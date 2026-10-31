@@ -356,6 +356,16 @@ class _Run:
         except ValidationError as unreadable:
             raise FlowCodeChanged(-1) from unreadable  # the driver names the journal step
 
+    def awaits(self, decision: DecisionId) -> bool:
+        """Whether the flows still stand behind ``decision``.
+
+        A flow waits for it, or it was in flight when the run restarted and the resumed flow
+        takes over its answer (``issue``, ``_left_settling``).
+        """
+        return decision in self._pendings or any(
+            item.request.decision_id == decision for item in self._in_flight
+        )
+
     def count(self, task: _Task, label: str) -> int:
         """The next number under ``label`` in ``task``'s flow (1, 2, ...); ids never repeat."""
         number = self._issued.get((task.path, label), 0) + 1
@@ -386,7 +396,7 @@ class _Run:
                 ("decision_id",), f"decision id {pending.decision.root} is not unique"
             )
         work = pending.work
-        if isinstance(work, Measure | Withdraw | StartAttempt):
+        if isinstance(work, Measure | Withdraw | StartAttempt | ProposeWinner):
             reattached = self._reattach(task, pending, work, label)
             if reattached is not None:
                 return reattached
@@ -415,7 +425,7 @@ class _Run:
         self,
         task: _Task,
         pending: Pending,
-        work: Measure | Withdraw | StartAttempt,
+        work: Measure | Withdraw | StartAttempt | ProposeWinner,
         label: Label | None,
     ) -> Pending | None:
         """The ``Pending`` waiting on the old request ``work`` repeats, or None if it is new.
@@ -443,7 +453,7 @@ class _Run:
         return pending
 
     def _reattached(
-        self, path: str, label: str, request: Measure | Withdraw | StartAttempt
+        self, path: str, label: str, request: Measure | Withdraw | StartAttempt | ProposeWinner
     ) -> InFlight | None:
         """The request in flight at the restart that ``request`` asks for again, if any.
 
@@ -737,7 +747,8 @@ class _Run:
         asking, the workspace is settled (``_ended``). A settlement is kept only while a flow
         there holds its workspace: it reopened it and will close it.
         """
-        if pending is not None or not isinstance(item, WorkspaceOpened | WorkspaceClosed | Failed):
+        kept = WorkspaceOpened | WorkspaceClosed | AdoptionFinished | Failed
+        if pending is not None or not isinstance(item, kept):
             return False
         for index, entry in enumerate(self._in_flight):
             request = entry.request
@@ -868,7 +879,8 @@ def _same_plan(old: Measure, new: Measure) -> bool:
 
 
 def _same_request(
-    old: Measure | Withdraw | StartAttempt, new: Measure | Withdraw | StartAttempt
+    old: Measure | Withdraw | StartAttempt | ProposeWinner,
+    new: Measure | Withdraw | StartAttempt | ProposeWinner,
 ) -> bool:
     """Whether ``new`` asks again for what ``old`` asked (see ``_Run._reattached``)."""
     if old.scope != new.scope:
@@ -880,6 +892,8 @@ def _same_request(
             return old.target == new.target
         case StartAttempt(), StartAttempt():
             return old.model_copy(update={"decision_id": new.decision_id}) == new
+        case ProposeWinner(), ProposeWinner():
+            return old.selection == new.selection
         case _:
             return False
 
@@ -887,7 +901,7 @@ def _same_request(
 def _answers(
     item: Event | Recorded,
     decision: DecisionId | None,
-    request: Measure | Withdraw | StartAttempt,
+    request: Measure | Withdraw | StartAttempt | ProposeWinner,
 ) -> bool:
     """Whether ``item``, answering ``decision``, answers ``request`` (a close: by its workspace)."""
     if isinstance(item, WorkspaceClosed) and isinstance(request, Withdraw):

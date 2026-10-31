@@ -30,7 +30,7 @@ from vs_core._ids import IdScheme
 from vs_core._registry import ContractError, OperationRegistration, OperationRegistry
 from vs_core.types.common import OperationSchemaRef, StrategyId
 from vs_core.types.search import StopLifted
-from vs_core.types.strategy import SearchDeclaration
+from vs_core.types.strategy import Finish, SearchDeclaration, WakeAt
 
 from ._defs import FlowDef
 from ._errors import FlowCodeChanged
@@ -279,6 +279,19 @@ class FlowDriver[C]:
         )
         self._cached = (key(new), run)
         return new, [*restarted, *decisions]
+
+    def awaits(self, state: FlowState, decision: Decision) -> bool:
+        """Whether a flow of ``state`` still waits for the answer to ``decision``.
+
+        A restart gives the flows a new incarnation that asks again for what it needs, so a
+        decision the dead one made and core never took is no longer waited for.
+        """
+        if isinstance(decision, WakeAt):
+            return True
+        identifier = (
+            decision.decision_id if isinstance(decision, Finish) else decision.request.decision_id
+        )
+        return self._runtime(state).awaits(identifier)
 
     def changes(self, before: FlowState, after: FlowState) -> bytes | None:
         """What ``after`` adds to ``before``, for the log; None when it does not continue it.

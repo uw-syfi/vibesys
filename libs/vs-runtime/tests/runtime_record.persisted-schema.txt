@@ -663,10 +663,10 @@ HostId {"additionalProperties":false,"type":"object"}
 HostId.kind optional {"const":"host","default":"host","type":"string"}
 HostId.root required {"minLength":1,"pattern":"^\\S+$","type":"string"}
 InFlight {"additionalProperties":false,"type":"object"}
-InFlight.answer optional {"anyOf":[{"discriminator":{"mapping":{"failed":"#/$defs/Failed","workspace_closed":"#/$defs/WorkspaceClosed","workspace_opened":"#/$defs/WorkspaceOpened"},"propertyName":"kind"},"oneOf":[{"$ref":"#/$defs/WorkspaceOpened"},{"$ref":"#/$defs/WorkspaceClosed"},{"$ref":"#/$defs/Failed"}]},{"type":"null"}],"default":null}
+InFlight.answer optional {"anyOf":[{"discriminator":{"mapping":{"adoption_finished":"#/$defs/AdoptionFinished","failed":"#/$defs/Failed","workspace_closed":"#/$defs/WorkspaceClosed","workspace_opened":"#/$defs/WorkspaceOpened"},"propertyName":"kind"},"oneOf":[{"$ref":"#/$defs/WorkspaceOpened"},{"$ref":"#/$defs/WorkspaceClosed"},{"$ref":"#/$defs/AdoptionFinished"},{"$ref":"#/$defs/Failed"}]},{"type":"null"}],"default":null}
 InFlight.label required {"type":"string"}
 InFlight.path required {"type":"string"}
-InFlight.request required {"anyOf":[{"$ref":"#/$defs/Measure"},{"$ref":"#/$defs/Withdraw"},{"$ref":"#/$defs/StartAttempt"}]}
+InFlight.request required {"anyOf":[{"$ref":"#/$defs/Measure"},{"$ref":"#/$defs/Withdraw"},{"$ref":"#/$defs/StartAttempt"},{"$ref":"#/$defs/ProposeWinner"}]}
 InitialSessionsFailed {"additionalProperties":false,"type":"object"}
 InitialSessionsFailed.admission_id required {"$ref":"#/$defs/DecisionId"}
 InitialSessionsFailed.attempt required {"$ref":"#/$defs/AttemptRef"}

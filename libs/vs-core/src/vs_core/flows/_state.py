@@ -44,6 +44,7 @@ from vs_core.types.settlement import Selection
 from vs_core.types.strategy import (
     Decision,
     Measure,
+    ProposeWinner,
     Settle,
     StartAttempt,
     StrategyState,
@@ -184,9 +185,13 @@ class InFlight(Value):
 
     path: str
     label: str
-    request: Measure | Withdraw | StartAttempt
+    request: Measure | Withdraw | StartAttempt | ProposeWinner
     answer: (
-        Annotated[WorkspaceOpened | WorkspaceClosed | Failed, Field(discriminator="kind")] | None
+        Annotated[
+            WorkspaceOpened | WorkspaceClosed | AdoptionFinished | Failed,
+            Field(discriminator="kind"),
+        ]
+        | None
     ) = None
     """Core's answer to an opening or a settlement, when it came before the resumed flow asked
     again: the flow takes it then."""

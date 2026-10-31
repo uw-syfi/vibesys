@@ -19,7 +19,7 @@ from protobuf import Oneof
 
 from vs_proto.api import StrategyAdvanced
 
-from ._search_run import Inbox, SearchHost, advance, begin, deferred
+from ._search_run import Advanced, Inbox, SearchHost, advance, begin, deferred
 from ._step import step
 from ._step_log import SCHEMA_VERSION, decode_held, encode_event, encode_held
 from .types.search import TimeReached
@@ -114,11 +114,11 @@ def advance_search[S: StrategyState, C](  # noqa: PLR0913  # lint-waiver: LW-441
         return step(state, event)
 
     host = SearchHost(step=record_step, registry=registry)
-    arrived = Inbox((*owed.events, *(TimeReached(time=wake) for wake in due)), held, owed.discarded)
+    arrived = Inbox((*owed.events, *(TimeReached(time=wake) for wake in due)), (), owed.discarded)
     if progress is None:
         advanced = begin(search, config, core, host, arrived)
     else:
-        advanced = advance(search, progress.state, core, host, arrived)
+        advanced = _hear_then_offer(search, progress, core, host, arrived)
     asked = {w for w in (progress.wakes if progress else ()) if w not in due} | set(advanced.wakes)
     count = 1 if progress is None else progress.advances + 1
     changes = None if progress is None else search.changes(progress.state, advanced.state)
@@ -141,6 +141,34 @@ def advance_search[S: StrategyState, C](  # noqa: PLR0913  # lint-waiver: LW-441
             count if whole else progress.checkpoint_at if progress else count,
             checkpointed=whole,
         ),
+    )
+
+
+def _hear_then_offer[S: StrategyState, C](
+    search: SearchDriver[S, C],
+    progress: Progress[S],
+    core: CoreState,
+    host: SearchHost,
+    arrived: Inbox,
+) -> Advanced[S]:
+    """The search hears ``arrived``, and only then are the decisions it held offered to core.
+
+    An event can restart the flows of the search (a resume lifts the stop it wound down under).
+    The restarted flows ask again for what they need, so a decision the dead ones held is no
+    longer wanted: it is offered only if the search still waits for its answer, and what it
+    asks again goes first.
+    """
+    heard = advance(search, progress.state, core, host, arrived)
+    wanted = tuple(d for d in progress.held if search.awaits(heard.state, d))
+    if not wanted and not heard.held:
+        return heard
+    offered = advance(search, heard.state, heard.core, host, Inbox(held=(*wanted, *heard.held)))
+    return replace(
+        offered,
+        discarded=(*heard.discarded, *offered.discarded),
+        published=(*heard.published, *offered.published),
+        wakes=(*heard.wakes, *offered.wakes),
+        submitted=(*heard.submitted, *offered.submitted),
     )
 
 

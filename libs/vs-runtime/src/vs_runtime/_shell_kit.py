@@ -426,6 +426,10 @@ class RecordingSearch[S: StrategyState, C]:
         self._decisions.extend(decisions)
         return next_state, decisions
 
+    def awaits(self, state: S, decision: Decision) -> bool:
+        """Whether the wrapped search in ``state`` still waits for ``decision``."""
+        return self._inner.awaits(state, decision)
+
     def changes(self, before: S, after: S) -> bytes | None:
         """The wrapped search's change from ``before`` to ``after``."""
         return self._inner.changes(before, after)

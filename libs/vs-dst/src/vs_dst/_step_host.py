@@ -182,6 +182,9 @@ class _Host:
         registry = setup.harness.registry
         driver = launch.search.driver(launch.config, registry)
         search = RecordingSearch(driver, self._decisions)
+        handle = _HostHandle(clock, self._decisions)
+        if watcher is not None:
+            watcher.watch(self._records, handle)
         confirmed = ConfirmedLog(self._records)
         epoch = (self._records.records[-1].epoch if self._records.records else 0) + 1
         confirmed.append(EpochStarted(epoch=epoch), epoch=epoch, at=Timestamp(), clock=clock.now())
@@ -198,8 +201,7 @@ class _Host:
         inputs = CoreInputs(log, run_search, clock)
         self._inputs = inputs
         self.state = log.state
-        if watcher is not None:
-            watcher.watch(self._records, _HostHandle(inputs, clock, self._decisions))
+        handle.inputs = inputs
         self._resume(log, epoch, clock)
         runner = _WorldRunner(
             _executors(self._outside, self._journal, lambda: log.state, watcher),
@@ -267,12 +269,16 @@ class _Host:
 
 
 class _HostHandle:
-    """What an interruption needs of this host: its clock, its decisions, an input."""
+    """What an interruption needs of this host: its clock, its decisions, an input.
 
-    def __init__(self, inputs: CoreInputs, clock: VirtualClock, decisions: list[Any]) -> None:
-        self._inputs = inputs
+    The records are watched from the host's first append, before its inputs exist, so the inputs
+    are bound once they do; an input before then has nowhere to go and is a defect.
+    """
+
+    def __init__(self, clock: VirtualClock, decisions: list[Any]) -> None:
         self._clock = clock
         self._decisions = decisions
+        self.inputs: CoreInputs | None = None
 
     @property
     def clock(self) -> VirtualClock:
@@ -283,7 +289,17 @@ class _HostHandle:
         return self._decisions
 
     def submit(self, event: CoreEvent) -> None:
-        self._inputs.offer(event)
+        if self.inputs is None:
+            raise HostNotOpenError
+        self.inputs.offer(event)
+
+
+class HostNotOpenError(RuntimeError):
+    """An input was offered to a host whose log is not open yet."""
+
+    def __init__(self) -> None:
+        """Say what happened."""
+        super().__init__("the host has no inputs before its run.log is open")
 
 
 class _WorldRunner:
