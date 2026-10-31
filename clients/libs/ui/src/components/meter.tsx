@@ -43,7 +43,8 @@ export function LoadingBar(props: {readonly label: string}): JSX.Element {
 /**
  * One reading: its `label`, a meter of how full it is, and its `figure` in words. With no `share`
  * there is no reading, and the meter is empty, so a missing reading is never drawn as zero. `dim`
- * shows a reading that is no longer current: still there, and quieter.
+ * shows a reading that is no longer current: still there, and quieter. Its text stays legible (the
+ * muted tone, not a fade), and its meter fades.
  */
 export function Gauge(props: {
   readonly label: string;
@@ -63,7 +64,9 @@ export function Gauge(props: {
         value={props.share ?? 0}
         tone={props.share === null ? 'muted' : (props.tone ?? 'ok')}
       />
-      <Text variant="small">{props.figure}</Text>
+      <Text variant="small" tone={props.dim === true ? 'muted' : 'default'}>
+        {props.figure}
+      </Text>
     </span>
   );
 }

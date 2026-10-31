@@ -502,8 +502,8 @@ button.vs-crumb:focus-visible {
   gap: var(--space-2);
   white-space: nowrap;
 }
-.vs-gauge[data-dim] {
-  opacity: 0.55;
+.vs-gauge[data-dim] .vs-meter {
+  opacity: 0.45;
 }
 
 .vs-new-below {
