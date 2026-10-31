@@ -153,7 +153,38 @@ def usage(projection: Projection) -> None:
         if increment.has_field(name):
             setattr(total, name, (getattr(total, name) or 0) + getattr(increment, name))
     attrs.usage = total
+    detail = _usage_detail(data)
+    if detail is not None:
+        attrs.usage_details.append(detail)
     update_turn(projection, span, attrs)
+
+
+def _usage_detail(data: e.TurnUsageData) -> p.TurnUsageDetail | None:
+    """The turn's provenance and per-model rows; ``None`` for a line recorded before they existed."""
+    if data.cost_basis is None and data.provider_session_id is None and not data.by_model:
+        return None
+    return p.TurnUsageDetail(
+        provider_session_id=data.provider_session_id,
+        cost_basis=None
+        if data.cost_basis is None
+        else enum_value(p.UsageCostBasis, data.cost_basis),
+        by_model=[
+            p.ModelTurnUsage(
+                model=row.model,
+                input=row.input_tokens,
+                cache_read=row.cache_read_input_tokens,
+                cache_creation=row.cache_creation_input_tokens,
+                cache_creation_1h=row.cache_creation_1h_input_tokens,
+                output=row.output_tokens,
+                reasoning=row.reasoning_output_tokens,
+                turns=row.turns,
+                recorded_usd=row.recorded_usd,
+                speed=None if row.speed is None else enum_value(p.UsageSpeed, row.speed),
+                primary=row.primary,
+            )
+            for row in data.by_model
+        ],
+    )
 
 
 def stream_id(span: str) -> str:

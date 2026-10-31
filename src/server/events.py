@@ -27,6 +27,7 @@ from pydantic import (
     Field,
     FiniteFloat,
     NonNegativeFloat,
+    NonNegativeInt,
     ValidationError,
     WithJsonSchema,
     field_validator,
@@ -962,6 +963,24 @@ class WorkstreamFinishedData(EventPayload):
     last_error: WorkstreamFailureData | None = None
 
 
+class ModelTurnUsageData(BaseModel):
+    """One model's share of one finished turn. See ``vibesys.events.ModelTurnUsageData``."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    model: str = Field(min_length=1)
+    input_tokens: NonNegativeInt
+    cache_creation_input_tokens: NonNegativeInt
+    cache_creation_1h_input_tokens: NonNegativeInt
+    cache_read_input_tokens: NonNegativeInt
+    output_tokens: NonNegativeInt
+    reasoning_output_tokens: NonNegativeInt
+    turns: NonNegativeInt
+    recorded_usd: NonNegativeFloat | None = None
+    speed: Literal["standard", "fast", "ultrafast"] | None = None
+    primary: bool = False
+
+
 class TurnUsageData(EventPayload):
     """Settled token and cost accounting for one finished agent turn.
 
@@ -978,6 +997,9 @@ class TurnUsageData(EventPayload):
     duration_ms: int | None = None
     span_id: SpanId | None = None
     """The agent-turn span of the run trace this turn ran as."""
+    cost_basis: Literal["price_table", "provider_reported", "unknown_model"] | None = None
+    by_model: tuple[ModelTurnUsageData, ...] = ()
+    provider_session_id: str | None = Field(default=None, min_length=1)
 
 
 class _SpanData(EventPayload):

@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
 
-_AgentTurnAttrsFields: TypeAlias = Literal["agent", "role", "model", "started_by", "stage", "attempt", "provider", "reasoning_effort", "harness_version", "usage", "reply_json", "transcript_length", "started_at", "ended_at", "client"]
+_AgentTurnAttrsFields: TypeAlias = Literal["agent", "role", "model", "started_by", "stage", "attempt", "provider", "reasoning_effort", "harness_version", "usage", "reply_json", "transcript_length", "started_at", "ended_at", "client", "usage_details"]
 
 class AgentTurnAttrs(Message[_AgentTurnAttrsFields]):
     """
@@ -98,9 +98,16 @@ class AgentTurnAttrs(Message[_AgentTurnAttrsFields]):
             ```proto
             optional vibesys.store.v1.AgentClient client = 15;
             ```
+        usage_details:
+            One entry for each finished turn the span ran, in the order they finished. `usage` is their
+            sum, and counts only each turn's main conversation.
+
+            ```proto
+            repeated vibesys.store.v1.TurnUsageDetail usage_details = 16;
+            ```
     """
 
-    __slots__ = ("agent", "role", "model", "started_by", "stage", "attempt", "provider", "reasoning_effort", "harness_version", "usage", "reply_json", "transcript_length", "started_at", "ended_at", "client")
+    __slots__ = ("agent", "role", "model", "started_by", "stage", "attempt", "provider", "reasoning_effort", "harness_version", "usage", "reply_json", "transcript_length", "started_at", "ended_at", "client", "usage_details")
 
     if TYPE_CHECKING:
 
@@ -122,6 +129,7 @@ class AgentTurnAttrs(Message[_AgentTurnAttrsFields]):
             started_at: Timestamp | None = None,
             ended_at: Timestamp | None = None,
             client: AgentClient | None = None,
+            usage_details: list[TurnUsageDetail] | None = None,
         ) -> None:
             pass
 
@@ -140,6 +148,7 @@ class AgentTurnAttrs(Message[_AgentTurnAttrsFields]):
         started_at: Timestamp | None
         ended_at: Timestamp | None
         client: AgentClient
+        usage_details: list[TurnUsageDetail]
 
 _TokenUsageFields: TypeAlias = Literal["input", "cache_read", "cache_creation", "output", "reasoning", "cost_usd", "duration_ms"]
 
@@ -207,6 +216,165 @@ class TokenUsage(Message[_TokenUsageFields]):
         cost_usd: float
         duration_ms: int
 
+_TurnUsageDetailFields: TypeAlias = Literal["provider_session_id", "cost_basis", "by_model"]
+
+class TurnUsageDetail(Message[_TurnUsageDetailFields]):
+    """
+    What one finished turn spent beyond the main-conversation totals of `TokenUsage`: who paid
+    for it, and how its cost was reached.
+
+    ```proto
+    message vibesys.store.v1.TurnUsageDetail
+    ```
+
+    Attributes:
+        provider_session_id:
+            The provider's own id of the conversation the turn ran in. It joins a turn to the transcript
+            the CLI wrote for it. Absent when the provider named none.
+
+            ```proto
+            optional string provider_session_id = 1;
+            ```
+        cost_basis:
+            Absent: the turn reported no cost, or was recorded before the basis existed.
+
+            ```proto
+            optional vibesys.store.v1.UsageCostBasis cost_basis = 2;
+            ```
+        by_model:
+            A superset of the turn's `TokenUsage`: the rows sum to the whole turn, which can include
+            models the main conversation did not run. Empty when the provider reports no split.
+
+            ```proto
+            repeated vibesys.store.v1.ModelTurnUsage by_model = 3;
+            ```
+    """
+
+    __slots__ = ("provider_session_id", "cost_basis", "by_model")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            provider_session_id: str | None = None,
+            cost_basis: UsageCostBasis | None = None,
+            by_model: list[ModelTurnUsage] | None = None,
+        ) -> None:
+            pass
+
+        provider_session_id: str
+        cost_basis: UsageCostBasis
+        by_model: list[ModelTurnUsage]
+
+_ModelTurnUsageFields: TypeAlias = Literal["model", "input", "cache_read", "cache_creation", "cache_creation_1h", "output", "reasoning", "turns", "recorded_usd", "speed", "primary"]
+
+class ModelTurnUsage(Message[_ModelTurnUsageFields]):
+    """
+    One model's share of one finished turn. Cost is never recomputed from these counts here: the
+    provider library prices them, and `recorded_usd` is its figure.
+
+    ```proto
+    message vibesys.store.v1.ModelTurnUsage
+    ```
+
+    Attributes:
+        model:
+            As the provider reports it.
+
+            ```proto
+            string model = 1;
+            ```
+        input:
+            Input tokens, cached ones included.
+
+            ```proto
+            uint64 input = 2;
+            ```
+        cache_read:
+            ```proto
+            uint64 cache_read = 3;
+            ```
+        cache_creation:
+            ```proto
+            uint64 cache_creation = 4;
+            ```
+        cache_creation_1h:
+            The part of `cache_creation` written with a one-hour lifetime.
+
+            ```proto
+            uint64 cache_creation_1h = 5;
+            ```
+        output:
+            Output tokens, reasoning included.
+
+            ```proto
+            uint64 output = 6;
+            ```
+        reasoning:
+            ```proto
+            uint64 reasoning = 7;
+            ```
+        turns:
+            The requests the turn made. Only the primary row counts them, so summing rows counts each once.
+
+            ```proto
+            uint32 turns = 8;
+            ```
+        recorded_usd:
+            The pinned price table's price of these tokens at the standard tier; absent when the table
+            has no price for the model. A list price at that tier, not a bill.
+
+            ```proto
+            optional double recorded_usd = 9;
+            ```
+        speed:
+            Absent: the provider reported none, which reads as standard.
+
+            ```proto
+            optional vibesys.store.v1.UsageSpeed speed = 10;
+            ```
+        primary:
+            The model the turn was run with. Exactly one row of a turn is.
+
+            ```proto
+            bool primary = 11;
+            ```
+    """
+
+    __slots__ = ("model", "input", "cache_read", "cache_creation", "cache_creation_1h", "output", "reasoning", "turns", "recorded_usd", "speed", "primary")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            model: str = "",
+            input: int = 0,
+            cache_read: int = 0,
+            cache_creation: int = 0,
+            cache_creation_1h: int = 0,
+            output: int = 0,
+            reasoning: int = 0,
+            turns: int = 0,
+            recorded_usd: float | None = None,
+            speed: UsageSpeed | None = None,
+            primary: bool = False,
+        ) -> None:
+            pass
+
+        model: str
+        input: int
+        cache_read: int
+        cache_creation: int
+        cache_creation_1h: int
+        output: int
+        reasoning: int
+        turns: int
+        recorded_usd: float
+        speed: UsageSpeed
+        primary: bool
+
 class AgentClient(Enum):
     """
     Who ran a turn: a scripted agent, or a provider. Absence is an older turn.
@@ -234,9 +402,96 @@ class AgentClient(Enum):
     SCRIPTED = 1
     PROVIDER = 2
 
+class UsageCostBasis(Enum):
+    """
+    How a turn's recorded cost was reached. A turn records one of the first three values (what
+    agentshim reports); absence is a turn recorded before the basis existed. The last two are never
+    recorded: a reader derives them for such a turn, and a row keyed on a basis never mixes turns
+    priced in different ways.
+
+    ```proto
+    enum vibesys.store.v1.UsageCostBasis
+    ```
+
+    Attributes:
+        UNSPECIFIED:
+            ```proto
+            USAGE_COST_BASIS_UNSPECIFIED = 0
+            ```
+        PRICE_TABLE:
+            Computed from the turn's tokens and agentshim's pinned price table.
+
+            ```proto
+            USAGE_COST_BASIS_PRICE_TABLE = 1
+            ```
+        PROVIDER_REPORTED:
+            The CLI's own figure, used when it did not say which model ran.
+
+            ```proto
+            USAGE_COST_BASIS_PROVIDER_REPORTED = 2
+            ```
+        UNKNOWN_MODEL:
+            A model in the turn has no price, so the turn has no recorded cost.
+
+            ```proto
+            USAGE_COST_BASIS_UNKNOWN_MODEL = 3
+            ```
+        LEGACY_RECORDED:
+            An older turn that has a recorded cost.
+
+            ```proto
+            USAGE_COST_BASIS_LEGACY_RECORDED = 4
+            ```
+        LEGACY_UNPRICED:
+            An older turn that has none.
+
+            ```proto
+            USAGE_COST_BASIS_LEGACY_UNPRICED = 5
+            ```
+    """
+
+    UNSPECIFIED = 0
+    PRICE_TABLE = 1
+    PROVIDER_REPORTED = 2
+    UNKNOWN_MODEL = 3
+    LEGACY_RECORDED = 4
+    LEGACY_UNPRICED = 5
+
+class UsageSpeed(Enum):
+    """
+    The service speed a request ran at.
+
+    ```proto
+    enum vibesys.store.v1.UsageSpeed
+    ```
+
+    Attributes:
+        UNSPECIFIED:
+            ```proto
+            USAGE_SPEED_UNSPECIFIED = 0
+            ```
+        STANDARD:
+            ```proto
+            USAGE_SPEED_STANDARD = 1
+            ```
+        FAST:
+            ```proto
+            USAGE_SPEED_FAST = 2
+            ```
+        ULTRAFAST:
+            ```proto
+            USAGE_SPEED_ULTRAFAST = 3
+            ```
+    """
+
+    UNSPECIFIED = 0
+    STANDARD = 1
+    FAST = 2
+    ULTRAFAST = 3
+
 
 _DESC = file_desc(
-    b'\n"vibesys/store/v1/agent_attrs.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto"\xdb\x06\n\x0eAgentTurnAttrs\x12!\n\x05agent\x18\x01 \x01(\tR\x05agentB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12\x1f\n\x04role\x18\x02 \x01(\tR\x04roleB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12&\n\x05model\x18\x03 \x01(\tH\x00R\x05modelB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12/\n\nstarted_by\x18\x04 \x03(\tR\tstartedByB\x10\xbaH\r\x92\x01\n"\x08r\x06\x10\x01(\x80\x80\x04\x12!\n\x05stage\x18\x05 \x01(\tR\x05stageB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12\x1d\n\x07attempt\x18\x06 \x01(\rH\x01R\x07attempt\x88\x01\x01\x12,\n\x08provider\x18\x07 \x01(\tH\x02R\x08providerB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12;\n\x10reasoning_effort\x18\x08 \x01(\tH\x03R\x0freasoningEffortB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x129\n\x0fharness_version\x18\t \x01(\tH\x04R\x0eharnessVersionB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x127\n\x05usage\x18\n \x01(\x0b2\x1c.vibesys.store.v1.TokenUsageH\x05R\x05usage\x88\x01\x01\x12(\n\nreply_json\x18\x0b \x01(\tR\treplyJsonB\t\xbaH\x06r\x04(\x80\x80\x04\x120\n\x11transcript_length\x18\x0c \x01(\x04H\x06R\x10transcriptLength\x88\x01\x01\x129\n\nstarted_at\x18\r \x01(\x0b2\x1a.google.protobuf.TimestampR\tstartedAt\x125\n\x08ended_at\x18\x0e \x01(\x0b2\x1a.google.protobuf.TimestampR\x07endedAt\x12F\n\x06client\x18\x0f \x01(\x0e2\x1d.vibesys.store.v1.AgentClientH\x07R\x06clientB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x88\x01\x01B\x08\n\x06_modelB\n\n\x08_attemptB\x0b\n\t_providerB\x13\n\x11_reasoning_effortB\x12\n\x10_harness_versionB\x08\n\x06_usageB\x14\n\x12_transcript_lengthB\t\n\x07_client"\xf1\x02\n\nTokenUsage\x12\x19\n\x05input\x18\x01 \x01(\x04H\x00R\x05input\x88\x01\x01\x12"\n\ncache_read\x18\x02 \x01(\x04H\x01R\tcacheRead\x88\x01\x01\x12*\n\x0ecache_creation\x18\x03 \x01(\x04H\x02R\rcacheCreation\x88\x01\x01\x12\x1b\n\x06output\x18\x04 \x01(\x04H\x03R\x06output\x88\x01\x01\x12!\n\treasoning\x18\x05 \x01(\x04H\x04R\treasoning\x88\x01\x01\x120\n\x08cost_usd\x18\x06 \x01(\x01H\x05R\x07costUsdB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x12$\n\x0bduration_ms\x18\x07 \x01(\x04H\x06R\ndurationMs\x88\x01\x01B\x08\n\x06_inputB\r\n\x0b_cache_readB\x11\n\x0f_cache_creationB\t\n\x07_outputB\x0c\n\n_reasoningB\x0b\n\t_cost_usdB\x0e\n\x0c_duration_ms*a\n\x0bAgentClient\x12\x1c\n\x18AGENT_CLIENT_UNSPECIFIED\x10\x00\x12\x19\n\x15AGENT_CLIENT_SCRIPTED\x10\x01\x12\x19\n\x15AGENT_CLIENT_PROVIDER\x10\x02BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3',
+    b'\n"vibesys/store/v1/agent_attrs.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto"\xa3\x07\n\x0eAgentTurnAttrs\x12!\n\x05agent\x18\x01 \x01(\tR\x05agentB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12\x1f\n\x04role\x18\x02 \x01(\tR\x04roleB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12&\n\x05model\x18\x03 \x01(\tH\x00R\x05modelB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12/\n\nstarted_by\x18\x04 \x03(\tR\tstartedByB\x10\xbaH\r\x92\x01\n"\x08r\x06\x10\x01(\x80\x80\x04\x12!\n\x05stage\x18\x05 \x01(\tR\x05stageB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12\x1d\n\x07attempt\x18\x06 \x01(\rH\x01R\x07attempt\x88\x01\x01\x12,\n\x08provider\x18\x07 \x01(\tH\x02R\x08providerB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12;\n\x10reasoning_effort\x18\x08 \x01(\tH\x03R\x0freasoningEffortB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x129\n\x0fharness_version\x18\t \x01(\tH\x04R\x0eharnessVersionB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x127\n\x05usage\x18\n \x01(\x0b2\x1c.vibesys.store.v1.TokenUsageH\x05R\x05usage\x88\x01\x01\x12(\n\nreply_json\x18\x0b \x01(\tR\treplyJsonB\t\xbaH\x06r\x04(\x80\x80\x04\x120\n\x11transcript_length\x18\x0c \x01(\x04H\x06R\x10transcriptLength\x88\x01\x01\x129\n\nstarted_at\x18\r \x01(\x0b2\x1a.google.protobuf.TimestampR\tstartedAt\x125\n\x08ended_at\x18\x0e \x01(\x0b2\x1a.google.protobuf.TimestampR\x07endedAt\x12F\n\x06client\x18\x0f \x01(\x0e2\x1d.vibesys.store.v1.AgentClientH\x07R\x06clientB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x88\x01\x01\x12F\n\rusage_details\x18\x10 \x03(\x0b2!.vibesys.store.v1.TurnUsageDetailR\x0cusageDetailsB\x08\n\x06_modelB\n\n\x08_attemptB\x0b\n\t_providerB\x13\n\x11_reasoning_effortB\x12\n\x10_harness_versionB\x08\n\x06_usageB\x14\n\x12_transcript_lengthB\t\n\x07_client"\xf1\x02\n\nTokenUsage\x12\x19\n\x05input\x18\x01 \x01(\x04H\x00R\x05input\x88\x01\x01\x12"\n\ncache_read\x18\x02 \x01(\x04H\x01R\tcacheRead\x88\x01\x01\x12*\n\x0ecache_creation\x18\x03 \x01(\x04H\x02R\rcacheCreation\x88\x01\x01\x12\x1b\n\x06output\x18\x04 \x01(\x04H\x03R\x06output\x88\x01\x01\x12!\n\treasoning\x18\x05 \x01(\x04H\x04R\treasoning\x88\x01\x01\x120\n\x08cost_usd\x18\x06 \x01(\x01H\x05R\x07costUsdB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x12$\n\x0bduration_ms\x18\x07 \x01(\x04H\x06R\ndurationMs\x88\x01\x01B\x08\n\x06_inputB\r\n\x0b_cache_readB\x11\n\x0f_cache_creationB\t\n\x07_outputB\x0c\n\n_reasoningB\x0b\n\t_cost_usdB\x0e\n\x0c_duration_ms"\xbb\x03\n\x0fTurnUsageDetail\x12@\n\x13provider_session_id\x18\x01 \x01(\tH\x00R\x11providerSessionIdB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12T\n\ncost_basis\x18\x02 \x01(\x0e2 .vibesys.store.v1.UsageCostBasisH\x01R\tcostBasisB\x0e\xbaH\x0b\x82\x01\x08\x10\x01 \x00 \x04 \x05\x88\x01\x01\x12;\n\x08by_model\x18\x03 \x03(\x0b2 .vibesys.store.v1.ModelTurnUsageR\x07byModelB\x16\n\x14_provider_session_idB\r\n\x0b_cost_basis:\xab\x01\xbaH\xa7\x01\x1a\xa4\x01\n\x1dturn_usage_detail.one_primary\x122a turn with model rows has exactly one primary row\x1aOthis.by_model.size() == 0 || this.by_model.filter(row, row.primary).size() == 1"\xc3\x07\n\x0eModelTurnUsage\x12!\n\x05model\x18\x01 \x01(\tR\x05modelB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12\x14\n\x05input\x18\x02 \x01(\x04R\x05input\x12\x1d\n\ncache_read\x18\x03 \x01(\x04R\tcacheRead\x12%\n\x0ecache_creation\x18\x04 \x01(\x04R\rcacheCreation\x12*\n\x11cache_creation_1h\x18\x05 \x01(\x04R\x0fcacheCreation1h\x12\x16\n\x06output\x18\x06 \x01(\x04R\x06output\x12\x1c\n\treasoning\x18\x07 \x01(\x04R\treasoning\x12\x14\n\x05turns\x18\x08 \x01(\rR\x05turns\x128\n\x0crecorded_usd\x18\t \x01(\x01H\x00R\x0brecordedUsdB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x12C\n\x05speed\x18\n \x01(\x0e2\x1c.vibesys.store.v1.UsageSpeedH\x01R\x05speedB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x88\x01\x01\x12\x18\n\x07primary\x18\x0b \x01(\x08R\x07primaryB\x0f\n\r_recorded_usdB\x08\n\x06_speed:\x85\x04\xbaH\x81\x04\x1a\x88\x01\n#model_turn_usage.cache_within_input\x12,cache reads and writes are part of the input\x1a3this.cache_read + this.cache_creation <= this.input\x1a\x8f\x01\n*model_turn_usage.long_writes_within_writes\x122one-hour cache writes are part of the cache writes\x1a-this.cache_creation_1h <= this.cache_creation\x1aj\n(model_turn_usage.reasoning_within_output\x12\x1freasoning is part of the output\x1a\x1dthis.reasoning <= this.output\x1av\n!model_turn_usage.turns_on_primary\x12/only the primary row counts the turn\'s requests\x1a this.primary || this.turns == 0u*a\n\x0bAgentClient\x12\x1c\n\x18AGENT_CLIENT_UNSPECIFIED\x10\x00\x12\x19\n\x15AGENT_CLIENT_SCRIPTED\x10\x01\x12\x19\n\x15AGENT_CLIENT_PROVIDER\x10\x02*\xec\x01\n\x0eUsageCostBasis\x12 \n\x1cUSAGE_COST_BASIS_UNSPECIFIED\x10\x00\x12 \n\x1cUSAGE_COST_BASIS_PRICE_TABLE\x10\x01\x12&\n"USAGE_COST_BASIS_PROVIDER_REPORTED\x10\x02\x12"\n\x1eUSAGE_COST_BASIS_UNKNOWN_MODEL\x10\x03\x12$\n USAGE_COST_BASIS_LEGACY_RECORDED\x10\x04\x12$\n USAGE_COST_BASIS_LEGACY_UNPRICED\x10\x05*t\n\nUsageSpeed\x12\x1b\n\x17USAGE_SPEED_UNSPECIFIED\x10\x00\x12\x18\n\x14USAGE_SPEED_STANDARD\x10\x01\x12\x14\n\x10USAGE_SPEED_FAST\x10\x02\x12\x19\n\x15USAGE_SPEED_ULTRAFAST\x10\x03BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3',
     [
         validate_pb.desc(),
         timestamp_pb.desc(),
@@ -244,7 +499,11 @@ _DESC = file_desc(
     {
         "AgentTurnAttrs": AgentTurnAttrs,
         "TokenUsage": TokenUsage,
+        "TurnUsageDetail": TurnUsageDetail,
+        "ModelTurnUsage": ModelTurnUsage,
         "AgentClient": AgentClient,
+        "UsageCostBasis": UsageCostBasis,
+        "UsageSpeed": UsageSpeed,
     },
 )
 

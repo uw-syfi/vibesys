@@ -15,6 +15,7 @@ from vibesys.events import (
     CoreEvent,
     CoreEventType,
     JsonResultPayload,
+    ModelTurnUsageData,
     ProviderSwitchedData,
     QuotaAbandonedData,
     QuotaPausedData,
@@ -36,6 +37,7 @@ from vs_sim.api import Clock, utc_datetime
 
 if TYPE_CHECKING:
     from vs_agent.api import (
+        AgentModelUsage,
         AgentQuotaError,
         AgentRateLimit,
         AgentUsage,
@@ -55,6 +57,23 @@ _MAX_TOOL_RESULT_BYTES = 8 * 1024 * 1024
 def _json_safe(args: dict[str, Any]) -> dict[str, Any]:
     """Coerce tool arguments to a JSON-serializable dictionary."""
     return to_jsonable_python(args, fallback=repr)
+
+
+def _model_turn_usage(row: AgentModelUsage) -> ModelTurnUsageData:
+    """The journal's row for one model's share of a turn, carried over unchanged."""
+    return ModelTurnUsageData(
+        model=row.model,
+        input_tokens=row.input_tokens,
+        cache_creation_input_tokens=row.cache_creation_input_tokens,
+        cache_creation_1h_input_tokens=row.cache_creation_1h_input_tokens,
+        cache_read_input_tokens=row.cache_read_input_tokens,
+        output_tokens=row.output_tokens,
+        reasoning_output_tokens=row.reasoning_output_tokens,
+        turns=row.turns,
+        recorded_usd=row.recorded_usd,
+        speed=row.speed,
+        primary=row.primary,
+    )
 
 
 def _classify_tool_result(content: str) -> ToolResultPayload | None:
@@ -237,6 +256,7 @@ class CoreAgentEventSink:
         agent_kind: str | None = None,
         round_label: str | None = None,
         invocation_id: str | None = None,
+        provider_session_id: str | None = None,
     ) -> None:
         """Emit settled token and cost accounting for one finished turn."""
         self._emit(
@@ -249,6 +269,9 @@ class CoreAgentEventSink:
                 reasoning_output_tokens=usage.reasoning_output_tokens,
                 total_cost_usd=usage.total_cost_usd,
                 duration_ms=usage.duration_ms,
+                cost_basis=usage.cost_basis,
+                by_model=tuple(_model_turn_usage(row) for row in usage.by_model),
+                provider_session_id=provider_session_id,
             ),
             agent_kind=agent_kind,
             round_label=round_label,

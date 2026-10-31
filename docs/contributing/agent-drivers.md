@@ -601,6 +601,18 @@ rows. Since agentshim 0.7, `cache_read_input_tokens` counts cache reads only;
 on Claude it used to include cache writes, which `cache_creation_input_tokens`
 reports.
 
+Each row also records where the cost came from and which models spent it. `cost_basis` is how
+the library reached `total_cost_usd` (`price_table`, `provider_reported` or `unknown_model`, which
+has no cost; `null` when none was reported). `by_model` has one row per model the turn ran, in the
+journal's names: a Claude turn's Task subagents and advisors run on their own models, and the
+token fields above count only the main conversation, so the rows are a superset that sums to the
+whole turn. Exactly one row is `primary`, the model the turn was run with, and only it carries the
+turn's requests (`turns`) and its service `speed`. Each row's `recorded_usd` is the library's price
+of the row at the standard tier, copied as given: VibeSys never recomputes a cost, and a fast or
+ultrafast row was billed more than that list price. `provider_session_id` is the provider's own id
+of the conversation the turn ran in, `null` when it named none or the turn failed before it did.
+The run journal's `turn_usage_recorded` event carries the same three fields.
+
 Each row also records skill use for the turn: `skill_uses` (number of skill
 loads), `skills_invoked` (their names, one per load, in order) and
 `skills_offered` (how many skills the provider listed for the session). A

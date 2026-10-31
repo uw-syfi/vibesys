@@ -4163,6 +4163,99 @@
       "title": "MetricRow",
       "type": "object"
     },
+    "ModelTurnUsageData": {
+      "additionalProperties": false,
+      "description": "One model's share of one finished turn. See ``vibesys.events.ModelTurnUsageData``.",
+      "properties": {
+        "model": {
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "input_tokens": {
+          "minimum": 0,
+          "title": "Input Tokens",
+          "type": "integer"
+        },
+        "cache_creation_input_tokens": {
+          "minimum": 0,
+          "title": "Cache Creation Input Tokens",
+          "type": "integer"
+        },
+        "cache_creation_1h_input_tokens": {
+          "minimum": 0,
+          "title": "Cache Creation 1H Input Tokens",
+          "type": "integer"
+        },
+        "cache_read_input_tokens": {
+          "minimum": 0,
+          "title": "Cache Read Input Tokens",
+          "type": "integer"
+        },
+        "output_tokens": {
+          "minimum": 0,
+          "title": "Output Tokens",
+          "type": "integer"
+        },
+        "reasoning_output_tokens": {
+          "minimum": 0,
+          "title": "Reasoning Output Tokens",
+          "type": "integer"
+        },
+        "turns": {
+          "minimum": 0,
+          "title": "Turns",
+          "type": "integer"
+        },
+        "recorded_usd": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Recorded Usd"
+        },
+        "speed": {
+          "anyOf": [
+            {
+              "enum": [
+                "standard",
+                "fast",
+                "ultrafast"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Speed"
+        },
+        "primary": {
+          "default": false,
+          "title": "Primary",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "model",
+        "input_tokens",
+        "cache_creation_input_tokens",
+        "cache_creation_1h_input_tokens",
+        "cache_read_input_tokens",
+        "output_tokens",
+        "reasoning_output_tokens",
+        "turns"
+      ],
+      "title": "ModelTurnUsageData",
+      "type": "object"
+    },
     "MultiAgentSpanAttributes": {
       "additionalProperties": false,
       "properties": {
@@ -8315,6 +8408,44 @@
             }
           ],
           "default": null
+        },
+        "cost_basis": {
+          "anyOf": [
+            {
+              "enum": [
+                "price_table",
+                "provider_reported",
+                "unknown_model"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cost Basis"
+        },
+        "by_model": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ModelTurnUsageData"
+          },
+          "title": "By Model",
+          "type": "array"
+        },
+        "provider_session_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider Session Id"
         }
       },
       "title": "TurnUsageData",

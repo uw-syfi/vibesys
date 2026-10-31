@@ -364,7 +364,7 @@ def test_nondurable_key_is_configuration_error(harness: _Harness) -> None:
 
 def test_malformed_ledger_fails_typed_before_dispatch(harness: _Harness) -> None:
     slot = harness.namespace.slot("malformed.json", AgentInvocationState)
-    harness.namespace.write_bytes("malformed.json", b'{"schema_version":3}')
+    harness.namespace.write_bytes("malformed.json", b'{"schema_version":"not a version"}')
     sessions = ClientAgentSessions(harness.client, slot, threads=SimThreads())
     sessions.bind(KEY, harness.spec, harness.turn)
     with pytest.raises(SessionPersistenceError, match="read invocation ledger"):
@@ -681,6 +681,10 @@ def test_inspection_rejects_nondurable_key_before_loading_ledger(harness: _Harne
     assert harness.boundary.calls == 1
 
 
+_FOREIGN_VERSION = AgentInvocationState.model_fields["schema_version"].default + 1
+"""A ledger version no VibeSys reads yet, so the ledger refuses it whatever the current one is."""
+
+
 class _SchemaFailureStore(FakeAgentInvocationStore):
     def __init__(self, operation: str) -> None:
         super().__init__()
@@ -688,12 +692,12 @@ class _SchemaFailureStore(FakeAgentInvocationStore):
 
     def load_optional(self) -> AgentInvocationState | None:
         if self.operation == "load":
-            return AgentInvocationState.model_validate({"schema_version": 3})
+            return AgentInvocationState.model_validate({"schema_version": _FOREIGN_VERSION})
         return super().load_optional()
 
     def save(self, model: AgentInvocationState) -> None:
         if self.operation == "save":
-            AgentInvocationState.model_validate({"schema_version": 3})
+            AgentInvocationState.model_validate({"schema_version": _FOREIGN_VERSION})
         super().save(model)
 
 

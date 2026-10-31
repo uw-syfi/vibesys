@@ -280,8 +280,9 @@ class AgentInvocationState(BaseModel):
     """Strict machine-local invocation ledger, stored through Project's StateSlot."""
 
     model_config = ConfigDict(extra="forbid")
-    schema_version: Literal[2] = 2
-    """2: a completed turn's result stores ``refused_steers``, and every result field is required."""
+    schema_version: Literal[3] = 3
+    """3: a completed turn's usage stores its cost basis and per-model rows. 2: a completed turn's
+    result stores ``refused_steers``, and every result field is required."""
     invocations: dict[str, AgentInvocationRecord] = Field(default_factory=dict)
 
     @field_validator("schema_version", mode="before")

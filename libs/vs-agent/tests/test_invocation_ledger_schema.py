@@ -20,11 +20,15 @@ from pydantic import ValidationError
 from vs_agent.api import (
     AgentInvocationRecord,
     AgentInvocationState,
+    AgentModelUsage,
     AgentSessionCheckpoint,
     AgentSessionKey,
     AgentTurnResult,
+    AgentUsage,
     Completed,
+    CostBasis,
     SessionScope,
+    UsageSpeed,
 )
 from vs_core.api.testing import assert_schema_pinned
 
@@ -51,6 +55,54 @@ def test_the_refusals_of_a_stored_turn_survive_a_reload(refused: tuple[str, ...]
     outcome = loaded.invocations["turn-1"].outcome
     assert isinstance(outcome, Completed)
     assert outcome.result.refused_steers == refused
+
+
+@given(
+    speed=st.none() | st.sampled_from(UsageSpeed),
+    basis=st.none() | st.sampled_from(CostBasis),
+    cost=st.none() | st.floats(0, 1000, allow_nan=False, allow_infinity=False),
+    turns=st.integers(0, 50),
+)
+@example(speed=UsageSpeed.FAST, basis=CostBasis.PRICE_TABLE, cost=0.25, turns=3)
+def test_the_models_and_cost_basis_of_a_stored_turn_survive_a_reload(
+    speed: UsageSpeed | None, basis: CostBasis | None, cost: float | None, turns: int
+) -> None:
+    row = AgentModelUsage(
+        model="claude-opus-5-5",
+        input_tokens=10,
+        cache_creation_input_tokens=2,
+        cache_creation_1h_input_tokens=1,
+        cache_read_input_tokens=3,
+        output_tokens=4,
+        reasoning_output_tokens=1,
+        turns=turns,
+        recorded_usd=cost,
+        speed=speed,
+        primary=True,
+    )
+    usage = AgentUsage(input_tokens=10, total_cost_usd=cost, cost_basis=basis, by_model=(row,))
+    completed = Completed(
+        session_key=_KEY,
+        invocation_id="turn-1",
+        result=AgentTurnResult(text="done", usage=usage, provider_session_id="p"),
+        checkpoint=AgentSessionCheckpoint(session_key=_KEY, provider_session_id="p"),
+    )
+    ledger = AgentInvocationState(
+        invocations={"turn-1": AgentInvocationRecord(payload_digest="digest", outcome=completed)}
+    )
+
+    loaded = AgentInvocationState.model_validate_json(ledger.model_dump_json())
+
+    assert loaded == ledger
+
+
+def test_a_ledger_the_previous_version_wrote_is_refused_naming_the_remedy() -> None:
+    """Version 2 stored a turn's usage without its models and basis; it is not decoded as if it had."""
+    stored = json.loads(_ledger(()).model_dump_json())
+    stored["schema_version"] = 2
+
+    with pytest.raises(ValidationError, match=r"version 2 .*start a new run"):
+        AgentInvocationState.model_validate(stored)
 
 
 @pytest.mark.parametrize("change", ["unknown-key", "missing-refusals"])

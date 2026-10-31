@@ -10,7 +10,7 @@
  * never recorded still has a record, with no role, harness or model.
  */
 import type {RunEvent} from '@vibesys/contracts';
-import type {UsageRecord} from '@vibesys/contracts/host-helper';
+import type {ModelUsage, UsageRecord} from '@vibesys/contracts/host-helper';
 
 /** What an `agent_execution_started` event says about who ran a turn. */
 interface ExecutionStart {
@@ -40,6 +40,77 @@ function cost(value: unknown): number | null {
 
 function time(value: unknown): string | null {
   return typeof value === 'string' && Number.isFinite(Date.parse(value)) ? value : null;
+}
+
+type RecordedCostBasis = NonNullable<UsageRecord['cost_basis']>;
+type UsageSpeed = NonNullable<ModelUsage['speed']>;
+
+const COST_BASES: ReadonlySet<unknown> = new Set<RecordedCostBasis>([
+  'price_table',
+  'provider_reported',
+  'unknown_model',
+]);
+const SPEEDS: ReadonlySet<unknown> = new Set<UsageSpeed>(['standard', 'fast', 'ultrafast']);
+
+function costBasis(value: unknown): RecordedCostBasis | null {
+  return COST_BASES.has(value) ? (value as RecordedCostBasis) : null;
+}
+
+/** One model's share of a turn, or null when the row is malformed. */
+function modelRow(value: unknown): ModelUsage | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const row = value as Record<string, unknown>;
+  const model = text(row['model']);
+  const input = count(row['input_tokens']);
+  const cacheRead = count(row['cache_read_input_tokens']);
+  const cacheWrite = count(row['cache_creation_input_tokens']);
+  const cacheWrite1h = count(row['cache_creation_1h_input_tokens']);
+  const output = count(row['output_tokens']);
+  const reasoning = count(row['reasoning_output_tokens']);
+  const turns = count(row['turns']);
+  const primary = row['primary'];
+  if (
+    model === null ||
+    input === null ||
+    cacheRead === null ||
+    cacheWrite === null ||
+    cacheWrite1h === null ||
+    output === null ||
+    reasoning === null ||
+    turns === null ||
+    typeof primary !== 'boolean'
+  ) {
+    return null;
+  }
+  return {
+    model,
+    input,
+    cache_read: cacheRead,
+    cache_write: cacheWrite,
+    cache_write_1h: cacheWrite1h,
+    output,
+    reasoning,
+    turns,
+    recorded_usd: cost(row['recorded_usd']),
+    speed: SPEEDS.has(row['speed']) ? (row['speed'] as UsageSpeed) : null,
+    primary,
+  };
+}
+
+/**
+ * The rows a `by_model` holds; none when the line has no split. A malformed row makes the whole
+ * split unreported: the rows left would sum to less than the turn, and a partial split reads as
+ * complete.
+ */
+function modelRows(value: unknown): ModelUsage[] {
+  if (!Array.isArray(value)) return [];
+  const rows: ModelUsage[] = [];
+  for (const item of value) {
+    const row = modelRow(item);
+    if (row === null) return [];
+    rows.push(row);
+  }
+  return rows;
 }
 
 /** `starts` with the execution `event` starts, when it is one. */
@@ -90,5 +161,8 @@ export function recordOf(starts: ExecutionStarts, event: RunEvent): UsageRecord 
     },
     cost_usd: cost(data.total_cost_usd),
     duration_ms: count(data.duration_ms),
+    cost_basis: costBasis(data.cost_basis),
+    by_model: modelRows(data.by_model),
+    provider_session_id: text(data.provider_session_id),
   };
 }

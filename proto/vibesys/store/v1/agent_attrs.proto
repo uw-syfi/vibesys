@@ -63,6 +63,9 @@ message AgentTurnAttrs {
     defined_only: true
     not_in: [0]
   }];
+  // One entry for each finished turn the span ran, in the order they finished. `usage` is their
+  // sum, and counts only each turn's main conversation.
+  repeated TurnUsageDetail usage_details = 16;
 }
 
 // Absence means unreported. A reported zero stays present on the wire.
@@ -77,4 +80,108 @@ message TokenUsage {
     finite: true
   }];
   optional uint64 duration_ms = 7;
+}
+
+// How a turn's recorded cost was reached. A turn records one of the first three values (what
+// agentshim reports); absence is a turn recorded before the basis existed. The last two are never
+// recorded: a reader derives them for such a turn, and a row keyed on a basis never mixes turns
+// priced in different ways.
+enum UsageCostBasis {
+  USAGE_COST_BASIS_UNSPECIFIED = 0;
+  // Computed from the turn's tokens and agentshim's pinned price table.
+  USAGE_COST_BASIS_PRICE_TABLE = 1;
+  // The CLI's own figure, used when it did not say which model ran.
+  USAGE_COST_BASIS_PROVIDER_REPORTED = 2;
+  // A model in the turn has no price, so the turn has no recorded cost.
+  USAGE_COST_BASIS_UNKNOWN_MODEL = 3;
+  // An older turn that has a recorded cost.
+  USAGE_COST_BASIS_LEGACY_RECORDED = 4;
+  // An older turn that has none.
+  USAGE_COST_BASIS_LEGACY_UNPRICED = 5;
+}
+
+// The service speed a request ran at.
+enum UsageSpeed {
+  USAGE_SPEED_UNSPECIFIED = 0;
+  USAGE_SPEED_STANDARD = 1;
+  USAGE_SPEED_FAST = 2;
+  USAGE_SPEED_ULTRAFAST = 3;
+}
+
+// What one finished turn spent beyond the main-conversation totals of `TokenUsage`: who paid
+// for it, and how its cost was reached.
+message TurnUsageDetail {
+  option (buf.validate.message).cel = {
+    id: "turn_usage_detail.one_primary"
+    message: "a turn with model rows has exactly one primary row"
+    expression: "this.by_model.size() == 0 || this.by_model.filter(row, row.primary).size() == 1"
+  };
+  // The provider's own id of the conversation the turn ran in. It joins a turn to the transcript
+  // the CLI wrote for it. Absent when the provider named none.
+  optional string provider_session_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  // Absent: the turn reported no cost, or was recorded before the basis existed.
+  optional UsageCostBasis cost_basis = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0, 4, 5]
+  }];
+  // A superset of the turn's `TokenUsage`: the rows sum to the whole turn, which can include
+  // models the main conversation did not run. Empty when the provider reports no split.
+  repeated ModelTurnUsage by_model = 3;
+}
+
+// One model's share of one finished turn. Cost is never recomputed from these counts here: the
+// provider library prices them, and `recorded_usd` is its figure.
+message ModelTurnUsage {
+  option (buf.validate.message).cel = {
+    id: "model_turn_usage.cache_within_input"
+    message: "cache reads and writes are part of the input"
+    expression: "this.cache_read + this.cache_creation <= this.input"
+  };
+  option (buf.validate.message).cel = {
+    id: "model_turn_usage.long_writes_within_writes"
+    message: "one-hour cache writes are part of the cache writes"
+    expression: "this.cache_creation_1h <= this.cache_creation"
+  };
+  option (buf.validate.message).cel = {
+    id: "model_turn_usage.reasoning_within_output"
+    message: "reasoning is part of the output"
+    expression: "this.reasoning <= this.output"
+  };
+  option (buf.validate.message).cel = {
+    id: "model_turn_usage.turns_on_primary"
+    message: "only the primary row counts the turn's requests"
+    expression: "this.primary || this.turns == 0u"
+  };
+  // As the provider reports it.
+  string model = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  // Input tokens, cached ones included.
+  uint64 input = 2;
+  uint64 cache_read = 3;
+  uint64 cache_creation = 4;
+  // The part of `cache_creation` written with a one-hour lifetime.
+  uint64 cache_creation_1h = 5;
+  // Output tokens, reasoning included.
+  uint64 output = 6;
+  uint64 reasoning = 7;
+  // The requests the turn made. Only the primary row counts them, so summing rows counts each once.
+  uint32 turns = 8;
+  // The pinned price table's price of these tokens at the standard tier; absent when the table
+  // has no price for the model. A list price at that tier, not a bill.
+  optional double recorded_usd = 9 [(buf.validate.field).double = {
+    gte: 0
+    finite: true
+  }];
+  // Absent: the provider reported none, which reads as standard.
+  optional UsageSpeed speed = 10 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // The model the turn was run with. Exactly one row of a turn is.
+  bool primary = 11;
 }

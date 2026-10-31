@@ -4536,6 +4536,98 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "ModelNotVetted",
       "type": "object"
     },
+    "ModelUsage": {
+      "additionalProperties": false,
+      "description": "One model's share of one finished turn: the journal's ``by_model`` row of a usage record.\n\nThe counts are always known: a row exists only for a turn whose increment was measured.\n``recorded_usd`` is the price agentshim recorded for these tokens at the standard tier, ``None``\nwhen it has no price for the model; it is not a bill, and nothing here recomputes it.",
+      "properties": {
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "input": {
+          "minimum": 0,
+          "title": "Input",
+          "type": "integer"
+        },
+        "cache_read": {
+          "minimum": 0,
+          "title": "Cache Read",
+          "type": "integer"
+        },
+        "cache_write": {
+          "minimum": 0,
+          "title": "Cache Write",
+          "type": "integer"
+        },
+        "cache_write_1h": {
+          "minimum": 0,
+          "title": "Cache Write 1H",
+          "type": "integer"
+        },
+        "output": {
+          "minimum": 0,
+          "title": "Output",
+          "type": "integer"
+        },
+        "reasoning": {
+          "minimum": 0,
+          "title": "Reasoning",
+          "type": "integer"
+        },
+        "turns": {
+          "minimum": 0,
+          "title": "Turns",
+          "type": "integer"
+        },
+        "recorded_usd": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Recorded Usd"
+        },
+        "speed": {
+          "anyOf": [
+            {
+              "enum": [
+                "standard",
+                "fast",
+                "ultrafast"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Speed"
+        },
+        "primary": {
+          "title": "Primary",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "model",
+        "input",
+        "cache_read",
+        "cache_write",
+        "cache_write_1h",
+        "output",
+        "reasoning",
+        "turns",
+        "recorded_usd",
+        "speed",
+        "primary"
+      ],
+      "title": "ModelUsage",
+      "type": "object"
+    },
     "OptionNotAccepted": {
       "additionalProperties": false,
       "description": "The run's search does not take a typed option the screen set (for instance rounds).",
@@ -8147,6 +8239,43 @@ const hostHelperSchema: Record<string, unknown> = {
             }
           ],
           "title": "Duration Ms"
+        },
+        "cost_basis": {
+          "anyOf": [
+            {
+              "enum": [
+                "price_table",
+                "provider_reported",
+                "unknown_model"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cost Basis"
+        },
+        "by_model": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ModelUsage"
+          },
+          "title": "By Model",
+          "type": "array"
+        },
+        "provider_session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider Session Id"
         }
       },
       "required": [

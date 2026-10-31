@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from tests.support.usage_events import split_usage_lines
 from tests.vibesys.golden.helpers import assert_exact_text
 
 from vibesys.api.importing import (
@@ -482,6 +483,39 @@ def test_settled_usage_keeps_unknowns_and_does_not_count_live_usage_updates() ->
     assert usage["total_cost_usd"].value == 0.42
     assert usage["cache_read_input_tokens"].field == "unknown"
     assert len(usage) == 7
+
+
+@given(split=split_usage_lines())
+def test_a_turn_line_with_the_per_model_split_imports_the_facts_of_the_line_without_it(
+    split: dict[str, Any],
+) -> None:
+    """Replay reads a turn's main conversation and cost; the split is the Usage screen's, not its."""
+    main = {
+        "input_tokens": 1234,
+        "output_tokens": 90,
+        "total_cost_usd": 0.42,
+        "duration_ms": 1500,
+    }
+
+    def imported(data: dict[str, Any]) -> list[Any]:
+        row = {
+            "type": "turn_usage_recorded",
+            "sequence": 1,
+            "timestamp": "2026-01-01T00:00:00Z",
+            "execution_id": "invocation-7",
+            "data": {"kind": "turn_usage_recorded", **main, **data},
+        }
+        source = ImportSource(
+            "core-events.jsonl", SourceFormat.EVENTS, json.dumps(row).encode() + b"\n"
+        )
+        return [(fact.unit, fact.quantity.value) for fact in _payloads(_import(source), "usage")]
+
+    only_split = {
+        key: value
+        for key, value in split["data"].items()
+        if key in {"cost_basis", "by_model", "provider_session_id"}
+    }
+    assert imported(only_split) == imported({})
 
 
 @given(
