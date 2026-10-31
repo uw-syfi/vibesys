@@ -1,27 +1,36 @@
 /**
  * What each idea did to each objective: its reading, its multiple of the input, whether it set a new
  * best, and what share of the objective's gain that was. Every figure is `objective-reading`'s: the
- * multiple of an idea is `multipleOver` its reading and the run's one input, the idea that set the
- * best is `bestSoFar`'s, so a row of the Ideas list and the chart's headline cannot state two
- * multiples of one input or name two bests.
+ * multiple of an idea is `multipleOver` its reading and the run's one input, the ideas that set a
+ * best are the owners of the steps of `bestSteps`, so a row of the Ideas list and the chart's
+ * headline cannot state two multiples of one input or name two bests.
+ *
+ * The impact is read from the whole run, cut at the time bar's position (`until`: readings taken
+ * and steps set at or before it) exactly as the chart is. It is never read from the run as it stood
+ * at that position: that run holds the writer's series without its decisions (no best flags, no
+ * stated value) and without the input of an objective other than the first.
  *
  * Share of gain, for a run with one objective and a known input: the best-so-far line goes from the
  * input to its last step in steps, each set by an idea; the idea's share is the sum of the
  * improvements of its steps over the best before them, divided by the improvement of the whole line.
  * The steps' improvements telescope to the line's, so the shares of the ideas that set a step, and
- * of the steps no idea owns (`unowned`), sum to one.
+ * of the steps no idea owns (`unowned`), sum to one. Without the input the line has no start, so
+ * there are no shares.
  *
  * Pure over the readings; nothing here words anything.
  */
 import type {Direction} from './direction.js';
 import {type Change, changeOf} from './headline.js';
 import {
-  bestSteps,
+  type BestReading,
   multipleOver,
   type ObjectiveReading,
   type ObjectiveSeries,
   objectiveSeriesOf,
+  readingKey,
+  readingsUntil,
   readObjective,
+  stepsUntil,
 } from './objective-reading.js';
 import type {PerformancePoint} from './performance.js';
 import type {RunModel} from './run-model.js';
@@ -72,30 +81,44 @@ function improvementOf(value: number, from: number, direction: Direction): numbe
   return direction === 'min' ? from - value : value - from;
 }
 
-/** The points of `reading` by idea: the one that set a best, else the first read. */
-function pointsByIdea(reading: ObjectiveReading): ReadonlyMap<string, PerformancePoint> {
+/**
+ * The reading each idea stands for among `points`: the last one that set a step of the line, else
+ * its last, the one the chart draws for it.
+ */
+function pointsByIdea(
+  points: readonly PerformancePoint[],
+  steps: readonly BestReading[],
+): ReadonlyMap<string, PerformancePoint> {
+  const stepKeys = new Set(steps.flatMap(step => (step.key === null ? [] : [step.key])));
   const found = new Map<string, PerformancePoint>();
-  for (const point of reading.fold.points) {
+  for (const point of points) {
     if (point.unowned === true) continue;
     const known = found.get(point.id);
-    if (known === undefined || (point.best && !known.best)) found.set(point.id, point);
+    if (
+      known === undefined ||
+      stepKeys.has(readingKey(point)) ||
+      !stepKeys.has(readingKey(known))
+    ) {
+      found.set(point.id, point);
+    }
   }
   return found;
 }
 
-/** The improvements of the steps of `reading`'s best line, each with the idea that set it. */
+/**
+ * The improvement each step of the line added over the one before it (the first over the input),
+ * with the idea that set it; the first step's is null when the input is unknown.
+ */
 function gainsOf(
   reading: ObjectiveReading,
-): readonly {readonly idea: string | null; readonly gain: number}[] {
+  steps: readonly BestReading[],
+): readonly {readonly idea: string | null; readonly gain: number | null}[] {
   let from = reading.input;
-  const gains: {idea: string | null; gain: number}[] = [];
-  for (const step of bestSteps(reading)) {
-    if (from !== null) {
-      gains.push({idea: step.idea, gain: improvementOf(step.value, from, reading.direction)});
-    }
+  return steps.map(step => {
+    const gain = from === null ? null : improvementOf(step.value, from, reading.direction);
     from = step.value;
-  }
-  return gains;
+    return {idea: step.idea, gain};
+  });
 }
 
 /** Whether any reading of `reading` is not the input's: an objective that never moved has none. */
@@ -112,24 +135,28 @@ function moves(reading: ObjectiveReading): boolean {
 function cellOf(
   reading: ObjectiveReading,
   point: PerformancePoint | undefined,
+  steps: ReadonlySet<string>,
   gain: number | null,
 ): ObjectiveCell {
   if (point === undefined) return NO_CELL;
   const multiple = multipleOver(point.value, reading.input, reading.direction);
+  const setBest = steps.has(readingKey(point));
   return {
     value: point.value,
     multiple,
     change: multiple === null ? null : changeOf(multiple),
-    setBest: point.best,
-    gain: point.best ? gain : null,
+    setBest,
+    gain: setBest ? gain : null,
   };
 }
 
-/** The shares of `reading`'s gain by idea, and what no idea owns; null when it has no gain to share. */
+/** The shares of the line's gain by idea, and what no idea owns; null without an input or a gain to share. */
 function sharesOf(
   reading: ObjectiveReading,
+  steps: readonly BestReading[],
 ): {readonly byIdea: ReadonlyMap<string, number>; readonly unowned: number} | null {
-  const gains = gainsOf(reading);
+  if (reading.input === null) return null;
+  const gains = gainsOf(reading, steps).map(each => ({idea: each.idea, gain: each.gain ?? 0}));
   const total = gains.reduce((sum, each) => sum + each.gain, 0);
   if (gains.length === 0 || !(total > 0)) return null;
   const byIdea = new Map<string, number>();
@@ -141,13 +168,19 @@ function sharesOf(
   return {byIdea, unowned};
 }
 
-/** What the ideas did to `readings` (the run's objectives, read), in the readings' order. */
-function impactOfReadings(readings: readonly ObjectiveReading[]): Impact {
-  const points = readings.map(pointsByIdea);
-  const gainsByIdea = readings.map(reading => {
+/** What the ideas did to `readings` (the run's objectives, read) by `until`, in the readings' order. */
+function impactOfReadings(readings: readonly ObjectiveReading[], until: number | null): Impact {
+  const lines = readings.map(reading => stepsUntil(reading, until));
+  const points = readings.map((reading, at) =>
+    pointsByIdea(readingsUntil(reading, until), lines[at] ?? []),
+  );
+  const stepKeys = lines.map(
+    line => new Set(line.flatMap(step => (step.key === null ? [] : [step.key]))),
+  );
+  const gainsByIdea = readings.map((reading, at) => {
     const byIdea = new Map<string, number>();
-    for (const {idea, gain} of gainsOf(reading)) {
-      if (idea !== null) byIdea.set(idea, (byIdea.get(idea) ?? 0) + gain);
+    for (const {idea, gain} of gainsOf(reading, lines[at] ?? [])) {
+      if (idea !== null && gain !== null) byIdea.set(idea, (byIdea.get(idea) ?? 0) + gain);
     }
     return byIdea;
   });
@@ -157,12 +190,18 @@ function impactOfReadings(readings: readonly ObjectiveReading[]): Impact {
     cells.set(
       id,
       readings.map((reading, at) =>
-        cellOf(reading, points[at]?.get(id), gainsByIdea[at]?.get(id) ?? null),
+        cellOf(
+          reading,
+          points[at]?.get(id),
+          stepKeys[at] ?? new Set(),
+          gainsByIdea[at]?.get(id) ?? null,
+        ),
       ),
     );
   }
   const [only] = readings;
-  const shared = readings.length === 1 && only !== undefined ? sharesOf(only) : null;
+  const [line] = lines;
+  const shared = readings.length === 1 && only !== undefined ? sharesOf(only, line ?? []) : null;
   return {
     columns: readings.map(reading => ({
       name: reading.name,
@@ -177,15 +216,18 @@ function impactOfReadings(readings: readonly ObjectiveReading[]): Impact {
 }
 
 /**
- * What the ideas of `model` did to the objectives `objectives` (the run's, read from the whole run
- * so a scrubbed model keeps its columns), at the sequence `model` is at.
+ * What the ideas of the run `whole` (to its end, whatever the position of the time bar) did to its
+ * objectives `objectives`, as of run-clock time `until` (null: the end): the readings taken and the
+ * steps set by then. The columns are the whole run's, so scrubbing neither adds nor drops one.
  */
 export function impactOf(
-  model: RunModel,
-  objectives: readonly ObjectiveSeries[] = objectiveSeriesOf(model),
+  whole: RunModel,
+  objectives: readonly ObjectiveSeries[] = objectiveSeriesOf(whole),
+  until: number | null = null,
 ): Impact {
-  const series = objectives.length > 0 ? objectives : objectiveSeriesOf(model);
+  const series = objectives.length > 0 ? objectives : objectiveSeriesOf(whole);
   return impactOfReadings(
-    series.map((each, at) => readObjective(model, each, at === 0, series.length < 2)),
+    series.map((each, at) => readObjective(whole, each, at === 0, series.length < 2)),
+    until,
   );
 }

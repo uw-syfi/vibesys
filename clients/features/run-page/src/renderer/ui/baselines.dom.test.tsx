@@ -13,6 +13,7 @@ import {IDEAS_FILTER_DEFAULT} from '../../state/ideas-view.js';
 import {EMPTY_TRACE_LOG, traceStep} from '../../state/live.js';
 import {createFactsReader} from '../../state/run-facts.js';
 import {createRunReader} from '../../state/run-model.js';
+import {positionOf} from '../../state/time-position.js';
 import {Hero} from './hero.js';
 import {IdeasTable} from './ideas-table.js';
 
@@ -69,7 +70,9 @@ async function drawn(
 }
 
 test('the headline reads vs the comparison, the chart draws its line, the others are small labels', async () => {
-  const screen = await drawn(<Hero {...BASE} whole={MODEL} idea={null} />);
+  const screen = await drawn(
+    <Hero {...BASE} position={positionOf(BASE.model, MODEL, BASE.clock.start)} idea={null} />,
+  );
   const text = screen.container.textContent ?? '';
   expect(text).toContain('5.82×');
   expect(text).toContain('vs vLLM');

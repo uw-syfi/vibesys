@@ -1,8 +1,9 @@
 /**
  * The stats row of the dashboard: the ideas the run tried, its measurements, the time its agents
  * worked within the time it ran, and the tokens it spent. Pure over the run at the position of the
- * time bar (`model`) and the run to its end (`whole`), so a row at a position says what the run had
- * done by then and the figures of two positions add up.
+ * time bar (`model`), the run to its end and that position on it (`position`), and the run's token
+ * ledger, so every figure of the row says what the run had done by the position and the figures of
+ * two positions add up.
  *
  * Definitions:
  * - Ideas tried: every idea the run began; measured: those with a reading of any objective;
@@ -14,14 +15,17 @@
  *   with every stopped stretch left out.
  * - Agent time: the time at least one agent turn was working, counted on the running time's axis, so
  *   it never exceeds the running time and two agents working at once count once.
+ * - Tokens: what the turns that had ended by the position spent (`tokensAt`).
  */
-import type {TokenTally} from '@vibesys/run-state';
+import type {TokenLedger, TokenTally} from '@vibesys/run-state';
 import type {Candidate} from '@vibesys/run-state/candidates';
 import {compactTokens} from '@vibesys/run-state/usage';
 import {impactOf} from './idea-impact.js';
-import type {ObjectiveSeries} from './objective-reading.js';
+import {objectiveSeriesOf} from './objective-reading.js';
 import type {RunModel} from './run-model.js';
 import {runningTimeOf, runningWords} from './running-time.js';
+import type {RunPosition} from './time-position.js';
+import {tokensAt} from './token-usage.js';
 
 /** A stretch of the run clock. */
 interface Interval {
@@ -94,17 +98,18 @@ function reported(tally: TokenTally | null | undefined): tally is TokenTally {
 }
 
 /**
- * The stats of the run at `model`'s position. `whole` is the run to its end (it holds the
- * sessions the running time is read from) and `start` its start on the run clock.
+ * The stats of the run at `model`'s position. `position.whole` is the run to its end (it holds the
+ * sessions the running time is read from, and the readings the ideas measured are counted from) and
+ * `start` its start on the run clock; `ledger` is what the run's turns spent, to its end.
  */
 export function runStats(
   model: RunModel,
-  whole: RunModel,
+  position: RunPosition,
   start: number,
-  tokens: TokenTally | null | undefined,
-  objectives?: readonly ObjectiveSeries[],
+  ledger: TokenLedger,
 ): RunStats {
-  const impact = impactOf(model, objectives);
+  const {whole, scrub} = position;
+  const impact = impactOf(whole, objectiveSeriesOf(whole), scrub);
   const candidates = model.candidates.candidates;
   const time = runningTimeOf(whole.sessions ?? [], start);
   const worked = merged(turnIntervals(model)).reduce(
@@ -112,6 +117,7 @@ export function runStats(
     0,
   );
   const running = model.latest === null ? null : time.at(model.latest);
+  const spent = tokensAt(ledger, model.trace.spans, scrub === null);
   return {
     ideas: {
       tried: candidates.length,
@@ -123,7 +129,7 @@ export function runStats(
     measurements: measurementsOf(candidates),
     agentSeconds: running === null ? null : Math.min(worked, running),
     runningSeconds: running,
-    tokens: reported(tokens) ? tokens : null,
+    tokens: reported(spent) ? spent : null,
   };
 }
 

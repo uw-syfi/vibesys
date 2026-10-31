@@ -16,8 +16,8 @@ import type {CoreState, TokenLedger} from '@vibesys/run-state';
 import type {ReactNode} from 'react';
 import type {
   ModelNames,
-  ObjectiveSeries,
   RunModel,
+  RunPosition,
   WhoBySpan,
   ZoomEvent,
 } from '../../../state/index.js';
@@ -35,8 +35,11 @@ interface RunClock {
 export interface ViewBase {
   readonly emptyLabelsOnly?: boolean;
   readonly model: RunModel;
-  /** The run's objectives, read from the whole run, so a position of the time bar keeps the columns. */
-  readonly objectives?: readonly ObjectiveSeries[];
+  /**
+   * The run to its end and the time bar's place on it: the figures of the dashboard (the charts, the
+   * stats, the Ideas table) are the whole run's cut there. Absent: `model` is the whole run.
+   */
+  readonly position?: RunPosition;
   readonly clock: RunClock;
   /** The tokens the run's turns spent, by turn span (empty before any turn finished). */
   readonly tokens: TokenLedger;

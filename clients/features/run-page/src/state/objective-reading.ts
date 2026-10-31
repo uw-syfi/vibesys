@@ -226,15 +226,33 @@ export function bestSteps(reading: ObjectiveReading): readonly BestReading[] {
 }
 
 /**
+ * The steps of `reading`'s line as of run-clock time `until` (null: the whole run): those set at or
+ * before it. The chart, the headline and the Ideas table read a position of the time bar through
+ * this one cut of the whole run, never through the run as it stood at that position.
+ */
+export function stepsUntil(
+  reading: ObjectiveReading,
+  until: number | null,
+): readonly BestReading[] {
+  return bestSteps(reading).filter(step => until === null || step.at <= until);
+}
+
+/** The readings of `reading` taken at or before run-clock time `until` (null: every one), in time order. */
+export function readingsUntil(
+  reading: ObjectiveReading,
+  until: number | null,
+): readonly PerformancePoint[] {
+  return reading.fold.points.filter(point => until === null || point.at <= until);
+}
+
+/**
  * The best of `reading` as of run-clock time `until` (null: the whole run): the last step of its
- * line by then (`bestSteps`), so the headline, the line and the tip name one best. Null when none
+ * line by then (`stepsUntil`), so the headline, the line and the tip name one best. Null when none
  * has been set, so the input stands; but a writer that states the input as the run's best says so
  * for the whole run: that is the best, with no step.
  */
 export function bestSoFar(reading: ObjectiveReading, until: number | null): BestReading | null {
-  const last = bestSteps(reading)
-    .filter(step => until === null || step.at <= until)
-    .at(-1);
+  const last = stepsUntil(reading, until).at(-1);
   if (last !== undefined || until !== null) return last ?? null;
   return reading.decided === undefined && reading.stated !== null
     ? {value: reading.stated, idea: null, key: null, at: 0}

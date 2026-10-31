@@ -32,7 +32,6 @@ export {IDEA_STATUSES, type IdeaStatus, STATUS_WORDS} from './idea-status.js';
 export {outcomeWords} from './idea-words.js';
 export {
   type CellForm,
-  DEFAULT_SORT,
   type IdeasSort,
   type IdeasTable,
   type IdeaTableRow,
@@ -141,7 +140,8 @@ export {
   skeletonScreenState,
 } from './skeleton-projection.js';
 export {adoptionTitles} from './span-words.js';
-export {spendOf, tokensByAgent, turnTokens} from './token-usage.js';
+export {endOf, positionOf, type RunPosition} from './time-position.js';
+export {spendOf, tokensAt, tokensByAgent, turnTokens} from './token-usage.js';
 export {
   type TokensCell,
   type TokensCells,

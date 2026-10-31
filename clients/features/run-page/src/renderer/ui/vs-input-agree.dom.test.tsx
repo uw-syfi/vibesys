@@ -8,7 +8,7 @@ import {EMPTY_LEDGER} from '@vibesys/run-state';
 import {Window} from 'happy-dom';
 import {act, type ReactNode} from 'react';
 import {createRoot} from 'react-dom/client';
-import {IDEAS_FILTER_DEFAULT, ideasTable, objectiveSeriesOf} from '../../state/index.js';
+import {endOf, IDEAS_FILTER_DEFAULT, ideasTable, objectiveSeriesOf} from '../../state/index.js';
 import {EMPTY_TRACE_LOG, traceStep} from '../../state/live.js';
 import {createRunReader, type RunModel} from '../../state/run-model.js';
 import {ratio} from '../../state/span-reading.js';
@@ -61,7 +61,7 @@ async function figuresOf(
 /** The multiples the table states for each title (titles repeat in a long run). */
 function tableFigures(model: RunModel): ReadonlyMap<string, ReadonlySet<string>> {
   const table = ideasTable(model, {
-    objectives: objectiveSeriesOf(model),
+    position: endOf(model),
     filter: IDEAS_FILTER_DEFAULT,
     sort: null,
     selected: null,

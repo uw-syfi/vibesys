@@ -35,8 +35,8 @@ import {
   machineBlockWords,
   NO_MODEL_NAMES,
   type Offer,
-  objectiveSeriesOf,
   pauseNowConfirmView,
+  positionOf,
   type ResolvedZoom,
   type Route,
   RUN_ROUTE,
@@ -546,14 +546,16 @@ function RunScreenBody(props: {
 }): JSX.Element {
   const {state, model, route, zoom, dispatch} = props;
   const names = props.modelNames ?? NO_MODEL_NAMES;
+  // The run's own start, read from the whole run: a scrubbed model before its first span has no
+  // start to give, and every face measures its times from the same origin at every position.
+  const start = clockStart(props.whole);
+  const position = positionOf(model, props.whole, start);
   const base: ViewBase = {
     emptyLabelsOnly: state.readOnly === true,
     names,
     model,
-    objectives: objectiveSeriesOf(props.whole),
-    // The run's own start, read from the whole run: a scrubbed model before its first span has no
-    // start to give, and every face measures its times from the same origin at every position.
-    clock: {start: clockStart(props.whole), now: clockAt(model, runNow(state))},
+    position,
+    clock: {start, now: clockAt(model, runNow(state))},
     tokens: props.core?.tokens ?? EMPTY_LEDGER,
     who: whoBySpan(usageRecords(state), names),
     adoptionTitles: adoptionTitles(model.trace.spans),
@@ -615,7 +617,7 @@ function RunScreenBody(props: {
       {before === null ? (
         <Hero
           {...base}
-          whole={props.whole}
+          position={position}
           idea={zoomed.idea?.id ?? null}
           lit={lit}
           hover={idea => dispatch({type: 'ideas-hover', idea})}

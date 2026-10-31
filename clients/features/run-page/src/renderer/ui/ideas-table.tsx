@@ -26,7 +26,7 @@ import {
 import type {JSX} from 'react';
 import {NO_CLEAR_CHANGE} from '../../state/headline.js';
 import {
-  DEFAULT_SORT,
+  endOf,
   type IdeaStatus,
   type IdeasFilter,
   type IdeasSort,
@@ -248,7 +248,7 @@ function columnsOf(
 ): readonly Column[] {
   const sorted = (by: IdeasSort): Sorting => ({
     marked: sameSort(table.sort, by),
-    press: () => setSort(sameSort(by, DEFAULT_SORT) ? null : by),
+    press: () => setSort(sameSort(by, table.defaultSort) ? null : by),
   });
   return [
     ...leadColumns(base),
@@ -297,7 +297,7 @@ export function IdeasTable(props: {
 }): JSX.Element {
   const {base, filter, sort} = props;
   const table = ideasTable(base.model, {
-    objectives: base.objectives,
+    position: base.position ?? endOf(base.model),
     filter,
     sort,
     selected: props.selected,

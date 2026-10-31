@@ -4,8 +4,9 @@
  * objective) and its agent time; the status chips with their counts; the search; the sort by an
  * objective. Pure over the run at the position of the time bar.
  *
- * Every figure of the impact is `idea-impact`'s, which is `objective-reading`'s: the best row's
- * `vs input` is the multiple of the chart's headline.
+ * The rows are the ideas of the run as it stood at the position (`model`); every figure of the
+ * impact is `idea-impact`'s, read from the whole run cut at the position, which is
+ * `objective-reading`'s: the best row's `vs input` is the multiple of the chart's headline.
  */
 import type {Candidate} from '@vibesys/run-state/candidates';
 import {
@@ -29,8 +30,9 @@ import {
 import {ideaAncestry} from './ideas-tree.js';
 import {type IdeasFilter, matchesIdeaQuery} from './ideas-view.js';
 import {metricLabel} from './metric-words.js';
-import type {ObjectiveSeries} from './objective-reading.js';
+import {type ObjectiveSeries, objectiveSeriesOf} from './objective-reading.js';
 import type {RunModel} from './run-model.js';
+import type {RunPosition} from './time-position.js';
 
 /** How many objectives get a column of their own; the rest are counted in the header. */
 const OBJECTIVE_COLUMNS = 4;
@@ -89,7 +91,10 @@ export interface IdeasTable {
   /** Objectives with no column of their own (more than `OBJECTIVE_COLUMNS` that moved). */
   readonly more: number;
   readonly form: CellForm;
+  /** The order the rows are in. */
   readonly sort: IdeasSort;
+  /** The order of a list nobody sorted: pressing the sort in force restores it. */
+  readonly defaultSort: IdeasSort;
   /** Chips with an idea behind them, `All` first. */
   readonly chips: readonly StatusChip[];
   readonly rows: readonly IdeaTableRow[];
@@ -104,8 +109,10 @@ export interface IdeasTable {
   readonly baselines: readonly string[];
 }
 
-/** The sort of a list nobody sorted: the first objective, best first. */
-export const DEFAULT_SORT: IdeasSort = {by: 'objective', index: 0};
+/** The sort of a list nobody sorted: the first objective with a column, best first. */
+function defaultSortOf(columns: readonly TableColumn[]): IdeasSort {
+  return {by: 'objective', index: columns[0]?.index ?? 0};
+}
 
 /** The stretches of `idea`'s agent turns, an open one lasting until `now`. */
 function workedSeconds(idea: Candidate, now: number | null): number {
@@ -129,7 +136,7 @@ function workedSeconds(idea: Candidate, now: number | null): number {
 }
 
 function columnsOf(
-  model: RunModel,
+  whole: RunModel,
   objectives: readonly ObjectiveSeries[],
   impact: Impact,
 ): {readonly columns: readonly TableColumn[]; readonly more: number} {
@@ -137,7 +144,7 @@ function columnsOf(
   const all = impact.columns.map((column, index): TableColumn => {
     const title = column.name === null ? 'Metric' : metricLabel(column.name);
     const series = objectives[index] ?? column;
-    return {...column, index, title, unit: unitWords(model, series, alone, title).trim()};
+    return {...column, index, title, unit: unitWords(whole, series, alone, title).trim()};
   });
   const moved = all.filter(column => column.moved);
   const shown = moved.length > 0 ? moved : all.slice(0, 1);
@@ -253,23 +260,26 @@ function rowOf(item: Candidate, context: RowContext): IdeaTableRow {
 }
 
 /**
- * `rows` in the order of `sort`; null is the default: running first, then the first objective's best.
- * Ties keep the newest first.
+ * `rows` in the order of `sort`; null is the default: the first objective's best, with the ideas
+ * still running first at the run's live end (`pinRunning`; in a replay they sort with the rest, as
+ * they were not running then). Ties keep the newest first.
  */
 function sorted(
   rows: readonly IdeaTableRow[],
   order: ReadonlyMap<string, number>,
   sort: IdeasSort | null,
+  fallback: IdeasSort,
+  pinRunning: boolean,
   directions: (index: number) => Direction,
 ): readonly IdeaTableRow[] {
-  const by = sort ?? DEFAULT_SORT;
+  const by = sort ?? fallback;
   const running = (row: IdeaTableRow): number => Number(row.status.status === 'running');
   const newest = (a: IdeaTableRow, b: IdeaTableRow): number =>
     (order.get(b.id) ?? 0) - (order.get(a.id) ?? 0);
   const value = (row: IdeaTableRow): number | null =>
     by.by === 'objective' ? (row.readings[by.index] ?? null) : null;
   return [...rows].sort((a, b) => {
-    const pinned = sort === null ? running(b) - running(a) : 0;
+    const pinned = sort === null && pinRunning ? running(b) - running(a) : 0;
     if (pinned !== 0) return pinned;
     const ordered =
       by.by === 'agent-time'
@@ -280,30 +290,33 @@ function sorted(
 }
 
 /**
- * The Ideas table of `model` under `filter` and `sort`. `objectives` are the run's, read from the
- * whole run so a scrubbed model keeps its columns; `selected` is the idea the charts single out
- * (`ideaAncestry` lights its lineage); `now` closes the turns still open.
+ * The Ideas table of `model` (the run at the time bar's position) under `filter` and `sort`.
+ * `position` is that place on the whole run: the objectives, their readings, best flags and
+ * multiples are the whole run's cut there, as the chart's are, so a scrubbed model (which holds
+ * none of the writer's decisions) neither loses a column nor a best. `selected` is the idea the
+ * charts single out (`ideaAncestry` lights its lineage); `now` closes the turns still open.
  */
 export function ideasTable(
   model: RunModel,
   options: {
-    readonly objectives?: readonly ObjectiveSeries[] | undefined;
+    readonly position: RunPosition;
     readonly filter: IdeasFilter;
-    /** Null: the default order, running first, then the first objective's best. */
+    /** Null: the default order, running first at the live end, then the first objective's best. */
     readonly sort: IdeasSort | null;
     readonly selected: string | null;
     readonly now: number | null;
   },
 ): IdeasTable {
   const tree = model.candidates;
-  const objectives = options.objectives ?? [];
-  const impact = impactOf(model, objectives);
-  const {columns, more} = columnsOf(model, objectives, impact);
+  const {whole, scrub} = options.position;
+  const objectives = objectiveSeriesOf(whole);
+  const impact = impactOf(whole, objectives, scrub);
+  const {columns, more} = columnsOf(whole, objectives, impact);
   const sole = impact.columns.length === 1;
   const statuses = new Map(
     tree.candidates.map(item => {
       const cells = impact.cells.get(item.id);
-      return [item.id, ideaStatus(item, changeOver(item, cells, model), hasReading(item, cells))];
+      return [item.id, ideaStatus(item, changeOver(item, cells, whole), hasReading(item, cells))];
     }),
   );
   const comparisons = sole ? baselineColumns(model) : {labels: [], cells: new Map()};
@@ -312,7 +325,7 @@ export function ideasTable(
     impact,
     columns,
     statuses,
-    bases: ideaBases(tree, model.direction),
+    bases: ideaBases(tree, whole.direction),
     titles: new Map(tree.candidates.map(item => [item.id, item.title])),
     comparisons,
     lit: ideaAncestry(model, options.selected),
@@ -324,17 +337,21 @@ export function ideasTable(
     .filter(item => matchesIdeaQuery(item, query))
     .filter(item => status === null || statuses.get(item.id)?.status === status);
   const order = new Map(tree.candidates.map((item, at) => [item.id, at]));
+  const defaultSort = defaultSortOf(columns);
   return {
     columns,
     more,
     form: formOf(columns.length),
-    sort: options.sort ?? DEFAULT_SORT,
+    sort: options.sort ?? defaultSort,
+    defaultSort,
     chips: chipsOf(statuses, tree.candidates.length),
     rows: sorted(
       shown.map(item => rowOf(item, context)),
       order,
       options.sort,
-      index => impact.columns[index]?.direction ?? model.direction,
+      defaultSort,
+      scrub === null,
+      index => impact.columns[index]?.direction ?? whole.direction,
     ),
     total: tree.candidates.length,
     shares: sole && impact.shares !== null,

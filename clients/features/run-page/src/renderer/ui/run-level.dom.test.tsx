@@ -12,6 +12,7 @@ import {act} from 'react';
 import {createRoot} from 'react-dom/client';
 import {
   createRunReader,
+  positionOf,
   RUN_ROUTE,
   type RunMode,
   type RunModel,
@@ -167,7 +168,7 @@ async function chartAt(scrub: number | null): Promise<{yLabels: string[]; cursor
   await act(async () =>
     root.render(
       <>
-        <Hero {...base} whole={measuredRun(null)} idea={null} />
+        <Hero {...base} position={positionOf(base.model, measuredRun(null), 0)} idea={null} />
         <RunLevel state={state} base={base} core={null} mode="ideas" dispatch={() => undefined} />
       </>,
     ),
@@ -228,7 +229,7 @@ async function textOf(model: RunModel, showFailed: boolean): Promise<string> {
   await act(async () =>
     root.render(
       <>
-        <Hero {...base} whole={model} idea={null} />
+        <Hero {...base} position={positionOf(base.model, model, 0)} idea={null} />
         <RunLevel state={shown} base={base} core={null} mode="ideas" dispatch={() => undefined} />
       </>,
     ),
@@ -270,7 +271,9 @@ test('the performance row is one element whatever idea is open: dots are singled
     },
   };
   const draw = (idea: string | null) =>
-    act(async () => root.render(<Hero {...base} whole={model} idea={idea} />));
+    act(async () =>
+      root.render(<Hero {...base} position={positionOf(base.model, model, 0)} idea={idea} />),
+    );
   /** Which readings are ringed as the open idea's: `focus`, else `-`. */
   const kinds = () =>
     [...container.querySelectorAll('.vs-chart-pick')].map(point =>
@@ -465,7 +468,11 @@ test('the selected idea’s line words the objective’s unit, not its metric ke
     who: new Map(),
     zoom: () => undefined,
   };
-  await act(async () => root.render(<Hero {...base} whole={withUnit} idea={first?.id ?? null} />));
+  await act(async () =>
+    root.render(
+      <Hero {...base} position={positionOf(base.model, withUnit, 0)} idea={first?.id ?? null} />,
+    ),
+  );
   const text = container.textContent ?? '';
   await act(async () => root.unmount());
   container.remove();
