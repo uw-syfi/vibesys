@@ -106,8 +106,13 @@ class AgentEventSink(Protocol):
         agent_kind: str | None = None,
         round_label: str | None = None,
         invocation_id: str | None = None,
+        provider_session_id: str | None = None,
     ) -> None:
-        """Publish settled token and cost accounting for one finished turn."""
+        """Publish settled token and cost accounting for one finished turn.
+
+        ``provider_session_id`` is the provider's own id of the conversation the turn ran in,
+        ``None`` when the turn ended before the provider named one.
+        """
         ...
 
     def rate_limit_update(
@@ -249,9 +254,10 @@ class NullAgentEventSink:
         agent_kind: str | None = None,
         round_label: str | None = None,
         invocation_id: str | None = None,
+        provider_session_id: str | None = None,
     ) -> None:
         """Ignore settled usage when no event sink was injected."""
-        del usage, agent_kind, round_label, invocation_id
+        del usage, agent_kind, round_label, invocation_id, provider_session_id
 
     def rate_limit_update(
         self,

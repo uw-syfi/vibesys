@@ -701,6 +701,20 @@ export type StartedAt2 = string | null;
 export type EndedAt1 = string | null;
 export type CostUsd = number | null;
 export type DurationMs = number | null;
+export type CostBasis = ("price_table" | "provider_reported" | "unknown_model" | "not_reported") | null;
+export type Model4 = string;
+export type Input1 = number;
+export type CacheRead1 = number;
+export type CacheWrite1 = number;
+export type CacheWrite1H = number;
+export type Output1 = number;
+export type Reasoning1 = number;
+export type Turns = number;
+export type RecordedUsd = number | null;
+export type Speed = ("standard" | "fast" | "ultrafast") | null;
+export type Primary = boolean;
+export type ByModel = ModelUsage[];
+export type ProviderSessionId = string | null;
 export type Records = UsageRecord[];
 export type NextOffset1 = number | null;
 export type RequestId56 = string;
@@ -711,7 +725,7 @@ export type Commit1 = string | null;
 export type Dirty1 = boolean | null;
 export type CpuCores = number;
 export type Vendor = string;
-export type Model4 = string;
+export type Model5 = string;
 export type Gpus = Gpu[];
 export type Docker = DockerReachable | DockerUnreachable;
 export type Reachable = true;
@@ -815,7 +829,7 @@ export type Kind22 = "roles_not_declared";
 export type Roles1 = string[];
 export type Kind23 = "model_not_vetted";
 export type Provider3 = string;
-export type Model5 = string | null;
+export type Model6 = string | null;
 export type Vetted = string[];
 export type Role2 = string | null;
 export type Fallback = boolean;
@@ -952,7 +966,7 @@ export type Since1 = string;
 export type Until1 = string;
 export type SpentUsd = number;
 export type SpendPerHourUsd = number;
-export type Turns = number;
+export type Turns1 = number;
 export type UnpricedTurns = number;
 export type UntimedTurns = number;
 export type NewBests = number;
@@ -967,9 +981,9 @@ export type UnpricedTurns1 = number;
 export type ByRun = RunSpend[];
 export type Role3 = string | null;
 export type Harness1 = string | null;
-export type Model6 = string | null;
+export type Model7 = string | null;
 export type CostUsd2 = number;
-export type Turns1 = number;
+export type Turns2 = number;
 export type UnpricedTurns2 = number;
 /**
  * @maxItems 64
@@ -2295,6 +2309,29 @@ export interface UsageRecord {
   tokens: TokenTally;
   cost_usd: CostUsd;
   duration_ms: DurationMs;
+  cost_basis?: CostBasis;
+  by_model?: ByModel;
+  provider_session_id?: ProviderSessionId;
+}
+/**
+ * One model's share of one finished turn: the journal's ``by_model`` row of a usage record.
+ *
+ * The counts are always known: a row exists only for a turn whose increment was measured.
+ * ``recorded_usd`` is the price agentshim recorded for these tokens at the standard tier, ``None``
+ * when it has no price for the model; it is not a bill, and nothing here recomputes it.
+ */
+export interface ModelUsage {
+  model: Model4;
+  input: Input1;
+  cache_read: CacheRead1;
+  cache_write: CacheWrite1;
+  cache_write_1h: CacheWrite1H;
+  output: Output1;
+  reasoning: Reasoning1;
+  turns: Turns;
+  recorded_usd: RecordedUsd;
+  speed: Speed;
+  primary: Primary;
 }
 /**
  * The machine's description.
@@ -2337,7 +2374,7 @@ export interface Hardware {
  */
 export interface Gpu {
   vendor: Vendor;
-  model: Model4;
+  model: Model5;
 }
 /**
  * Docker's daemon answered, with its server version.
@@ -2539,7 +2576,7 @@ export interface RolesNotDeclared {
 export interface ModelNotVetted {
   kind: Kind23;
   provider: Provider3;
-  model: Model5;
+  model: Model6;
   vetted: Vetted;
   role: Role2;
   fallback: Fallback;
@@ -2853,7 +2890,7 @@ export interface UsageWindowReply {
   spent_usd: SpentUsd;
   spend_per_hour_usd: SpendPerHourUsd;
   tokens: TokenTally;
-  turns: Turns;
+  turns: Turns1;
   unpriced_turns: UnpricedTurns;
   untimed_turns: UntimedTurns;
   new_bests: NewBests;
@@ -2881,9 +2918,9 @@ export interface RunSpend {
 export interface AgentSpend {
   role: Role3;
   harness: Harness1;
-  model: Model6;
+  model: Model7;
   cost_usd: CostUsd2;
-  turns: Turns1;
+  turns: Turns2;
   unpriced_turns?: UnpricedTurns2;
 }
 /**
