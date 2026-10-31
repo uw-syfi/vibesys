@@ -18,7 +18,8 @@ fi
 pids=()
 (./scripts/tests/test_proto_breaking.sh && ./scripts/check_proto_breaking.sh) &
 pids+=("$!")
-uv run --locked pytest libs/vs-proto/tests libs/vs-runlog/tests scripts/corevalue/tests scripts/host_operations/tests -n 0 --no-cov -q &
+# 1,000 small tests with no dominant one: spread across the cores the checks beside it leave, not one.
+uv run --locked pytest libs/vs-proto/tests libs/vs-runlog/tests scripts/corevalue/tests scripts/host_operations/tests -n auto --no-cov -q &
 pids+=("$!")
 (cd gateway && go build ./gen/... && go vet ./gen/...) &
 pids+=("$!")

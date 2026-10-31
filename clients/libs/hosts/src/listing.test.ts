@@ -190,6 +190,7 @@ describe('hostsComeUp', () => {
   const down = (host: string): HostListing => ({
     kind: 'unavailable',
     host,
+    step: 'gateway',
     connection: {kind: 'offline', detail: 'unreachable'},
   });
 

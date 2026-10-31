@@ -36,6 +36,11 @@ export interface HostRun {
   readonly reason: string | null;
 }
 
+/** The steps from a machine to its run list, in order. */
+export const LISTING_STEPS = ['gateway', 'handshake', 'runs'] as const;
+
+export type ListingStep = (typeof LISTING_STEPS)[number];
+
 /** A host's registry as the views show it, or why it cannot be read now. */
 export type HostListing =
   | {
@@ -55,6 +60,8 @@ export type HostListing =
   | {
       readonly kind: 'unavailable';
       readonly host: HostKey;
+      /** The step the host has reached, or stopped at, on the way to its runs. */
+      readonly step: ListingStep;
       readonly connection: ConnectionStatus;
     };
 
