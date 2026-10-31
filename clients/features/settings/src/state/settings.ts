@@ -20,6 +20,13 @@ export type SettingsChange =
 
 export type SettingsState =
   | {readonly kind: 'loading'; readonly os: ThemeMode; readonly token: number}
+  /** The read failed: it waits for the user's `retry`, or for a push. */
+  | {
+      readonly kind: 'failed';
+      readonly os: ThemeMode;
+      readonly token: number;
+      readonly error: string;
+    }
   | {
       readonly kind: 'ready';
       readonly os: ThemeMode;
@@ -36,6 +43,7 @@ export type SettingsState =
 export type SettingsAction =
   | {readonly type: 'loaded'; readonly token: number; readonly preferences: PreferencesView}
   | {readonly type: 'load-failed'; readonly token: number; readonly error: string}
+  | {readonly type: 'retry'}
   | {readonly type: 'os'; readonly mode: ThemeMode}
   | {readonly type: 'change'; readonly change: SettingsChange}
   | {readonly type: 'saved'; readonly token: number; readonly preferences: PreferencesView}
@@ -103,6 +111,7 @@ function stepReady(
     }
     case 'loaded':
     case 'load-failed':
+    case 'retry':
       return {state, requests: []};
   }
 }
@@ -114,14 +123,17 @@ export function settingsStep(state: SettingsState, action: SettingsAction): Sett
     case 'os':
       return {state: {...state, os: action.mode}, requests: []};
     case 'loaded':
-      if (action.token !== state.token) return {state, requests: []};
+      if (state.kind !== 'loading' || action.token !== state.token) return {state, requests: []};
       return {state: ready(state.os, action.preferences, state.token), requests: []};
     case 'pushed':
       return {state: ready(state.os, action.preferences, state.token), requests: []};
-    case 'load-failed': {
-      if (action.token !== state.token) return {state, requests: []};
+    case 'load-failed':
+      if (state.kind !== 'loading' || action.token !== state.token) return {state, requests: []};
+      return {state: {...state, kind: 'failed', error: action.error}, requests: []};
+    case 'retry': {
+      if (state.kind !== 'failed') return {state, requests: []};
       const token = state.token + 1;
-      return {state: {...state, token}, requests: [{kind: 'load', token}]};
+      return {state: {kind: 'loading', os: state.os, token}, requests: [{kind: 'load', token}]};
     }
     default:
       return {state, requests: []};
@@ -135,7 +147,7 @@ export function shownTheme(state: SettingsState, fallback: Appearance): ThemeNam
 
 /** What must hold in every state; empty when all do. */
 export function settingsInvariants(state: SettingsState): string[] {
-  if (state.kind === 'loading') return state.token > 0 ? [] : ['the load token is not positive'];
+  if (state.kind !== 'ready') return state.token > 0 ? [] : ['the load token is not positive'];
   const problems: string[] = [];
   const {appearance} = state.shown;
   if (THEMES[appearance.light].mode !== 'light') problems.push('the light theme is not light');

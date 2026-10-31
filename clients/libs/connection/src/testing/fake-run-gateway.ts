@@ -1,5 +1,5 @@
 import {create, toBinary} from '@bufbuild/protobuf';
-import {type HostId, type HostKey, hostKey} from '@vibesys/hosts';
+import {type HostId, type HostKey, hostKey, type ListingStep} from '@vibesys/hosts';
 import {type RunHead, type RunLiveness, WatchRunsResponseSchema} from '@vibesys/proto';
 import {FakeClock} from '@vibesys/transport/testing';
 import {type RunWatch, type RunWatchPorts, runWatch} from '../shell/run-watch.js';
@@ -9,6 +9,8 @@ export interface FakeRunStream {
   readonly host: HostKey;
   readonly signal: AbortSignal;
   receive(bytes: Uint8Array): void;
+  /** The gateway's report that the stream reached `step`. */
+  reached(step: ListingStep): void;
   end(): void;
   fail(error: Error): void;
 }
@@ -30,9 +32,10 @@ export class FakeRunGateway implements RunWatchPorts {
     _bytes: Uint8Array,
     signal: AbortSignal,
     receive: (bytes: Uint8Array) => void,
+    reached: (step: ListingStep) => void,
   ): Promise<void> {
     return new Promise((end, fail) => {
-      this.streams.push({host: hostKey(host), signal, receive, end, fail});
+      this.streams.push({host: hostKey(host), signal, receive, reached, end, fail});
     });
   }
 

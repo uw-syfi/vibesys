@@ -7,7 +7,7 @@ import {
   type WatchedRun,
   watchedListing,
 } from '@vibesys/connection';
-import {type HostKey, recordedProjectRoot} from '@vibesys/hosts';
+import {type HostKey, LISTING_STEPS, recordedProjectRoot} from '@vibesys/hosts';
 import {
   DrainGoal,
   LifecycleSchema,
@@ -166,11 +166,14 @@ test('property: a host lists runs only once its stream has delivered them all, w
     fc.property(
       RUNS,
       fc.oneof(
-        fc.constant({kind: 'connecting' as const}),
+        fc.constantFrom(...LISTING_STEPS).map(step => ({kind: 'connecting' as const, step})),
         fc.constant({kind: 'live' as const}),
-        fc
-          .integer({min: 1, max: 12})
-          .map(attempt => ({kind: 'reconnecting' as const, attempt, detail: 'network loss'})),
+        fc.integer({min: 1, max: 12}).map(attempt => ({
+          kind: 'reconnecting' as const,
+          attempt,
+          detail: 'network loss',
+          step: 'runs' as const,
+        })),
       ),
       (runs, phase) => {
         const state: RunsState = {phase, runs};
@@ -179,7 +182,7 @@ test('property: a host lists runs only once its stream has delivered them all, w
         if (listing.kind === 'unavailable' && phase.kind === 'reconnecting')
           expect(listing.connection.kind).toBe(phase.attempt >= 5 ? 'offline' : 'reconnecting');
         if (listing.kind === 'unavailable' && phase.kind === 'connecting')
-          expect(listing.connection).toEqual({kind: 'connecting'});
+          expect(listing).toMatchObject({connection: {kind: 'connecting'}, step: phase.step});
       },
     ),
     {numRuns: 60},

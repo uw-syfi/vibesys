@@ -45,7 +45,11 @@ test('uncertain host listings do not classify an old recent run as ended', () =>
 
 test('a machine that will not answer is named, not searched forever; one still connecting is not', () => {
   const unavailable = (connection: Extract<HostListing, {kind: 'unavailable'}>['connection']) =>
-    runRecord([{kind: 'unavailable', host: 'ssh:gpu', connection}], recent, recent);
+    runRecord(
+      [{kind: 'unavailable', host: 'ssh:gpu', step: 'gateway', connection}],
+      recent,
+      recent,
+    );
   expect(unavailable({kind: 'incompatible', detail: 'x'})).toEqual({
     kind: 'unlisted',
     why: 'machine',
