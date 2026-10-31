@@ -22,19 +22,15 @@ from . import (
 from ._adoption import reopen as reopen_adoption
 from ._continuations import (
     SuspensionRefusal,
-    exhausted,
-    paid_prefix_refusal,
-    published_history,
-    resume_refusal,
     wait_refusal_in,
 )
 from ._deadlines import queued_until, resolve_until
 from ._dispatch_episode import (
-    dispatch_episode_current,
     registered_retirement,
     retirement_dispatch,
     scope_admission,
 )
+from ._dispatch_validation import validate_dispatch_episode, validate_resume_authority
 from ._host_epochs import downtime
 from ._inspection import validate_inspection_target, validate_registered_owner
 from ._ledger_compaction import compact_ledger
@@ -48,13 +44,13 @@ from ._proofs import (
     descriptor_matches,
     observation_for,
     occupied_episode,
-    operation_for,
     request_dependency_status,
     requested_stop_mode,
     stop_mode,
 )
 from ._quota_pause_clock import credit_quota_pause
 from ._registry import ContractError
+from ._request_recovery import is_open
 from ._routing import SIGNAL_ORDER, event_area
 from ._run_pause import EpochFacts, control_refusal, reopened, stop_standing
 from ._session_inputs import check_declared_target, may_have_been_read
@@ -82,7 +78,6 @@ from .types.attempts import (
 from .types.common import (
     OPERATOR_ACTIONS,
     Area,
-    AttemptId,
     AttemptRef,
     ControlId,
     ControlInput,
@@ -107,7 +102,6 @@ from .types.common import (
     escalate_stop,
 )
 from .types.evaluation import (
-    ContinuationPhase,
     ContinuationReopenRequested,
     EvaluationEvent,
     MeasurementRequested,
@@ -175,19 +169,14 @@ from .types.scheduling import (
 )
 from .types.session_inputs import InputDropped, InputDropReason
 from .types.sessions import (
-    Access,
     AcquisitionStalled,
     CheckpointStalled,
-    DispatchTurn,
     InputWithdrawRequested,
     InterruptRequested,
-    Invocation,
-    ResumeSessionTurn,
     SessionsEvent,
     SessionsState,
     SteerReceived,
     TurnRequested,
-    TurnSpec,
 )
 from .types.settlement import (
     AssessmentSubmitted,
@@ -220,7 +209,6 @@ if TYPE_CHECKING:
     from .attempts import Reducer as AttemptsReducer
     from .evaluation import Reducer as EvaluationReducer
     from .types.evaluation import Continuation
-    from .types.evaluation_history import EvaluationHistoryCursor
     from .types.kernel import RunState
     from .types.session_inputs import MidTurnOffer
 
@@ -707,14 +695,21 @@ def _finish_run_inputs(state: CoreState) -> Transition:
 def _kernel_signal(
     state: CoreState,
     signal: RegisterAttempt | AdmitAttempt | CloseAdmission | RunDrained | RecoveryReady,
+    *,
+    publishing: bool,
 ) -> tuple[Transition, tuple[Signal, ...]]:
+    """Apply one kernel signal; ``publishing`` is whether this step has requests to register.
+
+    A run is drained only once nothing is left to clean up, and a request this step publishes
+    is cleanup the state does not hold yet: the run ends on a later tick, after they are done.
+    """
     if isinstance(signal, RegisterAttempt | AdmitAttempt | RecoveryReady):
         return _activation_signal(state, signal)
     if isinstance(signal, CloseAdmission):
         return Transition(state=state), (AdmissionControl(action="drain"),)
     if state.run.result is None:
         raise ContractError(("run", "result"), "drain has no registered stop proposal")
-    if cleanup_pending(state):
+    if publishing or cleanup_pending(state):
         return Transition(state=state), ()
     if state.run.status == RunStatus.TERMINAL:
         return Transition(state=state), ()
@@ -849,7 +844,14 @@ def propagate(
     # At quiescence a suspension nothing can publish is ended, so the wait its turn opened
     # always has a resolver, whichever way the checkpoint went.
     while pending or (pending := _stall_entries(state, [item.request for item in requests], seen)):
-        pending.sort(key=lambda entry: SIGNAL_ORDER.index(event_area(entry[0])))
+        # The run drains last: only once every other signal has had its say can it know whether
+        # the step leaves anything to clean up.
+        pending.sort(
+            key=lambda entry: (
+                isinstance(entry[0], RunDrained),
+                SIGNAL_ORDER.index(event_area(entry[0])),
+            )
+        )
         signal, cause, admission_id = pending.pop(0)
         admission_id = _signal_admission(state, signal, admission_id)
         observation = getattr(signal, "observation", None)
@@ -878,7 +880,7 @@ def propagate(
         if isinstance(
             signal, RegisterAttempt | AdmitAttempt | CloseAdmission | RunDrained | RecoveryReady
         ):
-            result, signals = _kernel_signal(state, signal)
+            result, signals = _kernel_signal(state, signal, publishing=bool(requests))
             state = result.state
             follow_ups = _follow_ups(signal, signals, seen)
             pending.extend((child, cause, admission_id) for child in follow_ups)
@@ -1214,7 +1216,12 @@ def _command(submission: Submission) -> Command:
 
 
 def _submitted(
-    state: CoreState, event: DecisionSubmitted, dispatch: Dispatch, *, check_revision: bool = True
+    state: CoreState,
+    event: DecisionSubmitted,
+    dispatch: Dispatch,
+    *,
+    check_revision: bool = True,
+    stopping: bool = False,
 ) -> Transition:
     submission = event.decision
     decision = event.command
@@ -1222,7 +1229,7 @@ def _submitted(
     replay = _decision_replay(state, submission)
     if replay is not None:
         return replay
-    rejection = validate_decision(state, event, check_revision=check_revision)
+    rejection = validate_decision(state, event, check_revision=check_revision, stopping=stopping)
     feedback = rejection or Accepted(decision_id=decision.decision_id)
     until = (
         resolve_until(state.run, submission.until)
@@ -1253,7 +1260,7 @@ def _submitted(
         updated = updated.model_copy(
             update={
                 "run": updated.run.model_copy(
-                    update={"result": decision.result, "status": RunStatus.CLOSING}
+                    update={"result": decision.result, "status": RunStatus.CLOSING, "park": None}
                 )
             }
         )
@@ -1352,7 +1359,10 @@ def _stop_control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) 
         return Transition(state=state)
     timed = _advance_event_time(state, event)
     result = _submitted(
-        timed, DecisionSubmitted(decision=decision, expected_revision=state.revision), dispatch
+        timed,
+        DecisionSubmitted(decision=decision, expected_revision=state.revision),
+        dispatch,
+        stopping=True,
     )
     if not any(isinstance(feedback, Accepted) for feedback in result.events):
         return result
@@ -1476,10 +1486,10 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
             "status": statuses.get(event.control.action, state.run.status),
         }
     )
-    run = _park_authority(state, run, event.control)
+    run = _park_authority(state, run, event)
     updated = state.model_copy(update={"run": run})
     if run.status is RunStatus.DRAINING and run.park is not None:
-        updated = _turn_permit.cap_to_permits(updated)
+        updated = _run_park.cap_to_drain_deadline(_turn_permit.cap_to_permits(updated))
     if event.control.action == "steer" or waits:
         result = Transition(state=updated)
     elif event.control.action in OPERATOR_ACTIONS:
@@ -1503,7 +1513,8 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
     )
 
 
-def _park_authority(state: CoreState, run: RunState, control: ControlInput) -> RunState:
+def _park_authority(state: CoreState, run: RunState, event: RunControlEvent) -> RunState:
+    control = event.control
     if control.action in ("park", "pause_now") or (
         control.action == "pause" and control.owner is PauseOwner.OPERATOR
     ):
@@ -1517,6 +1528,9 @@ def _park_authority(state: CoreState, run: RunState, control: ControlInput) -> R
                         state.run.park.admitted_turns
                         if state.run.park is not None
                         else _run_park.admitted_turns(state)
+                    ),
+                    deadline_at=_run_park.drain_deadline(
+                        event, state.run.now_at, state.run.limits.cleanup_bound
                     ),
                 )
             }
@@ -1592,188 +1606,6 @@ def _validate_observation_ingress(state: CoreState, event: CoreEvent) -> None:
         validate_registered_owner(state, event)
 
 
-def _validate_dispatch_episode(state: CoreState, request: Request) -> None:
-    """A prepared ordinary mutation never gains authority over a later episode."""
-    if not dispatch_episode_current(state, request):
-        raise ContractError(
-            ("admission_id",), "ordinary mutation requires the current owned admission episode"
-        )
-
-
-def _registered_session_turn(state: CoreState, request: ExecuteRegisteredOperation) -> TurnSpec:
-    """Resolve dispatch authority from the accepted canonical registered payload."""
-    origin = operation_for(state.run.receipts, request)
-    declaration = descriptor_matches(
-        state.registry,
-        state.run.capabilities,
-        request.operation,
-        LifecycleClass.SESSION_TURN,
-        OperationNormalizationKind.NONE,
-    )
-    if (
-        not isinstance(origin, Proven)
-        or not isinstance(declaration, Proven)
-        or origin.value.normalized_turn is None
-    ):
-        raise ContractError(
-            ("decision_id",), "registered session dispatch requires canonical turn proof"
-        )
-    return origin.value.normalized_turn
-
-
-def _builtin_session_turn(state: CoreState, request: DispatchTurn | ResumeSessionTurn) -> TurnSpec:
-    """Resolve dispatch authority before classifying a caller-supplied turn.
-
-    Paid and correction lifecycle policy remains owned by Sessions. A request
-    cannot erase its decision origin or downgrade a resume to bypass proof fences.
-    """
-    origin = accepted_receipt_for(state.run.receipts, request.decision_id, None)
-    receipt = origin.value if isinstance(origin, Proven) else None
-    decision = receipt.decision if receipt is not None else None
-    if (
-        receipt is None
-        or not isinstance(receipt.feedback, Accepted)
-        or receipt.feedback.decision_id != receipt.decision_id
-        or not isinstance(decision, RequestTurn)
-        or decision.decision_id != receipt.decision_id
-        or request.request_id not in receipt.request_ids
-        or decision.scope != request.scope
-        or decision.turn != request.turn
-    ):
-        raise ContractError(
-            ("decision_id",), "builtin session dispatch requires canonical turn proof"
-        )
-    return decision.turn
-
-
-def _validate_resume_authority(state: CoreState, request: Request) -> None:
-    """Missing history/publication/checkpoint values never authorize a resume.
-
-    These are shared proof fences. Evaluation B owns scientific exhaustion and
-    timeout policy, while Sessions A owns charge, lease and checkpoint issuance.
-    """
-    if isinstance(request, DispatchTurn | ResumeSessionTurn):
-        turn = _builtin_session_turn(state, request)
-    elif (
-        isinstance(request, ExecuteRegisteredOperation)
-        and request.operation.schema_ref.lifecycle == LifecycleClass.SESSION_TURN
-    ):
-        turn = _registered_session_turn(state, request)
-    else:
-        return
-    if turn.charge_class != "resume":
-        if isinstance(request, ResumeSessionTurn):
-            raise ContractError(("turn", "charge_class"), "resume request requires resume charge")
-        return
-    continuation = next(
-        (
-            row
-            for row in state.evaluation.continuations
-            if row.continuation_id == turn.continuation_id
-        ),
-        None,
-    )
-    successor = InvocationRef(
-        session_id=turn.session.session_id,
-        invocation_id=turn.invocation_id,
-        generation=request.scope.generation,
-    )
-    receipt = continuation.authorization_receipt if continuation is not None else None
-    preceding = next(
-        (
-            row
-            for row in state.sessions.invocations
-            if continuation is not None and row.invocation == continuation.invocation
-        ),
-        None,
-    )
-    if (
-        continuation is None
-        or receipt is None
-        or preceding is None
-        or preceding.scope != request.scope
-        or preceding.turn.session != turn.session
-        or continuation.invocation.session_id != successor.session_id
-        or continuation.invocation == successor
-        or receipt.continuation_id != turn.continuation_id
-        or receipt.next_invocation != successor
-        or receipt.timeout != continuation.timeout
-        or continuation.next_invocation != successor
-        or continuation.invocation.generation != request.scope.generation
-        or continuation.phase not in (ContinuationPhase.AUTHORIZED, ContinuationPhase.RESUMED)
-        or (
-            isinstance(request, ResumeSessionTurn)
-            and request.continuation_id != turn.continuation_id
-        )
-    ):
-        raise ContractError(
-            ("authorization_receipt",), "resume requires exact published successor proof"
-        )
-    _validate_resume_owner(state, request, turn, preceding, receipt.history_cursor)
-
-
-def _validate_resume_owner(
-    state: CoreState,
-    request: Request,
-    turn: TurnSpec,
-    preceding: Invocation,
-    publication_cursor: EvaluationHistoryCursor | None,
-) -> None:
-    """History belongs to the current attempt; run writer proof names its predecessor."""
-    if isinstance(request.scope.owner, AttemptId):
-        owner = next(
-            (
-                row
-                for row in state.attempts.attempts
-                if row.attempt_id == request.scope.owner
-                and row.generation == request.scope.generation
-            ),
-            None,
-        )
-        if owner is None or exhausted(state.attempts, request.scope):
-            raise ContractError(
-                ("evaluation_history",), "resume requires complete unexhausted attempt history"
-            )
-        prefix = preceding.evaluation_prefix
-        history = owner.evaluation_history
-        # Coverage only grows, so the paid-cycle prefix is checked on the stored history.
-        if prefix is None or paid_prefix_refusal(history, prefix) is not None:
-            raise ContractError(("evaluation_prefix",), SuspensionRefusal.PREFIX_MISMATCH.detail)
-        if (
-            publication_cursor is None
-            or publication_cursor.ordinal < prefix.ordinal
-            or publication_cursor.ordinal > len(history.covered_submissions)
-            or (
-                publication_cursor.ordinal
-                and history.covered_submissions[publication_cursor.ordinal - 1]
-                != publication_cursor.submission_id
-            )
-        ):
-            raise ContractError(
-                ("authorization_receipt", "history_cursor"),
-                "resume requires exact publication history prefix after paid-cycle start",
-            )
-        # The rule authorization applied, to the history it published (``published_history``).
-        refusal = resume_refusal(published_history(history, publication_cursor), prefix)
-        if refusal is not None:
-            raise ContractError(
-                ("evaluation_history",), "resume requires complete unexhausted attempt history"
-            )
-    else:
-        if (
-            request.scope.owner != state.run.run_id
-            or request.scope.generation != state.run.generation
-        ):
-            raise ContractError(("scope",), "resume requires current run generation")
-        if turn.session.access == Access.WRITE_CANDIDATE and not any(
-            proof.scope == request.scope and proof.invocation == preceding.invocation
-            for proof in state.sessions.run_checkpoints
-        ):
-            raise ContractError(
-                ("run_checkpoints",), "run writer resume requires exact predecessor checkpoint"
-            )
-
-
 def _unique_record(state: CoreState, identity: RequestId) -> RequestRecord | None:
     candidates = state.records.find(identity)
     if len(candidates) > 1:
@@ -1801,8 +1633,8 @@ def _validate_authorization(state: CoreState, event: CoreEvent) -> None:
             )
         if not _run_park.dispatch_allowed(state, record.request):
             raise ContractError(("dependency",), "park holds new work until relaunch")
-        _validate_dispatch_episode(state, record.request)
-        _validate_resume_authority(state, record.request)
+        validate_dispatch_episode(state, record.request)
+        validate_resume_authority(state, record.request)
 
 
 def _advance_event_time(state: CoreState, event: CoreEvent) -> CoreState:
@@ -1902,6 +1734,8 @@ def consume(
     event: CoreEvent,
     dispatch: Dispatch,
     compaction: Callable[[CoreState], CoreState] = compact_ledger,
+    *,
+    recorded: bool = False,
 ) -> Transition:
     """Consume one top-level event, advancing the sole revision exactly once.
 
@@ -1912,9 +1746,12 @@ def consume(
     reducer builds its part of the next state its own way, and a part rebuilt with the same
     content would be a new object that every per-instance memo (immutability verdicts, JSON
     text) has never seen. One owner at the exit keeps that true for all of them.
+
+    A parked epoch drops the inputs offered to it. A fact the run.log already holds
+    (``recorded``) is history, not an input, and is never dropped.
     """
     given = state
-    if parked_epoch_drops(state, event):
+    if not recorded and parked_epoch_drops(state, event):
         return Transition(state=state)
     _validate_observation_ingress(state, event)
     _validate_authorization(state, event)
@@ -1948,6 +1785,51 @@ def consume(
         raise ContractError(("wait",), f"a recorded wait breaks its contract: {unmet[0]}")
     advanced = compaction(result.state).model_copy(update={"revision": state.revision + 1})
     return result.model_copy(update={"state": share_unchanged(given, advanced)})
+
+
+def step_recorded(state: CoreState, event: CoreEvent) -> Transition:
+    """Consume an event the run.log already holds: a parked epoch does not drop it.
+
+    A parked epoch ignores what is offered to it. What the log records is history, and the fold
+    that rebuilds state from it must apply every fact, or a result core was told of is lost.
+    """
+    return consume(state, event, _dispatch, compact_ledger, recorded=True)
+
+
+def settle_park(state: CoreState) -> CoreState:
+    """The drain of a pause, advanced as far as ``state`` allows: parked once nothing holds it up.
+
+    A step that records no event (an attempt that ended, an epoch that opened) can free a
+    draining run, and only the kernel knows what else holds one up. The jobs it must release
+    are registered as the requests they are; no other state changes.
+    """
+    parked, cancellations = _run_park.advance(state)
+    if not cancellations:
+        return parked
+    return _registered_transition(parked, list(cancellations), []).state
+
+
+def settle_end(state: CoreState) -> CoreState:
+    """A closing run whose last step has a result, taken to its terminal status.
+
+    The kernel notices that nothing is left open at its next clock input, which the live shell
+    supplies on a timer. A fold has no timer, and the record of the step is the last input there
+    is, so the wake the shell would send is applied here, until it changes nothing: ending a
+    record the wake finds past its limit is one change, and the run's end the next. Without it a
+    run that was stopped with steps open is closing for good, and its end is recorded while it is.
+    """
+    while state.run.status is RunStatus.CLOSING and not any(
+        is_open(row) for row in state.records.records
+    ):
+        woken = step_recorded(state, ClockAdvanced(now_at=state.run.now_at)).state
+        if _phases(woken) == _phases(state):
+            return woken
+        state = woken
+    return state
+
+
+def _phases(state: CoreState) -> tuple[RunStatus, tuple[RequestPhase, ...]]:
+    return state.run.status, tuple(row.phase for row in state.records.records)
 
 
 def step(state: CoreState, event: CoreEvent, *, reducers: CoreReducers | None = None) -> Transition:

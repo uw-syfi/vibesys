@@ -64,7 +64,6 @@ from vs_runtime.api.core import (
     CoreRuntimeBindings,
     DispatchCapExceededError,
     ExecutionResult,
-    OwnerEvent,
     RequestExecutors,
     RunControlBridge,
     RunLoopConfig,
@@ -97,8 +96,9 @@ if TYPE_CHECKING:
         StrategyState,
         Transition,
     )
+    from vs_core.api.recovery import OwnerEvent
     from vs_core.api.testing import Answer
-    from vs_runtime.api.core import ExecutionContext, OwnerEvent
+    from vs_runtime.api.core import ExecutionContext
 
 
 @runtime_checkable

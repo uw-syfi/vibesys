@@ -2,7 +2,7 @@ import {mkdirSync, writeFileSync} from 'node:fs';
 import {expect, test} from '@playwright/test';
 import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
 import {KnownLedger} from './checks/known-ledger.js';
-import {EVERY_CHECK, screenCheck} from './checks/screen-check.js';
+import {SCREEN_CHECKS, screenCheck} from './checks/screen-check.js';
 import {main, openSettingsAt} from './settings-machine.js';
 import {SETTINGS_PAGES} from './settings-machine-pages.js';
 
@@ -29,7 +29,7 @@ for (const width of WIDTHS) {
         width,
       );
       const name = `settings/${each.name.replaceAll(' ', '-')}/${width}`;
-      expect(ledger.unexplained(name, await screenCheck(page, EVERY_CHECK))).toEqual([]);
+      expect(ledger.unexplained(name, await screenCheck(page, SCREEN_CHECKS))).toEqual([]);
       if (shots !== undefined) {
         const file = `settings-machine__${each.name.replaceAll(' ', '-')}__${width}.png`;
         await main(page).screenshot({path: `${shots}/${file}`});

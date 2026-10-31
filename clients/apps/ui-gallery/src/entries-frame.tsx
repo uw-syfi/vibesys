@@ -39,6 +39,7 @@ import {
 } from '@vibesys/ui';
 import {type JSX, useState} from 'react';
 import type {ComponentName, GalleryEntry} from './gallery-entry.js';
+import {BUILDER_LOWER, PLANNER_LOWER, REVIEWER_LOWER} from './role-words.js';
 
 const SPARK = [
   {x: 0, y: 1.58},
@@ -203,7 +204,7 @@ const ROWS: readonly GanttRow[] = [
         start: 1,
         end: 2,
         kind: 'grey',
-        label: 'judge · picked the idea · 1m',
+        label: `${REVIEWER_LOWER} · picked the idea · 1m`,
         press: noop,
       },
       {
@@ -211,7 +212,7 @@ const ROWS: readonly GanttRow[] = [
         start: 2,
         end: 5,
         kind: 'solid',
-        label: 'implementer · wrote the ring · 3m',
+        label: `${BUILDER_LOWER} · wrote the ring · 3m`,
         press: noop,
       },
       {
@@ -239,7 +240,7 @@ const ROWS: readonly GanttRow[] = [
         start: 7,
         end: 9,
         kind: 'solid',
-        label: 'implementer · batched dequeues · 2m',
+        label: `${BUILDER_LOWER} · batched dequeues · 2m`,
         press: noop,
       },
       {
@@ -266,7 +267,7 @@ const ROWS: readonly GanttRow[] = [
         start: 8,
         end: 14,
         kind: 'solid',
-        label: 'implementer · editing · 6m',
+        label: `${BUILDER_LOWER} · editing · 6m`,
         press: noop,
       },
     ],
@@ -285,9 +286,9 @@ const SERIES_ROWS: readonly GanttRow[] = [
     press: noop,
     figure: '1.40×',
     segments: [
-      {id: 'a', start: 0, end: 3, kind: 'solid', series: 1, label: 'implementer · 3m'},
+      {id: 'a', start: 0, end: 3, kind: 'solid', series: 1, label: `${BUILDER_LOWER} · 3m`},
       {id: 'b', start: 3, end: 6, kind: 'hatched', label: 'gate · 3m'},
-      {id: 'c', start: 6, end: 9, kind: 'solid', series: 3, label: 'judge · 3m'},
+      {id: 'c', start: 6, end: 9, kind: 'solid', series: 3, label: `${REVIEWER_LOWER} · 3m`},
     ],
   },
   {
@@ -299,7 +300,7 @@ const SERIES_ROWS: readonly GanttRow[] = [
     press: noop,
     figure: 'failed',
     segments: [
-      {id: 'd', start: 4, end: 8, kind: 'solid', series: 1, label: 'implementer · 4m'},
+      {id: 'd', start: 4, end: 8, kind: 'solid', series: 1, label: `${BUILDER_LOWER} · 4m`},
       {id: 'e', start: 8, end: 12, kind: 'hatched', label: 'gate · 4m'},
     ],
   },
@@ -314,17 +315,17 @@ const STEP_STRIP: GanttRow = {
   press: noop,
   figure: '1.40×',
   segments: [
-    {id: 'a', start: 0, end: 3, kind: 'solid', series: 1, label: 'implementer · 3m'},
+    {id: 'a', start: 0, end: 3, kind: 'solid', series: 1, label: `${BUILDER_LOWER} · 3m`},
     {id: 'b', start: 3, end: 6, kind: 'hatched', label: 'gate · 3m'},
-    {id: 'c', start: 6, end: 9, kind: 'solid', series: 3, label: 'judge · 3m'},
+    {id: 'c', start: 6, end: 9, kind: 'solid', series: 3, label: `${REVIEWER_LOWER} · 3m`},
   ],
 };
 
 /** Bars colored per role, with the legend that names each color; and a strip of steps with its rows. */
 function SeriesBarsDemo(): JSX.Element {
   const key = [
-    {label: 'implementer', series: 1},
-    {label: 'judge', series: 3},
+    {label: BUILDER_LOWER, series: 1},
+    {label: REVIEWER_LOWER, series: 3},
     {label: 'gate', hatched: true},
   ];
   return (
@@ -335,11 +336,11 @@ function SeriesBarsDemo(): JSX.Element {
           <Gantt label="Steps over time" strip from={0} to={9} rows={[STEP_STRIP]} />
         </Stack>
         <PickList label="Steps">
-          <PickRow id="a" title="implementer" swatch={1} figure="3m" select={noop} />
+          <PickRow id="a" title={BUILDER_LOWER} swatch={1} figure="3m" select={noop} />
           <PickRow id="b" title="gate" hatched figure="3m" select={noop} />
           <PickRow
             id="c"
-            title="judge"
+            title={REVIEWER_LOWER}
             swatch={3}
             badges={[{label: 'failed', tone: 'err'}]}
             figure="3m"
@@ -349,8 +350,8 @@ function SeriesBarsDemo(): JSX.Element {
         <SwatchLegend
           label="Bar colors"
           items={[
-            {label: 'implementer', series: 1},
-            {label: 'judge', series: 3},
+            {label: BUILDER_LOWER, series: 1},
+            {label: REVIEWER_LOWER, series: 3},
             {label: 'gate', hatched: true},
           ]}
         />
@@ -512,7 +513,7 @@ export const FRAME_ENTRIES = {
         items={[
           {id: 'run', label: 'Run', press: noop},
           {id: 'candidate', label: 'padding', press: noop},
-          {id: 'step', label: 'implementer', press: noop},
+          {id: 'step', label: BUILDER_LOWER, press: noop},
           {id: 'item', label: 'cargo test --locked'},
         ]}
       />
@@ -724,9 +725,9 @@ export const FRAME_ENTRIES = {
         to="Oct 15, 19:10"
         titles={['16:30 to 17:00', '17:00 to 17:30', '17:30 to 18:00', '18:00 to 18:30']}
         layers={[
-          {key: 'planner', series: 7, values: [4, 8, 10, 12]},
-          {key: 'implementer', series: 1, values: [6, 18, 38, 47]},
-          {key: 'judge', series: 3, values: [0, 3, 8, 13]},
+          {key: PLANNER_LOWER, series: 7, values: [4, 8, 10, 12]},
+          {key: BUILDER_LOWER, series: 1, values: [6, 18, 38, 47]},
+          {key: REVIEWER_LOWER, series: 3, values: [0, 3, 8, 13]},
         ]}
       />
     ),
@@ -744,14 +745,14 @@ export const FRAME_ENTRIES = {
         <SwatchLegend
           label="Roles"
           items={[
-            {label: 'planner', series: 7},
-            {label: 'implementer', series: 1},
-            {label: 'judge', series: 3},
+            {label: PLANNER_LOWER, series: 7},
+            {label: BUILDER_LOWER, series: 1},
+            {label: REVIEWER_LOWER, series: 3},
           ]}
         />
         <Row gap="space-2" align="center">
           <Swatch series={1} />
-          <Text variant="small">implementer</Text>
+          <Text variant="small">{BUILDER_LOWER}</Text>
         </Row>
       </Stack>
     ),

@@ -50,9 +50,11 @@ from vs_sim.crash import (
 from vs_sim.depth import Depth, depth, examples, set_depth, using_depth
 from vs_sim.fake_byte_source import FakeByteSource
 from vs_sim.fake_piped_process import ScriptedPipedProcess
+from vs_sim.fake_process_table import FakeProcessTable, Shows
 from vs_sim.fake_signal_relay import FakeMainThreadWake, FakeSignalRelay
 from vs_sim.fakes import (
     NO_PROCESSES,
+    DetachedBlockingRunner,
     FakeForegroundChild,
     FakeForegroundLauncher,
     FakeLoopbackHttp,
@@ -167,6 +169,7 @@ __all__ = [
     "CommandProbeContract",
     "CrashableClock",
     "Depth",
+    "DetachedBlockingRunner",
     "End",
     "EventTrace",
     "FakeByteSource",
@@ -177,6 +180,7 @@ __all__ = [
     "FakePipedProcessLauncher",
     "FakeProcessLauncher",
     "FakeProcessSignaller",
+    "FakeProcessTable",
     "FakeProcesses",
     "FakeSignalRelay",
     "FakeSignalSource",
@@ -229,6 +233,7 @@ __all__ = [
     "ScriptedPipedProcess",
     "ScriptedProbe",
     "ScriptedStreamingCommand",
+    "Shows",
     "SignalRelayContract",
     "SignalSourceContract",
     "SignalSourceUnderTest",

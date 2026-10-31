@@ -4,7 +4,6 @@
  * and any other run's as a Recent row reads it, from the registry's record of its end and its
  * digest.
  */
-import {isSynthesizedTask} from '@vibesys/contracts';
 import {type HostKey, hostFromKey, hostLabel} from '@vibesys/hosts';
 import {type RecentRun, sameRun} from '@vibesys/runs';
 import {type Clock, formatStarted} from './recent-words.js';
@@ -23,20 +22,10 @@ export interface DashboardRow {
   readonly host: HostKey;
   /** The machine's name, as the app words it. */
   readonly machine: string;
-  /**
-   * The task the machine lists the run with, else its Recent record's; null when neither has one
-   * or the only one is the name of a project made from flags.
-   */
-  readonly task: string | null;
   /** The project's path on the machine. */
   readonly project: string | null;
   /** When the run was created, in milliseconds. */
   readonly createdAt: number;
-}
-
-/** `task` when someone chose it: the one task of a project made from flags is nobody's choice. */
-function chosenTask(task: string | null): string | null {
-  return isSynthesizedTask(task) ? null : task;
 }
 
 /** The runs the dashboard shows, newest first. */
@@ -63,7 +52,6 @@ export function dashboardRows(state: SidebarState, clock: Clock): readonly Dashb
           : {...row, detail: run.unavailable, problem: {text: run.unavailable, retry: false}},
       host,
       machine,
-      task: chosenTask(run.task) ?? chosenTask(ref.task),
       project,
       createdAt: run.createdAt,
     };
@@ -82,7 +70,6 @@ export function dashboardRows(state: SidebarState, clock: Clock): readonly Dashb
         {
           host: listing.host,
           machine,
-          task: null,
           project: null,
           createdAt: run.startedAt * 1000,
           row: live.find(each => sameRun(each.run, ref)) ?? {

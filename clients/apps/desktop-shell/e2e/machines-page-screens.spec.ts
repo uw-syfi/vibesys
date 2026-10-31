@@ -1,7 +1,7 @@
 import {mkdirSync} from 'node:fs';
 import {expect, test} from '@playwright/test';
 import {KnownLedger} from './checks/known-ledger.js';
-import {EVERY_CHECK, screenCheck} from './checks/screen-check.js';
+import {SCREEN_CHECKS, screenCheck} from './checks/screen-check.js';
 import {openMachines, resizeTo, WORLDS} from './machines-page.js';
 
 /**
@@ -24,7 +24,7 @@ for (const world of WORLDS) {
     for (const width of WIDTHS) {
       await resizeTo(page, width);
       const name = `machines/${world.name.replaceAll(' ', '-')}/${width}`;
-      expect(ledger.unexplained(name, await screenCheck(page, EVERY_CHECK))).toEqual([]);
+      expect(ledger.unexplained(name, await screenCheck(page, SCREEN_CHECKS))).toEqual([]);
       if (shots !== undefined) {
         const file = `machines__${world.name.replaceAll(' ', '-')}__${width}.png`;
         await page.getByRole('main').screenshot({path: `${shots}/${file}`});

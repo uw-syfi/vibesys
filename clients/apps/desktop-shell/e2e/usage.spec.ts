@@ -1,10 +1,12 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
 import {KnownLedger} from './checks/known-ledger.js';
-import {EVERY_CHECK, screenCheck} from './checks/screen-check.js';
+import {SCREEN_CHECKS, screenCheck} from './checks/screen-check.js';
 import {settled} from './checks/settle.js';
 import {
   installFakeBridge,
+  installFakeChrome,
+  installFakeMachines,
   installFakeNewRun,
   installFakeProjectRuns,
   installFakeUsage,
@@ -34,7 +36,9 @@ async function open(page: Page, usage: UsageCase, width: number): Promise<void> 
   const seed = seedFor(usage);
   await page.setViewportSize({width, height: 900});
   await addInitScripts(page, [
+    initScript(installFakeChrome, seed),
     initScript(installFakeBridge, seed),
+    initScript(installFakeMachines, seed),
     initScript(installFakeProjectRuns, seed),
     initScript(installFakeNewRun, seed),
     initScript(installFakeUsage, seed),
@@ -59,7 +63,7 @@ for (const usage of USAGE_CASES) {
       expect(await page.evaluate(() => window.innerWidth)).toBe(width);
       await settled(page);
       const name = `${usage.name}/${width}`;
-      expect(ledger.unexplained(`usage/${name}`, await screenCheck(page, EVERY_CHECK))).toEqual([]);
+      expect(ledger.unexplained(`usage/${name}`, await screenCheck(page, SCREEN_CHECKS))).toEqual([]);
       // The page never scrolls sideways: a table that is too wide scrolls in its own box.
       const overflow = await page.evaluate(
         () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -274,6 +278,7 @@ test('Usage asks nothing until it is shown, and again each time it is shown', as
     page.evaluate(() => (window as unknown as UsageHost).fakeHost.usageAsked.length);
   const seed = seedFor(one);
   await addInitScripts(page, [
+    initScript(installFakeChrome, seed),
     initScript(installFakeBridge, seed),
     initScript(installFakeProjectRuns, seed),
     initScript(installFakeNewRun, seed),

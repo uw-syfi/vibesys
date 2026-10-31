@@ -3,7 +3,7 @@ import {expect, type Page, test} from '@playwright/test';
 import {fixtureNamed} from '@vibesys/run-fixtures';
 import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
 import {KnownLedger} from './checks/known-ledger.js';
-import {EVERY_CHECK, screenCheck} from './checks/screen-check.js';
+import {SCREEN_CHECKS, screenCheck} from './checks/screen-check.js';
 import {settled} from './checks/settle.js';
 import {
   dashboardWorld,
@@ -43,7 +43,7 @@ const DASHBOARDS: readonly (readonly [string, readonly RunCase[]])[] = [
 
 async function check(page: Page, name: string, ignore: string[] = []): Promise<void> {
   await settled(page);
-  const found = (await screenCheck(page, EVERY_CHECK)).filter(each => !ignore.includes(each.check));
+  const found = (await screenCheck(page, SCREEN_CHECKS)).filter(each => !ignore.includes(each.check));
   const lines = ledger.unexplained(name, found);
   if (shots !== undefined) {
     const file = `${name.replaceAll('/', '__')}.png`;

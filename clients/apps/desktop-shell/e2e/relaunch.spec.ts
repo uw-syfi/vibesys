@@ -181,13 +181,18 @@ test('Relaunch header action, results and new epoch survive Tail before acknowle
       await capture(page, `${state}-${width}-ready`);
       await page.getByRole('button', {name: 'Resume', exact: true}).click();
       await expect(page.getByRole('button', {name: 'Resume', exact: true})).toBeDisabled();
+      // The request is on its way: the run's state in the header is Resuming, not how it ended.
+      if (state !== 'parked') {
+        await expect(page.getByRole('main').getByText('Resuming', {exact: true})).toBeVisible();
+      }
       await capture(page, `${state}-${width}-launching`);
       await newEpoch(page, world.fixture);
       // The successor epoch runs: the controls follow it, and Resume is superseded.
       await expect(page.getByRole('button', {name: 'Pause', exact: true})).toBeVisible();
       await expect(page.getByRole('button', {name: 'Resume', exact: true})).toHaveCount(0);
       world.release();
-      await expect(page.getByText('Resume · Applied', {exact: true})).toBeVisible();
+      // An applied request has no row: the host's record of the new epoch settles Resume's own line.
+      await expect(page.getByText('Resume · Applied', {exact: true})).toHaveCount(0);
       await capture(page, `${state}-${width}-epoch`);
       await page.close();
     }

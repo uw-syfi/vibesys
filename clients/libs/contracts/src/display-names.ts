@@ -32,7 +32,7 @@ export function declaredRoleName(role: string): string | null {
   return ROLES[role] ?? null;
 }
 
-/** An agent role a person reads: "Judge", "Perf evaluator". */
+/** An agent role a person reads: "Reviewer", "Perf evaluator". */
 export function roleName(role: string): string {
   return ROLES[role] ?? wordsOfId(role);
 }

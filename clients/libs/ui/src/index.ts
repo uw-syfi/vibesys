@@ -6,7 +6,7 @@
  */
 export {applyTheme, type ThemeTarget} from './apply-theme.js';
 export {ActionPanel} from './components/action-panel.js';
-export {AppFrame, WindowFrame} from './components/app-frame.js';
+export {AppFrame} from './components/app-frame.js';
 export {BRAND_MARK_NAMES, BrandMark, type BrandMarkName} from './components/brand-mark.js';
 export {
   Button,
@@ -16,7 +16,7 @@ export {
   type ButtonSize,
   type ButtonVariant,
 } from './components/button.js';
-export {Banner, type BannerTone, Card} from './components/card.js';
+export {Card} from './components/card.js';
 export {
   Chart,
   type ChartPoint,
@@ -111,6 +111,7 @@ export {
   type Tradeoff,
 } from './components/pareto-frontier.js';
 export {type Completion, PathInput} from './components/path-input.js';
+export {withoutPaths} from './components/paths.js';
 export {
   type HeaderColumn,
   type ListHeader,
@@ -124,7 +125,11 @@ export {RailFrame, RailItem} from './components/rail.js';
 export {Breadcrumb, type Crumb, type Density, Screen} from './components/screen.js';
 export {Scrubber, type ScrubberTick} from './components/scrubber.js';
 export {SearchBox} from './components/search-box.js';
-export {type ChoiceOption, SegmentedControl} from './components/segmented-control.js';
+export {
+  type ChoiceOption,
+  SegmentedControl,
+  type SegmentOption,
+} from './components/segmented-control.js';
 export {Select, type SelectOption} from './components/select.js';
 export {useSideActionLayout} from './components/side-action-layout.js';
 export {
@@ -154,9 +159,11 @@ export {
 export {ThemeSwatch} from './components/theme-swatch.js';
 export {Thread, type ThreadItem} from './components/thread.js';
 export {type Stage, type StageState, Timeline} from './components/timeline.js';
+export {Toast, type ToastItem, ToastStack, type ToastTone} from './components/toast.js';
 export {Checkbox, Switch} from './components/toggle.js';
 export {type RowChip, Tree, TreeRow} from './components/tree.js';
 export {TurnResult} from './components/turn-result.js';
+export {WindowFrame} from './components/window-frame.js';
 export type {
   ColorRole,
   ElevationLevel,

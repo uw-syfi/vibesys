@@ -11,7 +11,7 @@ payload, refuses to start an effect when host authority is not held (the lease
 must verify and the host fence must be the newest seen for the owner), writes a
 ``begun`` marker before the effect so a restart knows an effect may have started,
 and seals the result only while authority still holds. A restarted effect is told
-it is resuming, so it inspects instead of repeating.
+it is a repeat, so it reaches the same end instead of doing the work twice.
 """
 
 from __future__ import annotations
@@ -134,9 +134,9 @@ class Declined:
 
 
 class Performer[ResultT: BaseModel](Protocol):
-    """The effect of one request, told whether an earlier host may have run it."""
+    """The effect of one request, told whether an earlier attempt may have run it."""
 
-    async def __call__(self, *, resumed: bool) -> Settled[ResultT] | Transient[ResultT]: ...
+    async def __call__(self, *, repeat: bool) -> Settled[ResultT] | Transient[ResultT]: ...
 
 
 type Execution[ResultT: BaseModel] = Replayed[ResultT] | Performed[ResultT] | Conflict | Declined
@@ -333,9 +333,10 @@ class ReceiptStore:
     ) -> Execution[ResultT]:
         """Run *perform* at most once per request identity ``key``.
 
-        ``perform`` receives ``resumed``: true when an earlier host began this
-        request and may have finished its effect, so the effect must inspect before
-        it repeats anything. A ``Settled`` result is sealed only while authority
+        ``perform`` receives ``repeat``: true when an earlier attempt may have run this
+        request, so the effect must reach the same end again without doing twice what
+        it did before. The caller says so with ``context.repeat``, and the begun marker
+        says so for a caller that does not. A ``Settled`` result is sealed only while authority
         still holds; a ``Transient`` one is returned unsealed, and the next attempt
         resumes from the ``begun`` marker. Concurrent identical deliveries to this
         live store share one outcome by ``key``. Only a delivery arriving after that
@@ -403,7 +404,7 @@ class ReceiptStore:
             start = self._start(key, owner, context, result_type)
             if not isinstance(start, bool):
                 return start
-            settled = await perform(resumed=start)
+            settled = await perform(repeat=context.repeat or start)
             if isinstance(settled, Transient):
                 return Performed(settled.result)
             reason = self.authorize(owner, context)
@@ -427,7 +428,7 @@ class ReceiptStore:
     def _start[ResultT: BaseModel](
         self, key: str, owner: str, context: ExecutionContext, result_type: type[ResultT]
     ) -> Replayed[ResultT] | Conflict | Declined | bool:
-        """Replay, conflict or refusal; else write the begun marker and say if it was resumed."""
+        """Replay, conflict or refusal; else write the begun marker and say if one was there."""
         sealed = self.load(self._EXECUTIONS, "execution", key, ExecutionRecord)
         if sealed is not None and sealed.payload_digest != context.payload_digest:
             return Conflict()

@@ -2,18 +2,22 @@
  * `screenCheck(page)`: the layout and wording checks over the screen a page shows now, against its
  * real layout. It returns every violation (`in-page.ts` says what each check reads); `report`
  * separates those a known failure explains (`known-failures.ts`) from the rest. A screen suite asks
- * for `EVERY_CHECK`, which adds the visual spec's laws; a journey's default stays with the defects. The checks are deterministic: no timing, only the page's layout at the
+ * for `SCREEN_CHECKS`, which adds the visual spec's laws; a journey's default stays with the defects. The checks are deterministic: no timing, only the page's layout at the
  * moment of the call, so the caller fixes the viewport, theme and fonts and lets the page settle.
  */
 import type {Page} from '@playwright/test';
 import {CODE_IDS, roleName} from '@vibesys/contracts';
 import {FAILURE_REASONS} from '@vibesys/run-fixtures';
+import {foreignFontUses} from '../../../../tools/e2e/bundled-fonts.mjs';
 import {
+  bannerCheck,
   type CheckId,
   type CheckInput,
   chartSizeCheck,
+  chromeClearCheck,
   columnTopsCheck,
   controlRowCheck,
+  dragRegionCheck,
   focusRingCheck,
   HELPERS,
   headingDepthCheck,
@@ -37,8 +41,11 @@ import {
 } from './in-page.js';
 import {isKnown, type KnownFailure} from './known-failures.js';
 
-/** The checks that read one screen; `stability` compares screens (`stability.ts`). */
-type PageCheckId = Exclude<CheckId, 'stability'>;
+/**
+ * The checks that run in the page; `stability` compares screens (`stability.ts`), and
+ * `bundled-font` asks the browser which font drew each text (`foreignFontUses`).
+ */
+type PageCheckId = Exclude<CheckId, 'stability' | 'bundled-font'>;
 
 const CHECKS: Readonly<Record<PageCheckId, (input: CheckInput) => Violation[]>> = {
   overlap: overlapCheck,
@@ -57,6 +64,9 @@ const CHECKS: Readonly<Record<PageCheckId, (input: CheckInput) => Violation[]>> 
   'column-tops': columnTopsCheck,
   'truncation-room': truncationRoomCheck,
   'focus-ring': focusRingCheck,
+  banner: bannerCheck,
+  'chrome-clear': chromeClearCheck,
+  'drag-region': dragRegionCheck,
   'left-edge': leftEdgeCheck,
   'heading-depth': headingDepthCheck,
   'spacing-order': spacingOrderCheck,
@@ -72,10 +82,6 @@ const VISUAL_CHECKS: readonly PageCheckId[] = [
   'hollow-box',
   'title-strip',
 ];
-
-/** Every check. A screen suite reports these against the known failures. */
-export const EVERY_CHECK = Object.keys(CHECKS) as PageCheckId[];
-const JOURNEY_CHECKS = EVERY_CHECK.filter(id => !VISUAL_CHECKS.includes(id));
 
 /** Enum values that never read as words: the failure reasons spelled with a hyphen or underscore. */
 const RAW_WORDS: readonly string[] = FAILURE_REASONS.filter(reason => /[-_]/.test(reason));
@@ -120,18 +126,56 @@ function script(only: readonly PageCheckId[], input: CheckInput): string {
   return `(() => {\n${sources.join('\n')}\nconst input = ${JSON.stringify(input)};\nreturn [${calls.join(', ')}];\n})()`;
 }
 
+/** The checks that run in the page, in the order they report. */
+export const IN_PAGE_CHECKS = Object.keys(CHECKS) as PageCheckId[];
+
+/** Every check of one screen: the in-page checks and the bundled-font check. */
+export const SCREEN_CHECKS: readonly (PageCheckId | 'bundled-font')[] = [
+  ...IN_PAGE_CHECKS,
+  'bundled-font',
+];
+
+/** Text a font other than the bundled ones drew: a glyph its own font lacks falls back to the machine's. */
+async function bundledFontCheck(page: Page): Promise<Violation[]> {
+  return (await foreignFontUses(page)).map(use => ({
+    check: 'bundled-font',
+    message: `"${use.text}" is drawn by ${use.font}, not a bundled font: use var(--font-mono) or an icon`,
+    where: use.where,
+  }));
+}
+
+/** The checks a journey runs: the defects, not the visual spec's laws (a journey passing through a screen cannot pay that screen's debt). */
+const JOURNEY_CHECKS: readonly (PageCheckId | 'bundled-font')[] = SCREEN_CHECKS.filter(
+  id => id === 'bundled-font' || !VISUAL_CHECKS.includes(id),
+);
+
 /** Every violation of `only` (the journey checks by default) on the screen `page` shows now. */
 export async function screenCheck(
   page: Page,
-  only: readonly PageCheckId[] = JOURNEY_CHECKS,
+  only: readonly (PageCheckId | 'bundled-font')[] = JOURNEY_CHECKS,
 ): Promise<Violation[]> {
-  return page.evaluate<Violation[]>(
-    script(only, {
+  const inPage = only.filter((id): id is PageCheckId => id !== 'bundled-font');
+  const violations = await page.evaluate<Violation[]>(
+    script(inPage, {
       rawWords: RAW_WORDS,
       ids: REGISTRY_IDS,
       names: REGISTRY_NAMES,
       userNames: USER_NAMES,
     }),
+  );
+  return only.includes('bundled-font')
+    ? [...violations, ...(await bundledFontCheck(page))]
+    : violations;
+}
+
+/** Whether pressing each of `points` (x, y) on the screen `page` shows moves the window, by its drag regions. */
+export async function pressMovesWindow(
+  page: Page,
+  points: readonly (readonly [number, number])[],
+): Promise<boolean[]> {
+  const sources = HELPERS.map(each => each.toString());
+  return page.evaluate<boolean[]>(
+    `(() => {\n${sources.join('\n')}\nconst regions = dragRegions();\nreturn ${JSON.stringify(points)}.map(([x, y]) => dragsAt(regions, x, y));\n})()`,
   );
 }
 

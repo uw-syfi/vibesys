@@ -2,7 +2,7 @@ import {mkdirSync, writeFileSync} from 'node:fs';
 import {expect, test} from '@playwright/test';
 import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
 import {KnownLedger} from './checks/known-ledger.js';
-import {EVERY_CHECK, screenCheck} from './checks/screen-check.js';
+import {SCREEN_CHECKS, screenCheck} from './checks/screen-check.js';
 import {main, NEW_RUN_PAGES, openAt} from './new-run-flow.js';
 import {SEED} from './world.js';
 
@@ -40,14 +40,14 @@ for (const theme of THEMES) {
         await expect(main(page).getByRole('heading', {level: 1})).toBeVisible();
         // The roles come with the first check of the run's inputs; the page is checked with them.
         if (each.agent !== undefined && each.step === 'agent') {
-          await expect(main(page).getByLabel('Judge model')).toBeVisible();
+          await expect(main(page).getByLabel('Reviewer model')).toBeVisible();
         }
         // The goal of the user's own task is read from the machine; the page is checked with it.
         if (each.step === 'goal' && each.answers.from === 'project') {
           await expect(main(page)).toContainText('Higher is better');
         }
         const name = `new-run/${each.name.replaceAll(' ', '-')}/${width}/${theme}`;
-        expect(ledger.unexplained(name, await screenCheck(page, EVERY_CHECK))).toEqual([]);
+        expect(ledger.unexplained(name, await screenCheck(page, SCREEN_CHECKS))).toEqual([]);
         if (shots !== undefined) {
           const file = `new-run__${each.name.replaceAll(' ', '-')}__${width}__${theme}.png`;
           await main(page).screenshot({path: `${shots}/${file}`});

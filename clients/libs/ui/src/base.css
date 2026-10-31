@@ -21,7 +21,6 @@ body > div:first-child {
 .vs-split,
 .vs-grid,
 .vs-card,
-.vs-banner,
 .vs-field,
 .vs-button,
 .vs-segmented,
@@ -32,6 +31,7 @@ body > div:first-child {
 
 .vs-button:focus-visible,
 .vs-segment:has(:focus-visible),
+.vs-select[data-label-inside]:has(:focus-visible),
 .vs-input:focus-visible,
 .vs-checkbox:focus-visible,
 .vs-switch:focus-visible {

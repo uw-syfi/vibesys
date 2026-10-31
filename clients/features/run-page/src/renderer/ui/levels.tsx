@@ -58,6 +58,8 @@ export interface LevelProps {
   readonly mode: RunMode;
   readonly dispatch: Dispatch;
   readonly loading: HistoryProgress | null;
+  /** Why the opened step's transcript could not be read; null when it could, or was not asked. */
+  readonly problem: string | null;
 }
 
 function StepLoading(props: {readonly progress: HistoryProgress}): JSX.Element {
@@ -253,7 +255,14 @@ function StepPane(
       title={stepTitle(step)}
       width="fill"
       enterKey={`step ${step.span}`}
-      meta={<Chip label={chip.label} tone={chip.tone} dot />}
+      meta={
+        <Row gap="space-2" wrap>
+          <Chip label={chip.label} tone={chip.tone} dot />
+          {props.problem === null ? null : (
+            <Chip label="Transcript unavailable" tone="warn" dot hint={props.problem} />
+          )}
+        </Row>
+      }
       actions={<ModeSwitch mode={mode} options={logsOptions('Step')} zoom={base.zoom} />}
       header={mode === 'logs' ? logsHeader(logs) : stepHeader(view)}
     >

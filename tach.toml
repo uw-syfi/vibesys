@@ -886,12 +886,12 @@ depends_on = []
 [[modules]]
 path = "vs_sim.api"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sim.blocking", "vs_sim.byte_source", "vs_sim.clock", "vs_sim.concurrency", "vs_sim.loopback_http", "vs_sim.network", "vs_sim.os_platform", "vs_sim.output", "vs_sim.probes", "vs_sim.processes", "vs_sim.randomness", "vs_sim.release", "vs_sim.signal_relay", "vs_sim.signals", "vs_sim.streaming", "vs_sim.sync", "vs_sim.yields"]
+depends_on = ["vs_sim.blocking", "vs_sim.byte_source", "vs_sim.clock", "vs_sim.concurrency", "vs_sim.loopback_http", "vs_sim.network", "vs_sim.os_platform", "vs_sim.output", "vs_sim.probes", "vs_sim.process_table", "vs_sim.processes", "vs_sim.randomness", "vs_sim.release", "vs_sim.signal_relay", "vs_sim.signals", "vs_sim.streaming", "vs_sim.sync", "vs_sim.yields"]
 
 [[modules]]
 path = "vs_sim.api.testing"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sim.child", "vs_sim.concurrency_contracts", "vs_sim.contracts", "vs_sim.crash", "vs_sim.depth", "vs_sim.fake_byte_source", "vs_sim.fake_piped_process", "vs_sim.fake_signal_relay", "vs_sim.fakes", "vs_sim.faults", "vs_sim.file_effects", "vs_sim.gate", "vs_sim.host_clock", "vs_sim.hostile_input", "vs_sim.manual", "vs_sim.output_contracts", "vs_sim.pairwise", "vs_sim.seeds", "vs_sim.signal_relay_contracts", "vs_sim.sim", "vs_sim.sim_network", "vs_sim.sim_threads", "vs_sim.states", "vs_sim.threads", "vs_sim.trace", "vs_sim.virtual", "vs_sim.waits"]
+depends_on = ["vs_sim.child", "vs_sim.concurrency_contracts", "vs_sim.contracts", "vs_sim.crash", "vs_sim.depth", "vs_sim.fake_byte_source", "vs_sim.fake_piped_process", "vs_sim.fake_process_table", "vs_sim.fake_signal_relay", "vs_sim.fakes", "vs_sim.faults", "vs_sim.file_effects", "vs_sim.gate", "vs_sim.host_clock", "vs_sim.hostile_input", "vs_sim.manual", "vs_sim.output_contracts", "vs_sim.pairwise", "vs_sim.seeds", "vs_sim.signal_relay_contracts", "vs_sim.sim", "vs_sim.sim_network", "vs_sim.sim_threads", "vs_sim.states", "vs_sim.threads", "vs_sim.trace", "vs_sim.virtual", "vs_sim.waits"]
 
 # Durable log streams for humans. Layer `logs`, above every library, so no library can
 # import it. `vs_logs.api` (the writer) is open to the product; `vs_logs.read` only to
@@ -993,6 +993,16 @@ depends_on = []
 path = "vs_sim.signals"
 layer = "prompts_and_lower_libs"
 depends_on = []
+
+[[modules]]
+path = "vs_sim.process_table"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_sim.signals"]
+
+[[modules]]
+path = "vs_sim.fake_process_table"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_sim.process_table"]
 
 [[modules]]
 path = "vs_sim.signal_relay"
@@ -1432,7 +1442,7 @@ expose = ["NativeProfilerPreflight", "ProfilerPreflight", "SessionAgents", "Sess
 [[modules]]
 path = "vs_core"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_runlog", "vs_proto", "vs_core._corevalue", "vs_core._generated", "vs_core._dispatch_episode", "vs_core._session_checkpoints", "vs_core._session_rows", "vs_core._session_scope", "vs_core._turn_outcomes", "vs_core._proofs", "vs_core._waits", "vs_core.types", "vs_core.types.common", "vs_core._values", "vs_core._outcomes", "vs_core._generated.vibesys.core.v1.common_cv", "vs_core._generated.vibesys.core.v1.vocabulary_cv"]
+depends_on = ["vs_proto", "vs_core._corevalue", "vs_core._generated", "vs_core._dispatch_episode", "vs_core._session_checkpoints", "vs_core._session_rows", "vs_core._session_scope", "vs_core._turn_outcomes", "vs_core._proofs", "vs_core._waits", "vs_core.types", "vs_core.types.common", "vs_core._values", "vs_core._outcomes", "vs_core._generated.vibesys.core.v1.common_cv", "vs_core._generated.vibesys.core.v1.vocabulary_cv"]
 
 [[interfaces]]
 from = ["vs_core"]
@@ -1697,15 +1707,6 @@ depends_on = ["vs_core", "vs_prompts", "vs_runtime", "vibesys.hypothesis", "vibe
 [[interfaces]]
 from = ["vibesys.orchestration.dynamic.core_policy"]
 expose = ["api", "api\\..*"]
-
-[[modules]]
-path = "vibesys.serial_replay"
-layer = "loops"
-depends_on = ["vs_core", "vs_issue_tracker", "vs_proto", "vs_runtime"]
-
-[[interfaces]]
-from = ["vibesys.serial_replay"]
-expose = ["roadmap_item", "serial_replay_bindings"]
 
 [[modules]]
 # A serial run's roadmap: the owner of the roadmap operations over the run's `Roadmap`, kept in

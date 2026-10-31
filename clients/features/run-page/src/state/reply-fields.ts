@@ -6,6 +6,7 @@
  * a badge, short values as facts, lists as lists, nested records as groups, and a field with no
  * value not at all.
  */
+import {roleName} from '@vibesys/contracts';
 import type {Tone} from './views.js';
 
 type Json = Readonly<Record<string, unknown>>;
@@ -56,19 +57,58 @@ function toneOf(value: string): Tone | undefined {
   return undefined;
 }
 
-/** `judge_result` as `Judge result`, and `JudgeResponse` as `Judge response`. */
-function humanize(name: string): string {
-  const spaced = name
+/** The words of a name in any case or separator: `JudgeResponse`, `judge_result`, `perf-evaluator`. */
+function wordsOf(name: string): string[] {
+  return name
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .replace(/[_-]+/g, ' ')
-    .trim()
-    .toLowerCase();
+    .split(/[\s_-]+/)
+    .filter(word => word !== '')
+    .map(word => word.toLowerCase());
+}
+
+function sentence(words: readonly string[]): string {
+  const spaced = words.join(' ');
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
-/** The kind of a reply as a title: `JudgeResponse` reads as `Judge response`. */
-export function replyTitle(kind: string): string {
-  return humanize(kind);
+/** `judge_result` as `Judge result`. */
+function humanize(name: string): string {
+  return sentence(wordsOf(name));
+}
+
+/** Where `inner` first occurs in `words` as a run, or -1. */
+function runIndex(words: readonly string[], inner: readonly string[]): number {
+  for (let start = 0; start + inner.length <= words.length; start += 1) {
+    if (inner.every((word, offset) => words[start + offset] === word)) return start;
+  }
+  return -1;
+}
+
+/**
+ * A reply kind names its role by the role's old name (`JudgeResponse`, `IssueImplementerResult`),
+ * which is a record key and not what a person calls the role. When the kind's words hold the words
+ * of the role's id (or of its last words: `plain-judge` is matched by `judge`), they read as the
+ * role's name instead, so the title follows the catalog and not the class name.
+ */
+function titleWords(kind: string, role: string | null): string[] {
+  const words = wordsOf(kind);
+  if (role === null) return words;
+  const parts = wordsOf(role);
+  for (let from = 0; from < parts.length; from += 1) {
+    const at = runIndex(words, parts.slice(from));
+    if (at < 0) continue;
+    const named = wordsOf(roleName(role));
+    return [...words.slice(0, at), ...named, ...words.slice(at + parts.length - from)];
+  }
+  return words;
+}
+
+/**
+ * The kind of a reply as a title: `JudgeResponse` of a role the catalog names `Reviewer` reads as
+ * `Reviewer response`.
+ */
+export function replyTitle(kind: string, role: string | null): string {
+  return sentence(titleWords(kind, role));
 }
 
 function isRecord(value: unknown): value is Json {

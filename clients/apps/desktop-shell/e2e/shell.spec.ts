@@ -1,6 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, test} from '@playwright/test';
-import {rawTextOf} from './checks/screen-check.js';
+import {rawTextOf, screenCheck} from './checks/screen-check.js';
+import {MAC_CHROME, WINDOWS_CHROME} from './fake-bridge.js';
 import {open, SEED, sidebar} from './world.js';
 
 test('Settings changes the theme at once and keeps it', async ({page}) => {
@@ -42,36 +43,23 @@ test('Match system follows the system appearance', async ({page}) => {
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'paper');
 });
 
-test('nothing drawn sits under the window controls, whose strip drags the window', async ({
-  page,
-}) => {
-  for (const width of [1280, 700]) {
-    await page.setViewportSize({width, height: 860});
-    await open(page);
-    const overlaps = await page.evaluate(() => {
-      const style = getComputedStyle(document.documentElement);
-      const inset = {
-        width: Number.parseFloat(style.getPropertyValue('--chrome-inset-width')),
-        height: Number.parseFloat(style.getPropertyValue('--chrome-inset-height')),
-      };
-      // Every control, and every element that draws text of its own.
-      const drawn = [...document.querySelectorAll('body *')].filter(
-        element =>
-          element.matches('a, button, input, select, textarea, [tabindex]:not([tabindex="-1"])') ||
-          [...element.childNodes].some(
-            node => node.nodeType === Node.TEXT_NODE && node.textContent?.trim() !== '',
-          ),
+for (const [name, chromeInset] of [
+  ['macOS', MAC_CHROME],
+  ['Windows and Linux', WINDOWS_CHROME],
+] as const) {
+  test(`on ${name} nothing is drawn under the window controls and no control moves the window, at every width`, async ({
+    page,
+  }) => {
+    for (const width of [1280, 700]) {
+      await page.setViewportSize({width, height: 860});
+      await open(page, {...SEED, chromeInset});
+      expect(await screenCheck(page, ['chrome-clear', 'drag-region']), `at ${width} px`).toEqual(
+        [],
       );
-      return drawn.flatMap(element => {
-        const box = element.getBoundingClientRect();
-        const hit = box.width > 0 && box.left < inset.width && box.top < inset.height;
-        return hit ? [`${element.textContent?.trim()} at ${box.left},${box.top}`] : [];
-      });
-    });
-    expect(overlaps, `at ${width} px`).toEqual([]);
-    const drag = await sidebar(page).evaluate(element =>
-      getComputedStyle(element).getPropertyValue('-webkit-app-region'),
-    );
-    expect(drag).toBe('drag');
-  }
-});
+      const rail = await sidebar(page).evaluate(element => element.getBoundingClientRect().width);
+      expect(rail, `the rail is at least the corner the controls cover, at ${width} px`).toBe(
+        Math.max(64, chromeInset.startWidth),
+      );
+    }
+  });
+}

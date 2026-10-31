@@ -13,11 +13,14 @@ import (
 	"github.com/uw-syfi/vibesys/gateway/gen"
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
 	"github.com/uw-syfi/vibesys/gateway/internal/hostcommand"
+	"github.com/uw-syfi/vibesys/gateway/internal/machinestats"
 	"github.com/uw-syfi/vibesys/gateway/internal/runindex"
 	"github.com/uw-syfi/vibesys/gateway/internal/runlog"
+	"github.com/uw-syfi/vibesys/gateway/internal/subscription"
 	"github.com/uw-syfi/vibesys/gateway/schemahash"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
@@ -30,6 +33,8 @@ type Config struct {
 	Version    string
 	Clock      Clock
 	HostRunner hostcommand.Runner
+	// Machine is what machine_stats samples.
+	Machine machinestats.Host
 }
 
 type host struct {
@@ -37,6 +42,7 @@ type host struct {
 	config Config
 	index  runlog.Index
 	heads  headObserver
+	topics *subscription.Hub
 }
 
 func (h *host) Hello(_ context.Context, request *apiv1.HelloRequest) (*apiv1.HelloResponse, error) {
@@ -162,8 +168,17 @@ func Serve(ctx context.Context, listener net.Listener, config Config) error {
 	if config.Clock == nil {
 		config.Clock = SystemClock{}
 	}
-	server := grpc.NewServer(grpc.MaxSendMsgSize(gen.HostAPIMaxMessageBytes), grpc.UnaryInterceptor(validateUnary), grpc.StreamInterceptor(validateStream))
-	apiv1.RegisterHostServiceServer(server, &host{config: config})
+	if config.Machine == nil {
+		config.Machine = machinestats.SystemHost{}
+	}
+	server := grpc.NewServer(
+		grpc.MaxSendMsgSize(gen.HostAPIMaxMessageBytes),
+		grpc.UnaryInterceptor(validateUnary),
+		grpc.StreamInterceptor(validateStream),
+		grpc.KeepaliveParams(keepalive.ServerParameters{Time: KeepaliveTime, Timeout: KeepaliveTimeout}),
+		grpc.StatsHandler(&connections{}),
+	)
+	apiv1.RegisterHostServiceServer(server, &host{config: config, topics: newTopics(config)})
 	stop := context.AfterFunc(ctx, server.Stop)
 	defer stop()
 	defer server.Stop()

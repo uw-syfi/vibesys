@@ -11,7 +11,7 @@ import {
   createRunReader,
   headerView,
   nowView,
-  pauseNowBannerView,
+  pauseNowConfirmView,
   type ReaderReply,
   type RunPageAction,
   runNow,
@@ -344,7 +344,7 @@ test('Pause now stays in the header, unavailable, while its confirmation is open
   });
   expect(headerView(store.getState()).pauseNow).toEqual({shown: true, disabledReason: null});
   store.dispatch({type: 'ask-pause-now'});
-  expect(pauseNowBannerView(store.getState()).kind).toBe('confirm');
+  expect(pauseNowConfirmView(store.getState()).kind).toBe('confirm');
   expect(headerView(store.getState()).pauseNow.shown).toBe(true);
   expect(headerView(store.getState()).pauseNow.disabledReason).not.toBeNull();
   store.dispatch({type: 'cancel-pause-now'});
@@ -567,23 +567,35 @@ test('property: legacy Resume immediately reports progress, bounds unanswered re
         try {
           store.dispatch({type: 'record', record: {kind: 'ended', run}});
           store.dispatch({type: 'resume-ended'});
-          expect(store.getState().resumeStatus?.pending).toBe(true);
-          expect(store.getState().resumeStatus?.message).toContain('Waiting for the run');
+          expect(store.getState().resumeStatus).toEqual({
+            pending: true,
+            reason: 'Waiting for the run to start',
+          });
           store.dispatch({type: 'resume-ended'});
           expect(app.asked.filter(each => each === 'resume')).toHaveLength(1);
           await settled();
           if (reply === 'failed') {
-            expect(store.getState().resumeStatus?.message).toContain('Host unavailable');
-            expect(store.getState().resumeStatus?.pending).toBe(false);
+            expect(store.getState().resumeStatus).toMatchObject({
+              pending: false,
+              tone: 'err',
+              title: 'Could not resume the run',
+              detail: expect.stringContaining('Host unavailable'),
+            });
           } else {
             clock.advance(elapsed);
             store.dispatch({type: 'record', record: {kind: 'ended', run}});
             expect(store.getState().resumeStatus?.pending).toBe(true);
             clock.advance(35000 - elapsed);
-            expect(store.getState().resumeStatus?.message).toContain('not confirmed');
+            expect(store.getState().resumeStatus).toMatchObject({
+              tone: 'warn',
+              title: 'Resume not confirmed',
+            });
             app.finishResume?.();
             await settled();
-            expect(store.getState().resumeStatus?.message).toContain('not confirmed');
+            expect(store.getState().resumeStatus).toMatchObject({
+              tone: 'warn',
+              title: 'Resume not confirmed',
+            });
           }
           store.dispatch({type: 'record', record: {kind: 'live', run: running()}});
           expect(store.getState().resumeStatus).toBeNull();

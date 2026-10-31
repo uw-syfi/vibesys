@@ -142,7 +142,7 @@ describe('an agent turn', () => {
         links: [],
       },
     } as Partial<Span>);
-    expect(titleOf(turn)).toBe('Implementer');
+    expect(titleOf(turn)).toBe('Builder');
   });
 });
 

@@ -2,7 +2,7 @@ import {mkdirSync} from 'node:fs';
 import {expect, type Page, test} from '@playwright/test';
 import {fixtureNamed} from '@vibesys/run-fixtures';
 import {KnownLedger} from './checks/known-ledger.js';
-import {EVERY_CHECK, screenCheck} from './checks/screen-check.js';
+import {SCREEN_CHECKS, screenCheck} from './checks/screen-check.js';
 import {settled} from './checks/settle.js';
 import {openFixture, releaseHistory} from './fixture-world.js';
 
@@ -47,7 +47,7 @@ for (const width of WIDTHS) {
       await expect(main.getByRole('heading', {level: 1})).toBeVisible();
       await expect(main.getByText(/^History \d+ of \d+$/)).toBeVisible();
       await settled(page);
-      expect(ledger.unexplained(name, await screenCheck(page, EVERY_CHECK))).toEqual([]);
+      expect(ledger.unexplained(name, await screenCheck(page, SCREEN_CHECKS))).toEqual([]);
       if (shots !== undefined) {
         await page.screenshot({path: `${shots}/${name.replaceAll('/', '__')}.png`});
       }

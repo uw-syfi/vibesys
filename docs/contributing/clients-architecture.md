@@ -39,6 +39,8 @@ clients/
   libs/store/       @vibesys/store            domain-free reducer kernel + fold model-test kit
   libs/machine/     @vibesys/machine          domain-free machine glue + machine model-test kit
                                                                                  -> store
+  libs/problems/    @vibesys/problems         what is wrong right now as data with a stable identity,
+                                              and the board that turns it into toasts -> store
   libs/run-state/   @vibesys/run-state        pure fold of run events; ./rounds, ./performance,
                                               ./transcript projections -> contracts
   libs/transport/   @vibesys/transport        framing, redial, persistent stream -> contracts
@@ -93,11 +95,12 @@ flowchart BT
   hosts["hosts (L1)"] --> contracts
   runs["runs (L2)"] --> contracts & hosts
   machine["machine (L1)"] --> store
+  problems["problems (L1)"] --> store
   run-session["run-session (L2)"] --> contracts & run-state & transport & store & machine
   ipc["ipc (L3)"] --> hosts & runs
   connection["connection (L3, Node)"] --> contracts & transport & hosts & machine
   settings["settings (L3, Node)"] --> hosts & runs
-  features["feature-* (L4)"] --> run-session & runs & hosts & ipc & ui & store
+  features["feature-* (L4)"] --> run-session & runs & hosts & ipc & ui & store & problems
   features -. "./main only" .-> connection & settings
   apps["apps/* (L5)"] --> features
 ```
@@ -111,7 +114,7 @@ cycles, and forbids feature-to-feature and app-to-app edges, because peers share
 | Layer | Rank | Packages | May depend on |
 | --- | --- | --- | --- |
 | `foundation` | 0 | `contracts`, `ui`, `store`, `request-identity` | nothing in the workspace |
-| `core` | 1 | `run-state`, `transport`, `hosts`, `machine` | foundation |
+| `core` | 1 | `run-state`, `transport`, `hosts`, `machine`, `problems` | foundation |
 | `domain` | 2 | `runs`, `run-session`, `run-history`, `run-fixtures` | foundation, core |
 | `service` | 3 | `ipc`, `connection`, `settings` | foundation, core, domain |
 | `feature` | 4 | `feature-*` | anything below |
@@ -259,7 +262,7 @@ compile error. The six themes are `paper`, `mist`, `sand` (light) and `ink`, `mi
 
 `src/tokens.css` is written by `pnpm --dir clients/libs/ui generate:tokens` from the tables and
 `src/primitives.css` (the hand-written styles of the primitives, appended verbatim). It has the
-scales and derived values (`color-mix` fills for selection, chips and banners) on `:root`, one
+scales and derived values (`color-mix` fills for selection, chips and toasts) on `:root`, one
 `:root[data-theme="<name>"]` block per theme, the zeroing of every motion duration under
 `prefers-reduced-motion: reduce`, and aliases for the variable names the stylesheet had before the
 roles (`LEGACY_ALIASES`), which stay until their consumers move. The defaults sit on a bare
@@ -284,6 +287,7 @@ There is no per-package opt-in or frozen-package list.
 | S4 | Feature and app code contains no raw colors or lengths: a string or template literal with a hex color, `rgb(`, `rgba(`, `hsl(`, `hsla(`, `oklch(`, `color-mix(`, or a `px`, `rem`, `em`, `vh` or `vw` length is an error | Grit rule `tools/lint-rules/strict-no-raw-values.grit` |
 | S6 | Feature and app packages import UI only from `@vibesys/ui`'s `.` and `./tokens`. Their other workspace imports are the non-UI libraries in `STRICT_WORKSPACE_IMPORTS` and feature packages composed by apps; third-party imports are `react`, `react-dom` and `xstate` (`STRICT_THIRD_PARTY`; Electron and Node builtins stay confined by `external-dependencies`). Test code is exempt. An app may also import `@vibesys/ui/tokens.css`, `@vibesys/ui/fonts.css` and `@vibesys/ui/components.css` in its entry wiring. Deep imports are refused by `imports-use-exports` and `.dependency-cruiser.mjs`, feature-to-feature imports by `layer-direction` | `check_package_graph.mjs` rule `strict-imports` |
 | S8 | `@vibesys/ui` itself uses tokens: `strict-no-raw-values.grit` also runs on `libs/ui/src` except the token table (`src/tokens/`) and tests, and `tools/lint-rules/ui-no-raw-css-values.grit` bans raw colors and lengths in the declarations of `libs/ui/src/*.css` except the generated `tokens.css`. Lengths in `@media` conditions are not declarations and stay | the two Grit rules, wired by `biome.json` |
+| S10 | Every `var(--name)` without a fallback in a stylesheet or TypeScript source names a custom property that a stylesheet declares or a TypeScript style sets (a `'--name':` key or `setProperty('--name', ...)`). A deleted token whose last reader is in another change otherwise builds, merges and leaves the declaration invalid at runtime. The scan is by name, not scope. A property set under a computed name cannot be found, so a `var()` on it needs a fallback | `check_css_custom_properties.mjs`, run by `pnpm check:ts-architecture` |
 
 `biome.json` excludes `libs/ui/src/primitives.css` from the stylesheet rule: the old primitives'
 pixel values (`10px`, `5px`, `14px`, ...) have no token to read, and a token would change what they
@@ -315,7 +319,7 @@ CSS of their own. An app imports `./tokens.css`, `./fonts.css` and `./components
 
 | Component | Props |
 | --- | --- |
-| `Page` | `width?: 'content' \| 'wide' \| 'narrow'`; the scrolling `<main>` with the page gutter |
+| `Page` | `width?: 'content' \| 'wide' \| 'narrow'`, `header?`, `footer?`; the scrolling `<main>` with the page gutter; a `header` stays in view above a body that scrolls, and is where the window's toasts hang |
 | `Stack`, `Row` | `gap?: SpaceToken`, `align?`, `justify?: 'start' \| 'center' \| 'end' \| 'between'`, `wrap?`, `grow?` |
 | `Split` | `main`, `aside`, `gap?`; the aside wraps under the main column when narrow |
 | `Dock` | `label`, `side` (a panel node or null), the screen as children; the panel sits full height at the right edge and the screen narrows |
@@ -324,16 +328,16 @@ CSS of their own. An app imports `./tokens.css`, `./fonts.css` and `./components
 | `Wordmark` | `art` (the caller's ASCII art; the app's one copy is `VIBESYS_WORDMARK` in new-run), `label?` (decorative without one), `align?: 'start' \| 'center'`, `tone?: 'accent' \| 'gradient'`, `size?: 'hero' \| 'compact'`; bold and solid, `hero` sized to its container's width, `compact` a fixed 40px tall |
 | `Icon` | `name: IconName` (closed set, `ICON_NAMES`), `label?` (decorative without one) |
 | `Button` | `text` or `icon` + `label`; one of `press`, `href` (renders `<a>`) or `submit`; `variant?: 'primary' \| 'secondary' \| 'quiet' \| 'danger'`, `size?: 'sm' \| 'md'`, `full?`, `disabledReason?`, `expanded?` |
-| `SegmentedControl` | `label`, `options: {value, label}[]`, `value`, `change`, `size?`; native radios, so one tab stop and arrow keys |
+| `SegmentedControl` | `label`, `options: {value, label, mark?: {tone, label}}[]` (a `mark` is a dot in the segment's corner, named by its label and on the pointer, taking no room), `value`, `change`, `size?`; native radios, so one tab stop and arrow keys |
 | `Select` | `value`, `options: {value, label, disabledReason?}[]`, `change`, `mono?` |
 | `Field` | `label`, `help?`, `error?`, one control as children |
 | `TextInput` | `value`, `change?`, `placeholder?`, `mono?`, `readOnly?`, `rows?` (above one: a multi-line box), `submit?` (Enter; Shift+Enter is a new line) |
 | `PathInput` | `value`, `change`, `completions: {value, detail?}[]`, `placeholder?`; the ARIA combobox pattern |
 | `Checkbox`, `Switch` | `label`, `checked`, `change`, `disabledReason?` |
-| `Chip` | `label`, `tone?: StatusTone`, `dot?` |
+| `Chip` | `label`, `tone?: StatusTone`, `dot?`, `mono?` (the label is an identifier, set in the code face), `hint?` (the longer account: the chip's accessible description, a tab stop drawn under the chip on hover and on keyboard focus; a path in it is shown by its last name) |
 | `StatusDot` | `tone: 'neutral' \| 'live' \| 'ok' \| 'warn' \| 'err'`, `label` |
 | `Card` | `section?` (a titled region), `flush?` |
-| `Banner` | `title`, `tone?: 'neutral' \| 'ok' \| 'warn' \| 'err'`, `body?`, `actions?` |
+| `Toast`, `ToastStack` | `Toast`: `tone: 'warn' \| 'err'`, `title`, `detail?`, `open`, `toggle(open)`, `dismiss()`. `ToastStack`: `label`, `toasts: {id, tone, title, detail?, open}[]` (newest first), `toggle(id, open)`, `dismiss(id)`; fixed at the top right, a small gap below the header row of the `Page` or `Screen` on show (the window's end strip where there is none), a labelled live region (an error is an `alert`, a warning a `status`); holds no state |
 | `Menu` | the trigger's `text` or `icon` + `label`, `items: {id, label, press \| href, danger?}[]`, `variant?`, `size?`; raised, keyboard navigable, closes on Esc, a choice or the focus leaving |
 | `Dialog` | `open`, `title`, `dismiss`, children, `actions?`; the native modal `<dialog>` at the `overlay` elevation |
 | `Table` | `label`, `columns: {key, header, cell(row), mono?, align?}[]`, `rows`, `rowKey`, `selected?`, `select?`; sticky header, scrolls sideways in its own focusable box |
@@ -363,6 +367,49 @@ no component reads a clock. Standard error in `LogPane` is drawn in `--log-err`,
 `log-text` (`LOG_ERR_MIX` in `./tokens`), because a light theme's `err` does not read on the log
 pane's dark background; a token test checks it in every theme.
 
+### Toasts and inline status
+
+The app draws no banner: no full-width strip, tinted or not, for any state, error or warning. A
+message is one of three things, and each has one form.
+
+- **A failure or warning the person passes through is a toast.** "Could not save the change", "The
+  machines could not be read", "The run did not take the command": an event, with no action
+  beside it. It is a *problem*: data with a stable `id`, a tone (`warn` or `err`), a short title
+  and a detail. Toasts sit at the top right of the window, a small gap below the screen's header row (a
+  `Page`'s or `Screen`'s `header`, whatever its height), collapsed to the title and a tone dot, with the detail behind a details button, and stay until the person
+  dismisses them or the problem clears. They never hide on a timer.
+- **A problem with one thing is a status word at that thing.** A login, a machine, a section that
+  could not be read, a step's transcript: a `Chip` in the thing's own row or header (`Not read`,
+  `Needs an update`, `Transcript unavailable`), the detail on its `hint`, and its action, if it
+  has one, beside it. A hint is the chip's accessible description, so it is read on hover, on
+  keyboard focus and by a screen reader; what a person must read to act (a login's link and code,
+  a start that may have happened) is text on the page, never only a hint. A run's state is the
+  header's status chip (a Resume on its way reads `Resuming`) with a few words of why beside it
+  and the whole account as its hint; Resume and Run again sit beside the other header actions. A
+  diagnostic is a row of the Logs, with a dot on the Logs tab.
+- **Anything else is not said.** A fact the screen already shows is not repeated in a message.
+
+The data flow is one-way. A feature's `./state` derives its problems from its state with a pure
+function (`settingsProblems`, `machineSettingsProblems`, `machinesProblems`, `runPageProblems`).
+The app reports them to its window's one board (`@vibesys/problems`; `reportProblems` follows a
+store, `useReportedProblems` follows a mounted screen) under a source name. The board is a plain
+reducer: it keeps one entry per identity, so repeats collapse; orders them newest first; drops a
+problem when no source reports it; and forgets a dismissal or an open toast when the problem
+clears, so one that recurs is shown again. `ProblemHost` renders the board's toasts once, at the
+root of each window (the main window and a run window), so no screen holds a toast list or a
+timer of its own.
+
+Enforced: `@vibesys/ui` has no `Banner`; no stylesheet rule paints a panel with the tone fills
+(`--banner-*-bg`, `--chip-*-bg`, or a mix of a status color) unless it is on the allow-list of
+`tone-fills.test.ts`; the `banner` screen check fails an element at least half as wide as the
+main pane that is filled with a status color, whatever it is called; a feature's `./state` is the
+only place a problem's words are written; and `toasts.spec.ts` shows a toast on every top-level
+screen at the smallest and a wide window, with each platform's window controls, and checks it
+sits below the header row and covers nothing in it. Unenforced: whether a message is a passing
+event or a problem with a thing needs a reader; and a new screen that puts its title row in the
+body instead of the `header` slot gets toasts over that row, until it is added to the spec's
+screens and given a `header`.
+
 ### The gallery and its screenshots
 
 `apps/ui-gallery` renders every state of every component, one page per theme (`?theme=<name>`),
@@ -383,6 +430,9 @@ pnpm --filter @vibesys/app-ui-gallery update:screenshots   # rewrite the baselin
 pnpm --filter @vibesys/app-ui-gallery test:e2e:linux       # compare against them locally
 ```
 
+`./scripts/regenerate_goldens.sh` does not rewrite these baselines: they need Docker and follow the UI, not
+the schema. Run `update:screenshots` yourself after a change that moves a rendering.
+
 A baseline update rewrites only the screens whose rendering changed: the suite launches
 Chromium with the flags in `DETERMINISTIC_RENDERING` (`playwright.config.ts`), which fix the
 rasterizer's per-run choices (LCD text, hinting, SIMD variants, raster threads) that otherwise
@@ -397,6 +447,16 @@ any difference; `scripts/check_clients.sh` runs it (see "Client checks before a 
 
 When the job fails on a screenshot, it uploads the actual and the diff as the
 `ui-gallery-test-results-1` artifact.
+
+Every glyph the UI draws comes from a bundled font. The body face has no check mark, bullet or
+cross, so a symbol set in it is drawn by whatever font the machine falls back to, and the same
+screen differs between operating systems (the gallery's baselines are the one place it showed
+first). Set a symbol in `var(--font-mono)`, whose bundled face has it, or use an icon. Enforced:
+the gallery's `every glyph the gallery draws comes from a bundled font` test and the
+`bundled-font` check in the desktop shell's `screenCheck` ask Chromium which font drew each text
+(`CSS.getPlatformFontsForNode`) and fail on any family `fonts.css` does not declare. One fixture
+writes run titles in other scripts and emoji on purpose, to test wrapping, and is exempt
+(`OTHER_SCRIPTS` in `screens.spec.ts`).
 
 ## Where a Run screen change goes
 
@@ -473,7 +533,11 @@ vendor id). Each vocabulary has one owner of its names:
   gathers them and `pnpm generate:protocol` writes `display-names.generated.ts` from it, which
   `@vibesys/contracts` serves as `roleName`. The `clients_quality` group regenerates it and fails on a
   diff; the role `title` pattern and `test_every_role_name_reads_as_words` fail a role with no
-  readable name. A role a plugin declares reads as the words of its id;
+  readable name. A role a plugin declares reads as the words of its id. No client source spells a
+  role's name: the `no-role-words` Biome rule fails a string, template or JSX text that does, and
+  `check_role_words.test.mjs` fails when the rule lacks a name the catalog declares. A reply
+  kind that leads with its role's old name (`JudgeResponse`) reads as the catalog's name for the
+  turn's role;
 - harness and model names are agentshim's, served by the backend. A client renders the field it
   receives and never maps or prettifies those ids.
 

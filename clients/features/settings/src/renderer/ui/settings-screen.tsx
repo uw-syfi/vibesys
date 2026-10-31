@@ -1,7 +1,7 @@
 import {
-  Banner,
   Button,
   Card,
+  Chip,
   EmptyState,
   Field,
   Grid,
@@ -134,12 +134,10 @@ function AppContent(props: {
   if (state.kind === 'loading') return <Text variant="body">Loading settings…</Text>;
   if (state.kind === 'failed') {
     return (
-      <Banner
-        tone="err"
-        title="Could not read settings"
-        body={state.error}
-        actions={<Button text="Retry" press={() => dispatch({type: 'retry'})} />}
-      />
+      <Row gap="space-3" align="center" wrap>
+        <Chip label="Not read" tone="err" dot hint={`Could not read settings\n${state.error}`} />
+        <Button text="Retry" press={() => dispatch({type: 'retry'})} />
+      </Row>
     );
   }
   const {appearance, notifications} = state.shown;
@@ -151,9 +149,6 @@ function AppContent(props: {
         <Text as="h1" variant="title">
           Notifications
         </Text>
-        {state.problem === null ? null : (
-          <Banner tone="err" title="Could not save the change." body={state.problem} />
-        )}
         <Card section="Run notifications">
           <Switch
             label="Notify me when a run finishes, fails or pauses"
@@ -169,9 +164,6 @@ function AppContent(props: {
       <Text as="h1" variant="title">
         Appearance
       </Text>
-      {state.problem === null ? null : (
-        <Banner tone="err" title="Could not save the change." body={state.problem} />
-      )}
       <Card section="Mode">
         <SegmentedControl
           label="Appearance mode"

@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vs_core.api.replay import ReplayRootReuse
 from vs_evaluation.api.testing import InMemoryEvaluationNamespace, wait_until_executor_started
 from vs_project.api import Project, StoreFence
 from vs_proto.api import replay
@@ -90,7 +89,7 @@ async def test_the_environment_verifies_inherited_writers_before_any_acquisition
     proof = replay.WriterTerminationProof(manifest=manifest, absent_domains=["job-a"])
     writers = replay_api.EvaluationWriterReconciliation(
         registry,
-        ReplayRootReuse(proof.to_binary()),
+        replay_api.ReplayRootReuse(proof.to_binary()),
         "run",
         StoreFence(host_id="host-a", epoch=1, expires_at=100),
     )
@@ -140,7 +139,7 @@ def test_evaluation_acquisition_holds_the_recorded_proof_through_workspace_creat
             manifest=manifest, proof=proof, status=replay.WriterReconciliationStatus.PROVEN_STOPPED
         )
     )
-    request = ReplayRootReuse(proof.to_binary())
+    request = replay_api.ReplayRootReuse(proof.to_binary())
     binding = replay_api.EvaluationWriterReconciliation(
         registry, request, "run", StoreFence(host_id="host-a", epoch=1, expires_at=100)
     )
@@ -194,7 +193,7 @@ def test_overlapping_acquisitions_hold_exclusion_until_the_last_one_exits(
             manifest=manifest, proof=proof, status=replay.WriterReconciliationStatus.PROVEN_STOPPED
         )
     )
-    request = ReplayRootReuse(proof.to_binary())
+    request = replay_api.ReplayRootReuse(proof.to_binary())
     binding = replay_api.EvaluationWriterReconciliation(
         registry, request, "run", StoreFence(host_id="host-a", epoch=1, expires_at=100)
     )

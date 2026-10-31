@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from vs_agent.api import (
     AgentCapabilities,
     AgentClient,
+    AgentExecutionCancelledError,
     AgentExecutionPolicy,
     AgentInvocationRecord,
     AgentInvocationState,
@@ -782,6 +783,47 @@ def test_explicit_drained_interruption_releases_key_without_replaying_unknown(
     assert harness.sessions.resume(KEY, harness.message, "interrupted-1") == interrupted
 
 
+def test_a_forgotten_unfinished_invocation_dispatches_again_and_an_answered_one_is_kept(
+    harness: _Harness,
+) -> None:
+    """The retry of a step whose attempt died starts clean; an answer is never re-asked."""
+    answered = harness.sessions.resume(KEY, harness.message, "answered-1")
+    assert isinstance(answered, Completed)
+
+    def fail() -> None:
+        raise KeyboardInterrupt
+
+    harness.boundary.effect = fail
+    with pytest.raises(KeyboardInterrupt):
+        harness.sessions.resume(KEY, harness.message, "killed-1")
+    harness.boundary.effect = None
+    calls = harness.boundary.calls
+
+    harness.sessions.forget_unfinished(KEY, "killed-1")
+    harness.sessions.forget_unfinished(KEY, "killed-1")
+    harness.sessions.forget_unfinished(KEY, "answered-1")
+    harness.sessions.forget_unfinished(KEY, "never-asked")
+
+    assert harness.sessions.inspect(KEY, "answered-1") == answered
+    assert isinstance(harness.sessions.inspect(KEY, "killed-1"), Unknown)
+    assert isinstance(harness.reconstruct().resume(KEY, harness.message, "killed-1"), Completed)
+    assert harness.boundary.calls == calls + 1
+
+
+def test_forgetting_refuses_another_key_s_invocation(harness: _Harness) -> None:
+    harness.boundary.effect = _raise_interrupt
+    with pytest.raises(KeyboardInterrupt):
+        harness.sessions.resume(KEY, harness.message, "killed-1")
+    other = AgentSessionKey(SessionScope.HYPOTHESIS, "other")
+
+    with pytest.raises(InvocationConflictError, match="another key"):
+        harness.sessions.forget_unfinished(other, "killed-1")
+
+
+def _raise_interrupt() -> None:
+    raise KeyboardInterrupt
+
+
 def test_initial_schema_rejection_without_checkpoint_fences_live_and_recovered_corrections(
     tmp_path: Path,
 ) -> None:
@@ -906,6 +948,34 @@ def test_release_refuses_while_an_invocation_is_active_and_cancel_ignores_idle_t
     assert isinstance(harness.sessions.resume(KEY, harness.message, "busy"), Completed)
     assert len(seen) == 1
     assert "active invocation" in seen[0]
+
+
+def test_a_cancel_that_arrives_before_a_turn_begins_refuses_its_start_exactly_once(
+    harness: _Harness,
+) -> None:
+    """A pause can be sent while the turn is still being prepared: it must not be lost."""
+    harness.sessions.cancel(KEY, "early-1")
+    calls = harness.boundary.calls
+
+    with pytest.raises(AgentExecutionCancelledError):
+        harness.sessions.resume(KEY, harness.message, "early-1")
+
+    assert harness.boundary.calls == calls
+    assert isinstance(harness.sessions.inspect(KEY, "early-1"), Unknown)
+    assert isinstance(harness.sessions.resume(KEY, harness.message, "early-1"), Completed)
+
+
+def test_a_cancel_of_an_answered_turn_or_of_one_still_to_be_forgotten_refuses_no_later_start(
+    harness: _Harness,
+) -> None:
+    answered = harness.sessions.resume(KEY, harness.message, "answered-1")
+    assert isinstance(answered, Completed)
+    harness.sessions.cancel(KEY, "answered-1")
+    assert harness.sessions.resume(KEY, harness.message, "answered-1") == answered
+
+    harness.sessions.cancel(KEY, "never-begun-1")
+    harness.sessions.forget_unfinished(KEY, "never-begun-1")
+    assert isinstance(harness.sessions.resume(KEY, harness.message, "never-begun-1"), Completed)
 
 
 def test_a_steer_reaches_no_turn_but_the_running_invocation(harness: _Harness) -> None:

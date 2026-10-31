@@ -5,7 +5,7 @@ import {fixtureNamed} from '@vibesys/run-fixtures';
 import {Controls, type Step} from './chat-controls.js';
 import {emitChat} from './chat-events.js';
 import {KnownLedger} from './checks/known-ledger.js';
-import {EVERY_CHECK, screenCheck} from './checks/screen-check.js';
+import {SCREEN_CHECKS, screenCheck} from './checks/screen-check.js';
 import {settled} from './checks/settle.js';
 import {openFixture, playLive} from './fixture-world.js';
 
@@ -124,7 +124,7 @@ async function openPanel(page: Page): Promise<void> {
 }
 
 async function check(page: Page, name: string): Promise<void> {
-  const found = await screenCheck(page, EVERY_CHECK);
+  const found = await screenCheck(page, SCREEN_CHECKS);
   expect(
     ledger.unexplained(`run-chat/${name}`, found),
     `${name} passes the layout and wording checks`,
@@ -193,8 +193,8 @@ test('a proposed steer shows as a card, edited before anything is sent', async (
   await expect(panel(page).getByRole('combobox', {name: 'To'}).locator('option')).toHaveText([
     'Whole run',
     'Planner',
-    'Implementer',
-    'Judge',
+    'Builder',
+    'Reviewer',
   ]);
   await panel(page).getByRole('radiogroup', {name: 'When'}).getByText('Now', {exact: true}).click();
   expect(controls.posted.length).toBe(0);
@@ -213,13 +213,13 @@ const DELIVERIES: readonly {
     name: 'reached',
     mode: 'Next turn',
     steps: [{state: 'queued'}, {state: 'reached', role: 'implementer'}],
-    shows: 'Reached · Implementer',
+    shows: 'Reached · Builder',
   },
   {
     name: 'in-force',
     mode: 'Every turn',
     steps: [{state: 'queued'}, {state: 'in_force', role: 'implementer'}],
-    shows: 'In force · Implementer · every turn',
+    shows: 'In force · Builder · every turn',
   },
   {
     name: 'dropped',

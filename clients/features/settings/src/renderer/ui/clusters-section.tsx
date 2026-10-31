@@ -6,7 +6,6 @@
 
 import type {ComputeSettings, SlurmClusterSettings} from '@vibesys/ipc';
 import {
-  Banner,
   Button,
   Card,
   Chip,
@@ -38,6 +37,7 @@ import {
   reachWords,
   stale,
   statedHardware,
+  testFailureWords,
 } from '../../state/index.js';
 import {Reading} from './reading.js';
 
@@ -230,21 +230,39 @@ function ClusterFormCard(props: FormProps): JSX.Element {
         <IdentityFields {...props} />
         <SlurmFields {...props} />
         <HardwareFields {...props} />
-        <TestResult form={form} outdated={stale(form)} />
-        {form.problem !== null && form.problem.field === null ? (
-          <Banner tone="err" title="The cluster was not saved." body={form.problem.text} />
-        ) : null}
+        <FormResult form={form} />
         <FormActions {...props} />
       </Stack>
     </Card>
   );
 }
 
-const STAGES = {
-  reach: 'Could not reach the cluster',
-  scheduler: 'The cluster’s scheduler did not answer',
-  workspace: 'The workspace is not usable',
-} as const;
+/** A failure the form holds, inline above the actions that try again; announced when it appears. */
+function FormFailure(props: {readonly title: string; readonly detail?: string}): JSX.Element {
+  return (
+    <div role="alert">
+      <Stack gap="space-1">
+        <Text variant="body-strong" tone="err">
+          {props.title}
+        </Text>
+        {props.detail === undefined ? null : <Text tone="muted">{props.detail}</Text>}
+      </Stack>
+    </div>
+  );
+}
+
+/** What the form says of itself above its actions: a failure it holds, and its connection test. */
+function FormResult(props: {readonly form: ClusterForm}): JSX.Element {
+  const {form} = props;
+  return (
+    <>
+      {form.problem === null || form.problem.field !== null ? null : (
+        <FormFailure title={form.problem.text} />
+      )}
+      <TestResult form={form} outdated={stale(form)} />
+    </>
+  );
+}
 
 function TestResult(props: {
   readonly form: ClusterForm;
@@ -254,21 +272,18 @@ function TestResult(props: {
   if (test.kind === 'untested' || test.kind === 'testing') return null;
   if (props.outdated) {
     return (
-      <Banner
-        tone="warn"
-        title="Test the connection again."
-        body="The settings changed since the last test."
-      />
+      <Chip label="Test again" tone="warn" dot hint="The settings changed since the last test." />
     );
   }
   if (test.kind === 'failed') {
-    return <Banner tone="err" title={STAGES[test.stage]} body={test.detail} />;
+    return <FormFailure title={testFailureWords(test.stage)} detail={test.detail} />;
   }
   return (
-    <Banner
+    <Chip
+      label="Connection works"
       tone="ok"
-      title="The connection works."
-      body={
+      dot
+      hint={
         test.partitions.length === 0
           ? 'The hardware above was read from the scheduler where it could be.'
           : `Partitions: ${test.partitions.join(', ')}. The hardware above was read from the scheduler where it could be.`
@@ -372,9 +387,6 @@ function Clusters(props: {
           <Button text="Add a cluster" press={() => dispatch({type: 'open-form', host})} />
         ) : null}
       </Row>
-      {view.removeProblem === null ? null : (
-        <Banner tone="err" title="The cluster was not removed." body={view.removeProblem} />
-      )}
       {view.form === null ? null : (
         <ClusterFormCard host={host} machine={machine} form={view.form} dispatch={dispatch} />
       )}

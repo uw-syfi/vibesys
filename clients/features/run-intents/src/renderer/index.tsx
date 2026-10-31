@@ -121,7 +121,7 @@ export function useRunIntents(props: RunIntentsProps) {
       status={writer.status}
       epoch={epoch}
       busy={busy}
-      entries={snapshot ? intentRows(snapshot.context, epoch) : []}
+      entries={snapshot ? intentRows(snapshot.context) : []}
       error={snapshot?.context.error ?? null}
       warning={snapshot?.context.warning ?? null}
       guidanceOpen={guidanceOpen}
@@ -134,7 +134,14 @@ export function useRunIntents(props: RunIntentsProps) {
   );
   const surface = intentSurface(props.enabled, controls);
   // Every surface that steers asks the same projection the Guidance control does.
-  return {...surface, busy, sendRequest, steerable: offersSteer(props.enabled, writer)};
+  return {
+    ...surface,
+    busy,
+    sendRequest,
+    steerable: offersSteer(props.enabled, writer),
+    // A Resume asked for and not yet answered: the run's state, which the page's header says.
+    resuming: relaunch?.state === 'launching',
+  };
 }
 
 function offersSteer(enabled: boolean, writer: ReturnType<typeof writerControls>): boolean {

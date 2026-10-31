@@ -4,11 +4,11 @@
  * credential is held, never the credential.
  */
 import type {AgentLogin} from '@vibesys/ipc';
-import {Banner, Button, Card, Chip, Row, Stack, Text} from '@vibesys/ui';
+import {Button, Card, Chip, Row, Stack, Text, withoutPaths} from '@vibesys/ui';
 import type {JSX} from 'react';
 import {
-  failureWords,
   type LoginProgress,
+  loginSteps,
   loginWords,
   type MachineSettingsAction,
   type MachineView,
@@ -26,20 +26,15 @@ function Progress(props: {
 }): JSX.Element | null {
   const {progress, machine, login} = props;
   if (progress === undefined || progress.kind === 'starting') return null;
-  if (progress.kind === 'failed') {
-    return (
-      <Banner
-        tone="err"
-        title={`Could not start the login on ${machine}.`}
-        {...failureWords(progress)}
-      />
-    );
-  }
+  // A login that did not start is a problem the app's board shows; see `machineSettingsProblems`.
+  if (progress.kind === 'failed') return null;
   if (progress.kind === 'unavailable') {
     return (
-      <Banner
+      <Chip
+        label="Cannot sign in"
         tone="warn"
-        title={
+        dot
+        hint={
           progress.reason === 'not_installed'
             ? `${login.provider_name} is not installed on ${machine}.`
             : `${login.provider_name} has no login command to start.`
@@ -47,13 +42,35 @@ function Progress(props: {
       />
     );
   }
+  // The host's own line (the address to open and the code to enter) is the next step: it is text on
+  // the page, selectable, for as long as the login is pending, not a hint.
   return (
-    <Banner
-      tone="ok"
-      title={`The login started on ${machine}.`}
-      body={progress.instruction ?? `Finish signing in on ${machine}, then check again.`}
-      actions={<Button text="Check again" press={props.check} />}
-    />
+    <Stack gap="space-2">
+      <Row gap="space-3" align="center" wrap>
+        <Chip
+          label="Login started"
+          tone="ok"
+          dot
+          {...(progress.instruction === null
+            ? {hint: `Finish signing in on ${machine}, then check again.`}
+            : {})}
+        />
+        <Button text="Check again" press={props.check} />
+      </Row>
+      {progress.instruction === null ? null : <LoginInstruction line={progress.instruction} />}
+    </Stack>
+  );
+}
+
+/** The address to open and the code to enter, as text to read and copy; a line of another shape as it came. */
+function LoginInstruction(props: {readonly line: string}): JSX.Element {
+  const steps = loginSteps(props.line);
+  if (steps === null) return <Text variant="code">{withoutPaths(props.line)}</Text>;
+  return (
+    <Row gap="space-3" wrap>
+      <Text variant="code">{steps.link}</Text>
+      {steps.code === null ? null : <Text variant="code">{steps.code}</Text>}
+    </Row>
   );
 }
 

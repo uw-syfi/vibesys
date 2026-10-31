@@ -93,9 +93,9 @@ class JournalSemanticEvents:
             raise ContractError(("request_id",), "canonical identity required")
         request_id = request.request_id
 
-        async def publish(*, resumed: bool) -> Settled[Published] | Transient[Published]:
+        async def publish(*, repeat: bool) -> Settled[Published] | Transient[Published]:
             with self._store.exclusive():
-                rows = self.read() if resumed else ()
+                rows = self.read() if repeat else ()
                 prior = next((row for row in rows if row.request_id == request_id.root), None)
                 if prior is not None:
                     return Settled(Published(sequence=prior.sequence))

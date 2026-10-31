@@ -2,7 +2,7 @@
 # with UPDATE_GOLDEN=1. scripts/check_persisted_schema_compat.py checks a change keeps
 # every saved document, or raises the version.
 shape RunEnvelope[FlowState]
-version 42
+version 43
 $root {"additionalProperties":false,"type":"object"}
 $root.core required {"$ref":"#/$defs/CoreState"}
 $root.event_cursor required {"$ref":"#/$defs/EventCursor"}
@@ -1345,12 +1345,14 @@ Step.event optional {"anyOf":[{"$ref":"#/$defs/JournaledEvent"},{"type":"null"}]
 Step.reads optional {"default":[],"items":{"type":"string"},"type":"array"}
 Step.recorded optional {"anyOf":[{"$ref":"#/$defs/Recorded"},{"type":"null"}],"default":null}
 StepAttempts {"additionalProperties":false,"type":"object"}
+StepAttempts.deadline_at optional {"anyOf":[{"$ref":"#/$defs/vs_core__types__common__Seconds__1"},{"type":"null"}],"default":null}
 StepAttempts.ended optional {"default":false,"type":"boolean"}
 StepAttempts.started required {"minimum":1,"type":"integer"}
 StepAttempts.tag required {"$ref":"#/$defs/RequestId"}
 StepAttempts.uncharged optional {"$ref":"#/$defs/Count","default":0}
 StepsState {"additionalProperties":false,"type":"object"}
 StepsState.attempts optional {"default":[],"items":{"$ref":"#/$defs/StepAttempts"},"type":"array"}
+StepsState.ended optional {"anyOf":[{"$ref":"#/$defs/RunResultProposal"},{"type":"null"}],"default":null}
 StepsState.epoch optional {"$ref":"#/$defs/Count","default":0}
 StopLifted {"additionalProperties":false,"type":"object"}
 StopLifted.control required {"$ref":"#/$defs/ControlInput"}

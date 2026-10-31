@@ -1,9 +1,0 @@
-syntax = "proto3";
-package vibesys.runtime.testing.v1;
-
-import "vibesys/core/v1/replay_agent.proto";
-
-message AgentReplayResult {
-  vibesys.core.v1.ReplayAgentResult facts = 1;
-  optional int32 value = 2;
-}

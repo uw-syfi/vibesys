@@ -113,6 +113,22 @@ goldens is in the `write-agent-prompt` skill.
 An old directory of prompt snapshots is read by no test, so regenerating it
 checks nothing; do not update it.
 
+The binary goldens a `.proto` file or the records projector invalidates are the
+native replays of the run-fixtures library and the desktop-shell scenarios, the
+conversion goldens and the gateway's Skeleton wire golden (with its retained RPC
+replies). After such a change run
+`./scripts/regenerate_goldens.sh` and commit every file it rewrites; it is the
+only regeneration command, and each stale-golden failure names it. It does not
+touch the UI gallery screenshot baselines, which need Docker and depend on the
+UI, not the schema (`update:screenshots`, in
+[clients-architecture.md](../../../../docs/contributing/clients-architecture.md)).
+Each golden set records the hash of its inputs beside it, so
+`./scripts/check_proto.sh` fails a stale one from hashes alone before any golden
+test runs. A test compares a native replay through `assert_replay_golden` in
+`tests.support.replay_golden`, which names the first differing record and the
+command. A new golden set joins `tests.support.wire_goldens` and the script, not
+a second command.
+
 ## Isolation and timeout verdicts
 
 `check_test_isolation` counts patching, mocking, sleeps (`time.sleep`,

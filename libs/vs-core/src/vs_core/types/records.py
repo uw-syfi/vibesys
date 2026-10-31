@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 
 from pydantic import BaseModel, Field, SerializeAsAny, ValidationInfo, model_validator
 
+from vs_core._generated.vibesys.core.v1.contracts_cv import AdoptionPublication, CheckoutUpdate
 from vs_core._outcomes import OutcomeCodecError, OutcomeValue, bind_outcome
 
 from .attempts import (
@@ -692,6 +693,10 @@ class TargetObservation(OutcomeValue):
     """What a rejected turn reply got wrong, field by field, for the correction that follows."""
     outcome: SerializeAsAny[BaseModel] | None = Field(default=None, exclude=True)
     operation_schema: OperationSchemaRef | None = None
+    publication: AdoptionPublication | None = Field(default=None, exclude_if=unset)
+    """Where an adoption published the winner, when it did."""
+    checkout: CheckoutUpdate | None = Field(default=None, exclude_if=unset)
+    """What an adoption did to the operator's checkout, when it touched it."""
     reissue: ReissueProof | None = None
     """Why core may send the inspected request out again, when the executor can prove it."""
 
@@ -779,6 +784,10 @@ class RequestObserved(OutcomeValue):
     evidence: tuple[EvidenceRef, ...] = ()
     revision: RevisionRef | None = None
     operation_schema: OperationSchemaRef | None = None
+    publication: AdoptionPublication | None = Field(default=None, exclude_if=unset)
+    """Where an adoption published the winner, when it did."""
+    checkout: CheckoutUpdate | None = Field(default=None, exclude_if=unset)
+    """What an adoption did to the operator's checkout, when it touched it."""
 
     @model_validator(mode="after")
     def registered_outcome(self, info: ValidationInfo) -> RequestObserved:
@@ -990,6 +999,9 @@ class StepEffect(StrEnum):
     SNAPSHOTS = "snapshots"
     """It reads the files to retain them, so no writer may run beside it or before it ends."""
 
+    CLOSES = "closes"
+    """It closes the scope, so no other step of the scope may run beside it or after it began."""
+
     NEITHER = "neither"
     """It leaves the files of the scope alone."""
 
@@ -1013,6 +1025,8 @@ def request_effect(request: Request, registry: tuple[OperationDescriptor, ...]) 
             return StepEffect.WRITES
         case SnapshotAndRetain() | SnapshotAndRetainRun() | RetainRevision():
             return StepEffect.SNAPSHOTS
+        case CloseAttemptScope():
+            return StepEffect.CLOSES
         case (
             SubmitMeasurement()
             | InspectTurn()
@@ -1022,7 +1036,6 @@ def request_effect(request: Request, registry: tuple[OperationDescriptor, ...]) 
             | InspectRequest()
             | VerifyAdoption()
             | DiscardWorkspace()
-            | CloseAttemptScope()
             | EnsureSession()
             | CancelTurn()
             | CloseSession()

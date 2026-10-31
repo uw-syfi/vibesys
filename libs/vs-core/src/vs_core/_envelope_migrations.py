@@ -142,6 +142,33 @@ def _v41_to_v42(envelope: JsonObject) -> JsonObject:
     return envelope | {"schema_version": 42}
 
 
+def _v42_to_v43(envelope: JsonObject) -> JsonObject:
+    """Version 43 gave ``RunPark`` a drain deadline, and a Pause now always has one.
+
+    A park saved at 42 by a Pause now (``immediate``) names no deadline, because that pause did
+    not wait for the requests still running: it parked at once. Version 43's Pause now waits for
+    them until the run's cleanup bound after the pause, so the park gets the deadline the new
+    code gives a Pause now that names none: the cleanup bound from the last time the envelope
+    recorded (the pause itself was recorded at or before it, and no earlier time is stored). A
+    park that is not immediate waits for its turns' own limits and keeps having no deadline, as
+    does a park whose run holds no cleanup bound to count from.
+    """
+    core = _object(envelope.get("core"))
+    run = _object(core.get("run"))
+    park = _object(run.get("park"))
+    now_at = _number(run.get("now_at"))
+    bound = _number(_object(run.get("limits")).get("cleanup_bound"))
+    if (
+        park.get("immediate") is True
+        and park.get("deadline_at") is None
+        and now_at is not None
+        and bound is not None
+        and bound > 0
+    ):
+        core = core | {"run": run | {"park": park | {"deadline_at": now_at + bound}}}
+    return envelope | {"core": core, "schema_version": 43}
+
+
 def _floor_declared(core: JsonObject) -> bool:
     run = _object(core.get("run"))
     task = _object(_object(run.get("facts")).get("task"))
@@ -158,8 +185,13 @@ def _is_unmeasured(item: JsonValue) -> bool:
     return not (min(candidate, base) >= _MIN_RUNS_WITHOUT_FLOOR and _positive(item.get("noise")))
 
 
+def _number(value: JsonValue) -> float | None:
+    return value if isinstance(value, int | float) and not isinstance(value, bool) else None
+
+
 def _positive(value: JsonValue) -> bool:
-    return isinstance(value, int | float) and not isinstance(value, bool) and value > 0
+    number = _number(value)
+    return number is not None and number > 0
 
 
 def _object(value: JsonValue) -> JsonObject:
@@ -175,6 +207,7 @@ MIGRATIONS: Final[Mapping[int, Migration]] = {
     39: _v39_to_v40,
     40: _v40_to_v41,
     41: _v41_to_v42,
+    42: _v42_to_v43,
 }
 """Version ``n`` to ``n + 1``, one entry per version, contiguous from the oldest supported."""
 

@@ -131,6 +131,14 @@
   visibility: hidden;
   font-weight: var(--text-body-strong-weight);
 }
+/* A mark sits in the segment's top right corner and takes no room of its own. */
+.vs-segment-mark {
+  position: absolute;
+  top: var(--space-1);
+  right: var(--space-1);
+  display: flex;
+  pointer-events: none;
+}
 /* The native radio covers its segment, unseen: it takes the presses, the focus and the arrow keys. */
 .vs-segment-input {
   position: absolute;
@@ -236,6 +244,37 @@
   padding-right: var(--space-7);
   border-radius: var(--radius-sm);
   font-size: var(--text-small-size);
+}
+.vs-select[data-label-inside] {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding-left: var(--space-4);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+.vs-select[data-label-inside][data-size="sm"] {
+  border-radius: var(--radius-sm);
+}
+/* The box is the wrapper's: the select inside has neither border nor background of its own. */
+.vs-select[data-label-inside] .vs-input {
+  flex: 1;
+  min-width: 0;
+  padding-left: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-weight: var(--text-body-strong-weight);
+}
+.vs-select[data-label-inside] .vs-input:focus-visible {
+  outline: none;
+}
+.vs-select-label {
+  flex: none;
+  color: var(--muted);
+  font-size: var(--text-small-size);
+  white-space: nowrap;
 }
 .vs-select-chevron {
   position: absolute;
@@ -363,9 +402,11 @@
 
 /* --- chip and status dot ----------------------------------------------------------------------- */
 
+/* As wide as its label wherever it sits: a chip alone in a column is not stretched into a strip. */
 .vs-chip {
   display: inline-flex;
   flex: none;
+  width: fit-content;
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-1) var(--space-3);
@@ -377,6 +418,37 @@
   line-height: var(--text-caption-line);
   font-weight: var(--text-caption-weight);
   white-space: nowrap;
+}
+/*
+ * The hint of a chip (its accessible description) is drawn under it on hover and on keyboard focus.
+ * It is fixed and anchored to its chip, so no row that clips its text (`overflow: hidden`) clips
+ * the hint, and it flips to the other side of the chip at the window's edge.
+ */
+.vs-chip[aria-description] {
+  anchor-name: --vs-chip-hint;
+  anchor-scope: --vs-chip-hint;
+}
+.vs-chip[aria-description]:hover::after,
+.vs-chip[aria-description]:focus-visible::after {
+  content: attr(aria-description) / "";
+  position: fixed;
+  position-anchor: --vs-chip-hint;
+  top: calc(anchor(bottom) + var(--space-2));
+  left: anchor(left);
+  position-try-fallbacks: flip-inline, flip-block;
+  z-index: 40;
+  width: max-content;
+  max-width: calc(var(--column-aside) + var(--space-8));
+  padding: var(--space-2) var(--space-3);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--elevation-raised);
+  color: var(--text);
+  font-family: var(--text-caption-family);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  pointer-events: none;
 }
 .vs-chip[data-mono-id] {
   font-family: var(--text-code-family);

@@ -61,7 +61,7 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
       await openSection(page, 'Clusters and clouds', 'host-b');
       await openForm(page);
       await fillForm(page, 'lab-login');
-      await expect(main(page).getByText('The connection works.')).toBeVisible();
+      await expect(main(page).getByText('Connection works', {exact: true})).toBeVisible();
     },
   },
   {
@@ -70,7 +70,10 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
       await openSection(page, 'Clusters and clouds', 'host-b');
       await openForm(page);
       await fillForm(page, 'no-workspace');
-      await expect(main(page).getByText('The workspace is not usable')).toBeVisible();
+      // The failed test is said in the form, above its actions.
+      await expect(
+        main(page).getByRole('alert').getByText('The workspace is not usable'),
+      ).toBeVisible();
     },
   },
   {
@@ -100,7 +103,7 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
     reach: async page => {
       await openSection(page, 'Agent logins', 'host-b');
       await main(page).getByRole('button', {name: 'Sign in'}).first().click();
-      await expect(main(page).getByText('The login started on host-b.')).toBeVisible();
+      await expect(main(page).getByText('Login started', {exact: true})).toBeVisible();
     },
   },
 ];

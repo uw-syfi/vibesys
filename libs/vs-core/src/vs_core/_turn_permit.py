@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict
 
 from ._strategy_operations import RenderRoleArtifactsBase
 from ._wait_clock import turn_bound
-from .types.common import ExecuteRegisteredOperation, InvocationRef, Scope
+from .types.common import ExecuteRegisteredOperation, InvocationRef, RunStatus, Scope
 from .types.evaluation import EvaluationState, SubmitMeasurement
 from .types.records import RecordsState, RequestPhase, Scheduled
 from .types.sessions import (
@@ -33,7 +33,10 @@ from .types.sessions import (
 from .types.strategy import Command, Operation, RequestTurn
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from .types.kernel import CoreState, RunState
+    from .types.records import RequestRecord
 
 
 class TurnPermit(BaseModel):
@@ -87,27 +90,42 @@ def cap_scheduled(state: CoreState, scheduled: Scheduled) -> Scheduled:
 
 def cap_to_permits(state: CoreState) -> CoreState:
     """Cap open records and the agent handles that name them at their permit."""
+    facts = _facts(state)
+
+    def permit_deadline(row: RequestRecord) -> float | None:
+        permit = _for_request(facts, row.request, live=False)
+        return None if permit is None else permit.deadline_at
+
+    return cap_open_records(state, permit_deadline)
+
+
+def cap_open_records(
+    state: CoreState, deadline_of: Callable[[RequestRecord], float | None]
+) -> CoreState:
+    """Cap each open record, and the agent handle that names it, at the deadline ``deadline_of`` gives.
+
+    A record whose deadline is None, or already no later, keeps its own.
+    """
     capped: dict[object, float] = {}
     records = []
     changed = False
-    facts = _facts(state)
     for row in state.records.records:
         if row.phase in (RequestPhase.COMPLETED, RequestPhase.BLOCKED):
             records.append(row)
             continue
-        permit = _for_request(facts, row.request, live=False)
-        if permit is None or row.until.at <= permit.deadline_at:
+        deadline = deadline_of(row)
+        if deadline is None or row.until.at <= deadline:
             records.append(row)
             continue
         changed = True
-        capped[row.request_id] = permit.deadline_at
+        capped[row.request_id] = deadline
         limit = row.limit_from_dispatch
         if limit is not None:
-            limit = min(limit, max(permit.deadline_at - state.run.now_at, 0.0))
+            limit = min(limit, max(deadline - state.run.now_at, 0.0))
         records.append(
             row.model_copy(
                 update={
-                    "until": row.until.model_copy(update={"at": permit.deadline_at}),
+                    "until": row.until.model_copy(update={"at": deadline}),
                     "limit_from_dispatch": limit,
                 }
             )
@@ -170,6 +188,20 @@ def _cap_pair(now_at: float, scheduled: Scheduled, permit: TurnPermit | None) ->
     )
 
 
+def drain_in_force(run: RunState, records: RecordsState) -> bool:
+    """Whether the run's pause still holds its authority over the work in flight.
+
+    ``RunPark.epoch`` is the epoch the operator paused in: it never moves, so a resume is admitted
+    in any later epoch (a drain a kill interrupted parks in the next epoch, and the Resume that
+    follows is the relaunch). The drain's authority is a different thing: a run that is still
+    draining keeps it in whatever epoch it is, and a parked run keeps it for the epoch it parked in.
+    """
+    park = run.park
+    if park is None:
+        return False
+    return run.status is RunStatus.DRAINING or park.epoch == records.recovery.epoch
+
+
 def _operator_drain(facts: _Facts) -> bool:
     """Whether a non-immediate operator Pause of this epoch is draining successors.
 
@@ -177,7 +209,7 @@ def _operator_drain(facts: _Facts) -> bool:
     running turn's own permit is not one either.
     """
     park = facts.run.park
-    return park is not None and not park.immediate and park.epoch == facts.records.recovery.epoch
+    return park is not None and not park.immediate and drain_in_force(facts.run, facts.records)
 
 
 def _for_request(facts: _Facts, request: object, *, live: bool) -> TurnPermit | None:
@@ -225,6 +257,24 @@ def _own_ref(request: DispatchTurn | ResumeSessionTurn) -> InvocationRef:
         session_id=request.turn.session.session_id,
         invocation_id=request.turn.invocation_id,
         generation=request.scope.generation,
+    )
+
+
+def scope_in_flight(sessions: SessionsState, records: RecordsState, scope: Scope) -> bool:
+    """An admitted turn of this owner has crossed core's dispatch boundary."""
+    return any(
+        turn.scope == scope and turn_executing(turn, records) for turn in sessions.invocations
+    )
+
+
+def turn_executing(turn: Invocation, records: RecordsState) -> bool:
+    """Whether the turn runs and its dispatch has been authorized, so its I/O may have begun."""
+    return turn.phase in (SessionPhase.EXECUTING, SessionPhase.UNKNOWN) and any(
+        isinstance(row.request, DispatchTurn | ResumeSessionTurn)
+        and row.request.turn == turn.turn
+        and row.request.scope == turn.scope
+        and row.phase != RequestPhase.PREPARED
+        for row in records.records
     )
 
 
@@ -361,7 +411,7 @@ def _holds(facts: _Facts, invocation: Invocation) -> bool:
     # A same-epoch Pause admits only the turns it captured, including once the
     # drain has parked. An immediate pause admits none. The dispatch record
     # below is a running turn, not a Pause.
-    if park is not None and park.epoch == records.recovery.epoch:
+    if park is not None and drain_in_force(facts.run, records):
         return not park.immediate and invocation.invocation in park.admitted_turns
     return any(
         isinstance(row.request, DispatchTurn | ResumeSessionTurn)

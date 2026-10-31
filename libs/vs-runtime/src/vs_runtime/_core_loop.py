@@ -48,7 +48,6 @@ from vs_core.api import (
     deferred,
     encode_json,
     orphan_waits,
-    pause_withdraws,
     permit_for_request,
     run_view,
     share_unchanged,
@@ -56,6 +55,7 @@ from vs_core.api import (
     translate,
     validate_startup,
 )
+from vs_core.api.recovery import OwnerEvent
 from vs_project.api import Committed, StateStore, StoredEnvelope, StoreFence, Unknown
 from vs_runtime._core_preflight import resolve_core_resume
 from vs_runtime._core_record import (
@@ -67,7 +67,6 @@ from vs_runtime._core_record import (
 from vs_runtime._core_requests import (
     ExecutionContext,
     ExecutorRefusal,
-    OwnerEvent,
     RequestExecutors,
     counts_toward_concurrency,
 )
@@ -1250,7 +1249,10 @@ class CoreRuntime[S: StrategyState]:
         longer commit what they would return. Their records stay DISPATCHED, like the
         failed one, for the next epoch to inspect.
         """
-        done = sorted((f for f in self._flights if f.task.done()), key=lambda f: f.order)
+        done = sorted(
+            (f for f in self._flights if f.task.done() and not self._interrupted(f)),
+            key=lambda f: f.order,
+        )
         failure: BaseException | None = None
         queued = len(self._queue)
         for flight in done:
@@ -1430,23 +1432,27 @@ class CoreRuntime[S: StrategyState]:
         current = self.record.envelope.core.records.record(flight.record.request_id)
         return current is None or current.phase in (RequestPhase.BLOCKED, RequestPhase.COMPLETED)
 
-    async def cancel_ended(self) -> bool:
-        """Cancel the running requests core has ended, at their limit or by a watch.
+    def _interrupted(self, flight: _Flight) -> bool:
+        """Whether core sent this request back to be run again: a pause past its drain deadline.
 
-        This is the only place a running request is stopped because a limit or watch
-        fired. A cancelled request returns no observation; core already reported it.
+        What the flight still returns is no attempt of the request, so it is never committed.
         """
-        ended = [f for f in self._flights if not f.task.done() and self._ended_by_core(f)]
-        return await self._cancel_flights(ended)
+        current = self.record.envelope.core.records.record(flight.record.request_id)
+        return current is not None and current.phase == RequestPhase.PREPARED
 
-    async def _cancel_withdrawn(self) -> bool:
-        return await self._cancel_flights(
-            [
-                flight
-                for flight in self._flights
-                if pause_withdraws(self.record.envelope.core, flight.record.request)
-            ]
-        )
+    async def cancel_ended(self) -> bool:
+        """Cancel the running requests core has ended or interrupted.
+
+        This is the only place a running request is stopped because a limit, a watch or a
+        pause's drain deadline fired. A cancelled request returns no observation; core already
+        reported it, or, when it only interrupted it, will send it again.
+        """
+        ended = [
+            f
+            for f in self._flights
+            if self._interrupted(f) or (not f.task.done() and self._ended_by_core(f))
+        ]
+        return await self._cancel_flights(ended)
 
     async def _cancel_flights(self, flights: Sequence[_Flight]) -> bool:
         for flight in flights:
@@ -1509,12 +1515,7 @@ class CoreRuntime[S: StrategyState]:
         try:
             while True:
                 # A failed request surfaces before anything else commits.
-                if (
-                    await self._cancel_withdrawn()
-                    or self._finish_done()
-                    or await self.cancel_ended()
-                    or self.advance()
-                ):
+                if self._finish_done() or await self.cancel_ended() or self.advance():
                     upkeep()
                     continue
                 if refusal is None:

@@ -199,7 +199,9 @@ class AgentSessions(Protocol):
         """Ask the provider to stop *invocation_id* if this instance is running it.
 
         A request, not a proof: only a later ``inspect`` that is not ``Pending``
-        shows the turn ended. Any other invocation is left alone.
+        shows the turn ended. An invocation with no record yet is stopped from starting:
+        its start raises ``AgentExecutionCancelledError`` before any provider call.
+        Any other invocation is left alone.
         """
         ...
 
@@ -224,6 +226,16 @@ class AgentSessions(Protocol):
 
     def release_interrupted(self, key: AgentSessionKey, invocation_id: str) -> None:
         """Release key ownership after the caller drains an explicit interruption."""
+        ...
+
+    def forget_unfinished(self, key: AgentSessionKey, invocation_id: str) -> None:
+        """Forget an invocation that ended without an answer, so asking again dispatches it.
+
+        The caller proves the attempt is over (its processes are ended) before calling.
+        Only a record with no answer is dropped (``Pending`` or ``Unknown``); an answered one
+        (``Completed``, ``InvalidResponse``) stays and is replayed. Idempotent. Raises
+        InvocationConflictError while the invocation is active or when it belongs to another key.
+        """
         ...
 
     def checkpoint(self, key: AgentSessionKey) -> AgentSessionCheckpoint:
@@ -452,6 +464,7 @@ class ClientAgentSessions:
         self._slot = slot
         self._bindings: dict[AgentSessionKey, tuple[AgentSessionSpec, AgentTurnRequest]] = {}
         self._active: set[str] = set()
+        self._cancelled_before_start: set[str] = set()
         self._schema_rejections: set[str] = set()
         self._active_keys: set[AgentSessionKey] = set()
         self._lock = threads.rlock()
@@ -487,10 +500,18 @@ class ClientAgentSessions:
             self._bindings[key] = (spec, turn)
 
     def cancel(self, key: AgentSessionKey, invocation_id: str) -> None:
-        """Ask the provider to stop *invocation_id* if this instance is running it."""
+        """Ask the provider to stop *invocation_id*, or stop it from starting.
+
+        An invocation this instance runs is cancelled at the provider. One with no record yet
+        has not begun, so its start is refused (``AgentExecutionCancelledError``, before any
+        provider call) however late the start arrives: a cancel that raced ahead of its turn is
+        not lost. The refusal is used up by that start, or dropped by ``forget_unfinished``.
+        """
         self._validate_invocation(key, invocation_id)
         with self._lock:
             running = invocation_id in self._active
+            if not running and invocation_id not in self._load().invocations:
+                self._cancelled_before_start.add(invocation_id)
         if running:
             self._client.cancel_session(key)
 
@@ -557,6 +578,34 @@ class ClientAgentSessions:
                 detail = f"cannot release interrupted invocation {invocation_id}: {error}"
                 raise SessionPersistenceError.because(detail) from error
 
+    def forget_unfinished(self, key: AgentSessionKey, invocation_id: str) -> None:
+        """Drop the unanswered record of *invocation_id* and of its correction."""
+        self._validate_invocation(key, invocation_id)
+        with self._lock:
+            if {invocation_id, f"{invocation_id}/correction"} & self._active:
+                detail = "cannot forget an active invocation"
+                raise InvocationConflictError.because(detail)
+            self._cancelled_before_start.discard(invocation_id)
+            state = self._load()
+            dropped = False
+            for identity in (invocation_id, f"{invocation_id}/correction"):
+                recorded = state.invocations.get(identity)
+                if recorded is None:
+                    continue
+                if recorded.outcome.session_key != str(key):
+                    detail = "unfinished invocation belongs to another key"
+                    raise InvocationConflictError.because(detail)
+                if not isinstance(recorded.outcome, Completed | InvalidResponse):
+                    del state.invocations[identity]
+                    dropped = True
+            if not dropped:
+                return
+            try:
+                self._slot.save(state)
+            except (ProjectError, OSError, ValidationError) as error:
+                detail = f"cannot forget unfinished invocation {invocation_id}: {error}"
+                raise SessionPersistenceError.because(detail) from error
+
     def inspect(self, key: AgentSessionKey, invocation_id: str) -> InvocationOutcome:
         """Read acknowledgement evidence without submitting another turn."""
         self._validate_invocation(key, invocation_id)
@@ -617,6 +666,16 @@ class ClientAgentSessions:
             raise SessionConfigurationError.because(detail)
         return self._dispatch(key, spec, turn, initial=True)
 
+    def _refuse_if_cancelled(self, invocation_id: str) -> None:
+        """Raise ``AgentExecutionCancelledError`` once, if a cancel reached the invocation first.
+
+        Called with the lock held, before the invocation is journaled or marked active.
+        """
+        if invocation_id in self._cancelled_before_start:
+            self._cancelled_before_start.discard(invocation_id)
+            message = f"invocation {invocation_id} was cancelled before it began"
+            raise AgentExecutionCancelledError(message)
+
     def _dispatch(
         self,
         key: AgentSessionKey,
@@ -637,6 +696,7 @@ class ClientAgentSessions:
                     detail = f"invocation {invocation_id} payload changed"
                     raise InvocationConflictError.because(detail)
                 return self.inspect(key, invocation_id)
+            self._refuse_if_cancelled(invocation_id)
             if key in self._active_keys:
                 detail = f"session {key} already has an active invocation"
                 raise InvocationConflictError.because(detail)

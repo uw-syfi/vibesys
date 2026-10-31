@@ -1,6 +1,6 @@
 /* Cards, menus, dialogs, tables, tabs, trees and key values. Imported by components.css. */
 
-/* --- card and banner --------------------------------------------------------------------------- */
+/* --- card --------------------------------------------------------------------------- */
 
 .vs-card {
   display: flex;
@@ -26,40 +26,87 @@
   padding: var(--space-4) var(--space-5);
 }
 
-.vs-banner {
+/* --- toast ------------------------------------------------------------------------------------- */
+
+/*
+ * The window's header is a page's `.vs-page-header` or a screen's `.vs-screen-header`: it names itself
+ * as the anchor the toast stack hangs under, so whatever a header holds (a title row, its actions, a
+ * scrubber) and however tall it grows, the stack starts below it and no screen positions anything.
+ */
+.vs-page-header,
+.vs-screen-header {
+  anchor-name: --vs-header;
+}
+/*
+ * At the top right, a small gap below the header; under the window's end strip, at the page's top
+ * edge, where a screen has no header. It runs to the bottom of the window and passes pointer events
+ * to the page around its toasts.
+ */
+.vs-toast-stack {
+  position: fixed;
+  top: calc(
+    anchor(--vs-header bottom, var(--chrome-end-height, var(--space-0))) + var(--space-3)
+  );
+  right: var(--space-4);
+  bottom: var(--space-4);
+  z-index: 30;
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-4);
-  padding: var(--space-4) var(--space-5);
+  flex-direction: column;
+  gap: var(--space-3);
+  width: calc(var(--column-aside) + var(--space-8));
+  max-width: calc(100% - 2 * var(--space-4));
+  overflow-y: auto;
+  pointer-events: none;
+}
+.vs-toast {
+  display: flex;
+  flex: none;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-4);
   border: var(--hairline) solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--panel);
+  box-shadow: var(--elevation-raised);
   color: var(--text);
+  pointer-events: auto;
 }
-.vs-banner[data-tone="ok"] {
-  border-color: var(--chip-ok-border);
-  background: var(--banner-ok-bg);
-}
-.vs-banner[data-tone="warn"] {
+.vs-toast[data-tone="warn"] {
   border-color: var(--chip-warn-border);
   background: var(--banner-warn-bg);
 }
-.vs-banner[data-tone="err"] {
+.vs-toast[data-tone="err"] {
   border-color: var(--chip-err-border);
   background: var(--banner-err-bg);
 }
-.vs-banner-text {
-  display: flex;
-  flex: 1 1 var(--column-field);
-  flex-direction: column;
-  gap: var(--space-2);
+.vs-toast-main {
+  flex: 1;
   min-width: 0;
 }
-.vs-banner-actions {
+.vs-toast-head {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-3) 0;
+}
+.vs-toast-title {
+  min-width: 0;
+  font-family: var(--text-body-strong-family);
+  font-size: var(--text-body-strong-size);
+  line-height: var(--text-body-strong-line);
+  font-weight: var(--text-body-strong-weight);
+  overflow-wrap: anywhere;
+}
+.vs-toast-detail {
+  padding-bottom: var(--space-3);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.vs-toast-controls {
+  display: flex;
+  flex: none;
+  gap: var(--space-1);
 }
 
 /* --- menu -------------------------------------------------------------------------------------- */

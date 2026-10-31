@@ -183,7 +183,7 @@ test('a legend names each role on the bars, in the color of its segments, and th
   const {container, unmount} = await mount(<TimelineView {...base(IDEAS, 3600)} />);
   const legend = container.querySelector('[aria-label="Bar colors"]');
   const entries = [...(legend?.querySelectorAll('li') ?? [])];
-  expect(entries.map(each => each.textContent ?? '')).toEqual(['Implementer', 'Judge', 'Gate']);
+  expect(entries.map(each => each.textContent ?? '')).toEqual(['Builder', 'Reviewer', 'Gate']);
   const colors = entries.map(item =>
     (item.querySelector('.vs-series-swatch') as HTMLElement).style.getPropertyValue('--seg-color'),
   );

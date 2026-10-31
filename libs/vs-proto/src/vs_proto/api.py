@@ -73,6 +73,10 @@ from vs_proto._generated.vibesys.api.v1.host_watch_generated_pb import (
     WatchRequest,
     WatchResponse,
 )
+from vs_proto._generated.vibesys.api.v1.subscribe_pb import (
+    SubscribeRequest,
+    SubscribeResponse,
+)
 from vs_proto._generated.vibesys.core.testing.v1 import values_pb as compiler_values
 from vs_proto._generated.vibesys.core.v1 import agent_facts_pb as core_agent_facts
 from vs_proto._generated.vibesys.core.v1 import common_pb as core_common
@@ -157,6 +161,7 @@ from vs_proto._generated.vibesys.store.v1.core_input_pb import (
     AttemptInterrupted,
     CoreInput,
     InterruptionReason,
+    RunEnded,
     StepCancelReason,
     StepFinished,
     StepStarted,
@@ -391,6 +396,7 @@ __all__ = [
     "ReplayStore",
     "RunAddress",
     "RunDescription",
+    "RunEnded",
     "RunFailure",
     "RunFailureKind",
     "RunHead",
@@ -432,6 +438,8 @@ __all__ = [
     "StreamOwner",
     "StreamRef",
     "StreamState",
+    "SubscribeRequest",
+    "SubscribeResponse",
     "TailRequest",
     "TailResponse",
     "TailStreamRequest",

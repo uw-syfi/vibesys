@@ -1,10 +1,10 @@
 import {expect, type Page, test} from '@playwright/test';
 import fc from 'fast-check';
-import {BAD_SCREENS, CLEAN_PAGE, CLEAN_SCREEN} from './checks/bad-dom.js';
+import {BAD_SCREENS, CLEAN_CHROME_SCREEN, CLEAN_PAGE, CLEAN_SCREEN} from './checks/bad-dom.js';
 import {contactSheetHtml} from './checks/contact-sheet.js';
 import {isKnown, KNOWN_FAILURES, type KnownFailure} from './checks/known-failures.js';
 import {KnownLedger} from './checks/known-ledger.js';
-import {EVERY_CHECK, report, screenCheck} from './checks/screen-check.js';
+import {IN_PAGE_CHECKS, pressMovesWindow, report, screenCheck} from './checks/screen-check.js';
 import {settled} from './checks/settle.js';
 import {anchorsOf, RUN_ANCHORS, stabilityViolations} from './checks/stability.js';
 
@@ -22,12 +22,13 @@ async function show(page: Page, html: string): Promise<void> {
 
 test('a clean screen passes every check', async ({page}) => {
   await show(page, CLEAN_SCREEN);
-  expect(await screenCheck(page, EVERY_CHECK)).toEqual([]);
+  // The bundled-font check needs the bundled faces; `bundled-font.spec.ts` loads them.
+  expect(await screenCheck(page, IN_PAGE_CHECKS)).toEqual([]);
 });
 
 test('a page that keeps the visual spec’s laws passes every check', async ({page}) => {
   await show(page, CLEAN_PAGE);
-  expect(await screenCheck(page, EVERY_CHECK)).toEqual([]);
+  expect(await screenCheck(page, IN_PAGE_CHECKS)).toEqual([]);
 });
 
 test('a box partly out of sight is not called hollow for what cannot be seen', async ({page}) => {
@@ -119,10 +120,27 @@ test('property: a window’s controls strip is wasted exactly when nothing is dr
   );
 });
 
+test('a page laid out around the window controls passes every check, and its blank space moves the window', async ({
+  page,
+}) => {
+  await show(page, CLEAN_CHROME_SCREEN);
+  expect(await screenCheck(page, IN_PAGE_CHECKS)).toEqual([]);
+  // The column's blank space and the top of the page drag; a control in the column, and the page's own space, do not.
+  expect(
+    await pressMovesWindow(page, [
+      [40, 200],
+      [10, 10],
+      [200, 4],
+      [20, 55],
+      [200, 100],
+    ]),
+  ).toEqual([true, true, true, false, false]);
+});
+
 for (const bad of BAD_SCREENS) {
   test(`${bad.check} fails on ${bad.name}`, async ({page}) => {
     await show(page, bad.html);
-    const violations = await screenCheck(page, EVERY_CHECK);
+    const violations = await screenCheck(page, IN_PAGE_CHECKS);
     const hits = violations.filter(each => each.check === bad.check);
     expect(
       hits.map(each => each.message),
@@ -131,6 +149,35 @@ for (const bad of BAD_SCREENS) {
     expect(hits.some(each => bad.message.test(each.message))).toBe(true);
   });
 }
+
+const TONES = '<style>:root{--chip-warn-bg:#f3e6c8;--banner-err-bg:#f9e4e1;--warn:#925500}</style>';
+
+test('a tinted chip, toast and attention tile are not banners, and a plain strip is not tinted', async ({
+  page,
+}) => {
+  await show(
+    page,
+    `${TONES}<main style="display:block;width:440px">
+      <span class="vs-chip" style="display:block;background:var(--chip-warn-bg)">Needs an update</span>
+      <div class="vs-toast" style="background:var(--banner-err-bg)">Could not resume the run</div>
+      <div class="vs-overview-tile" style="background:var(--banner-err-bg)">3 need you</div>
+      <div style="background:#ffffff">Ready to start <button>Start</button></div>
+    </main>`,
+  );
+  expect(await screenCheck(page, ['banner'])).toEqual([]);
+});
+
+test('a banner is found by its color, whatever it is called or where it sits', async ({page}) => {
+  await show(
+    page,
+    `${TONES}<header class="status-line" style="display:block;width:440px;background:var(--chip-warn-bg)">Check the host</header>
+    <main style="display:block;width:440px"><p>Run</p></main>`,
+  );
+  const found = await screenCheck(page, ['banner']);
+  expect(found.map(each => each.message)).toEqual([
+    'a strip 100% of the main pane wide is tinted by a status color: "Check the host"',
+  ]);
+});
 
 const CHART = `<div id="row" style="position:relative;height:90px">
   <svg id="chart" role="group" aria-label="Metric of each measured idea over the run, with the best so far" width="240" height="80"><circle cx="40" cy="40" r="6" fill="red"/></svg>

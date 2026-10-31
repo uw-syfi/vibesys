@@ -21,13 +21,14 @@ from .common import (
     InterruptPolicy,
     Observation,
     RequestId,
+    Seconds,
     Value,
     unset,
 )
 from .evaluation import EvaluationEvent
 from .records import RequestObserved
 from .sessions import SessionsEvent
-from .settlement import SettlementEvent
+from .settlement import RunResultProposal, SettlementEvent
 from .until import Failed
 
 type OwnerEvent = Annotated[
@@ -137,6 +138,9 @@ class StepAttempts(Value):
     """Whether the latest attempt ended without a result."""
     uncharged: Count = 0
     """The attempts a pause or shutdown ended."""
+    deadline_at: Seconds | None = Field(default=None, exclude_if=unset)
+    """The limit the first attempt started with: the step's own, which a cap on one attempt does
+    not move. A drain caps the request it cannot interrupt; the cap ends with that attempt."""
 
     @property
     def charged(self) -> int:
@@ -145,14 +149,17 @@ class StepAttempts(Value):
 
 
 class StepsState(Value):
-    """The epoch the log is in and the attempts of the steps still open.
+    """The epoch the log is in, the attempts of the steps still open, and the end of the run.
 
     A record of a later epoch opens it (see ``vs_core._step_attempts.epoch_opened``): the one
     writer of a run wrote nothing else in the earlier epoch after its process died.
+    ``ended`` is the result a ``RunEnded`` record published; it stands only while the run still
+    has that result, so a resumed run is not ended.
     """
 
     epoch: Count = 0
     attempts: tuple[StepAttempts, ...] = ()
+    ended: RunResultProposal | None = Field(default=None, exclude_if=unset)
 
     def of(self, tag: RequestId) -> StepAttempts | None:
         """The attempts of the open step ``tag``, or None before its first began."""

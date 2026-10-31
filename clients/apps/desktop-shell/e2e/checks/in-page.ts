@@ -23,6 +23,10 @@ export type CheckId =
   | 'column-tops'
   | 'truncation-room'
   | 'focus-ring'
+  | 'banner'
+  | 'chrome-clear'
+  | 'drag-region'
+  | 'bundled-font'
   | 'left-edge'
   | 'heading-depth'
   | 'spacing-order'
@@ -243,12 +247,23 @@ export function overlapCheck(): Violation[] {
 }
 
 /** A short text on several lines (a chip, number or badge), or a short word broken mid-word. */
+/**
+ * Whether `text` is a fragment of a paragraph or list item: the words between its inline code and
+ * emphasis, which wrap with the sentence they are in. A label is the whole text of its element.
+ */
+function isProseFragment(element: Element, text: string): boolean {
+  const prose = element.closest('li, p');
+  return (
+    prose !== null && (prose.textContent ?? '').replace(/\s+/g, ' ').trim().length > text.length
+  );
+}
+
 export function wrapCheck(): Violation[] {
   const found: Violation[] = [];
   for (const {node, element, text} of textBoxes()) {
     if (inCode(element)) continue;
     const lines = lineCount(node);
-    if (lines > 1 && text.length <= 24) {
+    if (lines > 1 && text.length <= 24 && !isProseFragment(element, text)) {
       found.push({
         check: 'wrap',
         message: `"${text}" is ${text.length} characters and wraps onto ${lines} lines`,
@@ -1280,6 +1295,177 @@ export function titleStripCheck(): Violation[] {
   ];
 }
 
+/**
+ * The resolved colors of the status fills: the tone washes (`--chip-*-bg`, `--banner-*-bg`) and the
+ * solid status colors. Read from the page's own tokens, so a fill is known by its color whatever
+ * element or class paints it; a token the page does not define resolves to nothing and is left out.
+ */
+function toneFills(): [number, number, number][] {
+  const names = ['accent', 'ok', 'warn', 'err'];
+  const tokens = [
+    ...names.map(name => `--chip-${name}-bg`),
+    ...names.map(name => `--banner-${name}-bg`),
+    ...names,
+  ].map(token => (token.startsWith('--') ? token : `--${token}`));
+  const probe = document.createElement('span');
+  document.body.append(probe);
+  const fills: [number, number, number][] = [];
+  for (const token of tokens) {
+    probe.style.background = `var(${token})`;
+    const [r = 0, g = 0, b = 0, a = 0] = toRgb(getComputedStyle(probe).backgroundColor);
+    if (a > 0) fills.push([r, g, b]);
+  }
+  probe.remove();
+  return fills;
+}
+
+/**
+ * A strip tinted by a status color: an element at least half as wide as the main pane that is filled
+ * with a tone fill, whatever it is called (a banner is a banner under any class name). What may be
+ * tinted is the allow-list below, each by what it is: a chip, a toast, an attention tile, a dot, and
+ * the bars and fills of a meter or a chart, which are data. Anything else needs its own argument,
+ * made here in review. The check reads the colors a screen is drawn in, so it is not fooled by a
+ * new component or a new token spelled the same.
+ */
+export function bannerCheck(): Violation[] {
+  const main = document.querySelector('main');
+  if (main === null) return [];
+  const room = main.getBoundingClientRect().width;
+  if (room <= 0) return [];
+  const allowed =
+    '.vs-chip, .vs-toast, .vs-overview-tile, .vs-dot, .vs-meter, .vs-gantt-seg, .vs-bars-segment, .vs-result-chart-mark, .vs-switch, .vs-button';
+  const fills = toneFills();
+  const found: Violation[] = [];
+  for (const element of document.body.querySelectorAll('*')) {
+    if (element.closest(allowed) !== null || !isShown(element)) continue;
+    const width = element.getBoundingClientRect().width;
+    if (width < room * 0.5) continue;
+    const [r = 0, g = 0, b = 0, a = 0] = toRgb(getComputedStyle(element).backgroundColor);
+    if (a === 0 || !fills.some(fill => Math.hypot(fill[0] - r, fill[1] - g, fill[2] - b) <= 3)) {
+      continue;
+    }
+    found.push({
+      check: 'banner',
+      message: `a strip ${Math.round((100 * width) / room)}% of the main pane wide is tinted by a status color: "${(element.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 40)}"`,
+      where: describe(element),
+    });
+  }
+  return found;
+}
+
+/** A host fact about the window's own controls (`--chrome-*` on the root element), in pixels; 0 when unset. */
+function chromeFact(name: string): number {
+  return Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name)) || 0;
+}
+
+/**
+ * The rectangles the window's own controls cover: the top-left corner the macOS traffic lights sit
+ * in, and the strip across the top of the page the Windows and Linux controls are drawn over.
+ */
+function chromeRooms(): Box[] {
+  const page = document.querySelector('.vs-app-main')?.getBoundingClientRect();
+  const rooms: Box[] = [
+    {
+      left: 0,
+      top: 0,
+      right: chromeFact('--chrome-start-width'),
+      bottom: chromeFact('--chrome-start-height'),
+    },
+  ];
+  if (page !== undefined) {
+    rooms.push({
+      left: page.left,
+      top: 0,
+      right: innerWidth,
+      bottom: chromeFact('--chrome-end-height'),
+    });
+  }
+  return rooms.filter(room => room.right > room.left && room.bottom > room.top);
+}
+
+/** The controls a person presses, as drawn: a link, button, field, disclosure, or focusable element. */
+function controlsOf(): Element[] {
+  return [
+    ...document.querySelectorAll(
+      'a, button, input, select, textarea, summary, [role="button"], [tabindex]:not([tabindex="-1"])',
+    ),
+  ].filter(isShown);
+}
+
+/** What the window's own controls cover is clear: no text, control or picture is drawn there. */
+export function chromeClearCheck(): Violation[] {
+  const rooms = chromeRooms();
+  if (rooms.length === 0) return [];
+  const drawn = [
+    ...textBoxes().flatMap(({element, lines}) => lines.map(box => ({element, box}))),
+    ...[...controlsOf(), ...[...document.querySelectorAll('svg, img, canvas')].filter(isShown)].map(
+      element => ({element, box: boxOf(element.getBoundingClientRect())}),
+    ),
+  ];
+  const seen = new Set<Element>();
+  const found: Violation[] = [];
+  for (const {element, box} of drawn) {
+    if (seen.has(element) || !rooms.some(room => cut(box, room) !== null)) continue;
+    seen.add(element);
+    found.push({
+      check: 'chrome-clear',
+      message: `${describe(element)} is drawn where the window's own controls are`,
+      where: describe(element),
+    });
+  }
+  return found;
+}
+
+interface DragRegion {
+  readonly drag: boolean;
+  readonly box: Box;
+}
+
+/** The elements that mark the window's drag regions, in tree order: each is a drag or a carve-out. */
+function dragRegions(): DragRegion[] {
+  return [...document.body.querySelectorAll('*')].flatMap(element => {
+    const mode = getComputedStyle(element).getPropertyValue('-webkit-app-region').trim();
+    if ((mode !== 'drag' && mode !== 'no-drag') || !isShown(element)) return [];
+    return [{drag: mode === 'drag', box: boxOf(element.getBoundingClientRect())}];
+  });
+}
+
+/** Whether pressing at (x, y) moves the window: the last region there decides, as in the OS. */
+function dragsAt(regions: readonly DragRegion[], x: number, y: number): boolean {
+  let drag = false;
+  for (const {box, drag: marks} of regions) {
+    if (x >= box.left && x < box.right && y >= box.top && y < box.bottom) drag = marks;
+  }
+  return drag;
+}
+
+/** No control is in a drag region, where pressing it would move the window instead. */
+export function dragRegionCheck(): Violation[] {
+  const regions = dragRegions();
+  if (!regions.some(region => region.drag)) return [];
+  const found: Violation[] = [];
+  for (const element of controlsOf()) {
+    const clip = clipArea(element);
+    const seen = clip === null ? null : cut(boxOf(element.getBoundingClientRect()), clip);
+    if (seen === null) continue;
+    const points: [number, number][] = [
+      [seen.left + 1, seen.top + 1],
+      [seen.right - 1, seen.top + 1],
+      [seen.left + 1, seen.bottom - 1],
+      [seen.right - 1, seen.bottom - 1],
+      [(seen.left + seen.right) / 2, (seen.top + seen.bottom) / 2],
+    ];
+    if (points.some(([x, y]) => dragsAt(regions, x, y))) {
+      found.push({
+        check: 'drag-region',
+        message: `${describe(element)} is in the window's drag region, so pressing it moves the window`,
+        where: describe(element),
+      });
+    }
+  }
+  return found;
+}
+
 /** What `screen-check.ts` sends to the page ahead of a check. */
 export const HELPERS: readonly ((...args: never[]) => unknown)[] = [
   inCode,
@@ -1308,6 +1494,7 @@ export const HELPERS: readonly ((...args: never[]) => unknown)[] = [
   markColors,
   legendColors,
   columnOf,
+  isProseFragment,
   labelsOf,
   hasIdAsWord,
   idHits,
@@ -1319,6 +1506,12 @@ export const HELPERS: readonly ((...args: never[]) => unknown)[] = [
   takesRoomRight,
   roomRight,
   chartLabelProblems,
+  toneFills,
+  chromeFact,
+  chromeRooms,
+  controlsOf,
+  dragRegions,
+  dragsAt,
   proseCap,
   drawsSide,
   backdropOf,

@@ -168,7 +168,7 @@ describe('step segments', () => {
     ]);
     expect(segments[0]?.series).not.toBe(segments[2]?.series);
     expect(segments[3]?.end).toBe(50);
-    expect(segments[0]?.label).toBe('Implementer · agent_turn t · 10s');
+    expect(segments[0]?.label).toBe('Builder · agent_turn t · 10s');
   });
 });
 

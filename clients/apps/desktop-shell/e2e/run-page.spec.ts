@@ -6,9 +6,11 @@ import {intentReplay} from '@vibesys/run-fixtures';
 import {
   type FakeBridgeSeed,
   installFakeBridge,
+  installFakeChrome,
   installFakeMachines,
   installFakeNewRun,
   installFakeProjectRuns,
+  MAC_CHROME,
 } from './fake-bridge.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {journeyScript, type NativeJourney, transitionJourney} from './journey-world.js';
@@ -45,7 +47,7 @@ function listed(live: unknown[], ended: unknown[]): Record<string, unknown> {
 
 const SEED: FakeBridgeSeed = {
   theme: 'ink',
-  chromeInset: {width: 84, height: 40},
+  chromeInset: MAC_CHROME,
   appearance: {mode: 'dark', light: 'paper', dark: 'ink'},
   listings: [listed([server('starting')], [])],
   recent: [
@@ -65,6 +67,7 @@ const SEED: FakeBridgeSeed = {
 /** The live run's server: a session that opens and answers, with no events to show yet. */
 async function open(page: Page, seed: FakeBridgeSeed): Promise<void> {
   await addInitScripts(page, [
+    initScript(installFakeChrome, seed),
     initScript(installFakeBridge, seed),
     initScript(installFakeMachines, seed),
     initScript(installFakeNewRun, seed),
@@ -189,7 +192,7 @@ test('a run starts, writes its logs, permits cancellation during drain, and resu
   await page.getByRole('button', {name: 'Pause now', exact: true}).click();
   await expect.poll(() => posted).toEqual(['pauseNow']);
 
-  // Ended: the banner reads the end record; Resume names the round, only when resumable.
+  // Ended: the header reads the end record, with Resume and Run again beside it.
   await push(
     page,
     listed(
@@ -238,9 +241,12 @@ test('every ended run offers Resume', async ({page}) => {
     resumable: false,
   });
   await open(page, {...SEED, listings: [listed([], [stopped])]});
-  await expect(page.getByText('Stopped by you.')).toBeVisible();
+  await expect(
+    page.getByRole('main').locator('.vs-chip', {hasText: 'Stopped'}),
+  ).toHaveAccessibleDescription('Stopped by you.');
   await expect(page.getByRole('button', {name: 'Resume', exact: true})).toBeVisible();
-  await page.getByRole('button', {name: 'View logs'}).click();
+  await expect(page.getByRole('button', {name: 'Run again', exact: true})).toBeVisible();
+  await page.getByRole('radiogroup', {name: 'Show'}).getByText('Logs').click();
   await expect(
     page.getByRole('radiogroup', {name: 'Show'}).getByRole('radio', {name: 'Logs'}),
   ).toBeChecked();

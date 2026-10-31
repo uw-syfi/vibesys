@@ -2,7 +2,7 @@
  * What a machine section shows while its reading is awaited, failed, or answered by a helper that
  * predates it; once answered, the section's own content.
  */
-import {Banner, Button, Card, EmptyState} from '@vibesys/ui';
+import {Button, Card, Chip, EmptyState, Row} from '@vibesys/ui';
 import type {JSX, ReactNode} from 'react';
 import {failureWords, type Reading as State} from '../../state/index.js';
 
@@ -22,20 +22,27 @@ export function Reading<T>(props: {
     );
   }
   if (reading.kind === 'failed') {
+    const {body, hint} = failureWords(reading);
     return (
-      <Banner
-        tone="err"
-        title={`Could not read ${props.what} on ${machine}.`}
-        {...failureWords(reading)}
-        actions={<Button text="Try again" press={props.retry} />}
-      />
+      <Row gap="space-3" align="center" wrap>
+        <Chip
+          label="Not read"
+          tone="err"
+          dot
+          hint={[`Could not read ${props.what} on ${machine}.`, body, hint]
+            .filter(part => part !== undefined)
+            .join('\n')}
+        />
+        <Button text="Try again" press={props.retry} />
+      </Row>
     );
   }
   if (reading.offered.kind === 'unsupported') {
     return (
-      <Banner
+      <Chip
+        label="Needs an update"
         tone="warn"
-        title="Needs an update"
+        dot
         hint={`The VibeSys on ${machine} is too old for this. Update its checkout in Machines, then come back.`}
       />
     );

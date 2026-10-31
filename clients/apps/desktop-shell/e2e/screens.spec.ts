@@ -3,7 +3,7 @@ import {expect, test} from '@playwright/test';
 import {fixtureNamed} from '@vibesys/run-fixtures';
 import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
 import {KnownLedger} from './checks/known-ledger.js';
-import {EVERY_CHECK, screenCheck} from './checks/screen-check.js';
+import {IN_PAGE_CHECKS, SCREEN_CHECKS, screenCheck} from './checks/screen-check.js';
 import {openFixture, playLive} from './fixture-world.js';
 import {type Journey, walkScreens} from './screens.js';
 
@@ -86,6 +86,14 @@ const LIGHT: readonly Cell[] = [
 const CELLS: readonly Cell[] = [...MAIN, ...STRESS, ...LIGHT];
 
 const ledger = new KnownLedger('run-matrix');
+
+/**
+ * The fixtures whose titles are written in scripts and emoji on purpose, to test how long text
+ * wraps: no bundled face has those glyphs, and they are the run's own text, not the UI's, so they
+ * skip the bundled-font check.
+ */
+const OTHER_SCRIPTS: ReadonlySet<string> = new Set(['long-titles']);
+
 let walked = 0;
 const sheet: SheetEntry[] = [];
 const shots = process.env['SCREENS_DIR'] || undefined;
@@ -105,7 +113,15 @@ for (const cell of CELLS) {
     const unexplained: string[] = [];
     const moved = await walkScreens(page, cell.journey, async (screen, current) => {
       const name = nameOf(cell, screen);
-      unexplained.push(...ledger.unexplained(name, await screenCheck(current, EVERY_CHECK)));
+      unexplained.push(
+        ...ledger.unexplained(
+          name,
+          await screenCheck(
+            current,
+            OTHER_SCRIPTS.has(cell.fixture) ? IN_PAGE_CHECKS : SCREEN_CHECKS,
+          ),
+        ),
+      );
       if (shots !== undefined) {
         const file = `${name.replaceAll('/', '__')}.png`;
         await current.screenshot({path: `${shots}/${file}`});

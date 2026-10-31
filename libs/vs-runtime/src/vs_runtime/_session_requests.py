@@ -128,8 +128,9 @@ if TYPE_CHECKING:
         Observation,
         RequestBase,
     )
+    from vs_core.api.recovery import OwnerEvent
     from vs_prompts.api import RenderedPrompt
-    from vs_runtime._core_requests import OwnerEvent, SessionRoleRequest
+    from vs_runtime._core_requests import SessionRoleRequest
     from vs_runtime._receipt_store import ReceiptStore
     from vs_runtime._workspace_access import AccessGrant, AccessGuardedWorkspace
     from vs_sim.api import BlockingRunner
@@ -146,6 +147,19 @@ def session_binding_key(request: RequestBase, session_id: SessionId) -> str:
 def scope_binding_key(scope: Scope, session_id: SessionId) -> str:
     """``session_binding_key`` for a session of ``scope``, without a request in hand."""
     return f"{scope.owner.kind}:{scope.owner.root}:{scope.generation}/{session_id.root}"
+
+
+def conversation_key(request: RequestBase, session: SessionSpec) -> AgentSessionKey:
+    """The key of the provider conversation *session* has under *request*'s scope.
+
+    An ensure writes it into the session's binding; it is derived from the scope and the spec
+    alone, so whoever holds a turn of the session names the conversation without the binding.
+    """
+    owner = request.scope.owner
+    member = f"{owner.kind}:{owner.root}:{session.session_id.root}"
+    return AgentSessionKey.for_member(
+        session.role_id.root, member, generation=request.scope.generation + 1
+    )
 
 
 def load_session_binding(store: ReceiptStore, bkey: str) -> SessionBinding | None:
@@ -469,6 +483,8 @@ class _Call:
     canonical: CoreRequestId
     """The request core knows as the one executing: what the dispatch record names."""
     context: ExecutionContext
+    mark: str | None = None
+    """What the turn's agent processes are marked with, when a step runner asked for the turn."""
 
 
 class TurnYields[TurnT, WaitT](Protocol):
@@ -575,21 +591,47 @@ class RuntimeSessionRequests:
         async with self._locks.setdefault(lock_key, asyncio.Lock()):
             return await self._run(call)
 
+    async def attempt(
+        self,
+        request: DispatchTurn,
+        context: ExecutionContext,
+        *,
+        mark: str,
+        behalf: CoreRequestId | None = None,
+    ) -> ExecutionResult:
+        """Run one attempt of a turn and return what it observed, recording no receipt of it.
+
+        The caller owns the step's result. What survives an attempt that dies is the invocation
+        journal, which replays an answered invocation instead of asking it again, and the access
+        receipt, whose baseline the next attempt is judged against. A turn core asked for as
+        another kind of request (a resume) names that request in *behalf*, which its dispatch
+        record names. Every agent process the turn starts carries *mark*, which the step's
+        runner finds them by after the process that started the turn died.
+        """
+        canonical = behalf or core_identity(request)
+        call = _Call(request, ReceiptKey(canonical.root), canonical, context, mark)
+        lock_key = f"{owner_key(request)}/{self._session_id(request).root}"
+        async with self._locks.setdefault(lock_key, asyncio.Lock()):
+            return (await self._performed(call)).result
+
+    async def _performed(
+        self, call: _Call
+    ) -> Settled[ExecutionResult] | Transient[ExecutionResult]:
+        try:
+            facts = await self._perform(call)
+        except _RefusalError as refusal:
+            facts = refusal.facts
+        except ReceiptCorruptError as error:
+            facts = _unknown(str(error))
+        result = self._result(call.request, call.context, facts)
+        return Settled(result) if result.observation.observation.terminal else Transient(result)
+
     async def _run(self, call: _Call) -> ExecutionOutcome:
         request, context = call.request, call.context
 
-        async def perform(
-            *, resumed: bool
-        ) -> Settled[ExecutionResult] | Transient[ExecutionResult]:
-            del resumed  # the journal, not this flag, says whether a dispatch happened
-            try:
-                facts = await self._perform(call)
-            except _RefusalError as refusal:
-                facts = refusal.facts
-            except ReceiptCorruptError as error:
-                facts = _unknown(str(error))
-            result = self._result(request, context, facts)
-            return Settled(result) if result.observation.observation.terminal else Transient(result)
+        async def perform(*, repeat: bool) -> Settled[ExecutionResult] | Transient[ExecutionResult]:
+            del repeat  # the journal, not this flag, says whether a dispatch happened
+            return await self._performed(call)
 
         execution = await self._store.run_once(
             call.receipt_key,
@@ -700,16 +742,6 @@ class RuntimeSessionRequests:
     def _binding_key(request: RequestBase, session_id: SessionId) -> str:
         return session_binding_key(request, session_id)
 
-    @staticmethod
-    def _conversation_key(request: RequestBase, session: SessionSpec) -> str:
-        owner = request.scope.owner
-        member = f"{owner.kind}:{owner.root}:{session.session_id.root}"
-        return str(
-            AgentSessionKey.for_member(
-                session.role_id.root, member, generation=request.scope.generation + 1
-            )
-        )
-
     async def _ensure(self, request: EnsureSession, call: _Call) -> _Facts:
         request_id = call.canonical
         spec = request.spec
@@ -724,7 +756,7 @@ class RuntimeSessionRequests:
             spec=spec,
             ensure_request=request_id,
             resource_id=ResourceId(root=f"session:{key}"),
-            session_key=self._conversation_key(request, spec),
+            session_key=str(conversation_key(request, spec)),
             turn_timeout_seconds=None if timeout is None else timeout.total_seconds(),
         )
         binding = self._bind(key, wanted, required, episode_fence(key, request.admission_id), call)
@@ -800,7 +832,7 @@ class RuntimeSessionRequests:
             ) from error
 
     async def _resolve(
-        self, request: DispatchTurn, bkey: str, permit: TurnPermit | None = None
+        self, request: DispatchTurn, bkey: str, call: _Call
     ) -> tuple[SessionBinding, _Dispatch]:
         """The ensured session and the resolved dispatch, or a refusal naming what is missing."""
         turn = request.turn
@@ -817,8 +849,8 @@ class RuntimeSessionRequests:
         if workspace is None or grant is None:
             raise _RefusalError(_rejected("the turn's workspace or access cannot be resolved"))
         scope = turn.workspace if isinstance(turn.workspace, Scope) else turn.workspace.scope
-        if permit is not None:
-            self._resolver.hold_permit(turn.invocation_id.root, scope, permit)
+        if call.context.permit is not None:
+            self._resolver.hold_permit(turn.invocation_id.root, scope, call.context.permit)
         spec = self._resolver.agent_spec(turn, workspace)
         template = self._resolver.template(turn)
         message = self._resolver.message(turn, (*request.inputs, *request.guidance))
@@ -842,6 +874,7 @@ class RuntimeSessionRequests:
                 template,
                 output_schema=schema,
                 timeout=None if timeout is None else timeout,
+                step_tag=call.mark,
             ),
             message,
             turn.invocation_id.root,
@@ -855,7 +888,7 @@ class RuntimeSessionRequests:
     async def _dispatch(self, request: DispatchTurn, call: _Call) -> _Facts:
         turn = request.turn
         bkey = self._binding_key(request, turn.session.session_id)
-        binding, dispatch = await self._resolve(request, bkey, call.context.permit)
+        binding, dispatch = await self._resolve(request, bkey, call)
         access_key = AccessKey(binding=bkey, invocation=dispatch.invocation)
         if self.settlement.receipt(access_key) is None:
             # Before the dispatch is recorded: a refusal here proves no provider call began.

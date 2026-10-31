@@ -258,12 +258,43 @@ jobs:
         if: needs.changes.outputs.clients == 'true'
         run: ./support/repoctl/repoctl run-checks --group clients_quality
 
+      # The proto check downloads and compiles the Go bindings and the Go code generation
+      # plugins, and the standard library is most of that compile. The caches setup-go restores
+      # belong to whichever job saved them first, which built and downloaded none of this, so
+      # this check keeps its own build cache and module cache. The module cache gets its own
+      # directory, so restoring it never lands on the read-only one setup-go filled.
+      # The build cache path comes from `go env`, as with the pnpm store: a wrong path caches
+      # nothing.
+      - name: Locate the Go caches for the proto check
+        if: needs.changes.outputs.proto == 'true'
+        id: go-cache
+        run: |
+          {
+            echo "build=$(go env GOCACHE)"
+            echo "modules=$RUNNER_TEMP/proto-go-modules"
+            echo "version=$(go env GOVERSION)"
+          } >> "$GITHUB_OUTPUT"
+
+      # The key names the toolchain: objects compiled by another Go version never match, so an
+      # unnamed key would stay stale after a patch release and never be saved again.
+      - name: Cache the Go build for the proto check
+        if: needs.changes.outputs.proto == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ steps.go-cache.outputs.build }}
+            ${{ steps.go-cache.outputs.modules }}
+          key: proto-go-${{ runner.os }}-${{ steps.go-cache.outputs.version }}-${{ hashFiles('gateway/go.mod', 'gateway/go.sum') }}
+
       # Reuse this job's Node, Python and Go setup rather than adding a runner.
       - name: Check protobuf contracts
         if: needs.changes.outputs.proto == 'true'
         env:
           # Compare against the pull request's merge base (main outside a PR).
           BASE_BRANCH: ${{ github.base_ref || 'main' }}
+          GOMODCACHE: ${{ steps.go-cache.outputs.modules }}
+          # Writable module directories, so the cache can be restored over and cleaned up.
+          GOFLAGS: -modcacherw
         run: |
           git fetch --no-tags origin "+refs/heads/${BASE_BRANCH}:refs/remotes/origin/${BASE_BRANCH}"
           PROTO_BASE_REF="origin/${BASE_BRANCH}" ./support/repoctl/repoctl run-checks --group proto

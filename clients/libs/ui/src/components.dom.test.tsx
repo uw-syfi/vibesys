@@ -23,6 +23,8 @@ import {
   ParetoChart,
   type ParetoPoint,
   PathInput,
+  RailFrame,
+  RailItem,
   Scrubber,
   SegmentedControl,
   Select,
@@ -35,6 +37,7 @@ import {
   Text,
   TextInput,
   type TextStyle,
+  WindowFrame,
 } from './index.js';
 import {TYPE} from './tokens/index.js';
 
@@ -245,38 +248,81 @@ describe('AppFrame', () => {
       label="Side"
       nav={<Button text="New run" press={() => undefined} />}
       navHidden={hidden}
-      control={
-        <Button
-          icon="sidebar"
-          label="Show sidebar"
-          hint="Show sidebar (Cmd+K)"
-          press={() => undefined}
-        />
-      }
     >
       <main>Main</main>
     </AppFrame>
   );
 
-  test('shown or hidden, the main area is only the page, with no strip pushing it down; hidden, the navigation is inert, out of the accessibility tree, and the reveal control is in the title-bar row', async () => {
+  test('shown or hidden, the main area is only the page; hidden, the navigation is inert and out of the accessibility tree', async () => {
     const container = await mount(frame(false));
     const nav = one(container, 'nav');
     expect(nav.hasAttribute('inert')).toBe(false);
     expect(nav.hasAttribute('aria-hidden')).toBe(false);
-    expect(container.querySelector('.vs-app-strip')).toBeNull();
-    expect(one(container, '.vs-app-titlebar-control button').getAttribute('aria-label')).toBe(
-      'Show sidebar',
-    );
 
     const hidden = await mount(frame(true));
     const hiddenNav = one(hidden, 'nav');
     expect(hiddenNav.hasAttribute('inert')).toBe(true);
     expect(hiddenNav.getAttribute('aria-hidden')).toBe('true');
-    expect(hidden.querySelector('.vs-app-strip')).toBeNull();
-    const reveal = one(hidden, '.vs-app-titlebar-control button');
-    expect(reveal.getAttribute('aria-label')).toBe('Show sidebar');
-    expect(reveal.textContent).toBe('');
     expect(one(hidden, 'main').textContent).toBe('Main');
+  });
+});
+
+describe('WindowFrame', () => {
+  const classes = (element: Element): string[] =>
+    [...element.children].map(child => child.className);
+
+  test('is a start column beside the page and nothing above either: the window controls have no row of their own', async () => {
+    const container = await mount(
+      <WindowFrame>
+        <main>Page</main>
+      </WindowFrame>,
+    );
+    const frame = one(container, '.vs-window-frame');
+    expect(classes(frame)).toEqual(['vs-window-start', 'vs-app-main']);
+    expect(one(frame, '.vs-window-start').childElementCount).toBe(0);
+    expect(classes(one(frame, '.vs-app-main'))).toEqual(['vs-window-drag', 'vs-app-content']);
+    expect(one(frame, '.vs-app-content main').textContent).toBe('Page');
+    expect(frame.querySelectorAll('button, a, input')).toHaveLength(0);
+  });
+
+  test('a given start column replaces the empty one', async () => {
+    const container = await mount(
+      <WindowFrame start={<nav className="given">Start</nav>}>
+        <main>Page</main>
+      </WindowFrame>,
+    );
+    expect(classes(one(container, '.vs-window-frame'))).toEqual(['given', 'vs-app-main']);
+  });
+});
+
+describe('RailFrame', () => {
+  test('holds its destinations in the start column, top group first, and the page beside it', async () => {
+    const container = await mount(
+      <RailFrame
+        label="App"
+        top={
+          <>
+            <RailItem icon="plus" label="New" press={() => undefined} />
+            <RailItem icon="grid" label="Runs" press={() => undefined} />
+          </>
+        }
+        bottom={<RailItem icon="gear" label="Settings" press={() => undefined} />}
+      >
+        <main>Page</main>
+      </RailFrame>,
+    );
+    const frame = one(container, '.vs-window-frame');
+    expect([...frame.children].map(child => child.tagName)).toEqual(['NAV', 'DIV']);
+    const rail = one(frame, 'nav');
+    expect(rail.className).toBe('vs-rail');
+    expect(rail.getAttribute('aria-label')).toBe('App');
+    expect([...rail.querySelectorAll('button')].map(button => button.textContent)).toEqual([
+      'New',
+      'Runs',
+      'Settings',
+    ]);
+    expect(one(frame, '.vs-app-content main').textContent).toBe('Page');
+    expect(frame.querySelector('.vs-window-start')).toBeNull();
   });
 });
 
@@ -342,6 +388,39 @@ describe('Field', () => {
 });
 
 describe('Select', () => {
+  test('with its label inside, shows the label before the choice and is named once', async () => {
+    const container = await mount(
+      <Field label="Group by" hideLabel>
+        <Select
+          labelInside
+          size="sm"
+          value="b"
+          change={() => undefined}
+          options={[
+            {value: 'a', label: 'Status'},
+            {value: 'b', label: 'Machine'},
+          ]}
+        />
+      </Field>,
+    );
+    const inside = one(container, '.vs-select-label');
+    expect(inside.textContent).toBe('Group by');
+    expect(inside.getAttribute('aria-hidden')).toBe('true');
+    expect(inside.compareDocumentPosition(one(container, 'select'))).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(one(container, 'label').getAttribute('for')).toBe(one(container, 'select').id);
+  });
+
+  test('without labelInside it draws no label of its own', async () => {
+    const container = await mount(
+      <Field label="Size">
+        <Select value="a" change={() => undefined} options={[{value: 'a', label: 'Small'}]} />
+      </Field>,
+    );
+    expect(container.querySelector('.vs-select-label')).toBeNull();
+  });
+
   test('a disabled option says why and cannot be chosen', async () => {
     const chosen: string[] = [];
     const container = await mount(

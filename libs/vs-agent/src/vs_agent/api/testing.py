@@ -21,6 +21,7 @@ from agentshim.testing import (
 )
 
 from vs_agent import fake_profiles
+from vs_agent.fake_agent_processes import FakeAgentProcess, FakeAgentProcesses
 from vs_agent.fake_client import FakeAgentClient, FakeInvocation
 from vs_agent.fake_docker_build_runner import (
     DockerBuildResult,
@@ -95,6 +96,8 @@ __all__ = [
     "DurableAgentClient",
     "FakeAgentClient",
     "FakeAgentInvocationStore",
+    "FakeAgentProcess",
+    "FakeAgentProcesses",
     "FakeAgentSessions",
     "FakeConfinement",
     "FakeDockerBuildRunner",

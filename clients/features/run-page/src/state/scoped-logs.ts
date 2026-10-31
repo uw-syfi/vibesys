@@ -279,3 +279,33 @@ export function streamToFollow(state: RunPageState, scope: LogScope): string | n
   const {shown} = scopedLogs(state, scope);
   return shown !== null && (state.selected !== shown || !state.followingLogs) ? shown : null;
 }
+
+/** A line of the run's own history, as the Logs face draws it: a record, or a failure to read them. */
+export interface HistoryLine {
+  readonly text: string;
+  readonly failure: boolean;
+}
+
+/**
+ * The run's history lines up to sequence `at` (null: all): the records the page holds, then the
+ * latest failure among them if the window of records no longer reaches it, so a diagnostic is
+ * always a row here; and the failure to read the records, last.
+ */
+export function historyLines(state: RunPageState, at: number | null): readonly HistoryLine[] {
+  const upTo = (seq: string): boolean => at === null || BigInt(seq) <= BigInt(at);
+  const rows = state.recordLog ?? [];
+  const diagnostic = state.recordDiagnostic;
+  const kept =
+    diagnostic === undefined || rows.some(row => row.seq === diagnostic.seq)
+      ? rows
+      : [...rows, diagnostic].sort((a, b) => (BigInt(a.seq) < BigInt(b.seq) ? -1 : 1));
+  return [
+    ...kept.filter(row => upTo(row.seq)).map(row => ({text: row.message, failure: row.failure})),
+    ...(state.recordLogError ? [{text: state.recordLogError, failure: true}] : []),
+  ];
+}
+
+/** Whether the run's history holds something to look at in Logs: a failure, or none readable. */
+export function hasDiagnostic(state: RunPageState): boolean {
+  return state.recordDiagnostic !== undefined || Boolean(state.recordLogError);
+}
