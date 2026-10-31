@@ -205,6 +205,9 @@ message ControlInput {
 message RunPark {
   repeated InvocationRef admitted_turns = 4;
   bool immediate = 3;
+  // Core time at which the drain stops waiting for running requests: it interrupts what can be
+  // run again and cancels the rest. Absent for a Pause that waits for its turns' own limits.
+  optional double deadline_at = 5 [(buf.validate.field).double.finite = true];
   ControlId control_id = 1 [(buf.validate.field).required = true];
   string epoch = 2 [(buf.validate.field).string.pattern = "^(0|[1-9][0-9]*)$", (core_field).integer = true];
 }

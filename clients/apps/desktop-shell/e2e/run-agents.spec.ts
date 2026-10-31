@@ -3,8 +3,10 @@ import {expect, type Page, test} from '@playwright/test';
 import {
   type FakeBridgeSeed,
   installFakeBridge,
+  installFakeChrome,
   installFakeMachines,
   installFakeProjectRuns,
+  MAC_CHROME,
 } from './fake-bridge.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {journeyScript} from './journey-world.js';
@@ -44,7 +46,7 @@ function listed(live: unknown[], ended: unknown[] = []): Record<string, unknown>
 
 const SEED: FakeBridgeSeed = {
   theme: 'ink',
-  chromeInset: {width: 84, height: 40},
+  chromeInset: MAC_CHROME,
   appearance: {mode: 'dark', light: 'paper', dark: 'ink'},
   listings: [listed([server('running')])],
   recent: [
@@ -73,6 +75,7 @@ async function check(page: Page, name: string): Promise<void> {
 
 async function openRun(page: Page): Promise<void> {
   await addInitScripts(page, [
+    initScript(installFakeChrome, SEED),
     initScript(installFakeBridge, SEED),
     initScript(installFakeProjectRuns, SEED),
     initScript(installFakeMachines, SEED),
@@ -95,14 +98,14 @@ test('the agents tree shows who started whom, and an agent opens beside it with 
   const agents = page.getByRole('listbox', {name: 'Agents'});
   await expect(agents.getByRole('option')).toHaveCount(6);
   await expect(agents.getByRole('option').nth(0)).toContainText('Planner');
-  await expect(agents.getByRole('option', {name: /judge/i})).toContainText(
-    'also started by Implementer',
+  await expect(agents.getByRole('option', {name: /reviewer/i})).toContainText(
+    'also started by Builder',
   );
   await expect(page.getByText('agent · what it is doing')).toBeVisible();
   await check(page, 'ink-agents');
 
   await agents
-    .getByRole('option', {name: /^Done Implementer/})
+    .getByRole('option', {name: /^Done Builder/})
     .first()
     .click();
   const turns = page.getByRole('listbox', {name: 'Turns'});
@@ -133,7 +136,7 @@ test('the run, each agent and each turn name the tokens they spent', async ({pag
   await expect(page.getByText('in (cached)', {exact: true})).toBeVisible();
   // Each agent's turns summed: the first implementer's one turn, the planner's one measured turn,
   // input with its cached share beside it, then output.
-  await expect(agents.getByRole('option', {name: /implementer/i}).nth(0)).toContainText(
+  await expect(agents.getByRole('option', {name: /builder/i}).nth(0)).toContainText(
     '1.2M 1.1M cached',
   );
   await expect(agents.getByRole('option', {name: /planner/i}).nth(0)).toContainText('182.4k');
@@ -141,7 +144,7 @@ test('the run, each agent and each turn name the tokens they spent', async ({pag
 
   // W5's implementer: its pane totals it, and its turn opens with its tokens in the header.
   await agents
-    .getByRole('option', {name: /implementer/i})
+    .getByRole('option', {name: /builder/i})
     .nth(1)
     .click();
   await expect(page.getByText('in 48.3k (31k cached) · out 2.6k').first()).toBeVisible();
@@ -158,10 +161,10 @@ test.describe('at 1000px', () => {
     await expect(page.getByText('in 1.5M (1.3M cached) · out 51.1k')).toBeVisible();
     await page.getByRole('radiogroup', {name: 'Show'}).getByText('Agents').click();
     const agents = page.getByRole('listbox', {name: 'Agents'});
-    await expect(agents.getByRole('option', {name: /implementer/i}).nth(0)).toContainText('1.2M');
+    await expect(agents.getByRole('option', {name: /builder/i}).nth(0)).toContainText('1.2M');
     await check(page, 'ink-agents-tokens-1000');
     await agents
-      .getByRole('option', {name: /implementer/i})
+      .getByRole('option', {name: /builder/i})
       .nth(1)
       .click();
     await check(page, 'ink-agent-tokens-1000');

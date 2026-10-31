@@ -114,7 +114,7 @@ describe('UsageView', () => {
     expect(view.textContent).toContain('$7.00');
     expect(rows(view)).toEqual([
       expect.stringMatching(/^Planner/),
-      expect.stringMatching(/^Implementer/),
+      expect.stringMatching(/^Builder/),
       expect.stringMatching(/^Run total.*100%/),
     ]);
   });
@@ -155,12 +155,12 @@ describe('UsageView', () => {
     );
     expect(rows(open).map(row => row.slice(0, 12))).toEqual([
       expect.stringMatching(/^Planner/),
-      expect.stringMatching(/^Implementer/),
+      expect.stringMatching(/^Builder/),
       expect.stringMatching(/^GPT-6 Luna/),
       expect.stringMatching(/^sonnet-5/),
       expect.stringMatching(/^Run total/),
     ]);
-    await press(open.querySelector('button[aria-label="Collapse Implementer"]'));
+    await press(open.querySelector('button[aria-label="Collapse Builder"]'));
     expect(sent).toEqual([{...USAGE_CONTROLS_DEFAULT, within: 'model', open: []}]);
   });
 

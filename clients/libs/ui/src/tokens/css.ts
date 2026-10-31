@@ -28,7 +28,6 @@ export const LEGACY_ALIASES: Readonly<Record<string, string>> = {
   'accent-text': 'var(--bg)',
   hover: 'var(--panel-2)',
   selected: 'var(--selection)',
-  titlebar: 'var(--control)',
 };
 
 const TONES = ['accent', 'ok', 'warn', 'err'] as const;

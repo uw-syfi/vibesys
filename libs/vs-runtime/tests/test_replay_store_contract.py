@@ -1,48 +1,89 @@
-"""The recorder's persistence contract against memory, local CAS and native log."""
+"""The run.log replay store's persistence contract against memory, local CAS and native log."""
 
 from collections.abc import Iterator
-from contextlib import AbstractContextManager, ExitStack, contextmanager, suppress
+from contextlib import AbstractContextManager, contextmanager, suppress
 from functools import partial
 from pathlib import Path
 from typing import Protocol
 
 import pytest
+from protobuf import Oneof
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
-from vs_core.api.replay import ReplayCall, ReplayFlow, SemanticKey
 from vs_faults.api import Boundary, FaultGate, FaultPlan, FaultRule, HostCrashError, HostFault
 from vs_project.api import (
     CommitFault,
     Committed,
     Conflict,
+    ConflictReason,
     FakeStateStore,
     Project,
-    StateStore,
     StoredEnvelope,
+    StoreFence,
 )
-from vs_proto.api import Ended, EpochStarted, Outcome, core_common, replay
+from vs_proto.api import EpochStarted, Lifecycle, Parked, Record
 from vs_proto.api import ReplayStore as Records
-from vs_runlog.api import FileRunLogWriter, OsFileSync, open_run_log
-from vs_runtime.api.replay import (
-    FakeReplayExecutor,
-    ReplayCommitError,
-    ReplayCompleted,
-    ReplayEnding,
-    ReplayLaunch,
-    ReplayResult,
-    ReplayRunHost,
-    ReplayRuntime,
-    ReplayStore,
-    RunLogReplayStore,
-    run_replay,
-)
+from vs_runlog.api import FileRunLogWriter, FileSync, OsFileSync, open_run_log
+from vs_runtime.api.replay import REPLAY_STORE_SCHEMA_VERSION, ReplayStore, RunLogReplayStore
 from vs_sim.api.testing import Sim, SimThreads, swept
+
+RUN = "run-a"
+LENGTH = 4
 
 
 class StoreFactory(Protocol):
     def __call__(
         self, fault_plan: tuple[CommitFault | None, ...] = ()
     ) -> AbstractContextManager[ReplayStore]: ...
+
+
+def chain(count: int) -> tuple[Record, ...]:
+    """A dense run.log prefix: the epoch start, then parked lifecycle records."""
+    return tuple(
+        Record(
+            seq=seq,
+            epoch=1,
+            clock=0.0,
+            at=Timestamp(),
+            body=Oneof("epoch_started", EpochStarted(run_id=RUN, epoch=1))
+            if seq == 1
+            else Oneof("lifecycle", Lifecycle(state=Oneof("parked", Parked()))),
+        )
+        for seq in range(1, count + 1)
+    )
+
+
+def envelope(count: int) -> StoredEnvelope:
+    return StoredEnvelope(
+        revision=count - 1,
+        schema_version=REPLAY_STORE_SCHEMA_VERSION,
+        payload=Records(records=list(chain(count))).to_binary(),
+    )
+
+
+def committed(store: ReplayStore) -> int:
+    stored = store.load()
+    if stored is None:
+        return 0
+    assert isinstance(stored, StoredEnvelope)
+    return stored.revision + 1
+
+
+def extend(store: ReplayStore, fence: StoreFence, upto: int = LENGTH, now: float = 0) -> bool:
+    """Commit the missing records one at a time; false at the first unconfirmed commit."""
+    for count in range(committed(store) + 1, upto + 1):
+        revision = None if count == 1 else count - 2
+        if not isinstance(store.commit(revision, envelope(count), fence, now), Committed):
+            return False
+    return True
+
+
+def log_writer(
+    project: Project, sim: Sim, sync: FileSync | None = None, threads: SimThreads | None = None
+) -> FileRunLogWriter:
+    path = project.run_log_path_for(project.root, RUN)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return FileRunLogWriter(path, clock=sim.clock, threads=threads or sim.threads(), sync=sync)
 
 
 @pytest.fixture(params=["fake", "local", "runlog"])
@@ -59,317 +100,199 @@ def stores(request: pytest.FixtureRequest, tmp_path: Path, sim: Sim) -> StoreFac
         if request.param == "fake":
             yield FakeStateStore(fault_plan=fault_plan)
         elif request.param == "local":
-            yield project.state_store("run-a", fault_plan=fault_plan)
+            yield project.state_store(RUN, fault_plan=fault_plan)
         else:
-            path = project.run_log_path_for(project.root, "run-a")
-            path.parent.mkdir(parents=True, exist_ok=True)
-            threads = sim.threads()
-            with FileRunLogWriter(path, clock=sim.clock, threads=threads) as writer:
-                yield RunLogReplayStore(writer, project.state_store("run-a", fault_plan=fault_plan))
+            with log_writer(project, sim) as writer:
+                yield RunLogReplayStore(writer, project.state_store(RUN, fault_plan=fault_plan))
 
     return opened
 
 
-def composed(store: ReplayStore, executor: FakeReplayExecutor, sim: Sim) -> ReplayRunHost:
-    return ReplayRunHost(
-        runtime(store),
-        executor,
-        sim.clock,
-        lambda _: ReplayEnding(
-            Ended(outcome=Outcome.FINISHED, summary="Measured.", resumable=True)
-        ),
-    )
+@pytest.mark.parametrize("count", range(1, LENGTH + 1))
+def test_every_store_loads_exactly_the_records_committed(stores: StoreFactory, count: int) -> None:
+    with stores() as store:
+        fence = store.acquire("host-a", 0, 30)
+        assert fence is not None
+        assert extend(store, fence, count)
+        assert store.load() == envelope(count)
+        assert store.release(fence, 0)
 
 
-async def test_native_fsync_crashes_reconcile_publication_without_repeating_paid_work(
-    tmp_path: Path, sim: Sim
+def test_stale_writer_cannot_commit(stores: StoreFactory) -> None:
+    with stores() as store:
+        first = store.acquire("host-a", 0, 30)
+        assert first is not None
+        assert extend(store, first, 2)
+        assert store.release(first, 0)
+        second = store.acquire("host-b", 0, 30)
+        assert second is not None
+        outcome = store.commit(1, envelope(3), first, 0)
+        assert isinstance(outcome, Conflict)
+        assert outcome.reason is ConflictReason.FENCE
+        assert store.load() == envelope(2)
+        assert store.release(second, 0)
+
+
+def test_revision_conflict_publishes_nothing(stores: StoreFactory) -> None:
+    with stores() as store:
+        fence = store.acquire("host-a", 0, 30)
+        assert fence is not None
+        assert extend(store, fence, 2)
+        outcome = store.commit(None, envelope(1), fence, 0)
+        assert isinstance(outcome, Conflict)
+        assert outcome.reason is ConflictReason.REVISION
+        assert store.load() == envelope(2)
+        assert store.release(fence, 0)
+
+
+@pytest.mark.parametrize("fault", list(CommitFault))
+def test_a_faulted_commit_never_loses_or_duplicates_a_record(
+    stores: StoreFactory, fault: CommitFault
 ) -> None:
-    async def once(
-        project: Project, gate: FaultGate, executor: FakeReplayExecutor, request_id: str
-    ) -> ReplayRunHost:
-        path = project.run_log_path_for(project.root, "run-a")
-        path.parent.mkdir(parents=True, exist_ok=True)
+    for boundary in range(LENGTH):
+        with stores((None,) * boundary + (fault,)) as store:
+            fence = store.acquire("host-a", 0, 30)
+            assert fence is not None
+            with suppress(OSError):
+                extend(store, fence)
+            store.release(fence, 0)
+            resumed = store.acquire("host-a", 0, 30)
+            assert resumed is not None
+            assert extend(store, resumed)
+            assert store.load() == envelope(LENGTH)
+
+
+@pytest.mark.parametrize("fault", list(HostFault))
+def test_a_fault_at_any_fsync_resumes_to_the_same_log(
+    tmp_path: Path, sim: Sim, fault: HostFault
+) -> None:
+    def settle(project: Project, gate: FaultGate, now: float) -> None:
         real = OsFileSync()
 
         def sync(descriptor: int, /) -> None:
             gate.around(Boundary.DURABLE_WRITE, "fsync", partial(real, descriptor))
 
-        threads = sim.threads()
-        with FileRunLogWriter(path, clock=sim.clock, threads=threads, sync=sync) as writer:
-            binding = RunLogReplayStore(writer, project.state_store("run-a"))
-            host = composed(binding, executor, sim)
-            assert await run_replay(host, launch(request_id)) == ReplayCompleted("measured")
-            return host
+        with log_writer(project, sim, sync) as writer:
+            store = RunLogReplayStore(writer, project.state_store(RUN))
+            fence = store.acquire("host-a", now, 30)
+            assert fence is not None
+            extend(store, fence, now=now)
 
-    def executor() -> FakeReplayExecutor:
-        return FakeReplayExecutor(
-            lambda _: ReplayResult(core_common.Identity(root="measured"), paid=True, cost_usd=2)
-        )
-
-    baseline = tmp_path / "baseline"
-    baseline.mkdir()
-    gate = FaultGate(FaultPlan(seed=0))
-    await once(Project.open(baseline), gate, executor(), "baseline")
-    boundaries = len(gate.calls)
-    for offset in swept(boundaries, sample=3):
+    baseline = FaultGate(FaultPlan(seed=0))
+    (tmp_path / "baseline").mkdir()
+    settle(Project.open(tmp_path / "baseline"), baseline, 0)
+    for offset in swept(len(baseline.calls), sample=4):
         root = tmp_path / f"case-{offset}"
         root.mkdir()
         project = Project.open(root)
-        gate = FaultGate(
-            FaultPlan(
-                seed=0,
-                rules=(
-                    FaultRule(
-                        boundary=Boundary.DURABLE_WRITE,
-                        target="fsync",
-                        at=offset + 1,
-                        fault=HostFault.CRASH_AFTER,
-                    ),
-                ),
-            )
+        rule = FaultRule(
+            boundary=Boundary.DURABLE_WRITE, target="fsync", at=offset + 1, fault=fault
         )
-        owner = executor()
-        with suppress(HostCrashError):
-            await once(project, gate, owner, "first")
+        gate = FaultGate(FaultPlan(seed=0, rules=(rule,)))
+        with suppress(HostCrashError, OSError):
+            settle(project, gate, 0)
         gate.heal()
-        resumed = await once(project, gate, owner, "resume")
-        assert len(owner.invocations) == 1
-        assert resumed.runtime.accounting.lifetime_completed == 1
-        assert resumed.runtime.accounting.reported_cost_usd == 2
+        settle(project, gate, 100)  # The crashed process's lease has lapsed.
+        with log_writer(project, sim) as writer:
+            assert RunLogReplayStore(writer, project.state_store(RUN)).load() == envelope(LENGTH)
 
 
-@pytest.mark.parametrize("fault", list(CommitFault))
-async def test_crash_sweep_keeps_one_paid_observation_across_every_store(
-    stores: StoreFactory, sim: Sim, fault: CommitFault
-) -> None:
-    with stores() as baseline:
-        executor = FakeReplayExecutor(
-            lambda _: ReplayResult(core_common.Identity(root="measured"), paid=True, cost_usd=2)
-        )
-        original = composed(baseline, executor, sim)
-        await run_replay(original, launch("baseline"))
-        boundaries = original.runtime.archive.sequence
-    for boundary in swept(boundaries, sample=3):
-        with stores((None,) * boundary + (fault,)) as store:
-            executor = FakeReplayExecutor(
-                lambda _: ReplayResult(core_common.Identity(root="measured"), paid=True, cost_usd=2)
-            )
-            with suppress(ReplayCommitError, OSError):
-                await run_replay(composed(store, executor, sim), launch(f"first-{boundary}"))
-            resumed = composed(store, executor, sim)
-            assert await run_replay(resumed, launch(f"resume-{boundary}")) == ReplayCompleted(
-                "measured"
-            )
-            assert len(executor.invocations) == 1
-            assert resumed.runtime.accounting.lifetime_completed == 1
-            assert resumed.runtime.accounting.paid_operations == 1
-            assert resumed.runtime.accounting.reported_cost_usd == 2
-
-
-def launch(request: str) -> ReplayLaunch:
-    return ReplayLaunch(EpochStarted(run_id="run-a"), request, "host-a", 30)
-
-
-async def root(ctx: ReplayFlow) -> str:
-    async with ctx.iteration("round", 1):
-        result = await ctx.call(
-            ReplayCall(
-                SemanticKey("measure"),
-                core_common.Identity(root="candidate"),
-                "test.v1",
-                replay.ReplayPolicy(reply_type=core_common.Identity.desc().type_name),
-                core_common.Identity,
-            )
-        )
-    return result.root
-
-
-def runtime(store: ReplayStore) -> ReplayRuntime:
-    return ReplayRuntime(store, root, replay.ReplayAllowance(iterations=2))
-
-
-@pytest.mark.parametrize("kind", ["fake", "local", "runlog"])
-def test_retained_formats_have_the_same_import_prerequisite(
-    kind: str, tmp_path: Path, sim: Sim
-) -> None:
+def written_run(tmp_path: Path, sim: Sim) -> tuple[Project, Path]:
     project = Project.open(tmp_path)
-    authority: StateStore = FakeStateStore() if kind == "fake" else project.state_store("run-a")
-    fence = authority.acquire("host-a", 0, 30)
-    assert fence is not None
-    old = StoredEnvelope(revision=0, schema_version=1, payload=b"retained-format")
-    assert isinstance(authority.commit(None, old, fence, 0), Committed)
-    assert authority.release(fence, 0)
-    with ExitStack() as resources:
-        store: ReplayStore = authority
-        if kind == "runlog":
-            path = project.run_log_path_for(tmp_path, "run-a")
-            path.parent.mkdir(parents=True, exist_ok=True)
-            threads = sim.threads()
-            writer = resources.enter_context(
-                FileRunLogWriter(path, clock=sim.clock, threads=threads)
-            )
-            store = RunLogReplayStore(writer, authority)
-        with pytest.raises(ReplayCommitError, match="facts-only import"):
-            runtime(store).start(launch("resume"), now=0, at=Timestamp())
-        assert authority.load() == old
-
-
-async def test_confirmed_prefix_replays_without_reexecuting(stores: StoreFactory, sim: Sim) -> None:
-    with stores() as store:
-        executor = FakeReplayExecutor(
-            lambda _: ReplayResult(core_common.Identity(root="measured"), paid=True, cost_usd=2)
-        )
-
-        def host() -> ReplayRunHost:
-            return ReplayRunHost(
-                runtime(store),
-                executor,
-                sim.clock,
-                lambda _: ReplayEnding(
-                    Ended(outcome=Outcome.FINISHED, summary="Measured.", resumable=True)
-                ),
-            )
-
-        assert await run_replay(host(), launch("first")) == ReplayCompleted("measured")
-        first = store.load()
-        assert isinstance(first, StoredEnvelope)
-        assert await run_replay(host(), launch("resume")) == ReplayCompleted("measured")
-        assert len(executor.invocations) == 1
-        resumed = store.load()
-        assert isinstance(resumed, StoredEnvelope)
-        assert resumed.revision > first.revision
-        assert resumed.payload.startswith(first.payload)
-
-
-def test_stale_writer_cannot_commit_or_dispatch(stores: StoreFactory) -> None:
-    with stores() as store:
-        first = runtime(store)
-        first.start(launch("first"), now=0, at=Timestamp())
-        previous = store.load()
-        assert isinstance(previous, StoredEnvelope)
-        first.close(now=0)
-        fence = store.acquire("host-b", 0, 30)
+    with log_writer(project, sim) as writer:
+        store = RunLogReplayStore(writer, project.state_store(RUN))
+        fence = store.acquire("host-a", 0, 30)
         assert fence is not None
-        stale = store.acquire("host-a", 0, 30)
-        assert stale is None
-        stored = store.load()
-        assert stored == previous
+        assert extend(store, fence)
         assert store.release(fence, 0)
+    return project, project.run_log_path_for(tmp_path, RUN)
 
 
-def test_revision_conflict_publishes_nothing(stores: StoreFactory) -> None:
-    with stores() as store:
-        shell = runtime(store)
-        shell.start(launch("first"), now=0, at=Timestamp())
-        shell.close(now=0)
-        stored = store.load()
-        assert isinstance(stored, StoredEnvelope)
-        fence = store.acquire("host-b", 0, 30)
-        assert fence is not None
-        outcome = store.commit(None, stored, fence, 0)
-        assert isinstance(outcome, Conflict)
-        assert store.load() == stored
-        assert store.release(fence, 0)
-
-
-def _written_run(tmp_path: Path) -> tuple[Project, Path, bytes]:
-    project = Project.open(tmp_path)
-    path = project.run_log_path_for(tmp_path, "run-a")
-    path.parent.mkdir(parents=True, exist_ok=True)
+def reload(project: Project) -> StoredEnvelope | None:
     threads = SimThreads()
+    path = project.run_log_path_for(project.root, RUN)
     with FileRunLogWriter(path, clock=threads.clock, threads=threads) as writer:
-        shell = runtime(RunLogReplayStore(writer, project.state_store("run-a")))
-        shell.start(launch("first"), now=0, at=Timestamp())
-        shell.prepare(now=0, at=Timestamp())
-        expected = shell.archive.encode()
-        shell.close(now=0)
-    return project, path, expected
-
-
-def _reload(project: Project, path: Path) -> StoredEnvelope | None:
-    threads = SimThreads()
-    with FileRunLogWriter(path, clock=threads.clock, threads=threads) as writer:
-        stored = RunLogReplayStore(writer, project.state_store("run-a")).load()
+        stored = RunLogReplayStore(writer, project.state_store(RUN)).load()
     assert stored is None or isinstance(stored, StoredEnvelope)
     return stored
 
 
-def test_run_log_alone_holds_the_records_and_survives_deleted_caches(tmp_path: Path) -> None:
-    project, path, expected = _written_run(tmp_path)
-    fence = project.state_store("run-a").load()
-    assert fence == StoredEnvelope(revision=0, schema_version=2, payload=b"")
+def test_run_log_alone_holds_the_records_and_survives_deleted_caches(
+    tmp_path: Path, sim: Sim
+) -> None:
+    project, path = written_run(tmp_path, sim)
+    assert project.state_store(RUN).load() == StoredEnvelope(
+        revision=0, schema_version=REPLAY_STORE_SCHEMA_VERSION, payload=b""
+    )
     with open_run_log(path) as reader:
-        assert Records(records=list(reader)).to_binary() == expected
+        assert Records(records=list(reader)).to_binary() == envelope(LENGTH).payload
     path.with_name("run.head").unlink(missing_ok=True)
     keyframes = path.parent / "keyframes"
-    retained = list(keyframes.glob("*.pb"))
-    assert retained
-    for keyframe in retained:
+    for keyframe in keyframes.glob("*.pb"):
         keyframe.unlink()
-    keyframes.rmdir()
-    stored = _reload(project, path)
-    assert stored is not None
-    assert stored.payload == expected
+    assert reload(project) == envelope(LENGTH)
 
 
-def test_a_corrupt_log_fails_and_the_atomic_store_cannot_repair_it(tmp_path: Path) -> None:
-    project, path, _ = _written_run(tmp_path)
+def test_a_corrupt_log_fails_and_the_atomic_store_cannot_repair_it(
+    tmp_path: Path, sim: Sim
+) -> None:
+    project, path = written_run(tmp_path, sim)
     data = bytearray(path.read_bytes())
     data[12] ^= 0xFF
     path.write_bytes(bytes(data))
     with pytest.raises(ValueError, match=r"corrupt run\.log"):
-        _reload(project, path)
-    assert project.state_store("run-a").load() == StoredEnvelope(
-        revision=0, schema_version=2, payload=b""
+        reload(project)
+    assert project.state_store(RUN).load() == StoredEnvelope(
+        revision=0, schema_version=REPLAY_STORE_SCHEMA_VERSION, payload=b""
     )
 
 
-def test_a_torn_final_frame_recovers_the_complete_record_prefix(tmp_path: Path) -> None:
-    project, path, expected = _written_run(tmp_path)
+def test_a_torn_final_frame_recovers_the_complete_record_prefix(tmp_path: Path, sim: Sim) -> None:
+    project, path = written_run(tmp_path, sim)
     with path.open("ab") as stream:
         stream.write(b"\x05\x00")
-    stored = _reload(project, path)
-    assert stored is not None
-    assert stored.payload == expected
+    assert reload(project) == envelope(LENGTH)
 
 
-def test_records_without_the_format_fence_grant_no_authority(tmp_path: Path) -> None:
+def test_records_without_the_format_fence_grant_no_authority(tmp_path: Path, sim: Sim) -> None:
     written = tmp_path / "written"
     written.mkdir()
-    _, path, _ = _written_run(written)
+    _, path = written_run(written, sim)
     unfenced = Project.open(tmp_path)
-    copied = unfenced.run_log_path_for(tmp_path, "run-a")
+    copied = unfenced.run_log_path_for(tmp_path, RUN)
     copied.parent.mkdir(parents=True, exist_ok=True)
     copied.write_bytes(path.read_bytes())
     with pytest.raises(ValueError, match="format fence"):
-        _reload(unfenced, copied)
+        reload(unfenced)
 
 
-def test_a_retained_positional_run_log_requires_facts_only_import(tmp_path: Path) -> None:
-    project, path, _ = _written_run(tmp_path)
-    store = project.state_store("run-a")
+def test_a_retained_positional_store_requires_facts_only_import(tmp_path: Path, sim: Sim) -> None:
+    project = Project.open(tmp_path)
+    store = project.state_store(RUN)
+    retained = StoredEnvelope(revision=0, schema_version=1, payload=b"positional")
     owner = store.acquire("host-a", 0, 30)
     assert owner is not None
-    retained = StoredEnvelope(revision=1, schema_version=1, payload=b"positional")
-    assert isinstance(store.commit(0, retained, owner, 0), Committed)
+    assert isinstance(store.commit(None, retained, owner, 0), Committed)
     assert store.release(owner, 0)
-    threads = SimThreads()
-    with (
-        FileRunLogWriter(path, clock=threads.clock, threads=threads) as writer,
-        pytest.raises(ReplayCommitError, match="facts-only import"),
-    ):
-        runtime(RunLogReplayStore(writer, store)).start(launch("resume"), now=0, at=Timestamp())
+    with log_writer(project, sim) as writer:
+        replay_store = RunLogReplayStore(writer, store)
+        fence = replay_store.acquire("host-a", 0, 30)
+        assert fence is not None
+        with pytest.raises(ValueError, match="facts-only import"):
+            replay_store.commit(None, envelope(1), fence, 0)
     assert store.load() == retained
 
 
-def test_a_keyed_archive_in_the_atomic_store_grants_no_authority(tmp_path: Path) -> None:
-    """Regression: an old P2 store archive must never replace run.log as the record authority."""
-    project, path, expected = _written_run(tmp_path)
-    store = project.state_store("run-a")
+def test_a_keyed_archive_in_the_atomic_store_grants_no_authority(tmp_path: Path, sim: Sim) -> None:
+    """Regression: an old store archive must never replace run.log as the record authority."""
+    project, _ = written_run(tmp_path, sim)
+    store = project.state_store(RUN)
     owner = store.acquire("host-a", 0, 30)
     assert owner is not None
-    archived = StoredEnvelope(revision=1, schema_version=2, payload=expected)
+    archived = StoredEnvelope(
+        revision=1, schema_version=REPLAY_STORE_SCHEMA_VERSION, payload=envelope(LENGTH).payload
+    )
     assert isinstance(store.commit(0, archived, owner, 0), Committed)
     assert store.release(owner, 0)
     with pytest.raises(ValueError, match=r"only run\.log may hold them"):
-        _reload(project, path)
+        reload(project)

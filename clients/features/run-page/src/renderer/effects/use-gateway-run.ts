@@ -6,6 +6,7 @@ import {getInitialSnapshot} from 'xstate';
 import {
   type GatewayRunContext,
   gatewayRunMachine,
+  isCatchUpBatch,
   loadView,
   logStreamToFollow,
   paintedSkeleton,
@@ -14,6 +15,7 @@ import {
   skeletonScreenState,
 } from '../../state/index.js';
 import {type GatewayRunPorts, startGatewayRun} from './gateway-run.js';
+import {pacedSnapshots} from './paced-snapshots.js';
 import {type RunPageAddress, useZoom} from './use-zoom.js';
 
 export function useGatewayRun(options: {
@@ -107,11 +109,17 @@ function useGatewayActor(seed: RunPageSeed, ports: GatewayRunPorts, schedule: Sc
     const started = startGatewayRun(ports, schedule, {
       seed: {...latestSeed.current, identity: {host, runId}},
     });
-    const subscription = started.subscribe(setSnapshot);
+    // The loader publishes after every batch; the page projects a catching-up read only so often.
+    const stopPacing = pacedSnapshots(
+      started,
+      schedule,
+      (next, previous) => isCatchUpBatch(previous?.context, next.context),
+      setSnapshot,
+    );
     setActor(started);
     setSnapshot(started.getSnapshot());
     return () => {
-      subscription.unsubscribe();
+      stopPacing();
       started.stop();
     };
   }, [ports, schedule, host, runId]);

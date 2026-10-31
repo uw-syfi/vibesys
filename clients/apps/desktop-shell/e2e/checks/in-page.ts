@@ -23,6 +23,9 @@ export type CheckId =
   | 'column-tops'
   | 'truncation-room'
   | 'focus-ring'
+  | 'chrome-clear'
+  | 'drag-region'
+  | 'bundled-font'
   | 'stability';
 
 export interface Violation {
@@ -910,6 +913,119 @@ export function columnTopsCheck(): Violation[] {
   return found;
 }
 
+/** A host fact about the window's own controls (`--chrome-*` on the root element), in pixels; 0 when unset. */
+function chromeFact(name: string): number {
+  return Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name)) || 0;
+}
+
+/**
+ * The rectangles the window's own controls cover: the top-left corner the macOS traffic lights sit
+ * in, and the strip across the top of the page the Windows and Linux controls are drawn over.
+ */
+function chromeRooms(): Box[] {
+  const page = document.querySelector('.vs-app-main')?.getBoundingClientRect();
+  const rooms: Box[] = [
+    {
+      left: 0,
+      top: 0,
+      right: chromeFact('--chrome-start-width'),
+      bottom: chromeFact('--chrome-start-height'),
+    },
+  ];
+  if (page !== undefined) {
+    rooms.push({
+      left: page.left,
+      top: 0,
+      right: innerWidth,
+      bottom: chromeFact('--chrome-end-height'),
+    });
+  }
+  return rooms.filter(room => room.right > room.left && room.bottom > room.top);
+}
+
+/** The controls a person presses, as drawn: a link, button, field, disclosure, or focusable element. */
+function controlsOf(): Element[] {
+  return [
+    ...document.querySelectorAll(
+      'a, button, input, select, textarea, summary, [role="button"], [tabindex]:not([tabindex="-1"])',
+    ),
+  ].filter(isShown);
+}
+
+/** What the window's own controls cover is clear: no text, control or picture is drawn there. */
+export function chromeClearCheck(): Violation[] {
+  const rooms = chromeRooms();
+  if (rooms.length === 0) return [];
+  const drawn = [
+    ...textBoxes().flatMap(({element, lines}) => lines.map(box => ({element, box}))),
+    ...[...controlsOf(), ...[...document.querySelectorAll('svg, img, canvas')].filter(isShown)].map(
+      element => ({element, box: boxOf(element.getBoundingClientRect())}),
+    ),
+  ];
+  const seen = new Set<Element>();
+  const found: Violation[] = [];
+  for (const {element, box} of drawn) {
+    if (seen.has(element) || !rooms.some(room => cut(box, room) !== null)) continue;
+    seen.add(element);
+    found.push({
+      check: 'chrome-clear',
+      message: `${describe(element)} is drawn where the window's own controls are`,
+      where: describe(element),
+    });
+  }
+  return found;
+}
+
+interface DragRegion {
+  readonly drag: boolean;
+  readonly box: Box;
+}
+
+/** The elements that mark the window's drag regions, in tree order: each is a drag or a carve-out. */
+function dragRegions(): DragRegion[] {
+  return [...document.body.querySelectorAll('*')].flatMap(element => {
+    const mode = getComputedStyle(element).getPropertyValue('-webkit-app-region').trim();
+    if ((mode !== 'drag' && mode !== 'no-drag') || !isShown(element)) return [];
+    return [{drag: mode === 'drag', box: boxOf(element.getBoundingClientRect())}];
+  });
+}
+
+/** Whether pressing at (x, y) moves the window: the last region there decides, as in the OS. */
+function dragsAt(regions: readonly DragRegion[], x: number, y: number): boolean {
+  let drag = false;
+  for (const {box, drag: marks} of regions) {
+    if (x >= box.left && x < box.right && y >= box.top && y < box.bottom) drag = marks;
+  }
+  return drag;
+}
+
+/** No control is in a drag region, where pressing it would move the window instead. */
+export function dragRegionCheck(): Violation[] {
+  const regions = dragRegions();
+  if (!regions.some(region => region.drag)) return [];
+  const found: Violation[] = [];
+  for (const element of controlsOf()) {
+    const clip = clipArea(element);
+    const seen = clip === null ? null : cut(boxOf(element.getBoundingClientRect()), clip);
+    if (seen === null) continue;
+    const points: [number, number][] = [
+      [seen.left + 1, seen.top + 1],
+      [seen.right - 1, seen.top + 1],
+      [seen.left + 1, seen.bottom - 1],
+      [seen.right - 1, seen.bottom - 1],
+      [(seen.left + seen.right) / 2, (seen.top + seen.bottom) / 2],
+    ];
+    if (points.some(([x, y]) => dragsAt(regions, x, y))) {
+      found.push({
+        check: 'drag-region',
+        message: `${describe(element)} is in the window's drag region, so pressing it moves the window`,
+        where: describe(element),
+      });
+    }
+  }
+  return found;
+}
+
 /** What `screen-check.ts` sends to the page ahead of a check. */
 export const HELPERS: readonly ((...args: never[]) => unknown)[] = [
   inCode,
@@ -949,4 +1065,9 @@ export const HELPERS: readonly ((...args: never[]) => unknown)[] = [
   takesRoomRight,
   roomRight,
   chartLabelProblems,
+  chromeFact,
+  chromeRooms,
+  controlsOf,
+  dragRegions,
+  dragsAt,
 ];

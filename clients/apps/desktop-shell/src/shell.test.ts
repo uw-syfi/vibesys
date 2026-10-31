@@ -1,6 +1,7 @@
 import {expect, test} from 'bun:test';
 import type {Screen} from '@vibesys/feature-app-shell/state';
 import type {PreferencesView, WelcomeBridge, WelcomeEvent} from '@vibesys/ipc';
+import {boardToasts} from '@vibesys/problems';
 import type {ThemeMode, ThemeName} from '@vibesys/ui/tokens';
 import fc from 'fast-check';
 import {createShellStores} from './shell.js';
@@ -416,6 +417,7 @@ test("a machine's Settings reading that failed while it was unreachable is read 
   const listing = {
     kind: 'unavailable' as const,
     host: 'ssh:gpu-box',
+    step: 'gateway' as const,
     connection: {kind: 'offline' as const, detail: 'down'},
   };
   stores.sidebar.store.dispatch({type: 'listing', listing});
@@ -427,4 +429,64 @@ test("a machine's Settings reading that failed while it was unreachable is read 
   await settleReads();
   expect(view()?.compute.kind).toBe('ready');
   expect(view()?.logins.kind).toBe('ready');
+});
+
+const APPEARANCE = {mode: 'dark', light: 'mist', dark: 'terminal'} as const;
+
+function storesOver(bridge: WelcomeBridge) {
+  return createShellStores(
+    bridge,
+    {mode: 'light', onChange: () => undefined},
+    {setAttribute: () => undefined},
+    () => () => undefined,
+    {
+      messages: {addEventListener: ignore, removeEventListener: ignore},
+      address: NO_ADDRESS,
+      now: () => 0,
+      session: () => {
+        throw new Error('this test opens no run');
+      },
+    },
+    {},
+  );
+}
+
+test('a failure a screen passes through reaches the window’s board, once, until it clears', async () => {
+  const refusing = {
+    ...fakeBridge(),
+    setAppearance: () =>
+      Promise.resolve({ok: false as const, error: 'The disk is full.', authNeeded: false}),
+  } as WelcomeBridge;
+  const stores = storesOver(refusing);
+  await settle();
+  const shown = () =>
+    boardToasts(stores.problems.getState()).map(toast => `${toast.title} · ${toast.detail}`);
+  expect(shown()).toEqual([]);
+  const save = (): void =>
+    stores.settings.dispatch({
+      type: 'change',
+      change: {kind: 'appearance', appearance: APPEARANCE},
+    });
+  save();
+  await settle();
+  expect(shown()).toEqual(['Could not save the change. · The disk is full.']);
+  stores.problems.dispatch({type: 'dismiss', id: 'settings/save'});
+  expect(shown()).toEqual([]);
+  // The next change clears the problem and fails again: it is new, so it is shown again.
+  save();
+  await settle();
+  expect(shown()).toEqual(['Could not save the change. · The disk is full.']);
+});
+
+test('machines that cannot be listed are reported with the machines store’s words', async () => {
+  const refusing = {
+    ...fakeBridge(),
+    machines: () =>
+      Promise.resolve({ok: false as const, error: 'hosts.json is unreadable.', authNeeded: false}),
+  } as WelcomeBridge;
+  const stores = storesOver(refusing);
+  await settle();
+  expect(boardToasts(stores.problems.getState())).toMatchObject([
+    {id: 'machines/list', tone: 'err', title: 'The machines could not be read'},
+  ]);
 });

@@ -5,9 +5,11 @@ import {
   type FakeBridgeSeed,
   type FakeWindows,
   installFakeBridge,
+  installFakeChrome,
   installFakeMachines,
   installFakeProjectRuns,
   installFakeWindows,
+  MAC_CHROME,
 } from './fake-bridge.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {appendJourney, journeyFixture, journeyScript, transitionJourney} from './journey-world.js';
@@ -50,7 +52,7 @@ function listed(live: unknown[], ended: unknown[] = []): Record<string, unknown>
 
 const SEED: FakeBridgeSeed = {
   theme: 'ink',
-  chromeInset: {width: 84, height: 40},
+  chromeInset: MAC_CHROME,
   appearance: {mode: 'dark', light: 'paper', dark: 'ink'},
   listings: [listed([server('running')])],
   recent: [
@@ -84,6 +86,7 @@ async function check(page: Page, name: string): Promise<void> {
 
 async function openRun(page: Page, live = false, server: RunFixture = SERVER): Promise<void> {
   await addInitScripts(page, [
+    initScript(installFakeChrome, SEED),
     initScript(installFakeBridge, SEED),
     initScript(installFakeProjectRuns, SEED),
     initScript(installFakeMachines, SEED),
@@ -132,7 +135,7 @@ test('every level opens from the keyboard alone, and Escape walks back', async (
   const steps = page.getByRole('listbox', {name: /steps$/});
   await tabInto(page, steps);
   await page.keyboard.press('Home');
-  const implementer = steps.getByRole('option', {name: /implementer/i}).first();
+  const implementer = steps.getByRole('option', {name: /builder/i}).first();
   for (let press = 0; press < 20; press += 1) {
     if (await implementer.evaluate(element => element === document.activeElement)) break;
     await page.keyboard.press('ArrowDown');
@@ -208,7 +211,7 @@ test('every level opens by click and walks back by Escape, the crumbs and Back',
   // Level 2: a step beside the idea's steps.
   const steps = page.getByRole('listbox', {name: /steps$/});
   await steps
-    .getByRole('option', {name: /implementer/i})
+    .getByRole('option', {name: /builder/i})
     .first()
     .click();
   // The turn reads as narrative: thinking and text first, the tool call folded into one line.
@@ -326,7 +329,7 @@ test('the performance row is the same element, in the same place and size, at ev
   await unchanged();
   await page
     .getByRole('listbox', {name: /steps$/})
-    .getByRole('option', {name: /implementer/i})
+    .getByRole('option', {name: /builder/i})
     .first()
     .click();
   await expect(page.getByRole('region', {name: 'Agent turn'})).toBeVisible();
@@ -513,6 +516,7 @@ test('the scrubber replays the run’s ideas at an earlier event and returns to 
     ],
   );
   await transitionJourney(page, 'trace', 'stopped');
+  await page.locator('.vs-banner').getByRole('button', {name: 'Show details'}).click();
   await expect(page.getByText('Stopped by you.')).toBeVisible();
   await check(page, 'ink-run-ended');
   // The banner's View logs is a zoom the address follows too.
@@ -643,7 +647,7 @@ test('a live turn keeps its scroll position and its element as events arrive', a
     .click();
   await page
     .getByRole('listbox', {name: /steps$/})
-    .getByRole('option', {name: /implementer/i})
+    .getByRole('option', {name: /builder/i})
     .first()
     .click();
   let sequence = journeyFixture('live').liveAfter ?? 0;

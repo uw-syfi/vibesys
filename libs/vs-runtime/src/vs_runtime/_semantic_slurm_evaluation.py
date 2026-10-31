@@ -257,6 +257,30 @@ class SemanticSlurmEvaluationExecutor:
         execution = await self._execution(handle_id, record, fresh=existing is None)
         await execution.executor.submit(provider_request, handle_id=handle_id)
 
+    async def ledger_key(self, request: EvaluationRequest) -> str:
+        """The key the evaluation ledger holds this request's job under, without submitting it.
+
+        The key hashes the candidate's bytes, so this opens a candidate worktree at the
+        request's revision, reads its key, and discards it again: a process that holds
+        only the request finds the job an earlier process submitted. Raises
+        ``ExecutorRejectedError`` for a request that could never have run, which left no
+        job, and ``ValueError`` when no ledger is configured.
+        """
+        try:
+            provider_request = self._provider_request(request)
+            record = self._record(request)
+        except ValueError as error:
+            raise ExecutorRejectedError(str(error)) from error
+        if not await self._workspaces.root.has_revision(record.snapshot):
+            message = f"candidate revision {record.snapshot!r} is not a commit of this run"
+            raise ExecutorRejectedError(message)
+        workspace = await self._workspaces.create_measured_candidate(record.snapshot)
+        try:
+            executor = self._make_executor(workspace.path, candidate=record.snapshot)
+            return await executor.ledger_key(provider_request)
+        finally:
+            await workspace.discard()
+
     async def inspect_only(self, handle_id: str) -> ExecutorObservation | None:
         """Observe durable provider work without recreating a workspace or recovery task."""
         record = self._load(handle_id)

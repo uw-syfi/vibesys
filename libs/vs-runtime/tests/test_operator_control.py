@@ -119,9 +119,11 @@ _REVIEWED_FIELDS = frozenset(
         ("pause_now", "control_id", "string"),
         ("pause_now", "action", "string"),
         ("pause_now", "expected_epoch", "integer?"),
+        ("pause_now", "drain_seconds", "number?"),
         ("pause", "control_id", "string"),
         ("pause", "action", "string"),
         ("pause", "expected_epoch", "integer?"),
+        ("pause", "drain_seconds", "number?"),
         ("resume", "control_id", "string"),
         ("resume", "action", "string"),
         ("resume", "fallback", "boolean"),
@@ -143,7 +145,7 @@ A steer changes what agents are told. ``cancel_attempt`` and ``cancel_item`` cha
 selection: a cancelled attempt is never judged, so it can win nothing, and whoever can reach
 a control ingress can aim one at a rival (``docs/contributing/sandboxing.md`` says which
 agent confinement leaves the control socket reachable). ``set_max_parallel`` only lowers how
-much runs at once. No field here carries an evaluation command, a checker, a trust rule or a
+much runs at once. ``drain_seconds`` only bounds how long a pause waits. No field here carries an evaluation command, a checker, a trust rule or a
 resource partition. A new field fails ``test_every_control_field_is_reviewed`` until it is
 added here.
 """

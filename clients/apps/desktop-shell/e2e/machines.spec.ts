@@ -4,13 +4,20 @@ import {rawTextOf} from './checks/screen-check.js';
 import {
   type FakeBridgeSeed,
   installFakeBridge,
+  installFakeChrome,
   installFakeMachines,
   installFakeNewRun,
+  MAC_CHROME,
 } from './fake-bridge.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 
 /** Where the journey's Ink screenshots go, when `MACHINES_SCREENSHOTS` names a directory. */
 const SHOTS = process.env['MACHINES_SCREENSHOTS'];
+
+/** Opens the banner on the page: its detail is behind its one-line title. */
+async function openBanner(page: Page): Promise<void> {
+  await page.locator('.vs-banner').getByRole('button', {name: 'Show details'}).first().click();
+}
 
 const FOUND = {
   state: 'found',
@@ -23,7 +30,7 @@ const FOUND = {
 
 const SEED: FakeBridgeSeed = {
   theme: 'ink',
-  chromeInset: {width: 84, height: 40},
+  chromeInset: MAC_CHROME,
   appearance: {mode: 'dark', light: 'paper', dark: 'ink'},
   listings: [],
   recent: [],
@@ -64,6 +71,7 @@ const row = (page: Page, name: string) => machineList(page).getByRole('treeitem'
 
 async function openMachines(page: Page, seed: FakeBridgeSeed = SEED): Promise<void> {
   await addInitScripts(page, [
+    initScript(installFakeChrome, seed),
     initScript(installFakeBridge, seed),
     initScript(installFakeMachines, seed),
     initScript(installFakeNewRun, seed),
@@ -104,7 +112,9 @@ test('machines show their status from their facts, and each problem carries its 
 
   // A missing checkout is fixed inline: its field is open with the old path.
   await row(page, 'host-b').click();
-  await expect(page.getByTitle(/^Nothing is at ~\/vibesys on host-b any more\./)).toBeVisible();
+  await openBanner(page);
+  // The checkout's path is shown by its last name only.
+  await expect(page.getByText(/^Nothing is at vibesys on host-b any more\./)).toBeVisible();
   const fix = page.getByRole('combobox', {name: 'VibeSys checkout on host-b'});
   await expect(fix).toHaveValue('~/vibesys');
   await shoot(page, 'ink-checkout-not-found');
@@ -118,8 +128,9 @@ test('machines show their status from their facts, and each problem carries its 
 
   // Sign in is the connection's own action.
   await row(page, 'host-a').click();
+  await openBanner(page);
   await expect(
-    page.getByTitle('The app couldn’t connect: your SSH key needs its passphrase.'),
+    page.getByText('The app couldn’t connect: your SSH key needs its passphrase.'),
   ).toBeVisible();
   await shoot(page, 'ink-sign-in');
   await page.getByRole('button', {name: 'Sign in', exact: true}).click();
@@ -188,7 +199,8 @@ test('a machine whose VibeSys lacks what the app needs shows Needs an update, no
   await expect(row(page, 'host-a')).toContainText('Needs an update');
   await expect(row(page, 'host-a')).not.toContainText('Ready');
   await row(page, 'host-a').click();
-  await expect(page.getByTitle('VibeSys on host-a needs an update')).toBeVisible();
+  await openBanner(page);
+  await expect(page.getByText('VibeSys on host-a needs an update')).toBeVisible();
   expect(await rawTextOf(page)).toEqual([]);
 });
 
@@ -203,6 +215,7 @@ test('Escape closes Add a machine, which has the focus as it opens, and no empty
 }) => {
   const none: FakeBridgeSeed = {...SEED, machines: []};
   await addInitScripts(page, [
+    initScript(installFakeChrome, none),
     initScript(installFakeBridge, none),
     initScript(installFakeMachines, none),
     initScript(installFakeNewRun, none),

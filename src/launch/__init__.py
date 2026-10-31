@@ -7,7 +7,7 @@ receive the resulting contracts and never import this package.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING, cast
 
@@ -26,7 +26,7 @@ from vs_project.api import Git, generate_run_id
 from vs_runtime.api.infrastructure import EnvironmentSystem
 from vs_runtime.api.wiring import InProcessRuns
 from vs_sandbox.api import SubprocessDockerCli, create_compute_backend
-from vs_sim.api import ProcessesProbe, utc_datetime
+from vs_sim.api import NoProcessTable, ProcessesProbe, utc_datetime
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -50,7 +50,14 @@ if TYPE_CHECKING:
     from vs_runtime.api.core import RunTiming
     from vs_runtime.api.infrastructure import RunState, StopTimer
     from vs_sandbox.api import ComputeBackendImpl
-    from vs_sim.api import BlockingRunner, Network, PipedProcessLauncher, Processes, Threads
+    from vs_sim.api import (
+        BlockingRunner,
+        Network,
+        PipedProcessLauncher,
+        Processes,
+        ProcessTable,
+        Threads,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +95,11 @@ class LaunchSettings:
     """Checks native profiler availability; ``None`` probes the host through ``processes``."""
     login_environment: Callable[[], Mapping[str, str]] | None = None
     """Reads the user's login shell environment; ``None`` reads it as provider CLIs are found."""
+    process_table: ProcessTable = field(default_factory=NoProcessTable)
+    """Finds and ends a host agent's processes; the entrypoint builds the real one.
+
+    The default has none, so clearing a host step answers that it is unavailable.
+    """
 
 
 def create_session(
@@ -195,6 +207,7 @@ def _implementations(
             slurm_processes=(
                 settings.processes if settings.slurm_processes is None else settings.slurm_processes
             ),
+            process_table=settings.process_table,
         ),
         state_stores=settings.state_stores,
         agent_providers=tuple(sorted(SHIPPED_PROVIDERS)),

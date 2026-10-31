@@ -32,6 +32,7 @@ test('native startup logs keep their owners through running, draining and ending
   await expect(page.getByRole('log').getByText('16:36:20 INFO container ready')).toBeVisible();
   await page.screenshot({path: test.info().outputPath('draining.png')});
   await transitionJourney(page, 'startup-draining', 'startup-ended');
+  await page.locator('.vs-banner').getByRole('button', {name: 'Show details'}).first().click();
   await expect(
     page.getByText('W6’s benchmark timed out after 300 s.', {exact: true}),
   ).toBeVisible();

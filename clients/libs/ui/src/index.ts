@@ -6,7 +6,7 @@
  */
 export {applyTheme, type ThemeTarget} from './apply-theme.js';
 export {ActionPanel} from './components/action-panel.js';
-export {AppFrame, WindowFrame} from './components/app-frame.js';
+export {AppFrame} from './components/app-frame.js';
 export {BRAND_MARK_NAMES, BrandMark, type BrandMarkName} from './components/brand-mark.js';
 export {
   Button,
@@ -111,6 +111,7 @@ export {
   type Tradeoff,
 } from './components/pareto-frontier.js';
 export {type Completion, PathInput} from './components/path-input.js';
+export {withoutPaths} from './components/paths.js';
 export {
   type HeaderColumn,
   type ListHeader,
@@ -138,6 +139,7 @@ export {Sparkline, type SparkStep} from './components/sparkline.js';
 export {type AreaLayer, StackedArea} from './components/stacked-area.js';
 export {type BarSegment, type StackedBar, StackedBars} from './components/stacked-bars.js';
 export {Chip, StatusDot, type StatusTone} from './components/status.js';
+export {type StepItem, StepList, type StepState} from './components/step-list.js';
 export {type ReplyField, StructuredReply} from './components/structured-reply.js';
 export {Swatch, type SwatchItem, SwatchLegend} from './components/swatch-legend.js';
 export {Table, type TableColumn} from './components/table.js';
@@ -153,9 +155,11 @@ export {
 export {ThemeSwatch} from './components/theme-swatch.js';
 export {Thread, type ThreadItem} from './components/thread.js';
 export {type Stage, type StageState, Timeline} from './components/timeline.js';
+export {Toast, type ToastItem, ToastStack, type ToastTone} from './components/toast.js';
 export {Checkbox, Switch} from './components/toggle.js';
 export {type RowChip, Tree, TreeRow} from './components/tree.js';
 export {TurnResult} from './components/turn-result.js';
+export {WindowFrame} from './components/window-frame.js';
 export type {
   ColorRole,
   ElevationLevel,

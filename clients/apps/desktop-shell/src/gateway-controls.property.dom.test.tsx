@@ -2,6 +2,7 @@ import {afterAll, beforeAll, expect, test} from 'bun:test';
 import {clone, create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {type HostKey, recordedProjectRoot} from '@vibesys/hosts';
 import {FakeGatewayBridge} from '@vibesys/ipc/testing';
+import {createProblemBoard} from '@vibesys/problems';
 import {
   DrainGoal,
   HostCallResponseSchema,
@@ -227,6 +228,7 @@ async function verifyOffers(input: Scenario) {
           }}
         >
           <GatewayRun
+            problems={createProblemBoard()}
             projectRoot={recordedProjectRoot('/project')}
             seed={{
               identity: {host: 'local' as HostKey, runId: 'run-a'},
@@ -348,6 +350,7 @@ async function withPeer(
     await act(async () =>
       root.render(
         <GatewayRun
+          problems={createProblemBoard()}
           projectRoot={location.projectRoot}
           seed={{
             identity: {host: 'local' as HostKey, runId: 'run-a'},

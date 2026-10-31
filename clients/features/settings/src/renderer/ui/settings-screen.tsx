@@ -132,6 +132,16 @@ function AppContent(props: {
 }): JSX.Element {
   const {section, state, dispatch} = props;
   if (state.kind === 'loading') return <Text variant="body">Loading settings…</Text>;
+  if (state.kind === 'failed') {
+    return (
+      <Banner
+        tone="failed"
+        title="Could not read settings"
+        body={state.error}
+        actions={<Button text="Retry" press={() => dispatch({type: 'retry'})} />}
+      />
+    );
+  }
   const {appearance, notifications} = state.shown;
   const choose = (next: Appearance): void =>
     dispatch({type: 'change', change: {kind: 'appearance', appearance: next}});
@@ -141,9 +151,6 @@ function AppContent(props: {
         <Text as="h1" variant="title">
           Notifications
         </Text>
-        {state.problem === null ? null : (
-          <Banner tone="err" title="Could not save the change." body={state.problem} />
-        )}
         <Card section="Run notifications">
           <Switch
             label="Notify me when a run finishes, fails or pauses"
@@ -159,9 +166,6 @@ function AppContent(props: {
       <Text as="h1" variant="title">
         Appearance
       </Text>
-      {state.problem === null ? null : (
-        <Banner tone="err" title="Could not save the change." body={state.problem} />
-      )}
       <Card section="Mode">
         <SegmentedControl
           label="Appearance mode"

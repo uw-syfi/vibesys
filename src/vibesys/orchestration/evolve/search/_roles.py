@@ -50,7 +50,7 @@ MUTATOR = Role(
 
 JUDGE = Role(
     name="judge",
-    title="Judge",
+    title="Reviewer",
     prompt="judge.j2",
     reply=JudgeResponse,
     workspace=WorkspaceMode.READ_ONLY_REVISION,

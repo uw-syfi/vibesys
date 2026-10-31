@@ -602,7 +602,9 @@ class SkyPilotBridge:
         snapshot_digest = self._snapshot_digest(staging)
         request_digest = self._request_digest(request, effective_command)
         existing_record = self._journal.load(request.invocation_id)
-        record = self._journal.prepare(request.invocation_id, request_digest, snapshot_digest)
+        record = self._journal.prepare(
+            request.invocation_id, request_digest, snapshot_digest, step_tag=request.step_tag
+        )
         if existing_record is None:
             self._locally_prepared_invocations.add(request.invocation_id)
         if record.phase in {InvocationPhase.COMPLETED, InvocationPhase.ACKNOWLEDGED}:
@@ -618,7 +620,7 @@ class SkyPilotBridge:
     ) -> str:
         """Bind recovery identity to the request, evaluator argv, and trusted setup."""
         request_document: dict[str, object] = {
-            "request": request.model_dump(mode="json", exclude={"invocation_id"}),
+            "request": request.model_dump(mode="json", exclude={"invocation_id", "step_tag"}),
             "command": command,
         }
         if self._framework_setup_command is not None:

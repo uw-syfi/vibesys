@@ -1,11 +1,34 @@
 import {describe, expect, test} from 'bun:test';
-import {SYNTHESIZED_TASK_NAME} from '@vibesys/contracts';
 import type {DashboardRow} from '@vibesys/feature-app-shell/state';
-import {type GroupBy, groupTiles, tilesOf} from '@vibesys/feature-runs-dashboard/state';
+import {GROUP_BYS, groupTiles, tilesOf} from '@vibesys/feature-runs-dashboard/state';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
-import {runCounts, runInput} from './shell-runs.js';
+import {loadingMachines, runCounts, runInput} from './shell-runs.js';
 
 const HOSTS = ['local', 'ssh:host-a', 'ssh:host-b', 'ssh:host-c'] as const;
+
+test('a listed machine has no block, a loading one its steps with no retry count, and only a failed one a retry', () => {
+  const retried: string[] = [];
+  const [loading, failed, ...rest] = loadingMachines(
+    [
+      {kind: 'listed', host: 'ssh:host-c'},
+      {kind: 'loading', host: 'local', step: 'handshake', attempt: 2},
+      {kind: 'failed', host: 'ssh:host-a', step: 'gateway', reason: 'helper exited (code 1)'},
+    ],
+    host => retried.push(host),
+  );
+  expect(rest).toEqual([]);
+  expect(loading?.machine).toBe('This Mac');
+  expect(loading?.retry).toBeNull();
+  expect(loading?.steps.map(step => [step.state, step.position, step.note])).toEqual([
+    ['done', '1/3', undefined],
+    ['current', '2/3', undefined],
+    ['pending', '3/3', undefined],
+  ]);
+  expect(failed?.steps.map(step => step.state)).toEqual(['failed', 'pending', 'pending']);
+  expect(failed?.steps[0]?.note).toBe('helper exited (code 1)');
+  failed?.retry?.();
+  expect(retried).toEqual(['ssh:host-a']);
+});
 
 test('each machine is counted its own runs, and the counts add up to every run listed', () => {
   for (const seed of SEEDS) {
@@ -21,7 +44,6 @@ test('each machine is counted its own runs, and the counts add up to every run l
 });
 
 test('every listed run has a tile in its grouping, however many, and the machines count them all', () => {
-  const GROUPS: readonly GroupBy[] = ['status', 'machine', 'task', 'agent'];
   for (const seed of SEEDS) {
     const random = new Seeded(seed);
     const rows = Array.from({length: random.int(90)}, (_, index) => ({
@@ -33,7 +55,7 @@ test('every listed run has a tile in its grouping, however many, and the machine
       },
     }));
     const tiles = tilesOf(rows.map(row => runInput(row, 0)));
-    const grouped = groupTiles(tiles, random.pick(GROUPS)).flatMap(group =>
+    const grouped = groupTiles(tiles, random.pick(GROUP_BYS)).flatMap(group =>
       group.tiles.map(tile => tile.hint),
     );
     expect(grouped.sort()).toEqual(rows.map(row => row.row.run.runId).sort());
@@ -63,7 +85,6 @@ function entry(status: 'live' | 'failed', now: string | null): DashboardRow {
     },
     host: 'local',
     machine: 'this computer',
-    task: 'mpmc',
     project: '/p/default',
     createdAt: Date.parse('2026-10-19T07:11:00Z'),
   } as DashboardRow;
@@ -72,17 +93,10 @@ function entry(status: 'live' | 'failed', now: string | null): DashboardRow {
 describe('the dashboard input of a run', () => {
   const now = Date.parse('2026-10-19T08:00:00Z');
 
-  test('carries why an ended run ended, and the id and task it is named by', () => {
+  test('carries why an ended run ended, and the id it is named by', () => {
     const input = runInput(entry('failed', 'the agent crashed'), now);
     expect(input.reason).toBe('the agent crashed');
     expect(input.runId).toBe('20261019-071100');
-    expect(input.task).toBe('mpmc');
-  });
-
-  test('groups a run with no task of its own under its title, never the synthesized task name', () => {
-    const input = runInput({...entry('live', null), task: null}, now);
-    expect(input.task).toBe('queue-rs');
-    expect(input.task).not.toBe(SYNTHESIZED_TASK_NAME);
   });
 
   test('is titled as its row is, the one title every screen gives the run', () => {

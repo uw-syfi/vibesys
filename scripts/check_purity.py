@@ -124,6 +124,13 @@ PURE_EXPORTS = {
             "Record",
             "Change",
             "EpochStarted",
+            "AttemptInterrupted",
+            "CoreInput",
+            "InterruptionReason",
+            "RunEnded",
+            "StepCancelReason",
+            "StepFinished",
+            "StepStarted",
             "RUN_LOG_MAX_RECORD_BYTES",
             "ReplayStore",
             "Span",
@@ -136,6 +143,10 @@ PURE_EXPORTS = {
         for name in ("EpochStarted", "ReplayStore", "Span", "Record")
     },
     "vs_proto.api.Change": frozenset({"STARTED", "UPDATED", "ENDED"}),
+    "vs_proto.api.InterruptionReason": frozenset({"PAUSE", "SHUTDOWN", "RAISED"}),
+    "vs_proto.api.StepCancelReason": frozenset(
+        {"DEADLINE", "PAUSE_NOW", "DRAIN_EXPIRED", "RUN_ENDING", "WITHDRAWN", "INTERRUPTED"}
+    ),
     "vs_proto.api.SpanStatus": frozenset({"STOPPED", "RUNNING", "DONE"}),
     "vs_proto.api.core_iterations": frozenset(
         {"IterationRequest", "IterationGranted", "IterationCompletion", "IterationCompleted"}

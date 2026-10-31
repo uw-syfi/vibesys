@@ -101,6 +101,7 @@ function world(listing: HostListing): {readonly bridge: ShellBridge; readonly as
       });
     },
     projectRuns: () => never,
+    retryListing: () => never,
     onListing: ignore,
     onRecent: ignore,
     onPreferences: ignore,

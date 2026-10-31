@@ -1,6 +1,7 @@
 import {describe, expect, test} from 'bun:test';
 import {HostValidationError, hostFromKey, hostKey, validAlias, validHostPath} from '@vibesys/hosts';
 import {
+  configuredMachines,
   EMPTY_SETTINGS,
   parseSettings,
   SshConfigSyntaxError,
@@ -277,5 +278,23 @@ describe('host settings', () => {
     for (const [value, message] of cases) {
       expect(() => parseSettings(value)).toThrow(message);
     }
+  });
+});
+
+describe('configuredMachines', () => {
+  const LOCAL = {kind: 'local'} as const;
+  const SSH = {kind: 'ssh', alias: 'host-a'} as const;
+
+  test('This Mac is a machine on a profile with nothing saved', () => {
+    expect(configuredMachines(EMPTY_SETTINGS)).toEqual([LOCAL]);
+  });
+
+  test('every saved machine follows This Mac, each once, even when This Mac has saved settings', () => {
+    const saved = withHostSettings(
+      withHostSettings(EMPTY_SETTINGS, SSH, {checkout: '/srv/vibesys'}),
+      LOCAL,
+      {checkout: '/srv/vibesys'},
+    );
+    expect(configuredMachines(saved)).toEqual([LOCAL, SSH]);
   });
 });

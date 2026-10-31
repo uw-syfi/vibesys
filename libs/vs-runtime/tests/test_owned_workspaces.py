@@ -252,7 +252,9 @@ class _Provider:
         del workspace_id, revision
         return None
 
-    def create_candidate(self, workspace_id: str, revision: str) -> _Resource:
+    def create_candidate(
+        self, workspace_id: str, revision: str, _step_tag: str | None = None, /
+    ) -> _Resource:
         resource = _Resource(workspace_id, self.root.path / workspace_id, revision)
         self.created.append(resource)
         return resource
@@ -299,7 +301,9 @@ class _LeftoverProvider(_Provider):
         self.reconciled = reconciled
         self.removed: list[str] = []
 
-    def create_candidate(self, workspace_id: str, revision: str) -> _Resource:
+    def create_candidate(
+        self, workspace_id: str, revision: str, _step_tag: str | None = None, /
+    ) -> _Resource:
         del workspace_id, revision
         pytest.fail("a held unresolved candidate must not be replaced")
 
@@ -457,7 +461,9 @@ class _CaptureProvider(_Provider):
             self._capture_runner.hold()
             self.capture_prepared.open()
 
-    def create_candidate(self, workspace_id: str, revision: str) -> _CancellableCaptureResource:
+    def create_candidate(
+        self, workspace_id: str, revision: str, _step_tag: str | None = None, /
+    ) -> _CancellableCaptureResource:
         resource_type = (
             _UnconfirmedCaptureResource if self._unconfirmed else _CancellableCaptureResource
         )
@@ -532,7 +538,9 @@ class _ContentProvider(_Provider):
         del workspace_id, revision
         return None
 
-    def create_candidate(self, workspace_id: str, revision: str) -> _ContentResource:
+    def create_candidate(
+        self, workspace_id: str, revision: str, _step_tag: str | None = None, /
+    ) -> _ContentResource:
         resource = _ContentResource(
             workspace_id, self.root.path / workspace_id, self.history[revision], self.history
         )
@@ -586,7 +594,9 @@ async def test_close_attempts_every_candidate_and_aggregates_failures(tmp_path: 
             raise OSError(self.id)
 
     class _FailingProvider(_Provider):
-        def create_candidate(self, workspace_id: str, revision: str) -> _Resource:
+        def create_candidate(
+            self, workspace_id: str, revision: str, _step_tag: str | None = None, /
+        ) -> _Resource:
             resource = _FailingResource(workspace_id, self.root.path / workspace_id, revision)
             self.created.append(resource)
             return resource
@@ -643,7 +653,9 @@ class _FlakyProvider(_Provider):
         self.failures = failures
         self.root = _FlakyResource(None, path, root_failures)
 
-    def create_candidate(self, workspace_id: str, revision: str) -> _Resource:
+    def create_candidate(
+        self, workspace_id: str, revision: str, _step_tag: str | None = None, /
+    ) -> _Resource:
         del revision
         resource = _FlakyResource(workspace_id, self.root.path / workspace_id, self.failures)
         self.created.append(resource)
@@ -1252,7 +1264,9 @@ class _BuildingProvider(_Provider):
         self.root = self.live
         self.building: list[_BuildingResource] = []
 
-    def create_candidate(self, workspace_id: str, revision: str) -> _BuildingResource:
+    def create_candidate(
+        self, workspace_id: str, revision: str, _step_tag: str | None = None, /
+    ) -> _BuildingResource:
         resource = _BuildingResource(
             workspace_id, self.root.path / workspace_id, revision, self.produces
         )

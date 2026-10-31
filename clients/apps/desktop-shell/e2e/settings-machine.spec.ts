@@ -75,10 +75,12 @@ test('another machine shows its own settings: empty, no Modal token, or too old 
   await expect(main(page).getByRole('heading', {name: 'lab-h100'})).toHaveCount(0);
   await nav(page).getByRole('combobox', {name: 'Machine'}).selectOption({label: 'host-c'});
   await expect(main(page).getByText('Needs an update', {exact: true})).toBeVisible();
-  await expect(main(page).getByTitle(/^The VibeSys on host-c is too old for this/)).toBeVisible();
+  await main(page).getByRole('button', {name: 'Show details'}).click();
+  await expect(main(page).getByText(/^The VibeSys on host-c is too old for this/)).toBeVisible();
   await nav(page).getByRole('button', {name: 'Agent logins'}).click();
   await expect(main(page).getByText('Needs an update', {exact: true})).toBeVisible();
-  await expect(main(page).getByTitle(/^The VibeSys on host-c is too old for this/)).toBeVisible();
+  await main(page).getByRole('button', {name: 'Show details'}).click();
+  await expect(main(page).getByText(/^The VibeSys on host-c is too old for this/)).toBeVisible();
 });
 
 test('a cluster is saved only after Test connection passes, and is then listed and removable', async ({
@@ -136,7 +138,11 @@ for (const [alias, says] of [
     await form.getByRole('textbox', {name: 'Workspace on the cluster'}).fill('/w');
     await form.getByRole('textbox', {name: 'SSH host alias'}).fill(alias);
     await form.getByRole('button', {name: 'Test connection'}).click();
-    await expect(form.getByText(says)).toBeVisible();
+    // The form holds the failure beside the button that retries it, once: no toast repeats it.
+    await expect(form.getByRole('alert').getByText(says)).toBeVisible();
+    await expect(page.getByRole('region', {name: 'Notifications'}).getByRole('alert')).toHaveCount(
+      0,
+    );
     await expect(form.getByRole('button', {name: 'Save cluster'})).toHaveAttribute(
       'aria-disabled',
       'true',
@@ -198,6 +204,7 @@ test('Sign in starts the harness’s own login on the chosen machine, and Check 
   await expect(claude.getByText('Not signed in')).toBeVisible();
   await claude.getByRole('button', {name: 'Sign in'}).click();
   await expect(claude.getByText('The login started on host-b.')).toBeVisible();
+  await claude.getByRole('button', {name: 'Show details'}).click();
   await expect(
     claude.getByText('Open https://example.com/device and enter the code AB12'),
   ).toBeVisible();

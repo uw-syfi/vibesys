@@ -231,6 +231,7 @@ def encode_RunPark(v: values.RunPark) -> pb.RunPark:
     return pb.RunPark(
         admitted_turns=[encode_InvocationRef(x) for x in v.admitted_turns],
         immediate=v.immediate,
+        deadline_at=v.deadline_at,
         control_id=encode_ControlId(v.control_id),
         epoch=str(v.epoch),
     )
@@ -240,6 +241,7 @@ def decode_RunPark(m: pb.RunPark) -> values.RunPark:
     return values.RunPark(
         admitted_turns=tuple(decode_InvocationRef(x) for x in m.admitted_turns),
         immediate=m.immediate,
+        deadline_at=m.deadline_at if m.has_field("deadline_at") else None,
         control_id=decode_ControlId(_required(m.control_id)),
         epoch=int(m.epoch),
     )

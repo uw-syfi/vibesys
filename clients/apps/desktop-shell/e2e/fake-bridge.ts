@@ -10,7 +10,7 @@
  * through `window.fakeHost`.
  */
 import type {ExampleList} from '@vibesys/contracts/host-helper';
-import type {WelcomeBridge} from '@vibesys/ipc';
+import type {ChromeInset, WelcomeBridge} from '@vibesys/ipc';
 
 /**
  * The bridge methods one Fake installer provides, as a type its object literal is checked against
@@ -29,6 +29,7 @@ export type CoreMethods =
   | 'setAppearance'
   | 'setNotifications'
   | 'onHostSettingsChanged'
+  | 'retryListing'
   | 'archive'
   | 'runDigests'
   | 'projectRuns'
@@ -80,10 +81,15 @@ export type MachineSettingsMethods =
 /** What `installFakeWindows` provides. */
 export type WindowsMethods = 'openRunWindow' | 'showMainWindow' | 'openSettings' | 'openExternal';
 
+/** What the desktop app's window chrome reports (`chromeInset`) on each platform, and in full screen. */
+export const MAC_CHROME: ChromeInset = {startWidth: 84, startHeight: 40, endHeight: 0};
+export const WINDOWS_CHROME: ChromeInset = {startWidth: 0, startHeight: 0, endHeight: 40};
+export const FULL_SCREEN_CHROME: ChromeInset = {startWidth: 0, startHeight: 0, endHeight: 0};
+
 export interface FakeBridgeSeed {
   readonly theme: string;
   /** The window controls' inset the preload sets, as main reports it for the platform. */
-  readonly chromeInset: {readonly width: number; readonly height: number};
+  readonly chromeInset: ChromeInset;
   readonly appearance: {readonly mode: string; readonly light: string; readonly dark: string};
   readonly listings: readonly unknown[];
   readonly recent: readonly unknown[];
@@ -186,6 +192,7 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
     notifications: {enabled: true},
     archived: [] as {host: string; runId: string}[],
   };
+  const retried: string[] = [];
   const listings = new Map<string, unknown>(
     seed.listings.map(listing => [(listing as {host: string}).host, listing]),
   );
@@ -227,6 +234,10 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
         store({...preferences, appearance}),
       setNotifications: (enabled: boolean) => store({...preferences, notifications: {enabled}}),
       onHostSettingsChanged: on('hostSettings'),
+      retryListing: (host: string) => {
+        retried.push(host);
+        return ok(null);
+      },
       archive: (run: {host: string; runId: string}, archived: boolean) => {
         const others = preferences.archived.filter(
           each => each.host !== run.host || each.runId !== run.runId,
@@ -253,6 +264,8 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
         listings.set(listing.host, listing);
         push('listing', listing);
       },
+      /** The machines the user asked to list again, in order. */
+      retried,
       /** The host's current listing, as the page last received it. */
       listingOf: (host: string) => listings.get(host),
       recent: (runs: readonly unknown[]) => {
@@ -261,15 +274,26 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
       },
     },
   });
-  // As the preload does, the first paint is in the stored theme, once the root element exists.
-  const paint = new MutationObserver(() => {
-    if (document.documentElement === null) return;
-    document.documentElement.setAttribute('data-theme', seed.theme);
-    for (const [axis, value] of Object.entries(seed.chromeInset))
-      document.documentElement.style.setProperty(`--chrome-inset-${axis}`, `${value}px`);
-    paint.disconnect();
+}
+
+/**
+ * As the preload does, the first paint is in the stored theme and leaves the room the window's own
+ * controls take, as soon as the root element exists: an init script beside `installFakeBridge`.
+ */
+export function installFakeChrome(seed: FakeBridgeSeed): void {
+  const paint = (): boolean => {
+    const root = document.documentElement;
+    if (root === null) return false;
+    const {startWidth, startHeight, endHeight} = seed.chromeInset;
+    root.setAttribute('data-theme', seed.theme);
+    root.style.cssText += `--chrome-start-width:${startWidth}px;--chrome-start-height:${startHeight}px;--chrome-end-height:${endHeight}px`;
+    return true;
+  };
+  if (paint()) return;
+  const waiting = new MutationObserver(() => {
+    if (paint()) waiting.disconnect();
   });
-  paint.observe(document, {childList: true});
+  waiting.observe(document, {childList: true});
 }
 
 /**
@@ -712,7 +736,15 @@ export function installFakeWindows(): void {
       }
       const query = `host=${encodeURIComponent(run.host)}&run=${encodeURIComponent(run.runId)}`;
       const opened = window.open(`./shell.html?${query}`, '_blank');
-      if (opened !== null) windows.set(key, opened);
+      if (opened !== null) {
+        windows.set(key, opened);
+        // The window keeps the initial blank page's, so the init scripts do not run again for the
+        // document that loads in it: it gets the host's first paint (the window controls' room)
+        // from its opener.
+        opened.addEventListener('DOMContentLoaded', () => {
+          opened.document.documentElement.style.cssText = document.documentElement.style.cssText;
+        });
+      }
       return ok();
     },
     showMainWindow: () => {

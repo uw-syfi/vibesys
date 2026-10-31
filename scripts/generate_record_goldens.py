@@ -347,6 +347,54 @@ def record_examples() -> dict[str, p.Record]:
                 ),
             )
         ),
+        "core_input": p.Record(
+            clock=2,
+            body=p.Oneof(
+                "core_input", p.CoreInput(schema_version=1, event=b'{"kind":"epoch_resumed"}')
+            ),
+        ),
+        "step_started": p.Record(
+            clock=2,
+            body=p.Oneof(
+                "step_started",
+                p.StepStarted(
+                    tag="request-a",
+                    attempt=2,
+                    schema_version=1,
+                    request=b'{"kind":"discard_workspace"}',
+                    deadline_at=60,
+                ),
+            ),
+        ),
+        "step_finished": p.Record(
+            clock=3,
+            body=p.Oneof(
+                "step_finished",
+                p.StepFinished(
+                    tag="request-a",
+                    attempt=2,
+                    schema_version=1,
+                    result=p.Oneof("cancelled", p.StepCancelReason.DEADLINE),
+                ),
+            ),
+        ),
+        "run_ended": p.Record(
+            clock=4,
+            body=p.Oneof(
+                "run_ended",
+                p.RunEnded(
+                    schema_version=1,
+                    result=b'{"outcome":"success","reason":"done","selection":null}',
+                ),
+            ),
+        ),
+        "attempt_interrupted": p.Record(
+            clock=3,
+            body=p.Oneof(
+                "attempt_interrupted",
+                p.AttemptInterrupted(tag="request-a", attempt=1, reason=p.InterruptionReason.PAUSE),
+            ),
+        ),
     }
     result = bodies
     for record in result.values():

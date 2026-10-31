@@ -1,6 +1,7 @@
 /** The journeys' world: a seeded Fake bridge, and opening the shell page over it. */
 
 import {expect, type Page} from '@playwright/test';
+import type {ChromeInset} from '@vibesys/ipc';
 import {
   clusterTestsByAlias,
   loginStartsByProvider,
@@ -11,11 +12,13 @@ import {
   type FakeBridgeSeed,
   type FakeNewRun,
   installFakeBridge,
+  installFakeChrome,
   installFakeExampleDestination,
   installFakeMachineSettings,
   installFakeMachines,
   installFakeNewRun,
   installFakeProjectRuns,
+  MAC_CHROME,
 } from './fake-bridge.js';
 import {installGateway, wire} from './fake-gateway.js';
 import {FAKE_OFFER} from './fake-offer.js';
@@ -26,6 +29,7 @@ export interface FakeHostWindow extends Window {
   fakeHost: {
     readonly newRun: FakeNewRun;
     listing(listing: unknown): void;
+    readonly retried: readonly string[];
     openSettings(): void;
     recent(runs: readonly unknown[]): void;
   };
@@ -70,8 +74,7 @@ const RECENT = [
 
 export const SEED: FakeBridgeSeed = {
   theme: 'paper',
-  // macOS's traffic lights (`chromeInset('darwin')` in the desktop app's window chrome).
-  chromeInset: {width: 84, height: 40},
+  chromeInset: MAC_CHROME,
   appearance: {mode: 'system', light: 'paper', dark: 'ink'},
   listings: [
     listed(
@@ -128,6 +131,7 @@ export const SEED: FakeBridgeSeed = {
 
 export async function open(page: Page, seed: FakeBridgeSeed = SEED): Promise<void> {
   await addInitScripts(page, [
+    initScript(installFakeChrome, seed),
     initScript(installFakeBridge, seed),
     initScript(installFakeMachines, seed),
     initScript(installFakeMachineSettings, seed),
@@ -155,28 +159,14 @@ export async function openNewRun(page: Page, seed: FakeBridgeSeed = SEED): Promi
 export const sidebar = (page: Page) => page.getByRole('navigation', {name: 'VibeSys'});
 
 /**
- * What the page draws inside the window controls' rectangle (`--chrome-inset-width` by
- * `--chrome-inset-height`, from the window's top-left corner), other than the sidebar toggle that
- * is meant to sit beside them: text and controls, as `text at x,y`. Empty when nothing is covered.
+ * What the host does when the window enters or leaves full screen: the controls' inset changes on
+ * the root element, without a reload.
  */
-export async function drawnUnderWindowControls(page: Page): Promise<string[]> {
-  return page.evaluate(() => {
-    const style = getComputedStyle(document.documentElement);
-    const inset = {
-      width: Number.parseFloat(style.getPropertyValue('--chrome-inset-width')),
-      height: Number.parseFloat(style.getPropertyValue('--chrome-inset-height')),
-    };
-    const drawn = [...document.querySelectorAll('body *')].filter(
-      element =>
-        element.matches('a, button, input, select, textarea, [tabindex]:not([tabindex="-1"])') ||
-        [...element.childNodes].some(
-          node => node.nodeType === Node.TEXT_NODE && node.textContent?.trim() !== '',
-        ),
-    );
-    return drawn.flatMap(element => {
-      const box = element.getBoundingClientRect();
-      const hit = box.width > 0 && box.left < inset.width && box.top < inset.height;
-      return hit ? [`${element.textContent?.trim()} at ${box.left},${box.top}`] : [];
-    });
-  });
+export async function setChromeInset(page: Page, inset: ChromeInset): Promise<void> {
+  await page.evaluate(next => {
+    const root = document.documentElement;
+    root.style.setProperty('--chrome-start-width', `${next.startWidth}px`);
+    root.style.setProperty('--chrome-start-height', `${next.startHeight}px`);
+    root.style.setProperty('--chrome-end-height', `${next.endHeight}px`);
+  }, inset);
 }

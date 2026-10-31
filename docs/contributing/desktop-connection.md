@@ -596,6 +596,13 @@ Every screen (Settings, Machines, New run, the Run screen, the sidebar) has one 
   connection status do not ask the host's helper, and an observed stream reconnects with a growing
   delay and is dropped after 30 seconds of silence. Digests and the usage window are registered
   reads (`ListRunDigests`, `UsageWindow`). There is no manual refresh path to forget.
+- **A wait has a name and an end.** The connection reports each step on the way to a machine's run
+  list (`ListingStep`: `gateway`, `handshake`, `runs`), a listing carries the step it stands at, and
+  `machineLoad` folds a machine into `loading` at a step, `failed` at a step, or `listed`
+  (`MachineLoad` in `@vibesys/hosts`). `loading` always ends: a stream that never answers fails its
+  lease, and after `RECONNECT_OFFLINE_AFTER` tries the watch stops and the machine is `failed` until
+  the user retries (`retryListing`, which starts the watch over) or a new listing arrives. The Runs
+  screen renders these values and decides nothing about the connection.
 
 The desktop window (`apps/desktop-shell`, the only renderer since the cutover, #2850) follows the same rules: the sidebar
 store (`@vibesys/feature-app-shell`) folds the listings, Recent and the archived runs, and the
@@ -682,7 +689,11 @@ attached run, trace events in increasing sequence, commands sent only when offer
 seeded action sequences with stale replies. The theme is in the first paint: the welcome preload asks
 the main process synchronously for the stored theme and the window controls' inset
 (`FIRST_PAINT_CHANNEL`, one fact from `window-chrome.ts`) and sets them on the root element before
-the page's scripts run.
+the page's scripts run. The inset says what the window's controls cover: the top-left corner the
+macOS traffic lights sit in (the rail keeps its items below it), or the strip across the page's top
+that the Windows and Linux controls are drawn over. Full screen hides the controls, so the window
+pushes the inset again on entering and leaving it (`CHROME_INSET_CHANNEL`) and the page collapses
+the reserved room.
 
 ## Windows and notifications
 

@@ -146,13 +146,13 @@ export async function walkScreens(
   await openIdea(page, journey.idea);
   await walk.at('idea');
   if (journey.command !== null) {
-    await openStep(page, /implementer/i);
+    await openStep(page, /builder/i);
     await walk.at('step');
     await openItem(page, journey.command);
     await walk.at('item');
     if (journey.judge) {
       await backToIdea(page);
-      await openStep(page, /judge/i);
+      await openStep(page, /reviewer/i);
       await walk.at('judge');
     }
   }

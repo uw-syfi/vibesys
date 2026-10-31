@@ -2,17 +2,24 @@ import {expect, test} from 'bun:test';
 import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {create, toBinary} from '@bufbuild/protobuf';
-import {hostListingFromRuns, runWatch} from '@vibesys/connection';
+import {hostListingFromRuns, RUN_WATCH_LEASE_MS, runWatch} from '@vibesys/connection';
 import {FakeRunGateway} from '@vibesys/connection/testing';
 import {
   dashboardRows,
   liveRows,
+  machineLoads,
   runProjectRoot,
   runsKnown,
   SIDEBAR_EMPTY,
   sidebarStep,
 } from '@vibesys/feature-app-shell/state';
-import {type HostId, hostKey, recordedProjectRoot} from '@vibesys/hosts';
+import {
+  type HostId,
+  hostKey,
+  LISTING_STEPS,
+  type MachineLoad,
+  recordedProjectRoot,
+} from '@vibesys/hosts';
 import {
   acceptListRunDigests,
   RunHeadSchema,
@@ -21,6 +28,7 @@ import {
 } from '@vibesys/proto';
 import {knownProjects} from '@vibesys/runs';
 import {FakeClock} from '@vibesys/transport/testing';
+import fc from 'fast-check';
 
 const HOST: HostId = {kind: 'ssh', alias: 'host-a'};
 
@@ -190,4 +198,148 @@ test('retained addressless publisher reaches dashboard, Usage projects and contr
     );
     watch.close();
   }
+});
+
+const MACHINES: readonly HostId[] = [{kind: 'local'}, HOST, {kind: 'ssh', alias: 'host-b'}];
+
+type HostEvent =
+  | {readonly kind: 'step'; readonly step: (typeof LISTING_STEPS)[number]}
+  | {readonly kind: 'exit'}
+  | {readonly kind: 'error'}
+  | {readonly kind: 'list'}
+  | {readonly kind: 'silence'; readonly ms: number};
+
+const HOST_EVENT: fc.Arbitrary<HostEvent> = fc.oneof(
+  fc.constantFrom(...LISTING_STEPS).map(step => ({kind: 'step', step}) as const),
+  fc.constant({kind: 'exit'} as const),
+  fc.constant({kind: 'error'} as const),
+  fc.constant({kind: 'list'} as const),
+  fc.integer({min: 1, max: 2 * RUN_WATCH_LEASE_MS}).map(ms => ({kind: 'silence', ms}) as const),
+);
+
+/**
+ * The longest a host that never answers can leave its machine unnamed as stopped: one lease per try
+ * until the views call it offline, with the doubling delays between them.
+ */
+const NEVER_ANSWERS_BOUND_STEPS: readonly number[] = [
+  ...[1_000, 2_000, 4_000, 8_000, 16_000].flatMap(delay => [RUN_WATCH_LEASE_MS, delay]),
+  RUN_WATCH_LEASE_MS,
+];
+
+/** Machines watched as the app watches them, folded as the Runs screen reads them. */
+function runsScreenWorld() {
+  const gateway = new FakeRunGateway();
+  const clock = new FakeClock();
+  const watch = runWatch(gateway, clock.schedule);
+  let state = SIDEBAR_EMPTY;
+  const hosts = MACHINES.map(hostKey);
+  for (const host of MACHINES) {
+    watch.observe(host, observed => {
+      state = sidebarStep(state, {
+        type: 'listing',
+        listing: hostListingFromRuns(hostKey(host), observed),
+      }).state;
+    });
+  }
+  state = sidebarStep(state, {
+    type: 'overview',
+    listings: state.listings,
+    recent: [],
+    skippedRecent: [],
+  }).state;
+  return {
+    gateway,
+    clock,
+    watch,
+    loads: (): MachineLoad[] => machineLoads(state, hosts),
+  };
+}
+
+/** Every stream's promise settling reaches the watch only after the microtasks it queued. */
+async function settle(): Promise<void> {
+  for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();
+}
+
+function expectNamed(load: MachineLoad): void {
+  if (load.kind === 'listed') return;
+  expect(LISTING_STEPS).toContain(load.step);
+  if (load.kind === 'failed') expect(load.reason).not.toBe('');
+}
+
+function happen(world: ReturnType<typeof runsScreenWorld>, host: HostId, event: HostEvent): void {
+  const stream = world.gateway.open(host).at(-1);
+  if (event.kind === 'step') stream?.reached(event.step);
+  else if (event.kind === 'exit') stream?.end();
+  else if (event.kind === 'error') stream?.fail(new Error('gateway startup exited: 1'));
+  else if (event.kind === 'list') world.gateway.announce(host, []);
+  else world.clock.advanceBy(event.ms);
+}
+
+test('property: at every moment of any host event sequence each machine is at a named step', async () => {
+  await fc.assert(
+    fc.asyncProperty(
+      fc.array(fc.tuple(fc.constantFrom(...MACHINES), HOST_EVENT), {maxLength: 40}),
+      async events => {
+        const world = runsScreenWorld();
+        for (const [host, event] of events) {
+          happen(world, host, event);
+          await settle();
+          for (const load of world.loads()) expectNamed(load);
+        }
+        // From wherever the sequence left it, a host that says nothing more stops being waited on.
+        for (const each of NEVER_ANSWERS_BOUND_STEPS) {
+          world.clock.advanceBy(each);
+          await settle();
+        }
+        expect(world.loads().map(load => load.kind)).not.toContain('loading');
+        world.watch.close();
+      },
+    ),
+    {numRuns: 64},
+  );
+});
+
+test('a host that never answers ends failed at the step it reached, with a reason', async () => {
+  const world = runsScreenWorld();
+  expect(world.loads().map(load => load.kind)).toEqual(['loading', 'loading', 'loading']);
+  for (const stream of world.gateway.open(HOST)) stream.reached('handshake');
+  for (const each of NEVER_ANSWERS_BOUND_STEPS) {
+    for (const stream of world.gateway.open(HOST)) stream.reached('handshake');
+    world.clock.advanceBy(each);
+    await settle();
+  }
+  expect(world.loads()[1]).toEqual({
+    kind: 'failed',
+    host: hostKey(HOST),
+    step: 'handshake',
+    reason: 'no answer',
+  });
+  world.watch.close();
+});
+
+test('a helper that exits at once fails its machine, and retry starts the steps over', async () => {
+  const world = runsScreenWorld();
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    for (const stream of world.gateway.open(HOST)) {
+      stream.fail(new Error('Error: gateway startup exited: 1'));
+    }
+    await settle();
+    world.clock.advanceBy(RUN_WATCH_LEASE_MS);
+    await settle();
+  }
+  expect(world.loads()[1]).toMatchObject({
+    kind: 'failed',
+    step: 'gateway',
+    reason: 'gateway exited (code 1)',
+  });
+  world.watch.retry(HOST);
+  expect(world.loads()[1]).toEqual({
+    kind: 'loading',
+    host: hostKey(HOST),
+    step: 'gateway',
+    attempt: 0,
+  });
+  world.gateway.announce(HOST, []);
+  expect(world.loads()[1]).toEqual({kind: 'listed', host: hostKey(HOST)});
+  world.watch.close();
 });

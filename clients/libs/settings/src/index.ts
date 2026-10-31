@@ -6,6 +6,7 @@
 // Permanent read-only decoders for retained JSON documents. Current writes use
 // the protobuf codecs above; these functions never write their source files.
 export {
+  configuredMachines,
   decodeRetainedSettings,
   type SshConfigDirective,
   SshConfigSyntaxError,

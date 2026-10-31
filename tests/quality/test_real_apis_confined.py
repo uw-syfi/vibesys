@@ -225,6 +225,7 @@ REAL_IMPLEMENTATIONS: dict[str, str] = _names(
             "OsProcesses",
             "LoopSignalSource",
             "PidfdProcessSignaller",
+            "OsProcessTable",
             "SubprocessLauncher",
             "InheritedStdioLauncher",
             "SubprocessCapturedTextProcessLauncher",
@@ -1794,6 +1795,11 @@ PARSE_EDGE_MODULES: dict[str, tuple[ParseKind, str]] = {
         "a recorded turn's output: vs_agent's runner decoded it under MAX_AGENT_REPLY_BYTES"
         " (8 MiB) and vs_runtime recorded it re-serialized",
     ),
+    "libs/vs-core/src/vs_core/_step_log.py": (
+        ParseKind.OWN_STORE,
+        "the core records of the run's own run.log: the loop encoded them, and the log's frames are"
+        " checksummed and validated on read",
+    ),
     "libs/vs-core/src/vs_core/_waitable.py": (
         ParseKind.MODEL_HOOK,
         "forwards to pydantic with the waitable registry in context",
@@ -2047,9 +2053,9 @@ REAL_DEFAULT_PENDING: dict[str, dict[str, Owner]] = {
         "agent_image_is_pushed:SubprocessDockerBuildRunner()": Owner.LANE_A,
         "ensure_pushed:SubprocessDockerBuildRunner()": Owner.LANE_A,
     },
-    "libs/vs-runtime/src/vs_runtime/_run_environment.py": {
+    "libs/vs-runtime/src/vs_runtime/_skypilot_environment.py": {
+        "SkyPilotEnvironment._job_runner:SkyPilotJobRunner(...)": Owner.CONFINEMENT,
         "SkyPilotEnvironment._open_skypilot:SkyPilotBridge(...)": Owner.CONFINEMENT,
-        "SkyPilotEnvironment._open_skypilot:SkyPilotJobRunner(...)": Owner.CONFINEMENT,
     },
     "libs/vs-sandbox/src/vs_sandbox/fake_command_runner.py": {
         "FakeCommandRunner:default_factory=OsThreads": Owner.PURITY,

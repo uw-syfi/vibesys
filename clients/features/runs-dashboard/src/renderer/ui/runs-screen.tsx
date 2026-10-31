@@ -6,7 +6,6 @@ import {
   Chip,
   EmptyState,
   Field,
-  LoadingBar,
   type MenuItem,
   OverviewGroup,
   OverviewTile,
@@ -17,6 +16,9 @@ import {
   Select,
   type SelectOption,
   Stack,
+  StatusDot,
+  type StepItem,
+  StepList,
   Text,
 } from '@vibesys/ui';
 import type {JSX} from 'react';
@@ -33,8 +35,6 @@ export interface RunsDraft {
 const GROUP_OPTIONS: readonly SelectOption<GroupBy>[] = [
   {value: 'status', label: 'Status'},
   {value: 'machine', label: 'Machine'},
-  {value: 'task', label: 'Task'},
-  {value: 'agent', label: 'Agent'},
 ];
 
 const CHART_KEY: readonly ChartKeyItem[] = [
@@ -79,6 +79,37 @@ function TileOf(props: {
   );
 }
 
+/** One machine's way to its run list; `retry` is set once it has stopped. */
+export interface MachineSteps {
+  readonly machine: string;
+  readonly steps: readonly StepItem[];
+  readonly retry: (() => void) | null;
+}
+
+/**
+ * One machine that has not listed, as a line among the tiles: where it stands (the step it is on,
+ * or the one it stopped at, with the reason) and, once stopped, a way to ask again.
+ */
+function MachineLine(props: {readonly load: MachineSteps}): JSX.Element {
+  const {load} = props;
+  const at = load.steps.find(step => step.state === 'current' || step.state === 'failed');
+  const failed = at?.state === 'failed';
+  return (
+    <Row gap="space-2" wrap>
+      <StatusDot tone={failed ? 'err' : 'live'} label={failed ? 'Failed' : 'Loading'} />
+      <Text variant="body-strong">{load.machine}</Text>
+      {at === undefined ? null : (
+        <Text variant="small" tone="muted">
+          {[at.label, at.position, at.note].filter(each => each !== undefined).join(' ')}
+        </Text>
+      )}
+      {load.retry === null ? null : (
+        <Button variant="quiet" size="sm" text="Retry" press={load.retry} />
+      )}
+    </Row>
+  );
+}
+
 function Draft(props: {readonly draft: RunsDraft}): JSX.Element {
   const {draft} = props;
   return (
@@ -101,11 +132,13 @@ function Draft(props: {readonly draft: RunsDraft}): JSX.Element {
 }
 
 /**
- * The Runs dashboard: a header row with the title, the chart key and a Group by select, then every
- * run's tile in groups on a grid that fills the width, the runs that need their user first, each
- * run in one group. With no run it says so, with a New run action, or while the machines are
- * still answering (`reading`) that it is reading. Pressing a tile opens its run (`open` is handed
- * the tile's id); `menu` is a tile's row menu.
+ * The Runs dashboard: a header with the title and the chart key, and under it the machine the runs
+ * are narrowed to (when one is) and a Group by select, then every run's tile in groups on a grid
+ * that fills the width, the runs that need their user first, each run in one group. With no run and
+ * every machine listed it says so, with a New run action; before that each machine still loading or
+ * stopped has a block of its steps (`loads`), and once tiles show it keeps a line of where it
+ * stands, so a machine that is missing is not silently absent. Pressing a tile opens its run
+ * (`open` is handed the tile's id); `menu` is a tile's row menu.
  */
 export function RunsScreen(props: {
   readonly tiles: readonly Tile[];
@@ -117,14 +150,15 @@ export function RunsScreen(props: {
   readonly open: (id: string) => void;
   readonly menu: (id: string) => readonly MenuItem[];
   readonly draft: RunsDraft | null;
-  /** Whether the machines have not yet said what runs they hold. */
-  readonly reading: boolean;
+  /** The machines that have not said what runs they hold, each with its steps. */
+  readonly loads: readonly MachineSteps[];
   readonly newRun: () => void;
   /** What to say when saved runs could not be read; none when all were. */
   readonly notice: {readonly title: string; readonly body: string} | null;
 }): JSX.Element {
   const {by, machine} = props;
   const tiles = onMachine(props.tiles, machine);
+  const loads = props.loads.filter(load => machine === null || load.machine === machine);
   const tile = (each: Tile): JSX.Element => (
     <TileOf key={each.id} tile={each} open={props.open} menu={props.menu} />
   );
@@ -132,33 +166,41 @@ export function RunsScreen(props: {
     <Page
       width="fill"
       header={
-        <Row justify="between" gap="space-4" wrap>
-          <Text as="h1" variant="title">
-            Runs
-          </Text>
-          <Row gap="space-5" wrap>
-            {machine === null ? null : (
-              <Row gap="space-1">
-                <Chip label={machine} />
-                <Button
-                  variant="quiet"
-                  size="sm"
-                  icon="cross"
-                  label={`Remove ${machine}`}
-                  press={props.clearMachine}
-                />
-              </Row>
-            )}
-            {tiles.length === 0 ? null : (
-              <>
-                <ResultChartKey label="Chart key" items={CHART_KEY} />
-                <Field label="Group by" hideLabel>
-                  <Select value={by} options={GROUP_OPTIONS} change={props.group} size="sm" />
-                </Field>
-              </>
-            )}
+        <Stack gap="space-4">
+          <Row justify="between" gap="space-4" wrap>
+            <Text as="h1" variant="title">
+              Runs
+            </Text>
+            {tiles.length === 0 ? null : <ResultChartKey label="Chart key" items={CHART_KEY} />}
           </Row>
-        </Row>
+          {machine === null && tiles.length === 0 ? null : (
+            <Row gap="space-5" wrap>
+              {machine === null ? null : (
+                <Row gap="space-1">
+                  <Chip label={machine} />
+                  <Button
+                    variant="quiet"
+                    size="sm"
+                    icon="cross"
+                    label={`Remove ${machine}`}
+                    press={props.clearMachine}
+                  />
+                </Row>
+              )}
+              {tiles.length === 0 ? null : (
+                <Field label="Group by" hideLabel>
+                  <Select
+                    labelInside
+                    value={by}
+                    options={GROUP_OPTIONS}
+                    change={props.group}
+                    size="sm"
+                  />
+                </Field>
+              )}
+            </Row>
+          )}
+        </Stack>
       }
     >
       <Stack gap="space-5">
@@ -166,8 +208,23 @@ export function RunsScreen(props: {
           <Banner tone="warn" title={props.notice.title} body={props.notice.body} />
         )}
         {props.draft === null ? null : <Draft draft={props.draft} />}
-        {tiles.length > 0 ? null : props.reading ? (
-          <LoadingBar label="Reading runs" />
+        {tiles.length > 0 ? (
+          loads.length > 0 ? (
+            <Stack gap="space-1">
+              {loads.map(load => (
+                <MachineLine key={load.machine} load={load} />
+              ))}
+            </Stack>
+          ) : null
+        ) : loads.length > 0 ? (
+          loads.map(load => (
+            <StepList
+              key={load.machine}
+              title={load.machine}
+              steps={load.steps}
+              {...(load.retry === null ? {} : {retry: load.retry})}
+            />
+          ))
         ) : (
           <EmptyState
             title="No runs"

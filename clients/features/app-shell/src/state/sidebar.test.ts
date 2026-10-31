@@ -64,7 +64,12 @@ function server(id: number, runId: string, phase: HostRun['phase'], startedAt = 
 function randomListing(random: () => number): HostListing {
   const host = pick(random, HOSTS);
   if (random() < 0.1)
-    return {kind: 'unavailable', host, connection: {kind: 'offline', detail: 'no route'}};
+    return {
+      kind: 'unavailable',
+      host,
+      step: 'gateway',
+      connection: {kind: 'offline', detail: 'no route'},
+    };
   const runs = Array.from({length: Math.floor(random() * 6)}, (_, index) =>
     server(index + 1, pick(random, RUN_IDS), pick(random, PHASES)),
   );

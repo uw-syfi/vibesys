@@ -24,7 +24,6 @@ export interface IntentRow {
   readonly status: IntentEntry['status'];
   readonly reason: string | null;
   readonly epoch: bigint | null;
-  readonly current: boolean;
 }
 export interface RunIntentsContext {
   readonly enabled: boolean;
@@ -233,7 +232,7 @@ export function historyEpoch(context: RunIntentsContext): bigint {
 }
 
 /** History includes writer outcomes posted elsewhere, plus local requests still awaiting them. */
-export function intentRows(context: RunIntentsContext, epoch: bigint): readonly IntentRow[] {
+export function intentRows(context: RunIntentsContext): readonly IntentRow[] {
   const local = context.entries.map(entry => ({
     id: entry.request.requestId,
     source: 'intent' as const,
@@ -244,7 +243,7 @@ export function intentRows(context: RunIntentsContext, epoch: bigint): readonly 
     reason: entry.reason,
     epoch: entry.request.expectedEpoch,
   }));
-  const rows = [
+  return [
     ...context.outcomes.map(row => ({
       ...row,
       epoch: row.epoch ?? local.find(entry => entry.id === row.id)?.epoch ?? null,
@@ -254,9 +253,4 @@ export function intentRows(context: RunIntentsContext, epoch: bigint): readonly 
         !context.outcomes.some(outcome => outcome.source === 'intent' && outcome.id === row.id),
     ),
   ];
-  const latest = rows.filter(row => row.status === 'applied' && row.epoch === epoch).at(-1);
-  return rows.map(row => ({
-    ...row,
-    current: latest !== undefined && row.id === latest.id && row.source === latest.source,
-  }));
 }

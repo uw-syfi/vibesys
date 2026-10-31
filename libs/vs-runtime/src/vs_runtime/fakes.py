@@ -429,6 +429,7 @@ class FakeWorkspaces:
         self._closed = False
         self._holds: Callable[[], WorkspaceHolds] | None = None
         self._measured: list[CandidateWorkspace] = []
+        self._measured_step_tags: list[str | None] = []
 
     def script_candidate_retain(
         self, *results: BaseException | None, after_retention: bool = False
@@ -501,11 +502,19 @@ class FakeWorkspaces:
         self._candidates.append(candidate)
         return candidate
 
-    async def create_measured_candidate(self, revision: str) -> CandidateWorkspace:
+    async def create_measured_candidate(
+        self, revision: str, *, step_tag: str | None = None
+    ) -> CandidateWorkspace:
         """A candidate of *revision*; the fake declares no unread paths, so it withholds none."""
         candidate = await self.create_candidate(revision)
         self._measured.append(candidate)
+        self._measured_step_tags.append(step_tag)
         return candidate
+
+    @property
+    def measured_step_tags(self) -> tuple[str | None, ...]:
+        """The step tag each measured candidate was opened for, in order."""
+        return tuple(self._measured_step_tags)
 
     @property
     def measured_candidates(self) -> tuple[CandidateWorkspace, ...]:

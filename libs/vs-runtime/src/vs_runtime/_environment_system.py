@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
+
+from vs_sim.api import NoProcessTable
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
-    from vs_sim.api import Network, PipedProcessLauncher, Processes, Threads
+    from vs_sim.api import Network, PipedProcessLauncher, Processes, ProcessTable, Threads
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +31,12 @@ class EnvironmentSystem:
     """Starts streamed host programs, such as ``docker exec`` and an agent GPU command's ``srun``."""
     slurm_processes: Processes
     """Starts the Slurm programs (ssh, rsync, a connector, ``scancel``, ``squeue``)."""
+    process_table: ProcessTable = field(default_factory=NoProcessTable)
+    """Finds and ends the host's processes by their marks, such as a host agent's.
+
+    The entrypoint passes the real table. The default has none, so a host step's clear answers
+    that it is unavailable rather than that nothing is left.
+    """
     login_environment: Callable[[], Mapping[str, str]] | None = None
     """Reads the environment the user's login shell has, where tools such as ``cargo`` are found.
 

@@ -25,11 +25,15 @@ import {
   Stack,
   StatusDot,
   type StatusTone,
+  StepList,
   Switch,
   Text,
   TextInput,
   type TextStyle,
   type TextTone,
+  Toast,
+  type ToastItem,
+  ToastStack,
   Wordmark,
 } from '@vibesys/ui';
 import {type JSX, useState} from 'react';
@@ -153,6 +157,24 @@ function SelectDemo(props: {
   );
 }
 
+function LabelInsideDemo(): JSX.Element {
+  const [value, setValue] = useState<'status' | 'machine'>('status');
+  return (
+    <Field label="Group by" hideLabel>
+      <Select
+        labelInside
+        size="sm"
+        value={value}
+        change={setValue}
+        options={[
+          {value: 'status', label: 'Status'},
+          {value: 'machine', label: 'Machine'},
+        ]}
+      />
+    </Field>
+  );
+}
+
 function PathDemo(): JSX.Element {
   const [value, setValue] = useState('~/src/');
   return (
@@ -191,6 +213,78 @@ function SliderDemo(): JSX.Element {
 }
 
 /** The layout, text and form components (batch 1 of the design system). */
+const noop = (): void => undefined;
+
+const SAMPLE_TOASTS: readonly ToastItem[] = [
+  {
+    id: 'read',
+    tone: 'warn',
+    title: 'The machines could not be read',
+    detail: 'Connection refused.',
+    open: false,
+  },
+  {
+    id: 'save',
+    tone: 'err',
+    title: 'Could not save the change',
+    detail: 'The settings file is read-only.',
+    open: false,
+  },
+];
+
+function ToastDemo(): JSX.Element {
+  const [open, setOpen] = useState(true);
+  return (
+    <Stack>
+      <Toast
+        tone="err"
+        title="Could not save the change"
+        detail="The settings file is read-only."
+        open={open}
+        toggle={setOpen}
+        dismiss={noop}
+      />
+      <Toast
+        tone="warn"
+        title="The machines could not be read"
+        detail="Connection refused."
+        open={false}
+        toggle={noop}
+        dismiss={noop}
+      />
+      <Toast
+        tone="err"
+        title="The command was not taken"
+        open={false}
+        toggle={noop}
+        dismiss={noop}
+      />
+    </Stack>
+  );
+}
+
+/** The stack sits over the window at its top right, so it is shown on request, not over the page. */
+function ToastStackDemo(): JSX.Element {
+  const [toasts, setToasts] = useState<readonly ToastItem[]>([]);
+  return (
+    <Stack>
+      <Button
+        text="Show notifications"
+        press={() => setToasts(SAMPLE_TOASTS)}
+        {...(toasts.length > 0 ? {disabledReason: 'Shown at the top right of the window'} : {})}
+      />
+      <ToastStack
+        label="Notifications"
+        toasts={toasts}
+        toggle={(id, open) =>
+          setToasts(list => list.map(toast => (toast.id === id ? {...toast, open} : toast)))
+        }
+        dismiss={id => setToasts(list => list.filter(toast => toast.id !== id))}
+      />
+    </Stack>
+  );
+}
+
 export const BASIC_ENTRIES = {
   Page: {
     render: () => (
@@ -375,6 +469,7 @@ export const BASIC_ENTRIES = {
         <SelectDemo mono={false} note={{help: 'Only tested options are listed.'}} />
         <SelectDemo mono note={{help: 'Shown in mono.'}} />
         <SelectDemo mono={false} note={{error: 'Pick a size that fits.'}} />
+        <LabelInsideDemo />
       </Grid>
     ),
   },
@@ -462,6 +557,35 @@ export const BASIC_ENTRIES = {
       </Grid>
     ),
   },
+  StepList: {
+    render: () => (
+      <Stack>
+        <StepList
+          title="This Mac"
+          steps={[
+            {id: 'gateway', label: 'Starting gateway', state: 'done', position: '1/3'},
+            {id: 'handshake', label: 'Connecting', state: 'current', position: '2/3'},
+            {id: 'runs', label: 'Loading runs', state: 'pending', position: '3/3'},
+          ]}
+        />
+        <StepList
+          title="host-a"
+          steps={[
+            {
+              id: 'gateway',
+              label: 'Starting gateway',
+              state: 'failed',
+              position: '1/3',
+              note: 'gateway exited (code 1)',
+            },
+            {id: 'handshake', label: 'Connecting', state: 'pending', position: '2/3'},
+            {id: 'runs', label: 'Loading runs', state: 'pending', position: '3/3'},
+          ]}
+          retry={() => undefined}
+        />
+      </Stack>
+    ),
+  },
   Banner: {
     render: () => (
       <Stack>
@@ -474,7 +598,7 @@ export const BASIC_ENTRIES = {
           actions={<Button text="Copy it out" press={() => undefined} />}
         />
         <Banner
-          tone="err"
+          tone="failed"
           title="It stopped with an error."
           body="The log has the details."
           actions={
@@ -487,4 +611,6 @@ export const BASIC_ENTRIES = {
       </Stack>
     ),
   },
+  Toast: {render: () => <ToastDemo />},
+  ToastStack: {render: () => <ToastStackDemo />},
 } satisfies Partial<Record<ComponentName, GalleryEntry>>;

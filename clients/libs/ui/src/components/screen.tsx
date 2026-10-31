@@ -8,6 +8,7 @@ export type Density = 'comfortable' | 'compact';
  * A screen that never scrolls as a whole: a fixed `header` (title, status, actions) above a body
  * that fills the rest of its container. Whatever is long scrolls inside a `Pane`. `density` is
  * read by the components inside (panes, pick rows, the scrubber), so a screen needs no overrides.
+ * The header is the screen's header row for the window's toasts, which sit just below it.
  */
 export function Screen(props: {
   readonly header: ReactNode;

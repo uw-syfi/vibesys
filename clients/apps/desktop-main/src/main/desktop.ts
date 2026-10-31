@@ -53,6 +53,7 @@ export interface DesktopDeps {
     | 'recent'
     | 'releaseLogs'
     | 'retireOwner'
+    | 'retryListing'
     | 'setCheckout'
     | 'signIn'
     | 'tasks'
@@ -273,6 +274,9 @@ export class Desktop {
         return null;
       case 'sign-in':
         await hosts.signIn(request.host);
+        return null;
+      case 'retry-listing':
+        hosts.retryListing(request.host);
         return null;
       case 'tasks':
         return hosts.tasks(request.host, request.project);
