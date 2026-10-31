@@ -82,7 +82,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  width: var(--column-aside);
+  width: calc(var(--column-aside) + var(--space-8));
   max-width: calc(100% - 2 * var(--space-4));
   max-height: calc(100% - var(--titlebar) - var(--space-5));
   overflow-y: auto;
