@@ -14,8 +14,9 @@ import (
 
 // FakeHost is a scripted machine, as strict as SystemHost about what exists: a
 // tool or file is present only if listed. Each read of a file takes its next
-// content and stays on the last. A tool is a function of its argv, which must
-// return once ctx ends, as SystemHost's Run does.
+// content and stays on the last. A tool is a function of its argv, and should
+// return once ctx ends, as SystemHost's Run should. The sampler does not depend
+// on it: Wedged is the machine where calls never return.
 type FakeHost struct {
 	Tools map[string]func(ctx context.Context, args []string) ([]byte, error)
 	Files map[string][][]byte
