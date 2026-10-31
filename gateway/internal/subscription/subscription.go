@@ -188,9 +188,14 @@ func (s *sampled[V]) once(ctx context.Context) (V, error) {
 	}
 }
 
-// failedFrame sanitizes a detail, which may be a panic value or a tool's output,
-// into what the schema accepts.
+// failedFrame sanitizes a code and a detail, which may be a source's own choice,
+// a panic value or a tool's output, into what the schema accepts. A source that
+// names no defined code has a defect, which is INTERNAL.
 func failedFrame(code apiv1.TopicFailureCode, detail string) *apiv1.TopicFailure {
+	if _, defined := apiv1.TopicFailureCode_name[int32(code)]; !defined || code == apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_UNSPECIFIED {
+		detail = fmt.Sprintf("source chose failure code %d: %s", int32(code), detail)
+		code = apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_INTERNAL
+	}
 	detail = strings.ToValidUTF8(detail, "?")
 	if len(detail) > maxDetailBytes {
 		cut := maxDetailBytes
