@@ -8,6 +8,7 @@ last checkpoint after a crash; and the growth of the log, which is linear in the
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import pytest
@@ -40,6 +41,7 @@ from vs_dst.api import (
     Moment,
     RunSetup,
     ShellHosting,
+    SimulatedRun,
     StepLoopHosting,
     simulate,
 )
@@ -287,3 +289,72 @@ def search_bytes(records: tuple[Record, ...]) -> int:
         for r in records
         if r.body is not None and r.body.field == "strategy_advanced"
     )
+
+
+WORLDS = {
+    f"{name}-{label}": (hosting, make)
+    for label, hosting in (("shell", ShellHosting()), ("step-loop", STEP_LOOP))
+    for name, make in (
+        ("tiny", lambda: TinyWorld(3)),
+        ("restartable", lambda: RestartableWorld(4, changed=False)),
+    )
+}
+
+
+@dataclass(frozen=True)
+class Stops:
+    """A finished run and the places the operator can stop it, a first time and a second."""
+
+    normal: SimulatedRun
+    first: tuple[Interruption, ...]
+    second: tuple[Interruption, ...]
+
+
+@pytest.fixture(scope="module", params=sorted(WORLDS))
+def stops(request: pytest.FixtureRequest) -> Stops:
+    hosting, make = WORLDS[request.param]
+    normal = simulate(make(), hosting)
+    pauses = normal.interruptions(Action.PAUSE)
+    return Stops(normal, pauses + normal.interruptions(Action.KILL), pauses)
+
+
+@settings(max_examples=examples(pr=8, nightly=60), deadline=None)
+@given(data=st.data())
+def test_a_run_resumed_and_stopped_again_ends_as_the_uninterrupted_run(
+    stops: Stops, data: st.DataObject
+) -> None:
+    """The host that resumed a run is itself paused, anywhere: the run ends as it would have, and
+    every step finishes once."""
+    first = data.draw(st.sampled_from(stops.first))
+    second = data.draw(st.sampled_from(stops.second))
+    interrupted = stops.normal.interrupt(first, then=second)
+
+    assert interrupted.never_stuck(), (first, second, interrupted.detail)
+    assert interrupted.matches_uninterrupted(), (first, second, interrupted.detail)
+    assert interrupted.every_step_finished_once(), (first, second)
+
+
+def test_a_second_pause_takes_hold_of_the_host_that_resumed_the_run(stops: Stops) -> None:
+    """The generator above reaches something: some second pause parks the resumed host again.
+
+    The first stop is a pause mid-run, after a commit the host is open for: one before the host
+    has opened its log is not delivered, and stops nothing.
+    """
+    mid_run = [p for p in stops.second if p.moment is Moment.AFTER_COMMIT]
+    first = mid_run[len(mid_run) // 2]
+    parked = [
+        stops.normal.interrupt(first, then=second).history.count("parked")
+        for second in stops.second
+        if second != first
+    ]
+
+    assert max(parked) >= 2, parked
+
+
+def test_a_resumed_host_is_stopped_again_by_a_pause_and_not_by_a_kill() -> None:
+    normal = simulate(TinyWorld(2), STEP_LOOP)
+    first, *_ = normal.interruptions(Action.PAUSE)
+    kill = normal.interruptions(Action.KILL)[0]
+
+    with pytest.raises(ValueError, match="stopped again by a pause"):
+        normal.interrupt(first, then=kill)

@@ -217,7 +217,7 @@ class SimulatedRun:
         points = choose(crash_point_policy(), self.commits, len(self._outside.effects.executed))
         return tuple(p for p in points if action in (None, p.action) and moment in (None, p.moment))
 
-    def interrupt(self, point: Interruption) -> Interrupted:
+    def interrupt(self, point: Interruption, then: Interruption | None = None) -> Interrupted:
         """What becomes of the run when ``point`` interrupts it and the operator resumes it.
 
         A kill starts from a copy of the outside world at ``point`` (the prefix is not run
@@ -229,16 +229,24 @@ class SimulatedRun:
 
         The first kill runs the world once more from its start, copying the outside world at
         every kill the policy offers, as `rerun_with_crash` does.
+
+        ``then`` stops the run again: the operator pauses the host that resumed it at that point
+        (a pause is the only second stop a resumed host can be given). Its index counts over the
+        whole run, the way ``point``'s does, so a point the resumed host never reaches stops nothing.
         """
         self._require_uninterrupted()
+        if then is not None and then.action is not Action.PAUSE:
+            message = f"a resumed host is stopped again by a pause, not by {then.kind}"
+            raise ValueError(message)
         expected = Expectation(self.result, self._duration)
+        operator = _interrupt.Operator(self._plan, expected.patience, then)
         if point.action is Action.PAUSE:
             return _interrupt.paused(
-                self._plan, self._pristine, self._started.clock_at, point, expected
+                operator, self._pristine, self._started.clock_at, point, expected
             )
         snapshot = self._snapshot(point, frozenset(self.interruptions(Action.KILL)))
         outside = snapshot.outside.copy()
-        return _interrupt.killed(self._plan, outside, self._restart_at(snapshot), point, expected)
+        return _interrupt.killed(operator, outside, self._restart_at(snapshot), point, expected)
 
     def _require_uninterrupted(self) -> None:
         if self._started.commits:

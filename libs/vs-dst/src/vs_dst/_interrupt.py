@@ -145,28 +145,57 @@ class Pauser:
         """Submit the operator's pause when the run is at the moment the interruption names."""
         if self._host is None or (moment, index) != (self._point.moment, self._point.index):
             return
+        # A pause is its own control: a second one, on a resumed host, must not be taken for the
+        # first, which the log still holds.
+        name = f"operator-pause-{self._point.moment.name.lower()}-{self._point.index}"
         control = ControlInput(
-            control_id=ControlId(root="operator-pause"),
+            control_id=ControlId(root=name),
             action="pause",
             owner=PauseOwner.OPERATOR,
         )
         self._host.submit(RunControlEvent(control=control, now_at=self._host.clock.now()))
 
 
+@dataclass(frozen=True)
+class Operator:
+    """What the operator does after a stop: resume the run, and stop it again if asked."""
+
+    plan: HostPlan
+    patience: float
+    again: Interruption | None = None
+    """A pause for the first host that resumes the run. Its index counts over the whole run, so
+    it only takes hold if that host gets there."""
+
+    def resume(self, outside: OutsideWorld, clock_at: float, hosts: list[Hosted]) -> list[Hosted]:
+        """Resume until a host ends the run or the operator has resumed `MAX_RESUMES` times.
+
+        ``hosts`` holds the host that ended before the first resume: none when it was killed.
+        Returns it with the hosts the resumes started.
+        """
+        resumes = 0
+        while not hosts or (resumes < MAX_RESUMES and not hosts[-1].finished):
+            # A host that dies before the run's first commit leaves nothing to resume.
+            resuming = self.plan.resuming(resumed=outside.store.observe() is not None)
+            stop = Pauser(self.again) if self.again is not None and resumes == 0 else None
+            hosts.append(resuming.run(outside, clock_at, stop, patience=self.patience))
+            clock_at = hosts[-1].ended_at + 1
+            resumes += 1
+        return hosts
+
+
 def killed(
-    plan: HostPlan,
+    operator: Operator,
     outside: OutsideWorld,
     clock_at: float,
     point: Interruption,
     expected: Expectation,
 ) -> Interrupted:
     """Resume the run ``outside`` holds after its host died, the resume starting at ``clock_at``."""
-    hosts = _resume(plan, outside, clock_at, expected.patience, [])
-    return _interrupted(point, expected, outside, hosts)
+    return _interrupted(point, expected, outside, operator.resume(outside, clock_at, []))
 
 
 def paused(
-    plan: HostPlan,
+    operator: Operator,
     pristine: OutsideWorld,
     clock_at: float,
     point: Interruption,
@@ -174,31 +203,9 @@ def paused(
 ) -> Interrupted:
     """Run the world from its start, pause it at ``point``, and resume it after the host exits."""
     outside = pristine.copy()
-    first = plan.run(outside, clock_at, Pauser(point), patience=expected.patience)
-    hosts = _resume(plan, outside, first.ended_at + 1, expected.patience, [first])
+    first = operator.plan.run(outside, clock_at, Pauser(point), patience=operator.patience)
+    hosts = operator.resume(outside, first.ended_at + 1, [first])
     return _interrupted(point, expected, outside, hosts)
-
-
-def _resume(
-    plan: HostPlan,
-    outside: OutsideWorld,
-    clock_at: float,
-    patience: float,
-    hosts: list[Hosted],
-) -> list[Hosted]:
-    """Resume until a host ends the run or the operator has resumed `MAX_RESUMES` times.
-
-    ``hosts`` holds the host that ended before the first resume: none when it was killed.
-    Returns it with the hosts the resumes started.
-    """
-    resumes = 0
-    while not hosts or (resumes < MAX_RESUMES and not hosts[-1].finished):
-        # A host that dies before the run's first commit leaves nothing to resume.
-        resuming = plan.resuming(resumed=outside.store.observe() is not None)
-        hosts.append(resuming.run(outside, clock_at, patience=patience))
-        clock_at = hosts[-1].ended_at + 1
-        resumes += 1
-    return hosts
 
 
 def _interrupted(
