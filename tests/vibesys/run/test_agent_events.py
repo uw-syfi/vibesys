@@ -29,6 +29,7 @@ from vs_agent.api import (
     AgentRateLimit,
     AgentUsage,
     Attribution,
+    CostBasis,
     ProviderSwitch,
     QuotaCondition,
     QuotaPlan,
@@ -203,6 +204,9 @@ def test_a_finished_turn_s_settled_usage_is_recorded_with_routing_metadata(
         output_tokens=90,
         total_cost_usd=0.42,
         duration_ms=1500,
+        # A usage that names no basis is recorded as not reported, never as null: null on a stored
+        # line means only that it was written before the field existed.
+        cost_basis=CostBasis.NOT_REPORTED,
     )
 
 
