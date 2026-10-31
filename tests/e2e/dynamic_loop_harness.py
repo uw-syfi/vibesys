@@ -62,7 +62,7 @@ from vs_agent.api.testing import FakeAgentClient
 from vs_core.api import CoreState, FlowDriver, FlowState
 from vs_core.api.recovery import fold
 from vs_core.testing.liveness import Budget, End, Journal, assert_live
-from vs_project.api import FakeStateStores, Project
+from vs_project.api import Project
 from vs_runlog.api import RunLogReader
 from vs_runtime.api.core import RunTiming
 from vs_runtime.api.testing import CrashableRunClock, FakeStopTimer
@@ -463,12 +463,6 @@ class LoopInput:
     agent_config: Path
     connector: FakeConnector
     """The in-process Fake cluster; pass it to :func:`run_request` as ``slurm_processes``."""
-    state_stores: FakeStateStores | None
-    """The run's durable records, kept across a simulated crash; ``None`` is the real ``.vibesys``.
-
-    Pass it to :func:`run_request` as ``state_stores``. The Fake commits and fences exactly as
-    the local store does (both pass ``test_state_store_contract``), without an fsync per read.
-    """
     plugin_id: str = "dynamic"
     """The strategy under test, a key of `tests.support.loop_spec.LOOPS`."""
 
@@ -478,13 +472,10 @@ class LoopInput:
         base: Path,
         *,
         poll_interval_s: float = 1.0,
-        on_disk_state: bool = False,
         agent_config: str = _AGENT_CONFIG,
     ) -> LoopInput:
         """Write the input project, the executing cluster, and its Slurm config.
 
-        The run's durable records live in memory unless ``on_disk_state``, which keeps
-        the product's fsynced ``.vibesys`` store for the scenarios that prove it.
         ``agent_config`` is the operator's agent.toml.
         """
         root = base / "project"
@@ -527,7 +518,6 @@ class LoopInput:
             config,
             agent_config_file,
             connector,
-            None if on_disk_state else FakeStateStores(),
         )
 
     @classmethod
@@ -544,12 +534,11 @@ class LoopInput:
             base / "slurm.toml",
             base / "agent.toml",
             connector,
-            None,
         )
 
     def project(self) -> Project:
-        """Open the input project over the run's state stores."""
-        return Project.open(self.root, state_stores=self.state_stores)
+        """Open the input project."""
+        return Project.open(self.root)
 
     def hold_jobs(self) -> None:
         """Leave every job submitted from now on pending until it is cancelled."""

@@ -31,7 +31,6 @@ if TYPE_CHECKING:
         CommitFault,
         ObservationFault,
         StateStore,
-        StateStoreFactory,
         StoreRecord,
     )
 
@@ -39,28 +38,19 @@ if TYPE_CHECKING:
 class Project:
     """One canonical project root with authored tasks and generated state."""
 
-    def __init__(
-        self, layout: ProjectLayout, *, state_stores: StateStoreFactory | None = None
-    ) -> None:
-        """Bind layout and state operations to the same validated root.
-
-        ``state_stores`` opens each run's ``StateStore``; ``None`` opens the
-        crash-atomic local one under the project's state directory.
-        """
+    def __init__(self, layout: ProjectLayout) -> None:
+        """Bind layout and state operations to the same validated root."""
         self._layout = layout
-        self._state_stores = state_stores
         self._state: ProjectState | None = None
 
     @classmethod
-    def open(
-        cls, project_root: Path | str, *, state_stores: StateStoreFactory | None = None
-    ) -> Self:
+    def open(cls, project_root: Path | str) -> Self:
         """Open an existing directory as a project.
 
         Authored task configuration and generated state may both be absent.
         Operations that need either surface validate it when called.
         """
-        return cls(ProjectLayout.open(project_root), state_stores=state_stores)
+        return cls(ProjectLayout.open(project_root))
 
     @classmethod
     def discover(cls, start: Path | str) -> Self:
@@ -90,21 +80,8 @@ class Project:
     ) -> StateStore:
         """Open the shared atomic record and host fence for one validated run.
 
-        Fault plans and ``effects`` (the durability operations; default the local
-        filesystem) drive the local store only; a project opened with injected
-        ``state_stores`` rejects them, since its stores take their faults at
-        construction.
+        ``effects`` is the durability operations; the default is the local filesystem.
         """
-        if self._state_stores is not None:
-            if (
-                tuple(fault_plan)
-                or tuple(lease_fault_plan)
-                or tuple(observation_fault_plan)
-                or effects is not None
-            ):
-                message = "fault plans apply to the local state store, not injected state_stores"
-                raise ValueError(message)
-            return self._state_stores(self, run_id)
         return LocalStateStore(
             self,
             run_id,
@@ -120,10 +97,7 @@ class Project:
         Opening a local store creates its directory, so a run that has no record
         yet is detected first.
         """
-        if (
-            self._state_stores is None
-            and self.state.state_store_namespace(run_id).read_bytes("store.json") is None
-        ):
+        if self.state.state_store_namespace(run_id).read_bytes("store.json") is None:
             return None
         return self.state_store(run_id).load()
 

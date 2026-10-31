@@ -34,7 +34,7 @@ __all__ = [
 
 
 def production_timing() -> RunTiming:
-    """Wall time, real threads and the production lease: the one definition of a real run's timing."""
+    """Wall time and real threads: the one definition of a real run's timing."""
     return RunTiming(SystemClock(), OsThreads())
 
 
@@ -53,7 +53,7 @@ def _production_settings() -> LaunchSettings:
 
 
 def production_runs() -> Runs:
-    """The in-process launcher over wall time, real threads, processes, sockets and the production lease."""
+    """The in-process launcher over wall time, real threads, processes and sockets."""
     return default_runs(_production_settings())
 
 

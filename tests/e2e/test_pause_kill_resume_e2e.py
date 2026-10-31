@@ -186,7 +186,6 @@ class Scenario:
         self.base = base
         self.loop_input = LoopInput.create(
             base,
-            on_disk_state=True,
             poll_interval_s=0.05,
             agent_config=f"{_AGENT_CONFIG}[agent]\nscripted_seed = {SEED}\n",
         )

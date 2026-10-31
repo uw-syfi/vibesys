@@ -65,7 +65,7 @@ class LaunchSettings:
     """Implementations selected once at the application wiring boundary."""
 
     timing: RunTiming
-    """The run's time sources and lease; the entrypoint builds them from real or simulated time."""
+    """The run's time sources; the entrypoint builds them from real or simulated time."""
     processes: Processes
     """Starts the run's Git and GitHub CLI commands; the entrypoint builds real or fake ones."""
     piped_processes: PipedProcessLauncher

@@ -348,7 +348,7 @@
  "libs/vs-project/tests/test_operator_key.py": 0.34,
  "libs/vs-project/tests/test_private_directory.py": 0.07,
  "libs/vs-project/tests/test_project_root.py": 0.04,
- "libs/vs-project/tests/test_project_state_stores.py": 0.07,
+ "libs/vs-project/tests/test_project_stored_record.py": 0.07,
  "libs/vs-project/tests/test_revision_publication.py": 0.16,
  "libs/vs-project/tests/test_run_address.py": 0.1,
  "libs/vs-project/tests/test_run_execution_record.py": 0.01,
