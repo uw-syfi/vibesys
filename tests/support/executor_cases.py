@@ -26,6 +26,7 @@ from tests.support.session_world import (
     ensure_request,
     inspect_request,
     open_host,
+    session_context,
 )
 from tests.support.workspace_world import WorkspaceEnv, open_workspace_env
 
@@ -584,9 +585,9 @@ class _SessionsWorld(_World):
     ) -> ExecutionResult:
         faulting = self.faulting(crash_at)
         try:
-            return await self.host.run(
-                request, self.store(faulting), lease=lease, digest=digest, repeat=repeat
-            )
+            context = session_context(request, lease=lease, digest=digest)
+            context = context.model_copy(update={"repeat": repeat})
+            return await self.host.run_in(request, self.store(faulting), context)
         finally:
             self._writes = faulting.writes
 
