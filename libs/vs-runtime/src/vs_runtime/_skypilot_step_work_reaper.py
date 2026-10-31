@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from vs_runtime._stage_marks import agent_mark
 from vs_runtime._step_runner import ClearUnavailableError
 from vs_sandbox.api.skypilot import SkyPilotCLIError, cancel_step_jobs
+from vs_sim.api import ShieldedBlockingRunner
 
 if TYPE_CHECKING:
     from vs_core.api import RequestId
@@ -38,13 +39,14 @@ class SkyPilotStepWorkReaper:
         """End the agent processes of run *run_id* through *agents*, then cancel jobs of *journal*.
 
         The jobs are found in *journal* by *runner*. *blocking* carries the journal reads and the
-        ``sky`` commands off the event loop.
+        ``sky`` commands off the event loop; a cancelled ``reap`` returns only once the call in
+        flight has ended: it is shielded.
         """
         self._run_id = run_id
         self._agents = agents
         self._journal = journal
         self._runner = runner
-        self._blocking = blocking
+        self._blocking = ShieldedBlockingRunner(blocking)
 
     async def reap(self, tag: RequestId) -> None:
         """End the step's agent processes and cancel its remote jobs.

@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from vs_agent.api import OrphanReapError, reap_step_agents
 from vs_runtime._stage_marks import agent_mark
 from vs_runtime._step_runner import ClearUnavailableError
+from vs_sim.api import ShieldedBlockingRunner
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -39,12 +40,13 @@ class DockerAgentWorkReaper:
         """Sweep the containers labelled *run_id* through *docker*; *blocking* carries each sweep.
 
         *reap_tagged* replaces the default ``docker exec`` sweep of one container, for a test.
+        A cancelled ``reap`` returns only once the sweep has ended: it is shielded.
         """
         self._run_id = run_id
         self._sweep = partial(
             reap_step_agents, run_id, docker=docker, log=log, reap_tagged=reap_tagged
         )
-        self._blocking = blocking
+        self._blocking = ShieldedBlockingRunner(blocking)
 
     async def reap(self, tag: RequestId) -> None:
         """End every process carrying *tag* in the run's containers.

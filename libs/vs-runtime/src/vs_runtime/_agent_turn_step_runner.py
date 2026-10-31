@@ -50,6 +50,7 @@ from vs_runtime._session_requests import (
 )
 from vs_runtime._stage_marks import agent_mark
 from vs_runtime._step_runner import Cleared, ClearUnavailableError
+from vs_sim.api import ShieldedBlockingRunner
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -163,7 +164,7 @@ class AgentTurnStepRunner:
         self._paths = paths
         self._sessions = state.sessions
         self._store = state.store
-        self._blocking = state.blocking
+        self._blocking = ShieldedBlockingRunner(state.blocking)
         self._clock = clock
         self._writer = writer
         self._reaper = reaper

@@ -14,7 +14,7 @@ import importlib
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from vs_sim.blocking import BlockingRunner, ThreadBlockingRunner
+    from vs_sim.blocking import BlockingRunner, ShieldedBlockingRunner, ThreadBlockingRunner
     from vs_sim.byte_source import (
         ByteSource,
         ByteSourceChangedError,
@@ -126,6 +126,7 @@ if TYPE_CHECKING:
 
 _MODULES: dict[str, str] = {
     "BlockingRunner": "vs_sim.blocking",
+    "ShieldedBlockingRunner": "vs_sim.blocking",
     "ThreadBlockingRunner": "vs_sim.blocking",
     "Clock": "vs_sim.clock",
     "MonotonicClock": "vs_sim.clock",
@@ -318,6 +319,7 @@ __all__ = [
     "ReservableThreads",
     "RunningProcess",
     "SeededRandom",
+    "ShieldedBlockingRunner",
     "SignalMainThreadWake",
     "SignalRelay",
     "SignalSource",

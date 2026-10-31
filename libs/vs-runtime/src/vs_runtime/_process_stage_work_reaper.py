@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 from vs_runtime._stage_marks import is_stage_mark_of
 from vs_runtime._step_runner import ClearUnavailableError
 from vs_sandbox.api import STEP_TAG_ENV
-from vs_sim.api import ProcessSurvivedError, ProcessTableUnavailableError
+from vs_sim.api import ProcessSurvivedError, ProcessTableUnavailableError, ShieldedBlockingRunner
 
 if TYPE_CHECKING:
     from vs_core.api import RequestId
@@ -39,11 +39,12 @@ class ProcessStageWorkReaper:
     def __init__(self, processes: ProcessTable, run_id: str, blocking: BlockingRunner) -> None:
         """Find and end the marked processes of run *run_id* through *processes*.
 
-        *blocking* carries each listing and each kill off the event loop.
+        *blocking* carries each listing and each kill off the event loop; a cancelled ``reap``
+        returns only once the call in flight has ended: it is shielded.
         """
         self._processes = processes
         self._run_id = run_id
-        self._blocking = blocking
+        self._blocking = ShieldedBlockingRunner(blocking)
 
     async def reap(self, tag: RequestId) -> None:
         """End every process carrying a handle of *tag*, scanning until a scan finds none."""

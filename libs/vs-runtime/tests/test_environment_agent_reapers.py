@@ -41,10 +41,10 @@ from vs_sandbox.api.slurm import load_slurm_operator_settings
 from vs_sandbox.fake_docker_engine import FakeDockerEngine
 from vs_sim.api import DISCARD, ProcessSpec
 from vs_sim.api.testing import (
+    DetachedBlockingRunner,
     FakePipedProcessLauncher,
     FakeProcesses,
     FakeProcessTable,
-    GatedBlockingRunner,
     InlineBlockingRunner,
     ManualClock,
     ProcessScript,
@@ -102,7 +102,7 @@ class TestDockerAgentWorkReaper(StageWorkReaperContract):
             OTHER_RUN: _containers(engine, OTHER_RUN, 1),
         }
         processes = FakeAgentProcesses()
-        blocking = GatedBlockingRunner()
+        blocking = DetachedBlockingRunner()
         reaper = DockerAgentWorkReaper(
             RUN, engine, blocking, lambda _line: None, processes.reap_tagged
         )
@@ -134,7 +134,7 @@ class _HostAgents:
 
     def __init__(self, shows: Shows) -> None:
         self.table = FakeProcessTable(shows)
-        self.blocking = GatedBlockingRunner()
+        self.blocking = DetachedBlockingRunner()
         self.reaper = HostEnvironment().agent_work_reaper(
             RUN,
             system=replace(idle_environment_system(), process_table=self.table),

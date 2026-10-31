@@ -30,6 +30,7 @@ from vs_evaluation.api import EvaluationState, ExecutorRejectedError, PollPhase
 from vs_runtime._evaluation_jobs import RejectedPlanError, handle_for
 from vs_runtime._job_step_run import JobStepRun, evaluation_request, submission_of
 from vs_runtime._step_runner import Adopted, Cleared, ClearUnavailableError
+from vs_sim.api import ShieldedBlockingRunner
 from vs_slurm.api import (
     ClusterObservation,
     ClusterUnknown,
@@ -61,7 +62,10 @@ class SlurmScheduler:
     cluster: Cluster
     """The scheduler the executor submits to: asked whether a withdrawn attempt's job has ended."""
     blocking: BlockingRunner
-    """Carries the ledger's and the cluster's blocking reads off the event loop."""
+    """Carries the ledger's and the cluster's blocking reads off the event loop.
+
+    The runner shields it: a cancelled ``clear`` returns only once the read in flight has ended.
+    """
 
 
 class SlurmJobStepRunner:
@@ -79,7 +83,7 @@ class SlurmJobStepRunner:
         self._executor = executor
         self._ledger = scheduler.ledger
         self._cluster = scheduler.cluster
-        self._blocking = scheduler.blocking
+        self._blocking = ShieldedBlockingRunner(scheduler.blocking)
         self._job = JobStepRun(executor, clock=clock, poll_interval_s=poll_interval_s)
 
     async def run(

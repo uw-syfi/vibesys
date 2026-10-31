@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from vs_runtime._stage_marks import is_stage_mark_of
 from vs_runtime._step_runner import ClearUnavailableError
 from vs_sandbox.api import StepContainerError
+from vs_sim.api import ShieldedBlockingRunner
 
 if TYPE_CHECKING:
     from vs_core.api import RequestId
@@ -27,11 +28,12 @@ class ContainerStageWorkReaper:
     def __init__(self, containers: StepContainers, run_id: str, blocking: BlockingRunner) -> None:
         """Find and remove the containers of run *run_id* through *containers*.
 
-        *blocking* carries each ``docker`` call off the event loop.
+        *blocking* carries each ``docker`` call off the event loop; a cancelled ``reap`` returns
+        only once the call in flight has ended: it is shielded.
         """
         self._containers = containers
         self._run_id = run_id
-        self._blocking = blocking
+        self._blocking = ShieldedBlockingRunner(blocking)
 
     async def reap(self, tag: RequestId) -> None:
         """Remove every container of *tag*, then list again to verify none remains."""

@@ -27,9 +27,9 @@ from vs_runtime.api.slurm_evaluation_stack import (
 from vs_runtime.api.step_runner import Adopted, CancelSignal, Cleared, ClearUnavailableError
 from vs_runtime.api.testing import StepRunnerContract, StepRunnerUnderTest
 from vs_sandbox.api.slurm import SlurmLedgerAttachment
-from vs_sim.api import SeededRandom
+from vs_sim.api import SeededRandom, yield_now
 from vs_sim.api.testing import (
-    InlineBlockingRunner,
+    DetachedBlockingRunner,
     ManualClock,
     VirtualClock,
     examples,
@@ -105,7 +105,7 @@ class Process:
         self.stack = stack
         self.runner = SlurmJobStepRunner(
             stack.executor,
-            SlurmScheduler(world.ledger, world.cluster, InlineBlockingRunner()),
+            SlurmScheduler(world.ledger, world.cluster, world.blocking),
             clock=world.clock,
             poll_interval_s=POLL_S,
         )
@@ -123,6 +123,7 @@ class World:
         self.clock = VirtualClock(1000.0)
         self.ledger = FlakyLedger(project=PROJECT, clock=ManualClock())
         self.cluster = FlakyCluster()
+        self.blocking = DetachedBlockingRunner()
         self.processes: list[Process] = []
         self.first = self.run(self.spawn())
 
@@ -506,6 +507,44 @@ def test_one_runs_cancel_never_ends_a_job_another_run_still_wants(tmp_path: Path
         result = await owner
         assert isinstance(result, Finished)
         assert len(world.cluster.submissions) == 1
+        await world.close()
+
+    world.run(main())
+
+
+@pytest.mark.parametrize("ledger", ["holds the request", "holds it withdrawn"])
+def test_a_cancelled_clear_returns_only_after_the_ledger_and_scheduler_reads_it_started_ended(
+    tmp_path: Path, ledger: str
+) -> None:
+    """The runner's own thread work is the ledger read and the scheduler calls of ``clear``.
+
+    The contract's flows never reach them (a restarted process polls the tag's job and adopts
+    it), so a clear of another step of the same content, which only the ledger can answer, is
+    cancelled while that work is in flight.
+    """
+    world = World(tmp_path)
+    left, other = tag_of("left"), tag_of("other-step-of-the-content")
+
+    async def main() -> None:
+        await world.die_mid_run(world.first, left, attempt=1)
+        if ledger == "holds it withdrawn":
+            _withdrawn(world, left)
+        second = await world.spawn()
+        world.blocking.hold()
+        call = asyncio.ensure_future(second.runner.clear(world.submission(other), other))
+
+        async def in_flight() -> int:
+            return world.blocking.in_flight
+
+        await yield_until(in_flight, lambda held: held > 0 or call.done(), "the ledger read")
+        assert world.blocking.in_flight > 0
+        call.cancel()
+        for _ in range(20):
+            await yield_now()
+        assert not call.done(), "clear returned while its thread work was in flight"
+        world.blocking.release()
+        await asyncio.gather(call, return_exceptions=True)
+        assert world.blocking.in_flight == 0
         await world.close()
 
     world.run(main())

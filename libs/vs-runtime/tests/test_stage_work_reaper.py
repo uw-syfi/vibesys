@@ -37,8 +37,8 @@ from vs_runtime.api.testing import (
 from vs_sandbox.api import STEP_TAG_ENV
 from vs_sandbox.api.testing import FakeStepContainers
 from vs_sim.api.testing import (
+    DetachedBlockingRunner,
     FakeProcessTable,
-    GatedBlockingRunner,
     InlineBlockingRunner,
     Shows,
     VirtualClock,
@@ -94,8 +94,8 @@ class TestFakeStageWorkReaper(StageWorkReaperContract):
 class _ProcessWorld:
     """Stage processes on a host whose process table shows ``shows``."""
 
-    def __init__(self, shows: Shows, blocking: GatedBlockingRunner | None = None) -> None:
-        self.blocking = blocking or GatedBlockingRunner()
+    def __init__(self, shows: Shows, blocking: DetachedBlockingRunner | None = None) -> None:
+        self.blocking = blocking or DetachedBlockingRunner()
         self.table = FakeProcessTable(shows)
         self.reaper = ProcessStageWorkReaper(self.table, RUN, self.blocking)
         self._lives = 0
@@ -136,8 +136,8 @@ class TestProcessStageWorkReaperOnMacOS(StageWorkReaperContract):
 
 
 class _ContainerWorld:
-    def __init__(self, blocking: GatedBlockingRunner | None = None) -> None:
-        self.blocking = blocking or GatedBlockingRunner()
+    def __init__(self, blocking: DetachedBlockingRunner | None = None) -> None:
+        self.blocking = blocking or DetachedBlockingRunner()
         self.daemon = FakeStepContainers()
         self.reaper = ContainerStageWorkReaper(self.daemon.of_run(RUN), RUN, self.blocking)
         self._lives = 0
@@ -176,7 +176,7 @@ class TestEachStageWorkReaper(StageWorkReaperContract):
     """A Docker run holds processes and containers; one reaper ends both."""
 
     def stage_work_under_test(self) -> StageWorkUnderTest:
-        blocking = GatedBlockingRunner()
+        blocking = DetachedBlockingRunner()
         processes = _ProcessWorld(Shows.LEADER_ARGUMENTS, blocking)
         containers = _ContainerWorld(blocking)
         process_side, container_side = processes.under_test(), containers.under_test()

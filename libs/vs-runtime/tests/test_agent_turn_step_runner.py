@@ -53,7 +53,7 @@ from vs_runtime.api.core import (
 from vs_runtime.api.docker_agent_work_reaper import DockerAgentWorkReaper
 from vs_runtime.api.executor_contexts import context_for
 from vs_runtime.api.stage_marks import agent_mark
-from vs_runtime.api.step_runner import CancelSignal, Cleared
+from vs_runtime.api.step_runner import CancelSignal, Cleared, StepRunner
 from vs_runtime.api.testing import (
     FakeStageWorkReaper,
     FakeWorkspace,
@@ -65,6 +65,7 @@ from vs_sandbox.fake_docker_engine import FakeDockerEngine
 from vs_sim.api import DISCARD, yield_now
 from vs_sim.api.testing import (
     HANG_GUARD_S,
+    DetachedBlockingRunner,
     FakePipedProcessLauncher,
     ManualClock,
     SimBlockingRunner,
@@ -157,6 +158,8 @@ class World:
     restarted: Callable[[], AgentTurnStepRunner]
     """A new process's runner over the same durable state: it remembers nothing."""
     kind: Kind = Kind.DISPATCH
+    blocking: DetachedBlockingRunner = field(default_factory=DetachedBlockingRunner)
+    """What the runner and its reaper do in a thread themselves; the executors have their own."""
 
     @property
     def processes(self) -> FakeAgentProcesses:
@@ -264,16 +267,17 @@ def open_world(root: Path, kind: Kind = Kind.DISPATCH) -> World:
     resolver.guarded = workspace
     turns = RuntimeSessionRequests(sessions, resolver, store, yields=None, blocking=blocking)
 
+    own = DetachedBlockingRunner()
     reaper = DockerAgentWorkReaper(
         _RUN,
         engine,
-        blocking,
+        own,
         lambda _line: None,
         reap_tagged=behavior.processes.reap_tagged,
     )
 
     lifecycle = SessionLifecycleRequests(sessions, turns, store, turns.settlement, blocking)
-    state = TurnState(sessions, store, blocking)
+    state = TurnState(sessions, store, own)
     paths = TurnPaths(turns, lifecycle, FixedTurns())
 
     def restarted() -> AgentTurnStepRunner:
@@ -292,6 +296,7 @@ def open_world(root: Path, kind: Kind = Kind.DISPATCH) -> World:
         state,
         restarted,
         kind,
+        own,
     )
 
 
@@ -307,6 +312,10 @@ class AgentTurnContract(StepRunnerContract):
 
     def step_runner_under_test(self) -> StepRunnerUnderTest:
         world = open_world(self._root / f"world-{next(self._worlds)}", self.kind)
+
+        async def restart() -> StepRunner:
+            return world.restarted()
+
         return StepRunnerUnderTest(
             runner=world.runner,
             run=world.run,
@@ -314,6 +323,8 @@ class AgentTurnContract(StepRunnerContract):
             running_step=world.running,
             left_running=world.left_running,
             unreachable=world.processes.unreachable,
+            blocking=world.blocking,
+            restart=restart,
         )
 
 
