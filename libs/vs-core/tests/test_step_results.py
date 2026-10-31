@@ -12,7 +12,7 @@ from vs_core.api.recovery import (
     Finished,
     StepResult,
 )
-from vs_core.types.until import FailureReason
+from vs_proto.api import StepCancelReason
 from vs_sim.api.testing import examples
 
 _RESULT = TypeAdapter(StepResult)
@@ -37,7 +37,7 @@ def finished(draw: st.DrawFn) -> Finished:
 RESULTS = st.one_of(
     finished(),
     st.builds(Cancelled, reason=st.sampled_from(CancelReason)),
-    st.just(Failed(reason=FailureReason.ATTEMPTS_EXHAUSTED)),
+    st.just(Failed(reason=core.FailureReason.ATTEMPTS_EXHAUSTED)),
 )
 
 
@@ -47,3 +47,9 @@ def test_a_step_result_round_trips_as_the_variant_it_was(result: StepResult) -> 
     decoded = _RESULT.validate_json(_RESULT.dump_json(result))
     assert decoded == result
     assert type(decoded) is type(result)
+
+
+def test_the_log_names_cancellations_as_core_does() -> None:
+    assert {reason.name for reason in CancelReason} == {
+        reason.name for reason in StepCancelReason if reason is not StepCancelReason.UNSPECIFIED
+    }

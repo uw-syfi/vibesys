@@ -205,6 +205,7 @@ def encode_ControlInput(v: values.ControlInput) -> pb.ControlInput:
         attempt=None if v.attempt is None else encode_AttemptId(v.attempt),
         item=None if v.item is None else encode_ItemId(v.item),
         max_parallel=None if v.max_parallel is None else str(v.max_parallel),
+        drain_seconds=v.drain_seconds,
     )
 
 
@@ -224,6 +225,7 @@ def decode_ControlInput(m: pb.ControlInput) -> values.ControlInput:
         attempt=None if m.attempt is None else decode_AttemptId(m.attempt),
         item=None if m.item is None else decode_ItemId(m.item),
         max_parallel=int(m.max_parallel) if m.has_field("max_parallel") else None,
+        drain_seconds=m.drain_seconds if m.has_field("drain_seconds") else None,
     )
 
 
@@ -231,6 +233,7 @@ def encode_RunPark(v: values.RunPark) -> pb.RunPark:
     return pb.RunPark(
         admitted_turns=[encode_InvocationRef(x) for x in v.admitted_turns],
         immediate=v.immediate,
+        deadline_at=v.deadline_at,
         control_id=encode_ControlId(v.control_id),
         epoch=str(v.epoch),
     )
@@ -240,6 +243,7 @@ def decode_RunPark(m: pb.RunPark) -> values.RunPark:
     return values.RunPark(
         admitted_turns=tuple(decode_InvocationRef(x) for x in m.admitted_turns),
         immediate=m.immediate,
+        deadline_at=m.deadline_at if m.has_field("deadline_at") else None,
         control_id=decode_ControlId(_required(m.control_id)),
         epoch=int(m.epoch),
     )

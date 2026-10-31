@@ -91,9 +91,11 @@ from .types.strategy import Cancel, Withdraw
 if TYPE_CHECKING:
     from .types.attempts import AttemptsState
     from .types.common import DecisionId
+    from .types.evaluation import EvaluationState
     from .types.kernel import RecordsContext, RunState, Signal, StrategyEvent
     from .types.records import RecordsEvent, RecordsState, Request
     from .types.sessions import SessionsState
+    from .types.until import Until
 
     type Facts = RequestObserved | TargetObservation
 
@@ -249,24 +251,24 @@ def _dispatched(
         update={"phase": RequestPhase.DISPATCHED, "dispatched_in": state.recovery.epoch}
     )
     if record.limit_from_dispatch is not None and record.dispatched_at is None:
-        until = started_until(context.run, record.limit_from_dispatch, record.until.watches)
-        at = cap_dispatch_until(
-            facts_for(
-                run=context.run,
-                sessions=context.sessions,
-                records=state,
-                evaluation=context.evaluation,
-            ),
-            record.request,
-            until.at,
-        )
-        updated = updated.model_copy(
-            update={
-                "until": until.model_copy(update={"at": at}),
-                "dispatched_at": context.run.now_at,
-            }
-        )
+        until = dispatch_until(context.run, context.sessions, state, context.evaluation, record)
+        updated = updated.model_copy(update={"until": until, "dispatched_at": context.run.now_at})
     return AreaChange(state=_replace(state, updated))
+
+
+def dispatch_until(
+    run: RunState,
+    sessions: SessionsState,
+    records: RecordsState,
+    evaluation: EvaluationState,
+    record: RequestRecord,
+) -> Until:
+    """The limit of a request whose limit counts from its dispatch, were it dispatched now."""
+    if record.limit_from_dispatch is None:
+        return record.until
+    until = started_until(run, record.limit_from_dispatch, record.until.watches)
+    facts = facts_for(run=run, sessions=sessions, records=records, evaluation=evaluation)
+    return until.model_copy(update={"at": cap_dispatch_until(facts, record.request, until.at)})
 
 
 # --- Observation ------------------------------------------------------------------
@@ -599,11 +601,11 @@ def retry_delay(context: RecordsContext, retries: int) -> float:
     return context.run.limits.request_retries.delay(retries)
 
 
-def _retry_limit(context: RecordsContext, record: RequestRecord) -> int:
-    request = record.request
+def retry_limit(run: RunState, request: Request) -> int:
+    """The re-sends a request may have after its first attempt."""
     if isinstance(request, ExecuteRegisteredOperation):
         return request.retry_limit
-    return context.run.limits.request_retries.limit
+    return run.limits.request_retries.limit
 
 
 def _next_phase(record: RequestRecord, observation: Observation) -> tuple[RequestPhase, int]:
@@ -646,7 +648,9 @@ def _exhausted(context: RecordsContext, record: RequestRecord, facts: Facts) -> 
     up by one so a redelivery of the retryable answer stays inert.
     """
     observation = facts.observation
-    if not observation.retryable or record.retry_count + 1 <= _retry_limit(context, record):
+    if not observation.retryable or record.retry_count + 1 <= retry_limit(
+        context.run, record.request
+    ):
         return facts
     return TargetObservation(
         observation=observation.model_copy(

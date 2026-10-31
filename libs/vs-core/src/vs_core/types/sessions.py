@@ -20,6 +20,7 @@ from .common import (
     ExecuteRegisteredOperation,
     Generation,
     InputId,
+    InterruptPolicy,
     InvocationId,
     InvocationRef,
     Observation,
@@ -93,6 +94,10 @@ class TurnSpec(Value):
     charge_class: Literal["paid", "correction", "resume", "free"]
     max_turns: int = Field(default=1, ge=1)
     predecessor: InvocationRef | None = None
+    on_interrupt: InterruptPolicy = Field(
+        default=InterruptPolicy.RERUN, exclude_if=lambda policy: policy is InterruptPolicy.RERUN
+    )
+    """What an interrupted attempt of this turn means: only the asker knows if a person watches."""
 
 
 class SessionPhase(StrEnum):
