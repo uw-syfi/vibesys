@@ -31,9 +31,15 @@ if TYPE_CHECKING:
         RunPreflightReply,
         RunPreflightRequest,
     )
-    from server.host_compute import ComputeSettings
+    from server.host_compute import ComputeError, ComputeSettings
     from server.host_envelope import HelperErrorCode
-    from server.host_examples import ExampleDestination, ExampleList, TaskGoal, TaskList
+    from server.host_examples import (
+        ExampleDestination,
+        ExampleList,
+        ProjectLookupError,
+        TaskGoal,
+        TaskList,
+    )
     from server.host_machine_facts import MachineDescription
     from server.host_run_reads import ProjectRun
     from server.registry import LiveRegistry
@@ -335,13 +341,7 @@ def read_failure_category(code: HelperErrorCode) -> FailureCategory:
     return found
 
 
-class _DomainRefusalError(Exception):
-    """The shape of the errors ``_domain_refusals`` names: one carrying its helper code."""
-
-    code: HelperErrorCode
-
-
-def _domain_refusals() -> tuple[type[_DomainRefusalError], ...]:
+def _domain_refusals() -> tuple[type[ProjectLookupError], type[ComputeError]]:
     """The errors a host fact raises to refuse a read, each carrying its helper code.
 
     An ``except`` clause evaluates its types only once an error is raised, so a read that

@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from server.host_machine_facts import MachineDescription
     from server.host_operation_reads import HostReadSource
     from server.registry import LiveRegistry
-    from vs_sim.api import Clock, Platform
+    from vs_sim.api import Platform, SleepingClock
 
 
 class ReadHost:
@@ -44,7 +44,7 @@ class ReadHost:
         self._platform = platform
 
     @cached_property
-    def clock(self) -> Clock:
+    def clock(self) -> SleepingClock:
         """Wall-clock epoch seconds."""
         return self._platform.clock
 

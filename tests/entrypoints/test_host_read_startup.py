@@ -103,21 +103,16 @@ class _Read:
     """Whether the command answers with framed responses, not one envelope."""
 
 
-def _request(slot: str, message: object) -> ReadRequest:
-    request = ReadRequest(checkout="/src/checkout", method=Oneof(slot, message))
-    validate(request)
-    return request
+_CHECKOUT = "/src/checkout"
 
 
 def _watch(project: Path) -> WatchRequest:
-    request = WatchRequest(
-        checkout="/src/checkout",
+    return WatchRequest(
+        checkout=_CHECKOUT,
         method=Oneof(
             "stream_saved_runs", pb.StreamSavedRunsRequest(request_id="r", project=str(project))
         ),
     )
-    validate(request)
-    return request
 
 
 def _window(project: Path) -> pb.UsageWindowRequest:
@@ -143,9 +138,12 @@ def _unvetted_preflight(project: Path) -> pb.PreflightRunRequest:
 READS: tuple[_Read, ...] = (
     _Read(
         "inspect-candidate",
-        lambda project: _request(
-            "inspect_candidate",
-            pb.InspectCandidateRequest(request_id="r", path=str(project), selection_revision=1),
+        lambda project: ReadRequest(
+            checkout=_CHECKOUT,
+            method=Oneof(
+                "inspect_candidate",
+                pb.InspectCandidateRequest(request_id="r", path=str(project), selection_revision=1),
+            ),
         ),
         "inspect_candidate",
         modules=520,
@@ -153,8 +151,9 @@ READS: tuple[_Read, ...] = (
     ),
     _Read(
         "list-tasks",
-        lambda project: _request(
-            "list_tasks", pb.ListTasksRequest(request_id="r", project=str(project))
+        lambda project: ReadRequest(
+            checkout=_CHECKOUT,
+            method=Oneof("list_tasks", pb.ListTasksRequest(request_id="r", project=str(project))),
         ),
         "list_tasks",
         modules=540,
@@ -162,9 +161,12 @@ READS: tuple[_Read, ...] = (
     ),
     _Read(
         "get-task-goal",
-        lambda project: _request(
-            "get_task_goal",
-            pb.GetTaskGoalRequest(request_id="r", project=str(project), task=_TASK),
+        lambda project: ReadRequest(
+            checkout=_CHECKOUT,
+            method=Oneof(
+                "get_task_goal",
+                pb.GetTaskGoalRequest(request_id="r", project=str(project), task=_TASK),
+            ),
         ),
         "get_task_goal",
         modules=540,
@@ -172,70 +174,87 @@ READS: tuple[_Read, ...] = (
     ),
     _Read(
         "list-harnesses",
-        lambda _project: _request("list_harnesses", pb.ListHarnessesRequest(request_id="r")),
+        lambda _project: ReadRequest(
+            checkout=_CHECKOUT,
+            method=Oneof("list_harnesses", pb.ListHarnessesRequest(request_id="r")),
+        ),
         "list_harnesses",
         modules=740,
-        catalog=True,
         agent_library=True,
+        catalog=True,
     ),
     _Read(
         "list-examples",
-        lambda _project: _request("list_examples", pb.ListExamplesRequest(request_id="r")),
+        lambda _project: ReadRequest(
+            checkout=_CHECKOUT,
+            method=Oneof("list_examples", pb.ListExamplesRequest(request_id="r")),
+        ),
         "list_examples",
         modules=540,
         catalog=True,
     ),
     _Read(
         "list-compute",
-        lambda _project: _request("list_compute", pb.ListComputeRequest(request_id="r")),
+        lambda _project: ReadRequest(
+            checkout=_CHECKOUT,
+            method=Oneof("list_compute", pb.ListComputeRequest(request_id="r")),
+        ),
         "list_compute",
         modules=480,
         catalog=True,
     ),
     _Read(
         "inspect-destination",
-        lambda project: _request(
-            "inspect_destination",
-            pb.InspectDestinationRequest(
-                request_id="r", example="kvstore-default", destination=str(project / "copy")
+        lambda project: ReadRequest(
+            checkout=_CHECKOUT,
+            method=Oneof(
+                "inspect_destination",
+                pb.InspectDestinationRequest(
+                    request_id="r", example="kvstore-default", destination=str(project / "copy")
+                ),
             ),
         ),
         "inspect_destination",
         modules=560,
         catalog=True,
     ),
-    _Read(
-        "stream-saved-runs",
-        _watch,
-        "stream_saved_runs",
-        modules=580,
-        stream=True,
-    ),
+    _Read("stream-saved-runs", _watch, "stream_saved_runs", modules=580, stream=True),
     _Read(
         "list-run-digests",
-        lambda project: _request(
-            "list_run_digests",
-            pb.ListRunDigestsRequest(request_id="r", project=str(project), run_ids=[_RUN]),
+        lambda project: ReadRequest(
+            checkout=_CHECKOUT,
+            method=Oneof(
+                "list_run_digests",
+                pb.ListRunDigestsRequest(request_id="r", project=str(project), run_ids=[_RUN]),
+            ),
         ),
         "list_run_digests",
         modules=580,
     ),
     _Read(
         "usage-window",
-        lambda project: _request("usage_window", _window(project)),
+        lambda project: ReadRequest(
+            checkout=_CHECKOUT, method=Oneof("usage_window", _window(project))
+        ),
         "usage_window",
         modules=590,
     ),
     _Read(
         "list-agent-logins",
-        lambda _project: _request("list_agent_logins", pb.ListAgentLoginsRequest(request_id="r")),
+        lambda _project: ReadRequest(
+            checkout=_CHECKOUT,
+            method=Oneof("list_agent_logins", pb.ListAgentLoginsRequest(request_id="r")),
+        ),
         "list_agent_logins",
         modules=740,
         agent_library=True,
     ),
     _Read(
         "describe-machine",
-        lambda _project: _request("describe_machine", pb.DescribeMachineRequest(request_id="r")),
+        lambda _project: ReadRequest(
+            checkout=_CHECKOUT,
+            method=Oneof("describe_machine", pb.DescribeMachineRequest(request_id="r")),
+        ),
         "describe_machine",
         modules=760,
         agent_library=True,
@@ -243,7 +262,10 @@ READS: tuple[_Read, ...] = (
     ),
     _Read(
         "preflight-run",
-        lambda project: _request("preflight_run", _unvetted_preflight(project)),
+        lambda project: ReadRequest(
+            checkout=_CHECKOUT,
+            method=Oneof("preflight_run", _unvetted_preflight(project)),
+        ),
         "failure",
         modules=760,
         agent_library=True,
@@ -278,7 +300,9 @@ def host_directory(tmp_path_factory: pytest.TempPathFactory) -> Path:
 def _probe(read: _Read, root: Path) -> _Probe:
     """Run ``read`` in a fresh interpreter whose host holds nothing but ``root``."""
     request = root / f"{read.command}.bin"
-    request.write_bytes(read.build(root / "project").to_binary())
+    message = read.build(root / "project")
+    validate(message)
+    request.write_bytes(message.to_binary())
     environment = {
         # No program is found by name: the machine's Docker, GPUs and agent CLIs are not
         # this test's subject, and a read's answer must not depend on them.
