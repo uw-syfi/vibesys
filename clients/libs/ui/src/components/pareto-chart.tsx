@@ -106,7 +106,7 @@ function exact(value: number): string {
 
 function layoutAxis(measured: readonly number[], direction: Direction, count: number): Layout {
   const values = measured.length === 0 ? [0, 1] : measured;
-  // Not `Math.min(...values)`: a run with a hundred thousand points has more than a call takes.
+  // Not `Math.min(...values)`: a plane of a hundred thousand points has more than a call takes.
   let [low, high] = [Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY];
   for (const value of values) {
     if (value < low) low = value;

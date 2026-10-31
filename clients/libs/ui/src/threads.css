@@ -238,12 +238,12 @@
   position: absolute;
   top: 50%;
   left: calc(var(--space-3) + (100% - 2 * var(--space-3)) * var(--mark-at));
-  box-sizing: border-box;
   width: var(--space-3);
   height: var(--space-3);
-  transform: translate(-50%, -50%) rotate(45deg);
-  border: var(--hairline) solid var(--bg);
-  background: var(--accent);
+  transform: translate(-50%, -50%);
+  fill: var(--accent);
+  stroke: var(--bg);
+  stroke-width: var(--hairline);
   pointer-events: none;
 }
 .vs-scrubber-ticks {

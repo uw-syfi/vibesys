@@ -96,7 +96,7 @@ interface Scale {
 }
 
 function extent(values: readonly number[]): readonly [number, number] {
-  // Not `Math.min(...values)`: a run with a hundred thousand readings has more than a call takes.
+  // Not `Math.min(...values)`: a series of a hundred thousand readings has more than a call takes.
   let [low, high] = [Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY];
   for (const value of values) {
     if (value < low) low = value;

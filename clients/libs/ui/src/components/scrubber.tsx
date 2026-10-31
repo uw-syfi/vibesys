@@ -110,7 +110,12 @@ function Track(props: {
 /** A small diamond on the track, `at` (0 to 1) of the way along it; it takes no pointer or focus. */
 function Mark(props: {readonly at: number}): JSX.Element {
   const place: StyleWithVars = {'--mark-at': props.at};
-  return <span className="vs-scrubber-mark" aria-hidden="true" style={place} />;
+  return (
+    // A drawn shape, not an empty box with a fill: a row of those reads as a strip of segments.
+    <svg className="vs-scrubber-mark" viewBox="0 0 8 8" aria-hidden="true" style={place}>
+      <path d="M4 .5 7.5 4 4 7.5 .5 4z" />
+    </svg>
+  );
 }
 
 /**
