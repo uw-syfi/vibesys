@@ -6,7 +6,7 @@ import {loadingMachines, runCounts, runInput} from './shell-runs.js';
 
 const HOSTS = ['local', 'ssh:host-a', 'ssh:host-b', 'ssh:host-c'] as const;
 
-test('a listed machine has no block, a loading one its steps, and only a failed one a retry', () => {
+test('a listed machine has no block, a loading one its steps with no retry count, and only a failed one a retry', () => {
   const retried: string[] = [];
   const [loading, failed, ...rest] = loadingMachines(
     [
@@ -20,9 +20,9 @@ test('a listed machine has no block, a loading one its steps, and only a failed 
   expect(loading?.machine).toBe('This Mac');
   expect(loading?.retry).toBeNull();
   expect(loading?.steps.map(step => [step.state, step.position, step.note])).toEqual([
-    ['done', '1/3', 'Retry 2'],
-    ['current', '2/3', 'Retry 2'],
-    ['pending', '3/3', 'Retry 2'],
+    ['done', '1/3', undefined],
+    ['current', '2/3', undefined],
+    ['pending', '3/3', undefined],
   ]);
   expect(failed?.steps.map(step => step.state)).toEqual(['failed', 'pending', 'pending']);
   expect(failed?.steps[0]?.note).toBe('helper exited (code 1)');
