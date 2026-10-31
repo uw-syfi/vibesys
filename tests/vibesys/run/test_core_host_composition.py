@@ -15,7 +15,7 @@ from protobuf.wkt.google.protobuf.wrappers_pb import StringValue
 from tests.support.container_credentials import set_container_cli_credentials
 from tests.support.core_plugins import core_policy
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
-from tests.support.real_git import NO_GITHUB, REAL_GIT
+from tests.support.real_git import NO_GIT, NO_GITHUB, REAL_GIT
 from tests.support.skeleton_strategy import SkeletonStrategy
 from tests.support.task_project import write_task
 from tests.vibesys.orchestration.plugin import EmptyOptions
@@ -59,8 +59,15 @@ from vs_runtime.api.core import RunTiming
 from vs_runtime.api.step_runner import fold_log
 from vs_runtime.api.testing import FakeStopTimer, idle_environment_system
 from vs_sandbox.api.testing import FakeComputeBackend
-from vs_sim.api import OsThreads, SleepingClock, ThreadBlockingRunner, UnixNetwork
-from vs_sim.api.testing import ManualClock, SimThreads, VirtualClock, run_virtual
+from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
+from vs_sim.api.testing import (
+    InlineBlockingRunner,
+    ManualClock,
+    SimNetwork,
+    SimThreads,
+    VirtualClock,
+    run_virtual,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -194,43 +201,6 @@ def _open(
     return lambda: run_virtual(clock, exercise())
 
 
-def _open_timed_by(tmp_path: Path, journal_clock: SleepingClock, host_clock: VirtualClock) -> None:
-    """Open the host over an integration timed by ``journal_clock`` and a host timed by its own."""
-    project_root = tmp_path / "project"
-    templates = tmp_path / "templates"
-    templates.mkdir()
-    _write_project(project_root)
-    integration = LocalRunIntegration(
-        clock=journal_clock,
-        git=REAL_GIT,
-        github=NO_GITHUB,
-        threads=OsThreads(),
-        system=idle_environment_system(),
-    )
-
-    async def exercise() -> None:
-        try:
-            async with open_product_core_host(
-                _request(project_root),
-                integration,
-                plugin=_plugin(templates),
-                options=EmptyOptions(),
-                timing=RunTiming(host_clock, OsThreads()),
-                agent_client_factory=_resumable_client,
-                backend_factory=host_container_backend,
-                invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
-                stop_timer=FakeStopTimer(threads=OsThreads()),
-                blocking=ThreadBlockingRunner(),
-                network=UnixNetwork(),
-                profiler_preflight=FakeProfilerPreflight(),
-            ):
-                pass
-        finally:
-            integration.close()
-
-    run_virtual(host_clock, exercise())
-
-
 def _run_diagnostics(tmp_path: Path, *, profile_capture_withheld: bool) -> str:
     """The text a run with a chosen profiler reports on its event stream while opening."""
     project_root = tmp_path / "project"
@@ -290,8 +260,40 @@ def test_core_host_yields_services_whose_state_starts_the_strategy(tmp_path: Pat
 def test_a_host_timed_by_another_clock_than_its_journal_is_refused(tmp_path: Path) -> None:
     """The log dates its records by the journal's clock and the loop counts on the host's: two
     clocks put the run's seconds on two timelines, and a run met its deadline at once."""
-    with pytest.raises(CoreCompositionError, match="timing clock"):
-        _open_timed_by(tmp_path, ManualClock(start=1.79e9), VirtualClock(at=0.0))
+    project_root = tmp_path / "project"
+    templates = tmp_path / "templates"
+    templates.mkdir()
+    _write_project(project_root)
+    clock = VirtualClock(at=0.0)
+    threads = SimThreads(clock)
+    integration = LocalRunIntegration(
+        clock=ManualClock(start=1.79e9),
+        git=NO_GIT,
+        github=NO_GITHUB,
+        threads=threads,
+        system=idle_environment_system(),
+    )
+
+    async def exercise() -> None:
+        with pytest.raises(CoreCompositionError, match="timing clock"):
+            async with open_product_core_host(
+                _request(project_root),
+                integration,
+                plugin=_plugin(templates),
+                options=EmptyOptions(),
+                timing=RunTiming(clock, threads),
+                backend_factory=host_container_backend,
+                stop_timer=FakeStopTimer(threads=threads),
+                blocking=InlineBlockingRunner(),
+                network=SimNetwork(threads),
+                profiler_preflight=FakeProfilerPreflight(),
+            ):
+                pytest.fail("a host over two clocks was opened")
+
+    try:
+        run_virtual(clock, exercise())
+    finally:
+        integration.close()
 
 
 @pytest.mark.parametrize("withheld", [False, True])
