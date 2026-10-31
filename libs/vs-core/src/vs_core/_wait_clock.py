@@ -50,6 +50,7 @@ if TYPE_CHECKING:
     from .types.evaluation import Continuation, EvaluationState
     from .types.kernel import RunState
     from .types.records import CapacityHold, HostEpoch, RecordsState, RequestRecord
+    from .types.until import Until
 
 type Job = OwnedJob | RegisteredOwnedJob
 
@@ -147,6 +148,25 @@ def job_bound(job: Job, stated: float, run: RunState, hosts: Sequence[HostEpoch]
         )
     ceiling = max(run.deadline_at, stated)
     return bound if bound.at <= ceiling else Bound(at=ceiling, by=WaitEnd.RUN_END)
+
+
+def job_step_until(run: RunState, until: Until) -> Until:
+    """The limit of a job step the recovery loop starts: the run's queue budget, then its limit.
+
+    A job's limit counts from its start, and queue time is the cluster's, not the work's. A
+    step is one request the loop hands to a runner whole, and core sees its job only at its end:
+    no fact says the job still waits in a queue (or for the root proof a run environment holds
+    its work for), so none can credit that time (``credited``). The step instead gets the
+    whole queue budget before its limit counts, and the executor bounds the job once it runs (the
+    scheduler's time limit, a stage's timeout). What the step's own limit still ends is a job
+    that never starts: after the queue budget a held or queued job is the cluster's failure, not
+    a wait. A limit never passes the run deadline, as a limit core credits never does
+    (``job_bound``); a run past its deadline gets no more time for its cleanup.
+    """
+    if run.deadline_at <= run.now_at:
+        return until
+    at = min(until.at + run.limits.queue_wait_budget, run.deadline_at)
+    return until.model_copy(update={"at": max(at, until.at)})
 
 
 def _submission_limit(evaluation: EvaluationState, records: RecordsState, job: Job) -> float | None:
