@@ -245,9 +245,9 @@ type producer struct {
 	at  generation
 }
 
-// typedSink is where the generic Source meets the type-erased hub. It validates
-// here so that a bad value fails the topic with a typed frame, once, and not
-// each stream with a transport error.
+// typedSink is where the generic Source meets the type-erased hub. It checks here
+// that an entry can reach a client, so that a bad value fails the topic with a
+// typed frame, once, and not each stream with a transport error.
 type typedSink[V proto.Message] struct {
 	producer
 	entry func(string, V) *apiv1.TopicEntry
@@ -255,7 +255,7 @@ type typedSink[V proto.Message] struct {
 
 func (s typedSink[V]) Put(name string, value V) {
 	entry := s.entry(name, value)
-	if err := protovalidate.Validate(entry); err != nil {
+	if err := sendable(entry); err != nil {
 		s.hub.apply(func(state *state) effects {
 			return state.fail(s.key, s.at, failedFrame(apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_SOURCE_FAILED, err.Error()))
 		})
@@ -263,6 +263,17 @@ func (s typedSink[V]) Put(name string, value V) {
 	}
 	size := proto.Size(value)
 	s.hub.apply(func(state *state) effects { return state.put(s.key, s.at, name, entry, size) })
+}
+
+// sendable says whether an entry passes the schema's rules and marshals. The
+// rules do not see invalid UTF-8 in a string, and marshalling refuses it, which
+// on the wire ends a stream with a transport error for every subscriber.
+func sendable(entry *apiv1.TopicEntry) error {
+	if err := protovalidate.Validate(entry); err != nil {
+		return err
+	}
+	_, err := proto.Marshal(entry)
+	return err
 }
 
 func (s typedSink[V]) Remove(name string) {

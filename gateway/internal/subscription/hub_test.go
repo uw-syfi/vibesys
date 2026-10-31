@@ -5,6 +5,7 @@ import (
 	"errors"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/quick"
@@ -17,6 +18,7 @@ import (
 	"github.com/uw-syfi/vibesys/gateway/internal/hostoperations"
 	"github.com/uw-syfi/vibesys/gateway/internal/subscription"
 	"github.com/uw-syfi/vibesys/gateway/internal/subscription/subscriptiontest"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -165,6 +167,80 @@ func TestAnyFailureDetailBecomesAValidFrame(t *testing.T) {
 			t.Fatal("a detail over the schema bound produced no failure frame")
 		}
 	})
+}
+
+// serveAsTransport serves one subscription the way gRPC sends it: every frame
+// must marshal, and one that does not ends the stream with a transport error. It
+// reports what the client saw once the hub and the source have settled.
+func serveAsTransport(hub *subscription.Hub) (frames []*apiv1.SubscribeResponse, transport error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	var mu sync.Mutex
+	done := make(chan error, 1)
+	go func() {
+		done <- hub.Serve(ctx, 2, request, func(frame *apiv1.SubscribeResponse) error {
+			if _, err := proto.Marshal(frame); err != nil {
+				return err
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			frames = append(frames, frame)
+			return nil
+		})
+	}()
+	synctest.Wait()
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		transport = err
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	return frames, transport
+}
+
+// badText puts a value that satisfies the schema's rules and still cannot be
+// marshalled: invalid UTF-8 in a key or in a string inside the value. The rules
+// cannot see it, so the hub must, once, where every topic gets it.
+func badText(text string, inKey bool) subscription.Source[stats] {
+	return script(func(ctx context.Context, sink subscription.Sink[stats]) error {
+		key, message := "machine", value(1)
+		if inKey {
+			key = text
+		} else {
+			message.Gpu = &apiv1.MachineStats_Gpus{Gpus: &apiv1.GpuList{Gpus: []*apiv1.GpuStats{{Name: text, MemoryTotalBytes: 1}}}}
+		}
+		sink.Put(key, message)
+		sink.Synced()
+		return wait(ctx)
+	})
+}
+
+func TestAValueThatCannotBeMarshalledIsATypedFailureAndNeverRetained(t *testing.T) {
+	property := func(raw []byte, inKey bool) bool {
+		var clean atomic.Bool
+		synctest.Test(t, func(t *testing.T) {
+			hub := subscription.New(clock.System{}, topic(badText(string(raw), inKey)))
+			// A subscriber that stays keeps the instance, and so any retained value.
+			resident := subscriptiontest.Open(hub, 1, request)
+			defer resident.Stop()
+			synctest.Wait()
+			_, transport := serveAsTransport(hub)
+			clean.Store(transport == nil)
+		})
+		return clean.Load()
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatal(err)
+	}
+	// The reported input: a name the schema's rules accept and no wire carries.
+	for _, inKey := range []bool{false, true} {
+		synctest.Test(t, func(t *testing.T) {
+			hub := subscription.New(clock.System{}, topic(badText("\xff", inKey)))
+			frames, transport := serveAsTransport(hub)
+			if transport != nil || len(frames) != 1 || frames[0].GetFailed().GetCode() != apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_SOURCE_FAILED {
+				t.Fatalf("inKey=%t: transport error %v, frames %v", inKey, transport, frames)
+			}
+		})
+	}
 }
 
 func TestARequestWithoutAProducerIsRefusedAsUnsupported(t *testing.T) {
