@@ -17,7 +17,9 @@ from vs_core.types.steps import (
     Failed,
     Finished,
     InterruptPolicy,
+    StepAttempts,
     StepResult,
+    StepsState,
 )
 
 __all__ = [
@@ -31,7 +33,9 @@ __all__ = [
     "InterruptPolicy",
     "Run",
     "Settle",
+    "StepAttempts",
     "StepResult",
+    "StepsState",
     "Wait",
     "decide",
     "finished_message",
