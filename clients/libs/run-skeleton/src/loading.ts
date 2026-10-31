@@ -55,6 +55,17 @@ function windowStart(response: SkeletonResponse): bigint {
   return response.nextSeq > RECORD_WINDOW ? response.nextSeq - RECORD_WINDOW : 0n;
 }
 
+/** What the first Tail reads for the record log: all of the log, a window before the keyframe, or nothing extra. */
+function firstWindow(
+  response: SkeletonResponse,
+  initial: Skeleton,
+): Pick<SkeletonLoad, 'windowFrom' | 'backfill'> {
+  if (response.keyframe === undefined) return {windowFrom: undefined, backfill: undefined};
+  if (!initial.recordsTracked) return {windowFrom: 0n, backfill: undefined};
+  const from = windowStart(response);
+  return {windowFrom: from, backfill: from > 0n ? {before: from, rows: 0} : undefined};
+}
+
 function withObservedHead(skeleton: Skeleton, response: SkeletonResponse): Skeleton {
   if (response.head === undefined) return skeleton;
   if (response.head.committedSeq !== response.committedSeq)
@@ -86,16 +97,7 @@ export function ingestSkeleton(response: SkeletonResponse): SkeletonLoad {
   return {
     skeleton,
     nextSeq: response.nextSeq,
-    windowFrom:
-      response.keyframe === undefined
-        ? undefined
-        : initial.recordsTracked
-          ? windowStart(response)
-          : 0n,
-    backfill:
-      response.keyframe !== undefined && initial.recordsTracked && windowStart(response) > 0n
-        ? {before: windowStart(response), rows: 0}
-        : undefined,
+    ...firstWindow(response, initial),
     failuresBefore:
       response.keyframe === undefined || skeleton.failuresTracked || !skeleton.recordsTracked
         ? undefined
