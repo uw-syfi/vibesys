@@ -260,6 +260,7 @@ test('shared-reader fold inventory is exhaustive', () => {
     'lifecycle',
     'metric',
     'notice',
+    'runEnded',
     'span',
     'stepFinished',
     'stepStarted',
