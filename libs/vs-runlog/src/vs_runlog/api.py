@@ -40,7 +40,13 @@ from vs_runlog._lock import (
     observe_writer_identity,
     writer_identity_path,
 )
-from vs_runlog._observe import HeadObserver, RunLogDamagedError, read_current_epoch, read_run_head
+from vs_runlog._observe import (
+    HeadObserver,
+    RunLogDamagedError,
+    read_committed_records,
+    read_current_epoch,
+    read_run_head,
+)
 from vs_runlog._upgrade import upgrade_skeleton
 
 __all__ = [
@@ -84,6 +90,7 @@ __all__ = [
     "observe_writer_identity",
     "open_run_log",
     "project_head",
+    "read_committed_records",
     "read_current_epoch",
     "read_run_head",
     "upgrade_skeleton",

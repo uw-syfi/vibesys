@@ -526,6 +526,11 @@ layer = "orchestration_host"
 depends_on = ["vs_agent", "vs_core", "vs_runtime", "vs_sim.api"]
 
 [[modules]]
+path = "vibesys.run.logged_run"
+layer = "orchestration_host"
+depends_on = ["vs_core", "vs_decode.api", "vs_project", "vs_proto", "vs_runlog", "vs_runtime"]
+
+[[modules]]
 path = "vibesys.run.step_seams"
 layer = "orchestration_host"
 depends_on = ["vibesys.run.step_runners", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_sim.api"]
@@ -1341,7 +1346,7 @@ from = ["vs_sandbox"]
 
 [[modules]]
 path = "vibesys.plugin_registration"
-depends_on = ["vibesys.run.contracts", "vs_core", "vs_project", "vs_runtime"]
+depends_on = ["vibesys.run.contracts", "vibesys.run.logged_run", "vs_core", "vs_project", "vs_runtime"]
 
 [[modules]]
 # Thin product composition: in-repository plugins plus the temporary private

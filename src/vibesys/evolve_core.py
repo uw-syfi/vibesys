@@ -55,7 +55,6 @@ from vs_runtime.api.core import (
     AgentEvaluationPolicy,
     OperationCatalog,
     OperationPorts,
-    RuntimeRecord,
     operation_roles,
 )
 
@@ -89,7 +88,6 @@ def evolve_projector() -> RuntimeRecordProjector[FlowState, EvolveSnapshot]:
     return RuntimeRecordProjector(
         plugin_id=_PLUGIN_ID,
         state_type=FlowState,
-        record_type=RuntimeRecord[FlowState],
         operations=OPERATIONS.registry(),
         published=published,
         project=project,

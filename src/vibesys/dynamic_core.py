@@ -64,7 +64,6 @@ from vs_runtime.api.core import (
     OperationCatalog,
     OperationEntry,
     OperationPorts,
-    RuntimeRecord,
     operation_roles,
 )
 
@@ -107,7 +106,6 @@ def dynamic_projector() -> RuntimeRecordProjector[FlowState, RunSnapshot]:
     return RuntimeRecordProjector(
         plugin_id=_PLUGIN_ID,
         state_type=FlowState,
-        record_type=RuntimeRecord[FlowState],
         operations=_registry(),
         published=published,
         project=project,
