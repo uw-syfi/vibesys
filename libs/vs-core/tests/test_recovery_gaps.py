@@ -76,7 +76,9 @@ def test_a_result_recorded_while_the_run_is_parked_is_kept_not_dropped() -> None
     (tag,) = [row.request_id for row in loop.state.records.records]
     result = Cancelled(reason=CancelReason.WITHDRAWN)
     loop.add(Oneof("step_finished", finished_message(tag, 1, result)))
-    assert loop.state.records.record(tag).phase is core.RequestPhase.COMPLETED  # ty: ignore[unresolved-attribute]
+    settled = loop.state.records.record(tag)
+    assert settled is not None
+    assert settled.phase is core.RequestPhase.COMPLETED
     assert open_step(loop.state, tag) is None
 
 
