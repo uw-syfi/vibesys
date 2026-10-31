@@ -52,7 +52,6 @@ from vs_runtime.api.core import (
     ExecutorRefusal,
     ExecutorRole,
     ObservationRejectedError,
-    OwnerEvent,
     OwnerEventRejectedError,
     Publication,
     PublicationAcknowledgement,
@@ -70,6 +69,7 @@ from vs_sim.api.testing import HANG_GUARD_S, Gate
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
+    from vs_core.api.recovery import OwnerEvent
     from vs_runtime.api.core import ExecutionLease
 
 

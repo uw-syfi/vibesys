@@ -13,7 +13,7 @@ import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, Literal, NoReturn
+from typing import TYPE_CHECKING, ClassVar, Literal, NoReturn, cast
 
 import pytest
 
@@ -61,6 +61,7 @@ from vs_runtime.api.operation_step_runner import (
     ClearedWork,
     KeyedWrite,
     OperationStepRunner,
+    OtherRunner,
     ReadOnly,
     RerunPolicy,
 )
@@ -77,7 +78,7 @@ from vs_sim.api.testing import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
     from pydantic import BaseModel
 
@@ -212,12 +213,7 @@ class Harness:
 
     def runner(self) -> OperationStepRunner:
         """A runner with no memory of an earlier one: a restarted process."""
-        return OperationStepRunner(
-            self.catalog,
-            {self.kind: self.policy},
-            ObservationFactory(self.store),
-            clock=self.clock,
-        )
+        return OperationStepRunner(self.catalog, ObservationFactory(self.store), clock=self.clock)
 
     def step(self, tag: RequestId, *, hangs: bool) -> ExecuteRegisteredOperation:
         request = self.request(name=tag.root, hangs=hangs)
@@ -232,14 +228,19 @@ class Harness:
 
 def harness(root: Path, request: type[Work], *, cleared: bool, keyed: bool) -> Harness:
     world = World(process_outlives_task=cleared)
-    lifecycle = request.model_fields["lifecycle"].default
-    entry = OperationEntry.owned(registration(request, lifecycle), WorkOwner(world))
-    catalog = OperationCatalog(OperationRegistry((entry.registration,)), (entry,))
-    namespace_cm = namespace_in(root)
-    namespace = namespace_cm.__enter__()
     policy: RerunPolicy = (
         ClearedWork(WorldCleaner(world)) if cleared else KeyedWrite("name") if keyed else ReadOnly()
     )
+    return harness_of(root, request, world, policy)
+
+
+def harness_of(root: Path, request: type[Work], world: World, policy: RerunPolicy) -> Harness:
+    """The runner's world for *request*, whose entry declares *policy*."""
+    lifecycle = request.model_fields["lifecycle"].default
+    entry = OperationEntry.owned(registration(request, lifecycle), WorkOwner(world), policy)
+    catalog = OperationCatalog(OperationRegistry((entry.registration,)), (entry,))
+    namespace_cm = namespace_in(root)
+    namespace = namespace_cm.__enter__()
     return Harness(
         world, catalog, ReceiptStore(namespace, SimThreads()), VirtualClock(), policy, request
     )
@@ -432,6 +433,7 @@ ALLOWED = {
     (QueryWork, ClearedWork),
     (WriteWork, KeyedWrite),
     (WriteWork, ClearedWork),
+    (OwnedWork, OtherRunner),
 }
 
 
@@ -440,41 +442,47 @@ def policy_of(kind: type[RerunPolicy], world: World) -> RerunPolicy:
         return KeyedWrite("name")
     if kind is ClearedWork:
         return ClearedWork(WorldCleaner(world))
+    if kind is OtherRunner:
+        return OtherRunner()
     return ReadOnly()
 
 
-@pytest.mark.parametrize("policy_type", [ReadOnly, KeyedWrite, ClearedWork, None])
+@pytest.mark.parametrize("policy_type", [ReadOnly, KeyedWrite, ClearedWork, OtherRunner])
 @pytest.mark.parametrize("request_type", [QueryWork, WriteWork, OwnedWork])
-def test_an_operation_registers_only_with_a_policy_its_lifecycle_allows(
-    tmp_path: Path, request_type: type[Work], policy_type: type[RerunPolicy] | None
+def test_an_operation_is_owned_only_with_a_policy_its_lifecycle_allows(
+    tmp_path: Path, request_type: type[Work], policy_type: type[RerunPolicy]
 ) -> None:
-    built = harness(tmp_path, request_type, cleared=False, keyed=False)
-    policies = {} if policy_type is None else {built.kind: policy_of(policy_type, built.world)}
-
-    def register() -> OperationStepRunner:
-        return OperationStepRunner(
-            built.catalog,
-            policies,
-            ObservationFactory(built.store),
-            clock=built.clock,
-        )
-
+    world = World(process_outlives_task=False)
+    policy = policy_of(policy_type, world)
     if (request_type, policy_type) in ALLOWED:
-        register()
+        harness_of(tmp_path, request_type, world, policy)
     else:
-        with pytest.raises(ContractError, match=built.kind):
-            register()
+        with pytest.raises(ContractError, match="rerun"):
+            harness_of(tmp_path, request_type, world, policy)
 
 
-def test_a_policy_for_an_operation_the_catalog_does_not_own_is_refused(tmp_path: Path) -> None:
-    built = harness(tmp_path, QueryWork, cleared=False, keyed=False)
-    with pytest.raises(ContractError, match=r"test\.stray"):
-        OperationStepRunner(
-            built.catalog,
-            {built.kind: ReadOnly(), "test.stray": ReadOnly()},
-            ObservationFactory(built.store),
-            clock=built.clock,
+def test_an_owned_operation_cannot_omit_its_rerun_policy() -> None:
+    """The omission is a type error; called anyway, the entry refuses it."""
+    owned = cast("Callable[..., OperationEntry]", OperationEntry.owned)
+    with pytest.raises(TypeError, match="rerun"):
+        owned(
+            registration(QueryWork, LifecycleClass.QUERY),
+            WorkOwner(World(process_outlives_task=False)),
         )
+
+
+def test_an_operation_another_runner_owns_is_refused_by_name(tmp_path: Path) -> None:
+    built = harness_of(tmp_path, OwnedWork, World(process_outlives_task=False), OtherRunner())
+    runner = built.runner()
+    step = built.step(RequestId(root="job"), hangs=False)
+
+    async def main() -> None:
+        with pytest.raises(ContractError, match=built.kind):
+            await runner.run(step, RequestId(root="job"), 1, DEADLINE, CancelSignal())
+        with pytest.raises(ContractError, match=built.kind):
+            await runner.clear(step, RequestId(root="job"))
+
+    run_virtual(built.clock, main())
 
 
 def test_a_keyed_write_names_its_key() -> None:
@@ -506,16 +514,6 @@ class DyingOwner:
         return await self.inner.cancel(request, context)
 
 
-def policies_of(items: tuple[OperationScenario, ...]) -> dict[str, RerunPolicy]:
-    return {
-        item.entry.schema.kind: ReadOnly()
-        if item.allows_repeat
-        else KeyedWrite("the owner's own key")
-        for item in items
-        if item.entry.owner is not None
-    }
-
-
 @contextmanager
 def scenario_world(
     died: str | None = None, only: str | None = None
@@ -529,9 +527,9 @@ def scenario_world(
             items = tuple(
                 replace(
                     item,
-                    entry=OperationEntry.owned(
-                        item.entry.registration,
-                        DyingOwner(item.entry.owner, after_effect=died == "after_effect"),
+                    entry=replace(
+                        item.entry,
+                        owner=DyingOwner(item.entry.owner, after_effect=died == "after_effect"),
                     ),
                 )
                 if item.name == only and item.entry.owner is not None
@@ -544,12 +542,7 @@ def scenario_world(
 def scenario_runner(
     items: tuple[OperationScenario, ...], store: ReceiptStore, clock: VirtualClock
 ) -> OperationStepRunner:
-    return OperationStepRunner(
-        catalog_of(items),
-        policies_of(items),
-        ObservationFactory(store),
-        clock=clock,
-    )
+    return OperationStepRunner(catalog_of(items), ObservationFactory(store), clock=clock)
 
 
 def owned(name: str) -> bool:
