@@ -451,8 +451,7 @@ class _StepLoop:
             return
         await self._record_started(run)
         flight.started = True
-        self._nudged.set()
-        outcome = await self._run_bounded(run, flight)
+        outcome = await self._run_bounded(run, flight.signal)
         await self._finish_attempt(run, flight, outcome)
 
     async def _finish_unstarted(self, flight: _Flight) -> None:
@@ -533,7 +532,7 @@ class _StepLoop:
         flight.signal.set(CancelReason.WITHDRAWN)
         delay = self._timing.clear_backoff_s
         while True:
-            outcome = await self._run_bounded(run, flight)
+            outcome = await self._run_bounded(run, flight.signal)
             if not isinstance(outcome, _Failed):
                 return outcome
             cleared = await self._clear(flight)
@@ -598,14 +597,14 @@ class _StepLoop:
             task.add_done_callback(_drop)
         return _outcome_of(task)
 
-    async def _run_bounded(self, run: Run, flight: _Flight) -> StepResult | _Failed:
+    async def _run_bounded(self, run: Run, signal: CancelSignal) -> StepResult | _Failed:
         """Run the attempt and wait for it to return: the result, or why it has none.
 
         A cancel gives the call its grace period; past it the task is cancelled, which is only
         a nudge (see ``_clear_once``), and the loop waits for the call to return, with the tag
         held and on the board.
         """
-        signal = flight.signal
+        self._nudged.set()
         task = asyncio.ensure_future(
             self._runner.run(run.step, run.tag, run.attempt, run.deadline_at, signal)
         )
@@ -614,7 +613,7 @@ class _StepLoop:
             if not task.done():
                 await self._first_of(_await(task), self._clock.sleep(self._timing.cancel_grace_s))
             if not task.done():
-                self._stalls.note(flight.tag, StallKind.RUN_HELD, None, self._clock.now())
+                self._stalls.note(run.tag, StallKind.RUN_HELD, None, self._clock.now())
                 self._nudged.set()
                 task.cancel()
                 await _await(task)
@@ -622,8 +621,8 @@ class _StepLoop:
             if not task.done():
                 task.cancel()
             task.add_done_callback(_drop)
-        if self._stalls.holds(flight.tag):
-            self._stalls.release(flight.tag)
+        if self._stalls.holds(run.tag):
+            self._stalls.release(run.tag)
         return _outcome_of(task)
 
     @staticmethod

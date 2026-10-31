@@ -151,6 +151,11 @@ class Watch:
         self.errors: list[BaseException] = []
         """Every error the board showed with a stall."""
 
+    def new_board(self) -> StallBoard:
+        """The board of the next process: a restart starts with nothing stalled."""
+        self.board = StallBoard()
+        return self.board
+
     def boundary(self) -> None:
         if self.runner is None:
             return
@@ -192,15 +197,13 @@ class WatchedClock:
 class Switch:
     """Counts the loop's boundaries and kills the host at one of them."""
 
-    def __init__(self, kill_at: int | None, watch: Watch) -> None:
+    def __init__(self, kill_at: int | None) -> None:
         self.ticks = 0
         self.kill_at = kill_at
-        self.watch = watch
         self.dead = False
         self.loop: asyncio.Task[RunRest] | None = None
 
     def tick(self) -> None:
-        self.watch.boundary()
         if self.dead:
             raise asyncio.CancelledError
         if self.ticks == self.kill_at:
@@ -212,34 +215,37 @@ class Switch:
 
 
 class CrashingLog:
-    def __init__(self, inner: StepLog, switch: Switch) -> None:
+    def __init__(self, inner: StepLog, switch: Switch, watch: Watch) -> None:
         self._inner = inner
         self._switch = switch
+        self._watch = watch
 
     @property
     def state(self) -> core.CoreState:
         return self._inner.state
 
     async def _around(self, write: Callable[[], Awaitable[None]]) -> None:
+        self._watch.boundary()
         self._switch.tick()
         await write()
+        self._watch.boundary()
         self._switch.tick()
 
     def open_step(self, tag: core.RequestId) -> OpenStep | None:
         return self._inner.open_step(tag)
 
     async def step_started(self, run: Run) -> None:
-        self._switch.watch.before_record("step_started", run.tag)
+        self._watch.before_record("step_started", run.tag)
         await self._around(lambda: self._inner.step_started(run))
 
     async def step_finished(self, tag: core.RequestId, attempt: int, result: StepResult) -> None:
-        self._switch.watch.before_record("step_finished", tag)
+        self._watch.before_record("step_finished", tag)
         await self._around(lambda: self._inner.step_finished(tag, attempt, result))
 
     async def attempt_interrupted(
         self, tag: core.RequestId, attempt: int, why: Interruption
     ) -> None:
-        self._switch.watch.before_record("attempt_interrupted", tag)
+        self._watch.before_record("attempt_interrupted", tag)
         await self._around(lambda: self._inner.attempt_interrupted(tag, attempt, why))
 
     async def run_ended(self, end: End) -> None:
@@ -250,9 +256,10 @@ class CrashingLog:
 
 
 class CrashingRunner:
-    def __init__(self, inner: FakeStepRunner, switch: Switch) -> None:
+    def __init__(self, inner: FakeStepRunner, switch: Switch, watch: Watch) -> None:
         self._inner = inner
         self._switch = switch
+        self._watch = watch
 
     async def run(
         self,
@@ -262,14 +269,18 @@ class CrashingRunner:
         deadline_at: float,
         cancel: CancelSignal,
     ) -> StepResult:
+        self._watch.boundary()
         self._switch.tick()
         result = await self._inner.run(step, tag, attempt, deadline_at, cancel)
+        self._watch.boundary()
         self._switch.tick()
         return result
 
     async def clear(self, step: core.Request, tag: core.RequestId) -> Adopted | Cleared:
+        self._watch.boundary()
         self._switch.tick()
         outcome = await self._inner.clear(step, tag)
+        self._watch.boundary()
         self._switch.tick()
         return outcome
 
@@ -355,15 +366,14 @@ async def run_epochs(world: World, clock: VirtualClock, kill_at: int | None) -> 
         log = FakeStepLog(world.records, world.seed.state, world.seed.registry, clock)
         if parked:
             log.resume_run()
-        board = world.watch.board = StallBoard()
-        switch = Switch(None if killed else kill_at, world.watch)
+        switch = Switch(None if killed else kill_at)
         loop = asyncio.ensure_future(
             run_step_loop(
-                CrashingLog(log, switch),
-                CrashingRunner(world.runner, switch),
+                CrashingLog(log, switch, world.watch),
+                CrashingRunner(world.runner, switch, world.watch),
                 WatchedClock(clock, world.watch),
                 TIMING,
-                board,
+                world.watch.new_board(),
             )
         )
         switch.loop = loop
@@ -374,7 +384,7 @@ async def run_epochs(world: World, clock: VirtualClock, kill_at: int | None) -> 
         if isinstance(operated, Exception):
             raise operated
         world.boundaries += switch.ticks
-        world.unproven.extend(stall.tag for stall in board.unproven())
+        world.unproven.extend(stall.tag for stall in world.watch.board.unproven())
         world.runner.process_died()
         killed = True
         if isinstance(outcome, asyncio.CancelledError):
