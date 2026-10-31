@@ -239,7 +239,7 @@ depends_on = ["vs_decode.api", "server.host_api", "server.host_helper_requests",
 [[modules]]
 # The host helper's request answering: one request through the host's interfaces.
 path = "server.host_helper_requests"
-depends_on = ["server.host_operation_reads", "server.host_operation_types_generated", "vibesys.api.host_operations", "vs_proto", "vs_decode.api", "server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_examples", "server.host_compute_runtime", "server.host_helper_logs", "server.host_helper_preflight", "server.host_machine_facts", "server.host_preflight", "server.host_run_dashboard", "server.host_run_events", "server.host_run_reader", "server.host_run_summary", "server.host_helper_readers", "server.registry", "server.relay", "server.run_digest", "server.run_summary", "server.usage_window", "vs_project", "vs_sim.api", "server.host_run_reads"]
+depends_on = ["server.host_operation_reads", "server.host_operation_types_generated", "vibesys.api.host_operations", "vs_proto", "vs_decode.api", "server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_examples", "server.host_compute_runtime", "server.host_helper_logs", "server.host_helper_preflight", "server.host_machine_facts", "server.host_preflight", "server.host_run_dashboard", "server.host_run_events", "server.host_run_reader", "server.host_run_summary", "server.host_helper_readers", "server.registry", "server.relay", "server.run_digest", "server.run_summary", "server.usage_window", "vs_project", "vs_sim.api", "server.host_run_reads", "server.lazy_modules", "server.host_harness"]
 
 [[modules]]
 # The read-only servers Chat reads ended runs through: found by run, started on demand.
@@ -322,7 +322,7 @@ depends_on = ["vs_proto", "vs_decode.api", "server.host_api", "server.host_run_d
 [[modules]]
 # The host helper's interfaces on a real host: projects, directories, launches, the checkout.
 path = "server.host_helper_os"
-depends_on = ["server.run_digest_store", "vs_runlog", "server.host_saved_runs", "vs_proto", "server.host_examples", "server.host_task_goal", "vs_decode.api", "server.host_api", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_preflight", "server.host_preflight", "server.host_helper_requests", "server.host_run_events", "server.run_digest", "server.span_index", "server.run_summary", "server.run_summary_cache", "vs_logs", "vs_project", "vs_sim.api", "server.host_run_reads"]
+depends_on = ["server.run_digest_store", "vs_runlog", "server.host_saved_runs", "vs_proto", "server.host_examples", "server.host_task_goal", "server.lazy_modules", "vs_decode.api", "server.host_api", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_preflight", "server.host_preflight", "server.host_helper_requests", "server.host_run_events", "server.run_digest", "server.span_index", "server.run_summary", "server.run_summary_cache", "vs_logs", "vs_project", "vs_sim.api", "server.host_run_reads"]
 
 [[modules]]
 # A run's summary: the fold of its journal that the run level shows, as a pure read model.

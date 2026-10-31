@@ -163,3 +163,57 @@ def test_every_lazy_module_in_product_code_is_declared_by_an_import() -> None:
         for problem in lazy_declaration_problems(source, str(path.relative_to(SOURCE_ROOT.parent)))
     ]
     assert problems == [], "\n".join(problems)
+
+
+HOST_READ_PATH = (
+    "entrypoints/host*.py",
+    "server/host_helper_*.py",
+    "server/host_operation_reads.py",
+    "server/host_task_goal.py",
+    "vibesys/api/host_operations/*.py",
+)
+"""The modules a ``vibesys host`` command and the host helper are built from: each loads a module
+lazily one way, through ``lazy_module``."""
+
+
+def deferred_import_calls(source: str, filename: str) -> list[str]:
+    """Each ``import_module(...)`` call in ``source`` as ``file:line: reason``."""
+    tree = parse_source(source, filename)
+    return [
+        f"{filename}:{node.lineno}: import_module hides a dependency from the type checker and "
+        f"tach; declare it with lazy_module ({FORM})"
+        for node in walk_nodes(tree)
+        if isinstance(node, ast.Call)
+        and (
+            (isinstance(node.func, ast.Name) and node.func.id == "import_module")
+            or (isinstance(node.func, ast.Attribute) and node.func.attr == "import_module")
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    "call", ["import_module('x.y')", "importlib.import_module('x.y')", "m.import_module(name)"]
+)
+def test_an_import_module_call_is_rejected_naming_the_line(call: str) -> None:
+    [problem] = deferred_import_calls(f"import importlib\n\nvalue = {call}\n", "m.py")
+
+    assert problem.startswith("m.py:3:")
+    assert "lazy_module" in problem
+
+
+def test_code_that_imports_statically_or_with_lazy_module_is_accepted() -> None:
+    assert deferred_import_calls("import json\nvalue = json.loads('1')\n", "m.py") == []
+
+
+def test_the_host_read_path_defers_imports_only_through_lazy_module() -> None:
+    files = sorted({path for pattern in HOST_READ_PATH for path in SOURCE_ROOT.glob(pattern)})
+    assert files, "the host read path moved; update HOST_READ_PATH"
+    problems = [
+        problem
+        for path in files
+        if path.name != "lazy_modules.py"
+        for problem in deferred_import_calls(
+            path.read_text(encoding="utf-8"), str(path.relative_to(SOURCE_ROOT.parent))
+        )
+    ]
+    assert problems == [], "\n".join(problems)
