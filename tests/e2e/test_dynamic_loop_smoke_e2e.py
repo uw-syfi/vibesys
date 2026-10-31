@@ -38,7 +38,7 @@ from typing import TYPE_CHECKING
 
 import agentshim
 import pytest
-from tests.e2e.dynamic_loop_harness import LoopInput, load_run
+from tests.e2e.dynamic_loop_harness import CoreRecords, LoopInput, load_run
 from tests.support import run_test_command
 from tests.support.docker_environment import host_container_backend
 from tests.support.loop_invariants import (
@@ -74,7 +74,8 @@ from vs_agent.api.testing import (
     tool_result,
     usage,
 )
-from vs_core.api import MIN_SAMPLES_WITHOUT_FLOOR
+from vs_core.api import MIN_SAMPLES_WITHOUT_FLOOR, ObservationStatus, StopMode, SubmitMeasurement
+from vs_core.api.recovery import CancelReason
 from vs_evaluation.api.tools import SUBMIT_TOOL, VALIDATE_WAIT_TOOL, build_core_evaluation_tools
 from vs_project.api import Project
 from vs_sim.api import (
@@ -93,7 +94,7 @@ from vs_slurm.fake_connector import HOLD_FILE, active_jobs, executing_cluster, r
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
-    from vibesys.api import CoreEvent, RunRequest, RunResult, Runs
+    from vibesys.api import CoreEvent, RunHandle, RunRequest, RunResult, Runs
     from vs_agent.api import AgentEventSink, AgentSpec, SessionStore
     from vs_agent.contracts import AgentCapabilities, AgentSessionSpec, AgentTurnRequest
     from vs_agent.shim_turns import LaunchedSession
@@ -768,12 +769,17 @@ class _RecordingRenderer(HeadlessRenderer):
 
 
 def _run_headless_recording(
-    request: RunRequest, runs: Runs, renderer: HeadlessRenderer
+    request: RunRequest,
+    runs: Runs,
+    renderer: HeadlessRenderer,
+    on_handle: Callable[[RunHandle], None] | None = None,
 ) -> RunResult:
-    """``run_headless`` with the renderer chosen by the caller."""
+    """``run_headless`` with the renderer chosen by the caller, and the run's handle offered."""
 
     async def execute() -> RunResult:
         handle = runs.start(request)
+        if on_handle is not None:
+            on_handle(handle)
         return await supervise(
             handle, render_run(handle, renderer=renderer), signals=LoopSignalSource()
         )
@@ -799,10 +805,11 @@ def _executing_cluster_input(base: Path) -> LoopInput:
 class _PendingCoreRuns:
     """Keep the fifth allocation pending and the sixth waiting for local admission.
 
-    The judge may finish once that allocation exists and core compared two samples
-    on each side. The official check then reuses the samples because core's last
-    candidate run is already spoken for; scope closure
-    cancels that queued run before it ever submits to Slurm.
+    Once that allocation exists and core compared two samples on each side, the operator stops
+    the run, cancelling what is in flight: the strategy would otherwise wait for the runs core
+    still has under way (a comparison is final only when they end), and a job held in the queue
+    never ends. The cancel finds the fifth allocation pending in the scheduler and the sixth
+    still waiting for local admission, which must never be submitted.
     """
 
     def __init__(self, loop_input: LoopInput) -> None:
@@ -812,7 +819,12 @@ class _PendingCoreRuns:
         self._accepted = False
         self._compared = False
         self._submissions = 0
+        self._handle: RunHandle | None = None
         loop_input.connector.intercept(self.intercept)
+
+    def bind(self, handle: RunHandle) -> None:
+        """The run this interleaving stops."""
+        self._handle = handle
 
     def intercept(
         self,
@@ -846,8 +858,10 @@ class _PendingCoreRuns:
             self._ready.set()
 
     def before_judge(self) -> None:
-        """Let core reserve its last sample before the strategy asks for the official check."""
+        """Hold the judge until core reserved its last sample, then stop the run, cancelling."""
         wait_or_fail(self._ready, "core's second comparison and last baseline allocation")
+        assert self._handle is not None
+        self._handle.stop(StopMode.CANCEL)
 
 
 def _core_slurm_search(
@@ -898,7 +912,8 @@ def _core_slurm_search(
     )
 
     renderer = _RecordingRenderer(None if interleaving is None else interleaving.observe)
-    return _run_headless_recording(request, runs, renderer), renderer
+    on_handle = None if interleaving is None else interleaving.bind
+    return _run_headless_recording(request, runs, renderer, on_handle), renderer
 
 
 @pytest.mark.usefixtures("container_cli_credentials")
@@ -925,8 +940,9 @@ def test_core_path_runs_the_fake_slurm_search(
         "terminal",
         "success",
     )
-    publications = run.state.portable_namespace(result.run_id, "publications")
-    assert publications.read_bytes("publications.json")
+    # The search published its record: the run.log holds the state it published, which is the
+    # one place a run's publications are kept (the loop journals none beside it).
+    assert CoreRecords(loop_input, result.run_id).snapshot is not None
     assert (
         not run.state.portable_namespace(result.run_id, PLUGIN.id)
         .external_directory()
@@ -940,31 +956,38 @@ def test_core_path_runs_the_fake_slurm_search(
     # The baseline and the implementer's own in-turn measurement through the tool were each
     # submitted exactly once. The task declares no per-run noise and the Fake benchmark reads
     # the same value on every run, so the comparison is a close call with no estimate of its
-    # noise (`vs_core._comparison`): core runs the base and the candidate's input again itself,
-    # each up to `MIN_SAMPLES_WITHOUT_FLOOR` runs, and once both sides hold that many identical
-    # runs no verdict can ever be reached, so nothing more is run. The implementer's turn does not
-    # wait for core's runs (they are not its attempt's history), so the strategy's official check
-    # may come while they are still under way: then it runs afresh and its run is the candidate's
-    # last sample, in place of core's; otherwise it is answered by the samples held (#2949).
-    # A queued core run also counts toward the candidate's sample cap, so the official
-    # check can reuse while that run is still awaiting local admission. Scope closure
-    # may cancel it before sbatch: core_runs records intent, not scheduler acceptance.
+    # noise (`vs_core._comparison`): core asks for runs of the base and of the candidate's input
+    # itself, each side up to `MIN_SAMPLES_WITHOUT_FLOOR` runs, and once both sides hold that
+    # many identical runs no verdict can ever be reached, so nothing more is run. The
+    # implementer's turn does not wait for core's runs (they are not its attempt's history),
+    # and they only feed the scope's comparison: a run that has not ended when the strategy
+    # leaves its workspace is withdrawn by the closing scope, so how many of them land depends
+    # on how long the jobs take against the agents. What does not depend on it: every run core
+    # asked for ended, landed or withdrawn, and the runs that landed never pass what a verdict
+    # needs.
     evaluation = envelope["core"]["evaluation"]
-    core_runs = {run["request_id"]["root"] for run in evaluation.get("core_runs", [])}
-    purposes = [
-        job["plan"]["purpose"]
-        for job in evaluation["jobs"]
-        if job["submission_id"]["root"] in core_runs
+    state = logged.core.evaluation
+    asked = {row.request_id for row in state.core_runs}
+    landed = [job for job in state.jobs if job.submission_id in asked]
+    withdrawn = [
+        row
+        for row in logged.core.records.records
+        if row.request_id in asked
+        and row.observation is not None
+        and row.observation.status is ObservationStatus.CANCELLED
+        and row.observation.diagnostic == CancelReason.WITHDRAWN.value
     ]
-    (official,) = (job for job in evaluation["jobs"] if job["plan"]["purpose"] == "official")
-    fresh_official = official.get("reuses") is None
-    assert purposes.count("baseline") == MIN_SAMPLES_WITHOUT_FLOOR - 1, evaluation["core_runs"]
-    # The agent's run, core's runs of its input, and a fresh official run: the fewest for a verdict.
-    assert 1 + purposes.count("local-validation") + fresh_official == MIN_SAMPLES_WITHOUT_FLOOR, (
+    assert len(landed) + len(withdrawn) == len(asked), evaluation["core_runs"]
+    purposes = [job.plan.purpose for job in landed]
+    (official,) = (job for job in state.jobs if job.plan.purpose == "official")
+    fresh_official = official.reuses is None
+    assert purposes.count("baseline") <= MIN_SAMPLES_WITHOUT_FLOOR - 1, evaluation["core_runs"]
+    # The agent's run, core's runs of its input, and a fresh official run: at most the fewest
+    # for a verdict.
+    assert 1 + purposes.count("local-validation") + fresh_official <= MIN_SAMPLES_WITHOUT_FLOOR, (
         evaluation["core_runs"]
     )
     _assert_cluster_submissions(run, result.run_id, loop_input)
-    cancelled = sum(job["status"] == "cancelled" for job in evaluation["jobs"])
     assert [call["rejection"] for call in evaluation["agent_calls"]] == [None]
     # The agent's own evaluation and the official one both sit in the ledger for the winner. A
     # framework run is trusted whoever asked for it, so the agent's records are correctness and
@@ -976,15 +999,13 @@ def test_core_path_runs_the_fake_slurm_search(
         ("official", "correctness"),
         ("official", "benchmark"),
     }
-    # The turn waited once: core recorded exactly one continuation for the whole run.
-    assert len(evaluation["continuations"]) == 1
     assert active_jobs(loop_input.cluster) == ()
     _assert_headless_stream(
         renderer.events,
         run_id=result.run_id,
         committed=_strings_of(envelope["core"]),
         rendered=capsys.readouterr().out,
-        job_counts=range(3 + len(core_runs) - cancelled, 3 + len(core_runs) + 1),
+        job_counts=range(3 + len(asked) - len(withdrawn), 3 + len(asked) + 1),
     )
 
 
@@ -1001,28 +1022,44 @@ def _assert_cluster_submissions(run: Project, run_id: str, loop_input: LoopInput
 
 @pytest.mark.usefixtures("container_cli_credentials")
 def test_core_run_cancelled_before_local_admission_never_submits(tmp_path: Path) -> None:
-    """An official reuse can close a scope while core's final candidate run is still queued."""
+    """A run cancelled while core's final candidate run is queued never submits the one waiting.
+
+    Core holds two runs of the candidate's comparison when the operator cancels the run: one
+    held pending in the Slurm queue, and one waiting for local admission that never reached the
+    scheduler. Both are steps of the run: the cancel ends the strategy's flows, the scope they
+    leave closes, and the closing scope withdraws both through their runner. The held job is
+    cancelled in the scheduler, and the other ends before dispatch and is never submitted. (An official check that reuses a run not seen ended is refused, so core measures
+    afresh, and the strategy waits for the runs under way, so only a stop or a failed attempt
+    closes a scope over them. The rule is `libs/vs-dst/tests/test_close_withdraws.py`'s.)
+    """
     loop_input = _executing_cluster_input(tmp_path)
     interleaving = _PendingCoreRuns(loop_input)
     result, _renderer = _core_slurm_search(loop_input, interleaving=interleaving)
-    assert result.succeeded is True
+    assert result.status is RunStatus.STOPPED
     run = Project.open(loop_input.root)
     logged = load_run(run, result.run_id)
     assert logged is not None
-    evaluation = logged.envelope["core"]["evaluation"]
-    assert len(evaluation["core_runs"]) == 4
-    (official,) = (job for job in evaluation["jobs"] if job["plan"]["purpose"] == "official")
-    assert official["reuses"] is not None
-    cancelled = [job for job in evaluation["jobs"] if job["status"] == "cancelled"]
-    assert len(cancelled) == 2
-    assert all(not job["evidence"] for job in cancelled)
+    core = logged.core
+    assert len(core.evaluation.core_runs) == 4
+    ended = [
+        row
+        for row in core.records.records
+        if isinstance(row.request, SubmitMeasurement)
+        and row.observation is not None
+        and row.observation.status is ObservationStatus.CANCELLED
+    ]
+    assert len(ended) == 2
+    # The stop ends the strategy's flows, and the scope they leave closes over both runs.
+    assert {row.observation.diagnostic for row in ended if row.observation is not None} == {
+        CancelReason.WITHDRAWN.value
+    }
     namespace = run.state.local_namespace(result.run_id, "core-evaluation")
-    durable = []
-    for job in cancelled:
-        payload = namespace.read_bytes(f"slurm-provider-handles/{job['resource_id']['root']}.json")
-        assert payload is not None
-        record = json.loads(payload)
-        durable.append((record["ended"], record["handle"] is None, record["dispatch_started"]))
-    assert set(durable) == {("cancelled_before_dispatch", True, False), (None, False, True)}
+    handles = namespace.external_directory() / "slurm-provider-handles"
+    durable = [
+        (record["ended"], record["handle"] is None, record["dispatch_started"])
+        for record in (json.loads(path.read_bytes()) for path in sorted(handles.glob("*.json")))
+    ]
+    # The step that waited for local admission ended before dispatch and never reached sbatch.
+    assert durable.count(("cancelled_before_dispatch", True, False)) == 1
     assert len(_assert_cluster_submissions(run, result.run_id, loop_input)) == 5
     assert active_jobs(loop_input.cluster) == ()

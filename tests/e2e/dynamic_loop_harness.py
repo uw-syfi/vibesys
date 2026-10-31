@@ -758,6 +758,8 @@ class LoadedRun:
     core: CoreState
     envelope: dict[str, Any]
     """``core`` and, once the search logged a whole state, ``strategy``."""
+    strategy: FlowState | None = None
+    """The search's state as of the last committed record, typed; None before its first whole state."""
 
 
 def load_run(project: Project, run_id: str, *, plugin_id: str = "dynamic") -> LoadedRun | None:
@@ -770,7 +772,7 @@ def load_run(project: Project, run_id: str, *, plugin_id: str = "dynamic") -> Lo
     envelope: dict[str, Any] = {"core": json.loads(logged.core.model_dump_json())}
     if logged.strategy is not None:
         envelope["strategy"] = json.loads(logged.strategy.model_dump_json())
-    return LoadedRun(logged.core, envelope)
+    return LoadedRun(logged.core, envelope, logged.strategy)
 
 
 def simulated_clock() -> CrashableRunClock:
@@ -793,11 +795,9 @@ class CoreRecords:
         self.project = loop_input.project()
         loaded = load_run(self.project, run_id)
         assert loaded is not None, f"no committed record for {run_id}"
-        assert "strategy" in loaded.envelope, f"the search of {run_id} logged no whole state"
+        assert loaded.strategy is not None, f"the search of {run_id} logged no whole state"
         self.envelope: dict[str, Any] = loaded.envelope
-        published = FlowDriver.published(
-            FlowState.model_validate(loaded.envelope["strategy"]), RunSnapshot
-        )
+        published = FlowDriver.published(loaded.strategy, RunSnapshot)
         assert published is not None, "the search published no record"
         self.snapshot: RunSnapshot = published
 
