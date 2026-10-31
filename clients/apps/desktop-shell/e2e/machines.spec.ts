@@ -4,8 +4,10 @@ import {rawTextOf} from './checks/screen-check.js';
 import {
   type FakeBridgeSeed,
   installFakeBridge,
+  installFakeChrome,
   installFakeMachines,
   installFakeNewRun,
+  MAC_CHROME,
 } from './fake-bridge.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 
@@ -23,7 +25,7 @@ const FOUND = {
 
 const SEED: FakeBridgeSeed = {
   theme: 'ink',
-  chromeInset: {width: 84, height: 40},
+  chromeInset: MAC_CHROME,
   appearance: {mode: 'dark', light: 'paper', dark: 'ink'},
   listings: [],
   recent: [],
@@ -64,6 +66,7 @@ const row = (page: Page, name: string) => machineList(page).getByRole('treeitem'
 
 async function openMachines(page: Page, seed: FakeBridgeSeed = SEED): Promise<void> {
   await addInitScripts(page, [
+    initScript(installFakeChrome, seed),
     initScript(installFakeBridge, seed),
     initScript(installFakeMachines, seed),
     initScript(installFakeNewRun, seed),
@@ -212,6 +215,7 @@ test('Escape closes Add a machine, which has the focus as it opens, and no empty
 }) => {
   const none: FakeBridgeSeed = {...SEED, machines: []};
   await addInitScripts(page, [
+    initScript(installFakeChrome, none),
     initScript(installFakeBridge, none),
     initScript(installFakeMachines, none),
     initScript(installFakeNewRun, none),

@@ -89,7 +89,7 @@ test('every title names what failed, and the machine where the step is about it'
   }
 });
 
-test('a load or check can be tried again from the banner; a fix or start is pressed again', () => {
+test('a load or check can be tried again from the status; a fix or start is pressed again', () => {
   const retry = (step: Step) => problemWords({step, detail: null, cause: null}, 'host-a').retry;
   const retried: Step[] = [
     'describe',

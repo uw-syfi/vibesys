@@ -621,9 +621,9 @@ export function Shell(props: {
 const viewerClock = (): Clock => ({now: Date.now()});
 
 /**
- * A run window: the Run screen for `run` alone, with no sidebar, below the same title-bar row as
- * the main window's. The sidebar's store still runs,
- * for the hosts' listings the run's record is read from.
+ * A run window: the Run screen for `run` alone, with no rail, in the same frame as the main window's
+ * so the window's own controls keep the same room. The sidebar's store still runs, for the hosts'
+ * listings the run's record is read from.
  */
 export function RunWindow(props: {
   readonly stores: ShellStores;

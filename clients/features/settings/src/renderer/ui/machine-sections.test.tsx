@@ -1,7 +1,15 @@
 import {expect, test} from 'bun:test';
-import type {AgentLogin, ComputeSettings} from '@vibesys/ipc';
+import type {AgentLogin, ClusterTest, ComputeSettings} from '@vibesys/ipc';
 import {renderToStaticMarkup} from 'react-dom/server';
-import {type ClusterForm, type MachineView, NEW_FORM} from '../../state/index.js';
+import {
+  type ClusterForm,
+  INITIAL_MACHINE_SETTINGS,
+  type MachineSettingsAction,
+  type MachineSettingsCall,
+  type MachineSettingsState,
+  type MachineView,
+  machineSettingsStep,
+} from '../../state/index.js';
 import {ClustersSection} from './clusters-section.js';
 import {LoginsSection} from './logins-section.js';
 
@@ -161,13 +169,88 @@ test('a login the helper cannot start, or has started, is a status word on its c
   expect(prose(started)).toEqual([]);
 });
 
-test('a cluster connection test is a status word in the form, whose settings changed is Test again', () => {
-  const passed: ClusterForm = {
-    ...NEW_FORM,
-    test: {kind: 'passed', sent: 'not what the fields build', partitions: ['gpu']},
+const HOST = 'ssh:host-b';
+
+/** The Add a cluster form after a user filled it in and the helper answered its test with `answer`. */
+function formAnswered(
+  answer:
+    | {readonly ok: true; readonly value: ClusterTest}
+    | {readonly ok: false; readonly error: string},
+  after: readonly MachineSettingsAction[] = [],
+): ClusterForm {
+  let state: MachineSettingsState = INITIAL_MACHINE_SETTINGS;
+  const issued: MachineSettingsCall[] = [];
+  const act = (action: MachineSettingsAction): void => {
+    const step = machineSettingsStep(state, action);
+    state = step.state;
+    issued.push(...step.requests);
   };
-  const html = renderToStaticMarkup(<ClustersSection {...props} view={view({form: passed})} />);
+  act({type: 'focus', host: HOST, section: 'clusters'});
+  act({type: 'open-form', host: HOST});
+  for (const [key, value] of [
+    ['name', 'lab'],
+    ['host', 'lab-login'],
+    ['workspace', '/w'],
+  ] as const) {
+    act({type: 'field', host: HOST, key, value});
+  }
+  act({type: 'test', host: HOST});
+  const test = issued.find(call => call.kind === 'test');
+  if (test === undefined) throw new Error('the form did not ask for a test');
+  act({type: 'tested', token: test.token, host: HOST, result: answer});
+  for (const action of after) act(action);
+  const form = state.views[HOST]?.form;
+  if (form === null || form === undefined) throw new Error('the form is not open');
+  return form;
+}
+
+const alerts = (html: string): number => html.match(/role="alert"/g)?.length ?? 0;
+
+for (const [stage, says] of [
+  ['reach', 'Could not reach the cluster'],
+  ['scheduler', 'The cluster’s scheduler did not answer'],
+  ['workspace', 'The workspace is not usable'],
+] as const) {
+  test(`a connection test that failed at ${stage} is said once, in the form, with why`, () => {
+    const form = formAnswered({
+      ok: true,
+      value: {outcome: 'failed', stage, detail: 'not writable'},
+    });
+    const html = renderToStaticMarkup(<ClustersSection {...props} view={view({form})} />);
+    expect(alerts(html)).toBe(1);
+    expect(drawnText(html).filter(text => text === says)).toHaveLength(1);
+    expect(drawnText(html)).toContain('not writable');
+  });
+}
+
+test('a failure that names no field is said in the form; one that names a field stays under it', () => {
+  const unnamed = formAnswered({ok: false, error: 'the helper did not answer'});
+  const unnamedHtml = renderToStaticMarkup(
+    <ClustersSection {...props} view={view({form: unnamed})} />,
+  );
+  expect(alerts(unnamedHtml)).toBe(1);
+  expect(drawnText(unnamedHtml)).toContain('the helper did not answer');
+
+  const named = formAnswered({ok: false, error: 'cluster.workspace: not a directory'});
+  const namedHtml = renderToStaticMarkup(<ClustersSection {...props} view={view({form: named})} />);
+  expect(alerts(namedHtml)).toBe(0);
+  expect(drawnText(namedHtml)).toContain('cluster.workspace: not a directory');
+});
+
+test('a test result of settings that have since changed is not shown as a failure', () => {
+  const form = formAnswered(
+    {ok: true, value: {outcome: 'failed', stage: 'workspace', detail: 'not writable'}},
+    [{type: 'field', host: HOST, key: 'workspace', value: '/other'}],
+  );
+  const html = renderToStaticMarkup(<ClustersSection {...props} view={view({form})} />);
+  expect(alerts(html)).toBe(0);
   expect(drawnText(html)).toContain('Test again');
   expect(html).toContain('aria-description="The settings changed since the last test."');
-  expect(html).not.toContain('Connection works');
+});
+
+test('a connection test that passed is not an alert', () => {
+  const form = formAnswered({ok: true, value: {outcome: 'passed', hardware: {}, partitions: []}});
+  const html = renderToStaticMarkup(<ClustersSection {...props} view={view({form})} />);
+  expect(alerts(html)).toBe(0);
+  expect(drawnText(html)).toContain('Connection works');
 });

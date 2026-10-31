@@ -1,46 +1,85 @@
 import {describe, expect, test} from 'bun:test';
-import {chromeInset, TITLEBAR_HEIGHT, windowChrome} from './window-chrome.js';
+import fc from 'fast-check';
+import {chromeInset, OVERLAY_HEIGHT, windowChrome} from './window-chrome.js';
+
+/** The largest the system draws the lights: three 14px discs 23px apart. */
+const LIGHT = 14;
+const LIGHTS_WIDTH = 60;
+
+const named = fc.constantFrom('darwin', 'win32', 'linux', 'freebsd');
+/** Any `process.platform` value: a known one, or whatever a future Electron reports. */
+const platform = fc.oneof(named, fc.string());
+const elsewhere = platform.filter(each => each !== 'darwin');
 
 describe('windowChrome', () => {
   test('every platform paints the same page background so nothing flashes before load', () => {
     const colors = ['darwin', 'win32', 'linux', 'freebsd'].map(
-      platform => windowChrome(platform).backgroundColor,
+      each => windowChrome(each).backgroundColor,
     );
     expect(new Set(colors).size).toBe(1);
     expect(colors[0]).toMatch(/^#[0-9a-f]{6}$/);
   });
 
-  test('macOS keeps the traffic lights vertically centered in the strip', () => {
+  test('macOS hides the title bar and places the lights at the margin the inset reserves', () => {
     const chrome = windowChrome('darwin');
     expect(chrome.titleBarStyle).toBe('hiddenInset');
-    const y = chrome.trafficLightPosition?.y ?? Number.NaN;
-    expect(y * 2 + 12).toBe(TITLEBAR_HEIGHT);
+    expect(chrome.trafficLightPosition).toBeDefined();
+    expect(chrome.titleBarOverlay).toBeUndefined();
   });
 
-  test('other platforms overlay window controls on the page background at strip height', () => {
-    for (const platform of ['win32', 'linux']) {
-      const chrome = windowChrome(platform);
-      expect(chrome.titleBarStyle).toBe('hidden');
-      expect(chrome.titleBarOverlay?.color).toBe(chrome.backgroundColor);
-      expect(chrome.titleBarOverlay?.height).toBe(TITLEBAR_HEIGHT);
-      expect(chrome.trafficLightPosition).toBeUndefined();
-    }
+  test('other platforms overlay window controls on the page background at the strip height', () => {
+    fc.assert(
+      fc.property(elsewhere, each => {
+        const chrome = windowChrome(each);
+        expect(chrome.titleBarStyle).toBe('hidden');
+        expect(chrome.titleBarOverlay?.color).toBe(chrome.backgroundColor);
+        expect(chrome.titleBarOverlay?.height).toBe(OVERLAY_HEIGHT);
+        expect(chrome.trafficLightPosition).toBeUndefined();
+      }),
+    );
   });
 });
 
 describe('chromeInset', () => {
-  test('on macOS covers the traffic lights with a margin past the last one, over the strip', () => {
+  test('on macOS the lights, at their largest, sit inside the reserved corner with at least the left margin after them, and centered in its height', () => {
     const inset = chromeInset('darwin');
-    const lights = windowChrome('darwin').trafficLightPosition;
-    const lastLightEnd = (lights?.x ?? 0) + 3 * 12 + 2 * 8;
-    expect(inset.width).toBeGreaterThan(lastLightEnd);
-    expect(inset.height).toBe(TITLEBAR_HEIGHT);
-    expect((lights?.y ?? 0) + 12).toBeLessThanOrEqual(inset.height);
+    const lights = windowChrome('darwin').trafficLightPosition ?? {x: Number.NaN, y: Number.NaN};
+    expect(lights.x).toBeGreaterThan(0);
+    expect(inset.startWidth - (lights.x + LIGHTS_WIDTH)).toBeGreaterThanOrEqual(lights.x);
+    expect(lights.y).toBeGreaterThan(0);
+    expect(inset.startHeight - (lights.y + LIGHT)).toBe(lights.y);
+    expect(inset.endHeight).toBe(0);
   });
 
-  test('is empty where the controls are drawn at the top right instead', () => {
-    for (const platform of ['win32', 'linux', 'freebsd']) {
-      expect(chromeInset(platform)).toEqual({width: 0, height: 0});
-    }
+  test('elsewhere the controls cover a strip across the top and no corner, as high as the overlay', () => {
+    fc.assert(
+      fc.property(elsewhere, each => {
+        const overlay = windowChrome(each).titleBarOverlay?.height;
+        expect(chromeInset(each)).toEqual({
+          startWidth: 0,
+          startHeight: 0,
+          endHeight: overlay ?? -1,
+        });
+      }),
+    );
+  });
+
+  test('a platform never has its controls at both ends, and a corner has both a width and a height', () => {
+    fc.assert(
+      fc.property(platform, each => {
+        const inset = chromeInset(each);
+        expect(inset.startWidth > 0 === inset.startHeight > 0).toBe(true);
+        expect(inset.startWidth > 0 && inset.endHeight > 0).toBe(false);
+        expect(inset.startWidth > 0 || inset.endHeight > 0).toBe(true);
+      }),
+    );
+  });
+
+  test('full screen hides the controls on every platform, so nothing is reserved', () => {
+    fc.assert(
+      fc.property(platform, each => {
+        expect(chromeInset(each, true)).toEqual({startWidth: 0, startHeight: 0, endHeight: 0});
+      }),
+    );
   });
 });

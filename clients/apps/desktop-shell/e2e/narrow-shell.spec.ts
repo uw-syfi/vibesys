@@ -1,5 +1,6 @@
 import {expect, type Page, test} from '@playwright/test';
 import {frameProblems, STACKED_FRAME} from './checks/main-above-fold.js';
+import {MAC_CHROME} from './fake-bridge.js';
 import {open, sidebar} from './world.js';
 
 /**
@@ -30,7 +31,7 @@ for (const width of WIDTHS) {
     await expect(page.getByRole('heading', {name: 'Runs'})).toBeInViewport();
     const rail = await sidebar(page).boundingBox();
     const content = await page.locator('.vs-app-content').boundingBox();
-    expect(rail?.width).toBe(64);
-    expect(content?.x).toBe(64);
+    expect(rail?.width).toBe(MAC_CHROME.startWidth);
+    expect(content?.x).toBe(MAC_CHROME.startWidth);
   });
 }

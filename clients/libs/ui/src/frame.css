@@ -1303,6 +1303,10 @@ button.vs-pickrow-trail:hover {
   .vs-listheader-col[data-fixed="trail"] {
     width: calc(var(--space-8) + var(--space-3));
   }
+  .vs-pickrow-measure[data-size="plain"],
+  .vs-listheader-col[data-fixed="measure"] {
+    width: var(--space-8);
+  }
   .vs-listheader-col[data-fixed="figure"],
   .vs-pickrow:has(.vs-pickrow-trail) .vs-pickrow-figure {
     min-width: var(--space-6);

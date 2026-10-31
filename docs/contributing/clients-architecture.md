@@ -319,7 +319,7 @@ CSS of their own. An app imports `./tokens.css`, `./fonts.css` and `./components
 
 | Component | Props |
 | --- | --- |
-| `Page` | `width?: 'content' \| 'wide' \| 'narrow'`; the scrolling `<main>` with the page gutter |
+| `Page` | `width?: 'content' \| 'wide' \| 'narrow'`, `header?`, `footer?`; the scrolling `<main>` with the page gutter; a `header` stays in view above a body that scrolls, and is where the window's toasts hang |
 | `Stack`, `Row` | `gap?: SpaceToken`, `align?`, `justify?: 'start' \| 'center' \| 'end' \| 'between'`, `wrap?`, `grow?` |
 | `Split` | `main`, `aside`, `gap?`; the aside wraps under the main column when narrow |
 | `Dock` | `label`, `side` (a panel node or null), the screen as children; the panel sits full height at the right edge and the screen narrows |
@@ -337,7 +337,7 @@ CSS of their own. An app imports `./tokens.css`, `./fonts.css` and `./components
 | `Chip` | `label`, `tone?: StatusTone`, `dot?`, `mono?` (the label is an identifier, set in the code face), `hint?` (the longer account: the chip's accessible description, a tab stop drawn under the chip on hover and on keyboard focus; a path in it is shown by its last name) |
 | `StatusDot` | `tone: 'neutral' \| 'live' \| 'ok' \| 'warn' \| 'err'`, `label` |
 | `Card` | `section?` (a titled region), `flush?` |
-| `Toast`, `ToastStack` | `Toast`: `tone: 'warn' \| 'err'`, `title`, `detail?`, `open`, `toggle(open)`, `dismiss()`. `ToastStack`: `label`, `toasts: {id, tone, title, detail?, open}[]` (newest first), `toggle(id, open)`, `dismiss(id)`; fixed at the top right below the title bar, a labelled live region (an error is an `alert`, a warning a `status`); holds no state |
+| `Toast`, `ToastStack` | `Toast`: `tone: 'warn' \| 'err'`, `title`, `detail?`, `open`, `toggle(open)`, `dismiss()`. `ToastStack`: `label`, `toasts: {id, tone, title, detail?, open}[]` (newest first), `toggle(id, open)`, `dismiss(id)`; fixed at the top right, a small gap below the header row of the `Page` or `Screen` on show (the window's end strip where there is none), a labelled live region (an error is an `alert`, a warning a `status`); holds no state |
 | `Menu` | the trigger's `text` or `icon` + `label`, `items: {id, label, press \| href, danger?}[]`, `variant?`, `size?`; raised, keyboard navigable, closes on Esc, a choice or the focus leaving |
 | `Dialog` | `open`, `title`, `dismiss`, children, `actions?`; the native modal `<dialog>` at the `overlay` elevation |
 | `Table` | `label`, `columns: {key, header, cell(row), mono?, align?}[]`, `rows`, `rowKey`, `selected?`, `select?`; sticky header, scrolls sideways in its own focusable box |
@@ -375,8 +375,8 @@ message is one of three things, and each has one form.
 - **A failure or warning the person passes through is a toast.** "Could not save the change", "The
   machines could not be read", "The run did not take the command": an event, with no action
   beside it. It is a *problem*: data with a stable `id`, a tone (`warn` or `err`), a short title
-  and a detail. Toasts sit at the top right of the window, below the title bar, collapsed to the
-  title and a tone dot, with the detail behind a details button, and stay until the person
+  and a detail. Toasts sit at the top right of the window, a small gap below the screen's header row (a
+  `Page`'s or `Screen`'s `header`, whatever its height), collapsed to the title and a tone dot, with the detail behind a details button, and stay until the person
   dismisses them or the problem clears. They never hide on a timer.
 - **A problem with one thing is a status word at that thing.** A login, a machine, a section that
   could not be read, a step's transcript: a `Chip` in the thing's own row or header (`Not read`,
@@ -399,10 +399,16 @@ clears, so one that recurs is shown again. `ProblemHost` renders the board's toa
 root of each window (the main window and a run window), so no screen holds a toast list or a
 timer of its own.
 
-Enforced: `@vibesys/ui` has no `Banner` and no stylesheet rule that paints a panel with the tone
-fills (`--banner-*-bg`) other than a toast and an attention tile (`tone-fills.test.ts`), and a
-feature's `./state` is the only place a problem's words are written. Unenforced: whether a message
-is a passing event or a problem with a thing needs a reader.
+Enforced: `@vibesys/ui` has no `Banner`; no stylesheet rule paints a panel with the tone fills
+(`--banner-*-bg`, `--chip-*-bg`, or a mix of a status color) unless it is on the allow-list of
+`tone-fills.test.ts`; the `banner` screen check fails an element at least half as wide as the
+main pane that is filled with a status color, whatever it is called; a feature's `./state` is the
+only place a problem's words are written; and `toasts.spec.ts` shows a toast on every top-level
+screen at the smallest and a wide window, with each platform's window controls, and checks it
+sits below the header row and covers nothing in it. Unenforced: whether a message is a passing
+event or a problem with a thing needs a reader; and a new screen that puts its title row in the
+body instead of the `header` slot gets toasts over that row, until it is added to the spec's
+screens and given a `header`.
 
 ### The gallery and its screenshots
 

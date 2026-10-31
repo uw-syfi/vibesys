@@ -275,4 +275,38 @@ export const BAD_SCREENS: readonly BadScreen[] = [
     message: /text runs outside the window/,
     html: `<div style="${PAGE}"><span style="position:absolute;left:-20px;top:20px">gone left</span></div>`,
   },
+  {
+    name: 'a back button drawn in the corner the macOS traffic lights sit in',
+    check: 'chrome-clear',
+    message: /button "Back" is drawn where the window's own controls are/,
+    html: `<style>:root{--chrome-start-width:80px;--chrome-start-height:40px}</style><div style="${PAGE}"><button>Back</button></div>`,
+  },
+  {
+    name: 'a title drawn in the strip the Windows controls are drawn over',
+    check: 'chrome-clear',
+    message: /span "Run title" is drawn where the window's own controls are/,
+    html: `<style>:root{--chrome-end-height:40px}</style><div class="vs-app-main" style="${PAGE}"><span>Run title</span></div>`,
+  },
+  {
+    name: 'a link left inside the window drag region',
+    check: 'drag-region',
+    message: /a "Open" is in the window's drag region/,
+    html: `<div style="-webkit-app-region:drag;height:60px;${PAGE}"><a href="#open">Open</a></div>`,
+  },
 ];
+
+/**
+ * A page that lays out around the window's own controls the way the app does, which the chrome
+ * checks pass: a start column that drags, a top band that drags, and the page's controls carved out.
+ */
+export const CLEAN_CHROME_SCREEN = `
+  <style>:root{--chrome-start-width:80px;--chrome-start-height:40px}</style>
+  <div style="${PAGE}display:flex;padding:0">
+    <nav style="-webkit-app-region:drag;width:80px;padding-top:48px;box-sizing:border-box;height:320px">
+      <button style="-webkit-app-region:no-drag">New</button>
+    </nav>
+    <div class="vs-app-main" style="position:relative;isolation:isolate;flex:1">
+      <div style="position:absolute;top:0;left:0;right:0;height:16px;z-index:-1;-webkit-app-region:drag"></div>
+      <div style="padding:24px"><h1 style="font-size:20px;margin:0">Run</h1><button style="-webkit-app-region:no-drag">Chat</button></div>
+    </div>
+  </div>`;

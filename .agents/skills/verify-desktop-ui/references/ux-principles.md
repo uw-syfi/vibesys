@@ -131,7 +131,7 @@ can decide it.
     already on screen is not said again. Enforced for the component by its
     absence from `@vibesys/ui`, by the stylesheet test of the tone fills (only
     listed selectors may be washed with a tone, whatever they are called), by
-    the `banner` screen check (no element over 60% of the main pane's width is
+    the `banner` screen check (no element at least half the main pane's width is
     filled with a status color, by color rather than by class name) and by the
     no-banners journey of the desktop shell's end-to-end suite; whether a
     message is passing or about a thing, and whether a hint holds something a
