@@ -2,7 +2,7 @@
 default_base = "main"
 jobs = ["python", "clients", "examples", "agent_image", "real_tiers", "evaluators", "impact", "stitch", "proto", "gateway", "cli"]
 
-ignored_roots = ["website", "third_party", ".agents", ".claude", ".github/ISSUE_TEMPLATE", ".github/DISCUSSION_TEMPLATE"]
+ignored_roots = ["website", "third_party", ".agents", ".claude", ".claude-plugin", ".github/ISSUE_TEMPLATE", ".github/DISCUSSION_TEMPLATE"]
 ignored_files = ["AGENTS.md", "CLAUDE.md", "LICENSE", "agent.toml.example", ".env.example", ".gitattributes", ".gitignore", ".github/CODEOWNERS", ".github/pull_request_template.md", ".github/delegated-merge.md"]
 
 [[discoveries]]
