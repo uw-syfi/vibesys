@@ -22,15 +22,18 @@ from vs_core.api.recovery import Tick, decide, may_start
 from vs_sim.api.testing import examples
 
 from .recovery_loop import OPEN, Loop, Move, may_start_agrees_with_decide, play
-from .recovery_worlds import Standing, StepSpec, World, build, worlds
-
-RETAIN = World((StepSpec(2.0),), retries=0, retains=(0,))
-"""A query step and a snapshot-and-retain, which a drain lets through."""
-CLOSE = World((StepSpec(2.0),), retries=0, closes=(1,))
-"""A query step and the close of a scope with no other step, which a drain lets through."""
-IN_FLIGHT = World((StepSpec(2.0, standing=Standing.RECONCILING),), retries=0)
-"""A step an earlier version left reconciling: the log gives it an ended first attempt."""
-DISPATCHED = World((StepSpec(2.0, standing=Standing.DISPATCHED),), retries=0)
+from .recovery_worlds import (
+    CLOSING,
+    CLOSING_ITS_STEP,
+    DISPATCHED,
+    IN_FLIGHT,
+    ONE_QUERY,
+    RETAINING,
+    Staging,
+    World,
+    build,
+    staged_worlds,
+)
 
 
 def started(world: World) -> Loop:
@@ -40,22 +43,17 @@ def started(world: World) -> Loop:
     return loop
 
 
-def drain_effect_worlds() -> st.SearchStrategy[World]:
-    """Worlds of every kind of step with a drain effect open beside them."""
-    return worlds().map(lambda world: replace(world, retains=world.retains or (0,)))
-
-
 # --- A ----------------------------------------------------------------------------------------
 
 
 @pytest.mark.regression
-@example(world=RETAIN, before=[], pause=("pause", None))
-@example(world=CLOSE, before=[], pause=("pause", None))
-@example(world=RETAIN, before=[("tick", None)], pause=("pause", 20.0))
-@example(world=RETAIN, before=[], pause=("pause_now", None))
+@example(world=RETAINING, before=[], pause=("pause", None))
+@example(world=CLOSING, before=[], pause=("pause", None))
+@example(world=RETAINING, before=[("tick", None)], pause=("pause", 20.0))
+@example(world=RETAINING, before=[], pause=("pause_now", None))
 @settings(max_examples=examples(pr=10, nightly=100), deadline=None)
 @given(
-    world=drain_effect_worlds(),
+    world=staged_worlds(Staging.RETAIN, Staging.CLOSE),
     before=st.lists(st.sampled_from([("tick", None), ("finish", 0)]), max_size=3),
     pause=st.sampled_from([("pause", None), ("pause", 1.0), ("pause", 20.0), ("pause_now", None)]),
 )
@@ -84,11 +82,11 @@ def test_a_resume_in_a_new_epoch_is_taken_while_the_pause_still_has_effects_to_d
     [
         (DISPATCHED, [("tock", 3.0), ("pause_now", None), ("crash", None)]),
         (
-            World((StepSpec(2.0),), retries=0),
+            ONE_QUERY,
             [("tick", None), ("tock", 40.0), ("pause_now", None), ("crash", None)],
         ),
         (
-            World((StepSpec(2.0),), retries=0),
+            ONE_QUERY,
             [("tick", None), ("pause", 20.0), ("tock", 40.0), ("crash", None)],
         ),
     ],
@@ -109,7 +107,7 @@ def test_b_a_parked_epoch_charges_nothing_for_the_attempt_of_a_step_core_ended(
 # --- C ----------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("world", [IN_FLIGHT, World((StepSpec(2.0),), retries=2)])
+@pytest.mark.parametrize("world", [IN_FLIGHT, replace(ONE_QUERY, retries=2)])
 def test_c_the_fold_refuses_the_report_of_a_replaced_attempt_after_core_ended_the_step(
     world: World,
 ) -> None:
@@ -127,7 +125,7 @@ def test_c_the_fold_refuses_the_report_of_a_replaced_attempt_after_core_ended_th
 # --- D ----------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("world", [RETAIN, World((StepSpec(2.0, scope=1),), closes=(0,))])
+@pytest.mark.parametrize("world", [RETAINING, CLOSING_ITS_STEP])
 def test_d_a_step_may_start_only_when_decide_would_run_it_once_the_drain_deadline_passed(
     world: World,
 ) -> None:

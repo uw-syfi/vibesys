@@ -22,6 +22,7 @@ move, or lags and meets the next input with its attempts still running. In every
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from hypothesis import example, given, settings
@@ -31,8 +32,21 @@ import vs_core.api as core
 from vs_core.api.recovery import RunRest, at_rest
 from vs_sim.api.testing import examples
 
-from .recovery_loop import MOVES, OPEN, Loop, Move, invariants, play, settle
-from .recovery_worlds import StepSpec, World, build, query_world, worlds
+from .recovery_loop import MOVES, OPEN, Loop, Move, epoch_scripts, invariants, play, settle
+from .recovery_worlds import (
+    CLOSING,
+    CLOSING_ITS_STEP,
+    DISPATCHED,
+    IN_FLIGHT,
+    ONE_QUERY,
+    RETAINING,
+    StepSpec,
+    World,
+    build,
+    query_world,
+    staged_worlds,
+    worlds,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -83,6 +97,30 @@ def pinned_worlds() -> list[tuple[World, list[Move]]]:
             ],
         ),
         (query_world((100.0,), 0), [("tick", None), ("quota_pause", None), ("resume_now", None)]),
+        *epoch_edges(),
+    ]
+
+
+def epoch_edges() -> list[tuple[World, list[Move]]]:
+    """The trajectories that found where a pause, a park or an attempt outlives its epoch.
+
+    A is a Resume refused under a pause that is still draining, B an attempt the model charged to
+    a step core had ended, C the report of a replaced attempt taken after core ended the step,
+    and D a step that may start where only the park is due.
+    """
+    resumed = [("relaunch_resume", None)]
+    late = [("tick", None), ("tock", 40.0), ("late_finish", 0)]
+    return [
+        (RETAINING, [("pause", None), *resumed]),
+        (CLOSING, [("pause", None), *resumed]),
+        (RETAINING, [("tick", None), ("pause", 20.0), ("crash", None), *resumed]),
+        (DISPATCHED, [("tock", 3.0), ("pause_now", None), ("crash", None)]),
+        (ONE_QUERY, [("tick", None), ("tock", 40.0), ("pause_now", None), *resumed]),
+        (ONE_QUERY, [("tick", None), ("pause", 20.0), ("tock", 40.0), ("crash", None)]),
+        (IN_FLIGHT, late),
+        (replace(ONE_QUERY, retries=2), [("tick", None), *resumed, *late]),
+        (RETAINING, [("pause", 1.0), ("clock", 3.0)]),
+        (CLOSING_ITS_STEP, [("pause", 1.0), ("clock", 3.0)]),
     ]
 
 
@@ -90,16 +128,23 @@ def pinned[F: Callable[..., object]](test: F) -> F:
     """Run the pinned trajectories whatever the generator draws, with and without a lagging loop."""
     for world, moves in pinned_worlds():
         for lag in (False, True):
-            test = example(world=world, moves=moves, lag=lag)(test)
+            test = example(case=(world, moves, lag))(test)
     return test
+
+
+def trajectories() -> st.SearchStrategy[Trajectory]:
+    """Moves drawn evenly from all kinds, and moves scripted around the end of an epoch."""
+    return st.one_of(
+        st.tuples(worlds(), st.lists(MOVES, max_size=14), st.booleans()),
+        st.tuples(staged_worlds(), epoch_scripts(), st.booleans()),
+    )
 
 
 @pinned
 @settings(max_examples=examples(pr=10, nightly=300), deadline=None)
-@given(world=worlds(), moves=st.lists(MOVES, max_size=14), lag=st.booleans())
-def test_every_action_core_returns_can_be_recorded_and_moves_the_run(
-    world: World, moves: list[Move], *, lag: bool
-) -> None:
+@given(case=trajectories())
+def test_every_action_core_returns_can_be_recorded_and_moves_the_run(case: Trajectory) -> None:
+    world, moves, lag = case
     state, registry = build(world)
     loop = Loop(state, registry)
     loop.open_epoch()
@@ -113,10 +158,11 @@ def test_every_action_core_returns_can_be_recorded_and_moves_the_run(
 
 @pinned
 @settings(max_examples=examples(pr=10, nightly=300), deadline=None)
-@given(world=worlds(), moves=st.lists(MOVES, max_size=14), lag=st.booleans())
+@given(case=trajectories())
 def test_a_run_left_to_cooperative_runners_comes_to_rest_and_records_each_end(
-    world: World, moves: list[Move], *, lag: bool
+    case: Trajectory,
 ) -> None:
+    world, moves, lag = case
     state, registry = build(world)
     loop = Loop(state, registry)
     loop.open_epoch()

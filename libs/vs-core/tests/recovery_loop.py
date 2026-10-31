@@ -394,6 +394,36 @@ MOVES: st.SearchStrategy[Move] = st.one_of(
 )
 
 
+STOPS: st.SearchStrategy[Move] = st.one_of(
+    st.tuples(st.just("pause"), st.sampled_from([None, 1.0, 20.0])),
+    st.tuples(st.just("pause_now"), st.sampled_from([None, 1.0])),
+    st.just(("quota_pause", None)),
+)
+WORK: st.SearchStrategy[Move] = st.one_of(
+    st.just(("tick", None)),
+    st.tuples(st.just("tock"), st.sampled_from([3.0, 40.0])),
+    st.tuples(st.just("clock"), st.sampled_from([3.0, 40.0, 500.0])),
+    st.tuples(st.just("finish"), st.integers(0, 1)),
+)
+EPOCH_ENDS: st.SearchStrategy[Move] = st.sampled_from([("crash", None), ("relaunch_resume", None)])
+
+
+def epoch_scripts() -> st.SearchStrategy[list[Move]]:
+    """Work, maybe a stop, more work, the end of the epoch, then any tail.
+
+    The causes found at the edge of an epoch are two to five moves in this order, which a list of
+    moves drawn evenly from all of them rarely makes.
+    """
+    return st.builds(
+        lambda work, stop, more, end, tail: [*work, *stop, *more, end, *tail],
+        st.lists(WORK, max_size=2),
+        st.lists(STOPS, max_size=1),
+        st.lists(WORK, max_size=2),
+        EPOCH_ENDS,
+        st.lists(MOVES, max_size=3),
+    )
+
+
 def play(loop: Loop, move: Move) -> None:
     """One move: something the runners, the clock, the process or the operator does."""
     name, argument = move
