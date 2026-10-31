@@ -26,7 +26,10 @@ from vs_core.api.recovery import (
     finished_message,
     fold,
     input_message,
+    interrupted_message,
+    may_start,
     open_step,
+    started_message,
 )
 from vs_proto.api import Oneof
 
@@ -257,3 +260,37 @@ def test_the_moves_cover_a_fold_that_equals_the_state() -> None:
     refolded = fold(loop.records, seeded((100.0,), 3)[0], registry=loop.registry)
     assert refolded.steps == loop.state.steps
     assert refolded.run == loop.state.run
+
+
+# --- a start the rule forbids is not recorded -------------------------------------------------
+
+
+def test_a_flight_that_waited_while_the_run_parked_cannot_record_its_start() -> None:
+    """A flight decided to run a step, waited for its `clear`, and the run parked meanwhile."""
+    loop = started((100.0, 100.0))
+    steps = [row.request_id for row in loop.state.records.records]
+    stale = Run(
+        step=loop.state.records.records[1].request, tag=steps[1], attempt=2, deadline_at=100.0
+    )
+    play(loop, ("pause_now", None))
+    for tag in steps:
+        started_row = loop.state.steps.of(tag)
+        assert started_row is not None
+        loop.add(Oneof("attempt_interrupted", interrupted_message(tag, 1, Interruption.PAUSE)))
+    assert loop.state.run.status is core.RunStatus.PARKED
+    assert not may_start(loop.state, steps[1])
+    with pytest.raises(ValueError, match="may not start it"):
+        loop.add(Oneof("step_started", started_message(stale)))
+
+
+@pytest.mark.parametrize("settled", [True, False])
+def test_may_start_is_false_for_a_step_with_a_result_and_for_one_no_one_knows(
+    *, settled: bool
+) -> None:
+    loop = started((100.0,))
+    (tag,) = [row.request_id for row in loop.state.records.records]
+    if settled:
+        loop.finish_running(0)
+        assert not may_start(loop.state, tag)
+    else:
+        assert not may_start(loop.state, core.RequestId(root="no-such-step"))

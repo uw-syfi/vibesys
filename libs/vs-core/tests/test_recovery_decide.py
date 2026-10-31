@@ -201,13 +201,14 @@ def scripts(draw: st.DrawFn) -> Script:
         running = [step for step in open_steps if step.running]
         idle = [step for step in open_steps if not step.running]
         choices = ["restart", *(["prepare"] if len(build.steps) < 3 else [])]
-        choices += ["start"] if idle else []
+        startable = [step for step in idle if not step.spent]
+        choices += ["start"] if startable else []
         choices += ["interrupt", "finish", "cancel"] if running else []
         match draw(st.sampled_from(choices)):
             case "prepare":
                 build.prepare(draw(st.integers(0, 3)))
             case "start":
-                build.start(draw(st.sampled_from(idle)))
+                build.start(draw(st.sampled_from(startable)))
             case "interrupt":
                 build.interrupt(draw(st.sampled_from(running)), draw(st.sampled_from(Interruption)))
             case "finish":

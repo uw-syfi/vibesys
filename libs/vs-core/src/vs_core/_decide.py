@@ -91,6 +91,18 @@ def decide(state: CoreState, now: float) -> tuple[Action, ...]:
     return actions or (Wait(until=_wake_at(state, open_steps, now)),)
 
 
+def may_start(state: CoreState, tag: RequestId) -> bool:
+    """Whether the run lets the step ``tag`` start an attempt now: the rule would ``Run`` it.
+
+    The fold refuses a start the rule forbids, so the log never holds one. A flight that waited
+    (for a ``clear``) while the run paused or parked asks again before it records its start.
+    """
+    record = state.records.record(tag)
+    if record is None or not is_open(record):
+        return False
+    return isinstance(_of_step(state, record, state.run.now_at), Run)
+
+
 def _apply(
     state: CoreState | None, record: Record, registry: OperationRegistry | None
 ) -> CoreState | None:
@@ -120,7 +132,11 @@ def _apply(
 
 def _start(state: CoreState, message: StepStarted, registry: OperationRegistry | None) -> CoreState:
     tag = RequestId(root=message.tag)
-    deadline = Until(at=message.deadline_at, watches=open_record(state, tag).until.watches)
+    record = open_record(state, tag)
+    if not may_start(state, tag):
+        problem = f"the log starts step {tag.root} in a run that may not start it"
+        raise ValueError(problem)
+    deadline = Until(at=message.deadline_at, watches=record.until.watches)
     return started(state, tag, message.attempt, decode_request(message, registry), deadline)
 
 

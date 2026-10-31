@@ -15,7 +15,7 @@ from vs_core._actions import (
     at_rest,
     interruption_of,
 )
-from vs_core._decide import decide, fold
+from vs_core._decide import decide, fold, may_start
 from vs_core._step_attempts import open_step
 from vs_core._step_log import (
     ended_message,
@@ -64,6 +64,7 @@ __all__ = [
     "input_message",
     "interrupted_message",
     "interruption_of",
+    "may_start",
     "open_step",
     "request_effect",
     "request_interrupt_policy",

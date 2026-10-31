@@ -42,6 +42,7 @@ from vs_core.api.recovery import (
     input_message,
     interrupted_message,
     interruption_of,
+    may_start,
     started_message,
 )
 from vs_proto.api import EpochStarted, Oneof, Record, Timestamp
@@ -294,6 +295,13 @@ def never_idle_draining(loop: Loop) -> None:
     )
 
 
+def may_start_agrees_with_decide(loop: Loop) -> None:
+    """The step a flight asks about may start exactly when the rule would run it."""
+    runs = {a.tag for a in decide(loop.state, loop.clock) if isinstance(a, Run)}
+    for row in loop.state.records.records:
+        assert may_start(loop.state, row.request_id) is (row.request_id in runs), row.request_id
+
+
 def play(loop: Loop, move: Move) -> None:
     name, argument = move
     match name:
@@ -382,6 +390,7 @@ def test_every_action_core_returns_can_be_recorded_and_moves_the_run(
     for move in moves:
         play(loop, move)
         never_idle_draining(loop)
+        may_start_agrees_with_decide(loop)
         loop.tick()
         never_idle_draining(loop)
 
