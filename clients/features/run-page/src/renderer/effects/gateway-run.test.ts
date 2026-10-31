@@ -947,6 +947,7 @@ test('property: writer refreshes never replace a displayed epoch with an older c
                   committedSeq: BigInt(records.length),
                   complete: length === records.length,
                   windowFrom: undefined,
+                  backfill: undefined,
                   failuresBefore: undefined,
                 },
           progress: {phase: 'history', through: BigInt(length), committed: BigInt(records.length)},

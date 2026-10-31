@@ -81,6 +81,7 @@ test('an empty complete response still waits for an epoch', () => {
       nextSeq: 0n,
       committedSeq: 0n,
       windowFrom: undefined,
+      backfill: undefined,
       failuresBefore: undefined,
     }),
   ).toBeUndefined();

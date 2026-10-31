@@ -12,17 +12,19 @@ import {
   type TailResponse,
   TailResponseSchema,
 } from '@vibesys/proto';
+import {isCoreBody} from '@vibesys/run-state/records';
 import type {AbortSignalLike} from '@vibesys/transport';
 import {type Actor, createActor, fromPromise} from 'xstate';
 import {DescriptorCache} from './descriptors.js';
 import {
+  type BackfillInput,
   type FailuresInput,
   type SkeletonLoaderInput,
   skeletonLoaderMachine,
   type TailInput,
 } from './loader-machine.js';
 import {RECORD_WINDOW, type SkeletonLoad} from './loading.js';
-import {checkpointRecords} from './record-facts.js';
+import {checkpointRecords, RECORD_HISTORY_LIMIT} from './record-facts.js';
 
 /** Generic unary/server-stream byte bridge. Both operations must release resources on abort. */
 export interface RunTransport {
@@ -60,6 +62,9 @@ export function skeletonLoaderMachineFor(
       }),
       failures: fromPromise<void, FailuresInput>(({input, signal}) =>
         pageFailures(transport, input, signal),
+      ),
+      backfill: fromPromise<void, BackfillInput>(({input, signal}) =>
+        pageRows(transport, input, signal, publisher),
       ),
       tail: fromPromise<void, TailInput>(async ({input, signal}) => {
         const request = toBinary(
@@ -113,6 +118,14 @@ function recordPublisher(records: RecordsListener) {
           .map(([, bytes]) => bytes),
       );
     },
+    /** Records from before the window; those the checkpoint already published are not repeated. */
+    page(found: readonly StoreRecord[]): void {
+      records(
+        found
+          .filter(record => !checkpoint.has(record.seq))
+          .map(record => toBinary(RecordSchema, record)),
+      );
+    },
     tail(response: TailResponse): void {
       records(
         response.records.filter(bytes => !checkpoint.delete(fromBinary(RecordSchema, bytes).seq)),
@@ -151,7 +164,7 @@ async function pageFailures(
   }
 }
 
-/** The current epoch's records in [start, end), by a Tail cancelled on reaching `end`. */
+/** Error notices of the epoch in [start, end). */
 async function readPage(
   transport: RunTransport,
   input: FailuresInput,
@@ -159,11 +172,60 @@ async function readPage(
   end: bigint,
   signal: AbortSignalLike,
 ): Promise<StoreRecord[]> {
-  const found: StoreRecord[] = [];
-  const request = toBinary(
-    TailRequestSchema,
-    create(TailRequestSchema, {runId: input.runId, fromSeq: start}),
+  const records = await readRange(transport, input.runId, start, end, signal);
+  return records.filter(
+    record =>
+      record.epoch === input.epoch &&
+      record.body.case === 'notice' &&
+      record.body.value.severity >= Severity.ERROR,
   );
+}
+
+/** Pages of a record window each: how far back rows are paged in; at most sixteen raw-record windows. */
+export const BACKFILL_PAGES = 16;
+
+/**
+ * The window of rows the record log keeps counts rows, not records: core's records among those
+ * the first Tail read leave it short. Pages of a window each, newest first, are read from before
+ * it until the rows reach a window, the log's start, or BACKFILL_PAGES pages.
+ */
+async function pageRows(
+  transport: RunTransport,
+  input: BackfillInput,
+  signal: AbortSignalLike,
+  publisher: ReturnType<typeof recordPublisher>,
+): Promise<void> {
+  let {backfill} = input;
+  for (
+    let page = 0;
+    backfill !== undefined &&
+    page < BACKFILL_PAGES &&
+    backfill.before > 0n &&
+    backfill.rows < RECORD_HISTORY_LIMIT;
+    page += 1
+  ) {
+    const start = backfill.before > RECORD_WINDOW ? backfill.before - RECORD_WINDOW : 0n;
+    const found = await readRange(transport, input.runId, start, backfill.before, signal);
+    if (signal.aborted) return;
+    publisher.page(found);
+    backfill = {
+      before: start,
+      rows: backfill.rows + found.filter(record => !isCoreBody(record.body)).length,
+    };
+    input.receive({type: 'backfilled', backfill});
+  }
+}
+
+/** The records in [start, end), by a Tail cancelled on reaching `end`. */
+async function readRange(
+  transport: RunTransport,
+  runId: string,
+  start: bigint,
+  end: bigint,
+  signal: AbortSignalLike,
+): Promise<StoreRecord[]> {
+  const found: StoreRecord[] = [];
+  const request = toBinary(TailRequestSchema, create(TailRequestSchema, {runId, fromSeq: start}));
   for await (const bytes of transport.stream(
     `${SERVICE}${HostService.method.tail.name}`,
     request,
@@ -173,15 +235,7 @@ async function readPage(
     const records = fromBinary(TailResponseSchema, bytes).records.map(item =>
       fromBinary(RecordSchema, item),
     );
-    found.push(
-      ...records.filter(
-        record =>
-          record.seq < end &&
-          record.epoch === input.epoch &&
-          record.body.case === 'notice' &&
-          record.body.value.severity >= Severity.ERROR,
-      ),
-    );
+    found.push(...records.filter(record => record.seq < end));
     if (records.some(record => record.seq >= end)) break;
   }
   return found;
