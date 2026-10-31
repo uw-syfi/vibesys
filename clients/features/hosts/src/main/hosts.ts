@@ -16,6 +16,7 @@ import {
   type RegistrySavedRuns,
   type RegistrySetup,
   type RunWatch,
+  type Subscriptions,
 } from '@vibesys/connection';
 import {
   type HarnessesListReply,
@@ -99,6 +100,12 @@ export interface HostsDeps {
   readonly endLogin?: (id: HostId) => void;
   /** The host's runs, from its gateway's WatchRuns while the host is shown. Cancel reaps the stream. */
   readonly runs: Pick<RunWatch, 'observe' | 'cancel' | 'retry'>;
+  /**
+   * The live subscriptions on a host. Removing a host ends them, and its observers hear
+   * `failed closed`; a host that only leaves the desired set (a panel switch, a cleared checkout)
+   * keeps them, because it is still listed and a mounted window must go on reading it.
+   */
+  readonly subscriptions: Pick<Subscriptions, 'closeHost'>;
   readonly savedRuns?: RegistrySavedRuns;
   /** Digests and the usage window, read through the gateway. */
   readonly runReads?: RegistryRunReads;
@@ -409,6 +416,7 @@ export class Hosts {
         // releasing the mutation fence, while preserving the durability failure for the caller.
         persistenceFailure = {error};
       }
+      if (persistenceFailure === null) this.#deps.subscriptions.closeHost(key);
       this.#checkoutRevisions.set(key, {removed: true});
       this.#watchIntents.delete(key);
       this.#changed();

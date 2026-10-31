@@ -13,7 +13,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/api/v1/subscribe.proto.
  */
 export const file_vibesys_api_v1_subscribe: GenFile = /*@__PURE__*/
-  fileDesc("Ch52aWJlc3lzL2FwaS92MS9zdWJzY3JpYmUucHJvdG8SDnZpYmVzeXMuYXBpLnYxIrABCgtUb3BpY1BvbGljeRISCgpjYWRlbmNlX21zGAEgASgNEhYKDnN0YWxlX2FmdGVyX21zGAIgASgNEh8KDmZpcnN0X2ZyYW1lX21zGAMgASgNQge6SAQqAiAAEhkKCG1heF9rZXlzGAQgASgNQge6SAQqAiAAEhcKD21pbl9pbnRlcnZhbF9tcxgFIAEoDRIgCg9tYXhfdmFsdWVfYnl0ZXMYBiABKA1CB7pIBCoCIAAiXgoQU3Vic2NyaWJlUmVxdWVzdBI6Cg1tYWNoaW5lX3N0YXRzGAEgASgLMiEudmliZXN5cy5hcGkudjEuTWFjaGluZVN0YXRzVG9waWNIAEIOCgV0b3BpYxIFukgCCAEi+QEKEVN1YnNjcmliZVJlc3BvbnNlEisKBWVudHJ5GAEgASgLMhoudmliZXN5cy5hcGkudjEuVG9waWNFbnRyeUgAEh0KB3JlbW92ZWQYAiABKAlCCrpIB3IFEAEogAFIABIoCgZzeW5jZWQYAyABKAsyFi52aWJlc3lzLmFwaS52MS5TeW5jZWRIABIuCgloZWFydGJlYXQYBCABKAsyGS52aWJlc3lzLmFwaS52MS5IZWFydGJlYXRIABIuCgZmYWlsZWQYBSABKAsyHC52aWJlc3lzLmFwaS52MS5Ub3BpY0ZhaWx1cmVIAEIOCgVmcmFtZRIFukgCCAEibAoKVG9waWNFbnRyeRIXCgNrZXkYASABKAlCCrpIB3IFEAEogAESNQoNbWFjaGluZV9zdGF0cxgCIAEoCzIcLnZpYmVzeXMuYXBpLnYxLk1hY2hpbmVTdGF0c0gAQg4KBXZhbHVlEgW6SAIIASIICgZTeW5jZWQiCwoJSGVhcnRiZWF0ImQKDFRvcGljRmFpbHVyZRI6CgRjb2RlGAEgASgOMiAudmliZXN5cy5hcGkudjEuVG9waWNGYWlsdXJlQ29kZUIKukgHggEEEAEgABIYCgZkZXRhaWwYAiABKAlCCLpIBXIDKIAgIikKEU1hY2hpbmVTdGF0c1RvcGljOhTi8xgQCJBOELDqARiYdSABMICAASKfAwoMTWFjaGluZVN0YXRzEjYKCnNhbXBsZWRfYXQYASABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQga6SAPIAQESLQoJY3B1X3N0YXRzGAIgASgLMhgudmliZXN5cy5hcGkudjEuQ3B1U3RhdHNIABIyCg9jcHVfdW5hdmFpbGFibGUYAyABKAsyFy52aWJlc3lzLmFwaS52MS5BYnNlbmNlSAASMwoMbWVtb3J5X3N0YXRzGAQgASgLMhsudmliZXN5cy5hcGkudjEuTWVtb3J5U3RhdHNIARI1ChJtZW1vcnlfdW5hdmFpbGFibGUYBSABKAsyFy52aWJlc3lzLmFwaS52MS5BYnNlbmNlSAESJwoEZ3B1cxgGIAEoCzIXLnZpYmVzeXMuYXBpLnYxLkdwdUxpc3RIAhIyCg9ncHVfdW5hdmFpbGFibGUYByABKAsyFy52aWJlc3lzLmFwaS52MS5BYnNlbmNlSAJCDAoDY3B1EgW6SAIIAUIPCgZtZW1vcnkSBbpIAggBQgwKA2dwdRIFukgCCAEiQAoIQ3B1U3RhdHMSNAoTdXRpbGl6YXRpb25fcGVyY2VudBgBIAEoAUIXukgUEhIZAAAAAAAAWUApAAAAAAAAAAAiswEKC01lbW9yeVN0YXRzEhIKCnVzZWRfYnl0ZXMYASABKAQSHAoLdG90YWxfYnl0ZXMYAiABKARCB7pIBDICIAA6crpIbxptCh5tZW1vcnlfc3RhdHMudXNlZF93aXRoaW5fdG90YWwSJnVzZWRfYnl0ZXMgbXVzdCBub3QgZXhjZWVkIHRvdGFsX2J5dGVzGiN0aGlzLnVzZWRfYnl0ZXMgPD0gdGhpcy50b3RhbF9ieXRlcyI8CgdHcHVMaXN0EjEKBGdwdXMYASADKAsyGC52aWJlc3lzLmFwaS52MS5HcHVTdGF0c0IJukgGkgEDEIACIrkCCghHcHVTdGF0cxINCgVpbmRleBgBIAEoDRIYCgRuYW1lGAIgASgJQgq6SAdyBRABKIACEjQKE3V0aWxpemF0aW9uX3BlcmNlbnQYAyABKAFCF7pIFBISGQAAAAAAAFlAKQAAAAAAAAAAEhkKEW1lbW9yeV91c2VkX2J5dGVzGAQgASgEEiMKEm1lbW9yeV90b3RhbF9ieXRlcxgFIAEoBEIHukgEMgIgADqNAbpIiQEahgEKG2dwdV9zdGF0cy51c2VkX3dpdGhpbl90b3RhbBI0bWVtb3J5X3VzZWRfYnl0ZXMgbXVzdCBub3QgZXhjZWVkIG1lbW9yeV90b3RhbF9ieXRlcxoxdGhpcy5tZW1vcnlfdXNlZF9ieXRlcyA8PSB0aGlzLm1lbW9yeV90b3RhbF9ieXRlcyJECgdBYnNlbmNlEjkKBnJlYXNvbhgBIAEoDjIdLnZpYmVzeXMuYXBpLnYxLkFic2VuY2VSZWFzb25CCrpIB4IBBBABIAAqzAEKEFRvcGljRmFpbHVyZUNvZGUSIgoeVE9QSUNfRkFJTFVSRV9DT0RFX1VOU1BFQ0lGSUVEEAASIgoeVE9QSUNfRkFJTFVSRV9DT0RFX1VOU1VQUE9SVEVEEAESKQolVE9QSUNfRkFJTFVSRV9DT0RFX1JFU09VUkNFX0VYSEFVU1RFRBACEiQKIFRPUElDX0ZBSUxVUkVfQ09ERV9TT1VSQ0VfRkFJTEVEEAMSHwobVE9QSUNfRkFJTFVSRV9DT0RFX0lOVEVSTkFMEAQq1QEKDUFic2VuY2VSZWFzb24SHgoaQUJTRU5DRV9SRUFTT05fVU5TUEVDSUZJRUQQABIhCh1BQlNFTkNFX1JFQVNPTl9UT09MX05PVF9GT1VORBABEh4KGkFCU0VOQ0VfUkVBU09OX1JFQURfRkFJTEVEEAISHAoYQUJTRU5DRV9SRUFTT05fVElNRURfT1VUEAMSHwobQUJTRU5DRV9SRUFTT05fUEFSU0VfRkFJTEVEEAQSIgoeQUJTRU5DRV9SRUFTT05fVE9PTF9VTlZFUklGSUVEEAU6VAoFdG9waWMSHy5nb29nbGUucHJvdG9idWYuTWVzc2FnZU9wdGlvbnMYvI4DIAEoCzIbLnZpYmVzeXMuYXBpLnYxLlRvcGljUG9saWN5UgV0b3BpY0I9WjtnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9nYXRld2F5L2dlbi92aWJlc3lzL2FwaS92MTthcGl2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_descriptor, file_google_protobuf_timestamp]);
+  fileDesc("Ch52aWJlc3lzL2FwaS92MS9zdWJzY3JpYmUucHJvdG8SDnZpYmVzeXMuYXBpLnYxIrABCgtUb3BpY1BvbGljeRISCgpjYWRlbmNlX21zGAEgASgNEhYKDnN0YWxlX2FmdGVyX21zGAIgASgNEh8KDmZpcnN0X2ZyYW1lX21zGAMgASgNQge6SAQqAiAAEhkKCG1heF9rZXlzGAQgASgNQge6SAQqAiAAEhcKD21pbl9pbnRlcnZhbF9tcxgFIAEoDRIgCg9tYXhfdmFsdWVfYnl0ZXMYBiABKA1CB7pIBCoCIAAiSwoPU3Vic2NyaWJlVGltaW5nEh0KDGhlYXJ0YmVhdF9tcxgBIAEoDUIHukgEKgIgABIZCghsZWFzZV9tcxgCIAEoDUIHukgEKgIgACJrChBTdWJzY3JpYmVSZXF1ZXN0EjoKDW1hY2hpbmVfc3RhdHMYASABKAsyIS52aWJlc3lzLmFwaS52MS5NYWNoaW5lU3RhdHNUb3BpY0gAOgvq8xgHCIgnELDqAUIOCgV0b3BpYxIFukgCCAEi+QEKEVN1YnNjcmliZVJlc3BvbnNlEisKBWVudHJ5GAEgASgLMhoudmliZXN5cy5hcGkudjEuVG9waWNFbnRyeUgAEh0KB3JlbW92ZWQYAiABKAlCCrpIB3IFEAEogAFIABIoCgZzeW5jZWQYAyABKAsyFi52aWJlc3lzLmFwaS52MS5TeW5jZWRIABIuCgloZWFydGJlYXQYBCABKAsyGS52aWJlc3lzLmFwaS52MS5IZWFydGJlYXRIABIuCgZmYWlsZWQYBSABKAsyHC52aWJlc3lzLmFwaS52MS5Ub3BpY0ZhaWx1cmVIAEIOCgVmcmFtZRIFukgCCAEibAoKVG9waWNFbnRyeRIXCgNrZXkYASABKAlCCrpIB3IFEAEogAESNQoNbWFjaGluZV9zdGF0cxgCIAEoCzIcLnZpYmVzeXMuYXBpLnYxLk1hY2hpbmVTdGF0c0gAQg4KBXZhbHVlEgW6SAIIASIICgZTeW5jZWQiCwoJSGVhcnRiZWF0ImQKDFRvcGljRmFpbHVyZRI6CgRjb2RlGAEgASgOMiAudmliZXN5cy5hcGkudjEuVG9waWNGYWlsdXJlQ29kZUIKukgHggEEEAEgABIYCgZkZXRhaWwYAiABKAlCCLpIBXIDKIAgIikKEU1hY2hpbmVTdGF0c1RvcGljOhTi8xgQCJBOELDqARiYdSABMICAASKfAwoMTWFjaGluZVN0YXRzEjYKCnNhbXBsZWRfYXQYASABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQga6SAPIAQESLQoJY3B1X3N0YXRzGAIgASgLMhgudmliZXN5cy5hcGkudjEuQ3B1U3RhdHNIABIyCg9jcHVfdW5hdmFpbGFibGUYAyABKAsyFy52aWJlc3lzLmFwaS52MS5BYnNlbmNlSAASMwoMbWVtb3J5X3N0YXRzGAQgASgLMhsudmliZXN5cy5hcGkudjEuTWVtb3J5U3RhdHNIARI1ChJtZW1vcnlfdW5hdmFpbGFibGUYBSABKAsyFy52aWJlc3lzLmFwaS52MS5BYnNlbmNlSAESJwoEZ3B1cxgGIAEoCzIXLnZpYmVzeXMuYXBpLnYxLkdwdUxpc3RIAhIyCg9ncHVfdW5hdmFpbGFibGUYByABKAsyFy52aWJlc3lzLmFwaS52MS5BYnNlbmNlSAJCDAoDY3B1EgW6SAIIAUIPCgZtZW1vcnkSBbpIAggBQgwKA2dwdRIFukgCCAEiQAoIQ3B1U3RhdHMSNAoTdXRpbGl6YXRpb25fcGVyY2VudBgBIAEoAUIXukgUEhIZAAAAAAAAWUApAAAAAAAAAAAiswEKC01lbW9yeVN0YXRzEhIKCnVzZWRfYnl0ZXMYASABKAQSHAoLdG90YWxfYnl0ZXMYAiABKARCB7pIBDICIAA6crpIbxptCh5tZW1vcnlfc3RhdHMudXNlZF93aXRoaW5fdG90YWwSJnVzZWRfYnl0ZXMgbXVzdCBub3QgZXhjZWVkIHRvdGFsX2J5dGVzGiN0aGlzLnVzZWRfYnl0ZXMgPD0gdGhpcy50b3RhbF9ieXRlcyI8CgdHcHVMaXN0EjEKBGdwdXMYASADKAsyGC52aWJlc3lzLmFwaS52MS5HcHVTdGF0c0IJukgGkgEDEIACIrkCCghHcHVTdGF0cxINCgVpbmRleBgBIAEoDRIYCgRuYW1lGAIgASgJQgq6SAdyBRABKIACEjQKE3V0aWxpemF0aW9uX3BlcmNlbnQYAyABKAFCF7pIFBISGQAAAAAAAFlAKQAAAAAAAAAAEhkKEW1lbW9yeV91c2VkX2J5dGVzGAQgASgEEiMKEm1lbW9yeV90b3RhbF9ieXRlcxgFIAEoBEIHukgEMgIgADqNAbpIiQEahgEKG2dwdV9zdGF0cy51c2VkX3dpdGhpbl90b3RhbBI0bWVtb3J5X3VzZWRfYnl0ZXMgbXVzdCBub3QgZXhjZWVkIG1lbW9yeV90b3RhbF9ieXRlcxoxdGhpcy5tZW1vcnlfdXNlZF9ieXRlcyA8PSB0aGlzLm1lbW9yeV90b3RhbF9ieXRlcyJECgdBYnNlbmNlEjkKBnJlYXNvbhgBIAEoDjIdLnZpYmVzeXMuYXBpLnYxLkFic2VuY2VSZWFzb25CCrpIB4IBBBABIAAqzAEKEFRvcGljRmFpbHVyZUNvZGUSIgoeVE9QSUNfRkFJTFVSRV9DT0RFX1VOU1BFQ0lGSUVEEAASIgoeVE9QSUNfRkFJTFVSRV9DT0RFX1VOU1VQUE9SVEVEEAESKQolVE9QSUNfRkFJTFVSRV9DT0RFX1JFU09VUkNFX0VYSEFVU1RFRBACEiQKIFRPUElDX0ZBSUxVUkVfQ09ERV9TT1VSQ0VfRkFJTEVEEAMSHwobVE9QSUNfRkFJTFVSRV9DT0RFX0lOVEVSTkFMEAQq1QEKDUFic2VuY2VSZWFzb24SHgoaQUJTRU5DRV9SRUFTT05fVU5TUEVDSUZJRUQQABIhCh1BQlNFTkNFX1JFQVNPTl9UT09MX05PVF9GT1VORBABEh4KGkFCU0VOQ0VfUkVBU09OX1JFQURfRkFJTEVEEAISHAoYQUJTRU5DRV9SRUFTT05fVElNRURfT1VUEAMSHwobQUJTRU5DRV9SRUFTT05fUEFSU0VfRkFJTEVEEAQSIgoeQUJTRU5DRV9SRUFTT05fVE9PTF9VTlZFUklGSUVEEAU6VAoFdG9waWMSHy5nb29nbGUucHJvdG9idWYuTWVzc2FnZU9wdGlvbnMYvI4DIAEoCzIbLnZpYmVzeXMuYXBpLnYxLlRvcGljUG9saWN5UgV0b3BpYzptChBzdWJzY3JpYmVfdGltaW5nEh8uZ29vZ2xlLnByb3RvYnVmLk1lc3NhZ2VPcHRpb25zGL2OAyABKAsyHy52aWJlc3lzLmFwaS52MS5TdWJzY3JpYmVUaW1pbmdSD3N1YnNjcmliZVRpbWluZ0I9WjtnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9nYXRld2F5L2dlbi92aWJlc3lzL2FwaS92MTthcGl2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_descriptor, file_google_protobuf_timestamp]);
 
 /**
  * One topic's fixed cadence and bounds, projected into generated Go and TypeScript tables.
@@ -73,6 +73,37 @@ export const TopicPolicySchema: GenMessage<TopicPolicy> = /*@__PURE__*/
   messageDesc(file_vibesys_api_v1_subscribe, 0);
 
 /**
+ * How often the gateway speaks and how long a client waits for it, whatever the
+ * topic. The generator projects both into Go and TypeScript tables, so neither
+ * language repeats the numbers.
+ *
+ * @generated from message vibesys.api.v1.SubscribeTiming
+ */
+export type SubscribeTiming = Message<"vibesys.api.v1.SubscribeTiming"> & {
+  /**
+   * The longest gap between frames on a healthy stream.
+   *
+   * @generated from field: uint32 heartbeat_ms = 1;
+   */
+  heartbeatMs: number;
+
+  /**
+   * A client counts a stream with no frame for this long as lost, even when the
+   * transport looks alive. It must exceed heartbeat_ms.
+   *
+   * @generated from field: uint32 lease_ms = 2;
+   */
+  leaseMs: number;
+};
+
+/**
+ * Describes the message vibesys.api.v1.SubscribeTiming.
+ * Use `create(SubscribeTimingSchema)` to create a new message.
+ */
+export const SubscribeTimingSchema: GenMessage<SubscribeTiming> = /*@__PURE__*/
+  messageDesc(file_vibesys_api_v1_subscribe, 1);
+
+/**
  * A closed set of topics. Each stream carries one topic's keyed state.
  *
  * @generated from message vibesys.api.v1.SubscribeRequest
@@ -95,7 +126,7 @@ export type SubscribeRequest = Message<"vibesys.api.v1.SubscribeRequest"> & {
  * Use `create(SubscribeRequestSchema)` to create a new message.
  */
 export const SubscribeRequestSchema: GenMessage<SubscribeRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_api_v1_subscribe, 1);
+  messageDesc(file_vibesys_api_v1_subscribe, 2);
 
 /**
  * Entries and removals until synced form one complete snapshot; later frames
@@ -156,7 +187,7 @@ export type SubscribeResponse = Message<"vibesys.api.v1.SubscribeResponse"> & {
  * Use `create(SubscribeResponseSchema)` to create a new message.
  */
 export const SubscribeResponseSchema: GenMessage<SubscribeResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_api_v1_subscribe, 2);
+  messageDesc(file_vibesys_api_v1_subscribe, 3);
 
 /**
  * CEL cannot pair a value with the request's topic. The gateway's typed registry
@@ -187,7 +218,7 @@ export type TopicEntry = Message<"vibesys.api.v1.TopicEntry"> & {
  * Use `create(TopicEntrySchema)` to create a new message.
  */
 export const TopicEntrySchema: GenMessage<TopicEntry> = /*@__PURE__*/
-  messageDesc(file_vibesys_api_v1_subscribe, 3);
+  messageDesc(file_vibesys_api_v1_subscribe, 4);
 
 /**
  * @generated from message vibesys.api.v1.Synced
@@ -200,7 +231,7 @@ export type Synced = Message<"vibesys.api.v1.Synced"> & {
  * Use `create(SyncedSchema)` to create a new message.
  */
 export const SyncedSchema: GenMessage<Synced> = /*@__PURE__*/
-  messageDesc(file_vibesys_api_v1_subscribe, 4);
+  messageDesc(file_vibesys_api_v1_subscribe, 5);
 
 /**
  * @generated from message vibesys.api.v1.Heartbeat
@@ -213,7 +244,7 @@ export type Heartbeat = Message<"vibesys.api.v1.Heartbeat"> & {
  * Use `create(HeartbeatSchema)` to create a new message.
  */
 export const HeartbeatSchema: GenMessage<Heartbeat> = /*@__PURE__*/
-  messageDesc(file_vibesys_api_v1_subscribe, 5);
+  messageDesc(file_vibesys_api_v1_subscribe, 6);
 
 /**
  * What the producer or the hub refused. A gRPC status means the transport failed
@@ -240,7 +271,7 @@ export type TopicFailure = Message<"vibesys.api.v1.TopicFailure"> & {
  * Use `create(TopicFailureSchema)` to create a new message.
  */
 export const TopicFailureSchema: GenMessage<TopicFailure> = /*@__PURE__*/
-  messageDesc(file_vibesys_api_v1_subscribe, 6);
+  messageDesc(file_vibesys_api_v1_subscribe, 7);
 
 /**
  * CPU, memory and per-GPU figures of the host the gateway runs on, sampled only
@@ -256,7 +287,7 @@ export type MachineStatsTopic = Message<"vibesys.api.v1.MachineStatsTopic"> & {
  * Use `create(MachineStatsTopicSchema)` to create a new message.
  */
 export const MachineStatsTopicSchema: GenMessage<MachineStatsTopic> = /*@__PURE__*/
-  messageDesc(file_vibesys_api_v1_subscribe, 7);
+  messageDesc(file_vibesys_api_v1_subscribe, 8);
 
 /**
  * Each section is present or says why it is not, so "no reading" can never be
@@ -329,7 +360,7 @@ export type MachineStats = Message<"vibesys.api.v1.MachineStats"> & {
  * Use `create(MachineStatsSchema)` to create a new message.
  */
 export const MachineStatsSchema: GenMessage<MachineStats> = /*@__PURE__*/
-  messageDesc(file_vibesys_api_v1_subscribe, 8);
+  messageDesc(file_vibesys_api_v1_subscribe, 9);
 
 /**
  * @generated from message vibesys.api.v1.CpuStats
@@ -348,7 +379,7 @@ export type CpuStats = Message<"vibesys.api.v1.CpuStats"> & {
  * Use `create(CpuStatsSchema)` to create a new message.
  */
 export const CpuStatsSchema: GenMessage<CpuStats> = /*@__PURE__*/
-  messageDesc(file_vibesys_api_v1_subscribe, 9);
+  messageDesc(file_vibesys_api_v1_subscribe, 10);
 
 /**
  * @generated from message vibesys.api.v1.MemoryStats
@@ -370,7 +401,7 @@ export type MemoryStats = Message<"vibesys.api.v1.MemoryStats"> & {
  * Use `create(MemoryStatsSchema)` to create a new message.
  */
 export const MemoryStatsSchema: GenMessage<MemoryStats> = /*@__PURE__*/
-  messageDesc(file_vibesys_api_v1_subscribe, 10);
+  messageDesc(file_vibesys_api_v1_subscribe, 11);
 
 /**
  * @generated from message vibesys.api.v1.GpuList
@@ -387,7 +418,7 @@ export type GpuList = Message<"vibesys.api.v1.GpuList"> & {
  * Use `create(GpuListSchema)` to create a new message.
  */
 export const GpuListSchema: GenMessage<GpuList> = /*@__PURE__*/
-  messageDesc(file_vibesys_api_v1_subscribe, 11);
+  messageDesc(file_vibesys_api_v1_subscribe, 12);
 
 /**
  * @generated from message vibesys.api.v1.GpuStats
@@ -426,7 +457,7 @@ export type GpuStats = Message<"vibesys.api.v1.GpuStats"> & {
  * Use `create(GpuStatsSchema)` to create a new message.
  */
 export const GpuStatsSchema: GenMessage<GpuStats> = /*@__PURE__*/
-  messageDesc(file_vibesys_api_v1_subscribe, 12);
+  messageDesc(file_vibesys_api_v1_subscribe, 13);
 
 /**
  * Why a section has no reading.
@@ -445,7 +476,7 @@ export type Absence = Message<"vibesys.api.v1.Absence"> & {
  * Use `create(AbsenceSchema)` to create a new message.
  */
 export const AbsenceSchema: GenMessage<Absence> = /*@__PURE__*/
-  messageDesc(file_vibesys_api_v1_subscribe, 13);
+  messageDesc(file_vibesys_api_v1_subscribe, 14);
 
 /**
  * @generated from enum vibesys.api.v1.TopicFailureCode
@@ -550,3 +581,11 @@ export const AbsenceReasonSchema: GenEnum<AbsenceReason> = /*@__PURE__*/
  */
 export const topic: GenExtension<MessageOptions, TopicPolicy> = /*@__PURE__*/
   extDesc(file_vibesys_api_v1_subscribe, 0);
+
+/**
+ * Required on SubscribeRequest: the frame timing the hub and every client share.
+ *
+ * @generated from extension: vibesys.api.v1.SubscribeTiming subscribe_timing = 51005;
+ */
+export const subscribe_timing: GenExtension<MessageOptions, SubscribeTiming> = /*@__PURE__*/
+  extDesc(file_vibesys_api_v1_subscribe, 1);

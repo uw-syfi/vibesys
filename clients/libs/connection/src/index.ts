@@ -94,4 +94,9 @@ export {
   runWatch,
   type WatchedRun,
 } from './shell/run-watch.js';
+export {
+  SubscriptionFailed,
+  type SubscriptionStreams,
+  Subscriptions,
+} from './shell/subscriptions.js';
 export type {CheckoutProblem, Phase} from './state/host-connection.js';

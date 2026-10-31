@@ -40,6 +40,9 @@
     },
     {
       "path": "../request-identity/tsconfig.lib.json"
+    },
+    {
+      "path": "../subscription/tsconfig.lib.json"
     }
   ]
 }
