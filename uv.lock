@@ -3231,6 +3231,7 @@ source = { editable = "libs/vs-core" }
 dependencies = [
     { name = "protobuf-py" },
     { name = "pydantic" },
+    { name = "vs-decode" },
     { name = "vs-proto" },
 ]
 
@@ -3238,6 +3239,7 @@ dependencies = [
 requires-dist = [
     { name = "protobuf-py", specifier = "==0.6.0" },
     { name = "pydantic", specifier = ">=2" },
+    { name = "vs-decode", editable = "libs/vs-decode" },
     { name = "vs-proto", editable = "libs/vs-proto" },
 ]
 

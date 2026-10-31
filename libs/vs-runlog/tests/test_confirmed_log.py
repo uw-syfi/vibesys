@@ -89,14 +89,14 @@ def test_what_is_appended_is_what_a_reopened_log_reads(
     with TemporaryDirectory() as directory:
         path = Path(directory) / "run.log"
         with FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads()) as writer:
-            log = ConfirmedLog(writer)
+            log = ConfirmedLog(writer, SimThreads())
             for message, (epoch, clock) in messages:
                 assert isinstance(stamp(message, log, epoch, clock), Appended)
             written = log.records()
         with open_run_log(path) as reader:
             assert tuple(reader) == written
         with FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads()) as reopened:
-            assert ConfirmedLog(reopened).records() == written
+            assert ConfirmedLog(reopened, SimThreads()).records() == written
         assert [record.seq for record in written] == list(range(1, len(messages) + 1))
 
 
@@ -108,7 +108,7 @@ def test_only_the_record_that_follows_the_confirmed_prefix_is_appended(
     with TemporaryDirectory() as directory:
         path = Path(directory) / "run.log"
         with FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads()) as writer:
-            log = ConfirmedLog(writer)
+            log = ConfirmedLog(writer, SimThreads())
             stamp(first, log, 1, 0.0)
             before = log.records()
             stray = Record(
@@ -128,7 +128,7 @@ def test_a_record_that_breaks_its_validation_rules_is_refused_and_leaves_the_log
     with TemporaryDirectory() as directory:
         path = Path(directory) / "run.log"
         with FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads()) as writer:
-            log = ConfirmedLog(writer)
+            log = ConfirmedLog(writer, SimThreads())
             stamp(message, log, 1, 0.0)
             before = log.records()
             with pytest.raises(ValidationError):
@@ -165,7 +165,7 @@ def test_an_uncertain_append_forgets_the_prefix_so_the_log_says_what_happened(
     before: list[CoreMessage], failed: CoreMessage, after: CoreMessage
 ) -> None:
     storage = FlakyRecords()
-    log = ConfirmedLog(storage)
+    log = ConfirmedLog(storage, SimThreads())
     for message in before:
         stamp(message, log, 1, 0.0)
     storage.fail_next_commit = True
@@ -198,7 +198,7 @@ def test_core_and_the_projection_share_one_dense_sequence_in_whatever_order_they
     with TemporaryDirectory() as directory:
         path = Path(directory) / "run.log"
         with FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads()) as writer:
-            log = ConfirmedLog(writer)
+            log = ConfirmedLog(writer, SimThreads())
             shared = SharedWriter(log, writer)
             messages = iter(core)
             for by_core in order:

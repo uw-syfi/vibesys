@@ -26,7 +26,6 @@ from vs_proto.api import (
     StepStarted,
     StrategyAdvanced,
 )
-from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -99,15 +98,15 @@ class ConfirmedLog:
     torn final frame on open; complete corruption fails there, never here.
     """
 
-    def __init__(self, writer: RunLogRecords, threads: Threads | None = None) -> None:
+    def __init__(self, writer: RunLogRecords, threads: Threads) -> None:
         """Append through ``writer``; the prefix is read on first use.
 
         ``threads`` makes the lock the appends of every thread (the loop's, the projection's)
-        go through; the default is the operating system's.
+        go through.
         """
         self._writer = writer
         self._confirmed: list[Record] | None = None
-        self._lock: Lock = (OsThreads() if threads is None else threads).rlock()
+        self._lock: Lock = threads.rlock()
 
     @contextmanager
     def transaction(self) -> Iterator[None]:

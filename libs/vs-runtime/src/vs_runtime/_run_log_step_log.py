@@ -137,26 +137,24 @@ class RunLogStepLog:
         log's own first records; the log goes on writing it, every ``cache_every`` core records
         and when the run comes to rest.
         """
-        folded, keeper = start_fold(cache, log.records(), registry, every=cache_every)
-        opened = cls(
-            log, folded, registry, clock, epoch=epoch, search=search, stamp=stamp, keeper=keeper
-        )
-        if folded is None:
-            if seed is None:
-                message = "a log with no start of the run needs the state to start it from"
-                raise ValueError(message)
-            opened._start(seed)
+        with log.transaction():
+            folded, keeper = start_fold(cache, log.records(), registry, every=cache_every)
+            first = None
+            if folded is None:
+                if seed is None:
+                    message = "a log with no start of the run needs the state to start it from"
+                    raise ValueError(message)
+                first = log.next_record(
+                    seed_message(seed), epoch=epoch, at=stamp(), clock=clock.now()
+                )
+                folded = fold_run((first,), registry=registry)
+            opened = cls(
+                log, folded, registry, clock, epoch=epoch, search=search, stamp=stamp, keeper=keeper
+            )
+            if first is not None:
+                opened._confirm(first)
         opened._settle()
         return opened
-
-    def _start(self, seed: CoreState) -> None:
-        """Append the seed as the first record of the run; the fold begins at it."""
-        with self._log.transaction():
-            record = self._log.next_record(
-                seed_message(seed), epoch=self._epoch, at=self._stamp(), clock=self._clock.now()
-            )
-            self._folded = apply_record(None, record, self._registry)
-            self._confirm(record)
 
     @property
     def state(self) -> CoreState:
