@@ -3,7 +3,9 @@
 Run ``uv run --locked python -m tests.vibesys.fact_import.descriptors`` after bumping
 ``ENVELOPE_SCHEMA_VERSION``: it writes ``envelope-v<N>.json`` for the new version and leaves
 every older entry, and ``retained.json``, untouched. Pin the previous version's file by hash
-in ``test_descriptors.py``.
+in ``test_descriptors.py``. A compatible change keeps the version
+(``scripts/check_persisted_schema_compat.py``): run it again then, and the current version's
+file widens to the new shape, which every older document of that version still satisfies.
 """
 
 from __future__ import annotations

@@ -149,9 +149,11 @@ export type SteerMode = "next_turn" | "standing" | "interrupt";
 export type ControlId1 = string;
 export type Action1 = "pause";
 export type ExpectedEpoch = number | null;
+export type DrainSeconds = number | null;
 export type ControlId2 = string;
 export type Action2 = "pause_now";
 export type ExpectedEpoch1 = number | null;
+export type DrainSeconds1 = number | null;
 export type ControlId3 = string;
 export type Action3 = "resume";
 export type Fallback1 = boolean;
@@ -1308,19 +1310,27 @@ export interface SteerTarget {
 }
 /**
  * Finish turns in flight, release evaluation jobs, save and exit for relaunch.
+ *
+ * ``drain_seconds`` bounds the wait: when it passes, the pause cancels what still runs, as
+ * Pause-now does. Without it the pause waits for its turns' own limits.
  */
 export interface PauseRequest {
   control_id: ControlId1;
   action: Action1;
   expected_epoch?: ExpectedEpoch;
+  drain_seconds?: DrainSeconds;
 }
 /**
  * Cancel unfinished work and exit; saved work remains resumable.
+ *
+ * ``drain_seconds`` is how long requests that cannot be cancelled at once get to finish before
+ * they are interrupted; the run's cleanup bound when absent.
  */
 export interface PauseNowRequest {
   control_id: ControlId2;
   action: Action2;
   expected_epoch?: ExpectedEpoch1;
+  drain_seconds?: DrainSeconds1;
 }
 /**
  * Continue a paused run.
