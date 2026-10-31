@@ -87,8 +87,8 @@ func watch(t *testing.T, p program) []*apiv1.WatchResponse {
 func listing(t *testing.T) hostoperations.HostCall {
 	t.Helper()
 	dispatched, ok := hostoperations.DispatchHostWatch(listingRequest())
-	if !ok || dispatched.Progress <= 0 {
-		t.Fatalf("the listing declares no progress bound: %+v", dispatched)
+	if !ok || dispatched.Progress <= 0 || dispatched.FirstEvent <= dispatched.Progress {
+		t.Fatalf("the listing declares no progress bound, or no first-frame window past it: %+v", dispatched)
 	}
 	return dispatched
 }
@@ -142,7 +142,8 @@ func TestAStreamWithNoLongSilenceIsDeliveredWholeHoweverLongItRuns(t *testing.T)
 	}
 }
 
-// One gap that outlasts the bound ends the stream there, whatever came before it.
+// One gap that outlasts the bound ends the stream there, whatever came before it. The gap before
+// the first frame is held to the first-frame window, every later gap to the progress bound.
 func TestAGapPastTheBoundFailsTheStreamAndKeepsTheFramesBeforeIt(t *testing.T) {
 	dispatched := listing(t)
 	for seed := int64(0); seed < 40; seed++ {
@@ -152,7 +153,11 @@ func TestAGapPastTheBoundFailsTheStreamAndKeepsTheFramesBeforeIt(t *testing.T) {
 		for index := range gaps {
 			gaps[index] = time.Duration(random.Int63n(int64(dispatched.Progress)))
 		}
-		gaps = append(gaps, dispatched.Progress+time.Nanosecond+time.Duration(random.Int63n(int64(time.Minute))), time.Second)
+		window := dispatched.Progress
+		if before == 0 {
+			window = dispatched.FirstEvent
+		}
+		gaps = append(gaps, window+time.Nanosecond+time.Duration(random.Int63n(int64(time.Minute))), time.Second)
 		sent := watch(t, program{gaps: gaps})
 		if len(sent) != before+1 {
 			t.Fatalf("seed %d: %d frames arrived, want the %d before the silence and a failure: %+v", seed, len(sent), before, sent)
@@ -166,7 +171,7 @@ func TestAGapPastTheBoundFailsTheStreamAndKeepsTheFramesBeforeIt(t *testing.T) {
 		if failure.GetCategory() != hostv1.FailureCategory_FAILURE_CATEGORY_DEADLINE_EXCEEDED {
 			t.Fatalf("seed %d: category %v", seed, failure.GetCategory())
 		}
-		if want := silenceMessage("watch", dispatched.CLI, dispatched.Progress); failure.GetMessage() != want {
+		if want := silenceMessage("watch", dispatched.CLI, window); failure.GetMessage() != want {
 			t.Fatalf("seed %d: message %q, want %q", seed, failure.GetMessage(), want)
 		}
 	}
@@ -174,13 +179,28 @@ func TestAGapPastTheBoundFailsTheStreamAndKeepsTheFramesBeforeIt(t *testing.T) {
 
 func TestAStreamSilentBeforeItsFirstFrameFailsNamingTheOperation(t *testing.T) {
 	dispatched := listing(t)
-	sent := watch(t, program{gaps: []time.Duration{dispatched.Progress + time.Nanosecond, time.Second}})
+	sent := watch(t, program{gaps: []time.Duration{dispatched.FirstEvent + time.Nanosecond, time.Second}})
 	if len(sent) != 1 {
 		t.Fatalf("sent %+v", sent)
 	}
 	failure := failureOf(t, sent)
 	if failure.GetCategory() != hostv1.FailureCategory_FAILURE_CATEGORY_DEADLINE_EXCEEDED || !strings.Contains(failure.GetMessage(), dispatched.CLI) {
 		t.Fatalf("failure %v does not name %q", failure, dispatched.CLI)
+	}
+	if want := silenceMessage("watch", dispatched.CLI, dispatched.FirstEvent); failure.GetMessage() != want {
+		t.Fatalf("message %q, want %q", failure.GetMessage(), want)
+	}
+}
+
+// The first frame pays for the process start, the repository open and the branch listing, so a
+// wait past the progress bound that ends inside the first-frame window is not silence.
+func TestTheFirstFrameMayTakeLongerThanTheGapsAfterIt(t *testing.T) {
+	dispatched := listing(t)
+	for _, first := range []time.Duration{dispatched.Progress + time.Nanosecond, dispatched.FirstEvent - time.Nanosecond} {
+		sent := watch(t, program{gaps: []time.Duration{first, time.Second}})
+		if len(sent) != 2 || sent[0].GetFailure() != nil || sent[1].GetFailure() != nil {
+			t.Fatalf("a first frame after %s: sent %+v", first, sent)
+		}
 	}
 }
 

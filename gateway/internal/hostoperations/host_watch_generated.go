@@ -11,7 +11,7 @@ func DispatchHostWatch(request *apiv1.WatchRequest) (HostCall, bool) {
 	case request.GetLogin() != nil:
 		return HostCall{CLI: "login", Deadline: 600000 * time.Millisecond, Executor: 1, Effect: 3, FirstEvent: 25000 * time.Millisecond, Progress: 0 * time.Millisecond}, true
 	case request.GetStreamSavedRuns() != nil:
-		return HostCall{CLI: "stream-saved-runs", Deadline: 600000 * time.Millisecond, Executor: 1, Effect: 1, FirstEvent: 0 * time.Millisecond, Progress: 25000 * time.Millisecond}, true
+		return HostCall{CLI: "stream-saved-runs", Deadline: 600000 * time.Millisecond, Executor: 1, Effect: 1, FirstEvent: 60000 * time.Millisecond, Progress: 25000 * time.Millisecond}, true
 	default:
 		return HostCall{}, false
 	}

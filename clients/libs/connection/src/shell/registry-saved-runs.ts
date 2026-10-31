@@ -11,6 +11,7 @@ import {
   StreamSavedRunsResponseSchema,
 } from '@vibesys/proto';
 import {newRequestId} from '@vibesys/request-identity';
+import {registerAbort} from '@vibesys/transport';
 import {requireCheckout} from './registry-reads.js';
 
 export interface SavedRunsPorts {
@@ -25,9 +26,9 @@ export interface SavedRunsPorts {
 
 export interface RegistrySavedRuns {
   /**
-   * Every run of `project`, newest first. A listing that ends any other way than its completing
-   * frame fails; once a frame has arrived the failure is a `SavedRunsInterrupted`, which keeps the
-   * rows received.
+   * Every run of `project`, newest first. The completing frame ends the listing: the stream is
+   * cancelled and whatever follows it does not matter. A listing that ends any other way fails;
+   * once a frame has arrived the failure is a `SavedRunsInterrupted`, which keeps the rows received.
    */
   list(host: HostId, project: string, signal: AbortSignal): Promise<readonly ListedRun[]>;
 }
@@ -97,14 +98,24 @@ export function registrySavedRuns(ports: SavedRunsPorts): RegistrySavedRuns {
         ),
       );
       const received = new Received(requestId);
+      const stream = new AbortController();
+      const caller = registerAbort(signal, () => stream.abort(signal.reason));
+      if (caller.aborted) stream.abort(signal.reason);
+      let failure: unknown;
       try {
-        await ports.stream(host, bytes, signal, payload => received.accept(payload));
-        if (!received.complete) throw new Error('saved-run listing ended before it was complete');
+        await ports.stream(host, bytes, stream.signal, payload => {
+          received.accept(payload);
+          if (received.complete) stream.abort(new Error('saved-run listing complete'));
+        });
       } catch (error) {
-        if (received.frames === 0) throw error;
-        throw new SavedRunsInterrupted(newestFirst(received.runs.values()), error);
+        failure = error;
+      } finally {
+        caller.detach();
       }
-      return newestFirst(received.runs.values());
+      if (received.complete) return newestFirst(received.runs.values());
+      const cause = failure ?? new Error('saved-run listing ended before it was complete');
+      if (received.frames === 0) throw cause;
+      throw new SavedRunsInterrupted(newestFirst(received.runs.values()), cause);
     },
   };
 }

@@ -86,7 +86,9 @@ type HostOperationsServiceClient interface {
 	Relaunch(ctx context.Context, in *RelaunchRequest, opts ...grpc.CallOption) (*RelaunchResponse, error)
 	ChatMessage(ctx context.Context, in *ChatMessageRequest, opts ...grpc.CallOption) (*ChatMessageResponse, error)
 	// One scan in one process, however many runs the project holds. Only silence fails it:
-	// each frame resets progress_ms, and cap_ms is a hang guard, not a target for the walk.
+	// each frame resets progress_ms, and cap_ms is a hang guard, not a target for the walk. The
+	// first frame has a window of its own, because it pays for the process start, the repository
+	// open and the branch listing before any row exists.
 	StreamSavedRuns(ctx context.Context, in *v1.StreamSavedRunsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[v1.StreamSavedRunsResponse], error)
 	TerminateRun(ctx context.Context, in *v1.TerminateRunRequest, opts ...grpc.CallOption) (*v1.TerminateRunResponse, error)
 	ListAgentLogins(ctx context.Context, in *v1.ListAgentLoginsRequest, opts ...grpc.CallOption) (*v1.ListAgentLoginsResponse, error)
@@ -421,7 +423,9 @@ type HostOperationsServiceServer interface {
 	Relaunch(context.Context, *RelaunchRequest) (*RelaunchResponse, error)
 	ChatMessage(context.Context, *ChatMessageRequest) (*ChatMessageResponse, error)
 	// One scan in one process, however many runs the project holds. Only silence fails it:
-	// each frame resets progress_ms, and cap_ms is a hang guard, not a target for the walk.
+	// each frame resets progress_ms, and cap_ms is a hang guard, not a target for the walk. The
+	// first frame has a window of its own, because it pays for the process start, the repository
+	// open and the branch listing before any row exists.
 	StreamSavedRuns(*v1.StreamSavedRunsRequest, grpc.ServerStreamingServer[v1.StreamSavedRunsResponse]) error
 	TerminateRun(context.Context, *v1.TerminateRunRequest) (*v1.TerminateRunResponse, error)
 	ListAgentLogins(context.Context, *v1.ListAgentLoginsRequest) (*v1.ListAgentLoginsResponse, error)

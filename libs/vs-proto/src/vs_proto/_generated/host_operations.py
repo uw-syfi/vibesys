@@ -479,7 +479,7 @@ StreamSavedRuns = Operation(
     2,
     1,
     2,
-    None,
+    60000,
     25000,
     pb.StreamSavedRunsRequest,
     pb.StreamSavedRunsResponse,

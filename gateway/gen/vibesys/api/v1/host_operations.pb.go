@@ -25,7 +25,7 @@ var File_vibesys_api_v1_host_operations_proto protoreflect.FileDescriptor
 
 const file_vibesys_api_v1_host_operations_proto_rawDesc = "" +
 	"\n" +
-	"$vibesys/api/v1/host_operations.proto\x12\x0evibesys.api.v1\x1a\x1evibesys/api/v1/host_call.proto\x1a'vibesys/host/v1/operation_options.proto\x1a vibesys/host/v1/operations.proto2\x81\x1d\n" +
+	"$vibesys/api/v1/host_operations.proto\x12\x0evibesys.api.v1\x1a\x1evibesys/api/v1/host_call.proto\x1a'vibesys/host/v1/operation_options.proto\x1a vibesys/host/v1/operations.proto2\x85\x1d\n" +
 	"\x15HostOperationsService\x12\x80\x01\n" +
 	"\tListTasks\x12!.vibesys.host.v1.ListTasksRequest\x1a\".vibesys.host.v1.ListTasksResponse\",\xca\xf3\x18(\b\n" +
 	"\x10\x90N\x18\x88' \x01(\x020\x018\x01J\x06\n" +
@@ -73,8 +73,8 @@ const file_vibesys_api_v1_host_operations_proto_rawDesc = "" +
 	"\bRelaunch\x12\x1f.vibesys.api.v1.RelaunchRequest\x1a .vibesys.api.v1.RelaunchResponse\"#\xca\xf3\x18\x1f\b\x15\x10\xb0\xea\x01\x18\x88' \x03(\x030\x018\x01P\x03X\x03b\brelaunch\x12\x8e\x01\n" +
 	"\vChatMessage\x12\".vibesys.api.v1.ChatMessageRequest\x1a#.vibesys.api.v1.ChatMessageResponse\"6\xca\xf3\x182\b\x16\x10\x90N\x18\x88' \x03(\x030\x018\x01J\x06\n" +
 	"\x01\x04\x12\x01\x02J\x06\n" +
-	"\x01\x03\x12\x01\x01P\x04X\x04b\fchat.message\x12\x8d\x01\n" +
-	"\x0fStreamSavedRuns\x12'.vibesys.host.v1.StreamSavedRunsRequest\x1a(.vibesys.host.v1.StreamSavedRunsResponse\"%\xca\xf3\x18!\b+\x10\xc0\xcf$\x18\x88' \x01(\x020\x028\x01J\x06\n" +
+	"\x01\x03\x12\x01\x01P\x04X\x04b\fchat.message\x12\x91\x01\n" +
+	"\x0fStreamSavedRuns\x12'.vibesys.host.v1.StreamSavedRunsRequest\x1a(.vibesys.host.v1.StreamSavedRunsResponse\")\xca\xf3\x18%\b+\x10\xc0\xcf$\x18\x88' \x01(\x020\x028\x01@\xe0\xd4\x03J\x06\n" +
 	"\x01\x01\x12\x01\x01P+X+h\xa8\xc3\x010\x01\x12}\n" +
 	"\fTerminateRun\x12$.vibesys.host.v1.TerminateRunRequest\x1a%.vibesys.host.v1.TerminateRunResponse\" \xca\xf3\x18\x1c\b&\x10\x90N\x18\x88' \x02(\x030\x018\x01J\x06\n" +
 	"\x01\x01\x12\x01\x01P&X&\x12\x9a\x01\n" +

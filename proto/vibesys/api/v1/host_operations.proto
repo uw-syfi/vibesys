@@ -386,7 +386,9 @@ service HostOperationsService {
     };
   }
   // One scan in one process, however many runs the project holds. Only silence fails it:
-  // each frame resets progress_ms, and cap_ms is a hang guard, not a target for the walk.
+  // each frame resets progress_ms, and cap_ms is a hang guard, not a target for the walk. The
+  // first frame has a window of its own, because it pays for the process start, the repository
+  // open and the branch listing before any row exists.
   rpc StreamSavedRuns(vibesys.host.v1.StreamSavedRunsRequest) returns (stream vibesys.host.v1.StreamSavedRunsResponse) {
     option (vibesys.host.v1.operation) = {
       operation_id: 43
@@ -394,6 +396,7 @@ service HostOperationsService {
       response_tag: 43
       cap_ms: 600000
       grace_ms: 5000
+      first_event_ms: 60000
       progress_ms: 25000
       effect: OPERATION_EFFECT_READ
       retry: RETRY_BOUNDED_READ

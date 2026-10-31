@@ -22,7 +22,13 @@ interface Row {
 /** What the host sends: frames of rows, then how the stream ends. */
 interface Script {
   readonly frames: readonly (readonly Row[])[];
-  readonly end: 'complete' | 'silent' | 'failure' | 'break';
+  readonly end:
+    | 'complete'
+    | 'silent'
+    | 'failure'
+    | 'break'
+    | 'complete-then-failure'
+    | 'complete-then-break';
 }
 
 function row(source: Row) {
@@ -42,6 +48,8 @@ function row(source: Row) {
  */
 function host(script: Script) {
   const sent: string[] = [];
+  const streams: AbortSignal[] = [];
+  const completing = script.end === 'complete' || script.end.startsWith('complete-then');
   const reads = registrySavedRuns({
     async checkout() {
       return '/checkout';
@@ -52,6 +60,7 @@ function host(script: Script) {
       if (request.method.case !== 'streamSavedRuns') throw new Error('unexpected method');
       const {requestId, project} = request.method.value;
       sent.push(project);
+      streams.push(signal);
       const frame = (runs: readonly Row[], complete: boolean) =>
         toBinary(
           WatchResponseSchema,
@@ -64,10 +73,10 @@ function host(script: Script) {
         );
       script.frames.forEach((runs, index) => {
         const last = index === script.frames.length - 1;
-        receive(frame(runs, last && script.end === 'complete'));
+        receive(frame(runs, last && completing));
       });
-      if (script.frames.length === 0 && script.end === 'complete') receive(frame([], true));
-      if (script.end === 'failure') {
+      if (script.frames.length === 0 && completing) receive(frame([], true));
+      if (script.end === 'failure' || script.end === 'complete-then-failure') {
         receive(
           toBinary(
             WatchResponseSchema,
@@ -80,10 +89,11 @@ function host(script: Script) {
           ),
         );
       }
-      if (script.end === 'break') throw new Error('gateway closed');
+      if (script.end === 'break' || script.end === 'complete-then-break')
+        throw new Error('gateway closed');
     },
   });
-  return {reads, sent};
+  return {reads, sent, streams};
 }
 
 const listed = (reads: ReturnType<typeof host>['reads']) =>
@@ -145,6 +155,19 @@ test('however the host cuts its frames, a completed listing holds every run once
     fc.asyncProperty(frames, async cut => {
       const {reads} = host({frames: cut, end: 'complete'});
       expect(await listed(reads)).toEqual(expected(cut));
+    }),
+  );
+});
+
+test('the completing frame ends the listing: a fault after it changes nothing and the stream is cancelled', async () => {
+  const ends = fc.constantFrom('complete-then-failure', 'complete-then-break') as fc.Arbitrary<
+    Script['end']
+  >;
+  await fc.assert(
+    fc.asyncProperty(frames, ends, async (cut, end) => {
+      const {reads, streams} = host({frames: cut, end});
+      expect(await listed(reads)).toEqual(expected(cut));
+      expect(streams.map(stream => stream.aborted)).toEqual([true]);
     }),
   );
 });

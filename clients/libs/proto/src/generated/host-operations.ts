@@ -29,7 +29,7 @@ export const operationPolicies = Object.freeze({
   StartRun: Object.freeze({name: 'StartRun', id: 36, requestTag: 36, responseTag: 36, capMs: 60000, graceMs: 5000, totalMs: 65000, effect: 3, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
   TerminateRun: Object.freeze({name: 'TerminateRun', id: 38, requestTag: 38, responseTag: 38, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
   Login: Object.freeze({name: 'Login', id: 40, requestTag: 40, responseTag: 40, capMs: 600000, graceMs: 5000, totalMs: 605000, effect: 3, retry: 3, executor: 1, cardinality: 2, firstEventMs: 25000, progressMs: undefined} as const),
-  StreamSavedRuns: Object.freeze({name: 'StreamSavedRuns', id: 43, requestTag: 43, responseTag: 43, capMs: 600000, graceMs: 5000, totalMs: 605000, effect: 1, retry: 2, executor: 1, cardinality: 2, firstEventMs: undefined, progressMs: 25000} as const),
+  StreamSavedRuns: Object.freeze({name: 'StreamSavedRuns', id: 43, requestTag: 43, responseTag: 43, capMs: 600000, graceMs: 5000, totalMs: 605000, effect: 1, retry: 2, executor: 1, cardinality: 2, firstEventMs: 60000, progressMs: 25000} as const),
 });
 export const hostCallBudgets = Object.freeze({
   postIntent: Object.freeze({capMs: 10000, graceMs: 5000, totalMs: 15000} as const),
@@ -373,5 +373,5 @@ export const mutateBudgets = Object.freeze({
 } as const);
 export const watchBudgets = Object.freeze({
   login: Object.freeze({capMs: 600000, graceMs: 5000, totalMs: 605000, firstEventMs: 25000, progressMs: 0} as const),
-  streamSavedRuns: Object.freeze({capMs: 600000, graceMs: 5000, totalMs: 605000, firstEventMs: 0, progressMs: 25000} as const),
+  streamSavedRuns: Object.freeze({capMs: 600000, graceMs: 5000, totalMs: 605000, firstEventMs: 60000, progressMs: 25000} as const),
 } as const);
