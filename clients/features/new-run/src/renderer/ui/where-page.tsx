@@ -7,8 +7,8 @@
 
 import type {MeasureTarget} from '@vibesys/ipc';
 import {
-  Banner,
   Button,
+  Chip,
   ChoiceTiles,
   Collapsible,
   KeyValue,
@@ -55,25 +55,28 @@ function MachineDetails(props: CardProps): JSX.Element | null {
 }
 
 /** What is wrong with the chosen machine's VibeSys: no checkout, or too old for this app. */
-function MachineNotices(props: CardProps & {readonly chooseCheckout: () => void}): JSX.Element {
+function MachineNotices(
+  props: CardProps & {readonly chooseCheckout: () => void},
+): JSX.Element | null {
   const {context} = props;
   const {machine} = context.form;
   const name = machineLabel(machine);
   const facts = context.facts?.for === machine ? context.facts.value : null;
   const noCheckout = facts?.kind === 'offered' && facts.value.checkout === null;
+  const outdated = missingFeatures(context.helper, machine).length > 0;
+  if (!outdated && !noCheckout) return null;
   return (
-    <>
-      {missingFeatures(context.helper, machine).length > 0 ? (
-        <Banner tone="warn" title={`VibeSys on ${name}`} body={NEEDS_UPDATE} />
+    <Row gap="space-3" align="center" wrap>
+      {outdated ? (
+        <Chip label={NEEDS_UPDATE} tone="warn" dot hint={`VibeSys on ${name} needs an update`} />
       ) : null}
       {noCheckout ? (
-        <Banner
-          tone="warn"
-          title={`No VibeSys checkout on ${name}`}
-          actions={<Button text="Choose it in Machines" press={props.chooseCheckout} />}
-        />
+        <>
+          <Chip label="No checkout" tone="warn" dot hint={`No VibeSys checkout on ${name}`} />
+          <Button text="Choose it in Machines" press={props.chooseCheckout} />
+        </>
       ) : null}
-    </>
+    </Row>
   );
 }
 
@@ -151,9 +154,10 @@ export function WherePage(
         ) : null}
       </Stack>
       {fit === null || fit.kind === 'unknown' ? null : (
-        <Banner
+        <Chip
+          label={fit.kind === 'fits' ? 'Hardware fits' : 'Hardware mismatch'}
           tone={fit.kind === 'fits' ? 'ok' : 'warn'}
-          title={fit.kind === 'fits' ? 'Hardware fits' : 'Hardware mismatch'}
+          dot
           hint={fit.words}
         />
       )}

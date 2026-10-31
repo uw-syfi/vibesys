@@ -20,6 +20,7 @@ from vs_core.api import (
     OperationRegistry,
     OperationSchemaRef,
 )
+from vs_runtime._rerun_policy import check_fits
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -28,6 +29,7 @@ if TYPE_CHECKING:
 
     from vs_core.api import OperationDescriptor, OperationRequest, SearchDeclaration
     from vs_runtime._core_requests import ExecutionContext
+    from vs_runtime._rerun_policy import RerunPolicy
 
 
 @dataclass(frozen=True)
@@ -98,12 +100,21 @@ class OperationEntry:
     owner: OperationOwner | None = None
     refusal: RefusalReason | None = None
     refusal_detail: str = ""
+    rerun: RerunPolicy | None = None
+    """What a rerun of the owned operation may repeat; ``None`` exactly when it has no owner."""
 
     def __post_init__(self) -> None:
-        """Exactly one of owner and refusal, and cancellation only when it is implemented."""
-        kind = self.registration.descriptor.kind
+        """Exactly one of owner and refusal, a rerun policy that fits, cancel only if implemented."""
+        descriptor = self.registration.descriptor
+        kind = descriptor.kind
         if (self.owner is None) == (self.refusal is None):
             raise ContractError(("catalog", kind), "exactly one of owner and refusal is required")
+        if (self.owner is None) != (self.rerun is None):
+            raise ContractError(
+                ("rerun", kind), "an owned operation declares its rerun policy, a refused one none"
+            )
+        if self.rerun is not None:
+            check_fits(kind, descriptor.lifecycle, self.rerun)
         if (
             self.owner is not None
             and self.registration.descriptor.cancel
@@ -112,9 +123,14 @@ class OperationEntry:
             raise ContractError(("catalog", kind, "cancel"), "declared cancel needs owner.cancel")
 
     @classmethod
-    def owned(cls, registration: OperationRegistration, owner: OperationOwner) -> OperationEntry:
-        """Bind an owner implementation to its declared operation."""
-        return cls(registration, owner=owner)
+    def owned(
+        cls, registration: OperationRegistration, owner: OperationOwner, rerun: RerunPolicy
+    ) -> OperationEntry:
+        """Bind an owner implementation to its declared operation, and what a rerun of it may repeat.
+
+        Raises ``ContractError`` naming the operation when *rerun* does not fit its lifecycle.
+        """
+        return cls(registration, owner=owner, rerun=rerun)
 
     @classmethod
     def refused(

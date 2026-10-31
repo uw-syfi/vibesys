@@ -30,8 +30,9 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vs_core.api import CoreState, OperationRegistry, Request, SchemaRef
+    from vs_core.api.recovery import OwnerEvent
     from vs_core.api.testing import Journal
-    from vs_runtime.api.core import ExecutionContext, OwnerEvent
+    from vs_runtime.api.core import ExecutionContext
     from vs_runtime.api.testing import Script
 
 

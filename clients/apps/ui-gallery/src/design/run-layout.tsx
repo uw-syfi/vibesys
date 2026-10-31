@@ -9,7 +9,6 @@
  */
 import {
   AppFrame,
-  Banner,
   Breadcrumb,
   Button,
   Chart,
@@ -345,9 +344,6 @@ function Header(props: {readonly flags: DesignFlags; readonly compactHero: boole
           </Row>
         </Row>
       </Row>
-      {ended ? (
-        <Banner tone="ok" title="Adopted mpmc-ring-padding" body="vibesys-runs/20261016-211736" />
-      ) : null}
       <Scrubber
         label="Run time"
         value={ended ? 22 : 14}

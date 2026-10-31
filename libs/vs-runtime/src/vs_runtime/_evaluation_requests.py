@@ -32,8 +32,6 @@ from __future__ import annotations
 from contextlib import suppress
 from typing import TYPE_CHECKING, assert_never
 
-from pydantic import BaseModel, ConfigDict, Field
-
 from vs_core.api import (
     CancelOwnedJob,
     CloseAttemptScope,
@@ -45,7 +43,6 @@ from vs_core.api import (
     InspectOwnedJob,
     JobObserved,
     MeasurementFailure,
-    MeasurementPlan,
     MeasurementSubmissionObserved,
     Observation,
     ObservationStatus,
@@ -88,6 +85,7 @@ from vs_runtime._evaluation_jobs import (
     measurement_request,
 )
 from vs_runtime._evidence_ledger import ReceiptEvidenceLedger
+from vs_runtime._job_registry import JobRecord, JobRegistry, scope_key
 from vs_runtime._measurement_progress import (
     IgnoreMeasurement,
     MeasurementDecisions,
@@ -102,62 +100,21 @@ from vs_runtime._observation_factory import (
 from vs_runtime._receipt_store import Conflict, Declined, Performed, Replayed, owner_key
 
 if TYPE_CHECKING:
+    from vs_core.api.recovery import OwnerEvent
     from vs_evaluation.api import PollingEvaluationExecutor
     from vs_runtime._core_identity import CoreRequestId
-    from vs_runtime._core_requests import EvaluationRoleRequest, OwnerEvent
+    from vs_runtime._core_requests import EvaluationRoleRequest
     from vs_runtime._receipt_store import ReceiptStore, Settled, Transient
     from vs_runtime._run_control import RunControlChannel
 
-_JOBS = "evaluation-jobs"
 _FENCED = "scope episode is closed or the job was cancelled"
-_SCOPES = "evaluation-scopes"
 _UNREADABLE_RUN = "the run this measurement reuses can no longer be read as ended"
-
-
-class JobRecord(BaseModel):
-    """A registered job: the intent receipt written before the effect."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-    handle_id: str = Field(min_length=1)
-    request_id: str = Field(min_length=1)
-    payload_digest: str = Field(min_length=1)
-    scope: Scope
-    admission_id: DecisionId | None = None
-    plan: MeasurementPlan
-    reuses: RequestId | None = None
-    """The submission whose ended job this one reads, when it reuses an earlier run."""
-    parked: bool = False
-    relaunch: int = Field(default=0, ge=0)
-
-    @property
-    def executor_handle(self) -> str:
-        """The executor job this record's observations read."""
-        return (
-            self.handle_id if self.relaunch == 0 else f"{self.handle_id}-relaunch-{self.relaunch}"
-        )
-
-
-class ScopeJobs(BaseModel):
-    """The jobs registered under one admission episode of one scope.
-
-    Whether the episode closed is its effect fence's to say (``scope_fence``).
-    """
-
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-    scope: Scope
-    admission_id: DecisionId | None = None
-    handles: tuple[str, ...] = ()
 
 
 def _identity(request: RequestBase) -> RequestId:
     if request.request_id is None:
         raise ContractError(("request_id",), "canonical identity required")
     return request.request_id
-
-
-def _scope_key(scope: Scope, admission_id: DecisionId | None) -> str:
-    episode = "" if admission_id is None else admission_id.root
-    return f"{scope.owner.kind}:{scope.owner.root}:{scope.generation}:{episode}"
 
 
 def _close_diagnostic(*, released: bool, submitting: bool) -> str:
@@ -170,7 +127,7 @@ def _close_diagnostic(*, released: bool, submitting: bool) -> str:
 
 def scope_fence(scope: Scope, admission_id: DecisionId | None) -> FenceKey:
     """The fence of one scope episode's jobs: submissions enter it, closing the scope closes it."""
-    return FenceKey(FenceKind.SCOPE_EPISODE, _scope_key(scope, admission_id))
+    return FenceKey(FenceKind.SCOPE_EPISODE, scope_key(scope, admission_id))
 
 
 def job_fence(scope: Scope, admission_id: DecisionId | None, handle: str) -> FenceKey:
@@ -178,7 +135,7 @@ def job_fence(scope: Scope, admission_id: DecisionId | None, handle: str) -> Fen
 
     Keyed by the episode too, so a cancel from another scope closes only a fence of its own.
     """
-    return FenceKey(FenceKind.MEASUREMENT_JOB, f"{_scope_key(scope, admission_id)}/{handle}")
+    return FenceKey(FenceKind.MEASUREMENT_JOB, f"{scope_key(scope, admission_id)}/{handle}")
 
 
 def _fences_of(request: RequestBase, handle: str) -> tuple[FenceKey, FenceKey]:
@@ -212,6 +169,7 @@ class MeasurementRequests:
         self._progress = MeasurementProgress(observer or IgnoreMeasurement())
         self._observations = ObservationFactory(store)
         self._fences = EffectFences(store)
+        self._registry = JobRegistry(store)
 
     async def execute(
         self, request: EvaluationRoleRequest, context: ExecutionContext
@@ -219,10 +177,8 @@ class MeasurementRequests:
         """Run one authorized request at most once under its canonical identity."""
         request_id = _identity(request)
 
-        async def perform(
-            *, resumed: bool
-        ) -> Settled[ExecutionResult] | Transient[ExecutionResult]:
-            return settle(await self._perform(request, context, resumed=resumed))
+        async def perform(*, repeat: bool) -> Settled[ExecutionResult] | Transient[ExecutionResult]:
+            return settle(await self._perform(request, context, repeat=repeat))
 
         execution = await self._store.run_once(
             request_id.root,
@@ -250,10 +206,10 @@ class MeasurementRequests:
                 assert_never(execution)
 
     async def _perform(
-        self, request: EvaluationRoleRequest, context: ExecutionContext, *, resumed: bool
+        self, request: EvaluationRoleRequest, context: ExecutionContext, *, repeat: bool
     ) -> ExecutionResult:
-        """The effect of one request. ``resumed`` is moot: every step first polls the job."""
-        del resumed  # the job record and a poll tell what an earlier host already did
+        """The effect of one request. ``repeat`` is moot: every step first polls the job."""
+        del repeat  # the job record and a poll tell what an earlier attempt already did
         match request:
             case SubmitMeasurement():
                 return await self._submit(request, context)
@@ -273,7 +229,7 @@ class MeasurementRequests:
     # ledger
 
     def _record(self, handle_id: str) -> JobRecord | None:
-        return self._store.load(_JOBS, "job", handle_id, JobRecord)
+        return self._registry.record(handle_id)
 
     def _executor_handle(self, record: JobRecord) -> str:
         """Resolve reuse through the source's durable physical identity, including relaunches."""
@@ -294,17 +250,6 @@ class MeasurementRequests:
         record = self._record(resource.root)
         return record if record is not None and record.scope == request.scope else None
 
-    def _register(self, scope: Scope, admission_id: DecisionId | None, handle: str) -> None:
-        """Add *handle* to its scope episode's index; called inside the episode's open fence."""
-
-        def decide(stored: ScopeJobs | None) -> tuple[ScopeJobs | None, None]:
-            index = stored or ScopeJobs(scope=scope, admission_id=admission_id)
-            if handle in index.handles:
-                return None, None
-            return index.model_copy(update={"handles": (*index.handles, handle)}), None
-
-        self._store.modify(_SCOPES, "scope", _scope_key(scope, admission_id), ScopeJobs, decide)
-
     def _forget(self, scope: Scope, admission_id: DecisionId | None, handle: str) -> None:
         """Drop *handle* from its scope's index: its submission was refused, so it never was a job.
 
@@ -312,21 +257,13 @@ class MeasurementRequests:
         for one it never heard of. An episode that already closed has listed the handle, so
         its index is left as the close read it.
         """
-
-        def decide(stored: ScopeJobs | None) -> tuple[ScopeJobs | None, None]:
-            if stored is None or handle not in stored.handles:
-                return None, None
-            kept = tuple(item for item in stored.handles if item != handle)
-            return stored.model_copy(update={"handles": kept}), None
-
         with self._store.exclusive():
             if self._fences.is_closed(scope_fence(scope, admission_id)):
                 return
-            self._store.modify(_SCOPES, "scope", _scope_key(scope, admission_id), ScopeJobs, decide)
+            self._registry.unindex(scope, admission_id, handle)
 
     def _handles(self, scope: Scope, admission_id: DecisionId | None) -> tuple[str, ...]:
-        index = self._store.load(_SCOPES, "scope", _scope_key(scope, admission_id), ScopeJobs)
-        return () if index is None else index.handles
+        return self._registry.handles(scope, admission_id)
 
     def _enter(
         self, fences: tuple[FenceKey, ...], by: CoreRequestId, context: ExecutionContext
@@ -574,17 +511,8 @@ class MeasurementRequests:
             admitted = self._enter(fences, by, context)
             record = self._record(handle)
             if record is None and admitted:
-                self._register(request.scope, request.admission_id, handle)
-                record = JobRecord(
-                    handle_id=handle,
-                    request_id=request_id.root,
-                    payload_digest=context.payload_digest,
-                    scope=request.scope,
-                    admission_id=request.admission_id,
-                    plan=request.plan,
-                    reuses=request.reuses,
-                )
-                self._store.record_once(_JOBS, "job", handle, record)
+                record = JobRecord.of(request, request_id, handle, context.payload_digest)
+                self._registry.register(record)
         if record is None:
             # The scope closed, or the job was cancelled, before this submission registered.
             return self._rejected(request, context, _FENCED)
@@ -849,7 +777,7 @@ class MeasurementRequests:
             with suppress(ExecutorCancellationUnconfirmedError):
                 await self._jobs.cancel(record.executor_handle)
         record = record.model_copy(update={"parked": True})
-        self._store.replace(_JOBS, "job", record.handle_id, record)
+        self._registry.replace(record)
         return record
 
     async def _relaunch(
@@ -880,7 +808,7 @@ class MeasurementRequests:
                     record = record.model_copy(
                         update={"parked": False, "relaunch": record.relaunch + 1}
                     )
-                    self._store.replace(_JOBS, "job", record.handle_id, record)
+                    self._registry.replace(record)
             if (await self._poll(record.executor_handle)).phase is PollPhase.UNSUBMITTED:
                 problem = self._authority_problem(request, context)
                 if problem is not None:

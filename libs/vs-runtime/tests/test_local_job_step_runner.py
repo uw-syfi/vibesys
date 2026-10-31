@@ -16,11 +16,15 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import pytest
+
 from vs_core.api import ObservationStatus, RequestId
 from vs_core.api.recovery import Cancelled, CancelReason, Finished
 from vs_evaluation.api import ResourceRequirements
 from vs_runtime.api import AccuracyEvaluation, PollingEvaluationExecutor
+from vs_runtime.api.core import JobRegistry
 from vs_runtime.api.evaluation_step_runners import LocalJobStepRunner, ProcessStageWorkReaper
+from vs_runtime.api.executor_contexts import receipt_store_in
 from vs_runtime.api.slurm_evaluation_stack import plan, submission
 from vs_runtime.api.stage_marks import handle_of_life, is_stage_mark_of, stage_mark
 from vs_runtime.api.step_runner import CancelSignal, Cleared
@@ -126,7 +130,7 @@ class HostEvaluation(FakeEvaluation):
 class World:
     """One host: an evaluation executor over Fakes, a reaper over its process table, the runner."""
 
-    def __init__(self, shows: Shows = Shows.ENVIRONMENT) -> None:
+    def __init__(self, root: Path, shows: Shows = Shows.ENVIRONMENT) -> None:
         self.clock = VirtualClock(1000.0)
         self.table = FakeProcessTable(shows)
         self.evaluation = HostEvaluation(default_accuracy=AccuracyEvaluation(executed=True))
@@ -138,8 +142,9 @@ class World:
         )
         self.blocking = DetachedBlockingRunner()
         self.reaper = ProcessStageWorkReaper(self.table, RUN, self.blocking)
+        self.registry = JobRegistry(receipt_store_in(root))
         self.runner = LocalJobStepRunner(
-            self.executor, self.reaper, clock=self.clock, poll_interval_s=POLL_S
+            self.executor, self.reaper, self.registry, clock=self.clock, poll_interval_s=POLL_S
         )
         self.snapshot = self.run(self.workspaces.root.snapshot("candidate"))
 
@@ -188,8 +193,12 @@ class LocalJobContract(StepRunnerContract):
 
     shows = Shows.ENVIRONMENT
 
+    @pytest.fixture(autouse=True)
+    def _root(self, tmp_path: Path) -> None:
+        self.root = tmp_path
+
     def step_runner_under_test(self) -> StepRunnerUnderTest:
-        world = World(self.shows)
+        world = World(self.root, self.shows)
         return StepRunnerUnderTest(
             runner=world.runner,
             run=world.run,
@@ -209,10 +218,10 @@ class TestLocalJobStepRunnerOnMacOS(LocalJobContract):
     shows = Shows.LEADER_ARGUMENTS
 
 
-def test_a_killed_attempt_is_cancelled_by_clear_and_the_next_attempt_runs_a_new_evaluation() -> (
-    None
-):
-    world = World()
+def test_a_killed_attempt_is_cancelled_by_clear_and_the_next_attempt_runs_a_new_evaluation(
+    tmp_path: Path,
+) -> None:
+    world = World(tmp_path)
     tag = tag_of("killed")
 
     async def main() -> None:
@@ -233,8 +242,8 @@ def test_a_killed_attempt_is_cancelled_by_clear_and_the_next_attempt_runs_a_new_
     assert len(world.evaluation.accuracy_calls) == 1
 
 
-def test_clear_reaps_the_stage_work_a_dead_process_left_by_the_tag_alone() -> None:
-    world = World()
+def test_clear_reaps_the_stage_work_a_dead_process_left_by_the_tag_alone(tmp_path: Path) -> None:
+    world = World(tmp_path)
     left, other = tag_of("left"), tag_of("other")
     ended = world.table.start_stage(STEP_TAG_ENV, stage_mark(RUN, handle_of_life(left, 0)))
     world.table.start_stage(STEP_TAG_ENV, stage_mark(RUN, handle_of_life(other, 0)))
@@ -248,8 +257,10 @@ def test_clear_reaps_the_stage_work_a_dead_process_left_by_the_tag_alone() -> No
     assert world.table.killed == [ended]
 
 
-def test_a_cancelled_step_returns_cancelled_and_the_same_tag_then_runs_clean() -> None:
-    world = World()
+def test_a_cancelled_step_returns_cancelled_and_the_same_tag_then_runs_clean(
+    tmp_path: Path,
+) -> None:
+    world = World(tmp_path)
     tag = tag_of("paused")
 
     async def main() -> None:
@@ -271,8 +282,8 @@ def test_a_cancelled_step_returns_cancelled_and_the_same_tag_then_runs_clean() -
     world.run(main())
 
 
-def test_a_step_that_reuses_a_finished_submission_launches_nothing() -> None:
-    world = World()
+def test_a_step_that_reuses_a_finished_submission_launches_nothing(tmp_path: Path) -> None:
+    world = World(tmp_path)
     source, reusing = tag_of("source"), tag_of("reusing")
 
     async def main() -> None:
@@ -290,8 +301,8 @@ def test_a_step_that_reuses_a_finished_submission_launches_nothing() -> None:
     assert len(world.evaluation.accuracy_calls) == 1
 
 
-def test_the_evaluation_opens_its_candidate_under_the_mark_of_its_handle() -> None:
-    world = World()
+def test_the_evaluation_opens_its_candidate_under_the_mark_of_its_handle(tmp_path: Path) -> None:
+    world = World(tmp_path)
     tag = tag_of("marked")
 
     async def main() -> None:

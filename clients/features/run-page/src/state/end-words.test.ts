@@ -3,7 +3,7 @@ import type {RunOverview, Span} from '@vibesys/contracts';
 import type {HostRun, RunEnd} from '@vibesys/hosts';
 import {EMPTY_TRACE, foldTrace} from '@vibesys/run-state/trace';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
-import {adoptedCandidate, endReason, unclipped} from './end-words.js';
+import {adoptedCandidate, briefFailure, endReason, unclipped} from './end-words.js';
 import {startHistory} from './history-pager.js';
 import {EMPTY_RUN_FOLD, traceLog} from './live.js';
 import {type RunPageState, runPageInitial} from './run-page.js';
@@ -284,5 +284,51 @@ describe('unclipped', () => {
     expect(unclipped('stopped by you', 'something else')).toBe('stopped by you');
     expect(unclipped(`${'a'.repeat(199)}\u2026`, 'b'.repeat(300))).toBe(`${'a'.repeat(199)}\u2026`);
     expect(unclipped(`${'a'.repeat(199)}\u2026`, null)).toBe(`${'a'.repeat(199)}\u2026`);
+  });
+});
+
+describe('the few words of a failure beside the status', () => {
+  const ROOT_ONLY: readonly Span[] = [ROOT];
+
+  test('only a failure’s own message is worded there; every other ending the status says', () => {
+    for (const outcome of OUTCOMES) {
+      for (const reason of CORE_REASONS) {
+        const brief = endedView(ended(outcome, reason, ROOT_ONLY))?.brief;
+        const own = outcome === 'failed' || outcome === 'force_stopped';
+        expect(brief === null, `${outcome} · ${reason}`).toBe(!own);
+      }
+    }
+  });
+
+  test('property: it is one short clause, whatever the message', () => {
+    for (const seed of SEEDS) {
+      const random = new Seeded(seed);
+      const word = () => 'abcdefghij'.slice(0, 1 + random.int(10));
+      const words = Array.from({length: random.int(40)}, word);
+      const message = `${words.join(' ')}${random.int(2) === 0 ? '\nsecond line' : ''}`;
+      const brief = briefFailure(message);
+      if (brief === null) continue;
+      expect(brief.length, `seed ${seed}`).toBeLessThanOrEqual(61);
+      expect(brief, `seed ${seed}`).not.toContain('\n');
+      expect(brief, `seed ${seed}`).toBe(brief.trim());
+      expect(brief.charAt(0), `seed ${seed}`).toBe(brief.charAt(0).toUpperCase());
+    }
+  });
+
+  test('leaves out an exception’s name and the detail after the first clause', () => {
+    expect(
+      briefFailure('NestedRepositoryError: host Git refuses a work tree: nested repositories at x'),
+    ).toBe('Host Git refuses a work tree');
+    expect(briefFailure('Benchmark timed out after 300 s. Retried twice.')).toBe(
+      'Benchmark timed out after 300 s.',
+    );
+    expect(briefFailure('')).toBeNull();
+    expect(briefFailure('Error: ')).toBeNull();
+  });
+
+  test('cuts a long clause at a word, and a single long word where it stands', () => {
+    const long = Array.from({length: 30}, () => 'word').join(' ');
+    expect(briefFailure(long)).toMatch(/^Word( word)+…$/);
+    expect(briefFailure('x'.repeat(100))).toBe(`${'X'}${'x'.repeat(59)}…`);
   });
 });

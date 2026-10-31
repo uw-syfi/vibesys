@@ -46,7 +46,8 @@ from vs_runtime._semantic_events import PUBLISHED_FACTS, Published
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from vs_runtime._core_requests import ExecutionContext, OwnerEvent
+    from vs_core.api.recovery import OwnerEvent
+    from vs_runtime._core_requests import ExecutionContext
     from vs_runtime._observation_factory import ObservationFactory
     from vs_runtime._receipt_store import ReceiptStore
 

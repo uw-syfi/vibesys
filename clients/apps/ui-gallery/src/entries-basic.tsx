@@ -1,7 +1,6 @@
 import {VIBESYS_WORDMARK} from '@vibesys/feature-new-run/renderer';
 import {
   ActionPanel,
-  Banner,
   BRAND_MARK_NAMES,
   BrandMark,
   Button,
@@ -79,7 +78,7 @@ function Segments(props: {readonly size: 'sm' | 'md'}): JSX.Element {
       change={setValue}
       options={[
         {value: 'recent', label: 'Recent'},
-        {value: 'folder', label: 'Folder'},
+        {value: 'folder', label: 'Folder', mark: {tone: 'warn', label: 'Needs a look'}},
         {value: 'example', label: 'Example'},
       ]}
     />
@@ -582,31 +581,6 @@ export const BASIC_ENTRIES = {
             {id: 'runs', label: 'Loading runs', state: 'pending', position: '3/3'},
           ]}
           retry={() => undefined}
-        />
-      </Stack>
-    ),
-  },
-  Banner: {
-    render: () => (
-      <Stack>
-        <Banner title="A neutral message." body="With a body that explains it." />
-        <Banner tone="ok" title="It finished." />
-        <Banner
-          tone="warn"
-          title="This folder is inside another Git repository."
-          body="Each one is kept in its own repository."
-          actions={<Button text="Copy it out" press={() => undefined} />}
-        />
-        <Banner
-          tone="failed"
-          title="It stopped with an error."
-          body="The log has the details."
-          actions={
-            <>
-              <Button variant="primary" text="Try again" press={() => undefined} />
-              <Button variant="quiet" text="Dismiss" press={() => undefined} />
-            </>
-          }
         />
       </Stack>
     ),
