@@ -12,8 +12,8 @@ checkout this module belongs to. Its imports stay within the light allowlist
 ``tests/architecture/test_light_entrypoints.py`` enforces.
 
 The helper builds every collaborator before it answers ``hello``, so it imports them statically:
-what it loads is what the module ceiling in ``tests/e2e/test_host_helper.py`` counts. Only what
-no ``hello`` needs (the agent library's harness list, the example machinery) is a lazy module.
+what it loads is what ``tests/e2e/test_host_helper.py`` holds to its forbidden module groups. Only
+what no ``hello`` needs (the agent library's harness list, the example machinery) is a lazy module.
 A read builds the same facts one at a time (``entrypoints.host_facts``);
 ``tests/entrypoints/test_host_facts.py`` holds the two wirings to each other.
 """
@@ -192,21 +192,30 @@ def local_timezone(now: float) -> tzinfo:
     return UTC if timezone is None else timezone
 
 
-def main() -> None:
-    """Serve this process's stdin and stdout as one channel, then exit with its status."""
+def serve_process() -> int:
+    """Serve this process's stdin and stdout as one channel; the exit status it ends with.
+
+    ``main`` leaves the process with it. A probe that reports what the helper loaded calls this
+    instead, so it can read ``sys.modules`` once the channel has ended.
+    """
     threads = OsThreads()
     try:
         host = real_host(os.environ, os.getuid(), threads)
     except PermissionError as exc:
         sys.stderr.write(f"vibesys-host-helper: {exc}\n")
         raise SystemExit(1) from exc
-    status = serve_channel(
+    return serve_channel(
         host=host,
         source=FdSource(_STDIN_FD),
         output=FdSink(_STDOUT_FD),
         errors=FdSink(_STDERR_FD),
         threads=threads,
     )
+
+
+def main() -> None:
+    """Serve this process's stdin and stdout as one channel, then exit with its status."""
+    status = serve_process()
     # A non-start request worker, a watch, or the input pump may still be blocked on the
     # registry or stdin. Starts and their cleanup settle before serve_channel returns.
     # The channel's outcome is decided, so leave at once.

@@ -7,10 +7,19 @@ from this checkout. Start-up time is reported against the 300 ms budget as a tes
 property and on stdout, never asserted: a test's result must not depend on timing.
 The deterministic tests of the helper are ``tests/server/test_host_helper.py`` and
 ``tests/conformance/test_host_helper.py``.
+
+What a ``hello`` may load is stated by name, in groups of modules (``tests/support/light_imports.py``
+for the heavy layers, ``_UNUSED_BY_HELLO`` below for the helper's own): a module of any group
+fails the test with the module and its group, whatever else the helper loads. The probe reads
+``sys.modules`` in the helper process, so it sees a module loaded through ``importlib`` (a
+``lazy_module`` handle, Pydantic's and ``vs_sim``'s on-use submodules) that ``-X importtime`` does
+not report. The total stays as a loose backstop for what no group names; it is not a budget a pull
+request spends, and it is never raised to make a check pass.
 """
 
 from __future__ import annotations
 
+import ast
 import itertools
 import json
 import os
@@ -20,12 +29,13 @@ import subprocess
 import sys
 import threading
 import time
+from enum import StrEnum
 from typing import IO, TYPE_CHECKING, Any, cast
 
 import pytest
 from tests.conformance.replay import load_scenario, run_steps, runner_group
 from tests.server.support import DEADLOCK_GUARD_S, build_server_parts
-from tests.support.light_imports import BUDGET_MS, is_heavy, loaded_modules
+from tests.support.light_imports import BUDGET_MS, HEAVY, describe, missing_modules, offenders
 
 from server.host_api import InstanceStatus, LiveInstanceRecord, RunPhase, RunStatus
 from server.registry import FileInstanceStore, instance_root
@@ -51,36 +61,77 @@ _SCENARIOS = tuple(
         )
     )
 )
-# vs_decode (the bounded JSON decode lib vs_project reads state through) adds 3 modules;
-# vs_project._workspace_tree (GitTracker restores preserved memory by descriptor) adds 1;
-# vs_project._nested_repositories (host Git refuses a work tree holding a nested repository)
-# adds 1.
-# server.host_helper_logs (the logs handlers: chunk cuts and the long poll) adds 1; the
-# vs_logs reader itself loads on the first logs request, never for hello (asserted below).
-# vs_redaction, its api, and its pattern/stream implementations add 4 light,
-# standard-library-only modules so every host diagnostic boundary uses the same bounded credential
-# matcher and stream redactor instead of retaining a second implementation.
-# The reservable worker implementation adds the standard-library-only ``queue`` and ``_queue``
-# modules so a refused native worker start can be reported before relay I/O is committed.
-# server.host_envelope and server.host_run_summary (the helper's request and reply bases and the
-# runs.summary messages, split out of server.host_api) add 2; the summary's fold and cache load on
-# the first runs.summary, never for hello (asserted below).
-# server.host_harness (the harness choice and its display names, split from host_api to hold its
-# file-length ceiling) adds 1.
-# server.run_digest (the run digest fold) and server.host_machine_facts (the machine facts
-# moved out of host_api) add 2 more; the summary's fold and cache load on the first request.
-# server.host_run_events (the run history's messages, split out of host_api) and
-# server.span_index (the journal's span index, read by the span and tail requests) add 2 light
-# modules: the standard library and Pydantic only.
-# vs_project._operator_key (the key every control-socket connection presents first) adds 1,
-# loading neither hmac nor secrets; main already loaded 355 before it.
-# server.host_run_dashboard (the run tile's contracts, split from host_api to hold its file-length
-# ceiling) adds 1: Pydantic and the standard library only.
-# server.host_run_reader (the run.reader messages) and server.host_helper_readers (finding or
-# starting the read-only server Chat reads an ended run through) add 2: the standard library,
-# Pydantic and light server modules only.
-_MODULE_CEILING = 359
-"""The most modules a helper may load to answer ``hello``; lower it as the helper sheds imports."""
+_PROBE = """
+import os
+import sys
+
+started = set(sys.modules)
+from entrypoints.host_helper import serve_process
+
+status = serve_process()
+sys.stderr.write(repr({"started": sorted(started), "modules": sorted(sys.modules)}) + "\\n")
+sys.stderr.flush()
+os._exit(status)
+"""
+"""The helper as ``python -m entrypoints.host_helper`` runs it, then, on stderr, the modules loaded.
+
+``started`` is what the interpreter had before the helper imported anything (the standard library
+start-up, the virtual environment's own ``.pth`` hooks), ``modules`` everything at the end. Like
+``main``, it leaves the process at once, since a blocked request worker would hold a normal exit.
+It imports nothing itself (``json`` would be a module the helper may not have loaded), so the
+report is a ``repr``. The probe replaces no code: it calls the function ``main`` calls."""
+
+
+class Unused(StrEnum):
+    """A group of modules the helper loads on a request that needs them, never for ``hello``."""
+
+    EXAMPLES = "the example catalog and project maker, loaded on the first examples request"
+    HARNESSES = "the agent library's harness list, loaded on the first harness request"
+    READ_ADAPTER = "the registered-read adapter, which serves `vibesys host <read>`, not the helper"
+    PROJECT_STATE = "the project's on-use state modules"
+    ID_MINTING = "minting an instance id, which needs no secrets or hmac (#2351)"
+    LOGS = "the logs reader, loaded on the first logs request"
+    RUN_TRANSPORT = "the run log and protobuf transport, loaded when a run publishes or reads a log"
+    SLURM = "the Slurm ledger of the launcher's `evals` command"
+    SAVED_RUNS = "saved-run import and paging, loaded on a saved-run request"
+    RUN_SUMMARY = "the run summary's fold and cache, loaded on the first summary request"
+
+
+_UNUSED_BY_HELLO: dict[str, tuple[str, ...]] = {
+    Unused.EXAMPLES: (
+        "entrypoints.examples",
+        "entrypoints.example_catalog",
+        "entrypoints.host_example_projects",
+    ),
+    Unused.HARNESSES: ("entrypoints.host_harnesses",),
+    Unused.READ_ADAPTER: (
+        "entrypoints.host_reads",
+        "entrypoints.host_facts",
+        "server.host_operation_reads",
+    ),
+    Unused.PROJECT_STATE: (
+        # The fingerprint of a workspace tree, publication of a revision and the retained
+        # files a fact import or a semantic restart reads.
+        "vs_project._fingerprint",
+        "vs_project._revision_publication",
+        "vs_project._retained",
+    ),
+    Unused.ID_MINTING: ("secrets", "hmac"),
+    Unused.LOGS: ("vs_logs",),
+    Unused.RUN_TRANSPORT: ("vs_runlog", "vs_proto", "google_crc32c", "google.protobuf"),
+    Unused.SLURM: ("vs_slurm",),
+    Unused.SAVED_RUNS: ("server.host_saved_runs",),
+    Unused.RUN_SUMMARY: ("server.run_summary", "server.run_summary_cache"),
+}
+"""The helper's own groups; ``HEAVY`` names the layers every light host command leaves out."""
+
+_FORBIDDEN: dict[str, tuple[str, ...]] = {**HEAVY, **_UNUSED_BY_HELLO}
+
+_MODULE_CEILING = 330
+"""A backstop on the modules the helper loads beyond the interpreter's own start-up (298 when it
+was set, on one platform). The groups above are the check; this catches what none names, so it is
+loose enough that a platform's own few modules (macOS loads ``_osx_support``) and one pull request's
+light module do not reach it. Lower it as the helper sheds imports; never raise it."""
 _HELLO = {
     "type": "hello",
     "request_id": "h",
@@ -167,13 +218,17 @@ def test_scenario_replays_against_a_real_helper(env: dict[str, str], name: str) 
     assert channel.finish() == (0, b"")
 
 
+def _loaded_by_the_helper(stderr: bytes) -> frozenset[str]:
+    """The modules the probe's helper imported, from the report on the last line of ``stderr``."""
+    report = ast.literal_eval(stderr.decode().strip().splitlines()[-1])
+    return frozenset(report["modules"]) - frozenset(report["started"])
+
+
 def test_hello_loads_no_engine_and_reports_its_start_up_time(
     env: dict[str, str], record_property: RecordProperty
 ) -> None:
     started = time.monotonic()
-    channel = _HelperChannel(
-        env, [sys.executable, "-X", "importtime", "-m", "entrypoints.host_helper"]
-    )
+    channel = _HelperChannel(env, [sys.executable, "-c", _PROBE])
     channel.send(_HELLO)
     reply = channel.receive()
     elapsed_ms = round((time.monotonic() - started) * 1000)
@@ -182,32 +237,23 @@ def test_hello_loads_no_engine_and_reports_its_start_up_time(
     record_property("hello_wall_ms", elapsed_ms)
     sys.stdout.write(f"host helper hello: {elapsed_ms} ms (budget {BUDGET_MS} ms)\n")
     assert (reply["type"], reply["protocol_version"], status) == ("hello", 1, 0)
-    loaded = loaded_modules(stderr.decode())
+    loaded = _loaded_by_the_helper(stderr)
     record_property("hello_modules", len(loaded))
-    assert "pydantic" in loaded, "importtime reported no modules; the check would be vacuous"
-    assert [name for name in loaded if is_heavy(name)] == []
-    assert "vs_project._fingerprint" not in loaded
+    assert {"pydantic", "server.host_helper"} <= loaded, (
+        "the probe reported no module the helper imports; the check would be vacuous"
+    )
+    forbidden = offenders(loaded, _FORBIDDEN)
+    assert forbidden == {}, (
+        f"hello loaded modules it has no reason to: {describe(forbidden)}. Import them where the "
+        "request that needs them uses them (a lazy module, or a module of its own), not at load."
+    )
     assert len(loaded) <= _MODULE_CEILING
-    # #2351: minting an instance id with ``secrets`` loaded ``secrets``, ``hmac``
-    # and ``base64`` on every hello and pushed the count over the ceiling.
-    assert {"secrets", "hmac"}.isdisjoint(loaded)
-    # Logs cost nothing until a client reads one: vs_logs loads on the first logs request.
-    assert [name for name in loaded if name.split(".")[0] == "vs_logs"] == []
-    # Run indexing shares Project's state I/O boundary, with no extra eager module.
-    assert "vs_project._run_index" not in loaded
-    # Publication loads when a run publishes a revision, never for hello.
-    assert "vs_project._revision_publication" not in loaded
-    # Retained-file reads serve the fact importer and a semantic restart, never hello.
-    assert "vs_project._retained" not in loaded
-    # Transport dependencies load only when a run publishes or reads a log.
-    assert {"vs_runlog", "vs_proto", "google_crc32c", "google.protobuf"}.isdisjoint(loaded)
-    # The launcher's light commands load on dispatch: hello pays for none of them, so the
-    # ``evals`` command's Slurm ledger (about 85 modules) stays out of the helper.
-    assert [name for name in loaded if name.split(".")[0] == "vs_slurm"] == []
-    # Saved-run import and paging load only for a saved-run request.
-    assert "server.host_saved_runs" not in loaded
-    # The run summary's fold and cache load on the first summary request.
-    assert {"server.run_summary", "server.run_summary_cache"}.isdisjoint(loaded)
+
+
+def test_every_module_a_group_names_exists() -> None:
+    """A group naming a module that was renamed or removed bans nothing: say which one."""
+    missing = missing_modules(_UNUSED_BY_HELLO)
+    assert missing == [], f"groups name modules that do not exist (renamed?): {missing}"
 
 
 def test_run_connect_makes_the_channel_a_relay_to_the_run(

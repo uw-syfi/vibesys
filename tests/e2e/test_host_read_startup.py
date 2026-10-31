@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support import run_test_command
+from tests.support.light_imports import under
 from tests.support.task_project import write_task
 
 from vs_project.api import Project
@@ -461,11 +462,7 @@ def _reply_slot(read: _Read, written: bytes) -> str:
 
 
 def _loaded(probe: _Probe, roots: tuple[str, ...]) -> list[str]:
-    return sorted(
-        name
-        for name in probe.modules
-        if any(name == root or name.startswith(f"{root}.") for root in roots)
-    )
+    return sorted(name for name in probe.modules if under(name, roots))
 
 
 @pytest.mark.parametrize("read", READS, ids=lambda read: read.command)
