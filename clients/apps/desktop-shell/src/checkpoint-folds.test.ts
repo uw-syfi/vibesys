@@ -253,6 +253,7 @@ test('shared-reader fold inventory is exhaustive', () => {
     'blob',
     'chat',
     'coreInput',
+    'coreSnapshot',
     'declarationAmended',
     'epochStarted',
     'intent',

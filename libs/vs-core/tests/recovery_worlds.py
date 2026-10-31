@@ -9,7 +9,7 @@ requests still open), under the epoch number the host counted. A step's limit is
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import ClassVar, Literal
 
@@ -324,6 +324,19 @@ def _retains(state: core.CoreState, world: World) -> tuple[core.RequestRecord, .
     return tuple(made)
 
 
+RETAINING = World((StepSpec(2.0),), retries=0, retains=(0,))
+"""A query step and a snapshot-and-retain, which a drain lets through."""
+CLOSING = World((StepSpec(2.0),), retries=0, closes=(1,))
+"""A query step and the close of a scope with no other step, which a drain lets through."""
+CLOSING_ITS_STEP = World((StepSpec(2.0, scope=1),), closes=(0,))
+"""A query step and the close of another scope than its own."""
+IN_FLIGHT = World((StepSpec(2.0, standing=Standing.RECONCILING),), retries=0)
+"""A step an earlier version left reconciling: the log gives it an ended first attempt."""
+DISPATCHED = World((StepSpec(2.0, standing=Standing.DISPATCHED),), retries=0)
+"""A step an earlier version left dispatched."""
+ONE_QUERY = World((StepSpec(2.0),), retries=0)
+
+
 def query_world(limits: tuple[float, ...], retries: int) -> World:
     """One query step per limit: the world the first recovery properties ran in."""
     return World(tuple(StepSpec(limit) for limit in limits), retries)
@@ -355,4 +368,41 @@ def worlds() -> st.SearchStrategy[World]:
         aux=st.lists(st.sampled_from(list(Aux)), max_size=2).map(tuple),
         closes=st.lists(st.integers(0, 1), max_size=1).map(tuple),
         retains=st.lists(st.integers(0, 1), max_size=1).map(tuple),
+    )
+
+
+class Staging(StrEnum):
+    """What a staged world always holds: an effect a drain lets through, or a step in flight."""
+
+    RETAIN = "retain"
+    CLOSE = "close"
+    IN_FLIGHT = "in_flight"
+
+
+def staged_worlds(*stagings: Staging) -> st.SearchStrategy[World]:
+    """Worlds that always hold what a pause, a kill or a restart treats differently.
+
+    Each holds one of ``stagings`` (every kind unless some are named).
+
+    A drain lets a snapshot-and-retain and the close of a scope through, and an earlier version
+    leaves a step in flight with no attempt in this log: the places the end of an epoch meets a
+    pause, a park or an attempt that is still live.
+    """
+
+    def staged(world: World, staging: Staging, scope: int, standing: Standing) -> World:
+        match staging:
+            case Staging.RETAIN:
+                return replace(world, retains=(*world.retains, scope))
+            case Staging.CLOSE:
+                return replace(world, closes=(*world.closes, scope))
+            case Staging.IN_FLIGHT:
+                first, *rest = world.steps
+                return replace(world, steps=(replace(first, standing=standing), *rest))
+
+    return st.builds(
+        staged,
+        worlds(),
+        st.sampled_from(stagings or tuple(Staging)),
+        st.integers(0, 1),
+        st.sampled_from([Standing.DISPATCHED, Standing.RECONCILING]),
     )

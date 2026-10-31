@@ -115,11 +115,28 @@ function checks(random: Seeded): Check[] {
   }));
 }
 
+/** A machine that has the CLIs of `harnessClis` installed and nothing else the tests look at. */
+function machineWith(harnessClis: readonly string[]): MachineDescription {
+  return {
+    checkout: null,
+    hardware: {cpu_cores: 8, gpus: [], accelerator: 'cpu'},
+    docker: {reachable: true, version: '29.1'},
+    harness_clis: [...harnessClis],
+    runs: {live: 0, ended_today: 0},
+  };
+}
+
 /** What each operation answers: plausible values, chosen at random. */
 function output(operation: string, random: Seeded): unknown {
   switch (operation) {
     case 'describe':
-      return random.pick([{kind: 'unsupported'}, {kind: 'offered', value: {}}]);
+      return random.pick([
+        {kind: 'unsupported'},
+        {
+          kind: 'offered',
+          value: machineWith(random.pick([[], ['claude'], ['codex'], ['mystery']])),
+        },
+      ]);
     case 'examples':
       return random.pick([{kind: 'unsupported'}, {kind: 'offered', value: exampleCatalogue}]);
     case 'harnesses':

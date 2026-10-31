@@ -139,6 +139,9 @@ def message_examples() -> dict[str, Message]:
     examples["UnmeasuredInput"] = p.UnmeasuredInput()
     examples["InputMeasurement"] = p.InputMeasurement(state=p.Oneof("measured", measured))
     examples["Failure"] = p.Failure(kind=p.SpanFailureKind.OUTCOME, message="Gate failed")
+    examples["StateCache"] = p.StateCache(
+        schema_version=1, through_seq=7, digest=bytes(32), state=b'{"revision":0}'
+    )
     return examples
 
 

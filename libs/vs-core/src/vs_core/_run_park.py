@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING
 
 from ._proofs import request_dependency_status
 from ._recovery_unanswered import Inspection, settlement
+from ._run_pause import pause_outlived
 from ._scope_order import holds_back
 from ._step_attempts import unstarted
 from ._turn_permit import (
@@ -123,7 +124,7 @@ def _request_bound(state: CoreState, request: Request) -> float | None:
 def dispatch_allowed(state: CoreState, request: Request) -> bool:
     """Whether the park drain permits this effect; the authorization boundary owns the gate."""
     if state.run.status == RunStatus.PARKED:
-        return state.run.park is not None and state.records.recovery.epoch > state.run.park.epoch
+        return pause_outlived(state)
     if state.run.status != RunStatus.DRAINING:
         return True
     if _pause_now_holds_back(state, request):

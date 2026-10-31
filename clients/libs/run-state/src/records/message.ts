@@ -91,6 +91,8 @@ export function recordMessage(body: StoreRecord['body']): string {
       return 'Run ended';
     case 'runStarted':
       return 'Run started';
+    case 'coreSnapshot':
+      return 'Run restored';
     case 'strategyAdvanced':
       return 'Search advanced';
     case undefined:
