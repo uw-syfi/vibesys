@@ -958,18 +958,11 @@ These are facts the implementation must settle, found while checking the design 
   runner has nothing running, or work `clear` adopts and the next run attaches to without starting it
   again.
 
-- **Closure waits for the open steps of its scope, and `decide` does not yet hold it.** Today `decide` starts
-  the `CloseAttemptScope` of a retiring attempt while a step of the scope still has a running attempt, and the
-  attempt lists no release dependency on a measurement whose job core has not seen (a step reports its job
-  when it ends). The job runners rely on the rule: a close cancels and lists the jobs registered under its
-  scope, and a step that has begun but not yet registered its job (the first thing a job runner does) would
-  submit it after the close read the registry, and run until its own limit. The rule is owned by
-  `rr/core-fixes`; `libs/vs-core/tests/test_recovery_closure_order.py` states it as a strict xfail
-  ("core-fixes") that turns into a failure when it lands, so the marker goes with the change.
-- **A pause must not cancel an owned job, and core still does.** The step runner side is done: a pause leaves a
-  Slurm job running and the resumed run adopts it. `vs_core/_run_park.py` still issues `CancelOwnedJob(for_park)`
-  and exempts `SubmitMeasurement` (the #3480 carve-out) on the pause path; replacing that with the rule "the
-  pause path never cancels owned jobs" is owned by `rr/core-fixes`.
+- **A close lists the jobs the scope registered.** `decide` holds the `CloseAttemptScope` until every other step
+  of its scope has a result ([Scope order](#scope-order)), and a pause never cancels an owned job. The job
+  runners rely on both: the close cancels and lists exactly the handles registered under its scope, so a step
+  must have registered its job before the close can read the registry, and a paused Slurm job is adopted by the
+  resumed run instead of being cancelled and claimed again.
 - **The snapshot kinds rely on `decide`'s scope order.** `RetainByContent` is safe once every writer of
   the scope has a result ([Scope order](#scope-order)); `ExecutorStepRunner` does not check it.
 - **Per-environment `clear` (item 5e).** `RunEnvironment.agent_work_reaper(run_id, ...)` gives the reaper of
