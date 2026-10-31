@@ -25,6 +25,7 @@ from vs_core._search_log import (
     checkpoint_search,
     restore,
 )
+from vs_core._step import advance_run_time
 from vs_core._step_attempts import open_step
 from vs_core._step_log import (
     decode_seed,
@@ -72,6 +73,7 @@ __all__ = [
     "StepsState",
     "Translated",
     "Wait",
+    "advance_run_time",
     "advance_search",
     "apply_record",
     "at_rest",

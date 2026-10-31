@@ -100,6 +100,7 @@ class RunLogStepLog:
         self._search = search
         self._stamp = stamp
         self._arrived = 0
+        self._appended = 0
         self._delivered = 0
         self._wake = asyncio.Event()
 
@@ -181,6 +182,19 @@ class RunLogStepLog:
         self._arrived += 1
         self._wake.set()
 
+    @property
+    def records_appended(self) -> int:
+        """How many records this process appended, to tell whether a step appended any."""
+        return self._appended
+
+    def hear(self) -> None:
+        """Let the search hear what is due now (a wake-up) and answer, though nothing was appended."""
+        before = self._appended
+        self._settle()
+        if self._appended != before:
+            self._arrived += 1
+            self._wake.set()
+
     async def next_input(self) -> None:
         """Return once ``input`` was called since this last returned."""
         while self._delivered == self._arrived:
@@ -209,6 +223,7 @@ class RunLogStepLog:
         confirmed = self._log.extend(record)
         if not isinstance(confirmed, Appended):
             raise RunLogUncertainError
+        self._appended += 1
 
     def _settle(self) -> None:
         """The search hears what core published and answers, until it has nothing more to say."""
