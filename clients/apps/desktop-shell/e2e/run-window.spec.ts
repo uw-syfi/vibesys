@@ -79,6 +79,7 @@ test('a run opens in a window of its own, shown alone and live there', async ({p
   await expect(runWindow.getByRole('radiogroup', {name: 'Show'})).toBeVisible();
   await expect(runWindow.getByText(`host-b · ${RUN_ID}`)).toBeVisible();
   await expect(sidebar(runWindow)).toHaveCount(0);
+  await expect(runWindow.getByRole('button', {name: 'Runs', exact: true})).toHaveCount(0);
   // Its page is clear of the window controls: it starts at the top of the window, beside an empty
   // column as wide as the main window's rail, which holds the lights and moves the window.
   expect(await screenCheck(runWindow, ['chrome-clear', 'drag-region'])).toEqual([]);
