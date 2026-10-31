@@ -5,7 +5,8 @@
 import {describe, expect, test} from 'bun:test';
 import type {RunSession} from '@vibesys/run-state/skeleton';
 import fc from 'fast-check';
-import {placesAlong, runningTimeOf} from './running-time.js';
+import type {RunModel} from './run-model.js';
+import {placesAlong, runningSeconds, runningTimeOf} from './running-time.js';
 
 /** Sessions that follow one another with stopped gaps between them (a gap may be none). */
 const sessions: fc.Arbitrary<readonly RunSession[]> = fc
@@ -95,6 +96,24 @@ describe('running time', () => {
         },
       ),
     );
+  });
+});
+
+describe('the running seconds of a run', () => {
+  test('are the sum of what its sessions worked, whatever the stops between them', () => {
+    fc.assert(
+      fc.property(sessions, each => {
+        const whole = {sessions: each, latest: each.at(-1)?.to ?? null} as unknown as RunModel;
+        const first = each[0]?.from ?? 0;
+        const worked = each.reduce((sum, session) => sum + (session.to - session.from), 0);
+        // The run's start is its first time: nothing before it counts.
+        expect(runningSeconds(whole, first)).toBe(worked);
+      }),
+    );
+  });
+
+  test('are none before the run recorded a time', () => {
+    expect(runningSeconds({sessions: [], latest: null} as unknown as RunModel, 0)).toBeNull();
   });
 });
 

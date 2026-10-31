@@ -11,7 +11,7 @@ import type {Candidate} from '@vibesys/run-state/candidates';
 import type {Direction} from './direction.js';
 
 /** What an idea's own measurement made of it. */
-export type IdeaResult = 'passed' | 'failed' | 'pending';
+type IdeaResult = 'passed' | 'failed' | 'pending';
 
 /** One measured idea. */
 export interface PerformancePoint {

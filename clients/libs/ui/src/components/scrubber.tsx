@@ -47,7 +47,7 @@ function positionAt(places: readonly number[], along: number): number {
 
 /** Where a key moves the playhead from position `value` of `last`, or null for a key that does not move it. */
 function keyed(key: string, value: number, last: number): number | null {
-  const jump = Math.max(1, Math.round(last / 10));
+  const jump = Math.max(1, Math.trunc(last / 10));
   const moved: Record<string, number> = {
     ArrowLeft: value - 1,
     ArrowDown: value - 1,
@@ -86,7 +86,7 @@ function Track(props: {
       min={0}
       max={single ? 1 : places === undefined ? props.last : SPAN}
       step={1}
-      value={single ? 1 : places === undefined ? props.value : Math.round(along * SPAN)}
+      value={single ? 1 : places === undefined ? props.value : Number((along * SPAN).toFixed(0))}
       disabled={single}
       aria-label={props.label}
       aria-valuetext={props.position}

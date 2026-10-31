@@ -124,7 +124,7 @@ function timeTicks(seconds: number) {
 }
 
 /** A length of running time as the axis words it: to the minute from a minute on (`11h 18m`). */
-export function runningWords(seconds: number): string {
+function runningWords(seconds: number): string {
   return duration(seconds < 60 ? seconds : Math.round(seconds / 60) * 60);
 }
 

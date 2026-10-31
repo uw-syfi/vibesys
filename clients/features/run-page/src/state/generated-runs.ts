@@ -5,7 +5,6 @@
  */
 import type {RunOverview} from '@vibesys/contracts';
 import type {Candidate, CandidateTree} from '@vibesys/run-state/candidates';
-import fc from 'fast-check';
 import {heroView} from './headline.js';
 import {IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
 import {withLiveBest} from './live-best.js';
@@ -33,28 +32,6 @@ export interface Run {
   /** Where the time bar stands, as a share of the run. */
   readonly cursor: number;
 }
-
-export const run: fc.Arbitrary<Run> = fc
-  .record({
-    direction: fc.constantFrom('max', 'min'),
-    input: fc.integer({min: 10, max: 5000}),
-    sessionInputs: fc.array(fc.integer({min: 10, max: 5000}), {minLength: 1, maxLength: 3}),
-    ideas: fc.array(
-      fc.record({
-        value: fc.integer({min: 1, max: 10000}),
-        at: fc.integer({min: 1, max: 600}),
-        passed: fc.boolean(),
-        session: fc.nat(2),
-      }),
-      {minLength: 0, maxLength: 16},
-    ),
-    cursor: fc.double({min: 0, max: 1, noNaN: true}),
-  })
-  .map(each => ({
-    ...each,
-    // The first session's re-measure is the run's input.
-    sessionInputs: [each.input, ...each.sessionInputs.slice(1)],
-  }));
 
 const NAME = 'metric';
 
