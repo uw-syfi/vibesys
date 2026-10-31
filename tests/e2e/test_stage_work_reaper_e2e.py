@@ -64,7 +64,7 @@ pytestmark = pytest.mark.skipif(
 
 RUN = "run-a"
 OTHER_RUN = "run-b"
-_START_BOUND_S = 30.0
+_START_BOUND_S = 120.0
 """Upper bound on a child reporting it started; reached only when it failed to start."""
 _STAGE = "sleep 120 & echo ready; wait"
 

@@ -18,14 +18,22 @@ from vs_sandbox.docker_states import (
     observe_removal,
     released,
 )
-from vs_sandbox.fake_docker_command import DockerResult, DockerTimeout
 from vs_sandbox.step_marks import STEP_TAG_LABEL
-from vs_sim.api import DISCARD
+from vs_sim.api import DISCARD, ProcessTimeoutError
 
 if TYPE_CHECKING:
     from vs_sandbox.docker_cli import DockerCli
 
 _DOCKER_TIMEOUT_S = 60.0
+
+
+@dataclass(frozen=True, slots=True)
+class _Reply:
+    """What a ``docker`` command printed and how it exited."""
+
+    returncode: int
+    stdout: str
+    stderr: str
 
 
 class StepContainerError(RuntimeError):
@@ -97,10 +105,10 @@ class DockerStepContainers:
             )
             raise StepContainerError(message)
 
-    def _run(self, argv: list[str], what: str, *, check: bool = True) -> DockerResult:
+    def _run(self, argv: list[str], what: str, *, check: bool = True) -> _Reply:
         try:
             result = self._docker.run(argv, timeout_seconds=_DOCKER_TIMEOUT_S, output=DISCARD)
-        except (OSError, DockerTimeout) as error:
+        except (OSError, ProcessTimeoutError) as error:
             message = f"could not {what}: {error}"
             raise StepContainerError(message) from error
         if check and result.returncode != 0:
@@ -108,4 +116,4 @@ class DockerStepContainers:
                 f"could not {what}: docker exited {result.returncode}: {result.stderr.strip()}"
             )
             raise StepContainerError(message)
-        return result
+        return _Reply(result.returncode, result.stdout, result.stderr)

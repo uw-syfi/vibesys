@@ -632,6 +632,14 @@ These are facts the implementation must settle, found while checking the design 
   a provider that cannot resume from it falls back to a fresh conversation from retained content, which the
   client already does for a standalone message.
 - **Clear completeness on the Host run environment.** See [what fits none](#what-fits-none).
+- **Stage work left running on a Metal run on macOS.** This applies only to Metal runs on the macOS host, where
+  macOS shows other processes' arguments but not their environment. A stage command is found by the mark on
+  its process group leader. If something outside the run kills that leader with SIGKILL while other processes
+  of its group keep running, nothing visible carries the mark any more. `clear` does not find them and
+  reports the host clean, and the re-run then races them. A child that starts its own session is missed the
+  same way. Linux and Docker runs are not affected: Linux reads the mark from every process's environment,
+  and Docker removes the container. No durable record of the group is kept; accepted for now. See
+  [marks on local stage work](#marks-on-local-stage-work).
 - **Fold cost.** See [state.pb is a cache](#statepb-is-a-cache).
 - **Interim bodies.** Request and event bodies in the new records are not yet proto messages. Until phase 3
   generates them, schema evolution of those bodies follows today's envelope migration chain, which is
