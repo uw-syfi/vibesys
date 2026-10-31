@@ -12,8 +12,8 @@ checkout this module belongs to. Its imports stay within the light allowlist
 ``tests/architecture/test_light_entrypoints.py`` enforces.
 
 The helper builds every collaborator before it answers ``hello``, so it imports them statically:
-what it loads is what the module ceiling in ``tests/e2e/test_host_helper.py`` counts. Only what
-no ``hello`` needs (the agent library's harness list, the example machinery) is a lazy module.
+what it loads is what ``tests/e2e/test_host_helper.py`` holds to its forbidden module groups. Only
+what no ``hello`` needs (the agent library's harness list, the example machinery) is a lazy module.
 A read builds the same facts one at a time (``entrypoints.host_facts``);
 ``tests/entrypoints/test_host_facts.py`` holds the two wirings to each other.
 """
