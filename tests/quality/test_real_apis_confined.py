@@ -225,6 +225,7 @@ REAL_IMPLEMENTATIONS: dict[str, str] = _names(
             "OsProcesses",
             "LoopSignalSource",
             "PidfdProcessSignaller",
+            "OsProcessTable",
             "SubprocessLauncher",
             "InheritedStdioLauncher",
             "SubprocessCapturedTextProcessLauncher",

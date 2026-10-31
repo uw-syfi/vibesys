@@ -53,7 +53,7 @@ once. An **open step** is a step with no result. An **epoch** is one process lif
 | `fold(log)` and `decide(state, now) -> actions` in `vs_core` | built, dormant (#3475 item 4a) |
 | Runner loop, `StepRunner` Protocol, `FakeStepRunner`, contract suite | built and dormant: `vs_runtime.api.step_runner` and `vs_runtime.api.testing`; no run selects it (#3475 item 4b) |
 | Runners: agent turn (`DispatchTurn`, `ResumeSessionTurn`, registered `SESSION_TURN` operations) and workspace | built, dormant: `vs_runtime.api.agent_step_runners`, with `vs_agent.reap_step_agents` and `AgentSessions.forget_unfinished` beneath them (#3475 item 5a). [Which runner owns each request kind](#the-runner-of-each-request-kind) names the 13 kinds with no owner |
-| Runners: Slurm and local evaluation (`SlurmJobStepRunner`, `LocalJobStepRunner`) | built and dormant; the local runner reaps what a dead process left through a `StageWorkReaper` that has no production implementation yet |
+| Runners: Slurm and local evaluation (`SlurmJobStepRunner`, `LocalJobStepRunner`) | built and dormant; the local runner reaps what a dead process left through a `StageWorkReaper`: `ProcessStageWorkReaper` ends the stage processes and `ContainerStageWorkReaper` the Docker candidate containers of the tag, both found by the step mark (see [Marks](#marks-on-local-stage-work)) |
 | Runners: registered operation and adoption | built and dormant: `vs_runtime.api.operation_step_runner` and `vs_runtime.api.adoption_step_runner`, each in the contract suite (#3475 item 5c) |
 | Per-environment `clear` (Docker, SkyPilot, Modal, Host) | unbuilt; see [open risks](#open-risks) for what each environment can and cannot clear |
 | Pause drains within a deadline and records `Parked` | in progress (#3475 item 1) |
@@ -222,6 +222,18 @@ Two things follow.
   them. What holds is that `decide` runs the snapshot only after every writer of the scope has a result,
   and a result is only recorded after its runner's `clear` or its own cancel path ended the processes. That
   ordering is `decide`'s rule from item 4a, and no test here proves it for the snapshot kinds.
+
+### Marks on local stage work
+
+A local evaluation runs its stages in a throwaway candidate session opened under `<run id>:<evaluation handle>`. Every stage command carries that mark as `VIBESYS_STEP_TAG` in its environment, and its process group leader carries it as an argument; a Docker candidate container also carries it as the `vibesys.step-tag` label. The run id is part of the mark because two runs on one host can use the same request id. What `clear` can find depends on what the host shows:
+
+| Host | Shown | Ends | Guarantee against pid reuse |
+|---|---|---|---|
+| Linux | the environment of every process (`/proc`) | each marked process, including a `setsid` descendant | a pidfd is opened before the process's start time is checked, so a reused pid is never signalled |
+| macOS | only arguments, so only the group leader | the leader's whole group | none atomic: the pid and its start second are checked, then the group is signalled; a wrong kill needs the pid space to wrap within that second and a new group leader to take the pid |
+| Docker | the container label, read from the daemon | the container, listed again afterwards to confirm | the container id |
+
+Not found on macOS: the members of a group whose leader died first, and a `setsid` child, because nothing visible carries the mark any more. `clear` then reports a clean host although they run. The leader is a shell that waits for its command and never replaces itself, so it dies before its group only by an outside `SIGKILL`. A durable record of the group, kept through `Project`, would close this; it is not built. Partial output is never reset: each open of a stage stream is a new stream with a new id, so a re-run starts empty and the dead attempt's bytes stay as its history.
 
 ### What fits none
 
@@ -739,6 +751,15 @@ These are facts the implementation must settle, found while checking the design 
   - **Host** cannot sweep by the marker on macOS (see what fits none), so it needs the process group
     recorded when the agent starts, and a ghost write is the residual.
 - **Fold cost.** Measured, see [state.pb is a cache](#statepb-is-a-cache); the keyframe interval is open.
+- **Stage work left running on a Metal run on macOS.** This applies only to Metal runs on the macOS host, where
+  macOS shows other processes' arguments but not their environment. A stage command is found by the mark on
+  its process group leader. If something outside the run kills that leader with SIGKILL while other processes
+  of its group keep running, nothing visible carries the mark any more. `clear` does not find them and
+  reports the host clean, and the re-run then races them. A child that starts its own session is missed the
+  same way. Linux and Docker runs are not affected: Linux reads the mark from every process's environment,
+  and Docker removes the container. No durable record of the group is kept; accepted for now. See
+  [marks on local stage work](#marks-on-local-stage-work).
+- **Fold cost.** See [state.pb is a cache](#statepb-is-a-cache).
 - **Interim bodies.** Request and event bodies in the new records are not yet proto messages. Until phase 3
   generates them, schema evolution of those bodies follows today's envelope migration chain, which is
   deleted at phase 3.

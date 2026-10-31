@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from vs_core.api import SubmitMeasurement
 from vs_evaluation.api import PollPhase
-from vs_runtime._evaluation_jobs import handle_for
+from vs_runtime._evaluation_jobs import handle_of_life
 from vs_runtime._job_step_run import JobStepRun
 from vs_runtime._step_runner import Cleared
 
@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from vs_core.api import Request, RequestId
     from vs_core.api.recovery import StepResult
     from vs_evaluation.api import PollingEvaluationExecutor
+    from vs_runtime._host_stage_work import HostStageWork
     from vs_runtime._step_runner import Adopted, CancelSignal
     from vs_sim.api import Clock
 
@@ -42,6 +43,18 @@ class StageWorkReaper(Protocol):
 
 class LocalJobStepRunner:
     """Runs ``SubmitMeasurement`` steps on the in-process evaluation executor."""
+
+    @classmethod
+    def on_host(
+        cls,
+        executor: PollingEvaluationExecutor,
+        host: HostStageWork,
+        *,
+        clock: Clock,
+        poll_interval_s: float,
+    ) -> LocalJobStepRunner:
+        """Run on *executor*; leave to what *host* shows of the stage work a dead process left."""
+        return cls(executor, host.reaper(), clock=clock, poll_interval_s=poll_interval_s)
 
     def __init__(
         self,
@@ -90,6 +103,4 @@ class LocalJobStepRunner:
 
     def _handle(self, tag: RequestId) -> str:
         """The executor handle of the tag's current life: each life is one run's evaluation."""
-        life = self._lives.get(tag, 0)
-        base = handle_for(tag)
-        return base if life == 0 else f"{base}-life-{life}"
+        return handle_of_life(tag, self._lives.get(tag, 0))

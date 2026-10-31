@@ -93,6 +93,7 @@ from vs_runtime._run_environment_facts import (
     RunEnvironmentPresentationFacts,
     SkyPilotEnvironmentFacts,
 )
+from vs_runtime._stage_marks import stage_mark
 from vs_runtime._tool_location import ToolLocation, ToolSite, assumed_tool
 from vs_runtime._trusted_evaluation import TrustedEvaluationPlan
 from vs_runtime._trusted_evaluation_preparation import (
@@ -130,6 +131,7 @@ from vs_sandbox.api import (
     host_resource_for_mount,
     require_sysbox_runtime,
     start_sandbox,
+    step_tag_env,
     stop_sandbox,
 )
 from vs_sandbox.api.docker_workspace import (
@@ -398,6 +400,10 @@ class RunEnvironmentRequest:
     #: declared tools) writes its raw output to, closed when the build ends;
     #: ``None`` discards the output.
     tool_build_output: ToolBuildOutputOpener | None = None
+    #: The step this session belongs to, set for the throwaway candidate of a local evaluation:
+    #: every command it runs carries the step's mark (`vs_sandbox.api.step_tag_env`), so the
+    #: work a dead process left is found by the tag alone.
+    step_tag: str | None = None
     #: Where a local Slurm root's probe, which runs beside the run, reports that its
     #: job waits in the queue and how it ended; ``None`` reports nothing.
     workspace_root_probe: WorkspaceRootProbeSink | None = None
@@ -786,7 +792,7 @@ def _make_host_sandbox(request: RunEnvironmentRequest, *, ephemeral: bool = Fals
         host_workspace=str(request.workspace),
         log_path=None,
         bind_mounts=[],
-        extra_env={},
+        extra_env=_step_mark(request),
         lifecycle_hooks=hooks,
         ephemeral=ephemeral,
     )
@@ -883,6 +889,13 @@ def _starting_container(
         yield output
     if request.log is not None:
         request.log(f"[docker] container {sandbox.id} started ({request.session_role})")
+
+
+def _step_mark(request: RunEnvironmentRequest) -> dict[str, str]:
+    """The environment that marks the session's commands as its step's, or none."""
+    if request.step_tag is None:
+        return {}
+    return step_tag_env(stage_mark(request.run_id, request.step_tag))
 
 
 def _reporting_tool_builds(request: RunEnvironmentRequest) -> ToolBuildOutputOpener | None:
@@ -1138,6 +1151,7 @@ class DockerEnvironment(NoCaptureRecovery):
         if request.git_history_root is not None:
             cli_provider_env.setdefault("VIBESYS_GIT_HISTORY", "/opt/vibesys-history")
         cli_provider_env.update(extras.env)
+        cli_provider_env.update(_step_mark(request))
         resources = deduplicate_host_resources(resources)
         lifecycle_hooks = symlink_lifecycle_hooks(docker_symlinks)
 

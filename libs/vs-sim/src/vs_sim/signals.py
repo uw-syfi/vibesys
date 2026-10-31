@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import ctypes
 import os
+import select
 import signal
 import sys
 import threading
@@ -148,15 +149,37 @@ class PidfdProcessSignaller:
 
     def terminate_if_current(self, pid: int, current: Callable[[], bool]) -> bool:
         """Open ``pid``, revalidate caller identity, and send SIGTERM through its pidfd."""
-        pidfd_open, pidfd_send_signal = _pidfd_calls(direct=self._direct_syscalls)
-        descriptor = pidfd_open(pid)
-        try:
-            if not current():
-                return False
-            pidfd_send_signal(descriptor, signal.SIGTERM)
-            return True
-        finally:
-            os.close(descriptor)
+        return signal_if_current(
+            pid, signal.SIGTERM, current, direct_syscalls=self._direct_syscalls
+        )
+
+
+def signal_if_current(
+    pid: int,
+    number: signal.Signals,
+    current: Callable[[], bool],
+    *,
+    direct_syscalls: bool = False,
+    exit_wait_s: float = 0.0,
+) -> bool:
+    """Send *number* to the process *pid* names iff *current* holds once its pidfd is open.
+
+    The pidfd is acquired before *current* is evaluated, so a pid the kernel reuses afterwards
+    is not signalled. After a send it waits up to *exit_wait_s* for that process to exit (its
+    pidfd turns readable), so a caller can rely on a killed process being gone. Raises
+    ``ProcessLookupError`` when *pid* no longer exists.
+    """
+    pidfd_open, pidfd_send_signal = _pidfd_calls(direct=direct_syscalls)
+    descriptor = pidfd_open(pid)
+    try:
+        if not current():
+            return False
+        pidfd_send_signal(descriptor, number)
+        if exit_wait_s > 0:
+            select.select([descriptor], [], [], exit_wait_s)
+        return True
+    finally:
+        os.close(descriptor)
 
 
 # Linux assigns these two system calls one number on every architecture (they

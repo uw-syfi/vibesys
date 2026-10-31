@@ -353,7 +353,9 @@ class PollingEvaluationExecutor:
         with held:
             if self._receipts is not None:
                 self._receipts.update(handle_id, cleanup_required=True)
-            workspace = await self._workspaces.create_measured_candidate(snapshot)
+            workspace = await self._workspaces.create_measured_candidate(
+                snapshot, step_tag=handle_id
+            )
             if self._receipts is not None:
                 self._receipts.update(handle_id, workspace=str(workspace.path))
         return workspace
