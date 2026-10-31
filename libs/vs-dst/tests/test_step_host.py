@@ -338,17 +338,16 @@ def test_a_second_pause_takes_hold_of_the_host_that_resumed_the_run(stops: Stops
     """The generator above reaches something: some second pause parks the resumed host again.
 
     The first stop is a pause mid-run, after a commit the host is open for: one before the host
-    has opened its log is not delivered, and stops nothing.
+    has opened its log is not delivered, and stops nothing. The second is a later commit, which
+    only the resumed host can reach.
     """
     mid_run = [p for p in stops.second if p.moment is Moment.AFTER_COMMIT]
     first = mid_run[len(mid_run) // 2]
-    parked = [
-        stops.normal.interrupt(first, then=second).history.count("parked")
-        for second in stops.second
-        if second != first
-    ]
+    later = [p for p in mid_run if p.index > first.index]
 
-    assert max(parked) >= 2, parked
+    assert any(
+        stops.normal.interrupt(first, then=second).history.count("parked") >= 2 for second in later
+    ), "no second pause parked the resumed host"
 
 
 def test_a_resumed_host_is_stopped_again_by_a_pause_and_not_by_a_kill() -> None:
