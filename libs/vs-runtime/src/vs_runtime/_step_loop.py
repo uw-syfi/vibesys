@@ -29,6 +29,7 @@ from vs_core.api.recovery import (
     at_rest,
     decide,
     interruption_of,
+    may_start,
 )
 from vs_runtime._step_runner import Adopted, CancelSignal, Cleared, ClearUnavailableError
 
@@ -300,9 +301,13 @@ class _StepLoop:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def _record_started(self, run: Run) -> None:
+    async def _record_started(self, run: Run) -> bool:
+        """Record the start unless the run no longer lets the step start: the decision is stale."""
         async with self._appending:
+            if not may_start(self._log.state, run.tag, self._clock.now()):
+                return False
             await self._log.step_started(run)
+            return True
 
     async def _record_finished(self, tag: RequestId, attempt: int, result: StepResult) -> None:
         async with self._appending:
@@ -325,7 +330,8 @@ class _StepLoop:
         if cleared is None or (flight.signal.is_set() and isinstance(cleared, Cleared)):
             await self._finish_unstarted(flight)
             return
-        await self._record_started(run)
+        if not await self._record_started(run):
+            return
         flight.started = True
         outcome = await self._run_bounded(run, flight.signal)
         await self._finish_attempt(run, flight, outcome)
