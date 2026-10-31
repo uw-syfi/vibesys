@@ -25,6 +25,7 @@ import {
 } from '@vibesys/ui';
 import type {JSX, KeyboardEvent} from 'react';
 import {
+  ACTION_FAILURE,
   formSuggestions,
   type Machine,
   type MachinesAction,
@@ -228,6 +229,32 @@ function NoMachine(props: {readonly state: MachinesState}): JSX.Element | null {
   );
 }
 
+/**
+ * A machine card's status words: how the machine stands, and, until an action of it succeeds, the
+ * removal or sign-in that failed (what it reported is the word's hint, and the toast's detail).
+ */
+function CardStatus(props: {
+  readonly state: MachinesState;
+  readonly machine: Machine;
+}): JSX.Element {
+  const {state, machine} = props;
+  const status = machineStatus(machine);
+  const problem = machineProblem(machine);
+  const failed = state.actionProblem?.host === machine.host ? state.actionProblem : null;
+  return (
+    <>
+      <Chip
+        label={statusWord(status)}
+        tone={statusTone(status)}
+        {...(problem === null ? {} : {hint: problem})}
+      />
+      {failed === null ? null : (
+        <Chip label={ACTION_FAILURE[failed.kind].word} tone="err" dot hint={failed.error} />
+      )}
+    </>
+  );
+}
+
 function Detail(props: {
   readonly state: MachinesState;
   readonly machine: Machine;
@@ -236,7 +263,6 @@ function Detail(props: {
 }): JSX.Element {
   const {state, machine, dispatch, newRun} = props;
   const status = machineStatus(machine);
-  const problem = machineProblem(machine);
   const removing = state.pending?.kind === 'remove' && state.pending.host === machine.host;
   const savingHere = state.fixing?.host === machine.host && state.fixing.saving !== null;
   const changeDisabled =
@@ -255,22 +281,13 @@ function Detail(props: {
               {machine.label}
             </Text>
           </Stack>
-          <Chip
-            label={statusWord(status)}
-            tone={statusTone(status)}
-            {...(problem === null ? {} : {hint: problem})}
-          />
+          <CardStatus state={state} machine={machine} />
         </Row>
         <ProblemFix state={state} machine={machine} dispatch={dispatch} />
         {status === 'checkout-not-found' ? null : (
           <CheckoutForm state={state} machine={machine} dispatch={dispatch} />
         )}
         <KeyValue items={machineFacts(machine)} />
-        {state.actionProblem === null ? null : (
-          <Text tone="err" variant="small">
-            {state.actionProblem}
-          </Text>
-        )}
         <Row gap="space-2" wrap>
           <Button text="New run here" press={() => newRun(machine.host)} />
           <Button

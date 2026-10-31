@@ -35,7 +35,7 @@ from vs_runtime.api.testing import (
     RunnerMethod,
     fake_run_seed,
 )
-from vs_sim.api.testing import VirtualClock, run_virtual, wait_for_state
+from vs_sim.api.testing import VirtualClock, loop_threads, run_virtual, wait_for_state
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -116,7 +116,9 @@ class World:
         """A new process over the run.log: it opens the next epoch, then runs the loop."""
         assert self.runner is not None
         self.processes += 1
-        log = FakeStepLog(self.records, self.seed.state, self.seed.registry, self.clock)
+        log = FakeStepLog(
+            self.records, self.seed.state, self.seed.registry, self.clock, loop_threads()
+        )
         for event in inputs:
             log.push(event)
         board = NotedBoard()

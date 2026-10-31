@@ -44,6 +44,7 @@ from vs_core.types.settlement import Selection
 from vs_core.types.strategy import (
     Decision,
     Measure,
+    ProposeWinner,
     Settle,
     StartAttempt,
     StrategyState,
@@ -184,9 +185,13 @@ class InFlight(Value):
 
     path: str
     label: str
-    request: Measure | Withdraw | StartAttempt
+    request: Measure | Withdraw | StartAttempt | ProposeWinner
     answer: (
-        Annotated[WorkspaceOpened | WorkspaceClosed | Failed, Field(discriminator="kind")] | None
+        Annotated[
+            WorkspaceOpened | WorkspaceClosed | AdoptionFinished | Failed,
+            Field(discriminator="kind"),
+        ]
+        | None
     ) = None
     """Core's answer to an opening or a settlement, when it came before the resumed flow asked
     again: the flow takes it then."""
@@ -266,6 +271,21 @@ class FlowState(StrategyState):
     """Results since the last restart that reached no waiting flow (abandoned or unknown)."""
     restart_settled: tuple[RestartSettled, ...] = ()
     """The workspaces the restarts since this journal began settled themselves, with why."""
+
+
+class FlowChanges(Value):
+    """What one advance added to a ``FlowState``.
+
+    The journal steps, and the two fields every update replaces. The log keeps this between
+    checkpoints, so it grows with the steps and not with the state.
+    """
+
+    steps: tuple[Step, ...]
+    dropped: tuple[Dropped, ...] = ()
+    restart_settled: tuple[RestartSettled, ...] = ()
+    issued: tuple[Issued, ...] = ()
+    """The decision numbers the steps moved: a restart from an older checkpoint must number past
+    every id the dead flows issued, or an answer for an old decision reaches a new one."""
 
 
 _DECISIONS = TypeAdapter(list[Decision])

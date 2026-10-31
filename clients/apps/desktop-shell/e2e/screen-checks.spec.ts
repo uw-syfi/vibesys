@@ -179,6 +179,59 @@ test('a banner is found by its color, whatever it is called or where it sits', a
   ]);
 });
 
+test('a chip, a toast, a tile, a log and a status word beside its control are not status rows', async ({
+  page,
+}) => {
+  await show(
+    page,
+    `<main style="display:block;width:440px">
+      <span class="vs-chip" data-tone="warn" role="status">Needs an update</span>
+      <section class="vs-toast-stack" aria-live="polite"><div class="vs-toast" role="alert">Could not resume the run</div></section>
+      <div class="vs-overview-tile" role="status">3 need you</div>
+      <div class="vs-log"><div role="log"><span class="vs-text" data-tone="err" style="display:block">error: linker not found</span></div></div>
+      <div style="display:flex;gap:8px"><span class="vs-text" data-tone="err">Unavailable</span><button>Retry history</button></div>
+    </main>`,
+  );
+  expect(await screenCheck(page, ['status-row'])).toEqual([]);
+});
+
+/**
+ * What a review of the check found it flagged and should not: it measures the words, not the box.
+ * Each of these has a box as wide as the pane and little to say in it.
+ */
+test('a stretched figure, a lone toned word, a live wrapper and a chip with its detail are not status rows', async ({
+  page,
+}) => {
+  await show(
+    page,
+    `<main style="display:block;width:440px">
+      <div style="display:flex;flex-direction:column"><span class="vs-text" data-tone="ok">1.42×</span></div>
+      <div style="display:flex;flex-direction:column"><span class="vs-text" data-tone="warn">No tasks</span></div>
+      <div aria-live="polite"><span class="vs-chip" data-tone="ok">Ready</span> <button>Start run</button></div>
+      <div role="alert"><div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center"><span class="vs-chip" data-tone="err">The workspace is not usable</span><span>the workspace /scratch/vibesys is missing or not writable, and the path it names is not a directory either, so check the mount and try the test again</span></div></div>
+    </main>`,
+  );
+  expect(await screenCheck(page, ['status-row'])).toEqual([]);
+});
+
+test('a status row is found by its words, tinted or not, and a hidden or narrow one is not', async ({
+  page,
+}) => {
+  await show(
+    page,
+    `<main style="display:block;width:440px">
+      <div role="alert">Could not read the runs of this machine, try again</div>
+      <div role="alert" hidden>Never drawn, though it is long enough to count if it were</div>
+      <div role="alert" style="width:100px">Narrow</div>
+    </main>`,
+  );
+  const found = await screenCheck(page, ['status-row']);
+  expect(found).toHaveLength(1);
+  expect(found[0]?.message).toMatch(
+    /^a status row \d+% of the main pane wide \(alert\): "Could not read the runs of this machine,"$/,
+  );
+});
+
 const CHART = `<div id="row" style="position:relative;height:90px">
   <svg id="chart" role="group" aria-label="Metric of each reading over the run, with the best so far" width="240" height="80"><circle cx="40" cy="40" r="6" fill="red"/></svg>
   <input id="bar" type="range" aria-label="Run position" style="position:absolute;left:260px;top:10px"/>
