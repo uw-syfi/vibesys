@@ -19,11 +19,11 @@ plugins:
     strategy: all
     out: clients/libs/proto/src/generated
     opt: [target=ts, import_extension=js]
-  - local: [go, run, google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11]
+  - local: [go, -C, gateway, tool, protoc-gen-go]
     strategy: all
     out: gateway/gen
     opt: paths=source_relative
-  - local: [go, run, google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.1]
+  - local: [go, -C, gateway, tool, protoc-gen-go-grpc]
     strategy: all
     out: gateway/gen
     opt: paths=source_relative

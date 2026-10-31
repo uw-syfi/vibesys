@@ -44,9 +44,16 @@ function listedRunsKnown(state: SidebarState, machines: readonly HostKey[] | nul
     return 'some';
   if (dashboardRefs(state).length > 0 || liveRows(state).length > 0) return 'some';
   if (state.overview.kind !== 'heard' || machines === null) return 'unknown';
-  if (machines.some(host => !state.listings.some(listing => listing.host === host))) {
-    return 'unknown';
-  }
+  // A machine still on its way to an answer (no listing yet, connecting, or reconnecting) keeps the
+  // question open; one that stopped has answered, and one that listed has said what it holds.
+  const answering = machines.some(
+    host =>
+      machineLoad(
+        host,
+        state.listings.find(listing => listing.host === host),
+      ).kind === 'loading',
+  );
+  if (answering) return 'unknown';
   if (Object.values(state.allRuns.projects).some(slot => slot.kind === 'failed')) return 'some';
   const loading = Object.values(state.allRuns.projects).some(slot => slot.kind === 'loading');
   return loading ? 'unknown' : 'none';
