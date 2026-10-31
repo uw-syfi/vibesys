@@ -1,21 +1,26 @@
 """A scripted run in its own process, for a test to pause, kill and resume.
 
-``python -m tests.e2e._interruptible_run BASE [--resume RUN_ID] [--hold AT:KIND]`` runs the
-scripted scenario of ``LoopInput.create(BASE)`` through ``run_request``, the production host
-composition over the product's on-disk ``.vibesys`` state, and reports on stdout, one JSON
-object per line: each run event as ``{"event": ..., "stage": ...}``, ``{"held": AT:KIND}`` when
-the hold is reached, and last ``{"outcome": ...}``. ``--resume`` relaunches the saved run as
-a new epoch, as ``vibesys --resume`` does.
+``run_process`` is the entry of a process a test starts through ``multiprocessing``'s fork
+server, which imports this module once and forks every run process from that image. A run
+process is a real process in its own session, as a shell-started ``vibesys`` is, and costs a
+fork instead of the 3.6 s a fresh interpreter takes to import the product.
 
-``--hold`` stops the first turn of the agent ``KIND`` until a line arrives on stdin, so the
-parent places an interruption inside that turn without a sleep: ``start`` holds the turn before
-its agent session exists, ``turn`` holds it once the session is open and the agent is working.
+It runs the scripted scenario of ``LoopInput.create(BASE)`` through ``run_request``, the
+production host composition over the product's on-disk ``.vibesys`` state, and reports on a
+pipe, one dict per message: each run event as ``{"event": ..., "stage": ...}``,
+``{"held": AT:KIND}`` when the hold is reached, and last ``{"outcome": ...}``. ``resume``
+relaunches the saved run as a new epoch, as ``vibesys --resume`` does.
+
+``hold`` stops the first turn of the agent ``KIND`` until the test sends on the release pipe, so
+the test places an interruption inside that turn without a sleep: ``start`` holds the turn
+before its agent session exists, ``turn`` holds it once the session is open and the agent is
+working.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
+import os
 import sys
 import threading
 from dataclasses import dataclass, replace
@@ -32,6 +37,7 @@ from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from multiprocessing.connection import Connection
 
     from vibesys.api import CoreEvent, RunHandle
     from vs_agent.api import (
@@ -72,16 +78,30 @@ class Hold:
         return cls(at, kind)
 
 
-def _say(**fields: object) -> None:
-    sys.stdout.write(json.dumps(fields) + "\n")
-    sys.stdout.flush()
+class Channel:
+    """A run process's pipes to the test: reports out, releases in."""
+
+    def __init__(self, reports: Connection, releases: Connection) -> None:
+        self._reports = reports
+        self._releases = releases
+        self._lock = threading.Lock()
+
+    def say(self, **fields: object) -> None:
+        """Send one report; the turn threads and the event reader all report."""
+        with self._lock:
+            self._reports.send(fields)
+
+    def wait_for_release(self) -> None:
+        """Block until the test lets the held turn go on."""
+        self._releases.recv()
 
 
 class _Gate:
     """Stops one turn until the parent releases it, once."""
 
-    def __init__(self, hold: Hold) -> None:
+    def __init__(self, hold: Hold, channel: Channel) -> None:
         self._hold = hold
+        self._channel = channel
         self._lock = threading.Lock()
         self._spent = False
 
@@ -90,8 +110,8 @@ class _Gate:
             if self._spent or (at, kind) != (self._hold.at, self._hold.kind):
                 return
             self._spent = True
-        _say(held=f"{at}:{kind}")
-        sys.stdin.readline()
+        self._channel.say(held=f"{at}:{kind}")
+        self._channel.wait_for_release()
 
 
 class _HeldClient(ScriptedAgentClient):
@@ -115,10 +135,8 @@ class _HeldClient(ScriptedAgentClient):
         )
 
 
-def _held_client_factory(
-    hold: Hold | None,
-) -> Callable[..., AgentClientProtocol]:
-    gate = None if hold is None else _Gate(hold)
+def _held_client_factory(hold: Hold | None, channel: Channel) -> Callable[..., AgentClientProtocol]:
+    gate = None if hold is None else _Gate(hold, channel)
 
     def build(
         *, spec: AgentSpec, events: AgentEventSink, log_dir: Path | None = None, **_services: object
@@ -143,9 +161,9 @@ def _held_responder(gate: _Gate, kind: str, responder: ResponseSource) -> Respon
     return answer
 
 
-def _report(event: CoreEvent) -> None:
+def _report(event: CoreEvent, channel: Channel) -> None:
     data = event.data
-    _say(
+    channel.say(
         event=event.type.value,
         stage=getattr(data, "stage", None) or getattr(data, "phase", None),
         gate=getattr(getattr(data, "gate", None), "value", None),
@@ -153,13 +171,13 @@ def _report(event: CoreEvent) -> None:
     )
 
 
-async def _report_all(handle: RunHandle) -> None:
-    _say(run_id=handle.run_id)
+async def _report_all(handle: RunHandle, channel: Channel) -> None:
+    channel.say(run_id=handle.run_id)
     async for event in handle.events():
-        _report(event)
+        _report(event, channel)
 
 
-def main(base: Path, resume: str | None, hold: Hold | None) -> None:
+def main(base: Path, resume: str | None, hold: Hold | None, channel: Channel) -> None:
     """Run the scenario under ``base`` and report its outcome."""
     loop_input = LoopInput.attach(base)
     request = loop_input.request(agent_backend="scripted", max_rounds=ROUNDS, max_in_flight=1)
@@ -169,12 +187,14 @@ def main(base: Path, resume: str | None, hold: Hold | None) -> None:
     run = run_request(
         request,
         NoAgents(),
-        client_factory=_held_client_factory(hold),
+        client_factory=_held_client_factory(hold, channel),
         slurm_processes=loop_input.connector,
         verify=False,
         relaunch_saved=resume is not None,
         lease_seconds=LEASE_SECONDS,
-        on_handle=lambda handle: reporters.append(asyncio.ensure_future(_report_all(handle))),
+        on_handle=lambda handle: reporters.append(
+            asyncio.ensure_future(_report_all(handle, channel))
+        ),
     )
     run.raise_error()
     assert run.result is not None
@@ -184,7 +204,7 @@ def main(base: Path, resume: str | None, hold: Hold | None) -> None:
         if event.type is CoreEventType.WINNER_SELECTED
         and isinstance(event.data, WinnerSelectedData)
     ]
-    _say(
+    channel.say(
         outcome={
             "run_id": run.result.run_id,
             "status": run.result.status.value,
@@ -194,8 +214,36 @@ def main(base: Path, resume: str | None, hold: Hold | None) -> None:
     )
 
 
-if __name__ == "__main__":
-    arguments = sys.argv[1:]
-    held = arguments[arguments.index("--hold") + 1] if "--hold" in arguments else None
-    resumed = arguments[arguments.index("--resume") + 1] if "--resume" in arguments else None
-    main(Path(arguments[0]), resumed, None if held is None else Hold.parse(held))
+@dataclass(frozen=True)
+class RunSpec:
+    """What one run process is asked to do."""
+
+    base: str
+    """The project the scenario was created under."""
+    resume: str | None
+    """The run to relaunch as a new epoch; ``None`` starts a new run."""
+    hold: str | None
+    """``AT:KIND`` of the turn to hold, or ``None``."""
+    errors: str
+    """The file the process's stderr goes to."""
+    environment: dict[str, str]
+    """The test's environment when it asked: each case has its own state home, which the fork
+    server's image (taken when its first case started) does not."""
+    cwd: str
+    """The test's working directory when it asked."""
+
+
+def run_process(spec: RunSpec, reports: Connection, releases: Connection) -> None:
+    """The run process: its own session, and its stderr in ``spec.errors``.
+
+    The fork server ends a process without shutting its interpreter down, so the imported product
+    is not freed on the way out (1.5 to 3 s a process). A failure leaves its traceback in
+    ``spec.errors`` and a nonzero status, which the test reports.
+    """
+    os.setsid()
+    os.environ.clear()
+    os.environ.update(spec.environment)
+    os.chdir(spec.cwd)
+    os.dup2(os.open(spec.errors, os.O_WRONLY | os.O_CREAT | os.O_TRUNC), sys.stderr.fileno())
+    held = None if spec.hold is None else Hold.parse(spec.hold)
+    main(Path(spec.base), spec.resume, held, Channel(reports, releases))
