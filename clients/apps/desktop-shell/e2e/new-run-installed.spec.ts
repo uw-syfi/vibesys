@@ -9,7 +9,8 @@ import {SEED} from './world.js';
 /**
  * The Agent page of a New run on machines that have different harnesses installed. The helper
  * lists Claude Code first on every machine; New run orders the list itself from the machine's
- * description, so the form starts with an installed harness, and says so when none is.
+ * description, so the form starts with an installed harness. With none installed it starts as
+ * before, and each tile says "Not found".
  * `SCREENS_DIR=<dir>` writes each window's screenshot (the app window only).
  */
 
@@ -54,10 +55,8 @@ for (const width of [1440, 1000] as const) {
       await expect(harness).toContainText(
         installed ? 'Installed on host-b' : 'Not found on host-b',
       );
-      // Nothing installed is one status word beside the section's name, never a sentence or a banner.
-      await expect(main(page).getByText('None installed', {exact: true})).toHaveCount(
-        installed ? 0 : 1,
-      );
+      // Nothing installed is the tile's own words, "Not found on host-b": no chip, sentence or banner.
+      await expect(main(page).getByText('None installed')).toHaveCount(0);
 
       // The installed harness's model line is the first card; the helper's own order is not.
       if (world.name === 'codex only') {

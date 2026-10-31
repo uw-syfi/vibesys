@@ -8,7 +8,6 @@ import type {HarnessOffer} from '@vibesys/ipc';
 import {
   BrandMark,
   Button,
-  Chip,
   ChoiceTiles,
   Field,
   Row,
@@ -161,8 +160,6 @@ export function AgentPage(props: CardProps): JSX.Element {
   }
   const pick: Pick = (provider, model) => dispatch({type: 'agent', provider, model});
   const installed = installedHarnesses(context.facts, machine);
-  // The offers are ordered installed-first, so none of them being installed is the whole story.
-  const nothingInstalled = installed !== null && !offers.some(o => installed.includes(o.provider));
   return (
     <Stack gap="space-5">
       <Stack gap="space-3">
@@ -188,10 +185,7 @@ export function AgentPage(props: CardProps): JSX.Element {
         <ModelChoice offers={offers} group={group} agent={agent} pick={pick} />
       </Stack>
       <Stack gap="space-3">
-        <Row>
-          <Text variant="section">Harness on {machineLabel(machine)}</Text>
-          {nothingInstalled ? <Chip label="None installed" tone="warn" /> : null}
-        </Row>
+        <Text variant="section">Harness on {machineLabel(machine)}</Text>
         <ChoiceTiles
           label="Harness"
           layout="cards"
