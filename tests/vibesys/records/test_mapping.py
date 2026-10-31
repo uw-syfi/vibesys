@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import get_args
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from protobuf.wkt.google.protobuf.wrappers_pb import StringValue
 from tests.support.event_models import payload_models, payloads
@@ -149,6 +149,194 @@ def test_transcript_entries_round_trip_and_state_is_pure(text: str) -> None:
     assert entry.entry.value.content is not None
     assert entry.entry.value.content.value is not None
     assert entry.entry.value.content.value.value == text
+
+
+def _transcript_entry(wire: bytes) -> p.TranscriptEntry:
+    """The one uvarint-framed entry a transcript stream write holds."""
+    prefix = next(index for index, byte in enumerate(wire) if byte < 128)
+    return p.TranscriptEntry.from_binary(wire[prefix + 1 :])
+
+
+def _text_of(content: p.TranscriptContent | None, blobs: dict[str, bytes]) -> str:
+    """What a transcript content holds, inline or by blob."""
+    assert content is not None
+    assert content.value is not None
+    if content.value.field == "inline":
+        return content.value.value
+    return blobs[content.value.value.sha256].decode()
+
+
+# Output as a command prints it: any characters (the default alphabet has newlines and non-ASCII),
+# lines joined by LF or CRLF, only newlines, and text at, over and far over the inline cap.
+_LINES = st.lists(st.text(max_size=20), max_size=8)
+_STREAM = st.one_of(
+    st.text(max_size=60),
+    _LINES.map("\n".join),
+    _LINES.map("\r\n".join),
+    st.integers(min_value=0, max_value=5).map(lambda count: "\n" * count),
+    st.sampled_from(["x" * 65536, "x" * 65537, "\u00e9" * 40000, "line\n" * 30000]),
+)
+_ANY = st.text(max_size=40)
+_NAME = st.text(min_size=1, max_size=16)
+_JSON_VALUE = st.one_of(
+    st.dictionaries(st.text(max_size=8), st.integers() | st.text(max_size=8), max_size=4),
+    st.lists(st.integers() | st.text(max_size=8), max_size=5),
+)
+_PAYLOAD = st.one_of(
+    st.none(),
+    st.builds(
+        e.CommandResultPayload,
+        stdout=_STREAM,
+        stderr=_STREAM,
+        exit_code=st.none() | st.integers(min_value=-(2**31), max_value=2**31 - 1),
+        duration=st.none() | st.floats(min_value=0, max_value=1e6),
+    ),
+    st.builds(e.JsonResultPayload, value=_JSON_VALUE),
+)
+_TRANSCRIPT_DATA = st.one_of(
+    st.builds(e.AgentOutputChunkData, channel=st.just("analysis"), content=_ANY),
+    st.builds(e.ToolCallData, tool=_NAME, call_id=_NAME, args=st.just({})),
+    st.builds(
+        e.ToolResultData,
+        tool=_NAME,
+        call_id=_NAME,
+        content=_ANY,
+        is_error=st.booleans(),
+        payload=_PAYLOAD,
+    ),
+)
+
+
+def _transcript_event_type(
+    data: e.AgentOutputChunkData | e.ToolCallData | e.ToolResultData,
+) -> e.CoreEventType:
+    if isinstance(data, e.AgentOutputChunkData):
+        return e.CoreEventType.AGENT_OUTPUT_CHUNK
+    if isinstance(data, e.ToolCallData):
+        return e.CoreEventType.TOOL_CALL
+    return e.CoreEventType.TOOL_RESULT
+
+
+def _mapped_entry(
+    data: e.AgentOutputChunkData | e.ToolCallData | e.ToolResultData, at: datetime
+) -> tuple[p.TranscriptEntry, dict[str, bytes]]:
+    observation = e.CoreEvent.model_validate(
+        {
+            "type": _transcript_event_type(data),
+            "data": data,
+            "timestamp": at,
+            "run_id": "run-a",
+            "sequence": 1,
+            "execution_id": "turn-a",
+        }
+    )
+    mapped = map_event(MappingState("run-a"), observation)
+    return (
+        _transcript_entry(mapped.streams[0].content),
+        {blob.sha256: blob.content for blob in mapped.blobs},
+    )
+
+
+@given(
+    data=_TRANSCRIPT_DATA,
+    seconds=st.integers(min_value=0, max_value=4_000_000_000),
+)
+def test_every_transcript_entry_records_when_its_event_happened(
+    data: e.AgentOutputChunkData | e.ToolCallData | e.ToolResultData, seconds: int
+) -> None:
+    at = datetime.fromtimestamp(seconds, UTC)
+    entry, _ = _mapped_entry(data, at)
+    assert entry.at == p.Timestamp.from_datetime(at)
+
+
+@given(data=_TRANSCRIPT_DATA)
+def test_a_tool_result_carries_its_payload_as_typed_fields(
+    data: e.AgentOutputChunkData | e.ToolCallData | e.ToolResultData,
+) -> None:
+    if not isinstance(data, e.ToolResultData):
+        return
+    entry, blobs = _mapped_entry(data, datetime(2026, 10, 15, tzinfo=UTC))
+    assert entry.entry is not None
+    result = entry.entry.value
+    assert isinstance(result, p.TranscriptToolResult)
+    payload = data.payload
+    if payload is None:
+        assert result.payload is None
+    elif isinstance(payload, e.JsonResultPayload):
+        assert result.payload is not None
+        assert result.payload.field == "json"
+        assert isinstance(result.payload.value, p.TranscriptContent)
+        assert json.loads(_text_of(result.payload.value, blobs)) == payload.value
+    else:
+        assert result.payload is not None
+        assert result.payload.field == "command"
+        command = result.payload.value
+        assert isinstance(command, p.TranscriptCommandResult)
+        assert _text_of(command.stdout, blobs) == payload.stdout
+        assert _text_of(command.stderr, blobs) == payload.stderr
+        # An absent number stays absent: an unset field reads as zero, so ask for its presence.
+        assert command.has_field("exit_code") is (payload.exit_code is not None)
+        if payload.exit_code is not None:
+            assert command.exit_code == payload.exit_code
+        assert command.has_field("duration_seconds") is (payload.duration is not None)
+        if payload.duration is not None:
+            assert command.duration_seconds == payload.duration
+    # The text the agent was shown is untouched by the payload.
+    assert _text_of(result.content, blobs) == data.content
+    # The deprecated JSON-string field is never written.
+    assert not result.has_field("payload_json")
+
+
+@pytest.mark.regression
+@given(
+    duration=st.one_of(
+        st.floats(max_value=-1e-9, allow_nan=False),
+        st.sampled_from([float("inf"), float("-inf"), float("nan")]),
+    )
+)
+@example(duration=-1.0)
+@example(duration=float("inf"))
+def test_a_duration_that_is_not_a_time_is_dropped_and_never_stored(duration: float) -> None:
+    data = e.ToolResultData(
+        tool="Bash",
+        call_id="c1",
+        content="out",
+        payload=e.CommandResultPayload(stdout="out", stderr="", exit_code=0, duration=duration),
+    )
+    entry, _ = _mapped_entry(data, datetime(2026, 10, 15, tzinfo=UTC))
+    assert entry.entry is not None
+    result = entry.entry.value
+    assert isinstance(result, p.TranscriptToolResult)
+    assert result.payload is not None
+    command = result.payload.value
+    assert isinstance(command, p.TranscriptCommandResult)
+    assert not command.has_field("duration_seconds")
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        e.AgentOutputChunkData(channel="assistant", content="a\ud800b"),
+        e.ToolResultData(tool="T", call_id="c", content="a\ud800b"),
+        e.ToolResultData(
+            tool="T",
+            call_id="c",
+            content="x",
+            payload=e.CommandResultPayload(stdout="a\ud800b", stderr="", exit_code=0),
+        ),
+    ],
+    ids=["assistant text", "tool result text", "command stdout"],
+)
+def test_a_lone_surrogate_in_any_transcript_text_is_refused_by_the_encode(
+    data: e.AgentOutputChunkData | e.ToolCallData | e.ToolResultData,
+) -> None:
+    """Documents what is: text that is not UTF-8 fails the projection, whichever field holds it.
+
+    The assistant and tool-result text fail this way on main; a command's payload adds no new way to
+    fail. Closing it belongs to the event boundary, not to this projection.
+    """
+    with pytest.raises(UnicodeEncodeError):
+        _mapped_entry(data, datetime(2026, 10, 15, tzinfo=UTC))
 
 
 _TEXT = st.text(alphabet=st.characters(exclude_categories=("Cs",)), min_size=1, max_size=16)
