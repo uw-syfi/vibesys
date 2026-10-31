@@ -276,24 +276,37 @@ class AgentInvocationRecord(BaseModel):
     sequence: int = Field(default=0, ge=0)
 
 
+_UPGRADED_FROM = 2
+"""The ledger version read as the current one: it differs only by fields that default to unknown."""
+
+
 class AgentInvocationState(BaseModel):
     """Strict machine-local invocation ledger, stored through Project's StateSlot."""
 
     model_config = ConfigDict(extra="forbid")
-    schema_version: Literal[2] = 2
-    """2: a completed turn's result stores ``refused_steers``, and every result field is required."""
+    schema_version: Literal[3] = 3
+    """3: a completed turn's usage stores its cost basis and per-model rows. 2: a completed turn's
+    result stores ``refused_steers``, and every result field is required."""
     invocations: dict[str, AgentInvocationRecord] = Field(default_factory=dict)
 
     @field_validator("schema_version", mode="before")
     @classmethod
     def _this_version(cls, value: object) -> object:
-        """Refuse a ledger another VibeSys version wrote, naming the remedy."""
+        """Read the current version, upgrade the previous one on load, refuse any other.
+
+        Version 2 stored the same shape without the two usage fields, which default to unknown, so
+        a ledger it wrote is exactly a version 3 ledger and the next save writes it as such. A
+        run paused across the upgrade resumes. Delete this upgrade 92 days after it merged, with
+        ``legacy_basis`` (#3531): by then no run that was paused under version 2 is resumed.
+        """
         current = cls.model_fields["schema_version"].default
+        if value == _UPGRADED_FROM:
+            return current
         if isinstance(value, int) and not isinstance(value, bool) and value != current:
             message = (
                 f"the ledger is version {value} and this VibeSys reads only version "
-                f"{current}; a run whose agent ledger another version wrote cannot resume "
-                "here: start a new run"
+                f"{current} (and upgrades version {_UPGRADED_FROM}); a run whose agent ledger "
+                "another version wrote cannot resume here: start a new run"
             )
             raise ValueError(message)
         return value

@@ -153,6 +153,27 @@ test('the run, each agent and each turn name the tokens they spent', async ({pag
   await check(page, 'ink-turn-tokens');
 });
 
+test('the Usage face reads turns that carry the per-model split, and the split moves no figure', async ({
+  page,
+}) => {
+  // The planner's turn ran a model the price table does not know, so it has no cost; the
+  // judge's turn ran on gpt-6.1-sol and its cost is an amount. Both lines carry `by_model`,
+  // `cost_basis` and `provider_session_id`; the other turns' lines do not.
+  await openRun(page);
+  await page.getByRole('radiogroup', {name: 'Show'}).getByText('Usage').click();
+  const table = page.getByRole('table', {name: 'Usage by group'});
+  await expect(table).toBeVisible();
+  const cost = (group: string) =>
+    table.locator('tbody tr', {hasText: group}).first().locator('td').nth(6);
+  await expect(cost('Reviewer')).toHaveText('$0.02');
+  await expect(cost('Planner')).toHaveText('unknown');
+  await expect(cost('Builder')).toHaveText('unknown');
+  await expect(page.getByRole('region', {name: 'Totals'})).toContainText(
+    'in 1.5M · out 34k · reasoning 17.1k',
+  );
+  await check(page, 'ink-usage-split');
+});
+
 test.describe('at 1000px', () => {
   test.use({viewport: {width: 1000, height: 900}});
 
