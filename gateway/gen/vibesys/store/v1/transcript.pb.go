@@ -392,6 +392,12 @@ type TranscriptToolResult struct {
 	IsError bool                   `protobuf:"varint,3,opt,name=is_error,json=isError,proto3" json:"is_error,omitempty"`
 	// The text the agent was shown.
 	Content *TranscriptContent `protobuf:"bytes,4,opt,name=content,proto3" json:"content,omitempty"`
+	// Written before `payload`: the whole result as a Pydantic JSON string. No longer written. A
+	// reader ignores it and shows `content`; it stays declared so records already stored keep
+	// decoding (the breaking-change check refuses to delete a field, reserved or not).
+	//
+	// Deprecated: Marked as deprecated in vibesys/store/v1/transcript.proto.
+	PayloadJson *TranscriptContent `protobuf:"bytes,5,opt,name=payload_json,json=payloadJson,proto3,oneof" json:"payload_json,omitempty"`
 	// What the tool returned beside its text. Absent for a result with none and for one written before
 	// this field existed. A reader that does not know the case shows `content` alone.
 	//
@@ -458,6 +464,14 @@ func (x *TranscriptToolResult) GetIsError() bool {
 func (x *TranscriptToolResult) GetContent() *TranscriptContent {
 	if x != nil {
 		return x.Content
+	}
+	return nil
+}
+
+// Deprecated: Marked as deprecated in vibesys/store/v1/transcript.proto.
+func (x *TranscriptToolResult) GetPayloadJson() *TranscriptContent {
+	if x != nil {
+		return x.PayloadJson
 	}
 	return nil
 }
@@ -600,17 +614,19 @@ const file_vibesys_store_v1_transcript_proto_rawDesc = "" +
 	"\acall_id\x18\x02 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04H\x00R\x06callId\x88\x01\x01\x12R\n" +
 	"\x0earguments_json\x18\x03 \x01(\v2#.vibesys.store.v1.TranscriptContentB\x06\xbaH\x03\xc8\x01\x01R\rargumentsJsonB\n" +
 	"\n" +
-	"\b_call_id\"\xed\x02\n" +
+	"\b_call_id\"\xbb\x03\n" +
 	"\x14TranscriptToolResult\x12\x1d\n" +
 	"\x04tool\x18\x01 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04R\x04tool\x12'\n" +
 	"\acall_id\x18\x02 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04H\x01R\x06callId\x88\x01\x01\x12\x19\n" +
 	"\bis_error\x18\x03 \x01(\bR\aisError\x12E\n" +
-	"\acontent\x18\x04 \x01(\v2#.vibesys.store.v1.TranscriptContentB\x06\xbaH\x03\xc8\x01\x01R\acontent\x12E\n" +
+	"\acontent\x18\x04 \x01(\v2#.vibesys.store.v1.TranscriptContentB\x06\xbaH\x03\xc8\x01\x01R\acontent\x12O\n" +
+	"\fpayload_json\x18\x05 \x01(\v2#.vibesys.store.v1.TranscriptContentB\x02\x18\x01H\x02R\vpayloadJson\x88\x01\x01\x12E\n" +
 	"\acommand\x18\x06 \x01(\v2).vibesys.store.v1.TranscriptCommandResultH\x00R\acommand\x129\n" +
 	"\x04json\x18\a \x01(\v2#.vibesys.store.v1.TranscriptContentH\x00R\x04jsonB\t\n" +
 	"\apayloadB\n" +
 	"\n" +
-	"\b_call_idJ\x04\b\x05\x10\x06R\fpayload_json\"\xaa\x02\n" +
+	"\b_call_idB\x0f\n" +
+	"\r_payload_json\"\xaa\x02\n" +
 	"\x17TranscriptCommandResult\x12C\n" +
 	"\x06stdout\x18\x01 \x01(\v2#.vibesys.store.v1.TranscriptContentB\x06\xbaH\x03\xc8\x01\x01R\x06stdout\x12C\n" +
 	"\x06stderr\x18\x02 \x01(\v2#.vibesys.store.v1.TranscriptContentB\x06\xbaH\x03\xc8\x01\x01R\x06stderr\x12 \n" +
@@ -661,15 +677,16 @@ var file_vibesys_store_v1_transcript_proto_depIdxs = []int32{
 	2,  // 6: vibesys.store.v1.TranscriptText.content:type_name -> vibesys.store.v1.TranscriptContent
 	2,  // 7: vibesys.store.v1.TranscriptToolCall.arguments_json:type_name -> vibesys.store.v1.TranscriptContent
 	2,  // 8: vibesys.store.v1.TranscriptToolResult.content:type_name -> vibesys.store.v1.TranscriptContent
-	6,  // 9: vibesys.store.v1.TranscriptToolResult.command:type_name -> vibesys.store.v1.TranscriptCommandResult
-	2,  // 10: vibesys.store.v1.TranscriptToolResult.json:type_name -> vibesys.store.v1.TranscriptContent
-	2,  // 11: vibesys.store.v1.TranscriptCommandResult.stdout:type_name -> vibesys.store.v1.TranscriptContent
-	2,  // 12: vibesys.store.v1.TranscriptCommandResult.stderr:type_name -> vibesys.store.v1.TranscriptContent
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	2,  // 9: vibesys.store.v1.TranscriptToolResult.payload_json:type_name -> vibesys.store.v1.TranscriptContent
+	6,  // 10: vibesys.store.v1.TranscriptToolResult.command:type_name -> vibesys.store.v1.TranscriptCommandResult
+	2,  // 11: vibesys.store.v1.TranscriptToolResult.json:type_name -> vibesys.store.v1.TranscriptContent
+	2,  // 12: vibesys.store.v1.TranscriptCommandResult.stdout:type_name -> vibesys.store.v1.TranscriptContent
+	2,  // 13: vibesys.store.v1.TranscriptCommandResult.stderr:type_name -> vibesys.store.v1.TranscriptContent
+	14, // [14:14] is the sub-list for method output_type
+	14, // [14:14] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_store_v1_transcript_proto_init() }

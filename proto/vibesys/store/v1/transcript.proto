@@ -61,10 +61,10 @@ message TranscriptToolResult {
   bool is_error = 3;
   // The text the agent was shown.
   TranscriptContent content = 4 [(buf.validate.field).required = true];
-  // Field 5 carried the result as a JSON string (a Pydantic dump); records written with it stay
-  // readable, a reader skips it and shows `content`.
-  reserved 5;
-  reserved "payload_json";
+  // Written before `payload`: the whole result as a Pydantic JSON string. No longer written. A
+  // reader ignores it and shows `content`; it stays declared so records already stored keep
+  // decoding (the breaking-change check refuses to delete a field, reserved or not).
+  optional TranscriptContent payload_json = 5 [deprecated = true];
   // What the tool returned beside its text. Absent for a result with none and for one written before
   // this field existed. A reader that does not know the case shows `content` alone.
   oneof payload {

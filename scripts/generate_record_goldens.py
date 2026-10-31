@@ -57,6 +57,14 @@ def transcript_examples() -> dict[str, Message]:
             ),
             at=p.Timestamp(seconds=1_700_000_000, nanos=250_000_000),
         ),
+        "result_legacy_payload_json": p.TranscriptEntry(
+            entry=p.Oneof(
+                "tool_result",
+                p.TranscriptToolResult(
+                    tool="shell", call_id="call-b", content=inline, payload_json=inline
+                ),
+            )
+        ),
         "result_json": p.TranscriptEntry(
             entry=p.Oneof(
                 "tool_result",

@@ -178,7 +178,9 @@ function jsonValueOf(value: string): JsonResultValue | undefined {
 }
 
 /**
- * What a result carried beside its text. A payload this reader cannot use (a case a newer writer
+ * What a result carried beside its text. The deprecated `payloadJson` field (the JSON string an
+ * earlier writer stored) is never read: such a record shows its `content`.
+ * A payload this reader cannot use (a case a newer writer
  * added, a part the writer left out, JSON text that is not an object or array) is none: the result
  * shows its text alone, and the rest of the turn is read as before.
  */

@@ -584,7 +584,7 @@ existed have none, and a reader shows no time for them. A tool result holds the 
 was shown (`content`) and, when the tool reported more, a typed `payload`: a command's stdout and
 stderr (each inline or a blob), its exit code and its run time, or a JSON value. A reader that
 does not know a payload case shows `content` alone. The earlier `payload_json` field is
-reserved, and a record written with it reads as `content`.
+deprecated: it is no longer written, and a reader ignores a record's copy and shows `content`.
 For older string attrs without a blob alternative, the bridge writes `blob:<sha256>`
 and a `BlobAttached` whose role names the field path; an oversized interim reply instead
 omits its inline JSON and uses the `reply` attachment.

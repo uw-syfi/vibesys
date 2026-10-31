@@ -283,6 +283,8 @@ def test_a_tool_result_carries_its_payload_as_typed_fields(
             assert command.duration_seconds == payload.duration
     # The text the agent was shown is untouched by the payload.
     assert _text_of(result.content, blobs) == data.content
+    # The deprecated JSON-string field is never written.
+    assert not result.has_field("payload_json")
 
 
 @pytest.mark.regression
