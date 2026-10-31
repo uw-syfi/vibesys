@@ -1,7 +1,15 @@
 import {expect, test} from '@playwright/test';
 import {fixtureNamed} from '@vibesys/run-fixtures';
 import {settled} from './checks/settle.js';
+import {MAC_CHROME} from './fake-bridge.js';
 import {openFixture, playLive} from './fixture-world.js';
+
+/**
+ * The dock lays the panel beside the screen only while it is wider than 760 px (`threads.css`). The
+ * rail beside it is as wide as the window's controls (`MAC_CHROME.startWidth`), so a window shows
+ * the panel beside the main from that much more.
+ */
+const DOCK_BESIDE_FROM = 760 + MAC_CHROME.startWidth;
 
 /** Sweep the input space around the dock and rail breakpoints, including 660 and 1000 px. */
 test('the run header stays beside its controls and chat preserves the main at dock widths', async ({
@@ -28,7 +36,7 @@ test('the run header stays beside its controls and chat preserves the main at do
     expect(action.x, `title leaves room for controls at ${width}px`).toBeGreaterThanOrEqual(
       title.x + title.width,
     );
-    if (width < 840) continue;
+    if (width <= DOCK_BESIDE_FROM) continue;
     await chat.click();
     await expect(page.getByRole('region', {name: 'Chat'})).toBeVisible();
     await expect(heading, `main content at ${width}px`).toBeVisible();
