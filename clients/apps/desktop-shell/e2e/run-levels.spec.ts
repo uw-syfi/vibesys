@@ -5,9 +5,11 @@ import {
   type FakeBridgeSeed,
   type FakeWindows,
   installFakeBridge,
+  installFakeChrome,
   installFakeMachines,
   installFakeProjectRuns,
   installFakeWindows,
+  MAC_CHROME,
 } from './fake-bridge.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {appendJourney, journeyFixture, journeyScript, transitionJourney} from './journey-world.js';
@@ -50,7 +52,7 @@ function listed(live: unknown[], ended: unknown[] = []): Record<string, unknown>
 
 const SEED: FakeBridgeSeed = {
   theme: 'ink',
-  chromeInset: {width: 84, height: 40},
+  chromeInset: MAC_CHROME,
   appearance: {mode: 'dark', light: 'paper', dark: 'ink'},
   listings: [listed([server('running')])],
   recent: [
@@ -81,6 +83,7 @@ async function check(page: Page, name: string): Promise<void> {
 
 async function openRun(page: Page, live = false, server: RunFixture = SERVER): Promise<void> {
   await addInitScripts(page, [
+    initScript(installFakeChrome, SEED),
     initScript(installFakeBridge, SEED),
     initScript(installFakeProjectRuns, SEED),
     initScript(installFakeMachines, SEED),

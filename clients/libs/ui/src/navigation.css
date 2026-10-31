@@ -160,10 +160,7 @@
 
 /* --- app frame --------------------------------------------------------------------------------- */
 
-.vs-app-frame,
-.vs-window-frame {
-  /* The title-bar row: as tall as the window's own controls, and at least one control. */
-  --titlebar-row: max(var(--chrome-inset-height, var(--space-0)), var(--control));
+.vs-app-frame {
   position: relative;
   display: flex;
   height: 100%;
@@ -179,8 +176,8 @@
   width: var(--sidebar-width, var(--sidebar));
   max-height: 100%;
   overflow: hidden;
-  /* The title-bar row (the window's own controls and the toggle) sits over the column's top: start below it. */
-  padding: calc(var(--titlebar-row) + var(--space-2)) var(--space-4) var(--space-5);
+  /* The window's own controls sit in the corner at the column's top: start below it. */
+  padding: calc(var(--chrome-start-height, var(--space-0)) + var(--space-2)) var(--space-4) var(--space-5);
   /* The column's background moves the window; its controls stay controls. */
   -webkit-app-region: drag;
   border-right: var(--hairline) solid var(--line);
@@ -199,12 +196,12 @@
   -webkit-app-region: no-drag;
 }
 /*
- * Hidden, the column leaves a rail of icon buttons: the same title-bar offset and background. It
- * is as wide as the window's own controls and the toggle after them need, so the page beside it
- * starts at the same place, top and left, as with the column shown.
+ * Hidden, the column leaves a rail of icon buttons: the same offset below the window's own controls
+ * and background. It is as wide as those controls and a button after them need, so the page beside
+ * it starts at the same place as with the column shown.
  */
 .vs-app-rail {
-  --rail-start: max(var(--chrome-inset-width, var(--space-0)), var(--space-4));
+  --rail-start: max(var(--chrome-start-width, var(--space-0)), var(--space-4));
   box-sizing: border-box;
   display: none;
   flex: none;
@@ -213,7 +210,7 @@
   gap: var(--space-3);
   width: calc(var(--rail-start) + var(--control) + var(--space-4));
   max-height: 100%;
-  padding: calc(var(--titlebar-row) + var(--space-2)) var(--space-4) var(--space-5)
+  padding: calc(var(--chrome-start-height, var(--space-0)) + var(--space-2)) var(--space-4) var(--space-5)
     var(--rail-start);
   -webkit-app-region: drag;
   border-right: var(--hairline) solid var(--line);
@@ -241,7 +238,7 @@
 }
 .vs-app-nav-resize {
   position: absolute;
-  top: var(--titlebar-row);
+  top: var(--chrome-start-height, var(--space-0));
   right: 0;
   bottom: 0;
   z-index: 2;
@@ -307,23 +304,6 @@
   min-height: 0;
 }
 /*
- * The title-bar row's control floats over the row, after the window's own controls and centered on
- * them; the same place with the column shown or hidden.
- */
-.vs-app-titlebar-control {
-  position: absolute;
-  top: 0;
-  left: max(var(--chrome-inset-width, var(--space-0)), var(--space-4));
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  height: var(--titlebar-row);
-  -webkit-app-region: no-drag;
-}
-.vs-app-titlebar-control * {
-  -webkit-app-region: no-drag;
-}
-/*
  * A narrow window never stacks the column above the page: the rail always stays beside the page
  * (what the column is hidden to, at any width), and a shown column floats over the rail and the
  * page's start instead of taking width from it. The page is first on screen at every width.
@@ -346,19 +326,4 @@
   .vs-app-nav[data-hidden] {
     box-shadow: none;
   }
-}
-/* A window without a navigation column: the title-bar row, then the page filling the rest. */
-.vs-window-frame {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  background: var(--bg);
-}
-/* A window without a column: an empty drag strip of the title-bar row's height above the page. */
-.vs-app-strip {
-  flex: none;
-  box-sizing: border-box;
-  height: var(--titlebar-row);
-  -webkit-app-region: drag;
-  background: var(--bg);
 }

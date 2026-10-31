@@ -138,7 +138,11 @@ for (const [alias, says] of [
     await form.getByRole('textbox', {name: 'Workspace on the cluster'}).fill('/w');
     await form.getByRole('textbox', {name: 'SSH host alias'}).fill(alias);
     await form.getByRole('button', {name: 'Test connection'}).click();
-    await expect(page.getByRole('alert').getByText(says)).toBeVisible();
+    // The form holds the failure beside the button that retries it, once: no toast repeats it.
+    await expect(form.getByRole('alert').getByText(says)).toBeVisible();
+    await expect(page.getByRole('region', {name: 'Notifications'}).getByRole('alert')).toHaveCount(
+      0,
+    );
     await expect(form.getByRole('button', {name: 'Save cluster'})).toHaveAttribute(
       'aria-disabled',
       'true',

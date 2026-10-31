@@ -5,24 +5,26 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ._actions import OpenStep
-from ._request_recovery import is_open, resent
-from .types.common import EventId, Observation, ObservationStatus
+from ._ownership import unreleased_records
+from ._request_recovery import command_open, is_open, is_step, resent
+from .types.common import EventId, Observation, ObservationStatus, RunStatus
 from .types.records import RequestObserved, RequestPhase, RequestRecord
 from .types.steps import (
     Cancelled,
+    CancelReason,
     Failed,
     Finished,
     Interruption,
     OwnerEvent,
     StepAttempts,
 )
+from .types.until import Until
 
 if TYPE_CHECKING:
     from .types.common import RequestId
     from .types.kernel import CoreState
     from .types.settlement import RunResultProposal
     from .types.steps import StepResult
-    from .types.until import Until
 
 
 def open_record(state: CoreState, tag: RequestId) -> RequestRecord:
@@ -34,14 +36,48 @@ def open_record(state: CoreState, tag: RequestId) -> RequestRecord:
     return rows[0]
 
 
+def ended_by_core(state: CoreState, tag: RequestId) -> bool:
+    """Whether core ended the step ``tag`` itself, so a record of its attempt is only history.
+
+    A clock tick past a step's limit ends it in the ledger while the loop's attempt still runs.
+    The step has its result; the attempt's end is recorded, and nothing it reports is applied. A
+    step the log never held is not this: it is refused, as a log other code wrote.
+    """
+    rows = state.records.find(tag)
+    if len(rows) > 1:
+        message = f"the log names step {tag.root} more than once"
+        raise ValueError(message)
+    if not rows:
+        message = f"the log names step {tag.root}, which the run never held"
+        raise ValueError(message)
+    return not is_open(rows[0])
+
+
+def ended_unconcluded(state: CoreState) -> tuple[RequestRecord, ...]:
+    """The steps core ended itself (at their limit) that still hold the run's closure.
+
+    The kernel ends a step whose limit passes under a clock input, whatever its runner is doing.
+    The step has its result, but a job or a turn it owns is released, and the run closes, only
+    when the runner's end of the attempt concludes it (`concluded`), as it does any step.
+    """
+    return tuple(row for row in unreleased_records(state) if is_step(row) and not is_open(row))
+
+
+def concluded(state: CoreState, tag: RequestId, reason: CancelReason) -> RequestObserved:
+    """The conclusive observation that settles the blocked step ``tag`` the way any step ends."""
+    (record,) = state.records.find(tag)
+    return _concluded(record, Cancelled(reason=reason), state.run.now_at)
+
+
 def epoch_opened(state: CoreState, epoch: int) -> CoreState:
     """``state`` in epoch ``epoch``, with every attempt of an earlier epoch ended.
 
     A run has one writer, so a record of a later epoch proves the process that ran the earlier
     epoch's attempts dead. They end without a result and count against the retry bound: the
     attempt may have run, and a step that kills its process every time must end as a typed failure.
-    Their steps go back to the state of a step no one has started, which is what a draining run
-    waits for before it parks.
+    An attempt a parked run still held ended with the pause, and is not counted. Their steps go
+    back to the state of a step no one has started, which is what a draining run waits for before
+    it parks.
 
     The kernel's host epoch moves with the log's, and ``RunPark.epoch`` does not: it stays the
     epoch the operator paused in. A drain in progress keeps its authority in the new epoch (see
@@ -50,15 +86,61 @@ def epoch_opened(state: CoreState, epoch: int) -> CoreState:
     """
     if epoch <= state.steps.epoch:
         return state
-    rows = tuple(row.model_copy(update={"ended": True}) for row in state.steps.attempts)
-    for row in rows:
+    origin = state.steps.epoch == 0
+    parked = state.run.status is RunStatus.PARKED
+    rows = []
+    for row in state.steps.attempts:
+        if ended_by_core(state, row.tag):
+            continue
+        # A park the process left with an attempt running (one that ignored the cancel) ended it:
+        # the exit was the pause's, so it is not charged like a crash.
+        spared = 1 if parked and not row.ended else 0
+        rows.append(row.model_copy(update={"ended": True, "uncharged": row.uncharged + spared}))
         state = _returned(state, row.tag)
+    if origin:
+        state = _earlier_version_settled(state)
     recovery = state.records.recovery
+    counted = epoch if origin else max(recovery.epoch, epoch)
     records = state.records.model_copy(
-        update={"recovery": recovery.model_copy(update={"epoch": max(recovery.epoch, epoch)})}
+        update={"recovery": recovery.model_copy(update={"epoch": counted})}
     )
-    steps = state.steps.model_copy(update={"epoch": epoch, "attempts": rows})
-    return state.model_copy(update={"steps": steps, "records": records})
+    park = state.run.park
+    if origin and park is not None:
+        park = park.model_copy(update={"epoch": min(park.epoch, epoch - 1)})
+    run = state.run.model_copy(update={"park": park})
+    steps = state.steps.model_copy(update={"epoch": epoch, "attempts": tuple(rows)})
+    return state.model_copy(update={"steps": steps, "records": records, "run": run})
+
+
+def _earlier_version_settled(state: CoreState) -> CoreState:
+    """``state``, a seed, with what an earlier version left in flight settled the way this one reads it.
+
+    The log's first epoch starts a numbering of its own, so a seed's host epoch and the park it holds
+    are older than any record that follows. The requests that settled unknown outcomes (an
+    inspection, a cancel, a block) are not steps: nothing here sends them, and one left open would
+    keep a pause from parking and a stop from ending. They lapse, as at their limit. A step in
+    flight with no attempt in this log has no one running it, so it goes back to unstarted, to run
+    again uncharged like one a pause interrupted.
+    """
+    state = commands_lapsed(state)
+    for record in state.records.records:
+        if is_open(record) and state.steps.of(record.request_id) is None:
+            state = _returned(state, record.request_id)
+    return state
+
+
+def commands_lapsed(state: CoreState) -> CoreState:
+    """``state`` with every inspection, cancel and block that is still open lapsed.
+
+    The kernel registers one when a limit passes under a clock input, for an executor to answer. A
+    log has none: a step whose limit passed is ended by the record of its cancel, and one that
+    must run again does so, so a command nothing sends would stay open and keep the run from
+    parking, ending or coming to rest.
+    """
+    for record in state.records.records:
+        if command_open(record):
+            state = _replaced(state, record.model_copy(update={"phase": RequestPhase.BLOCKED}))
+    return state
 
 
 def started(
@@ -80,13 +162,18 @@ def started(
             }
         )
     row = StepAttempts(
-        tag=tag, started=attempt, uncharged=0 if previous is None else previous.uncharged
+        tag=tag,
+        started=attempt,
+        uncharged=0 if previous is None else previous.uncharged,
+        deadline_at=deadline.at if previous is None else previous.deadline_at,
     )
     return _with(_replaced(state, record), tag, row)
 
 
 def interrupted(state: CoreState, tag: RequestId, attempt: int, why: Interruption) -> CoreState:
     """``state`` with the running attempt of ``tag`` ended by ``why``, charged only if it raised."""
+    if ended_by_core(state, tag):
+        return forgotten(state, tag)
     open_record(state, tag)
     row = state.steps.of(tag)
     if row is None or row.started != attempt or row.ended:
@@ -107,19 +194,57 @@ def _returned(state: CoreState, tag: RequestId) -> CoreState:
     record = open_record(state, tag)
     if record.phase is RequestPhase.PREPARED:
         return state
+    return _replaced(state, unstarted(state, record))
+
+
+def unstarted(state: CoreState, record: RequestRecord) -> RequestRecord:
+    """``record``, an open step whose attempt ended without a result, as one no one has started.
+
+    Its limit is the one its first attempt started with. A drain caps the request it cannot
+    interrupt, and the cap belongs to the attempt in flight: it ends with it, whoever returns the
+    step (the fold, on the record of the attempt's end, or the drain, which lets a job go at once).
+    """
     again = resent(record, state.run.now_at, state.run.limits.reconciliation_bound)
-    return _replaced(state, again)
+    row = state.steps.of(record.request_id)
+    if row is None or row.deadline_at is None:
+        return again
+    return again.model_copy(
+        update={"until": Until(at=row.deadline_at, watches=record.until.watches)}
+    )
 
 
 def ended(state: CoreState, result: RunResultProposal) -> CoreState:
-    """``state`` with the end of the run published, which the log records once nothing is open."""
+    """``state`` with the end of the run published, which the log records once the run is over."""
     if state.run.result is None or state.run.result != result:
         message = "the log ends a run with a result the run does not hold"
         raise ValueError(message)
-    if any(is_open(row) for row in state.records.records):
-        message = "the log ends a run that still has a step open"
+    if state.run.status is not RunStatus.TERMINAL:
+        message = "the log ends a run that is not over"
         raise ValueError(message)
     return state.model_copy(update={"steps": state.steps.model_copy(update={"ended": result})})
+
+
+def end_lifted(state: CoreState) -> CoreState:
+    """``state`` without the end of a run that holds no result: a resume reopened it.
+
+    The end stands for the result it published, in the epoch the run was over. A run stopped again
+    gets the same result, and its end is a new one the log has to record.
+    """
+    if state.steps.ended is None or state.run.result is not None:
+        return state
+    return state.model_copy(update={"steps": state.steps.model_copy(update={"ended": None})})
+
+
+def reported_by(state: CoreState, tag: RequestId, attempt: int) -> None:
+    """Refuse a finish that names an attempt other than the latest the step began.
+
+    A step settled without an attempt (a limit that passed in the queue) names the attempt it had.
+    """
+    row = state.steps.of(tag)
+    latest = 0 if row is None else row.started
+    if attempt != latest:
+        message = f"the log finishes attempt {attempt} of step {tag.root}, whose latest is {latest}"
+        raise ValueError(message)
 
 
 def open_step(state: CoreState, tag: RequestId) -> OpenStep | None:

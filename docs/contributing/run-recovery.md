@@ -526,10 +526,12 @@ like any other; whether cleanup should instead outlive the finish is left to the
 
 #### Rest, drain, end and resume
 
-Four facts of the rule the loop depends on, each held by `libs/vs-core/tests/test_recovery_gaps.py` and,
-over generated trajectories, by `test_recovery_progress.py`: the fold accepts the record of every action
-`decide` returns, applying an action changes the state, no `Wait` is already due, and a run left to
-cooperative runners comes to rest.
+The facts of the rule the loop depends on, each held by `libs/vs-core/tests/test_recovery_gaps.py` and,
+over generated trajectories, by `test_recovery_progress.py` over every kind of step, a lagging loop and the seeds a restart finds, and
+named one by one in `test_recovery_findings.py`: the fold accepts the record of every action `decide`
+returns, applying an action changes the state, no `Wait` is already due, a control the log holds does what
+it says or was refused to its sender, and a run left to cooperative runners comes to rest and records each
+end.
 
 - **Parked is at rest, and a recorded result is never dropped.** A parked epoch ignores what is offered
   to it (`parked_epoch_drops`). That is a filter on live input. A fact the log holds is history, and the
@@ -537,17 +539,23 @@ cooperative runners comes to rest.
   drop. `decide` settles nothing in a parked run, so it never asks for a result the kernel would ignore;
   it still cancels an attempt the park found running, because the kernel can park at a Pause now before
   the loop has stopped what runs, and a flight nothing cancels would hold the process up.
-- **A draining pause parks when no attempt runs.** An attempt that ends without a result (an
+- **A draining pause parks when nothing it waits for is left.** An attempt that ends without a result (an
   interruption, a raise, a crash into a new epoch) returns its step to the state of a step no one has
   started, as a drain that interrupts a request does (`resent`), and the fold then advances the drain
-  (`settle_park`): the run is `PARKED` once nothing it waits for is left. `RunPark.deadline_at` comes
+  (`settle_park`): the run is `PARKED` once nothing it waits for is left. What a drain waits for is the
+  question `decide` asks of a prepared step, `_run_park.starts` (dependencies met, the status admits it,
+  no step of its scope must end first), so a step the rule holds back can never keep a pause from
+  parking. `RunPark.deadline_at` comes
   from the pause's `drain_seconds`; `decide` cancels with `DRAIN_EXPIRED` once it has passed. The open
   step stays open and runs again, uncharged, in the epoch that resumes the run.
 - **The end of a run is a record.** A stop with nothing open takes the kernel to its terminal status at
   once, before anyone has published the result. `RunEnded` is that publication: the loop appends it on
-  `End`, `at_rest` reports `ENDED` only when it is in the log, and it stands only while the run still
-  holds that result, so a resumed run is not ended. The fold refuses a `RunEnded` with a step open or
-  with a result the run does not hold.
+  `End`, which `decide` returns only once the kernel is terminal. `at_rest` reports `ENDED` only when
+  the record is in the log, and it stands only while the run still holds that result: a resume clears
+  it (`end_lifted`), so a run stopped again with the same result records a second end. The kernel
+  notices that the last step has its result at its next clock input, which a live shell sends on a
+  timer and a fold has not, so the fold applies that wake after each record (`settle_end`). The fold
+  refuses a `RunEnded` while the run is not over or with a result the run does not hold.
 - **A parked run resumes only in a later epoch.** A pause exits the process, so the park lasts for the
   rest of the epoch it was made in, and the kernel refuses a resume there ("pause is terminal for this
   epoch"). Resume is a relaunch: the new process opens the next epoch (`EpochStarted`), which moves the
@@ -561,8 +569,41 @@ cooperative runners comes to rest.
 - **A drain with only held calls left ends with the process.** A held call ignored its cancel and its
   task's cancellation, and the loop records nothing about its tag while it runs. The drain cannot finish
   in that process, so the loop returns `PARKED` as a parked run does; the caller exits, the call dies with
-  the process, and the next process's log ends the attempt (charged as a crash), parks the drain and
-  admits the Resume.
+  the process, and the next process's log ends the attempt, parks the drain and admits the Resume.
+- **A run may park with an attempt the loop still runs, and the epoch end ends it.** A drain that cancels
+  (a Pause now, or a pause past its deadline) does not wait for the attempt that runs a request
+  (`_holds_park`): `decide` cancels it in the parked run, and a call that ignores the cancel dies with the
+  process. The first record of the next epoch ends that attempt as interrupted, not charged like a crash
+  (`epoch_opened`), because the pause ended it; one a draining run held when it died is charged. A
+  parked run therefore never holds an attempt that nothing will end.
+- **A step's limit is its own.** A drain caps the request it cannot interrupt at its deadline plus the
+  cleanup bound, and the cap belongs to the attempt in flight. `StepAttempts.deadline_at` keeps the limit
+  the first attempt started with, and whoever returns the step to unstarted (the fold, on the record of
+  the attempt's end, or the drain, which lets a job go at once) gives it back (`unstarted`), so a step
+  that was paused and resumed has the limit it would have had.
+- **A pause leaves the jobs of a loop-hosted run alone.** The request that watches a job goes back to
+  unstarted, the job runs on, and the next epoch runs the request again, where its runner finds the job
+  with `clear` and attaches to it. The kernel issues no cancel of a job and holds no park for it. A run
+  hosted by the executors of the layer being replaced (`steps.epoch == 0`) keeps the park's cancellation
+  of its jobs until the cutover removes them.
+- **A stop ends a run in a pause.** A draining or a parked run holds its search still, but the operator's
+  stop is not the search's: it takes the `Finish` through `takes_command(stopping=True)`, closes the park
+  and ends the run, instead of a rejected decision no one hears of.
+- **A seed is settled once, and the log numbers its own epochs.** The first epoch the fold opens starts
+  a numbering of its own, so a seed's host epoch and the park it holds are older than any record that
+  follows (otherwise the first Resumes are refused until the log catches up with the seed). What an
+  earlier version left in flight is settled the way this version reads it: an inspection, a cancel or a
+  block still open lapses (nothing here sends them), and a step in flight with no attempt in the log
+  goes back to unstarted. The kernel registers such commands again when a limit passes under a clock
+  input; the fold lapses them after each input.
+- **A step core ended itself is concluded the way any step ends.** A clock input past a step's limit ends
+  it in the kernel while the loop's attempt may still run. `decide` cancels the flight (or settles a step
+  with none) until the runner's end of the attempt concludes it, which is what releases a job or a turn it
+  owns, so a stopped run can close; the fold keeps a late report of such an attempt as history, not as a
+  result.
+- **The log is read as strictly as it is written.** A `StepFinished` names the latest attempt the step
+  began, a `RunEnded` a run that is over, and an interruption or cancel reason the version knows; the
+  fold refuses the rest with a `ValueError`, never a `KeyError`.
 
 - **The log holds only starts the rule would run.** A flight that waited for its `clear` while the run
   paused or parked would record a start into a parked run, leaving an attempt that nothing cancels. The
@@ -578,14 +619,15 @@ and the attempts that began. The loop reads it from core instead of rebuilding i
 A snapshot of a half-written tree is the one effect `clear` cannot undo, and `clear` cannot prevent
 it either: a process carries the tag of its own step, so the snapshot's `clear` has no tag to reap by.
 The rule orders the steps of one scope instead (`vs_core/_scope_order.py`). `request_effect` classifies
-every request kind as `WRITES`, `SNAPSHOTS` or `NEITHER`, beside `request_lifecycle`, so the rule names
-no kind:
+every request kind as `WRITES`, `SNAPSHOTS`, `CLOSES` or `NEITHER`, beside `request_lifecycle`, so the
+rule names no kind:
 
 - `SNAPSHOTS`: `SnapshotAndRetain`, `SnapshotAndRetainRun`, `RetainRevision`, and a registered
   operation whose descriptor has a revision authority of snapshot or retain;
 - `WRITES`: a turn whose session is not read-only, `EnsureWorkspace`, `RestoreRevision`, and a
   registered operation that is not a query, or that has no descriptor, because a descriptor does not
   yet declare whether it touches the tree;
+- `CLOSES`: `CloseAttemptScope`;
 - `NEITHER`: every other kind.
 
 A `SNAPSHOTS` step runs only while no `WRITES` step of its scope is open, and a `WRITES` step starts
@@ -593,7 +635,12 @@ only while no `SNAPSHOTS` step of its scope has a running attempt. Open means no
 attempt a pause interrupted, a runner raised or a crash ended still holds the scope back, because its
 files are half written and its next attempt resets them before it runs. A writer that depends on the
 snapshot, directly or through other steps, cannot end before it and does not hold it back. A snapshot
-blocked this way still ends: every writer has a limit, and the snapshot's own limit settles it. What
+blocked this way still ends: every writer has a limit, and the snapshot's own limit settles it. A
+`CLOSES` step runs only when every other step of its scope has a result, because a step that began
+before the close and reports its job after it would leave that job running with no one to cancel it;
+a step that waits for the close itself does not hold it back. The close waits for a running step to end
+by itself or at its limit: the rule does not withdraw the work of a closing scope, because nothing kind-free
+yet tells work whose result is no longer wanted from the cleanup the close depends on. What
 is missing for a precise rule is a declaration on `OperationDescriptor` of whether an operation
 writes the tree; until then every operation that is not a query counts as a writer, which only delays
 a snapshot. `libs/vs-core/tests/test_recovery_scope_order.py` holds the rule over generated states.

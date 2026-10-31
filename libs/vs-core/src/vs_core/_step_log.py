@@ -158,8 +158,17 @@ def interrupted_message(tag: RequestId, attempt: int, why: Interruption) -> Atte
 
 
 def decode_interruption(message: AttemptInterrupted) -> Interruption:
-    """Why the attempt of an ``AttemptInterrupted`` ended."""
-    return _INTERRUPTION_NAMES[message.reason]
+    """Why the attempt of an ``AttemptInterrupted`` ended, refused when this version has no such reason."""
+    return _known(_INTERRUPTION_NAMES, message.reason, "an interruption")
+
+
+def _known[S, T](names: dict[S, T], stored: S, what: str) -> T:
+    """The reason ``stored`` names, or a refusal of a log that holds one this version does not know."""
+    try:
+        return names[stored]
+    except KeyError:
+        message = f"the log holds {what} ({stored!r}) this version does not know"
+        raise ValueError(message) from None
 
 
 def ended_message(end: End) -> RunEndedRecord:
@@ -199,7 +208,7 @@ def decode_result(message: StepFinished, registry: OperationRegistry | None) -> 
         case Oneof(field="failed", value=failure):
             return Failed.model_validate_json(failure)
         case Oneof(field="cancelled", value=reason):
-            return Cancelled(reason=_CANCEL_NAMES[reason])
+            return Cancelled(reason=_known(_CANCEL_NAMES, reason, "a cancel reason"))
         case _:
             message_ = "a step result names finished, failed or cancelled"
             raise ValueError(message_)

@@ -5,6 +5,11 @@ runs only when every writer of its scope has a result, and a writer starts only 
 of its scope runs. A writer that was interrupted has no result either, so a snapshot waits for
 it to run again and end; its partial writes are reset by ``clear`` before that attempt, never
 retained. A writer that depends on the snapshot cannot end before it, so it does not hold it back.
+
+Closing a scope reads the registry of what the scope holds (its jobs, its sessions) and fences the
+rest, so the close runs only when every other step of its scope has a result: a step that began
+before the close and reports its job after it would leave that job running with no one to cancel it.
+A step that waits for the close itself cannot end before it, and does not hold it back.
 """
 
 from __future__ import annotations
@@ -32,6 +37,8 @@ def holds_back(state: CoreState, record: RequestRecord) -> bool:
         and row.request_id != record.request_id
         and row.request.scope == record.request.scope
     ]
+    if effect is StepEffect.CLOSES:
+        return any(not _follows(state, row, record.request_id) for row in siblings)
     if effect is StepEffect.SNAPSHOTS:
         return any(
             request_effect(row.request, state.registry) is StepEffect.WRITES

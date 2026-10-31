@@ -7,7 +7,7 @@ bounded batch and uses HTTP/2 flow control.
 
 The existing Python host helper and per-run byte relay remain in use by the
 current desktop. This binary supplies Hello, Tail, Skeleton, WatchRuns,
-GetBlobs and TailStream for the new client integration.
+GetBlobs, TailStream and Subscribe for the new client integration.
 
 ## Run
 
@@ -21,7 +21,8 @@ go build -o /tmp/vibesysd ./cmd/vibesysd
 Both commands accept `--root PATH`, the host's `.vibesys` directory, which
 normally defaults to `~/.vibesys`. `serve --idle-timeout 10m` sets the period
 with no open transport connections before shutdown. Open connections, even
-without active RPCs, keep it alive.
+without active RPCs, keep it alive, and keepalive (a ping after 30 s of
+silence, then 10 s for its acknowledgement) ends one that has gone half-open.
 
 `connect` dials the same socket and pipes stdin and stdout unchanged. If needed,
 it starts the same executable with `serve` in a detached session and waits up
