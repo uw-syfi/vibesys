@@ -48,20 +48,20 @@ once. An **open step** is a step with no result. An **epoch** is one process lif
 
 | Part | Status |
 |---|---|
-| Core inputs as log records: `CoreInput`, `StepStarted`, `StepFinished`, `AttemptInterrupted`, and the confirmed append in `vs_runlog` | built, dormant (#3475 item 4a) |
-| `RunStarted` (the seed of a fold) and `StrategyAdvanced` (one advance of the search) records, `RunLogStepLog`, `CoreInputs`, `StepRouter`, one appender and one lock for the run's records | built and dormant, run in simulation by `vs_dst.StepLoopHosting` (PR 6a-2) |
-| `CoreSnapshot` record, the seed of a migrated run, and `vibesys.run.store_migration`, the one-time migration of a run's `store.json` into it | built and dormant (PR 6a-3m); the migration is deleted seven days after the cutover ships |
-| `fold(log)` and `decide(state, now) -> actions` in `vs_core` | built, dormant (#3475 item 4a) |
-| Parked, draining, ended and resumed runs in the fold: the `RunEnded` record, `open_step`, the park advance (#3475, core gaps) | built, dormant |
-| Runner loop, `StepRunner` Protocol, `FakeStepRunner`, contract suite | built and dormant: `vs_runtime.api.step_runner` and `vs_runtime.api.testing`; no run selects it (#3475 item 4b) |
-| Runners: agent turn (`DispatchTurn`, `ResumeSessionTurn`, registered `SESSION_TURN` operations) and workspace | built, dormant: `vs_runtime.api.agent_step_runners`, with `vs_agent.reap_step_agents` and `AgentSessions.forget_unfinished` beneath them (#3475 item 5a). [Which runner owns each request kind](#the-runner-of-each-request-kind) names the 13 kinds with no owner |
-| Runners: Slurm and local evaluation (`SlurmJobStepRunner`, `LocalJobStepRunner`) | built and dormant; the local runner reaps what a dead process left through a `StageWorkReaper`: `ProcessStageWorkReaper` ends the stage processes and `ContainerStageWorkReaper` the Docker candidate containers of the tag, both found by the step mark (see [Marks](#marks-on-local-stage-work)) |
-| Runners: registered operation and adoption | built and dormant: `vs_runtime.api.operation_step_runner` and `vs_runtime.api.adoption_step_runner`, each in the contract suite (#3475 item 5c) |
-| Runner of the 13 executor kinds: `ExecutorStepRunner` | built and dormant: `vs_runtime.api.executor_step_runner`, in the contract suite for every kind (#3475 item 5d) |
-| Per-environment `clear` (Docker, SkyPilot, Modal, Slurm, Host) | built, dormant: `RunEnvironment.agent_work_reaper` (#3475 item 5e); every environment clears an agent step, the Host environment on macOS through a leader that carries the mark, see [open risks](#open-risks) |
+| Core inputs as log records: `CoreInput`, `StepStarted`, `StepFinished`, `AttemptInterrupted`, and the confirmed append in `vs_runlog` | in use (#3475 item 4a) |
+| `RunStarted` (the seed of a fold) and `StrategyAdvanced` (one advance of the search) records, `RunLogStepLog`, `CoreInputs`, `StepRouter`, one appender and one lock for the run's records | in use; also run in simulation by `vs_dst.StepLoopHosting` (PR 6a-2) |
+| `CoreSnapshot` record, the seed of a migrated run, and `vibesys.run.store_migration`, the one-time migration of a run's `store.json` into it | in use (PR 6a-3m); the migration is deleted seven days after the cutover ships |
+| `fold(log)` and `decide(state, now) -> actions` in `vs_core` | in use (#3475 item 4a) |
+| Parked, draining, ended and resumed runs in the fold: the `RunEnded` record, `open_step`, the park advance (#3475, core gaps) | in use |
+| Runner loop, `StepRunner` Protocol, `FakeStepRunner`, contract suite | in use: `vs_runtime.api.step_runner` and `vs_runtime.api.testing`; every run selects it (#3475 item 4b, PR 6a-3) |
+| Runners: agent turn (`DispatchTurn`, `ResumeSessionTurn`, registered `SESSION_TURN` operations) and workspace | in use: `vs_runtime.api.agent_step_runners`, with `vs_agent.reap_step_agents` and `AgentSessions.forget_unfinished` beneath them (#3475 item 5a). [Which runner owns each request kind](#the-runner-of-each-request-kind) names the 13 kinds with no owner |
+| Runners: Slurm and local evaluation (`SlurmJobStepRunner`, `LocalJobStepRunner`) | in use; the local runner reaps what a dead process left through a `StageWorkReaper`: `ProcessStageWorkReaper` ends the stage processes and `ContainerStageWorkReaper` the Docker candidate containers of the tag, both found by the step mark (see [Marks](#marks-on-local-stage-work)) |
+| Runners: registered operation and adoption | in use: `vs_runtime.api.operation_step_runner` and `vs_runtime.api.adoption_step_runner`, each in the contract suite (#3475 item 5c) |
+| Runner of the 13 executor kinds: `ExecutorStepRunner` | in use: `vs_runtime.api.executor_step_runner`, in the contract suite for every kind (#3475 item 5d) |
+| Per-environment `clear` (Docker, SkyPilot, Modal, Slurm, Host) | in use: `RunEnvironment.agent_work_reaper` (#3475 item 5e); every environment clears an agent step, the Host environment on macOS through a leader that carries the mark, see [open risks](#open-risks) |
 | Pause drains within a deadline and records `Parked` | in progress (#3475 item 1) |
 | `vs-dst` kills and pauses at every log write and every await | built; `StepLoopHosting` runs the production loop for all five searches (PR 6a-2). Every kill resumes to the uninterrupted result, and so does a resumed host paused again (`interrupt(point, then=...)`); the pause groups that still fail on a core finding are named in `tests/system/crash/test_never_stuck.py` |
-| `state.pb` as a cache of the fold: `FoldCache` in `vs_runlog`, the start from it and its writes in `RunLogStepLog` | built and dormant (PR 6a-3m); the one-append commit is the log's `ConfirmedLog` |
+| `state.pb` as a cache of the fold: `FoldCache` in `vs_runlog`, the start from it and its writes in `RunLogStepLog` | in use (PR 6a-3m); the one-append commit is the log's `ConfirmedLog` |
 | Prove-or-block layer ([inventory](#consumer-inventory)) | built; deleted at the cutover |
 | Keyed replay, parts 1 to 7a | deleted (the `vs_runtime` driver, the `vs_core` flows and `api/replay.py`, `serial_replay.py` and their tests); the protos and `RunLogReplayStore` stay until 6b (see [what of keyed replay stays](#what-of-keyed-replay-stays)) |
 | Keyed replay, parts 7b to 9 | not built, and not needed by this design |
@@ -194,18 +194,18 @@ lands it. "Executor step" below means a step that runs on its role's existing ex
 
 | Group | Kind | Runner | State |
 |---|---|---|---|
-| Session | `DispatchTurn` | `AgentTurnStepRunner` | built, dormant (5a) |
-| Session | `ResumeSessionTurn` | `AgentTurnStepRunner` | built, dormant (5a) |
-| Operation | `ExecuteRegisteredOperation` of lifecycle `SESSION_TURN` | `AgentTurnStepRunner`, through an `OperationTurns` the wiring supplies | built, dormant (5a); the wiring is 6a |
+| Session | `DispatchTurn` | `AgentTurnStepRunner` | in use (5a) |
+| Session | `ResumeSessionTurn` | `AgentTurnStepRunner` | in use (5a) |
+| Operation | `ExecuteRegisteredOperation` of lifecycle `SESSION_TURN` | `AgentTurnStepRunner`, through an `OperationTurns` the wiring supplies | in use (5a), wired by `vibesys.run.step_runners` (PR 6a-3) |
 | Operation | `ExecuteRegisteredOperation` of lifecycle `OWNED_JOB` | `SlurmJobStepRunner` or `LocalJobStepRunner` | 5b |
-| Operation | `ExecuteRegisteredOperation` of lifecycle `QUERY` or `IDEMPOTENT_WRITE` | `OperationStepRunner` | built, dormant (5c) |
+| Operation | `ExecuteRegisteredOperation` of lifecycle `QUERY` or `IDEMPOTENT_WRITE` | `OperationStepRunner` | in use (5c) |
 | Evaluation | `SubmitMeasurement` | `SlurmJobStepRunner` or `LocalJobStepRunner` | 5b |
-| Adoption | `AdoptRevision`, `VerifyAdoption` | `AdoptionStepRunner` | built, dormant (5c) |
-| Workspace | `EnsureWorkspace`, `RestoreRevision`, `DiscardWorkspace`, `CloseAttemptScope` | `ExecutorStepRunner` | built, dormant (5d) |
-| Workspace | `SnapshotAndRetain`, `RetainRevision` | `ExecutorStepRunner`; they need their scope's writers ended first | built, dormant (5d) |
-| Session | `EnsureSession`, `CancelTurn`, `CloseSession` | `ExecutorStepRunner` | built, dormant (5d) |
-| Session | `SnapshotAndRetainRun` | `ExecutorStepRunner`; it needs the run's writers ended first | built, dormant (5d) |
-| Evaluation | `ObserveOwnedJob`, `CollectEvidence`, `CancelOwnedJob` | `ExecutorStepRunner` | built, dormant (5d) |
+| Adoption | `AdoptRevision`, `VerifyAdoption` | `AdoptionStepRunner` | in use (5c) |
+| Workspace | `EnsureWorkspace`, `RestoreRevision`, `DiscardWorkspace`, `CloseAttemptScope` | `ExecutorStepRunner` | in use (5d) |
+| Workspace | `SnapshotAndRetain`, `RetainRevision` | `ExecutorStepRunner`; they need their scope's writers ended first | in use (5d) |
+| Session | `EnsureSession`, `CancelTurn`, `CloseSession` | `ExecutorStepRunner` | in use (5d) |
+| Session | `SnapshotAndRetainRun` | `ExecutorStepRunner`; it needs the run's writers ended first | in use (5d) |
+| Evaluation | `ObserveOwnedJob`, `CollectEvidence`, `CancelOwnedJob` | `ExecutorStepRunner` | in use (5d) |
 | Reconciliation | `InspectRequest`, `CancelOwnedResource`, `BlockRequest` | none: deleted | deleted at the cutover |
 | Session | `InspectTurn` | none: deleted | deleted at the cutover |
 | Evaluation | `InspectOwnedJob` | none: deleted | deleted at the cutover |
