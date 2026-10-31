@@ -2,7 +2,11 @@ import {expect, test} from 'bun:test';
 import {create} from '@bufbuild/protobuf';
 import {timestampFromMs} from '@bufbuild/protobuf/wkt';
 import {SUBSCRIPTION_LINGER_MS, Subscriptions} from '@vibesys/connection';
-import {type FakeSubscribeStream, FakeSubscribeStreams} from '@vibesys/connection/testing';
+import {
+  type FakeSubscribeStream,
+  FakeSubscribeStreams,
+  hubPortRig,
+} from '@vibesys/connection/testing';
 import {
   decodeGatewayReply,
   type GatewayPortBridge,
@@ -12,6 +16,7 @@ import {
 } from '@vibesys/ipc';
 import {MachineStatsSchema, TopicEntrySchema} from '@vibesys/proto';
 import {machineStats, type SubscriptionState, subscriptionSource} from '@vibesys/subscription';
+import {subscriptionPortContract} from '@vibesys/subscription/contract';
 import {FakeClock} from '@vibesys/transport/testing';
 import {
   type PortEnd,
@@ -324,4 +329,12 @@ test('a page that main does not admit sees failed closed, and no stream opens', 
   await settle();
   expect(source.getSnapshot()).toEqual({kind: 'failed', reason: 'closed', retrying: false});
   expect(gateway.streams).toHaveLength(0);
+});
+
+/** The window's bridge, over the page's port and `servePort`, to the hub: the same contract. */
+subscriptionPortContract('subscriptionBridge over servePort and the hub', () => {
+  const {hub, far} = hubPortRig();
+  const ipc = new FakeIpc();
+  installSubscriptionIpc(ipc, {hub: hub.port, admits: () => true});
+  return {port: subscriptionBridge(preloadOver(ipc, new FakeSender(), [])), far};
 });

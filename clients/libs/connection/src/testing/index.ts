@@ -32,5 +32,6 @@ export {
   FakeSubscribeStreams,
   idleSubscriptions,
 } from './fake-subscribe-streams.js';
+export {hubPortRig} from './hub-port-rig.js';
 export {commandOf, olderHost} from './older-host.js';
 export {phaseReached} from './phase-reached.js';

@@ -7,7 +7,8 @@
     "layer": "domain",
     "entries": {
       ".": "neutral",
-      "./testing": "neutral"
+      "./testing": "neutral",
+      "./contract": "neutral"
     }
   },
   "exports": {
@@ -20,6 +21,11 @@
       "@vibesys/source": "./src/testing/index.ts",
       "types": "./dist/testing/index.d.ts",
       "default": "./dist/testing/index.js"
+    },
+    "./contract": {
+      "@vibesys/source": "./src/testing/port-contract.ts",
+      "types": "./dist/testing/port-contract.d.ts",
+      "default": "./dist/testing/port-contract.js"
     }
   },
   "files": [

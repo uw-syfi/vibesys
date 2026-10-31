@@ -1,4 +1,5 @@
 /** A fake `SubscriptionPort`: the test plays main, sending updates and ending the port. */
+export {type GpuReading, machineEntry, type Readings} from './entries.js';
 import type {HostKey} from '@vibesys/hosts';
 import type {SubscribeRequest} from '@vibesys/proto';
 import type {SubscriptionPort, SubscriptionUpdate} from '../index.js';
@@ -11,6 +12,13 @@ export interface FakePortCall {
   readonly open: boolean;
   send(update: SubscriptionUpdate): void;
   end(error?: string): void;
+}
+
+function hears(key: string | undefined, update: SubscriptionUpdate): boolean {
+  if (key === undefined) return true;
+  if (update.kind === 'entry') return update.entry.key === key;
+  if (update.kind === 'removed') return update.key === key;
+  return true;
 }
 
 export class FakeSubscriptionPort implements SubscriptionPort {
@@ -28,7 +36,8 @@ export class FakeSubscriptionPort implements SubscriptionPort {
         return open;
       },
       send: update => {
-        if (open) receive(update);
+        // A keyed observation hears only its key's entries and removals, as main sends them.
+        if (open && hears(key, update)) receive(update);
       },
       end: error => {
         if (!open) return;
