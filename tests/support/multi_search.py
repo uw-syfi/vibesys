@@ -8,24 +8,17 @@ ledger the same way, without driving a run.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
-from protobuf import Oneof
+from tests.support.logged_run import write_logged_run
 from tests.vibesys.orchestration.multi._host import MultiHost, config
 
 from vibesys.orchestration.multi.search.api import multi
-from vs_core.api.recovery import seed_message
 from vs_core.testing.builders import initial_state
-from vs_project.api import Project
-from vs_proto.api import EpochStarted, Record, StrategyAdvanced, Timestamp
-from vs_runlog.api import FileRunLogWriter
-from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from vibesys.hypothesis.state import HypothesisState
-
-AT = Timestamp.from_datetime(datetime(2026, 8, 11, 12, 34, 56, tzinfo=UTC))
+    from vs_project.api import Project
 
 
 class SearchRecord:
@@ -37,7 +30,7 @@ class SearchRecord:
         self._run_id = run_id
 
     def save(self, search: HypothesisState) -> None:
-        """Append a process that starts the run if the log holds none, then a whole search state."""
+        """Append a whole search state whose published ledger is ``search``."""
         started = MultiHost.start(config(), restarting=False).run.state
         state = started.model_copy(
             update={"live": started.live.model_copy(update={"published": search.model_dump_json()})}
@@ -46,41 +39,7 @@ class SearchRecord:
         core = core.model_copy(
             update={"run": core.run.model_copy(update={"declaration": multi.declaration})}
         )
-        log = Project.run_log_path_for(self._project.root, self._run_id)
-        log.parent.mkdir(parents=True, exist_ok=True)
-        with FileRunLogWriter(log, clock=ManualClock(), threads=SimThreads()) as writer:
-            epoch = writer.epoch + 1
-            fresh = writer.sequence == 0
-
-            def stamped(body: Oneof[Literal["epoch_started"], EpochStarted]) -> Record:
-                return Record(seq=writer.sequence + 1, epoch=epoch, at=AT, clock=0.0, body=body)
-
-            writer.append(stamped(Oneof("epoch_started", EpochStarted(epoch=epoch))))
-            if fresh:
-                writer.append(
-                    Record(
-                        seq=writer.sequence + 1,
-                        epoch=epoch,
-                        at=AT,
-                        clock=0.0,
-                        body=Oneof("run_started", seed_message(core)),
-                    )
-                )
-            writer.append(
-                Record(
-                    seq=writer.sequence + 1,
-                    epoch=epoch,
-                    at=AT,
-                    clock=0.0,
-                    body=Oneof(
-                        "strategy_advanced",
-                        StrategyAdvanced(
-                            schema_version=1,
-                            strategy=Oneof("checkpoint", state.model_dump_json().encode()),
-                        ),
-                    ),
-                )
-            )
+        write_logged_run(self._project, self._run_id, core, state)
 
 
 __all__ = ["SearchRecord"]
