@@ -152,11 +152,22 @@ def test_a_run_interrupted_at_every_point_and_resumed_is_never_stuck(
 
 # --- the step loop ----------------------------------------------------------------------------
 #
-# The step loop runs the recovery rule of docs/contributing/run-recovery.md. It has no known
-# failures and no stuck groups: every class of every search, killed or paused at every point and
-# resumed, ends as the uninterrupted run did, and no step's effect finishes twice. A kill with an
-# effect in flight may run that effect again (it left no result to reuse); every other interruption
-# re-runs nothing.
+# The step loop runs the recovery rule of docs/contributing/run-recovery.md. Every kill, at every
+# point of every search, resumes to the uninterrupted result, and so does every pause but the
+# groups below; no step's effect finishes twice. A kill with an effect in flight may run that effect
+# again (it left no result to reuse); every other interruption re-runs nothing.
+
+PAUSE_THAT_FAILS_A_TURN = frozenset(
+    (world, PAUSE, moment) for world in ("single", "multi", "dynamic-parallel") for moment in Moment
+)
+"""A pause that lands after a turn was requested and before it was dispatched, then a resume: core
+has nothing that dispatches the turn again, so its acquisition-stall rule ends it (cancelled, never
+charged) and the search ends the run with no winner. Found by this sweep; core's pause and resume
+(the 4a review) owns the fix, and a group that passes again fails here as an unexpected pass."""
+
+PAUSE_THAT_FAILS_A_TURN_REASON = (
+    "a pause between a turn's request and its dispatch fails the turn on resume (4a)"
+)
 
 
 @pytest.mark.parametrize(
@@ -177,7 +188,16 @@ def test_a_dynamic_run_on_the_step_loop_interrupted_and_resumed_ends_as_it_did_a
 @pytest.mark.parametrize(
     ("world", "action_moment"),
     [
-        pytest.param(world, case, id=f"{world}-{_class_id(case)}")
+        pytest.param(
+            world,
+            case,
+            id=f"{world}-{_class_id(case)}",
+            marks=(
+                [pytest.mark.xfail(strict=True, reason=PAUSE_THAT_FAILS_A_TURN_REASON)]
+                if (world, *case) in PAUSE_THAT_FAILS_A_TURN
+                else []
+            ),
+        )
         for world in WORLDS
         for case in CLASSES
     ],

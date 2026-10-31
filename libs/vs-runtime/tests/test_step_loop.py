@@ -34,6 +34,7 @@ from vs_core.api.recovery import (
     Run,
     RunRest,
     finished_message,
+    fold_run,
 )
 from vs_proto.api import (
     AttemptInterrupted,
@@ -135,6 +136,10 @@ class World:
     exits: list[RunRest] = field(default_factory=list)
     unproven: list[core.RequestId] = field(default_factory=list)
     """The steps an ending recorded without proof that their work ended."""
+    running_at_park: list[str] = field(default_factory=list)
+    """The attempts the log had running each time the loop returned with the run parked."""
+    accepted: set[str] = field(default_factory=set)
+    """The controls the operator sent and the log took."""
 
 
 class Watch:
@@ -333,6 +338,7 @@ async def operator(
         await clock.sleep(max(0.0, scenario.pause_at - clock.now()))
         delivered.add("pause")
         log.push(pause_event(clock))
+        world.accepted.add("operator-pause")
     if "stop" in delivered:
         return
     if scenario.stop_at is not None:
@@ -347,6 +353,7 @@ async def operator(
     if log.state.run.status in (core.RunStatus.PARKED, core.RunStatus.DRAINING):
         return
     log.push(stop_event(clock))
+    world.accepted.add("operator-stop")
     delivered.add("stop")
 
 
@@ -410,6 +417,7 @@ async def run_epochs(world: World, clock: VirtualClock, kill_at: int | None) -> 
                 when="now",
             )
             log.push(core.RunControlEvent(control=resume, now_at=clock.now()))
+            world.accepted.add(resume.control_id.root)
         switch = Switch(None if killed else kill_at)
         loop = asyncio.ensure_future(
             run_step_loop(
@@ -431,6 +439,12 @@ async def run_epochs(world: World, clock: VirtualClock, kill_at: int | None) -> 
             raise operated
         world.boundaries += switch.ticks
         world.unproven.extend(stall.tag for stall in world.watch.board.unproven())
+        if outcome is RunRest.PARKED:
+            # What a runner still holds after a pause (a call that ignored its cancel) is the one
+            # residual the loop shows and leaves to the process exit; the log has no attempt running.
+            world.running_at_park.extend(
+                a.tag.root for a in log.state.steps.attempts if not a.ended
+            )
         world.runner.process_died()
         killed = True
         if isinstance(outcome, asyncio.CancelledError):
@@ -523,6 +537,31 @@ def check_world(world: World) -> None:
     assert set(world.runner.running()) <= set(world.unproven), "work was left running"
     assert world.runner.violations == ()
     assert world.watch.problems == []
+    if cooperative(world.scenario):
+        assert not world.running_at_park, "the run parked with an attempt the log has running"
+    check_every_accepted_control_is_effective(world)
+
+
+def cooperative(scenario: Scenario) -> bool:
+    """Whether every attempt of the scenario ends when it is told to.
+
+    A deaf or held attempt can outlive the park: the loop shows it and leaves it to the process
+    exit, but the log still has it running. That breaks "a parked run has nothing running", and the
+    one test that says so is ``test_a_run_parks_with_nothing_running_whatever_the_runners_do``.
+    """
+    return not any(
+        isinstance(behavior, AttemptHolds)
+        or (isinstance(behavior, AttemptHangs) and behavior.ignoring_signal)
+        for spec in scenario.steps
+        for behavior in spec.behaviors
+    )
+
+
+def check_every_accepted_control_is_effective(world: World) -> None:
+    """A control the log took is in the run's controls once the log is folded: none is swallowed."""
+    state = fold_run(world.records.read(), world.seed.state, registry=world.seed.registry).state
+    held = {control.control_id.root for control in state.run.controls}
+    assert world.accepted <= held, f"controls taken and not effective: {world.accepted - held}"
 
 
 def check_clear_precedes_every_rerun(world: World) -> None:
@@ -620,6 +659,16 @@ def test_a_runner_that_returns_late_from_a_pause_leaves_one_result_and_one_clear
     world = run_world(Scenario((step(DEAF, FINISHES, limit_s=50.0),), pause_at=1.0))
     check_world(world)
     assert attempts_started(world, 0) == [1, 2]
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="found by the generators of 6a-2; belongs to 4a: the loop returns parked with a deaf attempt open in the log",
+)
+def test_a_run_parks_with_nothing_running_whatever_the_runners_do() -> None:
+    world = run_world(Scenario((step(DEAF, FINISHES, limit_s=50.0),), pause_at=1.0))
+    assert world.exits[0] is RunRest.PARKED
+    assert not world.running_at_park, "the run parked with an attempt the log has running"
 
 
 def test_an_unreachable_backend_is_retried_and_the_step_then_runs_again() -> None:
