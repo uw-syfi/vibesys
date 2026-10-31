@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -24,6 +25,13 @@ import (
 
 // HeartbeatInterval is the longest gap between frames on a healthy stream.
 const HeartbeatInterval = 5 * time.Second
+
+// StopGrace is how long a producer may take to return once it is cancelled. A
+// source that ignores its context cannot be killed, so past this the hub stops
+// waiting: it fails the subscribers that waited and refuses new ones with a typed
+// failure, until the stuck source returns. It stays under every topic's first
+// frame bound, so a subscriber hears the failure before it would give up.
+const StopGrace = 5 * time.Second
 
 const (
 	// MaxPerConnection and MaxPerGateway cap open subscriptions.
@@ -41,9 +49,11 @@ type Sink[V proto.Message] interface {
 	Synced()
 }
 
-// Source produces one topic's facts. Run returns when ctx ends. Any earlier
-// return ends the stream for every subscriber: an error as SOURCE_FAILED, or
-// its own code through Failure, and a panic as INTERNAL.
+// Source produces one topic's facts. Run returns when ctx ends, within
+// StopGrace. Any earlier return ends the stream for every subscriber: an error
+// as SOURCE_FAILED, or its own code through Failure, and a panic as INTERNAL.
+// A Run that never returns costs one goroutine and blocks its topic instance
+// until it does: new subscribers get a typed failure, and nothing overlaps it.
 type Source[V proto.Message] interface {
 	Run(ctx context.Context, sink Sink[V]) error
 }
@@ -89,11 +99,19 @@ func (t Topic[V]) registration() registered {
 }
 
 // Sampled adapts a sampling function to a Source for a one-key topic. Samples
-// never overlap, so a slow one lowers the rate and cannot stack. sample must
+// never overlap, so a slow one lowers the rate and cannot stack. sample should
 // return by the deadline of its context, reporting anything it could not read
 // inside its value; an error ends the topic.
+//
+// A sample that ignores its context cannot be killed. Once it has overrun by
+// StopGrace the topic fails with a typed failure, and the source runs no other
+// sample until that one returns, however often the topic is subscribed again, so
+// it costs one goroutine and no more.
 func Sampled[V proto.Message](key string, cadence, deadline time.Duration, ticks clock.Clock, sample func(context.Context) (V, error)) Source[V] {
-	return sampled[V]{key, cadence, deadline, ticks, sample}
+	if cadence <= 0 || deadline <= 0 {
+		panic(fmt.Sprintf("sampled topic %s needs a positive cadence and deadline, got %s and %s", key, cadence, deadline))
+	}
+	return &sampled[V]{key: key, cadence: cadence, deadline: deadline, ticks: ticks, sample: sample}
 }
 
 type sampled[V proto.Message] struct {
@@ -101,15 +119,16 @@ type sampled[V proto.Message] struct {
 	cadence, deadline time.Duration
 	ticks             clock.Clock
 	sample            func(context.Context) (V, error)
+	// inflight is held from a sample's start until it returns. It belongs to the
+	// source, which outlives each producer run.
+	inflight atomic.Bool
 }
 
-func (s sampled[V]) Run(ctx context.Context, sink Sink[V]) error {
+func (s *sampled[V]) Run(ctx context.Context, sink Sink[V]) error {
 	ticker := s.ticks.NewTicker(s.cadence)
 	defer ticker.Stop()
 	for {
-		sampleCtx, cancel := context.WithTimeout(ctx, s.deadline)
-		value, err := s.sample(sampleCtx)
-		cancel()
+		value, err := s.once(ctx)
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -123,6 +142,49 @@ func (s sampled[V]) Run(ctx context.Context, sink Sink[V]) error {
 			return ctx.Err()
 		case <-ticker.Ticks():
 		}
+	}
+}
+
+// once takes one sample, ending its context at the deadline or when ctx ends.
+func (s *sampled[V]) once(ctx context.Context) (V, error) {
+	var none V
+	if !s.inflight.CompareAndSwap(false, true) {
+		return none, &Failure{Code: apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_SOURCE_FAILED, Detail: "an earlier sample has not returned"}
+	}
+	sampleCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type outcome struct {
+		value V
+		err   error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		defer s.inflight.Store(false)
+		defer func() {
+			if failed := recover(); failed != nil {
+				done <- outcome{err: &Failure{Code: apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_INTERNAL, Detail: fmt.Sprintf("panic: %v", failed)}}
+			}
+		}()
+		value, err := s.sample(sampleCtx)
+		done <- outcome{value, err}
+	}()
+	deadline := s.ticks.NewTicker(s.deadline)
+	defer deadline.Stop()
+	select {
+	case result := <-done:
+		return result.value, result.err
+	case <-deadline.Ticks():
+	case <-ctx.Done():
+	}
+	cancel()
+	grace := s.ticks.NewTicker(StopGrace)
+	defer grace.Stop()
+	select {
+	case result := <-done:
+		return result.value, result.err
+	case <-grace.Ticks():
+		return none, &Failure{Code: apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_SOURCE_FAILED,
+			Detail: fmt.Sprintf("sample did not return within %s of its deadline", StopGrace)}
 	}
 }
 

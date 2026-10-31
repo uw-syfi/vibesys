@@ -18,27 +18,51 @@ type subscriberID uint64
 type generation uint64
 
 // state is the hub's pure core: subscribers, the retained map of each topic
-// instance, and what each subscriber still owes its client. It holds no
-// goroutines, locks or clocks. Each transition returns what the shell must do.
+// instance, the producer goroutine alive for each, and what each subscriber
+// still owes its client. It holds no goroutines, locks or clocks. Each
+// transition returns what the shell must do, and the shell reports back every
+// producer's end and every stop that ran past its grace.
 //
 // Memory is O(keys) per subscriber and retains one value per key: a slow
 // subscriber costs key names, never a queue of values.
 type state struct {
 	limits      limits
 	instances   map[string]*instance
+	producers   map[string]*lifeline
 	subscribers map[subscriberID]*subscriber
 	connections map[uint64]int
 	nextID      uint64
 }
 
-// instance is one topic instance: exactly one producer while it is in instances.
+// instance is one topic instance. It has a producer from the moment one is
+// started, which is at once unless an earlier producer of the key is still
+// stopping: then the instance is waiting, and starts when that one ends.
 type instance struct {
+	topic       string
 	key         string
 	generation  generation
 	policy      hostoperations.TopicPolicy
 	values      map[string]*apiv1.TopicEntry
 	synced      bool
+	waiting     bool
 	subscribers map[subscriberID]*subscriber
+}
+
+// lifeline is the producer goroutine alive for an instance key. It can outlive
+// its instance, because a goroutine cannot be killed and a source may ignore its
+// cancellation. A key has at most one, so a producer that never ends costs one
+// goroutine however many subscribers come and go. abandoned marks one that was
+// asked to stop and has not, past its grace.
+type lifeline struct {
+	at        generation
+	abandoned bool
+}
+
+// producerRef names one producer goroutine: its instance and generation.
+type producerRef struct {
+	topic string
+	key   string
+	at    generation
 }
 
 // subscriber tracks what its client holds against the instance's keys. unsent
@@ -60,15 +84,18 @@ type subscriber struct {
 // effects are the shell's work after a transition.
 type effects struct {
 	wake []subscriberID
-	// stopped asks the shell to end the producer of instance.
-	stopped  bool
-	instance string
+	// start asks the shell to run a producer and to report ended when it returns.
+	start *producerRef
+	// stop asks the shell to cancel a producer, and to report overdue if it has
+	// not ended within the stop grace.
+	stop *producerRef
 }
 
 func newState(limits limits) *state {
 	return &state{
 		limits:      limits,
 		instances:   map[string]*instance{},
+		producers:   map[string]*lifeline{},
 		subscribers: map[subscriberID]*subscriber{},
 		connections: map[uint64]int{},
 	}
@@ -79,24 +106,33 @@ func (s *state) id() uint64 {
 	return s.nextID
 }
 
-// join admits a subscriber. started reports a new instance, whose producer the
-// shell must run under the returned generation. A refusal changes nothing.
-func (s *state) join(connection uint64, key string, policy hostoperations.TopicPolicy) (subscriberID, generation, bool, *apiv1.TopicFailure) {
+// join admits a subscriber to the instance of key, which starts a producer if
+// there is none. A refusal changes nothing: caps, and a key whose earlier
+// producer is stuck, which a new one must not overlap.
+func (s *state) join(connection uint64, topic, key string, policy hostoperations.TopicPolicy) (subscriberID, effects, *apiv1.TopicFailure) {
 	if s.connections[connection] >= s.limits.perConnection {
-		return 0, 0, false, failure(apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_RESOURCE_EXHAUSTED,
+		return 0, effects{}, failure(apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_RESOURCE_EXHAUSTED,
 			fmt.Sprintf("connection holds %d subscriptions, the limit", s.limits.perConnection))
 	}
 	if len(s.subscribers) >= s.limits.total {
-		return 0, 0, false, failure(apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_RESOURCE_EXHAUSTED,
+		return 0, effects{}, failure(apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_RESOURCE_EXHAUSTED,
 			fmt.Sprintf("gateway holds %d subscriptions, the limit", s.limits.total))
 	}
+	var work effects
 	current, exists := s.instances[key]
 	if !exists {
+		earlier := s.producers[key]
+		if earlier != nil && earlier.abandoned {
+			return 0, effects{}, failure(apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_SOURCE_FAILED, stuckDetail)
+		}
 		current = &instance{
-			key: key, generation: generation(s.id()), policy: policy,
+			topic: topic, key: key, generation: generation(s.id()), policy: policy, waiting: earlier != nil,
 			values: map[string]*apiv1.TopicEntry{}, subscribers: map[subscriberID]*subscriber{},
 		}
 		s.instances[key] = current
+		if !current.waiting {
+			work.start = s.launch(current)
+		}
 	}
 	joined := &subscriber{
 		connection: connection, instance: current, syncPending: current.synced,
@@ -110,11 +146,20 @@ func (s *state) join(connection uint64, key string, policy hostoperations.TopicP
 	current.subscribers[id] = joined
 	s.subscribers[id] = joined
 	s.connections[connection]++
-	return id, current.generation, !exists, nil
+	return id, work, nil
 }
 
-// leave ends a subscription. The last subscriber of a live instance stops its
-// producer and drops its retained map.
+// stuckDetail is what a subscriber is told while its key's producer will not stop.
+const stuckDetail = "an earlier producer of this topic has not stopped"
+
+// launch records the producer an instance starts with.
+func (s *state) launch(current *instance) *producerRef {
+	s.producers[current.key] = &lifeline{at: current.generation}
+	return &producerRef{topic: current.topic, key: current.key, at: current.generation}
+}
+
+// leave ends a subscription. The last subscriber of an instance removes it,
+// drops its retained map and stops its producer.
 func (s *state) leave(id subscriberID) effects {
 	left := s.subscribers[id]
 	delete(s.subscribers, id)
@@ -124,9 +169,17 @@ func (s *state) leave(id subscriberID) effects {
 	}
 	if s.instances[left.instance.key] == left.instance && len(left.instance.subscribers) == 0 {
 		delete(s.instances, left.instance.key)
-		return effects{stopped: true, instance: left.instance.key}
+		return effects{stop: stopOf(left.instance)}
 	}
 	return effects{}
+}
+
+// stopOf is the producer an instance is running, or nil while it waits for one.
+func stopOf(gone *instance) *producerRef {
+	if gone.waiting {
+		return nil
+	}
+	return &producerRef{topic: gone.topic, key: gone.key, at: gone.generation}
 }
 
 func (s *state) live(key string, at generation) *instance {
@@ -214,13 +267,54 @@ func (s *state) fail(key string, at generation, cause *apiv1.TopicFailure) effec
 	if current == nil {
 		return effects{}
 	}
-	delete(s.instances, key)
+	return effects{wake: s.close(current, cause), stop: stopOf(current)}
+}
+
+// close removes an instance and gives each of its subscribers the failure.
+func (s *state) close(current *instance, cause *apiv1.TopicFailure) []subscriberID {
+	delete(s.instances, current.key)
 	wake := make([]subscriberID, 0, len(current.subscribers))
 	for id, each := range current.subscribers {
 		each.failure = cause
 		wake = append(wake, id)
 	}
-	return effects{wake: wake, stopped: true, instance: key}
+	return wake
+}
+
+// ended records that a producer goroutine returned, with the failure its return
+// means. If its instance still wants it, the source ended on its own and the
+// instance fails with that cause. Then the key is free, and an instance that
+// waited on it starts.
+func (s *state) ended(ref producerRef, cause *apiv1.TopicFailure) effects {
+	if life := s.producers[ref.key]; life == nil || life.at != ref.at {
+		return effects{}
+	}
+	delete(s.producers, ref.key)
+	var work effects
+	if current := s.live(ref.key, ref.at); current != nil {
+		work.wake = s.close(current, cause)
+	}
+	if next := s.instances[ref.key]; next != nil && next.waiting {
+		next.waiting = false
+		work.start = s.launch(next)
+	}
+	return work
+}
+
+// overdue records that a producer asked to stop has not ended within the grace.
+// Nothing can end it, so it stays on record and the key refuses new subscribers
+// until it returns. The instance that waited on it fails now, with a typed
+// frame, and no later one waits at all.
+func (s *state) overdue(ref producerRef) effects {
+	life := s.producers[ref.key]
+	if life == nil || life.at != ref.at {
+		return effects{}
+	}
+	life.abandoned = true
+	if next := s.instances[ref.key]; next != nil && next.waiting {
+		return effects{wake: s.close(next, failure(apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_SOURCE_FAILED, stuckDetail))}
+	}
+	return effects{}
 }
 
 // next takes the subscriber's next frame, or nil when it is up to date. Removals

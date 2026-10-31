@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
@@ -35,7 +36,16 @@ type Sampler struct {
 	ticks    clock.Clock
 	host     Host
 	platform platform
+	calls    *calls
 }
+
+// calls holds, per section, whether a call into the Host is in flight. Neither
+// Host.Find nor Host.Run can be relied on to return when its context ends: a
+// PATH entry on a hung mount stalls LookPath, and a tool in uninterruptible sleep
+// outlasts its kill. So a stuck call is left to finish alone, and until it does
+// its section reports TIMED_OUT and starts no second call. At most one call per
+// section is ever stuck, however many samples or subscriptions come and go.
+type calls struct{ cpu, memory, gpu atomic.Bool }
 
 // platform reads the sections an operating system exposes differently.
 type platform interface {
@@ -47,22 +57,29 @@ type platform interface {
 // NewSampler returns a sampler for goos. An operating system with no sampler is
 // UNSUPPORTED, which retrying will not change.
 func NewSampler(goos string, ticks clock.Clock, host Host) (*Sampler, error) {
+	return newSampler(goos, ticks, host, &calls{})
+}
+
+// newSampler shares calls with the samplers of earlier subscriptions, which may
+// have left a call stuck.
+func newSampler(goos string, ticks clock.Clock, host Host, shared *calls) (*Sampler, error) {
 	switch goos {
 	case "linux":
-		return &Sampler{ticks, host, &linux{ticks: ticks}}, nil
+		return &Sampler{ticks, host, &linux{ticks: ticks}, shared}, nil
 	case "darwin":
-		return &Sampler{ticks, host, macos{}}, nil
+		return &Sampler{ticks, host, macos{}, shared}, nil
 	}
 	return nil, subscription.Unsupported(fmt.Sprintf("no machine stats on %s", goos))
 }
 
 // Sample reads every section concurrently, so one slow tool costs only its own
-// section. It returns once ctx ends and every Host call has returned.
+// section. It returns by the deadline of ctx whatever the Host is doing: a
+// section still running then reports TIMED_OUT.
 func (s *Sampler) Sample(ctx context.Context) (*apiv1.MachineStats, error) {
 	stats := &apiv1.MachineStats{}
 	var sections sync.WaitGroup
 	sections.Go(func() {
-		value, absence := read(ctx, func() (*apiv1.CpuStats, error) { return s.platform.cpu(ctx, s.host) })
+		value, absence := read(ctx, &s.calls.cpu, func() (*apiv1.CpuStats, error) { return s.platform.cpu(ctx, s.host) })
 		if absence != nil {
 			stats.Cpu = &apiv1.MachineStats_CpuUnavailable{CpuUnavailable: absence}
 			return
@@ -70,7 +87,7 @@ func (s *Sampler) Sample(ctx context.Context) (*apiv1.MachineStats, error) {
 		stats.Cpu = &apiv1.MachineStats_CpuStats{CpuStats: value}
 	})
 	sections.Go(func() {
-		value, absence := read(ctx, func() (*apiv1.MemoryStats, error) { return s.platform.memory(ctx, s.host) })
+		value, absence := read(ctx, &s.calls.memory, func() (*apiv1.MemoryStats, error) { return s.platform.memory(ctx, s.host) })
 		if absence != nil {
 			stats.Memory = &apiv1.MachineStats_MemoryUnavailable{MemoryUnavailable: absence}
 			return
@@ -78,7 +95,7 @@ func (s *Sampler) Sample(ctx context.Context) (*apiv1.MachineStats, error) {
 		stats.Memory = &apiv1.MachineStats_MemoryStats{MemoryStats: value}
 	})
 	sections.Go(func() {
-		value, absence := read(ctx, func() (*apiv1.GpuList, error) { return s.platform.gpus(ctx, s.host) })
+		value, absence := read(ctx, &s.calls.gpu, func() (*apiv1.GpuList, error) { return s.platform.gpus(ctx, s.host) })
 		if absence != nil {
 			stats.Gpu = &apiv1.MachineStats_GpuUnavailable{GpuUnavailable: absence}
 			return
@@ -90,8 +107,34 @@ func (s *Sampler) Sample(ctx context.Context) (*apiv1.MachineStats, error) {
 	return stats, nil
 }
 
-// read turns every way a section can fail into its typed absence.
-func read[T any](ctx context.Context, section func() (T, error)) (value T, absence *apiv1.Absence) {
+// read runs one section's Host calls and turns every way they can fail into the
+// section's typed absence. It returns when they do or when ctx ends, whichever is
+// first; in flight is held until they do, so a call that never returns is
+// abandoned once and never repeated.
+func read[T any](ctx context.Context, inflight *atomic.Bool, section func() (T, error)) (T, *apiv1.Absence) {
+	var none T
+	if !inflight.CompareAndSwap(false, true) {
+		return none, &apiv1.Absence{Reason: apiv1.AbsenceReason_ABSENCE_REASON_TIMED_OUT}
+	}
+	type outcome struct {
+		value   T
+		absence *apiv1.Absence
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		defer inflight.Store(false)
+		value, absence := attempt(ctx, section)
+		done <- outcome{value, absence}
+	}()
+	select {
+	case result := <-done:
+		return result.value, result.absence
+	case <-ctx.Done():
+		return none, &apiv1.Absence{Reason: apiv1.AbsenceReason_ABSENCE_REASON_TIMED_OUT}
+	}
+}
+
+func attempt[T any](ctx context.Context, section func() (T, error)) (value T, absence *apiv1.Absence) {
 	defer func() {
 		if recover() != nil {
 			absence = &apiv1.Absence{Reason: apiv1.AbsenceReason_ABSENCE_REASON_PARSE_FAILED}
@@ -124,7 +167,7 @@ func Topic(goos string, ticks clock.Clock, host Host) subscription.Topic[*apiv1.
 	return subscription.Topic[*apiv1.MachineStats]{
 		Name:   hostoperations.TopicMachineStats,
 		Policy: policy,
-		Source: source{goos, ticks, host, policy},
+		Source: source{goos: goos, ticks: ticks, host: host, policy: policy, calls: &calls{}},
 		Entry: func(key string, value *apiv1.MachineStats) *apiv1.TopicEntry {
 			return &apiv1.TopicEntry{Key: key, Value: &apiv1.TopicEntry_MachineStats{MachineStats: value}}
 		},
@@ -136,10 +179,13 @@ type source struct {
 	ticks  clock.Clock
 	host   Host
 	policy hostoperations.TopicPolicy
+	// calls outlives each producer run, because a call left stuck by one still
+	// holds its section when the next subscription starts.
+	calls *calls
 }
 
 func (s source) Run(ctx context.Context, sink subscription.Sink[*apiv1.MachineStats]) error {
-	sampler, err := NewSampler(s.goos, s.ticks, s.host)
+	sampler, err := newSampler(s.goos, s.ticks, s.host, s.calls)
 	if err != nil {
 		return err
 	}

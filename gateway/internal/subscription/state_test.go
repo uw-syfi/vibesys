@@ -5,6 +5,8 @@ package subscription
 // through goroutines. The public behavior is held by the contract suite.
 
 import (
+	"cmp"
+	"slices"
 	"testing"
 	"testing/quick"
 
@@ -14,6 +16,7 @@ import (
 )
 
 const (
+	modelTopic    = "machine_stats"
 	modelInstance = "instance"
 	modelKeys     = 4
 )
@@ -36,13 +39,23 @@ type client struct {
 	failed bool
 }
 
+// model is the shell the core is run against. It holds every producer the core
+// asked for until the model chooses to end it, which is how it stands in for a
+// source that returns late or never.
 type model struct {
 	t       *testing.T
 	state   *state
 	at      generation
 	written int64
 	clients []*client
-	running bool
+	alive   map[generation]*producerRun
+}
+
+// producerRun is a started producer: asked to stop, and whether its stop timer
+// is armed (the shell arms one with every stop request).
+type producerRun struct {
+	ref      producerRef
+	stopping bool
 }
 
 func entry(key string, value int64) *apiv1.TopicEntry {
@@ -52,26 +65,76 @@ func entry(key string, value int64) *apiv1.TopicEntry {
 }
 
 func (m *model) apply(work effects) {
-	if work.stopped {
-		if !m.running {
-			m.t.Fatal("stopped a producer that was not running")
+	if work.stop != nil {
+		run := m.alive[work.stop.at]
+		if run == nil {
+			m.t.Fatalf("stopped producer %d that is not alive", work.stop.at)
 		}
-		m.running = false
+		if run.stopping {
+			m.t.Fatalf("stopped producer %d twice", work.stop.at)
+		}
+		run.stopping = true
+	}
+	if work.start != nil {
+		if len(m.alive) != 0 {
+			m.t.Fatalf("started producer %d with %d alive: two producers of one instance overlap", work.start.at, len(m.alive))
+		}
+		m.alive[work.start.at] = &producerRun{ref: *work.start}
+		m.at = work.start.at
 	}
 }
 
 func (m *model) join() {
-	id, at, started, refusal := m.state.join(uint64(len(m.clients)%3), modelInstance, modelPolicy)
+	id, work, refusal := m.state.join(uint64(len(m.clients)%3), modelTopic, modelInstance, modelPolicy)
 	if refusal != nil {
+		if refusal.GetCode() == apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_SOURCE_FAILED && !m.stuck() {
+			m.t.Fatalf("refused for a stuck producer with none stuck: %v", refusal)
+		}
 		return
 	}
-	if started {
-		if m.running {
-			m.t.Fatal("started a second producer for one instance")
-		}
-		m.running, m.at = true, at
-	}
+	m.apply(work)
 	m.clients = append(m.clients, &client{id: id, values: map[string]int64{}, newest: map[string]int64{}})
+}
+
+// stuck reports whether a producer is on record as unable to stop.
+func (m *model) stuck() bool {
+	for _, life := range m.state.producers {
+		if life.abandoned {
+			return true
+		}
+	}
+	return false
+}
+
+// pick chooses an alive producer, the stopping ones only if asked.
+func (m *model) pick(who uint8, stopping bool) *producerRun {
+	var runs []*producerRun
+	for _, run := range m.alive {
+		if !stopping || run.stopping {
+			runs = append(runs, run)
+		}
+	}
+	if len(runs) == 0 {
+		return nil
+	}
+	slices.SortFunc(runs, func(a, b *producerRun) int { return cmp.Compare(a.ref.at, b.ref.at) })
+	return runs[int(who)%len(runs)]
+}
+
+// end returns a producer, which for a producer nobody asked to stop is the
+// source ending on its own.
+func (m *model) end(run *producerRun) {
+	delete(m.alive, run.ref.at)
+	m.apply(m.state.ended(run.ref, failure(apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_SOURCE_FAILED, "source stopped")))
+}
+
+// settle returns every producer that was asked to stop, as a well-behaved
+// source does, until none remains. A producer that ends may start the instance
+// that waited on it, which nobody has asked to stop.
+func (m *model) settle() {
+	for run := m.pick(0, true); run != nil; run = m.pick(0, true) {
+		m.end(run)
+	}
 }
 
 func (m *model) read(each *client, frames int) {
@@ -120,8 +183,11 @@ func (m *model) requireSameKeys(each *client) {
 	}
 }
 
-// requireBounded holds the conflation promise: bookkeeping is O(keys), however
-// far behind a reader falls.
+// requireBounded holds the conflation promise (bookkeeping is O(keys), however
+// far behind a reader falls) and the producer lifecycle: the core's record of
+// producers is the shell's, at most one runs for the key, an instance has one
+// or is waiting on one that is bounded by a timer, and a producer that will
+// not stop is never overlapped.
 func (m *model) requireBounded() {
 	for _, each := range m.state.subscribers {
 		if len(each.delivered) > modelKeys || len(each.unsent) > modelKeys || len(each.changed) > modelKeys || len(each.removed) > modelKeys {
@@ -129,8 +195,32 @@ func (m *model) requireBounded() {
 				modelKeys, len(each.delivered), len(each.unsent), len(each.changed), len(each.removed))
 		}
 	}
-	if _, live := m.state.instances[modelInstance]; live != m.running {
-		m.t.Fatalf("instance live=%t while producer running=%t", live, m.running)
+	if len(m.state.producers) != len(m.alive) {
+		m.t.Fatalf("core records %d producers, %d are alive", len(m.state.producers), len(m.alive))
+	}
+	if len(m.alive) > 2 {
+		m.t.Fatalf("%d producers alive for one instance: a stopping one and its successor at most", len(m.alive))
+	}
+	running := 0
+	for _, run := range m.alive {
+		if !run.stopping {
+			running++
+		}
+	}
+	current, live := m.state.instances[modelInstance]
+	switch {
+	case !live && running != 0:
+		m.t.Fatal("a producer runs with no instance")
+	case live && !current.waiting:
+		if m.alive[current.generation] == nil || m.alive[current.generation].stopping {
+			m.t.Fatalf("instance %d has no running producer", current.generation)
+		}
+	case live && current.waiting:
+		// No orphan waits: the producer it waits on has a stop timer, and is not
+		// one the core has already given up on.
+		if running != 0 || len(m.alive) != 1 || m.stuck() {
+			m.t.Fatalf("instance waits on %d alive producers, %d running, stuck=%t", len(m.alive), running, m.stuck())
+		}
 	}
 	subscribers := len(m.state.subscribers)
 	for _, each := range m.state.subscribers {
@@ -138,8 +228,8 @@ func (m *model) requireBounded() {
 			subscribers--
 		}
 	}
-	if (subscribers > 0) != m.running {
-		m.t.Fatalf("%d subscribers while producer running=%t", subscribers, m.running)
+	if (subscribers > 0) != live {
+		m.t.Fatalf("%d subscribers while instance live=%t", subscribers, live)
 	}
 }
 
@@ -149,7 +239,7 @@ func (m *model) step(next action) {
 	if len(m.clients) > 0 {
 		who = m.clients[int(next.Who)%len(m.clients)]
 	}
-	switch next.Kind % 7 {
+	switch next.Kind % 9 {
 	case 0:
 		m.join()
 	case 1:
@@ -172,6 +262,16 @@ func (m *model) step(next action) {
 		// A write from a producer already replaced must change nothing.
 		m.written++
 		m.apply(m.state.put(modelInstance, m.at-1, key, entry(key, m.written), 0))
+	case 7:
+		// A producer returns, late if it was asked to stop, and unasked if not.
+		if run := m.pick(next.Who, false); run != nil {
+			m.end(run)
+		}
+	case 8:
+		// A stop's grace runs out.
+		if run := m.pick(next.Who, true); run != nil {
+			m.apply(m.state.overdue(run.ref))
+		}
 	}
 	m.requireBounded()
 }
@@ -187,7 +287,7 @@ func removeClient(clients []*client, gone *client) []*client {
 }
 
 func newModel(t *testing.T) *model {
-	return &model{t: t, state: newState(limits{perConnection: 4, total: 8})}
+	return &model{t: t, state: newState(limits{perConnection: 4, total: 8}), alive: map[generation]*producerRun{}}
 }
 
 func TestDeliveredStateConvergesToTheProducersUnderAnyInterleaving(t *testing.T) {
@@ -265,7 +365,7 @@ func TestSyncedIsNotStarvedByValueChurn(t *testing.T) {
 func TestCapsRefuseWithoutChangingAnything(t *testing.T) {
 	s := newState(limits{perConnection: 2, total: 3})
 	join := func(connection uint64) *apiv1.TopicFailure {
-		_, _, _, refusal := s.join(connection, modelInstance, modelPolicy)
+		_, _, refusal := s.join(connection, modelTopic, modelInstance, modelPolicy)
 		return refusal
 	}
 	for _, connection := range []uint64{1, 1, 2} {
@@ -290,6 +390,10 @@ func TestAFailedInstanceIsReplacedAndItsProducerFenced(t *testing.T) {
 	old := m.at
 	m.apply(m.state.fail(modelInstance, old, failure(apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_SOURCE_FAILED, "gone")))
 	m.join()
+	if len(m.alive) != 1 || m.state.instances[modelInstance].waiting != true {
+		t.Fatal("a new instance did not wait for the producer still stopping")
+	}
+	m.end(m.alive[old])
 	if m.at == old {
 		t.Fatal("a failed instance kept its generation")
 	}
@@ -301,5 +405,36 @@ func TestAFailedInstanceIsReplacedAndItsProducerFenced(t *testing.T) {
 	frame, terminal := m.state.next(m.clients[0].id)
 	if !terminal || frame.GetFailed() == nil {
 		t.Fatalf("old subscriber got %v", frame)
+	}
+}
+
+// However late or never producers return, every instance that waits on one is
+// either started when it ends or failed when its grace runs out, and a producer
+// that never returns is on record once and refuses new subscribers instead of
+// costing one each.
+func TestEveryWaitingInstanceStartsOrFailsAndAStuckProducerIsNeverOverlapped(t *testing.T) {
+	property := func(actions []action) bool {
+		m := newModel(t)
+		for _, next := range actions {
+			m.step(next)
+		}
+		// Every grace runs out, then every stopping producer returns.
+		for run := m.pick(0, true); run != nil; run = m.pick(0, true) {
+			if !m.state.producers[run.ref.key].abandoned {
+				m.apply(m.state.overdue(run.ref))
+			}
+			if next := m.state.instances[modelInstance]; next != nil && next.waiting {
+				t.Fatal("an instance is still waiting after its grace ran out")
+			}
+			m.end(run)
+			m.requireBounded()
+		}
+		if next := m.state.instances[modelInstance]; next != nil && next.waiting {
+			return false
+		}
+		return len(m.alive) <= 1
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 2000}); err != nil {
+		t.Fatal(err)
 	}
 }

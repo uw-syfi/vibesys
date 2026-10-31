@@ -20,14 +20,14 @@ type Hub struct {
 	clock  clock.Clock
 	topics map[string]registered
 
-	mu        sync.Mutex
-	state     *state
-	wakes     map[subscriberID]chan struct{}
-	producers map[string]*running
+	mu      sync.Mutex
+	state   *state
+	wakes   map[subscriberID]chan struct{}
+	running map[producerRef]*running
 }
 
-// running is one producer goroutine. done outlives the instance so that a new
-// producer for the same instance starts only after this one has ended.
+// running is the shell's handle on one producer goroutine: how to cancel it, and
+// a signal that it has returned.
 type running struct {
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -41,7 +41,7 @@ func New(ticks clock.Clock, topics ...Registration) *Hub {
 func newHub(ticks clock.Clock, caps limits, topics ...Registration) *Hub {
 	hub := &Hub{
 		clock: ticks, topics: map[string]registered{}, state: newState(caps),
-		wakes: map[subscriberID]chan struct{}{}, producers: map[string]*running{},
+		wakes: map[subscriberID]chan struct{}{}, running: map[producerRef]*running{},
 	}
 	for _, topic := range topics {
 		each := topic.registration()
@@ -127,40 +127,46 @@ func (h *Hub) topicOf(request *apiv1.SubscribeRequest) (registered, error) {
 func (h *Hub) join(connection uint64, key string, topic registered, wake chan struct{}) (subscriberID, *apiv1.TopicFailure) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	id, at, started, refusal := h.state.join(connection, key, topic.policy)
+	id, work, refusal := h.state.join(connection, topic.name, key, topic.policy)
 	if refusal != nil {
 		return 0, refusal
 	}
 	h.wakes[id] = wake
-	if started {
-		h.start(key, at, topic)
-	}
+	h.perform(work)
 	return id, nil
 }
 
-// start runs a producer, after any previous one for the instance has ended, so
-// two producers of an instance never overlap.
-func (h *Hub) start(key string, at generation, topic registered) {
+// start runs a producer. The core starts one only when no other is alive for
+// the key, so none overlaps, and nothing here waits for another.
+func (h *Hub) start(ref producerRef) {
 	ctx, cancel := context.WithCancel(context.Background())
-	previous := h.producers[key]
 	self := &running{cancel: cancel, done: make(chan struct{})}
-	h.producers[key] = self
+	h.running[ref] = self
+	topic := h.topics[ref.topic]
 	go func() {
-		defer close(self.done)
-		defer cancel()
-		if previous != nil {
-			<-previous.done
-		}
-		if ctx.Err() == nil {
-			err := runProducer(ctx, topic, producer{hub: h, key: key, at: at})
-			if ctx.Err() == nil {
-				h.apply(func(s *state) effects { return s.fail(key, at, failureOf(err)) })
-			}
-		}
-		h.mu.Lock()
-		defer h.mu.Unlock()
-		if h.producers[key] == self {
-			delete(h.producers, key)
+		err := runProducer(ctx, topic, producer{hub: h, key: ref.key, at: ref.at})
+		cancel()
+		h.apply(func(s *state) effects {
+			delete(h.running, ref)
+			close(self.done)
+			return s.ended(ref, failureOf(err))
+		})
+	}()
+}
+
+// stop cancels a producer. A source may ignore that, and a goroutine cannot be
+// killed, so a producer still running after StopGrace is reported to the core,
+// which stops waiting for it.
+func (h *Hub) stop(ref producerRef) {
+	self := h.running[ref]
+	self.cancel()
+	go func() {
+		grace := h.clock.NewTicker(StopGrace)
+		defer grace.Stop()
+		select {
+		case <-self.done:
+		case <-grace.Ticks():
+			h.apply(func(s *state) effects { return s.overdue(ref) })
 		}
 	}()
 }
@@ -205,10 +211,11 @@ func (h *Hub) perform(work effects) {
 		default:
 		}
 	}
-	if work.stopped {
-		if current := h.producers[work.instance]; current != nil {
-			current.cancel()
-		}
+	if work.stop != nil {
+		h.stop(*work.stop)
+	}
+	if work.start != nil {
+		h.start(*work.start)
 	}
 }
 

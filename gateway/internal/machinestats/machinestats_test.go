@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"math/bits"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
@@ -19,7 +21,11 @@ import (
 	"github.com/uw-syfi/vibesys/gateway/internal/clock"
 	"github.com/uw-syfi/vibesys/gateway/internal/machinestats"
 	"github.com/uw-syfi/vibesys/gateway/internal/machinestats/machinestatstest"
+	"github.com/uw-syfi/vibesys/gateway/internal/subscription"
+	"github.com/uw-syfi/vibesys/gateway/internal/subscription/subscriptiontest"
 )
+
+var request = &apiv1.SubscribeRequest{Topic: &apiv1.SubscribeRequest_MachineStats{MachineStats: &apiv1.MachineStatsTopic{}}}
 
 type tool = func(context.Context, []string) ([]byte, error)
 
@@ -203,6 +209,162 @@ func TestAStuckToolTimesOutOnlyItsSection(t *testing.T) {
 		}
 		if gpuReason(stats) != apiv1.AbsenceReason_ABSENCE_REASON_TIMED_OUT || stats.GetCpuStats() == nil || stats.GetMemoryStats() == nil {
 			t.Fatalf("stats %v", stats)
+		}
+	})
+}
+
+// sections names the Linux calls of each section, so a test can wedge any subset.
+var linuxSections = []struct {
+	name  string
+	calls []machinestatstest.Call
+}{
+	{"cpu", []machinestatstest.Call{{Method: "ReadFile", Target: "/proc/stat"}}},
+	{"memory", []machinestatstest.Call{{Method: "ReadFile", Target: "/proc/meminfo"}}},
+	{"gpu", []machinestatstest.Call{{Method: "Find", Target: "nvidia-smi"}}},
+}
+
+func absent(stats *apiv1.MachineStats, section string) *apiv1.Absence {
+	switch section {
+	case "cpu":
+		return stats.GetCpuUnavailable()
+	case "memory":
+		return stats.GetMemoryUnavailable()
+	}
+	return stats.GetGpuUnavailable()
+}
+
+// wedgedLinux is the recorded machine with a GPU, whose chosen sections block in
+// calls that ignore their context.
+func wedgedLinux(stuck uint8) *machinestatstest.Wedged {
+	host := machinestatstest.Linux()
+	host.Files["/proc/stat"] = nil
+	for tick := range 32 {
+		host.Files["/proc/stat"] = append(host.Files["/proc/stat"], fmt.Appendf(nil, "cpu  %d 0 0 %d 0 0 0 0 0 0\n", 10*tick, 100*tick))
+	}
+	host.Tools["nvidia-smi"] = func(context.Context, []string) ([]byte, error) {
+		return []byte("0, GPU-a, NVIDIA Test, 1024, 40960, 17\n"), nil
+	}
+	return machinestatstest.Wedge(host, func(call machinestatstest.Call) bool {
+		for index, section := range linuxSections {
+			if stuck&(1<<index) != 0 && slices.Contains(section.calls, call) {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+// A Host call that never returns costs its own section and one stuck call: the
+// sample still ends at its deadline, the other sections still report, and no
+// later sample stacks a second call behind the stuck one.
+func TestAHostCallThatNeverReturnsIsBoundedToItsSectionAndOneCall(t *testing.T) {
+	property := func(stuck uint8, samples uint8) bool {
+		stuck %= 1 << len(linuxSections)
+		rounds := 2 + int(samples%4)
+		ok := true
+		synctest.Test(t, func(t *testing.T) {
+			host := wedgedLinux(stuck)
+			defer close(host.Release)
+			sampler, err := machinestats.NewSampler("linux", clock.System{}, host)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for round := range rounds {
+				ctx, cancel := context.WithTimeout(context.Background(), machinestats.SampleDeadline)
+				start := time.Now()
+				stats, err := sampler.Sample(ctx)
+				cancel()
+				if err != nil || time.Since(start) > machinestats.SampleDeadline {
+					t.Errorf("round %d: err %v after %s", round, err, time.Since(start))
+					ok = false
+				}
+				if err := protovalidate.Validate(stats); err != nil {
+					t.Errorf("round %d: %v", round, err)
+					ok = false
+				}
+				for index, section := range linuxSections {
+					got := absent(stats, section.name)
+					if wedged := stuck&(1<<index) != 0; wedged != (got != nil) ||
+						(wedged && got.GetReason() != apiv1.AbsenceReason_ABSENCE_REASON_TIMED_OUT) {
+						t.Errorf("round %d: stuck=%03b, %s reports %v in %v", round, stuck, section.name, got, stats)
+						ok = false
+					}
+				}
+				time.Sleep(machinestats.SampleDeadline)
+			}
+			synctest.Wait()
+			if blocked := host.Blocked.Load(); blocked != int64(bits.OnesCount8(stuck)) {
+				t.Errorf("stuck=%03b: %d calls blocked over %d samples", stuck, blocked, rounds)
+				ok = false
+			}
+		})
+		return ok
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 200}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Once the stuck call returns, its section reads again.
+func TestASectionRecoversWhenItsStuckCallReturns(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		host := wedgedLinux(0b111)
+		sampler, err := machinestats.NewSampler("linux", clock.System{}, host)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), machinestats.SampleDeadline)
+		stats, _ := sampler.Sample(ctx)
+		cancel()
+		if stats.GetCpuUnavailable() == nil || stats.GetMemoryUnavailable() == nil || stats.GetGpuUnavailable() == nil {
+			t.Fatalf("stats %v", stats)
+		}
+		close(host.Release)
+		synctest.Wait()
+		for range 2 {
+			ctx, cancel = context.WithTimeout(context.Background(), machinestats.SampleDeadline)
+			stats, _ = sampler.Sample(ctx)
+			cancel()
+			time.Sleep(machinestats.SampleDeadline)
+		}
+		if stats.GetCpuStats() == nil || stats.GetMemoryStats() == nil || stats.GetGpus() == nil {
+			t.Fatalf("a section stayed down after its call returned: %v", stats)
+		}
+	})
+}
+
+// The deadline is the topic's: a source that waited for a stuck tool, or for a
+// deadline an hour away, would send nothing until then.
+func TestTheTopicSendsItsFirstSampleAtTheSampleDeadlineWhateverIsStuck(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		host := wedgedLinux(0b100)
+		topic := machinestats.Topic("linux", clock.System{}, host)
+		hub := subscription.New(clock.System{}, topic)
+		stream := subscriptiontest.Open(hub, 1, request)
+		defer func() {
+			stream.Stop()
+			close(host.Release)
+		}()
+		time.Sleep(machinestats.SampleDeadline)
+		synctest.Wait()
+		frames := stream.Frames()
+		entry := slices.IndexFunc(frames, func(frame *apiv1.SubscribeResponse) bool { return frame.GetEntry() != nil })
+		if entry < 0 || !slices.ContainsFunc(frames, func(frame *apiv1.SubscribeResponse) bool { return frame.GetSynced() != nil }) {
+			t.Fatalf("no snapshot at the sample deadline: %v", frames)
+		}
+		stats := frames[entry].GetEntry().GetMachineStats()
+		if stats.GetGpuUnavailable().GetReason() != apiv1.AbsenceReason_ABSENCE_REASON_TIMED_OUT || stats.GetCpuStats() == nil || stats.GetMemoryStats() == nil {
+			t.Fatalf("stats %v", stats)
+		}
+		// Subscribing again and again must not stack calls behind the stuck one.
+		for range 50 {
+			stream.Stop()
+			stream = subscriptiontest.Open(hub, 1, request)
+			time.Sleep(machinestats.SampleDeadline)
+			synctest.Wait()
+		}
+		if blocked := host.Blocked.Load(); blocked != 1 {
+			t.Fatalf("%d calls blocked over 51 subscriptions", blocked)
 		}
 	})
 }

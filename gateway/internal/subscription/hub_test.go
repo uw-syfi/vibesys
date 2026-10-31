@@ -3,6 +3,7 @@ package subscription_test
 import (
 	"context"
 	"errors"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -390,6 +391,180 @@ func TestSampledDeadlineBoundsASlowSample(t *testing.T) {
 		synctest.Wait()
 		if frames := stream.Frames(); len(frames) == 0 {
 			t.Fatal("deadline did not end the sample")
+		}
+	})
+}
+
+// stuck is a source that serves one snapshot and then blocks in a call that
+// ignores its context, as a source inside a stuck tool or a hung mount does. Once
+// the call returns it behaves.
+func stuck(release chan struct{}) subscriptiontest.Counted[stats] {
+	return subscriptiontest.Count(script(func(ctx context.Context, sink subscription.Sink[stats]) error {
+		sink.Put("machine", value(1))
+		sink.Synced()
+		<-release
+		return wait(ctx)
+	}))
+}
+
+// failedWith is the failure a stream ended on, or nil while it is still open.
+func failedWith(stream *subscriptiontest.Stream) *apiv1.TopicFailure {
+	frames := stream.Frames()
+	if len(frames) == 0 {
+		return nil
+	}
+	return frames[len(frames)-1].GetFailed()
+}
+
+// A source that will not stop cannot be killed. It must cost the gateway one
+// goroutine however often clients come back, and every subscriber must hear a
+// typed failure, never a stream of heartbeats.
+func TestAProducerThatWillNotStopIsAccountedOnceAndTheTopicFailsTyped(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		release := make(chan struct{})
+		source := stuck(release)
+		hub := subscription.New(clock.System{}, topic(source))
+		first := subscriptiontest.Open(hub, 1, request)
+		synctest.Wait()
+		first.Stop()
+		goroutines := runtime.NumGoroutine()
+		const retries = 200
+		for range retries {
+			retry := subscriptiontest.Open(hub, 1, request)
+			time.Sleep(time.Second)
+			synctest.Wait()
+			retry.Stop()
+		}
+		if leaked := runtime.NumGoroutine() - goroutines; leaked > 2 {
+			t.Fatalf("%d goroutines leaked over %d retries", leaked, retries)
+		}
+		time.Sleep(time.Minute)
+		last := subscriptiontest.Open(hub, 1, request)
+		defer last.Stop()
+		time.Sleep(time.Hour)
+		synctest.Wait()
+		if failed := failedWith(last); failed.GetCode() != apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_SOURCE_FAILED {
+			t.Fatalf("a subscriber to a wedged topic got %v", last.Frames())
+		}
+		if err, ended := last.Ended(); !ended || err != nil {
+			t.Fatalf("stream ended=%t err=%v after its failed frame", ended, err)
+		}
+		if starts := source.Starts.Load(); starts != 1 {
+			t.Fatalf("%d producers started while the first would not stop", starts)
+		}
+		close(release)
+		synctest.Wait()
+		revived := subscriptiontest.Open(hub, 1, request)
+		defer revived.Stop()
+		time.Sleep(time.Second)
+		synctest.Wait()
+		if frames := revived.Frames(); len(frames) == 0 || frames[0].GetEntry() == nil || failedWith(revived) != nil {
+			t.Fatalf("the topic stayed down after its producer returned: %v", frames)
+		}
+	})
+}
+
+// A subscriber that arrives while the old producer is stopping waits for it, for
+// a bounded time. It must not stay subscribed to a stream with no producer.
+func TestASubscriberWaitingOnAStoppingProducerIsFailedNotLeftWaiting(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		release := make(chan struct{})
+		hub := subscription.New(clock.System{}, topic(stuck(release)))
+		first := subscriptiontest.Open(hub, 1, request)
+		synctest.Wait()
+		first.Stop()
+		second := subscriptiontest.Open(hub, 2, request)
+		defer second.Stop()
+		time.Sleep(time.Minute)
+		synctest.Wait()
+		if failed := failedWith(second); failed == nil {
+			t.Fatalf("a subscriber still waits on a producer that will not stop: %v", second.Frames())
+		}
+		close(release)
+	})
+}
+
+// A source that returns late, as a section waiting out its tool does, is the
+// ordinary case and must not fail anyone: the waiting subscriber is served by the
+// producer that starts when the old one returns.
+func TestASubscriberWaitingOnASlowStopGetsAFreshProducer(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		source := subscriptiontest.Count(script(func(ctx context.Context, sink subscription.Sink[stats]) error {
+			sink.Put("machine", value(1))
+			sink.Synced()
+			<-ctx.Done()
+			time.Sleep(2 * time.Second)
+			return ctx.Err()
+		}))
+		hub := subscription.New(clock.System{}, topic(source))
+		first := subscriptiontest.Open(hub, 1, request)
+		synctest.Wait()
+		first.Stop()
+		second := subscriptiontest.Open(hub, 2, request)
+		time.Sleep(10 * time.Second)
+		synctest.Wait()
+		if frames := second.Frames(); len(frames) == 0 || frames[0].GetEntry() == nil || failedWith(second) != nil {
+			t.Fatalf("frames %v", frames)
+		}
+		if starts := source.Starts.Load(); starts != 2 {
+			t.Fatalf("%d producers started", starts)
+		}
+		second.Stop()
+		time.Sleep(10 * time.Second)
+	})
+}
+
+// A sample that ignores its context is a typed failure for its subscribers and
+// one goroutine for the gateway, however often the topic is subscribed again.
+func TestASampleThatIgnoresItsContextFailsTheTopicOnceAndIsNeverRepeated(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		release := make(chan struct{})
+		var calls atomic.Int64
+		source := subscription.Sampled("machine", time.Second, time.Second, clock.System{},
+			func(context.Context) (stats, error) {
+				calls.Add(1)
+				<-release
+				return value(1), nil
+			})
+		hub := subscription.New(clock.System{}, topic(source))
+		first := subscriptiontest.Open(hub, 1, request)
+		defer first.Stop()
+		time.Sleep(time.Minute)
+		synctest.Wait()
+		if failed := failedWith(first); failed.GetCode() != apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_SOURCE_FAILED {
+			t.Fatalf("a stuck sample gave %v", first.Frames())
+		}
+		goroutines := runtime.NumGoroutine()
+		for range 50 {
+			retry := subscriptiontest.Open(hub, 1, request)
+			time.Sleep(time.Second)
+			synctest.Wait()
+			if failedWith(retry) == nil {
+				t.Fatalf("a retry was served while a sample is stuck: %v", retry.Frames())
+			}
+			retry.Stop()
+		}
+		if leaked := runtime.NumGoroutine() - goroutines; leaked > 2 || calls.Load() != 1 {
+			t.Fatalf("%d goroutines leaked, %d samples started", leaked, calls.Load())
+		}
+		close(release)
+		synctest.Wait()
+		revived := subscriptiontest.Open(hub, 1, request)
+		defer revived.Stop()
+		time.Sleep(time.Second)
+		synctest.Wait()
+		if frames := revived.Frames(); len(frames) == 0 || frames[0].GetEntry() == nil {
+			t.Fatalf("the topic stayed down after its sample returned: %v", frames)
+		}
+	})
+}
+
+func TestAPanickingSampleIsATypedFailureNotACrash(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		source := subscription.Sampled("machine", time.Second, time.Second, clock.System{},
+			func(context.Context) (stats, error) { panic("broken") })
+		if got := fail(t, source); got.GetCode() != apiv1.TopicFailureCode_TOPIC_FAILURE_CODE_INTERNAL {
+			t.Fatalf("failure %v", got)
 		}
 	})
 }

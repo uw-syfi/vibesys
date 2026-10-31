@@ -13,9 +13,11 @@ import (
 // ErrToolNotFound is what Host.Find returns for a tool the host does not have.
 var ErrToolNotFound = errors.New("tool not found")
 
-// Host is everything the sampler reads from the machine. Run returns once ctx
-// ends, with the context's error. A gateway started over non-login SSH has a
-// thin PATH, so Find searches PATH and then the given full paths.
+// Host is everything the sampler reads from the machine. Run should return once
+// ctx ends, with the context's error, but the sampler does not depend on it: no
+// call is trusted to return, because Find stalls on a hung PATH entry and a tool
+// in uninterruptible sleep outlasts its kill. A gateway started over non-login
+// SSH has a thin PATH, so Find searches PATH and then the given full paths.
 type Host interface {
 	ReadFile(path string) ([]byte, error)
 	Find(tool string, candidates ...string) (string, error)
