@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ._proofs import Proven, continues_admitted_work, current_admission, invocation_for
+from ._proofs import Proven, admitted_work_proceeds, current_admission, invocation_for
 from .types.attempts import AttemptPhase
 from .types.common import (
     AttemptId,
@@ -160,8 +160,9 @@ def attempt_for(context: SessionsContext, scope: Scope) -> AttemptView | None:
 def scope_active(context: SessionsContext, scope: Scope) -> bool:
     """True while the scope may start new work: live admission, or a run that carries on.
 
-    A paused run carries on (``continues_admitted_work``): its new work arrives only as
-    decisions, which the shell holds while it is paused.
+    A paused run carries on, and so does one draining an operator's pause
+    (``admitted_work_proceeds``): its new work arrives only as decisions, which the shell holds
+    while it is paused, and what a drain lets start is ``dispatch_allowed``'s to say.
     """
     if isinstance(scope.owner, AttemptId):
         owner = attempt_for(context, scope)
@@ -173,7 +174,7 @@ def scope_active(context: SessionsContext, scope: Scope) -> bool:
         )
     return scope == Scope(
         owner=context.run.run_id, generation=context.run.generation
-    ) and continues_admitted_work(context.run)
+    ) and admitted_work_proceeds(context.run)
 
 
 def proven_invocation(state: SessionsState, ref: InvocationRef) -> Invocation | None:
