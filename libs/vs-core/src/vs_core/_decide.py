@@ -322,6 +322,11 @@ _SEEDS = frozenset({"run_started", "core_snapshot"})
 """The records a fold starts from: a new run's seed, and the snapshot of a run an older version saved."""
 
 
+def starts_run(record: Record) -> bool:
+    """Whether ``record`` is the seed a fold starts from: a new run's, or a saved run's snapshot."""
+    return record.body is not None and record.body.field in _SEEDS
+
+
 def _seeded(body: Oneof, record: Record, registry: OperationRegistry | None) -> Folded:
     """The fold a seed record starts: a snapshot's unapplied inputs are applied, in order."""
     if body.field == "run_started":

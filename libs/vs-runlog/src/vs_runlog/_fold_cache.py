@@ -14,11 +14,9 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
 
 from vs_proto.api import StateCache, validate
-from vs_runlog._atomic import FileSync, OsFileSync, publish
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
-    from pathlib import Path
 
     from vs_proto.api import Record
 
@@ -109,7 +107,7 @@ def judge(
     return verdict
 
 
-def _decoded(data: bytes) -> CachedFold | CacheMiss:
+def decode_cache(data: bytes) -> CachedFold | CacheMiss:
     """The cache a ``state.pb`` holds, or ``UNREADABLE`` when it is not one of this version."""
     try:
         message = StateCache.from_binary(data)
@@ -121,7 +119,7 @@ def _decoded(data: bytes) -> CachedFold | CacheMiss:
     return CachedFold(message.through_seq, message.digest, message.state)
 
 
-def _encoded(cached: CachedFold) -> bytes:
+def encode_cache(cached: CachedFold) -> bytes:
     """The ``state.pb`` bytes of ``cached``, validated as a reader will."""
     message = StateCache(
         schema_version=SCHEMA_VERSION,
@@ -133,28 +131,6 @@ def _encoded(cached: CachedFold) -> bytes:
     return message.to_binary()
 
 
-class FileFoldCache:
-    """``state.pb`` on disk, replaced with a temporary file, an fsync and a rename."""
-
-    def __init__(self, path: Path, *, sync: FileSync | None = None) -> None:
-        """Cache in ``path``; ``sync`` is the durability operation, the operating system's by default."""
-        self._path = path
-        self._sync = OsFileSync() if sync is None else sync
-
-    def load(self) -> CachedFold | CacheMiss:
-        """The file as stored; a missing file is ``ABSENT``, anything else unusable ``UNREADABLE``."""
-        try:
-            return _decoded(self._path.read_bytes())
-        except FileNotFoundError:
-            return CacheMiss.ABSENT
-        except OSError:
-            return CacheMiss.UNREADABLE
-
-    def store(self, cached: CachedFold) -> None:
-        """Replace the file with ``cached``."""
-        publish(self._path, _encoded(cached), sync=self._sync)
-
-
 class MemoryFoldCache:
     """A cache kept in memory, as strict as the file: what it stores it validates and re-reads."""
 
@@ -164,11 +140,11 @@ class MemoryFoldCache:
 
     def load(self) -> CachedFold | CacheMiss:
         """The cache as stored."""
-        return CacheMiss.ABSENT if self._data is None else _decoded(self._data)
+        return CacheMiss.ABSENT if self._data is None else decode_cache(self._data)
 
     def store(self, cached: CachedFold) -> None:
         """Replace the cache with ``cached``."""
-        self._data = _encoded(cached)
+        self._data = encode_cache(cached)
 
     def damage(self, data: bytes | None) -> None:
         """Replace the stored bytes with anything, or delete them (``None``): a crash, a bad disk."""

@@ -67,9 +67,11 @@ def entry(seq: int, salt: bytes) -> Record:
     )
 
 
-LOGS = st.lists(st.binary(min_size=1, max_size=6), min_size=1, max_size=12).map(
-    lambda salts: [entry(index + 1, salt) for index, salt in enumerate(salts)]
-)
+SALTS = st.lists(st.binary(min_size=1, max_size=6), min_size=1, max_size=12)
+
+
+def log_of(salts: list[bytes]) -> list[Record]:
+    return [entry(index + 1, salt) for index, salt in enumerate(salts)]
 
 
 def digest_of(records: list[Record]) -> bytes:
@@ -78,10 +80,11 @@ def digest_of(records: list[Record]) -> bytes:
     return digest.value()
 
 
-@given(records=LOGS, data=st.data())
+@given(salts=SALTS, data=st.data())
 def test_a_cache_of_the_logs_own_first_records_is_used_and_the_digest_stands_at_its_end(
-    records: list[Record], data: st.DataObject
+    salts: list[bytes], data: st.DataObject
 ) -> None:
+    records = log_of(salts)
     covered = data.draw(st.integers(1, len(records)), label="records the cache covers")
     cache = CachedFold(covered, digest_of(records[:covered]), b"state")
     digest = PrefixDigest()
@@ -90,43 +93,46 @@ def test_a_cache_of_the_logs_own_first_records_is_used_and_the_digest_stands_at_
     assert digest.value() == digest_of(records)
 
 
-@given(records=LOGS, data=st.data())
+@given(salts=SALTS, data=st.data())
 def test_a_cache_of_a_log_that_differs_in_its_first_records_is_not_used(
-    records: list[Record], data: st.DataObject
+    salts: list[bytes], data: st.DataObject
 ) -> None:
+    records = log_of(salts)
     covered = data.draw(st.integers(1, len(records)), label="records the cache covers")
     changed = data.draw(st.integers(0, covered - 1), label="record that differs")
-    other = list(records)
-    other[changed] = entry(changed + 1, records[changed].body.value.event + b"!")
+    other = log_of([*salts[:changed], salts[changed] + b"!", *salts[changed + 1 :]])
     cache = CachedFold(covered, digest_of(other[:covered]), b"state")
     digest = PrefixDigest()
     assert judge(cache, records, digest) is CacheMiss.DIGEST_MISMATCH
     assert digest.value() == digest_of(records)
 
 
-@given(records=LOGS, extra=st.integers(1, 5))
+@given(salts=SALTS, extra=st.integers(1, 5))
 def test_a_cache_that_covers_more_than_the_log_holds_is_ahead_of_it(
-    records: list[Record], extra: int
+    salts: list[bytes], extra: int
 ) -> None:
+    records = log_of(salts)
     cache = CachedFold(len(records) + extra, digest_of(records), b"state")
     digest = PrefixDigest()
     assert judge(cache, records, digest) is CacheMiss.AHEAD_OF_LOG
     assert digest.value() == digest_of(records)
 
 
-@given(records=LOGS, miss=st.sampled_from([CacheMiss.ABSENT, CacheMiss.UNREADABLE]))
+@given(salts=SALTS, miss=st.sampled_from([CacheMiss.ABSENT, CacheMiss.UNREADABLE]))
 def test_a_cache_there_is_none_to_use_is_its_own_verdict(
-    records: list[Record], miss: CacheMiss
+    salts: list[bytes], miss: CacheMiss
 ) -> None:
+    records = log_of(salts)
     digest = PrefixDigest()
     assert judge(miss, records, digest) is miss
     assert digest.value() == digest_of(records)
 
 
-@given(records=LOGS, data=st.data())
+@given(salts=SALTS, data=st.data())
 def test_a_digest_extended_in_pieces_is_the_digest_of_the_whole(
-    records: list[Record], data: st.DataObject
+    salts: list[bytes], data: st.DataObject
 ) -> None:
+    records = log_of(salts)
     cut = data.draw(st.integers(0, len(records)))
     digest = PrefixDigest()
     digest.extend(records[:cut])

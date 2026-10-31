@@ -200,12 +200,17 @@ def _strategy(
     return Oneof("steps", changes)
 
 
+def _whole_state[S: StrategyState, C](search: SearchDriver[S, C], encoded: bytes) -> S:
+    """The search's whole state as it is logged: in the search driver's own encoding."""
+    return search.state_model.model_validate_json(encoded)
+
+
 def _saved[S: StrategyState, C](
     message: CoreSnapshot, search: SearchDriver[S, C], registry: OperationRegistry | None
 ) -> Progress[S]:
     """The search a run an older version saved left: its whole state, as a checkpoint is."""
     saved = decode_snapshot(message, registry)
-    state = search.state_model.model_validate_json(saved.strategy)
+    state = _whole_state(search, saved.strategy)
     return Progress(
         state,
         tuple(sorted(saved.wakes)),
@@ -224,7 +229,7 @@ def _read[S: StrategyState, C](
 ) -> Progress[S]:
     match message.strategy:
         case Oneof(field="checkpoint", value=whole):
-            state = search.state_model.model_validate_json(whole)
+            state = _whole_state(search, whole)
             whole_state = True
         case Oneof(field="steps", value=changes) if progress is not None:
             state = search.extend(progress.state, changes)

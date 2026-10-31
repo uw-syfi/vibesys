@@ -15,7 +15,15 @@ from vs_core._actions import (
     at_rest,
     interruption_of,
 )
-from vs_core._decide import Folded, apply_record, decide, fold, fold_run, may_start
+from vs_core._decide import (
+    Folded,
+    apply_record,
+    decide,
+    fold,
+    fold_run,
+    may_start,
+    starts_run,
+)
 from vs_core._search_events import Translated
 from vs_core._search_log import (
     CHECKPOINT_GROWTH,
@@ -102,4 +110,5 @@ __all__ = [
     "seed_message",
     "snapshot_message",
     "started_message",
+    "starts_run",
 ]

@@ -18,11 +18,11 @@ from vs_runlog._file import (
     install_run_log,
     open_run_log,
 )
+from vs_runlog._file_fold_cache import FileFoldCache
 from vs_runlog._fold import fold_skeleton
 from vs_runlog._fold_cache import (
     CachedFold,
     CacheMiss,
-    FileFoldCache,
     FoldCache,
     MemoryFoldCache,
     PrefixDigest,
