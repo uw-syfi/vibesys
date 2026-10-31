@@ -260,6 +260,7 @@ async function openWindow(
     broadcast: listing => windows.broadcast(WELCOME_EVENTS.listing, welcome.listing(listing)),
     endLogin: id => held.logins?.cancelHost(id),
     runs: watchedRuns,
+    subscriptions,
   });
   const logins = startLogins(hosts, gateway, manager);
   held.logins = logins;
@@ -362,8 +363,11 @@ function listedHosts(parts: {
   readonly broadcast: (listing: HostListing) => void;
   readonly endLogin?: (id: HostId) => void;
   readonly runs: ReturnType<typeof runWatch>;
+  /** A host that leaves the desired set ends the subscriptions on it. */
+  readonly subscriptions: Pick<Subscriptions, 'closeHost'>;
 }): {readonly hosts: Hosts; readonly setup: ReturnType<typeof registrySetup>} {
   const {manager, settings, gateway, history, notifier, welcome, broadcast, endLogin, runs} = parts;
+  const {subscriptions} = parts;
   const setup = registrySetup({
     unary: (id, bytes, signal) => gateway.unary(hostKey(id), READ_METHOD, bytes, signal),
   });
@@ -401,6 +405,7 @@ function listedHosts(parts: {
       retire: host => {
         history.invalidateHost(host);
         welcome.retireHost(host);
+        subscriptions.closeHost(host);
       },
     }),
   };

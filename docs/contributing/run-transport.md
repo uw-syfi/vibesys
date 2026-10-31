@@ -283,7 +283,9 @@ projects both into Go and TypeScript tables and refuses a lease that cannot hold
 sends no keepalive of its own: the gateway server sets no keepalive enforcement policy, so a client
 ping faster than gRPC's default would be refused, and the lease on frames already finds a silent
 stream. A client reads a stream through `@vibesys/subscription`, in main through `Subscriptions`,
-and never through the generic gateway port, which refuses `Subscribe`.
+and never through the generic gateway port, which refuses `Subscribe`. A lost session ends a
+`Subscribe` stream instead of re-issuing it, because a second stream in one call would deliver a
+second snapshot into state the caller already holds; the subscription's machine opens the next one.
 
 ## Versions and upgrades
 
