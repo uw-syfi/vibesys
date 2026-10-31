@@ -63,7 +63,7 @@ class Run:
         (self.task / "OBJECTIVE.md").write_text("Maximize throughput.\n")
         self.dir = root / ".vibesys-optimize" / "run-1"
         self.dir.mkdir(parents=True)
-        (self.dir / "run.json").write_text(json.dumps({"task": "demo"}))
+        (self.dir / "run.json").write_text(json.dumps({"task": "demo", "base_commit": SHA_A}))
 
     @property
     def lines(self) -> list[str]:
