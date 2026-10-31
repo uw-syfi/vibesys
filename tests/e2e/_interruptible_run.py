@@ -226,6 +226,11 @@ class RunSpec:
     """``AT:KIND`` of the turn to hold, or ``None``."""
     errors: str
     """The file the process's stderr goes to."""
+    environment: dict[str, str]
+    """The test's environment when it asked: each case has its own state home, which the fork
+    server's image (taken when its first case started) does not."""
+    cwd: str
+    """The test's working directory when it asked."""
 
 
 def run_process(spec: RunSpec, reports: Connection, releases: Connection) -> None:
@@ -236,6 +241,9 @@ def run_process(spec: RunSpec, reports: Connection, releases: Connection) -> Non
     ``spec.errors`` and a nonzero status, which the test reports.
     """
     os.setsid()
+    os.environ.clear()
+    os.environ.update(spec.environment)
+    os.chdir(spec.cwd)
     os.dup2(os.open(spec.errors, os.O_WRONLY | os.O_CREAT | os.O_TRUNC), sys.stderr.fileno())
     held = None if spec.hold is None else Hold.parse(spec.hold)
     main(Path(spec.base), spec.resume, held, Channel(reports, releases))

@@ -89,7 +89,11 @@ class RunProcess:
         releases_in, releases_out = _FORK_SERVER.Pipe(duplex=False)
         process = _FORK_SERVER.Process(
             target=run_process,
-            args=(RunSpec(str(base), resume, hold, str(errors)), reports_out, releases_in),
+            args=(
+                RunSpec(str(base), resume, hold, str(errors), dict(os.environ), str(Path.cwd())),
+                reports_out,
+                releases_in,
+            ),
             daemon=True,
         )
         process.start()
