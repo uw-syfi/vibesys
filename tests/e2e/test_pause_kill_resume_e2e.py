@@ -324,7 +324,9 @@ def _assert_epoch_opened_at_once(scenario: Scenario, resumed: RunProcess, run_id
     """
     resumed.wait_for(lambda line: "event" in line)
     log = Project.run_log_path_for(scenario.loop_input.root, run_id)
-    assert read_current_epoch(log).number == RESUMED_EPOCH
+    epoch = read_current_epoch(log)
+    assert epoch is not None
+    assert epoch.number == RESUMED_EPOCH
 
 
 def _pause(scenario: Scenario, run: RunProcess) -> None:

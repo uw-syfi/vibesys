@@ -1,7 +1,7 @@
 """What the whole-loop harness needs to know about a strategy, keyed by plugin id.
 
 The scenario harness drives a strategy through the production host: it builds the CLI request,
-decodes the committed envelope and checks liveness. Everything in it that names a concrete
+folds the run.log and checks liveness. Everything in it that names a concrete
 strategy lives here, so a ported strategy registers one `LoopSpec` and reuses the harness, the
 loop invariants and the chaos driver.
 """
@@ -13,12 +13,11 @@ from typing import TYPE_CHECKING
 
 from vibesys.orchestration.dynamic.search.api import OPERATIONS
 from vibesys.orchestration.issue_queue.search.api import issue_queue
-from vs_core.api import FlowState, RunEnvelope
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_core.api import CoreState
+    from vs_core.api import OperationRegistry
 
 
 @dataclass(frozen=True)
@@ -27,23 +26,19 @@ class LoopSpec:
 
     outer_loop: str
     """The CLI selection (`--outer-loop`) that runs the strategy."""
-    decode_core: Callable[[str], CoreState]
-    """Core's state out of the committed envelope's JSON, through the strategy's own codec."""
+    registry: Callable[[], OperationRegistry]
+    """The operations the strategy registers, which its run.log's records are decoded with."""
 
 
-def _dynamic_core(envelope: str) -> CoreState:
-    return OPERATIONS.registry().decode_envelope(RunEnvelope[FlowState], envelope).core
-
-
-def _plain_core(envelope: str) -> CoreState:
+def _plain_registry() -> OperationRegistry:
     registry = issue_queue.registry()
     assert registry is not None
-    return registry.decode_envelope(RunEnvelope[FlowState], envelope).core
+    return registry
 
 
 LOOPS = {
-    "dynamic": LoopSpec("dynamic", _dynamic_core),
-    "plain": LoopSpec("plain", _plain_core),
+    "dynamic": LoopSpec("dynamic", OPERATIONS.registry),
+    "plain": LoopSpec("plain", _plain_registry),
 }
 
 

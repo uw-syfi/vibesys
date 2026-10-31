@@ -32,7 +32,6 @@ from typing import TYPE_CHECKING, Protocol
 
 from pydantic import ValidationError
 from tests.support.docker_environment import host_container_backend
-from tests.support.dynamic_script import REGISTRY
 from tests.support.loop_invariants import RunRecords, check, terminal_event
 from tests.support.loop_spec import loop_spec
 from tests.support.real_git import REAL_PROCESSES
@@ -60,9 +59,11 @@ from vibesys.orchestration.dynamic.search.api import (
 )
 from vs_agent.api import NULL_SKILL_SELECTION, AgentCapabilities, SessionScope
 from vs_agent.api.testing import FakeAgentClient
-from vs_core.api import FlowDriver, FlowState, RunEnvelope
+from vs_core.api import CoreState, FlowDriver, FlowState
+from vs_core.api.recovery import fold
 from vs_core.testing.liveness import Budget, End, Journal, assert_live
-from vs_project.api import FakeStateStores, Project, StoredEnvelope
+from vs_project.api import FakeStateStores, Project
+from vs_runlog.api import RunLogReader
 from vs_runtime.api.core import RunTiming
 from vs_runtime.api.testing import CrashableRunClock, FakeStopTimer
 from vs_sim.api import (
@@ -734,9 +735,10 @@ def _assert_invariants(request: RunRequest, run: LoopRun) -> None:
     that ended on their own terms are checked.
     """
     root = request.project_root
+    loaded = load_run(Project.open(root), run.run_id, plugin_id=request.orchestration.id)
     records = RunRecords.from_core(
         [event.model_dump(mode="json") for event in run.events],
-        load_envelope(Project.open(root), run.run_id),
+        None if loaded is None else loaded.envelope,
         root.parent / "cluster",
         Project.log_directory_for(root, run.run_id),
     )
@@ -744,34 +746,50 @@ def _assert_invariants(request: RunRequest, run: LoopRun) -> None:
     assert not violations, [f"{v.invariant}: {v.detail}" for v in violations]
     ended = terminal_event(records)
     stopped = ended is not None and ended.get("status") == "interrupted"
-    assert_run_live(
-        records.envelope,
-        End.STOPPED if stopped else End.TERMINAL,
-        plugin_id=request.orchestration.id,
-    )
+    assert loaded is not None, "a run that ended committed no core record"
+    assert_run_live(loaded.core, End.STOPPED if stopped else End.TERMINAL)
 
 
-def assert_run_live(
-    envelope: Mapping[str, Any] | None, end: End = End.TERMINAL, *, plugin_id: str = "dynamic"
-) -> None:
-    """Fail when the committed core record shows a run that did not make bounded progress.
+def assert_run_live(core: CoreState, end: End = End.TERMINAL) -> None:
+    """Fail when the run's core state shows a run that did not make bounded progress.
 
-    The record is the run's intent ledger and final state (`vs_core.testing.liveness`).
+    The state is the run's intent ledger and final state (`vs_core.testing.liveness`).
     """
-    assert envelope is not None, "a run that ended committed no core record"
-    core = loop_spec(plugin_id).decode_core(json.dumps(envelope))
     assert_live(
         Journal.from_ledger(core), core, Budget(retries=core.run.limits.request_retries.limit), end
     )
 
 
-def load_envelope(project: Project, run_id: str) -> dict[str, Any] | None:
-    """Return the run's committed envelope, or None when none was committed."""
-    stored = project.stored_record(run_id)
-    if not isinstance(stored, StoredEnvelope):
+@dataclass(frozen=True)
+class LoadedRun:
+    """A run's core state folded from its run.log, and the same with the search's, as JSON."""
+
+    core: CoreState
+    envelope: dict[str, Any]
+    """``core`` and, once the run ended or parked, ``strategy``: the whole state the search logged."""
+
+
+def load_run(project: Project, run_id: str, *, plugin_id: str = "dynamic") -> LoadedRun | None:
+    """Fold the run's run.log; None when it holds no start of the run."""
+    path = Project.run_log_path_for(project.root, run_id)
+    if not path.exists():
         return None
-    envelope: dict[str, Any] = json.loads(stored.payload)["envelope"]
-    return envelope
+    with path.open("rb") as stream:
+        records = list(RunLogReader(stream))
+    if not any(r.body is not None and r.body.field == "run_started" for r in records):
+        return None
+    core = fold(records, registry=loop_spec(plugin_id).registry())
+    whole = [
+        r.body.value.strategy.value
+        for r in records
+        if r.body is not None
+        and r.body.field == "strategy_advanced"
+        and r.body.value.strategy.field == "checkpoint"
+    ]
+    envelope: dict[str, Any] = {"core": json.loads(core.model_dump_json())}
+    if whole:
+        envelope["strategy"] = json.loads(whole[-1])
+    return LoadedRun(core, envelope)
 
 
 def simulated_clock() -> CrashableRunClock:
@@ -792,11 +810,13 @@ class CoreRecords:
         self.loop_input = loop_input
         self.run_id = run_id
         self.project = loop_input.project()
-        envelope = load_envelope(self.project, run_id)
-        assert envelope is not None, f"no committed record for {run_id}"
-        self.envelope: dict[str, Any] = envelope
-        decoded = REGISTRY.decode_envelope(RunEnvelope[FlowState], json.dumps(envelope))
-        published = FlowDriver.published(decoded.strategy, RunSnapshot)
+        loaded = load_run(self.project, run_id)
+        assert loaded is not None, f"no committed record for {run_id}"
+        assert "strategy" in loaded.envelope, f"the search of {run_id} logged no whole state"
+        self.envelope: dict[str, Any] = loaded.envelope
+        published = FlowDriver.published(
+            FlowState.model_validate(loaded.envelope["strategy"]), RunSnapshot
+        )
         assert published is not None, "the search published no record"
         self.snapshot: RunSnapshot = published
 
