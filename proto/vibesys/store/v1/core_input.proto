@@ -175,3 +175,16 @@ message AttemptInterrupted {
     not_in: [0]
   }];
 }
+
+// RunEnded is the end of a run: its result, published once nothing is open. The loop appends it
+// when core says the run is over, so a reader of the log sees the end and a restart does not
+// publish it again.
+message RunEnded {
+  // Version of the canonical encoding of result.
+  uint32 schema_version = 1 [(buf.validate.field).uint32.gte = 1];
+  // The canonical JSON of the vs_core RunResultProposal the run ended with.
+  bytes result = 2 [(buf.validate.field).bytes = {
+    min_len: 1
+    max_len: 524288
+  }];
+}

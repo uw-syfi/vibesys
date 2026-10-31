@@ -7,6 +7,7 @@ from vs_core._actions import (
     Action,
     Cancel,
     End,
+    OpenStep,
     Run,
     RunRest,
     Settle,
@@ -14,7 +15,7 @@ from vs_core._actions import (
     at_rest,
     interruption_of,
 )
-from vs_core._decide import Folded, apply_record, decide, fold, fold_run
+from vs_core._decide import Folded, apply_record, decide, fold, fold_run, may_start
 from vs_core._search_events import Translated
 from vs_core._search_log import (
     CHECKPOINT_GROWTH,
@@ -24,8 +25,10 @@ from vs_core._search_log import (
     checkpoint_search,
     restore,
 )
+from vs_core._step_attempts import open_step
 from vs_core._step_log import (
     decode_seed,
+    ended_message,
     finished_message,
     input_message,
     interrupted_message,
@@ -58,6 +61,7 @@ __all__ = [
     "Folded",
     "InterruptPolicy",
     "Interruption",
+    "OpenStep",
     "Progress",
     "Run",
     "RunRest",
@@ -74,12 +78,15 @@ __all__ = [
     "checkpoint_search",
     "decide",
     "decode_seed",
+    "ended_message",
     "finished_message",
     "fold",
     "fold_run",
     "input_message",
     "interrupted_message",
     "interruption_of",
+    "may_start",
+    "open_step",
     "request_effect",
     "request_interrupt_policy",
     "restore",

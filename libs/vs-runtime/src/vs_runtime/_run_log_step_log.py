@@ -18,33 +18,33 @@ from typing import TYPE_CHECKING, Protocol
 
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
-from vs_core.api import RequestPhase
 from vs_core.api.recovery import (
     Interruption,
     RunRest,
     apply_record,
     at_rest,
+    ended_message,
     finished_message,
     fold_run,
     input_message,
     interrupted_message,
+    may_start,
+    open_step,
     seed_message,
     started_message,
 )
 from vs_runlog.api import Appended
-from vs_runtime._step_loop import Interrupted, OpenStep, Recorded, running_attempt
+from vs_runtime._step_loop import Interrupted, Recorded, running_attempt
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_core.api import CoreEvent, CoreState, OperationRegistry, RequestId
-    from vs_core.api.recovery import End, Folded, Run, StepResult
-    from vs_proto.api import StrategyAdvanced
+    from vs_core.api.recovery import End, Folded, OpenStep, Run, StepResult
+    from vs_proto.api import Record, StrategyAdvanced
     from vs_runlog.api import ConfirmedLog, CoreMessage
     from vs_runtime._step_loop import StepRecord
     from vs_sim.api import Clock
-
-_OPEN = (RequestPhase.PREPARED, RequestPhase.DISPATCHED, RequestPhase.RECONCILING)
 
 
 class RunLogUncertainError(Exception):
@@ -149,20 +149,16 @@ class RunLogStepLog:
 
     def open_step(self, tag: RequestId) -> OpenStep | None:
         """The step ``tag`` as the state has it, while it has no result."""
-        record = self.state.records.record(tag)
-        if record is None or record.phase not in _OPEN:
-            return None
-        attempts = self.state.steps.of(tag)
-        started = 0 if attempts is None else attempts.started
-        return OpenStep(record.request, record.until.at, started)
+        return open_step(self.state, tag)
 
-    async def step_started(self, run: Run) -> None:
-        """Append ``StepStarted``."""
+    async def step_started(self, run: Run) -> StepRecord:
+        """Append ``StepStarted`` if the run still lets the step start."""
+        if not may_start(self.state, run.tag, self._clock.now()):
+            return Interrupted()
         self._commit(started_message(run))
+        return Recorded()
 
-    async def step_finished(
-        self, tag: RequestId, attempt: int, result: StepResult
-    ) -> StepRecord:
+    async def step_finished(self, tag: RequestId, attempt: int, result: StepResult) -> StepRecord:
         """Append ``StepFinished``; for a parked run, ``AttemptInterrupted`` for its attempt."""
         if at_rest(self.state) is RunRest.PARKED:
             if running_attempt(self.state, tag, attempt):
@@ -176,9 +172,8 @@ class RunLogStepLog:
         self._commit(interrupted_message(tag, attempt, why))
 
     async def run_ended(self, end: End) -> None:
-        """Log the search whole, then append the end of the run."""
-        self._settle()
-        self._ended(end)
+        """Append the end of the run; the search logged itself whole when the run came to rest."""
+        self._commit(ended_message(end))
 
     def input(self, event: CoreEvent) -> None:
         """Append an input from outside the loop (an operator control, the clock) and wake it."""
@@ -207,13 +202,11 @@ class RunLogStepLog:
         record = self._log.next_record(
             message, epoch=self._epoch, at=self._stamp(), clock=self._clock.now()
         )
-        folded = apply_record(self._folded, record, self._registry)
-        assert folded is not None  # a log with a start is always folded
-        self._folded = folded
+        self._folded = apply_record(self._folded, record, self._registry)
         self._confirm(record)
 
-    def _confirm(self, record: object) -> None:
-        confirmed = self._log.extend(record)  # type: ignore[arg-type]
+    def _confirm(self, record: Record) -> None:
+        confirmed = self._log.extend(record)
         if not isinstance(confirmed, Appended):
             raise RunLogUncertainError
 
@@ -228,6 +221,3 @@ class RunLogStepLog:
         if at_rest(self.state) is not None and (rest := search.rest()) is not None:
             self._record(rest)
             search.appended()
-
-    def _ended(self, end: End) -> None:
-        raise NotImplementedError(end)

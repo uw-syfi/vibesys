@@ -551,6 +551,9 @@ deadlines, including requests made after Pause. Queued work outside that closure
 Pause now cancels unfinished work and exits. **Unfinished work may need repeating and may still
 incur charges.** It is available immediately while Pause drains. Completed results and actual
 usage remain recorded; operator interruption does not count as a failed round or consume a retry.
+Work that cannot be cancelled at once, such as starting an agent session, is waited for until the
+run's cleanup bound. A pause never exits with such work half done: what still runs then is
+stopped and recorded as interrupted, and Resume starts it again.
 
 Resume starts the same run as a new epoch after any ending: pause, crash, success, failure,
 deadline or environment failure. Its fresh duration defaults to the original duration. Resume

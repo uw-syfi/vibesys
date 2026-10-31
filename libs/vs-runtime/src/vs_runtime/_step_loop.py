@@ -22,6 +22,7 @@ from vs_core.api.recovery import (
     CancelReason,
     End,
     Interruption,
+    OpenStep,
     Run,
     RunRest,
     Settle,
@@ -39,17 +40,6 @@ if TYPE_CHECKING:
     from vs_core.api.recovery import Action, StepResult
     from vs_runtime._step_runner import StepRunner
     from vs_sim.api import SleepingClock
-
-
-@dataclass(frozen=True)
-class OpenStep:
-    """A step with no result, as the fold of the log has it, so ``clear`` has the request."""
-
-    step: Request
-    deadline_at: float
-    """Run-clock seconds at which core cancels an attempt of it."""
-    started: int
-    """The latest attempt that began; 0 before the first."""
 
 
 @dataclass(frozen=True)
@@ -87,8 +77,13 @@ class StepLog(Protocol):
         """The step ``tag`` as the fold has it while it has no result; ``None`` otherwise."""
         ...
 
-    async def step_started(self, run: Run) -> None:
-        """Record that an attempt is about to start, before any I/O of it."""
+    async def step_started(self, run: Run) -> StepRecord:
+        """Record that an attempt is about to start, before any I/O of it.
+
+        ``Interrupted`` when the run no longer lets the step start (a pause, an ending or the
+        step's limit came while the loop waited on a ``clear``): nothing is recorded and the
+        attempt must not run.
+        """
         ...
 
     async def step_finished(self, tag: RequestId, attempt: int, result: StepResult) -> StepRecord:
@@ -341,9 +336,9 @@ class _StepLoop:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def _record_started(self, run: Run) -> None:
+    async def _record_started(self, run: Run) -> StepRecord:
         async with self._appending:
-            await self._log.step_started(run)
+            return await self._log.step_started(run)
 
     async def _record_finished(
         self, tag: RequestId, attempt: int, result: StepResult
@@ -368,7 +363,8 @@ class _StepLoop:
         if cleared is None or (flight.signal.is_set() and isinstance(cleared, Cleared)):
             await self._finish_unstarted(flight)
             return
-        await self._record_started(run)
+        if isinstance(await self._record_started(run), Interrupted):
+            return
         flight.started = True
         outcome = await self._run_bounded(run, flight.signal)
         await self._finish_attempt(run, flight, outcome)
@@ -513,7 +509,6 @@ def running_attempt(state: CoreState, tag: RequestId, attempt: int) -> bool:
 
 __all__ = [
     "Interrupted",
-    "OpenStep",
     "Recorded",
     "StepLog",
     "StepLoopStalledError",

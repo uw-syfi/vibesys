@@ -38,7 +38,7 @@ once. An **open step** is a step with no result. An **epoch** is one process lif
    it is the only writer. Nothing else proves a process dead, and nothing needs to: the lock proves that
    no other process writes the log, and `clear` (rule 3) handles what the dead process left running.
 3. **No result means run again.** Core never asks whether an open step happened. The runner of the
-   step first calls `clear(step, tag)`, which removes or adopts what an earlier attempt left, and then runs the
+   step first calls `clear(tag)`, which removes or adopts what an earlier attempt left, and then runs the
    next attempt. The attempt number is recorded and shown.
 4. **Pause is not a crash.** Pause stops starting steps, lets running steps finish or cancels them
    within a deadline, records that the run is parked, and exits. A clean pause leaves no open attempt.
@@ -51,7 +51,8 @@ once. An **open step** is a step with no result. An **epoch** is one process lif
 | Core inputs as log records: `CoreInput`, `StepStarted`, `StepFinished`, `AttemptInterrupted`, and the confirmed append in `vs_runlog` | built, dormant (#3475 item 4a) |
 | `RunStarted` and `CoreSnapshot` records, the seed of a fold | unbuilt; `fold` takes its seed as an argument until the cutover (PR 6a) |
 | `fold(log)` and `decide(state, now) -> actions` in `vs_core` | built, dormant (#3475 item 4a) |
-| Runner loop, `StepRunner` Protocol, `FakeStepRunner`, contract suite | built and dormant: `vs_runtime.api.step_runner` and `vs_runtime.api.testing`; no run selects it (#3475 item 4b) |
+| Parked, draining, ended and resumed runs in the fold: the `RunEnded` record, `open_step`, the park advance (#3475, core gaps) | built, dormant |
+| Runner loop, `StepRunner` Protocol, `FakeStepRunner`, contract suite | unbuilt |
 | Runners: agent turn, workspace, Slurm and local evaluation, registered operation, adoption | unbuilt; `libs/vs-slurm/src/vs_slurm/ledger.py` is the model |
 | Pause drains within a deadline and records `Parked` | in progress (#3475 item 1) |
 | `vs-dst` kills and pauses at every log write and every await | in progress (#3475 item 2) |
@@ -162,7 +163,7 @@ unreachable. The first case is #3458, a completed `EnsureSession` whose session 
 acceptance. The table below marks `EnsureSession` safe to run twice. It keeps the four classes and adds
 what `clear` does for each.
 
-| Steps | Effect | After a crash | `clear(step, tag)` | Key |
+| Steps | Effect | After a crash | `clear(tag)` | Key |
 |---|---|---|---|---|
 | `ObserveOwnedJob`, `CollectEvidence`, `VerifyAdoption`; registered `QUERY` operations (`interpret_evidence`, `verify_revision`, board reads) | read only | safe | none | none |
 | `EnsureWorkspace`, `RestoreRevision` | create or reset an attempt's workspace to a recorded revision | safe: the end state is fixed by the request | none | tag (workspace is keyed by attempt and generation) |
@@ -245,7 +246,8 @@ New records (one proto envelope, `vibesys/store/v1/core_input.proto`, validated 
 | `CoreInput` | a decision or proposal, an owner event, an operator control, an epoch resume, a clock advance that changed state | the external inputs of `step` |
 | `StepStarted` | tag, attempt, request, deadline | durable intent before any I/O; makes a re-run visible |
 | `StepFinished` | tag, attempt, `Finished` (the report and the owner events), `Failed` or `Cancelled` with a typed reason | the result; one per step, and one atomic record, so a crash loses no owner event |
-| `AttemptInterrupted` | tag, attempt, reason (`PAUSE`, `SHUTDOWN`, `RAISED`) | an attempt that ended without ending the step; a `RAISED` one (the runner raised or gave nothing back) is charged to the retry bound, the other two are not. The loop writes `PAUSE` and `RAISED`; an orderly stop of the process (`SHUTDOWN`) is not built, and a cancelled loop is a crash |
+| `AttemptInterrupted` | tag, attempt, reason (`PAUSE`, `SHUTDOWN`, `RAISED`) | an attempt that ended without ending the step; a `RAISED` one (the runner raised or gave nothing back) is charged to the retry bound, the other two are not |
+| `RunEnded` | the run's result | the end of the run, published once nothing is open; a run has ended when this is in the log, not when the kernel reaches its terminal status |
 | `CoreSnapshot` | an old `RunEnvelope` | the seed of a migrated or imported run only; never written for a new run |
 
 The bodies of decisions, requests and observations are the canonical encoding of today's validated
@@ -378,14 +380,17 @@ kind. The rule is:
   record or by its process, is `Settle(Cancelled(INTERRUPTED))`;
 - an open step whose dependency can never succeed is `Settle(Cancelled(WITHDRAWN))`; one whose dependency is
   still pending waits;
-- a paused run (`PAUSED`, `DRAINING`, `PARKED`) starts no step except, while `DRAINING`, work the drain
-  admits (`_run_park.dispatch_allowed`); a running step is `Cancel(PAUSE_NOW)` when Pause now withdrew it
-  and `Cancel(DRAIN_EXPIRED)` from the pause's drain deadline (`RunPark.deadline_at`);
+- a paused run (`PAUSED`, `DRAINING`) starts no step except, while `DRAINING`, work the drain admits
+  (`_run_park.dispatch_allowed`); a running step is `Cancel(PAUSE_NOW)` when Pause now withdrew it and
+  `Cancel(DRAIN_EXPIRED)` once the pause's drain deadline (`RunPark.deadline_at`) has passed
+  (`_run_park.pause_cancels`);
+- a parked run is at rest: `decide` returns only `Wait`, whatever its steps hold or however late the clock is;
 - a run whose committed finish is a cancel, or that has ended, gets `Cancel(RUN_ENDING)` for each running
   step and `Settle(Cancelled(RUN_ENDING))` for each other open step, and starts none;
 - a step that snapshots its scope's files waits while any step that writes them is open, and a step that
   writes them waits while a snapshot of its scope runs ([Scope order](#scope-order));
-- a run with a committed finish and no open step is `End`.
+- a run with a committed finish, no open step and no `RunEnded` record is `End`; once the record is in
+  the log the run has ended and `decide` returns only `Wait`.
 
 A step runs now when its latest attempt has no record ending it. The first record of a later epoch (the
 epoch header, `EpochStarted`, which the writer appends before anything else) ends every attempt that
@@ -393,6 +398,44 @@ began before it: the run has one writer, so the earlier process is dead. The fol
 `decide`, so a state cached before the restart and a full fold agree, and `decide` issues `Run` for those
 steps as soon as the header is in the log. The ended attempts are charged, as a raised one is. Cleanup steps that core issues while a cancelling finish is committed are cancelled
 like any other; whether cleanup should instead outlive the finish is left to the cutover.
+
+#### Rest, drain, end and resume
+
+Four facts of the rule the loop depends on, each held by `libs/vs-core/tests/test_recovery_gaps.py` and,
+over generated trajectories, by `test_recovery_progress.py`: the fold accepts the record of every action
+`decide` returns, applying an action changes the state, no `Wait` is already due, and a run left to
+cooperative runners comes to rest.
+
+- **Parked is at rest, and a recorded result is never dropped.** A parked epoch ignores what is offered
+  to it (`parked_epoch_drops`). That is a filter on live input. A fact the log holds is history, and the
+  fold applies the report and the owner events of a `StepFinished` through `step_recorded`, which does not
+  drop. `decide` is silent in a parked run, so it never asks for a result the kernel would ignore.
+- **A draining pause parks when no attempt runs.** An attempt that ends without a result (an
+  interruption, a raise, a crash into a new epoch) returns its step to the state of a step no one has
+  started, as a drain that interrupts a request does (`resent`), and the fold then advances the drain
+  (`settle_park`): the run is `PARKED` once nothing it waits for is left. `RunPark.deadline_at` comes
+  from the pause's `drain_seconds`; `decide` cancels with `DRAIN_EXPIRED` once it has passed. The open
+  step stays open and runs again, uncharged, in the epoch that resumes the run.
+- **The end of a run is a record.** A stop with nothing open takes the kernel to its terminal status at
+  once, before anyone has published the result. `RunEnded` is that publication: the loop appends it on
+  `End`, `at_rest` reports `ENDED` only when it is in the log, and it stands only while the run still
+  holds that result, so a resumed run is not ended. The fold refuses a `RunEnded` with a step open or
+  with a result the run does not hold.
+- **A parked run resumes only in a later epoch.** A pause exits the process, so the park lasts for the
+  rest of the epoch it was made in, and the kernel refuses a resume there ("pause is terminal for this
+  epoch"). Resume is a relaunch: the new process opens the next epoch (`EpochStarted`), which moves the
+  kernel's host epoch with the log's and leaves the parked run parked, and the resume control is then an
+  ordinary input that the fold takes. A drain in progress keeps its authority across the new epoch, so a
+  Pause now still cancels.
+
+- **The log holds only starts the rule would run.** A flight that waited for its `clear` while the run
+  paused or parked would record a start into a parked run, leaving an attempt that nothing cancels. The
+  fold refuses a `StepStarted` that `decide` would not `Run`, and `may_start(state, tag, now)` is that
+  predicate for the loop to ask, under its append lock and with the clock it records at, before it
+  records a start. A flight that is refused stands down: its `clear` did no harm and the step stays open.
+
+`open_step(state, tag)` is the step as the loop runs it while it has no result: its request, its limit
+and the attempts that began. The loop reads it from core instead of rebuilding it from the ledger.
 
 #### Scope order
 
@@ -450,32 +493,18 @@ class Cleared:
 
 class StepRunner(Protocol):
     async def run(
-        self,
-        step: Request,
-        tag: RequestId,
-        attempt: int,
-        deadline_at: float,     # run-clock seconds; the limit of the work the runner starts
-        cancel: CancelSignal,
+        self, step: Request, tag: RequestId, attempt: int, cancel: CancelSignal
     ) -> StepResult: ...
 
-    async def clear(self, step: Request, tag: RequestId) -> Adopted | Cleared: ...
+    async def clear(self, tag: RequestId) -> Adopted | Cleared: ...
 ```
 
-`clear` takes the step, not only the tag, so a runner finds what an attempt left from the request itself
-and keeps no index from tag back to step (an agent runner needs no persisted receipt of which turn a tag
-was, an evaluation runner no table of handles). The loop always has the step: it is in the `Run` action,
-and after a restart the fold of the log holds the request of every open step, including one whose attempt
-ran in an earlier epoch. `deadline_at` is the `Run` action's, so a runner builds the limit of its work from
-it and needs no wiring of its own to learn the step's limit.
+Contract, which every implementation passes in `vs_runtime.api.testing.step_runner_contract`:
 
-Contract, which every implementation passes in `vs_runtime.api.testing.StepRunnerContract`, a class a test
-module subclasses with one factory method, as the `vs_sim` contracts are:
-
-1. `run` returns a result, or raises. A raise is "no result": the loop treats it like a crash. A `run` that
-   never returns fails the suite: every `run` in it carries the hang guard.
+1. `run` returns a result, or raises. A raise is "no result": the loop treats it like a crash.
 2. After `clear`, a second `run` with the same tag and a higher attempt starts clean.
 3. `clear` is idempotent, returns `Cleared` for a tag that never started, and returns only when nothing
-   carrying the tag runs or will start. It is given the step the attempt ran.
+   carrying the tag runs or will start.
 4. `Adopted` means the runner took over what an earlier attempt left. With `result` set the step had
    ended, and `run` returns that result. With `result` unset the work is still going, and `run` attaches
    to it instead of starting new work. Agent turns never adopt. Slurm jobs adopt, because they survive
@@ -495,48 +524,18 @@ The loop, `vs_runtime/_step_loop.py`:
 state = fold(log)                      # cache plus suffix, or the whole log
 repeat:
     for action in decide(state, clock.now()):
-        Run:    if attempt > 1: await runner.clear(step, tag)
+        Run:    if attempt > 1: await runner.clear(tag)
                 append StepStarted(tag, attempt)      # durable before I/O
-                start runner.run(step, tag, attempt, deadline_at, signal) as a task
+                start runner.run(...) as a task
         Cancel: set the signal; on return append StepFinished or AttemptInterrupted
-        Settle: await runner.clear(step, tag) if an attempt was interrupted; append StepFinished
-                (step: from the fold, for a step with no attempt in flight)
-        Wait:   await the first of: a task ending, a new input (a pause is one), the timer
-        End:    append Ended; release the lock
+        Settle: await runner.clear(tag) if an attempt was interrupted; append StepFinished
+        Wait:   await the first of: a task ending, a new input, the timer, the pause signal
+        End:    append RunEnded; release the lock
     state = fold(state, the records just appended)
 ```
 
 The loop owns timers, tasks, cancellation and recording. `decide` owns every decision, including that a
 deadline passed. No `if isinstance(step, ...)` appears in either.
-
-In code the loop decides with core's own functions, `decide` and `at_rest`, and sees the log through one
-interface it owns. `StepLog` is the log as the loop uses it: one atomic durable append per method, a
-`state` that is the fold of everything appended (by the loop or by an input from elsewhere), and
-`open_step(tag)`, the step with no result as the fold has it (its request, its limit and its latest
-attempt), which is where `clear` gets the step for a tag with no attempt in flight. `StepLogContract`
-holds a log to what the loop relies on, and a restarted log over the records of a dead process is how the
-tests kill the host. The loop's clock is the run clock, the one `decide` reads and the records carry.
-`at_rest(state)` says the run ended (the loop returns at once, so a restart never records the end twice)
-or parked (it returns once nothing is in flight). Each running attempt is a flight, one task that owns the
-attempt from `clear` to the record of how it ended, so a `clear` that waits on an unreachable backend never
-blocks the loop or an ending. How an attempt ends depends on why it was cancelled:
-
-| Cancel reason | Recorded | `clear` unreachable |
-|---|---|---|
-| `PAUSE_NOW`, `DRAIN_EXPIRED` | `AttemptInterrupted(PAUSE)` | give up; the next epoch's `clear` handles the leftovers |
-| `RUN_ENDING` | `StepFinished(Cancelled)` | give up; the leftovers are a named residual |
-| `DEADLINE`, `WITHDRAWN`, `INTERRUPTED` | `StepFinished(Cancelled)` | keep retrying with backoff |
-
-An attempt that returned a result on its own is recorded as that result even when a cancel was set, unless
-the run is parked: core drops a result in a parked epoch, so the attempt is recorded as
-`AttemptInterrupted(PAUSE)` and the step runs again after the resume. A parked run also takes no `Settle`: it
-waits for the resume, so a step past its limit is not settled over and over. An
-attempt the loop gave up on (it ignored the signal through the grace period, or raised) is cleared before
-its end is recorded, so a paused or ended run leaves nothing running. A parked run starts nothing, so
-flights still waiting on `clear` stop waiting. `Settle` and a `Cancel` with no flight (the host restarted)
-run `clear` and record the result; if `clear` adopts work that is still going, the loop attaches to it with
-the cancel signal set so that it ends. A raise out of `run` is "no result": the loop records
-`AttemptInterrupted(RAISED)`, and the next `Run` is attempt n + 1 after a `clear`.
 
 A re-run is shown from the same facts. The store already has a span `Attempt` message with `n` and `of`
 (`proto/vibesys/store/v1/span.proto`). The journal projection sets `n` from `StepStarted.attempt`.
@@ -616,7 +615,7 @@ Each pull request below is dormant until the cutover: test-reachable, not select
 | PR | Write set | Deletes |
 |---|---|---|
 | 4a. Inputs and decide | `proto/vibesys/store/v1/core_input.proto` and its generated code; `libs/vs-runlog/src/vs_runlog/` (input append, read, the log-prefix rule moved from `_replay_store.py`); `libs/vs-core/src/vs_core/api/recovery.py` and `_decide.py` (`fold`, `decide`, `Action`); `libs/vs-core/tests` (properties over generated logs: fold twice equals once, cached start equals full fold, crash at every record prefix yields `Run` for every open step and never a blocked action) | nothing |
-| 4b. Loop and Protocol | `libs/vs-runtime/src/vs_runtime/_step_loop.py`, `_step_runner.py`, `api/step_runner.py`, `api/step_runner_contracts.py`, `api/step_log_contracts.py`, `api/testing.py` (`FakeStepRunner`, `FakeStepLog`, `StepRunnerContract`, `StepLogContract`); `tach.toml`; `libs/vs-dst` hooks (#3475 item 2 owns the points) | nothing |
+| 4b. Loop and Protocol | `libs/vs-runtime/src/vs_runtime/_step_loop.py`, `_step_runner.py`, `api/step_runner.py`, `api/testing.py` (`FakeStepRunner`, `step_runner_contract`); `tach.toml`; `libs/vs-dst` hooks (#3475 item 2 owns the points) | nothing |
 | 5a. Agent turn and workspace runners | `libs/vs-runtime/src/vs_runtime/_agent_turn_step_runner.py`, `_workspace_step_runner.py`; `libs/vs-agent/src/vs_agent/orphans.py` gains reap by step tag beside reap by run | nothing |
 | 5b. Evaluation runners | `libs/vs-runtime/src/vs_runtime/_slurm_job_step_runner.py`, `_local_job_step_runner.py`; Slurm tier case | nothing |
 | 5c. Operation, adoption and environment runners | `libs/vs-runtime/src/vs_runtime/_operation_step_runner.py`, `_adoption_step_runner.py`; per-environment `clear` in `_run_environment.py` (Docker, SkyPilot, Modal, Host) | nothing |

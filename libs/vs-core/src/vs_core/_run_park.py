@@ -2,13 +2,30 @@
 
 Park owns only admission and physical job release. Existing turn/checkpoint transitions
 finish normally, and the ordinary persisted search and request ledger resume next epoch.
+
+A park never leaves a running request behind. Both modes close admission and wait until every
+request the run dispatched has recorded its outcome. Pause-now also cancels what can be
+cancelled at once (turns, jobs). A pause may carry a drain deadline (``RunPark.deadline_at``,
+from the event's ``drain_seconds``; Pause-now has the run's cleanup bound when it names none).
+At the deadline the drain stops waiting: a request recovery would send again goes back to
+PREPARED, interrupted and unreported (``resent``), and the next epoch runs it again; the rest is
+cancelled and ends at its limit, a cleanup bound after the deadline.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ._turn_permit import invocation_permit, permit_for_command, permit_for_request
+from ._recovery_unanswered import Inspection, settlement
+from ._request_recovery import resent
+from ._turn_permit import (
+    cap_open_records,
+    invocation_permit,
+    permit_for_command,
+    permit_for_request,
+    scope_in_flight,
+    turn_executing,
+)
 from .types.attempts import CloseAttemptScope, DiscardWorkspace, RetainRevision, SnapshotAndRetain
 from .types.common import RequestId, RunStatus
 from .types.evaluation import (
@@ -32,10 +49,10 @@ from .types.sessions import (
 from .types.until import Until
 
 if TYPE_CHECKING:
-    from .types.common import InvocationRef, Scope
-    from .types.kernel import CoreState
-    from .types.records import RecordsState, Request, RequestRecord
-    from .types.sessions import Invocation, SessionsState
+    from .types.common import InvocationRef, RunPark
+    from .types.kernel import CoreState, RunControlEvent
+    from .types.records import Request, RequestRecord
+    from .types.sessions import Invocation
     from .types.strategy import Command
 # These effects finish work already performed by a turn. Everything else waits for
 # relaunch, including prepared turns, measurements, polls and queued attempts.
@@ -94,7 +111,7 @@ def dispatch_allowed(state: CoreState, request: Request) -> bool:
         return state.run.park is not None and state.records.recovery.epoch > state.run.park.epoch
     if state.run.status != RunStatus.DRAINING:
         return True
-    if pause_withdraws(state, request):
+    if _pause_now_holds_back(state, request):
         return False
     return (
         _request_bound(state, request) is not None
@@ -106,29 +123,43 @@ def dispatch_allowed(state: CoreState, request: Request) -> bool:
     )
 
 
-def pause_withdraws(state: CoreState, request: Request) -> bool:
-    """Whether committed Pause now withdrew this effect's right to complete the epoch."""
+def drain_deadline(event: RunControlEvent, now_at: float, cleanup_bound: float) -> float | None:
+    """When the drain a pause starts stops waiting; None for a pause that waits for its turns.
+
+    The pause's own ``drain_seconds`` says; a Pause-now that names none gets the cleanup bound.
+    """
+    if event.drain_seconds is not None:
+        return now_at + event.drain_seconds
+    return now_at + cleanup_bound if event.control.action == "pause_now" else None
+
+
+def _immediate(state: CoreState, park: RunPark) -> bool:
+    """Whether the drain cancels at once: a Pause-now, or any pause past its deadline."""
+    return park.immediate or _past_deadline(state, park)
+
+
+def _past_deadline(state: CoreState, park: RunPark) -> bool:
+    return park.deadline_at is not None and state.run.now_at >= park.deadline_at
+
+
+def _pause_now_holds_back(state: CoreState, request: Request) -> bool:
+    """Whether a committed Pause-now, or a pause past its deadline, lets this effect start no more."""
+    park = state.run.park
     return (
-        state.run.park is not None
-        and state.records.recovery.epoch == state.run.park.epoch
-        and state.run.park.immediate
+        park is not None
+        and state.records.recovery.epoch == park.epoch
+        and _immediate(state, park)
         and not isinstance(request, _DRAIN_EFFECTS)
     )
 
 
-def scope_in_flight(sessions: SessionsState, records: RecordsState, scope: Scope) -> bool:
-    """An admitted turn of this owner has crossed core's dispatch boundary."""
-    return any(turn.scope == scope and _executing(turn, records) for turn in sessions.invocations)
+def pause_cancels(state: CoreState, request: Request) -> bool:
+    """Whether the drain of a pause cancels this running request now.
 
-
-def _executing(turn: Invocation, records: RecordsState) -> bool:
-    return turn.phase in (SessionPhase.EXECUTING, SessionPhase.UNKNOWN) and any(
-        isinstance(row.request, DispatchTurn | ResumeSessionTurn)
-        and row.request.turn == turn.turn
-        and row.request.scope == turn.scope
-        and row.phase != RequestPhase.PREPARED
-        for row in records.records
-    )
+    A Pause-now does from the start, and any pause does once its drain deadline has passed. The
+    effects that finish work a turn already did (a snapshot, a cleanup) are left to end.
+    """
+    return _pause_now_holds_back(state, request)
 
 
 def _unfinished(state: CoreState, record: RequestRecord) -> bool:
@@ -152,7 +183,7 @@ def _unfinished(state: CoreState, record: RequestRecord) -> bool:
 def _turns_in_flight(state: CoreState) -> bool:
     """A prepared dispatch marks its invocation executing before I/O actually starts."""
     return any(
-        _executing(turn, state.records)
+        turn_executing(turn, state.records)
         or (
             turn.phase is SessionPhase.SUSPENDED
             and invocation_permit(state, turn.invocation) is not None
@@ -170,14 +201,28 @@ def _released_or_bounded(state: CoreState, record: RequestRecord | None) -> bool
     )
 
 
-def _cancel_turns(state: CoreState) -> tuple[list[Scheduled], bool]:
-    park = state.run.park
-    if park is None or not park.immediate:
+def _dispatched(state: CoreState, invocation: Invocation) -> bool:
+    """Whether a dispatch of the turn was authorized: otherwise nothing runs that a cancel could stop.
+
+    Cancelling a turn that never began would close its fence, and the next epoch could not
+    dispatch it.
+    """
+    return any(
+        isinstance(row.request, DispatchTurn | ResumeSessionTurn)
+        and row.request.turn == invocation.turn
+        and row.request.scope == invocation.scope
+        and row.phase != RequestPhase.PREPARED
+        for row in state.records.records
+    )
+
+
+def _cancel_turns(state: CoreState, park: RunPark) -> tuple[list[Scheduled], bool]:
+    if not _immediate(state, park):
         return [], True
     pending: list[Scheduled] = []
     released = True
     for invocation in state.sessions.invocations:
-        if invocation.phase is SessionPhase.TERMINAL:
+        if invocation.phase is SessionPhase.TERMINAL or not _dispatched(state, invocation):
             continue
         identity = RequestId(
             root=f"pause-now:{park.control_id.root}:{invocation.invocation.invocation_id.root}"
@@ -209,19 +254,69 @@ def _cancel_turns(state: CoreState) -> tuple[list[Scheduled], bool]:
     return pending, released
 
 
+def _rerunnable(record: RequestRecord) -> bool:
+    """Whether recovery would send this open request again, which is when it may be interrupted."""
+    return (
+        settlement(record, inspection=Inspection.ANSWERED, owes_release=False, resendable=True)
+        == "resend"
+    )
+
+
+def cap_to_drain_deadline(state: CoreState) -> CoreState:
+    """Give the running requests a drain's deadline cannot interrupt a cleanup bound past it.
+
+    A request that cannot be sent again is cancelled once the deadline passes (a turn, a job) or
+    left to its own limit; either way it ends by ``cleanup_bound`` after the deadline, as any
+    request ends at its limit, and the loop then cancels its executor.
+    """
+    park = state.run.park
+    if park is None or park.deadline_at is None or state.run.status != RunStatus.DRAINING:
+        return state
+    bound = park.deadline_at + state.run.limits.cleanup_bound
+    return cap_open_records(
+        state,
+        lambda record: bound if _unfinished(state, record) and not _rerunnable(record) else None,
+    )
+
+
+def _interrupt_overdue(state: CoreState, park: RunPark) -> CoreState:
+    """At the drain deadline, send the running requests recovery could send again back to PREPARED.
+
+    The request is neither observed nor reported to its owner, and counts as no failure and no
+    retry. The loop cancels its executor, whose cleanup runs, and the next epoch dispatches it
+    again unchanged.
+    """
+    if not _past_deadline(state, park):
+        return state
+    reconciliation = state.run.limits.reconciliation_bound
+    records = tuple(
+        resent(row, state.run.now_at, reconciliation)
+        if _unfinished(state, row) and _rerunnable(row)
+        else row
+        for row in state.records.records
+    )
+    if records == state.records.records:
+        return state
+    return state.model_copy(
+        update={"records": state.records.model_copy(update={"records": records})}
+    )
+
+
 def advance(state: CoreState) -> tuple[CoreState, tuple[Scheduled, ...]]:
     """Request each live job's release once, then park after turns and their checkpoints drain."""
     park = state.run.park
     if state.run.status != RunStatus.DRAINING or park is None:
         return state, ()
+    state = _interrupt_overdue(state, park)
+    immediate = _immediate(state, park)
     # Polls/submissions already authorized must commit before their jobs are cancelled.
-    if not park.immediate and any(
+    if not immediate and any(
         _unfinished(state, record)
         and isinstance(record.request, SubmitMeasurement | ObserveOwnedJob | InspectOwnedJob)
         for record in state.records.records
     ):
         return state, ()
-    pending, released = _cancel_turns(state)
+    pending, released = _cancel_turns(state, park)
     for job in (*state.evaluation.jobs, *state.evaluation.registered_jobs):
         if job.terminal or job.resource_id is None:
             continue
@@ -236,7 +331,7 @@ def advance(state: CoreState) -> tuple[CoreState, tuple[Scheduled, ...]]:
                 admission_id=None if source is None else source.request.admission_id,
                 resource_id=job.resource_id,
                 for_park=True,
-                immediate=park.immediate,
+                immediate=immediate,
             )
             pending.append(
                 Scheduled(
@@ -244,7 +339,7 @@ def advance(state: CoreState) -> tuple[CoreState, tuple[Scheduled, ...]]:
                     until=Until(
                         at=(
                             state.run.now_at + state.run.limits.cleanup_bound
-                            if park.immediate
+                            if immediate
                             else max(
                                 state.run.now_at + state.run.limits.cleanup_bound,
                                 state.run.now_at if source is None else source.until.at,
@@ -256,19 +351,18 @@ def advance(state: CoreState) -> tuple[CoreState, tuple[Scheduled, ...]]:
         observation = None if held is None else held.observation
         released = released and (
             _released_or_bounded(state, held)
-            if park.immediate
+            if immediate
             else observation is not None and observation.accepted and observation.released
         )
     if pending:
         return state, tuple(pending)
-    if not released or (
-        not park.immediate
-        and (
-            any(_unfinished(state, row) for row in state.records.records) or _turns_in_flight(state)
-        )
+    if (
+        not released
+        or any(_unfinished(state, row) for row in state.records.records)
+        or (not immediate and _turns_in_flight(state))
     ):
         return state, ()
-    if not park.immediate and any(
+    if not immediate and any(
         row.phase == RequestPhase.PREPARED and dispatch_allowed(state, row.request)
         for row in state.records.records
     ):

@@ -1,8 +1,9 @@
 """The step runner interface and the loop that executes core's actions through it."""
 
+from vs_core.api.recovery import OpenStep
+from vs_runtime._run_log_step_log import RunLogStepLog, RunLogUncertainError, SearchHearing
 from vs_runtime._step_loop import (
     Interrupted,
-    OpenStep,
     Recorded,
     StepLog,
     StepLoopStalledError,
@@ -27,6 +28,9 @@ __all__ = [
     "Interrupted",
     "OpenStep",
     "Recorded",
+    "RunLogStepLog",
+    "RunLogUncertainError",
+    "SearchHearing",
     "StepLog",
     "StepLoopStalledError",
     "StepLoopTiming",

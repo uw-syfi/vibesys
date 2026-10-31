@@ -201,13 +201,14 @@ def scripts(draw: st.DrawFn) -> Script:
         running = [step for step in open_steps if step.running]
         idle = [step for step in open_steps if not step.running]
         choices = ["restart", *(["prepare"] if len(build.steps) < 3 else [])]
-        choices += ["start"] if idle else []
+        startable = [step for step in idle if not step.spent]
+        choices += ["start"] if startable else []
         choices += ["interrupt", "finish", "cancel"] if running else []
         match draw(st.sampled_from(choices)):
             case "prepare":
                 build.prepare(draw(st.integers(0, 3)))
             case "start":
-                build.start(draw(st.sampled_from(idle)))
+                build.start(draw(st.sampled_from(startable)))
             case "interrupt":
                 build.interrupt(draw(st.sampled_from(running)), draw(st.sampled_from(Interruption)))
             case "finish":
@@ -394,7 +395,7 @@ def test_a_step_that_asks_to_be_cancelled_still_runs_its_first_attempt() -> None
     )
 
 
-PAUSES = st.sampled_from([core.RunStatus.PAUSED, core.RunStatus.DRAINING, core.RunStatus.PARKED])
+PAUSES = st.sampled_from([core.RunStatus.PAUSED, core.RunStatus.DRAINING])
 
 
 def paused(
@@ -406,7 +407,7 @@ def paused(
 ) -> core.CoreState:
     standing = core.RunPark(
         control_id=core.ControlId(root="pause"),
-        epoch=0,
+        epoch=state.records.recovery.epoch,
         immediate=immediate,
         deadline_at=deadline_at,
     )
@@ -567,11 +568,21 @@ def test_a_later_epoch_ends_every_running_attempt_and_charges_it(script: Script)
 @pytest.mark.parametrize("status", list(core.RunStatus))
 def test_a_run_is_at_rest_only_when_it_ended_or_parked(status: core.RunStatus) -> None:
     run = SEED.run.model_copy(update={"status": status})
-    expected = {
-        core.RunStatus.TERMINAL: RunRest.ENDED,
-        core.RunStatus.PARKED: RunRest.PARKED,
-    }.get(status)
+    expected = RunRest.PARKED if status is core.RunStatus.PARKED else None
     assert at_rest(SEED.model_copy(update={"run": run})) is expected
+
+
+def test_a_run_has_ended_when_its_end_is_recorded_not_when_the_kernel_reaches_terminal() -> None:
+    result = core.RunResultProposal(outcome="cancelled", reason="done")
+    run = SEED.run.model_copy(update={"status": core.RunStatus.TERMINAL, "result": result})
+    terminal = SEED.model_copy(update={"run": run})
+    assert at_rest(terminal) is None
+    published = terminal.model_copy(update={"steps": StepsState(ended=result)})
+    assert at_rest(published) is RunRest.ENDED
+    resumed = published.model_copy(
+        update={"run": run.model_copy(update={"status": core.RunStatus.RUNNING, "result": None})}
+    )
+    assert at_rest(resumed) is None
 
 
 @pytest.mark.parametrize("reason", list(CancelReason))
@@ -626,3 +637,14 @@ def test_a_turn_declares_what_an_interruption_means_on_its_turn_spec(
     else:
         assert isinstance(action, Run)
         assert action.attempt == 2
+
+
+@settings(max_examples=examples(pr=12, nightly=200))
+@given(script=scripts(), late=st.floats(0, 1e4))
+def test_a_parked_run_does_nothing_whatever_its_steps_hold_or_how_late_it_is(
+    script: Script, late: float
+) -> None:
+    """Nothing runs, cancels or settles in a parked run: an overdue step waits for the resume."""
+    for length, (state, _) in enumerate(states(script)):
+        parked = paused(state, core.RunStatus.PARKED)
+        assert decide(parked, clock_of(length) + late) == (Wait(until=None),)

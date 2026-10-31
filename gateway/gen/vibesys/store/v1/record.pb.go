@@ -60,6 +60,7 @@ type Record struct {
 	//	*Record_StepStarted
 	//	*Record_StepFinished
 	//	*Record_AttemptInterrupted
+	//	*Record_RunEnded
 	//	*Record_RunStarted
 	//	*Record_StrategyAdvanced
 	Body          isRecord_Body `protobuf_oneof:"body"`
@@ -282,6 +283,15 @@ func (x *Record) GetAttemptInterrupted() *AttemptInterrupted {
 	return nil
 }
 
+func (x *Record) GetRunEnded() *RunEnded {
+	if x != nil {
+		if x, ok := x.Body.(*Record_RunEnded); ok {
+			return x.RunEnded
+		}
+	}
+	return nil
+}
+
 func (x *Record) GetRunStarted() *RunStarted {
 	if x != nil {
 		if x, ok := x.Body.(*Record_RunStarted); ok {
@@ -367,6 +377,10 @@ type Record_AttemptInterrupted struct {
 	AttemptInterrupted *AttemptInterrupted `protobuf:"bytes,26,opt,name=attempt_interrupted,json=attemptInterrupted,proto3,oneof"`
 }
 
+type Record_RunEnded struct {
+	RunEnded *RunEnded `protobuf:"bytes,27,opt,name=run_ended,json=runEnded,proto3,oneof"`
+}
+
 type Record_RunStarted struct {
 	RunStarted *RunStarted `protobuf:"bytes,28,opt,name=run_started,json=runStarted,proto3,oneof"`
 }
@@ -404,6 +418,8 @@ func (*Record_StepStarted) isRecord_Body() {}
 func (*Record_StepFinished) isRecord_Body() {}
 
 func (*Record_AttemptInterrupted) isRecord_Body() {}
+
+func (*Record_RunEnded) isRecord_Body() {}
 
 func (*Record_RunStarted) isRecord_Body() {}
 
@@ -695,7 +711,7 @@ var File_vibesys_store_v1_record_proto protoreflect.FileDescriptor
 
 const file_vibesys_store_v1_record_proto_rawDesc = "" +
 	"\n" +
-	"\x1dvibesys/store/v1/record.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1bvibesys/store/v1/chat.proto\x1a\x1evibesys/store/v1/content.proto\x1a!vibesys/store/v1/core_input.proto\x1a\x1cvibesys/store/v1/epoch.proto\x1a\x1dvibesys/store/v1/intent.proto\x1a vibesys/store/v1/lifecycle.proto\x1a\x1dvibesys/store/v1/notice.proto\x1a\x1dvibesys/store/v1/replay.proto\x1a\x1bvibesys/store/v1/span.proto\"\xdd\x16\n" +
+	"\x1dvibesys/store/v1/record.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1bvibesys/store/v1/chat.proto\x1a\x1evibesys/store/v1/content.proto\x1a!vibesys/store/v1/core_input.proto\x1a\x1cvibesys/store/v1/epoch.proto\x1a\x1dvibesys/store/v1/intent.proto\x1a vibesys/store/v1/lifecycle.proto\x1a\x1dvibesys/store/v1/notice.proto\x1a\x1dvibesys/store/v1/replay.proto\x1a\x1bvibesys/store/v1/span.proto\"\xaf\x17\n" +
 	"\x06Record\x12\x10\n" +
 	"\x03seq\x18\x01 \x01(\x04R\x03seq\x12*\n" +
 	"\x02at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x02at\x12\x14\n" +
@@ -718,15 +734,16 @@ const file_vibesys_store_v1_record_proto_rawDesc = "" +
 	"core_input\x18\x17 \x01(\v2\x1b.vibesys.store.v1.CoreInputH\x00R\tcoreInput\x12B\n" +
 	"\fstep_started\x18\x18 \x01(\v2\x1d.vibesys.store.v1.StepStartedH\x00R\vstepStarted\x12E\n" +
 	"\rstep_finished\x18\x19 \x01(\v2\x1e.vibesys.store.v1.StepFinishedH\x00R\fstepFinished\x12W\n" +
-	"\x13attempt_interrupted\x18\x1a \x01(\v2$.vibesys.store.v1.AttemptInterruptedH\x00R\x12attemptInterrupted\x12?\n" +
+	"\x13attempt_interrupted\x18\x1a \x01(\v2$.vibesys.store.v1.AttemptInterruptedH\x00R\x12attemptInterrupted\x129\n" +
+	"\trun_ended\x18\x1b \x01(\v2\x1a.vibesys.store.v1.RunEndedH\x00R\brunEnded\x12?\n" +
 	"\vrun_started\x18\x1c \x01(\v2\x1c.vibesys.store.v1.RunStartedH\x00R\n" +
 	"runStarted\x12Q\n" +
-	"\x11strategy_advanced\x18\x1d \x01(\v2\".vibesys.store.v1.StrategyAdvancedH\x00R\x10strategyAdvanced:\xa4\v\xbaH\xa0\v\x1a\xd8\x02\n" +
+	"\x11strategy_advanced\x18\x1d \x01(\v2\".vibesys.store.v1.StrategyAdvancedH\x00R\x10strategyAdvanced:\xbb\v\xbaH\xb7\v\x1a\xd8\x02\n" +
 	"\x0frecord.identity\x120seq, epoch and at are required for typed records\x1a\x92\x02!(has(this.lifecycle) || has(this.span) || has(this.metric) || has(this.stream) || has(this.blob) || has(this.intent) || has(this.notice) || has(this.chat) || has(this.declaration_amended) || has(this.input_measurement)) || (this.seq > 0u && this.epoch > 0u && has(this.at))\x1a\xf6\x01\n" +
 	"\x14record.epoch_started\x12Vepoch_started epoch must match epoch and seq and at must be present for a typed header\x1a\x85\x01!has(this.epoch_started) || !has(this.epoch_started.run) || (this.epoch == this.epoch_started.epoch && this.seq > 0u && has(this.at))\x1a\xa2\x01\n" +
 	"\x1arecord.declaration_amended\x124declaration amendment must name the containing epoch\x1aN!has(this.declaration_amended) || this.declaration_amended.epoch == this.epoch\x1a\xec\x02\n" +
-	"\x18record.input_measurement\x129an input measurement amendment must match its metric body\x1a\x94\x02!has(this.input_measurement) || (has(this.metric) && has(this.input_measurement.measured) && this.input_measurement.measured.series == this.metric.series && this.input_measurement.measured.value == this.metric.value && this.input_measurement.measured.span == this.metric.span)\x1a\xb5\x02\n" +
-	"\x13record.core_records\x12-core records require seq, epoch, at and clock\x1a\xee\x01!(has(this.core_input) || has(this.step_started) || has(this.step_finished) || has(this.attempt_interrupted) || has(this.run_started) || has(this.strategy_advanced)) || (this.seq > 0u && this.epoch > 0u && has(this.at) && has(this.clock))B\r\n" +
+	"\x18record.input_measurement\x129an input measurement amendment must match its metric body\x1a\x94\x02!has(this.input_measurement) || (has(this.metric) && has(this.input_measurement.measured) && this.input_measurement.measured.series == this.metric.series && this.input_measurement.measured.value == this.metric.value && this.input_measurement.measured.span == this.metric.span)\x1a\xcc\x02\n" +
+	"\x13record.core_records\x12-core records require seq, epoch, at and clock\x1a\x85\x02!(has(this.core_input) || has(this.step_started) || has(this.step_finished) || has(this.attempt_interrupted) || has(this.run_ended) || has(this.run_started) || has(this.strategy_advanced)) || (this.seq > 0u && this.epoch > 0u && has(this.at) && has(this.clock))B\r\n" +
 	"\x04body\x12\x05\xbaH\x02\b\x01B\b\n" +
 	"\x06_clockB\x0f\n" +
 	"\r_replay_clockB\x14\n" +
@@ -804,14 +821,15 @@ var file_vibesys_store_v1_record_proto_goTypes = []any{
 	(*StepStarted)(nil),                    // 16: vibesys.store.v1.StepStarted
 	(*StepFinished)(nil),                   // 17: vibesys.store.v1.StepFinished
 	(*AttemptInterrupted)(nil),             // 18: vibesys.store.v1.AttemptInterrupted
-	(*RunStarted)(nil),                     // 19: vibesys.store.v1.RunStarted
-	(*StrategyAdvanced)(nil),               // 20: vibesys.store.v1.StrategyAdvanced
-	(*RunDescription)(nil),                 // 21: vibesys.store.v1.RunDescription
-	(*SpanKindDecl)(nil),                   // 22: vibesys.store.v1.SpanKindDecl
-	(*MetricSeriesDecl)(nil),               // 23: vibesys.store.v1.MetricSeriesDecl
-	(*descriptorpb.FileDescriptorSet)(nil), // 24: google.protobuf.FileDescriptorSet
-	(*ReplayAllowance)(nil),                // 25: vibesys.store.v1.ReplayAllowance
-	(*ReplayAcknowledgement)(nil),          // 26: vibesys.store.v1.ReplayAcknowledgement
+	(*RunEnded)(nil),                       // 19: vibesys.store.v1.RunEnded
+	(*RunStarted)(nil),                     // 20: vibesys.store.v1.RunStarted
+	(*StrategyAdvanced)(nil),               // 21: vibesys.store.v1.StrategyAdvanced
+	(*RunDescription)(nil),                 // 22: vibesys.store.v1.RunDescription
+	(*SpanKindDecl)(nil),                   // 23: vibesys.store.v1.SpanKindDecl
+	(*MetricSeriesDecl)(nil),               // 24: vibesys.store.v1.MetricSeriesDecl
+	(*descriptorpb.FileDescriptorSet)(nil), // 25: google.protobuf.FileDescriptorSet
+	(*ReplayAllowance)(nil),                // 26: vibesys.store.v1.ReplayAllowance
+	(*ReplayAcknowledgement)(nil),          // 27: vibesys.store.v1.ReplayAcknowledgement
 }
 var file_vibesys_store_v1_record_proto_depIdxs = []int32{
 	4,  // 0: vibesys.store.v1.Record.at:type_name -> google.protobuf.Timestamp
@@ -832,21 +850,22 @@ var file_vibesys_store_v1_record_proto_depIdxs = []int32{
 	16, // 15: vibesys.store.v1.Record.step_started:type_name -> vibesys.store.v1.StepStarted
 	17, // 16: vibesys.store.v1.Record.step_finished:type_name -> vibesys.store.v1.StepFinished
 	18, // 17: vibesys.store.v1.Record.attempt_interrupted:type_name -> vibesys.store.v1.AttemptInterrupted
-	19, // 18: vibesys.store.v1.Record.run_started:type_name -> vibesys.store.v1.RunStarted
-	20, // 19: vibesys.store.v1.Record.strategy_advanced:type_name -> vibesys.store.v1.StrategyAdvanced
-	21, // 20: vibesys.store.v1.EpochStarted.run:type_name -> vibesys.store.v1.RunDescription
-	22, // 21: vibesys.store.v1.EpochStarted.span_kinds:type_name -> vibesys.store.v1.SpanKindDecl
-	23, // 22: vibesys.store.v1.EpochStarted.series:type_name -> vibesys.store.v1.MetricSeriesDecl
-	24, // 23: vibesys.store.v1.EpochStarted.descriptors:type_name -> google.protobuf.FileDescriptorSet
-	25, // 24: vibesys.store.v1.EpochStarted.initial_allowance:type_name -> vibesys.store.v1.ReplayAllowance
-	26, // 25: vibesys.store.v1.EpochStarted.replay_acknowledgement:type_name -> vibesys.store.v1.ReplayAcknowledgement
-	26, // 26: vibesys.store.v1.EpochStarted.replay_acknowledgements:type_name -> vibesys.store.v1.ReplayAcknowledgement
-	0,  // 27: vibesys.store.v1.ReplayStore.records:type_name -> vibesys.store.v1.Record
-	28, // [28:28] is the sub-list for method output_type
-	28, // [28:28] is the sub-list for method input_type
-	28, // [28:28] is the sub-list for extension type_name
-	28, // [28:28] is the sub-list for extension extendee
-	0,  // [0:28] is the sub-list for field type_name
+	19, // 18: vibesys.store.v1.Record.run_ended:type_name -> vibesys.store.v1.RunEnded
+	20, // 19: vibesys.store.v1.Record.run_started:type_name -> vibesys.store.v1.RunStarted
+	21, // 20: vibesys.store.v1.Record.strategy_advanced:type_name -> vibesys.store.v1.StrategyAdvanced
+	22, // 21: vibesys.store.v1.EpochStarted.run:type_name -> vibesys.store.v1.RunDescription
+	23, // 22: vibesys.store.v1.EpochStarted.span_kinds:type_name -> vibesys.store.v1.SpanKindDecl
+	24, // 23: vibesys.store.v1.EpochStarted.series:type_name -> vibesys.store.v1.MetricSeriesDecl
+	25, // 24: vibesys.store.v1.EpochStarted.descriptors:type_name -> google.protobuf.FileDescriptorSet
+	26, // 25: vibesys.store.v1.EpochStarted.initial_allowance:type_name -> vibesys.store.v1.ReplayAllowance
+	27, // 26: vibesys.store.v1.EpochStarted.replay_acknowledgement:type_name -> vibesys.store.v1.ReplayAcknowledgement
+	27, // 27: vibesys.store.v1.EpochStarted.replay_acknowledgements:type_name -> vibesys.store.v1.ReplayAcknowledgement
+	0,  // 28: vibesys.store.v1.ReplayStore.records:type_name -> vibesys.store.v1.Record
+	29, // [29:29] is the sub-list for method output_type
+	29, // [29:29] is the sub-list for method input_type
+	29, // [29:29] is the sub-list for extension type_name
+	29, // [29:29] is the sub-list for extension extendee
+	0,  // [0:29] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_store_v1_record_proto_init() }
@@ -879,6 +898,7 @@ func file_vibesys_store_v1_record_proto_init() {
 		(*Record_StepStarted)(nil),
 		(*Record_StepFinished)(nil),
 		(*Record_AttemptInterrupted)(nil),
+		(*Record_RunEnded)(nil),
 		(*Record_RunStarted)(nil),
 		(*Record_StrategyAdvanced)(nil),
 	}

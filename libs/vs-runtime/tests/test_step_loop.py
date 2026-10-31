@@ -49,6 +49,7 @@ from vs_runtime.api.step_runner import (
     OpenStep,
     StepLoopTiming,
     StepLoopTimingError,
+    StepRecord,
     run_step_loop,
 )
 from vs_runtime.api.testing import (
@@ -147,19 +148,22 @@ class CrashingLog:
     def state(self) -> core.CoreState:
         return self._inner.state
 
-    async def _around(self, write: Callable[[], Awaitable[None]]) -> None:
+    async def _around[T](self, write: Callable[[], Awaitable[T]]) -> T:
         self._switch.tick()
-        await write()
+        written = await write()
         self._switch.tick()
+        return written
 
     def open_step(self, tag: core.RequestId) -> OpenStep | None:
         return self._inner.open_step(tag)
 
-    async def step_started(self, run: Run) -> None:
-        await self._around(lambda: self._inner.step_started(run))
+    async def step_started(self, run: Run) -> StepRecord:
+        return await self._around(lambda: self._inner.step_started(run))
 
-    async def step_finished(self, tag: core.RequestId, attempt: int, result: StepResult) -> None:
-        await self._around(lambda: self._inner.step_finished(tag, attempt, result))
+    async def step_finished(
+        self, tag: core.RequestId, attempt: int, result: StepResult
+    ) -> StepRecord:
+        return await self._around(lambda: self._inner.step_finished(tag, attempt, result))
 
     async def attempt_interrupted(
         self, tag: core.RequestId, attempt: int, why: Interruption
@@ -171,6 +175,9 @@ class CrashingLog:
 
     async def next_input(self) -> None:
         await self._inner.next_input()
+
+    def stalled(self) -> str | None:
+        return self._inner.stalled()
 
 
 class CrashingRunner:
@@ -368,7 +375,7 @@ def check_log_of(world: World, tag: core.RequestId) -> None:
 
 def check_world(world: World) -> None:
     assert world.exits[-1] is RunRest.ENDED
-    assert len(world.records.ends) <= 1, "the run's end was recorded twice"
+    assert world.records.count("run_ended") <= 1, "the run's end was recorded twice"
     for tag in world.seed.tags:
         check_log_of(world, tag)
     check_clear_precedes_every_rerun(world)

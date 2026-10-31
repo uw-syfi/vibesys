@@ -8,20 +8,21 @@ request the loop hands to a runner whole, so nothing here names a step kind. The
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, overload
 
 from protobuf import Oneof
 
-from ._actions import Action, Cancel, End, Run, Settle, Wait
+from ._actions import Action, Cancel, End, Run, Settle, Wait, at_rest
 from ._proofs import request_dependency_status, stop_mode
 from ._request_ledger import dispatch_until, retry_limit
 from ._request_recovery import is_open
-from ._run_park import dispatch_allowed, pause_withdraws
+from ._run_park import dispatch_allowed, pause_cancels
 from ._scope_order import holds_back
 from ._search_events import Translated, translate
-from ._step import advance_run_time, step
+from ._step import advance_run_time, settle_park, step, step_recorded
 from ._step_attempts import (
     dispatched,
+    ended,
     epoch_opened,
     finish,
     forgotten,
@@ -35,6 +36,7 @@ from ._step_log import (
     decode_proposals,
     decode_request,
     decode_result,
+    decode_run_ended,
     decode_seed,
 )
 from .types.common import DependencyStatus, InterruptPolicy, RequestId, RunStatus, StopMode
@@ -97,28 +99,48 @@ def fold_run(
     return folded
 
 
+@overload
+def apply_record(
+    prior: Folded, record: Record, registry: OperationRegistry | None = None
+) -> Folded: ...
+
+
+@overload
+def apply_record(
+    prior: Folded | None, record: Record, registry: OperationRegistry | None = None
+) -> Folded | None: ...
+
+
 def apply_record(
     prior: Folded | None, record: Record, registry: OperationRegistry | None = None
 ) -> Folded | None:
     """``prior`` with one more record folded in; None while the log has not started the run."""
     state = None if prior is None else prior.state
     body = record.body
-    if body is not None and body.field == "strategy_advanced" and state is not None:
+    if state is None or (body is not None and body.field == "run_started"):
+        return _begin(state, record, registry)
+    state = _observed(state, record)
+    if body is not None and body.field == "strategy_advanced":
         # The search heard everything owed before it answered, and what its proposals caused.
-        return Folded(_advanced(_observed(state, record), body.value, registry))
-    state, published = _apply(state, record, registry)
-    if state is None:
-        return None
-    owed = Translated() if prior is None else prior.owed
+        return Folded(_advanced(state, body.value, registry))
+    state, published = _apply(state, body, registry)
     heard = translate(state, published)
+    owed = prior.owed if prior is not None else Translated()
     return Folded(
         state, Translated((*owed.events, *heard.events), (*owed.discarded, *heard.discarded))
     )
 
 
 def decide(state: CoreState, now: float) -> tuple[Action, ...]:
-    """What the runner loop does next, for the run clock ``now``. Total: it never raises."""
+    """What the runner loop does next, for the run clock ``now``. Total: it never raises.
+
+    A parked or ended run is at rest and has nothing to do: a step it holds waits for the epoch
+    that resumes the run, and an ended run is over.
+    """
     state = advance_run_time(state, now)
+    rest = at_rest(state)
+    if rest is not None:
+        return (Wait(until=None),)
     open_steps = tuple(record for record in state.records.records if is_open(record))
     if state.run.result is not None and not open_steps:
         return (End(result=state.run.result),)
@@ -128,42 +150,56 @@ def decide(state: CoreState, now: float) -> tuple[Action, ...]:
     return actions or (Wait(until=_wake_at(state, open_steps, now)),)
 
 
-def _apply(
-    state: CoreState | None, record: Record, registry: OperationRegistry | None
-) -> tuple[CoreState | None, tuple[StrategyEvent, ...]]:
-    body = record.body
-    if state is None or (body is not None and body.field == "run_started"):
-        return _begin(state, record, registry), ()
-    state = _observed(state, record)
-    match body:
-        case Oneof(field="core_input", value=message):
-            transition = step(state, decode_event(message, registry))
-            return transition.state, transition.events
-        case Oneof(field="step_started", value=message):
-            return _start(state, message, registry), ()
-        case Oneof(field="step_finished", value=message):
-            return _finish(state, message, registry)
-        case Oneof(field="attempt_interrupted", value=message):
-            tag = RequestId(root=message.tag)
-            return interrupted(state, tag, message.attempt, decode_interruption(message)), ()
-        case _:
-            return state, ()
+def may_start(state: CoreState, tag: RequestId, now: float) -> bool:
+    """Whether the run lets the step ``tag`` start an attempt at the run clock ``now``.
+
+    That is when the rule would ``Run`` it. The fold refuses a start the rule forbids, so the log
+    never holds one. A flight that waited (for a ``clear``) while the run paused, parked or ran
+    out the step's time asks again, with the clock it records its start at, before it does.
+    """
+    record = state.records.record(tag)
+    if record is None or not is_open(record):
+        return False
+    return isinstance(_of_step(advance_run_time(state, now), record, now), Run)
 
 
 def _begin(
     state: CoreState | None, record: Record, registry: OperationRegistry | None
-) -> CoreState | None:
-    """The state a record that precedes the run's seed, or is the seed, leaves."""
+) -> Folded | None:
+    """What a record that is, or precedes, the run's seed leaves of the fold."""
     body = record.body
     if body is not None and body.field == "run_started":
         if state is not None:
             message = f"record {record.seq} starts a run the log already started"
             raise ValueError(message)
-        return _observed(decode_seed(body.value, registry), record)
+        return Folded(_observed(decode_seed(body.value, registry), record))
     if body is not None and body.field in _CORE_RECORDS:
         message = f"record {record.seq} is core's, and the log holds no seed before it"
         raise ValueError(message)
     return None
+
+
+def _apply(
+    state: CoreState, body: Oneof | None, registry: OperationRegistry | None
+) -> tuple[CoreState, tuple[StrategyEvent, ...]]:
+    """``state`` after one record, and the events core published in folding it."""
+    published: tuple[StrategyEvent, ...] = ()
+    match body:
+        case Oneof(field="core_input", value=message):
+            transition = step(state, decode_event(message, registry))
+            state, published = transition.state, transition.events
+        case Oneof(field="step_started", value=message):
+            state = _start(state, message, registry)
+        case Oneof(field="step_finished", value=message):
+            state, published = _finish(state, message, registry)
+        case Oneof(field="attempt_interrupted", value=message):
+            why = decode_interruption(message)
+            state = settle_park(
+                interrupted(state, RequestId(root=message.tag), message.attempt, why)
+            )
+        case Oneof(field="run_ended", value=message):
+            state = ended(state, decode_run_ended(message))
+    return state, published
 
 
 def _advanced(
@@ -177,7 +213,11 @@ def _advanced(
 
 def _start(state: CoreState, message: StepStarted, registry: OperationRegistry | None) -> CoreState:
     tag = RequestId(root=message.tag)
-    deadline = Until(at=message.deadline_at, watches=open_record(state, tag).until.watches)
+    record = open_record(state, tag)
+    if not may_start(state, tag, state.run.now_at):
+        problem = f"the log starts step {tag.root} in a run that may not start it"
+        raise ValueError(problem)
+    deadline = Until(at=message.deadline_at, watches=record.until.watches)
     return started(state, tag, message.attempt, decode_request(message, registry), deadline)
 
 
@@ -187,10 +227,10 @@ def _finish(
     tag = RequestId(root=message.tag)
     state = dispatched(state, tag)
     report, owner_events = finish(state, tag, decode_result(message, registry))
-    transition = step(state, report)
+    transition = step_recorded(state, report)
     state, published = transition.state, transition.events
     for event in owner_events:
-        transition = step(state, event)
+        transition = step_recorded(state, event)
         state, published = transition.state, (*published, *transition.events)
     if any(is_open(row) for row in state.records.find(tag)):
         problem = f"the log finishes step {tag.root} with an observation that does not end it"
@@ -199,14 +239,23 @@ def _finish(
 
 
 _CORE_RECORDS = frozenset(
-    {"core_input", "strategy_advanced", "step_started", "step_finished", "attempt_interrupted"}
+    {
+        "core_input",
+        "strategy_advanced",
+        "step_started",
+        "step_finished",
+        "attempt_interrupted",
+        "run_ended",
+    }
 )
 
 
 def _observed(state: CoreState, record: Record) -> CoreState:
     """``state`` in the record's epoch and at its run clock."""
-    state = epoch_opened(state, record.epoch)
-    return state if record.clock is None else advance_run_time(state, record.clock)
+    opened = epoch_opened(state, record.epoch)
+    if opened is not state:
+        opened = settle_park(opened)
+    return opened if record.clock is None else advance_run_time(opened, record.clock)
 
 
 def _of_step(state: CoreState, record: RequestRecord, now: float) -> Action | None:
@@ -236,10 +285,9 @@ def _stop_running(state: CoreState, record: RequestRecord, now: float) -> Cancel
     park = state.run.park
     if now >= record.until.at:
         return Cancel(tag=tag, reason=CancelReason.DEADLINE)
-    if pause_withdraws(state, record.request):
-        return Cancel(tag=tag, reason=CancelReason.PAUSE_NOW)
-    if park is not None and park.deadline_at is not None and now >= park.deadline_at:
-        return Cancel(tag=tag, reason=CancelReason.DRAIN_EXPIRED)
+    if park is not None and pause_cancels(state, record.request):
+        reason = CancelReason.PAUSE_NOW if park.immediate else CancelReason.DRAIN_EXPIRED
+        return Cancel(tag=tag, reason=reason)
     return None
 
 

@@ -12,6 +12,7 @@ from vs_proto.api import (
     CoreInput,
     EpochStarted,
     Record,
+    RunEnded,
     RunStarted,
     StepFinished,
     StepStarted,
@@ -29,6 +30,7 @@ type CoreMessage = (
     | StepStarted
     | StepFinished
     | AttemptInterrupted
+    | RunEnded
 )
 """The messages core folds into its state, each the body of one record.
 
@@ -42,6 +44,7 @@ type _CoreBody = (
     | Oneof[Literal["step_started"], StepStarted]
     | Oneof[Literal["step_finished"], StepFinished]
     | Oneof[Literal["attempt_interrupted"], AttemptInterrupted]
+    | Oneof[Literal["run_ended"], RunEnded]
 )
 
 
@@ -146,7 +149,9 @@ def _body(message: CoreMessage) -> _CoreBody:
             return _step_body(message)
 
 
-def _step_body(message: StepStarted | StepFinished | AttemptInterrupted) -> _CoreBody:
+def _step_body(
+    message: StepStarted | StepFinished | AttemptInterrupted | RunEnded,
+) -> _CoreBody:
     match message:
         case StepStarted():
             return Oneof("step_started", message)
@@ -154,3 +159,5 @@ def _step_body(message: StepStarted | StepFinished | AttemptInterrupted) -> _Cor
             return Oneof("step_finished", message)
         case AttemptInterrupted():
             return Oneof("attempt_interrupted", message)
+        case RunEnded():
+            return Oneof("run_ended", message)
