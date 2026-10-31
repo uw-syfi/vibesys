@@ -5,7 +5,8 @@ import {initialCoreState, reduceEventBatch} from '@vibesys/run-state';
 import {baselineColumns, improvement, overBase} from './baselines.js';
 import {EMPTY_TRACE_LOG, traceStep} from './live.js';
 import {createFactsReader} from './run-facts.js';
-import {heroView, stripChartView} from './run-level.js';
+import {heroView} from './headline.js';
+import {objectiveCharts} from './objective-chart.js';
 import {createRunReader, type RunModel} from './run-model.js';
 
 /**
@@ -62,7 +63,7 @@ function withReading(rows: Row[]): RunEvent[] {
 const WITHOUT_READING = withReading([]);
 
 function onlyTile(model: RunModel) {
-  const [tile, ...more] = heroView(model).tiles;
+  const [tile, ...more] = heroView(model).headlines;
   if (tile === undefined || more.length > 0) throw new Error('expected one tile');
   return tile;
 }
@@ -107,10 +108,10 @@ describe('the headline of a run with no reading of its input', () => {
 
   test('is unchanged by a comparison once the input has a reading', () => {
     const read = fixtureNamed('finished-run').events;
-    const without = heroView(modelOf(read)).tiles;
+    const without = heroView(modelOf(read)).headlines;
     const withOne = heroView(
       modelOf([...read, comparisonsRead(read.at(-1) as RunEvent, read.length + 1, [VLLM])]),
-    ).tiles;
+    ).headlines;
     expect(withOne).toEqual(without);
     expect(without[0]?.note).toContain('input');
   });

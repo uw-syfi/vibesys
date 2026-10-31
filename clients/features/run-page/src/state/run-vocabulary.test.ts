@@ -3,7 +3,8 @@ import type {RunEvent, Span} from '@vibesys/contracts';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
 import {IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
 import {EMPTY_TRACE_LOG, traceStep} from './live.js';
-import {heroView, stripChartView} from './run-level.js';
+import {heroView} from './headline.js';
+import {objectiveCharts} from './objective-chart.js';
 import {createRunReader} from './run-model.js';
 
 /**

@@ -2,7 +2,7 @@ import {describe, expect, test} from 'bun:test';
 import type {Candidate} from '@vibesys/run-state/candidates';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
 import {openIdeaId} from './idea-focus.js';
-import {stripChartView} from './run-level.js';
+import {objectiveCharts} from './objective-chart.js';
 import type {RunModel} from './run-model.js';
 import {idea, modelOf} from './timeline-fixtures.js';
 import type {Route} from './zoom.js';

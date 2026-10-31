@@ -59,24 +59,27 @@ function progressOf(failed: FailedCheck): string {
 }
 
 /**
- * The figure at the right of an idea's row: its ratio to the input, its failed check's progress, or
- * why not. An idea the framework compared with a base but has no ratio to the input for shows the
- * ratio it made, named by that base (`1.10× vs round 2`): `againstWords` words a comparison.
+ * The figure at the right of an idea's row: its multiple of the input, its failed check's progress,
+ * or why not. `vsInput` reads the multiple (`vsInputOf`), the same reading the chart's headline is
+ * made of, so a row and a chart never state two multiples of the one input; an idea it gives none
+ * for keeps the ratio its own measurement states. An idea the framework compared with a base but
+ * has no ratio to the input for shows the ratio it made, named by that base (`1.10× vs round 2`):
+ * `againstWords` words a comparison.
  */
 export function figureOf(
   item: Candidate,
   inputKnown = true,
   againstWords: (against: BaseComparison) => string = against =>
     `${ratio(against.ratio)} vs its base`,
+  vsInput: (idea: Candidate) => number | null = () => null,
 ): {figure: string; tone: IdeaTone} {
   if (item.outcome === 'running') return {figure: '', tone: 'muted'};
   const measured = item.measurement;
   const failed = measured?.failed ?? null;
   if (failed !== null) return {figure: `Failed · ${progressOf(failed)}`, tone: 'err'};
   const tone = item.outcome === 'passed' ? 'ok' : 'err';
-  if (measured?.vsBaseline !== null && measured?.vsBaseline !== undefined) {
-    return {figure: ratio(measured.vsBaseline), tone};
-  }
+  const multiple = vsInput(item) ?? measured?.vsBaseline ?? null;
+  if (multiple !== null) return {figure: ratio(multiple), tone};
   if (measured?.against != null) {
     return {figure: againstWords(measured.against), tone};
   }
@@ -105,12 +108,13 @@ export function figureCell(
     readonly figure: string;
     readonly tone: IdeaTone;
   } = figure => figure,
+  vsInput?: (idea: Candidate) => number | null,
 ): FigureCell {
   const whole = cell(
-    figureOf(item, inputKnown, against => againstWords(candidates, against, 'whole')),
+    figureOf(item, inputKnown, against => againstWords(candidates, against, 'whole'), vsInput),
   );
   const short = cell(
-    figureOf(item, inputKnown, against => againstWords(candidates, against, 'short')),
+    figureOf(item, inputKnown, against => againstWords(candidates, against, 'short'), vsInput),
   );
   return short.figure === whole.figure
     ? whole
@@ -162,17 +166,6 @@ export function resultLine(
       return measure === null ? head : `${head} · measured ${measureClause(measure)}`;
     }
   }
-}
-
-/**
- * The hero's selected-idea words when it has no multiple to show: the status, then why. A failed
- * idea never shows a multiple there (see `resultLine`).
- */
-export function selectedWords(item: Candidate, measured: boolean): string {
-  if (item.outcome !== 'failed') return statusLabel(item);
-  const reason = failureReason(item);
-  if (reason !== null) return `Failed · ${reason}`;
-  return measured ? 'Failed its checks' : 'Failed · not measured';
 }
 
 /**

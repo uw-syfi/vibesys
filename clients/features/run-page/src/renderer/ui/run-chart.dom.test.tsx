@@ -91,10 +91,10 @@ async function rendered(
   const drawn = {
     sparklines: container.querySelectorAll('.vs-spark-line').length,
     charts: container.querySelectorAll('.vs-chart').length,
-    hasProgression: (heroView(whole, objectivesOf(whole)).tiles[0]?.trend?.steps.length ?? 0) > 0,
+    hasProgression: (heroView(whole, objectivesOf(whole)).headlines[0]?.trend?.steps.length ?? 0) > 0,
     points: skeleton.metrics.reduce((sum, series) => sum + series.points.length, 0),
     // Whether the tile claims a measured value: what it shows, the chart must draw from too.
-    tileValue: heroView(whole, objectivesOf(whole)).tiles.some(tile => tile.figure !== '\u2013'),
+    tileValue: heroView(whole, objectivesOf(whole)).headlines.some(tile => tile.figure !== '\u2013'),
   };
   await act(async () => root.unmount());
   container.remove();

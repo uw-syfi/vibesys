@@ -19,9 +19,13 @@ export {
 export {Banner, type BannerTone, Card} from './components/card.js';
 export {
   Chart,
+  ChartColumns,
+  ChartLegend,
+  type ChartLegendItem,
+  type ChartLegendMark,
+  ChartPanel,
   type ChartPoint,
   type ChartSize,
-  type ChartSpan,
   type ChartTick,
 } from './components/chart.js';
 export {ChatMessage} from './components/chat-message.js';

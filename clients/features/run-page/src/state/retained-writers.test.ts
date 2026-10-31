@@ -33,12 +33,12 @@ for (const [version, facts] of Object.entries(cases)) {
     const through = skeleton.throughSeq ?? 0n;
     const model = projectSkeleton(skeleton, through);
     const hero = heroView(model);
-    expect(hero.tiles[0]?.ratio).toBe(`${facts.ratio.toFixed(2)}×`);
+    expect(hero.headlines[0]?.ratio).toBe(`${facts.ratio.toFixed(2)}×`);
     expect(skeleton.head?.performanceStated).toBe(true);
     expect(skeleton.head?.objective?.bestValue).toBe(facts.best);
-    expect(hero.tiles[0]?.note).not.toBe('Unavailable');
+    expect(hero.headlines[0]?.note).not.toBe('Unavailable');
     expect(hero.measured).toBe(facts.measured);
-    expect(hero.tiles[0]?.trend?.steps.at(-1)?.y).toBe(facts.best);
+    expect(hero.headlines[0]?.trend?.steps.at(-1)?.y).toBe(facts.best);
     expect(stripChartView(model, clockStart(model), model.latest)?.steps.at(-1)?.y).toBe(
       facts.best,
     );
@@ -52,7 +52,7 @@ for (const [version, facts] of Object.entries(cases)) {
     expect(model.input).toBe(facts.input);
     expect(attrs.input_metrics[0]?.value).toBe(facts.input);
     expect(attrs.vs_baseline).toBe(facts.vs_baseline);
-    expect(heroView(model).tiles[0]?.trend?.reference).toBe(facts.chart_reference);
+    expect(heroView(model).headlines[0]?.trend?.reference).toBe(facts.chart_reference);
     for (let seq = 1n; seq <= through; seq += 1n) {
       const partial = projectSkeleton(skeleton, seq);
       expect(partial.input).toBe(seq >= BigInt(facts.measurement_seq) ? facts.input : null);

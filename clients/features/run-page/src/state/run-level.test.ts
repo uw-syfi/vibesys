@@ -4,7 +4,8 @@ import {EMPTY_TRACE} from '@vibesys/run-state/trace';
 import {bestLine} from './ideas-tree.js';
 import {IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
 import {EMPTY_TRACE_LOG, type TraceLog, traceAt, traceLog, traceStep} from './live.js';
-import {heroView, logStreamToFollow, nowView, resolveZoom, shownLogScope} from './run-level.js';
+import {logStreamToFollow, nowView, resolveZoom, shownLogScope} from './run-level.js';
+import {heroView} from './headline.js';
 import {createRunReader} from './run-model.js';
 import {type RunPageState, runPageInitial, runPageStep} from './run-page.js';
 import {scopedLogs} from './scoped-logs.js';
@@ -275,16 +276,16 @@ describe('the run level', () => {
 
   test('the best line names the best idea and its steps from the input, and the hero its ratio', () => {
     expect(bestLine(model)).toMatchObject({title: 'ring-pad', steps: 2});
-    const tile = heroView(model).tiles[0];
+    const tile = heroView(model).headlines[0];
     expect(tile?.ratio).toBe('2.00×');
     expect(tile?.detail).toContain('input 100');
   });
 
   test('the tile says what its ratio means, by the direction that is better', () => {
-    const higher = heroView(model).tiles[0];
+    const higher = heroView(model).headlines[0];
     expect(higher).toMatchObject({ratio: '2.00×', note: 'faster than input', tone: 'ok'});
     // Where lower is better, the same measurements are a regression: the ratio is the improvement.
-    const lower = heroView({...model, direction: 'min'}).tiles[0];
+    const lower = heroView({...model, direction: 'min'}).headlines[0];
     expect(lower).toMatchObject({ratio: '0.50×', note: 'slower than input', tone: 'err'});
   });
 
@@ -292,15 +293,15 @@ describe('the run level', () => {
     const named = heroView({
       ...model,
       overview: {objective: {text: 'goal', metric: 'p99_latency_ms'}},
-    }).tiles[0];
+    }).headlines[0];
     expect(named?.detail).toBe('200 p99 latency ms · input 100 p99 latency ms');
-    expect(heroView(model).tiles[0]?.detail).toMatch(/^\S+ \S+ · input \S+ \S+$/);
+    expect(heroView(model).headlines[0]?.detail).toMatch(/^\S+ \S+ · input \S+ \S+$/);
   });
 
   test('there is one tile today, with the best so far as a step line from the input', () => {
     const view = heroView(model);
-    expect(view.tiles).toHaveLength(1);
-    const trend = view.tiles[0]?.trend;
+    expect(view.headlines).toHaveLength(1);
+    const trend = view.headlines[0]?.trend;
     expect(trend?.reference).toBe(100);
     const ys = trend?.steps.map(step => step.y) ?? [];
     expect(ys[0]).toBe(100);
@@ -309,7 +310,7 @@ describe('the run level', () => {
 
   test('the hero names the metric in words, never by its id', () => {
     const named = (metric: string): string =>
-      heroView({...model, overview: {objective: {text: 'goal', metric}}}).tiles[0]?.name ?? '';
+      heroView({...model, overview: {objective: {text: 'goal', metric}}}).headlines[0]?.name ?? '';
     expect(named('TOTAL_OPS_PER_SEC')).toBe('Total ops/sec');
     expect(named('p99_latency_ms')).toBe('P99 latency ms');
     expect(named('throughput')).toBe('Throughput');

@@ -35,7 +35,7 @@ for (const item of cases) {
     const skeleton = seedSkeleton(fromBinary(KeyframeSchema, Buffer.from(item.skeleton, 'base64')));
     const model = projectSkeleton(skeleton, skeleton.throughSeq ?? 0n, '', {head});
     const facts = head.performance[0];
-    expect(heroView(model).tiles[0]?.ratio).toBe(
+    expect(heroView(model).headlines[0]?.ratio).toBe(
       item.card.adopted_ratio === null ? null : `${item.card.adopted_ratio.toFixed(2)}×`,
     );
     expect(facts).toBeDefined();
@@ -47,7 +47,7 @@ for (const item of cases) {
         .map(point => point.y) ?? [],
     ).toEqual(kept.flatMap(point => (point.point ? [point.point.value] : [])));
     expect(chart?.steps.at(-1)?.y).toBe(facts?.bestValue);
-    expect(heroView(model).tiles[0]?.trend?.steps.at(-1)?.y).toBe(facts?.bestValue);
+    expect(heroView(model).headlines[0]?.trend?.steps.at(-1)?.y).toBe(facts?.bestValue);
     expect(head.objective?.bestValue).toBe(item.card.dashboard.best.value);
     expect(facts?.bestValue).toBe(item.card.dashboard.best.value);
     expect(
@@ -65,7 +65,7 @@ for (const item of cases) {
       progress: {phase: 'history', through: 1n, committed: skeleton.throughSeq ?? 0n},
     });
     expect(heroView(catchingUp).measured).toBeNull();
-    expect(heroView(catchingUp).tiles[0]?.ratio).toBeNull();
+    expect(heroView(catchingUp).headlines[0]?.ratio).toBeNull();
     for (const idea of catchingUp.candidates.candidates) {
       expect(
         ideasView(catchingUp, {passed: true, failed: true, running: true, query: ''}).rows.find(
@@ -75,8 +75,8 @@ for (const item of cases) {
       expect(ideaFocusView(catchingUp, idea.id)?.ratio).toBeNull();
     }
     const failed = {...catchingUp, loadFailure: 'Data loss'};
-    expect(heroView(failed).tiles[0]?.note).toBe('Data loss');
-    expect(heroView(failed).tiles[0]?.detail).not.toContain('Reading');
+    expect(heroView(failed).headlines[0]?.note).toBe('Data loss');
+    expect(heroView(failed).headlines[0]?.detail).not.toContain('Reading');
     for (const idea of failed.candidates.candidates)
       expect(
         ideasView(failed, {passed: true, failed: true, running: true, query: ''}).rows.find(
@@ -175,7 +175,7 @@ let closedSummaries = 0;
 /** The tile of the second axis, which core states the same series for. */
 function axisTileOf(model: RunModel) {
   const axis = {name: 'second_axis', direction: model.direction ?? 'max'} as const;
-  return heroView(twoAxes(model), [axis, axis]).tiles[0];
+  return heroView(twoAxes(model), [axis, axis]).headlines[0];
 }
 
 for (const item of cases) {

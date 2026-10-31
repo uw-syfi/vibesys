@@ -8,7 +8,8 @@ import {SEEDS, Seeded} from '@vibesys/store/testing';
 import {outcomeWords} from './idea-words.js';
 import {ageWords, IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
 import {failuresAt} from './input-gates.js';
-import {clockAt, clockStart, heroView, nowView} from './run-level.js';
+import {clockAt, clockStart, nowView} from './run-level.js';
+import {heroView} from './headline.js';
 import {createRunReader, type RunModel} from './run-model.js';
 import {
   type RunPageRequest,
@@ -229,7 +230,7 @@ describe('a run that crashed with work open', () => {
   });
 
   test('the metric tile says the input was not measured, not that nothing was', () => {
-    const [tile] = heroView(model).tiles;
+    const [tile] = heroView(model).headlines;
     expect(tile?.detail).toBe('input not measured');
   });
 
@@ -261,7 +262,7 @@ describe('the same run opened from its summary', () => {
 
   test('holds the failed input gates as the whole history does', () => {
     expect(from.inputGates).toEqual(whole.inputGates);
-    expect(heroView(from).tiles[0]?.detail).toBe('input not measured');
+    expect(heroView(from).headlines[0]?.detail).toBe('input not measured');
   });
 
   test('says the whole reason when the registry record carries only its cut', () => {

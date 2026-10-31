@@ -5,7 +5,7 @@ import {Seeded} from '@vibesys/store/testing';
 import {IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
 import {traceLog} from './live.js';
 import {attached, events, failedGate, isoAt, opened, RUN, step, T0} from './live-run-fixtures.js';
-import {heroView} from './run-level.js';
+import {heroView} from './headline.js';
 import {createRunReader, type RunModel} from './run-model.js';
 import type {SummaryReply} from './run-summary.js';
 import {formatValue} from './span-reading.js';
@@ -113,7 +113,7 @@ describe('the performance tile of a run with no measured input', () => {
   );
 
   test('headlines the value of the objective’s own reading, with the unit in words', () => {
-    const [tile] = heroView(modelOf(spans, TWO_GATES)).tiles;
+    const [tile] = heroView(modelOf(spans, TWO_GATES)).headlines;
     expect(tile).toMatchObject({
       name: 'Output tokens/s',
       ratio: null,
@@ -124,11 +124,11 @@ describe('the performance tile of a run with no measured input', () => {
   });
 
   test('says there is no input when nothing failed either', () => {
-    expect(heroView(modelOf(spans)).tiles[0]?.detail).toBe('no input');
+    expect(heroView(modelOf(spans)).headlines[0]?.detail).toBe('no input');
   });
 
   test('draws the one value instead of nothing', () => {
-    const trend = heroView(modelOf(spans, TWO_GATES)).tiles[0]?.trend;
+    const trend = heroView(modelOf(spans, TWO_GATES)).headlines[0]?.trend;
     expect(trend?.steps).toHaveLength(1);
   });
 
@@ -138,7 +138,7 @@ describe('the performance tile of a run with no measured input', () => {
       const value = Math.round(random.next() * 10 ** random.int(7) * 1000) / 1000;
       const unit = random.pick(['output_tokens_per_s', 'ops/s', 'ms', 'p99_latency_ms']);
       const model = modelOf(passedIdea([{name: 'output_tokens_per_s', value}], unit, null));
-      const [tile] = heroView(model).tiles;
+      const [tile] = heroView(model).headlines;
       expect(tile?.figure).toBe(formatValue(value));
       expect(tile?.note ?? '').not.toContain('_');
       expect(tile?.detail).not.toContain('_');
@@ -149,7 +149,7 @@ describe('the performance tile of a run with no measured input', () => {
     const measured = passedIdea([{name: 'output_tokens_per_s', value: 300}], 'tok/s', {
       input: 150,
     });
-    expect(heroView(modelOf(measured)).tiles[0]).toMatchObject({
+    expect(heroView(modelOf(measured)).headlines[0]).toMatchObject({
       ratio: '2.00×',
       figure: '2.00×',
       note: 'faster than input',

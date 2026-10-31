@@ -1201,34 +1201,55 @@ button.vs-crumb:focus-visible {
   color: var(--text);
 }
 
-.vs-chart-point[data-faint] {
-  opacity: 0.45;
-}
-/* A chart that singles points out: the others stay, dimmed. */
-.vs-chart-point[data-emphasis="dim"] {
-  opacity: 0.25;
-}
-.vs-chart-point[data-emphasis="focus"] {
-  stroke-width: 3;
-}
-.vs-chart-related {
-  fill: none;
-  stroke: var(--muted);
-  stroke-width: 1;
-}
 /* The chain the reader points at: its dots are ringed in the accent, and no line joins them. */
 .vs-chart-lit {
   fill: none;
   stroke: var(--accent);
   stroke-width: 2;
 }
-.vs-chart-span-band {
-  fill: var(--accent);
-  opacity: 0.08;
+.vs-chart-tip-box {
+  fill: var(--text);
 }
-.vs-chart-span-bar {
-  fill: var(--accent);
-  opacity: 0.5;
+.vs-chart-tip-text {
+  fill: var(--panel);
+  font-family: var(--text-section-family);
+  font-size: var(--text-section-size);
+}
+.vs-chart-legend {
+  gap: var(--space-5);
+}
+.vs-chart-legend-mark {
+  flex: none;
+}
+.vs-chart-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.vs-chart-panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.vs-chart-panel-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  min-width: 0;
+}
+/* Charts side by side, as many as asked for up to three, equally wide. */
+.vs-chart-columns {
+  display: grid;
+  gap: var(--space-6);
+  grid-template-columns: repeat(var(--chart-count, 1), minmax(0, 1fr));
+}
+.vs-chart-columns[data-count="2"] {
+  --chart-count: 2;
+}
+.vs-chart-columns[data-count="3"] {
+  --chart-count: 3;
 }
 
 /* --- flat lists: a trailing column ("from <parent>") -------------------------------------------- */

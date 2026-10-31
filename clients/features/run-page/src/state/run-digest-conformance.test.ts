@@ -4,7 +4,7 @@ import {resolve} from 'node:path';
 import type {RunEvent} from '@vibesys/contracts';
 import {EMPTY_TRACE} from '@vibesys/run-state/trace';
 import {traceLog} from './live.js';
-import {heroView} from './run-level.js';
+import {heroView} from './headline.js';
 import {createRunReader} from './run-model.js';
 
 /**
@@ -39,7 +39,7 @@ describe('the digest of a run says what its page says', () => {
     test(`${name}: the ideas and the headline ratio`, () => {
       const model = createRunReader().read(traceLog(EMPTY_TRACE, null, fixture.events), null);
 
-      const headline = heroView(model).tiles[0]?.ratio ?? null;
+      const headline = heroView(model).headlines[0]?.ratio ?? null;
 
       expect(model.candidates.candidates.length).toBe(fixture.digest.ideas);
       // The headline is the adopted result, or while the run works the best gate so far.

@@ -3,7 +3,9 @@ import type {RunEvent, RunOverview, Span} from '@vibesys/contracts';
 import {EMPTY_TRACE} from '@vibesys/run-state/trace';
 import {IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
 import {traceLog} from './live.js';
-import {clockStart, heroView, nowView, stripChartView} from './run-level.js';
+import {clockStart, nowView} from './run-level.js';
+import {heroView} from './headline.js';
+import {objectiveCharts} from './objective-chart.js';
 import {createRunReader, type RunModel} from './run-model.js';
 
 /**
@@ -192,7 +194,7 @@ describe('a multi-agent run', () => {
   test('regression: the run level shows the best idea, its chart and both rounds', () => {
     const model = at(recorded().events);
     expect(heroView(model)).toMatchObject({measured: 2});
-    expect(heroView(model).tiles[0]).toMatchObject({
+    expect(heroView(model).headlines[0]).toMatchObject({
       ratio: '2.00×',
       note: 'faster than input',
       detail: '100 ops/s · input 50 ops/s',
@@ -221,10 +223,10 @@ describe('a multi-agent run', () => {
     const better = round(run, 3, {value: 300, vs: 6, verdict: 'passed'}, 'flow:000001/#1');
     adopt(run, 'c3', 300, 6);
     expect(better).toBe('flow:000003/#1');
-    expect(heroView(at(run.events)).tiles[0]?.ratio).toBe('6.00×');
+    expect(heroView(at(run.events)).headlines[0]?.ratio).toBe('6.00×');
     run.end('op:adopt', {verdict: 'adopted'});
     const model = at(run.events);
-    expect(heroView(model).tiles[0]?.ratio).toBe('6.00×');
+    expect(heroView(model).headlines[0]?.ratio).toBe('6.00×');
     const rows = ideasView(model, IDEAS_FILTER_DEFAULT).rows;
     expect(rows.filter(row => row.badges.some(badge => badge.label === 'adopted'))).toHaveLength(1);
     expect(rows.some(row => row.badges.some(badge => badge.label === 'best'))).toBe(false);
@@ -289,7 +291,7 @@ describe('a live multi run whose round 1 passed', () => {
       attrs_json: JSON.stringify({hypothesis_id: null, parent_revision: null, round: 2}),
     });
     const model = at(run.events);
-    expect(heroView(model).tiles[0]).toMatchObject({
+    expect(heroView(model).headlines[0]).toMatchObject({
       ratio: '2.00×',
       detail: expect.stringContaining('100 ops/s'),
     });
@@ -304,7 +306,7 @@ describe('a live multi run whose round 1 passed', () => {
     run.end('flow:#1');
     const model = at(run.events);
     expect(nowView(model)).toEqual([]);
-    expect(heroView(model).tiles[0]?.ratio).toBe('2.00×');
+    expect(heroView(model).headlines[0]?.ratio).toBe('2.00×');
   });
 });
 
@@ -342,12 +344,12 @@ describe('the best idea while the run works', () => {
         const settled = roundsEnd.filter(end => end <= sequence).length;
         const hero = heroView(model);
         if (settled === 0) {
-          expect(hero.tiles[0]).toMatchObject({ratio: null, note: null});
-          expect(hero.tiles[0]?.detail).toContain('nothing measured yet');
+          expect(hero.headlines[0]).toMatchObject({ratio: null, note: null});
+          expect(hero.headlines[0]?.detail).toContain('nothing measured yet');
           continue;
         }
         const best = Math.max(...values.slice(0, settled));
-        expect(hero.tiles[0]).toMatchObject({
+        expect(hero.headlines[0]).toMatchObject({
           ratio: `${(best / 50).toFixed(2)}×`,
           detail: expect.stringContaining(`${best} ops/s`),
         });
@@ -366,10 +368,10 @@ describe('the best idea while the run works', () => {
       title: 'c3',
       attrs_json: JSON.stringify({candidate: 'c3', metric_value: 300, vs_baseline: 6}),
     });
-    expect(heroView(at(run.events)).tiles[0]?.ratio).toBe('6.00×');
+    expect(heroView(at(run.events)).headlines[0]?.ratio).toBe('6.00×');
     run.end('op:adopt', {verdict: 'adopted'});
     const model = at(run.events);
-    expect(heroView(model).tiles[0]?.ratio).toBe('6.00×');
+    expect(heroView(model).headlines[0]?.ratio).toBe('6.00×');
     const badges = ideasView(model, IDEAS_FILTER_DEFAULT).rows.flatMap(row =>
       row.badges.map(badge => badge.label),
     );
@@ -384,6 +386,6 @@ describe('the best idea while the run works', () => {
       attrs_json: JSON.stringify({candidate: 'c3'}),
     });
     run.end('op:adopt', {verdict: 'not_adopted'});
-    expect(heroView(at(run.events)).tiles[0]?.ratio).toBeNull();
+    expect(heroView(at(run.events)).headlines[0]?.ratio).toBeNull();
   });
 });

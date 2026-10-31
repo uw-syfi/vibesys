@@ -8,7 +8,8 @@ import {ideaFocusView} from './idea-focus.js';
 import {IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
 import {traceLog} from './live.js';
 import {NO_PAUSES} from './quota-pauses.js';
-import {heroView, stripChartView} from './run-level.js';
+import {heroView} from './headline.js';
+import {objectiveCharts} from './objective-chart.js';
 import {createRunReader, type RunFacts, type RunModel} from './run-model.js';
 import {timelineRows} from './timeline-rows.js';
 
@@ -140,7 +141,7 @@ describe('an idea whose measurement the framework compared', () => {
   });
 
   test('headlines the best idea’s compared mean with the ratio the comparison made, by its base', () => {
-    const [tile] = heroView(model).tiles;
+    const [tile] = heroView(model).headlines;
     expect(tile).toMatchObject({
       figure: '385.4',
       ratio: null,

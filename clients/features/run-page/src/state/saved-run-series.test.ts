@@ -47,14 +47,14 @@ for (let seed = 1; seed <= 12; seed += 1) {
     expect(chart?.points.every(point => !point.label.includes('New best'))).toBe(true);
     expect(chart?.steps.at(-1)?.y).toBe(100);
     expect(new Set(chart?.points.map(point => point.key)).size).toBe(values.length);
-    expect(heroView(model).tiles[0]?.figure).toBe('–');
-    expect(heroView(model).tiles[0]?.trend?.steps.at(-1)?.y).toBe(100);
+    expect(heroView(model).headlines[0]?.figure).toBe('–');
+    expect(heroView(model).headlines[0]?.trend?.steps.at(-1)?.y).toBe(100);
     expect(paintedSkeleton(load)).toBe(load.skeleton);
     expect(paintedSkeleton({...load, complete: false})).toBe(load.skeleton);
     const prefix = projectSkeleton(load.skeleton, committedSeq, '', {
       progress: {phase: 'history', through: committedSeq, committed: committedSeq + 1n},
     });
-    expect(heroView(prefix).tiles[0]).toMatchObject({
+    expect(heroView(prefix).headlines[0]).toMatchObject({
       figure: '–',
       ratio: null,
       note: 'Catching up',

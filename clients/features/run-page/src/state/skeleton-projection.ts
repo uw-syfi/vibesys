@@ -97,6 +97,7 @@ export function projectSkeleton(
     pauses: reading.pauses,
     baselines: reading.baselines,
     latest: reading.latest,
+    sessions: reading.sessions,
     inputGates: reading.inputFailures,
     changed: new Set(),
   };

@@ -279,31 +279,27 @@
   fill: none;
   stroke: var(--accent);
   stroke-width: 2;
+  stroke-linejoin: round;
+}
+/* After the cursor: the line and the dots are quiet, the shape stays. */
+.vs-chart-step[data-after] {
+  opacity: 0.35;
 }
 .vs-chart-point {
-  fill: none;
-  stroke: var(--accent);
-  stroke-width: 2;
-}
-.vs-chart-point[data-filled] {
-  fill: var(--accent);
-}
-.vs-chart-point[data-tone=muted] {
-  stroke: var(--muted);
-}
-.vs-chart-point[data-tone=muted][data-filled] {
   fill: var(--muted);
+  stroke: none;
+  opacity: 0.6;
 }
-.vs-chart-point[data-tone=err] {
-  stroke: var(--err);
+.vs-chart-point[data-after] {
+  opacity: 0.25;
 }
-.vs-chart-point[data-tone=err][data-filled] {
-  fill: var(--err);
-}
-.vs-chart-playhead {
-  stroke: var(--muted);
+.vs-chart-cursor {
+  stroke: var(--accent);
   stroke-width: 1;
-  stroke-dasharray: 2 3;
+}
+.vs-chart-mark {
+  stroke: var(--text);
+  stroke-width: 1.5;
 }
 
 /* --- theme swatch ------------------------------------------------------------------------------ */
