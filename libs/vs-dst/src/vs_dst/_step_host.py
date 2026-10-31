@@ -38,6 +38,7 @@ from vs_dst._snapshots import RecordingRecords
 from vs_proto.api import EpochStarted, Timestamp
 from vs_runlog.api import ConfirmedLog
 from vs_runtime.api.core import DispatchCapExceededError, ExecutionContext
+from vs_runtime.api.step_router import LIVE_REQUEST_KINDS, NoRunnerError
 from vs_runtime.api.step_runner import (
     Adopted,
     Cleared,
@@ -342,8 +343,14 @@ class _WorldRunner:
         deadline_at: float,
         cancel: CancelSignal,
     ) -> StepResult:
-        """Perform the step, or return what its earlier attempt sealed."""
+        """Perform the step, or return what its earlier attempt sealed.
+
+        A kind the production router has no runner for is refused as it refuses it
+        (``NoRunnerError``), so a world cannot serve a step the real loop would stall on.
+        """
         del attempt
+        if type(step) not in LIVE_REQUEST_KINDS:
+            raise NoRunnerError(type(step).__name__)
         sealed = self._effects.sealed.get(tag.root)
         if sealed is not None:
             return _result_of(step, tag, sealed)

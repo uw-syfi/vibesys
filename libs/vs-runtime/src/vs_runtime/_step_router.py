@@ -20,18 +20,16 @@ from typing import TYPE_CHECKING, Annotated, get_args, get_origin
 
 from vs_core.api import (
     AdoptRevision,
-    BlockRequest,
-    CancelOwnedResource,
     DispatchTurn,
     ExecuteRegisteredOperation,
     InspectOwnedJob,
-    InspectRequest,
     InspectTurn,
     LifecycleClass,
     ResumeSessionTurn,
     SubmitMeasurement,
     VerifyAdoption,
 )
+from vs_core.api.recovery import COMMAND_KINDS
 from vs_runtime._executor_step_runner import DECLARED_REPEATS
 
 if TYPE_CHECKING:
@@ -41,10 +39,19 @@ if TYPE_CHECKING:
     from vs_core.api.recovery import StepResult
     from vs_runtime._step_runner import Adopted, CancelSignal, Cleared, StepRunner
 
-RECOVERY_ONLY_KINDS: frozenset[type[Request]] = frozenset(
-    {InspectRequest, InspectTurn, InspectOwnedJob, CancelOwnedResource, BlockRequest}
-)
-"""The requests of the prove-or-block layer. ``decide`` never issues them, and 6b deletes them."""
+UNSERVED_STEP_KINDS: frozenset[type[Request]] = frozenset({InspectTurn, InspectOwnedJob})
+"""The steps of the prove-or-block layer that no runner serves, because no step loop run opens one.
+
+Core opens them to settle an outcome it does not know, and the runners never leave one: a step
+with no final report has no result and runs again. A job step's report is its job's last
+observation (``finish``), so a run that ends over it asks to inspect nothing (``_born_ended``).
+A property over the loop model (``opens_no_unserved_step``) and the DST world runner, which
+refuses these kinds, keep it so. 6b deletes the kinds.
+"""
+
+RECOVERY_ONLY_KINDS: frozenset[type[Request]] = frozenset({*COMMAND_KINDS, *UNSERVED_STEP_KINDS})
+"""The requests of the prove-or-block layer: core's commands of reconciliation, which are not steps
+(``COMMAND_KINDS``), and the steps no runner serves (``UNSERVED_STEP_KINDS``)."""
 
 LIVE_REQUEST_KINDS: frozenset[type[Request]] = frozenset(
     {
@@ -203,6 +210,7 @@ def request_kinds(alias: object) -> frozenset[type]:
 __all__ = [
     "LIVE_REQUEST_KINDS",
     "RECOVERY_ONLY_KINDS",
+    "UNSERVED_STEP_KINDS",
     "NoRunnerError",
     "StepRouter",
     "StepRunnerParts",

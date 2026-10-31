@@ -19,6 +19,7 @@ from hypothesis import strategies as st
 
 import vs_core.api as core
 from vs_core.api.recovery import (
+    COMMAND_KINDS,
     Action,
     Cancel,
     Cancelled,
@@ -394,17 +395,12 @@ def ending(state: core.CoreState) -> bool:
 OPEN = (core.RequestPhase.PREPARED, core.RequestPhase.DISPATCHED, core.RequestPhase.RECONCILING)
 """The phases of a request that has no result yet."""
 
-RECOVERY_ONLY = (
-    core.InspectRequest,
-    core.InspectTurn,
-    core.InspectOwnedJob,
-    core.CancelOwnedResource,
-    core.BlockRequest,
-)
-"""The requests of the prove-or-block layer, which the runner loop has no runner for."""
-
 UNSERVED = (core.InspectTurn, core.InspectOwnedJob)
-"""Those of them that are steps: the rule starts a step, where it lets a command lapse."""
+"""The steps of the prove-or-block layer, which the runner loop has no runner for: the rule starts a
+step, where it lets a command (``COMMAND_KINDS``) lapse."""
+
+RECOVERY_ONLY = (*COMMAND_KINDS, *UNSERVED)
+"""The requests of the prove-or-block layer."""
 
 type Move = tuple[str, float | int | None]
 

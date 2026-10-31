@@ -1844,8 +1844,14 @@ def _replace_record(state: RecordsState, record: RequestRecord) -> RecordsState:
     )
 
 
+COMMAND_KINDS: frozenset[type[Request]] = frozenset(
+    {InspectRequest, CancelOwnedResource, BlockRequest}
+)
+"""The commands of reconciliation. Every other kind is a canonical request: a step ``decide`` runs."""
+
+
 def _canonical(record: RequestRecord) -> bool:
-    return not isinstance(record.request, InspectRequest | CancelOwnedResource | BlockRequest)
+    return type(record.request) not in COMMAND_KINDS
 
 
 def is_step(record: RequestRecord) -> bool:

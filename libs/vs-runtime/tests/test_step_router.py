@@ -15,10 +15,12 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_core.api.recovery import COMMAND_KINDS
 from vs_runtime.api.executor_step_runner import DECLARED_REPEATS
 from vs_runtime.api.step_router import (
     LIVE_REQUEST_KINDS,
     RECOVERY_ONLY_KINDS,
+    UNSERVED_STEP_KINDS,
     NoRunnerError,
     StepRouter,
     StepRunnerParts,
@@ -84,6 +86,22 @@ def test_the_live_kinds_are_every_request_the_union_has_but_the_prove_or_block_o
     assert everything >= RECOVERY_ONLY_KINDS
     assert len(LIVE_REQUEST_KINDS) == 19
     assert set(DECLARED_REPEATS) < LIVE_REQUEST_KINDS
+
+
+def test_the_router_serves_every_step_core_opens_but_the_two_it_never_opens() -> None:
+    """The router's table is core's own classification of what is a step, not a second claim.
+
+    Core keeps the commands of reconciliation (``COMMAND_KINDS``) out of the steps the loop runs;
+    every other kind is a step the loop can hand to the router. The steps without a runner are
+    exactly the two core opens only to settle an unknown outcome (``UNSERVED_STEP_KINDS``), which
+    a step loop run never does; a step added to the union without a runner, or taken out of it, fails here.
+    """
+    steps = request_kinds(core.Request) - COMMAND_KINDS
+
+    assert COMMAND_KINDS == request_kinds(core.ReconciliationRequest)
+    assert steps - LIVE_REQUEST_KINDS == UNSERVED_STEP_KINDS
+    assert UNSERVED_STEP_KINDS == {core.InspectTurn, core.InspectOwnedJob}
+    assert RECOVERY_ONLY_KINDS == COMMAND_KINDS | UNSERVED_STEP_KINDS
 
 
 def test_every_live_kind_has_the_runner_of_its_role() -> None:

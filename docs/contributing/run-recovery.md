@@ -185,6 +185,13 @@ The ledger keys a request by a hash of the content the job reads and its spec, n
 `InspectRequest`, `InspectTurn`, `InspectOwnedJob`, `CancelOwnedResource` and `BlockRequest` are not in the
 table because they exist only to settle unknown outcomes. They are deleted.
 
+`InspectRequest`, `CancelOwnedResource` and `BlockRequest` are core's commands of reconciliation, which
+`decide` never runs as steps (`COMMAND_KINDS`). `InspectTurn` and `InspectOwnedJob` are steps, and no runner
+serves them (`UNSERVED_STEP_KINDS`), so a step loop run must never open one: its steps end with a final report or
+none, and a job step's report is its job's last observation, so there is no outcome left to settle. A property over
+the loop model (`opens_no_unserved_step`) holds core to it, and the `vs-dst` world runner refuses both kinds as the
+production router does, so a rule that opens one fails the crash and pause suites instead of stalling a run.
+
 ### The runner of each request kind
 
 Every kind of `libs/vs-core/src/vs_core/types/records.py:Request` (24, in six groups) has one runner, or
