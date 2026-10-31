@@ -401,6 +401,19 @@ def host_directory(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return root
 
 
+@pytest.fixture(scope="module")
+def probed(host_directory: Path) -> Callable[[_Read], _Probe]:
+    """Each read's probe, run once: the checks of one read share its fresh interpreter."""
+    results: dict[str, _Probe] = {}
+
+    def probe(read: _Read) -> _Probe:
+        if read.command not in results:
+            results[read.command] = _probe(read, host_directory)
+        return results[read.command]
+
+    return probe
+
+
 def _probe(read: _Read, root: Path) -> _Probe:
     """Run ``read`` in a fresh interpreter whose host holds nothing but ``root``."""
     request = root / f"{read.command}.bin"
@@ -457,14 +470,16 @@ def _loaded(probe: _Probe, roots: tuple[str, ...]) -> list[str]:
 
 
 @pytest.mark.parametrize("read", READS, ids=lambda read: read.command)
-def test_a_read_loads_only_the_modules_it_uses(read: _Read, host_directory: Path) -> None:
+def test_a_read_loads_only_the_modules_it_uses(
+    read: _Read, probed: Callable[[_Read], _Probe]
+) -> None:
     """Fails on a read that loads a module of a group it does not list, that grows past its
     backstop count, or, for a catalog, that starts a process.
 
     The catalogs the app asks for at every launch answer from files and the interpreter alone. A
     shell probe of the user's login environment is the failure the last check catches: it is
     useless to a catalog and costs hundreds of milliseconds."""
-    probe = _probe(read, host_directory)
+    probe = probed(read)
 
     assert probe.reply == read.reply
     forbidden = {
@@ -483,11 +498,13 @@ def test_a_read_loads_only_the_modules_it_uses(read: _Read, host_directory: Path
 
 
 @pytest.mark.parametrize("read", READS, ids=lambda read: read.command)
-def test_a_read_lists_only_the_groups_it_loads(read: _Read, host_directory: Path) -> None:
+def test_a_read_lists_only_the_groups_it_loads(
+    read: _Read, probed: Callable[[_Read], _Probe]
+) -> None:
     """A group the read lists and does not load is room for a regression: remove it from the list.
 
     The list is a ban on every other group, so it is only as strong as it is tight."""
-    probe = _probe(read, host_directory)
+    probe = probed(read)
 
     unused = sorted(group.name for group in read.allowed if not _loaded(probe, GROUPS[group]))
     assert unused == [], f"{read.command} no longer loads {unused}: remove them from `allowed`"
