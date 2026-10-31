@@ -127,25 +127,14 @@ function recordsOf(input: Input) {
   }
   return records;
 }
-function historyWords(input: Input): string[] {
-  const actions = actionsOf(input);
-  const rows = [];
-  for (let epoch = 1; epoch <= input.epoch; epoch += 1) {
-    const current = actions.filter(item => item.epoch === epoch);
-    if (epoch > 1 && !current.some(item => item.action === IntentAction.RESUME && item.applied))
-      rows.push({id: `epoch-${epoch}`, epoch, action: IntentAction.RESUME, applied: true});
-    rows.push(...current);
-  }
-  const latest = rows.filter(row => row.epoch === input.epoch && row.applied).at(-1);
-  return rows.map(row => {
-    const past =
-      row.epoch < input.epoch
-        ? ' · Earlier epoch'
-        : row.applied && row !== latest
-          ? ' · Earlier action'
-          : '';
-    return `${LABELS.get(row.action)} · ${row.applied ? 'Applied' : 'Refused'}${past}`;
-  });
+/** What the page lists: the requests that did not take, oldest first. An applied request has no row. */
+function refusedWords(input: Input): string[] {
+  return actionsOf(input)
+    .filter(item => !item.applied)
+    .map(
+      item =>
+        `${LABELS.get(item.action)} · Refused${item.epoch < input.epoch ? ' · Earlier epoch' : ''}`,
+    );
 }
 function currentLifecycle(input: Input) {
   return create(LifecycleSchema, {
@@ -167,6 +156,12 @@ function historyRows(container: HTMLElement): string[] {
   return [...container.querySelectorAll('span')]
     .map(span => span.textContent ?? '')
     .filter(text => /^(Pause(?: now)?|Resume|Guidance) · (Applied|Refused)/.test(text));
+}
+
+/** An applied request has no row: the one applied line is Resume's own, until the host's record lands. */
+function expectNoAppliedRows(container: HTMLElement) {
+  for (const text of historyRows(container).filter(text => text.includes('· Applied')))
+    expect(text).toStartWith('Resume');
 }
 
 function verifyPermissions(container: HTMLElement, input: Input) {
@@ -222,9 +217,7 @@ async function verifyHistory(input: Input, availabilityOnly = false) {
     );
   const send = async (records: ReturnType<typeof recordsOf>) => {
     await act(async () => feed.publish(records));
-    expect(
-      historyRows(container).filter(text => text.endsWith('· Applied')).length,
-    ).toBeLessThanOrEqual(1);
+    expectNoAppliedRows(container);
   };
   try {
     if (availabilityOnly) {
@@ -274,14 +267,14 @@ async function verifyHistory(input: Input, availabilityOnly = false) {
     }
     await send(records);
     for (const record of [...records].reverse()) await send([record]);
-    expect(historyRows(container)).toEqual(historyWords(input));
+    expect(historyRows(container)).toEqual(refusedWords(input));
   } finally {
     await act(async () => root.unmount());
     container.remove();
   }
 }
 
-test('property: history and the latest applied action depend on writer positions across replays', async () => {
+test('property: only requests that did not take are listed, across replays and reconnects', async () => {
   await fc.assert(
     fc.asyncProperty(INPUT, input => verifyHistory(input)),
     {numRuns: 40, seed: 253},
@@ -471,9 +464,7 @@ async function verifyInterleaving(steps: readonly Step[]) {
       .map(button => button.textContent ?? '')
       .filter(text => ['Pause', 'Pause now', 'Guidance', 'Resume'].includes(text));
     expect(shown.sort()).toEqual(expectedButtons(facts).sort());
-    expect(
-      historyRows(container).filter(text => text.endsWith('· Applied')).length,
-    ).toBeLessThanOrEqual(1);
+    expectNoAppliedRows(container);
   };
   // Each stream is ordered by itself; only the streams interleave with one another.
   const apply = async (step: Step, index: number) => {
