@@ -25,7 +25,7 @@ import {
 } from '@vibesys/proto';
 import {
   type ConnectStep,
-  FAILURE_WORDS,
+  type FailureReason,
   type HostRunFacts,
   type RunFacts,
   type SubscriptionState,
@@ -41,6 +41,24 @@ const STAGES: Readonly<Record<StartupStage, NonNullable<RunPhase['stage']> | nul
 
 /** Why a run whose writer died without an ending reads as failed. */
 const INTERRUPTED_REASON = 'The run stopped without recording an ending.';
+
+/**
+ * Why a machine's run list is not coming, in a word or two. The table is total over the closed
+ * reasons, so a new reason fails to compile here instead of reaching a screen as no words.
+ */
+export const LISTING_FAILURE_WORDS: Readonly<Record<FailureReason, string>> = {
+  unreachable: 'Unreachable',
+  ended: 'Disconnected',
+  silent: 'No signal',
+  outdated: 'Not updating',
+  no_first_frame: 'No answer',
+  source_failed: 'Failed',
+  resource_exhausted: 'Too many runs',
+  internal: 'Failed',
+  unsupported: 'Not supported',
+  invalid_frame: 'Invalid answer',
+  closed: 'Closed',
+};
 
 /** The step of the way to a host's runs that a subscription's step is. */
 const LISTING_STEP: Readonly<Record<ConnectStep, ListingStep>> = {
@@ -196,7 +214,7 @@ function waiting(
     case 'stale':
       return {kind: 'reconnecting', attempt: state.attempt};
     case 'failed':
-      return {kind: 'offline', detail: FAILURE_WORDS[state.reason]};
+      return {kind: 'offline', detail: LISTING_FAILURE_WORDS[state.reason]};
   }
 }
 

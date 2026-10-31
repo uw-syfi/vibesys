@@ -34,7 +34,6 @@ export {
   CONNECTING,
   type ConnectStep,
   type Control,
-  FAILURE_WORDS,
   type FailureReason,
   type Instant,
   OFFLINE_AFTER,

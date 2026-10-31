@@ -190,6 +190,10 @@ export const subscriptionMachine = setup({
         actions: assign({halted: 'invalid_frame' as const}),
       },
       on: {
+        // A stream already being opened is the retry: asking again forgets the losses, so the
+        // answer is `connecting` and not the failure that was, and the stream goes on. A stream
+        // that delivers has no losses to forget.
+        retry: {actions: 'restart'},
         refused: [
           {
             guard: 'final',

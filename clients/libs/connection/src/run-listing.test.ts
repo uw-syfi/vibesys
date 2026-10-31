@@ -1,7 +1,12 @@
 import {expect, test} from 'bun:test';
 import {create} from '@bufbuild/protobuf';
 import {timestampFromMs} from '@bufbuild/protobuf/wkt';
-import {hostListingFromRuns, listingStep, watchedListing} from '@vibesys/connection';
+import {
+  hostListingFromRuns,
+  LISTING_FAILURE_WORDS,
+  listingStep,
+  watchedListing,
+} from '@vibesys/connection';
 import {type HostKey, LISTING_STEPS, type ListingStep, recordedProjectRoot} from '@vibesys/hosts';
 import {
   DrainGoal,
@@ -14,7 +19,6 @@ import {
 } from '@vibesys/proto';
 import {
   CONNECT_STEPS,
-  FAILURE_WORDS,
   type FailureReason,
   type HostRunFacts,
   RETRYABLE_REASONS,
@@ -210,7 +214,7 @@ test('property: a host lists runs only once its subscription is live, and says w
           // A failure is worded from its closed reason, never from text.
           expect(listing).toMatchObject({
             step,
-            connection: {kind: 'offline', detail: FAILURE_WORDS[state.reason]},
+            connection: {kind: 'offline', detail: LISTING_FAILURE_WORDS[state.reason]},
           });
           break;
       }

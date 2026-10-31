@@ -295,6 +295,43 @@ test('waking checks a live stream within a beat and retries a waiting one at onc
   expect(harness.control).toMatchObject({kind: 'stale', attempt: 0});
 });
 
+test('a retry while a stream is already being opened forgets the losses and keeps that stream', async () => {
+  const harness = new Harness(LEASE_ONLY);
+  await live(harness);
+  for (let loss = 1; loss <= OFFLINE_AFTER; loss += 1) {
+    harness.latest.fail();
+    await settle();
+    if (loss < OFFLINE_AFTER) harness.clock.advanceBy(backoffMs(loss));
+  }
+  expect(harness.control).toMatchObject({kind: 'failed', retrying: true});
+  // The parked retry opens a stream, which is still being dialed: the host still reads as failed.
+  harness.clock.advanceBy(30_000);
+  expect(harness.open).toHaveLength(1);
+  expect(harness.control).toMatchObject({kind: 'failed', retrying: true});
+  const dialing = harness.latest;
+  harness.actor.send({type: 'retry'});
+  // The press is answered: connecting, with the value it had, on the same stream.
+  expect(harness.control).toMatchObject({kind: 'stale', attempt: 0});
+  expect(harness.open).toEqual([dialing]);
+  expect(harness.streams).toHaveLength(OFFLINE_AFTER + 1);
+  // A host that then does not answer fails again after the same number of losses.
+  for (let loss = 1; loss <= OFFLINE_AFTER; loss += 1) {
+    harness.latest.fail();
+    await settle();
+    if (loss < OFFLINE_AFTER) harness.clock.advanceBy(backoffMs(loss));
+  }
+  expect(harness.control).toMatchObject({kind: 'failed', retrying: true});
+  // A stream that delivers has no losses to forget, and a retry leaves it be.
+  harness.actor.send({type: 'retry'});
+  harness.clock.advanceBy(30_000);
+  harness.latest.snapshot([statsEntry('machine', harness.clock.now())]);
+  await settle();
+  const delivering = harness.open;
+  harness.actor.send({type: 'retry'});
+  expect(harness.open).toEqual(delivering);
+  expect(harness.control.kind).toBe('live');
+});
+
 test('closing is final: observers hear failed closed and nothing runs', async () => {
   const harness = new Harness(LEASE_ONLY);
   await live(harness);

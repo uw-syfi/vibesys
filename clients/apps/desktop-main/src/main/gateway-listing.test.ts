@@ -2,7 +2,11 @@ import {expect, test} from 'bun:test';
 import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {create, fromBinary} from '@bufbuild/protobuf';
-import {GATEWAY_FIRST_CONNECT_BUDGET_MS, hostRuns} from '@vibesys/connection';
+import {
+  GATEWAY_FIRST_CONNECT_BUDGET_MS,
+  hostRuns,
+  LISTING_FAILURE_WORDS,
+} from '@vibesys/connection';
 import {
   announce,
   announceChange,
@@ -34,13 +38,7 @@ import {
   TopicEntrySchema,
 } from '@vibesys/proto';
 import {knownProjects} from '@vibesys/runs';
-import {
-  backoffMs,
-  FAILURE_WORDS,
-  failureBoundMs,
-  OFFLINE_AFTER,
-  runs as runsTopic,
-} from '@vibesys/subscription';
+import {backoffMs, failureBoundMs, OFFLINE_AFTER, runs as runsTopic} from '@vibesys/subscription';
 import fc from 'fast-check';
 
 const HOST: HostId = {kind: 'ssh', alias: 'host-a'};
@@ -318,7 +316,7 @@ test('a host that never answers ends failed at the step it reached, with the wor
     kind: 'failed',
     host: hostKey(HOST),
     step: 'handshake',
-    reason: FAILURE_WORDS.unreachable,
+    reason: LISTING_FAILURE_WORDS.unreachable,
   });
   world.release();
 });
@@ -335,7 +333,7 @@ test('a helper that exits at once fails its machine, and retry starts the steps 
   expect(world.loads()[1]).toMatchObject({
     kind: 'failed',
     step: 'gateway',
-    reason: FAILURE_WORDS.unreachable,
+    reason: LISTING_FAILURE_WORDS.unreachable,
   });
   world.runs.retry(hostKey(HOST));
   expect(world.loads()[1]).toEqual({

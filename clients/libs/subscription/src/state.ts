@@ -67,18 +67,3 @@ export const CONNECTING: Extract<Control, {readonly kind: 'connecting'}> = {
 
 /** The failures after which a screen is told the host is failing, not recovering. */
 export const OFFLINE_AFTER = 5;
-
-/** Why a host has no stream, in a word: the one table every screen words a failure from. */
-export const FAILURE_WORDS: Readonly<Record<FailureReason, string>> = {
-  unreachable: 'Unreachable',
-  ended: 'Disconnected',
-  silent: 'No signal',
-  outdated: 'Not updating',
-  no_first_frame: 'No reading',
-  source_failed: 'Failed',
-  resource_exhausted: 'Overloaded',
-  internal: 'Failed',
-  unsupported: 'Not supported',
-  invalid_frame: 'Invalid reading',
-  closed: 'Closed',
-};

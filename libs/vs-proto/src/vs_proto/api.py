@@ -164,11 +164,14 @@ from vs_proto._generated.vibesys.store.v1.content_pb import (
 from vs_proto._generated.vibesys.store.v1.core_input_pb import (
     AttemptInterrupted,
     CoreInput,
+    CoreSnapshot,
     InterruptionReason,
     RunEnded,
+    RunStarted,
     StepCancelReason,
     StepFinished,
     StepStarted,
+    StrategyAdvanced,
 )
 from vs_proto._generated.vibesys.store.v1.environment_attrs_pb import (
     CapacityCondition,
@@ -260,6 +263,7 @@ from vs_proto._generated.vibesys.store.v1.span_pb import (
     WaitingOn,
     WaitKind,
 )
+from vs_proto._generated.vibesys.store.v1.state_cache_pb import StateCache
 from vs_proto._generated.vibesys.store.v1.transcript_pb import (
     TranscriptChannel,
     TranscriptCommandResult,
@@ -320,6 +324,7 @@ __all__ = [
     "ComparisonVerdict",
     "ConfigurationFailed",
     "CoreInput",
+    "CoreSnapshot",
     "CreateChatSessionRequest",
     "CreateChatSessionResponse",
     "DescriptorSet",
@@ -410,6 +415,7 @@ __all__ = [
     "RunLiveness",
     "RunOutcomePresentation",
     "RunProcess",
+    "RunStarted",
     "Running",
     "RunsTopic",
     "RuntimeType",
@@ -434,6 +440,7 @@ __all__ = [
     "StageState",
     "Starting",
     "StartupStage",
+    "StateCache",
     "SteerIntent",
     "SteerMode",
     "SteerTarget",
@@ -442,6 +449,7 @@ __all__ = [
     "StepFinished",
     "StepStarted",
     "Stop",
+    "StrategyAdvanced",
     "StreamKind",
     "StreamOwner",
     "StreamRef",

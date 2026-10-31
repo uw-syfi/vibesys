@@ -8,7 +8,12 @@
  */
 
 export {connectionStatus} from './connection-status.js';
-export {hostListingFromRuns, listingStep, watchedListing} from './run-listing.js';
+export {
+  hostListingFromRuns,
+  LISTING_FAILURE_WORDS,
+  listingStep,
+  watchedListing,
+} from './run-listing.js';
 export {controlDirectory, installAskpass} from './shell/askpass.js';
 export {
   type ConnectionLease,

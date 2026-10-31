@@ -1,7 +1,8 @@
 import {expect, test} from 'bun:test';
 import type {HostKey, HostListing} from '@vibesys/hosts';
 import {RunLiveness, TopicFailureCode} from '@vibesys/proto';
-import {FAILURE_WORDS, OFFLINE_AFTER, backoffMs} from '@vibesys/subscription';
+import {backoffMs, OFFLINE_AFTER} from '@vibesys/subscription';
+import {LISTING_FAILURE_WORDS} from '../run-listing.js';
 import {announce, announceChange, hubRig, settle} from '../testing/index.js';
 import {hostRuns} from './host-runs.js';
 import {SUBSCRIPTION_LINGER_MS, SubscriptionFailed} from './subscriptions.js';
@@ -76,7 +77,7 @@ test('a host that keeps failing is offline in the words of its reason, and a ret
   }
   expect(last()).toMatchObject({
     kind: 'unavailable',
-    connection: {kind: 'offline', detail: FAILURE_WORDS.unreachable},
+    connection: {kind: 'offline', detail: LISTING_FAILURE_WORDS.unreachable},
   });
   expect(gateway.open).toHaveLength(0);
   runs.retry(HOST);
@@ -90,7 +91,9 @@ test('a host that cannot serve the topic is offline with that word and is not re
     case: 'failed',
     value: {code: TopicFailureCode.UNSUPPORTED, detail: ''},
   });
-  expect(last()).toMatchObject({connection: {kind: 'offline', detail: FAILURE_WORDS.unsupported}});
+  expect(last()).toMatchObject({
+    connection: {kind: 'offline', detail: LISTING_FAILURE_WORDS.unsupported},
+  });
   clock.advanceBy(60 * 60_000);
   expect(gateway.streams).toHaveLength(1);
 });

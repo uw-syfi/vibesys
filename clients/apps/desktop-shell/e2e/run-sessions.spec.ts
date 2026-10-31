@@ -211,6 +211,52 @@ async function captureSession(page: Page, width: number, state: string): Promise
   sheet.push({name: `${width}/${state}`, file});
 }
 
+/**
+ * The chip that says the history is unavailable draws its hint under itself while it has the keyboard
+ * focus. Over what? The chat's title row holds Threads, New chat and Close: the hint covers none of
+ * them, with the words the chat shows and with a hint as long as the browser lets it grow (a raw
+ * error of the thread list). `focus` is the keyboard's (Shift+Tab, Tab), which is what shows the hint.
+ */
+async function hintCoversNoControl(page: Page, pane: Locator, width: number): Promise<void> {
+  const chip = pane.locator('.vs-chip[aria-description]', {hasText: 'Unavailable'});
+  const check = async (state: string): Promise<void> => {
+    await chip.focus();
+    await page.keyboard.press('Shift+Tab');
+    await page.keyboard.press('Tab');
+    // The hint is a pseudo-element anchored under its chip: its box is what the browser resolved.
+    const hint = await chip.evaluate(each => {
+      const drawn = getComputedStyle(each, '::after');
+      const left = Number.parseFloat(drawn.left);
+      const top = Number.parseFloat(drawn.top);
+      return {
+        shown: drawn.content !== 'none',
+        left,
+        top,
+        right: left + Number.parseFloat(drawn.width),
+        bottom: top + Number.parseFloat(drawn.height),
+      };
+    });
+    expect(hint.shown, 'keyboard focus draws the hint').toBe(true);
+    for (const name of ['Threads', 'New chat', 'Close']) {
+      const box = await pane.getByRole('button', {name, exact: true}).boundingBox();
+      if (box === null) throw new Error(`the chat has no ${name} button`);
+      const apart =
+        hint.right <= box.x ||
+        box.x + box.width <= hint.left ||
+        hint.bottom <= box.y ||
+        box.y + box.height <= hint.top;
+      expect(apart, `the ${state} hint covers ${name} at ${width}px`).toBe(true);
+    }
+    await captureSession(page, width, `unavailable-hint-${state}`);
+    await page.keyboard.press('Tab');
+  };
+  await check('short');
+  await chip.evaluate(each =>
+    each.setAttribute('aria-description', 'The thread list could not be read: '.repeat(8)),
+  );
+  await check('long');
+}
+
 async function recoverHistory(page: Page, pane: Locator, width: number, answer: Record) {
   await page.evaluate(
     bytes => (window as unknown as GatewayWindow).fakeGateway.sendChatFrame(bytes),
@@ -218,6 +264,7 @@ async function recoverHistory(page: Page, pane: Locator, width: number, answer: 
   );
   await expect(pane.getByText('Unavailable', {exact: true})).toBeVisible();
   await captureSession(page, width, 'unavailable');
+  await hintCoversNoControl(page, pane, width);
   await pane.getByRole('button', {name: 'Retry history'}).click();
   await expect(pane.getByText('Unavailable', {exact: true})).not.toBeVisible();
   await expect(pane.getByText('It reduces contention under load.', {exact: true})).toBeVisible();
