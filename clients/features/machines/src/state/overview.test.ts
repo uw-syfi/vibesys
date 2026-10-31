@@ -311,8 +311,10 @@ describe('reconnect and load', () => {
         ...state.machines[0],
         report: {kind: 'ready', facts: FACTS(gpus, live)},
       } as never;
-      const load = machineLoad(machine);
+      const load = machineLoad(machine, live);
       expect(load?.slots).toBe(Math.max(1, gpus));
+      // Its load is the run list's live count, not the facts' count of the moment it was checked.
+      expect(machineLoad(machine, null)).toBeNull();
       expect(load?.share).toBeGreaterThanOrEqual(0);
       expect(load?.share).toBeLessThanOrEqual(1);
       expect(load?.share).toBe(Math.min(1, live / Math.max(1, gpus)));

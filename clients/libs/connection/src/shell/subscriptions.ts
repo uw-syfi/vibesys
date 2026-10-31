@@ -48,6 +48,13 @@ const CONNECT_STEPS: Readonly<Record<ListingStep, ConnectStep>> = {
   runs: 'stream',
 };
 
+/**
+ * How long a stream outlives its last observer. A page that is left and opened again (a screen
+ * switch, a remount) finds its stream running, instead of dialing the host again, which for an
+ * ssh host is a new connection. Nothing needs the stream after this, so it stops.
+ */
+export const SUBSCRIPTION_LINGER_MS = 5_000;
+
 /** A subscription that gave a screen no value, and why. */
 export class SubscriptionFailed extends Error {
   constructor(
@@ -82,6 +89,8 @@ class Instance {
   readonly observers = new Set<Observer>();
   readonly #actor: Actor<typeof subscriptionMachine>;
   #control: Control;
+  /** Cancels the pending stop of a machine that has no observer, or null while it has one. */
+  #lingering: (() => void) | null = null;
 
   readonly #parts: InstanceParts;
 
@@ -126,6 +135,8 @@ class Instance {
    * delivery does, and the replay is delivered as every later update is.
    */
   join(observer: Observer): void {
+    this.#lingering?.();
+    this.#lingering = null;
     this.observers.add(observer);
     const {fold} = this.#actor.getSnapshot().context;
     for (const update of replayUpdates(fold, observer.key)) this.#send(observer, update);
@@ -134,7 +145,11 @@ class Instance {
 
   leave(observer: Observer): void {
     this.observers.delete(observer);
-    if (this.observers.size === 0) this.close();
+    if (this.observers.size > 0 || this.#lingering !== null) return;
+    this.#lingering = this.#parts.schedule(() => {
+      this.#lingering = null;
+      this.close();
+    }, SUBSCRIPTION_LINGER_MS);
   }
 
   send(event: {type: 'retry'} | {type: 'wake'} | {type: 'close'}): void {
@@ -143,6 +158,8 @@ class Instance {
 
   /** Stop the machine, which aborts its stream. */
   close(): void {
+    this.#lingering?.();
+    this.#lingering = null;
     this.#actor.stop();
     this.#parts.retired(this);
   }
@@ -160,6 +177,8 @@ class Instance {
 
   /** The machine is final: it was closed from this side. */
   #finish(): void {
+    this.#lingering?.();
+    this.#lingering = null;
     const observers = [...this.observers];
     this.observers.clear();
     this.#parts.retired(this);
@@ -266,7 +285,7 @@ export class Subscriptions {
 
   /** The relay as a window's port, for what serves windows. */
   get port(): SubscriptionPort {
-    return {observe: this.relay};
+    return {observe: this.relay, retry: host => this.retry(host)};
   }
 
   /** `listener` hears the state now and on each change; the returned function releases it. */

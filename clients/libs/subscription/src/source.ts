@@ -20,12 +20,20 @@ export interface SubscriptionPort {
     /** The port is over: main cancelled it, closed it, or could not deliver. */
     ended: (error?: string) => void,
   ): {cancel(): void};
+  /**
+   * Ask main to try `host`'s waiting or stopped subscriptions again now. A stream that is
+   * delivering is left be, a host with no observation is untouched, and nothing is answered: the
+   * outcome is the observers' own state changing.
+   */
+  retry(host: HostKey): void;
 }
 
 export interface SubscriptionSource<S> {
   subscribe(listener: () => void): () => void;
   /** The same object until the state changes, as `useSyncExternalStore` requires. */
   getSnapshot(): SubscriptionState<S>;
+  /** Ask the host to try again now: the press behind a failed subscription's Retry. */
+  retry(): void;
 }
 
 const NOT_OBSERVED: SubscriptionState<never> = CONNECTING;
@@ -94,5 +102,6 @@ export function subscriptionSource<S>(
       if (!sameView(read.of, window)) read = {of: window, state: stateOf(topic, window)};
       return read.state;
     },
+    retry: () => port.retry(host),
   };
 }

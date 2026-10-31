@@ -8,12 +8,13 @@ import type {SlurmClusterSettings} from '@vibesys/ipc';
 import {gpuLine} from './hardware.js';
 import {type Machine, type MachinesState, machineStatus} from './machines.js';
 import {clustersOf, type LastCheck, type Places, unreachableClusters} from './places.js';
+import {type StatsView, streamStatus} from './stats.js';
 import {type StatusTone, statusTone} from './words.js';
 
 type Hardware = NonNullable<SlurmClusterSettings['hardware']>;
 
-/** The word and tone a machine's card carries: online, unreachable, or what it waits on. */
-export function cardStatus(machine: Machine): {readonly word: string; readonly tone: StatusTone} {
+/** The word and tone a card carries: the machine's own status. */
+function probeStatus(machine: Machine): {readonly word: string; readonly tone: StatusTone} {
   const status = machineStatus(machine);
   switch (status) {
     case 'ready':
@@ -22,6 +23,31 @@ export function cardStatus(machine: Machine): {readonly word: string; readonly t
       return {word: 'Checking', tone: 'neutral'};
     default:
       return {word: problemWord(status), tone: statusTone(status)};
+  }
+}
+
+/**
+ * The one word and tone a machine's card carries. The machine's own check speaks while the
+ * connection or the checkout is what is wrong (it names the fix), and otherwise the stream's
+ * state does, once the card has one, so a card never says `Online` beside `Unreachable`. A host
+ * the stream says it cannot read is `Not supported` alone, whatever the check said of its version.
+ */
+export function cardStatus(
+  machine: Machine,
+  stream: StatsView | null = null,
+): {readonly word: string; readonly tone: StatusTone} {
+  const own = probeStatus(machine);
+  if (stream === null) return own;
+  switch (machineStatus(machine)) {
+    case 'checking':
+    case 'sign-in':
+    case 'unavailable':
+    case 'checkout-not-found':
+      return own;
+    case 'needs-update':
+      return stream.kind === 'failed' ? streamStatus(stream) : own;
+    case 'ready':
+      return streamStatus(stream);
   }
 }
 
@@ -64,12 +90,14 @@ export interface Load {
   readonly share: number;
 }
 
-/** The machine's load from its own facts, or null while they are not known. */
-export function machineLoad(machine: Machine): Load | null {
+/**
+ * The machine's load: the `live` runs its run list holds against the slots its facts count, or
+ * null while either is not known.
+ */
+export function machineLoad(machine: Machine, live: number | null): Load | null {
   const described = facts(machine);
-  if (described === null) return null;
+  if (described === null || live === null) return null;
   const slots = Math.max(1, described.hardware.gpus.length);
-  const live = Math.max(0, described.runs.live);
   return {live, slots, share: Math.min(1, live / slots)};
 }
 

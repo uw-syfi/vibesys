@@ -68,6 +68,67 @@ class DesktopSubscribeRequest(Message[_DesktopSubscribeRequestFields]):
         request: SubscribeRequest | None
         key: str
 
+_DesktopRetryRequestFields: TypeAlias = Literal["host"]
+
+class DesktopRetryRequest(Message[_DesktopRetryRequestFields]):
+    """
+    A window asks main to try a host's waiting or stopped subscriptions again now.
+    Main answers nothing and ends the port; a stream that is delivering is left be.
+
+    ```proto
+    message vibesys.desktop.v1.DesktopRetryRequest
+    ```
+
+    Attributes:
+        host:
+            ```proto
+            string host = 1;
+            ```
+    """
+
+    __slots__ = ("host",)
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            host: str = "",
+        ) -> None:
+            pass
+
+        host: str
+
+_DesktopSubscriptionRequestFields: TypeAlias = Literal["observe", "retry"]
+
+class DesktopSubscriptionRequest(Message[_DesktopSubscriptionRequestFields]):
+    """
+    Everything a window can ask of the subscription port, one request per port.
+
+    ```proto
+    message vibesys.desktop.v1.DesktopSubscriptionRequest
+    ```
+
+    Attributes:
+        request:
+            ```proto
+            oneof request
+            ```
+    """
+
+    __slots__ = ("request",)
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            request: Oneof[Literal["observe"], DesktopSubscribeRequest] | Oneof[Literal["retry"], DesktopRetryRequest] | None = None,
+        ) -> None:
+            pass
+
+        request: Oneof[Literal["observe"], DesktopSubscribeRequest] | Oneof[Literal["retry"], DesktopRetryRequest] | None
+
 _DesktopSubscriptionConnectingFields: TypeAlias = Literal["step", "attempt"]
 
 class DesktopSubscriptionConnecting(Message[_DesktopSubscriptionConnectingFields]):
@@ -132,7 +193,7 @@ class DesktopSubscriptionLive(Message[_DesktopSubscriptionLiveFields]):
 
         since: Timestamp | None
 
-_DesktopSubscriptionStaleFields: TypeAlias = Literal["reason", "attempt"]
+_DesktopSubscriptionStaleFields: TypeAlias = Literal["reason", "attempt", "value_at"]
 
 class DesktopSubscriptionStale(Message[_DesktopSubscriptionStaleFields]):
     """
@@ -149,9 +210,15 @@ class DesktopSubscriptionStale(Message[_DesktopSubscriptionStaleFields]):
             ```proto
             uint32 attempt = 2;
             ```
+        value_at:
+            When main last received a value; display only, for the age of what is shown.
+
+            ```proto
+            optional google.protobuf.Timestamp value_at = 3;
+            ```
     """
 
-    __slots__ = ("reason", "attempt")
+    __slots__ = ("reason", "attempt", "value_at")
 
     if TYPE_CHECKING:
 
@@ -160,11 +227,13 @@ class DesktopSubscriptionStale(Message[_DesktopSubscriptionStaleFields]):
             *,
             reason: DesktopSubscriptionReason | None = None,
             attempt: int = 0,
+            value_at: Timestamp | None = None,
         ) -> None:
             pass
 
         reason: DesktopSubscriptionReason
         attempt: int
+        value_at: Timestamp | None
 
 _DesktopSubscriptionFailedFields: TypeAlias = Literal["reason", "retrying"]
 
@@ -413,7 +482,7 @@ class DesktopSubscriptionReason(Enum):
 
 
 _DESC = file_desc(
-    b'\n%vibesys/desktop/v1/subscription.proto\x12\x12vibesys.desktop.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1evibesys/api/v1/subscribe.proto"\xd9\x01\n\x17DesktopSubscribeRequest\x12O\n\x04host\x18\x01 \x01(\tR\x04hostB;\xbaH8r624^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$\x12B\n\x07request\x18\x02 \x01(\x0b2 .vibesys.api.v1.SubscribeRequestR\x07requestB\x06\xbaH\x03\xc8\x01\x01\x12!\n\x03key\x18\x03 \x01(\tH\x00R\x03keyB\n\xbaH\x07r\x05\x10\x01(\x80\x01\x88\x01\x01B\x06\n\x04_key"\x81\x01\n\x1dDesktopSubscriptionConnecting\x12F\n\x04step\x18\x01 \x01(\x0e2&.vibesys.desktop.v1.DesktopConnectStepR\x04stepB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x18\n\x07attempt\x18\x02 \x01(\rR\x07attempt"S\n\x17DesktopSubscriptionLive\x128\n\x05since\x18\x01 \x01(\x0b2\x1a.google.protobuf.TimestampR\x05sinceB\x06\xbaH\x03\xc8\x01\x01"\x87\x01\n\x18DesktopSubscriptionStale\x12Q\n\x06reason\x18\x01 \x01(\x0e2-.vibesys.desktop.v1.DesktopSubscriptionReasonR\x06reasonB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x18\n\x07attempt\x18\x02 \x01(\rR\x07attempt"\x8a\x01\n\x19DesktopSubscriptionFailed\x12Q\n\x06reason\x18\x01 \x01(\x0e2-.vibesys.desktop.v1.DesktopSubscriptionReasonR\x06reasonB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x1a\n\x08retrying\x18\x02 \x01(\x08R\x08retrying"\xd3\x02\n\x1aDesktopSubscriptionControl\x12S\n\nconnecting\x18\x01 \x01(\x0b21.vibesys.desktop.v1.DesktopSubscriptionConnectingH\x00R\nconnecting\x12A\n\x04live\x18\x02 \x01(\x0b2+.vibesys.desktop.v1.DesktopSubscriptionLiveH\x00R\x04live\x12D\n\x05stale\x18\x03 \x01(\x0b2,.vibesys.desktop.v1.DesktopSubscriptionStaleH\x00R\x05stale\x12G\n\x06failed\x18\x04 \x01(\x0b2-.vibesys.desktop.v1.DesktopSubscriptionFailedH\x00R\x06failedB\x0e\n\x05state\x12\x05\xbaH\x02\x08\x01"\x1a\n\x18DesktopSubscriptionBegin"\xcc\x02\n\x19DesktopSubscriptionUpdate\x12J\n\x07control\x18\x01 \x01(\x0b2..vibesys.desktop.v1.DesktopSubscriptionControlH\x00R\x07control\x12D\n\x05begin\x18\x02 \x01(\x0b2,.vibesys.desktop.v1.DesktopSubscriptionBeginH\x00R\x05begin\x122\n\x05entry\x18\x03 \x01(\x0b2\x1a.vibesys.api.v1.TopicEntryH\x00R\x05entry\x12&\n\x07removed\x18\x04 \x01(\tH\x00R\x07removedB\n\xbaH\x07r\x05\x10\x01(\x80\x01\x120\n\x06synced\x18\x05 \x01(\x0b2\x16.vibesys.api.v1.SyncedH\x00R\x06syncedB\x0f\n\x06update\x12\x05\xbaH\x02\x08\x01*\xa1\x01\n\x12DesktopConnectStep\x12$\n DESKTOP_CONNECT_STEP_UNSPECIFIED\x10\x00\x12 \n\x1cDESKTOP_CONNECT_STEP_GATEWAY\x10\x01\x12"\n\x1eDESKTOP_CONNECT_STEP_HANDSHAKE\x10\x02\x12\x1f\n\x1bDESKTOP_CONNECT_STEP_STREAM\x10\x03*\xaf\x04\n\x19DesktopSubscriptionReason\x12+\n\'DESKTOP_SUBSCRIPTION_REASON_UNSPECIFIED\x10\x00\x12+\n\'DESKTOP_SUBSCRIPTION_REASON_UNREACHABLE\x10\x01\x12%\n!DESKTOP_SUBSCRIPTION_REASON_ENDED\x10\x02\x12&\n"DESKTOP_SUBSCRIPTION_REASON_SILENT\x10\x03\x12(\n$DESKTOP_SUBSCRIPTION_REASON_OUTDATED\x10\x04\x12.\n*DESKTOP_SUBSCRIPTION_REASON_NO_FIRST_FRAME\x10\x05\x12-\n)DESKTOP_SUBSCRIPTION_REASON_SOURCE_FAILED\x10\x06\x122\n.DESKTOP_SUBSCRIPTION_REASON_RESOURCE_EXHAUSTED\x10\x07\x12(\n$DESKTOP_SUBSCRIPTION_REASON_INTERNAL\x10\x08\x12+\n\'DESKTOP_SUBSCRIPTION_REASON_UNSUPPORTED\x10\t\x12-\n)DESKTOP_SUBSCRIPTION_REASON_INVALID_FRAME\x10\n\x12&\n"DESKTOP_SUBSCRIPTION_REASON_CLOSED\x10\x0bBEZCgithub.com/uw-syfi/vibesys/gateway/gen/vibesys/desktop/v1;desktopv1b\x06proto3',
+    b'\n%vibesys/desktop/v1/subscription.proto\x12\x12vibesys.desktop.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1evibesys/api/v1/subscribe.proto"\xd9\x01\n\x17DesktopSubscribeRequest\x12O\n\x04host\x18\x01 \x01(\tR\x04hostB;\xbaH8r624^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$\x12B\n\x07request\x18\x02 \x01(\x0b2 .vibesys.api.v1.SubscribeRequestR\x07requestB\x06\xbaH\x03\xc8\x01\x01\x12!\n\x03key\x18\x03 \x01(\tH\x00R\x03keyB\n\xbaH\x07r\x05\x10\x01(\x80\x01\x88\x01\x01B\x06\n\x04_key"f\n\x13DesktopRetryRequest\x12O\n\x04host\x18\x01 \x01(\tR\x04hostB;\xbaH8r624^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$"\xb8\x01\n\x1aDesktopSubscriptionRequest\x12G\n\x07observe\x18\x01 \x01(\x0b2+.vibesys.desktop.v1.DesktopSubscribeRequestH\x00R\x07observe\x12?\n\x05retry\x18\x02 \x01(\x0b2\'.vibesys.desktop.v1.DesktopRetryRequestH\x00R\x05retryB\x10\n\x07request\x12\x05\xbaH\x02\x08\x01"\x81\x01\n\x1dDesktopSubscriptionConnecting\x12F\n\x04step\x18\x01 \x01(\x0e2&.vibesys.desktop.v1.DesktopConnectStepR\x04stepB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x18\n\x07attempt\x18\x02 \x01(\rR\x07attempt"S\n\x17DesktopSubscriptionLive\x128\n\x05since\x18\x01 \x01(\x0b2\x1a.google.protobuf.TimestampR\x05sinceB\x06\xbaH\x03\xc8\x01\x01"\xc6\x01\n\x18DesktopSubscriptionStale\x12Q\n\x06reason\x18\x01 \x01(\x0e2-.vibesys.desktop.v1.DesktopSubscriptionReasonR\x06reasonB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x18\n\x07attempt\x18\x02 \x01(\rR\x07attempt\x12=\n\x08value_at\x18\x03 \x01(\x0b2\x1a.google.protobuf.TimestampR\x07valueAtB\x06\xbaH\x03\xc8\x01\x01"\x8a\x01\n\x19DesktopSubscriptionFailed\x12Q\n\x06reason\x18\x01 \x01(\x0e2-.vibesys.desktop.v1.DesktopSubscriptionReasonR\x06reasonB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x1a\n\x08retrying\x18\x02 \x01(\x08R\x08retrying"\xd3\x02\n\x1aDesktopSubscriptionControl\x12S\n\nconnecting\x18\x01 \x01(\x0b21.vibesys.desktop.v1.DesktopSubscriptionConnectingH\x00R\nconnecting\x12A\n\x04live\x18\x02 \x01(\x0b2+.vibesys.desktop.v1.DesktopSubscriptionLiveH\x00R\x04live\x12D\n\x05stale\x18\x03 \x01(\x0b2,.vibesys.desktop.v1.DesktopSubscriptionStaleH\x00R\x05stale\x12G\n\x06failed\x18\x04 \x01(\x0b2-.vibesys.desktop.v1.DesktopSubscriptionFailedH\x00R\x06failedB\x0e\n\x05state\x12\x05\xbaH\x02\x08\x01"\x1a\n\x18DesktopSubscriptionBegin"\xcc\x02\n\x19DesktopSubscriptionUpdate\x12J\n\x07control\x18\x01 \x01(\x0b2..vibesys.desktop.v1.DesktopSubscriptionControlH\x00R\x07control\x12D\n\x05begin\x18\x02 \x01(\x0b2,.vibesys.desktop.v1.DesktopSubscriptionBeginH\x00R\x05begin\x122\n\x05entry\x18\x03 \x01(\x0b2\x1a.vibesys.api.v1.TopicEntryH\x00R\x05entry\x12&\n\x07removed\x18\x04 \x01(\tH\x00R\x07removedB\n\xbaH\x07r\x05\x10\x01(\x80\x01\x120\n\x06synced\x18\x05 \x01(\x0b2\x16.vibesys.api.v1.SyncedH\x00R\x06syncedB\x0f\n\x06update\x12\x05\xbaH\x02\x08\x01*\xa1\x01\n\x12DesktopConnectStep\x12$\n DESKTOP_CONNECT_STEP_UNSPECIFIED\x10\x00\x12 \n\x1cDESKTOP_CONNECT_STEP_GATEWAY\x10\x01\x12"\n\x1eDESKTOP_CONNECT_STEP_HANDSHAKE\x10\x02\x12\x1f\n\x1bDESKTOP_CONNECT_STEP_STREAM\x10\x03*\xaf\x04\n\x19DesktopSubscriptionReason\x12+\n\'DESKTOP_SUBSCRIPTION_REASON_UNSPECIFIED\x10\x00\x12+\n\'DESKTOP_SUBSCRIPTION_REASON_UNREACHABLE\x10\x01\x12%\n!DESKTOP_SUBSCRIPTION_REASON_ENDED\x10\x02\x12&\n"DESKTOP_SUBSCRIPTION_REASON_SILENT\x10\x03\x12(\n$DESKTOP_SUBSCRIPTION_REASON_OUTDATED\x10\x04\x12.\n*DESKTOP_SUBSCRIPTION_REASON_NO_FIRST_FRAME\x10\x05\x12-\n)DESKTOP_SUBSCRIPTION_REASON_SOURCE_FAILED\x10\x06\x122\n.DESKTOP_SUBSCRIPTION_REASON_RESOURCE_EXHAUSTED\x10\x07\x12(\n$DESKTOP_SUBSCRIPTION_REASON_INTERNAL\x10\x08\x12+\n\'DESKTOP_SUBSCRIPTION_REASON_UNSUPPORTED\x10\t\x12-\n)DESKTOP_SUBSCRIPTION_REASON_INVALID_FRAME\x10\n\x12&\n"DESKTOP_SUBSCRIPTION_REASON_CLOSED\x10\x0bBEZCgithub.com/uw-syfi/vibesys/gateway/gen/vibesys/desktop/v1;desktopv1b\x06proto3',
     [
         validate_pb.desc(),
         timestamp_pb.desc(),
@@ -421,6 +490,8 @@ _DESC = file_desc(
     ],
     {
         "DesktopSubscribeRequest": DesktopSubscribeRequest,
+        "DesktopRetryRequest": DesktopRetryRequest,
+        "DesktopSubscriptionRequest": DesktopSubscriptionRequest,
         "DesktopSubscriptionConnecting": DesktopSubscriptionConnecting,
         "DesktopSubscriptionLive": DesktopSubscriptionLive,
         "DesktopSubscriptionStale": DesktopSubscriptionStale,

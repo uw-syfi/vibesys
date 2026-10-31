@@ -24,9 +24,12 @@ import {
   type SidebarState,
 } from '@vibesys/feature-app-shell/state';
 import {
+  createLiveStats,
   createMachinesStore,
+  type LiveStats,
   MachinesPage,
   MachinesScreen,
+  WithHostLive,
 } from '@vibesys/feature-machines/renderer';
 import {
   type MachinesState,
@@ -75,10 +78,11 @@ import {createProblemBoard, type ProblemBoard, reportProblems} from '@vibesys/pr
 import type {RecentRun, RunRef} from '@vibesys/runs';
 import {sameRun} from '@vibesys/runs';
 import type {Store} from '@vibesys/store';
+import type {SubscriptionPort} from '@vibesys/subscription';
 import {applyTheme, Card, EmptyState, Page, type ThemeTarget, WindowFrame} from '@vibesys/ui';
 import {type JSX, useMemo, useSyncExternalStore} from 'react';
 import {GatewayRun} from './gateway-run.js';
-import {loadingMachines, runCounts, runInput} from './shell-runs.js';
+import {liveRunCounts, loadingMachines, runCounts, runInput} from './shell-runs.js';
 
 /** The clock the shell's screens time their bounds on: the window's own timers, in `main.tsx`. */
 export type Schedule = (callback: () => void, delayMs: number) => () => void;
@@ -86,6 +90,8 @@ export type Schedule = (callback: () => void, delayMs: number) => () => void;
 /** The page the shell runs in; its address holds the window's location. */
 export interface ShellPage extends Omit<RunPagePage, 'address'> {
   readonly address: WindowAddress & Pick<RunPageAddress, 'onEscape'>;
+  /** The window's way to a host's live data; without it the screens that show it show none. */
+  readonly subscriptions?: SubscriptionPort;
 }
 
 /** The stores the shell renders, and what its screens reach the app through. */
@@ -99,6 +105,8 @@ export interface ShellStores {
   readonly bridge: WelcomeBridge;
   readonly schedule: Schedule;
   readonly machines: ReturnType<typeof createMachinesStore>;
+  /** The machines' live stats, or null when the window has no way to a host's live data. */
+  readonly live: LiveStats | null;
   /** What the Usage page shows; it asks only while the page is on screen. */
   readonly usage: ReturnType<typeof createUsageStore>;
   readonly newRun: ReturnType<typeof createNewRunStore>['store'];
@@ -220,6 +228,10 @@ export function createShellStores(
     settings,
     machineSettings,
     machines,
+    live:
+      page.subscriptions === undefined
+        ? null
+        : createLiveStats(page.subscriptions, schedule, page.now),
     usage: createUsageStore(bridge, {
       schedule,
       clock: () => ({now: page.now(), zone: Intl.DateTimeFormat().resolvedOptions().timeZone}),
@@ -512,14 +524,22 @@ function MachinesRoute(props: {
   readonly stores: ShellStores;
   readonly machines: MachinesState;
   readonly counts: ReadonlyMap<HostKey, number>;
+  readonly liveRuns: ReadonlyMap<HostKey, number>;
   readonly select: (screen: Screen) => void;
 }): JSX.Element {
   const {stores, select} = props;
+  const {live} = stores;
   return (
     <MachinesPage
       state={props.machines}
       dispatch={stores.machines.dispatch}
       runCounts={props.counts}
+      liveRuns={props.liveRuns}
+      {...(live === null
+        ? {}
+        : {
+            live: (host, render) => <WithHostLive live={live} host={host} render={render} />,
+          })}
       incompleteHosts={
         new Set(projectRunGaps(useStore(stores.sidebar.store).allRuns).map(gap => gap.host))
       }
@@ -573,6 +593,7 @@ export function Shell(props: {
   const rows = useMemo(() => dashboardRows(sidebarState, viewerClock()), [sidebarState]);
   const tiles = useMemo(() => tilesOf(rows.map(row => runInput(row, Date.now()))), [rows]);
   const counts = useMemo(() => runCounts(rows), [rows]);
+  const liveRuns = useMemo(() => liveRunCounts(sidebarState.listings), [sidebarState.listings]);
   const select = (screen: Screen): void => sidebar.store.dispatch({type: 'select', screen});
   const machinesListed = machineCounts(machinesState).listed;
   const saved = machinesListed ? machinesState.machines.map(each => each.host) : null;
@@ -601,6 +622,7 @@ export function Shell(props: {
             stores={props.stores}
             machines={machinesState}
             counts={counts}
+            liveRuns={liveRuns}
             select={select}
           />
         );

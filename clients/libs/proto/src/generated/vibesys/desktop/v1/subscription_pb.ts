@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/desktop/v1/subscription.proto.
  */
 export const file_vibesys_desktop_v1_subscription: GenFile = /*@__PURE__*/
-  fileDesc("CiV2aWJlc3lzL2Rlc2t0b3AvdjEvc3Vic2NyaXB0aW9uLnByb3RvEhJ2aWJlc3lzLmRlc2t0b3AudjEixQEKF0Rlc2t0b3BTdWJzY3JpYmVSZXF1ZXN0EkkKBGhvc3QYASABKAlCO7pIOHI2MjReKGxvY2FsfHNzaDpbQS1aYS16MC05Xy5AOl1bQS1aYS16MC05Xy5AOi1dezAsMjU0fSkkEjkKB3JlcXVlc3QYAiABKAsyIC52aWJlc3lzLmFwaS52MS5TdWJzY3JpYmVSZXF1ZXN0Qga6SAPIAQESHAoDa2V5GAMgASgJQgq6SAdyBRABKIABSACIAQFCBgoEX2tleSJyCh1EZXNrdG9wU3Vic2NyaXB0aW9uQ29ubmVjdGluZxJACgRzdGVwGAEgASgOMiYudmliZXN5cy5kZXNrdG9wLnYxLkRlc2t0b3BDb25uZWN0U3RlcEIKukgHggEEEAEgABIPCgdhdHRlbXB0GAIgASgNIkwKF0Rlc2t0b3BTdWJzY3JpcHRpb25MaXZlEjEKBXNpbmNlGAEgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEIGukgDyAEBInYKGERlc2t0b3BTdWJzY3JpcHRpb25TdGFsZRJJCgZyZWFzb24YASABKA4yLS52aWJlc3lzLmRlc2t0b3AudjEuRGVza3RvcFN1YnNjcmlwdGlvblJlYXNvbkIKukgHggEEEAEgABIPCgdhdHRlbXB0GAIgASgNIngKGURlc2t0b3BTdWJzY3JpcHRpb25GYWlsZWQSSQoGcmVhc29uGAEgASgOMi0udmliZXN5cy5kZXNrdG9wLnYxLkRlc2t0b3BTdWJzY3JpcHRpb25SZWFzb25CCrpIB4IBBBABIAASEAoIcmV0cnlpbmcYAiABKAgisgIKGkRlc2t0b3BTdWJzY3JpcHRpb25Db250cm9sEkcKCmNvbm5lY3RpbmcYASABKAsyMS52aWJlc3lzLmRlc2t0b3AudjEuRGVza3RvcFN1YnNjcmlwdGlvbkNvbm5lY3RpbmdIABI7CgRsaXZlGAIgASgLMisudmliZXN5cy5kZXNrdG9wLnYxLkRlc2t0b3BTdWJzY3JpcHRpb25MaXZlSAASPQoFc3RhbGUYAyABKAsyLC52aWJlc3lzLmRlc2t0b3AudjEuRGVza3RvcFN1YnNjcmlwdGlvblN0YWxlSAASPwoGZmFpbGVkGAQgASgLMi0udmliZXN5cy5kZXNrdG9wLnYxLkRlc2t0b3BTdWJzY3JpcHRpb25GYWlsZWRIAEIOCgVzdGF0ZRIFukgCCAEiGgoYRGVza3RvcFN1YnNjcmlwdGlvbkJlZ2luIqQCChlEZXNrdG9wU3Vic2NyaXB0aW9uVXBkYXRlEkEKB2NvbnRyb2wYASABKAsyLi52aWJlc3lzLmRlc2t0b3AudjEuRGVza3RvcFN1YnNjcmlwdGlvbkNvbnRyb2xIABI9CgViZWdpbhgCIAEoCzIsLnZpYmVzeXMuZGVza3RvcC52MS5EZXNrdG9wU3Vic2NyaXB0aW9uQmVnaW5IABIrCgVlbnRyeRgDIAEoCzIaLnZpYmVzeXMuYXBpLnYxLlRvcGljRW50cnlIABIdCgdyZW1vdmVkGAQgASgJQgq6SAdyBRABKIABSAASKAoGc3luY2VkGAUgASgLMhYudmliZXN5cy5hcGkudjEuU3luY2VkSABCDwoGdXBkYXRlEgW6SAIIASqhAQoSRGVza3RvcENvbm5lY3RTdGVwEiQKIERFU0tUT1BfQ09OTkVDVF9TVEVQX1VOU1BFQ0lGSUVEEAASIAocREVTS1RPUF9DT05ORUNUX1NURVBfR0FURVdBWRABEiIKHkRFU0tUT1BfQ09OTkVDVF9TVEVQX0hBTkRTSEFLRRACEh8KG0RFU0tUT1BfQ09OTkVDVF9TVEVQX1NUUkVBTRADKq8EChlEZXNrdG9wU3Vic2NyaXB0aW9uUmVhc29uEisKJ0RFU0tUT1BfU1VCU0NSSVBUSU9OX1JFQVNPTl9VTlNQRUNJRklFRBAAEisKJ0RFU0tUT1BfU1VCU0NSSVBUSU9OX1JFQVNPTl9VTlJFQUNIQUJMRRABEiUKIURFU0tUT1BfU1VCU0NSSVBUSU9OX1JFQVNPTl9FTkRFRBACEiYKIkRFU0tUT1BfU1VCU0NSSVBUSU9OX1JFQVNPTl9TSUxFTlQQAxIoCiRERVNLVE9QX1NVQlNDUklQVElPTl9SRUFTT05fT1VUREFURUQQBBIuCipERVNLVE9QX1NVQlNDUklQVElPTl9SRUFTT05fTk9fRklSU1RfRlJBTUUQBRItCilERVNLVE9QX1NVQlNDUklQVElPTl9SRUFTT05fU09VUkNFX0ZBSUxFRBAGEjIKLkRFU0tUT1BfU1VCU0NSSVBUSU9OX1JFQVNPTl9SRVNPVVJDRV9FWEhBVVNURUQQBxIoCiRERVNLVE9QX1NVQlNDUklQVElPTl9SRUFTT05fSU5URVJOQUwQCBIrCidERVNLVE9QX1NVQlNDUklQVElPTl9SRUFTT05fVU5TVVBQT1JURUQQCRItCilERVNLVE9QX1NVQlNDUklQVElPTl9SRUFTT05fSU5WQUxJRF9GUkFNRRAKEiYKIkRFU0tUT1BfU1VCU0NSSVBUSU9OX1JFQVNPTl9DTE9TRUQQC0JFWkNnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9nYXRld2F5L2dlbi92aWJlc3lzL2Rlc2t0b3AvdjE7ZGVza3RvcHYxYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_api_v1_subscribe]);
+  fileDesc("CiV2aWJlc3lzL2Rlc2t0b3AvdjEvc3Vic2NyaXB0aW9uLnByb3RvEhJ2aWJlc3lzLmRlc2t0b3AudjEixQEKF0Rlc2t0b3BTdWJzY3JpYmVSZXF1ZXN0EkkKBGhvc3QYASABKAlCO7pIOHI2MjReKGxvY2FsfHNzaDpbQS1aYS16MC05Xy5AOl1bQS1aYS16MC05Xy5AOi1dezAsMjU0fSkkEjkKB3JlcXVlc3QYAiABKAsyIC52aWJlc3lzLmFwaS52MS5TdWJzY3JpYmVSZXF1ZXN0Qga6SAPIAQESHAoDa2V5GAMgASgJQgq6SAdyBRABKIABSACIAQFCBgoEX2tleSJgChNEZXNrdG9wUmV0cnlSZXF1ZXN0EkkKBGhvc3QYASABKAlCO7pIOHI2MjReKGxvY2FsfHNzaDpbQS1aYS16MC05Xy5AOl1bQS1aYS16MC05Xy5AOi1dezAsMjU0fSkkIqgBChpEZXNrdG9wU3Vic2NyaXB0aW9uUmVxdWVzdBI+CgdvYnNlcnZlGAEgASgLMisudmliZXN5cy5kZXNrdG9wLnYxLkRlc2t0b3BTdWJzY3JpYmVSZXF1ZXN0SAASOAoFcmV0cnkYAiABKAsyJy52aWJlc3lzLmRlc2t0b3AudjEuRGVza3RvcFJldHJ5UmVxdWVzdEgAQhAKB3JlcXVlc3QSBbpIAggBInIKHURlc2t0b3BTdWJzY3JpcHRpb25Db25uZWN0aW5nEkAKBHN0ZXAYASABKA4yJi52aWJlc3lzLmRlc2t0b3AudjEuRGVza3RvcENvbm5lY3RTdGVwQgq6SAeCAQQQASAAEg8KB2F0dGVtcHQYAiABKA0iTAoXRGVza3RvcFN1YnNjcmlwdGlvbkxpdmUSMQoFc2luY2UYASABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQga6SAPIAQEirAEKGERlc2t0b3BTdWJzY3JpcHRpb25TdGFsZRJJCgZyZWFzb24YASABKA4yLS52aWJlc3lzLmRlc2t0b3AudjEuRGVza3RvcFN1YnNjcmlwdGlvblJlYXNvbkIKukgHggEEEAEgABIPCgdhdHRlbXB0GAIgASgNEjQKCHZhbHVlX2F0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEIGukgDyAEBIngKGURlc2t0b3BTdWJzY3JpcHRpb25GYWlsZWQSSQoGcmVhc29uGAEgASgOMi0udmliZXN5cy5kZXNrdG9wLnYxLkRlc2t0b3BTdWJzY3JpcHRpb25SZWFzb25CCrpIB4IBBBABIAASEAoIcmV0cnlpbmcYAiABKAgisgIKGkRlc2t0b3BTdWJzY3JpcHRpb25Db250cm9sEkcKCmNvbm5lY3RpbmcYASABKAsyMS52aWJlc3lzLmRlc2t0b3AudjEuRGVza3RvcFN1YnNjcmlwdGlvbkNvbm5lY3RpbmdIABI7CgRsaXZlGAIgASgLMisudmliZXN5cy5kZXNrdG9wLnYxLkRlc2t0b3BTdWJzY3JpcHRpb25MaXZlSAASPQoFc3RhbGUYAyABKAsyLC52aWJlc3lzLmRlc2t0b3AudjEuRGVza3RvcFN1YnNjcmlwdGlvblN0YWxlSAASPwoGZmFpbGVkGAQgASgLMi0udmliZXN5cy5kZXNrdG9wLnYxLkRlc2t0b3BTdWJzY3JpcHRpb25GYWlsZWRIAEIOCgVzdGF0ZRIFukgCCAEiGgoYRGVza3RvcFN1YnNjcmlwdGlvbkJlZ2luIqQCChlEZXNrdG9wU3Vic2NyaXB0aW9uVXBkYXRlEkEKB2NvbnRyb2wYASABKAsyLi52aWJlc3lzLmRlc2t0b3AudjEuRGVza3RvcFN1YnNjcmlwdGlvbkNvbnRyb2xIABI9CgViZWdpbhgCIAEoCzIsLnZpYmVzeXMuZGVza3RvcC52MS5EZXNrdG9wU3Vic2NyaXB0aW9uQmVnaW5IABIrCgVlbnRyeRgDIAEoCzIaLnZpYmVzeXMuYXBpLnYxLlRvcGljRW50cnlIABIdCgdyZW1vdmVkGAQgASgJQgq6SAdyBRABKIABSAASKAoGc3luY2VkGAUgASgLMhYudmliZXN5cy5hcGkudjEuU3luY2VkSABCDwoGdXBkYXRlEgW6SAIIASqhAQoSRGVza3RvcENvbm5lY3RTdGVwEiQKIERFU0tUT1BfQ09OTkVDVF9TVEVQX1VOU1BFQ0lGSUVEEAASIAocREVTS1RPUF9DT05ORUNUX1NURVBfR0FURVdBWRABEiIKHkRFU0tUT1BfQ09OTkVDVF9TVEVQX0hBTkRTSEFLRRACEh8KG0RFU0tUT1BfQ09OTkVDVF9TVEVQX1NUUkVBTRADKq8EChlEZXNrdG9wU3Vic2NyaXB0aW9uUmVhc29uEisKJ0RFU0tUT1BfU1VCU0NSSVBUSU9OX1JFQVNPTl9VTlNQRUNJRklFRBAAEisKJ0RFU0tUT1BfU1VCU0NSSVBUSU9OX1JFQVNPTl9VTlJFQUNIQUJMRRABEiUKIURFU0tUT1BfU1VCU0NSSVBUSU9OX1JFQVNPTl9FTkRFRBACEiYKIkRFU0tUT1BfU1VCU0NSSVBUSU9OX1JFQVNPTl9TSUxFTlQQAxIoCiRERVNLVE9QX1NVQlNDUklQVElPTl9SRUFTT05fT1VUREFURUQQBBIuCipERVNLVE9QX1NVQlNDUklQVElPTl9SRUFTT05fTk9fRklSU1RfRlJBTUUQBRItCilERVNLVE9QX1NVQlNDUklQVElPTl9SRUFTT05fU09VUkNFX0ZBSUxFRBAGEjIKLkRFU0tUT1BfU1VCU0NSSVBUSU9OX1JFQVNPTl9SRVNPVVJDRV9FWEhBVVNURUQQBxIoCiRERVNLVE9QX1NVQlNDUklQVElPTl9SRUFTT05fSU5URVJOQUwQCBIrCidERVNLVE9QX1NVQlNDUklQVElPTl9SRUFTT05fVU5TVVBQT1JURUQQCRItCilERVNLVE9QX1NVQlNDUklQVElPTl9SRUFTT05fSU5WQUxJRF9GUkFNRRAKEiYKIkRFU0tUT1BfU1VCU0NSSVBUSU9OX1JFQVNPTl9DTE9TRUQQC0JFWkNnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9nYXRld2F5L2dlbi92aWJlc3lzL2Rlc2t0b3AvdjE7ZGVza3RvcHYxYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_api_v1_subscribe]);
 
 /**
  * A window asks Electron's main process to watch one topic of one host. Main
@@ -51,6 +51,57 @@ export const DesktopSubscribeRequestSchema: GenMessage<DesktopSubscribeRequest> 
   messageDesc(file_vibesys_desktop_v1_subscription, 0);
 
 /**
+ * A window asks main to try a host's waiting or stopped subscriptions again now.
+ * Main answers nothing and ends the port; a stream that is delivering is left be.
+ *
+ * @generated from message vibesys.desktop.v1.DesktopRetryRequest
+ */
+export type DesktopRetryRequest = Message<"vibesys.desktop.v1.DesktopRetryRequest"> & {
+  /**
+   * @generated from field: string host = 1;
+   */
+  host: string;
+};
+
+/**
+ * Describes the message vibesys.desktop.v1.DesktopRetryRequest.
+ * Use `create(DesktopRetryRequestSchema)` to create a new message.
+ */
+export const DesktopRetryRequestSchema: GenMessage<DesktopRetryRequest> = /*@__PURE__*/
+  messageDesc(file_vibesys_desktop_v1_subscription, 1);
+
+/**
+ * Everything a window can ask of the subscription port, one request per port.
+ *
+ * @generated from message vibesys.desktop.v1.DesktopSubscriptionRequest
+ */
+export type DesktopSubscriptionRequest = Message<"vibesys.desktop.v1.DesktopSubscriptionRequest"> & {
+  /**
+   * @generated from oneof vibesys.desktop.v1.DesktopSubscriptionRequest.request
+   */
+  request: {
+    /**
+     * @generated from field: vibesys.desktop.v1.DesktopSubscribeRequest observe = 1;
+     */
+    value: DesktopSubscribeRequest;
+    case: "observe";
+  } | {
+    /**
+     * @generated from field: vibesys.desktop.v1.DesktopRetryRequest retry = 2;
+     */
+    value: DesktopRetryRequest;
+    case: "retry";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message vibesys.desktop.v1.DesktopSubscriptionRequest.
+ * Use `create(DesktopSubscriptionRequestSchema)` to create a new message.
+ */
+export const DesktopSubscriptionRequestSchema: GenMessage<DesktopSubscriptionRequest> = /*@__PURE__*/
+  messageDesc(file_vibesys_desktop_v1_subscription, 2);
+
+/**
  * @generated from message vibesys.desktop.v1.DesktopSubscriptionConnecting
  */
 export type DesktopSubscriptionConnecting = Message<"vibesys.desktop.v1.DesktopSubscriptionConnecting"> & {
@@ -70,7 +121,7 @@ export type DesktopSubscriptionConnecting = Message<"vibesys.desktop.v1.DesktopS
  * Use `create(DesktopSubscriptionConnectingSchema)` to create a new message.
  */
 export const DesktopSubscriptionConnectingSchema: GenMessage<DesktopSubscriptionConnecting> = /*@__PURE__*/
-  messageDesc(file_vibesys_desktop_v1_subscription, 1);
+  messageDesc(file_vibesys_desktop_v1_subscription, 3);
 
 /**
  * @generated from message vibesys.desktop.v1.DesktopSubscriptionLive
@@ -89,7 +140,7 @@ export type DesktopSubscriptionLive = Message<"vibesys.desktop.v1.DesktopSubscri
  * Use `create(DesktopSubscriptionLiveSchema)` to create a new message.
  */
 export const DesktopSubscriptionLiveSchema: GenMessage<DesktopSubscriptionLive> = /*@__PURE__*/
-  messageDesc(file_vibesys_desktop_v1_subscription, 2);
+  messageDesc(file_vibesys_desktop_v1_subscription, 4);
 
 /**
  * @generated from message vibesys.desktop.v1.DesktopSubscriptionStale
@@ -104,6 +155,13 @@ export type DesktopSubscriptionStale = Message<"vibesys.desktop.v1.DesktopSubscr
    * @generated from field: uint32 attempt = 2;
    */
   attempt: number;
+
+  /**
+   * When main last received a value; display only, for the age of what is shown.
+   *
+   * @generated from field: google.protobuf.Timestamp value_at = 3;
+   */
+  valueAt?: Timestamp | undefined;
 };
 
 /**
@@ -111,7 +169,7 @@ export type DesktopSubscriptionStale = Message<"vibesys.desktop.v1.DesktopSubscr
  * Use `create(DesktopSubscriptionStaleSchema)` to create a new message.
  */
 export const DesktopSubscriptionStaleSchema: GenMessage<DesktopSubscriptionStale> = /*@__PURE__*/
-  messageDesc(file_vibesys_desktop_v1_subscription, 3);
+  messageDesc(file_vibesys_desktop_v1_subscription, 5);
 
 /**
  * @generated from message vibesys.desktop.v1.DesktopSubscriptionFailed
@@ -135,7 +193,7 @@ export type DesktopSubscriptionFailed = Message<"vibesys.desktop.v1.DesktopSubsc
  * Use `create(DesktopSubscriptionFailedSchema)` to create a new message.
  */
 export const DesktopSubscriptionFailedSchema: GenMessage<DesktopSubscriptionFailed> = /*@__PURE__*/
-  messageDesc(file_vibesys_desktop_v1_subscription, 4);
+  messageDesc(file_vibesys_desktop_v1_subscription, 6);
 
 /**
  * Main's control state for one subscription, sent whenever it changes.
@@ -178,7 +236,7 @@ export type DesktopSubscriptionControl = Message<"vibesys.desktop.v1.DesktopSubs
  * Use `create(DesktopSubscriptionControlSchema)` to create a new message.
  */
 export const DesktopSubscriptionControlSchema: GenMessage<DesktopSubscriptionControl> = /*@__PURE__*/
-  messageDesc(file_vibesys_desktop_v1_subscription, 5);
+  messageDesc(file_vibesys_desktop_v1_subscription, 7);
 
 /**
  * A new stream's entries follow. The window starts a fresh snapshot and keeps the
@@ -194,7 +252,7 @@ export type DesktopSubscriptionBegin = Message<"vibesys.desktop.v1.DesktopSubscr
  * Use `create(DesktopSubscriptionBeginSchema)` to create a new message.
  */
 export const DesktopSubscriptionBeginSchema: GenMessage<DesktopSubscriptionBegin> = /*@__PURE__*/
-  messageDesc(file_vibesys_desktop_v1_subscription, 6);
+  messageDesc(file_vibesys_desktop_v1_subscription, 8);
 
 /**
  * What a window folds. Entries and removals until synced are one snapshot; later
@@ -244,7 +302,7 @@ export type DesktopSubscriptionUpdate = Message<"vibesys.desktop.v1.DesktopSubsc
  * Use `create(DesktopSubscriptionUpdateSchema)` to create a new message.
  */
 export const DesktopSubscriptionUpdateSchema: GenMessage<DesktopSubscriptionUpdate> = /*@__PURE__*/
-  messageDesc(file_vibesys_desktop_v1_subscription, 7);
+  messageDesc(file_vibesys_desktop_v1_subscription, 9);
 
 /**
  * How far a stream has come toward its first frame.

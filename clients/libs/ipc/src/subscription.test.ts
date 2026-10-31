@@ -3,8 +3,10 @@ import {create, toBinary} from '@bufbuild/protobuf';
 import {timestampFromMs} from '@bufbuild/protobuf/wkt';
 import {
   DesktopConnectStep,
+  DesktopRetryRequestSchema,
   DesktopSubscribeRequestSchema,
   DesktopSubscriptionReason,
+  DesktopSubscriptionRequestSchema,
   MachineStatsSchema,
   TopicEntrySchema,
 } from '@vibesys/proto';
@@ -20,9 +22,9 @@ import fc from 'fast-check';
 import {gatewayEnd, gatewayReply} from './gateway.js';
 import {
   decodeUpdate,
-  encodeSubscribeCall,
+  encodeSubscriptionCall,
   encodeUpdate,
-  parseSubscribeCall,
+  parseSubscriptionCall,
   subscriptionBridge,
 } from './subscription.js';
 
@@ -35,6 +37,7 @@ const CONTROL: fc.Arbitrary<Control> = fc.oneof(
     kind: fc.constant('stale' as const),
     reason: fc.constantFrom(...RETRYABLE_REASONS),
     attempt: ATTEMPT,
+    valueAt: fc.integer({min: 0, max: 4e12}),
   }),
   fc.record({
     kind: fc.constant('failed' as const),
@@ -92,6 +95,7 @@ test('the closed sets are the generated enums, one for one', () => {
     kind: 'stale',
     reason,
     attempt: 1,
+    valueAt: 1,
   });
   // Every reason survives the wire, and every enum value stands for exactly one reason.
   const seen = new Set<string>();
@@ -126,31 +130,61 @@ test('an update with no case, a missing state or a bad value is refused by name'
   expect(() => decodeUpdate(new Uint8Array([0x0a, 0x00]))).toThrow();
   const stale = encodeUpdate({
     kind: 'control',
-    control: {kind: 'stale', reason: 'silent', attempt: 1},
+    control: {kind: 'stale', reason: 'silent', attempt: 1, valueAt: 1},
   });
   expect(() => decodeUpdate(new Uint8Array([...stale, 0xf8, 0x01, 1]))).toThrow();
 });
 
 test('a request names a host, a known topic and optionally a key, and nothing more', () => {
-  const call = {host: 'ssh:host-a', request: machineStats.request, key: 'machine'} as const;
-  const parsed = parseSubscribeCall(encodeSubscribeCall(call));
+  const call = {
+    kind: 'observe',
+    host: 'ssh:host-a',
+    request: machineStats.request,
+    key: 'machine',
+  } as const;
+  const parsed = parseSubscriptionCall(encodeSubscriptionCall(call));
+  if (parsed.kind !== 'observe') throw new Error('not an observation');
   expect(parsed.host).toBe('ssh:host-a');
   expect(parsed.key).toBe('machine');
   expect(parsed.request.topic.case).toBe('machineStats');
-  expect(parseSubscribeCall(encodeSubscribeCall({...call, key: undefined})).key).toBeUndefined();
-  expect(() => parseSubscribeCall({})).toThrow('protobuf bytes');
+  const keyless = parseSubscriptionCall(encodeSubscriptionCall({...call, key: undefined}));
+  expect(keyless.kind === 'observe' && keyless.key).toBeUndefined();
+  expect(() => parseSubscriptionCall({})).toThrow('protobuf bytes');
   const without = toBinary(
-    DesktopSubscribeRequestSchema,
-    create(DesktopSubscribeRequestSchema, {host: 'local'}),
+    DesktopSubscriptionRequestSchema,
+    create(DesktopSubscriptionRequestSchema, {
+      request: {
+        case: 'observe',
+        value: create(DesktopSubscribeRequestSchema, {host: 'local'}),
+      },
+    }),
   );
-  expect(() => parseSubscribeCall(without)).toThrow();
+  expect(() => parseSubscriptionCall(without)).toThrow();
   for (const host of ['', '-oProxyCommand=x', 'ssh:']) {
-    expect(() => encodeSubscribeCall({...call, host: host as never})).toThrow();
+    expect(() => encodeSubscriptionCall({...call, host: host as never})).toThrow();
   }
   expect(() =>
-    parseSubscribeCall(new Uint8Array([...encodeSubscribeCall(call), 0xf8, 0x01, 1])),
+    parseSubscriptionCall(new Uint8Array([...encodeSubscriptionCall(call), 0xf8, 0x01, 1])),
   ).toThrow();
-  expect(() => encodeSubscribeCall({...call, key: ''})).toThrow();
+  expect(() => encodeSubscriptionCall({...call, key: ''})).toThrow();
+});
+
+test('a retry names one host and nothing else; the port refuses every other request', () => {
+  const retry = encodeSubscriptionCall({kind: 'retry', host: 'ssh:host-a'});
+  expect(parseSubscriptionCall(retry)).toEqual({kind: 'retry', host: 'ssh:host-a'});
+  for (const host of ['', '-oProxyCommand=x', 'ssh:', 'ssh:a b']) {
+    expect(() => encodeSubscriptionCall({kind: 'retry', host: host as never})).toThrow();
+  }
+  expect(() => parseSubscriptionCall(new Uint8Array([...retry, 0xf8, 0x01, 1]))).toThrow();
+  // A request that holds no case, and a retry whose host is not a host, never reach the hub.
+  expect(() => parseSubscriptionCall(new Uint8Array())).toThrow();
+  const hostless = toBinary(
+    DesktopSubscriptionRequestSchema,
+    create(DesktopSubscriptionRequestSchema, {
+      request: {case: 'retry', value: create(DesktopRetryRequestSchema, {host: 'x y'})},
+    }),
+  );
+  expect(() => parseSubscriptionCall(hostless)).toThrow();
 });
 
 class Ports {
@@ -184,7 +218,10 @@ test('the bridge opens one port per observation, decodes what arrives and retire
   );
   const [open] = ports.calls;
   if (open === undefined) throw new Error('no port');
-  expect(parseSubscribeCall(open.request).host).toBe('ssh:host-a');
+  expect(parseSubscriptionCall(open.request)).toMatchObject({
+    kind: 'observe',
+    host: 'ssh:host-a',
+  });
   open.reply(gatewayReply(encodeUpdate({kind: 'begin'})));
   open.reply(gatewayReply(encodeUpdate({kind: 'control', control: {kind: 'live', since: 5}})));
   expect(heard.map(update => update.kind)).toEqual(['begin', 'control']);
@@ -225,4 +262,29 @@ test('a cancelled, malformed or undeliverable port ends the observation once and
     expect(ends).toHaveLength(outcome === 'cancel' ? 0 : 1);
     if (remote !== undefined) expect(remote.cancelled).toBe(1);
   }
+});
+
+test('retry opens a port that carries the retry and nothing else, and retires it when main ends it', () => {
+  const ports = new Ports();
+  subscriptionBridge(ports).retry('ssh:host-a');
+  const [open] = ports.calls;
+  if (open === undefined) throw new Error('no port');
+  expect(parseSubscriptionCall(open.request)).toEqual({kind: 'retry', host: 'ssh:host-a'});
+  expect(open.cancelled).toBe(0);
+  open.reply(gatewayEnd());
+  expect(open.cancelled).toBe(1);
+});
+
+test('a retry the window cannot make is dropped, and a port that fails retires itself', () => {
+  expect(() =>
+    subscriptionBridge({
+      open: () => {
+        throw new Error('cannot open');
+      },
+    }).retry('local'),
+  ).not.toThrow();
+  const ports = new Ports();
+  subscriptionBridge(ports).retry('local');
+  ports.calls[0]?.fail('delivery failed');
+  expect(ports.calls[0]?.cancelled).toBe(1);
 });

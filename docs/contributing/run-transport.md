@@ -296,6 +296,14 @@ and never through the generic gateway port, which refuses `Subscribe`. A lost se
 `Subscribe` stream instead of re-issuing it, because a second stream in one call would deliver a
 second snapshot into state the caller already holds; the subscription's machine opens the next one.
 
+A window asks main for two things on the subscription port, each one validated request on its own
+port: observe a topic of a host, and retry a host, which main hears as `Subscriptions.retry` and
+answers by ending the port. A value is old when the topic's `stale_after_ms` passes with no new
+one, and the machine bounds that with a timer like every other wait, so a wall clock that steps
+cannot stretch it. A stale state carries when its value arrived, so a screen shows the value dimmed
+with its age. A stream outlives its last observer by a few seconds, so a screen that is left and
+opened again finds its stream running instead of dialing the host again.
+
 ## Versions and upgrades
 
 Two version domains, with different rules.

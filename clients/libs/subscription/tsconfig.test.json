@@ -26,6 +26,9 @@
     },
     {
       "path": "../transport/tsconfig.testing.json"
+    },
+    {
+      "path": "./tsconfig.contract.json"
     }
   ]
 }

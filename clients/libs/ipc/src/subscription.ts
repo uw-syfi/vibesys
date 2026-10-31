@@ -10,9 +10,11 @@ import {TimestampSchema, timestampFromMs, timestampMs} from '@bufbuild/protobuf/
 import {type HostKey, hostFromKey} from '@vibesys/hosts';
 import {
   DesktopConnectStep,
+  DesktopRetryRequestSchema,
   DesktopSubscribeRequestSchema,
   type DesktopSubscriptionControl,
   DesktopSubscriptionReason,
+  DesktopSubscriptionRequestSchema,
   DesktopSubscriptionUpdateSchema,
   type SubscribeRequest,
   validatedExactFromBinary,
@@ -99,7 +101,11 @@ function controlInit(control: Control): Init {
           value: {
             state: {
               case: 'stale',
-              value: {reason: REASONS[control.reason], attempt: control.attempt},
+              value: {
+                reason: REASONS[control.reason],
+                attempt: control.attempt,
+                valueAt: timestampFromMs(control.valueAt),
+              },
             },
           },
         },
@@ -159,6 +165,7 @@ function controlOf(state: DesktopSubscriptionControl['state']): Control {
         kind: 'stale',
         reason: staleReason(named(REASON_OF, state.value.reason, 'reason')),
         attempt: state.value.attempt,
+        valueAt: timestampMs(state.value.valueAt ?? create(TimestampSchema)),
       };
     case 'failed':
       return {
@@ -190,34 +197,61 @@ export function decodeUpdate(bytes: Uint8Array): SubscriptionUpdate {
   }
 }
 
-/** A window's request: which topic of which host, and optionally one key of it. */
-export interface SubscribeCall {
-  readonly host: HostKey;
-  readonly request: SubscribeRequest;
-  readonly key: string | undefined;
-}
+/**
+ * What a window can ask of the port, one request per port: observe a topic of a host (and
+ * optionally one key of it), or ask the host's waiting subscriptions to try again now.
+ */
+export type SubscriptionCall =
+  | {
+      readonly kind: 'observe';
+      readonly host: HostKey;
+      readonly request: SubscribeRequest;
+      readonly key: string | undefined;
+    }
+  | {readonly kind: 'retry'; readonly host: HostKey};
 
-export function encodeSubscribeCall(call: SubscribeCall): Uint8Array {
+export function encodeSubscriptionCall(call: SubscriptionCall): Uint8Array {
   hostFromKey(call.host);
   const bytes = toBinary(
-    DesktopSubscribeRequestSchema,
-    create(DesktopSubscribeRequestSchema, {
-      host: call.host,
-      request: call.request,
-      ...(call.key === undefined ? {} : {key: call.key}),
+    DesktopSubscriptionRequestSchema,
+    create(DesktopSubscriptionRequestSchema, {
+      request:
+        call.kind === 'retry'
+          ? {case: 'retry', value: create(DesktopRetryRequestSchema, {host: call.host})}
+          : {
+              case: 'observe',
+              value: create(DesktopSubscribeRequestSchema, {
+                host: call.host,
+                request: call.request,
+                ...(call.key === undefined ? {} : {key: call.key}),
+              }),
+            },
     }),
   );
-  validatedExactFromBinary(DesktopSubscribeRequestSchema, bytes);
+  validatedExactFromBinary(DesktopSubscriptionRequestSchema, bytes);
   return bytes;
 }
 
 /** Main's side: a renderer's request, validated and with no field this build does not know. */
-export function parseSubscribeCall(value: unknown): SubscribeCall {
+export function parseSubscriptionCall(value: unknown): SubscriptionCall {
   if (!(value instanceof Uint8Array))
     throw new Error('subscription request must be protobuf bytes');
-  const message = validatedExactFromBinary(DesktopSubscribeRequestSchema, value);
-  if (message.request === undefined) throw new Error('subscription request names no topic');
-  return {host: message.host, request: message.request, key: message.key};
+  const {request} = validatedExactFromBinary(DesktopSubscriptionRequestSchema, value);
+  switch (request.case) {
+    case 'retry':
+      return {kind: 'retry', host: request.value.host};
+    case 'observe':
+      if (request.value.request === undefined)
+        throw new Error('subscription request names no topic');
+      return {
+        kind: 'observe',
+        host: request.value.host,
+        request: request.value.request,
+        key: request.value.key,
+      };
+    default:
+      throw new Error('subscription request holds no case');
+  }
 }
 
 /**
@@ -246,7 +280,11 @@ export function subscriptionBridge(ports: GatewayPortBridge): SubscriptionPort {
         }
       };
       try {
-        port = ports.open(encodeSubscribeCall({host, request, key}), deliver, finish);
+        port = ports.open(
+          encodeSubscriptionCall({kind: 'observe', host, request, key}),
+          deliver,
+          finish,
+        );
         if (done) port.cancel();
       } catch (error) {
         finish(String(error));
@@ -258,6 +296,22 @@ export function subscriptionBridge(ports: GatewayPortBridge): SubscriptionPort {
           port?.cancel();
         },
       };
+    },
+    retry(host) {
+      // Main's one reply is its end, which closes the port; a request main cannot be given leaves
+      // the retry to main's own schedule, so a failure here has nothing to report.
+      let port: {cancel(): void} | undefined;
+      let done = false;
+      const finish = (): void => {
+        done = true;
+        port?.cancel();
+      };
+      try {
+        port = ports.open(encodeSubscriptionCall({kind: 'retry', host}), finish, finish);
+        if (done) port.cancel();
+      } catch {
+        finish();
+      }
     },
   };
 }

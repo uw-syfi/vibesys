@@ -23,6 +23,7 @@ import type {JSX} from 'react';
 import {
   cardAction,
   cardStatus,
+  type HostLive,
   type Machine,
   type MachinesAction,
   type MachinesState,
@@ -32,14 +33,22 @@ import {
   placeRows,
   placesReading,
 } from '../../state/index.js';
+import {MachineStats} from './machine-stats.js';
 import {AddMachine} from './machines-screen.js';
 
 type Dispatch = (action: MachinesAction) => void;
 
+/** Draws what `render` makes of a host's live stats: the slot that reaches the effects. */
+export type LiveSlot = (host: HostKey, render: (live: HostLive) => JSX.Element) => JSX.Element;
+
 const CHECKING = 'Checking';
 
-function Busy(props: {readonly machine: Machine}): JSX.Element | null {
-  const load = machineLoad(props.machine);
+function Busy(props: {
+  readonly machine: Machine;
+  /** The runs live on the machine now, or null while its run list is not read. */
+  readonly live: number | null;
+}): JSX.Element | null {
+  const load = machineLoad(props.machine, props.live);
   if (load === null) return null;
   return (
     <Row gap="space-2">
@@ -141,49 +150,104 @@ function Fix(props: {
   );
 }
 
+/**
+ * The press that asks a host for readings again: the machine's own fix (Reconnect, Sign in) is the
+ * one press while its connection is the problem, and otherwise a host that cannot give readings
+ * offers Retry.
+ */
+function retryOf(machine: Machine, live: HostLive | null): (() => void) | null {
+  if (live === null || cardAction(machine) !== null) return null;
+  return live.view.kind === 'failed' && live.view.retry ? live.retry : null;
+}
+
+function CardHeader(props: {
+  readonly state: MachinesState;
+  readonly machine: Machine;
+  readonly dispatch: Dispatch;
+  readonly live: HostLive | null;
+  readonly openSettings: (host: HostKey) => void;
+}): JSX.Element {
+  const {state, machine, dispatch} = props;
+  const status = cardStatus(machine, props.live?.view ?? null);
+  const retry = retryOf(machine, props.live);
+  return (
+    <Row gap="space-3" wrap>
+      <Stack grow>
+        <Text as="h2" variant="heading">
+          {machine.label}
+        </Text>
+      </Stack>
+      <Chip dot label={status.word} tone={status.tone} />
+      <Fix state={state} machine={machine} dispatch={dispatch} />
+      {retry === null ? null : (
+        <Button size="sm" text="Retry" label={`Retry ${machine.label}`} press={retry} />
+      )}
+      <Button size="sm" text="Settings" press={() => props.openSettings(machine.host)} />
+    </Row>
+  );
+}
+
+function CardFacts(props: {
+  readonly machine: Machine;
+  readonly liveRuns: number | null;
+  readonly runs: number;
+  readonly incomplete: boolean;
+  readonly showRuns: (host: HostKey) => void;
+}): JSX.Element | null {
+  const {machine, runs} = props;
+  const hardware = machineHardware(machine);
+  if (hardware === null && runs === 0 && !props.incomplete) return null;
+  return (
+    <Row gap="space-5" wrap>
+      {hardware === null ? null : <Text>{hardware}</Text>}
+      <Busy machine={machine} live={props.liveRuns} />
+      {runs === 0 && !props.incomplete ? null : (
+        <Button
+          variant="quiet"
+          size="sm"
+          text={`${runs === 1 ? '1 run' : `${runs} runs`}${props.incomplete ? ' (incomplete)' : ''}`}
+          press={() => props.showRuns(machine.host)}
+        />
+      )}
+    </Row>
+  );
+}
+
 function MachineCard(props: {
   readonly state: MachinesState;
   readonly machine: Machine;
   readonly dispatch: Dispatch;
+  readonly live: LiveSlot | undefined;
+  readonly liveRuns: number | null;
   readonly runs: number;
   readonly incomplete: boolean;
   readonly showRuns: (host: HostKey) => void;
   readonly openSettings: (host: HostKey) => void;
 }): JSX.Element {
-  const {state, machine, dispatch, runs} = props;
-  const status = cardStatus(machine);
-  const hardware = machineHardware(machine);
-  return (
+  const {state, machine, dispatch} = props;
+  const card = (live: HostLive | null): JSX.Element => (
     <Card>
       <Stack gap="space-4">
-        <Row gap="space-3" wrap>
-          <Stack grow>
-            <Text as="h2" variant="heading">
-              {machine.label}
-            </Text>
-          </Stack>
-          <Chip dot label={status.word} tone={status.tone} />
-          <Fix state={state} machine={machine} dispatch={dispatch} />
-          <Button size="sm" text="Settings" press={() => props.openSettings(machine.host)} />
-        </Row>
-        {hardware === null && runs === 0 && !props.incomplete ? null : (
-          <Row gap="space-5" wrap>
-            {hardware === null ? null : <Text>{hardware}</Text>}
-            <Busy machine={machine} />
-            {runs === 0 && !props.incomplete ? null : (
-              <Button
-                variant="quiet"
-                size="sm"
-                text={`${runs === 1 ? '1 run' : `${runs} runs`}${props.incomplete ? ' (incomplete)' : ''}`}
-                press={() => props.showRuns(machine.host)}
-              />
-            )}
-          </Row>
-        )}
+        <CardHeader
+          state={state}
+          machine={machine}
+          dispatch={dispatch}
+          live={live}
+          openSettings={props.openSettings}
+        />
+        <CardFacts
+          machine={machine}
+          liveRuns={props.liveRuns}
+          runs={props.runs}
+          incomplete={props.incomplete}
+          showRuns={props.showRuns}
+        />
+        {live === null ? null : <MachineStats live={live} />}
         <Places state={state} machine={machine} dispatch={dispatch} />
       </Stack>
     </Card>
   );
+  return props.live === undefined ? card(null) : props.live(machine.host, card);
 }
 
 /**
@@ -194,6 +258,10 @@ export function MachinesPage(props: {
   readonly state: MachinesState;
   readonly dispatch: Dispatch;
   readonly runCounts: ReadonlyMap<HostKey, number>;
+  /** The runs live on each machine whose run list is read. */
+  readonly liveRuns: ReadonlyMap<HostKey, number>;
+  /** A machine's live stats, handed to its card to draw; without it the cards show none. */
+  readonly live?: LiveSlot;
   readonly incompleteHosts?: ReadonlySet<HostKey>;
   readonly showRuns: (host: HostKey) => void;
   readonly openSettings: (host: HostKey) => void;
@@ -218,6 +286,8 @@ export function MachinesPage(props: {
             state={state}
             machine={machine}
             dispatch={dispatch}
+            live={props.live}
+            liveRuns={props.liveRuns.get(machine.host) ?? null}
             runs={props.runCounts.get(machine.host) ?? 0}
             incomplete={props.incompleteHosts?.has(machine.host) ?? false}
             showRuns={props.showRuns}

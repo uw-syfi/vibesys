@@ -77,7 +77,7 @@ test('every frame renews the lease, and silence past it makes the value stale', 
   harness.clock.advanceBy(LEASE - 1);
   expect(harness.control.kind).toBe('live');
   harness.clock.advanceBy(1);
-  expect(harness.control).toEqual({kind: 'stale', reason: 'silent', attempt: 1});
+  expect(harness.control).toEqual({kind: 'stale', reason: 'silent', attempt: 1, valueAt: 0});
   expect(harness.open).toHaveLength(0);
 });
 
@@ -93,14 +93,57 @@ test('heartbeats do not keep a sampled value fresh', async () => {
     }
   };
   beatsFor(age - BEAT);
+  const valueAt = harness.clock.now();
   harness.latest.entry(statsEntry('machine', 1));
   // A value inside the bound keeps it fresh, however long ago the snapshot was.
-  beatsFor(age);
+  beatsFor(age - BEAT);
   expect(harness.control.kind).toBe('live');
-  // Beats alone cannot: the first one past the bound says the value is old.
+  // Beats alone cannot: the value is old at the bound, and says so then, with when it arrived.
   beatsFor(BEAT);
-  expect(harness.control).toEqual({kind: 'stale', reason: 'outdated', attempt: 1});
+  expect(harness.control).toEqual({kind: 'stale', reason: 'outdated', attempt: 1, valueAt});
   expect(harness.open).toHaveLength(0);
+});
+
+test('the value bound is a timer: a wall clock that steps back cannot stretch it', async () => {
+  const harness = new Harness();
+  await live(harness);
+  const age = harness.topic.policy.staleAfterMs;
+  // Frames stamped by a clock that went back a day: the stamps are display, not a deadline.
+  const back = harness.clock.now() - 24 * 60 * 60_000;
+  for (let at = BEAT; at < age; at += BEAT) {
+    harness.clock.advanceBy(BEAT);
+    harness.latest.send({type: 'beat', at: back});
+  }
+  expect(harness.control.kind).toBe('live');
+  harness.clock.advanceBy(BEAT);
+  expect(harness.control).toMatchObject({kind: 'stale', reason: 'outdated'});
+});
+
+test('a topic without a value bound is held by its lease alone', async () => {
+  const harness = new Harness(LEASE_ONLY);
+  await live(harness);
+  for (let beats = 0; beats < 100; beats += 1) {
+    harness.clock.advanceBy(BEAT);
+    harness.latest.beat();
+  }
+  expect(harness.control.kind).toBe('live');
+});
+
+test('data before the stream says it arrived is read, never dropped', async () => {
+  const harness = new Harness();
+  await settle();
+  // The order the gateway keeps is reached, then data; here the data comes first.
+  harness.latest.entry(statsEntry('machine', 1));
+  expect(harness.control).toEqual({kind: 'connecting', step: 'stream', attempt: 0});
+  harness.latest.synced();
+  expect(harness.control.kind).toBe('live');
+  expect(harness.updates.map(update => update.kind)).toEqual(['begin', 'entry', 'synced']);
+
+  // A snapshot that is only its end is read as one too, and a topic that allows none is live.
+  const empty = new Harness(LEASE_ONLY);
+  await settle();
+  empty.latest.synced();
+  expect(empty.control.kind).toBe('live');
 });
 
 test('a new stream keeps the old value until its snapshot, which replaces it whole', async () => {
@@ -108,7 +151,7 @@ test('a new stream keeps the old value until its snapshot, which replaces it who
   await live(harness, ['a', 'b']);
   harness.latest.fail();
   await settle();
-  expect(harness.control).toEqual({kind: 'stale', reason: 'ended', attempt: 1});
+  expect(harness.control).toEqual({kind: 'stale', reason: 'ended', attempt: 1, valueAt: 0});
   harness.clock.advanceBy(backoffMs(1));
   expect(harness.open).toHaveLength(1);
   harness.latest.reach('stream');
@@ -196,7 +239,7 @@ test('losses do not accumulate across recoveries: five in a row, not five over a
   harness.latest.fail();
   await settle();
   // One loss since it was last live, so it backs off one second, not eight.
-  expect(harness.control).toEqual({kind: 'stale', reason: 'ended', attempt: 1});
+  expect(harness.control).toMatchObject({kind: 'stale', reason: 'ended', attempt: 1});
   harness.clock.advanceBy(1_000);
   expect(harness.open).toHaveLength(1);
 });
@@ -229,7 +272,7 @@ test('a topic failure other than unsupported is retried like a lost stream', asy
     const harness = new Harness(LEASE_ONLY);
     await live(harness);
     harness.latest.send({type: 'refused', reason});
-    expect(harness.control).toEqual({kind: 'stale', reason, attempt: 1});
+    expect(harness.control).toMatchObject({kind: 'stale', reason, attempt: 1});
     harness.clock.advanceBy(backoffMs(1));
     expect(harness.open).toHaveLength(1);
   }
@@ -246,10 +289,47 @@ test('waking checks a live stream within a beat and retries a waiting one at onc
 
   harness.actor.send({type: 'wake'});
   harness.clock.advanceBy(BEAT + 2_000);
-  expect(harness.control).toEqual({kind: 'stale', reason: 'silent', attempt: 1});
+  expect(harness.control).toMatchObject({kind: 'stale', reason: 'silent', attempt: 1});
   harness.actor.send({type: 'wake'});
   expect(harness.open).toHaveLength(1);
   expect(harness.control).toMatchObject({kind: 'stale', attempt: 0});
+});
+
+test('a retry while a stream is already being opened forgets the losses and keeps that stream', async () => {
+  const harness = new Harness(LEASE_ONLY);
+  await live(harness);
+  for (let loss = 1; loss <= OFFLINE_AFTER; loss += 1) {
+    harness.latest.fail();
+    await settle();
+    if (loss < OFFLINE_AFTER) harness.clock.advanceBy(backoffMs(loss));
+  }
+  expect(harness.control).toMatchObject({kind: 'failed', retrying: true});
+  // The parked retry opens a stream, which is still being dialed: the host still reads as failed.
+  harness.clock.advanceBy(30_000);
+  expect(harness.open).toHaveLength(1);
+  expect(harness.control).toMatchObject({kind: 'failed', retrying: true});
+  const dialing = harness.latest;
+  harness.actor.send({type: 'retry'});
+  // The press is answered: connecting, with the value it had, on the same stream.
+  expect(harness.control).toMatchObject({kind: 'stale', attempt: 0});
+  expect(harness.open).toEqual([dialing]);
+  expect(harness.streams).toHaveLength(OFFLINE_AFTER + 1);
+  // A host that then does not answer fails again after the same number of losses.
+  for (let loss = 1; loss <= OFFLINE_AFTER; loss += 1) {
+    harness.latest.fail();
+    await settle();
+    if (loss < OFFLINE_AFTER) harness.clock.advanceBy(backoffMs(loss));
+  }
+  expect(harness.control).toMatchObject({kind: 'failed', retrying: true});
+  // A stream that delivers has no losses to forget, and a retry leaves it be.
+  harness.actor.send({type: 'retry'});
+  harness.clock.advanceBy(30_000);
+  harness.latest.snapshot([statsEntry('machine', harness.clock.now())]);
+  await settle();
+  const delivering = harness.open;
+  harness.actor.send({type: 'retry'});
+  expect(harness.open).toEqual(delivering);
+  expect(harness.control.kind).toBe('live');
 });
 
 test('closing is final: observers hear failed closed and nothing runs', async () => {

@@ -1,0 +1,31 @@
+{
+  "extends": "../../tools/tsconfig.base.json",
+  "compilerOptions": {
+    "lib": [
+      "ES2022"
+    ],
+    "types": [
+      "bun"
+    ],
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.contract.tsbuildinfo"
+  },
+  "include": [
+    "src/testing/port-contract.ts"
+  ],
+  "references": [
+    {
+      "path": "./tsconfig.lib.json"
+    },
+    {
+      "path": "./tsconfig.testing.json"
+    },
+    {
+      "path": "../hosts/tsconfig.lib.json"
+    },
+    {
+      "path": "../proto/tsconfig.lib.json"
+    }
+  ]
+}

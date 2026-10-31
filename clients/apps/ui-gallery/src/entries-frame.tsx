@@ -10,6 +10,7 @@ import {
   Gantt,
   type GanttRow,
   type GanttView,
+  Gauge,
   type Guide,
   LoadingBar,
   LogPane,
@@ -22,6 +23,7 @@ import {
   Panes,
   PickList,
   PickRow,
+  Readings,
   Reserve,
   Row,
   Said,
@@ -580,6 +582,34 @@ export const FRAME_ENTRIES = {
         <Meter label="Accent, 30% of the best" value={0.3} />
         <Meter label="Ok, 70% of the best" value={0.7} tone="ok" />
         <Meter label="Muted, all of it" value={1} tone="muted" />
+      </Stack>
+    ),
+  },
+  Gauge: {
+    render: () => (
+      <Stack>
+        <Row gap="space-5" wrap>
+          <Gauge label="CPU" share={0.34} figure="34%" figureWidth={5} />
+          <Gauge label="Memory" share={0.5} figure="18.0 / 36.0 GB" figureWidth={15} />
+          <Gauge label="GPU" share={0.95} figure="95%" figureWidth={5} tone="warn" />
+        </Row>
+        <Row gap="space-5" wrap>
+          <Gauge label="CPU" share={0.34} figure="34%" figureWidth={5} dim note="stale 42 s" />
+          <Gauge label="GPU" share={null} figure="–" figureWidth={5} />
+        </Row>
+      </Stack>
+    ),
+  },
+  Readings: {
+    render: () => (
+      <Stack>
+        <Readings>
+          <Gauge label="CPU" share={0.34} figure="34%" figureWidth={5} />
+          <Text variant="small" tone="warn">
+            42 s ago
+          </Text>
+        </Readings>
+        <Readings />
       </Stack>
     ),
   },
