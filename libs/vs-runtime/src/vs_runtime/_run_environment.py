@@ -746,8 +746,8 @@ class HostEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
         launcher gives it the mark twice, in its environment and as an argument of its leader,
         as a stage command gets it, so one reaper serves both on Linux and on macOS.
         """
-        del blocking, local_namespace, log
-        return ProcessStageWorkReaper(system.process_table, run_id)
+        del local_namespace, log
+        return ProcessStageWorkReaper(system.process_table, run_id, blocking)
 
     def locate_tool(self, executable: str, site: ToolSite) -> ToolLocation:
         """Find *executable* on the host's ``PATH``: the agent and its workload both run there."""

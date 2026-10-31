@@ -33,7 +33,7 @@ from vs_sandbox.api.skypilot import (
     deterministic_job_name,
 )
 from vs_sandbox.api.testing import FakeSkyPilotCluster
-from vs_sim.api.testing import InlineBlockingRunner, VirtualClock, run_virtual
+from vs_sim.api.testing import GatedBlockingRunner, VirtualClock, run_virtual
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -66,8 +66,9 @@ class World:
         self.journal = InvocationJournal(Project.open(root).state.state_store_namespace("skypilot"))
         self.runner = SkyPilotJobRunner(self.cluster, executable="sky")
         self.agents = FakeStageWorkReaper()
+        self.blocking = GatedBlockingRunner()
         self.reaper = SkyPilotStepWorkReaper(
-            run_id, self.agents, self.journal, self.runner, InlineBlockingRunner()
+            run_id, self.agents, self.journal, self.runner, self.blocking
         )
         self._invocations = count(1)
 
@@ -143,6 +144,7 @@ class TestSkyPilotStepWorkReaper(StageWorkReaperContract):
             running_in_other_run=theirs.running,
             unreachable=cluster.unreachable,
             stuck=cluster.stuck,
+            blocking=mine.blocking,
         )
 
 

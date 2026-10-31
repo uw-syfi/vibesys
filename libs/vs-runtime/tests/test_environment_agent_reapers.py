@@ -44,6 +44,7 @@ from vs_sim.api.testing import (
     FakePipedProcessLauncher,
     FakeProcesses,
     FakeProcessTable,
+    GatedBlockingRunner,
     InlineBlockingRunner,
     ManualClock,
     ProcessScript,
@@ -101,8 +102,9 @@ class TestDockerAgentWorkReaper(StageWorkReaperContract):
             OTHER_RUN: _containers(engine, OTHER_RUN, 1),
         }
         processes = FakeAgentProcesses()
+        blocking = GatedBlockingRunner()
         reaper = DockerAgentWorkReaper(
-            RUN, engine, InlineBlockingRunner(), lambda _line: None, processes.reap_tagged
+            RUN, engine, blocking, lambda _line: None, processes.reap_tagged
         )
         placed = count()
 
@@ -123,6 +125,7 @@ class TestDockerAgentWorkReaper(StageWorkReaperContract):
             running_in_other_run=lambda tag: running(OTHER_RUN, tag),
             unreachable=processes.unreachable,
             stuck=processes.stuck,
+            blocking=blocking,
         )
 
 
@@ -131,10 +134,11 @@ class _HostAgents:
 
     def __init__(self, shows: Shows) -> None:
         self.table = FakeProcessTable(shows)
+        self.blocking = GatedBlockingRunner()
         self.reaper = HostEnvironment().agent_work_reaper(
             RUN,
             system=replace(idle_environment_system(), process_table=self.table),
-            blocking=InlineBlockingRunner(),
+            blocking=self.blocking,
             local_namespace=_no_namespace,
             log=lambda _line: None,
         )
@@ -158,6 +162,7 @@ class _HostAgents:
             running_in_other_run=lambda tag: self.running(OTHER_RUN, tag),
             unreachable=_flag(self.table, "unreadable"),
             stuck=_flag(self.table, "survivors"),
+            blocking=self.blocking,
         )
 
 

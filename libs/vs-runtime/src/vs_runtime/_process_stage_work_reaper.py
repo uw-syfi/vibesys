@@ -7,6 +7,10 @@ shows of that mark is the process table's (``vs_sim.process_table``); the reaper
 the table shows carrying a handle of the tag, in any life. Work the host cannot show (a
 ``setsid`` child on macOS, or the members of a group whose leader died first) is a named
 residual (``docs/contributing/run-recovery.md``).
+
+Listing the table and ending a process block (``ps``, the pidfd select, a bounded wait for the
+exit), so each runs through the ``BlockingRunner``: a reap that waits out survivors must not stop
+the loop's timers, the drain deadline or another step's flight.
 """
 
 from __future__ import annotations
@@ -21,7 +25,7 @@ from vs_sim.api import ProcessSurvivedError, ProcessTableUnavailableError
 
 if TYPE_CHECKING:
     from vs_core.api import RequestId
-    from vs_sim.api import MarkedProcess, ProcessTable
+    from vs_sim.api import BlockingRunner, MarkedProcess, ProcessTable
 
 _BACKEND = "the process table"
 _MAX_SWEEPS = 8
@@ -32,19 +36,23 @@ few means the work forks faster than it is ended."""
 class ProcessStageWorkReaper:
     """A ``StageWorkReaper`` over the host's process table."""
 
-    def __init__(self, processes: ProcessTable, run_id: str) -> None:
-        """Find and end the marked processes of run *run_id* through *processes*."""
+    def __init__(self, processes: ProcessTable, run_id: str, blocking: BlockingRunner) -> None:
+        """Find and end the marked processes of run *run_id* through *processes*.
+
+        *blocking* carries each listing and each kill off the event loop.
+        """
         self._processes = processes
         self._run_id = run_id
+        self._blocking = blocking
 
     async def reap(self, tag: RequestId) -> None:
         """End every process carrying a handle of *tag*, scanning until a scan finds none."""
         for _ in range(_MAX_SWEEPS):
-            found = self._marked(tag)
+            found = await self._blocking.run(self._marked, tag)
             if not found:
                 return
             for process in found:
-                self._kill(tag, process)
+                await self._blocking.run(self._kill, tag, process)
         raise ClearUnavailableError(tag, "stage processes that keep restarting")
 
     def _kill(self, tag: RequestId, process: MarkedProcess) -> None:

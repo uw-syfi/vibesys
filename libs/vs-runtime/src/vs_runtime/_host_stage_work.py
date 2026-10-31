@@ -12,7 +12,7 @@ from vs_runtime._process_stage_work_reaper import ProcessStageWorkReaper
 if TYPE_CHECKING:
     from vs_runtime._local_job_step_runner import StageWorkReaper
     from vs_sandbox.api import StepContainers
-    from vs_sim.api import ProcessTable
+    from vs_sim.api import BlockingRunner, ProcessTable
 
 
 @dataclass(frozen=True)
@@ -23,10 +23,14 @@ class HostStageWork:
     containers: StepContainers | None
     """``None`` for a run environment without Docker."""
     run_id: str
+    blocking: BlockingRunner
+    """Carries the process table's and the container runtime's blocking calls off the event loop."""
 
     def reaper(self) -> StageWorkReaper:
         """A reaper that ends the processes and, where there are any, the containers of a tag."""
-        reapers: list[StageWorkReaper] = [ProcessStageWorkReaper(self.processes, self.run_id)]
+        reapers: list[StageWorkReaper] = [
+            ProcessStageWorkReaper(self.processes, self.run_id, self.blocking)
+        ]
         if self.containers is not None:
-            reapers.append(ContainerStageWorkReaper(self.containers, self.run_id))
+            reapers.append(ContainerStageWorkReaper(self.containers, self.run_id, self.blocking))
         return EachStageWorkReaper(*reapers)

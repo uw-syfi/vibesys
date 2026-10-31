@@ -52,7 +52,7 @@ from vs_sim.api import (
     SubprocessPipedProcessLauncher,
     parse_ps,
 )
-from vs_sim.api.testing import VirtualClock, run_virtual
+from vs_sim.api.testing import InlineBlockingRunner, VirtualClock, run_virtual
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -157,7 +157,7 @@ def _kill_owner(owner: subprocess.Popen[str]) -> None:
 
 
 def _reap(tag: RequestId, table: OsProcessTable | None = None) -> None:
-    reaper = ProcessStageWorkReaper(table or OsProcessTable(), RUN)
+    reaper = ProcessStageWorkReaper(table or OsProcessTable(), RUN, InlineBlockingRunner())
     run_virtual(VirtualClock(0.0), reaper.reap(tag))
 
 
@@ -253,7 +253,7 @@ class TestProcessStageWorkReaperOverRealProcesses(StageWorkReaperContract):
             )
 
         return StageWorkUnderTest(
-            reaper=ProcessStageWorkReaper(table, RUN),
+            reaper=ProcessStageWorkReaper(table, RUN, InlineBlockingRunner()),
             run=lambda main: run_virtual(VirtualClock(0.0), main),
             places=(StageWorkPlace.LEADER, StageWorkPlace.DESCENDANT),
             leave=lambda tag, _place: leave(RUN, tag),
@@ -297,7 +297,7 @@ class TestContainerStageWorkReaperOverTheDockerSandbox(StageWorkReaperContract):
             )
 
         return StageWorkUnderTest(
-            reaper=ContainerStageWorkReaper(daemon, RUN),
+            reaper=ContainerStageWorkReaper(daemon, RUN, InlineBlockingRunner()),
             run=lambda main: run_virtual(VirtualClock(0.0), main),
             places=(StageWorkPlace.CONTAINER,),
             leave=lambda tag, _place: leave(RUN, tag),
