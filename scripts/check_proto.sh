@@ -3,9 +3,17 @@
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
-uv run --locked python -m scripts.check_proto_layers
-uv run --locked --group proto buf lint
-./scripts/generate_proto.sh
+# Print each stage's wall and CPU seconds, so a run over its budget names the stage in the job log.
+stage() {
+  local TIMEFORMAT="proto stage $1: %R s wall, %U s user, %S s sys" status=0
+  shift
+  # Keep `time` from being the last command, which bash would exec without reporting.
+  time "$@" || status=$?
+  return "$status"
+}
+stage layers uv run --locked python -m scripts.check_proto_layers
+stage lint uv run --locked --group proto buf lint
+stage generate ./scripts/generate_proto.sh
 generated=(proto/vibesys/host/v1/admission_receipt_generated.proto gateway/internal/hostoperations/registry_generated.go src/server/host_operation_types_generated.py libs/vs-runtime/tests/generated libs/vs-core/tests/generated libs/vs-proto/src/vs_proto/_generated clients/libs/proto/src/generated gateway/gen
   libs/vs-core/src/vs_core/_generated libs/vs-runtime/src/vs_runtime/_core_values
   scripts/corevalue/tests/generated_pb scripts/corevalue/tests/generated_values scripts/corevalue/tests/generated_boundary)
@@ -16,14 +24,16 @@ if [[ -n "$(git ls-files --others --exclude-standard -- "${generated[@]}")" ]]; 
 fi
 # Generation is the only writer. Once it passes, these checks read its outputs.
 pids=()
-(./scripts/tests/test_proto_breaking.sh && ./scripts/check_proto_breaking.sh) &
+breaking() { ./scripts/tests/test_proto_breaking.sh && ./scripts/check_proto_breaking.sh; }
+stage breaking breaking &
 pids+=("$!")
 # 1,000 small tests with no dominant one: spread across the cores the checks beside it leave, not one.
-uv run --locked pytest libs/vs-proto/tests libs/vs-runlog/tests scripts/corevalue/tests scripts/host_operations/tests -n auto --no-cov -q &
+stage pytest uv run --locked pytest libs/vs-proto/tests libs/vs-runlog/tests scripts/corevalue/tests scripts/host_operations/tests -n auto --no-cov -q &
 pids+=("$!")
-(cd gateway && go build ./gen/... && go vet ./gen/...) &
+go_gen() { (cd gateway && go build ./gen/... && go vet ./gen/...); }
+stage go go_gen &
 pids+=("$!")
-./scripts/check_schema_hashes.sh &
+stage hashes ./scripts/check_schema_hashes.sh &
 pids+=("$!")
 # Reap every check, including on failure, so none outlives this command.
 status=0
