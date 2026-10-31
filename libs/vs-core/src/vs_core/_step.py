@@ -1968,6 +1968,19 @@ def consume(
     return result.model_copy(update={"state": share_unchanged(given, advanced)})
 
 
+def settle_park(state: CoreState) -> CoreState:
+    """The drain of a pause, advanced as far as ``state`` allows: parked once nothing holds it up.
+
+    A step that records no event (an attempt that ended, an epoch that opened) can free a
+    draining run, and only the kernel knows what else holds one up. The jobs it must release
+    are registered as the requests they are; no other state changes.
+    """
+    parked, cancellations = _run_park.advance(state)
+    if not cancellations:
+        return parked
+    return _registered_transition(parked, list(cancellations), []).state
+
+
 def step(state: CoreState, event: CoreEvent, *, reducers: CoreReducers | None = None) -> Transition:
     """Consume one event through explicit pure lifecycle implementations.
 

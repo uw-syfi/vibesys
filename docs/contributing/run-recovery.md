@@ -379,8 +379,8 @@ kind. The rule is:
 - an open step whose dependency can never succeed is `Settle(Cancelled(WITHDRAWN))`; one whose dependency is
   still pending waits;
 - a paused run (`PAUSED`, `DRAINING`, `PARKED`) starts no step except, while `DRAINING`, work the drain
-  admits (`_run_park.dispatch_allowed`); a running step is `Cancel(DRAIN_EXPIRED)` from the pause's drain
-  deadline (`RunPark.deadline_at`, which core gives a Pause now too), and not before;
+  admits (`_run_park.dispatch_allowed`); a running step is `Cancel(PAUSE_NOW)` when Pause now withdrew it
+  and `Cancel(DRAIN_EXPIRED)` from the pause's drain deadline (`RunPark.deadline_at`);
 - a run whose committed finish is a cancel, or that has ended, gets `Cancel(RUN_ENDING)` for each running
   step and `Settle(Cancelled(RUN_ENDING))` for each other open step, and starts none;
 - a step that snapshots its scope's files waits while any step that writes them is open, and a step that

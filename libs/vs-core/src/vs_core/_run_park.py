@@ -142,15 +142,21 @@ def _past_deadline(state: CoreState, park: RunPark) -> bool:
     return park.deadline_at is not None and state.run.now_at >= park.deadline_at
 
 
+def pause_withdraws(state: CoreState, request: Request) -> bool:
+    """Whether committed Pause now withdrew this effect's right to complete the epoch."""
+    park = state.run.park
+    return park is not None and park.immediate and _park_holds_back(state, park, request)
+
+
 def _withdrawn(state: CoreState, request: Request) -> bool:
     """Whether Pause now, or a drain past its deadline, no longer lets this effect start."""
     park = state.run.park
-    return (
-        park is not None
-        and state.records.recovery.epoch == park.epoch
-        and _immediate(state, park)
-        and not isinstance(request, _DRAIN_EFFECTS)
-    )
+    return park is not None and _immediate(state, park) and _park_holds_back(state, park, request)
+
+
+def _park_holds_back(state: CoreState, park: RunPark, request: Request) -> bool:
+    """Whether this epoch's park holds ``request`` back; what finishes a turn's work is left to end."""
+    return state.records.recovery.epoch == park.epoch and not isinstance(request, _DRAIN_EFFECTS)
 
 
 def _unfinished(state: CoreState, record: RequestRecord) -> bool:

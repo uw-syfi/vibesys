@@ -415,29 +415,87 @@ def paused(
 
 
 @settings(max_examples=examples(pr=12, nightly=200))
-@given(script=scripts(), status=PAUSES, immediate=st.booleans())
+@given(script=scripts(), status=PAUSES)
 def test_a_paused_run_starts_no_step_and_stops_what_runs_only_at_its_drain_deadline(
-    script: Script, status: core.RunStatus, *, immediate: bool
+    script: Script, status: core.RunStatus
 ) -> None:
-    """Pause now is no exception: it waits for what runs until its drain deadline, as Pause does.
-
-    Core gives a Pause now a deadline (the cleanup bound) when it records it, so what runs is
-    stopped then and not at the pause: the drain lets a request finish, and interrupts it only
-    when the deadline passes (`_run_park`).
-    """
     for length, (state, open_steps) in enumerate(states(script)):
         now = clock_of(length)
         running = {step.tag for step in open_steps if step.running}
-        draining = paused(state, status, deadline_at=now + 10.0, immediate=immediate)
+        draining = paused(state, status, deadline_at=now + 10.0)
         assert not [a for a in decide(draining, now) if isinstance(a, Run)]
         assert not [a for a in decide(draining, now + 5.0) if isinstance(a, Cancel)]
         expired = decide(draining, now + 10.0)
         assert {a.tag for a in expired if isinstance(a, Cancel)} == running
         assert {a.reason for a in expired if isinstance(a, Cancel)} <= {CancelReason.DRAIN_EXPIRED}
-        unbounded = paused(state, status, immediate=immediate)
+        unbounded = paused(state, status)
         assert not [a for a in decide(unbounded, now + 1e3) if isinstance(a, Cancel | Run)] or {
             a.reason for a in decide(unbounded, now + 1e3) if isinstance(a, Cancel)
         } == {CancelReason.DEADLINE}
+
+
+@settings(max_examples=examples(pr=12, nightly=200))
+@given(script=scripts())
+def test_a_pause_now_cancels_every_running_step_and_starts_none(script: Script) -> None:
+    for length, (state, open_steps) in enumerate(states(script)):
+        now = clock_of(length)
+        actions = decide(paused(state, core.RunStatus.DRAINING, immediate=True), now)
+        assert {a.tag for a in actions if isinstance(a, Cancel)} == {
+            step.tag for step in open_steps if step.running
+        }
+        assert {a.reason for a in actions if isinstance(a, Cancel)} <= {CancelReason.PAUSE_NOW}
+        assert not [a for a in actions if isinstance(a, Run)]
+
+
+@settings(max_examples=examples(pr=12, nightly=200))
+@given(
+    retries=st.integers(0, 3),
+    count=st.integers(1, 3),
+    action=st.sampled_from(["pause", "pause_now"]),
+    drain_seconds=st.floats(min_value=0.5, max_value=50.0),
+)
+def test_a_pause_parks_once_the_attempts_it_interrupted_are_back_to_unstarted(
+    retries: int, count: int, action: Literal["pause", "pause_now"], drain_seconds: float
+) -> None:
+    """The drain waits for every step to be unstarted or ended: an interrupted attempt is neither.
+
+    The interruption sends its step back to the state of one no one has started, with no result,
+    no failure and no retry spent, and that alone lets the drain park the run, so the next epoch
+    runs the step again.
+    """
+    build = Builder()
+    for _ in range(count):
+        build.prepare(retries)
+    for step in build.steps:
+        build.start(step)
+    state = fold(build.script.records, SEED)
+    pause = core.RunControlEvent(
+        control=core.ControlInput(
+            control_id=core.ControlId(root="pause"),
+            action=action,
+            owner=core.PauseOwner.OPERATOR if action == "pause" else None,
+        ),
+        now_at=state.run.now_at,
+        drain_seconds=drain_seconds,
+    )
+    build.append(Oneof("core_input", input_message(pause)))
+    state = fold(build.script.records[-1:], state)
+    assert state.run.status is core.RunStatus.DRAINING
+    for number, step in enumerate(build.steps, 1):
+        assert state.run.status is core.RunStatus.DRAINING
+        build.interrupt(step, Interruption.PAUSE)
+        state = fold(build.script.records[-1:], state)
+        record = state.records.record(step.tag)
+        assert record is not None
+        assert record.phase is core.RequestPhase.PREPARED
+        assert record.observation is None
+        assert record.retry_count == 0
+        attempts = state.steps.of(step.tag)
+        assert attempts is not None
+        assert attempts.uncharged == 1
+        assert (state.run.status is core.RunStatus.PARKED) == (number == count)
+    assert at_rest(state) is RunRest.PARKED
+    assert {row.phase for row in state.records.records} == {core.RequestPhase.PREPARED}
 
 
 @settings(max_examples=examples(pr=12, nightly=200))
