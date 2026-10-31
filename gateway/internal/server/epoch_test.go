@@ -14,7 +14,7 @@ import (
 
 // Retained phase-1 heads lack a canonical epoch. Informational process epochs
 // may disagree, and a complete successor beyond committed_seq is unpublished.
-func TestWatchRunsDecodesPhase1EpochFromPublishedLog(t *testing.T) {
+func TestRunsDecodesPhase1EpochFromPublishedLog(t *testing.T) {
 	for _, committed := range []*uint64{nil, proto.Uint64(0), proto.Uint64(5)} {
 		for _, process := range []*storev1.RunProcess{nil, {Epoch: 99, Pid: 1, StartedAt: &timestamppb.Timestamp{Seconds: 1}}} {
 			t.Run("published-prefix", func(t *testing.T) {

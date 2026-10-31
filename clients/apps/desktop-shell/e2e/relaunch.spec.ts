@@ -11,9 +11,9 @@ import {
   Outcome,
   RecordSchema,
   RelaunchRefusal,
+  RunEntrySchema,
   RunLiveness,
   TailResponseSchema,
-  RunEntrySchema,
 } from '@vibesys/proto';
 import {fixtureNamed, type StoreRunFixture, storeRunFixture} from '@vibesys/run-fixtures';
 import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';

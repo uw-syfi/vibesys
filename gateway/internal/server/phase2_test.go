@@ -280,7 +280,7 @@ func watchEntry(t *testing.T, stream *runStream) *runFrame {
 	}
 }
 
-func TestWatchRunsAtomicHeadAndRealLock(t *testing.T) {
+func TestRunsAtomicHeadAndRealLock(t *testing.T) {
 	f := start(t)
 	lock, err := os.OpenFile(filepath.Join(f.run, "run.lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {

@@ -10,6 +10,8 @@ import {
   type Keyframe,
   KeyframeSchema,
   RecordSchema,
+  RunHeadSchema,
+  type RunLiveness,
   SkeletonRequestSchema,
   SkeletonResponseSchema,
   type Record as StoreRecord,
@@ -17,8 +19,6 @@ import {
   TailResponseSchema,
   TailStreamRequestSchema,
   TailStreamResponseSchema,
-  RunHeadSchema,
-  type RunLiveness,
 } from '@vibesys/proto';
 import {type AbortSignalLike, registerAbort} from '@vibesys/transport';
 import type {RunLivenessFeed, RunLivenessHint, RunLivenessState, RunTransport} from './index.js';

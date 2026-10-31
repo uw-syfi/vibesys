@@ -23,12 +23,12 @@ import {
   type Starting,
   StartupStage,
 } from '@vibesys/proto';
-import {
-  type ConnectStep,
-  type FailureReason,
-  type HostRunFacts,
-  type RunFacts,
-  type SubscriptionState,
+import type {
+  ConnectStep,
+  FailureReason,
+  HostRunFacts,
+  RunFacts,
+  SubscriptionState,
 } from '@vibesys/subscription';
 
 const STAGES: Readonly<Record<StartupStage, NonNullable<RunPhase['stage']> | null>> = {

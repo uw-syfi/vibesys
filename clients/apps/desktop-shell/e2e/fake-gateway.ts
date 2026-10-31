@@ -6,13 +6,13 @@ import {
   GetBlobsResponseSchema,
   HostService,
   RecordSchema,
+  RunEntrySchema,
   type RunHead,
   RunLiveness,
   SkeletonResponseSchema,
   TailRequestSchema,
   TailResponseSchema,
   TailStreamResponseSchema,
-  RunEntrySchema,
 } from '@vibesys/proto';
 import type {StoreRunFixture} from '@vibesys/run-fixtures';
 import {epochHasEnded} from '@vibesys/run-skeleton';

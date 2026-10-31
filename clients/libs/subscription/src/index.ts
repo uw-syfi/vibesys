@@ -46,8 +46,8 @@ export {
 export {
   ALL_TOPICS,
   type AnyTopic,
-  type MachineStats,
   type HostRunFacts,
+  type MachineStats,
   machineStats,
   type RunFacts,
   runs,

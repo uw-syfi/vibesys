@@ -7,7 +7,13 @@ import {
   listingStep,
   watchedListing,
 } from '@vibesys/connection';
-import {type HostKey, LISTING_STEPS, type ListingStep, recordedProjectRoot} from '@vibesys/hosts';
+import {
+  type HostKey,
+  LISTING_STEPS,
+  type ListingStep,
+  machineLoad,
+  recordedProjectRoot,
+} from '@vibesys/hosts';
 import {
   DrainGoal,
   LifecycleSchema,
@@ -221,6 +227,20 @@ test('property: a host lists runs only once its subscription is live, and says w
       }
     }),
     {numRuns: 100},
+  );
+});
+
+test('property: a failed machine says the word of its reason, whole, whatever step it stopped at', () => {
+  fc.assert(
+    fc.property(REASON, STEP, (reason, step) => {
+      const listing = hostListingFromRuns(HOST, {kind: 'failed', reason, retrying: true}, step);
+      expect(machineLoad(HOST, listing)).toEqual({
+        kind: 'failed',
+        host: HOST,
+        step,
+        reason: LISTING_FAILURE_WORDS[reason],
+      });
+    }),
   );
 });
 

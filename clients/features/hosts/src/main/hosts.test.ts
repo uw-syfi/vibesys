@@ -1352,7 +1352,6 @@ describe('Hosts checkout changes', () => {
     const filesystem = new FakeSettingsFilesystem();
     const world = await gatewayWorld({filesystem, configured: [LOCAL]});
     await world.hosts.host(LOCAL, '10:100');
-    const first = world.gateway.open(LOCAL);
 
     const held = filesystem.deferNextWrite();
     const obsolete = world.hosts.setCheckout(LOCAL, '/cancelled', {owner: '10:100', sequence: 1});
@@ -1379,7 +1378,6 @@ describe('Hosts checkout changes', () => {
     const filesystem = new FakeSettingsFilesystem();
     const world = await gatewayWorld({filesystem, configured: [LOCAL]});
     await world.hosts.host(LOCAL, '10:100');
-    const first = world.gateway.open(LOCAL);
 
     const held = filesystem.deferNextReplaceAfterCommit();
     const change = {owner: '10:100', sequence: 1};
@@ -1774,7 +1772,6 @@ describe('Hosts watch the gateway of every desired host', () => {
     const world = await gatewayWorld({configured: [ALPHA]});
     await world.hosts.host(ALPHA, '10:100');
     world.gateway.announce(ALPHA, []);
-    const old = world.gateway.open(ALPHA);
     await world.hosts.setCheckout(ALPHA, '/new', {owner: '10:100', sequence: 1});
 
     expect(world.releases('ssh:alpha')).toBe(1);
@@ -1787,7 +1784,6 @@ describe('Hosts watch the gateway of every desired host', () => {
   test('reconciliation replaces a watcher whose checkout differs from authoritative settings', async () => {
     const world = await gatewayWorld({configured: [ALPHA]});
     await world.hosts.host(ALPHA, '10:100');
-    const old = world.gateway.open(ALPHA);
     await world.settings.updateHosts(current =>
       withHostSettings(current, ALPHA, {checkout: '/authoritative'}),
     );

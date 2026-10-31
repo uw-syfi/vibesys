@@ -110,7 +110,7 @@ func listing(t *testing.T, f fixture, c apiv1.HostServiceClient) map[string]*api
 
 // A read error in one run's data stays inside that run: the other runs list with the same
 // facts, and the damaged run is still listed by name.
-func TestWatchRunsListsHealthyRunsBesideADamagedOne(t *testing.T) {
+func TestRunsListsHealthyRunsBesideADamagedOne(t *testing.T) {
 	for _, name := range corpusCases(t) {
 		log, head := readCorpus(t, name, "run.log"), readCorpus(t, name, "run.head")
 		f := start(t)

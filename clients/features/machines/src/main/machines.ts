@@ -8,12 +8,12 @@
  */
 import {
   ConnectionError,
+  type HostRuns,
   type InspectedCandidate,
   isHostUnsupported,
   type RegistryClusters,
   type RegistryRunCatalog,
   type RegistrySetup,
-  type HostRuns,
 } from '@vibesys/connection';
 import type {MachineDescription} from '@vibesys/hosts';
 import {type HostId, hostFromKey, hostKey, hostLabel} from '@vibesys/hosts';
@@ -59,7 +59,7 @@ export interface MachinesMainDeps {
   readonly setup?: RegistrySetup;
   /** Cluster changes. Required when using the gateway for put, remove, and test. */
   readonly clusters?: RegistryClusters;
-  /** Live runs from WatchRuns. Required when using the gateway for a report. */
+  /** Live runs from the runs subscription. Required when using the gateway for a report. */
   readonly runs?: Pick<HostRuns, 'alive'>;
   /** The selection the caller still owns. A change across the await is stale. */
   readonly selectionRevision?: (id: HostId) => bigint;

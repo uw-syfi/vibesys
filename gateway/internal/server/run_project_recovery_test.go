@@ -15,7 +15,7 @@ import (
 // Generated layouts cover absent/present addresses, absent/retained/current heads,
 // project names with spaces, multiple epochs, and a root-free successor header.
 // The 72 layouts cross all root, head, sidecar and inside/outside states twice.
-func TestWatchRunsRecoversPreviousPublisherProject(t *testing.T) {
+func TestRunsRecoversPreviousPublisherProject(t *testing.T) {
 	for seed := 0; seed < 72; seed++ {
 		t.Run(fmt.Sprint(seed), func(t *testing.T) {
 			f := start(t)

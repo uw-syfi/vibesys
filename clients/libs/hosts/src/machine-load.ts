@@ -43,13 +43,15 @@ const FAILURE_WORDS: readonly (readonly [RegExp, (code: string) => string])[] = 
   [/Could not resolve hostname/, () => 'host not found'],
   [/the connection to .* is down/, () => 'connection down'],
   [/API hash mismatch/, () => 'version mismatch'],
-  [/run stream went silent/, () => 'no answer'],
-  [/run stream ended/, () => 'stream ended'],
   // A system call's failure: its message, without the path it names.
   [/\bE[A-Z]+: ([^,]+),/, message => message],
 ];
 
-/** `detail`, what a failed connection left behind, in a few words. */
+/**
+ * `detail`, the text of a failure that has no closed reason, in a few words. A machine's run list
+ * has one: its subscription fails with a `FailureReason`, worded by a table, and that word passes
+ * through here unchanged.
+ */
 export function failureWords(detail: string): string {
   for (const [pattern, words] of FAILURE_WORDS) {
     const found = pattern.exec(detail);

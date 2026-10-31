@@ -38,7 +38,7 @@ func (c *fakeClock) NewTicker(interval time.Duration) server.Ticker {
 func (t *fakeTicker) Ticks() <-chan time.Time { return t.ticks }
 func (t *fakeTicker) Stop()                   { close(t.stopped) }
 
-func TestWatchRunsDetectsBareLockReleaseOnTick(t *testing.T) {
+func TestRunsDetectsBareLockReleaseOnTick(t *testing.T) {
 	for _, withHead := range []bool{false, true} {
 		t.Run(fmt.Sprint(withHead), func(t *testing.T) {
 			ticker := &fakeTicker{ticks: make(chan time.Time, 1), stopped: make(chan struct{})}

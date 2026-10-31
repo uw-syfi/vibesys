@@ -91,7 +91,7 @@ func TestSkeletonDoesNotReadUncommittedCorruption(t *testing.T) {
 	}
 }
 
-func TestWatchRunsIndexCreatedAfterSubscription(t *testing.T) {
+func TestRunsIndexCreatedAfterSubscription(t *testing.T) {
 	f := start(t)
 	if err := os.Remove(filepath.Join(f.root, "runs", "run-1")); err != nil {
 		t.Fatal(err)
@@ -139,7 +139,7 @@ func TestSkeletonBeforeLogCreation(t *testing.T) {
 	}
 }
 
-func TestWatchRunsDoesNotMistakeAnotherProbeForWriter(t *testing.T) {
+func TestRunsDoesNotMistakeAnotherProbeForWriter(t *testing.T) {
 	f := start(t)
 	lock, err := os.OpenFile(filepath.Join(f.run, "run.lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
@@ -181,7 +181,7 @@ func TestPhase1SequenceZeroRemainsReadable(t *testing.T) {
 	}
 }
 
-func TestWatchRunsReadsAnEpochAwaitingItsFirstLifecycle(t *testing.T) {
+func TestRunsReadsAnEpochAwaitingItsFirstLifecycle(t *testing.T) {
 	f := start(t)
 	pending := head(proto.Uint64(0))
 	pending.Epoch = 5
@@ -202,7 +202,7 @@ func TestWatchRunsReadsAnEpochAwaitingItsFirstLifecycle(t *testing.T) {
 	}
 }
 
-func TestWatchRunsParkedEpochIsReadableAfterWriterReleasesLock(t *testing.T) {
+func TestRunsParkedEpochIsReadableAfterWriterReleasesLock(t *testing.T) {
 	for _, lockExists := range []bool{false, true} {
 		t.Run(fmt.Sprintf("lock-file-%t", lockExists), func(t *testing.T) {
 			f := start(t)

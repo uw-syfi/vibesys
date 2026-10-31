@@ -13,11 +13,11 @@ import {
   type PostIntentRequest,
   RecordSchema,
   RelaunchRefusal,
+  RunEntrySchema,
   RunLiveness,
   SpanStatus,
   type Record as StoreRecord,
   TailResponseSchema,
-  RunEntrySchema,
 } from '@vibesys/proto';
 import {fixtureNamed, INTENT_REPLAYS, intentReplay, storeRunFixture} from '@vibesys/run-fixtures';
 import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';

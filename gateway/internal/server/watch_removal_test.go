@@ -9,7 +9,7 @@ import (
 
 // No head writes or lock probes can accidentally wake this subscription: an
 // index unlink alone must invalidate the scan, even while its target survives.
-func TestWatchRunsIndexUnlinkWithoutTargetChange(t *testing.T) {
+func TestRunsIndexUnlinkWithoutTargetChange(t *testing.T) {
 	f := start(t)
 	stream, err := watchRuns(f.ctx, client(t, f, false))
 	if err != nil {

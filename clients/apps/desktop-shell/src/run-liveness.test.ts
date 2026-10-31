@@ -8,8 +8,8 @@ import {
   RETRYABLE_REASONS,
   type RunFacts,
   runs,
-  TERMINAL_REASONS,
   type SubscriptionState,
+  TERMINAL_REASONS,
 } from '@vibesys/subscription';
 import {FakeSubscriptionPort} from '@vibesys/subscription/testing';
 import fc from 'fast-check';

@@ -22,7 +22,7 @@ import {
   TopicEntrySchema,
 } from '@vibesys/proto';
 import {storeRunFixture} from '@vibesys/run-fixtures';
-import {FakeSubscriptionPort, type FakePortCall} from '@vibesys/subscription/testing';
+import {type FakePortCall, FakeSubscriptionPort} from '@vibesys/subscription/testing';
 import {FakeClock} from '@vibesys/transport/testing';
 import {IDBFactory} from 'fake-indexeddb';
 import fc from 'fast-check';
@@ -482,6 +482,35 @@ function assertVisible(container: HTMLElement) {
     );
 }
 
+const offersLiveControls = (container: HTMLElement) =>
+  controlButtons(container).some(text => ['Pause', 'Pause now', 'Guidance'].includes(text));
+
+/** The fault happens: the host stops delivering, or a records stream ends. A stall is silence. */
+async function inject(peer: RunPeer, fault: Generated<typeof FAULT>): Promise<void> {
+  await act(async () => {
+    if (fault.source === 'liveness') peer.host.lose();
+    else if (fault.fault === 'end')
+      for (const stream of followers(peer)) stream.ended('disconnected');
+  });
+}
+
+/** Words from an observation the window has released: its port fences them. */
+async function sayLate(peer: RunPeer): Promise<void> {
+  await act(async () => {
+    for (const call of peer.host.port.calls.filter(each => !each.open))
+      call.send({
+        kind: 'entry',
+        entry: create(TopicEntrySchema, {
+          key: RUN_ID,
+          value: {
+            case: 'runs',
+            value: create(RunEntrySchema, {head: {epoch: 1}, liveness: RunLiveness.ALIVE}),
+          },
+        }),
+      });
+  });
+}
+
 test('property: independently ending or stalling streams cannot revive a dead writer and recover within one virtual minute', async () => {
   await fc.assert(
     fc.asyncProperty(
@@ -499,25 +528,12 @@ test('property: independently ending or stalling streams cannot revive a dead wr
         await withPeer(peer, async (container, clock) => {
           for (const fault of faults) {
             const before = peer.streams.length;
-            const old = fault.source === 'lifecycle' ? followers(peer) : [];
-            await act(async () => {
-              if (fault.source === 'liveness') peer.host.lose();
-              else if (fault.fault === 'end')
-                for (const stream of old) stream.ended('disconnected');
-            });
-            expect(
-              controlButtons(container).some(text =>
-                ['Pause', 'Pause now', 'Guidance'].includes(text),
-              ),
-            ).toBe(false);
+            await inject(peer, fault);
+            expect(offersLiveControls(container)).toBe(false);
             assertVisible(container);
             assertOneLease(peer);
             await act(async () => clock.advanceBy(fault.elapsed));
-            expect(
-              controlButtons(container).some(text =>
-                ['Pause', 'Pause now', 'Guidance'].includes(text),
-              ),
-            ).toBe(false);
+            expect(offersLiveControls(container)).toBe(false);
             assertVisible(container);
             assertOneLease(peer);
             await act(async () => clock.advanceBy(31_000));
@@ -527,24 +543,7 @@ test('property: independently ending or stalling streams cannot revive a dead wr
             assertVisible(container);
             assertOneLease(peer);
             const recovered = controlButtons(container);
-            // Late words from an observation the window has released are fenced by its port.
-            const released = peer.host.port.calls.filter(call => !call.open);
-            await act(async () => {
-              for (const call of released)
-                call.send({
-                  kind: 'entry',
-                  entry: create(TopicEntrySchema, {
-                    key: RUN_ID,
-                    value: {
-                      case: 'runs',
-                      value: create(RunEntrySchema, {
-                        head: {epoch: 1},
-                        liveness: RunLiveness.ALIVE,
-                      }),
-                    },
-                  }),
-                });
-            });
+            await sayLate(peer);
             expect(controlButtons(container)).toEqual(recovered);
           }
         });
@@ -618,11 +617,7 @@ test('property: a successor on any independent stream exposes a stalled lifecycl
         }
         assertVisible(container);
         for (const fault of faults) {
-          await act(async () => {
-            if (fault.source === 'liveness') peer.host.lose();
-            else if (fault.fault === 'end')
-              for (const stream of followers(peer)) stream.ended('disconnected');
-          });
+          await inject(peer, fault);
           assertVisible(container);
           await act(async () => clock.advanceBy(fault.elapsed));
           assertVisible(container);

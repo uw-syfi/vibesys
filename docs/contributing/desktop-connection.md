@@ -591,10 +591,10 @@ Every screen (Settings, Machines, New run, the Run screen, the sidebar) has one 
   no state that changes behavior. The desktop shell is React.
 - **Native `<dialog>`.** Sheets are `<dialog>` opened with `showModal()`: focus containment, inert
   background, Esc, and return of focus to the opener come from the platform.
-- **Data from watches.** Host panels and Recent statuses fold the host gateway's `WatchRuns` stream
-  (`@vibesys/connection`'s `runWatch`, projected by `hostListingFromRuns`); the listing and the
-  connection status do not ask the host's helper, and an observed stream reconnects with a growing
-  delay and is dropped after 30 seconds of silence. Digests and the usage window are registered
+- **Data from watches.** Host panels and Recent statuses fold the host gateway's `runs` topic
+  (`@vibesys/connection`'s `hostRuns`, over the subscription hub and projected by
+  `hostListingFromRuns`); the listing and the connection status do not ask the host's helper, and the
+  subscription machine owns the lease, the retries and the end of the stream. Digests and the usage window are registered
   reads (`ListRunDigests`, `UsageWindow`). There is no manual refresh path to forget.
 - **A wait has a name and an end.** The connection reports each step on the way to a machine's run
   list (`ListingStep`: `gateway`, `handshake`, `runs`), a listing carries the step it stands at, and

@@ -18,9 +18,6 @@ export {
   FakeLink,
   record,
 } from './fake-helper.js';
-export {FakeLogStore, type LogStoreFixture} from './fake-log-store.js';
-export {deferredKillProcess, fakeProcess, pipeHeldProcess} from './fake-process.js';
-export {FakeReadCatalog} from './fake-read-catalog.js';
 export {
   type AnnouncedRun,
   announce,
@@ -30,6 +27,9 @@ export {
   idleHostRuns,
   runEntry,
 } from './fake-host-runs.js';
+export {FakeLogStore, type LogStoreFixture} from './fake-log-store.js';
+export {deferredKillProcess, fakeProcess, pipeHeldProcess} from './fake-process.js';
+export {FakeReadCatalog} from './fake-read-catalog.js';
 export {
   type FakeSubscribeStream,
   FakeSubscribeStreams,

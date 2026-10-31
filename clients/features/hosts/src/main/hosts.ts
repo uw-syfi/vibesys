@@ -7,8 +7,8 @@
 import {
   type ConnectionLease,
   type ConnectionManager,
-  type HostRuns,
   HelperRequestError,
+  type HostRuns,
   isHostUnsupported,
   type LogsLease,
   type RegistryRunCatalog,

@@ -41,7 +41,6 @@ export {
   provisionGateway,
 } from './shell/gateway-provision.js';
 export {CallTimedOut, GrpcDecoder, grpcFrame} from './shell/grpc.js';
-export {GATEWAY_FIRST_CONNECT_BUDGET_MS} from './state/gateway.js';
 export {ConnectionError, HelperRequestError} from './shell/helper-channel.js';
 export {HostConnection, type LogsLease} from './shell/host-connection.js';
 export {type HostRuns, type HostRunsSource, hostRuns} from './shell/host-runs.js';
@@ -97,4 +96,5 @@ export {
   type SubscriptionStreams,
   Subscriptions,
 } from './shell/subscriptions.js';
+export {GATEWAY_FIRST_CONNECT_BUDGET_MS} from './state/gateway.js';
 export type {CheckoutProblem, Phase} from './state/host-connection.js';

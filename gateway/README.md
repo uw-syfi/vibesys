@@ -6,7 +6,7 @@ serve multiple clients from one process; a blocked Tail stream retains its own
 bounded batch and uses HTTP/2 flow control.
 
 The existing Python host helper and per-run byte relay remain in use by the
-current desktop. This binary supplies Hello, Tail, Skeleton, WatchRuns,
+current desktop. This binary supplies Hello, Tail, Skeleton,
 GetBlobs, TailStream and Subscribe for the new client integration.
 
 ## Run
@@ -85,8 +85,8 @@ while logs are read. Subsequent indexed seeks replay at most 127 preceding
 records. File replacement or truncation invalidates cached positions. The index
 is process-local and never writes into a run directory.
 
-WatchRuns sends every linked run, an initial_complete marker, then replacements
-and removal tombstones by run_id. It watches the index and run directories so
+The runs topic (Subscribe) sends every linked run keyed by run_id, a synced frame, then replacements
+and removals. Its source watches the index and run directories so
 atomic head replacement is visible. Liveness probes run.lock with a nonblocking
 shared flock probe against the writer's exclusive lock and leaves the persisted head unchanged. A run with an ended lifecycle is
 ended; otherwise a held lock means alive and an unheld lock means interrupted.

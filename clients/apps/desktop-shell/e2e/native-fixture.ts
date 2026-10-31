@@ -10,11 +10,11 @@ import {
   API_SCHEMA_HASH,
   ClientReplaySchema,
   RecordSchema,
+  RunEntrySchema,
   RunLiveness,
   STORE_SCHEMA_HASH,
   type Record as StoreRecord,
   TailResponseSchema,
-  RunEntrySchema,
 } from '@vibesys/proto';
 import {parseFixture, type RunFixture, type StoreRunFixture} from '@vibesys/run-fixtures';
 import {gatewayScript, wire} from './fake-gateway.js';

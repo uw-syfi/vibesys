@@ -22,6 +22,7 @@ const schemas = new Map(
   [
     ...proto.HostService.methods.flatMap(method => [method.input, method.output]),
     proto.BlobResultSchema,
+    proto.RunEntrySchema,
   ].map(schema => [schema.typeName, schema]),
 );
 for (const item of cases) {

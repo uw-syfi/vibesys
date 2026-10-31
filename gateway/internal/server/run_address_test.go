@@ -17,7 +17,7 @@ import (
 )
 
 // Addresses do not depend on the presence, health or writer generation of run.head.
-func TestWatchRunsCarriesPublishedProject(t *testing.T) {
+func TestRunsCarriesPublishedProject(t *testing.T) {
 	for variant := 0; variant < 8; variant++ {
 		t.Run(fmt.Sprint(variant), func(t *testing.T) {
 			ticker := &fakeTicker{ticks: make(chan time.Time, 1), stopped: make(chan struct{})}
@@ -74,7 +74,7 @@ func TestWatchRunsCarriesPublishedProject(t *testing.T) {
 	}
 }
 
-func TestWatchRunsNeverPublishesAnEmptyOrRelativeAddress(t *testing.T) {
+func TestRunsNeverPublishesAnEmptyOrRelativeAddress(t *testing.T) {
 	for _, project := range []string{"", "relative"} {
 		f := start(t)
 		directory, err := filepath.EvalSymlinks(f.run)
@@ -103,7 +103,7 @@ func TestWatchRunsNeverPublishesAnEmptyOrRelativeAddress(t *testing.T) {
 }
 
 // Republishing only routing metadata wakes an existing stream even when its index link is unchanged.
-func TestWatchRunsObservesAddressBackfillAndRejectsStaleTargets(t *testing.T) {
+func TestRunsObservesAddressBackfillAndRejectsStaleTargets(t *testing.T) {
 	f := start(t)
 	project := externalFixture(t, &f, 0)
 	if err := os.Mkdir(filepath.Join(f.root, "run-addresses"), 0700); err != nil {
@@ -194,7 +194,7 @@ func externalFixture(t *testing.T, f *fixture, variant int) string {
 
 // A syntactically correct external key cannot make state inside a project routable.
 // Project's forward layout rejects these roots as well.
-func TestWatchRunsRejectsExternalStateInsideRecordedProject(t *testing.T) {
+func TestRunsRejectsExternalStateInsideRecordedProject(t *testing.T) {
 	for depth := 0; depth < 3; depth++ {
 		f := start(t)
 		home, err := filepath.EvalSymlinks(f.root)
