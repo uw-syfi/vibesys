@@ -1,7 +1,23 @@
 import {describe, expect, test} from 'bun:test';
 import type {HostListing, ListedRun} from '@vibesys/hosts';
 import type {WelcomeResult} from '@vibesys/ipc';
-import {createSidebarStore, type ShellBridge} from './index.js';
+import type {Screen} from '../state/index.js';
+import {createSidebarStore, type ShellBridge, type WindowAddress} from './index.js';
+
+/** A window that stays where it is, and goes Back or Forward when the test says so. */
+function windowAddress() {
+  let listener: (screen: Screen) => void = () => undefined;
+  const address: WindowAddress = {
+    screen: () => ({kind: 'runs'}),
+    push: () => undefined,
+    back: () => undefined,
+    onRestore: each => {
+      listener = each;
+      return () => undefined;
+    },
+  };
+  return {address, restore: (screen: Screen) => listener(screen)};
+}
 
 const LISTING: HostListing = {
   kind: 'listed',
@@ -70,7 +86,7 @@ const settle = async (): Promise<void> => {
 describe('a project listing the Runs screen no longer waits for', () => {
   test('is cancelled by the token it was sent under when the screen asks again', async () => {
     const {bridge, asked, cancelled} = world();
-    const {store} = createSidebarStore(bridge, () => () => undefined);
+    const {store} = createSidebarStore(bridge, () => () => undefined, windowAddress().address);
     await settle();
     expect(asked).toHaveLength(1);
     expect(cancelled).toEqual([]);
@@ -89,9 +105,21 @@ describe('a project listing the Runs screen no longer waits for', () => {
     expect(cancelled).toHaveLength(1);
   });
 
+  test('is cancelled too when the window goes Back to the Runs screen', async () => {
+    const {bridge, asked, cancelled} = world();
+    const back = windowAddress();
+    const {store} = createSidebarStore(bridge, () => () => undefined, back.address);
+    await settle();
+    store.dispatch({type: 'select', screen: {kind: 'new-run'}});
+    back.restore({kind: 'runs'});
+    await settle();
+    expect(cancelled).toEqual([asked[0] as number]);
+    expect(asked).toHaveLength(2);
+  });
+
   test('a listing that answered is not cancelled, and its slot is not left loading', async () => {
     const {bridge, asked, cancelled, open} = world();
-    const {store} = createSidebarStore(bridge, () => () => undefined);
+    const {store} = createSidebarStore(bridge, () => () => undefined, windowAddress().address);
     await settle();
     open.get(asked[0] as number)?.({ok: true, value: []});
     await settle();
@@ -107,7 +135,7 @@ describe('a project listing the Runs screen no longer waits for', () => {
 
   test('a failure within the bound frees the slot: it is failed, not loading', async () => {
     const {bridge, asked, open} = world();
-    const {store} = createSidebarStore(bridge, () => () => undefined);
+    const {store} = createSidebarStore(bridge, () => () => undefined, windowAddress().address);
     await settle();
     open.get(asked[0] as number)?.({
       ok: false,

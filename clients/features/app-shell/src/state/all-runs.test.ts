@@ -339,7 +339,10 @@ describe('the Runs dashboard', () => {
     const {state} = open([listed('ssh:host-a', [server('live', '/p/q', 'running')])]);
     expect(dashboardRows(state, CLOCK).map(each => each.row.run.runId)).toEqual(['live']);
     // The project's own listing of it replaces the report, never doubles it.
-    const requests = sidebarStep(state, {type: 'select', screen: {kind: 'new-run'}}).requests;
+    const requests = sidebarStep(state, {
+      type: 'select',
+      screen: {kind: 'new-run'},
+    }).requests.filter(request => request.kind !== 'push-address');
     expect(requests).toEqual([]);
   });
 
@@ -614,7 +617,7 @@ class FlakyHost {
 
   answer(at: number): void {
     const request = this.pending.splice(at, 1)[0];
-    if (!request) return;
+    if (!request || request.kind === 'push-address') return;
     if (request.kind === 'cancel-project-runs') {
       // The host stops reading that listing, so its reply never comes.
       const reading = this.pending.findIndex(
