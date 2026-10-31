@@ -2,7 +2,7 @@
 # with UPDATE_GOLDEN=1. scripts/check_persisted_schema_compat.py checks a change keeps
 # every saved document, or raises the version.
 shape RuntimeRecord[FlowState]
-version 42.1
+version 43.1
 $root {"additionalProperties":false,"type":"object"}
 $root.delivery_cursor required {"minimum":0,"type":"integer"}
 $root.envelope required {"$ref":"#/$defs/RunEnvelope_FlowState_"}

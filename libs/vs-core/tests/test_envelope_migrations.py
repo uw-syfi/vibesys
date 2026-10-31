@@ -152,3 +152,40 @@ def test_every_migration_since_compatible_changes_keep_the_version_rewrites_its_
         "the version raise if every saved envelope decodes as is, or save a fixture holding the "
         "data the step rewrites"
     )
+
+
+@given(
+    immediate=st.booleans(),
+    now_at=st.floats(min_value=0.0, max_value=1e6),
+    cleanup_bound=st.floats(min_value=0.5, max_value=3600.0),
+)
+def test_a_pause_now_saved_before_drain_deadlines_gets_the_cleanup_bound_and_nothing_else_changes(
+    *, immediate: bool, now_at: float, cleanup_bound: float
+) -> None:
+    """A park saved at 42 by a Pause now has no deadline; version 43's Pause now always has one."""
+    stored = json.loads((_FIXTURES / "v42-pause-now.json").read_text(encoding="utf-8"))
+    run = stored["core"]["run"]
+    run["park"]["immediate"] = immediate
+    run["now_at"] = now_at
+    run["limits"]["cleanup_bound"] = cleanup_bound
+    assert "deadline_at" not in run["park"]
+    expected = json.loads(json.dumps(stored))
+    expected["schema_version"] = core.ENVELOPE_SCHEMA_VERSION
+    if immediate:
+        expected["core"]["run"]["park"]["deadline_at"] = now_at + cleanup_bound
+    assert _upgraded(json.dumps(stored)) == expected
+
+
+def test_a_run_with_no_park_migrates_to_the_next_version_unchanged() -> None:
+    stored = json.loads((_FIXTURES / "v42-floor.json").read_text(encoding="utf-8"))
+    assert "park" not in stored["core"]["run"]
+    assert _upgraded(json.dumps(stored)) == {**stored, "schema_version": 43}
+
+
+def test_the_migrated_pause_now_decodes_with_its_deadline() -> None:
+    source = (_FIXTURES / "v42-pause-now.json").read_text(encoding="utf-8")
+    decoded = FAKE_REGISTRY.decode_envelope(_Envelope, source)
+    park = decoded.core.run.park
+    assert park is not None
+    assert park.immediate
+    assert park.deadline_at == decoded.core.run.now_at + decoded.core.run.limits.cleanup_bound
