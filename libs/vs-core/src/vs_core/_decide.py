@@ -16,14 +16,15 @@ from ._proofs import request_dependency_status, stop_mode
 from ._request_ledger import dispatch_until, retry_limit
 from ._request_recovery import is_open
 from ._run_park import dispatch_allowed, pause_withdraws
+from ._scope_order import holds_back
 from ._step import advance_run_time, step
 from ._step_attempts import (
     dispatched,
     epoch_opened,
+    finish,
     forgotten,
     interrupted,
     open_record,
-    report_of,
     started,
 )
 from ._step_log import decode_event, decode_interruption, decode_request, decode_result
@@ -111,12 +112,14 @@ def _finish(
 ) -> CoreState:
     tag = RequestId(root=message.tag)
     state = dispatched(state, tag)
-    report = report_of(state, tag, decode_result(message, registry))
-    state = forgotten(step(state, report).state, tag)
+    report, owner_events = finish(state, tag, decode_result(message, registry))
+    state = step(state, report).state
+    for event in owner_events:
+        state = step(state, event).state
     if any(is_open(row) for row in state.records.find(tag)):
         problem = f"the log finishes step {tag.root} with an observation that does not end it"
         raise ValueError(problem)
-    return state
+    return forgotten(state, tag)
 
 
 _CORE_RECORDS = frozenset({"core_input", "step_started", "step_finished", "attempt_interrupted"})
@@ -176,7 +179,11 @@ def _start_or_settle(state: CoreState, record: RequestRecord, now: float) -> Run
             return Settle(tag=tag, result=Failed(reason=FailureReason.ATTEMPTS_EXHAUSTED))
     if now >= record.until.at:
         return Settle(tag=tag, result=Cancelled(reason=CancelReason.DEADLINE))
-    if dependencies is DependencyStatus.PENDING or not _may_start(state, record):
+    if (
+        dependencies is DependencyStatus.PENDING
+        or not _may_start(state, record)
+        or holds_back(state, record)
+    ):
         return None
     deadline = (
         record.until

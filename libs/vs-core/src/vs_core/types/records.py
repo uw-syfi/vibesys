@@ -30,12 +30,14 @@ from .common import (
     LifecycleClass,
     Observation,
     ObservationStatus,
+    OperationDescriptor,
     OperationId,
     OperationRef,
     OperationSchemaRef,
     RequestBase,
     RequestId,
     ResourceId,
+    RevisionAuthority,
     RevisionRef,
     SchemaRef,
     Scope,
@@ -60,6 +62,7 @@ from .evaluation import (
 from .evaluation_history import EvaluationTerminalFacts
 from .job_observations import JobProgress, MeasurementFailure
 from .sessions import (
+    Access,
     CancelTurn,
     CloseSession,
     DispatchTurn,
@@ -975,6 +978,78 @@ def request_interrupt_policy(request: Request) -> InterruptPolicy:
             return request.operation.schema_ref.on_interrupt
         case _:
             return InterruptPolicy.RERUN
+
+
+class StepEffect(StrEnum):
+    """What a step does to the files of its scope's workspace, for ordering steps of one scope."""
+
+    WRITES = "writes"
+    """It may change the files: an agent turn that can write, a workspace set up or reset, an
+    operation not known to leave the tree alone."""
+
+    SNAPSHOTS = "snapshots"
+    """It reads the files to retain them, so no writer may run beside it or before it ends."""
+
+    NEITHER = "neither"
+    """It leaves the files of the scope alone."""
+
+
+def request_effect(request: Request, registry: tuple[OperationDescriptor, ...]) -> StepEffect:
+    """Classify the canonical request by what it does to its scope's files.
+
+    The recovery rule runs a snapshot only when every writer of its scope has a result, and starts
+    no writer while a snapshot runs. A registered operation is judged by its descriptor in
+    ``registry``: a revision authority of snapshot or retain snapshots, a restore writes, and
+    any other operation that is not a query is a writer, because a descriptor does not yet
+    declare whether it touches the tree. An operation with no descriptor is a writer.
+    """
+    match request:
+        case ExecuteRegisteredOperation():
+            return _operation_effect(request, registry)
+        case DispatchTurn() | ResumeSessionTurn():
+            read_only = request.turn.session.access == Access.READ_ONLY
+            return StepEffect.NEITHER if read_only else StepEffect.WRITES
+        case EnsureWorkspace() | RestoreRevision():
+            return StepEffect.WRITES
+        case SnapshotAndRetain() | SnapshotAndRetainRun() | RetainRevision():
+            return StepEffect.SNAPSHOTS
+        case (
+            SubmitMeasurement()
+            | InspectTurn()
+            | ObserveOwnedJob()
+            | InspectOwnedJob()
+            | CollectEvidence()
+            | InspectRequest()
+            | VerifyAdoption()
+            | DiscardWorkspace()
+            | CloseAttemptScope()
+            | EnsureSession()
+            | CancelTurn()
+            | CloseSession()
+            | CancelOwnedJob()
+            | AdoptRevision()
+            | CancelOwnedResource()
+            | BlockRequest()
+        ):
+            return StepEffect.NEITHER
+        case _:
+            assert_never(request)
+
+
+def _operation_effect(
+    request: ExecuteRegisteredOperation, registry: tuple[OperationDescriptor, ...]
+) -> StepEffect:
+    kind = request.operation.schema_ref.kind
+    descriptor = next((row for row in registry if row.kind == kind), None)
+    if descriptor is None:
+        return StepEffect.WRITES
+    if descriptor.revision_authority in (RevisionAuthority.SNAPSHOT, RevisionAuthority.RETAIN):
+        return StepEffect.SNAPSHOTS
+    if descriptor.revision_authority == RevisionAuthority.DISCARD:
+        return StepEffect.NEITHER
+    if descriptor.lifecycle == LifecycleClass.QUERY:
+        return StepEffect.NEITHER
+    return StepEffect.WRITES
 
 
 def request_lifecycle(request: Request) -> LifecycleClass:

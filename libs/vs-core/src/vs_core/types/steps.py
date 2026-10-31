@@ -14,6 +14,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
+from .attempts import AttemptsEvent
 from .common import (
     ContractValidationError,
     Count,
@@ -23,8 +24,20 @@ from .common import (
     Value,
     unset,
 )
+from .evaluation import EvaluationEvent
 from .records import RequestObserved
+from .sessions import SessionsEvent
+from .settlement import SettlementEvent
 from .until import Failed
+
+type OwnerEvent = Annotated[
+    AttemptsEvent | SessionsEvent | EvaluationEvent | SettlementEvent, Field(discriminator="kind")
+]
+"""What an executor tells the area that owns the resource of its request, beside the observation.
+
+The ledger derives an owner event of its own from a report (``_request_forward.owner_signals``),
+but not every fact: a plain turn's reply, a mid-turn input the provider refused and a job's failure
+classification reach core only as the executor's own events."""
 
 
 class CancelReason(StrEnum):
@@ -72,11 +85,15 @@ class Finished(Value):
 
     A step whose executor reports more than the observation (a turn's reply, evidence, a
     revision) carries the whole report in ``observed``, whose observation is ``observation``.
+    ``owner_events`` are the events the executor returned beside the report. Core applies the
+    report first and then each of them in order, as the live shell does, and one record holds all
+    of them, so a crash loses none.
     """
 
     kind: Literal["finished"] = "finished"
     observation: Observation
     observed: RequestObserved | None = Field(default=None, exclude_if=unset)
+    owner_events: tuple[OwnerEvent, ...] = Field(default=(), exclude_if=unset)
 
     @model_validator(mode="after")
     def report_is_of_the_observation(self) -> Finished:
@@ -149,6 +166,7 @@ __all__ = [
     "Finished",
     "InterruptPolicy",
     "Interruption",
+    "OwnerEvent",
     "StepAttempts",
     "StepResult",
     "StepsState",
