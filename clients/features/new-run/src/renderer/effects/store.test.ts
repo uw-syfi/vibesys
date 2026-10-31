@@ -4,7 +4,7 @@ import {REQUIRED_HELPER_FEATURES} from '@vibesys/hosts';
 import type {DestinationFound, MeasureTarget, Offered} from '@vibesys/ipc';
 import {computeSettings, exampleCatalogue} from '@vibesys/run-fixtures';
 import type {RecentRun, RunRef} from '@vibesys/runs';
-import type {Draft} from '../../state/index.js';
+import type {Draft, NewRunEvent} from '../../state/index.js';
 import {
   backendOf,
   destinationTaken,
@@ -119,6 +119,31 @@ test('the form follows the runs opened until the user changes an input', async (
   store.dispatch({type: 'recent', recent: [recentRun('local', '/q', 3)]});
   expect(store.getState().context.form.machine).toBe('ssh:gpu');
   expect(store.getState().context.answers.from).toBe('project');
+});
+
+test('what the machines report does not stop the form following the runs opened, whenever it arrives', () => {
+  // The shell sends `compute` as each machine's Settings data is read, and `recent` as the runs
+  // are listed; neither is the user's. Every way the two can interleave, `recent` last or first or
+  // between reports, leaves the form on the machine of the last run.
+  const reports: NewRunEvent[] = [
+    {type: 'compute', machine: 'local', compute: null},
+    {type: 'compute', machine: 'ssh:gpu', compute: {kind: 'unsupported'}},
+    {type: 'compute', machine: 'local', compute: {kind: 'unsupported'}},
+    {type: 'more_options', machine: 'local', open: true},
+  ];
+  const recent: NewRunEvent = {type: 'recent', recent: [recentRun('ssh:gpu', '/p', 2)]};
+  for (let at = 0; at <= reports.length; at += 1) {
+    const {store, stop} = createNewRunStore(fakeBridge(), {
+      recent: [],
+      schedule: manualSchedule().schedule,
+      started: () => undefined,
+    });
+    for (const event of [...reports.slice(0, at), recent, ...reports.slice(at)]) {
+      store.dispatch(event);
+    }
+    expect(store.getState().context.form.machine, `recent after ${at} reports`).toBe('ssh:gpu');
+    stop();
+  }
 });
 
 test('a started run is handed on, and a fresh form on the same machine follows it', async () => {

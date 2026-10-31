@@ -184,6 +184,12 @@ export function createNewRunStore(
         options.moreOptions?.write(moreOpen);
         return;
       }
+      if (event.type === 'compute') {
+        // What the machine has set up is read from its Settings data, not chosen: it arrives when
+        // the data does, before or after the runs opened, and must not decide which form this is.
+        current.send(event);
+        return;
+      }
       if (event.type !== 'recent') {
         edited = true;
         current.send(event);
