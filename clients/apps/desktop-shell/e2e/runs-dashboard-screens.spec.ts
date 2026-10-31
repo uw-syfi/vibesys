@@ -2,8 +2,8 @@ import {mkdirSync, writeFileSync} from 'node:fs';
 import {expect, type Page, test} from '@playwright/test';
 import {fixtureNamed} from '@vibesys/run-fixtures';
 import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
-import {KNOWN_FAILURES} from './checks/known-failures.js';
-import {report, screenCheck} from './checks/screen-check.js';
+import {KnownLedger} from './checks/known-ledger.js';
+import {SCREEN_CHECKS, screenCheck} from './checks/screen-check.js';
 import {settled} from './checks/settle.js';
 import {
   dashboardWorld,
@@ -29,6 +29,7 @@ const WIDTHS = [1440, 1000, 660] as const;
 const shots = process.env['SCREENS_DIR'] || undefined;
 if (shots !== undefined) mkdirSync(shots, {recursive: true});
 const sheet: SheetEntry[] = [];
+const ledger = new KnownLedger('dashboard');
 
 const NEEDS_YOU: readonly RunCase[] = MANY_RUNS.filter(run => run.attention !== undefined);
 
@@ -42,11 +43,10 @@ const DASHBOARDS: readonly (readonly [string, readonly RunCase[]])[] = [
 
 async function check(page: Page, name: string, ignore: string[] = []): Promise<void> {
   await settled(page);
-  const found = (await screenCheck(page)).filter(each => !ignore.includes(each.check));
-  const result = report(name, found, KNOWN_FAILURES);
-  const lines = result.unexplained.map(
-    each => `${name}: [${each.check}] ${each.message} (${each.where})`,
+  const found = (await screenCheck(page, SCREEN_CHECKS)).filter(
+    each => !ignore.includes(each.check),
   );
+  const lines = ledger.unexplained(name, found);
   if (shots !== undefined) {
     const file = `${name.replaceAll('/', '__')}.png`;
     await page.screenshot({path: `${shots}/${file}`});
@@ -137,6 +137,8 @@ for (const width of WIDTHS) {
     await check(page, `rail/settings/${width}`, ['legend']);
   });
 }
+
+ledger.requireEveryFailure(() => ledger.screens >= WIDTHS.length * (DASHBOARDS.length + 3));
 
 test('the contact sheet shows every dashboard and rail screen', async ({browser}) => {
   test.skip(shots === undefined, 'set SCREENS_DIR to write the screenshots and the contact sheet');

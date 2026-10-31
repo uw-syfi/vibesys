@@ -8,7 +8,14 @@ from typing import TYPE_CHECKING, Self
 
 import vs_proto.api as p
 from vibesys.events import CoreEvent
-from vibesys.records.api import MappedEvent, MappingState, epoch_header, map_event
+from vibesys.records.api import (
+    MappedEvent,
+    MappingState,
+    build_intents,
+    build_span_table,
+    epoch_header,
+    map_event,
+)
 from vs_decode.api import Unreadable, decode_json
 from vs_runlog.api import current_epoch, epoch_has_ended, fold_skeleton
 
@@ -151,9 +158,9 @@ class RunLogTee:
             dirty=self._dirty,
             wall_span_clock=True,
             clock_epochs=(*epochs, (at.timestamp(), clock)),
-            intents=tuple(intents.items()),
-            spans=tuple(
-                (key, history.versions[-1].span.to_binary())
+            intents=build_intents(intents.items()),
+            span_table=build_span_table(
+                (key, history.versions[-1].span)
                 for key, history in fold_skeleton(records, log_offset=0).spans.items()
                 if history.versions and history.versions[-1].span is not None
             ),
@@ -167,7 +174,7 @@ class RunLogTee:
     def intent(self, control_id: str) -> p.IntentState | None:
         """Return a previously recorded outcome without exposing mutable projection state."""
         if self._state is not None:
-            payload = dict(self._state.intents).get(control_id)
+            payload = self._state.intents.get(control_id)
             return None if payload is None else p.IntentState.from_binary(payload)
         for record in reversed(self._writer.read()):
             body = record.body
