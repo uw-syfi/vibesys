@@ -7,8 +7,7 @@
 import {encodeUpdate, gatewayReply, parseSubscribeCall, SUBSCRIPTION_CHANNEL} from '@vibesys/ipc';
 import type {SubscriptionPort} from '@vibesys/subscription';
 import {registerAbort} from '@vibesys/transport';
-import type {IpcMain} from 'electron';
-import {type PortCall, servePort} from './port-ipc.js';
+import {type PortCall, type PortIpc, servePort} from './port-ipc.js';
 import type {WelcomeInvokeEvent} from './welcome-ipc.js';
 
 /** What one window's request does: observe until the hub or the window ends it. */
@@ -34,7 +33,7 @@ export function subscriptionCall(hub: SubscriptionPort): PortCall {
 }
 
 export function installSubscriptionIpc(
-  ipc: IpcMain,
+  ipc: PortIpc,
   {hub, admits}: {hub: SubscriptionPort; admits: (event: WelcomeInvokeEvent) => boolean},
 ): void {
   servePort(ipc, SUBSCRIPTION_CHANNEL, admits, subscriptionCall(hub));

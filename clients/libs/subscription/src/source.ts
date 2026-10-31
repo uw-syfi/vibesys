@@ -30,6 +30,15 @@ export interface SubscriptionSource<S> {
 
 const NOT_OBSERVED: SubscriptionState<never> = CONNECTING;
 
+/** Whether two window states show a screen the same thing, without computing what they show. */
+function sameView(left: WindowState, right: WindowState): boolean {
+  if (!sameControl(left.control, right.control) || left.fold.broken !== right.fold.broken)
+    return false;
+  // A snapshot under construction, or data while main says there is no value, shows nothing.
+  const shows = right.control.kind === 'live' || right.control.kind === 'stale';
+  return !shows || left.fold.map === right.fold.map;
+}
+
 export function subscriptionSource<S>(
   port: SubscriptionPort,
   host: HostKey,
@@ -39,21 +48,19 @@ export function subscriptionSource<S>(
   const listeners = new Set<() => void>();
   let call: {cancel(): void} | null = null;
   let window: WindowState = INITIAL_WINDOW;
-  let current: SubscriptionState<S> = NOT_OBSERVED;
+  // The window at the last notification, and the state computed from it. The state is computed
+  // when a listener reads it, not when an update arrives, so a burst of updates before a read
+  // costs one `topic.fold` and not one per update.
+  let notified: WindowState = INITIAL_WINDOW;
+  let read: {readonly of: WindowState; readonly state: SubscriptionState<S>} = {
+    of: INITIAL_WINDOW,
+    state: NOT_OBSERVED,
+  };
 
   const publish = (next: WindowState): void => {
-    const previous = window;
     window = next;
-    // What the screen cannot see does not wake it: a snapshot under construction, or data while
-    // main says there is no value to show.
-    const shows = next.control.kind === 'live' || next.control.kind === 'stale';
-    if (
-      sameControl(previous.control, next.control) &&
-      previous.fold.broken === next.fold.broken &&
-      (!shows || previous.fold.map === next.fold.map)
-    )
-      return;
-    current = stateOf(topic, next);
+    if (sameView(notified, next)) return;
+    notified = next;
     for (const listener of [...listeners]) listener();
   };
 
@@ -70,7 +77,8 @@ export function subscriptionSource<S>(
     call?.cancel();
     call = null;
     window = INITIAL_WINDOW;
-    current = NOT_OBSERVED;
+    notified = INITIAL_WINDOW;
+    read = {of: INITIAL_WINDOW, state: NOT_OBSERVED};
   };
 
   return {
@@ -82,6 +90,9 @@ export function subscriptionSource<S>(
         if (listeners.size === 0) close();
       };
     },
-    getSnapshot: () => current,
+    getSnapshot() {
+      if (!sameView(read.of, window)) read = {of: window, state: stateOf(topic, window)};
+      return read.state;
+    },
   };
 }

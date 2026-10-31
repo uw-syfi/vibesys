@@ -8,7 +8,11 @@
 import {fromBinary, toBinary} from '@bufbuild/protobuf';
 import type {HostKey, ListingStep} from '@vibesys/hosts';
 import {clockFrom} from '@vibesys/machine';
-import {SubscribeRequestSchema, SubscribeResponseSchema} from '@vibesys/proto';
+import {
+  type SubscribeRequest,
+  SubscribeRequestSchema,
+  SubscribeResponseSchema,
+} from '@vibesys/proto';
 import {
   type AnyTopic,
   type ConnectStep,
@@ -62,7 +66,10 @@ interface Observer {
 
 interface InstanceParts {
   readonly host: HostKey;
+  /** What the machine folds with: the registry's descriptor of the request's topic. */
   readonly topic: AnyTopic;
+  /** What the machine opens, and what the instance is keyed by: the one request, validated. */
+  readonly request: SubscribeRequest;
   readonly streams: SubscriptionStreams;
   readonly schedule: ScheduleTimeout;
   readonly now: () => Instant;
@@ -80,8 +87,8 @@ class Instance {
 
   constructor(parts: InstanceParts) {
     this.#parts = parts;
-    const {host, topic, streams, schedule, now} = parts;
-    const bytes = toBinary(SubscribeRequestSchema, topic.request);
+    const {host, topic, request, streams, schedule, now} = parts;
+    const bytes = toBinary(SubscribeRequestSchema, request);
     this.#actor = createActor(
       subscriptionMachine.provide({
         actors: {
@@ -113,12 +120,16 @@ class Instance {
     this.#actor.start();
   }
 
-  /** Bring a new observer up to date: the data it missed, then the control that goes with it. */
+  /**
+   * Add an observer and bring it up to date: the data it missed, then the control that goes with
+   * it. It is a member before the first delivery, so it is released like any other whatever that
+   * delivery does, and the replay is delivered as every later update is.
+   */
   join(observer: Observer): void {
-    const {fold} = this.#actor.getSnapshot().context;
-    for (const update of replayUpdates(fold, observer.key)) observer.receive(update);
-    observer.receive({kind: 'control', control: this.#control});
     this.observers.add(observer);
+    const {fold} = this.#actor.getSnapshot().context;
+    for (const update of replayUpdates(fold, observer.key)) this.#send(observer, update);
+    this.#send(observer, {kind: 'control', control: this.#control});
   }
 
   leave(observer: Observer): void {
@@ -155,18 +166,23 @@ class Instance {
     for (const observer of observers) observer.ended();
   }
 
+  /** An observer cancelled by an earlier observer's callback in the same update hears nothing. */
+  #deliver(update: SubscriptionUpdate): void {
+    for (const observer of [...this.observers]) {
+      if (this.observers.has(observer)) this.#send(observer, update);
+    }
+  }
+
   /**
    * Observers are isolated from the machine and from each other: one that throws is reported and
    * the rest still hear the update, because an exception inside the actor would end it.
    */
-  #deliver(update: SubscriptionUpdate): void {
-    for (const observer of [...this.observers]) {
-      if (!wants(observer, update)) continue;
-      try {
-        observer.receive(update);
-      } catch (cause) {
-        this.#parts.report(cause);
-      }
+  #send(observer: Observer, update: SubscriptionUpdate): void {
+    if (!wants(observer, update)) return;
+    try {
+      observer.receive(update);
+    } catch (cause) {
+      this.#parts.report(cause);
     }
   }
 }
@@ -208,15 +224,22 @@ export class Subscriptions {
       return {cancel: () => {}};
     }
     const name = `${host}\0${Buffer.from(toBinary(SubscribeRequestSchema, request)).toString('base64')}`;
-    return this.#join(name, host, topic, {key, receive, ended});
+    return this.#join(name, host, topic, request, {key, receive, ended});
   };
 
-  #join(name: string, host: HostKey, topic: AnyTopic, observer: Observer): {cancel(): void} {
+  #join(
+    name: string,
+    host: HostKey,
+    topic: AnyTopic,
+    request: SubscribeRequest,
+    observer: Observer,
+  ): {cancel(): void} {
     let instance = this.#instances.get(name);
     if (instance === undefined) {
       instance = new Instance({
         host,
         topic,
+        request,
         streams: this.streams,
         schedule: this.schedule,
         now: this.now,
@@ -228,15 +251,22 @@ export class Subscriptions {
       this.#instances.set(name, instance);
     }
     const joined = instance;
-    joined.join(observer);
     let released = false;
-    return {
+    const handle = {
       cancel: () => {
         if (released) return;
         released = true;
         joined.leave(observer);
       },
     };
+    try {
+      joined.join(observer);
+    } catch (error) {
+      // An instance made for this observer must not outlive a join that did not complete.
+      handle.cancel();
+      throw error;
+    }
+    return handle;
   }
 
   /** The relay as a window's port, for what serves windows. */
@@ -253,7 +283,13 @@ export class Subscriptions {
   ): () => void {
     const source = subscriptionSource(this.port, host, topic, key);
     const release = source.subscribe(() => listener(source.getSnapshot()));
-    listener(source.getSnapshot());
+    try {
+      listener(source.getSnapshot());
+    } catch (error) {
+      // The caller gets no handle from a call that throws, so nothing else could release it.
+      release();
+      throw error;
+    }
     return release;
   }
 

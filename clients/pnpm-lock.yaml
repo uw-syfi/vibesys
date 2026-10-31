@@ -350,6 +350,9 @@ importers:
       '@vibesys/store':
         specifier: workspace:*
         version: link:../../libs/store
+      '@vibesys/subscription':
+        specifier: workspace:*
+        version: link:../../libs/subscription
       '@vibesys/transport':
         specifier: workspace:*
         version: link:../../libs/transport

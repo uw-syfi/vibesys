@@ -2,29 +2,13 @@ import {expect, test} from 'bun:test';
 import {create} from '@bufbuild/protobuf';
 import {SubscribeRequestSchema, TopicFailureCode} from '@vibesys/proto';
 import {type SubscriptionState, type SubscriptionUpdate, TOPICS} from '@vibesys/subscription';
-import {FakeClock} from '@vibesys/transport/testing';
-import {FakeSubscribeStreams} from '../testing/fake-subscribe-streams.js';
-import {SubscriptionFailed, Subscriptions} from './subscriptions.js';
+import {hubRig, settle} from '../testing/hub-rig.js';
+import {SubscriptionFailed} from './subscriptions.js';
 
 const HOST = 'ssh:host-a';
 const topic = TOPICS.machineStats;
 
-function hub() {
-  const clock = new FakeClock();
-  const gateway = new FakeSubscribeStreams();
-  const reported: unknown[] = [];
-  const subscriptions = new Subscriptions(
-    gateway,
-    clock.schedule,
-    () => clock.now(),
-    error => reported.push(error),
-  );
-  return {clock, gateway, subscriptions, reported};
-}
-
-async function settle(): Promise<void> {
-  for (let drain = 0; drain < 5; drain += 1) await Promise.resolve();
-}
+const hub = hubRig;
 
 test('an observer that throws is reported and does not stop the others or the machine', () => {
   const {gateway, subscriptions, reported} = hub();

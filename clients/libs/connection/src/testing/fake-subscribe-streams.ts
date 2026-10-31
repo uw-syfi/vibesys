@@ -9,7 +9,8 @@ import {
 } from '@vibesys/proto';
 import {SUBSCRIBE_METHOD} from '@vibesys/subscription';
 import {GrpcError, registerAbort} from '@vibesys/transport';
-import type {SubscriptionStreams} from '../shell/subscriptions.js';
+import {FakeClock} from '@vibesys/transport/testing';
+import {type SubscriptionStreams, Subscriptions} from '../shell/subscriptions.js';
 
 /** A frame as a test writes it: the case and the value's fields. */
 type Frame = NonNullable<MessageInitShape<typeof SubscribeResponseSchema>['frame']>;
@@ -28,6 +29,11 @@ export interface FakeSubscribeStream {
    * stream, and a stream that was left or ended hears nothing.
    */
   send(frame: Frame): void;
+  /**
+   * A frame that reaches the hub's callback after the connection left this stream, as one in
+   * flight does. The real connection drops such frames too; the hub must not trust that.
+   */
+  sendLate(frame: Frame): void;
   end(): void;
   fail(error?: Error): void;
 }
@@ -77,10 +83,7 @@ export class FakeSubscribeStreams implements SubscriptionStreams {
         },
         send: frame => {
           if (!open) return;
-          const encoded = toBinary(
-            SubscribeResponseSchema,
-            create(SubscribeResponseSchema, {frame}),
-          );
+          const encoded = encode(frame);
           try {
             validateHostPayload(method, 'output', encoded);
             receive(encoded);
@@ -88,9 +91,20 @@ export class FakeSubscribeStreams implements SubscriptionStreams {
             finish(() => reject(new GrpcError(15, `invalid Subscribe response: ${String(cause)}`)));
           }
         },
+        sendLate: frame => receive(encode(frame)),
         end: () => finish(resolve),
         fail: error => finish(() => reject(error ?? new GrpcError(14, 'connection lost'))),
       });
     });
   }
+}
+
+function encode(frame: Frame): Uint8Array {
+  return toBinary(SubscribeResponseSchema, create(SubscribeResponseSchema, {frame}));
+}
+
+/** A hub over a gateway that no one watches, for tests that never look at a subscription. */
+export function idleSubscriptions(): Subscriptions {
+  const clock = new FakeClock();
+  return new Subscriptions(new FakeSubscribeStreams(), clock.schedule, () => clock.now());
 }

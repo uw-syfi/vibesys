@@ -27,5 +27,10 @@ export {
   type FakeRunStream,
   idleRunWatch,
 } from './fake-run-gateway.js';
+export {
+  type FakeSubscribeStream,
+  FakeSubscribeStreams,
+  idleSubscriptions,
+} from './fake-subscribe-streams.js';
 export {commandOf, olderHost} from './older-host.js';
 export {phaseReached} from './phase-reached.js';

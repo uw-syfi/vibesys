@@ -160,6 +160,47 @@ test('five failures in a row are a failed answer that keeps trying, until one st
   expect(harness.control.kind).toBe('live');
 });
 
+test('the numbers are the contract: five losses in a row, the backoffs of 1, 2, 4 and 8 seconds, then every 30', async () => {
+  const harness = new Harness(LEASE_ONLY);
+  const backoffs = [1_000, 2_000, 4_000, 8_000];
+  for (const [index, wait] of backoffs.entries()) {
+    await settle();
+    harness.latest.fail();
+    await settle();
+    expect(harness.control).toMatchObject({kind: 'connecting', attempt: index + 1});
+    harness.clock.advanceBy(wait - 1);
+    expect(harness.open).toHaveLength(0);
+    harness.clock.advanceBy(1);
+    expect(harness.open).toHaveLength(1);
+  }
+  harness.latest.fail();
+  await settle();
+  // The fifth loss is the answer, and a host that keeps failing is tried every 30 seconds.
+  expect(harness.control).toEqual({kind: 'failed', reason: 'unreachable', retrying: true});
+  harness.clock.advanceBy(29_999);
+  expect(harness.open).toHaveLength(0);
+  harness.clock.advanceBy(1);
+  expect(harness.open).toHaveLength(1);
+});
+
+test('losses do not accumulate across recoveries: five in a row, not five over a week', async () => {
+  const harness = new Harness(LEASE_ONLY);
+  await live(harness);
+  for (let loss = 1; loss <= 3; loss += 1) {
+    harness.latest.fail();
+    await settle();
+    harness.clock.advanceBy(backoffMs(loss));
+  }
+  await live(harness);
+  expect(harness.control.kind).toBe('live');
+  harness.latest.fail();
+  await settle();
+  // One loss since it was last live, so it backs off one second, not eight.
+  expect(harness.control).toEqual({kind: 'stale', reason: 'ended', attempt: 1});
+  harness.clock.advanceBy(1_000);
+  expect(harness.open).toHaveLength(1);
+});
+
 test('an unsupported topic or a broken frame stops the retries, and only retry starts them again', async () => {
   for (const [reason, break_] of [
     ['unsupported', (stream: FakeStream) => stream.send({type: 'refused', reason: 'unsupported'})],

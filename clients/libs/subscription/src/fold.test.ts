@@ -144,13 +144,19 @@ const ANY_UPDATE: fc.Arbitrary<DataUpdate> = fc.oneof(
 );
 
 /** What one step of an arbitrary sequence must keep true. */
-function checkStep(before: Fold, update: DataUpdate, after: Fold, first: boolean): void {
+function checkStep(
+  before: Fold,
+  update: DataUpdate,
+  after: Fold,
+  first: boolean,
+  published: [string, TopicEntry][],
+): void {
   if (before.broken && update.kind !== 'begin') expect(after).toBe(before);
   if (before.broken && update.kind === 'begin') expect(after.map).toBeNull();
   // No stream is open before the first `begin`, so nothing else may arrive.
   if (first && update.kind !== 'begin') expect(after.broken).toBe(true);
-  // A published snapshot is never edited, only replaced.
-  if (before.map !== null && after.map === before.map) expect(after.map.size).toBe(before.map.size);
+  // A published snapshot is never edited, only replaced: what it held before is what it holds now.
+  if (before.map !== null) expect([...before.map.entries()]).toEqual(published);
   expect(after.map?.size ?? 0).toBeLessThanOrEqual(MANY.policy.maxKeys);
   expect(after.building?.size ?? 0).toBeLessThanOrEqual(MANY.policy.maxKeys);
 }
@@ -160,8 +166,10 @@ test('property: any update sequence folds without throwing, and a broken fold st
     fc.property(fc.array(ANY_UPDATE, {maxLength: 30}), updates => {
       let fold: Fold = EMPTY_FOLD;
       for (const [index, update] of updates.entries()) {
+        // What the published snapshot holds before the step, copied so the step cannot change it.
+        const published = [...(fold.map ?? new Map<string, TopicEntry>()).entries()];
         const next = foldUpdate(MANY, fold, update);
-        checkStep(fold, update, next, index === 0);
+        checkStep(fold, update, next, index === 0, published);
         fold = next;
       }
     }),

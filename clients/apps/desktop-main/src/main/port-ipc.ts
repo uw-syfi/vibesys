@@ -6,8 +6,52 @@
  */
 import {gatewayEnd} from '@vibesys/ipc';
 import {grpcCode} from '@vibesys/transport';
-import type {IpcMain, IpcMainEvent} from 'electron';
 import {rendererGeneration, type WelcomeInvokeEvent} from './welcome-ipc.js';
+
+/*
+ * What the lifecycle uses of Electron, and no more: Electron's `IpcMain`, `IpcMainEvent` and
+ * `MessagePortMain` satisfy these, and a test fills them with a Fake that holds the same rules.
+ */
+
+/** The main side of the port a call arrives on and is answered on. */
+export interface PortEnd {
+  on(event: 'message' | 'close', listener: () => void): unknown;
+  start(): void;
+  postMessage(message: Uint8Array): void;
+  close(): void;
+}
+
+/** The document that sent the call. */
+export interface PortFrame {
+  readonly processId: number;
+  readonly routingId: number;
+  readonly url: string;
+}
+
+/** The page that sent the call, and the ways it can go away. */
+export interface PortSender {
+  readonly id: number;
+  readonly mainFrame: unknown;
+  once(event: 'destroyed', listener: () => void): unknown;
+  on(
+    event: 'did-start-navigation',
+    listener: (event: unknown, url: string, inPage: boolean, mainFrame: boolean) => void,
+  ): unknown;
+  removeListener(
+    event: 'destroyed' | 'did-start-navigation',
+    listener: (...args: never[]) => void,
+  ): unknown;
+}
+
+export interface PortEvent {
+  readonly ports: readonly PortEnd[];
+  readonly sender: PortSender;
+  readonly senderFrame: PortFrame | null;
+}
+
+export interface PortIpc {
+  on(channel: string, listener: (event: PortEvent, value: unknown) => void): unknown;
+}
 
 /** What a call does: read the request, send replies through `send`, return when it is over. */
 export type PortCall = (
@@ -17,7 +61,7 @@ export type PortCall = (
 ) => Promise<void>;
 
 export function servePort(
-  ipc: IpcMain,
+  ipc: PortIpc,
   channel: string,
   admits: (event: WelcomeInvokeEvent) => boolean,
   call: PortCall,
@@ -71,7 +115,7 @@ export function endOf(error?: unknown): Uint8Array {
   return gatewayEnd(message, status);
 }
 
-function authorize(event: IpcMainEvent, admits: (event: WelcomeInvokeEvent) => boolean): void {
+function authorize(event: PortEvent, admits: (event: WelcomeInvokeEvent) => boolean): void {
   if (
     event.senderFrame !== event.sender.mainFrame ||
     !admits({

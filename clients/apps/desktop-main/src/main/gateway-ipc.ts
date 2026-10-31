@@ -17,8 +17,7 @@ import {type HostId, type HostKey, hostFromKey} from '@vibesys/hosts';
 import {GATEWAY_CHANNEL, gatewayReply, parseGatewayRequest} from '@vibesys/ipc';
 import {configuredHostCall, configuredRead, HOST_CALL_METHOD} from '@vibesys/runs/intents';
 import type {ScheduleTimeout} from '@vibesys/transport';
-import type {IpcMain} from 'electron';
-import {servePort} from './port-ipc.js';
+import {type PortIpc, servePort} from './port-ipc.js';
 import type {WelcomeInvokeEvent} from './welcome-ipc.js';
 
 export function createGatewayCalls(
@@ -37,7 +36,7 @@ export function createGatewayCalls(
 }
 
 export function installGatewayIpc(
-  ipc: IpcMain,
+  ipc: PortIpc,
   {
     calls,
     checkout,

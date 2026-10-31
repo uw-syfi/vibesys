@@ -363,7 +363,7 @@ function listedHosts(parts: {
   readonly broadcast: (listing: HostListing) => void;
   readonly endLogin?: (id: HostId) => void;
   readonly runs: ReturnType<typeof runWatch>;
-  /** A host that leaves the desired set ends the subscriptions on it. */
+  /** Removing a host ends the subscriptions on it (`Hosts.remove`). */
   readonly subscriptions: Pick<Subscriptions, 'closeHost'>;
 }): {readonly hosts: Hosts; readonly setup: ReturnType<typeof registrySetup>} {
   const {manager, settings, gateway, history, notifier, welcome, broadcast, endLogin, runs} = parts;
@@ -381,6 +381,7 @@ function listedHosts(parts: {
       setup,
       ...(endLogin === undefined ? {} : {endLogin}),
       runs,
+      subscriptions,
       catalog: registryRunCatalog({
         checkout: effectiveCheckout(settings, REPOSITORY_ROOT),
         unary: (id, bytes, signal) => gateway.unary(hostKey(id), READ_METHOD, bytes, signal),
@@ -405,7 +406,6 @@ function listedHosts(parts: {
       retire: host => {
         history.invalidateHost(host);
         welcome.retireHost(host);
-        subscriptions.closeHost(host);
       },
     }),
   };

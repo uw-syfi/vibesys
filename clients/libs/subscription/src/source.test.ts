@@ -119,3 +119,33 @@ function wording(state: SubscriptionState<unknown>): string {
 test('the state type names each way a subscription can be', () => {
   expect(wording(CONNECTING)).toBe('connecting gateway');
 });
+
+test('the state is computed when it is read, once for a burst of updates, and again only after a change', () => {
+  const port = new FakeSubscriptionPort();
+  let folds = 0;
+  const counting = {
+    ...machineStats,
+    fold: (entries: Parameters<typeof machineStats.fold>[0]) => {
+      folds += 1;
+      return machineStats.fold(entries);
+    },
+  };
+  const source = subscriptionSource(port, HOST, counting);
+  const woken: number[] = [];
+  source.subscribe(() => woken.push(woken.length));
+  const call = port.calls[0];
+  for (const update of DATA) call?.send(update);
+  call?.send({kind: 'control', control: {kind: 'live', since: 1}});
+  const afterSnapshot = folds;
+  for (let at = 10; at < 60; at += 1) call?.send({kind: 'entry', entry: statsEntry('machine', at)});
+  // A burst of fifty changes costs no fold until a screen reads...
+  expect(folds).toBe(afterSnapshot);
+  // ...and one when it does, however many reads follow.
+  const state = source.getSnapshot();
+  expect(source.getSnapshot()).toBe(state);
+  expect(folds).toBe(afterSnapshot + 1);
+  expect(state.kind === 'live' ? state.value.sampledAt?.nanos : null).toBe(59_000_000);
+  call?.send({kind: 'entry', entry: statsEntry('machine', 99)});
+  expect(source.getSnapshot()).not.toBe(state);
+  expect(folds).toBe(afterSnapshot + 2);
+});
