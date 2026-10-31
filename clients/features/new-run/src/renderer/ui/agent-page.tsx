@@ -8,6 +8,7 @@ import type {HarnessOffer} from '@vibesys/ipc';
 import {
   BrandMark,
   Button,
+  Chip,
   ChoiceTiles,
   Field,
   Row,
@@ -26,6 +27,7 @@ import {
   generationsIn,
   groupOf,
   harnessLabel,
+  installedHarnesses,
   modelAtTier,
   modelLabel,
   offersIn,
@@ -158,10 +160,9 @@ export function AgentPage(props: CardProps): JSX.Element {
     return <Text tone="warn">No agents</Text>;
   }
   const pick: Pick = (provider, model) => dispatch({type: 'agent', provider, model});
-  const installed =
-    context.facts?.for === machine && context.facts.value.kind === 'offered'
-      ? context.facts.value.value.harness_clis
-      : null;
+  const installed = installedHarnesses(context.facts, machine);
+  // The offers are ordered installed-first, so none of them being installed is the whole story.
+  const nothingInstalled = installed !== null && !offers.some(o => installed.includes(o.provider));
   return (
     <Stack gap="space-5">
       <Stack gap="space-3">
@@ -187,7 +188,10 @@ export function AgentPage(props: CardProps): JSX.Element {
         <ModelChoice offers={offers} group={group} agent={agent} pick={pick} />
       </Stack>
       <Stack gap="space-3">
-        <Text variant="section">Harness on {machineLabel(machine)}</Text>
+        <Row>
+          <Text variant="section">Harness on {machineLabel(machine)}</Text>
+          {nothingInstalled ? <Chip label="None installed" tone="warn" /> : null}
+        </Row>
         <ChoiceTiles
           label="Harness"
           layout="cards"
