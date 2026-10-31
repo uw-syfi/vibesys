@@ -1442,7 +1442,7 @@ expose = ["NativeProfilerPreflight", "ProfilerPreflight", "SessionAgents", "Sess
 [[modules]]
 path = "vs_core"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_runlog", "vs_proto", "vs_core._corevalue", "vs_core._generated", "vs_core._dispatch_episode", "vs_core._session_checkpoints", "vs_core._session_rows", "vs_core._session_scope", "vs_core._turn_outcomes", "vs_core._proofs", "vs_core._waits", "vs_core.types", "vs_core.types.common", "vs_core._values", "vs_core._outcomes", "vs_core._generated.vibesys.core.v1.common_cv", "vs_core._generated.vibesys.core.v1.vocabulary_cv"]
+depends_on = ["vs_proto", "vs_core._corevalue", "vs_core._generated", "vs_core._dispatch_episode", "vs_core._session_checkpoints", "vs_core._session_rows", "vs_core._session_scope", "vs_core._turn_outcomes", "vs_core._proofs", "vs_core._waits", "vs_core.types", "vs_core.types.common", "vs_core._values", "vs_core._outcomes", "vs_core._generated.vibesys.core.v1.common_cv", "vs_core._generated.vibesys.core.v1.vocabulary_cv"]
 
 [[interfaces]]
 from = ["vs_core"]
@@ -1707,15 +1707,6 @@ depends_on = ["vs_core", "vs_prompts", "vs_runtime", "vibesys.hypothesis", "vibe
 [[interfaces]]
 from = ["vibesys.orchestration.dynamic.core_policy"]
 expose = ["api", "api\\..*"]
-
-[[modules]]
-path = "vibesys.serial_replay"
-layer = "loops"
-depends_on = ["vs_core", "vs_issue_tracker", "vs_proto", "vs_runtime"]
-
-[[interfaces]]
-from = ["vibesys.serial_replay"]
-expose = ["roadmap_item", "serial_replay_bindings"]
 
 [[modules]]
 # A serial run's roadmap: the owner of the roadmap operations over the run's `Roadmap`, kept in

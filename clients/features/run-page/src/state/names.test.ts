@@ -16,7 +16,7 @@ describe('how a step is named for a person', () => {
   test('a step with its own headline keeps it, and its role is still named', () => {
     const step = {role: 'implementer', title: 'Pad the counters'};
     expect(stepTitle(step)).toBe('Pad the counters');
-    expect(stepLabel(step)).toBe('Implementer');
+    expect(stepLabel(step)).toBe('Builder');
   });
 
   test('a step without a role is named by its title', () => {
@@ -37,7 +37,7 @@ describe('the kicker over a step’s pane title', () => {
 
   test('names the role when the title is the step’s own headline', () => {
     expect(stepKicker({kind: 'agent_turn', role: 'implementer', title: 'Pad the counters'})).toBe(
-      'Agent turn · Implementer',
+      'Agent turn · Builder',
     );
     expect(stepKicker({kind: 'gate', role: null, title: 'correctness + benchmark'})).toBe('Gate');
   });

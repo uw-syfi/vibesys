@@ -34,8 +34,6 @@ export interface RunsDraft {
 const GROUP_OPTIONS: readonly SelectOption<GroupBy>[] = [
   {value: 'status', label: 'Status'},
   {value: 'machine', label: 'Machine'},
-  {value: 'task', label: 'Task'},
-  {value: 'agent', label: 'Agent'},
 ];
 
 const CHART_KEY: readonly ChartKeyItem[] = [
@@ -109,11 +107,12 @@ function Draft(props: {readonly draft: RunsDraft}): JSX.Element {
 }
 
 /**
- * The Runs dashboard: a header row with the title, the chart key and a Group by select, then every
- * run's tile in groups on a grid that fills the width, the runs that need their user first, each
- * run in one group. With no run and every machine listed it says so, with a New run action; before
- * that each machine still loading or stopped has a block of its steps (`loads`). Pressing a tile
- * opens its run (`open` is handed the tile's id); `menu` is a tile's row menu.
+ * The Runs dashboard: a header with the title and the chart key, and under it the machine the runs
+ * are narrowed to (when one is) and a Group by select, then every run's tile in groups on a grid
+ * that fills the width, the runs that need their user first, each run in one group. With no run and
+ * every machine listed it says so, with a New run action; before that each machine still loading or
+ * stopped has a block of its steps (`loads`). Pressing a tile opens its run (`open` is handed the
+ * tile's id); `menu` is a tile's row menu.
  */
 export function RunsScreen(props: {
   readonly tiles: readonly Tile[];
@@ -141,33 +140,41 @@ export function RunsScreen(props: {
     <Page
       width="fill"
       header={
-        <Row justify="between" gap="space-4" wrap>
-          <Text as="h1" variant="title">
-            Runs
-          </Text>
-          <Row gap="space-5" wrap>
-            {machine === null ? null : (
-              <Row gap="space-1">
-                <Chip label={machine} />
-                <Button
-                  variant="quiet"
-                  size="sm"
-                  icon="cross"
-                  label={`Remove ${machine}`}
-                  press={props.clearMachine}
-                />
-              </Row>
-            )}
-            {tiles.length === 0 ? null : (
-              <>
-                <ResultChartKey label="Chart key" items={CHART_KEY} />
-                <Field label="Group by" hideLabel>
-                  <Select value={by} options={GROUP_OPTIONS} change={props.group} size="sm" />
-                </Field>
-              </>
-            )}
+        <Stack gap="space-4">
+          <Row justify="between" gap="space-4" wrap>
+            <Text as="h1" variant="title">
+              Runs
+            </Text>
+            {tiles.length === 0 ? null : <ResultChartKey label="Chart key" items={CHART_KEY} />}
           </Row>
-        </Row>
+          {machine === null && tiles.length === 0 ? null : (
+            <Row gap="space-5" wrap>
+              {machine === null ? null : (
+                <Row gap="space-1">
+                  <Chip label={machine} />
+                  <Button
+                    variant="quiet"
+                    size="sm"
+                    icon="cross"
+                    label={`Remove ${machine}`}
+                    press={props.clearMachine}
+                  />
+                </Row>
+              )}
+              {tiles.length === 0 ? null : (
+                <Field label="Group by" hideLabel>
+                  <Select
+                    labelInside
+                    value={by}
+                    options={GROUP_OPTIONS}
+                    change={props.group}
+                    size="sm"
+                  />
+                </Field>
+              )}
+            </Row>
+          )}
+        </Stack>
       }
     >
       <Stack gap="space-5">

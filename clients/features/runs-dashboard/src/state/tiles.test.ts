@@ -19,7 +19,6 @@ import {
   type Tile,
   tileOf,
   tilesOf,
-  UNKNOWN_GROUP,
   type Verdict,
 } from './index.js';
 
@@ -50,11 +49,9 @@ function run(id: string, over: Partial<RunInput> = {}): RunInput {
     id,
     runId: id,
     title: id,
-    task: 'mpmc',
     started: null,
     machine: 'host-a',
     hardware: null,
-    agent: null,
     status: {kind: 'running', word: 'running'},
     problem: null,
     reason: null,
@@ -75,9 +72,7 @@ function run(id: string, over: Partial<RunInput> = {}): RunInput {
 
 function randomRun(random: Seeded, index: number): RunInput {
   return run(`run-${index}`, {
-    task: random.pick(['mpmc', 'spsc', 'mpsc']),
     machine: random.pick(['host-a', 'host-b']),
-    agent: random.pick(['Codex', 'Claude', null]),
     status: {kind: random.pick(STATUSES), word: 'word'},
     createdAt: random.int(5),
     points: random.bool() ? ideas(random) : null,
@@ -191,9 +186,7 @@ describe('a tile', () => {
   test('says machine and start time, leaving out what is unknown, under the title it is given', () => {
     expect(tileOf(run('a', {title: 'final'})).facts).toBe('host-a');
     expect(
-      tileOf(
-        run('a', {title: 'final', hardware: '8 cores', agent: 'Codex', started: 'Oct 19 04:21'}),
-      ).facts,
+      tileOf(run('a', {title: 'final', hardware: '8 cores', started: 'Oct 19 04:21'})).facts,
     ).toBe('host-a · Oct 19 04:21');
     expect(tileOf(run('a', {title: 'queue-rs-final2827'})).title).toBe('queue-rs-final2827');
   });
@@ -256,6 +249,10 @@ describe('the tiles of many runs', () => {
         new Set(runs.filter(each => attentionOf(each) !== 'none').map(each => each.id)),
       );
     }
+  });
+
+  test('the screen groups by status or by machine and nothing else', () => {
+    expect(GROUP_BYS).toEqual(['status', 'machine']);
   });
 
   test('every tile is in exactly one group, whatever the grouping', () => {
@@ -340,13 +337,8 @@ describe('the tiles of many runs', () => {
     ]);
   });
 
-  test('other groups are named by what they group and have no dot; an unknown agent is Unknown', () => {
-    const tiles = tilesOf([
-      run('a', {agent: 'Codex'}),
-      run('b', {agent: null}),
-      run('c', {machine: 'host-b'}),
-    ]);
-    expect(groupTiles(tiles, 'agent').map(group => group.title)).toEqual(['Codex', UNKNOWN_GROUP]);
+  test('machine groups are named by the machine, in name order, and have no dot', () => {
+    const tiles = tilesOf([run('a'), run('b'), run('c', {machine: 'host-b'})]);
     expect(
       groupTiles(tiles, 'machine').map(group => [group.title, group.tone, group.tiles.length]),
     ).toEqual([
@@ -360,7 +352,6 @@ describe('a tile of a run that crashed', () => {
   const crashed = (over: Partial<RunInput> = {}) =>
     run('20261019-071100', {
       status: {kind: 'failed', word: 'failed'},
-      task: 'mpmc',
       started: 'Oct 19, 07:11',
       ...over,
     });

@@ -31,6 +31,5 @@ export {
   type Tone,
   tileOf,
   tilesOf,
-  UNKNOWN_GROUP,
   type Verdict,
 } from './tiles.js';

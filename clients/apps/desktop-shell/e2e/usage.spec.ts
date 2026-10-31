@@ -5,6 +5,7 @@ import {report, screenCheck} from './checks/screen-check.js';
 import {settled} from './checks/settle.js';
 import {
   installFakeBridge,
+  installFakeMachines,
   installFakeNewRun,
   installFakeProjectRuns,
   installFakeUsage,
@@ -34,6 +35,7 @@ async function open(page: Page, usage: UsageCase, width: number): Promise<void> 
   await page.setViewportSize({width, height: 900});
   await addInitScripts(page, [
     initScript(installFakeBridge, seed),
+    initScript(installFakeMachines, seed),
     initScript(installFakeProjectRuns, seed),
     initScript(installFakeNewRun, seed),
     initScript(installFakeUsage, seed),

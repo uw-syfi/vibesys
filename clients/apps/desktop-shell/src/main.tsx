@@ -11,6 +11,7 @@ import {Card, EmptyState, LinkOpener, Page} from '@vibesys/ui';
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import {windowAddress} from './address.js';
+import {ProblemHost} from './problem-host.js';
 import {shellSessionOptions} from './run-session.js';
 import {createShellStores, RunWindow, Shell} from './shell.js';
 
@@ -69,11 +70,13 @@ if (bridge === undefined) {
   createRoot(root).render(
     <StrictMode>
       <LinkOpener open={openExternal}>
-        {run === null ? (
-          <Shell stores={stores} version={String(import.meta.env['VITE_APP_VERSION'])} />
-        ) : (
-          <RunWindow stores={stores} run={run} />
-        )}
+        <ProblemHost board={stores.problems}>
+          {run === null ? (
+            <Shell stores={stores} version={String(import.meta.env['VITE_APP_VERSION'])} />
+          ) : (
+            <RunWindow stores={stores} run={run} />
+          )}
+        </ProblemHost>
       </LinkOpener>
     </StrictMode>,
   );

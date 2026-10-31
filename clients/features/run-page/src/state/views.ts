@@ -546,7 +546,8 @@ export function unplacedRun(
 
 export interface EndedView {
   readonly title: string;
-  readonly tone: 'neutral' | 'ok' | 'warn' | 'err';
+  /** A run that failed is `failed`: the banner holds that state; it is not a passing error. */
+  readonly tone: 'neutral' | 'ok' | 'warn' | 'failed';
   readonly reason: string;
   /** "Resume from round N", only when the end record says the run can resume. */
   readonly resume: string | null;
@@ -592,7 +593,12 @@ export function endedView(state: RunPageState): EndedView | null {
             end.uncompared === true,
           );
   const resume = 'Resume';
-  return {title: label, tone: tone === 'live' ? 'neutral' : tone, reason, resume};
+  return {
+    title: label,
+    tone: tone === 'live' ? 'neutral' : tone === 'err' ? 'failed' : tone,
+    reason,
+    resume,
+  };
 }
 
 /**

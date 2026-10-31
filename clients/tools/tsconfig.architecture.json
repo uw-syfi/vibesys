@@ -43,6 +43,7 @@
       "@vibesys/logs": ["libs/logs/src/index.ts"],
       "@vibesys/machine": ["libs/machine/src/index.ts"],
       "@vibesys/machine/testing": ["libs/machine/src/testing/index.ts"],
+      "@vibesys/problems": ["libs/problems/src/index.ts"],
       "@vibesys/proto": ["libs/proto/src/index.ts"],
       "@vibesys/request-identity": ["libs/request-identity/src/index.ts"],
       "@vibesys/run-fixtures": ["libs/run-fixtures/src/index.ts"],

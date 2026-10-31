@@ -237,6 +237,37 @@
   border-radius: var(--radius-sm);
   font-size: var(--text-small-size);
 }
+.vs-select[data-label-inside] {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding-left: var(--space-4);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+.vs-select[data-label-inside][data-size="sm"] {
+  border-radius: var(--radius-sm);
+}
+/* The box is the wrapper's: the select inside has neither border nor background of its own. */
+.vs-select[data-label-inside] .vs-input {
+  flex: 1;
+  min-width: 0;
+  padding-left: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-weight: var(--text-body-strong-weight);
+}
+.vs-select[data-label-inside] .vs-input:focus-visible {
+  outline: none;
+}
+.vs-select-label {
+  flex: none;
+  color: var(--muted);
+  font-size: var(--text-small-size);
+  white-space: nowrap;
+}
 .vs-select-chevron {
   position: absolute;
   top: 50%;
