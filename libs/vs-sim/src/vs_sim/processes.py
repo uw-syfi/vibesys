@@ -17,6 +17,7 @@ from enum import StrEnum
 from functools import partial
 from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
+from vs_sim.exit_wait import ExitWaiter, host_exit_waiter
 from vs_sim.output import Capture, OutputStream, tee
 
 if TYPE_CHECKING:
@@ -194,7 +195,7 @@ class OsProcesses:
             stderr=subprocess.PIPE,
             process_group=0,
         )
-        group = _OwnedProcessGroup(process)
+        group = _OwnedProcessGroup(process, host_exit_waiter())
         captured = Capture(spec.max_output_bytes)
         pipes = _Pipes(spec.input, captured, tee(captured, output))
         deadline = None if timeout is None else time.monotonic() + timeout
@@ -588,9 +589,9 @@ def _close_pipe_resources(
 class _SubprocessGroup:
     """A just-started POSIX process group whose binary pipes still belong to its launcher."""
 
-    def __init__(self, process: subprocess.Popen[bytes]) -> None:
+    def __init__(self, process: subprocess.Popen[bytes], exit_waiter: ExitWaiter) -> None:
         self._process = process
-        self._group = _OwnedProcessGroup(process)
+        self._group = _OwnedProcessGroup(process, exit_waiter)
 
     @property
     def stdout(self) -> IO[bytes]:
@@ -637,21 +638,33 @@ class _ProcessGroupLeader(Protocol):
     def wait(self, timeout: float | None = None) -> int: ...
 
 
+class _WatcherStoppedError(RuntimeError):
+    """The thread watching a process group's leader stopped before the leader exited."""
+
+    def __init__(self) -> None:
+        """Say that the leader's exit was never observed."""
+        super().__init__("the exit watcher stopped before the process group's leader exited")
+
+
 class _OwnedProcessGroup:
     """Serialize process-group signals with leader reaping while its PGID is reserved."""
 
-    def __init__(self, process: _ProcessGroupLeader) -> None:
+    def __init__(self, process: _ProcessGroupLeader, exit_waiter: ExitWaiter) -> None:
         self._process = process
+        self._exit_waiter = exit_waiter
         self._reap_lock = threading.Lock()
         self._returncode: int | None = None
         self._exit_watch_lock = threading.Lock()
         self._exited: threading.Event | None = None
+        self._watch_failure: Exception | None = None
 
     def wait(self, timeout: float | None) -> int | None:
         """Wait without reaping until a signal can no longer race PGID reuse.
 
         Returns ``None`` when the leader is still running after *timeout*
         seconds. A concurrent signal is never held back by a wait in progress.
+        A watch that failed raises its failure here and is never reported as an
+        exit, which would block in the reap with the leader still running.
         """
         with self._reap_lock:
             if self._returncode is not None:
@@ -660,6 +673,8 @@ class _OwnedProcessGroup:
             self._wait_until_exited_without_reaping()
         elif not self._exit_watch().wait(timeout):
             return None
+        elif (failure := self._watch_failure) is not None:
+            raise failure
         return self.reap(timeout=None)
 
     def _exit_watch(self) -> threading.Event:
@@ -669,9 +684,18 @@ class _OwnedProcessGroup:
                 exited = threading.Event()
 
                 def watch() -> None:
+                    # Anything but a normal return leaves a failure, so a watcher that
+                    # dies is never read as the leader's exit.
+                    failure: Exception | None = _WatcherStoppedError()
                     try:
                         self._wait_until_exited_without_reaping()
+                        failure = None
+                    except ChildProcessError:
+                        failure = None  # The leader is gone, so there is nothing to wait for.
+                    except OSError as error:
+                        failure = error
                     finally:
+                        self._watch_failure = failure
                         exited.set()
 
                 threading.Thread(target=watch, name="vs-sim-group-exit", daemon=True).start()
@@ -702,7 +726,7 @@ class _OwnedProcessGroup:
 
     def _wait_until_exited_without_reaping(self) -> None:
         try:
-            os.waitid(os.P_PID, self._process.pid, os.WEXITED | os.WNOWAIT)
+            self._exit_waiter.wait(self._process.pid)
         except ChildProcessError:
             with self._reap_lock:
                 if self._returncode is not None:
@@ -781,6 +805,7 @@ def _start_subprocess_group(
     *,
     env: Mapping[str, str] | None,
     merge_stderr: bool,
+    exit_waiter: ExitWaiter,
 ) -> _StartedPipedProcess:
     process = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-994699 [S603]; execute the caller's argv directly with no shell at the process adapter boundary.
         argv,
@@ -791,7 +816,7 @@ def _start_subprocess_group(
         stderr=subprocess.STDOUT if merge_stderr else subprocess.PIPE,
         process_group=0,
     )
-    return _SubprocessGroup(process)
+    return _SubprocessGroup(process, exit_waiter)
 
 
 _START_ROLLBACK_TIMEOUT_S = 5.0
@@ -799,6 +824,10 @@ _START_ROLLBACK_TIMEOUT_S = 5.0
 
 class SubprocessPipedProcessLauncher:
     """Start piped commands in owned groups on VibeSys's supported POSIX hosts."""
+
+    def __init__(self, *, exit_waiter: ExitWaiter | None = None) -> None:
+        """Wait for a leader's exit with *exit_waiter*, by default the host's own mechanism."""
+        self._exit_waiter = host_exit_waiter() if exit_waiter is None else exit_waiter
 
     def start(
         self,
@@ -812,7 +841,12 @@ class SubprocessPipedProcessLauncher:
         if os.name != "posix":
             message = "piped process groups require a POSIX host"
             raise OSError(message)
-        start = partial(_start_subprocess_group, env=env, merge_stderr=merge_stderr)
+        start = partial(
+            _start_subprocess_group,
+            env=env,
+            merge_stderr=merge_stderr,
+            exit_waiter=self._exit_waiter,
+        )
         return _start_piped_process(argv, cwd, start, _CancellableTextPipe)
 
 
