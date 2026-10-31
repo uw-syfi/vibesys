@@ -237,10 +237,12 @@ class _PreparingWorkspaces(FakeWorkspaces):
         self.preparing = Gate()
         self.release = Gate()
 
-    async def create_measured_candidate(self, revision: str) -> CandidateWorkspace:
+    async def create_measured_candidate(
+        self, revision: str, *, step_tag: str | None = None
+    ) -> CandidateWorkspace:
         self.preparing.open()
         await self.release.wait()
-        return await super().create_measured_candidate(revision)
+        return await super().create_measured_candidate(revision, step_tag=step_tag)
 
 
 async def test_pause_drain_cancels_a_job_still_preparing_its_workspace() -> None:

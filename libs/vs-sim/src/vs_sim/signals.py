@@ -148,15 +148,32 @@ class PidfdProcessSignaller:
 
     def terminate_if_current(self, pid: int, current: Callable[[], bool]) -> bool:
         """Open ``pid``, revalidate caller identity, and send SIGTERM through its pidfd."""
-        pidfd_open, pidfd_send_signal = _pidfd_calls(direct=self._direct_syscalls)
-        descriptor = pidfd_open(pid)
-        try:
-            if not current():
-                return False
-            pidfd_send_signal(descriptor, signal.SIGTERM)
-            return True
-        finally:
-            os.close(descriptor)
+        return signal_if_current(
+            pid, signal.SIGTERM, current, direct_syscalls=self._direct_syscalls
+        )
+
+
+def signal_if_current(
+    pid: int,
+    number: signal.Signals,
+    current: Callable[[], bool],
+    *,
+    direct_syscalls: bool = False,
+) -> bool:
+    """Send *number* to the process *pid* names iff *current* holds once its pidfd is open.
+
+    The pidfd is acquired before *current* is evaluated, so a pid the kernel reuses afterwards
+    is not signalled. Raises ``ProcessLookupError`` when *pid* no longer exists.
+    """
+    pidfd_open, pidfd_send_signal = _pidfd_calls(direct=direct_syscalls)
+    descriptor = pidfd_open(pid)
+    try:
+        if not current():
+            return False
+        pidfd_send_signal(descriptor, number)
+        return True
+    finally:
+        os.close(descriptor)
 
 
 # Linux assigns these two system calls one number on every architecture (they

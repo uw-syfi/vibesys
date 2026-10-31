@@ -50,6 +50,7 @@ from vs_sim.crash import (
 from vs_sim.depth import Depth, depth, examples, set_depth, using_depth
 from vs_sim.fake_byte_source import FakeByteSource
 from vs_sim.fake_piped_process import ScriptedPipedProcess
+from vs_sim.fake_process_table import FakeProcessTable
 from vs_sim.fake_signal_relay import FakeMainThreadWake, FakeSignalRelay
 from vs_sim.fakes import (
     NO_PROCESSES,
@@ -177,6 +178,7 @@ __all__ = [
     "FakePipedProcessLauncher",
     "FakeProcessLauncher",
     "FakeProcessSignaller",
+    "FakeProcessTable",
     "FakeProcesses",
     "FakeSignalRelay",
     "FakeSignalSource",

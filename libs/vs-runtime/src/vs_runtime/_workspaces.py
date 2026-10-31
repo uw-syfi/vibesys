@@ -162,7 +162,9 @@ class WorkspaceResourceProvider(Protocol):
     @property
     def supports_parallel_candidates(self) -> bool: ...
 
-    def create_candidate(self, workspace_id: str, revision: str, /) -> WorkspaceResource: ...
+    def create_candidate(
+        self, workspace_id: str, revision: str, step_tag: str | None = None, /
+    ) -> WorkspaceResource: ...
 
     def reattach_candidate(self, workspace_id: str, revision: str, /) -> WorkspaceResource | None:
         """Reopen a candidate worktree a stopped host left on disk, keeping its content."""
@@ -475,6 +477,7 @@ class RuntimeWorkspaces:
         from_revision: str | None = None,
         *,
         member_id: str | None = None,
+        step_tag: str | None = None,
     ) -> CandidateWorkspace:
         workspace_id = (
             f"s{uuid.uuid4().hex}" if member_id is None else member_workspace_id(member_id)
@@ -505,7 +508,7 @@ class RuntimeWorkspaces:
                         )
                         raise RuntimeContractError(message)
                 task = asyncio.create_task(
-                    self._runner.run(self._open_candidate, workspace_id, revision)
+                    self._runner.run(self._open_candidate, workspace_id, revision, step_tag)
                 )
                 try:
                     resource = await asyncio.shield(task)
@@ -520,14 +523,16 @@ class RuntimeWorkspaces:
                     self._members.add(workspace_id)
                 return self._register(workspace_id, resource)
 
-    async def create_measured_candidate(self, revision: str) -> CandidateWorkspace:
+    async def create_measured_candidate(
+        self, revision: str, *, step_tag: str | None = None
+    ) -> CandidateWorkspace:
         """A fresh candidate of *revision* holding exactly what its measured input digests.
 
         The paths the task declares unread are removed (``WorkspaceResource.withhold_unread``),
         so an evaluation in it reads what ``measured_input`` names, and two revisions with one
         measured input are evaluated on byte-identical trees. A failure discards the candidate.
         """
-        candidate = await self.create_candidate(revision)
+        candidate = await self.create_candidate(revision, step_tag=step_tag)
         try:
             await run_sync(self._runner, self.resource_for(candidate).withhold_unread)
         except BaseException:
@@ -535,7 +540,9 @@ class RuntimeWorkspaces:
             raise
         return candidate
 
-    def _open_candidate(self, workspace_id: str, revision: str) -> WorkspaceResource:
+    def _open_candidate(
+        self, workspace_id: str, revision: str, step_tag: str | None
+    ) -> WorkspaceResource:
         """Open the candidate, refusing a revision the run's repository does not hold.
 
         A revision an agent or a search named is untrusted: it fails as the contract's typed
@@ -543,7 +550,7 @@ class RuntimeWorkspaces:
         """
         if not self.resource_for(self.root).has_revision(revision):
             raise WorkspaceRestoreError(revision)
-        return self._resources.create_candidate(workspace_id, revision)
+        return self._resources.create_candidate(workspace_id, revision, step_tag)
 
     def _register(
         self, workspace_id: str, resource: WorkspaceResource
