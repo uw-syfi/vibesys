@@ -125,9 +125,10 @@ can decide it.
     header's status chip with a few words of why beside it, the whole of it on
     the pointer, and Resume and Run again in the header; a diagnostic is a row
     of Logs with a dot on the Logs tab. A fact already on screen is not said
-    again. Enforced for the component by its absence from `@vibesys/ui` and by
-    `tone-fills.test.ts`, which keeps the tone fills off any panel but a toast
-    and an attention tile; whether a message is passing or about a thing is
+    again. Enforced for the component by its absence from `@vibesys/ui`, by the
+    stylesheet test of the tone fills (they paint a toast and an attention tile
+    and no other panel) and by the no-banners journey of the desktop shell's
+    end-to-end suite; whether a message is passing or about a thing is
     Unenforced (judgment).
 
 ## Sizes the checks cover
