@@ -72,7 +72,19 @@ conformance corpus.
    Protocol changes extend the shared conformance corpus, and
    `pnpm check:conformance` fails when an event or scenario lacks coverage or
    no runner executes it.
-8. **Stay inside the CI budgets.** The whole-run wall-time thresholds are set
+8. **Never print a full diff of a large golden.** pytest's diff of two stale
+   300 KB replays took 223 to 803 s under `-v` and cancelled a shard. The
+   bounded-comparison plugin explains a failed `==` over a large operand by
+   sizes, digests and the first difference, and a native replay golden compares
+   through `assert_replay_golden`.
+   `test_a_failed_comparison_prints_no_diff_at_any_verbosity` holds it.
+9. **Fail a stale native golden in the proto check group.** A `.proto` change
+   invalidates every native golden. `test_native_goldens_match_the_schemas_and_inputs_they_were_made_from`
+   reads hashes alone, and the proto group runs it.
+10. **Keep a parametrized test id short.** A long value in the id cut a
+    shard's CI log; give it `pytest.param(value, id="short-name")`.
+    `test_a_long_parameter_value_stops_the_session_naming_the_fix` covers it.
+11. **Stay inside the CI budgets.** The whole-run wall-time thresholds are set
    in the CI test workflow, and the shards balance on recorded per-file
    seconds. Mark a test `slow` only when it is an exhaustive sweep, so PR depth
    runs one case of it.

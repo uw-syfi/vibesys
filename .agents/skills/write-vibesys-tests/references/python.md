@@ -113,6 +113,14 @@ goldens is in the `write-agent-prompt` skill.
 An old directory of prompt snapshots is read by no test, so regenerating it
 checks nothing; do not update it.
 
+The native replay goldens of the run-fixtures library and the desktop-shell
+scenarios are binary and large. Regenerate them with
+`uv run python -m tests.support.journey_fixtures` after a change to a `.proto`
+file, the projector or a declaration, and commit every file it writes.
+`./scripts/check_proto.sh` fails a stale golden before any golden test runs. A
+test compares one through `assert_replay_golden` in `tests.support.replay_golden`,
+which names the first differing record and the command above.
+
 ## Isolation and timeout verdicts
 
 `check_test_isolation` counts patching, mocking, sleeps (`time.sleep`,

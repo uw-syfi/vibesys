@@ -61,8 +61,10 @@ DURATIONS_ENV = "VIBESYS_SHARD_DURATIONS"
 
 #: A file above this multiple of the mean shard load has its tests spread over the shards.
 HEAVY_SHARE = 1.1
-#: xdist workers per CI shard (a standard runner has two cores).
-WORKERS_PER_SHARD = 2
+#: xdist workers per CI shard: ``-n auto`` on a standard runner (four cores) starts four.
+#: Measured over 24 shard jobs of 8 runs on main, a shard's recorded seconds divided by its
+#: job time less 100 s of setup is 4.0 (3.6 to 4.4).
+WORKERS_PER_SHARD = 4
 #: Wall seconds one shard's tests may take; above this the shards need rebalancing
 #: or more of them. Leaves room under ten minutes for runner setup.
 SHARD_BUDGET_SECONDS = 400.0

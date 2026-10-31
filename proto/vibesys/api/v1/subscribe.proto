@@ -1,0 +1,202 @@
+syntax = "proto3";
+
+package vibesys.api.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/descriptor.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1";
+
+// A topic is latest-value state: a reader who missed five updates only wants the
+// sixth. Anything that needs every value in order belongs on Tail, not here.
+extend google.protobuf.MessageOptions {
+  // Required on every message that is an arm of SubscribeRequest.topic. The
+  // generator fails on a topic without one. A client cannot ask for another rate.
+  TopicPolicy topic = 51004;
+}
+
+// One topic's fixed cadence and bounds, projected into generated Go and TypeScript tables.
+message TopicPolicy {
+  // Sampling period. Zero means the topic is event driven.
+  uint32 cadence_ms = 1;
+  // Client bound on the age of a value, separate from the lease on frames. Zero
+  // means the lease alone decides.
+  uint32 stale_after_ms = 2;
+  // Client bound on the wait for the first frame once the stream is open.
+  uint32 first_frame_ms = 3 [(buf.validate.field).uint32.gt = 0];
+  // A breach ends the stream with RESOURCE_EXHAUSTED. Nothing is ever truncated.
+  uint32 max_keys = 4 [(buf.validate.field).uint32.gt = 0];
+  // Smallest gap between flushes of one stream. Changed keys wait and conflate.
+  uint32 min_interval_ms = 5;
+  // A breach ends the stream with RESOURCE_EXHAUSTED.
+  uint32 max_value_bytes = 6 [(buf.validate.field).uint32.gt = 0];
+}
+
+// A closed set of topics. Each stream carries one topic's keyed state.
+message SubscribeRequest {
+  oneof topic {
+    option (buf.validate.oneof).required = true;
+    MachineStatsTopic machine_stats = 1;
+  }
+}
+
+// Entries and removals until synced form one complete snapshot; later frames
+// change it. A value may be skipped, but each key's values stay in order. A new
+// stream starts from nothing, so nothing here carries a revision.
+message SubscribeResponse {
+  oneof frame {
+    option (buf.validate.oneof).required = true;
+    // The key now holds this value.
+    TopicEntry entry = 1;
+    // The key is gone.
+    string removed = 2 [(buf.validate.field).string = {
+      min_len: 1
+      max_bytes: 128
+    }];
+    // The state so far is one complete snapshot.
+    Synced synced = 3;
+    // Sent at least every five seconds, whatever the topic does.
+    Heartbeat heartbeat = 4;
+    // Terminal: the stream ends after this frame.
+    TopicFailure failed = 5;
+  }
+}
+
+// CEL cannot pair a value with the request's topic. The gateway's typed registry
+// guarantees the pairing and a client treats a mismatch as an invalid frame.
+message TopicEntry {
+  string key = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 128
+  }];
+  oneof value {
+    option (buf.validate.oneof).required = true;
+    MachineStats machine_stats = 2;
+  }
+}
+
+message Synced {}
+
+message Heartbeat {}
+
+// What the producer or the hub refused. A gRPC status means the transport failed
+// instead, so a retry policy reads one or the other and never the detail.
+message TopicFailure {
+  TopicFailureCode code = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // For logs only.
+  string detail = 2 [(buf.validate.field).string.max_bytes = 4096];
+}
+
+enum TopicFailureCode {
+  TOPIC_FAILURE_CODE_UNSPECIFIED = 0;
+  // This host cannot produce the topic. Retrying will not help.
+  TOPIC_FAILURE_CODE_UNSUPPORTED = 1;
+  // A key, value or subscription bound was exceeded.
+  TOPIC_FAILURE_CODE_RESOURCE_EXHAUSTED = 2;
+  // The producer failed or stopped. A new stream starts a new one.
+  TOPIC_FAILURE_CODE_SOURCE_FAILED = 3;
+  // The producer panicked: a defect in the gateway.
+  TOPIC_FAILURE_CODE_INTERNAL = 4;
+}
+
+// CPU, memory and per-GPU figures of the host the gateway runs on, sampled only
+// while someone is subscribed. On a Slurm login node these are the login node's.
+message MachineStatsTopic {
+  option (vibesys.api.v1.topic) = {
+    cadence_ms: 10000
+    stale_after_ms: 30000
+    first_frame_ms: 15000
+    max_keys: 1
+    max_value_bytes: 16384
+  };
+}
+
+// Each section is present or says why it is not, so "no reading" can never be
+// shown as zero, and an empty GPU list always means the tool reported no GPUs.
+message MachineStats {
+  // For display only. Freshness comes from receive gaps, never from comparing clocks.
+  google.protobuf.Timestamp sampled_at = 1 [(buf.validate.field).required = true];
+  oneof cpu {
+    option (buf.validate.oneof).required = true;
+    CpuStats cpu_stats = 2;
+    Absence cpu_unavailable = 3;
+  }
+  oneof memory {
+    option (buf.validate.oneof).required = true;
+    MemoryStats memory_stats = 4;
+    Absence memory_unavailable = 5;
+  }
+  oneof gpu {
+    option (buf.validate.oneof).required = true;
+    GpuList gpus = 6;
+    Absence gpu_unavailable = 7;
+  }
+}
+
+message CpuStats {
+  // Average across every logical CPU since the previous sample.
+  double utilization_percent = 1 [(buf.validate.field).double = {
+    gte: 0
+    lte: 100
+  }];
+}
+
+message MemoryStats {
+  option (buf.validate.message).cel = {
+    id: "memory_stats.used_within_total"
+    message: "used_bytes must not exceed total_bytes"
+    expression: "this.used_bytes <= this.total_bytes"
+  };
+  uint64 used_bytes = 1;
+  uint64 total_bytes = 2 [(buf.validate.field).uint64.gt = 0];
+}
+
+message GpuList {
+  repeated GpuStats gpus = 1 [(buf.validate.field).repeated.max_items = 256];
+}
+
+message GpuStats {
+  option (buf.validate.message).cel = {
+    id: "gpu_stats.used_within_total"
+    message: "memory_used_bytes must not exceed memory_total_bytes"
+    expression: "this.memory_used_bytes <= this.memory_total_bytes"
+  };
+  uint32 index = 1;
+  string name = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 256
+  }];
+  double utilization_percent = 3 [(buf.validate.field).double = {
+    gte: 0
+    lte: 100
+  }];
+  // On unified memory these describe the system memory the GPU shares.
+  uint64 memory_used_bytes = 4;
+  uint64 memory_total_bytes = 5 [(buf.validate.field).uint64.gt = 0];
+}
+
+// Why a section has no reading.
+message Absence {
+  AbsenceReason reason = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+enum AbsenceReason {
+  ABSENCE_REASON_UNSPECIFIED = 0;
+  // The command this section needs is not on this host.
+  ABSENCE_REASON_TOOL_NOT_FOUND = 1;
+  // The command or file exists and could not be read.
+  ABSENCE_REASON_READ_FAILED = 2;
+  // The read outlived the sample's deadline.
+  ABSENCE_REASON_TIMED_OUT = 3;
+  // The output was not in the expected format. Nothing is guessed from it.
+  ABSENCE_REASON_PARSE_FAILED = 4;
+  // The tool is present, and no recording of its output backs a parser yet.
+  ABSENCE_REASON_TOOL_UNVERIFIED = 5;
+}

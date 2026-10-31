@@ -735,5 +735,482 @@
       "initialComplete": true
     },
     "field": "watch_runs.shape"
+  },
+  {
+    "name": "SubscribeRequest machine stats",
+    "message": "SubscribeRequest",
+    "value": {
+      "machineStats": {}
+    }
+  },
+  {
+    "name": "SubscribeRequest without a topic",
+    "message": "SubscribeRequest",
+    "value": {},
+    "field": "topic"
+  },
+  {
+    "name": "SubscribeResponse entry",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": "machine",
+        "machineStats": {
+          "sampledAt": "2026-01-01T00:00:00Z",
+          "cpuStats": {
+            "utilizationPercent": 12.5
+          },
+          "memoryStats": {
+            "usedBytes": "1",
+            "totalBytes": "2"
+          },
+          "gpus": {
+            "gpus": [
+              {
+                "index": 0,
+                "name": "gpu",
+                "utilizationPercent": 100,
+                "memoryUsedBytes": "2",
+                "memoryTotalBytes": "2"
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "SubscribeResponse typed absences",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": "machine",
+        "machineStats": {
+          "sampledAt": "2026-01-01T00:00:00Z",
+          "cpuUnavailable": {
+            "reason": "ABSENCE_REASON_TOOL_UNVERIFIED"
+          },
+          "memoryUnavailable": {
+            "reason": "ABSENCE_REASON_TOOL_UNVERIFIED"
+          },
+          "gpuUnavailable": {
+            "reason": "ABSENCE_REASON_TOOL_UNVERIFIED"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "SubscribeResponse no gpus",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": "machine",
+        "machineStats": {
+          "sampledAt": "2026-01-01T00:00:00Z",
+          "cpuStats": {
+            "utilizationPercent": 12.5
+          },
+          "memoryStats": {
+            "usedBytes": "1",
+            "totalBytes": "2"
+          },
+          "gpus": {}
+        }
+      }
+    }
+  },
+  {
+    "name": "SubscribeResponse removed",
+    "message": "SubscribeResponse",
+    "value": {
+      "removed": "machine"
+    }
+  },
+  {
+    "name": "SubscribeResponse synced",
+    "message": "SubscribeResponse",
+    "value": {
+      "synced": {}
+    }
+  },
+  {
+    "name": "SubscribeResponse heartbeat",
+    "message": "SubscribeResponse",
+    "value": {
+      "heartbeat": {}
+    }
+  },
+  {
+    "name": "SubscribeResponse failed",
+    "message": "SubscribeResponse",
+    "value": {
+      "failed": {
+        "code": "TOPIC_FAILURE_CODE_UNSUPPORTED",
+        "detail": "no machine stats on plan9"
+      }
+    }
+  },
+  {
+    "name": "SubscribeResponse without a frame",
+    "message": "SubscribeResponse",
+    "value": {},
+    "field": "frame"
+  },
+  {
+    "name": "SubscribeResponse empty key",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": "",
+        "machineStats": {
+          "sampledAt": "2026-01-01T00:00:00Z",
+          "cpuStats": {
+            "utilizationPercent": 12.5
+          },
+          "memoryStats": {
+            "usedBytes": "1",
+            "totalBytes": "2"
+          },
+          "gpus": {
+            "gpus": [
+              {
+                "index": 0,
+                "name": "gpu",
+                "utilizationPercent": 100,
+                "memoryUsedBytes": "2",
+                "memoryTotalBytes": "2"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "field": "key"
+  },
+  {
+    "name": "SubscribeResponse long key",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": {
+          "$string": 129
+        },
+        "machineStats": {
+          "sampledAt": "2026-01-01T00:00:00Z",
+          "cpuStats": {
+            "utilizationPercent": 12.5
+          },
+          "memoryStats": {
+            "usedBytes": "1",
+            "totalBytes": "2"
+          },
+          "gpus": {
+            "gpus": [
+              {
+                "index": 0,
+                "name": "gpu",
+                "utilizationPercent": 100,
+                "memoryUsedBytes": "2",
+                "memoryTotalBytes": "2"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "field": "key"
+  },
+  {
+    "name": "SubscribeResponse entry without a value",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": "machine"
+      }
+    },
+    "field": "value"
+  },
+  {
+    "name": "SubscribeResponse empty removal",
+    "message": "SubscribeResponse",
+    "value": {
+      "removed": ""
+    },
+    "field": "removed"
+  },
+  {
+    "name": "SubscribeResponse unspecified failure",
+    "message": "SubscribeResponse",
+    "value": {
+      "failed": {}
+    },
+    "field": "code"
+  },
+  {
+    "name": "SubscribeResponse long failure detail",
+    "message": "SubscribeResponse",
+    "value": {
+      "failed": {
+        "code": "TOPIC_FAILURE_CODE_INTERNAL",
+        "detail": {
+          "$string": 4097
+        }
+      }
+    },
+    "field": "detail"
+  },
+  {
+    "name": "MachineStats without a time",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": "machine",
+        "machineStats": {
+          "cpuStats": {
+            "utilizationPercent": 12.5
+          },
+          "memoryStats": {
+            "usedBytes": "1",
+            "totalBytes": "2"
+          },
+          "gpus": {
+            "gpus": [
+              {
+                "index": 0,
+                "name": "gpu",
+                "utilizationPercent": 100,
+                "memoryUsedBytes": "2",
+                "memoryTotalBytes": "2"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "field": "sampled_at"
+  },
+  {
+    "name": "MachineStats without a cpu section",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": "machine",
+        "machineStats": {
+          "sampledAt": "2026-01-01T00:00:00Z",
+          "memoryStats": {
+            "usedBytes": "1",
+            "totalBytes": "2"
+          },
+          "gpus": {
+            "gpus": [
+              {
+                "index": 0,
+                "name": "gpu",
+                "utilizationPercent": 100,
+                "memoryUsedBytes": "2",
+                "memoryTotalBytes": "2"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "field": "cpu"
+  },
+  {
+    "name": "MachineStats without a memory section",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": "machine",
+        "machineStats": {
+          "sampledAt": "2026-01-01T00:00:00Z",
+          "cpuStats": {
+            "utilizationPercent": 12.5
+          },
+          "gpus": {
+            "gpus": [
+              {
+                "index": 0,
+                "name": "gpu",
+                "utilizationPercent": 100,
+                "memoryUsedBytes": "2",
+                "memoryTotalBytes": "2"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "field": "memory"
+  },
+  {
+    "name": "MachineStats without a gpu section",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": "machine",
+        "machineStats": {
+          "sampledAt": "2026-01-01T00:00:00Z",
+          "cpuStats": {
+            "utilizationPercent": 12.5
+          },
+          "memoryStats": {
+            "usedBytes": "1",
+            "totalBytes": "2"
+          }
+        }
+      }
+    },
+    "field": "gpu"
+  },
+  {
+    "name": "MachineStats cpu over 100",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": "machine",
+        "machineStats": {
+          "sampledAt": "2026-01-01T00:00:00Z",
+          "cpuStats": {
+            "utilizationPercent": 100.5
+          },
+          "memoryStats": {
+            "usedBytes": "1",
+            "totalBytes": "2"
+          },
+          "gpus": {
+            "gpus": [
+              {
+                "index": 0,
+                "name": "gpu",
+                "utilizationPercent": 100,
+                "memoryUsedBytes": "2",
+                "memoryTotalBytes": "2"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "field": "utilization_percent"
+  },
+  {
+    "name": "MachineStats used over total",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": "machine",
+        "machineStats": {
+          "sampledAt": "2026-01-01T00:00:00Z",
+          "cpuStats": {
+            "utilizationPercent": 12.5
+          },
+          "memoryStats": {
+            "usedBytes": "3",
+            "totalBytes": "2"
+          },
+          "gpus": {
+            "gpus": [
+              {
+                "index": 0,
+                "name": "gpu",
+                "utilizationPercent": 100,
+                "memoryUsedBytes": "2",
+                "memoryTotalBytes": "2"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "field": "used"
+  },
+  {
+    "name": "MachineStats gpu without a name",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": "machine",
+        "machineStats": {
+          "sampledAt": "2026-01-01T00:00:00Z",
+          "cpuStats": {
+            "utilizationPercent": 12.5
+          },
+          "memoryStats": {
+            "usedBytes": "1",
+            "totalBytes": "2"
+          },
+          "gpus": {
+            "gpus": [
+              {
+                "utilizationPercent": 1,
+                "memoryTotalBytes": "2"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "field": "name"
+  },
+  {
+    "name": "MachineStats gpu used over total",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": "machine",
+        "machineStats": {
+          "sampledAt": "2026-01-01T00:00:00Z",
+          "cpuStats": {
+            "utilizationPercent": 12.5
+          },
+          "memoryStats": {
+            "usedBytes": "1",
+            "totalBytes": "2"
+          },
+          "gpus": {
+            "gpus": [
+              {
+                "name": "gpu",
+                "memoryUsedBytes": "3",
+                "memoryTotalBytes": "2"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "field": "used"
+  },
+  {
+    "name": "MachineStats unspecified absence",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": "machine",
+        "machineStats": {
+          "sampledAt": "2026-01-01T00:00:00Z",
+          "memoryStats": {
+            "usedBytes": "1",
+            "totalBytes": "2"
+          },
+          "gpus": {
+            "gpus": [
+              {
+                "index": 0,
+                "name": "gpu",
+                "utilizationPercent": 100,
+                "memoryUsedBytes": "2",
+                "memoryTotalBytes": "2"
+              }
+            ]
+          },
+          "cpuUnavailable": {}
+        }
+      }
+    },
+    "field": "reason"
   }
 ]
