@@ -6,7 +6,7 @@ import {baselineColumns, improvement, overBase} from './baselines.js';
 import {EMPTY_TRACE_LOG, traceStep} from './live.js';
 import {createFactsReader} from './run-facts.js';
 import {heroView} from './headline.js';
-import {objectiveCharts} from './objective-chart.js';
+import {firstChart} from './chart-fixtures.js';
 import {createRunReader, type RunModel} from './run-model.js';
 
 /**
@@ -150,10 +150,10 @@ describe('the status words of the comparisons with no reading', () => {
 
 describe('the strip chart', () => {
   test('draws one reference line per measured comparison, by its label, and none for the rest', () => {
-    const chart = stripChartView(modelOf(SCENARIO), 0, null);
+    const chart = firstChart(modelOf(SCENARIO), 0, null);
     expect(chart?.baselines).toEqual([{y: 66.2, label: 'vLLM'}]);
     const two = [VLLM, {...VLLM, name: 'o', label: 'Other', value: 200}];
-    const more = stripChartView(modelOf(withReading(two)), 0, null);
+    const more = firstChart(modelOf(withReading(two)), 0, null);
     expect(more?.baselines.map(line => line.label)).toEqual(['vLLM', 'Other']);
   });
 
@@ -163,19 +163,19 @@ describe('the strip chart', () => {
       {name: 'b', label: 'B', status: 'not_configured'},
       {name: 'c', label: 'C', status: 'not_measured'},
     ];
-    const chart = stripChartView(modelOf(withReading(rows)), 0, null);
+    const chart = firstChart(modelOf(withReading(rows)), 0, null);
     expect(chart?.baselines).toEqual([]);
   });
 
   test('keeps a line inside the axis, whatever its value', () => {
     const far: Row = {...VLLM, value: 9000};
-    const chart = stripChartView(modelOf(withReading([far])), 0, null);
+    const chart = firstChart(modelOf(withReading([far])), 0, null);
     expect(chart?.yDomain[1]).toBeGreaterThan(9000);
   });
 
   test('does not draw a comparison of another metric', () => {
     const other: Row = {...VLLM, metric: 'p99_latency'};
-    const chart = stripChartView(modelOf(withReading([other])), 0, null);
+    const chart = firstChart(modelOf(withReading([other])), 0, null);
     expect(chart?.baselines).toEqual([]);
   });
 });

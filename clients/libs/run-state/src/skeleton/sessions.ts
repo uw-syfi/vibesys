@@ -74,3 +74,29 @@ export function sessionsOf(history: StoreHistory, through: bigint): readonly Run
   }
   return [...spans.entries()].sort((a, b) => a[0] - b[0]).map(([, session]) => session);
 }
+
+/**
+ * The latest run-clock time the run's records had stated by each of `seqs` (ascending), null before
+ * any had: where each position of the run's history stands on its clock, for a time bar spaced by time.
+ */
+export function clockThrough(
+  history: StoreHistory,
+  seqs: readonly number[],
+): readonly (number | null)[] {
+  const through = seqs.at(-1);
+  const ordered = [...stamps(history, through === undefined ? 0n : BigInt(through))].sort((a, b) =>
+    a.seq < b.seq ? -1 : a.seq > b.seq ? 1 : 0,
+  );
+  const found: (number | null)[] = [];
+  let reached: number | null = null;
+  let next = 0;
+  for (const seq of seqs) {
+    for (let stamp = ordered[next]; stamp !== undefined && stamp.seq <= BigInt(seq); ) {
+      reached = reached === null ? stamp.time : Math.max(reached, stamp.time);
+      next += 1;
+      stamp = ordered[next];
+    }
+    found.push(reached);
+  }
+  return found;
+}

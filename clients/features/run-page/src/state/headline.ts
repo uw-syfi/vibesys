@@ -243,8 +243,8 @@ function wordsOf(model: RunModel, read: Reading): Words {
 }
 
 /** The unit as a suffix (` ops/s`): the run's own, else the name of the measure in lower case. */
-function unitWords(model: RunModel, series: ObjectiveSeries, primary: boolean, name: string) {
-  if (primary) return ` ${objectiveUnit(model.overview) || name.toLowerCase()}`;
+function unitWords(model: RunModel, series: ObjectiveSeries, alone: boolean, name: string) {
+  if (alone) return ` ${objectiveUnit(model.overview) || name.toLowerCase()}`;
   const unit = model.candidates.candidates
     .flatMap(item => [
       ...(item.measurement?.readings ?? []),
@@ -259,6 +259,7 @@ function headlineOf(
   reading: ObjectiveReading,
   until: number | null,
   catchingUp: boolean,
+  alone: boolean,
 ): ObjectiveHeadline {
   const name = reading.name === null ? 'Metric' : metricLabel(reading.name);
   const id = reading.name ?? 'metric';
@@ -291,7 +292,7 @@ function headlineOf(
       hint: '',
     };
   }
-  const unit = unitWords(model, reading, reading.primary, name);
+  const unit = unitWords(model, reading, alone, name);
   const best = bestSoFar(reading, until);
   const value = best?.value ?? null;
   const better = value === null ? null : multipleOver(value, reading.input, reading.direction);
@@ -301,7 +302,7 @@ function headlineOf(
     input: reading.input,
     better,
     unit,
-    measured: reading.fold.points.length > 0,
+    measured: reading.fold.points.some(point => point.result !== 'pending'),
     againstBase:
       against === null
         ? null
@@ -338,7 +339,13 @@ export function heroView(
   const series = objectives.length > 0 ? objectives : objectiveSeriesOf(model);
   return {
     headlines: series.map((each, at) =>
-      headlineOf(model, readObjective(model, each, at === 0), until, catchingUp),
+      headlineOf(
+        model,
+        readObjective(model, each, at === 0, series.length < 2),
+        until,
+        catchingUp,
+        series.length < 2,
+      ),
     ),
     baselineNotes: catchingUp ? [] : baselineNotes(model.baselines),
   };

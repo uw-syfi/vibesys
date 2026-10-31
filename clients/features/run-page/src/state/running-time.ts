@@ -49,3 +49,17 @@ export function runningTimeOf(sessions: readonly RunSession[], start: number): R
   };
   return {at, resumes: sessions.slice(1).map(session => at(session.from))};
 }
+
+/**
+ * Where each of the `seconds` (running time at each position of a sequence, ascending) stands along
+ * a track from 0 (the first) to 1 (the last). A sequence that never advanced, or a single position,
+ * is spread evenly by position.
+ */
+export function placesAlong(seconds: readonly number[]): readonly number[] {
+  const first = seconds[0];
+  const last = seconds.at(-1);
+  if (first === undefined || last === undefined || last <= first) {
+    return seconds.map((_, at) => (seconds.length < 2 ? 0 : at / (seconds.length - 1)));
+  }
+  return seconds.map(each => (each - first) / (last - first));
+}

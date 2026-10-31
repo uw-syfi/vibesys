@@ -10,9 +10,12 @@
 import {baselineReferences} from './baselines.js';
 import {metricLabel, objectiveUnit} from './metric-words.js';
 import {
+  bestSteps,
   multipleOver,
   type ObjectiveReading,
-  readObjectives,
+  type ObjectiveSeries,
+  objectiveSeriesOf,
+  readObjective,
 } from './objective-reading.js';
 import {type RunningTime, runningTimeOf} from './running-time.js';
 import type {RunModel} from './run-model.js';
@@ -66,6 +69,9 @@ export interface ObjectiveChartView {
 }
 
 const NO_IDEAS: ReadonlySet<string> = new Set();
+
+/** The shortest x axis, in minutes: a run that has not begun still has an axis to draw. */
+const MIN_AXIS = 1;
 
 /** The share of the largest value left above it, so the top dot is not on the frame. */
 const HEADROOM = 1.1;
@@ -122,8 +128,8 @@ export function runningWords(seconds: number): string {
   return duration(seconds < 60 ? seconds : Math.round(seconds / 60) * 60);
 }
 
-function unitOf(model: RunModel, reading: ObjectiveReading): string {
-  if (reading.primary) return objectiveUnit(model.overview);
+function unitOf(model: RunModel, reading: ObjectiveReading, alone: boolean): string {
+  if (alone) return objectiveUnit(model.overview);
   const unit = model.candidates.candidates
     .flatMap(item => [
       ...(item.measurement?.readings ?? []),
@@ -147,6 +153,8 @@ function readingLabel(
 /** What an objective's chart draws once its axes are known. */
 interface Frame {
   readonly time: RunningTime;
+  /** The run has one objective: its unit is the run's own. */
+  readonly alone: boolean;
   /** Run-clock seconds the axis reaches. */
   readonly reached: number;
 }
@@ -161,7 +169,8 @@ function chartOf(
 ): ObjectiveChartView {
   const {time} = frame;
   const minutes = (at: number): number => time.at(at) / 60;
-  const unit = unitOf(model, reading);
+  const unit = unitOf(model, reading, frame.alone);
+  const stepped = bestSteps(reading);
   const readings = reading.fold.points.map(point => ({
     ...(point.unowned === true ? {} : {id: point.id}),
     key: point.key ?? point.id,
@@ -174,12 +183,12 @@ function chartOf(
     x: minutes(point.at),
     y: point.value,
     selected: focus !== null && point.id === focus,
-    lit: point.best && lit.has(point.id),
+    lit:
+      lit.has(point.id) &&
+      stepped.some(step => step.idea === point.id && step.value === point.value),
   }));
-  const end = Math.max(minutes(frame.reached), ...readings.map(point => point.x));
-  const steps = reading.fold.points
-    .filter(point => point.best)
-    .map(point => ({x: minutes(point.at), y: point.value}));
+  const end = Math.max(MIN_AXIS, minutes(frame.reached), ...readings.map(point => point.x));
+  const steps = stepped.map(step => ({x: minutes(step.at), y: step.value}));
   if (reading.input !== null) steps.unshift({x: 0, y: reading.input});
   const last = steps.at(-1);
   if (last !== undefined && last.x < end) steps.push({x: end, y: last.y});
@@ -222,7 +231,8 @@ function chartOf(
  * so scrubbing neither mounts nor unmounts a chart nor rescales its axes). `start` is the run's start
  * on its clock; `now` the live clock (null: the run's latest time bounds the axis, always so when
  * scrubbed); `scrub` the time bar's position in run-clock seconds (null at the live end); `focus` the
- * idea the reader has open and `lit` the ideas on the chain the reader points at.
+ * idea the reader has open and `lit` the ideas on the chain the reader points at. `objectives` are the
+ * run's, read from the whole run (`objectiveSeriesOf`).
  */
 export function objectiveCharts(
   whole: RunModel,
@@ -231,10 +241,24 @@ export function objectiveCharts(
   scrub: number | null = null,
   focus: string | null = null,
   lit: ReadonlySet<string> = NO_IDEAS,
+  objectives: readonly ObjectiveSeries[] = objectiveSeriesOf(whole),
 ): readonly ObjectiveChartView[] {
   const reached = (scrub === null ? (now ?? whole.latest) : whole.latest) ?? start;
-  const frame: Frame = {time: runningTimeOf(whole.sessions ?? [], start), reached};
-  return readObjectives(whole).map(reading => chartOf(whole, reading, frame, scrub, focus, lit));
+  const frame: Frame = {
+    time: runningTimeOf(whole.sessions ?? [], start),
+    alone: objectives.length < 2,
+    reached,
+  };
+  return objectives.map((series, at) =>
+    chartOf(
+      whole,
+      readObjective(whole, series, at === 0, frame.alone),
+      frame,
+      scrub,
+      focus,
+      lit,
+    ),
+  );
 }
 
 /** What the charts' legend names, in order: the line, the dots, and the ring of the open idea. */

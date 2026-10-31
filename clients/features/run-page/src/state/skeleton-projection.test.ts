@@ -43,9 +43,9 @@ import {
   runPageInitial,
   skeletonPositions,
   skeletonScreenState,
-  stripChartView,
-  timelineView,
+    timelineView,
 } from './index.js';
+import {firstChart} from './chart-fixtures.js';
 
 const SEED = {
   identity: {host: 'local' as const, runId: 'run-a'},
@@ -343,8 +343,8 @@ test('a keyframe map order cannot change the run origin or performance chart dur
       );
       const fromKeyframe = projectSkeleton(keyframe, through);
       expect(clockStart(fromKeyframe)).toBe(clockStart(fromRecords));
-      expect(stripChartView(fromKeyframe, clockStart(fromKeyframe), fromKeyframe.latest)).toEqual(
-        stripChartView(fromRecords, clockStart(fromRecords), fromRecords.latest),
+      expect(firstChart(fromKeyframe, clockStart(fromKeyframe), fromKeyframe.latest)).toEqual(
+        firstChart(fromRecords, clockStart(fromRecords), fromRecords.latest),
       );
     }
   }
@@ -529,10 +529,6 @@ for (const reversed of [false, true]) {
       if (tile.id === 'throughput') {
         expect(updated?.figure).toBe('3.20×');
         expect(updated?.detail).toBe('320 ops/s · input 100 ops/s');
-        expect(tile.trend).not.toBeNull();
-        expect(updated?.trend?.reference).toBe(100);
-        expect(updated?.trend?.from).toBe(tile.trend?.from);
-        expect(updated?.trend?.to).toBe(tile.trend?.to);
       } else {
         expect(updated).toEqual(tile);
       }

@@ -10,6 +10,7 @@ import {createRunReader, type RunModel} from './run-model.js';
 import type {SummaryReply} from './run-summary.js';
 import {formatValue} from './span-reading.js';
 import {timelineRows} from './timeline-rows.js';
+import {firstChart} from './chart-fixtures.js';
 
 /**
  * A live run whose input could not be measured: its input's gates failed before the first idea,
@@ -128,8 +129,9 @@ describe('the performance tile of a run with no measured input', () => {
   });
 
   test('draws the one value instead of nothing', () => {
-    const trend = heroView(modelOf(spans, TWO_GATES)).headlines[0]?.trend;
-    expect(trend?.steps).toHaveLength(1);
+    const chart = firstChart(modelOf(spans, TWO_GATES), 0, null);
+    expect(chart.readings).toHaveLength(1);
+    expect(chart.steps.length).toBeGreaterThan(0);
   });
 
   test('headlines any value as the screen writes numbers, and never shows a raw metric key', () => {

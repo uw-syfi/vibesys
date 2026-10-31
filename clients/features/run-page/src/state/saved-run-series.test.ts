@@ -12,8 +12,8 @@ import {
   projectSkeleton,
   runPageInitial,
   skeletonScreenState,
-  stripChartView,
-} from './index.js';
+  } from './index.js';
+import {firstChart} from './chart-fixtures.js';
 
 for (let seed = 1; seed <= 12; seed += 1) {
   test(`saved series survive missing idea ownership and catch-up (seed ${seed})`, () => {
@@ -40,15 +40,16 @@ for (let seed = 1; seed <= 12; seed += 1) {
       }),
     );
     const model = projectSkeleton(load.skeleton, committedSeq, '', {head});
-    const chart = stripChartView(model, clockStart(model), model.latest);
-    expect(chart?.points.map(point => point.y).sort((a, b) => a - b)).toEqual(
+    const chart = firstChart(model, clockStart(model), model.latest);
+    expect(chart.readings.map(point => point.y).sort((a, b) => a - b)).toEqual(
       [...values].sort((a, b) => a - b),
     );
-    expect(chart?.points.every(point => !point.label.includes('New best'))).toBe(true);
-    expect(chart?.steps.at(-1)?.y).toBe(100);
-    expect(new Set(chart?.points.map(point => point.key)).size).toBe(values.length);
+    // No reading beat the input, so the line is the input's, flat, and no step is claimed.
+    expect(chart.steps.at(-1)?.y).toBe(100);
+    expect(new Set(chart.steps.map(step => step.y))).toEqual(new Set([100]));
+    expect(new Set(chart.readings.map(point => point.key)).size).toBe(values.length);
     expect(heroView(model).headlines[0]?.figure).toBe('–');
-    expect(heroView(model).headlines[0]?.trend?.steps.at(-1)?.y).toBe(100);
+    expect(heroView(model).headlines[0]?.words).toBe('Unavailable');
     expect(paintedSkeleton(load)).toBe(load.skeleton);
     expect(paintedSkeleton({...load, complete: false})).toBe(load.skeleton);
     const prefix = projectSkeleton(load.skeleton, committedSeq, '', {
@@ -58,7 +59,6 @@ for (let seed = 1; seed <= 12; seed += 1) {
       figure: '–',
       ratio: null,
       note: 'Catching up',
-      trend: null,
     });
     const pageSeed = {
       identity: {host: 'local' as const, runId: 'run-a'},

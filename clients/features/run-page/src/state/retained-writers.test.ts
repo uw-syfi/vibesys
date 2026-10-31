@@ -4,7 +4,8 @@ import {readFileSync} from 'node:fs';
 import {fromBinary} from '@bufbuild/protobuf';
 import {SkeletonResponseSchema} from '@vibesys/proto';
 import {DescriptorCache, ingestSkeleton} from '@vibesys/run-skeleton';
-import {clockStart, heroView, ideasView, projectSkeleton, stripChartView} from './index.js';
+import {clockStart, heroView, ideasView, projectSkeleton} from './index.js';
+import {firstChart} from './chart-fixtures.js';
 
 const corpus = new URL('../../../../../proto/testdata/retained/', import.meta.url);
 const cases = JSON.parse(readFileSync(new URL('manifest.json', corpus), 'utf8')) as Record<
@@ -37,9 +38,7 @@ for (const [version, facts] of Object.entries(cases)) {
     expect(skeleton.head?.performanceStated).toBe(true);
     expect(skeleton.head?.objective?.bestValue).toBe(facts.best);
     expect(hero.headlines[0]?.note).not.toBe('Unavailable');
-    expect(hero.measured).toBe(facts.measured);
-    expect(hero.headlines[0]?.trend?.steps.at(-1)?.y).toBe(facts.best);
-    expect(stripChartView(model, clockStart(model), model.latest)?.steps.at(-1)?.y).toBe(
+    expect(firstChart(model, clockStart(model), model.latest)?.steps.at(-1)?.y).toBe(
       facts.best,
     );
     expect(
@@ -52,7 +51,9 @@ for (const [version, facts] of Object.entries(cases)) {
     expect(model.input).toBe(facts.input);
     expect(attrs.input_metrics[0]?.value).toBe(facts.input);
     expect(attrs.vs_baseline).toBe(facts.vs_baseline);
-    expect(heroView(model).headlines[0]?.trend?.reference).toBe(facts.chart_reference);
+    expect(firstChart(model, clockStart(model), model.latest).steps[0]?.y).toBe(
+      facts.chart_reference,
+    );
     for (let seq = 1n; seq <= through; seq += 1n) {
       const partial = projectSkeleton(skeleton, seq);
       expect(partial.input).toBe(seq >= BigInt(facts.measurement_seq) ? facts.input : null);

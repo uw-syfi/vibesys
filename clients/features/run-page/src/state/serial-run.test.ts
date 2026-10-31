@@ -5,7 +5,7 @@ import {IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
 import {traceLog} from './live.js';
 import {clockStart, nowView} from './run-level.js';
 import {heroView} from './headline.js';
-import {objectiveCharts} from './objective-chart.js';
+import {firstChart} from './chart-fixtures.js';
 import {createRunReader, type RunModel} from './run-model.js';
 
 /**
@@ -167,41 +167,36 @@ describe('scrubbing a multi-agent run', () => {
     const {events} = recorded();
     const whole = at(events);
     const start = clockStart(whole);
-    const fixed = stripChartView(whole, start, null);
-    expect(fixed).not.toBeNull();
+    const fixed = firstChart(whole, start, null);
     for (let sequence = 1; sequence <= events.length; sequence += 1) {
       const viewed = at(events, sequence);
       const scrub = viewed.latest ?? start;
-      const chart = stripChartView(whole, start, null, scrub);
-      // Rendered (never null, even before the first measurement) with the same axes.
-      expect(chart).not.toBeNull();
-      expect(chart?.yDomain).toEqual(fixed?.yDomain as readonly [number, number]);
-      expect(chart?.yTicks).toEqual(fixed?.yTicks as never);
-      expect(chart?.xTicks).toEqual(fixed?.xTicks as never);
-      expect(chart?.points.map(point => point.id)).toEqual(
-        fixed?.points.map(point => point.id) as string[],
-      );
-      expect(chart?.playhead).toBe((scrub - start) / 60);
-      for (const point of chart?.points ?? [])
-        expect(point.faint).toBe(point.x * 60 + start > scrub);
+      const chart = firstChart(whole, start, null, scrub);
+      // The same axes and the same readings; only the cursor moves.
+      expect(chart.yDomain).toEqual(fixed.yDomain);
+      expect(chart.yTicks).toEqual(fixed.yTicks);
+      expect(chart.xTicks).toEqual(fixed.xTicks);
+      expect(chart.steps).toEqual(fixed.steps);
+      expect(chart.readings.map(point => point.id)).toEqual(fixed.readings.map(point => point.id));
+      expect(chart.cursor).toBe((scrub - start) / 60);
     }
-    expect(fixed?.yDomain[0]).toBe(0);
-    expect(fixed?.yDomain[1]).toBeGreaterThan(100);
+    expect(fixed.yDomain[0]).toBe(0);
+    expect(fixed.yDomain[1]).toBeGreaterThan(100);
   });
 });
 
 describe('a multi-agent run', () => {
   test('regression: the run level shows the best idea, its chart and both rounds', () => {
     const model = at(recorded().events);
-    expect(heroView(model)).toMatchObject({measured: 2});
     expect(heroView(model).headlines[0]).toMatchObject({
       ratio: '2.00×',
       note: 'faster than input',
       detail: '100 ops/s · input 50 ops/s',
     });
-    const chart = stripChartView(model, clockStart(model), null);
-    expect(chart?.points.map(point => point.y)).toEqual([100, 10]);
-    expect(chart?.reference?.y).toBe(50);
+    const chart = firstChart(model, clockStart(model), null);
+    expect(chart.readings.map(point => point.y)).toEqual([100, 10]);
+    expect(chart.start).toBe('Input');
+    expect(chart.steps[0]?.y).toBe(50);
   });
 
   test('the ideas list each round by its hypothesis, with its ratio and what it builds on', () => {
@@ -295,8 +290,8 @@ describe('a live multi run whose round 1 passed', () => {
       ratio: '2.00×',
       detail: expect.stringContaining('100 ops/s'),
     });
-    const chart = stripChartView(model, clockStart(model), null);
-    expect(chart?.points.map(point => point.y)).toEqual([100]);
+    const chart = firstChart(model, clockStart(model), null);
+    expect(chart.readings.map(point => point.y)).toEqual([100]);
   });
 
   test('once the run finished nothing runs now, and the best stays', () => {

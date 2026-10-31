@@ -241,6 +241,11 @@ export interface RunPageState {
   readonly readOnly?: boolean;
   readonly lifecycleWord?: string | undefined;
   readonly positionWord?: string | undefined;
+  /**
+   * Where each position of the time bar stands along its track, from 0 to 1, in running time (see
+   * `placesAlong`); absent when the bar is spaced by position.
+   */
+  readonly positionPlaces?: readonly number[] | undefined;
   readonly identity: RunRef;
   /** What the sidebar knows about the run's name: its project and task. */
   readonly title: {readonly project: string; readonly task: string | null};

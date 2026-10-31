@@ -88,6 +88,11 @@ function extent(values: readonly number[]): readonly [number, number] {
   return low === high ? [low - 1, high + 1] : [low, high];
 }
 
+/** `range`, or one unit either side of it when it is a single value, so nothing divides by zero. */
+function widened(range: readonly [number, number]): readonly [number, number] {
+  return range[0] === range[1] ? [range[0] - 1, range[1] + 1] : range;
+}
+
 function scale(
   plot: Plot,
   xs: readonly number[],
@@ -95,8 +100,8 @@ function scale(
   xDomain: readonly [number, number] | undefined,
   yDomain: readonly [number, number] | undefined,
 ): Scale {
-  const [x0, x1] = xDomain ?? extent(xs);
-  const [y0, y1] = yDomain ?? extent(ys);
+  const [x0, x1] = widened(xDomain ?? extent(xs));
+  const [y0, y1] = widened(yDomain ?? extent(ys));
   return {
     x: value => plot.left + ((value - x0) / (x1 - x0)) * (plot.right - plot.left),
     y: value => plot.bottom - ((value - y0) / (y1 - y0)) * (plot.bottom - plot.top),

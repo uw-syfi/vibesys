@@ -20,7 +20,7 @@ import {screenSpans} from './spans.js';
 import {type StartupStep, startupSteps} from './startup.js';
 import type {SkeletonContent, StoreHistory, StoreView} from './types.js';
 
-export type {RunSession} from './sessions.js';
+export {clockThrough, type RunSession} from './sessions.js';
 export type {SkeletonContent, StoreHistory, StoreView} from './types.js';
 
 /** Scalar screen values copied from the writer's committed primary measurement. */

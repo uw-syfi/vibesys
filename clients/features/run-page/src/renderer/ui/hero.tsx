@@ -115,7 +115,9 @@ export function Hero(
   },
 ): JSX.Element {
   const objectives = objectivesOf(props.whole);
-  const scrub = props.model.at === null ? null : (props.model.latest ?? props.clock.start);
+  // The time bar stands before the run's end exactly when the viewed model is not the whole run.
+  const scrubbed = props.model.at !== null && props.model.at !== props.whole.at;
+  const scrub = scrubbed ? (props.model.latest ?? props.clock.start) : null;
   const hero = heroView(props.whole, objectives, scrub);
   const charts = objectiveCharts(
     props.whole,

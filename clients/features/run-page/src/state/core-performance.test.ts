@@ -14,13 +14,12 @@ import {IDEAS_FILTER_DEFAULT} from './ideas-view.js';
 import {
   clockStart,
   heroView,
-  ideaFocusView,
   ideasView,
   projectSkeleton,
-  stripChartView,
-} from './index.js';
+  } from './index.js';
 import type {RunModel} from './run-model.js';
 import {ratio} from './span-reading.js';
+import {firstChart} from './chart-fixtures.js';
 
 const root = new URL('../../../../../proto/testdata/performance/', import.meta.url);
 const cases: readonly {
@@ -40,14 +39,13 @@ for (const item of cases) {
     );
     expect(facts).toBeDefined();
     const kept = facts?.points.filter(point => point.newBest) ?? [];
-    const chart = stripChartView(model, clockStart(model), model.latest);
-    expect(
-      chart?.points
-        .filter(point => point.filled && point.tone === 'accent')
-        .map(point => point.y) ?? [],
-    ).toEqual(kept.flatMap(point => (point.point ? [point.point.value] : [])));
-    expect(chart?.steps.at(-1)?.y).toBe(facts?.bestValue);
-    expect(heroView(model).headlines[0]?.trend?.steps.at(-1)?.y).toBe(facts?.bestValue);
+    const chart = firstChart(model, clockStart(model), model.latest);
+    // The line steps up exactly at the readings core calls a new best, to the best it states.
+    const stepped = chart.steps.map(step => step.y).filter((y, at, ys) => y !== ys[at - 1]);
+    expect(stepped.slice(chart.start === null ? 0 : 1)).toEqual(
+      kept.flatMap(point => (point.point ? [point.point.value] : [])),
+    );
+    expect(chart.steps.at(-1)?.y).toBe(facts?.bestValue);
     expect(head.objective?.bestValue).toBe(item.card.dashboard.best.value);
     expect(facts?.bestValue).toBe(item.card.dashboard.best.value);
     expect(
@@ -64,7 +62,6 @@ for (const item of cases) {
       head,
       progress: {phase: 'history', through: 1n, committed: skeleton.throughSeq ?? 0n},
     });
-    expect(heroView(catchingUp).measured).toBeNull();
     expect(heroView(catchingUp).headlines[0]?.ratio).toBeNull();
     for (const idea of catchingUp.candidates.candidates) {
       expect(
@@ -72,7 +69,6 @@ for (const item of cases) {
           row => row.id === idea.id,
         )?.figure,
       ).toBe('Catching up');
-      expect(ideaFocusView(catchingUp, idea.id)?.ratio).toBeNull();
     }
     const failed = {...catchingUp, loadFailure: 'Data loss'};
     expect(heroView(failed).headlines[0]?.note).toBe('Data loss');
@@ -172,10 +168,21 @@ function statedBestBelow(model: RunModel, head: RunHead): Map<string, number> {
 
 let closedSummaries = 0;
 
-/** The tile of the second axis, which core states the same series for. */
+const secondAxis = (model: RunModel) =>
+  ({name: 'second_axis', direction: model.direction ?? 'max'}) as const;
+
+/** The headline of the second axis, which core states the same series for. */
 function axisTileOf(model: RunModel) {
-  const axis = {name: 'second_axis', direction: model.direction ?? 'max'} as const;
+  const axis = secondAxis(model);
   return heroView(twoAxes(model), [axis, axis]).headlines[0];
+}
+
+/** The chart of the second axis. */
+function axisChartOf(model: RunModel) {
+  const stated = twoAxes(model);
+  return firstChart(stated, clockStart(stated), stated.latest, null, null, new Set(), [
+    secondAxis(model),
+  ]);
 }
 
 for (const item of cases) {
@@ -185,7 +192,7 @@ for (const item of cases) {
 
     // The axis tile of a series reads the best core states, whatever the ideas passed with.
     expect(axisTileOf(misread)).toEqual(axisTileOf(model));
-    expect(axisTileOf(model)?.trend?.steps.at(-1)?.y).toBe(head.performance[0]?.bestValue);
+    expect(axisChartOf(model).steps.at(-1)?.y).toBe(head.performance[0]?.bestValue);
 
     // The Ideas tree's closed summary names core's latest new best below the idea.
     for (const seed of SEEDS.slice(0, 8)) {

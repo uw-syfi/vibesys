@@ -4,13 +4,14 @@ import {EMPTY_TRACE} from '@vibesys/run-state/trace';
 import {bestLine} from './ideas-tree.js';
 import {IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
 import {EMPTY_TRACE_LOG, type TraceLog, traceAt, traceLog, traceStep} from './live.js';
-import {logStreamToFollow, nowView, resolveZoom, shownLogScope} from './run-level.js';
+import {clockStart, logStreamToFollow, nowView, resolveZoom, shownLogScope} from './run-level.js';
 import {heroView} from './headline.js';
 import {createRunReader} from './run-model.js';
 import {type RunPageState, runPageInitial, runPageStep} from './run-page.js';
 import {scopedLogs} from './scoped-logs.js';
 import {scrubberView} from './scrub.js';
 import {type Route, RUN_MODES, RUN_ROUTE} from './zoom.js';
+import {firstChart} from './chart-fixtures.js';
 
 const ROOT: Span = {
   id: 'flow:search/#1',
@@ -298,12 +299,12 @@ describe('the run level', () => {
     expect(heroView(model).headlines[0]?.detail).toMatch(/^\S+ \S+ · input \S+ \S+$/);
   });
 
-  test('there is one tile today, with the best so far as a step line from the input', () => {
+  test('there is one headline, and its chart has the best so far as a step line from the input', () => {
     const view = heroView(model);
     expect(view.headlines).toHaveLength(1);
-    const trend = view.headlines[0]?.trend;
-    expect(trend?.reference).toBe(100);
-    const ys = trend?.steps.map(step => step.y) ?? [];
+    const chart = firstChart(model, clockStart(model), model.latest);
+    expect(chart.start).toBe('Input');
+    const ys = chart.steps.map(step => step.y);
     expect(ys[0]).toBe(100);
     expect(ys).toEqual([...ys].sort((a, b) => a - b));
   });

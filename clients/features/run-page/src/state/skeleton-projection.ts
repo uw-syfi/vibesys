@@ -11,6 +11,7 @@ import {agentGraph} from '@vibesys/run-state/agents';
 import {candidateTree} from '@vibesys/run-state/candidates';
 import {type RecordRow, rowsOfRecords} from '@vibesys/run-state/records';
 import {
+  clockThrough,
   coreIdeaKey,
   coreIdeaMeasurements,
   lifecycleState,
@@ -21,8 +22,10 @@ import {
 } from '@vibesys/run-state/skeleton';
 import {AppendLog} from './append-log.js';
 import {EMPTY_TRACE_LOG} from './live.js';
+import {clockStart} from './run-level.js';
 import type {RunModel} from './run-model.js';
 import {type RunPageSeed, type RunPageState, runPageInitial} from './run-page.js';
+import {placesAlong, runningTimeOf} from './running-time.js';
 import {settleIdeas} from './settled-ideas.js';
 import {skeletonPerformance} from './skeleton-performance.js';
 import {duration} from './span-reading.js';
@@ -161,13 +164,17 @@ export function skeletonScreenState(
           startedAt: 0,
           reason: lifecycle.reason,
         };
+  // The time bar's word and track are the run's running time, the same clock as the charts' axes.
+  const start = clockStart(whole);
+  const time = runningTimeOf(whole.sessions ?? [], start);
+  const positions = skeletonPositions(skeleton);
   const trace = {
     ...EMPTY_TRACE_LOG,
     base: whole.trace,
     head: whole.trace,
     baseOverview: whole.overview,
     headOverview: whole.overview,
-    positions: AppendLog.of(skeletonPositions(skeleton)),
+    positions: AppendLog.of(positions),
     calls: AppendLog.of(
       Object.values(skeleton.spans)
         .flatMap(history => {
@@ -184,7 +191,10 @@ export function skeletonScreenState(
     progress: whole.progress,
     recordDiagnostic: latestFailure(skeleton, ui.recordLog),
     lifecycleWord: lifecycle.word,
-    positionWord: whole.loadFailure ?? positionWord(whole.progress, reading.latest),
+    positionWord:
+      whole.loadFailure ??
+      positionWord(whole.progress, reading.latest === null ? null : time.at(reading.latest)),
+    positionPlaces: placesAlong(clockThrough(skeleton, positions).map(at => time.at(at ?? start))),
     startupStages: reading.startup.map(step => ({
       id: step.stage,
       label: STARTUP_LABELS[step.stage],
@@ -223,7 +233,7 @@ function observedLifecycle(skeleton: Skeleton, hint: RunLivenessHint | undefined
     : lifecycleState(observation.lifecycle);
 }
 
-function positionWord(progress: LoadProgress | undefined, latest: number | null): string {
+function positionWord(progress: LoadProgress | undefined, running: number | null): string {
   if (progress && progress.phase !== 'complete') return 'Catching up';
-  return latest === null ? 'Start' : duration(latest);
+  return running === null ? 'Start' : duration(running);
 }
