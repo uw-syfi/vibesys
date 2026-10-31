@@ -538,6 +538,12 @@ export const RICH_ENTRIES = {
         <Card>
           <Stat label="Elapsed" value="24m" />
         </Card>
+        <Card>
+          <Stat label="Tokens" value="8.1M" unit="input" sub="6.5M cached · 459k output" />
+        </Card>
+        <Card>
+          <Stat label="Tokens" value="Not reported" quiet />
+        </Card>
       </Grid>
     ),
   },
