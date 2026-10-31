@@ -34,11 +34,11 @@ from ._proofs import (
     admission_remaining,
     current_admission,
     current_closure,
-    draining,
     invocation_for,
     observation_for,
     occupied_episode,
     operation_for,
+    stop_draining,
 )
 from ._registry import ContractError
 from ._session_scope import retains_write_turn, write_turn_authority, yield_authority, yields_turn
@@ -305,7 +305,7 @@ def _admit(
     if not isinstance(occupied_episode(context.scheduling.slots, event.request), Proven):
         return AreaChange(state=state)
     if (
-        not (context.run.status == RunStatus.RUNNING or draining(context.run))
+        not (context.run.status == RunStatus.RUNNING or stop_draining(context.run))
         or context.run.now_at >= context.run.deadline_at
     ):
         registered = (
