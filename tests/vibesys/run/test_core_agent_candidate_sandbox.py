@@ -40,7 +40,6 @@ from vs_sandbox.api.testing import FakeDockerEngine
 from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
 from vs_sim.api.testing import (
     FakePipedProcessLauncher,
-    ManualClock,
     VirtualClock,
     run_virtual,
 )
@@ -95,14 +94,14 @@ def _sandboxes_seen_by_the_client(root: Path, candidates: int) -> tuple[bool, li
             ),
         }
     )
+    clock = VirtualClock(at=0.0)
     integration = LocalRunIntegration(
-        clock=ManualClock(),
+        clock=clock,
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
         system=idle_environment_system(),
     )
-    clock = VirtualClock(at=0.0)
 
     async def exercise() -> tuple[bool, list[str]]:
         async with open_product_core_host(
@@ -223,14 +222,14 @@ def _turns_through_the_public_builder(root: Path, candidates: int) -> _Turns:
             ),
         }
     )
+    clock = VirtualClock(at=0.0)
     integration = LocalRunIntegration(
-        clock=ManualClock(),
+        clock=clock,
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
         system=idle_environment_system(),
     )
-    clock = VirtualClock(at=0.0)
     turns = _Turns()
 
     async def exercise() -> None:

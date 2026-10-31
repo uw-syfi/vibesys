@@ -19,7 +19,7 @@ from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore
 from vs_runtime.api.core import RunTiming
 from vs_runtime.api.testing import FakeStopTimer
-from vs_sim.api import OsThreads, SystemClock, ThreadBlockingRunner, UnixNetwork
+from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -51,7 +51,7 @@ async def open_core_host(
         integration,
         plugin=plugin or capability_plugin(request.orchestration.id),
         options=EmptyOptions(),
-        timing=RunTiming(SystemClock(), OsThreads()),
+        timing=RunTiming(integration.clock, OsThreads()),
         agent_client_factory=_resumable_client,
         backend_factory=backend_factory,
         invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),

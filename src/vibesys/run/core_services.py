@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING, Any, Protocol
 from pydantic import BaseModel
 
 from vibesys.run.evaluation_socket import prepare_evaluation_socket
-from vibesys.run.run_clock import RunClock
 from vibesys.run.step_runners import (
     RunnerSeams,
     RunnerServices,
@@ -67,6 +66,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
     from pathlib import Path
 
+    from vibesys.run.run_clock import RunClock
     from vs_agent.api import AgentClientProtocol, AgentInvocationStore, AgentSpec
     from vs_core.api import (
         CoreState,
@@ -185,7 +185,11 @@ class CoreResources:
     """The model the operator chose per role id where it differs from the run's default."""
     agents: CoreAgentResources | None
     clock: SleepingClock
-    """The run's clock: it places the deadline and later paces the loop on one timeline."""
+    """The wall clock the run's operation owners read."""
+    run_clock: RunClock
+    """The run's clock, which the loop and the log run on: the host's journal's, one per run.
+
+    It is started when the run's log is open."""
     github: GitHubClient
     """Reaches GitHub, for operation owners that keep their records there."""
     threads: Threads
@@ -219,8 +223,6 @@ class CoreResources:
 
     Called once, when the run's runner is built; ``None`` is a run that composes no step runner
     (a composition test that only reads the services)."""
-    run_clock: RunClock | None = None
-    """The run's clock, which the loop and the log run on; started when the run's log is open."""
     step_runner_decorator: StepRunnerDecorator | None = None
     """Wraps the run's step runner as it is built; a test holds or faults steps through it."""
 
@@ -352,7 +354,7 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         ),
         evaluation=resources.evaluation,
         artifacts=artifacts,
-        clock=_run_clock(resources),
+        clock=resources.run_clock,
         agent_evaluation=bridge,
         profile_capture_withheld=plan.profile_capture_withheld,
         control_inbox=resources.project.state.control_inbox(run_id),
@@ -363,11 +365,6 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
 def _decorated(runner: StepRunner, decorator: StepRunnerDecorator | None) -> StepRunner:
     """The run's runner, wrapped by the decorator a composition supplied."""
     return runner if decorator is None else decorator(runner)
-
-
-def _run_clock(resources: CoreResources) -> RunClock:
-    """The run's clock, which a composition that runs no loop leaves to its wall clock."""
-    return resources.run_clock or RunClock(resources.clock)
 
 
 def _seams(resources: CoreResources) -> RunnerSeams:

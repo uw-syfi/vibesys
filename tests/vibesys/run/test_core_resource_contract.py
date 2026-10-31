@@ -14,6 +14,7 @@ from vibesys.run.core_services import (
     CoreEnvironment,
     CoreResources,
 )
+from vibesys.run.run_clock import RunClock
 from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore
 from vs_core.api import RequestRetries
 from vs_project.api import Project
@@ -90,6 +91,7 @@ def _resources(
         role_models={},
         agents=agents,
         clock=ManualClock(),
+        run_clock=RunClock(ManualClock()),
         github=NO_GITHUB,
         threads=sim.threads(),
         blocking=InlineBlockingRunner(),

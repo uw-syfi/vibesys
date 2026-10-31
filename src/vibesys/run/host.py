@@ -775,7 +775,8 @@ async def open_product_core_host(  # noqa: PLR0913  # lint-waiver: LW-948092 [PL
     """Open the host of a plugin whose ``core`` policy the runtime drives.
 
     Composition builds every core service from the resources it opens, and fails with
-    ``CoreCompositionError`` naming what is missing. A stop requested while the caller's
+    ``CoreCompositionError`` naming what is missing, or when the run's timing clock is not its
+    journal's (a run counts its seconds on one clock). A stop requested while the caller's
     block runs is bounded: if the block is still running `STOP_GRACE_S` later (timed by
     *stop_timer*), its task is cancelled and the block ends in `RunStopped`. Teardown then
     releases the core services before the workspaces they evaluate in.
@@ -783,6 +784,12 @@ async def open_product_core_host(  # noqa: PLR0913  # lint-waiver: LW-948092 [PL
     if plugin.core is None:
         message = f"orchestration {plugin.id!r} has no core policy"
         raise CoreCompositionError("core", message)
+    if timing.clock is not integration.clock:
+        message = (
+            "the run's timing clock is not the clock its journal is timed by: the log dates its "
+            "records by one and the loop counts on the other"
+        )
+        raise CoreCompositionError("timing", message)
     factory = _ProductHostFactory(
         request=request,
         integration=integration,
