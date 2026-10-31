@@ -101,7 +101,7 @@ describe('core records are runtime bookkeeping', () => {
     const bodies = RecordSchema.oneofs
       .find(oneof => oneof.localName === 'body')
       ?.fields.map(field => field.localName);
-    expect(Object.keys(RECORD_BODY_KIND).sort()).toEqual([...(bodies ?? new Uint8Array())].sort());
+    expect(Object.keys(RECORD_BODY_KIND).sort()).toEqual([...(bodies ?? [])].sort());
     expect(
       Object.entries(RECORD_BODY_KIND)
         .filter(([, kind]) => kind === 'core')
@@ -151,7 +151,8 @@ function interleaved(
   const log: Uint8Array[] = [];
   const pickCore = () => core[next(core.length)] ?? new Uint8Array();
   let taken = 0;
-  while (taken < ordinary.length) log.push(next(3) === 0 ? pickCore() : (ordinary[taken++] ?? new Uint8Array()));
+  while (taken < ordinary.length)
+    log.push(next(3) === 0 ? pickCore() : (ordinary[taken++] ?? new Uint8Array()));
   for (let extra = next(4); extra > 0; extra -= 1) log.push(pickCore());
   return log.map((bytes, index) =>
     toBinary(
