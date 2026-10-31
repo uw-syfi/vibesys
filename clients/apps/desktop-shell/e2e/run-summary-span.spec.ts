@@ -23,7 +23,11 @@ test('a finished run opens from its skeleton, and a step reads only its own cont
   const opened = await gatewayCalls(page);
   expect(opened.filter(method => method.endsWith('/Skeleton')).length).toBeGreaterThan(0);
 
-  await page.getByRole('listbox', {name: 'Ideas'}).getByRole('option').first().click();
+  // An idea that is not the run's adopted one: the list opens sorted by result, the adopted first.
+  await page
+    .getByRole('listbox', {name: 'Ideas'})
+    .getByRole('option', {name: /^Per-core queues with stealing/})
+    .click();
   const steps = page.getByRole('listbox', {name: /steps$/});
   await expect(steps).toBeVisible();
   const before = await gatewayCalls(page);

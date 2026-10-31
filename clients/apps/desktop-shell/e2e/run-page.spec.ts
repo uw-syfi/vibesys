@@ -218,7 +218,7 @@ test('the run level says what will appear before anything is measured, and keeps
 
   // With nothing folded yet the hero and the ideas say what will appear, not a guess.
   await expect(page.getByText('nothing measured yet')).toBeVisible();
-  await expect(page.getByText('No ideas yet')).toBeVisible();
+  await expect(page.getByRole('listbox', {name: 'Ideas'})).toHaveCount(0);
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
   await shot(page, 'ink-run-empty');
 
@@ -228,7 +228,7 @@ test('the run level says what will appear before anything is measured, and keeps
   await expect(show.getByRole('radio', {name: 'Agents'})).toBeChecked();
   await show.getByText('Ideas').click();
   await expect(show.getByRole('radio', {name: 'Ideas'})).toBeChecked();
-  await expect(page.getByText('No ideas yet')).toBeVisible();
+  await expect(page.getByRole('listbox', {name: 'Ideas'})).toHaveCount(0);
 });
 
 test('every ended run offers Resume', async ({page}) => {

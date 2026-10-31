@@ -104,9 +104,10 @@ test('a live run folds its trace into the ideas, the failed listed and hideable'
   const shown = await ideas.getByRole('option').count();
   await expect(page.getByRole('button', {name: /^\+ \d+ failed$/})).toHaveCount(0);
   // A status chip narrows the list to its group and shows every idea again when pressed twice.
-  await page.locator('button.vs-dotlegend-item', {hasText: /\d+ failed/}).click();
+  const last = page.locator('button.vs-dotlegend-item').last();
+  await last.click();
   await expect.poll(() => ideas.getByRole('option').count()).toBeLessThan(shown);
-  await page.locator('button.vs-dotlegend-item', {hasText: /\d+ failed/}).click();
+  await last.click();
   await expect.poll(() => ideas.getByRole('option').count()).toBe(shown);
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
 });
@@ -124,7 +125,7 @@ test('a run that has tried no idea yet says what will appear, not a guess', asyn
     .getByRole('main')
     .getByRole('button', {name: /^queue-rs · mpmc/})
     .click();
-  await expect(page.getByText('No ideas yet')).toBeVisible();
+  await expect(page.getByRole('listbox', {name: 'Ideas'})).toHaveCount(0);
   await expect(page.getByText('nothing measured yet')).toBeVisible();
 });
 

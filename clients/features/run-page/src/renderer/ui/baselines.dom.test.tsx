@@ -91,8 +91,8 @@ test('the Ideas table has a ratio column for each comparison, a dash where there
       dispatch={() => undefined}
     />,
   );
-  const header = [...screen.container.querySelectorAll('.vs-columnlist-headcell')].map(column =>
-    column.textContent?.replace(/ ▾$/, ''),
+  const header = [...screen.container.querySelectorAll('.vs-columnlist-headcell')].map(
+    column => column.textContent,
   );
   expect(header.slice(header.indexOf('vs input'), header.indexOf('vs input') + 3)).toEqual([
     'vs input',

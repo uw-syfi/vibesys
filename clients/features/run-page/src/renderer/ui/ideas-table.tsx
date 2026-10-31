@@ -96,7 +96,7 @@ function IdeaName(props: {readonly row: IdeaTableRow}): JSX.Element {
   const {row} = props;
   return (
     <CellInline>
-      <Text title={markdownToPlain(row.title)}>{markdownToPlain(row.title)}</Text>
+      <Text variant="code">{markdownToPlain(row.title)}</Text>
       {row.adopted ? <Chip label="Adopted" tone="ok" /> : null}
       {row.best ? <Chip label="Best" tone="ok" /> : null}
     </CellInline>
@@ -185,6 +185,7 @@ function leadColumns(base: ViewBase): readonly Column[] {
       key: 'idea',
       header: 'Idea',
       size: 'fill',
+      wrap: true,
       hint: row => markdownToPlain(row.title),
       cell: row => <IdeaName row={row} />,
     },
@@ -209,6 +210,7 @@ function leadColumns(base: ViewBase): readonly Column[] {
       header: 'Status',
       size: 'wide',
       narrow: 'short',
+      wrap: true,
       hint: row => [row.status.word, row.status.cause].filter(part => part !== null).join(' · '),
       cell: row => (
         <CellLines
@@ -289,14 +291,13 @@ export function IdeasTable(props: {
   const shown = table.rows.length;
   return (
     <Stack gap="space-3" grow>
-      <Row gap="space-3" align="center" wrap>
+      <Row gap="space-3" align="center">
         <Row gap="space-3" align="baseline">
           <Text variant="heading">Ideas</Text>
           <Text tone="muted">
             {shown === table.total ? `${table.total}` : `${shown} of ${table.total}`}
           </Text>
         </Row>
-        <Chips table={table} filter={filter} dispatch={props.dispatch} />
         <Row gap="space-0" grow justify="end">
           <SearchBox
             label="Search ideas"
@@ -306,6 +307,7 @@ export function IdeasTable(props: {
           />
         </Row>
       </Row>
+      <Chips table={table} filter={filter} dispatch={props.dispatch} />
       {shown === 0 ? (
         <Text tone="muted">No matches</Text>
       ) : (

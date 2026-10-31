@@ -1,5 +1,6 @@
-import {type CSSProperties, type FocusEvent, type JSX, type ReactNode, useId, useRef} from 'react';
+import {type CSSProperties, type FocusEvent, type JSX, type ReactNode, useId} from 'react';
 import {SIZE} from '../tokens/index.js';
+import {Icon} from './icon.js';
 import {navigationKeys, pickKeys} from './listbox.js';
 import {Text} from './text.js';
 import {InSlot, useSlot, useWindowed} from './windowing.js';
@@ -7,8 +8,9 @@ import {InSlot, useSlot, useWindowed} from './windowing.js';
 /** How wide a column is: the rest of the row, a name's width, or a figure's. */
 export type ColumnSize = 'fill' | 'wide' | 'short';
 
+/** A fill column keeps a readable width while the list has room for every column. */
 const TRACKS: Readonly<Record<ColumnSize, string>> = {
-  fill: 'minmax(0, 1fr)',
+  fill: 'minmax(var(--column-field), 1fr)',
   wide: 'var(--column-swatch)',
   short: 'var(--gantt-figure)',
 };
@@ -21,6 +23,8 @@ export interface ListColumn<Row> {
   readonly align?: 'start' | 'end';
   /** Drawn only while the list has room: it gives way when the list is narrow. */
   readonly optional?: boolean;
+  /** The cell's text wraps onto more lines instead of being cut short. */
+  readonly wrap?: boolean;
   /** The column's size when the list is narrow; the same by default. */
   readonly narrow?: ColumnSize;
   /** What the pointer shows over a cell whole, for a cell that may be cut short. */
@@ -57,7 +61,7 @@ function Header<Row>(props: {
           ) : (
             <button type="button" onClick={column.sort.press} title={`Sort by ${column.header}`}>
               {column.header}
-              {column.sort.marked ? <span aria-hidden="true">{' ▾'}</span> : null}
+              {column.sort.marked ? <Icon name="chevron-down" /> : null}
             </button>
           )}
         </span>
@@ -107,6 +111,7 @@ function Row<Row>(props: {
           className="vs-columnlist-cell"
           data-align={column.align}
           data-optional={column.optional || undefined}
+          data-wrap={column.wrap || undefined}
           title={column.hint?.(props.row)}
         >
           {column.cell(props.row)}
@@ -141,15 +146,6 @@ export function ColumnList<Row>(props: {
     estimate: SIZE.row,
     follow: false,
   });
-  const revealed = useRef<string | undefined>(undefined);
-  const scroller = (element: HTMLElement | null): void => {
-    win.scroller(element);
-    // Called after every commit: brings a newly selected row into view once.
-    if (element === null || revealed.current === props.selected) return;
-    revealed.current = props.selected;
-    const at = props.selected === undefined ? -1 : ids.indexOf(props.selected);
-    if (at >= 0) win.reveal(at, () => undefined);
-  };
   const selectedIndex = props.selected === undefined ? -1 : ids.indexOf(props.selected);
   const drawn = selectedIndex >= win.first && selectedIndex < win.last;
   const focusSelected = (event: FocusEvent<HTMLDivElement>): void => {
@@ -157,7 +153,13 @@ export function ColumnList<Row>(props: {
     win.reveal(selectedIndex >= 0 ? selectedIndex : 0, row => row.focus());
   };
   const tracksOf = (columns: readonly ListColumn<Row>[], narrow: boolean): string =>
-    columns.map(column => TRACKS[(narrow && column.narrow) || column.size]).join(' ');
+    columns
+      .map(column =>
+        narrow && column.size === 'fill'
+          ? 'minmax(0, 1fr)'
+          : TRACKS[(narrow && column.narrow) || column.size],
+      )
+      .join(' ');
   const tracks = {
     '--columns': tracksOf(props.columns, false),
     '--columns-narrow': tracksOf(
@@ -169,7 +171,7 @@ export function ColumnList<Row>(props: {
     <div className="vs-columnlist" style={tracks}>
       <Header columns={props.columns} id={headerId} />
       <div
-        ref={scroller}
+        ref={win.scroller}
         className="vs-columnlist-rows"
         role="listbox"
         aria-label={props.label}

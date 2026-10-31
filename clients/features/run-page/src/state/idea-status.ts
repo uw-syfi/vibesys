@@ -76,9 +76,10 @@ function causeOf(reason: string | null, status: IdeaStatus): string | null {
  * measured nothing.
  *
  * A passed idea is `Faster` or `No gain` by what it measured, `Not measured` without a reading.
- * A failed one: its measurement's verdict `slower` is `No gain`; a failed check or a verdict
- * `failed_check` is `Failed` (`Check failed`); the reason `not_measured` is `Not measured`; a reason
- * that gave the idea up (`turned_down`, `no_design`, ...) is `Dropped`; any other reason is `Failed`.
+ * A failed one: the reason `not_measured` is `Not measured`; a failed check or a verdict
+ * `failed_check` is `Failed` (`Check failed`); one that was measured (or whose verdict is `slower`)
+ * is `No gain`; with no reading, a reason that gave the idea up (`turned_down`, `no_design`, ...) is
+ * `Dropped` and any other reason is `Failed`.
  */
 export function ideaStatus(idea: Candidate, change: Change | null): IdeaStatusView {
   const none = (status: IdeaStatus): IdeaStatusView => ({status, cause: null});
@@ -89,10 +90,11 @@ export function ideaStatus(idea: Candidate, change: Change | null): IdeaStatusVi
   }
   const measurement = idea.measurement;
   if (idea.reason === 'not_measured') return none('not-measured');
-  if (measurement?.verdict === 'slower') return none('no-gain');
   if (measurement?.failed != null || measurement?.verdict === 'failed_check') {
     return {status: 'failed', cause: 'Check failed'};
   }
+  // It was measured and turned down, or came out slower: a result, with no gain in it.
+  if (measurement?.verdict === 'slower' || change !== null) return none('no-gain');
   const status: IdeaStatus =
     idea.reason !== null && DROPPED.has(idea.reason) ? 'dropped' : 'failed';
   return {status, cause: causeOf(idea.reason, status)};

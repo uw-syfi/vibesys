@@ -50,7 +50,7 @@ test('scrolling the ideas list moves only the list: the tabs, chips and search s
 }) => {
   await open(page, 'weeks-600-ideas', 1440);
   const search = page.getByRole('searchbox', {name: 'Search ideas'});
-  const header = page.locator('.vs-listheader').first();
+  const header = page.locator('.vs-columnlist-head').first();
   const before = [await search.boundingBox(), await header.boundingBox()];
   await page.getByRole('listbox', {name: 'Ideas'}).evaluate(list => {
     list.scrollTop = 600;
@@ -132,7 +132,7 @@ test('an idea is named in the monospace face in its pane title, its Steps title 
   const mono = await page.evaluate(() => {
     const family = (element: Element | null): string =>
       element === null ? '' : getComputedStyle(element).fontFamily;
-    const row = document.querySelector('.vs-picklist [role="option"] .vs-text');
+    const row = document.querySelector('[aria-label="Ideas"] [role="option"] .vs-text');
     return {
       row: family(row),
       title: family(document.querySelector('.vs-pane-title[data-mono]')),

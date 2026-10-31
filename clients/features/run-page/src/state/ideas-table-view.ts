@@ -8,9 +8,9 @@
  * `vs input` is the multiple of the chart's headline.
  */
 import type {Candidate} from '@vibesys/run-state/candidates';
-import {type BaselineColumns, baselineColumns} from './baselines.js';
+import {type BaselineColumns, baselineColumns, improvement} from './baselines.js';
 import type {Direction} from './direction.js';
-import {unitWords} from './headline.js';
+import {changeOf, unitWords} from './headline.js';
 import {type IdeaBases, ideaBases} from './idea-bases.js';
 import {type Impact, impactOf, type ObjectiveCell, type ObjectiveColumn} from './idea-impact.js';
 import {
@@ -147,11 +147,20 @@ function formOf(count: number): CellForm {
   return count === 2 ? 'value-multiple' : 'multiple';
 }
 
-/** The change an idea made over every objective it read: `faster` if any improved, else its first change. */
-function changeOver(cells: readonly ObjectiveCell[] | undefined) {
+/**
+ * The change an idea made over every objective it read: `faster` if any improved, else its first
+ * change. A run read from events states no series per objective when it has several; its ideas then
+ * have the ratio their own measurement states (`vsBaseline`, over the input) for the first.
+ */
+function changeOver(
+  item: Candidate,
+  cells: readonly ObjectiveCell[] | undefined,
+  direction: Direction,
+) {
   const changes = (cells ?? []).flatMap(cell => (cell.change === null ? [] : [cell.change]));
-  if (changes.length === 0) return null;
-  return changes.includes('faster') ? 'faster' : (changes[0] ?? null);
+  if (changes.length > 0) return changes.includes('faster') ? 'faster' : (changes[0] ?? null);
+  const own = item.measurement?.vsBaseline ?? null;
+  return own === null ? null : changeOf(improvement(own, direction));
 }
 
 /** `a` before `b` where `direction` says higher or lower is better; missing values last. */
@@ -274,7 +283,10 @@ export function ideasTable(
   const {columns, more} = columnsOf(model, objectives, impact);
   const sole = impact.columns.length === 1;
   const statuses = new Map(
-    tree.candidates.map(item => [item.id, ideaStatus(item, changeOver(impact.cells.get(item.id)))]),
+    tree.candidates.map(item => [
+      item.id,
+      ideaStatus(item, changeOver(item, impact.cells.get(item.id), model.direction)),
+    ]),
   );
   const comparisons = sole ? baselineColumns(model) : {labels: [], cells: new Map()};
   const context: RowContext = {

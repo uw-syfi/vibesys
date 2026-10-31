@@ -89,7 +89,7 @@ const ROWS = '[aria-label="Ideas"] [role="option"]';
 /** The text of the cell under `header` in each row. */
 function column(container: HTMLElement, header: string): string[] {
   const heads = [...container.querySelectorAll('.vs-columnlist-headcell')].map(
-    each => each.textContent?.replace(/ ▾$/, '') ?? '',
+    each => each.textContent ?? '',
   );
   const at = heads.indexOf(header);
   if (at < 0) throw new Error(`no column ${header}: ${heads.join(', ')}`);
@@ -185,7 +185,7 @@ test('a header sorts by its column and the same header again restores the defaul
   ) as HTMLElement;
   const marked = (): string[] =>
     [...screen.container.querySelectorAll('.vs-columnlist-headcell[data-marked]')].map(
-      each => each.textContent?.replace(/ ▾$/, '') ?? '',
+      each => each.textContent ?? '',
     );
   expect(marked()).toEqual(['Metric']);
   await act(async () => header.click());
