@@ -51,6 +51,8 @@ from vs_core.types.strategy import (
     Withdraw,
 )
 from vs_core.types.until import Failed
+from vs_decode.api import Unreadable, decode_json
+from vs_proto.api import RUN_LOG_MAX_RECORD_BYTES
 
 from ._spans import RunTrace, SpanLabel
 
@@ -287,7 +289,7 @@ class FlowState(StrategyState):
         published = self.live.published
         issued = {(i.path, i.label): i for i in self.live.issued}
         for encoded in changes:
-            gained = FlowChanges.model_validate_json(encoded)
+            gained = _decoded_changes(encoded)
             steps.extend(gained.steps)
             dropped, settled = gained.dropped, gained.restart_settled
             published = published if gained.published is None else gained.published
@@ -321,6 +323,21 @@ class FlowChanges(Value):
     published: str | None = None
     """The record the flows published in these steps, when they did: what a reader of the log
     shows of the run, which the steps alone do not rebuild without running the flows."""
+
+
+def _decoded_changes(encoded: bytes) -> FlowChanges:
+    """The changes a record of the log holds, or ``ValueError`` saying why it is unreadable."""
+    decoded = decode_json(
+        encoded,
+        FlowChanges,
+        source="the changes a record of the log holds",
+        max_bytes=RUN_LOG_MAX_RECORD_BYTES,
+    )
+    match decoded:
+        case Unreadable():
+            raise ValueError(str(decoded))
+        case _:
+            return decoded
 
 
 _DECISIONS = TypeAdapter(list[Decision])
