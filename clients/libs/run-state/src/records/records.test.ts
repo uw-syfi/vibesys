@@ -97,7 +97,7 @@ test('every retained record arm has a description, including startup and failure
 });
 
 describe('core records are runtime bookkeeping', () => {
-  test('the classification covers every body of the store schema, and core is the five core kinds', () => {
+  test('the classification covers every body of the store schema, and core is the eight core kinds', () => {
     const bodies = RecordSchema.oneofs
       .find(oneof => oneof.localName === 'body')
       ?.fields.map(field => field.localName);
@@ -107,7 +107,16 @@ describe('core records are runtime bookkeeping', () => {
         .filter(([, kind]) => kind === 'core')
         .map(([body]) => body)
         .sort(),
-    ).toEqual(['attemptInterrupted', 'coreInput', 'runEnded', 'stepFinished', 'stepStarted']);
+    ).toEqual([
+      'attemptInterrupted',
+      'coreInput',
+      'coreSnapshot',
+      'runEnded',
+      'runStarted',
+      'stepFinished',
+      'stepStarted',
+      'strategyAdvanced',
+    ]);
   });
 
   test('a log of core records alone has no rows, whatever the reader', () => {
