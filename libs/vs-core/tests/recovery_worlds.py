@@ -129,6 +129,8 @@ class World:
     """The scopes whose close is open beside their steps."""
     retains: tuple[int, ...] = ()
     """The scopes whose snapshot-and-retain, which a drain lets through, is open beside their steps."""
+    run_seconds: float | None = None
+    """The run's length in seconds; the default run is short enough that its end caps every limit."""
 
 
 def build(world: World) -> tuple[core.CoreState, core.OperationRegistry]:
@@ -149,6 +151,10 @@ def build(world: World) -> tuple[core.CoreState, core.OperationRegistry]:
             "limits": state.run.limits.model_copy(update={"request_retries": bound}),
         }
     )
+    if world.run_seconds is not None:
+        run = run.model_copy(
+            update={"deadline_at": world.run_seconds, "duration_seconds": world.run_seconds}
+        )
     state = state.model_copy(update={"registry": registry.descriptors, "run": run})
     scope = core.Scope(owner=state.run.run_id, generation=0)
     for index, spec in enumerate(world.steps):

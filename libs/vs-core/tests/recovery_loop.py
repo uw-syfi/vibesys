@@ -81,6 +81,15 @@ class RefusedRecordError(AssertionError):
         super().__init__(f"the fold refused the record of {action!r}: {error}")
 
 
+class UnservedStepError(AssertionError):
+    """Core opened a step that no runner serves."""
+
+    def __init__(self, row: core.RequestRecord) -> None:
+        super().__init__(
+            f"core opened {row.request.kind} {row.request_id.root}, which no runner serves"
+        )
+
+
 class IneffectiveControlError(AssertionError):
     """Core took a control into the log and the run is as it was: nobody was told it did nothing."""
 
@@ -177,6 +186,7 @@ class Loop:
         assert body is not None
         if isinstance(action, Run):
             self.closes_only_a_finished_scope(action)
+            self.runs_only_what_a_runner_serves(action)
         before = self.state
         try:
             self.add(body)
@@ -189,6 +199,16 @@ class Loop:
             assert self.state.run.status is core.RunStatus.TERMINAL, (
                 "the end was recorded and the run is not over"
             )
+
+    def runs_only_what_a_runner_serves(self, run: Run) -> None:
+        """The rule never starts a request of the prove-or-block layer: no runner serves one.
+
+        A step of such a kind has nothing to clear and nothing to run, so the loop waits on it for
+        good and the run it holds open never ends.
+        """
+        assert not isinstance(run.step, RECOVERY_ONLY), (
+            f"the rule starts {run.step.kind}, which no runner serves"
+        )
 
     def closes_only_a_finished_scope(self, run: Run) -> None:
         """A scope is closed when every other step of it has a result, and not before."""
@@ -374,6 +394,18 @@ def ending(state: core.CoreState) -> bool:
 OPEN = (core.RequestPhase.PREPARED, core.RequestPhase.DISPATCHED, core.RequestPhase.RECONCILING)
 """The phases of a request that has no result yet."""
 
+RECOVERY_ONLY = (
+    core.InspectRequest,
+    core.InspectTurn,
+    core.InspectOwnedJob,
+    core.CancelOwnedResource,
+    core.BlockRequest,
+)
+"""The requests of the prove-or-block layer, which the runner loop has no runner for."""
+
+UNSERVED = (core.InspectTurn, core.InspectOwnedJob)
+"""Those of them that are steps: the rule starts a step, where it lets a command lapse."""
+
 type Move = tuple[str, float | int | None]
 
 MOVES: st.SearchStrategy[Move] = st.one_of(
@@ -552,7 +584,20 @@ def limits_are_kept(loop: Loop) -> None:
             assert row.until.at == first, f"{row.request_id.root} had {first}, has {row.until.at}"
 
 
+def opens_no_unserved_step(loop: Loop) -> None:
+    """Core opens no inspection of a job or a turn: it is a step, and no runner serves it.
+
+    An inspection, a cancel of a resource and a block are commands the fold lapses; these two
+    are not, and the rule would start them. What the rule itself opens would be a step nothing
+    can run or clear, and the run it holds closing would wait for it for good.
+    """
+    for row in loop.state.records.records:
+        if isinstance(row.request, UNSERVED):
+            raise UnservedStepError(row)
+
+
 def invariants(loop: Loop) -> None:
+    opens_no_unserved_step(loop)
     never_idle_draining(loop)
     may_start_agrees_with_decide(loop)
     parked_cancels_what_runs(loop)

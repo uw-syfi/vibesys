@@ -1734,10 +1734,30 @@ def _terminate(
         source is None
         or not isinstance(request_matches(source, source.request), Proven)
         or not isinstance(_job_source(state, context, job, source), Proven)
+        or _born_ended(job, source)
     ):
         return AreaChange(state=state)
     return _termination(
         state, context, _next_step(job, context, cancel_unconfirmed=cancel_unconfirmed)
+    )
+
+
+def _born_ended(job: OwnedJob | RegisteredOwnedJob, source: RequestRecord) -> bool:
+    """Whether the report that closed *job*'s submission also ended the job: nothing is left to end.
+
+    A runner that carries a job to its end tells core only that end, so the job's row is made from
+    the report that closes its submission, and the job's first observation follows it. A run that
+    is ending asks to terminate the jobs it holds as the report lands, and a row with no
+    observation yet is no unconfirmed job to inspect: the report that made it says it is over.
+    """
+    report = source.observation
+    return (
+        job.observation is None
+        and report is not None
+        and report.accepted
+        and report.terminal
+        and report.released
+        and report.resource_id == job.resource_id
     )
 
 
