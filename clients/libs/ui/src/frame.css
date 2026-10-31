@@ -110,6 +110,10 @@ button.vs-crumb:focus-visible {
   gap: var(--space-4);
   container-type: inline-size;
 }
+/* A group set apart is a step further from its neighbours than they are from each other. */
+.vs-flex[data-apart] {
+  margin-block: var(--space-3);
+}
 /* Panes that hold a list in columns keep the height of its rows: the screen's body scrolls to them. */
 .vs-panes:has(.vs-columnlist) {
   flex: 1 0 auto;
@@ -1229,7 +1233,8 @@ button.vs-crumb:focus-visible {
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-4);
+  /* Chips that wrap are one group: their lines are closer than the groups around them. */
+  gap: var(--space-1) var(--space-4);
 }
 .vs-dotlegend-item {
   display: inline-flex;

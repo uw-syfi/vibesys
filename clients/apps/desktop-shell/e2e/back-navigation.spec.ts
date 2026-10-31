@@ -5,6 +5,7 @@
  * the engine also handled would move two entries.
  */
 import {expect, type Page, test} from '@playwright/test';
+import {scrolledToEnd} from './checks/settle.js';
 import {
   type FakeBridgeSeed,
   installFakeBridge,
@@ -121,15 +122,26 @@ test('the Runs crumb goes up to the dashboard from any level, and Back returns t
   await expect(opened(page)).toBeVisible();
 });
 
+/** Where the Ideas list sits in the screen's body, whatever the body is scrolled to. */
+async function placeInBody(page: Page) {
+  return ideas(page).evaluate(list => {
+    const {x, y, width, height} = list.getBoundingClientRect();
+    return {x, y: y + (document.querySelector('.vs-screen-body')?.scrollTop ?? 0), width, height};
+  });
+}
+
 test('zooming keeps the crumbs in their row, so what is below them stays put', async ({page}) => {
   await openShell(page);
   await run(page).click();
-  const before = await ideas(page).boundingBox();
+  // The list is under the charts, so a reader scrolls to it first. A zoom that leaves a shorter page
+  // takes a scrolled body back to its end: the list is held by its place in the body.
+  await scrolledToEnd(page);
+  const before = await placeInBody(page);
   await ideas(page)
     .getByRole('option', {name: /Combine W1 ring/})
     .click();
   await expect(opened(page)).toBeVisible();
-  expect(await ideas(page).boundingBox()).toEqual(before);
+  expect(await placeInBody(page)).toEqual(before);
 });
 
 test('Back crosses screens, and each screen keeps one entry', async ({page}) => {

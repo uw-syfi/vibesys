@@ -130,7 +130,7 @@ export function Hero(
   const pareto = paretoView(whole, props.clock.start, scrub, props.idea, props.lit);
   const legend = chartLegend(charts);
   return (
-    <Stack gap="space-3">
+    <Stack gap="space-3" apart>
       <RunStats
         model={props.model}
         position={props.position}

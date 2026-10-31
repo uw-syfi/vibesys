@@ -360,8 +360,8 @@ export function IdeasTable(props: {
   });
   const shown = table.rows.length;
   return (
-    <Stack gap="space-3">
-      <Row gap="space-4" align="center" wrap justify="between">
+    <Stack gap="space-2">
+      <Row gap="space-1" align="center" wrap justify="between">
         <Chips table={table} filter={filter} dispatch={props.dispatch} />
         <SearchBox
           label="Search ideas"
