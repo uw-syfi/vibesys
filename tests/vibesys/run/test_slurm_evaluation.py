@@ -169,7 +169,10 @@ class _TrackedWorkspaces:
         self.candidates.append(candidate)
         return cast("CandidateWorkspace", candidate)
 
-    async def create_measured_candidate(self, revision: str) -> CandidateWorkspace:
+    async def create_measured_candidate(
+        self, revision: str, *, step_tag: str | None = None
+    ) -> CandidateWorkspace:
+        del step_tag  # this double runs no command, so no mark reaches a process
         return await self.create_candidate(revision)
 
     async def adopt(

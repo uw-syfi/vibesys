@@ -2,8 +2,9 @@
 
 Nothing about the log is invented here: every method appends the record core defines for it
 through ``vs_runlog.ConfirmedLog`` and folds it with ``vs_core.api.recovery.fold``, so the state
-is what a real run.log would give. A record the fold refuses is never appended. Two things core
-has no record for yet are stood in for and marked as such (see ``run_ended`` and ``resume_run``).
+is what a real run.log would give. A record the fold refuses is never appended. Nothing is stood
+in for: the end of a run is core's ``RunEnded`` record, and a parked run resumes by a restart (a
+new log over the same records) and a resume control pushed into it.
 """
 
 from __future__ import annotations
@@ -12,24 +13,17 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Literal
 
 import vs_core.api as core
-from vs_core.api import RequestPhase, RunStatus
 from vs_core.api.recovery import (
+    ended_message,
     finished_message,
     fold,
     input_message,
     interrupted_message,
+    open_step,
     started_message,
 )
-from vs_proto.api import (
-    AttemptInterrupted,
-    CoreInput,
-    EpochStarted,
-    Record,
-    StepFinished,
-    StepStarted,
-    Timestamp,
-)
-from vs_runlog.api import Appended, ConfirmedLog
+from vs_proto.api import EpochStarted, Record, Timestamp
+from vs_runlog.api import Appended, ConfirmedLog, CoreMessage
 from vs_runtime._step_loop import OpenStep
 from vs_sim.api.testing import Changes
 
@@ -39,10 +33,6 @@ if TYPE_CHECKING:
     from vs_core.api import CoreEvent, CoreState, OperationRegistry, RequestId
     from vs_core.api.recovery import End, Interruption, Run, StepResult
     from vs_sim.api import Clock
-
-_OPEN = (RequestPhase.PREPARED, RequestPhase.DISPATCHED, RequestPhase.RECONCILING)
-
-type _Message = EpochStarted | CoreInput | StepStarted | StepFinished | AttemptInterrupted
 
 
 class FakeLogUncertainError(Exception):
@@ -54,19 +44,11 @@ class FakeLogUncertainError(Exception):
 
 
 class FakeRunRecords:
-    """The durable side of a run.log, kept in memory: what survives the death of a host.
-
-    ``ends`` and ``resumes`` are stand-ins for records core does not define yet. Both are
-    durable, so a restarted log sees them as a real one would see a record.
-    """
+    """The durable side of a run.log, kept in memory: what survives the death of a host."""
 
     def __init__(self) -> None:
         """Start with an empty log."""
         self.records: list[Record] = []
-        self.ends: list[End] = []
-        """Each end of the run a loop recorded; a faithful loop records one."""
-        self.resumes = 0
-        """How many times an operator resumed a parked run."""
         self.changes = Changes()
         """Notified at every commit, for a test that waits on the log."""
 
@@ -141,13 +123,9 @@ class FakeStepLog:
         self._inputs.notify()
 
     def open_step(self, tag: RequestId) -> OpenStep | None:
-        """The step ``tag`` as the state has it, while it has no result."""
-        record = self._state.records.record(tag)
-        if record is None or record.phase not in _OPEN:
-            return None
-        attempts = self._state.steps.of(tag)
-        started = 0 if attempts is None else attempts.started
-        return OpenStep(record.request, record.until.at, started)
+        """The step ``tag`` as core has it, while it has no result."""
+        view = open_step(self._state, tag)
+        return None if view is None else OpenStep(view.step, view.deadline_at, view.started)
 
     async def step_started(self, run: Run) -> None:
         """Append ``StepStarted``."""
@@ -162,41 +140,18 @@ class FakeStepLog:
         self._append(interrupted_message(tag, attempt, why))
 
     async def run_ended(self, end: End) -> None:
-        """Stand-in: core has no record of a run's end, so the end is kept beside the records.
-
-        The state then reads ``TERMINAL``, which is what ``at_rest`` looks at.
-        """
-        self._records.ends.append(end)
-        self._records.changes.notify()
-        self._state = self._with_standins(self._state)
+        """Append ``RunEnded``."""
+        self._append(ended_message(end))
 
     async def next_input(self) -> None:
         """Return once ``push`` was called since this last returned."""
         await self._inputs.changed(self._inputs_seen)
         self._inputs_seen = self._inputs.version
 
-    def resume_run(self) -> None:
-        """Stand-in: an operator resumes a parked run (core reaches this through its recovery).
-
-        The state is then running again (closing, if a stop was committed meanwhile), with the pause lifted.
-        """
-        self._records.resumes += 1
-        self._state = self._with_standins(self._state)
-
     def _refolded(self) -> CoreState:
-        folded = fold(self._records.read(), self._seed, registry=self._registry)
-        return self._with_standins(folded)
+        return fold(self._records.read(), self._seed, registry=self._registry)
 
-    def _with_standins(self, state: CoreState) -> CoreState:
-        run = state.run
-        if self._records.resumes and run.status in (RunStatus.PARKED, RunStatus.DRAINING):
-            resumed = RunStatus.CLOSING if run.result is not None else RunStatus.RUNNING
-            run = run.model_copy(update={"status": resumed, "park": None})
-        if self._records.ends:
-            run = run.model_copy(update={"status": RunStatus.TERMINAL})
-        return state.model_copy(update={"run": run})
-
-    def _append(self, message: _Message) -> None:
+    def _append(self, message: CoreMessage) -> None:
         """Fold the next record first, so a record the fold refuses is never appended."""
         at, clock = Timestamp(), self._clock.now()
         scratch = ConfirmedLog(_Scratch(self._records.read()))
@@ -206,7 +161,7 @@ class FakeStepLog:
         folded = fold([built.record], self._state, registry=self._registry)
         if not isinstance(self._log.extend(built.record), Appended):
             raise FakeLogUncertainError
-        self._state = self._with_standins(folded)
+        self._state = folded
 
 
 class FakeQueryOutcome(core.Value):

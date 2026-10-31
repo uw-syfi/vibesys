@@ -674,8 +674,8 @@ describe('Chart legend, panel and columns', () => {
       'Selected',
     ]);
     expect(
-      all(container, 'li svg .vs-chart-step, li svg .vs-chart-point, li svg .vs-chart-ring'),
-    ).toHaveLength(3);
+      all(container, 'li .vs-chart-legend-mark').map(mark => mark.getAttribute('data-mark')),
+    ).toEqual(['line', 'dot', 'ring']);
   });
 
   test('a panel puts its figure at the far end of its heading, with its hint on hover', async () => {

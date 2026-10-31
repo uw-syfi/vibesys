@@ -601,6 +601,10 @@ class AgentTurnRequest:
     (``AgentContextOverflowError``). A strict continuation (``expected_provider_session_id``)
     is checked against the conversation before it is retired.
     """
+    step_tag: str | None = None
+    """The step that asked for this turn: every agent process the turn starts carries it
+    (``vs_sandbox.step_marks``), so ``reap_step_agents`` can end exactly those. It is not part of
+    the turn's payload digest: the same step asks the same turn in every attempt."""
 
 
 @dataclass(frozen=True, slots=True)

@@ -236,12 +236,6 @@ def _load_registry() -> dict[str, object]:
     }
 
 
-def _load_run_park() -> dict[str, object]:
-    from vs_core._run_park import pause_withdraws
-
-    return {"pause_withdraws": pause_withdraws}
-
-
 def _load_turn_permit() -> dict[str, object]:
     from vs_core._turn_permit import TurnPermit, admitted_work_remains, permit_for_request
 
@@ -1829,7 +1823,6 @@ EXPORT_MODULES: dict[str, Callable[[], dict[str, object]]] = {
     "vs_core._projection": _load_projection,
     "vs_core._proofs": _load_proofs,
     "vs_core._registry": _load_registry,
-    "vs_core._run_park": _load_run_park,
     "vs_core._turn_permit": _load_turn_permit,
     "vs_core._run_pause": _load_run_pause,
     "vs_core._search_events": _load_search_events,

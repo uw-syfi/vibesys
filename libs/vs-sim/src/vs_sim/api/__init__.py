@@ -14,7 +14,7 @@ import importlib
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from vs_sim.blocking import BlockingRunner, ThreadBlockingRunner
+    from vs_sim.blocking import BlockingRunner, ShieldedBlockingRunner, ThreadBlockingRunner
     from vs_sim.byte_source import (
         ByteSource,
         ByteSourceChangedError,
@@ -58,6 +58,18 @@ if TYPE_CHECKING:
         tee,
     )
     from vs_sim.probes import CommandProbe, ProbeResult, ProcessesProbe, SubprocessProbe
+    from vs_sim.process_table import (
+        MarkedProcess,
+        NoProcessTable,
+        OsProcessTable,
+        ProcessSurvivedError,
+        ProcessTable,
+        ProcessTableUnavailableError,
+        ProcfsProcessTable,
+        PsRow,
+        mark_in,
+        parse_ps,
+    )
     from vs_sim.processes import (
         DEFAULT_MAX_OUTPUT_BYTES,
         LAUNCHER_LIFELINE_ENV,
@@ -114,6 +126,7 @@ if TYPE_CHECKING:
 
 _MODULES: dict[str, str] = {
     "BlockingRunner": "vs_sim.blocking",
+    "ShieldedBlockingRunner": "vs_sim.blocking",
     "ThreadBlockingRunner": "vs_sim.blocking",
     "Clock": "vs_sim.clock",
     "MonotonicClock": "vs_sim.clock",
@@ -200,6 +213,16 @@ _MODULES: dict[str, str] = {
     "LoopbackHttp": "vs_sim.loopback_http",
     "UrllibLoopbackHttp": "vs_sim.loopback_http",
     "PidfdProcessSignaller": "vs_sim.signals",
+    "MarkedProcess": "vs_sim.process_table",
+    "NoProcessTable": "vs_sim.process_table",
+    "OsProcessTable": "vs_sim.process_table",
+    "ProcessTable": "vs_sim.process_table",
+    "ProcessSurvivedError": "vs_sim.process_table",
+    "ProcessTableUnavailableError": "vs_sim.process_table",
+    "ProcfsProcessTable": "vs_sim.process_table",
+    "PsRow": "vs_sim.process_table",
+    "mark_in": "vs_sim.process_table",
+    "parse_ps": "vs_sim.process_table",
     "ProcessSignaller": "vs_sim.signals",
     "WriterProcessSignaller": "vs_sim.signals",
     "SignalSource": "vs_sim.signals",
@@ -257,10 +280,13 @@ __all__ = [
     "LoopSignalSource",
     "LoopbackHttp",
     "MainThreadWake",
+    "MarkedProcess",
     "MonotonicClock",
     "Network",
+    "NoProcessTable",
     "NotReleasedError",
     "NothingLeft",
+    "OsProcessTable",
     "OsProcesses",
     "OsThreads",
     "OutputSink",
@@ -277,10 +303,15 @@ __all__ = [
     "ProcessRun",
     "ProcessSignaller",
     "ProcessSpec",
+    "ProcessSurvivedError",
+    "ProcessTable",
+    "ProcessTableUnavailableError",
     "ProcessTimedOut",
     "ProcessTimeoutError",
     "Processes",
     "ProcessesProbe",
+    "ProcfsProcessTable",
+    "PsRow",
     "RandomSource",
     "ReleaseEvidence",
     "ReleaseStack",
@@ -288,6 +319,7 @@ __all__ = [
     "ReservableThreads",
     "RunningProcess",
     "SeededRandom",
+    "ShieldedBlockingRunner",
     "SignalMainThreadWake",
     "SignalRelay",
     "SignalSource",
@@ -318,6 +350,8 @@ __all__ = [
     "derive_seed",
     "follow_launcher",
     "forward_output",
+    "mark_in",
+    "parse_ps",
     "run_foreground",
     "sync_descriptor",
     "tee",

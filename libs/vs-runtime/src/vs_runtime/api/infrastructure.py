@@ -235,7 +235,6 @@ from vs_runtime._run_environment import (
     RunEnvironmentSessionRole,
     RunEnvironmentSpec,
     RunEnvironmentView,
-    SkyPilotEnvironment,
     open_run_environment_resources,
     open_workspace_environment_resources,
 )
@@ -282,6 +281,7 @@ from vs_runtime._skills import (
     load_skill_frontmatter,
     offered_skill_facts,
 )
+from vs_runtime._skypilot_environment import SkyPilotEnvironment
 from vs_runtime._slurm_environment import SlurmEnvironment, slurm_evaluation_plan
 from vs_runtime._steer_delivery import SteerableAttempt, SteerTargets, known_steer_targets
 from vs_runtime._task_image_policy import (

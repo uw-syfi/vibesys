@@ -498,6 +498,19 @@ class SlurmEvaluationExecutor:
         except Exception as exc:
             raise ExecutorSubmissionError(exc) from exc
 
+    async def ledger_key(self, request: EvaluationRequest) -> str:
+        """The key the evaluation ledger holds this request's job under, without submitting it.
+
+        The key hashes the workspace this executor runs over, so it is the same for every
+        request of one content and one spec, whatever its handle. Raises ``ValueError`` when
+        no ledger is attached or the request is not one this executor can run.
+        """
+        if self._ledger is None:
+            message = "this executor has no evaluation ledger, so its jobs have no ledger key"
+            raise ValueError(message)
+        batch = self._batch_request(request, self._parse_stages(request))
+        return await self._in_thread(self._ledger.ledger.key, batch)
+
     async def inspect_only(self, handle_id: str) -> ExecutorObservation | None:
         """Poll known durable work once without resuming collection or cancelling it."""
         validate_cluster_operation_id(handle_id)

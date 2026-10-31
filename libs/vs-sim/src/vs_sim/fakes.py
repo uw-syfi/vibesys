@@ -244,6 +244,28 @@ class GatedBlockingRunner:
             self._in_flight -= 1
 
 
+class DetachedBlockingRunner(GatedBlockingRunner):
+    """A gated runner whose calls, like a thread's, go on after their caller is cancelled.
+
+    :class:`GatedBlockingRunner` abandons a parked call when its caller is cancelled. A real
+    thread is not abandoned: the caller stops waiting and the function runs to its end. Here the
+    call is a task of its own, so ``in_flight`` stays up until the function has ended however the
+    caller left, which is what a test of "the call returns only when its work has" reads.
+    """
+
+    async def run[**P, T](self, function: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
+        """Run the call as a task the caller's cancel does not reach."""
+        work = asyncio.ensure_future(super().run(function, *args, **kwargs))
+        work.add_done_callback(_retrieve)
+        return await asyncio.shield(work)
+
+
+def _retrieve(work: asyncio.Future[Any]) -> None:
+    """Take the error of a call that ended after its caller left, so none goes unhandled."""
+    if not work.cancelled():
+        work.exception()
+
+
 class FakeSignalSource:
     """Signal handlers a test fires by hand."""
 

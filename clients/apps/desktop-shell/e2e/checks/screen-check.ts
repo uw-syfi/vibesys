@@ -7,6 +7,7 @@
 import type {Page} from '@playwright/test';
 import {CODE_IDS, roleName} from '@vibesys/contracts';
 import {FAILURE_REASONS} from '@vibesys/run-fixtures';
+import {foreignFontUses} from '../../../../tools/e2e/bundled-fonts.mjs';
 import {
   type CheckId,
   type CheckInput,
@@ -31,8 +32,11 @@ import {
 } from './in-page.js';
 import {isKnown, type KnownFailure} from './known-failures.js';
 
-/** The checks that read one screen; `stability` compares screens (`stability.ts`). */
-type PageCheckId = Exclude<CheckId, 'stability'>;
+/**
+ * The checks that run in the page; `stability` compares screens (`stability.ts`), and
+ * `bundled-font` asks the browser which font drew each text (`foreignFontUses`).
+ */
+type PageCheckId = Exclude<CheckId, 'stability' | 'bundled-font'>;
 
 const CHECKS: Readonly<Record<PageCheckId, (input: CheckInput) => Violation[]>> = {
   overlap: overlapCheck,
@@ -96,19 +100,41 @@ function script(only: readonly PageCheckId[], input: CheckInput): string {
   return `(() => {\n${sources.join('\n')}\nconst input = ${JSON.stringify(input)};\nreturn [${calls.join(', ')}];\n})()`;
 }
 
+/** The checks that run in the page, in the order they report. */
+export const IN_PAGE_CHECKS = Object.keys(CHECKS) as PageCheckId[];
+
+/** Every check of one screen: the in-page checks and the bundled-font check. */
+export const SCREEN_CHECKS: readonly (PageCheckId | 'bundled-font')[] = [
+  ...IN_PAGE_CHECKS,
+  'bundled-font',
+];
+
+/** Text a font other than the bundled ones drew: a glyph its own font lacks falls back to the machine's. */
+async function bundledFontCheck(page: Page): Promise<Violation[]> {
+  return (await foreignFontUses(page)).map(use => ({
+    check: 'bundled-font',
+    message: `"${use.text}" is drawn by ${use.font}, not a bundled font: use var(--font-mono) or an icon`,
+    where: use.where,
+  }));
+}
+
 /** Every violation of `only` (every check by default) on the screen `page` shows now. */
 export async function screenCheck(
   page: Page,
-  only: readonly PageCheckId[] = Object.keys(CHECKS) as PageCheckId[],
+  only: readonly (PageCheckId | 'bundled-font')[] = SCREEN_CHECKS,
 ): Promise<Violation[]> {
-  return page.evaluate<Violation[]>(
-    script(only, {
+  const inPage = only.filter((id): id is PageCheckId => id !== 'bundled-font');
+  const violations = await page.evaluate<Violation[]>(
+    script(inPage, {
       rawWords: RAW_WORDS,
       ids: REGISTRY_IDS,
       names: REGISTRY_NAMES,
       userNames: USER_NAMES,
     }),
   );
+  return only.includes('bundled-font')
+    ? [...violations, ...(await bundledFontCheck(page))]
+    : violations;
 }
 
 /** One screen's violations that no known failure explains, and the known ones it matched. */

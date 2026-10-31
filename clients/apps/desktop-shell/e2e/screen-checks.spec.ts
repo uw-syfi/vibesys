@@ -2,7 +2,7 @@ import {expect, type Page, test} from '@playwright/test';
 import {BAD_SCREENS, CLEAN_SCREEN} from './checks/bad-dom.js';
 import {contactSheetHtml} from './checks/contact-sheet.js';
 import {isKnown, KNOWN_FAILURES, type KnownFailure} from './checks/known-failures.js';
-import {report, screenCheck} from './checks/screen-check.js';
+import {IN_PAGE_CHECKS, report, screenCheck} from './checks/screen-check.js';
 import {settled} from './checks/settle.js';
 import {anchorsOf, RUN_ANCHORS, stabilityViolations} from './checks/stability.js';
 
@@ -20,13 +20,14 @@ async function show(page: Page, html: string): Promise<void> {
 
 test('a clean screen passes every check', async ({page}) => {
   await show(page, CLEAN_SCREEN);
-  expect(await screenCheck(page)).toEqual([]);
+  // The bundled-font check needs the bundled faces; `bundled-font.spec.ts` loads them.
+  expect(await screenCheck(page, IN_PAGE_CHECKS)).toEqual([]);
 });
 
 for (const bad of BAD_SCREENS) {
   test(`${bad.check} fails on ${bad.name}`, async ({page}) => {
     await show(page, bad.html);
-    const violations = await screenCheck(page);
+    const violations = await screenCheck(page, IN_PAGE_CHECKS);
     const hits = violations.filter(each => each.check === bad.check);
     expect(
       hits.map(each => each.message),
