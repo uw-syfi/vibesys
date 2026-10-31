@@ -10,6 +10,7 @@ import {
   initialSidebar,
   liveRows,
   projectRunGaps,
+  type Screen,
   type ShellActions,
   type SidebarAction,
   type SidebarRequest,
@@ -37,12 +38,32 @@ export type ScheduleRefresh = (callback: () => void, delayMs: number) => () => v
 /** How long a live run's digest is left before it is read again, in milliseconds. */
 export const LIVE_DIGEST_REFRESH_MS = 15_000;
 
+/**
+ * The window's history as the location's log: read once at the start and on each Back or Forward,
+ * and written only by the store (`SidebarRequest`), so nothing else moves the window.
+ */
+export interface WindowAddress {
+  /** The screen the address names now. */
+  screen(): Screen;
+  /** Adds a history entry naming `screen`. */
+  push(screen: Screen): void;
+  /** Goes one entry back, as the window's own Back does. */
+  back(): void;
+  /** Calls `listener` with the screen when the window goes Back or Forward; returns a stop. */
+  onRestore(listener: (screen: Screen) => void): () => void;
+}
+
 /** Ask what `request` names; its reply is dispatched as the action that carries its token. */
 function perform(
   bridge: ShellBridge,
+  address: WindowAddress,
   request: SidebarRequest,
   dispatch: (action: SidebarAction) => void,
 ): void {
+  if (request.kind === 'push-address') {
+    address.push(request.screen);
+    return;
+  }
   const {token} = request;
   if (request.kind === 'list-project-runs') {
     const {host, project} = request;
@@ -70,17 +91,19 @@ function perform(
 export function createSidebarStore(
   bridge: ShellBridge,
   schedule: ScheduleRefresh,
+  address: WindowAddress,
 ): {
   readonly store: Store<SidebarState, SidebarAction>;
   readonly actions: ShellActions;
 } {
-  const initial = initialSidebar();
+  const initial = initialSidebar(address.screen());
   const store = createStore<SidebarState, SidebarAction, SidebarRequest>(
     sidebarStep,
     initial.state,
-    (request, dispatch) => perform(bridge, request, dispatch),
+    (request, dispatch) => perform(bridge, address, request, dispatch),
   );
-  for (const request of initial.requests) perform(bridge, request, store.dispatch);
+  for (const request of initial.requests) perform(bridge, address, request, store.dispatch);
+  address.onRestore(screen => store.dispatch({type: 'restored', screen}));
   // While any run is live its digest is due again after each interval; the next waits on this one.
   let refreshing = false;
   const keepLiveDigestsFresh = (): void => {

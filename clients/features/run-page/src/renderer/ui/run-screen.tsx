@@ -106,6 +106,22 @@ const BREADCRUMB_ROW: readonly Crumb[] = [
   {id: 'here', label: 'Here'},
 ];
 
+/** The row under the run's header: `crumbs`, or the row kept empty when there are none. */
+function CrumbRow(props: {readonly crumbs: readonly Crumb[]}): JSX.Element {
+  return props.crumbs.length > 0 ? (
+    <Breadcrumb label="Zoom" items={props.crumbs} />
+  ) : (
+    <Reserve>
+      <Breadcrumb label="Zoom" items={BREADCRUMB_ROW} />
+    </Reserve>
+  );
+}
+
+/** The step up to the Runs dashboard, always the first of the row. */
+function runsCrumb(press: () => void): Crumb {
+  return {id: 'runs', label: 'Runs', out: true, press};
+}
+
 function showsBreadcrumb(route: Route, zoomed: ResolvedZoom): boolean {
   if (routeLevel(route) === 'run') return false;
   return !(zoomed.idea !== null && zoomed.step === null && zoomed.agent === null);
@@ -488,6 +504,8 @@ export function RunScreen(props: {
   /** App-owned run diagnostics, in the page’s scrolling body. */
   readonly toolbar?: ReactNode;
   readonly supplemental?: ReactNode;
+  /** Goes up to the Runs dashboard; absent in a run's own window, which has none. */
+  readonly runs?: () => void;
 }): JSX.Element {
   const {chat, ...rest} = props;
   return (
@@ -546,6 +564,7 @@ function RunScreenBody(props: {
   /** App-owned run diagnostics, in the page’s scrolling body. */
   readonly toolbar?: ReactNode;
   readonly supplemental?: ReactNode;
+  readonly runs?: () => void;
 }): JSX.Element {
   const {state, model, route, zoom, dispatch} = props;
   const names = props.modelNames ?? NO_MODEL_NAMES;
@@ -629,13 +648,12 @@ function RunScreenBody(props: {
       ) : (
         <Banner title={predatesTraceWords(before).title} body={predatesTraceWords(before).body} />
       )}
-      {showsBreadcrumb(route, zoomed) ? (
-        <Breadcrumb label="Zoom" items={crumbs(zoomed, route, zoom)} />
-      ) : (
-        <Reserve>
-          <Breadcrumb label="Zoom" items={BREADCRUMB_ROW} />
-        </Reserve>
-      )}
+      <CrumbRow
+        crumbs={[
+          ...(props.runs === undefined ? [] : [runsCrumb(props.runs)]),
+          ...(showsBreadcrumb(route, zoomed) ? crumbs(zoomed, route, zoom) : []),
+        ]}
+      />
       {detail.problem === null ? null : (
         <Banner tone="warn" title="The step’s transcript is not available" body={detail.problem} />
       )}

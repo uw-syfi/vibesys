@@ -132,7 +132,7 @@ export function useRunPage(options: RunPageOptions): {
   const reader = useMemo(() => createRunReader(), [key]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: one run's facts reader (`key`), like the reader above.
   const factsOf = useMemo(() => createFactsReader(), [key]);
-  const {route, zoom} = useZoom(key, page.address);
+  const {route, zoom} = useZoom(page.address);
   const ending = state === null ? null : runEnding(state);
   const facts = state === null ? undefined : factsOf(state.run);
   const model =

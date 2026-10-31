@@ -68,6 +68,9 @@ const SEED: FakeBridgeSeed = {
 
 const SERVER = journeyFixture('trace');
 
+/** The address of a run at its own level: it names the run, and no zoom. */
+const RUN_LEVEL = /#run=[^&]+$/;
+
 const shots = process.env['LEVEL_SHOTS'];
 
 async function check(page: Page, name: string): Promise<void> {
@@ -242,13 +245,13 @@ test('every level opens by click and walks back by Escape, the crumbs and Back',
   const stepHash = await page.evaluate(() => window.location.hash);
   await crumbs.getByRole('button', {name: 'Combine W1 ring with W2 padding'}).click();
   await expect(turn).toHaveCount(0);
-  await expect(page).toHaveURL(/#idea=[^&]+$/);
+  await expect(page).toHaveURL(/&idea=[^&]+$/);
   await page.goBack();
   await expect(turn).toBeVisible();
   expect(await page.evaluate(() => window.location.hash)).toBe(stepHash);
-  await crumbs.getByRole('button', {name: 'Run'}).click();
+  await crumbs.getByRole('button', {name: 'Run', exact: true}).click();
   await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
-  expect(await page.evaluate(() => window.location.hash)).toBe('');
+  await expect(page).toHaveURL(RUN_LEVEL);
   await page.goBack();
   await expect(turn).toBeVisible();
   await page.goForward();
@@ -391,7 +394,7 @@ test('clicking a dot of the chart opens its idea', async ({page}) => {
   await expect(
     page.getByRole('heading', {name: 'Cache-line padding and batched enqueue'}),
   ).toBeVisible();
-  await expect(page).toHaveURL(/#idea=[^&]+$/);
+  await expect(page).toHaveURL(/&idea=[^&]+$/);
   // The chart stays; another dot opens another idea beside the same chart.
   await perfChart(page)
     .getByRole('button', {name: /^Larger batch size ·/})
@@ -514,9 +517,9 @@ test('the scrubber replays the run’s ideas at an earlier event and returns to 
   await check(page, 'ink-run-ended');
   // The banner's View logs is a zoom the address follows too.
   await page.getByRole('button', {name: 'View logs'}).click();
-  await expect(page).toHaveURL(/#mode=logs$/);
+  await expect(page).toHaveURL(/&mode=logs$/);
   await page.goBack();
-  expect(await page.evaluate(() => window.location.hash)).toBe('');
+  await expect(page).toHaveURL(RUN_LEVEL);
 });
 
 test('the Logs face lists the run’s streams by owner, and an idea shows only its own', async ({

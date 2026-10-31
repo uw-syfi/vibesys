@@ -94,6 +94,7 @@ export function GatewayRun(props: GatewayRunProps): JSX.Element {
       }}
       chat={sessions}
       toolbar={intents.controls}
+      {...(props.navigation.runs === undefined ? {} : {runs: props.navigation.runs})}
       supplemental={
         <>
           <LoadStatus view={page.load} retry={page.retry} />

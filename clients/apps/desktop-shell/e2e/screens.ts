@@ -117,7 +117,10 @@ async function backToRun(page: Page): Promise<void> {
   const close = page.getByRole('button', {name: 'Close idea'});
   if (await close.isVisible()) await close.click();
   else
-    await page.getByRole('navigation', {name: 'Zoom'}).getByRole('button', {name: 'Run'}).click();
+    await page
+      .getByRole('navigation', {name: 'Zoom'})
+      .getByRole('button', {name: 'Run', exact: true})
+      .click();
   await expect(page.getByRole('listbox', {name: 'Ideas'})).toBeVisible();
 }
 
@@ -167,7 +170,10 @@ export async function walkScreens(
   await show.getByText('Agents').click();
   await openAgent(page);
   await walk.at('agent');
-  await page.getByRole('navigation', {name: 'Zoom'}).getByRole('button', {name: 'Run'}).click();
+  await page
+    .getByRole('navigation', {name: 'Zoom'})
+    .getByRole('button', {name: 'Run', exact: true})
+    .click();
   await show.getByText('Ideas').click();
   await page.getByRole('slider', {name: 'Run position'}).focus();
   await page.keyboard.press('Home');

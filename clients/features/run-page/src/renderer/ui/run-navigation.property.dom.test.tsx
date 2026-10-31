@@ -59,6 +59,7 @@ test('property: run-level spacing creates no inert or unnamed button on any face
         const model = createRunReader().read(state.run.trace, null);
         const container = document.createElement('div');
         const root = createRoot(container);
+        let left = 0;
         try {
           await act(async () =>
             root.render(
@@ -70,9 +71,19 @@ test('property: run-level spacing creates no inert or unnamed button on any face
                 route={{...RUN_ROUTE, mode}}
                 zoom={() => undefined}
                 dispatch={() => undefined}
+                runs={() => {
+                  left += 1;
+                }}
               />,
             ),
           );
+          const crumbs = container.querySelector('nav[aria-label="Zoom"]');
+          const runs = [...(crumbs?.querySelectorAll('button') ?? [])].filter(
+            button => button.textContent === 'Runs',
+          );
+          expect(runs).toHaveLength(1);
+          await act(async () => runs[0]?.click());
+          expect(left).toBe(1);
           expect(container.querySelector('[inert] button') === null).toBe(true);
           for (const button of container.querySelectorAll('button'))
             expect((button.getAttribute('aria-label') ?? button.textContent ?? '').trim()).not.toBe(

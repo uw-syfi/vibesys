@@ -24,7 +24,7 @@ export function useGatewayRun(options: {
 }) {
   const {seed, ports, schedule, address} = options;
   const {actor, snapshot} = useGatewayActor(seed, ports, schedule);
-  const {route, zoom} = useZoom(`${seed.identity.host}/${seed.identity.runId}`, address);
+  const {route, zoom} = useZoom(address);
   const {load, progress, ui, text, replies, transcripts} = snapshot.context;
   const loadFailure = terminalLoadFailure(snapshot.context);
   const skeleton = paintedSkeleton(load);

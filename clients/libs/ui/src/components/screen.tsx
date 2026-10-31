@@ -1,4 +1,5 @@
 import type {JSX, ReactNode} from 'react';
+import {Icon} from './icon.js';
 
 /** How much a screen's parts are spaced: `comfortable` (default) or `compact` (dense rows, slim headers). */
 export type Density = 'comfortable' | 'compact';
@@ -30,6 +31,8 @@ export interface Crumb {
   readonly label: string;
   /** The label is a name (an idea's), drawn in the mono face names use everywhere. */
   readonly mono?: boolean;
+  /** The step goes up and out of this trail, drawn as an arrow before its label. */
+  readonly out?: boolean;
   readonly press?: () => void;
 }
 
@@ -65,6 +68,7 @@ export function Breadcrumb(props: {
                 data-mono={item.mono || undefined}
                 onClick={item.press}
               >
+                {item.out ? <Icon name="chevron-left" /> : null}
                 {item.label}
               </button>
             )}

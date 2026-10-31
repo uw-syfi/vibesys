@@ -4,16 +4,9 @@ import type {PreferencesView, WelcomeBridge, WelcomeEvent} from '@vibesys/ipc';
 import type {ThemeMode, ThemeName} from '@vibesys/ui/tokens';
 import fc from 'fast-check';
 import {createShellStores} from './shell.js';
+import {FakeWindowAddress} from './testing/fake-address.js';
 
 const ignore = (): void => undefined;
-
-/** A window address that holds no zoom: these tests open no run. */
-const NO_ADDRESS = {
-  fragment: () => '',
-  push: ignore,
-  onRestore: () => ignore,
-  onEscape: () => ignore,
-};
 
 const STORED: PreferencesView = {
   appearance: {mode: 'system', light: 'mist', dark: 'midnight'},
@@ -64,7 +57,7 @@ test('the page follows the stored theme for the system mode, and each change of 
     () => () => undefined,
     {
       messages: {addEventListener: ignore, removeEventListener: ignore},
-      address: NO_ADDRESS,
+      address: new FakeWindowAddress(),
       now: () => 0,
       session: () => {
         throw new Error('this test opens no run');
@@ -92,7 +85,7 @@ test('New run opened for a machine starts on it; opened plainly, it keeps its ma
     () => () => undefined,
     {
       messages: {addEventListener: ignore, removeEventListener: ignore},
-      address: NO_ADDRESS,
+      address: new FakeWindowAddress(),
       now: () => 0,
       session: () => {
         throw new Error('this test opens no run');
@@ -119,7 +112,7 @@ test('regression: Run again opens New run with the options the run was started w
     () => () => undefined,
     {
       messages: {addEventListener: ignore, removeEventListener: ignore},
-      address: NO_ADDRESS,
+      address: new FakeWindowAddress(),
       now: () => 0,
       session: () => {
         throw new Error('this test opens no run');
@@ -175,6 +168,7 @@ test('Settings opened for a machine and section lands there, reads the machine, 
       return ok({kind: 'unsupported' as const});
     },
   } as WelcomeBridge;
+  const address = new FakeWindowAddress();
   const stores = createShellStores(
     bridge,
     {mode: 'light', onChange: () => undefined},
@@ -182,7 +176,7 @@ test('Settings opened for a machine and section lands there, reads the machine, 
     () => () => undefined,
     {
       messages: {addEventListener: ignore, removeEventListener: ignore},
-      address: NO_ADDRESS,
+      address,
       now: () => 0,
       session: () => {
         throw new Error('this test opens no run');
@@ -206,7 +200,7 @@ test('Settings opened for a machine and section lands there, reads the machine, 
     'logins local',
     'logins ssh:gpu-box',
   ]);
-  stores.sidebar.store.dispatch({type: 'back-from-settings'});
+  address.back();
   expect(stores.sidebar.store.getState().selection).toMatchObject({kind: 'new-run'});
   expect(stores.newRun.getState()).toBe(before);
 });
@@ -219,7 +213,7 @@ test('Settings opened plainly keeps the machine and section it was on', async ()
     () => () => undefined,
     {
       messages: {addEventListener: ignore, removeEventListener: ignore},
-      address: NO_ADDRESS,
+      address: new FakeWindowAddress(),
       now: () => 0,
       session: () => {
         throw new Error('this test opens no run');
@@ -257,6 +251,7 @@ test("New run offers what the machine's Settings data says, and returning from S
       ),
     agentLogins: () => ok({kind: 'unsupported' as const}),
   } as unknown as WelcomeBridge;
+  const address = new FakeWindowAddress();
   const stores = createShellStores(
     bridge,
     {mode: 'light', onChange: () => undefined},
@@ -264,7 +259,7 @@ test("New run offers what the machine's Settings data says, and returning from S
     () => () => undefined,
     {
       messages: {addEventListener: ignore, removeEventListener: ignore},
-      address: NO_ADDRESS,
+      address,
       now: () => 0,
       session: () => {
         throw new Error('this test opens no run');
@@ -284,7 +279,7 @@ test("New run offers what the machine's Settings data says, and returning from S
   const before = stores.newRun.getState().context;
   // The link on the Where page: Settings on that machine's clusters, and Back to the same form.
   select({kind: 'settings', machine: 'ssh:gpu-box', section: 'clusters'});
-  stores.sidebar.store.dispatch({type: 'back-from-settings'});
+  address.back();
   await settle();
   const after = stores.newRun.getState().context;
   expect(after.form).toEqual(before.form);
@@ -348,7 +343,7 @@ test('property: cold-start data arrival never navigates away from Runs', async (
           () => () => {},
           {
             messages: {addEventListener: ignore, removeEventListener: ignore},
-            address: NO_ADDRESS,
+            address: new FakeWindowAddress(),
             now: () => 0,
             session: () => {
               throw new Error('No user opened a run');
@@ -403,7 +398,7 @@ test("a machine's Settings reading that failed while it was unreachable is read 
     () => () => undefined,
     {
       messages: {addEventListener: ignore, removeEventListener: ignore},
-      address: NO_ADDRESS,
+      address: new FakeWindowAddress(),
       now: () => 0,
       session: () => {
         throw new Error('this test opens no run');

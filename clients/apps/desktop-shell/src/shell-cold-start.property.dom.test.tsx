@@ -7,6 +7,7 @@ import {Window} from 'happy-dom';
 import {act} from 'react';
 import {createRoot} from 'react-dom/client';
 import {createShellStores, Shell} from './shell.js';
+import {FakeWindowAddress} from './testing/fake-address.js';
 
 const window = new Window();
 const installed = Object.getOwnPropertyNames(window).filter(name => !(name in globalThis));
@@ -26,12 +27,6 @@ afterAll(async () => {
 });
 
 const ignore = (): void => undefined;
-const NO_ADDRESS = {
-  fragment: () => '',
-  push: ignore,
-  onRestore: () => ignore,
-  onEscape: () => ignore,
-};
 const STORED: PreferencesView = {
   appearance: {mode: 'system', light: 'mist', dark: 'midnight'},
   notifications: {enabled: true},
@@ -140,7 +135,7 @@ function coldStartStores(bridge: WelcomeBridge, clock: FakeClock) {
     clock.schedule,
     {
       messages: {addEventListener: ignore, removeEventListener: ignore},
-      address: NO_ADDRESS,
+      address: new FakeWindowAddress(),
       now: () => 0,
       session: () => {
         throw new Error('No user opened a run');

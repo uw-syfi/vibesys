@@ -206,9 +206,9 @@ function peerFor({lifecycle, liveness, epoch, loading, history, modernHead}: Sce
 
 const NAVIGATION = {runAgain: () => undefined, openWindow: () => undefined};
 const ADDRESS = {
-  fragment: () => '',
-  push: () => {},
-  onRestore: () => () => {},
+  zoom: () => '',
+  move: () => {},
+  subscribe: () => () => {},
   onEscape: () => () => {},
 };
 async function verifyOffers(input: Scenario) {

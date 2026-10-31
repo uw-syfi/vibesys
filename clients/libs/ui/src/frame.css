@@ -84,6 +84,12 @@
 button.vs-crumb {
   cursor: pointer;
 }
+button.vs-crumb > .vs-icon {
+  width: var(--text-small-size);
+  height: var(--text-small-size);
+  margin-inline-end: var(--space-1);
+  vertical-align: text-bottom;
+}
 button.vs-crumb:hover {
   color: var(--text);
   text-decoration: underline;
