@@ -48,6 +48,7 @@ from vs_sim.crash import (
     swept,
 )
 from vs_sim.depth import Depth, depth, examples, set_depth, using_depth
+from vs_sim.exit_wait_contracts import ExitWaiterContract
 from vs_sim.fake_byte_source import FakeByteSource
 from vs_sim.fake_piped_process import ScriptedPipedProcess
 from vs_sim.fake_process_table import FakeProcessTable, Shows
@@ -69,6 +70,7 @@ from vs_sim.fakes import (
     PipedStart,
     ProcessScript,
     ProcessStartRefusedError,
+    RefusingExitWaiter,
     RefusingProcesses,
     RefusingReservableThreads,
     RefusingThreads,
@@ -172,6 +174,7 @@ __all__ = [
     "DetachedBlockingRunner",
     "End",
     "EventTrace",
+    "ExitWaiterContract",
     "FakeByteSource",
     "FakeForegroundChild",
     "FakeForegroundLauncher",
@@ -220,6 +223,7 @@ __all__ = [
     "ProcessUnderTest",
     "ProcessesContract",
     "ProcessesUnderTest",
+    "RefusingExitWaiter",
     "RefusingProcesses",
     "RefusingReservableThreads",
     "RefusingThreads",

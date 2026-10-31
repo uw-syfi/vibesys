@@ -559,6 +559,11 @@ def test_no_command_a_run_starts_can_turn_its_terminals_echo_off(tmp_path: Path)
         os.close(leader)
 
 
+_NO_SIGTIMEDWAIT = pytest.mark.skipif(
+    not hasattr(signal, "sigtimedwait"), reason="signal.sigtimedwait is not provided on this host"
+)
+
+
 def _lifeline_reaches_a_grandchild() -> tuple[int, bool]:
     """Follow a lifeline, then start a command that inherits every inheritable descriptor.
 
@@ -585,6 +590,7 @@ def _lifeline_reaches_a_grandchild() -> tuple[int, bool]:
 
 
 @pytest.mark.regression
+@_NO_SIGTIMEDWAIT
 def test_no_command_the_run_starts_inherits_its_lifeline() -> None:
     """PR #3209 recheck LOW-1: a command started with ``close_fds=False`` held the lifeline.
 
@@ -608,6 +614,7 @@ def _hang_up_with_a_closed_lifeline() -> bool:
 
 
 @pytest.mark.regression
+@_NO_SIGTIMEDWAIT
 def test_a_lifeline_closed_before_its_end_still_hangs_up() -> None:
     """PR #3209 recheck LOW-3: closing an already closed lifeline raised before the SIGHUP.
 

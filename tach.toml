@@ -906,12 +906,12 @@ depends_on = []
 [[modules]]
 path = "vs_sim.api"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sim.blocking", "vs_sim.byte_source", "vs_sim.clock", "vs_sim.concurrency", "vs_sim.loopback_http", "vs_sim.network", "vs_sim.os_platform", "vs_sim.output", "vs_sim.probes", "vs_sim.process_table", "vs_sim.processes", "vs_sim.randomness", "vs_sim.release", "vs_sim.signal_relay", "vs_sim.signals", "vs_sim.streaming", "vs_sim.sync", "vs_sim.yields"]
+depends_on = ["vs_sim.blocking", "vs_sim.byte_source", "vs_sim.clock", "vs_sim.concurrency", "vs_sim.exit_wait", "vs_sim.loopback_http", "vs_sim.network", "vs_sim.os_platform", "vs_sim.output", "vs_sim.probes", "vs_sim.process_table", "vs_sim.processes", "vs_sim.randomness", "vs_sim.release", "vs_sim.signal_relay", "vs_sim.signals", "vs_sim.streaming", "vs_sim.sync", "vs_sim.yields"]
 
 [[modules]]
 path = "vs_sim.api.testing"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sim.child", "vs_sim.concurrency_contracts", "vs_sim.contracts", "vs_sim.crash", "vs_sim.depth", "vs_sim.fake_byte_source", "vs_sim.fake_piped_process", "vs_sim.fake_process_table", "vs_sim.fake_signal_relay", "vs_sim.fakes", "vs_sim.faults", "vs_sim.file_effects", "vs_sim.gate", "vs_sim.host_clock", "vs_sim.hostile_input", "vs_sim.manual", "vs_sim.output_contracts", "vs_sim.pairwise", "vs_sim.seeds", "vs_sim.signal_relay_contracts", "vs_sim.sim", "vs_sim.sim_network", "vs_sim.sim_threads", "vs_sim.states", "vs_sim.threads", "vs_sim.trace", "vs_sim.virtual", "vs_sim.waits"]
+depends_on = ["vs_sim.child", "vs_sim.concurrency_contracts", "vs_sim.contracts", "vs_sim.crash", "vs_sim.depth", "vs_sim.exit_wait_contracts", "vs_sim.fake_byte_source", "vs_sim.fake_piped_process", "vs_sim.fake_process_table", "vs_sim.fake_signal_relay", "vs_sim.fakes", "vs_sim.faults", "vs_sim.file_effects", "vs_sim.gate", "vs_sim.host_clock", "vs_sim.hostile_input", "vs_sim.manual", "vs_sim.output_contracts", "vs_sim.pairwise", "vs_sim.seeds", "vs_sim.signal_relay_contracts", "vs_sim.sim", "vs_sim.sim_network", "vs_sim.sim_threads", "vs_sim.states", "vs_sim.threads", "vs_sim.trace", "vs_sim.virtual", "vs_sim.waits"]
 
 # Durable log streams for humans. Layer `logs`, above every library, so no library can
 # import it. `vs_logs.api` (the writer) is open to the product; `vs_logs.read` only to
@@ -1000,9 +1000,19 @@ layer = "prompts_and_lower_libs"
 depends_on = []
 
 [[modules]]
+path = "vs_sim.exit_wait"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_sim.exit_wait_contracts"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_sim.exit_wait", "vs_sim.waits"]
+
+[[modules]]
 path = "vs_sim.processes"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sim.output"]
+depends_on = ["vs_sim.exit_wait", "vs_sim.output", "vs_sim.process_table"]
 
 [[modules]]
 path = "vs_sim.randomness"
