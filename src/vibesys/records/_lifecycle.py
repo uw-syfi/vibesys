@@ -11,6 +11,7 @@ import vibesys.events as e
 import vs_proto.api as p
 from vibesys.events import CoreEventType, make_core_event
 from vibesys.records._common import Projection, enum_value, measured_input
+from vibesys.records._span_table import SpanKey
 from vibesys.records._spans import ATTRS_TYPES
 
 if TYPE_CHECKING:
@@ -226,7 +227,7 @@ def ended(projection: Projection) -> None:
         ending.outcome = p.Outcome.STOPPED
     elif ending.outcome == p.Outcome.UNSPECIFIED:
         ending.outcome = p.Outcome.FINISHED
-    for span in list(projection.spans.values()):
+    for span in projection.spans.matching(SpanKey.unfinished()):
         if span.status in {p.SpanStatus.RUNNING, p.SpanStatus.WAITING, p.SpanStatus.PENDING}:
             span.status = (
                 p.SpanStatus.FAILED if ending.outcome == p.Outcome.FAILED else p.SpanStatus.STOPPED

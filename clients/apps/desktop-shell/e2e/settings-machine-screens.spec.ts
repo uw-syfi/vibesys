@@ -1,7 +1,8 @@
 import {mkdirSync, writeFileSync} from 'node:fs';
 import {expect, test} from '@playwright/test';
 import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
-import {screenCheck} from './checks/screen-check.js';
+import {KnownLedger} from './checks/known-ledger.js';
+import {SCREEN_CHECKS, screenCheck} from './checks/screen-check.js';
 import {main, openSettingsAt} from './settings-machine.js';
 import {SETTINGS_PAGES} from './settings-machine-pages.js';
 
@@ -15,6 +16,7 @@ import {SETTINGS_PAGES} from './settings-machine-pages.js';
 const shots = process.env['SCREENS_DIR'] || undefined;
 if (shots !== undefined) mkdirSync(shots, {recursive: true});
 const sheet: SheetEntry[] = [];
+const ledger = new KnownLedger('settings');
 
 const WIDTHS = [1440, 1000, 660] as const;
 
@@ -26,7 +28,8 @@ for (const width of WIDTHS) {
       expect(await page.evaluate(() => window.innerWidth), 'the window is as wide as asked').toBe(
         width,
       );
-      expect(await screenCheck(page)).toEqual([]);
+      const name = `settings/${each.name.replaceAll(' ', '-')}/${width}`;
+      expect(ledger.unexplained(name, await screenCheck(page, SCREEN_CHECKS))).toEqual([]);
       if (shots !== undefined) {
         const file = `settings-machine__${each.name.replaceAll(' ', '-')}__${width}.png`;
         await main(page).screenshot({path: `${shots}/${file}`});
@@ -35,6 +38,8 @@ for (const width of WIDTHS) {
     });
   }
 }
+
+ledger.requireEveryFailure(() => ledger.screens >= WIDTHS.length * SETTINGS_PAGES.length);
 
 test('the contact sheet of the machine Settings pages', async ({browser}) => {
   test.skip(shots === undefined, 'set SCREENS_DIR to write the screenshots and the contact sheet');
