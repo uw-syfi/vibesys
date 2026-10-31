@@ -4,7 +4,7 @@ import {decodeGatewayReply} from '@vibesys/ipc';
 import {HostCallRequestSchema} from '@vibesys/proto';
 import {configuredHostCall} from '@vibesys/runs/intents';
 import {GrpcError} from '@vibesys/transport';
-import {endOf} from './gateway-ipc.js';
+import {endOf} from './port-ipc.js';
 
 test('HostCall uses the current host configuration and preserves its typed method', () => {
   const request = create(HostCallRequestSchema, {

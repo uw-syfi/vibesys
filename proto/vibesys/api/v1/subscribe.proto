@@ -14,6 +14,8 @@ extend google.protobuf.MessageOptions {
   // Required on every message that is an arm of SubscribeRequest.topic. The
   // generator fails on a topic without one. A client cannot ask for another rate.
   TopicPolicy topic = 51004;
+  // Required on SubscribeRequest: the frame timing the hub and every client share.
+  SubscribeTiming subscribe_timing = 51005;
 }
 
 // One topic's fixed cadence and bounds, projected into generated Go and TypeScript tables.
@@ -33,8 +35,23 @@ message TopicPolicy {
   uint32 max_value_bytes = 6 [(buf.validate.field).uint32.gt = 0];
 }
 
+// How often the gateway speaks and how long a client waits for it, whatever the
+// topic. The generator projects both into Go and TypeScript tables, so neither
+// language repeats the numbers.
+message SubscribeTiming {
+  // The longest gap between frames on a healthy stream.
+  uint32 heartbeat_ms = 1 [(buf.validate.field).uint32.gt = 0];
+  // A client counts a stream with no frame for this long as lost, even when the
+  // transport looks alive. It must exceed heartbeat_ms.
+  uint32 lease_ms = 2 [(buf.validate.field).uint32.gt = 0];
+}
+
 // A closed set of topics. Each stream carries one topic's keyed state.
 message SubscribeRequest {
+  option (vibesys.api.v1.subscribe_timing) = {
+    heartbeat_ms: 5000
+    lease_ms: 30000
+  };
   oneof topic {
     option (buf.validate.oneof).required = true;
     MachineStatsTopic machine_stats = 1;

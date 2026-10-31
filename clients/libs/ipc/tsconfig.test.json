@@ -23,6 +23,12 @@
     },
     {
       "path": "../runs/tsconfig.lib.json"
+    },
+    {
+      "path": "../subscription/tsconfig.lib.json"
+    },
+    {
+      "path": "../subscription/tsconfig.testing.json"
     }
   ]
 }

@@ -7,6 +7,9 @@ const (
 	TopicMachineStats = "machine_stats"
 )
 
+// SubscribeFrameTiming is SubscribeRequest's heartbeat and lease, projected from its descriptor.
+var SubscribeFrameTiming = FrameTiming{Heartbeat: 5000 * time.Millisecond, Lease: 30000 * time.Millisecond}
+
 // Topics holds each SubscribeRequest.topic arm's policy, projected from its descriptor.
 var Topics = map[string]TopicPolicy{
 	TopicMachineStats: {Cadence: 10000 * time.Millisecond, StaleAfter: 30000 * time.Millisecond, FirstFrame: 15000 * time.Millisecond, MinInterval: 0 * time.Millisecond, MaxKeys: 1, MaxValueBytes: 16384},
