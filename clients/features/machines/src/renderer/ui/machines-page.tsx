@@ -32,14 +32,20 @@ import {
   placeRows,
   placesReading,
 } from '../../state/index.js';
+import {type LiveStats, useHostStats} from '../effects/live.js';
+import {MachineStats} from './machine-stats.js';
 import {AddMachine} from './machines-screen.js';
 
 type Dispatch = (action: MachinesAction) => void;
 
 const CHECKING = 'Checking';
 
-function Busy(props: {readonly machine: Machine}): JSX.Element | null {
-  const load = machineLoad(props.machine);
+function Busy(props: {
+  readonly machine: Machine;
+  /** The runs live on the machine now, or null while its run list is not read. */
+  readonly live: number | null;
+}): JSX.Element | null {
+  const load = machineLoad(props.machine, props.live);
   if (load === null) return null;
   return (
     <Row gap="space-2">
@@ -141,10 +147,22 @@ function Fix(props: {
   );
 }
 
+/** A card's live stats row: the host's stats while its subscription runs, or why there are none. */
+function Stats(props: {
+  readonly live: LiveStats | undefined;
+  readonly host: HostKey;
+}): JSX.Element | null {
+  const {view, retry} = useHostStats(props.live, props.host);
+  if (view === null || props.live === undefined) return null;
+  return <MachineStats view={view} live={props.live} retry={retry} />;
+}
+
 function MachineCard(props: {
   readonly state: MachinesState;
   readonly machine: Machine;
   readonly dispatch: Dispatch;
+  readonly live: LiveStats | undefined;
+  readonly liveRuns: number | null;
   readonly runs: number;
   readonly incomplete: boolean;
   readonly showRuns: (host: HostKey) => void;
@@ -169,7 +187,7 @@ function MachineCard(props: {
         {hardware === null && runs === 0 && !props.incomplete ? null : (
           <Row gap="space-5" wrap>
             {hardware === null ? null : <Text>{hardware}</Text>}
-            <Busy machine={machine} />
+            <Busy machine={machine} live={props.liveRuns} />
             {runs === 0 && !props.incomplete ? null : (
               <Button
                 variant="quiet"
@@ -180,6 +198,7 @@ function MachineCard(props: {
             )}
           </Row>
         )}
+        <Stats live={props.live} host={machine.host} />
         <Places state={state} machine={machine} dispatch={dispatch} />
       </Stack>
     </Card>
@@ -194,6 +213,10 @@ export function MachinesPage(props: {
   readonly state: MachinesState;
   readonly dispatch: Dispatch;
   readonly runCounts: ReadonlyMap<HostKey, number>;
+  /** The runs live on each machine whose run list is read. */
+  readonly liveRuns: ReadonlyMap<HostKey, number>;
+  /** The machines' live stats; without it the cards show none. */
+  readonly live?: LiveStats;
   readonly incompleteHosts?: ReadonlySet<HostKey>;
   readonly showRuns: (host: HostKey) => void;
   readonly openSettings: (host: HostKey) => void;
@@ -218,6 +241,8 @@ export function MachinesPage(props: {
             state={state}
             machine={machine}
             dispatch={dispatch}
+            live={props.live}
+            liveRuns={props.liveRuns.get(machine.host) ?? null}
             runs={props.runCounts.get(machine.host) ?? 0}
             incomplete={props.incompleteHosts?.has(machine.host) ?? false}
             showRuns={props.showRuns}

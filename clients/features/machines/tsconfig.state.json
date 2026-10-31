@@ -26,6 +26,12 @@
     },
     {
       "path": "../../libs/problems/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/proto/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/subscription/tsconfig.lib.json"
     }
   ]
 }

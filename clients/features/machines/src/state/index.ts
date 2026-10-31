@@ -4,6 +4,7 @@
  * and facts the screen shows.
  */
 
+export {AGE_TICK_MS, clockMachine} from './clock.js';
 export {gpuLine, gpuName} from './hardware.js';
 export {
   type FormName,
@@ -37,6 +38,14 @@ export {
 export {formSuggestions} from './path-form.js';
 export type {ClusterCheck, LastCheck, Places, PlacesReading} from './places.js';
 export {machinesProblems} from './problems.js';
+export {
+  ageWord,
+  FAILURE_WORDS,
+  type GaugeView,
+  type StatsView,
+  statsGauges,
+  statsView,
+} from './stats.js';
 export {
   type MachineFact,
   machineFacts,

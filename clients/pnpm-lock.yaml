@@ -169,6 +169,9 @@ importers:
       '@vibesys/store':
         specifier: workspace:*
         version: link:../../libs/store
+      '@vibesys/subscription':
+        specifier: workspace:*
+        version: link:../../libs/subscription
       '@vibesys/transport':
         specifier: workspace:*
         version: link:../../libs/transport
@@ -374,21 +377,33 @@ importers:
       '@vibesys/ipc':
         specifier: workspace:*
         version: link:../../libs/ipc
+      '@vibesys/machine':
+        specifier: workspace:*
+        version: link:../../libs/machine
       '@vibesys/problems':
         specifier: workspace:*
         version: link:../../libs/problems
+      '@vibesys/proto':
+        specifier: workspace:*
+        version: link:../../libs/proto
       '@vibesys/settings':
         specifier: workspace:*
         version: link:../../libs/settings
       '@vibesys/store':
         specifier: workspace:*
         version: link:../../libs/store
+      '@vibesys/subscription':
+        specifier: workspace:*
+        version: link:../../libs/subscription
       '@vibesys/ui':
         specifier: workspace:*
         version: link:../../libs/ui
       react:
         specifier: 19.1.1
         version: 19.1.1
+      xstate:
+        specifier: 5.33.2
+        version: 5.33.2
     devDependencies:
       '@types/bun':
         specifier: 1.4.2
@@ -405,6 +420,12 @@ importers:
       '@vibesys/transport':
         specifier: workspace:*
         version: link:../../libs/transport
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
+      happy-dom:
+        specifier: 20.14.5
+        version: 20.14.5
       react-dom:
         specifier: 19.1.1
         version: 19.1.1(react@19.1.1)

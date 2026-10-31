@@ -17,7 +17,9 @@ export function hubPortRig(): PortRig & {readonly hub: Subscriptions} {
     port: subscriptions.port,
     far: {
       live: (host, entry) => {
-        const stream = streamsOf(host).filter(each => each.open).at(-1);
+        const stream = streamsOf(host)
+          .filter(each => each.open)
+          .at(-1);
         // A host with no stream open has no one to speak to.
         if (stream === undefined) return;
         stream.reached('runs');

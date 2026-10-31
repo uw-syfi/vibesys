@@ -1,12 +1,7 @@
 /** Valid machine stats as a host's gateway sends them, for tests that feed a topic. */
 import {create} from '@bufbuild/protobuf';
 import {timestampFromMs} from '@bufbuild/protobuf/wkt';
-import {
-  AbsenceReason,
-  MachineStatsSchema,
-  type TopicEntry,
-  TopicEntrySchema,
-} from '@vibesys/proto';
+import {AbsenceReason, MachineStatsSchema, type TopicEntry, TopicEntrySchema} from '@vibesys/proto';
 
 export interface GpuReading {
   readonly name: string;
@@ -26,8 +21,11 @@ const UNREADABLE = {reason: AbsenceReason.READ_FAILED};
 
 /** A machine-stats entry for `key`, sampled at `sampledMs` (the host's clock, display only). */
 export function machineEntry(key: string, sampledMs: number, readings: Readings = {}): TopicEntry {
-  const {cpuPercent = 12.5, memory = {usedBytes: 4 * 2 ** 30, totalBytes: 16 * 2 ** 30}, gpus = []} =
-    readings;
+  const {
+    cpuPercent = 12.5,
+    memory = {usedBytes: 4 * 2 ** 30, totalBytes: 16 * 2 ** 30},
+    gpus = [],
+  } = readings;
   return create(TopicEntrySchema, {
     key,
     value: {

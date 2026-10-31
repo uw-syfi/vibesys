@@ -1,5 +1,6 @@
 import type {JSX} from 'react';
 import type {StyleWithVars} from './css-vars.js';
+import {Text} from './text.js';
 
 /** A horizontal share of a whole (0 to 1) in a tone: a gain, a share of time. */
 export function Meter(props: {
@@ -35,6 +36,34 @@ export function LoadingBar(props: {readonly label: string}): JSX.Element {
   return (
     <span className="vs-meter" role="progressbar" aria-label={props.label}>
       <span className="vs-meter-fill vs-meter-indeterminate" />
+    </span>
+  );
+}
+
+/**
+ * One reading: its `label`, a meter of how full it is, and its `figure` in words. With no `share`
+ * there is no reading, and the meter is empty, so a missing reading is never drawn as zero. `dim`
+ * shows a reading that is no longer current: still there, and quieter.
+ */
+export function Gauge(props: {
+  readonly label: string;
+  readonly share: number | null;
+  readonly figure: string;
+  readonly tone?: 'accent' | 'ok' | 'muted';
+  readonly dim?: boolean;
+}): JSX.Element {
+  return (
+    <span className="vs-gauge" data-dim={props.dim === true || undefined}>
+      <Text variant="small" tone="muted">
+        {props.label}
+      </Text>
+      <Meter
+        inline
+        label={`${props.label} ${props.figure}`}
+        value={props.share ?? 0}
+        tone={props.share === null ? 'muted' : (props.tone ?? 'ok')}
+      />
+      <Text variant="small">{props.figure}</Text>
     </span>
   );
 }

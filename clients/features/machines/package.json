@@ -41,11 +41,15 @@
     "@vibesys/connection": "workspace:*",
     "@vibesys/hosts": "workspace:*",
     "@vibesys/ipc": "workspace:*",
+    "@vibesys/machine": "workspace:*",
     "@vibesys/problems": "workspace:*",
+    "@vibesys/proto": "workspace:*",
     "@vibesys/settings": "workspace:*",
     "@vibesys/store": "workspace:*",
+    "@vibesys/subscription": "workspace:*",
     "@vibesys/ui": "workspace:*",
-    "react": "19.1.1"
+    "react": "19.1.1",
+    "xstate": "5.33.2"
   },
   "devDependencies": {
     "@types/bun": "1.4.2",
@@ -53,6 +57,8 @@
     "@types/react": "19.1.13",
     "@types/react-dom": "19.1.9",
     "@vibesys/transport": "workspace:*",
+    "fast-check": "4.10.2",
+    "happy-dom": "20.14.5",
     "react-dom": "19.1.1",
     "typescript": "^5.8.3"
   }

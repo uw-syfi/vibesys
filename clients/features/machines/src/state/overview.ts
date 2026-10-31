@@ -64,12 +64,14 @@ export interface Load {
   readonly share: number;
 }
 
-/** The machine's load from its own facts, or null while they are not known. */
-export function machineLoad(machine: Machine): Load | null {
+/**
+ * The machine's load: the `live` runs its run list holds against the slots its facts count, or
+ * null while either is not known.
+ */
+export function machineLoad(machine: Machine, live: number | null): Load | null {
   const described = facts(machine);
-  if (described === null) return null;
+  if (described === null || live === null) return null;
   const slots = Math.max(1, described.hardware.gpus.length);
-  const live = Math.max(0, described.runs.live);
   return {live, slots, share: Math.min(1, live / slots)};
 }
 
