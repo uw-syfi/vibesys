@@ -19,7 +19,16 @@ from functools import cache
 import pytest
 from tests.system.crash._flow_worlds import WORLDS
 
-from vs_dst.api import Action, Interruption, Moment, SimulatedRun, simulate
+from vs_dst.api import (
+    Action,
+    Hosting,
+    Interruption,
+    Moment,
+    ShellHosting,
+    SimulatedRun,
+    StepLoopHosting,
+    simulate,
+)
 from vs_sim.api.testing import evenly_spaced
 
 REASON = "#3475 recovery redesign"
@@ -34,21 +43,17 @@ KILL, PAUSE = Action.KILL, Action.PAUSE
 IN_FLIGHT = Moment.IN_FLIGHT
 
 KNOWN_FAILING: dict[str, tuple[Interruption, ...]] = {
-    "dynamic": (Interruption(KILL, IN_FLIGHT, 3), Interruption(PAUSE, IN_FLIGHT, 18)),
+    "dynamic": (Interruption(KILL, IN_FLIGHT, 3),),
     "evolve": (Interruption(KILL, IN_FLIGHT, 3),),
-    "single": (Interruption(PAUSE, IN_FLIGHT, 21),),
-    "multi": (Interruption(PAUSE, IN_FLIGHT, 25),),
 }
 """A few points that are stuck on today's main, which a pull request runs (the sweep below has the
-rest): a kill with a turn in flight leaves recovery blocked, and a pause late in a run leaves it
-waiting on a strategy that does not propose again."""
+rest): a kill with a turn in flight leaves recovery blocked."""
 
 STUCK_GROUPS: frozenset[tuple[str, Action, Moment]] = frozenset(
     {
         *(("dynamic", KILL, IN_FLIGHT), ("dynamic-parallel", KILL, IN_FLIGHT)),
         *(("evolve", KILL, IN_FLIGHT), ("issue-queue", KILL, IN_FLIGHT)),
-        ("single", KILL, IN_FLIGHT),
-        *(("dynamic", PAUSE, moment) for moment in Moment),
+        *(("single", KILL, IN_FLIGHT), ("multi", KILL, IN_FLIGHT)),
         *(("single", PAUSE, moment) for moment in Moment),
         *(("multi", PAUSE, moment) for moment in Moment),
     }
@@ -58,9 +63,16 @@ of the dynamic run and of a sample of the others (12 per class). The sweep of th
 nightly, and a pair it finds stuck belongs here."""
 
 
+SHELL = ShellHosting()
+STEP_LOOP = StepLoopHosting()
+HOSTINGS: dict[str, Hosting] = {"shell": SHELL, "step-loop": STEP_LOOP}
+"""The two hosts of a run: ``CoreRuntime``, which production runs today, and the step loop that
+replaces it. The tables above belong to the shell; the step loop has none (see below)."""
+
+
 @cache
-def _normal(world: str) -> SimulatedRun:
-    return simulate(WORLDS[world]())
+def _normal(world: str, hosting: str = "shell") -> SimulatedRun:
+    return simulate(WORLDS[world](), HOSTINGS[hosting])
 
 
 def _assert_never_stuck(normal: SimulatedRun, point: Interruption) -> None:
@@ -70,6 +82,14 @@ def _assert_never_stuck(normal: SimulatedRun, point: Interruption) -> None:
     assert interrupted.every_step_finished_once(), why
     if point.action is Action.PAUSE or point.moment is not Moment.IN_FLIGHT:
         assert interrupted.reruns == 0, why
+
+
+def _assert_resumed_as_uninterrupted(normal: SimulatedRun, point: Interruption) -> None:
+    """The run ends as the uninterrupted one did: the result, and the adoption it names."""
+    interrupted = normal.interrupt(point)
+    why = f"{point}: {interrupted.outcome.value}; hosts {interrupted.history}; {interrupted.detail}"
+    assert interrupted.matches_uninterrupted(), why
+    assert interrupted.every_step_finished_once(), why
 
 
 def _class_id(case: tuple[Action, Moment]) -> str:
@@ -127,4 +147,65 @@ def test_a_run_interrupted_at_every_point_and_resumed_is_never_stuck(
 ) -> None:
     normal = _normal(world)
     for point in normal.interruptions(*action_moment):
+        _assert_never_stuck(normal, point)
+
+
+# --- the step loop ----------------------------------------------------------------------------
+#
+# The step loop runs the recovery rule of docs/contributing/run-recovery.md. Every kill, at every
+# point of every search, resumes to the uninterrupted result, and so does every pause but the
+# groups below; no step's effect finishes twice. A kill with an effect in flight may run that effect
+# again (it left no result to reuse); every other interruption re-runs nothing.
+
+PAUSE_THAT_FAILS_A_TURN = frozenset(
+    (world, PAUSE, moment) for world in ("single", "multi", "dynamic-parallel") for moment in Moment
+)
+"""A pause that lands after a turn was requested and before it was dispatched, then a resume: core
+has nothing that dispatches the turn again, so its acquisition-stall rule ends it (cancelled, never
+charged) and the search ends the run with no winner. Found by this sweep; core's pause and resume
+(the 4a review) owns the fix, and a group that passes again fails here as an unexpected pass."""
+
+PAUSE_THAT_FAILS_A_TURN_REASON = (
+    "a pause between a turn's request and its dispatch fails the turn on resume (4a)"
+)
+
+
+@pytest.mark.parametrize(
+    ("action", "moment"), [pytest.param(*case, id=_class_id(case)) for case in CLASSES]
+)
+def test_a_dynamic_run_on_the_step_loop_interrupted_and_resumed_ends_as_it_did_at_a_sample_of_points(
+    action: Action, moment: Moment
+) -> None:
+    normal = _normal("dynamic", "step-loop")
+    points = normal.interruptions(action, moment)
+
+    for index in evenly_spaced(len(points), SAMPLE):
+        _assert_resumed_as_uninterrupted(normal, points[index])
+        _assert_never_stuck(normal, points[index])
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    ("world", "action_moment"),
+    [
+        pytest.param(
+            world,
+            case,
+            id=f"{world}-{_class_id(case)}",
+            marks=(
+                [pytest.mark.xfail(strict=True, reason=PAUSE_THAT_FAILS_A_TURN_REASON)]
+                if (world, *case) in PAUSE_THAT_FAILS_A_TURN
+                else []
+            ),
+        )
+        for world in WORLDS
+        for case in CLASSES
+    ],
+)
+def test_a_run_on_the_step_loop_interrupted_at_every_point_and_resumed_ends_as_it_did(
+    world: str, action_moment: tuple[Action, Moment]
+) -> None:
+    normal = _normal(world, "step-loop")
+    for point in normal.interruptions(*action_moment):
+        _assert_resumed_as_uninterrupted(normal, point)
         _assert_never_stuck(normal, point)

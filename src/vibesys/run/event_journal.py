@@ -19,7 +19,7 @@ from vibesys.events import (
     make_core_event,
 )
 from vibesys.run.runlog_tee import RunLogTee
-from vs_runlog.api import FileRunContent, FileRunLogWriter
+from vs_runlog.api import ConfirmedLog, FileRunContent, FileRunLogWriter, SharedWriter
 from vs_runtime.api.infrastructure import (
     DurableEventJournal,
     EventCodec,
@@ -69,6 +69,8 @@ class EventJournal(DurableEventJournal[CoreEvent]):
             self._loop = None
         self._runlog_configured = False
         self._runlog: RunLogTee | None = None
+        self.run_log: ConfirmedLog | None = None
+        """The run's one appender of run.log, once enabled: the projection and core append through it."""
         self.checkout: tuple[str, bool] = ("", False)
 
     def enable_runlog(self, project: Project, run_id: str) -> None:
@@ -79,8 +81,10 @@ class EventJournal(DurableEventJournal[CoreEvent]):
         try:
             path = project.run_log_path_for(project.root, run_id)
             path.parent.mkdir(parents=True, exist_ok=True)
+            writer = FileRunLogWriter(path, clock=self._clock, threads=self._threads)
+            self.run_log = ConfirmedLog(writer, self._threads)
             self._runlog = RunLogTee(
-                FileRunLogWriter(path, clock=self._clock, threads=self._threads),
+                SharedWriter(self.run_log, writer),
                 FileRunContent(
                     project.run_blobs_directory_for(project.root, run_id),
                     project.log_streams_directory_for(project.root, run_id),
