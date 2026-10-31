@@ -23,6 +23,7 @@ from vs_agent.contracts import (
     AgentContextOverflowError,
     AgentEvent,
     AgentEventKind,
+    AgentModelUsage,
     AgentOutputSchemaError,
     AgentQuotaError,
     AgentRateLimit,
@@ -31,9 +32,11 @@ from vs_agent.contracts import (
     AgentTurnTimeoutError,
     AgentUsage,
     AuthStatus,
+    CostBasis,
     MCPServerSpec,
     ProviderReadiness,
     QuotaCondition,
+    UsageSpeed,
 )
 from vs_agent.events import CommandResultPayload
 
@@ -47,6 +50,20 @@ _AUTH_STATUS = {
     agentshim.AuthState.KNOWN_OK: AuthStatus.OK,
     agentshim.AuthState.FAILED: AuthStatus.FAILED,
     agentshim.AuthState.UNKNOWN: AuthStatus.UNKNOWN,
+}
+
+# Total on purpose: a member agentshim adds that these tables miss is a KeyError in the first test
+# that walks the enum, never a silently dropped fact.
+_COST_BASIS = {
+    agentshim.CostSource.PRICE_TABLE: CostBasis.PRICE_TABLE,
+    agentshim.CostSource.PROVIDER_REPORTED: CostBasis.PROVIDER_REPORTED,
+    agentshim.CostSource.UNKNOWN_MODEL: CostBasis.UNKNOWN_MODEL,
+    agentshim.CostSource.NOT_REPORTED: CostBasis.NOT_REPORTED,
+}
+_SPEED = {
+    agentshim.UsageSpeed.STANDARD: UsageSpeed.STANDARD,
+    agentshim.UsageSpeed.FAST: UsageSpeed.FAST,
+    agentshim.UsageSpeed.ULTRAFAST: UsageSpeed.ULTRAFAST,
 }
 
 
@@ -103,7 +120,11 @@ def usage_from(
 
     ``input_tokens`` includes cached tokens on every provider: the library
     folds Anthropic's disjoint cache counts into the input total so the same
-    field means the same thing everywhere.
+    field means the same thing everywhere. The token fields count the main
+    conversation only, as the library's ``tokens`` do; ``by_model`` carries
+    every model the turn ran, priced by the library and copied here unchanged,
+    so the sum of its rows is the whole turn. ``cost_basis`` names how the
+    library reached the cost.
     """
     if not usage.increment_known:
         # Unknown resumed totals are zero placeholders, not measured increments.
@@ -118,6 +139,26 @@ def usage_from(
         reasoning_output_tokens=tokens.reasoning_output_tokens,
         total_cost_usd=cost_usd if cost_usd is not None else usage.total_cost_usd,
         duration_ms=duration_ms,
+        cost_basis=None if usage.cost_source is None else _COST_BASIS[usage.cost_source],
+        by_model=tuple(model_usage_from(row) for row in usage.by_model),
+    )
+
+
+def model_usage_from(row: agentshim.ModelUsage) -> AgentModelUsage:
+    """Carry one model's share of a turn over, with the cost the library priced it at."""
+    tokens = row.tokens
+    return AgentModelUsage(
+        model=row.model,
+        input_tokens=tokens.input_tokens,
+        cache_creation_input_tokens=tokens.cache_write_input_tokens,
+        cache_creation_1h_input_tokens=tokens.cache_write_1h_input_tokens,
+        cache_read_input_tokens=tokens.cache_read_input_tokens,
+        output_tokens=tokens.output_tokens,
+        reasoning_output_tokens=tokens.reasoning_output_tokens,
+        turns=tokens.turns,
+        recorded_usd=row.recorded_usd,
+        speed=None if row.speed is None else _SPEED[row.speed],
+        primary=row.primary,
     )
 
 
@@ -171,7 +212,8 @@ def timeout_error_from(error: agentshim.TurnTimeoutError) -> AgentTurnTimeoutErr
     """
     partial = error.partial if isinstance(error, agentshim.CliTimeoutError) else None
     usage = usage_from(partial.usage, cost_usd=partial.cost_usd) if partial is not None else None
-    return AgentTurnTimeoutError(error.timeout, usage=usage)
+    session_id = None if partial is None else partial.session_id
+    return AgentTurnTimeoutError(error.timeout, usage=usage, provider_session_id=session_id)
 
 
 def failure_from(

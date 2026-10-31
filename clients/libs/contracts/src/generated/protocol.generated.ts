@@ -801,6 +801,20 @@ export type OutputTokens = number | null;
 export type ReasoningOutputTokens = number | null;
 export type TotalCostUsd = number | null;
 export type DurationMs = number | null;
+export type CostBasis = ("price_table" | "provider_reported" | "unknown_model" | "not_reported") | null;
+export type Model7 = string;
+export type InputTokens3 = number;
+export type CacheCreationInputTokens1 = number;
+export type CacheCreation1HInputTokens = number;
+export type CacheReadInputTokens1 = number;
+export type OutputTokens1 = number;
+export type ReasoningOutputTokens1 = number;
+export type Turns1 = number;
+export type RecordedUsd = number | null;
+export type Speed = ("standard" | "fast" | "ultrafast") | null;
+export type Primary = boolean;
+export type ByModel = ModelTurnUsageData[];
+export type ProviderSessionId = string | null;
 export type Kind53 = "span_started";
 export type Kind54 = "span_updated";
 export type Kind55 = "span_ended";
@@ -1013,7 +1027,7 @@ export type MetricValue = number | null;
 export type VsBaseline = number | null;
 export type Agent = string;
 export type Role2 = string;
-export type Model7 = string | null;
+export type Model8 = string | null;
 export type StartedBy = string[];
 export type Stage4 = string;
 export type MetricValue1 = number | null;
@@ -2426,6 +2440,25 @@ export interface TurnUsageData {
   total_cost_usd?: TotalCostUsd;
   duration_ms?: DurationMs;
   span_id?: SpanId | null;
+  cost_basis?: CostBasis;
+  by_model?: ByModel;
+  provider_session_id?: ProviderSessionId;
+}
+/**
+ * One model's share of one finished turn. See ``vibesys.events.ModelTurnUsageData``.
+ */
+export interface ModelTurnUsageData {
+  model: Model7;
+  input_tokens: InputTokens3;
+  cache_creation_input_tokens: CacheCreationInputTokens1;
+  cache_creation_1h_input_tokens: CacheCreation1HInputTokens;
+  cache_read_input_tokens: CacheReadInputTokens1;
+  output_tokens: OutputTokens1;
+  reasoning_output_tokens: ReasoningOutputTokens1;
+  turns: Turns1;
+  recorded_usd?: RecordedUsd;
+  speed?: Speed;
+  primary?: Primary;
 }
 /**
  * A span started.
@@ -2799,7 +2832,7 @@ export interface AdoptionAttrs {
 export interface AgentTurnAttrs {
   agent: Agent;
   role: Role2;
-  model?: Model7;
+  model?: Model8;
   started_by?: StartedBy;
 }
 /**
