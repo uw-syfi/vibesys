@@ -153,11 +153,12 @@ export class GatewaySession {
       stream.on('response', headers);
       stream.on('trailers', headers);
       stream.on('error', finish);
-      // Waiting for a frame: the quiet that may pass before the next one, restarted by each.
+      // Waiting for a frame: the quiet that may pass before the next one, restarted by each. A call
+      // its consumer ended while taking a frame is settled and waits for nothing.
       const awaitFrame = (waitMs: number | undefined, bound: TimedOutBound): void => {
         cancelSilence();
-        if (waitMs !== undefined)
-          cancelSilence = this.schedule(() => finish(new CallTimedOut(bound, waitMs)), waitMs);
+        if (settled || waitMs === undefined) return;
+        cancelSilence = this.schedule(() => finish(new CallTimedOut(bound, waitMs)), waitMs);
       };
       stream.on('data', (chunk: Buffer) => {
         try {

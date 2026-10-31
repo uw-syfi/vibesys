@@ -10,6 +10,7 @@ import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -86,7 +87,11 @@ type TranscriptEntry struct {
 	//	*TranscriptEntry_Text
 	//	*TranscriptEntry_ToolCall
 	//	*TranscriptEntry_ToolResult
-	Entry         isTranscriptEntry_Entry `protobuf_oneof:"entry"`
+	Entry isTranscriptEntry_Entry `protobuf_oneof:"entry"`
+	// When the event this entry records happened. Absent in entries written before the field existed.
+	// A simulated run's clock starts at the epoch, so no floor is enforced here; a reader treats the
+	// epoch itself as no time.
+	At            *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=at,proto3" json:"at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -151,6 +156,13 @@ func (x *TranscriptEntry) GetToolResult() *TranscriptToolResult {
 		if x, ok := x.Entry.(*TranscriptEntry_ToolResult); ok {
 			return x.ToolResult
 		}
+	}
+	return nil
+}
+
+func (x *TranscriptEntry) GetAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.At
 	}
 	return nil
 }
@@ -378,9 +390,22 @@ type TranscriptToolResult struct {
 	Tool    string                 `protobuf:"bytes,1,opt,name=tool,proto3" json:"tool,omitempty"`
 	CallId  *string                `protobuf:"bytes,2,opt,name=call_id,json=callId,proto3,oneof" json:"call_id,omitempty"`
 	IsError bool                   `protobuf:"varint,3,opt,name=is_error,json=isError,proto3" json:"is_error,omitempty"`
-	Content *TranscriptContent     `protobuf:"bytes,4,opt,name=content,proto3" json:"content,omitempty"`
-	// The complete command or JSON payload, independent of the display content.
-	PayloadJson   *TranscriptContent `protobuf:"bytes,5,opt,name=payload_json,json=payloadJson,proto3,oneof" json:"payload_json,omitempty"`
+	// The text the agent was shown.
+	Content *TranscriptContent `protobuf:"bytes,4,opt,name=content,proto3" json:"content,omitempty"`
+	// Written before `payload`: the whole result as a Pydantic JSON string. No longer written. A
+	// reader ignores it and shows `content`; it stays declared so records already stored keep
+	// decoding (the breaking-change check refuses to delete a field, reserved or not).
+	//
+	// Deprecated: Marked as deprecated in vibesys/store/v1/transcript.proto.
+	PayloadJson *TranscriptContent `protobuf:"bytes,5,opt,name=payload_json,json=payloadJson,proto3,oneof" json:"payload_json,omitempty"`
+	// What the tool returned beside its text. Absent for a result with none and for one written before
+	// this field existed. A reader that does not know the case shows `content` alone.
+	//
+	// Types that are valid to be assigned to Payload:
+	//
+	//	*TranscriptToolResult_Command
+	//	*TranscriptToolResult_Json
+	Payload       isTranscriptToolResult_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -443,6 +468,7 @@ func (x *TranscriptToolResult) GetContent() *TranscriptContent {
 	return nil
 }
 
+// Deprecated: Marked as deprecated in vibesys/store/v1/transcript.proto.
 func (x *TranscriptToolResult) GetPayloadJson() *TranscriptContent {
 	if x != nil {
 		return x.PayloadJson
@@ -450,16 +476,130 @@ func (x *TranscriptToolResult) GetPayloadJson() *TranscriptContent {
 	return nil
 }
 
+func (x *TranscriptToolResult) GetPayload() isTranscriptToolResult_Payload {
+	if x != nil {
+		return x.Payload
+	}
+	return nil
+}
+
+func (x *TranscriptToolResult) GetCommand() *TranscriptCommandResult {
+	if x != nil {
+		if x, ok := x.Payload.(*TranscriptToolResult_Command); ok {
+			return x.Command
+		}
+	}
+	return nil
+}
+
+func (x *TranscriptToolResult) GetJson() *TranscriptContent {
+	if x != nil {
+		if x, ok := x.Payload.(*TranscriptToolResult_Json); ok {
+			return x.Json
+		}
+	}
+	return nil
+}
+
+type isTranscriptToolResult_Payload interface {
+	isTranscriptToolResult_Payload()
+}
+
+type TranscriptToolResult_Command struct {
+	Command *TranscriptCommandResult `protobuf:"bytes,6,opt,name=command,proto3,oneof"`
+}
+
+type TranscriptToolResult_Json struct {
+	// A JSON object or array, as JSON text.
+	Json *TranscriptContent `protobuf:"bytes,7,opt,name=json,proto3,oneof"`
+}
+
+func (*TranscriptToolResult_Command) isTranscriptToolResult_Payload() {}
+
+func (*TranscriptToolResult_Json) isTranscriptToolResult_Payload() {}
+
+// A command's result in parts, as the tool reported them.
+type TranscriptCommandResult struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Stdout *TranscriptContent     `protobuf:"bytes,1,opt,name=stdout,proto3" json:"stdout,omitempty"`
+	Stderr *TranscriptContent     `protobuf:"bytes,2,opt,name=stderr,proto3" json:"stderr,omitempty"`
+	// Absent when the tool has no exit status.
+	ExitCode *int32 `protobuf:"varint,3,opt,name=exit_code,json=exitCode,proto3,oneof" json:"exit_code,omitempty"`
+	// Absent when the tool did not time itself.
+	DurationSeconds *float64 `protobuf:"fixed64,4,opt,name=duration_seconds,json=durationSeconds,proto3,oneof" json:"duration_seconds,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *TranscriptCommandResult) Reset() {
+	*x = TranscriptCommandResult{}
+	mi := &file_vibesys_store_v1_transcript_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TranscriptCommandResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TranscriptCommandResult) ProtoMessage() {}
+
+func (x *TranscriptCommandResult) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_transcript_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TranscriptCommandResult.ProtoReflect.Descriptor instead.
+func (*TranscriptCommandResult) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_transcript_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *TranscriptCommandResult) GetStdout() *TranscriptContent {
+	if x != nil {
+		return x.Stdout
+	}
+	return nil
+}
+
+func (x *TranscriptCommandResult) GetStderr() *TranscriptContent {
+	if x != nil {
+		return x.Stderr
+	}
+	return nil
+}
+
+func (x *TranscriptCommandResult) GetExitCode() int32 {
+	if x != nil && x.ExitCode != nil {
+		return *x.ExitCode
+	}
+	return 0
+}
+
+func (x *TranscriptCommandResult) GetDurationSeconds() float64 {
+	if x != nil && x.DurationSeconds != nil {
+		return *x.DurationSeconds
+	}
+	return 0
+}
+
 var File_vibesys_store_v1_transcript_proto protoreflect.FileDescriptor
 
 const file_vibesys_store_v1_transcript_proto_rawDesc = "" +
 	"\n" +
-	"!vibesys/store/v1/transcript.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1evibesys/store/v1/content.proto\"\xe9\x01\n" +
+	"!vibesys/store/v1/transcript.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1evibesys/store/v1/content.proto\"\x95\x02\n" +
 	"\x0fTranscriptEntry\x126\n" +
 	"\x04text\x18\x01 \x01(\v2 .vibesys.store.v1.TranscriptTextH\x00R\x04text\x12C\n" +
 	"\ttool_call\x18\x02 \x01(\v2$.vibesys.store.v1.TranscriptToolCallH\x00R\btoolCall\x12I\n" +
 	"\vtool_result\x18\x03 \x01(\v2&.vibesys.store.v1.TranscriptToolResultH\x00R\n" +
-	"toolResultB\x0e\n" +
+	"toolResult\x12*\n" +
+	"\x02at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\x02atB\x0e\n" +
 	"\x05entry\x12\x05\xbaH\x02\b\x01\"y\n" +
 	"\x11TranscriptContent\x12#\n" +
 	"\x06inline\x18\x01 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04H\x00R\x06inline\x12/\n" +
@@ -474,16 +614,27 @@ const file_vibesys_store_v1_transcript_proto_rawDesc = "" +
 	"\acall_id\x18\x02 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04H\x00R\x06callId\x88\x01\x01\x12R\n" +
 	"\x0earguments_json\x18\x03 \x01(\v2#.vibesys.store.v1.TranscriptContentB\x06\xbaH\x03\xc8\x01\x01R\rargumentsJsonB\n" +
 	"\n" +
-	"\b_call_id\"\xaa\x02\n" +
+	"\b_call_id\"\xbb\x03\n" +
 	"\x14TranscriptToolResult\x12\x1d\n" +
 	"\x04tool\x18\x01 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04R\x04tool\x12'\n" +
-	"\acall_id\x18\x02 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04H\x00R\x06callId\x88\x01\x01\x12\x19\n" +
+	"\acall_id\x18\x02 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04H\x01R\x06callId\x88\x01\x01\x12\x19\n" +
 	"\bis_error\x18\x03 \x01(\bR\aisError\x12E\n" +
-	"\acontent\x18\x04 \x01(\v2#.vibesys.store.v1.TranscriptContentB\x06\xbaH\x03\xc8\x01\x01R\acontent\x12K\n" +
-	"\fpayload_json\x18\x05 \x01(\v2#.vibesys.store.v1.TranscriptContentH\x01R\vpayloadJson\x88\x01\x01B\n" +
+	"\acontent\x18\x04 \x01(\v2#.vibesys.store.v1.TranscriptContentB\x06\xbaH\x03\xc8\x01\x01R\acontent\x12O\n" +
+	"\fpayload_json\x18\x05 \x01(\v2#.vibesys.store.v1.TranscriptContentB\x02\x18\x01H\x02R\vpayloadJson\x88\x01\x01\x12E\n" +
+	"\acommand\x18\x06 \x01(\v2).vibesys.store.v1.TranscriptCommandResultH\x00R\acommand\x129\n" +
+	"\x04json\x18\a \x01(\v2#.vibesys.store.v1.TranscriptContentH\x00R\x04jsonB\t\n" +
+	"\apayloadB\n" +
 	"\n" +
 	"\b_call_idB\x0f\n" +
-	"\r_payload_json*\xbc\x01\n" +
+	"\r_payload_json\"\xaa\x02\n" +
+	"\x17TranscriptCommandResult\x12C\n" +
+	"\x06stdout\x18\x01 \x01(\v2#.vibesys.store.v1.TranscriptContentB\x06\xbaH\x03\xc8\x01\x01R\x06stdout\x12C\n" +
+	"\x06stderr\x18\x02 \x01(\v2#.vibesys.store.v1.TranscriptContentB\x06\xbaH\x03\xc8\x01\x01R\x06stderr\x12 \n" +
+	"\texit_code\x18\x03 \x01(\x05H\x00R\bexitCode\x88\x01\x01\x12@\n" +
+	"\x10duration_seconds\x18\x04 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00H\x01R\x0fdurationSeconds\x88\x01\x01B\f\n" +
+	"\n" +
+	"_exit_codeB\x13\n" +
+	"\x11_duration_seconds*\xbc\x01\n" +
 	"\x11TranscriptChannel\x12\"\n" +
 	"\x1eTRANSCRIPT_CHANNEL_UNSPECIFIED\x10\x00\x12 \n" +
 	"\x1cTRANSCRIPT_CHANNEL_ASSISTANT\x10\x01\x12\x1f\n" +
@@ -504,31 +655,38 @@ func file_vibesys_store_v1_transcript_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_store_v1_transcript_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_vibesys_store_v1_transcript_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_vibesys_store_v1_transcript_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_vibesys_store_v1_transcript_proto_goTypes = []any{
-	(TranscriptChannel)(0),       // 0: vibesys.store.v1.TranscriptChannel
-	(*TranscriptEntry)(nil),      // 1: vibesys.store.v1.TranscriptEntry
-	(*TranscriptContent)(nil),    // 2: vibesys.store.v1.TranscriptContent
-	(*TranscriptText)(nil),       // 3: vibesys.store.v1.TranscriptText
-	(*TranscriptToolCall)(nil),   // 4: vibesys.store.v1.TranscriptToolCall
-	(*TranscriptToolResult)(nil), // 5: vibesys.store.v1.TranscriptToolResult
-	(*BlobRef)(nil),              // 6: vibesys.store.v1.BlobRef
+	(TranscriptChannel)(0),          // 0: vibesys.store.v1.TranscriptChannel
+	(*TranscriptEntry)(nil),         // 1: vibesys.store.v1.TranscriptEntry
+	(*TranscriptContent)(nil),       // 2: vibesys.store.v1.TranscriptContent
+	(*TranscriptText)(nil),          // 3: vibesys.store.v1.TranscriptText
+	(*TranscriptToolCall)(nil),      // 4: vibesys.store.v1.TranscriptToolCall
+	(*TranscriptToolResult)(nil),    // 5: vibesys.store.v1.TranscriptToolResult
+	(*TranscriptCommandResult)(nil), // 6: vibesys.store.v1.TranscriptCommandResult
+	(*timestamppb.Timestamp)(nil),   // 7: google.protobuf.Timestamp
+	(*BlobRef)(nil),                 // 8: vibesys.store.v1.BlobRef
 }
 var file_vibesys_store_v1_transcript_proto_depIdxs = []int32{
-	3, // 0: vibesys.store.v1.TranscriptEntry.text:type_name -> vibesys.store.v1.TranscriptText
-	4, // 1: vibesys.store.v1.TranscriptEntry.tool_call:type_name -> vibesys.store.v1.TranscriptToolCall
-	5, // 2: vibesys.store.v1.TranscriptEntry.tool_result:type_name -> vibesys.store.v1.TranscriptToolResult
-	6, // 3: vibesys.store.v1.TranscriptContent.blob:type_name -> vibesys.store.v1.BlobRef
-	0, // 4: vibesys.store.v1.TranscriptText.channel:type_name -> vibesys.store.v1.TranscriptChannel
-	2, // 5: vibesys.store.v1.TranscriptText.content:type_name -> vibesys.store.v1.TranscriptContent
-	2, // 6: vibesys.store.v1.TranscriptToolCall.arguments_json:type_name -> vibesys.store.v1.TranscriptContent
-	2, // 7: vibesys.store.v1.TranscriptToolResult.content:type_name -> vibesys.store.v1.TranscriptContent
-	2, // 8: vibesys.store.v1.TranscriptToolResult.payload_json:type_name -> vibesys.store.v1.TranscriptContent
-	9, // [9:9] is the sub-list for method output_type
-	9, // [9:9] is the sub-list for method input_type
-	9, // [9:9] is the sub-list for extension type_name
-	9, // [9:9] is the sub-list for extension extendee
-	0, // [0:9] is the sub-list for field type_name
+	3,  // 0: vibesys.store.v1.TranscriptEntry.text:type_name -> vibesys.store.v1.TranscriptText
+	4,  // 1: vibesys.store.v1.TranscriptEntry.tool_call:type_name -> vibesys.store.v1.TranscriptToolCall
+	5,  // 2: vibesys.store.v1.TranscriptEntry.tool_result:type_name -> vibesys.store.v1.TranscriptToolResult
+	7,  // 3: vibesys.store.v1.TranscriptEntry.at:type_name -> google.protobuf.Timestamp
+	8,  // 4: vibesys.store.v1.TranscriptContent.blob:type_name -> vibesys.store.v1.BlobRef
+	0,  // 5: vibesys.store.v1.TranscriptText.channel:type_name -> vibesys.store.v1.TranscriptChannel
+	2,  // 6: vibesys.store.v1.TranscriptText.content:type_name -> vibesys.store.v1.TranscriptContent
+	2,  // 7: vibesys.store.v1.TranscriptToolCall.arguments_json:type_name -> vibesys.store.v1.TranscriptContent
+	2,  // 8: vibesys.store.v1.TranscriptToolResult.content:type_name -> vibesys.store.v1.TranscriptContent
+	2,  // 9: vibesys.store.v1.TranscriptToolResult.payload_json:type_name -> vibesys.store.v1.TranscriptContent
+	6,  // 10: vibesys.store.v1.TranscriptToolResult.command:type_name -> vibesys.store.v1.TranscriptCommandResult
+	2,  // 11: vibesys.store.v1.TranscriptToolResult.json:type_name -> vibesys.store.v1.TranscriptContent
+	2,  // 12: vibesys.store.v1.TranscriptCommandResult.stdout:type_name -> vibesys.store.v1.TranscriptContent
+	2,  // 13: vibesys.store.v1.TranscriptCommandResult.stderr:type_name -> vibesys.store.v1.TranscriptContent
+	14, // [14:14] is the sub-list for method output_type
+	14, // [14:14] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_store_v1_transcript_proto_init() }
@@ -547,14 +705,18 @@ func file_vibesys_store_v1_transcript_proto_init() {
 		(*TranscriptContent_Blob)(nil),
 	}
 	file_vibesys_store_v1_transcript_proto_msgTypes[3].OneofWrappers = []any{}
-	file_vibesys_store_v1_transcript_proto_msgTypes[4].OneofWrappers = []any{}
+	file_vibesys_store_v1_transcript_proto_msgTypes[4].OneofWrappers = []any{
+		(*TranscriptToolResult_Command)(nil),
+		(*TranscriptToolResult_Json)(nil),
+	}
+	file_vibesys_store_v1_transcript_proto_msgTypes[5].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_store_v1_transcript_proto_rawDesc), len(file_vibesys_store_v1_transcript_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   5,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -19,6 +19,11 @@ export {
   record,
 } from './fake-helper.js';
 export {FakeLogStore, type LogStoreFixture} from './fake-log-store.js';
+export {
+  FakeSubscribeStreams,
+  type FakeSubscribeStream,
+  idleSubscriptions,
+} from './fake-subscribe-streams.js';
 export {deferredKillProcess, fakeProcess, pipeHeldProcess} from './fake-process.js';
 export {FakeReadCatalog} from './fake-read-catalog.js';
 export {
@@ -27,10 +32,5 @@ export {
   type FakeRunStream,
   idleRunWatch,
 } from './fake-run-gateway.js';
-export {
-  type FakeSubscribeStream,
-  FakeSubscribeStreams,
-  idleSubscriptions,
-} from './fake-subscribe-streams.js';
 export {commandOf, olderHost} from './older-host.js';
 export {phaseReached} from './phase-reached.js';

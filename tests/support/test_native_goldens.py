@@ -9,7 +9,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from tests.support.native_goldens import report_stale, stale_goldens
-from tests.support.replay_golden import REGENERATE
+from tests.support.wire_goldens import REGENERATE
 
 from vs_proto.api import ClientReplay, ClientReplayBatch, EpochStarted, Lifecycle, Oneof, Record
 

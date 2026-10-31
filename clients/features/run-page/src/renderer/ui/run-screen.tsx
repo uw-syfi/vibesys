@@ -1,11 +1,11 @@
 import {type CoreState, EMPTY_LEDGER} from '@vibesys/run-state';
 import {
-  Banner,
   Breadcrumb,
   Button,
   Card,
   Chip,
   type Crumb,
+  Dialog,
   Dock,
   Fact,
   FactLine,
@@ -19,13 +19,13 @@ import {
   Stack,
   Text,
   Timeline,
+  withoutPaths,
 } from '@vibesys/ui';
 import type {JSX, ReactNode} from 'react';
 import {
   adoptionTitles,
   clockAt,
   clockStart,
-  endedView,
   type HistoryProgress,
   headerView,
   historyLoading,
@@ -35,8 +35,7 @@ import {
   machineBlockWords,
   NO_MODEL_NAMES,
   type Offer,
-  pauseNowBannerView,
-  predatesTraceWords,
+  pauseNowConfirmView,
   type ResolvedZoom,
   type Route,
   RUN_ROUTE,
@@ -106,6 +105,22 @@ const BREADCRUMB_ROW: readonly Crumb[] = [
   {id: 'here', label: 'Here'},
 ];
 
+/** The row under the run's header: `crumbs`, or the row kept empty when there are none. */
+function CrumbRow(props: {readonly crumbs: readonly Crumb[]}): JSX.Element {
+  return props.crumbs.length > 0 ? (
+    <Breadcrumb label="Zoom" items={props.crumbs} />
+  ) : (
+    <Reserve>
+      <Breadcrumb label="Zoom" items={BREADCRUMB_ROW} />
+    </Reserve>
+  );
+}
+
+/** The step up to the Runs dashboard, always the first of the row. */
+function runsCrumb(press: () => void): Crumb {
+  return {id: 'runs', label: 'Runs', out: true, press};
+}
+
 function showsBreadcrumb(route: Route, zoomed: ResolvedZoom): boolean {
   if (routeLevel(route) === 'run') return false;
   return !(zoomed.idea !== null && zoomed.step === null && zoomed.agent === null);
@@ -128,14 +143,33 @@ export interface RunChatSlot {
  * The run's facts under its title: its status and id on one line, the id whole (the line wraps
  * rather than cut it); the agents and the spend on the next, so the spend takes no line of its own.
  */
-function RunFacts(props: {readonly header: ReturnType<typeof headerView>}): JSX.Element {
+function RunFacts(props: {
+  readonly header: ReturnType<typeof headerView>;
+  /** Why the run's history cannot be read, when the page holds some of the run without it. */
+  readonly historyProblem: string | null;
+}): JSX.Element {
   const {header} = props;
   return (
     <>
       <FactLine fit="parent">
         <Fact>
-          <Chip label={header.status.label} tone={header.status.tone} dot />
+          <Chip
+            label={header.status.label}
+            tone={header.status.tone}
+            dot
+            {...(header.ended === null ? {} : {hint: header.ended.reason})}
+          />
         </Fact>
+        {header.ended === null || header.ended.brief === null ? null : (
+          <Fact shrink title={withoutPaths(header.ended.reason)}>
+            <Text tone="muted">{withoutPaths(header.ended.brief)}</Text>
+          </Fact>
+        )}
+        {props.historyProblem === null ? null : (
+          <Fact>
+            <Chip label="History unavailable" tone="warn" dot hint={props.historyProblem} />
+          </Fact>
+        )}
         <Fact shrink title={header.subtitle}>
           <Text variant="code" tone="muted">
             {header.subtitle}
@@ -165,15 +199,45 @@ function RunFacts(props: {readonly header: ReturnType<typeof headerView>}): JSX.
   );
 }
 
+/**
+ * The actions under the header: the app's own (the run controls' Resume, which know the writer),
+ * then the ended run's Resume and Run again, so an ended run's actions sit together.
+ */
+function RunActions(props: {
+  readonly header: ReturnType<typeof headerView>;
+  readonly toolbar: ReactNode;
+  readonly dispatch: Dispatch;
+}): JSX.Element | null {
+  const {dispatch, header} = props;
+  if (props.toolbar === undefined && !header.resume.shown && !header.runAgain.shown) return null;
+  return (
+    <Row gap="space-2" align="start" wrap>
+      {props.toolbar}
+      {header.resume.shown ? (
+        <Button
+          variant="primary"
+          text="Resume"
+          quietReason
+          {...reason(header.resume)}
+          press={() => dispatch({type: 'resume-ended'})}
+        />
+      ) : null}
+      {header.runAgain.shown ? (
+        <Button variant="secondary" text="Run again" press={() => dispatch({type: 'run-again'})} />
+      ) : null}
+    </Row>
+  );
+}
+
 function Header(props: {
   readonly state: RunPageState;
-  readonly names: ModelNames;
+  /** The header's words, computed once for the header and the actions under it. */
+  readonly header: ReturnType<typeof headerView>;
   readonly dispatch: Dispatch;
   readonly chat: RunChatSlot | undefined;
-  readonly toolbar?: ReactNode;
+  readonly historyProblem: string | null;
 }): JSX.Element {
-  const {state, dispatch, chat} = props;
-  const header = headerView(state, props.names);
+  const {state, dispatch, chat, header} = props;
   const items: MenuItem[] = [
     ...(header.openWindow.disabledReason === null
       ? [{id: 'window', label: 'Open in new window', press: () => dispatch({type: 'open-window'})}]
@@ -181,7 +245,16 @@ function Header(props: {
     ...(header.archive.shown
       ? [{id: 'archive', label: 'Archive', press: () => dispatch({type: 'archive'})}]
       : []),
-    {id: 'again', label: 'Run again with changes', press: () => dispatch({type: 'run-again'})},
+    // An ended run has Run again beside Resume.
+    ...(header.runAgain.shown
+      ? []
+      : [
+          {
+            id: 'again',
+            label: 'Run again with changes',
+            press: () => dispatch({type: 'run-again'}),
+          },
+        ]),
   ];
   return (
     <Stack gap="space-2">
@@ -191,7 +264,7 @@ function Header(props: {
           <Text as="h1" variant="heading">
             {header.title}
           </Text>
-          <RunFacts header={header} />
+          <RunFacts header={header} historyProblem={props.historyProblem} />
         </Stack>
         <Row gap="space-2" wrap align="start">
           {chat === undefined ? null : (
@@ -223,103 +296,42 @@ function Header(props: {
           <Menu icon="more" label="More actions" variant="quiet" align="end" items={items} />
         </Row>
       </Row>
-      {props.toolbar}
+      <PauseNowDialog state={state} dispatch={dispatch} />
     </Stack>
   );
 }
 
-function PauseNowBanner(props: {
+/** Pause now asks before it stops work that may still be charged. */
+function PauseNowDialog(props: {
   readonly state: RunPageState;
   readonly dispatch: Dispatch;
-}): JSX.Element | null {
+}): JSX.Element {
   const {state, dispatch} = props;
-  if (state.readOnly === true) return null;
-  const banner = pauseNowBannerView(state);
-  if (banner.kind === 'none') return null;
-  if (banner.kind === 'confirm') {
-    return (
-      <Banner
-        tone="warn"
-        title={banner.title}
-        body={banner.body}
-        actions={
-          <>
-            <Button
-              variant="danger"
-              text="Pause now"
-              press={() => dispatch({type: 'confirm-pause-now'})}
-            />
-            <Button
-              variant="secondary"
-              text="Keep running"
-              press={() => dispatch({type: 'cancel-pause-now'})}
-            />
-          </>
-        }
-      />
-    );
-  }
-  return null;
-}
-
-function EndedBanner(props: {
-  readonly state: RunPageState;
-  readonly dispatch: Dispatch;
-  readonly zoom: Zoom;
-}): JSX.Element | null {
-  const {state, dispatch} = props;
-  const ended = endedView(state);
-  if (ended === null) return null;
-  const logsAndAgain = (
-    <>
-      <Button
-        variant="secondary"
-        text="View logs"
-        press={() => {
-          dispatch({type: 'view-logs'});
-          props.zoom({type: 'jump', route: {...RUN_ROUTE, mode: 'logs'}});
-        }}
-      />
-      <Button variant="secondary" text="Run again" press={() => dispatch({type: 'run-again'})} />
-    </>
+  const question = pauseNowConfirmView(state);
+  const asking = state.readOnly !== true && question.kind === 'confirm';
+  return (
+    <Dialog
+      open={asking}
+      title={question.kind === 'confirm' ? question.title : ''}
+      dismiss={() => dispatch({type: 'cancel-pause-now'})}
+      actions={
+        <>
+          <Button
+            variant="secondary"
+            text="Keep running"
+            press={() => dispatch({type: 'cancel-pause-now'})}
+          />
+          <Button
+            variant="danger"
+            text="Pause now"
+            press={() => dispatch({type: 'confirm-pause-now'})}
+          />
+        </>
+      }
+    >
+      <Text>{question.kind === 'confirm' ? question.body : ''}</Text>
+    </Dialog>
   );
-  if (state.readOnly === true) {
-    // Resume belongs to the run controls, which know the writer; logs and Run again need no writer.
-    const reason = state.record.kind === 'ended' ? state.record.run.reason : null;
-    if (ended.title === 'Finished') return <Row gap="space-2">{logsAndAgain}</Row>;
-    return (
-      <Banner
-        tone={ended.tone}
-        title={state.lifecycleWord ?? ended.title}
-        {...(reason ? {body: reason} : {})}
-        actions={logsAndAgain}
-      />
-    );
-  }
-  const actions = (
-    <>
-      {ended.resume === null ? null : (
-        <Button
-          variant="primary"
-          text={ended.resume}
-          quietReason
-          {...(state.resumeStatus?.pending ? {disabledReason: 'Waiting for the run to start'} : {})}
-          press={() => dispatch({type: 'resume-ended'})}
-        />
-      )}
-      <Button
-        variant="secondary"
-        text="View logs"
-        press={() => {
-          dispatch({type: 'view-logs'});
-          props.zoom({type: 'jump', route: {...RUN_ROUTE, mode: 'logs'}});
-        }}
-      />
-      <Button variant="secondary" text="Run again" press={() => dispatch({type: 'run-again'})} />
-    </>
-  );
-  if (ended.title === 'Finished') return <Row gap="space-2">{actions}</Row>;
-  return <Banner tone={ended.tone} title={ended.title} body={ended.reason} actions={actions} />;
 }
 
 function Startup(props: {readonly state: RunPageState}): JSX.Element | null {
@@ -406,12 +418,14 @@ function pendingRunScreen(
   zoom: Zoom,
   route: Route,
   header: ReactNode,
+  actions: ReactNode,
 ): JSX.Element | null {
   if (state.record.kind === 'unlisted') {
     const blocked = machineBlockWords(state);
     const unplaced = unplacedRun(state);
     return (
       <Screen density="compact" header={header}>
+        {actions}
         {blocked !== null ? (
           <RunGone words={blocked} />
         ) : unplaced === null ? (
@@ -429,6 +443,7 @@ function pendingRunScreen(
   ) {
     return (
       <Screen density="compact" header={header}>
+        {actions}
         <InitialRunLoading stage="summary" />
       </Screen>
     );
@@ -437,6 +452,7 @@ function pendingRunScreen(
   if (gone !== null) {
     return (
       <Screen density="compact" header={header}>
+        {actions}
         <RunGone words={gone} />
       </Screen>
     );
@@ -445,7 +461,7 @@ function pendingRunScreen(
   if (loading !== null) {
     return (
       <Screen density="compact" header={header}>
-        <EndedBanner state={state} dispatch={dispatch} zoom={zoom} />
+        {actions}
         <HistoryLoading progress={loading} />
       </Screen>
     );
@@ -460,8 +476,15 @@ function pendingRunScreen(
   ) {
     return (
       <Screen density="compact" header={header}>
-        <EndedBanner state={state} dispatch={dispatch} zoom={zoom} />
-        <RunLoadError message={problem} retry={() => dispatch({type: 'retry-load'})} />
+        {actions}
+        <RunLoadError
+          message={problem}
+          retry={() => dispatch({type: 'retry-load'})}
+          viewLogs={() => {
+            dispatch({type: 'view-logs'});
+            zoom({type: 'jump', route: {...RUN_ROUTE, mode: 'logs'}});
+          }}
+        />
       </Screen>
     );
   }
@@ -488,6 +511,8 @@ export function RunScreen(props: {
   /** App-owned run diagnostics, in the page’s scrolling body. */
   readonly toolbar?: ReactNode;
   readonly supplemental?: ReactNode;
+  /** Goes up to the Runs dashboard; absent in a run's own window, which has none. */
+  readonly runs?: () => void;
 }): JSX.Element {
   const {chat, ...rest} = props;
   return (
@@ -519,16 +544,6 @@ function RunHeader(
   );
 }
 
-function CommandStatus({state}: {readonly state: RunPageState}): JSX.Element {
-  return (
-    <>
-      {state.resumeStatus === null ? null : (
-        <Banner tone="neutral" title={state.resumeStatus.message} />
-      )}
-    </>
-  );
-}
-
 function RunScreenBody(props: {
   readonly state: RunPageState;
   readonly model: RunModel;
@@ -543,6 +558,7 @@ function RunScreenBody(props: {
   /** App-owned run diagnostics, in the page’s scrolling body. */
   readonly toolbar?: ReactNode;
   readonly supplemental?: ReactNode;
+  readonly runs?: () => void;
 }): JSX.Element {
   const {state, model, route, zoom, dispatch} = props;
   const names = props.modelNames ?? NO_MODEL_NAMES;
@@ -558,6 +574,8 @@ function RunScreenBody(props: {
     adoptionTitles: adoptionTitles(model.trace.spans),
     zoom,
   };
+  const header = headerView(state, names);
+  const actions = <RunActions header={header} toolbar={props.toolbar} dispatch={dispatch} />;
   const pending = pendingRunScreen(
     state,
     dispatch,
@@ -565,11 +583,12 @@ function RunScreenBody(props: {
     route,
     <Header
       state={state}
-      names={names}
+      header={header}
       dispatch={dispatch}
       chat={props.chat}
-      toolbar={props.toolbar}
+      historyProblem={null}
     />,
+    actions,
   );
   if (pending !== null) return pending;
   const problem = historyProblem(state);
@@ -590,6 +609,7 @@ function RunScreenBody(props: {
     mode: route.mode,
     dispatch,
     loading: detail.loading ?? transcript,
+    problem: detail.problem,
   };
   return (
     <Screen
@@ -597,24 +617,16 @@ function RunScreenBody(props: {
       header={
         <RunHeader
           state={state}
-          names={names}
+          header={header}
           dispatch={dispatch}
           chat={props.chat}
+          historyProblem={problem}
           scrubber={traceArrival(state) === 'arrived' && before === null}
         />
       }
     >
-      {props.toolbar}
-      <PauseNowBanner state={state} dispatch={dispatch} />
-      <CommandStatus state={state} />
-      <EndedBanner state={state} dispatch={dispatch} zoom={zoom} />
-      {problem === null ? null : (
-        <Banner tone="warn" title="The run’s history is not available" body={problem} />
-      )}
+      {actions}
       <Startup state={state} />
-      {state.recordDiagnostic ? (
-        <Banner tone="warn" title="Run diagnostic" body={state.recordDiagnostic.message} />
-      ) : null}
       {before === null ? (
         <Hero
           {...base}
@@ -623,19 +635,13 @@ function RunScreenBody(props: {
           lit={lit}
           hover={idea => dispatch({type: 'ideas-hover', idea})}
         />
-      ) : (
-        <Banner title={predatesTraceWords(before).title} body={predatesTraceWords(before).body} />
-      )}
-      {showsBreadcrumb(route, zoomed) ? (
-        <Breadcrumb label="Zoom" items={crumbs(zoomed, route, zoom)} />
-      ) : (
-        <Reserve>
-          <Breadcrumb label="Zoom" items={BREADCRUMB_ROW} />
-        </Reserve>
-      )}
-      {detail.problem === null ? null : (
-        <Banner tone="warn" title="The step’s transcript is not available" body={detail.problem} />
-      )}
+      ) : null}
+      <CrumbRow
+        crumbs={[
+          ...(props.runs === undefined ? [] : [runsCrumb(props.runs)]),
+          ...(showsBreadcrumb(route, zoomed) ? crumbs(zoomed, route, zoom) : []),
+        ]}
+      />
       <LevelBody deep={deep} route={route} zoomed={zoomed} level={level} />
       {props.supplemental}
     </Screen>

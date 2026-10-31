@@ -23,7 +23,7 @@ from vs_issue_tracker.api import (
     open_issue_tracker_session,
 )
 from vs_prompts.api import RenderedPrompt, TemplateRenderer
-from vs_runtime.api.core import IssueBoardOwner, OperationEntry
+from vs_runtime.api.core import BOARD_KEY, IssueBoardOwner, OperationEntry, read_or_keyed
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -156,7 +156,7 @@ def board_entries(resources: OwnedOperationResources) -> tuple[OperationEntry, .
         session.tracker, session.progress, IssueQueueTexts(resources.variables), publish=mirror
     )
     return tuple(
-        OperationEntry.owned(registration, owner)
+        OperationEntry.owned(registration, owner, read_or_keyed(registration, BOARD_KEY))
         for registration in board_operation_registrations()
     )
 

@@ -88,9 +88,13 @@ export function GatewayRun(props: GatewayRunProps): JSX.Element {
       </Page>
     );
   }
+  // A Resume the controls asked for is the run's state until the host answers, as the page's own is.
+  const state = intents.resuming
+    ? {...page.state, resumeStatus: {pending: true as const, reason: 'Waiting for the host'}}
+    : page.state;
   return (
     <RunScreen
-      state={page.state}
+      state={state}
       model={page.model}
       whole={page.whole}
       core={page.state.run.core}
@@ -103,6 +107,7 @@ export function GatewayRun(props: GatewayRunProps): JSX.Element {
       }}
       chat={sessions}
       toolbar={intents.controls}
+      {...(props.navigation.runs === undefined ? {} : {runs: props.navigation.runs})}
       supplemental={
         <>
           <LoadStatus view={page.load} retry={page.retry} />

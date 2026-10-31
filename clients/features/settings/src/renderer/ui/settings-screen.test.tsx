@@ -16,9 +16,10 @@ function screen(state: SettingsState): string {
   );
 }
 
-test('settings that could not be read stay on the page as a failure with Retry', () => {
+test('settings that could not be read stay on the page as a status word with Retry', () => {
   const html = screen({kind: 'failed', os: 'dark', token: 1, error: 'the file is unreadable'});
-  expect(html).toContain('Could not read settings');
-  expect(html).toContain('data-tone="failed"');
+  expect(html).toContain('>Not read<');
+  expect(html).toContain('aria-description="Could not read settings\nthe file is unreadable"');
+  expect(html).toContain('data-tone="err"');
   expect(html).toContain('Retry');
 });
