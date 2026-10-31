@@ -3,17 +3,18 @@
 A host that dies loses its memory, so what survives a crash is the outside world: the store,
 the effects ledger, the publication delivery, and the world's own position (the replies it has
 handed out). `Snapshots` copies exactly those just before and just after every commit of the
-run it watches, in one `copy.deepcopy` so objects that share a reference keep sharing it. A
-crash case then starts a new host on a copy instead of re-running the prefix.
+run it watches, and as each effect begins, in one `copy.deepcopy` so objects that share a
+reference keep sharing it. A crash case then starts a new host on a copy instead of re-running
+the prefix.
 """
 
 from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
-from vs_dst._crash_points import CrashKind, CrashPoint
+from vs_dst._interruptions import Action, Interruption, Moment
 from vs_project.api import FakeStateStore
 
 if TYPE_CHECKING:
@@ -21,7 +22,19 @@ if TYPE_CHECKING:
     from vs_dst._effects import Effects
     from vs_dst._world import World
     from vs_project.api import CommitOutcome, StoredEnvelope, StoreFence
-    from vs_runtime.api.testing import FakePublicationDelivery
+    from vs_runtime.api.testing import FakePublicationDelivery, ScriptedHost
+
+
+class Watcher(Protocol):
+    """Hears each moment of a run an interruption can land on, as it is reached."""
+
+    def watch(self, store: RecordingStore, host: ScriptedHost) -> None:
+        """Start hearing ``store``'s commits, for the run ``host`` drives."""
+        ...
+
+    def reached(self, moment: Moment, index: int) -> None:
+        """The run is at the ``index``-th commit's ``moment``, or the ``index``-th effect in flight."""
+        ...
 
 
 class NondeterministicWorldError(RuntimeError):
@@ -85,7 +98,7 @@ class RecordingStore(FakeStateStore):
         self.commits = 0
         self.lease_ends_at = 0.0
         """The latest moment the committing hosts held the lease until, as the commits showed it."""
-        self.watcher: Snapshots | None = None
+        self.watcher: Watcher | None = None
 
     def __deepcopy__(self, memo: dict[int, object]) -> RecordingStore:
         """A copy is a store of the outside world, not of the watching: it has no watcher."""
@@ -104,29 +117,33 @@ class RecordingStore(FakeStateStore):
         self.commits += 1
         self.lease_ends_at = max(self.lease_ends_at, fence.expires_at, now)
         if self.watcher is not None:
-            self.watcher.take(CrashPoint(CrashKind.BEFORE_COMMIT, index))
+            self.watcher.reached(Moment.BEFORE_COMMIT, index)
         outcome = super().commit(expected_revision, envelope, fence, now)
         if self.watcher is not None:
-            self.watcher.take(CrashPoint(CrashKind.AFTER_COMMIT, index))
+            self.watcher.reached(Moment.AFTER_COMMIT, index)
         return outcome
 
 
 class Snapshots:
-    """A copy of the outside world at each wanted boundary of the run being watched."""
+    """A copy of the outside world at each wanted moment of the run being watched.
 
-    def __init__(self, outside: OutsideWorld, wanted: frozenset[CrashPoint]) -> None:
+    A wanted moment is a kill: what a copy holds is what a host that died there leaves behind.
+    """
+
+    def __init__(self, outside: OutsideWorld, wanted: frozenset[Interruption]) -> None:
         """Copy ``outside`` at the ``wanted`` points once `watch` has said whose decisions to count."""
         self._outside = outside
         self._wanted = wanted
         self._decisions: list[Decision] = []
-        self.by_point: dict[CrashPoint, Snapshot] = {}
+        self.by_point: dict[Interruption, Snapshot] = {}
 
-    def watch(self, store: RecordingStore, decisions: list[Decision]) -> None:
-        """Start watching the commits of ``store``; ``decisions`` is what the host proposes into."""
-        self._decisions = decisions
+    def watch(self, store: RecordingStore, host: ScriptedHost) -> None:
+        """Start watching the commits of ``store``, counting what ``host`` has decided."""
+        self._decisions = host.decisions
         store.watcher = self
 
-    def take(self, point: CrashPoint) -> None:
-        """Copy the outside world as it stands at ``point``, if the sweep wants that point."""
+    def reached(self, moment: Moment, index: int) -> None:
+        """Copy the outside world as it stands at this moment, if the sweep wants it."""
+        point = Interruption(Action.KILL, moment, index)
         if point in self._wanted:
             self.by_point[point] = Snapshot(self._outside.copy(), len(self._decisions))

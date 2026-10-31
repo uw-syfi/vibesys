@@ -120,6 +120,10 @@ version constraint.
 The strategy and plugin contract is in
 [orchestration-runtime.md](orchestration-runtime.md).
 
+What happens to a run when its process stops, and how the next process continues, is in
+[run-recovery.md](run-recovery.md): the log is the truth, a step with no result runs again after
+a `clear`, and the prove-or-block layer is being removed.
+
 A search is `@search(name, config=Model)` over a flow (straight-line `async` code that the
 runtime journals and replays). It follows [flows.md](flows.md): the `ctx` vocabulary (agents,
 workspaces, evaluation, groups), the rule for flow code, how core ends the run from the winner
