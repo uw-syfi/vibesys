@@ -5,17 +5,17 @@
  * (the generated runs are in `generated-runs.ts`).
  */
 import {describe, expect, test} from 'bun:test';
-import type {Candidate} from '@vibesys/run-state/candidates';
 import fc from 'fast-check';
 import {
   bestRow,
   candidateOf,
   chartBest,
   oracleBest,
-  type Run,
+  READERS,
   readFromEvents,
   readFromWriter,
   rowOf,
+  generatedRuns as run,
   viewedAt,
 } from './generated-runs.js';
 import {IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
@@ -27,48 +27,9 @@ import {
 } from './objective-reading.js';
 import {ratio} from './span-reading.js';
 
-const run: fc.Arbitrary<Run> = fc
-  .record({
-    direction: fc.constantFrom('max', 'min'),
-    input: fc.integer({min: 10, max: 5000}),
-    sessionInputs: fc.array(fc.integer({min: 10, max: 5000}), {minLength: 1, maxLength: 3}),
-    ideas: fc.array(
-      fc.record({
-        value: fc.integer({min: 1, max: 10000}),
-        at: fc.integer({min: 1, max: 600}),
-        passed: fc.boolean(),
-        session: fc.nat(2),
-        compared: fc.boolean(),
-      }),
-      {minLength: 0, maxLength: 16},
-    ),
-    cursor: fc.double({min: 0, max: 1, noNaN: true}),
-    // A writer states its best as it likes: the best of the readings (null), or any value.
-    stated: fc.option(fc.integer({min: 1, max: 12000}), {nil: null}),
-  })
-  .map(each => ({
-    ...each,
-    // The first session's re-measure is the run's input.
-    sessionInputs: [each.input, ...each.sessionInputs.slice(1)],
-    // The run states its input through at least one idea's ratio to it: the input gate ran before
-    // any idea, and only a session resumed later measures its ideas without one.
-    ideas: each.ideas.map((idea, at) => (at === 0 ? {...idea, compared: true} : idea)),
-  }));
-
 const SETTINGS = {numRuns: 300} as const;
 
-for (const [reader, read] of [
-  ['events', (each: Run, candidates: readonly Candidate[]) => readFromEvents(each, candidates)],
-  [
-    'the writer',
-    (each: Run, candidates: readonly Candidate[]) =>
-      readFromWriter(
-        each,
-        candidates,
-        Math.max(0, ...candidates.map(item => item.measurement?.at ?? 0)),
-      ),
-  ],
-] as const) {
+for (const [reader, read] of READERS) {
   describe(`the best of an objective, as read from ${reader}`, () => {
     test('the line ends at the best the definition names, whatever the writer states', () => {
       fc.assert(
