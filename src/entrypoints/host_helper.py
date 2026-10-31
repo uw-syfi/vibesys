@@ -192,30 +192,21 @@ def local_timezone(now: float) -> tzinfo:
     return UTC if timezone is None else timezone
 
 
-def serve_process() -> int:
-    """Serve this process's stdin and stdout as one channel; the exit status it ends with.
-
-    ``main`` leaves the process with it. A probe that reports what the helper loaded calls this
-    instead, so it can read ``sys.modules`` once the channel has ended.
-    """
+def main() -> None:
+    """Serve this process's stdin and stdout as one channel, then exit with its status."""
     threads = OsThreads()
     try:
         host = real_host(os.environ, os.getuid(), threads)
     except PermissionError as exc:
         sys.stderr.write(f"vibesys-host-helper: {exc}\n")
         raise SystemExit(1) from exc
-    return serve_channel(
+    status = serve_channel(
         host=host,
         source=FdSource(_STDIN_FD),
         output=FdSink(_STDOUT_FD),
         errors=FdSink(_STDERR_FD),
         threads=threads,
     )
-
-
-def main() -> None:
-    """Serve this process's stdin and stdout as one channel, then exit with its status."""
-    status = serve_process()
     # A non-start request worker, a watch, or the input pump may still be blocked on the
     # registry or stdin. Starts and their cleanup settle before serve_channel returns.
     # The channel's outcome is decided, so leave at once.

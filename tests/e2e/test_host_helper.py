@@ -66,20 +66,33 @@ import os
 import sys
 
 started = set(sys.modules)
-from entrypoints.host_helper import serve_process
+from entrypoints.host_helper import main
 
-status = serve_process()
-sys.stderr.write(repr({"started": sorted(started), "modules": sorted(sys.modules)}) + "\\n")
-sys.stderr.flush()
-os._exit(status)
+monitoring = sys.monitoring
+tool = monitoring.PROFILER_ID
+monitoring.use_tool_id(tool, "loaded-modules")
+
+def report(code, offset, function, argument):
+    if function is os._exit:
+        modules = {"started": sorted(started), "modules": sorted(sys.modules)}
+        sys.stderr.write(repr(modules) + "\\n")
+        sys.stderr.flush()
+
+monitoring.register_callback(tool, monitoring.events.CALL, report)
+monitoring.set_local_events(tool, main.__code__, monitoring.events.CALL)
+main()
 """
-"""The helper as ``python -m entrypoints.host_helper`` runs it, then, on stderr, the modules loaded.
+"""The helper's own ``main``, which reports on stderr the modules loaded as it leaves the process.
+
+``main`` ends with ``os._exit`` (a blocked request worker would hold a normal exit), so nothing
+runs after it. ``sys.monitoring`` is the interpreter's observer for this, as the audit hook is in
+``test_host_read_startup.py``: the callback runs before the call to ``os._exit`` made in ``main``
+and no code is replaced, so the product has no entry that only this probe uses.
 
 ``started`` is what the interpreter had before the helper imported anything (the standard library
-start-up, the virtual environment's own ``.pth`` hooks), ``modules`` everything at the end. Like
-``main``, it leaves the process at once, since a blocked request worker would hold a normal exit.
-It imports nothing itself (``json`` would be a module the helper may not have loaded), so the
-report is a ``repr``. The probe replaces no code: it calls the function ``main`` calls."""
+start-up, the virtual environment's own ``.pth`` hooks), ``modules`` everything at the end. The
+probe imports nothing itself (``json`` would be a module the helper may not have loaded), so the
+report is a ``repr``."""
 
 
 class Unused(StrEnum):
