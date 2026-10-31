@@ -131,11 +131,11 @@ describe('the Runs dashboard', () => {
 
     const rows = dashboardRows(answered, CLOCK);
 
-    expect(rows.map(each => [each.machine, each.row.run.runId, each.task])).toEqual([
-      ['host-a', 'new', 'mpmc'],
-      ['host-b', 'solo', 'mpmc'],
-      ['host-a', 'mid', 'mpmc'],
-      ['host-a', 'old', null],
+    expect(rows.map(each => [each.machine, each.row.run.runId])).toEqual([
+      ['host-a', 'new'],
+      ['host-b', 'solo'],
+      ['host-a', 'mid'],
+      ['host-a', 'old'],
     ]);
     expect(rows[0]?.row.run.host).toBe('ssh:host-a');
     expect(sidebarInvariants(answered)).toEqual([]);
@@ -156,9 +156,9 @@ describe('the Runs dashboard', () => {
 
     const rows = dashboardRows(answered, CLOCK);
 
-    expect(rows.map(each => [each.row.run.runId, each.task])).toEqual([
-      ['crashed', 'spsc'],
-      ['unknown', null],
+    expect(rows.map(each => [each.row.run.runId, each.row.title])).toEqual([
+      ['crashed', 'q · spsc'],
+      ['unknown', 'q'],
     ]);
   });
 
@@ -422,19 +422,11 @@ describe('what every screen calls a run', () => {
       ['seen', 'queue-rs · mpmc'],
       ['other', 'queue-rs'],
     ]);
-    // The one task of a project made from flags is no group: the dashboard groups by the project.
-    expect(rows.map(each => each.task)).toEqual([null, 'mpmc', null]);
   });
 
   test('titles a run by its project when its Recent record holds the synthesized task', () => {
     const rows = dashboardRows(listedWith('default', 'default'), CLOCK);
     expect(rows.map(each => each.row.title)).toEqual(['queue-rs', 'queue-rs', 'queue-rs']);
-    expect(rows.map(each => each.task)).toEqual([null, null, null]);
-  });
-
-  test('keeps a task someone wrote, whatever its name resembles', () => {
-    const rows = dashboardRows(listedWith('vllm', null), CLOCK);
-    expect(rows.map(each => each.task)).toEqual(['vllm', 'vllm', 'vllm']);
   });
 
   test('is worded the same by the Usage page as by the dashboard, with when each began', () => {

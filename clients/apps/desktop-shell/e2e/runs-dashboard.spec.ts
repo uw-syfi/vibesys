@@ -137,18 +137,15 @@ test('a run with more ideas than its chart keeps still counts them all', async (
   await expect(tile.locator('.vs-result-chart-mark')).toHaveCount(64);
 });
 
-test('Group by regroups the same tiles by machine, task and agent', async ({page}) => {
+test('Group by regroups the same tiles by machine and by status', async ({page}) => {
   await open(page, dashboardWorld(MANY_RUNS));
   const by = page.getByRole('combobox', {name: 'Group by'});
+  await expect(by.locator('option')).toHaveText(['Status', 'Machine']);
   const names = async (): Promise<string[]> =>
     (await groupTitles(page)).filter(title => !title.startsWith('Needs you'));
 
   await by.selectOption('machine');
   expect(await names()).toEqual(['host-a 4', 'host-b 3']);
-  await by.selectOption('task');
-  expect(await names()).toEqual(['mpmc 3', 'mpsc 2', 'spsc 2']);
-  await by.selectOption('agent');
-  expect(await names()).toEqual(['Unknown 7']);
   await by.selectOption('status');
   expect((await names())[0]).toBe('Running 2');
   // Needs you is its own group whatever the grouping.
