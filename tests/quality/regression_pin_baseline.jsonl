@@ -37,7 +37,6 @@
 {"path": "libs/vs-slurm/tests/test_shell_join.py", "test": "test_a_wrapped_script_with_a_port_argument_keeps_its_own_exit_status"}
 {"path": "tests/server/test_chat_factory.py", "test": "test_an_agent_whose_close_failed_is_closed_again_on_the_next_factory_close"}
 {"path": "tests/server/test_host_helper_causes.py", "test": "test_no_cause_is_worded_with_a_flag_or_the_runs_raw_text"}
-{"path": "tests/server/test_host_helper_harnesses.py", "test": "test_providers_whose_cli_is_installed_are_listed_first_and_nothing_else_changes"}
 {"path": "tests/server/test_host_helper_machine.py", "test": "test_a_harness_cli_is_installed_when_the_path_a_run_launches_with_holds_it"}
 {"path": "tests/server/test_host_helper_preflight.py", "test": "test_a_dirty_project_fails_project_clean_naming_the_project_and_every_path"}
 {"path": "tests/vibesys/api/test_runtime_commit_events.py", "test": "test_a_commit_whose_view_cannot_be_built_warns_once_and_loses_no_round"}

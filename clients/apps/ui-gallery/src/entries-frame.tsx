@@ -9,6 +9,7 @@ import {
   Gantt,
   type GanttRow,
   type GanttView,
+  Gauge,
   type Guide,
   LoadingBar,
   LogPane,
@@ -21,6 +22,7 @@ import {
   Panes,
   PickList,
   PickRow,
+  Readings,
   Reserve,
   Row,
   Said,
@@ -470,12 +472,23 @@ function ScreenDemo(): JSX.Element {
 }
 
 const TOOLS: readonly ToolLine[] = [
-  {id: 't1', name: 'read', line: 'src/lib.rs', outcome: '212 lines', state: 'ok', press: noop},
+  {
+    id: 't1',
+    name: 'read',
+    line: 'src/lib.rs',
+    outcome: '212 lines',
+    time: '+0s',
+    timeTitle: '0s into the turn',
+    state: 'ok',
+    press: noop,
+  },
   {
     id: 't2',
     name: 'execute',
     line: 'cargo test --locked',
-    outcome: 'exit 101',
+    outcome: 'exit 101 · 4.2s',
+    time: '+3s',
+    timeTitle: '3s into the turn',
     state: 'failed',
     press: noop,
   },
@@ -484,21 +497,38 @@ const TOOLS: readonly ToolLine[] = [
     name: 'edit',
     line: 'src/lib.rs',
     outcome: '+38 -12',
+    time: '+9s',
+    timeTitle: '9s into the turn',
     state: 'ok',
     selected: true,
     press: noop,
   },
+  {
+    id: 't4',
+    name: 'execute',
+    line: 'cargo bench',
+    time: '+14s',
+    timeTitle: '14s into the turn',
+    state: 'pending',
+    press: noop,
+  },
 ];
+
+const THOUGHT =
+  '**Looking at the counters**\n\nThroughput flattens past four producers; suspect false sharing on the counters.';
 
 function NarrativeDemo(): JSX.Element {
   const [opened, setOpened] = useState(true);
+  const [thought, setThought] = useState(false);
+  const [thinking, setThinking] = useState(true);
   return (
     <Narrative label="Turn">
-      <Thought text="Throughput flattens past four producers; suspect false sharing on the counters." />
+      <Thought text={THOUGHT} open={thought} toggle={setThought} />
       <ToolGroup tools={TOOLS.slice(0, 1)} open={false} toggle={noop} />
       <Said text="Head and tail share a cache line. Padding each to 128 bytes should stop it." />
       <ToolGroup tools={TOOLS} open={opened} toggle={setOpened} />
       <ToolGroup tools={TOOLS.slice(1, 2)} open={false} toggle={noop} />
+      <Thought live text={THOUGHT} open={thinking} toggle={setThinking} />
     </Narrative>
   );
 }
@@ -550,6 +580,34 @@ export const FRAME_ENTRIES = {
         <Meter label="Accent, 30% of the best" value={0.3} />
         <Meter label="Ok, 70% of the best" value={0.7} tone="ok" />
         <Meter label="Muted, all of it" value={1} tone="muted" />
+      </Stack>
+    ),
+  },
+  Gauge: {
+    render: () => (
+      <Stack>
+        <Row gap="space-5" wrap>
+          <Gauge label="CPU" share={0.34} figure="34%" figureWidth={5} />
+          <Gauge label="Memory" share={0.5} figure="18.0 / 36.0 GB" figureWidth={15} />
+          <Gauge label="GPU" share={0.95} figure="95%" figureWidth={5} tone="warn" />
+        </Row>
+        <Row gap="space-5" wrap>
+          <Gauge label="CPU" share={0.34} figure="34%" figureWidth={5} dim note="stale 42 s" />
+          <Gauge label="GPU" share={null} figure="–" figureWidth={5} />
+        </Row>
+      </Stack>
+    ),
+  },
+  Readings: {
+    render: () => (
+      <Stack>
+        <Readings>
+          <Gauge label="CPU" share={0.34} figure="34%" figureWidth={5} />
+          <Text variant="small" tone="warn">
+            42 s ago
+          </Text>
+        </Readings>
+        <Readings />
       </Stack>
     ),
   },
@@ -621,9 +679,7 @@ export const FRAME_ENTRIES = {
   Gantt: {render: () => <GanttDemo />},
   Narrative: {render: () => <NarrativeDemo />},
   Thought: {
-    render: () => (
-      <Text tone="muted">The muted, italic paragraphs of the Narrative above: the thinking.</Text>
-    ),
+    render: () => <Text tone="muted">The Thought and Thinking lines of the Narrative above.</Text>,
   },
   Said: {
     render: () => (
@@ -631,12 +687,7 @@ export const FRAME_ENTRIES = {
     ),
   },
   ToolGroup: {
-    render: () => (
-      <Text tone="muted">
-        The dim lines of the Narrative above: tool calls folded into one line that opens in place; a
-        failed call stays visible when closed, and the selected call is marked.
-      </Text>
-    ),
+    render: () => <Text tone="muted">The tool rows of the Narrative above.</Text>,
   },
   FactLine: {
     render: () => (

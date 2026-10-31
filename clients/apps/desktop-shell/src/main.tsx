@@ -6,11 +6,11 @@ import '@vibesys/ui/fonts.css';
 import '@vibesys/ui/components.css';
 import {browserDraftMemory, browserMoreOptionsMemory} from '@vibesys/feature-new-run/renderer';
 import {pageAppearance} from '@vibesys/feature-settings/renderer';
-import {runOfWindow, type WelcomeBridge} from '@vibesys/ipc';
+import {runOfWindow, subscriptionBridge, type WelcomeBridge} from '@vibesys/ipc';
 import {Card, EmptyState, LinkOpener, Page} from '@vibesys/ui';
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
-import {windowAddress} from './address.js';
+import {followMouseButtons, windowAddress} from './address.js';
 import {ProblemHost} from './problem-host.js';
 import {shellSessionOptions} from './run-session.js';
 import {createShellStores, RunWindow, Shell} from './shell.js';
@@ -19,6 +19,7 @@ declare global {
   interface Window {
     vibesysWelcome?: WelcomeBridge;
     vibesysGateway?: import('@vibesys/ipc').GatewayPortBridge;
+    vibesysSubscription?: import('@vibesys/ipc').GatewayPortBridge;
   }
 }
 
@@ -41,6 +42,9 @@ if (bridge === undefined) {
     const timer = window.setTimeout(callback, delayMs);
     return () => window.clearTimeout(timer);
   };
+  // A run window's page names its run in its query; the main window's has none.
+  const run = runOfWindow(window.location.search);
+  followMouseButtons(window);
   const stores = createShellStores(
     bridge,
     pageAppearance(window),
@@ -48,8 +52,12 @@ if (bridge === undefined) {
     schedule,
     {
       messages: window,
-      address: windowAddress(window),
+      address: windowAddress(window, run),
       now: () => Date.now(),
+      // The preload's second port: a host's live data reaches the window only through it.
+      ...(window.vibesysSubscription === undefined
+        ? {}
+        : {subscriptions: subscriptionBridge(window.vibesysSubscription)}),
       session: run => shellSessionOptions(run, {document, window, navigator}),
     },
     {
@@ -58,8 +66,6 @@ if (bridge === undefined) {
       draft: browserDraftMemory(() => window.sessionStorage),
     },
   );
-  // A run window's page names its run in its query; the main window's has none.
-  const run = runOfWindow(window.location.search);
   if (run === null) {
     bridge.onOpenSettings(() =>
       stores.sidebar.store.dispatch({type: 'select', screen: {kind: 'settings'}}),

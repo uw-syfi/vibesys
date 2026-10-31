@@ -1,7 +1,8 @@
 import {mkdirSync, writeFileSync} from 'node:fs';
 import {expect, test} from '@playwright/test';
 import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
-import {screenCheck} from './checks/screen-check.js';
+import {KnownLedger} from './checks/known-ledger.js';
+import {SCREEN_CHECKS, screenCheck} from './checks/screen-check.js';
 import {main, NEW_RUN_PAGES, openAt} from './new-run-flow.js';
 import {SEED} from './world.js';
 
@@ -15,6 +16,7 @@ import {SEED} from './world.js';
 const shots = process.env['SCREENS_DIR'] || undefined;
 if (shots !== undefined) mkdirSync(shots, {recursive: true});
 const sheet: SheetEntry[] = [];
+const ledger = new KnownLedger('new-run');
 
 const WIDTHS = [1440, 1000, 660] as const;
 const THEMES = ['paper', 'ink'] as const;
@@ -44,7 +46,8 @@ for (const theme of THEMES) {
         if (each.step === 'goal' && each.answers.from === 'project') {
           await expect(main(page)).toContainText('Higher is better');
         }
-        expect(await screenCheck(page)).toEqual([]);
+        const name = `new-run/${each.name.replaceAll(' ', '-')}/${width}/${theme}`;
+        expect(ledger.unexplained(name, await screenCheck(page, SCREEN_CHECKS))).toEqual([]);
         if (shots !== undefined) {
           const file = `new-run__${each.name.replaceAll(' ', '-')}__${width}__${theme}.png`;
           await main(page).screenshot({path: `${shots}/${file}`});
@@ -54,6 +57,8 @@ for (const theme of THEMES) {
     }
   }
 }
+
+ledger.requireEveryFailure(() => ledger.screens >= (WIDTHS.length + 1) * NEW_RUN_PAGES.length);
 
 test('the contact sheet of the New run pages', async ({browser}) => {
   test.skip(shots === undefined, 'set SCREENS_DIR to write the screenshots and the contact sheet');

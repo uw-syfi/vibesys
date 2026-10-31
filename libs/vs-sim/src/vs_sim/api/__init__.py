@@ -44,6 +44,13 @@ if TYPE_CHECKING:
         WorkerReservationStateError,
         WorkerStartRefusedError,
     )
+    from vs_sim.exit_wait import (
+        ExitWaiter,
+        ExitWaitUnsupportedError,
+        KqueueExitWaiter,
+        WaitidExitWaiter,
+        host_exit_waiter,
+    )
     from vs_sim.loopback_http import HttpReply, LoopbackHttp, UrllibLoopbackHttp
     from vs_sim.network import Connection, DeadlineNetwork, Listener, Network, UnixNetwork
     from vs_sim.os_platform import Platform
@@ -145,6 +152,11 @@ _MODULES: dict[str, str] = {
     "WorkerReservation": "vs_sim.concurrency",
     "WorkerReservationStateError": "vs_sim.concurrency",
     "WorkerStartRefusedError": "vs_sim.concurrency",
+    "ExitWaitUnsupportedError": "vs_sim.exit_wait",
+    "ExitWaiter": "vs_sim.exit_wait",
+    "KqueueExitWaiter": "vs_sim.exit_wait",
+    "WaitidExitWaiter": "vs_sim.exit_wait",
+    "host_exit_waiter": "vs_sim.exit_wait",
     "Connection": "vs_sim.network",
     "DeadlineNetwork": "vs_sim.network",
     "Listener": "vs_sim.network",
@@ -267,10 +279,13 @@ __all__ = [
     "Connection",
     "DeadlineNetwork",
     "Event",
+    "ExitWaitUnsupportedError",
+    "ExitWaiter",
     "ForegroundChild",
     "ForegroundLauncher",
     "HttpReply",
     "InheritedStdioLauncher",
+    "KqueueExitWaiter",
     "LauncherLifelineError",
     "LineCallback",
     "Lines",
@@ -340,6 +355,7 @@ __all__ = [
     "Threads",
     "UnixNetwork",
     "UrllibLoopbackHttp",
+    "WaitidExitWaiter",
     "WakeupFdSignalRelay",
     "Worker",
     "WorkerReservation",
@@ -350,6 +366,7 @@ __all__ = [
     "derive_seed",
     "follow_launcher",
     "forward_output",
+    "host_exit_waiter",
     "mark_in",
     "parse_ps",
     "run_foreground",

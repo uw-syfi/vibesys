@@ -58,6 +58,15 @@ read path and journal projection from the native core and control work still to 
    and GPU use in process, because a sample every 10 s cannot afford a Python start, and those
    numbers matter most when the checkout is missing or broken.
 
+   Because each read is a new Python process, a read's imports are its cost: a catalog read
+   does milliseconds of work, and a desktop launch asks for about twenty-five reads at once. A
+   read therefore builds only the host facts it asks for (`entrypoints.host_facts`), loads a
+   module only where its read uses it (`server.lazy_module`, or a module of its own
+   per family), and a catalog read starts no process. `tests/e2e/test_host_read_startup.py` runs
+   every read in a fresh interpreter and fails on a read that loads a named group of modules
+   (the run engine, the admission modules, the run-listing stream, the helper's OS adapters, the
+   agent library) it does not list, or that starts a process.
+
 ## What a run writes
 
 One directory per run, opened only through `vs-project`'s `Project`.
@@ -71,7 +80,7 @@ One directory per run, opened only through `vs-project`'s `Project`.
 | `run.head` | tiny status and headline for dashboards, and `committed_seq` | the run | replaced atomically |
 | `launch.lock` | serializes host relaunch admission until the new epoch is observed | the host command | held only during launch |
 | `run.lock` | an advisory lock the live run holds; no content | the run | held while the process lives |
-| `state.pb` | core's snapshot; records the last log sequence it covers | the run | compare-and-swap |
+| `state.pb` | a cache of core's fold; records the log sequence it covers and the digest of those records | the run | replaced atomically (see [run-recovery.md](run-recovery.md#statepb-is-a-cache)) |
 | `inbox/` | intents posted by viewers | the gateway | one file per request |
 | `sessions/<id>/` | a chat session: its own `session.log` and inbox | the session process | as the run |
 
@@ -277,6 +286,24 @@ frame ends the stream with a typed code. Anything that needs every value, such a
 `Tail`. `internal/subscription` owns the mechanism and `subscriptiontest` the contract each topic
 passes. Server keepalive ends a half-open connection, and with it the streams that hold a producer.
 
+The frame timing is stated once, as `SubscribeRequest`'s `subscribe_timing` option: the hub heartbeats
+at `heartbeat_ms`, and a client counts a stream with no frame for `lease_ms` as lost. The generator
+projects both into Go and TypeScript tables and refuses a lease that cannot hold a beat. The client
+sends no keepalive of its own: the gateway server sets no keepalive enforcement policy, so a client
+ping faster than gRPC's default would be refused, and the lease on frames already finds a silent
+stream. A client reads a stream through `@vibesys/subscription`, in main through `Subscriptions`,
+and never through the generic gateway port, which refuses `Subscribe`. A lost session ends a
+`Subscribe` stream instead of re-issuing it, because a second stream in one call would deliver a
+second snapshot into state the caller already holds; the subscription's machine opens the next one.
+
+A window asks main for two things on the subscription port, each one validated request on its own
+port: observe a topic of a host, and retry a host, which main hears as `Subscriptions.retry` and
+answers by ending the port. A value is old when the topic's `stale_after_ms` passes with no new
+one, and the machine bounds that with a timer like every other wait, so a wall clock that steps
+cannot stretch it. A stale state carries when its value arrived, so a screen shows the value dimmed
+with its age. A stream outlives its last observer by a few seconds, so a screen that is left and
+opened again finds its stream running instead of dialing the host again.
+
 ## Versions and upgrades
 
 Two version domains, with different rules.
@@ -401,7 +428,7 @@ How to read the table:
 | `tool_result` | `run.agent_events` | stream (`transcript`), blob | turn rows | L | Entry: tool, call id, error flag, summary. `content` and `payload` (command stdout and stderr, JSON) are a blob when over the cap. |
 | `todo_update` | `run.agent_events` | delete | none | S | No consumer. Re-adding an entry kind later is additive. |
 | `usage_update` | `run.agent_events` | delete | none (`CoreState.usage` is unread) | S | Context fill per tool call. High rate, no consumer. A `context_fill` metric series can return when a screen needs it. |
-| `turn_usage_recorded` | `run.agent_events` | span:`agent_turn` end attrs | usage view, run summary, global Usage page, workstream usage | S | `TokenUsage` attrs: input, cache read, cache creation, output, reasoning, cost, duration; unreported is absent, never zero. Summing over spans gives the run's spend. The `span_id` stamping on events is gone. |
+| `turn_usage_recorded` | `run.agent_events` | span:`agent_turn` end attrs | usage view, run summary, global Usage page, workstream usage | S | `TokenUsage` attrs: input, cache read, cache creation, output, reasoning, cost, duration; unreported is absent, never zero. Summing over spans gives the run's spend. The `span_id` stamping on events is gone. One `TurnUsageDetail` per turn on the span's `usage_details`: the provider session id, the cost basis and the per-model rows (`ModelTurnUsage`), so the main-conversation totals keep their meaning. |
 | `phase_started` | server execution, `run.integration` | delete | run map only; the Run screen reads no phase | S | Each phase is an agent turn or a workstream span. |
 | `phase_finished` | server execution, `run.integration` | delete | same | S | |
 | `subprocess_output` | `run.evaluation`, `measurement_events` | stream (`log`) | transcript "subprocess" rows | L | One stream per process, owner the span that ran it, redacted at write time. |
@@ -579,6 +606,12 @@ defined in
 [`transcript.proto`](https://github.com/uw-syfi/vibesys/blob/main/proto/vibesys/store/v1/transcript.proto).
 Each text, tool-call or tool-result entry holds inline content or a `BlobRef`. The turn's
 whole-span replacement seals the stream's final byte length when the turn ends.
+Every entry carries `at`, the time of the event it records; entries written before the field
+existed have none, and a reader shows no time for them. A tool result holds the text the agent
+was shown (`content`) and, when the tool reported more, a typed `payload`: a command's stdout and
+stderr (each inline or a blob), its exit code and its run time, or a JSON value. A reader that
+does not know a payload case shows `content` alone. The earlier `payload_json` field is
+deprecated: it is no longer written, and a reader ignores a record's copy and shows `content`.
 For older string attrs without a blob alternative, the bridge writes `blob:<sha256>`
 and a `BlobAttached` whose role names the field path; an oversized interim reply instead
 omits its inline JSON and uses the `reply` attachment.

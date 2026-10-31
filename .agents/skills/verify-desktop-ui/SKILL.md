@@ -1,6 +1,6 @@
 ---
 name: verify-desktop-ui
-description: Verify a desktop UI change the way a user sees it, before its pull request opens: replay run fixtures through the built app, pass the layout and wording checks on every screen, produce the app-window contact sheet, and judge each screen against the UX principles. Use when changing the desktop app's screens (the Run screen, sidebar, New run, settings), fixing a visual or wording bug there, adding a state a user can see, or opening a pull request that touches them.
+description: Verify a desktop UI change the way a user sees it, before its pull request opens: replay run fixtures through the built app, pass the layout and wording checks on every screen, produce the app-window contact sheet, judge each screen against the UX principles and the visual spec, and have an independent reviewer judge it. Use when changing the desktop app's screens (the Run screen, sidebar, New run, settings), fixing a visual or wording bug there, adding a state a user can see, or opening a pull request that touches them.
 metadata:
   kind: workflow
 ---
@@ -11,7 +11,8 @@ Tests of a UI change pass and the screen is still wrong: a ratio wrapping one
 character per line, overlapping header text, a raw failure reason, a chart that
 vanishes while scrubbing. This skill catches those before the user does,
 cheaply and the same way every time. The checks read real layout in a real
-browser against realistic runs; the critic step covers what no check can.
+browser against realistic runs; the critic step and the independent reviewer
+cover what no check can.
 
 ## Verification order
 
@@ -57,7 +58,9 @@ From the clients workspace root:
   `pnpm --filter @vibesys/app-desktop-shell e2e --headed <spec> -g <fixture>`.
 - The same suite in CI's Linux image (needs Docker):
   `pnpm --filter @vibesys/app-desktop-shell e2e:linux`. Run it when a check
-  passes here and you suspect a font or rendering difference.
+  passes here and you suspect a font or rendering difference. The native
+  replays are made on the host and mounted read-only; a spec that builds a
+  fixture differing from its declaration needs one host run first.
 
 ## Iterate on a fixture with hot reload
 
@@ -91,7 +94,8 @@ Unenforced: no check reads the field; the PR template asks for it.
 
 Before opening the PR, open every screen of the sheet that your change can
 reach, and judge each against
-[references/ux-principles.md](references/ux-principles.md). Ask of each:
+[references/ux-principles.md](references/ux-principles.md) and the layout laws of
+[references/visual-spec.md](references/visual-spec.md). Ask of each:
 
 - What does a user learn in three seconds? Is it the thing that matters?
 - What is unexplained: a color, a number, a word, an arrow?
@@ -100,13 +104,29 @@ reach, and judge each against
 Fix every problem you rate medium or higher before the PR opens; list the low
 ones in the PR body. Unenforced: a judgment of what a user wants cannot be a check.
 
-When the user reports a new complaint, add it to the principles, and make it a
-check when a page can decide it (follow `enforce-rules`).
+When the user reports a new complaint, add it to the principles, make it a check
+when a page can decide it (follow `enforce-rules`), and add the screen to the
+calibration set.
+
+## Independent review
+
+The builder is the worst judge of a screen: it already knows what each thing
+means. For every new or reworked screen, and for every layout change a user can
+see, a fresh agent that did not build the screen judges real-size screenshots
+against [references/visual-review.md](references/visual-review.md). Give it what
+that file lists and nothing else. Fix what it rates medium or higher.
+Unenforced: no check can tell a fresh agent from the builder.
+
+After changing the laws, the checks or the rubric, recalibrate as
+[references/visual-calibration.md](references/visual-calibration.md) says: the
+checks plus a blind reviewer must catch every complaint in the set.
+Unenforced: the reviewer's half is a judgment run by an agent, not by CI.
 
 ## Steps in a PR
 
 1. Rebase on the base branch (others edit the Run screen at the same time).
 2. Pass `pnpm --filter @vibesys/app-desktop-shell test:e2e`.
-3. Produce the before and after sheets; run the critic step.
+3. Produce the before and after sheets; run the critic step and, when the change
+   is visible, the independent review.
 4. Run `./scripts/check_clients.sh` (CI's client checks) before pushing.
 5. Fill the Screens field of the PR template.

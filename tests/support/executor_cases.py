@@ -26,6 +26,7 @@ from tests.support.session_world import (
     ensure_request,
     inspect_request,
     open_host,
+    session_context,
 )
 from tests.support.workspace_world import WorkspaceEnv, open_workspace_env
 
@@ -89,7 +90,7 @@ from vs_runtime.api.core import (
     revision_ref,
 )
 from vs_runtime.api.executor_contexts import RevocableLease, context_for
-from vs_runtime.api.executor_contracts import FaultingNamespace, Scenario
+from vs_runtime.api.executor_contracts import FaultingNamespace, Scenario, UnreceiptedStore
 from vs_runtime.api.operation_fixtures import SCOPE, catalog_of, execute_request, scenarios
 from vs_runtime.api.slurm_evaluation_stack import (
     ADMISSION,
@@ -115,11 +116,12 @@ if TYPE_CHECKING:
 class _World:
     """Shared plumbing: a Project directory and a namespace that can die mid-write."""
 
-    def __init__(self, base: Path) -> None:
+    def __init__(self, base: Path, *, receipted: bool = True) -> None:
         self.base = base
         (base / "project").mkdir()
         self._project = Project.open(base / "project")
         self._writes = 0
+        self._receipted = receipted
 
     def real_namespace(self) -> StateNamespace:
         return self._project.state.state_store_namespace("run")
@@ -128,7 +130,12 @@ class _World:
         return FaultingNamespace(self.real_namespace(), crash_at)
 
     def store(self, faulting: FaultingNamespace) -> ReceiptStore:
-        return ReceiptStore(cast("StateNamespace", faulting), threads=OsThreads())
+        return self._store_over(cast("StateNamespace", faulting), receipted=self._receipted)
+
+    @staticmethod
+    def _store_over(namespace: StateNamespace, *, receipted: bool) -> ReceiptStore:
+        kind = ReceiptStore if receipted else UnreceiptedStore
+        return kind(namespace, threads=OsThreads())
 
     def writes(self) -> int:
         return self._writes
@@ -214,13 +221,14 @@ class _OperationsWorld(_World):
         lease: RevocableLease,
         crash_at: int | None,
         digest: str | None = None,
+        repeat: bool = False,
     ) -> ExecutionResult:
         faulting = self.faulting(crash_at)
         store = self.store(faulting)
         runner = RegisteredOperationRequests(
             catalog_of(self._items()), NamespaceOperationReceipts(store), ObservationFactory(store)
         )
-        context = context_for(request, lease=lease)
+        context = context_for(request, lease=lease).model_copy(update={"repeat": repeat})
         if digest is not None:
             context = context.model_copy(update={"payload_digest": digest})
         try:
@@ -241,9 +249,9 @@ class _OperationsCase:
     )
 
     @asynccontextmanager
-    async def world(self) -> AsyncIterator[_OperationsWorld]:
+    async def world(self, *, receipted: bool = True) -> AsyncIterator[_OperationsWorld]:
         with tempfile.TemporaryDirectory() as raw:
-            yield _OperationsWorld(Path(raw))
+            yield _OperationsWorld(Path(raw), receipted=receipted)
 
 
 # semantic events
@@ -266,10 +274,11 @@ class _SemanticWorld(_World):
         lease: RevocableLease,
         crash_at: int | None,
         digest: str | None = None,
+        repeat: bool = False,
     ) -> ExecutionResult:
         faulting = self.faulting(crash_at)
         events = JournalSemanticEvents(self.store(faulting), cast("StateNamespace", faulting))
-        context = context_for(request, lease=lease)
+        context = context_for(request, lease=lease).model_copy(update={"repeat": repeat})
         if digest is not None:
             context = context.model_copy(update={"payload_digest": digest})
         try:
@@ -287,17 +296,17 @@ class _SemanticEventsCase:
     scenarios = (Scenario("block", BlockRequest, effectful=True),)
 
     @asynccontextmanager
-    async def world(self) -> AsyncIterator[_SemanticWorld]:
+    async def world(self, *, receipted: bool = True) -> AsyncIterator[_SemanticWorld]:
         with tempfile.TemporaryDirectory() as raw:
-            yield _SemanticWorld(Path(raw))
+            yield _SemanticWorld(Path(raw), receipted=receipted)
 
 
 # evaluation
 
 
 class _EvaluationWorld(_World):
-    def __init__(self, base: Path, stack: Stack) -> None:
-        super().__init__(base)
+    def __init__(self, base: Path, stack: Stack, *, receipted: bool = True) -> None:
+        super().__init__(base, receipted=receipted)
         self.stack = stack
 
     async def prepare(self, scenario: Scenario) -> RequestBase:
@@ -338,10 +347,11 @@ class _EvaluationWorld(_World):
         lease: RevocableLease,
         crash_at: int | None,
         digest: str | None = None,
+        repeat: bool = False,
     ) -> ExecutionResult:
         faulting = self.faulting(crash_at)
         requests = MeasurementRequests(self.stack.executor, self.store(faulting))
-        context = context_for(request, lease=lease)
+        context = context_for(request, lease=lease).model_copy(update={"repeat": repeat})
         if digest is not None:
             context = context.model_copy(update={"payload_digest": digest})
         try:
@@ -365,7 +375,7 @@ class _EvaluationCase:
     )
 
     @asynccontextmanager
-    async def world(self) -> AsyncIterator[_EvaluationWorld]:
+    async def world(self, *, receipted: bool = True) -> AsyncIterator[_EvaluationWorld]:
         with tempfile.TemporaryDirectory() as raw:
             base = Path(raw)
             stack = await build_stack(
@@ -373,7 +383,7 @@ class _EvaluationCase:
                 ScenarioCluster(),
             )
             try:
-                yield _EvaluationWorld(base, stack)
+                yield _EvaluationWorld(base, stack, receipted=receipted)
             finally:
                 await stack.executor.close()
 
@@ -400,10 +410,11 @@ def _run_request(name: str) -> dict[str, Any]:
     }
 
 
-class _WorkspacesWorld:
-    def __init__(self, env: WorkspaceEnv) -> None:
+class WorkspacesWorld:
+    def __init__(self, env: WorkspaceEnv, *, receipted: bool = True) -> None:
         self.env = env
         self._writes = 0
+        self._receipted = receipted
 
     @property
     def _root(self) -> Path:
@@ -419,6 +430,11 @@ class _WorkspacesWorld:
 
     async def _seed(self, request: RequestBase) -> ExecutionResult:
         return await self.execute(request, lease=RevocableLease(), crash_at=None)
+
+    def drift(self, request: RequestBase) -> None:
+        """Change the files *request* snapshots, as a writer that outlived its attempt would."""
+        tree = self._root if isinstance(request, SnapshotAndRetainRun) else self._candidate()
+        (tree / "candidate.py").write_text("VALUE = 3\n", encoding="utf-8")
 
     async def prepare(self, scenario: Scenario) -> RequestBase:
         base = self.env.hosts[0].root.revision
@@ -473,9 +489,11 @@ class _WorkspacesWorld:
         lease: RevocableLease,
         crash_at: int | None,
         digest: str | None = None,
+        repeat: bool = False,
     ) -> ExecutionResult:
         faulting = FaultingNamespace(self.env.receipts_namespace(), crash_at)
-        store = ReceiptStore(cast("StateNamespace", faulting), threads=OsThreads())
+        kind = ReceiptStore if self._receipted else UnreceiptedStore
+        store = kind(cast("StateNamespace", faulting), threads=OsThreads())
         executor = RuntimeWorkspaceRequests(
             self.env.start_host(),
             store,
@@ -483,7 +501,7 @@ class _WorkspacesWorld:
             blocking=ThreadBlockingRunner(),
             evidence=ReceiptEvidenceLedger(store),
         )
-        context = context_for(request, lease=lease)
+        context = context_for(request, lease=lease).model_copy(update={"repeat": repeat})
         if digest is not None:
             context = context.model_copy(update={"payload_digest": digest})
         try:
@@ -522,14 +540,14 @@ class _WorkspacesCase:
     )
 
     @asynccontextmanager
-    async def world(self) -> AsyncIterator[_WorkspacesWorld]:
+    async def world(self, *, receipted: bool = True) -> AsyncIterator[WorkspacesWorld]:
         with (
             tempfile.TemporaryDirectory() as raw,
             state_home(Path(raw) / "operator-state"),
             open_workspace_env(Path(raw)) as env,
         ):
             try:
-                yield _WorkspacesWorld(env)
+                yield WorkspacesWorld(env, receipted=receipted)
             finally:
                 for host in reversed(env.hosts):
                     await host.close()
@@ -539,8 +557,8 @@ class _WorkspacesCase:
 
 
 class _SessionsWorld(_World):
-    def __init__(self, base: Path) -> None:
-        super().__init__(base)
+    def __init__(self, base: Path, *, receipted: bool = True) -> None:
+        super().__init__(base, receipted=receipted)
         (base / "workspace").mkdir()
         self.host: SessionHost = open_host(base / "workspace")
 
@@ -563,10 +581,13 @@ class _SessionsWorld(_World):
         lease: RevocableLease,
         crash_at: int | None,
         digest: str | None = None,
+        repeat: bool = False,
     ) -> ExecutionResult:
         faulting = self.faulting(crash_at)
         try:
-            return await self.host.run(request, self.store(faulting), lease=lease, digest=digest)
+            context = session_context(request, lease=lease, digest=digest)
+            context = context.model_copy(update={"repeat": repeat})
+            return await self.host.run_in(request, self.store(faulting), context)
         finally:
             self._writes = faulting.writes
 
@@ -590,16 +611,16 @@ class _SessionsCase:
     )
 
     @asynccontextmanager
-    async def world(self) -> AsyncIterator[_SessionsWorld]:
+    async def world(self, *, receipted: bool = True) -> AsyncIterator[_SessionsWorld]:
         with tempfile.TemporaryDirectory() as raw:
-            yield _SessionsWorld(Path(raw))
+            yield _SessionsWorld(Path(raw), receipted=receipted)
 
 
 class _SessionLifecycleWorld(_SessionsWorld):
     """The sessions world with cancel, close and resume, and a checkpoint store that survives release."""
 
-    def __init__(self, base: Path) -> None:
-        super().__init__(base)
+    def __init__(self, base: Path, *, receipted: bool = True) -> None:
+        super().__init__(base, receipted=receipted)
         slot = self.real_namespace().slot("sessions.json", AgentSessionState)
         self.host = open_lifecycle_host(
             base / "workspace", DurableSessionStore(slot, threads=OsThreads())
@@ -621,10 +642,11 @@ class _SessionLifecycleWorld(_SessionsWorld):
         lease: RevocableLease,
         crash_at: int | None,
         digest: str | None = None,
+        repeat: bool = False,
     ) -> ExecutionResult:
         faulting = self.faulting(crash_at)
         executor = lifecycle_executor(self.host, self.store(faulting))
-        context = context_for(request, lease=lease)
+        context = context_for(request, lease=lease).model_copy(update={"repeat": repeat})
         if digest is not None:
             context = context.model_copy(update={"payload_digest": digest})
         try:
@@ -657,9 +679,9 @@ class _SessionLifecycleCase:
     )
 
     @asynccontextmanager
-    async def world(self) -> AsyncIterator[_SessionLifecycleWorld]:
+    async def world(self, *, receipted: bool = True) -> AsyncIterator[_SessionLifecycleWorld]:
         with tempfile.TemporaryDirectory() as raw:
-            yield _SessionLifecycleWorld(Path(raw))
+            yield _SessionLifecycleWorld(Path(raw), receipted=receipted)
 
 
 @contextmanager

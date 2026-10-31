@@ -4,7 +4,11 @@
  * rail and the selected screen: the Runs dashboard (home), New run, Settings, Machines, Usage, or
  * the Run screen for a selected run.
  */
-import {AppShell, createSidebarStore} from '@vibesys/feature-app-shell/renderer';
+import {
+  AppShell,
+  createSidebarStore,
+  type WindowAddress,
+} from '@vibesys/feature-app-shell/renderer';
 import {
   type Clock,
   type DashboardRow,
@@ -20,9 +24,12 @@ import {
   type SidebarState,
 } from '@vibesys/feature-app-shell/state';
 import {
+  createLiveStats,
   createMachinesStore,
+  type LiveStats,
   MachinesPage,
   MachinesScreen,
+  WithHostLive,
 } from '@vibesys/feature-machines/renderer';
 import {
   type MachinesState,
@@ -39,7 +46,11 @@ import {
   NewRunScreen,
   type NewRunSnapshot,
 } from '@vibesys/feature-new-run/renderer';
-import type {RunPageNavigation, RunPagePage} from '@vibesys/feature-run-page/renderer';
+import type {
+  RunPageAddress,
+  RunPageNavigation,
+  RunPagePage,
+} from '@vibesys/feature-run-page/renderer';
 import {RUN_ROUTE, routeQuery} from '@vibesys/feature-run-page/state';
 import {
   createGroupingStore,
@@ -67,13 +78,21 @@ import {createProblemBoard, type ProblemBoard, reportProblems} from '@vibesys/pr
 import type {RecentRun, RunRef} from '@vibesys/runs';
 import {sameRun} from '@vibesys/runs';
 import type {Store} from '@vibesys/store';
+import type {SubscriptionPort} from '@vibesys/subscription';
 import {applyTheme, Card, EmptyState, Page, type ThemeTarget, WindowFrame} from '@vibesys/ui';
 import {type JSX, useMemo, useSyncExternalStore} from 'react';
 import {GatewayRun} from './gateway-run.js';
-import {loadingMachines, runCounts, runInput} from './shell-runs.js';
+import {liveRunCounts, loadingMachines, runCounts, runInput} from './shell-runs.js';
 
 /** The clock the shell's screens time their bounds on: the window's own timers, in `main.tsx`. */
 export type Schedule = (callback: () => void, delayMs: number) => () => void;
+
+/** The page the shell runs in; its address holds the window's location. */
+export interface ShellPage extends Omit<RunPagePage, 'address'> {
+  readonly address: WindowAddress & Pick<RunPageAddress, 'onEscape'>;
+  /** The window's way to a host's live data; without it the screens that show it show none. */
+  readonly subscriptions?: SubscriptionPort;
+}
 
 /** The stores the shell renders, and what its screens reach the app through. */
 export interface ShellStores {
@@ -86,11 +105,13 @@ export interface ShellStores {
   readonly bridge: WelcomeBridge;
   readonly schedule: Schedule;
   readonly machines: ReturnType<typeof createMachinesStore>;
+  /** The machines' live stats, or null when the window has no way to a host's live data. */
+  readonly live: LiveStats | null;
   /** What the Usage page shows; it asks only while the page is on screen. */
   readonly usage: ReturnType<typeof createUsageStore>;
   readonly newRun: ReturnType<typeof createNewRunStore>['store'];
   /** The page a run's live session runs in. */
-  readonly page: RunPagePage;
+  readonly page: ShellPage;
   readonly newRunCompletion: ReturnType<typeof createNewRunStore>['completion'];
   /** The problems the window's screens report, shown as toasts by `ProblemHost`. */
   readonly problems: ProblemBoard;
@@ -115,6 +136,7 @@ function mainWindowPlace(stores: ShellStores): RunPlace {
       runAgain: () =>
         stores.sidebar.store.dispatch({type: 'select', screen: {kind: 'new-run', again: run}}),
       openWindow: () => stores.sidebar.actions.openWindow(run),
+      runs: () => stores.sidebar.store.dispatch({type: 'select', screen: {kind: 'runs'}}),
     }),
   };
 }
@@ -147,7 +169,7 @@ export function createShellStores(
   system: SystemAppearance,
   document: ThemeTarget,
   schedule: Schedule,
-  page: RunPagePage,
+  page: ShellPage,
   preferences: ShellPreferences,
 ): ShellStores {
   const settings = createSettingsStore(bridge, system);
@@ -156,7 +178,7 @@ export function createShellStores(
     if (state.kind === 'ready') applyTheme(shownTheme(state, DEFAULT_APPEARANCE), document);
   };
   settings.subscribe(follow);
-  const sidebar = createSidebarStore(bridge, schedule);
+  const sidebar = createSidebarStore(bridge, schedule, page.address);
   const newRun = createNewRunStore(bridge, {
     recent: sidebar.store.getState().recent,
     schedule,
@@ -206,6 +228,10 @@ export function createShellStores(
     settings,
     machineSettings,
     machines,
+    live:
+      page.subscriptions === undefined
+        ? null
+        : createLiveStats(page.subscriptions, schedule, page.now),
     usage: createUsageStore(bridge, {
       schedule,
       clock: () => {
@@ -297,6 +323,20 @@ function followSelection(
   newRun.dispatch({type: 'machine', machine: selection.machine});
 }
 
+/** The window's location as `run`'s page sees it: the zoom it holds while it shows that run. */
+function runAddress(stores: ShellStores, run: RunRef): RunPageAddress {
+  const {store} = stores.sidebar;
+  return {
+    zoom: () => {
+      const shown = store.getState().selection;
+      return shown.kind === 'run' && sameRun(shown.run, run) ? (shown.zoom ?? '') : '';
+    },
+    move: zoom => store.dispatch({type: 'select', screen: {kind: 'run', run, zoom}}),
+    subscribe: store.subscribe,
+    onEscape: stores.page.address.onEscape,
+  };
+}
+
 function useStore<S, A>(store: Store<S, A>): S {
   return useSyncExternalStore(store.subscribe, store.getState, store.getState);
 }
@@ -324,6 +364,7 @@ function RunRoute(props: {
   );
   const ports = typeof window === 'undefined' ? undefined : window.vibesysGateway;
   const gateway = useMemo(() => (ports === undefined ? undefined : gatewayBridge(ports)), [ports]);
+  const address = useMemo(() => runAddress(stores, run), [stores, run]);
   return gateway === undefined ? (
     <Page>
       <Card>
@@ -337,7 +378,7 @@ function RunRoute(props: {
       projectRoot={projectRoot}
       bridge={gateway}
       schedule={stores.schedule}
-      address={stores.page.address}
+      address={address}
       navigation={place.navigation(run)}
       problems={stores.problems}
     />
@@ -399,7 +440,7 @@ function SettingsRoute(props: {
   readonly machines: MachinesState;
   readonly select: (screen: Screen) => void;
 }): JSX.Element {
-  const {sidebar, settings, machineSettings, machines} = props.stores;
+  const {settings, machineSettings, machines} = props.stores;
   const settingsState = useStore(settings);
   const machineSettingsState = useStore(machineSettings);
   const machinesState = props.machines;
@@ -407,7 +448,7 @@ function SettingsRoute(props: {
     <SettingsScreen
       state={settingsState}
       dispatch={settings.dispatch}
-      back={() => sidebar.store.dispatch({type: 'back-from-settings'})}
+      back={props.stores.page.address.back}
       machinesContent={
         <MachinesScreen
           embedded
@@ -486,14 +527,22 @@ function MachinesRoute(props: {
   readonly stores: ShellStores;
   readonly machines: MachinesState;
   readonly counts: ReadonlyMap<HostKey, number>;
+  readonly liveRuns: ReadonlyMap<HostKey, number>;
   readonly select: (screen: Screen) => void;
 }): JSX.Element {
   const {stores, select} = props;
+  const {live} = stores;
   return (
     <MachinesPage
       state={props.machines}
       dispatch={stores.machines.dispatch}
       runCounts={props.counts}
+      liveRuns={props.liveRuns}
+      {...(live === null
+        ? {}
+        : {
+            live: (host, render) => <WithHostLive live={live} host={host} render={render} />,
+          })}
       incompleteHosts={
         new Set(projectRunGaps(useStore(stores.sidebar.store).allRuns).map(gap => gap.host))
       }
@@ -525,9 +574,11 @@ function UsageRoute(props: {
       actions={actions}
       label={label}
       openRun={(run: SpendRunRef) => {
-        // The Run screen reads its face from the window's address when it opens.
-        stores.page.address.push(routeQuery({...RUN_ROUTE, mode: 'usage'}));
-        select({kind: 'run', run: {host: run.host, runId: run.runId}});
+        select({
+          kind: 'run',
+          run: {host: run.host, runId: run.runId},
+          zoom: routeQuery({...RUN_ROUTE, mode: 'usage'}),
+        });
       }}
     />
   );
@@ -545,6 +596,7 @@ export function Shell(props: {
   const rows = useMemo(() => dashboardRows(sidebarState, viewerClock()), [sidebarState]);
   const tiles = useMemo(() => tilesOf(rows.map(row => runInput(row, Date.now()))), [rows]);
   const counts = useMemo(() => runCounts(rows), [rows]);
+  const liveRuns = useMemo(() => liveRunCounts(sidebarState.listings), [sidebarState.listings]);
   const select = (screen: Screen): void => sidebar.store.dispatch({type: 'select', screen});
   const machinesListed = machineCounts(machinesState).listed;
   const saved = machinesListed ? machinesState.machines.map(each => each.host) : null;
@@ -573,6 +625,7 @@ export function Shell(props: {
             stores={props.stores}
             machines={machinesState}
             counts={counts}
+            liveRuns={liveRuns}
             select={select}
           />
         );

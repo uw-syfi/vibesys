@@ -1,19 +1,15 @@
 import {describe, expect, test} from 'bun:test';
-import {checkMachine, type MachineAction} from '@vibesys/machine/testing';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
-import {createActor} from 'xstate';
 import {
   type Route,
   RUN_MODES,
   RUN_ROUTE,
   type RunMode,
   routeFromQuery,
-  routeLevel,
   routeQuery,
   routeUp,
   type ZoomEvent,
-  type ZoomMachineEvent,
-  zoomMachine,
+  zoomStep,
 } from './zoom.js';
 
 const IDS = ['a', 'b c', 'flow:w1/#1', 'x&y=z', '#hash'];
@@ -42,10 +38,6 @@ function randomZoom(random: Seeded): ZoomEvent {
   ]);
 }
 
-function randomEvent(random: Seeded): ZoomMachineEvent {
-  return random.int(9) === 0 ? {type: 'restore', route: randomRoute(random)} : randomZoom(random);
-}
-
 /** The window's history as the page drives it: entries of fragments, and where it stands. */
 class FakeHistory {
   readonly entries: string[];
@@ -55,17 +47,16 @@ class FakeHistory {
     this.entries = [fragment];
   }
 
-  push(fragment: string): void {
+  /** Adds an entry after the one it stands at, dropping any ahead, unless it names the same. */
+  move(fragment: string): void {
+    if (fragment === this.fragment) return;
     this.entries.splice(this.at + 1, this.entries.length, fragment);
     this.at = this.entries.length - 1;
   }
 
-  /** Goes `by` entries back (negative) or forward; returns the fragment, or null at an end. */
-  go(by: number): string | null {
-    const to = this.at + by;
-    if (to < 0 || to >= this.entries.length) return null;
-    this.at = to;
-    return this.entries[to] ?? null;
+  /** Goes `by` entries back (negative) or forward, stopping at either end. */
+  go(by: number): void {
+    this.at = Math.max(0, Math.min(this.entries.length - 1, this.at + by));
   }
 
   get fragment(): string {
@@ -74,35 +65,30 @@ class FakeHistory {
 }
 
 /**
- * Drives the machine as the page does for `steps` random moves: a user's zoom pushes the route
- * into the history, a Back or Forward restores the entry it lands on. After each, the entry the
- * history stands at names the route the machine shows.
+ * Drives the route as the page does for `steps` random moves: a user's zoom moves the history, a
+ * Back or Forward moves it without one. The route is only ever read from the entry it stands at.
  */
 function walkHistory(random: Seeded, steps: number): void {
   const history = new FakeHistory(routeQuery(randomRoute(random)));
-  const actor = createActor(
-    zoomMachine.provide({
-      actions: {remember: ({context}) => history.push(routeQuery(context.route))},
-    }),
-  ).start();
-  actor.send({type: 'restore', route: routeFromQuery(history.fragment)});
   for (let n = 0; n < steps; n += 1) {
-    const back = random.int(4) === 0 ? history.go(random.bool() ? -1 : 1) : null;
-    actor.send(back === null ? randomZoom(random) : {type: 'restore', route: routeFromQuery(back)});
-    expect(routeFromQuery(history.fragment)).toEqual(actor.getSnapshot().context.route);
+    if (random.int(4) === 0) history.go(random.bool() ? -1 : 1);
+    else {
+      const route = routeFromQuery(history.fragment);
+      const next = zoomStep(route, randomZoom(random));
+      history.move(routeQuery(next));
+      expect(routeFromQuery(history.fragment)).toEqual(next);
+    }
+    expect(routeProblems(routeFromQuery(history.fragment))).toEqual([]);
   }
-  actor.stop();
 }
 
-function zoom(...events: ZoomMachineEvent[]): {route: Route; remembered: string[]} {
-  const remembered: string[] = [];
-  const actor = createActor(
-    zoomMachine.provide({
-      actions: {remember: ({context}) => remembered.push(routeQuery(context.route))},
-    }),
-  ).start();
-  for (const event of events) actor.send(event);
-  return {route: actor.getSnapshot().context.route, remembered};
+/** The route after `events` from the run, and the addresses the zooms moved through. */
+function zoom(...events: ZoomEvent[]): {route: Route; remembered: string[]} {
+  const history = new FakeHistory('');
+  for (const event of events) {
+    history.move(routeQuery(zoomStep(routeFromQuery(history.fragment), event)));
+  }
+  return {route: routeFromQuery(history.fragment), remembered: history.entries.slice(1)};
 }
 
 /** What a route must never say: two things open, an item without its step, a hidden idea. */
@@ -117,30 +103,8 @@ function routeProblems(route: Route): string[] {
   ];
 }
 
-describe('the zoom machine', () => {
-  test('its state is the route’s level, and every zoom but a restore is remembered', () => {
-    checkMachine({
-      machine: zoomMachine,
-      input: undefined,
-      event: random => randomEvent(random),
-      invariants: snapshot => {
-        const level = routeLevel(snapshot.context.route);
-        const state = level === 'opened' ? 'opened' : level;
-        return [
-          ...(snapshot.matches(state) ? [] : [`level ${level} in ${String(snapshot.value)}`]),
-          ...routeProblems(snapshot.context.route),
-        ];
-      },
-      also: (before, event, after, actions: readonly MachineAction[]) => {
-        const changed = before.context.route !== after.context.route;
-        const remembered = actions.some(action => action.type === 'remember');
-        if (event.type === 'restore') expect(remembered).toBe(false);
-        else expect(remembered).toBe(changed);
-      },
-    });
-  });
-
-  test('after any zooms, Backs and Forwards, the address names the route shown', () => {
+describe('the zoom', () => {
+  test('after any zooms, Backs and Forwards, each route is one the address can name', () => {
     for (const seed of SEEDS) walkHistory(new Seeded(seed), 200);
   });
 

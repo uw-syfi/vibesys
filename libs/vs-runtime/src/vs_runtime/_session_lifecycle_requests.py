@@ -106,7 +106,8 @@ if TYPE_CHECKING:
 
     from vs_agent.api import AgentInvocationRecord, AgentSessionCheckpoint, AgentSessions
     from vs_core.api import RequestBase, SessionId, SnapshotAndRetainRun
-    from vs_runtime._core_requests import OwnerEvent, SessionRoleRequest
+    from vs_core.api.recovery import OwnerEvent
+    from vs_runtime._core_requests import SessionRoleRequest
     from vs_runtime._receipt_store import ReceiptStore
     from vs_runtime._workspace_requests import RunInvocationProof
     from vs_sim.api import BlockingRunner
@@ -310,10 +311,8 @@ class SessionLifecycleRequests:
         if not isinstance(request, _HANDLED):
             return self._result(request, context, _rejected(f"{request.kind} is not executed here"))
 
-        async def perform(
-            *, resumed: bool
-        ) -> Settled[ExecutionResult] | Transient[ExecutionResult]:
-            del resumed  # every step inspects durable evidence before it acts
+        async def perform(*, repeat: bool) -> Settled[ExecutionResult] | Transient[ExecutionResult]:
+            del repeat  # every step inspects durable evidence before it acts
             try:
                 result = await self._perform(request, request_id, context)
             except ReceiptCorruptError as error:

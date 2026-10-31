@@ -72,6 +72,20 @@ def takes_command(run: RunState, command: Command, *, stopping: bool = False) ->
     )
 
 
+def admits_command(state: CoreState, command: Command, *, stopping: bool = False) -> bool:
+    """Whether core takes ``command`` now: its status takes it, or a pause's drain admits it.
+
+    The one decision gate. ``validate_decision`` refuses a command it fails, and the shell
+    holds (``deferred``) a command it fails while the run is paused, so the two cannot disagree.
+    A drain admits the successor of a turn it admitted (``drain_bound``); the session gates then
+    admit that turn (``admitted_work_proceeds``).
+    """
+    return (
+        takes_command(state.run, command, stopping=stopping)
+        or drain_bound(state, command) is not None
+    )
+
+
 def validate_decision(
     state: CoreState,
     event: DecisionSubmitted,
@@ -85,9 +99,7 @@ def validate_decision(
         return _reject(
             decision, RejectionCode.STALE_VIEW, ("expected_revision",), "view revision changed"
         )
-    if not takes_command(state.run, decision, stopping=stopping) and (
-        drain_bound(state, decision) is None
-    ):
+    if not admits_command(state, decision, stopping=stopping):
         return _reject(
             decision, RejectionCode.CLOSED_SCOPE, ("scope",), "run not accepting decisions"
         )

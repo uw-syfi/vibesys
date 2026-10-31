@@ -31,12 +31,14 @@ import {
   ALL_RUNS_EMPTY,
   type AllRunsState,
   askProjectRuns,
+  type CancelProjectRuns,
   type ListProjectRuns,
   projectRunGaps,
   projectRunsListed,
   refreshed,
   reportedRunRefs,
 } from './all-runs.js';
+import {fragmentOf, type Screen} from './location.js';
 import {
   type Clock,
   formatDuration,
@@ -55,27 +57,7 @@ import {
   type RunRowStatus,
 } from './run-status.js';
 
-/** The screen the main area shows. */
-export type Screen =
-  /**
-   * New run; opened for a machine (Machines' "New run here"), it starts on that machine; opened
-   * to run `again` a run, it starts from that run's place and options.
-   */
-  | {readonly kind: 'new-run'; readonly machine?: HostKey; readonly again?: RunRef}
-  | {readonly kind: 'machines'}
-  /**
-   * Settings; opened for a machine's `section` (New run's link to set a machine up), it lands on
-   * that machine and section, and leaving it returns to the screen it was opened from.
-   */
-  | {
-      readonly kind: 'settings';
-      readonly machine?: HostKey;
-      readonly section?: 'clusters' | 'logins';
-    }
-  /** The Runs dashboard, the app's home. */
-  | {readonly kind: 'runs'}
-  | {readonly kind: 'usage'}
-  | {readonly kind: 'run'; readonly run: RunRef};
+export type {Screen} from './location.js';
 
 /** Why a Recent row cannot say how its run came out, in words, and whether asking again may help. */
 export interface RowProblem {
@@ -166,9 +148,8 @@ export interface SidebarState {
   readonly live: Readonly<Record<string, LiveDigest>>;
   /** The last token a digest request used, so each is new. */
   readonly lastDigestToken: number;
+  /** Where the window is: the one location, which the address follows. */
   readonly selection: Screen;
-  /** Screen to return to when Settings is opened, including its run or New run context. */
-  readonly beforeSettings: Screen;
 }
 
 export type SidebarAction =
@@ -185,8 +166,10 @@ export type SidebarAction =
   | {readonly type: 'listing'; readonly listing: HostListing}
   | {readonly type: 'recent'; readonly recent: readonly RecentRun[]}
   | {readonly type: 'archived'; readonly archived: readonly RunRef[]}
+  /** The user goes to `screen`: one entry of the window's history, unless they are there. */
   | {readonly type: 'select'; readonly screen: Screen}
-  | {readonly type: 'back-from-settings'}
+  /** The window went Back or Forward to an entry naming `screen`. */
+  | {readonly type: 'restored'; readonly screen: Screen}
   /** What the host said of the digests asked under `token`; null when it could not be asked. */
   | {readonly type: 'digests-read'; readonly token: number; readonly reply: RunDigestsReply | null}
   /** The user asks again for a Recent run whose state could not be read. */
@@ -213,7 +196,11 @@ export type SidebarRequest =
       readonly project: string;
       readonly runIds: readonly string[];
     }
-  | ListProjectRuns;
+  | ListProjectRuns
+  /** Stop reading a project's runs: the screen asked again, or no longer waits for them. */
+  | CancelProjectRuns
+  /** Add an entry to the window's history naming `screen`. */
+  | {readonly kind: 'push-address'; readonly screen: Screen};
 
 export type SidebarStep = Step<SidebarState, SidebarRequest>;
 
@@ -229,32 +216,42 @@ export const SIDEBAR_EMPTY: SidebarState = {
   live: {},
   lastDigestToken: 0,
   selection: {kind: 'runs'},
-  beforeSettings: {kind: 'runs'},
 };
 
 function same(state: SidebarState): SidebarStep {
   return {state, requests: []};
 }
 
-/** The sidebar before anything is heard. */
-export function initialSidebar(): SidebarStep {
-  return same(SIDEBAR_EMPTY);
+/** The sidebar before anything is heard, at the screen the window's address names. */
+export function initialSidebar(selection: Screen = SIDEBAR_EMPTY.selection): SidebarStep {
+  return same({...SIDEBAR_EMPTY, selection});
 }
 
-/** The selection, remembering the screen Settings was opened from. */
-function selected(state: SidebarState, screen: Screen): SidebarStep {
-  const beforeSettings =
-    screen.kind === 'settings' && state.selection.kind !== 'settings'
-      ? state.selection
-      : state.beforeSettings;
+/**
+ * The window at `screen`. Entering the Runs screen asks every project again, so the listings still
+ * being read are cancelled: their replies would be dropped.
+ */
+function shown(state: SidebarState, screen: Screen): SidebarStep {
   const entering = screen.kind === 'runs' && state.selection.kind !== 'runs';
-  const next = {
-    ...state,
-    selection: screen,
-    beforeSettings,
-    ...(entering ? {allRuns: refreshed(state.allRuns)} : {}),
+  const asked = entering ? refreshed(state.allRuns) : null;
+  return {
+    state: {
+      ...state,
+      selection: screen,
+      ...(asked === null ? {} : {allRuns: asked.all}),
+    },
+    requests: asked?.requests ?? [],
   };
-  return same(next);
+}
+
+/** The user at `screen`: the address follows, in one entry, unless it already names `screen`. */
+function selected(state: SidebarState, screen: Screen): SidebarStep {
+  const moved = fragmentOf(screen) !== fragmentOf(state.selection);
+  const shownStep = shown(state, screen);
+  return {
+    state: shownStep.state,
+    requests: [...shownStep.requests, ...(moved ? [{kind: 'push-address' as const, screen}] : [])],
+  };
 }
 
 /** How many runs Recent shows before "Show all". */
@@ -559,8 +556,8 @@ function baseStep(state: SidebarState, action: SidebarAction): SidebarStep {
       return same({...state, archived: action.archived});
     case 'select':
       return selected(state, action.screen);
-    case 'back-from-settings':
-      return selected(state, state.beforeSettings);
+    case 'restored':
+      return shown(state, action.screen);
   }
 }
 

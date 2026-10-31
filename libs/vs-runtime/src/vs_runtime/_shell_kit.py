@@ -64,7 +64,6 @@ from vs_runtime.api.core import (
     CoreRuntimeBindings,
     DispatchCapExceededError,
     ExecutionResult,
-    OwnerEvent,
     RequestExecutors,
     RunControlBridge,
     RunLoopConfig,
@@ -97,8 +96,10 @@ if TYPE_CHECKING:
         StrategyState,
         Transition,
     )
+    from vs_core.api.recovery import OwnerEvent
     from vs_core.api.testing import Answer
-    from vs_runtime.api.core import ExecutionContext, OwnerEvent
+    from vs_runtime._step_loop import StepLoopStalledError
+    from vs_runtime.api.core import ExecutionContext
 
 
 @runtime_checkable
@@ -425,6 +426,22 @@ class RecordingSearch[S: StrategyState, C]:
         self._decisions.extend(decisions)
         return next_state, decisions
 
+    def awaits(self, state: S, decision: Decision) -> bool:
+        """Whether the wrapped search in ``state`` still waits for ``decision``."""
+        return self._inner.awaits(state, decision)
+
+    def changes(self, before: S, after: S) -> bytes | None:
+        """The wrapped search's change from ``before`` to ``after``."""
+        return self._inner.changes(before, after)
+
+    def extend(self, state: S, changes: bytes) -> S:
+        """The wrapped search's ``state`` with ``changes`` applied."""
+        return self._inner.extend(state, changes)
+
+    def resume(self, state: S) -> S:
+        """The wrapped search's ``state`` as its logging process left it."""
+        return self._inner.resume(state)
+
 
 @dataclass
 class Run:
@@ -437,7 +454,7 @@ class Run:
     journal: Journal = field(default_factory=Journal)
     # The loop gave up on the run: its dispatch cap was hit (it never went idle) or it
     # stalled (open work and nothing to wake it).
-    halted: DispatchCapExceededError | RunStalledError | None = None
+    halted: DispatchCapExceededError | RunStalledError | StepLoopStalledError | None = None
     # An operator stop interrupted the run: it stays open for a resume (`RunStopped`).
     stopped: bool = False
 

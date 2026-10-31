@@ -89,7 +89,7 @@ layers_explicit_depends_on = true
 
 [[modules]]
 path = "entrypoints"
-depends_on = ["server.chat", "vibesys.api.chat", "vs_proto", "vs_runlog", "vibesys.api.host", "vibesys.api.host_operations", "vibesys.api.transport", "server.api", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs", "server.host_helper_machine", "server.host_compute_runtime", "server.host_helper_readers", "server.host_agent_logins", "server.host_compute", "server.host_preflight", "server.host_examples", "server.host_harness", "server.host_operation_reads", "vibesys.comparisons"]
+depends_on = ["server.chat", "vibesys.api.chat", "vs_proto", "vs_runlog", "vibesys.api.host", "vibesys.api.host_operations", "vibesys.api.transport", "server.api", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs", "server.host_helper_machine", "server.host_compute_runtime", "server.host_helper_readers", "server.host_agent_logins", "server.host_compute", "server.host_preflight", "server.host_examples", "server.host_harness", "server.host_machine_facts", "server.host_operation_reads", "server.host_task_goal", "server", "vibesys.comparisons"]
 
 [[modules]]
 path = "headless"
@@ -234,7 +234,7 @@ depends_on = ["vs_decode.api", "server.host_api", "server.host_helper_requests",
 [[modules]]
 # The host helper's request answering: one request through the host's interfaces.
 path = "server.host_helper_requests"
-depends_on = ["server.host_operation_reads", "server.host_operation_types_generated", "vibesys.api.host_operations", "vs_proto", "vs_decode.api", "server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_examples", "server.host_compute_runtime", "server.host_helper_logs", "server.host_helper_preflight", "server.host_machine_facts", "server.host_preflight", "server.host_run_dashboard", "server.host_run_events", "server.host_run_reader", "server.host_run_summary", "server.host_helper_readers", "server.registry", "server.relay", "server.run_digest", "server.run_summary", "server.usage_window", "vs_project", "vs_sim.api", "server.host_run_reads"]
+depends_on = ["server.host_operation_reads", "server.host_operation_types_generated", "vibesys.api.host_operations", "vs_proto", "vs_decode.api", "server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_examples", "server.host_compute_runtime", "server.host_helper_logs", "server.host_helper_preflight", "server.host_machine_facts", "server.host_preflight", "server.host_run_dashboard", "server.host_run_events", "server.host_run_reader", "server.host_run_summary", "server.host_helper_readers", "server.registry", "server.relay", "server.run_digest", "server.run_summary", "server.usage_window", "vs_project", "vs_sim.api", "server.host_run_reads", "server", "server.host_harness"]
 
 [[modules]]
 # The read-only servers Chat reads ended runs through: found by run, started on demand.
@@ -250,6 +250,11 @@ depends_on = ["server.host_api", "vs_sim.api"]
 # Light contracts for the example catalog and the projects made from it or copied out.
 path = "server.host_examples"
 depends_on = ["server.host_envelope", "server.host_preflight", "vs_project"]
+
+[[modules]]
+# What a task is for: the goal and axes one task directory declares, shared by the example and project catalogs.
+path = "server.host_task_goal"
+depends_on = ["server.host_examples", "vs_project"]
 
 [[modules]]
 # Light contracts for the harness a run starts with: the provider and model pair and how it reads.
@@ -312,7 +317,7 @@ depends_on = ["vs_proto", "vs_decode.api", "server.host_api", "server.host_run_d
 [[modules]]
 # The host helper's interfaces on a real host: projects, directories, launches, the checkout.
 path = "server.host_helper_os"
-depends_on = ["server.run_digest_store", "vs_runlog", "server.host_saved_runs", "vs_proto", "server.host_examples", "vs_decode.api", "server.host_api", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_preflight", "server.host_preflight", "server.host_helper_requests", "server.host_run_events", "server.run_digest", "server.span_index", "server.run_summary", "server.run_summary_cache", "vs_logs", "vs_project", "vs_sim.api", "server.host_run_reads"]
+depends_on = ["server.run_digest_store", "vs_runlog", "server.host_saved_runs", "vs_proto", "server.host_examples", "server.host_task_goal", "server", "vs_decode.api", "server.host_api", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_preflight", "server.host_preflight", "server.host_helper_requests", "server.host_run_events", "server.run_digest", "server.span_index", "server.run_summary", "server.run_summary_cache", "vs_logs", "vs_project", "vs_sim.api", "server.host_run_reads"]
 
 [[modules]]
 # A run's summary: the fold of its journal that the run level shows, as a pure read model.
@@ -483,7 +488,7 @@ depends_on = []
 [[modules]]
 path = "vibesys.run"
 layer = "prompts_and_lower_libs"
-depends_on = ["vibesys.run.runlog_tee", "vibesys.chat", "vs_runlog", "vs_proto", "vs_core", "vs_decode.api", "vibesys", "vibesys.errors", "vs_agent", "vs_runtime", "vibesys.inputs", "vs_github", "vs_sandbox", "vs_project", "vs_slurm", "vs_sim.api", "vs_redaction.api"]
+depends_on = ["vibesys.run.runlog_tee", "vibesys.records", "vibesys.chat", "vs_runlog", "vs_proto", "vs_core", "vs_decode.api", "vibesys", "vibesys.errors", "vs_agent", "vs_runtime", "vibesys.inputs", "vs_github", "vs_sandbox", "vs_project", "vs_slurm", "vs_sim.api", "vs_redaction.api"]
 
 [[modules]]
 path = "vibesys.run.evaluation_identity"
@@ -886,12 +891,12 @@ depends_on = []
 [[modules]]
 path = "vs_sim.api"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sim.blocking", "vs_sim.byte_source", "vs_sim.clock", "vs_sim.concurrency", "vs_sim.loopback_http", "vs_sim.network", "vs_sim.os_platform", "vs_sim.output", "vs_sim.probes", "vs_sim.process_table", "vs_sim.processes", "vs_sim.randomness", "vs_sim.release", "vs_sim.signal_relay", "vs_sim.signals", "vs_sim.streaming", "vs_sim.sync", "vs_sim.yields"]
+depends_on = ["vs_sim.blocking", "vs_sim.byte_source", "vs_sim.clock", "vs_sim.concurrency", "vs_sim.exit_wait", "vs_sim.loopback_http", "vs_sim.network", "vs_sim.os_platform", "vs_sim.output", "vs_sim.probes", "vs_sim.process_table", "vs_sim.processes", "vs_sim.randomness", "vs_sim.release", "vs_sim.signal_relay", "vs_sim.signals", "vs_sim.streaming", "vs_sim.sync", "vs_sim.yields"]
 
 [[modules]]
 path = "vs_sim.api.testing"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sim.child", "vs_sim.concurrency_contracts", "vs_sim.contracts", "vs_sim.crash", "vs_sim.depth", "vs_sim.fake_byte_source", "vs_sim.fake_piped_process", "vs_sim.fake_process_table", "vs_sim.fake_signal_relay", "vs_sim.fakes", "vs_sim.faults", "vs_sim.file_effects", "vs_sim.gate", "vs_sim.host_clock", "vs_sim.hostile_input", "vs_sim.manual", "vs_sim.output_contracts", "vs_sim.pairwise", "vs_sim.seeds", "vs_sim.signal_relay_contracts", "vs_sim.sim", "vs_sim.sim_network", "vs_sim.sim_threads", "vs_sim.states", "vs_sim.threads", "vs_sim.trace", "vs_sim.virtual", "vs_sim.waits"]
+depends_on = ["vs_sim.child", "vs_sim.concurrency_contracts", "vs_sim.contracts", "vs_sim.crash", "vs_sim.depth", "vs_sim.exit_wait_contracts", "vs_sim.fake_byte_source", "vs_sim.fake_piped_process", "vs_sim.fake_process_table", "vs_sim.fake_signal_relay", "vs_sim.fakes", "vs_sim.faults", "vs_sim.file_effects", "vs_sim.gate", "vs_sim.host_clock", "vs_sim.hostile_input", "vs_sim.manual", "vs_sim.output_contracts", "vs_sim.pairwise", "vs_sim.seeds", "vs_sim.signal_relay_contracts", "vs_sim.sim", "vs_sim.sim_network", "vs_sim.sim_threads", "vs_sim.states", "vs_sim.threads", "vs_sim.trace", "vs_sim.virtual", "vs_sim.waits"]
 
 # Durable log streams for humans. Layer `logs`, above every library, so no library can
 # import it. `vs_logs.api` (the writer) is open to the product; `vs_logs.read` only to
@@ -912,7 +917,7 @@ depends_on = ["vibesys", "vibesys.run.measurement_events", "vs_core", "vs_logs",
 [[modules]]
 path = "vs_dst"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_core", "vs_project", "vs_runtime", "vs_sim.api", "vs_sim.api.testing"]
+depends_on = ["vs_core", "vs_project", "vs_proto", "vs_runlog", "vs_runtime", "vs_sim.api", "vs_sim.api.testing"]
 
 [[modules]]
 path = "vs_sim.blocking"
@@ -980,9 +985,19 @@ layer = "prompts_and_lower_libs"
 depends_on = []
 
 [[modules]]
+path = "vs_sim.exit_wait"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_sim.exit_wait_contracts"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_sim.exit_wait", "vs_sim.waits"]
+
+[[modules]]
 path = "vs_sim.processes"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sim.output"]
+depends_on = ["vs_sim.exit_wait", "vs_sim.output", "vs_sim.process_table"]
 
 [[modules]]
 path = "vs_sim.randomness"
@@ -1442,7 +1457,7 @@ expose = ["NativeProfilerPreflight", "ProfilerPreflight", "SessionAgents", "Sess
 [[modules]]
 path = "vs_core"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_proto", "vs_core._corevalue", "vs_core._generated", "vs_core._dispatch_episode", "vs_core._session_checkpoints", "vs_core._session_rows", "vs_core._session_scope", "vs_core._turn_outcomes", "vs_core._proofs", "vs_core._waits", "vs_core.types", "vs_core.types.common", "vs_core._values", "vs_core._outcomes", "vs_core._generated.vibesys.core.v1.common_cv", "vs_core._generated.vibesys.core.v1.vocabulary_cv"]
+depends_on = ["vs_proto", "vs_decode.api", "vs_core._corevalue", "vs_core._generated", "vs_core._dispatch_episode", "vs_core._session_checkpoints", "vs_core._session_rows", "vs_core._session_scope", "vs_core._turn_outcomes", "vs_core._proofs", "vs_core._waits", "vs_core.types", "vs_core.types.common", "vs_core._values", "vs_core._outcomes", "vs_core._generated.vibesys.core.v1.common_cv", "vs_core._generated.vibesys.core.v1.vocabulary_cv"]
 
 [[interfaces]]
 from = ["vs_core"]
@@ -1491,7 +1506,7 @@ depends_on = ["vs_core.types", "vs_core.types.common", "vs_core._values"]
 
 [[interfaces]]
 from = ["vs_core._proofs"]
-expose = ["Mismatch", "Missing", "ProofField", "ProofReason", "Proven", "Verdict", "accepted_receipt_for", "blocked_unnamed", "admission_remaining", "committed_stop", "continues_admitted_work", "current_admission", "current_closure", "dependencies_for", "dependency_failed", "descriptor_matches", "draining", "fresh_observation", "invocation_for", "nonempty_required", "observation_for", "occupied_episode", "operation_for", "released_owner", "request_dependency_status", "request_matches", "requested_stop_mode", "resolved_observation", "stop_mode", "submission_budget_for"]
+expose = ["Mismatch", "Missing", "ProofField", "ProofReason", "Proven", "Verdict", "accepted_receipt_for", "blocked_unnamed", "admission_remaining", "admitted_work_proceeds", "committed_stop", "continues_admitted_work", "current_admission", "current_closure", "dependencies_for", "dependency_failed", "descriptor_matches", "fresh_observation", "invocation_for", "nonempty_required", "observation_for", "occupied_episode", "operation_for", "released_owner", "request_dependency_status", "request_matches", "requested_stop_mode", "resolved_observation", "stop_draining", "stop_mode", "submission_budget_for"]
 
 [[modules]]
 path = "vs_core.types"
@@ -2131,11 +2146,14 @@ depends_on = ["vibesys.fact_import", "vibesys.fact_import.reader"]
 
 [[modules]]
 path = "vibesys.api.host_operations"
-depends_on = ["vs_proto", "vibesys.api.host_operations._candidate", "vibesys.api.host_operations._compute", "vibesys.api.host_operations._handlers", "vibesys.api.host_operations._login", "vibesys.api.host_operations._project", "vibesys.api.host_operations._reads", "vibesys.api.host_operations._start"]
+depends_on = ["vs_proto", "vibesys.api.host_operations._candidate", "vibesys.api.host_operations._compute", "vibesys.api.host_operations._frames", "vibesys.api.host_operations._handlers", "vibesys.api.host_operations._login", "vibesys.api.host_operations._project", "vibesys.api.host_operations._reads", "vibesys.api.host_operations._start"]
 
 [[interfaces]]
+# One module per family of host operations, so a process imports only the family it serves:
+# `reads` (registered reads), `saved_runs` (the run-listing stream), `candidate` (candidate
+# inspection) and `api` (the admitted workflows).
 from = ["vibesys.api.host_operations"]
-expose = ["api", "api\\..*"]
+expose = ["api", "api\\..*", "reads", "saved_runs", "candidate"]
 
 [[modules]]
 path = "vibesys.api.host_operations._candidate"
@@ -2146,8 +2164,12 @@ path = "vibesys.api.host_operations._handlers"
 depends_on = ["vs_proto", "vibesys.api.host_operations._reads"]
 
 [[modules]]
+path = "vibesys.api.host_operations._frames"
+depends_on = []
+
+[[modules]]
 path = "vibesys.api.host_operations._login"
-depends_on = ["vs_proto"]
+depends_on = ["vs_proto", "vibesys.api.host_operations._frames"]
 
 [[modules]]
 path = "vibesys.api.host_operations._start"
@@ -2183,11 +2205,11 @@ expose = ["MIN_CHECKOUT_VERSION"]
 
 [[modules]]
 path = "server.host_saved_runs"
-depends_on = ["vibesys.api.transport", "vs_project", "vs_proto", "vs_runlog", "vs_sim.api"]
+depends_on = ["server.host_run_reads", "vibesys.api.transport", "vs_project", "vs_proto", "vs_runlog", "vs_sim.api"]
 
 [[interfaces]]
 from = ["server.host_saved_runs"]
-expose = ["page_saved_runs"]
+expose = ["saved_run_rows"]
 
 [[modules]]
 path = "vibesys.api.host_terminate"
@@ -2200,7 +2222,7 @@ expose = ["pause_now", "serve_terminate", "terminate_run"]
 
 [[modules]]
 path = "server.host_operation_reads"
-depends_on = ["server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_envelope", "server.host_examples", "server.host_machine_facts", "vs_proto", "vibesys.api.host_operations", "server.host_run_reads", "server.host_run_wire", "server.host_run_summary", "server.registry", "server.run_summary", "vs_sim.api"]
+depends_on = ["server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_envelope", "server.host_examples", "server.host_machine_facts", "vs_proto", "vibesys.api.host_operations", "server.host_run_reads", "server.host_run_wire", "server.host_run_summary", "server.host_saved_runs", "server", "server.registry", "server.run_summary", "vs_sim.api"]
 
 [[interfaces]]
 from = ["server.host_operation_reads"]
@@ -2214,7 +2236,7 @@ depends_on = ["server.host_api", "server.host_envelope", "server.host_examples",
 
 [[interfaces]]
 from = ["server.host_run_reads"]
-expose = ["ProjectRun", "RunProjects", "RunFacts", "run_summaries", "project_runs", "usage_window_reply"]
+expose = ["ProjectRun", "RunProjects", "RunFacts", "run_summaries", "project_runs", "named_run_digests", "usage_window_reply"]
 
 [[modules]]
 # The digests and the usage window restated as the registered reads' messages.

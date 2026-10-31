@@ -212,7 +212,9 @@ class _CountingRepositories:
         return self._fake.repository(root, faults)
 
 
-def test_one_channel_looks_a_run_up_once_however_many_pages_it_reads(tmp_path: Path) -> None:
+def test_reading_a_journal_opens_no_repository_however_many_pages_it_reads(
+    tmp_path: Path,
+) -> None:
     project = project_with_run(tmp_path / "proj", _RUN_ID)
     journal = Project.log_directory_for(project.resolve(), _RUN_ID) / RUN_EVENTS_FILE
     journal.parent.mkdir(parents=True, exist_ok=True)
@@ -223,15 +225,14 @@ def test_one_channel_looks_a_run_up_once_however_many_pages_it_reads(tmp_path: P
     for from_sequence in (1, 3, 5, 7):
         projects.run_events(project, _RUN_ID, from_sequence, 2, with_totals=True)
 
-    assert repositories.opened == 1
+    assert repositories.opened == 0
 
 
 def test_a_run_not_found_is_looked_up_again_so_one_that_starts_later_is_found(
     tmp_path: Path,
 ) -> None:
     project = project_with_run(tmp_path / "proj", _RUN_ID)
-    repositories = _CountingRepositories()
-    projects = FileProjects(repositories, SimThreads())
+    projects = FileProjects(_CountingRepositories(), SimThreads())
     other = "20261010-120000-22222222-other"
 
     for _attempt in range(2):
@@ -239,7 +240,11 @@ def test_a_run_not_found_is_looked_up_again_so_one_that_starts_later_is_found(
             projects.run_events(project, other, 1, 2, with_totals=False)
         assert refused.value.code is HelperErrorCode.UNKNOWN_RUN
 
-    assert repositories.opened == 2
+    journal = Project.log_directory_for(project.resolve(), other) / RUN_EVENTS_FILE
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    journal.write_bytes(b"".join(_lines([_event(1)])))
+
+    assert projects.run_events(project, other, 1, 2, with_totals=False) is not None
 
 
 def test_totals_are_named_only_for_a_request_that_asked_for_them(tmp_path: Path) -> None:

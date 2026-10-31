@@ -13,6 +13,7 @@ from tempfile import TemporaryDirectory
 import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
+from tests.support.golden_regeneration import REGENERATE
 
 from vibesys.api.transport import ConversionStatus, convert_run, convert_runs
 from vibesys.events import (
@@ -695,7 +696,7 @@ def test_gateway_conversion_fixture_regenerates_identically(
         saved = (directory / name).read_bytes()
         message = (
             f"proto/testdata/conversion/{name} differs; inspect the difference, then regenerate "
-            "with: uv run --locked python proto/testdata/conversion/generate.py"
+            f"with: {REGENERATE}"
         )
         if name.endswith(".gz"):
             assert gzip.decompress(saved) == gzip.decompress(payload), message

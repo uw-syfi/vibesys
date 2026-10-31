@@ -18,12 +18,20 @@ type Operation struct {
 	ID, RequestTag, ResponseTag uint32
 	Name                        string
 	Cap, Grace, FirstEvent      time.Duration
+	Progress                    time.Duration
 	Effect                      hostv1.OperationEffect
 	Retry                       hostv1.Retry
 	Executor                    hostv1.Executor
 	Cardinality                 hostv1.Cardinality
 	NewRequest, NewResponse     func() proto.Message
 	Correlations                [][2][]string
+}
+
+// FrameTiming is how often the gateway speaks on any subscription and how long a
+// client waits for it. The descriptor states both, and every language reads them
+// from its generated table.
+type FrameTiming struct {
+	Heartbeat, Lease time.Duration
 }
 
 // TopicPolicy is one subscription topic's fixed cadence and bounds. Zero Cadence

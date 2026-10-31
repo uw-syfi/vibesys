@@ -36,7 +36,7 @@ export {
   gatewayTarget,
   provisionGateway,
 } from './shell/gateway-provision.js';
-export {GrpcDecoder, grpcFrame} from './shell/grpc.js';
+export {CallTimedOut, GrpcDecoder, grpcFrame} from './shell/grpc.js';
 export {ConnectionError, HelperRequestError} from './shell/helper-channel.js';
 export {HostConnection, type LogsLease} from './shell/host-connection.js';
 export {HOST_UNSUPPORTED_MESSAGE, isHostUnsupported} from './shell/host-unsupported.js';
@@ -67,7 +67,12 @@ export {
   registryRunReads,
   usageWindowEntry,
 } from './shell/registry-run-reads.js';
-export {type RegistrySavedRuns, registrySavedRuns} from './shell/registry-saved-runs.js';
+export {
+  type RegistrySavedRuns,
+  registrySavedRuns,
+  SavedRunsInterrupted,
+  type SavedRunsPorts,
+} from './shell/registry-saved-runs.js';
 export {
   type CompletedPaths,
   type InspectedCandidate,
@@ -89,4 +94,10 @@ export {
   runWatch,
   type WatchedRun,
 } from './shell/run-watch.js';
+export {
+  SUBSCRIPTION_LINGER_MS,
+  SubscriptionFailed,
+  type SubscriptionStreams,
+  Subscriptions,
+} from './shell/subscriptions.js';
 export type {CheckoutProblem, Phase} from './state/host-connection.js';

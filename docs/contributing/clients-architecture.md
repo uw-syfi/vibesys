@@ -52,6 +52,10 @@ clients/
   libs/run-session/ @vibesys/run-session      one live run: runStep, the session machine, its
                                               ports, connectRun, WebSession    -> contracts, run-state,
                                                                        transport, store, machine
+  libs/subscription/ @vibesys/subscription    a host's live keyed state as one bounded state type
+                                              (connecting, live, stale, failed), its fold, the machine
+                                              that owns every wait, and a window's source of it
+                                                                                 -> hosts, machine, proto
   libs/run-fixtures/ @vibesys/run-fixtures   replayable run fixtures (recorded, scrubbed of hosts,
                                               paths and user names, or synthetic) for e2e harnesses
                                               and screen checks; dev only            -> contracts
@@ -115,7 +119,7 @@ cycles, and forbids feature-to-feature and app-to-app edges, because peers share
 | --- | --- | --- | --- |
 | `foundation` | 0 | `contracts`, `ui`, `store`, `request-identity` | nothing in the workspace |
 | `core` | 1 | `run-state`, `transport`, `hosts`, `machine`, `problems` | foundation |
-| `domain` | 2 | `runs`, `run-session`, `run-history`, `run-fixtures` | foundation, core |
+| `domain` | 2 | `runs`, `run-session`, `subscription`, `run-history`, `run-fixtures` | foundation, core |
 | `service` | 3 | `ipc`, `connection`, `settings` | foundation, core, domain |
 | `feature` | 4 | `feature-*` | anything below |
 | `app` | 5 | `apps/*` | anything below |
@@ -234,7 +238,7 @@ checker (`EXTERNAL_DEPENDENCIES`, rule `external-dependencies`):
 | --- | --- |
 | `react`, `react-dom` (and subpaths) | `dom` entries: `ui`, features' `./renderer`, browser and renderer apps |
 | `electron` | `node` and `preload` entries of features (`./main`) and apps (`desktop-main`) |
-| `xstate` | features' `./state` and `./renderer`; `MACHINE_PACKAGES`: `machine`, `connection` (its host connection machine), and `run-session` (its session machine). Never `store`, `run-state`, `hosts`, `runs`, `ui`, `contracts`, `transport`, or `ipc` |
+| `xstate` | features' `./state` and `./renderer`; `MACHINE_PACKAGES`: `machine`, `connection` (its host connection machine), `run-session` (its session machine), and `subscription` (its subscription machine). Never `store`, `run-state`, `hosts`, `runs`, `ui`, `contracts`, `transport`, or `ipc` |
 | Node builtins (`node:*` and bare names) | `node` entries |
 
 A package that declares one of them in `dependencies` must have an entry allowed to use it. Knip
@@ -402,11 +406,19 @@ timer of its own.
 Enforced: `@vibesys/ui` has no `Banner`; no stylesheet rule paints a panel with the tone fills
 (`--banner-*-bg`, `--chip-*-bg`, or a mix of a status color) unless it is on the allow-list of
 `tone-fills.test.ts`; the `banner` screen check fails an element at least half as wide as the
-main pane that is filled with a status color, whatever it is called; a feature's `./state` is the
-only place a problem's words are written; and `toasts.spec.ts` shows a toast on every top-level
+main pane that is filled with a status color, whatever it is called; the `status-row` screen check
+fails one that is not filled: an alert, a status or a live region outside a toast, or `Text` in a
+status tone, whose words reach half the pane (it measures the words, not the box, so a figure a flex
+column stretches or a live region around other content is not one), and a chip whose box reaches half
+the pane (a chip must be as wide as its label); an announced element that holds a chip is a status
+word with its detail, however long the detail wraps; a
+feature's `./state` is the only place a problem's words are written; and `toasts.spec.ts` shows a toast on every top-level
 screen at the smallest and a wide window, with each platform's window controls, and checks it
 sits below the header row and covers nothing in it. Unenforced: whether a message is a passing
-event or a problem with a thing needs a reader; and a new screen that puts its title row in the
+event or a problem with a thing needs a reader; a lone status word on a line of its own (it cannot be
+told from a figure or an empty-state word), and a strip that is neither filled, announced nor written
+in a status tone (a bordered box with a status dot, a chevron and a sentence), are found by no check,
+because the screens' data rows have the same parts; and a new screen that puts its title row in the
 body instead of the `header` slot gets toasts over that row, until it is added to the spec's
 screens and given a `header`.
 
@@ -429,6 +441,9 @@ the token test still holds every theme to the contrast floors. The baselines are
 pnpm --filter @vibesys/app-ui-gallery update:screenshots   # rewrite the baselines (needs Docker)
 pnpm --filter @vibesys/app-ui-gallery test:e2e:linux       # compare against them locally
 ```
+
+`./scripts/regenerate_goldens.sh` does not rewrite these baselines: they need Docker and follow the UI, not
+the schema. Run `update:screenshots` yourself after a change that moves a rendering.
 
 A baseline update rewrites only the screens whose rendering changed: the suite launches
 Chromium with the flags in `DETERMINISTIC_RENDERING` (`playwright.config.ts`), which fix the
@@ -520,6 +535,33 @@ Components, under `renderer/ui/`:
 
 To see a change on a recorded run with hot reload, use the fixture dev app
 (`pnpm --filter @vibesys/app-desktop-shell dev:fixture`, see the `verify-desktop-ui` skill).
+
+The native replays that the run page tests and the desktop e2e read (the records the shipping Python
+projector makes of each declaration in `libs/run-fixtures/src/data` and
+`apps/desktop-shell/e2e/scenarios`) are not committed. `tests/support/derived_replays.py` stores them
+under a hash of every file they can derive from: the roots and files of the `derived_replays`
+component in `.repoctl/components.toml` (whole source packages the projection imports, the lock and
+project files, the generators) and the Python version. The key errs wide because regenerating takes
+seconds. CI selects the client jobs on a change to the same component, so a projector, schema or
+library change the projection runs still runs the client tests that read the replays. The thirteen
+libraries the projection only imports (the runtime, the sandbox, the agent library and their kin)
+are entries written `{ path = "...", selects = false }`: they key the set and regenerate it, but a
+change to one selects no client job, because the projection snapshots and the conversion golden in
+the Python job still see what it does to a replay. A stale set is never read, and two pull requests
+cannot conflict on them.
+
+The `test` script of `run-page` and the `e2e`, `e2e:linux` and `dev:fixture` scripts of the desktop
+shell start through `tools/scripts/with_derived_replays.mjs`, which makes the set (about 15 s the
+first time for each key, shared by every checkout on the machine; 0.1 s after) and exports its
+directory, and forwards SIGINT, SIGTERM and SIGHUP to what it runs. This is a prerequisite a
+TypeScript-only checkout did not have: `uv` and a synced Python environment (`uv sync --dev`). A
+test reads a replay through `@vibesys/run-fixtures/derived`, which fails naming the script when it
+was skipped. A fixture that differs from its declaration is projected by the same projector into
+`variants/` inside the set. `e2e:linux` makes the set on the host and mounts it read-only into the
+Linux image, which has no `uv`; a spec that builds such a fixture needs one host run first. Because a projector change no
+longer shows as a changed file, `tests/vibesys/run/projection_shapes` commits a text snapshot of
+what each scenario projects to (record kinds and span label kinds, with counts). Only the goldens
+that pin a contract stay committed (`proto/testdata`), rewritten by `./scripts/regenerate_goldens.sh`.
 
 ## Display names
 
@@ -639,6 +681,7 @@ is tracked in #1969.
 | `run-session`'s session lifecycle (`sessionMachine`, `WebSession`) | machine | migrated (#2071) |
 | `feature-run-control`'s commands and banner | machine | migrated (#1950) |
 | `@vibesys/connection`'s `HostConnection` | machine | migrated (phase 8) |
+| `@vibesys/subscription`'s `subscriptionMachine` (one per host and topic instance, in main) | machine | new (#3498) |
 
 ## Build model
 
@@ -730,6 +773,7 @@ names a missing or extra one.
 | `@vibesys/runs` | domain | exists: run, task, and instance ids, bounded launch-profile values and optimistic mutations, a recent run's status from its host's listing, the exact-resume policy, the stop flow; depends on `contracts`, `hosts` | domain split (#1949), launch profiles (#2718) |
 | `@vibesys/machine` | core | exists: `actorStore`, `clockFrom`, `unprovided` (`.`) and `checkMachine` (`./testing`); domain-free | state architecture (#1950) |
 | `@vibesys/run-session` | domain | exists: the run fold's wiring (`runStep`), the session lifecycle (`sessionMachine`, three parallel regions: start-up, recovery, and the fenced replacement snapshot), its ports, the run connection over a control transport (`connectRun`), and `WebSession`, with `./testing` (an in-memory control transport and page lifecycle, and `sessionWith`) | domain split (#1949) |
+| `@vibesys/subscription` | domain | exists (`.` and `./testing`, `neutral`; `./contract`, `node`: the `SubscriptionPort` contract suite every implementation passes): a host's keyed live state as one closed state type that cannot express loading with no end, its fold (a snapshot swapped in at `synced`, so a removed key leaves no ghost), `subscriptionMachine` (the stream, its lease and its backoff, bounded by `failureBoundMs`), the topic registry, and `subscriptionSource` for a window's `useSyncExternalStore`; depends on `hosts`, `machine`, `proto`. `@vibesys/connection`'s `Subscriptions` runs it in main, and `@vibesys/ipc` carries it to windows | live subscriptions (#3498) |
 | `@vibesys/entities` | domain | deleted: split into `hosts` and `runs`; task arguments (`shellWords`) lived in `@vibesys/feature-start-run`, deleted with the Start sheet, and are now owned by `runs` | domain split (#1949), launch profiles (#2718) |
 | `@vibesys/ipc` | service | exists: the run connection's port messages and their validation, and the shell's channels, events, and payloads, with each feature's requests (channels, bridge slice, and the parser the main process runs) in `welcome/<feature>.ts` (the surface's historical name); depends on `hosts`, `runs` | domain packages (phase 5 of #1878); per-feature parsers with phase 8 |
 | `@vibesys/connection` | service | exists (`.`, `node`): the connection manager (`ConnectionManager`, `HostConnection`: an XState machine in `state/` and a `shell/` owning the links, channels, and the machine's clock), the ssh and local links, the bootstrap, and `connectionStatus`, with `./testing` (`FakeHelper`, `FakeLink`, and the `HostConnection` contract suite); depends on `contracts`, `transport`, `hosts` | desktop main process (phase 8 of #1878) |
@@ -738,7 +782,7 @@ names a missing or extra one.
 | `apps/desktop-renderer` | app | deleted at the cutover (#2850): the welcome view. `apps/desktop-shell` is the one desktop renderer | desktop renderer (phase 7 of #1878) |
 | `@vibesys/feature-app-shell` | feature | exists: the sidebar store (Live, Recent with the last 20 and Show all, Machines, the selected screen) over the hosts' listings, Recent and archived runs, with seeded-sequence invariant tests; the shell layout, the All runs screen (every run of the projects the app has met on each connected machine, grouped by machine) and the placeholder screens (`./renderer`); the run notices a listing calls for, raised by `./main` when Settings enables them | redesign (#2842) |
 | `@vibesys/feature-settings` | feature | exists: the Settings store (appearance and notifications, saved under tokens) and screen; `./main` answers the preference requests and keeps Electron's `nativeTheme` on the appearance's mode | redesign (#2842) |
-| `@vibesys/feature-machines` | feature | exists: the Machines store (the saved machines, each one's status a selector over its last report: Ready, Checkout not found, Sign in, or Can't connect; the Add form and the checkout form, whose path suggestions carry each checkout's version), with seeded-sequence invariant tests, and the screen (`./renderer`); `./main` lists the machines from `hosts.json`, reports a machine's facts from its connection's state and `machine.describe`, inspects paths (`checkout.inspect`) and removes a machine. Adding a machine or changing its checkout is `feature-hosts`' checked `setCheckout` | redesign (#2843) |
+| `@vibesys/feature-machines` | feature | exists: the Machines store (the saved machines, each one's status a selector over its last report: Ready, Checkout not found, Sign in, or Can't connect; the Add form and the checkout form, whose path suggestions carry each checkout's version), with seeded-sequence invariant tests, and the screen (`./renderer`), each card reading its host's live CPU, memory and GPU through a `machine_stats` subscription; `./main` lists the machines from `hosts.json`, reports a machine's facts from its connection's state and `machine.describe`, inspects paths (`checkout.inspect`) and removes a machine. Adding a machine or changing its checkout is `feature-hosts`' checked `setCheckout` | redesign (#2843) |
 | `@vibesys/feature-new-run` | feature | exists: New run as a guided form, one question to a page (`./state`: the answers and the steps they ask as a plain fold, the example catalogue's questions, the inputs a run starts with and their key, the draft a window keeps) and its machine (parallel regions loading what the machine offers, the project's tasks and the debounced "Ready to start" checks, with model tests); the pages and its store (`./renderer`); `./main` answers its requests with one host helper method each and records a started run in Recent | redesign (#2844) |
 | `@vibesys/feature-run-chat` | feature | exists: a run's chat panel. `./state`: the panel machine (open or closed, the thread shown, the harness choice, the composer, creating a thread and asking it), the steer card machine (draft, send, withdraw) with its delivery fold (`foldDelivery`; `deliveriesOf` is the one place the server's `steer_delivery` steps become card events), and selectors over the run fold for threads and items. `./renderer`: `useRunChat` over injected ports (the live session's chat and controls, the host's harness catalogue) and the panel UI. `run-page` hosts only the Chat button and the dock slot; `apps/desktop-shell` composes the two | chat panel (#3224) |
 | `apps/desktop-shell` | app | exists: the desktop window's composition (`shell.html`), the one page every window loads (a run window adds its run to the query); its Playwright journeys run against a Fake of the bridge | redesign (#2842); the only renderer since the cutover (#2850) |

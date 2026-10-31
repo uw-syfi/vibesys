@@ -6,6 +6,7 @@ versioned by ``SCHEMA_VERSION``, until those values are proto messages (run-reco
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, assert_never
 
 from protobuf import Oneof
@@ -15,17 +16,21 @@ from vs_proto.api import (
     AttemptInterrupted,
     CoreInput,
     InterruptionReason,
+    RunStarted,
     StepCancelReason,
     StepFinished,
     StepStarted,
+    StrategyAdvanced,
 )
 from vs_proto.api import (
     RunEnded as RunEndedRecord,
 )
 
+from ._refusal import RecordRefusedError, RefusalReason
 from .types.common import Value
-from .types.kernel import CoreEvent
+from .types.kernel import CoreEvent, CoreState
 from .types.records import Request, RequestObserved
+from .types.search import Discarded, Event
 from .types.settlement import RunResultProposal
 from .types.steps import (
     Cancelled,
@@ -36,6 +41,7 @@ from .types.steps import (
     OwnerEvent,
     StepResult,
 )
+from .types.strategy import Decision
 
 if TYPE_CHECKING:
     from ._actions import End, Run
@@ -53,10 +59,22 @@ class _FinishedBody(Value):
     owner_events: tuple[OwnerEvent, ...] = ()
 
 
+class _FoldBody(Value):
+    """A cached fold: core's state, and the events the search has yet to hear."""
+
+    schema_version: int = SCHEMA_VERSION
+    state: CoreState
+    events: tuple[Event, ...] = ()
+    discarded: tuple[Discarded, ...] = ()
+
+
 _EVENT = TypeAdapter(CoreEvent)
+_STATE = TypeAdapter(CoreState)
+_DECISIONS = TypeAdapter(tuple[Decision, ...])
 _REQUEST = TypeAdapter(Request)
 _FINISHED = TypeAdapter(_FinishedBody)
 _RESULT = TypeAdapter(RunResultProposal)
+_FOLD = TypeAdapter(_FoldBody)
 
 _CANCEL_REASONS = {
     CancelReason.DEADLINE: StepCancelReason.DEADLINE,
@@ -78,6 +96,123 @@ _INTERRUPTION_NAMES = {stored: why for why, stored in _INTERRUPTIONS.items()}
 def input_message(event: CoreEvent) -> CoreInput:
     """The record body of one external input core consumed."""
     return CoreInput(schema_version=SCHEMA_VERSION, event=_EVENT.dump_json(event))
+
+
+def seed_message(state: CoreState) -> RunStarted:
+    """The record body that starts a run's log: the state its fold begins from."""
+    return RunStarted(schema_version=SCHEMA_VERSION, state=_STATE.dump_json(state))
+
+
+def decode_seed(message: RunStarted, registry: OperationRegistry | None) -> CoreState:
+    """The state a ``RunStarted`` begins the fold from, refused when written by another encoding."""
+    _same_encoding(message.schema_version)
+    return _STATE.validate_json(message.state, context=_context(registry))
+
+
+@dataclass(frozen=True)
+class SavedRun:
+    """A run an older version saved, as it enters the log: what its fold starts from.
+
+    ``inputs`` are the owner events the saved run had received and not yet applied. ``strategy``
+    is the search's whole state in the driver's own encoding, ``wakes`` and ``held`` what it had
+    asked for and could not hand core yet.
+    """
+
+    state: CoreState
+    envelope_version: int
+    strategy: bytes
+    inputs: tuple[CoreEvent, ...] = ()
+    wakes: tuple[float, ...] = ()
+    held: tuple[Decision, ...] = ()
+
+
+@dataclass(frozen=True)
+class EncodedSavedRun:
+    """A saved run as the canonical JSON of its values, the form a snapshot record packs.
+
+    Packing it into a record and compressing it are the log writer's and reader's (a saved state is
+    megabytes of JSON); this is the part that is a function of core's own values.
+    """
+
+    envelope_version: int
+    state: bytes
+    strategy: bytes
+    inputs: tuple[bytes, ...] = ()
+    wakes: tuple[float, ...] = ()
+    held: bytes = b""
+    schema_version: int = SCHEMA_VERSION
+
+
+def encode_saved(saved: SavedRun) -> EncodedSavedRun:
+    """The canonical JSON of the values of ``saved``."""
+    return EncodedSavedRun(
+        envelope_version=saved.envelope_version,
+        state=_STATE.dump_json(saved.state),
+        strategy=saved.strategy,
+        inputs=tuple(_EVENT.dump_json(event) for event in saved.inputs),
+        wakes=saved.wakes,
+        held=_DECISIONS.dump_json(saved.held),
+    )
+
+
+def decode_saved(encoded: EncodedSavedRun, registry: OperationRegistry | None) -> SavedRun:
+    """The run ``encode_saved`` wrote, refused when written by another encoding."""
+    _same_encoding(encoded.schema_version)
+    context = _context(registry)
+    return SavedRun(
+        state=_STATE.validate_json(encoded.state, context=context),
+        envelope_version=encoded.envelope_version,
+        strategy=encoded.strategy,
+        inputs=tuple(_EVENT.validate_json(event, context=context) for event in encoded.inputs),
+        wakes=encoded.wakes,
+        held=_DECISIONS.validate_json(encoded.held, context=context) if encoded.held else (),
+    )
+
+
+def encode_fold(
+    state: CoreState, events: tuple[Event, ...], discarded: tuple[Discarded, ...]
+) -> bytes:
+    """The canonical JSON of a fold: a state and what the search still has to hear."""
+    return _FOLD.dump_json(_FoldBody(state=state, events=events, discarded=discarded))
+
+
+def decode_fold(
+    data: bytes, registry: OperationRegistry | None
+) -> tuple[CoreState, tuple[Event, ...], tuple[Discarded, ...]]:
+    """A fold written by ``encode_fold``, refused when another encoding or damaged wrote it."""
+    body = _FOLD.validate_json(data, context=_context(registry))
+    _same_encoding(body.schema_version)
+    return body.state, body.events, body.discarded
+
+
+def encode_event(event: CoreEvent) -> bytes:
+    """The canonical JSON of one core event."""
+    return _EVENT.dump_json(event)
+
+
+def encode_held(decisions: tuple[Decision, ...]) -> bytes:
+    """The canonical JSON of the decisions a search holds."""
+    return _DECISIONS.dump_json(decisions)
+
+
+def decode_held(
+    message: StrategyAdvanced, registry: OperationRegistry | None
+) -> tuple[Decision, ...]:
+    """The decisions an advance record says the search holds."""
+    _same_encoding(message.schema_version)
+    if not message.held:
+        return ()
+    return _DECISIONS.validate_json(message.held, context=_context(registry))
+
+
+def decode_proposals(
+    message: StrategyAdvanced, registry: OperationRegistry | None
+) -> tuple[CoreEvent, ...]:
+    """The proposals core took in an advance, in the order it took them."""
+    _same_encoding(message.schema_version)
+    return tuple(
+        _EVENT.validate_json(proposal, context=_context(registry)) for proposal in message.proposals
+    )
 
 
 def started_message(run: Run) -> StepStarted:
@@ -122,7 +257,7 @@ def _known[S, T](names: dict[S, T], stored: S, what: str) -> T:
         return names[stored]
     except KeyError:
         message = f"the log holds {what} ({stored!r}) this version does not know"
-        raise ValueError(message) from None
+        raise RecordRefusedError(RefusalReason.UNREADABLE, message) from None
 
 
 def ended_message(end: End) -> RunEndedRecord:
@@ -165,13 +300,13 @@ def decode_result(message: StepFinished, registry: OperationRegistry | None) -> 
             return Cancelled(reason=_known(_CANCEL_NAMES, reason, "a cancel reason"))
         case _:
             message_ = "a step result names finished, failed or cancelled"
-            raise ValueError(message_)
+            raise RecordRefusedError(RefusalReason.UNREADABLE, message_)
 
 
 def _same_encoding(version: int) -> None:
     if version != SCHEMA_VERSION:
         message = f"core record encoding version {version} is not {SCHEMA_VERSION}"
-        raise ValueError(message)
+        raise RecordRefusedError(RefusalReason.UNREADABLE, message)
 
 
 def _context(registry: OperationRegistry | None) -> dict[str, object]:

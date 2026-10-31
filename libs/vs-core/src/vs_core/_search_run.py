@@ -15,9 +15,8 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Protocol
 
 from ._registry import ContractError
-from ._run_park import drain_bound
 from ._search_events import run_view, translate
-from ._validation import takes_command
+from ._validation import admits_command
 from .types.common import THIS_RUN, RunStatus, Scope
 from .types.kernel import ProposalSubmitted
 from .types.records import RecoveryPhase
@@ -41,7 +40,7 @@ def deferred(core: CoreState, decision: Decision) -> bool:
     """Whether core cannot take ``decision`` yet but will later, so the shell holds it.
 
     Until recovery is ready core takes no decision. While the operator has the run paused it
-    takes only what a paused run accepts (``takes_command``): the rest waits for the resume
+    takes only what a paused run accepts (``admits_command``): the rest waits for the resume
     instead of reaching the search as a refusal, which would end the search's work.
     """
     if isinstance(decision, WakeAt):
@@ -49,10 +48,11 @@ def deferred(core: CoreState, decision: Decision) -> bool:
     if core.records.recovery.phase != RecoveryPhase.READY:
         return True
     command = decision.request if isinstance(decision, Wait) else decision
-    return (
-        core.run.status in (RunStatus.DRAINING, RunStatus.PARKED)
-        and drain_bound(core, command) is None
-    ) or (core.run.status == RunStatus.PAUSED and not takes_command(core.run, command))
+    return core.run.status in (
+        RunStatus.PAUSED,
+        RunStatus.DRAINING,
+        RunStatus.PARKED,
+    ) and not admits_command(core, command)
 
 
 def check_decisions(decisions: object) -> tuple[Decision, ...]:
@@ -114,6 +114,26 @@ class SearchDriver[S: StrategyState, C](Protocol):
 
     def update(self, state: S, event: Event, view: RunView) -> tuple[S, list[Decision]]:
         """Deliver one event."""
+        ...
+
+    def awaits(self, state: S, decision: Decision) -> bool:
+        """Whether the search in ``state`` still waits for the answer to ``decision``.
+
+        False for a decision of an incarnation of the search that a restart replaced: it asks
+        again for what it needs, so the old decision, held or not, no longer stands.
+        """
+        ...
+
+    def changes(self, before: S, after: S) -> bytes | None:
+        """What ``after`` adds to ``before``, for the log; None when it does not continue it."""
+        ...
+
+    def extend(self, state: S, changes: bytes) -> S:
+        """``state`` with ``changes`` applied, as a process that reads the log builds it."""
+        ...
+
+    def resume(self, state: S) -> S:
+        """``state`` as the process that logged it left it, rebuilding what the log does not keep."""
         ...
 
 

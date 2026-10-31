@@ -22,12 +22,17 @@ from vs_core.api.recovery import (
     Action,
     Cancel,
     Cancelled,
+    CancelReason,
     End,
     Finished,
     Interruption,
+    RecordRefusal,
+    RecordRefusedError,
+    RefusalReason,
     Run,
     Settle,
     StepEffect,
+    Tick,
     Wait,
     decide,
     ended_message,
@@ -38,6 +43,7 @@ from vs_core.api.recovery import (
     interruption_of,
     may_start,
     request_effect,
+    start_due,
     started_message,
 )
 from vs_proto.api import EpochStarted, Oneof, Record, Timestamp
@@ -71,7 +77,7 @@ class RunDidNotRestError(AssertionError):
 class RefusedRecordError(AssertionError):
     """The fold refused the record of an action `decide` returned."""
 
-    def __init__(self, action: Action, error: ValueError) -> None:
+    def __init__(self, action: Action, error: RecordRefusedError) -> None:
         super().__init__(f"the fold refused the record of {action!r}: {error}")
 
 
@@ -115,9 +121,16 @@ class Loop:
         """The process died, or a new one started: its first record opens the next epoch.
 
         What a parked run held ended with the pause, so no attempt of it is charged like a crash.
+        A step core ended itself has its result and keeps no attempt into the epoch: only the steps
+        still open are compared.
         """
         parked = self.state.run.status is core.RunStatus.PARKED
-        owed = {row.tag: row.charged - (0 if row.ended else 1) for row in self.state.steps.attempts}
+        open_steps = {r.request_id for r in self.state.records.records if r.phase in OPEN}
+        owed = {
+            row.tag: row.charged - (0 if row.ended else 1)
+            for row in self.state.steps.attempts
+            if row.tag in open_steps
+        }
         self.epoch += 1
         self.add(Oneof("epoch_started", EpochStarted(epoch=self.epoch)))
         if parked:
@@ -132,23 +145,28 @@ class Loop:
             case Run():
                 return Oneof("step_started", started_message(action))
             case Cancel(tag=tag, reason=reason):
-                started = self.state.steps.of(tag)
-                attempt = 0 if started is None else started.started
-                why = interruption_of(reason)
-                if why is not None:
-                    return Oneof("attempt_interrupted", interrupted_message(tag, attempt, why))
-                return Oneof(
-                    "step_finished",
-                    finished_message(tag, attempt, Cancelled(reason=reason)),
-                )
+                return self._ended(tag, reason)
             case Settle(tag=tag, result=result):
-                started = self.state.steps.of(tag)
-                attempt = 0 if started is None else started.started
-                return Oneof("step_finished", finished_message(tag, attempt, result))
+                return Oneof("step_finished", finished_message(tag, self._attempt(tag), result))
+            case Tick(at=at):
+                return Oneof("core_input", input_message(core.ClockAdvanced(now_at=at)))
             case End():
                 return Oneof("run_ended", ended_message(action))
             case Wait():
                 return None
+
+    def _attempt(self, tag: core.RequestId) -> int:
+        started = self.state.steps.of(tag)
+        return 0 if started is None else started.started
+
+    def _ended(self, tag: core.RequestId, reason: CancelReason) -> Body:
+        """How a cancelled attempt ends: interrupted, or the step's cancelled result."""
+        why = interruption_of(reason)
+        if why is not None:
+            return Oneof("attempt_interrupted", interrupted_message(tag, self._attempt(tag), why))
+        return Oneof(
+            "step_finished", finished_message(tag, self._attempt(tag), Cancelled(reason=reason))
+        )
 
     def apply(self, action: Action) -> None:
         """Record what the loop records for ``action``; the state must move."""
@@ -162,7 +180,7 @@ class Loop:
         before = self.state
         try:
             self.add(body)
-        except ValueError as error:
+        except RecordRefusedError as error:
             raise RefusedRecordError(action, error) from error
         assert self.state != before, f"{action!r} was recorded and changed nothing"
         if isinstance(action, Run):
@@ -234,7 +252,11 @@ class Loop:
         return Finished(observation=observation)
 
     def finish_late(self, index: int) -> bool:
-        """A runner reports a finish of an attempt that was replaced; whether one could be."""
+        """A runner reports the end of an attempt that was replaced; whether one could be.
+
+        The fold refuses both ways an attempt reports its end (a finish and an interruption),
+        whether or not core ended the step itself, and the log is as it was.
+        """
         late = [
             tag
             for tag in self.running()
@@ -247,19 +269,27 @@ class Loop:
         record = self.state.records.record(tag)
         assert row is not None
         assert record is not None
-        before = self.state
-        try:
-            self.add(
-                Oneof(
-                    "step_finished",
-                    finished_message(tag, row.started - 1, self.success(tag, record.request)),
-                )
-            )
-        except ValueError:
+        stale = row.started - 1
+        reports: dict[str, Body] = {
+            "finish": Oneof(
+                "step_finished", finished_message(tag, stale, self.success(tag, record.request))
+            ),
+            "interruption": Oneof(
+                "attempt_interrupted", interrupted_message(tag, stale, Interruption.RAISED)
+            ),
+        }
+        for report, body in reports.items():
+            before = self.state
+            try:
+                self.add(body)
+            except RecordRefusedError as refused:
+                reason = refused.refusal.reason
+            else:
+                message = f"the fold took the {report} of attempt {stale} of {tag.root}"
+                raise AssertionError(message + f" while attempt {row.started} runs")
+            assert reason is RefusalReason.ATTEMPT_MISMATCH
             assert self.state == before
-            return True
-        message = f"the fold took the finish of attempt {row.started - 1} of {tag.root}"
-        raise AssertionError(message + f" while attempt {row.started} runs")
+        return True
 
     def cancel_running(self, why: Interruption) -> None:
         """The loop cancels the one running attempt and records how it ended."""
@@ -364,6 +394,36 @@ MOVES: st.SearchStrategy[Move] = st.one_of(
 )
 
 
+STOPS: st.SearchStrategy[Move] = st.one_of(
+    st.tuples(st.just("pause"), st.sampled_from([None, 1.0, 20.0])),
+    st.tuples(st.just("pause_now"), st.sampled_from([None, 1.0])),
+    st.just(("quota_pause", None)),
+)
+WORK: st.SearchStrategy[Move] = st.one_of(
+    st.just(("tick", None)),
+    st.tuples(st.just("tock"), st.sampled_from([3.0, 40.0])),
+    st.tuples(st.just("clock"), st.sampled_from([3.0, 40.0, 500.0])),
+    st.tuples(st.just("finish"), st.integers(0, 1)),
+)
+EPOCH_ENDS: st.SearchStrategy[Move] = st.sampled_from([("crash", None), ("relaunch_resume", None)])
+
+
+def epoch_scripts() -> st.SearchStrategy[list[Move]]:
+    """Work, maybe a stop, more work, the end of the epoch, then any tail.
+
+    The causes found at the edge of an epoch are two to five moves in this order, which a list of
+    moves drawn evenly from all of them rarely makes.
+    """
+    return st.builds(
+        lambda work, stop, more, end, tail: [*work, *stop, *more, end, *tail],
+        st.lists(WORK, max_size=2),
+        st.lists(STOPS, max_size=1),
+        st.lists(WORK, max_size=2),
+        EPOCH_ENDS,
+        st.lists(MOVES, max_size=3),
+    )
+
+
 def play(loop: Loop, move: Move) -> None:
     """One move: something the runners, the clock, the process or the operator does."""
     name, argument = move
@@ -452,12 +512,20 @@ def never_idle_draining(loop: Loop) -> None:
 
 
 def may_start_agrees_with_decide(loop: Loop) -> None:
-    """The step a flight asks about may start exactly when the rule would run it."""
-    runs = {a.tag for a in decide(loop.state, loop.clock) if isinstance(a, Run)}
+    """The step a flight asks about may start exactly when the rule would run it, as that run.
+
+    A step that may not is refused by one of the two reasons a race explains.
+    """
+    runs = {a.tag: a for a in decide(loop.state, loop.clock) if isinstance(a, Run)}
     for row in loop.state.records.records:
-        assert may_start(loop.state, row.request_id, loop.clock) is (row.request_id in runs), (
-            row.request_id
-        )
+        tag = row.request_id
+        due = start_due(loop.state, tag, loop.clock)
+        assert may_start(loop.state, tag, loop.clock) is (tag in runs), tag
+        if tag in runs:
+            assert due == runs[tag], tag
+        else:
+            assert isinstance(due, RecordRefusal), tag
+            assert due.reason in {RefusalReason.STEP_NOT_OPEN, RefusalReason.START_NOT_DUE}, tag
 
 
 def parked_cancels_what_runs(loop: Loop) -> None:

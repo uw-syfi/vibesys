@@ -186,15 +186,34 @@ func (g *graph) add(c component) error {
 	if _, ok := g.Components[c.ID]; ok {
 		return fmt.Errorf("duplicate component id %q", c.ID)
 	}
+	for _, entry := range c.RootEntries {
+		if entry.KeyOnly {
+			c.KeyOnlyRoots = append(c.KeyOnlyRoots, entry.Path)
+		} else {
+			c.Roots = append(c.Roots, entry.Path)
+		}
+	}
+	for _, entry := range c.FileEntries {
+		if entry.KeyOnly {
+			c.KeyOnlyFiles = append(c.KeyOnlyFiles, entry.Path)
+		} else {
+			c.Files = append(c.Files, entry.Path)
+		}
+	}
+	c.RootEntries, c.FileEntries = nil, nil
 	if c.Root != "" {
 		c.Roots = append(c.Roots, c.Root)
 	}
-	for _, x := range append(append([]string{}, c.Roots...), c.Files...) {
+	for _, x := range append(append(append(append([]string{}, c.Roots...), c.Files...), c.KeyOnlyRoots...), c.KeyOnlyFiles...) {
 		if !validPath(x) {
 			return fmt.Errorf("%s has unsafe path %q", c.ID, x)
 		}
 	}
-	for label, group := range map[string][]string{"roots": c.Roots, "files": c.Files, "dependencies": c.DependsOn, "jobs": c.Jobs} {
+	for label, group := range map[string][]string{
+		"roots":        append(append([]string{}, c.Roots...), c.KeyOnlyRoots...),
+		"files":        append(append([]string{}, c.Files...), c.KeyOnlyFiles...),
+		"dependencies": c.DependsOn, "jobs": c.Jobs,
+	} {
 		if err := unique(group, c.ID+"."+label); err != nil {
 			return err
 		}
@@ -243,7 +262,10 @@ func readCurrentPolicy(root, configPath string) (graph, error) {
 		for _, entry := range []struct {
 			key   string
 			paths []string
-		}{{"roots", c.Roots}, {"files", c.Files}} {
+		}{
+			{"roots", c.Roots}, {"files", c.Files},
+			{"key-only roots", c.KeyOnlyRoots}, {"key-only files", c.KeyOnlyFiles},
+		} {
 			for _, rel := range entry.paths {
 				if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); err != nil {
 					return g, fmt.Errorf("component %q %s: path %q does not exist in the repository", id, entry.key, rel)

@@ -6,6 +6,7 @@
  */
 
 import {expect, type Page} from '@playwright/test';
+import type {MachineDescription} from '@vibesys/hosts';
 import {computeSettings, computeSettingsEmpty, sshCluster} from '@vibesys/run-fixtures';
 import {
   type FakeBridgeSeed,
@@ -16,10 +17,11 @@ import {
   installFakeProjectRuns,
 } from './fake-bridge.js';
 import {addInitScripts, initScript} from './init-scripts.js';
+import {type SubscriptionSeed, subscriptionScript} from './subscription-fake.js';
 import {PROJECT, SEED, server} from './world.js';
 
 /** Facts of a machine with GPUs, two runs live. */
-const FACTS = {
+const FACTS: MachineDescription = {
   checkout: {root: '/home/me/vibesys', version: '0.1.1', commit: 'e66d941', dirty: false},
   hardware: {
     cpu_cores: 64,
@@ -43,24 +45,33 @@ const NO_LOGINS = null;
 export interface MachinesWorld {
   readonly name: string;
   readonly seed: FakeBridgeSeed;
+  /** What each host's live stats do; a world without it has no subscription port. */
+  readonly live?: SubscriptionSeed;
   /** What to press before the page is looked at, from the page. */
   readonly before?: (page: Page) => Promise<void>;
 }
 
 const runId = (at: number): string => `2026101${at % 10}-1000${String(at).padStart(2, '0')}`;
 
-/** The Fake's listings and project runs for `runs`: each machine lists that many ended runs. */
+/**
+ * The Fake's listings and project runs for `runs`: each machine lists that many runs, of which
+ * `running` are live and the rest ended.
+ */
 function listing(
   runs: Readonly<Record<string, number>>,
+  running: Readonly<Record<string, number>>,
 ): Pick<FakeBridgeSeed, 'listings' | 'projectRuns'> {
   const hosts = Object.entries(runs).filter(([, count]) => count > 0);
+  const live = (host: string) => running[host] ?? 0;
   return {
     listings: hosts.map(([host, count]) => ({
       kind: 'listed',
       host,
-      live: [],
-      ended: Array.from({length: count}, (_, at) =>
-        server(`00000000000${at}`, runId(at), 'failed'),
+      live: Array.from({length: live(host)}, (_, at) =>
+        server(`00000000000${at}`, runId(at), 'running'),
+      ),
+      ended: Array.from({length: count - live(host)}, (_, at) =>
+        server(`00000000000${live(host) + at}`, runId(live(host) + at), 'failed'),
       ),
       unreadable: [],
       unverified: [],
@@ -83,11 +94,12 @@ function seeded(
   settings: NonNullable<FakeBridgeSeed['machineSettings']>,
   runs: Readonly<Record<string, number>>,
   reports: NonNullable<FakeBridgeSeed['reports']> = {},
+  running: Readonly<Record<string, number>> = {},
 ): FakeBridgeSeed {
   return {
     ...SEED,
     recent: [],
-    ...listing(runs),
+    ...listing(runs, running),
     facts: FACTS,
     machines,
     reports,
@@ -131,6 +143,22 @@ export const testOf = (page: Page, machine: string, cluster: string) =>
 export const card = (page: Page, machine: string) =>
   page.locator('div.vs-card', {has: page.getByRole('heading', {name: machine, exact: true})});
 
+const GIB = 2 ** 30;
+const BUSY = {
+  cpuPercent: 34,
+  memory: {usedBytes: 18 * GIB, totalBytes: 36 * GIB},
+};
+const GPUS = {
+  cpuPercent: 71,
+  memory: {usedBytes: 212 * GIB, totalBytes: 512 * GIB},
+  gpus: Array.from({length: 8}, (_, index) => ({
+    name: 'H100',
+    utilizationPercent: 40 + index * 8,
+    usedBytes: 52 * GIB,
+    totalBytes: 80 * GIB,
+  })),
+};
+
 export const WORLDS: readonly MachinesWorld[] = [
   {name: 'one machine', seed: seeded([LOCAL], {local: FULL}, {local: 3})},
   {
@@ -139,6 +167,8 @@ export const WORLDS: readonly MachinesWorld[] = [
       [LOCAL, HOST_A, HOST_B, HOST_C],
       {local: FULL, 'ssh:host-a': HELD, 'ssh:host-b': EMPTY, 'ssh:host-c': OLD},
       {local: 3, 'ssh:host-a': 1, 'ssh:host-c': 12},
+      {},
+      {local: 2},
     ),
   },
   {
@@ -159,6 +189,88 @@ export const WORLDS: readonly MachinesWorld[] = [
     before: async page => {
       await testOf(page, 'This Mac', 'standby').click();
       await expect(page.getByText('Unreachable since')).toBeVisible();
+    },
+  },
+  {
+    name: 'a live machine',
+    seed: seeded([LOCAL], {local: FULL}, {local: 3}),
+    live: {hosts: {local: {kind: 'live', readings: BUSY}}},
+  },
+  {
+    name: 'a stale machine',
+    seed: seeded([LOCAL], {local: FULL}, {local: 3}),
+    live: {hosts: {local: {kind: 'stale', readings: BUSY, reason: 'silent', ageMs: 42_000}}},
+  },
+  {
+    name: 'a connecting machine',
+    seed: seeded([LOCAL], {local: FULL}, {local: 3}),
+    live: {hosts: {local: {kind: 'connecting', step: 'handshake', attempt: 0}}},
+  },
+  {
+    name: 'a reconnecting machine',
+    seed: seeded([LOCAL], {local: FULL}, {local: 3}),
+    live: {
+      hosts: {
+        local: {kind: 'stale', readings: BUSY, reason: 'ended', ageMs: 95_000, attempt: 0},
+      },
+    },
+  },
+  {
+    name: 'a failed machine',
+    seed: seeded([LOCAL], {local: FULL}, {local: 3}),
+    live: {
+      hosts: {local: {kind: 'failed', reason: 'unreachable', retrying: true}},
+      afterRetry: {
+        local: {kind: 'stale', readings: BUSY, reason: 'ended', ageMs: 95_000, attempt: 0},
+      },
+    },
+  },
+  {
+    name: 'a closed machine',
+    seed: seeded([LOCAL], {local: FULL}, {local: 3}),
+    live: {hosts: {local: {kind: 'failed', reason: 'closed', retrying: false}}},
+  },
+  {
+    name: 'a machine with unread gauges',
+    seed: seeded([LOCAL], {local: FULL}, {local: 3}),
+    live: {hosts: {local: {kind: 'live', readings: {cpuPercent: null, memory: null, gpus: null}}}},
+  },
+  {
+    name: 'an older machine',
+    seed: seeded(
+      [LOCAL, HOST_C],
+      {local: FULL, 'ssh:host-c': OLD},
+      {local: 3},
+      {'ssh:host-c': {kind: 'needs-update', facts: null}},
+    ),
+    live: {
+      hosts: {
+        local: {kind: 'live', readings: BUSY},
+        'ssh:host-c': {kind: 'failed', reason: 'unsupported', retrying: false},
+      },
+    },
+  },
+  {
+    name: 'two live machines',
+    seed: seeded([LOCAL, HOST_A], {local: FULL, 'ssh:host-a': HELD}, {local: 3, 'ssh:host-a': 1}),
+    live: {
+      hosts: {local: {kind: 'live', readings: BUSY}, 'ssh:host-a': {kind: 'live', readings: GPUS}},
+    },
+  },
+  {
+    name: 'four machines in every state',
+    seed: seeded(
+      [LOCAL, HOST_A, HOST_B, HOST_C],
+      {local: FULL, 'ssh:host-a': HELD, 'ssh:host-b': EMPTY, 'ssh:host-c': OLD},
+      {local: 3, 'ssh:host-a': 1, 'ssh:host-c': 12},
+    ),
+    live: {
+      hosts: {
+        local: {kind: 'live', readings: BUSY},
+        'ssh:host-a': {kind: 'stale', readings: GPUS, reason: 'outdated', ageMs: 95_000},
+        'ssh:host-b': {kind: 'failed', reason: 'unreachable', retrying: true},
+        'ssh:host-c': {kind: 'connecting', step: 'handshake', attempt: 0},
+      },
     },
   },
   {
@@ -208,6 +320,7 @@ export async function openMachines(page: Page, width: number, world: MachinesWor
     initScript(installFakeMachineSettings, seed),
     initScript(installFakeProjectRuns, seed),
     ...(world.name === 'a test in progress' ? [initScript(holdTests, undefined)] : []),
+    ...(world.live === undefined ? [] : [subscriptionScript(world.live)]),
   ]);
   await page.goto('./shell.html');
   await resizeTo(page, width);

@@ -1,0 +1,18 @@
+shared/bases-and-effects
+records 66
+blobs 1
+streams 0
+record kinds
+  declaration_amended 1
+  epoch_started 1
+  lifecycle 1
+  metric 12
+  span 51
+span label kinds
+  (no label) 1
+  adoption 1
+  agent_turn 15
+  comparison 6
+  gate 12
+  planning_call 2
+  workstream 14

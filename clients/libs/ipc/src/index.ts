@@ -39,6 +39,15 @@ export {
   type RunLogsRequest,
 } from './run-logs.js';
 export {
+  decodeUpdate,
+  encodeSubscriptionCall,
+  encodeUpdate,
+  parseSubscriptionCall,
+  SUBSCRIPTION_CHANNEL,
+  type SubscriptionCall,
+  subscriptionBridge,
+} from './subscription.js';
+export {
   type AgentLogin,
   attempt,
   CHROME_INSET_CHANNEL,
@@ -65,6 +74,7 @@ export {
   type MachinesWelcomeBridge,
   type MeasureTarget,
   type NewRunWelcomeBridge,
+  nextOperationToken,
   type Offered,
   type PathCompletion,
   type PreferencesView,

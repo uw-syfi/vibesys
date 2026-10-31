@@ -133,7 +133,7 @@ describe('sidebarStep', () => {
       initial: initialSidebar().state,
       step: sidebarStep,
       action: random => modelAction(random),
-      issues: request => request.token,
+      issues: request => (request.kind === 'push-address' ? null : request.token),
       awaited: () => ({}),
       reply: () => null,
       invariants: sidebarInvariants,

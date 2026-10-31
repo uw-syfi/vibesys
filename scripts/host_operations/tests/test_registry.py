@@ -15,6 +15,7 @@ from scripts.host_operations.api import (
     GenerationError,
     compile_outputs,
     compile_registry,
+    compile_subscribe_timing,
     compile_topics,
 )
 from scripts.host_operations.generate import generate
@@ -30,7 +31,10 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 _SLOTS = tuple(host_operations.ADAPTER_OPERATIONS)
-_HANDLERS = tuple(op.name for op in host_operations.OPERATIONS if op.effect == 1)
+_STREAM = 2
+_HANDLERS = tuple(
+    op.name for op in host_operations.OPERATIONS if op.effect == 1 and op.cardinality != _STREAM
+)
 
 
 def _image() -> descriptor_pb2.FileDescriptorSet:
@@ -52,7 +56,6 @@ def _image() -> descriptor_pb2.FileDescriptorSet:
 def _slots() -> tuple[str, ...]:
     return (
         "list_tasks",
-        "list_saved_runs",
         "list_run_digests",
         "usage_window",
         "list_harnesses",
@@ -74,7 +77,7 @@ def _slots() -> tuple[str, ...]:
 
 
 def _watches() -> tuple[str, ...]:
-    return ("login",)
+    return ("login", "stream_saved_runs")
 
 
 def _changed(change: Callable[[object], None], index: int = 0) -> bytes:
@@ -110,6 +113,7 @@ def test_every_method_has_one_typed_handler_and_canonical_budget() -> None:
     ]
     assert [(op.slot, op.policy.cap_ms) for op in compiled if op.is_watch()] == [
         ("login", 600000),
+        ("stream_saved_runs", 600000),
     ]
     assert {op.policy.cap_ms + op.policy.grace_ms for op in compiled} == {
         10000,
@@ -150,6 +154,10 @@ def test_duplicate_identifiers_fail_generation(field: str) -> None:
         ("request_tag", 19000, "request_tag"),
         ("response_tag", 0, "response_tag"),
         ("first_event_ms", 1, "first_event"),
+        ("progress_ms", 1, "progress_ms"),
+        ("operation_id", 37, "retired"),
+        ("request_tag", 37, "retired"),
+        ("response_tag", 37, "retired"),
     ],
 )
 def test_invalid_policies_name_the_method(field: str, value: int, message: str) -> None:
@@ -268,6 +276,67 @@ def test_a_value_with_room_for_its_key_and_framing_is_accepted() -> None:
     assert compile_topics(_topic_image(change))[0].policy.max_value_bytes == HOST_API_MAX_MESSAGE_BYTES - 1024
 
 
+def _timing_image(change: Callable[[descriptor_pb2.DescriptorProto], None]) -> bytes:
+    """Rewrite the frame timing option of `SubscribeRequest`."""
+    image = _image()
+    file = next(f for f in image.file if f.name == "vibesys/api/v1/subscribe.proto")
+    change(next(message for message in file.message_type if message.name == "SubscribeRequest"))
+    return image.SerializeToString()
+
+
+def test_frame_timing_compiles_from_the_descriptor_into_both_languages() -> None:
+    root = Path(__file__).resolve().parents[3]
+    image = _image().SerializeToString()
+    timing = compile_subscribe_timing(image)
+    assert (timing.heartbeat_ms, timing.lease_ms) == (5000, 30000)
+    outputs = compile_outputs(image, _slots(), _server_sources(root), _watches())
+    typescript = outputs["clients/libs/proto/src/generated/host-operations.ts"]
+    go = outputs["gateway/internal/hostoperations/topics_generated.go"]
+    assert f"heartbeatMs: {timing.heartbeat_ms}, leaseMs: {timing.lease_ms}" in typescript
+    assert (
+        f"FrameTiming{{Heartbeat: {timing.heartbeat_ms} * time.Millisecond, "
+        f"Lease: {timing.lease_ms} * time.Millisecond}}"
+    ) in go
+
+
+def test_a_request_without_frame_timing_fails_generation() -> None:
+    def change(request: descriptor_pb2.DescriptorProto) -> None:
+        request.options.Clear()
+
+    with pytest.raises(GenerationError, match="SubscribeRequest: missing subscribe timing"):
+        compile_subscribe_timing(_timing_image(change))
+
+
+@pytest.mark.parametrize(
+    ("heartbeat", "lease", "message"),
+    [
+        (0, 30000, "heartbeat_ms and lease_ms are required"),
+        (5000, 0, "heartbeat_ms and lease_ms are required"),
+        (5000, 5000, "lease_ms must exceed heartbeat_ms"),
+        (5000, 4999, "lease_ms must exceed heartbeat_ms"),
+        (1, 2, None),
+    ],
+)
+def test_a_lease_that_cannot_hold_a_beat_fails_generation(
+    heartbeat: int, lease: int, message: str | None
+) -> None:
+    def change(request: descriptor_pb2.DescriptorProto) -> None:
+        update = (
+            _varint(1 << 3) + _varint(heartbeat) + _varint(2 << 3) + _varint(lease)
+        )
+        option = _varint(51005 << 3 | 2) + _varint(len(update)) + update
+        request.options.Clear()
+        request.options.ParseFromString(option)
+
+    image = _timing_image(change)
+    if message is None:
+        timing = compile_subscribe_timing(image)
+        assert (timing.heartbeat_ms, timing.lease_ms) == (heartbeat, lease)
+        return
+    with pytest.raises(GenerationError, match=f"SubscribeRequest: {message}"):
+        compile_subscribe_timing(image)
+
+
 def _varint(value: int) -> bytes:
     encoded = bytearray()
     while value > 0x7F:
@@ -317,8 +386,9 @@ def test_every_client_budget_exceeds_its_runner_cap() -> None:
             )
             assert f"totalMs: {client}" in typescript
             first = (
-                f", firstEventMs: {op.policy.first_event_ms}"
-                if op.policy.HasField("first_event_ms")
+                f", firstEventMs: {op.policy.first_event_ms if op.policy.HasField('first_event_ms') else 0}"
+                f", progressMs: {op.policy.progress_ms if op.policy.HasField('progress_ms') else 0}"
+                if op.is_watch()
                 else ""
             )
             assert (
@@ -427,12 +497,12 @@ def test_native_reads_keep_typed_routing_without_a_legacy_helper_adapter() -> No
         _image().SerializeToString(), _slots(), _server_sources(root), _watches()
     )
     operations = compile_registry(_image().SerializeToString(), _slots(), _watches())
-    native = next(op for op in operations if op.name == "ListSavedRuns")
+    native = next(op for op in operations if op.name == "ListRunDigests")
     assert native.policy.adapter_method == ""
-    assert "list_saved_runs" in outputs["proto/vibesys/api/v1/host_read_generated.proto"]
-    assert "ListSavedRuns" in outputs["clients/libs/proto/src/generated/host-operations.ts"]
-    assert "ListSavedRuns" not in outputs["src/server/host_operation_types_generated.py"]
+    assert "list_run_digests" in outputs["proto/vibesys/api/v1/host_read_generated.proto"]
+    assert "ListRunDigests" in outputs["clients/libs/proto/src/generated/host-operations.ts"]
+    assert "ListRunDigests" not in outputs["src/server/host_operation_types_generated.py"]
     assert (
-        "'': ListSavedRuns"
+        "'': ListRunDigests"
         not in outputs["libs/vs-proto/src/vs_proto/_generated/host_operations.py"]
     )

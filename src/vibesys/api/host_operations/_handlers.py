@@ -17,11 +17,6 @@ class _Reads:
     def __init__(self, source: ReadSource) -> None:
         self._source = source
 
-    def list_saved_runs(self, request: pb.ListSavedRunsRequest) -> pb.ListSavedRunsResponse:
-        response = self._source.saved_runs(request)
-        response.request_id = request.request_id
-        return response
-
     def list_run_digests(self, request: pb.ListRunDigestsRequest) -> pb.ListRunDigestsResponse:
         response = self._source.run_digests(request)
         response.request_id = request.request_id
@@ -43,10 +38,7 @@ class _Reads:
         )
 
     def list_harnesses(self, request: pb.ListHarnessesRequest) -> pb.ListHarnessesResponse:
-        installed = self._source.installed_harnesses()
-        listed = sorted(
-            self._source.harnesses(), key=lambda option: option.provider not in installed
-        )
+        listed = self._source.harnesses()
         if not request.with_generations:
             for option in listed:
                 if option.display is not None:
@@ -105,7 +97,7 @@ class _Reads:
 
 
 # Stream slots are registered beside the unary handlers. The generator rejects a drift.
-WATCH_SLOTS = ("login",)
+WATCH_SLOTS = ("login", "stream_saved_runs")
 # Mutation slots are not read handlers. The generator requires each one.
 MUTATION_SLOTS = (
     "terminate_run",
@@ -123,7 +115,6 @@ def handlers(source: ReadSource) -> host_operations.Handlers:
     reads = _Reads(source)
     return Handlers(
         list_tasks=reads.list_tasks,
-        list_saved_runs=reads.list_saved_runs,
         list_run_digests=reads.list_run_digests,
         usage_window=reads.usage_window,
         list_harnesses=reads.list_harnesses,

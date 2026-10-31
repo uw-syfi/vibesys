@@ -4,15 +4,26 @@
  * machine that cannot be reached, a project it cannot list, or a helper that predates the question
  * is counted, not hidden, and does not stop the others being read.
  */
-import {type HostKey, type HostListing, USAGE_WINDOW_MAX_RUNS} from '@vibesys/hosts';
-import {attempt, type WelcomeBridge, type WelcomeResult} from '@vibesys/ipc';
+import {
+  type HostKey,
+  type HostListing,
+  type ListedRun,
+  USAGE_WINDOW_MAX_RUNS,
+} from '@vibesys/hosts';
+import {
+  attempt,
+  nextOperationToken,
+  type UnexpectedFailure,
+  type WelcomeBridge,
+  type WelcomeResult,
+} from '@vibesys/ipc';
 import {knownProjects} from '@vibesys/runs';
 import type {ModelName, UsageOutcome, UsageSource, UsageSpan} from '../../state/index.js';
 
 /** The bridge calls the question makes. */
 export type UsageBridge = Pick<
   WelcomeBridge,
-  'overview' | 'projectRuns' | 'usageWindow' | 'harnesses' | 'onListing'
+  'overview' | 'projectRuns' | 'cancelProjectRuns' | 'usageWindow' | 'harnesses' | 'onListing'
 >;
 
 type Listed = Extract<HostListing, {readonly kind: 'listed'}>;
@@ -28,13 +39,32 @@ function value<T>(result: WelcomeResult<T> | {readonly ok: false}): T | null {
   return result.ok ? result.value : null;
 }
 
+/** The runs of `project`; the main process stops reading them if `signal` ends the question first. */
+async function listRuns(
+  bridge: UsageBridge,
+  host: HostKey,
+  project: string,
+  signal: AbortSignal,
+): Promise<WelcomeResult<readonly ListedRun[]> | UnexpectedFailure> {
+  signal.throwIfAborted();
+  const token = nextOperationToken();
+  const cancel = (): void => void attempt(() => bridge.cancelProjectRuns(token));
+  signal.addEventListener('abort', cancel, {once: true});
+  try {
+    return await attempt(() => bridge.projectRuns(host, project, token));
+  } finally {
+    signal.removeEventListener('abort', cancel);
+  }
+}
+
 async function askProject(
   bridge: UsageBridge,
   host: HostKey,
   project: string,
   span: UsageSpan,
+  signal: AbortSignal,
 ): Promise<ProjectAnswer> {
-  const runs = value(await attempt(() => bridge.projectRuns(host, project)));
+  const runs = value(await listRuns(bridge, host, project, signal));
   if (runs === null) return {kind: 'unreachable'};
   // The helper answers for at most this many runs, and the listing is newest first.
   const asked = runs.slice(0, USAGE_WINDOW_MAX_RUNS).map(run => run.runId);
@@ -78,7 +108,7 @@ export async function loadUsage(
     knownProjects(listing, recent, listing.host).map(project => ({host: listing.host, project})),
   );
   const [answers, names] = await Promise.all([
-    Promise.all(asks.map(ask => askProject(bridge, ask.host, ask.project, span))),
+    Promise.all(asks.map(ask => askProject(bridge, ask.host, ask.project, span, signal))),
     Promise.all(listed.map(listing => namesOn(bridge, listing.host))),
   ]);
   signal.throwIfAborted();

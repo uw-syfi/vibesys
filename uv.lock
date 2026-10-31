@@ -42,11 +42,11 @@ members = [
 
 [[package]]
 name = "agentshim"
-version = "0.23.1"
+version = "0.24.4"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/63/6b/bd290a9f4c5f1f6d0d543b1c372a16533d15f0d9922fd54a60100693bade/agentshim-0.23.1.tar.gz", hash = "sha256:b5d61ff1e705514ad400929848ce34fb6b7220fce83629b2a977a1ca8d1d331a", size = 287283, upload-time = "2026-10-31T01:52:21.787Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d1/05/bfc2b587c66ace00e4f83b27f7b8c4fea1c40b5074679ee006d6a55abc24/agentshim-0.24.4.tar.gz", hash = "sha256:98204c257d190463f597f2277735fac03ce5ba729f4cce08f4e2fdeff53af021", size = 326230, upload-time = "2026-10-31T15:15:48.778Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ca/f3/9b59855b1f30a51cb6b34ec07ec0b44a6b5ee5890c36bd254e35d79ffda5/agentshim-0.23.1-py3-none-any.whl", hash = "sha256:c06710d3b251c21a38f5a9b7937d9f0c1dc2fd84d41a3cc41f5a095ff470a670", size = 332116, upload-time = "2026-10-31T01:52:19.885Z" },
+    { url = "https://files.pythonhosted.org/packages/a1/21/fc55bae08bfcc54534a87ed2eb04af084e80a1271698ed9d77a1f38cf139/agentshim-0.24.4-py3-none-any.whl", hash = "sha256:07bba14613fcdeae6c2543e4624a58e4034c3e66057af25cc0e1ce04726d6194", size = 372068, upload-time = "2026-10-31T15:15:47.031Z" },
 ]
 
 [[package]]
@@ -3098,7 +3098,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentshim", specifier = ">=0.23.1,<0.24" },
+    { name = "agentshim", specifier = ">=0.24.4,<0.25" },
     { name = "cbor2", specifier = "<6" },
     { name = "cryptography", specifier = "<50" },
     { name = "google-crc32c", specifier = ">=1.7,<2" },
@@ -3173,7 +3173,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentshim", specifier = ">=0.23.1,<0.24" },
+    { name = "agentshim", specifier = ">=0.24.4,<0.25" },
     { name = "pydantic", specifier = ">=2" },
     { name = "pydantic-core" },
     { name = "vs-decode", editable = "libs/vs-decode" },
@@ -3231,6 +3231,7 @@ source = { editable = "libs/vs-core" }
 dependencies = [
     { name = "protobuf-py" },
     { name = "pydantic" },
+    { name = "vs-decode" },
     { name = "vs-proto" },
 ]
 
@@ -3238,6 +3239,7 @@ dependencies = [
 requires-dist = [
     { name = "protobuf-py", specifier = "==0.6.0" },
     { name = "pydantic", specifier = ">=2" },
+    { name = "vs-decode", editable = "libs/vs-decode" },
     { name = "vs-proto", editable = "libs/vs-proto" },
 ]
 
@@ -3260,6 +3262,8 @@ dependencies = [
     { name = "pydantic" },
     { name = "vs-core" },
     { name = "vs-project" },
+    { name = "vs-proto" },
+    { name = "vs-runlog" },
     { name = "vs-runtime" },
     { name = "vs-sim" },
 ]
@@ -3269,6 +3273,8 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2" },
     { name = "vs-core", editable = "libs/vs-core" },
     { name = "vs-project", editable = "libs/vs-project" },
+    { name = "vs-proto", editable = "libs/vs-proto" },
+    { name = "vs-runlog", editable = "libs/vs-runlog" },
     { name = "vs-runtime", editable = "libs/vs-runtime" },
     { name = "vs-sim", editable = "libs/vs-sim" },
 ]

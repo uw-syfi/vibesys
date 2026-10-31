@@ -43,6 +43,10 @@ local run stays short while CI keeps its full selection. A component with
 `local_jobs` selects only those jobs in `test` instead of all jobs and
 collections (the repoctl policy selects only `impact`). A component root in
 `local_ignore_roots` stays owned for the CI plan and is ignored by `test`.
+An entry of `roots` or `files` may also be a table, `{ path = "dir", selects = false }`:
+the component lists it, for whatever reads the list (a content key, say), but a change under it
+selects nothing, in CI or in `test`. One list carries both tiers, so a path is never written
+twice; the path must still exist, and a path cannot be listed as both kinds.
 A check group with `local_paths` or `local_components` runs in `test` only when
 a changed path is under one of the paths, or under a root or file of one of
 the named components (declare a list that CI also selects on once, in

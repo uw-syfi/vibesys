@@ -1,7 +1,20 @@
 import {describe, expect, test} from 'bun:test';
 import type {HostListing, RunDigestEntry} from '@vibesys/hosts';
 import {liveRows} from '../state/index.js';
-import {createSidebarStore, LIVE_DIGEST_REFRESH_MS, type ShellBridge} from './index.js';
+import {
+  createSidebarStore,
+  LIVE_DIGEST_REFRESH_MS,
+  type ShellBridge,
+  type WindowAddress,
+} from './index.js';
+
+/** A window that stays on home: these tests do not navigate. */
+const NO_ADDRESS: WindowAddress = {
+  screen: () => ({kind: 'runs'}),
+  push: () => undefined,
+  back: () => undefined,
+  onRestore: () => () => undefined,
+};
 
 /** A scheduler the test advances by hand: a callback runs only when its time has come. */
 class ManualClock {
@@ -88,6 +101,7 @@ function world(listing: HostListing): {readonly bridge: ShellBridge; readonly as
       });
     },
     projectRuns: () => never,
+    cancelProjectRuns: () => never,
     retryListing: () => never,
     onListing: ignore,
     onRecent: ignore,
@@ -107,7 +121,7 @@ describe('a live run on the sidebar', () => {
   test('its digest is read again each interval, and the row shows the latest', async () => {
     const clock = new ManualClock();
     const {bridge, asked} = world(LISTING(true));
-    const {store} = createSidebarStore(bridge, clock.schedule);
+    const {store} = createSidebarStore(bridge, clock.schedule, NO_ADDRESS);
     await drain();
     expect(asked()).toBe(1);
     expect(liveRows(store.getState())[0]?.trail).toBe('1 idea · 1.50× best so far · 1m');
@@ -125,7 +139,7 @@ describe('a live run on the sidebar', () => {
   test('with no live run nothing is scheduled and nothing is asked', async () => {
     const clock = new ManualClock();
     const {bridge, asked} = world(LISTING(false));
-    createSidebarStore(bridge, clock.schedule);
+    createSidebarStore(bridge, clock.schedule, NO_ADDRESS);
     await drain();
     expect(clock.pending).toBe(0);
     expect(asked()).toBe(0);

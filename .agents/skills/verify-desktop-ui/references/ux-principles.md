@@ -70,13 +70,9 @@ can decide it.
     what the user is reading. Unenforced: needs a person watching.
 14. **The sidebar stays a quick navigator.** New run and Settings stay in view while recent runs scroll; run rows and the sidebar toggle are clickable, the column resizes and collapses, and Settings has a way back to the exact prior screen. Enforced by `pnpm --filter @vibesys/app-desktop-shell test:e2e`.
 
-15. **Content fills its pane; cap only prose line length.** A turn, card or
-    log spans its pane's width with normal padding; a paragraph alone is
-    capped (about 105 characters), so text stays readable while code, tables
-    and tool output use the whole width. A list that only opened a wider pane
-    (the steps of an idea, a transcript) is narrow. Enforced by the
-    `pane-fill` check: the column holding wrapped text covers at least 85% of
-    its pane's inner width.
+15. **Layout follows the visual spec.** One left edge, size by depth, spacing by
+    relationship, boxes that fit, small states, labels and bands that earn their
+    place: the laws, and what enforces each, are in [visual-spec.md](visual-spec.md).
 
 ## Show failures, keep figures calm
 
@@ -132,10 +128,14 @@ can decide it.
     absence from `@vibesys/ui`, by the stylesheet test of the tone fills (only
     listed selectors may be washed with a tone, whatever they are called), by
     the `banner` screen check (no element at least half the main pane's width is
-    filled with a status color, by color rather than by class name) and by the
+    filled with a status color, by color rather than by class name), by the
+    `status-row` screen check (no alert, status or live region outside a toast, and no
+    `Text` in a status tone, has words that reach half the pane, and no chip is that
+    wide; the words are measured, not the box) and by the
     no-banners journey of the desktop shell's end-to-end suite; whether a
-    message is passing or about a thing, and whether a hint holds something a
-    person must act on, is Unenforced (judgment).
+    message is passing or about a thing, whether a hint holds something a
+    person must act on, a lone status word on a line of its own, and a bordered
+    strip that is neither filled, announced nor toned, is Unenforced (judgment).
 
 ## Sizes the checks cover
 

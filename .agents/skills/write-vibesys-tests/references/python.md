@@ -113,13 +113,51 @@ goldens is in the `write-agent-prompt` skill.
 An old directory of prompt snapshots is read by no test, so regenerating it
 checks nothing; do not update it.
 
-The native replay goldens of the run-fixtures library and the desktop-shell
-scenarios are binary and large. Regenerate them with
-`uv run python -m tests.support.journey_fixtures` after a change to a `.proto`
-file, the projector or a declaration, and commit every file it writes.
-`./scripts/check_proto.sh` fails a stale golden before any golden test runs. A
-test compares one through `assert_replay_golden` in `tests.support.replay_golden`,
-which names the first differing record and the command above.
+The native replays of the run-fixtures library and the desktop-shell scenarios
+are not goldens, and nothing of them is committed. They are the shipping
+projector applied to a declaration, so `tests.support.derived_replays` stores
+them under a hash of everything they can derive from: every file under the
+roots, and the files, of the `derived_replays` component in the repoctl policy
+(whole source packages, the lock and project files, the generators), and the
+Python version. The key is coarse on purpose: regenerating takes seconds, so it
+errs wide instead of listing what matters, and no trace of what ran can go
+stale. CI selects the client jobs on a change to the same component, so a
+projector change still runs the client tests that read the replays. An entry
+written with `selects = false` keys the set without selecting a job; use it only
+for a library the projection merely imports, whose effect on a replay the
+projection snapshots and the conversion golden already show. Widen the
+component, never the key alone. The `with_derived_replays` wrapper in the
+clients tools makes the set before a client test run (`pnpm test` in
+`run-page`, `pnpm e2e` and `e2e:linux` in the desktop shell) and needs `uv` and
+a synced Python environment, which a TypeScript-only checkout did not need
+before. A `.proto` or projector change names a new set, so none is stale and no
+two pull requests conflict. A client test reads one through
+`@vibesys/run-fixtures/derived`, which fails naming the script when it was
+skipped; a Python test projects the declaration itself with
+`shared_scenarios.project_shared` or `journey_fixtures.project_scenario`.
+Generation is never done inside a test.
+
+Because a projector change no longer shows as a changed file, a text snapshot
+of each scenario (record kinds and span label kinds, with counts) is committed
+under the run tests and rewritten by the regeneration script. It changes only
+when what a scenario projects to changes, so two pull requests conflict on it
+only for a real overlap.
+
+Three sets of committed binary goldens remain, each because it pins a contract or
+is read where Python cannot make it: the conversion goldens
+(which the gateway and TypeScript tests read), the
+gateway's Skeleton wire golden with its retained RPC replies, and the frozen
+retained corpus. After a converter or gateway change run
+`./scripts/regenerate_goldens.sh` and commit every file it rewrites; it is the
+only regeneration command, and each stale-golden failure names it. It does not
+touch the UI gallery screenshot baselines, which need Docker and depend on the
+UI, not the schema (`update:screenshots`, in
+[clients-architecture.md](../../../../docs/contributing/clients-architecture.md)).
+These carry no hash of their inputs, because a byte comparison already fails a
+stale one: `test_gateway_conversion_fixture_regenerates_identically` runs in the
+proto check group, and the gateway tests compare the wire golden and the replies;
+a change to any committed golden selects both jobs. A new committed golden joins
+`tests.support.golden_regeneration` and the script, not a second command.
 
 ## Isolation and timeout verdicts
 

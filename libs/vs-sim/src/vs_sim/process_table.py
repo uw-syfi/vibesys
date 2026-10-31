@@ -269,7 +269,7 @@ class _PsProcessTable:
         except ProcessLookupError:
             return False
         deadline = time.monotonic() + _EXIT_WAIT_S
-        while _group_running(process.pgid):
+        while group_running(process.pgid):
             if time.monotonic() > deadline:
                 message = f"process group {process.pgid} survived SIGKILL"
                 raise ProcessSurvivedError(message)
@@ -277,7 +277,11 @@ class _PsProcessTable:
         return True
 
 
-def _group_running(pgid: int) -> bool:
+def group_running(pgid: int) -> bool:
+    """Whether process group ``pgid`` has a member that is not a zombie, as ``ps`` lists it.
+
+    Raises :class:`ProcessTableUnavailableError` when ``ps`` cannot list the processes.
+    """
     return any(row.pgid == pgid and not row.stat.startswith("Z") for row in _listing())
 
 

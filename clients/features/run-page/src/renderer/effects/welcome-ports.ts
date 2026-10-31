@@ -57,7 +57,7 @@ export type RunPageBridge = Pick<
 /** The page the session runs in: where the preload's ports arrive, and the app's session wiring. */
 export interface RunPagePage {
   readonly messages: PortMessages;
-  /** The window's address and keys, where the screen keeps its zoom. */
+  /** The window's location and keys, where the screen's zoom lives. */
   readonly address: RunPageAddress;
   /** The window's clock, in epoch milliseconds. */
   now(): number;
@@ -78,6 +78,8 @@ export interface RunPageTarget {
 export interface RunPageNavigation {
   runAgain(): void;
   openWindow(): void;
+  /** Goes up to the Runs dashboard; absent in a run's own window, which has none. */
+  readonly runs?: () => void;
 }
 
 /** A history page with each recorded event validated; an event that is not one fails the page. */

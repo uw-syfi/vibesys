@@ -75,14 +75,24 @@ class ScriptedPipedProcess:
     """
 
     def __init__(
-        self, threads: Threads, *, merge_stderr: bool = False, survives_terminate: bool = False
+        self,
+        threads: Threads,
+        *,
+        merge_stderr: bool = False,
+        survives_terminate: bool = False,
+        wait_failure: OSError | None = None,
     ) -> None:
-        """Start the group running, with empty open pipes."""
+        """Start the group running, with empty open pipes.
+
+        With *wait_failure*, ``wait`` raises it at once and never reports an exit, as a real
+        group does when the host cannot watch its leader exit; signals still reach the group.
+        """
         self._condition = threads.condition()
         self._stdout = _HeldPipe(self._condition)
         self._stderr = _HeldPipe(self._condition)
         self._merge_stderr = merge_stderr
         self._survives_terminate = survives_terminate
+        self._wait_failure = wait_failure
         self._status: int | None = None
         self._reaped = False
         self.signals: list[str] = []
@@ -128,6 +138,8 @@ class ScriptedPipedProcess:
 
     def wait(self, timeout: float | None) -> int:
         """Wait for the leader and reap it, raising :class:`ProcessTimeoutError` on timeout."""
+        if self._wait_failure is not None:
+            raise self._wait_failure
         with self._condition:
             self._condition.wait_for(lambda: self._status is not None, timeout)
             status = self._status

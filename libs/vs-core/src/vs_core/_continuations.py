@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Literal
 from ._comparison import comparisons_to_publish, moment_of
 from ._deadlines import bound_to_run, cleanup, limit_to, time_remains
 from ._evaluation_history import attempt_settled, produce_history
-from ._proofs import continues_admitted_work
+from ._proofs import admitted_work_proceeds
 from ._registry import ContractError
 from ._session_scope import dispatching_request
 from ._submission_receipts import same_conclusion
@@ -451,7 +451,7 @@ def _attempt(context: EvaluationContext, scope: Scope) -> AttemptView | None:
 
 
 def _active(context: EvaluationContext, scope: Scope) -> bool:
-    if not continues_admitted_work(context.run):
+    if not admitted_work_proceeds(context.run):
         return False
     if scope.owner == context.run.run_id:
         return scope.generation == context.run.generation

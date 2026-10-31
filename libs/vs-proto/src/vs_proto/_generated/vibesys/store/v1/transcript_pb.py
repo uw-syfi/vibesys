@@ -10,17 +10,19 @@ from typing import Literal, TYPE_CHECKING, TypeAlias
 
 from protobuf import Enum, Message
 from protobuf._codegen import file_desc
+from protobuf.wkt.google.protobuf import timestamp_pb
 
 from . import content_pb
 from ....buf.validate import validate_pb
 
 if TYPE_CHECKING:
     from protobuf import DescFile, Oneof
+    from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
     from .content_pb import BlobRef
 
 
-_TranscriptEntryFields: TypeAlias = Literal["text", "tool_call", "tool_result"]
+_TranscriptEntryFields: TypeAlias = Literal["text", "tool_call", "tool_result", "at"]
 
 class TranscriptEntry(Message[_TranscriptEntryFields]):
     """
@@ -36,9 +38,17 @@ class TranscriptEntry(Message[_TranscriptEntryFields]):
             ```proto
             oneof entry
             ```
+        at:
+            When the event this entry records happened. Absent in entries written before the field existed.
+            A simulated run's clock starts at the epoch, so no floor is enforced here; a reader treats the
+            epoch itself as no time.
+
+            ```proto
+            optional google.protobuf.Timestamp at = 4;
+            ```
     """
 
-    __slots__ = ("entry",)
+    __slots__ = ("at", "entry")
 
     if TYPE_CHECKING:
 
@@ -46,10 +56,12 @@ class TranscriptEntry(Message[_TranscriptEntryFields]):
             self,
             *,
             entry: Oneof[Literal["text"], TranscriptText] | Oneof[Literal["tool_call"], TranscriptToolCall] | Oneof[Literal["tool_result"], TranscriptToolResult] | None = None,
+            at: Timestamp | None = None,
         ) -> None:
             pass
 
         entry: Oneof[Literal["text"], TranscriptText] | Oneof[Literal["tool_call"], TranscriptToolCall] | Oneof[Literal["tool_result"], TranscriptToolResult] | None
+        at: Timestamp | None
 
 _TranscriptContentFields: TypeAlias = Literal["inline", "blob"]
 
@@ -157,7 +169,7 @@ class TranscriptToolCall(Message[_TranscriptToolCallFields]):
         call_id: str
         arguments_json: TranscriptContent | None
 
-_TranscriptToolResultFields: TypeAlias = Literal["tool", "call_id", "is_error", "content", "payload_json"]
+_TranscriptToolResultFields: TypeAlias = Literal["tool", "call_id", "is_error", "content", "payload_json", "command", "json"]
 
 class TranscriptToolResult(Message[_TranscriptToolResultFields]):
     """
@@ -179,18 +191,29 @@ class TranscriptToolResult(Message[_TranscriptToolResultFields]):
             bool is_error = 3;
             ```
         content:
+            The text the agent was shown.
+
             ```proto
             optional vibesys.store.v1.TranscriptContent content = 4;
             ```
         payload_json:
-            The complete command or JSON payload, independent of the display content.
+            Written before `payload`: the whole result as a Pydantic JSON string. No longer written. A
+            reader ignores it and shows `content`; it stays declared so records already stored keep
+            decoding (the breaking-change check refuses to delete a field, reserved or not).
 
             ```proto
-            optional vibesys.store.v1.TranscriptContent payload_json = 5;
+            optional vibesys.store.v1.TranscriptContent payload_json = 5 [deprecated = true];
+            ```
+        payload:
+            What the tool returned beside its text. Absent for a result with none and for one written before
+            this field existed. A reader that does not know the case shows `content` alone.
+
+            ```proto
+            oneof payload
             ```
     """
 
-    __slots__ = ("tool", "call_id", "is_error", "content", "payload_json")
+    __slots__ = ("tool", "call_id", "is_error", "content", "payload_json", "payload")
 
     if TYPE_CHECKING:
 
@@ -202,6 +225,7 @@ class TranscriptToolResult(Message[_TranscriptToolResultFields]):
             is_error: bool = False,
             content: TranscriptContent | None = None,
             payload_json: TranscriptContent | None = None,
+            payload: Oneof[Literal["command"], TranscriptCommandResult] | Oneof[Literal["json"], TranscriptContent] | None = None,
         ) -> None:
             pass
 
@@ -210,6 +234,59 @@ class TranscriptToolResult(Message[_TranscriptToolResultFields]):
         is_error: bool
         content: TranscriptContent | None
         payload_json: TranscriptContent | None
+        payload: Oneof[Literal["command"], TranscriptCommandResult] | Oneof[Literal["json"], TranscriptContent] | None
+
+_TranscriptCommandResultFields: TypeAlias = Literal["stdout", "stderr", "exit_code", "duration_seconds"]
+
+class TranscriptCommandResult(Message[_TranscriptCommandResultFields]):
+    """
+    A command's result in parts, as the tool reported them.
+
+    ```proto
+    message vibesys.store.v1.TranscriptCommandResult
+    ```
+
+    Attributes:
+        stdout:
+            ```proto
+            optional vibesys.store.v1.TranscriptContent stdout = 1;
+            ```
+        stderr:
+            ```proto
+            optional vibesys.store.v1.TranscriptContent stderr = 2;
+            ```
+        exit_code:
+            Absent when the tool has no exit status.
+
+            ```proto
+            optional int32 exit_code = 3;
+            ```
+        duration_seconds:
+            Absent when the tool did not time itself.
+
+            ```proto
+            optional double duration_seconds = 4;
+            ```
+    """
+
+    __slots__ = ("stdout", "stderr", "exit_code", "duration_seconds")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            stdout: TranscriptContent | None = None,
+            stderr: TranscriptContent | None = None,
+            exit_code: int | None = None,
+            duration_seconds: float | None = None,
+        ) -> None:
+            pass
+
+        stdout: TranscriptContent | None
+        stderr: TranscriptContent | None
+        exit_code: int
+        duration_seconds: float
 
 class TranscriptChannel(Enum):
     """
@@ -248,9 +325,10 @@ class TranscriptChannel(Enum):
 
 
 _DESC = file_desc(
-    b'\n!vibesys/store/v1/transcript.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1evibesys/store/v1/content.proto"\xe9\x01\n\x0fTranscriptEntry\x126\n\x04text\x18\x01 \x01(\x0b2 .vibesys.store.v1.TranscriptTextH\x00R\x04text\x12C\n\ttool_call\x18\x02 \x01(\x0b2$.vibesys.store.v1.TranscriptToolCallH\x00R\x08toolCall\x12I\n\x0btool_result\x18\x03 \x01(\x0b2&.vibesys.store.v1.TranscriptToolResultH\x00R\ntoolResultB\x0e\n\x05entry\x12\x05\xbaH\x02\x08\x01"y\n\x11TranscriptContent\x12#\n\x06inline\x18\x01 \x01(\tH\x00R\x06inlineB\t\xbaH\x06r\x04(\x80\x80\x04\x12/\n\x04blob\x18\x02 \x01(\x0b2\x19.vibesys.store.v1.BlobRefH\x00R\x04blobB\x0e\n\x05value\x12\x05\xbaH\x02\x08\x01"\xa2\x01\n\x0eTranscriptText\x12I\n\x07channel\x18\x01 \x01(\x0e2#.vibesys.store.v1.TranscriptChannelR\x07channelB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12E\n\x07content\x18\x02 \x01(\x0b2#.vibesys.store.v1.TranscriptContentR\x07contentB\x06\xbaH\x03\xc8\x01\x01"\xbc\x01\n\x12TranscriptToolCall\x12\x1d\n\x04tool\x18\x01 \x01(\tR\x04toolB\t\xbaH\x06r\x04(\x80\x80\x04\x12\'\n\x07call_id\x18\x02 \x01(\tH\x00R\x06callIdB\t\xbaH\x06r\x04(\x80\x80\x04\x88\x01\x01\x12R\n\x0earguments_json\x18\x03 \x01(\x0b2#.vibesys.store.v1.TranscriptContentR\rargumentsJsonB\x06\xbaH\x03\xc8\x01\x01B\n\n\x08_call_id"\xaa\x02\n\x14TranscriptToolResult\x12\x1d\n\x04tool\x18\x01 \x01(\tR\x04toolB\t\xbaH\x06r\x04(\x80\x80\x04\x12\'\n\x07call_id\x18\x02 \x01(\tH\x00R\x06callIdB\t\xbaH\x06r\x04(\x80\x80\x04\x88\x01\x01\x12\x19\n\x08is_error\x18\x03 \x01(\x08R\x07isError\x12E\n\x07content\x18\x04 \x01(\x0b2#.vibesys.store.v1.TranscriptContentR\x07contentB\x06\xbaH\x03\xc8\x01\x01\x12K\n\x0cpayload_json\x18\x05 \x01(\x0b2#.vibesys.store.v1.TranscriptContentH\x01R\x0bpayloadJson\x88\x01\x01B\n\n\x08_call_idB\x0f\n\r_payload_json*\xbc\x01\n\x11TranscriptChannel\x12"\n\x1eTRANSCRIPT_CHANNEL_UNSPECIFIED\x10\x00\x12 \n\x1cTRANSCRIPT_CHANNEL_ASSISTANT\x10\x01\x12\x1f\n\x1bTRANSCRIPT_CHANNEL_ANALYSIS\x10\x02\x12!\n\x1dTRANSCRIPT_CHANNEL_DIAGNOSTIC\x10\x03\x12\x1d\n\x19TRANSCRIPT_CHANNEL_PROMPT\x10\x04BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3',
+    b'\n!vibesys/store/v1/transcript.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1evibesys/store/v1/content.proto"\x95\x02\n\x0fTranscriptEntry\x126\n\x04text\x18\x01 \x01(\x0b2 .vibesys.store.v1.TranscriptTextH\x00R\x04text\x12C\n\ttool_call\x18\x02 \x01(\x0b2$.vibesys.store.v1.TranscriptToolCallH\x00R\x08toolCall\x12I\n\x0btool_result\x18\x03 \x01(\x0b2&.vibesys.store.v1.TranscriptToolResultH\x00R\ntoolResult\x12*\n\x02at\x18\x04 \x01(\x0b2\x1a.google.protobuf.TimestampR\x02atB\x0e\n\x05entry\x12\x05\xbaH\x02\x08\x01"y\n\x11TranscriptContent\x12#\n\x06inline\x18\x01 \x01(\tH\x00R\x06inlineB\t\xbaH\x06r\x04(\x80\x80\x04\x12/\n\x04blob\x18\x02 \x01(\x0b2\x19.vibesys.store.v1.BlobRefH\x00R\x04blobB\x0e\n\x05value\x12\x05\xbaH\x02\x08\x01"\xa2\x01\n\x0eTranscriptText\x12I\n\x07channel\x18\x01 \x01(\x0e2#.vibesys.store.v1.TranscriptChannelR\x07channelB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12E\n\x07content\x18\x02 \x01(\x0b2#.vibesys.store.v1.TranscriptContentR\x07contentB\x06\xbaH\x03\xc8\x01\x01"\xbc\x01\n\x12TranscriptToolCall\x12\x1d\n\x04tool\x18\x01 \x01(\tR\x04toolB\t\xbaH\x06r\x04(\x80\x80\x04\x12\'\n\x07call_id\x18\x02 \x01(\tH\x00R\x06callIdB\t\xbaH\x06r\x04(\x80\x80\x04\x88\x01\x01\x12R\n\x0earguments_json\x18\x03 \x01(\x0b2#.vibesys.store.v1.TranscriptContentR\rargumentsJsonB\x06\xbaH\x03\xc8\x01\x01B\n\n\x08_call_id"\xbb\x03\n\x14TranscriptToolResult\x12\x1d\n\x04tool\x18\x01 \x01(\tR\x04toolB\t\xbaH\x06r\x04(\x80\x80\x04\x12\'\n\x07call_id\x18\x02 \x01(\tH\x01R\x06callIdB\t\xbaH\x06r\x04(\x80\x80\x04\x88\x01\x01\x12\x19\n\x08is_error\x18\x03 \x01(\x08R\x07isError\x12E\n\x07content\x18\x04 \x01(\x0b2#.vibesys.store.v1.TranscriptContentR\x07contentB\x06\xbaH\x03\xc8\x01\x01\x12O\n\x0cpayload_json\x18\x05 \x01(\x0b2#.vibesys.store.v1.TranscriptContentH\x02R\x0bpayloadJsonB\x02\x18\x01\x88\x01\x01\x12E\n\x07command\x18\x06 \x01(\x0b2).vibesys.store.v1.TranscriptCommandResultH\x00R\x07command\x129\n\x04json\x18\x07 \x01(\x0b2#.vibesys.store.v1.TranscriptContentH\x00R\x04jsonB\t\n\x07payloadB\n\n\x08_call_idB\x0f\n\r_payload_json"\xaa\x02\n\x17TranscriptCommandResult\x12C\n\x06stdout\x18\x01 \x01(\x0b2#.vibesys.store.v1.TranscriptContentR\x06stdoutB\x06\xbaH\x03\xc8\x01\x01\x12C\n\x06stderr\x18\x02 \x01(\x0b2#.vibesys.store.v1.TranscriptContentR\x06stderrB\x06\xbaH\x03\xc8\x01\x01\x12 \n\texit_code\x18\x03 \x01(\x05H\x00R\x08exitCode\x88\x01\x01\x12@\n\x10duration_seconds\x18\x04 \x01(\x01H\x01R\x0fdurationSecondsB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01B\x0c\n\n_exit_codeB\x13\n\x11_duration_seconds*\xbc\x01\n\x11TranscriptChannel\x12"\n\x1eTRANSCRIPT_CHANNEL_UNSPECIFIED\x10\x00\x12 \n\x1cTRANSCRIPT_CHANNEL_ASSISTANT\x10\x01\x12\x1f\n\x1bTRANSCRIPT_CHANNEL_ANALYSIS\x10\x02\x12!\n\x1dTRANSCRIPT_CHANNEL_DIAGNOSTIC\x10\x03\x12\x1d\n\x19TRANSCRIPT_CHANNEL_PROMPT\x10\x04BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3',
     [
         validate_pb.desc(),
+        timestamp_pb.desc(),
         content_pb.desc(),
     ],
     {
@@ -259,6 +337,7 @@ _DESC = file_desc(
         "TranscriptText": TranscriptText,
         "TranscriptToolCall": TranscriptToolCall,
         "TranscriptToolResult": TranscriptToolResult,
+        "TranscriptCommandResult": TranscriptCommandResult,
         "TranscriptChannel": TranscriptChannel,
     },
 )

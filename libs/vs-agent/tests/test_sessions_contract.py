@@ -31,6 +31,7 @@ from vs_agent.api import (
     AgentTurnRequest,
     AgentTurnResult,
     AgentTurnTimeoutError,
+    AgentUsage,
     ClientAgentSessions,
     Completed,
     DurableSessionStore,
@@ -364,12 +365,69 @@ def test_nondurable_key_is_configuration_error(harness: _Harness) -> None:
 
 def test_malformed_ledger_fails_typed_before_dispatch(harness: _Harness) -> None:
     slot = harness.namespace.slot("malformed.json", AgentInvocationState)
-    harness.namespace.write_bytes("malformed.json", b'{"schema_version":3}')
+    harness.namespace.write_bytes("malformed.json", b'{"schema_version":"not a version"}')
     sessions = ClientAgentSessions(harness.client, slot, threads=SimThreads())
     sessions.bind(KEY, harness.spec, harness.turn)
     with pytest.raises(SessionPersistenceError, match="read invocation ledger"):
         sessions.resume(KEY, harness.message, "resume-1")
     assert harness.boundary.calls == 1
+
+
+def _version_two_ledger(session_id: str) -> dict[str, object]:
+    """A ledger as a build of version 2 wrote it: one completed turn, usage without the new fields.
+
+    ``session_id`` is the conversation the turn ran in, so it continues the live checkpoint."""
+    completed = Completed(
+        session_key=str(KEY),
+        invocation_id="turn-1",
+        result=AgentTurnResult(
+            text="done", usage=AgentUsage(input_tokens=7), provider_session_id=session_id
+        ),
+        checkpoint=AgentSessionCheckpoint(session_key=str(KEY), provider_session_id=session_id),
+    )
+    record = AgentInvocationRecord(payload_digest="digest", outcome=completed)
+    stored = json.loads(AgentInvocationState(invocations={"turn-1": record}).model_dump_json())
+    stored["schema_version"] = 2
+    usage = stored["invocations"]["turn-1"]["outcome"]["result"]["usage"]
+    del usage["cost_basis"], usage["by_model"]
+    return stored
+
+
+def test_a_run_paused_under_ledger_version_two_resumes(harness: _Harness) -> None:
+    """The previous ledger is read as the current one, its unknowns unknown, and written as it."""
+    live = harness.client.provider_session_id(KEY)
+    assert live is not None
+    harness.namespace.write_bytes("v2.json", json.dumps(_version_two_ledger(live)).encode())
+    slot = harness.namespace.slot("v2.json", AgentInvocationState)
+    sessions = ClientAgentSessions(harness.client, slot, threads=SimThreads())
+    sessions.bind(KEY, harness.spec, harness.turn)
+
+    stored = sessions.inspect(KEY, "turn-1")
+    assert isinstance(stored, Completed)
+    assert stored.result.usage == AgentUsage(input_tokens=7)
+    assert stored.result.usage.cost_basis is None
+    assert stored.result.usage.by_model == ()
+
+    fresh = sessions.resume(KEY, harness.message, "resume-1")
+    assert isinstance(fresh, Completed)
+    saved = json.loads(harness.namespace.read_bytes("v2.json") or b"")
+    assert saved["schema_version"] == 3
+    assert set(saved["invocations"]) == {"turn-1", "resume-1"}
+
+
+@pytest.mark.parametrize("version", [1, 4, 99])
+def test_a_ledger_of_any_other_version_is_refused_naming_the_remedy(
+    harness: _Harness, version: int
+) -> None:
+    stored = _version_two_ledger("p")
+    stored["schema_version"] = version
+    harness.namespace.write_bytes("other.json", json.dumps(stored).encode())
+    slot = harness.namespace.slot("other.json", AgentInvocationState)
+    sessions = ClientAgentSessions(harness.client, slot, threads=SimThreads())
+    sessions.bind(KEY, harness.spec, harness.turn)
+
+    with pytest.raises(SessionPersistenceError, match=rf"version {version} .*start a new run"):
+        sessions.resume(KEY, harness.message, "resume-1")
 
 
 def test_a_ledger_an_older_version_wrote_is_refused_naming_the_remedy(harness: _Harness) -> None:
@@ -681,6 +739,10 @@ def test_inspection_rejects_nondurable_key_before_loading_ledger(harness: _Harne
     assert harness.boundary.calls == 1
 
 
+_FOREIGN_VERSION = AgentInvocationState.model_fields["schema_version"].default + 1
+"""A ledger version no VibeSys reads yet, so the ledger refuses it whatever the current one is."""
+
+
 class _SchemaFailureStore(FakeAgentInvocationStore):
     def __init__(self, operation: str) -> None:
         super().__init__()
@@ -688,12 +750,12 @@ class _SchemaFailureStore(FakeAgentInvocationStore):
 
     def load_optional(self) -> AgentInvocationState | None:
         if self.operation == "load":
-            return AgentInvocationState.model_validate({"schema_version": 3})
+            return AgentInvocationState.model_validate({"schema_version": _FOREIGN_VERSION})
         return super().load_optional()
 
     def save(self, model: AgentInvocationState) -> None:
         if self.operation == "save":
-            AgentInvocationState.model_validate({"schema_version": 3})
+            AgentInvocationState.model_validate({"schema_version": _FOREIGN_VERSION})
         super().save(model)
 
 

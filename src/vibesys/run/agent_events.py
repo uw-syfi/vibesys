@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from pydantic import JsonValue, TypeAdapter
+from pydantic import JsonValue, TypeAdapter, ValidationError
 from pydantic_core import to_jsonable_python
 
 from vibesys.events import (
@@ -15,6 +15,7 @@ from vibesys.events import (
     CoreEvent,
     CoreEventType,
     JsonResultPayload,
+    ModelTurnUsageData,
     ProviderSwitchedData,
     QuotaAbandonedData,
     QuotaPausedData,
@@ -31,11 +32,15 @@ from vibesys.events import (
     UsageUpdateData,
     make_core_event,
 )
+from vibesys.records.api import usage_split_refusals
 from vs_decode.api import Unreadable, decode_json
 from vs_sim.api import Clock, utc_datetime
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from vs_agent.api import (
+        AgentModelUsage,
         AgentQuotaError,
         AgentRateLimit,
         AgentUsage,
@@ -55,6 +60,41 @@ _MAX_TOOL_RESULT_BYTES = 8 * 1024 * 1024
 def _json_safe(args: dict[str, Any]) -> dict[str, Any]:
     """Coerce tool arguments to a JSON-serializable dictionary."""
     return to_jsonable_python(args, fallback=repr)
+
+
+def _model_turn_usage(row: AgentModelUsage) -> ModelTurnUsageData:
+    """The journal's row for one model's share of a turn, carried over unchanged."""
+    return ModelTurnUsageData(
+        model=row.model,
+        input_tokens=row.input_tokens,
+        cache_creation_input_tokens=row.cache_creation_input_tokens,
+        cache_creation_1h_input_tokens=row.cache_creation_1h_input_tokens,
+        cache_read_input_tokens=row.cache_read_input_tokens,
+        output_tokens=row.output_tokens,
+        reasoning_output_tokens=row.reasoning_output_tokens,
+        turns=row.turns,
+        recorded_usd=row.recorded_usd,
+        speed=row.speed,
+        primary=row.primary,
+    )
+
+
+def _journal_split(
+    rows: Sequence[AgentModelUsage],
+) -> tuple[tuple[ModelTurnUsageData, ...], tuple[str, ...]]:
+    """The per-model rows a journal line may carry, and why they were refused when it may not.
+
+    The rules live in the ``.proto`` the projector validates against, and a line carrying rows it
+    refuses would be written first and fail the projection after, which disables the run log's
+    tee for the rest of the process. So the rows are checked here, before the line exists. A
+    refused split is dropped whole, never in part: the rest of the turn is still true.
+    """
+    try:
+        split = tuple(_model_turn_usage(row) for row in rows)
+    except ValidationError as error:
+        return (), tuple(f"by_model: {each['msg']}" for each in error.errors())
+    reasons = usage_split_refusals(split)
+    return ((), reasons) if reasons else (split, ())
 
 
 def _classify_tool_result(content: str) -> ToolResultPayload | None:
@@ -237,8 +277,24 @@ class CoreAgentEventSink:
         agent_kind: str | None = None,
         round_label: str | None = None,
         invocation_id: str | None = None,
+        provider_session_id: str | None = None,
     ) -> None:
-        """Emit settled token and cost accounting for one finished turn."""
+        """Emit settled token and cost accounting for one finished turn.
+
+        The line always records a cost basis (``NOT_REPORTED`` when the usage names none), so a
+        line without one was written before the field existed. A per-model split the ``.proto``
+        refuses is left out and the refusal is reported on the diagnostic channel.
+        """
+        split, refusals = _journal_split(usage.by_model)
+        if refusals:
+            self.agent_output(
+                "[usage] the per-model split of this turn was refused and is not recorded: "
+                + "; ".join(refusals),
+                channel="diagnostic",
+                agent_kind=agent_kind,
+                round_label=round_label,
+                invocation_id=invocation_id,
+            )
         self._emit(
             CoreEventType.TURN_USAGE_RECORDED,
             TurnUsageData(
@@ -249,6 +305,9 @@ class CoreAgentEventSink:
                 reasoning_output_tokens=usage.reasoning_output_tokens,
                 total_cost_usd=usage.total_cost_usd,
                 duration_ms=usage.duration_ms,
+                cost_basis=usage.recorded_cost_basis,
+                by_model=split,
+                provider_session_id=provider_session_id or None,
             ),
             agent_kind=agent_kind,
             round_label=round_label,

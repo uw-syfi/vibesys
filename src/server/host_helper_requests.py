@@ -16,8 +16,8 @@ The reads of a project's runs (``ProjectRun``, ``run_summaries``, ``project_runs
 
 Public surface: ``answer``, ``apply_registered_project``, ``RegisteredProjectHost``,
 ``launch_registered_run``, ``registry_start_request``,
-``registry_read_source``, ``connect``, ``negotiate``, ``Negotiated``,
-``HelperHost``; the interfaces ``Projects``, ``Directories``,
+``registry_read_source``, ``describe_machine``, ``preflight_facts``, ``connect``, ``negotiate``,
+``Negotiated``, ``HelperHost``; the interfaces ``Projects``, ``Directories``,
 ``ProjectMutationExamples``, ``ProjectMutationDirectories``, ``RunLauncher`` and
 ``CheckoutProbe`` with the values they exchange (``ScannedEntry``, ``Scan``, ``PathHints``);
 ``home_relative``, ``without_home``, ``complete_path``, ``select_completions``, ``split_prefix``,
@@ -32,12 +32,12 @@ import posixpath
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Literal, Protocol, assert_never, overload
 
 from pydantic import TypeAdapter
 
+from server import lazy_module
 from server.host_api import (
     CLI_PROVIDER_FLAG,
     ENVIRONMENT_FLAGS,
@@ -155,12 +155,18 @@ from server.relay import (
 from vs_decode.api import Unreadable, decode_json
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping
+    from collections.abc import Callable, Iterable, Iterator, Mapping
     from datetime import tzinfo
-    from types import ModuleType
 
     from typing_extensions import TypeIs
 
+    from server import (
+        host_harness,
+        host_operation_reads,
+        host_operation_types_generated,
+        host_preflight,
+        host_run_reads,
+    )
     from server.host_agent_logins import AgentLogin, LoginStarted, LoginUnavailable
     from server.host_api import HarnessChoice, RunDigestUnreadable
     from server.host_compute import MeasurementTarget
@@ -179,9 +185,19 @@ if TYPE_CHECKING:
     from server.host_run_reads import ProjectRun
     from server.registry import InstanceInspector, LiveRegistry, StopEffects
     from server.run_summary import Summarized
+    from vibesys.api.host_operations import reads as read_operations
     from vs_project.api import OperatorDialer
+    from vs_proto import api as wire
     from vs_proto.api import host_payloads as pb
     from vs_sim.api import Clock, Connection
+else:
+    host_harness = lazy_module("server.host_harness")
+    host_operation_reads = lazy_module("server.host_operation_reads")
+    host_operation_types_generated = lazy_module("server.host_operation_types_generated")
+    host_preflight = lazy_module("server.host_preflight")
+    host_run_reads = lazy_module("server.host_run_reads")
+    read_operations = lazy_module("vibesys.api.host_operations.reads")
+    wire = lazy_module("vs_proto.api")
 
 SCAN_LIMIT: Final = 10_000
 """The most entries ``paths.complete`` reads from one directory."""
@@ -232,8 +248,12 @@ class Projects(Protocol):
     ``task_invalid`` (what it found does not parse).
     """
 
-    def saved_runs(self, request: pb.ListSavedRunsRequest) -> pb.ListSavedRunsResponse:
-        """The native metadata listing, importing readable retained runs."""
+    def stream_runs(self, project: Path) -> tuple[Path, Iterator[ProjectRun]]:
+        """The project's resolved root and one lazy scan of its runs, in discovery order.
+
+        The iterator raises ``ProjectLookupError`` as these methods do. A run removed while it
+        runs is left out and a run added may be; neither fails the scan.
+        """
         ...
 
     def tasks(self, project: Path) -> TaskList:
@@ -248,14 +268,19 @@ class Projects(Protocol):
         """
         ...
 
-    def runs(self, project: Path) -> tuple[Path, tuple[ProjectRun, ...]]:
-        """The project's resolved root and its runs, oldest first."""
+    def named_runs(
+        self, project: Path, run_ids: Iterable[str]
+    ) -> tuple[Path, tuple[ProjectRun, ...]]:
+        """The project's resolved root and those of ``run_ids`` it holds, oldest first.
+
+        The cost follows ``run_ids``, not the project's size. An id it does not hold is left out.
+        """
         ...
 
     def run_digest(self, project_root: Path, run_id: str) -> RunDigest | RunDigestUnreadable | None:
         """What run ``run_id``'s journal says at a glance; ``None`` when this machine holds none.
 
-        ``project_root`` is a root ``runs`` returned. Never raises: a journal that exists and
+        ``project_root`` is a root ``named_runs`` returned. Never raises: a journal that exists and
         cannot be read is ``RunDigestUnreadable``. A run recorded in the checkout whose journal
         is not in the log store of ``project_root`` has no digest: an empty one would say the
         run recorded nothing and stopped.
@@ -844,7 +869,7 @@ def answer(
 
 def is_registry_read(request: HelperRequest) -> TypeIs[RegistryReadRequest]:
     """Load the generated narrowing only when a caller goes beyond hello."""
-    return import_module("server.host_operation_types_generated").is_registry_read(request)
+    return host_operation_types_generated.is_registry_read(request)
 
 
 def _answer(
@@ -911,7 +936,7 @@ def _answer(
 def _project_reply(request: RunsListRequest, host: HelperHost) -> RunsListReply:
     """Answer a project's saved-run listing."""
     project = Path(_host_path(request.project, host.directories))
-    runs = import_module("server.host_run_reads").project_runs(
+    runs = host_run_reads.project_runs(
         host, project, request.digest_runs or (), with_dashboard=bool(request.with_dashboard)
     )
     return RunsListReply(request_id=request.request_id, runs=runs)
@@ -1058,7 +1083,7 @@ def _run_history_reply(
     if isinstance(request, RunsSummaryRequest):
         return _run_summary_reply(request, host)
     if isinstance(request, UsageWindowRequest):
-        return import_module("server.host_run_reads").usage_window_reply(
+        return host_run_reads.usage_window_reply(
             request, host, Path(_host_path(request.project, host.directories))
         )
     project = Path(_host_path(request.project, host.directories))
@@ -1219,7 +1244,7 @@ def _unconfigured_target(request_id: str | None, target: SlurmTarget | ModalTarg
     )
 
 
-def _preflight_facts(
+def preflight_facts(
     request: RunPreflightRequest, host: HelperHost
 ) -> RunPreflightReply | HelperError:
     """Check whether the run ``run.start`` would launch with these inputs can start."""
@@ -1345,20 +1370,15 @@ _REPLY: TypeAdapter[HelperReply] = TypeAdapter(HelperReply)
 
 def read_reply(request: HelperRequest, source: HostReadSource) -> HelperReply | HelperError:
     """Execute a registered helper read; pairing and routing come from descriptors."""
-    operation = _wire().host_operations.ADAPTER_OPERATIONS[request.type]
+    operation = wire.host_operations.ADAPTER_OPERATIONS[request.type]
     payload = request.model_dump(mode="json", exclude={"type", "deadline_ms"})
-    accepted = operation.accept(_wire().from_mapping(operation.request, payload))
+    accepted = operation.accept(wire.from_mapping(operation.request, payload))
     try:
-        encoded = import_module("vibesys.api.host_operations.api").execute_read(accepted, source)
-    except import_module("server.host_operation_reads").ReadRefusedError as error:
+        encoded = read_operations.execute_read(accepted, source)
+    except host_operation_reads.ReadRefusedError as error:
         return error.refusal
     response = operation.response.from_binary(encoded)
-    return _REPLY.validate_python({"type": request.type, **_wire().to_mapping(response)})
-
-
-def _wire() -> ModuleType:
-    """Load protobuf contracts only when a migrated read executes, preserving light startup."""
-    return import_module("vs_proto.api")
+    return _REPLY.validate_python({"type": request.type, **wire.to_mapping(response)})
 
 
 def registry_read_source(host: HelperHost, request: HelperRequest | None = None) -> HostReadSource:
@@ -1368,11 +1388,11 @@ def registry_read_source(host: HelperHost, request: HelperRequest | None = None)
         if isinstance(request, RunPreflightRequest) and request.agents is not None
         else None
     )
-    return import_module("server.host_operation_reads").HostReadSource(
+    return host_operation_reads.HostReadSource(
         host,
         role_order,
         describe=lambda: describe_machine(host),
-        preflight=lambda value: _preflight_facts(value, host),
+        preflight=lambda value: preflight_facts(value, host),
     )
 
 
@@ -1443,7 +1463,6 @@ def apply_registered_project(
     A destination that already holds something is the create answer ``taken``.
     Every other ``ProjectLookupError`` stays with the caller, which stores a refusal.
     """
-    wire = _wire()
     payloads = wire.host_payloads
     if slot == "create_example" and isinstance(request, payloads.CreateExampleRequest):
         try:
@@ -1474,7 +1493,6 @@ def apply_registered_project(
 
 
 def _registry_created(created: CreatedProject) -> pb.CreatedProject:
-    wire = _wire()
     return wire.from_mapping(wire.host_payloads.CreatedProject, created.model_dump(mode="json"))
 
 
@@ -1497,12 +1515,12 @@ def registry_start_request(request: pb.StartRunRequest) -> RunStartRequest:
 def _start_harness(harness: pb.StartRunHarness | None) -> HarnessChoice | None:
     if harness is None:
         return None
-    choice = import_module("server.host_harness").HarnessChoice
+    choice = host_harness.HarnessChoice
     return choice(provider=harness.provider, model=harness.model)
 
 
 def _start_agents(agents: Iterable[pb.StartRunAgent]) -> dict[str, HarnessChoice] | None:
-    choice = import_module("server.host_harness").HarnessChoice
+    choice = host_harness.HarnessChoice
     mapped = {}
     for agent in agents:
         harness = agent.harness
@@ -1516,43 +1534,42 @@ def _start_agents(agents: Iterable[pb.StartRunAgent]) -> dict[str, HarnessChoice
 def _start_options(options: pb.StartRunOptions | None) -> RunOptions | None:
     if options is None:
         return None
-    preflight = import_module("server.host_preflight")
-    payloads = import_module("vs_proto.api").host_payloads
+    payloads = wire.host_payloads
     rounds = options.rounds or None
     limit = options.time_limit_s or None
     chosen = {
-        payloads.StartRunResults.KEEP: preflight.RunResults.KEEP,
-        payloads.StartRunResults.PUBLISH_GITHUB: preflight.RunResults.PUBLISH_GITHUB,
+        payloads.StartRunResults.KEEP: host_preflight.RunResults.KEEP,
+        payloads.StartRunResults.PUBLISH_GITHUB: host_preflight.RunResults.PUBLISH_GITHUB,
     }.get(options.results)
     roles = tuple(_start_role(role) for role in options.roles)
     if rounds is None and limit is None and chosen is None and not roles:
         return None
-    return preflight.RunOptions(rounds=rounds, time_limit_s=limit, results=chosen, roles=roles)
+    return host_preflight.RunOptions(rounds=rounds, time_limit_s=limit, results=chosen, roles=roles)
 
 
 def _start_role(role: pb.StartRunRole) -> RoleOption:
-    preflight = import_module("server.host_preflight")
-    payloads = import_module("vs_proto.api").host_payloads
+    payloads = wire.host_payloads
     effort = {
-        payloads.StartRunReasoning.DEFAULT: preflight.ReasoningEffort.DEFAULT,
-        payloads.StartRunReasoning.LOW: preflight.ReasoningEffort.LOW,
-        payloads.StartRunReasoning.MEDIUM: preflight.ReasoningEffort.MEDIUM,
-        payloads.StartRunReasoning.HIGH: preflight.ReasoningEffort.HIGH,
-    }.get(role.reasoning, preflight.ReasoningEffort.DEFAULT)
-    return preflight.RoleOption(role=role.role, model=role.model or None, reasoning_effort=effort)
+        payloads.StartRunReasoning.DEFAULT: host_preflight.ReasoningEffort.DEFAULT,
+        payloads.StartRunReasoning.LOW: host_preflight.ReasoningEffort.LOW,
+        payloads.StartRunReasoning.MEDIUM: host_preflight.ReasoningEffort.MEDIUM,
+        payloads.StartRunReasoning.HIGH: host_preflight.ReasoningEffort.HIGH,
+    }.get(role.reasoning, host_preflight.ReasoningEffort.DEFAULT)
+    return host_preflight.RoleOption(
+        role=role.role, model=role.model or None, reasoning_effort=effort
+    )
 
 
 def _start_measure(measure: pb.StartRunMeasure | None) -> MeasurementTarget | None:
-    compute = import_module("server.host_compute")
     if measure is None or measure.target is None:
         return None
     match measure.target.field:
         case "same_machine":
-            return compute.SameMachine()
+            return SameMachine()
         case "slurm_cluster":
-            return compute.SlurmTarget(cluster=measure.target.value)
+            return SlurmTarget(cluster=measure.target.value)
         case "modal":
-            return compute.ModalTarget()
+            return ModalTarget()
         case _:
             message = "unknown measure target"
             raise ValueError(message)

@@ -1229,6 +1229,10 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
         EdgeKind.LOG,
         "the run.lock lifetime descriptor",
     ),
+    "libs/vs-runlog/src/vs_runlog/_file_fold_cache.py": (
+        EdgeKind.LOG,
+        "state.pb, the cache of the fold, read and replaced atomically; its judgment stays pure",
+    ),
     "libs/vs-runlog/src/vs_runlog/_file.py": (
         EdgeKind.LOG,
         "the run.log file sink and recovery reader; framing stays in the pure _framing module",
@@ -1525,6 +1529,10 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
     "src/server/host_compute_runtime.py": (
         EdgeKind.STORE,
         "the machine's compute settings file and the Modal and Slurm files it reads",
+    ),
+    "src/server/host_task_goal.py": (
+        EdgeKind.INPUT_LOADER,
+        "a task's OBJECTIVE.md, the goal both catalogs show",
     ),
     "src/server/host_helper_machine.py": (
         EdgeKind.OS_ADAPTER,

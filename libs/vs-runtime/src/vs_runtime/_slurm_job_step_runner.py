@@ -15,9 +15,13 @@ still wants, and a cancel goes through ``relinquish``, which drops this run's le
 the job to every other run that holds one. The one job ``clear`` ends is the job of a withdrawn
 attempt, which no run wants by definition.
 
-A job this runner cancelled is never attached to. The cancel interrupted the attempt (a pause,
-a drain deadline) and left no result, so the next attempt has to run the step: it takes the
-next handle of the tag, and the ledger, which holds a withdrawn attempt final, claims a new job.
+A pause or a drain deadline interrupts the attempt and leaves its job queued or running: the
+cancel would throw away the queue time and the work done, and the job survives the host by
+design. The next attempt's ``clear`` adopts it and its ``run`` attaches.
+
+A job that was cancelled is never attached to. Its cancel ended the step, or someone else
+cancelled it, so the next attempt has to run the step: it takes the next handle of the tag, and
+the ledger, which holds a withdrawn attempt final, claims a new job.
 """
 
 from __future__ import annotations
@@ -43,6 +47,7 @@ if TYPE_CHECKING:
     from vs_core.api import Request, RequestId, SubmitMeasurement
     from vs_core.api.recovery import StepResult
     from vs_evaluation.api import ExecutorPoll
+    from vs_runtime._job_registry import JobRegistry
     from vs_runtime._semantic_slurm_evaluation import SemanticSlurmEvaluationExecutor
     from vs_runtime._step_runner import CancelSignal
     from vs_sim.api import BlockingRunner, Clock
@@ -75,16 +80,23 @@ class SlurmJobStepRunner:
         self,
         executor: SemanticSlurmEvaluationExecutor,
         scheduler: SlurmScheduler,
+        registry: JobRegistry,
         *,
         clock: Clock,
         poll_interval_s: float,
     ) -> None:
-        """Run on *executor*, which attaches through the *scheduler*'s ledger; poll every interval."""
+        """Run on *executor*, which attaches through the *scheduler*'s ledger; poll every interval.
+
+        Each job is registered in *registry* before it is submitted, and a pause leaves it running:
+        a Slurm job survives the host, and the next attempt adopts it.
+        """
         self._executor = executor
         self._ledger = scheduler.ledger
         self._cluster = scheduler.cluster
         self._blocking = ShieldedBlockingRunner(scheduler.blocking)
-        self._job = JobStepRun(executor, clock=clock, poll_interval_s=poll_interval_s)
+        self._job = JobStepRun(
+            executor, registry, clock=clock, poll_interval_s=poll_interval_s, outlives_host=True
+        )
 
     async def run(
         self,

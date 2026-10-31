@@ -1,0 +1,54 @@
+{
+  "name": "@vibesys/subscription",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "vibesys": {
+    "layer": "domain",
+    "entries": {
+      ".": "neutral",
+      "./testing": "neutral",
+      "./contract": "node"
+    }
+  },
+  "exports": {
+    ".": {
+      "@vibesys/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./testing": {
+      "@vibesys/source": "./src/testing/index.ts",
+      "types": "./dist/testing/index.d.ts",
+      "default": "./dist/testing/index.js"
+    },
+    "./contract": {
+      "@vibesys/source": "./src/testing/port-contract.ts",
+      "types": "./dist/testing/port-contract.d.ts",
+      "default": "./dist/testing/port-contract.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!dist/.*.tsbuildinfo"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.lib.json tsconfig.testing.json tsconfig.contract.json",
+    "check": "tsc -b",
+    "test": "node ../../tools/scripts/run_bun_tests.mjs ./src"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.2",
+    "@vibesys/transport": "workspace:*",
+    "typescript": "^5.8.3",
+    "fast-check": "4.10.2",
+    "@vibesys/store": "workspace:*"
+  },
+  "dependencies": {
+    "@vibesys/hosts": "workspace:*",
+    "@vibesys/machine": "workspace:*",
+    "@vibesys/proto": "workspace:*",
+    "@bufbuild/protobuf": "2.16.0",
+    "xstate": "5.33.2"
+  }
+}

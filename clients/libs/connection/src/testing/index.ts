@@ -9,7 +9,7 @@
  * Its one consumer, this package's own `host-connection.test.ts`, imports it by its relative path.
  */
 
-export {FakeGateway, type FakeTail} from './fake-gateway.js';
+export {FakeGateway, type FakeSubscribe, type FakeTail, type FakeWatch} from './fake-gateway.js';
 export {
   ECHO_SERVER,
   FAKE_HARNESSES,
@@ -27,5 +27,12 @@ export {
   type FakeRunStream,
   idleRunWatch,
 } from './fake-run-gateway.js';
+export {
+  type FakeSubscribeStream,
+  FakeSubscribeStreams,
+  idleSubscriptions,
+} from './fake-subscribe-streams.js';
+export {hubPortRig} from './hub-port-rig.js';
+export {hubRig, settle} from './hub-rig.js';
 export {commandOf, olderHost} from './older-host.js';
 export {phaseReached} from './phase-reached.js';

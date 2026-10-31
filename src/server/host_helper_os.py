@@ -9,7 +9,6 @@ is light (``tests/architecture/test_light_entrypoints.py``).
 Public surface: ``FileProjects``, ``ProjectStopIntents``, ``OsDirectories``,
 ``SubprocessRunLauncher``,
 ``SubprocessRunPreflight``,
-``read_task_goal``,
 ``GitCheckoutProbe`` and ``StoreLogReader`` with ``run_streams_directory``.
 """
 
@@ -20,12 +19,12 @@ import os
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO
 
 from pydantic import JsonValue, TypeAdapter
 
+from server import lazy_module
 from server.host_api import (
     RUN_EVENTS_FILE,
     RUN_EVENTS_READ_MAX_BYTES,
@@ -45,12 +44,10 @@ from server.host_api import (
     RunDigestUnreadable,
 )
 from server.host_examples import (
-    ExampleObjective,
     ProjectLookupError,
     TaskGoal,
     TaskList,
     TaskSummary,
-    bounded_goal,
 )
 from server.host_helper_logs import (
     LogStoreCorruptError,
@@ -88,25 +85,30 @@ from vs_project.api import (
     NullGitTrackerEvents,
     Project,
     ProjectError,
-    load_objectives,
+    is_run_id,
 )
 from vs_sim.api import ProcessSpec
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Iterable, Iterator, Sequence
 
-    from server.host_run_reads import ProjectRun
+    from server import host_run_reads, host_task_goal, run_digest_store
     from server.run_summary import Summarized
     from server.run_summary_cache import SummaryReader
     from vs_logs.read import LogReader as StoreReader
-    from vs_project.api import GitRepositoryFactory, TaskDirectory
-    from vs_proto.api import host_payloads as pb
+    from vs_project.api import GitRepositoryFactory, OrchestrationRunManifest
+    from vs_runlog import api as run_log_library
     from vs_sim.api import (
         CommandProbe,
         ProcessLauncher,
         SleepingClock,
         Threads,
     )
+else:
+    host_run_reads = lazy_module("server.host_run_reads")
+    host_task_goal = lazy_module("server.host_task_goal")
+    run_digest_store = lazy_module("server.run_digest_store")
+    run_log_library = lazy_module("vs_runlog.api")
 
 _PYPROJECT_LIMIT_BYTES = 1 << 20
 _LAUNCH_OUTPUT_TAIL = 2000
@@ -124,7 +126,7 @@ def _run_began(project_root: Path, run_id: str) -> datetime:
     if not path.is_file():
         return _journal_began(Project.log_directory_for(project_root, run_id))
     try:
-        with import_module("vs_runlog.api").open_run_log(path) as records:
+        with run_log_library.open_run_log(path) as records:
             first = next(iter(records), None)
     except OSError:
         return datetime.fromtimestamp(0, UTC)
@@ -136,6 +138,31 @@ def _run_began(project_root: Path, run_id: str) -> datetime:
     ):
         return datetime.fromtimestamp(first.at.to_seconds(), UTC)
     return datetime.fromtimestamp(0, UTC)
+
+
+def _holds_log(project_root: Path, run_id: str) -> bool:
+    """Whether this machine's log store holds a journal or a typed log of the run."""
+    return (
+        Project.log_directory_for(project_root, run_id) / RUN_EVENTS_FILE
+    ).is_file() or Project.run_log_path_for(project_root, run_id).is_file()
+
+
+def _recorded_run(manifest: OrchestrationRunManifest) -> host_run_reads.ProjectRun:
+    return host_run_reads.ProjectRun(
+        run_id=manifest.run_id,
+        task=manifest.task_name,
+        display_name=manifest.display_name,
+        created_at=manifest.created_at,
+    )
+
+
+def _logged_run(project_root: Path, run_id: str) -> host_run_reads.ProjectRun:
+    return host_run_reads.ProjectRun(
+        run_id=run_id,
+        task=None,
+        display_name=run_id,
+        created_at=_run_began(project_root, run_id),
+    )
 
 
 def _journal_began(log_directory: Path) -> datetime:
@@ -193,29 +220,6 @@ def tally_journal(stream: BinaryIO, previous: JournalTally) -> JournalTally:
     return JournalTally(size, lines)
 
 
-def read_task_goal(task: TaskDirectory) -> TaskGoal:
-    """What ``task`` is for: its ``OBJECTIVE.md`` (cut to ``GOAL_MAX_CHARS``) and its axes.
-
-    Raises ``OSError`` for a file that cannot be read and ``ValueError`` (naming the file) for
-    ``objectives.toml`` that is invalid or a goal that is not UTF-8 text.
-    """
-    objectives = load_objectives(task.path).objective
-    try:
-        text = task.objective_path.read_text(encoding="utf-8")
-    except UnicodeDecodeError as exc:
-        message = f"{task.objective_path} is not UTF-8 text: {exc}"
-        raise ValueError(message) from exc
-    goal, truncated = bounded_goal(text)
-    return TaskGoal(
-        task=task.name.value,
-        objectives=tuple(
-            ExampleObjective(metric=axis.name, direction=axis.direction) for axis in objectives
-        ),
-        goal=goal,
-        goal_truncated=truncated,
-    )
-
-
 class FileProjects:
     """Projects read through ``vs_project``'s ``Project`` on this filesystem.
 
@@ -235,30 +239,11 @@ class FileProjects:
         self._clock = clock
         self._repositories = repositories
         self._threads = threads
-        self._journals: dict[tuple[Path, str], Path] = {}
         self._tallies: dict[Path, JournalTally] = {}
         self._digests: dict[Path, tuple[tuple[int, int], RunDigest]] = {}
         self._native_digests: dict[Path, tuple[bytes, RunDigest]] = {}
         self._indexes: dict[Path, JournalIndex] = {}
         self._summary_reader: SummaryReader | None = None
-
-    def saved_runs(self, request: pb.ListSavedRunsRequest) -> pb.ListSavedRunsResponse:
-        """Read catalog metadata and bounded history availability observations."""
-        wire = import_module("vs_proto.api")
-        pb = wire.host_payloads
-
-        root, runs = self.runs(Path(request.project))
-        entries = [
-            pb.SavedRun(
-                run_id=run.run_id,
-                task=run.task,
-                display_name=run.display_name,
-                created_at=wire.Timestamp.from_datetime(run.created_at),
-                imported=pb.SavedRunImport.AVAILABLE,
-            )
-            for run in runs
-        ]
-        return import_module("server.host_saved_runs").page_saved_runs(request, root, entries)
 
     def tasks(self, project: Path) -> TaskList:
         """The project's tasks, ordered by name."""
@@ -278,55 +263,67 @@ class FileProjects:
         """The goal and axes of the project's task ``task``."""
         opened = self._initialized(project)
         try:
-            return read_task_goal(opened.select_task(task))
+            return host_task_goal.read_task_goal(opened.select_task(task))
         except (ProjectError, OSError, ValueError) as exc:
             raise ProjectLookupError(
                 HelperErrorCode.TASK_INVALID, str(opened.root), str(exc)
             ) from exc
 
-    def runs(self, project: Path) -> tuple[Path, tuple[ProjectRun, ...]]:
-        """The project's root and its runs, oldest first; runs this VibeSys cannot read are left out.
+    def stream_runs(self, project: Path) -> tuple[Path, Iterator[host_run_reads.ProjectRun]]:
+        """The project's root and one lazy scan of its runs, in discovery order.
 
         A run is its identity, not only its portable record: a run with a journal in this
         machine's log store is listed even when its manifest was never committed or its
-        branch is gone (a run that stopped at start-up), under its id with no task.
+        branch is gone (a run that stopped at start-up), under its id with no task. Runs this
+        VibeSys cannot read are left out, and so is a run removed while the scan passes it.
         """
         opened = self._open(project)
+        return opened.root, self._scanned_runs(opened)
+
+    def _scanned_runs(self, opened: Project) -> Iterator[host_run_reads.ProjectRun]:
+        known: set[str] = set()
         try:
-            history = GitRunHistory(opened, self._repositories(opened.root, NullGitTrackerEvents()))
-            manifests = history.recorded().runs
+            for manifest in self._history(opened).scan():
+                known.add(manifest.run_id)
+                yield _recorded_run(manifest)
             logged = Project.logged_run_ids_for(opened.root)
         except ProjectError as exc:
             raise ProjectLookupError(
                 HelperErrorCode.TASK_INVALID, str(opened.root), str(exc)
             ) from exc
-        project_run = import_module("server.host_run_reads").ProjectRun
-        recorded = [
-            project_run(
-                run_id=manifest.run_id,
-                task=manifest.task_name,
-                display_name=manifest.display_name,
-                created_at=manifest.created_at,
-            )
-            for manifest in manifests
+        for run_id in logged:
+            if run_id not in known and _holds_log(opened.root, run_id):
+                yield _logged_run(opened.root, run_id)
+
+    def named_runs(
+        self, project: Path, run_ids: Iterable[str]
+    ) -> tuple[Path, tuple[host_run_reads.ProjectRun, ...]]:
+        """The project's root and those of ``run_ids`` it holds, oldest first.
+
+        Reads the named runs only, so the cost follows ``run_ids`` and not the project's size.
+        A run is held as ``stream_runs`` lists it; an id it does not hold is left out.
+        """
+        opened = self._open(project)
+        wanted = tuple(dict.fromkeys(run_ids))
+        try:
+            manifests = self._history(opened).named(wanted).runs
+        except ProjectError as exc:
+            raise ProjectLookupError(
+                HelperErrorCode.TASK_INVALID, str(opened.root), str(exc)
+            ) from exc
+        known = {manifest.run_id for manifest in manifests}
+        logged = [
+            _logged_run(opened.root, run_id)
+            for run_id in wanted
+            if run_id not in known and is_run_id(run_id) and _holds_log(opened.root, run_id)
         ]
-        known = {run.run_id for run in recorded}
-        journaled = [
-            project_run(
-                run_id=run_id,
-                task=None,
-                display_name=run_id,
-                created_at=_run_began(opened.root, run_id),
-            )
-            for run_id in logged
-            if run_id not in known
-            and (
-                (Project.log_directory_for(opened.root, run_id) / RUN_EVENTS_FILE).is_file()
-                or Project.run_log_path_for(opened.root, run_id).is_file()
-            )
-        ]
-        runs = sorted([*recorded, *journaled], key=lambda run: (run.created_at, run.run_id))
+        runs = sorted(
+            [*map(_recorded_run, manifests), *logged], key=lambda run: (run.created_at, run.run_id)
+        )
         return opened.root, tuple(runs)
+
+    def _history(self, opened: Project) -> GitRunHistory:
+        return GitRunHistory(opened, self._repositories(opened.root, NullGitTrackerEvents()))
 
     def run_digest(self, project_root: Path, run_id: str) -> RunDigest | RunDigestUnreadable | None:
         """Committed store facts, or the journal of a run never converted to the store.
@@ -361,7 +358,7 @@ class FileProjects:
             cached = self._native_digests.get(path)
             if cached is not None and cached[0] == version:
                 return cached[1]
-            digest = import_module("server.run_digest_store").read_digest(path)
+            digest = run_digest_store.read_digest(path)
         except (OSError, ValueError) as exc:
             return RunDigestUnreadable(
                 message="the run's committed store could not be read: "
@@ -418,29 +415,20 @@ class FileProjects:
         )
 
     def _journal(self, project: Path, run_id: str) -> Path:
-        """The journal of ``run_id``, found through the project's run history once per channel.
+        """The journal of ``run_id``, which this machine's log store holds or does not.
 
-        Every page of one run's history used to list the project's runs through git again.
-        The helper serves one channel, so a run it found stays found. The cache is a dict
-        of immutable paths that workers only ever add to: two workers racing to resolve
-        the same run store the same value, so it needs no lock.
-
-        A run the project records but whose journal this machine does not hold (it is in another
-        project's log store, or its checkout predates the journal) is refused as ``unknown_run``
-        by every read, the summary's way: an empty page would call it a run with no events.
+        A run with a journal is a run the project lists, so this asks no git. A run the project
+        records but whose journal this machine does not hold (it is in another project's log
+        store, or its checkout predates the journal) is refused as ``unknown_run`` by every
+        read, the summary's way: an empty page would call it a run with no events.
         """
-        key = (project, run_id)
-        journal = self._journals.get(key)
-        if journal is None:
-            root, runs = self.runs(project)
-            if all(run.run_id != run_id for run in runs):
-                message = f"{root} has no run {run_id!r}"
-                raise ProjectLookupError(HelperErrorCode.UNKNOWN_RUN, str(root), message)
-            journal = Project.log_directory_for(root, run_id) / RUN_EVENTS_FILE
-            self._journals[key] = journal
-        if not journal.is_file():
-            message = f"{project} holds no journal of run {run_id!r}"
-            raise ProjectLookupError(HelperErrorCode.UNKNOWN_RUN, str(project), message)
+        root = self._open(project).root
+        journal = (
+            Project.log_directory_for(root, run_id) / RUN_EVENTS_FILE if is_run_id(run_id) else None
+        )
+        if journal is None or not journal.is_file():
+            message = f"{root} holds no journal of run {run_id!r}"
+            raise ProjectLookupError(HelperErrorCode.UNKNOWN_RUN, str(root), message)
         return journal
 
     def run_journal(self, project: Path, run_id: str) -> Path:

@@ -2,8 +2,8 @@ import {mkdirSync, writeFileSync} from 'node:fs';
 import {expect, test} from '@playwright/test';
 import {fixtureNamed} from '@vibesys/run-fixtures';
 import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
-import {KNOWN_FAILURES} from './checks/known-failures.js';
-import {IN_PAGE_CHECKS, report, SCREEN_CHECKS, screenCheck} from './checks/screen-check.js';
+import {KnownLedger} from './checks/known-ledger.js';
+import {IN_PAGE_CHECKS, SCREEN_CHECKS, screenCheck} from './checks/screen-check.js';
 import {openFixture, playLive} from './fixture-world.js';
 import {type Journey, walkScreens} from './screens.js';
 
@@ -85,6 +85,8 @@ const LIGHT: readonly Cell[] = [
 ];
 const CELLS: readonly Cell[] = [...MAIN, ...STRESS, ...LIGHT];
 
+const ledger = new KnownLedger('run-matrix');
+
 /**
  * The fixtures whose titles are written in scripts and emoji on purpose, to test how long text
  * wraps: no bundled face has those glyphs, and they are the run's own text, not the UI's, so they
@@ -92,7 +94,6 @@ const CELLS: readonly Cell[] = [...MAIN, ...STRESS, ...LIGHT];
  */
 const OTHER_SCRIPTS: ReadonlySet<string> = new Set(['long-titles']);
 
-const matched = new Set<string>();
 let walked = 0;
 const sheet: SheetEntry[] = [];
 const shots = process.env['SCREENS_DIR'] || undefined;
@@ -112,18 +113,13 @@ for (const cell of CELLS) {
     const unexplained: string[] = [];
     const moved = await walkScreens(page, cell.journey, async (screen, current) => {
       const name = nameOf(cell, screen);
-      const result = report(
-        name,
-        await screenCheck(
-          current,
-          OTHER_SCRIPTS.has(cell.fixture) ? IN_PAGE_CHECKS : SCREEN_CHECKS,
-        ),
-        KNOWN_FAILURES,
-      );
-      for (const each of result.known) matched.add(each.failure.id);
       unexplained.push(
-        ...result.unexplained.map(
-          each => `${name}: [${each.check}] ${each.message} (${each.where})`,
+        ...ledger.unexplained(
+          name,
+          await screenCheck(
+            current,
+            OTHER_SCRIPTS.has(cell.fixture) ? IN_PAGE_CHECKS : SCREEN_CHECKS,
+          ),
         ),
       );
       if (shots !== undefined) {
@@ -132,14 +128,7 @@ for (const cell of CELLS) {
         sheet.push({name, file});
       }
     });
-    const walkReport = report(nameOf(cell, 'walk'), moved, KNOWN_FAILURES);
-    for (const each of walkReport.known) matched.add(each.failure.id);
-    const lines = [
-      ...unexplained,
-      ...walkReport.unexplained.map(
-        each => `${nameOf(cell, 'walk')}: [${each.check}] ${each.message} (${each.where})`,
-      ),
-    ];
+    const lines = [...unexplained, ...ledger.unexplained(nameOf(cell, 'walk'), moved)];
     walked += 1;
     expect(lines, `screens that break the layout or wording checks:\n${lines.join('\n')}`).toEqual(
       [],
@@ -147,15 +136,7 @@ for (const cell of CELLS) {
   });
 }
 
-test('every known failure still happens, so a fixed defect leaves the list', () => {
-  // Only the whole matrix can say a failure is gone: a filtered run walked too few screens.
-  test.skip(walked < CELLS.length, 'a filtered run: not every screen was walked');
-  const stale = KNOWN_FAILURES.filter(failure => !matched.has(failure.id)).map(each => each.id);
-  expect(
-    stale,
-    `known failures no screen shows any more, delete them: ${stale.join(', ')}`,
-  ).toEqual([]);
-});
+ledger.requireEveryFailure(() => walked >= CELLS.length);
 
 test('the contact sheet shows every screen', async ({browser}) => {
   test.skip(shots === undefined, 'set SCREENS_DIR to write the screenshots and the contact sheet');
