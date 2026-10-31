@@ -6,6 +6,7 @@
  */
 
 import {expect, type Page} from '@playwright/test';
+import type {MachineDescription} from '@vibesys/hosts';
 import {computeSettings, computeSettingsEmpty, sshCluster} from '@vibesys/run-fixtures';
 import {
   type FakeBridgeSeed,
@@ -20,7 +21,7 @@ import {type SubscriptionSeed, subscriptionScript} from './subscription-fake.js'
 import {PROJECT, SEED, server} from './world.js';
 
 /** Facts of a machine with GPUs, two runs live. */
-const FACTS = {
+const FACTS: MachineDescription = {
   checkout: {root: '/home/me/vibesys', version: '0.1.1', commit: 'e66d941', dirty: false},
   hardware: {
     cpu_cores: 64,
@@ -240,7 +241,7 @@ export const WORLDS: readonly MachinesWorld[] = [
       [LOCAL, HOST_C],
       {local: FULL, 'ssh:host-c': OLD},
       {local: 3},
-      {'ssh:host-c': {kind: 'needs-update', facts: FACTS}},
+      {'ssh:host-c': {kind: 'needs-update', facts: null}},
     ),
     live: {
       hosts: {
