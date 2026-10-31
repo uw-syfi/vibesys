@@ -28,7 +28,14 @@ if TYPE_CHECKING:
 
     from vibesys.run.run_clock import RunClock
     from vs_core.api import CoreEvent, CoreState, RequestId, SearchDeclaration, Transition
-    from vs_core.api.recovery import End, Interruption, OpenStep, Run, StepResult
+    from vs_core.api.recovery import (
+        End,
+        Interruption,
+        OpenStep,
+        RecordRefusal,
+        Run,
+        StepResult,
+    )
     from vs_runtime.api.core import CommitObserver
     from vs_runtime.api.step_runner import CoreInputs, SearchRun, StepRecord
 
@@ -126,8 +133,8 @@ class ObservedInputs:
         """The step ``tag`` as the log has it, while it has no result."""
         return self._inputs.open_step(tag)
 
-    async def step_started(self, run: Run) -> StepRecord:
-        """Record that an attempt is about to start."""
+    async def step_started(self, run: Run) -> Run | RecordRefusal:
+        """Record that an attempt is about to start, or say why the rule would not run it now."""
         try:
             return await self._inputs.step_started(run)
         finally:
@@ -153,6 +160,13 @@ class ObservedInputs:
         """Record the end of the run."""
         try:
             await self._inputs.run_ended(end)
+        finally:
+            self._observe()
+
+    async def clock_advanced(self, at: float) -> None:
+        """Record that the run clock reached ``at``, which core asked for with ``Tick``."""
+        try:
+            await self._inputs.clock_advanced(at)
         finally:
             self._observe()
 
