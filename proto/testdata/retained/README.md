@@ -15,7 +15,7 @@ manifest, so a new case needs no test change:
 
 A directory holds the files the previous writer left: `run.log`, `run.head`, `keyframes/`, and
 `skeleton.response.pb`, the gateway's public Skeleton reply over them. The reply is pinned with
-`VIBESYS_UPDATE_GOLDEN=1 go test ./internal/server -run TestSavedPreviousWriters` from `gateway/`.
+`./scripts/regenerate_goldens.sh`, which sets `VIBESYS_UPDATE_GOLDEN=1` for the gateway tests.
 The client reopens that exact reply and checks its live and historical screens.
 
 ## Manifest fields

@@ -10,13 +10,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from tests.support.bounded_comparison import describe_difference
+from tests.support.wire_goldens import REGENERATE
 
 from vs_proto.api import ClientReplay, ClientReplayBatch, Record
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-REGENERATE = "uv run python -m tests.support.journey_fixtures"
 _NAMES = ("golden", "projection")
 
 
