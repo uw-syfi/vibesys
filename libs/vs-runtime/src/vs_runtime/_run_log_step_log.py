@@ -29,6 +29,7 @@ from vs_core.api.recovery import (
     at_rest,
     ended_message,
     finished_message,
+    fold_run,
     input_message,
     interrupted_message,
     may_start,

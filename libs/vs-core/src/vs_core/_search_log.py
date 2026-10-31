@@ -212,9 +212,11 @@ def _whole_state[S: StrategyState, C](
     decoded = decode_json(
         encoded, search.state_model, source="the search checkpoint in the log", max_bytes=max_bytes
     )
-    if isinstance(decoded, Unreadable):
-        raise ValueError(str(decoded))
-    return decoded
+    match decoded:
+        case Unreadable():
+            raise ValueError(str(decoded))
+        case _:
+            return decoded
 
 
 def _saved[S: StrategyState, C](

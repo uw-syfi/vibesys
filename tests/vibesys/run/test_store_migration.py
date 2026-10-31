@@ -53,7 +53,7 @@ from vs_runlog.api import ConfirmedLog
 from vs_runtime.api.core import CoreResumeError, RuntimeRecord
 from vs_runtime.api.core_shell_fixtures import CounterConfig, counter
 from vs_runtime.api.testing import FakeRunRecords
-from vs_sim.api.testing import examples
+from vs_sim.api.testing import SimThreads, examples
 
 if TYPE_CHECKING:
     from vs_core.api import SearchDriver
@@ -349,7 +349,7 @@ class Records(FakeRunRecords):
 
 def resume(saved: Saved, records: FakeRunRecords) -> Migration:
     """What a resuming process does first: open its epoch, then migrate if the log holds no start."""
-    log = ConfirmedLog(records)
+    log = ConfirmedLog(records, SimThreads())
     epoch = (records.records[-1].epoch if records.records else 0) + 1
     log.append(EpochStarted(epoch=epoch), epoch=epoch, at=Timestamp(), clock=0.0)
     return migrate_saved_run(
@@ -458,7 +458,7 @@ def test_an_append_that_cannot_be_confirmed_leaves_the_next_resume_to_decide(
     records = Records()
     log_epoch = 1
     records.records.append(header(1, log_epoch))
-    log = ConfirmedLog(records)
+    log = ConfirmedLog(records, SimThreads())
     if durable:
         records.fail_next_commit = True
     else:
