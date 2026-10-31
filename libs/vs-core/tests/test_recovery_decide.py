@@ -139,9 +139,6 @@ class Script:
     epochs: list[int] = field(default_factory=list)
     open_steps: list[list[Step]] = field(default_factory=list)
 
-    def prefix(self, length: int) -> tuple[list[Record], list[Step]]:
-        return self.records[:length], self.open_steps[length]
-
 
 class Builder:
     """Appends the records of one loop action and keeps the model in step with them."""
@@ -497,7 +494,8 @@ def test_a_log_the_rule_did_not_write_is_refused_rather_than_guessed_at() -> Non
     build.start(step)
     skipped = Run(step.request, step.tag, step.started + 2, 100.0)
     ghost = Run(request_of("ghost", 0), core.RequestId(root="ghost"), 1, 100.0)
-    for bad in (skipped, ghost, Run(step.request, step.tag, 1, 100.0)):
+    next_while_running = Run(step.request, step.tag, step.started + 1, 100.0)
+    for bad in (skipped, ghost, Run(step.request, step.tag, 1, 100.0), next_while_running):
         records = [
             *build.script.records,
             Record(

@@ -273,9 +273,13 @@ reverses it, and the run-transport page changes to match when the cutover lands.
   Deleting `state.pb`, keyframes and `run.head` changes no result.
 - `committed_seq` in `run.head` keeps its meaning: the gateway serves records up to the last durable one.
 
-A cost to measure in the fold PR: a fold over the whole log grows with run length. The cache bounds it to
-the records since the last keyframe; a property test fixes that a cached start and a full fold give equal
-states.
+A fold over the whole log grows with run length. The cache bounds it to the records since the last
+keyframe, and a property test fixes that a cached start and a full fold give equal states. Measured on a
+laptop (a `StepStarted` and `AttemptInterrupted` pair: 17 microseconds per record up to 4,000 records;
+a `CoreInput` that prepares a request: 0.3 to 0.6 milliseconds, the cost of `step` itself, which grows
+with the ledger): a log of 4,000 attempt records folds in 70 milliseconds, and `decide` takes 0.04
+milliseconds. A start that folds the whole log of a run with thousands of inputs is a second or more,
+which is why the cache exists; the keyframe interval is the cutover's to choose.
 
 ## Interfaces
 
@@ -602,7 +606,7 @@ These are facts the implementation must settle, found while checking the design 
   a provider that cannot resume from it falls back to a fresh conversation from retained content, which the
   client already does for a standalone message.
 - **Clear completeness on the Host run environment.** See [what fits none](#what-fits-none).
-- **Fold cost.** See [state.pb is a cache](#statepb-is-a-cache).
+- **Fold cost.** Measured, see [state.pb is a cache](#statepb-is-a-cache); the keyframe interval is open.
 - **Interim bodies.** Request and event bodies in the new records are not yet proto messages. Until phase 3
   generates them, schema evolution of those bodies follows today's envelope migration chain, which is
   deleted at phase 3.
