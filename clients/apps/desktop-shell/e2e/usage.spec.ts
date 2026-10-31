@@ -521,3 +521,21 @@ test('the tiles share a top line at every width', async ({page}) => {
     expect(rows.size, `${width}: ${tops.join(',')}`).toBeLessThanOrEqual(2);
   }
 });
+
+test('the Price button of a model is on screen at 660 px', async ({page}) => {
+  await open(page, caseNamed('one-run'), 660);
+  const price = page
+    .getByRole('table', {name: 'Models'})
+    .getByRole('button', {name: 'Price'})
+    .first();
+  await price.scrollIntoViewIfNeeded();
+  const box = await price.boundingBox();
+  const width = await page.evaluate(() => window.innerWidth);
+  expect(box).not.toBeNull();
+  expect(
+    (box?.x ?? -1) >= 0 && (box?.x ?? 0) + (box?.width ?? 0) <= width,
+    JSON.stringify(box),
+  ).toBe(true);
+  await price.click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+});
