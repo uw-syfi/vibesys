@@ -22,6 +22,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
 _PROTOCOL_VERSION = 2
+# This helper is mounted alone and cannot import ``vs_sandbox.step_marks``, so it restates the
+# step mark's name; ``tests/test_skypilot_evaluator_helper.py`` pins the two together.
+_STEP_TAG_ENV = "VIBESYS_STEP_TAG"
 _MAX_FRAME_BYTES = 1024 * 1024
 _FRAMEWORK_ARGUMENT_COUNT = 2
 # This helper is mounted alone and cannot import the protocol, so it restates the
@@ -245,13 +248,15 @@ def run_evaluator(  # noqa: PLR0913
     state_dir: Path,
     stdout: TextIO,
     stderr: TextIO,
+    step_tag: str | None = None,
     connect: Callable[[Path], BridgePeer] = connect_unix,
 ) -> int:
     """Request one trusted evaluator and relay its streamed output.
 
     ``state_dir`` is the caller-owned directory that keeps the pending token
     across helper restarts. It is never defaulted to a shared location.
-    ``connect`` dials the bridge; tests pass an in-memory dialer.
+    ``connect`` dials the bridge; tests pass an in-memory dialer. ``step_tag`` is the mark the
+    agent's turn started this process with: the bridge journals it with the invocation.
     """
     invocation_id, pending_path = _pending_invocation(kind, arguments, state_dir)
     with contextlib.closing(connect(socket_path)) as client:
@@ -274,6 +279,8 @@ def run_evaluator(  # noqa: PLR0913
             "arguments": arguments,
             "artifacts": artifacts,
         }
+        if step_tag:
+            request["step_tag"] = step_tag
         client.sendall(json.dumps(request, separators=(",", ":")).encode() + b"\n")
         reader = client.makefile("rb")
         session = _BridgeSession(client, reader, invocation_id, pending_path)
@@ -386,6 +393,7 @@ def main(argv: Sequence[str] | None = None, environ: Mapping[str, str] = os.envi
             state_dir=Path(state_dir),
             stdout=sys.stdout,
             stderr=sys.stderr,
+            step_tag=environ.get(_STEP_TAG_ENV),
         )
     )
 
