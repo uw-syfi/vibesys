@@ -9,7 +9,7 @@ ledger the same way, without driving a run.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from protobuf import Oneof
 from tests.vibesys.orchestration.multi._host import MultiHost, config
@@ -50,22 +50,37 @@ class SearchRecord:
         log.parent.mkdir(parents=True, exist_ok=True)
         with FileRunLogWriter(log, clock=ManualClock(), threads=SimThreads()) as writer:
             epoch = writer.epoch + 1
-            bodies = [Oneof("epoch_started", EpochStarted(epoch=epoch))]
-            if writer.sequence == 0:
-                bodies.append(Oneof("run_started", seed_message(core)))
-            bodies.append(
-                Oneof(
-                    "strategy_advanced",
-                    StrategyAdvanced(
-                        schema_version=1,
-                        strategy=Oneof("checkpoint", state.model_dump_json().encode()),
+            fresh = writer.sequence == 0
+
+            def stamped(body: Oneof[Literal["epoch_started"], EpochStarted]) -> Record:
+                return Record(seq=writer.sequence + 1, epoch=epoch, at=AT, clock=0.0, body=body)
+
+            writer.append(stamped(Oneof("epoch_started", EpochStarted(epoch=epoch))))
+            if fresh:
+                writer.append(
+                    Record(
+                        seq=writer.sequence + 1,
+                        epoch=epoch,
+                        at=AT,
+                        clock=0.0,
+                        body=Oneof("run_started", seed_message(core)),
+                    )
+                )
+            writer.append(
+                Record(
+                    seq=writer.sequence + 1,
+                    epoch=epoch,
+                    at=AT,
+                    clock=0.0,
+                    body=Oneof(
+                        "strategy_advanced",
+                        StrategyAdvanced(
+                            schema_version=1,
+                            strategy=Oneof("checkpoint", state.model_dump_json().encode()),
+                        ),
                     ),
                 )
             )
-            for body in bodies:
-                writer.append(
-                    Record(seq=writer.sequence + 1, epoch=epoch, at=AT, clock=0.0, body=body)
-                )
 
 
 __all__ = ["SearchRecord"]
