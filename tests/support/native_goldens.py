@@ -13,7 +13,7 @@ from __future__ import annotations
 import hashlib
 from typing import TYPE_CHECKING
 
-from tests.support.replay_golden import REGENERATE
+from tests.support.wire_goldens import REGENERATE
 
 from vs_proto.api import ClientReplay, Record
 
@@ -58,7 +58,7 @@ def report_stale(problems: list[str]) -> str:
     """The failure message for ``problems``: the first few, how many more, and the fix."""
     named = "\n".join(f"  {problem}" for problem in problems[:_NAMED])
     more = f"\n  and {len(problems) - _NAMED} more" if len(problems) > _NAMED else ""
-    return f"The native goldens are stale:\n{named}{more}\nRegenerate and commit them: {REGENERATE}"
+    return f"The goldens are stale:\n{named}{more}\nRegenerate and commit them: {REGENERATE}"
 
 
 def _stale_hashes(

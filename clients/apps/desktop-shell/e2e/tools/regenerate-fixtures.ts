@@ -1,8 +1,8 @@
-/** All shared and journey native goldens have one authoritative Python generator. */
+/** Every golden a projector or schema change invalidates has one command: regenerate_goldens.sh. */
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 
-execFileSync('uv', ['run', 'python', '-m', 'tests.support.journey_fixtures'], {
+execFileSync('./scripts/regenerate_goldens.sh', {
   cwd: fileURLToPath(new URL('../../../../../', import.meta.url)),
   stdio: 'inherit',
 });

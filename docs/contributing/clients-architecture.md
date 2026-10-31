@@ -423,6 +423,9 @@ pnpm --filter @vibesys/app-ui-gallery update:screenshots   # rewrite the baselin
 pnpm --filter @vibesys/app-ui-gallery test:e2e:linux       # compare against them locally
 ```
 
+`./scripts/regenerate_goldens.sh` does not rewrite these baselines: they need Docker and follow the UI, not
+the schema. Run `update:screenshots` yourself after a change that moves a rendering.
+
 A baseline update rewrites only the screens whose rendering changed: the suite launches
 Chromium with the flags in `DETERMINISTIC_RENDERING` (`playwright.config.ts`), which fix the
 rasterizer's per-run choices (LCD text, hinting, SIMD variants, raster threads) that otherwise
