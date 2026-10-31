@@ -19,6 +19,12 @@ export interface RunLivenessHint {
   readonly head?: RunHead | undefined;
 }
 
+/** The record log keeps a window of rows; `rows` of them are in hand, from records at or after `before`. */
+export interface Backfill {
+  readonly before: bigint;
+  readonly rows: number;
+}
+
 /** Records before a keyframe's boundary that the first Tail also delivers, for the run's record log. */
 export const RECORD_WINDOW = BigInt(RECORD_HISTORY_LIMIT);
 
@@ -35,6 +41,11 @@ export interface SkeletonLoad {
    * this sequence were never read, so the error notices among them are paged in from the log.
    */
   readonly failuresBefore: bigint | undefined;
+  /**
+   * Set when the first Tail's window may hold fewer than a window of rows because core's records
+   * sit among them: the rows still to be paged in from before the window.
+   */
+  readonly backfill: Backfill | undefined;
   readonly committedSeq: bigint;
   readonly complete: boolean;
 }
@@ -81,6 +92,10 @@ export function ingestSkeleton(response: SkeletonResponse): SkeletonLoad {
         : initial.recordsTracked
           ? windowStart(response)
           : 0n,
+    backfill:
+      response.keyframe !== undefined && initial.recordsTracked && windowStart(response) > 0n
+        ? {before: windowStart(response), rows: 0}
+        : undefined,
     failuresBefore:
       response.keyframe === undefined || skeleton.failuresTracked || !skeleton.recordsTracked
         ? undefined

@@ -54,6 +54,7 @@
     "@noble/hashes": "2.0.1",
     "@vibesys/machine": "workspace:*",
     "@vibesys/proto": "workspace:*",
+    "@vibesys/run-state": "workspace:*",
     "@vibesys/store": "workspace:*",
     "@vibesys/transport": "workspace:*",
     "xstate": "5.33.2"

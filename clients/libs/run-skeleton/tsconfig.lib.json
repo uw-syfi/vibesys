@@ -28,6 +28,9 @@
       "path": "../machine/tsconfig.lib.json"
     },
     {
+      "path": "../run-state/tsconfig.records.json"
+    },
+    {
       "path": "../store/tsconfig.lib.json"
     },
     {

@@ -1152,6 +1152,9 @@ importers:
       '@vibesys/proto':
         specifier: workspace:*
         version: link:../proto
+      '@vibesys/run-state':
+        specifier: workspace:*
+        version: link:../run-state
       '@vibesys/store':
         specifier: workspace:*
         version: link:../store
