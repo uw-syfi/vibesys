@@ -16,6 +16,7 @@ from vs_proto.api import (
     InterruptionReason,
     Oneof,
     Record,
+    RunEnded,
     StepCancelReason,
     StepFinished,
     StepStarted,
@@ -53,6 +54,7 @@ _RESULT = st.builds(
 )
 MESSAGES: st.SearchStrategy[CoreMessage] = st.one_of(
     st.builds(EpochStarted, epoch=st.integers(1, 3)),
+    st.builds(RunEnded, schema_version=st.just(1), result=_BYTES),
     st.builds(CoreInput, schema_version=st.just(1), event=_BYTES),
     st.builds(
         StepStarted,
