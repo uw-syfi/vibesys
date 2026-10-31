@@ -4,20 +4,19 @@
  * and the sort say what they promise.
  */
 import {describe, expect, test} from 'bun:test';
-import type {Candidate} from '@vibesys/run-state/candidates';
 import fc from 'fast-check';
-import {run} from './generated-run.test-helper.js';
 import {
   candidateOf,
   chartBest,
+  READERS,
   type Run,
-  readFromEvents,
-  readFromWriter,
+  generatedRuns as run,
   viewedAt,
 } from './generated-runs.js';
 import {impactOf} from './idea-impact.js';
 import type {IDEA_STATUSES} from './idea-status.js';
 import {type IdeasSort, ideasTable} from './ideas-table-view.js';
+import {modelOfShape} from './ideas-tree-fixtures.js';
 import {IDEAS_FILTER_DEFAULT} from './ideas-view.js';
 import {
   bestSoFar,
@@ -29,19 +28,6 @@ import type {RunModel} from './run-model.js';
 import {ratio} from './span-reading.js';
 
 const SETTINGS = {numRuns: 300} as const;
-
-const READERS = [
-  ['events', (each: Run, candidates: readonly Candidate[]) => readFromEvents(each, candidates)],
-  [
-    'the writer',
-    (each: Run, candidates: readonly Candidate[]) =>
-      readFromWriter(
-        each,
-        candidates,
-        Math.max(0, ...candidates.map(item => item.measurement?.at ?? 0)),
-      ),
-  ],
-] as const;
 
 function tableOf(
   model: RunModel,
@@ -168,3 +154,40 @@ for (const [reader, read] of READERS) {
     });
   });
 }
+
+describe('an idea compared with its base', () => {
+  const SHAPE = {
+    parents: [null, 0, 1, 0, 3, 3, 5],
+    outcomes: ['passed', 'passed', 'passed', 'passed', 'failed', 'passed', 'passed'],
+  } as const;
+
+  /** Idea 3 states a ratio to its base, none to the input; the run's input is 100 (ideas 0, 1, 2 state theirs). */
+  function compared(): RunModel {
+    const model = modelOfShape(SHAPE);
+    const candidates = model.candidates.candidates.map(item =>
+      item.id === 'n3' && item.measurement !== null
+        ? {
+            ...item,
+            measurement: {
+              ...item.measurement,
+              vsBaseline: null,
+              against: {
+                ratio: 1.1,
+                baseCommit: 'x',
+                baseValue: 100,
+                verdict: 'better' as const,
+              },
+            },
+          }
+        : item,
+    );
+    return {...model, candidates: {...model.candidates, candidates}};
+  }
+
+  test('states its multiple of the run’s input when the run has one, not the ratio to its base', () => {
+    const model = compared();
+    const row = tableOf(model, model).rows.find(each => each.id === 'n3');
+    // Idea 3 measured 103 against an input of 100: what the chart's tip says of it.
+    expect(row?.cells[0]?.multiple).toBeCloseTo(1.03, 9);
+  });
+});

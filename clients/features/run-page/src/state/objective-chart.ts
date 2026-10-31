@@ -15,8 +15,10 @@ import {
   type ObjectiveReading,
   type ObjectiveSeries,
   objectiveSeriesOf,
+  readingKey,
   readObjective,
 } from './objective-reading.js';
+import type {PerformancePoint} from './performance.js';
 import type {RunModel} from './run-model.js';
 import {type RunningTime, runningTimeOf, runningWords} from './running-time.js';
 import {formatValue, ratio} from './span-reading.js';
@@ -33,7 +35,7 @@ export interface ChartReadingView {
   readonly y: number;
   /** The reading of the idea the reader has open: ringed in the foreground color. */
   readonly selected: boolean;
-  /** A step of the line set by the chain the reader points at: ringed in the accent. */
+  /** A corner of the line set by the chain the reader points at: ringed in the accent. */
   readonly lit: boolean;
 }
 
@@ -140,6 +142,26 @@ function readingLabel(title: string, value: number, unit: string, multiple: numb
     .join(' · ');
 }
 
+/**
+ * The readings the chart draws: one dot for each idea, whatever number of samples the run keeps of
+ * it. The samples that set a step of the line stay (the line's corners are dots), and the idea's
+ * last sample stands for it when none did; a reading with no idea to open stands for itself.
+ */
+function onePerIdea(
+  points: readonly PerformancePoint[],
+  stepKeys: ReadonlySet<string>,
+): readonly PerformancePoint[] {
+  const owned = points.filter(point => point.unowned !== true);
+  const last = new Map(owned.map(point => [point.id, point]));
+  const stepped = new Set(owned.filter(point => stepKeys.has(readingKey(point))).map(p => p.id));
+  return points.filter(
+    point =>
+      point.unowned === true ||
+      stepKeys.has(readingKey(point)) ||
+      (!stepped.has(point.id) && last.get(point.id) === point),
+  );
+}
+
 /** What an objective's chart draws once its axes are known. */
 interface Frame {
   readonly time: RunningTime;
@@ -160,9 +182,10 @@ function chartOf(
   const minutes = (at: number): number => time.at(at) / 60;
   const unit = unitOf(model, reading, frame.alone);
   const stepped = bestSteps(reading);
-  const readings = reading.fold.points.map(point => ({
+  const stepKeys = new Set(stepped.flatMap(step => (step.key === null ? [] : [step.key])));
+  const readings = onePerIdea(reading.fold.points, stepKeys).map(point => ({
     ...(point.unowned === true ? {} : {id: point.id}),
-    key: point.key ?? point.id,
+    key: readingKey(point),
     label: readingLabel(
       point.title,
       point.value,
@@ -172,9 +195,8 @@ function chartOf(
     x: minutes(point.at),
     y: point.value,
     selected: focus !== null && point.id === focus,
-    lit:
-      lit.has(point.id) &&
-      stepped.some(step => step.idea === point.id && step.value === point.value),
+    // Only a corner of the line is ringed for the chain: a reading that set no step has no ring.
+    lit: lit.has(point.id) && stepKeys.has(readingKey(point)),
   }));
   // What the run has worked, as the time bar says it: the axis may be longer (`MIN_AXIS`), this is not.
   const worked = Math.max(time.at(frame.reached), ...reading.fold.points.map(p => time.at(p.at)));

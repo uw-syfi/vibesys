@@ -5,18 +5,17 @@
  * (the generated runs are in `generated-runs.ts`).
  */
 import {describe, expect, test} from 'bun:test';
-import type {Candidate} from '@vibesys/run-state/candidates';
 import fc from 'fast-check';
-import {run} from './generated-run.test-helper.js';
 import {
   bestRow,
   candidateOf,
   chartBest,
   oracleBest,
-  type Run,
+  READERS,
   readFromEvents,
   readFromWriter,
   rowOf,
+  generatedRuns as run,
   viewedAt,
 } from './generated-runs.js';
 import {IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
@@ -30,18 +29,7 @@ import {ratio} from './span-reading.js';
 
 const SETTINGS = {numRuns: 300} as const;
 
-for (const [reader, read] of [
-  ['events', (each: Run, candidates: readonly Candidate[]) => readFromEvents(each, candidates)],
-  [
-    'the writer',
-    (each: Run, candidates: readonly Candidate[]) =>
-      readFromWriter(
-        each,
-        candidates,
-        Math.max(0, ...candidates.map(item => item.measurement?.at ?? 0)),
-      ),
-  ],
-] as const) {
+for (const [reader, read] of READERS) {
   describe(`the best of an objective, as read from ${reader}`, () => {
     test('the line ends at the best the definition names, whatever the writer states', () => {
       fc.assert(
