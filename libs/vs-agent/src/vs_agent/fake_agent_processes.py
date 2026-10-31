@@ -8,6 +8,7 @@ It matches the marker line exactly and kills nothing else, as the real sweep doe
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -15,7 +16,10 @@ from vs_agent.orphans import OrphanReapError
 from vs_agent.step_tags import STEP_TAG_ENV
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterator, Mapping
+
+_EVERY_CONTAINER = frozenset({"*"})
+"""The marker ``unreachable()`` sets when no container is named; no container id is ``*``."""
 
 
 @dataclass(frozen=True)
@@ -39,7 +43,7 @@ class FakeAgentProcesses:
         """Start with no process."""
         self._alive: dict[int, FakeAgentProcess] = {}
         self._next_pid = 1
-        self._unreachable: set[str] = set()
+        self._unreachable: frozenset[str] = frozenset()
         self.sweeps: list[tuple[str, str]] = []
         """Every ``reap_tagged(container_id, tag)`` call received, in order."""
 
@@ -50,9 +54,18 @@ class FakeAgentProcesses:
         self._alive[process.pid] = process
         return process
 
-    def unreachable(self, container_id: str) -> None:
-        """Make every sweep of *container_id* fail, as a daemon that cannot be reached does."""
-        self._unreachable.add(container_id)
+    @contextmanager
+    def unreachable(self, *container_ids: str) -> Iterator[None]:
+        """Make every sweep of the named containers fail while the context is open.
+
+        With no container named, every container is unreachable. A sweep fails as it does
+        against a daemon that cannot be reached.
+        """
+        self._unreachable = frozenset(container_ids) or _EVERY_CONTAINER
+        try:
+            yield
+        finally:
+            self._unreachable = frozenset()
 
     def alive(
         self, *, container_id: str | None = None, tag: str | None = None
@@ -72,7 +85,7 @@ class FakeAgentProcesses:
     def reap_tagged(self, container_id: str, tag: str) -> None:
         """Kill every process of *container_id* whose environment carries exactly *tag*."""
         self.sweeps.append((container_id, tag))
-        if container_id in self._unreachable:
+        if self._unreachable == _EVERY_CONTAINER or container_id in self._unreachable:
             message = (
                 f"could not end the agents of step {tag} in container {container_id}: unreachable"
             )

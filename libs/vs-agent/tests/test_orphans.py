@@ -267,9 +267,11 @@ def test_a_step_sweep_that_cannot_reach_a_container_names_it_and_the_step() -> N
     with tempfile.TemporaryDirectory() as raw:
         engine, mine = _engine_with_containers(raw, 2, 0)
         table = FakeAgentProcesses()
-        table.unreachable(mine[1])
 
-        with pytest.raises(OrphanReapError, match=f"step-a.*{mine[1]}"):
+        with (
+            table.unreachable(mine[1]),
+            pytest.raises(OrphanReapError, match=f"step-a.*{mine[1]}"),
+        ):
             reap_step_agents(
                 "run-a",
                 "step-a",
