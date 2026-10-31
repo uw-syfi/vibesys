@@ -669,8 +669,8 @@ export const RICH_ENTRIES = {
             xDomain={[0, 6]}
           />
         </ChartPanel>
-        <ChartPanel title="Completed requests" note="higher is better" figure="No clear change">
-          <Chart label="Completed requests" size="strip" points={[]} />
+        <ChartPanel title="Queue depth" note="lower is better" figure="No clear change">
+          <Chart label="Queue depth" size="strip" points={[]} />
         </ChartPanel>
       </Stack>
     ),

@@ -38,7 +38,7 @@ for (const bad of BAD_SCREENS) {
 }
 
 const CHART = `<div id="row" style="position:relative;height:90px">
-  <svg id="chart" role="group" aria-label="Metric of each measured idea over the run, with the best so far" width="240" height="80"><circle cx="40" cy="40" r="6" fill="red"/></svg>
+  <svg id="chart" role="group" aria-label="Metric of each reading over the run, with the best so far" width="240" height="80"><circle cx="40" cy="40" r="6" fill="red"/></svg>
   <input id="bar" type="range" aria-label="Run position" style="position:absolute;left:260px;top:10px"/>
 </div>`;
 

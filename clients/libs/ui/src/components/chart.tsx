@@ -665,7 +665,7 @@ export function ChartLegend(props: {
   readonly items: readonly ChartLegendItem[];
 }): JSX.Element {
   return (
-    <ul className="vs-dotlegend vs-chart-legend" aria-label={props.label}>
+    <ul className="vs-dotlegend vs-serieslegend vs-chart-legend" aria-label={props.label}>
       {props.items.map(item => (
         <li key={item.label} className="vs-dotlegend-item">
           <span className="vs-chart-legend-mark" data-mark={item.mark} aria-hidden="true" />
