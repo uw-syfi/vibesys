@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -54,6 +54,7 @@ from vs_agent.api import (
     CONTAINER_PYTHON,
     MAX_WHITESPACE_RUN,
     NULL_AGENT_EVENT_SINK,
+    STEP_TAG_ENV,
     AgentClient,
     AgentEvent,
     AgentEventKind,
@@ -68,6 +69,7 @@ from vs_agent.api import (
     SessionResumeError,
     SessionScope,
     container_import_roots,
+    step_tag_env,
 )
 from vs_agent.api.testing import FakeProvider
 
@@ -569,6 +571,58 @@ def test_confine_to_sandbox_rewrites_argv_through_any_workspace_sandbox(
         assert argv[argv.index("-w") + 1] == "/workspace"
     else:
         assert argv[0] == "/usr/bin/stub-sandbox"
+
+
+@pytest.mark.parametrize("sandbox_kind", ["host", "docker"])
+def test_confine_to_sandbox_starts_a_step_s_program_with_its_tag_in_the_environment(
+    tmp_path: Path,
+    sandbox_kind: str,
+) -> None:
+    """The marker is set by ``env`` inside the sandbox, which starts the program on its own."""
+    sandbox = (
+        _FakeHostSandbox() if sandbox_kind == "host" else FakeDockerConfinement(workspace=tmp_path)
+    )
+    fake = FakeExecutor([FakeRun(), FakeRun()])
+    executor = subject.confine_to_sandbox(fake, sandbox)
+    request = agentshim.CommandRequest(
+        argv=["claude", "-p"], stdin=None, cwd=str(tmp_path), env={}, timeout=None
+    )
+
+    executor.run(request, agentshim.NullSink())
+    executor.run(replace(request, env=step_tag_env("step-a")), agentshim.NullSink())
+
+    plain, tagged = (list(sent.argv) for sent in fake.requests)
+    assert plain[-2:] == ["claude", "-p"]
+    assert tagged[-4:] == ["env", f"{STEP_TAG_ENV}=step-a", "claude", "-p"]
+    assert tagged[:-4] == plain[:-2]
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_a_turn_marks_its_provider_process_with_the_step_that_asked_for_it(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    del sandbox_builds
+    session, fake = _session(tmp_path, provider, scripted_turn(provider, text="ok"))
+
+    session.run_turn(AgentTurnRequest(message="Do it", step_tag="step-a"))
+
+    assert fake.requests[-1].env[STEP_TAG_ENV] == "step-a"
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_a_turn_no_step_asked_for_carries_no_tag(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    del sandbox_builds
+    session, fake = _session(tmp_path, provider, scripted_turn(provider, text="ok"))
+
+    session.run_turn(AgentTurnRequest(message="Do it"))
+
+    assert STEP_TAG_ENV not in fake.requests[-1].env
 
 
 def test_host_binary_lookup_resolves_symlinks_before_sandbox_launch(tmp_path: Path) -> None:

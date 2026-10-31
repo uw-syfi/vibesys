@@ -42,6 +42,7 @@ from vs_agent.session_environment import (
     validate_env_names,
 )
 from vs_agent.shim_turns import LaunchedSession, SteerLedger, TurnEvents
+from vs_agent.step_tags import STEP_TAG_ENV
 from vs_sandbox.api import build_host_sandbox
 from vs_sim.api import CloseOnce, NothingLeft, Released
 
@@ -186,7 +187,13 @@ def confine_to_sandbox(
     """
 
     def transform(request: agentshim.CommandRequest) -> agentshim.CommandRequest:
-        return replace(request, argv=sandbox.wrap(list(request.argv), request.cwd))
+        argv = list(request.argv)
+        tag = request.env.get(STEP_TAG_ENV)
+        if tag is not None:
+            # The sandbox starts the program with its own environment, so the step's marker
+            # is set by ``env`` inside it: the process then carries the tag from exec on.
+            argv = ["env", f"{STEP_TAG_ENV}={tag}", *argv]
+        return replace(request, argv=sandbox.wrap(argv, request.cwd))
 
     return agentshim.TransformingExecutor(executor, transform, find_binary=find_binary)
 
