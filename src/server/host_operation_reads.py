@@ -14,6 +14,7 @@ read_failure_category, answer_registered_read and stream_saved_runs.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
@@ -31,6 +32,7 @@ if TYPE_CHECKING:
         host_run_summary,
         host_run_wire,
         host_saved_runs,
+        usage_scan,
     )
     from server.host_agent_logins import AgentLogin
     from server.host_machine_facts import MachineDescription
@@ -41,7 +43,7 @@ if TYPE_CHECKING:
     from vs_proto import api as wire
     from vs_proto.api import FailureCategory
     from vs_proto.api import host_payloads as pb
-    from vs_sim.api import Clock
+    from vs_sim.api import Clock, HttpsGet
 else:
     host_api = lazy_module("server.host_api")
     host_compute = lazy_module("server.host_compute")
@@ -51,6 +53,7 @@ else:
     host_run_summary = lazy_module("server.host_run_summary")
     host_run_wire = lazy_module("server.host_run_wire")
     host_saved_runs = lazy_module("server.host_saved_runs")
+    usage_scan = lazy_module("server.usage_scan")
     read_operations = lazy_module("vibesys.api.host_operations.reads")
     saved_runs = lazy_module("vibesys.api.host_operations.saved_runs")
     wire = lazy_module("vs_proto.api")
@@ -153,12 +156,18 @@ class HostReadSource:
         preflight: Callable[
             [host_api.RunPreflightRequest], host_api.RunPreflightReply | host_api.HelperError
         ],
+        https: Callable[[], HttpsGet] | None = None,
     ) -> None:
-        """Bind host I/O and the existing machine/preflight probe adapters."""
+        """Bind host I/O and the existing machine/preflight probe adapters.
+
+        ``https`` builds the host's client for the one fetch it makes, the price list, when a
+        refresh asks for it; a host built without one refuses the refresh.
+        """
         self._host = host
         self._role_order = role_order
         self._describe = describe
         self._preflight = preflight
+        self._https = https
 
     def _path(self, text: str) -> Path:
         expanded = Path(self._host.directories.expand(text))
@@ -196,6 +205,41 @@ class HostReadSource:
         )
         reply = host_run_reads.usage_window_reply(legacy, self._host, self._path(request.project))
         return host_run_wire.usage_response(request.request_id, reply)
+
+    def usage_summary(self, request: pb.UsageSummaryRequest) -> pb.UsageSummaryResponse:
+        """Cut the host's runs into the request's buckets, through the owners of the rollup and the summary."""
+        if request.now is None:
+            message = "now: required"
+            raise ValueError(message)
+        pricing = usage_scan.stored_pricing(
+            usage_scan.usage_directory(), now=request.now.to_datetime()
+        )
+        paths = [self._path(project) for project in request.projects]
+        return usage_scan.usage_summary(
+            request, self._host.projects, paths, pricing, os.environ, clock=self._host.clock
+        )
+
+    def usage_rates_refresh(
+        self, request: pb.UsageRatesRefreshRequest
+    ) -> pb.UsageRatesRefreshResponse:
+        """Fetch the price list if one is due, through the owner of the host's usage state."""
+        if self._https is None or request.now is None:
+            raise ReadRefusedError(
+                host_api.HelperError(
+                    code=host_envelope.HelperErrorCode.INTERNAL,
+                    message="this host has no network client to fetch prices with",
+                    request_id=request.request_id,
+                )
+            )
+        pricing = usage_scan.refresh_rates(
+            usage_scan.usage_directory(),
+            usage_scan.HttpsFetcher(self._https()),
+            now=request.now.to_datetime(),
+            force=request.force,
+        )
+        return wire.host_payloads.UsageRatesRefreshResponse(
+            request_id=request.request_id, pricing=pricing
+        )
 
     def tasks(self, project: str) -> pb.TaskList:
         """Read through the existing project's task owner."""

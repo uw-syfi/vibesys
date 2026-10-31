@@ -5,16 +5,20 @@ dashboard is the same pass's per-idea chart and the reason a run needs its user.
 contracts only: Pydantic and the standard library, so ``server.host_api`` imports them into
 ``RunDigest`` and ``RunSummary`` without the fold.
 
-Public surface: ``RunClosing``, ``IdeaVerdict``, ``IdeaPoint``, ``BestReading``, ``RunDashboard``, ``RunAttention`` and the
+Public surface: ``RunClosing``, ``IdeaVerdict``, ``IdeaPoint``, ``kept_landings``, ``BestReading``, ``RunDashboard``, ``RunAttention`` and the
 limits ``DASHBOARD_MAX_POINTS``, ``REPEATED_FAILURE_AFTER`` and ``STALLED_AFTER_S``.
 """
 
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated, Final
+from typing import TYPE_CHECKING, Annotated, Final
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, NonNegativeInt
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+    from datetime import datetime
 
 
 class RunClosing(StrEnum):
@@ -57,6 +61,18 @@ class IdeaPoint(BaseModel):
     ratio: float | None
     verdict: IdeaVerdict
     at: AwareDatetime | None = None
+
+
+def kept_landings(points: Iterable[IdeaPoint]) -> tuple[datetime, ...]:
+    """When each ``kept`` idea of ``points`` landed, in the order of the points.
+
+    The one definition of a new best's time, shared by every count of them (``usage.window``
+    and the usage rollup), so two counts of one run cannot disagree. A kept point whose journal
+    event had no readable time has none and is not counted.
+    """
+    return tuple(
+        point.at for point in points if point.verdict is IdeaVerdict.KEPT and point.at is not None
+    )
 
 
 DASHBOARD_MAX_POINTS: Final = 64

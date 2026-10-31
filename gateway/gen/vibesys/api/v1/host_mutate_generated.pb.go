@@ -37,6 +37,7 @@ type MutateRequest struct {
 	//	*MutateRequest_TestCluster
 	//	*MutateRequest_StartRun
 	//	*MutateRequest_TerminateRun
+	//	*MutateRequest_UsagePricesSave
 	Method        isMutateRequest_Method `protobuf_oneof:"method"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -149,6 +150,15 @@ func (x *MutateRequest) GetTerminateRun() *v1.TerminateRunRequest {
 	return nil
 }
 
+func (x *MutateRequest) GetUsagePricesSave() *v1.UsagePricesSaveRequest {
+	if x != nil {
+		if x, ok := x.Method.(*MutateRequest_UsagePricesSave); ok {
+			return x.UsagePricesSave
+		}
+	}
+	return nil
+}
+
 type isMutateRequest_Method interface {
 	isMutateRequest_Method()
 }
@@ -181,6 +191,10 @@ type MutateRequest_TerminateRun struct {
 	TerminateRun *v1.TerminateRunRequest `protobuf:"bytes,38,opt,name=terminate_run,json=terminateRun,proto3,oneof"`
 }
 
+type MutateRequest_UsagePricesSave struct {
+	UsagePricesSave *v1.UsagePricesSaveRequest `protobuf:"bytes,46,opt,name=usage_prices_save,json=usagePricesSave,proto3,oneof"`
+}
+
 func (*MutateRequest_CreateExample) isMutateRequest_Method() {}
 
 func (*MutateRequest_CopyProject) isMutateRequest_Method() {}
@@ -195,6 +209,8 @@ func (*MutateRequest_StartRun) isMutateRequest_Method() {}
 
 func (*MutateRequest_TerminateRun) isMutateRequest_Method() {}
 
+func (*MutateRequest_UsagePricesSave) isMutateRequest_Method() {}
+
 // The matching result, or a typed failure. Tag 2 stays reserved for failure.
 type MutateResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -208,6 +224,7 @@ type MutateResponse struct {
 	//	*MutateResponse_TestCluster
 	//	*MutateResponse_StartRun
 	//	*MutateResponse_TerminateRun
+	//	*MutateResponse_UsagePricesSave
 	Result        isMutateResponse_Result `protobuf_oneof:"result"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -322,6 +339,15 @@ func (x *MutateResponse) GetTerminateRun() *v1.TerminateRunResponse {
 	return nil
 }
 
+func (x *MutateResponse) GetUsagePricesSave() *v1.UsagePricesSaveResponse {
+	if x != nil {
+		if x, ok := x.Result.(*MutateResponse_UsagePricesSave); ok {
+			return x.UsagePricesSave
+		}
+	}
+	return nil
+}
+
 type isMutateResponse_Result interface {
 	isMutateResponse_Result()
 }
@@ -358,6 +384,10 @@ type MutateResponse_TerminateRun struct {
 	TerminateRun *v1.TerminateRunResponse `protobuf:"bytes,38,opt,name=terminate_run,json=terminateRun,proto3,oneof"`
 }
 
+type MutateResponse_UsagePricesSave struct {
+	UsagePricesSave *v1.UsagePricesSaveResponse `protobuf:"bytes,46,opt,name=usage_prices_save,json=usagePricesSave,proto3,oneof"`
+}
+
 func (*MutateResponse_Failure) isMutateResponse_Result() {}
 
 func (*MutateResponse_CreateExample) isMutateResponse_Result() {}
@@ -374,11 +404,13 @@ func (*MutateResponse_StartRun) isMutateResponse_Result() {}
 
 func (*MutateResponse_TerminateRun) isMutateResponse_Result() {}
 
+func (*MutateResponse_UsagePricesSave) isMutateResponse_Result() {}
+
 var File_vibesys_api_v1_host_mutate_generated_proto protoreflect.FileDescriptor
 
 const file_vibesys_api_v1_host_mutate_generated_proto_rawDesc = "" +
 	"\n" +
-	"*vibesys/api/v1/host_mutate_generated.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/host/v1/failure.proto\x1a vibesys/host/v1/operations.proto\"\xd1\x04\n" +
+	"*vibesys/api/v1/host_mutate_generated.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/host/v1/failure.proto\x1a vibesys/host/v1/operations.proto\"\xa8\x05\n" +
 	"\rMutateRequest\x12&\n" +
 	"\bcheckout\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01(\x80 R\bcheckout\x12N\n" +
@@ -389,8 +421,9 @@ const file_vibesys_api_v1_host_mutate_generated_proto_rawDesc = "" +
 	"\x0eremove_cluster\x18  \x01(\v2%.vibesys.host.v1.RemoveClusterRequestH\x00R\rremoveCluster\x12H\n" +
 	"\ftest_cluster\x18! \x01(\v2#.vibesys.host.v1.TestClusterRequestH\x00R\vtestCluster\x12?\n" +
 	"\tstart_run\x18$ \x01(\v2 .vibesys.host.v1.StartRunRequestH\x00R\bstartRun\x12K\n" +
-	"\rterminate_run\x18& \x01(\v2$.vibesys.host.v1.TerminateRunRequestH\x00R\fterminateRunB\x0f\n" +
-	"\x06method\x12\x05\xbaH\x02\b\x01\"\xf0\x04\n" +
+	"\rterminate_run\x18& \x01(\v2$.vibesys.host.v1.TerminateRunRequestH\x00R\fterminateRun\x12U\n" +
+	"\x11usage_prices_save\x18. \x01(\v2'.vibesys.host.v1.UsagePricesSaveRequestH\x00R\x0fusagePricesSaveB\x0f\n" +
+	"\x06method\x12\x05\xbaH\x02\b\x01\"\xc8\x05\n" +
 	"\x0eMutateResponse\x12=\n" +
 	"\afailure\x18\x02 \x01(\v2!.vibesys.host.v1.OperationFailureH\x00R\afailure\x12O\n" +
 	"\x0ecreate_example\x18\" \x01(\v2&.vibesys.host.v1.CreateExampleResponseH\x00R\rcreateExample\x12I\n" +
@@ -400,7 +433,8 @@ const file_vibesys_api_v1_host_mutate_generated_proto_rawDesc = "" +
 	"\x0eremove_cluster\x18  \x01(\v2&.vibesys.host.v1.RemoveClusterResponseH\x00R\rremoveCluster\x12I\n" +
 	"\ftest_cluster\x18! \x01(\v2$.vibesys.host.v1.TestClusterResponseH\x00R\vtestCluster\x12@\n" +
 	"\tstart_run\x18$ \x01(\v2!.vibesys.host.v1.StartRunResponseH\x00R\bstartRun\x12L\n" +
-	"\rterminate_run\x18& \x01(\v2%.vibesys.host.v1.TerminateRunResponseH\x00R\fterminateRunB\x0f\n" +
+	"\rterminate_run\x18& \x01(\v2%.vibesys.host.v1.TerminateRunResponseH\x00R\fterminateRun\x12V\n" +
+	"\x11usage_prices_save\x18. \x01(\v2(.vibesys.host.v1.UsagePricesSaveResponseH\x00R\x0fusagePricesSaveB\x0f\n" +
 	"\x06result\x12\x05\xbaH\x02\b\x01B=Z;github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1b\x06proto3"
 
 var (
@@ -417,23 +451,25 @@ func file_vibesys_api_v1_host_mutate_generated_proto_rawDescGZIP() []byte {
 
 var file_vibesys_api_v1_host_mutate_generated_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
 var file_vibesys_api_v1_host_mutate_generated_proto_goTypes = []any{
-	(*MutateRequest)(nil),            // 0: vibesys.api.v1.MutateRequest
-	(*MutateResponse)(nil),           // 1: vibesys.api.v1.MutateResponse
-	(*v1.CreateExampleRequest)(nil),  // 2: vibesys.host.v1.CreateExampleRequest
-	(*v1.CopyProjectRequest)(nil),    // 3: vibesys.host.v1.CopyProjectRequest
-	(*v1.PutClusterRequest)(nil),     // 4: vibesys.host.v1.PutClusterRequest
-	(*v1.RemoveClusterRequest)(nil),  // 5: vibesys.host.v1.RemoveClusterRequest
-	(*v1.TestClusterRequest)(nil),    // 6: vibesys.host.v1.TestClusterRequest
-	(*v1.StartRunRequest)(nil),       // 7: vibesys.host.v1.StartRunRequest
-	(*v1.TerminateRunRequest)(nil),   // 8: vibesys.host.v1.TerminateRunRequest
-	(*v1.OperationFailure)(nil),      // 9: vibesys.host.v1.OperationFailure
-	(*v1.CreateExampleResponse)(nil), // 10: vibesys.host.v1.CreateExampleResponse
-	(*v1.CopyProjectResponse)(nil),   // 11: vibesys.host.v1.CopyProjectResponse
-	(*v1.PutClusterResponse)(nil),    // 12: vibesys.host.v1.PutClusterResponse
-	(*v1.RemoveClusterResponse)(nil), // 13: vibesys.host.v1.RemoveClusterResponse
-	(*v1.TestClusterResponse)(nil),   // 14: vibesys.host.v1.TestClusterResponse
-	(*v1.StartRunResponse)(nil),      // 15: vibesys.host.v1.StartRunResponse
-	(*v1.TerminateRunResponse)(nil),  // 16: vibesys.host.v1.TerminateRunResponse
+	(*MutateRequest)(nil),              // 0: vibesys.api.v1.MutateRequest
+	(*MutateResponse)(nil),             // 1: vibesys.api.v1.MutateResponse
+	(*v1.CreateExampleRequest)(nil),    // 2: vibesys.host.v1.CreateExampleRequest
+	(*v1.CopyProjectRequest)(nil),      // 3: vibesys.host.v1.CopyProjectRequest
+	(*v1.PutClusterRequest)(nil),       // 4: vibesys.host.v1.PutClusterRequest
+	(*v1.RemoveClusterRequest)(nil),    // 5: vibesys.host.v1.RemoveClusterRequest
+	(*v1.TestClusterRequest)(nil),      // 6: vibesys.host.v1.TestClusterRequest
+	(*v1.StartRunRequest)(nil),         // 7: vibesys.host.v1.StartRunRequest
+	(*v1.TerminateRunRequest)(nil),     // 8: vibesys.host.v1.TerminateRunRequest
+	(*v1.UsagePricesSaveRequest)(nil),  // 9: vibesys.host.v1.UsagePricesSaveRequest
+	(*v1.OperationFailure)(nil),        // 10: vibesys.host.v1.OperationFailure
+	(*v1.CreateExampleResponse)(nil),   // 11: vibesys.host.v1.CreateExampleResponse
+	(*v1.CopyProjectResponse)(nil),     // 12: vibesys.host.v1.CopyProjectResponse
+	(*v1.PutClusterResponse)(nil),      // 13: vibesys.host.v1.PutClusterResponse
+	(*v1.RemoveClusterResponse)(nil),   // 14: vibesys.host.v1.RemoveClusterResponse
+	(*v1.TestClusterResponse)(nil),     // 15: vibesys.host.v1.TestClusterResponse
+	(*v1.StartRunResponse)(nil),        // 16: vibesys.host.v1.StartRunResponse
+	(*v1.TerminateRunResponse)(nil),    // 17: vibesys.host.v1.TerminateRunResponse
+	(*v1.UsagePricesSaveResponse)(nil), // 18: vibesys.host.v1.UsagePricesSaveResponse
 }
 var file_vibesys_api_v1_host_mutate_generated_proto_depIdxs = []int32{
 	2,  // 0: vibesys.api.v1.MutateRequest.create_example:type_name -> vibesys.host.v1.CreateExampleRequest
@@ -443,19 +479,21 @@ var file_vibesys_api_v1_host_mutate_generated_proto_depIdxs = []int32{
 	6,  // 4: vibesys.api.v1.MutateRequest.test_cluster:type_name -> vibesys.host.v1.TestClusterRequest
 	7,  // 5: vibesys.api.v1.MutateRequest.start_run:type_name -> vibesys.host.v1.StartRunRequest
 	8,  // 6: vibesys.api.v1.MutateRequest.terminate_run:type_name -> vibesys.host.v1.TerminateRunRequest
-	9,  // 7: vibesys.api.v1.MutateResponse.failure:type_name -> vibesys.host.v1.OperationFailure
-	10, // 8: vibesys.api.v1.MutateResponse.create_example:type_name -> vibesys.host.v1.CreateExampleResponse
-	11, // 9: vibesys.api.v1.MutateResponse.copy_project:type_name -> vibesys.host.v1.CopyProjectResponse
-	12, // 10: vibesys.api.v1.MutateResponse.put_cluster:type_name -> vibesys.host.v1.PutClusterResponse
-	13, // 11: vibesys.api.v1.MutateResponse.remove_cluster:type_name -> vibesys.host.v1.RemoveClusterResponse
-	14, // 12: vibesys.api.v1.MutateResponse.test_cluster:type_name -> vibesys.host.v1.TestClusterResponse
-	15, // 13: vibesys.api.v1.MutateResponse.start_run:type_name -> vibesys.host.v1.StartRunResponse
-	16, // 14: vibesys.api.v1.MutateResponse.terminate_run:type_name -> vibesys.host.v1.TerminateRunResponse
-	15, // [15:15] is the sub-list for method output_type
-	15, // [15:15] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	9,  // 7: vibesys.api.v1.MutateRequest.usage_prices_save:type_name -> vibesys.host.v1.UsagePricesSaveRequest
+	10, // 8: vibesys.api.v1.MutateResponse.failure:type_name -> vibesys.host.v1.OperationFailure
+	11, // 9: vibesys.api.v1.MutateResponse.create_example:type_name -> vibesys.host.v1.CreateExampleResponse
+	12, // 10: vibesys.api.v1.MutateResponse.copy_project:type_name -> vibesys.host.v1.CopyProjectResponse
+	13, // 11: vibesys.api.v1.MutateResponse.put_cluster:type_name -> vibesys.host.v1.PutClusterResponse
+	14, // 12: vibesys.api.v1.MutateResponse.remove_cluster:type_name -> vibesys.host.v1.RemoveClusterResponse
+	15, // 13: vibesys.api.v1.MutateResponse.test_cluster:type_name -> vibesys.host.v1.TestClusterResponse
+	16, // 14: vibesys.api.v1.MutateResponse.start_run:type_name -> vibesys.host.v1.StartRunResponse
+	17, // 15: vibesys.api.v1.MutateResponse.terminate_run:type_name -> vibesys.host.v1.TerminateRunResponse
+	18, // 16: vibesys.api.v1.MutateResponse.usage_prices_save:type_name -> vibesys.host.v1.UsagePricesSaveResponse
+	17, // [17:17] is the sub-list for method output_type
+	17, // [17:17] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_api_v1_host_mutate_generated_proto_init() }
@@ -471,6 +509,7 @@ func file_vibesys_api_v1_host_mutate_generated_proto_init() {
 		(*MutateRequest_TestCluster)(nil),
 		(*MutateRequest_StartRun)(nil),
 		(*MutateRequest_TerminateRun)(nil),
+		(*MutateRequest_UsagePricesSave)(nil),
 	}
 	file_vibesys_api_v1_host_mutate_generated_proto_msgTypes[1].OneofWrappers = []any{
 		(*MutateResponse_Failure)(nil),
@@ -481,6 +520,7 @@ func file_vibesys_api_v1_host_mutate_generated_proto_init() {
 		(*MutateResponse_TestCluster)(nil),
 		(*MutateResponse_StartRun)(nil),
 		(*MutateResponse_TerminateRun)(nil),
+		(*MutateResponse_UsagePricesSave)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

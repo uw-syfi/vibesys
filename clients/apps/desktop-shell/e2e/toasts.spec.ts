@@ -21,6 +21,7 @@ import {
   installFakeNewRun,
   installFakeProjectRuns,
   installFakeUsage,
+  installFakeUsagePrices,
   MAC_CHROME,
   WINDOWS_CHROME,
 } from './fake-bridge.js';
@@ -265,6 +266,7 @@ async function openScreens(page: Page, width: number, chrome: ChromeInset): Prom
     initScript(installFakeMachineSettings, seed),
     initScript(installFakeNewRun, seed),
     initScript(installFakeProjectRuns, seed),
+    initScript(installFakeUsagePrices, undefined),
     initScript(installFakeUsage, seed),
     initScript(installGatewayOnly, undefined),
     journeyScript('live'),

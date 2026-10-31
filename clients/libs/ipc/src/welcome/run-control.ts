@@ -10,7 +10,14 @@ import {
   hostFromKey,
   type ListedRun,
   type RunDigestsReply,
+  type UsageAliasEntry,
+  type UsagePricesOutcome,
+  type UsageRateEntry,
+  type UsageRateOverrideEntry,
+  type UsageRatesOutcome,
+  type UsageSummaryOutcome,
   type UsageWindowOutcome,
+  usageSummaryRefusal,
   usageWindowRefusal,
 } from '@vibesys/hosts';
 import {exactResumeRunId, type ResumeRunId} from '@vibesys/runs';
@@ -30,6 +37,9 @@ export const RUN_CONTROL_CHANNELS = {
   projectRuns: 'vibesys:welcome:project-runs',
   cancelProjectRuns: 'vibesys:welcome:cancel-project-runs',
   usageWindow: 'vibesys:welcome:usage-window',
+  usageSummary: 'vibesys:welcome:usage-summary',
+  usageRatesRefresh: 'vibesys:welcome:usage-rates-refresh',
+  usagePricesSave: 'vibesys:welcome:usage-prices-save',
 } as const;
 
 /** The most runs one digest request may name (the helper's bound). */
@@ -249,6 +259,33 @@ export interface RunControlWelcomeBridge {
     since: number,
     until: number,
   ): Promise<WelcomeResult<UsageWindowOutcome>>;
+  /**
+   * What `host` made of its usage over the buckets between `edges` (milliseconds, whole quarter
+   * hours, increasing) in each of `projects`: figures priced at today's list prices; or that this
+   * host's VibeSys does not offer it. `now` is the time the view asks at: the host reads no clock.
+   */
+  usageSummary(
+    host: HostKey,
+    projects: readonly string[],
+    edges: readonly number[],
+    now: number,
+  ): Promise<WelcomeResult<UsageSummaryOutcome>>;
+  /** Ask `host` to fetch its price list if one is due (`force`: even if the last is under a day old). */
+  usageRatesRefresh(
+    host: HostKey,
+    force: boolean,
+    now: number,
+  ): Promise<WelcomeResult<UsageRatesOutcome>>;
+  /**
+   * Replace the prices a person set on `host`, edited from the book at `baseRevision`: the book is
+   * saved whole, or the host answers with the book that moved.
+   */
+  usagePricesSave(
+    host: HostKey,
+    baseRevision: number,
+    overrides: readonly UsageRateOverrideEntry[],
+    aliases: readonly UsageAliasEntry[],
+  ): Promise<WelcomeResult<UsagePricesOutcome>>;
 }
 
 export type RunControlRequest =
@@ -318,6 +355,26 @@ export type RunControlRequest =
       readonly runIds: readonly string[];
       readonly since: number;
       readonly until: number;
+    }
+  | {
+      readonly kind: 'usage-summary';
+      readonly host: HostId;
+      readonly projects: readonly string[];
+      readonly edges: readonly number[];
+      readonly now: number;
+    }
+  | {
+      readonly kind: 'usage-rates-refresh';
+      readonly host: HostId;
+      readonly force: boolean;
+      readonly now: number;
+    }
+  | {
+      readonly kind: 'usage-prices-save';
+      readonly host: HostId;
+      readonly baseRevision: number;
+      readonly overrides: readonly UsageRateOverrideEntry[];
+      readonly aliases: readonly UsageAliasEntry[];
     };
 
 function sequence(value: unknown): number {
@@ -360,6 +417,117 @@ function instant(value: unknown, which: string): number {
     throw new Error(`the usage window's ${which} must be a time in milliseconds`);
   }
   return value;
+}
+
+function projectList(value: unknown): string[] {
+  if (!Array.isArray(value)) throw new Error('name the projects to read');
+  return value.map(each => project(each));
+}
+
+function edgeList(value: unknown): number[] {
+  if (!Array.isArray(value)) throw new Error('give the edges of the usage buckets');
+  return value.map(each => instant(each, 'edge'));
+}
+
+function price(value: unknown, what: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1_000_000) {
+    throw new Error(`the ${what} price must be a number of dollars per million tokens`);
+  }
+  return value;
+}
+
+/** At most this many entries and this many bytes a name, as the host's book allows. */
+const BOOK_ENTRIES_MAX = 256;
+const BOOK_NAME_BYTES_MAX = 128;
+
+/** The bytes `text` takes in UTF-8. */
+function utf8Length(text: string): number {
+  let bytes = 0;
+  for (const char of text) {
+    const code = char.codePointAt(0) ?? 0;
+    bytes += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
+  }
+  return bytes;
+}
+
+function bookName(value: unknown): string {
+  if (typeof value !== 'string' || value.length === 0 || utf8Length(value) > BOOK_NAME_BYTES_MAX) {
+    throw new Error(`a model name is 1 to ${BOOK_NAME_BYTES_MAX} bytes`);
+  }
+  return value;
+}
+
+function objectOf(value: unknown, what: string): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null) throw new Error(`${what} must be an object`);
+  return value as Record<string, unknown>;
+}
+
+function rateEntry(value: unknown): UsageRateEntry {
+  const rate = objectOf(value, 'a price');
+  const writeOneHour = rate['cacheWrite1h'];
+  return {
+    input: price(rate['input'], 'input'),
+    output: price(rate['output'], 'output'),
+    cacheRead: price(rate['cacheRead'], 'cache read'),
+    cacheWrite: price(rate['cacheWrite'], 'cache write'),
+    cacheWrite1h: writeOneHour === null ? null : price(writeOneHour, 'one hour cache write'),
+  };
+}
+
+function overrideList(value: unknown): UsageRateOverrideEntry[] {
+  if (!Array.isArray(value) || value.length > BOOK_ENTRIES_MAX) {
+    throw new Error(`at most ${BOOK_ENTRIES_MAX} prices`);
+  }
+  return value.map(each => {
+    const entry = objectOf(each, 'a price entry');
+    return {model: bookName(entry['model']), rate: rateEntry(entry['rate'])};
+  });
+}
+
+function aliasList(value: unknown): UsageAliasEntry[] {
+  if (!Array.isArray(value) || value.length > BOOK_ENTRIES_MAX) {
+    throw new Error(`at most ${BOOK_ENTRIES_MAX} Map to entries`);
+  }
+  return value.map(each => {
+    const entry = objectOf(each, 'a Map to entry');
+    return {from: bookName(entry['from']), to: bookName(entry['to'])};
+  });
+}
+
+type UsageChannel =
+  | typeof RUN_CONTROL_CHANNELS.usageSummary
+  | typeof RUN_CONTROL_CHANNELS.usageRatesRefresh
+  | typeof RUN_CONTROL_CHANNELS.usagePricesSave;
+
+/** The typed request of a Usage page channel; throws naming the first invalid value. */
+function parseUsageRequest(channel: UsageChannel, args: readonly unknown[]): RunControlRequest {
+  const [first, second, third, fourth] = args;
+  switch (channel) {
+    case RUN_CONTROL_CHANNELS.usageSummary: {
+      const projects = projectList(second);
+      const edges = edgeList(third);
+      const now = instant(fourth, 'now');
+      const refusal = usageSummaryRefusal(projects, edges);
+      if (refusal !== null) throw new Error(refusal);
+      return {kind: 'usage-summary', host: hostFromKey(first), projects, edges, now};
+    }
+    case RUN_CONTROL_CHANNELS.usageRatesRefresh:
+      if (typeof second !== 'boolean') throw new Error('say whether to force the refresh');
+      return {
+        kind: 'usage-rates-refresh',
+        host: hostFromKey(first),
+        force: second,
+        now: instant(third, 'now'),
+      };
+    case RUN_CONTROL_CHANNELS.usagePricesSave:
+      return {
+        kind: 'usage-prices-save',
+        host: hostFromKey(first),
+        baseRevision: sequence(second),
+        overrides: overrideList(third),
+        aliases: aliasList(fourth),
+      };
+  }
 }
 
 /** The typed request on `channel` with `args`; throws naming the first invalid value. */
@@ -453,5 +621,9 @@ export function parseRunControlRequest(
         until,
       };
     }
+    case RUN_CONTROL_CHANNELS.usageSummary:
+    case RUN_CONTROL_CHANNELS.usageRatesRefresh:
+    case RUN_CONTROL_CHANNELS.usagePricesSave:
+      return parseUsageRequest(channel, args);
   }
 }

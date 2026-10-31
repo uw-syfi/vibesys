@@ -22,7 +22,7 @@ A journal with finished rounds and no span event predates the run trace
 (``ideas`` is ``None``) instead of counting none. A round and its workstream span end together, so a
 journal with a finished round and no ended span has no spans at all.
 
-Public surface: ``digest_journal``, ``run_attention``, ``digest_store``.
+Public surface: ``digest_journal``, ``journal_kept_landings``, ``run_attention``, ``digest_store``.
 """
 
 from __future__ import annotations
@@ -51,6 +51,7 @@ from server.host_run_dashboard import (
     IdeaVerdict,
     RunAttention,
     RunDashboard,
+    kept_landings,
 )
 from server.host_run_summary import TraceFormat, trace_format
 from vs_decode.api import Unreadable, decode_json
@@ -411,8 +412,9 @@ class _Fold:
             return None
         return BestReading(value=measure.value, metric=self.metric, unit=self.unit)
 
-    def _dashboard(self, chart: list[_Plotted]) -> RunDashboard:
-        points = [
+    def _points(self, chart: list[_Plotted]) -> list[IdeaPoint]:
+        """Every idea of the ``chart`` as a point, none left out."""
+        return [
             IdeaPoint(
                 ratio=self._improvement(each.measure),
                 verdict=each.verdict,
@@ -420,8 +422,14 @@ class _Fold:
             )
             for each in chart
         ]
+
+    def _dashboard(self, chart: list[_Plotted]) -> RunDashboard:
         last = None if self.last is None else datetime.fromtimestamp(self.last, UTC)
-        return _dashboard_points(points, last, self._best_reading(chart))
+        return _dashboard_points(self._points(chart), last, self._best_reading(chart))
+
+    def landings(self) -> tuple[datetime, ...]:
+        """When each kept idea landed, every one: the dashboard's points are capped, this is not."""
+        return kept_landings(self._points(self._chart()))
 
     def _ending(self, data: dict[str, JsonValue]) -> None:
         try:
@@ -467,6 +475,20 @@ def digest_journal(lines: Iterable[bytes]) -> RunDigest:
     skipped: the figures are those of the events before it and after it that decode. The
     first and the last line are always decoded, for the times the run began and was last heard.
     """
+    return _folded(lines).digest()
+
+
+def journal_kept_landings(lines: Iterable[bytes]) -> tuple[datetime, ...]:
+    """When each idea of the journal ``lines`` that became the best so far landed, none left out.
+
+    The digest's dashboard keeps at most ``DASHBOARD_MAX_POINTS`` ideas, so a long run's early
+    bests are not in it; this is the same fold of the same journal without that cap, read by
+    whatever counts new bests over a long window. Reads lines as ``digest_journal`` does.
+    """
+    return _folded(lines).landings()
+
+
+def _folded(lines: Iterable[bytes]) -> _Fold:
     fold = _Fold()
     first = True
     unread: deque[bytes] = deque(maxlen=2)
@@ -486,7 +508,7 @@ def digest_journal(lines: Iterable[bytes]) -> RunDigest:
         if not isinstance(last, Unreadable):
             fold.stamp(last)
             break
-    return fold.digest()
+    return fold
 
 
 def run_attention(digest: RunDigest, *, phase: RunPhase | None, now: float) -> RunAttention:

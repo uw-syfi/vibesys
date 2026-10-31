@@ -189,7 +189,7 @@ if TYPE_CHECKING:
     from vs_project.api import OperatorDialer
     from vs_proto import api as wire
     from vs_proto.api import host_payloads as pb
-    from vs_sim.api import Clock, Connection
+    from vs_sim.api import Clock, Connection, HttpsGet
 else:
     host_harness = lazy_module("server.host_harness")
     host_operation_reads = lazy_module("server.host_operation_reads")
@@ -1381,8 +1381,14 @@ def read_reply(request: HelperRequest, source: HostReadSource) -> HelperReply | 
     return _REPLY.validate_python({"type": request.type, **wire.to_mapping(response)})
 
 
-def registry_read_source(host: HelperHost, request: HelperRequest | None = None) -> HostReadSource:
-    """Bind shared read facts; preserve only a legacy request's role display order."""
+def registry_read_source(
+    host: HelperHost, request: HelperRequest | None = None, *, https: HttpsGet | None = None
+) -> HostReadSource:
+    """Bind shared read facts; preserve only a legacy request's role display order.
+
+    ``https`` is the client for the price list's fetch; a read source without one answers every
+    read but that refresh (``entrypoints.host_reads`` builds the real one when a refresh asks).
+    """
     role_order = (
         tuple(request.agents)
         if isinstance(request, RunPreflightRequest) and request.agents is not None
@@ -1393,6 +1399,7 @@ def registry_read_source(host: HelperHost, request: HelperRequest | None = None)
         role_order,
         describe=lambda: describe_machine(host),
         preflight=lambda value: preflight_facts(value, host),
+        https=None if https is None else (lambda: https),
     )
 
 
