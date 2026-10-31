@@ -30,7 +30,6 @@ from vs_sandbox.api.testing import FakeDockerEngine
 from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
 from vs_sim.api.testing import (
     FakePipedProcessLauncher,
-    ManualClock,
     VirtualClock,
     run_virtual,
 )
@@ -72,14 +71,14 @@ def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]
             ),
         }
     )
+    clock = VirtualClock(at=0.0)
     integration = LocalRunIntegration(
-        clock=ManualClock(),
+        clock=clock,
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
         system=idle_environment_system(),
     )
-    clock = VirtualClock(at=0.0)
 
     def reaches(run_id: str) -> list[bool]:
         socket = evaluation_socket_path(project_root, run_id)

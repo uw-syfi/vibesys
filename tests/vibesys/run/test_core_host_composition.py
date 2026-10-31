@@ -15,7 +15,7 @@ from protobuf.wkt.google.protobuf.wrappers_pb import StringValue
 from tests.support.container_credentials import set_container_cli_credentials
 from tests.support.core_plugins import core_policy
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
-from tests.support.real_git import NO_GITHUB, REAL_GIT
+from tests.support.real_git import NO_GIT, NO_GITHUB, REAL_GIT
 from tests.support.skeleton_strategy import SkeletonStrategy
 from tests.support.task_project import write_task
 from tests.vibesys.orchestration.plugin import EmptyOptions
@@ -60,7 +60,14 @@ from vs_runtime.api.step_runner import fold_log
 from vs_runtime.api.testing import FakeStopTimer, idle_environment_system
 from vs_sandbox.api.testing import FakeComputeBackend
 from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
-from vs_sim.api.testing import ManualClock, SimThreads, VirtualClock, run_virtual
+from vs_sim.api.testing import (
+    InlineBlockingRunner,
+    ManualClock,
+    SimNetwork,
+    SimThreads,
+    VirtualClock,
+    run_virtual,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -158,14 +165,14 @@ def _open(
     templates = tmp_path / "templates"
     templates.mkdir()
     _write_project(project_root)
+    clock = VirtualClock(at=0.0)
     integration = LocalRunIntegration(
-        clock=ManualClock(),
+        clock=clock,
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
         system=idle_environment_system(),
     )
-    clock = VirtualClock(at=0.0)
 
     async def exercise() -> CoreServices:
         try:
@@ -200,14 +207,14 @@ def _run_diagnostics(tmp_path: Path, *, profile_capture_withheld: bool) -> str:
     templates = tmp_path / "templates"
     templates.mkdir()
     _write_project(project_root)
+    clock = VirtualClock(at=0.0)
     integration = LocalRunIntegration(
-        clock=ManualClock(),
+        clock=clock,
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
         system=idle_environment_system(),
     )
-    clock = VirtualClock(at=0.0)
 
     async def exercise() -> str:
         try:
@@ -247,6 +254,46 @@ def test_core_host_yields_services_whose_state_starts_the_strategy(tmp_path: Pat
     assert {op.kind for op in validate_startup(declaration, offered).operations} <= offered_kinds
     assert state.run.facts.objective == "Improve the queue."
     assert len(state.run.facts.evaluator_digest) == DIGEST_LENGTH
+
+
+@pytest.mark.regression
+def test_a_host_timed_by_another_clock_than_its_journal_is_refused(tmp_path: Path) -> None:
+    """The log dates its records by the journal's clock and the loop counts on the host's: two
+    clocks put the run's seconds on two timelines, and a run met its deadline at once."""
+    project_root = tmp_path / "project"
+    templates = tmp_path / "templates"
+    templates.mkdir()
+    _write_project(project_root)
+    clock = VirtualClock(at=0.0)
+    threads = SimThreads(clock)
+    integration = LocalRunIntegration(
+        clock=ManualClock(start=1.79e9),
+        git=NO_GIT,
+        github=NO_GITHUB,
+        threads=threads,
+        system=idle_environment_system(),
+    )
+
+    async def exercise() -> None:
+        with pytest.raises(CoreCompositionError, match="timing clock"):
+            async with open_product_core_host(
+                _request(project_root),
+                integration,
+                plugin=_plugin(templates),
+                options=EmptyOptions(),
+                timing=RunTiming(clock, threads),
+                backend_factory=host_container_backend,
+                stop_timer=FakeStopTimer(threads=threads),
+                blocking=InlineBlockingRunner(),
+                network=SimNetwork(threads),
+                profiler_preflight=FakeProfilerPreflight(),
+            ):
+                pytest.fail("a host over two clocks was opened")
+
+    try:
+        run_virtual(clock, exercise())
+    finally:
+        integration.close()
 
 
 @pytest.mark.parametrize("withheld", [False, True])
@@ -421,14 +468,14 @@ def test_run_plugin_drives_a_core_policy_through_the_shell(tmp_path: Path) -> No
     templates = tmp_path / "templates"
     templates.mkdir()
     _write_project(project_root)
+    clock = VirtualClock(at=0.0)
     integration = LocalRunIntegration(
-        clock=ManualClock(),
+        clock=clock,
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
         system=idle_environment_system(),
     )
-    clock = VirtualClock(at=0.0)
     request = _request(project_root).model_copy(update={"run_id": "core-run"})
     plugin = replace(
         _plugin(templates),

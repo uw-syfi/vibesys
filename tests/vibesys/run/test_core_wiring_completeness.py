@@ -39,7 +39,7 @@ from vs_runtime.api import CoreOperation
 from vs_runtime.api.core import EVALUATION_TOOL_ID, OperationRole, RunTiming
 from vs_runtime.api.testing import FakeStopTimer, idle_environment_system
 from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
-from vs_sim.api.testing import ManualClock, VirtualClock, run_virtual
+from vs_sim.api.testing import VirtualClock, run_virtual
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -84,14 +84,14 @@ def _services(tmp_path: Path) -> CoreServices:
         prompt_templates=policy.prompt_templates,
     )
     plugin = type(plugin)(id=plugin.id, agents=plugin.agents, options=EmptyOptions, core=policy)
+    clock = VirtualClock(at=0.0)
     integration = LocalRunIntegration(
-        clock=ManualClock(),
+        clock=clock,
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
         system=idle_environment_system(),
     )
-    clock = VirtualClock(at=0.0)
 
     async def exercise() -> CoreServices:
         try:

@@ -10,6 +10,11 @@ After each append the search hears what core published and answers (``SearchHear
 inside the same step, so the loop never sees a state the search has not caught up with. A run
 that parks or ends gets its search state logged whole.
 
+A record that parks the run is preceded by the display's record of it (``RestAnnouncer``), under
+the same lock: the log never holds a parked run that the display still shows as draining, whatever
+instant the process dies at. A process that dies between the two leaves a run shown as parked a
+record early, which its next epoch resumes the same.
+
 A start reads ``state.pb`` if it is given a cache and folds only the records after it; the log
 writes it again when the run comes to rest and now and then (``FoldKeeper``). The cache changes
 no result: ``cache_start`` says whether it was used, or why the whole log was folded.
@@ -23,7 +28,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
-from vs_core.api import ClockAdvanced
+from vs_core.api import ClockAdvanced, RunStatus
 from vs_core.api.recovery import (
     Interruption,
     RecordRefusal,
@@ -84,6 +89,18 @@ class SearchHearing(Protocol):
         ...
 
 
+class RestAnnouncer(Protocol):
+    """The display of a run, as the log tells it a run is about to rest."""
+
+    def parking(self, *, draining: bool) -> None:
+        """The next record parks the run: append what the display shows of that, before it.
+
+        ``draining`` is whether core already held the run draining, which the display showed when
+        it did; a run parked outright (nothing was running) has shown no drain yet.
+        """
+        ...
+
+
 class RunLogStepLog:
     """One process's view of a run.log: it appends core's records and folds them as it goes."""
 
@@ -100,6 +117,7 @@ class RunLogStepLog:
         search: SearchHearing | None,
         stamp: Callable[[], Timestamp] = Timestamp,
         keeper: FoldKeeper | None = None,
+        announcer: RestAnnouncer | None = None,
     ) -> None:
         """Hold ``folded``, the fold of everything ``log`` confirmed, and append as ``epoch``."""
         self._log = log
@@ -110,6 +128,7 @@ class RunLogStepLog:
         self._epoch = epoch
         self._search = search
         self._stamp = stamp
+        self._announcer = announcer
         self._arrived = 0
         self._appended = 0
         self._delivered = 0
@@ -130,6 +149,7 @@ class RunLogStepLog:
         stamp: Callable[[], Timestamp] = Timestamp,
         cache: FoldCache | None = None,
         cache_every: int = CACHE_EVERY,
+        announcer: RestAnnouncer | None = None,
     ) -> RunLogStepLog:
         """Take over the run ``log`` holds, in ``epoch``, whose header the writer already appended.
 
@@ -153,7 +173,15 @@ class RunLogStepLog:
                 )
                 folded = fold_run((first,), registry=registry)
             opened = cls(
-                log, folded, registry, clock, epoch=epoch, search=search, stamp=stamp, keeper=keeper
+                log,
+                folded,
+                registry,
+                clock,
+                epoch=epoch,
+                search=search,
+                stamp=stamp,
+                keeper=keeper,
+                announcer=announcer,
             )
             if first is not None:
                 opened._confirm(first)
@@ -286,14 +314,22 @@ class RunLogStepLog:
     def _record(self, message: CoreMessage, *, clock: float | None = None) -> None:
         """Fold the next record, and only then append it: a record the fold refuses stays out."""
         with self._log.transaction():
-            record = self._log.next_record(
-                message,
-                epoch=self._epoch,
-                at=self._stamp(),
-                clock=self._clock.now() if clock is None else clock,
-            )
-            self._folded = apply_record(self._folded, record, self._registry)
+            record = self._next(message, clock)
+            folded = apply_record(self._folded, record, self._registry)
+            if self._announcer is not None and _parks(self._folded, folded):
+                draining = self._folded.state.run.status is RunStatus.DRAINING
+                self._announcer.parking(draining=draining)
+                record = self._next(message, clock)
+            self._folded = folded
             self._confirm(record)
+
+    def _next(self, message: CoreMessage, clock: float | None) -> Record:
+        return self._log.next_record(
+            message,
+            epoch=self._epoch,
+            at=self._stamp(),
+            clock=self._clock.now() if clock is None else clock,
+        )
 
     def _confirm(self, record: Record) -> None:
         confirmed = self._log.extend(record)
@@ -318,3 +354,8 @@ class RunLogStepLog:
         if self._search is not None and (rest := self._search.rest()) is not None:
             self._record(rest)
             self._search.appended()
+
+
+def _parks(before: Folded, after: Folded) -> bool:
+    """Whether the record that turned ``before`` into ``after`` is the one that parks the run."""
+    return at_rest(after.state) is RunRest.PARKED and at_rest(before.state) is not RunRest.PARKED

@@ -17,7 +17,7 @@ from vibesys.run.contracts import (
     RunView,
 )
 from vibesys.run.logged_run import read_logged_run
-from vs_core.api import OperationRegistration
+from vs_core.api import FlowState, OperationRegistration
 from vs_runtime.api.core import OperationRole, RuntimeRecord
 from vs_runtime.api.infrastructure import known_steer_targets
 
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vs_core.api import OperationRegistry, StrategyState
+    from vs_core.api import OperationRegistry
     from vs_project.api import OrchestrationDescriptor, Project
     from vs_runtime.api import CorePolicy, OrchestrationPlugin, OrchestrationResumeDecision
     from vs_runtime.api.infrastructure import SteerTargets
@@ -81,7 +81,7 @@ def _plugin_run_view(
 
 
 @dataclass(frozen=True, slots=True)
-class RuntimeRecordProjector[S: StrategyState, P: BaseModel]:
+class RuntimeRecordProjector[S: FlowState, P: BaseModel]:
     """Project the strategy state of a core-driven run from its committed runtime record.
 
     A run on the core keeps its state in its run.log, which folds to core's state beside the

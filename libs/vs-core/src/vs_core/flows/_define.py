@@ -318,27 +318,15 @@ class FlowDriver[C]:
             issued=tuple(
                 i for i in after.live.issued if before_counts.get((i.path, i.label)) != i.count
             ),
+            published=(
+                after.live.published if after.live.published != before.live.published else None
+            ),
         )
         return gained.model_dump_json().encode()
 
     def extend(self, state: FlowState, changes: bytes) -> FlowState:
-        """``state`` with ``changes`` (from ``changes``) applied.
-
-        ``live`` keeps the flows' snapshots of the checkpoint it came from, which is where a
-        restart on changed code starts, but its decision numbers are current: the restarted flows
-        never reuse the id of a decision the dead ones issued.
-        """
-        gained = FlowChanges.model_validate_json(changes)
-        counts = {(i.path, i.label): i for i in state.live.issued}
-        counts.update({(i.path, i.label): i for i in gained.issued})
-        return state.model_copy(
-            update={
-                "journal": (*state.journal, *gained.steps),
-                "dropped": gained.dropped,
-                "restart_settled": gained.restart_settled,
-                "live": state.live.model_copy(update={"issued": tuple(counts.values())}),
-            }
-        )
+        """``state`` with ``changes`` (from ``changes``) applied."""
+        return state.extended((changes,))
 
     def resume(self, state: FlowState) -> FlowState:
         """``state`` as the process that logged it left it: where the flows are now.

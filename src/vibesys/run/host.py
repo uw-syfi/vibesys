@@ -34,7 +34,6 @@ from vibesys.run.measurement_events import CoreMeasurementEvents
 from vibesys.run.profilers import WITHHELD_TOOLS_ENV, ProfilerToolOffer, profiler_tool_offer
 from vibesys.run.queue_status import queue_status_reader, queue_status_service
 from vibesys.run.resources import open_run_resources
-from vibesys.run.run_clock import RunClock
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
 from vibesys.run.step_seams import step_seams
 from vs_agent.api import (
@@ -442,7 +441,7 @@ class _ProductHostFactory:
                 commit_observer=self.integration.core_commit_observer(
                     project.state.run_id, self.projector, self.plugin.id
                 ),
-                run_clock=RunClock(self.timing.clock),
+                run_clock=self.integration.events.run_clock,
                 seams=lambda: step_seams(
                     run_id=project.state.run_id,
                     environment=resources.environment,
@@ -776,7 +775,8 @@ async def open_product_core_host(  # noqa: PLR0913  # lint-waiver: LW-948092 [PL
     """Open the host of a plugin whose ``core`` policy the runtime drives.
 
     Composition builds every core service from the resources it opens, and fails with
-    ``CoreCompositionError`` naming what is missing. A stop requested while the caller's
+    ``CoreCompositionError`` naming what is missing, or when the run's timing clock is not its
+    journal's (a run counts its seconds on one clock). A stop requested while the caller's
     block runs is bounded: if the block is still running `STOP_GRACE_S` later (timed by
     *stop_timer*), its task is cancelled and the block ends in `RunStopped`. Teardown then
     releases the core services before the workspaces they evaluate in.
@@ -784,6 +784,12 @@ async def open_product_core_host(  # noqa: PLR0913  # lint-waiver: LW-948092 [PL
     if plugin.core is None:
         message = f"orchestration {plugin.id!r} has no core policy"
         raise CoreCompositionError("core", message)
+    if timing.clock is not integration.clock:
+        message = (
+            "the run's timing clock is not the clock its journal is timed by: the log dates its "
+            "records by one and the loop counts on the other"
+        )
+        raise CoreCompositionError("timing", message)
     factory = _ProductHostFactory(
         request=request,
         integration=integration,

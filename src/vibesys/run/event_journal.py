@@ -18,6 +18,7 @@ from vibesys.events import (
     RunFailureKind,
     make_core_event,
 )
+from vibesys.run.run_clock import RunClock
 from vibesys.run.runlog_tee import RunLogTee
 from vs_runlog.api import ConfirmedLog, FileRunContent, FileRunLogWriter, SharedWriter
 from vs_runtime.api.infrastructure import (
@@ -67,6 +68,8 @@ class EventJournal(DurableEventJournal[CoreEvent]):
             self._loop: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
         except RuntimeError:
             self._loop = None
+        self.run_clock = RunClock(clock)
+        """The run's clock: the run's log dates every record by it, and the loop runs on it."""
         self._runlog_configured = False
         self._runlog: RunLogTee | None = None
         self.run_log: ConfirmedLog | None = None
@@ -82,7 +85,7 @@ class EventJournal(DurableEventJournal[CoreEvent]):
             path = project.run_log_path_for(project.root, run_id)
             path.parent.mkdir(parents=True, exist_ok=True)
             writer = FileRunLogWriter(path, clock=self._clock, threads=self._threads)
-            self.run_log = ConfirmedLog(writer, self._threads)
+            self.run_log = ConfirmedLog(writer, self._threads, present=self.run_clock.current)
             self._runlog = RunLogTee(
                 SharedWriter(self.run_log, writer),
                 FileRunContent(
@@ -205,6 +208,16 @@ class EventJournal(DurableEventJournal[CoreEvent]):
                 event_type, text, timestamp=utc_datetime(self._clock), data=data, **fields
             )
         )
+
+    def parking(self, *, draining: bool) -> None:
+        """Show the run as parked, as the step log is about to record the park that makes it so.
+
+        A run parked outright shows its drain first: the control bridge shows none for a run that
+        is already parked when it looks.
+        """
+        if not draining:
+            self.emit(CoreEventType.PARK_REQUESTED, "Park requested")
+        self.emit(CoreEventType.PARKED, "Run paused")
 
     def has_recorded(self, event_type: CoreEventType) -> bool:
         """Whether an event of ``event_type`` was recorded, this process's or an earlier one's."""

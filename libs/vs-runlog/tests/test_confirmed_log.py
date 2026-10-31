@@ -176,12 +176,13 @@ def test_an_uncertain_append_forgets_the_prefix_so_the_log_says_what_happened(
     assert [record.seq for record in log.records()] == list(range(1, len(confirmed) + 2))
 
 
-def _projection_record() -> Record:
+def _projection_record(clock: float = 0.0) -> Record:
     """A record of the display projection: numbered by whoever appends it."""
     return Record(
         seq=1,
         epoch=1,
         at=Timestamp(seconds=1),
+        clock=clock,
         body=Oneof("lifecycle", Lifecycle(state=Oneof("running", Running()))),
     )
 
@@ -263,3 +264,60 @@ def test_two_threads_appending_at_once_never_collide_on_a_sequence_number(
         threads.run(exercise)
         with open_run_log(path) as reader:
             assert [record.seq for record in reader] == list(range(1, projection + core + 1))
+
+
+type Dating = tuple[bool, float, float | None]
+"""Whether core appends, the clock the caller asks for, and the run's present instant then."""
+
+DATINGS: st.SearchStrategy[Dating] = st.tuples(
+    st.booleans(), st.floats(0, 100), st.one_of(st.none(), st.floats(0, 100))
+)
+
+
+@pytest.mark.regression
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(steps=st.lists(DATINGS, min_size=1, max_size=16))
+@example(steps=[(True, 5.0, 5.0), (False, 7.0, 5.0)])
+def test_whoever_appends_a_record_is_dated_between_the_last_record_and_the_present_instant(
+    steps: list[Dating],
+) -> None:
+    """The display projection dates its records by the wall time of its events, core by the run
+    clock's instant; a projection record dated after the instant core has read made core's next
+    fact older than the log, and a whole fold refused it."""
+    present: list[float | None] = [None]
+    with TemporaryDirectory() as directory:
+        path = Path(directory) / "run.log"
+        with FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads()) as writer:
+            log = ConfirmedLog(writer, SimThreads(), present=lambda: present[0])
+            for by_core, clock, instant in steps:
+                present[0] = instant
+                before = log.records()
+                last = before[-1].clock if before else 0.0
+                if by_core:
+                    appended = log.append(
+                        CoreInput(schema_version=1, event=b"x"),
+                        epoch=1,
+                        at=Timestamp(seconds=1),
+                        clock=clock,
+                    )
+                    assert isinstance(appended, Appended)
+                else:
+                    log.stage(_projection_record(clock))
+                dated = log.records()[-1].clock
+                assert dated >= last
+                assert instant is None or dated <= max(instant, last)
+            clocks = [record.clock for record in log.records()]
+            assert clocks == sorted(clocks)
+
+
+def test_a_record_dated_before_the_last_one_is_refused() -> None:
+    with TemporaryDirectory() as directory:
+        path = Path(directory) / "run.log"
+        with FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads()) as writer:
+            log = ConfirmedLog(writer, SimThreads())
+            log.stage(_projection_record(5.0))
+            older = _projection_record(4.0)
+            older.seq = 2
+            with pytest.raises(ValueError, match="dated before"):
+                log.extend(older)
+            assert [record.clock for record in log.records()] == [5.0]

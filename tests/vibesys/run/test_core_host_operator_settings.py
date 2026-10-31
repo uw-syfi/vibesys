@@ -38,7 +38,7 @@ from vs_runtime.api import AgentRole, CorePlan, CoreRunContext, OrchestrationPlu
 from vs_runtime.api.core import RunTiming
 from vs_runtime.api.testing import FakeStopTimer, idle_environment_system
 from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
-from vs_sim.api.testing import ManualClock, VirtualClock, run_virtual
+from vs_sim.api.testing import VirtualClock, run_virtual
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -98,8 +98,9 @@ def _run(
         profiler_kind=ProfilerKind.NONE,
         backend=ComputeBackend.CPU,
     )
+    clock = VirtualClock(at=0.0)
     integration = LocalRunIntegration(
-        clock=ManualClock(),
+        clock=clock,
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
@@ -108,7 +109,6 @@ def _run(
     # A paused run asks for nothing; it stays open until the deadline stops it.
     if strategy is None:
         integration.control.pause_for_quota()
-    clock = VirtualClock(at=0.0)
 
     async def exercise() -> RunEnd:
         try:

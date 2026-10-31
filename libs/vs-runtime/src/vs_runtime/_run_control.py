@@ -444,8 +444,10 @@ class RunControlChannel(Protocol):
         """Drain queued operator actions exactly once."""
         ...
 
-    def land_park(self, jobs: tuple[str, ...] = (), *, immediate: bool = False) -> None:
-        """Report that core committed a park drain."""
+    def land_park(
+        self, jobs: tuple[str, ...] = (), *, immediate: bool = False, parked: bool = False
+    ) -> None:
+        """Report that core committed a park drain; ``parked`` when the run has already parked."""
         ...
 
     def notify_action_applied(self, summary: str) -> None:
@@ -1135,15 +1137,22 @@ class RuntimeRunControlChannel:
             pending, self._pending_actions = self._pending_actions, []
         return pending
 
-    def land_park(self, jobs: tuple[str, ...] = (), *, immediate: bool = False) -> None:
-        """Report core's accepted drain, after it is persisted."""
+    def land_park(
+        self, jobs: tuple[str, ...] = (), *, immediate: bool = False, parked: bool = False
+    ) -> None:
+        """Report core's accepted drain, after it is persisted.
+
+        A run that has already parked shows no drain: the log announced the park when it
+        recorded it, and a drain shown after it would show a parked run as draining.
+        """
         with self._lock:
             self._execution_closed = True
             if immediate:
                 self._executing.clear()
                 self._permits.clear()
             self._drain_jobs.update(jobs)
-            self._emit(RunControlTransitionKind.PARK_REQUESTED)
+            if not parked:
+                self._emit(RunControlTransitionKind.PARK_REQUESTED)
 
     def notify_action_applied(self, summary: str) -> None:
         """Record that core recorded an operator action, so it applied."""
