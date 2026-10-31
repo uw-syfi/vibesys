@@ -45,8 +45,8 @@ from vs_core.api import (
     Capabilities,
     validate_startup,
 )
-from vs_project.api import OrchestrationDescriptor, Project, StoredEnvelope
-from vs_runlog.api import RunLogReader
+from vs_project.api import OrchestrationDescriptor, Project
+from vs_runlog.api import RunLogReader, read_committed_records
 from vs_runtime.api import (
     AgentRole,
     CorePlan,
@@ -56,6 +56,7 @@ from vs_runtime.api import (
     RunStatus,
 )
 from vs_runtime.api.core import RunTiming
+from vs_runtime.api.step_runner import fold_log
 from vs_runtime.api.testing import FakeStopTimer, idle_environment_system
 from vs_sandbox.api.testing import FakeComputeBackend
 from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
@@ -461,10 +462,13 @@ def test_run_plugin_drives_a_core_policy_through_the_shell(tmp_path: Path) -> No
 
     # The scenario stops the run with a failure result: terminal, and not a success.
     assert status is RunStatus.FAILED
-    stored = Project.open(project_root).state_store("core-run").load()
-    assert isinstance(stored, StoredEnvelope)
-    core = json.loads(stored.payload)["envelope"]["core"]["run"]
-    assert (core["status"], core["result"]["outcome"]) == ("terminal", "failure")
+    logged = fold_log(
+        read_committed_records(Project.run_log_path_for(project_root, "core-run")), None
+    )
+    assert logged is not None
+    run = logged.state.run
+    assert run.result is not None
+    assert (run.status.value, run.result.outcome) == ("terminal", "failure")
 
 
 @pytest.mark.regression

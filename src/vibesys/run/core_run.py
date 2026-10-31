@@ -191,12 +191,12 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
     stalls = asyncio.ensure_future(StallReporter(board, integration.events).run(clock))
     run_error: BaseException | None = None
     try:
-        _resume_operator(log, controls, clock.now(), epoch=epoch, resumed=resumed)
         observed.begin(resumed=resumed)
         await _follow_core(host, log)
         if bridge is not None:
             bridge.attach(observed, clock)
             await bridge.serve()
+        _resume_operator(log, controls, clock.now(), epoch=epoch, resumed=resumed)
         rest = await run_step_loop(
             observed,
             services.runner(clock, epoch),
