@@ -2,13 +2,7 @@ import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
 import fc from 'fast-check';
 import {settled} from './checks/settle.js';
-import {
-  type Anchor,
-  anchorsOf,
-  pageBox,
-  RUN_ANCHORS,
-  stabilityViolations,
-} from './checks/stability.js';
+import {type Anchor, anchorsOf, RUN_ANCHORS, stabilityViolations} from './checks/stability.js';
 import {
   type FakeBridgeSeed,
   installFakeBridge,
@@ -318,8 +312,8 @@ test('choosing another idea keeps the list, the detail and the chart where they 
   const steps = page.getByRole('listbox', {name: /steps$/});
   // The steps list is as tall as the idea's steps, so only where it starts and how wide it is hold.
   const placed = async () => {
-    const {x, y, width} = await pageBox(steps);
-    return {x, y, width};
+    const box = await steps.boundingBox();
+    return box === null ? null : {x: box.x, y: box.y, width: box.width};
   };
   const stepsBefore = await placed();
   for (const index of [1, 2, 0]) {

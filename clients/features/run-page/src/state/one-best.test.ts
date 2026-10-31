@@ -2,7 +2,7 @@
  * One definition of "best". The headline multiple of a chart, the end of its best-so-far line and the
  * `vs input` of the best row of the Ideas list are read from one selector, so over any generated
  * run, at the run's end and at any position of the time bar, they state one multiple of one input
- * (the generated runs are in `generated-runs.ts`).
+ * (the generated runs are in `generated-runs.test-helper.ts`).
  */
 import {describe, expect, test} from 'bun:test';
 import fc from 'fast-check';
@@ -17,7 +17,7 @@ import {
   rowOf,
   generatedRuns as run,
   viewedAt,
-} from './generated-runs.js';
+} from './generated-runs.test-helper.js';
 import {IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
 import {
   bestSoFar,

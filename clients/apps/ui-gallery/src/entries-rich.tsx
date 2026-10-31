@@ -654,10 +654,10 @@ export const RICH_ENTRIES = {
           figure="3.83× faster"
           tone="ok"
           hint="6,054,154 ops/s · input 1,581,539 ops/s"
-          unit="ops/s"
         >
           <Chart
             label="Throughput"
+            unit="ops/s"
             size="strip"
             points={PICK_POINTS}
             steps={[
@@ -678,21 +678,25 @@ export const RICH_ENTRIES = {
   ChartColumns: {
     render: () => (
       <ChartColumns>
-        {['Time to first token', 'Time per output token', 'Completed requests'].map(title => (
+        {[
+          {title: 'Time to first token', better: 'lower', figure: '1.78× faster', end: 56},
+          {title: 'Time per output token', better: 'lower', figure: '1.25× faster', end: 80},
+          {title: 'Completed requests', better: 'higher', figure: '1.27× faster', end: 127},
+        ].map(panel => (
           <ChartPanel
-            key={title}
-            title={title}
-            note="lower is better"
-            figure="1.78× faster"
+            key={panel.title}
+            title={panel.title}
+            note={`${panel.better} is better`}
+            figure={panel.figure}
             tone="ok"
           >
             <Chart
-              label={title}
+              label={panel.title}
               size="strip"
               points={PICK_POINTS}
               steps={[
                 {x: 0, y: 100},
-                {x: 6, y: 127},
+                {x: 6, y: panel.end},
               ]}
               start="Input"
               xTicks={[0, 3, 6].map(value => ({value, label: `${value}m`}))}

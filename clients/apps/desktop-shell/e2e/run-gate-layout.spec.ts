@@ -30,7 +30,6 @@ for (const width of [1000, 1440]) {
     const listsHeight = await page.evaluate(
       () => document.querySelector('.vs-panes')?.getBoundingClientRect().height ?? 0,
     );
-    // The charts take what they need; the lists keep at least their floor (`--panes-floor`).
-    expect(listsHeight, 'the lists keep their room').toBeGreaterThanOrEqual(288);
+    expect(listsHeight, 'the lists keep their room').toBeGreaterThanOrEqual(900 * 0.38);
   });
 }

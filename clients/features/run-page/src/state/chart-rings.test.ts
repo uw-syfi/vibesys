@@ -6,7 +6,7 @@
  */
 import {describe, expect, test} from 'bun:test';
 import fc from 'fast-check';
-import {candidateOf, generatedRuns, READERS, type Run} from './generated-runs.js';
+import {candidateOf, generatedRuns, READERS, type Run} from './generated-runs.test-helper.js';
 import {objectiveCharts} from './objective-chart.js';
 import type {RunModel} from './run-model.js';
 

@@ -46,6 +46,11 @@ const PAD = 0.07;
 /** About this many ticks along the long, horizontal axis and the short, vertical one. */
 const X_TICKS = 6;
 const Y_TICKS = 4;
+/** Where `Better ↗` sits inside the frame's top right corner. */
+const BETTER_INSET = 4;
+/** The gap between the input's mark and its name. */
+const INPUT_GAP = 4;
+const BETTER_DROP = 16;
 const R = 6;
 const R_SMALL = 4;
 const R_RING = 10;
@@ -101,8 +106,12 @@ function exact(value: number): string {
 
 function layoutAxis(measured: readonly number[], direction: Direction, count: number): Layout {
   const values = measured.length === 0 ? [0, 1] : measured;
-  const low = Math.min(...values);
-  const high = Math.max(...values);
+  // Not `Math.min(...values)`: a plane of a hundred thousand points has more than a call takes.
+  let [low, high] = [Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY];
+  for (const value of values) {
+    if (value < low) low = value;
+    if (value > high) high = value;
+  }
   const span = high === low ? Math.max(1, Math.abs(low) * 0.1) : high - low;
   const from = (high === low ? low - span : low) - span * PAD;
   const to = (high === low ? high + span : high) + span * PAD;
@@ -192,7 +201,8 @@ function axisTitle(axis: ParetoAxis): string {
  * those, so moving the cursor along a time bar shows how the frontier advanced. (Without
  * a cursor every point is drawn.) The axes keep their range for the whole series, so nothing moves
  * but the points and the line. Both axes read the same way: toward the top and right is better
- * (an axis where lower is better is drawn backward), and each title says so. The input is a diamond;
+ * (an axis where lower is better is drawn backward), and each title says so, as does `Better ↗` in
+ * the frame's corner. The input is a diamond;
  * the frontier's points are solid, the dominated ones muted, and the turned-down ones hollow.
  * Hovering a point names it and gives its values; `highlighted` ids are ringed.
  */
@@ -204,6 +214,8 @@ export function ParetoChart(props: {
   readonly cursor?: number;
   readonly highlighted?: readonly string[];
   readonly size?: ParetoSize;
+  /** Whether the chart draws its own key under it (the roles of its points); true unless false. */
+  readonly legend?: boolean;
   /** With it every point is a button that calls `pick(id)`; the points are one tab stop. */
   readonly pick?: (id: string) => void;
   /** Called with a point's id as the pointer or the focus enters it, and null as it leaves. */
@@ -268,30 +280,32 @@ export function ParetoChart(props: {
           <Hover text={describe(named, x, y)} at={{x: px(named.x), y: py(named.y)}} plot={plot} />
         )}
       </svg>
-      <ul className="vs-dotlegend vs-serieslegend" aria-label="Points">
-        {KEY_ORDER.map(role => (
-          // A role not drawn yet keeps its place, unseen, so the legend is one height at every cursor.
-          <li
-            key={role}
-            className="vs-dotlegend-item"
-            {...(roles.has(role) ? {} : {'aria-hidden': true, 'data-absent': ''})}
-          >
-            <svg
-              className="vs-pareto-key"
-              data-role={role}
-              viewBox="-10 -10 20 20"
-              aria-hidden="true"
+      {props.legend === false ? null : (
+        <ul className="vs-dotlegend vs-serieslegend" aria-label="Points">
+          {KEY_ORDER.map(role => (
+            // A role not drawn yet keeps its place, unseen, so the legend is one height at every cursor.
+            <li
+              key={role}
+              className="vs-dotlegend-item"
+              {...(roles.has(role) ? {} : {'aria-hidden': true, 'data-absent': ''})}
             >
-              <g className="vs-pareto-point" data-role={role}>
-                <Shape role={role} cx={0} cy={0} />
-              </g>
-            </svg>
-            <Text variant="small" tone="muted">
-              {ROLE_WORD[role]}
-            </Text>
-          </li>
-        ))}
-      </ul>
+              <svg
+                className="vs-pareto-key"
+                data-role={role}
+                viewBox="-10 -10 20 20"
+                aria-hidden="true"
+              >
+                <g className="vs-pareto-point" data-role={role}>
+                  <Shape role={role} cx={0} cy={0} />
+                </g>
+              </svg>
+              <Text variant="small" tone="muted">
+                {ROLE_WORD[role]}
+              </Text>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -313,6 +327,17 @@ function PointMark(props: {
       <title>{props.text}</title>
       {props.ringed ? <circle className="vs-chart-ring" cx={at.x} cy={at.y} r={R_RING} /> : null}
       <Shape role={role} cx={at.x} cy={at.y} />
+      {role === 'input' ? (
+        // The input is the one mark named on the chart: it stands where the search began.
+        <text
+          className="vs-pareto-input"
+          x={at.x + R + INPUT_GAP}
+          y={at.y}
+          dominantBaseline="middle"
+        >
+          {ROLE_WORD.input}
+        </text>
+      ) : null}
     </>
   );
   if (pick === undefined) {
@@ -417,20 +442,21 @@ function Axes(props: {
           {tick.label}
         </text>
       ))}
-      <line
-        className="vs-chart-axis"
-        x1={plot.left}
-        x2={plot.left}
-        y1={plot.top}
-        y2={plot.bottom}
+      <rect
+        className="vs-chart-frame"
+        x={plot.left}
+        y={plot.top}
+        width={plot.right - plot.left}
+        height={plot.bottom - plot.top}
       />
-      <line
-        className="vs-chart-axis"
-        x1={plot.left}
-        x2={plot.right}
-        y1={plot.bottom}
-        y2={plot.bottom}
-      />
+      <text
+        className="vs-pareto-better"
+        x={plot.right - BETTER_INSET}
+        y={plot.top + BETTER_DROP}
+        textAnchor="end"
+      >
+        Better ↗
+      </text>
       <text className="vs-chart-label" x={plot.left} y={TOP_BAND - 12}>
         {`↑ ${axisTitle(props.y)}`}
       </text>

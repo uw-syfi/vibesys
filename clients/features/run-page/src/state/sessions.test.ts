@@ -8,7 +8,7 @@ import {storeRunFixture} from '@vibesys/run-fixtures';
 import {foldSkeleton, seedSkeleton, seekSkeleton} from '@vibesys/run-skeleton';
 import {clockThrough, readSkeleton} from '@vibesys/run-state/skeleton';
 import fc from 'fast-check';
-import {parts, type Records, recordsOf} from './session-records.js';
+import {parts, type Records, recordsOf} from './session-records.test-helper.js';
 
 function sessionsAt(records: readonly Records[number][], through: number) {
   const skeleton = foldSkeleton(seedSkeleton(), records.slice(0, through));

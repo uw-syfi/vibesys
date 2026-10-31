@@ -63,7 +63,11 @@ describe('the performance chart', () => {
       {x: 4, y: 14},
       {x: 5, y: 14},
     ]);
-    expect(chart?.readings.find(point => point.id === 'b')?.label).toBe('b · 8');
+    // A reading's whole name says when it was read, and whether it set a step of the line.
+    expect(chart?.readings.find(point => point.id === 'b')?.label).toBe('b · 8 · 2m 00s');
+    expect(chart?.readings.find(point => point.id === 'a')?.label).toBe(
+      'a · 10 · 1m 00s · new best',
+    );
   });
 
   test('the line starts at the input’s value at the start of the axis, and names it', () => {
@@ -78,7 +82,9 @@ describe('the performance chart', () => {
       {x: 2, y: 30},
       {x: 5, y: 30},
     ]);
-    expect(chart?.readings.find(point => point.id === 'b')?.label).toBe('b · 30 · 3.00×');
+    expect(chart?.readings.find(point => point.id === 'b')?.label).toBe(
+      'b · 30 · 3.00× · 2m 00s · new best',
+    );
   });
 
   test('a reading’s tip is its idea and the short figures; its name for assistive technology is whole', () => {
@@ -88,7 +94,7 @@ describe('the performance chart', () => {
     );
     const [first, second] = chart?.readings ?? [];
     expect(first?.tip).toEqual({lead: 'a', detail: '6.05M · 4.00×'});
-    expect(first?.label).toBe('a · 6,054,154 · 4.00×');
+    expect(first?.label).toBe('a · 6,054,154 · 4.00× · 1m 00s · new best');
     expect(second?.tip).toEqual({lead: 'b', detail: '757K · 0.50×'});
   });
 
@@ -114,7 +120,10 @@ describe('the performance chart', () => {
     const chart = chartOf(modelOf([idea('a', 'running', 0, 10)]), 5);
     expect(chart?.readings).toEqual([]);
     expect(chart?.steps).toEqual([]);
-    expect(chart?.yTicks).toEqual([]);
+    // Silent axes: four gridlines over the whole height, none with a word, and the time axis.
+    expect(chart?.yTicks.map(tick => tick.value)).toEqual([0.25, 0.5, 0.75, 1]);
+    expect(chart?.yTicks.every(tick => tick.label === '')).toBe(true);
+    expect(chart?.yDomain).toEqual([0, 1]);
     expect(chart?.xTicks.length).toBeGreaterThan(0);
   });
 

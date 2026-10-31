@@ -238,12 +238,12 @@
   position: absolute;
   top: 50%;
   left: calc(var(--space-3) + (100% - 2 * var(--space-3)) * var(--mark-at));
-  box-sizing: border-box;
   width: var(--space-3);
   height: var(--space-3);
-  transform: translate(-50%, -50%) rotate(45deg);
-  border: var(--hairline) solid var(--accent);
-  background: var(--panel);
+  transform: translate(-50%, -50%);
+  fill: var(--accent);
+  stroke: var(--bg);
+  stroke-width: var(--hairline);
   pointer-events: none;
 }
 .vs-scrubber-ticks {
@@ -286,6 +286,11 @@
 .vs-chart-grid,
 .vs-chart-axis {
   stroke: var(--grid);
+}
+/* The plot's frame, for a chart whose both axes are read from its edges. */
+.vs-chart-frame {
+  fill: none;
+  stroke: var(--line);
 }
 .vs-chart-label {
   fill: var(--muted);

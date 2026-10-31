@@ -5,7 +5,7 @@
  * a jump to the user. `anchorsOf` records the anchors on the screen now; `stabilityViolations`
  * compares the screen later against what was recorded.
  */
-import type {Locator, Page} from '@playwright/test';
+import type {Page} from '@playwright/test';
 import type {Violation} from './in-page.js';
 
 /** An element that must stay put: how the page names it, and the selector that finds it. */
@@ -47,22 +47,13 @@ export async function anchorsOf(
   anchors: readonly Anchor[] = RUN_ANCHORS,
 ): Promise<readonly (Placed | null)[]> {
   return page.evaluate(wanted => {
-    // Where an element is on the page, not on the screen: a page that scrolled to a pressed row has
-    // moved nothing, so the scroll of the window and of every container above it is added back.
-    const scrolled = (element: Element): number => {
-      let total = window.scrollY;
-      for (let node = element.parentElement; node !== null; node = node.parentElement) {
-        total += node.scrollTop;
-      }
-      return total;
-    };
     const kept = new Map<string, Element>();
     const placed = wanted.map(anchor => {
       const element = document.querySelector(anchor.selector);
       if (element === null) return null;
       kept.set(anchor.name, element);
       const {x, y, width, height} = element.getBoundingClientRect();
-      return {name: anchor.name, x, y: y + scrolled(element), width, height};
+      return {name: anchor.name, x, y, width, height};
     });
     (window as unknown as {screenAnchors: Map<string, Element>}).screenAnchors = kept;
     return placed;
@@ -80,28 +71,12 @@ export async function stabilityViolations(
   anchors: readonly Anchor[] = RUN_ANCHORS,
 ): Promise<Violation[]> {
   const now = await page.evaluate(wanted => {
-    // Where an element is on the page, not on the screen: a page that scrolled to a pressed row has
-    // moved nothing, so the scroll of the window and of every container above it is added back.
-    const scrolled = (element: Element): number => {
-      let total = window.scrollY;
-      for (let node = element.parentElement; node !== null; node = node.parentElement) {
-        total += node.scrollTop;
-      }
-      return total;
-    };
     const kept = (window as unknown as {screenAnchors: Map<string, Element>}).screenAnchors;
     return wanted.map(anchor => {
       const element = document.querySelector(anchor.selector);
       if (element === null) return null;
       const {x, y, width, height} = element.getBoundingClientRect();
-      return {
-        name: anchor.name,
-        x,
-        y: y + scrolled(element),
-        width,
-        height,
-        same: kept.get(anchor.name) === element,
-      };
+      return {name: anchor.name, x, y, width, height, same: kept.get(anchor.name) === element};
     });
   }, anchors);
   const found: Violation[] = [];
@@ -130,25 +105,4 @@ function movement(was: Placed, is: Placed & {same: boolean}, copies: boolean): s
   return moved.length === 0
     ? null
     : `changed its ${moved.map(key => `${key} from ${was[key]} to ${is[key]}`).join(', ')}`;
-}
-
-/**
- * Where `element` is on the page, not on the screen: the page scrolls to a row that was pressed (the
- * performance row is tall), and a scroll moves nothing. The scroll of the window and of every
- * container above the element is added back to its box.
- */
-export async function pageBox(element: Locator): Promise<{
-  readonly x: number;
-  readonly y: number;
-  readonly width: number;
-  readonly height: number;
-}> {
-  return element.evaluate(node => {
-    let scrolled = window.scrollY;
-    for (let each = node.parentElement; each !== null; each = each.parentElement) {
-      scrolled += each.scrollTop;
-    }
-    const {x, y, width, height} = node.getBoundingClientRect();
-    return {x, y: y + scrolled, width, height};
-  });
 }

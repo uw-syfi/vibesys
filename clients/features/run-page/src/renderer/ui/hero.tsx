@@ -76,12 +76,14 @@ function ObjectivePanel(props: {
     <ChartPanel
       title={headline?.name ?? chart.name}
       {...(chart.better === null ? {} : {note: BETTER_WORDS[chart.better]})}
-      {...(headline === undefined ? {} : {figure: headline.words, tone: headline.tone})}
+      {...(headline === undefined || headline.words === ''
+        ? {}
+        : {figure: headline.words, tone: headline.tone})}
       {...(headline === undefined || headline.hint === '' ? {} : {hint: headline.hint})}
-      {...(chart.unit === '' ? {} : {unit: chart.unit})}
     >
       <Chart
         label={chart.label}
+        {...(chart.unit === '' ? {} : {unit: chart.unit})}
         points={chart.readings}
         steps={chart.steps}
         {...(chart.start === null ? {} : {start: chart.start})}
@@ -154,6 +156,7 @@ export function Hero(
             <ParetoChart
               label={pareto.label}
               size="strip"
+              legend={false}
               points={pareto.points}
               x={pareto.x}
               y={pareto.y}

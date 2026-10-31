@@ -739,17 +739,49 @@ describe('Chart legend, panel and columns', () => {
         figure="3.83× faster"
         tone="ok"
         hint="6M · input 1.58M"
-        unit="ops/s"
       >
         <span>chart</span>
       </ChartPanel>,
     );
     expect(one(container, 'section').getAttribute('aria-label')).toBe('Throughput');
-    const figure = one(container, '.vs-chart-panel-head > .vs-text');
+    const figure = one(container, '.vs-chart-panel-head > .vs-chart-figure');
     expect(figure.textContent).toBe('3.83× faster');
-    expect(figure.getAttribute('data-tone')).toBe('ok');
-    expect(figure.getAttribute('title')).toBe('6M · input 1.58M');
-    expect(container.textContent).toContain('ops/s');
+    expect(one(figure, '.vs-text').getAttribute('data-tone')).toBe('ok');
+    // The hint is the figure's description and the figure a tab stop: no pointer is needed to read it.
+    expect(figure.getAttribute('aria-description')).toBe('6M · input 1.58M');
+    expect(figure.getAttribute('tabindex')).toBe('0');
+    expect(figure.hasAttribute('title')).toBe(false);
+  });
+
+  test('a figure with no hint is plain text, not a tab stop', async () => {
+    const {container} = await mount(
+      <ChartPanel title="Queue depth" figure="No clear change">
+        <span>chart</span>
+      </ChartPanel>,
+    );
+    const figure = one(container, '.vs-chart-figure');
+    expect(figure.hasAttribute('tabindex')).toBe(false);
+    expect(figure.hasAttribute('aria-description')).toBe(false);
+  });
+
+  test('a chart writes its y axis unit above the plot, inside its drawing', async () => {
+    const {container} = await mount(
+      <Chart
+        label="Series"
+        unit="ops/s"
+        points={[{x: 0, y: 1}]}
+        yTicks={[{value: 1, label: '1'}]}
+      />,
+    );
+    const words = [...container.querySelectorAll('svg text')].map(text => text.textContent);
+    expect(words).toContain('ops/s');
+    const unit = [...container.querySelectorAll('svg text')].find(
+      text => text.textContent === 'ops/s',
+    );
+    const axis = one(container, '.vs-chart-axis');
+    // Above the plot's top edge and at the drawing's left edge.
+    expect(Number(unit?.getAttribute('y'))).toBeLessThan(Number(axis.getAttribute('y1')));
+    expect(Number(unit?.getAttribute('x'))).toBe(0);
   });
 
   test('columns hold their charts as children, in order', async () => {

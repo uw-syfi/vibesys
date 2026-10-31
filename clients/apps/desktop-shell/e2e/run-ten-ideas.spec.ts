@@ -58,7 +58,6 @@ test('failed ideas are listed in the flat table and a chip lists only them', asy
   }
   await shot(page, 'ten-ideas-table');
 
-  await page.setViewportSize({width: 1440, height: 2000});
   await failedChip(page).click();
   await expect(failedRows(page)).toHaveCount(3);
   await expect(ideas(page).getByRole('option')).toHaveCount(3);
@@ -73,8 +72,8 @@ test('the performance row is a chart with a headline and values that carry a uni
   await openFixture(page, fixtureNamed('finished-ten-ideas'));
   const panel = page.getByRole('region', {name: 'Total ops/sec', exact: true});
   await expect(panel).toBeVisible();
-  await expect(panel.getByText('3.83× faster')).toHaveAttribute(
-    'title',
+  await expect(panel.locator('.vs-chart-figure')).toHaveText('3.83× faster');
+  await expect(panel.locator('.vs-chart-figure')).toHaveAccessibleDescription(
     '6,054,154 ops/s · input 1,581,539 ops/s',
   );
   // No line names the idea the figures belong to: the Ideas list badges it.

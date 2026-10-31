@@ -622,13 +622,20 @@ describe('Scrubber marks', () => {
 
   test('draw a diamond on the track at each place, and take no focus or name', async () => {
     const container = await mounted([0.25, 0.9]);
-    const marks = [...container.querySelectorAll('.vs-scrubber-mark')] as HTMLElement[];
+    const marks = [...container.querySelectorAll('.vs-scrubber-mark')];
     expect(marks.map(mark => mark.getAttribute('style'))).toEqual([
       '--mark-at: 0.25;',
       '--mark-at: 0.9;',
     ]);
     expect(marks.every(mark => mark.getAttribute('aria-hidden') === 'true')).toBe(true);
-    expect(marks.every(mark => mark.tabIndex < 0 && mark.textContent === '')).toBe(true);
+    expect(marks.every(mark => !mark.hasAttribute('tabindex') && mark.textContent === '')).toBe(
+      true,
+    );
+    // Each is a drawn shape, not an empty filled box: boxes beside the range would read, to the
+    // screen's legend check, as a strip of unnamed segments.
+    expect(
+      marks.every(mark => mark.tagName.toLowerCase() === 'svg' && mark.children.length === 1),
+    ).toBe(true);
     // The one slider is the range, with or without marks.
     expect(container.querySelectorAll('[role="slider"], input[type="range"]')).toHaveLength(1);
   });
@@ -765,6 +772,42 @@ describe('ParetoChart', () => {
         point.getAttribute('data-role') ?? '',
       ]),
     );
+
+  test('is framed on all four sides and says in its corner which way is better', async () => {
+    const root = await mount(<ParetoChart label="Trade-off" points={points} x={x} y={y} />);
+    const frame = root.querySelector('.vs-chart-frame');
+    expect(frame?.tagName.toLowerCase()).toBe('rect');
+    expect(Number(frame?.getAttribute('width'))).toBeGreaterThan(0);
+    expect(Number(frame?.getAttribute('height'))).toBeGreaterThan(0);
+    const better = root.querySelector('.vs-pareto-better');
+    expect(better?.textContent).toBe('Better ↗');
+    // Inside the frame, at its top right.
+    const right = Number(frame?.getAttribute('x')) + Number(frame?.getAttribute('width'));
+    expect(Number(better?.getAttribute('x'))).toBeLessThanOrEqual(right);
+    expect(Number(better?.getAttribute('y'))).toBeGreaterThan(Number(frame?.getAttribute('y')));
+  });
+
+  test('names its input on the chart, beside its mark, once', async () => {
+    const root = await mount(
+      <ParetoChart label="Trade-off" points={points} x={x} y={y} legend={false} />,
+    );
+    const names = [...root.querySelectorAll('.vs-pareto-input')];
+    expect(names.map(name => name.textContent)).toEqual(['Input']);
+    const mark = root.querySelector('.vs-pareto-point[data-role="input"] .vs-pareto-mark');
+    expect(Number(names[0]?.getAttribute('x'))).toBeGreaterThan(
+      Number(mark?.getAttribute('x')) + Number(mark?.getAttribute('width')) / 2,
+    );
+  });
+
+  test('draws its own key unless it is told the page keeps one for it', async () => {
+    const withKey = await mount(<ParetoChart label="Trade-off" points={points} x={x} y={y} />);
+    expect(withKey.querySelector('ul[aria-label="Points"]')).not.toBeNull();
+    const without = await mount(
+      <ParetoChart label="Trade-off" points={points} x={x} y={y} legend={false} />,
+    );
+    expect(without.querySelector('ul[aria-label="Points"]')).toBeNull();
+    expect(without.querySelectorAll('.vs-pareto-point').length).toBe(points.length);
+  });
 
   test('marks the input, the frontier, the dominated and the failed', async () => {
     const root = await mount(<ParetoChart label="Trade-off" points={points} x={x} y={y} />);

@@ -14,7 +14,7 @@ import {
   skeletonScreenState,
 } from './index.js';
 import {runningWords} from './running-time.js';
-import {parts, recordsOf} from './session-records.js';
+import {parts, recordsOf} from './session-records.test-helper.js';
 
 const SEED = {
   identity: {host: 'local' as const, runId: 'run-a'},

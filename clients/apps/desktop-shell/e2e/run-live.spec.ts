@@ -130,7 +130,8 @@ test('a run that has tried no idea yet says what will appear, not a guess', asyn
     .getByRole('button', {name: /^queue-rs · mpmc/})
     .click();
   await expect(page.getByRole('listbox', {name: 'Ideas'})).toHaveCount(0);
-  await expect(page.getByText('nothing measured yet')).toBeVisible();
+  await expect(page.getByText('nothing measured yet')).toHaveCount(0);
+  await expect(page.locator('.vs-chart-box .vs-chart-grid')).toHaveCount(4);
 });
 
 test('a live run drains from the header over its session, and is let go', async ({page}) => {

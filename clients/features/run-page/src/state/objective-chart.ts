@@ -80,6 +80,19 @@ const MIN_AXIS = 1;
 /** The share of the largest value left above it, so the top dot is not on the frame. */
 const HEADROOM = 1.1;
 
+/** The gridlines of a chart with nothing measured: four, evenly spaced, with no words, so the axes read as a chart. */
+const SILENT_TICKS = [0.25, 0.5, 0.75, 1].map(value => ({value, label: ''}));
+
+/** The smallest and largest of `values`; a loop, not a spread, which a long run's readings would overflow. */
+function rangeOf(values: readonly number[]): readonly [number, number] {
+  let [low, high] = [Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY];
+  for (const value of values) {
+    if (value < low) low = value;
+    if (value > high) high = value;
+  }
+  return [low, high];
+}
+
 /** A value on a y axis in the short form its size reads in: `6M`, `12K`, `0.42`. */
 const COMPACT = new Intl.NumberFormat('en-US', {notation: 'compact', maximumFractionDigits: 2});
 
@@ -177,9 +190,16 @@ function tipOf(
   point: PerformancePoint,
   unit: string,
   multiple: number | null,
+  said: {readonly when: string; readonly newBest: boolean},
 ): Pick<ChartReadingView, 'label' | 'tip'> {
   return {
-    label: [point.title, figuresOf(formatValue(point.value), unit, multiple)].join(' · '),
+    // The name carries what the dot shows by position and ring, for those who do not see them.
+    label: [
+      point.title,
+      figuresOf(formatValue(point.value), unit, multiple),
+      said.when,
+      ...(said.newBest ? ['new best'] : []),
+    ].join(' · '),
     tip: {lead: point.title, detail: figuresOf(shortValue(point.value), unit, multiple)},
   };
 }
@@ -208,7 +228,10 @@ function chartOf(
   const readings = onePerIdea(reading.fold.points, stepKeys).map(point => ({
     ...(point.unowned === true ? {} : {id: point.id}),
     key: readingKey(point),
-    ...tipOf(point, unit, multipleOver(point.value, reading.input, reading.direction)),
+    ...tipOf(point, unit, multipleOver(point.value, reading.input, reading.direction), {
+      when: runningWords(time.at(point.at)),
+      newBest: stepKeys.has(readingKey(point)),
+    }),
     x: minutes(point.at),
     y: point.value,
     selected: focus !== null && point.id === focus,
@@ -216,7 +239,10 @@ function chartOf(
     lit: lit.has(point.id) && stepKeys.has(readingKey(point)),
   }));
   // What the run has worked, as the time bar says it: the axis may be longer (`MIN_AXIS`), this is not.
-  const worked = Math.max(time.at(frame.reached), ...reading.fold.points.map(p => time.at(p.at)));
+  const worked = reading.fold.points.reduce(
+    (latest, point) => Math.max(latest, time.at(point.at)),
+    time.at(frame.reached),
+  );
   const reached = Math.max(MIN_AXIS * 60, worked);
   const end = reached / 60;
   const steps = stepped.map(step => ({x: minutes(step.at), y: step.value}));
@@ -233,7 +259,7 @@ function chartOf(
     ...(reading.input === null ? [] : [reading.input]),
     ...baselines.map(line => line.y),
   ];
-  const [low, top] = [Math.min(...ys), Math.max(...ys)];
+  const [low, top] = rangeOf(ys);
   const empty = readings.length === 0 && reading.input === null;
   const name = reading.name === null ? 'Metric' : metricLabel(reading.name);
   return {
@@ -248,7 +274,7 @@ function chartOf(
     baselines,
     xEnd: end,
     xTicks: timeTicks(reached),
-    yTicks: empty ? [] : valueTicks(low, top),
+    yTicks: empty ? SILENT_TICKS : valueTicks(low, top),
     yDomain: [low, top > 0 ? top * HEADROOM : 1],
     resumes: time.resumes.map(seconds => seconds / 60),
     caption: `running time · ${runningWords(worked)}`,
