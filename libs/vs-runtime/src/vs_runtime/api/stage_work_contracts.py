@@ -5,22 +5,35 @@ implements ``stage_work_under_test``. The cases drive a reaper through ``reap`` 
 ``StageWorkUnderTest`` names, and none reads a clock to decide an outcome. Each case runs for
 every place of stage work the variant can hold (``StageWorkUnderTest.places``), so a reaper that
 ends a leader but not its descendants, or a process but not its container, fails here.
+
+A reaper that waits on a host (``ps``, ``docker``, a bounded wait for an exit) must do so through
+the ``BlockingRunner`` it was built with, which the cases hold shut to prove it: whatever the
+reaper does on the caller's thread stops every timer of the loop it shares. A ``reap`` that is
+cancelled while that work is in flight returns only once the work has ended, because the loop
+starts nothing more on the tag until its ``clear`` has returned.
 """
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from vs_core.api import RequestId
 from vs_runtime._step_runner import ClearUnavailableError
+from vs_sim.api import yield_now
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
     from contextlib import AbstractContextManager
 
     from vs_runtime._local_job_step_runner import StageWorkReaper
+    from vs_sim.api.testing import GatedBlockingRunner
+
+
+_SETTLE_YIELDS = 20
+"""Turns of the loop a cancelled reap gets to return in before a case says it is still waiting."""
 
 
 class StageWorkPlace(StrEnum):
@@ -57,6 +70,11 @@ class StageWorkUnderTest:
     """Make the host refuse every ``reap`` for as long as the context is open."""
     stuck: Callable[[], AbstractContextManager[None]]
     """Make the work survive its kill for as long as the context is open."""
+    blocking: GatedBlockingRunner | None = None
+    """The runner the reaper was built with, open until a case holds it.
+
+    ``None`` for a reaper that waits on nothing, such as the in-memory Fake.
+    """
 
 
 class StageWorkReaperContract:
@@ -143,8 +161,66 @@ class StageWorkReaperContract:
                 _expect_unavailable(subject, tag)
             assert subject.running(tag) > 0, place
 
+    def test_reap_waits_on_the_host_only_through_its_blocking_runner(self) -> None:
+        """Held shut, the runner parks the reap before it touches the host; opened, the reap ends."""
+        for place in self._places():
+            subject = self.stage_work_under_test()
+            if subject.blocking is None:
+                return
+            blocking = subject.blocking
+            tag = RequestId(root="left")
+            subject.leave(tag, place)
+            left = subject.running(tag)
+
+            assert subject.run(_reap_while_held(subject, blocking, tag)) == left, place
+            assert subject.running(tag) == 0, place
+
+    def test_a_cancelled_reap_returns_only_after_the_call_in_flight_has_ended(self) -> None:
+        """The runner is held shut mid-call and the reap is cancelled: it must go on waiting."""
+        for place in self._places():
+            subject = self.stage_work_under_test()
+            if subject.blocking is None:
+                return
+            blocking = subject.blocking
+            tag = RequestId(root="left")
+            subject.leave(tag, place)
+
+            subject.run(_cancel_while_held(subject, blocking, tag))
+
+            assert blocking.in_flight == 0, place
+
     def _places(self) -> tuple[StageWorkPlace, ...]:
         return self.stage_work_under_test().places
+
+
+async def _reap_while_held(
+    subject: StageWorkUnderTest, blocking: GatedBlockingRunner, tag: RequestId
+) -> int:
+    """Start a reap with the runner held; the work still running once a call parked, then reap on."""
+    blocking.hold()
+    reap = asyncio.ensure_future(subject.reaper.reap(tag))
+    await blocking.wait_in_flight(1, reap)
+    untouched = subject.running(tag)
+    blocking.release()
+    await reap
+    return untouched
+
+
+async def _cancel_while_held(
+    subject: StageWorkUnderTest, blocking: GatedBlockingRunner, tag: RequestId
+) -> None:
+    """Cancel a reap with a call in flight; it is still waiting until the call is let go."""
+    blocking.hold()
+    try:
+        reap = asyncio.ensure_future(subject.reaper.reap(tag))
+        await blocking.wait_in_flight(1, reap)
+        reap.cancel()
+        for _ in range(_SETTLE_YIELDS):
+            await yield_now()
+        assert not reap.done(), "reap returned while a call of its own was in flight"
+    finally:
+        blocking.release()
+    await asyncio.gather(reap, return_exceptions=True)
 
 
 def _expect_unavailable(subject: StageWorkUnderTest, tag: RequestId) -> None:

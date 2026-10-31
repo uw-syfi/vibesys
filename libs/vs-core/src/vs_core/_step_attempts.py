@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ._request_recovery import is_open
+from ._request_recovery import is_open, resent
 from .types.common import EventId, Observation, ObservationStatus
 from .types.records import RequestObserved, RequestPhase, RequestRecord
 from .types.steps import (
@@ -78,7 +78,22 @@ def interrupted(state: CoreState, tag: RequestId, attempt: int, why: Interruptio
         message = f"the log interrupts attempt {attempt} of step {tag.root}, which is not running"
         raise ValueError(message)
     uncharged = row.uncharged + (0 if why.charged else 1)
+    state = _returned(state, tag)
     return _with(state, tag, row.model_copy(update={"ended": True, "uncharged": uncharged}))
+
+
+def _returned(state: CoreState, tag: RequestId) -> CoreState:
+    """``state`` with the open step ``tag`` back to the state of one no one has started.
+
+    Its attempt ended without a result, so nothing is owed an answer and nothing runs: the
+    request waits to be sent again, unreported to its owner, as a drain that interrupts a request
+    leaves it (``resent``).
+    """
+    record = open_record(state, tag)
+    if record.phase is RequestPhase.PREPARED:
+        return state
+    again = resent(record, state.run.now_at, state.run.limits.reconciliation_bound)
+    return _replaced(state, again)
 
 
 def dispatched(state: CoreState, tag: RequestId) -> CoreState:

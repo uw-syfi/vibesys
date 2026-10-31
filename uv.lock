@@ -42,11 +42,11 @@ members = [
 
 [[package]]
 name = "agentshim"
-version = "0.23.0"
+version = "0.23.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/4b/3e/3b0c6fd78131fdfd9dffc7c7f6fc89789c886ad043d547288dcd3142f7f7/agentshim-0.23.0.tar.gz", hash = "sha256:8792bc42ed9beb00c4989b7b4aa6024bffebb429029dd86cad6531ab12f24b15", size = 286942, upload-time = "2026-10-20T07:42:23.386Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/63/6b/bd290a9f4c5f1f6d0d543b1c372a16533d15f0d9922fd54a60100693bade/agentshim-0.23.1.tar.gz", hash = "sha256:b5d61ff1e705514ad400929848ce34fb6b7220fce83629b2a977a1ca8d1d331a", size = 287283, upload-time = "2026-10-31T01:52:21.787Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/67/f5/f53b81a877d68e15f11f6e769862e844366842385b41a8924ff0a2fbb500/agentshim-0.23.0-py3-none-any.whl", hash = "sha256:35793cec7b052eea0d7cd13a3354ad55a09f94bb952a6eb789faef82e4fe9ac0", size = 332025, upload-time = "2026-10-20T07:42:21.736Z" },
+    { url = "https://files.pythonhosted.org/packages/ca/f3/9b59855b1f30a51cb6b34ec07ec0b44a6b5ee5890c36bd254e35d79ffda5/agentshim-0.23.1-py3-none-any.whl", hash = "sha256:c06710d3b251c21a38f5a9b7937d9f0c1dc2fd84d41a3cc41f5a095ff470a670", size = 332116, upload-time = "2026-10-31T01:52:19.885Z" },
 ]
 
 [[package]]
@@ -3098,7 +3098,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentshim", specifier = ">=0.23.0,<0.24" },
+    { name = "agentshim", specifier = ">=0.23.1,<0.24" },
     { name = "cbor2", specifier = "<6" },
     { name = "cryptography", specifier = "<50" },
     { name = "google-crc32c", specifier = ">=1.7,<2" },
@@ -3173,7 +3173,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentshim", specifier = ">=0.23.0,<0.24" },
+    { name = "agentshim", specifier = ">=0.23.1,<0.24" },
     { name = "pydantic", specifier = ">=2" },
     { name = "pydantic-core" },
     { name = "vs-decode", editable = "libs/vs-decode" },
@@ -3232,7 +3232,6 @@ dependencies = [
     { name = "protobuf-py" },
     { name = "pydantic" },
     { name = "vs-proto" },
-    { name = "vs-runlog" },
 ]
 
 [package.metadata]
@@ -3240,7 +3239,6 @@ requires-dist = [
     { name = "protobuf-py", specifier = "==0.6.0" },
     { name = "pydantic", specifier = ">=2" },
     { name = "vs-proto", editable = "libs/vs-proto" },
-    { name = "vs-runlog", editable = "libs/vs-runlog" },
 ]
 
 [[package]]

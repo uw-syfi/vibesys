@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 import agentshim
 import pytest
 from agentshim.testing import FakeExecutor, FakeRun
+from tests.support.unique_run_id import unique_run_id
 
 from vs_agent.session_launch import confine_to_sandbox
 from vs_core.api import RequestId
@@ -41,7 +42,6 @@ pytestmark = pytest.mark.skipif(
     reason="no process table for this platform",
 )
 
-RUN = "run-a"
 _AGENT = "import time; time.sleep(600)"
 _LEFT_RUNNING: list[int] = []
 
@@ -65,7 +65,9 @@ class _Unconfined:
 def _end_what_a_test_left() -> Iterator[None]:
     yield
     while _LEFT_RUNNING:
-        with contextlib.suppress(ProcessLookupError):
+        # A group of only zombies (the reaper killed it, its parent has not collected it yet) is
+        # nothing left to signal: ESRCH on Linux, EPERM on macOS.
+        with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(_LEFT_RUNNING.pop(), signal.SIGKILL)
 
 
@@ -84,9 +86,15 @@ def _running_in_group(pgid: int) -> int:
     return sum(1 for row in parse_ps(listing) if row.pgid == pgid and not row.stat.startswith("Z"))
 
 
-def _start_agent(tag: RequestId) -> subprocess.Popen[bytes]:
-    """Launch an agent for the step *tag* the way a Host turn is launched."""
-    mark = agent_mark(RUN, tag)
+@pytest.fixture
+def run_id() -> str:
+    """The run of this test alone: the table reads the host's whole process list."""
+    return unique_run_id()
+
+
+def _start_agent(run_id: str, tag: RequestId) -> subprocess.Popen[bytes]:
+    """Launch an agent for the step *tag* of *run_id* the way a Host turn is launched."""
+    mark = agent_mark(run_id, tag)
     recorder = FakeExecutor([FakeRun()])
     executor = confine_to_sandbox(recorder, _Unconfined(), leads_group=True)
     environment = {**os.environ, **step_tag_env(mark)}
@@ -104,11 +112,11 @@ def _start_agent(tag: RequestId) -> subprocess.Popen[bytes]:
     return process
 
 
-def test_a_host_agent_is_ended_by_its_mark_and_another_step_s_agent_is_left() -> None:
+def test_a_host_agent_is_ended_by_its_mark_and_another_step_s_agent_is_left(run_id: str) -> None:
     target, bystander = RequestId(root="step-a"), RequestId(root="step-b")
-    ended, kept = _start_agent(target), _start_agent(bystander)
+    ended, kept = _start_agent(run_id, target), _start_agent(run_id, bystander)
     reaper = HostEnvironment().agent_work_reaper(
-        RUN,
+        run_id,
         system=replace(idle_environment_system(), process_table=OsProcessTable()),
         blocking=InlineBlockingRunner(),
         local_namespace=_no_namespace,

@@ -35,16 +35,14 @@ const STATUS_WORDS: Readonly<Record<RunRowStatus, string>> = {
   unknown: 'unknown',
 };
 
-/** A step of `load` as the screen lists it, with what `load` adds to the step it stands on. */
+/** A step of `load` as the screen lists it, with the reason a stopped machine gives on its step. */
 function stepItem(load: Exclude<MachineLoad, {readonly kind: 'listed'}>, step: LoadStep): StepItem {
-  const note =
-    load.kind === 'failed' ? load.reason : load.attempt > 0 ? `Retry ${load.attempt}` : null;
   return {
     id: step.step,
     label: step.word,
     state: step.state,
     position: step.position,
-    ...(note === null ? {} : {note}),
+    ...(load.kind === 'failed' ? {note: load.reason} : {}),
   };
 }
 
@@ -87,12 +85,9 @@ export function runInput(entry: DashboardRow, now: number): RunInput {
     id: digestKey(row.run),
     runId: row.run.runId,
     title: entry.row.title,
-    // A run with no task of its own is grouped under its title: the project's name.
-    task: entry.task ?? row.title,
     started: formatStarted(entry.createdAt, {now}),
     machine: entry.machine,
     hardware: null,
-    agent: null,
     status: {
       kind: STATUS_KINDS[row.status],
       word: row.problem === null ? row.look.word : STATUS_WORDS[row.status],

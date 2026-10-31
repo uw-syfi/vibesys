@@ -7,7 +7,6 @@
  */
 import type {HostKey} from '@vibesys/hosts';
 import {
-  Banner,
   Button,
   Card,
   Chip,
@@ -208,10 +207,6 @@ export function MachinesPage(props: {
   return (
     <Page header={header}>
       <Stack>
-        {state.listProblem === null ? null : (
-          <Banner tone="err" title="The machines could not be read" body={state.listProblem} />
-        )}
-        {state.actionProblem === null ? null : <Banner tone="err" title={state.actionProblem} />}
         {state.listing !== null && state.machines.length === 0 ? (
           <Card>
             <EmptyState title="Reading" />

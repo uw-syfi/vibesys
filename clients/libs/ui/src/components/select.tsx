@@ -43,11 +43,26 @@ export function Select<T extends string>(props: {
   readonly mono?: boolean;
   /** `sm` is the height of the other small controls (a search box), for a toolbar row. */
   readonly size?: 'sm';
+  /**
+   * Draws the `Field`'s label inside the control, before the chosen option (`Group by  Status`), so
+   * the value reads as a setting and not a filter. Give the `Field` `hideLabel`: the hidden label
+   * still names the control, and the inside copy is not read twice.
+   */
+  readonly labelInside?: boolean;
 }): JSX.Element {
   const wiring = useFieldWiring('Select');
   const {options, change} = props;
   return (
-    <span className="vs-select" data-size={props.size}>
+    <span
+      className="vs-select"
+      data-size={props.size}
+      data-label-inside={props.labelInside === true || undefined}
+    >
+      {props.labelInside === true ? (
+        <span className="vs-select-label" aria-hidden="true">
+          {wiring.label}
+        </span>
+      ) : null}
       <select
         className="vs-input"
         id={wiring.id}

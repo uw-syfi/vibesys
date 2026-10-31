@@ -4,7 +4,7 @@
  * records up to the budget, then Tail for the rest), and delivers every reply over one shared pipe
  * with a round trip and a throughput, in the virtual time of the clock that drives the test.
  */
-import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
+import {clone, create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {FileDescriptorSetSchema} from '@bufbuild/protobuf/wkt';
 import {sha256} from '@noble/hashes/sha2.js';
 import {bytesToHex} from '@noble/hashes/utils.js';
@@ -364,10 +364,14 @@ export class SimGateway implements RunTransport {
     const cached = this.#keyframes.get(covered);
     if (cached) return cached;
     const records = this.run.records;
-    const keyframe = create(KeyframeSchema, {
-      ...foldSkeleton(seedSkeleton(), records.slice(0, covered)),
-      throughSeq: records[covered - 1]?.seq ?? 0n,
-    });
+    // The fold shares what it did not change with the run's records, which this edits below: own a copy.
+    const keyframe = clone(
+      KeyframeSchema,
+      create(KeyframeSchema, {
+        ...foldSkeleton(seedSkeleton(), records.slice(0, covered)),
+        throughSeq: records[covered - 1]?.seq ?? 0n,
+      }),
+    );
     if (this.run.legacyKeyframes) {
       keyframe.failures = [];
       keyframe.failuresTracked = false;

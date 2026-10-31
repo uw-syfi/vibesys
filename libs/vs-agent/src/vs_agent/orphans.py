@@ -43,19 +43,28 @@ from vs_sim.api import DISCARD
 _DOCKER_TIMEOUT_SECONDS = 60.0
 
 # Kills every process in the container whose initial environment holds the line
-# ``$1=$2`` (the marker name and the step's tag) and prints how many it signalled. Like
-# agentshim's sweep for its own marker, it never reads its own shell's or its helpers'
-# environment as a match: the tag travels as arguments, not as environment. Nothing matched
-# prints 0; a container without ``tr`` or ``grep`` cannot sweep and must say so (exit 127),
-# not report clean.
+# ``$1=$2`` (the marker name and the step's tag) and prints how many it *found*, not how many
+# it killed: a kill that fails (the process is dying, or not the sweep's to signal) must read
+# as "still there", never as "nothing found", or the step would be called clear over a live
+# writer. Like agentshim's sweep for its own marker, it never reads its own shell's or its
+# helpers' environment as a match: the tag travels as arguments, not as environment. Nothing
+# matched prints 0; a container without ``tr`` or ``grep`` cannot sweep and must say so (exit
+# 127), not report clean.
+#
+# It runs as the container's own user, which is the agent's: the agent image's ``USER`` is the
+# agent, and neither the agent's ``docker exec`` nor this one passes ``-u``. A process's
+# environment is readable only by its owner (and by root with ``CAP_SYS_PTRACE``, which a
+# default container lacks), so ``-u root`` here would read nothing of the agent's and report
+# clean over a live writer. A process of another non-root user would be skipped the same way;
+# the agent is never started as one.
 _REAP_TAGGED_SCRIPT = (
     "command -v tr >/dev/null && command -v grep >/dev/null "
     "|| { echo 'reap needs tr and grep in the container' >&2; exit 127; }; "
     'self=$$; marker="$1=$2"; n=0; '
     "for d in /proc/[0-9]*; do "
     'pid=${d#/proc/}; [ "$pid" = "$self" ] && continue; '
-    "tr '\\0' '\\n' < \"$d/environ\" 2>/dev/null | grep -qxF -- \"$marker\" "
-    '&& kill -9 "$pid" 2>/dev/null && n=$((n+1)); '
+    "tr '\\0' '\\n' 2>/dev/null < \"$d/environ\" | grep -qxF -- \"$marker\" "
+    '&& { n=$((n+1)); kill -9 "$pid" 2>/dev/null; }; '
     'done; echo "$n"'
 )
 

@@ -1,29 +1,27 @@
-"""Closing an attempt does not wait for the open steps of its scope, nor stop one that has not begun.
+"""``decide`` holds the close of an attempt scope until the steps of that scope have results.
 
-Answer to the open question of the 6a plan (section 5): no. ``decide`` starts the
-``CloseAttemptScope`` of a retiring attempt while a step of the same scope still has a running
-attempt, because no dependency orders them and ``request_effect`` classes the close as neither a
-writer nor a snapshot. The attempt itself lists no release dependency on that step either: it
-depends on the closing request and on the jobs and records it already knows, so a measurement whose
-job core has not yet seen (a step reports its job only when it ends) is not among them. A step of
-the scope that has not begun is neither started nor settled by the retirement: it waits for the
-run's own end.
-
-What makes it safe for a running job is the close itself, not an ordering: it cancels every job
-registered under the scope and lists it (``vs_runtime._job_registry``), so the step ends. What no
-rule covers is a step that has begun but not yet registered its job when the close reads the
-registry: its job is submitted after the close. The window is the time between ``StepStarted`` and
-the job's registration, the first thing a job runner does.
+The recovery page says it ("Closure waits for the scope's steps to have results instead of proving
+release"), and the job runners rely on it: a close lists and cancels the jobs registered under its
+scope (``vs_runtime._job_registry``), and a step that has begun but not yet registered its job when
+the close reads the registry would submit that job after the close. The rule is owned by
+``rr/core-fixes`` (the open question of the 6a plan, section 5, was answered by this test failing:
+today ``decide`` starts the ``CloseAttemptScope`` of a retiring attempt while a step of its scope
+still has a running attempt, and the attempt lists no release dependency on a measurement whose job
+core has not seen). The test that states the rule is a strict xfail until that change lands; it
+then fails as an unexpected pass, and its marker is removed with the change.
 """
 
 from __future__ import annotations
 
+import pytest
+
 import vs_core.api as core
 from vs_core.api.recovery import (
-    Cancel,
+    Cancelled,
+    CancelReason,
     Run,
-    Settle,
     decide,
+    finished_message,
     fold,
     input_message,
     started_message,
@@ -38,10 +36,8 @@ def record(seq: int, body: Oneof) -> Record:
     return Record(seq=seq, epoch=1, at=Timestamp(seconds=seq), clock=float(seq), body=body)
 
 
-def closing_over_a_running_submission(
-    *, begun: bool = True
-) -> tuple[core.CoreState, core.SubmitMeasurement, int]:
-    """A retiring attempt whose measurement step has begun (or not), and the log's length."""
+def retiring_over_a_running_submission() -> tuple[core.CoreState, core.RequestId]:
+    """A retiring attempt whose measurement step has begun and has no result."""
     state, ref = fixture()
     scope = core.Scope(owner=ref.attempt_id, generation=ref.generation)
     submitted = core.step(
@@ -60,42 +56,32 @@ def closing_over_a_running_submission(
     )
     (submission,) = submitted.requests
     assert isinstance(submission, core.SubmitMeasurement)
-    assert submission.request_id is not None
-    state = submitted.state
-    if begun:
-        run = Run(submission, submission.request_id, 1, 100.0)
-        state = fold([record(1, Oneof("step_started", started_message(run)))], state)
-    event = retirement(ref, "cancel")
-    state = fold([record(2, Oneof("core_input", input_message(event)))], state)
-    return state, submission, 2
+    tag = submission.request_id
+    assert tag is not None
+    state = fold(
+        [record(1, Oneof("step_started", started_message(Run(submission, tag, 1, 100.0))))],
+        submitted.state,
+    )
+    state = fold([record(2, Oneof("core_input", input_message(retirement(ref, "cancel"))))], state)
+    return state, tag
 
 
-def test_the_close_of_a_scope_starts_while_a_step_of_the_scope_still_runs() -> None:
-    state, submission, _ = closing_over_a_running_submission()
-    actions = decide(state, 3.0)
-    runs = [action.step for action in actions if isinstance(action, Run)]
-    assert [type(step) for step in runs] == [core.CloseAttemptScope]
-    assert not [action for action in actions if isinstance(action, Cancel)]
-    assert submission.request_id is not None
-
-
-def test_the_attempt_lists_no_release_dependency_on_a_step_whose_job_core_has_not_seen() -> None:
-    state, submission, _ = closing_over_a_running_submission()
-    (owner,) = state.attempts.attempts
-    assert owner.phase is core.AttemptPhase.CLOSING
-    assert {dependency.identity for dependency in owner.release_dependencies} == {
-        core.RequestId(root="withdraw")
-    }
-    assert submission.request_id not in {item.identity for item in owner.release_dependencies}
-
-
-def test_a_step_of_the_scope_that_has_not_begun_is_not_started_and_not_settled_by_the_retirement() -> (
-    None
-):
-    state, submission, _ = closing_over_a_running_submission(begun=False)
-    actions = decide(state, 3.0)
-    assert [type(action.step) for action in actions if isinstance(action, Run)] == [
-        core.CloseAttemptScope
+def closes(state: core.CoreState) -> list[core.CloseAttemptScope]:
+    return [
+        action.step
+        for action in decide(state, 3.0)
+        if isinstance(action, Run) and isinstance(action.step, core.CloseAttemptScope)
     ]
-    assert not [action for action in actions if isinstance(action, Settle | Cancel)]
-    assert submission in {row.request for row in state.records.records}
+
+
+@pytest.mark.xfail(strict=True, reason="core-fixes")
+def test_the_close_of_a_scope_is_held_while_a_step_of_the_scope_has_no_result() -> None:
+    state, _ = retiring_over_a_running_submission()
+    assert closes(state) == []
+
+
+def test_the_close_of_a_scope_runs_once_the_steps_of_the_scope_have_results() -> None:
+    state, tag = retiring_over_a_running_submission()
+    ended = Cancelled(reason=CancelReason.RUN_ENDING)
+    state = fold([record(3, Oneof("step_finished", finished_message(tag, 1, ended)))], state)
+    assert len(closes(state)) == 1

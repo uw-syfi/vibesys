@@ -94,20 +94,22 @@ function nextContentHash(context: GatewayRunContext): string {
   );
 }
 
+/** A batch without a reply leaves the map as it was; the first reply of one copies it, once. */
 function replyAttachments(
   previous: GatewayRunContext['replies'],
   rows: readonly RecordRow[],
 ): GatewayRunContext['replies'] {
-  const replies = {...previous};
+  let replies: Record<string, GatewayRunContext['replies'][string]> | undefined;
   for (const row of rows) {
     const attachment = row.attachment;
     if (attachment?.role !== 'reply' || !attachment.blob) continue;
+    replies ??= {...previous};
     replies[attachment.span] = [
       ...(replies[attachment.span] ?? []),
       {seq: BigInt(row.seq), hash: attachment.blob.sha256},
     ];
   }
-  return replies;
+  return replies ?? previous;
 }
 
 /** Presentation changes reuse the existing pure reducer; gateway commands never reach legacy ports. */

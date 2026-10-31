@@ -290,15 +290,6 @@ native_targets = []
 pnpm_packages = []
 
 [[cases]]
-name = "keyed replay core selects Python verification"
-paths = ["libs/vs-core/src/vs_core/api/replay.py", "libs/vs-core/src/vs_core/flows/_replay_identity.py", "libs/vs-core/src/vs_core/flows/_replay_history.py", "libs/vs-core/src/vs_core/flows/_replay_run.py", "libs/vs-core/src/vs_core/flows/_replay_sources.py", "libs/vs-core/src/vs_core/flows/_replay_causality.py", "libs/vs-core/src/vs_core/flows/_replay_schema.py", "libs/vs-core/src/vs_core/flows/_replay_archive.py"]
-jobs = ["python"]
-[cases.collections]
-native_languages = []
-native_targets = []
-pnpm_packages = []
-
-[[cases]]
 name = "keyed replay contracts select proto verification"
 paths = ["proto/vibesys/store/v1/replay.proto", "proto/vibesys/search/v1/serial_effects.proto", "proto/vibesys/core/v1/replay_workspace.proto", "proto/vibesys/core/v1/replay_agent.proto", "proto/vibesys/core/v1/replay_evaluation.proto"]
 jobs = ["proto"]
@@ -308,27 +299,9 @@ native_targets = []
 pnpm_packages = []
 
 [[cases]]
-name = "replay context fixtures and ownership guard select generation and Python checks"
-paths = ["libs/vs-core/tests/proto/vibesys/replay/testing/v1/context.proto", "libs/vs-core/tests/generated/vibesys/replay/testing/v1/context_pb.py", "libs/vs-core/tests/buf.gen.yaml", "scripts/check_proto_layers.py"]
+name = "proto layer guard selects generation and Python checks"
+paths = ["scripts/check_proto_layers.py"]
 jobs = ["proto", "python"]
-[cases.collections]
-native_languages = []
-native_targets = []
-pnpm_packages = []
-
-[[cases]]
-name = "keyed live driver selects Python and real-tier verification"
-paths = ["libs/vs-runtime/src/vs_runtime/api/replay.py", "libs/vs-runtime/src/vs_runtime/_replay_runtime.py", "libs/vs-runtime/src/vs_runtime/_replay_run.py", "libs/vs-runtime/src/vs_runtime/_replay_fake.py", "libs/vs-runtime/src/vs_runtime/_replay_operations.py", "libs/vs-runtime/src/vs_runtime/_replay_workspaces.py", "libs/vs-runtime/src/vs_runtime/_replay_owner.py", "libs/vs-runtime/src/vs_runtime/_replay_sessions.py", "libs/vs-runtime/src/vs_runtime/_replay_evaluation.py", "libs/vs-runtime/src/vs_runtime/_replay_evaluation_jobs.py", "libs/vs-runtime/src/vs_runtime/_replay_executors.py", "libs/vs-runtime/src/vs_runtime/_replay_wiring.py", "libs/vs-runtime/src/vs_runtime/_replay_evidence.py", "src/vibesys/serial_replay.py", "libs/vs-runtime/tests/test_replay_schema_recovery.py"]
-jobs = ["python", "real_tiers"]
-[cases.collections]
-native_languages = []
-native_targets = []
-pnpm_packages = []
-
-[[cases]]
-name = "runtime replay schema fixtures select generation and runtime verification"
-paths = ["libs/vs-runtime/tests/proto/vibesys/runtime/testing/v1/prompt.proto", "libs/vs-runtime/tests/proto_prior/vibesys/runtime/testing/v1/schema_recovery.proto", "libs/vs-runtime/tests/generated/prior/vibesys/runtime/testing/v1/schema_recovery_pb.py", "libs/vs-runtime/tests/generated/vibesys/runtime/testing/v1/prompt_pb.py", "libs/vs-runtime/tests/buf.gen.yaml", "libs/vs-runtime/tests/buf.prior.gen.yaml"]
-jobs = ["proto", "python", "real_tiers"]
 [cases.collections]
 native_languages = []
 native_targets = []

@@ -61,7 +61,7 @@ once. An **open step** is a step with no result. An **epoch** is one process lif
 | `vs-dst` kills and pauses at every log write and every await | in progress (#3475 item 2) |
 | `state.pb` as a cache, one-append commit | unbuilt |
 | Prove-or-block layer ([inventory](#consumer-inventory)) | built; deleted at the cutover |
-| Keyed replay, parts 1 to 7a | merged and dormant: no run selects it |
+| Keyed replay, parts 1 to 7a | deleted (the `vs_runtime` driver, the `vs_core` flows and `api/replay.py`, `serial_replay.py` and their tests); the protos and `RunLogReplayStore` stay until 6b (see [what of keyed replay stays](#what-of-keyed-replay-stays)) |
 | Keyed replay, parts 7b to 9 | not built, and not needed by this design |
 
 ## Consumer inventory
@@ -97,8 +97,8 @@ Paths are under `libs/vs-core/src/vs_core/`.
 | `_recovery_owners.py` | 232 | `_request_recovery.py` only | Delete: it decides which area owns a resource a request reported, which only reattachment needs |
 | `_recovery_unanswered.py` | 85 | `_request_recovery.py` only | Delete: its four verdicts (`resend`, `unknown`, `terminal`, `blocked`) collapse to one, `resend` |
 | `_proofs.py` | 1,120 | 27 core modules, `api/proofs.py`, `api/_exports.py` | Delete 207 (`resolved_observation`, `released_owner`, `_release_*`, `_released_*`, `blocked_unnamed`). Move 211 (`committed_stop`, `stop_mode`, `requested_stop_mode`, `draining`, `continues_admitted_work`, `admission_remaining`, `occupied_episode`, the dependency rules) to `_run_stop.py` and `_admission.py` as plain functions. Keep 702: correlation checks the live reducers use |
-| `_attempt_retirement.py` | 1,941 | `attempts.py` only | Delete 691: release proofs, ownership discovery, `_inspect_unknown`, `_session_reattached`, `_reacquired`. Keep 1,250: closure, retention, guarded scope reopening. Closure does not wait for the scope's steps to have results ([open risks](#open-risks)): its close cancels and lists the jobs the scope registered, instead of proving release |
-| `_continuations.py` | 1,757 | `_step.py`, `_session_turns.py`, `_evaluation_history.py`, `evaluation.py`, `flows/_replay_turns.py` | Delete 96 (`_release_complete`, `_job_released`, `_descendants` and kin). Keep 1,661, including `credit_downtime` and `reach_deadlines` (wait deadlines) |
+| `_attempt_retirement.py` | 1,941 | `attempts.py` only | Delete 691: release proofs, ownership discovery, `_inspect_unknown`, `_session_reattached`, `_reacquired`. Keep 1,250: closure, retention, guarded scope reopening. Closure waits for the scope's steps to have results instead of proving release |
+| `_continuations.py` | 1,757 | `_step.py`, `_session_turns.py`, `_evaluation_history.py`, `evaluation.py` | Delete 96 (`_release_complete`, `_job_released`, `_descendants` and kin). Keep 1,661, including `credit_downtime` and `reach_deadlines` (wait deadlines) |
 | `_settlement.py` | 505 | `settlement.py` only | Delete 14 (`_released`, the gate that publishes only after release proof). Keep 491 |
 | `_inspection.py` | 217 | `_step.py` | Delete: correlates inspection answers, which no longer exist |
 | `_host_epochs.py` | 69 | `records.py`, `_step.py`, `_wait_clock.py`, `_request_recovery.py` | Delete: the fold's clock is the recorded run clock, which excludes downtime, so no host log is needed |
@@ -115,13 +115,13 @@ Paths are under `libs/vs-runtime/src/vs_runtime/`.
 
 | Module | Lines | Callers | Verdict |
 |---|---|---|---|
-| `_effect_fence.py` | 365 | `_evaluation_requests.py`, `_operation_requests.py`, `_observation_factory.py`, `_session_requests.py`, `_session_lifecycle_requests.py`, `_workspace_requests.py`, `_workspace_receipts.py`, `_replay_owner.py`, `_replay_operations.py`, `_replay_sessions.py`, `api/core.py`, `api/retained.py`, `api/fence_contracts.py` | Delete. `NothingHeld` and `MayHold` exist to prove "nothing is held"; `clear` replaces them |
+| `_effect_fence.py` | 365 | `_evaluation_requests.py`, `_operation_requests.py`, `_observation_factory.py`, `_session_requests.py`, `_session_lifecycle_requests.py`, `_workspace_requests.py`, `_workspace_receipts.py`, `api/core.py`, `api/retained.py`, `api/fence_contracts.py` | Delete. `NothingHeld` and `MayHold` exist to prove "nothing is held"; `clear` replaces them |
 | `_receipt_store.py` | 486 | 27 modules; `run_once` is used by 11 executors | Delete 265: `run_once`, `authorize`, `history`, `seal`, the `Settled`/`Transient`/`Replayed` result types. Keep 220: `exclusive`, `load`, `record_once`, `replace`, `modify`, the crash-safe keyed document store behind workspace receipts, operation receipts and the evidence ledger |
-| `_access_settlement.py` | 377 | `_session_requests.py`, `_session_lifecycle_requests.py`, `_replay_sessions.py`, `api/core.py`, `api/retained.py` | Delete `access_unproven`. Keep the rest. `begin` and `settle` enforce the role's workspace grant and revert unauthorized writes, which is policy, not recovery. The runners also use `fence`, `receipt`, `restore_interrupted` and the new `rewind`, which `clear` of a turn calls to return the workspace to the baseline its receipt retains and reopen the key for the next attempt. `begin` calls `require_clear` and `blocking`, and the workspace's snapshot guard calls `fenced_by`, so the unsettled-writer index stays too: the 103 lines this row first counted for deletion are not removable without redesigning that guard |
-| `_evaluation_recovery.py` | 311 | `_polling_evaluation.py` and `_semantic_slurm_evaluation.py` take it as an optional argument that no production wiring passes; `_replay_evaluation_jobs.py`; `api/slurm_evaluation_stack.py` | Delete |
-| `_writer_reconciliation.py` | 392 | `_replay_*` (5 modules), `_run_environment.py` (`reconcile_writers` on four environments), `_evaluation_recovery.py` | Delete, with `reconcile_writers` and the no-op recovery mixins in `_run_environment.py` |
+| `_access_settlement.py` | 377 | `_session_requests.py`, `_session_lifecycle_requests.py`, `api/core.py`, `api/retained.py` | Delete `access_unproven`. Keep the rest. `begin` and `settle` enforce the role's workspace grant and revert unauthorized writes, which is policy, not recovery. The runners also use `fence`, `receipt`, `restore_interrupted` and the new `rewind`, which `clear` of a turn calls to return the workspace to the baseline its receipt retains and reopen the key for the next attempt. `begin` calls `require_clear` and `blocking`, and the workspace's snapshot guard calls `fenced_by`, so the unsettled-writer index stays too: the 103 lines this row first counted for deletion are not removable without redesigning that guard |
+| `_evaluation_recovery.py` | 311 | `_polling_evaluation.py` and `_semantic_slurm_evaluation.py` take it as an optional argument that no production wiring passes; `api/slurm_evaluation_stack.py` | Delete |
+| `_writer_reconciliation.py` | 326 | `_run_environment.py` (`reconcile_writers` on four environments), `_evaluation_recovery.py` | Delete, with `reconcile_writers` and the no-op recovery mixins in `_run_environment.py` |
 | `_core_loop.py`, `_core_run.py`, `_core_preflight.py`, `_core_wiring.py` | 1,620, 751, 220, 217 | `src/vibesys/run/core_run.py`, `core_services.py`, `vs_dst` | Replace with the runner loop (about 600 lines). Recovery start, `HostRenewed`, lease upkeep, `_recovery_cannot_open` and `_blocked_for_good` go; dispatch, publication delivery and settle move into the loop |
-| `_replay_*.py` (17 modules), `api/replay.py` | 4,322 and 132 | tests, `src/vibesys/serial_replay.py` (173 lines, used only by `tests/vibesys/test_serial_replay.py`) | Delete. No production code selects replay. The one piece worth keeping is the log-append discipline in `_replay_store.py:RunLogReplayStore`, which moves to `vs_runlog` |
+| `libs/vs-runtime/src/vs_runtime/_replay_store.py`, `api/replay.py` | 167 and 33 | `_replay_store.py` has no importer but `api/replay.py`, which now exports it with the writer-proof and evaluation-recovery modules above | Delete both with the layer. `RunLogReplayStore` stays only until its log-append discipline, which item 4a moves to `vs_runlog.ConfirmedLog`, has no other user. Its contract suite (`libs/vs-runtime/tests/test_replay_store_contract.py`) drives the store directly |
 
 ### vs-project
 
@@ -132,7 +132,7 @@ Paths are under `libs/vs-runtime/src/vs_runtime/`.
 
 ### Tests
 
-About 9,700 lines of `libs/vs-runtime/tests/test_replay_*`, `test_writer_*`, `test_keyed_runtime.py` and related files, and the `libs/vs-core/tests` files named `test_recovery_*`, `test_proof_*`, `test_request_recovery*.py`, `test_attempt_*_proofs.py` and kin, go with their subjects. Tests of live behavior that happen to drive recovery (for example `test_attempt_retirement.py`) are rewritten against the new rule, not deleted.
+About 1,600 lines of `libs/vs-runtime/tests/test_writer_*`, `test_local_evaluation_receipts.py` and related files, and the `libs/vs-core/tests` files named `test_recovery_*`, `test_proof_*`, `test_request_recovery*.py`, `test_attempt_*_proofs.py` and kin, go with their subjects. Tests of live behavior that happen to drive recovery (for example `test_attempt_retirement.py`) are rewritten against the new rule, not deleted.
 
 ### Quota, capacity, stop and pause handling that must move
 
@@ -236,6 +236,8 @@ A local evaluation runs its stages in a throwaway candidate session opened under
 | Linux | the environment of every process (`/proc`) | each marked process, including a `setsid` descendant | a pidfd is opened before the process's start time is checked, so a reused pid is never signalled |
 | macOS | only arguments, so only the group leader | the leader's whole group | none atomic: the pid and its start second are checked, then the group is signalled; a wrong kill needs the pid space to wrap within that second and a new group leader to take the pid |
 | Docker | the container label, read from the daemon | the container, listed again afterwards to confirm | the container id |
+
+Not found on Linux: a process of another user (it cannot be this host's launcher's work), and a process of the same user that cleared its dumpable flag, such as an `ssh-agent` or a browser's sandbox, because `/proc/<pid>/environ` is then unreadable to its own user. Raising for them would make every clear fail on a desktop that runs one, and waiting would never end it, which is not the outage `ClearUnavailableError` is for. Any other failure to read the table (no file descriptors, no memory, an I/O error) is `ClearUnavailableError`, and a process still marked after the bounded wait that follows its SIGKILL is a survivor, as on macOS.
 
 Not found on macOS: the members of a group whose leader died first, and a `setsid` child, because nothing visible carries the mark any more. `clear` then reports a clean host although they run. The leader is a shell that waits for its command and never replaces itself, so it dies before its group only by an outside `SIGKILL`. A durable record of the group, kept through `Project`, would close this; it is not built. Partial output is never reset: each open of a stage stream is a new stream with a new id, so a re-run starts empty and the dead attempt's bytes stay as its history.
 
@@ -610,6 +612,22 @@ blocks the loop or an ending. How an attempt ends depends on why it was cancelle
 | `RUN_ENDING` | `StepFinished(Cancelled)` | give up; the leftovers are a named residual |
 | `DEADLINE`, `WITHDRAWN`, `INTERRUPTED` | `StepFinished(Cancelled)` | keep retrying with backoff |
 
+One flight holds a tag at a time, and holds it until every `run` and `clear` it started has returned. A cancel
+cannot stop a thread, so the awaitable finishing is the only proof that its work ended: a call that ignores
+its signal gets its task cancelled as a nudge and is then waited for, never given up on. Nothing starts, clears
+or records on that tag meanwhile, and the tag is on the stall board (`StallBoard`, handed to `run_step_loop`)
+with its kind (`run-held`, `clear-held`, `clear-unavailable`, `clear-failed`, `still-running`), how long, and
+the error that kept it there. A result is recorded only over proof: a `Cleared`, an `Adopted` whose work
+ended, or a returned result. A `run` that raised or was cancelled, an attach to adopted work that did not end
+it (a job still completing after its `scancel`), and any `clear` that raised have proved nothing, so the loop
+asks `clear` again with backoff; what a `clear` raised stays on the board, so a programmer error is visible
+in the stall and not swallowed. Ending the run treats a held tag as an open flight: `End` waits for it, and the
+stall shows. An operator who cannot wait kills the process; the next process's `clear` and `End` finish the
+run, because a crash is always recoverable. The one residual is a `clear` that cannot return at all while the
+run ends: the step is recorded cancelled without proof and listed in `StallBoard.unproven`. A runner whose
+call blocks in a thread must shield the thread, so that its awaitable ends only when the thread has: a call
+that returns on cancel while its thread goes on is invisible to the loop.
+
 An attempt that returned a result on its own is recorded as that result even when a cancel was set, unless
 the run is parked: core drops a result in a parked epoch, so the attempt is recorded as
 `AttemptInterrupted(PAUSE)` and the step runs again after the resume. A parked run also takes no `Settle`: it
@@ -704,7 +722,7 @@ Each pull request below is dormant until the cutover: test-reachable, not select
 | 5b. Evaluation runners | `libs/vs-runtime/src/vs_runtime/_slurm_job_step_runner.py`, `_local_job_step_runner.py`; Slurm tier case | nothing |
 | 5c. Operation, adoption and environment runners | `libs/vs-runtime/src/vs_runtime/_operation_step_runner.py`, `_adoption_step_runner.py`; per-environment `clear` in `_run_environment.py` (Docker, SkyPilot, Modal, Host) | nothing |
 | 6a. Cutover | `src/vibesys/run/core_run.py`, `core_services.py`, `src/launch`; `vs_runlog` `state.pb` cache writer; the one-time `CoreSnapshot` migration; `libs/vs-dst` runs the production loop | none yet; the old path is unreachable |
-| 6b. Deletion and guard | the files in the [inventory](#consumer-inventory); `tests/architecture/test_no_prove_or_block.py`; `tach.toml`; this page's status table, [run-transport.md](run-transport.md) commit text | about 5,700 production lines plus about 5,700 dormant keyed lines, and their tests |
+| 6b. Deletion and guard | the files in the [inventory](#consumer-inventory); `tests/architecture/test_no_prove_or_block.py`; `tach.toml`; this page's status table, [run-transport.md](run-transport.md) commit text | about 5,700 production lines plus about 200 dormant keyed lines (`_replay_store.py` and `api/replay.py`), and their tests |
 
 PR 6a and 6b land back to back, with no cleanup deferred, as #3408 required of its own production switch.
 
@@ -715,19 +733,22 @@ PR 6a and 6b land back to back, with no cleanup deferred, as #3408 required of i
   (`libs/vs-runtime/src/vs_runtime/_core_loop.py:CoreRuntime._authorized`). No keyed code is needed for it.
 - **Kept, moved:** the log-append commit discipline of `RunLogReplayStore` (torn tail repaired, complete
   corruption fails, uncertain commit authorizes no dispatch), into `vs_runlog`.
-- **Kept, dormant:** the pure core half of keyed replay in `libs/vs-core/src/vs_core/flows/`
-  (`_replay_identity.py`, `_replay_causality.py`, `_replay_schema.py`, `_replay_history.py`,
-  `_replay_sources.py`, `_replay_run.py`, `_replay_archive.py`, `_replay_accounting.py`,
-  `_replay_resources.py`, `_replay_iterations.py`, `_replay_controls.py`, `_replay_turns.py`, and
-  `api/replay.py`: about 3,900 lines). It is the only tested way to reuse results across a code edit by
-  semantic key, which this design does not need and a later one may. DECISION: keep it for one review
-  cycle, with no importer outside tests, and delete it if no consumer is scheduled. The orchestrator
-  can choose to delete it in 6b instead; nothing else depends on it.
-- **Deleted:** `_replay_physical.py` and `_replay_writers.py` (343 lines) and the archive's checks of
-  them, the whole `vs_runtime` half (4,454 lines), `_writer_reconciliation.py`, `_evaluation_recovery.py`,
-  `src/vibesys/serial_replay.py`, and the `ReplayUnknown`, retire and withdraw paths with them. Their
-  protos are removed in 6b; `buf breaking` flags the removal, so 6b names an exception, valid because
-  no run has written those messages.
+- **Deleted:** the whole `vs_runtime` driver half (`_replay_runtime.py`, `_replay_run.py` and the fourteen
+  modules around them, 4,323 lines), the pure `vs_core` half (`flows/_replay_*.py` and `api/replay.py`,
+  about 4,300 lines), `src/vibesys/serial_replay.py`, the writer barrier in `_writer_reconciliation.py`,
+  and the tests, benchmark scripts and test-only proto fixtures of all of them. The `ReplayUnknown`,
+  retire and withdraw paths went with the runtime. The code is the path to reusing results across a code
+  edit by semantic key, which this design does not need; it is recoverable from git history (#3378 and the
+  parts before it).
+- **Moved:** `ReplayRootReuse`, the one `vs_core` type live code still needed, now lives in
+  `_writer_reconciliation.py` beside the registry that issues it.
+- **Kept for 6b, listed:** `_writer_reconciliation.py` and `_evaluation_recovery.py` (imported by
+  `_run_environment.py` and `_polling_evaluation.py`, which other recovery branches edit), the `replay*.proto`
+  messages and their generated clients, and `_replay_store.py` with `api/replay.py`. Their protos are
+  removed in 6b; `buf breaking` flags the removal, so 6b names an exception, valid because no run has
+  written those messages. `vibesys.fact_import` still builds `AccountingEvidence` (from those protos) for
+  retained-run import; no run path calls `accounting_evidence`, and the only consumer of its output was the
+  deleted keyed ledger, so 6b decides whether it goes with them.
 
 ### Keeping the deleted modules from coming back
 
@@ -757,17 +778,17 @@ applies the rule "no result means run again".
 | Multi-host runs | adds one site | The run lock is a local `flock` and assumes the writer and the log share a host (run-transport's open question on NFS). A second host needs a lock behind an interface. Runners also need `StepStarted` to record where the attempt ran, so `clear` reaches that host. The `StepRunner` contract itself does not change |
 | New step kind | neutral | A runner and a contract run, no change to core |
 | New strategy | neutral | Strategies see results and attempts, never a blocked state |
-| Resume on edited code | neutral | Same rule as today (next round). The dormant keyed code is the path to more |
+| Resume on edited code | neutral | Same rule as today (next round). The deleted keyed-replay code (see git history) is the path to more |
 | Retained-run import | neutral | An imported run starts from a `CoreSnapshot` record, as a migrated one does |
 
 ## Open pull requests
 
 #3458 changes `_recovery_owners.py:known_owner`, and #3451 changes
-`libs/vs-runtime/src/vs_runtime/_replay_run.py:_LiveEpoch`. Both are
+`libs/vs-runtime/src/vs_runtime/_replay_run.py:_LiveEpoch`, a file the keyed-replay deletion removes. Both are
 members of the class this page removes. #3458 becomes unnecessary: with no recovery check there is no
 `known_owner`, and a session that ended without acceptance has a recorded result like any other step.
-#3451 becomes unnecessary for production and stays correct for the dormant keyed runtime until PR 6b
-deletes `_replay_run.py`. Neither should be reworked to fit this design. Merging them first costs nothing
+#3451 becomes unnecessary: its only file is deleted, so it closes without merging. Neither should be
+reworked to fit this design. Merging them first costs nothing
 beyond their review time, and neither blocks the sequence above.
 
 ## Open risks
@@ -835,15 +856,18 @@ These are facts the implementation must settle, found while checking the design 
   runner has nothing running, or work `clear` adopts and the next run attaches to without starting it
   again.
 
-- **Closure does not wait for the open steps of its scope.** `libs/vs-core/tests/test_recovery_closure_order.py`
-  holds it. `decide` starts the `CloseAttemptScope` of a retiring attempt while a step of the scope still
-  has a running attempt, and the attempt lists no release dependency on a measurement whose job core has
-  not seen (a step reports its job when it ends). A step that has not begun is neither started nor
-  settled by the retirement. So the close cannot assume the scope's jobs ended: it cancels every job
-  registered under the scope and lists it, which the step runner's registration makes possible. One
-  window remains, between `StepStarted` and the job's registration (the first thing a job runner does):
-  a job submitted after the close read the registry runs until its step's own limit. Closing it is a rule
-  of `decide`, not of a runner.
+- **Closure waits for the open steps of its scope, and `decide` does not yet hold it.** Today `decide` starts
+  the `CloseAttemptScope` of a retiring attempt while a step of the scope still has a running attempt, and the
+  attempt lists no release dependency on a measurement whose job core has not seen (a step reports its job
+  when it ends). The job runners rely on the rule: a close cancels and lists the jobs registered under its
+  scope, and a step that has begun but not yet registered its job (the first thing a job runner does) would
+  submit it after the close read the registry, and run until its own limit. The rule is owned by
+  `rr/core-fixes`; `libs/vs-core/tests/test_recovery_closure_order.py` states it as a strict xfail
+  ("core-fixes") that turns into a failure when it lands, so the marker goes with the change.
+- **A pause must not cancel an owned job, and core still does.** The step runner side is done: a pause leaves a
+  Slurm job running and the resumed run adopts it. `vs_core/_run_park.py` still issues `CancelOwnedJob(for_park)`
+  and exempts `SubmitMeasurement` (the #3480 carve-out) on the pause path; replacing that with the rule "the
+  pause path never cancels owned jobs" is owned by `rr/core-fixes`.
 - **The snapshot kinds rely on `decide`'s scope order.** `RetainByContent` is safe once every writer of
   the scope has a result ([Scope order](#scope-order)); `ExecutorStepRunner` does not check it.
 - **Per-environment `clear` (item 5e).** `RunEnvironment.agent_work_reaper(run_id, ...)` gives the reaper of
@@ -851,7 +875,13 @@ These are facts the implementation must settle, found while checking the design 
   would end every step's agent, so it is not a substitute. Each environment, and the step kinds a gap would
   leave unable to run there:
   - **Docker** sweeps the containers labelled with the run for processes whose initial environment carries
-    the tag (`DockerAgentWorkReaper`, over `vs_agent.reap_step_agents`) and removes no container.
+    the tag (`DockerAgentWorkReaper`, over `vs_agent.reap_step_agents`) and removes no container. The
+    sweep prints how many processes it found, not how many it killed, and repeats until a sweep finds
+    none, so a kill that fails is never read as "nothing there". It runs as the container's own user,
+    which is the agent's: the agent image's `USER` is the agent and neither the agent's `docker exec` nor
+    the sweep passes `-u`. A process's environment is readable only by its owner (and by root with
+    `CAP_SYS_PTRACE`, which a default container lacks), so `-u root` would read nothing of the agent's.
+    Residual: a process of another non-root user is skipped; the agent is never started as one.
   - **SkyPilot** runs the agent in the same editor container, so it gets that sweep, and then cancels the
     remote jobs the step's agent asked for. The premise that a SkyPilot evaluation is a step is wrong in
     code: no `SubmitMeasurement` runs on SkyPilot (or Modal); the agent calls the evaluator helper inside
@@ -870,7 +900,19 @@ These are facts the implementation must settle, found while checking the design 
     Modal's own cleanup and is not measured here: after a kill, a function call may keep running, and
     spending, until Modal ends it. A real-tier test with a Modal account is owed.
   - **Slurm** edits in a local Docker container too and gets the Docker sweep. Its jobs are adopted, not
-    cleared (`SlurmJobStepRunner`).
+    cleared (`SlurmJobStepRunner`). The ledger key names the content, not the run, so two runs on one
+    cluster that ask for one content share one job, and a step can attach to a job another run
+    submitted. A run's cancel goes through `relinquish`, which drops that run's lease and leaves the
+    job to every other run that holds one, and `clear` itself cancels only the job of an attempt the
+    ledger holds withdrawn, which no run wants by definition. A test pins that one run's cancel leaves a
+    job another run wants. `clear` asks the tag's own handle first: a job on record is adopted whatever
+    the workspace shows, and a handle on record whose plan cannot be keyed (the workspace lost the
+    candidate's commit) is `ClearUnavailableError`, never "never ran". A withdrawn entry is recorded
+    after the scancel was asked for, not after the job ended, so the scheduler is asked and the step is
+    cleared only once no live job of that attempt shows; a reading that cannot tell is
+    `ClearUnavailableError`. Residual: a submission a dead host had in flight when its attempt was
+    withdrawn can still start a job under that name afterwards; the ledger's orphan check cancels it by
+    name, and `clear` does not wait for that check.
   - **Host** finds the agent's processes through the same process table and reaper as a local
     evaluation's stage commands (`ProcessStageWorkReaper`). The mark an agent carries is the stage mark of
     the step's own handle (`agent_mark`), so one reaper finds both. `confine_to_sandbox(leads_group=True)`
@@ -881,6 +923,19 @@ These are facts the implementation must settle, found while checking the design 
     end-to-end case runs the production argv against the real `ps` or `/proc` of the host it runs on. The
     macOS residual below applies to an agent too: a descendant that left its group, or whose group leader
     died first, is not found.
+  - **A call returns only when its thread work has ended.** The loop starts nothing on a tag until its
+    `run` and `clear` have returned, and a task cancel is a nudge, so a runner that blocks in a thread
+    must not return while the thread goes on. Every runner and reaper that takes a `BlockingRunner`
+    shields it (`ShieldedBlockingRunner`): a cancelled caller waits for the function and then gets its
+    cancel. That covers the agent turn runner's cancel, inspect and `forget_unfinished`,
+    `SlurmJobStepRunner.clear`, and the Docker, SkyPilot, process and container reapers. The workspace
+    layer and the executors shield theirs, and the workspace, adoption, operation and executor runners
+    make no thread call of their own. `StepRunnerContract` holds a `DetachedBlockingRunner` (a Fake whose
+    call outlives its caller, as a thread does) shut, cancels a `run` in its stop path and a `clear`
+    mid-work, and fails if the call returned first; `StageWorkReaperContract` does the same for `reap`.
+    The case fails if a runner offers a blocking runner and never calls it from `run` or `clear`. It
+    runs on the local runner (both process tables), the agent turn runner and every reaper; Slurm's own
+    thread work is on the ledger path, which a dedicated test cancels.
   - **Found on the way:** `SkyPilotEnvironment` inherited a Docker run-wide reap that read Docker settings
     its configuration lacks, so resuming a SkyPilot run raised `AttributeError`; and the Modal and Slurm
     environments never reaped their run-labelled agent containers on resume. Both are fixed, with a test

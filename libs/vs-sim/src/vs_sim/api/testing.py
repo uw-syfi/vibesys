@@ -54,6 +54,7 @@ from vs_sim.fake_process_table import FakeProcessTable, Shows
 from vs_sim.fake_signal_relay import FakeMainThreadWake, FakeSignalRelay
 from vs_sim.fakes import (
     NO_PROCESSES,
+    DetachedBlockingRunner,
     FakeForegroundChild,
     FakeForegroundLauncher,
     FakeLoopbackHttp,
@@ -168,6 +169,7 @@ __all__ = [
     "CommandProbeContract",
     "CrashableClock",
     "Depth",
+    "DetachedBlockingRunner",
     "End",
     "EventTrace",
     "FakeByteSource",

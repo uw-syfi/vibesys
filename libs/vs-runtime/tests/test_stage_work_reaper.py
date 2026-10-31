@@ -10,6 +10,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -26,6 +27,7 @@ from vs_runtime.api.stage_marks import (
     is_stage_mark_of,
     stage_mark,
 )
+from vs_runtime.api.step_runner import ClearUnavailableError
 from vs_runtime.api.testing import (
     FakeStageWorkReaper,
     StageWorkPlace,
@@ -34,7 +36,14 @@ from vs_runtime.api.testing import (
 )
 from vs_sandbox.api import STEP_TAG_ENV
 from vs_sandbox.api.testing import FakeStepContainers
-from vs_sim.api.testing import FakeProcessTable, Shows, VirtualClock, run_virtual
+from vs_sim.api.testing import (
+    DetachedBlockingRunner,
+    FakeProcessTable,
+    InlineBlockingRunner,
+    Shows,
+    VirtualClock,
+    run_virtual,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Iterator
@@ -85,9 +94,10 @@ class TestFakeStageWorkReaper(StageWorkReaperContract):
 class _ProcessWorld:
     """Stage processes on a host whose process table shows ``shows``."""
 
-    def __init__(self, shows: Shows) -> None:
+    def __init__(self, shows: Shows, blocking: DetachedBlockingRunner | None = None) -> None:
+        self.blocking = blocking or DetachedBlockingRunner()
         self.table = FakeProcessTable(shows)
-        self.reaper = ProcessStageWorkReaper(self.table, RUN)
+        self.reaper = ProcessStageWorkReaper(self.table, RUN, self.blocking)
         self._lives = 0
 
     def leave(self, run_id: str, tag: RequestId, place: StageWorkPlace) -> None:
@@ -111,6 +121,7 @@ class _ProcessWorld:
             running_in_other_run=lambda tag: self.running(OTHER_RUN, tag),
             unreachable=_flag(self.table, "unreadable"),
             stuck=_flag(self.table, "survivors"),
+            blocking=self.blocking,
         )
 
 
@@ -125,9 +136,10 @@ class TestProcessStageWorkReaperOnMacOS(StageWorkReaperContract):
 
 
 class _ContainerWorld:
-    def __init__(self) -> None:
+    def __init__(self, blocking: DetachedBlockingRunner | None = None) -> None:
+        self.blocking = blocking or DetachedBlockingRunner()
         self.daemon = FakeStepContainers()
-        self.reaper = ContainerStageWorkReaper(self.daemon.of_run(RUN), RUN)
+        self.reaper = ContainerStageWorkReaper(self.daemon.of_run(RUN), RUN, self.blocking)
         self._lives = 0
 
     def leave(self, run_id: str, tag: RequestId) -> None:
@@ -151,6 +163,7 @@ class _ContainerWorld:
             running_in_other_run=lambda tag: self.running(OTHER_RUN, tag),
             unreachable=_flag(self.daemon, "unreachable"),
             stuck=_flag(self.daemon, "removal_fails_silently"),
+            blocking=self.blocking,
         )
 
 
@@ -163,7 +176,9 @@ class TestEachStageWorkReaper(StageWorkReaperContract):
     """A Docker run holds processes and containers; one reaper ends both."""
 
     def stage_work_under_test(self) -> StageWorkUnderTest:
-        processes, containers = _ProcessWorld(Shows.LEADER_ARGUMENTS), _ContainerWorld()
+        blocking = DetachedBlockingRunner()
+        processes = _ProcessWorld(Shows.LEADER_ARGUMENTS, blocking)
+        containers = _ContainerWorld(blocking)
         process_side, container_side = processes.under_test(), containers.under_test()
 
         def leave(tag: RequestId, place: StageWorkPlace) -> None:
@@ -191,6 +206,7 @@ class TestEachStageWorkReaper(StageWorkReaperContract):
             ),
             unreachable=lambda: both(process_side.unreachable, container_side.unreachable),
             stuck=lambda: both(process_side.stuck, container_side.stuck),
+            blocking=blocking,
         )
 
 
@@ -222,6 +238,41 @@ def test_a_mark_belongs_to_its_run_only(tag: RequestId, run: str, other: str) ->
     assert is_stage_mark_of(other, tag, mark) == (other == run)
 
 
+@pytest.mark.parametrize("shows", list(Shows))
+def test_work_a_supervisor_restarts_after_every_kill_is_rescanned_and_never_reported_clear(
+    shows: Shows,
+) -> None:
+    """Each scan ends what it finds, and the next scan finds it again: the reaper gives up, loudly."""
+    tag = RequestId(root="t")
+    table = FakeProcessTable(shows)
+    table.start_stage(STEP_TAG_ENV, stage_mark(RUN, handle_of_life(tag, 0)))
+    table.respawning = True
+    reaper = ProcessStageWorkReaper(table, RUN, InlineBlockingRunner())
+
+    with pytest.raises(ClearUnavailableError, match="keep restarting"):
+        _run(reaper.reap(tag))
+
+    assert len(table.killed) > 1, "the rescan did not run"
+    table.respawning = False
+    _run(reaper.reap(tag))
+    assert table.running(STEP_TAG_ENV, lambda mark: is_stage_mark_of(RUN, tag, mark)) == 0
+
+
+@pytest.mark.parametrize("shows", list(Shows))
+def test_a_process_the_host_refuses_to_signal_is_an_outage_of_the_table_not_a_crash(
+    shows: Shows,
+) -> None:
+    tag = RequestId(root="t")
+    table = FakeProcessTable(shows)
+    table.start_stage(STEP_TAG_ENV, stage_mark(RUN, handle_of_life(tag, 0)))
+    table.unsignalable = True
+
+    with pytest.raises(ClearUnavailableError):
+        _run(ProcessStageWorkReaper(table, RUN, InlineBlockingRunner()).reap(tag))
+
+    assert table.running(STEP_TAG_ENV, lambda mark: is_stage_mark_of(RUN, tag, mark)) == 1
+
+
 def test_a_pid_the_kernel_reused_is_not_killed_on_either_host() -> None:
     for shows in Shows:
         table = FakeProcessTable(shows)
@@ -250,11 +301,11 @@ def test_members_of_a_group_whose_leader_died_first_are_not_found_on_macos() -> 
     leader = table.start_stage(STEP_TAG_ENV, stage_mark(RUN, handle_of_life(tag, 0)))
     member = table.spawn(leader)
     table.exit(leader)
-    _run(ProcessStageWorkReaper(table, RUN).reap(tag))
+    _run(ProcessStageWorkReaper(table, RUN, InlineBlockingRunner()).reap(tag))
     assert table.alive(member)
     linux = FakeProcessTable(Shows.ENVIRONMENT)
     leader = linux.start_stage(STEP_TAG_ENV, stage_mark(RUN, handle_of_life(tag, 0)))
     member = linux.spawn(leader)
     linux.exit(leader)
-    _run(ProcessStageWorkReaper(linux, RUN).reap(tag))
+    _run(ProcessStageWorkReaper(linux, RUN, InlineBlockingRunner()).reap(tag))
     assert not linux.alive(member)

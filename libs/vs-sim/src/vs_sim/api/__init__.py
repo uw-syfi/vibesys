@@ -14,7 +14,7 @@ import importlib
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from vs_sim.blocking import BlockingRunner, ThreadBlockingRunner
+    from vs_sim.blocking import BlockingRunner, ShieldedBlockingRunner, ThreadBlockingRunner
     from vs_sim.byte_source import (
         ByteSource,
         ByteSourceChangedError,
@@ -65,6 +65,7 @@ if TYPE_CHECKING:
         ProcessSurvivedError,
         ProcessTable,
         ProcessTableUnavailableError,
+        ProcfsProcessTable,
         PsRow,
         mark_in,
         parse_ps,
@@ -125,6 +126,7 @@ if TYPE_CHECKING:
 
 _MODULES: dict[str, str] = {
     "BlockingRunner": "vs_sim.blocking",
+    "ShieldedBlockingRunner": "vs_sim.blocking",
     "ThreadBlockingRunner": "vs_sim.blocking",
     "Clock": "vs_sim.clock",
     "MonotonicClock": "vs_sim.clock",
@@ -217,6 +219,7 @@ _MODULES: dict[str, str] = {
     "ProcessTable": "vs_sim.process_table",
     "ProcessSurvivedError": "vs_sim.process_table",
     "ProcessTableUnavailableError": "vs_sim.process_table",
+    "ProcfsProcessTable": "vs_sim.process_table",
     "PsRow": "vs_sim.process_table",
     "mark_in": "vs_sim.process_table",
     "parse_ps": "vs_sim.process_table",
@@ -307,6 +310,7 @@ __all__ = [
     "ProcessTimeoutError",
     "Processes",
     "ProcessesProbe",
+    "ProcfsProcessTable",
     "PsRow",
     "RandomSource",
     "ReleaseEvidence",
@@ -315,6 +319,7 @@ __all__ = [
     "ReservableThreads",
     "RunningProcess",
     "SeededRandom",
+    "ShieldedBlockingRunner",
     "SignalMainThreadWake",
     "SignalRelay",
     "SignalSource",

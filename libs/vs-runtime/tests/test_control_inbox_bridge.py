@@ -424,6 +424,41 @@ def test_a_pause_sent_through_the_socket_and_the_inbox_is_recorded_once() -> Non
     assert inbox.rejected() == ()
 
 
+@given(
+    seconds=st.one_of(st.none(), st.floats(min_value=0.5, max_value=3600.0)),
+    now=st.floats(min_value=1.0, max_value=1000.0),
+)
+@example(seconds=7.5, now=1.0)
+def test_the_drain_deadline_of_a_pause_travels_from_the_request_into_the_park(
+    seconds: float | None, now: float
+) -> None:
+    """The deadline is the pause input's own field: sent over the socket or the inbox, core keeps it.
+
+    A Pause-now that names none waits the cleanup bound; a Pause that names none waits for its turns.
+    """
+    for request in (
+        PauseRequest(control_id="k1", expected_epoch=0, drain_seconds=seconds),
+        PauseNowRequest(control_id="k1", expected_epoch=0, drain_seconds=seconds),
+    ):
+        inbox = FakeControlInbox()
+        bridge, control = _wired(inbox, _Texts())
+        control.submit(request)
+        core = _commit(initial_state(), bridge.poll(initial_state(), now))
+        inbox.post("k1", _json(request), ended=_LIVE)
+        core = _commit(core, bridge.poll(core, now + 1))
+        park = core.run.park
+        assert park is not None
+        assert park.immediate == isinstance(request, PauseNowRequest)
+        if seconds is not None:
+            wait = seconds
+        elif park.immediate:
+            wait = core.run.limits.cleanup_bound
+        else:
+            assert park.deadline_at is None
+            continue
+        assert park.deadline_at == now + wait
+
+
 def test_a_control_resent_after_a_restart_replays_its_ack_and_changes_nothing() -> None:
     """Regression: a pause resent after a resume and a restart paused the channel but not core."""
     inbox = FakeControlInbox()

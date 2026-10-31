@@ -1,6 +1,0 @@
-version: v2
-plugins:
-  - local: protoc-gen-py
-    out: libs/vs-runtime/tests/generated/prior
-    opt:
-      - map_imports=buf/**:vs_proto._generated

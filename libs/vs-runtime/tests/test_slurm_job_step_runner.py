@@ -28,8 +28,8 @@ from vs_core.api import (
     ResourceId,
 )
 from vs_core.api.recovery import Cancelled, CancelReason, Finished, interruption_of
-from vs_runtime.api.core import JobRegistry, MeasurementRequests, RequestExecutors
-from vs_runtime.api.evaluation_step_runners import JobStepRun, SlurmJobStepRunner
+from vs_runtime.api.core import JobRegistry, MeasurementRequests, ReceiptStore, RequestExecutors
+from vs_runtime.api.evaluation_step_runners import SlurmJobStepRunner, SlurmScheduler
 from vs_runtime.api.executor_contexts import RevocableLease, receipt_store_in
 from vs_runtime.api.executor_step_runner import DECLARED_REPEATS, ExecutorStepRunner
 from vs_runtime.api.slurm_evaluation_stack import (
@@ -39,12 +39,12 @@ from vs_runtime.api.slurm_evaluation_stack import (
     plan,
     submission,
 )
-from vs_runtime.api.step_runner import Adopted, CancelSignal, Cleared
+from vs_runtime.api.step_runner import Adopted, CancelSignal, Cleared, ClearUnavailableError
 from vs_runtime.api.testing import StepRunnerContract, StepRunnerUnderTest
 from vs_sandbox.api.slurm import SlurmLedgerAttachment
-from vs_sim.api import SeededRandom
+from vs_sim.api import SeededRandom, yield_now
 from vs_sim.api.testing import (
-    InlineBlockingRunner,
+    DetachedBlockingRunner,
     ManualClock,
     VirtualClock,
     examples,
@@ -57,9 +57,11 @@ from vs_slurm.api import (
     FakeEvaluationLedger,
     LedgerError,
     LedgerPolicy,
+    LedgerState,
     SlurmConfig,
     SlurmJobStatus,
     SlurmSshTransport,
+    transitioned,
 )
 
 if TYPE_CHECKING:
@@ -114,16 +116,16 @@ class FlakyLedger(FakeEvaluationLedger):
 class Process:
     """One executor stack and the runner over it: what a restart replaces."""
 
-    def __init__(self, world: World, stack: Stack) -> None:
+    def __init__(self, world: World, stack: Stack, holder: str) -> None:
         self.stack = stack
-        job = JobStepRun(
+        self.holder = holder
+        self.runner = SlurmJobStepRunner(
             stack.executor,
-            world.registry,
+            SlurmScheduler(world.ledger, world.cluster, world.blocking),
+            world.registry_of(holder),
             clock=world.clock,
             poll_interval_s=POLL_S,
-            outlives_host=True,
         )
-        self.runner = SlurmJobStepRunner(stack.executor, world.ledger, InlineBlockingRunner(), job)
 
 
 class World:
@@ -138,27 +140,39 @@ class World:
         self.clock = VirtualClock(1000.0)
         self.ledger = FlakyLedger(project=PROJECT, clock=ManualClock())
         self.cluster = FlakyCluster()
-        self.store = receipt_store_in(root / "receipts")
-        self.registry = JobRegistry(self.store)
+        self.blocking = DetachedBlockingRunner()
+        self.stores: dict[str, ReceiptStore] = {}
         self.processes: list[Process] = []
         self.first = self.run(self.spawn())
+
+    def store_of(self, holder: str) -> ReceiptStore:
+        """The receipt store of run *holder*: on its disk, so a restarted process of it shares it."""
+        if holder not in self.stores:
+            directory = self.root / "receipts" / holder
+            directory.mkdir(parents=True, exist_ok=True)
+            self.stores[holder] = receipt_store_in(directory)
+        return self.stores[holder]
+
+    def registry_of(self, holder: str) -> JobRegistry:
+        """The job registry of run *holder*, over its receipt store."""
+        return JobRegistry(self.store_of(holder))
 
     def run[T](self, main: Coroutine[Any, Any, T]) -> T:
         """Run to the end on the virtual clock."""
         return run_virtual(self.clock, main)
 
-    async def spawn(self) -> Process:
-        """A new process over the same cluster, ledger and state, with fresh executor memory."""
+    async def spawn(self, holder: str = "run-1") -> Process:
+        """A new process of run *holder* over the same cluster, ledger and state, with fresh executor memory."""
         attachment = SlurmLedgerAttachment(
             ledger=self.ledger,
             config=CONFIG,
             project=PROJECT,
-            holder="run-1",
+            holder=holder,
             policy=LedgerPolicy(),
             clock=self.clock,
         )
         stack = await build_stack(self.root, self.cluster, sleeper=self.clock, ledger=attachment)
-        process = Process(self, stack)
+        process = Process(self, stack, holder)
         self.processes.append(process)
         return process
 
@@ -334,8 +348,7 @@ def test_a_pause_leaves_the_job_running_and_the_next_attempt_adopts_it(
 
 
 @pytest.mark.parametrize(
-    "reason",
-    [reason for reason in CancelReason if not interruption_of(reason)],
+    "reason", [reason for reason in CancelReason if not interruption_of(reason)]
 )
 def test_a_cancel_that_ends_the_step_cancels_the_job_and_the_next_attempt_submits_a_new_one(
     tmp_path: Path, reason: CancelReason
@@ -439,6 +452,167 @@ def test_a_step_that_reuses_a_submission_not_seen_ended_is_refused(tmp_path: Pat
     assert world.cluster.submissions == []
 
 
+def _withdrawn(world: World, tag: RequestId) -> str:
+    """The ledger records the step's request withdrawn, as a withdrawal does once it asked for the
+    cancel, without the job having ended. Returns the operation of the attempt."""
+    (key,) = world.ledger.list_keys()
+    entry = world.ledger.read(key)
+    assert entry is not None
+    withdrawn = transitioned(entry.record, LedgerState.WITHDRAWN, reason=f"withdrawn for {tag}")
+    assert world.ledger.replace(entry, withdrawn)
+    return entry.record.operation_id
+
+
+def test_a_withdrawn_request_whose_job_still_runs_is_cleared_only_once_that_job_ended(
+    tmp_path: Path,
+) -> None:
+    """The ledger records a withdrawal after the cancel was asked for, not after the job ended."""
+    world = World(tmp_path)
+    left, other = tag_of("left"), tag_of("other-step-of-the-content")
+
+    async def main() -> None:
+        await world.die_mid_run(world.first, left, attempt=1)
+        operation = _withdrawn(world, left)
+        assert world.cluster.live_jobs() == 1
+        second = await world.spawn()
+        assert await second.runner.clear(world.submission(other), other) == Cleared()
+        assert world.cluster.live_jobs() == 0
+        assert operation in world.cluster.cancelled
+        await world.close()
+
+    world.run(main())
+
+
+def test_a_withdrawn_request_is_not_cleared_while_the_scheduler_cannot_say_what_became_of_it(
+    tmp_path: Path,
+) -> None:
+    world = World(tmp_path)
+    left, other = tag_of("left"), tag_of("other-step-of-the-content")
+
+    async def main() -> None:
+        await world.die_mid_run(world.first, left, attempt=1)
+        _withdrawn(world, left)
+        second = await world.spawn()
+        world.cluster.refusing = True
+        with pytest.raises(ClearUnavailableError):
+            await second.runner.clear(world.submission(other), other)
+        world.cluster.refusing = False
+        assert world.cluster.live_jobs() == 1
+        await world.close()
+
+    world.run(main())
+
+
+def test_a_step_whose_job_is_on_record_is_never_cleared_because_the_workspace_lost_its_commit(
+    tmp_path: Path,
+) -> None:
+    """``has_revision`` says what the workspace holds, not whether the step submitted a job."""
+    world = World(tmp_path)
+    tag = tag_of("submitted")
+
+    async def main() -> None:
+        await world.die_mid_run(world.first, tag, attempt=1)
+        lost = world.submission(tag).model_copy(
+            update={"plan": plan(stages=STAGES, candidate="0" * 40)}
+        )
+        # Its handle is on record, but neither process can read the job's state yet: the plan
+        # cannot be keyed, so the ledger cannot say, and "never ran" is not an answer.
+        with pytest.raises(ClearUnavailableError):
+            await world.first.runner.clear(lost, tag)
+        second = await world.spawn()
+        with pytest.raises(ClearUnavailableError):
+            await second.runner.clear(lost, tag)
+        assert world.cluster.live_jobs() == 1
+        await world.close()
+
+    world.run(main())
+
+
+def test_a_step_that_never_submitted_is_cleared_when_its_plan_could_never_have_run(
+    tmp_path: Path,
+) -> None:
+    world = World(tmp_path)
+    tag = tag_of("never")
+
+    async def main() -> None:
+        lost = world.submission(tag).model_copy(
+            update={"plan": plan(stages=STAGES, candidate="0" * 40)}
+        )
+        assert await world.first.runner.clear(lost, tag) == Cleared()
+        await world.close()
+
+    world.run(main())
+
+
+def test_one_runs_cancel_never_ends_a_job_another_run_still_wants(tmp_path: Path) -> None:
+    """Two runs of one cluster share the job of one content: the ledger keeps it for the other."""
+    world = World(tmp_path)
+    mine, theirs = tag_of("mine"), tag_of("theirs")
+
+    async def main() -> None:
+        other_run = await world.spawn("run-2")
+        owner = asyncio.ensure_future(
+            world.first.runner.run(
+                world.step(theirs, ends=False), theirs, 1, DEADLINE_AT, CancelSignal()
+            )
+        )
+        await yield_until(world.submitted, lambda jobs: jobs == 1, "run-1's job")
+        cancel = CancelSignal()
+        attached = asyncio.ensure_future(
+            other_run.runner.run(world.step(mine, ends=False), mine, 1, DEADLINE_AT, cancel)
+        )
+        await yield_until(world.live, lambda jobs: jobs == 1, "the shared job")
+        cancel.set(CancelReason.WITHDRAWN)
+        assert await attached == Cancelled(reason=CancelReason.WITHDRAWN)
+        assert world.cluster.live_jobs() == 1
+        assert world.cluster.cancelled == []
+        world.cluster.finish_jobs()
+        result = await owner
+        assert isinstance(result, Finished)
+        assert len(world.cluster.submissions) == 1
+        await world.close()
+
+    world.run(main())
+
+
+@pytest.mark.parametrize("ledger", ["holds the request", "holds it withdrawn"])
+def test_a_cancelled_clear_returns_only_after_the_ledger_and_scheduler_reads_it_started_ended(
+    tmp_path: Path, ledger: str
+) -> None:
+    """The runner's own thread work is the ledger read and the scheduler calls of ``clear``.
+
+    The contract's flows never reach them (a restarted process polls the tag's job and adopts
+    it), so a clear of another step of the same content, which only the ledger can answer, is
+    cancelled while that work is in flight.
+    """
+    world = World(tmp_path)
+    left, other = tag_of("left"), tag_of("other-step-of-the-content")
+
+    async def main() -> None:
+        await world.die_mid_run(world.first, left, attempt=1)
+        if ledger == "holds it withdrawn":
+            _withdrawn(world, left)
+        second = await world.spawn()
+        world.blocking.hold()
+        call = asyncio.ensure_future(second.runner.clear(world.submission(other), other))
+
+        async def in_flight() -> int:
+            return world.blocking.in_flight
+
+        await yield_until(in_flight, lambda held: held > 0 or call.done(), "the ledger read")
+        assert world.blocking.in_flight > 0
+        call.cancel()
+        for _ in range(20):
+            await yield_now()
+        assert not call.done(), "clear returned while its thread work was in flight"
+        world.blocking.release()
+        await asyncio.gather(call, return_exceptions=True)
+        assert world.blocking.in_flight == 0
+        await world.close()
+
+    world.run(main())
+
+
 # The evaluation kinds on the ExecutorStepRunner serve the job this runner submitted
 
 
@@ -446,7 +620,9 @@ class Served:
     """The evaluation executor core's other job requests reach, over the world's own cluster."""
 
     def __init__(self, world: World) -> None:
-        evaluation = MeasurementRequests(world.first.stack.executor, world.store)
+        evaluation = MeasurementRequests(
+            world.first.stack.executor, world.store_of(world.first.holder)
+        )
         self.runner = ExecutorStepRunner(
             RequestExecutors(evaluation=evaluation),
             DECLARED_REPEATS,

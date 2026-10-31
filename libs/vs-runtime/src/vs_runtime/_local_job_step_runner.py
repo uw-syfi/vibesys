@@ -59,24 +59,26 @@ class LocalJobStepRunner:
 
         What a dead process left is found through what *host* shows of its stage work.
         """
-        job = JobStepRun(
-            executor, registry, clock=clock, poll_interval_s=poll_interval_s, outlives_host=False
-        )
-        return cls(executor, host.reaper(), job)
+        return cls(executor, host.reaper(), registry, clock=clock, poll_interval_s=poll_interval_s)
 
     def __init__(
         self,
         executor: PollingEvaluationExecutor,
         reaper: StageWorkReaper,
-        job: JobStepRun,
+        registry: JobRegistry,
+        *,
+        clock: Clock,
+        poll_interval_s: float,
     ) -> None:
-        """Run on *executor*; leave to *reaper* what a dead process left on the host.
+        """Run on *executor*, registering its jobs in *registry*; leave to *reaper* what a dead process left.
 
-        *job* follows each evaluation to its end, on the same *executor*.
+        A pause cancels the evaluation like any other cancel: nothing of it survives the host.
         """
         self._executor = executor
         self._reaper = reaper
-        self._job = job
+        self._job = JobStepRun(
+            executor, registry, clock=clock, poll_interval_s=poll_interval_s, outlives_host=False
+        )
         self._lives: dict[RequestId, int] = {}
 
     async def run(

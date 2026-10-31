@@ -53,7 +53,7 @@ export {
   type SessionView,
   type TraceLog,
 } from './live.js';
-export {type LoadView, loadView, paintedSkeleton} from './load-view.js';
+export {isCatchUpBatch, type LoadView, loadView, paintedSkeleton} from './load-view.js';
 export {type ModelNames, modelNamesOf, NO_MODEL_NAMES} from './model-names.js';
 export {roleLabel, stepKicker, stepLabel, stepTitle} from './names.js';
 export {
@@ -64,6 +64,8 @@ export {
   paretoView,
 } from './pareto-view.js';
 export {predatesTraceWords, roundsBeforeTrace} from './predates-trace.js';
+export {runPageProblems} from './problems.js';
+export {PROJECTION_PACE_MS, projectionPace} from './projection-pace.js';
 export {pauseWords, workedWords} from './quota-pauses.js';
 export {type ReaderReply, readerHeld} from './reader.js';
 export {runRecord, sameRecord} from './record.js';
