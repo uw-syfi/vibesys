@@ -38,7 +38,7 @@ from tests.support.scratch_tree import remove_scratch_tree
 
 from entrypoints.control import control_main, time_ordered_id
 from vibesys.events import CoreEventType
-from vibesys.orchestration.dynamic.scripted.api import IMPLEMENTER_KIND, PLANNER_KIND
+from vibesys.orchestration.dynamic.scripted.api import IMPLEMENTER_KIND, JUDGE_KIND, PLANNER_KIND
 from vs_project.api import Project
 from vs_runlog.api import read_current_epoch
 from vs_sim.api import OsThreads
@@ -399,11 +399,12 @@ def test_a_run_paused_in_an_evaluation_resumes_to_the_uninterrupted_result(
     _assert_ends_as_uninterrupted(scenario, resumed.finish(), uninterrupted)
 
 
+@pytest.mark.parametrize("kind", [IMPLEMENTER_KIND, JUDGE_KIND], ids=["implementer", "judge"])
 def test_a_run_killed_in_an_agent_turn_resumes_to_the_uninterrupted_result(
-    scenario: Scenario, uninterrupted: dict[str, object]
+    scenario: Scenario, uninterrupted: dict[str, object], kind: str
 ) -> None:
-    first = scenario.hold(TURN, IMPLEMENTER_KIND)
-    first.wait_for(lambda line: line.get("held") == f"{TURN}:{IMPLEMENTER_KIND}")
+    first = scenario.hold(TURN, kind)
+    first.wait_for(lambda line: line.get("held") == f"{TURN}:{kind}")
     first.kill()
 
     resumed = scenario.resume(first.run_id)
@@ -430,14 +431,16 @@ def test_a_run_killed_in_an_evaluation_resumes_to_the_uninterrupted_result(
 def test_a_run_killed_as_its_evaluation_is_pending_resumes_whichever_the_job_ends_first(
     scenario: Scenario, uninterrupted: dict[str, object], released: str
 ) -> None:
-    """The kill lands where the judge's request may still be open, with the job held or let go.
+    """The kill lands with only the held evaluations left, and the job ends before or after the resume.
 
-    A pending job is all this waits for, so the kill falls inside the judge's step in some runs:
-    the request an agent turn left open is cleared and run again like any other.
+    The kill is placed by the run's own report that its judge's step ended, never by the first
+    pending job: the input's measurement is pending as the run starts, so that job alone puts
+    the kill anywhere from the planner's turn to the judge's, and each place is a different
+    recovery. The judge's step has its own case (``test_a_run_killed_in_an_agent_turn_...``).
     """
     scenario.hold_evaluations()
     first = scenario.start()
-    scenario.wait_for_pending_job()
+    _wait_until_only_evaluations_remain(scenario, first)
     first.kill()
     if released == "before-resume":
         scenario.release_evaluations()
