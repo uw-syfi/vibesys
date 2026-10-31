@@ -5,7 +5,7 @@
 import {describe, expect, test} from 'bun:test';
 import type {RunSession} from '@vibesys/run-state/skeleton';
 import fc from 'fast-check';
-import {placesAlong, runningTimeOf} from './running-time.js';
+import {marksAlong, placesAlong, runningTimeOf} from './running-time.js';
 
 /** Sessions that follow one another with stopped gaps between them (a gap may be none). */
 const sessions: fc.Arbitrary<readonly RunSession[]> = fc
@@ -133,5 +133,37 @@ describe('places along the time bar', () => {
     expect(placesAlong([5, 5, 5])).toEqual([0, 0.5, 1]);
     expect(placesAlong([7])).toEqual([0]);
     expect(placesAlong([])).toEqual([]);
+  });
+});
+
+describe('marks along the time bar', () => {
+  const track = fc
+    .array(fc.integer({min: 0, max: 1000000}), {minLength: 2, maxLength: 30})
+    .map(times => [...times].sort((a, b) => a - b));
+
+  test('stand where the position of their time stands, and nowhere else', () => {
+    fc.assert(
+      fc.property(track, fc.nat(29), (seconds, pick) => {
+        const places = placesAlong(seconds);
+        const at = pick % seconds.length;
+        const marks = marksAlong(seconds, [seconds[at] ?? 0]);
+        if ((seconds.at(-1) ?? 0) <= (seconds[0] ?? 0)) return expect(marks).toEqual([]);
+        expect(marks).toHaveLength(1);
+        expect(marks[0]).toBeCloseTo(places[at] ?? 0, 9);
+      }),
+    );
+  });
+
+  test('are ascending, repeat no place, and keep to the track', () => {
+    fc.assert(
+      fc.property(track, fc.array(fc.integer({min: -10000, max: 1100000})), (seconds, times) => {
+        const marks = marksAlong(seconds, times);
+        for (const [at, place] of marks.entries()) {
+          expect(place).toBeGreaterThanOrEqual(0);
+          expect(place).toBeLessThanOrEqual(1);
+          if (at > 0) expect(place).toBeGreaterThan(marks[at - 1] ?? 0);
+        }
+      }),
+    );
   });
 });

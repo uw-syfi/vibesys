@@ -604,6 +604,41 @@ describe('Scrubber spaced by places', () => {
   });
 });
 
+describe('Scrubber marks', () => {
+  const mounted = async (marks: readonly number[] | undefined, last = 4) =>
+    mount(
+      <Scrubber
+        label="Run position"
+        value={last}
+        last={last}
+        live
+        pastLabel="Replay"
+        position="9h 41m"
+        {...(marks === undefined ? {} : {marks})}
+        change={() => undefined}
+        backToLive={() => undefined}
+      />,
+    );
+
+  test('draw a diamond on the track at each place, and take no focus or name', async () => {
+    const container = await mounted([0.25, 0.9]);
+    const marks = [...container.querySelectorAll('.vs-scrubber-mark')] as HTMLElement[];
+    expect(marks.map(mark => mark.getAttribute('style'))).toEqual([
+      '--mark-at: 0.25;',
+      '--mark-at: 0.9;',
+    ]);
+    expect(marks.every(mark => mark.getAttribute('aria-hidden') === 'true')).toBe(true);
+    expect(marks.every(mark => mark.tabIndex < 0 && mark.textContent === '')).toBe(true);
+    // The one slider is the range, with or without marks.
+    expect(container.querySelectorAll('[role="slider"], input[type="range"]')).toHaveLength(1);
+  });
+
+  test('are none without marks, and none on a track with nothing to scrub', async () => {
+    expect((await mounted(undefined)).querySelector('.vs-scrubber-mark')).toBeNull();
+    expect((await mounted([0.5], 0)).querySelector('.vs-scrubber-mark')).toBeNull();
+  });
+});
+
 describe('Scrubber with one position', () => {
   const range = async (last: number, value: number) => {
     const container = await mount(

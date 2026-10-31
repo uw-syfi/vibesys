@@ -27,6 +27,7 @@ export {
   type ChartPoint,
   type ChartSize,
   type ChartTick,
+  type ChartTip,
 } from './components/chart.js';
 export {ChatMessage} from './components/chat-message.js';
 export {type CheckItem, CheckList, type CheckState} from './components/check-list.js';
