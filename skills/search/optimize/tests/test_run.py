@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import math
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -31,6 +32,13 @@ class Git:
         self.root = root
         self.head = BASE
         self.live: set[int] = set()
+
+    def pid_file(self, path: Path, timeout: float) -> int:
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("invalid-timeout")
+        if not path.exists():
+            raise ValueError("pid-handoff-timeout")
+        return int(path.read_text().strip())
 
     def alive(self, pid: int) -> bool:
         return pid in self.live
@@ -486,6 +494,12 @@ def exercise_git_contract(git: controller.Git, root: Path, base: str, candidate:
     """The controller's supported Git operations, shared with the real-tier host test."""
     assert Path(git(root, ["rev-parse", "--show-toplevel"]).strip()) == root
     assert not git(root, ["status", "--porcelain"]).strip()
+    handoff = root / "handoff.pid"
+    handoff.write_text("123")
+    assert git.pid_file(handoff, 10) == 123
+    with pytest.raises(ValueError, match="timeout"):
+        git.pid_file(handoff, 0)
+    handoff.unlink()
     destination = root / "worktree"
     git(root, ["worktree", "add", "-b", "contract", str(destination), base])
     assert git(destination, ["rev-parse", "HEAD"]).strip() == base

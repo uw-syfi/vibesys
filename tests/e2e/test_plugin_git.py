@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 
@@ -79,6 +81,32 @@ def test_service_owner_stops_and_verifies_its_process_group() -> None:
             [sys.executable, "-c", "pass"],
             [sys.executable, "-c", "pass"],
             module.PosixHost(),
+        )
+        == 0
+    )
+
+
+def test_benchmark_wrapper_holds_the_host_lock_in_its_child() -> None:
+    source = Path(__file__).resolve().parents[2] / "skills/search/measure/scripts/measurements.py"
+    spec = importlib.util.spec_from_file_location("benchmark_lock_contract", source)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    program = """import fcntl, sys
+with open("/tmp/vibesys-benchmark.lock", "a") as lock:
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        sys.exit(0)
+    sys.exit(1)
+"""
+    assert (
+        module.main(
+            ["run", "--", sys.executable, "-c", program],
+            now=lambda: datetime(2026, 1, 1, tzinfo=UTC),
+            out=io.StringIO(),
+            err=io.StringIO(),
+            host="host-a",
         )
         == 0
     )
