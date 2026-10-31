@@ -13,7 +13,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/store/v1/agent_attrs.proto.
  */
 export const file_vibesys_store_v1_agent_attrs: GenFile = /*@__PURE__*/
-  fileDesc("CiJ2aWJlc3lzL3N0b3JlL3YxL2FnZW50X2F0dHJzLnByb3RvEhB2aWJlc3lzLnN0b3JlLnYxIsEFCg5BZ2VudFR1cm5BdHRycxIaCgVhZ2VudBgBIAEoCUILukgIcgYQASiAgAQSGQoEcm9sZRgCIAEoCUILukgIcgYQASiAgAQSHwoFbW9kZWwYAyABKAlCC7pICHIGEAEogIAESACIAQESJAoKc3RhcnRlZF9ieRgEIAMoCUIQukgNkgEKIghyBhABKICABBIaCgVzdGFnZRgFIAEoCUILukgIcgYQASiAgAQSFAoHYXR0ZW1wdBgGIAEoDUgBiAEBEiIKCHByb3ZpZGVyGAcgASgJQgu6SAhyBhABKICABEgCiAEBEioKEHJlYXNvbmluZ19lZmZvcnQYCCABKAlCC7pICHIGEAEogIAESAOIAQESKQoPaGFybmVzc192ZXJzaW9uGAkgASgJQgu6SAhyBhABKICABEgEiAEBEjAKBXVzYWdlGAogASgLMhwudmliZXN5cy5zdG9yZS52MS5Ub2tlblVzYWdlSAWIAQESHQoKcmVwbHlfanNvbhgLIAEoCUIJukgGcgQogIAEEh4KEXRyYW5zY3JpcHRfbGVuZ3RoGAwgASgESAaIAQESLgoKc3RhcnRlZF9hdBgNIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLAoIZW5kZWRfYXQYDiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEj4KBmNsaWVudBgPIAEoDjIdLnZpYmVzeXMuc3RvcmUudjEuQWdlbnRDbGllbnRCCrpIB4IBBBABIABIB4gBAUIICgZfbW9kZWxCCgoIX2F0dGVtcHRCCwoJX3Byb3ZpZGVyQhMKEV9yZWFzb25pbmdfZWZmb3J0QhIKEF9oYXJuZXNzX3ZlcnNpb25CCAoGX3VzYWdlQhQKEl90cmFuc2NyaXB0X2xlbmd0aEIJCgdfY2xpZW50IqgCCgpUb2tlblVzYWdlEhIKBWlucHV0GAEgASgESACIAQESFwoKY2FjaGVfcmVhZBgCIAEoBEgBiAEBEhsKDmNhY2hlX2NyZWF0aW9uGAMgASgESAKIAQESEwoGb3V0cHV0GAQgASgESAOIAQESFgoJcmVhc29uaW5nGAUgASgESASIAQESJwoIY29zdF91c2QYBiABKAFCELpIDRILQAEpAAAAAAAAAABIBYgBARIYCgtkdXJhdGlvbl9tcxgHIAEoBEgGiAEBQggKBl9pbnB1dEINCgtfY2FjaGVfcmVhZEIRCg9fY2FjaGVfY3JlYXRpb25CCQoHX291dHB1dEIMCgpfcmVhc29uaW5nQgsKCV9jb3N0X3VzZEIOCgxfZHVyYXRpb25fbXMqYQoLQWdlbnRDbGllbnQSHAoYQUdFTlRfQ0xJRU5UX1VOU1BFQ0lGSUVEEAASGQoVQUdFTlRfQ0xJRU5UX1NDUklQVEVEEAESGQoVQUdFTlRfQ0xJRU5UX1BST1ZJREVSEAJCQVo/Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy9zdG9yZS92MTtzdG9yZXYxYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_timestamp]);
+  fileDesc("CiJ2aWJlc3lzL3N0b3JlL3YxL2FnZW50X2F0dHJzLnByb3RvEhB2aWJlc3lzLnN0b3JlLnYxIvsFCg5BZ2VudFR1cm5BdHRycxIaCgVhZ2VudBgBIAEoCUILukgIcgYQASiAgAQSGQoEcm9sZRgCIAEoCUILukgIcgYQASiAgAQSHwoFbW9kZWwYAyABKAlCC7pICHIGEAEogIAESACIAQESJAoKc3RhcnRlZF9ieRgEIAMoCUIQukgNkgEKIghyBhABKICABBIaCgVzdGFnZRgFIAEoCUILukgIcgYQASiAgAQSFAoHYXR0ZW1wdBgGIAEoDUgBiAEBEiIKCHByb3ZpZGVyGAcgASgJQgu6SAhyBhABKICABEgCiAEBEioKEHJlYXNvbmluZ19lZmZvcnQYCCABKAlCC7pICHIGEAEogIAESAOIAQESKQoPaGFybmVzc192ZXJzaW9uGAkgASgJQgu6SAhyBhABKICABEgEiAEBEjAKBXVzYWdlGAogASgLMhwudmliZXN5cy5zdG9yZS52MS5Ub2tlblVzYWdlSAWIAQESHQoKcmVwbHlfanNvbhgLIAEoCUIJukgGcgQogIAEEh4KEXRyYW5zY3JpcHRfbGVuZ3RoGAwgASgESAaIAQESLgoKc3RhcnRlZF9hdBgNIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLAoIZW5kZWRfYXQYDiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEj4KBmNsaWVudBgPIAEoDjIdLnZpYmVzeXMuc3RvcmUudjEuQWdlbnRDbGllbnRCCrpIB4IBBBABIABIB4gBARI4Cg11c2FnZV9kZXRhaWxzGBAgAygLMiEudmliZXN5cy5zdG9yZS52MS5UdXJuVXNhZ2VEZXRhaWxCCAoGX21vZGVsQgoKCF9hdHRlbXB0QgsKCV9wcm92aWRlckITChFfcmVhc29uaW5nX2VmZm9ydEISChBfaGFybmVzc192ZXJzaW9uQggKBl91c2FnZUIUChJfdHJhbnNjcmlwdF9sZW5ndGhCCQoHX2NsaWVudCKoAgoKVG9rZW5Vc2FnZRISCgVpbnB1dBgBIAEoBEgAiAEBEhcKCmNhY2hlX3JlYWQYAiABKARIAYgBARIbCg5jYWNoZV9jcmVhdGlvbhgDIAEoBEgCiAEBEhMKBm91dHB1dBgEIAEoBEgDiAEBEhYKCXJlYXNvbmluZxgFIAEoBEgEiAEBEicKCGNvc3RfdXNkGAYgASgBQhC6SA0SC0ABKQAAAAAAAAAASAWIAQESGAoLZHVyYXRpb25fbXMYByABKARIBogBAUIICgZfaW5wdXRCDQoLX2NhY2hlX3JlYWRCEQoPX2NhY2hlX2NyZWF0aW9uQgkKB19vdXRwdXRCDAoKX3JlYXNvbmluZ0ILCglfY29zdF91c2RCDgoMX2R1cmF0aW9uX21zIpQDCg9UdXJuVXNhZ2VEZXRhaWwSLQoTcHJvdmlkZXJfc2Vzc2lvbl9pZBgBIAEoCUILukgIcgYQASiAgARIAIgBARJJCgpjb3N0X2Jhc2lzGAIgASgOMiAudmliZXN5cy5zdG9yZS52MS5Vc2FnZUNvc3RCYXNpc0IOukgLggEIEAEgACAEIAVIAYgBARIyCghieV9tb2RlbBgDIAMoCzIgLnZpYmVzeXMuc3RvcmUudjEuTW9kZWxUdXJuVXNhZ2U6qwG6SKcBGqQBCh10dXJuX3VzYWdlX2RldGFpbC5vbmVfcHJpbWFyeRIyYSB0dXJuIHdpdGggbW9kZWwgcm93cyBoYXMgZXhhY3RseSBvbmUgcHJpbWFyeSByb3caT3RoaXMuYnlfbW9kZWwuc2l6ZSgpID09IDAgfHwgdGhpcy5ieV9tb2RlbC5maWx0ZXIocm93LCByb3cucHJpbWFyeSkuc2l6ZSgpID09IDFCFgoUX3Byb3ZpZGVyX3Nlc3Npb25faWRCDQoLX2Nvc3RfYmFzaXMi0wYKDk1vZGVsVHVyblVzYWdlEhoKBW1vZGVsGAEgASgJQgu6SAhyBhABKICABBINCgVpbnB1dBgCIAEoBBISCgpjYWNoZV9yZWFkGAMgASgEEhYKDmNhY2hlX2NyZWF0aW9uGAQgASgEEhkKEWNhY2hlX2NyZWF0aW9uXzFoGAUgASgEEg4KBm91dHB1dBgGIAEoBBIRCglyZWFzb25pbmcYByABKAQSDQoFdHVybnMYCCABKA0SKwoMcmVjb3JkZWRfdXNkGAkgASgBQhC6SA0SC0ABKQAAAAAAAAAASACIAQESPAoFc3BlZWQYCiABKA4yHC52aWJlc3lzLnN0b3JlLnYxLlVzYWdlU3BlZWRCCrpIB4IBBBABIABIAYgBARIPCgdwcmltYXJ5GAsgASgIOoUEukiBBBqIAQojbW9kZWxfdHVybl91c2FnZS5jYWNoZV93aXRoaW5faW5wdXQSLGNhY2hlIHJlYWRzIGFuZCB3cml0ZXMgYXJlIHBhcnQgb2YgdGhlIGlucHV0GjN0aGlzLmNhY2hlX3JlYWQgKyB0aGlzLmNhY2hlX2NyZWF0aW9uIDw9IHRoaXMuaW5wdXQajwEKKm1vZGVsX3R1cm5fdXNhZ2UubG9uZ193cml0ZXNfd2l0aGluX3dyaXRlcxIyb25lLWhvdXIgY2FjaGUgd3JpdGVzIGFyZSBwYXJ0IG9mIHRoZSBjYWNoZSB3cml0ZXMaLXRoaXMuY2FjaGVfY3JlYXRpb25fMWggPD0gdGhpcy5jYWNoZV9jcmVhdGlvbhpqCihtb2RlbF90dXJuX3VzYWdlLnJlYXNvbmluZ193aXRoaW5fb3V0cHV0Eh9yZWFzb25pbmcgaXMgcGFydCBvZiB0aGUgb3V0cHV0Gh10aGlzLnJlYXNvbmluZyA8PSB0aGlzLm91dHB1dBp2CiFtb2RlbF90dXJuX3VzYWdlLnR1cm5zX29uX3ByaW1hcnkSL29ubHkgdGhlIHByaW1hcnkgcm93IGNvdW50cyB0aGUgdHVybidzIHJlcXVlc3RzGiB0aGlzLnByaW1hcnkgfHwgdGhpcy50dXJucyA9PSAwdUIPCg1fcmVjb3JkZWRfdXNkQggKBl9zcGVlZCphCgtBZ2VudENsaWVudBIcChhBR0VOVF9DTElFTlRfVU5TUEVDSUZJRUQQABIZChVBR0VOVF9DTElFTlRfU0NSSVBURUQQARIZChVBR0VOVF9DTElFTlRfUFJPVklERVIQAiqPAgoOVXNhZ2VDb3N0QmFzaXMSIAocVVNBR0VfQ09TVF9CQVNJU19VTlNQRUNJRklFRBAAEiAKHFVTQUdFX0NPU1RfQkFTSVNfUFJJQ0VfVEFCTEUQARImCiJVU0FHRV9DT1NUX0JBU0lTX1BST1ZJREVSX1JFUE9SVEVEEAISIgoeVVNBR0VfQ09TVF9CQVNJU19VTktOT1dOX01PREVMEAMSJAogVVNBR0VfQ09TVF9CQVNJU19MRUdBQ1lfUkVDT1JERUQQBBIkCiBVU0FHRV9DT1NUX0JBU0lTX0xFR0FDWV9VTlBSSUNFRBAFEiEKHVVTQUdFX0NPU1RfQkFTSVNfTk9UX1JFUE9SVEVEEAYqdAoKVXNhZ2VTcGVlZBIbChdVU0FHRV9TUEVFRF9VTlNQRUNJRklFRBAAEhgKFFVTQUdFX1NQRUVEX1NUQU5EQVJEEAESFAoQVVNBR0VfU1BFRURfRkFTVBACEhkKFVVTQUdFX1NQRUVEX1VMVFJBRkFTVBADQkFaP2dpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2dhdGV3YXkvZ2VuL3ZpYmVzeXMvc3RvcmUvdjE7c3RvcmV2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_timestamp]);
 
 /**
  * Attrs for agent_turn, including the final usage and transcript byte length.
@@ -103,6 +103,14 @@ export type AgentTurnAttrs = Message<"vibesys.store.v1.AgentTurnAttrs"> & {
    * @generated from field: optional vibesys.store.v1.AgentClient client = 15;
    */
   client?: AgentClient | undefined;
+
+  /**
+   * One entry for each finished turn the span ran, in the order they finished. `usage` is their
+   * sum, and counts only each turn's main conversation.
+   *
+   * @generated from field: repeated vibesys.store.v1.TurnUsageDetail usage_details = 16;
+   */
+  usageDetails: TurnUsageDetail[];
 };
 
 /**
@@ -162,6 +170,132 @@ export const TokenUsageSchema: GenMessage<TokenUsage> = /*@__PURE__*/
   messageDesc(file_vibesys_store_v1_agent_attrs, 1);
 
 /**
+ * What one finished turn spent beyond the main-conversation totals of `TokenUsage`: who paid
+ * for it, and how its cost was reached.
+ *
+ * @generated from message vibesys.store.v1.TurnUsageDetail
+ */
+export type TurnUsageDetail = Message<"vibesys.store.v1.TurnUsageDetail"> & {
+  /**
+   * The provider's own id of the conversation the turn ran in. It joins a turn to the transcript
+   * the CLI wrote for it. Absent when the provider named none.
+   *
+   * @generated from field: optional string provider_session_id = 1;
+   */
+  providerSessionId?: string | undefined;
+
+  /**
+   * Absent only on a line recorded before the basis existed: a turn that reports no cost records
+   * NOT_REPORTED.
+   *
+   * @generated from field: optional vibesys.store.v1.UsageCostBasis cost_basis = 2;
+   */
+  costBasis?: UsageCostBasis | undefined;
+
+  /**
+   * A superset of the turn's `TokenUsage`: the rows sum to the whole turn, which can include
+   * models the main conversation did not run. Empty when the provider reports no split.
+   *
+   * @generated from field: repeated vibesys.store.v1.ModelTurnUsage by_model = 3;
+   */
+  byModel: ModelTurnUsage[];
+};
+
+/**
+ * Describes the message vibesys.store.v1.TurnUsageDetail.
+ * Use `create(TurnUsageDetailSchema)` to create a new message.
+ */
+export const TurnUsageDetailSchema: GenMessage<TurnUsageDetail> = /*@__PURE__*/
+  messageDesc(file_vibesys_store_v1_agent_attrs, 2);
+
+/**
+ * One model's share of one finished turn. Cost is never recomputed from these counts here: the
+ * provider library prices them, and `recorded_usd` is its figure.
+ *
+ * @generated from message vibesys.store.v1.ModelTurnUsage
+ */
+export type ModelTurnUsage = Message<"vibesys.store.v1.ModelTurnUsage"> & {
+  /**
+   * As the provider reports it.
+   *
+   * @generated from field: string model = 1;
+   */
+  model: string;
+
+  /**
+   * Input tokens, cached ones included.
+   *
+   * @generated from field: uint64 input = 2;
+   */
+  input: bigint;
+
+  /**
+   * @generated from field: uint64 cache_read = 3;
+   */
+  cacheRead: bigint;
+
+  /**
+   * @generated from field: uint64 cache_creation = 4;
+   */
+  cacheCreation: bigint;
+
+  /**
+   * The part of `cache_creation` written with a one-hour lifetime.
+   *
+   * @generated from field: uint64 cache_creation_1h = 5;
+   */
+  cacheCreation1h: bigint;
+
+  /**
+   * Output tokens, reasoning included.
+   *
+   * @generated from field: uint64 output = 6;
+   */
+  output: bigint;
+
+  /**
+   * @generated from field: uint64 reasoning = 7;
+   */
+  reasoning: bigint;
+
+  /**
+   * The requests the turn made. Only the primary row counts them, so summing rows counts each once.
+   *
+   * @generated from field: uint32 turns = 8;
+   */
+  turns: number;
+
+  /**
+   * The pinned price table's price of these tokens at the standard tier; absent when the table
+   * has no price for the model. A list price at that tier, not a bill.
+   *
+   * @generated from field: optional double recorded_usd = 9;
+   */
+  recordedUsd?: number | undefined;
+
+  /**
+   * Absent: the provider reported none, which reads as standard.
+   *
+   * @generated from field: optional vibesys.store.v1.UsageSpeed speed = 10;
+   */
+  speed?: UsageSpeed | undefined;
+
+  /**
+   * The model the turn was run with. Exactly one row of a turn is.
+   *
+   * @generated from field: bool primary = 11;
+   */
+  primary: boolean;
+};
+
+/**
+ * Describes the message vibesys.store.v1.ModelTurnUsage.
+ * Use `create(ModelTurnUsageSchema)` to create a new message.
+ */
+export const ModelTurnUsageSchema: GenMessage<ModelTurnUsage> = /*@__PURE__*/
+  messageDesc(file_vibesys_store_v1_agent_attrs, 3);
+
+/**
  * Who ran a turn: a scripted agent, or a provider. Absence is an older turn.
  *
  * @generated from enum vibesys.store.v1.AgentClient
@@ -188,3 +322,101 @@ export enum AgentClient {
  */
 export const AgentClientSchema: GenEnum<AgentClient> = /*@__PURE__*/
   enumDesc(file_vibesys_store_v1_agent_attrs, 0);
+
+/**
+ * How a turn's recorded cost was reached. A turn records one of PRICE_TABLE, PROVIDER_REPORTED,
+ * UNKNOWN_MODEL and NOT_REPORTED, each what the provider library said. Absence of the field means
+ * only that the line was recorded before it existed. The two LEGACY values are never recorded: a
+ * reader derives them for such a line, and a row keyed on a basis never mixes turns priced in
+ * different ways.
+ *
+ * @generated from enum vibesys.store.v1.UsageCostBasis
+ */
+export enum UsageCostBasis {
+  /**
+   * @generated from enum value: USAGE_COST_BASIS_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * Computed from the turn's tokens and agentshim's pinned price table.
+   *
+   * @generated from enum value: USAGE_COST_BASIS_PRICE_TABLE = 1;
+   */
+  PRICE_TABLE = 1,
+
+  /**
+   * The CLI's own figure: Claude's when its result named no model, and opencode's.
+   *
+   * @generated from enum value: USAGE_COST_BASIS_PROVIDER_REPORTED = 2;
+   */
+  PROVIDER_REPORTED = 2,
+
+  /**
+   * A model in the turn has no price, so the turn has no recorded cost.
+   *
+   * @generated from enum value: USAGE_COST_BASIS_UNKNOWN_MODEL = 3;
+   */
+  UNKNOWN_MODEL = 3,
+
+  /**
+   * An older turn that has a recorded cost.
+   *
+   * @generated from enum value: USAGE_COST_BASIS_LEGACY_RECORDED = 4;
+   */
+  LEGACY_RECORDED = 4,
+
+  /**
+   * An older turn that has none.
+   *
+   * @generated from enum value: USAGE_COST_BASIS_LEGACY_UNPRICED = 5;
+   */
+  LEGACY_UNPRICED = 5,
+
+  /**
+   * The provider reported no cost and none is computed (a CLI that prints none, a resumed turn
+   * whose increment is unknown), or the library named no source for the cost it has.
+   *
+   * @generated from enum value: USAGE_COST_BASIS_NOT_REPORTED = 6;
+   */
+  NOT_REPORTED = 6,
+}
+
+/**
+ * Describes the enum vibesys.store.v1.UsageCostBasis.
+ */
+export const UsageCostBasisSchema: GenEnum<UsageCostBasis> = /*@__PURE__*/
+  enumDesc(file_vibesys_store_v1_agent_attrs, 1);
+
+/**
+ * The service speed a request ran at.
+ *
+ * @generated from enum vibesys.store.v1.UsageSpeed
+ */
+export enum UsageSpeed {
+  /**
+   * @generated from enum value: USAGE_SPEED_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: USAGE_SPEED_STANDARD = 1;
+   */
+  STANDARD = 1,
+
+  /**
+   * @generated from enum value: USAGE_SPEED_FAST = 2;
+   */
+  FAST = 2,
+
+  /**
+   * @generated from enum value: USAGE_SPEED_ULTRAFAST = 3;
+   */
+  ULTRAFAST = 3,
+}
+
+/**
+ * Describes the enum vibesys.store.v1.UsageSpeed.
+ */
+export const UsageSpeedSchema: GenEnum<UsageSpeed> = /*@__PURE__*/
+  enumDesc(file_vibesys_store_v1_agent_attrs, 2);
