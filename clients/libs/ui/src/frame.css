@@ -1034,16 +1034,7 @@ button.vs-crumb:focus-visible {
   overflow-wrap: anywhere;
 }
 .vs-columnlist-link {
-  max-width: 100%;
-  padding: 0;
-  overflow: hidden;
-  border: none;
-  background: none;
   color: var(--accent);
-  font: inherit;
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   cursor: pointer;
 }
 .vs-columnlist-link:hover {

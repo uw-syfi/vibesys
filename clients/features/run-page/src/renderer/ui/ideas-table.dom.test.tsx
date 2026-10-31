@@ -209,6 +209,22 @@ test('pressing a row opens its idea and the pointer on it names it for the chart
   await screen.done();
 });
 
+test('pressing the idea a row was built on opens that idea and does not pick the row', async () => {
+  const screen = await shown();
+  const row = screen.container.querySelectorAll(ROWS)[0] as HTMLElement;
+  const builtOn = row.querySelector('[data-column="built-on"]') as HTMLElement;
+  expect(builtOn.textContent).toBe('idea 5');
+  await act(async () => builtOn.click());
+  expect(screen.zoomed).toEqual([{type: 'open-idea', idea: 'n5'}]);
+  // The input has no idea to open: its cell picks the row, as every cell without an action does.
+  const input = [...screen.container.querySelectorAll(ROWS)].find(
+    each => each.querySelector('[data-column="built-on"]')?.textContent === 'Input',
+  ) as HTMLElement;
+  await act(async () => (input.querySelector('[data-column="built-on"]') as HTMLElement).click());
+  expect(screen.zoomed).toHaveLength(2);
+  await screen.done();
+});
+
 test('the rows that built the selected idea carry a bar, and the selected row is marked', async () => {
   const container = document.createElement('div');
   document.body.append(container);

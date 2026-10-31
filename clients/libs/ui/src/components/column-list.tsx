@@ -23,6 +23,12 @@ export interface ListColumn<Row> {
   readonly align?: 'start' | 'end';
   /** Drawn only while the list has room: it gives way when the list is narrow. */
   readonly optional?: boolean;
+  /**
+   * Pressing the column's cell acts on its own (a link to another row) and picks nothing; it says
+   * whether it did, and a press it did not take picks the row. The row holds the press: a cell has
+   * no control of its own inside the option.
+   */
+  readonly act?: (row: Row) => boolean;
   /** The cell's text wraps onto more lines instead of being cut short. */
   readonly wrap?: boolean;
   /** The column's size when the list is narrow; the same by default. */
@@ -93,9 +99,9 @@ function Row<Row>(props: {
       data-lineage={props.marks.lineage || undefined}
       data-fresh={props.marks.fresh || undefined}
       onClick={event => {
-        // A link inside a cell acts on its own.
-        if (event.target instanceof Element && event.target.closest('button, a') !== null) return;
-        props.select();
+        const cell = event.target instanceof Element ? event.target.closest('[data-column]') : null;
+        const column = props.columns.find(each => each.key === cell?.getAttribute('data-column'));
+        if (column?.act?.(props.row) !== true) props.select();
       }}
       onMouseEnter={hover === undefined ? undefined : () => hover(true)}
       onMouseLeave={hover === undefined ? undefined : () => hover(false)}
@@ -109,6 +115,7 @@ function Row<Row>(props: {
         <span
           key={column.key}
           className="vs-columnlist-cell"
+          data-column={column.key}
           data-align={column.align}
           data-optional={column.optional || undefined}
           data-wrap={column.wrap || undefined}
@@ -222,18 +229,12 @@ export function CellLines(props: {
   );
 }
 
-/** A cell's link: a word that acts on its own, without picking the row (a row's parent). */
-export function CellLink(props: {readonly label: string; readonly press: () => void}): JSX.Element {
+/** A cell's word that acts on its own (the column's `act`), drawn as a link. */
+export function CellLink(props: {readonly label: string}): JSX.Element {
   return (
-    <button
-      type="button"
-      className="vs-columnlist-link"
-      title={props.label}
-      tabIndex={-1}
-      onClick={props.press}
-    >
+    <span className="vs-columnlist-link" title={props.label}>
       {props.label}
-    </button>
+    </span>
   );
 }
 

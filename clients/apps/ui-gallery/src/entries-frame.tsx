@@ -236,12 +236,9 @@ const READING_COLUMNS: readonly ListColumn<Reading>[] = [
     header: 'Built on',
     size: 'wide',
     optional: true,
+    act: () => true,
     cell: row =>
-      row.parent === null ? (
-        <Text tone="muted">Input</Text>
-      ) : (
-        <CellLink label={row.parent} press={noop} />
-      ),
+      row.parent === null ? <Text tone="muted">Input</Text> : <CellLink label={row.parent} />,
   },
   {
     key: 'status',

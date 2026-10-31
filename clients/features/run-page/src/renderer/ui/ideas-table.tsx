@@ -108,6 +108,13 @@ function sameSort(a: IdeasSort, b: IdeasSort): boolean {
   return a.by === b.by;
 }
 
+/** A press on the idea a row was built on opens that idea; the input has none to open. */
+function openParent(base: ViewBase, row: IdeaTableRow): boolean {
+  if (row.builtOn.parent === null) return false;
+  base.zoom({type: 'open-idea', idea: row.builtOn.parent});
+  return true;
+}
+
 type Column = ListColumn<IdeaTableRow>;
 type Sorting = NonNullable<Column['sort']>;
 
@@ -195,14 +202,12 @@ function leadColumns(base: ViewBase): readonly Column[] {
       size: 'wide',
       optional: true,
       hint: row => markdownToPlain(row.builtOn.label),
+      act: row => openParent(base, row),
       cell: row =>
         row.builtOn.parent === null ? (
           quiet(row.builtOn.label)
         ) : (
-          <CellLink
-            label={markdownToPlain(row.builtOn.label)}
-            press={() => base.zoom({type: 'open-idea', idea: row.builtOn.parent ?? ''})}
-          />
+          <CellLink label={markdownToPlain(row.builtOn.label)} />
         ),
     },
     {
