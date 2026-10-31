@@ -23,8 +23,14 @@ base=$1
 shift
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# Build from the CI mirror when this job resolved one; otherwise the Dockerfile's
+# default is the same pinned digest upstream.
+cli_base=$(cd "${here}" && cd "$(git rev-parse --show-toplevel)" &&
+    python3 -m scripts.ci_base_images node:24.21.0-bookworm-slim 2>/dev/null) || cli_base=''
+build_args=()
+if [[ -n ${cli_base} ]]; then build_args=(--build-arg "BASE_IMAGE=${cli_base}"); fi
 docker build --quiet --tag vibesys-devcontainer-cli:features-test \
-    --file "${here}/Dockerfile" "${here}" >/dev/null
+    ${build_args[@]+"${build_args[@]}"} --file "${here}/Dockerfile" "${here}" >/dev/null
 
 # `features test` stages each test project under this directory and hands the
 # path to the host daemon as a bind mount source, so it must be the same

@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+from scripts.ci_registry_image_cache import registry_cache
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 import yaml
 
 REPO = Path(__file__).resolve().parents[2]
@@ -35,9 +40,8 @@ def test_image_builds_share_install_layers_across_pr_and_queue_refs(job: str) ->
     if job == "feature-tests":
         assert "matrix.family" in key
     bases = next(step for step in steps if step.get("id") == "image-bases")
-    assert "imagetools inspect" in bases["run"]
-    assert "{{.Manifest.Digest}}" in bases["run"]
-    assert "timeout --kill-after=5s 60s" in bases["run"]
+    assert "sha256sum scripts/ci_base_images.toml" in bases["run"]
+    assert "imagetools inspect" not in bases["run"]
     attach = next(step for step in steps if "data_root.sh attach" in step.get("run", ""))
     snapshot = next(step for step in steps if "data_root.sh snapshot" in step.get("run", ""))
     save = next(step for step in steps if step.get("with", {}).get("mode") == "save")
@@ -77,10 +81,73 @@ def test_minimal_container_supplies_cache_sources_through_the_validated_pytest_o
     assert 'request.config.getoption("--image-cache-from")' in conftest
 
 
-def test_registry_failures_do_not_silently_trigger_cold_installs() -> None:
+@pytest.mark.parametrize("mode", ["restore", "save"])
+@pytest.mark.parametrize("operation", ["login", "pull", "create", "cp", "build", "push", "tag"])
+def test_registry_errors_warn_and_allow_the_required_build(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], mode: str, operation: str
+) -> None:
+    archive = tmp_path / "docker-data.tar.zst"
+    if mode == "save":
+        archive.write_bytes(b"snapshot")
+    env = {
+        "CACHE_MODE": mode,
+        "CACHE_PATH": str(archive),
+        "CACHE_KEY": "key",
+        "CACHE_RESTORE_KEYS": "fallback",
+        "CACHE_TOKEN": "test-token",
+        "GITHUB_ACTOR": "actor",
+        "GITHUB_REPOSITORY": "owner/repo",
+        "GITHUB_OUTPUT": str(tmp_path / "outputs"),
+        "RUNNER_TEMP": str(tmp_path),
+    }
+    registry = FakeRegistry(operation)
+    hit = registry_cache(env, registry)
+    failed = any(call[1] == operation for call in registry.calls)
+    if failed:
+        assert "::warning::" in capsys.readouterr().out
+        assert hit is False
+    if mode == "restore":
+        assert (tmp_path / "outputs").read_text() == f"cache-hit={str(hit).lower()}\n"
+        assert archive.exists() is hit
+    else:
+        assert archive.read_bytes() == b"snapshot"
+
+
+class FakeRegistry:
+    """A registry with explicit operation failures and an in-memory archive payload."""
+
+    def __init__(self, fail: str) -> None:
+        self.fail = fail
+        self.calls: list[tuple[str, ...]] = []
+
+    def __call__(self, argv: Sequence[str], *, input_text: str | None = None) -> str:
+        del input_text
+        self.calls.append(tuple(argv))
+        assert argv[1] in {"login", "pull", "create", "cp", "rm", "build", "push", "tag"}
+        if argv[1] == self.fail:
+            if argv[1] == "cp":
+                Path(argv[-1]).write_bytes(b"partial archive")
+            message = "registry unavailable"
+            raise OSError(message)
+        if argv[1] == "cp":
+            Path(argv[-1]).write_bytes(b"snapshot")
+        return "container-id" if argv[1] == "create" else ""
+
+
+def test_the_action_keeps_required_build_failures_outside_its_best_effort_boundary() -> None:
     script = (REPO / "scripts/ci_registry_image_cache.sh").read_text()
-    assert "manifest unknown" in script
-    assert 'cat "${log}" >&2\n            return 1' in script
-    assert "timeout --kill-after=5s 180s docker pull" in script
-    assert "timeout --kill-after=5s 180s docker push" in script
-    assert "org.opencontainers.image.source" in script
+    assert "::warning::" in script
+    assert 'timeout --kill-after=5s "${cache_seconds}s" python3' in script
+    assert "cache_seconds=60" in script
+    assert "cache_seconds=120" in script
+    workflow = yaml.safe_load((REPO / ".github/workflows/test.yml").read_text())
+    for job in JOBS:
+        steps = workflow["jobs"][job]["steps"]
+        attach = next(
+            i for i, step in enumerate(steps) if "data_root.sh attach" in step.get("run", "")
+        )
+        snapshot = next(
+            i for i, step in enumerate(steps) if "data_root.sh snapshot" in step.get("run", "")
+        )
+        for step in steps[attach + 1 : snapshot]:
+            assert not step.get("continue-on-error", False)

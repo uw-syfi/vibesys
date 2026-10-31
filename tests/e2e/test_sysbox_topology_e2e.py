@@ -23,6 +23,7 @@ import shutil
 from typing import TYPE_CHECKING
 
 import pytest
+from scripts.ci_base_images import base_image
 from tests.support import run_test_command
 
 from vs_agent.api.images import agent_image
@@ -43,7 +44,8 @@ from vs_sim.api import DISCARD
 pytestmark = pytest.mark.e2e
 
 _ENABLE_ENV = "VIBESYS_E2E_SYSBOX"
-_BASE_IMAGE = "debian:bookworm"
+_ALPINE = base_image("alpine:latest")
+_BASE_IMAGE = base_image("debian:bookworm")
 _BUILD_TIMEOUT_S = 1800.0
 _EXEC_TIMEOUT_S = 300
 #: Compose names its project after the workspace directory.
@@ -83,7 +85,7 @@ def test_hotel_reservation_sandbox_runs_compose_and_containers_on_its_own_daemon
     (workspace / "docker-compose.yml").write_text(
         f"""services:
   probe:
-    image: alpine
+    image: {_ALPINE}
     command: ["sh", "-c", "cat /seed/seed.txt /capture/capture.txt"]
     volumes:
       - ./data:/seed:ro
@@ -124,7 +126,7 @@ def test_hotel_reservation_sandbox_runs_compose_and_containers_on_its_own_daemon
             == 0
         )
         assert inside("docker compose config --quiet").returncode == 0
-        assert inside("docker run --rm alpine true").returncode == 0
+        assert inside(f"docker run --rm {_ALPINE} true").returncode == 0
         probe = inside("docker compose run --rm probe")
         assert probe.returncode == 0, probe.stderr
         assert "from-the-workspace" in probe.stdout
@@ -132,7 +134,7 @@ def test_hotel_reservation_sandbox_runs_compose_and_containers_on_its_own_daemon
         # The topology ran on the sandbox's own daemon, not the host's: it pulled
         # alpine itself, the host daemon has no compose container, and the host
         # socket is not a mount inside the sandbox.
-        assert inside("docker image inspect alpine").returncode == 0
+        assert inside(f"docker image inspect {_ALPINE}").returncode == 0
         assert _host_container_names(_TASK_PROJECT) == ""
         assert inside("! grep -q docker.sock /proc/self/mountinfo").returncode == 0
     finally:

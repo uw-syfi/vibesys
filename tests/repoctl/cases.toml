@@ -318,7 +318,7 @@ pnpm_packages = []
 
 [[cases]]
 name = "shared image cache changes exercise every builder consumer"
-paths = ["scripts/ci_image_cache.py", "scripts/ci_registry_image_cache.sh", ".github/actions/docker-image-cache/action.yml"]
+paths = ["scripts/ci_image_cache.py", "scripts/ci_registry_image_cache.sh", "scripts/ci_registry_image_cache.py", "scripts/ci_base_images.py", "scripts/ci_base_images.toml", "scripts/ci_base_mirror_setup.sh", ".github/actions/docker-image-cache/action.yml", ".github/actions/ci-base-mirror/action.yml"]
 jobs = ["agent_image", "python", "real_tiers"]
 [cases.collections]
 native_languages = []
@@ -329,6 +329,15 @@ pnpm_packages = []
 name = "proto compatibility entry and regression select contract verification"
 paths = ["scripts/check_proto_breaking.sh", "scripts/tests/test_proto_breaking.sh"]
 jobs = ["proto", "python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "filesystem image identity changes exercise every builder consumer"
+paths = ["libs/vs-sandbox/src/vs_sandbox/feature_image.py"]
+jobs = ["agent_image", "python", "real_tiers"]
 [cases.collections]
 native_languages = []
 native_targets = []

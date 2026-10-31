@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -465,3 +467,86 @@ def test_cache_source_selection_does_not_invalidate_a_restored_result(tmp_path: 
     )
     assert first == second
     assert len(runner.seen) == 1
+
+
+@pytest.mark.regression
+@given(
+    changed=st.sampled_from(
+        ["mode", "directory_mode", "path", "content", "link", "empty_directory"]
+    ),
+    content=st.binary(min_size=1, max_size=100),
+    bit=st.integers(min_value=0, max_value=7),
+)
+@example(changed="mode", content=b"x", bit=6)
+@example(changed="directory_mode", content=b"x", bit=0)
+@example(changed="link", content=b"x", bit=0)
+def test_every_copied_filesystem_input_invalidates_a_restored_image(
+    changed: str, content: bytes, bit: int
+) -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        feature = _local(Path(directory), "tool-a", {})
+        data = feature.directory / "data"
+        data.mkdir()
+        payload = data / "payload"
+        payload.write_bytes(content)
+        payload.chmod(0o644)
+        data.chmod(0o755)
+        (data / "other").write_bytes(content)
+        link = feature.directory / "link"
+        link.symlink_to("data/payload")
+        runner = _Runner()
+        _build(runner, [feature])
+        before = set(runner.built)
+        if changed == "mode":
+            payload.chmod(0o644 ^ (1 << bit))
+        elif changed == "directory_mode":
+            data.chmod(0o755 ^ (1 << (bit % 6)))
+        elif changed == "path":
+            payload.rename(data / "renamed")
+        elif changed == "content":
+            payload.write_bytes(bytes([content[0] ^ 1]) + content[1:])
+        elif changed == "link":
+            link.unlink()
+            link.symlink_to("data/other")
+        else:
+            (feature.directory / "empty").mkdir()
+        _build(runner, [feature])
+        assert len(set(runner.built) - before) == 1
+        assert len(runner.seen) == 2
+
+
+@given(content=st.binary(max_size=100), mode=st.integers(min_value=0, max_value=0o777))
+def test_identical_feature_trees_with_permissions_and_links_have_the_same_tag(
+    content: bytes, mode: int
+) -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        tags = []
+        for location in ("one", "two"):
+            feature = _local(Path(directory) / location, "tool-a", {})
+            payload = feature.directory / "payload"
+            payload.write_bytes(content)
+            payload.chmod(mode | 0o400)
+            (feature.directory / "link").symlink_to("payload")
+            (feature.directory / "empty").mkdir()
+            runner = _Runner()
+            _build(runner, [feature])
+            tags.extend(_tags(runner))
+        assert tags[0] == tags[1]
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Python copies extended attributes on Linux")
+@pytest.mark.regression
+@given(value=st.binary(max_size=40))
+@example(value=b"capability")
+def test_feature_extended_attributes_are_install_inputs(value: bytes) -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        feature = _local(Path(directory), "tool-a", {})
+        payload = feature.directory / "payload"
+        payload.write_bytes(b"unchanged")
+        os.setxattr(payload, "user.vibesys-input", value)
+        runner = _Runner()
+        _build(runner, [feature])
+        before = set(runner.built)
+        os.setxattr(payload, "user.vibesys-input", value + b"\0")
+        _build(runner, [feature])
+        assert len(set(runner.built) - before) == 1

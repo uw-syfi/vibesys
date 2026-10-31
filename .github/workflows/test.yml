@@ -646,17 +646,15 @@ jobs:
       # devcontainer CLI builds. GHCR shares snapshots across PR/merge-queue refs.
       # Exact keys include install inputs and base digests; the family/base alias
       # reuses unchanged layers after edits, with Docker validating each input.
+      # Log in with the job's token and pick, per base image, the GHCR mirror or the
+      # same digest upstream. A fork PR's read-only token or a mirror outage only warns.
+      - name: Select the CI base image mirrors
+        uses: ./.github/actions/ci-base-mirror
+
       - name: Resolve the image cache's base digests
         id: image-bases
         run: |
-          cpu=$(uv run python -c 'from vs_sandbox.api import ComputeBackend, backend_default_image; print(backend_default_image(ComputeBackend.CPU))')
-          cpu_digest=$(timeout --kill-after=5s 60s docker buildx imagetools inspect "$cpu" --format '{{.Manifest.Digest}}')
-          uid_digest=$(timeout --kill-after=5s 60s docker buildx imagetools inspect ubuntu:24.04 --format '{{.Manifest.Digest}}')
-          [[ "$cpu_digest" =~ ^sha256:[0-9a-f]{64}$ && "$uid_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-          cli_base=$(awk '$1 == "FROM" {print $2}' libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/Dockerfile)
-          cli_digest=$(timeout --kill-after=5s 60s docker buildx imagetools inspect "$cli_base" --format '{{.Manifest.Digest}}')
-          [[ "$cli_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-          echo "digest=$(printf '%s\n' "$cpu_digest" "$uid_digest" "$cli_digest" | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          echo "digest=$(sha256sum scripts/ci_base_images.toml | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
 
       - name: Restore Docker layer cache
         id: docker-cache
@@ -664,7 +662,7 @@ jobs:
         with:
           mode: restore
           path: ${{ runner.temp }}/docker-data.tar.zst
-          key: agent-image-docker-v2-${{ steps.image-bases.outputs.digest }}-${{ hashFiles('libs/vs-sandbox/src/vs_sandbox/feature_image.py', 'libs/vs-sandbox/src/vs_sandbox/feature_dockerfile.py', 'libs/vs-sandbox/src/vs_sandbox/toolchain_features.py', 'libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/**', 'libs/vs-sandbox/src/vs_sandbox/features/**', 'libs/vs-runtime/src/vs_runtime/features/**', 'libs/vs-agent/src/vs_agent/images/features/**', 'libs/vs-agent/src/vs_agent/provider_policy.py', 'libs/vs-agent/src/vs_agent/agent_feature.py', 'libs/vs-runtime/src/vs_runtime/_image_features.py', 'libs/vs-runtime/src/vs_runtime/_run_environment.py', 'libs/vs-agent/src/vs_agent/images.py', 'tests/e2e/test_agent_image_e2e.py', 'libs/vs-sandbox/tests/test_docker_conformance_e2e.py', 'tests/e2e/test_credential_sharing_e2e.py', 'scripts/ci_docker_data_root.sh', 'scripts/ci_image_cache.py', 'scripts/ci_registry_image_cache.sh', '.github/actions/docker-image-cache/action.yml', '.github/workflows/test.yml') }}
+          key: agent-image-docker-v2-${{ steps.image-bases.outputs.digest }}-${{ hashFiles('libs/vs-sandbox/src/vs_sandbox/feature_image.py', 'libs/vs-sandbox/src/vs_sandbox/feature_dockerfile.py', 'libs/vs-sandbox/src/vs_sandbox/toolchain_features.py', 'libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/**', 'libs/vs-sandbox/src/vs_sandbox/features/**', 'libs/vs-runtime/src/vs_runtime/features/**', 'libs/vs-agent/src/vs_agent/images/features/**', 'libs/vs-agent/src/vs_agent/provider_policy.py', 'libs/vs-agent/src/vs_agent/agent_feature.py', 'libs/vs-runtime/src/vs_runtime/_image_features.py', 'libs/vs-runtime/src/vs_runtime/_run_environment.py', 'libs/vs-agent/src/vs_agent/images.py', 'tests/e2e/test_agent_image_e2e.py', 'libs/vs-sandbox/tests/test_docker_conformance_e2e.py', 'tests/e2e/test_credential_sharing_e2e.py', 'scripts/ci_docker_data_root.sh', 'scripts/ci_image_cache.py', 'scripts/ci_registry_image_cache.sh', 'scripts/ci_registry_image_cache.py', 'scripts/ci_base_images.toml', 'scripts/ci_base_images.py', '.github/actions/docker-image-cache/action.yml', '.github/workflows/test.yml') }}
           restore-keys: |
             agent-image-docker-v2-${{ steps.image-bases.outputs.digest }}-
 
@@ -676,7 +674,11 @@ jobs:
 
       - name: Snapshot Docker layer cache
         if: steps.docker-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-        run: ./scripts/ci_docker_data_root.sh snapshot "${{ runner.temp }}/docker-data.tar.zst"
+        run: |
+          if ! ./scripts/ci_docker_data_root.sh snapshot "${{ runner.temp }}/docker-data.tar.zst"; then
+            echo '::warning::Docker cache snapshot failed; skipping publication'
+            rm -f "${{ runner.temp }}/docker-data.tar.zst"
+          fi
 
       - name: Save Docker layer cache
         if: steps.docker-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
@@ -1055,6 +1057,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.real_tiers == 'true' || github.event_name == 'merge_group'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     timeout-minutes: 20
 
     steps:
@@ -1093,6 +1098,11 @@ jobs:
       - name: Set up repoctl
         uses: ./.github/actions/setup-repoctl
 
+      # Log in with the job's token and pick, per base image, the GHCR mirror or the
+      # same digest upstream. A fork PR's read-only token or a mirror outage only warns.
+      - name: Select the CI base image mirrors
+        uses: ./.github/actions/ci-base-mirror
+
       # Same Docker layer cache as `agent-image` (scripts/ci_docker_data_root.sh),
       # keyed on this tier's image inputs and the ISO week (floating base images).
       - name: Compute the Docker layer cache key
@@ -1104,7 +1114,7 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/docker-data.tar.zst
-          key: real-tiers-slurm-docker-${{ steps.docker-cache-week.outputs.week }}-${{ hashFiles('tests/slurm_cluster/image/**', 'tests/slurm_cluster/cluster.py', 'tests/slurm_cluster/harness.py', 'scripts/run_slurm_cluster_tests.sh', 'scripts/ci_docker_data_root.sh') }}
+          key: real-tiers-slurm-docker-${{ steps.docker-cache-week.outputs.week }}-${{ hashFiles('tests/slurm_cluster/image/**', 'scripts/ci_base_images.toml', 'tests/slurm_cluster/cluster.py', 'tests/slurm_cluster/harness.py', 'scripts/run_slurm_cluster_tests.sh', 'scripts/ci_docker_data_root.sh') }}
           restore-keys: |
             real-tiers-slurm-docker-${{ steps.docker-cache-week.outputs.week }}-
             real-tiers-slurm-docker-${{ steps.docker-cache-week.outputs.previous }}-
@@ -1119,7 +1129,11 @@ jobs:
 
       - name: Snapshot Docker layer cache
         if: github.event_name == 'push' && steps.docker-cache.outputs.cache-hit != 'true'
-        run: ./scripts/ci_docker_data_root.sh snapshot "${{ runner.temp }}/docker-data.tar.zst"
+        run: |
+          if ! ./scripts/ci_docker_data_root.sh snapshot "${{ runner.temp }}/docker-data.tar.zst"; then
+            echo '::warning::Docker cache snapshot failed; skipping publication'
+            rm -f "${{ runner.temp }}/docker-data.tar.zst"
+          fi
 
       - name: Save Docker layer cache
         if: github.event_name == 'push' && steps.docker-cache.outputs.cache-hit != 'true'
@@ -1167,17 +1181,15 @@ jobs:
 
       # Same Docker layer cache as `agent-image` (scripts/ci_docker_data_root.sh),
       # keyed on install inputs and resolved base digests, including floating bases.
+      # Log in with the job's token and pick, per base image, the GHCR mirror or the
+      # same digest upstream. A fork PR's read-only token or a mirror outage only warns.
+      - name: Select the CI base image mirrors
+        uses: ./.github/actions/ci-base-mirror
+
       - name: Resolve the image cache's base digests
         id: image-bases
         run: |
-          cpu=$(uv run python -c 'from vs_sandbox.api import ComputeBackend, backend_default_image; print(backend_default_image(ComputeBackend.CPU))')
-          cpu_digest=$(timeout --kill-after=5s 60s docker buildx imagetools inspect "$cpu" --format '{{.Manifest.Digest}}')
-          uid_digest=$(timeout --kill-after=5s 60s docker buildx imagetools inspect ubuntu:24.04 --format '{{.Manifest.Digest}}')
-          [[ "$cpu_digest" =~ ^sha256:[0-9a-f]{64}$ && "$uid_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-          cli_base=$(awk '$1 == "FROM" {print $2}' libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/Dockerfile)
-          cli_digest=$(timeout --kill-after=5s 60s docker buildx imagetools inspect "$cli_base" --format '{{.Manifest.Digest}}')
-          [[ "$cli_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-          echo "digest=$(printf '%s\n' "$cpu_digest" "$uid_digest" "$cli_digest" | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          echo "digest=$(sha256sum scripts/ci_base_images.toml | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
 
       - name: Restore Docker layer cache
         id: docker-cache
@@ -1185,7 +1197,7 @@ jobs:
         with:
           mode: restore
           path: ${{ runner.temp }}/docker-data.tar.zst
-          key: real-tiers-minimal-container-docker-v2-${{ steps.image-bases.outputs.digest }}-${{ hashFiles('libs/vs-sandbox/src/vs_sandbox/feature_image.py', 'libs/vs-sandbox/src/vs_sandbox/feature_dockerfile.py', 'libs/vs-sandbox/src/vs_sandbox/toolchain_features.py', 'libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/**', 'libs/vs-sandbox/src/vs_sandbox/features/**', 'libs/vs-runtime/src/vs_runtime/features/**', 'libs/vs-agent/src/vs_agent/images/features/**', 'libs/vs-agent/src/vs_agent/provider_policy.py', 'libs/vs-agent/src/vs_agent/agent_feature.py', 'libs/vs-runtime/src/vs_runtime/_image_features.py', 'libs/vs-runtime/src/vs_runtime/_run_environment.py', 'libs/vs-agent/src/vs_agent/images.py', 'scripts/run_minimal_container_tests.sh', 'tests/minimal_container/editor.py', 'tests/minimal_container/conftest.py', 'scripts/ci_docker_data_root.sh', 'scripts/ci_image_cache.py', 'scripts/ci_registry_image_cache.sh', '.github/actions/docker-image-cache/action.yml', '.github/workflows/test.yml') }}
+          key: real-tiers-minimal-container-docker-v2-${{ steps.image-bases.outputs.digest }}-${{ hashFiles('libs/vs-sandbox/src/vs_sandbox/feature_image.py', 'libs/vs-sandbox/src/vs_sandbox/feature_dockerfile.py', 'libs/vs-sandbox/src/vs_sandbox/toolchain_features.py', 'libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/**', 'libs/vs-sandbox/src/vs_sandbox/features/**', 'libs/vs-runtime/src/vs_runtime/features/**', 'libs/vs-agent/src/vs_agent/images/features/**', 'libs/vs-agent/src/vs_agent/provider_policy.py', 'libs/vs-agent/src/vs_agent/agent_feature.py', 'libs/vs-runtime/src/vs_runtime/_image_features.py', 'libs/vs-runtime/src/vs_runtime/_run_environment.py', 'libs/vs-agent/src/vs_agent/images.py', 'scripts/run_minimal_container_tests.sh', 'tests/minimal_container/editor.py', 'tests/minimal_container/conftest.py', 'scripts/ci_docker_data_root.sh', 'scripts/ci_image_cache.py', 'scripts/ci_registry_image_cache.sh', 'scripts/ci_registry_image_cache.py', 'scripts/ci_base_images.toml', 'scripts/ci_base_images.py', '.github/actions/docker-image-cache/action.yml', '.github/workflows/test.yml') }}
           restore-keys: |
             real-tiers-minimal-container-docker-v2-${{ steps.image-bases.outputs.digest }}-
 
@@ -1206,7 +1218,11 @@ jobs:
 
       - name: Snapshot Docker layer cache
         if: steps.docker-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-        run: ./scripts/ci_docker_data_root.sh snapshot "${{ runner.temp }}/docker-data.tar.zst"
+        run: |
+          if ! ./scripts/ci_docker_data_root.sh snapshot "${{ runner.temp }}/docker-data.tar.zst"; then
+            echo '::warning::Docker cache snapshot failed; skipping publication'
+            rm -f "${{ runner.temp }}/docker-data.tar.zst"
+          fi
 
       - name: Save Docker layer cache
         if: steps.docker-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
@@ -1247,17 +1263,19 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # Log in with the job's token and pick, per base image, the GHCR mirror or the
+      # same digest upstream. A fork PR's read-only token or a mirror outage only warns.
+      - name: Select the CI base image mirrors
+        uses: ./.github/actions/ci-base-mirror
+
       - name: Resolve the image cache's base digests
         id: image-bases
         env:
           BASE_IMAGE: ${{ matrix.base }}
         run: |
-          base=$(timeout --kill-after=5s 60s docker buildx imagetools inspect "$BASE_IMAGE" --format '{{.Manifest.Digest}}')
-          cli_base=$(awk '$1 == "FROM" {print $2}' libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/Dockerfile)
-          cli=$(timeout --kill-after=5s 60s docker buildx imagetools inspect "$cli_base" --format '{{.Manifest.Digest}}')
-          [[ "$base" =~ ^sha256:[0-9a-f]{64}$ && "$cli" =~ ^sha256:[0-9a-f]{64}$ ]]
+          base=$(python3 -m scripts.ci_base_images "$BASE_IMAGE")
           echo "base=$base" >> "$GITHUB_OUTPUT"
-          echo "digest=$(printf '%s\n' "$base" "$cli" "$(sha256sum libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/UbuntuMirror.Dockerfile scripts/ci_ubuntu_mirror.py)" | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          echo "digest=$(sha256sum scripts/ci_base_images.toml | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
 
       - name: Restore Docker layer cache
         id: docker-cache
@@ -1265,7 +1283,7 @@ jobs:
         with:
           mode: restore
           path: ${{ runner.temp }}/docker-data.tar.zst
-          key: feature-tests-${{ matrix.family }}-v2-${{ steps.image-bases.outputs.digest }}-${{ hashFiles('libs/vs-agent/src/vs_agent/images/features/**', 'libs/vs-sandbox/src/vs_sandbox/features/**', 'libs/vs-runtime/src/vs_runtime/features/**', 'libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/**', 'scripts/ci_docker_data_root.sh', 'scripts/ci_ubuntu_mirror.py', 'libs/vs-sandbox/src/vs_sandbox/feature_dockerfile.py', 'scripts/ci_image_cache.py', 'scripts/ci_registry_image_cache.sh', '.github/actions/docker-image-cache/action.yml', '.github/workflows/test.yml') }}
+          key: feature-tests-${{ matrix.family }}-v2-${{ steps.image-bases.outputs.digest }}-${{ hashFiles('libs/vs-agent/src/vs_agent/images/features/**', 'libs/vs-sandbox/src/vs_sandbox/features/**', 'libs/vs-runtime/src/vs_runtime/features/**', 'libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/**', 'scripts/ci_docker_data_root.sh', 'scripts/ci_ubuntu_mirror.py', 'libs/vs-sandbox/src/vs_sandbox/feature_dockerfile.py', 'scripts/ci_image_cache.py', 'scripts/ci_registry_image_cache.sh', 'scripts/ci_registry_image_cache.py', 'scripts/ci_base_images.toml', 'scripts/ci_base_images.py', '.github/actions/docker-image-cache/action.yml', '.github/workflows/test.yml') }}
           restore-keys: |
             feature-tests-${{ matrix.family }}-v2-${{ steps.image-bases.outputs.digest }}-
 
@@ -1277,9 +1295,8 @@ jobs:
       - name: Use the runner's Ubuntu archive mirror
         if: matrix.family == 'cuda-ubuntu'
         env:
-          BASE_IMAGE: ${{ matrix.base }}@${{ steps.image-bases.outputs.base }}
+          BASE_IMAGE: ${{ steps.image-bases.outputs.base }}
         run: |
-          if docker image inspect vibesys-feature-base:ci >/dev/null 2>&1; then exit 0; fi
           mirror=$(python3 scripts/ci_ubuntu_mirror.py)
           echo "Feature apt mirror: ${mirror}"
           docker build --tag vibesys-feature-base:ci \
@@ -1288,9 +1305,17 @@ jobs:
             --file libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/UbuntuMirror.Dockerfile \
             libs/vs-sandbox/src/vs_sandbox/devcontainer-cli
 
+      # The devcontainer CLI container has no registry credentials, so the host
+      # pulls a mirrored base first and its builds find the image locally.
+      - name: Pull the Feature base image on the host
+        if: matrix.family != 'cuda-ubuntu'
+        env:
+          BASE_IMAGE: ${{ steps.image-bases.outputs.base }}
+        run: timeout --kill-after=5s 300s docker pull "$BASE_IMAGE"
+
       - name: Test every Feature on ${{ matrix.base }}
         env:
-          FEATURE_BASE: ${{ matrix.family == 'cuda-ubuntu' && 'vibesys-feature-base:ci' || format('{0}@{1}', matrix.base, steps.image-bases.outputs.base) }}
+          FEATURE_BASE: ${{ matrix.family == 'cuda-ubuntu' && 'vibesys-feature-base:ci' || steps.image-bases.outputs.base }}
         run: >-
           libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/test_features.sh "$FEATURE_BASE"
           libs/vs-sandbox/src/vs_sandbox/features
@@ -1299,7 +1324,11 @@ jobs:
 
       - name: Snapshot Docker layer cache
         if: steps.docker-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-        run: ./scripts/ci_docker_data_root.sh snapshot "${{ runner.temp }}/docker-data.tar.zst"
+        run: |
+          if ! ./scripts/ci_docker_data_root.sh snapshot "${{ runner.temp }}/docker-data.tar.zst"; then
+            echo '::warning::Docker cache snapshot failed; skipping publication'
+            rm -f "${{ runner.temp }}/docker-data.tar.zst"
+          fi
 
       - name: Save Docker layer cache
         if: steps.docker-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)

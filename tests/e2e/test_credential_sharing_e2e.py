@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 
 import agentshim
 import pytest
+from scripts.ci_base_images import base_image
 
 from vs_agent.api import auth_bind_mounts, auth_copy_paths
 from vs_agent.api.images import agent_image
@@ -43,7 +44,7 @@ pytestmark = pytest.mark.e2e
 _ENABLE_ENV = "VIBESYS_E2E_DOCKER"
 #: Overridable so a host whose Docker store lacks the default base can use
 #: another Debian-derived image.
-_BASE_IMAGE = os.environ.get("VIBESYS_E2E_DOCKER_BASE_IMAGE", "python:3.12-bookworm")
+_BASE_IMAGE = os.environ.get("VIBESYS_E2E_DOCKER_BASE_IMAGE", base_image("python:3.12-bookworm"))
 _BUILD_TIMEOUT_S = 900.0
 _PROVIDER = "claude"
 

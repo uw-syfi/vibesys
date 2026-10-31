@@ -25,6 +25,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, cast
 
+from scripts.ci_base_images import base_image
 from tests.slurm_cluster.cluster import SlurmCluster, build_image, docker, wait_until
 
 from vibesys.run.environment import open_run_environment
@@ -78,7 +79,9 @@ CONTAINER_TMP = "/tmp"  # noqa: S108  # lint-waiver: LW-960011 [S108]; the frame
 def build_agent_image() -> str:
     """Build the agent test image; return its immutable image id."""
     tag = build_image(
-        dockerfile="agent.Dockerfile", tag_prefix="vibesys-slurm-test-agent", build_args={}
+        dockerfile="agent.Dockerfile",
+        tag_prefix="vibesys-slurm-test-agent",
+        build_args={"BASE_IMAGE": base_image("python:3.12-slim")},
     )
     return docker("image", "inspect", "--format", "{{.Id}}", tag).stdout.strip()
 
@@ -321,7 +324,7 @@ def make_request(
             ComputeBackend.CPU,
             log_dir,
             log=lambda _: None,
-            image="python:3.12-slim",
+            image=base_image("python:3.12-slim"),
             docker=SubprocessDockerCli(
                 processes=OsProcesses(), launcher=SubprocessPipedProcessLauncher()
             ),

@@ -18,6 +18,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+from scripts.ci_base_images import base_image
 from tests.support import run_test_command
 
 from vs_agent.api.images import (
@@ -43,7 +44,7 @@ _ENABLE_ENV = "VIBESYS_E2E_DOCKER"
 #: Base image for the Docker case: small, Debian-derived (the agent layer's
 #: apt step requires it), and already used by ``tests/e2e/test_agent_image_e2e.py``
 #: and the CPU backend, so it and its early layers are typically cached.
-_DOCKER_BASE_IMAGE = "python:3.12-bookworm"
+_DOCKER_BASE_IMAGE = base_image("python:3.12-bookworm")
 _DOCKER_BUILD_TIMEOUT_S = 600.0
 
 

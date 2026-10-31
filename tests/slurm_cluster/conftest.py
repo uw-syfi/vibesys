@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
 import pytest
+from scripts.ci_base_images import base_image
 from tests.slurm_cluster.cluster import (
     SlurmCluster,
     build_image,
@@ -67,7 +68,12 @@ def slurm_cluster(tmp_path_factory: pytest.TempPathFactory) -> Iterator[SlurmClu
     image = build_image(
         dockerfile="Dockerfile",
         tag_prefix="vibesys-slurm-test-cluster",
-        build_args={"USER_NAME": user, "USER_UID": str(os.getuid()), "USER_GID": str(os.getgid())},
+        build_args={
+            "BASE_IMAGE": base_image("ubuntu:24.04"),
+            "USER_NAME": user,
+            "USER_UID": str(os.getuid()),
+            "USER_GID": str(os.getgid()),
+        },
     )
     root = tmp_path_factory.mktemp("cluster-fs")
     cluster = start_cluster(root, image=image)
