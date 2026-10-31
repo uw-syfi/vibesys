@@ -95,9 +95,11 @@ test('property: a window that joins at any point is told the step the others wer
   );
   await fc.assert(
     fc.asyncProperty(
-      fc.array(OPS, {minLength: 1, maxLength: 30}),
-      fc.nat({max: 30}),
-      async (ops, joinAt) => {
+      // The window joins at one of the operations: a join point past the last would never join.
+      fc
+        .array(OPS, {minLength: 1, maxLength: 30})
+        .chain(ops => fc.tuple(fc.constant(ops), fc.nat({max: ops.length - 1}))),
+      async ([ops, joinAt]) => {
         const {gateway, clock, runs, listings, release} = watching();
         const late: HostListing[] = [];
         let releaseLate: (() => void) | null = null;
