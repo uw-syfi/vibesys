@@ -23,7 +23,7 @@ import vs_core.api as core
 from vs_core.api.recovery import RunRest, Wait, at_rest, decide
 from vs_sim.api.testing import examples
 
-from .recovery_loop import MOVES, Loop, Move, play
+from .recovery_loop import MOVES, Loop, Move, opens_no_unserved_step, play
 from .recovery_worlds import World, build, worlds
 from .test_measurements import requested
 
@@ -58,11 +58,29 @@ def world_loop(world: World) -> Loop:
     return loop
 
 
-def stop_and_end(loop: Loop) -> None:
-    """Stop the run by cancel, and let the loop that cancels and settles run, with no time passing."""
+def stop_and_end(loop: Loop, late: list[int], *, by_search: bool) -> None:
+    """Stop the run by cancel, and let the loop that cancels and settles run, with no time passing.
+
+    The operator stops a run by a control; the search, which a paused run does not hear, ends one
+    that is running with a finish that cancels. A
+    runner whose step was running when the stop came may report before the loop cancels it
+    (``late``: which steps), and the report is a finish the run takes while it ends.
+    """
     result = core.RunResultProposal(outcome="cancelled", reason="operator")
-    control = loop.control("stop", mode=core.StopMode.CANCEL)
-    loop.offer(core.RunControlEvent(control=control, now_at=loop.clock, result=result))
+    if by_search and loop.state.run.status is core.RunStatus.RUNNING:
+        finish = core.Finish(
+            decision_id=core.DecisionId(root="finish"),
+            scope=core.Scope(owner=loop.state.run.run_id, generation=loop.state.run.generation),
+            mode="cancel",
+            result=result,
+        )
+        loop.offer(core.DecisionSubmitted(decision=finish, expected_revision=loop.state.revision))
+    else:
+        control = loop.control("stop", mode=core.StopMode.CANCEL)
+        loop.offer(core.RunControlEvent(control=control, now_at=loop.clock, result=result))
+    for index in late:
+        loop.finish_running(index)
+    opens_no_unserved_step(loop)
     clock = loop.clock
     for _ in range(_SPENT):
         actions = decide(loop.state, loop.clock)
@@ -79,15 +97,19 @@ def stop_and_end(loop: Loop) -> None:
 _FINISHED = [("tick", None), ("finish", 0)]
 """A job step ran, and reported its job released."""
 
+_LATE = st.lists(st.integers(0, 3), max_size=3)
 
-@example(moves=_FINISHED, lag=False)
-@example(moves=[("tick", None), ("finish", 0), ("tock", 3.0)], lag=False)
-@example(moves=[("tick", None)], lag=False)
-@example(moves=[], lag=True)
+
+@example(moves=_FINISHED, lag=False, late=[], by_search=False)
+@example(moves=[("tick", None), ("finish", 0), ("tock", 3.0)], lag=False, late=[], by_search=False)
+@example(moves=[("tick", None)], lag=False, late=[0], by_search=True)
+@example(moves=[("tick", None)], lag=False, late=[0], by_search=False)
+@example(moves=[("tick", None)], lag=False, late=[], by_search=True)
+@example(moves=[], lag=True, late=[], by_search=False)
 @settings(max_examples=examples(pr=10, nightly=300), deadline=None)
-@given(moves=_STEADY, lag=st.booleans())
+@given(moves=_STEADY, lag=st.booleans(), late=_LATE, by_search=st.booleans())
 def test_a_cancelled_run_holding_a_measurement_ends_with_no_time_passing(
-    moves: list[Move], *, lag: bool
+    moves: list[Move], late: list[int], *, lag: bool, by_search: bool
 ) -> None:
     loop = measurement_loop()
     for move in moves:
@@ -95,13 +117,13 @@ def test_a_cancelled_run_holding_a_measurement_ends_with_no_time_passing(
         if not lag or move[0] == "tick":
             loop.tick()
     if loop.state.run.result is None:
-        stop_and_end(loop)
+        stop_and_end(loop, late, by_search=by_search)
 
 
 @settings(max_examples=examples(pr=10, nightly=300), deadline=None)
-@given(world=worlds(), moves=_STEADY, lag=st.booleans())
+@given(world=worlds(), moves=_STEADY, lag=st.booleans(), late=_LATE, by_search=st.booleans())
 def test_a_cancelled_run_of_any_world_ends_with_no_time_passing(
-    world: World, moves: list[Move], *, lag: bool
+    world: World, moves: list[Move], late: list[int], *, lag: bool, by_search: bool
 ) -> None:
     loop = world_loop(world)
     for move in moves:
@@ -109,4 +131,4 @@ def test_a_cancelled_run_of_any_world_ends_with_no_time_passing(
         if not lag or move[0] == "tick":
             loop.tick()
     if loop.state.run.result is None:
-        stop_and_end(loop)
+        stop_and_end(loop, late, by_search=by_search)

@@ -1059,7 +1059,10 @@ These are facts the implementation must settle, found while checking the design 
 - **A job step's report is its job's last observation.** A job runner answers a measurement
   submission with the job's terminal observation, evidence and facts, and no poll follows. Core takes
   that report as the job's observation too (`_step_attempts.finish`), so a run that is ending closes
-  over a job it saw end, instead of waiting for a poll that a closing run does not ask for.
+  over a job it saw end, instead of waiting for a poll that a closing run does not ask for. A run that is
+  ending asks to terminate the jobs it holds as the report lands, before the job's observation follows the
+  report: a job its own report ended is not terminated (`_measurements._born_ended`), because the
+  inspection core would open for an unconfirmed job is a step no runner serves.
 - **A job step is held for the queue budget before its limit counts.** A job's limit counts from its start,
   and queue time (the scheduler's, or the root proof a run environment holds Slurm work for) is not the
   work's. Core sees a step's job only at its end, so no fact credits that time as the ledger did
