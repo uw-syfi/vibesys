@@ -1,6 +1,8 @@
-import {Children, type JSX, type ReactNode} from 'react';
-import {Icon} from './icon.js';
+import {Children, type JSX, type ReactNode, useMemo} from 'react';
+import {Collapsible} from './collapsible.js';
+import {Icon, type IconName} from './icon.js';
 import {Markdown} from './markdown.js';
+import {markdownToPlain} from './markdown-plain.js';
 import type {ToolState} from './message.js';
 import {NewBelow} from './new-below.js';
 import {InSlot, useSlot, useWindowed} from './windowing.js';
@@ -10,7 +12,7 @@ const ESTIMATED_BLOCK = 56;
 
 /**
  * A turn read as a narrative: `Thought`, `Said` and `ToolGroup` blocks in time order, the words
- * first and the tool calls folded between them. It scrolls inside itself (`size` `fill` takes the
+ * first and the tool calls grouped between them. It scrolls inside itself (`size` `fill` takes the
  * height of its container) and draws only the blocks near the visible part, between spacers as
  * tall as the rest, so a turn of any length costs a screenful. Give each block a stable `key`.
  * While following the end (`start` `end`), scrolling up stops following and shows a "New below"
@@ -62,11 +64,56 @@ export function Narrative(props: {
   );
 }
 
-/** The thinking, as Markdown: muted and italic, so it stands apart from what was said. */
-export function Thought(props: {readonly text: string}): JSX.Element {
+/** How much of a thought the closed line reads: a few hundred characters is far more than a line shows. */
+const PREVIEW_CHARS = 400;
+
+/**
+ * The closed line's preview: the start of the text as plain words, its blocks (a bold title, then a
+ * sentence) told apart by a dot. Only the start is converted, so a long thought costs no more.
+ */
+function previewOf(text: string): string {
+  const cut = text.slice(0, PREVIEW_CHARS);
+  // Do not end on the first half of a character the cut split in two.
+  const whole = /[\ud800-\udbff]$/.test(cut) ? cut.slice(0, -1) : cut;
+  return whole
+    .split(/\n[ \t]*\n/)
+    .map(markdownToPlain)
+    .filter(part => part !== '')
+    .join(' · ');
+}
+
+/**
+ * The thinking, as Markdown under a "Thought" line with a brain icon: muted and italic, so it
+ * stands apart from what was said. Closed, the line carries a one-line preview of the text. While
+ * it is still being written (`live`) the line reads "Thinking" and its icon pulses. The caller
+ * owns whether it is open, as for `ToolGroup`.
+ */
+export function Thought(props: {
+  readonly text: string;
+  readonly live?: boolean;
+  readonly open: boolean;
+  readonly toggle: (open: boolean) => void;
+}): JSX.Element {
+  const preview = useMemo(() => previewOf(props.text), [props.text]);
   return (
-    <div ref={useSlot()?.measure} className="vs-thought">
-      <Markdown text={props.text} />
+    <div
+      ref={useSlot()?.measure}
+      className="vs-thought"
+      data-live={props.live === true || undefined}
+    >
+      <Collapsible
+        label={props.live === true ? 'Thinking' : 'Thought'}
+        leading={
+          <span className="vs-thought-icon">
+            <Icon name="brain" />
+          </span>
+        }
+        {...(props.open || preview === '' ? {} : {summary: preview})}
+        open={props.open}
+        toggle={props.toggle}
+      >
+        <Markdown text={props.text} />
+      </Collapsible>
     </div>
   );
 }
@@ -86,10 +133,21 @@ export interface ToolLine {
   readonly name: string;
   readonly line: string;
   readonly outcome?: string;
+  /** When in the turn the call was made, as the row writes it (`+1m 17s`). */
+  readonly time?: string;
+  /** What the time means, for a reader who hovers it. */
+  readonly timeTitle?: string;
   readonly state: ToolState;
   readonly selected?: boolean;
   readonly press: () => void;
 }
+
+/** The icon and the word that say where a call stands. */
+const STATE: Readonly<Record<ToolState, {readonly icon: IconName; readonly word: string}>> = {
+  pending: {icon: 'wrench', word: 'In progress'},
+  ok: {icon: 'check', word: 'Done'},
+  failed: {icon: 'alert', word: 'Failed'},
+};
 
 function toolWords(tool: ToolLine): string {
   return `${tool.name} ${tool.line}${tool.outcome === undefined ? '' : ` (${tool.outcome})`}`;
@@ -97,6 +155,7 @@ function toolWords(tool: ToolLine): string {
 
 function ToolRow(props: {readonly tool: ToolLine}): JSX.Element {
   const {tool} = props;
+  const state = STATE[tool.state];
   return (
     <button
       type="button"
@@ -106,19 +165,31 @@ function ToolRow(props: {readonly tool: ToolLine}): JSX.Element {
       aria-current={tool.selected === true ? 'true' : undefined}
       onClick={tool.press}
     >
+      <span className="vs-toolgroup-status">
+        <Icon name={state.icon} label={state.word} />
+      </span>
       <span className="vs-toolgroup-name">{tool.name}</span>
       <span className="vs-toolgroup-line">{tool.line}</span>
       {tool.outcome === undefined ? null : (
         <span className="vs-toolgroup-outcome">{tool.outcome}</span>
+      )}
+      {tool.time === undefined ? null : (
+        <span
+          className="vs-toolgroup-time"
+          {...(tool.timeTitle === undefined ? {} : {title: tool.timeTitle})}
+        >
+          {tool.time}
+        </span>
       )}
     </button>
   );
 }
 
 /**
- * The tool calls made between two paragraphs, as one dim line ("2 tools · read …") that opens in
- * place to one row per call. A failed call stays visible as its own red row while the group is
- * closed. Pressing a row opens that call.
+ * The tool calls made between two paragraphs: a head ("2 tools") that opens in place to one row
+ * per call, each with a status icon, a name chip, its subject, its outcome and when in the turn it
+ * ran. Closed, the head lists the calls in one dim line and a failed call stays visible as its
+ * own red row. Pressing a row opens that call. The caller owns whether the group is open.
  */
 export function ToolGroup(props: {
   readonly tools: readonly ToolLine[];
@@ -139,7 +210,9 @@ export function ToolGroup(props: {
       >
         <Icon name={props.open ? 'chevron-down' : 'chevron-right'} />
         <span className="vs-toolgroup-count">{count}</span>
-        <span className="vs-toolgroup-line">{props.tools.map(toolWords).join(', ')}</span>
+        {props.open ? null : (
+          <span className="vs-toolgroup-line">{props.tools.map(toolWords).join(', ')}</span>
+        )}
       </button>
       {(props.open ? props.tools : failed).map(tool => (
         <ToolRow key={tool.id} tool={tool} />

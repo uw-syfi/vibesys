@@ -120,6 +120,39 @@ export function turnNarrative(
   return transcript === null ? null : narrativeOf(transcript.rows);
 }
 
+/** A group of this many calls or fewer starts open, so a short run of calls reads as rows. */
+export const GROUP_OPEN_LIMIT = 3;
+
+/** How a thought or a tool group starts: still being written, and open or closed. */
+export interface BlockStart {
+  readonly live: boolean;
+  readonly open: boolean;
+}
+
+/**
+ * How each thought and tool group of `narrative` starts, before the reader opens or closes any.
+ * While the turn is `live`, its last block, if it is a thought, is still being written: it reads
+ * "Thinking" and starts open. Every other thought (and all of them once the turn is over) starts
+ * closed to its preview. A group of more than `GROUP_OPEN_LIMIT` calls starts closed, its failed
+ * calls still shown; a shorter one starts open.
+ */
+export function blockStarts(
+  narrative: TurnNarrative,
+  live: boolean,
+): ReadonlyMap<string, BlockStart> {
+  const last = narrative.blocks.at(-1);
+  const starts = new Map<string, BlockStart>();
+  for (const block of narrative.blocks) {
+    if (block.kind === 'thought') {
+      const writing = live && block === last;
+      starts.set(block.id, {live: writing, open: writing});
+    } else if (block.kind === 'tools') {
+      starts.set(block.id, {live: false, open: block.tools.length <= GROUP_OPEN_LIMIT});
+    }
+  }
+  return starts;
+}
+
 /** The tool call `item` in `narrative`, and the block that holds it. */
 export function toolOf(
   narrative: TurnNarrative,
@@ -234,23 +267,35 @@ export function gateView(
   };
 }
 
-/** One tool call in full as the item pane reads it, in order: input, then result. */
+/**
+ * One tool call in full as the item pane reads it, in order: its input, then its result. A
+ * command's result comes as its two streams (without the line break that ends each, LF or CRLF), each under its
+ * own title, stderr in the error color; any other result as one section, titled "Error" when the call failed.
+ */
 export function itemLines(tool: ToolRow): GateLine[] {
   const section = (title: string, text: string | null, stream: 'out' | 'err'): GateLine[] =>
     text === null || text === ''
       ? []
-      : [{text: title, stream: 'out'}, ...text.split('\n').map(line => ({text: line, stream}))];
-  return [
-    ...section('Input', tool.input, 'out'),
-    ...(tool.input !== null && tool.output !== null && tool.output !== ''
-      ? [{text: '', stream: 'out' as const}]
-      : []),
-    ...section(
-      tool.state === 'failed' ? 'Error' : 'Result',
-      tool.output,
-      tool.state === 'failed' ? 'err' : 'out',
-    ),
-  ];
+      : [{text: title, stream: 'out'}, ...text.split(/\r?\n/).map(line => ({text: line, stream}))];
+  const {command} = tool;
+  const sections =
+    command === undefined
+      ? [
+          section('Input', tool.input, 'out'),
+          section(
+            tool.state === 'failed' ? 'Error' : 'Result',
+            tool.output,
+            tool.state === 'failed' ? 'err' : 'out',
+          ),
+        ]
+      : [
+          section('Input', tool.input, 'out'),
+          section('Stdout', command.stdout.replace(/\r?\n$/, ''), 'out'),
+          section('Stderr', command.stderr.replace(/\r?\n$/, ''), 'err'),
+        ];
+  return sections
+    .filter(each => each.length > 0)
+    .flatMap((each, index) => (index === 0 ? each : [{text: '', stream: 'out' as const}, ...each]));
 }
 
 /**

@@ -10,10 +10,20 @@ import type {CoreState} from '@vibesys/run-state';
 import {type RunTrace, traceSpans} from '@vibesys/run-state/trace';
 import {type TranscriptEntry, transcriptBySpan} from '@vibesys/run-state/transcript';
 import {type ReplyFieldView, replyFields, replyTitle} from './reply-fields.js';
+import {duration} from './span-reading.js';
 import {ended, plain, statusWords, titleOf} from './span-words.js';
 
 /** What a message is: a reply, the thinking behind it, the prompt it answers, or a note. */
 type TurnVoice = 'reply' | 'reasoning' | 'prompt' | 'note';
+
+/** What a command printed and how it ended, as its result reported them in parts. */
+interface CommandOutput {
+  readonly exitCode: number | null;
+  /** How long the command ran, in seconds; null when the result did not say. */
+  readonly seconds: number | null;
+  readonly stdout: string;
+  readonly stderr: string;
+}
 
 /** One row of the turn-by-turn view. */
 export type TurnRow =
@@ -55,6 +65,10 @@ export type TurnRow =
       readonly meta?: string;
       readonly input: string | null;
       readonly output: string | null;
+      /** The result in parts, when it was a command's; `output` is then what the agent was shown. */
+      readonly command?: CommandOutput;
+      /** Seconds into the turn at which the call was made; absent when the entries carry no time. */
+      readonly elapsed?: number;
     };
 
 /** The turns under the selected step: how many there are, and their rows in order. */
@@ -88,9 +102,45 @@ function summaryOf(args: Readonly<Record<string, unknown>> | undefined): string 
   return line.length > SUMMARY_LIMIT ? `${line.slice(0, SUMMARY_LIMIT - 1)}…` : line;
 }
 
+/** A command's run time: tenths of a second below ten seconds, then as the screen writes any duration. */
+function ranFor(seconds: number): string {
+  const tenths = Math.round(Math.max(0, seconds) * 10) / 10;
+  return tenths < 10 ? `${tenths.toFixed(1)}s` : duration(Math.round(seconds));
+}
+
+/** The result of a command as its parts, or undefined for any other result. */
+function commandOf(entry: TranscriptEntry): CommandOutput | undefined {
+  const payload = entry.toolResult?.payload;
+  if (payload?.kind !== 'command') return undefined;
+  return {
+    exitCode: payload.exit_code ?? null,
+    seconds: payload.duration ?? null,
+    stdout: payload.stdout,
+    stderr: payload.stderr,
+  };
+}
+
+/**
+ * How a command ended in a word or two: `exit 1 · 2.3s`. A zero exit is the ordinary end, so it is
+ * not said (the row already reads as done); undefined when there is neither a failure code nor a time.
+ */
+function endingOf(command: CommandOutput): string | undefined {
+  const parts = [
+    ...(command.exitCode === null || command.exitCode === 0 ? [] : [`exit ${command.exitCode}`]),
+    ...(command.seconds === null ? [] : [ranFor(command.seconds)]),
+  ];
+  return parts.length === 0 ? undefined : parts.join(' · ');
+}
+
 /** The size of a tool's result in a word or two, or why it has none. */
-function metaOf(state: 'pending' | 'ok' | 'failed', output: string | null): string | undefined {
+function metaOf(
+  state: 'pending' | 'ok' | 'failed',
+  output: string | null,
+  command: CommandOutput | undefined,
+): string | undefined {
   if (state === 'pending') return undefined;
+  const ending = command === undefined ? undefined : endingOf(command);
+  if (ending !== undefined) return ending;
   if (output === null) return 'no result';
   if (output === '') return 'no output';
   const lines = output.split('\n').length;
@@ -101,18 +151,43 @@ function metaOf(state: 'pending' | 'ok' | 'failed', output: string | null): stri
   return `${prefix}${size}`;
 }
 
-function toolRow(entry: TranscriptEntry, turnEnded: boolean): TurnRow {
+/**
+ * When the turn began, in epoch milliseconds, as the run recorded it for the turn; undefined when
+ * it recorded none (the reader then counts from the turn's first timed entry).
+ */
+function turnStartOf(core: CoreState, span: string): number | undefined {
+  const began = core.usageRecords.find(record => record.span_id === span)?.started_at;
+  const at = began === null || began === undefined ? Number.NaN : Date.parse(began);
+  return Number.isFinite(at) ? at : undefined;
+}
+
+/**
+ * Seconds from the turn's start to the entry's event, never negative: it is the entry's own time, so
+ * where events were stamped in another order than they arrived it can go back along the turn. None
+ * when the entry has no time or the turn has no origin.
+ */
+function elapsedOf(entry: TranscriptEntry, origin: number | undefined): {elapsed?: number} {
+  if (entry.at === undefined || origin === undefined) return {};
+  return {elapsed: Math.max(0, (entry.at - origin) / 1000)};
+}
+
+/** The tool's name: the typed call's, else the first line of the legacy call text. */
+function nameOf(entry: TranscriptEntry): string {
+  if (entry.toolName !== undefined) return entry.toolName;
+  return (entry.toolCall ?? '').replace(/^\s*→\s*/, '').split('\n', 1)[0] || 'Tool';
+}
+
+function toolRow(entry: TranscriptEntry, turnEnded: boolean, origin: number | undefined): TurnRow {
   const args = entry.toolArguments;
   const settled = entry.toolResult !== undefined;
   const failed = entry.tone === 'failure';
   const typed = entry.toolName !== undefined;
-  const name = typed
-    ? (entry.toolName ?? 'Tool')
-    : (entry.toolCall ?? '').replace(/^\s*→\s*/, '').split('\n', 1)[0] || 'Tool';
+  const name = nameOf(entry);
   const output = typed ? (settled ? (entry.toolResult?.content ?? '') : null) : entry.content;
   const summary = summaryOf(args);
   const state = failed ? 'failed' : settled || turnEnded || !typed ? 'ok' : 'pending';
-  const meta = metaOf(state, output);
+  const command = commandOf(entry);
+  const meta = metaOf(state, output, command);
   return {
     kind: 'tool',
     id: entry.id,
@@ -122,6 +197,8 @@ function toolRow(entry: TranscriptEntry, turnEnded: boolean): TurnRow {
     ...(meta === undefined ? {} : {meta}),
     input: args === undefined ? null : JSON.stringify(args, null, 2),
     output,
+    ...(command === undefined ? {} : {command}),
+    ...elapsedOf(entry, origin),
   };
 }
 
@@ -155,7 +232,7 @@ function replyRow(entry: TranscriptEntry, author: string): TurnRow {
   };
 }
 
-function rowOf(entry: TranscriptEntry, turnEnded: boolean): TurnRow {
+function rowOf(entry: TranscriptEntry, turnEnded: boolean, origin: number | undefined): TurnRow {
   const agent = entry.agentKind === undefined ? 'Agent' : roleName(entry.agentKind);
   switch (entry.kind) {
     case 'assistant':
@@ -167,7 +244,7 @@ function rowOf(entry: TranscriptEntry, turnEnded: boolean): TurnRow {
     case 'reply':
       return replyRow(entry, agent);
     case 'tool':
-      return toolRow(entry, turnEnded);
+      return toolRow(entry, turnEnded, origin);
     case 'diagnostic':
     case 'subprocess':
     case 'status':
@@ -204,7 +281,9 @@ export function turnTranscript(
       title: titleOf(span),
       detail: statusWords(span.status).label,
     });
-    for (const entry of own) rows.push(rowOf(entry, ended(span)));
+    // A turn's clock starts when the run says the turn began, else at its first timed entry.
+    const origin = turnStartOf(core, span.id) ?? own.find(entry => entry.at !== undefined)?.at;
+    for (const entry of own) rows.push(rowOf(entry, ended(span), origin));
   }
   return {turns, rows};
 }

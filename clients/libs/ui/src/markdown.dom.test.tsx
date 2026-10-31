@@ -165,7 +165,7 @@ describe('Markdown', () => {
   test('Thought, Said, replies and reasoning read as Markdown; prompts stay plain', async () => {
     const container = await mount(
       <>
-        <Thought text="**title**" />
+        <Thought text="**title**" open toggle={noop} />
         <Said text="- item" />
         <Message author="a" variant="reply" text="- m1" open toggle={noop} />
         <Message author="a" variant="prompt" text="- raw **p**" open toggle={noop} />

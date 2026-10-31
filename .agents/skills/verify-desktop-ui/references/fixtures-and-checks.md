@@ -14,8 +14,9 @@ key, an event the protocol rejects, a sequence that does not increase.
 
 The committed set covers long titles, every failure reason, retries,
 continuation rounds, ideas on non-input bases, a live run with a reconnect, a
-finished run, the desktop shell's fake run, and, generated and not committed, 600
-ideas over 14 days. `fixtureNamed` gives one by name.
+finished run, an agent turn at realistic size (`agent-turn-rich`: long reasoning, thirty
+tool calls, a failed command, an edit, a Markdown answer, and a turn still thinking), the
+desktop shell's fake run, and 600 ideas over 14 days. `fixtureNamed` gives one by name.
 
 ## Add a case
 
