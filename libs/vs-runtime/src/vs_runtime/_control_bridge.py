@@ -798,7 +798,7 @@ class RunControlBridge:
             case ResumeRequest():
                 # Core records a capacity wait too, so the entry settles once core holds it.
                 # ``_submitted_request`` asked core's rule first, so this is never refused.
-                return self._record_pause(core, now_at, _pause_change(request), events)
+                return self._record_pause(core, now_at, _resume_change(request), events)
             case SteerRequest():
                 # Applied now, or queued earlier through the socket under the same id.
                 self._take_steers(core, now_at, events)
@@ -857,7 +857,7 @@ class RunControlBridge:
             case PauseRequest() | PauseNowRequest():
                 check = _operator_pause(request, None).control(pending)
             case ResumeRequest():
-                check = _pause_change(request).control(pending)
+                check = _resume_change(request).control(pending)
             case SteerRequest() | WithdrawRequest():
                 # Core takes a steer and a withdrawal under the same rule.
                 check = ControlInput(control_id=pending, action="steer")
@@ -1010,7 +1010,7 @@ class RunControlBridge:
         self._asked[control.control_id] = change
         if change.text is not None and control.artifact is not None:
             self._steer.put(control.artifact, change.text)
-        return RunControlEvent(control=control, now_at=now_at)
+        return RunControlEvent(control=control, now_at=now_at, drain_seconds=change.drain_seconds)
 
 
 class IntentJournal(Protocol):
@@ -1067,6 +1067,7 @@ class _Change:
     fallback: bool = False
     capacity_wait_stands: bool = False
     drain_seconds: float | None = None
+    """How long the pause this control records waits for running requests (``RunControlEvent``)."""
     origin: str | None = None
     """The id of the operator control the channel says asked for this pause change; it can
     differ from ``control_id``, the identity core records (a re-recorded hold has none)."""
@@ -1113,7 +1114,6 @@ class _Change:
             when=self.when,
             fallback=self.fallback,
             capacity_wait_stands=self.capacity_wait_stands,
-            drain_seconds=self.drain_seconds,
         )
 
 
@@ -1166,10 +1166,7 @@ def _records(control: ControlInput, request: ControlRequest) -> bool:
                 fallback,
             )
         case PauseRequest() | PauseNowRequest():
-            return (
-                control.action == request.action.value
-                and control.drain_seconds == request.drain_seconds
-            )
+            return control.action == request.action.value
         case CancelAttemptRequest() | CancelItemRequest() | SetMaxParallelRequest():
             return records_action(control, request)
 
@@ -1205,15 +1202,8 @@ def _operator_pause(request: PauseRequest | PauseNowRequest, control_id: str | N
     )
 
 
-def _pause_change(request: PauseRequest | ResumeRequest) -> _Change:
-    """The control an operator's pause or resume records."""
-    if isinstance(request, PauseRequest):
-        return _Change(
-            "pause",
-            owner=PauseOwner.OPERATOR,
-            control_id=request.control_id,
-            origin=request.control_id,
-        )
+def _resume_change(request: ResumeRequest) -> _Change:
+    """The control an operator's resume records."""
     return _Change(
         "resume",
         when=request.when,

@@ -25,6 +25,7 @@ from vs_runtime._fake_step_runner import (
     LeftoverWorkError,
     RunnerCall,
     RunnerMethod,
+    StepTagMismatchError,
     finished_result,
 )
 from vs_runtime._run_clocks import CrashableRunClock, ProbedRunClock
@@ -164,6 +165,7 @@ __all__ = [
     "ScriptedHost",
     "StepRunnerContract",
     "StepRunnerUnderTest",
+    "StepTagMismatchError",
     "TranslatorFactory",
     "UnsafeControlSchemaError",
     "control_schema_fields",

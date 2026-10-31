@@ -3,7 +3,17 @@
 Design: ``docs/contributing/run-recovery.md``. Nothing here performs I/O.
 """
 
-from vs_core._actions import Action, Cancel, End, Run, Settle, Wait
+from vs_core._actions import (
+    Action,
+    Cancel,
+    End,
+    Run,
+    RunRest,
+    Settle,
+    Wait,
+    at_rest,
+    interruption_of,
+)
 from vs_core._decide import decide, fold
 from vs_core._step_log import (
     finished_message,
@@ -16,6 +26,7 @@ from vs_core.types.steps import (
     CancelReason,
     Failed,
     Finished,
+    Interruption,
     InterruptPolicy,
     StepAttempts,
     StepResult,
@@ -31,16 +42,20 @@ __all__ = [
     "Failed",
     "Finished",
     "InterruptPolicy",
+    "Interruption",
     "Run",
+    "RunRest",
     "Settle",
     "StepAttempts",
     "StepResult",
     "StepsState",
     "Wait",
+    "at_rest",
     "decide",
     "finished_message",
     "fold",
     "input_message",
     "interrupted_message",
+    "interruption_of",
     "started_message",
 ]
