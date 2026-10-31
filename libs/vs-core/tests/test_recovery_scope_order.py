@@ -22,6 +22,7 @@ from hypothesis import strategies as st
 
 import vs_core.api as core
 from vs_core.api.recovery import (
+    Action,
     Cancel,
     Cancelled,
     CancelReason,
@@ -426,7 +427,7 @@ def closing(specs: list[Spec], index: int) -> bool:
     )
 
 
-def actions_of(state: core.CoreState) -> dict[core.RequestId, core.Action]:
+def actions_of(state: core.CoreState) -> dict[core.RequestId, Action]:
     return {
         action.tag: action
         for action in decide(state, 1.0)
@@ -434,7 +435,7 @@ def actions_of(state: core.CoreState) -> dict[core.RequestId, core.Action]:
     }
 
 
-def is_withdrawal(action: core.Action | None) -> bool:
+def is_withdrawal(action: Action | None) -> bool:
     match action:
         case Cancel(reason=CancelReason.WITHDRAWN):
             return True

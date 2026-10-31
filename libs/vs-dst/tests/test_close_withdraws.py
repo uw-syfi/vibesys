@@ -11,8 +11,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
+from protobuf import Oneof
 
 from vs_core.api import (
     ArtifactId,
@@ -33,6 +35,7 @@ from vs_core.api import (
 )
 from vs_core.flows import search
 from vs_dst.api import RunSetup, StepLoopHosting, simulate
+from vs_proto.api import StepCancelReason
 from vs_runtime.api.testing import Launch
 from vs_sim.api.testing import examples
 
@@ -40,7 +43,7 @@ from ._tiny import BASELINE, TinyWorld
 
 if TYPE_CHECKING:
     from vs_core.api import Request
-    from vs_proto.api import Record, StepFinished, StepStarted
+    from vs_proto.api import Record, StepStarted
 
 STEP_LOOP = StepLoopHosting()
 
@@ -102,22 +105,27 @@ class HeldWorld(TinyWorld):
         return isinstance(request, SubmitMeasurement)
 
 
-def bodies(records: tuple[Record, ...], field: str) -> list[StepStarted | StepFinished]:
-    return [r.body.value for r in records if r.body is not None and r.body.field == field]
+def measurement_starts(records: tuple[Record, ...]) -> list[tuple[Record, StepStarted]]:
+    """Each start of a measurement step, with the record that holds it."""
+    found = []
+    for record in records:
+        match record.body:
+            case Oneof(field="step_started", value=started) if started.tag.startswith(
+                "measurement:"
+            ):
+                found.append((record, started))
+    return found
 
 
-def measurement_of(records: tuple[Record, ...]) -> tuple[Record, StepFinished]:
-    """The measurement step: the record of its first start, and how it ended (once)."""
-    starts = [
-        r
-        for r in records
-        if r.body is not None
-        and r.body.field == "step_started"
-        and r.body.value.tag.startswith("measurement:")
-    ]
-    assert starts[0].body is not None
-    (finished,) = [s for s in bodies(records, "step_finished") if s.tag == starts[0].body.value.tag]
-    return starts[0], finished
+def result_of(records: tuple[Record, ...], tag: str) -> object:
+    """How the step ``tag`` ended, which a log records once."""
+    results = []
+    for record in records:
+        match record.body:
+            case Oneof(field="step_finished", value=finished) if finished.tag == tag:
+                results.append(finished.result)
+    (result,) = results
+    return result
 
 
 def ended_at(records: tuple[Record, ...]) -> float:
@@ -127,13 +135,15 @@ def ended_at(records: tuple[Record, ...]) -> float:
 
 def withdrawn_long_before_its_limit(records: tuple[Record, ...]) -> float:
     """Assert the measurement was withdrawn and the run ended: how long after its start it took."""
-    first, finished = measurement_of(records)
-    assert first.body is not None
+    ((first, started), *_) = measurement_starts(records)
     assert first.clock is not None
-    assert finished.result.field == "cancelled"
-    assert finished.result.value.name == "WITHDRAWN"
+    match result_of(records, started.tag):
+        case Oneof(field="cancelled", value=reason):
+            assert reason is StepCancelReason.WITHDRAWN
+        case other:
+            pytest.fail(f"the measurement ended with {other}, not withdrawn")
     took = ended_at(records) - first.clock
-    assert took < (first.body.value.deadline_at - first.clock) / 2
+    assert took < (started.deadline_at - first.clock) / 2
     return took
 
 
