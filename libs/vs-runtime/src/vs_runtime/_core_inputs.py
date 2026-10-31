@@ -39,8 +39,8 @@ from vs_core.api.recovery import (
     advance_run_time,
     advance_search,
     checkpoint_search,
-    restore,
 )
+from vs_runtime._saved_run_record import restore_log
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -102,7 +102,7 @@ class SearchRun[S: StrategyState, C]:
     ) -> SearchRun[S, C]:
         """The search as the log's advance records left it; fresh when they hold none."""
         with _search_generators():
-            progress = restore(records, search, registry)
+            progress = restore_log(records, search, registry)
         return cls(search, config, registry, progress)
 
     @property

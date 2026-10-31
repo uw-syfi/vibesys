@@ -2,7 +2,9 @@
 
 from vs_core.api.recovery import OpenStep
 from vs_runtime._core_inputs import Controls, CoreInputs, SearchRun
+from vs_runtime._fold_keeper import CACHE_EVERY, CacheUsed, FoldStart
 from vs_runtime._run_log_step_log import RunLogStepLog, RunLogUncertainError, SearchHearing
+from vs_runtime._saved_run_record import fold_log, restore_log, saved_run_in, snapshot_message
 from vs_runtime._step_loop import (
     Interrupted,
     Recorded,
@@ -25,12 +27,15 @@ from vs_runtime._step_runner import (
 )
 
 __all__ = [
+    "CACHE_EVERY",
     "Adopted",
+    "CacheUsed",
     "CancelSignal",
     "ClearUnavailableError",
     "Cleared",
     "Controls",
     "CoreInputs",
+    "FoldStart",
     "Interrupted",
     "OpenStep",
     "Recorded",
@@ -47,5 +52,9 @@ __all__ = [
     "StepLoopTimingError",
     "StepRecord",
     "StepRunner",
+    "fold_log",
+    "restore_log",
     "run_step_loop",
+    "saved_run_in",
+    "snapshot_message",
 ]

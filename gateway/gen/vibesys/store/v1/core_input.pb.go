@@ -204,6 +204,113 @@ func (x *RunStarted) GetState() []byte {
 	return nil
 }
 
+// CoreSnapshot is the seed of a run that an older version saved in store.json: its core state,
+// the inputs that version had not applied yet, and the search it left, appended once as one
+// record so a crash can never leave one of them without the others. It is the only way a run
+// that began before its log held core's state enters the log, and it is never written for a new
+// run (RunStarted is). It folds as RunStarted does, then applies the inputs in order.
+type CoreSnapshot struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Version of the canonical encoding of state, inputs and held.
+	SchemaVersion uint32 `protobuf:"varint,1,opt,name=schema_version,json=schemaVersion,proto3" json:"schema_version,omitempty"`
+	// Version of the saved run envelope the snapshot was read from, after its own upgrades.
+	EnvelopeVersion uint32 `protobuf:"varint,2,opt,name=envelope_version,json=envelopeVersion,proto3" json:"envelope_version,omitempty"`
+	// The zlib-compressed canonical JSON of the vs_core CoreState the saved run held. A saved
+	// state is megabytes of JSON and a record holds one, so the encoding is compressed.
+	State []byte `protobuf:"bytes,3,opt,name=state,proto3" json:"state,omitempty"`
+	// The canonical JSON of each owner event the saved run had received and not yet applied, in
+	// the order it would have applied them.
+	Inputs [][]byte `protobuf:"bytes,4,rep,name=inputs,proto3" json:"inputs,omitempty"`
+	// The zlib-compressed whole state of the search, in the search driver's own encoding, as a
+	// StrategyAdvanced checkpoint holds it.
+	Strategy []byte `protobuf:"bytes,5,opt,name=strategy,proto3" json:"strategy,omitempty"`
+	// Run-clock times the search had asked to be woken at.
+	Wakes []float64 `protobuf:"fixed64,6,rep,packed,name=wakes,proto3" json:"wakes,omitempty"`
+	// The canonical JSON of the decisions the search had made that core could not take yet.
+	Held          []byte `protobuf:"bytes,7,opt,name=held,proto3" json:"held,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CoreSnapshot) Reset() {
+	*x = CoreSnapshot{}
+	mi := &file_vibesys_store_v1_core_input_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CoreSnapshot) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CoreSnapshot) ProtoMessage() {}
+
+func (x *CoreSnapshot) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_core_input_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CoreSnapshot.ProtoReflect.Descriptor instead.
+func (*CoreSnapshot) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_core_input_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *CoreSnapshot) GetSchemaVersion() uint32 {
+	if x != nil {
+		return x.SchemaVersion
+	}
+	return 0
+}
+
+func (x *CoreSnapshot) GetEnvelopeVersion() uint32 {
+	if x != nil {
+		return x.EnvelopeVersion
+	}
+	return 0
+}
+
+func (x *CoreSnapshot) GetState() []byte {
+	if x != nil {
+		return x.State
+	}
+	return nil
+}
+
+func (x *CoreSnapshot) GetInputs() [][]byte {
+	if x != nil {
+		return x.Inputs
+	}
+	return nil
+}
+
+func (x *CoreSnapshot) GetStrategy() []byte {
+	if x != nil {
+		return x.Strategy
+	}
+	return nil
+}
+
+func (x *CoreSnapshot) GetWakes() []float64 {
+	if x != nil {
+		return x.Wakes
+	}
+	return nil
+}
+
+func (x *CoreSnapshot) GetHeld() []byte {
+	if x != nil {
+		return x.Held
+	}
+	return nil
+}
+
 // StrategyAdvanced is one advance of the run's search, appended as one record so that what it
 // proposed and what it kept can never disagree after a crash: the proposals core took, the
 // state change the search made, and the wake-ups it asked for.
@@ -234,7 +341,7 @@ type StrategyAdvanced struct {
 
 func (x *StrategyAdvanced) Reset() {
 	*x = StrategyAdvanced{}
-	mi := &file_vibesys_store_v1_core_input_proto_msgTypes[1]
+	mi := &file_vibesys_store_v1_core_input_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -246,7 +353,7 @@ func (x *StrategyAdvanced) String() string {
 func (*StrategyAdvanced) ProtoMessage() {}
 
 func (x *StrategyAdvanced) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_core_input_proto_msgTypes[1]
+	mi := &file_vibesys_store_v1_core_input_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -259,7 +366,7 @@ func (x *StrategyAdvanced) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StrategyAdvanced.ProtoReflect.Descriptor instead.
 func (*StrategyAdvanced) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_core_input_proto_rawDescGZIP(), []int{1}
+	return file_vibesys_store_v1_core_input_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *StrategyAdvanced) GetSchemaVersion() uint32 {
@@ -355,7 +462,7 @@ type CoreInput struct {
 
 func (x *CoreInput) Reset() {
 	*x = CoreInput{}
-	mi := &file_vibesys_store_v1_core_input_proto_msgTypes[2]
+	mi := &file_vibesys_store_v1_core_input_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -367,7 +474,7 @@ func (x *CoreInput) String() string {
 func (*CoreInput) ProtoMessage() {}
 
 func (x *CoreInput) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_core_input_proto_msgTypes[2]
+	mi := &file_vibesys_store_v1_core_input_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -380,7 +487,7 @@ func (x *CoreInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CoreInput.ProtoReflect.Descriptor instead.
 func (*CoreInput) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_core_input_proto_rawDescGZIP(), []int{2}
+	return file_vibesys_store_v1_core_input_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *CoreInput) GetSchemaVersion() uint32 {
@@ -417,7 +524,7 @@ type StepStarted struct {
 
 func (x *StepStarted) Reset() {
 	*x = StepStarted{}
-	mi := &file_vibesys_store_v1_core_input_proto_msgTypes[3]
+	mi := &file_vibesys_store_v1_core_input_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -429,7 +536,7 @@ func (x *StepStarted) String() string {
 func (*StepStarted) ProtoMessage() {}
 
 func (x *StepStarted) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_core_input_proto_msgTypes[3]
+	mi := &file_vibesys_store_v1_core_input_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -442,7 +549,7 @@ func (x *StepStarted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StepStarted.ProtoReflect.Descriptor instead.
 func (*StepStarted) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_core_input_proto_rawDescGZIP(), []int{3}
+	return file_vibesys_store_v1_core_input_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *StepStarted) GetTag() string {
@@ -501,7 +608,7 @@ type StepFinished struct {
 
 func (x *StepFinished) Reset() {
 	*x = StepFinished{}
-	mi := &file_vibesys_store_v1_core_input_proto_msgTypes[4]
+	mi := &file_vibesys_store_v1_core_input_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -513,7 +620,7 @@ func (x *StepFinished) String() string {
 func (*StepFinished) ProtoMessage() {}
 
 func (x *StepFinished) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_core_input_proto_msgTypes[4]
+	mi := &file_vibesys_store_v1_core_input_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -526,7 +633,7 @@ func (x *StepFinished) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StepFinished.ProtoReflect.Descriptor instead.
 func (*StepFinished) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_core_input_proto_rawDescGZIP(), []int{4}
+	return file_vibesys_store_v1_core_input_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *StepFinished) GetTag() string {
@@ -622,7 +729,7 @@ type AttemptInterrupted struct {
 
 func (x *AttemptInterrupted) Reset() {
 	*x = AttemptInterrupted{}
-	mi := &file_vibesys_store_v1_core_input_proto_msgTypes[5]
+	mi := &file_vibesys_store_v1_core_input_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -634,7 +741,7 @@ func (x *AttemptInterrupted) String() string {
 func (*AttemptInterrupted) ProtoMessage() {}
 
 func (x *AttemptInterrupted) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_core_input_proto_msgTypes[5]
+	mi := &file_vibesys_store_v1_core_input_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -647,7 +754,7 @@ func (x *AttemptInterrupted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AttemptInterrupted.ProtoReflect.Descriptor instead.
 func (*AttemptInterrupted) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_core_input_proto_rawDescGZIP(), []int{5}
+	return file_vibesys_store_v1_core_input_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *AttemptInterrupted) GetTag() string {
@@ -686,7 +793,7 @@ type RunEnded struct {
 
 func (x *RunEnded) Reset() {
 	*x = RunEnded{}
-	mi := &file_vibesys_store_v1_core_input_proto_msgTypes[6]
+	mi := &file_vibesys_store_v1_core_input_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -698,7 +805,7 @@ func (x *RunEnded) String() string {
 func (*RunEnded) ProtoMessage() {}
 
 func (x *RunEnded) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_core_input_proto_msgTypes[6]
+	mi := &file_vibesys_store_v1_core_input_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -711,7 +818,7 @@ func (x *RunEnded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunEnded.ProtoReflect.Descriptor instead.
 func (*RunEnded) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_core_input_proto_rawDescGZIP(), []int{6}
+	return file_vibesys_store_v1_core_input_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *RunEnded) GetSchemaVersion() uint32 {
@@ -736,7 +843,16 @@ const file_vibesys_store_v1_core_input_proto_rawDesc = "" +
 	"\n" +
 	"RunStarted\x12.\n" +
 	"\x0eschema_version\x18\x01 \x01(\rB\a\xbaH\x04*\x02(\x01R\rschemaVersion\x12!\n" +
-	"\x05state\x18\x02 \x01(\fB\v\xbaH\bz\x06\x10\x01\x18\x80\x80 R\x05state\"\xda\x02\n" +
+	"\x05state\x18\x02 \x01(\fB\v\xbaH\bz\x06\x10\x01\x18\x80\x80 R\x05state\"\xb4\x02\n" +
+	"\fCoreSnapshot\x12.\n" +
+	"\x0eschema_version\x18\x01 \x01(\rB\a\xbaH\x04*\x02(\x01R\rschemaVersion\x122\n" +
+	"\x10envelope_version\x18\x02 \x01(\rB\a\xbaH\x04*\x02(\x01R\x0fenvelopeVersion\x12!\n" +
+	"\x05state\x18\x03 \x01(\fB\v\xbaH\bz\x06\x10\x01\x18\x80\x80@R\x05state\x12(\n" +
+	"\x06inputs\x18\x04 \x03(\fB\x10\xbaH\r\x92\x01\n" +
+	"\"\bz\x06\x10\x01\x18\x80\x80 R\x06inputs\x12'\n" +
+	"\bstrategy\x18\x05 \x01(\fB\v\xbaH\bz\x06\x10\x01\x18\x80\x80@R\bstrategy\x12+\n" +
+	"\x05wakes\x18\x06 \x03(\x01B\x15\xbaH\x12\x92\x01\x0f\"\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\x05wakes\x12\x1d\n" +
+	"\x04held\x18\a \x01(\fB\t\xbaH\x06z\x04\x18\x80\x80 R\x04held\"\xda\x02\n" +
 	"\x10StrategyAdvanced\x12.\n" +
 	"\x0eschema_version\x18\x01 \x01(\rB\a\xbaH\x04*\x02(\x01R\rschemaVersion\x12.\n" +
 	"\tproposals\x18\x02 \x03(\fB\x10\xbaH\r\x92\x01\n" +
@@ -803,17 +919,18 @@ func file_vibesys_store_v1_core_input_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_store_v1_core_input_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_vibesys_store_v1_core_input_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_vibesys_store_v1_core_input_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_vibesys_store_v1_core_input_proto_goTypes = []any{
 	(StepCancelReason)(0),      // 0: vibesys.store.v1.StepCancelReason
 	(InterruptionReason)(0),    // 1: vibesys.store.v1.InterruptionReason
 	(*RunStarted)(nil),         // 2: vibesys.store.v1.RunStarted
-	(*StrategyAdvanced)(nil),   // 3: vibesys.store.v1.StrategyAdvanced
-	(*CoreInput)(nil),          // 4: vibesys.store.v1.CoreInput
-	(*StepStarted)(nil),        // 5: vibesys.store.v1.StepStarted
-	(*StepFinished)(nil),       // 6: vibesys.store.v1.StepFinished
-	(*AttemptInterrupted)(nil), // 7: vibesys.store.v1.AttemptInterrupted
-	(*RunEnded)(nil),           // 8: vibesys.store.v1.RunEnded
+	(*CoreSnapshot)(nil),       // 3: vibesys.store.v1.CoreSnapshot
+	(*StrategyAdvanced)(nil),   // 4: vibesys.store.v1.StrategyAdvanced
+	(*CoreInput)(nil),          // 5: vibesys.store.v1.CoreInput
+	(*StepStarted)(nil),        // 6: vibesys.store.v1.StepStarted
+	(*StepFinished)(nil),       // 7: vibesys.store.v1.StepFinished
+	(*AttemptInterrupted)(nil), // 8: vibesys.store.v1.AttemptInterrupted
+	(*RunEnded)(nil),           // 9: vibesys.store.v1.RunEnded
 }
 var file_vibesys_store_v1_core_input_proto_depIdxs = []int32{
 	0, // 0: vibesys.store.v1.StepFinished.cancelled:type_name -> vibesys.store.v1.StepCancelReason
@@ -830,11 +947,11 @@ func file_vibesys_store_v1_core_input_proto_init() {
 	if File_vibesys_store_v1_core_input_proto != nil {
 		return
 	}
-	file_vibesys_store_v1_core_input_proto_msgTypes[1].OneofWrappers = []any{
+	file_vibesys_store_v1_core_input_proto_msgTypes[2].OneofWrappers = []any{
 		(*StrategyAdvanced_Steps)(nil),
 		(*StrategyAdvanced_Checkpoint)(nil),
 	}
-	file_vibesys_store_v1_core_input_proto_msgTypes[4].OneofWrappers = []any{
+	file_vibesys_store_v1_core_input_proto_msgTypes[5].OneofWrappers = []any{
 		(*StepFinished_Finished)(nil),
 		(*StepFinished_Failed)(nil),
 		(*StepFinished_Cancelled)(nil),
@@ -845,7 +962,7 @@ func file_vibesys_store_v1_core_input_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_store_v1_core_input_proto_rawDesc), len(file_vibesys_store_v1_core_input_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   7,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

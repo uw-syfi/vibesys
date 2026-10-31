@@ -63,6 +63,7 @@ type Record struct {
 	//	*Record_RunEnded
 	//	*Record_RunStarted
 	//	*Record_StrategyAdvanced
+	//	*Record_CoreSnapshot
 	Body          isRecord_Body `protobuf_oneof:"body"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -310,6 +311,15 @@ func (x *Record) GetStrategyAdvanced() *StrategyAdvanced {
 	return nil
 }
 
+func (x *Record) GetCoreSnapshot() *CoreSnapshot {
+	if x != nil {
+		if x, ok := x.Body.(*Record_CoreSnapshot); ok {
+			return x.CoreSnapshot
+		}
+	}
+	return nil
+}
+
 type isRecord_Body interface {
 	isRecord_Body()
 }
@@ -389,6 +399,11 @@ type Record_StrategyAdvanced struct {
 	StrategyAdvanced *StrategyAdvanced `protobuf:"bytes,29,opt,name=strategy_advanced,json=strategyAdvanced,proto3,oneof"`
 }
 
+type Record_CoreSnapshot struct {
+	// The seed of a run an older version saved; see CoreSnapshot.
+	CoreSnapshot *CoreSnapshot `protobuf:"bytes,30,opt,name=core_snapshot,json=coreSnapshot,proto3,oneof"`
+}
+
 func (*Record_EpochStarted) isRecord_Body() {}
 
 func (*Record_LegacyEvent) isRecord_Body() {}
@@ -424,6 +439,8 @@ func (*Record_RunEnded) isRecord_Body() {}
 func (*Record_RunStarted) isRecord_Body() {}
 
 func (*Record_StrategyAdvanced) isRecord_Body() {}
+
+func (*Record_CoreSnapshot) isRecord_Body() {}
 
 // EpochStarted identifies the writer and schemas for one run epoch.
 // DeclarationAmended records may extend kinds and series for the same epoch.
@@ -711,7 +728,7 @@ var File_vibesys_store_v1_record_proto protoreflect.FileDescriptor
 
 const file_vibesys_store_v1_record_proto_rawDesc = "" +
 	"\n" +
-	"\x1dvibesys/store/v1/record.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1bvibesys/store/v1/chat.proto\x1a\x1evibesys/store/v1/content.proto\x1a!vibesys/store/v1/core_input.proto\x1a\x1cvibesys/store/v1/epoch.proto\x1a\x1dvibesys/store/v1/intent.proto\x1a vibesys/store/v1/lifecycle.proto\x1a\x1dvibesys/store/v1/notice.proto\x1a\x1dvibesys/store/v1/replay.proto\x1a\x1bvibesys/store/v1/span.proto\"\xaf\x17\n" +
+	"\x1dvibesys/store/v1/record.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1bvibesys/store/v1/chat.proto\x1a\x1evibesys/store/v1/content.proto\x1a!vibesys/store/v1/core_input.proto\x1a\x1cvibesys/store/v1/epoch.proto\x1a\x1dvibesys/store/v1/intent.proto\x1a vibesys/store/v1/lifecycle.proto\x1a\x1dvibesys/store/v1/notice.proto\x1a\x1dvibesys/store/v1/replay.proto\x1a\x1bvibesys/store/v1/span.proto\"\x91\x18\n" +
 	"\x06Record\x12\x10\n" +
 	"\x03seq\x18\x01 \x01(\x04R\x03seq\x12*\n" +
 	"\x02at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x02at\x12\x14\n" +
@@ -738,12 +755,13 @@ const file_vibesys_store_v1_record_proto_rawDesc = "" +
 	"\trun_ended\x18\x1b \x01(\v2\x1a.vibesys.store.v1.RunEndedH\x00R\brunEnded\x12?\n" +
 	"\vrun_started\x18\x1c \x01(\v2\x1c.vibesys.store.v1.RunStartedH\x00R\n" +
 	"runStarted\x12Q\n" +
-	"\x11strategy_advanced\x18\x1d \x01(\v2\".vibesys.store.v1.StrategyAdvancedH\x00R\x10strategyAdvanced:\xbb\v\xbaH\xb7\v\x1a\xd8\x02\n" +
+	"\x11strategy_advanced\x18\x1d \x01(\v2\".vibesys.store.v1.StrategyAdvancedH\x00R\x10strategyAdvanced\x12E\n" +
+	"\rcore_snapshot\x18\x1e \x01(\v2\x1e.vibesys.store.v1.CoreSnapshotH\x00R\fcoreSnapshot:\xd6\v\xbaH\xd2\v\x1a\xd8\x02\n" +
 	"\x0frecord.identity\x120seq, epoch and at are required for typed records\x1a\x92\x02!(has(this.lifecycle) || has(this.span) || has(this.metric) || has(this.stream) || has(this.blob) || has(this.intent) || has(this.notice) || has(this.chat) || has(this.declaration_amended) || has(this.input_measurement)) || (this.seq > 0u && this.epoch > 0u && has(this.at))\x1a\xf6\x01\n" +
 	"\x14record.epoch_started\x12Vepoch_started epoch must match epoch and seq and at must be present for a typed header\x1a\x85\x01!has(this.epoch_started) || !has(this.epoch_started.run) || (this.epoch == this.epoch_started.epoch && this.seq > 0u && has(this.at))\x1a\xa2\x01\n" +
 	"\x1arecord.declaration_amended\x124declaration amendment must name the containing epoch\x1aN!has(this.declaration_amended) || this.declaration_amended.epoch == this.epoch\x1a\xec\x02\n" +
-	"\x18record.input_measurement\x129an input measurement amendment must match its metric body\x1a\x94\x02!has(this.input_measurement) || (has(this.metric) && has(this.input_measurement.measured) && this.input_measurement.measured.series == this.metric.series && this.input_measurement.measured.value == this.metric.value && this.input_measurement.measured.span == this.metric.span)\x1a\xcc\x02\n" +
-	"\x13record.core_records\x12-core records require seq, epoch, at and clock\x1a\x85\x02!(has(this.core_input) || has(this.step_started) || has(this.step_finished) || has(this.attempt_interrupted) || has(this.run_ended) || has(this.run_started) || has(this.strategy_advanced)) || (this.seq > 0u && this.epoch > 0u && has(this.at) && has(this.clock))B\r\n" +
+	"\x18record.input_measurement\x129an input measurement amendment must match its metric body\x1a\x94\x02!has(this.input_measurement) || (has(this.metric) && has(this.input_measurement.measured) && this.input_measurement.measured.series == this.metric.series && this.input_measurement.measured.value == this.metric.value && this.input_measurement.measured.span == this.metric.span)\x1a\xe7\x02\n" +
+	"\x13record.core_records\x12-core records require seq, epoch, at and clock\x1a\xa0\x02!(has(this.core_input) || has(this.step_started) || has(this.step_finished) || has(this.attempt_interrupted) || has(this.run_ended) || has(this.run_started) || has(this.strategy_advanced) || has(this.core_snapshot)) || (this.seq > 0u && this.epoch > 0u && has(this.at) && has(this.clock))B\r\n" +
 	"\x04body\x12\x05\xbaH\x02\b\x01B\b\n" +
 	"\x06_clockB\x0f\n" +
 	"\r_replay_clockB\x14\n" +
@@ -824,12 +842,13 @@ var file_vibesys_store_v1_record_proto_goTypes = []any{
 	(*RunEnded)(nil),                       // 19: vibesys.store.v1.RunEnded
 	(*RunStarted)(nil),                     // 20: vibesys.store.v1.RunStarted
 	(*StrategyAdvanced)(nil),               // 21: vibesys.store.v1.StrategyAdvanced
-	(*RunDescription)(nil),                 // 22: vibesys.store.v1.RunDescription
-	(*SpanKindDecl)(nil),                   // 23: vibesys.store.v1.SpanKindDecl
-	(*MetricSeriesDecl)(nil),               // 24: vibesys.store.v1.MetricSeriesDecl
-	(*descriptorpb.FileDescriptorSet)(nil), // 25: google.protobuf.FileDescriptorSet
-	(*ReplayAllowance)(nil),                // 26: vibesys.store.v1.ReplayAllowance
-	(*ReplayAcknowledgement)(nil),          // 27: vibesys.store.v1.ReplayAcknowledgement
+	(*CoreSnapshot)(nil),                   // 22: vibesys.store.v1.CoreSnapshot
+	(*RunDescription)(nil),                 // 23: vibesys.store.v1.RunDescription
+	(*SpanKindDecl)(nil),                   // 24: vibesys.store.v1.SpanKindDecl
+	(*MetricSeriesDecl)(nil),               // 25: vibesys.store.v1.MetricSeriesDecl
+	(*descriptorpb.FileDescriptorSet)(nil), // 26: google.protobuf.FileDescriptorSet
+	(*ReplayAllowance)(nil),                // 27: vibesys.store.v1.ReplayAllowance
+	(*ReplayAcknowledgement)(nil),          // 28: vibesys.store.v1.ReplayAcknowledgement
 }
 var file_vibesys_store_v1_record_proto_depIdxs = []int32{
 	4,  // 0: vibesys.store.v1.Record.at:type_name -> google.protobuf.Timestamp
@@ -853,19 +872,20 @@ var file_vibesys_store_v1_record_proto_depIdxs = []int32{
 	19, // 18: vibesys.store.v1.Record.run_ended:type_name -> vibesys.store.v1.RunEnded
 	20, // 19: vibesys.store.v1.Record.run_started:type_name -> vibesys.store.v1.RunStarted
 	21, // 20: vibesys.store.v1.Record.strategy_advanced:type_name -> vibesys.store.v1.StrategyAdvanced
-	22, // 21: vibesys.store.v1.EpochStarted.run:type_name -> vibesys.store.v1.RunDescription
-	23, // 22: vibesys.store.v1.EpochStarted.span_kinds:type_name -> vibesys.store.v1.SpanKindDecl
-	24, // 23: vibesys.store.v1.EpochStarted.series:type_name -> vibesys.store.v1.MetricSeriesDecl
-	25, // 24: vibesys.store.v1.EpochStarted.descriptors:type_name -> google.protobuf.FileDescriptorSet
-	26, // 25: vibesys.store.v1.EpochStarted.initial_allowance:type_name -> vibesys.store.v1.ReplayAllowance
-	27, // 26: vibesys.store.v1.EpochStarted.replay_acknowledgement:type_name -> vibesys.store.v1.ReplayAcknowledgement
-	27, // 27: vibesys.store.v1.EpochStarted.replay_acknowledgements:type_name -> vibesys.store.v1.ReplayAcknowledgement
-	0,  // 28: vibesys.store.v1.ReplayStore.records:type_name -> vibesys.store.v1.Record
-	29, // [29:29] is the sub-list for method output_type
-	29, // [29:29] is the sub-list for method input_type
-	29, // [29:29] is the sub-list for extension type_name
-	29, // [29:29] is the sub-list for extension extendee
-	0,  // [0:29] is the sub-list for field type_name
+	22, // 21: vibesys.store.v1.Record.core_snapshot:type_name -> vibesys.store.v1.CoreSnapshot
+	23, // 22: vibesys.store.v1.EpochStarted.run:type_name -> vibesys.store.v1.RunDescription
+	24, // 23: vibesys.store.v1.EpochStarted.span_kinds:type_name -> vibesys.store.v1.SpanKindDecl
+	25, // 24: vibesys.store.v1.EpochStarted.series:type_name -> vibesys.store.v1.MetricSeriesDecl
+	26, // 25: vibesys.store.v1.EpochStarted.descriptors:type_name -> google.protobuf.FileDescriptorSet
+	27, // 26: vibesys.store.v1.EpochStarted.initial_allowance:type_name -> vibesys.store.v1.ReplayAllowance
+	28, // 27: vibesys.store.v1.EpochStarted.replay_acknowledgement:type_name -> vibesys.store.v1.ReplayAcknowledgement
+	28, // 28: vibesys.store.v1.EpochStarted.replay_acknowledgements:type_name -> vibesys.store.v1.ReplayAcknowledgement
+	0,  // 29: vibesys.store.v1.ReplayStore.records:type_name -> vibesys.store.v1.Record
+	30, // [30:30] is the sub-list for method output_type
+	30, // [30:30] is the sub-list for method input_type
+	30, // [30:30] is the sub-list for extension type_name
+	30, // [30:30] is the sub-list for extension extendee
+	0,  // [0:30] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_store_v1_record_proto_init() }
@@ -901,6 +921,7 @@ func file_vibesys_store_v1_record_proto_init() {
 		(*Record_RunEnded)(nil),
 		(*Record_RunStarted)(nil),
 		(*Record_StrategyAdvanced)(nil),
+		(*Record_CoreSnapshot)(nil),
 	}
 	file_vibesys_store_v1_record_proto_msgTypes[1].OneofWrappers = []any{}
 	type x struct{}
