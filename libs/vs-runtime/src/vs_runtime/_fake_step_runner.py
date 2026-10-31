@@ -84,6 +84,8 @@ class RunnerCall:
     tag: RequestId
     attempt: int | None
     """The attempt of a ``run`` call; ``None`` for ``clear``."""
+    deadline_at: float | None
+    """The deadline a ``run`` call was given; ``None`` for ``clear``."""
 
 
 class LeftoverWorkError(Exception):
@@ -92,6 +94,15 @@ class LeftoverWorkError(Exception):
     def __init__(self, tag: RequestId, attempt: int) -> None:
         """Name the step and the attempt that was refused."""
         super().__init__(f"attempt {attempt} of {tag} started before clear removed its leftovers")
+
+
+class StepTagMismatchError(Exception):
+    """A call named a tag that is not the request id of the step it passed."""
+
+    def __init__(self, tag: RequestId, step: Request) -> None:
+        """Name the tag and the step's own id."""
+        super().__init__(f"tag {tag} is not the request id of the step passed with it")
+        self.step = step
 
 
 class ClearedRunningAttemptError(Exception):
@@ -184,10 +195,12 @@ class FakeStepRunner:
         step: Request,
         tag: RequestId,
         attempt: int,
+        deadline_at: float,
         cancel: CancelSignal,
     ) -> StepResult:
         """Do what the tag's script says for this attempt, or attach to adopted work."""
-        self._calls.append(RunnerCall(RunnerMethod.RUN, tag, attempt))
+        self._calls.append(RunnerCall(RunnerMethod.RUN, tag, attempt, deadline_at))
+        self._check_identity(step, tag)
         if tag in self._attached:
             return await self._await_end(tag, cancel, ignoring_signal=False)
         if tag in self._work:
@@ -207,9 +220,10 @@ class FakeStepRunner:
         ignoring = isinstance(behavior, AttemptHangs) and behavior.ignoring_signal
         return await self._await_end(tag, cancel, ignoring_signal=ignoring)
 
-    async def clear(self, tag: RequestId) -> Adopted | Cleared:
+    async def clear(self, step: Request, tag: RequestId) -> Adopted | Cleared:
         """End the tag's work, or adopt it when this runner adopts."""
-        self._calls.append(RunnerCall(RunnerMethod.CLEAR, tag, None))
+        self._calls.append(RunnerCall(RunnerMethod.CLEAR, tag, None, None))
+        self._check_identity(step, tag)
         if self._clear_takes_s:
             await self._clock.sleep(self._clear_takes_s)
         if self._unreachable or self._unavailable:
@@ -230,6 +244,12 @@ class FakeStepRunner:
         del self._work[tag]
         self._attached.discard(tag)
         return Adopted(result)
+
+    def _check_identity(self, step: Request, tag: RequestId) -> None:
+        if step.request_id != tag:
+            error = StepTagMismatchError(tag, step)
+            self._violations.append(error)
+            raise error
 
     def _behavior(self, step: Request, tag: RequestId, attempt: int) -> Behavior:
         behaviors = self._scripts.get(tag)

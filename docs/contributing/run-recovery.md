@@ -38,7 +38,7 @@ once. An **open step** is a step with no result. An **epoch** is one process lif
    it is the only writer. Nothing else proves a process dead, and nothing needs to: the lock proves that
    no other process writes the log, and `clear` (rule 3) handles what the dead process left running.
 3. **No result means run again.** Core never asks whether an open step happened. The runner of the
-   step first calls `clear(tag)`, which removes or adopts what an earlier attempt left, and then runs the
+   step first calls `clear(step, tag)`, which removes or adopts what an earlier attempt left, and then runs the
    next attempt. The attempt number is recorded and shown.
 4. **Pause is not a crash.** Pause stops starting steps, lets running steps finish or cancels them
    within a deadline, records that the run is parked, and exits. A clean pause leaves no open attempt.
@@ -162,7 +162,7 @@ unreachable. The first case is #3458, a completed `EnsureSession` whose session 
 acceptance. The table below marks `EnsureSession` safe to run twice. It keeps the four classes and adds
 what `clear` does for each.
 
-| Steps | Effect | After a crash | `clear(tag)` | Key |
+| Steps | Effect | After a crash | `clear(step, tag)` | Key |
 |---|---|---|---|---|
 | `ObserveOwnedJob`, `CollectEvidence`, `VerifyAdoption`; registered `QUERY` operations (`interpret_evidence`, `verify_revision`, board reads) | read only | safe | none | none |
 | `EnsureWorkspace`, `RestoreRevision` | create or reset an attempt's workspace to a recorded revision | safe: the end state is fixed by the request | none | tag (workspace is keyed by attempt and generation) |
@@ -396,19 +396,32 @@ class Cleared:
 
 class StepRunner(Protocol):
     async def run(
-        self, step: Request, tag: RequestId, attempt: int, cancel: CancelSignal
+        self,
+        step: Request,
+        tag: RequestId,
+        attempt: int,
+        deadline_at: float,     # run-clock seconds; the limit of the work the runner starts
+        cancel: CancelSignal,
     ) -> StepResult: ...
 
-    async def clear(self, tag: RequestId) -> Adopted | Cleared: ...
+    async def clear(self, step: Request, tag: RequestId) -> Adopted | Cleared: ...
 ```
+
+`clear` takes the step, not only the tag, so a runner finds what an attempt left from the request itself
+and keeps no index from tag back to step (an agent runner needs no persisted receipt of which turn a tag
+was, an evaluation runner no table of handles). The loop always has the step: it is in the `Run` action,
+and after a restart the fold of the log holds the request of every open step, including one whose attempt
+ran in an earlier epoch. `deadline_at` is the `Run` action's, so a runner builds the limit of its work from
+it and needs no wiring of its own to learn the step's limit.
 
 Contract, which every implementation passes in `vs_runtime.api.testing.StepRunnerContract`, a class a test
 module subclasses with one factory method, as the `vs_sim` contracts are:
 
-1. `run` returns a result, or raises. A raise is "no result": the loop treats it like a crash.
+1. `run` returns a result, or raises. A raise is "no result": the loop treats it like a crash. A `run` that
+   never returns fails the suite: every `run` in it carries the hang guard.
 2. After `clear`, a second `run` with the same tag and a higher attempt starts clean.
 3. `clear` is idempotent, returns `Cleared` for a tag that never started, and returns only when nothing
-   carrying the tag runs or will start.
+   carrying the tag runs or will start. It is given the step the attempt ran.
 4. `Adopted` means the runner took over what an earlier attempt left. With `result` set the step had
    ended, and `run` returns that result. With `result` unset the work is still going, and `run` attaches
    to it instead of starting new work. Agent turns never adopt. Slurm jobs adopt, because they survive
@@ -428,11 +441,12 @@ The loop, `vs_runtime/_step_loop.py`:
 state = fold(log)                      # cache plus suffix, or the whole log
 repeat:
     for action in decide(state, clock.now()):
-        Run:    if attempt > 1: await runner.clear(tag)
+        Run:    if attempt > 1: await runner.clear(step, tag)
                 append StepStarted(tag, attempt)      # durable before I/O
-                start runner.run(...) as a task
+                start runner.run(step, tag, attempt, deadline_at, signal) as a task
         Cancel: set the signal; on return append StepFinished or AttemptInterrupted
-        Settle: await runner.clear(tag) if an attempt was interrupted; append StepFinished
+        Settle: await runner.clear(step, tag) if an attempt was interrupted; append StepFinished
+                (step: from the fold, for a step with no attempt in flight)
         Wait:   await the first of: a task ending, a new input (a pause is one), the timer
         End:    append Ended; release the lock
     state = fold(state, the records just appended)
@@ -443,7 +457,7 @@ deadline passed. No `if isinstance(step, ...)` appears in either.
 
 In code the loop sees the world through two interfaces it owns. `StepLog` is the log as the loop uses it:
 one atomic durable append per method, a `state` that is the fold of everything appended (by the loop or by
-an input from elsewhere), and `latest_run(tag)`, the request of the last recorded attempt. `RecoveryRule`
+an input from elsewhere), and `open_step(tag)`, the step with no result as the fold has it (its request, its limit and its latest attempt), which is where `clear` gets the step for a tag with no attempt in flight. `RecoveryRule`
 is core's pure surface: `decide`, and `settled`, which says the log already holds the end of the run
 (`ENDED`) or the run is paused (`PARKED`). A restarted loop over a log that holds `Ended` returns at once
 instead of recording it twice. Each running attempt is a flight, one task that owns the attempt from

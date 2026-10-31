@@ -56,6 +56,7 @@ from vs_runlog.api import Appended, ConfirmedLog
 from vs_runtime.api.step_runner import (
     Interruption,
     LoopExit,
+    OpenStep,
     StepLog,
     StepLoopTiming,
     StepLoopTimingError,
@@ -187,6 +188,13 @@ def _fold_log(state: Model, entry: LogEntry) -> Model:
     raise AssertionError(message)
 
 
+def model_open_step(model: Model, tag: core.RequestId) -> OpenStep | None:
+    step = model.step(tag)
+    if step.result is not None:
+        return None
+    return OpenStep(a_step(tag), step.spec.deadline_at, step.attempts)
+
+
 def a_step(tag: core.RequestId) -> core.Request:
     return core.ObserveOwnedJob(
         request_id=tag,
@@ -300,8 +308,8 @@ class _CrashingLog[S]:
         await write()
         self._switch.tick()
 
-    def latest_run(self, tag: core.RequestId) -> Run | None:
-        return self._inner.latest_run(tag)
+    def open_step(self, tag: core.RequestId) -> OpenStep | None:
+        return self._inner.open_step(tag)
 
     async def step_started(self, run: Run) -> None:
         await self._around(lambda: self._inner.step_started(run))
@@ -327,16 +335,21 @@ class _CrashingRunner:
         self._switch = switch
 
     async def run(
-        self, step: core.Request, tag: core.RequestId, attempt: int, cancel: CancelSignal
+        self,
+        step: core.Request,
+        tag: core.RequestId,
+        attempt: int,
+        deadline_at: float,
+        cancel: CancelSignal,
     ) -> StepResult:
         self._switch.tick()
-        result = await self._inner.run(step, tag, attempt, cancel)
+        result = await self._inner.run(step, tag, attempt, deadline_at, cancel)
         self._switch.tick()
         return result
 
-    async def clear(self, tag: core.RequestId) -> Adopted | Cleared:
+    async def clear(self, step: core.Request, tag: core.RequestId) -> Adopted | Cleared:
         self._switch.tick()
-        outcome = await self._inner.clear(tag)
+        outcome = await self._inner.clear(step, tag)
         self._switch.tick()
         return outcome
 
@@ -379,7 +392,7 @@ async def _epochs(
     inputs = _timeline(scenario)
     outcome = Outcome(entries, (), runner, 0, 0)
     while True:
-        log = FakeStepLog(seed, fold, entries)
+        log = FakeStepLog(seed, fold, model_open_step, entries)
         log.push(NewEpoch())
         switch = _Switch(kill_at if outcome.epochs == 0 else None)
         loop = asyncio.ensure_future(
@@ -457,6 +470,7 @@ def check_invariants(outcome: Outcome, scenario: Scenario) -> None:
     for spec in scenario.steps:
         check_attempts_follow_interruptions(outcome, spec)
     check_clear_precedes_every_rerun(outcome)
+    check_runs_carry_the_step_deadline(outcome, scenario)
     assert outcome.runner.running() == (), "work was left running"
     assert outcome.runner.violations == ()
 
@@ -496,6 +510,13 @@ def check_attempts_follow_interruptions(outcome: Outcome, spec: Spec) -> None:
                 finished = True
             case NewEpoch():
                 ended_since_start = True
+
+
+def check_runs_carry_the_step_deadline(outcome: Outcome, scenario: Scenario) -> None:
+    deadlines = {spec.name: spec.deadline_at for spec in scenario.steps}
+    for call in outcome.calls:
+        if call.kind is RunnerMethod.RUN:
+            assert call.deadline_at == deadlines[call.tag.root]
 
 
 def check_clear_precedes_every_rerun(outcome: Outcome) -> None:
@@ -787,6 +808,13 @@ class MemoryRecords:
         return by_tag
 
 
+OPEN_PHASES = (
+    core.RequestPhase.PREPARED,
+    core.RequestPhase.DISPATCHED,
+    core.RequestPhase.RECONCILING,
+)
+
+
 class CoreStepLog:
     """A ``StepLog`` over core's records: each method appends one and folds it into the state."""
 
@@ -805,17 +833,21 @@ class CoreStepLog:
         folded = core_fold(records.read(), seed, registry=registry)
         steps = folded.steps.model_copy(update={"epoch": epoch})
         self._state = folded.model_copy(update={"steps": steps})
-        self._runs: dict[core.RequestId, Run] = {}
 
     @property
     def state(self) -> core.CoreState:
         return self._state
 
-    def latest_run(self, tag: core.RequestId) -> Run | None:
-        return self._runs.get(tag)
+    def open_step(self, tag: core.RequestId) -> OpenStep | None:
+        record = self._state.records.record(tag)
+        if record is None or record.phase not in OPEN_PHASES:
+            return None
+        attempts = self._state.steps.of(tag)
+        return OpenStep(
+            record.request, record.until.at, 0 if attempts is None else attempts.started
+        )
 
     async def step_started(self, run: Run) -> None:
-        self._runs[run.tag] = run
         self._append(started_message(run))
 
     async def step_finished(self, tag: core.RequestId, attempt: int, result: StepResult) -> None:

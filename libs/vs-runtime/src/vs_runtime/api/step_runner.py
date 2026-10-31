@@ -3,6 +3,7 @@
 from vs_runtime._step_loop import (
     Interruption,
     LoopExit,
+    OpenStep,
     RecoveryRule,
     StepLog,
     StepLoopTiming,
@@ -24,6 +25,7 @@ __all__ = [
     "Cleared",
     "Interruption",
     "LoopExit",
+    "OpenStep",
     "RecoveryRule",
     "StepLog",
     "StepLoopTiming",
