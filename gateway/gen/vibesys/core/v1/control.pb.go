@@ -697,11 +697,8 @@ type ControlInput struct {
 	Attempt            *AttemptId             `protobuf:"bytes,12,opt,name=attempt,proto3" json:"attempt,omitempty"`
 	Item               *ItemId                `protobuf:"bytes,13,opt,name=item,proto3" json:"item,omitempty"`
 	MaxParallel        *string                `protobuf:"bytes,14,opt,name=max_parallel,json=maxParallel,proto3,oneof" json:"max_parallel,omitempty"`
-	// Seconds a pause waits for running requests before it interrupts them; the run's cleanup
-	// bound when a Pause-now does not say.
-	DrainSeconds  *float64 `protobuf:"fixed64,15,opt,name=drain_seconds,json=drainSeconds,proto3,oneof" json:"drain_seconds,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *ControlInput) Reset() {
@@ -832,23 +829,13 @@ func (x *ControlInput) GetMaxParallel() string {
 	return ""
 }
 
-func (x *ControlInput) GetDrainSeconds() float64 {
-	if x != nil && x.DrainSeconds != nil {
-		return *x.DrainSeconds
-	}
-	return 0
-}
-
 // Durable drain authority. A parked run can resume only in a later host epoch.
 type RunPark struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	AdmittedTurns []*InvocationRef       `protobuf:"bytes,4,rep,name=admitted_turns,json=admittedTurns,proto3" json:"admitted_turns,omitempty"`
 	Immediate     bool                   `protobuf:"varint,3,opt,name=immediate,proto3" json:"immediate,omitempty"`
-	// Core time at which the drain stops waiting for running requests: it interrupts what can be
-	// run again and cancels the rest. Absent for a Pause that waits for its turns' own limits.
-	DeadlineAt    *float64   `protobuf:"fixed64,5,opt,name=deadline_at,json=deadlineAt,proto3,oneof" json:"deadline_at,omitempty"`
-	ControlId     *ControlId `protobuf:"bytes,1,opt,name=control_id,json=controlId,proto3" json:"control_id,omitempty"`
-	Epoch         string     `protobuf:"bytes,2,opt,name=epoch,proto3" json:"epoch,omitempty"`
+	ControlId     *ControlId             `protobuf:"bytes,1,opt,name=control_id,json=controlId,proto3" json:"control_id,omitempty"`
+	Epoch         string                 `protobuf:"bytes,2,opt,name=epoch,proto3" json:"epoch,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -895,13 +882,6 @@ func (x *RunPark) GetImmediate() bool {
 		return x.Immediate
 	}
 	return false
-}
-
-func (x *RunPark) GetDeadlineAt() float64 {
-	if x != nil && x.DeadlineAt != nil {
-		return *x.DeadlineAt
-	}
-	return 0
 }
 
 func (x *RunPark) GetControlId() *ControlId {
@@ -983,7 +963,7 @@ const file_vibesys_core_v1_control_proto_rawDesc = "" +
 	"\bRunPause\x12=\n" +
 	"\x05owner\x18\x01 \x01(\x0e2\x1b.vibesys.core.v1.PauseOwnerB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x05owner\x12#\n" +
-	"\rcapacity_wait\x18\x02 \x01(\bR\fcapacityWait\"\xf5\x14\n" +
+	"\rcapacity_wait\x18\x02 \x01(\bR\fcapacityWait\"\xb2\x13\n" +
 	"\fControlInput\x12A\n" +
 	"\n" +
 	"control_id\x18\x01 \x01(\v2\x1a.vibesys.core.v1.ControlIdB\x06\xbaH\x03\xc8\x01\x01R\tcontrolId\x12B\n" +
@@ -1002,8 +982,7 @@ const file_vibesys_core_v1_control_proto_rawDesc = "" +
 	"\x14capacity_wait_stands\x18\v \x01(\bR\x12capacityWaitStands\x124\n" +
 	"\aattempt\x18\f \x01(\v2\x1a.vibesys.core.v1.AttemptIdR\aattempt\x12+\n" +
 	"\x04item\x18\r \x01(\v2\x17.vibesys.core.v1.ItemIdR\x04item\x12B\n" +
-	"\fmax_parallel\x18\x0e \x01(\tB\x1a\xbaH\x11r\x0f2\r^[1-9][0-9]*$\xca\xf3\x18\x02\x10\x01H\x00R\vmaxParallel\x88\x01\x01\x12:\n" +
-	"\rdrain_seconds\x18\x0f \x01(\x01B\x10\xbaH\r\x12\v@\x01!\x00\x00\x00\x00\x00\x00\x00\x00H\x01R\fdrainSeconds\x88\x01\x01:\xeb\r\xbaH\xe7\r\x1a\xd3\x01\n" +
+	"\fmax_parallel\x18\x0e \x01(\tB\x1a\xbaH\x11r\x0f2\r^[1-9][0-9]*$\xca\xf3\x18\x02\x10\x01H\x00R\vmaxParallel\x88\x01\x01:\xf6\f\xbaH\xf2\f\x1a\xd3\x01\n" +
 	"\x13ControlInput.notice\x12Oartifact only for a steer or operator action, and required for operator actions\x1ak(!has(this.artifact) || this.action in [4, 6, 7, 8]) && (!(this.action in [6, 7, 8]) || has(this.artifact))\x1ai\n" +
 	"\x11ControlInput.mode\x12,mode required for its action and only for it\x1a&(this.action == 3) == (this.mode != 0)\x1ax\n" +
 	"\x16ControlInput.withdraws\x121withdraws required for its action and only for it\x1a+(this.action == 5) == (has(this.withdraws))\x1al\n" +
@@ -1016,19 +995,14 @@ const file_vibesys_core_v1_control_proto_rawDesc = "" +
 	"\x17ControlInput.input_mode\x12\x19input_mode only for steer\x1a(this.input_mode == 0 || this.action == 4\x1a\xaf\x01\n" +
 	"\x1cControlInput.invocation_mode\x12<input_mode interrupt or standing cannot target an invocation\x1aQ!(this.input_mode in [2, 3]) || !has(this.target) || !has(this.target.invocation)\x1a\x88\x01\n" +
 	"\x17ControlInput.when_flags\x12,when only immediate resume switches or keeps\x1a?!(this.fallback || this.capacity_wait_stands) || this.when == 1\x1a{\n" +
-	"!ControlInput.capacity_wait_stands\x12'capacity_wait_stands fallback ends wait\x1a-!(this.fallback && this.capacity_wait_stands)\x1as\n" +
-	"\x1aControlInput.drain_seconds\x12\x1edrain_seconds only for a pause\x1a5!has(this.drain_seconds) || this.action in [1, 9, 10]B\x0f\n" +
-	"\r_max_parallelB\x10\n" +
-	"\x0e_drain_seconds\"\xa6\x02\n" +
+	"!ControlInput.capacity_wait_stands\x12'capacity_wait_stands fallback ends wait\x1a-!(this.fallback && this.capacity_wait_stands)B\x0f\n" +
+	"\r_max_parallel\"\xe7\x01\n" +
 	"\aRunPark\x12E\n" +
 	"\x0eadmitted_turns\x18\x04 \x03(\v2\x1e.vibesys.core.v1.InvocationRefR\radmittedTurns\x12\x1c\n" +
-	"\timmediate\x18\x03 \x01(\bR\timmediate\x12-\n" +
-	"\vdeadline_at\x18\x05 \x01(\x01B\a\xbaH\x04\x12\x02@\x01H\x00R\n" +
-	"deadlineAt\x88\x01\x01\x12A\n" +
+	"\timmediate\x18\x03 \x01(\bR\timmediate\x12A\n" +
 	"\n" +
 	"control_id\x18\x01 \x01(\v2\x1a.vibesys.core.v1.ControlIdB\x06\xbaH\x03\xc8\x01\x01R\tcontrolId\x124\n" +
-	"\x05epoch\x18\x02 \x01(\tB\x1e\xbaH\x15r\x132\x11^(0|[1-9][0-9]*)$\xca\xf3\x18\x02\x10\x01R\x05epochB\x0e\n" +
-	"\f_deadline_atB?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1b\x06proto3"
+	"\x05epoch\x18\x02 \x01(\tB\x1e\xbaH\x15r\x132\x11^(0|[1-9][0-9]*)$\xca\xf3\x18\x02\x10\x01R\x05epochB?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1b\x06proto3"
 
 var (
 	file_vibesys_core_v1_control_proto_rawDescOnce sync.Once
@@ -1117,7 +1091,6 @@ func file_vibesys_core_v1_control_proto_init() {
 		(*InputTarget_Role)(nil),
 	}
 	file_vibesys_core_v1_control_proto_msgTypes[9].OneofWrappers = []any{}
-	file_vibesys_core_v1_control_proto_msgTypes[10].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

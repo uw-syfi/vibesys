@@ -556,7 +556,11 @@ class RunControlBridge:
         for request in self._channel.take_pending_actions():
             state = self._as_asked(_after(core, events))
             change = (
-                _operator_pause(request, request.control_id)
+                _Change(
+                    request.action.value,
+                    owner=PauseOwner.OPERATOR if isinstance(request, PauseRequest) else None,
+                    control_id=request.control_id,
+                )
                 if isinstance(request, PauseRequest | PauseNowRequest)
                 else _Change(
                     request.action.value,
@@ -737,7 +741,11 @@ class RunControlBridge:
             )
         for request in self._channel.take_pending_actions():
             change = (
-                _operator_pause(request, request.control_id)
+                _Change(
+                    request.action.value,
+                    owner=PauseOwner.OPERATOR if isinstance(request, PauseRequest) else None,
+                    control_id=request.control_id,
+                )
                 if isinstance(request, PauseRequest | PauseNowRequest)
                 else _Change(
                     request.action.value, control_id=request.control_id, action_request=request
@@ -855,7 +863,10 @@ class RunControlBridge:
         pending = ControlId(root="pending")
         match request:
             case PauseRequest() | PauseNowRequest():
-                check = _operator_pause(request, None).control(pending)
+                check = _Change(
+                    request.action.value,
+                    owner=PauseOwner.OPERATOR if isinstance(request, PauseRequest) else None,
+                ).control(pending)
             case ResumeRequest():
                 check = _pause_change(request).control(pending)
             case SteerRequest() | WithdrawRequest():
@@ -1066,7 +1077,6 @@ class _Change:
     when: ResumeWhen | None = None
     fallback: bool = False
     capacity_wait_stands: bool = False
-    drain_seconds: float | None = None
     origin: str | None = None
     """The id of the operator control the channel says asked for this pause change; it can
     differ from ``control_id``, the identity core records (a re-recorded hold has none)."""
@@ -1113,7 +1123,6 @@ class _Change:
             when=self.when,
             fallback=self.fallback,
             capacity_wait_stands=self.capacity_wait_stands,
-            drain_seconds=self.drain_seconds,
         )
 
 
@@ -1166,10 +1175,7 @@ def _records(control: ControlInput, request: ControlRequest) -> bool:
                 fallback,
             )
         case PauseRequest() | PauseNowRequest():
-            return (
-                control.action == request.action.value
-                and control.drain_seconds == request.drain_seconds
-            )
+            return control.action == request.action.value
         case CancelAttemptRequest() | CancelItemRequest() | SetMaxParallelRequest():
             return records_action(control, request)
 
@@ -1192,16 +1198,6 @@ def _standing_now(core: CoreState, events: list[CoreEvent], withdraws: str) -> b
         and event.input.input_id == input_id
         and event.input.mode is InputMode.STANDING
         for event in events
-    )
-
-
-def _operator_pause(request: PauseRequest | PauseNowRequest, control_id: str | None) -> _Change:
-    """The control an operator's pause or pause-now records, with the drain it asked for."""
-    return _Change(
-        request.action.value,
-        owner=PauseOwner.OPERATOR if isinstance(request, PauseRequest) else None,
-        control_id=control_id,
-        drain_seconds=request.drain_seconds,
     )
 
 

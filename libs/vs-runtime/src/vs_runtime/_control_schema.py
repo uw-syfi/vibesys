@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
-_SCALARS = frozenset({"string", "boolean", "integer", "number"})
+_SCALARS = frozenset({"string", "boolean", "integer"})
 
 
 class UnsafeControlSchemaError(AssertionError):
@@ -81,7 +81,7 @@ def _kind(
         message = f"{path}: {name} is a structure no one allowed"
         raise UnsafeControlSchemaError(message)
     if not _scalar(spec):
-        message = f"{path}: {spec} is not a string, boolean, integer or number"
+        message = f"{path}: {spec} is not a string, boolean or integer"
         raise UnsafeControlSchemaError(message)
     return str(spec["type"])
 
