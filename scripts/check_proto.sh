@@ -11,6 +11,16 @@ stage() {
   time "$@" || status=$?
   return "$status"
 }
+# Hypothesis builds its Unicode tables on first use and keeps them under .hypothesis. A fresh
+# checkout has none, so each pytest worker built its own, about 4 s of CPU apiece on a runner.
+# Build them once, beside generation, which leaves cores idle.
+warm_hypothesis() {
+  uv run --locked python -c 'import hypothesis as h, hypothesis.strategies as st; h.given(st.text())(h.settings(max_examples=1, database=None)(lambda s: None))()'
+}
+stage hypothesis-cache warm_hypothesis &
+warm=$!
+# A failed stage below ends the script before the final reap; stop the warm-up with it.
+trap '[[ -z "$warm" ]] || kill "$warm" 2>/dev/null || true' EXIT
 stage layers uv run --locked python -m scripts.check_proto_layers
 stage lint uv run --locked --group proto buf lint
 stage generate ./scripts/generate_proto.sh
@@ -23,6 +33,8 @@ if [[ -n "$(git ls-files --others --exclude-standard -- "${generated[@]}")" ]]; 
   exit 1
 fi
 # Generation is the only writer. Once it passes, these checks read its outputs.
+wait "$warm"
+warm=
 pids=()
 breaking() { ./scripts/tests/test_proto_breaking.sh && ./scripts/check_proto_breaking.sh; }
 stage breaking breaking &
