@@ -37,7 +37,10 @@ import {
   whoWords,
 } from '../../../../state/index.js';
 import {workedSeconds} from '../../../../state/quota-pauses.js';
+import {elapsedWords} from '../../../../state/span-reading.js';
 import {
+  type BlockStart,
+  blockStarts,
   type GateView,
   gateView,
   itemLines,
@@ -73,6 +76,12 @@ function lineOf(
     name: tool.name,
     line: tool.summary ?? '',
     ...(tool.meta === undefined ? {} : {outcome: tool.meta}),
+    ...(tool.elapsed === undefined
+      ? {}
+      : {
+          time: `+${elapsedWords(tool.elapsed)}`,
+          timeTitle: `${elapsedWords(tool.elapsed)} into the turn`,
+        }),
     state: tool.state,
     selected: tool.id === props.item,
     press: () => props.zoom({type: 'open-item', item: tool.id}),
@@ -111,6 +120,7 @@ function ResultCard(args: {
 function BlockView(args: {
   readonly block: NarrativeBlock;
   readonly props: StepViewProps;
+  readonly live: boolean;
   readonly open: boolean;
   readonly toggle: (open: boolean) => void;
 }): JSX.Element {
@@ -127,7 +137,7 @@ function BlockView(args: {
         />
       );
     case 'thought':
-      return <Thought text={block.text} />;
+      return <Thought text={block.text} live={args.live} open={args.open} toggle={args.toggle} />;
     case 'said':
       return <Said text={block.text} />;
     case 'tools':
@@ -164,7 +174,8 @@ function TurnBody(props: StepViewProps): JSX.Element {
   const {step, item} = props;
   // Counts the presses of the summary line, which scrolls the narrative to the reply card.
   const [toResult, setToResult] = useState(0);
-  // A group the reader opened or closed; any other is open only when it holds the opened call.
+  // A thought or group the reader opened or closed, or a thought left open while it was written;
+  // any other starts as `blockStarts` says, and a group holding the opened call starts open.
   const [flipped, setFlipped] = useState<ReadonlyMap<string, boolean>>(new Map());
   const narrative = turnNarrative(props.model.trace, props.core, step.span);
   if (narrative === null) return <EmptyState title="Reading the turn…" />;
@@ -182,6 +193,14 @@ function TurnBody(props: StepViewProps): JSX.Element {
     );
   }
   const live = LIVE.has(step.status);
+  const starts = blockStarts(narrative, live);
+  // A thought open because it is being written stays open when the turn moves on, so a reader who
+  // is partway through it is not shown it collapse. Only a press closes it from then on.
+  const unlatched = [...starts].filter(([id, start]) => start.live && !flipped.has(id));
+  if (unlatched.length > 0) {
+    setFlipped(new Map([...flipped, ...unlatched.map(([id]) => [id, true] as const)]));
+  }
+  const startOf = (id: string): BlockStart => starts.get(id) ?? {live: false, open: false};
   const holding = item === null ? null : toolOf(narrative, item)?.block;
   const summary = resultSummary(narrative, props);
   return (
@@ -208,7 +227,8 @@ function TurnBody(props: StepViewProps): JSX.Element {
             key={block.id}
             block={block}
             props={props}
-            open={flipped.get(block.id) ?? block.id === holding}
+            live={startOf(block.id).live}
+            open={flipped.get(block.id) ?? (startOf(block.id).open || block.id === holding)}
             toggle={open => setFlipped(new Map(flipped).set(block.id, open))}
           />
         ))}
@@ -313,7 +333,7 @@ export function ItemView(props: ItemViewProps): JSX.Element {
           </Text>
         )}
       </Row>
-      <LogPane label={`${tool.name} call`} lines={itemLines(tool)} size="fill" />
+      <LogPane label={`${tool.name} call`} lines={itemLines(tool)} size="fill" start="top" />
     </>
   );
 }
