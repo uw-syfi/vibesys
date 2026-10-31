@@ -248,7 +248,7 @@ class _Switch:
         self.ticks = 0
         self.kill_at = kill_at
         self.dead = False
-        self.loop: asyncio.Future[object] | None = None
+        self.loop: asyncio.Task[LoopExit] | None = None
 
     def tick(self) -> None:
         if self.dead:

@@ -66,14 +66,8 @@ class StepRunnerContract:
         tag = _tag("finishing")
 
         async def main() -> None:
-            try:
-                result = await subject.runner.run(
-                    subject.finishing_step(tag), tag, 1, CancelSignal()
-                )
-            except Exception:  # noqa: BLE001  # lint-waiver: LW-STEPRUN-2 [BLE001]; a raise is the second thing clause 1 allows, and any exception type is one
-                await subject.runner.clear(tag)
-            else:
-                assert isinstance(result, Finished | Failed | Cancelled)
+            outcome = await _run_to_the_end(subject, tag, attempt=1)
+            assert isinstance(outcome, Exception | Finished | Failed | Cancelled)
             assert await subject.left_running(tag) == 0
 
         subject.run(main())
@@ -217,10 +211,20 @@ async def _finish_after_clear(
         cancel.set(CancelReason.WITHDRAWN)
         await asyncio.wait_for(task, HANG_GUARD_S)
         return
-    try:
-        await subject.runner.run(subject.finishing_step(tag), tag, attempt, CancelSignal())
-    except Exception:  # noqa: BLE001  # lint-waiver: LW-STEPRUN-2 [BLE001]; see test_a_step_that_finishes_ends_with_a_step_result
+    await _run_to_the_end(subject, tag, attempt=attempt)
+
+
+async def _run_to_the_end(
+    subject: StepRunnerUnderTest, tag: RequestId, *, attempt: int
+) -> StepResult | BaseException:
+    """Run a step that ends by itself; a raise is a legitimate end, and ``clear`` follows it."""
+    step = subject.finishing_step(tag)
+    (outcome,) = await asyncio.gather(
+        subject.runner.run(step, tag, attempt, CancelSignal()), return_exceptions=True
+    )
+    if isinstance(outcome, BaseException):
         await subject.runner.clear(tag)
+    return outcome
 
 
 async def _exercise(subject: StepRunnerUnderTest, tag: RequestId, actions: tuple[str, ...]) -> None:

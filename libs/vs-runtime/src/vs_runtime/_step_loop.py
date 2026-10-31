@@ -446,12 +446,12 @@ class _StepLoop[S]:
             await asyncio.gather(*tasks, return_exceptions=True)
 
 
-async def _await(task: asyncio.Future[object]) -> None:
+async def _await[T](task: asyncio.Future[T]) -> None:
     """Wait for ``task`` to end without raising what it raised or being cancelled by it."""
     await asyncio.wait({task})
 
 
-def _drop(task: asyncio.Future[object]) -> None:
+def _drop[T](task: asyncio.Future[T]) -> None:
     """Consume the result of an attempt the loop gave up on, so a late return is dropped."""
     if not task.cancelled():
         task.exception()
