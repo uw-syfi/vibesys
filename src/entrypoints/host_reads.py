@@ -2,10 +2,9 @@
 
 Every read is a new process, so what a read imports is paid by every read: a catalog read does
 tens of milliseconds of work and the import of what it never uses would cost ten times that.
-:class:`ReadHost` therefore builds each fact the first time a read asks for it. ``list-compute``
-never constructs the project catalog, the registry or the agent library, and ``list-tasks`` never
-constructs the compute settings. ``describe-machine`` and ``preflight-run`` genuinely read the
-whole host (its registry, machine probes and launcher), so they build the helper's host on use.
+:class:`ReadHost` is the host's facts (``entrypoints.host_facts``), each built the first time a
+read asks for it. ``describe-machine`` and ``preflight-run`` genuinely read the whole host (its
+registry, machine probes and launcher), so they build the helper's host on use.
 
 Public surface: ``ReadHost``, ``read_source`` and ``serve_read``.
 """
@@ -14,118 +13,54 @@ from __future__ import annotations
 
 import os
 from functools import cached_property
-from importlib import import_module
-from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vs_sim.api import ProcessesProbe, SubprocessPipedProcessLauncher
+from entrypoints.host_facts import HostFacts
+from server.lazy_modules import lazy_module
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
-    from server.host_agent_logins import AgentLibraryLogins
-    from server.host_api import HarnessOption, HelperError, RunPreflightReply, RunPreflightRequest
-    from server.host_compute_runtime import MachineCompute
-    from server.host_helper_os import FileProjects, OsDirectories
-    from server.host_helper_requests import ExampleProjects, HelperHost
-    from server.host_machine_facts import MachineDescription
-    from server.host_operation_reads import HostReadSource
-    from server.registry import LiveRegistry
-    from vs_sim.api import Platform, SleepingClock
+    from entrypoints import host_helper
+    from server import host_api, host_helper_requests, host_machine_facts, host_operation_reads
+    from vs_sim.api import Platform
+else:
+    host_helper = lazy_module("entrypoints.host_helper")
+    host_helper_requests = lazy_module("server.host_helper_requests")
+    host_operation_reads = lazy_module("server.host_operation_reads")
 
 
-class ReadHost:
-    """The host facts a registered read asks for; each is built on first use and kept."""
+class ReadHost(HostFacts):
+    """The host facts a registered read asks for, and the reads that need the whole host."""
 
-    def __init__(self, environ: Mapping[str, str], uid: int, platform: Platform) -> None:
-        """Bind this process's environment and platform; nothing is constructed yet."""
-        self._environ = environ
-        self._uid = uid
-        self._platform = platform
-
-    @cached_property
-    def clock(self) -> SleepingClock:
-        """Wall-clock epoch seconds."""
-        return self._platform.clock
-
-    @cached_property
-    def projects(self) -> FileProjects:
-        """Project metadata, authored tasks and the runs' journals on this filesystem."""
-        os_projects = import_module("server.host_helper_os")
-        projects = import_module("vs_project.api")
-        return os_projects.FileProjects(
-            projects.git_repositories(projects.Git(self._platform.processes)),
-            self._platform.threads,
-            clock=self.clock,
-        )
-
-    @cached_property
-    def directories(self) -> OsDirectories:
-        """Path expansion and the home directory."""
-        return import_module("server.host_helper_os").OsDirectories()
-
-    @cached_property
-    def examples(self) -> ExampleProjects:
-        """This checkout's example catalog and project maker."""
-        catalog = import_module("entrypoints.host_example_projects")
-        return catalog.checkout_example_projects(self._platform.processes)
-
-    @cached_property
-    def compute(self) -> MachineCompute:
-        """The compute settings, from this account's configuration files."""
-        adapters = import_module("server.host_compute_runtime")
-        return adapters.MachineCompute(
-            adapters.OsConfigFiles(),
-            ProcessesProbe(self._platform.processes),
-            home=str(Path.home()),
-            environ=self._environ,
-        )
-
-    @cached_property
-    def registry(self) -> LiveRegistry:
-        """The servers this host runs or ran; ``PermissionError`` when its root is unsafe."""
-        registry = import_module("server.registry")
-        root = registry.instance_root(self._environ, self._uid)
-        return registry.LiveRegistry(registry.FileInstanceStore(root), self.clock)
-
-    @cached_property
-    def logins(self) -> AgentLibraryLogins:
-        """Each vetted harness's login facts."""
-        launcher = SubprocessPipedProcessLauncher()
-        return import_module("server.host_agent_logins").host_logins(
-            launcher, self._platform.threads
-        )
-
-    def harnesses(self) -> tuple[HarnessOption, ...]:
-        """The agent library's vetted harnesses."""
-        return import_module("entrypoints.host_harnesses").vetted_harnesses()
-
-    def describe(self) -> MachineDescription:
+    def describe(self) -> host_machine_facts.MachineDescription:
         """What this machine offers runs; reads the whole host."""
-        requests = import_module("server.host_helper_requests")
-        return requests.describe_machine(self._whole_host)
+        return host_helper_requests.describe_machine(self._whole_host)
 
-    def preflight(self, request: RunPreflightRequest) -> RunPreflightReply | HelperError:
+    def preflight(
+        self, request: host_api.RunPreflightRequest
+    ) -> host_api.RunPreflightReply | host_api.HelperError:
         """Whether the run these inputs describe can start; reads the whole host."""
-        requests = import_module("server.host_helper_requests")
-        return requests.preflight_facts(request, self._whole_host)
+        return host_helper_requests.preflight_facts(request, self._whole_host)
 
     @cached_property
-    def _whole_host(self) -> HelperHost:
+    def _whole_host(self) -> host_helper_requests.HelperHost:
         """The helper's host with every collaborator; built only by a read that needs them all."""
-        return import_module("entrypoints.host_helper").real_host(
-            self._environ, self._uid, self._platform.threads
-        )
+        return host_helper.real_host(self._environ, self._uid, self._threads)
 
 
-def read_source(platform: Platform) -> HostReadSource:
+def read_source(platform: Platform) -> host_operation_reads.HostReadSource:
     """The read adapter over this process's user, host and ``platform``."""
-    host = ReadHost(os.environ, os.getuid(), platform)
-    reads = import_module("server.host_operation_reads")
-    return reads.HostReadSource(host, None, describe=host.describe, preflight=host.preflight)
+    host = ReadHost(
+        os.environ,
+        os.getuid(),
+        clock=platform.clock,
+        threads=platform.threads,
+        processes=platform.processes,
+    )
+    return host_operation_reads.HostReadSource(
+        host, None, describe=host.describe, preflight=host.preflight
+    )
 
 
 def serve_read(cli: str, payload: bytes, *, platform: Platform) -> bytes:
     """Answer registered read ``cli`` for this process's user; the reply is the envelope bytes."""
-    reads = import_module("server.host_operation_reads")
-    return reads.answer_registered_read(cli, payload, read_source(platform))
+    return host_operation_reads.answer_registered_read(cli, payload, read_source(platform))

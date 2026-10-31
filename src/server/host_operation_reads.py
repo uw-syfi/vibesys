@@ -5,8 +5,8 @@ neither the helper channel nor a live run. Read refusals retain their closed
 category; callers receive a validated registry response.
 
 ``vibesys host <read>`` is a new process per read, so every module this one loads at
-import is paid by every read. It therefore names the host models only for type checking and
-loads each at the read or refusal that needs it.
+import is paid by every read. It therefore declares the modules only some reads use as lazy
+modules (``server.lazy_modules``), loaded at the read or refusal that needs them.
 
 Public surface: HostReadFacts, HostReadSource, ReadRefusedError,
 read_failure_category, answer_registered_read and stream_saved_runs.
@@ -14,51 +14,58 @@ read_failure_category, answer_registered_read and stream_saved_runs.
 
 from __future__ import annotations
 
-from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+from server.lazy_modules import lazy_module
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator
-    from types import ModuleType
 
+    from server import (
+        host_api,
+        host_compute,
+        host_envelope,
+        host_examples,
+        host_run_reads,
+        host_run_summary,
+        host_run_wire,
+        host_saved_runs,
+    )
     from server.host_agent_logins import AgentLogin
-    from server.host_api import (
-        HarnessOption,
-        HelperError,
-        RunDigest,
-        RunDigestUnreadable,
-        RunPreflightReply,
-        RunPreflightRequest,
-    )
-    from server.host_compute import ComputeError, ComputeSettings
-    from server.host_envelope import HelperErrorCode
-    from server.host_examples import (
-        ExampleDestination,
-        ExampleList,
-        ProjectLookupError,
-        TaskGoal,
-        TaskList,
-    )
     from server.host_machine_facts import MachineDescription
-    from server.host_run_reads import ProjectRun
     from server.registry import LiveRegistry
     from server.run_summary import Summarized
+    from vibesys.api.host_operations import reads as read_operations
+    from vibesys.api.host_operations import saved_runs
+    from vs_proto import api as wire
     from vs_proto.api import FailureCategory
     from vs_proto.api import host_payloads as pb
     from vs_sim.api import Clock
+else:
+    host_api = lazy_module("server.host_api")
+    host_compute = lazy_module("server.host_compute")
+    host_envelope = lazy_module("server.host_envelope")
+    host_examples = lazy_module("server.host_examples")
+    host_run_reads = lazy_module("server.host_run_reads")
+    host_run_summary = lazy_module("server.host_run_summary")
+    host_run_wire = lazy_module("server.host_run_wire")
+    host_saved_runs = lazy_module("server.host_saved_runs")
+    read_operations = lazy_module("vibesys.api.host_operations.reads")
+    saved_runs = lazy_module("vibesys.api.host_operations.saved_runs")
+    wire = lazy_module("vs_proto.api")
 
 
 class _ReadProjects(Protocol):
-    def stream_runs(self, project: Path) -> tuple[Path, Iterator[ProjectRun]]: ...
-    def tasks(self, project: Path) -> TaskList: ...
-    def task_goal(self, project: Path, task: str) -> TaskGoal: ...
+    def stream_runs(self, project: Path) -> tuple[Path, Iterator[host_run_reads.ProjectRun]]: ...
+    def tasks(self, project: Path) -> host_examples.TaskList: ...
+    def task_goal(self, project: Path, task: str) -> host_examples.TaskGoal: ...
     def named_runs(
         self, project: Path, run_ids: Iterable[str]
-    ) -> tuple[Path, tuple[ProjectRun, ...]]: ...
+    ) -> tuple[Path, tuple[host_run_reads.ProjectRun, ...]]: ...
     def run_digest(
         self, project_root: Path, run_id: str
-    ) -> RunDigest | RunDigestUnreadable | None: ...
+    ) -> host_api.RunDigest | host_api.RunDigestUnreadable | None: ...
     def run_summary(self, project: Path, run_id: str) -> Summarized: ...
 
 
@@ -68,14 +75,14 @@ class _ReadDirectories(Protocol):
 
 
 class _ReadExamples(Protocol):
-    def list(self, *, with_catalogue: bool) -> ExampleList: ...
+    def list(self, *, with_catalogue: bool) -> host_examples.ExampleList: ...
     def destination(
         self, example: str, destination: Path
-    ) -> tuple[ExampleDestination, str | None]: ...
+    ) -> tuple[host_examples.ExampleDestination, str | None]: ...
 
 
 class _ReadCompute(Protocol):
-    def settings(self) -> ComputeSettings: ...
+    def settings(self) -> host_compute.ComputeSettings: ...
 
 
 class _ReadLogins(Protocol):
@@ -120,7 +127,7 @@ class HostReadFacts(Protocol):
         """Provider-owned login facts."""
         ...
 
-    def harnesses(self) -> tuple[HarnessOption, ...]:
+    def harnesses(self) -> tuple[host_api.HarnessOption, ...]:
         """Vetted harness facts from the agent library."""
         ...
 
@@ -128,7 +135,7 @@ class HostReadFacts(Protocol):
 class ReadRefusedError(Exception):
     """A probe refused a read with a closed category and diagnostic."""
 
-    def __init__(self, refusal: HelperError) -> None:
+    def __init__(self, refusal: host_api.HelperError) -> None:
         """Retain the original refusal for both transport adapters."""
         self.refusal = refusal
         super().__init__(refusal.message)
@@ -143,7 +150,9 @@ class HostReadSource:
         role_order: tuple[str, ...] | None,
         *,
         describe: Callable[[], MachineDescription],
-        preflight: Callable[[RunPreflightRequest], RunPreflightReply | HelperError],
+        preflight: Callable[
+            [host_api.RunPreflightRequest], host_api.RunPreflightReply | host_api.HelperError
+        ],
     ) -> None:
         """Bind host I/O and the existing machine/preflight probe adapters."""
         self._host = host
@@ -160,69 +169,66 @@ class HostReadSource:
     def saved_runs(self, project: str) -> tuple[str, Iterable[pb.SavedRun]]:
         """One lazy scan through the existing project catalog owner, in discovery order."""
         root, runs = self._host.projects.stream_runs(self._path(project))
-        return str(root), import_module("server.host_saved_runs").saved_run_rows(root, runs)
+        return str(root), host_saved_runs.saved_run_rows(root, runs)
 
     def run_digests(self, request: pb.ListRunDigestsRequest) -> pb.ListRunDigestsResponse:
         """Read each run's digest through the owner of the helper's project run listing."""
-        requests = import_module("server.host_run_reads")
-        runs = requests.named_run_digests(
+        runs = host_run_reads.named_run_digests(
             self._host,
             self._path(request.project),
             request.run_ids,
             with_dashboard=request.with_dashboard,
         )
-        return import_module("server.host_run_wire").digests_response(request.request_id, runs)
+        return host_run_wire.digests_response(request.request_id, runs)
 
     def usage_window(self, request: pb.UsageWindowRequest) -> pb.UsageWindowResponse:
         """Sum the runs' usage through the owner of the helper's usage window."""
         if request.since is None or request.until is None:
             message = "since and until: a window needs both ends"
             raise ValueError(message)
-        legacy = import_module("server.host_run_summary").UsageWindowRequest(
+        legacy = host_run_summary.UsageWindowRequest(
             request_id=request.request_id,
-            deadline_ms=_wire().host_operations.UsageWindow.total_ms,
+            deadline_ms=wire.host_operations.UsageWindow.total_ms,
             project=request.project,
             run_ids=tuple(request.run_ids),
             since=request.since.to_datetime(),
             until=request.until.to_datetime(),
         )
-        requests = import_module("server.host_run_reads")
-        reply = requests.usage_window_reply(legacy, self._host, self._path(request.project))
-        return import_module("server.host_run_wire").usage_response(request.request_id, reply)
+        reply = host_run_reads.usage_window_reply(legacy, self._host, self._path(request.project))
+        return host_run_wire.usage_response(request.request_id, reply)
 
     def tasks(self, project: str) -> pb.TaskList:
         """Read through the existing project's task owner."""
-        return _wire().from_mapping(
-            _wire().host_payloads.TaskList,
+        return wire.from_mapping(
+            wire.host_payloads.TaskList,
             self._host.projects.tasks(self._path(project)).model_dump(mode="json"),
         )
 
     def logins(self) -> list[pb.AgentLogin]:
         """Project the provider's observed login state without reading secrets."""
         return [
-            _wire().from_mapping(_wire().host_payloads.AgentLogin, login.model_dump(mode="json"))
+            wire.from_mapping(wire.host_payloads.AgentLogin, login.model_dump(mode="json"))
             for login in self._host.logins.list()
         ]
 
     def harnesses(self) -> list[pb.HarnessOption]:
         """Project vetted harness facts; the catalog's order is the answer's order."""
         return [
-            _wire().from_mapping(
-                _wire().host_payloads.HarnessOption, option.model_dump(mode="json")
-            )
+            wire.from_mapping(wire.host_payloads.HarnessOption, option.model_dump(mode="json"))
             for option in self._host.harnesses()
         ]
 
     def inspect_destination(self, example: str, destination: str) -> pb.InspectDestinationResponse:
         """What creating ``example`` would find at ``destination``."""
-        models = import_module("server.host_examples")
         state, project = self._host.examples.destination(example, self._path(destination))
-        payloads = _wire().host_payloads
+        payloads = wire.host_payloads
         states = {
-            models.ExampleDestination.ABSENT: payloads.DestinationState.ABSENT,
-            models.ExampleDestination.EMPTY: payloads.DestinationState.EMPTY,
-            models.ExampleDestination.EXAMPLE_PROJECT: payloads.DestinationState.EXAMPLE_PROJECT,
-            models.ExampleDestination.OCCUPIED: payloads.DestinationState.OCCUPIED,
+            host_examples.ExampleDestination.ABSENT: payloads.DestinationState.ABSENT,
+            host_examples.ExampleDestination.EMPTY: payloads.DestinationState.EMPTY,
+            host_examples.ExampleDestination.EXAMPLE_PROJECT: (
+                payloads.DestinationState.EXAMPLE_PROJECT
+            ),
+            host_examples.ExampleDestination.OCCUPIED: payloads.DestinationState.OCCUPIED,
         }
         return payloads.InspectDestinationResponse(
             state=states[state],
@@ -231,36 +237,35 @@ class HostReadSource:
 
     def examples(self, *, with_catalogue: bool) -> pb.ExampleList:
         """Project the checkout owner's example metadata without dropping details."""
-        return _wire().from_mapping(
-            _wire().host_payloads.ExampleList,
+        return wire.from_mapping(
+            wire.host_payloads.ExampleList,
             self._host.examples.list(with_catalogue=with_catalogue).model_dump(mode="json"),
         )
 
     def task_goal(self, project: str, task: str) -> pb.TaskGoal:
         """Read the bounded authored task goal."""
-        return _wire().from_mapping(
-            _wire().host_payloads.TaskGoal,
+        return wire.from_mapping(
+            wire.host_payloads.TaskGoal,
             self._host.projects.task_goal(self._path(project), task).model_dump(mode="json"),
         )
 
     def machine(self) -> pb.MachineDescription:
         """Project the current machine probe snapshot."""
-        return _wire().from_mapping(
-            _wire().host_payloads.MachineDescription,
+        return wire.from_mapping(
+            wire.host_payloads.MachineDescription,
             self._describe().model_dump(mode="json"),
         )
 
     def compute(self) -> pb.ComputeSettings:
         """Project source-aware settings; this operation performs no mutation."""
-        return _wire().from_mapping(
-            _wire().host_payloads.ComputeSettings,
+        return wire.from_mapping(
+            wire.host_payloads.ComputeSettings,
             self._host.compute.settings().model_dump(mode="json"),
         )
 
     def preflight(self, request: pb.PreflightRunRequest) -> pb.PreflightRunResponse:
         """Revalidate the temporary legacy projection before invoking its probe owner."""
-        models = import_module("server.host_api")
-        payload = _wire().to_mapping(request)
+        payload = wire.to_mapping(request)
         # Legacy diagnostics choose the first role in insertion order. Protobuf
         # maps have no ordering, so retain only that display preference here.
         if self._role_order is not None:
@@ -269,31 +274,26 @@ class HostReadSource:
                 message = "agents: expected a projected role mapping"
                 raise TypeError(message)
             payload["agents"] = {role: agents[role] for role in self._role_order}
-        legacy = models.RunPreflightRequest.model_validate(
-            {**payload, "deadline_ms": _wire().host_operations.PreflightRun.total_ms}
+        legacy = host_api.RunPreflightRequest.model_validate(
+            {**payload, "deadline_ms": wire.host_operations.PreflightRun.total_ms}
         )
         result = self._preflight(legacy)
-        if isinstance(result, models.HelperError):
+        if isinstance(result, host_api.HelperError):
             raise ReadRefusedError(result)
-        return _wire().from_mapping(
-            _wire().host_payloads.PreflightRunResponse,
+        return wire.from_mapping(
+            wire.host_payloads.PreflightRunResponse,
             result.model_dump(mode="json", exclude={"type"}),
         )
 
 
-def _wire() -> ModuleType:
-    """Load protobuf contracts only when a migrated read executes, preserving light startup."""
-    return import_module("vs_proto.api")
-
-
-def read_failure_category(code: HelperErrorCode) -> FailureCategory:
+def read_failure_category(code: host_envelope.HelperErrorCode) -> FailureCategory:
     """Map one helper refusal onto the closed failure category.
 
     Callers branch on the category. ``CLUSTER_READ_ONLY`` is permission denied:
     the file's owner is not this helper.
     """
-    failure = _wire().FailureCategory
-    codes = import_module("server.host_envelope").HelperErrorCode
+    failure = wire.FailureCategory
+    codes = host_envelope.HelperErrorCode
     categories = {
         codes.INVALID_REQUEST: failure.INVALID_INPUT,
         codes.TASK_INVALID: failure.INVALID_INPUT,
@@ -341,39 +341,25 @@ def read_failure_category(code: HelperErrorCode) -> FailureCategory:
     return found
 
 
-def _domain_refusals() -> tuple[type[ProjectLookupError], type[ComputeError]]:
-    """The errors a host fact raises to refuse a read, each carrying its helper code.
-
-    An ``except`` clause evaluates its types only once an error is raised, so a read that
-    succeeds never loads the modules that define them.
-    """
-    return (
-        import_module("server.host_examples").ProjectLookupError,
-        import_module("server.host_compute").ComputeError,
-    )
-
-
 def answer_registered_read(cli: str, payload: bytes, source: HostReadSource) -> bytes:
     """Run one registered read for ``vibesys host`` and return the envelope bytes."""
-    operations = import_module("vibesys.api.host_operations.reads")
     try:
-        return operations.execute_host_read(payload, source, cli=cli)
+        return read_operations.execute_host_read(payload, source, cli=cli)
     except ReadRefusedError as error:
         category = read_failure_category(error.refusal.code)
-        return operations.host_read_failure(category, error.refusal.message)
-    except _domain_refusals() as error:
-        return operations.host_read_failure(read_failure_category(error.code), str(error))
+        return read_operations.host_read_failure(category, error.refusal.message)
+    except (host_examples.ProjectLookupError, host_compute.ComputeError) as error:
+        return read_operations.host_read_failure(read_failure_category(error.code), str(error))
 
 
 def stream_saved_runs(
     payload: bytes, source: HostReadSource, write: Callable[[bytes], object]
 ) -> None:
     """Run the saved-run stream for ``vibesys host``; a refusal ends it as a typed failure frame."""
-    operations = import_module("vibesys.api.host_operations.api")
     try:
-        operations.serve_saved_runs(payload, source, cli="stream-saved-runs", write=write)
-    except import_module("server.host_examples").ProjectLookupError as error:
-        write(operations.host_watch_failure(read_failure_category(error.code), str(error)))
+        saved_runs.serve_saved_runs(payload, source, cli="stream-saved-runs", write=write)
+    except host_examples.ProjectLookupError as error:
+        write(saved_runs.host_watch_failure(read_failure_category(error.code), str(error)))
 
 
 __all__ = [

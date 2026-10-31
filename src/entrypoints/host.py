@@ -2,26 +2,25 @@
 
 Each command is a new process, so a command pays for every module its family imports. The
 module level holds the command tables and nothing else a command might not use; each family
-imports its own adapters when it is dispatched, and a registered read builds only the host
-facts it asks for (``entrypoints.host_reads``).
+is a lazy module (``server.lazy_modules``) loaded when its command is dispatched, and a
+registered read builds only the host facts it asks for (``entrypoints.host_reads``).
 """
 
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from collections import Counter
-from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+from server.lazy_modules import lazy_module
 from vs_proto.api import host_operations
-from vs_proto.api import host_payloads as pb
 from vs_sim.api import (
     OsThreads,
     Platform,
     Signals,
+    SubprocessPipedProcessLauncher,
     SystemClock,
     WakeupFdSignalRelay,
 )
@@ -57,8 +56,25 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from typing import BinaryIO
 
-    from vibesys.api.host_operations.api import LoginRefusedFact, LoginStartedFact
-    from vs_sim.api import Processes, SignalRelay, SleepingClock, Threads
+    from entrypoints import chat_session, host_mutations, host_reads
+    from server import host_agent_logins, host_operation_reads
+    from vibesys.api import host as host_api
+    from vibesys.api import transport as conversion
+    from vibesys.api.host_operations import api as login_operations
+    from vibesys.api.host_operations import candidate
+    from vs_project import api as projects
+    from vs_sim.api import SignalRelay, SleepingClock, Threads
+else:
+    chat_session = lazy_module("entrypoints.chat_session")
+    host_mutations = lazy_module("entrypoints.host_mutations")
+    host_reads = lazy_module("entrypoints.host_reads")
+    host_agent_logins = lazy_module("server.host_agent_logins")
+    host_operation_reads = lazy_module("server.host_operation_reads")
+    host_api = lazy_module("vibesys.api.host")
+    conversion = lazy_module("vibesys.api.transport")
+    login_operations = lazy_module("vibesys.api.host_operations.api")
+    candidate = lazy_module("vibesys.api.host_operations.candidate")
+    projects = lazy_module("vs_project.api")
 
 
 def run(argv: list[str], *, cwd: Path, clock: SleepingClock | None = None) -> tuple[int, str, str]:
@@ -82,8 +98,6 @@ def run(argv: list[str], *, cwd: Path, clock: SleepingClock | None = None) -> tu
         help="rebuild runs this migration already converted, from their untouched journals",
     )
     args = parser.parse_args(argv)
-    conversion = import_module("vibesys.api.transport")
-    projects = import_module("vs_project.api")
     clock = SystemClock() if clock is None else clock
     root = args.project if args.project.is_absolute() else cwd / args.project
     try:
@@ -115,7 +129,6 @@ def main(
 ) -> int:
     """Run one host method from the current directory."""
     runtime = Platform.real() if platform is None else platform
-    threads = runtime.threads
     arguments = sys.argv[1:] if argv is None else argv
     if arguments and arguments[0] == "inspect-candidate":
         parser = argparse.ArgumentParser(
@@ -125,8 +138,7 @@ def main(
         parser.parse_args(arguments[1:])
         source = sys.stdin.buffer if stdin is None else stdin
         destination = sys.stdout.buffer if stdout is None else stdout
-        operations = import_module("vibesys.api.host_operations.api")
-        destination.write(operations.execute_inspect_candidate(source.read((1 << 20) + 1)))
+        destination.write(candidate.execute_inspect_candidate(source.read((1 << 20) + 1)))
         return 0
     if arguments and arguments[0] in _READ_COMMANDS:
         parser = argparse.ArgumentParser(
@@ -136,8 +148,9 @@ def main(
         parser.parse_args(arguments[1:])
         source = sys.stdin.buffer if stdin is None else stdin
         destination = sys.stdout.buffer if stdout is None else stdout
-        serve_read = import_module("entrypoints.host_reads").serve_read
-        destination.write(serve_read(arguments[0], source.read((1 << 20) + 1), platform=runtime))
+        destination.write(
+            host_reads.serve_read(arguments[0], source.read((1 << 20) + 1), platform=runtime)
+        )
         return 0
     if arguments and arguments[0] in _WATCH_COMMANDS:
         parser = argparse.ArgumentParser(
@@ -159,14 +172,10 @@ def main(
         parser.parse_args(arguments[1:])
         source = sys.stdin.buffer if stdin is None else stdin
         destination = sys.stdout.buffer if stdout is None else stdout
-        owned = threads
         destination.write(
-            import_module("vibesys.api.host").terminate_host(
-                source.read((1 << 20) + 1),
-                platform=runtime,
+            host_mutations.serve_mutation(
+                _MUTATION_COMMANDS[arguments[0]], source.read((1 << 20) + 1), runtime
             )
-            if _MUTATION_COMMANDS[arguments[0]] == "terminate_run"
-            else _serve_mutation(arguments[0], source.read((1 << 20) + 1), owned, runtime.processes)
         )
         return 0
     if arguments and arguments[0] in _HOST_CALL_COMMANDS:
@@ -178,9 +187,9 @@ def main(
         source = sys.stdin.buffer if stdin is None else stdin
         destination = sys.stdout.buffer if stdout is None else stdout
         destination.write(
-            import_module("vibesys.api.host").host_call(
+            host_api.host_call(
                 source.read((1 << 20) + 1),
-                start_chat=import_module("entrypoints.chat_session").start_chat
+                start_chat=chat_session.start_chat
                 if _HOST_CALL_COMMANDS[arguments[0]] == "chat_message"
                 else None,
                 platform=runtime,
@@ -195,21 +204,20 @@ def main(
 
 def _serve_saved_runs(payload: bytes, destination: BinaryIO, platform: Platform) -> None:
     """Stream one project's runs: one scan in this process, a frame as each batch is read."""
-    facts = import_module("entrypoints.host_reads").read_source(platform)
+    facts = host_reads.read_source(platform)
 
     def write(chunk: bytes) -> None:
         destination.write(chunk)
         # The gateway's progress bound counts what reached it, not what this process buffered.
         destination.flush()
 
-    import_module("server.host_operation_reads").stream_saved_runs(payload, facts, write)
+    host_operation_reads.stream_saved_runs(payload, facts, write)
 
 
 def _serve_login(payload: bytes, destination: BinaryIO, platform: Platform) -> None:
     """Wire the native login watch without constructing unrelated helper resources."""
     threads = platform.threads
-    launcher = import_module("vs_sim.api").SubprocessPipedProcessLauncher()
-    logins = import_module("server.host_agent_logins").host_logins(launcher, threads)
+    logins = host_agent_logins.host_logins(SubprocessPipedProcessLauncher(), threads)
     watch_login(payload, destination, logins, threads, WakeupFdSignalRelay(threads))
 
 
@@ -228,21 +236,21 @@ def watch_login(
     signals: SignalRelay,
 ) -> None:
     """Start one login and hold this process until it ends or this process is signalled."""
-    models = import_module("server.host_agent_logins")
-    operations = import_module("vibesys.api.host_operations.api")
     held: list[LoginHold] = []
     stop = threads.event()
 
-    def start(provider: str) -> LoginStartedFact | LoginRefusedFact:
+    def start(
+        provider: str,
+    ) -> login_operations.LoginStartedFact | login_operations.LoginRefusedFact:
         started = logins.hold(provider)
         held.append(started)
         result = started.result
-        if isinstance(result, models.LoginStarted):
-            return operations.LoginStartedFact(result.instruction)
-        if not isinstance(result, models.LoginUnavailable):
+        if isinstance(result, host_agent_logins.LoginStarted):
+            return login_operations.LoginStartedFact(result.instruction)
+        if not isinstance(result, host_agent_logins.LoginUnavailable):
             message = "login result is neither started nor unavailable"
             raise TypeError(message)
-        return operations.LoginRefusedFact(
+        return login_operations.LoginRefusedFact(
             reason=result.reason.value,
             command=result.command,
             detail=result.detail or "",
@@ -265,103 +273,7 @@ def watch_login(
         destination.flush()
 
     with signals.relay([Signals.SIGTERM], lambda _number: stop.set()):
-        operations.serve_login(payload, cli="login", start=start, write=write, wait=wait)
-
-
-def _serve_mutation(cli: str, payload: bytes, threads: Threads, processes: Processes) -> bytes:
-    """Dispatch one mutation command. Cluster and project changes are not starts."""
-    slot = _MUTATION_COMMANDS[cli]
-    if slot == "start_run":
-        return _serve_start(payload, threads)
-    if slot in {"put_cluster", "remove_cluster", "test_cluster"}:
-        return _serve_cluster(payload, processes)
-    return _serve_project(payload, threads)
-
-
-def _serve_project(payload: bytes, threads: Threads) -> bytes:
-    """Admit one project change, then apply it. Replay does not apply it again."""
-    requests = import_module("server.host_helper_requests")
-    refused = import_module("server.host_examples").ProjectLookupError
-    operations = import_module("vibesys.api.host_operations.api")
-    host = import_module("entrypoints.host_helper").real_host(os.environ, os.getuid(), threads)
-
-    def apply(slot: str, request: object) -> object:
-        if not isinstance(request, pb.CreateExampleRequest | pb.CopyProjectRequest):
-            message = "project request is not a project mutation"
-            raise operations.ProjectRefusedError(message)
-        try:
-            return requests.apply_registered_project(slot, request, host)
-        except (refused, TypeError, ValueError) as exc:
-            raise operations.ProjectRefusedError(str(exc)) from exc
-
-    return operations.serve_project(
-        payload,
-        store=import_module("vs_project.api").Project.admissions(),
-        host_user=str(os.getuid()),
-        apply=apply,
-    )
-
-
-def _serve_cluster(payload: bytes, processes: Processes) -> bytes:
-    """Admit one cluster change, then apply it. Replay does not apply it again."""
-    models = import_module("server.host_compute")
-    refused = models.ComputeError
-    adapters = import_module("server.host_compute_runtime")
-    operations = import_module("vibesys.api.host_operations.api")
-    probe = import_module("vs_sim.api").ProcessesProbe(processes)
-    compute = adapters.MachineCompute(
-        adapters.OsConfigFiles(), probe, home=str(Path.home()), environ=os.environ
-    )
-
-    def apply(slot: str, request: object) -> object:
-        if not isinstance(
-            request, pb.PutClusterRequest | pb.RemoveClusterRequest | pb.TestClusterRequest
-        ):
-            message = "cluster request is not a cluster mutation"
-            raise operations.ClusterRefusedError(message)
-        try:
-            return models.apply_registered_cluster(slot, request, compute)
-        except (refused, TypeError, ValueError) as exc:
-            raise operations.ClusterRefusedError(str(exc)) from exc
-
-    return operations.serve_cluster(
-        payload,
-        store=import_module("vs_project.api").Project.admissions(),
-        host_user=str(os.getuid()),
-        apply=apply,
-    )
-
-
-def _serve_start(payload: bytes, threads: Threads) -> bytes:
-    """Admit the start, then launch through the helper. Replay does not launch."""
-    requests = import_module("server.host_helper_requests")
-    refused = import_module("server.host_examples").ProjectLookupError
-    models = import_module("server.host_api")
-    operations = import_module("vibesys.api.host_operations.api")
-
-    def launch(request: pb.StartRunRequest) -> tuple[str, str]:
-        try:
-            body = requests.registry_start_request(request)
-        except (TypeError, ValueError) as exc:
-            raise operations.StartRefusedError(str(exc)) from exc
-        host = import_module("entrypoints.host_helper").real_host(os.environ, os.getuid(), threads)
-        try:
-            reply = requests.launch_registered_run(body, host)
-        except refused as exc:
-            raise operations.StartRefusedError(str(exc)) from exc
-        if isinstance(reply, models.HelperError):
-            raise operations.StartRefusedError(reply.message)
-        started = reply.launch
-        if isinstance(started, models.DetachedLaunchFailure):
-            raise operations.StartRefusedError(started.message)
-        return started.run_id, started.id
-
-    return operations.serve_start(
-        payload,
-        store=import_module("vs_project.api").Project.admissions(),
-        launch=launch,
-        host_user=str(os.getuid()),
-    )
+        login_operations.serve_login(payload, cli="login", start=start, write=write, wait=wait)
 
 
 if __name__ == "__main__":

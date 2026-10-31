@@ -89,7 +89,7 @@ layers_explicit_depends_on = true
 
 [[modules]]
 path = "entrypoints"
-depends_on = ["server.chat", "vibesys.api.chat", "vs_proto", "vs_runlog", "vibesys.api.host", "vibesys.api.host_operations", "vibesys.api.transport", "server.api", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs", "server.host_helper_machine", "server.host_compute_runtime", "server.host_helper_readers", "server.host_agent_logins", "server.host_compute", "server.host_preflight", "server.host_examples", "server.host_harness", "server.host_machine_facts", "server.host_operation_reads", "server.host_task_goal", "vibesys.comparisons"]
+depends_on = ["server.chat", "vibesys.api.chat", "vs_proto", "vs_runlog", "vibesys.api.host", "vibesys.api.host_operations", "vibesys.api.transport", "server.api", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs", "server.host_helper_machine", "server.host_compute_runtime", "server.host_helper_readers", "server.host_agent_logins", "server.host_compute", "server.host_preflight", "server.host_examples", "server.host_harness", "server.host_machine_facts", "server.host_operation_reads", "server.host_task_goal", "server.lazy_modules", "vibesys.comparisons"]
 
 [[modules]]
 path = "headless"
@@ -170,6 +170,11 @@ depends_on = ["server.host_envelope"]
 # The helper's runs.summary messages. Light: Pydantic and the envelope.
 path = "server.host_run_summary"
 depends_on = ["server.host_envelope"]
+
+[[modules]]
+# Lazy module handles: a module imported at the first attribute read, typed by an import beside it.
+# Light; no internal imports.
+path = "server.lazy_modules"
 
 [[modules]]
 # The facts machine.describe reports: hardware, Docker, checkout, run counts. Light; no
@@ -2136,11 +2141,14 @@ depends_on = ["vibesys.fact_import", "vibesys.fact_import.reader"]
 
 [[modules]]
 path = "vibesys.api.host_operations"
-depends_on = ["vs_proto", "vibesys.api.host_operations._candidate", "vibesys.api.host_operations._compute", "vibesys.api.host_operations._handlers", "vibesys.api.host_operations._login", "vibesys.api.host_operations._project", "vibesys.api.host_operations._reads", "vibesys.api.host_operations._start"]
+depends_on = ["vs_proto", "vibesys.api.host_operations._candidate", "vibesys.api.host_operations._compute", "vibesys.api.host_operations._frames", "vibesys.api.host_operations._handlers", "vibesys.api.host_operations._login", "vibesys.api.host_operations._project", "vibesys.api.host_operations._reads", "vibesys.api.host_operations._start"]
 
 [[interfaces]]
+# One module per family of host operations, so a process imports only the family it serves:
+# `reads` (registered reads), `saved_runs` (the run-listing stream), `candidate` (candidate
+# inspection) and `api` (the admitted workflows).
 from = ["vibesys.api.host_operations"]
-expose = ["api", "api\\..*", "reads"]
+expose = ["api", "api\\..*", "reads", "saved_runs", "candidate"]
 
 [[modules]]
 path = "vibesys.api.host_operations._candidate"
@@ -2151,8 +2159,12 @@ path = "vibesys.api.host_operations._handlers"
 depends_on = ["vs_proto", "vibesys.api.host_operations._reads"]
 
 [[modules]]
+path = "vibesys.api.host_operations._frames"
+depends_on = []
+
+[[modules]]
 path = "vibesys.api.host_operations._login"
-depends_on = ["vs_proto"]
+depends_on = ["vs_proto", "vibesys.api.host_operations._frames"]
 
 [[modules]]
 path = "vibesys.api.host_operations._start"
@@ -2205,7 +2217,7 @@ expose = ["pause_now", "serve_terminate", "terminate_run"]
 
 [[modules]]
 path = "server.host_operation_reads"
-depends_on = ["server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_envelope", "server.host_examples", "server.host_machine_facts", "vs_proto", "vibesys.api.host_operations", "server.host_run_reads", "server.host_run_wire", "server.host_run_summary", "server.registry", "server.run_summary", "vs_sim.api"]
+depends_on = ["server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_envelope", "server.host_examples", "server.host_machine_facts", "vs_proto", "vibesys.api.host_operations", "server.host_run_reads", "server.host_run_wire", "server.host_run_summary", "server.host_saved_runs", "server.lazy_modules", "server.registry", "server.run_summary", "vs_sim.api"]
 
 [[interfaces]]
 from = ["server.host_operation_reads"]
