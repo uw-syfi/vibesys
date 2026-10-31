@@ -19,6 +19,7 @@ sys.path.insert(0, str(SCRIPTS))
 spec = importlib.util.spec_from_file_location("run_controller", SCRIPTS / "run.py")
 controller = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(controller)
+measurements = importlib.import_module("measurements")
 NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
 BASE, CANDIDATE = "a" * 40, "b" * 40
 
@@ -29,6 +30,10 @@ class Git:
     def __init__(self, root: Path) -> None:
         self.root = root
         self.head = BASE
+        self.live: set[int] = set()
+
+    def alive(self, pid: int) -> bool:
+        return pid in self.live
 
     def __call__(self, _cwd: Path, args: list[str]) -> str:
         if args == ["rev-parse", "--show-toplevel"]:
@@ -128,7 +133,7 @@ def test_legal_sequences_keep_rendered_ledger_consistent(
         )
         assert run.call("transition", "--id", item, "--to", target, "--reason", "evidence") == 0
         ledger = (run.path / "ledger.md").read_text()
-        assert len(ledger.splitlines()) == index + 3
+        assert ledger.count("| implement |") == index + 1
         assert f"| {target} |" in ledger
         assert controller.status(run.state(), NOW)["free_slots"] == 3
 
@@ -147,7 +152,10 @@ def test_finish_succeeds_iff_preconditions_hold(
     if opened:
         assert run.call("add", "--id", "open", "--kind", "profile", "--hypothesis", "inspect") == 0
     if commands:
-        assert run.call("track", "--id", "shell-1", "--description", "measurement") == 0
+        assert (
+            run.call("track", "--id", "shell-1", "--description", "measurement", "--pid", "123")
+            == 0
+        )
     succeeds = not early and not opened and fresh and not commands
     assert (run.call("finish", seconds=1109 if early else 1350) == 0) == succeeds
     assert (run.path.parent / "active").exists() != succeeds
@@ -184,14 +192,16 @@ def test_main_never_moves_without_better_and_judge_pass(
     assert (
         run.call("transition", "--id", "candidate", "--to", "won", "--reason", "judged") == 0
     ) == judge
+    assert run.call("idle", "--reason", "no more ideas") == 0
     allowed = judge and gain == 10
     assert (run.call("move-main", "--id", "candidate", seconds=100) == 0) == allowed
     assert run.git.head == (CANDIDATE if allowed else BASE)
     if allowed:
+        assert run.state()["idle_reason"] is None
         assert run.call("finish", seconds=1350) == 2
         run.record(CANDIDATE, [1980, 2000, 2020], 101)
         assert run.call("finish", seconds=1350) == 0
-        assert '"ratio": 20.0' in (run.path / "report.md").read_text()
+        assert '"ratio": 15.0' in (run.path / "report.md").read_text()
 
 
 def test_trial_two_early_finish_is_rejected(tmp_path: Path) -> None:
@@ -257,9 +267,89 @@ def test_interleaved_work_sequences_preserve_ledger_and_slot_invariants(
         assert 0 <= busy <= after["fanout"]
         assert controller.status(after, NOW)["free_slots"] == after["fanout"] - busy
         ledger = (run.path / "ledger.md").read_text()
-        assert len(ledger.splitlines()) == len(after["items"]) + 2
+        assert ledger.count("| implement |") == len(after["items"])
         for key, row in after["items"].items():
             assert (
                 f"| {key} | implement | reduce copies | {row['state']} | {row['reason']} |"
                 in ledger
             )
+
+
+@given(early=st.booleans(), reason=st.sampled_from(["", " ", "no useful hypotheses"]))
+def test_early_finish_requires_explicit_reason(
+    tmp_path_factory: pytest.TempPathFactory, *, early: bool, reason: str
+) -> None:
+    run = Run(tmp_path_factory.mktemp("early"))
+    run.record(BASE, [10, 11, 12], 1)
+    args = ["finish", "--reason", reason]
+    if early:
+        args.append("--early")
+    succeeds = early and bool(reason.strip())
+    assert (run.call(*args, seconds=100) == 0) == succeeds
+    if succeeds:
+        assert reason in (run.path / "report.md").read_text()
+        assert reason in (run.path / "ledger.md").read_text()
+
+
+@given(live=st.booleans())
+def test_untrack_checks_pid_before_deleting(
+    tmp_path_factory: pytest.TempPathFactory, *, live: bool
+) -> None:
+    run = Run(tmp_path_factory.mktemp("process"))
+    assert run.call("track", "--id", "timer", "--pid", "123", "--description", "sleep 165") == 0
+    if live:
+        run.git.live.add(123)
+    before = run.state()
+    assert (run.call("untrack", "--id", "timer") == 0) != live
+    if live:
+        assert run.state() == before
+
+
+def test_trial_three_running_sleep_cannot_be_untracked_or_finished(tmp_path: Path) -> None:
+    run = Run(tmp_path)
+    run.record(BASE, [10, 11, 12], 1)
+    assert run.call("finish", seconds=1200) == 2
+    assert run.call("track", "--id", "sleep", "--pid", "123", "--description", "sleep 165") == 0
+    run.git.live.add(123)
+    assert run.call("untrack", "--id", "sleep", seconds=1350) == 2
+    assert run.call("finish", seconds=1350) == 2
+    assert run.call("finish", "--early", "--reason", "done", seconds=1200) == 2
+    run.git.live.remove(123)
+    assert run.call("untrack", "--id", "sleep", seconds=1350) == 0
+    assert run.call("finish", seconds=1350) == 0
+
+
+@given(events=st.lists(st.sampled_from(["idle", "add", "returned", "abandoned"]), max_size=30))
+def test_idle_reason_sequences_invalidate_only_on_return(
+    tmp_path_factory: pytest.TempPathFactory, events: list[str]
+) -> None:
+    run = Run(tmp_path_factory.mktemp("idle"))
+    expected = None
+    for event in events:
+        if event == "idle":
+            assert run.call("idle", "--reason", "limited host capacity") == 0
+            expected = "limited host capacity"
+        elif event == "add":
+            run.call("add", "--id", "x", "--kind", "implement", "--hypothesis", "test")
+        else:
+            code = run.call("transition", "--id", "x", "--to", event, "--reason", "done")
+            if code == 0 and event == "returned":
+                expected = None
+        assert run.state()["idle_reason"] == expected
+        assert controller.status(run.state(), NOW)["idle_reason"] == expected
+
+
+def test_finish_reports_public_full_pool_comparison(tmp_path: Path) -> None:
+    run = Run(tmp_path)
+    run.record(BASE, [10, 11, 12], 1)
+    run.record(CANDIDATE, [100, 101, 102], 2)
+    state = run.state()
+    state.update(main_commit=CANDIDATE, main_moved_at=(NOW + timedelta(seconds=3)).isoformat())
+    (run.path / "run.json").write_text(json.dumps(state))
+    run.git.head = CANDIDATE
+    run.record(CANDIDATE, [200, 201, 202], 4)
+    expected = measurements.compare_commit(measurements.load_records(run.path), CANDIDATE, BASE)
+    assert run.call("finish", seconds=1350) == 0
+    report = (run.path / "report.md").read_text()
+    assert json.loads(report.split("```json\n")[1].split("\n```")[0]) == expected
+    assert "[1, 2, 3]" in report

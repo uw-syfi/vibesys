@@ -15,6 +15,7 @@ Confirm both match before you change anything (an empty branch name means detach
 Work only in this worktree.
 Return by: <ISO timestamp before the run deadline>; stop work and hand back by this time.
 Measurement setup: <build/start/readiness/stop commands, runtime arguments, resource allocation>.
+Measurement script: <absolute installed path to measure/scripts/measurements.py; no filesystem search>
 Task: .vibesys/tasks/<task>/ (read OBJECTIVE.md). Run directory: <abs path of $RUN>
 Load these skills first: <vibesys:implement-hypothesis | judge-candidate | combine-candidates |
   profile-revision>, vibesys:measure, and <domain skills>.
@@ -53,7 +54,10 @@ Add:
 Candidate: <full SHA>      Parent: <full SHA>
 Claim: <the implementer's claim>      Recorded verdict: <from vibesys:measure compare, or none>
 Read only. Edit nothing. Run the task correctness command yourself in this worktree,
-on your allocated port. Save service PIDs and stop only those PIDs.
+on your allocated port. Start services with &, save $!, kill only that PID; never pkill,
+killall or port lookup. Use bounded readiness probes, never fixed startup sleeps.
+Run the supplied absolute measurement script compare for this exact candidate and parent.
+Read its samples and gain; return unmeasured if speed evidence is missing.
 Return pass, fail or unmeasured with the command, port, exit status and reasons.
 ```
 
