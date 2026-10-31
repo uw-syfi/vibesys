@@ -196,6 +196,9 @@ def test_f17_resumed_epoch_adopts_with_dirty_staged_operator_files(tmp_path: Pat
                 assert event.publication is not None
                 assert event.checkout is not None
                 assert event.checkout.status is CheckoutStatus.DIRTY_TREE
+                # The report alone says the same, which is all a step's fold keeps of the event.
+                assert result.observation.publication == event.publication
+                assert result.observation.checkout == event.checkout
                 assert repository.read_blob(event.publication.commit, "candidate.py") == b"winner"
                 assert repository.head() == head
                 assert repository.has_staged_changes()

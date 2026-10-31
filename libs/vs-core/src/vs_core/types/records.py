@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 
 from pydantic import BaseModel, Field, SerializeAsAny, ValidationInfo, model_validator
 
+from vs_core._generated.vibesys.core.v1.contracts_cv import AdoptionPublication, CheckoutUpdate
 from vs_core._outcomes import OutcomeCodecError, OutcomeValue, bind_outcome
 
 from .attempts import (
@@ -779,6 +780,10 @@ class RequestObserved(OutcomeValue):
     evidence: tuple[EvidenceRef, ...] = ()
     revision: RevisionRef | None = None
     operation_schema: OperationSchemaRef | None = None
+    publication: AdoptionPublication | None = Field(default=None, exclude_if=unset)
+    """Where an adoption published the winner, when it did."""
+    checkout: CheckoutUpdate | None = Field(default=None, exclude_if=unset)
+    """What an adoption did to the operator's checkout, when it touched it."""
 
     @model_validator(mode="after")
     def registered_outcome(self, info: ValidationInfo) -> RequestObserved:

@@ -430,6 +430,8 @@ class RuntimeWorkspaceRequests:
                 observation=observation,
                 setup_failure=facts.setup_failure,
                 revision=facts.revision,
+                publication=facts.publication,
+                checkout=facts.checkout,
             ),
             owner_events=events,
         )

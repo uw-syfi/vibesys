@@ -426,13 +426,10 @@ The fold refuses a record whose observation or owner event names another request
 as the live shell does. A request that core settled itself (`Failed`, `Cancelled`) has no owner event:
 the ledger derives the owner's from the conclusive observation core writes.
 
-One fact is lost by that order. The report's derived `AdoptionObserved` has no publication, so a
-succeeded adoption takes the legacy path (core issues `VerifyAdoption`), and the executor's own event
-for the same observation sequence is then stale and ignored. The live shell has the same order and
-the same loss. What is missing is a place for the publication and checkout on the report:
-`RequestObserved` has none. Adding both there, and passing them through `owner_signals`, makes the
-first `AdoptionObserved` complete and the executor's own event redundant. Until the cutover (PR 6a)
-places them, an adoption runner's publication does not reach core.
+One fact the order would lose is carried by the report instead. An adoption's publication and checkout
+are fields of `RequestObserved`, and `owner_signals` copies them into the `AdoptionObserved` it derives,
+so the derived event is as complete as the executor's own and a succeeded adoption is not followed by a
+`VerifyAdoption`. `AdoptionStepRunner` and the workspace executor both fill them.
 
 `decide(fold(log), now)` is the issue's `decide(log) -> actions`. It is split in two so a cached state can
 stand in for the fold. The action type has no `Blocked` or `Unknown` variant, and no variant names a step

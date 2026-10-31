@@ -37,7 +37,7 @@ from vs_runtime._workspace_requests import commit_of
 from vs_runtime.contracts import RevisionLedger, RuntimeContractError, Workspaces
 
 if TYPE_CHECKING:
-    from vs_core.api import Request, RequestId, Selection
+    from vs_core.api import AdoptionPublication, CheckoutUpdate, Request, RequestId, Selection
     from vs_core.api.recovery import StepResult
     from vs_runtime._evidence_ledger import EvidenceLookup
     from vs_runtime._observation_factory import ObservationFactory
@@ -59,6 +59,15 @@ class _Refusal:
     """The selection is not a revision adoption may use."""
 
     reason: str
+
+
+@dataclass(frozen=True)
+class _Adopted:
+    """What one adoption did: its facts, where it published, and what it did to the checkout."""
+
+    facts: ObservationFacts
+    publication: AdoptionPublication | None = None
+    checkout: CheckoutUpdate | None = None
 
 
 class AdoptionStepRunner:
@@ -114,13 +123,13 @@ class AdoptionStepRunner:
             raise ClearUnavailableError(tag, _BACKEND) from error
         return Cleared()
 
-    async def _adopt(self, request: AdoptRevision | VerifyAdoption) -> ObservationFacts:
+    async def _adopt(self, request: AdoptRevision | VerifyAdoption) -> _Adopted:
         selection = request.selection
         target = await self._target(selection)
         if isinstance(target, _Refusal):
-            return ObservationFacts.refused(target.reason)
+            return _Adopted(ObservationFacts.refused(target.reason))
         if not self._publishes:
-            return await self._keep_tree(request, target)
+            return _Adopted(await self._keep_tree(request, target))
         return await self._publish(request, target)
 
     async def _target(self, selection: Selection) -> str | _Refusal:
@@ -149,9 +158,7 @@ class AdoptionStepRunner:
             diagnostic="root workspace content differs from the selected revision",
         )
 
-    async def _publish(
-        self, request: AdoptRevision | VerifyAdoption, commit: str
-    ) -> ObservationFacts:
+    async def _publish(self, request: AdoptRevision | VerifyAdoption, commit: str) -> _Adopted:
         ref = request.selection.revision
         message = (
             adoption_commit_message(request, commit, self._evidence)
@@ -161,17 +168,19 @@ class AdoptionStepRunner:
         try:
             publication = await self._workspaces.adopt(commit, message=message)
         except RuntimeContractError as error:
-            return ObservationFacts(
-                status=ObservationStatus.FAILED, accepted=True, diagnostic=str(error)
+            return _Adopted(
+                ObservationFacts(
+                    status=ObservationStatus.FAILED, accepted=True, diagnostic=str(error)
+                )
             )
         if isinstance(request, VerifyAdoption):
-            return _succeeded(ref, "published")
+            return _Adopted(_succeeded(ref, "published"), publication)
         checkout = await self._workspaces.update_checkout(publication)
-        return _succeeded(ref, f"checkout {checkout.status.value.replace('_', ' ')}")
+        facts = _succeeded(ref, f"checkout {checkout.status.value.replace('_', ' ')}")
+        return _Adopted(facts, publication, checkout)
 
-    def _finished(
-        self, request: AdoptRevision | VerifyAdoption, facts: ObservationFacts
-    ) -> Finished:
+    def _finished(self, request: AdoptRevision | VerifyAdoption, adopted: _Adopted) -> Finished:
+        facts = adopted.facts
         observation = self._observations.observe(
             ObservationSubject.of(request), facts, observed_at=self._clock.now()
         )
@@ -180,6 +189,8 @@ class AdoptionStepRunner:
             observation=observation,
             setup_failure=SetupFailureKind.PERMANENT if refused else SetupFailureKind.UNKNOWN,
             revision=facts.revision,
+            publication=adopted.publication,
+            checkout=adopted.checkout,
         )
         return Finished(observation=observation, observed=reported)
 
