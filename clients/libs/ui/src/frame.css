@@ -108,6 +108,11 @@ button.vs-crumb:focus-visible {
 .vs-panes:has(.vs-columnlist) {
   flex: 1 0 auto;
 }
+/* A body scrolled to such a list stays where the reader put it when the list's rows change height:
+   the browser's own anchoring would move the page by the difference, and the charts with it. */
+.vs-screen-body:has(.vs-columnlist) {
+  overflow-anchor: none;
+}
 /* Too narrow for a list and the idea it opened side by side (the detail would wrap words and clip
    its tabs): the opened pane takes the row, and its close button brings the list back. */
 @container (max-width: 640px) {
@@ -1121,6 +1126,11 @@ button.vs-crumb:focus-visible {
   gap: var(--space-3);
   max-width: 100%;
   min-width: 0;
+}
+/* A name and its tag in a cell that wraps: the tag goes under the name when there is no room beside it. */
+.vs-columnlist-cell[data-wrap] .vs-columnlist-inline:not([data-nowrap]) {
+  flex-wrap: wrap;
+  row-gap: var(--space-1);
 }
 .vs-columnlist-inline[data-nowrap] {
   overflow: hidden;

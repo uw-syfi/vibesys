@@ -107,7 +107,7 @@ test('a live run folds its trace into the ideas, the failed listed and hideable'
   const shown = await ideas.getByRole('option').count();
   await expect(page.getByRole('button', {name: /^\+ \d+ failed$/})).toHaveCount(0);
   // A status chip narrows the list to its group and shows every idea again when pressed twice.
-  const running = page.getByRole('button', {name: /^Running \d+$/});
+  const running = page.locator('button.vs-dotlegend-item', {hasText: /^Running \d+/});
   await running.click();
   await expect.poll(() => ideas.getByRole('option').count()).toBeLessThan(shown);
   await running.click();

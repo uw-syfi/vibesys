@@ -72,6 +72,7 @@ function Header<Row>(props: {
           data-optional={column.optional || undefined}
           data-marked={column.sort?.marked || undefined}
           data-tight-blank={column.tight === 'dot' || undefined}
+          title={column.header}
         >
           {column.sort === undefined || column.sort.marked ? (
             <span className="vs-columnlist-marked">

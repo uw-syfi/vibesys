@@ -4,6 +4,14 @@
  * while the run is scrubbed; an element replaced by a copy (a remount) or moved by a pixel reads as
  * a jump to the user. `anchorsOf` records the anchors on the screen now; `stabilityViolations`
  * compares the screen later against what was recorded.
+ *
+ * An anchor's place is its place in the screen's body, whatever the body is scrolled to (the Ideas
+ * table is under the charts, so a reader of a laptop window has scrolled to it). The scroll itself
+ * is held too: a press that scrolled the page is a violation, except where the page got shorter
+ * than the scroll it was at and the browser took the scroll back to the end that is left, and
+ * (`mayScroll`) the press that opens the Ideas table's idea, which draws the list again beside the
+ * idea: its rows are measured after their first draw, and the layout between the two shortens the
+ * page for a moment and takes the scroll with it.
  */
 import type {Page} from '@playwright/test';
 import type {Violation} from './in-page.js';
@@ -39,6 +47,8 @@ interface Placed {
   readonly y: number;
   readonly width: number;
   readonly height: number;
+  /** The screen body's scroll when this was read. */
+  readonly scrolled: number;
 }
 
 /** Records each anchor's element (kept in the page) and where it is; an absent one is `null`. */
@@ -48,12 +58,13 @@ export async function anchorsOf(
 ): Promise<readonly (Placed | null)[]> {
   return page.evaluate(wanted => {
     const kept = new Map<string, Element>();
+    const scrolled = document.querySelector('.vs-screen-body')?.scrollTop ?? 0;
     const placed = wanted.map(anchor => {
       const element = document.querySelector(anchor.selector);
       if (element === null) return null;
       kept.set(anchor.name, element);
       const {x, y, width, height} = element.getBoundingClientRect();
-      return {name: anchor.name, x, y, width, height};
+      return {name: anchor.name, x, y: y + scrolled, width, height, scrolled};
     });
     (window as unknown as {screenAnchors: Map<string, Element>}).screenAnchors = kept;
     return placed;
@@ -69,17 +80,34 @@ export async function stabilityViolations(
   step: string,
   before: readonly (Placed | null)[],
   anchors: readonly Anchor[] = RUN_ANCHORS,
+  mayScroll = false,
 ): Promise<Violation[]> {
-  const now = await page.evaluate(wanted => {
+  const {now, body} = await page.evaluate(wanted => {
     const kept = (window as unknown as {screenAnchors: Map<string, Element>}).screenAnchors;
-    return wanted.map(anchor => {
-      const element = document.querySelector(anchor.selector);
-      if (element === null) return null;
-      const {x, y, width, height} = element.getBoundingClientRect();
-      return {name: anchor.name, x, y, width, height, same: kept.get(anchor.name) === element};
-    });
+    const element = document.querySelector('.vs-screen-body');
+    const scrolled = element?.scrollTop ?? 0;
+    return {
+      body: {
+        scrolled,
+        end: Math.max(0, (element?.scrollHeight ?? 0) - (element?.clientHeight ?? 0)),
+      },
+      now: wanted.map(anchor => {
+        const found = document.querySelector(anchor.selector);
+        if (found === null) return null;
+        const {x, y, width, height} = found.getBoundingClientRect();
+        return {
+          name: anchor.name,
+          x,
+          y: y + scrolled,
+          width,
+          height,
+          scrolled,
+          same: kept.get(anchor.name) === found,
+        };
+      }),
+    };
   }, anchors);
-  const found: Violation[] = [];
+  const found: Violation[] = mayScroll ? [] : [...scrollViolation(step, before, body)];
   for (const [index, was] of before.entries()) {
     if (was === null) continue;
     const is = now[index];
@@ -105,4 +133,24 @@ function movement(was: Placed, is: Placed & {same: boolean}, copies: boolean): s
   return moved.length === 0
     ? null
     : `changed its ${moved.map(key => `${key} from ${was[key]} to ${is[key]}`).join(', ')}`;
+}
+
+/** The press scrolled the page, which only a page that got shorter than its scroll may do (the browser clamps it). */
+function scrollViolation(
+  step: string,
+  before: readonly (Placed | null)[],
+  body: {readonly scrolled: number; readonly end: number},
+): Violation[] {
+  const was = before.find(each => each !== null)?.scrolled;
+  if (was === undefined || Math.abs(was - body.scrolled) <= 0.5) return [];
+  const clamped = body.scrolled < was && body.scrolled >= body.end - 0.5;
+  return clamped
+    ? []
+    : [
+        {
+          check: 'stability',
+          message: `the page scrolled from ${was} to ${body.scrolled} at "${step}"`,
+          where: '.vs-screen-body',
+        },
+      ];
 }

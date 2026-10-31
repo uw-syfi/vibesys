@@ -276,11 +276,17 @@ function perfChart(page: Page): Locator {
 }
 
 /** Where the performance row is and what its axes read: all of it must be the same at every level. */
+/**
+ * Where the performance row sits in the page: its place in the screen's body, whatever the body is
+ * scrolled to. A level without the Ideas table is a shorter page, and the browser takes a scrolled
+ * body back to the end that is left; that is the page's move, the row has not moved in it.
+ */
 async function perfRow(page: Page) {
   return perfChart(page).evaluate(chart => {
+    const scrolled = document.querySelector('.vs-screen-body')?.scrollTop ?? 0;
     const box = (element: Element) => {
       const {x, y, width, height} = element.getBoundingClientRect();
-      return {x, y, width, height};
+      return {x, y: y + scrolled, width, height};
     };
     const row = chart.closest('.vs-chart-columns');
     return {

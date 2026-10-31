@@ -267,7 +267,6 @@ function leadColumns(base: ViewBase): readonly Column[] {
       size: 'wide',
       narrow: 'medium',
       tight: 'dot',
-      wrap: true,
       hint: row => [row.status.word, row.status.cause].filter(part => part !== null).join(' · '),
       cell: row => (
         <CellLines
@@ -384,7 +383,7 @@ export function IdeasTable(props: {
           hover={id => props.dispatch({type: 'ideas-hover', idea: id})}
           marks={row => ({lineage: row.lineage, fresh: row.fresh})}
           describe={row => describeFigures(table, row)}
-          crowded={table.columns.length > 2}
+          crowded={table.columns.length > 1}
         />
       )}
     </Stack>
