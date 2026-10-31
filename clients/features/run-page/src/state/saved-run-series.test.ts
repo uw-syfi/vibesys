@@ -4,6 +4,7 @@ import {clone, create, toBinary} from '@bufbuild/protobuf';
 import {Direction, RecordSchema, RunHeadSchema, SkeletonResponseSchema} from '@vibesys/proto';
 import {storeRunFixture} from '@vibesys/run-fixtures';
 import {ingestSkeleton, seedSkeleton} from '@vibesys/run-skeleton';
+import {firstChart} from './chart-fixtures.js';
 import {
   clockStart,
   headerView,
@@ -12,8 +13,7 @@ import {
   projectSkeleton,
   runPageInitial,
   skeletonScreenState,
-  } from './index.js';
-import {firstChart} from './chart-fixtures.js';
+} from './index.js';
 
 for (let seed = 1; seed <= 12; seed += 1) {
   test(`saved series survive missing idea ownership and catch-up (seed ${seed})`, () => {

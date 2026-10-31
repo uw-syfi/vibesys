@@ -1,11 +1,11 @@
 import {describe, expect, test} from 'bun:test';
 import type {RunEvent, RunOverview, Span} from '@vibesys/contracts';
 import {EMPTY_TRACE} from '@vibesys/run-state/trace';
+import {firstChart} from './chart-fixtures.js';
+import {heroView} from './headline.js';
 import {IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
 import {traceLog} from './live.js';
 import {clockStart, nowView} from './run-level.js';
-import {heroView} from './headline.js';
-import {firstChart} from './chart-fixtures.js';
 import {createRunReader, type RunModel} from './run-model.js';
 
 /**

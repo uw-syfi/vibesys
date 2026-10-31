@@ -4,8 +4,8 @@ import {readFileSync} from 'node:fs';
 import {fromBinary} from '@bufbuild/protobuf';
 import {SkeletonResponseSchema} from '@vibesys/proto';
 import {DescriptorCache, ingestSkeleton} from '@vibesys/run-skeleton';
-import {clockStart, heroView, ideasView, projectSkeleton} from './index.js';
 import {firstChart} from './chart-fixtures.js';
+import {clockStart, heroView, ideasView, projectSkeleton} from './index.js';
 
 const corpus = new URL('../../../../../proto/testdata/retained/', import.meta.url);
 const cases = JSON.parse(readFileSync(new URL('manifest.json', corpus), 'utf8')) as Record<
@@ -38,9 +38,7 @@ for (const [version, facts] of Object.entries(cases)) {
     expect(skeleton.head?.performanceStated).toBe(true);
     expect(skeleton.head?.objective?.bestValue).toBe(facts.best);
     expect(hero.headlines[0]?.note).not.toBe('Unavailable');
-    expect(firstChart(model, clockStart(model), model.latest)?.steps.at(-1)?.y).toBe(
-      facts.best,
-    );
+    expect(firstChart(model, clockStart(model), model.latest)?.steps.at(-1)?.y).toBe(facts.best);
     expect(
       ideasView(model, {passed: true, failed: true, running: true, query: ''}).rows.every(
         row => row.figure !== 'Performance facts unavailable',

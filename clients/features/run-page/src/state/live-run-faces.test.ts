@@ -2,15 +2,15 @@ import {describe, expect, test} from 'bun:test';
 import type {RunEvent, RunOverview, RunSnapshot, Span} from '@vibesys/contracts';
 import {EMPTY_TRACE} from '@vibesys/run-state/trace';
 import {Seeded} from '@vibesys/store/testing';
+import {firstChart} from './chart-fixtures.js';
+import {heroView} from './headline.js';
 import {IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
 import {traceLog} from './live.js';
 import {attached, events, failedGate, isoAt, opened, RUN, step, T0} from './live-run-fixtures.js';
-import {heroView} from './headline.js';
 import {createRunReader, type RunModel} from './run-model.js';
 import type {SummaryReply} from './run-summary.js';
 import {formatValue} from './span-reading.js';
 import {timelineRows} from './timeline-rows.js';
-import {firstChart} from './chart-fixtures.js';
 
 /**
  * A live run whose input could not be measured: its input's gates failed before the first idea,

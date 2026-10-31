@@ -12,12 +12,7 @@ import type {Candidate} from '@vibesys/run-state/candidates';
 import {improvement, objectiveMetric} from './baselines.js';
 import type {Direction} from './direction.js';
 import {objectivesOf} from './pareto-view.js';
-import {
-  ideaReading,
-  inputValueOf,
-  type PerformanceFold,
-  performanceFold,
-} from './performance.js';
+import {ideaReading, inputValueOf, type PerformanceFold, performanceFold} from './performance.js';
 import type {RunModel} from './run-model.js';
 
 /** An objective's best: the value, the idea that set it, and when. */
@@ -170,7 +165,11 @@ export function bestSoFar(reading: ObjectiveReading, until: number | null): Best
   const last = set.at(-1);
   const setter = last === undefined || last.unowned === true ? null : last.id;
   if (until === null && reading.stated !== null) {
-    return {value: reading.stated, idea: last?.value === reading.stated ? setter : null, at: last?.at ?? 0};
+    return {
+      value: reading.stated,
+      idea: last?.value === reading.stated ? setter : null,
+      at: last?.at ?? 0,
+    };
   }
   return last === undefined ? null : {value: last.value, idea: setter, at: last.at};
 }

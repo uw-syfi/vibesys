@@ -34,6 +34,7 @@ import {storeRunFixture} from '@vibesys/run-fixtures';
 import {foldSkeleton, ingestSkeleton, seedSkeleton, seekSkeleton} from '@vibesys/run-skeleton';
 import {readSkeleton} from '@vibesys/run-state/skeleton';
 import {totalUsage, usageOverTime} from '@vibesys/run-state/usage';
+import {firstChart} from './chart-fixtures.js';
 import {
   clockStart,
   headerView,
@@ -43,9 +44,8 @@ import {
   runPageInitial,
   skeletonPositions,
   skeletonScreenState,
-    timelineView,
+  timelineView,
 } from './index.js';
-import {firstChart} from './chart-fixtures.js';
 
 const SEED = {
   identity: {host: 'local' as const, runId: 'run-a'},

@@ -3,10 +3,10 @@ import type {RunEvent} from '@vibesys/contracts';
 import {fixtureNamed} from '@vibesys/run-fixtures';
 import {initialCoreState, reduceEventBatch} from '@vibesys/run-state';
 import {baselineColumns, improvement, overBase} from './baselines.js';
+import {firstChart} from './chart-fixtures.js';
+import {heroView} from './headline.js';
 import {EMPTY_TRACE_LOG, traceStep} from './live.js';
 import {createFactsReader} from './run-facts.js';
-import {heroView} from './headline.js';
-import {firstChart} from './chart-fixtures.js';
 import {createRunReader, type RunModel} from './run-model.js';
 
 /**

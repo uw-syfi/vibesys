@@ -492,6 +492,72 @@ describe('Scrubber', () => {
   });
 });
 
+describe('Scrubber spaced by places', () => {
+  /** Five positions, the first three close in time and a long quiet stretch before the last two. */
+  const PLACES = [0, 0.05, 0.1, 0.9, 1];
+  const mounted = async (value: number, seen: number[]) => {
+    const container = await mount(
+      <Scrubber
+        label="Run position"
+        value={value}
+        last={4}
+        live={false}
+        pastLabel="Replay"
+        position="9h 41m"
+        places={PLACES}
+        ticks={[{at: 3, label: '4'}]}
+        change={at => seen.push(at)}
+        backToLive={() => undefined}
+      />,
+    );
+    return container.querySelector('input[type="range"]') as HTMLInputElement;
+  };
+
+  test('puts the playhead where the position stands in time, not where it stands in the list', async () => {
+    const [near, far] = [await mounted(2, []), await mounted(3, [])];
+    expect([near.min, near.max, near.value]).toEqual(['0', '1000', '100']);
+    expect(far.value).toBe('900');
+  });
+
+  test('a tick stands at its position’s place along the track', async () => {
+    const container = await mount(
+      <Scrubber
+        label="Run position"
+        value={3}
+        last={4}
+        live={false}
+        pastLabel="Replay"
+        position="9h 41m"
+        places={PLACES}
+        ticks={[{at: 3, label: '4'}]}
+        change={() => undefined}
+        backToLive={() => undefined}
+      />,
+    );
+    const tick = container.querySelector('.vs-scrubber-tick') as HTMLElement | null;
+    // Unmeasured in this DOM, a tick is placed by its share of the track.
+    expect(tick?.getAttribute('style')).toContain('90%');
+  });
+
+  test('the arrows, Page Up and Down, Home and End step by position, as a native range does', async () => {
+    const seen: number[] = [];
+    const range = await mounted(2, seen);
+    for (const key of [
+      'ArrowLeft',
+      'ArrowRight',
+      'ArrowDown',
+      'ArrowUp',
+      'Home',
+      'End',
+      'PageUp',
+      'PageDown',
+    ]) {
+      await press(range, key);
+    }
+    expect(seen).toEqual([1, 3, 1, 3, 0, 4, 3, 1]);
+  });
+});
+
 describe('Scrubber with one position', () => {
   const range = async (last: number, value: number) => {
     const container = await mount(
@@ -523,48 +589,20 @@ describe('Scrubber with one position', () => {
   });
 });
 
-describe('Chart emphasis and spans', () => {
+describe('Chart rings and cursor', () => {
   const points: ChartPoint[] = [
-    {id: 'a', x: 1, y: 10, filled: true},
-    {id: 'b', x: 2, y: 20, filled: true},
-    {id: 'c', x: 3, y: 15, filled: false},
+    {id: 'a', x: 1, y: 10},
+    {id: 'b', x: 2, y: 20},
+    {id: 'c', x: 3, y: 15},
   ];
   const frame = (container: HTMLElement) =>
     [...container.querySelectorAll('.vs-chart-pick')].map(pick => [
       pick.getAttribute('aria-label'),
       pick.querySelector('circle.vs-chart-point')?.getAttribute('cx'),
+      pick.querySelector('circle.vs-chart-point')?.getAttribute('cy'),
     ]);
 
-  test('emphasis marks dots and the ring follows the focus, with every dot still drawn', async () => {
-    const container = await mount(
-      <Chart
-        label="c"
-        points={points.map(point => ({
-          ...point,
-          emphasis:
-            point.id === 'b'
-              ? ('focus' as const)
-              : point.id === 'a'
-                ? ('related' as const)
-                : ('dim' as const),
-        }))}
-        pick={() => undefined}
-      />,
-    );
-    const kinds = [...container.querySelectorAll('.vs-chart-pick')].map(each =>
-      each.getAttribute('data-emphasis'),
-    );
-    expect(kinds).toEqual(['related', 'focus', 'dim']);
-    expect(container.querySelectorAll('.vs-chart-ring')).toHaveLength(1);
-    expect(container.querySelectorAll('.vs-chart-related')).toHaveLength(1);
-    expect(
-      container
-        .querySelector('.vs-chart-pick[data-emphasis="focus"]')
-        ?.getAttribute('aria-pressed'),
-    ).toBe('true');
-  });
-
-  test('neither emphasis nor spans move a dot or the axes', async () => {
+  test('neither a ring nor the cursor moves a dot or the axes', async () => {
     const xTicks = [
       {value: 0, label: '0'},
       {value: 4, label: '4'},
@@ -575,18 +613,16 @@ describe('Chart emphasis and spans', () => {
     const marked = await mount(
       <Chart
         label="c"
-        points={points.map(point => ({...point, emphasis: 'dim' as const}))}
-        spans={[{from: -50, to: 2, label: 'an idea'}]}
+        points={points.map(point => ({...point, selected: point.id === 'b', lit: true}))}
+        cursor={2.5}
         xTicks={xTicks}
         pick={() => undefined}
       />,
     );
     expect(frame(marked)).toEqual(frame(plain));
-    expect(marked.querySelectorAll('.vs-chart-span')).toHaveLength(1);
-    // The band is clipped to the plot: it starts at the axis, not at x = -50.
-    const band = marked.querySelector('.vs-chart-span-band');
-    const axis = marked.querySelector('line.vs-chart-axis');
-    expect(band?.getAttribute('x')).toBe(axis?.getAttribute('x1'));
+    expect(marked.querySelectorAll('.vs-chart-ring')).toHaveLength(1);
+    expect(marked.querySelectorAll('.vs-chart-lit')).toHaveLength(3);
+    expect(marked.querySelectorAll('.vs-chart-cursor')).toHaveLength(1);
   });
 });
 
@@ -595,7 +631,7 @@ describe('Chart x labels', () => {
     const container = await mount(
       <Chart
         label="c"
-        points={[{x: 0, y: 1, filled: true}]}
+        points={[{x: 0, y: 1}]}
         xTicks={[
           {value: 0, label: '0s'},
           {value: 1_200_000, label: '333h 20m'},

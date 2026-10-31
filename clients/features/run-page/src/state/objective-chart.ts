@@ -17,8 +17,8 @@ import {
   objectiveSeriesOf,
   readObjective,
 } from './objective-reading.js';
-import {type RunningTime, runningTimeOf} from './running-time.js';
 import type {RunModel} from './run-model.js';
+import {type RunningTime, runningTimeOf} from './running-time.js';
 import {duration, formatValue, ratio} from './span-reading.js';
 
 /** One reading of an objective as the chart draws it. */
@@ -139,12 +139,7 @@ function unitOf(model: RunModel, reading: ObjectiveReading, alone: boolean): str
   return unit == null ? '' : unit;
 }
 
-function readingLabel(
-  title: string,
-  value: number,
-  unit: string,
-  multiple: number | null,
-): string {
+function readingLabel(title: string, value: number, unit: string, multiple: number | null): string {
   return [title, `${formatValue(value)}${unit === '' ? '' : ` ${unit}`}`]
     .concat(multiple === null ? [] : [ratio(multiple)])
     .join(' · ');
@@ -163,11 +158,10 @@ function chartOf(
   model: RunModel,
   reading: ObjectiveReading,
   frame: Frame,
-  scrub: number | null,
-  focus: string | null,
-  lit: ReadonlySet<string>,
+  moment: ChartMoment,
 ): ObjectiveChartView {
   const {time} = frame;
+  const {scrub = null, focus = null, lit = NO_IDEAS} = moment;
   const minutes = (at: number): number => time.at(at) / 60;
   const unit = unitOf(model, reading, frame.alone);
   const stepped = bestSteps(reading);
@@ -208,8 +202,7 @@ function chartOf(
   return {
     id: reading.name ?? 'metric',
     name,
-    better:
-      reading.direction === 'max' ? 'higher' : reading.direction === 'min' ? 'lower' : null,
+    better: reading.direction === 'max' ? 'higher' : reading.direction === 'min' ? 'lower' : null,
     unit,
     label: `${name} of each reading over the run's running time, with the best so far`,
     readings,
@@ -226,38 +219,39 @@ function chartOf(
   };
 }
 
+/** Where the run is read and what the reader points at, for the charts of one moment. */
+export interface ChartMoment {
+  /** The run's start on its clock. */
+  readonly start: number;
+  /** The live clock; null: the run's latest time bounds the axis, always so when scrubbed. */
+  readonly now: number | null;
+  /** The time bar's position in run-clock seconds; null (the default) at the live end. */
+  readonly scrub?: number | null;
+  /** The idea the reader has open. */
+  readonly focus?: string | null;
+  /** The ideas on the chain the reader points at. */
+  readonly lit?: ReadonlySet<string>;
+}
+
 /**
  * One chart per objective of `whole`, the run to its live end (never the run at a scrubbed sequence,
- * so scrubbing neither mounts nor unmounts a chart nor rescales its axes). `start` is the run's start
- * on its clock; `now` the live clock (null: the run's latest time bounds the axis, always so when
- * scrubbed); `scrub` the time bar's position in run-clock seconds (null at the live end); `focus` the
- * idea the reader has open and `lit` the ideas on the chain the reader points at. `objectives` are the
- * run's, read from the whole run (`objectiveSeriesOf`).
+ * so scrubbing neither mounts nor unmounts a chart nor rescales its axes), as of `moment`.
+ * `objectives` are the run's, read from the whole run (`objectiveSeriesOf`).
  */
 export function objectiveCharts(
   whole: RunModel,
-  start: number,
-  now: number | null,
-  scrub: number | null = null,
-  focus: string | null = null,
-  lit: ReadonlySet<string> = NO_IDEAS,
+  moment: ChartMoment,
   objectives: readonly ObjectiveSeries[] = objectiveSeriesOf(whole),
 ): readonly ObjectiveChartView[] {
-  const reached = (scrub === null ? (now ?? whole.latest) : whole.latest) ?? start;
+  const reached =
+    (moment.scrub == null ? (moment.now ?? whole.latest) : whole.latest) ?? moment.start;
   const frame: Frame = {
-    time: runningTimeOf(whole.sessions ?? [], start),
+    time: runningTimeOf(whole.sessions ?? [], moment.start),
     alone: objectives.length < 2,
     reached,
   };
   return objectives.map((series, at) =>
-    chartOf(
-      whole,
-      readObjective(whole, series, at === 0, frame.alone),
-      frame,
-      scrub,
-      focus,
-      lit,
-    ),
+    chartOf(whole, readObjective(whole, series, at === 0, frame.alone), frame, moment),
   );
 }
 

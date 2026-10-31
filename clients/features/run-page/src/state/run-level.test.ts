@@ -1,17 +1,17 @@
 import {describe, expect, test} from 'bun:test';
 import type {RunEvent, Span} from '@vibesys/contracts';
 import {EMPTY_TRACE} from '@vibesys/run-state/trace';
+import {firstChart} from './chart-fixtures.js';
+import {heroView} from './headline.js';
 import {bestLine} from './ideas-tree.js';
 import {IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
 import {EMPTY_TRACE_LOG, type TraceLog, traceAt, traceLog, traceStep} from './live.js';
 import {clockStart, logStreamToFollow, nowView, resolveZoom, shownLogScope} from './run-level.js';
-import {heroView} from './headline.js';
 import {createRunReader} from './run-model.js';
 import {type RunPageState, runPageInitial, runPageStep} from './run-page.js';
 import {scopedLogs} from './scoped-logs.js';
 import {scrubberView} from './scrub.js';
 import {type Route, RUN_MODES, RUN_ROUTE} from './zoom.js';
-import {firstChart} from './chart-fixtures.js';
 
 const ROOT: Span = {
   id: 'flow:search/#1',

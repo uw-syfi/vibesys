@@ -90,7 +90,7 @@ async function rendered(
       />,
     ),
   );
-  const [chart] = objectiveCharts(whole, 0, null);
+  const [chart] = objectiveCharts(whole, {start: 0, now: null});
   const drawn = {
     dots: container.querySelectorAll('.vs-chart-box .vs-chart-point').length,
     lines: container.querySelectorAll('.vs-chart-box .vs-chart-step').length,
@@ -171,30 +171,38 @@ function withStandaloneInput(
   );
 }
 
+/** The writer's head of the whole prefix: the best it states is the input's own value. */
+const stated = (through: bigint): RunHead =>
+  create(RunHeadSchema, {
+    committedSeq: through,
+    objective: {series: {name: 'throughput', unit: 'ops/s'}, bestValue: 100, inputValue: 100},
+  });
+
+/** What the page draws for the first `length` records of the run, against what the run holds. */
+async function checkDrawn(
+  records: ReturnType<typeof storeRunFixture>['records'],
+  length: number,
+  head: ((through: bigint) => RunHead) | undefined,
+  label: string,
+): Promise<void> {
+  const drawn = await rendered(records.slice(0, length), head);
+  // Every measured point is a dot, and a headline that shows a value never stands alone.
+  expect(drawn.points, label).toBeGreaterThan(0);
+  expect(drawn.dots, `dots: ${label}`).toBe(drawn.points);
+  expect(drawn.lines, `line: ${label}`).toBe(drawn.hasLine ? 1 : 0);
+  if (drawn.headlineValue) {
+    expect(drawn.dots + drawn.lines, `headline: ${label}`).toBeGreaterThan(0);
+  }
+}
+
 test('the headline and the chart read one source, whoever measured the input', async () => {
   for (const count of [0, 1, 3]) {
     const made = storeRunFixture('short', count, 1).records;
     for (const withHead of [false, true]) {
       const records = withStandaloneInput(made, 100);
       for (let length = 4; length <= records.length; length += 3) {
-        const head = withHead
-          ? (through: bigint): RunHead =>
-              create(RunHeadSchema, {
-                committedSeq: through,
-                objective: {
-                  series: {name: 'throughput', unit: 'ops/s'},
-                  bestValue: 100,
-                  inputValue: 100,
-                },
-              })
-          : undefined;
-        const drawn = await rendered(records.slice(0, length), head);
         const label = `${count} ideas, ${length} records, head ${withHead}`;
-        // Every measured point is a dot, and a headline that shows a value never stands alone.
-        expect(drawn.points, label).toBeGreaterThan(0);
-        expect(drawn.dots, `dots: ${label}`).toBe(drawn.points);
-        expect(drawn.lines, `line: ${label}`).toBe(drawn.hasLine ? 1 : 0);
-        if (drawn.headlineValue) expect(drawn.dots + drawn.lines, `headline: ${label}`).toBeGreaterThan(0);
+        await checkDrawn(records, length, withHead ? stated : undefined, label);
       }
     }
   }

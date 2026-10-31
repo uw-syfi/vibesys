@@ -5,11 +5,11 @@ import {fixtureNamed} from '@vibesys/run-fixtures';
 import {initialCoreState, reduceEventBatch} from '@vibesys/run-state';
 import {EMPTY_TRACE, foldTrace, traceSpans} from '@vibesys/run-state/trace';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
+import {heroView} from './headline.js';
 import {outcomeWords} from './idea-words.js';
 import {ageWords, IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
 import {failuresAt} from './input-gates.js';
 import {clockAt, clockStart, nowView} from './run-level.js';
-import {heroView} from './headline.js';
 import {createRunReader, type RunModel} from './run-model.js';
 import {
   type RunPageRequest,

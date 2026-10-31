@@ -1,8 +1,8 @@
 import {describe, expect, test} from 'bun:test';
 import type {RunEvent, Span} from '@vibesys/contracts';
+import {heroView} from './headline.js';
 import {EMPTY_TRACE_LOG, traceStep} from './live.js';
 import {paretoView} from './pareto-view.js';
-import {heroView} from './headline.js';
 import {createRunReader} from './run-model.js';
 
 const ROOT: Span = {

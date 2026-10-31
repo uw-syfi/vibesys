@@ -119,14 +119,13 @@ export function Hero(
   const scrubbed = props.model.at !== null && props.model.at !== props.whole.at;
   const scrub = scrubbed ? (props.model.latest ?? props.clock.start) : null;
   const hero = heroView(props.whole, objectives, scrub);
-  const charts = objectiveCharts(
-    props.whole,
-    props.clock.start,
-    props.clock.now,
+  const charts = objectiveCharts(props.whole, {
+    start: props.clock.start,
+    now: props.clock.now,
     scrub,
-    props.idea,
-    props.lit,
-  );
+    focus: props.idea,
+    ...(props.lit === undefined ? {} : {lit: props.lit}),
+  });
   const pareto = paretoView(props.whole, props.clock.start, scrub, props.idea, props.lit);
   const legend = chartLegend(charts);
   return (

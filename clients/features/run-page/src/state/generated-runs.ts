@@ -104,7 +104,11 @@ export function readFromEvents(run: Run, candidates: readonly Candidate[]): RunM
 }
 
 /** The run as its writer states it: a series with the best and the input, and the headline of both. */
-export function readFromWriter(run: Run, candidates: readonly Candidate[], until: number): RunModel {
+export function readFromWriter(
+  run: Run,
+  candidates: readonly Candidate[],
+  until: number,
+): RunModel {
   const events = readFromEvents(run, candidates);
   const fold: PerformanceFold = performanceFold(candidates, run.direction, run.input, NAME);
   const leader = fold.points.filter(point => point.best).at(-1);
@@ -169,11 +173,10 @@ export function bestRow(model: RunModel): {readonly idea: string; readonly figur
 
 /** What the chart says of its best at `scrub` (null: the end): its headline and the end of its line. */
 export function chartBest(whole: RunModel, scrub: number | null) {
-  const [chart] = objectiveCharts(whole, 0, whole.latest, scrub);
+  const [chart] = objectiveCharts(whole, {start: 0, now: whole.latest, scrub});
   const [headline] = heroView(whole, undefined, scrub).headlines;
   const input = chart?.steps[0]?.y;
   // The line to the cursor: its last step at or before it, which is the best so far.
   const reached = chart?.steps.filter(step => scrub === null || step.x * 60 <= scrub).at(-1);
   return {chart, headline, input, reached};
 }
-

@@ -4,12 +4,12 @@ import {event as fixtureEvent} from '@vibesys/contracts/testing';
 import {type CoreState, initialCoreState, reduceEvent} from '@vibesys/run-state';
 import {EMPTY_TRACE} from '@vibesys/run-state/trace';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
+import {firstChart} from './chart-fixtures.js';
+import {heroView} from './headline.js';
 import {ideaOutcomeLine} from './idea-focus.js';
 import {IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
 import {traceLog} from './live.js';
 import {NO_PAUSES} from './quota-pauses.js';
-import {heroView} from './headline.js';
-import {firstChart} from './chart-fixtures.js';
 import {createRunReader, type RunFacts, type RunModel} from './run-model.js';
 import {timelineRows} from './timeline-rows.js';
 

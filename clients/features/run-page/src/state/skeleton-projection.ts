@@ -164,9 +164,6 @@ export function skeletonScreenState(
           startedAt: 0,
           reason: lifecycle.reason,
         };
-  // The time bar's word and track are the run's running time, the same clock as the charts' axes.
-  const start = clockStart(whole);
-  const time = runningTimeOf(whole.sessions ?? [], start);
   const positions = skeletonPositions(skeleton);
   const trace = {
     ...EMPTY_TRACE_LOG,
@@ -191,10 +188,7 @@ export function skeletonScreenState(
     progress: whole.progress,
     recordDiagnostic: latestFailure(skeleton, ui.recordLog),
     lifecycleWord: lifecycle.word,
-    positionWord:
-      whole.loadFailure ??
-      positionWord(whole.progress, reading.latest === null ? null : time.at(reading.latest)),
-    positionPlaces: placesAlong(clockThrough(skeleton, positions).map(at => time.at(at ?? start))),
+    ...timeBar(skeleton, whole, reading.latest, positions),
     startupStages: reading.startup.map(step => ({
       id: step.stage,
       label: STARTUP_LABELS[step.stage],
@@ -231,6 +225,25 @@ function observedLifecycle(skeleton: Skeleton, hint: RunLivenessHint | undefined
   return observation.interrupted
     ? {status: 'failed' as const, word: 'Interrupted', reason: null}
     : lifecycleState(observation.lifecycle);
+}
+
+/**
+ * The time bar's word and track: the run's running time, the same clock as the charts' axes. The
+ * word is the time of the view (`latest` on the run clock), the track spaces `positions` by it.
+ */
+function timeBar(
+  skeleton: Skeleton,
+  whole: RunModel,
+  latest: number | null,
+  positions: readonly number[],
+): Pick<RunPageState, 'positionWord' | 'positionPlaces'> {
+  const start = clockStart(whole);
+  const time = runningTimeOf(whole.sessions ?? [], start);
+  return {
+    positionWord:
+      whole.loadFailure ?? positionWord(whole.progress, latest === null ? null : time.at(latest)),
+    positionPlaces: placesAlong(clockThrough(skeleton, positions).map(at => time.at(at ?? start))),
+  };
 }
 
 function positionWord(progress: LoadProgress | undefined, running: number | null): string {

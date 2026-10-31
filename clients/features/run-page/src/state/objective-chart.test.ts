@@ -43,7 +43,7 @@ const chartOf = (
   scrub: number | null = null,
   focus: string | null = null,
   lit: ReadonlySet<string> = new Set(),
-) => objectiveCharts(model, 0, now, scrub, focus, lit)[0];
+) => objectiveCharts(model, {start: 0, now, scrub, focus, lit})[0];
 
 describe('the performance chart', () => {
   test('draws every reading as a dot and steps the line at each new best', () => {

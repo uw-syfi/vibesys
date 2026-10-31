@@ -136,7 +136,6 @@ function xLabelAt(
   return {x, anchor: 'middle'};
 }
 
-
 /** The grid and labels at the ticks, and the two axes. */
 function Axes(props: {
   readonly plot: Plot;
@@ -244,18 +243,59 @@ function Caption(props: {
   );
 }
 
-/**
- * A series over time or index in SVG: `points` (one faint dot each), a `steps` line (the best so
- * far, starting at `start`'s value and stepping at each new best), dashed `references`, a `cursor`
- * (the line and the dots after it dimmed), marks on the x axis, grid lines and labels at the ticks,
- * and a `caption` under them. Drawn in `accent`, `muted`, the text color and `grid` only. `label`
- * describes the chart for assistive technology. `size` `strip` is a short, wide chart. Hovering a
- * point says its `label` in a tip; points with an `id` are buttons that call `pick(id)`, and the
- * pickable points are one tab stop (the selected one, else the first); the arrows, Home and End
- * move among them. With many points the dots are small, and with thousands, those without an id
- * are binned into at most a few thousand dots.
- */
-export function Chart(props: {
+/** Dashed reference lines, each labelled at its right end. */
+function References(props: {
+  readonly lines: readonly {readonly y: number; readonly label: string}[];
+  readonly plot: Plot;
+  readonly at: Scale;
+}): JSX.Element {
+  const {plot, at} = props;
+  return (
+    <>
+      {props.lines.map(line => (
+        <g key={`${line.label}:${line.y}`} data-reference={line.label}>
+          <line
+            className="vs-chart-reference"
+            x1={plot.left}
+            x2={plot.right}
+            y1={at.y(line.y)}
+            y2={at.y(line.y)}
+          />
+          <text className="vs-chart-label" x={plot.right - 6} y={at.y(line.y) - 6} textAnchor="end">
+            {line.label}
+          </text>
+        </g>
+      ))}
+    </>
+  );
+}
+
+/** What stands on and under the x axis besides its labels: the marks on it, and the caption. */
+function Footer(props: {
+  readonly plot: Plot;
+  readonly at: Scale;
+  readonly marks: readonly number[];
+  readonly caption: string | undefined;
+  readonly markLabel: string | undefined;
+}): JSX.Element {
+  const {plot, at, marks} = props;
+  return (
+    <>
+      {marks.map(mark => (
+        <Mark key={mark} x={at.x(mark)} bottom={plot.bottom} />
+      ))}
+      {props.caption === undefined ? null : (
+        <Caption
+          plot={plot}
+          caption={props.caption}
+          markLabel={marks.length === 0 ? undefined : props.markLabel}
+        />
+      )}
+    </>
+  );
+}
+
+interface ChartProps {
   readonly label: string;
   readonly points: readonly ChartPoint[];
   readonly steps?: readonly {readonly x: number; readonly y: number}[];
@@ -281,7 +321,52 @@ export function Chart(props: {
   readonly pick?: (id: string) => void;
   /** Called with a point's id when the pointer or the focus enters it, and null when it leaves. */
   readonly hover?: (id: string | null) => void;
-}): JSX.Element {
+}
+
+/** The plot, the scales that place a value on it, and the one pickable point on the tab order. */
+function layoutOf(
+  props: ChartProps,
+  width: number,
+): {readonly plot: Plot; readonly at: Scale; readonly stop: string | undefined} {
+  const steps = props.steps ?? [];
+  const plot = plotFor(
+    props.yTicks ?? [],
+    props.size ?? 'default',
+    width,
+    props.caption !== undefined,
+  );
+  const at = scale(
+    plot,
+    [
+      ...props.points.map(p => p.x),
+      ...steps.map(p => p.x),
+      ...(props.xTicks ?? []).map(t => t.value),
+    ],
+    [
+      ...props.points.map(p => p.y),
+      ...steps.map(p => p.y),
+      ...(props.yTicks ?? []).map(t => t.value),
+      ...(props.references ?? []).map(line => line.y),
+    ],
+    props.xDomain,
+    props.yDomain,
+  );
+  const pickable = props.points.filter(point => point.id !== undefined);
+  return {plot, at, stop: (pickable.find(point => point.selected === true) ?? pickable[0])?.id};
+}
+
+/**
+ * A series over time or index in SVG: `points` (one faint dot each), a `steps` line (the best so
+ * far, starting at `start`'s value and stepping at each new best), dashed `references`, a `cursor`
+ * (the line and the dots after it dimmed), marks on the x axis, grid lines and labels at the ticks,
+ * and a `caption` under them. Drawn in `accent`, `muted`, the text color and `grid` only. `label`
+ * describes the chart for assistive technology. `size` `strip` is a short, wide chart. Points with an
+ * `id` are buttons that call `pick(id)` (hovering or focusing one says its `label` in a tip), and the
+ * pickable points are one tab stop (the selected one, else the first); the arrows, Home and End
+ * move among them. With many points the dots are small, and with thousands, those without an id
+ * are binned into at most a few thousand dots.
+ */
+export function Chart(props: ChartProps): JSX.Element {
   const size = props.size ?? 'default';
   const steps = props.steps ?? [];
   const xTicks = props.xTicks ?? [];
@@ -291,21 +376,7 @@ export function Chart(props: {
   const [tip, setTip] = useState<{readonly text: string; readonly x: number; readonly y: number}>();
   const clip = useId().replaceAll(':', '');
   const width = Math.max(MIN_WIDTH, measured ?? FALLBACK_WIDTH);
-  const plot = plotFor(yTicks, size, width, props.caption !== undefined);
-  const at = scale(
-    plot,
-    [...props.points.map(p => p.x), ...steps.map(p => p.x), ...xTicks.map(t => t.value)],
-    [
-      ...props.points.map(p => p.y),
-      ...steps.map(p => p.y),
-      ...yTicks.map(t => t.value),
-      ...(props.references ?? []).map(line => line.y),
-    ],
-    props.xDomain,
-    props.yDomain,
-  );
-  const pickable = props.points.filter(point => point.id !== undefined);
-  const stop = (pickable.find(point => point.selected === true) ?? pickable[0])?.id;
+  const {plot, at, stop} = layoutOf(props, width);
   const cursor = props.cursor === undefined ? undefined : at.x(props.cursor);
   const height = HEIGHT[size];
   const first = steps[0];
@@ -320,35 +391,14 @@ export function Chart(props: {
         aria-label={props.label}
       >
         <Axes plot={plot} at={at} width={width} xTicks={xTicks} yTicks={yTicks} />
-        {marks.map(mark => (
-          <Mark key={mark} x={at.x(mark)} bottom={plot.bottom} />
-        ))}
-        {props.caption === undefined ? null : (
-          <Caption
-            plot={plot}
-            caption={props.caption}
-            markLabel={marks.length === 0 ? undefined : props.markLabel}
-          />
-        )}
-        {(props.references ?? []).map(line => (
-          <g key={`${line.label}:${line.y}`} data-reference={line.label}>
-            <line
-              className="vs-chart-reference"
-              x1={plot.left}
-              x2={plot.right}
-              y1={at.y(line.y)}
-              y2={at.y(line.y)}
-            />
-            <text
-              className="vs-chart-label"
-              x={plot.right - 6}
-              y={at.y(line.y) - 6}
-              textAnchor="end"
-            >
-              {line.label}
-            </text>
-          </g>
-        ))}
+        <Footer
+          plot={plot}
+          at={at}
+          marks={marks}
+          caption={props.caption}
+          markLabel={props.markLabel}
+        />
+        <References lines={props.references ?? []} plot={plot} at={at} />
         {first === undefined || props.start === undefined ? null : (
           <text className="vs-chart-label" x={plot.left + 6} y={at.y(first.y) - 8}>
             {props.start}
@@ -405,7 +455,12 @@ function Line(props: {
         <rect x={0} y={0} width={edge} height={props.height} />
       </clipPath>
       <clipPath id={`${id}-after`}>
-        <rect x={edge} y={0} width={Math.max(0, plot.right + MARGIN_RIGHT - edge)} height={props.height} />
+        <rect
+          x={edge}
+          y={0}
+          width={Math.max(0, plot.right + MARGIN_RIGHT - edge)}
+          height={props.height}
+        />
       </clipPath>
       <path className="vs-chart-step" d={props.d} clipPath={`url(#${id}-before)`} />
       <path className="vs-chart-step" data-after="" d={props.d} clipPath={`url(#${id}-after)`} />
@@ -463,7 +518,9 @@ function Point(props: {
   readonly dense: boolean;
   readonly pick: ((id: string) => void) | undefined;
   readonly hover: ((id: string | null) => void) | undefined;
-  readonly tell: (tip: {readonly text: string; readonly x: number; readonly y: number} | undefined) => void;
+  readonly tell: (
+    tip: {readonly text: string; readonly x: number; readonly y: number} | undefined,
+  ) => void;
 }): JSX.Element {
   const {point, at, pick, hover} = props;
   const id = point.id;
@@ -490,13 +547,7 @@ function Point(props: {
       />
     </>
   );
-  if (id === undefined || pick === undefined) {
-    return (
-      <g onMouseEnter={enter} onMouseLeave={leave}>
-        {body}
-      </g>
-    );
-  }
+  if (id === undefined || pick === undefined) return <g>{body}</g>;
   return (
     // biome-ignore lint/a11y/useSemanticElements: an SVG point cannot be a <button>; the group carries the button role, name, state and keys instead.
     <g
@@ -578,8 +629,15 @@ function Tip(props: {
   const above = tip.y - TIP_GAP - TIP_HEIGHT >= plot.top;
   const top = above ? tip.y - TIP_GAP - TIP_HEIGHT : tip.y + TIP_GAP;
   return (
-    <g className="vs-chart-tip" pointerEvents="none" role="tooltip">
-      <rect className="vs-chart-tip-box" x={left} y={top} width={width} height={TIP_HEIGHT} rx={4} />
+    <g className="vs-chart-tip" pointerEvents="none">
+      <rect
+        className="vs-chart-tip-box"
+        x={left}
+        y={top}
+        width={width}
+        height={TIP_HEIGHT}
+        rx={4}
+      />
       <text
         className="vs-chart-tip-text"
         x={left + TIP_PAD}
@@ -610,7 +668,13 @@ export function ChartLegend(props: {
     <ul className="vs-dotlegend vs-chart-legend" aria-label={props.label}>
       {props.items.map(item => (
         <li key={item.label} className="vs-dotlegend-item">
-          <svg className="vs-chart-legend-mark" width={20} height={14} viewBox="0 0 20 14" aria-hidden="true">
+          <svg
+            className="vs-chart-legend-mark"
+            width={20}
+            height={14}
+            viewBox="0 0 20 14"
+            aria-hidden="true"
+          >
             {item.mark === 'line' ? (
               <line className="vs-chart-step" x1={0} x2={20} y1={7} y2={7} />
             ) : item.mark === 'dot' ? (

@@ -3,8 +3,8 @@ import {readdirSync, readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import type {RunEvent} from '@vibesys/contracts';
 import {EMPTY_TRACE} from '@vibesys/run-state/trace';
-import {traceLog} from './live.js';
 import {heroView} from './headline.js';
+import {traceLog} from './live.js';
 import {createRunReader} from './run-model.js';
 
 /**

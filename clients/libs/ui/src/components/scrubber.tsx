@@ -63,6 +63,51 @@ function keyed(key: string, value: number, last: number): number | null {
 }
 
 /**
+ * The range of a `Scrubber`: over the positions themselves, or, when the track is spaced by `places`,
+ * over `SPAN` steps of it, a point on it standing for the newest position at or before it.
+ */
+function Track(props: {
+  readonly id: string;
+  readonly label: string;
+  readonly position: string;
+  readonly value: number;
+  readonly last: number;
+  readonly single: boolean;
+  readonly places: readonly number[] | undefined;
+  readonly change: (value: number) => void;
+}): JSX.Element {
+  const {places, single} = props;
+  const along = places === undefined ? 0 : (places[props.value] ?? 0);
+  return (
+    <input
+      id={props.id}
+      className="vs-scrubber-range"
+      type="range"
+      min={0}
+      max={single ? 1 : places === undefined ? props.last : SPAN}
+      step={1}
+      value={single ? 1 : places === undefined ? props.value : Math.round(along * SPAN)}
+      disabled={single}
+      aria-label={props.label}
+      aria-valuetext={props.position}
+      onChange={event =>
+        props.change(
+          places === undefined
+            ? Number(event.target.value)
+            : positionAt(places, Number(event.target.value) / SPAN),
+        )
+      }
+      onKeyDown={event => {
+        const next = places === undefined ? null : keyed(event.key, props.value, props.last);
+        if (next === null) return;
+        event.preventDefault();
+        props.change(next);
+      }}
+    />
+  );
+}
+
+/**
  * A range over the positions 0 to `last` of a sequence, with labelled ticks and the playhead at
  * `value`. It reads `latestLabel` ("Live" unless given) at the newest position (`live`), and
  * `pastLabel` anywhere else, where it offers `backLabel` ("Back to live" unless given); a sequence
@@ -126,30 +171,15 @@ export function Scrubber(props: {
           <Button size="sm" text={props.backLabel ?? 'Back to live'} press={props.backToLive} />
         )}
       </div>
-      <input
+      <Track
         id={id}
-        className="vs-scrubber-range"
-        type="range"
-        min={0}
-        max={single ? 1 : places === undefined ? props.last : SPAN}
-        step={1}
-        value={single ? 1 : places === undefined ? props.value : Math.round(share(props.value) * SPAN)}
-        disabled={single}
-        aria-label={props.label}
-        aria-valuetext={props.position}
-        onChange={event =>
-          props.change(
-            places === undefined
-              ? Number(event.target.value)
-              : positionAt(places, Number(event.target.value) / SPAN),
-          )
-        }
-        onKeyDown={event => {
-          const next = places === undefined ? null : keyed(event.key, props.value, props.last);
-          if (next === null) return;
-          event.preventDefault();
-          props.change(next);
-        }}
+        label={props.label}
+        position={props.position}
+        value={props.value}
+        last={props.last}
+        single={single}
+        places={places}
+        change={props.change}
       />
       {props.ticks === undefined ? null : (
         <div ref={measure} className="vs-scrubber-ticks" aria-hidden="true">

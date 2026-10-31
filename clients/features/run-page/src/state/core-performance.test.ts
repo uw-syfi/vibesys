@@ -8,18 +8,13 @@ import {seedSkeleton} from '@vibesys/run-skeleton';
 import type {Candidate} from '@vibesys/run-state/candidates';
 import {lifecycleState} from '@vibesys/run-state/skeleton';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
+import {firstChart} from './chart-fixtures.js';
 import {adoptedCandidate} from './end-words.js';
 import {ideaTree} from './ideas-tree.js';
 import {IDEAS_FILTER_DEFAULT} from './ideas-view.js';
-import {
-  clockStart,
-  heroView,
-  ideasView,
-  projectSkeleton,
-  } from './index.js';
+import {clockStart, heroView, ideasView, projectSkeleton} from './index.js';
 import type {RunModel} from './run-model.js';
 import {ratio} from './span-reading.js';
-import {firstChart} from './chart-fixtures.js';
 
 const root = new URL('../../../../../proto/testdata/performance/', import.meta.url);
 const cases: readonly {

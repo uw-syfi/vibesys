@@ -56,8 +56,10 @@ export {
 } from './live.js';
 export {type LoadView, loadView, paintedSkeleton} from './load-view.js';
 export {type ModelNames, modelNamesOf, NO_MODEL_NAMES} from './model-names.js';
+export {roleLabel, stepKicker, stepLabel, stepTitle} from './names.js';
 export {
   type ChartLegendEntry,
+  type ChartMoment,
   type ChartReadingView,
   chartLegend,
   type ObjectiveChartView,
@@ -74,7 +76,6 @@ export {
   readObjectives,
   vsInputOf,
 } from './objective-reading.js';
-export {roleLabel, stepKicker, stepLabel, stepTitle} from './names.js';
 export {
   objectivesOf,
   type ParetoAxisView,
@@ -99,7 +100,6 @@ export {
   resolveZoom,
 } from './run-level.js';
 export {createRunReader, type RunModel} from './run-model.js';
-export {type RunningTime, runningTimeOf} from './running-time.js';
 export {
   type HistoryProgress,
   type HistoryReply,
@@ -118,6 +118,7 @@ export {
   type SpanDetailReply,
 } from './run-page.js';
 export {type SummaryReply, summaryFacts, type WireSummary} from './run-summary.js';
+export {type RunningTime, runningTimeOf} from './running-time.js';
 export {scrubberView, viewAtPosition} from './scrub.js';
 export {
   projectSkeleton,

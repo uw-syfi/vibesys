@@ -29,8 +29,8 @@ describe('LogPane', () => {
 });
 
 describe('Chart', () => {
-  test('draws each point filled or hollow, and the reference, playhead and step line', () => {
-    const points = [1, 2, 3, 4, 5].map(x => ({x, y: x * 3, filled: x % 2 === 0}));
+  test('draws a dot for each point, the start of the line, a reference and the cursor', () => {
+    const points = [1, 2, 3, 4, 5].map(x => ({x, y: x * 3}));
     const html = renderToStaticMarkup(
       <Chart
         label="Series"
@@ -39,13 +39,19 @@ describe('Chart', () => {
           {x: 1, y: 3},
           {x: 5, y: 15},
         ]}
-        reference={{y: 6, label: 'baseline'}}
-        playhead={3}
+        start="Input"
+        references={[{y: 6, label: 'baseline'}]}
+        cursor={3}
       />,
     );
     expect(html.match(/<circle/g)?.length).toBe(points.length);
-    expect(html.match(/data-filled="true"/g)?.length).toBe(2);
-    for (const part of ['vs-chart-reference', 'vs-chart-playhead', 'vs-chart-step', 'baseline']) {
+    for (const part of [
+      'vs-chart-reference',
+      'vs-chart-cursor',
+      'vs-chart-step',
+      'baseline',
+      'Input',
+    ]) {
       expect(html).toContain(part);
     }
     expect(html).toContain('aria-label="Series"');
@@ -84,7 +90,7 @@ describe('Chart y labels', () => {
           const high = mantissa * 10 ** exponent;
           const yTicks = [high / 4, high / 2, high].map(value => ({value, label: format(value)}));
           const html = renderToStaticMarkup(
-            <Chart label="Series" points={[{x: 1, y: high, filled: true}]} yTicks={yTicks} />,
+            <Chart label="Series" points={[{x: 1, y: high}]} yTicks={yTicks} />,
           );
           const {labels, ends} = yLabels(html);
           expect(labels).toEqual(yTicks.map(tick => tick.label));

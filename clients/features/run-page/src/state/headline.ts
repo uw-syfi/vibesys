@@ -64,7 +64,10 @@ const SAME = 0.0005;
 
 const NO_CLEAR_CHANGE = 'No clear change';
 
-type Words = Pick<ObjectiveHeadline, 'ratio' | 'figure' | 'note' | 'words' | 'tone' | 'detail' | 'hint'>;
+type Words = Pick<
+  ObjectiveHeadline,
+  'ratio' | 'figure' | 'note' | 'words' | 'tone' | 'detail' | 'hint'
+>;
 
 function bestCandidate(model: RunModel): Candidate | null {
   const id = model.candidates.best?.candidate ?? null;

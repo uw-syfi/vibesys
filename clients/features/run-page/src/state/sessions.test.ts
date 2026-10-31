@@ -43,14 +43,18 @@ function recordsOf(parts: readonly Part[], downtime: boolean) {
   const expected: {from: number; to: number}[] = [];
   let clock = 0;
   const push = (body: Body): void => {
-    records.push(create(RecordSchema, {seq: BigInt(records.length + 1), epoch: expected.length, body}));
+    records.push(
+      create(RecordSchema, {seq: BigInt(records.length + 1), epoch: expected.length, body}),
+    );
   };
   for (const part of parts) {
     if (downtime || expected.length === 0) clock += part.stopped;
     expected.push({from: clock, to: clock + part.work});
     const header = clone(RecordSchema, HEADER as Records[number]);
     if (header.body.case === 'epochStarted') header.body.value.epoch = expected.length;
-    records.push(create(RecordSchema, {...header, seq: BigInt(records.length + 1), epoch: expected.length}));
+    records.push(
+      create(RecordSchema, {...header, seq: BigInt(records.length + 1), epoch: expected.length}),
+    );
     for (let span = 0; span < part.spans; span += 1) {
       const started = clock + Math.floor((span * part.work) / part.spans / 2);
       const ended = span === part.spans - 1 ? clock + part.work : started + 1;
@@ -132,7 +136,13 @@ describe('where the time bar stands on the run clock', () => {
           reached = time;
         }
         const last = times.at(-1);
-        expect(last).toBe(Math.max(...records.flatMap(r => (r.body.case === 'span' ? [r.body.value.span?.endedAt ?? 0] : [0]))));
+        expect(last).toBe(
+          Math.max(
+            ...records.flatMap(r =>
+              r.body.case === 'span' ? [r.body.value.span?.endedAt ?? 0] : [0],
+            ),
+          ),
+        );
       }),
       {numRuns: 10},
     );

@@ -9,10 +9,13 @@ import {placesAlong, runningTimeOf} from './running-time.js';
 
 /** Sessions that follow one another with stopped gaps between them (a gap may be none). */
 const sessions: fc.Arbitrary<readonly RunSession[]> = fc
-  .array(fc.record({work: fc.integer({min: 1, max: 5000}), stopped: fc.integer({min: 0, max: 90000})}), {
-    minLength: 1,
-    maxLength: 6,
-  })
+  .array(
+    fc.record({work: fc.integer({min: 1, max: 5000}), stopped: fc.integer({min: 0, max: 90000})}),
+    {
+      minLength: 1,
+      maxLength: 6,
+    },
+  )
   .map(parts => {
     let at = 0;
     return parts.map(part => {
@@ -37,16 +40,20 @@ describe('running time', () => {
 
   test('never goes back, and never runs faster than the clock', () => {
     fc.assert(
-      fc.property(sessions, fc.array(fc.integer({min: 0, max: 800000}), {maxLength: 12}), (each, times) => {
-        const time = runningTimeOf(each, 0);
-        const ordered = [...times].sort((a, b) => a - b);
-        for (let at = 1; at < ordered.length; at += 1) {
-          const [before, after] = [ordered[at - 1] ?? 0, ordered[at] ?? 0];
-          const moved = time.at(after) - time.at(before);
-          expect(moved).toBeGreaterThanOrEqual(0);
-          expect(moved).toBeLessThanOrEqual(after - before);
-        }
-      }),
+      fc.property(
+        sessions,
+        fc.array(fc.integer({min: 0, max: 800000}), {maxLength: 12}),
+        (each, times) => {
+          const time = runningTimeOf(each, 0);
+          const ordered = [...times].sort((a, b) => a - b);
+          for (let at = 1; at < ordered.length; at += 1) {
+            const [before, after] = [ordered[at - 1] ?? 0, ordered[at] ?? 0];
+            const moved = time.at(after) - time.at(before);
+            expect(moved).toBeGreaterThanOrEqual(0);
+            expect(moved).toBeLessThanOrEqual(after - before);
+          }
+        },
+      ),
     );
   });
 
@@ -78,11 +85,15 @@ describe('running time', () => {
 
   test('is the clock as it stands when no session is known', () => {
     fc.assert(
-      fc.property(fc.integer({min: 0, max: 100000}), fc.integer({min: 0, max: 100000}), (start, at) => {
-        const time = runningTimeOf([], start);
-        expect(time.at(at)).toBe(Math.max(0, at - start));
-        expect(time.resumes).toEqual([]);
-      }),
+      fc.property(
+        fc.integer({min: 0, max: 100000}),
+        fc.integer({min: 0, max: 100000}),
+        (start, at) => {
+          const time = runningTimeOf([], start);
+          expect(time.at(at)).toBe(Math.max(0, at - start));
+          expect(time.resumes).toEqual([]);
+        },
+      ),
     );
   });
 });
@@ -108,7 +119,10 @@ describe('places along the time bar', () => {
           if (last > first) {
             expect(places.at(-1)).toBe(1);
             const middle = Math.floor(seconds.length / 2);
-            expect(places[middle]).toBeCloseTo(((seconds[middle] ?? 0) - first) / (last - first), 9);
+            expect(places[middle]).toBeCloseTo(
+              ((seconds[middle] ?? 0) - first) / (last - first),
+              9,
+            );
           }
         },
       ),
