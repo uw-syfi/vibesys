@@ -21,9 +21,10 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from vibesys.api.importing import ImportSource, SourceFormat, import_run_facts
-from vibesys.events import CoreEventType, TurnUsageData
+from vibesys.events import CoreEventType, ModelTurnUsageData, TurnUsageData
 from vibesys.run import CoreAgentEventSink, EventJournal
 from vs_agent.api import (
+    SHIPPED_PROVIDERS,
     AgentClient,
     AgentExecutionPolicy,
     AgentSessionKey,
@@ -36,8 +37,10 @@ from vs_agent.api import (
 from vs_agent.api.testing import (
     FakeExecutor,
     FakeProvider,
+    TokenUsage,
     assistant_text,
     fake_agentshim_launcher,
+    scripted_turn,
     stream_peers,
 )
 from vs_core.api.testing import FAKE_REGISTRY
@@ -158,6 +161,10 @@ def _split_turns(draw: st.DrawFn) -> agentshim.ProviderUsage:
     )
 
 
+_NO_COST = {agentshim.CostSource.UNKNOWN_MODEL, agentshim.CostSource.NOT_REPORTED}
+"""The sources that go with no cost: nothing was priced, and nothing was guessed."""
+
+
 def _report(usage: agentshim.ProviderUsage) -> agentshim.UsageReport:
     return agentshim.UsageReport(usage=usage, cost_usd=usage.total_cost_usd)
 
@@ -245,7 +252,7 @@ def test_every_way_the_library_reaches_a_cost_has_a_basis_of_the_same_name(
 ) -> None:
     usage = agentshim.ProviderUsage(
         tokens=agentshim.TokenUsage(input_tokens=5, output_tokens=2, turns=1),
-        total_cost_usd=None if source is agentshim.CostSource.UNKNOWN_MODEL else 0.5,
+        total_cost_usd=None if source in _NO_COST else 0.5,
         provider="claude",
         cost_source=source,
     )
@@ -314,7 +321,14 @@ def test_the_usage_row_holds_the_split_in_the_journals_own_names(rows: Sequence[
     """``usage.jsonl`` and the journal write one vocabulary, so a reader of either joins them."""
     tokens = agentshim.TokenUsage(input_tokens=9, output_tokens=3, turns=2)
     split = tuple(
-        agentshim.ModelUsage(model, tokens, 0.25, None, primary=index == 0)
+        agentshim.ModelUsage(
+            model,
+            # Only the primary row counts the turn's requests, as the library builds them.
+            agentshim.TokenUsage(input_tokens=9, output_tokens=3, turns=2 if index == 0 else 0),
+            0.25,
+            None,
+            primary=index == 0,
+        )
         for index, model in enumerate(rows)
     )
     usage = agentshim.ProviderUsage(
@@ -331,10 +345,133 @@ def test_the_usage_row_holds_the_split_in_the_journals_own_names(rows: Sequence[
     assert isinstance(written, list)
     assert [item["model"] for item in written] == [each.model for each in data.by_model]
     for item, each in zip(written, data.by_model, strict=True):
-        assert item["input_tokens"] == each.input_tokens
-        assert item["turns"] == each.turns
-        assert item["primary"] == each.primary
-        assert item["recorded_usd"] == each.recorded_usd
+        # The row names exactly the journal row's fields, in its names, with its values.
+        assert item == each.model_dump(mode="json")
+        assert set(item) == set(ModelTurnUsageData.model_fields)
+
+
+def test_the_usage_row_names_the_turns_fields_and_nothing_else(tmp_path: Path) -> None:
+    """A reader of ``usage.jsonl`` joins it to the journal by these keys, so they are pinned."""
+    usage = agentshim.ProviderUsage(
+        tokens=agentshim.TokenUsage(input_tokens=9, output_tokens=3, turns=2),
+        total_cost_usd=0.5,
+        provider="claude",
+        cost_source=agentshim.CostSource.PROVIDER_REPORTED,
+    )
+
+    data, session_id, row = _run_turn(tmp_path, _report(usage))
+
+    accounting = {
+        "input_tokens",
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens",
+        "output_tokens",
+        "reasoning_output_tokens",
+        "total_cost_usd",
+        "duration_ms",
+    }
+    assert set(row) == {
+        "timestamp",
+        "kind",
+        "round_label",
+        "provider",
+        "model",
+        "reasoning_effort",
+        *accounting,
+        "cost_basis",
+        "by_model",
+        "provider_session_id",
+        "skill_uses",
+        "skills_invoked",
+        "skills_offered",
+    }
+    # The accounting keys are the journal event's own, by the same names.
+    assert accounting | {"cost_basis", "by_model", "provider_session_id"} <= set(
+        TurnUsageData.model_fields
+    )
+    assert data.cost_basis is CostBasis.PROVIDER_REPORTED
+    assert row["cost_basis"] == "provider_reported"
+    assert row["provider_session_id"] == session_id
+
+
+@settings(max_examples=examples(pr=30, nightly=300), deadline=None)
+@given(
+    cost=st.none() | st.floats(0, 1000, allow_nan=False, allow_infinity=False),
+    source=st.none() | st.sampled_from(agentshim.CostSource),
+)
+def test_a_turn_the_client_records_always_records_a_basis_so_null_means_only_an_old_line(
+    cost: float | None, source: agentshim.CostSource | None
+) -> None:
+    """Whatever the library said of a turn's cost, even nothing, the new line says something."""
+    usage = agentshim.ProviderUsage(
+        tokens=agentshim.TokenUsage(input_tokens=5, output_tokens=2, turns=1),
+        total_cost_usd=cost,
+        provider="claude",
+        cost_source=source,
+    )
+    with tempfile.TemporaryDirectory() as directory:
+        data, _, row = _run_turn(Path(directory), _report(usage))
+
+    assert data.cost_basis is not None
+    assert row["cost_basis"] == data.cost_basis.value
+    if source is None and cost is None:
+        assert data.cost_basis is CostBasis.NOT_REPORTED
+
+
+@pytest.mark.parametrize("provider", SHIPPED_PROVIDERS)
+def test_a_turn_of_every_shipped_provider_records_a_basis(tmp_path: Path, provider: str) -> None:
+    """Each shipped CLI's own stream shape, through the production session path, with no cost
+    printed: the line says ``not_reported`` (or the basis the library computed), never nothing."""
+    if provider == "codex":
+        data = _codex_turn(tmp_path, "gpt-6.1-sol")
+    else:
+        data, _, _ = _one_shot_turn(tmp_path, provider)
+
+    assert data.cost_basis is not None
+
+
+def _one_shot_turn(
+    root: Path, provider: str
+) -> tuple[TurnUsageData, str | None, dict[str, object]]:
+    """One turn of a one-shot CLI, scripted in its own stream format, through ``AgentClient``."""
+    journal = EventJournal(clock=ManualClock(), threads=SimThreads())
+    journal.attach(root / "run", "run-1")
+    logs = root / "logs"
+    logs.mkdir()
+    run = scripted_turn(
+        provider,
+        text="done",
+        session_id="session-1",
+        usage=TokenUsage(input_tokens=100, cache_read_input_tokens=40, output_tokens=10),
+    )
+    client = AgentClient(
+        fake_agentshim_launcher(
+            provider=provider, executor=FakeExecutor(run), threads=SimThreads()
+        ),
+        provider=provider,
+        event_sink=CoreAgentEventSink(journal.record, clock=ManualClock()),
+        log_dir=logs,
+        clock=ManualClock(),
+        threads=SimThreads(),
+    )
+    spec = AgentSessionSpec(
+        role="implementer",
+        provider=provider,
+        workspace=root,
+        policy=AgentExecutionPolicy(require_enforcement=False),
+    )
+    try:
+        result = client.run(
+            session_spec=spec,
+            turn=AgentTurnRequest(message="work", invocation_id="inv-1", label="round 1"),
+            session_key=AgentSessionKey(SessionScope.ROLE, "implementer"),
+        )
+    finally:
+        client.close()
+    (event,) = (e for e in journal.read() if e.type is CoreEventType.TURN_USAGE_RECORDED)
+    assert isinstance(event.data, TurnUsageData)
+    row = json.loads((logs / "usage.jsonl").read_text(encoding="utf-8"))
+    return event.data, result.provider_session_id, row
 
 
 def _codex_turn(root: Path, model: str) -> TurnUsageData:
@@ -422,5 +559,6 @@ def test_a_turn_on_a_model_nobody_priced_reads_unknown_never_a_guess(tmp_path: P
     data = _codex_turn(tmp_path, "gpt-0-unpriced")
 
     assert data.total_cost_usd is None
+    assert data.cost_basis is CostBasis.UNKNOWN_MODEL
     assert [row.recorded_usd for row in data.by_model] == [None]
     assert _replay_money(data) == "unknown"
