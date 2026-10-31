@@ -124,6 +124,11 @@ function objectiveColumns(
       key: `objective-${column.index}`,
       header: column.title,
       size: table.form === 'multiple' ? 'short' : 'wide',
+      narrow: 'short',
+      hint: row => {
+        const cell = row.cells[at];
+        return cell?.value == null ? undefined : `${formatValue(cell.value)} ${column.unit}`.trim();
+      },
       ...(at > 0 ? {optional: true} : {}),
       sort: sorted({by: 'objective', index: column.index}),
       cell: row => {
@@ -144,6 +149,7 @@ function singleColumns(table: IdeasTableView): readonly Column[] {
     key: 'vs-input',
     header: 'vs input',
     size: 'short',
+    optional: true,
     cell: row => {
       const cell = row.cells[0];
       return cell === undefined || cell.multiple === null ? quiet(NONE) : <Multiple cell={cell} />;
@@ -175,12 +181,19 @@ function singleColumns(table: IdeasTableView): readonly Column[] {
 
 function leadColumns(base: ViewBase): readonly Column[] {
   return [
-    {key: 'idea', header: 'Idea', size: 'fill', cell: row => <IdeaName row={row} />},
+    {
+      key: 'idea',
+      header: 'Idea',
+      size: 'fill',
+      hint: row => markdownToPlain(row.title),
+      cell: row => <IdeaName row={row} />,
+    },
     {
       key: 'built-on',
       header: 'Built on',
       size: 'wide',
       optional: true,
+      hint: row => markdownToPlain(row.builtOn.label),
       cell: row =>
         row.builtOn.parent === null ? (
           quiet(row.builtOn.label)
@@ -195,6 +208,8 @@ function leadColumns(base: ViewBase): readonly Column[] {
       key: 'status',
       header: 'Status',
       size: 'wide',
+      narrow: 'short',
+      hint: row => [row.status.word, row.status.cause].filter(part => part !== null).join(' · '),
       cell: row => (
         <CellLines
           main={
@@ -274,11 +289,13 @@ export function IdeasTable(props: {
   const shown = table.rows.length;
   return (
     <Stack gap="space-3" grow>
-      <Row gap="space-3" align="center">
-        <Text variant="heading">Ideas</Text>
-        <Text tone="muted">
-          {shown === table.total ? `${table.total}` : `${shown} of ${table.total}`}
-        </Text>
+      <Row gap="space-3" align="center" wrap>
+        <Row gap="space-3" align="baseline">
+          <Text variant="heading">Ideas</Text>
+          <Text tone="muted">
+            {shown === table.total ? `${table.total}` : `${shown} of ${table.total}`}
+          </Text>
+        </Row>
         <Chips table={table} filter={filter} dispatch={props.dispatch} />
         <Row gap="space-0" grow justify="end">
           <SearchBox

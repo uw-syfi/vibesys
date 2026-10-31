@@ -19,8 +19,12 @@ export interface ListColumn<Row> {
   readonly header: string;
   readonly size: ColumnSize;
   readonly align?: 'start' | 'end';
-  /** Drawn only while the list has room: it gives way below `NARROW` of its own width. */
+  /** Drawn only while the list has room: it gives way when the list is narrow. */
   readonly optional?: boolean;
+  /** The column's size when the list is narrow; the same by default. */
+  readonly narrow?: ColumnSize;
+  /** What the pointer shows over a cell whole, for a cell that may be cut short. */
+  readonly hint?: (row: Row) => string | undefined;
   readonly cell: (row: Row) => ReactNode;
   /** Pressing the header sorts by the column; `marked` draws the arrow on the one it sorts by. */
   readonly sort?: {readonly marked: boolean; readonly press: () => void};
@@ -103,6 +107,7 @@ function Row<Row>(props: {
           className="vs-columnlist-cell"
           data-align={column.align}
           data-optional={column.optional || undefined}
+          title={column.hint?.(props.row)}
         >
           {column.cell(props.row)}
         </span>
@@ -151,11 +156,14 @@ export function ColumnList<Row>(props: {
     if (event.target !== event.currentTarget) return;
     win.reveal(selectedIndex >= 0 ? selectedIndex : 0, row => row.focus());
   };
-  const tracksOf = (columns: readonly ListColumn<Row>[]): string =>
-    columns.map(column => TRACKS[column.size]).join(' ');
+  const tracksOf = (columns: readonly ListColumn<Row>[], narrow: boolean): string =>
+    columns.map(column => TRACKS[(narrow && column.narrow) || column.size]).join(' ');
   const tracks = {
-    '--columns': tracksOf(props.columns),
-    '--columns-narrow': tracksOf(props.columns.filter(column => column.optional !== true)),
+    '--columns': tracksOf(props.columns, false),
+    '--columns-narrow': tracksOf(
+      props.columns.filter(column => column.optional !== true),
+      true,
+    ),
   } as CSSProperties;
   return (
     <div className="vs-columnlist" style={tracks}>
