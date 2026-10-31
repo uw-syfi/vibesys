@@ -29,8 +29,8 @@ from vs_runtime._run_environment import (
     _cli_container_env,
     _cli_provider_env_and_auth_files,
     _ensure_pushed_for_remote_backend,
-    _SkyPilotRunEnvironmentSession,
 )
+from vs_runtime._skypilot_environment import _SkyPilotRunEnvironmentSession
 from vs_runtime.api.infrastructure import (
     SANDBOX_EVALUATOR_GO_MODULES_ROOT,
     EvaluatorPackageRequirement,
@@ -2295,7 +2295,7 @@ remote_artifact_root = "/remote/vibesys"
         def close(self) -> None:
             self.closed += 1
 
-    monkeypatch.setattr("vs_runtime._run_environment.SkyPilotBridge", FakeBridge)
+    monkeypatch.setattr("vs_runtime._skypilot_environment.SkyPilotBridge", FakeBridge)
     backend = FakeBackend()
     environment = build_run_environment(
         make_run_environment_spec(
@@ -2383,7 +2383,7 @@ remote_artifact_root = "/remote/vibesys"
         def close(self) -> None:
             return
 
-    monkeypatch.setattr("vs_runtime._run_environment.SkyPilotBridge", FakeBridge)
+    monkeypatch.setattr("vs_runtime._skypilot_environment.SkyPilotBridge", FakeBridge)
     package = resolve_evaluator_package(
         EvaluatorPackageRequirement(
             name="vibesys-evaluator-request-factory",
@@ -2558,7 +2558,7 @@ remote_artifact_root = "/remote/vibesys"
         def close(self) -> None:
             pass
 
-    monkeypatch.setattr("vs_runtime._run_environment.SkyPilotBridge", _FakeBridge)
+    monkeypatch.setattr("vs_runtime._skypilot_environment.SkyPilotBridge", _FakeBridge)
     skypilot_backend = FakeBackend()
     skypilot_env = build_run_environment(
         make_run_environment_spec(

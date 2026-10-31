@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -78,7 +78,13 @@ from vs_agent.contracts import (
     AgentSkillUse,
     AgentTurnRequest,
 )
-from vs_sandbox.api import DockerSandbox, HostResource, ProjectPathPolicy
+from vs_sandbox.api import (
+    STEP_TAG_ENV,
+    DockerSandbox,
+    HostResource,
+    ProjectPathPolicy,
+    step_tag_env,
+)
 from vs_sandbox.api.testing import FakeDockerConfinement
 from vs_sim.api.testing import HANG_GUARD_S, ManualClock, SimThreads, start_thread
 
@@ -569,6 +575,85 @@ def test_confine_to_sandbox_rewrites_argv_through_any_workspace_sandbox(
         assert argv[argv.index("-w") + 1] == "/workspace"
     else:
         assert argv[0] == "/usr/bin/stub-sandbox"
+
+
+@pytest.mark.parametrize("sandbox_kind", ["host", "docker"])
+def test_confine_to_sandbox_starts_a_step_s_program_with_its_tag_in_the_environment(
+    tmp_path: Path,
+    sandbox_kind: str,
+) -> None:
+    """The marker is set by ``env`` inside the sandbox, which starts the program on its own."""
+    sandbox = (
+        _FakeHostSandbox() if sandbox_kind == "host" else FakeDockerConfinement(workspace=tmp_path)
+    )
+    fake = FakeExecutor([FakeRun(), FakeRun()])
+    executor = subject.confine_to_sandbox(fake, sandbox)
+    request = agentshim.CommandRequest(
+        argv=["claude", "-p"], stdin=None, cwd=str(tmp_path), env={}, timeout=None
+    )
+
+    executor.run(request, agentshim.NullSink())
+    executor.run(replace(request, env=step_tag_env("step-a")), agentshim.NullSink())
+
+    plain, tagged = (list(sent.argv) for sent in fake.requests)
+    assert plain[-2:] == ["claude", "-p"]
+    assert tagged[-4:] == ["env", f"{STEP_TAG_ENV}=step-a", "claude", "-p"]
+    assert tagged[:-4] == plain[:-2]
+
+
+@pytest.mark.parametrize("leads_group", [True, False])
+def test_a_host_command_is_led_by_a_process_that_carries_the_mark_as_an_argument(
+    tmp_path: Path, *, leads_group: bool
+) -> None:
+    """macOS shows another process's arguments, not its environment, so the leader carries it."""
+    fake = FakeExecutor([FakeRun()])
+    executor = subject.confine_to_sandbox(fake, _FakeHostSandbox(), leads_group=leads_group)
+    request = agentshim.CommandRequest(
+        argv=["claude", "-p"],
+        stdin=None,
+        cwd=str(tmp_path),
+        env=step_tag_env("run-a:step-a"),
+        timeout=None,
+    )
+
+    executor.run(request, agentshim.NullSink())
+
+    argv = list(fake.requests[-1].argv)
+    if leads_group:
+        assert argv[0] == "/bin/sh"
+        assert f"{STEP_TAG_ENV}=run-a:step-a" in argv
+        assert argv[-1].endswith(f"env {STEP_TAG_ENV}=run-a:step-a claude -p")
+    else:
+        assert argv[0] == "/usr/bin/stub-sandbox"
+        assert argv[-4:] == ["env", f"{STEP_TAG_ENV}=run-a:step-a", "claude", "-p"]
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_a_turn_marks_its_provider_process_with_the_step_that_asked_for_it(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    del sandbox_builds
+    session, fake = _session(tmp_path, provider, scripted_turn(provider, text="ok"))
+
+    session.run_turn(AgentTurnRequest(message="Do it", step_tag="step-a"))
+
+    assert fake.requests[-1].env[STEP_TAG_ENV] == "step-a"
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_a_turn_no_step_asked_for_carries_no_tag(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    del sandbox_builds
+    session, fake = _session(tmp_path, provider, scripted_turn(provider, text="ok"))
+
+    session.run_turn(AgentTurnRequest(message="Do it"))
+
+    assert STEP_TAG_ENV not in fake.requests[-1].env
 
 
 def test_host_binary_lookup_resolves_symlinks_before_sandbox_launch(tmp_path: Path) -> None:

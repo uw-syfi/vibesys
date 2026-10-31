@@ -1760,3 +1760,21 @@ def test_a_client_that_sent_extra_bytes_and_hung_up_is_seen_disconnected(
 
     threads.run(main)
     assert any("client disconnected" in line for line in logs), logs
+
+
+def test_the_bridge_journals_the_step_of_an_evaluation_and_the_tag_is_not_part_of_its_identity(
+    tmp_path: Path, transport: MemoryTransport
+) -> None:
+    bridge = _bridge(tmp_path, transport)
+    bridge.start()
+    try:
+        tagged = EvaluationRequest(kind="accuracy", invocation_id="7" * 32, step_tag="step-a")
+        first = transport.evaluate(bridge, tagged)
+        again = transport.evaluate(bridge, tagged.model_copy(update={"step_tag": "step-b"}))
+    finally:
+        bridge.close()
+
+    record = InvocationJournal(_namespace(tmp_path)).load("7" * 32)
+    assert record is not None
+    assert record.step_tag == "step-a"
+    assert [frame.type for frame in first] == [frame.type for frame in again]
