@@ -95,6 +95,24 @@ async function failedRun(page: Page, look: Look): Promise<void> {
   await shoot(page, 'run-logs', look);
 }
 
+async function newRunMayHaveStarted(page: Page, look: Look): Promise<void> {
+  const review = NEW_RUN_PAGES.find(each => each.name === 'review project');
+  if (review === undefined) throw new Error('the world has no Review page');
+  await openNewRunAt(page, review, themed(SEED, look));
+  // The host takes the run and the reply is lost: the call rejects with nothing reported.
+  await page.evaluate(() => {
+    const bridge = (window as unknown as {vibesysWelcome: Record<string, unknown>}).vibesysWelcome;
+    bridge['startRun'] = () => Promise.reject(new Error('the reply was lost'));
+  });
+  await newRunMain(page).getByRole('button', {name: 'Start run'}).click();
+  await expect(newRunMain(page).getByText('May have started', {exact: true})).toBeVisible();
+  await expect(newRunMain(page).getByText('Check Runs first', {exact: true})).toBeVisible();
+  await expect(newRunMain(page).getByRole('button', {name: 'Open Runs'})).toBeVisible();
+  await expectNoBanner(page);
+  expect(await screenCheck(page)).toEqual([]);
+  await shoot(page, 'new-run-may-have-started', look);
+}
+
 async function settingsStatus(page: Page, look: Look): Promise<void> {
   const machines = [
     {host: 'local', label: 'This Mac', checkout: '~/projs/vibesys'},
@@ -204,6 +222,10 @@ const SCREENS: readonly {
 }[] = [
   {title: 'a failed run: its state in the header, its diagnostic in Logs', walk: failedRun},
   {title: 'Settings: a section too old and a login started are status words', walk: settingsStatus},
+  {
+    title: 'New run: a start that may have happened says so on the page',
+    walk: newRunMayHaveStarted,
+  },
   {
     title: 'Machines: the status word, its reason on the pointer, its fix beside it',
     walk: machinesStatus,
