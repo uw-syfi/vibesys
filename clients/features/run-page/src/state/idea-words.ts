@@ -78,7 +78,8 @@ export function figureOf(
   const failed = measured?.failed ?? null;
   if (failed !== null) return {figure: `Failed · ${progressOf(failed)}`, tone: 'err'};
   const tone = item.outcome === 'passed' ? 'ok' : 'err';
-  const multiple = vsInput(item) ?? measured?.vsBaseline ?? null;
+  // An idea the framework gave no ratio to the input has none here either: its base is named below.
+  const multiple = measured?.vsBaseline == null ? null : (vsInput(item) ?? measured.vsBaseline);
   if (multiple !== null) return {figure: ratio(multiple), tone};
   if (measured?.against != null) {
     return {figure: againstWords(measured.against), tone};

@@ -4,10 +4,11 @@ import {
   type Keyframe,
   KeyframeSchema,
   LifecycleVersionSchema,
+  type MetricHistory,
   MetricHistorySchema,
   MetricVersionSchema,
-  RecordSchema,
   Severity,
+  type SpanHistory,
   SpanHistorySchema,
   SpanVersionSchema,
   type Record as StoreRecord,
@@ -77,54 +78,119 @@ function copySkeleton(keyframe: Keyframe): Skeleton {
 }
 
 /**
+ * A batch's working copy of a skeleton. Each collection is copied once when the batch opens, and a
+ * span or metric history on its first touch, so a batch costs its own records plus the state's
+ * pointers, never a deep copy of the state. Everything else is shared with the state it started
+ * from and with the records it read, which the fold never mutates.
+ */
+interface Batch {
+  readonly next: {-readonly [K in keyof Skeleton]: Skeleton[K]};
+  /** The histories this batch created or copied: the only ones it may append to. */
+  readonly owned: Set<object>;
+  /** Position of each series and stream in `next`, built on the first one the batch meets. */
+  metricAt?: Map<string, number>;
+  streamAt?: Map<string, number>;
+}
+
+function openBatch(state: Skeleton): Batch {
+  return {
+    next: {
+      throughSeq: state.throughSeq,
+      spans: {...state.spans},
+      metrics: [...state.metrics],
+      streams: [...state.streams],
+      epochs: [...state.epochs],
+      lifecycles: [...state.lifecycles],
+      // Replaced, never appended to.
+      failures: state.failures,
+      failuresTracked: state.failuresTracked,
+      intents: [...state.intents],
+      recordsTracked: state.recordsTracked,
+      recordFacts: [...state.recordFacts],
+      head: state.head,
+    },
+    owned: new Set(),
+  };
+}
+
+/**
  * Typed records are dense. Phase 1 epoch/legacy records may start at zero and have gaps,
  * as served by the gateway during the seven-day read window. Every cursor strictly increases.
+ *
+ * Linear in the batch plus the state's pointers: neither `state` nor `records` is mutated, a
+ * state returned earlier never changes, and whatever a batch does not touch is the same object in
+ * the state it returns (the structure is shared, so a returned state is read-only).
  */
 export function foldSkeleton(state: Skeleton, records: readonly StoreRecord[]): Skeleton {
-  const next = {
-    ...copySkeleton(create(KeyframeSchema, {...state, throughSeq: state.throughSeq ?? 0n})),
-    throughSeq: state.throughSeq,
-  };
+  const batch = openBatch(state);
+  const {next} = batch;
   for (const record of records) {
     validateSequence(next.throughSeq, record);
     if (next.head !== undefined && (next.head.committedSeq ?? 0n) < record.seq)
       next.head = undefined;
-    foldBody(next, clone(RecordSchema, record));
+    foldBody(batch, record);
     next.throughSeq = record.seq;
   }
   return next;
 }
 
-function appendRecordFact(state: Omit<Skeleton, 'throughSeq'>, record: StoreRecord): void {
-  if (record.body.case === 'intent') state.intents.push(record);
+function appendRecordFact({next}: Batch, record: StoreRecord): void {
+  if (record.body.case === 'intent') next.intents.push(record);
   else if (record.body.case !== 'epochStarted' && isRecordFact(record))
-    state.recordFacts.push(record);
+    next.recordFacts.push(record);
 }
 
-function foldBody(state: Omit<Skeleton, 'throughSeq'>, record: StoreRecord): void {
+/** The span's history for appending: copied the first time this batch touches it. */
+function spanHistory({next, owned}: Batch, id: string): SpanHistory {
+  const known = Object.hasOwn(next.spans, id) ? next.spans[id] : undefined;
+  if (known !== undefined && owned.has(known)) return known;
+  const history = known ? {...known, versions: [...known.versions]} : create(SpanHistorySchema);
+  owned.add(history);
+  // Assignment would reach the `__proto__` setter for a span of that name; define the property.
+  Object.defineProperty(next.spans, id, {
+    value: history,
+    enumerable: true,
+    writable: true,
+    configurable: true,
+  });
+  return history;
+}
+
+/** The series' history for appending: copied the first time this batch touches it. */
+function metricHistory(batch: Batch, series: string): MetricHistory {
+  const {next, owned} = batch;
+  batch.metricAt ??= new Map(next.metrics.map((history, at) => [history.series, at]));
+  const at = batch.metricAt.get(series);
+  const known = at === undefined ? undefined : next.metrics[at];
+  if (known !== undefined && owned.has(known)) return known;
+  const history = known
+    ? {...known, points: [...known.points]}
+    : create(MetricHistorySchema, {series});
+  owned.add(history);
+  if (at === undefined || known === undefined) {
+    batch.metricAt.set(series, next.metrics.length);
+    next.metrics.push(history);
+  } else next.metrics[at] = history;
+  return history;
+}
+
+function foldBody(batch: Batch, record: StoreRecord): void {
+  const {next: state} = batch;
   const {seq, body} = record;
   appendInputDeclaration(state, record);
-  appendRecordFact(state, record);
+  appendRecordFact(batch, record);
   switch (body.case) {
     case 'span': {
       const span = body.value.span;
       if (!span) throw new Error(`record ${seq}: span.span is required`);
-      const history =
-        (Object.hasOwn(state.spans, span.id) ? state.spans[span.id] : undefined) ??
-        create(SpanHistorySchema);
-      history.versions.push(create(SpanVersionSchema, {seq, span}));
-      state.spans = {...state.spans, [span.id]: history};
+      spanHistory(batch, span.id).versions.push(create(SpanVersionSchema, {seq, span}));
       break;
     }
-    case 'metric': {
-      let history = state.metrics.find(item => item.series === body.value.series);
-      if (!history) {
-        history = create(MetricHistorySchema, {series: body.value.series});
-        state.metrics.push(history);
-      }
-      history.points.push(create(MetricVersionSchema, {seq, point: body.value}));
+    case 'metric':
+      metricHistory(batch, body.value.series).points.push(
+        create(MetricVersionSchema, {seq, point: body.value}),
+      );
       break;
-    }
     case 'epochStarted':
     case 'declarationAmended':
       state.epochs.push(
@@ -145,9 +211,12 @@ function foldBody(state: Omit<Skeleton, 'throughSeq'>, record: StoreRecord): voi
         state.failures = [...state.failures.filter(kept => kept.epoch !== record.epoch), record];
       break;
     case 'stream': {
-      const index = state.streams.findIndex(stream => stream.id === body.value.id);
-      if (index < 0) state.streams.push(body.value);
-      else state.streams[index] = body.value;
+      batch.streamAt ??= new Map(state.streams.map((stream, at) => [stream.id, at]));
+      const at = batch.streamAt.get(body.value.id);
+      if (at === undefined) {
+        batch.streamAt.set(body.value.id, state.streams.length);
+        state.streams.push(body.value);
+      } else state.streams[at] = body.value;
       break;
     }
     default:
@@ -156,7 +225,7 @@ function foldBody(state: Omit<Skeleton, 'throughSeq'>, record: StoreRecord): voi
 }
 
 /** Store upgrades carry a declaration alongside the original metric record. */
-function appendInputDeclaration(state: Omit<Skeleton, 'throughSeq'>, record: StoreRecord): void {
+function appendInputDeclaration(state: Batch['next'], record: StoreRecord): void {
   if (record.inputMeasurement !== undefined) {
     const epoch = state.epochs.at(-1)?.epoch;
     if (epoch?.run) {

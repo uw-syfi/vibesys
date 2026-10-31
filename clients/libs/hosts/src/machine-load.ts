@@ -40,6 +40,8 @@ const FAILURE_WORDS: readonly (readonly [RegExp, (code: string) => string])[] = 
   [/gateway (?:startup|connect) exited: (\S+?):?(?:\s|$)/, code => `gateway exited (code ${code})`],
   [/requires gateway resources/, () => 'gateway not built'],
   [/timed out|did not connect in time/, () => 'gateway timed out'],
+  [/Could not resolve hostname/, () => 'host not found'],
+  [/the connection to .* is down/, () => 'connection down'],
   [/API hash mismatch/, () => 'version mismatch'],
   [/run stream went silent/, () => 'no answer'],
   [/run stream ended/, () => 'stream ended'],
