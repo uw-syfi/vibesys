@@ -34,7 +34,7 @@ from vs_core.api.recovery import (
     Run,
     RunRest,
     finished_message,
-    fold_run,
+    fold,
 )
 from vs_proto.api import (
     AttemptInterrupted,
@@ -67,7 +67,14 @@ from vs_runtime.api.testing import (
     RunnerMethod,
     fake_run_seed,
 )
-from vs_sim.api.testing import VirtualClock, examples, run_virtual, swept, wait_for_state
+from vs_sim.api.testing import (
+    VirtualClock,
+    examples,
+    loop_threads,
+    run_virtual,
+    swept,
+    wait_for_state,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -142,6 +149,25 @@ class World:
     """The controls the operator sent and the log took."""
 
 
+class HeldBoard(StallBoard):
+    """A stall board that remembers every tag it showed held, for a run that parks over one.
+
+    The board empties as the loop returns, and a parked run may still have an attempt open in the
+    log for a call that ignored its cancel: this says which tags were held when it parked.
+    """
+
+    def __init__(self, held: set[str]) -> None:
+        super().__init__()
+        self._held = held
+
+    def note(
+        self, tag: core.RequestId, kind: StallKind, error: BaseException | None, now: float
+    ) -> None:
+        if kind.held:
+            self._held.add(tag.root)
+        super().note(tag, kind, error, now)
+
+
 class Watch:
     """What the loop owes a tag it holds, checked at every boundary and before every record.
 
@@ -150,7 +176,9 @@ class Watch:
     """
 
     def __init__(self) -> None:
-        self.board = StallBoard()
+        self.held: set[str] = set()
+        """Every tag the board showed held, in any process of the run."""
+        self.board: StallBoard = HeldBoard(self.held)
         self.runner: FakeStepRunner | None = None
         self.problems: list[str] = []
         """Each way the loop acted on a tag it should have left alone, as it was seen."""
@@ -161,7 +189,7 @@ class Watch:
 
     def new_board(self) -> StallBoard:
         """The board of the next process: a restart starts with nothing stalled."""
-        self.board = StallBoard()
+        self.board = HeldBoard(self.held)
         return self.board
 
     def boundary(self) -> None:
@@ -409,7 +437,9 @@ async def run_epochs(world: World, clock: VirtualClock, kill_at: int | None) -> 
     parked = False
     killed = False
     while True:
-        log = FakeStepLog(world.records, world.seed.state, world.seed.registry, clock)
+        log = FakeStepLog(
+            world.records, world.seed.state, world.seed.registry, clock, loop_threads()
+        )
         if parked:
             resume = core.ControlInput(
                 control_id=core.ControlId(root=f"resume-{len(world.exits)}"),
@@ -440,8 +470,9 @@ async def run_epochs(world: World, clock: VirtualClock, kill_at: int | None) -> 
         world.boundaries += switch.ticks
         world.unproven.extend(stall.tag for stall in world.watch.board.unproven())
         if outcome is RunRest.PARKED:
-            # What a runner still holds after a pause (a call that ignored its cancel) is the one
-            # residual the loop shows and leaves to the process exit; the log has no attempt running.
+            # A call that ignored its cancel is the one residual the loop shows and leaves to the
+            # process exit, so the log may still have its attempt running. The next epoch ends it
+            # uncharged (``epoch_opened``).
             world.running_at_park.extend(
                 a.tag.root for a in log.state.steps.attempts if not a.ended
             )
@@ -539,6 +570,7 @@ def check_world(world: World) -> None:
     assert world.watch.problems == []
     if cooperative(world.scenario):
         assert not world.running_at_park, "the run parked with an attempt the log has running"
+    assert set(world.running_at_park) <= world.watch.held, "parked over an attempt no call holds"
     check_every_accepted_control_is_effective(world)
 
 
@@ -546,8 +578,8 @@ def cooperative(scenario: Scenario) -> bool:
     """Whether every attempt of the scenario ends when it is told to.
 
     A deaf or held attempt can outlive the park: the loop shows it and leaves it to the process
-    exit, but the log still has it running. That breaks "a parked run has nothing running", and the
-    one test that says so is ``test_a_run_parks_with_nothing_running_whatever_the_runners_do``.
+    exit, and the log still has it running. A parked run therefore holds an attempt only for a call
+    the loop showed held (``check_world``), and the next epoch ends it uncharged.
     """
     return not any(
         isinstance(behavior, AttemptHolds)
@@ -559,7 +591,7 @@ def cooperative(scenario: Scenario) -> bool:
 
 def check_every_accepted_control_is_effective(world: World) -> None:
     """A control the log took is in the run's controls once the log is folded: none is swallowed."""
-    state = fold_run(world.records.read(), world.seed.state, registry=world.seed.registry).state
+    state = fold(world.records.read(), world.seed.state, registry=world.seed.registry)
     held = {control.control_id.root for control in state.run.controls}
     assert world.accepted <= held, f"controls taken and not effective: {world.accepted - held}"
 
@@ -661,14 +693,15 @@ def test_a_runner_that_returns_late_from_a_pause_leaves_one_result_and_one_clear
     assert attempts_started(world, 0) == [1, 2]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="found by the generators of 6a-2; belongs to 4a: the loop returns parked with a deaf attempt open in the log",
-)
-def test_a_run_parks_with_nothing_running_whatever_the_runners_do() -> None:
-    world = run_world(Scenario((step(DEAF, FINISHES, limit_s=50.0),), pause_at=1.0))
-    assert world.exits[0] is RunRest.PARKED
-    assert not world.running_at_park, "the run parked with an attempt the log has running"
+def test_a_run_parks_over_an_open_attempt_only_for_a_call_that_ignored_its_cancel() -> None:
+    """The log may park with the attempt of a deaf call running; the exit ends it, uncharged.
+
+    With no tries to spare, the step still finishes after the resume: the pause is not a crash.
+    """
+    world = run_world(Scenario((step(DEAF, FINISHES, limit_s=50.0),), pause_at=1.0, retries=0))
+    assert world.exits == [RunRest.PARKED, RunRest.ENDED]
+    assert set(world.running_at_park) <= world.watch.held
+    assert was_finished(world, 0), "the held attempt was charged as a crash"
 
 
 def test_an_unreachable_backend_is_retried_and_the_step_then_runs_again() -> None:

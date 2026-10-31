@@ -1,10 +1,11 @@
 """What a log starts from, and what a cache of its fold stands in for.
 
-A log starts from `RunStarted` (a new run) or `CoreSnapshot` (a run an older version saved, appended
-once by a migration). The snapshot is a seed the way the worlds of `recovery_worlds.py` are: steps of
-every kind, in the standing a log of an earlier version leaves them, under an epoch the host counted
-that the log's own numbering may be behind. Folding it must never refuse such a seed, and `decide`
-must still ask for every open step.
+A log starts from `RunStarted` (a new run) or a snapshot (a run an older version saved, appended once
+by a migration). The log's reader decodes the snapshot record into a `SavedRun`, which core folds as
+`apply_saved` (the record's wire form is `vs_runtime`'s, and tested there). A saved run is a seed the
+way the worlds of `recovery_worlds.py` are: steps of every kind, in the standing a log of an earlier
+version leaves them, under an epoch the host counted that the log's own numbering may be behind.
+Folding it must never refuse such a seed, and `decide` must still ask for every open step.
 
 The cache of a fold is `Folded.encode`: the fold of the first records of a log, which a start reads
 and then folds the rest of the log over. Whatever the log and wherever it is cut, that is the fold of
@@ -22,22 +23,24 @@ from vs_core.api.recovery import (
     Folded,
     Run,
     SavedRun,
+    apply_record,
+    apply_saved,
     at_rest,
     decide,
-    decode_snapshot,
+    decode_saved,
+    encode_saved,
     fold_run,
     input_message,
     seed_message,
-    snapshot_message,
 )
-from vs_proto.api import EpochStarted, Oneof, Record, Timestamp
+from vs_proto.api import CoreSnapshot, EpochStarted, Oneof, Record, Timestamp
 from vs_sim.api.testing import examples
 
 from .recovery_loop import MOVES, OPEN, Loop, Move, invariants, play, settle
 from .recovery_worlds import Standing, StepSpec, World, build, worlds
 
 
-def record(seq: int, epoch: int, body: Oneof, clock: float = 0.0) -> Record:
+def record(seq: int, epoch: int, body: Oneof | None, clock: float = 0.0) -> Record:
     return Record(seq=seq, epoch=epoch, at=Timestamp(seconds=seq), clock=clock, body=body)
 
 
@@ -51,20 +54,26 @@ def saved_run(state: core.CoreState, *inputs: core.CoreEvent) -> SavedRun:
     )
 
 
+def snapshot_record(epoch: int) -> Record:
+    """The record that holds a saved run. Core reads its epoch and clock; its body is the reader's."""
+    return record(2, epoch, None)
+
+
 def snapshot_loop(world: World, epoch: int) -> Loop:
     """A run resumed from a snapshot of ``world``, in the log's epoch ``epoch``."""
     state, registry = build(world)
-    snapshot = record(2, epoch, Oneof("core_snapshot", snapshot_message(saved_run(state))))
-    records = [header(epoch), snapshot]
-    folded = fold_run(records, registry=registry)
-    return Loop(folded.state, registry, records=records, epoch=epoch, clock=snapshot.clock)
+    snapshot = snapshot_record(epoch)
+    folded = apply_saved(None, saved_run(state), snapshot)
+    return Loop(
+        folded.state, registry, records=[header(epoch), snapshot], epoch=epoch, clock=snapshot.clock
+    )
 
 
 EPOCHS = st.integers(1, 4)
 """The epoch of the log the snapshot lands in; the host counted its own, which may be ahead."""
 
 
-def test_a_snapshot_round_trips_what_it_holds() -> None:
+def test_a_saved_run_round_trips_its_canonical_json() -> None:
     state, registry = build(World(()))
     pause = core.RunControlEvent(
         control=core.ControlInput(
@@ -81,23 +90,22 @@ def test_a_snapshot_round_trips_what_it_holds() -> None:
         inputs=(pause,),
         wakes=(30.0, 40.0),
     )
-    assert decode_snapshot(snapshot_message(saved), registry) == saved
+    assert decode_saved(encode_saved(saved), registry) == saved
 
 
 @settings(max_examples=examples(pr=10, nightly=200), deadline=None)
 @given(world=worlds(), epoch=EPOCHS)
-def test_a_snapshot_folds_as_the_start_of_a_new_run_does(world: World, epoch: int) -> None:
+def test_a_saved_run_folds_as_the_start_of_a_new_run_does(world: World, epoch: int) -> None:
     state, registry = build(world)
     started = record(2, epoch, Oneof("run_started", seed_message(state)))
-    snapshot = record(2, epoch, Oneof("core_snapshot", snapshot_message(saved_run(state))))
-    assert fold_run([header(epoch), snapshot], registry=registry) == fold_run(
+    assert apply_saved(None, saved_run(state), snapshot_record(epoch)) == fold_run(
         [header(epoch), started], registry=registry
     )
 
 
 @settings(max_examples=examples(pr=10, nightly=200), deadline=None)
 @given(world=worlds(), epoch=EPOCHS)
-def test_the_inputs_of_a_snapshot_are_applied_in_order_as_input_records_are(
+def test_the_inputs_of_a_saved_run_are_applied_in_order_as_input_records_are(
     world: World, epoch: int
 ) -> None:
     """A saved run's unapplied inputs fold as the same inputs appended one by one after the seed."""
@@ -111,7 +119,6 @@ def test_the_inputs_of_a_snapshot_are_applied_in_order_as_input_records_are(
         now_at=0.0,
     )
     inputs = (pause, core.ClockAdvanced(now_at=2.0))
-    snapshot = record(2, epoch, Oneof("core_snapshot", snapshot_message(saved_run(state, *inputs))))
     separately = [
         record(2, epoch, Oneof("run_started", seed_message(state))),
         *(
@@ -119,9 +126,18 @@ def test_the_inputs_of_a_snapshot_are_applied_in_order_as_input_records_are(
             for index, event in enumerate(inputs)
         ),
     ]
-    assert fold_run([header(epoch), snapshot], registry=registry) == fold_run(
+    assert apply_saved(None, saved_run(state, *inputs), snapshot_record(epoch)) == fold_run(
         [header(epoch), *separately], registry=registry
     )
+
+
+def test_a_snapshot_record_is_read_by_the_reader_of_the_log_and_not_by_core() -> None:
+    state, registry = build(World(()))
+    snapshot = record(2, 1, Oneof("core_snapshot", CoreSnapshot()))
+    with pytest.raises(ValueError, match="snapshot"):
+        apply_record(None, snapshot, registry)
+    with pytest.raises(ValueError, match="already started"):
+        apply_saved(Folded(state), saved_run(state), snapshot)
 
 
 def rejected(loop: Loop, moves: list[Move], *, lag: bool) -> int | None:
@@ -223,15 +239,17 @@ def test_a_fold_started_from_its_cache_is_the_fold_of_the_whole_log(
     world: World, moves: list[Move], *, snapshot: bool, epoch: int, data: st.DataObject
 ) -> None:
     loop = _log_of(world, moves, snapshot=snapshot, epoch=epoch)
-    seed = None if snapshot else build(world)[0]
-    records = loop.records
-    first = 2 if snapshot else 0  # a cache covers the seed: the header and the snapshot
-    cut = data.draw(st.integers(first, len(records)), label="records the cache covers")
-    whole = fold_run(records, seed, registry=loop.registry)
-    cached = fold_run(records[:cut], seed, registry=loop.registry)
+    state, _ = build(world)
+    if snapshot:  # the saved run seeds the fold at its record, after the header
+        seed, tail = apply_saved(None, saved_run(state), loop.records[1]), loop.records[2:]
+    else:
+        seed, tail = Folded(state), loop.records
+    cut = data.draw(st.integers(0, len(tail)), label="records the cache covers")
+    whole = fold_run(tail, seed, registry=loop.registry)
+    cached = fold_run(tail[:cut], seed, registry=loop.registry)
     restored = Folded.decode(cached.encode(), loop.registry)
     assert restored == cached
-    assert fold_run(records[cut:], restored, registry=loop.registry) == whole
+    assert fold_run(tail[cut:], restored, registry=loop.registry) == whole
 
 
 def test_a_cache_written_by_another_encoding_or_damaged_is_refused() -> None:

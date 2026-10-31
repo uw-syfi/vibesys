@@ -223,7 +223,13 @@ def _begin(
         if prior is not None:
             message = f"record {record.seq} starts a run the log already started"
             raise ValueError(message)
-        return _seeded(body, record, registry)
+        if body.field == "core_snapshot":
+            message = (
+                f"record {record.seq} is a snapshot: its run is decoded by the log's reader "
+                "and folded with apply_saved"
+            )
+            raise ValueError(message)
+        return Folded(_observed(decode_seed(body.value, registry), record))
     if body is not None and body.field in _CORE_RECORDS:
         message = f"record {record.seq} is core's, and the log holds no seed before it"
         raise ValueError(message)
@@ -327,11 +333,15 @@ def starts_run(record: Record) -> bool:
     return record.body is not None and record.body.field in _SEEDS
 
 
-def _seeded(body: Oneof, record: Record, registry: OperationRegistry | None) -> Folded:
-    """The fold a seed record starts: a snapshot's unapplied inputs are applied, in order."""
-    if body.field == "run_started":
-        return Folded(_observed(decode_seed(body.value, registry), record))
-    saved = decode_snapshot(body.value, registry)
+def apply_saved(prior: Folded | None, saved: SavedRun, record: Record) -> Folded:
+    """The fold a saved run's snapshot ``record`` starts, with its unapplied inputs applied in order.
+
+    ``saved`` is the run the record holds, decoded by the log's reader. The record gives the epoch
+    and the run clock the fold begins in. It is the log's seed, so ``prior`` is None.
+    """
+    if prior is not None:
+        message = f"record {record.seq} starts a run the log already started"
+        raise ValueError(message)
     folded = Folded(_observed(saved.state, record))
     for event in saved.inputs:
         state, published = _stepped(folded.state, event)

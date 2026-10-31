@@ -31,7 +31,7 @@ from vs_proto.api import EpochStarted, Notice, NoticeCode, Oneof, Record, Severi
 from vs_runlog.api import CachedFold, CacheMiss, ConfirmedLog, MemoryFoldCache, PrefixDigest
 from vs_runtime.api.step_runner import CACHE_EVERY, CacheUsed, RunLogStepLog
 from vs_runtime.api.testing import FakeRunRecords, fake_run_seed
-from vs_sim.api.testing import VirtualClock, examples, run_virtual
+from vs_sim.api.testing import SimThreads, VirtualClock, examples, run_virtual
 
 if TYPE_CHECKING:
     from vs_runtime.api.testing import FakeRunSeed
@@ -81,7 +81,7 @@ class Process:
         self, *, cached: bool = True, every: int = CACHE_EVERY
     ) -> tuple[RunLogStepLog, HearingSearch]:
         """A new process: it opens the next epoch and takes over what the earlier ones left."""
-        confirmed = self.confirmed = ConfirmedLog(self.records)
+        confirmed = self.confirmed = ConfirmedLog(self.records, SimThreads())
         epoch = (self.records.records[-1].epoch if self.records.records else 0) + 1
         confirmed.append(
             EpochStarted(epoch=epoch), epoch=epoch, at=Timestamp(), clock=self.clock.now()

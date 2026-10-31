@@ -7,12 +7,16 @@ swallowed; a deadline stops the run once; a run that waits on nothing is reporte
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import vs_core.api as core
 from vs_core.api.recovery import Interruption, Run, RunRest, at_rest, decide
 from vs_runtime.api.step_runner import CoreInputs
 from vs_runtime.api.testing import FakeRunRecords, FakeStepLog, fake_run_seed
-from vs_sim.api.testing import VirtualClock, run_virtual
+from vs_sim.api.testing import SimThreads, VirtualClock, run_virtual
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 @dataclass
@@ -33,7 +37,7 @@ class OperatorOf:
         state: core.CoreState,
         *,
         running: bool,
-        refused: tuple[core.ControlRefusedError, ...] | list[core.ControlRefusedError] = (),
+        refused: Sequence[core.ControlRefusedError] = (),
     ) -> None:
         del running
         self.settled_with.append(state.run.status)
@@ -53,7 +57,7 @@ def inputs_over(
 ) -> tuple[CoreInputs, FakeStepLog, VirtualClock]:
     clock = VirtualClock()
     seed = fake_run_seed(limits_s, retries=1)
-    log = FakeStepLog(FakeRunRecords(), seed.state, seed.registry, clock)
+    log = FakeStepLog(FakeRunRecords(), seed.state, seed.registry, clock, SimThreads())
     return CoreInputs(log, None, clock, controls=operator), log, clock
 
 

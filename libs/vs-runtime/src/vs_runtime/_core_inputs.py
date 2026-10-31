@@ -39,8 +39,8 @@ from vs_core.api.recovery import (
     advance_run_time,
     advance_search,
     checkpoint_search,
-    restore,
 )
+from vs_runtime._saved_run_record import restore_log
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -56,12 +56,12 @@ if TYPE_CHECKING:
 class Controls(Protocol):
     """The operator's side of a run: what the bridge of ``vs_runtime.api.control`` offers."""
 
-    def poll(self, core: CoreState, now_at: float) -> tuple[CoreEvent, ...]:
+    def poll(self, core: CoreState, now_at: float, /) -> tuple[CoreEvent, ...]:
         """The controls requested since the last poll, as core events."""
         ...
 
     def settled(
-        self, core: CoreState, *, running: bool, refused: Sequence[ControlRefusedError] = ()
+        self, core: CoreState, /, *, running: bool, refused: Sequence[ControlRefusedError] = ()
     ) -> None:
         """Tell the operator what core committed and which of its controls it refused."""
         ...
@@ -94,7 +94,7 @@ class SearchRun[S: StrategyState, C]:
     ) -> SearchRun[S, C]:
         """The search as the log's advance records left it; fresh when they hold none."""
         with _search_generators():
-            progress = restore(records, search, registry)
+            progress = restore_log(records, search, registry)
         return cls(search, config, registry, progress)
 
     @property

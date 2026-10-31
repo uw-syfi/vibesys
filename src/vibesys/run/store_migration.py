@@ -18,10 +18,11 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
-from vs_core.api.recovery import SavedRun, snapshot_message, starts_run
+from vs_core.api.recovery import SavedRun, starts_run
 from vs_proto.api import RUN_LOG_MAX_RECORD_BYTES
 from vs_runlog.api import Appended
 from vs_runtime.api.core import resolve_core_resume
+from vs_runtime.api.step_runner import snapshot_message
 
 if TYPE_CHECKING:
     from collections.abc import Callable

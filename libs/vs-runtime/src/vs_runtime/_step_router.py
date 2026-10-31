@@ -186,13 +186,16 @@ def build_step_runner(parts: StepRunnerParts) -> StepRouter:
     return StepRouter(routes, operations, unserved=unserved)
 
 
-def request_kinds(alias: object) -> frozenset[type[Request]]:
+def request_kinds(alias: object) -> frozenset[type]:
     """Every class in the request union ``alias`` names, through aliases and ``Annotated``."""
     value = getattr(alias, "__value__", alias)
     if get_origin(value) is Annotated:
         return request_kinds(get_args(value)[0])
     members = get_args(value)
     if not members:
+        if not isinstance(value, type):
+            message = f"{value!r} is neither a request class nor a union of them"
+            raise TypeError(message)
         return frozenset({value})
     return frozenset().union(*(request_kinds(member) for member in members))
 
