@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol, assert_never
 
+from vs_core.api import RunStatus
 from vs_core.api.recovery import (
     Cancel,
     Cancelled,
@@ -37,6 +38,7 @@ from vs_core.api.recovery import (
     at_rest,
     decide,
     interruption_of,
+    may_start,
 )
 from vs_runtime._step_runner import Adopted, CancelSignal, Cleared, ClearUnavailableError
 
@@ -298,12 +300,30 @@ class _StepLoop:
         actions = decide(self._log.state, self._clock.now())
         if rest is RunRest.PARKED:
             return await self._park(actions)
+        if self._drain_waits_on_the_exit():
+            return RunRest.PARKED
         end = next((a for a in actions if isinstance(a, End)), None)
         if end is not None and not self._flights:
             await self._record_ended(end)
             return RunRest.ENDED
         await self._wake(self._dispatch(actions))
         return None
+
+    def _drain_waits_on_the_exit(self) -> bool:
+        """Whether a pause's drain has nothing left but calls that only the process exit stops.
+
+        A held call ignored its cancel and its task's cancellation, and no record may name its tag
+        while it runs. The drain cannot finish in this process, so the loop returns as a parked run
+        does: the caller exits, the call dies with the process, and the next process's log ends the
+        attempt, parks the drain and admits the operator's Resume.
+        """
+        state = self._log.state
+        draining = state.run.status is RunStatus.DRAINING and state.run.park is not None
+        return (
+            draining
+            and bool(self._flights)
+            and all(self._stalls.holds(tag) for tag in self._flights)
+        )
 
     async def _park(self, actions: tuple[Action, ...]) -> RunRest | None:
         """A parked run starts nothing and takes no result: it only stops what still runs.
@@ -424,9 +444,13 @@ class _StepLoop:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def _record_started(self, run: Run) -> None:
+    async def _record_started(self, run: Run) -> bool:
+        """Record the start unless the run no longer lets the step start: the decision is stale."""
         async with self._appending:
+            if not may_start(self._log.state, run.tag, self._clock.now()):
+                return False
             await self._log.step_started(run)
+            return True
 
     async def _record_finished(self, tag: RequestId, attempt: int, result: StepResult) -> None:
         async with self._appending:
@@ -449,7 +473,8 @@ class _StepLoop:
         if cleared is None or (flight.signal.is_set() and isinstance(cleared, Cleared)):
             await self._finish_unstarted(flight)
             return
-        await self._record_started(run)
+        if not await self._record_started(run):
+            return
         flight.started = True
         outcome = await self._run_bounded(run, flight.signal)
         await self._finish_attempt(run, flight, outcome)
