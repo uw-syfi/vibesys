@@ -249,8 +249,10 @@ test('shared-reader fold inventory is exhaustive', () => {
     'run-sessions/src/renderer/effects/use-steer-deliveries.ts',
   ]);
   expect(Object.keys(RECORD_FACTS).sort()).toEqual([
+    'attemptInterrupted',
     'blob',
     'chat',
+    'coreInput',
     'declarationAmended',
     'epochStarted',
     'intent',
@@ -259,6 +261,8 @@ test('shared-reader fold inventory is exhaustive', () => {
     'metric',
     'notice',
     'span',
+    'stepFinished',
+    'stepStarted',
     'stream',
   ]);
 });

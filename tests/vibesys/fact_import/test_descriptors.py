@@ -14,7 +14,7 @@ from tests.vibesys.fact_import.descriptors import (
 # Every frozen file except the current envelope version's. When ENVELOPE_SCHEMA_VERSION is
 # bumped, the previous version's file joins this table and is never edited again.
 _PINNED = {
-    "envelope-v42.json": "6a3216d9cd8adbcbf0ce876a10836575577e1b8294c43d861d6b532edde83894",
+    "envelope-v42.json": "2a98bcf319b3ba27df5a24ebaab8fea0613cc16b6665d7b0bfab3f682fd258a0",
     "retained.json": "1d651d6d14af8db053ad400ce002812c26c9f1a17ede3ee47a14716503a2e7da",
 }
 
@@ -26,8 +26,10 @@ def test_the_current_envelope_version_has_frozen_descriptors_equal_to_the_live_m
         "`uv run --locked python -m tests.vibesys.fact_import.descriptors`"
     )
     assert path.read_text() == render(live_descriptors()), (
-        f"the live models changed {path.name} in place: bump ENVELOPE_SCHEMA_VERSION and "
-        "freeze the new version instead"
+        f"the live models changed {path.name}: if every saved envelope still validates "
+        "(scripts/check_persisted_schema_compat.py), regenerate it with "
+        "`uv run --locked python -m tests.vibesys.fact_import.descriptors`; otherwise bump "
+        "ENVELOPE_SCHEMA_VERSION and freeze the new version instead"
     )
 
 

@@ -41,7 +41,6 @@ from tests.support.task_project import write_task
 
 import launch
 from entrypoints.cli import build_run_request, parse_cli_invocation
-from entrypoints.production import production_timing
 from launch import LaunchSettings
 from vibesys.api import (
     CoreEventType,
@@ -66,7 +65,13 @@ from vs_core.testing.liveness import Budget, End, Journal, assert_live
 from vs_project.api import FakeStateStores, Project, StoredEnvelope
 from vs_runtime.api.core import PRODUCTION_LEASE_SECONDS, RunTiming
 from vs_runtime.api.testing import CrashableRunClock, FakeStopTimer
-from vs_sim.api import OsThreads, SubprocessPipedProcessLauncher, ThreadBlockingRunner, UnixNetwork
+from vs_sim.api import (
+    OsThreads,
+    SubprocessPipedProcessLauncher,
+    SystemClock,
+    ThreadBlockingRunner,
+    UnixNetwork,
+)
 from vs_sim.api.testing import run_virtual
 from vs_slurm.fake_connector import HOLD_FILE, SUBMITTED_FILE, FakeConnector, recorded_commands
 
@@ -524,6 +529,23 @@ class LoopInput:
             None if on_disk_state else FakeStateStores(),
         )
 
+    @classmethod
+    def attach(cls, base: Path) -> LoopInput:
+        """Open the input :meth:`create` wrote under ``base`` in another process.
+
+        The run's durable records are the product's ``.vibesys`` on disk, which is all
+        two processes can share; the cluster is the one directory both execute on.
+        """
+        connector = FakeConnector(base / "cluster")
+        return cls(
+            base / "project",
+            connector.state,
+            base / "slurm.toml",
+            base / "agent.toml",
+            connector,
+            None,
+        )
+
     def project(self) -> Project:
         """Open the input project over the run's state stores."""
         return Project.open(self.root, state_stores=self.state_stores)
@@ -644,6 +666,7 @@ def run_request(  # noqa: PLR0913
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
     slurm_processes: Processes | None = None,
     state_stores: StateStoreFactory | None = None,
+    lease_seconds: float = PRODUCTION_LEASE_SECONDS,
 ) -> LoopRun:
     """Execute a built request through the production host composition.
 
@@ -651,7 +674,9 @@ def run_request(  # noqa: PLR0913
     resumes a crashed run passes one ``simulated_clock()`` to both runs: the state store's
     lease is compared on one shared timeline, and waiting advances it at once. Such a run
     that waits more than ``SIMULATED_BUDGET_S`` simulated seconds fails instead of
-    spinning. Simulated time decouples the loop from the agent turns that run in threads,
+    spinning. ``lease_seconds`` is how long a writer's lease outlives it: a real-clock run that
+    resumes after its predecessor was killed waits that long, so such a scenario shortens it.
+    Simulated time decouples the loop from the agent turns that run in threads,
     so scenarios that depend on a turn finishing within one poll still use the wall clock.
     """
     if clock is not None:
@@ -664,7 +689,7 @@ def run_request(  # noqa: PLR0913
             backend_factory=backend_factory or host_container_backend,
             stop_timer=stop_timer or FakeStopTimer(threads=OsThreads()),
             timing=(
-                production_timing()
+                RunTiming(SystemClock(), lease_seconds, OsThreads())
                 if clock is None
                 else RunTiming(clock, PRODUCTION_LEASE_SECONDS, OsThreads())
             ),

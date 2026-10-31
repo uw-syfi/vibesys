@@ -75,6 +75,9 @@ class FailureReason(StrEnum):
     OUT_OF_BUDGET = "out-of-budget"
     MEASUREMENT_UNTRUSTED = "measurement-untrusted"
 
+    ATTEMPTS_EXHAUSTED = "attempts-exhausted"
+    """Every attempt the step may have (``Limits.request_retries``) ended without a result."""
+
 
 class WaitRefusal(StrEnum):
     """Why a turn that asked to wait for its evaluations was not suspended. Closed."""

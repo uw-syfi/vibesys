@@ -1,0 +1,63 @@
+"""A step's result is one of three typed values, each a closed record that survives its encoding."""
+
+from hypothesis import given, settings
+from hypothesis import strategies as st
+from pydantic import TypeAdapter
+
+import vs_core.api as core
+from vs_core.api.recovery import (
+    Cancelled,
+    CancelReason,
+    Failed,
+    Finished,
+    Interruption,
+    StepResult,
+)
+from vs_proto.api import InterruptionReason, StepCancelReason
+from vs_sim.api.testing import examples
+
+_RESULT = TypeAdapter(StepResult)
+
+
+@st.composite
+def finished(draw: st.DrawFn) -> Finished:
+    status = draw(st.sampled_from(core.ObservationStatus))
+    return Finished(
+        observation=core.Observation(
+            event_id=core.EventId(root=draw(st.text("abc", min_size=1, max_size=4))),
+            request_id=core.RequestId(root=draw(st.text("abc", min_size=1, max_size=4))),
+            scope=core.Scope(owner=core.RunId(root="run"), generation=draw(st.integers(0, 3))),
+            sequence=draw(st.integers(0, 9)),
+            observed_at=draw(st.floats(0, 1e6)),
+            status=status,
+            terminal=draw(st.booleans()),
+        )
+    )
+
+
+RESULTS = st.one_of(
+    finished(),
+    st.builds(Cancelled, reason=st.sampled_from(CancelReason)),
+    st.just(Failed(reason=core.FailureReason.ATTEMPTS_EXHAUSTED)),
+)
+
+
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(result=RESULTS)
+def test_a_step_result_round_trips_as_the_variant_it_was(result: StepResult) -> None:
+    decoded = _RESULT.validate_json(_RESULT.dump_json(result))
+    assert decoded == result
+    assert type(decoded) is type(result)
+
+
+def test_the_log_names_cancellations_as_core_does() -> None:
+    assert {reason.name for reason in CancelReason} == {
+        reason.name for reason in StepCancelReason if reason is not StepCancelReason.UNSPECIFIED
+    }
+
+
+def test_the_log_names_interruptions_as_core_does() -> None:
+    assert {why.name for why in Interruption} == {
+        why.name for why in InterruptionReason if why is not InterruptionReason.UNSPECIFIED
+    }
+    assert {why for why in Interruption if why.charged} == {Interruption.RAISED}
