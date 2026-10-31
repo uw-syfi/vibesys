@@ -36,7 +36,7 @@ export {
   gatewayTarget,
   provisionGateway,
 } from './shell/gateway-provision.js';
-export {GrpcDecoder, grpcFrame} from './shell/grpc.js';
+export {CallTimedOut, GrpcDecoder, grpcFrame} from './shell/grpc.js';
 export {ConnectionError, HelperRequestError} from './shell/helper-channel.js';
 export {HostConnection, type LogsLease} from './shell/host-connection.js';
 export {HOST_UNSUPPORTED_MESSAGE, isHostUnsupported} from './shell/host-unsupported.js';
