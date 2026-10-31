@@ -723,7 +723,7 @@ def _benchmark_run(command: list[str]) -> int:
         fcntl.flock(lock, fcntl.LOCK_EX)
         # LW-100354 [S603]; explicit user argv; a shell adds quoting hazards,
         # while an executable allowlist would reject legitimate user benchmarks.
-        return subprocess.run(command, check=False).returncode  # noqa: S603
+        return subprocess.run(command, check=False, pass_fds=(lock.fileno(),)).returncode  # noqa: S603
 
 
 def main(
@@ -744,11 +744,8 @@ def main(
             return _benchmark_run(args.argv)
         run = _run_directory(args.run)
         args.run = str(run)
-        if args.command_name == "record":
-            with (run / "run.lock").open("a") as lock:
-                fcntl.flock(lock, fcntl.LOCK_EX)
-                _COMMANDS[args.command_name](args, _Env(out=out, now=now, host=host))
-        else:
+        with (run / "run.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
             _COMMANDS[args.command_name](args, _Env(out=out, now=now, host=host))
     except InvalidInputError as error:
         err.write(f"error: {error}\n")

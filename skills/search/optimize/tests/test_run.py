@@ -463,6 +463,17 @@ def test_judge_cannot_pass_missing_or_failed_declared_gate(
         )
         == 0
     ) == (result is True)
+    if result is True:
+        assert run.call("transition", "--id", "x", "--to", "won", "--reason", "judged") == 0
+        failed = {
+            **rows[-1],
+            "gates": {declaration: {"passed": [True, False, True], "values": [0.1, 2.0, 0.3]}},
+        }
+        with path.open("a") as stream:
+            stream.write(json.dumps(failed) + "\n")
+        assert run.call("move-main", "--id", "x") == 2
+        assert run.state()["main_commit"] == BASE
+        path.write_text("".join(json.dumps(r) + "\n" for r in rows))
     comparison = measurements.compare_commit(measurements.load_records(run.path), CANDIDATE, BASE)
     assert comparison["gates"]["candidate"]["status"] == (
         "unmeasured" if result is None else "pass" if result else "fail"
