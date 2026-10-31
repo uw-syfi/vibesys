@@ -104,10 +104,10 @@ async function openItem(page: Page, command: string): Promise<void> {
   await expect(turn.locator('[aria-current="true"]')).toBeVisible();
 }
 
-/** The idea level again, by its crumb (the second), from a step or item. */
+/** The idea level again, by its crumb (the third, after Runs and Run), from a step or item. */
 async function backToIdea(page: Page): Promise<void> {
   await settled(page);
-  await page.getByRole('navigation', {name: 'Zoom'}).getByRole('button').nth(1).click();
+  await page.getByRole('navigation', {name: 'Zoom'}).getByRole('button').nth(2).click();
   await expect(page.getByRole('listbox', {name: /steps$/})).toBeVisible();
 }
 
