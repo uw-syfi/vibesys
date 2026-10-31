@@ -20,7 +20,11 @@ test('the idea, the turn and the clock stop where the run did', async ({page}) =
   await openFixture(page, fixture);
   const main = page.getByRole('main');
   await expect(main.getByText('Running', {exact: true})).toHaveCount(0);
-  await main.locator('.vs-banner').getByRole('button', {name: 'Show details'}).click();
+  await main
+    .locator('.vs-banner')
+    .filter({hasText: 'Run diagnostic'})
+    .getByRole('button', {name: 'Show details'})
+    .click();
   await expect(main.getByText(/run failed/i).first()).toBeVisible();
   await expect(main.getByText('input not measured')).toBeVisible();
   await shot(page, 'ideas');
@@ -41,6 +45,7 @@ test('the banner gives the whole reason the run failed', async ({page}) => {
   await page
     .getByRole('main')
     .locator('.vs-banner')
+    .filter({has: page.getByRole('button', {name: 'Run again'})})
     .getByRole('button', {name: 'Show details'})
     .click();
   // The header's facts and the banner each give it whole; the first match is the whole reason.
