@@ -16,8 +16,8 @@ The reads of a project's runs (``ProjectRun``, ``run_summaries``, ``project_runs
 
 Public surface: ``answer``, ``apply_registered_project``, ``RegisteredProjectHost``,
 ``launch_registered_run``, ``registry_start_request``,
-``registry_read_source``, ``connect``, ``negotiate``, ``Negotiated``,
-``HelperHost``; the interfaces ``Projects``, ``Directories``,
+``registry_read_source``, ``describe_machine``, ``preflight_facts``, ``connect``, ``negotiate``,
+``Negotiated``, ``HelperHost``; the interfaces ``Projects``, ``Directories``,
 ``ProjectMutationExamples``, ``ProjectMutationDirectories``, ``RunLauncher`` and
 ``CheckoutProbe`` with the values they exchange (``ScannedEntry``, ``Scan``, ``PathHints``);
 ``home_relative``, ``without_home``, ``complete_path``, ``select_completions``, ``split_prefix``,
@@ -1228,7 +1228,7 @@ def _unconfigured_target(request_id: str | None, target: SlurmTarget | ModalTarg
     )
 
 
-def _preflight_facts(
+def preflight_facts(
     request: RunPreflightRequest, host: HelperHost
 ) -> RunPreflightReply | HelperError:
     """Check whether the run ``run.start`` would launch with these inputs can start."""
@@ -1358,7 +1358,7 @@ def read_reply(request: HelperRequest, source: HostReadSource) -> HelperReply | 
     payload = request.model_dump(mode="json", exclude={"type", "deadline_ms"})
     accepted = operation.accept(_wire().from_mapping(operation.request, payload))
     try:
-        encoded = import_module("vibesys.api.host_operations.api").execute_read(accepted, source)
+        encoded = import_module("vibesys.api.host_operations.reads").execute_read(accepted, source)
     except import_module("server.host_operation_reads").ReadRefusedError as error:
         return error.refusal
     response = operation.response.from_binary(encoded)
@@ -1381,7 +1381,7 @@ def registry_read_source(host: HelperHost, request: HelperRequest | None = None)
         host,
         role_order,
         describe=lambda: describe_machine(host),
-        preflight=lambda value: _preflight_facts(value, host),
+        preflight=lambda value: preflight_facts(value, host),
     )
 
 

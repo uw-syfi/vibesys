@@ -13,7 +13,7 @@ import json
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
-from hypothesis import assume, given
+from hypothesis import assume, example, given
 from hypothesis import strategies as st
 from tests.server.host_helper_support import (
     HARNESSES,
@@ -95,11 +95,17 @@ def test_the_list_is_the_hosts_vetted_harnesses() -> None:
     assert reply == HarnessesListReply(request_id="l", harnesses=HARNESSES)
 
 
+@example(installed={"claude"})
 @given(installed=st.sets(st.sampled_from(["codex", "claude"])))
-def test_providers_whose_cli_is_installed_are_listed_first_and_nothing_else_changes(
+def test_the_list_is_the_catalog_in_its_own_order_whichever_clis_are_installed(
     installed: set[str],
 ) -> None:
-    """Regression: a machine without the first provider's CLI defaulted a run to it."""
+    """Which CLIs a machine has is ``machine.describe``'s answer (``harness_clis``): telling takes a
+    login shell, and a list the app asks for at every launch starts none. A client that wants the
+    installed providers first orders the list with that answer.
+
+    Regression: the list asked the machine, so every ``harnesses.list`` started a shell.
+    """
     threads = SimThreads()
     host = replace(
         fake_host(threads, SimNetwork(threads)),
@@ -109,13 +115,7 @@ def test_providers_whose_cli_is_installed_are_listed_first_and_nothing_else_chan
     reply = answer(HarnessesListRequest(request_id="l", deadline_ms=1), host, threads.event())
 
     assert isinstance(reply, HarnessesListReply)
-    providers = [option.provider for option in reply.harnesses]
-    first_missing = next((i for i, p in enumerate(providers) if p not in installed), len(providers))
-    assert all(p not in installed for p in providers[first_missing:])
-    assert sorted(reply.harnesses, key=repr) == sorted(HARNESSES, key=repr)
-    for provider in installed:
-        mine = [option for option in reply.harnesses if option.provider == provider]
-        assert mine == [option for option in HARNESSES if option.provider == provider]
+    assert list(reply.harnesses) == list(HARNESSES)
 
 
 def _negotiated(features: list[str]) -> ChannelState:

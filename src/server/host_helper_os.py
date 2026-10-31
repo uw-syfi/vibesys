@@ -9,7 +9,6 @@ is light (``tests/architecture/test_light_entrypoints.py``).
 Public surface: ``FileProjects``, ``ProjectStopIntents``, ``OsDirectories``,
 ``SubprocessRunLauncher``,
 ``SubprocessRunPreflight``,
-``read_task_goal``,
 ``GitCheckoutProbe`` and ``StoreLogReader`` with ``run_streams_directory``.
 """
 
@@ -45,12 +44,10 @@ from server.host_api import (
     RunDigestUnreadable,
 )
 from server.host_examples import (
-    ExampleObjective,
     ProjectLookupError,
     TaskGoal,
     TaskList,
     TaskSummary,
-    bounded_goal,
 )
 from server.host_helper_logs import (
     LogStoreCorruptError,
@@ -89,7 +86,6 @@ from vs_project.api import (
     Project,
     ProjectError,
     is_run_id,
-    load_objectives,
 )
 from vs_sim.api import ProcessSpec
 
@@ -100,7 +96,7 @@ if TYPE_CHECKING:
     from server.run_summary import Summarized
     from server.run_summary_cache import SummaryReader
     from vs_logs.read import LogReader as StoreReader
-    from vs_project.api import GitRepositoryFactory, OrchestrationRunManifest, TaskDirectory
+    from vs_project.api import GitRepositoryFactory, OrchestrationRunManifest
     from vs_sim.api import (
         CommandProbe,
         ProcessLauncher,
@@ -218,29 +214,6 @@ def tally_journal(stream: BinaryIO, previous: JournalTally) -> JournalTally:
     return JournalTally(size, lines)
 
 
-def read_task_goal(task: TaskDirectory) -> TaskGoal:
-    """What ``task`` is for: its ``OBJECTIVE.md`` (cut to ``GOAL_MAX_CHARS``) and its axes.
-
-    Raises ``OSError`` for a file that cannot be read and ``ValueError`` (naming the file) for
-    ``objectives.toml`` that is invalid or a goal that is not UTF-8 text.
-    """
-    objectives = load_objectives(task.path).objective
-    try:
-        text = task.objective_path.read_text(encoding="utf-8")
-    except UnicodeDecodeError as exc:
-        message = f"{task.objective_path} is not UTF-8 text: {exc}"
-        raise ValueError(message) from exc
-    goal, truncated = bounded_goal(text)
-    return TaskGoal(
-        task=task.name.value,
-        objectives=tuple(
-            ExampleObjective(metric=axis.name, direction=axis.direction) for axis in objectives
-        ),
-        goal=goal,
-        goal_truncated=truncated,
-    )
-
-
 class FileProjects:
     """Projects read through ``vs_project``'s ``Project`` on this filesystem.
 
@@ -284,7 +257,7 @@ class FileProjects:
         """The goal and axes of the project's task ``task``."""
         opened = self._initialized(project)
         try:
-            return read_task_goal(opened.select_task(task))
+            return import_module("server.host_task_goal").read_task_goal(opened.select_task(task))
         except (ProjectError, OSError, ValueError) as exc:
             raise ProjectLookupError(
                 HelperErrorCode.TASK_INVALID, str(opened.root), str(exc)

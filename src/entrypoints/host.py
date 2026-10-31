@@ -1,4 +1,10 @@
-"""Host commands with contract-only startup; dispatched commands load their I/O adapters."""
+"""Host commands with contract-only startup; dispatched commands load their I/O adapters.
+
+Each command is a new process, so a command pays for every module its family imports. The
+module level holds the command tables and nothing else a command might not use; each family
+imports its own adapters when it is dispatched, and a registered read builds only the host
+facts it asks for (``entrypoints.host_reads``).
+"""
 
 from __future__ import annotations
 
@@ -10,20 +16,6 @@ from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from vibesys.api.host import host_call, terminate_host
-from vibesys.api.host_operations.api import (
-    ClusterRefusedError,
-    LoginRefusedFact,
-    LoginStartedFact,
-    ProjectRefusedError,
-    StartRefusedError,
-    execute_inspect_candidate,
-    serve_cluster,
-    serve_login,
-    serve_project,
-    serve_start,
-)
-from vs_project.api import Project, ProjectError
 from vs_proto.api import host_operations
 from vs_proto.api import host_payloads as pb
 from vs_sim.api import (
@@ -65,6 +57,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from typing import BinaryIO
 
+    from vibesys.api.host_operations.api import LoginRefusedFact, LoginStartedFact
     from vs_sim.api import Processes, SignalRelay, SleepingClock, Threads
 
 
@@ -90,10 +83,11 @@ def run(argv: list[str], *, cwd: Path, clock: SleepingClock | None = None) -> tu
     )
     args = parser.parse_args(argv)
     conversion = import_module("vibesys.api.transport")
+    projects = import_module("vs_project.api")
     clock = SystemClock() if clock is None else clock
     root = args.project if args.project.is_absolute() else cwd / args.project
     try:
-        project = Project.open(root)
+        project = projects.Project.open(root)
         if args.method == "convert-runs":
             rows = conversion.convert_runs(
                 project, clock=clock, threads=OsThreads(), reconvert=args.reconvert
@@ -107,7 +101,7 @@ def run(argv: list[str], *, cwd: Path, clock: SleepingClock | None = None) -> tu
             )
             return int(counts[conversion.ConversionStatus.FAILED] > 0), output + summary + "\n", ""
         result = conversion.convert_run(project, args.run, clock=clock, threads=OsThreads())
-    except (OSError, ValueError, TypeError, ProjectError) as exc:
+    except (OSError, ValueError, TypeError, projects.ProjectError) as exc:
         return 1, "", f"vibesys host {args.method}: {exc}\n"
     return 0, f"{result.status}: {result.reason}\n", ""
 
@@ -131,7 +125,8 @@ def main(
         parser.parse_args(arguments[1:])
         source = sys.stdin.buffer if stdin is None else stdin
         destination = sys.stdout.buffer if stdout is None else stdout
-        destination.write(execute_inspect_candidate(source.read((1 << 20) + 1)))
+        operations = import_module("vibesys.api.host_operations.api")
+        destination.write(operations.execute_inspect_candidate(source.read((1 << 20) + 1)))
         return 0
     if arguments and arguments[0] in _READ_COMMANDS:
         parser = argparse.ArgumentParser(
@@ -141,10 +136,8 @@ def main(
         parser.parse_args(arguments[1:])
         source = sys.stdin.buffer if stdin is None else stdin
         destination = sys.stdout.buffer if stdout is None else stdout
-        host = import_module("entrypoints.host_helper").real_host(os.environ, os.getuid(), threads)
-        facts = import_module("server.host_helper_requests").registry_read_source(host)
-        reply = import_module("server.host_operation_reads").answer_registered_read
-        destination.write(reply(arguments[0], source.read((1 << 20) + 1), facts))
+        serve_read = import_module("entrypoints.host_reads").serve_read
+        destination.write(serve_read(arguments[0], source.read((1 << 20) + 1), platform=runtime))
         return 0
     if arguments and arguments[0] in _WATCH_COMMANDS:
         parser = argparse.ArgumentParser(
@@ -155,7 +148,7 @@ def main(
         source = sys.stdin.buffer if stdin is None else stdin
         destination = sys.stdout.buffer if stdout is None else stdout
         _WATCH_SERVERS[_WATCH_COMMANDS[arguments[0]]](
-            source.read((1 << 20) + 1), destination, threads
+            source.read((1 << 20) + 1), destination, runtime
         )
         return 0
     if arguments and arguments[0] in _MUTATION_COMMANDS:
@@ -168,7 +161,7 @@ def main(
         destination = sys.stdout.buffer if stdout is None else stdout
         owned = threads
         destination.write(
-            terminate_host(
+            import_module("vibesys.api.host").terminate_host(
                 source.read((1 << 20) + 1),
                 platform=runtime,
             )
@@ -185,7 +178,7 @@ def main(
         source = sys.stdin.buffer if stdin is None else stdin
         destination = sys.stdout.buffer if stdout is None else stdout
         destination.write(
-            host_call(
+            import_module("vibesys.api.host").host_call(
                 source.read((1 << 20) + 1),
                 start_chat=import_module("entrypoints.chat_session").start_chat
                 if _HOST_CALL_COMMANDS[arguments[0]] == "chat_message"
@@ -200,10 +193,9 @@ def main(
     return code
 
 
-def _serve_saved_runs(payload: bytes, destination: BinaryIO, threads: Threads) -> None:
+def _serve_saved_runs(payload: bytes, destination: BinaryIO, platform: Platform) -> None:
     """Stream one project's runs: one scan in this process, a frame as each batch is read."""
-    host = import_module("entrypoints.host_helper").real_host(os.environ, os.getuid(), threads)
-    facts = import_module("server.host_helper_requests").registry_read_source(host)
+    facts = import_module("entrypoints.host_reads").read_source(platform)
 
     def write(chunk: bytes) -> None:
         destination.write(chunk)
@@ -213,14 +205,15 @@ def _serve_saved_runs(payload: bytes, destination: BinaryIO, threads: Threads) -
     import_module("server.host_operation_reads").stream_saved_runs(payload, facts, write)
 
 
-def _serve_login(payload: bytes, destination: BinaryIO, threads: Threads) -> None:
+def _serve_login(payload: bytes, destination: BinaryIO, platform: Platform) -> None:
     """Wire the native login watch without constructing unrelated helper resources."""
+    threads = platform.threads
     launcher = import_module("vs_sim.api").SubprocessPipedProcessLauncher()
     logins = import_module("server.host_agent_logins").host_logins(launcher, threads)
     watch_login(payload, destination, logins, threads, WakeupFdSignalRelay(threads))
 
 
-_WATCH_SERVERS: dict[str, Callable[[bytes, BinaryIO, Threads], None]] = {
+_WATCH_SERVERS: dict[str, Callable[[bytes, BinaryIO, Platform], None]] = {
     "login": _serve_login,
     "stream_saved_runs": _serve_saved_runs,
 }
@@ -236,6 +229,7 @@ def watch_login(
 ) -> None:
     """Start one login and hold this process until it ends or this process is signalled."""
     models = import_module("server.host_agent_logins")
+    operations = import_module("vibesys.api.host_operations.api")
     held: list[LoginHold] = []
     stop = threads.event()
 
@@ -244,11 +238,11 @@ def watch_login(
         held.append(started)
         result = started.result
         if isinstance(result, models.LoginStarted):
-            return LoginStartedFact(result.instruction)
+            return operations.LoginStartedFact(result.instruction)
         if not isinstance(result, models.LoginUnavailable):
             message = "login result is neither started nor unavailable"
             raise TypeError(message)
-        return LoginRefusedFact(
+        return operations.LoginRefusedFact(
             reason=result.reason.value,
             command=result.command,
             detail=result.detail or "",
@@ -271,7 +265,7 @@ def watch_login(
         destination.flush()
 
     with signals.relay([Signals.SIGTERM], lambda _number: stop.set()):
-        serve_login(payload, cli="login", start=start, write=write, wait=wait)
+        operations.serve_login(payload, cli="login", start=start, write=write, wait=wait)
 
 
 def _serve_mutation(cli: str, payload: bytes, threads: Threads, processes: Processes) -> bytes:
@@ -288,20 +282,21 @@ def _serve_project(payload: bytes, threads: Threads) -> bytes:
     """Admit one project change, then apply it. Replay does not apply it again."""
     requests = import_module("server.host_helper_requests")
     refused = import_module("server.host_examples").ProjectLookupError
+    operations = import_module("vibesys.api.host_operations.api")
     host = import_module("entrypoints.host_helper").real_host(os.environ, os.getuid(), threads)
 
     def apply(slot: str, request: object) -> object:
         if not isinstance(request, pb.CreateExampleRequest | pb.CopyProjectRequest):
             message = "project request is not a project mutation"
-            raise ProjectRefusedError(message)
+            raise operations.ProjectRefusedError(message)
         try:
             return requests.apply_registered_project(slot, request, host)
         except (refused, TypeError, ValueError) as exc:
-            raise ProjectRefusedError(str(exc)) from exc
+            raise operations.ProjectRefusedError(str(exc)) from exc
 
-    return serve_project(
+    return operations.serve_project(
         payload,
-        store=Project.admissions(),
+        store=import_module("vs_project.api").Project.admissions(),
         host_user=str(os.getuid()),
         apply=apply,
     )
@@ -312,6 +307,7 @@ def _serve_cluster(payload: bytes, processes: Processes) -> bytes:
     models = import_module("server.host_compute")
     refused = models.ComputeError
     adapters = import_module("server.host_compute_runtime")
+    operations = import_module("vibesys.api.host_operations.api")
     probe = import_module("vs_sim.api").ProcessesProbe(processes)
     compute = adapters.MachineCompute(
         adapters.OsConfigFiles(), probe, home=str(Path.home()), environ=os.environ
@@ -322,15 +318,15 @@ def _serve_cluster(payload: bytes, processes: Processes) -> bytes:
             request, pb.PutClusterRequest | pb.RemoveClusterRequest | pb.TestClusterRequest
         ):
             message = "cluster request is not a cluster mutation"
-            raise ClusterRefusedError(message)
+            raise operations.ClusterRefusedError(message)
         try:
             return models.apply_registered_cluster(slot, request, compute)
         except (refused, TypeError, ValueError) as exc:
-            raise ClusterRefusedError(str(exc)) from exc
+            raise operations.ClusterRefusedError(str(exc)) from exc
 
-    return serve_cluster(
+    return operations.serve_cluster(
         payload,
-        store=Project.admissions(),
+        store=import_module("vs_project.api").Project.admissions(),
         host_user=str(os.getuid()),
         apply=apply,
     )
@@ -341,27 +337,28 @@ def _serve_start(payload: bytes, threads: Threads) -> bytes:
     requests = import_module("server.host_helper_requests")
     refused = import_module("server.host_examples").ProjectLookupError
     models = import_module("server.host_api")
+    operations = import_module("vibesys.api.host_operations.api")
 
     def launch(request: pb.StartRunRequest) -> tuple[str, str]:
         try:
             body = requests.registry_start_request(request)
         except (TypeError, ValueError) as exc:
-            raise StartRefusedError(str(exc)) from exc
+            raise operations.StartRefusedError(str(exc)) from exc
         host = import_module("entrypoints.host_helper").real_host(os.environ, os.getuid(), threads)
         try:
             reply = requests.launch_registered_run(body, host)
         except refused as exc:
-            raise StartRefusedError(str(exc)) from exc
+            raise operations.StartRefusedError(str(exc)) from exc
         if isinstance(reply, models.HelperError):
-            raise StartRefusedError(reply.message)
+            raise operations.StartRefusedError(reply.message)
         started = reply.launch
         if isinstance(started, models.DetachedLaunchFailure):
-            raise StartRefusedError(started.message)
+            raise operations.StartRefusedError(started.message)
         return started.run_id, started.id
 
-    return serve_start(
+    return operations.serve_start(
         payload,
-        store=Project.admissions(),
+        store=import_module("vs_project.api").Project.admissions(),
         launch=launch,
         host_user=str(os.getuid()),
     )

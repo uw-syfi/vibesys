@@ -58,6 +58,12 @@ read path and journal projection from the native core and control work still to 
    and GPU use in process, because a sample every 10 s cannot afford a Python start, and those
    numbers matter most when the checkout is missing or broken.
 
+   Because each read is a new Python process, a read's imports are its cost: a catalog read
+   does milliseconds of work, and a desktop launch asks for about twenty-five reads at once. A
+   read therefore builds only the host facts it asks for (`entrypoints.host_reads`), a catalog
+   read starts no process, and `tests/e2e/test_host_read_startup.py` counts the
+   modules and processes of every read in a fresh interpreter against a committed budget.
+
 ## What a run writes
 
 One directory per run, opened only through `vs-project`'s `Project`.

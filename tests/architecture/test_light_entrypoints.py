@@ -84,6 +84,7 @@ ALLOWED_FIRST_PARTY = (
     "server.host_operation_types_generated",
     "server.host_run_dashboard",
     "server.host_run_summary",
+    "server.host_task_goal",
     "server.run_summary",
     "server.run_summary_cache",
     "server.instances",
