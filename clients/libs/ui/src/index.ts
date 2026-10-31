@@ -75,7 +75,7 @@ export {
   ToolCall,
   type ToolState,
 } from './components/message.js';
-export {Gauge, LoadingBar, Meter} from './components/meter.js';
+export {Gauge, LoadingBar, Meter, Readings} from './components/meter.js';
 export {MetricTile, MetricTiles} from './components/metric-tile.js';
 export {
   Narrative,

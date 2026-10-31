@@ -26,10 +26,10 @@ import {
 import {
   createLiveStats,
   createMachinesStore,
-  HostStats,
   type LiveStats,
   MachinesPage,
   MachinesScreen,
+  WithHostLive,
 } from '@vibesys/feature-machines/renderer';
 import {
   type MachinesState,
@@ -538,7 +538,11 @@ function MachinesRoute(props: {
       dispatch={stores.machines.dispatch}
       runCounts={props.counts}
       liveRuns={props.liveRuns}
-      {...(live === null ? {} : {stats: host => <HostStats live={live} host={host} />})}
+      {...(live === null
+        ? {}
+        : {
+            live: (host, render) => <WithHostLive live={live} host={host} render={render} />,
+          })}
       incompleteHosts={
         new Set(projectRunGaps(useStore(stores.sidebar.store).allRuns).map(gap => gap.host))
       }

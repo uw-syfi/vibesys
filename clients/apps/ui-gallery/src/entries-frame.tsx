@@ -22,6 +22,7 @@ import {
   Panes,
   PickList,
   PickRow,
+  Readings,
   Reserve,
   Row,
   Said,
@@ -586,14 +587,27 @@ export const FRAME_ENTRIES = {
     render: () => (
       <Stack>
         <Row gap="space-5" wrap>
-          <Gauge label="CPU" share={0.34} figure="34%" />
-          <Gauge label="Memory" share={0.5} figure="18.0 / 36.0 GB" />
-          <Gauge label="GPU" share={0.95} figure="95%" tone="accent" />
+          <Gauge label="CPU" share={0.34} figure="34%" figureWidth={5} />
+          <Gauge label="Memory" share={0.5} figure="18.0 / 36.0 GB" figureWidth={15} />
+          <Gauge label="GPU" share={0.95} figure="95%" figureWidth={5} tone="warn" />
         </Row>
         <Row gap="space-5" wrap>
-          <Gauge label="CPU" share={0.34} figure="34%" dim />
-          <Gauge label="GPU" share={null} figure="–" />
+          <Gauge label="CPU" share={0.34} figure="34%" figureWidth={5} dim note="stale 42 s" />
+          <Gauge label="GPU" share={null} figure="–" figureWidth={5} />
         </Row>
+      </Stack>
+    ),
+  },
+  Readings: {
+    render: () => (
+      <Stack>
+        <Readings>
+          <Gauge label="CPU" share={0.34} figure="34%" figureWidth={5} />
+          <Text variant="small" tone="warn">
+            42 s ago
+          </Text>
+        </Readings>
+        <Readings />
       </Stack>
     ),
   },
