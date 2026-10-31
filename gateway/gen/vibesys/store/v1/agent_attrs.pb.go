@@ -73,17 +73,18 @@ func (AgentClient) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_store_v1_agent_attrs_proto_rawDescGZIP(), []int{0}
 }
 
-// How a turn's recorded cost was reached. A turn records one of the first three values (what
-// agentshim reports); absence is a turn recorded before the basis existed. The last two are never
-// recorded: a reader derives them for such a turn, and a row keyed on a basis never mixes turns
-// priced in different ways.
+// How a turn's recorded cost was reached. A turn records one of PRICE_TABLE, PROVIDER_REPORTED,
+// UNKNOWN_MODEL and NOT_REPORTED, each what the provider library said. Absence of the field means
+// only that the line was recorded before it existed. The two LEGACY values are never recorded: a
+// reader derives them for such a line, and a row keyed on a basis never mixes turns priced in
+// different ways.
 type UsageCostBasis int32
 
 const (
 	UsageCostBasis_USAGE_COST_BASIS_UNSPECIFIED UsageCostBasis = 0
 	// Computed from the turn's tokens and agentshim's pinned price table.
 	UsageCostBasis_USAGE_COST_BASIS_PRICE_TABLE UsageCostBasis = 1
-	// The CLI's own figure, used when it did not say which model ran.
+	// The CLI's own figure: Claude's when its result named no model, and opencode's.
 	UsageCostBasis_USAGE_COST_BASIS_PROVIDER_REPORTED UsageCostBasis = 2
 	// A model in the turn has no price, so the turn has no recorded cost.
 	UsageCostBasis_USAGE_COST_BASIS_UNKNOWN_MODEL UsageCostBasis = 3
@@ -91,6 +92,9 @@ const (
 	UsageCostBasis_USAGE_COST_BASIS_LEGACY_RECORDED UsageCostBasis = 4
 	// An older turn that has none.
 	UsageCostBasis_USAGE_COST_BASIS_LEGACY_UNPRICED UsageCostBasis = 5
+	// The provider reported no cost and none is computed (a CLI that prints none, a resumed turn
+	// whose increment is unknown), or the library named no source for the cost it has.
+	UsageCostBasis_USAGE_COST_BASIS_NOT_REPORTED UsageCostBasis = 6
 )
 
 // Enum value maps for UsageCostBasis.
@@ -102,6 +106,7 @@ var (
 		3: "USAGE_COST_BASIS_UNKNOWN_MODEL",
 		4: "USAGE_COST_BASIS_LEGACY_RECORDED",
 		5: "USAGE_COST_BASIS_LEGACY_UNPRICED",
+		6: "USAGE_COST_BASIS_NOT_REPORTED",
 	}
 	UsageCostBasis_value = map[string]int32{
 		"USAGE_COST_BASIS_UNSPECIFIED":       0,
@@ -110,6 +115,7 @@ var (
 		"USAGE_COST_BASIS_UNKNOWN_MODEL":     3,
 		"USAGE_COST_BASIS_LEGACY_RECORDED":   4,
 		"USAGE_COST_BASIS_LEGACY_UNPRICED":   5,
+		"USAGE_COST_BASIS_NOT_REPORTED":      6,
 	}
 )
 
@@ -465,7 +471,8 @@ type TurnUsageDetail struct {
 	// The provider's own id of the conversation the turn ran in. It joins a turn to the transcript
 	// the CLI wrote for it. Absent when the provider named none.
 	ProviderSessionId *string `protobuf:"bytes,1,opt,name=provider_session_id,json=providerSessionId,proto3,oneof" json:"provider_session_id,omitempty"`
-	// Absent: the turn reported no cost, or was recorded before the basis existed.
+	// Absent only on a line recorded before the basis existed: a turn that reports no cost records
+	// NOT_REPORTED.
 	CostBasis *UsageCostBasis `protobuf:"varint,2,opt,name=cost_basis,json=costBasis,proto3,enum=vibesys.store.v1.UsageCostBasis,oneof" json:"cost_basis,omitempty"`
 	// A superset of the turn's `TokenUsage`: the rows sum to the whole turn, which can include
 	// models the main conversation did not run. Empty when the provider reports no split.
@@ -748,14 +755,15 @@ const file_vibesys_store_v1_agent_attrs_proto_rawDesc = "" +
 	"\vAgentClient\x12\x1c\n" +
 	"\x18AGENT_CLIENT_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15AGENT_CLIENT_SCRIPTED\x10\x01\x12\x19\n" +
-	"\x15AGENT_CLIENT_PROVIDER\x10\x02*\xec\x01\n" +
+	"\x15AGENT_CLIENT_PROVIDER\x10\x02*\x8f\x02\n" +
 	"\x0eUsageCostBasis\x12 \n" +
 	"\x1cUSAGE_COST_BASIS_UNSPECIFIED\x10\x00\x12 \n" +
 	"\x1cUSAGE_COST_BASIS_PRICE_TABLE\x10\x01\x12&\n" +
 	"\"USAGE_COST_BASIS_PROVIDER_REPORTED\x10\x02\x12\"\n" +
 	"\x1eUSAGE_COST_BASIS_UNKNOWN_MODEL\x10\x03\x12$\n" +
 	" USAGE_COST_BASIS_LEGACY_RECORDED\x10\x04\x12$\n" +
-	" USAGE_COST_BASIS_LEGACY_UNPRICED\x10\x05*t\n" +
+	" USAGE_COST_BASIS_LEGACY_UNPRICED\x10\x05\x12!\n" +
+	"\x1dUSAGE_COST_BASIS_NOT_REPORTED\x10\x06*t\n" +
 	"\n" +
 	"UsageSpeed\x12\x1b\n" +
 	"\x17USAGE_SPEED_UNSPECIFIED\x10\x00\x12\x18\n" +
