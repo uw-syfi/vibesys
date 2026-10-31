@@ -147,6 +147,8 @@ class CoreInputs:
         self._controls = controls
         self._poll_every = control_poll_seconds
         self._refused: list[ControlRefusedError] = []
+        self._offered: list[CoreEvent] = []
+        self._nudge = asyncio.Event()
 
     @property
     def state(self) -> CoreState:
@@ -187,26 +189,37 @@ class CoreInputs:
         """Tell the operator what core committed and refused, once the loop has returned."""
         self._settle_controls()
 
+    def offer(self, event: CoreEvent) -> None:
+        """An input from outside the loop (an operator's control): appended at the next poll."""
+        self._offered.append(event)
+        self._nudge.set()
+
     async def next_input(self) -> None:
         """Return once an input was appended, by an operator, the clock or a wake-up included."""
-        input_arrived = asyncio.ensure_future(self._log.next_input())
+        arrived = asyncio.ensure_future(self._log.next_input())
         try:
-            while not input_arrived.done():
-                if self._poll():
-                    return
+            while True:
+                self._poll()
+                waits: set[asyncio.Future[Any]] = {
+                    arrived,
+                    asyncio.ensure_future(self._log.changed()),
+                    asyncio.ensure_future(self._nudge.wait()),
+                }
                 timer = self._due()
-                waits: set[asyncio.Future[Any]] = {input_arrived}
                 if timer is not None:
                     waits.add(asyncio.ensure_future(self._clock.sleep(timer)))
                 try:
                     await asyncio.wait(waits, return_when=asyncio.FIRST_COMPLETED)
                 finally:
-                    for wait in waits - {input_arrived}:
+                    for wait in waits - {arrived}:
                         wait.cancel()
+                    await asyncio.gather(*(waits - {arrived}), return_exceptions=True)
+                self._nudge.clear()
+                if arrived.done():
+                    return
         finally:
-            if not input_arrived.done():
-                input_arrived.cancel()
-            await asyncio.gather(input_arrived, return_exceptions=True)
+            arrived.cancel()
+            await asyncio.gather(arrived, return_exceptions=True)
 
     def stalled(self) -> str | None:
         """Why the run can never go on, or None while a timer, a wake-up or the operator can move it.
@@ -218,28 +231,27 @@ class CoreInputs:
         state = self.state
         if state.run.status in (RunStatus.PAUSED, RunStatus.DRAINING, RunStatus.PARKED):
             return None
+        now = self._clock.now()
         progress = None if self._search is None else self._search.progress
-        if (progress is not None and progress.next_wake() is not None) or (
-            project(state).next_observe_at is not None
-        ):
+        wake = None if progress is None else progress.next_wake()
+        observe = project(state).next_observe_at
+        if any(at is not None and at > now for at in (wake, observe)):
             return None
         return _describe(state)
 
-    def _poll(self) -> bool:
+    def _poll(self) -> None:
         """Append what the operator, the deadline, the clock and the search are due to bring."""
-        before = self._log.records_appended
         now = self._clock.now()
         self._controls_in(now)
         self._deadline(now)
         self._tick(now)
         self._log.hear()
         self._settle_controls()
-        return self._log.records_appended != before
 
     def _controls_in(self, now: float) -> None:
-        if self._controls is None:
-            return
-        for event in self._controls.poll(self.state, now):
+        offered, self._offered = self._offered, []
+        polled = () if self._controls is None else self._controls.poll(self.state, now)
+        for event in (*offered, *polled):
             try:
                 self._log.input(event)
             except ControlRefusedError as refusal:
@@ -267,12 +279,19 @@ class CoreInputs:
             self._log.input(RunControlEvent(control=control, now_at=now))
 
     def _tick(self, now: float) -> None:
-        """Deliver the clock to core when it would change something: a poll, a limit, a wait."""
+        """Deliver the clock to core once a time it asked for has come, if that changes anything.
+
+        The time core asks for is ``CoreView.next_observe_at``: a paced poll, a wait's timer, a
+        request's retry. A delivery that changes nothing is not appended, so a run whose timer
+        is due and moves nothing is a stall to report, not a record to write forever.
+        """
+        due = project(self.state).next_observe_at
+        if due is None or due > now:
+            return
         moved = advance_run_time(self.state, now)
-        event = ClockAdvanced(now_at=now)
-        advanced = step(moved, event)
+        advanced = step(moved, ClockAdvanced(now_at=now))
         if advanced.requests or advanced.events or advanced.state != moved:
-            self._log.input(event)
+            self._log.input(ClockAdvanced(now_at=now))
 
     def _due(self) -> float | None:
         """Seconds until the next thing this wrapper must look at, None when none is set."""

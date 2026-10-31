@@ -72,6 +72,7 @@ from vs_runtime.api.core import (
     drive_core,
     start_core,
 )
+from vs_runtime._step_loop import StepLoopStalledError
 from vs_runtime.api.infrastructure import RunStopped, create_run_control_channel
 from vs_sim.api.testing import SimThreads, VirtualClock, run_virtual
 
@@ -449,7 +450,7 @@ class Run:
     journal: Journal = field(default_factory=Journal)
     # The loop gave up on the run: its dispatch cap was hit (it never went idle) or it
     # stalled (open work and nothing to wake it).
-    halted: DispatchCapExceededError | RunStalledError | None = None
+    halted: DispatchCapExceededError | RunStalledError | StepLoopStalledError | None = None
     # An operator stop interrupted the run: it stays open for a resume (`RunStopped`).
     stopped: bool = False
 

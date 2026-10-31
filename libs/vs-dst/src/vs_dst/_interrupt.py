@@ -8,7 +8,7 @@ outcome of the interruption.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
@@ -21,14 +21,13 @@ from vs_core.api import (
     RunControlEvent,
     RunStatus,
 )
-from vs_dst._host import Hosted, run_host
 from vs_dst._interruptions import Action, Interruption, Moment
 
 if TYPE_CHECKING:
     from vs_core.api import CoreState, RunResultProposal
     from vs_dst._effects import Effects
-    from vs_dst._snapshots import OutsideWorld, RecordingStore
-    from vs_runtime.api.testing import HostOptions, ScriptedHost
+    from vs_dst._host import Hosted, HostPlan
+    from vs_dst._snapshots import OutsideWorld, RunningHost, Store
 
 MAX_RESUMES = 2
 """How many times the operator resumes a run that did not end before giving up on it."""
@@ -119,9 +118,9 @@ class Pauser:
 
     def __init__(self, point: Interruption) -> None:
         self._point = point
-        self._host: ScriptedHost | None = None
+        self._host: RunningHost | None = None
 
-    def watch(self, store: RecordingStore, host: ScriptedHost) -> None:
+    def watch(self, store: Store, host: RunningHost) -> None:
         """Start hearing ``store``'s commits, for the run ``host`` drives."""
         self._host = host
         store.watcher = self
@@ -130,44 +129,43 @@ class Pauser:
         """Submit the operator's pause when the run is at the moment the interruption names."""
         if self._host is None or (moment, index) != (self._point.moment, self._point.index):
             return
-        now = self._host.clock.now()
         control = ControlInput(
             control_id=ControlId(root="operator-pause"),
             action="pause",
             owner=PauseOwner.OPERATOR,
         )
-        self._host.shell.submit(RunControlEvent(control=control, now_at=now), now_at=now)
+        self._host.submit(RunControlEvent(control=control, now_at=self._host.clock.now()))
 
 
 def killed(
+    plan: HostPlan,
     outside: OutsideWorld,
-    options: HostOptions,
     clock_at: float,
     point: Interruption,
     expected: Expectation,
 ) -> Interrupted:
     """Resume the run ``outside`` holds after its host died, the resume starting at ``clock_at``."""
-    hosts = _resume(outside, options, clock_at, expected.patience, [])
+    hosts = _resume(plan, outside, clock_at, expected.patience, [])
     return _interrupted(point, expected, outside, hosts)
 
 
 def paused(
+    plan: HostPlan,
     pristine: OutsideWorld,
-    options: HostOptions,
     clock_at: float,
     point: Interruption,
     expected: Expectation,
 ) -> Interrupted:
     """Run the world from its start, pause it at ``point``, and resume it after the host exits."""
     outside = pristine.copy()
-    first = run_host(outside, options, clock_at, Pauser(point), patience=expected.patience)
-    hosts = _resume(outside, options, first.ended_at + 1, expected.patience, [first])
+    first = plan.run(outside, clock_at, Pauser(point), patience=expected.patience)
+    hosts = _resume(plan, outside, first.ended_at + 1, expected.patience, [first])
     return _interrupted(point, expected, outside, hosts)
 
 
 def _resume(
+    plan: HostPlan,
     outside: OutsideWorld,
-    options: HostOptions,
     clock_at: float,
     patience: float,
     hosts: list[Hosted],
@@ -180,8 +178,8 @@ def _resume(
     resumes = 0
     while not hosts or (resumes < MAX_RESUMES and not hosts[-1].finished):
         # A host that dies before the run's first commit leaves nothing to resume.
-        resuming = replace(options, resumed=outside.store.observe() is not None)
-        hosts.append(run_host(outside, resuming, clock_at, patience=patience))
+        resuming = plan.resuming(resumed=outside.store.observe() is not None)
+        hosts.append(resuming.run(outside, clock_at, patience=patience))
         clock_at = hosts[-1].ended_at + 1
         resumes += 1
     return hosts

@@ -103,6 +103,7 @@ class RunLogStepLog:
         self._appended = 0
         self._delivered = 0
         self._wake = asyncio.Event()
+        self._changed = asyncio.Event()
 
     @classmethod
     def open(  # noqa: PLR0913  # lint-waiver: LW-204719 [PLR0913]; opening reads the same six things the constructor holds, plus the seed a new run starts from.
@@ -173,7 +174,12 @@ class RunLogStepLog:
         self._commit(interrupted_message(tag, attempt, why))
 
     async def run_ended(self, end: End) -> None:
-        """Append the end of the run; the search logged itself whole when the run came to rest."""
+        """Log the search whole, then append the end of the run.
+
+        The whole state comes first, so the end is the last record of the run and a log that
+        ends cleanly always holds the search as it finished.
+        """
+        self._rest()
         self._commit(ended_message(end))
 
     def input(self, event: CoreEvent) -> None:
@@ -194,6 +200,11 @@ class RunLogStepLog:
         if self._appended != before:
             self._arrived += 1
             self._wake.set()
+
+    async def changed(self) -> None:
+        """Return once a record was appended since this last returned, whoever appended it."""
+        await self._changed.wait()
+        self._changed.clear()
 
     async def next_input(self) -> None:
         """Return once ``input`` was called since this last returned."""
@@ -224,6 +235,7 @@ class RunLogStepLog:
         if not isinstance(confirmed, Appended):
             raise RunLogUncertainError
         self._appended += 1
+        self._changed.set()
 
     def _settle(self) -> None:
         """The search hears what core published and answers, until it has nothing more to say."""
@@ -233,6 +245,11 @@ class RunLogStepLog:
         while (advance := search.advance(self._folded, self._clock.now())) is not None:
             self._record(advance)
             search.appended()
-        if at_rest(self.state) is not None and (rest := search.rest()) is not None:
+        if at_rest(self.state) is not None:
+            self._rest()
+
+    def _rest(self) -> None:
+        """Log the search whole, unless the log already holds it so."""
+        if self._search is not None and (rest := self._search.rest()) is not None:
             self._record(rest)
-            search.appended()
+            self._search.appended()

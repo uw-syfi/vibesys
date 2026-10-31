@@ -51,10 +51,6 @@ class Store(Protocol):
 
     commits: int
     """How many commits the host was asked for."""
-    lease_ends_at: float
-    """The latest moment the committing hosts held a lease until; 0 when the run has none."""
-    last_clock: float
-    """The latest run-clock time a committed record carries; 0 before the first."""
     watcher: Watcher | None
 
     def observe(self) -> object | None:
@@ -101,7 +97,7 @@ class WorldNotCopyableError(TypeError):
 class OutsideWorld:
     """Everything outside a host: what survives it, and the one run's host starts over."""
 
-    store: RecordingStore | RecordingRecords
+    store: Store
     delivery: FakePublicationDelivery
     effects: Effects
     world: World
@@ -137,8 +133,8 @@ class RecordingRecords(FakeRunRecords):
         """Start empty, watched by nobody."""
         super().__init__()
         self.commits = 0
-        self.lease_ends_at = 0.0
         self.last_clock = 0.0
+        """The latest run-clock time of a record in the log."""
         self.watcher: Watcher | None = None
 
     def __deepcopy__(self, memo: dict[int, object]) -> RecordingRecords:

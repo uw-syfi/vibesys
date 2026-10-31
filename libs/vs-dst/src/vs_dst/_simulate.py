@@ -10,17 +10,16 @@ from vs_core.api.testing import Budget, liveness
 from vs_dst import _interrupt
 from vs_dst._crash_points import CrashKind, CrashPoint, crash_point_policy
 from vs_dst._effects import Effects
-from vs_dst._host import FIRST_HOST_STARTS_AT, Hosted, run_host
+from vs_dst._host import FIRST_HOST_STARTS_AT, Hosted, Hosting, HostPlan, ShellHosting
 from vs_dst._interrupt import Expectation
 from vs_dst._interruptions import Action, Interruption, Moment, choose
 from vs_dst._snapshots import (
     NondeterministicWorldError,
     OutsideWorld,
-    RecordingStore,
     Snapshot,
     Snapshots,
 )
-from vs_runtime.api.testing import LEASE, FakePublicationDelivery, HostOptions
+from vs_runtime.api.testing import FakePublicationDelivery, HostOptions
 
 if TYPE_CHECKING:
     from vs_core.api import CoreState, Decision, RunResultProposal, StrategyState
@@ -48,7 +47,7 @@ class SimulatedRun:
         self,
         hosted: Hosted,
         outside: OutsideWorld,
-        options: HostOptions,
+        plan: HostPlan,
         pristine: OutsideWorld,
         started: Start | None = None,
     ) -> None:
@@ -59,7 +58,7 @@ class SimulatedRun:
         """
         self._run = hosted.run()
         self._outside = outside
-        self._options = options
+        self._plan = plan
         self._pristine = pristine
         self._started = Start() if started is None else started
         self._duration = hosted.ended_at - self._started.clock_at
@@ -181,13 +180,13 @@ class SimulatedRun:
         snapshot = self._snapshot(kill, frozenset(map(Interruption.kill, self.crash_points())))
         outside = snapshot.outside.copy()
         clock_at = self._restart_at(snapshot)
-        hosted = run_host(outside, self._options, clock_at)
+        hosted = self._plan.run(outside, clock_at)
         started = Start(
             clock_at=clock_at,
             commits=snapshot.outside.store.commits,
             decisions=(*self._started.decisions, *self._run.decisions[: snapshot.decisions]),
         )
-        return SimulatedRun(hosted, outside, self._options, snapshot.outside, started)
+        return SimulatedRun(hosted, outside, self._plan, snapshot.outside, started)
 
     def interruptions(
         self, action: Action | None = None, moment: Moment | None = None
@@ -220,13 +219,11 @@ class SimulatedRun:
         expected = Expectation(self.result, self._duration)
         if point.action is Action.PAUSE:
             return _interrupt.paused(
-                self._pristine, self._options, self._started.clock_at, point, expected
+                self._plan, self._pristine, self._started.clock_at, point, expected
             )
         snapshot = self._snapshot(point, frozenset(self.interruptions(Action.KILL)))
         outside = snapshot.outside.copy()
-        return _interrupt.killed(
-            outside, self._options, self._restart_at(snapshot), point, expected
-        )
+        return _interrupt.killed(self._plan, outside, self._restart_at(snapshot), point, expected)
 
     def _require_uninterrupted(self) -> None:
         if self._started.commits:
@@ -234,12 +231,8 @@ class SimulatedRun:
             raise ValueError(message)
 
     def _restart_at(self, snapshot: Snapshot) -> float:
-        """When the host that takes over a dead one starts: after the dead one's lease has expired.
-
-        However far the dead host's clock had run by the crash (a run that waits out a limit
-        runs it far ahead).
-        """
-        return max(self._started.clock_at + LEASE, snapshot.outside.store.lease_ends_at) + 1
+        """When the host that takes over a dead one starts, as its hosting says."""
+        return self._plan.restart_at(self._started.clock_at, snapshot.outside.store)
 
     def _snapshot(self, point: Interruption, offered: frozenset[Interruption]) -> Snapshot:
         """The outside world at the kill ``point``.
@@ -254,29 +247,29 @@ class SimulatedRun:
         """Run the world again from its start, copying the outside world at the ``wanted`` kills."""
         outside = self._pristine.copy()
         snapshots = Snapshots(outside, wanted | {point})
-        run_host(outside, self._options, self._started.clock_at, snapshots).run()
+        self._plan.run(outside, self._started.clock_at, snapshots).run()
         if outside.store.commits != self.commits:
             raise NondeterministicWorldError(outside.world, self.commits, outside.store.commits)
         self._snapshots.update(snapshots.by_point)
 
 
-def simulate(world: World) -> SimulatedRun:
-    """Run ``world``'s strategy to the end of its run on the production shell and loop.
+def simulate(world: World, hosting: Hosting | None = None) -> SimulatedRun:
+    """Run ``world``'s strategy to the end of its run on a host, and keep the means to crash it.
 
-    The loop, the lease, the fence, the clock, the durable commit and the owner-event queue
-    are the real `vs_runtime` ones, on a virtual clock and an in-memory store. The run copies
-    nothing while it goes (it counts its commits), so a test that never crashes it pays one copy
-    of the initial world; `rerun_with_crash` runs the world once more to take the copies a crash
-    sweep needs. A world that cannot be deep-copied raises `WorldNotCopyableError`.
+    ``hosting`` says which host: the production shell (``CoreRuntime``) by default, with its
+    loop, lease, fence, clock, durable commit and owner-event queue on a virtual clock and an
+    in-memory store, or the step loop (`StepLoopHosting`) over an in-memory run.log. The run
+    copies nothing while it goes (it counts its commits), so a test that never crashes it pays
+    one copy of the initial world; `rerun_with_crash` runs the world once more to take the copies
+    a crash sweep needs. A world that cannot be deep-copied raises `WorldNotCopyableError`.
 
     How the host is arranged (its concurrency, a run-control channel) is the world's
     `RunSetup`; a `HostedWorld` also hears each host's shell and clock.
     """
+    hosting = ShellHosting() if hosting is None else hosting
     setup = world.setup
     options = HostOptions(max_concurrent=setup.max_concurrent, controlled=setup.controlled)
-    store = RecordingStore()
-    outside = OutsideWorld(store, FakePublicationDelivery(), Effects(), world)
+    outside = OutsideWorld(hosting.new_store(), FakePublicationDelivery(), Effects(), world)
     pristine = outside.copy()  # also fails now, naming the world, if it cannot be copied
-    return SimulatedRun(
-        run_host(outside, options, FIRST_HOST_STARTS_AT), outside, options, pristine
-    )
+    plan = HostPlan(hosting, options)
+    return SimulatedRun(plan.run(outside, FIRST_HOST_STARTS_AT), outside, plan, pristine)
