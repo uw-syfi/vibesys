@@ -188,6 +188,9 @@
   flex: none;
   width: var(--space-4);
   text-align: start;
+  /* The marks are glyphs the bundled mono face carries; any other face lets the system's fallback
+     font draw them, and that differs from machine to machine. */
+  font-family: var(--font-mono);
   color: var(--text-muted);
 }
 
