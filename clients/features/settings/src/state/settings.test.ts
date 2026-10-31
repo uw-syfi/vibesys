@@ -39,6 +39,23 @@ function randomAppearance(random: () => number): Appearance {
   };
 }
 
+/** The reply to `request`, as it succeeded or failed. */
+function replyTo(
+  request: SettingsRequest,
+  ok: boolean,
+  preferences: PreferencesView,
+): SettingsAction {
+  const {token} = request;
+  if (request.kind === 'load') {
+    return ok
+      ? {type: 'loaded', token, preferences}
+      : {type: 'load-failed', token, error: 'unreadable'};
+  }
+  return ok
+    ? {type: 'saved', token, preferences}
+    : {type: 'save-failed', token, error: 'disk full'};
+}
+
 /** One action: a user change, a reply to any request ever made (stale or not), a push, or the OS. */
 function randomAction(random: () => number, issued: readonly SettingsRequest[]): SettingsAction {
   const roll = random();
@@ -53,24 +70,15 @@ function randomAction(random: () => number, issued: readonly SettingsRequest[]):
       ? {type: 'change', change: {kind: 'appearance', appearance: randomAppearance(random)}}
       : {type: 'change', change: {kind: 'notifications', enabled: random() < 0.5}};
   }
-  if (roll < 0.7 && request !== undefined) {
-    const ok = random() < 0.8;
-    if (request.kind === 'load') {
-      return ok
-        ? {type: 'loaded', token: request.token, preferences}
-        : {type: 'load-failed', token: request.token, error: 'unreadable'};
-    }
-    return ok
-      ? {type: 'saved', token: request.token, preferences}
-      : {type: 'save-failed', token: request.token, error: 'disk full'};
-  }
+  if (roll < 0.7 && request !== undefined) return replyTo(request, random() < 0.8, preferences);
+  if (roll < 0.8) return {type: 'retry'};
   if (roll < 0.85) return {type: 'pushed', preferences};
   return {type: 'os', mode: random() < 0.5 ? 'light' : 'dark'};
 }
 
 function awaited(state: SettingsState): number | null {
   if (state.kind === 'loading') return state.token;
-  return state.saving?.token ?? null;
+  return state.kind === 'failed' ? null : (state.saving?.token ?? null);
 }
 
 /** What every step must keep: the invariants, issued tokens, new requests, and stale replies ignored. */
@@ -93,7 +101,10 @@ function checkStep(
     expect(same, context).toHaveLength(1);
   }
   const reply =
-    action.type === 'change' || action.type === 'os' || action.type === 'pushed'
+    action.type === 'change' ||
+    action.type === 'os' ||
+    action.type === 'pushed' ||
+    action.type === 'retry'
       ? null
       : action.token;
   if (reply !== null && reply !== awaited(before)) expect(next.state, context).toBe(before);
@@ -120,6 +131,16 @@ describe('settingsStep', () => {
         state = next.state;
       }
     }
+  });
+
+  test('a read that fails ends failed with no new request, and Retry reads again', () => {
+    const {state} = initialSettings('light');
+    const failed = settingsStep(state, {type: 'load-failed', token: 1, error: 'unreadable'});
+    expect(failed.state).toMatchObject({kind: 'failed', error: 'unreadable'});
+    expect(failed.requests).toEqual([]);
+    const again = settingsStep(failed.state, {type: 'retry'});
+    expect(again.state).toEqual({kind: 'loading', os: 'light', token: 2});
+    expect(again.requests).toEqual([{kind: 'load', token: 2}]);
   });
 
   test('shows a change at once and keeps it over an older save reply', () => {

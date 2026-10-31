@@ -3,6 +3,7 @@
  * listing, Recent, the preferences), and by the run digests, which the store asks for itself
  * (`SidebarRequest`).
  */
+import type {HostKey} from '@vibesys/hosts';
 import {settled, type WelcomeBridge} from '@vibesys/ipc';
 import {sameRun} from '@vibesys/runs';
 import {createStore, type Store} from '@vibesys/store';
@@ -29,6 +30,7 @@ export type ShellBridge = Pick<
   | 'onListing'
   | 'onRecent'
   | 'onPreferences'
+  | 'retryListing'
 >;
 
 /** Run `callback` after `delayMs`; the returned function cancels it (the app injects the scheduler). */
@@ -107,14 +109,20 @@ export function createSidebarStore(
   bridge.onListing(event => pushed(event.sequence, {type: 'listing', listing: event.value}));
   bridge.onRecent(event => pushed(event.sequence, {type: 'recent', recent: event.value}));
   bridge.onPreferences(event => store.dispatch({type: 'archived', archived: event.value.archived}));
-  void settled(bridge.overview()).then(result => {
-    if (!result.ok) return;
-    const {listings, recent, skippedRecent, eventCursor} = result.value;
-    cursor = eventCursor;
-    store.dispatch({type: 'overview', listings, recent, skippedRecent});
-    for (const {sequence, action} of early.splice(0))
-      if (sequence > eventCursor) store.dispatch(action);
-  });
+  const askOverview = (): void => {
+    void settled(bridge.overview()).then(result => {
+      if (!result.ok) {
+        store.dispatch({type: 'overview-failed', reason: result.error});
+        return;
+      }
+      const {listings, recent, skippedRecent, eventCursor} = result.value;
+      cursor = eventCursor;
+      store.dispatch({type: 'overview', listings, recent, skippedRecent});
+      for (const {sequence, action} of early.splice(0))
+        if (sequence > eventCursor) store.dispatch(action);
+    });
+  };
+  askOverview();
   void settled(bridge.preferences()).then(result => {
     if (result.ok) store.dispatch({type: 'archived', archived: result.value.archived});
   });
@@ -128,6 +136,13 @@ export function createSidebarStore(
           store.dispatch({type: 'select', screen: {kind: 'runs'}});
         }
         void settled(bridge.openRunWindow(run));
+      },
+      retryLoad: (host: HostKey) => {
+        if (store.getState().overview.kind === 'failed') {
+          store.dispatch({type: 'overview-asked'});
+          askOverview();
+        }
+        void settled(bridge.retryListing(host));
       },
     },
   };

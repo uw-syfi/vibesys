@@ -14,6 +14,7 @@ export const HOSTS_CHANNELS = {
   setCheckout: 'vibesys:welcome:set-checkout',
   cancelCheckout: 'vibesys:welcome:cancel-checkout',
   signIn: 'vibesys:welcome:sign-in',
+  retryListing: 'vibesys:welcome:retry-listing',
   complete: 'vibesys:welcome:complete',
   logs: 'vibesys:welcome:logs',
   releaseLogs: 'vibesys:welcome:release-logs',
@@ -26,6 +27,8 @@ export interface HostsWelcomeBridge {
   setCheckout(host: HostKey, path: string, change: number): Promise<WelcomeResult<string>>;
   cancelCheckout(change: number): Promise<WelcomeResult<null>>;
   signIn(host: HostKey): Promise<WelcomeResult<null>>;
+  /** Ask `host` for its runs again now. */
+  retryListing(host: HostKey): Promise<WelcomeResult<null>>;
   /** The directories that complete `directory` (a path ending in `/`) on `host`. */
   complete(host: HostKey, directory: string): Promise<WelcomeResult<PathCompletion>>;
   /**
@@ -52,6 +55,7 @@ export type HostsRequest =
     }
   | {readonly kind: 'cancel-checkout'; readonly change: number}
   | {readonly kind: 'sign-in'; readonly host: HostId}
+  | {readonly kind: 'retry-listing'; readonly host: HostId}
   /** List `directory` (a path ending in `/`) for completion. */
   | {readonly kind: 'complete'; readonly host: HostId; readonly directory: string}
   | {
@@ -105,6 +109,8 @@ export function parseHostsRequest(
       return {kind: 'cancel-checkout', change: operationToken(first, 'checkout change')};
     case HOSTS_CHANNELS.signIn:
       return {kind: 'sign-in', host: hostFromKey(first)};
+    case HOSTS_CHANNELS.retryListing:
+      return {kind: 'retry-listing', host: hostFromKey(first)};
     case HOSTS_CHANNELS.complete:
       return {kind: 'complete', host: hostFromKey(first), directory: directory(second)};
     case HOSTS_CHANNELS.logs: {

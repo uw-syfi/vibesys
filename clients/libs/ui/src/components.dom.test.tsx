@@ -30,6 +30,7 @@ import {
   StackedBars,
   StatusDot,
   type StatusTone,
+  StepList,
   Table,
   Text,
   TextInput,
@@ -95,6 +96,44 @@ function ControlledSegments() {
   ];
   return <SegmentedControl label="Mode" options={options} value={value} change={setValue} />;
 }
+
+describe('StepList', () => {
+  test('names each step by word, and offers Retry only when given one', async () => {
+    let retried = 0;
+    const container = await mount(
+      <StepList
+        title="This Mac"
+        steps={[
+          {id: 'a', label: 'Starting gateway', state: 'done', position: '1/3'},
+          {id: 'b', label: 'Connecting', state: 'failed', position: '2/3', note: 'exited (code 1)'},
+          {id: 'c', label: 'Loading runs', state: 'pending', position: '3/3'},
+        ]}
+        retry={() => {
+          retried += 1;
+        }}
+      />,
+    );
+    const marks = [...container.querySelectorAll('[role="img"]')];
+    expect(marks.map(mark => mark.getAttribute('aria-label'))).toEqual([
+      'Done',
+      'Failed',
+      'Waiting',
+    ]);
+    expect(container.textContent).toContain('This Mac');
+    expect(container.textContent).toContain('2/3');
+    expect(container.textContent).toContain('exited (code 1)');
+    expect(container.textContent).not.toContain('1/3');
+    await click(one(container, 'button'));
+    expect(retried).toBe(1);
+    const waiting = await mount(
+      <StepList
+        title="This Mac"
+        steps={[{id: 'a', label: 'Starting gateway', state: 'current', position: '1/3'}]}
+      />,
+    );
+    expect(waiting.querySelector('button')).toBeNull();
+  });
+});
 
 describe('SegmentedControl', () => {
   test('is one named radio group; a press chooses exactly one segment', async () => {
