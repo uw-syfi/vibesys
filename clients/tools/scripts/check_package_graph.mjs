@@ -927,6 +927,7 @@ export const STRICT_WORKSPACE_IMPORTS = {
   '@vibesys/logs': null,
   '@vibesys/ipc': null,
   '@vibesys/connection': null,
+  '@vibesys/subscription': null,
   // Its entries are node-only, so `runtime-reachability` already keeps it in `./main` entries.
   '@vibesys/settings': null,
 };

@@ -183,7 +183,7 @@ function sameControl(left: Control, right: Control): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-export class Subscriptions implements SubscriptionPort {
+export class Subscriptions {
   readonly #instances = new Map<string, Instance>();
   #closed = false;
 
@@ -196,11 +196,12 @@ export class Subscriptions implements SubscriptionPort {
   ) {}
 
   /**
-   * Watch `request` on `host`: the machine's data and control are sent to `receive` now and as they
-   * change, restricted to `key` when given. `ended` is told once, when the hub closes the host or
-   * itself. Cancelling releases the observer; the last release stops the stream.
+   * Relay `request` on `host`: the machine's data and control are sent to `receive` now and as
+   * they change, restricted to `key` when given, for an observer that folds them itself (a window).
+   * `ended` is told once, when the hub closes the host or itself. Cancelling releases the observer;
+   * the last release stops the stream.
    */
-  observe: SubscriptionPort['observe'] = (host, request, key, receive, ended) => {
+  relay: SubscriptionPort['observe'] = (host, request, key, receive, ended) => {
     const topic = topicOf(request);
     if (this.#closed || topic === null) {
       ended(this.#closed ? 'subscriptions closed' : 'unknown subscription topic');
@@ -238,14 +239,19 @@ export class Subscriptions implements SubscriptionPort {
     };
   }
 
+  /** The relay as a window's port, for what serves windows. */
+  get port(): SubscriptionPort {
+    return {observe: this.relay};
+  }
+
   /** `listener` hears the state now and on each change; the returned function releases it. */
-  watch<S>(
+  observe<S>(
     host: HostKey,
     topic: Topic<S>,
     listener: (state: SubscriptionState<S>) => void,
     key?: string,
   ): () => void {
-    const source = subscriptionSource(this, host, topic, key);
+    const source = subscriptionSource(this.port, host, topic, key);
     const release = source.subscribe(() => listener(source.getSnapshot()));
     listener(source.getSnapshot());
     return release;
@@ -271,7 +277,7 @@ export class Subscriptions implements SubscriptionPort {
         settle(() => reject(signal.reason ?? new Error('cancelled')));
         return;
       }
-      release = this.watch(host, topic, state => {
+      release = this.observe(host, topic, state => {
         if (state.kind === 'live') settle(() => resolve(state.value));
         else if (state.kind === 'failed')
           settle(() => reject(new SubscriptionFailed(state.reason, state.retrying)));

@@ -52,6 +52,10 @@ clients/
   libs/run-session/ @vibesys/run-session      one live run: runStep, the session machine, its
                                               ports, connectRun, WebSession    -> contracts, run-state,
                                                                        transport, store, machine
+  libs/subscription/ @vibesys/subscription    a host's live keyed state as one bounded state type
+                                              (connecting, live, stale, failed), its fold, the machine
+                                              that owns every wait, and a window's source of it
+                                                                                 -> hosts, machine, proto
   libs/run-fixtures/ @vibesys/run-fixtures   replayable run fixtures (recorded, scrubbed of hosts,
                                               paths and user names, or synthetic) for e2e harnesses
                                               and screen checks; dev only            -> contracts
@@ -115,7 +119,7 @@ cycles, and forbids feature-to-feature and app-to-app edges, because peers share
 | --- | --- | --- | --- |
 | `foundation` | 0 | `contracts`, `ui`, `store`, `request-identity` | nothing in the workspace |
 | `core` | 1 | `run-state`, `transport`, `hosts`, `machine`, `problems` | foundation |
-| `domain` | 2 | `runs`, `run-session`, `run-history`, `run-fixtures` | foundation, core |
+| `domain` | 2 | `runs`, `run-session`, `subscription`, `run-history`, `run-fixtures` | foundation, core |
 | `service` | 3 | `ipc`, `connection`, `settings` | foundation, core, domain |
 | `feature` | 4 | `feature-*` | anything below |
 | `app` | 5 | `apps/*` | anything below |
@@ -234,7 +238,7 @@ checker (`EXTERNAL_DEPENDENCIES`, rule `external-dependencies`):
 | --- | --- |
 | `react`, `react-dom` (and subpaths) | `dom` entries: `ui`, features' `./renderer`, browser and renderer apps |
 | `electron` | `node` and `preload` entries of features (`./main`) and apps (`desktop-main`) |
-| `xstate` | features' `./state` and `./renderer`; `MACHINE_PACKAGES`: `machine`, `connection` (its host connection machine), and `run-session` (its session machine). Never `store`, `run-state`, `hosts`, `runs`, `ui`, `contracts`, `transport`, or `ipc` |
+| `xstate` | features' `./state` and `./renderer`; `MACHINE_PACKAGES`: `machine`, `connection` (its host connection machine), `run-session` (its session machine), and `subscription` (its subscription machine). Never `store`, `run-state`, `hosts`, `runs`, `ui`, `contracts`, `transport`, or `ipc` |
 | Node builtins (`node:*` and bare names) | `node` entries |
 
 A package that declares one of them in `dependencies` must have an entry allowed to use it. Knip
@@ -628,6 +632,7 @@ is tracked in #1969.
 | `run-session`'s session lifecycle (`sessionMachine`, `WebSession`) | machine | migrated (#2071) |
 | `feature-run-control`'s commands and banner | machine | migrated (#1950) |
 | `@vibesys/connection`'s `HostConnection` | machine | migrated (phase 8) |
+| `@vibesys/subscription`'s `subscriptionMachine` (one per host and topic instance, in main) | machine | new (#3498) |
 
 ## Build model
 
@@ -719,6 +724,7 @@ names a missing or extra one.
 | `@vibesys/runs` | domain | exists: run, task, and instance ids, bounded launch-profile values and optimistic mutations, a recent run's status from its host's listing, the exact-resume policy, the stop flow; depends on `contracts`, `hosts` | domain split (#1949), launch profiles (#2718) |
 | `@vibesys/machine` | core | exists: `actorStore`, `clockFrom`, `unprovided` (`.`) and `checkMachine` (`./testing`); domain-free | state architecture (#1950) |
 | `@vibesys/run-session` | domain | exists: the run fold's wiring (`runStep`), the session lifecycle (`sessionMachine`, three parallel regions: start-up, recovery, and the fenced replacement snapshot), its ports, the run connection over a control transport (`connectRun`), and `WebSession`, with `./testing` (an in-memory control transport and page lifecycle, and `sessionWith`) | domain split (#1949) |
+| `@vibesys/subscription` | domain | exists (`.`, `./testing`, both `neutral`): a host's keyed live state as one closed state type that cannot express loading with no end, its fold (a snapshot swapped in at `synced`, so a removed key leaves no ghost), `subscriptionMachine` (the stream, its lease and its backoff, bounded by `failureBoundMs`), the topic registry, and `subscriptionSource` for a window's `useSyncExternalStore`; depends on `hosts`, `machine`, `proto`. `@vibesys/connection`'s `Subscriptions` runs it in main, and `@vibesys/ipc` carries it to windows | live subscriptions (#3498) |
 | `@vibesys/entities` | domain | deleted: split into `hosts` and `runs`; task arguments (`shellWords`) lived in `@vibesys/feature-start-run`, deleted with the Start sheet, and are now owned by `runs` | domain split (#1949), launch profiles (#2718) |
 | `@vibesys/ipc` | service | exists: the run connection's port messages and their validation, and the shell's channels, events, and payloads, with each feature's requests (channels, bridge slice, and the parser the main process runs) in `welcome/<feature>.ts` (the surface's historical name); depends on `hosts`, `runs` | domain packages (phase 5 of #1878); per-feature parsers with phase 8 |
 | `@vibesys/connection` | service | exists (`.`, `node`): the connection manager (`ConnectionManager`, `HostConnection`: an XState machine in `state/` and a `shell/` owning the links, channels, and the machine's clock), the ssh and local links, the bootstrap, and `connectionStatus`, with `./testing` (`FakeHelper`, `FakeLink`, and the `HostConnection` contract suite); depends on `contracts`, `transport`, `hosts` | desktop main process (phase 8 of #1878) |

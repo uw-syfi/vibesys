@@ -12,7 +12,7 @@ import {GrpcError, registerAbort} from '@vibesys/transport';
 import type {SubscriptionStreams} from '../shell/subscriptions.js';
 
 /** A frame as a test writes it: the case and the value's fields. */
-export type Frame = NonNullable<MessageInitShape<typeof SubscribeResponseSchema>['frame']>;
+type Frame = NonNullable<MessageInitShape<typeof SubscribeResponseSchema>['frame']>;
 
 /** One Subscribe stream a host's gateway holds open, with the means to speak and end it. */
 export interface FakeSubscribeStream {

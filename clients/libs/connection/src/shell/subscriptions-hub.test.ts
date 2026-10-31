@@ -30,11 +30,11 @@ test('an observer that throws is reported and does not stop the others or the ma
   const {gateway, subscriptions, reported} = hub();
   const heard: SubscriptionState<unknown>[] = [];
   let broken = false;
-  subscriptions.watch(HOST, topic, () => {
+  subscriptions.observe(HOST, topic, () => {
     if (broken) throw new Error('screen bug');
   });
   broken = true;
-  subscriptions.watch(HOST, topic, state => heard.push(state));
+  subscriptions.observe(HOST, topic, state => heard.push(state));
   gateway.streams[0]?.reached('runs');
   expect(heard.map(state => state.kind)).toEqual(['connecting', 'connecting']);
   expect(reported.length).toBeGreaterThan(0);
@@ -46,7 +46,7 @@ test("a relay receives the machine's updates, restricted to its key, then ends w
   const {gateway, subscriptions} = hub();
   const heard: SubscriptionUpdate[] = [];
   const ends: (string | undefined)[] = [];
-  subscriptions.observe(
+  subscriptions.relay(
     HOST,
     topic.request,
     'machine',
@@ -93,7 +93,7 @@ test('a request for a topic this client does not know is refused at once', () =>
   const {gateway, subscriptions} = hub();
   const ends: (string | undefined)[] = [];
   const unknown = create(SubscribeRequestSchema);
-  subscriptions.observe(
+  subscriptions.relay(
     HOST,
     unknown,
     undefined,

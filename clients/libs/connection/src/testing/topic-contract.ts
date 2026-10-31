@@ -50,7 +50,7 @@ class Rig<S> {
   constructor(readonly topic: Topic<S>) {}
 
   watch(key?: string): () => void {
-    return this.hub.watch(HOST, this.topic, state => this.states.push(state), key);
+    return this.hub.observe(HOST, this.topic, state => this.states.push(state), key);
   }
 
   get state(): SubscriptionState<S> {
@@ -196,7 +196,7 @@ function lateObserverIsToldTheState<S>(topic: Topic<S>, scenario: Scenario): voi
   rig.watch();
   rig.snapshot(scenario.first);
   const late: SubscriptionState<S>[] = [];
-  rig.hub.watch(HOST, topic, state => late.push(state));
+  rig.hub.observe(HOST, topic, state => late.push(state));
   expect(rig.gateway.streams).toHaveLength(1);
   expect(late.at(-1)).toMatchObject({kind: 'live', value: rig.expected(scenario.first)});
   // A watcher of one key is told that key's snapshot, which the topic may or may not accept alone.
@@ -204,7 +204,7 @@ function lateObserverIsToldTheState<S>(topic: Topic<S>, scenario: Scenario): voi
   if (key === undefined) return;
   const own = scenario.first.filter(entry => entry.key === key);
   const keyed: SubscriptionState<S>[] = [];
-  rig.hub.watch(HOST, topic, state => keyed.push(state), key);
+  rig.hub.observe(HOST, topic, state => keyed.push(state), key);
   const alone = topic.fold(new Map(own.map(entry => [entry.key, entry])));
   expect(keyed.at(-1)?.kind).toBe(alone === null ? 'failed' : 'live');
 }
