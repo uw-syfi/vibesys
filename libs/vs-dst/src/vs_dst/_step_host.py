@@ -330,7 +330,7 @@ class _WorldRunner:
     twice. A step whose effect began and did not finish left nothing, and runs again.
     """
 
-    def __init__(  # lint-waiver: LW-120071 [PLR0913]; the runner's collaborators are independent and each is read by `run` or `clear`; grouping them in a carrier would only hide which is which.
+    def __init__(
         self,
         executors: RecoverableExecutors,
         effects: Effects,
