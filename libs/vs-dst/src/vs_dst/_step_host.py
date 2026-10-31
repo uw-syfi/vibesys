@@ -178,7 +178,8 @@ class _Host:
     ) -> Run:
         world = self._outside.world
         setup = world.setup
-        launch = setup.new_launch()
+        resuming = self._options.resumed and setup.upgrade is not None
+        launch = setup.upgrade() if resuming and setup.upgrade is not None else setup.new_launch()
         registry = setup.harness.registry
         driver = launch.search.driver(launch.config, registry)
         search = RecordingSearch(driver, self._decisions)

@@ -22,6 +22,7 @@ from vs_dst._interruptions import Action, Interruption, Moment, choose
 from vs_dst._snapshots import (
     NondeterministicWorldError,
     OutsideWorld,
+    RecordingRecords,
     Snapshot,
     Snapshots,
 )
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
     from vs_core.api.testing import Journal, Violation
     from vs_dst._interrupt import Interrupted
     from vs_dst._world import World
+    from vs_proto.api import Record
     from vs_runtime.api.core import DispatchCapExceededError, RunStalledError
     from vs_runtime.api.step_runner import StepLoopStalledError
 
@@ -129,6 +131,12 @@ class SimulatedRun:
     def stopped(self) -> bool:
         """Whether an operator stop interrupted the run."""
         return self._run.stopped
+
+    @property
+    def log_records(self) -> tuple[Record, ...]:
+        """The records of the run.log a step-loop run left, in order; none for a shell run."""
+        store = self._outside.store
+        return tuple(store.records) if isinstance(store, RecordingRecords) else ()
 
     @property
     def commits(self) -> int:

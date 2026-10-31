@@ -19,7 +19,16 @@ from functools import cache
 import pytest
 from tests.system.crash._flow_worlds import WORLDS
 
-from vs_dst.api import Action, Interruption, Moment, SimulatedRun, simulate
+from vs_dst.api import (
+    Action,
+    Hosting,
+    Interruption,
+    Moment,
+    ShellHosting,
+    SimulatedRun,
+    StepLoopHosting,
+    simulate,
+)
 from vs_sim.api.testing import evenly_spaced
 
 REASON = "#3475 recovery redesign"
@@ -58,9 +67,16 @@ of the dynamic run and of a sample of the others (12 per class). The sweep of th
 nightly, and a pair it finds stuck belongs here."""
 
 
+SHELL = ShellHosting()
+STEP_LOOP = StepLoopHosting()
+HOSTINGS: dict[str, Hosting] = {"shell": SHELL, "step-loop": STEP_LOOP}
+"""The two hosts of a run: ``CoreRuntime``, which production runs today, and the step loop that
+replaces it. The tables above belong to the shell; the step loop has none (see below)."""
+
+
 @cache
-def _normal(world: str) -> SimulatedRun:
-    return simulate(WORLDS[world]())
+def _normal(world: str, hosting: str = "shell") -> SimulatedRun:
+    return simulate(WORLDS[world](), HOSTINGS[hosting])
 
 
 def _assert_never_stuck(normal: SimulatedRun, point: Interruption) -> None:
@@ -70,6 +86,14 @@ def _assert_never_stuck(normal: SimulatedRun, point: Interruption) -> None:
     assert interrupted.every_step_finished_once(), why
     if point.action is Action.PAUSE or point.moment is not Moment.IN_FLIGHT:
         assert interrupted.reruns == 0, why
+
+
+def _assert_resumed_as_uninterrupted(normal: SimulatedRun, point: Interruption) -> None:
+    """The run ends as the uninterrupted one did: the result, and the adoption it names."""
+    interrupted = normal.interrupt(point)
+    why = f"{point}: {interrupted.outcome.value}; hosts {interrupted.history}; {interrupted.detail}"
+    assert interrupted.matches_uninterrupted(), why
+    assert interrupted.every_step_finished_once(), why
 
 
 def _class_id(case: tuple[Action, Moment]) -> str:
@@ -127,4 +151,45 @@ def test_a_run_interrupted_at_every_point_and_resumed_is_never_stuck(
 ) -> None:
     normal = _normal(world)
     for point in normal.interruptions(*action_moment):
+        _assert_never_stuck(normal, point)
+
+
+# --- the step loop ----------------------------------------------------------------------------
+#
+# The step loop runs the recovery rule of docs/contributing/run-recovery.md. It has no known
+# failures and no stuck groups: every class of every search, killed or paused at every point and
+# resumed, ends as the uninterrupted run did, and no step's effect finishes twice. A kill with an
+# effect in flight may run that effect again (it left no result to reuse); every other interruption
+# re-runs nothing.
+
+
+@pytest.mark.parametrize(
+    ("action", "moment"), [pytest.param(*case, id=_class_id(case)) for case in CLASSES]
+)
+def test_a_dynamic_run_on_the_step_loop_interrupted_and_resumed_ends_as_it_did_at_a_sample_of_points(
+    action: Action, moment: Moment
+) -> None:
+    normal = _normal("dynamic", "step-loop")
+    points = normal.interruptions(action, moment)
+
+    for index in evenly_spaced(len(points), SAMPLE):
+        _assert_resumed_as_uninterrupted(normal, points[index])
+        _assert_never_stuck(normal, points[index])
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    ("world", "action_moment"),
+    [
+        pytest.param(world, case, id=f"{world}-{_class_id(case)}")
+        for world in WORLDS
+        for case in CLASSES
+    ],
+)
+def test_a_run_on_the_step_loop_interrupted_at_every_point_and_resumed_ends_as_it_did(
+    world: str, action_moment: tuple[Action, Moment]
+) -> None:
+    normal = _normal(world, "step-loop")
+    for point in normal.interruptions(*action_moment):
+        _assert_resumed_as_uninterrupted(normal, point)
         _assert_never_stuck(normal, point)

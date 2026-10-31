@@ -256,9 +256,12 @@ class FlowDriver[C]:
         item = journaled or kept
         if item is None:
             raise ContractError(("event",), "an event is journaled as itself or as a record")
-        if lifting and (run.concluded or event.new_epoch):
-            # The search ended the run under the stop, so no flow is left to take the lift:
-            # every flow starts again from its latest checkpoint, with the stop taken back.
+        if lifting and run.concluded and (run.stop is not None or event.new_epoch):
+            # The search ended the run, and what ended it is gone: the stop it answered is lifted,
+            # or the run was reopened and core forgot its ending. No flow is left to take the
+            # lift, so every flow starts again from its latest checkpoint, with the stop taken
+            # back. A run that was only paused, or that concluded for its own reasons while it
+            # was, goes on as it was: its ending is still the search's to propose.
             state, run, restarting = self._restart(state, view, lifted=True)
             restarted.extend(restarting)
         decisions = run.feed(item, view, None)

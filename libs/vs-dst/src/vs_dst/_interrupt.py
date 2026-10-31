@@ -22,12 +22,15 @@ from vs_core.api import (
 )
 from vs_dst._host import has_ended
 from vs_dst._interruptions import Action, Interruption, Moment
+from vs_dst._snapshots import RecordingRecords
 
 if TYPE_CHECKING:
     from vs_core.api import CoreState, RunResultProposal
     from vs_dst._effects import Effects
     from vs_dst._host import Hosted, HostPlan
     from vs_dst._snapshots import OutsideWorld, RunningHost, Store
+    from vs_dst._world import World
+    from vs_proto.api import Record
 
 MAX_RESUMES = 2
 """How many times the operator resumes a run that did not end before giving up on it."""
@@ -93,6 +96,12 @@ class Interrupted:
     core: CoreState | None
     """Core's state as the last host left it."""
     effects: Effects
+    expected: RunResultProposal | None = None
+    """How the uninterrupted run ended."""
+    world: World | None = None
+    """The world as the hosts of the interrupted run left it: what it handed out."""
+    log_records: tuple[Record, ...] = ()
+    """The run.log the hosts left, in order (a step-loop run; none for a shell run)."""
 
     @property
     def result(self) -> RunResultProposal | None:
@@ -107,6 +116,13 @@ class Interrupted:
     def never_stuck(self) -> bool:
         """Whether the run continued to its end or ended with a named reason."""
         return self.outcome in (Outcome.CONTINUED, Outcome.ENDED_WITH_REASON)
+
+    def matches_uninterrupted(self) -> bool:
+        """Whether the run ended exactly as the uninterrupted one did: the same result, adoption included.
+
+        Attempts are not compared: an interruption legitimately costs a step another attempt.
+        """
+        return self.outcome is Outcome.CONTINUED and self.result == self.expected
 
     def every_step_finished_once(self) -> bool:
         """Whether no request's effect finished (sealed a result) more than once."""
@@ -191,7 +207,20 @@ def _interrupted(
     outcome, detail = _classify(hosts[-1], expected.result)
     resumes = len(hosts) - (point.action is Action.PAUSE)
     history = tuple(_short(host.how, _HOW_LIMIT) for host in hosts)
-    return Interrupted(point, outcome, detail, resumes, history, hosts[-1].core, outside.effects)
+    store = outside.store
+    records = tuple(store.records) if isinstance(store, RecordingRecords) else ()
+    return Interrupted(
+        point,
+        outcome,
+        detail,
+        resumes,
+        history,
+        hosts[-1].core,
+        outside.effects,
+        expected.result,
+        outside.world,
+        records,
+    )
 
 
 def _classify(last: Hosted, expected: RunResultProposal | None) -> tuple[Outcome, str]:

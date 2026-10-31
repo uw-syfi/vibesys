@@ -27,6 +27,12 @@ class RunSetup:
     """Registry, run facts, limits, envelope type and evidence requirements of the run."""
     schemas: Mapping[SchemaRef, type[BaseModel]]
     """The reply types the run's agent turns answer."""
+    upgrade: Callable[[], Launch[Any]] | None = None
+    """The search the code has become, for a world that tests resuming a run on changed code.
+
+    A host that resumes a run (the operator's Resume after a pause or a crash) runs this search
+    instead of ``new_launch``'s; the first host of a run never does. ``None``: the code does not
+    change."""
     max_concurrent: int = 1
     """How many requests the loop executes at once."""
     controlled: bool = False
