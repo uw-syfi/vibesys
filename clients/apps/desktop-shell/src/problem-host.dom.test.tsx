@@ -82,7 +82,7 @@ describe('the window’s host of problems', () => {
   test('opens a toast to its detail and dismisses it until the problem clears and recurs', async () => {
     const {container, show, button} = setup();
     await show([SAVE]);
-    await act(async () => button('Could not save the change').click());
+    await act(async () => button('Show details').click());
     expect(container.textContent).toContain('The disk is full.');
     await act(async () => button('Dismiss').click());
     expect(container.querySelector('[role="alert"]')).toBeNull();
