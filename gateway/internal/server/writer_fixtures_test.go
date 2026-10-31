@@ -94,7 +94,8 @@ func TestPythonWriterSkeletonFixtures(t *testing.T) {
 
 // The TypeScript reader decodes this exact reply (clients/libs/run-skeleton
 // descriptors.test.ts), so the two languages agree on what the hash names.
-// Set VIBESYS_UPDATE_GOLDEN=1 to rewrite it after a deliberate wire change.
+// ./scripts/regenerate_goldens.sh rewrites it (with VIBESYS_UPDATE_GOLDEN=1) after a deliberate
+// wire change.
 func pinWireGolden(t *testing.T, reply *apiv1.SkeletonResponse) {
 	t.Helper()
 	path := "../../../proto/testdata/skeleton-wire/converted.response.pb.gz"
@@ -134,6 +135,6 @@ func pinWireGolden(t *testing.T, reply *apiv1.SkeletonResponse) {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(want, encoded) {
-		t.Fatalf("Skeleton reply differs from %s; rerun with VIBESYS_UPDATE_GOLDEN=1 if intended", path)
+		t.Fatalf("Skeleton reply differs from %s; if the change is intended, run ./scripts/regenerate_goldens.sh and commit what it rewrites", path)
 	}
 }

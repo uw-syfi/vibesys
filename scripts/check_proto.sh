@@ -42,8 +42,9 @@ pids+=("$!")
 # 1,000 small tests with no dominant one: spread across the cores the checks beside it leave, not one.
 stage pytest uv run --locked pytest libs/vs-proto/tests libs/vs-runlog/tests scripts/corevalue/tests scripts/host_operations/tests -n auto --no-cov -q &
 pids+=("$!")
-# A native golden that a schema change left stale fails here, from hashes alone and naming the
-# command that regenerates it; the golden tests that project every scenario run in the shards.
+# A golden that a schema or projector change left stale fails here, from hashes alone, naming
+# ./scripts/regenerate_goldens.sh: the native replays, the conversion goldens and the Skeleton
+# wire golden. The golden tests that project every scenario run in the shards.
 # Its own process: each xdist worker above would import the projector's modules again.
 stage goldens uv run --locked pytest tests/vibesys/run/test_native_goldens_current.py --no-cov -q &
 pids+=("$!")

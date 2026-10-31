@@ -1,7 +1,15 @@
 import {expect, test} from 'bun:test';
 import type {WelcomeResult} from '@vibesys/ipc';
 import {machineLoads} from '../state/index.js';
-import {createSidebarStore, type ShellBridge} from './index.js';
+import {createSidebarStore, type ShellBridge, type WindowAddress} from './index.js';
+
+/** A window that stays on home: these tests do not navigate. */
+const NO_ADDRESS: WindowAddress = {
+  screen: () => ({kind: 'runs'}),
+  push: () => undefined,
+  back: () => undefined,
+  onRestore: () => () => undefined,
+};
 
 type Overview = Awaited<ReturnType<ShellBridge['overview']>>;
 
@@ -53,7 +61,7 @@ for (const [name, reply] of [
 ] as const) {
   test(`an overview that ${name} fails the machines instead of waiting forever`, async () => {
     const {bridge} = world([reply]);
-    const {store} = createSidebarStore(bridge, () => () => undefined);
+    const {store} = createSidebarStore(bridge, () => () => undefined, NO_ADDRESS);
     await settle();
     expect(store.getState().overview).toMatchObject({kind: 'failed'});
     expect(machineLoads(store.getState(), ['local'])).toEqual([
@@ -72,7 +80,7 @@ test('retry asks a failed overview again, and asks the machine for its runs', as
     () => Promise.resolve(FAILED),
     () => Promise.resolve(HEARD),
   ]);
-  const {store, actions} = createSidebarStore(bridge, () => () => undefined);
+  const {store, actions} = createSidebarStore(bridge, () => () => undefined, NO_ADDRESS);
   await settle();
   actions.retryLoad('local');
   expect(store.getState().overview).toEqual({kind: 'waiting'});
@@ -84,7 +92,7 @@ test('retry asks a failed overview again, and asks the machine for its runs', as
 
 test('retry with the overview heard asks only the machine', async () => {
   const {bridge, asked, retried} = world([() => Promise.resolve(HEARD)]);
-  const {actions} = createSidebarStore(bridge, () => () => undefined);
+  const {actions} = createSidebarStore(bridge, () => () => undefined, NO_ADDRESS);
   await settle();
   actions.retryLoad('ssh:host-a');
   await settle();

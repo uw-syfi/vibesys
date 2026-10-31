@@ -78,9 +78,12 @@ conformance corpus.
    sizes, digests and the first difference, and a native replay golden compares
    through `assert_replay_golden`.
    `test_a_failed_comparison_prints_no_diff_at_any_verbosity` holds it.
-9. **Fail a stale native golden in the proto check group.** A `.proto` change
-   invalidates every native golden. `test_native_goldens_match_the_schemas_and_inputs_they_were_made_from`
-   reads hashes alone, and the proto group runs it.
+9. **Fail a stale golden in the proto check group, naming one command.** A
+   `.proto` or records projector change invalidates the native replays, the
+   conversion goldens and the Skeleton wire golden; `./scripts/regenerate_goldens.sh`
+   rewrites them all. `test_native_goldens_match_the_schemas_and_inputs_they_were_made_from`
+   and `test_wire_goldens_match_the_inputs_they_were_made_from` read hashes
+   alone, and the proto group runs them.
 10. **Keep a parametrized test id short.** A long value in the id cut a
     shard's CI log; give it `pytest.param(value, id="short-name")`.
     `test_a_long_parameter_value_stops_the_session_naming_the_fix` covers it.
