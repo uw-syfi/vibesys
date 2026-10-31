@@ -24,11 +24,13 @@ noises at the fewest samples, 2.04 with many). Anything less is ``inconclusive``
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import math
 import platform
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -44,8 +46,10 @@ __all__ = [
     "InvalidInputError",
     "compare_commit",
     "compare_samples",
+    "gate_summary",
     "load_records",
     "main",
+    "objective_gates",
     "task_fingerprint",
 ]
 
@@ -91,7 +95,20 @@ _ROLES = ("base", "candidate")
 _DIRECTIONS = ("max", "min")
 _CHECKS = ("pass", "fail")
 _YES_NO = ("yes", "no")
-_SKIPPED_PARTS = ("__pycache__",)
+# Match vs-project input exclusions without importing the installed package.
+_SKIPPED_PARTS = (
+    "__pycache__",
+    ".cache",
+    ".git",
+    ".mypy_cache",
+    ".nox",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".tox",
+    "agent.toml",
+    "node_modules",
+    "results.json",
+)
 
 
 class InvalidInputError(Exception):
@@ -194,12 +211,19 @@ def task_fingerprint(task_dir: Path) -> str:
     files = sorted(
         p
         for p in task_dir.rglob("*")
-        if p.is_file() and not any(part in _SKIPPED_PARTS for part in p.parts)
+        if p.is_file()
+        and not any(
+            part in _SKIPPED_PARTS or part == ".env" or part.startswith(".env.") for part in p.parts
+        )
     )
     for path in files:
         digest.update(path.relative_to(task_dir).as_posix().encode())
         digest.update(b"\0")
-        digest.update(hashlib.sha256(path.read_bytes()).digest())
+        content = hashlib.sha256()
+        with path.open("rb") as stream:
+            for block in iter(lambda: stream.read(65536), b""):
+                content.update(block)
+        digest.update(content.digest())
     return digest.hexdigest()
 
 
@@ -246,7 +270,7 @@ def validate_record(record: object) -> dict[str, Any]:
     """Return ``record`` if it is a valid measurement record, else raise ``InvalidInputError``."""
     if not isinstance(record, dict):
         raise InvalidInputError("a record must be a JSON object")
-    unknown = sorted(set(record) - set(_FIELDS))
+    unknown = sorted(set(record) - set(_FIELDS) - {"gate_requirements", "gates"})
     missing = sorted(set(_FIELDS) - set(record))
     if unknown:
         raise InvalidInputError(f"unknown field {', '.join(unknown)}")
@@ -264,7 +288,39 @@ def validate_record(record: object) -> dict[str, Any]:
     for key in ("recorded_at", "host", "label", "metric", "command", "evaluator"):
         _validate_text(record, key)
     _validate_samples(record["samples"])
+    _validate_timestamp(record["recorded_at"])
+    _validate_gates(record)
     return record
+
+
+def _validate_timestamp(value: str) -> None:
+    try:
+        stamp = datetime.fromisoformat(
+            value.removesuffix("Z") + "+00:00" if value.endswith("Z") else value
+        )
+    except ValueError as error:
+        raise InvalidInputError("recorded_at must be an ISO timestamp with timezone") from error
+    if stamp.tzinfo is None:
+        raise InvalidInputError("recorded_at needs timezone")
+
+
+def _validate_gates(record: dict[str, Any]) -> None:
+    requirements = record.get("gate_requirements", [])
+    gates = record.get("gates", {})
+    if not isinstance(requirements, list) or not all(isinstance(g, str) for g in requirements):
+        raise InvalidInputError("gate_requirements must be a list of names")
+    if not isinstance(gates, dict) or set(gates) - set(requirements):
+        raise InvalidInputError("gates must name declared objective gates")
+    for name, gate in gates.items():
+        if not isinstance(gate, dict) or set(gate) != {"passed", "values"}:
+            raise InvalidInputError(f"gate {name}: expected passed and values")
+        if not isinstance(gate["passed"], list) or any(type(v) is not bool for v in gate["passed"]):
+            raise InvalidInputError(f"gate {name}: passed must contain booleans")
+        _validate_samples(gate["values"])
+        if len(gate["passed"]) != len(record["samples"]) or len(gate["values"]) != len(
+            record["samples"]
+        ):
+            raise InvalidInputError(f"gate {name}: one result and value per sample required")
 
 
 def load_records(run: Path) -> list[dict[str, Any]]:
@@ -316,6 +372,45 @@ def _task_dir(run: Path) -> Path:
     return directory
 
 
+def objective_gates(task: Path) -> list[str]:
+    """Conservatively require evidence for every gate/SLA declaration in task Markdown.
+
+    Names are the exact stripped declaration lines, so no domain vocabulary or numeric
+    threshold is guessed. The measurer interprets each rule and records per-sample results.
+    """
+    return sorted(
+        {
+            line.strip()
+            for path in task.glob("*.md")
+            for line in path.read_text().splitlines()
+            if re.search(r"\b(?:gates?|sla)\b", line, re.IGNORECASE)
+        }
+    )
+
+
+def gate_summary(
+    records: list[dict[str, Any]], required: list[str] | None = None
+) -> dict[str, Any]:
+    """Pool evidence fail-closed; a failed sample always dominates missing data."""
+    names = set(required or []) | {g for r in records for g in r.get("gate_requirements", [])}
+    failed = any(not all(g["passed"]) for r in records for g in r.get("gates", {}).values())
+    missing = any(
+        not records or any(name not in r.get("gates", {}) for r in records) for name in names
+    )
+    return {
+        "status": "fail" if failed else "unmeasured" if missing else "pass",
+        "ranges": {
+            name: [min(values), max(values)]
+            for name in sorted(names)
+            if (
+                values := [
+                    v for r in records for v in r.get("gates", {}).get(name, {}).get("values", [])
+                ]
+            )
+        },
+    }
+
+
 def _record_from(
     args: argparse.Namespace, run: Path, host: str, now: Callable[[], datetime]
 ) -> dict[str, Any]:
@@ -333,6 +428,8 @@ def _record_from(
         "check": args.check,
         "exclusive": args.exclusive,
         "evaluator": task_fingerprint(_task_dir(run)),
+        "gate_requirements": objective_gates(_task_dir(run)),
+        "gates": json.loads(args.gates.read_text()) if args.gates else {},
     }
 
 
@@ -375,6 +472,7 @@ def compare_commit(records: list[dict[str, Any]], commit: str, base: str | None)
         "direction": anchor["direction"],
         "evaluator": anchor["evaluator"],
         "check": _commit_check(mine),
+        "gates": {"candidate": gate_summary(mine), "base": gate_summary(theirs)},
         "warnings": _warnings(
             comparable, [r for r in theirs if (r["metric"], r["evaluator"]) == key]
         ),
@@ -440,6 +538,9 @@ def _format_comparison(result: dict[str, Any]) -> str:
         )
         detail += f"; {result['reason']})" if result["reason"] else ")"
     lines = [f"{head}{detail}; {result['metric']} ({result['direction']}); check {result['check']}"]
+    lines.append(
+        "objective gates and pooled ranges: " + json.dumps(result["gates"], sort_keys=True)
+    )
     lines.extend(f"warning: {w}" for w in result["warnings"])
     return "\n".join(lines)
 
@@ -448,10 +549,17 @@ def _emit(env: _Env, payload: object, text: str, *, as_json: bool) -> None:
     env.out.write((json.dumps(payload, sort_keys=True) if as_json else text) + "\n")
 
 
+def _cmd_gates(args: argparse.Namespace, env: _Env) -> None:
+    env.out.write(json.dumps(objective_gates(_task_dir(Path(args.run))), indent=2) + "\n")
+
+
 def _cmd_record(args: argparse.Namespace, env: _Env) -> None:
     run = Path(args.run)
     record = _record_from(args, run, env.host, env.now)
     validate_record(record)
+    meta = json.loads((run / "run.json").read_text())
+    if args.role == "base" and meta.get("base_commit", args.commit) != args.commit:
+        raise InvalidInputError("--role base must match run.json base_commit")
     _check_against_history(record, load_records(run))
     with (run / MEASUREMENTS_FILE).open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, sort_keys=False) + "\n")
@@ -463,16 +571,31 @@ def _cmd_record(args: argparse.Namespace, env: _Env) -> None:
 def _cmd_compare(args: argparse.Namespace, env: _Env) -> None:
     records = load_records(Path(args.run))
     result = compare_commit(records, _validate_commit(args.commit), args.base)
+    required = objective_gates(_task_dir(Path(args.run)))
+    result["gates"] = {
+        "candidate": gate_summary(
+            [r for r in records if r["commit"] == result["commit"]], required
+        ),
+        "base": gate_summary([r for r in records if r["commit"] == result["base"]], required),
+    }
     _emit(env, result, _format_comparison(result), as_json=args.json)
 
 
 def _cmd_best(args: argparse.Namespace, env: _Env) -> None:
     records = load_records(Path(args.run))
+    required = objective_gates(_task_dir(Path(args.run)))
     candidates = list(dict.fromkeys(r["commit"] for r in records if r["role"] == "candidate"))
     won = []
     for commit in candidates:
         result = compare_commit(records, commit, None)
-        if result["verdict"] == "better" and result["check"] == "pass":
+        result["gates"]["candidate"] = gate_summary(
+            [r for r in records if r["commit"] == commit], required
+        )
+        if (
+            result["verdict"] == "better"
+            and result["check"] == "pass"
+            and result["gates"]["candidate"]["status"] == "pass"
+        ):
             won.append(result)
     if not won:
         _emit(
@@ -531,6 +654,12 @@ def _parser() -> argparse.ArgumentParser:
     parser = _Parser(prog="measurements.py", description=__doc__.split("\n\n")[0])
     commands = parser.add_subparsers(dest="command_name", required=True, parser_class=_Parser)
 
+    runner = commands.add_parser("run", help="execute benchmark load under the host-wide lock")
+    runner.add_argument("argv", nargs=argparse.REMAINDER)
+
+    gates = commands.add_parser("gates", help="list exact task objective gate declaration keys")
+    gates.add_argument("--run", required=True)
+
     record = commands.add_parser("record", help="append one validated measurement")
     record.add_argument("--run", required=True)
     record.add_argument("--commit", required=True)
@@ -540,6 +669,9 @@ def _parser() -> argparse.ArgumentParser:
     record.add_argument("--direction", required=True, choices=_DIRECTIONS)
     record.add_argument("--command", required=True)
     record.add_argument("--sample", required=True, action="append", type=_finite_number)
+    record.add_argument(
+        "--gates", type=Path, help="JSON objective gate results, one value and pass per sample"
+    )
     record.add_argument("--check", choices=_CHECKS)
     record.add_argument("--exclusive", choices=_YES_NO)
 
@@ -560,7 +692,13 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-_COMMANDS = {"record": _cmd_record, "compare": _cmd_compare, "best": _cmd_best, "show": _cmd_show}
+_COMMANDS = {
+    "record": _cmd_record,
+    "gates": _cmd_gates,
+    "compare": _cmd_compare,
+    "best": _cmd_best,
+    "show": _cmd_show,
+}
 
 
 def _run_directory(value: str) -> Path:
@@ -568,6 +706,21 @@ def _run_directory(value: str) -> Path:
     if not run.is_dir():
         raise InvalidInputError(f"the run directory {value} does not exist")
     return run
+
+
+def _benchmark_run(command: list[str]) -> int:
+    if command[:1] == ["--"]:
+        command.pop(0)
+    if not command:
+        raise InvalidInputError("run requires -- <benchmark command>")
+    # LW-100359 [S108]; one host path must ignore per-shell TMPDIR; random temp
+    # files cannot synchronize, and per-repository locks permit cross-run overlap.
+    lock_path = Path("/tmp/vibesys-benchmark.lock")  # noqa: S108
+    with lock_path.open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        # LW-100354 [S603]; explicit user argv; a shell adds quoting hazards,
+        # while an executable allowlist would reject legitimate user benchmarks.
+        return subprocess.run(command, check=False).returncode  # noqa: S603
 
 
 def main(
@@ -584,9 +737,16 @@ def main(
     """
     try:
         args = _parser().parse_args(argv)
+        if args.command_name == "run":
+            return _benchmark_run(args.argv)
         run = _run_directory(args.run)
         args.run = str(run)
-        _COMMANDS[args.command_name](args, _Env(out=out, now=now, host=host))
+        if args.command_name == "record":
+            with (run / "run.lock").open("a") as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                _COMMANDS[args.command_name](args, _Env(out=out, now=now, host=host))
+        else:
+            _COMMANDS[args.command_name](args, _Env(out=out, now=now, host=host))
     except InvalidInputError as error:
         err.write(f"error: {error}\n")
         return 2
@@ -597,7 +757,8 @@ if __name__ == "__main__":
     sys.exit(
         main(
             sys.argv[1:],
-            now=lambda: datetime.now(timezone.utc),
+            # LW-100357 [TID251]; standalone host clock; vs_sim adds a dependency, indirect lookup hides real I/O.
+            now=lambda: datetime.now(timezone.utc),  # noqa: TID251
             out=sys.stdout,
             err=sys.stderr,
             host=platform.node() or "unknown",

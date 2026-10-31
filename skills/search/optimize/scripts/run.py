@@ -10,17 +10,29 @@ from __future__ import annotations
 
 import argparse
 import copy
+import fcntl
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
+
+# LW-100355 [TID251]; standalone bounded waits; vs_sim adds a dependency, busy spinning wastes CPU.
+import time  # noqa: TID251
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, TextIO
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "measure/scripts"))
-from measurements import InvalidInputError, compare_commit, load_records
+from measurements import (
+    InvalidInputError,
+    compare_commit,
+    gate_summary,
+    load_records,
+    objective_gates,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -35,18 +47,21 @@ class Git(Protocol):
 
     def alive(self, pid: int) -> bool: ...
 
+    def pid_file(self, path: Path, timeout: float) -> int: ...
 
-__all__ = ["finishable", "main", "status", "transition"]
+
+__all__ = ["HostGit", "finishable", "main", "parse_date", "read_state", "status", "transition"]
 
 TERMINAL = {"won", "parked", "abandoned"}
 EDGES = {
     "dispatched": {"returned", "abandoned"},
     "returned": {"judging", "parked", "abandoned"},
-    "judging": TERMINAL,
+    "judging": TERMINAL | {"returned"},
 }
 
 
-def _date(value: str) -> datetime:
+def parse_date(value: str) -> datetime:
+    """Parse an ISO instant, accepting UTC Z on Python 3.10."""
     return datetime.fromisoformat(
         value.removesuffix("Z") + "+00:00" if value.endswith("Z") else value
     )
@@ -71,7 +86,7 @@ def status(state: State, now: datetime) -> dict[str, Any]:
     free = max(0, state["fanout"] - busy)
     if state["finished"]:
         action = "finish succeeded"
-    elif now >= _date(state["wrap_up_at"]):
+    elif now >= parse_date(state["wrap_up_at"]):
         action = "begin wrap-up: close open items, stop owned tasks, measure main, run finish"
     elif any(i["state"] == "returned" for i in opened):
         action = "judge returned items, then choose work or record idle --reason"
@@ -80,7 +95,7 @@ def status(state: State, now: datetime) -> dict[str, Any]:
     else:
         action = "wait for completion notifications"
     return {
-        "seconds_left": (_date(state["deadline"]) - now).total_seconds(),
+        "seconds_left": (parse_date(state["deadline"]) - now).total_seconds(),
         "wrap_up_at": state["wrap_up_at"],
         "open_items": opened,
         "free_slots": free,
@@ -97,7 +112,7 @@ def transition(state: State, item: str, target: str, reason: str) -> State:
     row = result["items"][item]
     if target not in EDGES.get(row["state"], set()) or not reason.strip():
         raise ValueError(f"invalid transition {row['state']} -> {target}, or empty reason")
-    if target == "judging" and status(state, _date(state["started_at"]))["free_slots"] == 0:
+    if target == "judging" and status(state, parse_date(state["started_at"]))["free_slots"] == 0:
         raise ValueError("no free judge slot")
     if target == "won" and not row.get("judge_pass"):
         raise ValueError("won requires a recorded judge pass")
@@ -118,7 +133,7 @@ def finishable(
     """Check all finish guards, including a fresh successful measurement of current main."""
     if early and not reason.strip():
         raise ValueError("finish --early requires --reason")
-    if now < _date(state["wrap_up_at"]) and not (early and reason.strip()):
+    if now < parse_date(state["wrap_up_at"]) and not (early and reason.strip()):
         raise ValueError("too early: wrap-up starts at " + state["wrap_up_at"])
     if any(i["state"] not in TERMINAL for i in state["items"].values()):
         raise ValueError("open work items: collect or abandon them first")
@@ -128,7 +143,7 @@ def finishable(
         r
         for r in records
         if r["commit"] == state["main_commit"]
-        and _date(r["recorded_at"]) > _date(state["main_moved_at"])
+        and parse_date(r["recorded_at"]) > parse_date(state["main_moved_at"])
         and r["check"] == "pass"
     ]
     if not fresh:
@@ -161,13 +176,14 @@ def read_state(run: Path) -> State:
         "promotions",
         "idle_reason",
         "decisions",
+        "session_id",
     }
     if not isinstance(state, dict) or set(state) != fields:
         raise ValueError(f"run.json keys must be {sorted(fields)}; got {state}")
     if state["schema"] != 1 or not isinstance(state["fanout"], int) or state["fanout"] <= 0:
         raise ValueError("run.json: invalid schema or fanout")
     for key in ("started_at", "deadline", "wrap_up_at", "main_moved_at"):
-        if _date(state[key]).tzinfo is None:
+        if parse_date(state[key]).tzinfo is None:
             raise ValueError(f"run.json: {key} needs timezone")
     for row in state["items"].values():
         if row["state"] not in {*EDGES, *TERMINAL}:
@@ -177,9 +193,14 @@ def read_state(run: Path) -> State:
 
 def _save(run: Path, state: State) -> None:
     path = run / "run.json"
-    temporary = run / "run.json.tmp"
-    temporary.write_text(json.dumps(state, indent=2) + "\n")
-    temporary.replace(path)
+    descriptor, name = tempfile.mkstemp(prefix="run-", suffix=".tmp", dir=run)
+    temporary = Path(name)
+    try:
+        with os.fdopen(descriptor, "w") as stream:
+            stream.write(json.dumps(state, indent=2) + "\n")
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
     rows = ["| id | kind | hypothesis | state | reason |", "| --- | --- | --- | --- | --- |"]
     for key, item in state["items"].items():
         fields = [key, item["kind"], item["hypothesis"], item["state"], item["reason"]]
@@ -230,6 +251,7 @@ def _start(args: argparse.Namespace, now: datetime, git: Git) -> Path:
         "promotions": [],
         "idle_reason": None,
         "decisions": [],
+        "session_id": None,
     }
     exclude = Path(git(root, ["rev-parse", "--git-path", "info/exclude"]).strip())
     if not exclude.is_absolute():
@@ -244,10 +266,20 @@ def _start(args: argparse.Namespace, now: datetime, git: Git) -> Path:
     return run
 
 
+def _check_gates(run: Path, commit: str) -> None:
+    state = read_state(run)
+    task = run.parent.parent / ".vibesys/tasks" / state["task"]
+    records = [r for r in load_records(run) if r["commit"] == commit]
+    summary = gate_summary(records, objective_gates(task))
+    if summary["status"] != "pass":
+        raise ValueError("objective gates: " + summary["status"])
+
+
 def _move(run: Path, state: State, item: str, now: datetime, git: Git) -> None:
     row = state["items"][item]
     commit = _sha(row.get("commit", ""))
     comparison = compare_commit(load_records(run), commit, state["main_commit"])
+    _check_gates(run, commit)
     if (
         row["state"] != "won"
         or not row.get("judge_pass")
@@ -290,7 +322,7 @@ def _item_command(args: argparse.Namespace, state: State, now: datetime) -> Stat
     command = args.command
     if command == "add":
         _name(args.id)
-        if now >= _date(state["wrap_up_at"]) or not status(state, now)["free_slots"]:
+        if now >= parse_date(state["wrap_up_at"]) or not status(state, now)["free_slots"]:
             raise ValueError("no dispatch slot or wrap-up has begun")
         if args.id in state["items"]:
             raise ValueError("duplicate item id")
@@ -320,7 +352,7 @@ def _finish(
         raise ValueError("main moved outside run.py")
     records = load_records(run)
     comparison = finishable(state, now, records, early=args.early, reason=args.reason)
-    if args.early:
+    if args.early and now < parse_date(state["wrap_up_at"]):
         _decision(state, "early-finish", args.reason, now)
     record_ids = [
         index
@@ -342,6 +374,16 @@ def _finish(
     return comparison
 
 
+def _preconditions(args: argparse.Namespace, run: Path, state: State, git: Git) -> None:
+    command = args.command
+    if state["finished"] and command != "status":
+        raise ValueError("run already finished")
+    if command == "judge" and args.result == "pass":
+        _check_gates(run, args.commit)
+    if command == "track" and args.pid_file:
+        args.pid = git.pid_file(args.pid_file, args.timeout)
+
+
 def _operate(
     args: argparse.Namespace,
     run: Path,
@@ -350,20 +392,23 @@ def _operate(
     git: Git,
 ) -> dict[str, Any]:
     command = args.command
-    if state["finished"] and command != "status":
-        raise ValueError("run already finished")
+    _preconditions(args, run, state, git)
     if command in {"add", "transition", "judge"}:
         state = _item_command(args, state, now)
     elif command == "move-main":
         _move(run, state, args.id, now, git)
     elif command in {"track", "untrack"}:
-        _command(args, state, git)
+        _command(args, state, git, now)
+    elif command == "abort":
+        _decision(state, "abort", args.reason, now)
+        state["finished"] = True
     elif command == "idle":
         _decision(state, "idle", args.reason, now)
         state["idle_reason"] = args.reason
     elif command == "finish":
         if any(git.alive(row["pid"]) for row in state["commands"].values()):
             raise ValueError("tracked process still alive")
+        _check_gates(run, state["main_commit"])
         comparison = _finish(run, state, now, git, args)
     _save(run, state)
     if state["finished"]:
@@ -373,13 +418,15 @@ def _operate(
     return comparison if command == "finish" else status(state, now)
 
 
-def _command(args: argparse.Namespace, state: State, git: Git) -> None:
+def _command(args: argparse.Namespace, state: State, git: Git, now: datetime) -> None:
     if args.command == "track":
-        if args.id in state["commands"] or args.pid <= 0:
-            raise ValueError("duplicate command or nonpositive pid")
+        if args.id in state["commands"] or not 1 < args.pid <= 2**31 - 1:
+            raise ValueError("duplicate command or invalid pid (expected 2..2147483647)")
         state["commands"][args.id] = {"description": args.description, "pid": args.pid}
     else:
-        if git.alive(state["commands"][args.id]["pid"]):
+        if args.force:
+            _decision(state, "force-untrack", args.reason, now)
+        elif git.alive(state["commands"][args.id]["pid"]):
             raise ValueError("command still running; stop it and confirm completion first")
         del state["commands"][args.id]
 
@@ -406,6 +453,7 @@ def _parser() -> argparse.ArgumentParser:
         "track",
         "untrack",
         "idle",
+        "abort",
         "finish",
     ):
         sub = subs.add_parser(name)
@@ -419,14 +467,20 @@ def _parser() -> argparse.ArgumentParser:
             sub.add_argument("--hypothesis", required=True)
         if name == "transition":
             sub.add_argument("--to", choices=tuple(EDGES) + tuple(sorted(TERMINAL)), required=True)
-        if name in {"transition", "judge", "idle"}:
+        if name in {"transition", "judge", "idle", "abort"}:
             sub.add_argument("--reason", required=True)
         if name == "judge":
             sub.add_argument("--commit", required=True)
-            sub.add_argument("--result", choices=("pass", "fail"), required=True)
+            sub.add_argument("--result", choices=("pass", "fail", "unmeasured"), required=True)
+        if name == "untrack":
+            sub.add_argument("--force", action="store_true")
+            sub.add_argument("--reason", default="")
         if name == "track":
             sub.add_argument("--description", required=True)
-            sub.add_argument("--pid", type=int, required=True)
+            pid = sub.add_mutually_exclusive_group(required=True)
+            pid.add_argument("--pid", type=int)
+            pid.add_argument("--pid-file", type=Path)
+            sub.add_argument("--timeout", type=float, default=10)
         if name == "finish":
             sub.add_argument("--early", action="store_true")
             sub.add_argument("--reason", default="")
@@ -448,9 +502,11 @@ def main(
             out.write(str(_start(args, now, git)) + "\n")
             return 0
         run = args.run.resolve()
-        state = read_state(run)
-        _recover(run, state, now, git)
-        result = _operate(args, run, state, now, git)
+        with (run / "run.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            state = read_state(run)
+            _recover(run, state, now, git)
+            result = _operate(args, run, state, now, git)
         out.write(json.dumps(result, indent=2) + "\n")
     except (ValueError, KeyError, OSError, TypeError, AttributeError, InvalidInputError) as error:
         err.write(f"error: {error}\n")
@@ -458,14 +514,26 @@ def main(
     return 0
 
 
+def _read_pid(path: Path) -> int | None:
+    try:
+        return int(path.read_text().strip())
+    except (FileNotFoundError, ValueError):
+        return None
+
+
 class HostGit:
     """Git and PID inspection for the standalone installed controller."""
 
     def __call__(self, cwd: Path, args: list[str]) -> str:
+        """Run git from PATH with a bounded invocation."""
+        executable = shutil.which("git")
+        if executable is None:
+            raise ValueError("git is not on PATH")
         # LW-100348 [S603]; git argv is controller-owned and never uses a shell. Separate
-        # wrappers for each git verb would duplicate this single I/O boundary.
+        # wrappers for each git verb would duplicate this single I/O boundary; shell
+        # invocation would add quoting and injection hazards instead of validating argv.
         result = subprocess.run(  # noqa: S603
-            ["/usr/bin/git", "-C", str(cwd), *args],
+            [executable, "-C", str(cwd), *args],
             capture_output=True,
             text=True,
             timeout=30,
@@ -475,10 +543,23 @@ class HostGit:
             raise ValueError(result.stderr)
         return result.stdout
 
+    def pid_file(self, path: Path, timeout: float) -> int:
+        """Wait within a deadline for the background Bash PID handoff."""
+        if timeout <= 0:
+            raise ValueError("PID handoff timeout must be positive")
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            pid = _read_pid(path)
+            if pid is not None:
+                return pid
+            time.sleep(min(0.05, max(0, deadline - time.monotonic())))
+        raise ValueError("PID handoff timed out: " + str(path))
+
     def alive(self, pid: int) -> bool:
+        """Inspect a validated POSIX PID without signalling it."""
         try:
             os.kill(pid, 0)
-        except ProcessLookupError:
+        except (ProcessLookupError, OverflowError):
             return False
         except PermissionError:
             return True
@@ -489,7 +570,8 @@ if __name__ == "__main__":
     sys.exit(
         main(
             sys.argv[1:],
-            now=datetime.now(timezone.utc),
+            # LW-100356 [TID251]; standalone host clock; vs_sim adds a dependency, indirect lookup hides real I/O.
+            now=datetime.now(timezone.utc),  # noqa: TID251
             out=sys.stdout,
             err=sys.stderr,
             git=HostGit(),

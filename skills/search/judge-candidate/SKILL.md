@@ -36,7 +36,8 @@ Start from the diff against the parent (`git diff <parent> <candidate>`) and the
    about speed only when a recorded result shows it is not there. If no comparable verdict
    exists, return `unmeasured` and ask the lead to schedule measurement. Never run a long
    measurement in the judge; the lead records it before requesting a new judgment.
-   A correctness-only pass is `unmeasured`, never an unconditional `pass`.
+   A correctness-only pass or missing objective gate data is `unmeasured`, never `pass`.
+   Read candidate gate status and pooled ranges in compare: a failed gate means fail.
 
 Source reading decides correctness and rule violations. Only a recorded measurement decides a
 claim about speed. Do not run other benchmarks. The required correctness check is the exception to the short-command budget.
@@ -44,23 +45,13 @@ claim about speed. Do not run other benchmarks. The required correctness check i
 Passing the check is not enough: reject a candidate that violates a rule in `OBJECTIVE.md`.
 
 
-Start a required service with `&`, save `$!` immediately, and kill only that saved PID:
-
-```sh
-./server --port "$P" &
-service_pid=$!
-trap 'kill "$service_pid" 2>/dev/null || true; wait "$service_pid" 2>/dev/null || true' EXIT
-ready=false
-for i in $(seq 50); do
-  if redis-cli -p "$P" PING; then ready=true; break; fi
-  sleep 0.1
-done
-[ "$ready" = true ] || exit 1
-```
-
-Adapt the start command and readiness probe to the task. Bounded readiness waits are fine;
-fixed startup delays and open-ended sleeps are not. Never use `pkill`, `killall`, or a PID
-found through port lookup. Ownership comes from `$!`, not a process name or listening port.
+Use the measure skill's `scripts/service.py` owner for every required service. Supply
+`--service`, `--probe`, and `--client` as JSON argv arrays, with a positive `--timeout`.
+It starts a new process group, fails on exhausted readiness, and stops and verifies the
+whole group on every exit. Never use handwritten background-shell PID or startup-sleep recipes.
+Run any load, including short sanity/tuning benchmarks, through
+`python3 "${CLAUDE_SKILL_DIR}/../measure/scripts/measurements.py" run -- <command>`.
+This host-wide lock applies to recorded and unrecorded benchmarks alike.
 
 ## Return
 

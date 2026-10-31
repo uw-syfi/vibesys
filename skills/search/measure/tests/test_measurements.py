@@ -360,6 +360,8 @@ def test_a_record_carries_what_was_measured_where_and_against_which_task(new_run
         "check": "pass",
         "exclusive": "yes",
         "evaluator": script.task_fingerprint(run.task),
+        "gate_requirements": [],
+        "gates": {},
     }
 
 
@@ -661,3 +663,25 @@ def test_show_filters_by_commit(new_run: NewRun) -> None:
     assert code == 0
     assert out.count("\n") == 2
     assert run.cli("show", "--run", str(run.dir), "--commit", SHA_C)[1] == "no records\n"
+
+
+@pytest.mark.parametrize("stamp", ["not-a-date", "2026-01-01T00:00:00", "2026-99-99T00:00:00Z"])
+def test_record_timestamp_requires_a_real_zoned_instant(new_run: NewRun, stamp: str) -> None:
+    run = new_run()
+    assert run.record(SHA_A, [1, 2, 3], role="base")[0] == 0
+    (record,) = run.show()
+    record["recorded_at"] = stamp
+    with pytest.raises(script.InvalidInputError, match="recorded_at"):
+        script.validate_record(record)
+
+
+def test_task_hash_ignores_generated_results_and_environment(new_run: NewRun) -> None:
+    run = new_run()
+    before = script.task_fingerprint(run.task)
+    for name in ("results.json", ".env", ".env.local", "agent.toml", "__pycache__/generated.pyc"):
+        path = run.task / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("generated output")
+    assert script.task_fingerprint(run.task) == before
+    (run.task / "OBJECTIVE.md").write_text("changed objective")
+    assert script.task_fingerprint(run.task) != before

@@ -40,19 +40,25 @@ the TOML prefix. Honor every objective gate, including ones not enforced by exit
    `ready for measurement`; the lead measures it in a background job or resumes the worker
    with the slot after the current owner finishes. Never wait inside a worker for permission
    to measure. Do not dispatch overlapping measurement windows. This also
-   serializes the recorder's history validation and append; the script supplies no file lock.
+   requires every load command, including unrecorded profiling or sanity runs, to take
+   the host-wide `measurements.py run -- <command>` lock. Recorder validation and append
+   also take the controller transaction lock.
 2. Use an absolute `RUN` path. Resolve the full commit SHA and create a new detached worktree:
    `git worktree add --detach "$RUN/measure/<work-id>-<attempt>" <SHA>`.
    Use a fresh attempt ID for every remeasurement. Make the parent directory first.
-3. From that checkout, execute the brief's build and service recipe, then the check. Save logs
-   under the attempt's artifacts directory. Abort on any failure or objective gate violation.
+3. From that checkout, execute the brief's build and service recipe, then the check. Use `service.py` with JSON service/probe/client argv to bound readiness
+   and own cleanup of the entire group. Save logs
+   under the attempt's artifacts directory. Abort on build or correctness failure.
 4. Execute the benchmark five times, appending its declared `json_argument` and a distinct
    absolute JSON output path each time. Abort on a nonzero exit, timeout, missing output,
-   missing metric or failed gate. Never reuse output from an earlier attempt.
+   missing metric. Record objective gate failures with the corresponding samples; never
+   discard them to make a candidate pass. Never reuse output from an earlier attempt.
 5. Use `--role base` whenever the measured SHA equals `run.json`'s `base_commit`, otherwise
    `--role candidate`, including remeasurements. Read the metric from each fresh JSON and
    call the recording CLI once with one `--sample`
-   flag per value, `--check pass`, and the full command. A repeat records only new samples,
+   flag per value, `--check pass`, `--gates <JSON file>` and the full command. Gate results
+   use exact stripped gate/SLA declaration lines as keys, each with one `passed` boolean
+   and numeric `values` entry per throughput sample. A repeat records only new samples,
    never the old samples again. Return the slot and clean up the server and worktree.
 
 The lead runs this sequence as a background Bash job when measuring itself. Bound the whole

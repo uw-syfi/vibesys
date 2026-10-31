@@ -17,7 +17,7 @@ forbids. The judge reads the diff for this and for every rule in OBJECTIVE.md. A
 with a failing or weakened check is a fail.
 
 **Losing results to context limits.** Findings that stay in your head are gone after a
-compaction. Put each decision in `decisions.md`, each result through the run controller, and each
+compaction. Put each decision in `ledger.md`, each result through the run controller, and each
 expectation in `notes/` as it happens.
 
 **A merge measured on the wrong commit.** Main moved while a combine was running, or the
