@@ -19,6 +19,7 @@ export const RECORD_FACTS = {
   stepStarted: 'window',
   stepFinished: 'window',
   attemptInterrupted: 'window',
+  runEnded: 'window',
 } as const satisfies Record<NonNullable<StoreRecord['body']['case']>, string>;
 
 /** The raw-record fold keeps 1000 rows; the shared reader must recover that whole bounded view. */

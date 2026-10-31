@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ._actions import OpenStep
 from ._request_recovery import is_open, resent
 from .types.common import EventId, Observation, ObservationStatus
 from .types.records import RequestObserved, RequestPhase, RequestRecord
@@ -14,12 +15,12 @@ from .types.steps import (
     Interruption,
     OwnerEvent,
     StepAttempts,
-    StepsState,
 )
 
 if TYPE_CHECKING:
     from .types.common import RequestId
     from .types.kernel import CoreState
+    from .types.settlement import RunResultProposal
     from .types.steps import StepResult
     from .types.until import Until
 
@@ -39,11 +40,25 @@ def epoch_opened(state: CoreState, epoch: int) -> CoreState:
     A run has one writer, so a record of a later epoch proves the process that ran the earlier
     epoch's attempts dead. They end without a result and count against the retry bound: the
     attempt may have run, and a step that kills its process every time must end as a typed failure.
+    Their steps go back to the state of a step no one has started, which is what a draining run
+    waits for before it parks.
+
+    The kernel's host epoch moves with the log's, and ``RunPark.epoch`` does not: it stays the
+    epoch the operator paused in. A drain in progress keeps its authority in the new epoch (see
+    ``drain_in_force``), so a Pause-now still cancels; when it parks, the park is older than the
+    epoch it parks in, and the operator's Resume is admitted at once.
     """
     if epoch <= state.steps.epoch:
         return state
     rows = tuple(row.model_copy(update={"ended": True}) for row in state.steps.attempts)
-    return state.model_copy(update={"steps": StepsState(epoch=epoch, attempts=rows)})
+    for row in rows:
+        state = _returned(state, row.tag)
+    recovery = state.records.recovery
+    records = state.records.model_copy(
+        update={"recovery": recovery.model_copy(update={"epoch": max(recovery.epoch, epoch)})}
+    )
+    steps = state.steps.model_copy(update={"epoch": epoch, "attempts": rows})
+    return state.model_copy(update={"steps": steps, "records": records})
 
 
 def started(
@@ -94,6 +109,27 @@ def _returned(state: CoreState, tag: RequestId) -> CoreState:
         return state
     again = resent(record, state.run.now_at, state.run.limits.reconciliation_bound)
     return _replaced(state, again)
+
+
+def ended(state: CoreState, result: RunResultProposal) -> CoreState:
+    """``state`` with the end of the run published, which the log records once nothing is open."""
+    if state.run.result is None or state.run.result != result:
+        message = "the log ends a run with a result the run does not hold"
+        raise ValueError(message)
+    if any(is_open(row) for row in state.records.records):
+        message = "the log ends a run that still has a step open"
+        raise ValueError(message)
+    return state.model_copy(update={"steps": state.steps.model_copy(update={"ended": result})})
+
+
+def open_step(state: CoreState, tag: RequestId) -> OpenStep | None:
+    """The step ``tag`` as the loop runs it, while it has no result; None once it has one."""
+    rows = state.records.find(tag)
+    if len(rows) != 1 or not is_open(rows[0]):
+        return None
+    attempts = state.steps.of(tag)
+    started_ = 0 if attempts is None else attempts.started
+    return OpenStep(step=rows[0].request, deadline_at=rows[0].until.at, started=started_)
 
 
 def dispatched(state: CoreState, tag: RequestId) -> CoreState:
