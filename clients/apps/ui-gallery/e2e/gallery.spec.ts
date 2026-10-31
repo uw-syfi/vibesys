@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
+import {foreignFontMessage, foreignFontUses} from '../../../tools/e2e/bundled-fonts.mjs';
 
 /** The faces and weights the type scale uses; each must be the bundled font, not a fallback. */
 const FONTS = [
@@ -95,6 +96,14 @@ test('every component looks as agreed, and the page has no axe violation, in Ink
     await screenshotOverlays(page, theme);
     await screenshotParetoHover(page, theme);
   }
+});
+
+test('every glyph the gallery draws comes from a bundled font, none from the machine', async ({
+  page,
+}) => {
+  await open(page, 'ink');
+  const foreign = await foreignFontUses(page);
+  expect(foreign, foreignFontMessage(foreign)).toEqual([]);
 });
 
 /** Hovering a point of the Pareto chart names it and gives its values. */

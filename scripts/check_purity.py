@@ -127,6 +127,7 @@ PURE_EXPORTS = {
             "AttemptInterrupted",
             "CoreInput",
             "InterruptionReason",
+            "RunEnded",
             "StepCancelReason",
             "StepFinished",
             "StepStarted",
