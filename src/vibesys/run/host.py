@@ -34,7 +34,6 @@ from vibesys.run.measurement_events import CoreMeasurementEvents
 from vibesys.run.profilers import WITHHELD_TOOLS_ENV, ProfilerToolOffer, profiler_tool_offer
 from vibesys.run.queue_status import queue_status_reader, queue_status_service
 from vibesys.run.resources import open_run_resources
-from vibesys.run.run_clock import RunClock
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
 from vibesys.run.step_seams import step_seams
 from vs_agent.api import (
@@ -442,7 +441,7 @@ class _ProductHostFactory:
                 commit_observer=self.integration.core_commit_observer(
                     project.state.run_id, self.projector, self.plugin.id
                 ),
-                run_clock=RunClock(self.timing.clock),
+                run_clock=self.integration.events.run_clock,
                 seams=lambda: step_seams(
                     run_id=project.state.run_id,
                     environment=resources.environment,

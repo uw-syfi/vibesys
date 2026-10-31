@@ -43,6 +43,8 @@ class RunClock:
     The run does not age while the loop runs one synchronous stretch: every reading before the
     event loop next gets control is the same instant. A fact the loop dates and the record that
     holds it are made in one such stretch, so the record never dates itself before the fact.
+    The run's log dates every record by this clock (``current``), the display projection's
+    included, so no record of the stretch is dated after the instant the fact was.
     """
 
     def __init__(self, wall: SleepingClock) -> None:
@@ -79,6 +81,10 @@ class RunClock:
 
     def _pass(self) -> None:
         self._instant = None
+
+    def current(self) -> float | None:
+        """``now``, or None while the clock has not started (the run's log is not yet open)."""
+        return None if self._shift is None else self.now()
 
     async def sleep(self, seconds: float) -> None:
         """Wait on the wall clock."""

@@ -4,6 +4,12 @@
 projection's alike, goes through it, one dense sequence under one lock. A caller that builds a
 record from the prefix (a fold that must accept it first) holds the lock across the whole
 decision with ``transaction``.
+
+It is also the one place a record is dated. Whoever asks for a clock, the record gets that clock
+no later than the run's present instant and no earlier than the log's last record: the clocks
+of a log are non-decreasing in log order, and no record is dated after an instant a caller of the
+run has already read. A fact the loop dated at the present instant is then never older than a
+record of the log, whoever appended it, so a fold of the whole log accepts it.
 """
 
 from __future__ import annotations
@@ -28,7 +34,7 @@ from vs_proto.api import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
     from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
@@ -98,15 +104,23 @@ class ConfirmedLog:
     torn final frame on open; complete corruption fails there, never here.
     """
 
-    def __init__(self, writer: RunLogRecords, threads: Threads) -> None:
+    def __init__(
+        self,
+        writer: RunLogRecords,
+        threads: Threads,
+        *,
+        present: Callable[[], float | None] = lambda: None,
+    ) -> None:
         """Append through ``writer``; the prefix is read on first use.
 
         ``threads`` makes the lock the appends of every thread (the loop's, the projection's)
-        go through.
+        go through. ``present`` is the run's present instant on its clock, None while the run
+        has none (its clock starts when the loop takes the log over): no record is dated after it.
         """
         self._writer = writer
         self._confirmed: list[Record] | None = None
         self._lock: Lock = threads.rlock()
+        self._present = present
 
     @contextmanager
     def transaction(self) -> Iterator[None]:
@@ -143,6 +157,9 @@ class ConfirmedLog:
             if record.seq != len(prefix) + 1:
                 message = f"run.log record {record.seq} does not follow {len(prefix)} confirmed"
                 raise ValueError(message)
+            if record.clock < _latest(prefix):
+                message = f"run.log record {record.seq} is dated before the record that precedes it"
+                raise ValueError(message)
             self._confirmed = None
             try:
                 self._writer.append(record)
@@ -158,11 +175,13 @@ class ConfirmedLog:
 
         For the display projection, whose records are many and small and which commits at the
         boundaries of a run. The record's own ``seq`` is replaced: the projection cannot know how
-        many records core appended since it last looked. ``record`` is numbered in place.
+        many records core appended since it last looked, and its ``clock`` is dated as every
+        record is. ``record`` is numbered and dated in place.
         """
         with self._lock:
             prefix = self._prefix()
             record.seq = len(prefix) + 1
+            record.clock = self._dated(record.clock, prefix)
             self._confirmed = None
             self._writer.append(record)
             prefix.append(record)
@@ -179,12 +198,22 @@ class ConfirmedLog:
         """``message`` stamped as the record that follows the confirmed prefix, not yet appended.
 
         A caller that must accept a record before it is durable (a fold that refuses it) builds
-        it here and passes it to ``extend``.
+        it here and passes it to ``extend``. The record carries ``clock`` as the log dates it.
         """
         with self._lock:
+            prefix = self._prefix()
             return Record(
-                seq=len(self._prefix()) + 1, epoch=epoch, at=at, clock=clock, body=_body(message)
+                seq=len(prefix) + 1,
+                epoch=epoch,
+                at=at,
+                clock=self._dated(clock, prefix),
+                body=_body(message),
             )
+
+    def _dated(self, clock: float, prefix: list[Record]) -> float:
+        """``clock`` no later than the present instant, and no earlier than the last record's."""
+        present = self._present()
+        return max(clock if present is None else min(clock, present), _latest(prefix))
 
     def append(
         self, message: CoreMessage, *, epoch: int, at: Timestamp, clock: float
@@ -192,6 +221,11 @@ class ConfirmedLog:
         """Stamp ``message`` with the next sequence and append it as a record."""
         with self._lock:
             return self.extend(self.next_record(message, epoch=epoch, at=at, clock=clock))
+
+
+def _latest(prefix: list[Record]) -> float:
+    """The clock of the last record, 0 for a log with none."""
+    return prefix[-1].clock if prefix else 0.0
 
 
 def _body(message: CoreMessage) -> _CoreBody:
