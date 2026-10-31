@@ -3,8 +3,8 @@
  * The page takes it as a slot, because presentational code reaches no effects.
  */
 import type {HostKey} from '@vibesys/hosts';
-import {type JSX, useMemo, useSyncExternalStore} from 'react';
-import type {HostLive, Machine} from '../state/index.js';
+import {type JSX, useEffect, useMemo, useRef, useSyncExternalStore} from 'react';
+import {type HostLive, hostsToRecheck, type Machine} from '../state/index.js';
 import {type LiveStats, useHostStats} from './effects/live.js';
 
 /** What `render` draws for `host`, given the host's live stats. */
@@ -51,4 +51,24 @@ export function useDeliveringHosts(
       .join('\n');
   const delivering = useSyncExternalStore(subscribe, read, read);
   return useMemo(() => new Set(delivering === '' ? [] : delivering.split('\n')), [delivering]);
+}
+
+/**
+ * Asks `recheck` for the machines that deliver though their check found them unreachable, once for
+ * each spell of delivering: a host that streams is reached, so what its check could not read is
+ * read again (its hardware, and what it can run) without the user pressing anything.
+ */
+export function useRecheckReached(
+  delivering: ReadonlySet<HostKey>,
+  machines: readonly Machine[],
+  recheck: (host: HostKey) => void,
+): void {
+  const asked = useRef(new Set<HostKey>());
+  useEffect(() => {
+    for (const host of [...asked.current]) if (!delivering.has(host)) asked.current.delete(host);
+    for (const host of hostsToRecheck(machines, delivering, asked.current)) {
+      asked.current.add(host);
+      recheck(host);
+    }
+  }, [delivering, machines, recheck]);
 }

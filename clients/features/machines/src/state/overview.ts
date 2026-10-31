@@ -232,3 +232,22 @@ export function machinesAttention(
   const clusters = unreachableClusters({places: state.places, lastToken: state.lastToken}) > 0;
   return mostUrgentProblem(clusters ? [...problems, 'unavailable'] : problems);
 }
+
+/**
+ * The hosts to check again: those that deliver readings though their last check found them
+ * unreachable (the check was wrong, or the host has come back), and have not been asked since they
+ * began delivering. One more check per spell of delivering, so a check that fails again is not
+ * repeated for as long as the host delivers.
+ */
+export function hostsToRecheck(
+  machines: readonly Machine[],
+  delivering: ReadonlySet<string>,
+  asked: ReadonlySet<string>,
+): readonly string[] {
+  return machines
+    .filter(
+      each =>
+        machineStatus(each) === 'unavailable' && delivering.has(each.host) && !asked.has(each.host),
+    )
+    .map(each => each.host);
+}

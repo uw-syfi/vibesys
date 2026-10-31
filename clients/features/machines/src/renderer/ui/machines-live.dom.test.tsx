@@ -20,7 +20,7 @@ import {act} from 'react';
 import {createRoot} from 'react-dom/client';
 import {initialMachines, type MachinesState, machinesStep} from '../../state/index.js';
 import {createLiveStats} from '../effects/live.js';
-import {useDeliveringHosts, WithHostLive} from '../host-stats.js';
+import {useDeliveringHosts, useRecheckReached, WithHostLive} from '../host-stats.js';
 import {MachinesPage} from './machines-page.js';
 
 const window = new Window();
@@ -177,11 +177,30 @@ function rig(withRuns = false) {
       unmount: () => act(async () => hosts.unmount()),
     };
   };
+  /** The page's re-check of hosts that stream though their check failed, and who it asked. */
+  const recheck = (shown: readonly string[], report: MachineReport) => {
+    const asked: string[] = [];
+    const {machines} = listed(shown, report);
+    const Reading = (): null => {
+      const delivering = useDeliveringHosts(live, machines, true);
+      useRecheckReached(delivering, machines, host => asked.push(host));
+      return null;
+    };
+    const place = document.createElement('div');
+    document.body.append(place);
+    const hosts = createRoot(place);
+    return {
+      mount: () => act(async () => hosts.render(<Reading />)),
+      asked: () => [...asked],
+      unmount: () => act(async () => hosts.unmount()),
+    };
+  };
   return {
     clock,
     gateway,
     subscriptions,
     rail,
+    recheck,
     container,
     show,
     card,
@@ -530,5 +549,39 @@ describe('the Machines page reads each host live', () => {
     expect(idle.latest()).toEqual([]);
     expect(world.gateway.open).toHaveLength(0);
     await idle.unmount();
+  });
+
+  test('a host that streams though its check found it unreachable is checked again once for each spell of streaming', async () => {
+    const world = rig();
+    const unreachable = {kind: 'unavailable', detail: 'timed out'} as const;
+    await world.show([A, B], unreachable);
+    const page = world.recheck([A, B], unreachable);
+    await page.mount();
+    expect(page.asked()).toEqual([]);
+    await world.snapshot(A);
+    expect(page.asked()).toEqual([A]);
+    // Beats and new values ask nothing more.
+    await world.advance(BEAT);
+    await world.send(A, stream => stream.send({case: 'heartbeat', value: {}}));
+    await world.snapshot(A);
+    expect(page.asked()).toEqual([A]);
+    // The host stops delivering and comes back: a new spell, one more check.
+    await world.advance(AGE + 1);
+    await world.advance(backoffMs(1));
+    await world.snapshot(A);
+    expect(page.asked()).toEqual([A, A]);
+    await page.unmount();
+    await world.stop();
+  });
+
+  test('a host whose check passed is never checked again for streaming', async () => {
+    const world = rig();
+    await world.show([A]);
+    const page = world.recheck([A], {kind: 'ready', facts: FACTS});
+    await page.mount();
+    await world.snapshot(A);
+    expect(page.asked()).toEqual([]);
+    await page.unmount();
+    await world.stop();
   });
 });

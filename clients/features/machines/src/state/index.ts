@@ -28,6 +28,7 @@ export {
   cardStatus,
   clockWord,
   hardwareLine,
+  hostsToRecheck,
   type Load,
   machineHardware,
   machineLoad,

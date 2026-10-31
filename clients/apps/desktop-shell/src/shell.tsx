@@ -30,6 +30,7 @@ import {
   MachinesPage,
   MachinesScreen,
   useDeliveringHosts,
+  useRecheckReached,
   WithHostLive,
 } from '@vibesys/feature-machines/renderer';
 import {
@@ -600,6 +601,9 @@ export function Shell(props: {
     props.stores.live,
     machinesState.machines,
     sidebarState.selection.kind === 'machines',
+  );
+  useRecheckReached(delivering, machinesState.machines, host =>
+    machines.dispatch({type: 'reconnect', host}),
   );
   const machinesListed = machineCounts(machinesState).listed;
   const saved = machinesListed ? machinesState.machines.map(each => each.host) : null;

@@ -16,6 +16,7 @@ import {
   cardStatus,
   clockWord,
   hardwareLine,
+  hostsToRecheck,
   initialMachines,
   type Machine,
   type MachinesAction,
@@ -431,6 +432,26 @@ describe('one status for a card, whatever its check and its stream each say', ()
         if (machineStatus(machine) !== 'unavailable')
           expect(attention).toBe(machinesAttention(state));
       }),
+    );
+  });
+
+  test('property: a delivering host is checked again once, only when its check found it unreachable', () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom(...REPORTS),
+        fc.boolean(),
+        fc.boolean(),
+        (report, reached, asked) => {
+          const machine = machineWith(report);
+          const again = hostsToRecheck(
+            [machine],
+            reached ? new Set([machine.host]) : new Set(),
+            asked ? new Set([machine.host]) : new Set(),
+          );
+          const owed = reached && !asked && machineStatus(machine) === 'unavailable';
+          expect(again).toEqual(owed ? [machine.host] : []);
+        },
+      ),
     );
   });
 
