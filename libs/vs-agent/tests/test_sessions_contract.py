@@ -782,6 +782,47 @@ def test_explicit_drained_interruption_releases_key_without_replaying_unknown(
     assert harness.sessions.resume(KEY, harness.message, "interrupted-1") == interrupted
 
 
+def test_a_forgotten_unfinished_invocation_dispatches_again_and_an_answered_one_is_kept(
+    harness: _Harness,
+) -> None:
+    """The retry of a step whose attempt died starts clean; an answer is never re-asked."""
+    answered = harness.sessions.resume(KEY, harness.message, "answered-1")
+    assert isinstance(answered, Completed)
+
+    def fail() -> None:
+        raise KeyboardInterrupt
+
+    harness.boundary.effect = fail
+    with pytest.raises(KeyboardInterrupt):
+        harness.sessions.resume(KEY, harness.message, "killed-1")
+    harness.boundary.effect = None
+    calls = harness.boundary.calls
+
+    harness.sessions.forget_unfinished(KEY, "killed-1")
+    harness.sessions.forget_unfinished(KEY, "killed-1")
+    harness.sessions.forget_unfinished(KEY, "answered-1")
+    harness.sessions.forget_unfinished(KEY, "never-asked")
+
+    assert harness.sessions.inspect(KEY, "answered-1") == answered
+    assert isinstance(harness.sessions.inspect(KEY, "killed-1"), Unknown)
+    assert isinstance(harness.reconstruct().resume(KEY, harness.message, "killed-1"), Completed)
+    assert harness.boundary.calls == calls + 1
+
+
+def test_forgetting_refuses_another_key_s_invocation(harness: _Harness) -> None:
+    harness.boundary.effect = _raise_interrupt
+    with pytest.raises(KeyboardInterrupt):
+        harness.sessions.resume(KEY, harness.message, "killed-1")
+    other = AgentSessionKey(SessionScope.HYPOTHESIS, "other")
+
+    with pytest.raises(InvocationConflictError, match="another key"):
+        harness.sessions.forget_unfinished(other, "killed-1")
+
+
+def _raise_interrupt() -> None:
+    raise KeyboardInterrupt
+
+
 def test_initial_schema_rejection_without_checkpoint_fences_live_and_recovered_corrections(
     tmp_path: Path,
 ) -> None:

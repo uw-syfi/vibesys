@@ -226,6 +226,16 @@ class AgentSessions(Protocol):
         """Release key ownership after the caller drains an explicit interruption."""
         ...
 
+    def forget_unfinished(self, key: AgentSessionKey, invocation_id: str) -> None:
+        """Forget an invocation that ended without an answer, so asking again dispatches it.
+
+        The caller proves the attempt is over (its processes are ended) before calling.
+        Only a record with no answer is dropped (``Pending`` or ``Unknown``); an answered one
+        (``Completed``, ``InvalidResponse``) stays and is replayed. Idempotent. Raises
+        InvocationConflictError while the invocation is active or when it belongs to another key.
+        """
+        ...
+
     def checkpoint(self, key: AgentSessionKey) -> AgentSessionCheckpoint:
         """Return conversation identity or raise SessionResumeError."""
         ...
@@ -555,6 +565,33 @@ class ClientAgentSessions:
                 self._slot.save(state)
             except (ProjectError, OSError, ValidationError) as error:
                 detail = f"cannot release interrupted invocation {invocation_id}: {error}"
+                raise SessionPersistenceError.because(detail) from error
+
+    def forget_unfinished(self, key: AgentSessionKey, invocation_id: str) -> None:
+        """Drop the unanswered record of *invocation_id* and of its correction."""
+        self._validate_invocation(key, invocation_id)
+        with self._lock:
+            if {invocation_id, f"{invocation_id}/correction"} & self._active:
+                detail = "cannot forget an active invocation"
+                raise InvocationConflictError.because(detail)
+            state = self._load()
+            dropped = False
+            for identity in (invocation_id, f"{invocation_id}/correction"):
+                recorded = state.invocations.get(identity)
+                if recorded is None:
+                    continue
+                if recorded.outcome.session_key != str(key):
+                    detail = "unfinished invocation belongs to another key"
+                    raise InvocationConflictError.because(detail)
+                if not isinstance(recorded.outcome, Completed | InvalidResponse):
+                    del state.invocations[identity]
+                    dropped = True
+            if not dropped:
+                return
+            try:
+                self._slot.save(state)
+            except (ProjectError, OSError, ValidationError) as error:
+                detail = f"cannot forget unfinished invocation {invocation_id}: {error}"
                 raise SessionPersistenceError.because(detail) from error
 
     def inspect(self, key: AgentSessionKey, invocation_id: str) -> InvocationOutcome:
