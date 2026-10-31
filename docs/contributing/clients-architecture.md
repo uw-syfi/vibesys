@@ -535,8 +535,12 @@ under a hash of every file they can derive from: the roots and files of the `der
 component in `.repoctl/components.toml` (whole source packages the projection imports, the lock and
 project files, the generators) and the Python version. The key errs wide because regenerating takes
 seconds. CI selects the client jobs on a change to the same component, so a projector, schema or
-library change still runs the client tests that read the replays, and a stale set is never read.
-Two pull requests cannot conflict on them.
+library change the projection runs still runs the client tests that read the replays. The thirteen
+libraries the projection only imports (the runtime, the sandbox, the agent library and their kin)
+are entries written `{ path = "...", selects = false }`: they key the set and regenerate it, but a
+change to one selects no client job, because the projection snapshots and the conversion golden in
+the Python job still see what it does to a replay. A stale set is never read, and two pull requests
+cannot conflict on them.
 
 The `test` script of `run-page` and the `e2e`, `e2e:linux` and `dev:fixture` scripts of the desktop
 shell start through `tools/scripts/with_derived_replays.mjs`, which makes the set (about 15 s the

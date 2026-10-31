@@ -90,7 +90,7 @@ func TestLocalTestSelectionNarrowsHeavyGroups(t *testing.T) {
 		{
 			name:        "vs-runtime outside the evaluator path (the vs-runtime part of 8b4e430df)",
 			paths:       []string{"libs/vs-runtime/src/vs_runtime/_capacity_gate.py", "libs/vs-runtime/tests/test_capacity_gate.py"},
-			wantCI:      []string{"clients", "python", "real_tiers"},
+			wantCI:      []string{"python", "real_tiers"},
 			wantGroups:  []string{"always_on", "python_architecture", "python_guards", "python_quality", "python_tests", "python_types"},
 			wantSkipped: []string{"minimal_container_tests", "slurm_cluster_tests"},
 			wantTargets: -1,
@@ -98,7 +98,7 @@ func TestLocalTestSelectionNarrowsHeavyGroups(t *testing.T) {
 		{
 			name:        "vs-runtime file the evaluator examples import (93d8548d9)",
 			paths:       []string{"libs/vs-runtime/src/vs_runtime/_run_environment.py"},
-			wantCI:      []string{"clients", "examples", "python", "real_tiers"},
+			wantCI:      []string{"examples", "python", "real_tiers"},
 			wantGroups:  []string{"always_on", "examples_native_evaluator_tests", "examples_tests", "python_architecture", "python_guards", "python_quality", "python_tests", "python_types"},
 			wantSkipped: []string{"examples_cpu_check_shard", "minimal_container_tests", "slurm_cluster_tests"},
 			wantTargets: -1,

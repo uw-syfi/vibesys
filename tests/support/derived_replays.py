@@ -11,7 +11,8 @@ component in ``.repoctl/components.toml`` (whole source packages the generators 
 imports, not the functions a trace saw run), the files that component lists (the lock file, the
 project files, the generators), and the Python version. Regenerating takes seconds, so the key
 errs wide rather than listing what matters. CI selects the client jobs on a change to the same
-component, so there is one list: the key and the selection cannot disagree.
+component, so there is one list. Each entry of it may say ``selects = false``: it still keys the
+set, but a change to it selects no job (the libraries the projection only imports).
 
 ``materialize`` publishes the set a key names with one rename, so a killed run leaves nothing a
 reader could take for a complete set, and refuses to publish when an input changed while it ran.
@@ -59,8 +60,8 @@ Produce = Callable[[Path], None]
 KeyOf = Callable[[], str]
 
 
-def inputs(repository: Path = REPOSITORY) -> tuple[str, ...]:
-    """The roots and files of the ``derived_replays`` component: the one list of what a set derives from."""
+def _entries(repository: Path) -> list[tuple[str, bool]]:
+    """The component's roots then files as (path, selects): a string selects, a table says."""
     components = tomllib.loads((repository / POLICY).read_text()).get("components", [])
     named = [component for component in components if component.get("id") == COMPONENT]
     if len(named) != 1:
@@ -68,7 +69,26 @@ def inputs(repository: Path = REPOSITORY) -> tuple[str, ...]:
             f"{POLICY} must declare exactly one component with id {COMPONENT!r}; found {len(named)}"
         )
         raise ValueError(message)
-    return (*named[0].get("roots", ()), *named[0].get("files", ()))
+    entries: list[tuple[str, bool]] = []
+    for entry in (*named[0].get("roots", ()), *named[0].get("files", ())):
+        if isinstance(entry, str):
+            entries.append((entry, True))
+        elif isinstance(entry, dict) and isinstance(entry.get("path"), str):
+            entries.append((entry["path"], entry.get("selects", True) is not False))
+        else:
+            message = f"{POLICY}: a {COMPONENT} entry must be a string or a table with a path, got {entry!r}"
+            raise TypeError(message)
+    return entries
+
+
+def inputs(repository: Path = REPOSITORY) -> tuple[str, ...]:
+    """The key's inputs: every root and file of the ``derived_replays`` component."""
+    return tuple(path for path, _ in _entries(repository))
+
+
+def selecting_inputs(repository: Path = REPOSITORY) -> tuple[str, ...]:
+    """The inputs a change to which also selects the client jobs: those not marked ``selects = false``."""
+    return tuple(path for path, selects in _entries(repository) if selects)
 
 
 def input_files(repository: Path = REPOSITORY, names: Sequence[str] | None = None) -> list[Path]:

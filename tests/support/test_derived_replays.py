@@ -23,6 +23,7 @@ from tests.support.derived_replays import (
     key,
     main,
     materialize,
+    selecting_inputs,
 )
 
 if TYPE_CHECKING:
@@ -37,8 +38,8 @@ root = "clients"
 id = "derived_replays"
 class = "manual"
 job = "clients"
-roots = ["schemas", "libs/core/src"]
-files = ["uv.lock", "libs/core/pyproject.toml"]
+roots = ["schemas", "libs/core/src", { path = "libs/imported/src", selects = false }]
+files = ["uv.lock", "libs/core/pyproject.toml", { path = "libs/imported/pyproject.toml", selects = false }]
 """
 _FILES = {
     "schemas/api.proto": b"message A {}",
@@ -46,6 +47,8 @@ _FILES = {
     "libs/core/src/core/values.py": b"X = 1",
     "libs/core/src/core/data/template.j2": b"{{ name }}",
     "libs/core/pyproject.toml": b"[project]",
+    "libs/imported/src/imported/api.py": b"Y = 2",
+    "libs/imported/pyproject.toml": b"[project]\nname = 'imported'",
     "uv.lock": b"version = 1",
 }
 _PYTHON = (3, 12, 3)
@@ -160,6 +163,90 @@ def test_the_policy_must_declare_the_component_exactly_once(tmp_path: Path, copi
 
     with pytest.raises(ValueError, match="exactly one component"):
         inputs(root)
+
+
+def test_an_entry_that_does_not_select_still_keys_the_set(tmp_path: Path) -> None:
+    """Import-only libraries regenerate the set, and a change to one selects no job."""
+    root = _repository(tmp_path)
+    before = _key(root)
+
+    (root / "libs/imported/src/imported/api.py").write_text("Y = 3")
+    source = _key(root)
+    (root / "libs/imported/pyproject.toml").write_text("[project]\nname = 'renamed'")
+
+    assert len({before, source, _key(root)}) == 3
+    assert "libs/imported/src" in inputs(root)
+    assert "libs/imported/src" not in selecting_inputs(root)
+    assert "libs/imported/pyproject.toml" not in selecting_inputs(root)
+    assert {"schemas", "libs/core/src", "uv.lock"} <= set(selecting_inputs(root))
+
+
+def test_every_selection_root_is_a_key_root_in_a_synthetic_policy(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+
+    assert set(selecting_inputs(root)) < set(inputs(root))
+
+
+@pytest.mark.parametrize("entry", ["42", "{ selects = false }", "{ path = 3 }"])
+def test_an_entry_that_is_neither_a_path_nor_a_table_with_one_is_rejected(
+    tmp_path: Path, entry: str
+) -> None:
+    root = _repository(tmp_path)
+    (root / POLICY).write_text('[[components]]\nid = "derived_replays"\nroots = [' + entry + "]\n")
+
+    with pytest.raises(TypeError, match="derived_replays entry"):
+        inputs(root)
+
+
+def test_every_selection_root_of_the_real_policy_is_a_key_root() -> None:
+    """The jobs a change selects are a subset of what keys the set, never the other way round."""
+    key_inputs, selecting = set(inputs()), set(selecting_inputs())
+
+    assert selecting <= key_inputs
+    assert selecting, "the policy selects nothing from the derived_replays component"
+    assert key_inputs - selecting, "the policy marks no import-only entry key-only"
+
+
+def test_the_real_policy_selects_on_what_the_projection_runs_and_only_keys_what_it_imports() -> (
+    None
+):
+    key_inputs, selecting = set(inputs()), set(selecting_inputs())
+    ran = {
+        "proto/vibesys",
+        "libs/vs-core/src",
+        "libs/vs-proto/src",
+        "libs/vs-runlog/src",
+        "libs/vs-decode/src",
+        "libs/vs-redaction/src",
+        "src/vibesys/records",
+        "src/vibesys/search_spans",
+        "uv.lock",
+        "pyproject.toml",
+        "tests/support/materialize_replays.py",
+    }
+    only_imported = {
+        f"libs/{lib}/src"
+        for lib in (
+            "vs-agent",
+            "vs-async-ops",
+            "vs-evaluation",
+            "vs-evaluator-protocol",
+            "vs-faults",
+            "vs-issue-tracker",
+            "vs-mcp",
+            "vs-project",
+            "vs-prompts",
+            "vs-runtime",
+            "vs-sandbox",
+            "vs-sim",
+            "vs-slurm",
+        )
+    }
+
+    assert ran <= selecting
+    assert only_imported <= key_inputs
+    assert not only_imported & selecting
+    assert {"libs/vs-faults/src", "libs/vs-issue-tracker/src"} <= key_inputs
 
 
 def test_the_real_policy_lists_what_the_generators_and_the_environment_need() -> None:

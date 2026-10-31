@@ -128,80 +128,65 @@ job = "clients"
 root = "clients"
 depends_on = ["server_protocol", "server_transport", "bun_fetcher"]
 
-# What the native replays derive from, listed once. `tests/support/derived_replays.py` reads this
-# component to key a replay set and CI selects the client jobs on a change to any root or file, so
-# a set is never read stale and a projector change still runs the client tests that read it.
-# The libraries are every one the generators reach through module-level imports, whole, because a
-# constant or class a traced function uses is defined where the import graph says, not where a
-# call trace says. The two declaration directories also sit under `clients`.
+# What the native replays derive from, listed once, in two tiers. Every entry is a key input:
+# `tests/support/derived_replays.py` hashes it into the key of a replay set, so a set is never read
+# stale. An entry is also a selection input, a change to which selects the client jobs in CI and
+# locally, unless it is written `{ path = "...", selects = false }`. The libraries are every one the
+# generators reach through module-level imports, whole. The five a trace saw run (vs-core,
+# vs-proto, vs-runlog, vs-decode, vs-redaction) select; the thirteen the projection only imports
+# are key-only, so editing the runtime or the sandbox regenerates the set but does not run the
+# client jobs. The projection snapshots and the conversion golden, which the Python job runs,
+# still see a change from them. The two declaration directories also sit under `clients`.
 [[components]]
 id = "derived_replays"
 class = "manual"
 job = "clients"
 roots = [
   "proto/vibesys",
-  "libs/vs-agent/src",
-  "libs/vs-async-ops/src",
+  { path = "libs/vs-agent/src", selects = false },
+  { path = "libs/vs-async-ops/src", selects = false },
   "libs/vs-core/src",
   "libs/vs-decode/src",
-  "libs/vs-evaluation/src",
-  "libs/vs-evaluator-protocol/src",
-  "libs/vs-faults/src",
-  "libs/vs-issue-tracker/src",
-  "libs/vs-mcp/src",
-  "libs/vs-project/src",
-  "libs/vs-prompts/src",
+  { path = "libs/vs-evaluation/src", selects = false },
+  { path = "libs/vs-evaluator-protocol/src", selects = false },
+  { path = "libs/vs-faults/src", selects = false },
+  { path = "libs/vs-issue-tracker/src", selects = false },
+  { path = "libs/vs-mcp/src", selects = false },
+  { path = "libs/vs-project/src", selects = false },
+  { path = "libs/vs-prompts/src", selects = false },
   "libs/vs-proto/src",
   "libs/vs-redaction/src",
   "libs/vs-runlog/src",
-  "libs/vs-runtime/src",
-  "libs/vs-sandbox/src",
-  "libs/vs-sim/src",
-  "libs/vs-slurm/src",
+  { path = "libs/vs-runtime/src", selects = false },
+  { path = "libs/vs-sandbox/src", selects = false },
+  { path = "libs/vs-sim/src", selects = false },
+  { path = "libs/vs-slurm/src", selects = false },
   "src/vibesys/records",
   "src/vibesys/search_spans",
   "clients/libs/run-fixtures/src/data",
   "clients/apps/desktop-shell/e2e/scenarios",
 ]
-# A local `repoctl test` ignores the libraries the projection only imports (a trace saw none of
-# their functions run), so an edit to the runtime or the sandbox does not run the client groups on a
-# laptop. CI keeps them selected: a constant or class defined there could still reach a replay.
-local_ignore_roots = [
-  "libs/vs-agent/src",
-  "libs/vs-async-ops/src",
-  "libs/vs-evaluation/src",
-  "libs/vs-evaluator-protocol/src",
-  "libs/vs-faults/src",
-  "libs/vs-issue-tracker/src",
-  "libs/vs-mcp/src",
-  "libs/vs-project/src",
-  "libs/vs-prompts/src",
-  "libs/vs-runtime/src",
-  "libs/vs-sandbox/src",
-  "libs/vs-sim/src",
-  "libs/vs-slurm/src",
-]
 files = [
   "uv.lock",
   "pyproject.toml",
-  "libs/vs-agent/pyproject.toml",
-  "libs/vs-async-ops/pyproject.toml",
+  { path = "libs/vs-agent/pyproject.toml", selects = false },
+  { path = "libs/vs-async-ops/pyproject.toml", selects = false },
   "libs/vs-core/pyproject.toml",
   "libs/vs-decode/pyproject.toml",
-  "libs/vs-evaluation/pyproject.toml",
-  "libs/vs-evaluator-protocol/pyproject.toml",
-  "libs/vs-faults/pyproject.toml",
-  "libs/vs-issue-tracker/pyproject.toml",
-  "libs/vs-mcp/pyproject.toml",
-  "libs/vs-project/pyproject.toml",
-  "libs/vs-prompts/pyproject.toml",
+  { path = "libs/vs-evaluation/pyproject.toml", selects = false },
+  { path = "libs/vs-evaluator-protocol/pyproject.toml", selects = false },
+  { path = "libs/vs-faults/pyproject.toml", selects = false },
+  { path = "libs/vs-issue-tracker/pyproject.toml", selects = false },
+  { path = "libs/vs-mcp/pyproject.toml", selects = false },
+  { path = "libs/vs-project/pyproject.toml", selects = false },
+  { path = "libs/vs-prompts/pyproject.toml", selects = false },
   "libs/vs-proto/pyproject.toml",
   "libs/vs-redaction/pyproject.toml",
   "libs/vs-runlog/pyproject.toml",
-  "libs/vs-runtime/pyproject.toml",
-  "libs/vs-sandbox/pyproject.toml",
-  "libs/vs-sim/pyproject.toml",
-  "libs/vs-slurm/pyproject.toml",
+  { path = "libs/vs-runtime/pyproject.toml", selects = false },
+  { path = "libs/vs-sandbox/pyproject.toml", selects = false },
+  { path = "libs/vs-sim/pyproject.toml", selects = false },
+  { path = "libs/vs-slurm/pyproject.toml", selects = false },
   "src/vibesys/__init__.py",
   "src/vibesys/events.py",
   "src/vibesys/metrics.py",

@@ -122,7 +122,10 @@ roots, and the files, of the `derived_replays` component in the repoctl policy
 Python version. The key is coarse on purpose: regenerating takes seconds, so it
 errs wide instead of listing what matters, and no trace of what ran can go
 stale. CI selects the client jobs on a change to the same component, so a
-projector change still runs the client tests that read the replays; widen the
+projector change still runs the client tests that read the replays. An entry
+written with `selects = false` keys the set without selecting a job; use it only
+for a library the projection merely imports, whose effect on a replay the
+projection snapshots and the conversion golden already show. Widen the
 component, never the key alone. The `with_derived_replays` wrapper in the
 clients tools makes the set before a client test run (`pnpm test` in
 `run-page`, `pnpm e2e` and `e2e:linux` in the desktop shell) and needs `uv` and

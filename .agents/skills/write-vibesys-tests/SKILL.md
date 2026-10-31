@@ -79,7 +79,7 @@ conformance corpus.
    (`test_a_failed_comparison_prints_no_diff_at_any_verbosity`).
 9. **Do not commit what a projector or schema change rewrites.** The clients'
    native replays are generated under a coarse hash of their inputs, the same
-   list CI selects the client jobs on (`test_a_changed_byte_of_any_input_names_a_different_set`).
+   list that also selects the client jobs (`test_a_changed_byte_of_any_input_names_a_different_set`).
    A committed golden pins a contract or is read where no Python runs
    (`test_gateway_conversion_fixture_regenerates_identically`;
    `./scripts/regenerate_goldens.sh` rewrites it); a text snapshot per scenario
