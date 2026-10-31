@@ -12,6 +12,7 @@ import {
   RecordSchema,
   RelaunchRefusal,
   RunEntrySchema,
+  RunFailureKind,
   RunLiveness,
   TailResponseSchema,
 } from '@vibesys/proto';
@@ -46,6 +47,10 @@ function replay(state: RunState): StoreRunFixture {
                     : state === 'failed'
                       ? Outcome.FAILED
                       : Outcome.STOPPED,
+                // A failed ending says why, as every ending the host states does.
+                ...(state === 'failed'
+                  ? {failure: {kind: RunFailureKind.CONFIGURATION, reason: 'build failed'}}
+                  : {}),
               },
             },
     });

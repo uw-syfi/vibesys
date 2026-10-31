@@ -1,6 +1,7 @@
 /** Browser fixture for the same protobuf port ABI the Electron preload exposes. */
 
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
+import {timestampFromMs} from '@bufbuild/protobuf/wkt';
 import {
   encodeUpdate,
   type GatewayBridge,
@@ -12,6 +13,7 @@ import {
   parseSubscriptionCall,
 } from '@vibesys/ipc';
 import {
+  DrainGoal,
   HostCallRequestSchema,
   RecordSchema,
   RunEntrySchema,
@@ -348,6 +350,22 @@ function fixtureObservations(input: WireFixture) {
           (head.committedSeq > 0n && record.seq <= head.committedSeq),
       );
       head.epoch = observeRun(foldSkeleton(seedSkeleton(), prefix)).epoch;
+    }
+    // The gateway never states a head that is not whole: a spec's hint names the facts it is
+    // about, and the rest is what the log says, as the gateway projects it.
+    if (head) {
+      if (head.strategy === '') head.strategy = 'fixture';
+      if (head.process !== undefined) {
+        if (head.process.pid === 0) head.process.pid = 1;
+        head.process.startedAt ??= timestampFromMs(1_700_000_000_000);
+      }
+      if (head.lifecycle === undefined && !head.awaitingLifecycle)
+        head.lifecycle = observeRun(foldSkeleton(seedSkeleton(), records)).lifecycle;
+      // A drain a spec's log records without saying what it drains toward is a pause, the first
+      // goal; a head names its goal.
+      const state = head.lifecycle?.state;
+      if (state?.case === 'draining' && state.value.goal === DrainGoal.UNSPECIFIED)
+        state.value.goal = DrainGoal.PARK;
     }
     return toBinary(RunEntrySchema, response);
   };
