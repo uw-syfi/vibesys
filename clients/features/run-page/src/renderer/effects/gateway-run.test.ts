@@ -7,12 +7,13 @@ import {
   RunHeadSchema,
   RunLiveness,
   Severity,
+  type Record as StoreRecord,
   TailRequestSchema,
   TranscriptChannel,
   TranscriptEntrySchema,
   WatchRunsResponseSchema,
 } from '@vibesys/proto';
-import {storeRunFixture} from '@vibesys/run-fixtures';
+import {storeRunFixture, withCoreRecords} from '@vibesys/run-fixtures';
 import {foldSkeleton, seedSkeleton} from '@vibesys/run-skeleton';
 import {FakeSkeletonCache} from '@vibesys/run-skeleton/cache';
 import {gatewayReader} from '@vibesys/run-skeleton/reader';
@@ -214,6 +215,51 @@ test('native record history comes from the loader without a second reader of the
   } finally {
     actor.stop();
   }
+});
+
+/** The run history the screen lists for a log, once its reader has delivered the whole of it. */
+async function historyOf(
+  records: readonly StoreRecord[],
+): Promise<readonly {body: string; message: string}[]> {
+  const transport = new FakeRunTransport({records});
+  const clock = new FakeClock();
+  const actor = startGatewayRun(
+    {reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule)},
+    clock.schedule,
+    {seed: SEED},
+  );
+  try {
+    await reached(actor, snapshot => snapshot.context.load?.complete === true);
+    await reached(actor, snapshot => snapshot.context.ui.recordLog !== undefined);
+    // The skeleton folds core records without a fact of their own, through the last of them.
+    expect(actor.getSnapshot().context.load?.skeleton.throughSeq).toBe(records.at(-1)?.seq);
+    return (actor.getSnapshot().context.ui.recordLog ?? []).map(({body, message}) => ({
+      body,
+      message,
+    }));
+  } finally {
+    actor.stop();
+  }
+}
+
+test('regression: core records written by the run are no rows of the run history', async () => {
+  const ordinary = storeRunFixture('live').records;
+  const mixed = withCoreRecords(ordinary, [2, 0, 1, 3]);
+  expect(mixed.length).toBeGreaterThan(ordinary.length);
+  const history = await historyOf(mixed);
+  expect(history).toEqual(await historyOf(ordinary));
+  expect(history).toHaveLength(ordinary.length);
+});
+
+test('property: any placement of core records among the ordinary ones leaves the same history', async () => {
+  const ordinary = storeRunFixture('live', 3).records;
+  const expected = await historyOf(ordinary);
+  await fc.assert(
+    fc.asyncProperty(fc.array(fc.nat(3), {maxLength: ordinary.length + 1}), async core => {
+      expect(await historyOf(withCoreRecords(ordinary, core))).toEqual(expected);
+    }),
+    {numRuns: 20},
+  );
 });
 
 test('failed unary and corrupt content surface errors without using the legacy path', async () => {
@@ -806,6 +852,7 @@ test('property: writer refreshes never replace a displayed epoch with an older c
                   committedSeq: BigInt(records.length),
                   complete: length === records.length,
                   windowFrom: undefined,
+                  backfill: undefined,
                   failuresBefore: undefined,
                 },
           progress: {phase: 'history', through: BigInt(length), committed: BigInt(records.length)},

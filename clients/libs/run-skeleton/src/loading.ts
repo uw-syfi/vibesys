@@ -19,6 +19,12 @@ export interface RunLivenessHint {
   readonly head?: RunHead | undefined;
 }
 
+/** The record log keeps a window of rows; `rows` of them are in hand, from records at or after `before`. */
+export interface Backfill {
+  readonly before: bigint;
+  readonly rows: number;
+}
+
 /** Records before a keyframe's boundary that the first Tail also delivers, for the run's record log. */
 export const RECORD_WINDOW = BigInt(RECORD_HISTORY_LIMIT);
 
@@ -35,6 +41,11 @@ export interface SkeletonLoad {
    * this sequence were never read, so the error notices among them are paged in from the log.
    */
   readonly failuresBefore: bigint | undefined;
+  /**
+   * Set when the first Tail's window may hold fewer than a window of rows because core's records
+   * sit among them: the rows still to be paged in from before the window.
+   */
+  readonly backfill: Backfill | undefined;
   readonly committedSeq: bigint;
   readonly complete: boolean;
 }
@@ -42,6 +53,17 @@ export interface SkeletonLoad {
 /** Where the records a keyframe hides end, less the window the first Tail re-reads. */
 function windowStart(response: SkeletonResponse): bigint {
   return response.nextSeq > RECORD_WINDOW ? response.nextSeq - RECORD_WINDOW : 0n;
+}
+
+/** What the first Tail reads for the record log: all of the log, a window before the keyframe, or nothing extra. */
+function firstWindow(
+  response: SkeletonResponse,
+  initial: Skeleton,
+): Pick<SkeletonLoad, 'windowFrom' | 'backfill'> {
+  if (response.keyframe === undefined) return {windowFrom: undefined, backfill: undefined};
+  if (!initial.recordsTracked) return {windowFrom: 0n, backfill: undefined};
+  const from = windowStart(response);
+  return {windowFrom: from, backfill: from > 0n ? {before: from, rows: 0} : undefined};
 }
 
 function withObservedHead(skeleton: Skeleton, response: SkeletonResponse): Skeleton {
@@ -75,12 +97,7 @@ export function ingestSkeleton(response: SkeletonResponse): SkeletonLoad {
   return {
     skeleton,
     nextSeq: response.nextSeq,
-    windowFrom:
-      response.keyframe === undefined
-        ? undefined
-        : initial.recordsTracked
-          ? windowStart(response)
-          : 0n,
+    ...firstWindow(response, initial),
     failuresBefore:
       response.keyframe === undefined || skeleton.failuresTracked || !skeleton.recordsTracked
         ? undefined
