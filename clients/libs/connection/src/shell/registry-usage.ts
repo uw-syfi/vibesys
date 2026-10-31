@@ -236,6 +236,7 @@ export function usageSummaryEntry(response: UsageSummaryResponse): UsageSummaryE
     pendingRuns: response.pendingRuns,
     pendingFiles: response.pendingFiles,
     foldedSeries: response.foldedSeries,
+    ratesOmitted: response.ratesOmitted,
     readAt: ms(response.readAt) ?? 0,
   };
 }

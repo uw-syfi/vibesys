@@ -8,6 +8,7 @@ import type {UsageSourceChoice, UsageTab, UsageView} from './usage-view.js';
 /** What the page is doing about its figures. */
 export type UsagePhase =
   | 'loading'
+  | 'connecting'
   | 'scanning'
   | 'refreshing'
   | 'rating'
@@ -25,14 +26,8 @@ export interface HostRow {
   readonly status: string;
 }
 
-/** The status word in the page header. */
-export type UsageStatusWord =
-  | 'Connecting'
-  | 'Scanning'
-  | 'Refreshing'
-  | 'Ready'
-  | 'Unavailable'
-  | 'Saving';
+/** The status word in the page header: said only while the page is working on its figures. */
+export type UsageStatusWord = 'Scanning' | 'Refreshing' | 'Saving';
 
 export type DialogState =
   | null
@@ -42,7 +37,8 @@ export type DialogState =
 /** What the screen renders. */
 export interface UsageScreenState {
   readonly phase: UsagePhase;
-  readonly status: UsageStatusWord;
+  /** What the page is doing, or null when it is idle, still connecting, or has nothing to show. */
+  readonly status: UsageStatusWord | null;
   readonly period: UsagePeriod;
   readonly tab: UsageTab;
   readonly source: UsageSourceChoice;

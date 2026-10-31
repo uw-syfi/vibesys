@@ -47,17 +47,18 @@ describe('readUsage', () => {
     expect(answer).toMatchObject({unreachable: [], unsupported: []});
   });
 
-  test('property: it names at most the bound of projects, the most recently used first', async () => {
+  test('property: up to 64 projects are all named; with more, none is, and the page says older runs are unread', async () => {
     for (const seed of SEEDS.slice(0, 30)) {
       const count = new Seeded(seed).int(150);
       const projects = Array.from({length: count}, (_, at) => `/p/${at}`);
       const bridge = new FakeUsageBridge({hosts: [{host: 'local', projects, answer: spent(1)}]});
-      await read(bridge);
+      const answer = await read(bridge);
       const named = bridge.asked[0]?.projects ?? [];
-      expect(named.length).toBeLessThanOrEqual(64);
-      expect(named.length).toBe(count === 0 ? 1 : Math.min(count, 64));
-      // A machine with no known project is asked about the home, where outside use lives.
-      if (count === 0) expect(named).toEqual(['~']);
+      // The host reads every run it indexed whatever it is told, so the figure is whole for runs it
+      // holds an index for; only a project that cannot be named leaves the older ones unread.
+      expect(named.length, `seed ${seed}`).toBe(count > 64 ? 0 : count);
+      expect([...named].sort(), `seed ${seed}`).toEqual(count > 64 ? [] : [...projects].sort());
+      expect(answer.olderRunsUnread, `seed ${seed}`).toBe(count > 64);
     }
   });
 
@@ -87,6 +88,51 @@ describe('readUsage', () => {
     const answer = await read(bridge, ['ssh:host-a']);
     expect(bridge.asked.map(each => each.host)).toEqual(['local']);
     expect(answer.unreachable).toEqual([]);
+  });
+
+  test('a machine still connecting is waited for, not counted as down', async () => {
+    const bridge = new FakeUsageBridge({
+      hosts: [
+        {host: 'local', answer: spent(1)},
+        {host: 'ssh:host-a', answer: spent(2)},
+      ],
+      connecting: ['ssh:host-a'],
+    });
+    const answer = await read(bridge);
+    expect(answer.replies.map(each => each.host)).toEqual(['local']);
+    expect(answer).toMatchObject({connecting: ['ssh:host-a'], unreachable: []});
+    const only = new FakeUsageBridge({
+      hosts: [{host: 'local', answer: spent(1)}],
+      connecting: ['local'],
+    });
+    expect(await read(only)).toMatchObject({replies: [], connecting: ['local']});
+  });
+
+  test('a catalogue that is not ready is asked for once more, and a missing one is left to the view', async () => {
+    const listed = {
+      kind: 'listed' as const,
+      harnesses: [
+        {
+          provider: 'claude',
+          model: 'claude-opus-5-5',
+          default: true,
+          display: {providerName: 'Claude Code', modelName: 'Opus 5.5'},
+        },
+      ],
+    };
+    const late = new FakeUsageBridge({
+      hosts: [{host: 'local', answer: spent(1)}],
+      harnesses: {local: listed},
+      harnessesFailing: 1,
+    });
+    expect((await read(late)).names.map(each => each.modelName)).toEqual(['Opus 5.5']);
+    expect(late.catalogues).toHaveLength(2);
+    const never = new FakeUsageBridge({
+      hosts: [{host: 'local', answer: spent(1)}],
+      harnesses: {local: listed},
+      harnessesFailing: 5,
+    });
+    expect((await read(never)).names).toEqual([]);
   });
 
   test('when nothing could be read the question fails, naming why', async () => {
@@ -135,7 +181,7 @@ describe('readUsage', () => {
         harnessName: 'Claude Code',
         modelName: 'Opus 5.5',
       },
-      {harness: 'codex', model: 'gpt-6.1-luna', harnessName: 'codex', modelName: null},
+      {harness: 'codex', model: 'gpt-6.1-luna', harnessName: null, modelName: null},
     ]);
   });
 

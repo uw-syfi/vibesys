@@ -332,6 +332,9 @@ def usage_summary(  # noqa: PLR0913  # lint-waiver: LW-518204 [PLR0913]; one rea
     if request.now is None:
         message = "now: required"
         raise ValueError(message)
+    if any(stamp.nanos for stamp in request.edges):
+        message = "edges: whole quarter hours, to the second"
+        raise ValueError(message)
     edges = [stamp.to_datetime() for stamp in request.edges]
     now = request.now.to_datetime()
     budget = Budget(budget_bytes)

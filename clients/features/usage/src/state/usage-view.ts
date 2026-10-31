@@ -13,7 +13,7 @@ import {roleName} from '@vibesys/contracts';
 import {type HostKey, hostFromKey, hostLabel, type UsagePricingEntry} from '@vibesys/hosts';
 import type {PeriodEdges} from './edges.js';
 import {bucketLabel} from './edges.js';
-import {dollars, percent, tokens, turnsWords} from './format.js';
+import {dollars, percent, plainName, tokens, turnsWords} from './format.js';
 import type {DenseSeries, Field, Merged, ProviderCost} from './merge.js';
 
 export type UsageTab = 'cost' | 'tokens';
@@ -31,7 +31,8 @@ export interface ViewFilters {
 export interface ModelName {
   readonly harness: string;
   readonly model: string;
-  readonly harnessName: string;
+  /** The catalogue's name for the provider; null when it gives none. */
+  readonly harnessName: string | null;
   readonly modelName: string | null;
 }
 
@@ -40,6 +41,7 @@ export interface ProviderRow {
   readonly name: string;
   /** The palette slot of the provider's mark, stable across filters. */
   readonly series: number;
+  /** The provider's total, or `Unpriced` when no price covers any of its tokens. */
   readonly figure: string;
   /** Its share of the figure above, from 0 to 1. */
   readonly share: number;
@@ -74,6 +76,7 @@ export interface ModelRow {
   readonly id: string;
   readonly name: string;
   readonly costUsd: number;
+  /** What it cost, or `Unpriced` when no price covers any of its tokens. */
   readonly cost: string;
   readonly tokens: number;
   readonly tokensFigure: string;
@@ -114,8 +117,8 @@ export interface AgentRow {
   readonly role: string;
   /** The model as the price list names it. */
   readonly model: string;
-  /** The catalogue's name for it; null when the machine lists none. */
-  readonly modelName: string | null;
+  /** The catalogue's name for it, else its id in words. */
+  readonly modelName: string;
   readonly cost: string;
   readonly share: number;
 }
@@ -189,13 +192,17 @@ function volumeOf(series: readonly DenseSeries[], buckets: number): number[] {
   );
 }
 
-/** The provider's name: the catalogue's if it has one, else the id. */
-function providerName(names: readonly ModelName[], provider: string): string {
-  return names.find(each => each.harness === provider)?.harnessName ?? provider;
+/** The provider's name: the catalogue's if it has one, else its id in words. */
+export function providerName(names: readonly ModelName[], provider: string): string {
+  return names.find(each => each.harness === provider)?.harnessName ?? plainName(provider);
 }
 
-function modelName(names: readonly ModelName[], provider: string, model: string): string {
-  return names.find(each => each.harness === provider && each.model === model)?.modelName ?? model;
+/** The model's name: the catalogue's if it has one, else its id in words. */
+export function modelName(names: readonly ModelName[], provider: string, model: string): string {
+  return (
+    names.find(each => each.harness === provider && each.model === model)?.modelName ??
+    plainName(model)
+  );
 }
 
 /** Providers in a fixed order so a provider keeps its color whatever is hidden. */
@@ -218,15 +225,22 @@ interface Cut {
 const byTab = (tab: UsageTab, cost: number, count: number): number =>
   tab === 'cost' ? cost : count;
 
+/** What a cost reads as when no price covers any of what was used: never a zero. */
+const UNPRICED = 'Unpriced';
+
+/** Whether tokens were used and none of them has a price. */
+const uncovered = (used: number, unpriced: number): boolean => used > 0 && unpriced >= used;
+
 function providerRows(cut: Cut, total: number): ProviderRow[] {
   const {merged, filters, names, palette} = cut;
   // Over every provider, so a hidden one can be turned back on.
-  const held = new Map<string, {cost: number; tokens: number}>();
+  const held = new Map<string, {cost: number; tokens: number; unpriced: number}>();
   for (const each of merged.series) {
     if (filters.source !== 'all' && each.origin !== filters.source) continue;
-    const own = held.get(each.provider) ?? {cost: 0, tokens: 0};
+    const own = held.get(each.provider) ?? {cost: 0, tokens: 0, unpriced: 0};
     own.cost += sum(each.values.estimateUsd);
     own.tokens += sum(processed(each));
+    if (each.source === 'unpriced') own.unpriced += sum(processed(each));
     held.set(each.provider, own);
   }
   return [...held.entries()]
@@ -236,7 +250,12 @@ function providerRows(cut: Cut, total: number): ProviderRow[] {
         provider,
         name: providerName(names, provider),
         series: palette.get(provider) ?? 0,
-        figure: filters.tab === 'cost' ? dollars(own.cost) : tokens(own.tokens),
+        figure:
+          filters.tab === 'cost'
+            ? uncovered(own.tokens, own.unpriced)
+              ? UNPRICED
+              : dollars(own.cost)
+            : tokens(own.tokens),
         share: hidden || total === 0 ? 0 : byTab(filters.tab, own.cost, own.tokens) / total,
         hidden,
       };
@@ -246,15 +265,25 @@ function providerRows(cut: Cut, total: number): ProviderRow[] {
 
 function chartLayers(cut: Cut): ChartLayer[] {
   const {shown, filters, names, palette, buckets} = cut;
-  return [...new Set(shown.map(each => each.provider))].sort().map(provider => {
+  const layers: ChartLayer[] = [];
+  for (const provider of [...new Set(shown.map(each => each.provider))].sort()) {
     const own = shown.filter(each => each.provider === provider);
-    return {
+    const unpriced = sum(
+      volumeOf(
+        own.filter(each => each.source === 'unpriced'),
+        buckets,
+      ),
+    );
+    // A provider no price covers has no cost to draw: a flat line at zero would say it was free.
+    if (filters.tab === 'cost' && uncovered(sum(volumeOf(own, buckets)), unpriced)) continue;
+    layers.push({
       provider,
       name: providerName(names, provider),
       series: palette.get(provider) ?? 0,
       values: filters.tab === 'cost' ? column(own, 'estimateUsd', buckets) : volumeOf(own, buckets),
-    };
-  });
+    });
+  }
+  return layers;
 }
 
 const part = (key: string, label: string, value: number, figure: string): Part => ({
@@ -288,7 +317,7 @@ function tokenTotals(cut: Cut) {
 function tileRows(cut: Cut, totalTokens: number): Tile[] {
   const {shown, buckets: n} = cut;
   const {cached, uncached, output, input} = tokenTotals(cut);
-  return [
+  const counts: Tile[] = [
     {
       name: 'Processed',
       figure: tokens(totalTokens),
@@ -301,6 +330,11 @@ function tileRows(cut: Cut, totalTokens: number): Tile[] {
     },
     {name: 'Uncached', figure: tokens(uncached), detail: null},
     {name: 'Output', figure: tokens(output), detail: null},
+  ];
+  // Tokens are not dollars: a screen of tokens carries no tile of money.
+  if (cut.filters.tab === 'tokens') return counts;
+  return [
+    ...counts,
     {
       name: 'Cache savings',
       figure: dollars(sum(column(shown, 'cacheSavingsUsd', n))),
@@ -364,11 +398,14 @@ function modelRow(
     id,
     name: modelName(names, provider, id),
     costUsd: cost,
-    cost: dollars(cost),
+    cost: uncovered(count, unpriced) ? UNPRICED : dollars(cost),
     tokens: count,
     tokensFigure: tokens(count),
     turns: sum(column(own, 'turns', n)),
-    perMillion: count === 0 || cost === 0 ? null : dollars((cost / count) * 1_000_000),
+    perMillion:
+      count === 0 || cost === 0 || uncovered(count, unpriced)
+        ? null
+        : dollars((cost / count) * 1_000_000),
     cacheHit: input === 0 ? null : cached / input,
     unpricedTokens: unpriced,
     share: 0,
@@ -402,11 +439,15 @@ function timeRows(cut: Cut, labels: readonly string[]): TimeRow[] {
   const {merged, shown, buckets: n} = cut;
   const estimate = column(shown, 'estimateUsd', n);
   const volume = volumeOf(shown, n);
+  const unpriced = volumeOf(
+    shown.filter(each => each.source === 'unpriced'),
+    n,
+  );
   const turns = column(shown, 'turns', n);
   return labels.map((label, at) => ({
     key: `${at}`,
     label,
-    cost: dollars(estimate[at] ?? 0),
+    cost: uncovered(volume[at] ?? 0, unpriced[at] ?? 0) ? '—' : dollars(estimate[at] ?? 0),
     tokens: tokens(volume[at] ?? 0),
     turns: turns[at] ?? 0,
     runs: merged.runs[at] ?? 0,
@@ -449,7 +490,7 @@ function agentRows(cut: Cut): AgentRow[] {
     key: `${row.role}|${row.model}`,
     role: roleName(row.role),
     model: row.model,
-    modelName: names.find(each => each.model === row.model)?.modelName ?? null,
+    modelName: names.find(each => each.model === row.model)?.modelName ?? plainName(row.model),
     cost: dollars(cost),
     share: total === 0 ? 0 : cost / total,
   }));
@@ -463,6 +504,7 @@ function chipRows(
   options: {
     readonly pricing: readonly UsagePricingEntry[];
     readonly unreadablePrices: boolean;
+    readonly olderRunsUnread: boolean;
   },
 ): ChipView[] {
   const {shown, merged, buckets: n} = cut;
@@ -494,13 +536,27 @@ function chipRows(
   if (stale !== undefined) {
     chips.push({
       key: 'rates',
-      label: stale.status === 'bundled' ? 'Rates bundled' : 'Rates cached',
-      hint: stale.checkedOn === '' ? null : `Prices of ${stale.checkedOn}`,
+      label:
+        stale.checkedOn === ''
+          ? `${stale.status === 'bundled' ? 'Bundled' : 'Cached'} prices`
+          : `Prices of ${stale.checkedOn}`,
+      hint:
+        stale.status === 'bundled'
+          ? 'The prices that came with this version, not a fresh list'
+          : 'The last price list fetched, not a fresh one',
       tone: 'neutral',
     });
   }
   if (options.unreadablePrices) {
     chips.push({key: 'prices', label: 'Prices unreadable', hint: null, tone: 'warn'});
+  }
+  if (options.olderRunsUnread) {
+    chips.push({
+      key: 'older',
+      label: 'Older runs unread',
+      hint: 'More projects than one question can name: only the runs a host has indexed are read',
+      tone: 'neutral',
+    });
   }
   if (merged.foldedSeries > 0) {
     chips.push({
@@ -529,6 +585,7 @@ export function usageView(
     readonly edges: PeriodEdges;
     readonly pricing: readonly UsagePricingEntry[];
     readonly unreadablePrices: boolean;
+    readonly olderRunsUnread: boolean;
     readonly overridden: ReadonlySet<string>;
   },
 ): UsageView {

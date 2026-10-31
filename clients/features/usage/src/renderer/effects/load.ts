@@ -29,8 +29,6 @@ export type UsageBridge = Pick<
   'overview' | 'usageSummary' | 'usageRatesRefresh' | 'usagePricesSave' | 'harnesses' | 'onListing'
 >;
 
-/** A project the host is asked about when the app has met none on it: the home, for the transcripts. */
-const HOME = '~';
 /** The most projects a question names (the host's bound). */
 const PROJECTS_MAX = 64;
 
@@ -39,15 +37,21 @@ function value<T>(result: WelcomeResult<T> | UnexpectedFailure): T | null {
 }
 
 /** What the machine's catalogue calls its harnesses and models; none when it offers no catalogue. */
-async function namesOn(bridge: UsageBridge, host: HostKey): Promise<readonly ModelName[]> {
+async function namesOnce(bridge: UsageBridge, host: HostKey): Promise<readonly ModelName[]> {
   const listing = value(await attempt(() => bridge.harnesses(host)));
   if (listing === null || listing.kind !== 'listed') return [];
   return listing.harnesses.map(({provider, model, display}) => ({
     harness: provider,
     model,
-    harnessName: display?.providerName ?? provider,
+    harnessName: display?.providerName ?? null,
     modelName: display?.modelName ?? null,
   }));
+}
+
+/** The catalogue, asked a second time when the first answer was none: a machine just up may not have it yet. */
+async function namesOn(bridge: UsageBridge, host: HostKey): Promise<readonly ModelName[]> {
+  const first = await namesOnce(bridge, host);
+  return first.length > 0 ? first : namesOnce(bridge, host);
 }
 
 type Asked =
@@ -84,33 +88,55 @@ export async function readUsage(
   if (!overview.ok) throw new Error(overview.error);
   signal.throwIfAborted();
   const {listings, recent} = overview.value;
-  const listed = listings.filter(
-    listing => listing.kind === 'listed' && !hostsOff.includes(listing.host),
+  const wanted = listings.filter(listing => !hostsOff.includes(listing.host));
+  const listed = wanted.filter(listing => listing.kind === 'listed');
+  // A machine that is still connecting has not failed: it is waited for, not counted as down.
+  const connecting = wanted.flatMap(listing =>
+    listing.kind === 'unavailable' &&
+    (listing.connection.kind === 'connecting' || listing.connection.kind === 'reconnecting')
+      ? [listing.host]
+      : [],
   );
+  const down = wanted.flatMap(listing =>
+    listing.kind !== 'listed' && !connecting.includes(listing.host) ? [listing.host] : [],
+  );
+  const known = listed.map(listing => knownProjects(listing, recent, listing.host));
   const [answers, names] = await Promise.all([
     Promise.all(
-      listed.map(listing => {
-        const projects = knownProjects(listing, recent, listing.host).slice(0, PROJECTS_MAX);
-        return askHost(bridge, listing.host, projects.length === 0 ? [HOME] : projects, edges, now);
+      listed.map((listing, at) => {
+        const all = known[at] ?? [];
+        // More projects than a question can name: ask for none, and the host reads every run it
+        // indexed. Only runs from before that index are then left out, which the page says.
+        return askHost(bridge, listing.host, all.length > PROJECTS_MAX ? [] : all, edges, now);
       }),
     ),
     Promise.all(listed.map(listing => namesOn(bridge, listing.host))),
   ]);
   signal.throwIfAborted();
   const unreachable = [
-    ...listings
-      .filter(listing => listing.kind !== 'listed' && !hostsOff.includes(listing.host))
-      .map(listing => listing.host),
+    ...down,
     ...listed.flatMap((listing, at) => (answers[at]?.kind === 'unreachable' ? [listing.host] : [])),
   ];
   const unsupported = listed.flatMap((listing, at) =>
     answers[at]?.kind === 'unsupported' ? [listing.host] : [],
   );
   const replies = answers.flatMap(answer => (answer.kind === 'reply' ? [answer.reply] : []));
-  if (replies.length === 0 && unsupported.length === 0 && unreachable.length > 0) {
+  if (
+    replies.length === 0 &&
+    unsupported.length === 0 &&
+    unreachable.length > 0 &&
+    connecting.length === 0
+  ) {
     throw new Error('nothing could be read');
   }
-  return {replies, unreachable, unsupported, names: names.flat()};
+  return {
+    replies,
+    unreachable,
+    unsupported,
+    connecting,
+    names: names.flat(),
+    olderRunsUnread: known.some(each => each.length > PROJECTS_MAX),
+  };
 }
 
 /** Ask each of `hosts` to fetch its price list; a failure leaves the page working on the old one. */

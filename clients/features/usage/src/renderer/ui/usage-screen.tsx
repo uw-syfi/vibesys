@@ -175,7 +175,7 @@ function modelColumns(
       cell: row => (
         <Stack gap="space-0">
           <span title={row.id}>
-            <Text variant={row.name === row.id ? 'code' : 'body-strong'}>{row.name}</Text>
+            <Text variant="body-strong">{row.name}</Text>
           </span>
           <Text variant="small" tone="muted">
             {row.providerName}
@@ -190,7 +190,9 @@ function modelColumns(
       align: 'end',
       cell: row => (
         <Row gap="space-2" align="center" justify="end">
-          {row.unpricedTokens > 0 ? <Chip label="Unpriced" tone="warn" /> : null}
+          {row.unpricedTokens > 0 && row.cost !== 'Unpriced' ? (
+            <Chip label="Part unpriced" tone="warn" />
+          ) : null}
           {row.overridden ? <Chip label="Set" /> : null}
           {tab === 'cost' ? row.cost : row.tokensFigure}
         </Row>
@@ -211,7 +213,7 @@ function modelColumns(
     {key: 'turns', header: 'Turns', mono: true, align: 'end', wide: true, cell: row => row.turns},
     {
       key: 'per-million',
-      header: 'Per M',
+      header: 'Per 1M tokens',
       mono: true,
       align: 'end',
       wide: true,
@@ -300,7 +302,7 @@ const AGENT_COLUMNS: readonly TableColumn<AgentRow>[] = [
     header: 'Model',
     cell: row => (
       <span title={row.model}>
-        <Text variant={row.modelName === null ? 'code' : 'body'}>{row.modelName ?? row.model}</Text>
+        <Text variant="body">{row.modelName}</Text>
       </span>
     ),
   },
@@ -378,19 +380,22 @@ function Overview(props: {readonly view: UsageView; readonly tab: UsageTab}): JS
         }))}
         format={tab === 'cost' ? dollars : tokens}
         axis={tab === 'cost' ? axisDollars : tokens}
+        stacked
       />
-      <Row gap="space-6" wrap>
+      <Row gap="space-6" align="start" wrap>
         {view.tiles.map(tile => (
           <Tile key={tile.name} name={tile.name} figure={tile.figure} detail={tile.detail} />
         ))}
-        {view.perNewBest === null ? null : (
-          <Tile
-            name="Per new best"
-            figure={view.perNewBest}
-            detail={`${view.newBests} new bests`}
-          />
+        {tab === 'tokens' ? null : (
+          <>
+            <Tile
+              name="Per new best"
+              figure={view.perNewBest ?? '—'}
+              detail={`${view.newBests} new bests`}
+            />
+            <Tile name="Per hour now" figure={view.perHourNow} />
+          </>
         )}
-        <Tile name="Per hour now" figure={view.perHourNow} />
       </Row>
       {tab === 'cost' ? (
         <Stack gap="space-3">
@@ -441,6 +446,8 @@ function RunsSection(props: {
 
 function Figures(props: UsageScreenProps & {readonly view: UsageView}): JSX.Element {
   const {view, state, actions, openRun, label} = props;
+  // Nothing used: say so once. A figure of zero and a count of sessions would say it again.
+  if (view.empty) return <Notice text="No usage" />;
   return (
     <Stack gap="space-5">
       <Hero view={view} />
@@ -449,36 +456,30 @@ function Figures(props: UsageScreenProps & {readonly view: UsageView}): JSX.Elem
           <Providers rows={view.providers} toggle={actions.provider} />
         </Section>
       )}
-      {view.empty ? (
-        <Notice text="No usage" />
-      ) : (
-        <>
-          <Overview view={view} tab={state.tab} />
-          <Section title="Models">
-            <Table
-              label="Models"
-              middle
-              columns={modelColumns(state.tab, actions.setPrice)}
-              rows={view.models}
-              rowKey={row => row.key}
-              select={actions.model}
-            />
-          </Section>
-          <Section title="Time">
-            <Table label="Time" columns={TIME_COLUMNS} rows={view.times} rowKey={row => row.key} />
-          </Section>
-          <RunsSection view={view} label={label} openRun={openRun} />
-          {view.agents.length === 0 ? null : (
-            <Section title="Agents">
-              <Table
-                label="Cost by agent"
-                columns={AGENT_COLUMNS}
-                rows={view.agents}
-                rowKey={row => row.key}
-              />
-            </Section>
-          )}
-        </>
+      <Overview view={view} tab={state.tab} />
+      <Section title="Models">
+        <Table
+          label="Models"
+          middle
+          columns={modelColumns(state.tab, actions.setPrice)}
+          rows={view.models}
+          rowKey={row => row.key}
+          select={actions.model}
+        />
+      </Section>
+      <Section title="Time">
+        <Table label="Time" columns={TIME_COLUMNS} rows={view.times} rowKey={row => row.key} />
+      </Section>
+      <RunsSection view={view} label={label} openRun={openRun} />
+      {view.agents.length === 0 ? null : (
+        <Section title="Agents">
+          <Table
+            label="Cost by agent"
+            columns={AGENT_COLUMNS}
+            rows={view.agents}
+            rowKey={row => row.key}
+          />
+        </Section>
       )}
     </Stack>
   );
@@ -514,6 +515,52 @@ function Body(props: UsageScreenProps): JSX.Element {
   return <Figures {...props} view={state.view} />;
 }
 
+/** What a model cost and how it is priced: its figures, its trend, its split, and its prices. */
+function ModelFigures(props: {readonly detail: ModelDetail; readonly tab: UsageTab}): JSX.Element {
+  const {detail, tab} = props;
+  return (
+    <Stack gap="space-4">
+      <Row gap="space-6" wrap>
+        <Tile name="Cost" figure={detail.cost} />
+        <Tile name="Tokens" figure={detail.tokens} />
+        <Tile name="Turns" figure={`${detail.turns}`} />
+        {detail.perMillion === null ? null : (
+          <Tile name="Per 1M tokens" figure={detail.perMillion} />
+        )}
+        {detail.cacheHit === null ? null : <Tile name="Cache hit" figure={detail.cacheHit} />}
+      </Row>
+      {detail.unpriced === null ? null : <Chip label={detail.unpriced} tone="warn" />}
+      {detail.priced || tab === 'tokens' ? (
+        <AreaChart
+          label={`${detail.name} over time`}
+          unit={tab === 'cost' ? 'US dollars' : 'tokens'}
+          labels={detail.trendLabels}
+          layers={[{key: detail.key, name: detail.name, series: 0, values: detail.trend}]}
+          format={tab === 'cost' ? dollars : tokens}
+          axis={tab === 'cost' ? axisDollars : tokens}
+        />
+      ) : null}
+      {detail.priced ? <ShareBar label="Cost by kind" parts={parts(detail.costParts)} /> : null}
+      <ShareBar label="Tokens by kind" parts={parts(detail.tokenParts)} />
+      <Table
+        label="Prices"
+        columns={[
+          {key: 'label', header: 'Price', lead: true, cell: row => row.label},
+          {
+            key: 'text',
+            header: 'Per 1M tokens',
+            mono: true,
+            align: 'end',
+            cell: row => row.text,
+          },
+        ]}
+        rows={detail.prices}
+        rowKey={row => row.field}
+      />
+    </Stack>
+  );
+}
+
 function ModelDialog(props: {
   readonly detail: ModelDetail | null;
   readonly tab: UsageTab;
@@ -538,39 +585,7 @@ function ModelDialog(props: {
         </Row>
       }
     >
-      {detail === null ? (
-        <Notice text="No usage" />
-      ) : (
-        <Stack gap="space-4">
-          <Row gap="space-6" wrap>
-            <Tile name="Cost" figure={detail.cost} />
-            <Tile name="Tokens" figure={detail.tokens} />
-            <Tile name="Turns" figure={`${detail.turns}`} />
-            {detail.perMillion === null ? null : <Tile name="Per M" figure={detail.perMillion} />}
-            {detail.cacheHit === null ? null : <Tile name="Cache hit" figure={detail.cacheHit} />}
-          </Row>
-          {detail.unpriced === null ? null : <Chip label={detail.unpriced} tone="warn" />}
-          <AreaChart
-            label={`${detail.name} over time`}
-            unit={tab === 'cost' ? 'US dollars' : 'tokens'}
-            labels={detail.trendLabels}
-            layers={[{key: detail.key, name: detail.name, series: 0, values: detail.trend}]}
-            format={tab === 'cost' ? dollars : tokens}
-            axis={tab === 'cost' ? axisDollars : tokens}
-          />
-          <ShareBar label="Cost by kind" parts={parts(detail.costParts)} />
-          <ShareBar label="Tokens by kind" parts={parts(detail.tokenParts)} />
-          <Table
-            label="Prices"
-            columns={[
-              {key: 'label', header: 'Price', lead: true, cell: row => row.label},
-              {key: 'text', header: 'Per M', mono: true, align: 'end', cell: row => row.text},
-            ]}
-            rows={detail.prices}
-            rowKey={row => row.field}
-          />
-        </Stack>
-      )}
+      {detail === null ? <Notice text="No usage" /> : <ModelFigures detail={detail} tab={tab} />}
     </Dialog>
   );
 }
@@ -626,7 +641,7 @@ function PricesDialog(props: {
             {prices.fields.map(field => (
               <Field
                 key={field.field}
-                label={`${field.label} per M`}
+                label={`${field.label} per 1M tokens`}
                 {...(field.error ? {error: 'Invalid'} : {})}
               >
                 <TextInput
@@ -687,61 +702,69 @@ function Dialogs(props: {
   return <PricesDialog prices={dialog.prices} actions={actions} />;
 }
 
+/** The page's header: the title, what the page is doing, the controls, and the machines to read. */
+function Header(props: {
+  readonly state: UsageScreenState;
+  readonly actions: UsageActions;
+}): JSX.Element {
+  const {state, actions} = props;
+  const {hosts} = state;
+  return (
+    <Stack gap="space-3">
+      <Row justify="between" align="center" wrap>
+        <Row gap="space-3" align="baseline">
+          <Text as="h1" variant="title">
+            Usage
+          </Text>
+          {state.status === null ? null : (
+            <Text variant="small" tone="muted">
+              {state.status}
+            </Text>
+          )}
+        </Row>
+        <Row gap="space-3" align="center" wrap>
+          <SegmentedControl
+            label="Measure"
+            size="sm"
+            options={TABS}
+            value={state.tab}
+            change={actions.tab}
+          />
+          <Field label="Period" hideLabel>
+            <Select
+              size="sm"
+              value={state.period}
+              options={USAGE_PERIODS}
+              change={actions.period}
+            />
+          </Field>
+          <Field label="Source" hideLabel>
+            <Select size="sm" value={state.source} options={SOURCES} change={actions.source} />
+          </Field>
+          <Button text="Refresh" variant="secondary" size="sm" press={actions.refresh} />
+        </Row>
+      </Row>
+      {hosts.length < 2 ? null : (
+        <Row gap="space-4" wrap>
+          {hosts.map(host => (
+            <span key={host.host} title={host.status}>
+              <Checkbox
+                label={host.label}
+                checked={host.on}
+                change={() => actions.host(host.host)}
+              />
+            </span>
+          ))}
+        </Row>
+      )}
+    </Stack>
+  );
+}
+
 export function UsageScreen(props: UsageScreenProps): JSX.Element {
   const {state, actions} = props;
-  const hosts = state.hosts;
   return (
-    <Page
-      width="wide"
-      header={
-        <Stack gap="space-3">
-          <Row justify="between" align="center" wrap>
-            <Row gap="space-3" align="baseline">
-              <Text as="h1" variant="title">
-                Usage
-              </Text>
-              <Text variant="small" tone="muted">
-                {state.status}
-              </Text>
-            </Row>
-            <Row gap="space-3" align="center" wrap>
-              <SegmentedControl
-                label="Measure"
-                size="sm"
-                options={TABS}
-                value={state.tab}
-                change={actions.tab}
-              />
-              <Field label="Period" hideLabel>
-                <Select
-                  size="sm"
-                  value={state.period}
-                  options={USAGE_PERIODS}
-                  change={actions.period}
-                />
-              </Field>
-              <Field label="Source" hideLabel>
-                <Select size="sm" value={state.source} options={SOURCES} change={actions.source} />
-              </Field>
-              <Button text="Refresh" variant="secondary" size="sm" press={actions.refresh} />
-            </Row>
-          </Row>
-          {hosts.length < 2 ? null : (
-            <Row gap="space-4" wrap>
-              {hosts.map(host => (
-                <span key={host.host} title={host.status}>
-                  <Checkbox
-                    label={host.label}
-                    checked={host.on}
-                    change={() => actions.host(host.host)}
-                  />
-                </span>
-              ))}
-            </Row>
-          )}
-        </Stack>
-      }
-    >
+    <Page width="wide" header={<Header state={state} actions={actions} />}>
       <Body {...props} />
       <Dialogs dialog={state.dialog} tab={state.tab} actions={actions} />
     </Page>

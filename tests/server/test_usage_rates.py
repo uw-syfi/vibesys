@@ -26,6 +26,7 @@ from server.usage_scan import (
     refresh_rates,
     save_prices,
     stored_pricing,
+    usage_summary,
 )
 from vibesys.api.host_operations.api import (
     PricesDamagedError,
@@ -46,7 +47,7 @@ from vs_proto.api import (
     validate,
 )
 from vs_sim.api import HttpsGetError
-from vs_sim.api.testing import FakeHttpsGet
+from vs_sim.api.testing import FakeHttpsGet, ManualClock
 
 START = dt.datetime(2026, 10, 31, 12, tzinfo=dt.UTC)
 FLOOR = dt.timedelta(seconds=60)
@@ -510,15 +511,35 @@ def test_a_time_outside_what_a_host_can_hold_is_refused_at_the_wire(
 
 
 @given(nanos=st.integers(min_value=1, max_value=999_999_999))
-def test_an_edge_that_is_not_a_whole_second_is_refused_at_the_wire(nanos: int) -> None:
-    """Edges are whole quarter hours: a fraction of a second is not one."""
+def test_an_edge_that_is_not_a_whole_second_is_refused_as_invalid_input(nanos: int) -> None:
+    """Edges are whole quarter hours: a fraction of a second is not one.
+
+    The rule is the host's, not the wire's (the wire's expression language cannot read a
+    timestamp's fraction the same in every language), so the read refuses it as a bad value.
+    """
     request = host_payloads.UsageSummaryRequest(
         request_id="r",
         edges=[Timestamp(seconds=1_790_000_100, nanos=nanos), Timestamp(seconds=1_790_001_000)],
         now=Timestamp(seconds=1_790_001_000),
     )
-    with pytest.raises(ValidationError):
-        validate(request)
+    validate(request)
+    with tempfile.TemporaryDirectory() as raw, pytest.raises(ValueError, match="whole"):
+        usage_summary(
+            request,
+            _NoProjects(),
+            [],
+            stored_pricing(Path(raw), now=dt.datetime(2026, 10, 31, tzinfo=dt.UTC)),
+            {},
+            clock=ManualClock(1_790_001_000.0),
+        )
+
+
+class _NoProjects:
+    def run_summary(self, project: Path, run_id: str) -> object:
+        raise AssertionError("no run is read")
+
+    def run_digest(self, project_root: Path, run_id: str) -> None:
+        del project_root, run_id
 
 
 def test_a_request_that_names_no_project_is_one_the_wire_carries() -> None:

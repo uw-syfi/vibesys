@@ -32,6 +32,10 @@ export interface ReadAnswer {
   /** Hosts whose VibeSys does not offer the question. */
   readonly unsupported: readonly HostKey[];
   readonly names: readonly ModelName[];
+  /** Hosts whose connection is still coming up: not read yet, and not failed. */
+  readonly connecting: readonly HostKey[];
+  /** Whether a host knows more projects than one question can name, so older runs are not read. */
+  readonly olderRunsUnread: boolean;
 }
 
 /** One destination's result of a save. */
@@ -84,6 +88,8 @@ export interface UsageContext {
   readonly pricing: Readonly<Record<string, UsagePricingEntry>>;
   /** Hosts a fresh price list was already asked of this visit, so a failed fetch is not retried in a loop. */
   readonly ratesAsked: readonly HostKey[];
+  /** How many times the page asked again while every machine was still connecting. */
+  readonly polls: number;
 }
 
 export type UsageEvent =
@@ -117,9 +123,22 @@ export interface UsageInput {
 export const USAGE_DEADLINE_MS = 60_000;
 /** How often a shown page asks again, in milliseconds. */
 export const USAGE_REFRESH_MS = 60_000;
+/** How often a page waiting for its machines to connect asks again, and how many times at most. */
+const CONNECT_POLL_MS = 1_500;
+const CONNECT_POLLS_MAX = 40;
 
 function toggle<T>(list: readonly T[], item: T): readonly T[] {
   return list.includes(item) ? list.filter(each => each !== item) : [...list, item];
+}
+
+/** Whether nothing was read yet because every machine is still connecting. */
+function stillConnecting(answer: ReadAnswer | null): boolean {
+  return (
+    answer !== null &&
+    answer.replies.length === 0 &&
+    answer.unsupported.length === 0 &&
+    answer.connecting.length > 0
+  );
 }
 
 /** Whether the answer still has work a host left for a later call. */
@@ -151,13 +170,10 @@ export const usageMachine = setup({
       edges: periodEdges(params.period, params.clock.now, params.clock.zone),
       problem: null,
     })),
-    reask: assign((_, params: {readonly clock: UsageClock}) => ({
-      problem: null,
-      clockNow: params.clock.now,
-    })),
     forget: assign({answer: null}),
     show: assign((_, params: {readonly answer: ReadAnswer}) => ({
       answer: params.answer,
+      polls: 0,
       pricing: Object.fromEntries(
         params.answer.replies.map(reply => [reply.host, reply.summary.pricing]),
       ),
@@ -170,10 +186,14 @@ export const usageMachine = setup({
       params.answer.unreachable.length === 0 &&
       params.answer.unsupported.length > 0,
     isPending: (_, params: {readonly answer: ReadAnswer}) => pendingWork(params.answer),
+    isConnecting: (_, params: {readonly answer: ReadAnswer}) => stillConnecting(params.answer),
+    connectingKept: ({context}, params: {readonly answer: ReadAnswer}) =>
+      context.answer !== null && stillConnecting(params.answer),
+    pollsSpent: ({context}) => context.polls >= CONNECT_POLLS_MAX,
     ratesDue: ({context}) => hostsDue(context).length > 0,
     holdsAnswer: ({context}) => context.answer !== null,
   },
-  delays: {deadline: USAGE_DEADLINE_MS, refresh: USAGE_REFRESH_MS},
+  delays: {deadline: USAGE_DEADLINE_MS, refresh: USAGE_REFRESH_MS, connectPoll: CONNECT_POLL_MS},
 }).createMachine({
   id: 'usage',
   context: ({input}) => ({
@@ -188,6 +208,7 @@ export const usageMachine = setup({
     dialog: null,
     pricing: {},
     ratesAsked: [],
+    polls: 0,
   }),
   initial: 'loading',
   states: {
@@ -197,6 +218,10 @@ export const usageMachine = setup({
         src: 'read',
         input: ({context}) => ({edges: context.edges, hostsOff: context.hostsOff}),
         onDone: [
+          {
+            guard: {type: 'isConnecting', params: ({event}) => ({answer: event.output})},
+            target: 'connecting',
+          },
           {
             guard: {type: 'isUnsupported', params: ({event}) => ({answer: event.output})},
             target: 'unsupported',
@@ -229,6 +254,10 @@ export const usageMachine = setup({
         input: ({context}) => ({edges: context.edges, hostsOff: context.hostsOff}),
         onDone: [
           {
+            guard: {type: 'isConnecting', params: ({event}) => ({answer: event.output})},
+            target: 'ready',
+          },
+          {
             guard: {type: 'isPending', params: ({event}) => ({answer: event.output})},
             target: 'scanning',
             reenter: true,
@@ -253,6 +282,15 @@ export const usageMachine = setup({
         src: 'read',
         input: ({context}) => ({edges: context.edges, hostsOff: context.hostsOff}),
         onDone: [
+          // Machines still coming up: keep what is shown, or wait for them when nothing is.
+          {
+            guard: {type: 'connectingKept', params: ({event}) => ({answer: event.output})},
+            target: 'ready',
+          },
+          {
+            guard: {type: 'isConnecting', params: ({event}) => ({answer: event.output})},
+            target: 'connecting',
+          },
           {
             guard: {type: 'isPending', params: ({event}) => ({answer: event.output})},
             target: 'scanning',
@@ -344,6 +382,39 @@ export const usageMachine = setup({
                 : context.dialog,
           }),
         },
+      },
+      // A host that never answers a save leaves the dialog saying it was not saved, not Saving.
+      after: {
+        deadline: {
+          target: 'ready',
+          actions: assign({
+            dialog: ({context}) =>
+              context.dialog?.kind === 'prices'
+                ? {
+                    ...context.dialog,
+                    results: context.dialog.apply.map(host => ({
+                      host,
+                      outcome: 'failed' as const,
+                      reason: 'timed out',
+                    })),
+                  }
+                : context.dialog,
+          }),
+        },
+      },
+    },
+    // Every machine is still connecting: that is not a failure. Ask again shortly, until a machine
+    // answers, one comes up (its listing asks the page again), or the wait is spent.
+    connecting: {
+      after: {
+        connectPoll: [
+          {
+            guard: 'pollsSpent',
+            target: 'failed',
+            actions: {type: 'fail', params: {problem: 'timed out'}},
+          },
+          {target: 'loading', actions: assign({polls: ({context}) => context.polls + 1})},
+        ],
       },
     },
     unsupported: {},

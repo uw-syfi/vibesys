@@ -43,7 +43,14 @@ const answer = (pendingRuns = 0, refreshDue = false): ReadAnswer => {
       pricing: {...reply.summary.pricing, refreshDue},
     },
   }));
-  return {replies, unreachable: [], unsupported: [], names: []};
+  return {
+    replies,
+    unreachable: [],
+    unsupported: [],
+    connecting: [],
+    names: [],
+    olderRunsUnread: false,
+  };
 };
 
 /** A machine whose questions are the test's to answer, one at a time. */

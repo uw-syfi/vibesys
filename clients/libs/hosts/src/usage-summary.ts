@@ -12,6 +12,8 @@
 /** The longest list of projects or of edges the host accepts in one question. */
 export const USAGE_SUMMARY_MAX_PROJECTS = 64;
 export const USAGE_SUMMARY_MAX_EDGES = 100;
+/** The last millisecond a host's calendar holds (the end of year 9999). */
+const CALENDAR_END_MS = 253_402_300_799_000;
 /** Edges are whole quarter hours: the grain a host rolls its runs up to. */
 export const USAGE_QUARTER_MS = 900_000;
 
@@ -166,6 +168,8 @@ export interface UsageSummaryEntry {
   readonly pendingRuns: number;
   readonly pendingFiles: number;
   readonly foldedSeries: number;
+  /** Resolved rates the host left out of `rates` because it lists at most 256. */
+  readonly ratesOmitted: number;
   readonly readAt: number;
 }
 
@@ -194,8 +198,8 @@ export function usageSummaryRefusal(
   projects: readonly string[],
   edges: readonly number[],
 ): string | null {
-  if (projects.length === 0 || projects.length > USAGE_SUMMARY_MAX_PROJECTS) {
-    return `a usage question names 1 to ${USAGE_SUMMARY_MAX_PROJECTS} projects`;
+  if (projects.length > USAGE_SUMMARY_MAX_PROJECTS) {
+    return `a usage question names at most ${USAGE_SUMMARY_MAX_PROJECTS} projects`;
   }
   if (edges.length < 2 || edges.length > USAGE_SUMMARY_MAX_EDGES) {
     return `a usage question has 2 to ${USAGE_SUMMARY_MAX_EDGES} edges`;
@@ -204,6 +208,7 @@ export function usageSummaryRefusal(
     if (!Number.isInteger(edge) || edge % USAGE_QUARTER_MS !== 0) {
       return 'the edges of a usage question are whole quarter hours';
     }
+    if (edge < 0 || edge > CALENDAR_END_MS) return 'an edge of a usage question is in the calendar';
     const before = edges[at - 1];
     if (before !== undefined && before >= edge) return 'the edges of a usage question increase';
   }

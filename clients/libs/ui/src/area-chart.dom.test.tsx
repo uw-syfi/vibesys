@@ -5,7 +5,7 @@ import fc from 'fast-check';
 import {Window} from 'happy-dom';
 import {act, type ReactNode} from 'react';
 import {createRoot} from 'react-dom/client';
-import {areaPath, linePath} from './components/area-chart.js';
+import {bandPath, linePath} from './components/area-chart.js';
 import {AreaChart, niceScale, ShareBar} from './index.js';
 
 const window = new Window();
@@ -95,19 +95,20 @@ describe('linePath', () => {
     );
   });
 
-  test('one point, none, and a closed area', () => {
+  test('one point, none, and a closed band', () => {
     expect(linePath([])).toBe('');
     expect(linePath([{x: 1, y: 2}])).toBe('M1 2');
-    expect(areaPath([], 9)).toBe('');
-    expect(
-      areaPath(
-        [
-          {x: 0, y: 5},
-          {x: 10, y: 3},
-        ],
-        9,
-      ),
-    ).toMatch(/L10 9 L0 9 Z$/);
+    expect(bandPath([], [])).toBe('');
+    const upper = [
+      {x: 0, y: 5},
+      {x: 10, y: 3},
+    ];
+    const floor = [
+      {x: 0, y: 9},
+      {x: 10, y: 9},
+    ];
+    // Out along the upper line, back along the lower, and shut.
+    expect(bandPath(upper, floor)).toMatch(/^M0 5 .* L10 9 .*0 9.* Z$/);
   });
 });
 
@@ -189,5 +190,86 @@ describe('AreaChart axis words', () => {
       each => each.textContent,
     );
     expect(tips).toEqual(['x $100.00', 'x $300.00']);
+  });
+});
+
+describe('AreaChart stacked', () => {
+  const layers = [
+    {key: 'a', name: 'Claude', series: 0, values: [1, 4, 2]},
+    {key: 'b', name: 'Codex', series: 1, values: [3, 1, 3]},
+  ];
+  const labelsOf = (container: HTMLElement) =>
+    [...container.querySelectorAll('.vs-chart-label')].map(each => each.textContent ?? '');
+  const highest = (container: HTMLElement): number =>
+    Math.max(
+      ...labelsOf(container)
+        .filter(text => /^\$\d+$/.test(text))
+        .map(text => Number(text.slice(1))),
+    );
+
+  test('piles the layers so the axis covers their sum, and the tooltip still says each layer\u2019s own', async () => {
+    const stacked = await mount(
+      <AreaChart
+        label="Spend"
+        unit="US dollars"
+        labels={['a', 'b', 'c']}
+        layers={layers}
+        format={v => `$${v}`}
+        stacked
+      />,
+    );
+    const overlaid = await mount(
+      <AreaChart
+        label="Spend"
+        unit="US dollars"
+        labels={['a', 'b', 'c']}
+        layers={layers}
+        format={v => `$${v}`}
+      />,
+    );
+    // The tallest slice holds 5 piled (4 + 1) and 4 overlaid.
+    expect(highest(stacked)).toBeGreaterThanOrEqual(5);
+    expect(highest(overlaid)).toBeLessThan(highest(stacked));
+    const rows = [...stacked.querySelectorAll('.vs-area-chart-tip-row')].map(
+      each => each.textContent,
+    );
+    expect(rows.slice(0, 2)).toEqual(['Claude $1', 'Codex $3']);
+  });
+
+  test('property: a pile covers the sum of its layers, an overlay the tallest of them', async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(fc.array(fc.integer({min: 0, max: 50}), {minLength: 3, maxLength: 3}), {
+          minLength: 1,
+          maxLength: 4,
+        }),
+        async rows => {
+          const made = rows.map((values, at) => ({
+            key: `k${at}`,
+            name: `L${at}`,
+            series: at,
+            values,
+          }));
+          const piled = Math.max(
+            ...[0, 1, 2].map(at => made.reduce((sum, each) => sum + (each.values[at] ?? 0), 0)),
+          );
+          const tallest = Math.max(...made.flatMap(each => each.values));
+          const container = await mount(
+            <AreaChart
+              label="x"
+              unit="u"
+              labels={['a', 'b', 'c']}
+              layers={made}
+              format={v => `$${v}`}
+              stacked
+            />,
+          );
+          const top = highest(container);
+          expect(top).toBeGreaterThanOrEqual(piled);
+          expect(top).toBeGreaterThanOrEqual(tallest);
+        },
+      ),
+      {numRuns: 25},
+    );
   });
 });

@@ -18,10 +18,10 @@ const edges = fc
     return found;
   });
 
-test('property: a question of 1 to 64 projects over 2 to 100 increasing quarter-hour edges is asked', () => {
+test('property: a question of 0 to 64 projects over 2 to 100 increasing quarter-hour edges is asked', () => {
   fc.assert(
     fc.property(
-      fc.array(fc.string({minLength: 1}), {minLength: 1, maxLength: USAGE_SUMMARY_MAX_PROJECTS}),
+      fc.array(fc.string({minLength: 1}), {maxLength: USAGE_SUMMARY_MAX_PROJECTS}),
       edges.filter(each => each.length <= USAGE_SUMMARY_MAX_EDGES),
       (projects, found) => {
         expect(usageSummaryRefusal(projects, found)).toBeNull();
@@ -30,10 +30,9 @@ test('property: a question of 1 to 64 projects over 2 to 100 increasing quarter-
   );
 });
 
-test('property: the same question is refused when it has too many or too few projects or edges', () => {
+test('property: the same question is refused when it has too many projects or too many or too few edges', () => {
   fc.assert(
     fc.property(edges, found => {
-      expect(usageSummaryRefusal([], found)).toContain('projects');
       expect(
         usageSummaryRefusal(
           Array.from({length: USAGE_SUMMARY_MAX_PROJECTS + 1}, () => '/p'),
@@ -66,5 +65,16 @@ test('property: an edge off a quarter hour, or one that does not increase, is re
         if (at > 0) expect(usageSummaryRefusal(['/p'], flat)).toContain('increase');
       },
     ),
+  );
+});
+
+test('property: an edge beyond the calendar a host holds is refused, however far', () => {
+  fc.assert(
+    fc.property(fc.integer({min: 1, max: 1_000_000}), steps => {
+      const past = (253_402_300_799_000 / USAGE_QUARTER_MS + steps) * USAGE_QUARTER_MS;
+      expect(
+        usageSummaryRefusal(['/p'], [0, Math.floor(past / USAGE_QUARTER_MS) * USAGE_QUARTER_MS]),
+      ).toContain('calendar');
+    }),
   );
 });

@@ -51,6 +51,7 @@ export interface UsageStoreOptions {
 
 const PHASES: readonly string[] = [
   'loading',
+  'connecting',
   'scanning',
   'refreshing',
   'rating',
@@ -65,15 +66,17 @@ function phaseOf(value: unknown): UsagePhase {
   throw new Error(`the usage machine is in an unknown state: ${JSON.stringify(value)}`);
 }
 
-const STATUS: Readonly<Record<UsagePhase, UsageStatusWord>> = {
-  loading: 'Connecting',
+/** The header's word for each phase: none while the body says what it needs to (Loading, Retry). */
+const STATUS: Readonly<Record<UsagePhase, UsageStatusWord | null>> = {
+  loading: null,
+  connecting: null,
   scanning: 'Scanning',
   refreshing: 'Refreshing',
   rating: 'Refreshing',
-  ready: 'Ready',
+  ready: null,
   saving: 'Saving',
-  unsupported: 'Unavailable',
-  failed: 'Unavailable',
+  unsupported: null,
+  failed: null,
 };
 
 interface Held {
@@ -151,6 +154,7 @@ class Folds {
           unreadablePrices: held.answer.replies.some(
             reply => reply.summary.pricesStatus === 'unreadable',
           ),
+          olderRunsUnread: held.answer.olderRunsUnread,
           overridden,
         });
         this.#view = {held, filters, overridden, view};

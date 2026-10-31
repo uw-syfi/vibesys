@@ -12907,15 +12907,15 @@ const file_vibesys_host_v1_operations_proto_rawDesc = "" +
 	"\bby_agent\x18\r \x03(\v2\x1b.vibesys.host.v1.AgentSpendB\b\xbaH\x05\x92\x01\x02\x10@R\abyAgent\x12%\n" +
 	"\x0eagents_omitted\x18\x0e \x01(\rR\ragentsOmitted\x12+\n" +
 	"\fmissing_runs\x18\x0f \x03(\tB\b\xbaH\x05\x92\x01\x02\x10dR\vmissingRunsB\x18\n" +
-	"\x16_cost_per_new_best_usd\"\xcf\x03\n" +
+	"\x16_cost_per_new_best_usd\"\xee\x02\n" +
 	"\x13UsageSummaryRequest\x12)\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01\x18\x80\x01R\trequestId\x12/\n" +
 	"\bprojects\x18\x02 \x03(\tB\x13\xbaH\x10\x92\x01\r\x10@\x18\x01\"\ar\x05\x10\x01(\x80 R\bprojects\x12L\n" +
 	"\x05edges\x18\x03 \x03(\v2\x1a.google.protobuf.TimestampB\x1a\xbaH\x17\x92\x01\x14\b\x02\x10d\"\x0e\xb2\x01\v\"\a\b\xff\x82\xd1\xff\xaf\a2\x00R\x05edges\x12B\n" +
-	"\x03now\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampB\x14\xbaH\x11\xc8\x01\x01\xb2\x01\v\"\a\b\xff\x82\xd1\xff\xaf\a2\x00R\x03now:\xc9\x01\xbaH\xc5\x01\x1a\xc2\x01\n" +
-	"\x13usage_summary.edges\x120edges must be whole quarter hours, to the second\x1aythis.edges.all(edge, int(edge) >= 0 && int(edge) <= 253402300799 && int(edge) % 900 == 0 && edge == timestamp(int(edge)))\"\xdb\x02\n" +
+	"\x03now\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampB\x14\xbaH\x11\xc8\x01\x01\xb2\x01\v\"\a\b\xff\x82\xd1\xff\xaf\a2\x00R\x03now:i\xbaHf\x1ad\n" +
+	"\x13usage_summary.edges\x12!edges must be whole quarter hours\x1a*this.edges.all(edge, int(edge) % 900 == 0)\"\xdb\x02\n" +
 	"\x0eUsageSeriesKey\x12@\n" +
 	"\x06origin\x18\x01 \x01(\x0e2\x1c.vibesys.host.v1.UsageOriginB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06origin\x12:\n" +

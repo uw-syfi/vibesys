@@ -19,7 +19,14 @@ function viewOf(
   return usageView(
     merged,
     {tab: 'cost', source: 'all', hidden: new Set(), ...filters},
-    {names: [], edges: EDGES, pricing, unreadablePrices: false, overridden: new Set()},
+    {
+      names: [],
+      edges: EDGES,
+      pricing,
+      unreadablePrices: false,
+      olderRunsUnread: false,
+      overridden: new Set(),
+    },
   );
 }
 
@@ -100,7 +107,22 @@ describe('usageView', () => {
         'all',
         new Set(PROVIDERS.filter(each => each !== provider)),
       );
-      if (row !== undefined) expect(row.figure, `seed ${seed}`).toBe(dollars(own));
+      if (row !== undefined) {
+        // What a person reads for the provider: its dollars, or Unpriced when no price covers any
+        // of what it used (worked out from the raw series, not from the view).
+        const series = replies
+          .flatMap(reply => reply.summary.series)
+          .filter(each => each.provider === provider);
+        const used = series
+          .flatMap(each => [each.cached, each.cacheWrite, each.uncached, each.output])
+          .flat();
+        const covered = series
+          .filter(each => each.source !== 'unpriced')
+          .flatMap(each => [each.cached, each.cacheWrite, each.uncached, each.output])
+          .flat();
+        const none = used.some(count => count > 0) && !covered.some(count => count > 0);
+        expect(row.figure, `seed ${seed}`).toBe(none ? 'Unpriced' : dollars(own));
+      }
       // The row stays so it can be turned on, with no share while hidden.
       expect(without.providers.find(each => each.provider === provider)?.hidden ?? true).toBe(true);
       expect(without.hero.figure, `seed ${seed}`).toBe(
@@ -151,13 +173,86 @@ describe('usageView', () => {
       status: 'bundled' as const,
       checkedOn: '2026-10-01',
     }));
-    expect(viewOf(replies, {}, stale).chips.map(chip => chip.label)).toContain('Rates bundled');
+    // The chip says which day the prices are of, not only that they are bundled.
+    expect(viewOf(replies, {}, stale).chips.map(chip => chip.label)).toContain(
+      'Prices of 2026-10-01',
+    );
     const merged = mergeReplies(claimSources(replies), N);
     const unreadable = usageView(
       merged,
       {tab: 'cost', source: 'all', hidden: new Set()},
-      {names: [], edges: EDGES, pricing: [], unreadablePrices: true, overridden: new Set()},
+      {
+        names: [],
+        edges: EDGES,
+        pricing: [],
+        unreadablePrices: true,
+        olderRunsUnread: false,
+        overridden: new Set(),
+      },
     );
     expect(unreadable.chips.map(chip => chip.label)).toContain('Prices unreadable');
+  });
+});
+
+describe('what no price covers', () => {
+  /** One host that ran only `source` series, in the tokens and dollars the contract gives such a row. */
+  function onlyOf(source: 'unpriced' | 'model', seed: number) {
+    const replies = repliesFor(new Seeded(seed), N, 1).map(reply => ({
+      ...reply,
+      summary: {
+        ...reply.summary,
+        series: reply.summary.series.map(series => ({
+          ...series,
+          origin: 'run' as const,
+          usageSource: 0,
+          provider: 'claude',
+          model: 'model-a',
+          source,
+          estimateUsd: series.estimateUsd.map(each => (source === 'unpriced' ? 0 : each + 1)),
+        })),
+      },
+    }));
+    return viewOf(replies);
+  }
+
+  test('property: a model and a provider no price covers read Unpriced, never a zero, and are not drawn', () => {
+    for (const seed of SEEDS.slice(0, 80)) {
+      const view = onlyOf('unpriced', seed);
+      if (view.models.length === 0) continue;
+      const used = view.models.some(model => model.tokens > 0);
+      if (!used) continue;
+      for (const model of view.models.filter(each => each.tokens > 0)) {
+        expect(model.cost, `seed ${seed}`).toBe('Unpriced');
+        expect(model.perMillion, `seed ${seed}`).toBeNull();
+      }
+      expect(view.providers.map(row => row.figure)).toEqual(['Unpriced']);
+      // No layer: a line at zero would say the provider was free.
+      expect(view.chart.layers, `seed ${seed}`).toEqual([]);
+    }
+  });
+
+  test('property: a priced model reads dollars and is drawn', () => {
+    for (const seed of SEEDS.slice(0, 80)) {
+      const view = onlyOf('model', seed);
+      for (const model of view.models.filter(each => each.tokens > 0)) {
+        expect(model.cost, `seed ${seed}`).toMatch(/^\$/);
+      }
+      if (view.providers.length > 0 && view.models.some(each => each.tokens > 0)) {
+        expect(view.chart.layers.length, `seed ${seed}`).toBe(1);
+      }
+    }
+  });
+});
+
+describe('the tokens tab', () => {
+  test('property: carries no tile of dollars', () => {
+    for (const seed of SEEDS.slice(0, 80)) {
+      const replies = repliesFor(new Seeded(seed), N, 1 + new Seeded(seed).int(2));
+      const names = viewOf(replies, {tab: 'tokens'}).tiles.map(tile => tile.name);
+      expect(names, `seed ${seed}`).not.toContain('Cache savings');
+      expect(viewOf(replies, {tab: 'cost'}).tiles.map(tile => tile.name)).toContain(
+        'Cache savings',
+      );
+    }
   });
 });

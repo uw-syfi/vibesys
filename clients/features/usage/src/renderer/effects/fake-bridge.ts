@@ -100,6 +100,7 @@ export function emptySummary(book: UsagePriceBookEntry = EMPTY_BOOK): UsageSumma
     pendingRuns: 0,
     pendingFiles: 0,
     foldedSeries: 0,
+    ratesOmitted: 0,
     readAt: 0,
   };
 }
@@ -120,7 +121,11 @@ export interface FakeWorld {
   readonly hosts: readonly FakeHost[];
   /** Machines the app cannot reach. */
   readonly unavailable?: readonly HostKey[];
+  /** Machines whose connection is still coming up: not failed, and not answering yet. */
+  readonly connecting?: readonly HostKey[];
   readonly harnesses?: Readonly<Record<string, HarnessListing>>;
+  /** How many of the first catalogue questions fail, as a machine just up may not have one ready. */
+  readonly harnessesFailing?: number;
   readonly overviewFails?: boolean;
 }
 
@@ -136,11 +141,11 @@ const listedHost = (host: HostKey): HostListing => ({
   unverified: [],
 });
 
-const unavailableHost = (host: HostKey): HostListing => ({
+const unavailableHost = (host: HostKey, connecting = false): HostListing => ({
   kind: 'unavailable',
   host,
   step: 'gateway',
-  connection: {kind: 'offline', detail: 'unreachable'},
+  connection: connecting ? {kind: 'connecting'} : {kind: 'offline', detail: 'unreachable'},
 });
 
 export class FakeUsageBridge implements UsageBridge {
@@ -161,6 +166,8 @@ export class FakeUsageBridge implements UsageBridge {
   readonly overviews: number[] = [];
   /** The machines that cannot be reached now; they answer nothing until `connect`. */
   readonly #down: Set<HostKey>;
+  /** The machines of `#down` that are still connecting, as the app words a connection not yet up. */
+  readonly #connecting: Set<HostKey>;
   /** The book each host holds, and the saves that fail. */
   readonly #books = new Map<HostKey, UsagePriceBookEntry>();
   readonly #saveFails = new Set<HostKey>();
@@ -170,13 +177,16 @@ export class FakeUsageBridge implements UsageBridge {
   #hold: Promise<void> | null = null;
 
   constructor(readonly world: FakeWorld) {
-    this.#down = new Set(world.unavailable ?? []);
+    this.#harnessesFailing = world.harnessesFailing ?? 0;
+    this.#connecting = new Set(world.connecting ?? []);
+    this.#down = new Set([...(world.unavailable ?? []), ...this.#connecting]);
     for (const each of world.hosts) this.#books.set(each.host, each.book ?? EMPTY_BOOK);
   }
 
   /** The machine's connection comes up: it answers from now on, and its listing is pushed. */
   connect(host: HostKey): void {
     this.#down.delete(host);
+    this.#connecting.delete(host);
     this.#push(listedHost(host));
   }
 
@@ -223,7 +233,9 @@ export class FakeUsageBridge implements UsageBridge {
     this.overviews.push(this.overviews.length);
     if (this.world.overviewFails === true) return failed('The machines could not be listed');
     const listed = this.world.hosts.filter(each => !this.#down.has(each.host));
-    const unavailable = [...this.#down].map(unavailableHost);
+    const unavailable = [...this.#down].map(host =>
+      unavailableHost(host, this.#connecting.has(host)),
+    );
     // The projects are known from the runs the app opened in them.
     const recent: RecentRun[] = this.world.hosts.flatMap(each =>
       (each.projects ?? ['/p']).map(project => ({
@@ -286,6 +298,17 @@ export class FakeUsageBridge implements UsageBridge {
     return ok({kind: 'saved' as const, prices: saved});
   };
 
-  harnesses: UsageBridge['harnesses'] = async host =>
-    ok(this.world.harnesses?.[host] ?? {kind: 'unsupported' as const});
+  #harnessesFailing: number;
+
+  /** Every catalogue question asked, to say how often a page asks. */
+  readonly catalogues: HostKey[] = [];
+
+  harnesses: UsageBridge['harnesses'] = async host => {
+    this.catalogues.push(host);
+    if (this.#harnessesFailing > 0) {
+      this.#harnessesFailing -= 1;
+      return failed('The catalogue is not ready');
+    }
+    return ok(this.world.harnesses?.[host] ?? {kind: 'unsupported' as const});
+  };
 }

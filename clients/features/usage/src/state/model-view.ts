@@ -21,7 +21,13 @@ import {
   type PriceDraft,
   type RateField,
 } from './price-drafts.js';
-import type {ModelName, Part, ViewFilters} from './usage-view.js';
+import {
+  type ModelName,
+  modelName,
+  type Part,
+  providerName,
+  type ViewFilters,
+} from './usage-view.js';
 
 export interface PriceRowView {
   readonly field: RateField;
@@ -42,7 +48,10 @@ export interface ModelDetail {
   readonly providerName: string;
   readonly id: string;
   readonly name: string;
+  /** What it cost, or `Unpriced` when no price covers any of its tokens. */
   readonly cost: string;
+  /** False when no price covers any of its tokens: there is no cost to chart or to split. */
+  readonly priced: boolean;
   readonly tokens: string;
   readonly turns: number;
   readonly perMillion: string | null;
@@ -148,6 +157,7 @@ export function modelDetail(
   const unpriced = sum(
     own.filter(each => each.source === 'unpriced').flatMap(each => processed(each)),
   );
+  const unpricedAll = count > 0 && unpriced >= count;
   const trend = new Array<number>(n).fill(0);
   for (const each of own) {
     const values = filters.tab === 'cost' ? each.values.estimateUsd : processed(each);
@@ -161,17 +171,18 @@ export function modelDetail(
     value,
     figure,
   });
-  const catalogued = names.find(each => each.harness === provider && each.model === id);
   return {
     key,
     provider,
-    providerName: names.find(each => each.harness === provider)?.harnessName ?? provider,
+    providerName: providerName(names, provider),
     id,
-    name: catalogued?.modelName ?? id,
-    cost: dollars(cost),
+    name: modelName(names, provider, id),
+    cost: unpricedAll ? 'Unpriced' : dollars(cost),
+    priced: !unpricedAll,
     tokens: tokens(count),
     turns: column('turns'),
-    perMillion: count === 0 || cost === 0 ? null : dollars((cost / count) * 1_000_000),
+    perMillion:
+      count === 0 || cost === 0 || unpricedAll ? null : dollars((cost / count) * 1_000_000),
     cacheHit: input === 0 ? null : percent(cached / input),
     trend,
     trendLabels: Array.from({length: n}, (_, at) => bucketLabel(edges, at)),
@@ -240,7 +251,6 @@ interface PricesInputs {
 export function pricesView(key: string, draft: PriceDraft, inputs: PricesInputs): PricesView {
   const {apply, results, replies, problem, names} = inputs;
   const [provider = ''] = key.split('\u0000');
-  const catalogued = names.find(each => each.harness === provider && each.model === draft.model);
   const checked = checkRate(draft.rate);
   const invalid = !draft.automatic && !checked.ok ? checked.field : null;
   const targets = [
@@ -255,7 +265,7 @@ export function pricesView(key: string, draft: PriceDraft, inputs: PricesInputs)
   const writes = draft.automatic || checked.ok;
   return {
     key,
-    title: catalogued?.modelName ?? draft.model,
+    title: modelName(names, provider, draft.model),
     draft,
     fields: FIELDS.map(({field, label}) => ({
       field,

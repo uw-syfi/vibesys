@@ -10,7 +10,15 @@ export {
   type UsagePeriod,
   zoneOffsetMs,
 } from './edges.js';
-export {axisDollars, dollars, percent, perMillion, tokens, turnsWords} from './format.js';
+export {
+  axisDollars,
+  dollars,
+  percent,
+  perMillion,
+  plainName,
+  tokens,
+  turnsWords,
+} from './format.js';
 export {
   type Dialog,
   draftProblem,

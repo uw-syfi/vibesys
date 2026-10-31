@@ -57,3 +57,27 @@ export function perMillion(rate: number): string {
       ? `$${rate.toPrecision(2)}`
       : `$${Number(rate.toFixed(4))}`;
 }
+
+/**
+ * A name a person can read for an id nobody gave a name to: its words capitalized and its version
+ * numbers joined (`claude-sonnet-5-5` is `Claude Sonnet 5.5`), without a bracketed variant or a
+ * date snapshot. Used only where the machine's catalogue has no name for the id, so a screen
+ * never shows the id itself.
+ */
+export function plainName(id: string): string {
+  const words = id
+    .trim()
+    .replace(/\[[^\]]*\]$/, '')
+    .split(/[-_\s/]+/)
+    .filter(word => word !== '' && !/^\d{8}$/.test(word));
+  const out: string[] = [];
+  for (const word of words) {
+    const last = out.at(-1);
+    if (/^\d+$/.test(word) && last !== undefined && /^\d+(\.\d+)*$/.test(last)) {
+      out[out.length - 1] = `${last}.${word}`;
+    } else {
+      out.push(/^[a-z]/.test(word) ? `${word.charAt(0).toUpperCase()}${word.slice(1)}` : word);
+    }
+  }
+  return out.join(' ') || id;
+}

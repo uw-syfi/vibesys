@@ -69,10 +69,16 @@ async function open(page: Page, usage: UsageCase, width: number): Promise<void> 
     .getByRole('button', {name: 'Usage'})
     .click();
   await expect(page.getByRole('heading', {name: 'Usage', level: 1})).toBeVisible();
-  // The page has read its figures once it says Ready, or why it cannot.
-  await expect(page.getByText('Loading', {exact: true})).toHaveCount(0);
-  await expect(page.getByText('Connecting', {exact: true})).toHaveCount(0);
+  // The page has read its figures once nothing is loading, or has said why it cannot.
+  await idle(page);
   await settled(page);
+}
+
+/** The page has nothing in flight: no loading body and no header word for work in hand. */
+async function idle(page: Page): Promise<void> {
+  for (const word of ['Loading', 'Refreshing', 'Scanning', 'Saving']) {
+    await expect(page.getByText(word, {exact: true})).toHaveCount(0);
+  }
 }
 
 const asked = (page: Page) =>
@@ -137,11 +143,12 @@ test('a host that predates the question reads Update required and shows no figur
 
 test('a failed question reads Unavailable and Retry asks again', async ({page}) => {
   await open(page, caseNamed('failed-question'), 1440);
-  await expect(page.getByText('Unavailable', {exact: true}).first()).toBeVisible();
+  // The body says it once; the header has no word for a failure.
+  await expect(page.getByText('Unavailable', {exact: true})).toHaveCount(1);
   const before = (await asked(page)).length;
   await page.getByRole('button', {name: 'Retry'}).click();
   await expect.poll(async () => (await asked(page)).length).toBeGreaterThan(before);
-  await expect(page.getByText('Unavailable', {exact: true}).first()).toBeVisible();
+  await expect(page.getByText('Unavailable', {exact: true})).toHaveCount(1);
 });
 
 test('an empty period says No usage, at the page’s left edge, and shows no table', async ({
@@ -150,6 +157,8 @@ test('an empty period says No usage, at the page’s left edge, and shows no tab
   await open(page, caseNamed('empty-period'), 1440);
   await expect(page.getByText('No usage', {exact: true})).toBeVisible();
   await expect(page.getByRole('table', {name: 'Models'})).toHaveCount(0);
+  // The empty state says so once: no figure of zero and no count of sessions above it.
+  await expect(page.locator('#usage-hero')).toHaveCount(0);
   // With no provider there is nothing to switch on or off: no bare header row.
   await expect(page.getByRole('table', {name: 'Providers'})).toHaveCount(0);
 });
@@ -217,7 +226,7 @@ test('every period asks the host in the buckets it names, in both directions', a
       expect(edge % 900_000, label).toBe(0);
       if (at > 0) expect(edge).toBeGreaterThan(last?.edges[at - 1] ?? 0);
     }
-    await expect(page.getByText('Connecting', {exact: true})).toHaveCount(0);
+    await idle(page);
     await expect(page.getByRole('table', {name: 'Time'}).getByRole('row')).toHaveCount(edges);
   }
 });
@@ -262,7 +271,8 @@ test('the source select and a provider toggle cut the figures by exactly the row
 test('what the host could not price is a chip, and the rates it used are named', async ({page}) => {
   await open(page, caseNamed('unpriced-models'), 1440);
   await expect(page.getByText(/% unpriced$/)).toBeVisible();
-  await expect(page.getByText('Rates bundled', {exact: true})).toBeVisible();
+  // The price list is dated, so a person sees how old the prices are, not only that they are bundled.
+  await expect(page.getByText('Prices of 2026-10-30', {exact: true})).toBeVisible();
 });
 
 test('a model opens its detail, and its price is set, saved and read back', async ({page}) => {
@@ -279,7 +289,7 @@ test('a model opens its detail, and its price is set, saved and read back', asyn
   const prices = page.getByRole('dialog');
   await expect(prices).toBeVisible();
   await prices.getByRole('checkbox', {name: 'Automatic'}).uncheck();
-  await prices.getByLabel('Input per M').fill('7');
+  await prices.getByLabel('Input per 1M tokens').fill('7');
   await prices.getByRole('button', {name: 'Save'}).click();
   await expect(prices.getByText('Saved', {exact: true})).toBeVisible();
   const saved = await page.evaluate(() => (window as unknown as UsageHost).fakeHost.usageSaved);
@@ -300,7 +310,7 @@ test('a price that cannot be saved says which field, and Save waits', async ({pa
     .click();
   const prices = page.getByRole('dialog');
   await prices.getByRole('checkbox', {name: 'Automatic'}).uncheck();
-  await prices.getByLabel('Output per M').fill('-1');
+  await prices.getByLabel('Output per 1M tokens').fill('-1');
   await expect(prices.getByText('Invalid', {exact: true})).toBeVisible();
   await expect(prices.getByRole('button', {name: 'Save'})).toHaveAttribute('aria-disabled', 'true');
   expect(await page.evaluate(() => (window as unknown as UsageHost).fakeHost.usageSaved)).toEqual(
@@ -347,7 +357,7 @@ test('Refresh asks the host again', async ({page}) => {
   const before = (await asked(page)).length;
   await page.getByRole('button', {name: 'Refresh'}).click();
   await expect.poll(async () => (await asked(page)).length).toBeGreaterThan(before);
-  await expect(page.getByText('Connecting', {exact: true})).toHaveCount(0);
+  await idle(page);
 });
 
 test('Usage asks nothing until it is shown, and again each time it is shown', async ({page}) => {
@@ -422,11 +432,11 @@ test('every tab, period, source and dialog, walked and captured', async ({page, 
   ];
   for (const [at, label] of periods.entries()) {
     await page.getByLabel('Period').selectOption({label});
-    await expect(page.getByText('Connecting', {exact: true})).toHaveCount(0);
+    await idle(page);
     await shoot(`period ${at + 1}, ${label}`);
   }
   await page.getByLabel('Period').selectOption({label: 'Past 7 days'});
-  await expect(page.getByText('Connecting', {exact: true})).toHaveCount(0);
+  await idle(page);
   for (const tab of ['Tokens', 'Cost', 'Tokens', 'Cost']) {
     await page.getByRole('radio', {name: tab}).check({force: true});
     await shoot(`tab ${tab}`);
@@ -449,9 +459,9 @@ test('every tab, period, source and dialog, walked and captured', async ({page, 
     .click();
   await shoot('price dialog, automatic');
   await page.getByRole('dialog').getByRole('checkbox', {name: 'Automatic'}).uncheck();
-  await page.getByRole('dialog').getByLabel('Output per M').fill('-1');
+  await page.getByRole('dialog').getByLabel('Output per 1M tokens').fill('-1');
   await shoot('price dialog, invalid output');
-  await page.getByRole('dialog').getByLabel('Output per M').fill('30');
+  await page.getByRole('dialog').getByLabel('Output per 1M tokens').fill('30');
   await page.getByRole('dialog').getByRole('button', {name: 'Save'}).click();
   await expect(page.getByRole('dialog').getByText('Saved', {exact: true})).toBeVisible();
   await shoot('price dialog, saved');
@@ -462,4 +472,52 @@ test('every tab, period, source and dialog, walked and captured', async ({page, 
   await sheet.goto(`file://${dir}/contact-sheet.html`);
   await sheet.screenshot({path: `${dir}/contact-sheet.png`, fullPage: true});
   await sheet.close();
+});
+
+test('a model no price covers reads Unpriced, and neither it nor its provider is drawn at zero', async ({
+  page,
+}) => {
+  await open(page, caseNamed('unpriced-models'), 1440);
+  const models = page.getByRole('table', {name: 'Models'});
+  const row = models.getByRole('row').filter({hasText: 'Gpt Next Mini'});
+  await expect(row).toContainText('Unpriced');
+  await expect(row).not.toContainText('$0.00');
+  const providers = page.getByRole('table', {name: 'Providers'});
+  await expect(providers.getByRole('row').filter({hasText: 'Codex'})).toContainText('Unpriced');
+  // One layer is drawn: the provider with prices.
+  await expect(page.locator('.vs-area-chart-layer')).toHaveCount(1);
+  // Every name is the catalogue's or the id in words, never the id.
+  await expect(page.getByText('gpt-next-mini')).toHaveCount(0);
+});
+
+test('the tokens tab carries no dollars', async ({page}) => {
+  await open(page, caseNamed('one-run'), 1440);
+  await page.getByRole('radio', {name: 'Tokens'}).check({force: true});
+  for (const name of ['Cache savings', 'Per new best', 'Per hour now']) {
+    await expect(page.getByText(name, {exact: true})).toHaveCount(0);
+  }
+  await page.getByRole('radio', {name: 'Cost'}).check({force: true});
+  await expect(page.getByText('Per new best', {exact: true})).toBeVisible();
+});
+
+test('the tiles share a top line at every width', async ({page}) => {
+  await open(page, caseNamed('one-run'), 1440);
+  for (const width of WIDTHS) {
+    await page.setViewportSize({width, height: 900});
+    await settled(page);
+    const tops = await page.evaluate(() => {
+      const caption = [...document.querySelectorAll('main .vs-text')].find(
+        each => each.textContent === 'Processed',
+      );
+      const row = caption?.parentElement?.parentElement;
+      return [...(row?.children ?? [])].map(tile =>
+        Math.round(tile.querySelector('.vs-text')?.getBoundingClientRect().top ?? -1),
+      );
+    });
+    expect(tops.length, `${width}`).toBeGreaterThanOrEqual(5);
+    // Tiles of a row share a top: a wrapped second row starts lower, but never staggers within one.
+    const rows = new Map<number, number>();
+    for (const top of tops) rows.set(top, (rows.get(top) ?? 0) + 1);
+    expect(rows.size, `${width}: ${tops.join(',')}`).toBeLessThanOrEqual(2);
+  }
 });

@@ -1231,9 +1231,13 @@ describe('Hosts usage reads', () => {
     await hosts.usageSummary(LOCAL, ['/srv/project'], [0, QUARTER], 7);
     expect(usage.summaries).toEqual([{projects: ['/srv/project'], edges: [0, QUARTER], now: 7}]);
 
-    await expect(hosts.usageSummary(LOCAL, [], [0, QUARTER], 7)).rejects.toThrow('projects');
+    const tooMany = Array.from({length: 65}, (_, at) => `/p/${at}`);
+    await expect(hosts.usageSummary(LOCAL, tooMany, [0, QUARTER], 7)).rejects.toThrow('at most');
     await expect(hosts.usageSummary(LOCAL, ['/p'], [QUARTER, 0], 7)).rejects.toThrow('increase');
     expect(usage.summaries).toHaveLength(1);
+    // No project named: the host counts every run it indexed, so the question is asked.
+    await hosts.usageSummary(LOCAL, [], [0, QUARTER], 7);
+    expect(usage.summaries).toHaveLength(2);
   });
 
   test('property: a question is asked exactly when the host would accept it', async () => {
@@ -1254,11 +1258,11 @@ describe('Hosts usage reads', () => {
           expect(usage.summaries).toHaveLength(refused ? 0 : 1);
           const increasing = edges.every((edge, at) => at === 0 || (edges[at - 1] ?? 0) < edge);
           expect(refused).toBe(
-            projects.length === 0 ||
-              projects.length > 64 ||
+            projects.length > 64 ||
               edges.length < 2 ||
               edges.length > 100 ||
-              !increasing,
+              !increasing ||
+              edges.some(edge => edge < 0),
           );
         },
       ),

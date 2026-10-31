@@ -2009,8 +2009,8 @@ message UsageWindowResponse {
 message UsageSummaryRequest {
   option (buf.validate.message).cel = {
     id: "usage_summary.edges"
-    message: "edges must be whole quarter hours, to the second"
-    expression: "this.edges.all(edge, int(edge) >= 0 && int(edge) <= 253402300799 && int(edge) % 900 == 0 && edge == timestamp(int(edge)))"
+    message: "edges must be whole quarter hours"
+    expression: "this.edges.all(edge, int(edge) % 900 == 0)"
   };
   string request_id = 1 [(buf.validate.field).string = {
     min_len: 1

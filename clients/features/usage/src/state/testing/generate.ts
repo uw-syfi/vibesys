@@ -33,13 +33,17 @@ function seriesFor(
   usageSource: number,
 ): UsageSeriesEntry {
   const buckets = populated(rng, n);
+  const source = rng.pick(ESTIMATES);
   const column = (make: (rng: Random) => number): number[] => buckets.map(() => make(rng));
+  // A row no price covers has no estimate: the host leaves every dollar of it at zero.
+  const priced = (make: (rng: Random) => number): number[] =>
+    source === 'unpriced' ? buckets.map(() => 0) : column(make);
   return {
     origin,
     provider: rng.pick(PROVIDERS),
     model: rng.pick(MODELS),
     speed: rng.pick(SPEEDS),
-    source: rng.pick(ESTIMATES),
+    source,
     usageSource,
     buckets,
     cached: column(count),
@@ -50,13 +54,13 @@ function seriesFor(
     turns: column(r => r.int(30)),
     approximateTurns: column(r => r.int(3)),
     recordedUsd: column(dollars),
-    estimateUsd: column(dollars),
-    inputUsd: column(dollars),
-    cacheReadUsd: column(dollars),
-    cacheWriteUsd: column(dollars),
-    outputUsd: column(dollars),
-    speedPremiumUsd: column(dollars),
-    cacheSavingsUsd: column(dollars),
+    estimateUsd: priced(dollars),
+    inputUsd: priced(dollars),
+    cacheReadUsd: priced(dollars),
+    cacheWriteUsd: priced(dollars),
+    outputUsd: priced(dollars),
+    speedPremiumUsd: priced(dollars),
+    cacheSavingsUsd: priced(dollars),
   };
 }
 
@@ -121,6 +125,7 @@ export function summaryFor(rng: Random, n: number, tag: string): UsageSummaryEnt
     pendingRuns: 0,
     pendingFiles: 0,
     foldedSeries: 0,
+    ratesOmitted: 0,
     readAt: 1 + rng.int(1000),
   };
 }

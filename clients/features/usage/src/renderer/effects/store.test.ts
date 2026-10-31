@@ -56,7 +56,7 @@ describe('createUsageStore', () => {
     expect(bridge.overviews).toEqual([]);
     expect(store.getState()).toMatchObject({
       phase: 'loading',
-      status: 'Connecting',
+      status: null,
       period: '7d',
       tab: 'cost',
       view: null,
@@ -70,7 +70,8 @@ describe('createUsageStore', () => {
     const unsubscribe = store.subscribe(() => undefined);
     await settle(store);
     const state = store.getState();
-    expect(state).toMatchObject({phase: 'ready', status: 'Ready'});
+    // Nothing to say while the page is idle: the figures speak.
+    expect(state).toMatchObject({phase: 'ready', status: null});
     expect(state.view?.hero.figure).toBe('$4.00');
     expect(bridge.asked[0]?.edges).toHaveLength(8);
     unsubscribe();
@@ -159,13 +160,13 @@ describe('createUsageStore', () => {
       ],
     });
     const {store, stop} = usage(bridge);
-    const seen: string[] = [];
+    const seen: (string | null)[] = [];
     const unsubscribe = store.subscribe(() => seen.push(store.getState().status));
     for (let turn = 0; turn < 200 && store.getState().phase !== 'ready'; turn += 1) {
       await Promise.resolve();
     }
     expect(seen).toContain('Scanning');
-    expect(store.getState()).toMatchObject({status: 'Ready'});
+    expect(store.getState()).toMatchObject({status: null});
     expect(answers).toBe(3);
     unsubscribe();
     stop();
@@ -287,5 +288,84 @@ describe('the prices dialog', () => {
     expect(bridge.saves).toEqual([]);
     unsubscribe();
     stop();
+  });
+});
+
+describe('a machine that is still connecting', () => {
+  const connecting = () =>
+    new FakeUsageBridge({
+      hosts: [{host: 'local', answer: spent(4)}],
+      connecting: ['local'],
+    });
+
+  /** The phases the page showed, from the first until `until` says stop. */
+  async function watch(
+    bridge: FakeUsageBridge,
+    steps: (made: ReturnType<typeof usage>) => Promise<void>,
+  ): Promise<{phases: string[]; made: ReturnType<typeof usage>}> {
+    const made = usage(bridge);
+    const phases: string[] = [];
+    const unsubscribe = made.store.subscribe(() => {
+      const phase = made.store.getState().phase;
+      if (phases.at(-1) !== phase) phases.push(phase);
+    });
+    await steps(made);
+    unsubscribe();
+    made.stop();
+    return {phases, made};
+  }
+
+  test('the page waits and loads: it never says failed while a connection is on its way', async () => {
+    const bridge = connecting();
+    const {phases} = await watch(bridge, async made => {
+      await settle(made.store);
+      for (let poll = 0; poll < 5; poll += 1) {
+        // The page asks again shortly, and every answer is still "connecting".
+        made.time.runNext();
+        await settle(made.store);
+      }
+      expect(made.store.getState()).toMatchObject({view: null});
+    });
+    expect(phases).not.toContain('failed');
+    expect(phases).toContain('connecting');
+    expect(bridge.asked).toEqual([]);
+  });
+
+  test('the machine coming up shows the figures without a Retry', async () => {
+    const bridge = connecting();
+    const {made, phases} = await watch(bridge, async made => {
+      await settle(made.store);
+      bridge.connect('local');
+      for (let turn = 0; turn < 200 && made.store.getState().phase !== 'ready'; turn += 1) {
+        await Promise.resolve();
+      }
+      expect(made.store.getState().view?.hero.figure).toBe('$4.00');
+    });
+    expect(made.store.getState().phase).toBe('ready');
+    expect(phases).not.toContain('failed');
+  });
+
+  test('a connection that never comes is a failure once the wait is spent, not before', async () => {
+    const bridge = connecting();
+    const {phases} = await watch(bridge, async made => {
+      await settle(made.store);
+      for (let poll = 0; poll < 60 && made.store.getState().phase !== 'failed'; poll += 1) {
+        made.time.runNext();
+        await settle(made.store);
+      }
+      expect(made.store.getState()).toMatchObject({phase: 'failed', problem: 'timed out'});
+    });
+    expect(phases.filter(each => each === 'failed')).toHaveLength(1);
+  });
+
+  test('a machine that is offline is down at once, and the page says so', async () => {
+    const bridge = new FakeUsageBridge({
+      hosts: [{host: 'local', answer: spent(4)}],
+      unavailable: ['local'],
+    });
+    const {made} = await watch(bridge, async made => {
+      await settle(made.store);
+    });
+    expect(made.store.getState()).toMatchObject({phase: 'failed'});
   });
 });

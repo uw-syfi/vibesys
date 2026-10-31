@@ -156,11 +156,17 @@ export function AreaChart(props: {
   readonly format: (value: number) => string;
   /** Words a value on the axis, where it may be shorter than in the tooltip; `format` by default. */
   readonly axis?: (value: number) => string;
+  /**
+   * Pile the layers on one another, the first at the bottom, so the height at a slice is their
+   * sum and no two areas overlap to blend into a color that belongs to neither.
+   */
+  readonly stacked?: boolean;
 }): JSX.Element {
   const [measure, measured] = useInlineSize();
   const width = Math.max(MIN_WIDTH, measured ?? FALLBACK_WIDTH);
   const count = props.labels.length;
-  const scale = niceScale(Math.max(0, ...props.layers.flatMap(layer => layer.values)), TICKS);
+  const stack = stacked(props.layers, props.stacked === true);
+  const scale = niceScale(Math.max(0, ...stack.flatMap(each => each.upper)), TICKS);
   const ticks = scale.ticks.map(tick => ({tick, text: (props.axis ?? props.format)(tick)}));
   const left =
     EDGE + Math.ceil(Math.max(1, ...ticks.map(each => each.text.length)) * GLYPH) + LABEL_GAP;
@@ -185,13 +191,14 @@ export function AreaChart(props: {
         aria-label={`${props.label}, in ${props.unit}`}
       >
         <Axes frame={frame} ticks={ticks} labels={props.labels} />
-        {props.layers.map(layer => {
+        {stack.map(({layer, upper, lower}) => {
           const style: StyleWithVars = {'--seg-color': `var(--series-${layer.series})`};
-          const points = layer.values.map((value, at) => ({x: frame.x(at), y: frame.y(value)}));
+          const top = upper.map((value, at) => ({x: frame.x(at), y: frame.y(value)}));
+          const base = lower.map((value, at) => ({x: frame.x(at), y: frame.y(value)}));
           return (
             <g key={layer.key} className="vs-area-chart-layer" style={style}>
-              <path className="vs-area-chart-fill" d={areaPath(points, bottom)} />
-              <path className="vs-area-chart-line" d={linePath(points)} />
+              <path className="vs-area-chart-fill" d={bandPath(top, base)} />
+              <path className="vs-area-chart-line" d={linePath(top)} />
             </g>
           );
         })}
@@ -208,6 +215,26 @@ export function AreaChart(props: {
       </svg>
     </figure>
   );
+}
+
+/** One layer with the heights its area spans: from `lower` up to `upper` at each slice. */
+interface Band {
+  readonly layer: ChartLayer;
+  readonly upper: readonly number[];
+  readonly lower: readonly number[];
+}
+
+/** The bands of `layers`: each from zero, or, `piled`, each from where the one before it ends. */
+function stacked(layers: readonly ChartLayer[], piled: boolean): readonly Band[] {
+  const below: number[] = [];
+  return layers.map(layer => {
+    const lower = layer.values.map((_, at) => (piled ? (below[at] ?? 0) : 0));
+    const upper = layer.values.map((value, at) => (lower[at] ?? 0) + value);
+    if (piled) {
+      for (const [at, value] of upper.entries()) below[at] = value;
+    }
+    return {layer, upper, lower};
+  });
 }
 
 interface Point {
@@ -259,10 +286,10 @@ export function linePath(points: readonly Point[]): string {
   return path;
 }
 
-/** The area under `linePath(points)` down to `bottom`. */
-export function areaPath(points: readonly Point[], bottom: number): string {
-  const first = points[0];
-  const last = points.at(-1);
-  if (first === undefined || last === undefined) return '';
-  return `${linePath(points)} L${last.x} ${bottom} L${first.x} ${bottom} Z`;
+/** The area between the line through `upper` and the line through `lower`, drawn back to its start. */
+export function bandPath(upper: readonly Point[], lower: readonly Point[]): string {
+  const start = lower.at(-1);
+  if (upper[0] === undefined || start === undefined) return '';
+  const back = linePath([...lower].reverse()).replace(/^M\S+ \S+/, '');
+  return `${linePath(upper)} L${start.x} ${start.y}${back} Z`;
 }

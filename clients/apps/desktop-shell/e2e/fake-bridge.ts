@@ -501,7 +501,9 @@ export function installFakeUsage(seed: FakeBridgeSeed): void {
           source: set !== undefined ? 'override' : rate === null ? 'unpriced' : 'model',
         };
       }),
-      ...Object.fromEntries(['pendingRuns', 'pendingFiles', 'foldedSeries'].map(key => [key, 0])),
+      ...Object.fromEntries(
+        ['pendingRuns', 'pendingFiles', 'foldedSeries', 'ratesOmitted'].map(key => [key, 0]),
+      ),
       readAt: 1,
     };
   };
