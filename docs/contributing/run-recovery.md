@@ -53,10 +53,10 @@ once. An **open step** is a step with no result. An **epoch** is one process lif
 | `fold(log)` and `decide(state, now) -> actions` in `vs_core` | built, dormant (#3475 item 4a) |
 | Runner loop, `StepRunner` Protocol, `FakeStepRunner`, contract suite | built and dormant: `vs_runtime.api.step_runner` and `vs_runtime.api.testing`; no run selects it (#3475 item 4b) |
 | Runners: agent turn (`DispatchTurn`, `ResumeSessionTurn`, registered `SESSION_TURN` operations) and workspace | built, dormant: `vs_runtime.api.agent_step_runners`, with `vs_agent.reap_step_agents` and `AgentSessions.forget_unfinished` beneath them (#3475 item 5a). [Which runner owns each request kind](#the-runner-of-each-request-kind) names the 13 kinds with no owner |
-| Runners: Slurm and local evaluation | unbuilt; `libs/vs-slurm/src/vs_slurm/ledger.py` is the model |
+| Runners: Slurm and local evaluation (`SlurmJobStepRunner`, `LocalJobStepRunner`) | built and dormant; the local runner reaps what a dead process left through a `StageWorkReaper`; `MarkedStageWorkReaper` finds the host processes of a local evaluation by the `VIBESYS_STEP_TAG` mark its candidate session sets (Linux), and Docker candidate containers are not yet reaped by tag |
 | Runners: registered operation and adoption | built and dormant: `vs_runtime.api.operation_step_runner` and `vs_runtime.api.adoption_step_runner`, each in the contract suite (#3475 item 5c) |
 | Runner of the 13 executor kinds: `ExecutorStepRunner` | built and dormant: `vs_runtime.api.executor_step_runner`, in the contract suite for every kind (#3475 item 5d) |
-| Per-environment `clear` (Docker, SkyPilot, Modal, Host) | unbuilt; see [open risks](#open-risks) for what each environment can and cannot clear |
+| Per-environment `clear` (Docker, SkyPilot, Modal, Slurm, Host) | built, dormant: `RunEnvironment.agent_work_reaper` (#3475 item 5e); the Host environment refuses agent steps where it cannot list process environments, see [open risks](#open-risks) |
 | Pause drains within a deadline and records `Parked` | in progress (#3475 item 1) |
 | `vs-dst` kills and pauses at every log write and every await | in progress (#3475 item 2) |
 | `state.pb` as a cache, one-append commit | unbuilt |
@@ -174,9 +174,11 @@ what `clear` does for each.
 | `SnapshotAndRetain`, `SnapshotAndRetainRun`, `RetainRevision` | commit the workspace and write a retention ref | safe after `clear` of the scope's writers, so the snapshot cannot race a running agent; the ref is content-addressed | reap tagged agent processes of the scope | revision id |
 | `AdoptRevision` | write the winner into the operator's checkout | safe: it sets the target state and verifies it | none | tag |
 | `DispatchTurn`, `ResumeSessionTurn`; registered `SESSION_TURN` operations | one agent turn: a process group, writes to the workspace, tokens, tool calls | safe after `clear` only | kill the processes carrying the tag in the run's containers (`vs_agent.reap_step_agents`; the containers belong to a role or a workspace and outlive the step, so none is removed), then, unless the journal holds an answer for the invocation, return the workspace to the baseline of its access receipt (`AccessSettlement.rewind`) and forget the invocation's unanswered journal record (`AgentSessions.forget_unfinished`), so the retry dispatches it again and resumes the last completed turn | tag |
-| `SubmitMeasurement`; registered `OWNED_JOB` operations | an evaluation job on Slurm, Docker or a local process | Slurm: safe, the ledger finds the job by key. Docker and local: safe after `clear` | Slurm: adopt (job running or ended) or cancel by ledger key. Local and Docker: kill the stage process group, remove the labelled container, discard partial stage output | evaluation request digest plus tag |
+| `SubmitMeasurement`; registered `OWNED_JOB` operations | an evaluation job on Slurm, Docker or a local process | Slurm: safe, the ledger finds the job. Docker and local: safe after `clear` | Slurm: adopt (request claimed, queued, running or ended) and never cancel; `run` attaches. Local and Docker: cancel the process's own evaluation, kill the stage process group, remove the labelled container, discard partial stage output | Slurm: the ledger's content key, which `clear` computes from the step. Local: the tag |
 | registered `IDEMPOTENT_WRITE` operations: `render_artifacts`, `retain_revision`, the dynamic handoff write, issue-board `ApplyIssueChanges` and `LogProgress` | content-addressed or keyed writes | safe: each carries a key the tracker or store checks before writing | none | existing key |
 | `capture_command`, `validate_local` | run a command or validation recipe in a workspace | safe after `clear` | kill the process group, reset the workspace to the recorded commit | tag |
+
+The ledger keys a request by a hash of the content the job reads and its spec, not by the tag, so `clear(step, tag)` computes the key from the step: it opens a candidate worktree at the step's revision, hashes it, discards it, and reads the ledger. Two steps of one content therefore share one job, and a step that finds the job another step submitted attaches to it. A job that a pause or drain cancelled is final in the ledger, so the next attempt asks for a new handle of the tag (`-life-n`) and the ledger claims a new job; only an attempt that ended without a cancel attaches. A local evaluation never attaches: each run takes a fresh handle.
 
 `InspectRequest`, `InspectTurn`, `InspectOwnedJob`, `CancelOwnedResource` and `BlockRequest` are not in the
 table because they exist only to settle unknown outcomes. They are deleted.
@@ -237,8 +239,9 @@ Two things follow.
   marker sweep this page first described is not available there: the Host environment serves macOS, where
   `ps eww` does not show another process's environment (measured on Darwin 27.2: the marker of a child
   process owned by the same user is absent from its `ps eww` line), so no process can be found by the
-  marker the way a Linux `/proc/<pid>/environ` scan finds it inside a container. Nothing records a process
-  group for a Host agent yet, so the Host runner has to record the group at start.
+  marker the way a Linux `/proc/<pid>/environ` scan finds it inside a container. The Host environment finds
+  agents through the process table that item 5d builds, and refuses agent steps where that table cannot list
+  environments (see the per-environment risk below), instead of recording a process group of its own.
 - **A cancelled adoption.** `Workspaces.adopt` publishes in a worker thread, and cancelling the step ends
   the wait for it, not the thread. The commit a straggler writes is the commit the next attempt writes
   (`adopt` is idempotent), so `AdoptionStepRunner.clear` removes nothing and only proves the workspace
@@ -741,21 +744,42 @@ These are facts the implementation must settle, found while checking the design 
     The tag is stable across epochs, so the runner is safe; a retry that minted a new id would not be.
 - **The snapshot kinds are unchecked here.** `RetainByContent` is safe once every writer of the scope has
   a result, which is `decide`'s rule (item 4a); `ExecutorStepRunner` does not check it.
-- **Per-environment `clear` (item 5c, not built).** `RunEnvironment` has run-wide `reap_orphans` and
-  `reconcile_writers` today, and no step-level `clear`. The agent and stage runners take their reaper as a
-  function of the tag (`StepReaper`, `StageWorkReaper`), so each environment owes them one:
-  - **Docker** needs `vs_agent.reap_step_agents` and the step marker of item 5a; with them the Docker
-    reaper is that function bound to the run's id and Docker client. The run-wide reap would end the
-    other steps' agents, so it is not a substitute.
-  - **SkyPilot** has a Docker editor, which gets the Docker reaper, and remote clusters named per run and
-    resources (`stable_cluster_name`), not per step. Its evaluation jobs are keyed by invocation id in the
-    journal of `vs_sandbox.skypilot_recovery`, so clearing them is the job of a SkyPilot evaluation runner,
-    which no item builds.
-  - **Modal** has no job runner and no per-step resource: its apps are named per run (`_modal_app_name`),
-    so there is nothing to find by tag. Its agent container is a Docker container and gets the Docker
-    reaper.
-  - **Host** cannot sweep by the marker on macOS (see what fits none), so it needs the process group
-    recorded when the agent starts, and a ghost write is the residual.
+- **Per-environment `clear` (item 5e).** `RunEnvironment.agent_work_reaper(run_id, ...)` gives the reaper of
+  one step's agent work, by the step's tag, which `AgentTurnStepRunner` takes. The run-wide `reap_orphans`
+  would end every step's agent, so it is not a substitute. Each environment, and the step kinds a gap would
+  leave unable to run there:
+  - **Docker** sweeps the containers labelled with the run for processes whose initial environment carries
+    the tag (`DockerAgentWorkReaper`, over `vs_agent.reap_step_agents`) and removes no container.
+  - **SkyPilot** runs the agent in the same editor container, so it gets that sweep, and then cancels the
+    remote jobs the step's agent asked for. The premise that a SkyPilot evaluation is a step is wrong in
+    code: no `SubmitMeasurement` runs on SkyPilot (or Modal); the agent calls the evaluator helper inside
+    its turn, which sends the request over the host-owned bridge, and the bridge journals the invocation.
+    So there is no evaluation runner to build, and `SlurmJobStepRunner`'s shape (a polling executor under
+    a handle) does not fit. The helper sends the step mark its process inherited, the journal records it as
+    `InvocationRecord.step_tag`, and `SkyPilotStepWorkReaper` cancels the tag's jobs by cluster and job id
+    (`cancel_step_jobs`). The cluster is named per run and holds other steps' jobs, so it is never touched.
+    A job whose id the host died before recording is found by its journaled name. Invocations journaled
+    before this change carry no tag, so a rerun cannot cancel their jobs. Open: a request the helper sent
+    just before it was killed can still be journaled after the sweep read the journal, and then its job
+    runs until its own end; the window is the bridge's handling time of one request.
+  - **Modal** has no per-step handle: its app is named per run (`VIBESYS_MODAL_APP_NAME`) and the
+    candidate's `modal run` is a client process inside the agent container, so it carries the step's tag
+    and is ended by the Docker sweep. What Modal then does with remote work whose client was killed is
+    Modal's own cleanup and is not measured here; a real-tier test with a Modal account is owed.
+  - **Slurm** edits in a local Docker container too and gets the Docker sweep. Its jobs are adopted, not
+    cleared (`SlurmJobStepRunner`).
+  - **Host** finds the agent's processes by the tag in their environment through the process table. Where
+    the table cannot list process environments (macOS today) `agent_work_reaper` raises
+    `StepClearUnsupportedError`, naming `dispatch_turn`, `resume_session_turn` and
+    `execute_registered_operation`, at the start of the run, so a step that could never be cleared
+    does not wait. `MarkedStageWorkReaper` takes a matcher so one sweep serves a stage command (a handle of
+    the tag) and an agent (the tag). A local evaluation's stage commands (`SubmitMeasurement`,
+    `capture_command`, `validate_local`) have the same gap on macOS and still raise
+    `ClearUnavailableError` there, which the loop retries for ever.
+  - **Found on the way:** `SkyPilotEnvironment` inherited a Docker run-wide reap that read Docker settings
+    its configuration lacks, so resuming a SkyPilot run raised `AttributeError`; and the Modal and Slurm
+    environments never reaped their run-labelled agent containers on resume. Both are fixed, with a test
+    over every container environment.
 - **Fold cost.** Measured, see [state.pb is a cache](#statepb-is-a-cache); the keyframe interval is open.
 - **Interim bodies.** Request and event bodies in the new records are not yet proto messages. Until phase 3
   generates them, schema evolution of those bodies follows today's envelope migration chain, which is

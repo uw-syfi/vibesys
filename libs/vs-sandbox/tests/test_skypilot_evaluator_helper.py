@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 import vs_sandbox.skypilot_evaluator as helper_module  # test-isolation: failure injection exercises the private remote helper process boundary.
+from vs_sandbox.api import STEP_TAG_ENV
 from vs_sandbox.api.skypilot import (
     ArtifactFrame,
     ErrorFrame,
@@ -213,3 +214,29 @@ def test_helper_cli_requires_an_explicit_state_directory(
     assert exit_info.value.code == 2
     assert "VIBESYS_SKYPILOT_CALLER_STATE" in capsys.readouterr().err
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("step_tag", ["step-a", None])
+def test_the_helper_sends_the_step_mark_its_turn_started_it_with(
+    tmp_path: Path, step_tag: str | None
+) -> None:
+    bridge = _bridge(MemoryTransport(), [_COMPLETED])
+    run_evaluator(
+        "accuracy",
+        _SOCKET,
+        state_dir=tmp_path,
+        stdout=io.StringIO(),
+        stderr=io.StringIO(),
+        step_tag=step_tag,
+        connect=bridge.dial,
+    )
+    bridge.finish()
+
+    (request,) = bridge.requests
+    assert request.get("step_tag") == step_tag
+    assert ("step_tag" in request) == (step_tag is not None)
+
+
+def test_the_helper_names_the_mark_the_framework_sets() -> None:
+    """The helper is mounted alone, so it restates the mark's name; this pins the two together."""
+    assert helper_module.STEP_TAG_ENV == STEP_TAG_ENV

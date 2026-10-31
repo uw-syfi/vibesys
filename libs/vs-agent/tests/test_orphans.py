@@ -13,11 +13,9 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vs_agent.api import (
-    STEP_TAG_ENV,
     OrphanReapError,
     reap_orphaned_agents,
     reap_step_agents,
-    step_tag_env,
 )
 from vs_agent.api.testing import (
     DockerResult,
@@ -25,7 +23,7 @@ from vs_agent.api.testing import (
     docker_result,
     docker_timed_out,
 )
-from vs_sandbox.api import RUN_ID_LABEL
+from vs_sandbox.api import RUN_ID_LABEL, STEP_TAG_ENV, step_tag_env
 from vs_sandbox.fake_docker_engine import FakeDockerEngine
 from vs_sim.api import DISCARD
 from vs_sim.api.testing import FakePipedProcessLauncher, examples

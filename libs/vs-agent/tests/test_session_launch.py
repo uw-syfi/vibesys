@@ -54,7 +54,6 @@ from vs_agent.api import (
     CONTAINER_PYTHON,
     MAX_WHITESPACE_RUN,
     NULL_AGENT_EVENT_SINK,
-    STEP_TAG_ENV,
     AgentClient,
     AgentEvent,
     AgentEventKind,
@@ -69,7 +68,6 @@ from vs_agent.api import (
     SessionResumeError,
     SessionScope,
     container_import_roots,
-    step_tag_env,
 )
 from vs_agent.api.testing import FakeProvider
 
@@ -80,7 +78,13 @@ from vs_agent.contracts import (
     AgentSkillUse,
     AgentTurnRequest,
 )
-from vs_sandbox.api import DockerSandbox, HostResource, ProjectPathPolicy
+from vs_sandbox.api import (
+    STEP_TAG_ENV,
+    DockerSandbox,
+    HostResource,
+    ProjectPathPolicy,
+    step_tag_env,
+)
 from vs_sandbox.api.testing import FakeDockerConfinement
 from vs_sim.api.testing import HANG_GUARD_S, ManualClock, SimThreads, start_thread
 

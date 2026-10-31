@@ -1679,7 +1679,9 @@ class _FaultyResources:
     def supports_parallel_candidates(self) -> bool:
         return self._inner.supports_parallel_candidates
 
-    def create_candidate(self, workspace_id: str, revision: str, /) -> WorkspaceResource:
+    def create_candidate(
+        self, workspace_id: str, revision: str, _step_tag: str | None = None, /
+    ) -> WorkspaceResource:
         if self.fail_creates:
             self.fail_creates -= 1
             message = "transient candidate creation failure"

@@ -1,15 +1,15 @@
-"""The marker an agent process carries to say which step started it.
+"""The mark a process carries to say which step started it.
 
-A step's tag is its request id, the same in every epoch of a run. An agent process starts
-with ``STEP_TAG_ENV=<tag>`` in its environment, so the process an earlier attempt of the step
-left running is found by the tag alone (``vs_agent.orphans.reap_step_agents``). The marker is
-the process's initial environment, which the agent cannot rewrite afterwards.
+A step's work is found by its mark after the process that started it died: a stage command
+starts with ``STEP_TAG_ENV=<tag>`` in its initial environment, which its descendants inherit and
+the command cannot rewrite from outside. The mark is the process's environment, so it survives
+the launching process with no record to keep.
 """
 
 from __future__ import annotations
 
 STEP_TAG_ENV = "VIBESYS_STEP_TAG"
-"""The environment variable that names the step an agent process belongs to."""
+"""The environment variable that names the step a process belongs to."""
 
 _FORBIDDEN = ("\n", "\0")
 

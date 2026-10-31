@@ -58,6 +58,12 @@ if TYPE_CHECKING:
         tee,
     )
     from vs_sim.probes import CommandProbe, ProbeResult, ProcessesProbe, SubprocessProbe
+    from vs_sim.process_table import (
+        MarkedProcess,
+        OsProcessTable,
+        ProcessTable,
+        ProcessTableUnavailableError,
+    )
     from vs_sim.processes import (
         DEFAULT_MAX_OUTPUT_BYTES,
         LAUNCHER_LIFELINE_ENV,
@@ -200,6 +206,10 @@ _MODULES: dict[str, str] = {
     "LoopbackHttp": "vs_sim.loopback_http",
     "UrllibLoopbackHttp": "vs_sim.loopback_http",
     "PidfdProcessSignaller": "vs_sim.signals",
+    "MarkedProcess": "vs_sim.process_table",
+    "OsProcessTable": "vs_sim.process_table",
+    "ProcessTable": "vs_sim.process_table",
+    "ProcessTableUnavailableError": "vs_sim.process_table",
     "ProcessSignaller": "vs_sim.signals",
     "WriterProcessSignaller": "vs_sim.signals",
     "SignalSource": "vs_sim.signals",
@@ -257,10 +267,12 @@ __all__ = [
     "LoopSignalSource",
     "LoopbackHttp",
     "MainThreadWake",
+    "MarkedProcess",
     "MonotonicClock",
     "Network",
     "NotReleasedError",
     "NothingLeft",
+    "OsProcessTable",
     "OsProcesses",
     "OsThreads",
     "OutputSink",
@@ -277,6 +289,8 @@ __all__ = [
     "ProcessRun",
     "ProcessSignaller",
     "ProcessSpec",
+    "ProcessTable",
+    "ProcessTableUnavailableError",
     "ProcessTimedOut",
     "ProcessTimeoutError",
     "Processes",

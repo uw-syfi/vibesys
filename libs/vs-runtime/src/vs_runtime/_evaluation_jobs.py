@@ -94,6 +94,24 @@ def handle_for(request_id: RequestId) -> str:
     return "vs-" + hashlib.sha256(request_id.root.encode()).hexdigest()[:40]
 
 
+_LIFE_SEPARATOR = "-life-"
+
+
+def handle_of_life(request_id: RequestId, life: int) -> str:
+    """The handle of the tag's *life*-th evaluation: each life is one run's, the first is the base."""
+    base = handle_for(request_id)
+    return base if life == 0 else f"{base}{_LIFE_SEPARATOR}{life}"
+
+
+def is_handle_of(request_id: RequestId, handle: str) -> bool:
+    """Whether *handle* is one the tag's evaluations ran under, in any life."""
+    base = handle_for(request_id)
+    if handle == base:
+        return True
+    life = handle.removeprefix(base + _LIFE_SEPARATOR)
+    return handle.startswith(base + _LIFE_SEPARATOR) and life.isdigit()
+
+
 def awaits_submissions(core: CoreState, jobs: tuple[ResourceId, ...]) -> bool:
     """Whether every job in ``jobs`` that core does not own yet belongs to a submission in flight.
 

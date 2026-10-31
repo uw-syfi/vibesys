@@ -24,13 +24,14 @@ from typing import TYPE_CHECKING
 
 import agentshim
 
-from vs_agent.step_tags import STEP_TAG_ENV, step_tag_env
 from vs_sandbox.api import (
     INITIAL_CONTAINER_LIFE,
     RUN_ID_LABEL,
+    STEP_TAG_ENV,
     RemovalReading,
     observe_removal,
     released,
+    step_tag_env,
 )
 
 if TYPE_CHECKING:
