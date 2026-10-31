@@ -32,6 +32,7 @@ from vs_sandbox.fake_docker_confinement import FakeDockerConfinement
 from vs_sandbox.fake_docker_engine import FakeContainer, FakeDockerEngine
 from vs_sandbox.fake_gpu_telemetry import FakeGpuTelemetry
 from vs_sandbox.fake_host_container import HostExecutedContainer, HostExecutedContainerBackend
+from vs_sandbox.fake_skypilot_cluster import FakeSkyPilotCluster
 from vs_sandbox.fake_step_containers import FakeRunStepContainers, FakeStepContainers
 from vs_sandbox.fake_stoppable_process import FakeStoppableProcess, StoppableScript
 from vs_sandbox.gpu_telemetry_contracts import GpuTelemetryContract, TelemetryHarness
@@ -55,6 +56,7 @@ __all__ = [
     "FakeLifecycleRunner",
     "FakeRunStepContainers",
     "FakeRunnerCreation",
+    "FakeSkyPilotCluster",
     "FakeStepContainers",
     "FakeStoppableProcess",
     "GpuTelemetryContract",
