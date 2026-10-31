@@ -54,6 +54,15 @@ Keep measurements serialized as tracked background Bash commands (`run_in_backgr
 Use `track` with the Bash task ID and a bounded PID-file handoff (`--pid-file <file> --timeout 10`); after its completion
 notification use `untrack`.
 
+Never stop to ask the user: decide, and log the decision (alternatives, reason, how to undo it) in
+`ledger.md`. Judging also takes a dispatch slot, so keep one free for it. A judge result of
+`unmeasured` records no pass: re-judge once the measurement lands.
+
+Plan the clock backwards. The last `move-main` must leave room for one full fresh measurement of
+main plus a margin, so write that deadline in `run.json` notes at the start. When one measurement
+takes tens of minutes (a remote queue), start it for each commit as soon as the commit exists,
+and rely on its multi-sample record, not on one quick sample, which can understate the gain.
+
 Branch new ideas from the current winner. When leaving slots idle, run
 `idle --run "$RUN" --reason "<why>"`; the controller records the decision in state, ledger
 and report. It holds until a new item returns or main moves; then decide again.
@@ -64,6 +73,12 @@ the budget or an open-ended polling loop.
 Bounded readiness waits for a service are allowed; use the task readiness probe through the measure skill service helper, with a fixed
 attempt limit and fail if it never becomes ready. Do useful work or yield. A cron alone does
 not release the Stop hook.
+
+## Reporting
+
+Describe every item by what it does in plain words, then its code name in parentheses, such as
+"paged attention for decode (d2)". Never use a bare code name in the ledger, a report or a message
+to the user. Lead each report with time left, then a table of items with status and measured gain.
 
 ## Wrap-up
 

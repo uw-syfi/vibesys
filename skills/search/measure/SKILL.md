@@ -69,3 +69,12 @@ Use `record --observations <JSON file>` for descriptive auxiliary measurements s
 latency: map metric names (including units) to numeric sample arrays. `compare` and the
 report print the pooled observed ranges for the exact contributing revisions and evaluator.
 Derive prose ranges only from that output; omit ranges that were not recorded.
+
+## Slow or remote measurements
+
+When one measurement takes long (a cluster queue), submit one job per commit, cache its results
+by commit SHA, and record from the cache. After any relaunch, list the queue and cancel a
+duplicate job for the same commit before assuming the first died. Start the job as a tracked
+background command, never with shell `&`. Do not use `pkill -f` from the shell that matches
+its own command line; kill by the saved PID. Judge and compare on the multi-sample official
+record; a single development sample is only a smoke check.
