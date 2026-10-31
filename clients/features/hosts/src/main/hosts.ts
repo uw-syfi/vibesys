@@ -53,6 +53,7 @@ import type {
 } from '@vibesys/ipc';
 import type {LogListOutcome, LogReadOutcome} from '@vibesys/logs';
 import {
+  configuredMachines,
   rememberInstance,
   type SettingsStore,
   settingsFor,
@@ -318,7 +319,7 @@ export class Hosts {
    */
   async configured(): Promise<void> {
     const {settings} = await this.#deps.settings.hosts();
-    this.#configured = new Set(Object.keys(settings.hosts).map(key => hostKey(hostFromKey(key))));
+    this.#configured = new Set(configuredMachines(settings).map(hostKey));
     await this.#reconcile(this.#changed());
   }
 

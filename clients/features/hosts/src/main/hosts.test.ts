@@ -1807,6 +1807,7 @@ describe('Hosts watch the gateway of every desired host', () => {
   });
 
   describe('configured machines', () => {
+    // This Mac is a machine on every profile, as the Machines screen lists it: it is watched too.
     test.each([
       [[ALPHA]],
       [[BETA]],
@@ -1814,22 +1815,22 @@ describe('Hosts watch the gateway of every desired host', () => {
     ] as const)('every configured machine is watched with no recent run: %j', async configured => {
       const world = await gatewayWorld({configured});
       await world.hosts.configured();
-      expect(world.watched()).toEqual(configured.map(hostKey).sort());
+      expect(world.watched()).toEqual([hostKey(LOCAL), ...configured.map(hostKey)].sort());
     });
 
-    test('nothing is watched when no machine is configured', async () => {
+    test('This Mac is watched on a profile with no saved machine and no recent run', async () => {
       const world = await gatewayWorld({configured: []});
       await world.hosts.configured();
-      expect(world.watched()).toEqual([]);
+      expect(world.watched()).toEqual([hostKey(LOCAL)]);
     });
 
     test('a removed machine stops being watched and a re-read cannot bring it back', async () => {
       const world = await gatewayWorld({configured: [ALPHA, BETA]});
       await world.hosts.configured();
       await world.hosts.remove(ALPHA);
-      expect(world.watched()).toEqual(['ssh:beta']);
+      expect(world.watched()).toEqual(['local', 'ssh:beta']);
       await world.hosts.configured();
-      expect(world.watched()).toEqual(['ssh:beta']);
+      expect(world.watched()).toEqual(['local', 'ssh:beta']);
     });
   });
 });
