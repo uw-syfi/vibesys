@@ -107,6 +107,27 @@ export function signInBlocked(login: AgentLogin, machine: string): string | null
   return `${login.provider_name} has no login command to start.`;
 }
 
+/** What a started login asks the person to do, as the two things to read off it. */
+export interface LoginSteps {
+  /** The address to open. */
+  readonly link: string;
+  /** The code to enter there; null for a page that takes none. */
+  readonly code: string | null;
+}
+
+// The host words the line (`login_instruction` in `host_agent_logins.py`): `Open <url>` and, when
+// the login showed a code, ` and enter the code <code>`.
+const LOGIN_LINE = /^Open (\S+)(?: and enter the code (\S.*))?$/;
+
+/**
+ * The link and the code of the host's login instruction, or null for a line in any other shape
+ * (a host that words it differently): the line is then shown as it came.
+ */
+export function loginSteps(instruction: string): LoginSteps | null {
+  const found = LOGIN_LINE.exec(instruction);
+  return found === null ? null : {link: found[1] ?? '', code: found[2] ?? null};
+}
+
 /** What the Machines entry of Settings says of the saved machines: how many, and how many need attention. */
 export function machinesDetail(saved: number, attention: number): string {
   const count = `${saved} saved`;

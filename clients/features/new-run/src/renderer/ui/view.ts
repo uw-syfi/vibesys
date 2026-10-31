@@ -27,6 +27,7 @@ import {
   type NewRunSnapshot,
   offers,
   projectPath,
+  startUnconfirmed,
   type Vendor,
 } from '../../state/index.js';
 import {type FailureWords, failureWords} from './cause-words.js';
@@ -451,11 +452,15 @@ function inputReadiness(snapshot: NewRunSnapshot): Readiness[] {
   return [{id: 'checking', state: 'pending', label: 'Checking these inputs on the machine'}];
 }
 
+/** Why Start waits after a start that may have happened; the screen draws it beside Start. */
+const UNCONFIRMED_START = 'Check Runs first';
+
 /** Why Start is disabled now, or undefined when it may start. */
 export function startBlocked(snapshot: NewRunSnapshot): string | undefined {
   const {context} = snapshot;
   if (snapshot.matches({editing: {action: 'starting'}})) return 'Starting the run.';
   if (snapshot.matches({editing: {action: 'fixing'}})) return 'Making the project.';
+  if (startUnconfirmed(context.problem)) return UNCONFIRMED_START;
   if (missingFeatures(context.helper, context.form.machine).length > 0) {
     return `VibeSys on ${machineLabel(context.form.machine)} needs an update`;
   }

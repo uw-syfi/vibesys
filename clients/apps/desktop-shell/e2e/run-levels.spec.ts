@@ -516,11 +516,12 @@ test('the scrubber replays the run’s ideas at an earlier event and returns to 
     ],
   );
   await transitionJourney(page, 'trace', 'stopped');
-  await page.locator('.vs-banner').getByRole('button', {name: 'Show details'}).click();
-  await expect(page.getByText('Stopped by you.')).toBeVisible();
+  await expect(
+    page.getByRole('main').locator('.vs-chip', {hasText: 'Stopped'}),
+  ).toHaveAccessibleDescription('Stopped by you.');
   await check(page, 'ink-run-ended');
-  // The banner's View logs is a zoom the address follows too.
-  await page.getByRole('button', {name: 'View logs'}).click();
+  // The Logs tab is a zoom the address follows too.
+  await page.getByRole('radiogroup', {name: 'Show'}).getByText('Logs').click();
   await expect(page).toHaveURL(/&mode=logs$/);
   await page.goBack();
   await expect(page).toHaveURL(RUN_LEVEL);

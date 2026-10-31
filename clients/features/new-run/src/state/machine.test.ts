@@ -47,6 +47,7 @@ import {
   runInputs,
   sameTarget,
   splitWords,
+  startUnconfirmed,
   vettedModels,
 } from './index.js';
 
@@ -255,6 +256,7 @@ function inputEvent(random: Seeded, snapshot: SnapshotFrom<typeof newRunMachine>
       path: '/made/kv',
     },
     {type: 'start'},
+    {type: 'looked'},
   ]);
 }
 
@@ -265,6 +267,8 @@ function expectStartOnlyWhenChecksPass(before: Snapshot, after: Snapshot): void 
   const starting = (snapshot: Snapshot) => snapshot.matches({editing: {action: 'starting'}});
   if (!starting(before) && starting(after)) {
     expect(checksPass(before.context.form, before.context.checks)).toBe(true);
+    // A start that may have happened is not repeated until the person has looked.
+    expect(startUnconfirmed(before.context.problem)).toBe(false);
   }
 }
 
@@ -318,6 +322,13 @@ function expectAsksOnlyWhatHelperTakes(before: Snapshot, after: Snapshot): void 
   if (entered({editing: {action: 'starting'}})) {
     expect(offers(helper, form.machine, 'run_options')).toBe(true);
     expect(missingFeatures(helper, form.machine)).toEqual([]);
+  }
+}
+
+/** Looking among the runs after a start that may have happened ends that problem, Start opens. */
+function expectLookingOpensStart(before: Snapshot, event: NewRunEvent, after: Snapshot): void {
+  if (event.type === 'looked' && startUnconfirmed(before.context.problem)) {
+    expect(after.context.problem).toBeNull();
   }
 }
 
@@ -424,6 +435,7 @@ describe('newRunMachine', () => {
         },
         also: (before, event, after) => {
           expectStartOnlyWhenChecksPass(before, after);
+          expectLookingOpensStart(before, event as NewRunEvent, after);
           expectInputKeepsFacts(before, event as NewRunEvent, after);
           expectInputApplied(before, event as NewRunEvent, after);
           expectAsksOnlyWhatHelperTakes(before, after);

@@ -1,9 +1,11 @@
 import {describe, expect, test} from 'bun:test';
 import type {AgentLogin} from '@vibesys/ipc';
+import fc from 'fast-check';
 import {
   failureWords,
   hardwareModels,
   hardwareWords,
+  loginSteps,
   loginWords,
   machinesDetail,
   modalWords,
@@ -98,5 +100,34 @@ describe('a failed reading', () => {
 
   test('any other failure is shown in the words it came with', () => {
     expect(failureWords({error: 'No such cluster.'})).toEqual({body: 'No such cluster.'});
+  });
+});
+
+describe('loginSteps', () => {
+  test('property: the host’s line gives back its link and its code', () => {
+    fc.assert(
+      fc.property(
+        fc.webUrl(),
+        fc.option(fc.stringMatching(/^[A-Z0-9][A-Z0-9-]{1,10}$/), {nil: null}),
+        (link, code) => {
+          // The line `login_instruction` words on the host.
+          const line = code === null ? `Open ${link}` : `Open ${link} and enter the code ${code}`;
+          expect(loginSteps(line)).toEqual({link, code});
+        },
+      ),
+      {numRuns: 100, seed: 3515},
+    );
+  });
+
+  test('a line of another shape is not taken apart', () => {
+    for (const line of [
+      '',
+      'Run claude login',
+      'Open',
+      'open https://a.example',
+      'Visit https://a.example',
+    ]) {
+      expect(loginSteps(line), line).toBeNull();
+    }
   });
 });
