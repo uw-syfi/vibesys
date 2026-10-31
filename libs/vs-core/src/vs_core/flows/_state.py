@@ -283,6 +283,9 @@ class FlowChanges(Value):
     steps: tuple[Step, ...]
     dropped: tuple[Dropped, ...] = ()
     restart_settled: tuple[RestartSettled, ...] = ()
+    issued: tuple[Issued, ...] = ()
+    """The decision numbers the steps moved: a restart from an older checkpoint must number past
+    every id the dead flows issued, or an answer for an old decision reaches a new one."""
 
 
 _DECISIONS = TypeAdapter(list[Decision])

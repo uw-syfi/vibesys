@@ -151,8 +151,9 @@ def _run_shell_host(
     world = outside.world
     setup = world.setup
     enactment = _Enactment(world)
+    resumed = options.resumed and setup.upgrade is not None
     host = scripted_host(
-        setup.new_launch(),
+        setup.upgrade() if resumed and setup.upgrade is not None else setup.new_launch(),
         world,
         setup.harness,
         setup.schemas,
