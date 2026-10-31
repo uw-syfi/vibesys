@@ -209,6 +209,9 @@ func (h *Hub) start(ref producerRef) {
 // which stops waiting for it.
 func (h *Hub) stop(ref producerRef) {
 	self := h.running[ref]
+	if self == nil {
+		return
+	}
 	self.cancel()
 	go func() {
 		grace := h.clock.NewTicker(StopGrace)
