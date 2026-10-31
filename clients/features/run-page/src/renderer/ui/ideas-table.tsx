@@ -38,7 +38,7 @@ import {
   runningWords,
   type TableColumn,
 } from '../../state/index.js';
-import {formatValue, ratio} from '../../state/span-reading.js';
+import {compactValue, formatValue, ratio} from '../../state/span-reading.js';
 import type {ViewBase} from './views/props.js';
 
 const STATUS_TONES: Readonly<Record<IdeaStatus, StatusTone>> = {
@@ -59,18 +59,45 @@ const CHANGE_TONES: Readonly<Record<NonNullable<ObjectiveCell['change']>, TextTo
 /** What an empty cell says. */
 const NONE = '–';
 
-/** A reading's multiple as a cell says it: the multiple, in its tone, or `No clear change`. */
-function Multiple(props: {readonly cell: ObjectiveCell}): JSX.Element | null {
+/**
+ * How a multiple within noise of the input reads: the muted multiple (`ratio`), `No clear change`
+ * (`words`), or the words where the cell has room and the multiple where it has not (`both`).
+ */
+type FlatReading = 'ratio' | 'words' | 'both';
+
+/** A reading's multiple as a cell says it: the multiple in its tone, and a flat one as `flat` says. */
+function Multiple(props: {
+  readonly cell: ObjectiveCell;
+  readonly flat: FlatReading;
+}): JSX.Element | null {
   const {multiple, change} = props.cell;
   if (multiple === null || change === null) return null;
-  return (
+  const figure = (
     <Text variant="code" tone={CHANGE_TONES[change]}>
-      {change === 'same' ? NO_CLEAR_CHANGE : ratio(multiple)}
+      {ratio(multiple)}
     </Text>
+  );
+  if (change !== 'same' || props.flat === 'ratio') return figure;
+  const words = (
+    <Text variant="code" tone="muted">
+      {NO_CLEAR_CHANGE}
+    </Text>
+  );
+  if (props.flat === 'words') return words;
+  return (
+    <>
+      <span data-optional>{words}</span>
+      <span data-narrow-only>{figure}</span>
+    </>
   );
 }
 
-/** The cell of one objective: a dot where the reading set a best, the value, the multiple. */
+/**
+ * The cell of one objective: a dot where the reading set a best, the value, the multiple. The value
+ * is compact (`6.05M`), its exact figure the cell's hint. While the list is narrow the cell keeps the
+ * multiple alone, for every objective: a run of one objective draws it here, where the `vs input`
+ * column that states it while the list is wide has given way.
+ */
 function ObjectiveFigure(props: {
   readonly cell: ObjectiveCell;
   readonly column: TableColumn;
@@ -78,26 +105,25 @@ function ObjectiveFigure(props: {
 }): JSX.Element {
   const {cell, column, form} = props;
   if (cell.value === null) return <Text tone="muted">{NONE}</Text>;
-  const value = formatValue(cell.value);
-  const exact = `${value}${column.unit === '' ? '' : ` ${column.unit}`}`;
-  // The unit is the column's header; the cell drops it when the list is narrow (`data-optional`).
-  const alone = column.unit === '' ? null : <span data-optional>{` ${column.unit}`}</span>;
+  const unit = form === 'value' && column.unit !== '' ? ` ${column.unit}` : '';
+  // A reading with no multiple (no input) keeps its value when the list is narrow.
+  const gives = cell.multiple !== null;
   return (
-    <span title={exact}>
-      <CellInline>
-        <CellMark on={cell.setBest} />
-        {form === 'multiple' ? null : (
-          // Beside a multiple the value gives way when the list is narrow; alone it keeps its place.
-          <span data-optional={form === 'value-multiple' || undefined}>
-            <Text variant="code">
-              {value}
-              {form === 'value' ? alone : null}
-            </Text>
-          </span>
-        )}
-        {form === 'value' ? null : <Multiple cell={cell} />}
-      </CellInline>
-    </span>
+    <CellInline>
+      <CellMark on={cell.setBest} />
+      {form === 'multiple' ? null : (
+        <span data-optional={gives || undefined}>
+          <Text variant="code">{`${compactValue(cell.value)}${unit}`}</Text>
+        </span>
+      )}
+      {form === 'value' ? (
+        <span data-narrow-only>
+          <Multiple cell={cell} flat="ratio" />
+        </span>
+      ) : (
+        <Multiple cell={cell} flat={form === 'value-multiple' ? 'both' : 'ratio'} />
+      )}
+    </CellInline>
   );
 }
 
@@ -141,11 +167,14 @@ function objectiveColumns(
       header: column.title,
       size: table.form === 'multiple' ? 'short' : 'wide',
       narrow: 'short',
+      tight: 'compact',
       hint: row => {
         const cell = row.cells[at];
         return cell?.value == null ? undefined : `${formatValue(cell.value)} ${column.unit}`.trim();
       },
-      ...(at > 0 ? {optional: true} : {}),
+      ...(at === table.columns.length - 1 && table.more > 0
+        ? {note: {label: `+${table.more}`, hint: `${table.more} more objectives`}}
+        : {}),
       sort: sorted({by: 'objective', index: column.index}),
       cell: row => {
         const cell = row.cells[at];
@@ -159,6 +188,11 @@ function objectiveColumns(
   );
 }
 
+/** A gain with its sign: a line that ended below its best has a negative one. */
+function signed(gain: number): string {
+  return gain < 0 ? `−${compactValue(-gain)}` : `+${compactValue(gain)}`;
+}
+
 /** The columns of a run with one objective: the multiple of the input, each comparison, the share. */
 function singleColumns(table: IdeasTableView): readonly Column[] {
   const vsInput: Column = {
@@ -168,7 +202,11 @@ function singleColumns(table: IdeasTableView): readonly Column[] {
     optional: true,
     cell: row => {
       const cell = row.cells[0];
-      return cell === undefined || cell.multiple === null ? quiet(NONE) : <Multiple cell={cell} />;
+      return cell === undefined || cell.multiple === null ? (
+        quiet(NONE)
+      ) : (
+        <Multiple cell={cell} flat="words" />
+      );
     },
   };
   const comparisons = table.baselines.map(
@@ -189,10 +227,12 @@ function singleColumns(table: IdeasTableView): readonly Column[] {
       row.share === null ? (
         quiet(NONE)
       ) : (
-        <Text variant="code">{`+${formatValue(row.share.gain)} ${row.share.percent}%`}</Text>
+        <Text variant="code">{`${signed(row.share.gain)} ${row.share.percent}%`}</Text>
       ),
   };
-  return [vsInput, ...comparisons, ...(table.shares ? [share] : [])];
+  // A run with no input has no multiple to state: its column would read a dash on every row.
+  const known = table.columns[0]?.input != null;
+  return [...(known ? [vsInput] : []), ...comparisons, ...(table.shares ? [share] : [])];
 }
 
 function leadColumns(base: ViewBase): readonly Column[] {
@@ -216,7 +256,7 @@ function leadColumns(base: ViewBase): readonly Column[] {
         row.builtOn.parent === null ? (
           quiet(row.builtOn.label)
         ) : (
-          <CellLink label={markdownToPlain(row.builtOn.label)} />
+          <CellLink label={markdownToPlain(row.builtOn.label)} lit={row.lineage || row.selected} />
         ),
     },
     {
@@ -224,6 +264,7 @@ function leadColumns(base: ViewBase): readonly Column[] {
       header: 'Status',
       size: 'wide',
       narrow: 'medium',
+      tight: 'dot',
       wrap: true,
       hint: row => [row.status.word, row.status.cause].filter(part => part !== null).join(' · '),
       cell: row => (
@@ -231,7 +272,9 @@ function leadColumns(base: ViewBase): readonly Column[] {
           main={
             <CellInline nowrap>
               <StatusDot tone={STATUS_TONES[row.status.status]} label={row.status.word} />
-              <Text>{row.status.word}</Text>
+              <span data-tight-hide>
+                <Text>{row.status.word}</Text>
+              </span>
             </CellInline>
           }
           note={row.status.cause}
@@ -287,6 +330,17 @@ function Chips(props: {
   return <DotLegend items={items} />;
 }
 
+/** The exact figures of a row, each under its objective's name: the cells show them compact. */
+function describeFigures(table: IdeasTableView, row: IdeaTableRow): string | undefined {
+  const figures = table.columns.flatMap((column, at) => {
+    const value = row.cells[at]?.value;
+    return value == null
+      ? []
+      : [`${column.title} ${`${formatValue(value)} ${column.unit}`.trim()}`];
+  });
+  return figures.length === 0 ? undefined : figures.join(', ');
+}
+
 export function IdeasTable(props: {
   readonly base: ViewBase;
   readonly filter: IdeasFilter;
@@ -305,24 +359,16 @@ export function IdeasTable(props: {
   });
   const shown = table.rows.length;
   return (
-    <Stack gap="space-3" grow>
-      <Row gap="space-3" align="center">
-        <Row gap="space-3" align="baseline">
-          <Text variant="heading">Ideas</Text>
-          <Text tone="muted">
-            {shown === table.total ? `${table.total}` : `${shown} of ${table.total}`}
-          </Text>
-        </Row>
-        <Row gap="space-0" grow justify="end">
-          <SearchBox
-            label="Search ideas"
-            placeholder="Search ideas"
-            value={filter.query}
-            change={query => props.dispatch({type: 'ideas-filter', filter: {...filter, query}})}
-          />
-        </Row>
+    <Stack gap="space-3">
+      <Row gap="space-4" align="center" wrap justify="between">
+        <Chips table={table} filter={filter} dispatch={props.dispatch} />
+        <SearchBox
+          label="Search ideas"
+          placeholder="Search ideas"
+          value={filter.query}
+          change={query => props.dispatch({type: 'ideas-filter', filter: {...filter, query}})}
+        />
       </Row>
-      <Chips table={table} filter={filter} dispatch={props.dispatch} />
       {shown === 0 ? (
         <Text tone="muted">No matches</Text>
       ) : (
@@ -335,6 +381,8 @@ export function IdeasTable(props: {
           select={id => base.zoom({type: 'open-idea', idea: id})}
           hover={id => props.dispatch({type: 'ideas-hover', idea: id})}
           marks={row => ({lineage: row.lineage, fresh: row.fresh})}
+          describe={row => describeFigures(table, row)}
+          crowded={table.columns.length > 2}
         />
       )}
     </Stack>

@@ -5,8 +5,8 @@ import {navigationKeys, pickKeys} from './listbox.js';
 import {Text} from './text.js';
 import {InSlot, useSlot, useWindowed} from './windowing.js';
 
-/** How wide a column is: the rest of the row, a name's width, or a figure's. */
-export type ColumnSize = 'fill' | 'wide' | 'medium' | 'short';
+/** How wide a column is: the rest of the row, a name's width, a figure's, or a mark and a few digits. */
+export type ColumnSize = 'fill' | 'wide' | 'medium' | 'short' | 'compact' | 'dot';
 
 /** A fill column keeps a readable width while the list has room for every column. */
 const TRACKS: Readonly<Record<ColumnSize, string>> = {
@@ -14,6 +14,8 @@ const TRACKS: Readonly<Record<ColumnSize, string>> = {
   wide: 'calc(var(--gantt-figure) + var(--space-8))',
   medium: 'calc(var(--gantt-figure) + var(--space-3))',
   short: 'var(--gantt-figure)',
+  compact: 'calc(var(--gantt-figure) * 0.7)',
+  dot: 'calc(var(--dot) + var(--space-4))',
 };
 
 /** One column of a `ColumnList`: its header, how a row fills its cell, and how the header sorts. */
@@ -34,8 +36,12 @@ export interface ListColumn<Row> {
   readonly wrap?: boolean;
   /** The column's size when the list is narrow; the same by default. */
   readonly narrow?: ColumnSize;
+  /** The column's size when a crowded list is tighter still; its `narrow` size by default. */
+  readonly tight?: ColumnSize;
   /** What the pointer shows over a cell whole, for a cell that may be cut short. */
   readonly hint?: (row: Row) => string | undefined;
+  /** A small mark after the header (`+2`) and what it stands for, on hover. */
+  readonly note?: {readonly label: string; readonly hint: string};
   readonly cell: (row: Row) => ReactNode;
   /**
    * Pressing the header sorts by the column. `marked` draws the arrow on the column the list is
@@ -65,6 +71,7 @@ function Header<Row>(props: {
           data-align={column.align}
           data-optional={column.optional || undefined}
           data-marked={column.sort?.marked || undefined}
+          data-tight-blank={column.tight === 'dot' || undefined}
         >
           {column.sort === undefined || column.sort.marked ? (
             <span className="vs-columnlist-marked">
@@ -75,6 +82,11 @@ function Header<Row>(props: {
             <button type="button" onClick={column.sort.press} title={`Sort by ${column.header}`}>
               {column.header}
             </button>
+          )}
+          {column.note === undefined ? null : (
+            <span className="vs-columnlist-note" title={column.note.hint}>
+              {column.note.label}
+            </span>
           )}
         </span>
       ))}
@@ -88,6 +100,7 @@ function Row<Row>(props: {
   readonly columns: readonly ListColumn<Row>[];
   readonly selected: boolean;
   readonly marks: RowMarks;
+  readonly describe: string | undefined;
   readonly select: () => void;
   readonly hover: ((on: boolean) => void) | undefined;
 }): JSX.Element {
@@ -100,6 +113,7 @@ function Row<Row>(props: {
       role="option"
       tabIndex={props.selected ? 0 : -1}
       aria-selected={props.selected}
+      aria-description={props.describe}
       aria-posinset={slot === null ? undefined : slot.index + 1}
       aria-setsize={slot === null ? undefined : slot.size}
       data-lineage={props.marks.lineage || undefined}
@@ -150,6 +164,14 @@ export function ColumnList<Row>(props: {
   readonly select: (key: string) => void;
   readonly hover?: (key: string | null) => void;
   readonly marks?: (row: Row) => RowMarks;
+  /** The row's figures whole, for assistive technology: a cell may show them cut short or compact. */
+  readonly describe?: (row: Row) => string | undefined;
+  /**
+   * Too many columns for the room a narrow list has: below its tight width the columns take their
+   * `tight` size and the parts of a cell marked `data-tight-hide` give way (a status word beside
+   * its dot).
+   */
+  readonly crowded?: boolean;
 }): JSX.Element {
   const headerId = useId();
   const ids = props.rows.map(props.rowKey);
@@ -165,23 +187,27 @@ export function ColumnList<Row>(props: {
     if (event.target !== event.currentTarget) return;
     win.reveal(selectedIndex >= 0 ? selectedIndex : 0, row => row.focus());
   };
-  const tracksOf = (columns: readonly ListColumn<Row>[], narrow: boolean): string =>
+  const tracksOf = (
+    columns: readonly ListColumn<Row>[],
+    tier: 'wide' | 'narrow' | 'tight',
+  ): string =>
     columns
-      .map(column =>
-        narrow && column.size === 'fill'
-          ? 'minmax(0, 1fr)'
-          : TRACKS[(narrow && column.narrow) || column.size],
-      )
+      .map(column => {
+        const size =
+          tier === 'wide'
+            ? column.size
+            : ((tier === 'tight' ? column.tight : undefined) ?? column.narrow ?? column.size);
+        return tier !== 'wide' && column.size === 'fill' ? 'minmax(0, 1fr)' : TRACKS[size];
+      })
       .join(' ');
+  const kept = props.columns.filter(column => column.optional !== true);
   const tracks = {
-    '--columns': tracksOf(props.columns, false),
-    '--columns-narrow': tracksOf(
-      props.columns.filter(column => column.optional !== true),
-      true,
-    ),
+    '--columns': tracksOf(props.columns, 'wide'),
+    '--columns-narrow': tracksOf(kept, 'narrow'),
+    '--columns-tight': tracksOf(kept, 'tight'),
   } as CSSProperties;
   return (
-    <div className="vs-columnlist" style={tracks}>
+    <div className="vs-columnlist" style={tracks} data-crowded={props.crowded || undefined}>
       <Header columns={props.columns} id={headerId} />
       <div
         ref={win.scroller}
@@ -206,6 +232,7 @@ export function ColumnList<Row>(props: {
                 columns={props.columns}
                 selected={key === props.selected}
                 marks={props.marks?.(row) ?? {}}
+                describe={props.describe?.(row)}
                 select={() => props.select(key)}
                 hover={props.hover === undefined ? undefined : on => props.hover?.(on ? key : null)}
               />
@@ -235,10 +262,13 @@ export function CellLines(props: {
   );
 }
 
-/** A cell's word that acts on its own (the column's `act`), drawn as a link. */
-export function CellLink(props: {readonly label: string}): JSX.Element {
+/**
+ * A cell's word that acts on its own (the column's `act`), drawn as a link: quiet, and in the accent
+ * while `lit` (its row is on the path to the selected row).
+ */
+export function CellLink(props: {readonly label: string; readonly lit?: boolean}): JSX.Element {
   return (
-    <span className="vs-columnlist-link" title={props.label}>
+    <span className="vs-columnlist-link" data-lit={props.lit || undefined} title={props.label}>
       {props.label}
     </span>
   );

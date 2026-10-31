@@ -24,7 +24,7 @@ export interface ObjectiveSpec {
 }
 
 /** One generated idea: a reading of every objective, and maybe a second one a moment later. */
-export interface IdeaSpec {
+interface IdeaSpec {
   readonly passed: boolean;
   /** Its reading of each objective, as a multiple of the objective's input (1: the input's own). */
   readonly ratios: readonly number[];

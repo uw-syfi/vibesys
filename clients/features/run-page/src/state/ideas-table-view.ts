@@ -76,6 +76,8 @@ export interface IdeaTableRow {
   readonly agentSeconds: number;
   /** An idea built the selected idea on its way: the rows of its lineage carry a bar. */
   readonly lineage: boolean;
+  /** It is the idea the charts single out. */
+  readonly selected: boolean;
   readonly fresh: boolean;
 }
 
@@ -255,6 +257,7 @@ function rowOf(item: Candidate, context: RowContext): IdeaTableRow {
       gain !== null && fraction !== undefined ? {gain, percent: Math.round(fraction * 100)} : null,
     agentSeconds: workedSeconds(item, context.now),
     lineage: context.lit.has(item.id) && item.id !== context.selected,
+    selected: item.id === context.selected,
     fresh: model.changed.has(item.id),
   };
 }

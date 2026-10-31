@@ -1,6 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Locator, type Page, test} from '@playwright/test';
 import type {RunFixture} from '@vibesys/run-fixtures';
+import {scrolledToEnd} from './checks/settle.js';
 import {
   type FakeBridgeSeed,
   type FakeWindows,
@@ -307,6 +308,8 @@ test('the performance row is the same element, in the same place and size, at ev
 }) => {
   await openRun(page);
   await expect(perfChart(page)).toBeVisible();
+  // The rows are below the charts: scrolled to them first, a click scrolls nothing.
+  await scrolledToEnd(page);
   await perfChart(page).evaluate(chart => chart.setAttribute('data-probe', 'perf'));
   const atRun = await perfRow(page);
   expect(atRun.probe).toBe('perf');

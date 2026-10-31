@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
 import fc from 'fast-check';
-import {settled} from './checks/settle.js';
+import {scrolledToEnd, settled} from './checks/settle.js';
 import {type Anchor, anchorsOf, RUN_ANCHORS, stabilityViolations} from './checks/stability.js';
 import {
   type FakeBridgeSeed,
@@ -305,6 +305,7 @@ test('choosing another idea keeps the list, the detail and the chart where they 
   await openRun(page, 10);
   const options = page.getByRole('listbox', {name: 'Ideas'}).getByRole('option');
   await settled(page);
+  await scrolledToEnd(page);
   await options.nth(0).click();
   await expect(page.getByRole('listbox', {name: /steps$/})).toBeVisible();
   await settled(page);

@@ -4,7 +4,7 @@ import {FAILURE_REASONS} from '@vibesys/run-fixtures';
 import type {Candidate, CandidateMeasurement} from '@vibesys/run-state/candidates';
 import fc from 'fast-check';
 import type {Change} from './headline.js';
-import {IDEA_STATUSES, ideaStatus, STATUS_WORDS} from './idea-status.js';
+import {IDEA_STATUSES, ideaStatus, REASON_WORDS, STATUS_WORDS} from './idea-status.js';
 import {idea} from './timeline-fixtures.js';
 
 const changes: fc.Arbitrary<Change | null> = fc.constantFrom('faster', 'slower', 'same', null);
@@ -38,15 +38,21 @@ describe('the status of an idea', () => {
     }
   });
 
-  test('says no cause for a reason that is no identifier: prose is never shown as a cause', () => {
+  test('says no cause for a reason outside the closed set, identifier-shaped or prose', () => {
     fc.assert(
       fc.property(
-        fc.string().filter(text => !/^[a-z][a-z0-9]*(?:[_-][a-z0-9]+)*$/.test(text)),
+        fc.oneof(fc.string(), fc.stringMatching(/^[a-z][a-z0-9]*(?:[_-][a-z0-9]+)*$/)),
         text => {
+          fc.pre(!FAILURE_REASONS.includes(text));
           expect(ideaStatus(failed(text), null, false).cause).toBeNull();
         },
       ),
     );
+    expect(ideaStatus(failed('oom-killed'), null, false).cause).toBeNull();
+  });
+
+  test('has a word for every reason the run protocol gives, and for no other', () => {
+    expect(Object.keys(REASON_WORDS).sort()).toEqual([...FAILURE_REASONS].sort());
   });
 
   test('reads the cause of the reasons the screen words by hand', () => {

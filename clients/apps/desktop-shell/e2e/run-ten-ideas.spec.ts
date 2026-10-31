@@ -30,8 +30,6 @@ const failedRows = (page: Page) =>
 
 test('failed ideas are listed in the flat table and a chip lists only them', async ({page}) => {
   await openFixture(page, fixtureNamed('finished-ten-ideas'));
-  // Tall enough for the charts and every row: the list draws the rows its pane has room for.
-  await page.setViewportSize({width: 1440, height: 2000});
   await expect(ideas(page).locator('.vs-guide, .vs-pickrow-fold')).toHaveCount(0);
   await expect(ideas(page).getByRole('option')).toHaveCount(10);
   await expect(failedRows(page)).toHaveCount(3);

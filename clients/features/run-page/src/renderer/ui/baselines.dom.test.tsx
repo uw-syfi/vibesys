@@ -83,7 +83,7 @@ test('the headline reads vs the comparison, the chart draws its line, the others
   await screen.done();
 });
 
-test('the Ideas table has a ratio column for each comparison, a dash where there is none', async () => {
+test('the Ideas table has a ratio column for each comparison, a dash where there is none, and no vs input column without an input', async () => {
   const screen = await drawn(
     <IdeasTable
       base={BASE}
@@ -97,22 +97,19 @@ test('the Ideas table has a ratio column for each comparison, a dash where there
   const header = [...screen.container.querySelectorAll('.vs-columnlist-headcell')].map(
     column => column.textContent,
   );
-  expect(header.slice(header.indexOf('vs input'), header.indexOf('vs input') + 3)).toEqual([
-    'vs input',
-    'vLLM',
-    'SGLang',
-  ]);
-  const at = header.indexOf('vs input');
+  // The run has no reading of its input: a `vs input` column would read a dash on every row.
+  expect(header).not.toContain('vs input');
+  const at = header.indexOf('vLLM');
+  expect(header.slice(at, at + 2)).toEqual(['vLLM', 'SGLang']);
   const rows = [...screen.container.querySelectorAll('[role="option"]')].map(row => ({
     title: row.querySelector('.vs-columnlist-cell .vs-text')?.textContent,
     cells: [...row.querySelectorAll('.vs-columnlist-cell')]
-      .slice(at, at + 3)
+      .slice(at, at + 2)
       .map(cell => cell.textContent),
   }));
   expect(rows).toEqual([
-    // The run has no reading of its input: `vs input` is a dash and the comparison carries the ratio.
-    {title: 'Pin the consumers to cores', cells: ['–', '5.82×', '–']},
-    {title: 'Preallocate the arena', cells: ['–', '5.29×', '–']},
+    {title: 'Pin the consumers to cores', cells: ['5.82×', '–']},
+    {title: 'Preallocate the arena', cells: ['5.29×', '–']},
   ]);
   await screen.done();
 });

@@ -8,7 +8,7 @@
  */
 import type {Candidate} from '@vibesys/run-state/candidates';
 import type {Change} from './headline.js';
-import {TURNED_DOWN, words} from './span-reading.js';
+import {TURNED_DOWN} from './span-reading.js';
 
 /** The statuses, in the order the chips show them. */
 export const IDEA_STATUSES = [
@@ -39,8 +39,47 @@ export interface IdeaStatusView {
   readonly cause: string | null;
 }
 
-/** The reason of an idea that never reached a verdict about its result: it was given up, not judged. */
-const DROPPED: ReadonlySet<string> = new Set([
+/**
+ * The reasons a span gives for an idea that did not make it, and the cause each states under its
+ * status. The set is closed: a reason this client does not know is a status alone, never its
+ * identifier spelt out. A reason the backend adds is worded here in the same change
+ * (`idea-status.test.ts` holds the fixtures' list of reasons to this table).
+ */
+export const REASON_WORDS = {
+  turned_down: 'Turned down',
+  not_measured: 'Not measured',
+  no_design: 'No design',
+  not_opened: 'Not opened',
+  stopped: 'Stopped',
+  'parent-unverified': 'Parent unverified',
+  refused: 'Refused',
+  ended: 'Ended',
+  'out-of-budget': 'Out of budget',
+  'turn-failed': 'Turn failed',
+  'invalid-reply': 'Invalid reply',
+  'render-failed': 'Render failed',
+  'wait-refused': 'Wait refused',
+  'checkpoint-declined': 'Checkpoint declined',
+  'no-changed-candidate': 'No changed candidate',
+  'implementation-failed': 'Not implemented',
+  'review-rejected': 'Review rejected',
+  'no-trusted-evidence': 'No trusted evidence',
+  'evidence-refused': 'Evidence refused',
+  'evidence-undecodable': 'Evidence undecodable',
+  'profile-capture-unavailable': 'Profile capture unavailable',
+  'turn-limit': 'Turn limit',
+  'repeated-turn': 'Repeated turn',
+  'merge-refused': 'Merge refused',
+  'merge-unsound': 'Merge unsound',
+  'merge-regressed': 'Merge regressed',
+} as const;
+
+type Reason = keyof typeof REASON_WORDS;
+
+const isReason = (reason: string): reason is Reason => Object.hasOwn(REASON_WORDS, reason);
+
+/** The reasons of an idea that never reached a verdict about its result: it was given up, not judged. */
+const DROPPED: ReadonlySet<Reason> = new Set([
   TURNED_DOWN,
   'no_design',
   'not_opened',
@@ -49,23 +88,10 @@ const DROPPED: ReadonlySet<string> = new Set([
   'out-of-budget',
 ]);
 
-/** The words of the reasons that read badly as their identifier does (`implementation-failed`). */
-const CAUSE_WORDS: Readonly<Record<string, string>> = {
-  [TURNED_DOWN]: 'Turned down',
-  'implementation-failed': 'Not implemented',
-  'review-rejected': 'Review rejected',
-};
-
-/** Whether `reason` has the shape of an identifier (`no_design`, `turn-limit`), not a sentence. */
-function isIdentifier(reason: string): boolean {
-  return /^[a-z][a-z0-9]*(?:[_-][a-z0-9]+)*$/.test(reason);
-}
-
-/** The cause a reason states under its status; null for a reason that is no identifier. */
+/** The cause a known reason states under its status; null for a reason that is not one, and for one that only repeats the status. */
 function causeOf(reason: string | null, status: IdeaStatus): string | null {
-  if (reason === null || !isIdentifier(reason)) return null;
-  const named = CAUSE_WORDS[reason] ?? words(reason);
-  const cause = `${named.charAt(0).toUpperCase()}${named.slice(1)}`;
+  if (reason === null || !isReason(reason)) return null;
+  const cause = REASON_WORDS[reason];
   // A cause that only repeats the status says nothing (`Failed`, `Dropped`).
   return cause.toLowerCase() === STATUS_WORDS[status].toLowerCase() ? null : cause;
 }
@@ -101,6 +127,8 @@ export function ideaStatus(
   // It was measured and turned down, or came out slower: a result, with no gain in it.
   if (measurement?.verdict === 'slower' || change !== null || measured) return none('no-gain');
   const status: IdeaStatus =
-    idea.reason !== null && DROPPED.has(idea.reason) ? 'dropped' : 'failed';
+    idea.reason !== null && isReason(idea.reason) && DROPPED.has(idea.reason)
+      ? 'dropped'
+      : 'failed';
   return {status, cause: causeOf(idea.reason, status)};
 }
