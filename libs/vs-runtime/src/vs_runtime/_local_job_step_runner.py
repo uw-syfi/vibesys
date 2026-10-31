@@ -1,18 +1,21 @@
-"""A step that is a local evaluation: a stage process on this host, started again from clean.
+"""A step that is a local evaluation: stages on this host, started again from clean.
 
-Nothing of a local evaluation survives its host by design, so a re-run never attaches: ``clear``
-ends whatever an earlier attempt left and the next attempt runs under a handle of its own, so
-the executor never answers it with the cancelled attempt's partial result. What an earlier
-attempt left is the evaluation task of this process, which the executor cancels, and the
-stage processes and containers a dead process left, which the host's ``StageWorkReaper``
-finds by the step's tag.
+Nothing of a local evaluation survives its host by design, so a re-run never attaches to an
+earlier attempt's work. ``clear`` ends what an earlier attempt left and the next ``run`` starts
+under a handle of its own, so the executor never answers it with the cancelled attempt's
+partial result. Two things can be left:
+
+- the evaluation task of this process, which the executor cancels and waits for;
+- the stage processes and containers of a process that died, which a ``StageWorkReaper`` finds
+  by the step's tag.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
-from vs_evaluation.api import EvaluationState
+from vs_core.api import SubmitMeasurement
+from vs_evaluation.api import PollPhase
 from vs_runtime._evaluation_jobs import handle_for
 from vs_runtime._job_step_run import JobStepRun
 from vs_runtime._step_runner import Cleared
@@ -52,25 +55,35 @@ class LocalJobStepRunner:
         self._executor = executor
         self._reaper = reaper
         self._job = JobStepRun(executor, clock=clock, poll_interval_s=poll_interval_s)
-        self._attempts: dict[RequestId, list[str]] = {}
+        self._lives: dict[RequestId, int] = {}
 
     async def run(
         self, step: Request, tag: RequestId, attempt: int, cancel: CancelSignal
     ) -> StepResult:
-        """Run the step's evaluation as attempt ``attempt``, under a handle of its own."""
-        handle = f"{handle_for(tag)}-attempt-{attempt}"
-        self._attempts.setdefault(tag, []).append(handle)
-        return await self._job.run(step, tag, handle, cancel)
+        """Run the step's evaluation from clean, or follow the one of this process still going.
+
+        A step that reuses an earlier submission launches nothing and reads that job's result.
+        """
+        del attempt  # a job of this process is found by the tag and its life, never by attempt
+        if isinstance(step, SubmitMeasurement) and step.reuses is not None:
+            return await self._job.read_ended(step, tag, self._handle(step.reuses))
+        if (await self._executor.poll(self._handle(tag))).phase is PollPhase.ENDED:
+            self._lives[tag] = self._lives.get(tag, 0) + 1
+        return await self._job.run(step, tag, self._handle(tag), cancel)
 
     async def clear(self, tag: RequestId) -> Adopted | Cleared:
         """End every evaluation of ``tag`` this process runs, then what a dead process left."""
-        for handle in self._attempts.get(tag, ()):
-            observed = await self._executor.inspect_only(handle)
-            if observed is not None and not _ended(observed.state):
+        handle = self._handle(tag)
+        polled = await self._executor.poll(handle)
+        if polled.phase is not PollPhase.UNSUBMITTED:
+            if polled.phase is not PollPhase.ENDED:
                 await self._executor.cancel(handle)
+            self._lives[tag] = self._lives.get(tag, 0) + 1
         await self._reaper.reap(tag)
         return Cleared()
 
-
-def _ended(state: EvaluationState) -> bool:
-    return state in {EvaluationState.SUCCEEDED, EvaluationState.FAILED, EvaluationState.CANCELED}
+    def _handle(self, tag: RequestId) -> str:
+        """The executor handle of the tag's current life: each life is one run's evaluation."""
+        life = self._lives.get(tag, 0)
+        base = handle_for(tag)
+        return base if life == 0 else f"{base}-life-{life}"
