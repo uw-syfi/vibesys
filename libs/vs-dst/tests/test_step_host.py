@@ -308,6 +308,7 @@ class Stops:
     normal: SimulatedRun
     first: tuple[Interruption, ...]
     second: tuple[Interruption, ...]
+    kills: tuple[Interruption, ...]
 
 
 @pytest.fixture(scope="module", params=sorted(WORLDS))
@@ -315,7 +316,8 @@ def stops(request: pytest.FixtureRequest) -> Stops:
     hosting, make = WORLDS[request.param]
     normal = simulate(make(), hosting)
     pauses = normal.interruptions(Action.PAUSE)
-    return Stops(normal, pauses + normal.interruptions(Action.KILL), pauses)
+    kills = normal.interruptions(Action.KILL)
+    return Stops(normal, pauses + kills, pauses, kills)
 
 
 @settings(max_examples=examples(pr=8, nightly=60), deadline=None)
@@ -348,6 +350,42 @@ def test_a_second_pause_takes_hold_of_the_host_that_resumed_the_run(stops: Stops
     assert any(
         stops.normal.interrupt(first, then=second).history.count("parked") >= 2 for second in later
     ), "no second pause parked the resumed host"
+
+
+@settings(max_examples=examples(pr=8, nightly=60), deadline=None)
+@given(data=st.data())
+def test_a_run_paused_and_killed_while_it_winds_down_ends_as_the_uninterrupted_run(
+    stops: Stops, data: st.DataObject
+) -> None:
+    """The host dies while it drains after the operator's pause, anywhere: the resume ends the run
+    as it would have ended, and every step finishes once."""
+    pause = data.draw(st.sampled_from(stops.second))
+    kill = data.draw(st.sampled_from(stops.kills))
+    interrupted = stops.normal.interrupt_while_draining(pause, kill)
+
+    assert interrupted.never_stuck(), (pause, kill, interrupted.detail)
+    assert interrupted.matches_uninterrupted(), (pause, kill, interrupted.detail)
+    assert interrupted.every_step_finished_once(), (pause, kill)
+
+
+def test_a_kill_takes_hold_of_the_host_that_winds_down_after_a_pause(stops: Stops) -> None:
+    """The generator above reaches something: some kill lands on the draining host."""
+    mid_run = [p for p in stops.second if p.moment is Moment.AFTER_COMMIT]
+    pause = mid_run[len(mid_run) // 2]
+
+    assert any(
+        stops.normal.interrupt_while_draining(pause, kill).interruption.action is Action.KILL
+        for kill in stops.kills
+    ), "no kill landed on the draining host"
+
+
+def test_a_run_is_paused_and_then_killed_and_not_the_other_way_round() -> None:
+    normal = simulate(TinyWorld(2), STEP_LOOP)
+    pause = normal.interruptions(Action.PAUSE)[0]
+    kill = normal.interruptions(Action.KILL)[0]
+
+    with pytest.raises(ValueError, match="paused at a pause and killed at a kill"):
+        normal.interrupt_while_draining(kill, pause)
 
 
 def test_a_resumed_host_is_stopped_again_by_a_pause_and_not_by_a_kill() -> None:

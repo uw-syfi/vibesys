@@ -22,13 +22,13 @@ from vs_core.api import (
 )
 from vs_dst._host import has_ended
 from vs_dst._interruptions import Action, Interruption, Moment
-from vs_dst._snapshots import RecordingRecords
+from vs_dst._snapshots import RecordingRecords, Snapshots
 
 if TYPE_CHECKING:
     from vs_core.api import CoreState, RunResultProposal
     from vs_dst._effects import Effects
     from vs_dst._host import Hosted, HostPlan
-    from vs_dst._snapshots import OutsideWorld, RunningHost, Store
+    from vs_dst._snapshots import OutsideWorld, RunningHost, Store, Watcher
     from vs_dst._world import World
     from vs_proto.api import Record
 
@@ -161,7 +161,7 @@ class Operator:
     """What the operator does after a stop: resume the run, and stop it again if asked."""
 
     plan: HostPlan
-    patience: float
+    expected: Expectation
     again: Interruption | None = None
     """A pause for the first host that resumes the run. Its index counts over the whole run, so
     it only takes hold if that host gets there."""
@@ -177,7 +177,7 @@ class Operator:
             # A host that dies before the run's first commit leaves nothing to resume.
             resuming = self.plan.resuming(resumed=outside.store.observe() is not None)
             stop = Pauser(self.again) if self.again is not None and resumes == 0 else None
-            hosts.append(resuming.run(outside, clock_at, stop, patience=self.patience))
+            hosts.append(resuming.run(outside, clock_at, stop, patience=self.expected.patience))
             clock_at = hosts[-1].ended_at + 1
             resumes += 1
         return hosts
@@ -188,10 +188,10 @@ def killed(
     outside: OutsideWorld,
     clock_at: float,
     point: Interruption,
-    expected: Expectation,
 ) -> Interrupted:
     """Resume the run ``outside`` holds after its host died, the resume starting at ``clock_at``."""
-    return _interrupted(point, expected, outside, operator.resume(outside, clock_at, []))
+    hosts = operator.resume(outside, clock_at, [])
+    return _interrupted(point, operator.expected, outside, hosts)
 
 
 def paused(
@@ -199,13 +199,56 @@ def paused(
     pristine: OutsideWorld,
     clock_at: float,
     point: Interruption,
-    expected: Expectation,
 ) -> Interrupted:
     """Run the world from its start, pause it at ``point``, and resume it after the host exits."""
     outside = pristine.copy()
-    first = operator.plan.run(outside, clock_at, Pauser(point), patience=operator.patience)
+    first = operator.plan.run(outside, clock_at, Pauser(point), patience=operator.expected.patience)
     hosts = operator.resume(outside, first.ended_at + 1, [first])
-    return _interrupted(point, expected, outside, hosts)
+    return _interrupted(point, operator.expected, outside, hosts)
+
+
+def killed_while_draining(
+    operator: Operator,
+    pristine: OutsideWorld,
+    clock_at: float,
+    pause: Interruption,
+    kill: Interruption,
+) -> Interrupted:
+    """Pause the run at ``pause``, kill the host that is winding down at ``kill``, and resume it.
+
+    A host that winds down and exits before it reaches ``kill`` is an ordinary pause.
+    """
+    outside = pristine.copy()
+    snapshots = Snapshots(outside, frozenset({kill}))
+    first = operator.plan.run(
+        outside, clock_at, Together(Pauser(pause), snapshots), patience=operator.expected.patience
+    )
+    snapshot = snapshots.by_point.get(kill)
+    if snapshot is None:
+        hosts = operator.resume(outside, first.ended_at + 1, [first])
+        return _interrupted(pause, operator.expected, outside, hosts)
+    left = snapshot.outside
+    restart = operator.plan.restart_at(clock_at, left.store)
+    return _interrupted(kill, operator.expected, left, operator.resume(left, restart, []))
+
+
+class Together:
+    """Hears each moment for several watchers at once, as a store has the one."""
+
+    def __init__(self, *watchers: Watcher) -> None:
+        """Pass every moment to ``watchers``, in order."""
+        self._watchers = watchers
+
+    def watch(self, store: Store, host: RunningHost) -> None:
+        """Start every watcher on the run ``host`` drives, then stand in for them on ``store``."""
+        for watcher in self._watchers:
+            watcher.watch(store, host)
+        store.watcher = self
+
+    def reached(self, moment: Moment, index: int) -> None:
+        """Tell every watcher."""
+        for watcher in self._watchers:
+            watcher.reached(moment, index)
 
 
 def _interrupted(

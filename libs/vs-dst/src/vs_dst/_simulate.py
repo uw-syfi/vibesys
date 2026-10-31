@@ -239,14 +239,29 @@ class SimulatedRun:
             message = f"a resumed host is stopped again by a pause, not by {then.kind}"
             raise ValueError(message)
         expected = Expectation(self.result, self._duration)
-        operator = _interrupt.Operator(self._plan, expected.patience, then)
+        operator = _interrupt.Operator(self._plan, expected, then)
         if point.action is Action.PAUSE:
-            return _interrupt.paused(
-                operator, self._pristine, self._started.clock_at, point, expected
-            )
+            return _interrupt.paused(operator, self._pristine, self._started.clock_at, point)
         snapshot = self._snapshot(point, frozenset(self.interruptions(Action.KILL)))
         outside = snapshot.outside.copy()
-        return _interrupt.killed(operator, outside, self._restart_at(snapshot), point, expected)
+        return _interrupt.killed(operator, outside, self._restart_at(snapshot), point)
+
+    def interrupt_while_draining(self, pause: Interruption, kill: Interruption) -> Interrupted:
+        """What becomes of the run paused at ``pause``, killed while winding down, and resumed.
+
+        The operator pauses the run at ``pause``, the host dies at ``kill`` before it has wound
+        down, and the operator resumes it. The indices count over the whole run, as for `interrupt`. A host that finishes winding
+        down before it reaches ``kill`` was only paused.
+        """
+        self._require_uninterrupted()
+        if pause.action is not Action.PAUSE or kill.action is not Action.KILL:
+            message = "a run is paused at a pause and killed at a kill, in that order"
+            raise ValueError(message)
+        expected = Expectation(self.result, self._duration)
+        operator = _interrupt.Operator(self._plan, expected)
+        return _interrupt.killed_while_draining(
+            operator, self._pristine, self._started.clock_at, pause, kill
+        )
 
     def _require_uninterrupted(self) -> None:
         if self._started.commits:
