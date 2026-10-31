@@ -251,6 +251,28 @@ class AccessSettlement:
             problem = "the interrupted turn's retained input could not be restored"
             raise AccessSettlementError(problem)
 
+    async def rewind(self, key: AccessKey) -> None:
+        """End an interrupted writer's claim and let the next run of its key start from its baseline.
+
+        For a writer proven ended: restore the workspace to the baseline its receipt retains
+        (``restore_interrupted``), then reopen the receipt, unsettled, without a violation and
+        outside the workspace's fence. The next ``begin`` of the same key resumes it, so the run
+        that follows is judged against that baseline. A receipt left settled would judge nothing:
+        ``settle`` returns the recorded verdict of a settled one without looking at the tree.
+        """
+        receipt = self.receipt(key)
+        if receipt is None:
+            return
+        await self.restore_interrupted(key)
+        with self._store.exclusive():
+            latest = self.receipt(key) or receipt
+            self._store.replace(
+                _ACCESS,
+                "access",
+                key.text,
+                latest.model_copy(update={"settled": False, "violation": None, "unrestorable": ()}),
+            )
+
     async def settle(self, key: AccessKey) -> AccessViolation | None:
         """Revert the unauthorized writes of a writer proven ended; its violation, if any.
 

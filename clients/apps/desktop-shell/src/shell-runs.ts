@@ -35,16 +35,14 @@ const STATUS_WORDS: Readonly<Record<RunRowStatus, string>> = {
   unknown: 'unknown',
 };
 
-/** A step of `load` as the screen lists it, with what `load` adds to the step it stands on. */
+/** A step of `load` as the screen lists it, with the reason a stopped machine gives on its step. */
 function stepItem(load: Exclude<MachineLoad, {readonly kind: 'listed'}>, step: LoadStep): StepItem {
-  const note =
-    load.kind === 'failed' ? load.reason : load.attempt > 0 ? `Retry ${load.attempt}` : null;
   return {
     id: step.step,
     label: step.word,
     state: step.state,
     position: step.position,
-    ...(note === null ? {} : {note}),
+    ...(load.kind === 'failed' ? {note: load.reason} : {}),
   };
 }
 

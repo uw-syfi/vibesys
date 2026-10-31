@@ -133,9 +133,14 @@ class WorkspaceResourceFactory:
         """Return whether the active environment supports candidate concurrency."""
         return self._environment.view.supports_parallel_candidate_evaluation
 
-    def create_candidate(self, workspace_id: str, revision: str) -> RuntimeWorkspaceResource:
-        """Open one isolated candidate and unwind every partial acquisition on failure."""
-        return self._wrap_candidate(self._project.open_candidate(workspace_id, revision))
+    def create_candidate(
+        self, workspace_id: str, revision: str, step_tag: str | None = None
+    ) -> RuntimeWorkspaceResource:
+        """Open one isolated candidate and unwind every partial acquisition on failure.
+
+        A candidate opened for *step_tag* marks every command it runs as that step's.
+        """
+        return self._wrap_candidate(self._project.open_candidate(workspace_id, revision), step_tag)
 
     def reattach_candidate(
         self, workspace_id: str, revision: str
@@ -168,7 +173,9 @@ class WorkspaceResourceFactory:
         """Remove a candidate worktree no live handle owns; its sandbox closed with its host."""
         self._project.remove_leftover(workspace_id)
 
-    def _wrap_candidate(self, project: _ProjectWorkspaceResources) -> RuntimeWorkspaceResource:
+    def _wrap_candidate(
+        self, project: _ProjectWorkspaceResources, step_tag: str | None = None
+    ) -> RuntimeWorkspaceResource:
         workspace_id = project.workspace_id
         ownership = ReleaseStack()
         try:
@@ -180,6 +187,7 @@ class WorkspaceResourceFactory:
                     log_dir=project.logger.log_dir,
                     workspace=project.project_root,
                     ref_dir=None,
+                    step_tag=step_tag,
                     # A candidate session may reach only its own worktree: the run's
                     # other candidates are not its to read or write through a broker.
                     run_owned_roots=(),

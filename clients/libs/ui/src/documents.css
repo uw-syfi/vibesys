@@ -164,6 +164,8 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  width: fit-content;
+  max-width: 100%;
 }
 
 .vs-steps {
@@ -185,8 +187,11 @@
 .vs-step-mark {
   flex: none;
   width: var(--space-4);
-  text-align: center;
-  color: var(--text-muted);
+  text-align: start;
+  /* The marks are glyphs the bundled mono face carries; any other face lets the system's fallback
+     font draw them, and that differs from machine to machine. */
+  font-family: var(--font-mono);
+  color: var(--muted);
 }
 
 .vs-step[data-state="current"] .vs-step-mark {
