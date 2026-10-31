@@ -328,13 +328,13 @@ class SessionHost:
         store: ReceiptStore,
         *,
         lease: RevocableLease | None = None,
-        now_at: float | None = None,
         digest: str | None = None,
+        repeat: bool = False,
     ) -> ExecutionResult:
         """Execute *request* once on a freshly started host over *store*."""
-        context = context_for(request, lease=lease).model_copy(update={"until": Until(at=100.0)})
-        if now_at is not None:
-            context = context.model_copy(update={"now_at": now_at})
+        context = context_for(request, lease=lease).model_copy(
+            update={"until": Until(at=100.0), "repeat": repeat}
+        )
         if digest is not None:
             context = context.model_copy(update={"payload_digest": digest})
         outcome = await self.executor(store).execute(cast("Any", request), context)

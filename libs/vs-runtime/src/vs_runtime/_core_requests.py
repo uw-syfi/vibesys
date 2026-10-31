@@ -105,6 +105,13 @@ class ExecutionContext(BaseModel):
     lease: SkipValidation[ExecutionLease | None] = Field(default=None, exclude=True, repr=False)
     permit: TurnPermit | None = None
     """The logical-turn permit core issued for this request, when the request consumes one."""
+    repeat: bool = False
+    """Whether an earlier attempt of this request may have run.
+
+    The runner loop records an attempt before any of its I/O, so an attempt after the first
+    proves an earlier one may have started. A repeat must reach the end a first run reaches
+    without doing twice what the earlier attempt may have done.
+    """
 
 
 type OwnerEvent = Annotated[

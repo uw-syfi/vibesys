@@ -219,10 +219,8 @@ class MeasurementRequests:
         """Run one authorized request at most once under its canonical identity."""
         request_id = _identity(request)
 
-        async def perform(
-            *, resumed: bool
-        ) -> Settled[ExecutionResult] | Transient[ExecutionResult]:
-            return settle(await self._perform(request, context, resumed=resumed))
+        async def perform(*, repeat: bool) -> Settled[ExecutionResult] | Transient[ExecutionResult]:
+            return settle(await self._perform(request, context, repeat=repeat))
 
         execution = await self._store.run_once(
             request_id.root,
@@ -250,10 +248,10 @@ class MeasurementRequests:
                 assert_never(execution)
 
     async def _perform(
-        self, request: EvaluationRoleRequest, context: ExecutionContext, *, resumed: bool
+        self, request: EvaluationRoleRequest, context: ExecutionContext, *, repeat: bool
     ) -> ExecutionResult:
-        """The effect of one request. ``resumed`` is moot: every step first polls the job."""
-        del resumed  # the job record and a poll tell what an earlier host already did
+        """The effect of one request. ``repeat`` is moot: every step first polls the job."""
+        del repeat  # the job record and a poll tell what an earlier attempt already did
         match request:
             case SubmitMeasurement():
                 return await self._submit(request, context)

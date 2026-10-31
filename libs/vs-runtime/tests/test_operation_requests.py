@@ -506,9 +506,9 @@ async def test_inspection_seals_an_effect_the_owner_proves_never_happened() -> N
         context = context_for(request)
 
         async def crash_after_record(
-            *, resumed: bool
+            *, repeat: bool
         ) -> Settled[ResultReceipt] | Transient[ResultReceipt]:
-            del resumed
+            del repeat
             receipts.record_record(
                 RecordReceipt(
                     request_id="req-never",

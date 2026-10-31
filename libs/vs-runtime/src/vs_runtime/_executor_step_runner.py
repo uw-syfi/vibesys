@@ -16,9 +16,12 @@ so each kind declares, in a ``Repeat`` class, why a second run reaches the same 
 The constructor refuses a kind with no declared class, and a kind that another runner owns. No class
 leaves anything for ``clear`` to remove: the executor runs in this process, so an attempt that died
 left only what the repeat reaches again, and one that is cancelled in this process is ended before
-``run`` returns. What guards a repeat is the executor itself: when it cannot conclude (a precondition
-unmet, the host not holding authority) it answers with an observation that is not terminal, and
-``run`` raises, which the loop clears and runs again within the step's retry bound.
+``run`` returns. The loop records an attempt before its I/O, so an attempt after the first proves an
+earlier one may have run: ``run`` passes that to the executor as ``ExecutionContext.repeat``, and the
+executor looks for what the earlier attempt left (a snapshot by its label, a release it already made)
+instead of doing it twice. What guards a repeat is that and the executor itself: when it cannot
+conclude (a precondition unmet, the host not holding authority) it answers with an observation that is
+not terminal, and ``run`` raises, which the loop clears and runs again within the step's retry bound.
 
 A step cancelled mid-execution ends its wait for the executor, not any thread the executor started;
 the repeat of such a step reaches the same state, which is the one residual.
@@ -159,7 +162,6 @@ class ExecutorStepRunner:
         cancel: CancelSignal,
     ) -> StepResult:
         """Run the step on its executor; ``Cancelled`` once *cancel* is set and the executor ended."""
-        del attempt  # the executor finds the step by its request id, so no attempt number names it
         self._served(step, tag)
         context = ExecutionContext(
             fence=self._fence,
@@ -167,6 +169,7 @@ class ExecutorStepRunner:
             until=Until(at=deadline_at),
             payload_digest=hashlib.sha256(step.model_dump_json().encode()).hexdigest(),
             lease=self._lease,
+            repeat=attempt > 1,
         )
         work = asyncio.ensure_future(self._executors.dispatch(step, context))
         if not await finished_before_cancel(work, cancel):

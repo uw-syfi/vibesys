@@ -345,10 +345,10 @@ class RuntimeWorkspaceRequests:
         async with lock:
 
             async def perform(
-                *, resumed: bool
+                *, repeat: bool
             ) -> Settled[ExecutionResult] | Transient[ExecutionResult]:
                 result = self._result(
-                    request, context, await self._perform(request, context, resumed=resumed)
+                    request, context, await self._perform(request, context, repeat=repeat)
                 )
                 observation = result.observation.observation
                 return Settled(result) if observation.terminal else Transient(result)
@@ -435,7 +435,7 @@ class RuntimeWorkspaceRequests:
         )
 
     async def _perform(
-        self, request: Request, context: ExecutionContext, *, resumed: bool
+        self, request: Request, context: ExecutionContext, *, repeat: bool
     ) -> _Facts:
         if isinstance(request, _HANDLED) and not self._receipts.admit_generation(request.attempt):
             return _rejected("a newer generation of this attempt exists")
@@ -443,15 +443,15 @@ class RuntimeWorkspaceRequests:
             case EnsureWorkspace():
                 return await self._fenced_ensure(request, context)
             case SnapshotAndRetainRun():
-                return await self._run_snapshot(request, resumed=resumed)
+                return await self._run_snapshot(request, repeat=repeat)
             case AdoptRevision() | VerifyAdoption():
                 return await self._adoption(request)
             case RestoreRevision() | RetainRevision() | SnapshotAndRetain() | DiscardWorkspace():
-                return await self._attempt_request(request, context, resumed=resumed)
+                return await self._attempt_request(request, context, repeat=repeat)
             case _:
                 return _rejected(f"{request.kind} cannot be executed against a workspace")
 
-    async def _run_snapshot(self, request: SnapshotAndRetainRun, *, resumed: bool) -> _Facts:
+    async def _run_snapshot(self, request: SnapshotAndRetainRun, *, repeat: bool) -> _Facts:
         """Retain the run's root, but only once the invocation's writer is proven gone."""
         unproven = self._run_invocations.unproven(request)
         if unproven is not None:
@@ -460,13 +460,13 @@ class RuntimeWorkspaceRequests:
             self._workspaces.root,
             request,
             request.retention,
-            resumed=resumed,
+            repeat=repeat,
             resource_id=None,
             owner=_RUN_OWNER,
         )
 
     async def _withdraw_or_discard(
-        self, request: DiscardWorkspace, context: ExecutionContext, *, resumed: bool
+        self, request: DiscardWorkspace, context: ExecutionContext, *, repeat: bool
     ) -> _Facts:
         """Close the attempt's workspace fence, then discard what its ensures made, if anything."""
         attempt = request.attempt
@@ -479,7 +479,7 @@ class RuntimeWorkspaceRequests:
                 # The generation ends unbound: it never holds the exclusive root again.
                 self._receipts.mark_released(attempt)
         if bound is not None:
-            return await self._discard(request, bound, resumed=resumed)
+            return await self._discard(request, bound, repeat=repeat)
         if isinstance(closure, NothingHeld):
             return _never_held(closure, attempt, _WITHDRAWN)
         return await self._remove_unbound(attempt, closure)
@@ -511,10 +511,10 @@ class RuntimeWorkspaceRequests:
         request: RestoreRevision | RetainRevision | SnapshotAndRetain | DiscardWorkspace,
         context: ExecutionContext,
         *,
-        resumed: bool,
+        repeat: bool,
     ) -> _Facts:
         if isinstance(request, DiscardWorkspace):
-            return await self._withdraw_or_discard(request, context, resumed=resumed)
+            return await self._withdraw_or_discard(request, context, repeat=repeat)
         binding = self._receipts.load_binding(request.attempt)
         if binding is None:
             return _rejected("no workspace was ensured for this attempt")
@@ -531,7 +531,7 @@ class RuntimeWorkspaceRequests:
                     workspace,
                     request,
                     request.retention,
-                    resumed=resumed,
+                    repeat=repeat,
                     resource_id=binding.resource_id,
                     owner=attempt_key(request.attempt),
                 )
@@ -811,7 +811,7 @@ class RuntimeWorkspaceRequests:
         )
         if commit is None:
             return _rejected("revision is not a revision this attempt may restore")
-        # Restore is idempotent, so a resumed request only repeats it when the tree differs.
+        # Restore is idempotent, so a repeated request only redoes it when the tree differs.
         if not await workspace.matches_revision(commit):
             failure = await self._materialize(workspace, commit, resource_id=binding.resource_id)
             if failure is not None:
@@ -855,7 +855,7 @@ class RuntimeWorkspaceRequests:
         request: SnapshotAndRetain | SnapshotAndRetainRun,
         retention: Literal["wip", "candidate"],
         *,
-        resumed: bool,
+        repeat: bool,
         resource_id: ResourceId | None,
         owner: str,
     ) -> _Facts:
@@ -864,7 +864,7 @@ class RuntimeWorkspaceRequests:
         retention_label = f"{retention}:{request.request_id.root}"
         # An interrupted snapshot may already have committed: recover it by its
         # deterministic label rather than commit a second time.
-        commit = await workspace.find_snapshot(label) if resumed else None
+        commit = await workspace.find_snapshot(label) if repeat else None
         if commit is None:
             try:
                 commit = await workspace.snapshot_and_retain(label, retention_label=retention_label)
@@ -890,7 +890,7 @@ class RuntimeWorkspaceRequests:
         )
 
     async def _discard(
-        self, request: DiscardWorkspace, binding: AttemptBinding, *, resumed: bool
+        self, request: DiscardWorkspace, binding: AttemptBinding, *, repeat: bool
     ) -> _Facts:
         if binding.workspace_id is None:
             # The root is run-owned and stays; ending the attempt ends only its hold. A
@@ -924,10 +924,10 @@ class RuntimeWorkspaceRequests:
             candidate = await self._workspaces.reattach_candidate(member)
         if candidate is None:
             # Claim completeness only with proof the session close ran: a recorded
-            # discard, or this very request begun by an earlier host (a crash between
-            # the discard and its record). Anyone else's release proves nothing.
+            # discard, or this very request run before (a crash between the discard and
+            # its record). Anyone else's release proves nothing.
             recorded = self._receipts.is_released(request.attempt)
-            if resumed and not recorded:
+            if repeat and not recorded:
                 self._receipts.mark_released(request.attempt)
                 recorded = True
             return _Facts(

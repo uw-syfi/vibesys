@@ -4,6 +4,10 @@ Three layers. The kinds' classes are pinned to the recovery page, and the constr
 with none. The shared ``StepRunnerContract`` runs against every kind over a world that counts the
 state a step leaves and the work still going. And every kind runs on its real executor, killed at
 durable-write boundaries and run again, so "safe to repeat" is read from the executors' own disk.
+
+The real executors run with receipts disabled (``UnreceiptedStore``): they keep no begun marker and
+replay no sealed result, so a repeat reaches the same end only through ``ExecutionContext.repeat``
+and the effect itself, as it must once the runner loop owns repeats.
 """
 
 from __future__ import annotations
@@ -14,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
 import pytest
-from tests.support.executor_cases import CASES
+from tests.support.executor_cases import CASES, WorkspacesWorld
 from tests.support.session_lifecycle_world import close_request
 from tests.support.session_world import ensure_request, session_spec
 
@@ -72,9 +76,12 @@ from vs_sim.api import SeededRandom
 from vs_sim.api.testing import VirtualClock, examples, run_virtual
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Collection, Mapping
 
-    from vs_core.api import Request
+    from _pytest.mark.structures import ParameterSet
+
+    from vs_core.api import Request, RequestBase
+    from vs_core.api.recovery import StepResult
     from vs_runtime.api.core import ExecutionContext
     from vs_runtime.api.executor_contracts import CaseWorld, ExecutorCase, Scenario
 
@@ -371,8 +378,10 @@ class Rig:
         self.crash_at: int | None = None
 
     async def execute(self, request: Request, context: ExecutionContext) -> ExecutionResult:
-        del context  # the world builds the context a shell would, for its own host
-        return await self.world.execute(request, lease=self.lease, crash_at=self.crash_at)
+        # The world builds the context a shell would, for its own host; the runner's say is `repeat`.
+        return await self.world.execute(
+            request, lease=self.lease, crash_at=self.crash_at, repeat=context.repeat
+        )
 
     def runner(self) -> ExecutorStepRunner:
         """A runner with no memory of an earlier one: a restarted process."""
@@ -385,12 +394,17 @@ class Rig:
         )
 
 
-REAL = [
-    pytest.param(case, scenario, id=f"{case.name}-{scenario.name}")
-    for case in CASES
-    for scenario in case.scenarios
-    if scenario.kind in DECLARED_REPEATS
-]
+def _params(kinds: Collection[type[RequestBase]]) -> list[ParameterSet]:
+    return [
+        pytest.param(case, scenario, id=f"{case.name}-{scenario.name}")
+        for case in CASES
+        for scenario in case.scenarios
+        if scenario.kind in kinds
+    ]
+
+
+REAL = _params(DECLARED_REPEATS)
+SNAPSHOTS = _params({SnapshotAndRetain, SnapshotAndRetainRun})
 
 
 def test_every_declared_kind_has_a_real_executor_scenario() -> None:
@@ -406,26 +420,41 @@ async def prepared(world: CaseWorld, scenario: Scenario) -> Request:
 
 
 @dataclass(frozen=True)
+class Result:
+    """What a step's result says about the world it left, without the ids of one run."""
+
+    status: ObservationStatus
+    terminal: bool
+    accepted: bool
+    released: bool
+    children_complete: bool
+
+    @classmethod
+    def of(cls, done: StepResult) -> Result:
+        assert isinstance(done, Finished)
+        seen = done.observation
+        return cls(seen.status, seen.terminal, seen.accepted, seen.released, seen.children_complete)
+
+
+@dataclass(frozen=True)
 class Reference:
     """What an unkilled run of a scenario leaves."""
 
-    status: ObservationStatus
-    accepted: bool
+    result: Result
     effects: int
     writes: int
 
 
 async def reference_of(case: ExecutorCase, scenario: Scenario) -> Reference:
-    async with case.world() as world:
+    async with case.world(receipted=False) as world:
         request = await prepared(world, scenario)
         assert request.request_id is not None
         done = (
             await Rig(world).runner().run(request, request.request_id, 1, DEADLINE, CancelSignal())
         )
-        assert isinstance(done, Finished)
-        seen = done.observation
-        assert seen.terminal
-        return Reference(seen.status, seen.accepted, world.effects(), world.writes())
+        result = Result.of(done)
+        assert result.terminal
+        return Reference(result, world.effects(), world.writes())
 
 
 def sampled(boundaries: int) -> list[int]:
@@ -438,7 +467,7 @@ def sampled(boundaries: int) -> list[int]:
 async def killed_then_run_again(
     case: ExecutorCase, scenario: Scenario, boundary: int, reference: Reference
 ) -> None:
-    async with case.world() as world:
+    async with case.world(receipted=False) as world:
         request = await prepared(world, scenario)
         assert request.request_id is not None
         tag = request.request_id
@@ -450,12 +479,7 @@ async def killed_then_run_again(
         restarted = rig.runner()
         assert await restarted.clear(request, tag) == Cleared()
         result = await restarted.run(request, tag, 2, DEADLINE, CancelSignal())
-        assert isinstance(result, Finished)
-        assert (result.observation.status, result.observation.accepted) == (
-            reference.status,
-            reference.accepted,
-        )
-        assert result.observation.terminal
+        assert Result.of(result) == reference.result, f"boundary {boundary}"
         assert world.effects() == reference.effects, f"boundary {boundary}"
 
 
@@ -474,7 +498,7 @@ async def test_a_step_killed_at_a_durable_write_runs_again_to_the_effects_of_an_
 async def test_a_step_that_finished_runs_again_to_the_same_result_and_effects(
     case: ExecutorCase, scenario: Scenario
 ) -> None:
-    async with case.world() as world:
+    async with case.world(receipted=False) as world:
         request = await prepared(world, scenario)
         assert request.request_id is not None
         tag = request.request_id
@@ -484,12 +508,32 @@ async def test_a_step_that_finished_runs_again_to_the_same_result_and_effects(
         restarted = rig.runner()
         assert await restarted.clear(request, tag) == Cleared()
         again = await restarted.run(request, tag, 2, DEADLINE, CancelSignal())
+        assert Result.of(again) == Result.of(first)
+        assert world.effects() == effects
+
+
+# A snapshot is taken once, whatever the tree does between attempts
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("case", "scenario"), SNAPSHOTS)
+async def test_a_snapshot_that_ran_again_after_the_tree_moved_returns_the_snapshot_it_took(
+    case: ExecutorCase, scenario: Scenario
+) -> None:
+    """The repeat finds the snapshot by its label; committing again would retain the moved tree."""
+    async with case.world(receipted=False) as world:
+        assert isinstance(world, WorkspacesWorld)
+        request = await prepared(world, scenario)
+        assert request.request_id is not None
+        tag = request.request_id
+        rig = Rig(world)
+        first = await rig.runner().run(request, tag, 1, DEADLINE, CancelSignal())
+        effects = world.effects()
+        world.drift(request)
+        again = await rig.runner().run(request, tag, 2, DEADLINE, CancelSignal())
         assert isinstance(first, Finished)
         assert isinstance(again, Finished)
-        assert (again.observation.status, again.observation.terminal) == (
-            first.observation.status,
-            first.observation.terminal,
-        )
+        assert again.report.revision == first.report.revision
         assert world.effects() == effects
 
 
@@ -508,7 +552,7 @@ async def test_a_session_ensure_killed_at_any_durable_write_runs_again_and_binds
     case = case_named("sessions")
     scenario = next(scenario for scenario in case.scenarios if scenario.kind is EnsureSession)
     reference = await reference_of(case, scenario)
-    assert reference.status is ObservationStatus.SUCCEEDED
+    assert reference.result.status is ObservationStatus.SUCCEEDED
     for boundary in range(2 * reference.writes):
         await killed_then_run_again(case, scenario, boundary, reference)
 
@@ -517,7 +561,7 @@ async def test_a_session_ensure_killed_at_any_durable_write_runs_again_and_binds
 async def test_an_ensure_whose_session_ended_without_acceptance_runs_again_to_a_result() -> None:
     """#3458: the session was ensured and closed with no turn accepted, then the ensure's result was lost."""
     case = case_named("session-lifecycle")
-    async with case.world() as world:
+    async with case.world(receipted=False) as world:
         rig = Rig(world)
         ensure, close = ensure_request(), close_request()
         assert ensure.request_id is not None
@@ -548,39 +592,40 @@ ACTIONS = ("run", "kill", "restart", "clear")
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("seed", range(examples(pr=6, nightly=60)))
-async def test_whatever_the_order_of_runs_kills_restarts_and_clears_a_session_ensure_ends_bound_once(
-    seed: int,
+@pytest.mark.parametrize(("case", "scenario"), REAL)
+async def test_whatever_the_order_of_runs_kills_restarts_and_clears_a_step_ends_as_an_unkilled_one(
+    case: ExecutorCase, scenario: Scenario
 ) -> None:
-    case = case_named("sessions")
-    scenario = next(scenario for scenario in case.scenarios if scenario.kind is EnsureSession)
     reference = await reference_of(case, scenario)
-    rng = SeededRandom(seed)
-    async with case.world() as world:
-        request = await prepared(world, scenario)
-        assert request.request_id is not None
-        tag = request.request_id
-        rig = Rig(world)
-        runner = rig.runner()
-        attempt = 0
-        for _ in range(rng.randint(1, 8)):
-            attempt += 1
-            match rng.choice(ACTIONS):
-                case "run":
-                    result = await runner.run(request, tag, attempt, DEADLINE, CancelSignal())
-                    assert isinstance(result, Finished)
-                case "kill":
-                    rig.crash_at = rng.randint(0, 2 * reference.writes - 1)
-                    with contextlib.suppress(ProcessKilledError):
-                        await runner.run(request, tag, attempt, DEADLINE, CancelSignal())
-                    rig.crash_at = None
-                case "restart":
-                    runner = rig.runner()
-                case "clear":
-                    assert await runner.clear(request, tag) == Cleared()
-            assert world.effects() <= reference.effects
-        runner = rig.runner()
-        assert await runner.clear(request, tag) == Cleared()
-        done = await runner.run(request, tag, attempt + 1, DEADLINE, CancelSignal())
-        assert isinstance(done, Finished)
-        assert world.effects() == reference.effects
+    for seed in range(examples(pr=3, nightly=30)):
+        rng = SeededRandom(seed)
+        async with case.world(receipted=False) as world:
+            request = await prepared(world, scenario)
+            assert request.request_id is not None
+            tag = request.request_id
+            before = world.effects()
+            between = range(min(before, reference.effects), max(before, reference.effects) + 1)
+            rig = Rig(world)
+            runner = rig.runner()
+            attempt = 0
+            for _ in range(rng.randint(1, 8)):
+                attempt += 1
+                match rng.choice(ACTIONS):
+                    case "run":
+                        done = await runner.run(request, tag, attempt, DEADLINE, CancelSignal())
+                        assert Result.of(done) == reference.result, f"seed {seed}"
+                    case "kill":
+                        rig.crash_at = rng.randint(0, 2 * reference.writes - 1)
+                        with contextlib.suppress(ProcessKilledError):
+                            await runner.run(request, tag, attempt, DEADLINE, CancelSignal())
+                        rig.crash_at = None
+                    case "restart":
+                        runner = rig.runner()
+                    case "clear":
+                        assert await runner.clear(request, tag) == Cleared()
+                assert world.effects() in between, f"seed {seed}"
+            runner = rig.runner()
+            assert await runner.clear(request, tag) == Cleared()
+            done = await runner.run(request, tag, attempt + 1, DEADLINE, CancelSignal())
+            assert Result.of(done) == reference.result, f"seed {seed}"
+            assert world.effects() == reference.effects, f"seed {seed}"

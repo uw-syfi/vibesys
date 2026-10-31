@@ -308,10 +308,8 @@ class SessionLifecycleRequests:
         if not isinstance(request, _HANDLED):
             return self._result(request, context, _rejected(f"{request.kind} is not executed here"))
 
-        async def perform(
-            *, resumed: bool
-        ) -> Settled[ExecutionResult] | Transient[ExecutionResult]:
-            del resumed  # every step inspects durable evidence before it acts
+        async def perform(*, repeat: bool) -> Settled[ExecutionResult] | Transient[ExecutionResult]:
+            del repeat  # every step inspects durable evidence before it acts
             try:
                 result = await self._perform(request, request_id, context)
             except ReceiptCorruptError as error:

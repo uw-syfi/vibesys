@@ -611,10 +611,8 @@ class RuntimeSessionRequests:
     async def _run(self, call: _Call) -> ExecutionOutcome:
         request, context = call.request, call.context
 
-        async def perform(
-            *, resumed: bool
-        ) -> Settled[ExecutionResult] | Transient[ExecutionResult]:
-            del resumed  # the journal, not this flag, says whether a dispatch happened
+        async def perform(*, repeat: bool) -> Settled[ExecutionResult] | Transient[ExecutionResult]:
+            del repeat  # the journal, not this flag, says whether a dispatch happened
             return await self._performed(call)
 
         execution = await self._store.run_once(
