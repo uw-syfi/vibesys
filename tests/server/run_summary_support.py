@@ -23,6 +23,7 @@ from server.events import (
     EventStatus,
     EventType,
     GateFinishedData,
+    ModelTurnUsageData,
     OutputData,
     RunEvent,
     RunInterruptedData,
@@ -49,6 +50,48 @@ _SCHEMAS: tuple[dict[str, Any], ...] = (
     {"title": "Review", "type": "object", "properties": {"verdict": {"type": "string"}}},
     {"title": "Plan", "type": "object", "properties": {"outcome": {"enum": ["blocked"]}}},
 )
+
+
+def _split() -> st.SearchStrategy[tuple[ModelTurnUsageData, ...]]:
+    """No split, or the rows of one turn: unique models, exactly one primary, requests on it alone."""
+    count = st.integers(min_value=0, max_value=5000)
+
+    def rows(
+        models: list[str], primary: int, turns: int
+    ) -> st.SearchStrategy[tuple[ModelTurnUsageData, ...]]:
+        return st.tuples(
+            *(
+                st.builds(
+                    ModelTurnUsageData,
+                    model=st.just(model),
+                    input_tokens=count,
+                    cache_creation_input_tokens=count,
+                    cache_creation_1h_input_tokens=count,
+                    cache_read_input_tokens=count,
+                    output_tokens=count,
+                    reasoning_output_tokens=count,
+                    turns=st.just(turns if index == primary else 0),
+                    recorded_usd=st.none() | st.floats(0, 5, allow_nan=False),
+                    speed=st.sampled_from([None, "standard", "fast", "ultrafast"])
+                    if index == primary
+                    else st.none(),
+                    primary=st.just(index == primary),
+                )
+                for index, model in enumerate(models)
+            )
+        )
+
+    split = st.tuples(
+        st.lists(
+            st.sampled_from(["opus", "haiku", "sonnet", "gpt-6.1-sol"]),
+            min_size=1,
+            max_size=3,
+            unique=True,
+        ),
+        st.integers(min_value=0, max_value=2),
+        st.integers(min_value=1, max_value=30),
+    ).flatmap(lambda parts: rows(parts[0], parts[1] % len(parts[0]), parts[2]))
+    return st.just(()) | split
 
 
 def _span() -> st.SearchStrategy[Span]:
@@ -125,6 +168,11 @@ def _drafts() -> st.SearchStrategy[_Draft]:
         total_cost_usd=st.none() | st.floats(0, 5, allow_nan=False),
         duration_ms=counts,
         span_id=st.none() | st.sampled_from(_SPAN_IDS),
+        # A line recorded before the split has none of these three; one after has them all.
+        cost_basis=st.none()
+        | st.sampled_from(["price_table", "provider_reported", "unknown_model"]),
+        by_model=_split(),
+        provider_session_id=st.none() | st.text(min_size=1, max_size=8),
     )
     spent = st.tuples(usage_data, st.none() | st.sampled_from(EXECUTION_IDS)).map(
         lambda pair: _Draft(EventType.TURN_USAGE_RECORDED, pair[0], execution_id=pair[1])

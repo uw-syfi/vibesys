@@ -49,6 +49,16 @@ frames), never for a duration. Do not add a sleep to make a check pass.
 ## Known failures
 
 A defect already on the base branch that no change of yours fixes goes in the
-known-failure list with the issue that tracks it, naming the check, the text
-and the screens it shows on. It is a debt, not a skip: the suite fails on any
-new violation and on a listed one no screen shows any more.
+known-failure list with the issue that tracks it, naming the suite, the check,
+the text and the screens it shows on. It is a debt, not a skip: the suite that
+owns the entry fails on any new violation and on a listed one its screens no
+longer show. Name the mechanism in the entry's text, not one screen, so that a
+fix deletes one entry. A failing screen is held by the first entry that matches.
+
+## Screen suites and journeys
+
+A screen suite owns the look of its screens: it walks them at each width and asks
+for every check, the visual spec's laws included, against the known failures. A
+journey proves behavior and asks for the defect checks alone: a journey that
+passes through a screen does not own how that screen is laid out, and the laws
+would fail it for a debt it cannot pay.
