@@ -11,7 +11,7 @@ from vs_runtime.api.testing import (
     StepLogUnderTest,
     fake_run_seed,
 )
-from vs_sim.api.testing import VirtualClock, run_virtual
+from vs_sim.api.testing import SimThreads, VirtualClock, run_virtual
 
 
 class TestFakeStepLog(StepLogContract):
@@ -19,10 +19,10 @@ class TestFakeStepLog(StepLogContract):
         clock = VirtualClock()
         seed = fake_run_seed([30.0, 40.0], retries=2)
         records = FakeRunRecords()
-        log = FakeStepLog(records, seed.state, seed.registry, clock)
+        log = FakeStepLog(records, seed.state, seed.registry, clock, SimThreads())
 
         def reopen() -> FakeStepLog:
-            return FakeStepLog(records, seed.state, seed.registry, clock)
+            return FakeStepLog(records, seed.state, seed.registry, clock, SimThreads())
 
         def push_input() -> None:
             control = core.ControlInput(control_id=core.ControlId(root="input"), action="pause_now")

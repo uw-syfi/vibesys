@@ -124,26 +124,25 @@ class RunLogStepLog:
         later process folds from, with the run's deadline in it. The search then hears whatever
         the dead process left it owed, and a run still to begin starts here.
         """
-        prefix = log.records()
-        started = any(r.body is not None and r.body.field == "run_started" for r in prefix)
-        folded = None if not started else fold_run(prefix, registry=registry)
-        opened = cls(log, folded, registry, clock, epoch=epoch, search=search, stamp=stamp)
-        if folded is None:
-            if seed is None:
+        with log.transaction():
+            prefix = log.records()
+            started = any(r.body is not None and r.body.field == "run_started" for r in prefix)
+            if started:
+                first = None
+                folded = fold_run(prefix, registry=registry)
+            elif seed is None:
                 message = "a log with no start of the run needs the state to start it from"
                 raise ValueError(message)
-            opened._start(seed)
+            else:
+                first = log.next_record(
+                    seed_message(seed), epoch=epoch, at=stamp(), clock=clock.now()
+                )
+                folded = fold_run((first,), registry=registry)
+            opened = cls(log, folded, registry, clock, epoch=epoch, search=search, stamp=stamp)
+            if first is not None:
+                opened._confirm(first)
         opened._settle()
         return opened
-
-    def _start(self, seed: CoreState) -> None:
-        """Append the seed as the first record of the run; the fold begins at it."""
-        with self._log.transaction():
-            record = self._log.next_record(
-                seed_message(seed), epoch=self._epoch, at=self._stamp(), clock=self._clock.now()
-            )
-            self._folded = apply_record(None, record, self._registry)
-            self._confirm(record)
 
     @property
     def state(self) -> CoreState:

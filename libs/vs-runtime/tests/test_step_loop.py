@@ -67,7 +67,14 @@ from vs_runtime.api.testing import (
     RunnerMethod,
     fake_run_seed,
 )
-from vs_sim.api.testing import VirtualClock, examples, run_virtual, swept, wait_for_state
+from vs_sim.api.testing import (
+    VirtualClock,
+    examples,
+    loop_threads,
+    run_virtual,
+    swept,
+    wait_for_state,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -409,7 +416,9 @@ async def run_epochs(world: World, clock: VirtualClock, kill_at: int | None) -> 
     parked = False
     killed = False
     while True:
-        log = FakeStepLog(world.records, world.seed.state, world.seed.registry, clock)
+        log = FakeStepLog(
+            world.records, world.seed.state, world.seed.registry, clock, loop_threads()
+        )
         if parked:
             resume = core.ControlInput(
                 control_id=core.ControlId(root=f"resume-{len(world.exits)}"),

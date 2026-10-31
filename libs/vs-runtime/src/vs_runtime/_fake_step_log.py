@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from vs_core.api import CoreEvent, CoreState, OperationRegistry, RequestId
-    from vs_sim.api import Clock
+    from vs_sim.api import Clock, Threads
 
 
 class FakeRunRecords:
@@ -65,9 +65,10 @@ class FakeStepLog(RunLogStepLog):
         seed: CoreState,
         registry: OperationRegistry,
         clock: Clock,
+        threads: Threads,
     ) -> None:
-        """Fold ``records`` over ``seed`` and open the next epoch."""
-        confirmed = ConfirmedLog(records)
+        """Fold ``records`` over ``seed`` and open the next epoch; ``threads`` locks its appends."""
+        confirmed = ConfirmedLog(records, threads)
         epoch = (records.records[-1].epoch if records.records else 0) + 1
         confirmed.append(EpochStarted(epoch=epoch), epoch=epoch, at=Timestamp(), clock=clock.now())
         folded = fold_run(confirmed.records(), seed, registry=registry)

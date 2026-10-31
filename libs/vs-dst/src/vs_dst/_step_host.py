@@ -52,7 +52,7 @@ from vs_runtime.api.step_runner import (
     run_step_loop,
 )
 from vs_runtime.api.testing import RecordingSearch, Run
-from vs_sim.api.testing import VirtualClock, run_virtual
+from vs_sim.api.testing import VirtualClock, loop_threads, run_virtual
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -185,7 +185,7 @@ class _Host:
         handle = _HostHandle(clock, self._decisions)
         if watcher is not None:
             watcher.watch(self._records, handle)
-        confirmed = ConfirmedLog(self._records)
+        confirmed = ConfirmedLog(self._records, loop_threads())
         epoch = (self._records.records[-1].epoch if self._records.records else 0) + 1
         confirmed.append(EpochStarted(epoch=epoch), epoch=epoch, at=Timestamp(), clock=clock.now())
         run_search = SearchRun.restored(confirmed.records(), search, launch.config, registry)
