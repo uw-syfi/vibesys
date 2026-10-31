@@ -255,7 +255,6 @@ class ControlInput(CoreValue):
         "attempt",
         "item",
         "max_parallel",
-        "drain_seconds",
     )
     control_id: ControlId
     action: ControlAction
@@ -271,7 +270,6 @@ class ControlInput(CoreValue):
     attempt: AttemptId | None = None
     item: ItemId | None = None
     max_parallel: Annotated[int | None, Field(ge=1)] = None
-    drain_seconds: Annotated[float | None, Field(gt=0.0, allow_inf_nan=False)] = None
 
     def __post_init__(self) -> None:
         """Enforce the proto message rules at construction as well as decode."""
@@ -494,23 +492,6 @@ class ControlInput(CoreValue):
             raise ValueError("when only immediate resume switches or keeps")
         if not (not (self.fallback and self.capacity_wait_stands)):
             raise ValueError("capacity_wait_stands fallback ends wait")
-        if not (
-            not (self.drain_seconds is not None)
-            or {
-                "pause": 1,
-                "resume": 2,
-                "stop": 3,
-                "steer": 4,
-                "withdraw": 5,
-                "cancel_attempt": 6,
-                "cancel_item": 7,
-                "set_max_parallel": 8,
-                "park": 9,
-                "pause_now": 10,
-            }.get(self.action, 0)
-            in [1, 9, 10]
-        ):
-            raise ValueError("drain_seconds only for a pause")
 
     __hash__ = CoreValue.cached_hash
 

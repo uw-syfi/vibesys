@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
     from vs_core.api import RequestId
     from vs_core.api.recovery import End, Run, StepResult
-    from vs_runtime._step_loop import Interruption
+    from vs_runtime._step_loop import Interruption, OpenStep
 
 
 @dataclass(frozen=True)
@@ -61,15 +61,19 @@ class FakeStepLog[S, I]:
         self,
         seed: S,
         fold: Callable[[S, LogEntry | I], S],
+        open_step: Callable[[S, RequestId], OpenStep | None],
         entries: Iterable[LogEntry | I] = (),
     ) -> None:
-        """Fold ``entries`` over ``seed``; ``fold`` applies one entry to a state."""
+        """Fold ``entries`` over ``seed``; ``fold`` applies one entry to a state.
+
+        ``open_step`` reads a step with no result out of a state, as the real fold does.
+        """
         self._fold = fold
+        self._open_step = open_step
         self._state = seed
         self.entries: list[LogEntry | I] = []
         self._inputs = Changes()
         self._inputs_seen = 0
-        self._latest: dict[RequestId, Run] = {}
         for entry in entries:
             self._add(entry)
 
@@ -83,9 +87,9 @@ class FakeStepLog[S, I]:
         self._add(entry)
         self._inputs.notify()
 
-    def latest_run(self, tag: RequestId) -> Run | None:
-        """The run of the last ``LoggedStarted`` of ``tag``."""
-        return self._latest.get(tag)
+    def open_step(self, tag: RequestId) -> OpenStep | None:
+        """The step ``tag`` as the current state has it, while it has no result."""
+        return self._open_step(self._state, tag)
 
     async def step_started(self, run: Run) -> None:
         """Append ``LoggedStarted``."""
@@ -110,6 +114,4 @@ class FakeStepLog[S, I]:
 
     def _add(self, entry: LogEntry | I) -> None:
         self.entries.append(entry)
-        if isinstance(entry, LoggedStarted):
-            self._latest[entry.run.tag] = entry.run
         self._state = self._fold(self._state, entry)

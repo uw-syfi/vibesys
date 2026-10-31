@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import math
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol, assert_never
 
@@ -23,7 +23,7 @@ from vs_runtime._step_runner import Adopted, CancelSignal, Cleared, ClearUnavail
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Coroutine
 
-    from vs_core.api import RequestId
+    from vs_core.api import Request, RequestId
     from vs_core.api.recovery import Action, StepResult
     from vs_runtime._step_runner import StepRunner
     from vs_sim.api import SleepingClock
@@ -49,6 +49,17 @@ class LoopExit(StrEnum):
     """The run is paused and nothing is in flight."""
 
 
+@dataclass(frozen=True)
+class OpenStep:
+    """A step with no result, as the fold of the log has it, so ``clear`` has the request."""
+
+    step: Request
+    deadline_at: float
+    """Run-clock seconds at which core cancels an attempt of it."""
+    started: int
+    """The latest attempt that began; 0 before the first."""
+
+
 class StepLog[S](Protocol):
     """The run's log as the loop uses it: each method is one atomic durable append.
 
@@ -61,8 +72,8 @@ class StepLog[S](Protocol):
         """The state to decide on."""
         ...
 
-    def latest_run(self, tag: RequestId) -> Run | None:
-        """The last attempt recorded for ``tag``, with the request it ran; ``None`` if none."""
+    def open_step(self, tag: RequestId) -> OpenStep | None:
+        """The step ``tag`` as the fold has it while it has no result; ``None`` otherwise."""
         ...
 
     async def step_started(self, run: Run) -> None:
@@ -153,8 +164,11 @@ def _fate(reason: CancelReason) -> _Fate:
 class _Flight:
     """One attempt, or one conclusion of a step with no attempt running."""
 
-    def __init__(self, tag: RequestId, deadline_at: float | None, *, ending: bool = False) -> None:
+    def __init__(
+        self, tag: RequestId, step: Request, deadline_at: float | None, *, ending: bool = False
+    ) -> None:
         self.tag = tag
+        self.step = step
         self.deadline_at = deadline_at
         self.signal = CancelSignal()
         self.ending = ending
@@ -256,7 +270,7 @@ class _StepLoop[S]:
 
     def _start(self, run: Run) -> None:
         if run.tag not in self._flights:
-            flight = _Flight(run.tag, run.deadline_at)
+            flight = _Flight(run.tag, run.step, run.deadline_at)
             self._launch(flight, self._attempt(run, flight))
 
     def _cancel(self, action: Cancel) -> None:
@@ -275,8 +289,11 @@ class _StepLoop[S]:
             self._conclude(action.tag, action.result, ending=False)
 
     def _conclude(self, tag: RequestId, result: StepResult, *, ending: bool) -> None:
-        flight = _Flight(tag, None, ending=ending)
-        self._launch(flight, self._clear_then_finish(flight, result))
+        """End a step that has no attempt in flight (the host restarted, or it never began)."""
+        open_step = self._log.open_step(tag)
+        if open_step is not None:
+            flight = _Flight(tag, open_step.step, None, ending=ending)
+            self._launch(flight, self._clear_then_finish(flight, result))
 
     def _launch(self, flight: _Flight, work: Coroutine[object, object, None]) -> None:
         self._flights[flight.tag] = flight
@@ -324,8 +341,8 @@ class _StepLoop[S]:
             await self._log.step_finished(tag, attempt, result)
 
     def _last_attempt(self, tag: RequestId) -> int:
-        latest = self._log.latest_run(tag)
-        return 0 if latest is None else latest.attempt
+        open_step = self._log.open_step(tag)
+        return 0 if open_step is None else open_step.started
 
     async def _record_interrupted(self, tag: RequestId, attempt: int, why: Interruption) -> None:
         async with self._appending:
@@ -393,14 +410,12 @@ class _StepLoop[S]:
         await self._record_finished(flight.tag, self._last_attempt(flight.tag), result)
 
     async def _end_adopted(self, flight: _Flight) -> None:
-        """Attach to work ``clear`` adopted and still going, with the signal set, so it ends.
-
-        Only a started attempt leaves anything to adopt, so its request is in the log.
-        """
-        latest = self._log.latest_run(flight.tag)
-        if latest is not None:
+        """Attach to work ``clear`` adopted and still going, with the signal set, so it ends."""
+        open_step = self._log.open_step(flight.tag)
+        if open_step is not None:
             flight.signal.set(CancelReason.WITHDRAWN)
-            await self._run_bounded(replace(latest, attempt=latest.attempt + 1), flight.signal)
+            run = Run(flight.step, flight.tag, open_step.started + 1, open_step.deadline_at)
+            await self._run_bounded(run, flight.signal)
 
     async def _clear(self, flight: _Flight) -> Adopted | Cleared | None:
         """``clear`` the tag, retrying while its backend is unreachable.
@@ -411,7 +426,7 @@ class _StepLoop[S]:
         while True:
             try:
                 return await self._bounded(
-                    self._runner.clear(flight.tag), self._timing.clear_timeout_s
+                    self._runner.clear(flight.step, flight.tag), self._timing.clear_timeout_s
                 )
             except (ClearUnavailableError, TimeoutError):
                 if flight.abandons_clear():
@@ -422,7 +437,9 @@ class _StepLoop[S]:
 
     async def _run_bounded(self, run: Run, signal: CancelSignal) -> StepResult | None:
         """Run the attempt; give a cancel its grace, then cancel the task, then let go of it."""
-        task = asyncio.ensure_future(self._runner.run(run.step, run.tag, run.attempt, signal))
+        task = asyncio.ensure_future(
+            self._runner.run(run.step, run.tag, run.attempt, run.deadline_at, signal)
+        )
         try:
             await self._first_of(_await(task), signal.wait())
             if not task.done():
@@ -475,6 +492,7 @@ def _drop[T](task: asyncio.Future[T]) -> None:
 __all__ = [
     "Interruption",
     "LoopExit",
+    "OpenStep",
     "RecoveryRule",
     "StepLog",
     "StepLoopTiming",

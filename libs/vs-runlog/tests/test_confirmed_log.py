@@ -12,6 +12,7 @@ from hypothesis import strategies as st
 from vs_proto.api import (
     AttemptInterrupted,
     CoreInput,
+    EpochStarted,
     InterruptionReason,
     Oneof,
     Record,
@@ -51,6 +52,7 @@ _RESULT = st.builds(
     result=_OUTCOME,
 )
 MESSAGES: st.SearchStrategy[CoreMessage] = st.one_of(
+    st.builds(EpochStarted, epoch=st.integers(1, 3)),
     st.builds(CoreInput, schema_version=st.just(1), event=_BYTES),
     st.builds(
         StepStarted,

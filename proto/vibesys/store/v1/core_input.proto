@@ -102,10 +102,13 @@ enum InterruptionReason {
   INTERRUPTION_REASON_PAUSE = 1;
   // The run process shut down in an orderly way.
   INTERRUPTION_REASON_SHUTDOWN = 2;
+  // The runner raised, or gave nothing back. Unlike the two above it is charged to the step's
+  // retry bound, as a crash of the attempt is.
+  INTERRUPTION_REASON_RAISED = 3;
 }
 
-// AttemptInterrupted is an attempt that ended without a result. The step stays open and is
-// not charged an attempt of its retry bound.
+// AttemptInterrupted is an attempt that ended without a result. The step stays open. A pause or
+// shutdown is not charged an attempt of its retry bound; a runner that raised is.
 message AttemptInterrupted {
   string tag = 1 [(buf.validate.field).string = {
     min_len: 1
