@@ -11,29 +11,9 @@ import type {TopicEntry} from '@vibesys/proto';
 import type {SubscriptionPort, SubscriptionUpdate} from '../index.js';
 import {applyUpdate, INITIAL_WINDOW, machineStats, stateOf, type WindowState} from '../index.js';
 import {machineEntry} from './entries.js';
+import type {PortRig} from './port-rig.js';
 
-/** The host as its owner sees it: what the port asks of it, and what it does to the port. */
-export interface FarSide {
-  /** Every observation of `host` is brought live with `entry` as its machine's stats. */
-  live(host: HostKey, entry: TopicEntry): void;
-  /** Whether the far side still serves any observation of `host`. */
-  holds(host: HostKey): boolean;
-  /** `host` has lost its stream and is waiting to try again. */
-  waits(host: HostKey): Promise<void>;
-  /** How many times `host` was asked to try again since it waited. */
-  retried(host: HostKey): number;
-  /** The host was removed: its observations end. */
-  remove(host: HostKey): Promise<void>;
-  /** Let outcomes in flight reach their owners. */
-  drain(): Promise<void>;
-  /** Let time pass for whatever the far side keeps a while after its last observer left. */
-  later(): Promise<void>;
-}
-
-export interface PortRig {
-  readonly port: SubscriptionPort;
-  readonly far: FarSide;
-}
+export type {FarSide, PortRig} from './port-rig.js';
 
 /** The stats of the one machine a host reports, sampled at `seconds`. */
 const stats = (seconds: number): TopicEntry => machineEntry('machine', seconds * 1000);

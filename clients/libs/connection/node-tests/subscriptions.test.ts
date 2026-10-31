@@ -11,7 +11,13 @@ import {machineStats, SUBSCRIBE_METHOD, type SubscriptionState} from '@vibesys/s
 import {GrpcError} from '@vibesys/transport';
 import {FakeClock} from '@vibesys/transport/testing';
 import {expect} from 'expect';
-import {GatewayCalls, GatewayConnection, Subscriptions, TAIL_METHOD} from '../src/index.js';
+import {
+  GatewayCalls,
+  GatewayConnection,
+  SUBSCRIPTION_LINGER_MS,
+  Subscriptions,
+  TAIL_METHOD,
+} from '../src/index.js';
 // test-isolation: Node HTTP/2 needs the gateway Fake alone; legacy contract exports load bun:test.
 import {FakeGateway} from '../src/testing/fake-gateway.js';
 
@@ -142,6 +148,8 @@ test('leaving the last observer ends the gateway stream', {timeout: 15000}, asyn
     open.send({case: 'entry', value: reading(1)});
     open.send({case: 'synced', value: {}});
     release();
+    // The stream outlives its last observer by the linger, then ends with its machine.
+    clock.advanceBy(SUBSCRIPTION_LINGER_MS);
     await open.closed;
     expect(clock.pending).toBe(0);
   } finally {

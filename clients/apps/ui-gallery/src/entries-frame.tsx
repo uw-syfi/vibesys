@@ -9,6 +9,7 @@ import {
   Gantt,
   type GanttRow,
   type GanttView,
+  Gauge,
   type Guide,
   LoadingBar,
   LogPane,
@@ -578,6 +579,21 @@ export const FRAME_ENTRIES = {
         <Meter label="Accent, 30% of the best" value={0.3} />
         <Meter label="Ok, 70% of the best" value={0.7} tone="ok" />
         <Meter label="Muted, all of it" value={1} tone="muted" />
+      </Stack>
+    ),
+  },
+  Gauge: {
+    render: () => (
+      <Stack>
+        <Row gap="space-5" wrap>
+          <Gauge label="CPU" share={0.34} figure="34%" />
+          <Gauge label="Memory" share={0.5} figure="18.0 / 36.0 GB" />
+          <Gauge label="GPU" share={0.95} figure="95%" tone="accent" />
+        </Row>
+        <Row gap="space-5" wrap>
+          <Gauge label="CPU" share={0.34} figure="34%" dim />
+          <Gauge label="GPU" share={null} figure="–" />
+        </Row>
       </Stack>
     ),
   },

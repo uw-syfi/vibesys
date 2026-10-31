@@ -4,7 +4,7 @@
  * own streams opening, ending and closing.
  */
 import type {HostKey} from '@vibesys/hosts';
-import type {PortRig} from '@vibesys/subscription/contract';
+import type {PortRig} from '@vibesys/subscription/testing';
 import {SUBSCRIPTION_LINGER_MS, type Subscriptions} from '../shell/subscriptions.js';
 import {hubRig, settle} from './hub-rig.js';
 
