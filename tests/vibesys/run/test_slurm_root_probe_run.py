@@ -210,7 +210,6 @@ def _run(
             ),
             backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(threads=threads),
             git_repository=_ProductGit().repository,
-            # Run records in memory: hours of a run's virtual time take many commits.
         ),
     )
 
