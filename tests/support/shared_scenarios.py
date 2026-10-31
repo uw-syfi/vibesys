@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 REPOSITORY = Path(__file__).resolve().parents[2]
 SOURCES = REPOSITORY / "clients/libs/run-fixtures/src/data"
 GOLDENS = REPOSITORY / "clients/libs/run-fixtures/src/native"
+TRACE = REPOSITORY / "clients/apps/desktop-shell/e2e/scenarios/trace.json"
 
 
 def declarations() -> list[Path]:
@@ -43,8 +44,21 @@ def fingerprint() -> str:
     return digest.hexdigest()
 
 
+def publish_live_trace() -> None:
+    """The ``queue-rs-live`` declaration is the desktop journey trace under a new name."""
+    trace = json.loads(TRACE.read_text())
+    trace.update(
+        name="queue-rs-live",
+        description="A dynamic search over two planning calls, seven ideas, W5 with a turn and a judge.",
+    )
+    (SOURCES / "queue-rs-live.json").write_text(
+        json.dumps(trace, indent=2, ensure_ascii=False) + "\n"
+    )
+
+
 def regenerate() -> None:
     """Publish native replay artifacts and a manifest that fails on source or byte drift."""
+    publish_live_trace()
     GOLDENS.mkdir(exist_ok=True)
     for path in declarations():
         (GOLDENS / f"{path.stem}.pb").write_bytes(project_shared(path).to_binary())
