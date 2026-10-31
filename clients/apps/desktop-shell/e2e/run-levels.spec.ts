@@ -144,9 +144,8 @@ test('every level opens from the keyboard alone, and Escape walks back', async (
   const turn = page.getByRole('region', {name: 'Agent turn'});
   await expect(turn).toBeVisible();
 
-  // Tab reaches the folded tool line; Enter opens it, Tab reaches the call, Enter opens that.
+  // Tab reaches the reasoning line, then the tool group and its calls; Enter on the call opens it.
   await tabInto(page, turn);
-  await page.keyboard.press('Enter');
   const bench = turn.getByRole('button', {name: /cargo bench --bench queue/}).last();
   for (let press = 0; press < 10; press += 1) {
     if (await bench.evaluate(element => element === document.activeElement)) break;
@@ -214,14 +213,17 @@ test('every level opens by click and walks back by Escape, the crumbs and Back',
     .getByRole('option', {name: /builder/i})
     .first()
     .click();
-  // The turn reads as narrative: thinking and text first, the tool call folded into one line.
+  // The turn reads as narrative: thinking (closed to a one-line preview) and text first, then the
+  // tool calls as rows; a short run of calls starts open, and the reader can close it.
   const turn = page.getByRole('region', {name: 'Agent turn'});
   await expect(turn.getByText('The head and tail counters share a cache line.')).toBeVisible();
   await expect(turn.getByText('I will pad each counter to its own line')).toBeVisible();
-  const folded = turn.getByRole('button', {name: /1 tool/});
-  await expect(folded).toHaveAttribute('aria-expanded', 'false');
-  await folded.click();
-  await expect(folded).toHaveAttribute('aria-expanded', 'true');
+  const group = turn.getByRole('button', {name: /1 tool/});
+  await expect(group).toHaveAttribute('aria-expanded', 'true');
+  await group.click();
+  await expect(group).toHaveAttribute('aria-expanded', 'false');
+  await group.click();
+  await expect(group).toHaveAttribute('aria-expanded', 'true');
   await check(page, 'ink-step');
 
   // Level 3: the item in full, beside its step, whose group stays open with the call marked.
@@ -334,10 +336,6 @@ test('the performance row is the same element, in the same place and size, at ev
     .click();
   await expect(page.getByRole('region', {name: 'Agent turn'})).toBeVisible();
   await unchanged();
-  await page
-    .getByRole('region', {name: 'Agent turn'})
-    .getByRole('button', {name: /1 tool/})
-    .click();
   await page
     .getByRole('region', {name: 'Agent turn'})
     .getByRole('button', {name: /cargo bench --bench queue/})
@@ -663,7 +661,6 @@ test('a live turn keeps its scroll position and its element as events arrive', a
   // Thinking and text come first, and the reply shows every one of its fields, with no collapse.
   await expect(turn).toContainText('Said number 11');
   await expect(turn.getByRole('button', {name: /Show all fields/})).toHaveCount(0);
-  await expect(turn.locator('.vs-thought strong').first()).toBeVisible();
   expect(await turn.evaluate(element => element.textContent?.includes('**'))).toBe(false);
 
   // A live turn the reader has not scrolled away from stays at its end.
@@ -673,17 +670,19 @@ test('a live turn keeps its scroll position and its element as events arrive', a
   await more(12, 1);
   await expect.poll(gap).toBeLessThan(2);
 
-  // Scrolled away, it stays where it is: the same element, and no scroll event moved it.
+  // Scrolled away, it stays where it is: the same element, and no scroll event moved it. (The
+  // reasoning is closed to a line, so the turn is shorter than it was: scroll a short way up.)
+  const AWAY = 150;
   await expect
     .poll(() => turn.evaluate(element => element.scrollHeight - element.clientHeight))
-    .toBeGreaterThan(400);
-  await turn.evaluate(element => {
+    .toBeGreaterThan(AWAY);
+  await turn.evaluate((element, top) => {
     const seen: number[] = [];
     Object.assign(window, {scrolls: seen});
     element.setAttribute('data-probe', '1');
     element.addEventListener('scroll', () => seen.push(element.scrollTop));
-    element.scrollTop = 400;
-  });
+    element.scrollTop = top;
+  }, AWAY);
   const scrolls = () => page.evaluate(() => (window as unknown as {scrolls: number[]}).scrolls);
   // The page has taken the reader's scroll before the run updates.
   await expect.poll(async () => (await scrolls()).length).toBeGreaterThan(0);
@@ -693,8 +692,8 @@ test('a live turn keeps its scroll position and its element as events arrive', a
   await expect.poll(height).toBeGreaterThan(before);
   await more(17, 1);
   await expect(turn.locator('xpath=self::*[@data-probe]')).toHaveCount(1);
-  expect((await scrolls()).filter(top => top !== 400)).toEqual([]);
-  expect(await turn.evaluate(element => element.scrollTop)).toBe(400);
+  expect((await scrolls()).filter(top => top !== AWAY)).toEqual([]);
+  expect(await turn.evaluate(element => element.scrollTop)).toBe(AWAY);
 
   // A link in what the agent said opens through the app's opener, never in the window.
   const url = page.url();
@@ -710,4 +709,15 @@ test('a live turn keeps its scroll position and its element as events arrive', a
   await more(0, 1); // The real turn closes only after its last transcript chunk.
   await expect(turn).toContainText('Padded both counters');
   await expect(turn.getByRole('button', {name: /Show all fields/})).toHaveCount(0);
+
+  // The turn is over. The reader had its first thought in view while it was written, so it stays
+  // open rather than collapsing under them; its bold title is a title, never markup.
+  const line = turn.locator('.vs-thought').first().getByRole('button');
+  await expect(line).toHaveAttribute('aria-expanded', 'true');
+  await expect(turn.locator('.vs-thought strong').first()).toBeVisible();
+  // A press closes it to a one-line preview, and it stays closed.
+  await line.click();
+  await expect(line).toHaveAttribute('aria-expanded', 'false');
+  await expect(turn.locator('.vs-thought .vs-collapsible-summary').first()).toBeVisible();
+  expect(await turn.evaluate(element => element.textContent?.includes('**'))).toBe(false);
 });

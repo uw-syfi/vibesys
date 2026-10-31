@@ -1,8 +1,11 @@
 import {describe, expect, test} from 'bun:test';
 import type {RunEvent, Span} from '@vibesys/contracts';
+import type {UsageRecord} from '@vibesys/contracts/host-helper';
 import {event} from '@vibesys/contracts/testing';
 import {initialCoreState, reduceEventBatch} from '@vibesys/run-state';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
+import * as fc from 'fast-check';
+import {commandOutput} from './command-output.test-helper.js';
 import {type RunPageAction, type RunPageState, runPageInitial, runPageStep} from './run-page.js';
 import {type TurnRow, turnTranscript} from './turn-transcript.js';
 import {viewedRun} from './views.js';
@@ -148,6 +151,7 @@ describe('the turns under a step', () => {
         meta: '13 chars',
         input: '{\n  "command": "cargo bench"\n}',
         output: 'ok 14 benches',
+        elapsed: 2,
       },
       expect.objectContaining({kind: 'tool', name: 'Bash', state: 'pending', output: null}),
     ]);
@@ -392,5 +396,221 @@ describe('a tool call in the turn view', () => {
     const empty = rowsOf([call(10, 'op:1', 'c1', 'x'), result(11, 'op:1', 'c1', '')], 'op:1');
     expect(empty[1]).toMatchObject({meta: 'no output'});
     expect(rowsOf([call(10, 'op:1', 'c1', 'x')], 'op:1')[1]).not.toHaveProperty('meta');
+  });
+});
+
+function commandResult(
+  sequence: number,
+  callId: string,
+  command: {stdout: string; stderr: string; exit_code: number | null; duration: number | null},
+) {
+  return event(sequence, 'tool_result', {
+    invocation_id: 'inv-op:1',
+    agent_kind: 'implementer',
+    span_id: 'op:1',
+    data: {
+      kind: 'tool_result',
+      tool: 'Bash',
+      call_id: callId,
+      content: command.stdout || command.stderr,
+      is_error: false,
+      payload: {kind: 'command', ...command},
+    },
+  });
+}
+
+type ToolTurnRow = Extract<TurnRow, {kind: 'tool'}>;
+const toolRows = (rows: readonly TurnRow[] | undefined): ToolTurnRow[] =>
+  (rows ?? []).filter((row): row is ToolTurnRow => row.kind === 'tool');
+
+describe('a command result in a turn’s rows', () => {
+  test('keeps the exit code, the run time and both streams as the result reported them', () => {
+    fc.assert(
+      fc.property(
+        commandOutput,
+        commandOutput,
+        fc.option(fc.integer({min: -(2 ** 31), max: 2 ** 31 - 1}), {nil: null}),
+        fc.option(fc.double({min: 0, max: 1e5, noNaN: true}), {nil: null}),
+        (stdout, stderr, exit_code, duration) => {
+          const state = page(
+            [
+              call(10, 'op:1', 'c1', 'x'),
+              commandResult(11, 'c1', {stdout, stderr, exit_code, duration}),
+            ],
+            'op:1',
+          );
+          const [row] = toolRows(turns(state)?.rows);
+          expect(row?.command).toEqual({exitCode: exit_code, seconds: duration, stdout, stderr});
+        },
+      ),
+    );
+  });
+
+  test('says how it ended in words: a failing code, then the time, tenths below ten seconds', () => {
+    const words = (exit_code: number | null, duration: number | null): string | undefined => {
+      const state = page(
+        [
+          call(10, 'op:1', 'c1', 'x'),
+          commandResult(11, 'c1', {stdout: 'out', stderr: '', exit_code, duration}),
+        ],
+        'op:1',
+      );
+      return toolRows(turns(state)?.rows)[0]?.meta;
+    };
+    expect(words(0, 2.34)).toBe('2.3s');
+    expect(words(1, 0.04)).toBe('exit 1 · 0.0s');
+    expect(words(-9, 9.94)).toBe('exit -9 · 9.9s');
+    expect(words(2, 9.96)).toBe('exit 2 · 10s');
+    expect(words(0, 59)).toBe('59s');
+    expect(words(0, 125)).toBe('2m');
+    expect(words(137, null)).toBe('exit 137');
+    expect(words(null, 3)).toBe('3.0s');
+    // A zero exit with no time says nothing of the run, so the row falls back to the output's size.
+    expect(words(0, null)).toBe('3 chars');
+  });
+
+  test('never says "exit 0", whatever the result held', () => {
+    fc.assert(
+      fc.property(
+        fc.option(fc.double({min: 0, max: 1e6, noNaN: true}), {nil: null}),
+        commandOutput,
+        (duration, stdout) => {
+          const state = page(
+            [
+              call(10, 'op:1', 'c1', 'x'),
+              commandResult(11, 'c1', {stdout, stderr: '', exit_code: 0, duration}),
+            ],
+            'op:1',
+          );
+          expect(toolRows(turns(state)?.rows)[0]?.meta ?? '').not.toContain('exit');
+        },
+      ),
+    );
+  });
+
+  test('falls back to the size of the output when it reported neither, and for any other result', () => {
+    const none = page(
+      [
+        call(10, 'op:1', 'c1', 'x'),
+        commandResult(11, 'c1', {stdout: 'built', stderr: '', exit_code: null, duration: null}),
+      ],
+      'op:1',
+    );
+    expect(toolRows(turns(none)?.rows)[0]?.meta).toBe('5 chars');
+    const plain = page([call(10, 'op:1', 'c1', 'x'), result(11, 'op:1', 'c1', 'a\nb')], 'op:1');
+    const [row] = toolRows(turns(plain)?.rows);
+    expect(row?.meta).toBe('2 lines');
+    expect(row?.command).toBeUndefined();
+  });
+
+  test('a call that has no result yet has none of it', () => {
+    const [row] = toolRows(turns(page([call(10, 'op:1', 'c1', 'x')], 'op:1'))?.rows);
+    expect(row?.state).toBe('pending');
+    expect(row?.command).toBeUndefined();
+    expect(row?.meta).toBeUndefined();
+  });
+});
+
+describe('when in a turn a row happened', () => {
+  const BEGAN = Date.parse('2026-10-15T16:00:00Z');
+  const stamped = (each: RunEvent, offsetMs: number): RunEvent => ({
+    ...each,
+    timestamp: new Date(BEGAN + offsetMs).toISOString(),
+  });
+  const record = (span: string, startedAt: string | null): UsageRecord => ({
+    run_id: null,
+    execution_id: null,
+    span_id: span,
+    round_label: null,
+    role: 'implementer',
+    client: null,
+    harness: null,
+    model: null,
+    reasoning_effort: null,
+    harness_version: null,
+    started_at: startedAt,
+    ended_at: null,
+    cost_usd: null,
+    duration_ms: null,
+    tokens: {input: null, cache_read: null, cache_write: null, output: null, reasoning: null},
+  });
+  /** The turn's rows, for a run whose usage records say the turns began as `starts` says. */
+  function rowsWith(
+    events: readonly RunEvent[],
+    span: string,
+    starts: Readonly<Record<string, string | null>>,
+  ): ToolTurnRow[] {
+    const viewed = viewedRun(page(events, span).state);
+    if (viewed.core === null) throw new Error('the page has no run fold');
+    const core = {
+      ...viewed.core,
+      usageRecords: Object.entries(starts).map(([each, at]) => record(each, at)),
+    };
+    return toolRows(turnTranscript(viewed.trace, core, span)?.rows);
+  }
+
+  test('is the seconds from the turn’s start to the call, never negative, in whatever order the events were stamped', () => {
+    fc.assert(
+      fc.property(
+        fc.array(fc.integer({min: -60_000, max: 3_600_000}), {minLength: 1, maxLength: 25}),
+        offsets => {
+          const events = offsets.map((offset, index) =>
+            stamped(call(10 + index, 'op:1', `c${index}`, `cmd ${index}`), offset),
+          );
+          const rows = rowsWith(events, 'op:1', {'op:1': new Date(BEGAN).toISOString()});
+          expect(rows.map(row => row.elapsed)).toEqual(
+            offsets.map(offset => Math.max(0, offset / 1000)),
+          );
+        },
+      ),
+    );
+  });
+
+  test('shows the time the turn waited before its first call', () => {
+    const rows = rowsWith(
+      [stamped(call(10, 'op:1', 'c1', 'a'), 7_500), stamped(call(11, 'op:1', 'c2', 'b'), 9_000)],
+      'op:1',
+      {'op:1': new Date(BEGAN).toISOString()},
+    );
+    expect(rows.map(row => row.elapsed)).toEqual([7.5, 9]);
+  });
+
+  test('counts from the first entry that has a time when the run recorded no start, or one that is not a time', () => {
+    const untimed = (sequence: number) =>
+      ({...say(sequence, 'op:1', 'hello '), timestamp: 'unknown'}) as RunEvent;
+    const events = [untimed(10), call(11, 'op:1', 'c1', 'a'), call(14, 'op:1', 'c2', 'b')];
+    for (const starts of [{}, {'op:1': null}, {'op:1': 'not a time'}]) {
+      expect(rowsWith(events, 'op:1', starts).map(row => row.elapsed)).toEqual([0, 3]);
+    }
+  });
+
+  test('is absent when no entry has a time', () => {
+    const rows = rowsWith(
+      [
+        {...call(11, 'op:1', 'c1', 'a'), timestamp: 'unknown'} as RunEvent,
+        {...call(12, 'op:1', 'c2', 'b'), timestamp: 'unknown'} as RunEvent,
+      ],
+      'op:1',
+      {},
+    );
+    expect(rows.every(row => !('elapsed' in row))).toBe(true);
+  });
+
+  test('is counted from each turn’s own start under a workstream', () => {
+    const state = page(
+      [
+        call(10, 'op:1', 'a1', 'first'),
+        call(12, 'op:2', 'b1', 'second'),
+        call(14, 'op:1', 'a2', 'third'),
+        call(17, 'op:2', 'b2', 'fourth'),
+      ],
+      'flow:root#1',
+    );
+    expect(toolRows(turns(state)?.rows).map(row => `${row.summary} ${row.elapsed}`)).toEqual([
+      'first 0',
+      'third 4',
+      'second 0',
+      'fourth 5',
+    ]);
   });
 });
