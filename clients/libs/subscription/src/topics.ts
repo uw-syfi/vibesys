@@ -11,7 +11,7 @@ import {
   type MachineStats,
   MachineStatsTopicSchema,
   type RunHead,
-  type RunLiveness,
+  RunLiveness,
   RunsTopicSchema,
   type SubscribeRequest,
   SubscribeRequestSchema,
@@ -81,6 +81,13 @@ export interface RunFacts {
 
 /** The runs of one host's run index, by run id. */
 export type HostRunFacts = ReadonlyMap<string, RunFacts>;
+
+/** How many of a host's runs have a writer alive: the one meaning of "live" for a run count. */
+export function aliveRuns(runs: HostRunFacts): number {
+  let alive = 0;
+  for (const run of runs.values()) if (run.liveness === RunLiveness.ALIVE) alive += 1;
+  return alive;
+}
 
 /** The run list of one host, and with a key, one run's facts. */
 export const runs: Topic<HostRunFacts> = {

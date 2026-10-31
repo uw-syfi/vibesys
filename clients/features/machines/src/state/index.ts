@@ -45,6 +45,8 @@ export {
   FAILURE_WORDS,
   type GaugeView,
   type HostLive,
+  type RunsView,
+  runsView,
   type StatsView,
   statsGauges,
   statsView,

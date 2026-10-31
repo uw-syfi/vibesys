@@ -8,7 +8,7 @@ import {
   type SubscriptionState,
   TERMINAL_REASONS,
 } from '@vibesys/subscription';
-import {machineEntry, type Readings} from '@vibesys/subscription/testing';
+import {machineEntry, type Readings, runsOf} from '@vibesys/subscription/testing';
 import fc from 'fast-check';
 import {
   ageWord,
@@ -19,6 +19,7 @@ import {
   initialMachines,
   type Machine,
   machinesStep,
+  runsView,
   statsGauges,
   statsView,
   streamStatus,
@@ -227,9 +228,14 @@ test('property: a card never says Online beside a stream that is not live', () =
       fc.constantFrom('ready', 'needs-update', 'unavailable', 'sign-in' as const),
       (state, probe) => {
         const status = cardStatus(listed(probe), statsView(state));
+        // Online is the stream's word, so only a live stream says it; the check can hold it back
+        // (a sign-in, an old version) but a check whose reads timed out cannot, beside live readings.
         if (status.word === 'Online') {
-          expect(probe === 'ready' && state.kind === 'live').toBe(true);
+          expect(state.kind === 'live' && (probe === 'ready' || probe === 'unavailable')).toBe(
+            true,
+          );
         }
+        if (state.kind === 'live' && probe === 'unavailable') expect(status.word).toBe('Online');
         // One word, never a sentence, and a tone the chip can draw.
         expect(status.word.split(' ').length).toBeLessThanOrEqual(3);
         expect(['neutral', 'ok', 'warn', 'err']).toContain(status.tone);
@@ -300,4 +306,31 @@ test('an age reads in the largest whole unit, never negative, and never goes dow
       expect(order(ageWord(early + gap, 0))).toBeGreaterThanOrEqual(order(ageWord(early, 0)));
     }),
   );
+});
+
+test('property: a card counts its runs from one reading, and a host that stops delivering keeps its counts, dimmed', () => {
+  fc.assert(
+    fc.property(
+      fc.nat({max: 40}),
+      fc.nat({max: 40}),
+      fc.constantFrom(...RETRYABLE_REASONS),
+      fc.integer({min: 1, max: 4}),
+      (alive, ended, reason, attempt) => {
+        const value = runsOf(alive, ended);
+        const live = runsView({kind: 'live', value, since: 1});
+        const stale = runsView({kind: 'stale', value, reason, attempt, valueAt: 1});
+        expect(live).toEqual({total: alive + ended, alive, stale: false});
+        // The same reading, so the same counts: only its currency changes.
+        expect(stale).toEqual({total: alive + ended, alive, stale: true});
+        // The alive runs are some of the runs held, never more.
+        expect(alive).toBeLessThanOrEqual(alive + ended);
+      },
+    ),
+  );
+});
+
+test('a host that has not said holds no counts, and one that failed before saying says none', () => {
+  expect(runsView({kind: 'connecting', step: 'stream', attempt: 0})).toBeNull();
+  expect(runsView({kind: 'connecting', step: 'gateway', attempt: 3})).toBeNull();
+  expect(runsView({kind: 'failed', reason: 'unreachable', retrying: true})).toBeNull();
 });

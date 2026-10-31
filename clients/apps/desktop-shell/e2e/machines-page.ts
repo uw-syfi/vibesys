@@ -17,7 +17,12 @@ import {
   installFakeProjectRuns,
 } from './fake-bridge.js';
 import {addInitScripts, initScript} from './init-scripts.js';
-import {type SubscriptionSeed, subscriptionScript} from './subscription-fake.js';
+import {
+  type HostFeed,
+  type RunsFeed,
+  type SubscriptionSeed,
+  subscriptionScript,
+} from './subscription-fake.js';
 import {PROJECT, SEED, server} from './world.js';
 
 /** Facts of a machine with GPUs, two runs live. */
@@ -45,8 +50,11 @@ const NO_LOGINS = null;
 export interface MachinesWorld {
   readonly name: string;
   readonly seed: FakeBridgeSeed;
-  /** What each host's live stats do; a world without it has no subscription port. */
-  readonly live?: SubscriptionSeed;
+  /**
+   * What each host's live stats and runs do, over the defaults every world gets: a host streams
+   * what its check found, and says the runs its listing holds.
+   */
+  readonly live?: Partial<SubscriptionSeed>;
   /** What to press before the page is looked at, from the page. */
   readonly before?: (page: Page) => Promise<void>;
 }
@@ -87,6 +95,43 @@ function listing(
       ]),
     ),
   };
+}
+
+/**
+ * What a host streams when its world says nothing: its readings if its check passed, and no
+ * answer yet if the check found it unreachable, signed out or too old. A host that is reached
+ * again (signed in, its checkout set) streams.
+ */
+function feedOf(report: NonNullable<FakeBridgeSeed['reports']>[string] | undefined): HostFeed {
+  return report === undefined || report.kind === 'ready'
+    ? {kind: 'live'}
+    : {kind: 'connecting', step: 'handshake', attempt: 0};
+}
+
+/** A listing the Fake bridge holds, as far as the runs a host says are read from it. */
+interface Listed {
+  readonly host: string;
+  readonly live: readonly unknown[];
+  readonly ended: readonly unknown[];
+}
+
+const isListed = (value: unknown): value is Listed =>
+  typeof value === 'object' &&
+  value !== null &&
+  'host' in value &&
+  'live' in value &&
+  Array.isArray(value.live) &&
+  'ended' in value &&
+  Array.isArray(value.ended);
+
+/** The runs each machine says it holds: those its listing names, alive or ended. */
+function runsSaid(seed: FakeBridgeSeed): Record<string, RunsFeed> {
+  const said = new Map<string, RunsFeed>();
+  for (const listed of seed.listings.filter(isListed))
+    said.set(listed.host, {alive: listed.live.length, ended: listed.ended.length});
+  return Object.fromEntries(
+    (seed.machines ?? []).map(({host}) => [host, said.get(host) ?? {alive: 0, ended: 0}]),
+  );
 }
 
 function seeded(
@@ -194,6 +239,23 @@ export const WORLDS: readonly MachinesWorld[] = [
   {
     name: 'a live machine',
     seed: seeded([LOCAL], {local: FULL}, {local: 3}),
+    live: {hosts: {local: {kind: 'live', readings: BUSY}}},
+  },
+  {
+    name: 'a busy machine',
+    seed: seeded([LOCAL], {local: FULL}, {local: 3}, {}, {local: 2}),
+    live: {hosts: {local: {kind: 'live', readings: BUSY}}},
+  },
+  {
+    // The machine's check timed out on a loaded host, while the host streams its readings.
+    name: 'a loaded machine',
+    seed: seeded(
+      [LOCAL],
+      {local: FULL},
+      {local: 3},
+      {local: {kind: 'unavailable', detail: 'the host did not answer in time'}},
+      {local: 2},
+    ),
     live: {hosts: {local: {kind: 'live', readings: BUSY}}},
   },
   {
@@ -320,7 +382,16 @@ export async function openMachines(page: Page, width: number, world: MachinesWor
     initScript(installFakeMachineSettings, seed),
     initScript(installFakeProjectRuns, seed),
     ...(world.name === 'a test in progress' ? [initScript(holdTests, undefined)] : []),
-    ...(world.live === undefined ? [] : [subscriptionScript(world.live)]),
+    subscriptionScript({
+      hosts: {
+        ...Object.fromEntries(
+          (seed.machines ?? []).map(({host}) => [host, feedOf(seed.reports?.[host])]),
+        ),
+        ...world.live?.hosts,
+      },
+      runs: {...runsSaid(seed), ...world.live?.runs},
+      ...(world.live?.afterRetry === undefined ? {} : {afterRetry: world.live.afterRetry}),
+    }),
   ]);
   await page.goto('./shell.html');
   await resizeTo(page, width);

@@ -4,7 +4,9 @@
  * subscription's state and never stored.
  */
 import {
+  aliveRuns,
   type FailureReason,
+  type HostRunFacts,
   type Instant,
   type MachineReadings,
   type MachineStats,
@@ -41,9 +43,32 @@ export type StatsView =
   /** No value and no stream: why, and whether a press can help. */
   | {readonly kind: 'failed'; readonly reason: FailureReason; readonly retry: boolean};
 
-/** What a card's stats row needs of one host: what to draw, how old it is, and the press to retry. */
+/**
+ * What a card says of a machine's runs: how many it holds and how many are alive, as its `runs`
+ * subscription last said. One source for both, so the two never come from different reads. Once
+ * the host has said, the counts stay: they are `stale` when it stopped delivering, and are never
+ * taken away.
+ */
+export interface RunsView {
+  readonly total: number;
+  readonly alive: number;
+  readonly stale: boolean;
+}
+
+/** The runs `state` holds, or null while the host has not said. */
+export function runsView(state: SubscriptionState<HostRunFacts>): RunsView | null {
+  if (state.kind !== 'live' && state.kind !== 'stale') return null;
+  return {total: state.value.size, alive: aliveRuns(state.value), stale: state.kind === 'stale'};
+}
+
+/**
+ * What a card's stats row needs of one host: what to draw, how old it is, the press to retry, and
+ * the runs the host holds.
+ */
 export interface HostLive {
   readonly view: StatsView;
+  /** The host's runs, from the one subscription both counts read; null until it has said. */
+  readonly runs: RunsView | null;
   /** How old a stale value is, as words (`42 s`); null while it is current, or before the clock reads. */
   readonly age: string | null;
   readonly retry: () => void;

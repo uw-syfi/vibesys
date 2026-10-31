@@ -439,6 +439,13 @@ export function installFakeMachines(seed: FakeBridgeSeed): void {
   const report = (host: string) => reports.get(host) ?? {kind: 'ready', facts: seed.facts ?? null};
   const found = (path: string) =>
     (checkouts[path] as {state?: string} | undefined)?.state === 'found';
+  /** A host that has just been reached streams again, in a world that scripts its streams. */
+  const reached = (host: string) =>
+    (
+      window as unknown as {
+        fakeSubscriptions?: {set(host: string, feed: {kind: 'live'}): void};
+      }
+    ).fakeSubscriptions?.set(host, {kind: 'live'});
   Object.assign((window as unknown as {vibesysWelcome: object}).vibesysWelcome, {
     machines: () => ok(machines),
     machine: (host: string) => ok(report(host)),
@@ -468,11 +475,13 @@ export function installFakeMachines(seed: FakeBridgeSeed): void {
             : left.label.localeCompare(right.label),
       );
       reports.delete(host);
+      reached(host);
       return ok(path);
     },
     cancelCheckout: () => ok(null),
     signIn: (host: string) => {
       reports.delete(host);
+      reached(host);
       return ok(null);
     },
     // Completion needs the host's helper, which starts from its saved checkout.

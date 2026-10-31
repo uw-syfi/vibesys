@@ -15,7 +15,9 @@ import {
 import {
   DrainGoal,
   HostCallRequestSchema,
+  type Record as LogRecord,
   RecordSchema,
+  type RunEntry,
   RunEntrySchema,
   RunLiveness,
   SkeletonResponseSchema,
@@ -333,40 +335,44 @@ function preloadOver(bridge: GatewayBridge): GatewayPortBridge {
   };
 }
 
+type Head = NonNullable<RunEntry['head']>;
+
+/**
+ * The gateway never states a head that is not whole: a spec's hint names the facts it is about,
+ * and the rest is what the log says, as the gateway projects it. A process identity is never a
+ * source of epoch authority, including in a Fake.
+ */
+function completeHead(head: Head, records: readonly LogRecord[]): void {
+  if (head.epoch === 0) {
+    const prefix = records.filter(
+      record =>
+        head.committedSeq === undefined ||
+        (head.committedSeq > 0n && record.seq <= head.committedSeq),
+    );
+    head.epoch = observeRun(foldSkeleton(seedSkeleton(), prefix)).epoch;
+  }
+  if (head.strategy === '') head.strategy = 'fixture';
+  if (head.process !== undefined) {
+    if (head.process.pid === 0) head.process.pid = 1;
+    head.process.startedAt ??= timestampFromMs(1_700_000_000_000);
+  }
+  if (head.lifecycle === undefined && !head.awaitingLifecycle)
+    head.lifecycle = observeRun(foldSkeleton(seedSkeleton(), records)).lifecycle;
+  // A drain a spec's log records without saying what it drains toward is a pause, the first goal;
+  // a head names its goal.
+  const state = head.lifecycle?.state;
+  if (state?.case === 'draining' && state.value.goal === DrainGoal.UNSPECIFIED)
+    state.value.goal = DrainGoal.PARK;
+}
+
 function fixtureObservations(input: WireFixture) {
   const records = [
     ...fromBinary(SkeletonResponseSchema, new Uint8Array(input.skeleton)).records,
     ...fromBinary(TailResponseSchema, new Uint8Array(input.tail)).records,
   ].map(bytes => fromBinary(RecordSchema, bytes));
-  // Match the gateway's retained-head decoder using canonical log facts.
-  // A process identity is never a source of epoch authority, including in a Fake.
   const decode = (bytes: Uint8Array): Uint8Array => {
     const response = fromBinary(RunEntrySchema, bytes);
-    const head = response.head;
-    if (head && head.epoch === 0) {
-      const prefix = records.filter(
-        record =>
-          head.committedSeq === undefined ||
-          (head.committedSeq > 0n && record.seq <= head.committedSeq),
-      );
-      head.epoch = observeRun(foldSkeleton(seedSkeleton(), prefix)).epoch;
-    }
-    // The gateway never states a head that is not whole: a spec's hint names the facts it is
-    // about, and the rest is what the log says, as the gateway projects it.
-    if (head) {
-      if (head.strategy === '') head.strategy = 'fixture';
-      if (head.process !== undefined) {
-        if (head.process.pid === 0) head.process.pid = 1;
-        head.process.startedAt ??= timestampFromMs(1_700_000_000_000);
-      }
-      if (head.lifecycle === undefined && !head.awaitingLifecycle)
-        head.lifecycle = observeRun(foldSkeleton(seedSkeleton(), records)).lifecycle;
-      // A drain a spec's log records without saying what it drains toward is a pause, the first
-      // goal; a head names its goal.
-      const state = head.lifecycle?.state;
-      if (state?.case === 'draining' && state.value.goal === DrainGoal.UNSPECIFIED)
-        state.value.goal = DrainGoal.PARK;
-    }
+    if (response.head) completeHead(response.head, records);
     return toBinary(RunEntrySchema, response);
   };
   return {

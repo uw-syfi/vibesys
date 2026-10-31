@@ -5,8 +5,7 @@
  */
 import type {HostKey, HostListing, ListingStep} from '@vibesys/hosts';
 import {LISTING_STEPS} from '@vibesys/hosts';
-import {RunLiveness} from '@vibesys/proto';
-import {runs} from '@vibesys/subscription';
+import {aliveRuns, runs} from '@vibesys/subscription';
 import {hostListingFromRuns, listingStep} from '../run-listing.js';
 import type {Subscriptions} from './subscriptions.js';
 
@@ -47,10 +46,7 @@ export function hostRuns(source: HostRunsSource): HostRuns {
       });
     },
     async alive(host, signal) {
-      const facts = await source.first(host, runs, signal);
-      let count = 0;
-      for (const run of facts.values()) if (run.liveness === RunLiveness.ALIVE) count += 1;
-      return count;
+      return aliveRuns(await source.first(host, runs, signal));
     },
     retry: host => source.retry(host),
   };
