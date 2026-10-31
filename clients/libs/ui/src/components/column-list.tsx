@@ -15,7 +15,7 @@ const TRACKS: Readonly<Record<ColumnSize, string>> = {
   medium: 'calc(var(--gantt-figure) + var(--space-3))',
   short: 'var(--gantt-figure)',
   compact: 'calc(var(--gantt-figure) * 0.7)',
-  dot: 'calc(var(--dot) + var(--space-4))',
+  dot: 'calc(var(--dot) + var(--space-6))',
 };
 
 /** One column of a `ColumnList`: its header, how a row fills its cell, and how the header sorts. */

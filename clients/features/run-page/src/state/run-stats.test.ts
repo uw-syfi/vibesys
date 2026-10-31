@@ -275,6 +275,19 @@ describe('the stats row at a position of the time bar', () => {
     );
   });
 
+  test('a turn still running at the position has spent nothing yet, though the run’s ledger has its usage', () => {
+    const turn = {from: 0, length: 100, open: false, input: 700, output: 30};
+    const sessions: readonly RunSession[] = [{from: 0, to: 200}];
+    const at = (until: number) => {
+      const {viewed, ledger, position} = runAt([turn], sessions, 0, until);
+      return runStats(viewed, position, 0, ledger).tokens?.input ?? 0;
+    };
+    expect(at(50)).toBe(0);
+    expect(at(99)).toBe(0);
+    expect(at(100)).toBe(700);
+    expect(at(150)).toBe(700);
+  });
+
   test('measurements count the attempts that measured a value and those that failed to, not both', () => {
     const base = idea('x', 'passed', 0, 10);
     const measured = base.attempts[0]?.measurement ?? null;

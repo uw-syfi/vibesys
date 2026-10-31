@@ -24,21 +24,23 @@ import {
   type TextTone,
 } from '@vibesys/ui';
 import type {JSX} from 'react';
-import {NO_CLEAR_CHANGE} from '../../state/headline.js';
 import {
+  compactValue,
   endOf,
+  formatValue,
   type IdeaStatus,
   type IdeasFilter,
   type IdeasSort,
   type IdeasTable as IdeasTableView,
   type IdeaTableRow,
   ideasTable,
+  NO_CLEAR_CHANGE,
   type ObjectiveCell,
   type RunPageAction,
+  ratio,
   runningWords,
   type TableColumn,
 } from '../../state/index.js';
-import {compactValue, formatValue, ratio} from '../../state/span-reading.js';
 import type {ViewBase} from './views/props.js';
 
 const STATUS_TONES: Readonly<Record<IdeaStatus, StatusTone>> = {

@@ -1591,6 +1591,10 @@ button.vs-dotlegend-item:disabled {
 button.vs-dotlegend-item:disabled .vs-text {
   color: var(--muted);
 }
+/* The chip of the state the list is already in has nothing to change, and is the one in force: it keeps its words. */
+button.vs-dotlegend-item[aria-pressed="true"]:disabled .vs-text {
+  color: var(--text);
+}
 button.vs-dotlegend-item:focus-visible {
   outline: var(--focus-ring) solid var(--accent);
   outline-offset: var(--focus-offset);

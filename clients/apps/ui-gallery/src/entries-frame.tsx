@@ -238,7 +238,11 @@ const READING_COLUMNS: readonly ListColumn<Reading>[] = [
     optional: true,
     act: () => true,
     cell: row =>
-      row.parent === null ? <Text tone="muted">Input</Text> : <CellLink label={row.parent} />,
+      row.parent === null ? (
+        <Text tone="muted">Input</Text>
+      ) : (
+        <CellLink label={row.parent} lit={row.name === 'ring-v2' || row.name === 'ring-v1'} />
+      ),
   },
   {
     key: 'status',
@@ -250,6 +254,7 @@ const READING_COLUMNS: readonly ListColumn<Reading>[] = [
     key: 'value',
     header: 'Throughput',
     size: 'wide',
+    note: {label: '+2', hint: '2 more objectives'},
     sort: {marked: true, press: noop},
     cell: row => (
       <CellInline>

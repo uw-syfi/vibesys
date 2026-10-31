@@ -17,7 +17,12 @@ export {
   type GatewayTranscriptInput,
   gatewayRunMachine,
 } from './gateway-machine.js';
-export {type HeroView, heroView, type ObjectiveHeadline} from './headline.js';
+export {
+  type HeroView,
+  heroView,
+  NO_CLEAR_CHANGE,
+  type ObjectiveHeadline,
+} from './headline.js';
 export {type HistoryLoadingView, historyLoadingView} from './history-words.js';
 export {type IdeaBase, type IdeaBases, ideaBases} from './idea-bases.js';
 export {effectWords, type IdeaEffect, type IdeaEffects, ideaEffects} from './idea-effects.js';
@@ -139,6 +144,7 @@ export {
   skeletonPositions,
   skeletonScreenState,
 } from './skeleton-projection.js';
+export {compactValue, formatValue, ratio} from './span-reading.js';
 export {adoptionTitles} from './span-words.js';
 export {endOf, positionOf, type RunPosition} from './time-position.js';
 export {spendOf, tokensAt, tokensByAgent, turnTokens} from './token-usage.js';
