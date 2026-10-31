@@ -3,7 +3,7 @@ import {create} from '@bufbuild/protobuf';
 import {SubscribeRequestSchema, TopicFailureCode} from '@vibesys/proto';
 import {type SubscriptionState, type SubscriptionUpdate, TOPICS} from '@vibesys/subscription';
 import {hubRig, settle} from '../testing/hub-rig.js';
-import {SubscriptionFailed} from './subscriptions.js';
+import {SUBSCRIPTION_LINGER_MS, SubscriptionFailed} from './subscriptions.js';
 
 const HOST = 'ssh:host-a';
 const topic = TOPICS.machineStats;
@@ -64,12 +64,14 @@ test('first resolves with the live value, and rejects with the reason a host wil
   });
   await expect(never).rejects.toEqual(new SubscriptionFailed('unsupported', false));
   await settle();
+  refused.clock.advanceBy(SUBSCRIPTION_LINGER_MS);
   expect(refused.gateway.open).toHaveLength(0);
   expect(refused.clock.pending).toBe(0);
 
   wanted.abort(new Error('screen left'));
   await expect(value).rejects.toThrow('screen left');
   await settle();
+  live.clock.advanceBy(SUBSCRIPTION_LINGER_MS);
   expect(live.gateway.open).toHaveLength(0);
 });
 

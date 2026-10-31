@@ -15,6 +15,8 @@ export interface FakePortCall {
 
 export class FakeSubscriptionPort implements SubscriptionPort {
   readonly calls: FakePortCall[] = [];
+  /** The hosts the window asked to retry, in order. */
+  readonly retries: HostKey[] = [];
 
   observe: SubscriptionPort['observe'] = (host, request, key, receive, ended) => {
     let open = true;
@@ -40,6 +42,10 @@ export class FakeSubscriptionPort implements SubscriptionPort {
         open = false;
       },
     };
+  };
+
+  retry: SubscriptionPort['retry'] = host => {
+    this.retries.push(host);
   };
 
   /** The calls the window still holds. */

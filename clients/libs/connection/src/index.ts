@@ -95,6 +95,7 @@ export {
   type WatchedRun,
 } from './shell/run-watch.js';
 export {
+  SUBSCRIPTION_LINGER_MS,
   SubscriptionFailed,
   type SubscriptionStreams,
   Subscriptions,

@@ -56,9 +56,12 @@ test("it is live only once the snapshot and main's word agree, and stale keeps t
   if (state.kind !== 'live') throw new Error(`expected live, got ${state.kind}`);
   const {value} = state;
   expect(value.sampledAt?.nanos).toBe(5_000_000);
-  call()?.send({kind: 'control', control: {kind: 'stale', reason: 'silent', attempt: 1}});
+  call()?.send({
+    kind: 'control',
+    control: {kind: 'stale', reason: 'silent', attempt: 1, valueAt: 9},
+  });
   const stale = source.getSnapshot();
-  expect(stale).toEqual({kind: 'stale', value, reason: 'silent', attempt: 1});
+  expect(stale).toEqual({kind: 'stale', value, reason: 'silent', attempt: 1, valueAt: 9});
   call()?.send({kind: 'control', control: {kind: 'failed', reason: 'unreachable', retrying: true}});
   expect(source.getSnapshot()).toEqual({kind: 'failed', reason: 'unreachable', retrying: true});
   expect(states.map(each => each.kind)).toEqual(['live', 'stale', 'failed']);

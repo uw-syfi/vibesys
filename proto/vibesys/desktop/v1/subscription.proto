@@ -20,6 +20,21 @@ message DesktopSubscribeRequest {
   }];
 }
 
+// A window asks main to try a host's waiting or stopped subscriptions again now.
+// Main answers nothing and ends the port; a stream that is delivering is left be.
+message DesktopRetryRequest {
+  string host = 1 [(buf.validate.field).string.pattern = "^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$"];
+}
+
+// Everything a window can ask of the subscription port, one request per port.
+message DesktopSubscriptionRequest {
+  oneof request {
+    option (buf.validate.oneof).required = true;
+    DesktopSubscribeRequest observe = 1;
+    DesktopRetryRequest retry = 2;
+  }
+}
+
 // How far a stream has come toward its first frame.
 enum DesktopConnectStep {
   DESKTOP_CONNECT_STEP_UNSPECIFIED = 0;
@@ -75,6 +90,8 @@ message DesktopSubscriptionStale {
     not_in: [0]
   }];
   uint32 attempt = 2;
+  // When main last received a value; display only, for the age of what is shown.
+  google.protobuf.Timestamp value_at = 3 [(buf.validate.field).required = true];
 }
 
 message DesktopSubscriptionFailed {

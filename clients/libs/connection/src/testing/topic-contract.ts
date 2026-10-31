@@ -17,7 +17,7 @@ import {
 } from '@vibesys/subscription';
 import {FakeClock} from '@vibesys/transport/testing';
 import fc from 'fast-check';
-import {Subscriptions} from '../shell/subscriptions.js';
+import {SUBSCRIPTION_LINGER_MS, Subscriptions} from '../shell/subscriptions.js';
 import {GATEWAY_FIRST_CONNECT_BUDGET_MS} from '../state/gateway.js';
 import {type FakeSubscribeStream, FakeSubscribeStreams} from './fake-subscribe-streams.js';
 
@@ -141,15 +141,18 @@ async function failsWithinTheBound<S>(topic: Topic<S>, behaviors: readonly Behav
   expect(rig.state).toMatchObject({kind: 'failed', retrying: true});
 }
 
-/** Beats for as long as the value allows, then the first one past it. */
+/** Beats for as long as the value allows, then the moment it is old: the bound is a timer. */
 function beatsPastTheValueBound<S>(rig: Rig<S>, bound: number): void {
-  for (let at = BEAT; at <= bound; at += BEAT) {
+  let elapsed = 0;
+  while (elapsed + BEAT < bound) {
     rig.clock.advanceBy(BEAT);
     rig.beat();
+    elapsed += BEAT;
     expect(rig.state.kind).toBe('live');
   }
-  rig.clock.advanceBy(BEAT);
-  rig.beat();
+  rig.clock.advanceBy(bound - elapsed - 1);
+  expect(rig.state.kind).toBe('live');
+  rig.clock.advanceBy(1);
   expect(rig.state).toMatchObject({kind: 'stale', reason: 'outdated'});
 }
 
@@ -182,6 +185,10 @@ function lastObserverStopsTheStream<S>(topic: Topic<S>, scenario: Scenario): voi
   one();
   expect(rig.gateway.open).toHaveLength(1);
   two();
+  // The stream outlives its last observer by the linger, then goes with its machine and timers.
+  rig.clock.advanceBy(SUBSCRIPTION_LINGER_MS - 1);
+  expect(rig.gateway.open).toHaveLength(1);
+  rig.clock.advanceBy(1);
   expect(rig.gateway.open).toHaveLength(0);
   expect(rig.stream.signal.aborted).toBe(true);
   expect(rig.clock.pending).toBe(0);
@@ -189,6 +196,26 @@ function lastObserverStopsTheStream<S>(topic: Topic<S>, scenario: Scenario): voi
   rig.watch();
   expect(rig.gateway.streams).toHaveLength(2);
   expect(rig.state.kind).toBe('connecting');
+}
+
+function observerThatReturnsWithinTheLingerFindsItsStream<S>(
+  topic: Topic<S>,
+  scenario: Scenario,
+): void {
+  const rig = new Rig(topic);
+  rig.watch()();
+  rig.clock.advanceBy(SUBSCRIPTION_LINGER_MS - 1);
+  rig.snapshot(scenario.first);
+  // Back inside the linger: the same stream and its value, with no second dial.
+  const back = rig.watch();
+  expect(rig.gateway.streams).toHaveLength(1);
+  expect(rig.state).toMatchObject({kind: 'live', value: rig.expected(scenario.first)});
+  rig.clock.advanceBy(SUBSCRIPTION_LINGER_MS * 4);
+  expect(rig.gateway.open).toHaveLength(1);
+  back();
+  rig.clock.advanceBy(SUBSCRIPTION_LINGER_MS);
+  expect(rig.gateway.open).toHaveLength(0);
+  expect(rig.clock.pending).toBe(0);
 }
 
 function lateObserverIsToldTheState<S>(topic: Topic<S>, scenario: Scenario): void {
@@ -282,6 +309,14 @@ export function topicContract<S>(each: TopicCase<S>): void {
     test('the last observer to leave stops the stream, drops the machine and leaves no timer', () => {
       fc.assert(
         fc.property(scenario, value => lastObserverStopsTheStream(topic, value)),
+        runs,
+      );
+    });
+    test('an observer that returns within the linger finds its stream running, and one that does not dials again', () => {
+      fc.assert(
+        fc.property(scenario, value =>
+          observerThatReturnsWithinTheLingerFindsItsStream(topic, value),
+        ),
         runs,
       );
     });

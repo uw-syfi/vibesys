@@ -1,7 +1,7 @@
 import {expect, test} from 'bun:test';
 import {create} from '@bufbuild/protobuf';
 import {timestampFromMs} from '@bufbuild/protobuf/wkt';
-import {Subscriptions} from '@vibesys/connection';
+import {SUBSCRIPTION_LINGER_MS, Subscriptions} from '@vibesys/connection';
 import {type FakeSubscribeStream, FakeSubscribeStreams} from '@vibesys/connection/testing';
 import {
   decodeGatewayReply,
@@ -289,8 +289,11 @@ test('window to port to servePort to hub to machine: live in the window, and can
   world.stream().send({case: 'synced', value: {}});
   expect(world.source.getSnapshot().kind).toBe('live');
   release();
-  // The window's last listener left: its port closed, the call was cancelled, the hub let go.
+  // The window's last listener left: its port closed and the call was cancelled. The hub keeps the
+  // stream for a page that comes straight back, then lets go.
   expect(world.ports[0]?.closes).toBe(1);
+  expect(world.gateway.open).toHaveLength(1);
+  world.clock.advanceBy(SUBSCRIPTION_LINGER_MS);
   expect(world.gateway.open).toHaveLength(0);
   expect(world.clock.pending).toBe(0);
 });
