@@ -57,6 +57,8 @@ def _opens_store(node: ast.AST, stores: set[str]) -> bool:
 
 def store_reads(source: str) -> list[int]:
     """Line numbers where a run's state store is loaded or observed."""
+    if STORE not in source:
+        return []
     tree = parse_source(source)
     nodes = list(walk_nodes(tree))
     stores = {

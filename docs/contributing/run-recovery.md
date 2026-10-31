@@ -1065,7 +1065,7 @@ These are facts the implementation must settle, found while checking the design 
 
 - **A job step's report is its job's last observation.** A job runner answers a measurement
   submission with the job's terminal observation, evidence and facts, and no poll follows. Core takes
-  that report as the job's observation too (`_step_attempts.finish`), so a run that is ending closes
+  that report as the job's observation too (`_step_attempts.finish`, which asks `_job_reports.ended_job_events`, so the rule itself names no kind of step), so a run that is ending closes
   over a job it saw end, instead of waiting for a poll that a closing run does not ask for. A run that is
   ending asks to terminate the jobs it holds as the report lands, before the job's observation follows the
   report: a job its own report ended is not terminated (`_measurements._born_ended`), because the
