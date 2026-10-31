@@ -41,7 +41,7 @@ test('a box partly out of sight is not called hollow for what cannot be seen', a
 /** Whether `check` holds of a page: `build` draws it from the generated numbers. */
 function decides<Case>(
   page: Page,
-  check: 'hollow-box' | 'spacing-order' | 'left-edge' | 'heading-depth',
+  check: 'hollow-box' | 'spacing-order' | 'left-edge' | 'heading-depth' | 'title-strip',
   cases: fc.Arbitrary<Case>,
   build: (each: Case) => string,
   fails: (each: Case) => boolean,
@@ -98,6 +98,24 @@ test('property: nothing under a title is as large as the title', async ({page}) 
     ({title, child}) =>
       `<div class="vs-page-content"><div class="vs-page-header"><h1 style="font-size:${title}px;margin:0">Logins</h1></div><div class="vs-page-scroll"><div class="vs-page-body" style="font-size:${child}px"><div>Machine</div></div></div></div>`,
     ({title, child}) => child >= title,
+  );
+});
+
+test('property: a window’s controls strip is wasted exactly when nothing is drawn in its first 24 px', async ({
+  page,
+}) => {
+  await decides(
+    page,
+    'title-strip',
+    fc.record({
+      controls: fc.integer({min: 0, max: 60}),
+      start: fc.integer({min: 0, max: 80}),
+      toggle: fc.boolean(),
+    }),
+    ({controls, start, toggle}) =>
+      `<style>:root{--chrome-inset-height:${controls}px}</style><div style="display:flow-root;height:${start}px">${toggle ? '<button style="margin:2px 90px">Menu</button>' : ''}</div><div style="width:100px;height:8px;background:#888"></div>`,
+    // The first box sits `start` px down, or under a toggle that shares the strip with the controls.
+    ({controls, start, toggle}) => controls > 0 && start > 24 && !toggle,
   );
 });
 

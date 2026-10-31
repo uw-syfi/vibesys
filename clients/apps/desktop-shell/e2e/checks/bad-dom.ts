@@ -346,6 +346,12 @@ export const BAD_SCREENS: readonly BadScreen[] = [
     html: `<div style="${PAGE}"><div style="border:1px solid #888;width:440px;box-sizing:border-box;padding:12px"><div>This Mac</div><div>Connecting</div><div>Loading runs</div></div></div>`,
   },
   {
+    name: 'F13: a strip across the window, as high as its controls, with nothing beside them',
+    check: 'title-strip',
+    message: /^the top \d+ px of the window carry only its own controls/,
+    html: `<style>:root{--chrome-inset-height:40px}</style><div style="${PAGE}padding-top:0"><div style="height:40px"></div><h1 style="font-size:20px;margin:0">Runs</h1></div>`,
+  },
+  {
     name: 'text drawn outside the window',
     check: 'overflow',
     message: /text runs outside the window/,

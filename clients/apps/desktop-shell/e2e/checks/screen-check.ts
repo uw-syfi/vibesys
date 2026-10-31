@@ -29,6 +29,7 @@ import {
   scrollRoomCheck,
   spacingOrderCheck,
   strikeCheck,
+  titleStripCheck,
   truncationCheck,
   truncationRoomCheck,
   type Violation,
@@ -60,6 +61,7 @@ const CHECKS: Readonly<Record<PageCheckId, (input: CheckInput) => Violation[]>> 
   'heading-depth': headingDepthCheck,
   'spacing-order': spacingOrderCheck,
   'hollow-box': hollowBoxCheck,
+  'title-strip': titleStripCheck,
 };
 
 /** The laws of the visual spec a page can decide: a suite that owns a screen's look runs these. */
@@ -68,6 +70,7 @@ const VISUAL_CHECKS: readonly PageCheckId[] = [
   'heading-depth',
   'spacing-order',
   'hollow-box',
+  'title-strip',
 ];
 
 /** Every check. A screen suite reports these against the known failures. */

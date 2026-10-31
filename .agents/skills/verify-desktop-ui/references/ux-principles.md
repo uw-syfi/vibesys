@@ -71,8 +71,8 @@ can decide it.
 14. **The sidebar stays a quick navigator.** New run and Settings stay in view while recent runs scroll; run rows and the sidebar toggle are clickable, the column resizes and collapses, and Settings has a way back to the exact prior screen. Enforced by `pnpm --filter @vibesys/app-desktop-shell test:e2e`.
 
 15. **Layout follows the visual spec.** One left edge, size by depth, spacing by
-    relationship, boxes that fit, small states and labels that earn their place:
-    the laws, and what enforces each, are in [visual-spec.md](visual-spec.md).
+    relationship, boxes that fit, small states, labels and bands that earn their
+    place: the laws, and what enforces each, are in [visual-spec.md](visual-spec.md).
 
 ## Show failures, keep figures calm
 

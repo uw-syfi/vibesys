@@ -61,7 +61,21 @@ const EVEN_GAPS = /^(\d+) px between groups is not more than the \1 px inside on
 const TILE_GAPS = /^4 px between groups is not more than the 24 px inside one: "Total ops\/sec/;
 const RUN_HEADER_GAPS = /^4 px between groups is not more than the 4 px inside one: "queue-rs/;
 
+/** Every screen's strip across the window, as high as the window's controls, with nothing beside them. */
+const STRIP = /^the top \d+ px of the window carry only its own controls/;
+const SUITES: readonly Suite[] = [
+  'run-matrix',
+  'run-history',
+  'run-chat',
+  'dashboard',
+  'settings',
+  'machines',
+  'new-run',
+  'usage',
+];
+
 export const KNOWN_FAILURES: readonly KnownFailure[] = [
+  ...SUITES.map(suite => visual(`title-strip-${suite}`, suite, 'title-strip', STRIP)),
   visual('run-title-matrix', 'run-matrix', 'heading-depth', RUN_TITLE),
   visual('run-title-history', 'run-history', 'heading-depth', RUN_TITLE),
   visual('run-title-chat', 'run-chat', 'heading-depth', RUN_TITLE),

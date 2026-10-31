@@ -27,6 +27,7 @@ export type CheckId =
   | 'heading-depth'
   | 'spacing-order'
   | 'hollow-box'
+  | 'title-strip'
   | 'stability';
 
 export interface Violation {
@@ -1249,6 +1250,34 @@ export function hollowBoxCheck(): Violation[] {
     });
   }
   return found;
+}
+
+/**
+ * Law 7 of the visual spec: a band earns its height. The window's own controls (the traffic lights)
+ * are not in the page; `--chrome-inset-height` says how much room they take. When the page draws
+ * nothing in the top 24 px of the window (a control is a 12 px disc, so 24 px is its row with room
+ * to spare), that strip carries only the window's controls and the room is spent for nothing: the
+ * first text, picture, control or box starts lower. A window with no controls has no such strip.
+ */
+export function titleStripCheck(): Violation[] {
+  const controls = Number.parseFloat(
+    getComputedStyle(document.documentElement).getPropertyValue('--chrome-inset-height'),
+  );
+  const row = 24;
+  if (!(controls > 0)) return [];
+  const tops = screenInk(textBoxes())
+    .filter(each => each.box.bottom > 0 && each.box.top < innerHeight)
+    .map(each => Math.max(0, each.box.top));
+  if (tops.length === 0) return [];
+  const first = Math.min(...tops);
+  if (first <= row) return [];
+  return [
+    {
+      check: 'title-strip',
+      message: `the top ${Math.round(first)} px of the window carry only its own controls: the first text, picture or control starts at y ${Math.round(first)}, past the ${row} px a row of controls needs`,
+      where: 'window',
+    },
+  ];
 }
 
 /** What `screen-check.ts` sends to the page ahead of a check. */
