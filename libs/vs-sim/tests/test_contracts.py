@@ -240,6 +240,7 @@ def _assert_terminated(process: subprocess.Popen[bytes]) -> None:
     assert process.wait(timeout=HANG_GUARD_S) == -signal.SIGTERM
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="pidfds are Linux system calls")
 class TestPidfdProcessSignaller(ProcessSignallerContract):
     def process_signaller_under_test(self) -> ProcessSignallerUnderTest:
         process = subprocess.Popen(
@@ -518,11 +519,14 @@ class TestOsProcesses(ProcessesContract):
                 name,
             ),
             # The grandchild in the leader's group also holds stdout open, so the call returns
-            # only because the whole group is killed.
+            # only because the whole group is killed. It starts before the leader writes: a
+            # stop that follows the first bytes then finds both in the group. Written first, the
+            # stop can land while the leader is forking, which kills the leader and leaves the
+            # new child (macOS forks slowly enough to lose that race most runs).
             outlives_timeout=lambda written: _python(
                 "import subprocess, sys, signal; "
-                "sys.stdout.buffer.write(bytes.fromhex(sys.argv[1])); sys.stdout.flush(); "
                 "subprocess.Popen([sys.executable, '-c', 'import signal; signal.pause()']); "
+                "sys.stdout.buffer.write(bytes.fromhex(sys.argv[1])); sys.stdout.flush(); "
                 "signal.pause()",
                 written.hex(),
             ),
