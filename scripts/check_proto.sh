@@ -24,7 +24,7 @@ trap '[[ -z "$warm" ]] || kill "$warm" 2>/dev/null || true' EXIT
 stage layers uv run --locked python -m scripts.check_proto_layers
 stage lint uv run --locked --group proto buf lint
 stage generate ./scripts/generate_proto.sh
-generated=(proto/vibesys/host/v1/admission_receipt_generated.proto gateway/internal/hostoperations/registry_generated.go src/server/host_operation_types_generated.py libs/vs-proto/src/vs_proto/_generated clients/libs/proto/src/generated gateway/gen
+generated=(proto/vibesys/host/v1/admission_receipt_generated.proto gateway/internal/hostoperations/registry_generated.go gateway/internal/hostoperations/topics_generated.go src/server/host_operation_types_generated.py libs/vs-proto/src/vs_proto/_generated clients/libs/proto/src/generated gateway/gen
   libs/vs-core/src/vs_core/_generated libs/vs-runtime/src/vs_runtime/_core_values
   scripts/corevalue/tests/generated_pb scripts/corevalue/tests/generated_values scripts/corevalue/tests/generated_boundary)
 git diff --exit-code -- "${generated[@]}"

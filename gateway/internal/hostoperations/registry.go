@@ -26,6 +26,13 @@ type Operation struct {
 	Correlations                [][2][]string
 }
 
+// TopicPolicy is one subscription topic's fixed cadence and bounds. Zero Cadence
+// means event driven; zero StaleAfter means the frame lease alone decides.
+type TopicPolicy struct {
+	Cadence, StaleAfter, FirstFrame, MinInterval time.Duration
+	MaxKeys, MaxValueBytes                       int
+}
+
 // Lookup rejects unknown routing keys; the returned descriptor is independent.
 func Lookup(id uint32) (Operation, error) {
 	op, ok := registry[id]
