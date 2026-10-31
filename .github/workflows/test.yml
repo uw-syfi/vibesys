@@ -135,6 +135,11 @@ jobs:
       - name: Check agent skills
         run: python3 -m scripts.check_skills
 
+      # The Claude Code plugin manifest lists every skill under `skills/`; a change to either
+      # side must keep them in step, and `.claude-plugin/` selects no job of its own.
+      - name: Check published skills and plugin manifest
+        run: python3 -m scripts.published_skills
+
   stitch:
     needs: changes
     if: needs.changes.outputs.stitch == 'true'
