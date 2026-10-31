@@ -187,9 +187,6 @@ def test_decide_runs_every_open_step_of_a_saved_run_to_a_result(world: World, ep
     assert rest is not None or paused or not open_steps, "idle with a step open and nothing running"
 
 
-@pytest.mark.xfail(
-    strict=True, reason="seams: Run has no clear_first fact yet, and a step in flight needs one"
-)
 @pytest.mark.parametrize("standing", [Standing.DISPATCHED, Standing.RECONCILING])
 @pytest.mark.parametrize("epoch", [1, 3])
 def test_a_step_in_flight_in_a_saved_run_is_cleared_before_it_runs_again(
@@ -200,7 +197,7 @@ def test_a_step_in_flight_in_a_saved_run_is_cleared_before_it_runs_again(
     loop = snapshot_loop(world, epoch)
     loop.open_epoch()
     (run,) = [a for a in decide(loop.state, loop.clock) if isinstance(a, Run)]
-    assert vars(run)["clear_first"]
+    assert run.clear_first
 
 
 def _log_of(world: World, moves: list[Move], *, snapshot: bool, epoch: int) -> Loop:

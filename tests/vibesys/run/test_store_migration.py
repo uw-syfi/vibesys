@@ -250,9 +250,6 @@ def in_flight(
     return saved.model_copy(update={"envelope": saved.envelope.model_copy(update={"core": state})})
 
 
-@pytest.mark.xfail(
-    strict=True, reason="seams: Run has no clear_first fact yet, and a step in flight needs one"
-)
 @pytest.mark.parametrize("phase", IN_FLIGHT)
 @pytest.mark.parametrize(
     "path", [p for p in GOLDENS if p.stem.endswith("floor")], ids=lambda p: p.stem
@@ -265,7 +262,7 @@ def test_every_step_in_flight_in_a_pre_cutover_run_is_cleared_before_it_runs_aga
     state = folded([header(1, 2), snapshot, header(3, 3)]).state
     runs = [a for a in decide(state, state.run.now_at) if isinstance(a, Run)]
     assert runs
-    assert all(vars(run)["clear_first"] for run in runs)
+    assert all(run.clear_first for run in runs)
 
 
 # --- the migration of a project's run -------------------------------------------------------------
