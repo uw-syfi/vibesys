@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.unique_run_id import unique_run_id
 
 from vs_core.api import RequestId
 from vs_runtime._evaluation_jobs import handle_of_life
@@ -63,8 +64,6 @@ pytestmark = pytest.mark.skipif(
     reason="no process table for this platform",
 )
 
-RUN = "run-a"
-OTHER_RUN = "run-b"
 _START_BOUND_S = 120.0
 """Upper bound on a child reporting it started; reached only when it failed to start."""
 _STAGE = "sleep 120 & echo ready; wait"
@@ -126,6 +125,7 @@ def _spawn(
 
 
 def _owner_with_stage(mark: str, workdir: Path) -> tuple[subprocess.Popen[str], int]:
+    """Start an owner running a stage under *mark*; the owner and the stage's process group."""
     owner = _spawn(
         [
             sys.executable,
@@ -145,8 +145,9 @@ def _owner_with_stage(mark: str, workdir: Path) -> tuple[subprocess.Popen[str], 
     reports = _Reports(owner.stdout, bound=_START_BOUND_S)
     pid = int(reports.next_line())
     assert reports.next_line() == "ready"
-    _LEFT_RUNNING.append(_pgid_of(pid))
-    return owner, pid
+    pgid = _pgid_of(pid)
+    _LEFT_RUNNING.append(pgid)
+    return owner, pgid
 
 
 class _Reports:
@@ -233,23 +234,30 @@ def _kill_owner(owner: subprocess.Popen[str]) -> None:
     owner.wait(timeout=_START_BOUND_S)
 
 
-def _reap(tag: RequestId, table: OsProcessTable | None = None) -> None:
-    reaper = ProcessStageWorkReaper(table or OsProcessTable(), RUN, InlineBlockingRunner())
+@pytest.fixture
+def run_id() -> str:
+    """The run of this test alone: the table reads the host's whole process list."""
+    return unique_run_id()
+
+
+def _reap(tag: RequestId, run_id: str, table: OsProcessTable | None = None) -> None:
+    reaper = ProcessStageWorkReaper(table or OsProcessTable(), run_id, InlineBlockingRunner())
     run_virtual(VirtualClock(0.0), reaper.reap(tag))
 
 
-def test_a_stage_whose_owner_died_is_ended_by_its_tag_and_its_group_is_gone(tmp_path: Path) -> None:
+def test_a_stage_whose_owner_died_is_ended_by_its_tag_and_its_group_is_gone(
+    tmp_path: Path, run_id: str
+) -> None:
     tag = RequestId(root="e2e-stage")
-    owner, shell_pid = _owner_with_stage(stage_mark(RUN, handle_of_life(tag, 1)), tmp_path)
-    pgid = _pgid_of(shell_pid)
+    owner, pgid = _owner_with_stage(stage_mark(run_id, handle_of_life(tag, 1)), tmp_path)
     _kill_owner(owner)
     assert _running_in_group(pgid) > 0, "the stage should outlive its owner"
-    _reap(tag)
+    _reap(tag, run_id)
     assert _running_in_group(pgid) == 0
 
 
-def test_the_launcher_leaves_the_mark_in_the_leaders_arguments() -> None:
-    mark = stage_mark(RUN, "vs-x")
+def test_the_launcher_leaves_the_mark_in_the_leaders_arguments(run_id: str) -> None:
+    mark = stage_mark(run_id, "vs-x")
     argv = step_shell_argv("/bin/sh", "echo hi", {STEP_TAG_ENV: mark})
     done = subprocess.run(  # noqa: S603  # lint-waiver: LW-914312 [S603]; the test's own fixed argv.
         argv, capture_output=True, text=True, check=True
@@ -259,17 +267,18 @@ def test_the_launcher_leaves_the_mark_in_the_leaders_arguments() -> None:
 
 
 def test_the_members_of_a_group_whose_leader_died_first_are_found_on_linux_only(
-    tmp_path: Path,
+    tmp_path: Path, run_id: str
 ) -> None:
     """The named residual: on macOS only the leader carries the mark that ``ps`` shows."""
     tag = RequestId(root="e2e-leader")
-    owner, shell_pid = _owner_with_stage(stage_mark(RUN, handle_of_life(tag, 0)), tmp_path)
-    pgid = _pgid_of(shell_pid)
+    owner, pgid = _owner_with_stage(stage_mark(run_id, handle_of_life(tag, 0)), tmp_path)
     _kill_owner(owner)
-    leader = next(row for row in _ps_rows() if row.pid == pgid)
-    os.kill(leader.pid, signal.SIGKILL)
     try:
-        _reap(tag)
+        os.kill(pgid, signal.SIGKILL)  # the group's leader: its pid is the group's id
+    except ProcessLookupError as error:
+        raise AssertionError(_missing(pgid)) from error
+    try:
+        _reap(tag, run_id)
         found_on_linux = sys.platform.startswith("linux")
         assert (_running_in_group(pgid) == 0) == found_on_linux
     finally:
@@ -278,7 +287,30 @@ def test_the_members_of_a_group_whose_leader_died_first_are_found_on_linux_only(
 
 
 def _pgid_of(pid: int) -> int:
-    return next(row.pgid for row in _ps_rows() if row.pid == pid)
+    """The process group of *pid*, asked of the kernel at the moment it is needed.
+
+    *pid* is one a running child just reported. A listing parsed afterwards is a second source
+    that can disagree with the first (a row the parser does not read, a process gone between the
+    two), and a bare ``next`` over it ends in ``StopIteration``. A miss here is a finding that
+    names the pid and what ``ps`` shows.
+    """
+    try:
+        return os.getpgid(pid)
+    except ProcessLookupError as error:
+        raise AssertionError(_missing(pid)) from error
+
+
+def _missing(pid: int) -> str:
+    rows = _ps_rows()
+    related = [
+        f"{row.pid} pgid {row.pgid} {row.stat} {row.command[:100]!r}"
+        for row in rows
+        if pid in {row.pid, row.pgid} or _STAGE in row.command
+    ]
+    return (
+        f"process {pid} was reported as running and is not; ps lists {len(rows)} processes, "
+        f"and these name the pid or the stage: {related}"
+    )
 
 
 class _RefusableProcessTable:
@@ -311,6 +343,7 @@ def _flag(owner: object, name: str) -> Iterator[None]:
 
 class TestProcessStageWorkReaperOverRealProcesses(StageWorkReaperContract):
     def stage_work_under_test(self) -> StageWorkUnderTest:
+        mine, theirs = unique_run_id("run-a"), unique_run_id("run-b")
         table = _RefusableProcessTable()
         groups: dict[tuple[str, str], list[int]] = {}
         spawned: list[subprocess.Popen[str]] = []
@@ -330,13 +363,13 @@ class TestProcessStageWorkReaperOverRealProcesses(StageWorkReaperContract):
             )
 
         return StageWorkUnderTest(
-            reaper=ProcessStageWorkReaper(table, RUN, InlineBlockingRunner()),
+            reaper=ProcessStageWorkReaper(table, mine, InlineBlockingRunner()),
             run=lambda main: run_virtual(VirtualClock(0.0), main),
             places=(StageWorkPlace.LEADER, StageWorkPlace.DESCENDANT),
-            leave=lambda tag, _place: leave(RUN, tag),
-            leave_in_other_run=lambda tag, _place: leave(OTHER_RUN, tag),
-            running=lambda tag: running(RUN, tag),
-            running_in_other_run=lambda tag: running(OTHER_RUN, tag),
+            leave=lambda tag, _place: leave(mine, tag),
+            leave_in_other_run=lambda tag, _place: leave(theirs, tag),
+            running=lambda tag: running(mine, tag),
+            running_in_other_run=lambda tag: running(theirs, tag),
             unreachable=lambda: _flag(table, "unreadable"),
             stuck=lambda: _flag(table, "survivors"),
         )
@@ -344,12 +377,13 @@ class TestProcessStageWorkReaperOverRealProcesses(StageWorkReaperContract):
 
 class TestContainerStageWorkReaperOverTheDockerSandbox(StageWorkReaperContract):
     def stage_work_under_test(self) -> StageWorkUnderTest:
+        mine, theirs = unique_run_id("run-a"), unique_run_id("run-b")
         scratch = Path(tempfile.mkdtemp())
         (scratch / "state").mkdir()
         engine = FakeDockerEngine(scratch / "state", launcher=SubprocessPipedProcessLauncher())
         sandboxes: list[DockerSandbox] = []
 
-        daemon = _RefusableContainers(DockerStepContainers(engine, RUN))
+        daemon = _RefusableContainers(DockerStepContainers(engine, mine))
 
         def leave(run_id: str, tag: RequestId) -> None:
             workspace = scratch / f"w{len(sandboxes)}"
@@ -374,13 +408,13 @@ class TestContainerStageWorkReaperOverTheDockerSandbox(StageWorkReaperContract):
             )
 
         return StageWorkUnderTest(
-            reaper=ContainerStageWorkReaper(daemon, RUN, InlineBlockingRunner()),
+            reaper=ContainerStageWorkReaper(daemon, mine, InlineBlockingRunner()),
             run=lambda main: run_virtual(VirtualClock(0.0), main),
             places=(StageWorkPlace.CONTAINER,),
-            leave=lambda tag, _place: leave(RUN, tag),
-            leave_in_other_run=lambda tag, _place: leave(OTHER_RUN, tag),
-            running=lambda tag: running(RUN, tag),
-            running_in_other_run=lambda tag: running(OTHER_RUN, tag),
+            leave=lambda tag, _place: leave(mine, tag),
+            leave_in_other_run=lambda tag, _place: leave(theirs, tag),
+            running=lambda tag: running(mine, tag),
+            running_in_other_run=lambda tag: running(theirs, tag),
             unreachable=lambda: _flag(daemon, "unreachable"),
             stuck=lambda: _stuck_removals(engine),
         )

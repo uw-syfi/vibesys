@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.unique_run_id import unique_run_id
 
 from vs_core.api import RequestId
 from vs_runtime.api.docker_agent_work_reaper import DockerAgentWorkReaper
@@ -35,7 +36,13 @@ pytestmark = pytest.mark.skipif(
     not sys.platform.startswith("linux"), reason="the sweep reads /proc inside the container"
 )
 
-_RUN = "run-a"
+
+@pytest.fixture
+def run_id() -> str:
+    """The run of this test alone: the sweep reads the host's whole /proc (see ``unique_run_id``)."""
+    return unique_run_id()
+
+
 _SLEEP = "import time; time.sleep(600)"
 _EXIT_BOUND_S = 30.0
 """Upper bound on a killed process being reaped by its parent; reached only on a hang."""
@@ -56,27 +63,27 @@ def _marked_process(mark: str) -> Iterator[subprocess.Popen[bytes]]:
         process.wait(_EXIT_BOUND_S)
 
 
-def _mark(tag: str, run: str = _RUN) -> str:
+def _mark(tag: str, run: str) -> str:
     """What the agent processes of step *tag* of run *run* carry: the mark the reaper sweeps for."""
     return agent_mark(run, RequestId(root=tag))
 
 
-def test_the_sweep_ends_the_processes_of_one_step_and_no_other() -> None:
+def test_the_sweep_ends_the_processes_of_one_step_and_no_other(run_id: str) -> None:
     with (
         tempfile.TemporaryDirectory() as raw,
-        _marked_process(_mark("step-a")) as target,
-        _marked_process(_mark("step-ab")) as longer,
-        _marked_process(_mark("other")) as other,
-        _marked_process(_mark("step-a", run="run-b")) as another_run,
+        _marked_process(_mark("step-a", run_id)) as target,
+        _marked_process(_mark("step-ab", run_id)) as longer,
+        _marked_process(_mark("other", run_id)) as other,
+        _marked_process(_mark("step-a", unique_run_id("another-run"))) as another_run,
         _marked_process("step-a") as bare,
     ):
         engine = FakeDockerEngine(Path(raw), launcher=SubprocessPipedProcessLauncher())
         engine.run(
-            ["docker", "run", "-d", "--label", f"{RUN_ID_LABEL}={_RUN}", "image"],
+            ["docker", "run", "-d", "--label", f"{RUN_ID_LABEL}={run_id}", "image"],
             timeout_seconds=_EXIT_BOUND_S,
             output=DISCARD,
         )
-        reaper = DockerAgentWorkReaper(_RUN, engine, InlineBlockingRunner(), lambda _line: None)
+        reaper = DockerAgentWorkReaper(run_id, engine, InlineBlockingRunner(), lambda _line: None)
 
         run_virtual(VirtualClock(0.0), reaper.reap(RequestId(root="step-a")))
 
@@ -100,16 +107,16 @@ class _EngineWhoseSweepCannotKill(FakeDockerEngine):
         return super().run(argv, timeout_seconds=timeout_seconds, output=output)
 
 
-def test_a_process_the_sweep_cannot_kill_is_never_reported_clear() -> None:
+def test_a_process_the_sweep_cannot_kill_is_never_reported_clear(run_id: str) -> None:
     """Regression: the sweep counted the kills that worked, so a failed kill read as nothing found."""
-    with tempfile.TemporaryDirectory() as raw, _marked_process(_mark("step-a")) as target:
+    with tempfile.TemporaryDirectory() as raw, _marked_process(_mark("step-a", run_id)) as target:
         engine = _EngineWhoseSweepCannotKill(Path(raw), launcher=SubprocessPipedProcessLauncher())
         engine.run(
-            ["docker", "run", "-d", "--label", f"{RUN_ID_LABEL}={_RUN}", "image"],
+            ["docker", "run", "-d", "--label", f"{RUN_ID_LABEL}={run_id}", "image"],
             timeout_seconds=_EXIT_BOUND_S,
             output=DISCARD,
         )
-        reaper = DockerAgentWorkReaper(_RUN, engine, InlineBlockingRunner(), lambda _line: None)
+        reaper = DockerAgentWorkReaper(run_id, engine, InlineBlockingRunner(), lambda _line: None)
 
         with pytest.raises(ClearUnavailableError):
             run_virtual(VirtualClock(0.0), reaper.reap(RequestId(root="step-a")))
