@@ -25,7 +25,6 @@ from vs_agent.api import (
     AgentSessionState,
     AgentTurnRequest,
     DurableSessionStore,
-    reap_step_agents,
 )
 from vs_agent.api.testing import (
     FakeAgentInvocationStore,
@@ -50,9 +49,11 @@ from vs_runtime.api.core import (
     SealedExecution,
     SessionLifecycleRequests,
 )
+from vs_runtime.api.docker_agent_work_reaper import DockerAgentWorkReaper
 from vs_runtime.api.executor_contexts import context_for
 from vs_runtime.api.step_runner import CancelSignal, Cleared
 from vs_runtime.api.testing import (
+    FakeStageWorkReaper,
     FakeWorkspace,
     StepRunnerContract,
     StepRunnerUnderTest,
@@ -255,21 +256,20 @@ def open_world(root: Path, kind: Kind = Kind.DISPATCH) -> World:
     resolver.guarded = workspace
     turns = RuntimeSessionRequests(sessions, resolver, store, yields=None, blocking=blocking)
 
-    def reap(tag: str) -> None:
-        reap_step_agents(
-            _RUN,
-            tag,
-            docker=engine,
-            log=lambda _line: None,
-            reap_tagged=behavior.processes.reap_tagged,
-        )
+    reaper = DockerAgentWorkReaper(
+        _RUN,
+        engine,
+        blocking,
+        lambda _line: None,
+        reap_tagged=behavior.processes.reap_tagged,
+    )
 
     lifecycle = SessionLifecycleRequests(sessions, turns, store, turns.settlement, blocking)
     state = TurnState(sessions, store, blocking)
     paths = TurnPaths(turns, lifecycle, FixedTurns())
 
     def restarted() -> AgentTurnStepRunner:
-        return AgentTurnStepRunner(paths, state, clock, FENCE, reap)
+        return AgentTurnStepRunner(paths, state, clock, FENCE, reaper)
 
     return World(
         restarted(),
@@ -562,7 +562,7 @@ def test_a_registered_turn_that_is_not_the_operations_own_is_refused(
         world.state,
         world.clock,
         FENCE,
-        lambda _tag: None,
+        FakeStageWorkReaper(),
     )
 
     async def main() -> None:

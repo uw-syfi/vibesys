@@ -18,6 +18,8 @@ from vs_sandbox.api import STEP_TAG_ENV
 from vs_sim.api import ProcessTableUnavailableError
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from vs_core.api import RequestId
     from vs_sim.api import MarkedProcess, ProcessTable
 
@@ -27,12 +29,31 @@ _MAX_SWEEPS = 8
 few means the work forks faster than it is ended."""
 
 
+def _handle_of(tag: RequestId) -> Callable[[str], bool]:
+    return partial(is_handle_of, tag)
+
+
+def marked_with_the_tag(tag: RequestId) -> Callable[[str], bool]:
+    """Accepts the mark an agent turn's processes carry: the step's tag itself."""
+    return tag.root.__eq__
+
+
 class MarkedStageWorkReaper:
     """A ``StageWorkReaper`` over the host's process table."""
 
-    def __init__(self, processes: ProcessTable) -> None:
-        """Find and end marked processes through *processes*."""
+    def __init__(
+        self,
+        processes: ProcessTable,
+        marked_as: Callable[[RequestId], Callable[[str], bool]] = _handle_of,
+    ) -> None:
+        """Find and end marked processes through *processes*.
+
+        *marked_as* says which mark values belong to a tag. A local evaluation's stage commands
+        carry a handle of the tag (the default); an agent turn's processes carry the tag
+        (``marked_with_the_tag``).
+        """
         self._processes = processes
+        self._marked_as = marked_as
 
     async def reap(self, tag: RequestId) -> None:
         """End every process carrying a handle of *tag*, scanning until a scan finds none."""
@@ -46,6 +67,6 @@ class MarkedStageWorkReaper:
 
     def _marked(self, tag: RequestId) -> tuple[MarkedProcess, ...]:
         try:
-            return self._processes.marked(STEP_TAG_ENV, partial(is_handle_of, tag))
+            return self._processes.marked(STEP_TAG_ENV, self._marked_as(tag))
         except ProcessTableUnavailableError as error:
             raise ClearUnavailableError(tag, _BACKEND) from error

@@ -239,4 +239,4 @@ def test_the_helper_sends_the_step_mark_its_turn_started_it_with(
 
 def test_the_helper_names_the_mark_the_framework_sets() -> None:
     """The helper is mounted alone, so it restates the mark's name; this pins the two together."""
-    assert helper_module._STEP_TAG_ENV == STEP_TAG_ENV  # noqa: SLF001  # test-isolation: the standalone helper's constant is not library API.
+    assert helper_module.STEP_TAG_ENV == STEP_TAG_ENV

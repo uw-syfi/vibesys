@@ -28,7 +28,6 @@ from vs_agent.api import (
     AgentSessionKey,
     Completed,
     InvalidResponse,
-    OrphanReapError,
     SessionPersistenceError,
 )
 from vs_core.api import (
@@ -54,22 +53,15 @@ if TYPE_CHECKING:
     from vs_core.api import HostFence, Observation, Request, RequestId, TurnSpec
     from vs_core.api.recovery import StepResult
     from vs_runtime._core_requests import ExecutionResult
+    from vs_runtime._local_job_step_runner import StageWorkReaper
     from vs_runtime._receipt_store import ReceiptStore
     from vs_runtime._session_lifecycle_requests import SessionLifecycleRequests
     from vs_runtime._session_requests import RuntimeSessionRequests
     from vs_runtime._step_runner import Adopted, CancelSignal
     from vs_sim.api import BlockingRunner, Clock
 
-_AGENTS = "the agent containers"
 _WORKSPACE = "the workspace"
 _JOURNAL = "the invocation journal"
-
-type StepReaper = Callable[[str], None]
-"""Kill every agent process carrying the tag it is given, or raise ``OrphanReapError``.
-
-It blocks, so the runner calls it through its ``BlockingRunner``. In production it is
-``vs_agent.reap_step_agents`` bound to the run's id and Docker client.
-"""
 
 
 class NotATurnError(TypeError):
@@ -142,12 +134,13 @@ class AgentTurnStepRunner:
         state: TurnState,
         clock: Clock,
         fence: HostFence,
-        reap: StepReaper,
+        reaper: StageWorkReaper,
     ) -> None:
         """Bind the turn executors, the durable state they write, the run clock, the fence and the reaper.
 
-        *state* is what the executors were built with. *clock* is the run clock the deadline
-        of an attempt is read against. *fence* is the host identity the executors' effect
+        *state* is what the executors were built with. *reaper* ends the processes of a step by its
+        tag (the environment's: containers, or host processes found by their mark). *clock* is the
+        run clock the deadline of an attempt is read against. *fence* is the host identity the executors' effect
         fences record: one run lock holder is the only writer, so it does not change within a
         run.
         """
@@ -157,7 +150,7 @@ class AgentTurnStepRunner:
         self._blocking = state.blocking
         self._clock = clock
         self._fence = fence
-        self._reap = reap
+        self._reaper = reaper
 
     async def run(
         self,
@@ -256,10 +249,7 @@ class AgentTurnStepRunner:
         return Cancelled(reason=reason)
 
     async def _clear(self, plan: _Plan, tag: RequestId) -> None:
-        try:
-            await self._blocking.run(self._reap, tag.root)
-        except OrphanReapError as error:
-            raise ClearUnavailableError(tag, _AGENTS) from error
+        await self._reaper.reap(tag)
         journaled = self._journaled(plan)
         if journaled is None:
             return

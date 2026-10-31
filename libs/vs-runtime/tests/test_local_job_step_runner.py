@@ -200,9 +200,10 @@ def test_the_evaluation_opens_its_candidate_under_the_mark_of_its_handle() -> No
     tag = tag_of("marked")
 
     async def main() -> None:
-        await world.runner.run(world.step(tag, ends=True), tag, 1, CancelSignal())
-        await world.runner.clear(tag)
-        await world.runner.run(world.step(tag, ends=True), tag, 2, CancelSignal())
+        step = world.step(tag, ends=True)
+        await world.runner.run(step, tag, 1, DEADLINE_AT, CancelSignal())
+        await world.runner.clear(step, tag)
+        await world.runner.run(step, tag, 2, DEADLINE_AT, CancelSignal())
 
     world.run(main())
     assert world.workspaces.measured_step_tags[-2:] == (

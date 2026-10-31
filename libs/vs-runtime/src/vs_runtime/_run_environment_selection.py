@@ -20,8 +20,8 @@ from vs_runtime._run_environment import (
     ModalEnvironment,
     RunEnvironment,
     RunEnvironmentSpec,
-    SkyPilotEnvironment,
 )
+from vs_runtime._skypilot_environment import SkyPilotEnvironment
 from vs_runtime._slurm_environment import SlurmEnvironment
 from vs_runtime._task_image_policy import TaskImageError, editor_image_plan
 from vs_sandbox.api import backend_is_host_only
