@@ -21,13 +21,11 @@ from tests.support.session_world import (
 
 import vs_core.api as core
 from vs_agent.api import (
-    STEP_TAG_ENV,
     AgentClient,
     AgentSessionState,
     AgentTurnRequest,
     DurableSessionStore,
     reap_step_agents,
-    step_tag_env,
 )
 from vs_agent.api.testing import (
     FakeAgentInvocationStore,
@@ -59,7 +57,7 @@ from vs_runtime.api.testing import (
     StepRunnerContract,
     StepRunnerUnderTest,
 )
-from vs_sandbox.api import RUN_ID_LABEL
+from vs_sandbox.api import RUN_ID_LABEL, STEP_TAG_ENV, step_tag_env
 from vs_sandbox.fake_docker_engine import FakeDockerEngine
 from vs_sim.api import DISCARD
 from vs_sim.api.testing import (

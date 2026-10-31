@@ -168,7 +168,6 @@ from vs_agent.sink import (
 )
 from vs_agent.skills import NULL_SKILL_SELECTION, SkillSelection
 from vs_agent.spec import AgentBackend, AgentSpec
-from vs_agent.step_tags import STEP_TAG_ENV, step_tag_env
 from vs_agent.todos import todos_from_tool_call
 from vs_agent.tool_server_check import CHECK_TIMEOUT_S, ToolServerFailure, check_tool_servers
 
@@ -214,7 +213,6 @@ __all__ = [
     "NULL_AGENT_EVENT_SINK",
     "NULL_SKILL_SELECTION",
     "SHIPPED_PROVIDERS",
-    "STEP_TAG_ENV",
     "STOP_POLL_S",
     "AgentBackend",
     "AgentCapabilities",
@@ -346,7 +344,6 @@ __all__ = [
     "reply_breach",
     "session_env_allowlist",
     "session_environment",
-    "step_tag_env",
     "task_agent_host_resources",
     "todos_from_tool_call",
     "validate_env_names",

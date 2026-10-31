@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vs_agent.orphans import OrphanReapError
-from vs_agent.step_tags import STEP_TAG_ENV
+from vs_sandbox.api import STEP_TAG_ENV
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping

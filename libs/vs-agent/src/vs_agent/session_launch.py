@@ -42,8 +42,7 @@ from vs_agent.session_environment import (
     validate_env_names,
 )
 from vs_agent.shim_turns import LaunchedSession, SteerLedger, TurnEvents
-from vs_agent.step_tags import STEP_TAG_ENV
-from vs_sandbox.api import build_host_sandbox
+from vs_sandbox.api import STEP_TAG_ENV, build_host_sandbox
 from vs_sim.api import CloseOnce, NothingLeft, Released
 
 if TYPE_CHECKING:
