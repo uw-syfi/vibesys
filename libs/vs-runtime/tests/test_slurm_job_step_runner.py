@@ -28,7 +28,14 @@ from vs_core.api import (
     ResourceId,
 )
 from vs_core.api.recovery import Cancelled, CancelReason, Finished, interruption_of
-from vs_runtime.api.core import JobRegistry, MeasurementRequests, ReceiptStore, RequestExecutors
+from vs_runtime.api.core import (
+    JobBooks,
+    JobRegistry,
+    MeasurementRequests,
+    ReceiptEvidenceLedger,
+    ReceiptStore,
+    RequestExecutors,
+)
 from vs_runtime.api.evaluation_step_runners import SlurmJobStepRunner, SlurmScheduler
 from vs_runtime.api.executor_contexts import RevocableLease, receipt_store_in
 from vs_runtime.api.executor_step_runner import DECLARED_REPEATS, ExecutorStepRunner
@@ -122,7 +129,7 @@ class Process:
         self.runner = SlurmJobStepRunner(
             stack.executor,
             SlurmScheduler(world.ledger, world.cluster, world.blocking),
-            world.registry_of(holder),
+            world.books_of(holder),
             clock=world.clock,
             poll_interval_s=POLL_S,
         )
@@ -153,9 +160,10 @@ class World:
             self.stores[holder] = receipt_store_in(directory)
         return self.stores[holder]
 
-    def registry_of(self, holder: str) -> JobRegistry:
-        """The job registry of run *holder*, over its receipt store."""
-        return JobRegistry(self.store_of(holder))
+    def books_of(self, holder: str) -> JobBooks:
+        """The job registry and evidence ledger of run *holder*, over its receipt store."""
+        store = self.store_of(holder)
+        return JobBooks(JobRegistry(store), ReceiptEvidenceLedger(store))
 
     def run[T](self, main: Coroutine[Any, Any, T]) -> T:
         """Run to the end on the virtual clock."""
@@ -274,6 +282,10 @@ def test_a_restarted_process_adopts_the_job_a_killed_one_submitted_and_returns_i
         assert result.observation.request_id == tag
         assert result.report.evidence
         assert result.report.evaluation_result is not None
+        # Core takes the report as the job's last observation, so the readings are in the ledger
+        # the operation that decodes them reads by the time the step reports (not after a poll).
+        ledger = ReceiptEvidenceLedger(world.store_of("run-1"))
+        assert all(ledger.lookup(ref.key) is not None for ref in result.report.evidence)
         await world.close()
 
     world.run(main())

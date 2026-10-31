@@ -47,7 +47,7 @@ if TYPE_CHECKING:
     from vs_core.api import Request, RequestId, SubmitMeasurement
     from vs_core.api.recovery import StepResult
     from vs_evaluation.api import ExecutorPoll
-    from vs_runtime._job_registry import JobRegistry
+    from vs_runtime._job_registry import JobBooks
     from vs_runtime._semantic_slurm_evaluation import SemanticSlurmEvaluationExecutor
     from vs_runtime._step_runner import CancelSignal
     from vs_sim.api import BlockingRunner, Clock
@@ -80,14 +80,14 @@ class SlurmJobStepRunner:
         self,
         executor: SemanticSlurmEvaluationExecutor,
         scheduler: SlurmScheduler,
-        registry: JobRegistry,
+        books: JobBooks,
         *,
         clock: Clock,
         poll_interval_s: float,
     ) -> None:
         """Run on *executor*, which attaches through the *scheduler*'s ledger; poll every interval.
 
-        Each job is registered in *registry* before it is submitted, and a pause leaves it running:
+        Each job is registered in *books* before it is submitted, and a pause leaves it running:
         a Slurm job survives the host, and the next attempt adopts it.
         """
         self._executor = executor
@@ -95,7 +95,7 @@ class SlurmJobStepRunner:
         self._cluster = scheduler.cluster
         self._blocking = ShieldedBlockingRunner(scheduler.blocking)
         self._job = JobStepRun(
-            executor, registry, clock=clock, poll_interval_s=poll_interval_s, outlives_host=True
+            executor, books, clock=clock, poll_interval_s=poll_interval_s, outlives_host=True
         )
 
     async def run(

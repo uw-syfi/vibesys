@@ -20,7 +20,7 @@ from vs_runtime.api.agent_step_runners import (
     TurnPaths,
     TurnState,
 )
-from vs_runtime.api.core import JobRegistry
+from vs_runtime.api.core import JobBooks, JobRegistry
 from vs_runtime.api.executor_step_runner import DECLARED_REPEATS, ExecutorStepRunner
 from vs_runtime.api.operation_step_runner import (
     OperationStepRunner,
@@ -48,9 +48,9 @@ class RunnerSeams:
 
     agent_work: StageWorkReaper
     """Ends the agent processes of one step by its tag, in the environment the agent runs in."""
-    jobs: Callable[[Clock, JobRegistry], StepRunner] | None
+    jobs: Callable[[Clock, JobBooks], StepRunner] | None
     """Builds the runner of ``SubmitMeasurement`` and owned-job operations on the run clock and
-    the registry that tells the run's other job requests where each job is;
+    the books the run keeps of its jobs (where each is, what each read);
     ``None`` where the agent runs the evaluation helper inside its turn (SkyPilot, Modal)."""
 
 
@@ -126,7 +126,12 @@ def build_run_runner(
                 clock=clock,
             ),
             operations=OperationStepRunner(services.catalog, bound.observations, clock=clock),
-            jobs=None if seams.jobs is None else seams.jobs(clock, JobRegistry(bound.store)),
+            jobs=None
+            if seams.jobs is None
+            else seams.jobs(
+                clock,
+                JobBooks(JobRegistry(bound.store), bound.evidence, bound.progress, bound.decisions),
+            ),
         )
     )
 

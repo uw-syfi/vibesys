@@ -18,11 +18,19 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from vs_core.api import ObservationStatus, RequestId
+from vs_core.api import DecisionId, ObservationStatus, RequestId
 from vs_core.api.recovery import Cancelled, CancelReason, Finished
 from vs_evaluation.api import ResourceRequirements
 from vs_runtime.api import AccuracyEvaluation, PollingEvaluationExecutor
-from vs_runtime.api.core import JobRegistry
+from vs_runtime.api.core import (
+    JobBooks,
+    JobRegistry,
+    MeasurementDecisions,
+    MeasurementProgress,
+    ReceiptEvidenceLedger,
+    StageSettled,
+    StageStarted,
+)
 from vs_runtime.api.evaluation_step_runners import LocalJobStepRunner, ProcessStageWorkReaper
 from vs_runtime.api.executor_contexts import receipt_store_in
 from vs_runtime.api.slurm_evaluation_stack import plan, submission
@@ -127,6 +135,19 @@ class HostEvaluation(FakeEvaluation):
             self.workspaces.table.exit(stage)
 
 
+class StagesHeard:
+    """The host's observer: what it was told of each stage of a job."""
+
+    def __init__(self) -> None:
+        self.settled: list[StageSettled] = []
+
+    def stage_started(self, event: StageStarted) -> None:
+        del event
+
+    def stage_settled(self, event: StageSettled) -> None:
+        self.settled.append(event)
+
+
 class World:
     """One host: an evaluation executor over Fakes, a reaper over its process table, the runner."""
 
@@ -142,9 +163,18 @@ class World:
         )
         self.blocking = DetachedBlockingRunner()
         self.reaper = ProcessStageWorkReaper(self.table, RUN, self.blocking)
-        self.registry = JobRegistry(receipt_store_in(root))
+        store = receipt_store_in(root)
+        self.evidence = ReceiptEvidenceLedger(store)
+        self.heard = StagesHeard()
+        self.decisions = MeasurementDecisions()
         self.runner = LocalJobStepRunner(
-            self.executor, self.reaper, self.registry, clock=self.clock, poll_interval_s=POLL_S
+            self.executor,
+            self.reaper,
+            JobBooks(
+                JobRegistry(store), self.evidence, MeasurementProgress(self.heard), self.decisions
+            ),
+            clock=self.clock,
+            poll_interval_s=POLL_S,
         )
         self.snapshot = self.run(self.workspaces.root.snapshot("candidate"))
 
@@ -299,6 +329,53 @@ def test_a_step_that_reuses_a_finished_submission_launches_nothing(tmp_path: Pat
 
     world.run(main())
     assert len(world.evaluation.accuracy_calls) == 1
+
+
+def test_a_finished_step_has_recorded_every_reading_it_reports_in_the_evidence_ledger(
+    tmp_path: Path,
+) -> None:
+    """The operation that decodes a job's readings reads only the ledger.
+
+    Core takes the step's report as the job's last observation, so no poll after it writes the
+    readings: a report whose evidence the ledger does not hold reads back as undecodable and ends
+    the run failed. A step that reuses an ended job reports its evidence under its own request.
+    """
+    world = World(tmp_path)
+    source, reusing = tag_of("source"), tag_of("reusing")
+
+    async def main() -> None:
+        measured = world.step(source, ends=True)
+        first = await world.runner.run(measured, source, 1, DEADLINE_AT, CancelSignal())
+        step = measured.model_copy(update={"request_id": reusing, "reuses": source})
+        again = await world.runner.run(step, reusing, 1, DEADLINE_AT, CancelSignal())
+        for done in (first, again):
+            assert isinstance(done, Finished)
+            assert done.report.evidence
+            for ref in done.report.evidence:
+                held = world.evidence.lookup(ref.key)
+                assert held is not None, ref.key
+                assert held.purpose == measured.plan.purpose
+
+    world.run(main())
+
+
+def test_a_finished_step_tells_the_host_its_stages_and_names_the_decision_it_answers(
+    tmp_path: Path,
+) -> None:
+    """The poll that used to tell the host and name the span no longer follows the report."""
+    world = World(tmp_path)
+    tag = tag_of("ended")
+    decision = DecisionId(root="decision-1")
+
+    async def main() -> None:
+        step = world.step(tag, ends=True).model_copy(update={"decision_id": decision})
+        done = await world.runner.run(step, tag, 1, DEADLINE_AT, CancelSignal())
+        assert isinstance(done, Finished)
+
+    world.run(main())
+    assert [(event.stage_id, event.passed) for event in world.heard.settled] == [("accuracy", True)]
+    handle = world.heard.settled[0].handle_id
+    assert world.decisions.decision(handle) == decision.root
 
 
 def test_the_evaluation_opens_its_candidate_under_the_mark_of_its_handle(tmp_path: Path) -> None:

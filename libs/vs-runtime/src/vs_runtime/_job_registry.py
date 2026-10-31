@@ -10,14 +10,21 @@ polling executor of ``MeasurementRequests`` does, and so does a step runner's ``
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from vs_core.api import DecisionId, MeasurementPlan, RequestId, Scope
+from vs_runtime._measurement_progress import (
+    IgnoreMeasurement,
+    MeasurementDecisions,
+    MeasurementProgress,
+)
 
 if TYPE_CHECKING:
     from vs_core.api import SubmitMeasurement
+    from vs_runtime._evidence_ledger import EvidenceLedger
     from vs_runtime._receipt_store import ReceiptStore
 
 _JOBS = "evaluation-jobs"
@@ -78,6 +85,26 @@ def scope_key(scope: Scope, admission_id: DecisionId | None) -> str:
     """The name of one admission episode of one scope."""
     episode = "" if admission_id is None else admission_id.root
     return f"{scope.owner.kind}:{scope.owner.root}:{scope.generation}:{episode}"
+
+
+@dataclass(frozen=True)
+class JobBooks:
+    """What a run keeps about its jobs: where each is, what each read, and what each is doing.
+
+    A step runner that reports a job's end to core is the job's observer: core takes the report as
+    the job's last observation, so no poll of the executor follows it. What that poll used to
+    do the runner does before it reports: it registers the job when it submits (``registry``),
+    names the decision the job answers (``decisions``), records the readings of the stages in the
+    ledger the operation that decodes them reads (``evidence``), and tells the host each stage
+    started and ended (``progress``).
+    """
+
+    registry: JobRegistry
+    evidence: EvidenceLedger
+    progress: MeasurementProgress = field(
+        default_factory=lambda: MeasurementProgress(IgnoreMeasurement())
+    )
+    decisions: MeasurementDecisions = field(default_factory=MeasurementDecisions)
 
 
 class JobRegistry:

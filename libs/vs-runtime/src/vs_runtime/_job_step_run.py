@@ -38,6 +38,7 @@ from vs_runtime._evaluation_jobs import (
     job_view,
     measurement_request,
 )
+from vs_runtime._evidence_ledger import ledgered_poll
 from vs_runtime._job_registry import JobRecord
 from vs_runtime._observation_factory import ObservationFacts, ObservationSubject
 
@@ -45,7 +46,7 @@ if TYPE_CHECKING:
     from vs_core.api import Request, RequestId
     from vs_core.api.recovery import StepResult
     from vs_evaluation.api import EvaluationRequest, ExecutorPoll, PollingEvaluationExecutor
-    from vs_runtime._job_registry import JobRegistry
+    from vs_runtime._job_registry import JobBooks
     from vs_runtime._step_runner import CancelSignal
     from vs_sim.api import Clock
 
@@ -70,22 +71,26 @@ class JobStepRun:
     def __init__(
         self,
         executor: PollingEvaluationExecutor,
-        registry: JobRegistry,
+        books: JobBooks,
         *,
         clock: Clock,
         poll_interval_s: float,
         outlives_host: bool,
     ) -> None:
-        """Run on *executor*, registering each job in *registry*; stamp observations with *clock*.
+        """Run on *executor*, keeping each job in *books*; stamp observations with *clock*.
 
-        A job is polled at least every *poll_interval_s*. *outlives_host* says the executor's
-        jobs survive this process, so a pause leaves them for the next attempt to adopt.
+        A job is registered before it is submitted and its readings are recorded before the step
+        reports its end. A job is polled at least every *poll_interval_s*. *outlives_host* says the
+        executor's jobs survive this process, so a pause leaves them for the next attempt to adopt.
         """
         if poll_interval_s <= 0:
             message = f"poll_interval_s must be positive, got {poll_interval_s}"
             raise ValueError(message)
         self._executor = executor
-        self._registry = registry
+        self._registry = books.registry
+        self._evidence = books.evidence
+        self._progress = books.progress
+        self._decisions = books.decisions
         self._clock = clock
         self._poll_interval_s = poll_interval_s
         self._outlives_host = outlives_host
@@ -102,6 +107,8 @@ class JobStepRun:
         try:
             request = evaluation_request(submission, handle, deadline_at=deadline_at)
             self._registry.register(JobRecord.of(submission, tag, handle, payload_digest_of(step)))
+            if submission.decision_id is not None:
+                self._decisions.record(handle, submission.decision_id.root)
             await self._executor.submit(request, handle_id=handle)
         except RejectedPlanError as error:
             return self._refused(submission, tag, str(error), MeasurementFailure.WORKLOAD)
@@ -166,6 +173,10 @@ class JobStepRun:
     ) -> StepResult:
         """The report of an ended job, whole: evidence, scientific facts and failure included."""
         subject = ObservationSubject(core_named(tag), step.scope, step.admission_id)
+        polled = ledgered_poll(
+            self._evidence, polled, source_request=subject.request_id, plan=step.plan
+        )
+        self._progress.report(handle, step.plan.purpose, polled, reused=step.reuses is not None)
         view = job_view(
             polled,
             step.plan,

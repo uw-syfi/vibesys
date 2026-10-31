@@ -35,6 +35,7 @@ from vs_runtime._measurement_progress import (
     IgnoreMeasurement,
     MeasurementDecisions,
     MeasurementObserver,
+    MeasurementProgress,
 )
 from vs_runtime._observation_factory import ObservationFactory
 from vs_runtime._operation_catalog import OperationCatalog
@@ -164,6 +165,10 @@ class CoreExecutors:
     """Builds the observation a runner reports for an operation or an adoption."""
     evidence: ReceiptEvidenceLedger
     """The run's evidence ledger, which an adoption reads."""
+    progress: MeasurementProgress
+    """Tells the run's observer each stage of a job that a step runner reported ended."""
+    decisions: MeasurementDecisions
+    """Which decision each submitted job answers, shared with the observer that names its spans."""
 
     def bindings(self, registry: OperationRegistry) -> CoreRuntimeBindings:
         """The old shell's bindings over these executors: the operation codec, the roles, steering."""
@@ -234,7 +239,15 @@ def core_executors(  # noqa: PLR0913  # lint-waiver: LW-260141 [PLR0913]; the ru
         ),
         semantic_events=JournalSemanticEvents(store, receipts),
     )
-    return CoreExecutors(executors, session, store, observations, evidence)
+    return CoreExecutors(
+        executors,
+        session,
+        store,
+        observations,
+        evidence,
+        MeasurementProgress(measurement.observer),
+        measurement.decisions,
+    )
 
 
 def core_bindings(  # noqa: PLR0913  # lint-waiver: LW-263518 [PLR0913]; the same keyword arguments as ``core_executors``, which this wraps for the shell that has not been removed yet.

@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
     from vs_evaluation.api import PollingEvaluationExecutor
     from vs_project.api import StateNamespace
-    from vs_runtime.api.core import JobRegistry
+    from vs_runtime.api.core import JobBooks
     from vs_runtime.api.infrastructure import (
         EnvironmentSystem,
         RunEnvironment,
@@ -70,9 +70,9 @@ def step_seams(  # noqa: PLR0913  # lint-waiver: LW-263519 [PLR0913]; each argum
         system.process_table, containers if kind == "docker" else None, run_id, blocking
     )
 
-    def local(clock: Clock, registry: JobRegistry) -> StepRunner:
+    def local(clock: Clock, books: JobBooks) -> StepRunner:
         return LocalJobStepRunner.on_host(
-            evaluation, stage_work, registry, clock=clock, poll_interval_s=poll_interval_s
+            evaluation, stage_work, books, clock=clock, poll_interval_s=poll_interval_s
         )
 
     return RunnerSeams(agent_work=agent_work, jobs=local)
@@ -83,7 +83,7 @@ def _slurm_jobs(
     evaluation: PollingEvaluationExecutor,
     blocking: BlockingRunner,
     poll_interval_s: float,
-) -> Callable[[Clock, JobRegistry], StepRunner]:
+) -> Callable[[Clock, JobBooks], StepRunner]:
     """The job runner of a cluster run: adopt a job through the ledger, or end it and run again.
 
     A run whose operator configured ``[vibesys.ledger]`` finds a job its dead process left by the
@@ -93,19 +93,19 @@ def _slurm_jobs(
     """
     ledger = slurm.ledger
 
-    def jobs(clock: Clock, registry: JobRegistry) -> StepRunner:
+    def jobs(clock: Clock, books: JobBooks) -> StepRunner:
         if ledger is None:
             return LocalJobStepRunner(
                 evaluation,
                 EachStageWorkReaper(),
-                registry,
+                books,
                 clock=clock,
                 poll_interval_s=poll_interval_s,
             )
         return SlurmJobStepRunner(
             slurm,
             SlurmScheduler(ledger, slurm.cluster, blocking),
-            registry,
+            books,
             clock=clock,
             poll_interval_s=poll_interval_s,
         )

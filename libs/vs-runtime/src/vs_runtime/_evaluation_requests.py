@@ -38,8 +38,6 @@ from vs_core.api import (
     CollectEvidence,
     ContractError,
     DecisionId,
-    EvidenceId,
-    EvidenceKey,
     InspectOwnedJob,
     JobObserved,
     MeasurementFailure,
@@ -64,7 +62,6 @@ from vs_evaluation.api import (
     ExecutorPoll,
     ExecutorRejectedError,
     PollPhase,
-    TrustedEvidence,
 )
 from vs_runtime._core_identity import core_identity, core_named
 from vs_runtime._core_requests import ExecutionContext, ExecutionResult, settle
@@ -84,7 +81,7 @@ from vs_runtime._evaluation_jobs import (
     job_view,
     measurement_request,
 )
-from vs_runtime._evidence_ledger import ReceiptEvidenceLedger
+from vs_runtime._evidence_ledger import ReceiptEvidenceLedger, ledgered_poll
 from vs_runtime._job_registry import JobRecord, JobRegistry, scope_key
 from vs_runtime._measurement_progress import (
     IgnoreMeasurement,
@@ -283,35 +280,12 @@ class MeasurementRequests:
     def _with_ledgered_evidence(
         self, polled: ExecutorPoll, record: JobRecord, subject: ObservationSubject
     ) -> ExecutorPoll:
-        """Record each stage reading once; a later poll that reads differently gets the stored one.
-
-        Evidence never changes under a reader, so a replay returns the stored entry
-        instead of failing inside the pure translation.
-        """
-        terminal = polled.terminal
-        if terminal is None:
-            return polled
-        ledger = ReceiptEvidenceLedger(self._store)
-        known = {stage.stage_id for stage in record.plan.stages}
-        steps = []
-        for step in terminal.stage_results:
-            if step.result is None or step.name not in known:
-                steps.append(step)
-                continue
-            item = TrustedEvidence.model_validate(step.result)
-            key = EvidenceKey(
-                source_request=subject.request_id, evidence_id=EvidenceId(root=item.evidence_id)
-            )
-            stored = ledger.lookup(key)
-            if stored is None:
-                ledger.record(subject.request_id, item, record.plan.purpose)
-                steps.append(step)
-            else:
-                steps.append(
-                    step.model_copy(update={"result": stored.evidence.model_dump(mode="json")})
-                )
-        return polled.model_copy(
-            update={"terminal": terminal.model_copy(update={"stage_results": tuple(steps)})}
+        """Record each stage reading once; a later poll that reads differently gets the stored one."""
+        return ledgered_poll(
+            ReceiptEvidenceLedger(self._store),
+            polled,
+            source_request=subject.request_id,
+            plan=record.plan,
         )
 
     async def _view(

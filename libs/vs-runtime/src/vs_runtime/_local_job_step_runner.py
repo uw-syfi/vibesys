@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from vs_core.api.recovery import StepResult
     from vs_evaluation.api import PollingEvaluationExecutor
     from vs_runtime._host_stage_work import HostStageWork
-    from vs_runtime._job_registry import JobRegistry
+    from vs_runtime._job_registry import JobBooks
     from vs_runtime._step_runner import Adopted, CancelSignal
     from vs_sim.api import Clock
 
@@ -50,34 +50,34 @@ class LocalJobStepRunner:
         cls,
         executor: PollingEvaluationExecutor,
         host: HostStageWork,
-        registry: JobRegistry,
+        books: JobBooks,
         *,
         clock: Clock,
         poll_interval_s: float,
     ) -> LocalJobStepRunner:
-        """Run on *executor*, registering its jobs in *registry*.
+        """Run on *executor*, keeping its jobs in *books*.
 
         What a dead process left is found through what *host* shows of its stage work.
         """
-        return cls(executor, host.reaper(), registry, clock=clock, poll_interval_s=poll_interval_s)
+        return cls(executor, host.reaper(), books, clock=clock, poll_interval_s=poll_interval_s)
 
     def __init__(
         self,
         executor: PollingEvaluationExecutor,
         reaper: StageWorkReaper,
-        registry: JobRegistry,
+        books: JobBooks,
         *,
         clock: Clock,
         poll_interval_s: float,
     ) -> None:
-        """Run on *executor*, registering its jobs in *registry*; leave to *reaper* what a dead process left.
+        """Run on *executor*, keeping its jobs in *books*; leave to *reaper* what a dead process left.
 
         A pause cancels the evaluation like any other cancel: nothing of it survives the host.
         """
         self._executor = executor
         self._reaper = reaper
         self._job = JobStepRun(
-            executor, registry, clock=clock, poll_interval_s=poll_interval_s, outlives_host=False
+            executor, books, clock=clock, poll_interval_s=poll_interval_s, outlives_host=False
         )
         self._lives: dict[RequestId, int] = {}
 

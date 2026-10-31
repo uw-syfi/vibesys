@@ -24,7 +24,8 @@ from vs_core.api import ContractError, EvidenceId, EvidenceKey
 from vs_evaluation.api import TrustedEvidence
 
 if TYPE_CHECKING:
-    from vs_core.api import RequestId
+    from vs_core.api import MeasurementPlan, RequestId
+    from vs_evaluation.api import ExecutorPoll
     from vs_runtime._receipt_store import ReceiptStore
 
 type MeasurementPurpose = Literal["baseline", "local-validation", "official", "profile"]
@@ -57,6 +58,49 @@ class EvidenceLookup(Protocol):
     def lookup(self, key: EvidenceKey) -> EvidenceEntry | None:
         """The recorded entry. Raises ReceiptCorruptError when a stored entry is unreadable."""
         ...
+
+
+class EvidenceLedger(EvidenceRecorder, EvidenceLookup, Protocol):
+    """Both ports: a producer that settles a reading once reads back what it or an earlier try wrote."""
+
+
+def ledgered_poll(
+    ledger: EvidenceLedger,
+    polled: ExecutorPoll,
+    *,
+    source_request: RequestId,
+    plan: MeasurementPlan,
+) -> ExecutorPoll:
+    """``polled`` with each stage reading recorded once; a later try that reads differently gets the stored one.
+
+    Evidence never changes under a reader, so a replay returns the stored entry instead of failing
+    inside the pure translation. Whoever reports a job's end to core calls this first: the operation
+    that decodes the evidence reads only this ledger (``InterpretEvidenceOwner``).
+    """
+    terminal = polled.terminal
+    if terminal is None:
+        return polled
+    known = {stage.stage_id for stage in plan.stages}
+    steps = []
+    for step in terminal.stage_results:
+        if step.result is None or step.name not in known:
+            steps.append(step)
+            continue
+        item = TrustedEvidence.model_validate(step.result)
+        key = EvidenceKey(
+            source_request=source_request, evidence_id=EvidenceId(root=item.evidence_id)
+        )
+        stored = ledger.lookup(key)
+        if stored is None:
+            ledger.record(source_request, item, plan.purpose)
+            steps.append(step)
+        else:
+            steps.append(
+                step.model_copy(update={"result": stored.evidence.model_dump(mode="json")})
+            )
+    return polled.model_copy(
+        update={"terminal": terminal.model_copy(update={"stage_results": tuple(steps)})}
+    )
 
 
 def _key(key: EvidenceKey) -> str:
