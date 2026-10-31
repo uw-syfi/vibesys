@@ -42,8 +42,9 @@ const NOT_OBSERVED: SubscriptionState<never> = CONNECTING;
 function sameView(left: WindowState, right: WindowState): boolean {
   if (!sameControl(left.control, right.control) || left.fold.broken !== right.fold.broken)
     return false;
-  // A snapshot under construction, or data while main says there is no value, shows nothing.
-  const shows = right.control.kind === 'live' || right.control.kind === 'stale';
+  // The data shows with every control but `connecting`, which has none; a snapshot under
+  // construction is not in `fold.map` until it is whole.
+  const shows = right.control.kind !== 'connecting';
   return !shows || left.fold.map === right.fold.map;
 }
 

@@ -538,6 +538,114 @@ describe('Scrubber', () => {
   });
 });
 
+describe('Scrubber spaced by places', () => {
+  /** Five positions, the first three close in time and a long quiet stretch before the last two. */
+  const PLACES = [0, 0.05, 0.1, 0.9, 1];
+  const mounted = async (value: number, seen: number[]) => {
+    const container = await mount(
+      <Scrubber
+        label="Run position"
+        value={value}
+        last={4}
+        live={false}
+        pastLabel="Replay"
+        position="9h 41m"
+        places={PLACES}
+        ticks={[{at: 3, label: '4'}]}
+        change={at => seen.push(at)}
+        backToLive={() => undefined}
+      />,
+    );
+    return container.querySelector('input[type="range"]') as HTMLInputElement;
+  };
+
+  test('puts the playhead where the position stands in time, not where it stands in the list', async () => {
+    const [near, far] = [await mounted(2, []), await mounted(3, [])];
+    expect([near.min, near.max, near.value]).toEqual(['0', '1000', '100']);
+    expect(far.value).toBe('900');
+  });
+
+  test('a tick stands at its position’s place along the track', async () => {
+    const container = await mount(
+      <Scrubber
+        label="Run position"
+        value={3}
+        last={4}
+        live={false}
+        pastLabel="Replay"
+        position="9h 41m"
+        places={PLACES}
+        ticks={[{at: 3, label: '4'}]}
+        change={() => undefined}
+        backToLive={() => undefined}
+      />,
+    );
+    const tick = container.querySelector('.vs-scrubber-tick') as HTMLElement | null;
+    // Unmeasured in this DOM, a tick is placed by its share of the track.
+    expect(tick?.getAttribute('style')).toContain('90%');
+  });
+
+  test('the arrows, Page Up and Down, Home and End step by position, as a native range does', async () => {
+    const seen: number[] = [];
+    const range = await mounted(2, seen);
+    for (const key of [
+      'ArrowLeft',
+      'ArrowRight',
+      'ArrowDown',
+      'ArrowUp',
+      'Home',
+      'End',
+      'PageUp',
+      'PageDown',
+    ]) {
+      await press(range, key);
+    }
+    expect(seen).toEqual([1, 3, 1, 3, 0, 4, 3, 1]);
+  });
+});
+
+describe('Scrubber marks', () => {
+  const mounted = async (marks: readonly number[] | undefined, last = 4) =>
+    mount(
+      <Scrubber
+        label="Run position"
+        value={last}
+        last={last}
+        live
+        pastLabel="Replay"
+        position="9h 41m"
+        {...(marks === undefined ? {} : {marks})}
+        change={() => undefined}
+        backToLive={() => undefined}
+      />,
+    );
+
+  test('draw a diamond on the track at each place, and take no focus or name', async () => {
+    const container = await mounted([0.25, 0.9]);
+    const marks = [...container.querySelectorAll('.vs-scrubber-mark')];
+    expect(marks.map(mark => mark.getAttribute('style'))).toEqual([
+      '--mark-at: 0.25;',
+      '--mark-at: 0.9;',
+    ]);
+    expect(marks.every(mark => mark.getAttribute('aria-hidden') === 'true')).toBe(true);
+    expect(marks.every(mark => !mark.hasAttribute('tabindex') && mark.textContent === '')).toBe(
+      true,
+    );
+    // Each is a drawn shape, not an empty filled box: boxes beside the range would read, to the
+    // screen's legend check, as a strip of unnamed segments.
+    expect(
+      marks.every(mark => mark.tagName.toLowerCase() === 'svg' && mark.children.length === 1),
+    ).toBe(true);
+    // The one slider is the range, with or without marks.
+    expect(container.querySelectorAll('[role="slider"], input[type="range"]')).toHaveLength(1);
+  });
+
+  test('are none without marks, and none on a track with nothing to scrub', async () => {
+    expect((await mounted(undefined)).querySelector('.vs-scrubber-mark')).toBeNull();
+    expect((await mounted([0.5], 0)).querySelector('.vs-scrubber-mark')).toBeNull();
+  });
+});
+
 describe('Scrubber with one position', () => {
   const range = async (last: number, value: number) => {
     const container = await mount(
@@ -569,48 +677,20 @@ describe('Scrubber with one position', () => {
   });
 });
 
-describe('Chart emphasis and spans', () => {
+describe('Chart rings and cursor', () => {
   const points: ChartPoint[] = [
-    {id: 'a', x: 1, y: 10, filled: true},
-    {id: 'b', x: 2, y: 20, filled: true},
-    {id: 'c', x: 3, y: 15, filled: false},
+    {id: 'a', x: 1, y: 10},
+    {id: 'b', x: 2, y: 20},
+    {id: 'c', x: 3, y: 15},
   ];
   const frame = (container: HTMLElement) =>
     [...container.querySelectorAll('.vs-chart-pick')].map(pick => [
       pick.getAttribute('aria-label'),
       pick.querySelector('circle.vs-chart-point')?.getAttribute('cx'),
+      pick.querySelector('circle.vs-chart-point')?.getAttribute('cy'),
     ]);
 
-  test('emphasis marks dots and the ring follows the focus, with every dot still drawn', async () => {
-    const container = await mount(
-      <Chart
-        label="c"
-        points={points.map(point => ({
-          ...point,
-          emphasis:
-            point.id === 'b'
-              ? ('focus' as const)
-              : point.id === 'a'
-                ? ('related' as const)
-                : ('dim' as const),
-        }))}
-        pick={() => undefined}
-      />,
-    );
-    const kinds = [...container.querySelectorAll('.vs-chart-pick')].map(each =>
-      each.getAttribute('data-emphasis'),
-    );
-    expect(kinds).toEqual(['related', 'focus', 'dim']);
-    expect(container.querySelectorAll('.vs-chart-ring')).toHaveLength(1);
-    expect(container.querySelectorAll('.vs-chart-related')).toHaveLength(1);
-    expect(
-      container
-        .querySelector('.vs-chart-pick[data-emphasis="focus"]')
-        ?.getAttribute('aria-pressed'),
-    ).toBe('true');
-  });
-
-  test('neither emphasis nor spans move a dot or the axes', async () => {
+  test('neither a ring nor the cursor moves a dot or the axes', async () => {
     const xTicks = [
       {value: 0, label: '0'},
       {value: 4, label: '4'},
@@ -621,18 +701,16 @@ describe('Chart emphasis and spans', () => {
     const marked = await mount(
       <Chart
         label="c"
-        points={points.map(point => ({...point, emphasis: 'dim' as const}))}
-        spans={[{from: -50, to: 2, label: 'an idea'}]}
+        points={points.map(point => ({...point, selected: point.id === 'b', lit: true}))}
+        cursor={2.5}
         xTicks={xTicks}
         pick={() => undefined}
       />,
     );
     expect(frame(marked)).toEqual(frame(plain));
-    expect(marked.querySelectorAll('.vs-chart-span')).toHaveLength(1);
-    // The band is clipped to the plot: it starts at the axis, not at x = -50.
-    const band = marked.querySelector('.vs-chart-span-band');
-    const axis = marked.querySelector('line.vs-chart-axis');
-    expect(band?.getAttribute('x')).toBe(axis?.getAttribute('x1'));
+    expect(marked.querySelectorAll('.vs-chart-ring')).toHaveLength(1);
+    expect(marked.querySelectorAll('.vs-chart-lit')).toHaveLength(3);
+    expect(marked.querySelectorAll('.vs-chart-cursor')).toHaveLength(1);
   });
 });
 
@@ -641,7 +719,7 @@ describe('Chart x labels', () => {
     const container = await mount(
       <Chart
         label="c"
-        points={[{x: 0, y: 1, filled: true}]}
+        points={[{x: 0, y: 1}]}
         xTicks={[
           {value: 0, label: '0s'},
           {value: 1_200_000, label: '333h 20m'},
@@ -694,6 +772,42 @@ describe('ParetoChart', () => {
         point.getAttribute('data-role') ?? '',
       ]),
     );
+
+  test('is framed on all four sides and says in its corner which way is better', async () => {
+    const root = await mount(<ParetoChart label="Trade-off" points={points} x={x} y={y} />);
+    const frame = root.querySelector('.vs-chart-frame');
+    expect(frame?.tagName.toLowerCase()).toBe('rect');
+    expect(Number(frame?.getAttribute('width'))).toBeGreaterThan(0);
+    expect(Number(frame?.getAttribute('height'))).toBeGreaterThan(0);
+    const better = root.querySelector('.vs-pareto-better');
+    expect(better?.textContent).toBe('Better ↗');
+    // Inside the frame, at its top right.
+    const right = Number(frame?.getAttribute('x')) + Number(frame?.getAttribute('width'));
+    expect(Number(better?.getAttribute('x'))).toBeLessThanOrEqual(right);
+    expect(Number(better?.getAttribute('y'))).toBeGreaterThan(Number(frame?.getAttribute('y')));
+  });
+
+  test('names its input on the chart, beside its mark, once', async () => {
+    const root = await mount(
+      <ParetoChart label="Trade-off" points={points} x={x} y={y} legend={false} />,
+    );
+    const names = [...root.querySelectorAll('.vs-pareto-input')];
+    expect(names.map(name => name.textContent)).toEqual(['Input']);
+    const mark = root.querySelector('.vs-pareto-point[data-role="input"] .vs-pareto-mark');
+    expect(Number(names[0]?.getAttribute('x'))).toBeGreaterThan(
+      Number(mark?.getAttribute('x')) + Number(mark?.getAttribute('width')) / 2,
+    );
+  });
+
+  test('draws its own key unless it is told the page keeps one for it', async () => {
+    const withKey = await mount(<ParetoChart label="Trade-off" points={points} x={x} y={y} />);
+    expect(withKey.querySelector('ul[aria-label="Points"]')).not.toBeNull();
+    const without = await mount(
+      <ParetoChart label="Trade-off" points={points} x={x} y={y} legend={false} />,
+    );
+    expect(without.querySelector('ul[aria-label="Points"]')).toBeNull();
+    expect(without.querySelectorAll('.vs-pareto-point').length).toBe(points.length);
+  });
 
   test('marks the input, the frontier, the dominated and the failed', async () => {
     const root = await mount(<ParetoChart label="Trade-off" points={points} x={x} y={y} />);

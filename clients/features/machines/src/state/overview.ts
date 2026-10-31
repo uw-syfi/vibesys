@@ -27,10 +27,21 @@ function probeStatus(machine: Machine): {readonly word: string; readonly tone: S
 }
 
 /**
- * The one word and tone a machine's card carries. The machine's own check speaks while the
- * connection or the checkout is what is wrong (it names the fix), and otherwise the stream's
- * state does, once the card has one, so a card never says `Online` beside `Unreachable`. A host
- * the stream says it cannot read is `Not supported` alone, whatever the check said of its version.
+ * Whether the host is delivering right now: its stream has current values. That is proof the host
+ * is reached, which no failed read of the machine's facts can refute.
+ */
+function delivering(stream: StatsView | null): boolean {
+  return stream !== null && stream.kind === 'values' && stream.stale === null;
+}
+
+/**
+ * The one word and tone a machine's card carries, folded from the two things that speak of the
+ * machine: its check, which reads its facts, and its stream, which says whether it is reached now.
+ * The check speaks of what only it can know: a sign-in to make, a checkout that is missing, a
+ * version that is old. Whether the host is reached is the stream's to say once it is delivering,
+ * so a check whose reads timed out on a busy host never says `Unreachable` beside live readings.
+ * A host the stream says it cannot read is `Not supported` alone, whatever the check said of its
+ * version. The card's one action (`cardAction`) follows the same fold.
  */
 export function cardStatus(
   machine: Machine,
@@ -41,9 +52,10 @@ export function cardStatus(
   switch (machineStatus(machine)) {
     case 'checking':
     case 'sign-in':
-    case 'unavailable':
     case 'checkout-not-found':
       return own;
+    case 'unavailable':
+      return delivering(stream) ? streamStatus(stream) : own;
     case 'needs-update':
       return stream.kind === 'failed' ? streamStatus(stream) : own;
     case 'ready':
@@ -67,13 +79,19 @@ export function machineHardware(machine: Machine): string | null {
   return [`${described.hardware.cpu_cores} CPU`, ...gpus].join(' · ');
 }
 
-/** What a machine's card offers to fix its connection: Sign in, Reconnect, or nothing. */
-export function cardAction(machine: Machine): 'sign-in' | 'reconnect' | null {
+/**
+ * What a machine's card offers to fix its connection: Sign in, Reconnect, or nothing. A host that
+ * is delivering is reached, so it is offered no Reconnect, whatever its check found.
+ */
+export function cardAction(
+  machine: Machine,
+  stream: StatsView | null = null,
+): 'sign-in' | 'reconnect' | null {
   switch (machineStatus(machine)) {
     case 'sign-in':
       return 'sign-in';
     case 'unavailable':
-      return 'reconnect';
+      return delivering(stream) ? null : 'reconnect';
     case 'ready':
     case 'checking':
     case 'needs-update':
@@ -199,12 +217,17 @@ export function placesReading(
  * What the page lists that needs the user, as the most urgent problem: a machine that is not online
  * (and not being checked) names its own status, and a cluster whose last test found it unreachable
  * is `unavailable`. Null when nothing needs the user. The rail's warning dot, worded by
- * `problemWord`, so an old machine reads "Needs an update" there as it does on the page.
+ * `problemWord`, so an old machine reads "Needs an update" there as it does on the page. A host in
+ * `delivering` is reached whatever its check found (as its card says), so it is no problem.
  */
-export function machinesAttention(state: MachinesState): MachineProblem | null {
+export function machinesAttention(
+  state: MachinesState,
+  delivering: ReadonlySet<string> = new Set(),
+): MachineProblem | null {
   const problems = state.machines.flatMap(each => {
     const status = machineStatus(each);
-    return status === 'ready' || status === 'checking' ? [] : [status];
+    if (status === 'ready' || status === 'checking') return [];
+    return status === 'unavailable' && delivering.has(each.host) ? [] : [status];
   });
   const clusters = unreachableClusters({places: state.places, lastToken: state.lastToken}) > 0;
   return mostUrgentProblem(clusters ? [...problems, 'unavailable'] : problems);

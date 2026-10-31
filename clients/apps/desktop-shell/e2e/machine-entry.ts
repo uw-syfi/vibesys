@@ -1,7 +1,13 @@
-/** A valid machine-stats entry as a host's gateway sends it, for the page-side fake of the port. */
+/** Valid entries as a host's gateway sends them, for the page-side fake of the subscription port. */
 import {create} from '@bufbuild/protobuf';
 import {timestampFromMs} from '@bufbuild/protobuf/wkt';
-import {AbsenceReason, MachineStatsSchema, type TopicEntry, TopicEntrySchema} from '@vibesys/proto';
+import {
+  AbsenceReason,
+  MachineStatsSchema,
+  RunLiveness,
+  type TopicEntry,
+  TopicEntrySchema,
+} from '@vibesys/proto';
 
 interface Gpu {
   readonly name: string;
@@ -59,6 +65,17 @@ export function machineEntry(key: string, sampledMs: number, readings: Readings 
                 },
               },
       }),
+    },
+  });
+}
+
+/** A `runs` entry for `runId`: its writer `alive`, or the run `ended`. */
+export function runEntry(runId: string, state: 'alive' | 'ended'): TopicEntry {
+  return create(TopicEntrySchema, {
+    key: runId,
+    value: {
+      case: 'runs',
+      value: {liveness: state === 'alive' ? RunLiveness.ALIVE : RunLiveness.ENDED},
     },
   });
 }

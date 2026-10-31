@@ -267,7 +267,7 @@ func TestTailStreamRejectsEscapes(t *testing.T) {
 	}
 }
 
-func watchEntry(t *testing.T, stream apiv1.HostService_WatchRunsClient) *apiv1.WatchRunsResponse {
+func watchEntry(t *testing.T, stream *runStream) *runFrame {
 	t.Helper()
 	for {
 		got, err := stream.Recv()
@@ -280,7 +280,7 @@ func watchEntry(t *testing.T, stream apiv1.HostService_WatchRunsClient) *apiv1.W
 	}
 }
 
-func TestWatchRunsAtomicHeadAndRealLock(t *testing.T) {
+func TestRunsAtomicHeadAndRealLock(t *testing.T) {
 	f := start(t)
 	lock, err := os.OpenFile(filepath.Join(f.run, "run.lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
@@ -291,7 +291,7 @@ func TestWatchRunsAtomicHeadAndRealLock(t *testing.T) {
 		t.Fatal(err)
 	}
 	publishHead(t, f, head(proto.Uint64(1)))
-	stream, err := client(t, f, false).WatchRuns(f.ctx, &apiv1.WatchRunsRequest{})
+	stream, err := subscribeRuns(f.ctx, client(t, f, false))
 	if err != nil {
 		t.Fatal(err)
 	}

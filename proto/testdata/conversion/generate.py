@@ -110,8 +110,8 @@ def fixtures(project: Project) -> dict[str, bytes]:
         [base64.b64encode(record.to_binary()).decode("ascii") for record in records]
     ).encode()
     return {
-        "records.base64.json.gz": gzip.compress(record_json, mtime=0),
-        "run.log.gz": gzip.compress(log, mtime=0),
+        "records.base64.json.gz": deterministic_gzip(record_json),
+        "run.log.gz": deterministic_gzip(log),
         "run.head": head.to_binary(),
         f"keyframes/{head.committed_seq}.pb": expected,
         "expected.pb": expected,
@@ -120,6 +120,24 @@ def fixtures(project: Project) -> dict[str, bytes]:
         ),
         **usage_fixtures(),
     }
+
+
+#: The operating-system byte of the committed goldens' gzip headers. A gzip writer states the system
+#: it runs on (zlib's own code, which is Linux's on one machine and macOS's on another, or
+#: "unknown" in older Pythons), so a regeneration anywhere else would rewrite every golden for
+#: that byte alone.
+GZIP_OS_BYTE = 0x13
+
+
+def deterministic_gzip(data: bytes) -> bytes:
+    """`data` gzipped with a header that is the same on every machine: no time, a pinned system."""
+    packed = bytearray(gzip.compress(data, mtime=0))
+    packed[GZIP_HEADER_OS_OFFSET] = GZIP_OS_BYTE
+    return bytes(packed)
+
+
+#: Where the operating-system byte sits in a gzip header (RFC 1952).
+GZIP_HEADER_OS_OFFSET = 9
 
 
 def legacy_events(events: list[CoreEvent]) -> bytes:
@@ -142,7 +160,7 @@ def legacy_events(events: list[CoreEvent]) -> bytes:
             "[" + ",".join(event.model_dump_json() for event in journal.read()) + "]"
         ).encode()
         integration.close()
-    return gzip.compress(encoded, mtime=0)
+    return deterministic_gzip(encoded)
 
 
 def usage_fixtures() -> dict[str, bytes]:
@@ -177,7 +195,7 @@ def usage_fixtures() -> dict[str, bytes]:
             (root / "keyframes" / f"{head.committed_seq}.pb").read_bytes(),
         )
         return {
-            "usage/run.log.gz": gzip.compress(log, mtime=0),
+            "usage/run.log.gz": deterministic_gzip(log),
             "usage/run.head": head.to_binary(),
             "usage/expected.pb": expected,
             "usage/records.base64.json": (

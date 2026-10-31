@@ -25,7 +25,7 @@ for (const width of [1000, 1440]) {
     await playLive(page, fixture);
     await settled(page);
     await expect(page.locator('.vs-check-list')).toHaveCount(0);
-    await expect(page.getByText(/Best so far|Adopted:/)).toHaveCount(0);
+    await expect(page.getByText(/Adopted:/)).toHaveCount(0);
     if (shots !== undefined) await page.screenshot({path: `${shots}/run-gate__${width}.png`});
     const listsHeight = await page.evaluate(
       () => document.querySelector('.vs-panes')?.getBoundingClientRect().height ?? 0,

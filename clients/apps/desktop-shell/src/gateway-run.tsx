@@ -16,16 +16,20 @@ import type {ProblemBoard} from '@vibesys/problems';
 import {type RecordsFanout, type RecordsListener, recordsFanout} from '@vibesys/run-skeleton';
 import {gatewayContentCache} from '@vibesys/run-skeleton/cache';
 import {type GatewayReader, gatewayReader} from '@vibesys/run-skeleton/reader';
+import type {SubscriptionPort} from '@vibesys/subscription';
 import {Card, EmptyState, Page, Text} from '@vibesys/ui';
 import {type JSX, useMemo} from 'react';
 import {useGatewayChat} from './gateway-chat.js';
 import {gatewayTransport} from './gateway-transport.js';
 import {useReportedProblems} from './problem-host.js';
+import {runLiveness} from './run-liveness.js';
 
 interface GatewayRunProps {
   readonly seed: RunPageSeed;
   readonly projectRoot: RecordedProjectRoot | undefined;
   readonly bridge: GatewayBridge;
+  /** The window's port to the host's live data, which this run's liveness is read through. */
+  readonly subscriptions: SubscriptionPort;
   readonly schedule: ScheduleTimeout;
   readonly address: RunPageAddress;
   readonly navigation: RunPageNavigation;
@@ -34,10 +38,10 @@ interface GatewayRunProps {
 }
 
 export function GatewayRun(props: GatewayRunProps): JSX.Element {
-  const {bridge, seed, schedule, address} = props;
+  const {bridge, subscriptions, seed, schedule, address} = props;
   const {fanout, ports} = useMemo(
-    () => gatewayPorts({bridge, host: seed.identity.host, schedule}),
-    [bridge, seed.identity.host, schedule],
+    () => gatewayPorts({bridge, subscriptions, host: seed.identity.host, schedule}),
+    [bridge, subscriptions, seed.identity.host, schedule],
   );
   const page = useGatewayRun({seed, ports, schedule, address});
   const {snapshot} = page;
@@ -120,15 +124,17 @@ export function GatewayRun(props: GatewayRunProps): JSX.Element {
 
 function gatewayPorts(input: {
   readonly bridge: GatewayBridge;
+  readonly subscriptions: SubscriptionPort;
   readonly host: RunPageSeed['identity']['host'];
   readonly schedule: ScheduleTimeout;
 }): {readonly fanout: RecordsFanout; readonly ports: GatewayRunPorts} {
-  const {bridge, host, schedule} = input;
+  const {bridge, subscriptions, host, schedule} = input;
   const fanout = recordsFanout();
   const reader = gatewayReader(
     gatewayTransport(bridge, host),
     gatewayContentCache(indexedDB),
     schedule,
+    runLiveness(subscriptions, host),
   );
   return {
     fanout,

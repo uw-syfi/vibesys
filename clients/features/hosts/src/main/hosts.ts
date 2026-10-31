@@ -8,7 +8,7 @@ import {
   type ConnectionLease,
   type ConnectionManager,
   HelperRequestError,
-  hostListingFromRuns,
+  type HostRuns,
   isHostUnsupported,
   type LogsLease,
   type RegistryRunCatalog,
@@ -16,7 +16,6 @@ import {
   type RegistrySavedRuns,
   type RegistrySetup,
   type RegistryUsage,
-  type RunWatch,
   type Subscriptions,
 } from '@vibesys/connection';
 import {
@@ -105,8 +104,8 @@ export interface HostsDeps {
   readonly setup?: RegistrySetup;
   /** Stop a host login when its checkout is replaced or the host is removed. */
   readonly endLogin?: (id: HostId) => void;
-  /** The host's runs, from its gateway's WatchRuns while the host is shown. Cancel reaps the stream. */
-  readonly runs: Pick<RunWatch, 'observe' | 'cancel' | 'retry'>;
+  /** The host's runs, from its gateway's `runs` subscription while the host is shown. */
+  readonly runs: Pick<HostRuns, 'observe' | 'retry'>;
   /**
    * The live subscriptions on a host. Removing a host ends them, and its observers hear
    * `failed closed`; a host that only leaves the desired set (a panel switch, a cleared checkout)
@@ -884,9 +883,9 @@ export class Hosts {
   }
 
   /**
-   * Show `key`'s runs as its gateway's WatchRuns states them. The listing and the connection status
-   * are both that stream's: the host's helper is not asked, so a helper that cannot start does not
-   * hide a gateway that can list.
+   * Show `key`'s runs as its gateway's `runs` subscription states them. The listing and the
+   * connection status are both that subscription's: the host's helper is not asked, so a helper
+   * that cannot start does not hide a gateway that can list.
    */
   #install(key: HostKey, checkout: string): void {
     const push = this.#deps.push;
@@ -899,9 +898,8 @@ export class Hosts {
         this.#deps.log(`could not check the VibeSys of ${hostLabel(hostFromKey(key))}: ${reason}`),
     });
     let live = false;
-    const stopRuns = this.#deps.runs.observe(hostFromKey(key), state => {
+    const stopRuns = this.#deps.runs.observe(key, listing => {
       if (stopped) return;
-      const listing = hostListingFromRuns(key, state);
       if (listing.kind === 'listed') {
         gate.listing(listing);
         if (!live) gate.recheck();
@@ -918,13 +916,12 @@ export class Hosts {
       },
       retry: () => {
         if (live) gate.recheck();
-        else this.#deps.runs.retry(hostFromKey(key));
+        else this.#deps.runs.retry(key);
       },
       stop: () => {
         stopped = true;
         gate.invalidate();
         stopRuns();
-        this.#deps.runs.cancel(hostFromKey(key));
       },
     });
   }

@@ -276,7 +276,7 @@ test('every level opens by click and walks back by Escape, the crumbs and Back',
 
 /** The performance chart of the run, which every level keeps on screen. */
 function perfChart(page: Page): Locator {
-  return page.getByRole('group', {name: /of each measured idea over the run/});
+  return page.getByRole('group', {name: /of each reading over the run/});
 }
 
 /** Where the performance row is and what its axes read: all of it must be the same at every level. */
@@ -286,7 +286,7 @@ async function perfRow(page: Page) {
       const {x, y, width, height} = element.getBoundingClientRect();
       return {x, y, width, height};
     };
-    const row = chart.closest('.vs-flex[data-direction="row"]');
+    const row = chart.closest('.vs-chart-columns');
     return {
       chart: box(chart),
       row: row === null ? null : box(row),
@@ -296,17 +296,14 @@ async function perfRow(page: Page) {
   });
 }
 
-async function emphasized(page: Page) {
+/** The readings ringed in the text color (the open idea's) and in the accent (its lineage's steps). */
+async function ringed(page: Page) {
   return perfChart(page).evaluate(chart => {
-    const kinds = ['focus', 'related', 'dim'] as const;
-    return Object.fromEntries(
-      kinds.map(kind => [
-        kind,
-        [...chart.querySelectorAll(`.vs-chart-pick[data-emphasis="${kind}"]`)].map(
-          point => point.getAttribute('aria-label')?.split(' · ')[0],
-        ),
-      ]),
-    );
+    const named = (ring: string) =>
+      [...chart.querySelectorAll('.vs-chart-pick')]
+        .filter(point => point.querySelector(ring) !== null)
+        .map(point => point.getAttribute('aria-label')?.split(' · ')[0]);
+    return {selected: named('.vs-chart-ring'), lineage: named('.vs-chart-lit')};
   });
 }
 
@@ -351,40 +348,34 @@ test('the performance row is the same element, in the same place and size, at ev
   await unchanged();
 });
 
-test('an open idea is singled out on the chart: its dot ringed, the rest dimmed, its base outlined', async ({
+test('an open idea is singled out on the chart: its reading ringed, the steps of its lineage ringed in the accent', async ({
   page,
 }) => {
   await openRun(page);
   const ideas = page.getByRole('listbox', {name: 'Ideas'});
-  expect(await emphasized(page)).toEqual({focus: [], related: [], dim: []});
+  const key = page.getByRole('list', {name: 'Chart key'});
+  expect(await ringed(page)).toEqual({selected: [], lineage: []});
+  await expect(key.getByText('Selected', {exact: true})).toHaveCount(0);
 
-  // A measured idea: its own dot is the focus, the other dots stay (dimmed), its base is outlined.
+  // A measured idea: its own reading is ringed, every reading stays, and the key names the ring.
   await ideas.getByRole('option', {name: /Cache-line padding/}).click();
-  expect(await emphasized(page)).toEqual({
-    focus: ['Cache-line padding and batched enqueue'],
-    related: ['Lock-free ring with per-slot sequence numbers'],
-    dim: ['Larger batch size'],
-  });
-  await expect(perfChart(page).locator('.vs-chart-span')).toHaveCount(1);
-  // The hero keeps the run's best and reads this idea's result on its own line.
+  const open = await ringed(page);
+  expect(open.selected).toEqual(['Cache-line padding and batched enqueue']);
+  await expect(key.getByText('Selected', {exact: true})).toBeVisible();
+  await expect(perfChart(page).getByRole('button')).toHaveCount(3);
+  // The hero keeps the run's best.
   await expect(page.getByText('1.18×').first()).toBeVisible();
-  await expect(page.getByText('1.07× vs input')).toBeVisible();
 
-  // An idea with no measurement singles nothing out, outlines its base, and says why in words.
+  // An idea with no measurement has no reading to ring, so the key does not name a ring.
   await page.keyboard.press('Escape');
   await ideas.getByRole('option', {name: /Combine W1 ring with W2 padding/}).click();
-  expect(await emphasized(page)).toEqual({
-    focus: [],
-    related: ['Lock-free ring with per-slot sequence numbers'],
-    dim: [],
-  });
-  await expect(page.getByText('Selected idea:')).toBeVisible();
+  expect((await ringed(page)).selected).toEqual([]);
+  await expect(key.getByText('Selected', {exact: true})).toHaveCount(0);
 
-  // Back at the run nothing is singled out, and the idea line is empty.
+  // Back at the run nothing is ringed.
   await page.keyboard.press('Escape');
   await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
-  expect(await emphasized(page)).toEqual({focus: [], related: [], dim: []});
-  await expect(page.getByText(/Selected idea/)).toHaveCount(0);
+  expect(await ringed(page)).toEqual({selected: [], lineage: []});
 });
 
 test('clicking a dot of the chart opens its idea', async ({page}) => {
@@ -668,6 +659,13 @@ test('a live turn keeps its scroll position and its element as events arrive', a
     turn.evaluate(element => element.scrollHeight - element.scrollTop - element.clientHeight);
   await expect.poll(gap).toBeLessThan(2);
   await more(12, 1);
+  // The reader watches this thought being written: the page draws it as "Thinking" and keeps it
+  // open from then on. Name it by its title, never by position: the turn draws only the thoughts
+  // near the visible part, so "the first" is whichever one the window starts at, and a press that
+  // scrolls moves the window. Only a thought drawn while it was written stays open, so the test
+  // waits for this one to be drawn so, whatever the page's speed.
+  const watched = turn.locator('.vs-thought', {hasText: /Thought title 12(?!\d)/});
+  await expect(watched.and(turn.locator('[data-live]'))).toBeVisible();
   await expect.poll(gap).toBeLessThan(2);
 
   // Scrolled away, it stays where it is: the same element, and no scroll event moved it. (The
@@ -710,14 +708,14 @@ test('a live turn keeps its scroll position and its element as events arrive', a
   await expect(turn).toContainText('Padded both counters');
   await expect(turn.getByRole('button', {name: /Show all fields/})).toHaveCount(0);
 
-  // The turn is over. The reader had its first thought in view while it was written, so it stays
-  // open rather than collapsing under them; its bold title is a title, never markup.
-  const line = turn.locator('.vs-thought').first().getByRole('button');
+  // The turn is over. The reader had that thought in view while it was written, so it stays open
+  // rather than collapsing under them; its bold title is a title, never markup.
+  const line = watched.getByRole('button');
   await expect(line).toHaveAttribute('aria-expanded', 'true');
-  await expect(turn.locator('.vs-thought strong').first()).toBeVisible();
+  await expect(watched.locator('strong').first()).toBeVisible();
   // A press closes it to a one-line preview, and it stays closed.
   await line.click();
   await expect(line).toHaveAttribute('aria-expanded', 'false');
-  await expect(turn.locator('.vs-thought .vs-collapsible-summary').first()).toBeVisible();
+  await expect(watched.locator('.vs-collapsible-summary')).toBeVisible();
   expect(await turn.evaluate(element => element.textContent?.includes('**'))).toBe(false);
 });

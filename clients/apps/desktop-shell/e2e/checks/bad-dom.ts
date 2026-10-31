@@ -226,19 +226,19 @@ export const BAD_SCREENS: readonly BadScreen[] = [
     name: 'a chart too small to read',
     check: 'chart-size',
     message: /the chart is 240 by 60 px, under the 280 by 100 px/,
-    html: `<div style="${PAGE}"><svg class="vs-chart" role="group" aria-label="Metric of each measured idea over the run, with the best so far" width="240" height="60" viewBox="0 0 240 60"><circle cx="40" cy="30" r="4" fill="red"/></svg></div>`,
+    html: `<div style="${PAGE}"><svg class="vs-chart" role="group" aria-label="Metric of each reading over the run, with the best so far" width="240" height="60" viewBox="0 0 240 60"><circle cx="40" cy="30" r="4" fill="red"/></svg></div>`,
   },
   {
     name: 'a chart drawn at a third of its size, its labels specks',
     check: 'chart-size',
     message: /the chart label "10m" is drawn 4 px high, under 10 px/,
-    html: `<div style="${PAGE}"><svg class="vs-chart" role="group" aria-label="Metric of each measured idea over the run, with the best so far" width="330" height="120" viewBox="0 0 1000 364"><text x="500" y="300" style="font-size:11px">10m</text></svg></div>`,
+    html: `<div style="${PAGE}"><svg class="vs-chart" role="group" aria-label="Metric of each reading over the run, with the best so far" width="330" height="120" viewBox="0 0 1000 364"><text x="500" y="300" style="font-size:11px">10m</text></svg></div>`,
   },
   {
     name: 'a chart label cut by the drawing’s edge',
     check: 'chart-size',
     message: /the chart label "333h 20m" is cut by the edge of the drawing/,
-    html: `<div style="${PAGE}"><svg class="vs-chart" role="group" aria-label="Metric of each measured idea over the run, with the best so far" width="320" height="120" viewBox="0 0 320 120" style="overflow:visible"><text x="300" y="100" style="font-size:12px">333h 20m</text></svg></div>`,
+    html: `<div style="${PAGE}"><svg class="vs-chart" role="group" aria-label="Metric of each reading over the run, with the best so far" width="320" height="120" viewBox="0 0 320 120" style="overflow:visible"><text x="300" y="100" style="font-size:12px">333h 20m</text></svg></div>`,
   },
   {
     name: 'an agent turn in a column a third of its pane, with dead space beside it',

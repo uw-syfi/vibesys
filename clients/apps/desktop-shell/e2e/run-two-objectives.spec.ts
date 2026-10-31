@@ -24,20 +24,26 @@ const chart = (page: Page) => page.getByRole('group', {name: /of each measured i
 const roleOf = (page: Page, role: string) =>
   chart(page).locator(`.vs-pareto-point[data-role="${role}"]`);
 
-test('the performance row has a tile per objective, each with its unit and what it means', async ({
+const panel = (page: Page, name: string) => page.getByRole('region', {name, exact: true});
+
+test('the performance row has a chart per objective, each with its headline and its values on hover', async ({
   page,
 }) => {
   await openFixture(page, fixtureNamed('finished-two-objectives'));
-  const tiles = page.getByRole('region', {name: 'Performance'}).locator('.vs-tile');
-  await expect(tiles).toHaveCount(2);
-  await expect(tiles.nth(0).getByText('Total ops/sec', {exact: true})).toBeVisible();
-  await expect(tiles.nth(0).locator('.vs-tile-detail')).toHaveText(
+  const [throughput, latency] = [panel(page, 'Total ops/sec'), panel(page, 'P99 latency')];
+  await expect(throughput).toContainText('higher is better');
+  await expect(throughput.locator('.vs-chart-figure')).toHaveText('3.83× faster');
+  await expect(throughput.locator('.vs-chart-figure')).toHaveAccessibleDescription(
     '6,054,154 ops/s · input 1,581,539 ops/s',
   );
-  await expect(tiles.nth(1).getByText('P99 latency', {exact: true})).toBeVisible();
+  await expect(latency).toContainText('lower is better');
   // Lower is better: the best latency, 8.7 ms against the input's 12.4 ms, reads as an improvement.
-  await expect(tiles.nth(1).locator('.vs-tile-detail')).toHaveText('8.7 ms · input 12.4 ms');
-  await expect(tiles.nth(1).getByText('faster than input')).toBeVisible();
+  await expect(latency.locator('.vs-chart-figure')).toHaveText('1.43× faster');
+  await expect(latency.locator('.vs-chart-figure')).toHaveAccessibleDescription(
+    '8.7 ms · input 12.4 ms',
+  );
+  // Each series is a chart of its own beside the trade-off chart.
+  await expect(page.getByRole('group', {name: /of each reading over the run/})).toHaveCount(2);
   await shot(page, 'two-objectives-hero');
 });
 
@@ -51,13 +57,13 @@ test('the trade-off chart marks the input, the frontier, the dominated and the f
   expect(await roleOf(page, 'frontier').count()).toBeGreaterThanOrEqual(3);
   expect(await roleOf(page, 'dominated').count()).toBeGreaterThanOrEqual(1);
   await expect(chart(page).locator('path.vs-pareto-frontier')).toHaveCount(1);
-  // Both axes say which way is better, and the key names every mark.
+  // Both axes say which way is better, and its corner says it again; it is framed, and keeps no key
+  // of its own: the one key under the charts names the lines and dots, and the input is labelled.
   await expect(chart(page)).toContainText('Total ops/sec (ops/s), higher is better');
   await expect(chart(page)).toContainText('P99 latency (ms), lower is better');
-  const key = page.getByRole('list', {name: 'Points'});
-  for (const word of ['Input', 'On the frontier', 'Dominated', 'Failed']) {
-    await expect(key.getByText(word, {exact: true})).toBeVisible();
-  }
+  await expect(chart(page)).toContainText('Better ↗');
+  await expect(chart(page).locator('.vs-chart-frame')).toHaveCount(1);
+  await expect(page.getByRole('list', {name: 'Points'})).toHaveCount(0);
   await shot(page, 'two-objectives-chart');
 });
 

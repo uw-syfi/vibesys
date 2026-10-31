@@ -29,6 +29,7 @@ import {
   type LiveStats,
   MachinesPage,
   MachinesScreen,
+  useDeliveringHosts,
   WithHostLive,
 } from '@vibesys/feature-machines/renderer';
 import {
@@ -80,9 +81,9 @@ import {sameRun} from '@vibesys/runs';
 import type {Store} from '@vibesys/store';
 import type {SubscriptionPort} from '@vibesys/subscription';
 import {applyTheme, Card, EmptyState, Page, type ThemeTarget, WindowFrame} from '@vibesys/ui';
-import {type JSX, useMemo, useSyncExternalStore} from 'react';
+import {type JSX, useCallback, useMemo, useSyncExternalStore} from 'react';
 import {GatewayRun} from './gateway-run.js';
-import {liveRunCounts, loadingMachines, runCounts, runInput} from './shell-runs.js';
+import {loadingMachines, runInput} from './shell-runs.js';
 
 /** The clock the shell's screens time their bounds on: the window's own timers, in `main.tsx`. */
 export type Schedule = (callback: () => void, delayMs: number) => () => void;
@@ -105,6 +106,8 @@ export interface ShellStores {
   readonly bridge: WelcomeBridge;
   readonly schedule: Schedule;
   readonly machines: ReturnType<typeof createMachinesStore>;
+  /** The window's way to a host's live data, or null when it has none. */
+  readonly subscriptions: SubscriptionPort | null;
   /** The machines' live stats, or null when the window has no way to a host's live data. */
   readonly live: LiveStats | null;
   /** What the Usage page shows; it asks only while the page is on screen. */
@@ -228,6 +231,7 @@ export function createShellStores(
     settings,
     machineSettings,
     machines,
+    subscriptions: page.subscriptions ?? null,
     live:
       page.subscriptions === undefined
         ? null
@@ -362,7 +366,8 @@ function RunRoute(props: {
   const ports = typeof window === 'undefined' ? undefined : window.vibesysGateway;
   const gateway = useMemo(() => (ports === undefined ? undefined : gatewayBridge(ports)), [ports]);
   const address = useMemo(() => runAddress(stores, run), [stores, run]);
-  return gateway === undefined ? (
+  const {subscriptions} = stores;
+  return gateway === undefined || subscriptions === null ? (
     <Page>
       <Card>
         <EmptyState title="Run service unavailable" />
@@ -374,6 +379,7 @@ function RunRoute(props: {
       seed={seed}
       projectRoot={projectRoot}
       bridge={gateway}
+      subscriptions={subscriptions}
       schedule={stores.schedule}
       address={address}
       navigation={place.navigation(run)}
@@ -519,12 +525,10 @@ function RunsRoute(props: {
   );
 }
 
-/** The Machines page over its store: a machine's runs are the dashboard narrowed to it, its Settings open on its clusters. */
+/** The Machines page over its store: a machine's runs are its own `runs` subscription's, its Settings open on its clusters. */
 function MachinesRoute(props: {
   readonly stores: ShellStores;
   readonly machines: MachinesState;
-  readonly counts: ReadonlyMap<HostKey, number>;
-  readonly liveRuns: ReadonlyMap<HostKey, number>;
   readonly select: (screen: Screen) => void;
 }): JSX.Element {
   const {stores, select} = props;
@@ -533,16 +537,11 @@ function MachinesRoute(props: {
     <MachinesPage
       state={props.machines}
       dispatch={stores.machines.dispatch}
-      runCounts={props.counts}
-      liveRuns={props.liveRuns}
       {...(live === null
         ? {}
         : {
             live: (host, render) => <WithHostLive live={live} host={host} render={render} />,
           })}
-      incompleteHosts={
-        new Set(projectRunGaps(useStore(stores.sidebar.store).allRuns).map(gap => gap.host))
-      }
       showRuns={host => {
         stores.grouping.dispatch({
           type: 'filter-machine',
@@ -592,9 +591,19 @@ export function Shell(props: {
   const newRunState = useStore(newRun);
   const rows = useMemo(() => dashboardRows(sidebarState, viewerClock()), [sidebarState]);
   const tiles = useMemo(() => tilesOf(rows.map(row => runInput(row, Date.now()))), [rows]);
-  const counts = useMemo(() => runCounts(rows), [rows]);
-  const liveRuns = useMemo(() => liveRunCounts(sidebarState.listings), [sidebarState.listings]);
   const select = (screen: Screen): void => sidebar.store.dispatch({type: 'select', screen});
+  // On the Machines screen the rail folds what the cards fold: a host that delivers is reached.
+  // The store hears which hosts deliver, and checks again one whose check found it unreachable.
+  const reportDelivering = useCallback(
+    (hosts: readonly HostKey[]) => machines.dispatch({type: 'delivering', hosts}),
+    [machines],
+  );
+  const delivering = useDeliveringHosts(
+    props.stores.live,
+    machinesState.machines,
+    sidebarState.selection.kind === 'machines',
+    reportDelivering,
+  );
   const machinesListed = machineCounts(machinesState).listed;
   const saved = machinesListed ? machinesState.machines.map(each => each.host) : null;
   const known = runsKnown(sidebarState, saved);
@@ -617,15 +626,7 @@ export function Shell(props: {
       case 'settings':
         return <SettingsRoute stores={props.stores} machines={machinesState} select={select} />;
       case 'machines':
-        return (
-          <MachinesRoute
-            stores={props.stores}
-            machines={machinesState}
-            counts={counts}
-            liveRuns={liveRuns}
-            select={select}
-          />
-        );
+        return <MachinesRoute stores={props.stores} machines={machinesState} select={select} />;
       case 'runs':
         return (
           <RunsRoute
@@ -651,7 +652,7 @@ export function Shell(props: {
         );
     }
   };
-  const attention = machinesAttention(machinesState);
+  const attention = machinesAttention(machinesState, delivering);
   return (
     <AppShell
       state={sidebarState}

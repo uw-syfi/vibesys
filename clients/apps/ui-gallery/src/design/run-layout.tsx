@@ -387,8 +387,8 @@ function Hero(props: {
           points={POINTS}
           pick={props.pick}
           steps={STEPS_LINE}
-          reference={{y: INPUT, label: 'input'}}
-          playhead={now(props.flags)}
+          start="Input"
+          cursor={now(props.flags)}
           yTicks={[5_000_000, 10_000_000].map(value => ({value, label: `${value / 1_000_000}M`}))}
           xTicks={axisTicks(props.flags).map(t => ({value: t.at, label: t.label}))}
         />

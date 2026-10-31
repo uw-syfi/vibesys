@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import {create, toBinary} from '@bufbuild/protobuf';
 import {expect, type Page, test} from '@playwright/test';
-import {IntentAction, RunLiveness, WatchRunsResponseSchema} from '@vibesys/proto';
+import {IntentAction, RunEntrySchema, RunLiveness} from '@vibesys/proto';
 import {Controls} from './chat-controls.js';
 import {
   type FakeBridgeSeed,
@@ -129,7 +129,8 @@ test('a run that has tried no idea yet says what will appear, not a guess', asyn
     .getByRole('button', {name: /^queue-rs · mpmc/})
     .click();
   await expect(page.getByText('No ideas yet')).toBeVisible();
-  await expect(page.getByText('nothing measured yet')).toBeVisible();
+  await expect(page.getByText('nothing measured yet')).toHaveCount(0);
+  await expect(page.locator('.vs-chart-box .vs-chart-grid')).toHaveCount(4);
 });
 
 test('a live run drains from the header over its session, and is let go', async ({page}) => {
@@ -172,9 +173,8 @@ test('a live run drains from the header over its session, and is let go', async 
       (window as unknown as {fakeGateway: {observe(b: number[]): void}}).fakeGateway.observe(bytes),
     [
       ...toBinary(
-        WatchRunsResponseSchema,
-        create(WatchRunsResponseSchema, {
-          runId: RUN_ID,
+        RunEntrySchema,
+        create(RunEntrySchema, {
           liveness: RunLiveness.PARKED,
           head: {epoch: 1},
         }),

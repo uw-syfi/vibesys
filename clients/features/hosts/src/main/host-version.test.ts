@@ -4,9 +4,8 @@ import {
   type InspectedCandidate,
   type RegistrySetup,
   registrySetup,
-  runWatch,
 } from '@vibesys/connection';
-import {FakeLink, FakeRunGateway, idleSubscriptions, olderHost} from '@vibesys/connection/testing';
+import {FakeLink, FakeRunsGateway, olderHost} from '@vibesys/connection/testing';
 import {type HostId, type HostListing, hostKey} from '@vibesys/hosts';
 import {SettingsStore, withHostSettings} from '@vibesys/settings';
 import {FakeSettingsFilesystem} from '@vibesys/settings/testing';
@@ -90,15 +89,15 @@ describe('Hosts on an older v2 host', () => {
       outOfDate = resolve;
     });
     const logged: string[] = [];
-    const gateway = new FakeRunGateway();
+    const gateway = new FakeRunsGateway();
     const hosts = new Hosts({
       manager,
       settings,
       localCheckout: '/bundled',
       sshConfigPath: '/missing',
       setup: registrySetup({unary: olderHost.read}),
-      runs: runWatch(gateway, new FakeClock().schedule),
-      subscriptions: idleSubscriptions(),
+      runs: gateway.runs,
+      subscriptions: gateway.subscriptions,
       log: message => logged.push(message),
       push: listing => {
         pushed.push(listing);
@@ -327,8 +326,8 @@ describe('Hosts and a held version check', () => {
       config: {delaysMs: [1], deadlineMs: 60_000, heartbeatMs: 15_000},
       log: () => {},
     });
-    const gateway = new FakeRunGateway();
     const clock = new FakeClock();
+    const gateway = new FakeRunsGateway(clock);
     const pushed: HostListing[] = [];
     const wake: (() => void)[] = [];
     const hosts = new Hosts({
@@ -337,8 +336,8 @@ describe('Hosts and a held version check', () => {
       localCheckout: '/bundled',
       sshConfigPath: '/missing',
       setup,
-      runs: runWatch(gateway, clock.schedule),
-      subscriptions: idleSubscriptions(),
+      runs: gateway.runs,
+      subscriptions: gateway.subscriptions,
       log: () => {},
       push: listing => {
         pushed.push(listing);

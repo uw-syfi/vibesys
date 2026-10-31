@@ -12,7 +12,6 @@ import {
   TranscriptChannel,
   TranscriptEntrySchema,
   TranscriptToolResultSchema,
-  WatchRunsResponseSchema,
 } from '@vibesys/proto';
 import {storeRunFixture, withCoreRecords} from '@vibesys/run-fixtures';
 import {foldSkeleton, seedSkeleton} from '@vibesys/run-skeleton';
@@ -95,7 +94,7 @@ test('Skeleton then Tail, local seek, verified cached content, logs and cancella
   const cache = new FakeSkeletonCache();
   const clock = new FakeClock();
   const ports = {
-    reader: gatewayReader(transport, cache, clock.schedule),
+    reader: gatewayReader(transport, cache, clock.schedule, transport.host.feed),
   };
   const actor = startGatewayRun(ports, clock.schedule, {seed: SEED});
   await reached(
@@ -122,7 +121,8 @@ test('Skeleton then Tail, local seek, verified cached content, logs and cancella
   expect(transport.calls).toHaveLength(calls);
   actor.send({type: 'ui', action: {type: 'select-stream', streamId: 'build-log'}});
   await reached(actor, snapshot => snapshot.context.ui.views['build-log']?.lines.length === 1);
-  expect(transport.activeStreams).toBe(3);
+  // The Tail and the log: the host's liveness rides its own subscription, not this transport.
+  expect(transport.activeStreams).toBe(2);
   actor.stop();
   await Promise.resolve();
   expect(
@@ -146,7 +146,12 @@ test('live records append while scrubbed and switching streams cancels the prior
   const clock = new FakeClock();
   const actor = startGatewayRun(
     {
-      reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
+      reader: gatewayReader(
+        transport,
+        new FakeSkeletonCache(),
+        clock.schedule,
+        transport.host.feed,
+      ),
     },
     clock.schedule,
     {seed: SEED},
@@ -175,7 +180,12 @@ test('native record history comes from the loader without a second reader of the
   const clock = new FakeClock();
   const actor = startGatewayRun(
     {
-      reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
+      reader: gatewayReader(
+        transport,
+        new FakeSkeletonCache(),
+        clock.schedule,
+        transport.host.feed,
+      ),
     },
     clock.schedule,
     {seed: SEED},
@@ -272,7 +282,12 @@ test('failed unary and corrupt content surface errors without using the legacy p
     transport.failures.set(`${SERVICE}${operation}`, new Error('Fault'));
     const actor = startGatewayRun(
       {
-        reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
+        reader: gatewayReader(
+          transport,
+          new FakeSkeletonCache(),
+          clock.schedule,
+          transport.host.feed,
+        ),
       },
       new FakeClock().schedule,
       {seed: SEED},
@@ -294,7 +309,12 @@ test('content and first-log deadlines use the injected clock', async () => {
   const fixture = storeRunFixture();
   const clock = new FakeClock();
   const transport = new FakeRunTransport(fixture);
-  const reader = gatewayReader(transport, new FakeSkeletonCache(), clock.schedule);
+  const reader = gatewayReader(
+    transport,
+    new FakeSkeletonCache(),
+    clock.schedule,
+    transport.host.feed,
+  );
   transport.held.add(`${SERVICE}GetBlobs`);
   transport.held.add(`${SERVICE}TailStream`);
   const actor = startGatewayRun({reader}, clock.schedule, {seed: SEED});
@@ -319,7 +339,12 @@ test('each objective hash is attempted once even when content fails', async () =
   transport.failures.set(`${SERVICE}GetBlobs`, new Error('Fault'));
   const actor = startGatewayRun(
     {
-      reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
+      reader: gatewayReader(
+        transport,
+        new FakeSkeletonCache(),
+        clock.schedule,
+        transport.host.feed,
+      ),
     },
     clock.schedule,
     {seed: SEED},
@@ -363,35 +388,34 @@ test.each([
   const clock = new FakeClock();
   const actor = startGatewayRun(
     {
-      reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
+      reader: gatewayReader(
+        transport,
+        new FakeSkeletonCache(),
+        clock.schedule,
+        transport.host.feed,
+      ),
     },
     clock.schedule,
     {seed: SEED},
   );
   await reached(actor, snapshot => snapshot.context.load?.complete === true);
-  await transport.called(`${SERVICE}WatchRuns`);
-  transport.observe(
-    create(WatchRunsResponseSchema, {
-      runId: 'other',
-      liveness: RunLiveness.INTERRUPTED,
-      head: {epoch: 1, process: {epoch: 1}},
-    }),
-  );
-  transport.observe(
-    create(WatchRunsResponseSchema, {
-      runId: 'run-a',
-      liveness: RunLiveness.ALIVE,
-      head: {epoch: 1, process: {epoch: 1}},
-    }),
-  );
+  await transport.host.watched();
+  transport.observe({
+    runId: 'other',
+    liveness: RunLiveness.INTERRUPTED,
+    head: {epoch: 1, process: {epoch: 1}},
+  });
+  transport.observe({
+    runId: 'run-a',
+    liveness: RunLiveness.ALIVE,
+    head: {epoch: 1, process: {epoch: 1}},
+  });
   await reached(actor, snapshot => snapshot.context.hint?.value === RunLiveness.ALIVE);
-  transport.observe(
-    create(WatchRunsResponseSchema, {
-      runId: 'run-a',
-      liveness: RunLiveness.INTERRUPTED,
-      head: {epoch: 1, process: {epoch: 1}},
-    }),
-  );
+  transport.observe({
+    runId: 'run-a',
+    liveness: RunLiveness.INTERRUPTED,
+    head: {epoch: 1, process: {epoch: 1}},
+  });
   await reached(actor, snapshot => snapshot.context.hint?.value === RunLiveness.INTERRUPTED);
   const {load, hint, ui} = actor.getSnapshot().context;
   if (!load) throw new Error('loaded run required');
@@ -407,11 +431,7 @@ test.each([
   expect(actor.getSnapshot().context.error).toBeNull();
   actor.stop();
   await Promise.resolve();
-  expect(
-    transport.calls
-      .filter(call => call.method.endsWith('WatchRuns'))
-      .every(call => call.signal.aborted),
-  ).toBe(true);
+  expect(transport.host.watching).toBe(0);
 });
 
 test.each([
@@ -424,7 +444,12 @@ test.each([
     const clock = new FakeClock();
     const actor = startGatewayRun(
       {
-        reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
+        reader: gatewayReader(
+          transport,
+          new FakeSkeletonCache(),
+          clock.schedule,
+          transport.host.feed,
+        ),
       },
       clock.schedule,
       {seed: SEED},
@@ -436,13 +461,13 @@ test.each([
         snapshot.matches({active: {content: 'idle'}}) &&
         Object.keys(snapshot.context.text).length > 0,
     );
-    expect(clock.pending).toBe(1);
+    // The reader holds no liveness lease: the host's subscription does.
+    expect(clock.pending).toBe(0);
     const through = actor.getSnapshot().context.load?.skeleton.throughSeq;
     if (failure === 'closed') transport.close(`${SERVICE}Tail`);
     else transport.fail(`${SERVICE}Tail`, new Error('connection lost'));
     // The retry timer is armed only after the stream's outcome has been consumed.
-    // The liveness lease holds one timer; the retry is the second.
-    await reached(actor, () => (kind === 'live' ? clock.pending > 1 : true));
+    await reached(actor, () => (kind === 'live' ? clock.pending > 0 : true));
     expect(actor.getSnapshot().context.failure === undefined).toBe(kind === 'short');
     expect(actor.getSnapshot().context.load?.skeleton.throughSeq).toBe(through);
     if (kind === 'live') {
@@ -468,7 +493,12 @@ test.each([
   if (method === 'Skeleton') transport.fail(`${SERVICE}Skeleton`, missing);
   const actor = startGatewayRun(
     {
-      reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
+      reader: gatewayReader(
+        transport,
+        new FakeSkeletonCache(),
+        clock.schedule,
+        transport.host.feed,
+      ),
     },
     clock.schedule,
     {seed: SEED},
@@ -482,7 +512,7 @@ test.each([
   await reached(actor, final);
   const reads = () => transport.calls.filter(call => /\/(Skeleton|Tail)$/.test(call.method)).length;
   const before = reads();
-  // WatchRuns keeps reporting the link as healthy; the reader's answer stays final.
+  // The host keeps reporting the link as healthy; the reader's answer stays final.
   for (let tick = 0; tick < 5; tick += 1) {
     clock.advanceBy(1000);
     await Promise.resolve();
@@ -493,18 +523,18 @@ test.each([
   expect(clock.pending).toBe(0);
 });
 
-test.each([
-  'deadline',
-  'closed',
-  'error',
-] as const)('liveness %s recovers independently and cancels with the reader', async failure => {
+test('the host losing its stream is a failure that recovers independently and ends with the reader', async () => {
   const fixture = storeRunFixture('live');
   const clock = new FakeClock();
   const transport = new FakeRunTransport(fixture);
-  if (failure === 'deadline') transport.held.add(`${SERVICE}WatchRuns`);
   const actor = startGatewayRun(
     {
-      reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
+      reader: gatewayReader(
+        transport,
+        new FakeSkeletonCache(),
+        clock.schedule,
+        transport.host.feed,
+      ),
     },
     clock.schedule,
     {seed: SEED},
@@ -514,28 +544,22 @@ test.each([
     snapshot =>
       snapshot.context.load?.complete === true && Object.keys(snapshot.context.text).length > 0,
   );
-  await transport.called(`${SERVICE}WatchRuns`);
-  if (failure === 'deadline') clock.advanceBy(30000);
-  else if (failure === 'closed') transport.close(`${SERVICE}WatchRuns`);
-  else transport.fail(`${SERVICE}WatchRuns`, new Error('offline'));
+  await transport.host.watched();
+  transport.host.lose();
   await reached(actor, snapshot => snapshot.context.failure !== undefined);
-  transport.release(`${SERVICE}WatchRuns`);
-  transport.recover(`${SERVICE}WatchRuns`);
-  clock.advanceBy(1000);
+  transport.host.restore();
   await reached(actor, snapshot => snapshot.context.failure === undefined);
-  transport.observe(
-    create(WatchRunsResponseSchema, {
-      runId: 'run-a',
-      liveness: RunLiveness.INTERRUPTED,
-      head: {epoch: 1, process: {epoch: 1}},
-    }),
-  );
+  transport.observe({
+    runId: 'run-a',
+    liveness: RunLiveness.INTERRUPTED,
+    head: {epoch: 1, process: {epoch: 1}},
+  });
   await reached(actor, snapshot => snapshot.context.hint?.value === RunLiveness.INTERRUPTED);
-  transport.observe(create(WatchRunsResponseSchema, {runId: 'run-a', removed: true}));
+  transport.observe({runId: 'run-a', removed: true});
   await reached(actor, snapshot => snapshot.context.hint === undefined);
   actor.stop();
   expect(clock.pending).toBe(0);
-  expect(transport.calls.filter(call => call.method.endsWith('WatchRuns'))).toHaveLength(2);
+  expect(transport.host.watching).toBe(0);
 });
 
 test('reply attachments load through the same verified content owner as objectives', async () => {
@@ -574,7 +598,12 @@ test('reply attachments load through the same verified content owner as objectiv
   const clock = new FakeClock();
   const actor = startGatewayRun(
     {
-      reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
+      reader: gatewayReader(
+        transport,
+        new FakeSkeletonCache(),
+        clock.schedule,
+        transport.host.feed,
+      ),
     },
     clock.schedule,
     {seed: SEED},
@@ -603,36 +632,22 @@ test('reply attachments load through the same verified content owner as objectiv
 async function expireAndRestoreWatch(
   actor: ReturnType<typeof startGatewayRun>,
   transport: FakeRunTransport,
-  clock: FakeClock,
-  idle: number,
 ) {
-  transport.held.add(`${SERVICE}WatchRuns`);
-  clock.advanceBy(idle);
-  expect(actor.getSnapshot().context.failure?.kind).toBe('transport');
-  transport.release(`${SERVICE}WatchRuns`);
-  // The retries back off while the channel is down, and a stream needs a few turns to deliver:
-  // step through the waits a second at a time, letting the streams run between steps.
-  const restored = () => {
-    const {context} = actor.getSnapshot();
-    return context.failure === undefined && context.hint?.epoch === 1;
-  };
-  for (let step = 0; step < 120 && !restored(); step += 1) {
-    clock.advanceBy(1000);
-    for (let turn = 0; turn < 20; turn += 1) await Promise.resolve();
-  }
+  transport.host.lose();
+  await reached(actor, snapshot => snapshot.context.failure?.kind === 'transport');
+  transport.host.restore();
   await reached(
     actor,
     snapshot => snapshot.context.failure === undefined && snapshot.context.hint?.epoch === 1,
   );
 }
 
-test('property: quiet logs and peer failures stay scoped to their stream for any idle interval', async () => {
+test('property: quiet logs and peer failures stay scoped to their stream across the host losing its stream', async () => {
   const fixture = storeRunFixture('live');
   await fc.assert(
     fc.asyncProperty(
-      fc.integer({min: 30000, max: 3600000}),
       fc.constantFrom('Not found', 'Unsupported by an older host', 'Connection closed'),
-      async (idle, error) => {
+      async error => {
         const transport = new FakeRunTransport({
           ...fixture,
           streams: {...fixture.streams, quiet: new Uint8Array()},
@@ -640,7 +655,12 @@ test('property: quiet logs and peer failures stay scoped to their stream for any
         const clock = new FakeClock();
         const actor = startGatewayRun(
           {
-            reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
+            reader: gatewayReader(
+              transport,
+              new FakeSkeletonCache(),
+              clock.schedule,
+              transport.host.feed,
+            ),
           },
           clock.schedule,
           {seed: SEED},
@@ -652,17 +672,15 @@ test('property: quiet logs and peer failures stay scoped to their stream for any
               snapshot.context.load?.complete === true &&
               Object.keys(snapshot.context.text).length > 0,
           );
-          transport.observe(
-            create(WatchRunsResponseSchema, {
-              runId: SEED.identity.runId,
-              liveness: RunLiveness.ALIVE,
-              head: {epoch: 1},
-            }),
-          );
+          transport.observe({
+            runId: SEED.identity.runId,
+            liveness: RunLiveness.ALIVE,
+            head: {epoch: 1},
+          });
           await reached(actor, snapshot => snapshot.context.hint?.epoch === 1);
           actor.send({type: 'ui', action: {type: 'select-stream', streamId: 'quiet'}});
           await transport.called(`${SERVICE}TailStream`);
-          await expireAndRestoreWatch(actor, transport, clock, idle);
+          await expireAndRestoreWatch(actor, transport);
           expect(actor.getSnapshot().context.error).toBeNull();
           expect(actor.getSnapshot().context.ui.logProblem).toBeUndefined();
           expect(actor.getSnapshot().matches({active: {logs: 'following'}})).toBe(true);
@@ -672,7 +690,7 @@ test('property: quiet logs and peer failures stay scoped to their stream for any
           transport.recover(`${SERVICE}TailStream`);
           actor.send({type: 'ui', action: {type: 'select-stream', streamId: 'quiet'}});
           expect(actor.getSnapshot().context.ui.logProblem).toBeUndefined();
-          await expireAndRestoreWatch(actor, transport, clock, idle);
+          await expireAndRestoreWatch(actor, transport);
           expect(actor.getSnapshot().context.error).toBeNull();
           actor.send({type: 'ui', action: {type: 'select-stream', streamId: 'build-log'}});
           await reached(actor, snapshot => snapshot.context.ui.views['build-log'] !== undefined);
@@ -710,7 +728,14 @@ test('regression: native turn content crosses the real reader for every stream s
     });
     const clock = new FakeClock();
     const actor = startGatewayRun(
-      {reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule)},
+      {
+        reader: gatewayReader(
+          transport,
+          new FakeSkeletonCache(),
+          clock.schedule,
+          transport.host.feed,
+        ),
+      },
       clock.schedule,
       {seed: SEED},
     );
@@ -830,7 +855,14 @@ test('an incomplete native transcript releases its reader on close or the first-
     });
     const clock = new FakeClock();
     const actor = startGatewayRun(
-      {reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule)},
+      {
+        reader: gatewayReader(
+          transport,
+          new FakeSkeletonCache(),
+          clock.schedule,
+          transport.host.feed,
+        ),
+      },
       clock.schedule,
       {seed: SEED},
     );

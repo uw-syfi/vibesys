@@ -3,7 +3,7 @@ import {mkdirSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {create, toBinary} from '@bufbuild/protobuf';
 import {expect, type Page, test} from '@playwright/test';
-import {RecordSchema, RunLiveness, WatchRunsResponseSchema} from '@vibesys/proto';
+import {RecordSchema, RunEntrySchema, RunLiveness} from '@vibesys/proto';
 import {fixtureNamed, storeRunFixture} from '@vibesys/run-fixtures';
 import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
 import {screenCheck} from './checks/screen-check.js';
@@ -59,9 +59,8 @@ for (const width of [1000, 1440, 1920]) {
       ).toBeVisible();
       const hint = [
         ...toBinary(
-          WatchRunsResponseSchema,
-          create(WatchRunsResponseSchema, {
-            runId: 'run-a',
+          RunEntrySchema,
+          create(RunEntrySchema, {
             liveness: RunLiveness.INTERRUPTED,
             head: {process: {epoch: 1}},
           }),

@@ -49,18 +49,6 @@
     }
   },
   {
-    "name": "WatchRunsRequest valid",
-    "message": "WatchRunsRequest",
-    "value": {}
-  },
-  {
-    "name": "WatchRunsResponse valid",
-    "message": "WatchRunsResponse",
-    "value": {
-      "runId": "run-1"
-    }
-  },
-  {
     "name": "GetBlobsRequest valid",
     "message": "GetBlobsRequest",
     "value": {
@@ -102,21 +90,6 @@
     "value": {
       "data": "eA==",
       "nextOffset": "1"
-    }
-  },
-  {
-    "name": "WatchRunsResponse variant 13",
-    "message": "WatchRunsResponse",
-    "value": {
-      "initialComplete": true
-    }
-  },
-  {
-    "name": "WatchRunsResponse variant 14",
-    "message": "WatchRunsResponse",
-    "value": {
-      "runId": "run-1",
-      "removed": true
     }
   },
   {
@@ -441,42 +414,6 @@
     "field": "sessions"
   },
   {
-    "name": "WatchRunsResponse.runId 45",
-    "message": "WatchRunsResponse",
-    "value": {
-      "runId": "../escape"
-    },
-    "field": "run_id"
-  },
-  {
-    "name": "WatchRunsResponse.liveness 46",
-    "message": "WatchRunsResponse",
-    "value": {
-      "runId": "run-1",
-      "liveness": 99
-    },
-    "field": "liveness"
-  },
-  {
-    "name": "WatchRunsResponse.initialComplete 47",
-    "message": "WatchRunsResponse",
-    "value": {
-      "runId": "run-1",
-      "initialComplete": true
-    },
-    "field": "watch_runs.shape"
-  },
-  {
-    "name": "WatchRunsResponse.removed 48",
-    "message": "WatchRunsResponse",
-    "value": {
-      "runId": "run-1",
-      "removed": true,
-      "liveness": 1
-    },
-    "field": "watch_runs.shape"
-  },
-  {
     "name": "GetBlobsRequest.sha256 49",
     "message": "GetBlobsRequest",
     "value": {
@@ -617,46 +554,6 @@
     "field": "tail_stream.offset"
   },
   {
-    "name": "WatchRunsResponse native head",
-    "message": "WatchRunsResponse",
-    "value": {
-      "runId": "run-1",
-      "head": {
-        "lifecycle": {
-          "running": {}
-        },
-        "strategy": "test"
-      },
-      "liveness": 1
-    }
-  },
-  {
-    "name": "WatchRunsResponse native liveness required",
-    "message": "WatchRunsResponse",
-    "value": {
-      "runId": "run-1",
-      "head": {
-        "lifecycle": {
-          "running": {}
-        },
-        "strategy": "test"
-      }
-    },
-    "field": "watch_runs.shape"
-  },
-  {
-    "name": "WatchRunsResponse nested required lifecycle",
-    "message": "WatchRunsResponse",
-    "value": {
-      "runId": "run-1",
-      "head": {
-        "strategy": "test"
-      },
-      "liveness": 1
-    },
-    "field": "head.lifecycle"
-  },
-  {
     "name": "TailRequest upper sequence boundary",
     "message": "TailRequest",
     "value": {
@@ -710,31 +607,6 @@
       "committedSeq": "9223372036854775807"
     },
     "field": "committed_seq"
-  },
-  {
-    "name": "WatchRuns heartbeat marker",
-    "message": "WatchRunsResponse",
-    "value": {
-      "heartbeat": true
-    }
-  },
-  {
-    "name": "WatchRuns heartbeat cannot carry an entry",
-    "message": "WatchRunsResponse",
-    "value": {
-      "heartbeat": true,
-      "runId": "run-1"
-    },
-    "field": "watch_runs.shape"
-  },
-  {
-    "name": "WatchRuns marker kinds are exclusive",
-    "message": "WatchRunsResponse",
-    "value": {
-      "heartbeat": true,
-      "initialComplete": true
-    },
-    "field": "watch_runs.shape"
   },
   {
     "name": "SubscribeRequest machine stats",
@@ -1212,5 +1084,127 @@
       }
     },
     "field": "reason"
+  },
+  {
+    "name": "RunEntry without a head",
+    "message": "RunEntry",
+    "value": {}
+  },
+  {
+    "name": "RunEntry unknown liveness",
+    "message": "RunEntry",
+    "value": {
+      "liveness": "RUN_LIVENESS_UNSPECIFIED"
+    }
+  },
+  {
+    "name": "RunEntry liveness",
+    "message": "RunEntry",
+    "value": {
+      "liveness": "RUN_LIVENESS_ENDED"
+    }
+  },
+  {
+    "name": "RunEntry.liveness out of range",
+    "message": "RunEntry",
+    "value": {
+      "liveness": 99
+    },
+    "field": "liveness"
+  },
+  {
+    "name": "RunEntry native head",
+    "message": "RunEntry",
+    "value": {
+      "head": {
+        "lifecycle": {
+          "running": {}
+        },
+        "strategy": "test"
+      },
+      "liveness": "RUN_LIVENESS_ALIVE"
+    }
+  },
+  {
+    "name": "RunEntry native liveness required",
+    "message": "RunEntry",
+    "value": {
+      "head": {
+        "lifecycle": {
+          "running": {}
+        },
+        "strategy": "test"
+      }
+    },
+    "field": "run_entry.head_has_liveness"
+  },
+  {
+    "name": "RunEntry nested required lifecycle",
+    "message": "RunEntry",
+    "value": {
+      "head": {
+        "strategy": "test"
+      },
+      "liveness": "RUN_LIVENESS_ALIVE"
+    },
+    "field": "head.lifecycle"
+  },
+  {
+    "name": "RunEntry project root",
+    "message": "RunEntry",
+    "value": {
+      "projectRoot": "/home/user/project"
+    }
+  },
+  {
+    "name": "RunEntry.projectRoot empty",
+    "message": "RunEntry",
+    "value": {
+      "projectRoot": ""
+    },
+    "field": "project_root"
+  },
+  {
+    "name": "RunEntry.projectRoot relative",
+    "message": "RunEntry",
+    "value": {
+      "projectRoot": "project"
+    },
+    "field": "project_root"
+  },
+  {
+    "name": "SubscribeRequest runs",
+    "message": "SubscribeRequest",
+    "value": {
+      "runs": {}
+    }
+  },
+  {
+    "name": "SubscribeResponse runs entry",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": "run-1",
+        "runs": {
+          "head": {
+            "lifecycle": {
+              "running": {}
+            },
+            "strategy": "test"
+          },
+          "liveness": "RUN_LIVENESS_ALIVE"
+        }
+      }
+    }
+  },
+  {
+    "name": "SubscribeResponse entry without a value",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": "run-1"
+      }
+    },
+    "field": "value"
   }
 ]

@@ -110,6 +110,11 @@ export interface MachinesState {
   readonly actionProblem: ActionProblem | null;
   /** What each ready machine has set up and how its clusters tested, by machine. */
   readonly places: Readonly<Record<HostKey, Places>>;
+  /**
+   * The machines checked again because their host streams though their check found them
+   * unreachable, for as long as they keep streaming: one more check per spell of streaming.
+   */
+  readonly rechecked: readonly HostKey[];
   readonly lastToken: number;
 }
 
@@ -121,6 +126,8 @@ export type MachinesAction =
   | PlacesAction
   /** Check the machine again, signing in first when it is waiting for that. */
   | {readonly type: 'reconnect'; readonly host: HostKey}
+  /** The hosts whose stream delivers now: each one whose check failed is checked again, once. */
+  | {readonly type: 'delivering'; readonly hosts: readonly HostKey[]}
   | {
       readonly type: 'listed';
       readonly token: number;
@@ -217,6 +224,7 @@ export function initialMachines(): MachinesStep {
     pending: null,
     actionProblem: null,
     places: {},
+    rechecked: [],
     lastToken: 1,
   };
   return {state, requests: [{kind: 'list', token: 1}]};
@@ -484,6 +492,45 @@ function reconnect(state: MachinesState, host: HostKey): MachinesStep {
   return {state: {...state, machines, lastToken: token}, requests: [{kind: 'report', token, host}]};
 }
 
+/**
+ * The hosts to check again: those that deliver readings though their last check found them
+ * unreachable (the check was wrong, or the host has come back), and have not been asked since they
+ * began delivering. One more check per spell of delivering, so a check that fails again is not
+ * repeated for as long as the host delivers.
+ */
+export function hostsToRecheck(
+  machines: readonly Machine[],
+  delivering: ReadonlySet<HostKey>,
+  asked: ReadonlySet<HostKey>,
+): readonly HostKey[] {
+  return machines
+    .filter(
+      each =>
+        machineStatus(each) === 'unavailable' && delivering.has(each.host) && !asked.has(each.host),
+    )
+    .map(each => each.host);
+}
+
+function delivering(state: MachinesState, hosts: readonly HostKey[]): MachinesStep {
+  const reached = new Set(hosts);
+  // A host that stopped delivering starts a new spell when it delivers again.
+  const asked = state.rechecked.filter(host => reached.has(host));
+  let next: MachinesState = {...state, rechecked: asked};
+  const requests: MachinesStep['requests'][number][] = [];
+  for (const host of hostsToRecheck(state.machines, reached, new Set(asked))) {
+    const step = reconnect(next, host);
+    // A check that could not start (one is under way, or a removal is awaited) is not owed.
+    if (step.requests.length === 0) continue;
+    next = {...step.state, rechecked: [...next.rechecked, host]};
+    requests.push(...step.requests);
+  }
+  const unchanged =
+    requests.length === 0 &&
+    next.rechecked.length === state.rechecked.length &&
+    next.rechecked.every((host, index) => host === state.rechecked[index]);
+  return unchanged ? same(state) : {state: next, requests};
+}
+
 function startPending(
   state: MachinesState,
   kind: 'remove' | 'sign-in',
@@ -663,6 +710,8 @@ export function machinesStep(state: MachinesState, action: MachinesAction): Mach
       return done(state, action);
     case 'reconnect':
       return reconnect(state, action.host);
+    case 'delivering':
+      return delivering(state, action.hosts);
     case 'computed':
     case 'test-cluster':
     case 'tested':

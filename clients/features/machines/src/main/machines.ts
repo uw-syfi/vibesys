@@ -8,12 +8,12 @@
  */
 import {
   ConnectionError,
+  type HostRuns,
   type InspectedCandidate,
   isHostUnsupported,
   type RegistryClusters,
   type RegistryRunCatalog,
   type RegistrySetup,
-  type RunWatch,
 } from '@vibesys/connection';
 import type {MachineDescription} from '@vibesys/hosts';
 import {type HostId, hostFromKey, hostKey, hostLabel} from '@vibesys/hosts';
@@ -59,8 +59,8 @@ export interface MachinesMainDeps {
   readonly setup?: RegistrySetup;
   /** Cluster changes. Required when using the gateway for put, remove, and test. */
   readonly clusters?: RegistryClusters;
-  /** Live runs from WatchRuns. Required when using the gateway for a report. */
-  readonly runs?: Pick<RunWatch, 'live'>;
+  /** Live runs from the runs subscription. Required when using the gateway for a report. */
+  readonly runs?: Pick<HostRuns, 'alive'>;
   /** The selection the caller still owns. A change across the await is stale. */
   readonly selectionRevision?: (id: HostId) => bigint;
   /** Host logins when using the gateway. The actor outlives the panel that started one. */
@@ -147,7 +147,7 @@ export class MachinesMain {
         expectedCheckout,
         new AbortController().signal,
       );
-      const live = await this.#runs().live(id);
+      const live = await this.#runs().alive(hostKey(id), new AbortController().signal);
       return {kind: 'ready', facts: {...facts, runs: {...facts.runs, live}}};
     } catch (error) {
       return unreachable(error);
@@ -249,11 +249,11 @@ export class MachinesMain {
     return setup;
   }
 
-  /** WatchRuns. A missing port is a wiring error, not a reason to use the helper's count. */
-  #runs(): Pick<RunWatch, 'live'> {
+  /** The runs subscription. A missing port is a wiring error, not a reason to use the helper's count. */
+  #runs(): Pick<HostRuns, 'alive'> {
     const runs = this.#deps.runs;
     if (runs === undefined) {
-      throw new Error('the run watch is missing');
+      throw new Error('the host runs are missing');
     }
     return runs;
   }

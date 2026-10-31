@@ -29,7 +29,7 @@ func runProject(id, dir string) (string, error) {
 		}
 		at = filepath.Dir(at)
 	}
-	if err := protovalidate.Validate(&apiv1.WatchRunsResponse{RunId: id, ProjectRoot: proto.String(at)}); err != nil {
+	if err := protovalidate.Validate(&apiv1.RunEntry{ProjectRoot: proto.String(at)}); err != nil {
 		return "", err
 	}
 	return at, nil

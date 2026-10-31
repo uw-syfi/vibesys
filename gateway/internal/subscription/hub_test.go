@@ -556,6 +556,7 @@ func TestMinimumIntervalConflatesEachStream(t *testing.T) {
 		source := topic(script(func(ctx context.Context, sink subscription.Sink[stats]) error {
 			for second := int64(1); ; second++ {
 				sink.Put("machine", value(second))
+				sink.Synced()
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
@@ -580,11 +581,83 @@ func TestMinimumIntervalConflatesEachStream(t *testing.T) {
 	})
 }
 
+// The floor spaces the changes after a snapshot; the snapshot itself is never held back,
+// however many keys it has and however the source splits its Puts from its Synced.
+func TestTheSnapshotIsNotHeldByTheMinimumInterval(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		limited := policy
+		limited.MinInterval = 200 * time.Millisecond
+		limited.MaxKeys = 8
+		source := topic(script(func(ctx context.Context, sink subscription.Sink[stats]) error {
+			for _, key := range []string{"a", "b", "c"} {
+				sink.Put(key, value(1))
+				runtime.Gosched()
+			}
+			sink.Synced()
+			<-ctx.Done()
+			return ctx.Err()
+		}))
+		source.Policy = limited
+		stream := subscriptiontest.Open(subscription.New(clock.System{}, source), 1, request)
+		defer stream.Stop()
+		synctest.Wait()
+		entries, synced, _, _ := subscriptiontest.Arms(stream.Received())
+		if entries != 3 || synced != 1 {
+			t.Fatalf("%d entries and %d synced frames with no time passed, want 3 and 1", entries, synced)
+		}
+	})
+}
+
+// A change right behind a flush waits out the floor, and one after a quiet spell does not.
+func TestAQuietStreamIsAnsweredAtOnceAndABusyOneNoFasterThanTheFloor(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		limited := policy
+		limited.MinInterval = 200 * time.Millisecond
+		changes := make(chan int64)
+		source := topic(script(func(ctx context.Context, sink subscription.Sink[stats]) error {
+			sink.Put("machine", value(1))
+			sink.Synced()
+			for {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case second := <-changes:
+					sink.Put("machine", value(second))
+				}
+			}
+		}))
+		source.Policy = limited
+		stream := subscriptiontest.Open(subscription.New(clock.System{}, source), 1, request)
+		defer stream.Stop()
+		synctest.Wait()
+		if entries, _, _, _ := subscriptiontest.Arms(stream.Received()); entries != 1 {
+			t.Fatalf("%d entries before any change", entries)
+		}
+		changes <- 2
+		synctest.Wait()
+		if entries, _, _, _ := subscriptiontest.Arms(stream.Received()); entries != 1 {
+			t.Fatalf("a change inside the floor was sent at once: %d entries", entries)
+		}
+		time.Sleep(limited.MinInterval)
+		synctest.Wait()
+		if entries, _, _, _ := subscriptiontest.Arms(stream.Received()); entries != 2 {
+			t.Fatalf("the change was not sent once the floor passed: %d entries", entries)
+		}
+		time.Sleep(10 * limited.MinInterval)
+		changes <- 3
+		synctest.Wait()
+		if entries, _, _, _ := subscriptiontest.Arms(stream.Received()); entries != 3 {
+			t.Fatalf("a change after a quiet spell was held: %d entries", entries)
+		}
+	})
+}
+
 // hot is a source that writes its one key every period, forever.
 func hot(period time.Duration) subscription.Source[stats] {
 	return script(func(ctx context.Context, sink subscription.Sink[stats]) error {
 		for second := int64(1); ; second++ {
 			sink.Put("machine", value(second))
+			sink.Synced()
 			select {
 			case <-ctx.Done():
 				return ctx.Err()

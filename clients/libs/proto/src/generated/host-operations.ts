@@ -417,4 +417,5 @@ export const watchBudgets = Object.freeze({
 export const subscribeTiming = Object.freeze({heartbeatMs: 5000, leaseMs: 30000} as const);
 export const topicPolicies = Object.freeze({
   machineStats: Object.freeze({cadenceMs: 10000, staleAfterMs: 30000, firstFrameMs: 15000, minIntervalMs: 0, maxKeys: 1, maxValueBytes: 16384} as const),
+  runs: Object.freeze({cadenceMs: 0, staleAfterMs: 0, firstFrameMs: 30000, minIntervalMs: 200, maxKeys: 2048, maxValueBytes: 262144} as const),
 } as const);

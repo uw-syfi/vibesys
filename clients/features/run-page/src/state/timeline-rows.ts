@@ -15,6 +15,7 @@ import type {
 } from '@vibesys/run-state/candidates';
 import {figureCell, vsInputCell} from './idea-words.js';
 import {stepLabel, stepTitle} from './names.js';
+import {vsInputOf} from './objective-reading.js';
 import {inputValueOf} from './performance.js';
 import {
   NO_PAUSES,
@@ -184,9 +185,10 @@ function figureCells(
   item: Candidate,
   inputKnown: boolean,
   candidates: readonly Candidate[],
+  vsInput: (idea: Candidate) => number | null,
 ): Pick<TimelineRow, 'figure' | 'figureTitle'> {
   if (item.outcome === 'running') return {figure: ''};
-  const {figure, figureTitle} = figureCell(item, inputKnown, candidates, vsInputCell);
+  const {figure, figureTitle} = figureCell(item, inputKnown, candidates, vsInputCell, vsInput);
   return figureTitle === undefined ? {figure} : {figure, figureTitle};
 }
 
@@ -196,6 +198,7 @@ function rowOf(
   inputKnown: boolean,
   candidates: readonly Candidate[],
   pauses: readonly QuotaPauseSpan[],
+  vsInput: (idea: Candidate) => number | null,
 ): TimelineRow {
   const steps = item.attempts.flatMap(attempt => attempt.steps);
   return {
@@ -204,7 +207,7 @@ function rowOf(
     start: item.startedAt,
     end: endOf(item.startedAt, item.endedAt, now),
     outcome: OUTCOME[item.outcome],
-    ...figureCells(item, inputKnown, candidates),
+    ...figureCells(item, inputKnown, candidates, vsInput),
     segments: stepSegments(steps, now, pauses),
     lane: false,
   };
@@ -332,6 +335,7 @@ export function timelineRows(
 ): TimelineRows {
   const all = model.candidates.candidates;
   const inputKnown = inputValueOf(all) !== null;
+  const vsInput = vsInputOf(model);
   const reached = Math.max(
     clock.now ?? clock.start,
     ...all.map(item => endOf(item.startedAt, item.endedAt, clock.now)),
@@ -340,7 +344,7 @@ export function timelineRows(
   const to = Math.max(reached, from + 1);
   const view = range === 'all' ? {from, to} : {from: Math.max(from, to - RANGE_SECONDS[range]), to};
   const inRange = ordered(all)
-    .map(item => rowOf(item, clock.now, inputKnown, all, model.pauses))
+    .map(item => rowOf(item, clock.now, inputKnown, all, model.pauses, vsInput))
     .filter(row => row.end >= view.from && row.start <= view.to);
   const failed = inRange.filter(row => row.outcome === 'err');
   const fold = !expanded && failed.length > FAILED_DENSE;

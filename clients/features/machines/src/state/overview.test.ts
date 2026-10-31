@@ -9,11 +9,14 @@ import type {
   SlurmClusterSettings,
 } from '@vibesys/ipc';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
+import {RETRYABLE_REASONS, TERMINAL_REASONS} from '@vibesys/subscription';
+import fc from 'fast-check';
 import {
   cardAction,
   cardStatus,
   clockWord,
   hardwareLine,
+  hostsToRecheck,
   initialMachines,
   type Machine,
   type MachinesAction,
@@ -25,6 +28,7 @@ import {
   machinesAttention,
   machinesStep,
   placeRows,
+  type StatsView,
   statusWord,
 } from './index.js';
 
@@ -368,5 +372,123 @@ describe('reconnect and load', () => {
       result: {ok: true, value: {kind: 'unavailable', detail: 'timed out'}},
     }).state;
     expect(machinesAttention(down)).toBe('unavailable');
+  });
+});
+
+describe('one status for a card, whatever its check and its stream each say', () => {
+  const REPORTS: readonly (MachineReport | 'checking')[] = [
+    {kind: 'ready', facts: FACTS(2, 1)},
+    'checking',
+    {kind: 'sign-in', detail: 'waiting'},
+    {kind: 'unavailable', detail: 'deadline exceeded after 10 s'},
+    {kind: 'checkout-not-found', detail: 'gone'},
+    {kind: 'needs-update', facts: FACTS(0, 0)},
+  ];
+  const machineWith = (report: MachineReport | 'checking'): Machine => {
+    const machine = ready(['ssh:host-a']).machines[0] as Machine;
+    return report === 'checking'
+      ? {...machine, report: null, checking: 3}
+      : {...machine, report, checking: null};
+  };
+  const VIEWS: fc.Arbitrary<StatsView> = fc.oneof(
+    fc.constant({kind: 'waiting'} as const),
+    fc.constant({kind: 'values', gauges: [], stale: null} as const),
+    fc.boolean().map(
+      reconnecting =>
+        ({
+          kind: 'values',
+          gauges: [],
+          stale: {valueAt: 1, reconnecting},
+        }) as const satisfies StatsView,
+    ),
+    fc
+      .constantFrom(...RETRYABLE_REASONS, ...TERMINAL_REASONS)
+      .map(reason => ({kind: 'failed', reason, retry: true}) as const satisfies StatsView),
+  );
+  const delivering = (view: StatsView) => view.kind === 'values' && view.stale === null;
+
+  test('a host that is delivering is never called unreachable, nor offered Reconnect, whatever its check found', () => {
+    fc.assert(
+      fc.property(fc.constantFrom(...REPORTS), VIEWS, (report, view) => {
+        const machine = machineWith(report);
+        if (!delivering(view)) return;
+        expect(cardStatus(machine, view).word).not.toBe(problemWord('unavailable'));
+        expect(cardAction(machine, view)).not.toBe('reconnect');
+      }),
+    );
+  });
+
+  test('the rail folds what the card folds: a card that says Online leaves the rail nothing to warn of, and a host adds no warning of its own', () => {
+    fc.assert(
+      fc.property(fc.constantFrom(...REPORTS), VIEWS, (report, view) => {
+        const machine = machineWith(report);
+        const state = {...ready(['ssh:host-a']), machines: [machine]};
+        const reached = delivering(view) ? new Set([machine.host]) : new Set<string>();
+        const attention = machinesAttention(state, reached);
+        if (cardStatus(machine, view).word === 'Online') expect(attention).toBeNull();
+        // What the stream knows only takes warnings away.
+        expect(attention === null || attention === machinesAttention(state)).toBe(true);
+        // What only the check can know is still warned of while the host delivers.
+        if (machineStatus(machine) !== 'unavailable')
+          expect(attention).toBe(machinesAttention(state));
+      }),
+    );
+  });
+
+  test('property: a delivering host is checked again once, only when its check found it unreachable', () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom(...REPORTS),
+        fc.boolean(),
+        fc.boolean(),
+        (report, reached, asked) => {
+          const machine = machineWith(report);
+          const again = hostsToRecheck(
+            [machine],
+            reached ? new Set([machine.host]) : new Set(),
+            asked ? new Set([machine.host]) : new Set(),
+          );
+          const owed = reached && !asked && machineStatus(machine) === 'unavailable';
+          expect(again).toEqual(owed ? [machine.host] : []);
+        },
+      ),
+    );
+  });
+
+  test('the chip and the action never contradict: an online card has nothing to fix, and a fix is never offered beside it', () => {
+    fc.assert(
+      fc.property(fc.constantFrom(...REPORTS), VIEWS, (report, view) => {
+        const machine = machineWith(report);
+        const status = cardStatus(machine, view);
+        const action = cardAction(machine, view);
+        if (status.word === 'Online') expect(action).toBeNull();
+        // Reconnect is the fix for a connection the card says is down, and only for that.
+        if (action === 'reconnect') {
+          expect(delivering(view)).toBe(false);
+          expect(status.word).not.toBe('Online');
+        }
+      }),
+    );
+  });
+
+  test('what only the check can know still speaks while the host delivers: a sign-in, a missing checkout, an old version', () => {
+    const live: StatsView = {kind: 'values', gauges: [], stale: null};
+    for (const [report, word] of [
+      [{kind: 'sign-in', detail: 'waiting'}, 'Sign in'],
+      [{kind: 'checkout-not-found', detail: 'gone'}, problemWord('checkout-not-found')],
+      [{kind: 'needs-update', facts: FACTS(0, 0)}, problemWord('needs-update')],
+    ] as const) {
+      expect(cardStatus(machineWith(report), live).word).toBe(word);
+    }
+  });
+
+  test('a check that timed out is Online beside live readings, and Unreachable once the readings stop', () => {
+    const timedOut = machineWith({kind: 'unavailable', detail: 'deadline exceeded after 10 s'});
+    expect(cardStatus(timedOut, {kind: 'values', gauges: [], stale: null}).word).toBe('Online');
+    expect(cardAction(timedOut, {kind: 'values', gauges: [], stale: null})).toBeNull();
+    const stale: StatsView = {kind: 'values', gauges: [], stale: {valueAt: 1, reconnecting: false}};
+    expect(cardStatus(timedOut, stale).word).toBe(problemWord('unavailable'));
+    expect(cardAction(timedOut, stale)).toBe('reconnect');
+    expect(cardStatus(timedOut).word).toBe(problemWord('unavailable'));
   });
 });

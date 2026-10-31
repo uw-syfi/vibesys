@@ -2,8 +2,8 @@
 // @generated from file vibesys/api/v1/host.proto (package vibesys.api.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
-import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
+import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
 import { file_buf_validate_validate } from "../../../buf/validate/validate_pb.js";
 import type { HostCallRequestSchema, HostCallResponseSchema } from "./host_call_pb.js";
 import { file_vibesys_api_v1_host_call } from "./host_call_pb.js";
@@ -25,7 +25,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/api/v1/host.proto.
  */
 export const file_vibesys_api_v1_host: GenFile = /*@__PURE__*/
-  fileDesc("Chl2aWJlc3lzL2FwaS92MS9ob3N0LnByb3RvEg52aWJlc3lzLmFwaS52MSI+CgxIZWxsb1JlcXVlc3QSLgoPYXBpX3NjaGVtYV9oYXNoGAEgASgJQhW6SBJyEDIOXlswLTlhLWZdezY0fSQiZAoNSGVsbG9SZXNwb25zZRIuCg9hcGlfc2NoZW1hX2hhc2gYASABKAlCFbpIEnIQMg5eWzAtOWEtZl17NjR9JBIjCg9nYXRld2F5X3ZlcnNpb24YAiABKAlCCrpIB3IFEAEogAIiqwEKC1RhaWxSZXF1ZXN0EjgKBnJ1bl9pZBgBIAEoCUIoukglciMyIV5bQS1aYS16MC05XVtBLVphLXowLTlfLV17MCwxMjd9JBIhCghmcm9tX3NlcRgCIAEoBEIPukgMMgoY//////////9/Ej8KCnNlc3Npb25faWQYAyABKAlCK7pIKHImMiReKFtBLVphLXowLTldW0EtWmEtejAtOV8tXXswLDEyN30pPyQi2gIKDFRhaWxSZXNwb25zZRInCgdyZWNvcmRzGAEgAygMQha6SBOSARAIARCAgEAiCHoGEAEYgIBAEiQKC3Rocm91Z2hfc2VxGAIgASgEQg+6SAwyChj+/////////38SJwoEaGVhZBgDIAEoCzIZLnZpYmVzeXMuc3RvcmUudjEuUnVuSGVhZDrRAbpIzQEaygEKEHRhaWxfaGVhZF9wcmVmaXgSM2hlYWQgbXVzdCBzdGF0ZSBwZXJmb3JtYW5jZSBmb3IgZXhhY3RseSB0aHJvdWdoX3NlcRqAASFoYXModGhpcy5oZWFkKSB8fCAoaGFzKHRoaXMuaGVhZC5jb21taXR0ZWRfc2VxKSAmJiB0aGlzLmhlYWQuY29tbWl0dGVkX3NlcSA9PSB0aGlzLnRocm91Z2hfc2VxICYmIHRoaXMuaGVhZC5wZXJmb3JtYW5jZV9zdGF0ZWQpIo0BCg9Ta2VsZXRvblJlcXVlc3QSOAoGcnVuX2lkGAEgASgJQii6SCVyIzIhXltBLVphLXowLTldW0EtWmEtejAtOV8tXXswLDEyN30kEkAKGGtub3duX2Rlc2NyaXB0b3JzX3NoYTI1NhgCIAMoCUIeukgbkgEYEEAYASISchAyDl5bMC05YS1mXXs2NH0kIlEKDURlc2NyaXB0b3JTZXQSJQoGc2hhMjU2GAEgASgJQhW6SBJyEDIOXlswLTlhLWZdezY0fSQSGQoEZGF0YRgCIAEoDEILukgIegYQARiAgEAi+QIKEFNrZWxldG9uUmVzcG9uc2USIgoIa2V5ZnJhbWUYASABKAxCC7pICHoGEAEYgIBASACIAQESJQoHcmVjb3JkcxgCIAMoDEIUukgRkgEOEICAQCIIegYQARiAgEASJgoNY29tbWl0dGVkX3NlcRgDIAEoBEIPukgMMgoY/v////////9/EiEKCG5leHRfc2VxGAQgASgEQg+6SAwyChj//////////38SEAoIY29tcGxldGUYBSABKAgSRQoIc2Vzc2lvbnMYBiADKAlCM7pIMJIBLRCAgEAYASIlciMyIV5bQS1aYS16MC05XVtBLVphLXowLTlfLV17MCwxMjd9JBJACg9kZXNjcmlwdG9yX3NldHMYByADKAsyHS52aWJlc3lzLmFwaS52MS5EZXNjcmlwdG9yU2V0Qgi6SAWSAQIQQBInCgRoZWFkGAggASgLMhkudmliZXN5cy5zdG9yZS52MS5SdW5IZWFkQgsKCV9rZXlmcmFtZSISChBXYXRjaFJ1bnNSZXF1ZXN0It4FChFXYXRjaFJ1bnNSZXNwb25zZRI7CgZydW5faWQYASABKAlCK7pIKHImMiReKFtBLVphLXowLTldW0EtWmEtejAtOV8tXXswLDEyN30pPyQSJwoEaGVhZBgCIAEoCzIZLnZpYmVzeXMuc3RvcmUudjEuUnVuSGVhZBI3CghsaXZlbmVzcxgDIAEoDjIbLnZpYmVzeXMuYXBpLnYxLlJ1bkxpdmVuZXNzQgi6SAWCAQIQARIPCgdyZW1vdmVkGAQgASgIEhgKEGluaXRpYWxfY29tcGxldGUYBSABKAgSEQoJaGVhcnRiZWF0GAYgASgIEigKDHByb2plY3Rfcm9vdBgHIAEoCUINukgKcggQASiAIDoBL0gAiAEBOrADukisAxqpAwoQd2F0Y2hfcnVucy5zaGFwZRJvcnVuX2lkLCBoZWFkLCBsaXZlbmVzcywgcmVtb3ZlZCBhbmQgaW5pdGlhbF9jb21wbGV0ZSBtdXN0IGZvcm0gYW4gZW50cnksIHRvbWJzdG9uZSwgaW5pdGlhbCBtYXJrZXIgb3IgaGVhcnRiZWF0GqMCKHRoaXMuaW5pdGlhbF9jb21wbGV0ZSB8fCB0aGlzLmhlYXJ0YmVhdCkgPyAoISh0aGlzLmluaXRpYWxfY29tcGxldGUgJiYgdGhpcy5oZWFydGJlYXQpICYmIHRoaXMucnVuX2lkID09ICcnICYmICFoYXModGhpcy5oZWFkKSAmJiB0aGlzLmxpdmVuZXNzID09IDAgJiYgIXRoaXMucmVtb3ZlZCkgOiAodGhpcy5ydW5faWQgIT0gJycgJiYgKHRoaXMucmVtb3ZlZCA/ICghaGFzKHRoaXMuaGVhZCkgJiYgdGhpcy5saXZlbmVzcyA9PSAwKSA6ICghaGFzKHRoaXMuaGVhZCkgfHwgdGhpcy5saXZlbmVzcyAhPSAwKSkpQg8KDV9wcm9qZWN0X3Jvb3QiuwEKD0dldEJsb2JzUmVxdWVzdBI4CgZydW5faWQYASABKAlCKLpIJXIjMiFeW0EtWmEtejAtOV1bQS1aYS16MC05Xy1dezAsMTI3fSQSLQoGc2hhMjU2GAIgAygJQh26SBqSARcQgAIiEnIQMg5eWzAtOWEtZl17NjR9JBI/CgpzZXNzaW9uX2lkGAMgASgJQiu6SChyJjIkXihbQS1aYS16MC05XVtBLVphLXowLTlfLV17MCwxMjd9KT8kIkgKEEdldEJsb2JzUmVzcG9uc2USNAoFYmxvYnMYASADKAsyGi52aWJlc3lzLmFwaS52MS5CbG9iUmVzdWx0Qgm6SAaSAQMQgAIi2QIKCkJsb2JSZXN1bHQSJQoGc2hhMjU2GAEgASgJQhW6SBJyEDIOXlswLTlhLWZdezY0fSQSGAoEZGF0YRgCIAEoDEIKukgHegUYgICACBIdCgplcnJvcl9jb2RlGAMgASgFQgm6SAYaBBgQKAASIAoNZXJyb3JfbWVzc2FnZRgEIAEoCUIJukgGcgQogIAEOsgBukjEARrBAQoTYmxvYl9yZXN1bHQub3V0Y29tZRJDZXJyb3JfY29kZSwgZXJyb3JfbWVzc2FnZSBhbmQgZGF0YSBtdXN0IGRlc2NyaWJlIHN1Y2Nlc3Mgb3IgZmFpbHVyZRpldGhpcy5lcnJvcl9jb2RlID09IDAgPyB0aGlzLmVycm9yX21lc3NhZ2UgPT0gJycgOiAodGhpcy5kYXRhLnNpemUoKSA9PSAwICYmIHRoaXMuZXJyb3JfbWVzc2FnZSAhPSAnJykisQEKEVRhaWxTdHJlYW1SZXF1ZXN0EjgKBnJ1bl9pZBgBIAEoCUIoukglciMyIV5bQS1aYS16MC05XVtBLVphLXowLTlfLV17MCwxMjd9JBI8CglzdHJlYW1faWQYAiABKAlCKbpIJnIkMiJeW0EtWmEtejAtOV1bQS1aYS16MC05Xy4tXXswLDI1NX0kEiQKC2Zyb21fb2Zmc2V0GAMgASgEQg+6SAwyChj//////////38iuQEKElRhaWxTdHJlYW1SZXNwb25zZRIZCgRkYXRhGAEgASgMQgu6SAh6BhABGICABBIkCgtuZXh0X29mZnNldBgCIAEoBEIPukgMMgoY//////////9/OmK6SF8aXQoSdGFpbF9zdHJlYW0ub2Zmc2V0EhtuZXh0X29mZnNldCBtdXN0IGNvdmVyIGRhdGEaKnRoaXMubmV4dF9vZmZzZXQgPj0gdWludCh0aGlzLmRhdGEuc2l6ZSgpKSJTChdMaXN0Q2hhdFNlc3Npb25zUmVxdWVzdBI4CgZydW5faWQYASABKAlCKLpIJXIjMiFeW0EtWmEtejAtOV1bQS1aYS16MC05Xy1dezAsMTI3fSQiXQoYTGlzdENoYXRTZXNzaW9uc1Jlc3BvbnNlEkEKCHNlc3Npb25zGAEgAygLMiQudmliZXN5cy5zdG9yZS52MS5DaGF0U2Vzc2lvbkNyZWF0ZWRCCbpIBpIBAxCAICqSAQoLUnVuTGl2ZW5lc3MSHAoYUlVOX0xJVkVORVNTX1VOU1BFQ0lGSUVEEAASFgoSUlVOX0xJVkVORVNTX0FMSVZFEAESHAoYUlVOX0xJVkVORVNTX0lOVEVSUlVQVEVEEAISFgoSUlVOX0xJVkVORVNTX0VOREVEEAMSFwoTUlVOX0xJVkVORVNTX1BBUktFRBAEMr8HCgtIb3N0U2VydmljZRJNCghIb3N0Q2FsbBIfLnZpYmVzeXMuYXBpLnYxLkhvc3RDYWxsUmVxdWVzdBogLnZpYmVzeXMuYXBpLnYxLkhvc3RDYWxsUmVzcG9uc2USQQoEUmVhZBIbLnZpYmVzeXMuYXBpLnYxLlJlYWRSZXF1ZXN0GhwudmliZXN5cy5hcGkudjEuUmVhZFJlc3BvbnNlEkYKBVdhdGNoEhwudmliZXN5cy5hcGkudjEuV2F0Y2hSZXF1ZXN0Gh0udmliZXN5cy5hcGkudjEuV2F0Y2hSZXNwb25zZTABEkcKBk11dGF0ZRIdLnZpYmVzeXMuYXBpLnYxLk11dGF0ZVJlcXVlc3QaHi52aWJlc3lzLmFwaS52MS5NdXRhdGVSZXNwb25zZRJECgVIZWxsbxIcLnZpYmVzeXMuYXBpLnYxLkhlbGxvUmVxdWVzdBodLnZpYmVzeXMuYXBpLnYxLkhlbGxvUmVzcG9uc2USZQoQTGlzdENoYXRTZXNzaW9ucxInLnZpYmVzeXMuYXBpLnYxLkxpc3RDaGF0U2Vzc2lvbnNSZXF1ZXN0GigudmliZXN5cy5hcGkudjEuTGlzdENoYXRTZXNzaW9uc1Jlc3BvbnNlEkMKBFRhaWwSGy52aWJlc3lzLmFwaS52MS5UYWlsUmVxdWVzdBocLnZpYmVzeXMuYXBpLnYxLlRhaWxSZXNwb25zZTABEk0KCFNrZWxldG9uEh8udmliZXN5cy5hcGkudjEuU2tlbGV0b25SZXF1ZXN0GiAudmliZXN5cy5hcGkudjEuU2tlbGV0b25SZXNwb25zZRJSCglXYXRjaFJ1bnMSIC52aWJlc3lzLmFwaS52MS5XYXRjaFJ1bnNSZXF1ZXN0GiEudmliZXN5cy5hcGkudjEuV2F0Y2hSdW5zUmVzcG9uc2UwARJNCghHZXRCbG9icxIfLnZpYmVzeXMuYXBpLnYxLkdldEJsb2JzUmVxdWVzdBogLnZpYmVzeXMuYXBpLnYxLkdldEJsb2JzUmVzcG9uc2USVQoKVGFpbFN0cmVhbRIhLnZpYmVzeXMuYXBpLnYxLlRhaWxTdHJlYW1SZXF1ZXN0GiIudmliZXN5cy5hcGkudjEuVGFpbFN0cmVhbVJlc3BvbnNlMAESUgoJU3Vic2NyaWJlEiAudmliZXN5cy5hcGkudjEuU3Vic2NyaWJlUmVxdWVzdBohLnZpYmVzeXMuYXBpLnYxLlN1YnNjcmliZVJlc3BvbnNlMAFCPVo7Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy9hcGkvdjE7YXBpdjFiBnByb3RvMw", [file_buf_validate_validate, file_vibesys_api_v1_host_call, file_vibesys_api_v1_host_mutate_generated, file_vibesys_api_v1_host_read_generated, file_vibesys_api_v1_host_watch_generated, file_vibesys_api_v1_subscribe, file_vibesys_store_v1_chat, file_vibesys_store_v1_skeleton]);
+  fileDesc("Chl2aWJlc3lzL2FwaS92MS9ob3N0LnByb3RvEg52aWJlc3lzLmFwaS52MSI+CgxIZWxsb1JlcXVlc3QSLgoPYXBpX3NjaGVtYV9oYXNoGAEgASgJQhW6SBJyEDIOXlswLTlhLWZdezY0fSQiZAoNSGVsbG9SZXNwb25zZRIuCg9hcGlfc2NoZW1hX2hhc2gYASABKAlCFbpIEnIQMg5eWzAtOWEtZl17NjR9JBIjCg9nYXRld2F5X3ZlcnNpb24YAiABKAlCCrpIB3IFEAEogAIiqwEKC1RhaWxSZXF1ZXN0EjgKBnJ1bl9pZBgBIAEoCUIoukglciMyIV5bQS1aYS16MC05XVtBLVphLXowLTlfLV17MCwxMjd9JBIhCghmcm9tX3NlcRgCIAEoBEIPukgMMgoY//////////9/Ej8KCnNlc3Npb25faWQYAyABKAlCK7pIKHImMiReKFtBLVphLXowLTldW0EtWmEtejAtOV8tXXswLDEyN30pPyQi2gIKDFRhaWxSZXNwb25zZRInCgdyZWNvcmRzGAEgAygMQha6SBOSARAIARCAgEAiCHoGEAEYgIBAEiQKC3Rocm91Z2hfc2VxGAIgASgEQg+6SAwyChj+/////////38SJwoEaGVhZBgDIAEoCzIZLnZpYmVzeXMuc3RvcmUudjEuUnVuSGVhZDrRAbpIzQEaygEKEHRhaWxfaGVhZF9wcmVmaXgSM2hlYWQgbXVzdCBzdGF0ZSBwZXJmb3JtYW5jZSBmb3IgZXhhY3RseSB0aHJvdWdoX3NlcRqAASFoYXModGhpcy5oZWFkKSB8fCAoaGFzKHRoaXMuaGVhZC5jb21taXR0ZWRfc2VxKSAmJiB0aGlzLmhlYWQuY29tbWl0dGVkX3NlcSA9PSB0aGlzLnRocm91Z2hfc2VxICYmIHRoaXMuaGVhZC5wZXJmb3JtYW5jZV9zdGF0ZWQpIo0BCg9Ta2VsZXRvblJlcXVlc3QSOAoGcnVuX2lkGAEgASgJQii6SCVyIzIhXltBLVphLXowLTldW0EtWmEtejAtOV8tXXswLDEyN30kEkAKGGtub3duX2Rlc2NyaXB0b3JzX3NoYTI1NhgCIAMoCUIeukgbkgEYEEAYASISchAyDl5bMC05YS1mXXs2NH0kIlEKDURlc2NyaXB0b3JTZXQSJQoGc2hhMjU2GAEgASgJQhW6SBJyEDIOXlswLTlhLWZdezY0fSQSGQoEZGF0YRgCIAEoDEILukgIegYQARiAgEAi+QIKEFNrZWxldG9uUmVzcG9uc2USIgoIa2V5ZnJhbWUYASABKAxCC7pICHoGEAEYgIBASACIAQESJQoHcmVjb3JkcxgCIAMoDEIUukgRkgEOEICAQCIIegYQARiAgEASJgoNY29tbWl0dGVkX3NlcRgDIAEoBEIPukgMMgoY/v////////9/EiEKCG5leHRfc2VxGAQgASgEQg+6SAwyChj//////////38SEAoIY29tcGxldGUYBSABKAgSRQoIc2Vzc2lvbnMYBiADKAlCM7pIMJIBLRCAgEAYASIlciMyIV5bQS1aYS16MC05XVtBLVphLXowLTlfLV17MCwxMjd9JBJACg9kZXNjcmlwdG9yX3NldHMYByADKAsyHS52aWJlc3lzLmFwaS52MS5EZXNjcmlwdG9yU2V0Qgi6SAWSAQIQQBInCgRoZWFkGAggASgLMhkudmliZXN5cy5zdG9yZS52MS5SdW5IZWFkQgsKCV9rZXlmcmFtZSK7AQoPR2V0QmxvYnNSZXF1ZXN0EjgKBnJ1bl9pZBgBIAEoCUIoukglciMyIV5bQS1aYS16MC05XVtBLVphLXowLTlfLV17MCwxMjd9JBItCgZzaGEyNTYYAiADKAlCHbpIGpIBFxCAAiISchAyDl5bMC05YS1mXXs2NH0kEj8KCnNlc3Npb25faWQYAyABKAlCK7pIKHImMiReKFtBLVphLXowLTldW0EtWmEtejAtOV8tXXswLDEyN30pPyQiSAoQR2V0QmxvYnNSZXNwb25zZRI0CgVibG9icxgBIAMoCzIaLnZpYmVzeXMuYXBpLnYxLkJsb2JSZXN1bHRCCbpIBpIBAxCAAiLZAgoKQmxvYlJlc3VsdBIlCgZzaGEyNTYYASABKAlCFbpIEnIQMg5eWzAtOWEtZl17NjR9JBIYCgRkYXRhGAIgASgMQgq6SAd6BRiAgIAIEh0KCmVycm9yX2NvZGUYAyABKAVCCbpIBhoEGBAoABIgCg1lcnJvcl9tZXNzYWdlGAQgASgJQgm6SAZyBCiAgAQ6yAG6SMQBGsEBChNibG9iX3Jlc3VsdC5vdXRjb21lEkNlcnJvcl9jb2RlLCBlcnJvcl9tZXNzYWdlIGFuZCBkYXRhIG11c3QgZGVzY3JpYmUgc3VjY2VzcyBvciBmYWlsdXJlGmV0aGlzLmVycm9yX2NvZGUgPT0gMCA/IHRoaXMuZXJyb3JfbWVzc2FnZSA9PSAnJyA6ICh0aGlzLmRhdGEuc2l6ZSgpID09IDAgJiYgdGhpcy5lcnJvcl9tZXNzYWdlICE9ICcnKSKxAQoRVGFpbFN0cmVhbVJlcXVlc3QSOAoGcnVuX2lkGAEgASgJQii6SCVyIzIhXltBLVphLXowLTldW0EtWmEtejAtOV8tXXswLDEyN30kEjwKCXN0cmVhbV9pZBgCIAEoCUIpukgmciQyIl5bQS1aYS16MC05XVtBLVphLXowLTlfLi1dezAsMjU1fSQSJAoLZnJvbV9vZmZzZXQYAyABKARCD7pIDDIKGP//////////fyK5AQoSVGFpbFN0cmVhbVJlc3BvbnNlEhkKBGRhdGEYASABKAxCC7pICHoGEAEYgIAEEiQKC25leHRfb2Zmc2V0GAIgASgEQg+6SAwyChj//////////386YrpIXxpdChJ0YWlsX3N0cmVhbS5vZmZzZXQSG25leHRfb2Zmc2V0IG11c3QgY292ZXIgZGF0YRoqdGhpcy5uZXh0X29mZnNldCA+PSB1aW50KHRoaXMuZGF0YS5zaXplKCkpIlMKF0xpc3RDaGF0U2Vzc2lvbnNSZXF1ZXN0EjgKBnJ1bl9pZBgBIAEoCUIoukglciMyIV5bQS1aYS16MC05XVtBLVphLXowLTlfLV17MCwxMjd9JCJdChhMaXN0Q2hhdFNlc3Npb25zUmVzcG9uc2USQQoIc2Vzc2lvbnMYASADKAsyJC52aWJlc3lzLnN0b3JlLnYxLkNoYXRTZXNzaW9uQ3JlYXRlZEIJukgGkgEDEIAgMusGCgtIb3N0U2VydmljZRJNCghIb3N0Q2FsbBIfLnZpYmVzeXMuYXBpLnYxLkhvc3RDYWxsUmVxdWVzdBogLnZpYmVzeXMuYXBpLnYxLkhvc3RDYWxsUmVzcG9uc2USQQoEUmVhZBIbLnZpYmVzeXMuYXBpLnYxLlJlYWRSZXF1ZXN0GhwudmliZXN5cy5hcGkudjEuUmVhZFJlc3BvbnNlEkYKBVdhdGNoEhwudmliZXN5cy5hcGkudjEuV2F0Y2hSZXF1ZXN0Gh0udmliZXN5cy5hcGkudjEuV2F0Y2hSZXNwb25zZTABEkcKBk11dGF0ZRIdLnZpYmVzeXMuYXBpLnYxLk11dGF0ZVJlcXVlc3QaHi52aWJlc3lzLmFwaS52MS5NdXRhdGVSZXNwb25zZRJECgVIZWxsbxIcLnZpYmVzeXMuYXBpLnYxLkhlbGxvUmVxdWVzdBodLnZpYmVzeXMuYXBpLnYxLkhlbGxvUmVzcG9uc2USZQoQTGlzdENoYXRTZXNzaW9ucxInLnZpYmVzeXMuYXBpLnYxLkxpc3RDaGF0U2Vzc2lvbnNSZXF1ZXN0GigudmliZXN5cy5hcGkudjEuTGlzdENoYXRTZXNzaW9uc1Jlc3BvbnNlEkMKBFRhaWwSGy52aWJlc3lzLmFwaS52MS5UYWlsUmVxdWVzdBocLnZpYmVzeXMuYXBpLnYxLlRhaWxSZXNwb25zZTABEk0KCFNrZWxldG9uEh8udmliZXN5cy5hcGkudjEuU2tlbGV0b25SZXF1ZXN0GiAudmliZXN5cy5hcGkudjEuU2tlbGV0b25SZXNwb25zZRJNCghHZXRCbG9icxIfLnZpYmVzeXMuYXBpLnYxLkdldEJsb2JzUmVxdWVzdBogLnZpYmVzeXMuYXBpLnYxLkdldEJsb2JzUmVzcG9uc2USVQoKVGFpbFN0cmVhbRIhLnZpYmVzeXMuYXBpLnYxLlRhaWxTdHJlYW1SZXF1ZXN0GiIudmliZXN5cy5hcGkudjEuVGFpbFN0cmVhbVJlc3BvbnNlMAESUgoJU3Vic2NyaWJlEiAudmliZXN5cy5hcGkudjEuU3Vic2NyaWJlUmVxdWVzdBohLnZpYmVzeXMuYXBpLnYxLlN1YnNjcmliZVJlc3BvbnNlMAFCPVo7Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy9hcGkvdjE7YXBpdjFiBnByb3RvMw", [file_buf_validate_validate, file_vibesys_api_v1_host_call, file_vibesys_api_v1_host_mutate_generated, file_vibesys_api_v1_host_read_generated, file_vibesys_api_v1_host_watch_generated, file_vibesys_api_v1_subscribe, file_vibesys_store_v1_chat, file_vibesys_store_v1_skeleton]);
 
 /**
  * @generated from message vibesys.api.v1.HelloRequest
@@ -251,78 +251,6 @@ export const SkeletonResponseSchema: GenMessage<SkeletonResponse> = /*@__PURE__*
   messageDesc(file_vibesys_api_v1_host, 6);
 
 /**
- * @generated from message vibesys.api.v1.WatchRunsRequest
- */
-export type WatchRunsRequest = Message<"vibesys.api.v1.WatchRunsRequest"> & {
-};
-
-/**
- * Describes the message vibesys.api.v1.WatchRunsRequest.
- * Use `create(WatchRunsRequestSchema)` to create a new message.
- */
-export const WatchRunsRequestSchema: GenMessage<WatchRunsRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_api_v1_host, 7);
-
-/**
- * Initial entries precede an initial_complete marker. Later entries replace by
- * run_id; removed is a tombstone. A phase 1 run has no head and UNSPECIFIED liveness.
- *
- * @generated from message vibesys.api.v1.WatchRunsResponse
- */
-export type WatchRunsResponse = Message<"vibesys.api.v1.WatchRunsResponse"> & {
-  /**
-   * head is absent for phase 1 runs, tombstones and the initial marker.
-   * UNSPECIFIED represents unknown phase 1 liveness and marker/tombstone absence.
-   *
-   * @generated from field: string run_id = 1;
-   */
-  runId: string;
-
-  /**
-   * @generated from field: vibesys.store.v1.RunHead head = 2;
-   */
-  head?: RunHead | undefined;
-
-  /**
-   * @generated from field: vibesys.api.v1.RunLiveness liveness = 3;
-   */
-  liveness: RunLiveness;
-
-  /**
-   * @generated from field: bool removed = 4;
-   */
-  removed: boolean;
-
-  /**
-   * @generated from field: bool initial_complete = 5;
-   */
-  initialComplete: boolean;
-
-  /**
-   * Emitted at least every five seconds, after all preceding run observations.
-   * A receiver expires its facts after thirty seconds without a frame.
-   *
-   * @generated from field: bool heartbeat = 6;
-   */
-  heartbeat: boolean;
-
-  /**
-   * Canonical host-side project directory. Older gateways may omit it; those entries have no
-   * address and cannot enter project-dependent listings. Markers and tombstones omit it.
-   *
-   * @generated from field: optional string project_root = 7;
-   */
-  projectRoot?: string | undefined;
-};
-
-/**
- * Describes the message vibesys.api.v1.WatchRunsResponse.
- * Use `create(WatchRunsResponseSchema)` to create a new message.
- */
-export const WatchRunsResponseSchema: GenMessage<WatchRunsResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_api_v1_host, 8);
-
-/**
  * Malformed hashes reject the whole request before filesystem access. File
  * lookup/content failures for admitted hashes remain per-result errors.
  *
@@ -350,7 +278,7 @@ export type GetBlobsRequest = Message<"vibesys.api.v1.GetBlobsRequest"> & {
  * Use `create(GetBlobsRequestSchema)` to create a new message.
  */
 export const GetBlobsRequestSchema: GenMessage<GetBlobsRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_api_v1_host, 9);
+  messageDesc(file_vibesys_api_v1_host, 7);
 
 /**
  * At most 16 MiB of blob content per response. Each requested hash has a result
@@ -371,7 +299,7 @@ export type GetBlobsResponse = Message<"vibesys.api.v1.GetBlobsResponse"> & {
  * Use `create(GetBlobsResponseSchema)` to create a new message.
  */
 export const GetBlobsResponseSchema: GenMessage<GetBlobsResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_api_v1_host, 10);
+  messageDesc(file_vibesys_api_v1_host, 8);
 
 /**
  * @generated from message vibesys.api.v1.BlobResult
@@ -403,7 +331,7 @@ export type BlobResult = Message<"vibesys.api.v1.BlobResult"> & {
  * Use `create(BlobResultSchema)` to create a new message.
  */
 export const BlobResultSchema: GenMessage<BlobResult> = /*@__PURE__*/
-  messageDesc(file_vibesys_api_v1_host, 11);
+  messageDesc(file_vibesys_api_v1_host, 9);
 
 /**
  * @generated from message vibesys.api.v1.TailStreamRequest
@@ -430,7 +358,7 @@ export type TailStreamRequest = Message<"vibesys.api.v1.TailStreamRequest"> & {
  * Use `create(TailStreamRequestSchema)` to create a new message.
  */
 export const TailStreamRequestSchema: GenMessage<TailStreamRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_api_v1_host, 12);
+  messageDesc(file_vibesys_api_v1_host, 10);
 
 /**
  * @generated from message vibesys.api.v1.TailStreamResponse
@@ -452,7 +380,7 @@ export type TailStreamResponse = Message<"vibesys.api.v1.TailStreamResponse"> & 
  * Use `create(TailStreamResponseSchema)` to create a new message.
  */
 export const TailStreamResponseSchema: GenMessage<TailStreamResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_api_v1_host, 13);
+  messageDesc(file_vibesys_api_v1_host, 11);
 
 /**
  * Only committed session metadata is exposed. Empty sessions created before a
@@ -472,7 +400,7 @@ export type ListChatSessionsRequest = Message<"vibesys.api.v1.ListChatSessionsRe
  * Use `create(ListChatSessionsRequestSchema)` to create a new message.
  */
 export const ListChatSessionsRequestSchema: GenMessage<ListChatSessionsRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_api_v1_host, 14);
+  messageDesc(file_vibesys_api_v1_host, 12);
 
 /**
  * @generated from message vibesys.api.v1.ListChatSessionsResponse
@@ -489,45 +417,7 @@ export type ListChatSessionsResponse = Message<"vibesys.api.v1.ListChatSessionsR
  * Use `create(ListChatSessionsResponseSchema)` to create a new message.
  */
 export const ListChatSessionsResponseSchema: GenMessage<ListChatSessionsResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_api_v1_host, 15);
-
-/**
- * @generated from enum vibesys.api.v1.RunLiveness
- */
-export enum RunLiveness {
-  /**
-   * @generated from enum value: RUN_LIVENESS_UNSPECIFIED = 0;
-   */
-  UNSPECIFIED = 0,
-
-  /**
-   * @generated from enum value: RUN_LIVENESS_ALIVE = 1;
-   */
-  ALIVE = 1,
-
-  /**
-   * @generated from enum value: RUN_LIVENESS_INTERRUPTED = 2;
-   */
-  INTERRUPTED = 2,
-
-  /**
-   * @generated from enum value: RUN_LIVENESS_ENDED = 3;
-   */
-  ENDED = 3,
-
-  /**
-   * A cleanly drained epoch. The saved run can be relaunched.
-   *
-   * @generated from enum value: RUN_LIVENESS_PARKED = 4;
-   */
-  PARKED = 4,
-}
-
-/**
- * Describes the enum vibesys.api.v1.RunLiveness.
- */
-export const RunLivenessSchema: GenEnum<RunLiveness> = /*@__PURE__*/
-  enumDesc(file_vibesys_api_v1_host, 0);
+  messageDesc(file_vibesys_api_v1_host, 13);
 
 /**
  * HostService is a stateless view over a host user's run files.
@@ -613,14 +503,6 @@ export const HostService: GenService<{
     methodKind: "unary";
     input: typeof SkeletonRequestSchema;
     output: typeof SkeletonResponseSchema;
-  },
-  /**
-   * @generated from rpc vibesys.api.v1.HostService.WatchRuns
-   */
-  watchRuns: {
-    methodKind: "server_streaming";
-    input: typeof WatchRunsRequestSchema;
-    output: typeof WatchRunsResponseSchema;
   },
   /**
    * @generated from rpc vibesys.api.v1.HostService.GetBlobs

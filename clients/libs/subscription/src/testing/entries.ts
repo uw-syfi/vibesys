@@ -1,7 +1,14 @@
 /** Valid machine stats as a host's gateway sends them, for tests that feed a topic. */
 import {create} from '@bufbuild/protobuf';
 import {timestampFromMs} from '@bufbuild/protobuf/wkt';
-import {AbsenceReason, MachineStatsSchema, type TopicEntry, TopicEntrySchema} from '@vibesys/proto';
+import {
+  AbsenceReason,
+  MachineStatsSchema,
+  RunLiveness,
+  type TopicEntry,
+  TopicEntrySchema,
+} from '@vibesys/proto';
+import type {HostRunFacts} from '../topics.js';
 
 export interface GpuSample {
   readonly name: string;
@@ -62,6 +69,31 @@ export function machineEntry(key: string, sampledMs: number, readings: Readings 
                   },
                 },
       }),
+    },
+  });
+}
+
+/** A host's runs as its `runs` topic folds them: `alive` with a writer, `ended` without. */
+export function runsOf(alive: number, ended: number): HostRunFacts {
+  return new Map(
+    Array.from({length: alive + ended}, (_, index) => [
+      `run-${index}`,
+      {
+        projectRoot: undefined,
+        head: undefined,
+        liveness: index < alive ? RunLiveness.ALIVE : RunLiveness.ENDED,
+      },
+    ]),
+  );
+}
+
+/** A `runs` entry for `runId`: its writer `alive`, or the run `ended`. */
+export function runEntryOf(runId: string, state: 'alive' | 'ended'): TopicEntry {
+  return create(TopicEntrySchema, {
+    key: runId,
+    value: {
+      case: 'runs',
+      value: {liveness: state === 'alive' ? RunLiveness.ALIVE : RunLiveness.ENDED},
     },
   });
 }

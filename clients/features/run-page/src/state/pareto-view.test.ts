@@ -1,8 +1,8 @@
 import {describe, expect, test} from 'bun:test';
 import type {RunEvent, Span} from '@vibesys/contracts';
+import {heroView} from './headline.js';
 import {EMPTY_TRACE_LOG, traceStep} from './live.js';
 import {paretoView} from './pareto-view.js';
-import {heroView} from './run-level.js';
 import {createRunReader} from './run-model.js';
 
 const ROOT: Span = {
@@ -198,7 +198,7 @@ describe('the performance row of a run with two objectives', () => {
     const tiles = heroView({
       ...modelOf(AXES),
       series: statedBy({total_ops_per_sec: 2500, p99_latency: 10}),
-    }).tiles;
+    }).headlines;
 
     expect(tiles.map(t => t.name)).toEqual(['Total ops/sec', 'P99 latency']);
     // the best throughput is 2,500 against 1,000; the best latency is 10 ms against 20 ms
@@ -213,13 +213,13 @@ describe('the performance row of a run with two objectives', () => {
     const stated = heroView({
       ...modelOf(AXES),
       series: statedBy({total_ops_per_sec: 1500, p99_latency: 18}),
-    }).tiles;
+    }).headlines;
     expect(stated.map(t => t.ratio)).toEqual(['1.50×', '1.11×']);
-    const unstated = heroView(modelOf(AXES)).tiles;
+    const unstated = heroView(modelOf(AXES)).headlines;
     expect(unstated.map(t => t.ratio)).toEqual([null, null]);
   });
 
   test('keeps one tile for a run with one objective', () => {
-    expect(heroView(modelOf(AXES.slice(0, 1))).tiles).toHaveLength(1);
+    expect(heroView(modelOf(AXES.slice(0, 1))).headlines).toHaveLength(1);
   });
 });

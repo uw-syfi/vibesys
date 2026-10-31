@@ -8,7 +8,12 @@
  */
 
 export {connectionStatus} from './connection-status.js';
-export {hostListingFromRuns, watchedListing} from './run-listing.js';
+export {
+  hostListingFromRuns,
+  LISTING_FAILURE_WORDS,
+  listingStep,
+  watchedListing,
+} from './run-listing.js';
 export {controlDirectory, installAskpass} from './shell/askpass.js';
 export {
   type ConnectionLease,
@@ -23,7 +28,6 @@ export {
   READ_METHOD,
   TAIL_METHOD,
   WATCH_METHOD,
-  WATCH_RUNS_METHOD,
 } from './shell/gateway.js';
 export {GatewayCalls} from './shell/gateway-calls.js';
 export {localGateway} from './shell/gateway-local.js';
@@ -39,6 +43,7 @@ export {
 export {CallTimedOut, GrpcDecoder, grpcFrame} from './shell/grpc.js';
 export {ConnectionError, HelperRequestError} from './shell/helper-channel.js';
 export {HostConnection, type LogsLease} from './shell/host-connection.js';
+export {type HostRuns, type HostRunsSource, hostRuns} from './shell/host-runs.js';
 export {HOST_UNSUPPORTED_MESSAGE, isHostUnsupported} from './shell/host-unsupported.js';
 export {type Link, LocalLink, SshLink} from './shell/link.js';
 export {LoginActor, type LoginPorts, type LoginStart} from './shell/login-actor.js';
@@ -92,18 +97,10 @@ export {
   usageSummaryEntry,
 } from './shell/registry-usage.js';
 export {
-  RUN_WATCH_LEASE_MS,
-  type RunsPhase,
-  type RunsState,
-  type RunWatch,
-  type RunWatchPorts,
-  runWatch,
-  type WatchedRun,
-} from './shell/run-watch.js';
-export {
   SUBSCRIPTION_LINGER_MS,
   SubscriptionFailed,
   type SubscriptionStreams,
   Subscriptions,
 } from './shell/subscriptions.js';
+export {GATEWAY_FIRST_CONNECT_BUDGET_MS} from './state/gateway.js';
 export type {CheckoutProblem, Phase} from './state/host-connection.js';

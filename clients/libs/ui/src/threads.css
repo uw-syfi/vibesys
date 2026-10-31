@@ -218,11 +218,33 @@
   flex: 1;
   min-width: 0;
 }
+.vs-scrubber-track {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
 .vs-scrubber-range {
+  flex: 1;
+  min-width: 0;
   width: 100%;
   margin: 0;
   accent-color: var(--accent);
   cursor: pointer;
+}
+/* A moment worth finding: a small diamond on the track. A range's thumb (a `--space-5` disc) travels
+   between half its width from either end, so a mark is placed inside that, where the thumb would be. */
+.vs-scrubber-mark {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--space-3) + (100% - 2 * var(--space-3)) * var(--mark-at));
+  width: var(--space-3);
+  height: var(--space-3);
+  transform: translate(-50%, -50%);
+  fill: var(--accent);
+  stroke: var(--bg);
+  stroke-width: var(--hairline);
+  pointer-events: none;
 }
 .vs-scrubber-ticks {
   position: relative;
@@ -265,6 +287,11 @@
 .vs-chart-axis {
   stroke: var(--grid);
 }
+/* The plot's frame, for a chart whose both axes are read from its edges. */
+.vs-chart-frame {
+  fill: none;
+  stroke: var(--line);
+}
 .vs-chart-label {
   fill: var(--muted);
   font-family: var(--text-section-family);
@@ -279,31 +306,27 @@
   fill: none;
   stroke: var(--accent);
   stroke-width: 2;
+  stroke-linejoin: round;
+}
+/* After the cursor: the line and the dots are quiet, the shape stays. */
+.vs-chart-step[data-after] {
+  opacity: 0.35;
 }
 .vs-chart-point {
-  fill: none;
-  stroke: var(--accent);
-  stroke-width: 2;
-}
-.vs-chart-point[data-filled] {
-  fill: var(--accent);
-}
-.vs-chart-point[data-tone=muted] {
-  stroke: var(--muted);
-}
-.vs-chart-point[data-tone=muted][data-filled] {
   fill: var(--muted);
+  stroke: none;
+  opacity: 0.6;
 }
-.vs-chart-point[data-tone=err] {
-  stroke: var(--err);
+.vs-chart-point[data-after] {
+  opacity: 0.25;
 }
-.vs-chart-point[data-tone=err][data-filled] {
-  fill: var(--err);
-}
-.vs-chart-playhead {
-  stroke: var(--muted);
+.vs-chart-cursor {
+  stroke: var(--accent);
   stroke-width: 1;
-  stroke-dasharray: 2 3;
+}
+.vs-chart-mark {
+  stroke: var(--text);
+  stroke-width: 1.5;
 }
 
 /* --- theme swatch ------------------------------------------------------------------------------ */

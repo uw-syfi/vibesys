@@ -5,15 +5,13 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
 )
 
 // No head writes or lock probes can accidentally wake this subscription: an
 // index unlink alone must invalidate the scan, even while its target survives.
-func TestWatchRunsIndexUnlinkWithoutTargetChange(t *testing.T) {
+func TestRunsIndexUnlinkWithoutTargetChange(t *testing.T) {
 	f := start(t)
-	stream, err := client(t, f, false).WatchRuns(f.ctx, &apiv1.WatchRunsRequest{})
+	stream, err := subscribeRuns(f.ctx, client(t, f, false))
 	if err != nil {
 		t.Fatal(err)
 	}

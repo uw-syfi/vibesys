@@ -1,5 +1,8 @@
-/** Faithful in-memory byte transport for the store reader, with explicit publication and faults. */
-import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
+/**
+ * Faithful in-memory byte transport for the store reader, with explicit publication and faults, and
+ * the host's say on a run's liveness as the reader is given it.
+ */
+import {create, fromBinary, type MessageInitShape, toBinary} from '@bufbuild/protobuf';
 import {
   GetBlobsRequestSchema,
   GetBlobsResponseSchema,
@@ -7,6 +10,8 @@ import {
   type Keyframe,
   KeyframeSchema,
   RecordSchema,
+  RunHeadSchema,
+  type RunLiveness,
   SkeletonRequestSchema,
   SkeletonResponseSchema,
   type Record as StoreRecord,
@@ -14,11 +19,9 @@ import {
   TailResponseSchema,
   TailStreamRequestSchema,
   TailStreamResponseSchema,
-  type WatchRunsResponse,
-  WatchRunsResponseSchema,
 } from '@vibesys/proto';
 import {type AbortSignalLike, registerAbort} from '@vibesys/transport';
-import type {RunTransport} from './index.js';
+import type {RunLivenessFeed, RunLivenessHint, RunLivenessState, RunTransport} from './index.js';
 
 const SERVICE = `/${HostService.typeName}/`;
 interface Subscriber {
@@ -30,8 +33,91 @@ interface Cursor {
   nextSeq: bigint;
   streamId: string;
   offset: bigint;
-  observation: number;
-  initial: WatchRunsResponse[];
+}
+
+/** What the host last said of a run, or that it lists the run no more. */
+export type ObservedRun =
+  | {
+      readonly runId: string;
+      readonly liveness: RunLiveness;
+      readonly head?: MessageInitShape<typeof RunHeadSchema> | undefined;
+    }
+  | {readonly runId: string; readonly removed: true};
+
+/**
+ * The host as the reader sees it: delivering what it last said of each run, or not delivering. It
+ * starts delivering nothing, which is a host with no runs; `lose` and `restore` are its stream
+ * dropping and coming back, with the same runs.
+ */
+export class FakeRunHost {
+  readonly #runs = new Map<string, RunLivenessHint>();
+  readonly #feeds = new Set<{readonly runId: string; readonly notify: () => void}>();
+  readonly #watchers = new Set<() => void>();
+  #lost = false;
+  /** How many feeds are subscribed now. */
+  get watching(): number {
+    return this.#feeds.size;
+  }
+  /** Resolves once something is subscribed to a run's liveness. */
+  async watched(): Promise<void> {
+    if (this.#feeds.size > 0) return;
+    await new Promise<void>(resolve => {
+      this.#watchers.add(resolve);
+    });
+  }
+  observe(observation: ObservedRun): void {
+    if ('removed' in observation) this.#runs.delete(observation.runId);
+    else {
+      const head =
+        observation.head === undefined ? undefined : create(RunHeadSchema, observation.head);
+      this.#runs.set(observation.runId, {
+        epoch: head?.epoch ?? 0,
+        value: observation.liveness,
+        head,
+      });
+    }
+    this.#changed();
+  }
+  /** The stream drops: the host says nothing, and what it said is no longer a fact. */
+  lose(): void {
+    this.#lost = true;
+    this.#changed();
+  }
+  /** The stream is back and says what it said. */
+  restore(): void {
+    this.#lost = false;
+    this.#changed();
+  }
+  /** The feed of one run, as `gatewayReader` takes it. */
+  readonly feed = (runId: string): RunLivenessFeed => {
+    let state: RunLivenessState = this.#stateOf(runId);
+    return {
+      subscribe: listener => {
+        const entry = {
+          runId,
+          notify: () => {
+            state = this.#stateOf(runId, state);
+            listener();
+          },
+        };
+        this.#feeds.add(entry);
+        for (const resolve of this.#watchers) resolve();
+        this.#watchers.clear();
+        return () => {
+          this.#feeds.delete(entry);
+        };
+      },
+      getSnapshot: () => state,
+    };
+  };
+  #stateOf(runId: string, previous?: RunLivenessState): RunLivenessState {
+    if (this.#lost) return previous?.kind === 'lost' ? previous : {kind: 'lost'};
+    const hint = this.#runs.get(runId);
+    return previous?.kind === 'live' && previous.hint === hint ? previous : {kind: 'live', hint};
+  }
+  #changed(): void {
+    for (const feed of [...this.#feeds]) feed.notify();
+  }
 }
 
 // Match the gateway's Skeleton reserve and conservative Tail framing budget.
@@ -61,7 +147,8 @@ export class FakeRunTransport implements RunTransport {
   readonly calls: {method: string; request: Uint8Array; signal: AbortSignalLike}[] = [];
   readonly #subscribers = new Set<Subscriber>();
   readonly #idle = new Set<() => void>();
-  readonly #observations: WatchRunsResponse[] = [];
+  /** What the host says of each run's liveness, which the reader is given beside the transport. */
+  readonly host = new FakeRunHost();
   readonly #closed = new Set<string>();
   readonly #records: StoreRecord[];
   readonly #keyframe: Uint8Array | undefined;
@@ -116,9 +203,8 @@ export class FakeRunTransport implements RunTransport {
     this.#records.push(...records);
     for (const subscriber of [...this.#subscribers]) subscriber.receive();
   }
-  observe(response: WatchRunsResponse): void {
-    this.#observations.push(response);
-    for (const subscriber of [...this.#subscribers]) subscriber.receive();
+  observe(observation: ObservedRun): void {
+    this.host.observe(observation);
   }
   close(method: string): void {
     this.#closed.add(method);
@@ -243,25 +329,10 @@ export class FakeRunTransport implements RunTransport {
       if (!input.runId || !input.streamId) throw new Error('run_id and stream_id required');
       streamId = input.streamId;
       offset = input.fromOffset;
-    } else if (method !== `${SERVICE}WatchRuns`) throw new Error(`Unknown stream method ${method}`);
-    const current = new Map<string, WatchRunsResponse>();
-    for (const response of this.#observations) {
-      if (response.heartbeat || response.initialComplete) continue;
-      if (response.removed) current.delete(response.runId);
-      else current.set(response.runId, response);
-    }
-    return {
-      nextSeq,
-      streamId,
-      offset,
-      observation: this.#observations.length,
-      initial: [...current.values(), create(WatchRunsResponseSchema, {initialComplete: true})],
-    };
+    } else throw new Error(`Unknown stream method ${method}`);
+    return {nextSeq, streamId, offset};
   }
   private batch(method: string, cursor: Cursor): Uint8Array | undefined {
-    if (method === `${SERVICE}WatchRuns`) {
-      return this.observation(cursor);
-    }
     if (method === `${SERVICE}Tail`) {
       const pending = this.#records.filter(record => record.seq >= cursor.nextSeq);
       const records = boundedRecords(pending, 'tail');
@@ -292,13 +363,6 @@ export class FakeRunTransport implements RunTransport {
       }
     }
     return undefined;
-  }
-  private observation(cursor: Cursor): Uint8Array | undefined {
-    const initial = cursor.initial.shift();
-    if (initial) return toBinary(WatchRunsResponseSchema, initial);
-    const response = this.#observations[cursor.observation];
-    if (response) cursor.observation += 1;
-    return response ? toBinary(WatchRunsResponseSchema, response) : undefined;
   }
   private async wait(method: string, signal: AbortSignalLike): Promise<void> {
     if (!this.held.has(method)) return;

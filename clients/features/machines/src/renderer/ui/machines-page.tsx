@@ -32,6 +32,8 @@ import {
   type PlaceRow,
   placeRows,
   placesReading,
+  type RunsView,
+  type StatsView,
 } from '../../state/index.js';
 import {MachineStats} from './machine-stats.js';
 import {AddMachine} from './machines-screen.js';
@@ -45,20 +47,23 @@ const CHECKING = 'Checking';
 
 function Busy(props: {
   readonly machine: Machine;
-  /** The runs live on the machine now, or null while its run list is not read. */
-  readonly live: number | null;
+  /** The runs the machine holds, as it last said; null until it has said. */
+  readonly runs: RunsView | null;
 }): JSX.Element | null {
-  const load = machineLoad(props.machine, props.live);
+  const load = machineLoad(props.machine, props.runs?.alive ?? null);
   if (load === null) return null;
+  // What a host last said stays when it stops delivering: dimmed, in the same place.
+  const dim = props.runs?.stale === true;
   return (
     <Row gap="space-2">
       <Meter
         inline
+        dim={dim}
         label={`${load.live} live of ${load.slots}`}
         value={load.share}
         tone={load.share >= 1 ? 'accent' : 'ok'}
       />
-      <Text>{load.live} live</Text>
+      <Text {...(dim ? {tone: 'muted' as const} : {})}>{load.live} live</Text>
     </Row>
   );
 }
@@ -129,9 +134,11 @@ function Fix(props: {
   readonly state: MachinesState;
   readonly machine: Machine;
   readonly dispatch: Dispatch;
+  /** What the host's stream says, which a card that is delivering needs no Reconnect for. */
+  readonly stream: StatsView | null;
 }): JSX.Element | null {
   const {state, machine, dispatch} = props;
-  const action = cardAction(machine);
+  const action = cardAction(machine, props.stream);
   if (action === null) return null;
   const busy = machine.checking !== null || state.pending?.host === machine.host;
   const words =
@@ -156,7 +163,7 @@ function Fix(props: {
  * offers Retry.
  */
 function retryOf(machine: Machine, live: HostLive | null): (() => void) | null {
-  if (live === null || cardAction(machine) !== null) return null;
+  if (live === null || cardAction(machine, live.view) !== null) return null;
   return live.view.kind === 'failed' && live.view.retry ? live.retry : null;
 }
 
@@ -178,7 +185,7 @@ function CardHeader(props: {
         </Text>
       </Stack>
       <Chip dot label={status.word} tone={status.tone} />
-      <Fix state={state} machine={machine} dispatch={dispatch} />
+      <Fix state={state} machine={machine} dispatch={dispatch} stream={props.live?.view ?? null} />
       {retry === null ? null : (
         <Button size="sm" text="Retry" label={`Retry ${machine.label}`} press={retry} />
       )}
@@ -189,23 +196,23 @@ function CardHeader(props: {
 
 function CardFacts(props: {
   readonly machine: Machine;
-  readonly liveRuns: number | null;
-  readonly runs: number;
-  readonly incomplete: boolean;
+  /** The runs the machine holds, from the one subscription; null until the host has said. */
+  readonly runs: RunsView | null;
   readonly showRuns: (host: HostKey) => void;
 }): JSX.Element | null {
   const {machine, runs} = props;
   const hardware = machineHardware(machine);
-  if (hardware === null && runs === 0 && !props.incomplete) return null;
+  if (hardware === null && runs === null) return null;
+  const total = runs?.total ?? 0;
   return (
     <Row gap="space-5" wrap>
       {hardware === null ? null : <Text>{hardware}</Text>}
-      <Busy machine={machine} live={props.liveRuns} />
-      {runs === 0 && !props.incomplete ? null : (
+      <Busy machine={machine} runs={runs} />
+      {runs === null || total === 0 ? null : (
         <Button
           variant="quiet"
           size="sm"
-          text={`${runs === 1 ? '1 run' : `${runs} runs`}${props.incomplete ? ' (incomplete)' : ''}`}
+          text={total === 1 ? '1 run' : `${total} runs`}
           press={() => props.showRuns(machine.host)}
         />
       )}
@@ -218,9 +225,6 @@ function MachineCard(props: {
   readonly machine: Machine;
   readonly dispatch: Dispatch;
   readonly live: LiveSlot | undefined;
-  readonly liveRuns: number | null;
-  readonly runs: number;
-  readonly incomplete: boolean;
   readonly showRuns: (host: HostKey) => void;
   readonly openSettings: (host: HostKey) => void;
 }): JSX.Element {
@@ -235,13 +239,7 @@ function MachineCard(props: {
           live={live}
           openSettings={props.openSettings}
         />
-        <CardFacts
-          machine={machine}
-          liveRuns={props.liveRuns}
-          runs={props.runs}
-          incomplete={props.incomplete}
-          showRuns={props.showRuns}
-        />
+        <CardFacts machine={machine} runs={live?.runs ?? null} showRuns={props.showRuns} />
         {live === null ? null : <MachineStats live={live} />}
         <Places state={state} machine={machine} dispatch={dispatch} />
       </Stack>
@@ -251,18 +249,15 @@ function MachineCard(props: {
 }
 
 /**
- * The Machines page over its store's `state`. `runCounts` is the runs on each machine (from the
- * run digests); `showRuns` and `openSettings` ask the shell to change screens for a machine.
+ * The Machines page over its store's `state`. The runs on each machine, live and in all, come from
+ * its `runs` subscription through `live`, one source for both; `showRuns` and `openSettings` ask
+ * the shell to change screens for a machine.
  */
 export function MachinesPage(props: {
   readonly state: MachinesState;
   readonly dispatch: Dispatch;
-  readonly runCounts: ReadonlyMap<HostKey, number>;
-  /** The runs live on each machine whose run list is read. */
-  readonly liveRuns: ReadonlyMap<HostKey, number>;
-  /** A machine's live stats, handed to its card to draw; without it the cards show none. */
+  /** A machine's live data, handed to its card to draw; without it the cards show none. */
   readonly live?: LiveSlot;
-  readonly incompleteHosts?: ReadonlySet<HostKey>;
   readonly showRuns: (host: HostKey) => void;
   readonly openSettings: (host: HostKey) => void;
 }): JSX.Element {
@@ -287,9 +282,6 @@ export function MachinesPage(props: {
             machine={machine}
             dispatch={dispatch}
             live={props.live}
-            liveRuns={props.liveRuns.get(machine.host) ?? null}
-            runs={props.runCounts.get(machine.host) ?? 0}
-            incomplete={props.incompleteHosts?.has(machine.host) ?? false}
             showRuns={props.showRuns}
             openSettings={props.openSettings}
           />

@@ -13,6 +13,8 @@ export function Meter(props: {
   readonly inline?: boolean;
   /** Drawn only: what it shows is said in words beside it, so assistive technology skips it. */
   readonly decorative?: boolean;
+  /** A reading that is no longer current: still there, and quieter. */
+  readonly dim?: boolean;
 }): JSX.Element {
   const share = Number.isFinite(props.value) ? Math.max(0, Math.min(1, props.value)) : 0;
   const fill: StyleWithVars = {
@@ -26,6 +28,7 @@ export function Meter(props: {
         aria-hidden="true"
         data-tone={props.tone ?? 'accent'}
         data-inline={props.inline === true || undefined}
+        data-dim={props.dim === true || undefined}
         style={fill}
       >
         <span className="vs-meter-fill" />
@@ -39,6 +42,7 @@ export function Meter(props: {
       aria-label={props.label}
       data-tone={props.tone ?? 'accent'}
       data-inline={props.inline === true || undefined}
+      data-dim={props.dim === true || undefined}
       style={fill}
     >
       <span className="vs-meter-fill" />

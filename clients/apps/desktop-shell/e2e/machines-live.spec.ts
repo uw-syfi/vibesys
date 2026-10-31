@@ -269,3 +269,51 @@ test('the page watches a host only while it is on screen', async ({page}) => {
   await expect.poll(() => hosts.observing(page, 'local')).toBe(1);
   await expect(gauges(page, 'This Mac')).toHaveCount(2);
 });
+
+test('a host that streams is one status: a check that timed out says nothing of it, on the card or the rail', async ({
+  page,
+}) => {
+  await openMachines(page, 1440, world('a loaded machine'));
+  await expect(chips(page, 'This Mac')).toHaveText(['Online']);
+  await expect(card(page, 'This Mac').getByRole('button', {name: 'Reconnect'})).toHaveCount(0);
+  await expect(gauges(page, 'This Mac')).toHaveText(['CPU34%', 'Memory18.0 / 36.0 GB']);
+  await expect(rail(page).getByRole('button', {name: /^Machines$/})).toBeVisible();
+  // When the host stops delivering, the check's word and its fix are all there is to go on.
+  await hosts.set(page, 'local', {kind: 'failed', reason: 'unreachable', retrying: true});
+  await expect(chips(page, 'This Mac')).toHaveText(['Unreachable']);
+  await expect(card(page, 'This Mac').getByRole('button', {name: 'Reconnect'})).toBeVisible();
+  await expect(rail(page).getByRole('button', {name: /^Machines, Unreachable$/})).toBeVisible();
+});
+
+/** What the card's summary line shows, in order, and where each cell is. */
+async function summary(page: Page, machine: string) {
+  const row = card(page, machine).locator('.vs-meter[role="img"]').locator('xpath=../..');
+  return row.evaluate(element =>
+    [...element.children].map(cell => {
+      const {x, width} = cell.getBoundingClientRect();
+      return {text: cell.textContent ?? '', x, width};
+    }),
+  );
+}
+
+test('when a host stops delivering the summary line keeps its meter and its run count where they were, dimmed', async ({
+  page,
+}) => {
+  await openMachines(page, 1440, world('a busy machine'));
+  const meter = card(page, 'This Mac').locator('.vs-meter[role="img"]');
+  await expect(meter).toBeVisible();
+  await expect(meter).not.toHaveAttribute('data-dim');
+  const live = await summary(page, 'This Mac');
+  expect(live.map(each => each.text)).toEqual(['64 CPU · 8× H100', '2 live', '3 runs']);
+  const gone = {reason: 'silent', ageMs: 42_000} as const;
+  await hosts.set(page, 'local', {kind: 'stale', readings: BUSY, ...gone});
+  await hosts.setRuns(page, 'local', {alive: 2, ended: 1, stale: gone});
+  await expect(meter).toHaveAttribute('data-dim', 'true');
+  // Nothing is removed, its text is the same, and nothing moves.
+  expect(await summary(page, 'This Mac')).toEqual(live);
+  // The host answers again: the same line, current.
+  await hosts.set(page, 'local', {kind: 'live', readings: BUSY});
+  await hosts.setRuns(page, 'local', {alive: 2, ended: 1});
+  await expect(meter).not.toHaveAttribute('data-dim');
+  expect(await summary(page, 'This Mac')).toEqual(live);
+});

@@ -5,10 +5,14 @@
  * registered, and the contract suite then runs every registered topic.
  */
 import {create} from '@bufbuild/protobuf';
+import {type RecordedProjectRoot, recordedProjectRoot} from '@vibesys/hosts';
 import {
   HostService,
   type MachineStats,
   MachineStatsTopicSchema,
+  type RunHead,
+  RunLiveness,
+  RunsTopicSchema,
   type SubscribeRequest,
   SubscribeRequestSchema,
   type TopicEntry,
@@ -68,8 +72,42 @@ export const machineStats: Topic<MachineStats> = {
     onlyValue(entries, entry => (entry.value.case === 'machineStats' ? entry.value.value : null)),
 };
 
+/** What a host last said of one run: its head (absent for a phase 1 run), liveness and project. */
+export interface RunFacts {
+  readonly projectRoot: RecordedProjectRoot | undefined;
+  readonly head: RunHead | undefined;
+  readonly liveness: RunLiveness;
+}
+
+/** The runs of one host's run index, by run id. */
+export type HostRunFacts = ReadonlyMap<string, RunFacts>;
+
+/** How many of a host's runs have a writer alive: the one meaning of "live" for a run count. */
+export function aliveRuns(runs: HostRunFacts): number {
+  let alive = 0;
+  for (const run of runs.values()) if (run.liveness === RunLiveness.ALIVE) alive += 1;
+  return alive;
+}
+
+/** The run list of one host, and with a key, one run's facts. */
+export const runs: Topic<HostRunFacts> = {
+  arm: 'runs',
+  request: create(SubscribeRequestSchema, {topic: {case: 'runs', value: create(RunsTopicSchema)}}),
+  policy: topicPolicies.runs,
+  accepts: entry => entry.value.case === 'runs',
+  fold: entries => {
+    const facts = new Map<string, RunFacts>();
+    for (const [runId, entry] of entries) {
+      if (entry.value.case !== 'runs') return null;
+      const {head, liveness, projectRoot} = entry.value.value;
+      facts.set(runId, {projectRoot: recordedProjectRoot(projectRoot), head, liveness});
+    }
+    return facts;
+  },
+};
+
 /** Every topic by its arm; an arm of the request with no entry here fails to compile. */
-export const TOPICS = {machineStats} satisfies Record<TopicArm, AnyTopic>;
+export const TOPICS = {machineStats, runs} satisfies Record<TopicArm, AnyTopic>;
 
 /** Every topic, for the contract suite and for tools that list them. */
 export const ALL_TOPICS: readonly AnyTopic[] = Object.values(TOPICS);

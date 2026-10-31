@@ -20,10 +20,15 @@ export {
 export {Card} from './components/card.js';
 export {
   Chart,
+  ChartColumns,
+  ChartLegend,
+  type ChartLegendItem,
+  type ChartLegendMark,
+  ChartPanel,
   type ChartPoint,
   type ChartSize,
-  type ChartSpan,
   type ChartTick,
+  type ChartTip,
 } from './components/chart.js';
 export {ChatMessage} from './components/chat-message.js';
 export {type CheckItem, CheckList, type CheckState} from './components/check-list.js';

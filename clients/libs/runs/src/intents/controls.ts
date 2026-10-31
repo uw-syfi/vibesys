@@ -36,8 +36,8 @@ type WriterAvailability = {readonly epoch: bigint} & (
 
 /**
  * Facts are epoch-fenced: lifecycle is known only at its recorded epoch; history and launch
- * acknowledgements can prove a successor exists before lifecycle catches up. WatchRuns is
- * known until its subscription ends or its 30-second lease expires, then unknown (never alive).
+ * acknowledgements can prove a successor exists before lifecycle catches up. The host's
+ * liveness is known while its `runs` subscription delivers, then unknown (never alive).
  * The total projection yields actions, Resume, or a visible catching-up/unknown reason.
  * The liveness watch resubscribes within 31 seconds; unresolved facts ask the owning page to
  * re-read lifecycle within 30 seconds, repeatedly while the gap persists. Machine/DOM properties

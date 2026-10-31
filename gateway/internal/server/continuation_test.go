@@ -21,7 +21,7 @@ import (
 
 type fakeClock struct {
 	now      atomic.Int64
-	ticker   *fakeTicker
+	ticker   server.Ticker
 	interval time.Duration
 }
 type fakeTicker struct {
@@ -38,7 +38,7 @@ func (c *fakeClock) NewTicker(interval time.Duration) server.Ticker {
 func (t *fakeTicker) Ticks() <-chan time.Time { return t.ticks }
 func (t *fakeTicker) Stop()                   { close(t.stopped) }
 
-func TestWatchRunsDetectsBareLockReleaseOnTick(t *testing.T) {
+func TestRunsDetectsBareLockReleaseOnTick(t *testing.T) {
 	for _, withHead := range []bool{false, true} {
 		t.Run(fmt.Sprint(withHead), func(t *testing.T) {
 			ticker := &fakeTicker{ticks: make(chan time.Time, 1), stopped: make(chan struct{})}
@@ -57,7 +57,7 @@ func TestWatchRunsDetectsBareLockReleaseOnTick(t *testing.T) {
 			}
 			ctx, cancel := context.WithCancel(f.ctx)
 			defer cancel()
-			stream, err := client(t, f, false).WatchRuns(ctx, &apiv1.WatchRunsRequest{})
+			stream, err := subscribeRuns(ctx, client(t, f, false))
 			if err != nil {
 				t.Fatal(err)
 			}

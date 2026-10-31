@@ -14,10 +14,13 @@ from protobuf.wkt.google.protobuf import descriptor_pb, timestamp_pb
 from protobuf.wkt.google.protobuf.descriptor_pb import MessageOptions
 
 from ....buf.validate import validate_pb
+from ...store.v1 import skeleton_pb
 
 if TYPE_CHECKING:
     from protobuf import DescFile, Oneof
     from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
+
+    from ...store.v1.skeleton_pb import RunHead
 
 
 _TopicPolicyFields: TypeAlias = Literal["cadence_ms", "stale_after_ms", "first_frame_ms", "max_keys", "min_interval_ms", "max_value_bytes"]
@@ -57,7 +60,8 @@ class TopicPolicy(Message[_TopicPolicyFields]):
             uint32 max_keys = 4;
             ```
         min_interval_ms:
-            Smallest gap between flushes of one stream. Changed keys wait and conflate.
+            Smallest gap between the flushes of one stream after its snapshot, which is never
+            held back. Changed keys wait and conflate.
 
             ```proto
             uint32 min_interval_ms = 5;
@@ -136,7 +140,7 @@ class SubscribeTiming(Message[_SubscribeTimingFields]):
         heartbeat_ms: int
         lease_ms: int
 
-_SubscribeRequestFields: TypeAlias = Literal["machine_stats"]
+_SubscribeRequestFields: TypeAlias = Literal["machine_stats", "runs"]
 
 class SubscribeRequest(Message[_SubscribeRequestFields]):
     """
@@ -160,11 +164,11 @@ class SubscribeRequest(Message[_SubscribeRequestFields]):
         def __init__(
             self,
             *,
-            topic: Oneof[Literal["machine_stats"], MachineStatsTopic] | None = None,
+            topic: Oneof[Literal["machine_stats"], MachineStatsTopic] | Oneof[Literal["runs"], RunsTopic] | None = None,
         ) -> None:
             pass
 
-        topic: Oneof[Literal["machine_stats"], MachineStatsTopic] | None
+        topic: Oneof[Literal["machine_stats"], MachineStatsTopic] | Oneof[Literal["runs"], RunsTopic] | None
 
 _SubscribeResponseFields: TypeAlias = Literal["entry", "removed", "synced", "heartbeat", "failed"]
 
@@ -198,7 +202,7 @@ class SubscribeResponse(Message[_SubscribeResponseFields]):
 
         frame: Oneof[Literal["entry"], TopicEntry] | Oneof[Literal["removed"], str] | Oneof[Literal["synced"], Synced] | Oneof[Literal["heartbeat"], Heartbeat] | Oneof[Literal["failed"], TopicFailure] | None
 
-_TopicEntryFields: TypeAlias = Literal["key", "machine_stats"]
+_TopicEntryFields: TypeAlias = Literal["key", "machine_stats", "runs"]
 
 class TopicEntry(Message[_TopicEntryFields]):
     """
@@ -228,12 +232,12 @@ class TopicEntry(Message[_TopicEntryFields]):
             self,
             *,
             key: str = "",
-            value: Oneof[Literal["machine_stats"], MachineStats] | None = None,
+            value: Oneof[Literal["machine_stats"], MachineStats] | Oneof[Literal["runs"], RunEntry] | None = None,
         ) -> None:
             pass
 
         key: str
-        value: Oneof[Literal["machine_stats"], MachineStats] | None
+        value: Oneof[Literal["machine_stats"], MachineStats] | Oneof[Literal["runs"], RunEntry] | None
 
 _SyncedFields: TypeAlias = NoReturn
 
@@ -558,6 +562,76 @@ class Absence(Message[_AbsenceFields]):
 
         reason: AbsenceReason
 
+_RunsTopicFields: TypeAlias = NoReturn
+
+class RunsTopic(Message[_RunsTopicFields]):
+    """
+    The runs of the host's run index, keyed by run id: each run's head and whether its writer
+    is alive. Event driven: a rename in the index or a run directory is the only cause of a
+    change, and a lock probe is the only poll. A run absent from the map is not published.
+
+    ```proto
+    message vibesys.api.v1.RunsTopic
+    ```
+    """
+
+    __slots__ = ()
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+        ) -> None:
+            pass
+
+_RunEntryFields: TypeAlias = Literal["head", "liveness", "project_root"]
+
+class RunEntry(Message[_RunEntryFields]):
+    """
+    What the host last said of one run. head is absent for a phase 1 run and for a run whose
+    head cannot be read or is over the topic's bound, so one damaged run never hides the others.
+
+    ```proto
+    message vibesys.api.v1.RunEntry
+    ```
+
+    Attributes:
+        head:
+            ```proto
+            optional vibesys.store.v1.RunHead head = 1;
+            ```
+        liveness:
+            UNSPECIFIED is unknown phase 1 liveness.
+
+            ```proto
+            vibesys.api.v1.RunLiveness liveness = 2;
+            ```
+        project_root:
+            Canonical host-side project directory. A run without one has no address and cannot enter
+            project-dependent listings.
+
+            ```proto
+            optional string project_root = 3;
+            ```
+    """
+
+    __slots__ = ("head", "liveness", "project_root")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            head: RunHead | None = None,
+            liveness: RunLiveness | None = None,
+            project_root: str | None = None,
+        ) -> None:
+            pass
+
+        head: RunHead | None
+        liveness: RunLiveness
+        project_root: str
+
 class TopicFailureCode(Enum):
     """
     ```proto
@@ -651,6 +725,43 @@ class AbsenceReason(Enum):
     PARSE_FAILED = 4
     TOOL_UNVERIFIED = 5
 
+class RunLiveness(Enum):
+    """
+    ```proto
+    enum vibesys.api.v1.RunLiveness
+    ```
+
+    Attributes:
+        UNSPECIFIED:
+            ```proto
+            RUN_LIVENESS_UNSPECIFIED = 0
+            ```
+        ALIVE:
+            ```proto
+            RUN_LIVENESS_ALIVE = 1
+            ```
+        INTERRUPTED:
+            ```proto
+            RUN_LIVENESS_INTERRUPTED = 2
+            ```
+        ENDED:
+            ```proto
+            RUN_LIVENESS_ENDED = 3
+            ```
+        PARKED:
+            A cleanly drained epoch. The saved run can be relaunched.
+
+            ```proto
+            RUN_LIVENESS_PARKED = 4
+            ```
+    """
+
+    UNSPECIFIED = 0
+    ALIVE = 1
+    INTERRUPTED = 2
+    ENDED = 3
+    PARKED = 4
+
 ext_topic: Final[Extension[MessageOptions, TopicPolicy]] = Extension()
 """
 Required on every message that is an arm of SubscribeRequest.topic. The
@@ -672,11 +783,12 @@ extend google.protobuf.MessageOptions { optional vibesys.api.v1.SubscribeTiming 
 
 
 _DESC = file_desc(
-    b'\n\x1evibesys/api/v1/subscribe.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\x1a\x1fgoogle/protobuf/timestamp.proto"\xfe\x01\n\x0bTopicPolicy\x12\x1d\n\ncadence_ms\x18\x01 \x01(\rR\tcadenceMs\x12$\n\x0estale_after_ms\x18\x02 \x01(\rR\x0cstaleAfterMs\x12-\n\x0efirst_frame_ms\x18\x03 \x01(\rR\x0cfirstFrameMsB\x07\xbaH\x04*\x02 \x00\x12"\n\x08max_keys\x18\x04 \x01(\rR\x07maxKeysB\x07\xbaH\x04*\x02 \x00\x12&\n\x0fmin_interval_ms\x18\x05 \x01(\rR\rminIntervalMs\x12/\n\x0fmax_value_bytes\x18\x06 \x01(\rR\rmaxValueBytesB\x07\xbaH\x04*\x02 \x00"a\n\x0fSubscribeTiming\x12*\n\x0cheartbeat_ms\x18\x01 \x01(\rR\x0bheartbeatMsB\x07\xbaH\x04*\x02 \x00\x12"\n\x08lease_ms\x18\x02 \x01(\rR\x07leaseMsB\x07\xbaH\x04*\x02 \x00"y\n\x10SubscribeRequest\x12H\n\rmachine_stats\x18\x01 \x01(\x0b2!.vibesys.api.v1.MachineStatsTopicH\x00R\x0cmachineStatsB\x0e\n\x05topic\x12\x05\xbaH\x02\x08\x01:\x0b\xea\xf3\x18\x07\x08\x88\'\x10\xb0\xea\x01"\xa4\x02\n\x11SubscribeResponse\x122\n\x05entry\x18\x01 \x01(\x0b2\x1a.vibesys.api.v1.TopicEntryH\x00R\x05entry\x12&\n\x07removed\x18\x02 \x01(\tH\x00R\x07removedB\n\xbaH\x07r\x05\x10\x01(\x80\x01\x120\n\x06synced\x18\x03 \x01(\x0b2\x16.vibesys.api.v1.SyncedH\x00R\x06synced\x129\n\theartbeat\x18\x04 \x01(\x0b2\x19.vibesys.api.v1.HeartbeatH\x00R\theartbeat\x126\n\x06failed\x18\x05 \x01(\x0b2\x1c.vibesys.api.v1.TopicFailureH\x00R\x06failedB\x0e\n\x05frame\x12\x05\xbaH\x02\x08\x01"\x7f\n\nTopicEntry\x12\x1c\n\x03key\x18\x01 \x01(\tR\x03keyB\n\xbaH\x07r\x05\x10\x01(\x80\x01\x12C\n\rmachine_stats\x18\x02 \x01(\x0b2\x1c.vibesys.api.v1.MachineStatsH\x00R\x0cmachineStatsB\x0e\n\x05value\x12\x05\xbaH\x02\x08\x01"\x08\n\x06Synced"\x0b\n\tHeartbeat"r\n\x0cTopicFailure\x12@\n\x04code\x18\x01 \x01(\x0e2 .vibesys.api.v1.TopicFailureCodeR\x04codeB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12 \n\x06detail\x18\x02 \x01(\tR\x06detailB\x08\xbaH\x05r\x03(\x80 ")\n\x11MachineStatsTopic:\x14\xe2\xf3\x18\x10\x08\x90N\x10\xb0\xea\x01\x18\x98u \x010\x80\x80\x01"\xfa\x03\n\x0cMachineStats\x12A\n\nsampled_at\x18\x01 \x01(\x0b2\x1a.google.protobuf.TimestampR\tsampledAtB\x06\xbaH\x03\xc8\x01\x01\x127\n\tcpu_stats\x18\x02 \x01(\x0b2\x18.vibesys.api.v1.CpuStatsH\x00R\x08cpuStats\x12B\n\x0fcpu_unavailable\x18\x03 \x01(\x0b2\x17.vibesys.api.v1.AbsenceH\x00R\x0ecpuUnavailable\x12@\n\x0cmemory_stats\x18\x04 \x01(\x0b2\x1b.vibesys.api.v1.MemoryStatsH\x01R\x0bmemoryStats\x12H\n\x12memory_unavailable\x18\x05 \x01(\x0b2\x17.vibesys.api.v1.AbsenceH\x01R\x11memoryUnavailable\x12-\n\x04gpus\x18\x06 \x01(\x0b2\x17.vibesys.api.v1.GpuListH\x02R\x04gpus\x12B\n\x0fgpu_unavailable\x18\x07 \x01(\x0b2\x17.vibesys.api.v1.AbsenceH\x02R\x0egpuUnavailableB\x0c\n\x03cpu\x12\x05\xbaH\x02\x08\x01B\x0f\n\x06memory\x12\x05\xbaH\x02\x08\x01B\x0c\n\x03gpu\x12\x05\xbaH\x02\x08\x01"T\n\x08CpuStats\x12H\n\x13utilization_percent\x18\x01 \x01(\x01R\x12utilizationPercentB\x17\xbaH\x14\x12\x12\x19\x00\x00\x00\x00\x00\x00Y@)\x00\x00\x00\x00\x00\x00\x00\x00"\xca\x01\n\x0bMemoryStats\x12\x1d\n\nused_bytes\x18\x01 \x01(\x04R\tusedBytes\x12(\n\x0btotal_bytes\x18\x02 \x01(\x04R\ntotalBytesB\x07\xbaH\x042\x02 \x00:r\xbaHo\x1am\n\x1ememory_stats.used_within_total\x12&used_bytes must not exceed total_bytes\x1a#this.used_bytes <= this.total_bytes"B\n\x07GpuList\x127\n\x04gpus\x18\x01 \x03(\x0b2\x18.vibesys.api.v1.GpuStatsR\x04gpusB\t\xbaH\x06\x92\x01\x03\x10\x80\x02"\xfd\x02\n\x08GpuStats\x12\x14\n\x05index\x18\x01 \x01(\rR\x05index\x12\x1e\n\x04name\x18\x02 \x01(\tR\x04nameB\n\xbaH\x07r\x05\x10\x01(\x80\x02\x12H\n\x13utilization_percent\x18\x03 \x01(\x01R\x12utilizationPercentB\x17\xbaH\x14\x12\x12\x19\x00\x00\x00\x00\x00\x00Y@)\x00\x00\x00\x00\x00\x00\x00\x00\x12*\n\x11memory_used_bytes\x18\x04 \x01(\x04R\x0fmemoryUsedBytes\x125\n\x12memory_total_bytes\x18\x05 \x01(\x04R\x10memoryTotalBytesB\x07\xbaH\x042\x02 \x00:\x8d\x01\xbaH\x89\x01\x1a\x86\x01\n\x1bgpu_stats.used_within_total\x124memory_used_bytes must not exceed memory_total_bytes\x1a1this.memory_used_bytes <= this.memory_total_bytes"L\n\x07Absence\x12A\n\x06reason\x18\x01 \x01(\x0e2\x1d.vibesys.api.v1.AbsenceReasonR\x06reasonB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00*\xcc\x01\n\x10TopicFailureCode\x12"\n\x1eTOPIC_FAILURE_CODE_UNSPECIFIED\x10\x00\x12"\n\x1eTOPIC_FAILURE_CODE_UNSUPPORTED\x10\x01\x12)\n%TOPIC_FAILURE_CODE_RESOURCE_EXHAUSTED\x10\x02\x12$\n TOPIC_FAILURE_CODE_SOURCE_FAILED\x10\x03\x12\x1f\n\x1bTOPIC_FAILURE_CODE_INTERNAL\x10\x04*\xd5\x01\n\rAbsenceReason\x12\x1e\n\x1aABSENCE_REASON_UNSPECIFIED\x10\x00\x12!\n\x1dABSENCE_REASON_TOOL_NOT_FOUND\x10\x01\x12\x1e\n\x1aABSENCE_REASON_READ_FAILED\x10\x02\x12\x1c\n\x18ABSENCE_REASON_TIMED_OUT\x10\x03\x12\x1f\n\x1bABSENCE_REASON_PARSE_FAILED\x10\x04\x12"\n\x1eABSENCE_REASON_TOOL_UNVERIFIED\x10\x05:T\n\x05topic\x18\xbc\x8e\x03 \x01(\x0b2\x1b.vibesys.api.v1.TopicPolicy\x12\x1f.google.protobuf.MessageOptionsR\x05topic:m\n\x10subscribe_timing\x18\xbd\x8e\x03 \x01(\x0b2\x1f.vibesys.api.v1.SubscribeTiming\x12\x1f.google.protobuf.MessageOptionsR\x0fsubscribeTimingB=Z;github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1b\x06proto3',
+    b'\n\x1evibesys/api/v1/subscribe.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1fvibesys/store/v1/skeleton.proto"\xfe\x01\n\x0bTopicPolicy\x12\x1d\n\ncadence_ms\x18\x01 \x01(\rR\tcadenceMs\x12$\n\x0estale_after_ms\x18\x02 \x01(\rR\x0cstaleAfterMs\x12-\n\x0efirst_frame_ms\x18\x03 \x01(\rR\x0cfirstFrameMsB\x07\xbaH\x04*\x02 \x00\x12"\n\x08max_keys\x18\x04 \x01(\rR\x07maxKeysB\x07\xbaH\x04*\x02 \x00\x12&\n\x0fmin_interval_ms\x18\x05 \x01(\rR\rminIntervalMs\x12/\n\x0fmax_value_bytes\x18\x06 \x01(\rR\rmaxValueBytesB\x07\xbaH\x04*\x02 \x00"a\n\x0fSubscribeTiming\x12*\n\x0cheartbeat_ms\x18\x01 \x01(\rR\x0bheartbeatMsB\x07\xbaH\x04*\x02 \x00\x12"\n\x08lease_ms\x18\x02 \x01(\rR\x07leaseMsB\x07\xbaH\x04*\x02 \x00"\xaa\x01\n\x10SubscribeRequest\x12H\n\rmachine_stats\x18\x01 \x01(\x0b2!.vibesys.api.v1.MachineStatsTopicH\x00R\x0cmachineStats\x12/\n\x04runs\x18\x02 \x01(\x0b2\x19.vibesys.api.v1.RunsTopicH\x00R\x04runsB\x0e\n\x05topic\x12\x05\xbaH\x02\x08\x01:\x0b\xea\xf3\x18\x07\x08\x88\'\x10\xb0\xea\x01"\xa4\x02\n\x11SubscribeResponse\x122\n\x05entry\x18\x01 \x01(\x0b2\x1a.vibesys.api.v1.TopicEntryH\x00R\x05entry\x12&\n\x07removed\x18\x02 \x01(\tH\x00R\x07removedB\n\xbaH\x07r\x05\x10\x01(\x80\x01\x120\n\x06synced\x18\x03 \x01(\x0b2\x16.vibesys.api.v1.SyncedH\x00R\x06synced\x129\n\theartbeat\x18\x04 \x01(\x0b2\x19.vibesys.api.v1.HeartbeatH\x00R\theartbeat\x126\n\x06failed\x18\x05 \x01(\x0b2\x1c.vibesys.api.v1.TopicFailureH\x00R\x06failedB\x0e\n\x05frame\x12\x05\xbaH\x02\x08\x01"\xaf\x01\n\nTopicEntry\x12\x1c\n\x03key\x18\x01 \x01(\tR\x03keyB\n\xbaH\x07r\x05\x10\x01(\x80\x01\x12C\n\rmachine_stats\x18\x02 \x01(\x0b2\x1c.vibesys.api.v1.MachineStatsH\x00R\x0cmachineStats\x12.\n\x04runs\x18\x03 \x01(\x0b2\x18.vibesys.api.v1.RunEntryH\x00R\x04runsB\x0e\n\x05value\x12\x05\xbaH\x02\x08\x01"\x08\n\x06Synced"\x0b\n\tHeartbeat"r\n\x0cTopicFailure\x12@\n\x04code\x18\x01 \x01(\x0e2 .vibesys.api.v1.TopicFailureCodeR\x04codeB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12 \n\x06detail\x18\x02 \x01(\tR\x06detailB\x08\xbaH\x05r\x03(\x80 ")\n\x11MachineStatsTopic:\x14\xe2\xf3\x18\x10\x08\x90N\x10\xb0\xea\x01\x18\x98u \x010\x80\x80\x01"\xfa\x03\n\x0cMachineStats\x12A\n\nsampled_at\x18\x01 \x01(\x0b2\x1a.google.protobuf.TimestampR\tsampledAtB\x06\xbaH\x03\xc8\x01\x01\x127\n\tcpu_stats\x18\x02 \x01(\x0b2\x18.vibesys.api.v1.CpuStatsH\x00R\x08cpuStats\x12B\n\x0fcpu_unavailable\x18\x03 \x01(\x0b2\x17.vibesys.api.v1.AbsenceH\x00R\x0ecpuUnavailable\x12@\n\x0cmemory_stats\x18\x04 \x01(\x0b2\x1b.vibesys.api.v1.MemoryStatsH\x01R\x0bmemoryStats\x12H\n\x12memory_unavailable\x18\x05 \x01(\x0b2\x17.vibesys.api.v1.AbsenceH\x01R\x11memoryUnavailable\x12-\n\x04gpus\x18\x06 \x01(\x0b2\x17.vibesys.api.v1.GpuListH\x02R\x04gpus\x12B\n\x0fgpu_unavailable\x18\x07 \x01(\x0b2\x17.vibesys.api.v1.AbsenceH\x02R\x0egpuUnavailableB\x0c\n\x03cpu\x12\x05\xbaH\x02\x08\x01B\x0f\n\x06memory\x12\x05\xbaH\x02\x08\x01B\x0c\n\x03gpu\x12\x05\xbaH\x02\x08\x01"T\n\x08CpuStats\x12H\n\x13utilization_percent\x18\x01 \x01(\x01R\x12utilizationPercentB\x17\xbaH\x14\x12\x12\x19\x00\x00\x00\x00\x00\x00Y@)\x00\x00\x00\x00\x00\x00\x00\x00"\xca\x01\n\x0bMemoryStats\x12\x1d\n\nused_bytes\x18\x01 \x01(\x04R\tusedBytes\x12(\n\x0btotal_bytes\x18\x02 \x01(\x04R\ntotalBytesB\x07\xbaH\x042\x02 \x00:r\xbaHo\x1am\n\x1ememory_stats.used_within_total\x12&used_bytes must not exceed total_bytes\x1a#this.used_bytes <= this.total_bytes"B\n\x07GpuList\x127\n\x04gpus\x18\x01 \x03(\x0b2\x18.vibesys.api.v1.GpuStatsR\x04gpusB\t\xbaH\x06\x92\x01\x03\x10\x80\x02"\xfd\x02\n\x08GpuStats\x12\x14\n\x05index\x18\x01 \x01(\rR\x05index\x12\x1e\n\x04name\x18\x02 \x01(\tR\x04nameB\n\xbaH\x07r\x05\x10\x01(\x80\x02\x12H\n\x13utilization_percent\x18\x03 \x01(\x01R\x12utilizationPercentB\x17\xbaH\x14\x12\x12\x19\x00\x00\x00\x00\x00\x00Y@)\x00\x00\x00\x00\x00\x00\x00\x00\x12*\n\x11memory_used_bytes\x18\x04 \x01(\x04R\x0fmemoryUsedBytes\x125\n\x12memory_total_bytes\x18\x05 \x01(\x04R\x10memoryTotalBytesB\x07\xbaH\x042\x02 \x00:\x8d\x01\xbaH\x89\x01\x1a\x86\x01\n\x1bgpu_stats.used_within_total\x124memory_used_bytes must not exceed memory_total_bytes\x1a1this.memory_used_bytes <= this.memory_total_bytes"L\n\x07Absence\x12A\n\x06reason\x18\x01 \x01(\x0e2\x1d.vibesys.api.v1.AbsenceReasonR\x06reasonB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00"\x1f\n\tRunsTopic:\x12\xe2\xf3\x18\x0e\x18\xb0\xea\x01 \x80\x10(\xc8\x010\x80\x80\x10"\xba\x02\n\x08RunEntry\x12-\n\x04head\x18\x01 \x01(\x0b2\x19.vibesys.store.v1.RunHeadR\x04head\x12A\n\x08liveness\x18\x02 \x01(\x0e2\x1b.vibesys.api.v1.RunLivenessR\x08livenessB\x08\xbaH\x05\x82\x01\x02\x10\x01\x125\n\x0cproject_root\x18\x03 \x01(\tH\x00R\x0bprojectRootB\r\xbaH\nr\x08\x10\x01(\x80 :\x01/\x88\x01\x01B\x0f\n\r_project_root:t\xbaHq\x1ao\n\x1brun_entry.head_has_liveness\x12)a run with a head must state its liveness\x1a%!has(this.head) || this.liveness != 0*\xcc\x01\n\x10TopicFailureCode\x12"\n\x1eTOPIC_FAILURE_CODE_UNSPECIFIED\x10\x00\x12"\n\x1eTOPIC_FAILURE_CODE_UNSUPPORTED\x10\x01\x12)\n%TOPIC_FAILURE_CODE_RESOURCE_EXHAUSTED\x10\x02\x12$\n TOPIC_FAILURE_CODE_SOURCE_FAILED\x10\x03\x12\x1f\n\x1bTOPIC_FAILURE_CODE_INTERNAL\x10\x04*\xd5\x01\n\rAbsenceReason\x12\x1e\n\x1aABSENCE_REASON_UNSPECIFIED\x10\x00\x12!\n\x1dABSENCE_REASON_TOOL_NOT_FOUND\x10\x01\x12\x1e\n\x1aABSENCE_REASON_READ_FAILED\x10\x02\x12\x1c\n\x18ABSENCE_REASON_TIMED_OUT\x10\x03\x12\x1f\n\x1bABSENCE_REASON_PARSE_FAILED\x10\x04\x12"\n\x1eABSENCE_REASON_TOOL_UNVERIFIED\x10\x05*\x92\x01\n\x0bRunLiveness\x12\x1c\n\x18RUN_LIVENESS_UNSPECIFIED\x10\x00\x12\x16\n\x12RUN_LIVENESS_ALIVE\x10\x01\x12\x1c\n\x18RUN_LIVENESS_INTERRUPTED\x10\x02\x12\x16\n\x12RUN_LIVENESS_ENDED\x10\x03\x12\x17\n\x13RUN_LIVENESS_PARKED\x10\x04:T\n\x05topic\x18\xbc\x8e\x03 \x01(\x0b2\x1b.vibesys.api.v1.TopicPolicy\x12\x1f.google.protobuf.MessageOptionsR\x05topic:m\n\x10subscribe_timing\x18\xbd\x8e\x03 \x01(\x0b2\x1f.vibesys.api.v1.SubscribeTiming\x12\x1f.google.protobuf.MessageOptionsR\x0fsubscribeTimingB=Z;github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1b\x06proto3',
     [
         validate_pb.desc(),
         descriptor_pb.desc(),
         timestamp_pb.desc(),
+        skeleton_pb.desc(),
     ],
     {
         "TopicPolicy": TopicPolicy,
@@ -694,8 +806,11 @@ _DESC = file_desc(
         "GpuList": GpuList,
         "GpuStats": GpuStats,
         "Absence": Absence,
+        "RunsTopic": RunsTopic,
+        "RunEntry": RunEntry,
         "TopicFailureCode": TopicFailureCode,
         "AbsenceReason": AbsenceReason,
+        "RunLiveness": RunLiveness,
         "topic": ext_topic,
         "subscribe_timing": ext_subscribe_timing,
     },

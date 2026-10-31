@@ -33,7 +33,6 @@ service HostService {
   // (inclusive). Record bytes pass through unchanged; only seq is decoded.
   rpc Tail(TailRequest) returns (stream TailResponse);
   rpc Skeleton(SkeletonRequest) returns (SkeletonResponse);
-  rpc WatchRuns(WatchRunsRequest) returns (stream WatchRunsResponse);
   rpc GetBlobs(GetBlobsRequest) returns (GetBlobsResponse);
   rpc TailStream(TailStreamRequest) returns (stream TailStreamResponse);
   // Subscribe sends one topic's keyed state, then conflated changes, until the
@@ -147,44 +146,6 @@ message SkeletonResponse {
   repeated DescriptorSet descriptor_sets = 7 [(buf.validate.field).repeated.max_items = 64];
   // Core facts at committed_seq, including the retained-writer read upgrade.
   vibesys.store.v1.RunHead head = 8;
-}
-
-message WatchRunsRequest {}
-
-// Initial entries precede an initial_complete marker. Later entries replace by
-// run_id; removed is a tombstone. A phase 1 run has no head and UNSPECIFIED liveness.
-message WatchRunsResponse {
-  option (buf.validate.message).cel = {
-    id: "watch_runs.shape"
-    message: "run_id, head, liveness, removed and initial_complete must form an entry, tombstone, initial marker or heartbeat"
-    expression: "(this.initial_complete || this.heartbeat) ? (!(this.initial_complete && this.heartbeat) && this.run_id == '' && !has(this.head) && this.liveness == 0 && !this.removed) : (this.run_id != '' && (this.removed ? (!has(this.head) && this.liveness == 0) : (!has(this.head) || this.liveness != 0)))"
-  };
-  // head is absent for phase 1 runs, tombstones and the initial marker.
-  // UNSPECIFIED represents unknown phase 1 liveness and marker/tombstone absence.
-  string run_id = 1 [(buf.validate.field).string.pattern = "^([A-Za-z0-9][A-Za-z0-9_-]{0,127})?$"];
-  vibesys.store.v1.RunHead head = 2;
-  RunLiveness liveness = 3 [(buf.validate.field).enum.defined_only = true];
-  bool removed = 4;
-  bool initial_complete = 5;
-  // Emitted at least every five seconds, after all preceding run observations.
-  // A receiver expires its facts after thirty seconds without a frame.
-  bool heartbeat = 6;
-  // Canonical host-side project directory. Older gateways may omit it; those entries have no
-  // address and cannot enter project-dependent listings. Markers and tombstones omit it.
-  optional string project_root = 7 [(buf.validate.field).string = {
-    min_len: 1
-    max_bytes: 4096
-    prefix: "/"
-  }];
-}
-
-enum RunLiveness {
-  RUN_LIVENESS_UNSPECIFIED = 0;
-  RUN_LIVENESS_ALIVE = 1;
-  RUN_LIVENESS_INTERRUPTED = 2;
-  RUN_LIVENESS_ENDED = 3;
-  // A cleanly drained epoch. The saved run can be relaunched.
-  RUN_LIVENESS_PARKED = 4;
 }
 
 // Malformed hashes reject the whole request before filesystem access. File

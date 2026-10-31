@@ -50,13 +50,13 @@ for (const item of cases) {
           head: nextHead,
         }),
       );
-      // WatchRuns may be behind, ahead or missing while Tail is already committed.
+      // The runs topic may be behind, ahead or missing while Tail is already committed.
       for (const hint of [undefined, before, {...nextHead, committedSeq: seq + 1n}, nextHead]) {
         const model = projectSkeleton(load.skeleton, seq, '', {head: hint});
         const performance = model.series?.get(head.performance[0]?.series ?? '');
         expect(performance).toBeDefined();
         expect(performance?.refusal).toBeUndefined();
-        expect(heroView(model).tiles[0]?.note).not.toBe('Unavailable');
+        expect(heroView(model).headlines[0]?.note).not.toBe('Unavailable');
       }
       const checkpoint = create(KeyframeSchema, {...load.skeleton, throughSeq: seq});
       load = ingestSkeleton(

@@ -1,6 +1,6 @@
 /**
  * A gateway Fake with a link model, for simulation tests of how a run opens. It answers Skeleton,
- * Tail, WatchRuns and GetBlobs as the Go gateway does (a keyframe that fits the reply budget, then
+ * Tail and GetBlobs as the Go gateway does (a keyframe that fits the reply budget, then
  * records up to the budget, then Tail for the rest), and delivers every reply over one shared pipe
  * with a round trip and a throughput, in the virtual time of the clock that drives the test.
  */
@@ -20,7 +20,6 @@ import {
   type Record as StoreRecord,
   TailRequestSchema,
   TailResponseSchema,
-  WatchRunsResponseSchema,
 } from '@vibesys/proto';
 import {type AbortSignalLike, registerAbort, type ScheduleTimeout} from '@vibesys/transport';
 import type {RunTransport} from './loader.js';
@@ -128,9 +127,6 @@ export interface SimClock {
   readonly schedule: ScheduleTimeout;
 }
 
-/** The service's WatchRuns heartbeat interval. */
-const HEARTBEAT_MS = 5000;
-
 export class SimGateway implements RunTransport {
   readonly calls: SimCall[] = [];
   readonly deliveries: SimDelivery[] = [];
@@ -190,27 +186,9 @@ export class SimGateway implements RunTransport {
     const call = this.begin(method, request, signal);
     if (call.fault?.kind === 'down') await this.arrive(method, 0, signal, true);
     this.refuse(call.fault);
-    if (method !== `${SERVICE}WatchRuns`) this.requireLog();
+    this.requireLog();
     const cut = call.fault?.kind === 'cut' ? call.fault : undefined;
     let sent = 0;
-    if (method === `${SERVICE}WatchRuns`) {
-      const hello = toBinary(
-        WatchRunsResponseSchema,
-        create(WatchRunsResponseSchema, {initialComplete: true}),
-      );
-      await this.arrive(method, hello.length, signal);
-      yield hello;
-      // As the service does: a heartbeat every few seconds for as long as the stream is open.
-      const beat = toBinary(
-        WatchRunsResponseSchema,
-        create(WatchRunsResponseSchema, {heartbeat: true}),
-      );
-      while (await this.sleep(HEARTBEAT_MS, signal)) {
-        await this.arrive(method, beat.length, signal);
-        yield beat;
-      }
-      return;
-    }
     if (method !== `${SERVICE}Tail`) throw new Error(`Unknown stream method ${method}`);
     for await (const message of this.tail(request, signal)) {
       if (cut && sent >= cut.afterMessages) {
@@ -221,24 +199,6 @@ export class SimGateway implements RunTransport {
       sent += 1;
       yield message;
     }
-  }
-
-  /** Wait `ms` of virtual time: true when it passed, false when the stream was cancelled first. */
-  private sleep(ms: number, signal: AbortSignalLike): Promise<boolean> {
-    return new Promise<boolean>(resolve => {
-      const cancel = this.clock.schedule(() => {
-        registration.detach();
-        resolve(true);
-      }, ms);
-      const registration = registerAbort(signal, () => {
-        cancel();
-        resolve(false);
-      });
-      if (registration.aborted) {
-        cancel();
-        resolve(false);
-      }
-    });
   }
 
   private begin(method: string, request: Uint8Array, signal: AbortSignalLike) {

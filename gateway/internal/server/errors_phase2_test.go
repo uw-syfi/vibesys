@@ -91,7 +91,7 @@ func TestSkeletonDoesNotReadUncommittedCorruption(t *testing.T) {
 	}
 }
 
-func TestWatchRunsIndexCreatedAfterSubscription(t *testing.T) {
+func TestRunsIndexCreatedAfterSubscription(t *testing.T) {
 	f := start(t)
 	if err := os.Remove(filepath.Join(f.root, "runs", "run-1")); err != nil {
 		t.Fatal(err)
@@ -99,7 +99,7 @@ func TestWatchRunsIndexCreatedAfterSubscription(t *testing.T) {
 	if err := os.Remove(filepath.Join(f.root, "runs")); err != nil {
 		t.Fatal(err)
 	}
-	stream, err := client(t, f, false).WatchRuns(f.ctx, &apiv1.WatchRunsRequest{})
+	stream, err := subscribeRuns(f.ctx, client(t, f, false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestSkeletonBeforeLogCreation(t *testing.T) {
 	}
 }
 
-func TestWatchRunsDoesNotMistakeAnotherProbeForWriter(t *testing.T) {
+func TestRunsDoesNotMistakeAnotherProbeForWriter(t *testing.T) {
 	f := start(t)
 	lock, err := os.OpenFile(filepath.Join(f.run, "run.lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
@@ -151,7 +151,7 @@ func TestWatchRunsDoesNotMistakeAnotherProbeForWriter(t *testing.T) {
 		t.Fatal(err)
 	}
 	publishHead(t, f, head(proto.Uint64(0)))
-	stream, err := client(t, f, false).WatchRuns(f.ctx, &apiv1.WatchRunsRequest{})
+	stream, err := subscribeRuns(f.ctx, client(t, f, false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +181,7 @@ func TestPhase1SequenceZeroRemainsReadable(t *testing.T) {
 	}
 }
 
-func TestWatchRunsReadsAnEpochAwaitingItsFirstLifecycle(t *testing.T) {
+func TestRunsReadsAnEpochAwaitingItsFirstLifecycle(t *testing.T) {
 	f := start(t)
 	pending := head(proto.Uint64(0))
 	pending.Epoch = 5
@@ -189,7 +189,7 @@ func TestWatchRunsReadsAnEpochAwaitingItsFirstLifecycle(t *testing.T) {
 	pending.AwaitingLifecycle = true
 	publishHead(t, f, pending)
 	c := client(t, f, false)
-	stream, err := c.WatchRuns(f.ctx, &apiv1.WatchRunsRequest{})
+	stream, err := subscribeRuns(f.ctx, c)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +202,7 @@ func TestWatchRunsReadsAnEpochAwaitingItsFirstLifecycle(t *testing.T) {
 	}
 }
 
-func TestWatchRunsParkedEpochIsReadableAfterWriterReleasesLock(t *testing.T) {
+func TestRunsParkedEpochIsReadableAfterWriterReleasesLock(t *testing.T) {
 	for _, lockExists := range []bool{false, true} {
 		t.Run(fmt.Sprintf("lock-file-%t", lockExists), func(t *testing.T) {
 			f := start(t)
@@ -219,7 +219,7 @@ func TestWatchRunsParkedEpochIsReadableAfterWriterReleasesLock(t *testing.T) {
 			parked.Lifecycle = &storev1.Lifecycle{State: &storev1.Lifecycle_Parked{Parked: &storev1.Parked{}}}
 			publishHead(t, f, parked)
 			c := client(t, f, false)
-			stream, err := c.WatchRuns(f.ctx, &apiv1.WatchRunsRequest{})
+			stream, err := subscribeRuns(f.ctx, c)
 			if err != nil {
 				t.Fatal(err)
 			}

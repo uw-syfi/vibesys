@@ -85,15 +85,15 @@ func damages(log, head []byte) []struct {
 }
 
 // listing reads the initial listing of the host, which must complete.
-func listing(t *testing.T, f fixture, c apiv1.HostServiceClient) map[string]*apiv1.WatchRunsResponse {
+func listing(t *testing.T, f fixture, c apiv1.HostServiceClient) map[string]*apiv1.RunEntry {
 	t.Helper()
 	ctx, cancel := context.WithCancel(f.ctx)
 	defer cancel()
-	stream, err := c.WatchRuns(ctx, &apiv1.WatchRunsRequest{})
+	stream, err := subscribeRuns(ctx, c)
 	if err != nil {
 		t.Fatal(err)
 	}
-	runs := map[string]*apiv1.WatchRunsResponse{}
+	runs := map[string]*apiv1.RunEntry{}
 	for {
 		got, err := stream.Recv()
 		if err != nil {
@@ -103,14 +103,14 @@ func listing(t *testing.T, f fixture, c apiv1.HostServiceClient) map[string]*api
 		case got.InitialComplete:
 			return runs
 		case got.RunId != "":
-			runs[got.RunId] = got
+			runs[got.RunId] = got.RunEntry
 		}
 	}
 }
 
 // A read error in one run's data stays inside that run: the other runs list with the same
 // facts, and the damaged run is still listed by name.
-func TestWatchRunsListsHealthyRunsBesideADamagedOne(t *testing.T) {
+func TestRunsListsHealthyRunsBesideADamagedOne(t *testing.T) {
 	for _, name := range corpusCases(t) {
 		log, head := readCorpus(t, name, "run.log"), readCorpus(t, name, "run.head")
 		f := start(t)

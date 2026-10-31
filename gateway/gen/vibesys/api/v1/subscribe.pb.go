@@ -8,6 +8,7 @@ package apiv1
 
 import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
+	v1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	descriptorpb "google.golang.org/protobuf/types/descriptorpb"
@@ -146,6 +147,62 @@ func (AbsenceReason) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_api_v1_subscribe_proto_rawDescGZIP(), []int{1}
 }
 
+type RunLiveness int32
+
+const (
+	RunLiveness_RUN_LIVENESS_UNSPECIFIED RunLiveness = 0
+	RunLiveness_RUN_LIVENESS_ALIVE       RunLiveness = 1
+	RunLiveness_RUN_LIVENESS_INTERRUPTED RunLiveness = 2
+	RunLiveness_RUN_LIVENESS_ENDED       RunLiveness = 3
+	// A cleanly drained epoch. The saved run can be relaunched.
+	RunLiveness_RUN_LIVENESS_PARKED RunLiveness = 4
+)
+
+// Enum value maps for RunLiveness.
+var (
+	RunLiveness_name = map[int32]string{
+		0: "RUN_LIVENESS_UNSPECIFIED",
+		1: "RUN_LIVENESS_ALIVE",
+		2: "RUN_LIVENESS_INTERRUPTED",
+		3: "RUN_LIVENESS_ENDED",
+		4: "RUN_LIVENESS_PARKED",
+	}
+	RunLiveness_value = map[string]int32{
+		"RUN_LIVENESS_UNSPECIFIED": 0,
+		"RUN_LIVENESS_ALIVE":       1,
+		"RUN_LIVENESS_INTERRUPTED": 2,
+		"RUN_LIVENESS_ENDED":       3,
+		"RUN_LIVENESS_PARKED":      4,
+	}
+)
+
+func (x RunLiveness) Enum() *RunLiveness {
+	p := new(RunLiveness)
+	*p = x
+	return p
+}
+
+func (x RunLiveness) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (RunLiveness) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_api_v1_subscribe_proto_enumTypes[2].Descriptor()
+}
+
+func (RunLiveness) Type() protoreflect.EnumType {
+	return &file_vibesys_api_v1_subscribe_proto_enumTypes[2]
+}
+
+func (x RunLiveness) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use RunLiveness.Descriptor instead.
+func (RunLiveness) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_api_v1_subscribe_proto_rawDescGZIP(), []int{2}
+}
+
 // One topic's fixed cadence and bounds, projected into generated Go and TypeScript tables.
 type TopicPolicy struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -158,7 +215,8 @@ type TopicPolicy struct {
 	FirstFrameMs uint32 `protobuf:"varint,3,opt,name=first_frame_ms,json=firstFrameMs,proto3" json:"first_frame_ms,omitempty"`
 	// A breach ends the stream with RESOURCE_EXHAUSTED. Nothing is ever truncated.
 	MaxKeys uint32 `protobuf:"varint,4,opt,name=max_keys,json=maxKeys,proto3" json:"max_keys,omitempty"`
-	// Smallest gap between flushes of one stream. Changed keys wait and conflate.
+	// Smallest gap between the flushes of one stream after its snapshot, which is never
+	// held back. Changed keys wait and conflate.
 	MinIntervalMs uint32 `protobuf:"varint,5,opt,name=min_interval_ms,json=minIntervalMs,proto3" json:"min_interval_ms,omitempty"`
 	// A breach ends the stream with RESOURCE_EXHAUSTED.
 	MaxValueBytes uint32 `protobuf:"varint,6,opt,name=max_value_bytes,json=maxValueBytes,proto3" json:"max_value_bytes,omitempty"`
@@ -302,6 +360,7 @@ type SubscribeRequest struct {
 	// Types that are valid to be assigned to Topic:
 	//
 	//	*SubscribeRequest_MachineStats
+	//	*SubscribeRequest_Runs
 	Topic         isSubscribeRequest_Topic `protobuf_oneof:"topic"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -353,6 +412,15 @@ func (x *SubscribeRequest) GetMachineStats() *MachineStatsTopic {
 	return nil
 }
 
+func (x *SubscribeRequest) GetRuns() *RunsTopic {
+	if x != nil {
+		if x, ok := x.Topic.(*SubscribeRequest_Runs); ok {
+			return x.Runs
+		}
+	}
+	return nil
+}
+
 type isSubscribeRequest_Topic interface {
 	isSubscribeRequest_Topic()
 }
@@ -361,7 +429,13 @@ type SubscribeRequest_MachineStats struct {
 	MachineStats *MachineStatsTopic `protobuf:"bytes,1,opt,name=machine_stats,json=machineStats,proto3,oneof"`
 }
 
+type SubscribeRequest_Runs struct {
+	Runs *RunsTopic `protobuf:"bytes,2,opt,name=runs,proto3,oneof"`
+}
+
 func (*SubscribeRequest_MachineStats) isSubscribeRequest_Topic() {}
+
+func (*SubscribeRequest_Runs) isSubscribeRequest_Topic() {}
 
 // Entries and removals until synced form one complete snapshot; later frames
 // change it. A value may be skipped, but each key's values stay in order. A new
@@ -509,6 +583,7 @@ type TopicEntry struct {
 	// Types that are valid to be assigned to Value:
 	//
 	//	*TopicEntry_MachineStats
+	//	*TopicEntry_Runs
 	Value         isTopicEntry_Value `protobuf_oneof:"value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -567,6 +642,15 @@ func (x *TopicEntry) GetMachineStats() *MachineStats {
 	return nil
 }
 
+func (x *TopicEntry) GetRuns() *RunEntry {
+	if x != nil {
+		if x, ok := x.Value.(*TopicEntry_Runs); ok {
+			return x.Runs
+		}
+	}
+	return nil
+}
+
 type isTopicEntry_Value interface {
 	isTopicEntry_Value()
 }
@@ -575,7 +659,13 @@ type TopicEntry_MachineStats struct {
 	MachineStats *MachineStats `protobuf:"bytes,2,opt,name=machine_stats,json=machineStats,proto3,oneof"`
 }
 
+type TopicEntry_Runs struct {
+	Runs *RunEntry `protobuf:"bytes,3,opt,name=runs,proto3,oneof"`
+}
+
 func (*TopicEntry_MachineStats) isTopicEntry_Value() {}
+
+func (*TopicEntry_Runs) isTopicEntry_Value() {}
 
 type Synced struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1190,6 +1280,110 @@ func (x *Absence) GetReason() AbsenceReason {
 	return AbsenceReason_ABSENCE_REASON_UNSPECIFIED
 }
 
+// The runs of the host's run index, keyed by run id: each run's head and whether its writer
+// is alive. Event driven: a rename in the index or a run directory is the only cause of a
+// change, and a lock probe is the only poll. A run absent from the map is not published.
+type RunsTopic struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RunsTopic) Reset() {
+	*x = RunsTopic{}
+	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RunsTopic) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RunsTopic) ProtoMessage() {}
+
+func (x *RunsTopic) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RunsTopic.ProtoReflect.Descriptor instead.
+func (*RunsTopic) Descriptor() ([]byte, []int) {
+	return file_vibesys_api_v1_subscribe_proto_rawDescGZIP(), []int{15}
+}
+
+// What the host last said of one run. head is absent for a phase 1 run and for a run whose
+// head cannot be read or is over the topic's bound, so one damaged run never hides the others.
+type RunEntry struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Head  *v1.RunHead            `protobuf:"bytes,1,opt,name=head,proto3" json:"head,omitempty"`
+	// UNSPECIFIED is unknown phase 1 liveness.
+	Liveness RunLiveness `protobuf:"varint,2,opt,name=liveness,proto3,enum=vibesys.api.v1.RunLiveness" json:"liveness,omitempty"`
+	// Canonical host-side project directory. A run without one has no address and cannot enter
+	// project-dependent listings.
+	ProjectRoot   *string `protobuf:"bytes,3,opt,name=project_root,json=projectRoot,proto3,oneof" json:"project_root,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RunEntry) Reset() {
+	*x = RunEntry{}
+	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RunEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RunEntry) ProtoMessage() {}
+
+func (x *RunEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_api_v1_subscribe_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RunEntry.ProtoReflect.Descriptor instead.
+func (*RunEntry) Descriptor() ([]byte, []int) {
+	return file_vibesys_api_v1_subscribe_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *RunEntry) GetHead() *v1.RunHead {
+	if x != nil {
+		return x.Head
+	}
+	return nil
+}
+
+func (x *RunEntry) GetLiveness() RunLiveness {
+	if x != nil {
+		return x.Liveness
+	}
+	return RunLiveness_RUN_LIVENESS_UNSPECIFIED
+}
+
+func (x *RunEntry) GetProjectRoot() string {
+	if x != nil && x.ProjectRoot != nil {
+		return *x.ProjectRoot
+	}
+	return ""
+}
+
 var file_vibesys_api_v1_subscribe_proto_extTypes = []protoimpl.ExtensionInfo{
 	{
 		ExtendedType:  (*descriptorpb.MessageOptions)(nil),
@@ -1226,7 +1420,7 @@ var File_vibesys_api_v1_subscribe_proto protoreflect.FileDescriptor
 
 const file_vibesys_api_v1_subscribe_proto_rawDesc = "" +
 	"\n" +
-	"\x1evibesys/api/v1/subscribe.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xfe\x01\n" +
+	"\x1evibesys/api/v1/subscribe.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1fvibesys/store/v1/skeleton.proto\"\xfe\x01\n" +
 	"\vTopicPolicy\x12\x1d\n" +
 	"\n" +
 	"cadence_ms\x18\x01 \x01(\rR\tcadenceMs\x12$\n" +
@@ -1237,9 +1431,10 @@ const file_vibesys_api_v1_subscribe_proto_rawDesc = "" +
 	"\x0fmax_value_bytes\x18\x06 \x01(\rB\a\xbaH\x04*\x02 \x00R\rmaxValueBytes\"a\n" +
 	"\x0fSubscribeTiming\x12*\n" +
 	"\fheartbeat_ms\x18\x01 \x01(\rB\a\xbaH\x04*\x02 \x00R\vheartbeatMs\x12\"\n" +
-	"\blease_ms\x18\x02 \x01(\rB\a\xbaH\x04*\x02 \x00R\aleaseMs\"y\n" +
+	"\blease_ms\x18\x02 \x01(\rB\a\xbaH\x04*\x02 \x00R\aleaseMs\"\xaa\x01\n" +
 	"\x10SubscribeRequest\x12H\n" +
-	"\rmachine_stats\x18\x01 \x01(\v2!.vibesys.api.v1.MachineStatsTopicH\x00R\fmachineStats:\v\xea\xf3\x18\a\b\x88'\x10\xb0\xea\x01B\x0e\n" +
+	"\rmachine_stats\x18\x01 \x01(\v2!.vibesys.api.v1.MachineStatsTopicH\x00R\fmachineStats\x12/\n" +
+	"\x04runs\x18\x02 \x01(\v2\x19.vibesys.api.v1.RunsTopicH\x00R\x04runs:\v\xea\xf3\x18\a\b\x88'\x10\xb0\xea\x01B\x0e\n" +
 	"\x05topic\x12\x05\xbaH\x02\b\x01\"\xa4\x02\n" +
 	"\x11SubscribeResponse\x122\n" +
 	"\x05entry\x18\x01 \x01(\v2\x1a.vibesys.api.v1.TopicEntryH\x00R\x05entry\x12&\n" +
@@ -1248,12 +1443,13 @@ const file_vibesys_api_v1_subscribe_proto_rawDesc = "" +
 	"\x06synced\x18\x03 \x01(\v2\x16.vibesys.api.v1.SyncedH\x00R\x06synced\x129\n" +
 	"\theartbeat\x18\x04 \x01(\v2\x19.vibesys.api.v1.HeartbeatH\x00R\theartbeat\x126\n" +
 	"\x06failed\x18\x05 \x01(\v2\x1c.vibesys.api.v1.TopicFailureH\x00R\x06failedB\x0e\n" +
-	"\x05frame\x12\x05\xbaH\x02\b\x01\"\x7f\n" +
+	"\x05frame\x12\x05\xbaH\x02\b\x01\"\xaf\x01\n" +
 	"\n" +
 	"TopicEntry\x12\x1c\n" +
 	"\x03key\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01(\x80\x01R\x03key\x12C\n" +
-	"\rmachine_stats\x18\x02 \x01(\v2\x1c.vibesys.api.v1.MachineStatsH\x00R\fmachineStatsB\x0e\n" +
+	"\rmachine_stats\x18\x02 \x01(\v2\x1c.vibesys.api.v1.MachineStatsH\x00R\fmachineStats\x12.\n" +
+	"\x04runs\x18\x03 \x01(\v2\x18.vibesys.api.v1.RunEntryH\x00R\x04runsB\x0e\n" +
 	"\x05value\x12\x05\xbaH\x02\b\x01\"\b\n" +
 	"\x06Synced\"\v\n" +
 	"\tHeartbeat\"r\n" +
@@ -1294,7 +1490,15 @@ const file_vibesys_api_v1_subscribe_proto_rawDesc = "" +
 	"\x1bgpu_stats.used_within_total\x124memory_used_bytes must not exceed memory_total_bytes\x1a1this.memory_used_bytes <= this.memory_total_bytes\"L\n" +
 	"\aAbsence\x12A\n" +
 	"\x06reason\x18\x01 \x01(\x0e2\x1d.vibesys.api.v1.AbsenceReasonB\n" +
-	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06reason*\xcc\x01\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06reason\"\x1f\n" +
+	"\tRunsTopic:\x12\xe2\xf3\x18\x0e\x18\xb0\xea\x01 \x80\x10(\xc8\x010\x80\x80\x10\"\xba\x02\n" +
+	"\bRunEntry\x12-\n" +
+	"\x04head\x18\x01 \x01(\v2\x19.vibesys.store.v1.RunHeadR\x04head\x12A\n" +
+	"\bliveness\x18\x02 \x01(\x0e2\x1b.vibesys.api.v1.RunLivenessB\b\xbaH\x05\x82\x01\x02\x10\x01R\bliveness\x125\n" +
+	"\fproject_root\x18\x03 \x01(\tB\r\xbaH\n" +
+	"r\b\x10\x01(\x80 :\x01/H\x00R\vprojectRoot\x88\x01\x01:t\xbaHq\x1ao\n" +
+	"\x1brun_entry.head_has_liveness\x12)a run with a head must state its liveness\x1a%!has(this.head) || this.liveness != 0B\x0f\n" +
+	"\r_project_root*\xcc\x01\n" +
 	"\x10TopicFailureCode\x12\"\n" +
 	"\x1eTOPIC_FAILURE_CODE_UNSPECIFIED\x10\x00\x12\"\n" +
 	"\x1eTOPIC_FAILURE_CODE_UNSUPPORTED\x10\x01\x12)\n" +
@@ -1307,7 +1511,13 @@ const file_vibesys_api_v1_subscribe_proto_rawDesc = "" +
 	"\x1aABSENCE_REASON_READ_FAILED\x10\x02\x12\x1c\n" +
 	"\x18ABSENCE_REASON_TIMED_OUT\x10\x03\x12\x1f\n" +
 	"\x1bABSENCE_REASON_PARSE_FAILED\x10\x04\x12\"\n" +
-	"\x1eABSENCE_REASON_TOOL_UNVERIFIED\x10\x05:T\n" +
+	"\x1eABSENCE_REASON_TOOL_UNVERIFIED\x10\x05*\x92\x01\n" +
+	"\vRunLiveness\x12\x1c\n" +
+	"\x18RUN_LIVENESS_UNSPECIFIED\x10\x00\x12\x16\n" +
+	"\x12RUN_LIVENESS_ALIVE\x10\x01\x12\x1c\n" +
+	"\x18RUN_LIVENESS_INTERRUPTED\x10\x02\x12\x16\n" +
+	"\x12RUN_LIVENESS_ENDED\x10\x03\x12\x17\n" +
+	"\x13RUN_LIVENESS_PARKED\x10\x04:T\n" +
 	"\x05topic\x12\x1f.google.protobuf.MessageOptions\x18\xbc\x8e\x03 \x01(\v2\x1b.vibesys.api.v1.TopicPolicyR\x05topic:m\n" +
 	"\x10subscribe_timing\x12\x1f.google.protobuf.MessageOptions\x18\xbd\x8e\x03 \x01(\v2\x1f.vibesys.api.v1.SubscribeTimingR\x0fsubscribeTimingB=Z;github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1b\x06proto3"
 
@@ -1323,55 +1533,63 @@ func file_vibesys_api_v1_subscribe_proto_rawDescGZIP() []byte {
 	return file_vibesys_api_v1_subscribe_proto_rawDescData
 }
 
-var file_vibesys_api_v1_subscribe_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_vibesys_api_v1_subscribe_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_vibesys_api_v1_subscribe_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+var file_vibesys_api_v1_subscribe_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_vibesys_api_v1_subscribe_proto_goTypes = []any{
 	(TopicFailureCode)(0),               // 0: vibesys.api.v1.TopicFailureCode
 	(AbsenceReason)(0),                  // 1: vibesys.api.v1.AbsenceReason
-	(*TopicPolicy)(nil),                 // 2: vibesys.api.v1.TopicPolicy
-	(*SubscribeTiming)(nil),             // 3: vibesys.api.v1.SubscribeTiming
-	(*SubscribeRequest)(nil),            // 4: vibesys.api.v1.SubscribeRequest
-	(*SubscribeResponse)(nil),           // 5: vibesys.api.v1.SubscribeResponse
-	(*TopicEntry)(nil),                  // 6: vibesys.api.v1.TopicEntry
-	(*Synced)(nil),                      // 7: vibesys.api.v1.Synced
-	(*Heartbeat)(nil),                   // 8: vibesys.api.v1.Heartbeat
-	(*TopicFailure)(nil),                // 9: vibesys.api.v1.TopicFailure
-	(*MachineStatsTopic)(nil),           // 10: vibesys.api.v1.MachineStatsTopic
-	(*MachineStats)(nil),                // 11: vibesys.api.v1.MachineStats
-	(*CpuStats)(nil),                    // 12: vibesys.api.v1.CpuStats
-	(*MemoryStats)(nil),                 // 13: vibesys.api.v1.MemoryStats
-	(*GpuList)(nil),                     // 14: vibesys.api.v1.GpuList
-	(*GpuStats)(nil),                    // 15: vibesys.api.v1.GpuStats
-	(*Absence)(nil),                     // 16: vibesys.api.v1.Absence
-	(*timestamppb.Timestamp)(nil),       // 17: google.protobuf.Timestamp
-	(*descriptorpb.MessageOptions)(nil), // 18: google.protobuf.MessageOptions
+	(RunLiveness)(0),                    // 2: vibesys.api.v1.RunLiveness
+	(*TopicPolicy)(nil),                 // 3: vibesys.api.v1.TopicPolicy
+	(*SubscribeTiming)(nil),             // 4: vibesys.api.v1.SubscribeTiming
+	(*SubscribeRequest)(nil),            // 5: vibesys.api.v1.SubscribeRequest
+	(*SubscribeResponse)(nil),           // 6: vibesys.api.v1.SubscribeResponse
+	(*TopicEntry)(nil),                  // 7: vibesys.api.v1.TopicEntry
+	(*Synced)(nil),                      // 8: vibesys.api.v1.Synced
+	(*Heartbeat)(nil),                   // 9: vibesys.api.v1.Heartbeat
+	(*TopicFailure)(nil),                // 10: vibesys.api.v1.TopicFailure
+	(*MachineStatsTopic)(nil),           // 11: vibesys.api.v1.MachineStatsTopic
+	(*MachineStats)(nil),                // 12: vibesys.api.v1.MachineStats
+	(*CpuStats)(nil),                    // 13: vibesys.api.v1.CpuStats
+	(*MemoryStats)(nil),                 // 14: vibesys.api.v1.MemoryStats
+	(*GpuList)(nil),                     // 15: vibesys.api.v1.GpuList
+	(*GpuStats)(nil),                    // 16: vibesys.api.v1.GpuStats
+	(*Absence)(nil),                     // 17: vibesys.api.v1.Absence
+	(*RunsTopic)(nil),                   // 18: vibesys.api.v1.RunsTopic
+	(*RunEntry)(nil),                    // 19: vibesys.api.v1.RunEntry
+	(*timestamppb.Timestamp)(nil),       // 20: google.protobuf.Timestamp
+	(*v1.RunHead)(nil),                  // 21: vibesys.store.v1.RunHead
+	(*descriptorpb.MessageOptions)(nil), // 22: google.protobuf.MessageOptions
 }
 var file_vibesys_api_v1_subscribe_proto_depIdxs = []int32{
-	10, // 0: vibesys.api.v1.SubscribeRequest.machine_stats:type_name -> vibesys.api.v1.MachineStatsTopic
-	6,  // 1: vibesys.api.v1.SubscribeResponse.entry:type_name -> vibesys.api.v1.TopicEntry
-	7,  // 2: vibesys.api.v1.SubscribeResponse.synced:type_name -> vibesys.api.v1.Synced
-	8,  // 3: vibesys.api.v1.SubscribeResponse.heartbeat:type_name -> vibesys.api.v1.Heartbeat
-	9,  // 4: vibesys.api.v1.SubscribeResponse.failed:type_name -> vibesys.api.v1.TopicFailure
-	11, // 5: vibesys.api.v1.TopicEntry.machine_stats:type_name -> vibesys.api.v1.MachineStats
-	0,  // 6: vibesys.api.v1.TopicFailure.code:type_name -> vibesys.api.v1.TopicFailureCode
-	17, // 7: vibesys.api.v1.MachineStats.sampled_at:type_name -> google.protobuf.Timestamp
-	12, // 8: vibesys.api.v1.MachineStats.cpu_stats:type_name -> vibesys.api.v1.CpuStats
-	16, // 9: vibesys.api.v1.MachineStats.cpu_unavailable:type_name -> vibesys.api.v1.Absence
-	13, // 10: vibesys.api.v1.MachineStats.memory_stats:type_name -> vibesys.api.v1.MemoryStats
-	16, // 11: vibesys.api.v1.MachineStats.memory_unavailable:type_name -> vibesys.api.v1.Absence
-	14, // 12: vibesys.api.v1.MachineStats.gpus:type_name -> vibesys.api.v1.GpuList
-	16, // 13: vibesys.api.v1.MachineStats.gpu_unavailable:type_name -> vibesys.api.v1.Absence
-	15, // 14: vibesys.api.v1.GpuList.gpus:type_name -> vibesys.api.v1.GpuStats
-	1,  // 15: vibesys.api.v1.Absence.reason:type_name -> vibesys.api.v1.AbsenceReason
-	18, // 16: vibesys.api.v1.topic:extendee -> google.protobuf.MessageOptions
-	18, // 17: vibesys.api.v1.subscribe_timing:extendee -> google.protobuf.MessageOptions
-	2,  // 18: vibesys.api.v1.topic:type_name -> vibesys.api.v1.TopicPolicy
-	3,  // 19: vibesys.api.v1.subscribe_timing:type_name -> vibesys.api.v1.SubscribeTiming
-	20, // [20:20] is the sub-list for method output_type
-	20, // [20:20] is the sub-list for method input_type
-	18, // [18:20] is the sub-list for extension type_name
-	16, // [16:18] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	11, // 0: vibesys.api.v1.SubscribeRequest.machine_stats:type_name -> vibesys.api.v1.MachineStatsTopic
+	18, // 1: vibesys.api.v1.SubscribeRequest.runs:type_name -> vibesys.api.v1.RunsTopic
+	7,  // 2: vibesys.api.v1.SubscribeResponse.entry:type_name -> vibesys.api.v1.TopicEntry
+	8,  // 3: vibesys.api.v1.SubscribeResponse.synced:type_name -> vibesys.api.v1.Synced
+	9,  // 4: vibesys.api.v1.SubscribeResponse.heartbeat:type_name -> vibesys.api.v1.Heartbeat
+	10, // 5: vibesys.api.v1.SubscribeResponse.failed:type_name -> vibesys.api.v1.TopicFailure
+	12, // 6: vibesys.api.v1.TopicEntry.machine_stats:type_name -> vibesys.api.v1.MachineStats
+	19, // 7: vibesys.api.v1.TopicEntry.runs:type_name -> vibesys.api.v1.RunEntry
+	0,  // 8: vibesys.api.v1.TopicFailure.code:type_name -> vibesys.api.v1.TopicFailureCode
+	20, // 9: vibesys.api.v1.MachineStats.sampled_at:type_name -> google.protobuf.Timestamp
+	13, // 10: vibesys.api.v1.MachineStats.cpu_stats:type_name -> vibesys.api.v1.CpuStats
+	17, // 11: vibesys.api.v1.MachineStats.cpu_unavailable:type_name -> vibesys.api.v1.Absence
+	14, // 12: vibesys.api.v1.MachineStats.memory_stats:type_name -> vibesys.api.v1.MemoryStats
+	17, // 13: vibesys.api.v1.MachineStats.memory_unavailable:type_name -> vibesys.api.v1.Absence
+	15, // 14: vibesys.api.v1.MachineStats.gpus:type_name -> vibesys.api.v1.GpuList
+	17, // 15: vibesys.api.v1.MachineStats.gpu_unavailable:type_name -> vibesys.api.v1.Absence
+	16, // 16: vibesys.api.v1.GpuList.gpus:type_name -> vibesys.api.v1.GpuStats
+	1,  // 17: vibesys.api.v1.Absence.reason:type_name -> vibesys.api.v1.AbsenceReason
+	21, // 18: vibesys.api.v1.RunEntry.head:type_name -> vibesys.store.v1.RunHead
+	2,  // 19: vibesys.api.v1.RunEntry.liveness:type_name -> vibesys.api.v1.RunLiveness
+	22, // 20: vibesys.api.v1.topic:extendee -> google.protobuf.MessageOptions
+	22, // 21: vibesys.api.v1.subscribe_timing:extendee -> google.protobuf.MessageOptions
+	3,  // 22: vibesys.api.v1.topic:type_name -> vibesys.api.v1.TopicPolicy
+	4,  // 23: vibesys.api.v1.subscribe_timing:type_name -> vibesys.api.v1.SubscribeTiming
+	24, // [24:24] is the sub-list for method output_type
+	24, // [24:24] is the sub-list for method input_type
+	22, // [22:24] is the sub-list for extension type_name
+	20, // [20:22] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_api_v1_subscribe_proto_init() }
@@ -1381,6 +1599,7 @@ func file_vibesys_api_v1_subscribe_proto_init() {
 	}
 	file_vibesys_api_v1_subscribe_proto_msgTypes[2].OneofWrappers = []any{
 		(*SubscribeRequest_MachineStats)(nil),
+		(*SubscribeRequest_Runs)(nil),
 	}
 	file_vibesys_api_v1_subscribe_proto_msgTypes[3].OneofWrappers = []any{
 		(*SubscribeResponse_Entry)(nil),
@@ -1391,6 +1610,7 @@ func file_vibesys_api_v1_subscribe_proto_init() {
 	}
 	file_vibesys_api_v1_subscribe_proto_msgTypes[4].OneofWrappers = []any{
 		(*TopicEntry_MachineStats)(nil),
+		(*TopicEntry_Runs)(nil),
 	}
 	file_vibesys_api_v1_subscribe_proto_msgTypes[9].OneofWrappers = []any{
 		(*MachineStats_CpuStats)(nil),
@@ -1400,13 +1620,14 @@ func file_vibesys_api_v1_subscribe_proto_init() {
 		(*MachineStats_Gpus)(nil),
 		(*MachineStats_GpuUnavailable)(nil),
 	}
+	file_vibesys_api_v1_subscribe_proto_msgTypes[16].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_api_v1_subscribe_proto_rawDesc), len(file_vibesys_api_v1_subscribe_proto_rawDesc)),
-			NumEnums:      2,
-			NumMessages:   15,
+			NumEnums:      3,
+			NumMessages:   17,
 			NumExtensions: 2,
 			NumServices:   0,
 		},

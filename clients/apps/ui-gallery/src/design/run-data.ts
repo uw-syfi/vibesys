@@ -266,10 +266,10 @@ export const OUTCOME_DOT: Readonly<
 
 /** Every measured candidate, minutes into the run against ops/s. */
 export const POINTS: readonly ChartPoint[] = [
-  {id: 'input', label: 'input · 1.00×', x: 0, y: INPUT, filled: true},
-  {id: 'mpmc-ring-v1', label: 'mpmc-ring-v1 · 4.09×', x: 6, y: 9_530_114, filled: true},
-  {id: 'batch-dequeue', label: 'batch-dequeue · 3.82×', x: 10, y: 8_912_330, filled: false},
-  {id: 'mpmc-ring-padding', label: 'mpmc-ring-padding · 5.72×', x: 11, y: BEST, filled: true},
+  {id: 'input', label: 'input · 1.00×', x: 0, y: INPUT},
+  {id: 'mpmc-ring-v1', label: 'mpmc-ring-v1 · 4.09×', x: 6, y: 9_530_114},
+  {id: 'batch-dequeue', label: 'batch-dequeue · 3.82×', x: 10, y: 8_912_330},
+  {id: 'mpmc-ring-padding', label: 'mpmc-ring-padding · 5.72×', x: 11, y: BEST},
 ];
 
 export const STEPS_LINE: readonly {readonly x: number; readonly y: number}[] = [

@@ -16,13 +16,8 @@
  */
 import {describe, expect, test} from 'bun:test';
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
-import {ConnectionManager, registrySetup, runWatch} from '@vibesys/connection';
-import {
-  type AnnouncedRun,
-  FakeLink,
-  FakeRunGateway,
-  idleSubscriptions,
-} from '@vibesys/connection/testing';
+import {ConnectionManager, registrySetup} from '@vibesys/connection';
+import {type AnnouncedRun, FakeLink, FakeRunsGateway} from '@vibesys/connection/testing';
 import type {HostId, HostListing} from '@vibesys/hosts';
 import {
   CandidateState,
@@ -179,7 +174,7 @@ async function rigOver(): Promise<Rig> {
     log: () => {},
   });
   const held = new HeldProbes();
-  const gateway = new FakeRunGateway();
+  const gateway = new FakeRunsGateway(clock);
   const pushed: HostListing[] = [];
   const hosts = new Hosts({
     manager,
@@ -187,8 +182,8 @@ async function rigOver(): Promise<Rig> {
     localCheckout: '/bundled',
     sshConfigPath: '/missing',
     setup: registrySetup({unary: held.unary}),
-    runs: runWatch(gateway, clock.schedule),
-    subscriptions: idleSubscriptions(),
+    runs: gateway.runs,
+    subscriptions: gateway.subscriptions,
     log: () => {},
     push: listing => pushed.push(listing),
     retire: () => {},

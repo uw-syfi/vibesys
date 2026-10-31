@@ -32,7 +32,7 @@ changing the skeleton projection.
 Relaunch shares the header action row and result status line. The shell passes
 the latest epoch and that epoch's lifecycle as the optional `relaunch`
 observation, independently of timeline scrubbing. The feature watches
-`WatchRuns` for that run's liveness, fenced by the writer epoch. It offers
+the host's `runs` topic for that run's liveness, fenced by the writer epoch. It offers
 Relaunch for parked, stopped-resumable, or interrupted observations and hides
 it for an active writer or a permanently ended run.
 

@@ -233,9 +233,7 @@ export async function playLive(page: Page, fixture: RunFixture): Promise<void> {
   const subscriptions = () =>
     page.evaluate(() => {
       const calls = (window as unknown as FixtureWindow).fakeGateway.calls();
-      return ['Tail', 'WatchRuns'].map(
-        method => calls.filter(call => call.endsWith(`/${method}`)).length,
-      );
+      return ['Tail'].map(method => calls.filter(call => call.endsWith(`/${method}`)).length);
     });
   const before = await subscriptions();
   await page.evaluate(() => (window as unknown as FixtureWindow).fakeHost.drop());
