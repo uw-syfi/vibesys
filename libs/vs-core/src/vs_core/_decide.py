@@ -27,7 +27,7 @@ from .types.until import FailureReason, Until
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from vs_proto.api import Record
+    from vs_proto.api import Record, StepFinished, StepStarted
 
     from ._registry import OperationRegistry
     from .types.kernel import CoreState
@@ -82,24 +82,32 @@ def _apply(
         case Oneof(field="core_input", value=message):
             return step(state, decode_event(message, registry)).state
         case Oneof(field="step_started", value=message):
-            tag = RequestId(root=message.tag)
-            deadline = Until(at=message.deadline_at, watches=open_record(state, tag).until.watches)
-            return started(state, tag, message.attempt, decode_request(message, registry), deadline)
+            return _start(state, message, registry)
         case Oneof(field="step_finished", value=message):
-            tag = RequestId(root=message.tag)
-            state = dispatched(state, tag)
-            report = report_of(state, tag, decode_result(message, registry))
-            state = forgotten(step(state, report).state, tag)
-            if any(is_open(row) for row in state.records.find(tag)):
-                problem = (
-                    f"the log finishes step {tag.root} with an observation that does not end it"
-                )
-                raise ValueError(problem)
-            return state
+            return _finish(state, message, registry)
         case Oneof(field="attempt_interrupted", value=message):
             return interrupted(state, RequestId(root=message.tag), message.attempt)
         case _:
             return state
+
+
+def _start(state: CoreState, message: StepStarted, registry: OperationRegistry | None) -> CoreState:
+    tag = RequestId(root=message.tag)
+    deadline = Until(at=message.deadline_at, watches=open_record(state, tag).until.watches)
+    return started(state, tag, message.attempt, decode_request(message, registry), deadline)
+
+
+def _finish(
+    state: CoreState, message: StepFinished, registry: OperationRegistry | None
+) -> CoreState:
+    tag = RequestId(root=message.tag)
+    state = dispatched(state, tag)
+    report = report_of(state, tag, decode_result(message, registry))
+    state = forgotten(step(state, report).state, tag)
+    if any(is_open(row) for row in state.records.find(tag)):
+        problem = f"the log finishes step {tag.root} with an observation that does not end it"
+        raise ValueError(problem)
+    return state
 
 
 _CORE_RECORDS = frozenset({"core_input", "step_started", "step_finished", "attempt_interrupted"})

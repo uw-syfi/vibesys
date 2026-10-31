@@ -79,6 +79,14 @@ export function recordMessage(body: StoreRecord['body']): string {
       return body.value.message;
     case 'chat':
       return chatMessage(body.value);
+    case 'coreInput':
+      return 'Core input';
+    case 'stepStarted':
+      return `Step ${body.value.tag}: attempt ${body.value.attempt} started`;
+    case 'stepFinished':
+      return `Step ${body.value.tag} finished`;
+    case 'attemptInterrupted':
+      return `Step ${body.value.tag}: attempt ${body.value.attempt} interrupted`;
     case undefined:
       throw new Error('record.body required');
   }
