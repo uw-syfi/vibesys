@@ -83,8 +83,9 @@ What changed:
 - Question 8 now lists every horizontal band and vertical column with what it
   carries, flags a band carrying only the window's own controls, and gives a
   removal test for the rest. The new `title-strip` check holds the top strip, so
-  the row has a check as well as a question; it fires on the screens of every
-  suite today, each listed as a known failure.
+  the row has a check as well as a question. It fired on every screen when
+  written; the strip is gone from main, so no screen lists it as a known
+  failure now, and the check keeps it gone.
 - Question 2 now compares the title with each level below it, one by one.
 - Severity is defined. The brief gives each screenshot's width and scale, and
   lengths are read in CSS pixels. Question 1 is a ranked list of marks. Question 3

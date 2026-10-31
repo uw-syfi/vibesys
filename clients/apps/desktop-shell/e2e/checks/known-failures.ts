@@ -59,23 +59,11 @@ const NAV_FIELD = /^2 px between groups is not more than the 6 px inside one: "M
 const EVEN_GAPS = /^(\d+) px between groups is not more than the \1 px inside one/;
 /** A label that hugs a tile row, then a wide gap inside that row. */
 const TILE_GAPS = /^4 px between groups is not more than the 24 px inside one: "Total ops\/sec/;
+const USAGE_TITLE = /^the title "Usage" is 26 px and a text under it is \d+ px/;
+const USAGE_EDGE = /^the title of "Usage" starts at x \d+ and the content/;
 const RUN_HEADER_GAPS = /^4 px between groups is not more than the 4 px inside one: "queue-rs/;
 
-/** Every screen's strip across the window, as high as the window's controls, with nothing beside them. */
-const STRIP = /^the top \d+ px of the window carry only its own controls/;
-const SUITES: readonly Suite[] = [
-  'run-matrix',
-  'run-history',
-  'run-chat',
-  'dashboard',
-  'settings',
-  'machines',
-  'new-run',
-  'usage',
-];
-
 export const KNOWN_FAILURES: readonly KnownFailure[] = [
-  ...SUITES.map(suite => visual(`title-strip-${suite}`, suite, 'title-strip', STRIP)),
   visual('run-title-matrix', 'run-matrix', 'heading-depth', RUN_TITLE),
   visual('run-title-history', 'run-history', 'heading-depth', RUN_TITLE),
   visual('run-title-chat', 'run-chat', 'heading-depth', RUN_TITLE),
@@ -121,7 +109,6 @@ export const KNOWN_FAILURES: readonly KnownFailure[] = [
     /under the 40% a box fits: "(Modal|SkyPilot|campus|cluster-m)/,
   ),
   visual('settings-wide-empty', 'settings', 'hollow-box', /a box fits: "No Slurm cluster yet"/),
-  visual('settings-wide-banner', 'settings', 'hollow-box', /a box fits: "Needs an update"/),
   visual('new-run-even-gaps', 'new-run', 'spacing-order', EVEN_GAPS),
   visual(
     'new-run-roles-gaps',
@@ -129,21 +116,15 @@ export const KNOWN_FAILURES: readonly KnownFailure[] = [
     'spacing-order',
     /^8 px between groups is not more than the 12 px inside one: "Use a different agent/,
   ),
-  visual('new-run-wide-banner', 'new-run', 'hollow-box', /a box fits: "Hardware fits"/),
   visual(
     'new-run-wide-cards',
     'new-run',
     'hollow-box',
     /under the 40% a box fits: "(Benchmark|Optimizes)/,
   ),
-  visual('usage-even-gaps', 'usage', 'spacing-order', EVEN_GAPS),
-  visual(
-    'machine-step-cards',
-    'dashboard',
-    'hollow-box',
-    /under the 40% a box fits: "[^"]*[●✓✕○](Starting gateway|Connecting|Loading runs)/,
-    /^runs\/(one-machine-connecting|machines-at-each-step)\//,
-  ),
+  // The Usage title sits in the page header, where the checks read it as the page title.
+  visual('usage-title', 'usage', 'heading-depth', USAGE_TITLE),
+  visual('usage-empty-edge', 'usage', 'left-edge', USAGE_EDGE),
 ];
 
 export function isKnown(failure: KnownFailure, screen: string, violation: Violation): boolean {

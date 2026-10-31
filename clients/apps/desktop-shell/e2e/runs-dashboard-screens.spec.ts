@@ -43,7 +43,9 @@ const DASHBOARDS: readonly (readonly [string, readonly RunCase[]])[] = [
 
 async function check(page: Page, name: string, ignore: string[] = []): Promise<void> {
   await settled(page);
-  const found = (await screenCheck(page, SCREEN_CHECKS)).filter(each => !ignore.includes(each.check));
+  const found = (await screenCheck(page, SCREEN_CHECKS)).filter(
+    each => !ignore.includes(each.check),
+  );
   const lines = ledger.unexplained(name, found);
   if (shots !== undefined) {
     const file = `${name.replaceAll('/', '__')}.png`;

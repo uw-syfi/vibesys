@@ -63,7 +63,9 @@ for (const usage of USAGE_CASES) {
       expect(await page.evaluate(() => window.innerWidth)).toBe(width);
       await settled(page);
       const name = `${usage.name}/${width}`;
-      expect(ledger.unexplained(`usage/${name}`, await screenCheck(page, SCREEN_CHECKS))).toEqual([]);
+      expect(ledger.unexplained(`usage/${name}`, await screenCheck(page, SCREEN_CHECKS))).toEqual(
+        [],
+      );
       // The page never scrolls sideways: a table that is too wide scrolls in its own box.
       const overflow = await page.evaluate(
         () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
