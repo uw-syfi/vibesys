@@ -90,7 +90,7 @@ test('Clusters and clouds says how a cluster is reached in a few words', () => {
   expect(text).toContain('Login node');
 });
 
-test('a machine too old for a section says Needs an update, with the detail on the pointer', () => {
+test('a machine too old for a section says Needs an update, with the detail as its description', () => {
   const old = view({
     compute: {kind: 'ready', offered: {kind: 'unsupported'}},
     logins: {kind: 'ready', offered: {kind: 'unsupported'}},
@@ -101,14 +101,14 @@ test('a machine too old for a section says Needs an update, with the detail on t
   ]) {
     expect(prose(html)).toEqual([]);
     expect(drawnText(html)).toContain('Needs an update');
-    expect(html).toContain('title="The VibeSys on host-b is too old for this.');
+    expect(html).toContain('aria-description="The VibeSys on host-b is too old for this.');
   }
 });
 
 test('Agent logins draws labels, with each harness’s detail on its status', () => {
   const html = renderToStaticMarkup(<LoginsSection {...props} view={view({})} />);
   expect(prose(html)).toEqual([]);
-  expect(html).toContain('title="Codex is not installed on host-b."');
+  expect(html).toContain('aria-description="Codex is not installed on host-b."');
   expect(html).toContain('title="Or set an API key on host-b"');
 });
 
@@ -138,16 +138,26 @@ test('a login the helper cannot start, or has started, is a status word on its c
     />,
   );
   expect(drawnText(unavailable)).toContain('Cannot sign in');
-  expect(unavailable).toContain('title="Claude Code has no login command to start."');
+  expect(unavailable).toContain('aria-description="Claude Code has no login command to start."');
   const started = renderToStaticMarkup(
     <LoginsSection
       {...props}
-      view={view({starts: {claude: {kind: 'started', instruction: 'Run claude login.'}}})}
+      view={view({
+        starts: {
+          claude: {
+            kind: 'started',
+            instruction: 'Open https://example.com/device and enter the code AB12',
+          },
+        },
+      })}
     />,
   );
   expect(drawnText(started)).toContain('Login started');
   expect(drawnText(started)).toContain('Check again');
-  expect(started).toContain('Run claude login.');
+  // The next step is on the page as the two things to read off it, not only a description.
+  expect(drawnText(started)).toContain('https://example.com/device');
+  expect(drawnText(started)).toContain('AB12');
+  expect(started).not.toContain('aria-description="Open https://');
   expect(prose(started)).toEqual([]);
 });
 
@@ -158,6 +168,6 @@ test('a cluster connection test is a status word in the form, whose settings cha
   };
   const html = renderToStaticMarkup(<ClustersSection {...props} view={view({form: passed})} />);
   expect(drawnText(html)).toContain('Test again');
-  expect(html).toContain('title="The settings changed since the last test."');
+  expect(html).toContain('aria-description="The settings changed since the last test."');
   expect(html).not.toContain('Connection works');
 });

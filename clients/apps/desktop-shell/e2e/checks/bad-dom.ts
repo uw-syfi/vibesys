@@ -263,6 +263,13 @@ export const BAD_SCREENS: readonly BadScreen[] = [
     html: `<div style="${PAGE}"><div class="vs-page-content" style="position:relative;width:440px;height:200px"><div class="vs-page-scroll" style="width:300px"><div class="vs-page-body" style="padding-top:60px"><div>Machine</div></div></div><div class="vs-page-footer" style="position:absolute;left:320px;top:0;width:100px"><div>Ready</div></div></div></div>`,
   },
   {
+    name: 'a full-width strip tinted by a warn fill under a new class name, with its text and a button',
+    check: 'banner',
+    message:
+      /a strip 100% of the main pane wide is tinted by a status color: "Login started Check again"/,
+    html: `<style>:root{--chip-warn-bg:#f3e6c8;--chip-err-bg:#f6dad6}</style><main style="display:block;width:440px"><div class="vs-notice" style="display:flex;gap:8px;background:var(--chip-warn-bg)">Login started <button>Check again</button></div></main>`,
+  },
+  {
     name: 'text drawn outside the window',
     check: 'overflow',
     message: /text runs outside the window/,

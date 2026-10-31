@@ -142,7 +142,7 @@ export {
   sameTarget,
   targetFacts,
 } from './measure.js';
-export {type Problem, problemOf, type Step, StepFailure} from './problem.js';
+export {type Problem, problemOf, type Step, StepFailure, startUnconfirmed} from './problem.js';
 export {
   agentWithRoles,
   formWithRoles,

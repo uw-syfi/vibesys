@@ -49,10 +49,11 @@ export interface HeaderView {
   /** What ran each role of the run, from its usage records: `Planner` with `model on harness`. */
   readonly agents: readonly {readonly role: string; readonly ran: readonly string[]}[];
   /**
-   * Why an ended run ended other than by finishing: a few words beside the status, and the whole of
-   * it for the pointer. Null while the run is not over, or when the status says it all.
+   * How an ended run ended, whatever its outcome: the whole reason, as the status's description (a
+   * status word never has to carry it), and for a failure a few words of its message beside the
+   * status (`brief`). Null while the run is not over, and while its Resume is on its way.
    */
-  readonly ended: {readonly brief: string; readonly reason: string} | null;
+  readonly ended: {readonly brief: string | null; readonly reason: string} | null;
   readonly pause: Offer;
   readonly pauseNow: Offer;
   /** Resume an ended run; disabled while its request is on its way. */
@@ -124,7 +125,10 @@ function status(state: RunPageState): {label: string; tone: Tone} {
     case 'stopping':
       return {label: 'Pausing', tone: 'warn'};
     case 'ended':
-      return endedStatus(phase.run.phase, phase.end);
+      // A Resume on its way is the run's state: it is not shown as it ended until it starts or fails.
+      return state.resumeStatus?.pending === true
+        ? {label: 'Resuming', tone: 'live'}
+        : endedStatus(phase.run.phase, phase.end);
   }
 }
 
@@ -567,9 +571,9 @@ export function unplacedRun(
 
 export interface EndedView {
   readonly title: string;
-  /** Why the run ended, whole: the pointer on the status when `title` does not say it all. */
+  /** Why the run ended, whole: the status's description. */
   readonly reason: string;
-  /** A few words of a failure's message, for beside the status; null when `title` says it all. */
+  /** A few words of a failure's message, for beside the status; null for an ending that is not one. */
   readonly brief: string | null;
 }
 
@@ -620,10 +624,10 @@ export function endedView(state: RunPageState): EndedView | null {
   return {title: label, reason, brief: message ? briefFailure(reason) : null};
 }
 
-/** The header's words for an ended run that did not simply finish; see `HeaderView.ended`. */
+/** The header's words for an ended run; see `HeaderView.ended`. */
 function endedWords(state: RunPageState): HeaderView['ended'] {
-  const ended = endedView(state);
-  return ended === null || ended.brief === null ? null : {brief: ended.brief, reason: ended.reason};
+  const ended = state.resumeStatus?.pending === true ? null : endedView(state);
+  return ended === null ? null : {brief: ended.brief, reason: ended.reason};
 }
 
 /**

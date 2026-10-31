@@ -3,6 +3,7 @@ import type {RunEvent, RunSnapshot, Span} from '@vibesys/contracts';
 import {type LogStream, parseHelperRequest} from '@vibesys/contracts/host-helper';
 import type {HostRun} from '@vibesys/hosts';
 import {emptyLogView, foldChunk} from '@vibesys/logs';
+import {END_OUTCOMES} from '@vibesys/run-fixtures';
 import type {RunTracePublication} from '@vibesys/run-session';
 import {type CoreState, initialCoreState, reduceEvent} from '@vibesys/run-state';
 import {checkModel, type Seeded} from '@vibesys/store/testing';
@@ -543,6 +544,63 @@ describe('the run page store', () => {
     expect(fold(failed, [{type: 'resume-ended'}]).requests).toEqual([
       {kind: 'resume-ended', fromRound: 2},
     ]);
+  });
+
+  test('property: every outcome of the record is on the header, and a Resume on its way is the run’s state', () => {
+    for (const outcome of END_OUTCOMES) {
+      const failed = outcome === 'failed' || outcome === 'force_stopped';
+      const reason = 'a reason the registry recorded';
+      const state = fold(initial(), [
+        {
+          type: 'record',
+          record: {
+            kind: 'ended',
+            run: server(failed ? 'failed' : 'completed', {
+              end: {outcome, reason, resumable: true},
+              reason: failed ? reason : null,
+            }),
+          },
+        },
+      ]).state;
+      const view = headerView(state);
+      // The reason is on the header for every outcome: a status word is never the only account.
+      expect(view.ended?.reason.length, outcome).toBeGreaterThan(0);
+      if (failed) expect(view.ended?.reason, outcome).toBe(reason);
+      expect(view.ended?.brief === null, outcome).toBe(!failed);
+      expect(view.status.label, outcome).not.toBe('Resuming');
+
+      const resuming = headerView({
+        ...state,
+        resumeStatus: {pending: true, reason: 'Waiting for the run to start'},
+      });
+      expect(resuming.status, outcome).toEqual({label: 'Resuming', tone: 'live'});
+      expect(resuming.resume, outcome).toEqual({
+        shown: true,
+        disabledReason: 'Waiting for the run to start',
+      });
+      expect(resuming.ended, outcome).toBeNull();
+    }
+  });
+
+  test('a failure whose message starts with a blank line still has its first words', () => {
+    const message =
+      '\n  Traceback (most recent call last):\n    File "x"\nValueError: nothing here';
+    const state = fold(initial(), [
+      {
+        type: 'record',
+        record: {
+          kind: 'ended',
+          run: server('failed', {
+            end: {outcome: 'failed', reason: message, resumable: true},
+            reason: message,
+          }),
+        },
+      },
+    ]).state;
+    expect(headerView(state).ended).toEqual({
+      brief: 'Traceback (most recent call last)',
+      reason: message,
+    });
   });
 
   test('regression: a run that ended with no winner is not shown as a success', () => {

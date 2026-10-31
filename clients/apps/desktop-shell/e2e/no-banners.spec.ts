@@ -51,11 +51,12 @@ async function shoot(page: Page, name: string, look: Look): Promise<void> {
 }
 
 /**
- * What no screen has: the deleted banner's class, a details button outside a toast, or a status
- * word stretched across the page (a chip is as wide as its label, never half the window).
+ * What no screen has: a strip tinted by a status color (the `banner` screen check reads colors, so a
+ * banner is found under any name), a details button outside a toast, or a status word stretched
+ * across the page (a chip is as wide as its label, never half the window).
  */
 async function expectNoBanner(page: Page): Promise<void> {
-  await expect(page.locator('.vs-banner')).toHaveCount(0);
+  expect(await screenCheck(page, ['banner'])).toEqual([]);
   const main = page.getByRole('main');
   await expect(main.getByRole('button', {name: 'Show details'})).toHaveCount(0);
   const room = (await main.boundingBox())?.width ?? 0;
@@ -72,9 +73,11 @@ async function failedRun(page: Page, look: Look): Promise<void> {
   const main = page.getByRole('main');
   await expectNoBanner(page);
   await expect(main.getByText('Failed', {exact: true}).first()).toBeVisible();
-  // A few words of why, beside the status; the whole message is on the pointer.
+  // A few words of why, beside the status; the whole message is the status's description.
   await expect(main.getByText('Host Git refuses a work tree that may hold a nested')).toBeVisible();
-  await expect(main.locator(`[title="${fixture.end?.reason ?? ''}"]`).first()).toBeAttached();
+  await expect(
+    main.locator('.vs-chip[aria-description]', {hasText: 'Failed'}),
+  ).toHaveAccessibleDescription(fixture.end?.reason ?? '');
   await expect(main.getByRole('button', {name: 'Resume', exact: true})).toBeVisible();
   await expect(main.getByRole('button', {name: 'Run again', exact: true})).toBeVisible();
   await expect(main.getByRole('button', {name: 'View logs'})).toHaveCount(0);
@@ -102,7 +105,7 @@ async function settingsStatus(page: Page, look: Look): Promise<void> {
   await openSection(page, 'Agent logins', 'host-c');
   await expect(settingsMain(page).getByText('Needs an update', {exact: true})).toBeVisible();
   await expect(
-    settingsMain(page).locator('[title^="The VibeSys on host-c is too old"]'),
+    settingsMain(page).locator('[aria-description^="The VibeSys on host-c is too old"]'),
   ).toBeAttached();
   await expectNoBanner(page);
   await shoot(page, 'settings-section-old', look);
@@ -114,6 +117,9 @@ async function settingsStatus(page: Page, look: Look): Promise<void> {
   await claude.getByRole('button', {name: 'Sign in'}).click();
   await expect(claude.getByText('Login started', {exact: true})).toBeVisible();
   await expect(claude.getByRole('button', {name: 'Check again'})).toBeVisible();
+  // The next step is text on the page, not a description a pointer must find.
+  await expect(claude.getByText('https://example.com/device', {exact: true})).toBeVisible();
+  await expect(claude.getByText('AB12', {exact: true})).toBeVisible();
   await expectNoBanner(page);
   expect(await screenCheck(page)).toEqual([]);
   await shoot(page, 'settings-login-started', look);
@@ -157,7 +163,7 @@ async function machinesStatus(page: Page, look: Look): Promise<void> {
   await expect(
     page
       .getByRole('main')
-      .locator('[title="The app couldn’t connect: your SSH key needs its passphrase."]'),
+      .locator('[aria-description="The app couldn’t connect: your SSH key needs its passphrase."]'),
   ).toBeAttached();
   await expectNoBanner(page);
   await shoot(page, 'machines-sign-in', look);

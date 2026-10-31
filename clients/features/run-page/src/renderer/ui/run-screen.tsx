@@ -144,7 +144,7 @@ function RunFacts(props: {
             {...(header.ended === null ? {} : {hint: header.ended.reason})}
           />
         </Fact>
-        {header.ended === null ? null : (
+        {header.ended === null || header.ended.brief === null ? null : (
           <Fact shrink title={withoutPaths(header.ended.reason)}>
             <Text tone="muted">{withoutPaths(header.ended.brief)}</Text>
           </Fact>
@@ -188,13 +188,11 @@ function RunFacts(props: {
  * then the ended run's Resume and Run again, so an ended run's actions sit together.
  */
 function RunActions(props: {
-  readonly state: RunPageState;
-  readonly names: ModelNames;
+  readonly header: ReturnType<typeof headerView>;
   readonly toolbar: ReactNode;
   readonly dispatch: Dispatch;
 }): JSX.Element | null {
-  const {dispatch} = props;
-  const header = headerView(props.state, props.names);
+  const {dispatch, header} = props;
   if (props.toolbar === undefined && !header.resume.shown && !header.runAgain.shown) return null;
   return (
     <Row gap="space-2" align="start" wrap>
@@ -217,13 +215,13 @@ function RunActions(props: {
 
 function Header(props: {
   readonly state: RunPageState;
-  readonly names: ModelNames;
+  /** The header's words, computed once for the header and the actions under it. */
+  readonly header: ReturnType<typeof headerView>;
   readonly dispatch: Dispatch;
   readonly chat: RunChatSlot | undefined;
   readonly historyProblem: string | null;
 }): JSX.Element {
-  const {state, dispatch, chat} = props;
-  const header = headerView(state, props.names);
+  const {state, dispatch, chat, header} = props;
   const items: MenuItem[] = [
     ...(header.openWindow.disabledReason === null
       ? [{id: 'window', label: 'Open in new window', press: () => dispatch({type: 'open-window'})}]
@@ -557,9 +555,8 @@ function RunScreenBody(props: {
     adoptionTitles: adoptionTitles(model.trace.spans),
     zoom,
   };
-  const actions = (
-    <RunActions state={state} names={names} toolbar={props.toolbar} dispatch={dispatch} />
-  );
+  const header = headerView(state, names);
+  const actions = <RunActions header={header} toolbar={props.toolbar} dispatch={dispatch} />;
   const pending = pendingRunScreen(
     state,
     dispatch,
@@ -567,7 +564,7 @@ function RunScreenBody(props: {
     route,
     <Header
       state={state}
-      names={names}
+      header={header}
       dispatch={dispatch}
       chat={props.chat}
       historyProblem={null}
@@ -601,7 +598,7 @@ function RunScreenBody(props: {
       header={
         <RunHeader
           state={state}
-          names={names}
+          header={header}
           dispatch={dispatch}
           chat={props.chat}
           historyProblem={problem}

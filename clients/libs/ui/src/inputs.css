@@ -419,6 +419,30 @@
   font-weight: var(--text-caption-weight);
   white-space: nowrap;
 }
+/* The hint of a chip (its accessible description) is drawn under it on hover and on keyboard focus. */
+.vs-chip[aria-description] {
+  position: relative;
+}
+.vs-chip[aria-description]:hover::after,
+.vs-chip[aria-description]:focus-visible::after {
+  content: attr(aria-description) / "";
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  left: 0;
+  z-index: 40;
+  width: max-content;
+  max-width: calc(var(--column-aside) + var(--space-8));
+  padding: var(--space-2) var(--space-3);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--elevation-raised);
+  color: var(--text);
+  font-family: var(--text-caption-family);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
 .vs-chip[data-mono-id] {
   font-family: var(--text-code-family);
 }

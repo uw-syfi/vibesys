@@ -104,9 +104,11 @@ test('machines show their status from their facts, and each problem carries its 
 
   // A missing checkout is fixed inline: its field is open with the old path.
   await row(page, 'host-b').click();
-  // The status word carries the reason on the pointer; the checkout's path is shown by its last name only.
+  // The status word carries the reason as its description; the checkout's path is shown by its last name only.
   await expect(
-    page.getByRole('main').locator('[title^="Nothing is at vibesys on host-b any more."]'),
+    page
+      .getByRole('main')
+      .locator('[aria-description^="Nothing is at vibesys on host-b any more."]'),
   ).toBeAttached();
   const fix = page.getByRole('combobox', {name: 'VibeSys checkout on host-b'});
   await expect(fix).toHaveValue('~/vibesys');
@@ -124,7 +126,7 @@ test('machines show their status from their facts, and each problem carries its 
   await expect(
     page
       .getByRole('main')
-      .locator('[title="The app couldn’t connect: your SSH key needs its passphrase."]'),
+      .locator('[aria-description="The app couldn’t connect: your SSH key needs its passphrase."]'),
   ).toBeAttached();
   await shoot(page, 'ink-sign-in');
   await page.getByRole('button', {name: 'Sign in', exact: true}).click();
@@ -194,7 +196,7 @@ test('a machine whose VibeSys lacks what the app needs shows Needs an update, no
   await expect(row(page, 'host-a')).not.toContainText('Ready');
   await row(page, 'host-a').click();
   await expect(
-    page.getByRole('main').locator('[title="VibeSys on host-a needs an update"]'),
+    page.getByRole('main').locator('[aria-description="VibeSys on host-a needs an update"]'),
   ).toBeAttached();
   expect(await rawTextOf(page)).toEqual([]);
 });

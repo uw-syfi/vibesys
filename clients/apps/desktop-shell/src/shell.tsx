@@ -387,6 +387,7 @@ function NewRunRoute(props: {
         props.stores.machineSettings.dispatch({type: 'section', section: 'machines'});
         props.select({kind: 'settings'});
       }}
+      showRuns={() => props.select({kind: 'runs'})}
       setUp={machine => props.select({kind: 'settings', machine, section: 'clusters'})}
     />
   );

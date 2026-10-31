@@ -138,7 +138,9 @@ describe('a path is shown by its last name', () => {
     await fc.assert(
       fc.asyncProperty(SENTENCE, async hint => {
         const container = await mount(<Chip label="Not read" hint={hint.text} />);
-        expect(container.querySelector('.vs-chip')?.getAttribute('title')).toBe(hint.shown);
+        expect(container.querySelector('.vs-chip')?.getAttribute('aria-description')).toBe(
+          hint.shown,
+        );
         container.remove();
       }),
       {numRuns: 60, seed: 5},

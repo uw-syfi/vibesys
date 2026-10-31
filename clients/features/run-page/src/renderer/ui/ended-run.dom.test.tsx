@@ -6,6 +6,7 @@
 
 import {afterAll, beforeAll, describe, expect, test} from 'bun:test';
 import type {HostRun} from '@vibesys/hosts';
+import {END_OUTCOMES} from '@vibesys/run-fixtures';
 import fc from 'fast-check';
 import {Window} from 'happy-dom';
 import {act} from 'react';
@@ -74,6 +75,8 @@ function pageOf(run: HostRun): RunPageState {
 
 interface Drawn {
   readonly text: string;
+  /** What the status chips describe themselves by: the hints, which keyboard and screen reader reach. */
+  readonly described: readonly string[];
   readonly buttons: readonly string[];
   readonly titles: readonly string[];
   readonly disabled: readonly string[];
@@ -106,6 +109,9 @@ async function drawn(
   const buttons = [...container.querySelectorAll('button')];
   const read: Drawn = {
     text: container.textContent ?? '',
+    described: [...container.querySelectorAll('[aria-description]')].map(
+      each => each.getAttribute('aria-description') ?? '',
+    ),
     buttons: buttons.map(button => button.textContent ?? ''),
     titles: [...container.querySelectorAll('[title]')].map(
       each => each.getAttribute('title') ?? '',
@@ -135,7 +141,7 @@ describe('a failed run', () => {
         expect(brief).not.toBeNull();
         expect(read.text).toContain('Failed');
         expect(read.text).toContain(brief ?? '');
-        expect(read.titles).toContain(message);
+        expect(read.described).toContain(message);
         expect(read.buttons).toContain('Resume');
         expect(read.buttons).toContain('Run again');
         expect(read.buttons).not.toContain('View logs');
@@ -152,7 +158,14 @@ describe('a failed run', () => {
     const read = await drawn(pageOf(ended('failed', message)));
     expect(read.text).toContain('Host Git refuses a work tree that may hold a nested');
     expect(read.text).not.toContain('NestedRepositoryError');
-    expect(read.titles).toContain(message);
+    expect(read.described).toContain(message);
+  });
+
+  test('a failure whose message begins with a blank line keeps its words and its description', async () => {
+    const message = '\nTraceback (most recent call last):\n  File "x"\nValueError: boom';
+    const read = await drawn(pageOf(ended('failed', message)));
+    expect(read.text).toContain('Traceback (most recent call last)');
+    expect(read.described).toContain(message);
   });
 
   test('a run opened read-only offers Run again and no Resume', async () => {
@@ -161,26 +174,37 @@ describe('a failed run', () => {
     expect(read.buttons).not.toContain('Resume');
   });
 
-  test('the Resume that was asked for waits, with its reason, and the old strip’s words are gone', async () => {
+  test('the Resume that was asked for is the run’s state in the header, and Resume waits', async () => {
     const state: RunPageState = {
       ...pageOf(ended('failed', 'it broke')),
       resumeStatus: {pending: true, reason: 'Waiting for the run to start'},
     };
     const read = await drawn(state);
+    expect(read.text).toContain('Resuming');
+    expect(read.text).not.toContain('Failed');
     expect(read.disabled).toContain('Resume');
     expect(read.text).not.toContain('Resume requested');
   });
 });
 
-describe('a run that ended in a way its status word says', () => {
-  test('carries no words beside the status, and still Run again', async () => {
-    for (const outcome of ['adopted', 'kept-input', 'no-winner', 'deadline', 'stopped'] as const) {
-      const run = ended(outcome, 'a reason the outcome words');
-      const read = await drawn(pageOf(run));
-      expect(read.titles, outcome).not.toContain('a reason the outcome words');
-      expect(read.text, outcome).not.toContain('a reason the outcome words');
+describe('every way a run can end', () => {
+  test('is on the header: the status word, and the whole reason as the status’s description', async () => {
+    for (const outcome of END_OUTCOMES) {
+      const failed = outcome === 'failed' || outcome === 'force_stopped';
+      const read = await drawn(pageOf(ended(outcome, 'a reason the registry recorded')));
+      // A new outcome cannot lose its reason: it is described whatever its status word says.
+      expect(read.described.length, outcome).toBe(1);
+      expect(read.described[0]?.length, outcome).toBeGreaterThan(0);
+      if (failed) expect(read.described, outcome).toContain('a reason the registry recorded');
+      expect(read.text, outcome).not.toContain('View logs');
       expect(read.buttons, outcome).toContain('Run again');
     }
+  });
+
+  test('a run the registry ended with the finish refused says what happened, not only Not adopted', async () => {
+    const read = await drawn(pageOf(ended('finish-refused', 'x')));
+    expect(read.text).toContain('Not adopted');
+    expect(read.described).toContain('The run could not record its result.');
   });
 });
 
@@ -191,10 +215,10 @@ describe('a run whose history cannot be read', () => {
     history: {kind: 'failed', message: 'the helper hung up'},
   };
 
-  test('with logs to look at, says so at the header with the reason on the pointer', async () => {
+  test('with logs to look at, says so at the header with the reason as its description', async () => {
     const read = await drawn(unread, {...RUN_ROUTE, mode: 'logs'});
     expect(read.text).toContain('History unavailable');
-    expect(read.titles.some(title => title.includes('the helper hung up'))).toBe(true);
+    expect(read.described.some(each => each.includes('the helper hung up'))).toBe(true);
   });
 
   test('with nothing else to show, offers Retry and View logs', async () => {

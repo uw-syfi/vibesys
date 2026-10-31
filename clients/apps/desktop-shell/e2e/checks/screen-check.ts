@@ -9,6 +9,7 @@ import {CODE_IDS, roleName} from '@vibesys/contracts';
 import {FAILURE_REASONS} from '@vibesys/run-fixtures';
 import {foreignFontUses} from '../../../../tools/e2e/bundled-fonts.mjs';
 import {
+  bannerCheck,
   type CheckId,
   type CheckInput,
   chartSizeCheck,
@@ -55,6 +56,7 @@ const CHECKS: Readonly<Record<PageCheckId, (input: CheckInput) => Violation[]>> 
   'column-tops': columnTopsCheck,
   'truncation-room': truncationRoomCheck,
   'focus-ring': focusRingCheck,
+  banner: bannerCheck,
 };
 
 /** Enum values that never read as words: the failure reasons spelled with a hyphen or underscore. */

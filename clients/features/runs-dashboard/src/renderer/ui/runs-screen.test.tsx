@@ -81,13 +81,13 @@ test('narrowed to a machine, only its block shows', () => {
   expect(html.match(/vs-step-list/g)).toHaveLength(1);
 });
 
-test('saved runs that could not be read are a status word beside the title, the detail on the pointer', () => {
+test('saved runs that could not be read are a status word beside the title, the detail as its description', () => {
   const html = screen([], null, false, {
     title: '2 saved runs skipped',
     body: 'recent.json: runs[16].task must be a task name',
   });
   expect(html).toContain('>2 saved runs skipped<');
-  expect(html).toContain('title="recent.json: runs[16].task must be a task name"');
+  expect(html).toContain('aria-description="recent.json: runs[16].task must be a task name"');
   expect(html).not.toContain('>recent.json');
   expect(html).not.toContain('vs-banner');
   expect(screen([])).not.toContain('saved runs skipped');

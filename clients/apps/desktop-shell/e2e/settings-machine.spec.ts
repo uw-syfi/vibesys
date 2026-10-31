@@ -74,14 +74,14 @@ test('another machine shows its own settings: empty, no Modal token, or too old 
   await expect(card(page, 'Modal').getByText('No token')).toBeVisible();
   await expect(main(page).getByRole('heading', {name: 'lab-h100'})).toHaveCount(0);
   await nav(page).getByRole('combobox', {name: 'Machine'}).selectOption({label: 'host-c'});
-  // The detail is on the status word's pointer, not on the page.
+  // The detail is the status word's description, not on the page.
   const tooOld = main(page).getByText('Needs an update', {exact: true});
   await expect(tooOld).toBeVisible();
-  await expect(tooOld).toHaveAttribute('title', /^The VibeSys on host-c is too old for this/);
+  await expect(tooOld).toHaveAccessibleDescription(/^The VibeSys on host-c is too old for this/);
   await expect(main(page).getByText(/is too old for this/)).toHaveCount(0);
   await nav(page).getByRole('button', {name: 'Agent logins'}).click();
   await expect(tooOld).toBeVisible();
-  await expect(tooOld).toHaveAttribute('title', /^The VibeSys on host-c is too old for this/);
+  await expect(tooOld).toHaveAccessibleDescription(/^The VibeSys on host-c is too old for this/);
 });
 
 test('a cluster is saved only after Test connection passes, and is then listed and removable', async ({
@@ -109,8 +109,7 @@ test('a cluster is saved only after Test connection passes, and is then listed a
   // Changing what was tested takes the test back.
   await form.getByRole('textbox', {name: 'Workspace on the cluster'}).fill('/scratch/other');
   await expect(save).toHaveAttribute('aria-disabled', 'true');
-  await expect(form.getByText('Test again', {exact: true})).toHaveAttribute(
-    'title',
+  await expect(form.getByText('Test again', {exact: true})).toHaveAccessibleDescription(
     'The settings changed since the last test.',
   );
   await form.getByRole('button', {name: 'Test connection'}).click();
@@ -205,11 +204,9 @@ test('Sign in starts the harness’s own login on the chosen machine, and Check 
   await claude.getByRole('button', {name: 'Sign in'}).click();
   const started = claude.getByText('Login started', {exact: true});
   await expect(started).toBeVisible();
-  // What to do next is on the pointer.
-  await expect(started).toHaveAttribute(
-    'title',
-    /Open https:\/\/example\.com\/device and enter the code AB12/,
-  );
+  // What to do next is on the page, as text to read and copy, while the login is pending.
+  await expect(claude.getByText('https://example.com/device', {exact: true})).toBeVisible();
+  await expect(claude.getByText('AB12', {exact: true})).toBeVisible();
   expect((await done(page)).logins).toEqual(['ssh:host-b claude']);
   await claude.getByRole('button', {name: 'Check again'}).click();
   await expect(started).toHaveCount(0);

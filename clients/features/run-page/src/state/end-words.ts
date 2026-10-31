@@ -103,13 +103,14 @@ export function unclipped(reason: string, full: string | null): string {
 const BRIEF_LENGTH = 60;
 
 /**
- * A few words of a failure's message, for beside the status: its first clause without a leading
- * exception name (`SomeError: `), cut at a word. Null when the message says nothing. The whole
- * message stays on the pointer.
+ * A few words of a failure's message, for beside the status: the first clause of its first
+ * non-blank line without a leading exception name (`SomeError: `), cut at a word. Null when the
+ * message says nothing. The whole message stays in the status's description.
  */
 export function briefFailure(message: string): string | null {
-  const line = (message.split('\n')[0] ?? '').replace(/^[\w.]*(?:Error|Exception):\s*/, '');
-  const clause = (line.split(/(?<=[.!?])\s|:\s/)[0] ?? '').trim();
+  const first = message.split('\n').find(each => each.trim() !== '') ?? '';
+  const line = first.trim().replace(/^[\w.]*(?:Error|Exception):\s*/, '');
+  const clause = (line.split(/(?<=[.!?])\s|:\s/)[0] ?? '').trim().replace(/:$/, '');
   if (clause === '') return null;
   const space = clause.lastIndexOf(' ', BRIEF_LENGTH);
   const cut =

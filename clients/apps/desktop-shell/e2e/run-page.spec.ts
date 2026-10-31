@@ -238,10 +238,9 @@ test('every ended run offers Resume', async ({page}) => {
     resumable: false,
   });
   await open(page, {...SEED, listings: [listed([], [stopped])]});
-  await expect(page.getByRole('main').locator('.vs-chip', {hasText: 'Stopped'})).toHaveAttribute(
-    'title',
-    'Stopped by you.',
-  );
+  await expect(
+    page.getByRole('main').locator('.vs-chip', {hasText: 'Stopped'}),
+  ).toHaveAccessibleDescription('Stopped by you.');
   await expect(page.getByRole('button', {name: 'Resume', exact: true})).toBeVisible();
   await expect(page.getByRole('button', {name: 'Run again', exact: true})).toBeVisible();
   await page.getByRole('radiogroup', {name: 'Show'}).getByText('Logs').click();

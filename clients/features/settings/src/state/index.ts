@@ -35,6 +35,8 @@ export {
   failureWords,
   hardwareModels,
   hardwareWords,
+  type LoginSteps,
+  loginSteps,
   loginWords,
   machinesDetail,
   modalWords,

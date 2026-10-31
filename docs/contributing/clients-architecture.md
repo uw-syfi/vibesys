@@ -334,7 +334,7 @@ CSS of their own. An app imports `./tokens.css`, `./fonts.css` and `./components
 | `TextInput` | `value`, `change?`, `placeholder?`, `mono?`, `readOnly?`, `rows?` (above one: a multi-line box), `submit?` (Enter; Shift+Enter is a new line) |
 | `PathInput` | `value`, `change`, `completions: {value, detail?}[]`, `placeholder?`; the ARIA combobox pattern |
 | `Checkbox`, `Switch` | `label`, `checked`, `change`, `disabledReason?` |
-| `Chip` | `label`, `tone?: StatusTone`, `dot?` |
+| `Chip` | `label`, `tone?: StatusTone`, `dot?`, `mono?` (the label is an identifier, set in the code face), `hint?` (the longer account: the chip's accessible description, a tab stop drawn under the chip on hover and on keyboard focus; a path in it is shown by its last name) |
 | `StatusDot` | `tone: 'neutral' \| 'live' \| 'ok' \| 'warn' \| 'err'`, `label` |
 | `Card` | `section?` (a titled region), `flush?` |
 | `Toast`, `ToastStack` | `Toast`: `tone: 'warn' \| 'err'`, `title`, `detail?`, `open`, `toggle(open)`, `dismiss()`. `ToastStack`: `label`, `toasts: {id, tone, title, detail?, open}[]` (newest first), `toggle(id, open)`, `dismiss(id)`; fixed at the top right below the title bar, a labelled live region (an error is an `alert`, a warning a `status`); holds no state |
@@ -380,10 +380,13 @@ message is one of three things, and each has one form.
   dismisses them or the problem clears. They never hide on a timer.
 - **A problem with one thing is a status word at that thing.** A login, a machine, a section that
   could not be read, a step's transcript: a `Chip` in the thing's own row or header (`Not read`,
-  `Needs an update`, `Transcript unavailable`), the detail on its `hint` (the pointer), and its
-  action, if it has one, beside it. A run's state is the header's status chip with a few words of
-  why beside it and the whole account on the pointer; Resume and Run again sit beside the other
-  header actions. A diagnostic is a row of the Logs, with a dot on the Logs tab.
+  `Needs an update`, `Transcript unavailable`), the detail on its `hint`, and its action, if it
+  has one, beside it. A hint is the chip's accessible description, so it is read on hover, on
+  keyboard focus and by a screen reader; what a person must read to act (a login's link and code,
+  a start that may have happened) is text on the page, never only a hint. A run's state is the
+  header's status chip (a Resume on its way reads `Resuming`) with a few words of why beside it
+  and the whole account as its hint; Resume and Run again sit beside the other header actions. A
+  diagnostic is a row of the Logs, with a dot on the Logs tab.
 - **Anything else is not said.** A fact the screen already shows is not repeated in a message.
 
 The data flow is one-way. A feature's `./state` derives its problems from its state with a pure

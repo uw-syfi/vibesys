@@ -153,14 +153,14 @@ async function stepChips(problem: string | null): Promise<{text: string | null; 
   );
   const chips = [...container.querySelectorAll('.vs-chip')].map(chip => ({
     text: chip.textContent,
-    hint: chip.getAttribute('title') ?? '',
+    hint: chip.getAttribute('aria-description') ?? '',
   }));
   await act(async () => root.unmount());
   container.remove();
   return chips;
 }
 
-test('a step whose transcript could not be read says so at the step, with the reason on the pointer', async () => {
+test('a step whose transcript could not be read says so at the step, with the reason as its description', async () => {
   const chips = await stepChips('the span page made no progress');
   expect(chips).toContainEqual({
     text: 'Transcript unavailable',

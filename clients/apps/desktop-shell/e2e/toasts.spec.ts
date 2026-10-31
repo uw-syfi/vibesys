@@ -134,7 +134,7 @@ for (const width of [1440, 660]) {
       .click();
     await page.getByRole('treeitem', {name: 'host-b'}).click();
     await page.setViewportSize({width, height: 900});
-    const status = page.locator('[title="VibeSys on host-b needs an update"]');
+    const status = page.locator('[aria-description="VibeSys on host-b needs an update"]');
     await expect(status).toHaveText('Needs an update');
     await expect(page.locator('.vs-banner')).toHaveCount(0);
     await expect(page.getByText('VibeSys on host-b needs an update')).toHaveCount(0);

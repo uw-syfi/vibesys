@@ -510,10 +510,9 @@ test('the scrubber replays the run’s ideas at an earlier event and returns to 
     ],
   );
   await transitionJourney(page, 'trace', 'stopped');
-  await expect(page.getByRole('main').locator('.vs-chip', {hasText: 'Stopped'})).toHaveAttribute(
-    'title',
-    'Stopped by you.',
-  );
+  await expect(
+    page.getByRole('main').locator('.vs-chip', {hasText: 'Stopped'}),
+  ).toHaveAccessibleDescription('Stopped by you.');
   await check(page, 'ink-run-ended');
   // The Logs tab is a zoom the address follows too.
   await page.getByRole('radiogroup', {name: 'Show'}).getByText('Logs').click();

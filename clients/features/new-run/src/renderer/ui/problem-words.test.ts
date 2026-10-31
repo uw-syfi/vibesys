@@ -1,7 +1,7 @@
 import {expect, test} from 'bun:test';
 import {FAILURE_CAUSE_WORDS, type FailureCause, UNEXPECTED_FAILURE} from '@vibesys/ipc';
 import {type Problem, problemOf, type Step, StepFailure} from '../../state/index.js';
-import {problemWords} from './problem-words.js';
+import {MAY_HAVE_STARTED, problemWords} from './problem-words.js';
 
 /** Every step, as a closed set: a step added without words is a compile error here. */
 const STEPS: Readonly<Record<Step, true>> = {
@@ -35,6 +35,9 @@ test('a failure nobody reported never shows its raw error, for any step', () => 
       );
       expect(words.title).toEndWith('.');
       expect(words.body.length).toBeGreaterThan(0);
+      // The status is a few words, never a sentence: the sentence is its description.
+      expect(words.label).not.toMatch(/[.!?]/);
+      expect(words.label.split(' ').length).toBeLessThanOrEqual(3);
     }
   }
 });
@@ -106,4 +109,23 @@ test('an unreported start does not claim that nothing started', () => {
   expect(problemWords({step: 'tasks', detail: null, cause: null}, 'host-a').body).toBe(
     UNEXPECTED_FAILURE,
   );
+});
+
+/** Every problem a step can have: nothing reported, a reported text, and a typed cause. */
+function problemsOf(step: Step): Problem[] {
+  return [
+    {step, detail: null, cause: null},
+    {step, detail: 'No such project.', cause: null},
+    ...CAUSES.map(cause => ({step, detail: RAW, cause})),
+  ];
+}
+
+test('property: only a start nobody reported on says it may have started, and sends to Runs', () => {
+  for (const problem of ALL_STEPS.flatMap(problemsOf)) {
+    const words = problemWords(problem, 'host-a');
+    const unconfirmed = problem.step === 'start' && problem.detail === null;
+    expect(words.look, JSON.stringify(problem)).toBe(unconfirmed);
+    // A start that failed for a known reason is worded differently from one that may have happened.
+    expect(words.label === MAY_HAVE_STARTED, JSON.stringify(problem)).toBe(unconfirmed);
+  }
 });
