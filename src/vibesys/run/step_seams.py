@@ -23,7 +23,7 @@ from vs_sandbox.api import DockerStepContainers, SubprocessDockerCli
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vibesys.run.core_services import ClosableEvaluation
+    from vs_evaluation.api import PollingEvaluationExecutor
     from vs_project.api import StateNamespace
     from vs_runtime.api.core import JobRegistry
     from vs_runtime.api.infrastructure import (
@@ -49,7 +49,7 @@ def step_seams(  # noqa: PLR0913  # lint-waiver: LW-263519 [PLR0913]; each argum
     blocking: BlockingRunner,
     namespace: Callable[[str], StateNamespace],
     log: Callable[[str], None],
-    evaluation: ClosableEvaluation,
+    evaluation: PollingEvaluationExecutor,
     slurm: SemanticSlurmEvaluationExecutor | None,
     poll_interval_s: float,
 ) -> RunnerSeams:
@@ -80,7 +80,7 @@ def step_seams(  # noqa: PLR0913  # lint-waiver: LW-263519 [PLR0913]; each argum
 
 def _slurm_jobs(
     slurm: SemanticSlurmEvaluationExecutor,
-    evaluation: ClosableEvaluation,
+    evaluation: PollingEvaluationExecutor,
     blocking: BlockingRunner,
     poll_interval_s: float,
 ) -> Callable[[Clock, JobRegistry], StepRunner]:
