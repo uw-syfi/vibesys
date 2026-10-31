@@ -19,7 +19,7 @@ from vs_core.api import RequestRetries, RevisionRef
 from vs_project.api import Project
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import ArtifactStore, CorePlan, CoreRunContext, RunFacts
-from vs_runtime.api.core import OperationEntry, OperationPorts
+from vs_runtime.api.core import KeyedWrite, OperationEntry, OperationPorts
 from vs_runtime.api.infrastructure import AgentPaths, RunEnvironmentView, TrustedEvaluationPlan
 from vs_runtime.api.testing import (
     FakeEvidenceLedger,
@@ -170,7 +170,8 @@ class MemoryDocuments:
 
 def handoff() -> tuple[OperationEntry, ...]:
     """The handoff write, owned by the production owner over in-memory documents."""
-    return (OperationEntry.owned(HANDOFF, HandoffOwner(MemoryDocuments())),)
+    owner = HandoffOwner(MemoryDocuments())
+    return (OperationEntry.owned(HANDOFF, owner, KeyedWrite("the handoff file of the call")),)
 
 
 def ports(root: Path, run: ResolvedRun) -> OperationPorts:

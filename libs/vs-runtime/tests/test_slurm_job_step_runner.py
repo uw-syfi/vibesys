@@ -14,9 +14,24 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from vs_core.api import MeasurementFailure, ObservationStatus, RequestId
-from vs_core.api.recovery import Cancelled, CancelReason, Finished
+from vs_core.api import (
+    AttemptId,
+    AttemptRef,
+    CloseAttemptScope,
+    CollectEvidence,
+    HostFence,
+    HostId,
+    MeasurementFailure,
+    ObservationStatus,
+    ObserveOwnedJob,
+    RequestId,
+    ResourceId,
+)
+from vs_core.api.recovery import Cancelled, CancelReason, Finished, interruption_of
+from vs_runtime.api.core import JobRegistry, MeasurementRequests, ReceiptStore, RequestExecutors
 from vs_runtime.api.evaluation_step_runners import SlurmJobStepRunner, SlurmScheduler
+from vs_runtime.api.executor_contexts import RevocableLease, receipt_store_in
+from vs_runtime.api.executor_step_runner import DECLARED_REPEATS, ExecutorStepRunner
 from vs_runtime.api.slurm_evaluation_stack import (
     ScenarioCluster,
     Stack,
@@ -101,11 +116,13 @@ class FlakyLedger(FakeEvaluationLedger):
 class Process:
     """One executor stack and the runner over it: what a restart replaces."""
 
-    def __init__(self, world: World, stack: Stack) -> None:
+    def __init__(self, world: World, stack: Stack, holder: str) -> None:
         self.stack = stack
+        self.holder = holder
         self.runner = SlurmJobStepRunner(
             stack.executor,
             SlurmScheduler(world.ledger, world.cluster, world.blocking),
+            world.registry_of(holder),
             clock=world.clock,
             poll_interval_s=POLL_S,
         )
@@ -124,8 +141,21 @@ class World:
         self.ledger = FlakyLedger(project=PROJECT, clock=ManualClock())
         self.cluster = FlakyCluster()
         self.blocking = DetachedBlockingRunner()
+        self.stores: dict[str, ReceiptStore] = {}
         self.processes: list[Process] = []
         self.first = self.run(self.spawn())
+
+    def store_of(self, holder: str) -> ReceiptStore:
+        """The receipt store of run *holder*: on its disk, so a restarted process of it shares it."""
+        if holder not in self.stores:
+            directory = self.root / "receipts" / holder
+            directory.mkdir(parents=True, exist_ok=True)
+            self.stores[holder] = receipt_store_in(directory)
+        return self.stores[holder]
+
+    def registry_of(self, holder: str) -> JobRegistry:
+        """The job registry of run *holder*, over its receipt store."""
+        return JobRegistry(self.store_of(holder))
 
     def run[T](self, main: Coroutine[Any, Any, T]) -> T:
         """Run to the end on the virtual clock."""
@@ -142,7 +172,7 @@ class World:
             clock=self.clock,
         )
         stack = await build_stack(self.root, self.cluster, sleeper=self.clock, ledger=attachment)
-        process = Process(self, stack)
+        process = Process(self, stack, holder)
         self.processes.append(process)
         return process
 
@@ -170,13 +200,14 @@ class World:
         return self.cluster.live_jobs()
 
     async def pause(self, process: Process, tag: RequestId, attempt: int) -> None:
-        """Cancel the step's job through its own run, as a Pause does, and see it end."""
+        """Pause the step through its own run, as a Pause does, and see its job left alone."""
         cancel = CancelSignal()
         step = self.step(tag, ends=False)
         task = asyncio.ensure_future(process.runner.run(step, tag, attempt, DEADLINE_AT, cancel))
         await yield_until(self.live, lambda jobs: jobs > 0 or task.done(), str(tag))
         cancel.set(CancelReason.PAUSE_NOW)
         assert await task == Cancelled(reason=CancelReason.PAUSE_NOW)
+        assert self.cluster.live_jobs() == 1
 
     async def die_mid_run(self, process: Process, tag: RequestId, attempt: int) -> None:
         """Submit the step's job, then lose the process: only the task awaiting it is cancelled."""
@@ -286,10 +317,11 @@ def test_a_step_of_the_content_another_step_submitted_attaches_to_its_job(tmp_pa
     assert len(world.cluster.submissions) == 1
 
 
-def test_a_cancelled_job_is_never_attached_to_so_the_next_attempt_submits_a_new_one(
-    tmp_path: Path,
+@pytest.mark.parametrize("reason", [CancelReason.PAUSE_NOW, CancelReason.DRAIN_EXPIRED])
+def test_a_pause_leaves_the_job_running_and_the_next_attempt_adopts_it(
+    tmp_path: Path, reason: CancelReason
 ) -> None:
-    """The cancel interrupted the attempt and left no result; attaching would return Cancelled."""
+    """A cancel would throw away the queue time and the work done; the job survives the host."""
     world = World(tmp_path)
     runner = world.first.runner
     tag = tag_of("paused")
@@ -300,8 +332,41 @@ def test_a_cancelled_job_is_never_attached_to_so_the_next_attempt_submits_a_new_
             runner.run(world.step(tag, ends=False), tag, 1, DEADLINE_AT, cancel)
         )
         await yield_until(world.submitted, lambda jobs: jobs == 1, "the first job")
-        cancel.set(CancelReason.PAUSE_NOW)
-        assert await task == Cancelled(reason=CancelReason.PAUSE_NOW)
+        cancel.set(reason)
+        assert await task == Cancelled(reason=reason)
+        assert world.cluster.live_jobs() == 1
+        assert await runner.clear(world.submission(tag), tag) == Adopted(None)
+        world.cluster.finish_jobs()
+        again = await runner.run(world.step(tag, ends=True), tag, 2, DEADLINE_AT, CancelSignal())
+        assert isinstance(again, Finished)
+        assert again.observation.status is ObservationStatus.SUCCEEDED
+        await world.close()
+
+    world.run(main())
+    assert len(world.cluster.submissions) == 1
+    assert world.cluster.cancelled == []
+
+
+@pytest.mark.parametrize(
+    "reason", [reason for reason in CancelReason if not interruption_of(reason)]
+)
+def test_a_cancel_that_ends_the_step_cancels_the_job_and_the_next_attempt_submits_a_new_one(
+    tmp_path: Path, reason: CancelReason
+) -> None:
+    """The cancel ended the job; attaching to it would return Cancelled, so the next one is new."""
+    world = World(tmp_path)
+    runner = world.first.runner
+    tag = tag_of("ended")
+
+    async def main() -> None:
+        cancel = CancelSignal()
+        task = asyncio.ensure_future(
+            runner.run(world.step(tag, ends=False), tag, 1, DEADLINE_AT, cancel)
+        )
+        await yield_until(world.submitted, lambda jobs: jobs == 1, "the first job")
+        cancel.set(reason)
+        assert await task == Cancelled(reason=reason)
+        assert world.cluster.live_jobs() == 0
         assert await runner.clear(world.submission(tag), tag) == Cleared()
         again = await runner.run(world.step(tag, ends=True), tag, 2, DEADLINE_AT, CancelSignal())
         assert isinstance(again, Finished)
@@ -313,17 +378,15 @@ def test_a_cancelled_job_is_never_attached_to_so_the_next_attempt_submits_a_new_
     assert world.cluster.live_jobs() == 0
 
 
-def test_any_order_of_kills_pauses_restarts_and_clears_leaves_one_job_that_was_not_cancelled(
+def test_any_order_of_kills_pauses_restarts_and_clears_runs_one_job_and_cancels_none(
     tmp_path: Path,
 ) -> None:
-    """One tag is one live job: every other job it ever had was cancelled, never duplicated."""
+    """One tag is one job: a kill, a pause or a clear never duplicates it and never cancels it."""
     for seed in range(examples(pr=6, nightly=40)):
         world = World(tmp_path / f"world-{seed}")
         world.run(_a_sequence_ends_with_a_result(world, seed))
-        submitted = set(world.cluster.submissions)
-        cancelled = set(world.cluster.cancelled)
-        assert cancelled <= submitted, seed
-        assert len(submitted - cancelled) == 1, seed
+        assert len(world.cluster.submissions) == 1, seed
+        assert world.cluster.cancelled == [], seed
 
 
 async def _a_sequence_ends_with_a_result(world: World, seed: int) -> None:
@@ -499,8 +562,8 @@ def test_one_runs_cancel_never_ends_a_job_another_run_still_wants(tmp_path: Path
             other_run.runner.run(world.step(mine, ends=False), mine, 1, DEADLINE_AT, cancel)
         )
         await yield_until(world.live, lambda jobs: jobs == 1, "the shared job")
-        cancel.set(CancelReason.PAUSE_NOW)
-        assert await attached == Cancelled(reason=CancelReason.PAUSE_NOW)
+        cancel.set(CancelReason.WITHDRAWN)
+        assert await attached == Cancelled(reason=CancelReason.WITHDRAWN)
         assert world.cluster.live_jobs() == 1
         assert world.cluster.cancelled == []
         world.cluster.finish_jobs()
@@ -545,6 +608,94 @@ def test_a_cancelled_clear_returns_only_after_the_ledger_and_scheduler_reads_it_
         world.blocking.release()
         await asyncio.gather(call, return_exceptions=True)
         assert world.blocking.in_flight == 0
+        await world.close()
+
+    world.run(main())
+
+
+# The evaluation kinds on the ExecutorStepRunner serve the job this runner submitted
+
+
+class Served:
+    """The evaluation executor core's other job requests reach, over the world's own cluster."""
+
+    def __init__(self, world: World) -> None:
+        evaluation = MeasurementRequests(
+            world.first.stack.executor, world.store_of(world.first.holder)
+        )
+        self.runner = ExecutorStepRunner(
+            RequestExecutors(evaluation=evaluation),
+            DECLARED_REPEATS,
+            fence=HostFence(host_id=HostId(root="host"), epoch=1),
+            lease=RevocableLease(),
+            clock=world.clock,
+        )
+
+    async def run(self, request: Request) -> Finished:
+        assert request.request_id is not None
+        done = await self.runner.run(request, request.request_id, 1, DEADLINE_AT, CancelSignal())
+        assert isinstance(done, Finished)
+        return done
+
+
+def job_request(
+    kind: type[ObserveOwnedJob] | type[CollectEvidence], step: Request, resource: str
+) -> ObserveOwnedJob | CollectEvidence:
+    return kind(
+        request_id=RequestId(root=f"{kind.__name__}-of-{resource}"),
+        scope=step.scope,
+        admission_id=step.admission_id,
+        resource_id=ResourceId(root=resource),
+    )
+
+
+def test_a_job_the_runner_submitted_is_collected_and_observed_through_the_executor_runner(
+    tmp_path: Path,
+) -> None:
+    """Core asks to collect the evidence of an ended job that brought none, and to poll a live one."""
+    world = World(tmp_path / "world")
+    tag = tag_of("submitted")
+
+    async def main() -> None:
+        served = Served(world)
+        step = world.step(tag, ends=True)
+        ended = await world.first.runner.run(step, tag, 1, DEADLINE_AT, CancelSignal())
+        assert isinstance(ended, Finished)
+        resource = ended.observation.resource_id
+        assert resource is not None
+        for kind in (CollectEvidence, ObserveOwnedJob):
+            done = await served.run(job_request(kind, step, resource.root))
+            assert done.observation.status is ObservationStatus.SUCCEEDED, kind.__name__
+            assert done.observation.terminal
+        await world.close()
+
+    world.run(main())
+
+
+def test_a_scope_closed_over_a_running_job_the_runner_submitted_cancels_it_and_lists_it(
+    tmp_path: Path,
+) -> None:
+    world = World(tmp_path / "world")
+    tag = tag_of("running")
+
+    async def main() -> None:
+        served = Served(world)
+        step = world.step(tag, ends=False)
+        run = asyncio.ensure_future(
+            world.first.runner.run(step, tag, 1, DEADLINE_AT, CancelSignal())
+        )
+        await yield_until(world.live, lambda jobs: jobs > 0 or run.done(), str(tag))
+        close = CloseAttemptScope(
+            request_id=RequestId(root="close"),
+            scope=step.scope,
+            admission_id=step.admission_id,
+            attempt=AttemptRef(attempt_id=AttemptId(root="attempt"), generation=0),
+        )
+        done = await served.run(close)
+        assert len(done.observation.children) == 1
+        assert world.cluster.live_jobs() == 0
+        run.cancel()
+        await asyncio.gather(run, return_exceptions=True)
         await world.close()
 
     world.run(main())

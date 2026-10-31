@@ -14,11 +14,6 @@ import {addInitScripts, initScript} from './init-scripts.js';
 /** Where the journey's Ink screenshots go, when `MACHINES_SCREENSHOTS` names a directory. */
 const SHOTS = process.env['MACHINES_SCREENSHOTS'];
 
-/** Opens the banner on the page: its detail is behind its one-line title. */
-async function openBanner(page: Page): Promise<void> {
-  await page.locator('.vs-banner').getByRole('button', {name: 'Show details'}).first().click();
-}
-
 const FOUND = {
   state: 'found',
   root: '/home/me/vibesys',
@@ -112,9 +107,12 @@ test('machines show their status from their facts, and each problem carries its 
 
   // A missing checkout is fixed inline: its field is open with the old path.
   await row(page, 'host-b').click();
-  await openBanner(page);
-  // The checkout's path is shown by its last name only.
-  await expect(page.getByText(/^Nothing is at vibesys on host-b any more\./)).toBeVisible();
+  // The status word carries the reason as its description; the checkout's path is shown by its last name only.
+  await expect(
+    page
+      .getByRole('main')
+      .locator('[aria-description^="Nothing is at vibesys on host-b any more."]'),
+  ).toBeAttached();
   const fix = page.getByRole('combobox', {name: 'VibeSys checkout on host-b'});
   await expect(fix).toHaveValue('~/vibesys');
   await shoot(page, 'ink-checkout-not-found');
@@ -128,10 +126,11 @@ test('machines show their status from their facts, and each problem carries its 
 
   // Sign in is the connection's own action.
   await row(page, 'host-a').click();
-  await openBanner(page);
   await expect(
-    page.getByText('The app couldn’t connect: your SSH key needs its passphrase.'),
-  ).toBeVisible();
+    page
+      .getByRole('main')
+      .locator('[aria-description="The app couldn’t connect: your SSH key needs its passphrase."]'),
+  ).toBeAttached();
   await shoot(page, 'ink-sign-in');
   await page.getByRole('button', {name: 'Sign in', exact: true}).click();
   await expect(row(page, 'host-a')).toContainText('Ready');
@@ -199,8 +198,9 @@ test('a machine whose VibeSys lacks what the app needs shows Needs an update, no
   await expect(row(page, 'host-a')).toContainText('Needs an update');
   await expect(row(page, 'host-a')).not.toContainText('Ready');
   await row(page, 'host-a').click();
-  await openBanner(page);
-  await expect(page.getByText('VibeSys on host-a needs an update')).toBeVisible();
+  await expect(
+    page.getByRole('main').locator('[aria-description="VibeSys on host-a needs an update"]'),
+  ).toBeAttached();
   expect(await rawTextOf(page)).toEqual([]);
 });
 

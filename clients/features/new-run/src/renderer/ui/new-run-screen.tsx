@@ -31,7 +31,7 @@ import {
 import {GoalPage} from './goal-page.js';
 import {type FolderCompletion, ProjectPage, TaskPage} from './project-pages.js';
 import {Nav, Question} from './question.js';
-import {ProblemBanner, ReviewPage, StartButton} from './review-page.js';
+import {ProblemStatus, ReviewPage, StartButton} from './review-page.js';
 import {progressLine, type StepView, stepViews} from './steps.js';
 import {entriesIn, type MachineOption} from './view.js';
 import {WherePage} from './where-page.js';
@@ -79,6 +79,8 @@ interface ScreenProps {
   readonly machines: readonly MachineOption[];
   /** Open Machines, where the machine's VibeSys checkout is chosen. */
   readonly chooseCheckout: () => void;
+  /** Open Runs, where a run that did start is listed. */
+  readonly showRuns: () => void;
   /** Open Settings on the clusters of `machine`, where a place to measure is set up. */
   readonly setUp: (machine: HostKey) => void;
   /** The folder field's path completion. */
@@ -255,7 +257,7 @@ export function NewRunScreen(props: ScreenProps): JSX.Element {
       >
         <Stack gap="space-5">
           {at === 'start' ? <Wordmark art={VIBESYS_WORDMARK} size="compact" /> : null}
-          <ProblemBanner context={context} dispatch={dispatch} />
+          <ProblemStatus context={context} dispatch={dispatch} showRuns={props.showRuns} />
           {at === null || copy === null ? (
             examplesFailed(context, at) ? (
               <ExamplesFailed context={context} dispatch={dispatch} machines={props.machines} />

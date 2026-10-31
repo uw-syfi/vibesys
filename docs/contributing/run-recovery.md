@@ -175,7 +175,7 @@ what `clear` does for each.
 | `SnapshotAndRetain`, `SnapshotAndRetainRun`, `RetainRevision` | commit the workspace and write a retention ref | safe, and `decide` makes it safe: it runs the step only when every writer of its scope has a result, so it never reads a half-written tree ([Scope order](#scope-order)); the ref is content-addressed | none | revision id |
 | `AdoptRevision` | write the winner into the operator's checkout | safe: it sets the target state and verifies it | none | tag |
 | `DispatchTurn`, `ResumeSessionTurn`; registered `SESSION_TURN` operations | one agent turn: a process group, writes to the workspace, tokens, tool calls | safe after `clear` only | kill the processes carrying the tag in the run's containers (`vs_agent.reap_step_agents`; the containers belong to a role or a workspace and outlive the step, so none is removed), then, unless the journal holds an answer for the invocation, return the workspace to the baseline of its access receipt (`AccessSettlement.rewind`) and forget the invocation's unanswered journal record (`AgentSessions.forget_unfinished`), so the retry dispatches it again and resumes the last completed turn | tag |
-| `SubmitMeasurement`; registered `OWNED_JOB` operations | an evaluation job on Slurm, Docker or a local process | Slurm: safe, the ledger finds the job. Docker and local: safe after `clear` | Slurm: adopt (request claimed, queued, running or ended) and never cancel; `run` attaches. Local and Docker: cancel the process's own evaluation, kill the stage process group, remove the labelled container, discard partial stage output | Slurm: the ledger's content key, which `clear` computes from the step. Local: the tag |
+| `SubmitMeasurement`; registered `OWNED_JOB` operations | an evaluation job on Slurm, Docker or a local process | Slurm: safe, the ledger finds the job. Docker and local: safe after `clear` | Slurm: adopt (request claimed, queued, running or ended); a pause or a drain deadline leaves the job running and `run` attaches to it; only a cancel that ends the step cancels it. Local and Docker: cancel the process's own evaluation, kill the stage process group, remove the labelled container, discard partial stage output | Slurm: the ledger's content key, which `clear` computes from the step. Local: the tag |
 | registered `IDEMPOTENT_WRITE` operations: `render_artifacts`, `retain_revision`, the dynamic handoff write, issue-board `ApplyIssueChanges` and `LogProgress` | content-addressed or keyed writes | safe: each carries a key the tracker or store checks before writing | none | existing key |
 | `capture_command`, `validate_local` | run a command or validation recipe in a workspace | safe after `clear` | kill the process group, reset the workspace to the recorded commit | tag |
 
@@ -268,22 +268,22 @@ Not found on macOS: the members of a group whose leader died first, and a `setsi
 
 A step kind that is not safe to run twice is enforced by type in two places. `StepRunner.run` takes the
 tag as a required argument, so a runner cannot start work with no key. A registered operation declares
-what a rerun may repeat as a `RerunPolicy` when it is given to `OperationStepRunner`: `ReadOnly`,
-`KeyedWrite` (names the key its owner reads back through `inspect`) or `ClearedWork` (a cleaner that
-kills the process group and resets the workspace). The runner refuses, naming the operation kind, an
-owned operation with no policy, one its lifecycle does not allow (`QUERY` takes `ReadOnly` or
+what a rerun may repeat as a `RerunPolicy` when its owner enters the catalog (`OperationEntry.owned`
+takes it as a required argument): `ReadOnly`, `KeyedWrite` (names the key its owner reads back through
+`inspect`), `ClearedWork` (a cleaner that kills the process group and resets the workspace) or
+`OtherRunner` (a job or a turn, whose own runner declares what a rerun repeats). The entry refuses,
+naming the operation kind, a policy its lifecycle does not allow (`QUERY` takes `ReadOnly` or
 `ClearedWork`, `IDEMPOTENT_WRITE` takes `KeyedWrite` or `ClearedWork`, `OWNED_JOB` and `SESSION_TURN`
-take none because the evaluation and agent-turn runners own them), and a policy for an operation the
-catalog does not own. The table above classes `capture_command` and `validate_local` as `ClearedWork`
-and `export_patch` as read only, which is how their lifecycles are declared in code.
+take `OtherRunner`), and `OperationStepRunner` refuses a step of an operation another runner owns. The
+table above classes `capture_command` and `validate_local` as `ClearedWork` and `export_patch` as read
+only, which is how their lifecycles are declared in code. The production roles carry their policy in one
+table in `_operation_wiring.py`. The two command roles take the cleaner the run supplies; a run that
+supplies none gets `UnwiredWorkCleaner`, whose `clear` raises `ClearUnavailableError`, so the step loop
+waits on that runner visibly instead of repeating a command whose process nobody ended. The cutover
+(PR 6a) wires a real cleaner.
 
 Doc fact corrected against code (item 5c): the first version of this page put `export_patch` among
 the keyed writes. Its owner exports a patch and writes nothing, and it is declared `QUERY`.
-
-Open at the cutover: the policy is passed beside the catalog, so the production wiring must supply one
-per owned operation. `_validate_operation` does not yet name a runner for every non-`QUERY` descriptor;
-moving the policy onto `OperationEntry.owned` makes the omission a type error, and is a cutover change
-because every owner registration passes through it.
 
 ## Is core state a fold of the log
 
@@ -443,13 +443,10 @@ The fold refuses a record whose observation or owner event names another request
 as the live shell does. A request that core settled itself (`Failed`, `Cancelled`) has no owner event:
 the ledger derives the owner's from the conclusive observation core writes.
 
-One fact is lost by that order. The report's derived `AdoptionObserved` has no publication, so a
-succeeded adoption takes the legacy path (core issues `VerifyAdoption`), and the executor's own event
-for the same observation sequence is then stale and ignored. The live shell has the same order and
-the same loss. What is missing is a place for the publication and checkout on the report:
-`RequestObserved` has none. Adding both there, and passing them through `owner_signals`, makes the
-first `AdoptionObserved` complete and the executor's own event redundant. Until the cutover (PR 6a)
-places them, an adoption runner's publication does not reach core.
+One fact the order would lose is carried by the report instead. An adoption's publication and checkout
+are fields of `RequestObserved`, and `owner_signals` copies them into the `AdoptionObserved` it derives,
+so the derived event is as complete as the executor's own and a succeeded adoption is not followed by a
+`VerifyAdoption`. `AdoptionStepRunner` and the workspace executor both fill them.
 
 `decide(fold(log), now)` is the issue's `decide(log) -> actions`. It is split in two so a cached state can
 stand in for the fold. The action type has no `Blocked` or `Unknown` variant, and no variant names a step
@@ -934,6 +931,50 @@ These are facts the implementation must settle, found while checking the design 
 - **Provider session id of a killed turn.** `forget_unfinished` does not touch the provider conversation. A
   provider that rewrites its session id mid-turn makes the retry's expected-checkpoint check fail loudly
   (`SessionResumeError`) instead of resuming; the fix belongs to that provider's contract case.
+- **The executor kinds repeat by tag, without receipts.** The loop records an attempt before any of its
+  I/O, so an attempt after the first proves an earlier one may have run. `ExecutorStepRunner` passes that
+  as `ExecutionContext.repeat`, which replaces the `resumed` flag the begun marker of `run_once` used to
+  give (`run_once` now hands its performers `repeat` from the context or the marker, so the production
+  loop is unchanged). Every test of a repeat runs the real executors over an `UnreceiptedStore`, which
+  keeps no execution record: each of the 13 kinds is killed at sampled durable writes (every write, for
+  `EnsureSession`), cleared and run again, and so is a generated program of runs, kills, restarts and
+  clears, with the effects and the result of an unkilled run. Two kinds were safe only through the
+  marker:
+  - `DiscardWorkspace` answered `children_complete=False` ("released without a recorded session close")
+    for a worktree its killed first attempt had already removed, unless it was told it was a repeat.
+  - `SnapshotAndRetain` and `SnapshotAndRetainRun` look for the snapshot an earlier attempt committed by
+    its label only on a repeat, so a repeat returns that snapshot even when the tree moved since. Without
+    it a snapshot of an unchanged tree commits nothing new (the tracker commits only staged changes), but a
+    moved tree is committed again and the result names another revision. Measured on a repeat under
+    another request id, each snapshot or retain adds one retained revision (effects 9 to 10, 7 to 8, 7 to
+    8), where `EnsureWorkspace`, `RestoreRevision`, `DiscardWorkspace`, `CancelTurn`, `CloseSession` and
+    the evaluation kinds add none. The label is `core:<request id>`, so the tag is what keeps it unique.
+  - `EnsureSession` repeats safely only under the same request id: the binding records the ensure that
+    made it, and a fresh-policy ensure under another id is refused ("session identity is already in use").
+    The tag is stable across epochs, so the runner is safe; a retry that minted a new id would not be.
+- **A job a step runner submits is registered for core's other job requests.** The evaluation executor
+  answers `CollectEvidence`, `ObserveOwnedJob` and `CancelOwnedJob` only for a job in its registry, and
+  `CloseAttemptScope` lists exactly the handles indexed under the scope. `JobStepRun` called the polling
+  executor directly and wrote neither, so a collection was rejected as "not owned by this scope" and a
+  close was released over a live job with an empty manifest. `JobRegistry` now owns both records, and
+  `MeasurementRequests` and `JobStepRun` write through it before the executor is contacted. Core sends a
+  step-run job a `CollectEvidence` when it ended with no evidence and a `CloseAttemptScope` at the
+  attempt's closure, and no `ObserveOwnedJob` or `CancelOwnedJob`, since it only ever sees the job ended.
+- **A pause leaves a Slurm job running.** `JobStepRun` used to cancel the job on any cancel signal, so a
+  Pause threw away the queue time and the work, and the resumed run claimed a new job. A cancel that
+  interrupts the attempt (`interruption_of`: `PAUSE_NOW`, `DRAIN_EXPIRED`) now returns `Cancelled` and
+  leaves the job; `clear` adopts it and the next `run` attaches. A runner whose work dies with the host (a
+  local evaluation) still cancels it. The `StepRunner` contract says it: after an interrupting cancel a
+  runner has nothing running, or work `clear` adopts and the next run attaches to without starting it
+  again.
+
+- **A close lists the jobs the scope registered.** `decide` holds the `CloseAttemptScope` until every other step
+  of its scope has a result ([Scope order](#scope-order)), and a pause never cancels an owned job. The job
+  runners rely on both: the close cancels and lists exactly the handles registered under its scope, so a step
+  must have registered its job before the close can read the registry, and a paused Slurm job is adopted by the
+  resumed run instead of being cancelled and claimed again.
+- **The snapshot kinds rely on `decide`'s scope order.** `RetainByContent` is safe once every writer of
+  the scope has a result ([Scope order](#scope-order)); `ExecutorStepRunner` does not check it.
 - **Per-environment `clear` (item 5e).** `RunEnvironment.agent_work_reaper(run_id, ...)` gives the reaper of
   one step's agent work, by the step's tag, which `AgentTurnStepRunner` takes. The run-wide `reap_orphans`
   would end every step's agent, so it is not a substitute. Each environment, and the step kinds a gap would
