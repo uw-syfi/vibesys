@@ -28,10 +28,16 @@ class TestFakeStepLog(StepLogContract):
             control = core.ControlInput(control_id=core.ControlId(root="input"), action="pause_now")
             log.push(core.RunControlEvent(control=control, now_at=clock.now()))
 
+        def pause() -> None:
+            control = core.ControlInput(control_id=core.ControlId(root="pause"), action="pause_now")
+            log.push(core.RunControlEvent(control=control, now_at=clock.now()))
+
         return StepLogUnderTest(
             log=log,
             reopen=reopen,
             push_input=push_input,
+            pause=pause,
+            elapse=clock.sleep,
             drive=lambda main: run_virtual(clock, main),
             runs=tuple(a for a in decide(seed.state, clock.now()) if isinstance(a, Run)),
         )

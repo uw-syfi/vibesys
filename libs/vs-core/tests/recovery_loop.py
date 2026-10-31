@@ -25,6 +25,9 @@ from vs_core.api.recovery import (
     End,
     Finished,
     Interruption,
+    RecordRefusal,
+    RecordRefusedError,
+    RefusalReason,
     Run,
     Settle,
     StepEffect,
@@ -38,6 +41,7 @@ from vs_core.api.recovery import (
     interruption_of,
     may_start,
     request_effect,
+    start_due,
     started_message,
 )
 from vs_proto.api import EpochStarted, Oneof, Record, Timestamp
@@ -71,7 +75,7 @@ class RunDidNotRestError(AssertionError):
 class RefusedRecordError(AssertionError):
     """The fold refused the record of an action `decide` returned."""
 
-    def __init__(self, action: Action, error: ValueError) -> None:
+    def __init__(self, action: Action, error: RecordRefusedError) -> None:
         super().__init__(f"the fold refused the record of {action!r}: {error}")
 
 
@@ -162,7 +166,7 @@ class Loop:
         before = self.state
         try:
             self.add(body)
-        except ValueError as error:
+        except RecordRefusedError as error:
             raise RefusedRecordError(action, error) from error
         assert self.state != before, f"{action!r} was recorded and changed nothing"
         if isinstance(action, Run):
@@ -255,11 +259,14 @@ class Loop:
                     finished_message(tag, row.started - 1, self.success(tag, record.request)),
                 )
             )
-        except ValueError:
-            assert self.state == before
-            return True
-        message = f"the fold took the finish of attempt {row.started - 1} of {tag.root}"
-        raise AssertionError(message + f" while attempt {row.started} runs")
+        except RecordRefusedError as refused:
+            reason = refused.refusal.reason
+        else:
+            message = f"the fold took the finish of attempt {row.started - 1} of {tag.root}"
+            raise AssertionError(message + f" while attempt {row.started} runs")
+        assert reason is RefusalReason.ATTEMPT_MISMATCH
+        assert self.state == before
+        return True
 
     def cancel_running(self, why: Interruption) -> None:
         """The loop cancels the one running attempt and records how it ended."""
@@ -452,12 +459,20 @@ def never_idle_draining(loop: Loop) -> None:
 
 
 def may_start_agrees_with_decide(loop: Loop) -> None:
-    """The step a flight asks about may start exactly when the rule would run it."""
-    runs = {a.tag for a in decide(loop.state, loop.clock) if isinstance(a, Run)}
+    """The step a flight asks about may start exactly when the rule would run it, as that run.
+
+    A step that may not is refused by one of the two reasons a race explains.
+    """
+    runs = {a.tag: a for a in decide(loop.state, loop.clock) if isinstance(a, Run)}
     for row in loop.state.records.records:
-        assert may_start(loop.state, row.request_id, loop.clock) is (row.request_id in runs), (
-            row.request_id
-        )
+        tag = row.request_id
+        due = start_due(loop.state, tag, loop.clock)
+        assert may_start(loop.state, tag, loop.clock) is (tag in runs), tag
+        if tag in runs:
+            assert due == runs[tag], tag
+        else:
+            assert isinstance(due, RecordRefusal), tag
+            assert due.reason in {RefusalReason.STEP_NOT_OPEN, RefusalReason.START_NOT_DUE}, tag
 
 
 def parked_cancels_what_runs(loop: Loop) -> None:

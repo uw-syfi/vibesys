@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from ._actions import OpenStep
 from ._ownership import unreleased_records
+from ._refusal import RecordRefusedError, RefusalReason
 from ._request_recovery import command_open, is_open, is_step, resent
 from .types.common import EventId, Observation, ObservationStatus, RunStatus
 from .types.records import RequestObserved, RequestPhase, RequestRecord
@@ -32,7 +33,7 @@ def open_record(state: CoreState, tag: RequestId) -> RequestRecord:
     rows = state.records.find(tag)
     if len(rows) != 1 or not is_open(rows[0]):
         message = f"the log names step {tag.root}, which is not open"
-        raise ValueError(message)
+        raise RecordRefusedError(RefusalReason.STEP_NOT_OPEN, message, tag)
     return rows[0]
 
 
@@ -46,10 +47,10 @@ def ended_by_core(state: CoreState, tag: RequestId) -> bool:
     rows = state.records.find(tag)
     if len(rows) > 1:
         message = f"the log names step {tag.root} more than once"
-        raise ValueError(message)
+        raise RecordRefusedError(RefusalReason.STEP_NOT_OPEN, message, tag)
     if not rows:
         message = f"the log names step {tag.root}, which the run never held"
-        raise ValueError(message)
+        raise RecordRefusedError(RefusalReason.STEP_NOT_OPEN, message, tag)
     return not is_open(rows[0])
 
 
@@ -152,7 +153,7 @@ def started(
     expected = 1 if previous is None else previous.started + 1
     if attempt != expected or record.request != request or (previous and not previous.ended):
         message = f"the log starts attempt {attempt} of step {tag.root}, not its attempt {expected}"
-        raise ValueError(message)
+        raise RecordRefusedError(RefusalReason.ATTEMPT_MISMATCH, message, tag)
     if record.phase is RequestPhase.PREPARED:
         record = record.model_copy(
             update={
@@ -178,7 +179,7 @@ def interrupted(state: CoreState, tag: RequestId, attempt: int, why: Interruptio
     row = state.steps.of(tag)
     if row is None or row.started != attempt or row.ended:
         message = f"the log interrupts attempt {attempt} of step {tag.root}, which is not running"
-        raise ValueError(message)
+        raise RecordRefusedError(RefusalReason.ATTEMPT_MISMATCH, message, tag)
     uncharged = row.uncharged + (0 if why.charged else 1)
     state = _returned(state, tag)
     return _with(state, tag, row.model_copy(update={"ended": True, "uncharged": uncharged}))
@@ -217,10 +218,10 @@ def ended(state: CoreState, result: RunResultProposal) -> CoreState:
     """``state`` with the end of the run published, which the log records once the run is over."""
     if state.run.result is None or state.run.result != result:
         message = "the log ends a run with a result the run does not hold"
-        raise ValueError(message)
+        raise RecordRefusedError(RefusalReason.RUN_NOT_OVER, message)
     if state.run.status is not RunStatus.TERMINAL:
         message = "the log ends a run that is not over"
-        raise ValueError(message)
+        raise RecordRefusedError(RefusalReason.RUN_NOT_OVER, message)
     return state.model_copy(update={"steps": state.steps.model_copy(update={"ended": result})})
 
 
@@ -244,7 +245,7 @@ def reported_by(state: CoreState, tag: RequestId, attempt: int) -> None:
     latest = 0 if row is None else row.started
     if attempt != latest:
         message = f"the log finishes attempt {attempt} of step {tag.root}, whose latest is {latest}"
-        raise ValueError(message)
+        raise RecordRefusedError(RefusalReason.ATTEMPT_MISMATCH, message, tag)
 
 
 def open_step(state: CoreState, tag: RequestId) -> OpenStep | None:
@@ -308,7 +309,7 @@ def _speaks_for(record: RequestRecord, fact: object) -> None:
         )
     ):
         message = f"the log finishes step {record.request_id.root} with a fact of another request"
-        raise ValueError(message)
+        raise RecordRefusedError(RefusalReason.RESULT_MISMATCH, message, record.request_id)
 
 
 def forgotten(state: CoreState, tag: RequestId) -> CoreState:

@@ -10,7 +10,15 @@ from __future__ import annotations
 import pytest
 
 import vs_core.api as core
-from vs_core.api.recovery import Finished, Run, finished_message, fold, started_message
+from vs_core.api.recovery import (
+    Finished,
+    RecordRefusedError,
+    RefusalReason,
+    Run,
+    finished_message,
+    fold,
+    started_message,
+)
 from vs_proto.api import Oneof, Record, Timestamp
 
 from .test_owner_event_precedence import REPLY, SCHEMA, dispatched, observation
@@ -99,5 +107,6 @@ def test_a_fact_that_names_another_request_is_refused_not_applied(where: str) ->
             observed=report,
             owner_events=(owner.model_copy(update={"observation": foreign(seen)}),),
         )
-    with pytest.raises(ValueError, match="another request"):
+    with pytest.raises(RecordRefusedError, match="another request") as refused:
         fold(log_of(request, finished), state)
+    assert refused.value.refusal.reason is RefusalReason.RESULT_MISMATCH

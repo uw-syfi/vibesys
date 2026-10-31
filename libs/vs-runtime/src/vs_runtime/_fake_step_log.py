@@ -14,12 +14,15 @@ from typing import TYPE_CHECKING, ClassVar, Literal
 
 import vs_core.api as core
 from vs_core.api.recovery import (
+    RecordRefusal,
+    Run,
     ended_message,
     finished_message,
     fold,
     input_message,
     interrupted_message,
     open_step,
+    start_due,
     started_message,
 )
 from vs_proto.api import EpochStarted, Record, Timestamp
@@ -31,7 +34,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from vs_core.api import CoreEvent, CoreState, OperationRegistry, RequestId
-    from vs_core.api.recovery import End, Interruption, Run, StepResult
+    from vs_core.api.recovery import End, Interruption, StepResult
     from vs_sim.api import Clock
 
 
@@ -127,9 +130,15 @@ class FakeStepLog:
         view = open_step(self._state, tag)
         return None if view is None else OpenStep(view.step, view.deadline_at, view.started)
 
-    async def step_started(self, run: Run) -> None:
-        """Append ``StepStarted``."""
-        self._append(started_message(run))
+    async def step_started(self, run: Run) -> Run | RecordRefusal:
+        """Append ``StepStarted`` if the rule would run the step now, with the limit it gives now."""
+        at = self._clock.now()
+        due = start_due(self._state, run.tag, at)
+        if isinstance(due, RecordRefusal):
+            return due
+        recorded = Run(run.step, run.tag, run.attempt, due.deadline_at)
+        self._append(started_message(recorded), clock=at)
+        return recorded
 
     async def step_finished(self, tag: RequestId, attempt: int, result: StepResult) -> None:
         """Append ``StepFinished``."""
@@ -151,11 +160,15 @@ class FakeStepLog:
     def _refolded(self) -> CoreState:
         return fold(self._records.read(), self._seed, registry=self._registry)
 
-    def _append(self, message: CoreMessage) -> None:
-        """Fold the next record first, so a record the fold refuses is never appended."""
-        at, clock = Timestamp(), self._clock.now()
+    def _append(self, message: CoreMessage, *, clock: float | None = None) -> None:
+        """Fold the next record first, so a record the fold refuses is never appended.
+
+        The record is stamped with ``clock`` when the caller read it for its own check, so the
+        check and the stamp are one instant.
+        """
+        stamp = self._clock.now() if clock is None else clock
         scratch = ConfirmedLog(_Scratch(self._records.read()))
-        built = scratch.append(message, epoch=self.epoch, at=at, clock=clock)
+        built = scratch.append(message, epoch=self.epoch, at=Timestamp(), clock=stamp)
         if not isinstance(built, Appended):
             raise FakeLogUncertainError
         folded = fold([built.record], self._state, registry=self._registry)

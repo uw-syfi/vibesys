@@ -567,13 +567,22 @@ end.
   result.
 - **The log is read as strictly as it is written.** A `StepFinished` names the latest attempt the step
   began, a `RunEnded` a run that is over, and an interruption or cancel reason the version knows; the
-  fold refuses the rest with a `ValueError`, never a `KeyError`.
+  fold refuses the rest as a `RecordRefusedError`, never a `KeyError`. It is a `ValueError` that carries a
+  `RecordRefusal`: the closed `RefusalReason` (`NO_SEED`, `STEP_NOT_OPEN`, `START_NOT_DUE`, `ATTEMPT_MISMATCH`,
+  `RUN_NOT_OVER`, `RESULT_MISMATCH`, `UNREADABLE`), the step it names, and the message. No fold module raises a
+  bare `ValueError`.
 
-- **The log holds only starts the rule would run.** A flight that waited for its `clear` while the run
-  paused or parked would record a start into a parked run, leaving an attempt that nothing cancels. The
-  fold refuses a `StepStarted` that `decide` would not `Run`, and `may_start(state, tag, now)` is that
-  predicate for the loop to ask, under its append lock and with the clock it records at, before it
-  records a start. A flight that is refused stands down: its `clear` did no harm and the step stays open.
+- **The log holds only starts the rule would run, checked and stamped at one instant.** A flight that
+  waited for its `clear` or for the writer while the run paused, parked or ran out the step's time would
+  record a start into a run that cannot take it, leaving an attempt that nothing cancels. The fold refuses
+  a `StepStarted` that `decide` would not `Run`. The loop does not ask first with its own clock: that clock
+  reading and the log's stamp are two instants, and a pause or a limit can fall between them.
+  `step_started(run)` reads the run clock once, asks `start_due(state, tag, now)` (the `Run` the rule gives
+  at that instant, or a `RecordRefusal`), and stamps the record with that same `now`. It returns the attempt as recorded,
+  which the loop runs: an unstarted step's limit counts from the stamp, so a start that waited is not born
+  expired. When the rule would not `Run` the step then, it appends nothing and returns the `RecordRefusal`
+  (`STEP_NOT_OPEN` or `START_NOT_DUE`, the two a race explains; an attempt out of order is no race and
+  raises). A flight that is refused stands down: its `clear` did no harm and the step stays open.
 
 `open_step(state, tag)` is the step as the loop runs it while it has no result: its request, its limit
 and the attempts that began. The loop reads it from core instead of rebuilding it from the ledger.
@@ -703,7 +712,8 @@ In code the loop decides with core's own functions, `decide` and `at_rest`, and 
 interface it owns. `StepLog` is the log as the loop uses it: one atomic durable append per method, a
 `state` that is the fold of everything appended (by the loop or by an input from elsewhere), and
 `open_step(tag)`, the step with no result as the fold has it (its request, its limit and its latest
-attempt), which is where `clear` gets the step for a tag with no attempt in flight. `StepLogContract`
+attempt), which is where `clear` gets the step for a tag with no attempt in flight. `step_started(run)` is
+the one append that decides: it returns the attempt as recorded or a `StartRefused`. `StepLogContract`
 holds a log to what the loop relies on, and a restarted log over the records of a dead process is how the
 tests kill the host. The loop's clock is the run clock, the one `decide` reads and the records carry.
 `at_rest(state)` says the run ended (the loop returns at once, so a restart never records the end twice)

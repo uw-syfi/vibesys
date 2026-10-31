@@ -31,6 +31,7 @@ from vs_core.api.recovery import (
     CancelReason,
     End,
     Interruption,
+    RecordRefusal,
     Run,
     RunRest,
     Settle,
@@ -38,7 +39,6 @@ from vs_core.api.recovery import (
     at_rest,
     decide,
     interruption_of,
-    may_start,
 )
 from vs_runtime._step_runner import Adopted, CancelSignal, Cleared, ClearUnavailableError
 
@@ -78,8 +78,18 @@ class StepLog(Protocol):
         """The step ``tag`` as the fold has it while it has no result; ``None`` otherwise."""
         ...
 
-    async def step_started(self, run: Run) -> None:
-        """Record that an attempt is about to start, before any I/O of it."""
+    async def step_started(self, run: Run) -> Run | RecordRefusal:
+        """Record that an attempt is about to start, before any I/O of it.
+
+        The log checks and stamps at one instant of the run clock, so no pause, park or end of
+        the step's time can fall between them: it asks ``start_due`` at the instant it stamps
+        the record and appends only what that gives. The ``Run`` returned is the attempt as
+        recorded, which the loop runs: its limit is that of the stamp's instant, later than
+        ``run``'s when the start waited. When the rule would not ``Run`` the step then (it has its
+        result, or the run paused or ran out its time), the log appends nothing and returns the
+        ``RecordRefusal``, ``STEP_NOT_OPEN`` or ``START_NOT_DUE``. An attempt out of order, which no race
+        explains, raises ``RecordRefusedError``.
+        """
         ...
 
     async def step_finished(self, tag: RequestId, attempt: int, result: StepResult) -> None:
@@ -444,13 +454,11 @@ class _StepLoop:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def _record_started(self, run: Run) -> bool:
-        """Record the start unless the run no longer lets the step start: the decision is stale."""
+    async def _record_started(self, run: Run) -> Run | None:
+        """Record the start, or ``None`` when the run no longer lets the step start: stale."""
         async with self._appending:
-            if not may_start(self._log.state, run.tag, self._clock.now()):
-                return False
-            await self._log.step_started(run)
-            return True
+            started = await self._log.step_started(run)
+        return None if isinstance(started, RecordRefusal) else started
 
     async def _record_finished(self, tag: RequestId, attempt: int, result: StepResult) -> None:
         async with self._appending:
@@ -473,11 +481,13 @@ class _StepLoop:
         if cleared is None or (flight.signal.is_set() and isinstance(cleared, Cleared)):
             await self._finish_unstarted(flight)
             return
-        if not await self._record_started(run):
+        started = await self._record_started(run)
+        if started is None:
             return
         flight.started = True
-        outcome = await self._run_bounded(run, flight.signal)
-        await self._finish_attempt(run, flight, outcome)
+        flight.deadline_at = started.deadline_at
+        outcome = await self._run_bounded(started, flight.signal)
+        await self._finish_attempt(started, flight, outcome)
 
     async def _finish_unstarted(self, flight: _Flight) -> None:
         """The wait for ``clear`` ended by a cancel: no attempt of this try ever started."""

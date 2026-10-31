@@ -24,6 +24,8 @@ from vs_core.api.recovery import (
     Finished,
     Interruption,
     InterruptPolicy,
+    RecordRefusedError,
+    RefusalReason,
     Run,
     RunRest,
     Settle,
@@ -547,6 +549,23 @@ def test_every_result_core_settles_ends_its_step_and_keeps_its_reason(
     assert closed.observation.terminal
 
 
+def refused_start(build: Builder, bad: Run) -> RefusalReason:
+    """The reason the fold gives for a start ``bad`` appended after ``build``'s records."""
+    records = [
+        *build.script.records,
+        Record(
+            seq=len(build.script.records) + 1,
+            epoch=1,
+            at=Timestamp(seconds=9),
+            clock=9.0,
+            body=Oneof("step_started", started_message(bad)),
+        ),
+    ]
+    with pytest.raises(RecordRefusedError, match="log") as refused:
+        fold(records, SEED)
+    return refused.value.refusal.reason
+
+
 def test_a_log_the_rule_did_not_write_is_refused_rather_than_guessed_at() -> None:
     build = Builder()
     build.prepare(1)
@@ -554,20 +573,14 @@ def test_a_log_the_rule_did_not_write_is_refused_rather_than_guessed_at() -> Non
     build.start(step)
     skipped = Run(step.request, step.tag, step.started + 2, 100.0)
     ghost = Run(request_of("ghost", 0), core.RequestId(root="ghost"), 1, 100.0)
-    next_while_running = Run(step.request, step.tag, step.started + 1, 100.0)
-    for bad in (skipped, ghost, Run(step.request, step.tag, 1, 100.0), next_while_running):
-        records = [
-            *build.script.records,
-            Record(
-                seq=len(build.script.records) + 1,
-                epoch=1,
-                at=Timestamp(seconds=9),
-                clock=9.0,
-                body=Oneof("step_started", started_message(bad)),
-            ),
-        ]
-        with pytest.raises(ValueError, match="log"):
-            fold(records, SEED)
+    running = Run(step.request, step.tag, step.started + 1, 100.0)
+    again = Run(step.request, step.tag, 1, 100.0)
+    for bad in (skipped, again, running):
+        assert refused_start(build, bad) is RefusalReason.START_NOT_DUE
+    assert refused_start(build, ghost) is RefusalReason.STEP_NOT_OPEN
+    build.interrupt(step, Interruption.PAUSE)
+    assert refused_start(build, skipped) is RefusalReason.ATTEMPT_MISMATCH
+    assert refused_start(build, again) is RefusalReason.ATTEMPT_MISMATCH
 
 
 @settings(max_examples=examples(pr=12, nightly=100))
