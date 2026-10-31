@@ -56,7 +56,7 @@ once. An **open step** is a step with no result. An **epoch** is one process lif
 | `vs-dst` kills and pauses at every log write and every await | in progress (#3475 item 2) |
 | `state.pb` as a cache, one-append commit | unbuilt |
 | Prove-or-block layer ([inventory](#consumer-inventory)) | built; deleted at the cutover |
-| Keyed replay, parts 1 to 7a | the `vs_runtime` half, `serial_replay.py` and their tests are deleted; the pure `vs_core` half stays, dormant, until 6b (see [what of keyed replay stays](#what-of-keyed-replay-stays)) |
+| Keyed replay, parts 1 to 7a | deleted (the `vs_runtime` driver, the `vs_core` flows and `api/replay.py`, `serial_replay.py` and their tests); the protos and `RunLogReplayStore` stay until 6b (see [what of keyed replay stays](#what-of-keyed-replay-stays)) |
 | Keyed replay, parts 7b to 9 | not built, and not needed by this design |
 
 ## Consumer inventory
@@ -93,7 +93,7 @@ Paths are under `libs/vs-core/src/vs_core/`.
 | `_recovery_unanswered.py` | 85 | `_request_recovery.py` only | Delete: its four verdicts (`resend`, `unknown`, `terminal`, `blocked`) collapse to one, `resend` |
 | `_proofs.py` | 1,120 | 27 core modules, `api/proofs.py`, `api/_exports.py` | Delete 207 (`resolved_observation`, `released_owner`, `_release_*`, `_released_*`, `blocked_unnamed`). Move 211 (`committed_stop`, `stop_mode`, `requested_stop_mode`, `draining`, `continues_admitted_work`, `admission_remaining`, `occupied_episode`, the dependency rules) to `_run_stop.py` and `_admission.py` as plain functions. Keep 702: correlation checks the live reducers use |
 | `_attempt_retirement.py` | 1,941 | `attempts.py` only | Delete 691: release proofs, ownership discovery, `_inspect_unknown`, `_session_reattached`, `_reacquired`. Keep 1,250: closure, retention, guarded scope reopening. Closure waits for the scope's steps to have results instead of proving release |
-| `_continuations.py` | 1,757 | `_step.py`, `_session_turns.py`, `_evaluation_history.py`, `evaluation.py`, `flows/_replay_turns.py` | Delete 96 (`_release_complete`, `_job_released`, `_descendants` and kin). Keep 1,661, including `credit_downtime` and `reach_deadlines` (wait deadlines) |
+| `_continuations.py` | 1,757 | `_step.py`, `_session_turns.py`, `_evaluation_history.py`, `evaluation.py` | Delete 96 (`_release_complete`, `_job_released`, `_descendants` and kin). Keep 1,661, including `credit_downtime` and `reach_deadlines` (wait deadlines) |
 | `_settlement.py` | 505 | `settlement.py` only | Delete 14 (`_released`, the gate that publishes only after release proof). Keep 491 |
 | `_inspection.py` | 217 | `_step.py` | Delete: correlates inspection answers, which no longer exist |
 | `_host_epochs.py` | 69 | `records.py`, `_step.py`, `_wait_clock.py`, `_request_recovery.py` | Delete: the fold's clock is the recorded run clock, which excludes downtime, so no host log is needed |
@@ -481,7 +481,7 @@ Each pull request below is dormant until the cutover: test-reachable, not select
 | 5b. Evaluation runners | `libs/vs-runtime/src/vs_runtime/_slurm_job_step_runner.py`, `_local_job_step_runner.py`; Slurm tier case | nothing |
 | 5c. Operation, adoption and environment runners | `libs/vs-runtime/src/vs_runtime/_operation_step_runner.py`, `_adoption_step_runner.py`; per-environment `clear` in `_run_environment.py` (Docker, SkyPilot, Modal, Host) | nothing |
 | 6a. Cutover | `src/vibesys/run/core_run.py`, `core_services.py`, `src/launch`; `vs_runlog` `state.pb` cache writer; the one-time `CoreSnapshot` migration; `libs/vs-dst` runs the production loop | none yet; the old path is unreachable |
-| 6b. Deletion and guard | the files in the [inventory](#consumer-inventory); `tests/architecture/test_no_prove_or_block.py`; `tach.toml`; this page's status table, [run-transport.md](run-transport.md) commit text | about 5,700 production lines plus about 4,300 dormant keyed lines (the `vs_core` half and `_replay_store.py`), and their tests |
+| 6b. Deletion and guard | the files in the [inventory](#consumer-inventory); `tests/architecture/test_no_prove_or_block.py`; `tach.toml`; this page's status table, [run-transport.md](run-transport.md) commit text | about 5,700 production lines plus about 200 dormant keyed lines (`_replay_store.py` and `api/replay.py`), and their tests |
 
 PR 6a and 6b land back to back, with no cleanup deferred, as #3408 required of its own production switch.
 
@@ -492,24 +492,22 @@ PR 6a and 6b land back to back, with no cleanup deferred, as #3408 required of i
   (`libs/vs-runtime/src/vs_runtime/_core_loop.py:CoreRuntime._authorized`). No keyed code is needed for it.
 - **Kept, moved:** the log-append commit discipline of `RunLogReplayStore` (torn tail repaired, complete
   corruption fails, uncertain commit authorizes no dispatch), into `vs_runlog`.
-- **Kept, dormant, until 6b:** the pure core half of keyed replay in `libs/vs-core/src/vs_core/flows/`
-  (`_replay_identity.py`, `_replay_causality.py`, `_replay_schema.py`, `_replay_history.py`,
-  `_replay_sources.py`, `_replay_run.py`, `_replay_archive.py`, `_replay_accounting.py`,
-  `_replay_resources.py`, `_replay_iterations.py`, `_replay_controls.py`, `_replay_turns.py`,
-  `_replay_physical.py`, `_replay_writers.py`, and `api/replay.py`: about 4,100 lines), with its tests. No
-  importer outside tests and `_writer_reconciliation.py` (`ReplayRootReuse`) reaches it. It stays because
-  `libs/vs-core/tests/test_replay_archive.py` is edited by the core-input work (the archive refuses core
-  records), which also keeps the archive's closure alive. It costs about 7 seconds of CI test time in
-  total. Delete it with the layer in 6b.
 - **Deleted:** the whole `vs_runtime` driver half (`_replay_runtime.py`, `_replay_run.py` and the fourteen
-  modules around them, 4,323 lines), `src/vibesys/serial_replay.py`, the writer barrier in
-  `_writer_reconciliation.py`, and the tests and test-only proto fixtures of all of them. The
-  `ReplayUnknown`, retire and withdraw paths went with the runtime.
+  modules around them, 4,323 lines), the pure `vs_core` half (`flows/_replay_*.py` and `api/replay.py`,
+  about 4,300 lines), `src/vibesys/serial_replay.py`, the writer barrier in `_writer_reconciliation.py`,
+  and the tests, benchmark scripts and test-only proto fixtures of all of them. The `ReplayUnknown`,
+  retire and withdraw paths went with the runtime. The code is the path to reusing results across a code
+  edit by semantic key, which this design does not need; it is recoverable from git history (#3378 and the
+  parts before it).
+- **Moved:** `ReplayRootReuse`, the one `vs_core` type live code still needed, now lives in
+  `_writer_reconciliation.py` beside the registry that issues it.
 - **Kept for 6b, listed:** `_writer_reconciliation.py` and `_evaluation_recovery.py` (imported by
   `_run_environment.py` and `_polling_evaluation.py`, which other recovery branches edit), the `replay*.proto`
-  messages and their generated clients (removing them needs the `buf breaking` exception 6b names), and
-  `_replay_store.py`. Their protos are removed in 6b; `buf breaking` flags the removal, so 6b names an
-  exception, valid because no run has written those messages.
+  messages and their generated clients, and `_replay_store.py` with `api/replay.py`. Their protos are
+  removed in 6b; `buf breaking` flags the removal, so 6b names an exception, valid because no run has
+  written those messages. `vibesys.fact_import` still builds `AccountingEvidence` (from those protos) for
+  retained-run import; no run path calls `accounting_evidence`, and the only consumer of its output was the
+  deleted keyed ledger, so 6b decides whether it goes with them.
 
 ### Keeping the deleted modules from coming back
 
@@ -539,7 +537,7 @@ applies the rule "no result means run again".
 | Multi-host runs | adds one site | The run lock is a local `flock` and assumes the writer and the log share a host (run-transport's open question on NFS). A second host needs a lock behind an interface. Runners also need `StepStarted` to record where the attempt ran, so `clear` reaches that host. The `StepRunner` contract itself does not change |
 | New step kind | neutral | A runner and a contract run, no change to core |
 | New strategy | neutral | Strategies see results and attempts, never a blocked state |
-| Resume on edited code | neutral | Same rule as today (next round). The dormant keyed code is the path to more |
+| Resume on edited code | neutral | Same rule as today (next round). The deleted keyed-replay code (see git history) is the path to more |
 | Retained-run import | neutral | An imported run starts from a `CoreSnapshot` record, as a migrated one does |
 
 ## Open pull requests

@@ -10,6 +10,7 @@ from vs_runtime._evaluation_recovery import (
 from vs_runtime._replay_store import REPLAY_STORE_SCHEMA_VERSION, ReplayStore, RunLogReplayStore
 from vs_runtime._writer_reconciliation import (
     DockerWriterReconciler,
+    ReplayRootReuse,
     UnsupportedWriterReconciler,
     WriterProofError,
     WriterReconciler,
@@ -24,6 +25,7 @@ __all__ = [
     "EvaluationWorkspaceAcquisitions",
     "EvaluationWriterReconciliation",
     "LocalEvaluationReceipts",
+    "ReplayRootReuse",
     "ReplayStore",
     "RunLogReplayStore",
     "UnsupportedWriterReconciler",

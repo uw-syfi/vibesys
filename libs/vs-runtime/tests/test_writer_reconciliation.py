@@ -12,12 +12,12 @@ from hypothesis import strategies as st
 
 from vs_agent.api import reap_recorded_agents
 from vs_agent.api.testing import FakeConfinement
-from vs_core.api.replay import ReplayRootReuse
 from vs_project.api import FakeStateStore, Project
 from vs_proto.api import ValidationError, replay, validate
 from vs_runtime.api.infrastructure import RunEnvironmentSpec, build_run_environment
 from vs_runtime.api.replay import (
     DockerWriterReconciler,
+    ReplayRootReuse,
     UnsupportedWriterReconciler,
     WriterProofError,
     WriterRegistry,

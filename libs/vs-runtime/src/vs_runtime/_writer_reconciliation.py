@@ -26,7 +26,6 @@ from vs_sim.api import DISCARD, ProcessTimeoutError, ReleaseStack
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
-    from vs_core.api.replay import ReplayRootReuse
     from vs_project.api import StateNamespace, StoreFence
     from vs_sandbox.api import DockerCli
     from vs_sim.api import Threads
@@ -42,6 +41,16 @@ def _checked[T: Message](message: T) -> T:
         problem = "writer evidence contains unknown fields"
         raise WriterProofError(problem)
     return message
+
+
+@dataclass(frozen=True)
+class ReplayRootReuse:
+    """A release/reuse request carries durable environment proof, never a released receipt."""
+
+    proof_bytes: bytes
+
+    def proof(self) -> pb.WriterTerminationProof:
+        return _checked(pb.WriterTerminationProof.from_binary(self.proof_bytes))
 
 
 class WriterRegistry:

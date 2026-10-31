@@ -290,15 +290,6 @@ native_targets = []
 pnpm_packages = []
 
 [[cases]]
-name = "keyed replay core selects Python verification"
-paths = ["libs/vs-core/src/vs_core/api/replay.py", "libs/vs-core/src/vs_core/flows/_replay_identity.py", "libs/vs-core/src/vs_core/flows/_replay_history.py", "libs/vs-core/src/vs_core/flows/_replay_run.py", "libs/vs-core/src/vs_core/flows/_replay_sources.py", "libs/vs-core/src/vs_core/flows/_replay_causality.py", "libs/vs-core/src/vs_core/flows/_replay_schema.py", "libs/vs-core/src/vs_core/flows/_replay_archive.py"]
-jobs = ["python"]
-[cases.collections]
-native_languages = []
-native_targets = []
-pnpm_packages = []
-
-[[cases]]
 name = "keyed replay contracts select proto verification"
 paths = ["proto/vibesys/store/v1/replay.proto", "proto/vibesys/search/v1/serial_effects.proto", "proto/vibesys/core/v1/replay_workspace.proto", "proto/vibesys/core/v1/replay_agent.proto", "proto/vibesys/core/v1/replay_evaluation.proto"]
 jobs = ["proto"]
@@ -308,8 +299,8 @@ native_targets = []
 pnpm_packages = []
 
 [[cases]]
-name = "replay context fixtures and ownership guard select generation and Python checks"
-paths = ["libs/vs-core/tests/proto/vibesys/replay/testing/v1/context.proto", "libs/vs-core/tests/generated/vibesys/replay/testing/v1/context_pb.py", "libs/vs-core/tests/buf.gen.yaml", "scripts/check_proto_layers.py"]
+name = "proto layer guard selects generation and Python checks"
+paths = ["scripts/check_proto_layers.py"]
 jobs = ["proto", "python"]
 [cases.collections]
 native_languages = []
