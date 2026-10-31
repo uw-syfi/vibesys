@@ -9,6 +9,7 @@ from ._ownership import unreleased_records
 from ._refusal import RecordRefusedError, RefusalReason
 from ._request_recovery import command_open, is_open, is_step, resent
 from .types.common import EventId, Observation, ObservationStatus, RunStatus
+from .types.evaluation import JobObserved, SubmitMeasurement
 from .types.records import RequestObserved, RequestPhase, RequestRecord
 from .types.steps import (
     Cancelled,
@@ -312,9 +313,39 @@ def finish(
         case Finished():
             for fact in (result.observation, *result.owner_events):
                 _speaks_for(record, fact)
-            return result.report, result.owner_events
+            return result.report, (*result.owner_events, *_job_ended(record, result))
         case Failed() | Cancelled():
             return _concluded(record, result, state.run.now_at), ()
+
+
+def _job_ended(record: RequestRecord, result: Finished) -> tuple[JobObserved, ...]:
+    """The job observation of a submission whose own report ended its job, else none.
+
+    A runner that carries a job to its end answers the submission with the job's terminal
+    observation, evidence and facts: the report is the job's last observation, and no poll will
+    bring another. Without this the job stays unobserved until a poll answers, and a run that is
+    ending asks for no poll, so its closure would wait on a release nothing can prove. A runner
+    that returns the job's observation beside its report has said it already.
+    """
+    observation = result.observation
+    if (
+        not isinstance(record.request, SubmitMeasurement)
+        or not (observation.accepted and observation.terminal)
+        or observation.resource_id is None
+        or any(isinstance(event, JobObserved) for event in result.owner_events)
+    ):
+        return ()
+    report = result.report
+    return (
+        JobObserved(
+            progress=report.progress,
+            resource_id=observation.resource_id,
+            observation=observation,
+            evidence=report.evidence,
+            evaluation_result=report.evaluation_result,
+            failure=report.measurement_failure,
+        ),
+    )
 
 
 def _speaks_for(record: RequestRecord, fact: object) -> None:
