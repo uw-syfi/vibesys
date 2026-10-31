@@ -8,6 +8,7 @@ Claude Code additionally caps consecutive tool-free continuations at eight.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import sys
@@ -16,7 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "search/optimize/scripts"))
-from run import read_state, status
+from run import parse_date, read_state, status
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -34,28 +35,25 @@ def block_reason(cwd: Path, now: datetime, event: dict[str, Any] | None = None) 
         if not run_id or any(c in run_id for c in ("/", "\\")) or run_id in {".", ".."}:
             return None
         run = home / run_id
-        state = read_state(run)
+        with (run / "run.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            state = read_state(run)
+            session = event.get("session_id")
+            if not session or state["session_id"] not in {None, session}:
+                return None
+            if state["session_id"] is None:
+                state["session_id"] = session
+                temporary = run / "session.tmp"
+                temporary.write_text(json.dumps(state, indent=2) + "\n")
+                temporary.replace(run / "run.json")
         summary = status(state, now)
         if summary["seconds_left"] <= 0 or state["finished"]:
             return None
-        wrap_up = datetime.fromisoformat(state["wrap_up_at"])
-        pending = event.get("background_tasks", [])
-        running = any(
-            t.get("status") == "running"
-            and (
-                t.get("type") == "subagent"
-                or (t.get("type") == "shell" and t.get("id") in state["commands"])
-            )
-            for t in pending
-        )
-        if now < wrap_up and (running or state["idle_reason"] or not summary["free_slots"]):
+        if now < parse_date(state["wrap_up_at"]) and (
+            state["idle_reason"] or not summary["free_slots"]
+        ):
             return None
-        return (
-            f"{summary['seconds_left']:g} seconds left; wrap-up {summary['wrap_up_at']}; "
-            f"{summary['free_slots']} free slots. {summary['next']}. "
-            "Dispatch with add, or record why not with idle --reason. "
-            f'Run python3 "{Path(__file__).resolve().parents[1]}/search/optimize/scripts/run.py" status --run "{run}"'
-        )
+        return summary["next"]
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return None
 
@@ -85,7 +83,8 @@ if __name__ == "__main__":
         main(
             sys.stdin,
             sys.stdout,
-            now=lambda: datetime.now(timezone.utc),
+            # LW-100358 [TID251]; standalone host clock; vs_sim adds a dependency, indirect lookup hides real I/O.
+            now=lambda: datetime.now(timezone.utc),  # noqa: TID251
             fallback_cwd=Path.cwd(),
             project_dir=Path(os.environ["CLAUDE_PROJECT_DIR"])
             if os.environ.get("CLAUDE_PROJECT_DIR")

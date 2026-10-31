@@ -43,8 +43,8 @@ brief's budget; identical readings on both sides remain inconclusive even after 
 code 2 means the input was invalid and the message says which part.
 
 Run each measurement's build/check/benchmark/record sequence as one tracked background Bash
-command with `run_in_background: true`. At the start of that shell, write `echo "$BASHPID" > "$RUN/<attempt>.pid"`;
-the lead reads it and supplies `track --pid <PID>` with the task id.
+command with `run_in_background: true`. Use Bash. At the start of that shell, write `echo "$BASHPID" > "$RUN/<attempt>.pid"`;
+the lead uses `track --pid-file "$RUN/<attempt>.pid" --timeout 10` with the task id; no fixed delay.
 Never detach the whole sequence with `nohup`, `setsid`, shell `&` or
 `disown`: Claude Code must track completion and notify the lead. Serialize by starting the
 next measurement only when the previous command's completion notification arrives. Do not
@@ -56,7 +56,18 @@ Use `set -euo pipefail` in the measurement shell. Preserve failure with
 call after notification. Never append `; tail ...` to a measurement. Record the exact
 executed benchmark command, including dependency flags, port and output argument. Build
 that command once and execute the same value you record; do not reconstruct it from memory.
-Services within the tracked sequence may start with `&`; save `$!` immediately and
-stop only that saved PID in cleanup, never names or port lookups. Use a bounded task readiness
-probe with a fixed attempt limit and fail when it expires; do not use fixed startup sleeps
-or open-ended polling.
+Use `scripts/service.py --service '<JSON argv>' --probe '<JSON argv>'
+--client '<JSON argv>' --timeout <seconds>` to own services, readiness and cleanup.
+It kills and verifies the whole process group, including wrapper descendants; readiness
+exhaustion fails before the client runs. Do not write `&`/PID/sleep recipes.
+
+Every load-generating command, recorded or unrecorded (including sanity and tuning runs),
+must execute through `measurements.py run -- <command>`. Its host-wide flock prevents overlap.
+
+Read every task objective gate, including prose in OBJECTIVE.md. `gates --run <dir>` lists
+the exact declaration keys. `record --gates <file>`
+accepts a JSON object keyed by each exact stripped gate/SLA declaration line in task Markdown.
+Each result has `passed: [true|false, ...]` and `values: [number, ...]`, one of each per
+throughput sample. Evaluate the actual task limits; never infer pass from missing data.
+`compare` prints gate status for each revision and pooled metric ranges; derive report prose
+ranges only from that output. Missing results are unmeasured; any failed sample blocks approval.

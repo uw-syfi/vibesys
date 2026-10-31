@@ -8,8 +8,8 @@ description: "Use when asked to optimize a repository against a benchmark, unatt
 You are the lead of a time-boxed optimization run. You steer; you never edit candidate code.
 Subagents do that, each in its own git worktree. You choose what to try, check what comes back,
 and treat the time box as a limit, not a quota. Everything you need to resume lives in files, so a
-context limit costs you nothing: after any compaction, reread `run.json`, `ledger.md`,
-`decisions.md` and the newest files in `notes/` before acting.
+context limit costs you nothing: after any compaction, reread `run.json`, `ledger.md` and
+the newest files in `notes/` before acting.
 
 Arguments: `<task>`, `--time <duration>` (`90m`, `2h`, `1h30m`), and `--fanout N`, the most
 subagents running at once (default 3).
@@ -36,6 +36,8 @@ before you plan and again at each wrap-up.
 
 ## Loop
 
+Never run run.py commands in parallel. The controller locks whole state transactions.
+
 After every completion notification or wakeup, run:
 
 ```sh
@@ -46,7 +48,7 @@ Do what `next` says. Use the commands in [run-state.md](references/run-state.md)
 before dispatch, transition it on return, record its judge result, and promote winners.
 Give each background subagent a self-contained brief from briefs.md and its own worktree.
 Keep measurements serialized as tracked background Bash commands (`run_in_background: true`).
-Use `track` with the Bash task ID and the saved process PID (`--pid`); after its completion
+Use `track` with the Bash task ID and a bounded PID-file handoff (`--pid-file <file> --timeout 10`); after its completion
 notification use `untrack`.
 
 Branch new ideas from the current winner. When leaving slots idle, run
@@ -56,7 +58,7 @@ Finish before wrap-up only with `finish --early --reason "<why>"`, after all oth
 
 Wait only on completion notifications or the one wakeup. Never use a timer sleep to wait out
 the budget or an open-ended polling loop.
-Bounded readiness waits for a service are allowed; use the task readiness probe with a fixed
+Bounded readiness waits for a service are allowed; use the task readiness probe through the measure skill service helper, with a fixed
 attempt limit and fail if it never becomes ready. Do useful work or yield. A cron alone does
 not release the Stop hook.
 

@@ -204,14 +204,14 @@ def test_main_never_moves_without_better_and_judge_pass(
         assert '"ratio": 15.0' in (run.path / "report.md").read_text()
 
 
-def test_trial_two_early_finish_is_rejected(tmp_path: Path) -> None:
+def test_early_finish_is_rejected(tmp_path: Path) -> None:
     run = Run(tmp_path)
     run.record(BASE, [10, 11, 12], 1)
     assert run.call("finish", seconds=1109) == 2
     assert (run.path.parent / "active").exists()
 
 
-def test_trial_two_historical_measurement_cannot_finalize_moved_main(tmp_path: Path) -> None:
+def test_historical_measurement_cannot_finalize_moved_main(tmp_path: Path) -> None:
     run = Run(tmp_path)
     run.git.head = CANDIDATE
     run.record(BASE, [10, 11, 12], 1)
@@ -305,7 +305,7 @@ def test_untrack_checks_pid_before_deleting(
         assert run.state() == before
 
 
-def test_trial_three_running_sleep_cannot_be_untracked_or_finished(tmp_path: Path) -> None:
+def test_running_sleep_cannot_be_untracked_or_finished(tmp_path: Path) -> None:
     run = Run(tmp_path)
     run.record(BASE, [10, 11, 12], 1)
     assert run.call("finish", seconds=1200) == 2
@@ -353,3 +353,161 @@ def test_finish_reports_public_full_pool_comparison(tmp_path: Path) -> None:
     report = (run.path / "report.md").read_text()
     assert json.loads(report.split("```json\n")[1].split("\n```")[0]) == expected
     assert "[1, 2, 3]" in report
+
+
+@pytest.mark.parametrize("pid", [0, 1, -1, 2**31, 99999999999999999999])
+def test_invalid_pid_is_rejected_without_state_change(tmp_path: Path, pid: int) -> None:
+    run = Run(tmp_path)
+    before = run.state()
+    assert run.call("track", "--id", "bad", "--description", "foreign", "--pid", str(pid)) == 2
+    assert run.state() == before
+
+
+def test_abort_releases_active_marker_and_records_reason(tmp_path: Path) -> None:
+    run = Run(tmp_path)
+    assert run.call("abort", "--reason", "lead crashed; manual recovery") == 0
+    assert not (run.path.parent / "active").exists()
+    assert run.state()["decisions"][-1]["kind"] == "abort"
+
+
+def test_live_foreign_pid_can_be_forcibly_untracked_with_reason(tmp_path: Path) -> None:
+    run = Run(tmp_path)
+    run.git.live.add(123)
+    assert run.call("track", "--id", "x", "--description", "owned command", "--pid", "123") == 0
+    assert run.call("untrack", "--id", "x") == 2
+    assert run.call("untrack", "--id", "x", "--force") == 2
+    assert run.call("untrack", "--id", "x", "--force", "--reason", "PID reused") == 0
+    assert run.state()["decisions"][-1]["kind"] == "force-untrack"
+
+
+@given(moved=st.booleans())
+def test_pending_promotion_recovers_at_either_git_boundary(
+    tmp_path_factory: pytest.TempPathFactory, *, moved: bool
+) -> None:
+    run = Run(tmp_path_factory.mktemp("recovery"))
+
+    class PromotionCrash(BaseException):
+        pass
+
+    class CrashingGit(Git):
+        def __call__(self, cwd: Path, args: list[str]) -> str:
+            if args[:2] == ["reset", "--hard"]:
+                if moved:
+                    super().__call__(cwd, args)
+                raise PromotionCrash
+            return super().__call__(cwd, args)
+
+    run.record(BASE, [99, 100, 101], 1)
+    run.record(CANDIDATE, [999, 1000, 1001], 2)
+    assert (
+        run.call("add", "--id", "candidate", "--kind", "implement", "--hypothesis", "faster") == 0
+    )
+    for target in ("returned", "judging"):
+        assert run.call("transition", "--id", "candidate", "--to", target, "--reason", "done") == 0
+    assert (
+        run.call(
+            "judge",
+            "--id",
+            "candidate",
+            "--commit",
+            CANDIDATE,
+            "--result",
+            "pass",
+            "--reason",
+            "checked",
+        )
+        == 0
+    )
+    assert run.call("transition", "--id", "candidate", "--to", "won", "--reason", "judged") == 0
+    run.git = CrashingGit(run.git.root)
+    with pytest.raises(PromotionCrash):
+        run.call("move-main", "--id", "candidate")
+    assert run.state()["pending_move"]["commit"] == CANDIDATE
+    assert run.state()["main_commit"] == BASE
+    assert run.call("status") == 0
+    recovered = run.state()
+    assert recovered["pending_move"] is None
+    assert recovered["main_commit"] == (CANDIDATE if moved else BASE)
+    assert len(recovered["promotions"]) == int(moved)
+    assert run.call("status") == 0
+    assert run.state() == recovered
+
+
+@pytest.mark.parametrize("result", [None, False, True])
+def test_judge_cannot_pass_missing_or_failed_declared_gate(
+    tmp_path: Path, *, result: bool | None
+) -> None:
+    run = Run(tmp_path)
+    task = tmp_path / ".vibesys/tasks/demo"
+    task.mkdir(parents=True)
+    declaration = "Latency SLA: latency must stay under the task limit."
+    (task / "OBJECTIVE.md").write_text(declaration)
+    run.record(BASE, [10, 11, 12], 1)
+    run.record(CANDIDATE, [100, 110, 120], 2)
+    path = run.path / "measurements.jsonl"
+    rows = [json.loads(line) for line in path.read_text().splitlines()]
+    for row in rows:
+        row["gate_requirements"] = [declaration]
+        row["gates"] = (
+            {}
+            if result is None
+            else {declaration: {"passed": [result] * 3, "values": [0.1, 0.2, 0.3]}}
+        )
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    assert run.call("add", "--id", "x", "--kind", "implement", "--hypothesis", "reduce copies") == 0
+    assert run.call("transition", "--id", "x", "--to", "returned", "--reason", "done") == 0
+    assert run.call("transition", "--id", "x", "--to", "judging", "--reason", "review") == 0
+    assert (
+        run.call(
+            "judge", "--id", "x", "--commit", CANDIDATE, "--result", "pass", "--reason", "checked"
+        )
+        == 0
+    ) == (result is True)
+    comparison = measurements.compare_commit(measurements.load_records(run.path), CANDIDATE, BASE)
+    assert comparison["gates"]["candidate"]["status"] == (
+        "unmeasured" if result is None else "pass" if result else "fail"
+    )
+    if result is not None:
+        assert comparison["gates"]["candidate"]["ranges"][declaration] == [0.1, 0.3]
+
+
+def exercise_git_contract(git: controller.Git, root: Path, base: str, candidate: str) -> None:
+    """The controller's supported Git operations, shared with the real-tier host test."""
+    assert Path(git(root, ["rev-parse", "--show-toplevel"]).strip()) == root
+    assert not git(root, ["status", "--porcelain"]).strip()
+    destination = root / "worktree"
+    git(root, ["worktree", "add", "-b", "contract", str(destination), base])
+    assert git(destination, ["rev-parse", "HEAD"]).strip() == base
+    git(destination, ["reset", "--hard", candidate])
+    assert git(destination, ["rev-parse", "HEAD"]).strip() == candidate
+    assert not git(destination, ["status", "--porcelain"]).strip()
+    with pytest.raises(ValueError, match="not-a-git-verb"):
+        git(destination, ["not-a-git-verb"])
+
+
+def test_fake_git_obeys_controller_contract(tmp_path: Path) -> None:
+    exercise_git_contract(Git(tmp_path), tmp_path, BASE, CANDIDATE)
+
+
+def test_unmeasured_judge_releases_for_measurement_then_rejudge(tmp_path: Path) -> None:
+    run = Run(tmp_path)
+    assert run.call("add", "--id", "x", "--kind", "implement", "--hypothesis", "reduce copies") == 0
+    for target in ("returned", "judging"):
+        assert run.call("transition", "--id", "x", "--to", target, "--reason", "done") == 0
+    assert (
+        run.call(
+            "judge",
+            "--id",
+            "x",
+            "--commit",
+            CANDIDATE,
+            "--result",
+            "unmeasured",
+            "--reason",
+            "missing gates",
+        )
+        == 0
+    )
+    assert not run.state()["items"]["x"]["judge_pass"]
+    assert run.call("transition", "--id", "x", "--to", "won", "--reason", "claim") == 2
+    assert run.call("transition", "--id", "x", "--to", "returned", "--reason", "measure next") == 0

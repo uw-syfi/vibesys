@@ -281,6 +281,10 @@ extend-exclude = [
     "examples/model-serving/qwen3.5-397b-a17b-mi300a-bespoke/.vibesys/tasks/default/reference/configuration_qwen3_5_moe.py",
 ]
 
+[tool.ruff.per-file-target-version]
+"skills/search/**/scripts/*.py" = "py310"
+"skills/hooks/deadline_stop.py" = "py310"
+
 [tool.ruff.lint]
 select = [
     "E", "F", "I", "UP", "B", "W",
@@ -374,9 +378,8 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel", "server.control_envelope
 # TRY003: one CLI input-error type carries contextual diagnostics. A subclass per validation
 # would expand the public API without distinct handling; assigning each message to a temporary
 # variable would only hide the same construction from lint. Keep messages at their validation.
-"skills/search/optimize/scripts/*.py" = ["TID251", "UP017", "TRY003"]
-"skills/search/measure/scripts/*.py" = ["TID251", "UP017", "TRY003"]
-"skills/hooks/deadline_stop.py" = ["TID251", "UP017"]
+"skills/search/optimize/scripts/run.py" = ["TRY003"]
+"skills/search/measure/scripts/measurements.py" = ["TRY003"]
 # Tests retain the Python 3.10 timestamps used in the standalone entry points' contract.
 "skills/hooks/tests/**" = ["S101", "PLR2004", "D", "INP001", "UP017"]
 "skills/search/*/tests/**" = ["S101", "PLR2004", "D", "INP001", "UP017"]

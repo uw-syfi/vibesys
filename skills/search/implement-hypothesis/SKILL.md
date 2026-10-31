@@ -33,23 +33,13 @@ parent commit and the scope. Details of the steps and the handoff are in
 4. With the verdict in hand, build the next step on it, or stop.
 
 
-Start a required service with `&`, save `$!` immediately, and kill only that saved PID:
-
-```sh
-./server --port "$P" &
-service_pid=$!
-trap 'kill "$service_pid" 2>/dev/null || true; wait "$service_pid" 2>/dev/null || true' EXIT
-ready=false
-for i in $(seq 50); do
-  if redis-cli -p "$P" PING; then ready=true; break; fi
-  sleep 0.1
-done
-[ "$ready" = true ] || exit 1
-```
-
-Adapt the start command and readiness probe to the task. Bounded readiness waits are fine;
-fixed startup delays and open-ended sleeps are not. Never use `pkill`, `killall`, or a PID
-found through port lookup. Ownership comes from `$!`, not a process name or listening port.
+Use the measure skill's `scripts/service.py` owner for every required service. Supply
+`--service`, `--probe`, and `--client` as JSON argv arrays, with a positive `--timeout`.
+It starts a new process group, fails on exhausted readiness, and stops and verifies the
+whole group on every exit. Never use handwritten background-shell PID or startup-sleep recipes.
+Run any load, including short sanity/tuning benchmarks, through
+`python3 "${CLAUDE_SKILL_DIR}/../measure/scripts/measurements.py" run -- <command>`.
+This host-wide lock applies to recorded and unrecorded benchmarks alike.
 
 ## Never
 

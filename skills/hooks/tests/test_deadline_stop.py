@@ -39,6 +39,7 @@ def test_stop_decision_table(
     (run.parent / "active").write_text("run-1")
     state = {
         "schema": 1,
+        "session_id": "lead",
         "idle_reason": "host busy" if idle else None,
         "decisions": [],
         "run_id": "run-1",
@@ -62,6 +63,7 @@ def test_stop_decision_table(
         (run.parent / "active").unlink()
     event = {
         "cwd": str(run),
+        "session_id": "lead",
         "stop_hook_active": continuation,
         "session_crons": [{"id": "wakeup"}] if kind == "cron" else [],
         "background_tasks": [],
@@ -82,15 +84,14 @@ def test_stop_decision_table(
     blocked = (
         run_state == "active"
         and window != "deadline"
-        and not (window == "search" and (kind in {"subagent", "tracked"} or idle or full))
+        and not (window == "search" and (idle or full))
     )
     assert bool(out.getvalue()) == blocked
     if blocked:
-        assert "free slots" in json.loads(out.getvalue())["reason"]
-        assert "status --run" in json.loads(out.getvalue())["reason"]
+        assert json.loads(out.getvalue())["reason"] == hook.status(state, now)["next"]
 
 
-def test_trial_two_cron_alone_cannot_release_idle_slots(tmp_path: Path) -> None:
+def test_cron_alone_cannot_release_unexplained_slots(tmp_path: Path) -> None:
     test_stop_decision_table(tmp_path, "search", "cron", "active", choices=(False, False, False))
 
 
@@ -102,7 +103,22 @@ def test_bad_input_fails_open(tmp_path: Path, payload: str) -> None:
 
 
 @given(choices=st.tuples(st.booleans(), st.booleans(), st.booleans()))
-def test_search_gate_blocks_iff_idle_unexplained_and_nothing_running(
+def test_search_gate_requires_a_reason_for_free_slots(
     tmp_path_factory: pytest.TempPathFactory, choices: tuple[bool, bool, bool]
 ) -> None:
     test_stop_decision_table(tmp_path_factory.mktemp("gate"), "search", "none", "active", choices)
+
+
+@pytest.mark.parametrize("bound", [None, "lead", "other"])
+def test_hook_binds_only_first_session_and_releases_other_sessions(
+    tmp_path: Path, bound: str | None
+) -> None:
+    test_stop_decision_table(tmp_path, "search", "none", "active", choices=(False, False, False))
+    run = tmp_path / ".vibesys-optimize/run-1"
+    state = json.loads((run / "run.json").read_text())
+    state["session_id"] = bound
+    state["wrap_up_at"] = state["wrap_up_at"].replace("+00:00", "Z")
+    (run / "run.json").write_text(json.dumps(state))
+    reason = hook.block_reason(tmp_path, NOW, {"session_id": "lead"})
+    assert (reason is None) == (bound == "other")
+    assert json.loads((run / "run.json").read_text())["session_id"] == (bound or "lead")

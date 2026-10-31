@@ -9,7 +9,7 @@
       "name": "vibesys",
       "source": "./skills",
       "description": "Time-boxed optimization with parallel hypotheses, measurements, independent judging and a Stop hook, plus domain skills for kernels, LLM serving, microservices, Tokio services and Neuron.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "strict": false,
       "skills": [
         "./domains/dial9-tokio/dial9-rank-bottlenecks",
