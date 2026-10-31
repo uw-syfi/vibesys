@@ -16,7 +16,7 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 from tests.server.host_helper_support import fake_host
 
-from entrypoints.host_helper import vetted_harnesses
+from entrypoints.host_harnesses import vetted_harnesses
 from server.host_api import (
     HarnessesListReply,
     HarnessesListRequest,

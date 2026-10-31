@@ -1530,6 +1530,10 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
         EdgeKind.STORE,
         "the machine's compute settings file and the Modal and Slurm files it reads",
     ),
+    "src/server/host_task_goal.py": (
+        EdgeKind.INPUT_LOADER,
+        "a task's OBJECTIVE.md, the goal both catalogs show",
+    ),
     "src/server/host_helper_machine.py": (
         EdgeKind.OS_ADAPTER,
         "checkout pyproject reader for the host helper's machine probe",
