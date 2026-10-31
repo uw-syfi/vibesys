@@ -10,9 +10,8 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vs_sim.api import HttpsGetError, UrllibHttpsGet
+from vs_sim.api import HttpsGetError, HttpsOnlyRedirects, UrllibHttpsGet
 from vs_sim.api.testing import FakeHttpsGet
-from vs_sim.https_get import HttpsOnlyRedirects
 
 
 @given(address=st.from_regex(r"\A(http|ftp|file|)[:/a-z0-9.]{0,30}\Z", fullmatch=True))

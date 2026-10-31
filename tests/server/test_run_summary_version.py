@@ -133,6 +133,7 @@ def _limit_reading(sequence: int, used: float) -> RunEvent:
 
 
 @pytest.mark.regression
+@example(used=0.25, poison=0.95)
 @given(
     used=st.floats(min_value=0.0, max_value=0.9), poison=st.floats(min_value=0.91, max_value=1.0)
 )

@@ -276,7 +276,10 @@ def test_a_value_with_room_for_its_key_and_framing_is_accepted() -> None:
         raw = topic.options.SerializeToString()
         topic.options.ParseFromString(raw + _append_to_policy(6, HOST_API_MAX_MESSAGE_BYTES - 1024))
 
-    assert compile_topics(_topic_image(change))[0].policy.max_value_bytes == HOST_API_MAX_MESSAGE_BYTES - 1024
+    assert (
+        compile_topics(_topic_image(change))[0].policy.max_value_bytes
+        == HOST_API_MAX_MESSAGE_BYTES - 1024
+    )
 
 
 def _timing_image(change: Callable[[descriptor_pb2.DescriptorProto], None]) -> bytes:
@@ -324,9 +327,7 @@ def test_a_lease_that_cannot_hold_a_beat_fails_generation(
     heartbeat: int, lease: int, message: str | None
 ) -> None:
     def change(request: descriptor_pb2.DescriptorProto) -> None:
-        update = (
-            _varint(1 << 3) + _varint(heartbeat) + _varint(2 << 3) + _varint(lease)
-        )
+        update = _varint(1 << 3) + _varint(heartbeat) + _varint(2 << 3) + _varint(lease)
         option = _varint(51005 << 3 | 2) + _varint(len(update)) + update
         request.options.Clear()
         request.options.ParseFromString(option)

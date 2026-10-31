@@ -195,7 +195,13 @@ describe('parseWelcomeRequest', () => {
       kind: 'usage-summary',
       edges: [0, 900_000, 1_800_000],
     });
-    expect(() => ask([], [0, 900_000])).toThrow('1 to 64 projects');
+    // No project named is a question: the host counts every run it indexed.
+    expect(ask([], [0, 900_000])).toMatchObject({kind: 'usage-summary', projects: []});
+    const many = Array.from({length: 65}, (_, at) => `/p/${at}`);
+    expect(() => ask(many, [0, 900_000])).toThrow('at most 64 projects');
+    expect(() =>
+      ask(['/p'], [0, 253_402_300_800_000 + 900_000 - ((253_402_300_800_000 + 900_000) % 900_000)]),
+    ).toThrow('calendar');
     expect(() => ask(['/p'], [0])).toThrow('2 to 100 edges');
     expect(() => ask(['/p'], [0, 901_000])).toThrow('whole quarter hours');
     expect(() => ask(['/p'], [900_000, 0])).toThrow('increase');

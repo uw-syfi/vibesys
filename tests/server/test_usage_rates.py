@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
+from tests.server.usage_support import Projects
 
 from entrypoints.host_mutations import apply_price_save
 from server.usage_pricing import PriceBookError, PriceBookUnreadableError
@@ -526,20 +527,12 @@ def test_an_edge_that_is_not_a_whole_second_is_refused_as_invalid_input(nanos: i
     with tempfile.TemporaryDirectory() as raw, pytest.raises(ValueError, match="whole"):
         usage_summary(
             request,
-            _NoProjects(),
+            Projects(),
             [],
             stored_pricing(Path(raw), now=dt.datetime(2026, 10, 31, tzinfo=dt.UTC)),
             {},
             clock=ManualClock(1_790_001_000.0),
         )
-
-
-class _NoProjects:
-    def run_summary(self, project: Path, run_id: str) -> object:
-        raise AssertionError("no run is read")
-
-    def run_digest(self, project_root: Path, run_id: str) -> None:
-        del project_root, run_id
 
 
 def test_a_request_that_names_no_project_is_one_the_wire_carries() -> None:

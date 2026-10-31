@@ -51,7 +51,7 @@ if TYPE_CHECKING:
         WaitidExitWaiter,
         host_exit_waiter,
     )
-    from vs_sim.https_get import HttpsGet, HttpsGetError, UrllibHttpsGet
+    from vs_sim.https_get import HttpsGet, HttpsGetError, HttpsOnlyRedirects, UrllibHttpsGet
     from vs_sim.loopback_http import HttpReply, LoopbackHttp, UrllibLoopbackHttp
     from vs_sim.network import Connection, DeadlineNetwork, Listener, Network, UnixNetwork
     from vs_sim.os_platform import Platform
@@ -225,6 +225,7 @@ _MODULES: dict[str, str] = {
     "HttpReply": "vs_sim.loopback_http",
     "HttpsGet": "vs_sim.https_get",
     "HttpsGetError": "vs_sim.https_get",
+    "HttpsOnlyRedirects": "vs_sim.https_get",
     "UrllibHttpsGet": "vs_sim.https_get",
     "LoopbackHttp": "vs_sim.loopback_http",
     "UrllibLoopbackHttp": "vs_sim.loopback_http",
@@ -290,6 +291,7 @@ __all__ = [
     "HttpReply",
     "HttpsGet",
     "HttpsGetError",
+    "HttpsOnlyRedirects",
     "InheritedStdioLauncher",
     "KqueueExitWaiter",
     "LauncherLifelineError",

@@ -60,7 +60,7 @@ export function perMillion(rate: number): string {
 
 /**
  * A name a person can read for an id nobody gave a name to: its words capitalized and its version
- * numbers joined (`claude-sonnet-5-5` is `Claude Sonnet 5.5`), without a bracketed variant or a
+ * numbers joined (`some-model-5-5` is `Some Model 5.5`), without a bracketed variant or a
  * date snapshot. Used only where the machine's catalogue has no name for the id, so a screen
  * never shows the id itself.
  */
