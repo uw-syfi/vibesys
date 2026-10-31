@@ -1,0 +1,20 @@
+journeys/stopped
+records 56
+blobs 2
+streams 4
+record kinds
+  blob 1
+  declaration_amended 2
+  epoch_started 1
+  lifecycle 2
+  metric 5
+  span 41
+  stream 4
+span label kinds
+  (no label) 1
+  adoption 1
+  agent_turn 14
+  cache_warmup 1
+  gate 9
+  planning_call 4
+  workstream 11

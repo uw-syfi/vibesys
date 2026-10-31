@@ -31,6 +31,7 @@ import {
   WaitKind,
 } from '@vibesys/proto';
 import {storeRunFixture} from '@vibesys/run-fixtures';
+import {derivedReplay} from '@vibesys/run-fixtures/derived';
 import {foldSkeleton, ingestSkeleton, seedSkeleton, seekSkeleton} from '@vibesys/run-skeleton';
 import {readSkeleton} from '@vibesys/run-state/skeleton';
 import {totalUsage, usageOverTime} from '@vibesys/run-state/usage';
@@ -659,12 +660,7 @@ test('retained real usage and cache costs match the old projection through repla
 });
 
 test('regression: native planning-call markers survive keyframes across call counts', () => {
-  const replay = fromBinary(
-    ClientReplaySchema,
-    readFileSync(
-      new URL('../../../../libs/run-fixtures/src/native/finished-run.pb', import.meta.url),
-    ),
-  );
+  const replay = fromBinary(ClientReplaySchema, derivedReplay('shared', 'finished-run'));
   const records = replay.batches.flatMap(batch =>
     batch.records.map(bytes => fromBinary(RecordSchema, bytes)),
   );
