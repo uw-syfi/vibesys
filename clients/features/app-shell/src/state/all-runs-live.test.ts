@@ -69,6 +69,8 @@ function settle(
       if (request.kind === 'read-digests') {
         digestRequests += 1;
         action = {type: 'digests-read', token: request.token, reply: reply(request.runIds)};
+      } else if (request.kind === 'push-address') {
+        continue;
       } else {
         action = {
           type: 'project-runs-listed',
