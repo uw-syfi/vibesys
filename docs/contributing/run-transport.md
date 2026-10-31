@@ -54,7 +54,9 @@ read path and journal projection from the native core and control work still to 
    is about 0.4 ms.
 3. **The gateway has no product logic.** It tails files, serves them, writes intents and launches
    processes. Everything that needs product knowledge runs as a `vibesys host <method>`
-   subprocess of the host checkout.
+   subprocess of the host checkout. OS facts are not product logic: the gateway samples CPU, memory
+   and GPU use in process, because a sample every 10 s cannot afford a Python start, and those
+   numbers matter most when the checkout is missing or broken.
 
 ## What a run writes
 
@@ -252,12 +254,21 @@ connect; a release build later downloads the released binary instead. It is stat
 | `Tail` | stream | log records from a sequence, then live |
 | `GetBlobs` | unary | blobs by hash |
 | `TailStream` | stream | a log stream from an offset, then live |
+| `Subscribe` | stream | one topic's keyed state, then conflated changes; see below |
 | `PostIntent` | unary | writes the run's (or session's) inbox |
 | `HostCall` | unary | typed host operations, including `relaunch` of an existing run; `vibesys host <method>` with protobuf on stdin and stdout |
 | `Attach` | bidi | reserved |
 
 The gateway preserves framed record bodies. Its store read boundary supplies semantic upgrades
 for retained records and keyframes before serving them.
+
+`Subscribe` is the one form for live state where a reader who missed five updates only wants the
+sixth. A topic is a map of key to latest value. The gateway runs one producer per topic instance
+and stops it when the last subscriber leaves, so a blocked client costs key names, never a queue.
+A topic's cadence, staleness and bounds are its `TopicPolicy` in `subscribe.proto`, and a failed
+frame ends the stream with a typed code. Anything that needs every value, such as a log, stays on
+`Tail`. `internal/subscription` owns the mechanism and `subscriptiontest` the contract each topic
+passes. Server keepalive ends a half-open connection, and with it the streams that hold a producer.
 
 ## Versions and upgrades
 
