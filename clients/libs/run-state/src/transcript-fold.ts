@@ -45,7 +45,7 @@ export interface TranscriptEntry {
   /**
    * When the event this entry records happened, in epoch milliseconds. A text entry glued from
    * chunks keeps its first chunk's time, and a tool call joined by its result keeps the call's.
-   * Absent for an entry whose source carries no time.
+   * Absent for an entry whose source carries no time, or only the epoch (a time never set).
    */
   readonly at?: number;
   readonly startsTurn?: boolean;
@@ -79,7 +79,8 @@ export function eventToTranscriptEntry(event: RunEvent): TranscriptEntry | null 
   return {
     ...entry,
     ...(spanId === undefined || spanId === null ? {} : {spanId}),
-    ...(Number.isFinite(at) ? {at} : {}),
+    // The epoch is how a time that was never set reads, so it is no time.
+    ...(Number.isFinite(at) && at > 0 ? {at} : {}),
   };
 }
 

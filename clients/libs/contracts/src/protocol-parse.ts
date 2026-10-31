@@ -9,7 +9,6 @@ import type {
   RunEvent,
   RunSnapshot,
   ServerMessage,
-  ToolResultPayload,
 } from './protocol.js';
 import {
   fieldError,
@@ -65,23 +64,6 @@ export function validateRunEvent(value: unknown): RunEvent {
 export function validateAgentReply(value: unknown): AgentReply {
   validateSchema(value, {$ref: '#/$defs/AgentReply'}, 'agent reply', {...OPEN_WALK, strict: true});
   return value as AgentReply;
-}
-
-const TOOL_RESULT_PAYLOAD = {
-  oneOf: [{$ref: '#/$defs/CommandResultPayload'}, {$ref: '#/$defs/JsonResultPayload'}],
-  discriminator: {
-    propertyName: 'kind',
-    mapping: {
-      command: '#/$defs/CommandResultPayload',
-      json: '#/$defs/JsonResultPayload',
-    },
-  },
-};
-
-/** Validate a retained tool-result payload (a store record carries it apart from its event). */
-export function validateToolResultPayload(value: unknown): ToolResultPayload {
-  validateSchema(value, TOOL_RESULT_PAYLOAD, 'tool result payload', {...OPEN_WALK, strict: true});
-  return value as ToolResultPayload;
 }
 
 /**

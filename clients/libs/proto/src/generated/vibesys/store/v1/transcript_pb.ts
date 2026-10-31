@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/store/v1/transcript.proto.
  */
 export const file_vibesys_store_v1_transcript: GenFile = /*@__PURE__*/
-  fileDesc("CiF2aWJlc3lzL3N0b3JlL3YxL3RyYW5zY3JpcHQucHJvdG8SEHZpYmVzeXMuc3RvcmUudjEi9QEKD1RyYW5zY3JpcHRFbnRyeRIwCgR0ZXh0GAEgASgLMiAudmliZXN5cy5zdG9yZS52MS5UcmFuc2NyaXB0VGV4dEgAEjkKCXRvb2xfY2FsbBgCIAEoCzIkLnZpYmVzeXMuc3RvcmUudjEuVHJhbnNjcmlwdFRvb2xDYWxsSAASPQoLdG9vbF9yZXN1bHQYAyABKAsyJi52aWJlc3lzLnN0b3JlLnYxLlRyYW5zY3JpcHRUb29sUmVzdWx0SAASJgoCYXQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQg4KBWVudHJ5EgW6SAIIASJrChFUcmFuc2NyaXB0Q29udGVudBIbCgZpbmxpbmUYASABKAlCCbpIBnIEKICABEgAEikKBGJsb2IYAiABKAsyGS52aWJlc3lzLnN0b3JlLnYxLkJsb2JSZWZIAEIOCgV2YWx1ZRIFukgCCAEikAEKDlRyYW5zY3JpcHRUZXh0EkAKB2NoYW5uZWwYASABKA4yIy52aWJlc3lzLnN0b3JlLnYxLlRyYW5zY3JpcHRDaGFubmVsQgq6SAeCAQQQASAAEjwKB2NvbnRlbnQYAiABKAsyIy52aWJlc3lzLnN0b3JlLnYxLlRyYW5zY3JpcHRDb250ZW50Qga6SAPIAQEinwEKElRyYW5zY3JpcHRUb29sQ2FsbBIXCgR0b29sGAEgASgJQgm6SAZyBCiAgAQSHwoHY2FsbF9pZBgCIAEoCUIJukgGcgQogIAESACIAQESQwoOYXJndW1lbnRzX2pzb24YAyABKAsyIy52aWJlc3lzLnN0b3JlLnYxLlRyYW5zY3JpcHRDb250ZW50Qga6SAPIAQFCCgoIX2NhbGxfaWQi/QEKFFRyYW5zY3JpcHRUb29sUmVzdWx0EhcKBHRvb2wYASABKAlCCbpIBnIEKICABBIfCgdjYWxsX2lkGAIgASgJQgm6SAZyBCiAgARIAIgBARIQCghpc19lcnJvchgDIAEoCBI8Cgdjb250ZW50GAQgASgLMiMudmliZXN5cy5zdG9yZS52MS5UcmFuc2NyaXB0Q29udGVudEIGukgDyAEBEj4KDHBheWxvYWRfanNvbhgFIAEoCzIjLnZpYmVzeXMuc3RvcmUudjEuVHJhbnNjcmlwdENvbnRlbnRIAYgBAUIKCghfY2FsbF9pZEIPCg1fcGF5bG9hZF9qc29uKrwBChFUcmFuc2NyaXB0Q2hhbm5lbBIiCh5UUkFOU0NSSVBUX0NIQU5ORUxfVU5TUEVDSUZJRUQQABIgChxUUkFOU0NSSVBUX0NIQU5ORUxfQVNTSVNUQU5UEAESHwobVFJBTlNDUklQVF9DSEFOTkVMX0FOQUxZU0lTEAISIQodVFJBTlNDUklQVF9DSEFOTkVMX0RJQUdOT1NUSUMQAxIdChlUUkFOU0NSSVBUX0NIQU5ORUxfUFJPTVBUEARCQVo/Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy9zdG9yZS92MTtzdG9yZXYxYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_store_v1_content]);
+  fileDesc("CiF2aWJlc3lzL3N0b3JlL3YxL3RyYW5zY3JpcHQucHJvdG8SEHZpYmVzeXMuc3RvcmUudjEi9QEKD1RyYW5zY3JpcHRFbnRyeRIwCgR0ZXh0GAEgASgLMiAudmliZXN5cy5zdG9yZS52MS5UcmFuc2NyaXB0VGV4dEgAEjkKCXRvb2xfY2FsbBgCIAEoCzIkLnZpYmVzeXMuc3RvcmUudjEuVHJhbnNjcmlwdFRvb2xDYWxsSAASPQoLdG9vbF9yZXN1bHQYAyABKAsyJi52aWJlc3lzLnN0b3JlLnYxLlRyYW5zY3JpcHRUb29sUmVzdWx0SAASJgoCYXQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQg4KBWVudHJ5EgW6SAIIASJrChFUcmFuc2NyaXB0Q29udGVudBIbCgZpbmxpbmUYASABKAlCCbpIBnIEKICABEgAEikKBGJsb2IYAiABKAsyGS52aWJlc3lzLnN0b3JlLnYxLkJsb2JSZWZIAEIOCgV2YWx1ZRIFukgCCAEikAEKDlRyYW5zY3JpcHRUZXh0EkAKB2NoYW5uZWwYASABKA4yIy52aWJlc3lzLnN0b3JlLnYxLlRyYW5zY3JpcHRDaGFubmVsQgq6SAeCAQQQASAAEjwKB2NvbnRlbnQYAiABKAsyIy52aWJlc3lzLnN0b3JlLnYxLlRyYW5zY3JpcHRDb250ZW50Qga6SAPIAQEinwEKElRyYW5zY3JpcHRUb29sQ2FsbBIXCgR0b29sGAEgASgJQgm6SAZyBCiAgAQSHwoHY2FsbF9pZBgCIAEoCUIJukgGcgQogIAESACIAQESQwoOYXJndW1lbnRzX2pzb24YAyABKAsyIy52aWJlc3lzLnN0b3JlLnYxLlRyYW5zY3JpcHRDb250ZW50Qga6SAPIAQFCCgoIX2NhbGxfaWQivgIKFFRyYW5zY3JpcHRUb29sUmVzdWx0EhcKBHRvb2wYASABKAlCCbpIBnIEKICABBIfCgdjYWxsX2lkGAIgASgJQgm6SAZyBCiAgARIAYgBARIQCghpc19lcnJvchgDIAEoCBI8Cgdjb250ZW50GAQgASgLMiMudmliZXN5cy5zdG9yZS52MS5UcmFuc2NyaXB0Q29udGVudEIGukgDyAEBEjwKB2NvbW1hbmQYBiABKAsyKS52aWJlc3lzLnN0b3JlLnYxLlRyYW5zY3JpcHRDb21tYW5kUmVzdWx0SAASMwoEanNvbhgHIAEoCzIjLnZpYmVzeXMuc3RvcmUudjEuVHJhbnNjcmlwdENvbnRlbnRIAEIJCgdwYXlsb2FkQgoKCF9jYWxsX2lkSgQIBRAGUgxwYXlsb2FkX2pzb24i/wEKF1RyYW5zY3JpcHRDb21tYW5kUmVzdWx0EjsKBnN0ZG91dBgBIAEoCzIjLnZpYmVzeXMuc3RvcmUudjEuVHJhbnNjcmlwdENvbnRlbnRCBrpIA8gBARI7CgZzdGRlcnIYAiABKAsyIy52aWJlc3lzLnN0b3JlLnYxLlRyYW5zY3JpcHRDb250ZW50Qga6SAPIAQESFgoJZXhpdF9jb2RlGAMgASgFSACIAQESLwoQZHVyYXRpb25fc2Vjb25kcxgEIAEoAUIQukgNEgtAASkAAAAAAAAAAEgBiAEBQgwKCl9leGl0X2NvZGVCEwoRX2R1cmF0aW9uX3NlY29uZHMqvAEKEVRyYW5zY3JpcHRDaGFubmVsEiIKHlRSQU5TQ1JJUFRfQ0hBTk5FTF9VTlNQRUNJRklFRBAAEiAKHFRSQU5TQ1JJUFRfQ0hBTk5FTF9BU1NJU1RBTlQQARIfChtUUkFOU0NSSVBUX0NIQU5ORUxfQU5BTFlTSVMQAhIhCh1UUkFOU0NSSVBUX0NIQU5ORUxfRElBR05PU1RJQxADEh0KGVRSQU5TQ1JJUFRfQ0hBTk5FTF9QUk9NUFQQBEJBWj9naXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9nYXRld2F5L2dlbi92aWJlc3lzL3N0b3JlL3YxO3N0b3JldjFiBnByb3RvMw", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_store_v1_content]);
 
 /**
  * Transcript streams contain uvarint-length-prefixed TranscriptEntry messages.
@@ -49,6 +49,8 @@ export type TranscriptEntry = Message<"vibesys.store.v1.TranscriptEntry"> & {
 
   /**
    * When the event this entry records happened. Absent in entries written before the field existed.
+   * A simulated run's clock starts at the epoch, so no floor is enforced here; a reader treats the
+   * epoch itself as no time.
    *
    * @generated from field: google.protobuf.Timestamp at = 4;
    */
@@ -164,17 +166,33 @@ export type TranscriptToolResult = Message<"vibesys.store.v1.TranscriptToolResul
   isError: boolean;
 
   /**
+   * The text the agent was shown.
+   *
    * @generated from field: vibesys.store.v1.TranscriptContent content = 4;
    */
   content?: TranscriptContent | undefined;
 
   /**
-   * The complete result as a ToolResultPayload in JSON (a command's stdout, stderr, exit code and
-   * duration, or a JSON value), independent of the display content.
+   * What the tool returned beside its text. Absent for a result with none and for one written before
+   * this field existed. A reader that does not know the case shows `content` alone.
    *
-   * @generated from field: optional vibesys.store.v1.TranscriptContent payload_json = 5;
+   * @generated from oneof vibesys.store.v1.TranscriptToolResult.payload
    */
-  payloadJson?: TranscriptContent | undefined;
+  payload: {
+    /**
+     * @generated from field: vibesys.store.v1.TranscriptCommandResult command = 6;
+     */
+    value: TranscriptCommandResult;
+    case: "command";
+  } | {
+    /**
+     * A JSON object or array, as JSON text.
+     *
+     * @generated from field: vibesys.store.v1.TranscriptContent json = 7;
+     */
+    value: TranscriptContent;
+    case: "json";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -183,6 +201,44 @@ export type TranscriptToolResult = Message<"vibesys.store.v1.TranscriptToolResul
  */
 export const TranscriptToolResultSchema: GenMessage<TranscriptToolResult> = /*@__PURE__*/
   messageDesc(file_vibesys_store_v1_transcript, 4);
+
+/**
+ * A command's result in parts, as the tool reported them.
+ *
+ * @generated from message vibesys.store.v1.TranscriptCommandResult
+ */
+export type TranscriptCommandResult = Message<"vibesys.store.v1.TranscriptCommandResult"> & {
+  /**
+   * @generated from field: vibesys.store.v1.TranscriptContent stdout = 1;
+   */
+  stdout?: TranscriptContent | undefined;
+
+  /**
+   * @generated from field: vibesys.store.v1.TranscriptContent stderr = 2;
+   */
+  stderr?: TranscriptContent | undefined;
+
+  /**
+   * Absent when the tool has no exit status.
+   *
+   * @generated from field: optional int32 exit_code = 3;
+   */
+  exitCode?: number | undefined;
+
+  /**
+   * Absent when the tool did not time itself.
+   *
+   * @generated from field: optional double duration_seconds = 4;
+   */
+  durationSeconds?: number | undefined;
+};
+
+/**
+ * Describes the message vibesys.store.v1.TranscriptCommandResult.
+ * Use `create(TranscriptCommandResultSchema)` to create a new message.
+ */
+export const TranscriptCommandResultSchema: GenMessage<TranscriptCommandResult> = /*@__PURE__*/
+  messageDesc(file_vibesys_store_v1_transcript, 5);
 
 /**
  * @generated from enum vibesys.store.v1.TranscriptChannel

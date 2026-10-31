@@ -2,6 +2,7 @@
 import {describe, expect, it} from 'bun:test';
 import type {RunEvent} from '@vibesys/contracts';
 import {event} from '@vibesys/contracts/testing';
+import * as fc from 'fast-check';
 import {initialCoreState, reduceEventBatch} from './index.js';
 import {transcriptBySpan} from './transcript/index.js';
 
@@ -44,32 +45,57 @@ function entriesOf(events: readonly RunEvent[]) {
   return transcriptBySpan(core.transcript, new Set(['turn'])).get('turn') ?? [];
 }
 
-/** A turn of chunks and tool calls at increasing times, the same for a seed; and those times. */
-function randomTurn(seed: number): {events: RunEvent[]; times: Set<number>} {
-  let state = seed;
-  const next = (n: number): number => {
-    state = (Math.imul(state, 1_103_515_245) + 12_345) >>> 0;
-    return state % n;
-  };
+/** One thing a turn did, and when (any time: events may be stamped out of the order they arrive). */
+type Op = {readonly kind: 'analysis' | 'assistant' | 'call' | 'result'; readonly at: number};
+
+const ops = fc.array(
+  fc.record({
+    kind: fc.constantFrom('analysis', 'assistant', 'call', 'result'),
+    at: fc.integer({min: 0, max: 3_600_000}),
+  }),
+  {maxLength: 40},
+);
+
+/** The turn as events: a result closes the oldest open call, and with none open it is text. */
+function turnOf(sequence: readonly Op[]): {events: RunEvent[]; asked: Op['kind'][]} {
   const events: RunEvent[] = [];
-  const times = new Set<number>();
+  const asked: Op['kind'][] = [];
   const open: string[] = [];
-  let offset = 0;
-  for (let sequence = 1; sequence <= 30; sequence += 1) {
-    offset += next(5_000);
-    times.add(START + offset);
-    const choice = next(4);
-    const closing = choice === 0 ? open.splice(next(open.length), 1)[0] : undefined;
+  sequence.forEach((op, index) => {
+    const number = index + 1;
+    const closing = op.kind === 'result' ? open.shift() : undefined;
     if (closing !== undefined) {
-      events.push(result(sequence, offset, closing));
-    } else if (choice === 1) {
-      open.push(`c${sequence}`);
-      events.push(call(sequence, offset, `c${sequence}`));
+      events.push(result(number, op.at, closing));
+      asked.push('result');
+    } else if (op.kind === 'call') {
+      open.push(`c${number}`);
+      events.push(call(number, op.at, `c${number}`));
+      asked.push('call');
     } else {
-      events.push(say(sequence, offset, `w${sequence} `, choice === 2 ? 'analysis' : 'assistant'));
+      const channel = op.kind === 'analysis' ? 'analysis' : 'assistant';
+      events.push(say(number, op.at, `w${number} `, channel));
+      asked.push(channel);
     }
-  }
-  return {events, times};
+  });
+  return {events, asked};
+}
+
+/** The time each entry should carry, by the fold's rules: a chunk glues onto a last entry of its own kind, a result joins its call. */
+function expectedTimes(sequence: readonly Op[], asked: readonly Op['kind'][]): number[] {
+  const times: number[] = [];
+  let last: Op['kind'] | undefined;
+  sequence.forEach((op, index) => {
+    const kind = asked[index];
+    if (kind === 'result') return;
+    if (kind === 'call') {
+      times.push(START + op.at);
+      last = 'call';
+    } else if (kind !== last) {
+      times.push(START + op.at);
+      last = kind;
+    }
+  });
+  return times;
 }
 
 describe('the time of a transcript entry', () => {
@@ -96,6 +122,13 @@ describe('the time of a transcript entry', () => {
     expect(entries[0]?.at).toBe(START + 1_000);
   });
 
+  it('is absent when the event holds only the epoch, which is how a time never set reads', () => {
+    const unset = {...say(1, 0, 'x', 'assistant'), timestamp: '1970-01-01T00:00:00Z'} as RunEvent;
+    const [entry] = entriesOf([unset]);
+    expect(entry?.content).toBe('x');
+    expect('at' in (entry ?? {})).toBe(false);
+  });
+
   it('is absent, and harmless, when the event’s time cannot be read', () => {
     const odd = {...say(1, 0, 'x', 'assistant'), timestamp: 'garbled'} as RunEvent;
     const [entry] = entriesOf([odd]);
@@ -103,12 +136,12 @@ describe('the time of a transcript entry', () => {
     expect('at' in (entry ?? {})).toBe(false);
   });
 
-  it('never runs backwards along a turn, and is always one of its events’ times', () => {
-    for (let seed = 1; seed <= 40; seed += 1) {
-      const {events, times} = randomTurn(seed);
-      const ats = entriesOf(events).map(entry => entry.at);
-      expect(ats.every(at => at !== undefined && times.has(at))).toBe(true);
-      expect([...ats]).toEqual([...ats].sort((a, b) => (a ?? 0) - (b ?? 0)));
-    }
+  it('is, for every entry of any turn, the time of the event that began it, however the times are ordered', () => {
+    fc.assert(
+      fc.property(ops, sequence => {
+        const {events, asked} = turnOf(sequence);
+        expect(entriesOf(events).map(entry => entry.at)).toEqual(expectedTimes(sequence, asked));
+      }),
+    );
   });
 });

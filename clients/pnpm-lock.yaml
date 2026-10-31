@@ -1190,6 +1190,9 @@ importers:
       '@types/bun':
         specifier: 1.4.2
         version: 1.4.2
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
       typescript:
         specifier: ^5.8.3
         version: 5.9.3

@@ -579,6 +579,12 @@ defined in
 [`transcript.proto`](https://github.com/uw-syfi/vibesys/blob/main/proto/vibesys/store/v1/transcript.proto).
 Each text, tool-call or tool-result entry holds inline content or a `BlobRef`. The turn's
 whole-span replacement seals the stream's final byte length when the turn ends.
+Every entry carries `at`, the time of the event it records; entries written before the field
+existed have none, and a reader shows no time for them. A tool result holds the text the agent
+was shown (`content`) and, when the tool reported more, a typed `payload`: a command's stdout and
+stderr (each inline or a blob), its exit code and its run time, or a JSON value. A reader that
+does not know a payload case shows `content` alone. The earlier `payload_json` field is
+reserved, and a record written with it reads as `content`.
 For older string attrs without a blob alternative, the bridge writes `blob:<sha256>`
 and a `BlobAttached` whose role names the field path; an oversized interim reply instead
 omits its inline JSON and uses the `reply` attachment.

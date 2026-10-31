@@ -1,7 +1,6 @@
 /** Pure decoding and projection of the run log's native transcript stream. */
 import {fromBinary, type MessageShape} from '@bufbuild/protobuf';
 import {timestampMs} from '@bufbuild/protobuf/wkt';
-import {type ToolResultPayload, validateToolResultPayload} from '@vibesys/contracts';
 import {
   RUN_LOG_MAX_RECORD_BYTES,
   TranscriptChannel,
@@ -9,7 +8,7 @@ import {
   TranscriptEntrySchema,
 } from '@vibesys/proto';
 import {ownProjectionInput} from '../publication.js';
-import type {TranscriptEntry} from '../transcript-fold.js';
+import type {ToolResultPayload, TranscriptEntry} from '../transcript-fold.js';
 
 type NativeEntry = MessageShape<typeof TranscriptEntrySchema>;
 export interface NativeTranscript {
@@ -57,6 +56,21 @@ export function appendNativeTranscript(
   return {pending: bytes.slice(cursor), offset: state.offset + cursor, entries};
 }
 
+type ToolResultBody = Extract<NativeEntry['entry'], {case: 'toolResult'}>['value'];
+
+/** The contents a result's typed payload holds; none when it has no payload or one this reader does not know. */
+function payloadContents(result: ToolResultBody): readonly (TranscriptContent | undefined)[] {
+  const payload = result.payload;
+  switch (payload.case) {
+    case 'command':
+      return [payload.value.stdout, payload.value.stderr];
+    case 'json':
+      return [payload.value];
+    default:
+      return [];
+  }
+}
+
 function contents(entry: NativeEntry): readonly (TranscriptContent | undefined)[] {
   switch (entry.entry.case) {
     case 'text':
@@ -64,7 +78,7 @@ function contents(entry: NativeEntry): readonly (TranscriptContent | undefined)[
     case 'toolCall':
       return [entry.entry.value.argumentsJson];
     case 'toolResult':
-      return [entry.entry.value.content, entry.entry.value.payloadJson];
+      return [entry.entry.value.content, ...payloadContents(entry.entry.value)];
     default:
       throw new Error('Transcript frame has no entry');
   }
@@ -97,6 +111,13 @@ function argumentsOf(value: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
+/** The entry's time, none when the record has none or holds the epoch itself (the unset time). */
+function eventTime(at: NativeEntry['at']): {at?: number} {
+  if (at === undefined) return {};
+  const ms = timestampMs(at);
+  return ms > 0 ? {at: ms} : {};
+}
+
 type Base = Pick<TranscriptEntry, 'id' | 'spanId' | 'turnId' | 'invocationId' | 'at'>;
 type EntryBody = NativeEntry['entry'];
 type Blobs = Readonly<Record<string, string>>;
@@ -117,16 +138,6 @@ function textEntry(
   if (!kind) throw new Error('Invalid transcript channel');
   return [{...base, kind, content}];
 }
-/** The typed payload a result carried apart from its display text; unknown shapes fail by name. */
-function payloadOf(text: string): ToolResultPayload {
-  let value: unknown;
-  try {
-    value = JSON.parse(text);
-  } catch {
-    throw new Error('Transcript tool payload is not JSON');
-  }
-  return validateToolResultPayload(value);
-}
 function callEntry(
   base: Base,
   entry: Extract<EntryBody, {case: 'toolCall'}>['value'],
@@ -146,15 +157,64 @@ function callEntry(
     },
   ];
 }
-function resultEntry(
-  base: Base,
-  entry: Extract<EntryBody, {case: 'toolResult'}>['value'],
-  blobs: Blobs,
-): TranscriptEntry[] {
+/** A result's payload once its contents are known; `waiting` while one is still a blob nobody has sent. */
+type PayloadReading =
+  | {readonly state: 'waiting'}
+  | {readonly state: 'ready'; readonly payload?: ToolResultPayload};
+
+const NO_PAYLOAD: PayloadReading = {state: 'ready'};
+
+type JsonResultValue = Extract<ToolResultPayload, {kind: 'json'}>['value'];
+
+/** A JSON object or array in `value`, or undefined for any other text. */
+function jsonValueOf(value: string): JsonResultValue | undefined {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    // Parsed JSON is a JSON value by construction.
+    return typeof parsed === 'object' && parsed !== null ? (parsed as JsonResultValue) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * What a result carried beside its text. A payload this reader cannot use (a case a newer writer
+ * added, a part the writer left out, JSON text that is not an object or array) is none: the result
+ * shows its text alone, and the rest of the turn is read as before.
+ */
+function payloadOf(result: ToolResultBody, blobs: Blobs): PayloadReading {
+  const payload = result.payload;
+  if (payload.case === 'command') {
+    const {stdout, stderr} = payload.value;
+    if (stdout === undefined || stderr === undefined) return NO_PAYLOAD;
+    const out = text(stdout, blobs);
+    const err = text(stderr, blobs);
+    if (out === undefined || err === undefined) return {state: 'waiting'};
+    return {
+      state: 'ready',
+      payload: {
+        kind: 'command',
+        stdout: out,
+        stderr: err,
+        exit_code: payload.value.exitCode ?? null,
+        duration: payload.value.durationSeconds ?? null,
+      },
+    };
+  }
+  if (payload.case === 'json') {
+    const written = text(payload.value, blobs);
+    if (written === undefined) return {state: 'waiting'};
+    const value = jsonValueOf(written);
+    return value === undefined ? NO_PAYLOAD : {state: 'ready', payload: {kind: 'json', value}};
+  }
+  return NO_PAYLOAD;
+}
+
+function resultEntry(base: Base, entry: ToolResultBody, blobs: Blobs): TranscriptEntry[] {
   const content = text(entry.content, blobs);
-  const payloadText = entry.payloadJson ? text(entry.payloadJson, blobs) : undefined;
-  if (content === undefined || (entry.payloadJson && payloadText === undefined)) return [];
-  const payload = payloadText === undefined ? undefined : payloadOf(payloadText);
+  const reading = payloadOf(entry, blobs);
+  if (content === undefined || reading.state === 'waiting') return [];
+  const {payload} = reading;
   return [
     {
       ...base,
@@ -163,14 +223,16 @@ function resultEntry(
       toolName: entry.tool,
       ...(entry.callId ? {toolCallId: entry.callId} : {}),
       ...(entry.isError ? {tone: 'failure'} : {}),
-      toolResult: ownProjectionInput({
-        kind: 'tool_result',
-        tool: entry.tool,
-        content,
-        is_error: entry.isError,
-        call_id: entry.callId ?? null,
+      toolResult: {
+        ...ownProjectionInput({
+          kind: 'tool_result',
+          tool: entry.tool,
+          content,
+          is_error: entry.isError,
+          call_id: entry.callId ?? null,
+        }),
         ...(payload === undefined ? {} : {payload}),
-      }),
+      },
     },
   ];
 }
@@ -187,7 +249,7 @@ export function nativeTranscriptEntries(
       spanId,
       turnId: spanId,
       invocationId: spanId,
-      ...(value.at === undefined ? {} : {at: timestampMs(value.at)}),
+      ...eventTime(value.at),
     };
     switch (value.entry.case) {
       case 'text':

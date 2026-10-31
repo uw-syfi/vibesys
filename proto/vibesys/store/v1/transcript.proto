@@ -18,6 +18,8 @@ message TranscriptEntry {
     TranscriptToolResult tool_result = 3;
   }
   // When the event this entry records happened. Absent in entries written before the field existed.
+  // A simulated run's clock starts at the epoch, so no floor is enforced here; a reader treats the
+  // epoch itself as no time.
   google.protobuf.Timestamp at = 4;
 }
 
@@ -57,8 +59,30 @@ message TranscriptToolResult {
   string tool = 1 [(buf.validate.field).string.max_bytes = 65536];
   optional string call_id = 2 [(buf.validate.field).string.max_bytes = 65536];
   bool is_error = 3;
+  // The text the agent was shown.
   TranscriptContent content = 4 [(buf.validate.field).required = true];
-  // The complete result as a ToolResultPayload in JSON (a command's stdout, stderr, exit code and
-  // duration, or a JSON value), independent of the display content.
-  optional TranscriptContent payload_json = 5;
+  // Field 5 carried the result as a JSON string (a Pydantic dump); records written with it stay
+  // readable, a reader skips it and shows `content`.
+  reserved 5;
+  reserved "payload_json";
+  // What the tool returned beside its text. Absent for a result with none and for one written before
+  // this field existed. A reader that does not know the case shows `content` alone.
+  oneof payload {
+    TranscriptCommandResult command = 6;
+    // A JSON object or array, as JSON text.
+    TranscriptContent json = 7;
+  }
+}
+
+// A command's result in parts, as the tool reported them.
+message TranscriptCommandResult {
+  TranscriptContent stdout = 1 [(buf.validate.field).required = true];
+  TranscriptContent stderr = 2 [(buf.validate.field).required = true];
+  // Absent when the tool has no exit status.
+  optional int32 exit_code = 3;
+  // Absent when the tool did not time itself.
+  optional double duration_seconds = 4 [(buf.validate.field).double = {
+    gte: 0
+    finite: true
+  }];
 }
