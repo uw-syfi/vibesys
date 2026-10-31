@@ -169,3 +169,25 @@ describe('ShareBar', () => {
     );
   });
 });
+
+describe('AreaChart axis words', () => {
+  test('the axis may word a value shorter than the tooltip does', async () => {
+    const container = await mount(
+      <AreaChart
+        label="Spend"
+        unit="US dollars"
+        labels={['a', 'b']}
+        layers={[{key: 'x', name: 'x', series: 0, values: [100, 300]}]}
+        format={value => `$${value}.00`}
+        axis={value => `$${value}`}
+      />,
+    );
+    const axis = [...container.querySelectorAll('.vs-chart-label')].map(each => each.textContent);
+    expect(axis).toContain('$300');
+    expect(axis).not.toContain('$300.00');
+    const tips = [...container.querySelectorAll('.vs-area-chart-tip-row')].map(
+      each => each.textContent,
+    );
+    expect(tips).toEqual(['x $100.00', 'x $300.00']);
+  });
+});

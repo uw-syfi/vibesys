@@ -278,6 +278,9 @@
   border-top: var(--hairline) solid var(--line);
   vertical-align: top;
 }
+.vs-table[data-middle] td {
+  vertical-align: middle;
+}
 .vs-table td[data-mono] {
   font-family: var(--text-code-family);
   font-size: var(--text-code-size);

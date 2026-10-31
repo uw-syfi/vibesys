@@ -45,7 +45,8 @@ export type TableRowKind = 'sub' | 'total';
 /**
  * A table of `rows` in `columns`, with a sticky header, scrolling sideways in its own box when it is
  * wider than its container. With `select`, a press or Enter on a row selects it, and the row whose
- * key is `selected` is marked current.
+ * key is `selected` is marked current. With `middle`, a row's cells are centered on each other, for
+ * rows that hold a control beside text.
  */
 export function Table<Row>(props: {
   /** The table's accessible name, also naming its scrolling box. */
@@ -54,6 +55,7 @@ export function Table<Row>(props: {
   readonly rows: readonly Row[];
   readonly rowKey: (row: Row) => string;
   readonly selected?: string;
+  readonly middle?: boolean;
   readonly select?: (key: string) => void;
   readonly rowKind?: (row: Row) => TableRowKind | undefined;
   /** A row that folds gets a chevron before its first cell; `'none'` keeps the slot empty. */
@@ -73,7 +75,7 @@ export function Table<Row>(props: {
       // biome-ignore lint/a11y/noNoninteractiveTabindex: a box that scrolls sideways must take the focus so a keyboard can scroll it (WCAG 2.1.1, axe scrollable-region-focusable); no interactive element scrolls a table.
       tabIndex={0}
     >
-      <table className="vs-table" aria-label={props.label}>
+      <table className="vs-table" aria-label={props.label} data-middle={props.middle || undefined}>
         <thead>
           <tr>
             {columns.map(column => (

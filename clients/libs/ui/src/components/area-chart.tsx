@@ -154,12 +154,14 @@ export function AreaChart(props: {
   readonly labels: readonly string[];
   readonly layers: readonly ChartLayer[];
   readonly format: (value: number) => string;
+  /** Words a value on the axis, where it may be shorter than in the tooltip; `format` by default. */
+  readonly axis?: (value: number) => string;
 }): JSX.Element {
   const [measure, measured] = useInlineSize();
   const width = Math.max(MIN_WIDTH, measured ?? FALLBACK_WIDTH);
   const count = props.labels.length;
   const scale = niceScale(Math.max(0, ...props.layers.flatMap(layer => layer.values)), TICKS);
-  const ticks = scale.ticks.map(tick => ({tick, text: props.format(tick)}));
+  const ticks = scale.ticks.map(tick => ({tick, text: (props.axis ?? props.format)(tick)}));
   const left =
     EDGE + Math.ceil(Math.max(1, ...ticks.map(each => each.text.length)) * GLYPH) + LABEL_GAP;
   const right = width - MARGIN_RIGHT;
