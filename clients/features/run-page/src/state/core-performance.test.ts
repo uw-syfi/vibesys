@@ -12,7 +12,14 @@ import {firstChart} from './chart-fixtures.js';
 import {adoptedCandidate} from './end-words.js';
 import {ideaTree} from './ideas-tree.js';
 import {IDEAS_FILTER_DEFAULT} from './ideas-view.js';
-import {clockStart, heroView, ideasView, projectSkeleton} from './index.js';
+import {
+  clockStart,
+  heroView,
+  ideasView,
+  projectSkeleton,
+  runPageInitial,
+  skeletonScreenState,
+} from './index.js';
 import type {RunModel} from './run-model.js';
 import {ratio} from './span-reading.js';
 
@@ -74,6 +81,32 @@ for (const item of cases) {
           row => row.id === idea.id,
         )?.figure,
       ).toBe('Data loss');
+  });
+}
+
+const SEED = {
+  identity: {host: 'local' as const, runId: 'run-a'},
+  title: {project: 'queue-rs', task: null},
+  hostLabel: 'Local',
+  unavailable: {},
+};
+
+for (const item of cases) {
+  test(`the time bar marks the new bests core states, once each: ${item.name}`, () => {
+    const head = fromBinary(RunHeadSchema, Buffer.from(item.head, 'base64'));
+    const skeleton = seedSkeleton(fromBinary(KeyframeSchema, Buffer.from(item.skeleton, 'base64')));
+    const model = projectSkeleton(skeleton, skeleton.throughSeq ?? 0n, '', {head});
+    const state = skeletonScreenState(SEED, skeleton, model, runPageInitial(SEED));
+    const marks = state.positionMarks ?? [];
+    const stated = head.performance[0]?.points.filter(point => point.newBest).length ?? 0;
+    // A mark for each new best (two at one moment share a place), none when the input stands.
+    expect(marks.length).toBeLessThanOrEqual(stated);
+    expect(marks.length > 0).toBe(stated > 0);
+    for (const [at, place] of marks.entries()) {
+      expect(place).toBeGreaterThanOrEqual(0);
+      expect(place).toBeLessThanOrEqual(1);
+      if (at > 0) expect(place).toBeGreaterThan(marks[at - 1] ?? 0);
+    }
   });
 }
 

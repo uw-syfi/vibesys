@@ -246,6 +246,11 @@ export interface RunPageState {
    * `placesAlong`); absent when the bar is spaced by position.
    */
   readonly positionPlaces?: readonly number[] | undefined;
+  /**
+   * Where each new best of the run's charts was set along the time bar's track, from 0 to 1, in the
+   * same running time as `positionPlaces` (see `marksAlong`); none when the bar is spaced by position.
+   */
+  readonly positionMarks?: readonly number[] | undefined;
   readonly identity: RunRef;
   /** What the sidebar knows about the run's name: its project and task. */
   readonly title: {readonly project: string; readonly task: string | null};

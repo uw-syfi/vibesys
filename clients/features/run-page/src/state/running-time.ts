@@ -65,6 +65,24 @@ export function placesAlong(seconds: readonly number[]): readonly number[] {
 }
 
 /**
+ * Where each of `marks` (seconds of running time) stands along the same track `placesAlong` spaces
+ * `seconds` over: 0 at the first position, 1 at the last, the same place a position of that time
+ * has. Ascending and without repeats; none for a track that never advanced, which has no scale.
+ */
+export function marksAlong(
+  seconds: readonly number[],
+  marks: readonly number[],
+): readonly number[] {
+  const first = seconds[0];
+  const last = seconds.at(-1);
+  if (first === undefined || last === undefined || last <= first) return [];
+  const along = marks
+    .map(mark => (mark - first) / (last - first))
+    .filter(place => place >= 0 && place <= 1);
+  return [...new Set(along)].sort((a, b) => a - b);
+}
+
+/**
  * A length of running time in words, the one way the screen says it: the time bar's word and the
  * caption of every chart. Floored, because a clock never says a time it has not reached: to the
  * second below an hour (`21m 40s`), to the minute from an hour on (`11h 17m`).

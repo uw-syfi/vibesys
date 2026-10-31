@@ -107,6 +107,12 @@ function Track(props: {
   );
 }
 
+/** A small diamond on the track, `at` (0 to 1) of the way along it; it takes no pointer or focus. */
+function Mark(props: {readonly at: number}): JSX.Element {
+  const place: StyleWithVars = {'--mark-at': props.at};
+  return <span className="vs-scrubber-mark" aria-hidden="true" style={place} />;
+}
+
 /**
  * A range over the positions 0 to `last` of a sequence, with labelled ticks and the playhead at
  * `value`. It reads `latestLabel` ("Live" unless given) at the newest position (`live`), and
@@ -136,6 +142,8 @@ export function Scrubber(props: {
   readonly ticks?: readonly ScrubberTick[];
   /** Where each position (0 to `last`) stands along the track, 0 to 1; even when absent. */
   readonly places?: readonly number[];
+  /** Where a small diamond is drawn on the track, each 0 to 1 along it: the moments worth finding. */
+  readonly marks?: readonly number[];
   /**
    * What a tick's label counts (`Call`): each label reads `Call 3` while every one fits beside the
    * others, and the bare number once they would not, so labels never skip.
@@ -171,16 +179,19 @@ export function Scrubber(props: {
           <Button size="sm" text={props.backLabel ?? 'Back to live'} press={props.backToLive} />
         )}
       </div>
-      <Track
-        id={id}
-        label={props.label}
-        position={props.position}
-        value={props.value}
-        last={props.last}
-        single={single}
-        places={places}
-        change={props.change}
-      />
+      <div className="vs-scrubber-track">
+        <Track
+          id={id}
+          label={props.label}
+          position={props.position}
+          value={props.value}
+          last={props.last}
+          single={single}
+          places={places}
+          change={props.change}
+        />
+        {single ? null : (props.marks ?? []).map(at => <Mark key={at} at={at} />)}
+      </div>
       {props.ticks === undefined ? null : (
         <div ref={measure} className="vs-scrubber-ticks" aria-hidden="true">
           {(fitted ?? ticks.map((_, index) => ({index, left: null}))).map(({index, left}) => {

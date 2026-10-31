@@ -22,10 +22,11 @@ import {
 } from '@vibesys/run-state/skeleton';
 import {AppendLog} from './append-log.js';
 import {EMPTY_TRACE_LOG} from './live.js';
+import {bestSteps, readObjectives} from './objective-reading.js';
 import {clockStart} from './run-level.js';
 import type {RunModel} from './run-model.js';
 import {type RunPageSeed, type RunPageState, runPageInitial} from './run-page.js';
-import {placesAlong, runningTimeOf, runningWords} from './running-time.js';
+import {marksAlong, placesAlong, runningTimeOf, runningWords} from './running-time.js';
 import {settleIdeas} from './settled-ideas.js';
 import {skeletonPerformance} from './skeleton-performance.js';
 import {STARTUP_LABELS} from './startup-stages.js';
@@ -228,20 +229,26 @@ function observedLifecycle(skeleton: Skeleton, hint: RunLivenessHint | undefined
 
 /**
  * The time bar's word and track: the run's running time, the same clock as the charts' axes. The
- * word is the time of the view (`latest` on the run clock), the track spaces `positions` by it.
+ * word is the time of the view (`latest` on the run clock), the track spaces `positions` by it, and a
+ * mark on it is each new best of the charts' lines.
  */
 function timeBar(
   skeleton: Skeleton,
   whole: RunModel,
   latest: number | null,
   positions: readonly number[],
-): Pick<RunPageState, 'positionWord' | 'positionPlaces'> {
+): Pick<RunPageState, 'positionWord' | 'positionPlaces' | 'positionMarks'> {
   const start = clockStart(whole);
   const time = runningTimeOf(whole.sessions ?? [], start);
+  const seconds = clockThrough(skeleton, positions).map(at => time.at(at ?? start));
+  const newBests = readObjectives(whole).flatMap(reading =>
+    bestSteps(reading).map(step => time.at(step.at)),
+  );
   return {
     positionWord:
       whole.loadFailure ?? positionWord(whole.progress, latest === null ? null : time.at(latest)),
-    positionPlaces: placesAlong(clockThrough(skeleton, positions).map(at => time.at(at ?? start))),
+    positionPlaces: placesAlong(seconds),
+    positionMarks: marksAlong(seconds, newBests),
   };
 }
 

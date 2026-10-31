@@ -218,11 +218,33 @@
   flex: 1;
   min-width: 0;
 }
+.vs-scrubber-track {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
 .vs-scrubber-range {
+  flex: 1;
+  min-width: 0;
   width: 100%;
   margin: 0;
   accent-color: var(--accent);
   cursor: pointer;
+}
+/* A moment worth finding: a small diamond on the track. A range's thumb (a `--space-5` disc) travels
+   between half its width from either end, so a mark is placed inside that, where the thumb would be. */
+.vs-scrubber-mark {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--space-3) + (100% - 2 * var(--space-3)) * var(--mark-at));
+  box-sizing: border-box;
+  width: var(--space-3);
+  height: var(--space-3);
+  transform: translate(-50%, -50%) rotate(45deg);
+  border: var(--hairline) solid var(--accent);
+  background: var(--panel);
+  pointer-events: none;
 }
 .vs-scrubber-ticks {
   position: relative;

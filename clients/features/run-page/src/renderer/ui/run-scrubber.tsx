@@ -15,6 +15,8 @@ export function RunScrubber(props: {
   readonly position?: string | undefined;
   /** Where each position stands along the track in running time; even when absent. */
   readonly places?: readonly number[] | undefined;
+  /** Where each new best was set along the track, 0 to 1; none when absent. */
+  readonly marks?: readonly number[] | undefined;
   readonly change: (view: RunView) => void;
 }): JSX.Element | null {
   const {log, view, ended, change} = props;
@@ -32,6 +34,7 @@ export function RunScrubber(props: {
       position={props.position ?? shown.position}
       ticks={shown.ticks}
       {...(props.places === undefined ? {} : {places: props.places})}
+      {...(props.marks === undefined ? {} : {marks: props.marks})}
       tickWord="Call"
       change={index => change(viewAtPosition(log, index))}
       backToLive={() => change({at: 'live'})}
