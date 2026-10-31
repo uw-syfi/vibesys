@@ -706,7 +706,9 @@ _INVALID_ITEMS = {ScalarType.STRING: "", ScalarType.BYTES: b"", ScalarType.DOUBL
 def test_constrained_lists_reject_an_invalid_item(name: str, field: str) -> None:
     descriptor = next(f for f in _MESSAGES[name].desc().fields if f.name == field)
     assert isinstance(descriptor.value, DescFieldValueList)
-    item = _INVALID_ITEMS[descriptor.value.element]
+    element = descriptor.value.element
+    assert isinstance(element, ScalarType)
+    item = _INVALID_ITEMS[element]
     assert_invalid(changed(_MESSAGES[name], **{field: [item]}), field)
 
 

@@ -56,12 +56,12 @@ if TYPE_CHECKING:
 class Controls(Protocol):
     """The operator's side of a run: what the bridge of ``vs_runtime.api.control`` offers."""
 
-    def poll(self, core: CoreState, now_at: float) -> tuple[CoreEvent, ...]:
+    def poll(self, core: CoreState, now_at: float, /) -> tuple[CoreEvent, ...]:
         """The controls requested since the last poll, as core events."""
         ...
 
     def settled(
-        self, core: CoreState, *, running: bool, refused: Sequence[ControlRefusedError] = ()
+        self, core: CoreState, /, *, running: bool, refused: Sequence[ControlRefusedError] = ()
     ) -> None:
         """Tell the operator what core committed and which of its controls it refused."""
         ...

@@ -1,7 +1,8 @@
 """Native desktop journeys: declarative core events interpreted by the shipping projector.
 
-Regenerate with ``uv run python -m tests.support.journey_fixtures``. The golden
-check compares the same projection byte for byte, including blobs and streams.
+Regenerate with ``./scripts/regenerate_goldens.sh``, which runs this module beside the shared
+scenarios. The golden check compares the same projection byte for byte, including blobs and
+streams.
 """
 
 from __future__ import annotations
@@ -13,7 +14,6 @@ from pathlib import Path
 
 from tests.support.lineage_fixture import lineage_fixture
 from tests.support.retained_events import project_heads, replay_of
-from tests.support.shared_scenarios import regenerate
 
 from vs_proto.api import (
     ClientReplay,
@@ -147,13 +147,3 @@ if __name__ == "__main__":
             for path in sorted(ROOT.glob("*.pb"))
         )
     )
-    trace = json.loads((ROOT / "trace.json").read_text())
-    trace.update(
-        name="queue-rs-live",
-        description="A dynamic search over two planning calls, seven ideas, W5 with a turn and a judge.",
-    )
-    (ROOT.parents[3] / "libs/run-fixtures/src/data/queue-rs-live.json").write_text(
-        json.dumps(trace, indent=2, ensure_ascii=False) + "\n"
-    )
-
-    regenerate()

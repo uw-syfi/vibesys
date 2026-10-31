@@ -17,7 +17,8 @@ from typing import TYPE_CHECKING
 
 from protobuf import Oneof
 
-from vs_proto.api import StrategyAdvanced
+from vs_decode.api import Unreadable, decode_json
+from vs_proto.api import RUN_LOG_MAX_RECORD_BYTES, StrategyAdvanced
 
 from ._search_run import Advanced, Inbox, SearchHost, advance, begin, deferred
 from ._step import step
@@ -121,8 +122,12 @@ def advance_search[S: StrategyState, C](  # noqa: PLR0913  # lint-waiver: LW-441
         advanced = _hear_then_offer(search, progress, core, host, arrived)
     asked = {w for w in (progress.wakes if progress else ()) if w not in due} | set(advanced.wakes)
     count = 1 if progress is None else progress.advances + 1
-    changes = None if progress is None else search.changes(progress.state, advanced.state)
-    whole = changes is None or count >= CHECKPOINT_GROWTH * max(progress.checkpoint_at, 1)
+    if progress is None:
+        changes, whole, checkpoint_at = None, True, count
+    else:
+        changes = search.changes(progress.state, advanced.state)
+        whole = changes is None or count >= CHECKPOINT_GROWTH * max(progress.checkpoint_at, 1)
+        checkpoint_at = count if whole else progress.checkpoint_at
     record = StrategyAdvanced(
         schema_version=SCHEMA_VERSION,
         proposals=[encode_event(event) for event in taken],
@@ -138,7 +143,7 @@ def advance_search[S: StrategyState, C](  # noqa: PLR0913  # lint-waiver: LW-441
             tuple(sorted(asked)),
             advanced.held,
             count,
-            count if whole else progress.checkpoint_at if progress else count,
+            checkpoint_at,
             checkpointed=whole,
         ),
     )
@@ -206,7 +211,17 @@ def _read[S: StrategyState, C](
 ) -> Progress[S]:
     match message.strategy:
         case Oneof(field="checkpoint", value=whole):
-            state = search.state_model.model_validate_json(whole)
+            decoded = decode_json(
+                whole,
+                search.state_model,
+                source="the search checkpoint in the log",
+                max_bytes=RUN_LOG_MAX_RECORD_BYTES,
+            )
+            match decoded:
+                case Unreadable():
+                    raise ValueError(str(decoded))
+                case _:
+                    state = decoded
             whole_state = True
         case Oneof(field="steps", value=changes) if progress is not None:
             state = search.extend(progress.state, changes)

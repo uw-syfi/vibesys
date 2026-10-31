@@ -45,6 +45,7 @@ from vs_dst.api import (
     StepLoopHosting,
     simulate,
 )
+from vs_proto.api import StrategyAdvanced
 from vs_runtime.api.testing import Launch
 from vs_sim.api.testing import examples
 
@@ -187,9 +188,11 @@ class RestartableWorld(TinyWorld):
         return Succeeded()
 
 
-def last_advance_of_epoch(records: tuple[Record, ...], epoch: int) -> Record:
+def last_advance_of_epoch(records: tuple[Record, ...], epoch: int) -> StrategyAdvanced:
     return [
-        r for r in records if r.epoch == epoch and r.body and r.body.field == "strategy_advanced"
+        r.body.value
+        for r in records
+        if r.epoch == epoch and r.body and isinstance(r.body.value, StrategyAdvanced)
     ][-1]
 
 
@@ -215,8 +218,8 @@ def test_a_clean_pause_leaves_the_search_whole_in_the_log_and_the_resume_keeps_w
         if interrupted.history[0] != "parked":
             continue  # the run ended before the pause took hold
         whole = last_advance_of_epoch(interrupted.log_records, 1)
-        assert whole.body is not None
-        assert whole.body.value.strategy.field == "checkpoint", point
+        assert whole.strategy is not None
+        assert whole.strategy.field == "checkpoint", point
         assert isinstance(interrupted.world, RestartableWorld)
         assert settled_twice(interrupted.world) <= 1, (point, settled_twice(interrupted.world))
         if not changed:
