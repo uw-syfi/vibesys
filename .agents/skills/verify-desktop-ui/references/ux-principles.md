@@ -132,10 +132,13 @@ can decide it.
     absence from `@vibesys/ui`, by the stylesheet test of the tone fills (only
     listed selectors may be washed with a tone, whatever they are called), by
     the `banner` screen check (no element at least half the main pane's width is
-    filled with a status color, by color rather than by class name) and by the
+    filled with a status color, by color rather than by class name), by the
+    `status-row` screen check (none is announced as an alert, a status or a live
+    region outside a toast, or written in a status tone, at that width) and by the
     no-banners journey of the desktop shell's end-to-end suite; whether a
-    message is passing or about a thing, and whether a hint holds something a
-    person must act on, is Unenforced (judgment).
+    message is passing or about a thing, whether a hint holds something a
+    person must act on, and a bordered strip that is neither filled, announced
+    nor toned, is Unenforced (judgment).
 
 ## Sizes the checks cover
 
