@@ -153,6 +153,15 @@ def _pause_now_holds_back(state: CoreState, request: Request) -> bool:
     )
 
 
+def pause_cancels(state: CoreState, request: Request) -> bool:
+    """Whether the drain of a pause cancels this running request now.
+
+    A Pause-now does from the start, and any pause does once its drain deadline has passed. The
+    effects that finish work a turn already did (a snapshot, a cleanup) are left to end.
+    """
+    return _pause_now_holds_back(state, request)
+
+
 def _unfinished(state: CoreState, record: RequestRecord) -> bool:
     if record.phase not in (RequestPhase.DISPATCHED, RequestPhase.RECONCILING):
         return False

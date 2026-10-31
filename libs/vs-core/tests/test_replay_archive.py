@@ -399,7 +399,9 @@ def test_duplicate_epoch_descriptor_names_fail_validation() -> None:
 
 
 _NATIVE_RECORDS = record_examples()
-_CORE_RECORDS = frozenset({"core_input", "step_started", "step_finished", "attempt_interrupted"})
+_CORE_RECORDS = frozenset(
+    {"core_input", "step_started", "step_finished", "attempt_interrupted", "run_ended"}
+)
 """The records of the recovery rule: a keyed replay log never holds them, and the archive refuses them."""
 _NON_POLICY_RECORDS = tuple(
     name

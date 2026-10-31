@@ -11,15 +11,16 @@ from typing import TYPE_CHECKING
 
 from protobuf import Oneof
 
-from ._actions import Action, Cancel, End, Run, Settle, Wait
+from ._actions import Action, Cancel, End, Run, Settle, Wait, at_rest
 from ._proofs import request_dependency_status, stop_mode
 from ._request_ledger import dispatch_until, retry_limit
 from ._request_recovery import is_open
-from ._run_park import dispatch_allowed, pause_withdraws
+from ._run_park import dispatch_allowed, pause_cancels
 from ._scope_order import holds_back
-from ._step import advance_run_time, step
+from ._step import advance_run_time, settle_park, step, step_recorded
 from ._step_attempts import (
     dispatched,
+    ended,
     epoch_opened,
     finish,
     forgotten,
@@ -27,7 +28,13 @@ from ._step_attempts import (
     open_record,
     started,
 )
-from ._step_log import decode_event, decode_interruption, decode_request, decode_result
+from ._step_log import (
+    decode_event,
+    decode_interruption,
+    decode_request,
+    decode_result,
+    decode_run_ended,
+)
 from .types.common import DependencyStatus, InterruptPolicy, RequestId, RunStatus, StopMode
 from .types.records import request_interrupt_policy
 from .types.steps import Cancelled, CancelReason, Failed
@@ -66,8 +73,15 @@ def fold(
 
 
 def decide(state: CoreState, now: float) -> tuple[Action, ...]:
-    """What the runner loop does next, for the run clock ``now``. Total: it never raises."""
+    """What the runner loop does next, for the run clock ``now``. Total: it never raises.
+
+    A parked or ended run is at rest and has nothing to do: a step it holds waits for the epoch
+    that resumes the run, and an ended run is over.
+    """
     state = advance_run_time(state, now)
+    rest = at_rest(state)
+    if rest is not None:
+        return (Wait(until=None),)
     open_steps = tuple(record for record in state.records.records if is_open(record))
     if state.run.result is not None and not open_steps:
         return (End(result=state.run.result),)
@@ -89,16 +103,19 @@ def _apply(
     state = _observed(state, record)
     match body:
         case Oneof(field="core_input", value=message):
-            return step(state, decode_event(message, registry)).state
+            state = step(state, decode_event(message, registry)).state
         case Oneof(field="step_started", value=message):
-            return _start(state, message, registry)
+            state = _start(state, message, registry)
         case Oneof(field="step_finished", value=message):
-            return _finish(state, message, registry)
+            state = _finish(state, message, registry)
         case Oneof(field="attempt_interrupted", value=message):
-            tag = RequestId(root=message.tag)
-            return interrupted(state, tag, message.attempt, decode_interruption(message))
-        case _:
-            return state
+            why = decode_interruption(message)
+            state = settle_park(
+                interrupted(state, RequestId(root=message.tag), message.attempt, why)
+            )
+        case Oneof(field="run_ended", value=message):
+            state = ended(state, decode_run_ended(message))
+    return state
 
 
 def _start(state: CoreState, message: StepStarted, registry: OperationRegistry | None) -> CoreState:
@@ -113,22 +130,26 @@ def _finish(
     tag = RequestId(root=message.tag)
     state = dispatched(state, tag)
     report, owner_events = finish(state, tag, decode_result(message, registry))
-    state = step(state, report).state
+    state = step_recorded(state, report).state
     for event in owner_events:
-        state = step(state, event).state
+        state = step_recorded(state, event).state
     if any(is_open(row) for row in state.records.find(tag)):
         problem = f"the log finishes step {tag.root} with an observation that does not end it"
         raise ValueError(problem)
     return forgotten(state, tag)
 
 
-_CORE_RECORDS = frozenset({"core_input", "step_started", "step_finished", "attempt_interrupted"})
+_CORE_RECORDS = frozenset(
+    {"core_input", "step_started", "step_finished", "attempt_interrupted", "run_ended"}
+)
 
 
 def _observed(state: CoreState, record: Record) -> CoreState:
     """``state`` in the record's epoch and at its run clock."""
-    state = epoch_opened(state, record.epoch)
-    return state if record.clock is None else advance_run_time(state, record.clock)
+    opened = epoch_opened(state, record.epoch)
+    if opened is not state:
+        opened = settle_park(opened)
+    return opened if record.clock is None else advance_run_time(opened, record.clock)
 
 
 def _of_step(state: CoreState, record: RequestRecord, now: float) -> Action | None:
@@ -158,10 +179,9 @@ def _stop_running(state: CoreState, record: RequestRecord, now: float) -> Cancel
     park = state.run.park
     if now >= record.until.at:
         return Cancel(tag=tag, reason=CancelReason.DEADLINE)
-    if pause_withdraws(state, record.request):
-        return Cancel(tag=tag, reason=CancelReason.PAUSE_NOW)
-    if park is not None and park.deadline_at is not None and now >= park.deadline_at:
-        return Cancel(tag=tag, reason=CancelReason.DRAIN_EXPIRED)
+    if park is not None and pause_cancels(state, record.request):
+        reason = CancelReason.PAUSE_NOW if park.immediate else CancelReason.DRAIN_EXPIRED
+        return Cancel(tag=tag, reason=reason)
     return None
 
 
