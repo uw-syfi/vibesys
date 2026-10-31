@@ -6,7 +6,6 @@
 import type {HostKey} from '@vibesys/hosts';
 import {FAILURE_CAUSE_WORDS, type FailureCause} from '@vibesys/ipc';
 import {
-  Banner,
   Button,
   Card,
   Chip,
@@ -174,41 +173,39 @@ function CheckoutForm(props: {
   );
 }
 
-function Problem(props: {
+/** What fixes a machine that is not ready, when something does: sign in, or point at its checkout. */
+function ProblemFix(props: {
   readonly state: MachinesState;
   readonly machine: Machine;
   readonly dispatch: Dispatch;
 }): JSX.Element | null {
   const {state, machine, dispatch} = props;
-  const problem = machineProblem(machine);
-  if (problem === null) return null;
   const status = machineStatus(machine);
   const signingIn = state.pending?.kind === 'sign-in' && state.pending.host === machine.host;
   const fixingHere = state.fixing?.host === machine.host;
-  const actions =
-    status === 'sign-in' ? (
-      <Button
-        variant="primary"
-        text={signingIn ? 'Signing in…' : 'Sign in'}
-        {...(signingIn ? {disabledReason: 'Waiting for the host to accept the sign-in.'} : {})}
-        press={() => dispatch({type: 'sign-in', host: machine.host})}
-      />
-    ) : status !== 'checkout-not-found' ? undefined : fixingHere ? (
-      <CheckoutForm state={state} machine={machine} dispatch={dispatch} />
-    ) : (
+  if (status === 'sign-in') {
+    return (
+      <Row gap="space-2" wrap>
+        <Button
+          variant="primary"
+          text={signingIn ? 'Signing in…' : 'Sign in'}
+          {...(signingIn ? {disabledReason: 'Waiting for the host to accept the sign-in.'} : {})}
+          press={() => dispatch({type: 'sign-in', host: machine.host})}
+        />
+      </Row>
+    );
+  }
+  if (status !== 'checkout-not-found') return null;
+  return fixingHere ? (
+    <CheckoutForm state={state} machine={machine} dispatch={dispatch} />
+  ) : (
+    <Row gap="space-2" wrap>
       <Button
         variant="primary"
         text="Choose the checkout"
         press={() => dispatch({type: 'open-fix', host: machine.host})}
       />
-    );
-  return (
-    <Banner
-      tone="warn"
-      title={statusWord(status)}
-      hint={problem}
-      {...(actions === undefined ? {} : {actions})}
-    />
+    </Row>
   );
 }
 
@@ -239,6 +236,7 @@ function Detail(props: {
 }): JSX.Element {
   const {state, machine, dispatch, newRun} = props;
   const status = machineStatus(machine);
+  const problem = machineProblem(machine);
   const removing = state.pending?.kind === 'remove' && state.pending.host === machine.host;
   const savingHere = state.fixing?.host === machine.host && state.fixing.saving !== null;
   const changeDisabled =
@@ -257,9 +255,13 @@ function Detail(props: {
               {machine.label}
             </Text>
           </Stack>
-          <Chip label={statusWord(status)} tone={statusTone(status)} />
+          <Chip
+            label={statusWord(status)}
+            tone={statusTone(status)}
+            {...(problem === null ? {} : {hint: problem})}
+          />
         </Row>
-        <Problem state={state} machine={machine} dispatch={dispatch} />
+        <ProblemFix state={state} machine={machine} dispatch={dispatch} />
         {status === 'checkout-not-found' ? null : (
           <CheckoutForm state={state} machine={machine} dispatch={dispatch} />
         )}

@@ -7,16 +7,16 @@ unbound roles return an explicit refusal without fabricating lifecycle facts.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from enum import StrEnum
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Annotated, Protocol, assert_never, cast
+from typing import TYPE_CHECKING, Protocol, assert_never, cast
 
 from pydantic import BaseModel, ConfigDict, Field, SkipValidation
 
 from vs_core.api import (
     AdoptRevision,
-    AttemptsEvent,
     BlockRequest,
     CancelOwnedJob,
     CancelOwnedResource,
@@ -29,7 +29,6 @@ from vs_core.api import (
     DispatchTurn,
     EnsureSession,
     EnsureWorkspace,
-    EvaluationEvent,
     ExecuteRegisteredOperation,
     HostFence,
     InspectOwnedJob,
@@ -44,8 +43,6 @@ from vs_core.api import (
     RestoreRevision,
     ResumeSessionTurn,
     RetainRevision,
-    SessionsEvent,
-    SettlementEvent,
     SnapshotAndRetain,
     SnapshotAndRetainRun,
     SubmitMeasurement,
@@ -53,6 +50,7 @@ from vs_core.api import (
     Until,
     VerifyAdoption,
 )
+from vs_core.api.recovery import OwnerEvent
 from vs_runtime._receipt_store import Settled, Transient
 
 if TYPE_CHECKING:
@@ -105,12 +103,18 @@ class ExecutionContext(BaseModel):
     lease: SkipValidation[ExecutionLease | None] = Field(default=None, exclude=True, repr=False)
     permit: TurnPermit | None = None
     """The logical-turn permit core issued for this request, when the request consumes one."""
+    repeat: bool = False
+    """Whether an earlier attempt of this request may have run.
+
+    The runner loop records an attempt before any of its I/O, so an attempt after the first
+    proves an earlier one may have started. A repeat must reach the end a first run reaches
+    without doing twice what the earlier attempt may have done.
+    """
 
 
-type OwnerEvent = Annotated[
-    AttemptsEvent | SessionsEvent | EvaluationEvent | SettlementEvent,
-    Field(discriminator="kind"),
-]
+def payload_digest_of(request: RequestBase) -> str:
+    """The digest that names *request*'s payload in an ``ExecutionContext``."""
+    return hashlib.sha256(request.model_dump_json().encode()).hexdigest()
 
 
 class ExecutionResult(BaseModel):

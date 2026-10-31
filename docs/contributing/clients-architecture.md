@@ -262,7 +262,7 @@ compile error. The six themes are `paper`, `mist`, `sand` (light) and `ink`, `mi
 
 `src/tokens.css` is written by `pnpm --dir clients/libs/ui generate:tokens` from the tables and
 `src/primitives.css` (the hand-written styles of the primitives, appended verbatim). It has the
-scales and derived values (`color-mix` fills for selection, chips and banners) on `:root`, one
+scales and derived values (`color-mix` fills for selection, chips and toasts) on `:root`, one
 `:root[data-theme="<name>"]` block per theme, the zeroing of every motion duration under
 `prefers-reduced-motion: reduce`, and aliases for the variable names the stylesheet had before the
 roles (`LEGACY_ALIASES`), which stay until their consumers move. The defaults sit on a bare
@@ -328,16 +328,15 @@ CSS of their own. An app imports `./tokens.css`, `./fonts.css` and `./components
 | `Wordmark` | `art` (the caller's ASCII art; the app's one copy is `VIBESYS_WORDMARK` in new-run), `label?` (decorative without one), `align?: 'start' \| 'center'`, `tone?: 'accent' \| 'gradient'`, `size?: 'hero' \| 'compact'`; bold and solid, `hero` sized to its container's width, `compact` a fixed 40px tall |
 | `Icon` | `name: IconName` (closed set, `ICON_NAMES`), `label?` (decorative without one) |
 | `Button` | `text` or `icon` + `label`; one of `press`, `href` (renders `<a>`) or `submit`; `variant?: 'primary' \| 'secondary' \| 'quiet' \| 'danger'`, `size?: 'sm' \| 'md'`, `full?`, `disabledReason?`, `expanded?` |
-| `SegmentedControl` | `label`, `options: {value, label}[]`, `value`, `change`, `size?`; native radios, so one tab stop and arrow keys |
+| `SegmentedControl` | `label`, `options: {value, label, mark?: {tone, label}}[]` (a `mark` is a dot in the segment's corner, named by its label and on the pointer, taking no room), `value`, `change`, `size?`; native radios, so one tab stop and arrow keys |
 | `Select` | `value`, `options: {value, label, disabledReason?}[]`, `change`, `mono?` |
 | `Field` | `label`, `help?`, `error?`, one control as children |
 | `TextInput` | `value`, `change?`, `placeholder?`, `mono?`, `readOnly?`, `rows?` (above one: a multi-line box), `submit?` (Enter; Shift+Enter is a new line) |
 | `PathInput` | `value`, `change`, `completions: {value, detail?}[]`, `placeholder?`; the ARIA combobox pattern |
 | `Checkbox`, `Switch` | `label`, `checked`, `change`, `disabledReason?` |
-| `Chip` | `label`, `tone?: StatusTone`, `dot?` |
+| `Chip` | `label`, `tone?: StatusTone`, `dot?`, `mono?` (the label is an identifier, set in the code face), `hint?` (the longer account: the chip's accessible description, a tab stop drawn under the chip on hover and on keyboard focus; a path in it is shown by its last name) |
 | `StatusDot` | `tone: 'neutral' \| 'live' \| 'ok' \| 'warn' \| 'err'`, `label` |
 | `Card` | `section?` (a titled region), `flush?` |
-| `Banner` | `title`, `tone?: 'neutral' \| 'ok' \| 'warn' \| 'failed'`, `body?`, `hint?`, `actions?`; a state the screen is in, on one line, its actions beside it and `body` then `hint` behind a details button; there is no `err` tone (see "Toasts and banners") |
 | `Toast`, `ToastStack` | `Toast`: `tone: 'warn' \| 'err'`, `title`, `detail?`, `open`, `toggle(open)`, `dismiss()`. `ToastStack`: `label`, `toasts: {id, tone, title, detail?, open}[]` (newest first), `toggle(id, open)`, `dismiss(id)`; fixed at the top right, a small gap below the header row of the `Page` or `Screen` on show (the window's end strip where there is none), a labelled live region (an error is an `alert`, a warning a `status`); holds no state |
 | `Menu` | the trigger's `text` or `icon` + `label`, `items: {id, label, press \| href, danger?}[]`, `variant?`, `size?`; raised, keyboard navigable, closes on Esc, a choice or the focus leaving |
 | `Dialog` | `open`, `title`, `dismiss`, children, `actions?`; the native modal `<dialog>` at the `overlay` elevation |
@@ -368,9 +367,10 @@ no component reads a clock. Standard error in `LogPane` is drawn in `--log-err`,
 `log-text` (`LOG_ERR_MIX` in `./tokens`), because a light theme's `err` does not read on the log
 pane's dark background; a token test checks it in every theme.
 
-### Toasts and banners
+### Toasts and inline status
 
-A message on a screen is one of two things, and each has one form.
+The app draws no banner: no full-width strip, tinted or not, for any state, error or warning. A
+message is one of three things, and each has one form.
 
 - **A failure or warning the person passes through is a toast.** "Could not save the change", "The
   machines could not be read", "The run did not take the command": an event, with no action
@@ -378,11 +378,16 @@ A message on a screen is one of two things, and each has one form.
   and a detail. Toasts sit at the top right of the window, a small gap below the screen's header row (a
   `Page`'s or `Screen`'s `header`, whatever its height), collapsed to the title and a tone dot, with the detail behind a details button, and stay until the person
   dismisses them or the problem clears. They never hide on a timer.
-- **A state the screen is in, or a message that holds actions, is a banner.** The run ended, the
-  run's history is not available, a machine needs an update, a reading failed with Try again
-  beside it. It stays on the page as one line, its actions beside it and its detail behind the
-  same details button. A banner's `failed` tone is a failure the screen *holds*; a passing
-  failure has no banner tone.
+- **A problem with one thing is a status word at that thing.** A login, a machine, a section that
+  could not be read, a step's transcript: a `Chip` in the thing's own row or header (`Not read`,
+  `Needs an update`, `Transcript unavailable`), the detail on its `hint`, and its action, if it
+  has one, beside it. A hint is the chip's accessible description, so it is read on hover, on
+  keyboard focus and by a screen reader; what a person must read to act (a login's link and code,
+  a start that may have happened) is text on the page, never only a hint. A run's state is the
+  header's status chip (a Resume on its way reads `Resuming`) with a few words of why beside it
+  and the whole account as its hint; Resume and Run again sit beside the other header actions. A
+  diagnostic is a row of the Logs, with a dot on the Logs tab.
+- **Anything else is not said.** A fact the screen already shows is not repeated in a message.
 
 The data flow is one-way. A feature's `./state` derives its problems from its state with a pure
 function (`settingsProblems`, `machineSettingsProblems`, `machinesProblems`, `runPageProblems`).
@@ -394,13 +399,15 @@ clears, so one that recurs is shown again. `ProblemHost` renders the board's toa
 root of each window (the main window and a run window), so no screen holds a toast list or a
 timer of its own.
 
-Enforced: `BannerTone` has no `err`, so `<Banner tone="err">` is a type error
-(`toast.dom.test.tsx` holds the type), a feature's `./state` is the only place a problem's
-words are written, and `toasts.spec.ts` shows a toast on every top-level screen at the smallest
-and a wide window, with each platform's window controls, and checks it sits below the header row
-and covers nothing in it. Unenforced: whether a message is a passing event or a held state needs
-a reader; a state that holds an action is a banner; and a new screen that puts its title row in
-the body instead of the `header` slot gets toasts over that row, until it is added to the spec's
+Enforced: `@vibesys/ui` has no `Banner`; no stylesheet rule paints a panel with the tone fills
+(`--banner-*-bg`, `--chip-*-bg`, or a mix of a status color) unless it is on the allow-list of
+`tone-fills.test.ts`; the `banner` screen check fails an element at least half as wide as the
+main pane that is filled with a status color, whatever it is called; a feature's `./state` is the
+only place a problem's words are written; and `toasts.spec.ts` shows a toast on every top-level
+screen at the smallest and a wide window, with each platform's window controls, and checks it
+sits below the header row and covers nothing in it. Unenforced: whether a message is a passing
+event or a problem with a thing needs a reader; and a new screen that puts its title row in the
+body instead of the `header` slot gets toasts over that row, until it is added to the spec's
 screens and given a `header`.
 
 ### The gallery and its screenshots
@@ -422,6 +429,9 @@ the token test still holds every theme to the contrast floors. The baselines are
 pnpm --filter @vibesys/app-ui-gallery update:screenshots   # rewrite the baselines (needs Docker)
 pnpm --filter @vibesys/app-ui-gallery test:e2e:linux       # compare against them locally
 ```
+
+`./scripts/regenerate_goldens.sh` does not rewrite these baselines: they need Docker and follow the UI, not
+the schema. Run `update:screenshots` yourself after a change that moves a rendering.
 
 A baseline update rewrites only the screens whose rendering changed: the suite launches
 Chromium with the flags in `DETERMINISTIC_RENDERING` (`playwright.config.ts`), which fix the

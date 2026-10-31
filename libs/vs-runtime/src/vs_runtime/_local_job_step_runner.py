@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from vs_core.api.recovery import StepResult
     from vs_evaluation.api import PollingEvaluationExecutor
     from vs_runtime._host_stage_work import HostStageWork
+    from vs_runtime._job_registry import JobRegistry
     from vs_runtime._step_runner import Adopted, CancelSignal
     from vs_sim.api import Clock
 
@@ -49,25 +50,35 @@ class LocalJobStepRunner:
         cls,
         executor: PollingEvaluationExecutor,
         host: HostStageWork,
+        registry: JobRegistry,
         *,
         clock: Clock,
         poll_interval_s: float,
     ) -> LocalJobStepRunner:
-        """Run on *executor*; leave to what *host* shows of the stage work a dead process left."""
-        return cls(executor, host.reaper(), clock=clock, poll_interval_s=poll_interval_s)
+        """Run on *executor*, registering its jobs in *registry*.
+
+        What a dead process left is found through what *host* shows of its stage work.
+        """
+        return cls(executor, host.reaper(), registry, clock=clock, poll_interval_s=poll_interval_s)
 
     def __init__(
         self,
         executor: PollingEvaluationExecutor,
         reaper: StageWorkReaper,
+        registry: JobRegistry,
         *,
         clock: Clock,
         poll_interval_s: float,
     ) -> None:
-        """Run on *executor*; leave to *reaper* what a dead process left on the host."""
+        """Run on *executor*, registering its jobs in *registry*; leave to *reaper* what a dead process left.
+
+        A pause cancels the evaluation like any other cancel: nothing of it survives the host.
+        """
         self._executor = executor
         self._reaper = reaper
-        self._job = JobStepRun(executor, clock=clock, poll_interval_s=poll_interval_s)
+        self._job = JobStepRun(
+            executor, registry, clock=clock, poll_interval_s=poll_interval_s, outlives_host=False
+        )
         self._lives: dict[RequestId, int] = {}
 
     async def run(

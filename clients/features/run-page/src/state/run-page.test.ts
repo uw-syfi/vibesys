@@ -3,6 +3,7 @@ import type {RunEvent, RunSnapshot, Span} from '@vibesys/contracts';
 import {type LogStream, parseHelperRequest} from '@vibesys/contracts/host-helper';
 import type {HostRun} from '@vibesys/hosts';
 import {emptyLogView, foldChunk} from '@vibesys/logs';
+import {END_OUTCOMES} from '@vibesys/run-fixtures';
 import type {RunTracePublication} from '@vibesys/run-session';
 import {type CoreState, initialCoreState, reduceEvent} from '@vibesys/run-state';
 import {checkModel, type Seeded} from '@vibesys/store/testing';
@@ -29,7 +30,7 @@ import {
   followedStreams,
   headerView,
   logGroups,
-  pauseNowBannerView,
+  pauseNowConfirmView,
   runGoneWords,
   streamLines,
   timelineView,
@@ -380,11 +381,11 @@ function notOffered(before: RunPageState, request: RunPageRequest): string | nul
         ? null
         : 'pause was sent while not offered';
     case 'pause-now':
-      return pauseNowBannerView(before).kind === 'confirm'
+      return pauseNowConfirmView(before).kind === 'confirm'
         ? null
         : 'cancellation was not confirmed';
     case 'resume-ended':
-      return endedView(before)?.resume == null ? 'resume of a run that cannot resume' : null;
+      return headerView(before).resume.shown ? null : 'resume of a run that cannot resume';
     case 'arm-bound':
       return request.ms === LOCATE_BOUND_MS ? null : 'a bound is not a documented one';
     default:
@@ -425,7 +426,7 @@ describe('the run page store', () => {
         {type: 'record', record: {kind: 'live', run: server('paused', {paused: 'quota'})}},
         {type: 'run-core', core: quotaCore(stage)},
       ]).state;
-      expect(Object.keys(headerView(state))).not.toContain('resume');
+      expect(headerView(state).resume.shown).toBe(false);
       expect(headerView(state).pauseNow.shown).toBe(true);
       expect(fold(state, [{type: 'pause'}]).requests).toEqual([]);
     }
@@ -518,7 +519,7 @@ describe('the run page store', () => {
     const draining = fold(initial(), [{type: 'record', record: RECORDS[6] as RunRecord}]).state;
     expect(headerView(draining).pauseNow.shown).toBe(true);
     const asked = fold(draining, [{type: 'ask-pause-now'}]);
-    expect(pauseNowBannerView(asked.state)).toEqual({
+    expect(pauseNowConfirmView(asked.state)).toEqual({
       kind: 'confirm',
       title: 'Pause now?',
       body: 'Unfinished work may need repeating and may still incur charges.',
@@ -533,14 +534,84 @@ describe('the run page store', () => {
     expect(fold(state, [{type: 'view', view: {at: 'live'}}]).state.view).toEqual({at: 'live'});
   });
 
-  test('the ended banner names the round to resume from only when resumable', () => {
+  test('an ended run offers Resume from the round its end record names', () => {
     const stopped = fold(initial(), [{type: 'record', record: RECORDS[7] as RunRecord}]).state;
-    expect(endedView(stopped)).toMatchObject({title: 'Stopped', resume: 'Resume'});
+    expect(endedView(stopped)).toMatchObject({title: 'Stopped'});
+    expect(headerView(stopped).resume).toEqual({shown: true, disabledReason: null});
     const failed = fold(initial(), [{type: 'record', record: RECORDS[8] as RunRecord}]).state;
-    expect(endedView(failed)).toMatchObject({title: 'Failed', resume: 'Resume'});
+    expect(endedView(failed)).toMatchObject({title: 'Failed'});
+    expect(headerView(failed).resume.shown).toBe(true);
     expect(fold(failed, [{type: 'resume-ended'}]).requests).toEqual([
       {kind: 'resume-ended', fromRound: 2},
     ]);
+  });
+
+  test('property: every outcome of the record is on the header, and a Resume on its way is the run’s state', () => {
+    for (const outcome of END_OUTCOMES) {
+      const failed = outcome === 'failed' || outcome === 'force_stopped';
+      const reason = 'a reason the registry recorded';
+      const state = fold(initial(), [
+        {
+          type: 'record',
+          record: {
+            kind: 'ended',
+            run: server(failed ? 'failed' : 'completed', {
+              end: {outcome, reason, resumable: true},
+              reason: failed ? reason : null,
+            }),
+          },
+        },
+      ]).state;
+      const view = headerView(state);
+      // The reason is on the header for every outcome: a status word is never the only account.
+      expect(view.ended?.reason.length, outcome).toBeGreaterThan(0);
+      if (failed) expect(view.ended?.reason, outcome).toBe(reason);
+      expect(view.ended?.brief === null, outcome).toBe(!failed);
+      expect(view.status.label, outcome).not.toBe('Resuming');
+
+      // Whatever the run's record words its lifecycle as, a Resume on its way reads Resuming.
+      for (const lifecycleWord of [undefined, 'Stopped', 'Failed']) {
+        const resuming = headerView({
+          ...state,
+          lifecycleWord,
+          resumeStatus: {pending: true, reason: 'Waiting for the run to start'},
+        });
+        expect(resuming.status, `${outcome} ${lifecycleWord}`).toEqual({
+          label: 'Resuming',
+          tone: 'live',
+        });
+      }
+      const resuming = headerView({
+        ...state,
+        resumeStatus: {pending: true, reason: 'Waiting for the run to start'},
+      });
+      expect(resuming.resume, outcome).toEqual({
+        shown: true,
+        disabledReason: 'Waiting for the run to start',
+      });
+      expect(resuming.ended, outcome).toBeNull();
+    }
+  });
+
+  test('a failure whose message starts with a blank line still has its first words', () => {
+    const message =
+      '\n  Traceback (most recent call last):\n    File "x"\nValueError: nothing here';
+    const state = fold(initial(), [
+      {
+        type: 'record',
+        record: {
+          kind: 'ended',
+          run: server('failed', {
+            end: {outcome: 'failed', reason: message, resumable: true},
+            reason: message,
+          }),
+        },
+      },
+    ]).state;
+    expect(headerView(state).ended).toEqual({
+      brief: 'Traceback (most recent call last)',
+      reason: message,
+    });
   });
 
   test('regression: a run that ended with no winner is not shown as a success', () => {
@@ -552,7 +623,7 @@ describe('the run page store', () => {
     };
     const state = fold(initial(), [{type: 'record', record}]).state;
     expect(headerView(state).status).toEqual({label: 'No winner', tone: 'neutral'});
-    expect(endedView(state)).toMatchObject({title: 'No winner', tone: 'neutral'});
+    expect(endedView(state)).toMatchObject({title: 'No winner', brief: null});
   });
 
   test('groups streams by owner and builds the startup timeline from them', () => {
@@ -1027,7 +1098,7 @@ test('terminal session events supersede a stale live listing for every control',
     const ended = fold(attached, [{type: 'run-core', core}]).state;
     expect(headerView(ended).pause.shown).toBe(false);
     expect(headerView(ended).pauseNow.shown).toBe(false);
-    expect(endedView(ended)?.resume).toBe('Resume');
+    expect(headerView(ended).resume.shown).toBe(true);
     expect(
       fold(ended, [{type: 'pause'}, {type: 'ask-pause-now'}, {type: 'confirm-pause-now'}]).requests,
     ).toEqual([]);

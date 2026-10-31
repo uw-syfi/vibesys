@@ -26,6 +26,14 @@ export interface Problem {
   readonly cause: FailureCause | null;
 }
 
+/**
+ * Whether the problem is a start that failed without a word from the machine: the run may have
+ * started, so Start waits until the person has looked among their runs.
+ */
+export function startUnconfirmed(problem: Problem | null): boolean {
+  return problem?.step === 'start' && problem.detail === null;
+}
+
 /** A step's failure as the main process reported it (`detail`), or unreported (null). */
 export class StepFailure extends Error {
   readonly detail: string | null;

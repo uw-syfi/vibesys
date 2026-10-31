@@ -358,11 +358,13 @@ async def test_a_quota_hold_waits_until_released_and_the_run_then_ends_as_it_wou
         assert transitions in ([], ["pause_requested"])
 
 
-@pytest.mark.parametrize("adoption", [AdoptRevision, VerifyAdoption])
-async def test_an_in_flight_adoption_finishes_while_a_pause_is_pending(
-    tmp_path: Path, adoption: type[AdoptRevision] | type[VerifyAdoption]
-) -> None:
-    """A graceful pause never abandons adoption, nor acknowledges a run that already ended."""
+async def test_an_in_flight_adoption_finishes_while_a_pause_is_pending(tmp_path: Path) -> None:
+    """A graceful pause never abandons adoption, nor acknowledges a run that already ended.
+
+    The adoption request in flight is the ``AdoptRevision``: its report carries the publication,
+    so no ``VerifyAdoption`` follows it in this world (see the test below), and the pause rule
+    does not look at the kind of an adoption request.
+    """
     trace = _PauseTrace(lambda: process.shell.dispatched)
     channel = RuntimeRunControlChannel(trace.changed, threads=SimThreads())
 
@@ -372,7 +374,7 @@ async def test_an_in_flight_adoption_finishes_while_a_pause_is_pending(
         async def sleep(self, seconds: float) -> None:
             trace.record()
             if not self.requested and any(
-                isinstance(request, adoption) for request in process.shell.in_flight
+                isinstance(request, AdoptRevision) for request in process.shell.in_flight
             ):
                 self.requested = True
                 channel.pause_for_quota()
@@ -390,6 +392,29 @@ async def test_an_in_flight_adoption_finishes_while_a_pause_is_pending(
     assert (outcome.result.outcome, outcome.result.reason) == _UNPAUSED_END
     assert trace.transitions == ["pause_requested"]
     trace.assert_held()
+
+
+async def test_a_succeeded_adoption_that_carries_its_publication_is_not_verified_again(
+    tmp_path: Path,
+) -> None:
+    """The report of an adoption says where it published, so core completes on it alone.
+
+    A ``VerifyAdoption`` follows an adoption only when its answer lacks a publication or is
+    unknown. The workspace executor of this world attaches the publication to the report of every
+    adoption it succeeds, so the run adopts with one request and verifies without a second.
+    """
+    clock = ProbedRunClock(clock_from(1.0))
+    with open_skeleton_world(tmp_path) as world:
+        process, host = _host(world, clock)
+        start_core(host, _config())
+        outcome = await drive_core(host, _config())
+        core = process.shell.record.envelope.core
+    assert outcome.status == RunStatus.TERMINAL
+    assert core.settlement.adoption is not None
+    assert core.settlement.adoption.verified
+    requests = [row.request for row in core.records.records]
+    assert any(isinstance(request, AdoptRevision) for request in requests)
+    assert not any(isinstance(request, VerifyAdoption) for request in requests)
 
 
 async def _measure_a_job_running(tmp_path: Path, runtime: float) -> tuple[World, Process, bool]:

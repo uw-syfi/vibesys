@@ -305,7 +305,14 @@ def _owner_signal(
                 ),
             )
         case AdoptRevision() | VerifyAdoption():
-            signals = (AdoptionObserved(observation=observation, revision=facts.revision),)
+            signals = (
+                AdoptionObserved(
+                    observation=observation,
+                    revision=facts.revision,
+                    publication=facts.publication,
+                    checkout=facts.checkout,
+                ),
+            )
         case _:
             pass
     return signals
