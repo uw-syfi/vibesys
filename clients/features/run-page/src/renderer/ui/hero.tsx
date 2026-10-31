@@ -139,7 +139,7 @@ export function Hero(
         tokens={props.tokens.total}
         objectives={props.objectives ?? objectiveSeriesOf(props.whole)}
       />
-      <ChartColumns count={charts.length + (pareto === null ? 0 : 1)}>
+      <ChartColumns>
         {charts.map((chart, at) => (
           <ObjectivePanel
             key={chart.id}

@@ -103,6 +103,7 @@
   --column-figure: 320px;
   --column-metric: 360px;
   --column-chart: 248px;
+  --chart-min: 280px;
   --chart-height: 48px;
   --pane-list: 380px;
   --pane-outline: 340px;

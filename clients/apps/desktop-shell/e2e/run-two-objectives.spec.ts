@@ -24,20 +24,26 @@ const chart = (page: Page) => page.getByRole('group', {name: /of each measured i
 const roleOf = (page: Page, role: string) =>
   chart(page).locator(`.vs-pareto-point[data-role="${role}"]`);
 
-test('the performance row has a tile per objective, each with its unit and what it means', async ({
+const panel = (page: Page, name: string) => page.getByRole('region', {name, exact: true});
+
+test('the performance row has a chart per objective, each with its headline and its values on hover', async ({
   page,
 }) => {
   await openFixture(page, fixtureNamed('finished-two-objectives'));
-  const tiles = page.getByRole('region', {name: 'Performance'}).locator('.vs-tile');
-  await expect(tiles).toHaveCount(2);
-  await expect(tiles.nth(0).getByText('Total ops/sec', {exact: true})).toBeVisible();
-  await expect(tiles.nth(0).locator('.vs-tile-detail')).toHaveText(
+  const [throughput, latency] = [panel(page, 'Total ops/sec'), panel(page, 'P99 latency')];
+  await expect(throughput).toContainText('higher is better');
+  await expect(throughput.getByText('3.83× faster')).toHaveAttribute(
+    'title',
     '6,054,154 ops/s · input 1,581,539 ops/s',
   );
-  await expect(tiles.nth(1).getByText('P99 latency', {exact: true})).toBeVisible();
+  await expect(latency).toContainText('lower is better');
   // Lower is better: the best latency, 8.7 ms against the input's 12.4 ms, reads as an improvement.
-  await expect(tiles.nth(1).locator('.vs-tile-detail')).toHaveText('8.7 ms · input 12.4 ms');
-  await expect(tiles.nth(1).getByText('faster than input')).toBeVisible();
+  await expect(latency.getByText('1.43× faster')).toHaveAttribute(
+    'title',
+    '8.7 ms · input 12.4 ms',
+  );
+  // Each series is a chart of its own beside the trade-off chart.
+  await expect(page.getByRole('group', {name: /of each reading over the run/})).toHaveCount(2);
   await shot(page, 'two-objectives-hero');
 });
 
