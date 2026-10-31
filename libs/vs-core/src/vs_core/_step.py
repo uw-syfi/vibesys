@@ -707,14 +707,21 @@ def _finish_run_inputs(state: CoreState) -> Transition:
 def _kernel_signal(
     state: CoreState,
     signal: RegisterAttempt | AdmitAttempt | CloseAdmission | RunDrained | RecoveryReady,
+    *,
+    publishing: bool,
 ) -> tuple[Transition, tuple[Signal, ...]]:
+    """Apply one kernel signal; ``publishing`` is whether this step has requests to register.
+
+    A run is drained only once nothing is left to clean up, and a request this step publishes
+    is cleanup the state does not hold yet: the run ends on a later tick, after they are done.
+    """
     if isinstance(signal, RegisterAttempt | AdmitAttempt | RecoveryReady):
         return _activation_signal(state, signal)
     if isinstance(signal, CloseAdmission):
         return Transition(state=state), (AdmissionControl(action="drain"),)
     if state.run.result is None:
         raise ContractError(("run", "result"), "drain has no registered stop proposal")
-    if cleanup_pending(state):
+    if publishing or cleanup_pending(state):
         return Transition(state=state), ()
     if state.run.status == RunStatus.TERMINAL:
         return Transition(state=state), ()
@@ -849,7 +856,14 @@ def propagate(
     # At quiescence a suspension nothing can publish is ended, so the wait its turn opened
     # always has a resolver, whichever way the checkpoint went.
     while pending or (pending := _stall_entries(state, [item.request for item in requests], seen)):
-        pending.sort(key=lambda entry: SIGNAL_ORDER.index(event_area(entry[0])))
+        # The run drains last: only once every other signal has had its say can it know whether
+        # the step leaves anything to clean up.
+        pending.sort(
+            key=lambda entry: (
+                isinstance(entry[0], RunDrained),
+                SIGNAL_ORDER.index(event_area(entry[0])),
+            )
+        )
         signal, cause, admission_id = pending.pop(0)
         admission_id = _signal_admission(state, signal, admission_id)
         observation = getattr(signal, "observation", None)
@@ -878,7 +892,7 @@ def propagate(
         if isinstance(
             signal, RegisterAttempt | AdmitAttempt | CloseAdmission | RunDrained | RecoveryReady
         ):
-            result, signals = _kernel_signal(state, signal)
+            result, signals = _kernel_signal(state, signal, publishing=bool(requests))
             state = result.state
             follow_ups = _follow_ups(signal, signals, seen)
             pending.extend((child, cause, admission_id) for child in follow_ups)

@@ -25,7 +25,18 @@ from tests.system.delivery._skeleton_subject import (
     launch,
 )
 
-from vs_core.api import RequestPhase, RunStatus, SubmitMeasurement
+from vs_core.api import (
+    ContractError,
+    ControlId,
+    ControlInput,
+    RequestPhase,
+    RunControlEvent,
+    RunResultProposal,
+    RunStatus,
+    StopMode,
+    SubmitMeasurement,
+    step,
+)
 from vs_core.testing.liveness import End, final_state
 from vs_project.api import FakeStateStore
 from vs_runtime.api.core import drive_core, start_core
@@ -39,7 +50,7 @@ from vs_runtime.api.testing import (
 from vs_sim.api.testing import run_virtual, swept
 
 if TYPE_CHECKING:
-    from vs_core.api import CoreState, Request, RunResultProposal
+    from vs_core.api import CoreState, Request
     from vs_runtime.api.core import ExecutionContext, ExecutionResult
     from vs_runtime.api.testing import TranslatorFactory
 
@@ -150,6 +161,46 @@ def test_c6_a_pause_at_any_request_parks_with_nothing_open_and_resumes_to_the_sa
     else:
         assert ended.run.result == reference
     assert final_state(ended, End.TERMINAL) == []
+
+
+def _stops(core: CoreState) -> list[RunControlEvent]:
+    """Every stop an operator, the deadline or a blocked recovery can send, at ``core``'s time."""
+    return [
+        RunControlEvent(
+            control=ControlInput(
+                control_id=ControlId(root=f"stop-{mode.value}-{outcome}"),
+                action="stop",
+                mode=mode,
+            ),
+            result=RunResultProposal(outcome=outcome, reason="test"),
+            now_at=core.run.now_at,
+        )
+        for mode in StopMode
+        for outcome in ("cancelled", "blocked")
+    ]
+
+
+@pytest.mark.parametrize(("action", "pause_at"), _points(2))
+def test_c6_a_stop_of_any_mode_ends_a_run_that_was_paused_without_publishing_requests(
+    action: Action, pause_at: int
+) -> None:
+    """Ending a run cannot fail: a terminal transition publishes nothing, whichever stop ends it.
+
+    The states are those the run held when the pause was sent and when its resume dispatched
+    first, the two a blocked recovery or an operator's stop finds a paused run in.
+    """
+    world = Faulted(pause=Pause(pause_at, action))
+    left = _hosts(world)
+    first = left[0].records.recovery.epoch
+    resumed = next((core for core in world.cores if core.records.recovery.epoch > first), None)
+    for core in (world.cores[pause_at], left[0], *(() if resumed is None else (resumed,))):
+        for event in _stops(core):
+            try:
+                after = step(core, event)
+            except ContractError as error:
+                pytest.fail(f"{event.control.control_id.root} at {core.run.status}: {error}")
+            if after.state.run.status is RunStatus.TERMINAL:
+                assert not after.requests
 
 
 @dataclass

@@ -201,6 +201,8 @@ class Faulted:
         self.executed: Counter[str] = Counter()
         self.kinds: list[str] = []
         """The kind of every request the run executed, in order: where a stop point lands."""
+        self.cores: list[CoreState] = []
+        """The core state each request executed in, in order: where a control can land."""
 
     def attach(self, shell: CoreRuntime[Any], clock: VirtualClock) -> None:
         """Hear the shell once it exists: the operator's stop is submitted to it, as a control is."""
@@ -212,6 +214,7 @@ class Faulted:
         if request.request_id is not None:
             self.executed[request.request_id.root] += 1
         self.kinds.append(request.kind)
+        self.cores.append(core)
         self._maybe_control(core)
         faulted = self._measurement(request) or self._job(request, core) or self._turn(request)
         return self._base(request, core) if faulted is None else faulted
