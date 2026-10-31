@@ -22,6 +22,8 @@ if TYPE_CHECKING:
 _PROC = Path("/proc")
 _STAT_FIELDS_AFTER_COMM = 20
 """Fields of ``/proc/<pid>/stat`` between the command's closing parenthesis and the start time."""
+_EXIT_WAIT_S = 10.0
+"""How long a kill waits for the process to exit; SIGKILL cannot be handled, so this bounds only a stuck kernel."""
 
 
 class ProcessTableUnavailableError(RuntimeError):
@@ -83,7 +85,7 @@ class OsProcessTable:
             return _read(process.pid, name) == process
 
         try:
-            return signal_if_current(process.pid, signal.SIGKILL, current)
+            return signal_if_current(process.pid, signal.SIGKILL, current, exit_wait_s=_EXIT_WAIT_S)
         except ProcessLookupError:
             return False
 

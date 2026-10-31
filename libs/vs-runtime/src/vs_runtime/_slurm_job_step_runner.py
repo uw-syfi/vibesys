@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 from vs_core.api import SubmitMeasurement
 from vs_evaluation.api import EvaluationState, PollPhase
-from vs_runtime._evaluation_jobs import handle_for
+from vs_runtime._evaluation_jobs import handle_of_life
 from vs_runtime._job_step_run import JobStepRun
 from vs_runtime._step_runner import Adopted, Cleared, ClearUnavailableError
 from vs_slurm.api import LedgerError
@@ -88,10 +88,9 @@ class SlurmJobStepRunner:
 
     async def _current(self, tag: RequestId) -> tuple[str, ExecutorPoll]:
         """The handle of the tag's current job and its poll: the first one not ended cancelled."""
-        base = handle_for(tag)
         life = 0
         while True:
-            handle = base if life == 0 else f"{base}-life-{life}"
+            handle = handle_of_life(tag, life)
             polled = await self._executor.poll(handle)
             if not _ended_cancelled(polled):
                 return handle, polled

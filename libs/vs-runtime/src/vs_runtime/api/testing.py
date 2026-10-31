@@ -8,6 +8,7 @@ from vs_runtime._fake_core_execution import (
     FakePublicationDelivery,
     FakeRequestExecution,
 )
+from vs_runtime._fake_stage_work_reaper import FakeStageWorkReaper
 from vs_runtime._fake_step_log import (
     FakeStepLog,
     LogEntry,
@@ -47,6 +48,7 @@ from vs_runtime._shell_kit import (
     scripted_host,
 )
 from vs_runtime._validation_passes import MemoryValidationPasses
+from vs_runtime.api.stage_work_contracts import StageWorkReaperContract, StageWorkUnderTest
 from vs_runtime.api.step_runner_contracts import StepRunnerContract, StepRunnerUnderTest
 from vs_runtime.fake_docker_daemon import DaemonBackend, daemon_docker_config, daemon_engine
 from vs_runtime.fakes import (
@@ -135,6 +137,7 @@ __all__ = [
     "FakeRunControlEventSink",
     "FakeRunHandle",
     "FakeRuns",
+    "FakeStageWorkReaper",
     "FakeStepLog",
     "FakeStepRunner",
     "FakeStopTimer",
@@ -162,6 +165,8 @@ __all__ = [
     "Script",
     "ScriptedExecutors",
     "ScriptedHost",
+    "StageWorkReaperContract",
+    "StageWorkUnderTest",
     "StepRunnerContract",
     "StepRunnerUnderTest",
     "TranslatorFactory",

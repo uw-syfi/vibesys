@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import ctypes
 import os
+import select
 import signal
 import sys
 import threading
@@ -159,11 +160,14 @@ def signal_if_current(
     current: Callable[[], bool],
     *,
     direct_syscalls: bool = False,
+    exit_wait_s: float = 0.0,
 ) -> bool:
     """Send *number* to the process *pid* names iff *current* holds once its pidfd is open.
 
     The pidfd is acquired before *current* is evaluated, so a pid the kernel reuses afterwards
-    is not signalled. Raises ``ProcessLookupError`` when *pid* no longer exists.
+    is not signalled. After a send it waits up to *exit_wait_s* for that process to exit (its
+    pidfd turns readable), so a caller can rely on a killed process being gone. Raises
+    ``ProcessLookupError`` when *pid* no longer exists.
     """
     pidfd_open, pidfd_send_signal = _pidfd_calls(direct=direct_syscalls)
     descriptor = pidfd_open(pid)
@@ -171,6 +175,8 @@ def signal_if_current(
         if not current():
             return False
         pidfd_send_signal(descriptor, number)
+        if exit_wait_s > 0:
+            select.select([descriptor], [], [], exit_wait_s)
         return True
     finally:
         os.close(descriptor)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vs_sim.process_table import MarkedProcess
+from vs_sim.process_table import MarkedProcess, ProcessTableUnavailableError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -18,6 +18,7 @@ class FakeProcessTable:
         self._live: dict[int, tuple[int, dict[str, str]]] = {}
         self._clock = 0
         self.killed: list[MarkedProcess] = []
+        self.unreadable = False
 
     def start(self, name: str, value: str, *, pid: int | None = None) -> MarkedProcess:
         """A new process whose environment sets *name* to *value*.
@@ -40,6 +41,8 @@ class FakeProcessTable:
 
     def marked(self, name: str, matches: Callable[[str], bool]) -> tuple[MarkedProcess, ...]:
         """The live processes whose mark *name* *matches* accepts."""
+        if self.unreadable:
+            raise ProcessTableUnavailableError
         return tuple(
             MarkedProcess(pid, started, marks[name])
             for pid, (started, marks) in sorted(self._live.items())

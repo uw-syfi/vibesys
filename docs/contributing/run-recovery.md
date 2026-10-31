@@ -53,7 +53,7 @@ once. An **open step** is a step with no result. An **epoch** is one process lif
 | `fold(log)` and `decide(state, now) -> actions` in `vs_core` | built, dormant (#3475 item 4a) |
 | Runner loop, `StepRunner` Protocol, `FakeStepRunner`, contract suite | built and dormant: `vs_runtime.api.step_runner` and `vs_runtime.api.testing`; no run selects it (#3475 item 4b) |
 | Runners: agent turn, workspace, registered operation, adoption | unbuilt; `libs/vs-slurm/src/vs_slurm/ledger.py` is the model |
-| Runners: Slurm and local evaluation (`SlurmJobStepRunner`, `LocalJobStepRunner`) | built and dormant; the local runner reaps what a dead process left through a `StageWorkReaper` that has no production implementation yet |
+| Runners: Slurm and local evaluation (`SlurmJobStepRunner`, `LocalJobStepRunner`) | built and dormant; the local runner reaps what a dead process left through a `StageWorkReaper`; `MarkedStageWorkReaper` finds the host processes of a local evaluation by the `VIBESYS_STEP_TAG` mark its candidate session sets (Linux), and Docker candidate containers are not yet reaped by tag |
 | Pause drains within a deadline and records `Parked` | in progress (#3475 item 1) |
 | `vs-dst` kills and pauses at every log write and every await | in progress (#3475 item 2) |
 | `state.pb` as a cache, one-append commit | unbuilt |
