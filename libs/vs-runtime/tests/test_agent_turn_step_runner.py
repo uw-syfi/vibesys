@@ -411,7 +411,9 @@ def test_the_next_attempt_after_a_kill_is_asked_again_and_judged_from_the_record
         await world.runner.clear(world.step(tag), tag)
 
         assert world.turns.settlement.fenced_by(world.workspace.path) == ()
-        assert len(world.workspace.agent_restore_calls) == 1
+        # The turn's role only reads: settling reverted what it wrote, so there is nothing
+        # authorized to undo and a restore would touch a workspace that needs none.
+        assert world.workspace.agent_restore_calls == []
         result = await world.runner.run(world.finishing(tag), tag, 2, DEADLINE_AT, CancelSignal())
         assert isinstance(result, Finished)
         replies = [e for e in result.owner_events if isinstance(e, core.TurnObserved)]

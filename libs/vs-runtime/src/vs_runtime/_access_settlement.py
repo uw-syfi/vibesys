@@ -31,7 +31,7 @@ from vs_runtime._workspace_access import (
     AccessNotRestoredError,
     enforce_workspace_access,
 )
-from vs_runtime.contracts import RuntimeContractError
+from vs_runtime.contracts import RuntimeContractError, WorkspaceAccess
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -246,6 +246,11 @@ class AccessSettlement:
             problem = "the interrupted turn's retained workspace is unavailable"
             raise AccessSettlementError(problem)
         await self.settle(key)
+        if receipt.grant.access is WorkspaceAccess.READ_ONLY:
+            # Settling reverted everything the role wrote, and none of it was authorized: the tree
+            # is at the baseline already. A restore would touch a workspace nothing needs it in,
+            # and a resumed run's own project refuses it.
+            return
         await workspace.restore_for_agent(receipt.baseline, preserve_paths=())
         if await workspace.pending_changes():
             problem = "the interrupted turn's retained input could not be restored"
