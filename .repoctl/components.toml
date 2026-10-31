@@ -163,6 +163,24 @@ roots = [
   "clients/libs/run-fixtures/src/data",
   "clients/apps/desktop-shell/e2e/scenarios",
 ]
+# A local `repoctl test` ignores the libraries the projection only imports (a trace saw none of
+# their functions run), so an edit to the runtime or the sandbox does not run the client groups on a
+# laptop. CI keeps them selected: a constant or class defined there could still reach a replay.
+local_ignore_roots = [
+  "libs/vs-agent/src",
+  "libs/vs-async-ops/src",
+  "libs/vs-evaluation/src",
+  "libs/vs-evaluator-protocol/src",
+  "libs/vs-faults/src",
+  "libs/vs-issue-tracker/src",
+  "libs/vs-mcp/src",
+  "libs/vs-project/src",
+  "libs/vs-prompts/src",
+  "libs/vs-runtime/src",
+  "libs/vs-sandbox/src",
+  "libs/vs-sim/src",
+  "libs/vs-slurm/src",
+]
 files = [
   "uv.lock",
   "pyproject.toml",
