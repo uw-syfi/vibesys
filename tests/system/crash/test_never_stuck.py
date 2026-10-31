@@ -43,14 +43,11 @@ KILL, PAUSE = Action.KILL, Action.PAUSE
 IN_FLIGHT = Moment.IN_FLIGHT
 
 KNOWN_FAILING: dict[str, tuple[Interruption, ...]] = {
-    "dynamic": (Interruption(KILL, IN_FLIGHT, 3), Interruption(PAUSE, IN_FLIGHT, 18)),
+    "dynamic": (Interruption(KILL, IN_FLIGHT, 3),),
     "evolve": (Interruption(KILL, IN_FLIGHT, 3),),
-    "single": (Interruption(PAUSE, IN_FLIGHT, 21),),
-    "multi": (Interruption(PAUSE, IN_FLIGHT, 25),),
 }
 """A few points that are stuck on today's main, which a pull request runs (the sweep below has the
-rest): a kill with a turn in flight leaves recovery blocked, and a pause late in a run leaves it
-waiting on a strategy that does not propose again."""
+rest): a kill with a turn in flight leaves recovery blocked."""
 
 STUCK_GROUPS: frozenset[tuple[str, Action, Moment]] = frozenset(
     {

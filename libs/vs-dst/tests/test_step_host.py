@@ -17,6 +17,7 @@ from hypothesis import strategies as st
 from vs_core.api import (
     AttemptBudget,
     AttemptId,
+    AttemptPhase,
     EnsureWorkspace,
     Flow,
     FlowState,
@@ -32,7 +33,16 @@ from vs_core.api import (
 from vs_core.api.recovery import CHECKPOINT_GROWTH
 from vs_core.api.testing import Harness, Succeeded, sample_limits, sample_retries
 from vs_core.flows import search
-from vs_dst.api import Action, Interruption, Moment, RunSetup, StepLoopHosting, simulate
+from vs_dst.api import (
+    Action,
+    Hosting,
+    Interruption,
+    Moment,
+    RunSetup,
+    ShellHosting,
+    StepLoopHosting,
+    simulate,
+)
 from vs_runtime.api.testing import Launch
 from vs_sim.api.testing import examples
 
@@ -44,6 +54,7 @@ if TYPE_CHECKING:
     from vs_proto.api import Record
 
 STEP_LOOP = StepLoopHosting()
+TERMINAL = AttemptPhase.TERMINAL
 
 
 def fields_of(records: tuple[Record, ...]) -> list[str]:
@@ -185,18 +196,7 @@ def settled_twice(world: RestartableWorld) -> int:
     return world.workspaces_handed_out - world.items
 
 
-OPEN_QUESTION = (
-    "design question for the orchestrator: a restart on changed code keeps the work the dead flows "
-    "had in flight and the new code does not ask for again, and that work holds core's slot for good"
-)
-"""Why a resume on changed code can stall today. It is the same on the shell (``RunStalledError``)."""
-
-
-@pytest.mark.parametrize(
-    "changed",
-    [False, pytest.param(True, marks=pytest.mark.xfail(strict=True, reason=OPEN_QUESTION))],
-    ids=["same-code", "changed-code"],
-)
+@pytest.mark.parametrize("changed", [False, True], ids=["same-code", "changed-code"])
 def test_a_clean_pause_leaves_the_search_whole_in_the_log_and_the_resume_keeps_what_was_done(
     changed: bool,  # noqa: FBT001  # lint-waiver: LW-731420 [FBT001]; pytest passes a parametrized value by keyword, and a keyword-only marker would only restate that.
     # > A keyword-only marker is not what a parametrized test takes from pytest by position; two tests would repeat the body instead.
@@ -240,13 +240,24 @@ def test_a_restart_from_an_older_checkpoint_never_reuses_a_decision_id_the_dead_
             assert settled_twice(interrupted.world) <= interrupted.world.items, point
 
 
-@pytest.mark.xfail(strict=True, reason=OPEN_QUESTION)
-def test_a_resume_on_changed_code_after_a_kill_with_an_effect_in_flight_finishes() -> None:
-    normal = simulate(RestartableWorld(8, changed=True), STEP_LOOP)
+@pytest.mark.parametrize("hosting", [ShellHosting(), STEP_LOOP], ids=["shell", "step-loop"])
+def test_a_resume_on_changed_code_lets_go_of_work_the_new_code_does_not_ask_for(
+    hosting: Hosting,
+) -> None:
+    """A run killed or paused anywhere and resumed on code that names its attempts differently ends,
+    with every attempt closed: the work the dead flows had in flight and the new code never asks for
+    is carried out through its attempt's closure, which frees the slot only once that is done."""
+    normal = simulate(RestartableWorld(4, changed=True), hosting)
 
-    for point in normal.interruptions(Action.KILL, Moment.IN_FLIGHT):
-        interrupted = normal.interrupt(point)
-        assert interrupted.never_stuck(), (point, interrupted.detail)
+    for action in Action:
+        for moment in Moment:
+            for point in normal.interruptions(action, moment):
+                interrupted = normal.interrupt(point)
+                assert interrupted.never_stuck(), (point, interrupted.detail)
+                assert interrupted.every_step_finished_once(), point
+                assert interrupted.core is not None
+                held = [a for a in interrupted.core.attempts.attempts if a.phase is not TERMINAL]
+                assert not held, (point, [a.attempt_id.root for a in held])
 
 
 @settings(max_examples=examples(pr=6, nightly=40), deadline=None)
