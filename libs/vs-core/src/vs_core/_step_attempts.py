@@ -199,13 +199,13 @@ def started(
 
 def interrupted(state: CoreState, tag: RequestId, attempt: int, why: Interruption) -> CoreState:
     """``state`` with the running attempt of ``tag`` ended by ``why``, charged only if it raised."""
-    if ended_by_core(state, tag):
-        return forgotten(state, tag)
-    open_record(state, tag)
+    by_core = ended_by_core(state, tag)
     row = state.steps.of(tag)
     if row is None or row.started != attempt or row.ended:
         message = f"the log interrupts attempt {attempt} of step {tag.root}, which is not running"
         raise RecordRefusedError(RefusalReason.ATTEMPT_MISMATCH, message, tag)
+    if by_core:
+        return forgotten(state, tag)
     uncharged = row.uncharged + (0 if why.charged else 1)
     state = _returned(state, tag)
     return _with(state, tag, row.model_copy(update={"ended": True, "uncharged": uncharged}))

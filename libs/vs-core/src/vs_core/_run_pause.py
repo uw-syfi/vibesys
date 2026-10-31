@@ -139,6 +139,23 @@ def control_refusal(state: CoreState, control: ControlInput) -> ControlRefusedEr
     return _pause_refusal(run, control)
 
 
+def pause_outlived(state: CoreState) -> bool:
+    """Whether the run holds a pause made in an epoch that has ended, so a Resume belongs to it.
+
+    A pause is terminal for the epoch it was made in. The process that took it may have died
+    mid-drain, and the next epoch then finds the run still draining under the same pause, or
+    parked by the drain it finished. Either way the dead epoch's pause no longer blocks a Resume.
+    It is a different fact from ``drain_in_force``: a drain that outlived its epoch keeps its
+    authority over the work in flight until it parks.
+    """
+    run = state.run
+    return (
+        run.status in (RunStatus.DRAINING, RunStatus.PARKED)
+        and run.park is not None
+        and state.records.recovery.epoch > run.park.epoch
+    )
+
+
 def _inactive_refusal(state: CoreState, control: ControlInput) -> ControlRefusedError | None:
     run = state.run
     if (
@@ -147,13 +164,7 @@ def _inactive_refusal(state: CoreState, control: ControlInput) -> ControlRefused
     ) or (run.status == RunStatus.DRAINING and control.action == "pause_now"):
         return None
     if run.status in (RunStatus.DRAINING, RunStatus.PARKED):
-        if (
-            run.status == RunStatus.PARKED
-            and control.action == "resume"
-            and control.when == "now"
-            and run.park is not None
-            and state.records.recovery.epoch > run.park.epoch
-        ):
+        if control.action == "resume" and control.when == "now" and pause_outlived(state):
             return None
         return ControlRefusedError(control, ("run", "status"), "pause is terminal for this epoch")
     if run.status == RunStatus.TERMINAL:
