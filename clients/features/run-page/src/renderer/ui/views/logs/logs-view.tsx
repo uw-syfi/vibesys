@@ -4,10 +4,12 @@
  * Streams come from the page state, joined to spans by the stream owner's `span_id`
  * (`state/scoped-logs.ts`). The shell follows the shown stream (`streamToFollow`): a view runs no effects.
  */
-import {Banner, Button, EmptyState, LogPane, PickList, PickRow} from '@vibesys/ui';
+import {Button, Chip, EmptyState, LogPane, PickList, PickRow, Row} from '@vibesys/ui';
 import {type JSX, useMemo} from 'react';
 import {type RunPageAction, type RunPageState, stepKicker} from '../../../../state/index.js';
 import {
+  hasDiagnostic,
+  historyLines,
   ideaTitlesBySpan,
   type LogScope,
   paneLines,
@@ -29,7 +31,7 @@ export const logsHeader: ViewHeader<LogsViewProps> = ({scope}): PaneHeader =>
   scope.kind === 'step' ? {kicker: stepKicker(scope.step)} : {};
 
 type Dispatch = (action: RunPageAction) => void;
-type Row = ScopedLogs['rows'][number];
+type ListRow = ScopedLogs['rows'][number];
 
 function liveState(live: boolean): {tone: 'live' | 'neutral'; label: string} {
   return live ? {tone: 'live', label: 'Writing'} : {tone: 'neutral', label: 'Closed'};
@@ -41,7 +43,7 @@ function liveState(live: boolean): {tone: 'live' | 'neutral'; label: string} {
  */
 function FoldRow(props: {
   readonly id: string;
-  readonly row: Extract<Row, {kind: 'fold'}>;
+  readonly row: Extract<ListRow, {kind: 'fold'}>;
   readonly byOwner: boolean;
   readonly dispatch: Dispatch;
 }): JSX.Element {
@@ -62,7 +64,7 @@ function FoldRow(props: {
 
 function StreamRow(props: {
   readonly id: string;
-  readonly row: Extract<Row, {kind: 'stream'}>;
+  readonly row: Extract<ListRow, {kind: 'stream'}>;
   readonly byOwner: boolean;
   readonly dispatch: Dispatch;
 }): JSX.Element {
@@ -111,17 +113,18 @@ function StreamRows(props: {
 }
 
 export function LogsView(props: LogsViewProps): JSX.Element {
-  const rows = props.state.recordLog;
-  const error = props.state.recordLogError;
-  if (props.scope.kind === 'run' && (rows !== undefined || error))
+  if (
+    props.scope.kind === 'run' &&
+    (props.state.recordLog !== undefined || hasDiagnostic(props.state))
+  )
     return (
       <>
-        {error ? <Banner tone="warn" title={error} /> : null}
         <LogPane
           label="Run history"
-          lines={(rows ?? [])
-            .filter(row => props.model.at === null || BigInt(row.seq) <= BigInt(props.model.at))
-            .map(row => ({text: row.message, ...(row.failure ? {stream: 'err' as const} : {})}))}
+          lines={historyLines(props.state, props.model.at).map(line => ({
+            text: line.text,
+            ...(line.failure ? {stream: 'err' as const} : {}),
+          }))}
         />
         <StreamLogs {...props} />
       </>
@@ -147,16 +150,15 @@ function StreamLogs(props: LogsViewProps): JSX.Element {
   const pane = (
     <>
       {state.logProblem?.streamId === shown ? (
-        <Banner
-          tone="warn"
-          title={state.logProblem.message}
-          actions={
-            <Button
-              text="Retry log"
-              press={() => dispatch({type: 'select-stream', streamId: shown})}
-            />
-          }
-        />
+        <Row gap="space-2" align="center" wrap>
+          <Chip label="Log unavailable" tone="warn" dot hint={state.logProblem.message} />
+          <Button
+            variant="quiet"
+            size="sm"
+            text="Retry log"
+            press={() => dispatch({type: 'select-stream', streamId: shown})}
+          />
+        </Row>
       ) : null}
       <LogPane
         key={stream.id}

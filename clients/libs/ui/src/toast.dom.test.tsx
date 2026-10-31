@@ -1,10 +1,10 @@
-/** Toasts and banners in a browser DOM, through the `.` entry only. */
+/** Toasts in a browser DOM, through the `.` entry only. */
 
 import {afterAll, beforeAll, describe, expect, test} from 'bun:test';
 import {Window} from 'happy-dom';
 import {act, type ReactNode, useState} from 'react';
 import {createRoot} from 'react-dom/client';
-import {Banner, type BannerTone, Button, type ToastItem, ToastStack} from './index.js';
+import {type ToastItem, ToastStack} from './index.js';
 
 const window = new Window();
 const installed = Object.getOwnPropertyNames(window).filter(name => !(name in globalThis));
@@ -152,46 +152,5 @@ describe('a stack of toasts', () => {
       expect(button.disabled).toBe(false);
       expect(button.type).toBe('button');
     }
-  });
-});
-
-describe('a banner', () => {
-  test('is one line until its details control is opened to the body and hint behind it', async () => {
-    const container = await mount(
-      <Banner tone="warn" title="Needs an update" body="The body." hint="The hint." />,
-    );
-    expect(container.textContent).toContain('Needs an update');
-    expect(container.textContent).not.toContain('The body.');
-    await click(named(container, 'Show details'));
-    expect(container.textContent).toContain('The body.');
-    expect(container.textContent).toContain('The hint.');
-  });
-
-  test('keeps its actions reachable while closed, and its title is not a control', async () => {
-    let pressed = 0;
-    const container = await mount(
-      <Banner
-        tone="failed"
-        title="Run again"
-        body="Why it ended."
-        actions={<Button text="Run again" press={() => (pressed += 1)} />}
-      />,
-    );
-    expect(container.textContent).not.toContain('Why it ended.');
-    await click(named(container, 'Run again'));
-    expect(pressed).toBe(1);
-    expect(buttons(container).filter(button => button.textContent === 'Run again')).toHaveLength(1);
-  });
-
-  test('without a body or hint has nothing to open', async () => {
-    const container = await mount(<Banner title="No VibeSys checkout" />);
-    expect(container.querySelector('button')).toBeNull();
-    expect(container.textContent).toBe('No VibeSys checkout');
-  });
-
-  test('has no error tone: a failure passed through is a toast, a failure held is `failed`', () => {
-    const rejectsErr: 'err' extends BannerTone ? never : true = true;
-    const acceptsFailed: 'failed' extends BannerTone ? true : never = true;
-    expect([rejectsErr, acceptsFailed]).toEqual([true, true]);
   });
 });

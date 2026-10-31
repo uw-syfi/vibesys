@@ -70,7 +70,7 @@ import {
   runInputs,
 } from './form.js';
 import {type Compute, formWithMeasure} from './measure.js';
-import {type Problem, problemOf, type Step} from './problem.js';
+import {type Problem, problemOf, type Step, startUnconfirmed} from './problem.js';
 import {formWithRoles, rolesAfter, rolesWithin} from './roles.js';
 
 /** The fixes the screen performs itself; the rest are the shell's (Machines) or the user's. */
@@ -154,6 +154,8 @@ export type NewRunEvent =
   | {readonly type: 'refresh'}
   /** Try again the load or check that failed (`problem`). */
   | {readonly type: 'retry'}
+  /** The person looked among their runs after a start that may have happened: Start is open again. */
+  | {readonly type: 'looked'}
   | {readonly type: 'fix'; readonly fix: ProjectFix}
   /** Use the project that already is the example's, at `path`, without copying it again. */
   | {
@@ -435,7 +437,10 @@ export const newRunMachine = setup({
       context.form.project.example === event.example,
     mayStart: ({context}) =>
       checksPass(context.form, context.checks) &&
-      missingFeatures(context.helper, context.form.machine).length === 0,
+      missingFeatures(context.helper, context.form.machine).length === 0 &&
+      // A start that may have happened is not repeated before the person has looked.
+      !startUnconfirmed(context.problem),
+    unconfirmedStart: ({context}) => startUnconfirmed(context.problem),
     helperKnown: ({context}) => context.helper?.for === context.form.machine,
     offersChecks: ({context}) =>
       offers(context.helper, context.form.machine, 'preflight') &&
@@ -968,6 +973,7 @@ export const newRunMachine = setup({
                   }),
                 },
                 start: {guard: 'mayStart', target: 'starting'},
+                looked: {guard: 'unconfirmedStart', actions: 'clearProblem'},
               },
             },
             fixing: {
