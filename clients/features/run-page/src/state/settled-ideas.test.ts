@@ -154,9 +154,14 @@ describe('an idea whose measurement the framework compared', () => {
   test('has that mean in the chart’s points, whose tooltips read it', () => {
     const chart = firstChart(model, T0, T0 + 4000);
     expect(chart.readings.map(point => point.y)).toEqual([350.39, 385.4]);
-    expect(chart.readings.map(point => point.label)).toEqual([
+    expect(chart.readings.map(point => `${point.tip.lead} · ${point.tip.detail}`)).toEqual([
       'Idea 2 · 350.4 tok/s',
       'Idea 3 · 385.4 tok/s',
+    ]);
+    // The names for assistive technology say the same, and when each was read and that it set a step.
+    expect(chart.readings.map(point => point.label)).toEqual([
+      'Idea 2 · 350.4 tok/s · 46m 40s · new best',
+      'Idea 3 · 385.4 tok/s · 1h 03m · new best',
     ]);
   });
 

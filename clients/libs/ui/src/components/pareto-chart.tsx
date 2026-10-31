@@ -106,8 +106,12 @@ function exact(value: number): string {
 
 function layoutAxis(measured: readonly number[], direction: Direction, count: number): Layout {
   const values = measured.length === 0 ? [0, 1] : measured;
-  const low = Math.min(...values);
-  const high = Math.max(...values);
+  // Not `Math.min(...values)`: a run with a hundred thousand points has more than a call takes.
+  let [low, high] = [Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY];
+  for (const value of values) {
+    if (value < low) low = value;
+    if (value > high) high = value;
+  }
   const span = high === low ? Math.max(1, Math.abs(low) * 0.1) : high - low;
   const from = (high === low ? low - span : low) - span * PAD;
   const to = (high === low ? high + span : high) + span * PAD;

@@ -96,8 +96,12 @@ interface Scale {
 }
 
 function extent(values: readonly number[]): readonly [number, number] {
-  const low = Math.min(...values);
-  const high = Math.max(...values);
+  // Not `Math.min(...values)`: a run with a hundred thousand readings has more than a call takes.
+  let [low, high] = [Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY];
+  for (const value of values) {
+    if (value < low) low = value;
+    if (value > high) high = value;
+  }
   return low === high ? [low - 1, high + 1] : [low, high];
 }
 
