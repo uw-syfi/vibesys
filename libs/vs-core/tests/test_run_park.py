@@ -1,5 +1,7 @@
 """Park holds admission and preserves unfinished work for the next host epoch."""
 
+from typing import Literal
+
 import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
@@ -9,6 +11,7 @@ import vs_core.api as core
 from .test_measurement_pacing import World, limits
 from .test_measurements import plan
 from .test_session_yield_completion import terminal_yield
+from .test_silent_executor_deadline import BOUND, _silent
 from .test_write_turn_retention import answer, snapshots, write_turn_world
 
 
@@ -242,3 +245,161 @@ def test_successor_resume_clears_an_interrupted_drain(epoch: int, *, immediate: 
     assert any(
         isinstance(event, core.StopLiftRecorded) and event.new_epoch for event in opening.events
     )
+
+
+_OPEN_RECORDS = [
+    (core.RequestPhase.DISPATCHED, core.ObservationStatus.FAILED),
+    (core.RequestPhase.RECONCILING, core.ObservationStatus.UNKNOWN),
+]
+
+
+def _pause(
+    state: core.CoreState, *, action: Literal["pause", "pause_now"], drain_seconds: float | None
+) -> core.CoreState:
+    return core.step(
+        state,
+        core.RunControlEvent(
+            control=core.ControlInput(
+                control_id=core.ControlId(root="pause"),
+                action=action,
+                owner=core.PauseOwner.OPERATOR if action == "pause" else None,
+            ),
+            now_at=state.run.now_at,
+            drain_seconds=drain_seconds,
+        ),
+    ).state
+
+
+@pytest.mark.regression
+@example(
+    open_record=_OPEN_RECORDS[0],
+    lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
+    action="pause_now",
+    drain_seconds=5.0,
+)
+@given(
+    open_record=st.sampled_from(_OPEN_RECORDS),
+    lifecycle=st.sampled_from([core.LifecycleClass.IDEMPOTENT_WRITE, core.LifecycleClass.QUERY]),
+    action=st.sampled_from(["pause", "pause_now"]),
+    drain_seconds=st.floats(min_value=1.0, max_value=BOUND * 0.8),
+)
+def test_a_pause_past_its_deadline_interrupts_a_request_that_can_run_again_and_the_resume_sends_it(
+    open_record: tuple[core.RequestPhase, core.ObservationStatus],
+    lifecycle: core.LifecycleClass,
+    action: Literal["pause", "pause_now"],
+    drain_seconds: float,
+) -> None:
+    """The park never leaves the request open, and it is no failure, no retry, no report.
+
+    Regression (#3475): a Pause-now exited with the session start of the planner in flight, so the
+    Resume had to prove what became of it and ended the run blocked.
+    """
+    phase, status = open_record
+    state = _silent(phase, status, terminal=False)
+    [row] = state.records.records
+    state = state.model_copy(
+        update={
+            "records": state.records.model_copy(
+                update={"records": (row.model_copy(update={"lifecycle": lifecycle}),)}
+            )
+        }
+    )
+    paused = _pause(state, action=action, drain_seconds=drain_seconds)
+    assert paused.run.status is core.RunStatus.DRAINING
+    assert paused.run.park is not None
+    deadline = paused.run.park.deadline_at
+    assert deadline == paused.run.now_at + drain_seconds
+    assert deadline is not None
+    waiting = core.step(paused, core.ClockAdvanced(now_at=deadline - 0.5))
+    assert waiting.state.run.status is core.RunStatus.DRAINING
+    [still] = waiting.state.records.records
+    assert still.phase is phase
+    interrupted = core.step(waiting.state, core.ClockAdvanced(now_at=deadline))
+    assert interrupted.state.run.status is core.RunStatus.PARKED
+    [sent_back] = interrupted.state.records.records
+    assert sent_back.phase is core.RequestPhase.PREPARED
+    assert sent_back.observation is None
+    assert sent_back.retry_count == row.retry_count
+    assert sent_back.request == row.request
+    assert not interrupted.requests
+    assert not any(isinstance(event, core.Failed) for event in interrupted.events)
+    # The next epoch dispatches the same request again.
+    epoch = interrupted.state.records.recovery.epoch + 1
+    resumed = core.step(
+        interrupted.state, core.EpochResumed(epoch=epoch, now_at=deadline + 1)
+    ).state
+    assert resumed.run.status is core.RunStatus.RUNNING
+    request_id = sent_back.request_id
+    while (record := resumed.records.record(request_id)) is not None and (
+        record.phase is core.RequestPhase.PREPARED
+        and resumed.records.recovery.phase is not core.RecoveryPhase.READY
+    ):
+        resumed = core.step(resumed, core.ClockAdvanced(now_at=resumed.run.now_at + 1)).state
+    authorized = core.step(resumed, core.DispatchAuthorized(request_id=request_id)).state
+    dispatched = authorized.records.record(request_id)
+    assert dispatched is not None
+    assert dispatched.phase is core.RequestPhase.DISPATCHED
+    assert dispatched.retry_count == row.retry_count
+
+
+@given(
+    lifecycle=st.sampled_from([core.LifecycleClass.OWNED_JOB, core.LifecycleClass.SESSION_TURN]),
+    drain_seconds=st.floats(min_value=1.0, max_value=BOUND * 0.4),
+)
+def test_a_request_that_cannot_run_again_ends_a_cleanup_bound_after_the_deadline_not_before(
+    lifecycle: core.LifecycleClass, drain_seconds: float
+) -> None:
+    state = _silent(core.RequestPhase.DISPATCHED, core.ObservationStatus.FAILED, terminal=False)
+    [row] = state.records.records
+    state = state.model_copy(
+        update={
+            "records": state.records.model_copy(
+                update={
+                    "records": (
+                        row.model_copy(
+                            update={
+                                "lifecycle": lifecycle,
+                                "until": row.until.model_copy(update={"at": 1e9}),
+                            }
+                        ),
+                    )
+                }
+            )
+        }
+    )
+    paused = _pause(state, action="pause_now", drain_seconds=drain_seconds)
+    assert paused.run.park is not None
+    assert paused.run.park.deadline_at is not None
+    bound = paused.run.limits.cleanup_bound
+    due = paused.run.park.deadline_at + bound
+    [capped] = paused.records.records
+    assert capped.until.at == due
+    at_deadline = core.step(paused, core.ClockAdvanced(now_at=due - 0.5)).state
+    assert at_deadline.run.status is core.RunStatus.DRAINING
+    [open_row] = at_deadline.records.records
+    assert open_row.phase is core.RequestPhase.DISPATCHED
+    ended = core.step(at_deadline, core.ClockAdvanced(now_at=due)).state
+    blocked = ended.records.record(row.request_id)
+    assert blocked is not None
+    assert blocked.phase is core.RequestPhase.BLOCKED
+
+
+@given(
+    action=st.sampled_from(["pause", "pause_now"]),
+    drain_seconds=st.one_of(st.none(), st.floats(min_value=0.5, max_value=1e4)),
+)
+def test_the_drain_deadline_is_the_pause_inputs_own_field(
+    action: Literal["pause", "pause_now"], drain_seconds: float | None
+) -> None:
+    """A Pause-now that names none waits the cleanup bound; a Pause that names none, for its turns."""
+    state = core.initial_state()
+    paused = _pause(state, action=action, drain_seconds=drain_seconds)
+    assert paused.run.park is not None
+    expected = (
+        paused.run.now_at + drain_seconds
+        if drain_seconds is not None
+        else paused.run.now_at + paused.run.limits.cleanup_bound
+        if action == "pause_now"
+        else None
+    )
+    assert paused.run.park.deadline_at == expected

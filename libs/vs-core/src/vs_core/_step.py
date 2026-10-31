@@ -1476,10 +1476,10 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
             "status": statuses.get(event.control.action, state.run.status),
         }
     )
-    run = _park_authority(state, run, event.control)
+    run = _park_authority(state, run, event)
     updated = state.model_copy(update={"run": run})
     if run.status is RunStatus.DRAINING and run.park is not None:
-        updated = _turn_permit.cap_to_permits(updated)
+        updated = _run_park.cap_to_drain_deadline(_turn_permit.cap_to_permits(updated))
     if event.control.action == "steer" or waits:
         result = Transition(state=updated)
     elif event.control.action in OPERATOR_ACTIONS:
@@ -1503,7 +1503,8 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
     )
 
 
-def _park_authority(state: CoreState, run: RunState, control: ControlInput) -> RunState:
+def _park_authority(state: CoreState, run: RunState, event: RunControlEvent) -> RunState:
+    control = event.control
     if control.action in ("park", "pause_now") or (
         control.action == "pause" and control.owner is PauseOwner.OPERATOR
     ):
@@ -1517,6 +1518,9 @@ def _park_authority(state: CoreState, run: RunState, control: ControlInput) -> R
                         state.run.park.admitted_turns
                         if state.run.park is not None
                         else _run_park.admitted_turns(state)
+                    ),
+                    deadline_at=_run_park.drain_deadline(
+                        event, state.run.now_at, state.run.limits.cleanup_bound
                     ),
                 )
             }
