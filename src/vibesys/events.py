@@ -28,8 +28,10 @@ import vs_agent.api as _agent_api
 from vs_agent.api import (
     AgentOutputChannel,
     AgentStatusData,
+    CostBasis,
     TodoItemData,
     ToolResultPayload,
+    UsageSpeed,
 )
 from vs_core.api import (
     CheckoutStatus,
@@ -1034,6 +1036,31 @@ class WorkstreamFinishedData(EventPayload):
     last_error: WorkstreamFailureData | None = None
 
 
+class ModelTurnUsageData(BaseModel):
+    """One model's share of one finished turn: the journal's mirror of ``ModelTurnUsage``.
+
+    The ``.proto`` message (``vibesys.store.v1.ModelTurnUsage``) is the contract and this model
+    mirrors it until the journal retires; ``tests/vibesys/records`` holds the two together.
+    ``recorded_usd`` is agentshim's price of these tokens at the standard tier, copied from
+    ``vs_agent.contracts.AgentModelUsage`` and never recomputed here.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    model: str = Field(min_length=1)
+    input_tokens: NonNegativeInt
+    cache_creation_input_tokens: NonNegativeInt
+    cache_creation_1h_input_tokens: NonNegativeInt
+    cache_read_input_tokens: NonNegativeInt
+    output_tokens: NonNegativeInt
+    reasoning_output_tokens: NonNegativeInt
+    turns: NonNegativeInt
+    """The turn's requests; only the primary row counts them."""
+    recorded_usd: NonNegativeFloat | None = None
+    speed: UsageSpeed | None = None
+    primary: bool = False
+
+
 class TurnUsageData(EventPayload):
     """Settled token and cost accounting for one finished agent turn.
 
@@ -1041,6 +1068,11 @@ class TurnUsageData(EventPayload):
     exactly. Kept separate from ``UsageUpdateData``/``USAGE_UPDATE``: that one
     is a live, overwritten in-flight snapshot (progress), this one is the
     settled per-turn accounting (a durable record), emitted once per turn.
+
+    The token fields count the turn's main conversation. ``by_model`` is a superset: one row per
+    model the turn ran, summing to the whole turn, with exactly one primary row. A line recorded
+    before ``by_model``, ``cost_basis`` and ``provider_session_id`` existed has none of them, and
+    a reader takes its absence as unknown, never as zero or as a guess.
     """
 
     kind: Literal["turn_usage_recorded"] = "turn_usage_recorded"
@@ -1053,6 +1085,13 @@ class TurnUsageData(EventPayload):
     duration_ms: int | None = None
     span_id: SpanId | None = None
     """The agent-turn span of the run trace this turn ran as; the server names it."""
+    cost_basis: CostBasis | None = None
+    """How ``total_cost_usd`` was reached; ``None``: no cost was reported, or the line is older."""
+    by_model: tuple[ModelTurnUsageData, ...] = ()
+    """Each model the turn ran; empty when the provider reports no split, or the line is older."""
+    provider_session_id: str | None = Field(default=None, min_length=1)
+    """The provider's id of the conversation the turn ran in, which names the transcript the CLI
+    wrote; ``None`` when the provider named none, or the line is older."""
 
 
 class _SpanData(EventPayload):

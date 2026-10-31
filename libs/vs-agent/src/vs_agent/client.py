@@ -84,6 +84,8 @@ class _TurnAccounting:
 
     usage: AgentUsage
     skills: AgentSkillUse
+    provider_session_id: str | None = None
+    """The conversation the turn ran in, when the turn got far enough to name one."""
 
 
 def _emit_and_log(
@@ -526,16 +528,20 @@ class AgentClient:
                 session_key=session_key,
                 observer=stream,
             )
-            accounting = _TurnAccounting(result.usage, result.skills)
+            accounting = _TurnAccounting(result.usage, result.skills, result.provider_session_id)
         except Exception as exc:
             terminal_result = terminal_result_from(exc)
             if terminal_result is not None:
-                accounting = _TurnAccounting(terminal_result.usage, terminal_result.skills)
+                accounting = _TurnAccounting(
+                    terminal_result.usage,
+                    terminal_result.skills,
+                    terminal_result.provider_session_id,
+                )
             elif (
                 isinstance(exc, (AgentTurnTimeoutError, AgentOutputSchemaError))
                 and exc.usage is not None
             ):
-                accounting = _TurnAccounting(exc.usage, AgentSkillUse())
+                accounting = _TurnAccounting(exc.usage, AgentSkillUse(), exc.provider_session_id)
             stream.close()
             _emit_and_log(
                 self._sink, f"\n=== {label} ROUND ERROR: {turn.label} ===", self._run_log_file
@@ -574,6 +580,7 @@ class AgentClient:
             agent_kind=kind,
             round_label=round_label,
             invocation_id=invocation_id,
+            provider_session_id=accounting.provider_session_id,
         )
         if self._log_dir is None:
             return
@@ -588,6 +595,7 @@ class AgentClient:
                 usage=accounting.usage,
                 skills=accounting.skills,
                 recorded_at=utc_datetime(self._clock),
+                provider_session_id=accounting.provider_session_id,
             )
         except OSError as exc:
             _emit_and_log(
