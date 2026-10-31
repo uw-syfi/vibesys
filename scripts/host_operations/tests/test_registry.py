@@ -26,6 +26,8 @@ def _image() -> descriptor_pb2.FileDescriptorSet:
     seen = {}
 
     def add(file: object) -> None:
+        if file.name in seen:
+            return
         for imported in file.dependencies:
             add(imported)
         seen[file.name] = descriptor_pb2.FileDescriptorProto.FromString(file.proto.to_binary())
