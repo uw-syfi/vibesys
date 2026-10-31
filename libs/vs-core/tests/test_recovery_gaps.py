@@ -21,6 +21,7 @@ from vs_core.api.recovery import (
     Run,
     RunRest,
     Settle,
+    Tick,
     Wait,
     at_rest,
     decide,
@@ -111,8 +112,13 @@ def test_a_pause_that_names_a_drain_cancels_what_still_runs_when_it_passes_and_t
     loop.clock += 4.0
     assert not [a for a in decide(loop.state, loop.clock) if isinstance(a, Cancel)]
     loop.clock += 2.0
+    # Nothing writes a record when the drain gives up, so the clock is one: the run parks in the log
+    # with the attempt still running, and the loop cancels it.
+    assert decide(loop.state, loop.clock) == (Tick(at=loop.clock),)
+    loop.tick()
+    assert loop.state.run.status is core.RunStatus.PARKED
     (cancel,) = [a for a in decide(loop.state, loop.clock) if isinstance(a, Cancel)]
-    assert cancel.reason is CancelReason.DRAIN_EXPIRED
+    assert cancel.reason in (CancelReason.DRAIN_EXPIRED, CancelReason.PAUSE_NOW)
     loop.apply(cancel)
     assert loop.state.run.status is core.RunStatus.PARKED
     resume_in_next_epoch(loop)

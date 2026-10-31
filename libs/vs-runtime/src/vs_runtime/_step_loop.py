@@ -2,7 +2,10 @@
 
 ``decide`` owns every decision, including that a deadline passed. The loop owns tasks, bounds
 and the log: a step's ``StepStarted`` is durable before any of its I/O, and ``clear`` runs
-before every attempt after the first. The loop never looks at what kind of step it runs.
+before every attempt core says may have work (``Run.clear_first``). The loop never looks at what
+kind of step it runs, and it decides nothing from a hint of its own: whether to clear, whether an
+ending gives up a ``clear``, what result to record and whether the run is parked are each a fact
+that core returned or recorded.
 
 Each running attempt is a flight, one task that owns the attempt from ``clear`` to the record
 of how it ended. The main task only reads state, hands actions to flights and waits.
@@ -24,7 +27,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol, assert_never
 
-from vs_core.api import RunStatus
 from vs_core.api.recovery import (
     Cancel,
     Cancelled,
@@ -35,6 +37,7 @@ from vs_core.api.recovery import (
     Run,
     RunRest,
     Settle,
+    Tick,
     Wait,
     at_rest,
     decide,
@@ -106,6 +109,14 @@ class StepLog(Protocol):
 
     async def run_ended(self, end: End) -> None:
         """Record the end of the run."""
+        ...
+
+    async def clock_advanced(self, at: float) -> None:
+        """Record that the run clock reached ``at``, which core asked for with ``Tick``.
+
+        Time changes the log only through a record, and the fold applies it as an input: a
+        pause's drain that ran out its deadline parks the run here, in the log.
+        """
         ...
 
     async def next_input(self) -> None:
@@ -231,18 +242,29 @@ class _Failed:
 class _Flight:
     """One attempt, or one conclusion of a step with no attempt running."""
 
-    def __init__(
-        self, tag: RequestId, step: Request, deadline_at: float | None, *, ending: bool = False
-    ) -> None:
+    def __init__(self, tag: RequestId, step: Request, deadline_at: float | None) -> None:
         self.tag = tag
         self.step = step
         self.deadline_at = deadline_at
         self.signal = CancelSignal()
-        self.ending = ending
+        self.ending = False
         self.started = False
         self.parked = False
         self.changed = asyncio.Event()
         self.task: asyncio.Task[None] | None = None
+
+    def conclude(self, reason: CancelReason) -> None:
+        """Take core's reason for ending the tag's step, from a ``Cancel`` or a ``Settle`` alike.
+
+        The first reason is the signal's. That the run is ending is remembered whichever came
+        first, because an ending gives up a ``clear`` that no deadline or dependency does.
+        """
+        ending = reason is CancelReason.RUN_ENDING
+        news = self.signal.reason is None or (ending and not self.ending)
+        self.signal.set(reason)
+        self.ending = self.ending or ending
+        if news:
+            self.changed.set()
 
     def abandons_clear(self) -> bool:
         """Whether an unreachable backend ends the wait for ``clear``."""
@@ -310,30 +332,16 @@ class _StepLoop:
         actions = decide(self._log.state, self._clock.now())
         if rest is RunRest.PARKED:
             return await self._park(actions)
-        if self._drain_waits_on_the_exit():
-            return RunRest.PARKED
+        tick = next((a for a in actions if isinstance(a, Tick)), None)
+        if tick is not None:
+            await self._record_clock(tick)
+            return None
         end = next((a for a in actions if isinstance(a, End)), None)
         if end is not None and not self._flights:
             await self._record_ended(end)
             return RunRest.ENDED
         await self._wake(self._dispatch(actions))
         return None
-
-    def _drain_waits_on_the_exit(self) -> bool:
-        """Whether a pause's drain has nothing left but calls that only the process exit stops.
-
-        A held call ignored its cancel and its task's cancellation, and no record may name its tag
-        while it runs. The drain cannot finish in this process, so the loop returns as a parked run
-        does: the caller exits, the call dies with the process, and the next process's log ends the
-        attempt, parks the drain and admits the operator's Resume.
-        """
-        state = self._log.state
-        draining = state.run.status is RunStatus.DRAINING and state.run.park is not None
-        return (
-            draining
-            and bool(self._flights)
-            and all(self._stalls.holds(tag) for tag in self._flights)
-        )
 
     async def _park(self, actions: tuple[Action, ...]) -> RunRest | None:
         """A parked run starts nothing and takes no result: it only stops what still runs.
@@ -364,7 +372,7 @@ class _StepLoop:
                     self._settle(action)
                 case Wait(until=until):
                     wake_at = until
-                case End():
+                case Tick() | End():
                     pass
                 case _:
                     assert_never(action)
@@ -384,24 +392,33 @@ class _StepLoop:
 
     def _cancel(self, action: Cancel) -> None:
         flight = self._flights.get(action.tag)
-        ending = action.reason is CancelReason.RUN_ENDING
         if flight is None:
             if interruption_of(action.reason) is None:
-                self._conclude(action.tag, Cancelled(reason=action.reason), ending=ending)
+                self._conclude(action.tag, Cancelled(reason=action.reason))
             return
-        flight.signal.set(action.reason)
-        flight.ending = flight.ending or ending
-        flight.changed.set()
+        flight.conclude(action.reason)
 
     def _settle(self, action: Settle) -> None:
-        if action.tag not in self._flights:
-            self._conclude(action.tag, action.result, ending=False)
+        """End a step core decided without an attempt running.
 
-    def _conclude(self, tag: RequestId, result: StepResult, *, ending: bool) -> None:
+        A tag that has a flight has one waiting for its ``clear`` before it starts: the reason
+        reaches it as a cancel does, so a run that is ending is not held by a ``clear`` it does not
+        wait for. A result that is not a cancellation (a step out of tries) has no reason to give,
+        and the flight ends by itself: its start is refused, and the step is settled next.
+        """
+        flight = self._flights.get(action.tag)
+        if flight is None:
+            self._conclude(action.tag, action.result)
+        elif isinstance(action.result, Cancelled):
+            flight.conclude(action.result.reason)
+
+    def _conclude(self, tag: RequestId, result: StepResult) -> None:
         """End a step that has no attempt in flight (the host restarted, or it never began)."""
         open_step = self._log.open_step(tag)
         if open_step is not None:
-            flight = _Flight(tag, open_step.step, None, ending=ending)
+            flight = _Flight(tag, open_step.step, None)
+            if isinstance(result, Cancelled):
+                flight.conclude(result.reason)
             self._launch(flight, self._clear_then_finish(flight, result))
 
     def _launch(self, flight: _Flight, work: Coroutine[object, object, None]) -> None:
@@ -476,8 +493,12 @@ class _StepLoop:
         async with self._appending:
             await self._log.run_ended(end)
 
+    async def _record_clock(self, tick: Tick) -> None:
+        async with self._appending:
+            await self._log.clock_advanced(tick.at)
+
     async def _attempt(self, run: Run, flight: _Flight) -> None:
-        cleared = await self._clear(flight) if run.attempt > 1 else Cleared()
+        cleared = await self._clear(flight) if run.clear_first else Cleared()
         if cleared is None or (flight.signal.is_set() and isinstance(cleared, Cleared)):
             await self._finish_unstarted(flight)
             return
@@ -529,17 +550,24 @@ class _StepLoop:
             await self._record_outcome(run, Cancelled(reason=reason))
 
     async def _clear_then_finish(self, flight: _Flight, result: StepResult) -> None:
+        """End a step that has no attempt in flight with ``result``, unless its work has its own.
+
+        An adopted result is never replaced: work that ended while no host ran, or while the
+        flight ended it, has the answer, and ``result`` is only what core settled in its absence.
+        """
         cleared = await self._clear(flight)
         if (cleared is None and not flight.ending) or self._parked():
             return
-        if isinstance(cleared, Adopted) and cleared.result is None:
+        own = cleared.result if isinstance(cleared, Adopted) else None
+        if isinstance(cleared, Adopted) and own is None:
             open_step = self._log.open_step(flight.tag)
             if open_step is not None:
                 run = Run(flight.step, flight.tag, open_step.started + 1, open_step.deadline_at)
-                await self._end_alive(flight, run)
+                ended = await self._end_alive(flight, run)
+                own = None if isinstance(ended, Cleared | Cancelled) else ended
             if self._parked():
                 return
-        await self._record_finished(flight.tag, self._last_attempt(flight.tag), result)
+        await self._record_finished(flight.tag, self._last_attempt(flight.tag), own or result)
 
     def _parked(self) -> bool:
         """Whether the run is paused: a parked epoch takes no result into its state."""

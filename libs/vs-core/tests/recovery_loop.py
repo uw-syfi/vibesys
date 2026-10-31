@@ -31,6 +31,7 @@ from vs_core.api.recovery import (
     Run,
     Settle,
     StepEffect,
+    Tick,
     Wait,
     decide,
     ended_message,
@@ -136,23 +137,28 @@ class Loop:
             case Run():
                 return Oneof("step_started", started_message(action))
             case Cancel(tag=tag, reason=reason):
-                started = self.state.steps.of(tag)
-                attempt = 0 if started is None else started.started
-                why = interruption_of(reason)
-                if why is not None:
-                    return Oneof("attempt_interrupted", interrupted_message(tag, attempt, why))
-                return Oneof(
-                    "step_finished",
-                    finished_message(tag, attempt, Cancelled(reason=reason)),
-                )
+                return self._ended(tag, reason)
             case Settle(tag=tag, result=result):
-                started = self.state.steps.of(tag)
-                attempt = 0 if started is None else started.started
-                return Oneof("step_finished", finished_message(tag, attempt, result))
+                return Oneof("step_finished", finished_message(tag, self._attempt(tag), result))
+            case Tick(at=at):
+                return Oneof("core_input", input_message(core.ClockAdvanced(now_at=at)))
             case End():
                 return Oneof("run_ended", ended_message(action))
             case Wait():
                 return None
+
+    def _attempt(self, tag: core.RequestId) -> int:
+        started = self.state.steps.of(tag)
+        return 0 if started is None else started.started
+
+    def _ended(self, tag: core.RequestId, reason: core.CancelReason) -> Body:
+        """How a cancelled attempt ends: interrupted, or the step's cancelled result."""
+        why = interruption_of(reason)
+        if why is not None:
+            return Oneof("attempt_interrupted", interrupted_message(tag, self._attempt(tag), why))
+        return Oneof(
+            "step_finished", finished_message(tag, self._attempt(tag), Cancelled(reason=reason))
+        )
 
     def apply(self, action: Action) -> None:
         """Record what the loop records for ``action``; the state must move."""

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 from protobuf import Oneof
 
-from ._actions import Action, Cancel, End, Run, RunRest, Settle, Wait, at_rest
+from ._actions import Action, Cancel, End, Run, RunRest, Settle, Tick, Wait, at_rest
 from ._proofs import request_dependency_status, stop_mode
 from ._refusal import RecordRefusal, RecordRefusedError, RefusalReason
 from ._request_ledger import dispatch_until, retry_limit
@@ -94,10 +94,13 @@ def decide(state: CoreState, now: float) -> tuple[Action, ...]:
     parks at a Pause now before the loop has stopped what runs, and a flight nothing cancels
     would hold the process up.
     """
+    recorded = state
     state = advance_run_time(state, now)
     rest = at_rest(state)
     if rest is RunRest.ENDED:
         return (Wait(until=None),)
+    if _park_is_due(recorded, state):
+        return (Tick(at=now),)
     open_steps = tuple(record for record in state.records.records if is_open(record))
     if rest is RunRest.PARKED:
         stops = (
@@ -116,6 +119,20 @@ def decide(state: CoreState, now: float) -> tuple[Action, ...]:
         *(action for record in open_steps if (action := _of_step(state, record, now)) is not None),
     )
     return actions or (Wait(until=_wake_at(state, open_steps, now)),)
+
+
+def _park_is_due(recorded: CoreState, now: CoreState) -> bool:
+    """Whether the time that passed parks a draining run, which no record has yet said.
+
+    The drain of a pause stops waiting at its deadline, so a run that waited only on attempts
+    the loop cancels parks once the clock reaches it. The log shows that only through a record,
+    and ending a step is not always the next one: the run clock is an input (``Tick``), so the
+    park is in the log whatever else the run does.
+    """
+    return (
+        recorded.run.status is RunStatus.DRAINING
+        and settle_park(now).run.status is RunStatus.PARKED
+    )
 
 
 def _running(state: CoreState, record: RequestRecord) -> bool:
@@ -165,7 +182,8 @@ def _apply(
     state = _observed(state, record)
     match body:
         case Oneof(field="core_input", value=message):
-            state = commands_lapsed(end_lifted(step(state, decode_event(message, registry)).state))
+            event = step(state, decode_event(message, registry)).state
+            state = settle_park(commands_lapsed(end_lifted(event)))
         case Oneof(field="step_started", value=message):
             state = _start(state, message, registry)
         case Oneof(field="step_finished", value=message):
@@ -319,6 +337,7 @@ def _start_or_settle(state: CoreState, record: RequestRecord, now: float) -> Run
         tag=tag,
         attempt=1 if attempts is None else attempts.started + 1,
         deadline_at=deadline.at,
+        clear_first=attempts is not None,
     )
 
 

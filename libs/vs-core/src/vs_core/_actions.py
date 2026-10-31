@@ -31,6 +31,12 @@ class Run:
     """1, or n + 1 after n attempts ended without a result."""
     deadline_at: float
     """Run-clock seconds; the loop sets a timer for it."""
+    clear_first: bool = False
+    """Whether work of the step may exist, so the runner's ``clear`` comes before the attempt.
+
+    True whenever the log or its seed shows the step was sent: an attempt began, or an earlier
+    version dispatched it. The attempt number is not that fact: a seed's step in flight has no
+    attempt in the log and still may have work."""
 
 
 @dataclass(frozen=True)
@@ -59,13 +65,27 @@ class Wait:
 
 
 @dataclass(frozen=True)
+class Tick:
+    """Record that the run clock reached ``at``.
+
+    Time passing changes the log only through a record. A pause's drain whose deadline passed
+    parks the run, but nothing writes a record at that instant, and until one does the log says
+    the run is still draining: whether a held attempt is charged would depend on whether an
+    unrelated step happens to end later. The loop appends the clock, the fold applies it, and
+    the run parks in the log.
+    """
+
+    at: float
+
+
+@dataclass(frozen=True)
 class End:
     """The run committed its finish and nothing is open: publish it and exit."""
 
     result: RunResultProposal
 
 
-type Action = Run | Cancel | Settle | Wait | End
+type Action = Run | Cancel | Settle | Wait | Tick | End
 
 
 @dataclass(frozen=True)

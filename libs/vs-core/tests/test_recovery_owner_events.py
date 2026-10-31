@@ -34,10 +34,12 @@ def log_of(
 ) -> list[Record]:
     assert request.request_id is not None
     tag = tag or request.request_id
-    run = Run(step=request, tag=tag, attempt=1, deadline_at=100.0)
+    # The seed's step was in flight when an earlier version stopped: the log's first attempt of it
+    # is the second, a re-run.
+    run = Run(step=request, tag=tag, attempt=2, deadline_at=100.0, clear_first=True)
     return [
         record(1, Oneof("step_started", started_message(run))),
-        record(2, Oneof("step_finished", finished_message(tag, 1, finished))),
+        record(2, Oneof("step_finished", finished_message(tag, 2, finished))),
     ]
 
 

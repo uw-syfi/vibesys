@@ -98,6 +98,7 @@ def epoch_opened(state: CoreState, epoch: int) -> CoreState:
         spared = 1 if parked and not row.ended else 0
         rows.append(row.model_copy(update={"ended": True, "uncharged": row.uncharged + spared}))
         state = _returned(state, row.tag)
+    state = _with_attempts(state, tuple(rows))
     if origin:
         state = _earlier_version_settled(state)
     recovery = state.records.recovery
@@ -109,8 +110,12 @@ def epoch_opened(state: CoreState, epoch: int) -> CoreState:
     if origin and park is not None:
         park = park.model_copy(update={"epoch": min(park.epoch, epoch - 1)})
     run = state.run.model_copy(update={"park": park})
-    steps = state.steps.model_copy(update={"epoch": epoch, "attempts": tuple(rows)})
+    steps = state.steps.model_copy(update={"epoch": epoch})
     return state.model_copy(update={"steps": steps, "records": records, "run": run})
+
+
+def _with_attempts(state: CoreState, rows: tuple[StepAttempts, ...]) -> CoreState:
+    return state.model_copy(update={"steps": state.steps.model_copy(update={"attempts": rows})})
 
 
 def _earlier_version_settled(state: CoreState) -> CoreState:
@@ -121,13 +126,34 @@ def _earlier_version_settled(state: CoreState) -> CoreState:
     inspection, a cancel, a block) are not steps: nothing here sends them, and one left open would
     keep a pause from parking and a stop from ending. They lapse, as at their limit. A step in
     flight with no attempt in this log has no one running it, so it goes back to unstarted, to run
-    again uncharged like one a pause interrupted.
+    again uncharged like one a pause interrupted. Its earlier attempt is the log's first, ended
+    and uncharged, so the run that follows shows as a re-run and clears what the first left.
     """
     state = commands_lapsed(state)
     for record in state.records.records:
-        if is_open(record) and state.steps.of(record.request_id) is None:
-            state = _returned(state, record.request_id)
+        if is_open(record) and state.steps.of(record.request_id) is None and _sent(record):
+            first = StepAttempts(
+                tag=record.request_id,
+                started=1,
+                ended=True,
+                uncharged=1,
+                deadline_at=record.until.at,
+            )
+            state = _returned(_with(state, record.request_id, first), record.request_id)
     return state
+
+
+def _sent(record: RequestRecord) -> bool:
+    """Whether a log of an earlier version shows the step was sent, so its work may exist.
+
+    A step that was never dispatched has nothing to clear; one the earlier version dispatched, in
+    flight now or sent again after a failure, may have work its runner has to find.
+    """
+    return (
+        record.phase is not RequestPhase.PREPARED
+        or record.dispatched_at is not None
+        or record.dispatched_in is not None
+    )
 
 
 def commands_lapsed(state: CoreState) -> CoreState:

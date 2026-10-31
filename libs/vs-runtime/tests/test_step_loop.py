@@ -273,6 +273,9 @@ class CrashingLog:
     async def run_ended(self, end: End) -> None:
         await self._around(lambda: self._inner.run_ended(end))
 
+    async def clock_advanced(self, at: float) -> None:
+        await self._around(lambda: self._inner.clock_advanced(at))
+
     async def next_input(self) -> None:
         await self._inner.next_input()
 

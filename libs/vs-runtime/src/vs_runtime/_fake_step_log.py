@@ -9,7 +9,7 @@ new log over the same records) and a resume control pushed into it.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, ClassVar, Literal
 
 import vs_core.api as core
@@ -136,7 +136,7 @@ class FakeStepLog:
         due = start_due(self._state, run.tag, at)
         if isinstance(due, RecordRefusal):
             return due
-        recorded = Run(run.step, run.tag, run.attempt, due.deadline_at)
+        recorded = replace(run, deadline_at=due.deadline_at)
         self._append(started_message(recorded), clock=at)
         return recorded
 
@@ -151,6 +151,10 @@ class FakeStepLog:
     async def run_ended(self, end: End) -> None:
         """Append ``RunEnded``."""
         self._append(ended_message(end))
+
+    async def clock_advanced(self, at: float) -> None:
+        """Append the input that the run clock reached ``at``."""
+        self._append(input_message(core.ClockAdvanced(now_at=at)))
 
     async def next_input(self) -> None:
         """Return once ``push`` was called since this last returned."""
@@ -201,12 +205,19 @@ class FakeRunSeed:
     tags: tuple[RequestId, ...]
 
 
-def fake_run_seed(limits_s: Sequence[float], retries: int) -> FakeRunSeed:
+def fake_run_seed(
+    limits_s: Sequence[float],
+    retries: int,
+    *,
+    standing: core.RequestPhase = core.RequestPhase.PREPARED,
+) -> FakeRunSeed:
     """A run with one open step per entry of ``limits_s``, each allowed that many seconds.
 
     ``retries`` is the bound on re-sends of a step after its first attempt (core's
     ``Limits.request_retries``): a step whose charged attempts pass it ends as
-    ``ATTEMPTS_EXHAUSTED``.
+    ``ATTEMPTS_EXHAUSTED``. ``standing`` is how a log of an earlier version leaves each step:
+    ``PREPARED`` has not been sent, and ``DISPATCHED`` or ``RECONCILING`` was in flight with no
+    attempt in this log, so its work may exist.
     """
     descriptor = core.OperationDescriptor(
         kind="test.query",
@@ -244,5 +255,14 @@ def fake_run_seed(limits_s: Sequence[float], retries: int) -> FakeRunSeed:
             expected_revision=state.revision,
         )
         state = core.step(state, submitted).state
+    if standing is not core.RequestPhase.PREPARED:
+        sent = tuple(
+            row.model_copy(
+                update={"phase": standing, "dispatched_at": 0.0, "until": core.Until(at=limit)}
+            )
+            for row, limit in zip(state.records.records, limits_s, strict=True)
+        )
+        records = state.records.model_copy(update={"records": sent})
+        state = state.model_copy(update={"records": records})
     tags = tuple(row.request_id for row in state.records.records if row.request_id is not None)
     return FakeRunSeed(state, registry, tags)
