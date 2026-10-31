@@ -615,6 +615,22 @@ blocks the loop or an ending. How an attempt ends depends on why it was cancelle
 | `RUN_ENDING` | `StepFinished(Cancelled)` | give up; the leftovers are a named residual |
 | `DEADLINE`, `WITHDRAWN`, `INTERRUPTED` | `StepFinished(Cancelled)` | keep retrying with backoff |
 
+One flight holds a tag at a time, and holds it until every `run` and `clear` it started has returned. A cancel
+cannot stop a thread, so the awaitable finishing is the only proof that its work ended: a call that ignores
+its signal gets its task cancelled as a nudge and is then waited for, never given up on. Nothing starts, clears
+or records on that tag meanwhile, and the tag is on the stall board (`StallBoard`, handed to `run_step_loop`)
+with its kind (`run-held`, `clear-held`, `clear-unavailable`, `clear-failed`, `still-running`), how long, and
+the error that kept it there. A result is recorded only over proof: a `Cleared`, an `Adopted` whose work
+ended, or a returned result. A `run` that raised or was cancelled, an attach to adopted work that did not end
+it (a job still completing after its `scancel`), and any `clear` that raised have proved nothing, so the loop
+asks `clear` again with backoff; what a `clear` raised stays on the board, so a programmer error is visible
+in the stall and not swallowed. Ending the run treats a held tag as an open flight: `End` waits for it, and the
+stall shows. An operator who cannot wait kills the process; the next process's `clear` and `End` finish the
+run, because a crash is always recoverable. The one residual is a `clear` that cannot return at all while the
+run ends: the step is recorded cancelled without proof and listed in `StallBoard.unproven`. A runner whose
+call blocks in a thread must shield the thread, so that its awaitable ends only when the thread has: a call
+that returns on cancel while its thread goes on is invisible to the loop.
+
 An attempt that returned a result on its own is recorded as that result even when a cancel was set, unless
 the run is parked: core drops a result in a parked epoch, so the attempt is recorded as
 `AttemptInterrupted(PAUSE)` and the step runs again after the resume. A parked run also takes no `Settle`: it
