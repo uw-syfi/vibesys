@@ -151,7 +151,7 @@ def _fold_log(state: Model, entry: LogEntry) -> Model:
     match entry:
         case LoggedStarted(run):
             return state.with_step(run.tag, attempts=run.attempt, running=True)
-        case LoggedFinished(tag, result):
+        case LoggedFinished(tag, _attempt, result):
             return state.with_step(tag, running=False, result=result)
         case LoggedInterrupted(tag, _attempt, why):
             debit = 1 if why is Interruption.RAISED else 0
@@ -281,8 +281,8 @@ class _CrashingLog:
     async def step_started(self, run: Run) -> None:
         await self._around(lambda: self._inner.step_started(run))
 
-    async def step_finished(self, tag: core.RequestId, result: StepResult) -> None:
-        await self._around(lambda: self._inner.step_finished(tag, result))
+    async def step_finished(self, tag: core.RequestId, attempt: int, result: StepResult) -> None:
+        await self._around(lambda: self._inner.step_finished(tag, attempt, result))
 
     async def attempt_interrupted(
         self, tag: core.RequestId, attempt: int, why: Interruption
@@ -440,7 +440,7 @@ def concerns(entry: LogEntry | Input, tag: core.RequestId) -> bool:
     match entry:
         case LoggedStarted(run):
             return run.tag == tag
-        case LoggedInterrupted(other, _, _) | LoggedFinished(other, _):
+        case LoggedInterrupted(other, _, _) | LoggedFinished(other, _, _):
             return other == tag
         case NewEpoch():
             return True
@@ -464,7 +464,10 @@ def check_attempts_follow_interruptions(outcome: Outcome, spec: Spec) -> None:
             case LoggedInterrupted(_, number, _):
                 assert number == attempt
                 ended_since_start = True
-            case LoggedFinished():
+            case LoggedFinished(_, named, _):
+                assert named == attempt, (
+                    f"{spec.name} finished naming attempt {named}, not {attempt}"
+                )
                 finished = True
             case NewEpoch():
                 ended_since_start = True

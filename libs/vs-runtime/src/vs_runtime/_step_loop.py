@@ -69,8 +69,8 @@ class StepLog[S](Protocol):
         """Record that an attempt is about to start, before any I/O of it."""
         ...
 
-    async def step_finished(self, tag: RequestId, result: StepResult) -> None:
-        """Record the one result of a step."""
+    async def step_finished(self, tag: RequestId, attempt: int, result: StepResult) -> None:
+        """Record the one result of a step and the attempt that produced it (0 if none ran)."""
         ...
 
     async def attempt_interrupted(self, tag: RequestId, attempt: int, why: Interruption) -> None:
@@ -319,9 +319,13 @@ class _StepLoop[S]:
         async with self._appending:
             await self._log.step_started(run)
 
-    async def _record_finished(self, tag: RequestId, result: StepResult) -> None:
+    async def _record_finished(self, tag: RequestId, attempt: int, result: StepResult) -> None:
         async with self._appending:
-            await self._log.step_finished(tag, result)
+            await self._log.step_finished(tag, attempt, result)
+
+    def _last_attempt(self, tag: RequestId) -> int:
+        latest = self._log.latest_run(tag)
+        return 0 if latest is None else latest.attempt
 
     async def _record_interrupted(self, tag: RequestId, attempt: int, why: Interruption) -> None:
         async with self._appending:
@@ -345,7 +349,9 @@ class _StepLoop[S]:
         """The wait for ``clear`` ended by a cancel: no attempt of this try ever started."""
         reason = flight.signal.reason
         if reason is not None and _fate(reason) is not _Fate.INTERRUPT:
-            await self._record_finished(flight.tag, Cancelled(reason=reason))
+            await self._record_finished(
+                flight.tag, self._last_attempt(flight.tag), Cancelled(reason=reason)
+            )
 
     async def _finish_attempt(self, run: Run, flight: _Flight, outcome: StepResult | None) -> None:
         reason = flight.signal.reason
@@ -358,25 +364,25 @@ class _StepLoop[S]:
         ):
             await self._record_interrupted(run.tag, run.attempt, Interruption.PAUSE)
         else:
-            await self._record_finished(run.tag, outcome)
+            await self._record_finished(run.tag, run.attempt, outcome)
 
     async def _finish_without_result(self, run: Run, flight: _Flight) -> None:
         """The attempt raised or was given up on: clear what it left, then say how it ended."""
         cleared = await self._clear(flight)
         reason = flight.signal.reason
         if isinstance(cleared, Adopted) and cleared.result is not None:
-            await self._record_finished(run.tag, cleared.result)
+            await self._record_finished(run.tag, run.attempt, cleared.result)
         elif reason is None or _fate(reason) is _Fate.INTERRUPT:
             why = Interruption.RAISED if reason is None else Interruption.PAUSE
             await self._record_interrupted(run.tag, run.attempt, why)
         elif isinstance(cleared, Adopted):
             outcome = await self._run_bounded(run, flight.signal)
             if outcome is None:
-                await self._record_finished(run.tag, Cancelled(reason=reason))
+                await self._record_finished(run.tag, run.attempt, Cancelled(reason=reason))
             else:
                 await self._finish_attempt(run, flight, outcome)
         else:
-            await self._record_finished(run.tag, Cancelled(reason=reason))
+            await self._record_finished(run.tag, run.attempt, Cancelled(reason=reason))
 
     async def _clear_then_finish(self, flight: _Flight, result: StepResult) -> None:
         cleared = await self._clear(flight)
@@ -384,7 +390,7 @@ class _StepLoop[S]:
             return
         if isinstance(cleared, Adopted) and cleared.result is None:
             await self._end_adopted(flight)
-        await self._record_finished(flight.tag, result)
+        await self._record_finished(flight.tag, self._last_attempt(flight.tag), result)
 
     async def _end_adopted(self, flight: _Flight) -> None:
         """Attach to work ``clear`` adopted and still going, with the signal set, so it ends.

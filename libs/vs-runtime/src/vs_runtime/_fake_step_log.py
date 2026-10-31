@@ -27,6 +27,7 @@ class LoggedFinished:
     """A step was recorded as ended with a result."""
 
     tag: RequestId
+    attempt: int
     result: StepResult
 
 
@@ -90,9 +91,9 @@ class FakeStepLog[S, I]:
         """Append ``LoggedStarted``."""
         self._add(LoggedStarted(run))
 
-    async def step_finished(self, tag: RequestId, result: StepResult) -> None:
+    async def step_finished(self, tag: RequestId, attempt: int, result: StepResult) -> None:
         """Append ``LoggedFinished``."""
-        self._add(LoggedFinished(tag, result))
+        self._add(LoggedFinished(tag, attempt, result))
 
     async def attempt_interrupted(self, tag: RequestId, attempt: int, why: Interruption) -> None:
         """Append ``LoggedInterrupted``."""
