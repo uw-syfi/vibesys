@@ -697,6 +697,11 @@ test('a live turn keeps its scroll position and its element as events arrive', a
 
   // A link in what the agent said opens through the app's opener, never in the window.
   const url = page.url();
+  // The turn draws the messages near what is in view, and the link is in the last: the reader
+  // scrolls to it first, however much room the screen leaves the turn.
+  await turn.evaluate(element => {
+    element.scrollTop = element.scrollHeight;
+  });
   await turn.getByRole('link', {name: 'the notes 11'}).click();
   await expect
     .poll(() =>
