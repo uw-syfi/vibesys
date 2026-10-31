@@ -6,7 +6,6 @@ versioned by ``SCHEMA_VERSION``, until those values are proto messages (run-reco
 
 from __future__ import annotations
 
-import zlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, assert_never
 
@@ -16,7 +15,6 @@ from pydantic import TypeAdapter
 from vs_proto.api import (
     AttemptInterrupted,
     CoreInput,
-    CoreSnapshot,
     InterruptionReason,
     RunStarted,
     StepCancelReason,
@@ -127,43 +125,47 @@ class SavedRun:
     held: tuple[Decision, ...] = ()
 
 
-def snapshot_message(saved: SavedRun) -> CoreSnapshot:
-    """The record body that seeds a log with a run an older version saved.
+@dataclass(frozen=True)
+class EncodedSavedRun:
+    """A saved run as the canonical JSON of its values, the form a snapshot record packs.
 
-    The state and the search are compressed: a saved state is megabytes of JSON, and the record
-    holds one of them and the other.
+    Packing it into a record and compressing it are the log writer's and reader's (a saved state is
+    megabytes of JSON); this is the part that is a function of core's own values.
     """
-    return CoreSnapshot(
-        schema_version=SCHEMA_VERSION,
+
+    envelope_version: int
+    state: bytes
+    strategy: bytes
+    inputs: tuple[bytes, ...] = ()
+    wakes: tuple[float, ...] = ()
+    held: bytes = b""
+    schema_version: int = SCHEMA_VERSION
+
+
+def encode_saved(saved: SavedRun) -> EncodedSavedRun:
+    """The canonical JSON of the values of ``saved``."""
+    return EncodedSavedRun(
         envelope_version=saved.envelope_version,
-        state=zlib.compress(_STATE.dump_json(saved.state)),
-        inputs=[_EVENT.dump_json(event) for event in saved.inputs],
-        strategy=zlib.compress(saved.strategy),
-        wakes=list(saved.wakes),
+        state=_STATE.dump_json(saved.state),
+        strategy=saved.strategy,
+        inputs=tuple(_EVENT.dump_json(event) for event in saved.inputs),
+        wakes=saved.wakes,
         held=_DECISIONS.dump_json(saved.held),
     )
 
 
-def decode_snapshot(message: CoreSnapshot, registry: OperationRegistry | None) -> SavedRun:
-    """The run a ``CoreSnapshot`` holds, refused when written by another encoding or damaged."""
-    _same_encoding(message.schema_version)
+def decode_saved(encoded: EncodedSavedRun, registry: OperationRegistry | None) -> SavedRun:
+    """The run ``encode_saved`` wrote, refused when written by another encoding."""
+    _same_encoding(encoded.schema_version)
     context = _context(registry)
     return SavedRun(
-        state=_STATE.validate_json(_inflated(message.state), context=context),
-        envelope_version=message.envelope_version,
-        strategy=_inflated(message.strategy),
-        inputs=tuple(_EVENT.validate_json(event, context=context) for event in message.inputs),
-        wakes=tuple(message.wakes),
-        held=_DECISIONS.validate_json(message.held, context=context) if message.held else (),
+        state=_STATE.validate_json(encoded.state, context=context),
+        envelope_version=encoded.envelope_version,
+        strategy=encoded.strategy,
+        inputs=tuple(_EVENT.validate_json(event, context=context) for event in encoded.inputs),
+        wakes=encoded.wakes,
+        held=_DECISIONS.validate_json(encoded.held, context=context) if encoded.held else (),
     )
-
-
-def _inflated(data: bytes) -> bytes:
-    try:
-        return zlib.decompress(data)
-    except zlib.error as error:
-        message = f"the log holds a snapshot that does not inflate: {error}"
-        raise ValueError(message) from error
 
 
 def encode_fold(

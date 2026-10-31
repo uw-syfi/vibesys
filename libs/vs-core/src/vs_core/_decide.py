@@ -44,7 +44,6 @@ from ._step_log import (
     decode_result,
     decode_run_ended,
     decode_seed,
-    decode_snapshot,
     encode_fold,
 )
 from .types.common import (
@@ -65,6 +64,7 @@ if TYPE_CHECKING:
     from vs_proto.api import Record, StepFinished, StepStarted, StrategyAdvanced
 
     from ._registry import OperationRegistry
+    from ._step_log import SavedRun
     from .types.kernel import CoreEvent, CoreState, StrategyEvent
     from .types.records import RequestRecord
     from .types.steps import StepResult
@@ -95,32 +95,32 @@ class Folded:
 
 def fold(
     records: Iterable[Record],
-    seed: CoreState | Folded | None = None,
+    seed: CoreState | None = None,
     *,
     registry: OperationRegistry | None = None,
 ) -> CoreState:
-    """The core state a log leaves, starting from ``seed`` or the log's own seed record.
+    """The core state a log leaves, starting from ``seed`` or the log's ``RunStarted``.
 
     Every record names the epoch it was written in and, when it has one, the run clock, which
     excludes downtime. Records that are not core's (spans, metrics, notices) change nothing
     else. A record the reducers refuse is an error, never skipped: the log was written by
     other code. ``registry`` decodes the outcomes of registered operations.
     """
-    return fold_run(records, seed, registry=registry).state
+    return fold_run(records, None if seed is None else Folded(seed), registry=registry).state
 
 
 def fold_run(
     records: Iterable[Record],
-    seed: CoreState | Folded | None = None,
+    seed: Folded | None = None,
     *,
     registry: OperationRegistry | None = None,
 ) -> Folded:
     """``fold``, and the events the search still has to hear.
 
-    ``seed`` may be the fold of the log's first records (a cache of it), and ``records`` then the
-    ones after: the result is the fold of the whole log.
+    ``seed`` may be the fold of the log's first records (a cache of it, or a saved run's seed), and
+    ``records`` then the ones after: the result is the fold of the whole log.
     """
-    folded = Folded(seed) if seed is not None and not isinstance(seed, Folded) else seed
+    folded = seed
     for record in records:
         folded = apply_record(folded, record, registry)
     if folded is None:
