@@ -312,7 +312,10 @@ def test_a_drain_a_kill_cut_short_parks_in_the_next_epoch_and_admits_the_resume_
     """
     loop = started((100.0,))
     pause(loop) if kind == "pause" else play(loop, ("pause_now", None))
-    assert loop.state.run.status is core.RunStatus.DRAINING
+    # A drain that waits is cut short mid-way; one that cancels parks at once, with the attempt
+    # still running for the loop to cancel, and the kill takes it.
+    waiting = core.RunStatus.DRAINING if kind == "pause" else core.RunStatus.PARKED
+    assert loop.state.run.status is waiting
     draining = loop.state.run.park
     assert draining is not None
     paused_in = draining.epoch

@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from vs_core.api import RequestId
 from vs_core.api.recovery import Cancelled, CancelReason, Interruption, Run, RunRest, at_rest
-from vs_runtime._step_loop import Interrupted, Recorded
+from vs_runtime._step_loop import Interrupted
 from vs_sim.api import yield_now
 from vs_sim.api.testing import HANG_GUARD_S
 
@@ -203,8 +203,14 @@ class StepLogContract:
 
         subject.drive(main())
 
-    def test_a_pause_that_lands_while_the_attempt_runs_does_not_refuse_its_result(self) -> None:
-        """Pausing is not parking: the attempt still runs, so its result is a result."""
+    def test_a_pause_now_parks_the_run_and_the_attempts_result_ends_the_attempt_not_the_step(
+        self,
+    ) -> None:
+        """Pausing now parks the run at once, while the attempt still runs, so its result is late.
+
+        The log turns it into the end of the attempt (``AttemptInterrupted``) and answers
+        ``Interrupted``: the step has no result and runs again after the resume.
+        """
         subject = self.step_log_under_test()
         run = subject.runs[0]
 
@@ -212,11 +218,15 @@ class StepLogContract:
             await subject.log.step_started(run)
             assert at_rest(subject.log.state) is None
             subject.push_input()
+            assert at_rest(subject.log.state) is RunRest.PARKED
             result = Cancelled(reason=CancelReason.WITHDRAWN)
             assert isinstance(
-                await subject.log.step_finished(run.tag, run.attempt, result), Recorded
+                await subject.log.step_finished(run.tag, run.attempt, result), Interrupted
             )
-            assert subject.log.open_step(run.tag) is None
+            attempts = subject.log.state.steps.of(run.tag)
+            assert attempts is not None
+            assert attempts.ended
+            assert subject.log.open_step(run.tag) is not None
 
         subject.drive(main())
 

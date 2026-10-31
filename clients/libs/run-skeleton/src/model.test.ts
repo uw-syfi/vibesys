@@ -120,7 +120,7 @@ test('every keyframe cut reconstructs the full skeleton and every seek equals a 
   }
 });
 
-test('fold owns its inputs and rejects gaps, duplicates and out of range seeks', () => {
+test('a folded state does not depend on the input records and rejects gaps, duplicates and out of range seeks', () => {
   const records = recordsFor(9);
   const initial = seedSkeleton();
   const state = foldSkeleton(initial, records);

@@ -54,7 +54,11 @@ once. An **open step** is a step with no result. An **epoch** is one process lif
 | `fold(log)` and `decide(state, now) -> actions` in `vs_core` | built, dormant (#3475 item 4a) |
 | Parked, draining, ended and resumed runs in the fold: the `RunEnded` record, `open_step`, the park advance (#3475, core gaps) | built, dormant |
 | Runner loop, `StepRunner` Protocol, `FakeStepRunner`, contract suite | built and dormant: `vs_runtime.api.step_runner` and `vs_runtime.api.testing`; no run selects it (#3475 item 4b) |
-| Runners: agent turn, workspace, Slurm and local evaluation, registered operation, adoption, executor | built and dormant (#3475 items 5a to 5c); `StepRouter` gives the loop its one runner |
+| Runners: agent turn (`DispatchTurn`, `ResumeSessionTurn`, registered `SESSION_TURN` operations) and workspace | built, dormant: `vs_runtime.api.agent_step_runners`, with `vs_agent.reap_step_agents` and `AgentSessions.forget_unfinished` beneath them (#3475 item 5a). [Which runner owns each request kind](#the-runner-of-each-request-kind) names the 13 kinds with no owner |
+| Runners: Slurm and local evaluation (`SlurmJobStepRunner`, `LocalJobStepRunner`) | built and dormant; the local runner reaps what a dead process left through a `StageWorkReaper`: `ProcessStageWorkReaper` ends the stage processes and `ContainerStageWorkReaper` the Docker candidate containers of the tag, both found by the step mark (see [Marks](#marks-on-local-stage-work)) |
+| Runners: registered operation and adoption | built and dormant: `vs_runtime.api.operation_step_runner` and `vs_runtime.api.adoption_step_runner`, each in the contract suite (#3475 item 5c) |
+| Runner of the 13 executor kinds: `ExecutorStepRunner` | built and dormant: `vs_runtime.api.executor_step_runner`, in the contract suite for every kind (#3475 item 5d) |
+| Per-environment `clear` (Docker, SkyPilot, Modal, Slurm, Host) | built, dormant: `RunEnvironment.agent_work_reaper` (#3475 item 5e); every environment clears an agent step, the Host environment on macOS through a leader that carries the mark, see [open risks](#open-risks) |
 | Pause drains within a deadline and records `Parked` | in progress (#3475 item 1) |
 | `vs-dst` kills and pauses at every log write and every await | built; `StepLoopHosting` runs the production loop for all five searches (PR 6a-2) |
 | `state.pb` as a cache, one-append commit | unbuilt |
@@ -115,7 +119,7 @@ Paths are under `libs/vs-runtime/src/vs_runtime/`.
 |---|---|---|---|
 | `_effect_fence.py` | 365 | `_evaluation_requests.py`, `_operation_requests.py`, `_observation_factory.py`, `_session_requests.py`, `_session_lifecycle_requests.py`, `_workspace_requests.py`, `_workspace_receipts.py`, `api/core.py`, `api/retained.py`, `api/fence_contracts.py` | Delete. `NothingHeld` and `MayHold` exist to prove "nothing is held"; `clear` replaces them |
 | `_receipt_store.py` | 486 | 27 modules; `run_once` is used by 11 executors | Delete 265: `run_once`, `authorize`, `history`, `seal`, the `Settled`/`Transient`/`Replayed` result types. Keep 220: `exclusive`, `load`, `record_once`, `replace`, `modify`, the crash-safe keyed document store behind workspace receipts, operation receipts and the evidence ledger |
-| `_access_settlement.py` | 377 | `_session_requests.py`, `_session_lifecycle_requests.py`, `api/core.py`, `api/retained.py` | Delete 103: `fence`, `require_clear`, `blocking`, `fenced_by`, `restore_interrupted`, `access_unproven`. Keep the other 274 lines, chiefly `begin` and `settle`: they enforce the role's workspace grant and revert unauthorized writes, which is policy, not recovery. `restore_interrupted` is what `clear` does for a turn |
+| `_access_settlement.py` | 377 | `_session_requests.py`, `_session_lifecycle_requests.py`, `api/core.py`, `api/retained.py` | Delete `access_unproven`. Keep the rest. `begin` and `settle` enforce the role's workspace grant and revert unauthorized writes, which is policy, not recovery. The runners also use `fence`, `receipt`, `restore_interrupted` and the new `rewind`, which `clear` of a turn calls to return the workspace to the baseline its receipt retains and reopen the key for the next attempt. `begin` calls `require_clear` and `blocking`, and the workspace's snapshot guard calls `fenced_by`, so the unsettled-writer index stays too: the 103 lines this row first counted for deletion are not removable without redesigning that guard |
 | `_evaluation_recovery.py` | 311 | `_polling_evaluation.py` and `_semantic_slurm_evaluation.py` take it as an optional argument that no production wiring passes; `api/slurm_evaluation_stack.py` | Delete |
 | `_writer_reconciliation.py` | 326 | `_run_environment.py` (`reconcile_writers` on four environments), `_evaluation_recovery.py` | Delete, with `reconcile_writers` and the no-op recovery mixins in `_run_environment.py` |
 | `_core_loop.py`, `_core_run.py`, `_core_preflight.py`, `_core_wiring.py` | 1,620, 751, 220, 217 | `src/vibesys/run/core_run.py`, `core_services.py`, `vs_dst` | Replace with the runner loop (about 600 lines). Recovery start, `HostRenewed`, lease upkeep, `_recovery_cannot_open` and `_blocked_for_good` go; dispatch, publication delivery and settle move into the loop |
@@ -166,18 +170,78 @@ what `clear` does for each.
 
 | Steps | Effect | After a crash | `clear(tag)` | Key |
 |---|---|---|---|---|
-| `ObserveOwnedJob`, `CollectEvidence`, `VerifyAdoption`; registered `QUERY` operations (`interpret_evidence`, `verify_revision`, board reads) | read only | safe | none | none |
+| `ObserveOwnedJob`, `CollectEvidence`, `VerifyAdoption`; registered `QUERY` operations (`interpret_evidence`, `verify_revision`, `export_patch`, board reads) | read only | safe | none | none |
 | `EnsureWorkspace`, `RestoreRevision` | create or reset an attempt's workspace to a recorded revision | safe: the end state is fixed by the request | none | tag (workspace is keyed by attempt and generation) |
 | `DiscardWorkspace`, `CloseAttemptScope`, `CloseSession`, `CancelTurn`, `CancelOwnedJob`, `EnsureSession` | release or bind a resource | safe: releasing twice is a no-op in the contract | none | tag |
 | `SnapshotAndRetain`, `SnapshotAndRetainRun`, `RetainRevision` | commit the workspace and write a retention ref | safe, and `decide` makes it safe: it runs the step only when every writer of its scope has a result, so it never reads a half-written tree ([Scope order](#scope-order)); the ref is content-addressed | none | revision id |
 | `AdoptRevision` | write the winner into the operator's checkout | safe: it sets the target state and verifies it | none | tag |
-| `DispatchTurn`, `ResumeSessionTurn`; registered `SESSION_TURN` operations | one agent turn: a process group, writes to the workspace, tokens, tool calls | safe after `clear` only | reap processes marked with the tag (`vs_agent.orphans` does this by run label today), remove the labelled container, reset the workspace to the commit recorded at `StepStarted`, drop the provider session id the killed turn wrote so the retry resumes the last completed turn | tag |
-| `SubmitMeasurement`; registered `OWNED_JOB` operations | an evaluation job on Slurm, Docker or a local process | Slurm: safe, the ledger finds the job by key. Docker and local: safe after `clear` | Slurm: adopt (job running or ended) or cancel by ledger key. Local and Docker: kill the stage process group, remove the labelled container, discard partial stage output | evaluation request digest plus tag |
-| registered `IDEMPOTENT_WRITE` operations: `render_artifacts`, `retain_revision`, `export_patch`, the dynamic handoff write, issue-board `ApplyIssueChanges` and `LogProgress` | content-addressed or keyed writes | safe: each carries a key the tracker or store checks before writing | none | existing key |
+| `DispatchTurn`, `ResumeSessionTurn`; registered `SESSION_TURN` operations | one agent turn: a process group, writes to the workspace, tokens, tool calls | safe after `clear` only | kill the processes carrying the tag in the run's containers (`vs_agent.reap_step_agents`; the containers belong to a role or a workspace and outlive the step, so none is removed), then, unless the journal holds an answer for the invocation, return the workspace to the baseline of its access receipt (`AccessSettlement.rewind`) and forget the invocation's unanswered journal record (`AgentSessions.forget_unfinished`), so the retry dispatches it again and resumes the last completed turn | tag |
+| `SubmitMeasurement`; registered `OWNED_JOB` operations | an evaluation job on Slurm, Docker or a local process | Slurm: safe, the ledger finds the job. Docker and local: safe after `clear` | Slurm: adopt (request claimed, queued, running or ended) and never cancel; `run` attaches. Local and Docker: cancel the process's own evaluation, kill the stage process group, remove the labelled container, discard partial stage output | Slurm: the ledger's content key, which `clear` computes from the step. Local: the tag |
+| registered `IDEMPOTENT_WRITE` operations: `render_artifacts`, `retain_revision`, the dynamic handoff write, issue-board `ApplyIssueChanges` and `LogProgress` | content-addressed or keyed writes | safe: each carries a key the tracker or store checks before writing | none | existing key |
 | `capture_command`, `validate_local` | run a command or validation recipe in a workspace | safe after `clear` | kill the process group, reset the workspace to the recorded commit | tag |
+
+The ledger keys a request by a hash of the content the job reads and its spec, not by the tag, so `clear(step, tag)` computes the key from the step: it opens a candidate worktree at the step's revision, hashes it, discards it, and reads the ledger. Two steps of one content therefore share one job, and a step that finds the job another step submitted attaches to it. A job that a pause or drain cancelled is final in the ledger, so the next attempt asks for a new handle of the tag (`-life-n`) and the ledger claims a new job; only an attempt that ended without a cancel attaches. A local evaluation never attaches: each run takes a fresh handle.
 
 `InspectRequest`, `InspectTurn`, `InspectOwnedJob`, `CancelOwnedResource` and `BlockRequest` are not in the
 table because they exist only to settle unknown outcomes. They are deleted.
+
+### The runner of each request kind
+
+Every kind of `libs/vs-core/src/vs_core/types/records.py:Request` (24, in six groups) has one runner, or
+is deleted, or has no owner yet. A runner is named only if its module exists in the pull request that
+lands it. "Executor step" below means a step that runs on its role's existing executor and needs no
+`clear` (the "none" rows of the table above); `ExecutorStepRunner` runs them.
+
+| Group | Kind | Runner | State |
+|---|---|---|---|
+| Session | `DispatchTurn` | `AgentTurnStepRunner` | built, dormant (5a) |
+| Session | `ResumeSessionTurn` | `AgentTurnStepRunner` | built, dormant (5a) |
+| Operation | `ExecuteRegisteredOperation` of lifecycle `SESSION_TURN` | `AgentTurnStepRunner`, through an `OperationTurns` the wiring supplies | built, dormant (5a); the wiring is 6a |
+| Operation | `ExecuteRegisteredOperation` of lifecycle `OWNED_JOB` | `SlurmJobStepRunner` or `LocalJobStepRunner` | 5b |
+| Operation | `ExecuteRegisteredOperation` of lifecycle `QUERY` or `IDEMPOTENT_WRITE` | `OperationStepRunner` | built, dormant (5c) |
+| Evaluation | `SubmitMeasurement` | `SlurmJobStepRunner` or `LocalJobStepRunner` | 5b |
+| Adoption | `AdoptRevision`, `VerifyAdoption` | `AdoptionStepRunner` | built, dormant (5c) |
+| Workspace | `EnsureWorkspace`, `RestoreRevision`, `DiscardWorkspace`, `CloseAttemptScope` | `ExecutorStepRunner` | built, dormant (5d) |
+| Workspace | `SnapshotAndRetain`, `RetainRevision` | `ExecutorStepRunner`; they need their scope's writers ended first | built, dormant (5d) |
+| Session | `EnsureSession`, `CancelTurn`, `CloseSession` | `ExecutorStepRunner` | built, dormant (5d) |
+| Session | `SnapshotAndRetainRun` | `ExecutorStepRunner`; it needs the run's writers ended first | built, dormant (5d) |
+| Evaluation | `ObserveOwnedJob`, `CollectEvidence`, `CancelOwnedJob` | `ExecutorStepRunner` | built, dormant (5d) |
+| Reconciliation | `InspectRequest`, `CancelOwnedResource`, `BlockRequest` | none: deleted | deleted at the cutover |
+| Session | `InspectTurn` | none: deleted | deleted at the cutover |
+| Evaluation | `InspectOwnedJob` | none: deleted | deleted at the cutover |
+
+Two things follow.
+
+- **13 kinds had no owner:** `EnsureWorkspace`, `RestoreRevision`, `DiscardWorkspace`,
+  `CloseAttemptScope`, `SnapshotAndRetain`, `RetainRevision`, `EnsureSession`, `CancelTurn`,
+  `CloseSession`, `SnapshotAndRetainRun`, `ObserveOwnedJob`, `CollectEvidence` and `CancelOwnedJob`.
+  `ExecutorStepRunner` (item 5d) runs them on their role's executor (`RequestExecutors`). It does not
+  answer `Cleared` for everything: each kind declares in `DECLARED_REPEATS` why a second run reaches
+  the same state, in one of four classes taken from the table above (`ReadOnly`, `FixedEnd` for
+  `EnsureWorkspace` and `RestoreRevision`, `ReleaseOrBind` for the releases, binds and cancels, and
+  `RetainByContent` for the snapshot and retain kinds). The constructor refuses a kind with no class and
+  a kind another runner owns. `WorkspaceStepRunner` is a decorator, not an owner: it records and restores
+  a workspace around an inner runner that runs the step.
+- **The snapshot kinds depend on ordering, not on a reap.** The table above says `clear` of
+  `SnapshotAndRetain`, `SnapshotAndRetainRun` and `RetainRevision` reaps the scope's tagged agent
+  processes. A process carries the tag of its own step, so a snapshot step's `clear(step, tag)` cannot find
+  them. What holds is that `decide` runs the snapshot only after every writer of the scope has a result,
+  and a result is only recorded after its runner's `clear` or its own cancel path ended the processes. That
+  ordering is `decide`'s rule from item 4a, and no test here proves it for the snapshot kinds.
+
+### Marks on local stage work
+
+A local evaluation runs its stages in a throwaway candidate session opened under `<run id>:<evaluation handle>`. Every stage command carries that mark as `VIBESYS_STEP_TAG` in its environment, and its process group leader carries it as an argument; a Docker candidate container also carries it as the `vibesys.step-tag` label. The run id is part of the mark because two runs on one host can use the same request id. What `clear` can find depends on what the host shows:
+
+| Host | Shown | Ends | Guarantee against pid reuse |
+|---|---|---|---|
+| Linux | the environment of every process (`/proc`) | each marked process, including a `setsid` descendant | a pidfd is opened before the process's start time is checked, so a reused pid is never signalled |
+| macOS | only arguments, so only the group leader | the leader's whole group | none atomic: the pid and its start second are checked, then the group is signalled; a wrong kill needs the pid space to wrap within that second and a new group leader to take the pid |
+| Docker | the container label, read from the daemon | the container, listed again afterwards to confirm | the container id |
+
+Not found on Linux: a process of another user (it cannot be this host's launcher's work), and a process of the same user that cleared its dumpable flag, such as an `ssh-agent` or a browser's sandbox, because `/proc/<pid>/environ` is then unreadable to its own user. Raising for them would make every clear fail on a desktop that runs one, and waiting would never end it, which is not the outage `ClearUnavailableError` is for. Any other failure to read the table (no file descriptors, no memory, an I/O error) is `ClearUnavailableError`, and a process still marked after the bounded wait that follows its SIGKILL is a survivor, as on macOS.
+
+Not found on macOS: the members of a group whose leader died first, and a `setsid` child, because nothing visible carries the mark any more. `clear` then reports a clean host although they run. The leader is a shell that waits for its command and never replaces itself, so it dies before its group only by an outside `SIGKILL`. A durable record of the group, kept through `Project`, would close this; it is not built. Partial output is never reset: each open of a stage stream is a new stream with a new id, so a re-run starts empty and the dead attempt's bytes stay as its history.
 
 ### What fits none
 
@@ -186,17 +250,41 @@ table because they exist only to settle unknown outcomes. They are deleted.
   ([sandboxing.md](sandboxing.md)) bounds what a turn can reach; that bound is the only protection.
 - **Descendants that escape the process group and the marker** (a `setsid` child). `clear` cannot prove
   none remain. A Docker run environment removes the container, which ends them. The Host run environment
-  has no such boundary, so its `clear` kills the recorded group and sweeps for the marker, and a ghost write
-  is caught by `AccessSettlement.settle` before a result is accepted. This is a named residual, not a proof.
+  has no such boundary, so its `clear` can only kill a recorded process group, and a ghost write is caught
+  by `AccessSettlement.settle` before a result is accepted. This is a named residual, not a proof. The
+  marker sweep this page first described is not available there: the Host environment serves macOS, where
+  `ps eww` does not show another process's environment (measured on Darwin 27.2: the marker of a child
+  process owned by the same user is absent from its `ps eww` line), so no process can be found by the
+  marker the way a Linux `/proc/<pid>/environ` scan finds it inside a container. The Host environment
+  launches an agent the way a stage command is launched, led by a shell that carries the mark as an argument,
+  and finds it through the process table of item 5d, so a Metal run on macOS starts and clears (see the
+  per-environment risk below).
+- **A cancelled adoption.** `Workspaces.adopt` publishes in a worker thread, and cancelling the step ends
+  the wait for it, not the thread. The commit a straggler writes is the commit the next attempt writes
+  (`adopt` is idempotent), so `AdoptionStepRunner.clear` removes nothing and only proves the workspace
+  answers.
 - **Usage of a killed attempt.** The provider may not report it. It is recorded as unknown, never zero.
 - **A backend that offers neither a client-chosen id nor a list by label.** No `clear` can exist for it,
   so it cannot pass the contract suite and cannot be added as a step runner.
 
 A step kind that is not safe to run twice is enforced by type in two places. `StepRunner.run` takes the
-tag as a required argument, so a runner cannot start work with no key. Registration of an operation
-(`libs/vs-core/src/vs_core/_registry.py:_validate_operation`) requires, for every non-`QUERY`
-descriptor, that its runner is named, and the registry test runs each registered runner through the
-contract suite, which replaces today's rule that such a descriptor declare `inspect`, `cancel` and `watch`.
+tag as a required argument, so a runner cannot start work with no key. A registered operation declares
+what a rerun may repeat as a `RerunPolicy` when it is given to `OperationStepRunner`: `ReadOnly`,
+`KeyedWrite` (names the key its owner reads back through `inspect`) or `ClearedWork` (a cleaner that
+kills the process group and resets the workspace). The runner refuses, naming the operation kind, an
+owned operation with no policy, one its lifecycle does not allow (`QUERY` takes `ReadOnly` or
+`ClearedWork`, `IDEMPOTENT_WRITE` takes `KeyedWrite` or `ClearedWork`, `OWNED_JOB` and `SESSION_TURN`
+take none because the evaluation and agent-turn runners own them), and a policy for an operation the
+catalog does not own. The table above classes `capture_command` and `validate_local` as `ClearedWork`
+and `export_patch` as read only, which is how their lifecycles are declared in code.
+
+Doc fact corrected against code (item 5c): the first version of this page put `export_patch` among
+the keyed writes. Its owner exports a patch and writes nothing, and it is declared `QUERY`.
+
+Open at the cutover: the policy is passed beside the catalog, so the production wiring must supply one
+per owned operation. `_validate_operation` does not yet name a runner for every non-`QUERY` descriptor;
+moving the policy onto `OperationEntry.owned` makes the omission a type error, and is a cutover change
+because every owner registration passes through it.
 
 ## Is core state a fold of the log
 
@@ -527,8 +615,8 @@ import it. Each runner is a `vs_runtime` implementation that adapts one library'
 (`vs_agent`, `vs_slurm`, `vs_project`). The library supplies the mechanism (kill by tag, adopt by ledger
 key); the issue's wording "one `StepRunner` each in `vs-agent`, `vs-slurm`" would need an upward edge.
 Implementations are named `<Variant><Role>`: `FakeStepRunner`, `AgentTurnStepRunner`,
-`WorkspaceStepRunner`, `SlurmJobStepRunner`, `LocalJobStepRunner`, `OperationStepRunner` and
-`AdoptionStepRunner`.
+`WorkspaceStepRunner`, `SlurmJobStepRunner`, `LocalJobStepRunner`, `OperationStepRunner`,
+`AdoptionStepRunner` and `ExecutorStepRunner`.
 
 ```python
 @dataclass(frozen=True)
@@ -800,7 +888,121 @@ These are facts the implementation must settle, found while checking the design 
   a provider that cannot resume from it falls back to a fresh conversation from retained content, which the
   client already does for a standalone message.
 - **Clear completeness on the Host run environment.** See [what fits none](#what-fits-none).
+- **The turn runner still goes through the session executor's fences.** `RuntimeSessionRequests.attempt`
+  skips the receipt of the result (`run_once`), but `_dispatch` still enters `EffectFences` and records a
+  `DispatchRecord` before the provider call. They hold across a rerun because `clear` runs first, and the
+  cutover removes them from `_dispatch` together with `_effect_fence.py`.
+- **Registered `SESSION_TURN` operations carry the reply as a turn does.** The runner puts the reply in the
+  report's `outcome_schema` and `outcome_json`, and leaves `operation_schema` unset: setting it needs the
+  registry's codec context, which only the wiring has. No production operation has that lifecycle today, so
+  the typed outcome of one is unproven until 6a wires `OperationTurns`.
+- **Provider session id of a killed turn.** `forget_unfinished` does not touch the provider conversation. A
+  provider that rewrites its session id mid-turn makes the retry's expected-checkpoint check fail loudly
+  (`SessionResumeError`) instead of resuming; the fix belongs to that provider's contract case.
+- **Per-environment `clear` (item 5e).** `RunEnvironment.agent_work_reaper(run_id, ...)` gives the reaper of
+  one step's agent work, by the step's tag, which `AgentTurnStepRunner` takes. The run-wide `reap_orphans`
+  would end every step's agent, so it is not a substitute. Each environment, and the step kinds a gap would
+  leave unable to run there:
+  - **Docker** sweeps the containers labelled with the run for processes whose initial environment carries
+    the tag (`DockerAgentWorkReaper`, over `vs_agent.reap_step_agents`) and removes no container. The
+    sweep prints how many processes it found, not how many it killed, and repeats until a sweep finds
+    none, so a kill that fails is never read as "nothing there". It runs as the container's own user,
+    which is the agent's: the agent image's `USER` is the agent and neither the agent's `docker exec` nor
+    the sweep passes `-u`. A process's environment is readable only by its owner (and by root with
+    `CAP_SYS_PTRACE`, which a default container lacks), so `-u root` would read nothing of the agent's.
+    Residual: a process of another non-root user is skipped; the agent is never started as one.
+  - **SkyPilot** runs the agent in the same editor container, so it gets that sweep, and then cancels the
+    remote jobs the step's agent asked for. The premise that a SkyPilot evaluation is a step is wrong in
+    code: no `SubmitMeasurement` runs on SkyPilot (or Modal); the agent calls the evaluator helper inside
+    its turn, which sends the request over the host-owned bridge, and the bridge journals the invocation.
+    So there is no evaluation runner to build, and `SlurmJobStepRunner`'s shape (a polling executor under
+    a handle) does not fit. The helper sends the step mark its process inherited, the journal records it as
+    `InvocationRecord.step_tag`, and `SkyPilotStepWorkReaper` cancels the tag's jobs by cluster and job id
+    (`cancel_step_jobs`). The cluster is named per run and holds other steps' jobs, so it is never touched.
+    A job whose id the host died before recording is found by its journaled name. Invocations journaled
+    before this change carry no tag, so a rerun cannot cancel their jobs. Open: a request the helper sent
+    just before it was killed can still be journaled after the sweep read the journal, and then its job
+    runs until its own end; the window is the bridge's handling time of one request.
+  - **Modal** has no per-step handle: its app is named per run (`VIBESYS_MODAL_APP_NAME`) and the
+    candidate's `modal run` is a client process inside the agent container, so it carries the step's mark
+    and is ended by the Docker sweep. What Modal then does with remote work whose client was killed is
+    Modal's own cleanup and is not measured here: after a kill, a function call may keep running, and
+    spending, until Modal ends it. A real-tier test with a Modal account is owed.
+  - **Slurm** edits in a local Docker container too and gets the Docker sweep. Its jobs are adopted, not
+    cleared (`SlurmJobStepRunner`). The ledger key names the content, not the run, so two runs on one
+    cluster that ask for one content share one job, and a step can attach to a job another run
+    submitted. A run's cancel goes through `relinquish`, which drops that run's lease and leaves the
+    job to every other run that holds one, and `clear` itself cancels only the job of an attempt the
+    ledger holds withdrawn, which no run wants by definition. A test pins that one run's cancel leaves a
+    job another run wants. `clear` asks the tag's own handle first: a job on record is adopted whatever
+    the workspace shows, and a handle on record whose plan cannot be keyed (the workspace lost the
+    candidate's commit) is `ClearUnavailableError`, never "never ran". A withdrawn entry is recorded
+    after the scancel was asked for, not after the job ended, so the scheduler is asked and the step is
+    cleared only once no live job of that attempt shows; a reading that cannot tell is
+    `ClearUnavailableError`. Residual: a submission a dead host had in flight when its attempt was
+    withdrawn can still start a job under that name afterwards; the ledger's orphan check cancels it by
+    name, and `clear` does not wait for that check.
+  - **Host** finds the agent's processes through the same process table and reaper as a local
+    evaluation's stage commands (`ProcessStageWorkReaper`). The mark an agent carries is the stage mark of
+    the step's own handle (`agent_mark`), so one reaper finds both. `confine_to_sandbox(leads_group=True)`
+    leads the host command with a shell that carries the mark as an argument (`step_shell_argv`), as
+    `LocalShellRunner` leads a stage command, because macOS shows another process's arguments and not its
+    environment. No step kind is refused: a Metal run on macOS starts and clears. A contract case runs the
+    reaper over a process table that shows what Linux shows and one that shows what macOS shows, and an
+    end-to-end case runs the production argv against the real `ps` or `/proc` of the host it runs on. The
+    macOS residual below applies to an agent too: a descendant that left its group, or whose group leader
+    died first, is not found.
+  - **A call returns only when its thread work has ended.** The loop starts nothing on a tag until its
+    `run` and `clear` have returned, and a task cancel is a nudge, so a runner that blocks in a thread
+    must not return while the thread goes on. Every runner and reaper that takes a `BlockingRunner`
+    shields it (`ShieldedBlockingRunner`): a cancelled caller waits for the function and then gets its
+    cancel. That covers the agent turn runner's cancel, inspect and `forget_unfinished`,
+    `SlurmJobStepRunner.clear`, and the Docker, SkyPilot, process and container reapers. The workspace
+    layer and the executors shield theirs, and the workspace, adoption, operation and executor runners
+    make no thread call of their own. `StepRunnerContract` holds a `DetachedBlockingRunner` (a Fake whose
+    call outlives its caller, as a thread does) shut, cancels a `run` in its stop path and a `clear`
+    mid-work, and fails if the call returned first; `StageWorkReaperContract` does the same for `reap`.
+    The case fails if a runner offers a blocking runner and never calls it from `run` or `clear`. It
+    runs on the local runner (both process tables), the agent turn runner and every reaper; Slurm's own
+    thread work is on the ledger path, which a dedicated test cancels.
+  - **Found on the way:** `SkyPilotEnvironment` inherited a Docker run-wide reap that read Docker settings
+    its configuration lacks, so resuming a SkyPilot run raised `AttributeError`; and the Modal and Slurm
+    environments never reaped their run-labelled agent containers on resume. Both are fixed, with a test
+    over every container environment.
+- **6a must replace the receipts the 13 executor kinds rely on.** In plain words: `EnsureWorkspace`,
+  `RestoreRevision`, `DiscardWorkspace`, `CloseAttemptScope`, `SnapshotAndRetain`, `RetainRevision`,
+  `EnsureSession`, `CancelTurn`, `CloseSession`, `SnapshotAndRetainRun`, `ObserveOwnedJob`, `CollectEvidence`
+  and `CancelOwnedJob` are run again after a crash with no `clear`, and that is safe today only because their
+  executors write a receipt for each request and read it back. The cutover deletes those receipts, so 6a has
+  to give each kind an equivalent that does the same job. Two need it spelled out: `EnsureSession` repeats
+  safely only under the same request id, and `SnapshotAndRetain` and `SnapshotAndRetainRun` find the
+  snapshot an interrupted attempt already made by its label only when they are resumed.
+- **The executor kinds repeat safely today because their executors keep receipts.** `ExecutorStepRunner`
+  runs on `RuntimeWorkspaceRequests`, `RuntimeSessionRequests` and the evaluation executor, which replay a
+  sealed result by request id and resume an unsealed one (`run_once`). Every kind passes a kill at sampled
+  durable writes through the runner (every write, for `EnsureSession`), but the cutover deletes
+  `run_once`, and these facts must then hold without it:
+  - `SnapshotAndRetain` and `SnapshotAndRetainRun` look for the snapshot an interrupted attempt already
+    committed by its label only when resumed (`_snapshot`, `find_snapshot` under `if resumed`). Without
+    the flag a repeat commits again: an unreferenced equal-tree commit, never a wrong result. The lookup
+    has to become unconditional. Measured on a repeat under another request id, each snapshot or retain
+    adds one retained revision (effects 9 to 10, 7 to 8, 7 to 8), where `EnsureWorkspace`,
+    `RestoreRevision`, `DiscardWorkspace`, `CancelTurn`, `CloseSession` and the evaluation kinds add none.
+  - `EnsureSession` repeats safely only under the same request id: the binding records the ensure that
+    made it, and a fresh-policy ensure under another id is refused ("session identity is already in use").
+    The tag is stable across epochs, so the runner is safe; a retry that minted a new id would not be.
+- **The snapshot kinds are unchecked here.** `RetainByContent` is safe once every writer of the scope has
+  a result, which is `decide`'s rule (item 4a); `ExecutorStepRunner` does not check it.
 - **Fold cost.** Measured, see [state.pb is a cache](#statepb-is-a-cache); the keyframe interval is open.
+- **Stage work left running on a Metal run on macOS.** This applies only to Metal runs on the macOS host, where
+  macOS shows other processes' arguments but not their environment. A stage command is found by the mark on
+  its process group leader. If something outside the run kills that leader with SIGKILL while other processes
+  of its group keep running, nothing visible carries the mark any more. `clear` does not find them and
+  reports the host clean, and the re-run then races them. A child that starts its own session is missed the
+  same way. Linux and Docker runs are not affected: Linux reads the mark from every process's environment,
+  and Docker removes the container. No durable record of the group is kept; accepted for now. See
+  [marks on local stage work](#marks-on-local-stage-work).
+- **Fold cost.** See [state.pb is a cache](#statepb-is-a-cache).
 - **Interim bodies.** Request and event bodies in the new records are not yet proto messages. Until phase 3
   generates them, schema evolution of those bodies follows today's envelope migration chain, which is
   deleted at phase 3.
