@@ -18,7 +18,7 @@ import {type OpenShell, openShell} from './shell-world.js';
 /** The run the journeys' worlds list on the dashboard: the queue example's task. */
 const RUN_BUTTON = /^queue-rs · mpmc/;
 
-export async function openRun(shell: OpenShell, button: RegExp = RUN_BUTTON): Promise<void> {
+async function openRun(shell: OpenShell, button: RegExp = RUN_BUTTON): Promise<void> {
   const main = one(shell.container, {role: 'main'});
   const press = one(main, {role: 'button', name: button});
   await act(async () => press.click());

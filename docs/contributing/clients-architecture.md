@@ -482,7 +482,7 @@ a browser in it.
   by a role and a name, as Playwright's locators do. A page is drawn in about 25 ms.
   The Run screen is the same: `openShell(null, {run})` installs the browser journeys' Fake gateway
   (`testing/gateway-preload.ts`) over a run (`testing/gateway-fixture.ts`, `testing/replay-world.ts`,
-  `testing/journey-records.ts`), `openRun` opens it from the dashboard as a person does, and
+  `testing/journey-records.ts`), `shellOnRun` opens it from the dashboard as a person does, and
   `shell.gateway` (`observe`, `disconnect`, `append`) and `shell.emit` feed it the live run's later events.
 - **A layout** (where a control sits, what overflows or overlaps, what the window's controls cover, a
   computed font, axe, a screenshot) needs a browser, so it is a Playwright spec in `e2e/`. A browser
