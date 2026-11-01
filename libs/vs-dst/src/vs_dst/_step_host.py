@@ -25,8 +25,6 @@ from vs_core.api import (
     ControlRefusedError,
     DispatchTurn,
     FlowCodeChanged,
-    HostFence,
-    HostId,
     ObservationStatus,
     ResumeSessionTurn,
     RunControlEvent,
@@ -262,7 +260,6 @@ class _Host:
             _executors(self._outside, self._journal, lambda: log.state, watcher, handle),
             self._outside.effects,
             clock,
-            epoch,
             world,
         )
         loop = asyncio.ensure_future(
@@ -468,7 +465,6 @@ class _WorldRunner:
         executors: RecoverableExecutors,
         effects: Effects,
         clock: VirtualClock,
-        epoch: int,
         world: World,
     ) -> None:
         self._executors = executors
@@ -476,7 +472,6 @@ class _WorldRunner:
         self._clock = clock
         self._holds = _holds_of(world)
         self._clear_fails = _clear_failures_of(world)
-        self._fence = HostFence(host_id=HostId(root="dst"), epoch=epoch)
 
     async def run(
         self,
@@ -502,7 +497,6 @@ class _WorldRunner:
             self._executors.begin(tag.root)
             return Cancelled(reason=await cancel.wait())
         context = ExecutionContext(
-            fence=self._fence,
             now_at=self._clock.now(),
             payload_digest=tag.root,
             until=Until(at=deadline_at),

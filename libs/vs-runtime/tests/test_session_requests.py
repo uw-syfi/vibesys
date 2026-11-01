@@ -38,7 +38,6 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from vs_core.api import RequestBase
-    from vs_runtime.api.executor_contexts import RevocableLease
 
 
 class World:
@@ -62,12 +61,11 @@ class World:
         self,
         request: RequestBase,
         *,
-        lease: RevocableLease | None = None,
         now_at: float | None = None,
         dies_before_seal: bool = False,
     ) -> ExecutionResult:
         return await self.host.run(
-            request, self.store(dies_before_seal=dies_before_seal), lease=lease, now_at=now_at
+            request, self.store(dies_before_seal=dies_before_seal), now_at=now_at
         )
 
 

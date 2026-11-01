@@ -12,11 +12,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vs_core.api import HostFence, HostId
 from vs_runtime.api.adoption_step_runner import AdoptionStepRunner
 from vs_runtime.api.agent_step_runners import (
     AgentTurnStepRunner,
-    RunWriter,
     TurnPaths,
     TurnState,
 )
@@ -99,26 +97,16 @@ class UnservedRunner:
         return Cleared()
 
 
-def build_run_runner(
-    services: RunnerServices, seams: RunnerSeams, *, clock: Clock, epoch: int
-) -> StepRouter:
-    """The router of a run in process ``epoch``, whose runners read the run clock ``clock``.
+def build_run_runner(services: RunnerServices, seams: RunnerSeams, *, clock: Clock) -> StepRouter:
+    """The router of a run, whose runners read the run clock ``clock``.
 
-    The fence names the writer of this epoch. The run's lock is the only fence, so it carries no
-    authority of its own: it is monotone per epoch because the executors still stamp it.
+    The run's lock is the only writer, so no runner carries an authority of its own.
     """
-    fence = HostFence(host_id=HostId(root=f"run:{services.run_id}"), epoch=epoch)
     bound = services.executors
     return build_step_runner(
         StepRunnerParts(
-            executors=ExecutorStepRunner(
-                bound.executors,
-                DECLARED_REPEATS,
-                fence=fence,
-                lease=_AlwaysHeld(),
-                clock=clock,
-            ),
-            turns=_turn_runner(services, seams, fence, clock),
+            executors=ExecutorStepRunner(bound.executors, DECLARED_REPEATS, clock=clock),
+            turns=_turn_runner(services, seams, clock),
             adoption=AdoptionStepRunner(
                 services.workspaces,
                 bound.evidence,
@@ -136,9 +124,7 @@ def build_run_runner(
     )
 
 
-def _turn_runner(
-    services: RunnerServices, seams: RunnerSeams, fence: HostFence, clock: Clock
-) -> StepRunner:
+def _turn_runner(services: RunnerServices, seams: RunnerSeams, clock: Clock) -> StepRunner:
     """The agent turn runner, or the refusal of a run that declares no agent role."""
     session = services.executors.sessions
     if session is None or services.sessions is None:
@@ -149,25 +135,12 @@ def _turn_runner(
             sessions=services.sessions, store=services.executors.store, blocking=services.blocking
         ),
         clock,
-        RunWriter(run_id=services.run_id, fence=fence),
+        services.run_id,
         seams.agent_work,
     )
 
 
 _NO_TURNS: OperationTurns = NoOperationTurns()
-
-
-class _AlwaysHeld:
-    """The execution lease of a run whose lock is held by this process for as long as it runs."""
-
-    def renew(self, *, now_at: float, lease_duration: float) -> None:
-        """Nothing expires: the kernel drops the lock when the process ends."""
-        del now_at, lease_duration
-
-    def verify(self, *, now_at: float) -> bool:
-        """The lock is held, or this process would not be running the step."""
-        del now_at
-        return True
 
 
 __all__ = [

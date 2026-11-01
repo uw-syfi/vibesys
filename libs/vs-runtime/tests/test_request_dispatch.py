@@ -12,8 +12,6 @@ from vs_core.api import (
     Access,
     ContractError,
     EnsureSession,
-    HostFence,
-    HostId,
     Request,
     RequestId,
     RoleId,
@@ -73,7 +71,6 @@ async def test_unrouted_request_type_is_a_typed_contract_error() -> None:
         ),
     )
     context = ExecutionContext(
-        fence=HostFence(host_id=HostId(root="host"), epoch=1),
         now_at=1,
         payload_digest="digest",
         until=Until(at=100.0),

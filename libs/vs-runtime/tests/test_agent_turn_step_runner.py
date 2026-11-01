@@ -40,7 +40,6 @@ from vs_prompts.api import TemplateRenderer
 from vs_runtime.api.agent_step_runners import (
     AgentTurnStepRunner,
     NotATurnError,
-    RunWriter,
     TurnPaths,
     TurnState,
     TurnWithoutResultError,
@@ -84,8 +83,6 @@ if TYPE_CHECKING:
 
 _RUN = "run-a"
 DEADLINE_AT = 1_000_000.0
-FENCE = core.HostFence(host_id=core.HostId(root="host"), epoch=1)
-WRITER = RunWriter(_RUN, FENCE)
 
 
 class Kind(StrEnum):
@@ -281,7 +278,7 @@ def open_world(root: Path, kind: Kind = Kind.DISPATCH) -> World:
     paths = TurnPaths(turns, lifecycle, FixedTurns())
 
     def restarted() -> AgentTurnStepRunner:
-        return AgentTurnStepRunner(paths, state, clock, WRITER, reaper)
+        return AgentTurnStepRunner(paths, state, clock, _RUN, reaper)
 
     return World(
         restarted(),
@@ -637,7 +634,7 @@ def test_a_registered_turn_that_is_not_the_operations_own_is_refused(
         TurnPaths(world.turns, world.lifecycle, Wrong()),
         world.state,
         world.clock,
-        WRITER,
+        _RUN,
         FakeStageWorkReaper(),
     )
 

@@ -189,7 +189,7 @@ def test_f17_resumed_epoch_adopts_with_dirty_staged_operator_files(tmp_path: Pat
                         settlement_id=SettlementId(root="winner"), revision=revision
                     ),
                 )
-                result = await _run(executor, request, epoch=2)
+                result = await _run(executor, request, repeat=True)
                 assert _status(result) is ObservationStatus.SUCCEEDED
                 (event,) = result.owner_events
                 assert isinstance(event, AdoptionObserved)
@@ -203,7 +203,7 @@ def test_f17_resumed_epoch_adopts_with_dirty_staged_operator_files(tmp_path: Pat
                 assert repository.head() == head
                 assert repository.has_staged_changes()
                 assert (path / "candidate.py").read_text() == "operator unstaged"
-                assert await _run(executor, request, epoch=3) == result
+                assert await _run(executor, request, repeat=True) == result
             finally:
                 for host in reversed(env.hosts):
                     await host.close()

@@ -151,7 +151,6 @@ class Host:
 
     env: WorkspaceEnv
     crash: RestoreCrash = field(default_factory=RestoreCrash)
-    epoch: int = 1
 
     def executor(self, store: KeyedDocuments) -> RuntimeWorkspaceRequests:
         return RuntimeWorkspaceRequests(
@@ -174,7 +173,6 @@ class Host:
         try:
             return await self._execute(self.executor(store), request)
         except HostDied:
-            self.epoch += 1
             self.crash.disarm()
             return await self._execute(self.executor(MortalStore(self.env)), request)
         finally:
@@ -183,7 +181,7 @@ class Host:
     async def _execute(
         self, executor: RuntimeWorkspaceRequests, request: Request
     ) -> ExecutionResult:
-        outcome = await executor.execute(request, _context(request, epoch=self.epoch))
+        outcome = await executor.execute(request, _context(request))
         assert isinstance(outcome, ExecutionResult), outcome
         return outcome
 

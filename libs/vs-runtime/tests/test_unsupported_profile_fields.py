@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vs_core.api import HostFence, HostId, ObservationStatus, Until
+from vs_core.api import ObservationStatus, Until
 from vs_evaluation.api import EvaluationStep, ProfileField, SemanticEvaluationStage
 from vs_project.api import Project
 from vs_runtime.api.core import ExecutionContext, KeyedDocuments, MeasurementRequests
@@ -118,10 +118,8 @@ async def test_a_request_the_capture_cannot_satisfy_resolves_as_a_rejection_nami
                 override=plan(stages=("profile",), candidate=stack.snapshot),
             )
             context = ExecutionContext(
-                fence=HostFence(host_id=HostId(root="host"), epoch=1),
                 now_at=5.0,
                 payload_digest=hashlib.sha256(request.model_dump_json().encode()).hexdigest(),
-                lease=_Lease(),
                 until=Until(at=100.0),
             )
 

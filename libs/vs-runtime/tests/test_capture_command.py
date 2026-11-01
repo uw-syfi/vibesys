@@ -10,7 +10,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vs_core.api import CaptureCommandBase, HostFence, HostId, RevisionId, RevisionRef, Until
+from vs_core.api import CaptureCommandBase, RevisionId, RevisionRef, Until
 from vs_runtime.api import CommandResult, Workspace
 from vs_runtime.api.core import CaptureCommandOwner, ExecutionContext, NotApplied
 from vs_runtime.api.testing import FakeCommands, FakeWorkspace, FakeWorkspaces
@@ -189,7 +189,6 @@ async def test_a_host_that_dies_mid_capture_leaves_nothing_after_the_replay(iden
 async def test_inspection_never_runs_the_command() -> None:
     owner, _, commands = _owner({"r1"})
     context = ExecutionContext(
-        fence=HostFence(host_id=HostId(root="h"), epoch=1),
         now_at=0.0,
         payload_digest="d",
         until=Until(at=100.0),

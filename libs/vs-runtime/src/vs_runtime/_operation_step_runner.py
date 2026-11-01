@@ -22,8 +22,6 @@ from pydantic import BaseModel, ValidationError
 from vs_core.api import (
     ContractError,
     ExecuteRegisteredOperation,
-    HostFence,
-    HostId,
     ObservationStatus,
     RequestObserved,
     Until,
@@ -44,10 +42,6 @@ if TYPE_CHECKING:
     from vs_runtime._operation_catalog import OperationCatalog, OperationEntry, OperationOwner
     from vs_runtime._step_runner import CancelSignal
     from vs_sim.api import Clock
-
-
-_NO_FENCE = HostFence(host_id=HostId(root="step-runner"), epoch=0)
-"""``ExecutionContext`` still requires a host fence; the run's lock is the only fence now."""
 
 
 class OperationStepRunner:
@@ -139,7 +133,6 @@ class OperationStepRunner:
         self, request: ExecuteRegisteredOperation, until_at: float, *, repeat: bool = False
     ) -> ExecutionContext:
         return ExecutionContext(
-            fence=_NO_FENCE,
             now_at=self._clock.now(),
             payload_digest=payload_digest_of(request),
             until=Until(at=until_at),

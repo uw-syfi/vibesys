@@ -32,7 +32,6 @@ if TYPE_CHECKING:
     from vs_core.api import RequestBase
     from vs_project.api import StateNamespace
     from vs_runtime.api.core import ExecutionResult
-    from vs_runtime.api.executor_contexts import RevocableLease
 
 
 class ProcessKilledError(
@@ -102,7 +101,6 @@ class CaseWorld(Protocol):
         self,
         request: RequestBase,
         *,
-        lease: RevocableLease,
         crash_at: int | None,
         digest: str | None = None,
         repeat: bool = False,

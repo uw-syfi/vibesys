@@ -203,7 +203,7 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
         controls.bring_in(log, clock.now())
         rest = await run_step_loop(
             observed,
-            services.runner(clock, epoch),
+            services.runner(clock),
             clock,
             StepLoopTiming(
                 cancel_grace_s=services.cancellation_bound_seconds,

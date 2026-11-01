@@ -19,8 +19,6 @@ from vs_core.api import (
     AttemptRef,
     CloseAttemptScope,
     CollectEvidence,
-    HostFence,
-    HostId,
     MeasurementFailure,
     ObservationStatus,
     ObserveOwnedJob,
@@ -37,7 +35,7 @@ from vs_runtime.api.core import (
     RequestExecutors,
 )
 from vs_runtime.api.evaluation_step_runners import SlurmJobStepRunner, SlurmScheduler
-from vs_runtime.api.executor_contexts import RevocableLease, receipt_store_in
+from vs_runtime.api.executor_contexts import receipt_store_in
 from vs_runtime.api.executor_step_runner import DECLARED_REPEATS, ExecutorStepRunner
 from vs_runtime.api.slurm_evaluation_stack import (
     ScenarioCluster,
@@ -756,8 +754,6 @@ class Served:
         self.runner = ExecutorStepRunner(
             RequestExecutors(evaluation=evaluation),
             DECLARED_REPEATS,
-            fence=HostFence(host_id=HostId(root="host"), epoch=1),
-            lease=RevocableLease(),
             clock=world.clock,
         )
 

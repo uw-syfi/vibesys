@@ -11,7 +11,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from vs_core.api import HostFence, HostId, RevisionId, RevisionRef, Until, ValidateLocalBase
+from vs_core.api import RevisionId, RevisionRef, Until, ValidateLocalBase
 from vs_runtime.api import CommandResult, member_workspace_id
 from vs_runtime.api.core import ExecutionContext, NotApplied, ValidateLocalOwner
 from vs_runtime.api.infrastructure import LocalValidator
@@ -236,7 +236,6 @@ async def test_a_run_without_isolated_candidates_refuses_instead_of_touching_the
 async def test_inspection_never_runs_a_recipe(tmp_path: Path) -> None:
     owner, _, commands, _ = _owner(tmp_path, {"r1"})
     context = ExecutionContext(
-        fence=HostFence(host_id=HostId(root="h"), epoch=1),
         now_at=0.0,
         payload_digest="d",
         until=Until(at=100.0),

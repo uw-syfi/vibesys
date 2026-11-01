@@ -35,8 +35,6 @@ from vs_core.api import (
     DispatchTurn,
     EnsureSession,
     EnsureWorkspace,
-    HostFence,
-    HostId,
     InvocationId,
     InvocationRef,
     JobObserved,
@@ -57,7 +55,6 @@ from vs_core.api import (
 )
 from vs_core.api.recovery import Finished
 from vs_runtime.api.core import ExecutionResult, RequestExecutors
-from vs_runtime.api.executor_contexts import RevocableLease
 from vs_runtime.api.executor_contracts import ProcessKilledError
 from vs_runtime.api.executor_step_runner import (
     DECLARED_REPEATS,
@@ -106,7 +103,6 @@ THIRTEEN = frozenset(
 """The kinds with no runner of their own, as ``docs/contributing/run-recovery.md`` lists them."""
 
 DEADLINE = 600.0
-FENCE = HostFence(host_id=HostId(root="host"), epoch=1)
 SCOPE = Scope(owner=RunId(root="run"), generation=0)
 HANGS = "hangs"
 QUICK = "quick"
@@ -120,9 +116,7 @@ def tag_named(name: str) -> RequestId:
 def runner_over(
     executors: RequestExecutors, repeats: Mapping[type[Request], Repeat] = DECLARED_REPEATS
 ) -> ExecutorStepRunner:
-    return ExecutorStepRunner(
-        executors, repeats, fence=FENCE, lease=RevocableLease(), clock=VirtualClock()
-    )
+    return ExecutorStepRunner(executors, repeats, clock=VirtualClock())
 
 
 # The declaration
@@ -280,8 +274,6 @@ def contract_for(kind: type[Request]) -> type[StepRunnerContract]:
             runner = ExecutorStepRunner(
                 RequestExecutors(workspaces=executor, sessions=executor, evaluation=executor),
                 DECLARED_REPEATS,
-                fence=FENCE,
-                lease=RevocableLease(),
                 clock=clock,
             )
 
@@ -402,22 +394,17 @@ class Rig:
 
     def __init__(self, world: CaseWorld) -> None:
         self.world = world
-        self.lease = RevocableLease()
         self.crash_at: int | None = None
 
     async def execute(self, request: Request, context: ExecutionContext) -> ExecutionResult:
         # The world builds the context a shell would, for its own host; the runner's say is `repeat`.
-        return await self.world.execute(
-            request, lease=self.lease, crash_at=self.crash_at, repeat=context.repeat
-        )
+        return await self.world.execute(request, crash_at=self.crash_at, repeat=context.repeat)
 
     def runner(self) -> ExecutorStepRunner:
         """A runner with no memory of an earlier one: a restarted process."""
         return ExecutorStepRunner(
             RequestExecutors(workspaces=self, sessions=self, evaluation=self),
             DECLARED_REPEATS,
-            fence=FENCE,
-            lease=self.lease,
             clock=VirtualClock(),
         )
 

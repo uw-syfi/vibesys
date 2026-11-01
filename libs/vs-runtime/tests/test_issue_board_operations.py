@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from vs_core.api import HostFence, HostId, OperationRegistry, Until
+from vs_core.api import OperationRegistry, Until
 from vs_issue_tracker.api import (
     AppliedChanges,
     ApplyIssueChanges,
@@ -35,7 +35,6 @@ from vs_runtime.api.core import (
     IssueBoardOwner,
     NotApplied,
 )
-from vs_runtime.api.executor_contexts import RevocableLease
 from vs_sim.api.testing import ManualClock, SimThreads, examples
 
 if TYPE_CHECKING:
@@ -70,10 +69,8 @@ def execute(owner: IssueBoardOwner, request: OperationRequest) -> object:
 
 def _context(request: OperationRequest) -> ExecutionContext:
     return ExecutionContext(
-        fence=HostFence(host_id=HostId(root="host"), epoch=1),
         now_at=5.0,
         payload_digest=hashlib.sha256(request.model_dump_json().encode()).hexdigest(),
-        lease=RevocableLease(),
         until=Until(at=100.0),
     )
 

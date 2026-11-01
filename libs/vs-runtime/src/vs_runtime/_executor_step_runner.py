@@ -60,9 +60,9 @@ from vs_runtime._step_runner import Cleared
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from vs_core.api import HostFence, Observation, Request, RequestId
+    from vs_core.api import Observation, Request, RequestId
     from vs_core.api.recovery import StepResult
-    from vs_runtime._core_requests import ExecutionLease, ExecutionOutcome, RequestExecutors
+    from vs_runtime._core_requests import ExecutionOutcome, RequestExecutors
     from vs_runtime._step_runner import Adopted, CancelSignal
     from vs_sim.api import Clock
 
@@ -134,22 +134,16 @@ class ExecutorStepRunner:
         executors: RequestExecutors,
         repeats: Mapping[type[Request], Repeat],
         *,
-        fence: HostFence,
-        lease: ExecutionLease,
         clock: Clock,
     ) -> None:
-        """Bind the executors, the class each served kind declares, and the host authority.
+        """Bind the executors and the class each served kind declares.
 
         Raises ``ContractError`` naming the kind when one of the served kinds declares no class,
-        or when a kind another runner owns is declared. *fence* and *lease* are the host
-        authority the executors still check: one run lock holder is the only writer, so the
-        fence does not change within a run.
+        or when a kind another runner owns is declared.
         """
         _check_repeats(repeats)
         self._executors = executors
         self._repeats = dict(repeats)
-        self._fence = fence
-        self._lease = lease
         self._clock = clock
 
     async def run(
@@ -163,11 +157,9 @@ class ExecutorStepRunner:
         """Run the step on its executor; ``Cancelled`` once *cancel* is set and the executor ended."""
         self._served(step, tag)
         context = ExecutionContext(
-            fence=self._fence,
             now_at=self._clock.now(),
             until=Until(at=deadline_at),
             payload_digest=payload_digest_of(step),
-            lease=self._lease,
             repeat=attempt > 1,
         )
         work = asyncio.ensure_future(self._executors.dispatch(step, context))
