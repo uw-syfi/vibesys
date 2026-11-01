@@ -201,7 +201,6 @@
 {"path": "tests/support/stream_session_world.py", "rule": "real_impl", "count": 3}
 {"path": "tests/support/workspace_world.py", "rule": "real_impl", "count": 4}
 {"path": "tests/system/agent_evaluation/test_bridge.py", "rule": "real_impl", "count": 1}
-{"path": "tests/system/agent_tools/test_core_property.py", "rule": "real_impl", "count": 3}
 {"path": "tests/vibesys/agents/test_stub_runner.py", "rule": "real_impl", "count": 4}
 {"path": "tests/vibesys/api/test_auxiliary_agents.py", "rule": "real_impl", "count": 15}
 {"path": "tests/vibesys/api/test_fail_fast.py", "rule": "real_impl", "count": 8}
