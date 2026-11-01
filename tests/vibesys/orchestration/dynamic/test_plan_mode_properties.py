@@ -97,9 +97,7 @@ def _greedy_order(plan: list[dict[str, Any]]) -> list[str]:
             if item["id"] not in order and all(dep in order for dep in item["depends_on"])
         ]
         measuring = {item["id"] for item in plan if item["evaluate"] == "trusted"} & set(order[-1:])
-        unblocked = [
-            item for item in ready if not measuring.intersection(item["depends_on"])
-        ]
+        unblocked = [item for item in ready if not measuring.intersection(item["depends_on"])]
         order.append((unblocked or ready)[0]["id"])
     return order
 
