@@ -29,10 +29,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ._request_recovery import is_open
 from ._run_pause import run_pause
 from .types.common import PauseOwner, RunStatus
-from .types.records import RequestPhase
+from .types.records import RequestPhase, is_open
 from .types.sessions import DispatchTurn, ResumeSessionTurn
 
 if TYPE_CHECKING:

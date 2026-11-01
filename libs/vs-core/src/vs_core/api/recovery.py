@@ -28,7 +28,6 @@ from vs_core._decide import (
     starts_run,
 )
 from vs_core._refusal import RecordRefusal, RecordRefusedError, RefusalReason
-from vs_core._request_recovery import COMMAND_KINDS
 from vs_core._search_events import Translated
 from vs_core._search_log import (
     CHECKPOINT_GROWTH,
@@ -55,6 +54,7 @@ from vs_core._step_log import (
 )
 from vs_core.types.common import ClosePolicy, EndPolicy
 from vs_core.types.records import (
+    COMMAND_KINDS,
     StepEffect,
     request_close_policy,
     request_effect,

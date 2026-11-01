@@ -50,7 +50,6 @@ from ._proofs import (
 )
 from ._quota_pause_clock import credit_quota_pause
 from ._registry import ContractError
-from ._request_recovery import is_open
 from ._routing import SIGNAL_ORDER, event_area
 from ._run_pause import EpochFacts, control_refusal, pause_outlived, reopened, stop_standing
 from ._session_inputs import check_declared_target, may_have_been_read
@@ -152,6 +151,7 @@ from .types.records import (
     RequestRecord,
     RequestUndispatchable,
     Scheduled,
+    is_open,
     request_lifecycle,
 )
 from .types.scheduling import (

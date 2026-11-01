@@ -109,6 +109,10 @@ type RegisteredOperationRequest = ExecuteRegisteredOperation
 type ReconciliationRequest = Annotated[
     InspectRequest | CancelOwnedResource | BlockRequest, Field(discriminator="kind")
 ]
+COMMAND_KINDS: frozenset[type[Request]] = frozenset(
+    {InspectRequest, CancelOwnedResource, BlockRequest}
+)
+"""The commands of reconciliation. Every other kind is a canonical request: a step ``decide`` runs."""
 type Request = Annotated[
     WorkspaceRequest
     | SessionRequest
@@ -328,6 +332,28 @@ class RequestRecord(OutcomeValue):
                 )
             self.evaluation_result.validate_observation(self.observation)
         return bind_outcome(self, info)
+
+
+_OPEN_PHASES = (RequestPhase.PREPARED, RequestPhase.DISPATCHED, RequestPhase.RECONCILING)
+
+
+def _canonical(record: RequestRecord) -> bool:
+    return type(record.request) not in COMMAND_KINDS
+
+
+def is_step(record: RequestRecord) -> bool:
+    """A canonical request, which the recovery rule runs: not a command of reconciliation."""
+    return _canonical(record)
+
+
+def is_open(record: RequestRecord) -> bool:
+    """A canonical record that has not ended: core owes it a result by its ``until``."""
+    return _canonical(record) and record.phase in _OPEN_PHASES
+
+
+def command_open(record: RequestRecord) -> bool:
+    """An inspection, cancel or block that has not ended: its limit ends it if nothing else."""
+    return not _canonical(record) and record.phase in _OPEN_PHASES
 
 
 class ChildObservationWatermark(Value):

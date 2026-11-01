@@ -21,9 +21,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ._request_recovery import is_open
 from .types.common import ClosePolicy
-from .types.records import StepEffect, request_close_policy, request_effect
+from .types.records import StepEffect, is_open, request_close_policy, request_effect
 
 if TYPE_CHECKING:
     from .types.common import RequestId
