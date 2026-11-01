@@ -16,7 +16,7 @@ from __future__ import annotations
 import hashlib
 from collections import Counter
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 from tests.support.dynamic_script import FACTS, Executors, lease
 from tests.support.skeleton_strategy import (
@@ -43,7 +43,6 @@ from vs_core.api import (
     ObserveOwnedJob,
     OwnedJob,
     ParentVerification,
-    PauseOwner,
     RenderedArtifacts,
     ResourceId,
     ResumeSessionTurn,
@@ -141,39 +140,12 @@ def _nth(outcomes: tuple[str, ...], position: int, default: str) -> str:
     return default if not outcomes else outcomes[min(position, len(outcomes) - 1)]
 
 
-@dataclass(frozen=True)
-class Pause:
-    """The operator's pause, sent while the ``at``-th request executes (each, for a tuple).
-
-    ``action`` is the pause that drains or pause-now; ``drain_seconds`` is the deadline it carries.
-    """
-
-    at: int | tuple[int, ...]
-    action: Literal["pause", "pause_now"] = "pause"
-    drain_seconds: float | None = None
-
-    @property
-    def positions(self) -> tuple[int, ...]:
-        """The requests it is sent at."""
-        return (self.at,) if isinstance(self.at, int) else self.at
-
-    def event(self, position: int, now_at: float) -> RunControlEvent:
-        """The event sent at the request in ``position``."""
-        control = ControlInput(
-            control_id=ControlId(root=f"{self.action}-{position}"),
-            action=self.action,
-            owner=PauseOwner.OPERATOR if self.action == "pause" else None,
-        )
-        return RunControlEvent(control=control, now_at=now_at, drain_seconds=self.drain_seconds)
-
-
 class Faulted:
     """A world whose measurements and turns go the way `Outcomes` says, over the scripted world.
 
     With ``stop_at`` the operator's stop arrives while the ``stop_at``-th request executes,
     the way a control arrives mid-run in production (the shell admits it between steps); a tuple
-    stops the run at each of those requests, across the hosts a resume starts. ``pause`` sends the
-    operator's pause the same way.
+    stops the run at each of those requests, across the hosts a resume starts.
     """
 
     def __init__(
@@ -181,15 +153,12 @@ class Faulted:
         outcomes: Outcomes | None = None,
         *,
         stop_at: int | tuple[int, ...] | None = None,
-        pause: Pause | None = None,
         base: SkeletonScript | None = None,
     ) -> None:
         """Layer ``outcomes`` over ``base`` (a plain scripted world by default)."""
         self._base = base or SkeletonScript()
         self._outcomes = outcomes or Outcomes()
         self._stops = (stop_at,) if isinstance(stop_at, int) else stop_at or ()
-        self._pause = pause
-        self.paused = False
         self._shell: CoreRuntime[Any] | None = None
         self.clock: VirtualClock | None = None
         """The clock of the host that is running, for an executor that waits on it."""
@@ -230,9 +199,6 @@ class Faulted:
                 control_id=ControlId(root=f"stop-{position}"), action="stop", mode=StopMode.DRAIN
             )
             self._shell.submit(RunControlEvent(control=stop, now_at=now_at), now_at=now_at)
-        if self._pause is not None and position in self._pause.positions:
-            self.paused = True
-            self._shell.submit(self._pause.event(position, now_at), now_at=now_at)
 
     def _measurement(self, request: Request) -> Answer | None:
         if not isinstance(request, SubmitMeasurement):
