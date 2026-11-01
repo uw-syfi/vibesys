@@ -75,7 +75,7 @@ from vs_sim.api.testing import SimNetwork, loop_threads
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_core.api import CoreState, Request
+    from vs_core.api import CoreEvent, CoreState, Request, Transition
     from vs_core.api.testing import Answer
     from vs_dst.api import Admission
     from vs_runtime.api.core import SnapshotWorkspace
@@ -226,9 +226,9 @@ class _ShownAdmission:
         """The state shown in place of the committed one."""
         return self._shown
 
-    def admit(self, event: object, *, now_at: float) -> object:
+    def admit(self, event: CoreEvent, *, now_at: float) -> Transition:
         """The real admission."""
-        return self._inner.admit(event, now_at=now_at)  # type: ignore[arg-type]
+        return self._inner.admit(event, now_at=now_at)
 
 
 def _submitted(request: SubmitMeasurement) -> Answer:
@@ -439,7 +439,7 @@ class _Host:
         closing = core.model_copy(
             update={"run": core.run.model_copy(update={"status": RunStatus.CLOSING})}
         )
-        self._bridge.attach(_ShownAdmission(self._admission, closing), self._clock)  # type: ignore[arg-type]
+        self._bridge.attach(_ShownAdmission(self._admission, closing), self._clock)
         try:
             assert self._bridge.yielded(request) is None, "the gate refuses at the end of the turn"
         finally:
@@ -565,8 +565,9 @@ class _Host:
             if step[0] in ("submit", "timeout_retry") and "submission budget" in reply.error:
                 world.budget_refused.append(world.edits[-1])
             return False
-        if step[0] in ("submit", "timeout_retry") and "handle_id" in reply.result:  # type: ignore[operator]
-            handle = reply.result["handle_id"]  # type: ignore[index]
+        result = reply.result or {}
+        if step[0] in ("submit", "timeout_retry") and "handle_id" in result:
+            handle = str(result["handle_id"])
             assert any(
                 call.request_id is not None and handle_for(call.request_id) == handle
                 for call in self._admission.admitted_core.evaluation.agent_calls
