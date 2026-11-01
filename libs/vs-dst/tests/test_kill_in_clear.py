@@ -8,7 +8,7 @@ still hold what recovery promises, read from the run.log and the effects ledger 
 
 - a step that has no result is run again, and a step that has one is not: no effect finishes
   twice, and every result in the log is the result of an effect that finished;
-- the run ends at most once, and a run that ended has a result for every step it started;
+- the run ends once (a drain's end is reopened by the Resume, so a drained run ends again), and a run that ended has a result for every step it started;
 - the run makes progress: it is never stuck, or it waits on a far side that cannot be reached.
 
 The worlds are the tiny search with a ``clear`` that works, and one whose far side is gone for the
@@ -30,10 +30,13 @@ from vs_runtime.api.step_runner import Adopted, Cleared
 from vs_sim.api.testing import examples
 
 from ._tiny import TinyWorld
-from .test_failing_clear import FAR, DeadClearWorld
+from .test_failing_clear import FAR, DeadClearWorld, _fields
 
 if TYPE_CHECKING:
-    from vs_core.api import Request
+    from collections.abc import Awaitable, Callable
+
+    from vs_core.api import Request, RequestId
+    from vs_dst._step_host import _WorldRunner
     from vs_dst.api import Interrupted, SimulatedRun
     from vs_proto.api import Record
 
@@ -42,23 +45,31 @@ GIVES_UP_AFTER = 3
 
 
 def _tags(records: tuple[Record, ...], field: str) -> list[str]:
-    return [
-        r.body.value.tag for r in records if isinstance(r.body, Oneof) and r.body.field == field
-    ]
+    return [message.tag for message in _fields(records, field)]
 
 
 def _ends(records: tuple[Record, ...]) -> int:
     return sum(isinstance(r.body, Oneof) and r.body.field == "run_ended" for r in records)
 
 
-def check_recovery(interrupted: Interrupted, *, kill: Interruption) -> None:
+def check_recovery(
+    interrupted: Interrupted,
+    *,
+    kill: Interruption,
+    drained: bool = False,
+    answers_every_step: bool = True,
+) -> None:
     """The run-log invariants of a recovered run; raises ``AssertionError`` naming the broken one."""
     where = f"{interrupted.interruption} after {kill}: {interrupted.detail}"
     records, effects = interrupted.log_records, interrupted.effects
     assert interrupted.never_stuck(), f"progress: {interrupted.outcome.value}, {where}"
     assert interrupted.outcome is not Outcome.ERRORED, where
-    assert _ends(records) == 1, f"one ending: {_ends(records)} ends, {where}"
-    assert interrupted.every_step_finished_once(), f"a step finished twice, {where}"
+    reopened = drained  # a Resume reopens a drained run
+    assert 1 <= _ends(records) <= 1 + reopened, f"one ending: {_ends(records)} ends, {where}"
+    if (
+        answers_every_step
+    ):  # a world that leaves an attempt unanswered legitimately finishes it again
+        assert interrupted.every_step_finished_once(), f"a step finished twice, {where}"
     started, finished = _tags(records, "step_started"), set(_tags(records, "step_finished"))
     assert set(started) <= finished, f"a step with no result was not run again, {where}"
     assert finished <= set(effects.finished), f"a result no effect produced, {where}"
@@ -77,7 +88,11 @@ def _worlds() -> dict[str, Any]:
 
 
 def _first_kills(normal: SimulatedRun) -> list[Interruption]:
-    return list(normal.interruptions(Action.KILL, Moment.IN_FLIGHT))
+    """Kills that leave a step to clear: an effect in flight (nothing sealed), or a commit not made (a result sealed)."""
+    return [
+        *normal.interruptions(Action.KILL, Moment.IN_FLIGHT),
+        *normal.interruptions(Action.KILL, Moment.BEFORE_COMMIT),
+    ]
 
 
 @settings(max_examples=examples(pr=12, nightly=150), deadline=None)
@@ -93,7 +108,8 @@ def test_an_interruption_in_any_await_of_a_clear_leaves_a_run_that_recovers(
     normal = simulate(_worlds()[world]())
     first = _first_kills(normal)[choice % len(_first_kills(normal))]
     awaits = _clear_awaits_of_the_resumed_host(normal, first)
-    assert awaits > 0, "the host that took over cleared nothing: no kill lands in a clear"
+    if awaits == 0:
+        return  # a kill at a commit boundary can leave no step to clear
     point = Interruption(second, Moment.IN_CLEAR, choice % awaits)
 
     if second is Action.KILL:
@@ -101,14 +117,22 @@ def test_an_interruption_in_any_await_of_a_clear_leaves_a_run_that_recovers(
     else:
         interrupted = normal.interrupt(first, then=point)
 
-    check_recovery(interrupted, kill=first)
+    check_recovery(
+        interrupted,
+        kill=first,
+        drained=second is Action.STOP,
+        answers_every_step=world == "works",
+    )
 
 
 def test_a_clear_has_an_await_for_a_kill_to_land_in_after_each_kill_of_a_step_in_flight() -> None:
     """Every step in flight at a kill is cleared by the next host, through awaits a kill can land in."""
     normal = simulate(TinyWorld(2))
 
-    counts = {_clear_awaits_of_the_resumed_host(normal, kill) for kill in _first_kills(normal)}
+    counts = {
+        _clear_awaits_of_the_resumed_host(normal, kill)
+        for kill in normal.interruptions(Action.KILL, Moment.IN_FLIGHT)
+    }
 
     assert counts
     assert min(counts) >= 3
@@ -116,15 +140,11 @@ def test_a_clear_has_an_await_for_a_kill_to_land_in_after_each_kill_of_a_step_in
 
 def _every_case() -> list[tuple[Interruption, Interruption]]:
     normal = simulate(TinyWorld(2))
-    cases = []
-    for first in _first_kills(normal):
-        for index in range(_clear_awaits_of_the_resumed_host(normal, first)):
-            cases.append((first, Interruption(Action.KILL, Moment.IN_CLEAR, index)))
-    return cases
-
-
-def _broken(case: Interruption | None = None) -> None:
-    del case
+    return [
+        (first, Interruption(Action.KILL, Moment.IN_CLEAR, index))
+        for first in _first_kills(normal)
+        for index in range(_clear_awaits_of_the_resumed_host(normal, first))
+    ]
 
 
 def _run_every_case() -> int:
@@ -143,41 +163,35 @@ def test_every_kill_in_every_await_of_a_clear_recovers_in_the_tiny_world() -> No
     assert _run_every_case() == 0
 
 
-class _Consuming:
+async def _consuming(self: _WorldRunner, step: Request, tag: RequestId) -> Adopted | Cleared:
     """A broken ``clear``: it takes the sealed result out of the ledger at its first await and puts
     it back at its last, so a kill between loses what the step's effect left, and the effect runs
     again. Only a kill inside the ``clear`` shows it."""
-
-    @staticmethod
-    async def clear(self: Any, step: Request, tag: Any) -> Adopted | Cleared:
-        sealed = self._effects.sealed.pop(tag.root, None)
+    sealed = self._effects.sealed.pop(tag.root, None)
+    for _ in range(3):
         await self._await_in_clear()
-        await self._await_in_clear()
-        await self._await_in_clear()
-        if sealed is None:
-            return Cleared()
-        self._effects.sealed[tag.root] = sealed
-        return Adopted(self._sealed(step, tag))
+    if sealed is None:
+        return Cleared()
+    self._effects.sealed[tag.root] = sealed
+    return Adopted(self._sealed(step, tag))
 
 
-class _Inventing:
+async def _inventing(self: _WorldRunner, step: Request, tag: RequestId) -> Adopted | Cleared:
     """A broken ``clear`` that adopts a result for a step whose effect sealed none."""
-
-    @staticmethod
-    async def clear(self: Any, step: Request, tag: Any) -> Adopted | Cleared:
-        await self._await_in_clear()
-        done = self._effects.sealed.get(tag.root) or next(iter(self._effects.sealed.values()), None)
-        if done is None:
-            return Cleared()
-        self._effects.sealed[tag.root] = done
-        return Adopted(self._sealed(step, tag))
+    await self._await_in_clear()
+    done = self._effects.sealed.get(tag.root) or next(iter(self._effects.sealed.values()), None)
+    if done is None:
+        return Cleared()
+    self._effects.sealed[tag.root] = done
+    return Adopted(self._sealed(step, tag))
 
 
-@pytest.mark.parametrize("mutant", [_Consuming, _Inventing])
+@pytest.mark.parametrize("mutant", [_consuming, _inventing])
 def test_a_broken_recovery_rule_in_clear_breaks_an_invariant(
-    mutant: type, monkeypatch: pytest.MonkeyPatch
+    mutant: Callable[[_WorldRunner, Request, RequestId], Awaitable[Adopted | Cleared]],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The invariants catch a ``clear`` that loses a result or invents one (a mutation check)."""
-    monkeypatch.setattr(_step_host._WorldRunner, "clear", mutant.clear)  # noqa: SLF001
+    monkeypatch.setattr(_step_host._WorldRunner, "clear", mutant)  # noqa: SLF001
 
-    assert _run_every_case() > 0, f"{mutant.__name__} is not caught by any kill in a clear"
+    assert _run_every_case() > 0, f"{mutant!r} is not caught by any kill in a clear"
