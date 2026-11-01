@@ -34,7 +34,7 @@ without convergence: park the direction and say why.
 **Idle slots.** A free slot with no reason. Dispatch a new planner or a worker branched from the winner, or state
 why not in the next report. Re-decide after an item returns or main moves.
 
-**Long measurements in the foreground.** A 25-minute benchmark loop in your own turn. Use the tracked Bash recipe in `vibesys:measure` and go back to the other slots.
+**Long measurements in the foreground.** A 25-minute benchmark loop in your own turn. Use the tracked background recipe in `vibesys:measure` and go back to the other slots.
 
 **Trusting a handoff.** "Tests pass" without a command, "measured" without a record. Run
 `measurements.py show --dir <state dir> --commit <SHA>` and read it.

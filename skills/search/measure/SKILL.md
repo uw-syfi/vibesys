@@ -9,7 +9,8 @@ A measurement is a commit, a correctness check and several benchmark samples, ta
 worktree of that exact commit and recorded by a script. Never trust a number that is not in the
 record.
 
-The script: `python3 "${CLAUDE_SKILL_DIR}/scripts/measurements.py"` (standard library only).
+The script: `measurements.py` in this skill's `scripts/` directory, run with `python3` (standard library
+only; how to locate it: [harness reference](../optimize/references/harness/README.md)).
 `--dir` is the optimization's state directory, `.vibesys-state/optimize/<task>` (see
 `vibesys:state`). Details of every step and flag are
 in [measuring.md](references/measuring.md).
@@ -45,10 +46,11 @@ both constant, or samples of a different metric or task version. Add samples onl
 brief's budget; identical readings on both sides remain inconclusive even after repeats. Exit
 code 2 means the input was invalid and the message says which part.
 
-Run each measurement's build/check/benchmark/record sequence as one tracked background Bash
-command with `run_in_background: true`. Use Bash. Never detach the whole sequence with `nohup`, `setsid`, shell `&` or
-`disown`: Claude Code must track completion and notify the lead. Serialize by starting the
-next measurement only when the previous command's completion notification arrives. Do not
+Run each measurement's build/check/benchmark/record sequence as one background task your harness
+tracks and reports on when it finishes (see [harness reference](../optimize/references/harness/README.md)).
+Never detach the whole sequence with `nohup`, `setsid`, shell `&` or `disown`: the harness must
+track completion and notify the lead. Serialize by starting the
+next measurement only when the previous task's completion notification arrives. Do not
 launch a home-made chain script of measurements. While it runs, do other useful work or yield
 for its notification; never wait with foreground `sleep`.
 
@@ -76,6 +78,6 @@ Derive prose ranges only from that output; omit ranges that were not recorded.
 When one measurement takes long (a cluster queue), submit one job per commit, cache its results
 by commit SHA, and record from the cache. After any relaunch, list the queue and cancel a
 duplicate job for the same commit before assuming the first died. Start the job as a tracked
-background command, never with shell `&`. Do not use `pkill -f` from the shell that matches
+background task, never with shell `&`. Do not use `pkill -f` from the shell that matches
 its own command line; kill by the saved PID. Judge and compare on the multi-sample official
 record; a single development sample is only a smoke check.

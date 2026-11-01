@@ -59,7 +59,7 @@ the TOML prefix.
    with `--observations <JSON file>` when the report will describe their ranges. A repeat records only new samples,
    never the old samples again. Return the slot and clean up the server and worktree.
 
-The lead runs this sequence as a background Bash job when measuring itself. Bound the whole
+The lead runs this sequence as a tracked background task when measuring itself. Bound the whole
 sequence by the worker return time, and each command by its declared timeout as well. If fewer
 samples fit, record what completed and report `inconclusive` when there are too few for a
 verdict.

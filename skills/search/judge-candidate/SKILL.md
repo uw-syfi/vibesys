@@ -27,8 +27,8 @@ Start from the diff against the parent (`git diff <parent> <candidate>`) and the
 3. **Honest?** Does it special-case the benchmark's inputs, cache on its seed, skip or weaken a
    check, stub work, or touch `.vibesys/`, the checker or the benchmark?
 4. **Real?** Is the gain beyond noise? The recorded verdict decides this:
-   Run `python3 "${CLAUDE_SKILL_DIR}/../measure/scripts/measurements.py" compare
-   --dir <dir> --commit <candidate> --base <parent> --json` yourself and read its output.
+   Run the script `measurements.py` from the measure skill's `scripts/` directory (how to locate it: [harness reference](../optimize/references/harness/README.md)):
+   `python3 measurements.py compare --dir <dir> --commit <candidate> --base <parent> --json` yourself and read its output.
    Confirm the full commit SHA and recorded samples support the claimed gain; worker text
    is not measurement evidence. Fail a claim
    about speed only when a recorded result shows it is not there. If no comparable verdict
@@ -47,7 +47,7 @@ Use the measure skill's `scripts/service.py` owner for every required service. S
 It starts a new process group, fails on exhausted readiness, and stops and verifies the
 whole group on every exit. Never use handwritten background-shell PID or startup-sleep recipes.
 Run any load, including short sanity/tuning benchmarks, through
-`python3 "${CLAUDE_SKILL_DIR}/../measure/scripts/measurements.py" run -- <command>`.
+the script `measurements.py` from the measure skill's `scripts/` directory (how to locate it: [harness reference](../optimize/references/harness/README.md)): `python3 measurements.py run -- <command>`.
 This host-wide lock applies to recorded and unrecorded benchmarks alike.
 
 ## Return

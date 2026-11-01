@@ -1,6 +1,6 @@
 ---
 name: optimize
-description: "Use when asked to optimize a repository against a benchmark, unattended, as `/vibesys:optimize <task> [--fanout N]`, in a repository that has `.vibesys/tasks/<task>/`. One long-running, stoppable and resumable optimization per task: planners propose hypotheses as plan files, workers try them in parallel git worktrees, every commit is measured against the base and judged, and the best commit lands on a result branch."
+description: "Use when asked to optimize a repository against a benchmark, unattended, as `optimize <task> [--fanout N]`, in a repository that has `.vibesys/tasks/<task>/`. One long-running, stoppable and resumable optimization per task: planners propose hypotheses as plan files, workers try them in parallel git worktrees, every commit is measured against the base and judged, and the best commit lands on a result branch."
 ---
 
 # Optimize
@@ -12,7 +12,8 @@ limit or a stop costs nothing: resume by reading the state.
 Arguments: `<task>` and `--fanout N`, the most subagents running at once (default 3). Planners,
 workers, profilers, combiners and judges all count; a judge takes a slot too.
 
-Requires Claude Code on POSIX (Linux or macOS), git and Python 3.10+.
+Needs a harness that can run background tasks and subagents, on POSIX (Linux or macOS), with git and
+Python 3.10+. How each capability maps to a harness: [references/harness/](references/harness/README.md).
 
 State layout, plan files and resuming: `vibesys:state`. Brief templates:
 [briefs.md](references/briefs.md). Read [failure-patterns.md](references/failure-patterns.md)
@@ -28,7 +29,7 @@ before you plan.
 2. Use `vibesys:state` to create or resume `.vibesys-state/optimize/<task>/`. A new
    optimization gets branch `vibesys/<task>` and a worktree for it in `worktrees/`.
 3. If no base record exists, measure the base with `vibesys:measure` (at least 5 samples) as a
-   tracked background Bash command with `run_in_background: true`. No comparison means anything
+   background task your harness tracks and reports on when it finishes. No comparison means anything
    until it lands. Plan while it runs.
 
 ## Loop
@@ -40,7 +41,7 @@ before you plan.
    decision in the plan's Decision section.
 3. Dispatch workers for chosen plans with a self-contained brief from briefs.md; save the brief
    text in the plan's Result section. Branch new ideas from the current winner.
-4. Measure every returned commit (tracked background Bash, one at a time), then dispatch a judge.
+4. Measure every returned commit (tracked background task, one at a time), then dispatch a judge.
    Combine parked or won plans with combine-candidates, and use profile-revision when a question
    needs evidence. Record outcomes, record ids and lessons in the plan, set `status` and `gain`.
 5. Keep slots busy; when you leave one idle, state the reason in your next report.
@@ -57,7 +58,7 @@ before you plan.
 - Slow measurements (a cluster queue) start per commit as soon as the commit exists and rely on
   multi-sample records, not one quick sample.
 - Never ask the user: decide, and write the decision into the plan.
-- Measurement hygiene lives in `vibesys:measure`: tracked background Bash commands only, no
+- Measurement hygiene lives in `vibesys:measure`: tracked background tasks only, no
   `nohup`, `setsid` or shell `&`, no `pkill -f` from a shell that matches itself, and a queue
   check for duplicate jobs after a relaunch.
 - Wait on completion notifications, never on a timer sleep or an open-ended polling loop.

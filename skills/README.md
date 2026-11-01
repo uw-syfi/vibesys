@@ -14,6 +14,14 @@ claude plugin install vibesys@vibesys
 The optimize loop needs Claude Code with background Bash/Agent execution, git and Python 3.10 or
 newer for its standard-library measurement scripts. It does not need the VibeSys Python package.
 
+## Harness neutrality
+
+The search skills are provider-neutral. They describe abstract capabilities (subagents, tracked
+background tasks, locating scripts), and the provider mappings live in
+`skills/search/optimize/references/harness/<provider>.md`. The plugin packaging
+(`.claude-plugin/`) is Claude Code's delivery format and is the only Claude-specific part outside
+that folder.
+
 ## Layout
 
 - `domains/`: domain skills for kernels, LLM serving, microservices, Tokio services and

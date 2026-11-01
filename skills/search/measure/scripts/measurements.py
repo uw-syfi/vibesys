@@ -2,7 +2,7 @@
 """Record and compare benchmark measurements of commits for one optimization.
 
 The single writer of an optimization's ``measurements/<commit-sha>.jsonl`` shards. It uses only
-the Python standard library (3.10 or newer) and runs from an installed Claude Code plugin,
+the Python standard library (3.10 or newer) and runs from an installed skill directory,
 outside any VibeSys package, so nothing here may import one.
 
 Subcommands use ``--dir DIR`` (the state directory ``.vibesys-state/optimize/<task>``), except
