@@ -52,6 +52,8 @@ class Held(Value):
     """How long the search keeps its workspace open after it asked for the measurement."""
 
     leaves_after: float
+    until_stopped: bool = False
+    """Whether the search ends its wait at a stop, as a search that awaits ``ctx.stopped`` does."""
 
 
 @search("measure-then-leave", config=Held)
@@ -70,7 +72,8 @@ async def measure_then_leave(ctx: Flow, config: Held) -> None:
         if isinstance(workspace, NotOpened):
             return
         asking.start("measure", measure, workspace)
-        await ctx.first(ctx.timer(ctx.clock.now() + config.leaves_after))
+        leaves = ctx.timer(ctx.clock.now() + config.leaves_after)
+        await (ctx.first(leaves, ctx.stopped) if config.until_stopped else ctx.first(leaves))
 
 
 async def measure(ctx: Flow, workspace: Workspace) -> None:
@@ -93,10 +96,12 @@ async def measure(ctx: Flow, workspace: Workspace) -> None:
 class HeldWorld(TinyWorld):
     """The tiny world, whose measurements stay pending until the loop cancels them."""
 
-    def __init__(self, leaves_after: float) -> None:
+    def __init__(self, leaves_after: float, *, until_stopped: bool = False) -> None:
         super().__init__(1)
         self.setup = RunSetup(
-            new_launch=lambda: Launch(measure_then_leave, Held(leaves_after=leaves_after)),
+            new_launch=lambda: Launch(
+                measure_then_leave, Held(leaves_after=leaves_after, until_stopped=until_stopped)
+            ),
             harness=self.setup.harness,
             schemas={},
         )

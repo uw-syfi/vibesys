@@ -28,6 +28,7 @@ from vs_dst._interruptions import Action, Interruption, Moment
 from vs_dst._simulate import SimulatedRun, simulate
 from vs_dst._snapshots import NondeterministicWorldError, WorldNotCopyableError
 from vs_dst._step_host import StepLoopHosting
+from vs_dst._stops import StopKind, Stopped, StopPoint
 from vs_dst._world import Enact, HoldingWorld, HostedWorld, RunSetup, World
 
 __all__ = [
@@ -54,6 +55,9 @@ __all__ = [
     "ShellHosting",
     "SimulatedRun",
     "StepLoopHosting",
+    "StopKind",
+    "StopPoint",
+    "Stopped",
     "World",
     "WorldNotCopyableError",
     "crash_point_policy",

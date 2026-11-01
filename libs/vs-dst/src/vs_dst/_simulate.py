@@ -26,6 +26,7 @@ from vs_dst._snapshots import (
     Snapshot,
     Snapshots,
 )
+from vs_dst._stops import StopKind, Stopped, Stopper, StopPoint, stop_points
 from vs_runtime.api.testing import FakePublicationDelivery, HostOptions
 
 if TYPE_CHECKING:
@@ -261,6 +262,44 @@ class SimulatedRun:
         operator = _interrupt.Operator(self._plan, expected)
         return _interrupt.killed_while_draining(
             operator, self._pristine, self._started.clock_at, pause, kill
+        )
+
+    def stop_points(self) -> tuple[StopPoint, ...]:
+        """The places in this run the suite stops it: a sample on pull requests, all of them nightly.
+
+        A stop lands just before a commit, just after one, or as an effect begins, like an
+        interruption does. Only a run no interruption has touched offers them.
+        """
+        self._require_uninterrupted()
+        return stop_points(self.commits, len(self._outside.effects.executed))
+
+    def stop(self, point: StopPoint, kind: StopKind) -> Stopped:
+        """What becomes of the run when ``kind`` stops it at ``point``.
+
+        The world runs from its start with the stop delivered at ``point``, to the end of the
+        host that took it: the run ended, or the host gave up on it after the patience an
+        interrupted run is given (`Stopped` says which, and what it waits on if not). It is a
+        step-loop run (`StepLoopHosting`): the run.log records how the run ended.
+        """
+        self._require_uninterrupted()
+        outside = self._pristine.copy()
+        stopper = Stopper(point, kind)
+        patience = Expectation(self.result, self._duration).patience
+        hosted = self._plan.run(outside, self._started.clock_at, stopper, patience=patience)
+        store = outside.store
+        records = tuple(store.records) if isinstance(store, RecordingRecords) else ()
+        failure = hosted.ended if isinstance(hosted.ended, Exception) else None
+        halted = None if isinstance(hosted.ended, Exception) else hosted.ended.halted
+        return Stopped(
+            point=point,
+            kind=kind,
+            delivered_at=stopper.delivered_at,
+            ended_at=hosted.ended_at,
+            ended=hosted.finished,
+            core=hosted.core,
+            halted=halted,
+            failure=failure,
+            log_records=records,
         )
 
     def _require_uninterrupted(self) -> None:

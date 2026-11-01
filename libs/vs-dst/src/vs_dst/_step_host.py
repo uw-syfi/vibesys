@@ -366,7 +366,7 @@ class _WorldRunner:
         if self._holds(step):
             # The job is queued and nothing starts it: it began, ends by no one's doing, and
             # seals nothing, so only the loop's cancel ends the step.
-            self._effects.executed.append(tag.root)
+            self._executors.begin(tag.root)
             return Cancelled(reason=await cancel.wait())
         context = ExecutionContext(
             fence=self._fence,
