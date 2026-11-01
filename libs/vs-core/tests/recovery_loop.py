@@ -585,13 +585,14 @@ def backoffs(loop: Loop) -> set[float]:
 def never_idle_draining(loop: Loop) -> None:
     """A draining run with no attempt running has finished draining: it is parked, or has work.
 
-    Work includes a re-run that waits out its backoff: the wake is timed, and the run drains on.
+    A re-run that waits out its backoff is work: the wake is timed (at its backoff, or at the end
+    of the drain, whichever comes first), and the run drains on.
     """
     if loop.state.run.status is not core.RunStatus.DRAINING or loop.running():
         return
     actions = decide(loop.state, loop.clock)
-    timed = {a.until for a in actions if isinstance(a, Wait) and a.until is not None}
-    assert any(not isinstance(action, Wait) for action in actions) or timed & backoffs(loop), (
+    timed = any(isinstance(a, Wait) and a.until is not None for a in actions)
+    assert any(not isinstance(action, Wait) for action in actions) or (timed and backoffs(loop)), (
         "a draining run with nothing running and nothing to do never parks"
     )
 
