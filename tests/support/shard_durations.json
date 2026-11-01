@@ -1033,8 +1033,6 @@
  "tests/system/run_loop/test_run_loop.py": 28.78,
  "tests/system/skeleton/test_durable_records.py": 1.48,
  "tests/system/skeleton/test_skeleton.py": 7.3,
- "tests/system/steer/test_interrupt_reaches_the_running_turn.py": 16.21,
- "tests/system/steer/test_steer_reaches_the_next_turn.py": 7.45,
  "tests/system/test_hostile_json.py": 16.79,
  "tests/system/test_loop_spec.py": 0.01,
  "tests/system/timing/test_failed_turn.py": 3.15,

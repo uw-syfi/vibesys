@@ -99,7 +99,7 @@ def _enter_boundary(parts: ServerParts, kind: str, round_label: str, user_prompt
     stop-raising at an invocation boundary replicate that call sequence here, against the
     same `RunControlChannel` the real loop reads. Steering is not simulated: on the core
     path it is a session input that the next turn receives, and
-    `tests/system/steer/test_steer_reaches_the_next_turn.py` drives that for real.
+    `libs/vs-runtime/tests/test_steer_targets.py` follows each steer to the turn that took it.
     """
     control = parts.control
     control.raise_if_stopped()
