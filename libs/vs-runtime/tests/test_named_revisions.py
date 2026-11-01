@@ -41,9 +41,9 @@ from vs_project.api import GitCommandError, Project
 from vs_runtime.api import WorkspaceRestoreError
 from vs_runtime.api.core import (
     ExecutionResult,
+    KeyedDocuments,
     MeasurementRequests,
     MeasurementServices,
-    ReceiptStore,
     core_executors,
 )
 from vs_runtime.api.executor_contexts import context_for
@@ -308,7 +308,7 @@ _KINDS = (
 def _requests_over(base: Path, jobs: PollingEvaluationExecutor) -> MeasurementRequests:
     project = Project.open(base / "project")
     return MeasurementRequests(
-        jobs, ReceiptStore(project.state.state_store_namespace("run"), threads=SimThreads())
+        jobs, KeyedDocuments(project.state.state_store_namespace("run"), threads=SimThreads())
     )
 
 

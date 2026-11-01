@@ -1,4 +1,4 @@
-"""Durable workspace tables over the shared ``ReceiptStore``.
+"""Durable workspace tables over the shared ``KeyedDocuments``.
 
 Bindings, the exclusive-root holder, attempt generations, revision ownership and
 release proofs are records in the one crash-safe store every executor uses, so each
@@ -17,7 +17,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 from vs_core.api import AttemptRef, RequestId, ResourceId, RevisionRef, WorkspaceMode
 
 if TYPE_CHECKING:
-    from vs_runtime._receipt_store import ReceiptStore
+    from vs_runtime._keyed_documents import KeyedDocuments
 
 
 class AttemptBinding(BaseModel):
@@ -210,14 +210,14 @@ class Released(BaseModel):
 
 
 class StoreWorkspaceReceipts:
-    """The workspace tables, as records in the shared ``ReceiptStore``.
+    """The workspace tables, as records in the shared ``KeyedDocuments``.
 
     Every read-modify-write runs under the store's cross-process lock, so two hosts
     cannot both bind an attempt, hold the exclusive root or advance a generation.
     Execution receipts (begun and sealed results) are the store's ``run_once``.
     """
 
-    def __init__(self, store: ReceiptStore) -> None:
+    def __init__(self, store: KeyedDocuments) -> None:
         self._store = store
 
     def load_binding(self, attempt: AttemptRef) -> AttemptBinding | None:

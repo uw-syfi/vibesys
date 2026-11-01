@@ -40,8 +40,8 @@ from vs_evaluation.api import EvidenceKind as StageKind
 from vs_project.api import GitTracker, NullGitTrackerEvents, adoption_branch
 from vs_project.api.testing import FakeGitRepositories, GitKind
 from vs_runtime.api.core import (
+    KeyedDocuments,
     ReceiptEvidenceLedger,
-    ReceiptStore,
     RuntimeWorkspaceRequests,
     adoption_commit_message,
     commit_of,
@@ -84,7 +84,7 @@ _MEASUREMENT = st.tuples(
 """Metrics, the purpose they were measured for, and whether the ledger recorded them."""
 
 
-def _executor(workspaces: RuntimeWorkspaces, store: ReceiptStore) -> RuntimeWorkspaceRequests:
+def _executor(workspaces: RuntimeWorkspaces, store: KeyedDocuments) -> RuntimeWorkspaceRequests:
     return RuntimeWorkspaceRequests(
         workspaces,
         store,
@@ -165,7 +165,7 @@ def test_an_adopted_winner_is_committed_on_the_run_branch_and_the_next_run_start
 
     async def exercise(
         workspaces: RuntimeWorkspaces,
-        store: ReceiptStore,
+        store: KeyedDocuments,
         repository: GitRepository,
         disk: FakeGitRepositories,
     ) -> None:
@@ -232,7 +232,7 @@ def test_an_adopted_winner_is_committed_on_the_run_branch_and_the_next_run_start
             asyncio.run(
                 exercise(
                     env.hosts[0],
-                    ReceiptStore(env.receipts_namespace(), threads=SimThreads()),
+                    KeyedDocuments(env.receipts_namespace(), threads=SimThreads()),
                     disk.repository(project),
                     disk,
                 )
@@ -267,7 +267,9 @@ def test_the_adoption_message_names_the_revision_and_every_recorded_metric(
     kept: Literal["candidate", "input"],
 ) -> None:
     with open_workspace_env(tmp_path_factory.mktemp("message")) as env:
-        ledger = ReceiptEvidenceLedger(ReceiptStore(env.receipts_namespace(), threads=SimThreads()))
+        ledger = ReceiptEvidenceLedger(
+            KeyedDocuments(env.receipts_namespace(), threads=SimThreads())
+        )
         revision = RevisionRef(revision_id=RevisionId(root=commit), digest=f"git-commit:{commit}")
         evidence = tuple(
             _measured(ledger, index, revision, measurement)

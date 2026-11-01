@@ -118,7 +118,7 @@ class CaseWorld(Protocol):
         ...
 
     def receipts_namespace(self) -> StateNamespace:
-        """The real namespace the executor's ReceiptStore writes to (no fault injection)."""
+        """The real namespace the executor's KeyedDocuments writes to (no fault injection)."""
         ...
 
     def owners_root(self) -> Path:

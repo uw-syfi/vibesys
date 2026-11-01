@@ -31,9 +31,9 @@ from vs_core.api.recovery import Cancelled, CancelReason, Finished, interruption
 from vs_runtime.api.core import (
     JobBooks,
     JobRegistry,
+    KeyedDocuments,
     MeasurementRequests,
     ReceiptEvidenceLedger,
-    ReceiptStore,
     RequestExecutors,
 )
 from vs_runtime.api.evaluation_step_runners import SlurmJobStepRunner, SlurmScheduler
@@ -148,11 +148,11 @@ class World:
         self.ledger = FlakyLedger(project=PROJECT, clock=ManualClock())
         self.cluster = FlakyCluster()
         self.blocking = DetachedBlockingRunner()
-        self.stores: dict[str, ReceiptStore] = {}
+        self.stores: dict[str, KeyedDocuments] = {}
         self.processes: list[Process] = []
         self.first = self.run(self.spawn())
 
-    def store_of(self, holder: str) -> ReceiptStore:
+    def store_of(self, holder: str) -> KeyedDocuments:
         """The receipt store of run *holder*: on its disk, so a restarted process of it shares it."""
         if holder not in self.stores:
             directory = self.root / "receipts" / holder

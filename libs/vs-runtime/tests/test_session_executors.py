@@ -31,7 +31,7 @@ from vs_core.api import ArtifactId, ArtifactRef, CancelTurn, DispatchTurn, Obser
 from vs_runtime.api import AgentRole, ArtifactStore, RuntimeContractError, WorkspaceAccess
 from vs_runtime.api.core import (
     ExecutionResult,
-    ReceiptStore,
+    KeyedDocuments,
     ResolverInputs,
     SessionExecutors,
     StoreWorkspaceReceipts,
@@ -103,7 +103,7 @@ class Run:
         """A host: fresh workspaces and executors over the same disk and journal."""
         if len(self.env.hosts) > 1 or hasattr(self, "executors"):
             self.env.start_host()
-        store = ReceiptStore(self.env.receipts_namespace(), threads=SimThreads())
+        store = KeyedDocuments(self.env.receipts_namespace(), threads=SimThreads())
         artifacts = ArtifactStore(self.env.project.state.local_namespace(RUN_ID, "artifacts"))
         self.artifacts = artifacts
 

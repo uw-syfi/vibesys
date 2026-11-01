@@ -1,8 +1,8 @@
 """Schemas of receipt families the step loop no longer writes, kept for the retained-run import.
 
-A run written before the step loop left an execution record for every request, and for every
-registered operation a record and a sealed result, and a published diagnostic for every blocked
-request. Nothing writes them now. The
+A run written before the step loop left an execution record for every request, an effect fence
+for what an executor created, and for every registered operation a record and a sealed result,
+and a published diagnostic for every blocked request. Nothing writes them now. The
 import of such a run (``vs_runtime.api.retained``) still decodes them, so their strict
 schemas stay here, read-only.
 """
@@ -14,7 +14,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from vs_core.api import ObservationStatus, OperationSchemaRef, OperationWire
+from vs_core.api import HostFence, ObservationStatus, OperationSchemaRef, OperationWire, RequestId
 
 RECEIPT_SCHEMA_VERSION = 1
 
@@ -60,6 +60,23 @@ class ExecutionRecord(BaseModel):
     phase: ExecutionPhase
     result_json: str | None = None
     result_type: str | None = None
+
+
+class FenceEntry(BaseModel):
+    """One request that entered an effect fence, on which host, and whether its delivery ended."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    request_id: RequestId
+    host: HostFence
+    left: bool = False
+
+
+class FenceRecord(BaseModel):
+    """The state of one effect fence: who entered it and who closed it, first writer kept."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    entries: tuple[FenceEntry, ...] = ()
+    closed_by: RequestId | None = None
 
 
 class Published(BaseModel):

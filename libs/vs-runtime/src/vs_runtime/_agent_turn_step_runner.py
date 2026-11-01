@@ -58,8 +58,8 @@ if TYPE_CHECKING:
     from vs_core.api import HostFence, Observation, Request, RequestId, TurnSpec
     from vs_core.api.recovery import StepResult
     from vs_runtime._core_requests import ExecutionResult
+    from vs_runtime._keyed_documents import KeyedDocuments
     from vs_runtime._local_job_step_runner import StageWorkReaper
-    from vs_runtime._receipt_store import ReceiptStore
     from vs_runtime._session_lifecycle_requests import SessionLifecycleRequests
     from vs_runtime._session_requests import RuntimeSessionRequests
     from vs_runtime._step_runner import Adopted, CancelSignal
@@ -139,7 +139,7 @@ class TurnState:
     """The durable state the turn path writes, and the runner that keeps blocking calls off the loop."""
 
     sessions: AgentSessions
-    store: ReceiptStore
+    store: KeyedDocuments
     blocking: BlockingRunner
 
 

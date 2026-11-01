@@ -29,11 +29,11 @@ if TYPE_CHECKING:
     from vs_sim.api import Threads
 
 
-class ReceiptCorruptError(Exception):
+class DocumentCorruptError(Exception):
     """A stored receipt cannot be read back; an executor reports Unknown."""
 
 
-class ReceiptStore:
+class KeyedDocuments:
     """Atomic, cross-process receipt files below one state namespace."""
 
     def __init__(self, namespace: StateNamespace, threads: Threads) -> None:
@@ -77,14 +77,14 @@ class ReceiptStore:
     ) -> ReceiptT | None:
         """The recorded receipt, or None when nothing was recorded.
 
-        Raises ``ReceiptCorruptError`` when a file exists but fails to decode. Other
+        Raises ``DocumentCorruptError`` when a file exists but fails to decode. Other
         project-state errors (unreadable file, invalid path) are not corruption and propagate.
         """
         try:
             return self._namespace.load_optional(self._path(family, part, key), model)
         except StateDocumentDamagedError as error:
             message = f"{family} {part} receipt is unreadable"
-            raise ReceiptCorruptError(message) from error
+            raise DocumentCorruptError(message) from error
 
     def record_once(self, family: str, part: str, key: str, receipt: BaseModel) -> None:
         """Durably record the receipt; identical replays pass, a different payload conflicts."""
@@ -126,4 +126,4 @@ def owner_key(request: RequestBase) -> str:
     return f"{request.scope.owner.kind}:{request.scope.owner.root}:{request.scope.generation}"
 
 
-__all__ = ["ReceiptCorruptError", "ReceiptStore", "owner_key"]
+__all__ = ["DocumentCorruptError", "KeyedDocuments", "owner_key"]

@@ -68,8 +68,8 @@ from vs_runtime.api.core import (
     AgentEvaluationBridge,
     AgentEvaluationPolicy,
     AgentEvaluationRecords,
+    KeyedDocuments,
     OwedSubmissions,
-    ReceiptStore,
     handle_for,
 )
 from vs_runtime.api.testing import Launch
@@ -426,7 +426,9 @@ def new_bridge(
         POLICY,
         _Workspaces(world, held or HeldSnapshot()),
         AgentEvaluationRecords(
-            OwedSubmissions(ReceiptStore(owed_namespace(world.owed.path), threads=loop_threads())),
+            OwedSubmissions(
+                KeyedDocuments(owed_namespace(world.owed.path), threads=loop_threads())
+            ),
             SynthesizedEvidence(),
         ),
         diagnostics,

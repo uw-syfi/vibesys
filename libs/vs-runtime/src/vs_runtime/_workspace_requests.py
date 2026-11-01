@@ -76,7 +76,7 @@ if TYPE_CHECKING:
     from vs_core.api import Request
     from vs_core.api.recovery import OwnerEvent
     from vs_runtime._evidence_ledger import EvidenceLookup
-    from vs_runtime._receipt_store import ReceiptStore
+    from vs_runtime._keyed_documents import KeyedDocuments
     from vs_runtime._workspaces import RuntimeWorkspace, RuntimeWorkspaces
     from vs_sim.api import BlockingRunner
 
@@ -115,14 +115,14 @@ class _Facts:
     publication: AdoptionPublication | None = None
     checkout: CheckoutUpdate | None = None
     holding_nothing: ObservationFacts | None = None
-    """The facts as ``refused`` or ``never_held`` built them, when the answer holds nothing."""
+    """The facts as ``refused`` or ``nothing_held`` built them, when the answer holds nothing."""
 
 
 def _rejected(diagnostic: str) -> _Facts:
     """A refusal decided before the request did anything: it holds nothing, now or later.
 
     The refusal is sealed, so a replay answers the same and the request never acts afterwards.
-    Like ``ObservationFacts.never_held`` it names no resource, so core never reads it as the
+    Like ``ObservationFacts.nothing_held`` it names no resource, so core never reads it as the
     release of a workspace that the attempt (or another one) still holds.
     """
     return _holding_nothing(ObservationFacts.refused(diagnostic))
@@ -258,7 +258,7 @@ class RuntimeWorkspaceRequests:
     def __init__(
         self,
         workspaces: RuntimeWorkspaces,
-        store: ReceiptStore,
+        store: KeyedDocuments,
         run_invocations: RunInvocationProof,
         blocking: BlockingRunner,
         evidence: EvidenceLookup,

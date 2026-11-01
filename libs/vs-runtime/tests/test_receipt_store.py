@@ -1,4 +1,4 @@
-"""ReceiptStore: crash-safe keyed documents, under one cross-process lock."""
+"""KeyedDocuments: crash-safe keyed documents, under one cross-process lock."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict
 
 from vs_core.api import ContractError
 from vs_project.api import Project, ProjectStateError
-from vs_runtime.api.core import ReceiptCorruptError, ReceiptStore
+from vs_runtime.api.core import DocumentCorruptError, KeyedDocuments
 from vs_sim.api.testing import SimThreads, examples
 
 FAMILY = "documents"
@@ -24,9 +24,9 @@ class Doc(BaseModel):
     value: int
 
 
-def store_at(root: Path) -> ReceiptStore:
+def store_at(root: Path) -> KeyedDocuments:
     (root / "project").mkdir(exist_ok=True)
-    return ReceiptStore(
+    return KeyedDocuments(
         Project.open(root / "project").state.state_store_namespace("run"), threads=SimThreads()
     )
 
@@ -118,10 +118,10 @@ def test_a_damaged_receipt_is_corruption_and_an_invalid_path_is_not() -> None:
         store.replace(FAMILY, PART, "k", Doc(value=1))
         for path in (Path(raw) / "project").rglob(f"*.{PART}.json"):
             path.write_text("secret-receipt-bytes")
-        with pytest.raises(ReceiptCorruptError) as damaged:
+        with pytest.raises(DocumentCorruptError) as damaged:
             store.load(FAMILY, PART, "k", Doc)
         assert "secret-receipt-bytes" not in str(damaged.value.__cause__)
         # A family that is not a safe path is a caller bug, not a damaged receipt.
         with pytest.raises(ProjectStateError) as invalid:
             store.load("../escape", PART, "k", Doc)
-        assert not isinstance(invalid.value, ReceiptCorruptError)
+        assert not isinstance(invalid.value, DocumentCorruptError)

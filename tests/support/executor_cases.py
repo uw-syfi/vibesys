@@ -71,9 +71,9 @@ from vs_project.api.testing import WorldGit, world_git
 from vs_runtime.api.core import (
     ContinuationBinding,
     ExecutionResult,
+    KeyedDocuments,
     MeasurementRequests,
     ReceiptEvidenceLedger,
-    ReceiptStore,
     RuntimeWorkspaceRequests,
     SessionBinding,
     owner_key,
@@ -116,8 +116,8 @@ class _World:
     def faulting(self, crash_at: int | None) -> FaultingNamespace:
         return FaultingNamespace(self.real_namespace(), crash_at)
 
-    def store(self, faulting: FaultingNamespace) -> ReceiptStore:
-        return ReceiptStore(cast("StateNamespace", faulting), threads=OsThreads())
+    def store(self, faulting: FaultingNamespace) -> KeyedDocuments:
+        return KeyedDocuments(cast("StateNamespace", faulting), threads=OsThreads())
 
     def writes(self) -> int:
         return self._writes
@@ -334,7 +334,7 @@ class WorkspacesWorld:
         repeat: bool = False,
     ) -> ExecutionResult:
         faulting = FaultingNamespace(self.env.receipts_namespace(), crash_at)
-        store = ReceiptStore(cast("StateNamespace", faulting), threads=OsThreads())
+        store = KeyedDocuments(cast("StateNamespace", faulting), threads=OsThreads())
         executor = RuntimeWorkspaceRequests(
             self.env.start_host(),
             store,

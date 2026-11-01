@@ -75,20 +75,6 @@ from vs_runtime._core_requests import (
     WorkspaceRequests,
 )
 from vs_runtime._core_state import CoreStartup, new_core_state
-from vs_runtime._effect_fence import (
-    EffectFences,
-    Entered,
-    Evidence,
-    Fenced,
-    FenceKey,
-    FenceKind,
-    MayHold,
-    NothingHeld,
-    OwnerNotApplied,
-    Removed,
-    StillCreatingError,
-    Unrecorded,
-)
 from vs_runtime._evaluation_jobs import handle_for
 from vs_runtime._evaluation_requests import MeasurementRequests
 from vs_runtime._evidence_ledger import (
@@ -102,6 +88,11 @@ from vs_runtime._evidence_operations import InterpretEvidenceOwner, RetainRevisi
 from vs_runtime._export_patch_operation import ExportPatchOwner
 from vs_runtime._issue_board_operations import BOARD_KEY, BoardTexts, IssueBoardOwner
 from vs_runtime._job_registry import JobBooks, JobRecord, JobRegistry
+from vs_runtime._keyed_documents import (
+    DocumentCorruptError,
+    KeyedDocuments,
+    owner_key,
+)
 from vs_runtime._measurement_progress import (
     IgnoreMeasurement,
     MeasurementDecisions,
@@ -140,11 +131,6 @@ from vs_runtime._operation_wiring import (
     production_owners,
 )
 from vs_runtime._owed_submissions import OwedKey, OwedSubmission, OwedSubmissions
-from vs_runtime._receipt_store import (
-    ReceiptCorruptError,
-    ReceiptStore,
-    owner_key,
-)
 from vs_runtime._render_operation import RenderArtifactsOwner, reply_variable
 from vs_runtime._rerun_policy import KeyedWrite, ReadOnly, read_or_keyed
 from vs_runtime._run_timing import RunTiming
@@ -228,10 +214,8 @@ __all__ = [
     "CoreResumeError",
     "CoreStartup",
     "DispatchCapExceededError",
-    "EffectFences",
-    "Entered",
+    "DocumentCorruptError",
     "EvaluationRequests",
-    "Evidence",
     "EvidenceEntry",
     "EvidenceLedger",
     "EvidenceLookup",
@@ -243,9 +227,6 @@ __all__ = [
     "ExecutorRefusal",
     "ExecutorRole",
     "ExportPatchOwner",
-    "FenceKey",
-    "FenceKind",
-    "Fenced",
     "IgnoreCommits",
     "IgnoreMeasurement",
     "Indeterminate",
@@ -257,9 +238,9 @@ __all__ = [
     "JobRecord",
     "JobRegistry",
     "JournalRunInvocations",
+    "KeyedDocuments",
     "KeyedWrite",
     "LifecycleReportingExecutor",
-    "MayHold",
     "MeasurementDecisions",
     "MeasurementObserver",
     "MeasurementProgress",
@@ -267,7 +248,6 @@ __all__ = [
     "MeasurementServices",
     "MidTurnSteering",
     "NotApplied",
-    "NothingHeld",
     "ObservationFactory",
     "ObservationFacts",
     "ObservationLedgerCorruptError",
@@ -282,7 +262,6 @@ __all__ = [
     "OwedKey",
     "OwedSubmission",
     "OwedSubmissions",
-    "OwnerNotApplied",
     "ProductionSessionResolver",
     "Publication",
     "PublicationAcknowledgement",
@@ -290,13 +269,10 @@ __all__ = [
     "PublicationHistory",
     "PublicationLease",
     "ReadOnly",
-    "ReceiptCorruptError",
     "ReceiptEvidenceLedger",
-    "ReceiptStore",
     "RefusalReason",
     "RefusingRequestExecution",
     "ReleasedRunInvocations",
-    "Removed",
     "RenderArtifactsOwner",
     "RequestExecutors",
     "ResolvedCoreResume",
@@ -331,14 +307,12 @@ __all__ = [
     "StageStarted",
     "StatelessToolServers",
     "SteerArtifacts",
-    "StillCreatingError",
     "StoreWorkspaceReceipts",
     "ToolServerSource",
     "TurnDispatcher",
     "TurnMessages",
     "TurnSteering",
     "TurnYields",
-    "Unrecorded",
     "ValidateLocalOwner",
     "VerifyRevisionOwner",
     "WinnerSelection",
