@@ -288,6 +288,17 @@ def _simulated(
 
 
 class TestConfig:
+    @pytest.mark.parametrize(
+        "interval",
+        [0.0, -1.0, float("nan"), float("inf"), float("-inf")],
+        ids=["zero", "negative", "nan", "inf", "-inf"],
+    )
+    def test_a_queue_check_interval_that_is_not_a_positive_number_is_rejected_by_name(
+        self, interval: float
+    ) -> None:
+        with pytest.raises(ValueError, match="queue_check_interval_seconds"):
+            _config(queue_check_interval_seconds=interval)
+
     def test_requests_above_the_limits_are_rejected_not_clamped(self) -> None:
         config = _config(max_gpus=4, max_time_minutes=30)
         assert config.request(None, None) == GpuJobRequest(gpus=1, time_minutes=30)
@@ -892,6 +903,42 @@ class TestLauncher:
         assert controller[0].startswith("scancel")
         assert len(controller) == 7
         assert all(command.startswith("squeue") for command in controller[1:])
+
+    @given(
+        interval=st.floats(0.01, 120, allow_nan=False) | st.just(5.0), status=st.integers(1, 255)
+    )
+    def test_a_failed_command_returns_after_five_queue_checks_at_the_configured_interval(
+        self, interval: float, status: int
+    ) -> None:
+        """The proof window is five intervals of virtual time, 25 s by default, never more."""
+        threads = SimThreads()
+        process = ScriptedPipedProcess(threads, merge_stderr=True)
+        process.exit(status)
+        launcher = AgentGpuLauncher(
+            _config(queue_check_interval_seconds=interval),
+            ("slurm-shell",),
+            probe=ScriptedProbe(_scheduler_answer),
+            processes=FakePipedProcessLauncher(lambda _start: process),
+            threads=threads,
+        )
+
+        def run() -> tuple[GpuJobOutcome, float]:
+            started = threads.now()
+            outcome = launcher.run(
+                GpuJobRequest(gpus=1, time_minutes=5),
+                GpuCommand(argv=("work",), cwd=Path("workspace"), env={}),
+                write=bytearray().extend,
+                cancel=threads.event(),
+            )
+            return outcome, threads.now() - started
+
+        outcome, waited = threads.run(run)
+
+        assert (outcome.exit_code, outcome.termination_confirmed) == (status, True)
+        assert waited == pytest.approx(5 * interval)
+
+    def test_the_default_queue_check_interval_keeps_the_proof_window_at_25_seconds(self) -> None:
+        assert _config().queue_check_interval_seconds * 5 == 25
 
     @pytest.mark.parametrize("queued", ["", "still-running\n"])
     def test_a_post_submission_relay_failure_stops_and_confirms_the_named_job(
