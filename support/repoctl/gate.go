@@ -185,7 +185,27 @@ func ensureHooks(root string, out io.Writer) {
 	}
 }
 
+// leaveGitHookEnvironment unsets the variables git exports to a hook to say which repository
+// it is in. The lanes inherit them, so a test that makes a repository of its own in a temporary
+// directory (`git init` there) would otherwise act on this one, or fail with "must be run in a
+// work tree". The repository is found from the working directory, as it is outside a hook.
+func leaveGitHookEnvironment(root string) error {
+	names, err := gitrepo.LocalEnvVars(root)
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		if err := os.Unsetenv(name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func runGate(root, configPath string, g graph, args []string, out io.Writer) error {
+	if err := leaveGitHookEnvironment(root); err != nil {
+		return err
+	}
 	newRunner := func(w io.Writer) execution.Runner {
 		return execution.OSRunner{Stdout: w, Stderr: w, OwnProcessGroup: true}
 	}

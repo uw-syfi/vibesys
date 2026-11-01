@@ -68,3 +68,13 @@ func Head(root string) (branch, sha string) {
 	}
 	return branch, sha
 }
+
+// LocalEnvVars names the environment variables git sets for a hook and reads to find the
+// repository (GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE and the like), from git itself.
+func LocalEnvVars(root string) ([]string, error) {
+	out, err := command.Run(root, "git", "rev-parse", "--local-env-vars")
+	if err != nil {
+		return nil, err
+	}
+	return strings.Fields(string(out)), nil
+}

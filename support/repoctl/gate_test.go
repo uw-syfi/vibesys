@@ -301,3 +301,24 @@ func TestTheRepositoryGateFollowsTheChange(t *testing.T) {
 		})
 	}
 }
+
+func TestTheGateLeavesTheEnvironmentGitSetsForAHook(t *testing.T) {
+	root := t.TempDir()
+	cmd := exec.Command("git", "init", "-q")
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	hooked := map[string]string{"GIT_DIR": filepath.Join(root, "elsewhere"), "GIT_WORK_TREE": root, "GIT_INDEX_FILE": filepath.Join(root, "index")}
+	for name, value := range hooked {
+		t.Setenv(name, value)
+	}
+	if err := leaveGitHookEnvironment(root); err != nil {
+		t.Fatal(err)
+	}
+	for name := range hooked {
+		if value, set := os.LookupEnv(name); set {
+			t.Errorf("%s is still set to %q: a lane would run git against the pushing repository", name, value)
+		}
+	}
+}
