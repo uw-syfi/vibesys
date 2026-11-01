@@ -89,16 +89,60 @@ export function Prose(props: {readonly blocks: readonly ProseBlock[]}): JSX.Elem
   );
 }
 
-/** A key number: a `section` label, the value in the `metric` style, and an optional sub-label. */
+/**
+ * A key number: a `section` label, the value in the `metric` style (with a small `unit` after it),
+ * and an optional sub-label.
+ */
 export function Stat(props: {
   readonly label: string;
   readonly value: string;
+  readonly unit?: string;
   readonly sub?: string;
+  /** A value that is a word, not a number (`Not reported`): body size and muted. */
+  readonly quiet?: boolean;
+  /** On one line: the label, the value in the code face, then its unit and sub-label. */
+  readonly inline?: boolean;
+  /** What the pointer shows over the figure: its whole value. */
+  readonly title?: string;
 }): JSX.Element {
+  if (props.inline === true) {
+    return (
+      <div className="vs-stat" data-inline="" title={props.title}>
+        <Text variant="section">{props.label}</Text>
+        {props.quiet === true ? (
+          <Text tone="muted">{props.value}</Text>
+        ) : (
+          <span className="vs-stat-figure">
+            <Text variant="code">
+              {props.unit === undefined ? props.value : `${props.value} ${props.unit}`}
+            </Text>
+          </span>
+        )}
+        {props.sub === undefined ? null : (
+          <span className="vs-stat-sub">
+            <Text variant="small" tone="muted">
+              {`· ${props.sub}`}
+            </Text>
+          </span>
+        )}
+      </div>
+    );
+  }
   return (
-    <div className="vs-stat">
+    <div className="vs-stat" title={props.title}>
       <Text variant="section">{props.label}</Text>
-      <Text variant="metric">{props.value}</Text>
+      <span className="vs-stat-value">
+        {props.quiet === true ? (
+          <Text tone="muted">{props.value}</Text>
+        ) : (
+          <Text variant="metric">{props.value}</Text>
+        )}
+        {props.unit === undefined ? null : (
+          <Text variant="small" tone="muted">
+            {props.unit}
+          </Text>
+        )}
+      </span>
       {props.sub === undefined ? null : (
         <Text variant="small" tone="muted">
           {props.sub}

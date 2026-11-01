@@ -28,6 +28,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  container: screen-header / inline-size;
 }
 .vs-screen-body {
   flex: 1 1 auto;
@@ -109,6 +110,21 @@ button.vs-crumb:focus-visible {
   display: flex;
   gap: var(--space-4);
   container-type: inline-size;
+}
+/* A group set apart is a step further from its neighbours than they are from each other. */
+.vs-flex[data-apart] {
+  margin-block: var(--space-3);
+}
+/* Panes that hold a list in columns keep the height of its rows: the screen's body scrolls to them. */
+.vs-panes:has(.vs-columnlist) {
+  /* A list in columns takes the height the screen leaves it and scrolls its rows inside, under its
+     header; the screen's body scrolls only when what sits above leaves less than nine rows. */
+  min-height: calc(var(--row) * 9 + var(--space-8) * 2);
+}
+/* A body scrolled to such a list stays where the reader put it when the list's rows change height:
+   the browser's own anchoring would move the page by the difference, and the charts with it. */
+.vs-screen-body:has(.vs-columnlist) {
+  overflow-anchor: none;
 }
 /* Too narrow for a list and the idea it opened side by side (the detail would wrap words and clip
    its tabs): the opened pane takes the row, and its close button brings the list back. */
@@ -604,6 +620,10 @@ button.vs-crumb:focus-visible {
   line-height: var(--text-body-strong-line);
   font-weight: var(--text-body-strong-weight);
 }
+.vs-screen[data-density="compact"] .vs-pane[data-bare] > .vs-pane-body {
+  /* No header above the body: its own controls start close to the pane's edge. */
+  padding-top: var(--space-1);
+}
 .vs-screen[data-density="compact"] .vs-pane-body {
   gap: var(--space-3);
   padding: var(--space-3) var(--space-3);
@@ -988,6 +1008,203 @@ button.vs-crumb:focus-visible {
   }
 }
 
+/* --- a list in columns: header that sorts, rows on one grid, a bar for the path to the selection --- */
+
+.vs-columnlist {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-height: 0;
+  container-type: inline-size;
+}
+.vs-columnlist-head,
+.vs-columnlist-row {
+  display: grid;
+  grid-template-columns: var(--columns);
+  align-items: center;
+  column-gap: var(--space-3);
+}
+.vs-columnlist-head {
+  padding: 0 var(--space-3) var(--space-1) calc(var(--space-3) + var(--focus-ring));
+  border-bottom: var(--hairline) solid var(--line);
+  color: var(--muted);
+  font-family: var(--text-caption-family);
+  font-size: var(--text-caption-size);
+  line-height: var(--text-caption-line);
+  white-space: nowrap;
+}
+.vs-columnlist-headcell {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vs-columnlist-headcell[data-align="end"],
+.vs-columnlist-cell[data-align="end"] {
+  text-align: right;
+}
+.vs-columnlist-marked {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text);
+}
+.vs-columnlist-headcell button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.vs-columnlist-headcell[data-marked] button,
+.vs-columnlist-headcell button:hover {
+  color: var(--text);
+}
+.vs-columnlist-note {
+  margin-left: var(--space-1);
+  color: var(--muted);
+}
+/*
+ * The rows scroll inside the list, under the header, drawing only the rows near the visible part:
+ * at most sixteen rows tall, or, in a list that fills (`data-size`), the height it is given.
+ */
+.vs-columnlist-rows {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: calc(var(--row) * 16);
+  overflow-y: auto;
+}
+.vs-columnlist[data-size="fill"] > .vs-columnlist-rows {
+  flex: 1 1 0;
+  max-height: none;
+}
+.vs-columnlist-rows:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-columnlist-row {
+  min-height: var(--row);
+  padding: var(--space-3) var(--space-3);
+  border: var(--hairline) solid transparent;
+  border-left: var(--focus-ring) solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.vs-columnlist-row:hover {
+  background: var(--panel-2);
+}
+/* A compact screen keeps a row to its text: nine rows and more show beside a screen's header. */
+.vs-screen[data-density="compact"] .vs-columnlist-row {
+  min-height: calc(var(--row) - var(--space-3));
+}
+.vs-columnlist-row:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-columnlist-row[data-lineage] {
+  border-left-color: var(--accent);
+}
+.vs-columnlist-row[aria-selected="true"] {
+  background: var(--selection);
+  border-left-color: var(--text);
+}
+.vs-columnlist-row[data-fresh] {
+  animation: vs-pane-flash calc(var(--duration-base) * 8) var(--easing);
+}
+/*
+ * A list without room for every column (`data-tier`, set from its measured width) drops its
+ * optional columns and the parts of a cell marked optional, and keeps the rest on one grid; a part
+ * marked `data-narrow-only` is drawn only then (a figure that a dropped column states while the
+ * list is wide).
+ */
+.vs-columnlist [data-narrow-only] {
+  display: none;
+}
+.vs-columnlist:not([data-tier="wide"]) .vs-columnlist-head,
+.vs-columnlist:not([data-tier="wide"]) .vs-columnlist-row {
+  grid-template-columns: var(--columns-narrow);
+  column-gap: var(--space-2);
+}
+.vs-columnlist:not([data-tier="wide"]) [data-optional] {
+  display: none;
+}
+.vs-columnlist:not([data-tier="wide"]) [data-narrow-only] {
+  display: inline;
+}
+/* A crowded list (a column for each of several objectives) in a pane a half row wide. */
+.vs-columnlist[data-tier="tight"] .vs-columnlist-head,
+.vs-columnlist[data-tier="tight"] .vs-columnlist-row {
+  grid-template-columns: var(--columns-tight);
+}
+.vs-columnlist[data-tier="tight"] [data-tight-hide],
+.vs-columnlist[data-tier="tight"] .vs-columnlist-lines > :not(:first-child) {
+  display: none;
+}
+/* A header over a column cut to its mark keeps its place and says nothing. */
+.vs-columnlist[data-tier="tight"] [data-tight-blank] > * {
+  visibility: hidden;
+}
+.vs-columnlist-cell {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vs-columnlist-cell[data-wrap] {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.vs-columnlist-link {
+  color: var(--muted);
+  cursor: pointer;
+}
+.vs-columnlist-link[data-lit] {
+  color: var(--accent);
+}
+.vs-columnlist-link:hover {
+  text-decoration: underline;
+}
+.vs-columnlist-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: 100%;
+  min-width: 0;
+}
+/* A name and its tag in a cell that wraps: the tag goes under the name when there is no room beside it. */
+.vs-columnlist-cell[data-wrap] .vs-columnlist-inline:not([data-nowrap]) {
+  flex-wrap: wrap;
+  row-gap: var(--space-1);
+}
+.vs-columnlist-inline[data-nowrap] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vs-columnlist-mark {
+  flex: none;
+  width: var(--dot);
+  height: var(--dot);
+  border-radius: var(--radius-full);
+}
+.vs-columnlist-mark[data-on] {
+  background: var(--accent);
+}
+.vs-columnlist-lines {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 /* --- reading a tree: column header, dot tooltip, path to the root, dot legend ------------------- */
 
 .vs-listheader {
@@ -1059,7 +1276,8 @@ button.vs-crumb:focus-visible {
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-4);
+  /* Chips that wrap are one group: their lines are closer than the groups around them. */
+  gap: var(--space-1) var(--space-4);
 }
 .vs-dotlegend-item {
   display: inline-flex;
@@ -1335,6 +1553,9 @@ button.vs-crumb:focus-visible {
 .vs-chart-legend {
   gap: var(--space-5);
 }
+.vs-chart-legend .vs-dotlegend-item[data-reserved] {
+  visibility: hidden;
+}
 .vs-chart-legend-mark {
   flex: none;
   display: inline-block;
@@ -1386,6 +1607,32 @@ button.vs-crumb:focus-visible {
   display: grid;
   gap: var(--space-6);
   grid-template-columns: repeat(auto-fit, minmax(var(--chart-min), 1fr));
+}
+.vs-chart-columns[data-across] {
+  /* Side by side while each chart keeps the width it is read at; a narrower window wraps the last. */
+  grid-template-columns: repeat(
+    auto-fit,
+    minmax(
+      max(var(--chart-min-across), calc((100% - (var(--across) - 1) * var(--space-6)) / var(--across))),
+      1fr
+    )
+  );
+}
+/* A heading on one line: the note gives way, with an ellipsis, before the figure goes under the name. */
+.vs-chart-panel-head[data-one-line] {
+  flex-wrap: nowrap;
+}
+.vs-chart-panel-head[data-one-line] .vs-chart-panel-title {
+  flex-wrap: nowrap;
+  flex: 0 1 auto;
+}
+.vs-chart-panel-head[data-one-line] .vs-chart-panel-note {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vs-chart-panel-head[data-one-line] .vs-chart-figure {
+  flex: none;
 }
 
 /* --- flat lists: a trailing column ("from <parent>") -------------------------------------------- */
@@ -1498,9 +1745,9 @@ button.vs-dotlegend-item:disabled {
 button.vs-dotlegend-item:disabled .vs-text {
   color: var(--muted);
 }
-/* A hidden state is drawn without the pill, never struck through (that reads as deleted); a failed count keeps the failed color. */
-.vs-dotlegend-item[data-tone="err"] .vs-text {
-  color: var(--err);
+/* The chip of the state the list is already in has nothing to change, and is the one in force: it keeps its words. */
+button.vs-dotlegend-item[aria-pressed="true"]:disabled .vs-text {
+  color: var(--text);
 }
 button.vs-dotlegend-item:focus-visible {
   outline: var(--focus-ring) solid var(--accent);

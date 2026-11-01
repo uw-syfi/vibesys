@@ -17,11 +17,19 @@ export type GridColumn = 'field' | 'tile' | 'swatch' | 'swatch-row';
 
 interface FlexProps {
   readonly gap?: SpaceToken;
+  /** The gap between the lines of a wrapped row, when it is not the gap inside a line. */
+  readonly rowGap?: SpaceToken;
   readonly align?: Align;
   readonly justify?: Justify;
   readonly wrap?: boolean;
   /** Take the free space of the `Row` or `Stack` this sits in. */
   readonly grow?: boolean;
+  /**
+   * Set apart from the groups around it by a step more than the gap they keep, so that the gap
+   * between this group and its neighbours is wider than the gap inside it, and a reader sees where
+   * it begins and ends.
+   */
+  readonly apart?: boolean;
   /**
    * A fixed width, whatever the content: a figure's block (`figure`), so what shares its row never moves; or
    * a chart (`chart`), which takes the rest of its row and drops to a row of its own, full width, when the
@@ -31,12 +39,15 @@ interface FlexProps {
   readonly children: ReactNode;
 }
 
-function gapStyle(gap: SpaceToken): CSSProperties {
-  return {gap: `var(--${gap})`};
+function gapStyle(gap: SpaceToken, rowGap?: SpaceToken): CSSProperties {
+  return rowGap === undefined
+    ? {gap: `var(--${gap})`}
+    : {columnGap: `var(--${gap})`, rowGap: `var(--${rowGap})`};
 }
 
 function Flex(props: FlexProps & {readonly direction: 'row' | 'column'}): JSX.Element {
   const {direction, gap = 'space-3', align, justify, wrap = false, grow = false} = props;
+  const {apart = false} = props;
   return (
     <div
       className="vs-flex"
@@ -45,8 +56,9 @@ function Flex(props: FlexProps & {readonly direction: 'row' | 'column'}): JSX.El
       data-justify={justify}
       data-wrap={wrap || undefined}
       data-grow={grow || undefined}
+      data-apart={apart || undefined}
       data-width={props.width}
-      style={gapStyle(gap)}
+      style={gapStyle(gap, props.rowGap)}
     >
       {props.children}
     </div>

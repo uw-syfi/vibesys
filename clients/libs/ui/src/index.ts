@@ -34,6 +34,22 @@ export {ChatMessage} from './components/chat-message.js';
 export {type CheckItem, CheckList, type CheckState} from './components/check-list.js';
 export {ChoiceTiles, type TileOption} from './components/choice-tiles.js';
 export {Collapsible} from './components/collapsible.js';
+export {
+  CellInline,
+  CellLines,
+  CellLink,
+  CellMark,
+  ColumnList,
+  type ColumnSize,
+  type ListColumn,
+  type RowMarks,
+} from './components/column-list.js';
+export {
+  type ColumnTier,
+  columnTier,
+  type TrackedColumn,
+  widthToShowAll,
+} from './components/column-tracks.js';
 export {Dialog} from './components/dialog.js';
 export {
   EmptyState,

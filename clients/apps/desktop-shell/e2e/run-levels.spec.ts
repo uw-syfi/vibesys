@@ -1,6 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Locator, type Page, test} from '@playwright/test';
 import type {RunFixture} from '@vibesys/run-fixtures';
+import {scrolledToEnd} from './checks/settle.js';
 import {
   type FakeBridgeSeed,
   type FakeWindows,
@@ -155,37 +156,39 @@ test('every level opens from the keyboard alone, and Escape walks back', async (
   await expect(page.getByText('queue/mpmc time: 41.2 ms')).toBeVisible();
 
   for (const _level of ['step', 'idea', 'run']) await page.keyboard.press('Escape');
-  await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
+  await expect(page.getByRole('listbox', {name: 'Ideas'})).toBeVisible();
   await expect(page.getByRole('heading', {name: 'Combine W1 ring with W2 padding'})).toHaveCount(0);
 });
 
-test('the run level shows the best ratio, the ideas running first, and what runs now', async ({
+test('the run level shows the best ratio, and the ideas running first with what they do', async ({
   page,
 }) => {
   await openRun(page);
   await showList(page);
   const ideas = page.getByRole('listbox', {name: 'Ideas'});
-  // Running first, then the rest newest first, the failed among them.
+  // Running first, then the rest by the first objective, best first; the ones with no reading last.
   await expect(ideas.getByRole('option')).toHaveText([
-    /Per-core queues with stealing/,
-    /Wait-free consumer path/,
-    /Combine W1 ring with W2 padding/,
-    /Larger batch size/,
-    /Spin then park idle consumers/,
-    /Cache-line padding and batched enqueue/,
-    /Lock-free ring with per-slot sequence numbers/,
+    /^Per-core queues with stealing/,
+    /^Wait-free consumer path/,
+    /^Combine W1 ring with W2 padding/,
+    /^Lock-free ring with per-slot sequence numbers/,
+    /^Cache-line padding and batched enqueue/,
+    /^Larger batch size/,
+    /^Spin then park idle consumers/,
   ]);
   await expect(page.getByText('1.18×').first()).toBeVisible();
-  const now = page.getByRole('listbox', {name: 'Running now'});
-  await expect(now.getByRole('option', {name: /Combine W1 ring/}).first()).toBeVisible();
+  // A running idea says what it is doing under its name.
+  await expect(
+    ideas.getByRole('option', {name: /Combine W1 ring/}).locator('.vs-columnlist-lines > .vs-text'),
+  ).toHaveText(/correctness \+ benchmark/);
   await check(page, 'ink-run');
 
-  // The failed are listed; their chip narrows the list to them and a second press brings the rest
+  // The dropped are listed; their chip narrows the list to them and a second press brings the rest
   // back, and the search narrows the list.
-  await page.locator('button.vs-dotlegend-item', {hasText: '2 failed'}).click();
+  await page.locator('button.vs-dotlegend-item', {hasText: /^Dropped 1/}).click();
   await expect(ideas.getByRole('option', {name: /Spin then park/})).toBeVisible();
   await expect(ideas.getByRole('option', {name: /Combine W1 ring/})).toHaveCount(0);
-  await page.locator('button.vs-dotlegend-item', {hasText: '2 failed'}).click();
+  await page.locator('button.vs-dotlegend-item', {hasText: /^Dropped 1/}).click();
   await expect(ideas.getByRole('option', {name: /Combine W1 ring/})).toBeVisible();
   await page.getByLabel('Search ideas').fill('spin');
   await expect(ideas.getByRole('option')).toHaveText([/Spin then park/]);
@@ -255,23 +258,23 @@ test('every level opens by click and walks back by Escape, the crumbs and Back',
   await expect(turn).toBeVisible();
   expect(await page.evaluate(() => window.location.hash)).toBe(stepHash);
   await crumbs.getByRole('button', {name: 'Run', exact: true}).click();
-  await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
+  await expect(page.getByRole('listbox', {name: 'Ideas'})).toBeVisible();
   await expect(page).toHaveURL(RUN_LEVEL);
   await page.goBack();
   await expect(turn).toBeVisible();
   await page.goForward();
-  await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
+  await expect(page.getByRole('listbox', {name: 'Ideas'})).toBeVisible();
 
-  // Now jumps straight to the live step; Escape walks up to the run.
+  // A running idea's row opens its idea; Escape walks up to the run.
   await page
-    .getByRole('listbox', {name: 'Running now'})
+    .getByRole('listbox', {name: 'Ideas'})
     .getByRole('option', {name: /Combine W1 ring/})
     .first()
     .click();
-  await expect(page.getByRole('heading', {name: 'correctness + benchmark'})).toBeVisible();
+  await expect(page.getByRole('heading', {name: 'Combine W1 ring with W2 padding'})).toBeVisible();
   await page.keyboard.press('Escape');
-  await page.keyboard.press('Escape');
-  await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
+  await expect(page.getByRole('listbox', {name: 'Ideas'})).toBeVisible();
+  await expect(page.getByRole('heading', {name: 'Combine W1 ring with W2 padding'})).toHaveCount(0);
 });
 
 /** The performance chart of the run, which every level keeps on screen. */
@@ -280,11 +283,17 @@ function perfChart(page: Page): Locator {
 }
 
 /** Where the performance row is and what its axes read: all of it must be the same at every level. */
+/**
+ * Where the performance row sits in the page: its place in the screen's body, whatever the body is
+ * scrolled to. A level without the Ideas table is a shorter page, and the browser takes a scrolled
+ * body back to the end that is left; that is the page's move, the row has not moved in it.
+ */
 async function perfRow(page: Page) {
   return perfChart(page).evaluate(chart => {
+    const scrolled = document.querySelector('.vs-screen-body')?.scrollTop ?? 0;
     const box = (element: Element) => {
       const {x, y, width, height} = element.getBoundingClientRect();
-      return {x, y, width, height};
+      return {x, y: y + scrolled, width, height};
     };
     const row = chart.closest('.vs-chart-columns');
     return {
@@ -312,6 +321,8 @@ test('the performance row is the same element, in the same place and size, at ev
 }) => {
   await openRun(page);
   await expect(perfChart(page)).toBeVisible();
+  // The rows are below the charts: scrolled to them first, a click scrolls nothing.
+  await scrolledToEnd(page);
   await perfChart(page).evaluate(chart => chart.setAttribute('data-probe', 'perf'));
   const atRun = await perfRow(page);
   expect(atRun.probe).toBe('perf');
@@ -341,7 +352,7 @@ test('the performance row is the same element, in the same place and size, at ev
   await expect(page.getByText('queue/mpmc time: 41.2 ms')).toBeVisible();
   await unchanged();
   for (const _level of ['item', 'step', 'idea']) await page.keyboard.press('Escape');
-  await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
+  await expect(page.getByRole('listbox', {name: 'Ideas'})).toBeVisible();
   await unchanged();
   // The run's other faces and the idea's Logs face keep it too.
   await page.getByRole('radiogroup', {name: 'Show'}).getByText('Logs').click();
@@ -355,7 +366,7 @@ test('an open idea is singled out on the chart: its reading ringed, the steps of
   const ideas = page.getByRole('listbox', {name: 'Ideas'});
   const key = page.getByRole('list', {name: 'Chart key'});
   expect(await ringed(page)).toEqual({selected: [], lineage: []});
-  await expect(key.getByText('Selected', {exact: true})).toHaveCount(0);
+  await expect(key.getByText('Selected', {exact: true})).toBeHidden();
 
   // A measured idea: its own reading is ringed, every reading stays, and the key names the ring.
   await ideas.getByRole('option', {name: /Cache-line padding/}).click();
@@ -370,11 +381,14 @@ test('an open idea is singled out on the chart: its reading ringed, the steps of
   await page.keyboard.press('Escape');
   await ideas.getByRole('option', {name: /Combine W1 ring with W2 padding/}).click();
   expect((await ringed(page)).selected).toEqual([]);
-  await expect(key.getByText('Selected', {exact: true})).toHaveCount(0);
+  await expect(key.getByText('Selected', {exact: true})).toBeHidden();
 
   // Back at the run nothing is ringed.
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
+  await expect(page.getByRole('listbox', {name: 'Ideas'})).toBeVisible();
+  // The list widens as the idea closes, so a row may come under the pointer, and a row the pointer
+  // is on lights its lineage: take the pointer away.
+  await page.mouse.move(0, 0);
   expect(await ringed(page)).toEqual({selected: [], lineage: []});
 });
 
@@ -492,7 +506,7 @@ test('the scrubber replays the run’s ideas at an earlier event and returns to 
   await expect(ideas.getByRole('option')).toHaveCount(7);
   await page.getByRole('slider', {name: 'Run position'}).focus();
   await page.keyboard.press('Home');
-  await expect(page.getByText('No ideas yet')).toBeVisible();
+  await expect(ideas).toHaveCount(0);
   await page.getByRole('button', {name: 'Back to live'}).click();
   await expect(ideas.getByRole('option')).toHaveCount(7);
   await page.evaluate(
@@ -618,12 +632,14 @@ test('every face of the run level keeps the time bar and the hero in view', asyn
       await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight),
     ).toBe(true);
   }
-  // Now keeps what runs whole (the role and what it does), even in a narrow window; the idea's name gives way.
+  // A running idea keeps what it does whole (the role and the step), even in a narrow window.
+  await show.getByText('Ideas', {exact: true}).click();
   await page.setViewportSize({width: 1024, height: 800});
-  const rows = page.getByRole('listbox', {name: 'Running now'}).getByRole('option');
-  await expect(rows.first()).toBeVisible();
-  for (const row of await rows.all()) {
-    const doing = row.locator('.vs-pickrow-text > :nth-child(2)');
+  const doings = page
+    .getByRole('listbox', {name: 'Ideas'})
+    .locator('[data-column="idea"] .vs-columnlist-lines > .vs-text');
+  await expect(doings.first()).toBeVisible();
+  for (const doing of await doings.all()) {
     await expect(doing).toHaveText(/\S/);
     expect(await doing.evaluate(each => each.scrollWidth <= each.clientWidth)).toBe(true);
   }
@@ -695,6 +711,11 @@ test('a live turn keeps its scroll position and its element as events arrive', a
 
   // A link in what the agent said opens through the app's opener, never in the window.
   const url = page.url();
+  // The turn draws the messages near what is in view, and the link is in the last: the reader
+  // scrolls to it first, however much room the screen leaves the turn.
+  await turn.evaluate(element => {
+    element.scrollTop = element.scrollHeight;
+  });
   await turn.getByRole('link', {name: 'the notes 11'}).click();
   await expect
     .poll(() =>
@@ -704,6 +725,13 @@ test('a live turn keeps its scroll position and its element as events arrive', a
     )
     .toEqual(['https://example.com/notes/11']);
   expect(page.url()).toBe(url);
+  // The turn draws what is near the reader and follows its end only while the reader is there; the
+  // press on the link left them mid-turn, whether the page had taken that scroll or not when the turn
+  // closed. They go back to the end, so the reply is drawn however the page and the run interleave.
+  await turn.evaluate(element => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect.poll(gap).toBeLessThan(2);
   await more(0, 1); // The real turn closes only after its last transcript chunk.
   await expect(turn).toContainText('Padded both counters');
   await expect(turn.getByRole('button', {name: /Show all fields/})).toHaveCount(0);

@@ -5,6 +5,7 @@
  * the engine also handled would move two entries.
  */
 import {expect, type Page, test} from '@playwright/test';
+import {settled} from './checks/settle.js';
 import {
   type FakeBridgeSeed,
   installFakeBridge,
@@ -101,11 +102,11 @@ test('the mouse buttons retrace a run’s zooms, leave it for the dashboard, and
   await openIdea(page);
   await press(page, 'back');
   await expect(opened(page)).toHaveCount(0);
-  await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
+  await expect(ideas(page)).toBeVisible();
   await press(page, 'back');
   await expect(dashboard(page)).toBeVisible();
   await press(page, 'forward');
-  await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
+  await expect(ideas(page)).toBeVisible();
   await press(page, 'forward');
   await expect(opened(page)).toBeVisible();
 });
@@ -115,21 +116,33 @@ test('the Runs crumb goes up to the dashboard from any level, and Back returns t
 }) => {
   await openShell(page);
   await openIdea(page);
+  // The row of crumbs, with the way up to the dashboard first, shows from the idea's steps on.
+  await page
+    .getByRole('listbox', {name: /steps$/})
+    .getByRole('option')
+    .first()
+    .click();
   await crumbs(page).getByRole('button', {name: 'Runs', exact: true}).click();
   await expect(dashboard(page)).toBeVisible();
   await page.goBack();
-  await expect(opened(page)).toBeVisible();
+  await expect(crumbs(page)).toBeVisible();
 });
 
-test('zooming keeps the crumbs in their row, so what is below them stays put', async ({page}) => {
+test('opening an idea moves neither the charts nor the time bar', async ({page}) => {
   await openShell(page);
   await run(page).click();
-  const before = await ideas(page).boundingBox();
+  const bar = page.getByRole('slider', {name: 'Run position'});
+  const chart = page.locator('.vs-chart-panel').first();
+  await expect(ideas(page)).toBeVisible();
+  await settled(page);
+  const before = {bar: await bar.boundingBox(), chart: await chart.boundingBox()};
   await ideas(page)
     .getByRole('option', {name: /Combine W1 ring/})
     .click();
   await expect(opened(page)).toBeVisible();
-  expect(await ideas(page).boundingBox()).toEqual(before);
+  await settled(page);
+  // The idea opens beside the list, which gives it room: the list narrows, the performance row stays.
+  expect({bar: await bar.boundingBox(), chart: await chart.boundingBox()}).toEqual(before);
 });
 
 test('Back crosses screens, and each screen keeps one entry', async ({page}) => {
@@ -157,7 +170,7 @@ test('a reload at a zoom shows the same run at the same zoom, and Back still lea
   await page.reload();
   await expect(opened(page)).toBeVisible();
   await press(page, 'back');
-  await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
+  await expect(ideas(page)).toBeVisible();
   await press(page, 'back');
   await expect(dashboard(page)).toBeVisible();
 });
@@ -172,7 +185,7 @@ test('leaving a zoomed run keeps its zoom from the next run opened', async ({pag
   await expect(dashboard(page)).toBeVisible();
   await expect(page).not.toHaveURL(/idea=/);
   await run(page).click();
-  await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
+  await expect(ideas(page)).toBeVisible();
   await expect(opened(page)).toHaveCount(0);
 });
 
@@ -207,7 +220,7 @@ test('Back and Forward return a screen to where it was scrolled, and a new visit
   await openShell(page);
   const rail = page.getByRole('navigation', {name: 'VibeSys'});
   await run(page).click();
-  await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
+  await expect(ideas(page)).toBeVisible();
   await scrollEverything(page, 60);
   const onRun = await scrolls(page);
   expect(Object.values(onRun).length).toBeGreaterThan(0);
@@ -226,6 +239,6 @@ test('Back and Forward return a screen to where it was scrolled, and a new visit
   // Opening a screen anew starts it at the top.
   await rail.getByRole('button', {name: /^Runs/}).click();
   await run(page).click();
-  await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
+  await expect(ideas(page)).toBeVisible();
   expect(Object.values(await scrolls(page)).every(top => top === 0)).toBe(true);
 });

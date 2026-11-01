@@ -64,16 +64,26 @@ class Walk {
     await settled(this.#page);
     await this.#visit(screen, this.#page);
     this.moved.push(
-      ...(await stabilityViolations(this.#page, screen, this.#before, this.#anchors)),
+      ...(await stabilityViolations(
+        this.#page,
+        screen,
+        this.#before,
+        this.#anchors,
+        screen === 'idea',
+      )),
     );
   }
 }
 
+/** The row of `idea` in the Ideas list; the first row for none. */
+function ideaRow(page: Page, idea: string | null) {
+  const options = page.getByRole('listbox', {name: 'Ideas'}).getByRole('option');
+  return idea === null ? options.first() : options.filter({hasText: row(idea)}).first();
+}
+
 async function openIdea(page: Page, idea: string | null): Promise<void> {
   await settled(page);
-  const options = page.getByRole('listbox', {name: 'Ideas'}).getByRole('option');
-  const other = options.first();
-  const target = idea === null ? other : options.filter({hasText: row(idea)}).first();
+  const target = ideaRow(page, idea);
   // Pointing at a row redraws the chart (it lights the row's chain): on a long run that takes long
   // enough to swallow a click that arrives with the first pointer move, so point first, then press.
   await target.hover();
@@ -143,6 +153,9 @@ export async function walkScreens(
   // is read from the lists: a reader scrolls to them before opening an idea, so the walk starts
   // there. Where the screen fits nothing scrolls, and an idea that moved the page would be caught.
   await ideas.scrollIntoViewIfNeeded();
+  // The list is as tall as its rows, so the idea to open may be below the fold: a reader scrolls to
+  // it first, and the press then scrolls nothing.
+  await ideaRow(page, journey.idea).scrollIntoViewIfNeeded();
   await settled(page);
   const walk = new Walk(page, visit, anchors, await anchorsOf(page, anchors));
   await walk.at('run');

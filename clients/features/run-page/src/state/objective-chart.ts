@@ -338,3 +338,22 @@ export function chartLegend(charts: readonly ObjectiveChartView[]): readonly Cha
       : []),
   ];
 }
+
+/**
+ * How many charts share a row of the performance section: every chart of a run of up to three
+ * objectives, then rows of two (four charts) or three (more), so a row is never narrower than a
+ * chart and its axis labels can be read.
+ */
+export function chartsAcross(count: number): number {
+  if (count <= 3) return Math.max(1, count);
+  return count === 4 ? 2 : 3;
+}
+
+/**
+ * Whether the chart at `at` of `count` sits in the last row. Only those name their x axis (the
+ * running time), once under each column, so a wrapped row is not taller for saying it twice.
+ */
+export function inLastChartRow(at: number, count: number): boolean {
+  const across = chartsAcross(count);
+  return at >= Math.floor((count - 1) / across) * across;
+}

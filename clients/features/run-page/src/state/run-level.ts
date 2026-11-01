@@ -1,5 +1,5 @@
 /**
- * The run level's Now pane (what runs now, each a shortcut to its live step), the run clock's
+ * What each running idea is doing (the Ideas table words it under the idea's name), the run clock's
  * start and now, and what a route resolves to in the run (`resolveZoom`): an id the run does not
  * hold resolves a level up, so a stale address still opens.
  */
@@ -14,22 +14,14 @@ import {openWaits} from './span-words.js';
 import {timelineView} from './views.js';
 import {type Route, routeLevel} from './zoom.js';
 
-/** One thing running now. */
-export interface NowItem {
-  readonly id: string;
+/** What a running idea is doing, and since when on the run clock. */
+export interface IdeaDoing {
   /**
    * What runs, kept whole on a narrow row: who runs it and what (`Builder · Agent turn`,
-   * `Waiting after Builder`) for an idea, the role for an agent.
+   * `Waiting after Builder`).
    */
   readonly doing: string;
-  /** What it belongs to, which gives way first: the idea's title, or what the agent works in. */
-  readonly context: string;
   readonly since: number;
-  /** Where the row jumps to. */
-  readonly open:
-    | {readonly kind: 'step'; readonly idea: string; readonly step: string}
-    | {readonly kind: 'idea'; readonly idea: string}
-    | {readonly kind: 'agent'; readonly agent: string};
 }
 
 /** When the span began its newest wait on something other than a timer or the stop; null if none. */
@@ -51,62 +43,35 @@ function stepSummary(step: CandidateStep): string {
     : `${role} · ${title}`;
 }
 
-/** What runs now: each running idea's latest running step, then agents working outside ideas. */
-export function nowView(model: RunModel): readonly NowItem[] {
-  const running = model.candidates.candidates.filter(item => item.outcome === 'running');
-  const attempts = new Set(running.flatMap(item => item.attempts.map(attempt => attempt.span)));
-  return [
-    ...running.map(item => ideaNow(item, model.trace.spans)),
-    ...model.agents.agents
-      .filter(
-        agent => agent.status === 'running' && !attempts.has(agent.activity.within?.span ?? ''),
-      )
-      .map(agentNow),
-  ];
+/** What each running idea is doing, by the idea's id. */
+export function ideaDoing(model: RunModel): ReadonlyMap<string, IdeaDoing> {
+  return new Map(
+    model.candidates.candidates
+      .filter(item => item.outcome === 'running')
+      .map(item => [item.id, doing(item, model.trace.spans)]),
+  );
 }
 
 /**
- * A running idea's row: its newest running step; between steps (its agent yielded to an
- * evaluation, say) the step it last finished, waiting since the attempt began to wait; and before
- * its first step, starting since its running attempt began (a later attempt of a kept idea starts
- * long after the idea did).
+ * A running idea's newest running step; between steps (its agent yielded to an evaluation, say)
+ * the step it last finished, waiting since the attempt began to wait; and before its first step,
+ * starting since its running attempt began (a later attempt of a kept idea starts long after the
+ * idea did).
  */
-function ideaNow(item: Candidate, spans: ReadonlyMap<string, Span>): NowItem {
+function doing(item: Candidate, spans: ReadonlyMap<string, Span>): IdeaDoing {
   const step = item.running.at(-1);
   if (step === undefined) {
     const attempt = item.attempts.filter(each => each.outcome === 'running').at(-1);
     const last = attempt?.steps.at(-1);
     if (attempt === undefined || last === undefined) {
-      const open = {kind: 'idea', idea: item.id} as const;
-      const since = attempt?.startedAt ?? item.startedAt;
-      return {id: item.id, doing: 'Starting', context: item.title, since, open};
+      return {doing: 'Starting', since: attempt?.startedAt ?? item.startedAt};
     }
     return {
-      id: attempt.span,
       doing: `Waiting after ${stepLabel(last)}`,
-      context: item.title,
       since: waitingSince(spans.get(attempt.span)) ?? last.endedAt ?? attempt.startedAt,
-      open: {kind: 'step', idea: item.id, step: last.span},
     };
   }
-  return {
-    id: step.span,
-    doing: stepSummary(step),
-    context: item.title,
-    since: step.startedAt,
-    open: {kind: 'step', idea: item.id, step: step.span},
-  };
-}
-
-function agentNow(agent: AgentNode): NowItem {
-  const within = agent.activity.within;
-  return {
-    id: agent.activity.turn,
-    doing: roleName(agent.role),
-    context: within === null ? 'Agent turn' : within.title,
-    since: agent.activity.startedAt,
-    open: {kind: 'agent', agent: agent.id},
-  };
+  return {doing: stepSummary(step), since: step.startedAt};
 }
 
 /** The run clock now: the live clock when the page carries one, else the latest the spans say. */

@@ -13,6 +13,7 @@ import {IDEAS_FILTER_DEFAULT} from '../../state/ideas-view.js';
 import {EMPTY_TRACE_LOG, traceStep} from '../../state/live.js';
 import {createFactsReader} from '../../state/run-facts.js';
 import {createRunReader} from '../../state/run-model.js';
+import {positionOf} from '../../state/time-position.js';
 import {Hero} from './hero.js';
 import {IdeasTable} from './ideas-table.js';
 
@@ -69,7 +70,9 @@ async function drawn(
 }
 
 test('the headline reads vs the comparison, the chart draws its line, the others are small labels', async () => {
-  const screen = await drawn(<Hero {...BASE} whole={MODEL} idea={null} />);
+  const screen = await drawn(
+    <Hero {...BASE} position={positionOf(BASE.model, MODEL, BASE.clock.start)} idea={null} />,
+  );
   const text = screen.container.textContent ?? '';
   expect(text).toContain('5.82×');
   expect(text).toContain('vs vLLM');
@@ -80,25 +83,29 @@ test('the headline reads vs the comparison, the chart draws its line, the others
   await screen.done();
 });
 
-test('the Ideas table has a ratio column for each comparison, a dash where there is none', async () => {
+test('the Ideas table has a ratio column for each comparison, a dash where there is none, and no vs input column without an input', async () => {
   const screen = await drawn(
     <IdeasTable
       base={BASE}
       filter={IDEAS_FILTER_DEFAULT}
-      sort="newest"
+      sort={null}
+      setSort={() => undefined}
       selected={null}
-      outcomes={new Map()}
-      effects={new Map()}
       dispatch={() => undefined}
     />,
   );
-  const header = [...screen.container.querySelectorAll('.vs-listheader-col')].map(
+  const header = [...screen.container.querySelectorAll('.vs-columnlist-headcell')].map(
     column => column.textContent,
   );
-  expect(header).toEqual(['vs input', 'vLLM', 'SGLang']);
+  // The run has no reading of its input: a `vs input` column would read a dash on every row.
+  expect(header).not.toContain('vs input');
+  const at = header.indexOf('vLLM');
+  expect(header.slice(at, at + 2)).toEqual(['vLLM', 'SGLang']);
   const rows = [...screen.container.querySelectorAll('[role="option"]')].map(row => ({
-    title: row.querySelector('.vs-pickrow-text > .vs-text')?.textContent,
-    cells: [...row.querySelectorAll('.vs-pickrow-measure')].map(cell => cell.textContent),
+    title: row.querySelector('.vs-columnlist-cell .vs-text')?.textContent,
+    cells: [...row.querySelectorAll('.vs-columnlist-cell')]
+      .slice(at, at + 2)
+      .map(cell => cell.textContent),
   }));
   expect(rows).toEqual([
     {title: 'Pin the consumers to cores', cells: ['5.82×', '–']},

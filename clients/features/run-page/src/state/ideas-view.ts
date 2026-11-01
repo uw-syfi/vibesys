@@ -1,14 +1,14 @@
 /**
- * The run level's Ideas face: one row per candidate, running first and then the rest newest
- * first, the failed shown with the rest unless the filter hides them (`+ N failed` then stands
- * for them). The tree
- * layout (`ideas-tree.ts`) draws the same rows nested under what each built on.
+ * The compact Ideas list: one row per candidate, running first and then the rest newest first. The
+ * tree layout (`ideas-tree.ts`) draws the same rows nested under what each built on; the dashboard's
+ * table is `ideas-table-view.ts`.
  *
  * Rows are memoized on the candidate tree and the filter, so a render with neither changed builds
  * nothing (a tree is the same object until a span changes).
  */
 import type {Candidate, CandidateOutcome, CandidateTree} from '@vibesys/run-state/candidates';
 import {type IdeaBase, type IdeaBases, ideaBases} from './idea-bases.js';
+import type {IdeaStatus} from './idea-status.js';
 import {figureCell, type IdeaTone, outcomeWords} from './idea-words.js';
 import {objectiveUnit} from './metric-words.js';
 import {vsInputOf} from './objective-reading.js';
@@ -16,56 +16,21 @@ import {inputValueOf} from './performance.js';
 import type {Direction, RunModel} from './run-model.js';
 import {duration, formatValue} from './span-reading.js';
 
-/** Which ideas the Ideas face shows. */
+/**
+ * What narrows the Ideas list: the words an idea's title or text holds, and the status the chosen
+ * chip shows (null: every status). The compact list beside an open idea and the tree honor the query
+ * only; the table (`ideasTable`) honors both.
+ */
 export interface IdeasFilter {
   readonly query: string;
-  readonly passed: boolean;
-  readonly running: boolean;
-  readonly failed: boolean;
+  readonly status: IdeaStatus | null;
 }
 
-export const IDEAS_FILTER_DEFAULT: IdeasFilter = {
-  query: '',
-  passed: true,
-  running: true,
-  failed: true,
-};
+export const IDEAS_FILTER_DEFAULT: IdeasFilter = {query: '', status: null};
 
-const GROUPS: readonly CandidateOutcome[] = ['passed', 'running', 'failed'];
-
-/** Whether the chips narrow the list: with every group on, nothing is chosen. */
-function narrowed(filter: IdeasFilter): boolean {
-  return !GROUPS.every(group => filter[group]);
-}
-
-/** Whether the chip of `group` is the chosen one: pressed only while the list is narrowed to it. */
-export function chipPressed(filter: IdeasFilter, group: CandidateOutcome): boolean {
-  return narrowed(filter) && filter[group];
-}
-
-/**
- * The filter after a press on the chip of `group`: the list shows that group alone; a press on
- * the chosen chip shows every group again. The query is kept.
- */
-export function pressChip(filter: IdeasFilter, group: CandidateOutcome): IdeasFilter {
-  const chosen =
-    chipPressed(filter, group) && GROUPS.every(each => filter[each] === (each === group));
-  const all = {passed: true, running: true, failed: true};
-  return {
-    ...filter,
-    ...(chosen ? all : {passed: false, running: false, failed: false, [group]: true}),
-  };
-}
-
-/** What the list says when `filter` leaves it with no ideas. */
-export function noIdeasWords(filter: IdeasFilter): {title: string; body: string} {
-  const query = filter.query.trim();
-  const group = GROUPS.find(each => chipPressed(filter, each));
-  const title =
-    query === '' ? `No ${group ?? ''} ideas`.replace('  ', ' ') : `No ideas match “${query}”`;
-  const body =
-    query === '' ? 'Press the chip again to show every idea.' : 'Clear the search to see them all.';
-  return {title, body};
+/** What `ideasView` narrows by. */
+export interface IdeasQuery {
+  readonly query: string;
 }
 
 /** One idea's row. */
@@ -99,8 +64,6 @@ export interface IdeaRow {
 
 export interface IdeasView {
   readonly rows: readonly IdeaRow[];
-  /** Failed ideas the filter hides (the `+ N failed` row); 0 when shown or none. */
-  readonly hiddenFailed: number;
   readonly counts: Readonly<Record<CandidateOutcome, number>>;
   readonly total: number;
 }
@@ -218,9 +181,11 @@ function rowOf(item: Candidate, context: RowContext): IdeaRow {
   };
 }
 
-function matches(item: Candidate, query: string): boolean {
-  if (query === '') return true;
-  const needle = query.toLowerCase();
+/** Whether `item`'s title or text holds `query` (any case); an empty query holds for all. */
+export function matchesIdeaQuery(item: Candidate, query: string): boolean {
+  const words = query.trim();
+  if (words === '') return true;
+  const needle = words.toLowerCase();
   return [item.title, item.idea ?? '', item.hypothesis ?? ''].some(text =>
     text.toLowerCase().includes(needle),
   );
@@ -263,24 +228,18 @@ export function ideaRowsById(model: RunModel): ReadonlyMap<string, IdeaRow> {
   return rows;
 }
 
-function buildIdeas(model: RunModel, filter: IdeasFilter): IdeasView {
+function buildIdeas(model: RunModel, filter: IdeasQuery): IdeasView {
   const tree = model.candidates;
   const counts = {running: 0, passed: 0, failed: 0};
   for (const item of tree.candidates) counts[item.outcome] += 1;
   const rowsById = ideaRowsById(model);
-  const query = filter.query.trim();
   const rows: IdeaRow[] = [];
-  let hiddenFailed = 0;
   for (const item of ordered(tree.candidates)) {
-    if (!matches(item, query)) continue;
-    if (!filter[item.outcome]) {
-      if (item.outcome === 'failed') hiddenFailed += 1;
-      continue;
-    }
+    if (!matchesIdeaQuery(item, filter.query)) continue;
     const row = rowsById.get(item.id);
     if (row !== undefined) rows.push(row);
   }
-  return {rows, hiddenFailed, counts, total: tree.candidates.length};
+  return {rows, counts, total: tree.candidates.length};
 }
 
 /** Counts the ideas views built, for the memoization tests. */
@@ -288,10 +247,10 @@ export interface ViewMeter {
   count(units: number): void;
 }
 
-const ideasMemo = new WeakMap<CandidateTree, {filter: IdeasFilter; view: IdeasView}>();
+const ideasMemo = new WeakMap<CandidateTree, {filter: IdeasQuery; view: IdeasView}>();
 
 /** The Ideas face of `model` under `filter`; the same object while neither changes. */
-export function ideasView(model: RunModel, filter: IdeasFilter, meter?: ViewMeter): IdeasView {
+export function ideasView(model: RunModel, filter: IdeasQuery, meter?: ViewMeter): IdeasView {
   const cached = ideasMemo.get(model.candidates);
   if (
     cached !== undefined &&
@@ -306,10 +265,8 @@ export function ideasView(model: RunModel, filter: IdeasFilter, meter?: ViewMete
   return view;
 }
 
-function sameFilter(a: IdeasFilter, b: IdeasFilter): boolean {
-  return (
-    a.query === b.query && a.passed === b.passed && a.running === b.running && a.failed === b.failed
-  );
+function sameFilter(a: IdeasQuery, b: IdeasQuery): boolean {
+  return a.query === b.query;
 }
 
 /** How long ago `since` was on the run clock at `now`, as the rows word it. */

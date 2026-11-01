@@ -5,7 +5,7 @@ import {firstChart} from './chart-fixtures.js';
 import {heroView} from './headline.js';
 import {IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
 import {traceLog} from './live.js';
-import {clockStart, nowView} from './run-level.js';
+import {clockStart, ideaDoing} from './run-level.js';
 import {createRunReader, type RunModel} from './run-model.js';
 
 /**
@@ -234,9 +234,13 @@ describe('a multi-agent run', () => {
         event.type === 'span_started' &&
         (event.data as {span: Span}).span.id === 'op:000002/orchestrator.1',
     );
-    expect(nowView(at(events, designing + 1)).map(item => [item.context, item.doing])).toEqual([
-      ['round 2', 'Planner'],
-    ]);
+    const model = at(events, designing + 1);
+    expect(
+      model.candidates.candidates.flatMap(idea => {
+        const running = ideaDoing(model).get(idea.id);
+        return running === undefined ? [] : [[idea.title, running.doing]];
+      }),
+    ).toEqual([['round 2', 'Planner']]);
   });
 });
 
@@ -294,13 +298,13 @@ describe('a live multi run whose round 1 passed', () => {
     expect(chart.readings.map(point => point.y)).toEqual([100]);
   });
 
-  test('once the run finished nothing runs now, and the best stays', () => {
+  test('once the run finished no idea is doing anything, and the best stays', () => {
     const run = new Recording();
     liveRoundOne(run);
     run.end('op:adopt', {verdict: 'adopted'});
     run.end('flow:#1');
     const model = at(run.events);
-    expect(nowView(model)).toEqual([]);
+    expect(ideaDoing(model).size).toBe(0);
     expect(heroView(model).headlines[0]?.ratio).toBe('2.00×');
   });
 });

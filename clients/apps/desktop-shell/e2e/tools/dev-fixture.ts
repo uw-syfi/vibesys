@@ -13,7 +13,13 @@
  */
 import {fileURLToPath} from 'node:url';
 import {parseArgs} from 'node:util';
-import {FIXTURE_NAMES, fixtureNamed, splitLive} from '@vibesys/run-fixtures';
+import {
+  FIXTURE_NAMES,
+  fixtureNamed,
+  objectivesRun,
+  type RunFixture,
+  splitLive,
+} from '@vibesys/run-fixtures';
 import {createServer, type Plugin} from 'vite';
 import {fixtureScripts} from '../fixture-world.js';
 
@@ -23,13 +29,20 @@ const SHELL_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 
 type Theme = 'ink' | 'paper';
 
+/** The catalog's fixtures, and the generated runs of three and six objectives (`objectives-3`, `objectives-6`). */
+function runNamed(name: string): RunFixture {
+  if (name === 'objectives-3') return objectivesRun(3);
+  if (name === 'objectives-6') return objectivesRun(6);
+  return fixtureNamed(name);
+}
+
 function themeOf(text: string | null): Theme {
   return text === 'paper' ? 'paper' : 'ink';
 }
 
 /** The classic script a page runs first: the installers, then opening the run from Recent. */
 function pageScript(name: string, theme: Theme): string {
-  const fixture = fixtureNamed(name);
+  const fixture = runNamed(name);
   const parts = [...fixtureScripts(fixture, {theme})];
   const live = fixture.state === 'live' ? splitLive(fixture) : null;
   const play = JSON.stringify(live === null ? [] : [live.beforeDrop, live.afterDrop]);
@@ -113,10 +126,10 @@ const {values, positionals} = parseArgs({
 });
 
 if (values.list) {
-  process.stdout.write(`${FIXTURE_NAMES.join('\n')}\n`);
+  process.stdout.write(`${[...FIXTURE_NAMES, 'objectives-3', 'objectives-6'].join('\n')}\n`);
 } else {
   const name = positionals[0] ?? DEFAULT_FIXTURE;
-  fixtureNamed(name);
+  runNamed(name);
   const server = await createServer({
     root: SHELL_ROOT,
     plugins: [fixtureApp(name, themeOf(values.theme))],

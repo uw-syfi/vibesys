@@ -13,10 +13,10 @@ import {
   Menu,
   type MenuItem,
   markdownToPlain,
-  Reserve,
   Row,
   Screen,
   Stack,
+  Stat,
   Text,
   Timeline,
   withoutPaths,
@@ -36,6 +36,7 @@ import {
   NO_MODEL_NAMES,
   type Offer,
   pauseNowConfirmView,
+  positionOf,
   type ResolvedZoom,
   type Route,
   RUN_ROUTE,
@@ -60,7 +61,7 @@ import {
   usageRecords,
   whoBySpan,
 } from '../../state/index.js';
-import {Hero} from './hero.js';
+import {heroParts} from './hero.js';
 import {
   HistoryLoading,
   InitialRunLoading,
@@ -96,24 +97,21 @@ function LevelBody(props: {
 }
 
 /**
- * What the breadcrumb row is as tall as: a step to go back to and the place you are at. The row is
- * drawn empty and kept where no breadcrumb shows, so the panes below it stay where they are when
- * a step opens and the breadcrumb appears.
+ * The row under the header that says where in the run the panes are, with a way back to the Runs
+ * dashboard and to each level, from an idea's steps on. Above that the header's Runs button leads
+ * to the dashboard and the panes say the rest; the row is not kept empty above them, so the
+ * charts and the table start as high as the window allows.
  */
-const BREADCRUMB_ROW: readonly Crumb[] = [
-  {id: 'back', label: 'Run'},
-  {id: 'here', label: 'Here'},
-];
-
-/** The row under the run's header: `crumbs`, or the row kept empty when there are none. */
-function CrumbRow(props: {readonly crumbs: readonly Crumb[]}): JSX.Element {
-  return props.crumbs.length > 0 ? (
-    <Breadcrumb label="Zoom" items={props.crumbs} />
-  ) : (
-    <Reserve>
-      <Breadcrumb label="Zoom" items={BREADCRUMB_ROW} />
-    </Reserve>
-  );
+function CrumbRow(props: {
+  readonly runs: (() => void) | undefined;
+  readonly route: Route;
+  readonly zoomed: ResolvedZoom;
+  readonly zoom: Zoom;
+}): JSX.Element | null {
+  const {runs, route, zoomed, zoom} = props;
+  if (!showsBreadcrumb(route, zoomed)) return null;
+  const up = runs === undefined ? [] : [runsCrumb(runs)];
+  return <Breadcrumb label="Zoom" items={[...up, ...crumbs(zoomed, route, zoom)]} />;
 }
 
 /** The step up to the Runs dashboard, always the first of the row. */
@@ -140,8 +138,9 @@ export interface RunChatSlot {
 }
 
 /**
- * The run's facts under its title: its status and id on one line, the id whole (the line wraps
- * rather than cut it); the agents and the spend on the next, so the spend takes no line of its own.
+ * The run's title and facts on one line: its title, its status, why it ended, the id whole (the line
+ * gives way at the id, with an ellipsis, before it cuts anything else), then the models that built
+ * it, which give way too and say everything on hover.
  */
 function RunFacts(props: {
   readonly header: ReturnType<typeof headerView>;
@@ -150,92 +149,60 @@ function RunFacts(props: {
 }): JSX.Element {
   const {header} = props;
   return (
-    <>
-      <FactLine fit="parent">
-        <Fact>
-          <Chip
-            label={header.status.label}
-            tone={header.status.tone}
-            dot
-            {...(header.ended === null ? {} : {hint: header.ended.reason})}
-          />
+    <FactLine fit="parent" wrap={false}>
+      <Fact>
+        <Text as="h1" variant="heading">
+          {header.title}
+        </Text>
+      </Fact>
+      <Fact>
+        <Chip
+          label={header.status.label}
+          tone={header.status.tone}
+          dot
+          {...(header.ended === null ? {} : {hint: header.ended.reason})}
+        />
+      </Fact>
+      {header.ended === null || header.ended.brief === null ? null : (
+        <Fact shrink title={withoutPaths(header.ended.reason)}>
+          <Text tone="muted">{withoutPaths(header.ended.brief)}</Text>
         </Fact>
-        {header.ended === null || header.ended.brief === null ? null : (
-          <Fact shrink title={withoutPaths(header.ended.reason)}>
-            <Text tone="muted">{withoutPaths(header.ended.brief)}</Text>
-          </Fact>
-        )}
-        {props.historyProblem === null ? null : (
-          <Fact>
-            <Chip label="History unavailable" tone="warn" dot hint={props.historyProblem} />
-          </Fact>
-        )}
-        <Fact shrink title={header.subtitle}>
-          <Text variant="code" tone="muted">
-            {header.subtitle}
-          </Text>
-        </Fact>
-      </FactLine>
-      {header.agents.length === 0 && header.spent === null ? null : (
-        <FactLine>
-          {header.agents.map(agent => (
-            <Fact key={agent.role}>
-              <Text variant="small" tone="muted">
-                {agent.role}
-              </Text>
-              <Text variant="code">{agent.ran.join(', ')}</Text>
-            </Fact>
-          ))}
-          {header.spent === null ? null : (
-            <Fact>
-              <Text variant="code" tone="muted" title={header.spent.title}>
-                {header.agents.length === 0 ? header.spent.label : `· ${header.spent.label}`}
-              </Text>
-            </Fact>
-          )}
-        </FactLine>
       )}
-    </>
+      {props.historyProblem === null ? null : (
+        <Fact>
+          <Chip label="History unavailable" tone="warn" dot hint={props.historyProblem} />
+        </Fact>
+      )}
+      <Fact shrink title={header.subtitle}>
+        <Text variant="code" tone="muted">
+          {header.subtitle}
+        </Text>
+      </Fact>
+      {header.agents.map(agent => (
+        <Fact key={agent.role} shrink title={`${agent.role} ${agent.ran.join(', ')}`}>
+          <Stat inline label={agent.role} value={agent.ran.join(', ')} />
+        </Fact>
+      ))}
+    </FactLine>
   );
 }
 
 /**
- * The actions under the header: the app's own (the run controls' Resume, which know the writer),
- * then the ended run's Resume and Run again, so an ended run's actions sit together.
+ * The run's header on one line: the way back to the Runs dashboard, the title and facts, and at the
+ * end the actions (the app's own, the ended run's Resume and Run again, Chat, Pause, the menu). A
+ * window too narrow for both puts the actions under the title.
  */
-function RunActions(props: {
-  readonly header: ReturnType<typeof headerView>;
-  readonly toolbar: ReactNode;
-  readonly dispatch: Dispatch;
-}): JSX.Element | null {
-  const {dispatch, header} = props;
-  if (props.toolbar === undefined && !header.resume.shown && !header.runAgain.shown) return null;
-  return (
-    <Row gap="space-2" align="start" wrap>
-      {props.toolbar}
-      {header.resume.shown ? (
-        <Button
-          variant="primary"
-          text="Resume"
-          quietReason
-          {...reason(header.resume)}
-          press={() => dispatch({type: 'resume-ended'})}
-        />
-      ) : null}
-      {header.runAgain.shown ? (
-        <Button variant="secondary" text="Run again" press={() => dispatch({type: 'run-again'})} />
-      ) : null}
-    </Row>
-  );
-}
-
 function Header(props: {
   readonly state: RunPageState;
-  /** The header's words, computed once for the header and the actions under it. */
+  /** The header's words, computed once for the header and its actions. */
   readonly header: ReturnType<typeof headerView>;
   readonly dispatch: Dispatch;
   readonly chat: RunChatSlot | undefined;
   readonly historyProblem: string | null;
+  /** The app's own controls (Resume knows the writer), first among the actions. */
+  readonly toolbar: ReactNode;
+  /** Goes up to the Runs dashboard, first among the actions; absent where the crumbs say it, and in a run's own window. */
+  readonly runs?: (() => void) | undefined;
 }): JSX.Element {
   const {state, dispatch, chat, header} = props;
   const items: MenuItem[] = [
@@ -257,47 +224,74 @@ function Header(props: {
         ]),
   ];
   return (
-    <Stack gap="space-2">
-      <Row justify="between" align="start" wrap>
-        {/* Grown from no width: the actions keep the title's row and the title's lines wrap instead. */}
-        <Stack gap="space-2" grow>
-          <Text as="h1" variant="heading">
-            {header.title}
-          </Text>
-          <RunFacts header={header} historyProblem={props.historyProblem} />
-        </Stack>
-        <Row gap="space-2" wrap align="start">
-          {chat === undefined ? null : (
-            <Button
-              variant={chat.open ? 'primary' : 'secondary'}
-              icon="chat"
-              label="Chat"
-              expanded={chat.open}
-              press={chat.toggle}
-              {...(chat.unavailable === undefined ? {} : {disabledReason: chat.unavailable})}
-            />
-          )}
-          {header.pause.shown ? (
-            <Button
-              variant="secondary"
-              text="Pause"
-              press={() => dispatch({type: 'pause'})}
-              {...reason(header.pause)}
-            />
-          ) : null}
-          {header.pauseNow.shown ? (
-            <Button
-              variant="danger"
-              text="Pause now"
-              press={() => dispatch({type: 'ask-pause-now'})}
-              {...reason(header.pauseNow)}
-            />
-          ) : null}
-          <Menu icon="more" label="More actions" variant="quiet" align="end" items={items} />
-        </Row>
+    <Row gap="space-2" justify="between" align="center" wrap>
+      {/* Grown from no width: the actions keep the title's line and the facts give way first. */}
+      <Row gap="space-2" align="center" grow>
+        <RunFacts header={header} historyProblem={props.historyProblem} />
+      </Row>
+      <Row gap="space-2" align="center">
+        {props.runs === undefined ? null : (
+          <Button variant="quiet" size="sm" icon="chevron-left" text="Runs" press={props.runs} />
+        )}
+        {props.toolbar}
+        {header.resume.shown ? (
+          <Button
+            variant="primary"
+            size="sm"
+            text="Resume"
+            quietReason
+            {...reason(header.resume)}
+            press={() => dispatch({type: 'resume-ended'})}
+          />
+        ) : null}
+        {header.runAgain.shown ? (
+          <Button
+            variant="secondary"
+            size="sm"
+            text="Run again"
+            press={() => dispatch({type: 'run-again'})}
+          />
+        ) : null}
+        {chat === undefined ? null : (
+          <Button
+            variant={chat.open ? 'primary' : 'secondary'}
+            size="sm"
+            icon="chat"
+            label="Chat"
+            expanded={chat.open}
+            press={chat.toggle}
+            {...(chat.unavailable === undefined ? {} : {disabledReason: chat.unavailable})}
+          />
+        )}
+        {header.pause.shown ? (
+          <Button
+            variant="secondary"
+            size="sm"
+            text="Pause"
+            press={() => dispatch({type: 'pause'})}
+            {...reason(header.pause)}
+          />
+        ) : null}
+        {header.pauseNow.shown ? (
+          <Button
+            variant="danger"
+            size="sm"
+            text="Pause now"
+            press={() => dispatch({type: 'ask-pause-now'})}
+            {...reason(header.pauseNow)}
+          />
+        ) : null}
+        <Menu
+          size="sm"
+          icon="more"
+          label="More actions"
+          variant="quiet"
+          align="end"
+          items={items}
+        />
       </Row>
       <PauseNowDialog state={state} dispatch={dispatch} />
-    </Stack>
+    </Row>
   );
 }
 
@@ -418,14 +412,12 @@ function pendingRunScreen(
   zoom: Zoom,
   route: Route,
   header: ReactNode,
-  actions: ReactNode,
 ): JSX.Element | null {
   if (state.record.kind === 'unlisted') {
     const blocked = machineBlockWords(state);
     const unplaced = unplacedRun(state);
     return (
       <Screen density="compact" header={header}>
-        {actions}
         {blocked !== null ? (
           <RunGone words={blocked} />
         ) : unplaced === null ? (
@@ -443,7 +435,6 @@ function pendingRunScreen(
   ) {
     return (
       <Screen density="compact" header={header}>
-        {actions}
         <InitialRunLoading stage="summary" />
       </Screen>
     );
@@ -452,7 +443,6 @@ function pendingRunScreen(
   if (gone !== null) {
     return (
       <Screen density="compact" header={header}>
-        {actions}
         <RunGone words={gone} />
       </Screen>
     );
@@ -461,7 +451,6 @@ function pendingRunScreen(
   if (loading !== null) {
     return (
       <Screen density="compact" header={header}>
-        {actions}
         <HistoryLoading progress={loading} />
       </Screen>
     );
@@ -476,7 +465,6 @@ function pendingRunScreen(
   ) {
     return (
       <Screen density="compact" header={header}>
-        {actions}
         <RunLoadError
           message={problem}
           retry={() => dispatch({type: 'retry-load'})}
@@ -522,26 +510,34 @@ export function RunScreen(props: {
   );
 }
 
+/** The header: the line of title and actions, the time bar and the stats line. */
 function RunHeader(
-  props: Parameters<typeof Header>[0] & {readonly scrubber: boolean},
+  props: Parameters<typeof Header>[0] & {
+    readonly scrubber: boolean;
+    /** The stats and the key to the charts; absent while the run's charts are not drawn. */
+    readonly figures: ReactNode;
+  },
 ): JSX.Element {
-  const {scrubber, ...header} = props;
+  const {scrubber, figures, ...header} = props;
   const {state, dispatch} = props;
   return (
-    <Stack gap="space-2">
+    <Stack gap="space-4">
       <Header {...header} />
-      {scrubber ? (
-        <RunScrubber
-          log={state.run.trace}
-          view={state.view}
-          ended={runHasEnded(state)}
-          wall={runWallNow(state)}
-          position={state.positionWord}
-          places={state.positionPlaces}
-          marks={state.positionMarks}
-          change={view => dispatch({type: 'view', view})}
-        />
-      ) : null}
+      <Stack gap="space-3">
+        {scrubber ? (
+          <RunScrubber
+            log={state.run.trace}
+            view={state.view}
+            ended={runHasEnded(state)}
+            wall={runWallNow(state)}
+            position={state.positionWord}
+            places={state.positionPlaces}
+            marks={state.positionMarks}
+            change={view => dispatch({type: 'view', view})}
+          />
+        ) : null}
+        {figures}
+      </Stack>
     </Stack>
   );
 }
@@ -564,20 +560,22 @@ function RunScreenBody(props: {
 }): JSX.Element {
   const {state, model, route, zoom, dispatch} = props;
   const names = props.modelNames ?? NO_MODEL_NAMES;
+  // The run's own start, read from the whole run: a scrubbed model before its first span has no
+  // start to give, and every face measures its times from the same origin at every position.
+  const start = clockStart(props.whole);
+  const position = positionOf(model, props.whole, start);
   const base: ViewBase = {
     emptyLabelsOnly: state.readOnly === true,
     names,
     model,
-    // The run's own start, read from the whole run: a scrubbed model before its first span has no
-    // start to give, and every face measures its times from the same origin at every position.
-    clock: {start: clockStart(props.whole), now: clockAt(model, runNow(state))},
+    position,
+    clock: {start, now: clockAt(model, runNow(state))},
     tokens: props.core?.tokens ?? EMPTY_LEDGER,
     who: whoBySpan(usageRecords(state), names),
     adoptionTitles: adoptionTitles(model.trace.spans),
     zoom,
   };
   const header = headerView(state, names);
-  const actions = <RunActions header={header} toolbar={props.toolbar} dispatch={dispatch} />;
   const pending = pendingRunScreen(
     state,
     dispatch,
@@ -589,8 +587,8 @@ function RunScreenBody(props: {
       dispatch={dispatch}
       chat={props.chat}
       historyProblem={null}
+      toolbar={props.toolbar}
     />,
-    actions,
   );
   if (pending !== null) return pending;
   const problem = historyProblem(state);
@@ -613,6 +611,16 @@ function RunScreenBody(props: {
     loading: detail.loading ?? transcript,
     problem: detail.problem,
   };
+  const parts =
+    before === null
+      ? heroParts({
+          ...base,
+          position,
+          idea: zoomed.idea?.id ?? null,
+          lit,
+          hover: idea => dispatch({type: 'ideas-hover', idea}),
+        })
+      : null;
   return (
     <Screen
       density="compact"
@@ -623,27 +631,28 @@ function RunScreenBody(props: {
           dispatch={dispatch}
           chat={props.chat}
           historyProblem={problem}
+          toolbar={props.toolbar}
+          runs={showsBreadcrumb(route, zoomed) ? undefined : props.runs}
           scrubber={traceArrival(state) === 'arrived' && before === null}
+          figures={
+            parts === null ? null : (
+              <Row gap="space-2" justify="between" align="baseline" wrap>
+                {parts.stats}
+                {parts.legend}
+              </Row>
+            )
+          }
         />
       }
     >
-      {actions}
       <Startup state={state} />
-      {before === null ? (
-        <Hero
-          {...base}
-          whole={props.whole}
-          idea={zoomed.idea?.id ?? null}
-          lit={lit}
-          hover={idea => dispatch({type: 'ideas-hover', idea})}
-        />
-      ) : null}
-      <CrumbRow
-        crumbs={[
-          ...(props.runs === undefined ? [] : [runsCrumb(props.runs)]),
-          ...(showsBreadcrumb(route, zoomed) ? crumbs(zoomed, route, zoom) : []),
-        ]}
-      />
+      {parts === null ? null : (
+        <>
+          {parts.charts}
+          {parts.notes}
+        </>
+      )}
+      <CrumbRow runs={props.runs} route={route} zoomed={zoomed} zoom={zoom} />
       <LevelBody deep={deep} route={route} zoomed={zoomed} level={level} />
       {props.supplemental}
     </Screen>
