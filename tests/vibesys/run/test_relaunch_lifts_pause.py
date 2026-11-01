@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-import pytest
 from tests.support.container_credentials import set_container_cli_credentials
 from tests.support.core_plugins import capability_plugin
 from tests.support.docker_environment import fake_docker_environment
@@ -49,6 +48,8 @@ from vs_sim.api.testing import (
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    import pytest
 
     from vs_sim.api import ProcessSpec
     from vs_sim.api.testing import Sim
@@ -145,18 +146,21 @@ def _process(
     return sim.run(exercise(), threads=threads)
 
 
-@pytest.mark.parametrize("pauses", [0, 1, 2, 3])
 def test_every_relaunch_of_a_paused_run_lifts_the_pause_and_the_last_one_ends_the_run(
-    tmp_path: Path, sim: Sim, monkeypatch: pytest.MonkeyPatch, pauses: int
+    tmp_path: Path, sim: Sim, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Pause, relaunch, pause the relaunch, relaunch again: each relaunch resumes, the last ends.
+
+    Two pauses, not one: a relaunch that names its resume the same in every process is refused
+    the second time and leaves the run parked, which one pause does not show.
+    """
     set_container_cli_credentials(monkeypatch)
     root = _project(tmp_path)
     disk = FakeGitRepositories()
 
-    rests = [
-        _process(root, sim, disk, resumed=index > 0, pause=True).status for index in range(pauses)
-    ]
-    last = _process(root, sim, disk, resumed=pauses > 0, pause=False)
+    first = _process(root, sim, disk, resumed=False, pause=True)
+    second = _process(root, sim, disk, resumed=True, pause=True)
+    last = _process(root, sim, disk, resumed=True, pause=False)
 
-    assert rests == [RunStatus.PARKED] * pauses
+    assert [first.status, second.status] == [RunStatus.PARKED, RunStatus.PARKED]
     assert last.status is not RunStatus.PARKED
