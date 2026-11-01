@@ -31,6 +31,13 @@ from vs_runtime._control_bridge import (
     RunControlBridge,
     SteerArtifacts,
 )
+from vs_runtime._core_executors import (
+    CoreExecutors,
+    MeasurementServices,
+    SessionServices,
+    core_executors,
+    empty_catalog,
+)
 from vs_runtime._core_loop import (
     AdmissionBusyError,
     CoreContractGapError,
@@ -89,7 +96,6 @@ from vs_runtime._core_requests import (
     settle,
 )
 from vs_runtime._core_run import (
-    HEARTBEAT_TASK,
     WAIT_TASK,
     CoreRunHost,
     NextWake,
@@ -101,16 +107,8 @@ from vs_runtime._core_run import (
     drive_core,
     start_core,
 )
-from vs_runtime._core_wiring import (
-    CoreExecutors,
-    CoreStartup,
-    MeasurementServices,
-    SessionServices,
-    core_bindings,
-    core_executors,
-    empty_catalog,
-    new_core_state,
-)
+from vs_runtime._core_state import CoreStartup, new_core_state
+from vs_runtime._core_wiring import core_bindings
 from vs_runtime._effect_fence import (
     EffectFences,
     Entered,
@@ -262,7 +260,6 @@ __all__ = [
     "BOARD_KEY",
     "EVALUATION_TOOL_ID",
     "HAND_ROLLED_ROLES",
-    "HEARTBEAT_TASK",
     "NOT_TARGET_FACTS",
     "REQUEST_DISPATCH",
     "RUNTIME_SCHEMA_VERSION",

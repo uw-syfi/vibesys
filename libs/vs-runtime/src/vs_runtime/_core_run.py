@@ -49,6 +49,7 @@ from vs_core.api import (
     unreleased_records,
 )
 from vs_runtime._mid_turn_steering import MidTurnSteering
+from vs_runtime._run_clocks import HEARTBEAT_TASK
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -59,9 +60,6 @@ if TYPE_CHECKING:
     from vs_runtime._core_requests import ExecutorRefusal
     from vs_sim.api import SleepingClock
 
-
-#: Name of the task that renews the lease while a drain is in flight; fakes recognize it.
-HEARTBEAT_TASK = "lease-heartbeat"
 
 #: Name of the task that sleeps while requests run; the sleep ends early when one finishes.
 WAIT_TASK = "loop-wait"
