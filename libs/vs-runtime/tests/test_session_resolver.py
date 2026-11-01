@@ -249,6 +249,21 @@ def test_a_turn_with_a_steer_and_standing_guidance_shows_each_once_in_its_own_se
     assert path.read_text(encoding="utf-8") == str(message)
 
 
+def test_a_steer_offered_to_a_running_turn_carries_its_text_once_and_an_unreadable_one_is_none(
+    production: Production,
+) -> None:
+    steer = reserved(production.put("stop tuning the prefill, profile decode"), 1)
+    unreadable = reserved(
+        ArtifactRef(artifact_id=ArtifactId(root="gone"), digest="sha256:" + "0" * 64), 2
+    )
+
+    message = production.resolver.mid_turn_message(steer)
+
+    assert message is not None
+    assert str(message).count("stop tuning the prefill, profile decode") == 1
+    assert production.resolver.mid_turn_message(unreadable) is None
+
+
 @pytest.mark.asyncio
 async def test_a_missing_or_tampered_artifact_rejects_the_turn_before_any_provider_call(
     production: Production,

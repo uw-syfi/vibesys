@@ -1113,8 +1113,6 @@
  "tests/system/crash/test_stops_end_promptly.py": 6.62,
  "tests/system/delivery/test_delivery_faults.py": 5.01,
  "tests/system/delivery/test_request_kinds.py": 3.96,
- "tests/system/steer/test_interrupt_reaches_the_running_turn.py": 16.21,
- "tests/system/steer/test_steer_reaches_the_next_turn.py": 7.45,
  "tests/system/test_hostile_json.py": 16.79,
  "tests/system/test_loop_spec.py": 0.01,
  "tests/system/whole_run/test_whole_run.py": 78.64,
