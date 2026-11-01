@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import shlex
-from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -75,7 +74,6 @@ if TYPE_CHECKING:
     from contextlib import AbstractContextManager
     from pathlib import Path
 
-    from vs_runtime._evaluation_recovery import EvaluationWorkspaceAcquisitions
     from vs_runtime._measurement_progress import StageOutputOpener
     from vs_runtime._run_control import RunControlChannel
     from vs_runtime.contracts import Checkout, MeasuredCheckouts
@@ -163,7 +161,6 @@ class SemanticSlurmEvaluationExecutor:
         stage_output: StageOutputOpener | None = None,
         root_proof: WorkspaceRootProof | None = None,
         control: RunControlChannel | None = None,
-        recovery: EvaluationWorkspaceAcquisitions | None = None,
     ) -> None:
         """Bind external Slurm policy to semantic evaluation state.
 
@@ -180,12 +177,7 @@ class SemanticSlurmEvaluationExecutor:
 
         ``root_proof`` is the run's workspace-root probe; no evaluation is submitted
         before it proves the root, and none at all once it failed.
-
-        ``recovery`` is the dormant replay acquisition service. Its durable manifest
-        guards inherited backing before any acquisition; existing positional callers
-        keep their current lifecycle until the atomic production cutover.
         """
-        self._acquisitions = recovery
         self._control = control
         self._root_proof = root_proof
         self._stage_failure_text = stage_failure_text
@@ -264,7 +256,7 @@ class SemanticSlurmEvaluationExecutor:
                 message = f"candidate revision {record.snapshot!r} is not a commit of this run"
                 raise ExecutorRejectedError(message)
             self._namespace.save(self._path(handle_id), record)
-        execution = await self._execution(handle_id, record, fresh=existing is None)
+        execution = await self._execution(handle_id, record)
         await execution.executor.submit(provider_request, handle_id=handle_id)
 
     async def ledger_key(self, request: EvaluationRequest) -> str:
@@ -403,8 +395,6 @@ class SemanticSlurmEvaluationExecutor:
         self,
         handle_id: str,
         record: _DurableSemanticSubmission,
-        *,
-        fresh: bool,
     ) -> _Execution:
         async with self._lock:
             existing = self._executions.get(handle_id)
@@ -412,18 +402,7 @@ class SemanticSlurmEvaluationExecutor:
                 return existing
             # Closing during admission must not leave an unowned candidate executor.
             self._refuse_if_closing(handle_id)
-            held = (
-                nullcontext()
-                if self._acquisitions is None
-                else self._acquisitions.acquire(
-                    handle_id,
-                    str(self._workspaces.root.path),
-                    fresh=fresh,
-                    live=tuple(self._executions),
-                )
-            )
-            with held:
-                workspace = await self._workspaces.create_measured_candidate(record.snapshot)
+            workspace = await self._workspaces.create_measured_candidate(record.snapshot)
             executor = self._make_executor(
                 workspace.path,
                 self._stage_streams(record.request),

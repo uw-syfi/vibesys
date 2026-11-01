@@ -162,7 +162,6 @@ from vs_project.api.state_store import (
     QuarantinedEnvelope,
     StateStore,
     StoredEnvelope,
-    StoreFence,
     StoreRecord,
 )
 from vs_project.errors import ProjectError, StateDocumentDamagedError
@@ -316,7 +315,6 @@ __all__ = [
     "StateStore",
     "StateTransition",
     "StoreDurabilityEffects",
-    "StoreFence",
     "StoreRecord",
     "StoredEnvelope",
     "TaskDirectory",

@@ -65,6 +65,11 @@ DELETED_MODULES: tuple[str, ...] = (
     # The state store's lease, fence and compare-and-swap record (#3475 part 6b).
     "vs_project._store_operations",
     "vs_project._decode_memo",
+    # The dormant replay recovery: writer proofs, evaluation workspace acquisition and the
+    # replay store (#3475 6b). No production wiring passed any of them.
+    "vs_runtime._evaluation_recovery",
+    "vs_runtime._writer_reconciliation",
+    "vs_runtime.api.replay",
 )
 """Dotted module paths that no file under ``src/`` or ``libs/*/src`` may provide, as a module or
 as a package (a listed ``a.b`` also forbids ``a.b.c``)."""
@@ -82,13 +87,14 @@ DELETED_SYMBOLS: tuple[str, ...] = (
     "core_bindings",
     "drive_core",
     "start_core",
-    # The state store's writer half (#3475 part 6b). StoreFence joins when its last two users go.
+    # The state store's writer half (#3475 part 6b), and its fence once the writer-proof modules went.
     "CommitFault",
     "CommitOutcome",
     "ConflictReason",
     "LeaseDocument",
     "RunLogReplayStore",
     "StateStoreWriteError",
+    "StoreFence",
     "StoreOperations",
     "mutate_if_fenced",
 )

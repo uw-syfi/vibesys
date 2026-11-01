@@ -134,18 +134,18 @@ Paths are under `libs/vs-runtime/src/vs_runtime/`.
 | `_effect_fence.py` | 365 | `_evaluation_requests.py`, `_operation_requests.py`, `_observation_factory.py`, `_session_requests.py`, `_session_lifecycle_requests.py`, `_workspace_requests.py`, `_workspace_receipts.py`, `api/core.py`, `api/retained.py`, `api/fence_contracts.py` | Delete. `NothingHeld` and `MayHold` exist to prove "nothing is held"; `clear` replaces them |
 | `_receipt_store.py` | 486 | 27 modules; `run_once` is used by 11 executors | Delete 265: `run_once`, `authorize`, `history`, `seal`, the `Settled`/`Transient`/`Replayed` result types. Keep 220: `exclusive`, `load`, `record_once`, `replace`, `modify`, the crash-safe keyed document store behind workspace receipts, operation receipts and the evidence ledger |
 | `_access_settlement.py` | 377 | `_session_requests.py`, `_session_lifecycle_requests.py`, `api/core.py`, `api/retained.py` | Delete `access_unproven`. Keep the rest. `begin` and `settle` enforce the role's workspace grant and revert unauthorized writes, which is policy, not recovery. The runners also use `fence`, `receipt`, `restore_interrupted` and the new `rewind`, which `clear` of a turn calls to return the workspace to the baseline its receipt retains and reopen the key for the next attempt. `begin` calls `require_clear` and `blocking`, and the workspace's snapshot guard calls `fenced_by`, so the unsettled-writer index stays too: the 103 lines this row first counted for deletion are not removable without redesigning that guard |
-| `_evaluation_recovery.py` | 311 | `_polling_evaluation.py` and `_semantic_slurm_evaluation.py` take it as an optional argument that no production wiring passes; `api/slurm_evaluation_stack.py` | Delete |
-| `_writer_reconciliation.py` | 326 | `_run_environment.py` (`reconcile_writers` on four environments), `_evaluation_recovery.py` | Delete, with `reconcile_writers` and the no-op recovery mixins in `_run_environment.py` |
+| `_evaluation_recovery.py` | 311 | `_polling_evaluation.py` and `_semantic_slurm_evaluation.py` took it as an optional argument that no production wiring passed; `api/slurm_evaluation_stack.py` | Deleted, with the optional `receipts` and `recovery` arguments and their branches
+| `_writer_reconciliation.py` | 326 | `_run_environment.py` (`reconcile_writers` on four environments), `_evaluation_recovery.py` | Deleted, with `reconcile_writers` on every environment. The no-op `_NoopWorkspaceRecovery` mixin stays for its `reap_orphans`, `repair_workspace` and `remove_workspace_child`
 | `_core_loop.py`, `_core_run.py`, `_core_wiring.py`, `_core_publications.py` | 1,590, 616, 53, 84 | Deleted (#3475 6b). Production reads what these held through `_core_executors.py` (`core_executors`) and `_core_state.py` (`new_core_state`, `CoreStartup`) | The runner loop replaced them. Recovery start, `HostRenewed`, lease upkeep, `_recovery_cannot_open` and `_blocked_for_good` went with them |
 | `_core_preflight.py` | 220 | `src/vibesys/run/core_run.py` (`reject_legacy_resume`), `src/vibesys/run/store_migration.py` (`resolve_core_resume`) | Keep. It reads a legacy run's store for the migration and refuses to resume one; it goes with the legacy store reader, not with the shell |
-| `_replay_store.py`, `api/replay.py` | 167 and 33 | `_replay_store.py` had no importer but `api/replay.py`, which exports the writer-proof and evaluation-recovery modules above | `_replay_store.py` deleted with its contract suite (#3475 6b): `RunLogReplayStore` had no production user, and its log-append discipline lives in `vs_runlog.ConfirmedLog`. `api/replay.py` goes with the writer-proof and evaluation-recovery modules |
+| `_replay_store.py`, `api/replay.py` | 167 and 33 | `_replay_store.py` had no importer but `api/replay.py`, which exported it with the writer-proof and evaluation-recovery modules above | Both deleted with the modules they exported: `_replay_store.py` with its contract suite (#3475 6b, `RunLogReplayStore` had no production user, and its log-append discipline lives in `vs_runlog.ConfirmedLog`), `api/replay.py` with the writer-proof and evaluation-recovery modules |
 
 ### vs-project
 
 | Module | Lines | Callers | Verdict |
 |---|---|---|---|
 | `_store_operations.py` | 443 | `_state_store.py`, `_core_loop.py` (`acquire`, `renew`, `release`, `verify`, `mutate_if_fenced`, `commit`), `_receipt_store.py:authorize` | Deleted (#3475 6b): the lease, the fence, the compare-and-swap record, `lease.json` and the store.json version 1 to 2 move, and with them `acquire`, `renew`, `release`, `verify`, `mutate_if_fenced`, `commit` and `quarantine`. The run's lock replaces the lease. `state.pb` is written by the one writer with an atomic rename, never compared and swapped. `_store_document.py` keeps the reading of the document |
-| `_state_store.py`, `api/state_store.py` | 314, 208 | `project.py`, `libs/vs-runtime/src/vs_runtime/_core_preflight.py`, `_run_end.py`, `src/vibesys/run/store_migration.py` | Kept as a reader (`observe`, `load`) of a legacy run's `store.json`, which the migration reads until it is deleted. `StoreFence` stays only for `_evaluation_recovery.py` and `_writer_reconciliation.py`, which go with the prove-or-block layer |
+| `_state_store.py`, `api/state_store.py` | 314, 208 | `project.py`, `libs/vs-runtime/src/vs_runtime/_core_preflight.py`, `_run_end.py`, `src/vibesys/run/store_migration.py` | Kept as a reader (`observe`, `load`) of a legacy run's `store.json`, which the migration reads until it is deleted. `StoreFence` is deleted with the two writer-proof modules that named it |
 
 ### Tests
 
@@ -1053,10 +1053,9 @@ PR 6a and 6b land back to back, with no cleanup deferred, as #3408 required of i
   parts before it).
 - **Moved:** `ReplayRootReuse`, the one `vs_core` type live code still needed, now lives in
   `_writer_reconciliation.py` beside the registry that issues it.
-- **Kept for 6b, listed:** `_writer_reconciliation.py` and `_evaluation_recovery.py` (imported by
-  `_run_environment.py` and `_polling_evaluation.py`, which other recovery branches edit), the `replay*.proto`
-  messages and their generated clients, and `_replay_store.py` with `api/replay.py`. Their protos are
-  removed in 6b; `buf breaking` flags the removal, so 6b names an exception, valid because no run has
+- **Kept for 6b, listed:** the `replay*.proto` messages and their generated clients. The modules that
+  read them (`_writer_reconciliation.py`, `_evaluation_recovery.py`, `_replay_store.py`, `api/replay.py`)
+  are deleted. The protos are removed in 6b; `buf breaking` flags the removal, so 6b names an exception, valid because no run has
   written those messages. `vibesys.fact_import` still builds `AccountingEvidence` (from those protos) for
   retained-run import; no run path calls `accounting_evidence`, and the only consumer of its output was the
   deleted keyed ledger, so 6b decides whether it goes with them.
@@ -1073,7 +1072,7 @@ Both are plain tuples at the top of the file, one line each, and each pull reque
 layer adds what it removed. The guard holds the keyed-replay modules, `ReplayUnknown`, the old shell runtime (`_core_loop`, `_core_run`, `_core_wiring`, `_core_publications` and the names they defined), the keyed replay store and the state store's writer half (`_store_operations`, `CommitFault`, `StoreOperations`, `mutate_if_fenced` and kin) today. The names the
 inventory above marks for deletion (`RecoveryBarrier`, `RecoveryCheck`, `HostEpoch`, `ChildLease`,
 `InspectRequest`, `InspectTurn`, `InspectOwnedJob`, `CancelOwnedResource`, `BlockRequest`, `EffectFences`,
-`NothingHeld`, `MayHold`, `StoreFence`, `HostFence`) join the list in the pull request that deletes each.
+`NothingHeld`, `MayHold`, `HostFence`) join the list in the pull request that deletes each.
 `ObservationStatus.UNKNOWN` joins as a member list in the pull request that removes the value. Unenforced:
 that every `StepRunner` implementation is in the contract suite's parametrization; no check holds it yet.
 The guard is an AST scan like `tests/architecture/test_epoch_ending_authority.py`. Unenforced remainder: the

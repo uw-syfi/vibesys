@@ -10,7 +10,6 @@ import pytest
 from vs_evaluation.api import EvaluationState, PollPhase
 from vs_evaluation.api.testing import InMemoryEvaluationNamespace, wait_until_executor_started
 from vs_faults.api import Boundary, FaultGate, FaultPlan, FaultRule, HostCrashError, HostFault
-from vs_runtime.api.replay import EvaluationRecoveryBlockedError
 from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster, build_stack
 from vs_slurm.api import SlurmJobStatus
 
@@ -94,25 +93,4 @@ async def test_fresh_owner_retains_identity_and_evidence_across_a_recovery_crash
         finally:
             await again.executor.close()
     finally:
-        await old.executor.close()
-
-
-@pytest.mark.regression
-async def test_new_slurm_handle_cannot_bypass_an_inherited_writer_grant(tmp_path: Path) -> None:
-    namespace = InMemoryEvaluationNamespace()
-    cluster = ScenarioCluster()
-    cluster.states = (SlurmJobStatus.RUNNING,)
-    old = await build_stack(tmp_path, cluster, namespace=namespace, replay_recovery=True)
-    fresh = await build_stack(tmp_path, cluster, namespace=namespace, replay_recovery=True)
-    try:
-        request = _request(old.snapshot)
-        await old.executor.submit(request, handle_id=_HANDLE)
-        await wait_until_executor_started(cluster.accepted, old.executor, _HANDLE)
-        with pytest.raises(EvaluationRecoveryBlockedError) as blocked:
-            await fresh.executor.submit(request, handle_id="replacement-evaluation")
-        assert blocked.value.block.outstanding == [_HANDLE]
-        assert not fresh.workspaces.candidates
-        assert cluster.submissions == [_HANDLE]
-    finally:
-        await fresh.executor.close()
         await old.executor.close()

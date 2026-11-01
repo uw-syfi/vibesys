@@ -1,9 +1,7 @@
-"""A legacy run's stored record, and the fence its writer held, independent of kernel schemas.
+"""A legacy run's stored record, independent of kernel schemas.
 
 A run saved before the step loop serialized its complete kernel envelope into ``payload``. This
 release only reads that record, for the migration of the run into the run log; nothing writes it.
-``StoreFence`` is the identity of the lease its writer held, and stays only until the two
-writer-reconciliation modules of ``vs_runtime`` that name it are deleted.
 """
 
 from enum import StrEnum
@@ -48,18 +46,6 @@ class QuarantinedEnvelope(_Value):
 
 
 StoreRecord = Annotated[StoredEnvelope | QuarantinedEnvelope, Field(discriminator="kind")]
-
-
-class StoreFence(_Value):
-    """Storage lease identity, mapped to the kernel host fence by the shell.
-
-    Epoch and host identify ownership. The persisted expiry is authoritative,
-    so a token retained before same-epoch renewal remains valid.
-    """
-
-    host_id: str = Field(min_length=1, pattern=r"^\S+$")
-    epoch: int = Field(ge=1)
-    expires_at: float = Field(ge=0, allow_inf_nan=False)
 
 
 class ObservationFault(StrEnum):

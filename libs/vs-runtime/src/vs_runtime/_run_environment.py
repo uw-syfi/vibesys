@@ -112,10 +112,6 @@ from vs_runtime._trusted_evaluation_preparation import (
     required_evaluator_tools_root,
 )
 from vs_runtime._workspace_files import write_for_agent
-from vs_runtime._writer_reconciliation import (
-    UnsupportedWriterReconciler,
-    docker_writer_reconciler,
-)
 from vs_sandbox.api import (
     CONTAINER_RUNTIME_TOOLCHAIN,
     DeviceLease,
@@ -160,7 +156,6 @@ if TYPE_CHECKING:
     from vs_agent.api.images import BuildProgressSink, DockerBuildRunner, ImageBuildProgress
     from vs_evaluation.api import ProfileField
     from vs_project.api import StateNamespace
-    from vs_proto.api import replay as writer_pb
     from vs_runtime._environment_system import EnvironmentSystem
     from vs_runtime._local_job_step_runner import StageWorkReaper
     from vs_sandbox.api import (
@@ -624,16 +619,6 @@ class RunEnvironment(CaptureRecoverySource, Protocol):
         """Remove a workspace-relative child and report whether it is absent."""
         ...
 
-    def reconcile_writers(
-        self,
-        manifest: writer_pb.WriterManifest,
-        *,
-        system: EnvironmentSystem,
-        log: Callable[[str], None],
-    ) -> writer_pb.WriterReconciliation:
-        """Return environment-issued death proof, or explicit Pending/Unknown/Unsupported."""
-        ...
-
     def reap_orphans(
         self, run_id: str, *, system: EnvironmentSystem, log: Callable[[str], None]
     ) -> None:
@@ -664,17 +649,6 @@ class RunEnvironment(CaptureRecoverySource, Protocol):
 
 
 class _NoopWorkspaceRecovery(NoCaptureRecovery):
-    def reconcile_writers(
-        self,
-        manifest: writer_pb.WriterManifest,
-        *,
-        system: EnvironmentSystem,
-        log: Callable[[str], None],
-    ) -> writer_pb.WriterReconciliation:
-        del system, log
-        name = manifest.backing.environment if manifest.backing is not None else "unknown"
-        return UnsupportedWriterReconciler(name).reconcile_writers(manifest)
-
     def reap_orphans(
         self, run_id: str, *, system: EnvironmentSystem, log: Callable[[str], None]
     ) -> None:
@@ -1207,16 +1181,6 @@ class DockerEnvironment(NoCaptureRecovery):
             run_id=request.run_id,
         )
         return BuiltEditor(sandbox, agent_git_writable=plan.agent_git_writable)
-
-    def reconcile_writers(
-        self,
-        manifest: writer_pb.WriterManifest,
-        *,
-        system: EnvironmentSystem,
-        log: Callable[[str], None],
-    ) -> writer_pb.WriterReconciliation:
-        """Reap recorded domains and verify death without opening writable resources."""
-        return docker_writer_reconciler(self._docker(system), log).reconcile_writers(manifest)
 
     def reap_orphans(
         self, run_id: str, *, system: EnvironmentSystem, log: Callable[[str], None]
