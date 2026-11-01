@@ -35,6 +35,7 @@ from vs_core.api.recovery import (
     RecordRefusal,
     Run,
     RunRest,
+    at_rest,
     finished_message,
     fold,
 )
@@ -219,14 +220,18 @@ class Watch:
             if stall.error is not None:
                 self.errors.append(stall.error)
 
-    def before_record(self, what: str, tag: core.RequestId) -> None:
-        """No record on a tag while a call on it is unfinished, nor a result over live work."""
+    def before_record(self, what: str, tag: core.RequestId, *, parked: bool = False) -> None:
+        """No record on a tag while a call on it is unfinished, nor a result over live work.
+
+        A result asked of a parked log is no result: the log records the attempt as interrupted
+        (``Interrupted``), which a parked run leaves to its next process to adopt or clear.
+        """
         if self.runner is None:
             return
         if tag in self.runner.pending():
             self.problems.append(f"{what} on {tag.root} while a call of it is unfinished")
         unproven = any(stall.tag == tag for stall in self.board.unproven())
-        if what == "step_finished" and tag in self.runner.running() and not unproven:
+        if what == "step_finished" and not parked and tag in self.runner.running() and not unproven:
             self.problems.append(f"step_finished on {tag.root} over work still going")
 
 
@@ -316,7 +321,8 @@ class CrashingLog:
     async def step_finished(
         self, tag: core.RequestId, attempt: int, result: StepResult
     ) -> StepRecord:
-        self._watch.before_record("step_finished", tag)
+        parked = at_rest(self._inner.state) is RunRest.PARKED
+        self._watch.before_record("step_finished", tag, parked=parked)
         if self._faults.before_result is not None:
             await self._faults.before_result(tag, attempt)
         return await self._around(lambda: self._inner.step_finished(tag, attempt, result))
