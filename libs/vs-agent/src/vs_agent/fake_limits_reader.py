@@ -26,10 +26,9 @@ from vs_agent.api.usage_limits import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
     from agentshim.execution.process import SpawnRequest
-    from agentshim.testing import ClaudeStreamPeers, CodexScript
     from agentshim.testing.process import FakePeer
 
 
@@ -106,18 +105,19 @@ class FakeLimitsReader:
         return [credit for credit in self._credits.get(provider, ()) if credit not in spent]
 
 
-def limits_executor(
-    *, claude: ClaudeStreamPeers | None = None, codex: CodexScript | None = None
-) -> FakeExecutor:
-    """An executor whose ``claude`` and ``codex`` are agentshim's fake CLIs, for ``AgentLimitsReader``."""
+def limits_executor(fakes: Mapping[str, Callable[[SpawnRequest], FakePeer]]) -> FakeExecutor:
+    """An executor whose CLIs are agentshim's fakes, for ``AgentLimitsReader``.
+
+    ``fakes`` maps a binary's name to the factory of its fake process: ``ClaudeStreamPeers.build``
+    or ``CodexScript.peer``. A binary that has none cannot be started.
+    """
 
     def peers(request: SpawnRequest) -> FakePeer:
         binary = PurePath(request.argv[0]).name
-        if binary == "claude" and claude is not None:
-            return claude.build(request)
-        if binary == "codex" and codex is not None:
-            return codex.peer(request)
-        message = f"no fake {binary} was given"
-        raise ValueError(message)
+        fake = fakes.get(binary)
+        if fake is None:
+            message = f"no fake {binary} was given"
+            raise ValueError(message)
+        return fake(request)
 
     return FakeExecutor([], peers=peers)

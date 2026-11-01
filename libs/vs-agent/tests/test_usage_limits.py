@@ -82,7 +82,9 @@ def _agent() -> LimitsReader:
             credits=CREDITS,
         )
     )
-    return AgentLimitsReader(ENV, 5.0, executor=limits_executor(claude=claude, codex=codex))
+    return AgentLimitsReader(
+        ENV, 5.0, executor=limits_executor({"claude": claude.build, "codex": codex.peer})
+    )
 
 
 @pytest.fixture(params=[pytest.param(_fake, id="fake"), pytest.param(_agent, id="agentshim")])
