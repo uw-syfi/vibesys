@@ -176,8 +176,13 @@ _AGENT_GPU_TABLE = textwrap.dedent(
     max_time_minutes = 10
     default_time_minutes = 5
     read_only_paths = [{tools}]
+    queue_check_interval_seconds = {check_interval}
     """
 )
+#: Seconds between the queue checks that prove a failed or stopped job gone. The five checks of
+#: the proof window cost 25 s of every nonzero exit at the default 5 s, and this cluster's
+#: queue answers in milliseconds, so a short interval proves the same fact.
+QUEUE_CHECK_INTERVAL_SECONDS = 0.2
 #: The one file in the operator's read-only tools directory (see :func:`operator_tools`).
 OPERATOR_TOOL_FILE = "interpreter.txt"
 OPERATOR_TOOL_TEXT = "operator interpreter\n"
@@ -235,7 +240,10 @@ def _slurm_config(cluster: SlurmCluster, kind: str, shim: Path | None) -> str:
         + transport
         + '\n\n[vibesys]\nremote_python = "/usr/bin/python3"\n'
         + (
-            _AGENT_GPU_TABLE.format(tools=json.dumps(str(operator_tools(cluster))))
+            _AGENT_GPU_TABLE.format(
+                tools=json.dumps(str(operator_tools(cluster))),
+                check_interval=QUEUE_CHECK_INTERVAL_SECONDS,
+            )
             if kind == "slurm-local-gpu"
             else ""
         )

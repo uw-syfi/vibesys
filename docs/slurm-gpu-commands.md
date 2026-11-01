@@ -108,6 +108,9 @@ read_only_paths = ["/home/operator/venvs/torch"]
 # At most this many of the run's GPU jobs, across all of its agents, are submitted
 # to Slurm at once. Omit it for no cap.
 max_concurrent_jobs = 2
+# Seconds between the queue checks that show a stopped or failed command's job is
+# gone. Omit it for 5.
+queue_check_interval_seconds = 5
 ```
 
 `max_concurrent_jobs` keeps one run from monopolizing a shared partition: without
@@ -119,6 +122,12 @@ such as `[vibesys-gpu] waiting: 2 of this run's GPU jobs are active (cap 2), 1
 queued ahead; ...`. Its `--time` limit starts when it is submitted, not while it
 waits, and an agent that stops the command while it waits leaves the line without
 a job ever being submitted. The value must be a positive integer.
+
+When a command ends with a nonzero status or is stopped, its status is returned
+only after the job has been absent from the queue for five checks in a row,
+`queue_check_interval_seconds` apart (25 s by default). The window keeps a job
+whose submission was acknowledged late from being taken for gone. A smaller
+interval shortens the window and the wait; the value must be a positive number.
 
 `read_only_paths` entries must be absolute, normalized paths (no `..`, `.`,
 repeated or trailing slashes, and not `/`), must exist on the submit host when

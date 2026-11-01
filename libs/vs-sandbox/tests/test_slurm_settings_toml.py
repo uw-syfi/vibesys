@@ -65,6 +65,7 @@ _agent_gpus = st.builds(
     ).map(tuple),
     windows_command=st.none() | _argv,
     max_concurrent_jobs=st.none() | st.integers(1, 16),
+    queue_check_interval_seconds=st.floats(0.01, 60, allow_nan=False),
 )
 _services = st.builds(
     SlurmService,
