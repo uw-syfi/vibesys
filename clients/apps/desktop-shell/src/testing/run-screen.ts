@@ -19,7 +19,7 @@ import {type OpenShell, openShell} from './shell-world.js';
 /** The run the journeys' worlds list on the dashboard: the queue example's task. */
 const RUN_BUTTON = /^queue-rs · mpmc/;
 
-async function openRun(
+export async function openRun(
   shell: OpenShell,
   button: RegExp = RUN_BUTTON,
   read: 'read' | 'as shown' = 'read',
@@ -62,9 +62,18 @@ export async function shellOnRun(
   listed: RunFixture = {...fixtureNamed('finished-run'), runId: 'run-a'},
   read: 'read' | 'as shown' = 'read',
 ): Promise<OpenShell> {
-  // A fresh copy keeps nothing the last one cached.
-  Object.assign(globalThis, {indexedDB: new IDBFactory()});
-  const shell = await openShell(null, {schedule, seed: seedOf(listed, 'ink'), run: world});
+  const shell = await shellOnDashboard(world, schedule, listed);
   await openRun(shell, RUN_BUTTON, read);
   return shell;
+}
+
+/** The shell on `world` as `shellOnRun` has it, before the run is opened: the dashboard listing `listed`. */
+export async function shellOnDashboard(
+  world: ReplayWorld,
+  schedule: ScheduleTimeout,
+  listed: RunFixture = {...fixtureNamed('finished-run'), runId: 'run-a'},
+): Promise<OpenShell> {
+  // A fresh copy keeps nothing the last one cached.
+  Object.assign(globalThis, {indexedDB: new IDBFactory()});
+  return openShell(null, {schedule, seed: seedOf(listed, 'ink'), run: world});
 }

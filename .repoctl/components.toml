@@ -2,7 +2,7 @@
 default_base = "main"
 jobs = ["python", "clients", "examples", "agent_image", "real_tiers", "evaluators", "impact", "stitch", "proto", "gateway", "cli"]
 
-ignored_roots = ["website", "third_party", ".agents", ".claude", ".github/ISSUE_TEMPLATE", ".github/DISCUSSION_TEMPLATE"]
+ignored_roots = ["website", "third_party", ".agents", ".claude", ".claude-plugin", ".github/ISSUE_TEMPLATE", ".github/DISCUSSION_TEMPLATE"]
 ignored_files = ["AGENTS.md", "CLAUDE.md", "LICENSE", "agent.toml.example", ".env.example", ".gitattributes", ".gitignore", ".github/CODEOWNERS", ".github/pull_request_template.md", ".github/delegated-merge.md"]
 
 [[discoveries]]
@@ -96,7 +96,7 @@ job = "python"
 # Central tests and project tooling are outside Tach's source roots. The committed goldens under
 # proto/testdata have no input hash, so the Python tests that compare them with what the converter
 # writes now run when one changes.
-roots = ["tests", "libs", "sdk", "scripts", "packaging", "resources", "examples", "proto/testdata"]
+roots = ["tests", "libs", "sdk", "scripts", "packaging", "resources", "skills", "examples", "proto/testdata"]
 files = [
   "tach.toml",
   "pyproject.toml",
@@ -397,4 +397,5 @@ job = "cli"
 # The contract the CLI is generated from selects its checks too, so an edit to it cannot leave the
 # Go bindings unvetted. The proto job checks that the bindings are current.
 roots = ["cli", "proto/vibesys/cli"]
-files = ["buf.gen.cli.yaml"]
+# The release workflow builds and publishes what these checks build, so a change to it runs them too.
+files = ["buf.gen.cli.yaml", ".github/workflows/cli-release.yml"]

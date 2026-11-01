@@ -15,7 +15,7 @@ export PROTO_BASE_REF=base
 git init -q -b base "$work/repo"
 cd "$work/repo"
 cp "$root/buf.yaml" .
-for layer in store search core; do
+for layer in store search core cli; do
   mkdir -p "proto/vibesys/$layer/v1"
   cat > "proto/vibesys/$layer/v1/record.proto" <<PROTO
 syntax = "proto3";
@@ -51,7 +51,7 @@ git commit -qm 'additive PR'
 echo 'proto breaking: behind-base additive PR passes'
 
 # Exercise both deletion and rename in every checked schema layer.
-for layer in store search core; do
+for layer in store search core cli; do
   for change in delete rename; do
     if [[ "$change" == delete ]]; then
       field=''
@@ -76,7 +76,7 @@ PROTO
     git restore "proto/vibesys/$layer/v1/record.proto"
   done
 done
-echo 'proto breaking: field deletions and renames fail in all three layers'
+echo 'proto breaking: field deletions and renames fail in every checked layer'
 
 # A local shallow clone has both tips but cannot reach their common ancestor.
 git clone -q --no-local --depth=1 --branch pr "file://$work/repo" "$work/shallow"

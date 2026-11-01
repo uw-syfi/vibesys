@@ -13,10 +13,11 @@ from resources_packaging import (
     PackagingError,
     stage_resources,
     stage_sdk,
+    stage_skills,
 )
 
 from vibesys.api.request import default_skill_roots
-from vibesys.config import BUNDLED_RESOURCES
+from vibesys.config import BUNDLED_RESOURCES, BUNDLED_SKILLS
 from vibesys.constants import PROJECT_ROOT
 from vibesys.orchestration.profilers import PROFILERS_COMMON_STAGED_NAME
 
@@ -40,7 +41,7 @@ def _make_fake_repo(root: Path) -> Path:
     chat = root / "resources" / "chat-skills" / "steering-a-run"
     chat.mkdir(parents=True)
     (chat / "SKILL.md").write_text("---\nname: steering-a-run\ndescription: d\n---\n")
-    skill = root / "resources" / "skills" / "serving-systems"
+    skill = root / "skills" / "domains" / "serving-systems"
     skill.mkdir(parents=True)
     (skill / "SKILL.md").write_text("---\nname: serving-systems\ndescription: d\n---\n")
     (skill / ".vibesys.toml").write_text('[[rule]]\npath = "."\n')
@@ -57,12 +58,45 @@ def test_stage_resources_copies_trees_and_drops_vendored_checkouts(tmp_path: Pat
     assert (dest / "profilers" / "nsys" / "server.py").is_file()
     assert (dest / "profilers" / "_common" / "capture_runtime.py").is_file()
     assert (dest / "chat-skills" / "steering-a-run" / "SKILL.md").is_file()
-    assert (dest / "skills" / "serving-systems" / "SKILL.md").is_file()
-    assert (dest / "skills" / "serving-systems" / ".vibesys.toml").is_file()
     assert (dest / "evaluators" / "queue" / "vibesys.evaluator.toml").is_file()
     assert not (dest / "evaluators" / "queue" / "native_runner" / "target").exists()
-    assert not (dest / "skills" / "serving-systems" / "repos").exists()
     assert not (dest / "profilers" / "nsys" / "__pycache__").exists()
+    assert not (dest / "skills").exists()
+
+
+def test_stage_skills_copies_domain_skills_and_drops_vendored_checkouts(tmp_path: Path) -> None:
+    repo = _make_fake_repo(tmp_path / "repo")
+    (repo / "skills" / "search" / "optimize").mkdir(parents=True)
+    (repo / "skills" / "search" / "optimize" / "SKILL.md").write_text("search skill")
+    dest = tmp_path / "build" / "vibesys" / "_skills"
+
+    assert stage_skills(repo, dest)
+    assert (dest / "serving-systems" / "SKILL.md").is_file()
+    assert (dest / "serving-systems" / ".vibesys.toml").is_file()
+    assert not (dest / "serving-systems" / "repos").exists()
+    assert not (dest / "search").exists()
+    assert not (dest / "optimize").exists()
+
+
+def test_stage_skills_is_idempotent(tmp_path: Path) -> None:
+    repo = _make_fake_repo(tmp_path / "repo")
+    dest = tmp_path / "dest"
+
+    assert stage_skills(repo, dest)
+    assert stage_skills(repo, dest)
+    assert (dest / "serving-systems" / "SKILL.md").is_file()
+
+
+def test_stage_skills_without_a_skills_tree_is_a_noop(tmp_path: Path) -> None:
+    dest = tmp_path / "dest"
+
+    assert not stage_skills(tmp_path / "empty-repo", dest)
+    assert not dest.exists()
+
+
+def test_required_skill_staging_rejects_a_missing_tree(tmp_path: Path) -> None:
+    with pytest.raises(PackagingError, match="skills/domains"):
+        stage_skills(tmp_path / "repo", tmp_path / "dest", required=True)
 
 
 def test_stage_resources_is_idempotent(tmp_path: Path) -> None:
@@ -85,7 +119,7 @@ def test_required_resource_staging_rejects_a_missing_tree(tmp_path: Path) -> Non
     repo = tmp_path / "repo"
     (repo / "resources" / "profilers").mkdir(parents=True)
 
-    with pytest.raises(PackagingError, match="resources/skills"):
+    with pytest.raises(PackagingError, match="resources/evaluators"):
         stage_resources(repo, tmp_path / "dest", required=True)
 
 
@@ -137,9 +171,10 @@ def test_profiler_support_common_dir_points_at_the_shared_capture_runtime() -> N
     assert PROFILERS_COMMON_STAGED_NAME == "profilers_common"
 
 
-def test_default_skill_roots_point_at_the_resources_tree() -> None:
+def test_default_skill_roots_point_at_the_domain_skills_tree() -> None:
     roots = default_skill_roots()
-    assert roots == (PROJECT_ROOT / "resources" / "skills",)
+    assert roots == (PROJECT_ROOT / "skills" / "domains",)
+    assert BUNDLED_SKILLS.root() == PROJECT_ROOT / "skills" / "domains"
 
 
 def test_evaluator_packages_dir_points_at_the_resources_tree() -> None:

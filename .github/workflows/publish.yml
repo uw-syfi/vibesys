@@ -12,6 +12,7 @@ on:
       - 'src/**'
       - 'libs/**'
       - 'resources/**'
+      - 'skills/**'
       - 'sdk/**'
       - '.github/workflows/publish.yml'
   release:
@@ -27,6 +28,9 @@ concurrency:
 jobs:
   build:
     name: Build and verify universal wheel
+    # The repository also publishes vibesys-cli releases (cli-v<version> and the rolling cli-latest);
+    # those are not wheels. cli-release.yml builds them.
+    if: github.event_name != 'release' || !startsWith(github.event.release.tag_name, 'cli-')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

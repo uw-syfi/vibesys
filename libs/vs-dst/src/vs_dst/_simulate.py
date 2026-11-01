@@ -278,6 +278,23 @@ class SimulatedRun:
             operator, self._pristine, self._started.clock_at, first, kill
         )
 
+    def interrupt_again(self, first: Interruption, kill: Interruption) -> Interrupted:
+        """What becomes of the run killed at ``first``, resumed, and killed again at ``kill``, then resumed.
+
+        ``first`` is a kill the run offers; ``kill`` lands in the host that took over, such as
+        inside its ``clear`` of a step (`Moment.IN_CLEAR`, whose index counts ``clear`` awaits
+        over the whole run). A host that ends before it reaches ``kill`` was only resumed.
+        """
+        self._require_uninterrupted()
+        if first.action is not Action.KILL or kill.action is not Action.KILL:
+            message = "a run is killed at a kill and killed again at a kill"
+            raise ValueError(message)
+        expected = Expectation(self.result, self._duration)
+        operator = _interrupt.Operator(self._plan, expected)
+        snapshot = self._snapshot(first, frozenset(self.interruptions(Action.KILL)))
+        outside = snapshot.outside.copy()
+        return _interrupt.killed_again(operator, outside, self._restart_at(snapshot), first, kill)
+
     def operate(
         self, requests: Sequence[OperatorRequest], kill: Interruption | None = None
     ) -> Interrupted:

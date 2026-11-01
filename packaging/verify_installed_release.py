@@ -130,6 +130,8 @@ def _verify_resources() -> None:
     skill_roots = default_skill_roots()
     if len(skill_roots) != 1 or not any(skill_roots[0].rglob("SKILL.md")):
         _fail(f"Installed skills did not resolve: {skill_roots}")
+    if "site-packages" not in str(skill_roots[0].resolve()):
+        _fail(f"Installed skills did not resolve from site-packages: {skill_roots}")
     for kind in ACTIVE_PROFILER_KINDS:
         support = BUNDLED_RESOURCES.directory("profilers", kind.value)
         if support is None or "site-packages" not in str(support.resolve()):

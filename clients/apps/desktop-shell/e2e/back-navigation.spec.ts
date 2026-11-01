@@ -1,8 +1,10 @@
 /**
- * Back and Forward over the whole location, with the mouse's own buttons: the window's history
- * holds the screen, the run and its zoom, so Back leaves a run for where it was opened from. The
- * buttons are pressed through the browser's input pipeline, as a mouse presses them, so a press
- * the engine also handled would move two entries.
+ * Back and Forward with the mouse's own buttons, a reload at a zoom, a layout that does not move
+ * when an idea opens, and the scroll Back restores: what needs a real browser's history and input.
+ * The buttons are pressed through the browser's input pipeline, as a mouse presses them, so a press
+ * the engine also handled would move two entries. Which location Back and Forward reach (the zooms,
+ * the dashboard, one entry per screen, the Runs crumb, a zoom left behind with its run) is
+ * `src/back-navigation.dom.test.tsx`.
  */
 import {expect, type Page, test} from '@playwright/test';
 import {
@@ -16,7 +18,7 @@ import {STARTED_AT} from '../src/testing/started-at.js';
 import {settled} from './checks/settle.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {journeyScript} from './journey-world.js';
-import {showScreen, sidebar} from './read.js';
+import {showScreen} from './read.js';
 
 const PROJECT = '/home/me/vibesys-projects/queue-rs';
 const RUN_ID = '20261015-163047';
@@ -86,7 +88,6 @@ const dashboard = (page: Page) => page.getByRole('main').getByRole('heading', {n
 const run = (page: Page) => page.getByRole('main').getByRole('button', {name: /^queue-rs · mpmc/});
 const ideas = (page: Page) => page.getByRole('listbox', {name: 'Ideas'});
 const opened = (page: Page) => page.getByRole('heading', {name: 'Combine W1 ring with W2 padding'});
-const crumbs = (page: Page) => page.getByRole('navigation', {name: 'Zoom'});
 
 async function openIdea(page: Page): Promise<void> {
   await run(page).click();
@@ -112,23 +113,6 @@ test('the mouse buttons retrace a run’s zooms, leave it for the dashboard, and
   await expect(opened(page)).toBeVisible();
 });
 
-test('the Runs crumb goes up to the dashboard from any level, and Back returns to that level', async ({
-  page,
-}) => {
-  await openShell(page);
-  await openIdea(page);
-  // The row of crumbs, with the way up to the dashboard first, shows from the idea's steps on.
-  await page
-    .getByRole('listbox', {name: /steps$/})
-    .getByRole('option')
-    .first()
-    .click();
-  await crumbs(page).getByRole('button', {name: 'Runs', exact: true}).click();
-  await expect(dashboard(page)).toBeVisible();
-  await page.goBack();
-  await expect(crumbs(page)).toBeVisible();
-});
-
 test('opening an idea moves neither the charts nor the time bar', async ({page}) => {
   await openShell(page);
   await run(page).click();
@@ -146,23 +130,6 @@ test('opening an idea moves neither the charts nor the time bar', async ({page})
   expect({bar: await bar.boundingBox(), chart: await chart.boundingBox()}).toEqual(before);
 });
 
-test('Back crosses screens, and each screen keeps one entry', async ({page}) => {
-  await openShell(page);
-  const rail = sidebar(page);
-  const machines = rail.getByRole('button', {name: /^Machines/});
-  await machines.click();
-  await machines.click();
-  await showScreen(page, 'Settings');
-  await showScreen(page, 'Settings');
-  await page.getByRole('main').getByRole('button', {name: 'Back'}).click();
-  await expect(page).toHaveURL(/#machines$/);
-  await page.goBack();
-  await expect(dashboard(page)).toBeVisible();
-  await page.goForward();
-  await page.goForward();
-  await expect(page).toHaveURL(/#settings$/);
-});
-
 test('a reload at a zoom shows the same run at the same zoom, and Back still leaves it', async ({
   page,
 }) => {
@@ -174,17 +141,6 @@ test('a reload at a zoom shows the same run at the same zoom, and Back still lea
   await expect(ideas(page)).toBeVisible();
   await press(page, 'back');
   await expect(dashboard(page)).toBeVisible();
-});
-
-test('leaving a zoomed run keeps its zoom from the next run opened', async ({page}) => {
-  await openShell(page);
-  await openIdea(page);
-  await showScreen(page, 'Runs');
-  await expect(dashboard(page)).toBeVisible();
-  await expect(page).not.toHaveURL(/idea=/);
-  await run(page).click();
-  await expect(ideas(page)).toBeVisible();
-  await expect(opened(page)).toHaveCount(0);
 });
 
 /** The offsets of every element on the page that scrolls, by its class. */

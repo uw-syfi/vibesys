@@ -93,6 +93,9 @@ path = "examples/model-serving/Llama-3.1-8B-Instruct-MLX-8bit"
 path = "examples/model-serving/deepseek-v3.2-8xb200"
 
 [[example]]
+path = "examples/model-serving/flint"
+
+[[example]]
 path = "examples/model-serving/glm-5.2-8xb200"
 
 [[example]]
@@ -120,7 +123,7 @@ path = "examples/model-serving/qwen3.5-397b-a17b-mi300a-bespoke"
 path = "examples/model-serving/qwen3.5-9b-mi210"
 
 [[example]]
-path = "examples/model-serving/qwen3.6-35b-a3b-2xh100"
+path = "examples/model-serving/qwen3.6-35b-a3b"
 
 [[example]]
 path = "examples/model-serving/repositories/sglang"

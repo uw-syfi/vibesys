@@ -20,7 +20,7 @@ def test_source_skill_paths_resolve_without_changing_objective_text(parts: list[
         target = skill / resource
         target.parent.mkdir(parents=True)
         target.write_text("Reference.")
-        citation = f"resources/skills/serving-systems/{resource.as_posix()}"
+        citation = f"skills/domains/serving-systems/{resource.as_posix()}"
         objective = f"Read `{citation}`. Constraint: never start a full-model server."
         resolved = resolve_agent_resource_paths(objective, [skill])
         expected = f".agents/skills/serving-systems/{resource.as_posix()}"
@@ -51,7 +51,7 @@ def test_unavailable_source_resources_fail_before_an_agent_turn(
     excluded = Path("references/platforms/cuda")
     (skill / excluded).mkdir(parents=True)
     (skill / excluded / "floor.md").write_text("Wrong backend.")
-    citation = f"resources/skills/serving-systems/{resource}"
+    citation = f"skills/domains/serving-systems/{resource}"
     with pytest.raises(ValueError, match=diagnostic) as error:
         resolve_agent_resource_paths(
             citation, [skill], excluded_relative_paths=frozenset({excluded})
@@ -60,7 +60,7 @@ def test_unavailable_source_resources_fail_before_an_agent_turn(
 
 
 def test_uninstalled_skill_is_not_silently_rewritten() -> None:
-    citation = "resources/skills/unknown/SKILL.md"
+    citation = "skills/domains/unknown/SKILL.md"
     with pytest.raises(ValueError, match="skill is not installed") as error:
         resolve_agent_resource_paths(citation, [])
     assert citation in str(error.value)
@@ -76,7 +76,7 @@ def test_alias_citations_cannot_expose_excluded_targets(tmp_path: Path, *, absol
     (skill / "alias.md").symlink_to(skill / target if absolute else target)
     with pytest.raises(ValueError, match="excluded from this run"):
         resolve_agent_resource_paths(
-            "resources/skills/demo/alias.md", [skill], excluded_relative_paths=frozenset({excluded})
+            "skills/domains/demo/alias.md", [skill], excluded_relative_paths=frozenset({excluded})
         )
 
 
@@ -86,6 +86,6 @@ def test_absolute_link_citation_advertises_canonical_copied_resource(tmp_path: P
     target.parent.mkdir(parents=True)
     target.write_text("Reference.")
     (skill / "absolute.md").symlink_to(target)
-    assert resolve_agent_resource_paths("resources/skills/demo/absolute.md", [skill]) == (
+    assert resolve_agent_resource_paths("skills/domains/demo/absolute.md", [skill]) == (
         ".agents/skills/demo/references/note.md"
     )

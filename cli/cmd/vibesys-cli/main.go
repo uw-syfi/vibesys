@@ -18,6 +18,7 @@ var version = "dev"
 // tell a mistyped command from a failed job.
 const (
 	exitOK           = 0
+	exitFailure      = 1
 	exitInvalidInput = 2
 )
 
@@ -32,6 +33,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stdout, "vibesys-cli %s\n", version)
 		return exitOK
 	}
-	_, _ = fmt.Fprintln(stderr, "usage: vibesys-cli --version")
+	if len(args) > 0 && args[0] == "upgrade" {
+		return runUpgrade(args[1:], stdout, stderr, productionUpgrade)
+	}
+	_, _ = fmt.Fprintln(stderr, "usage: vibesys-cli --version | upgrade")
 	return exitInvalidInput
 }

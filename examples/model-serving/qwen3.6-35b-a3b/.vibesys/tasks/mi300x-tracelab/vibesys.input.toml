@@ -1,0 +1,32 @@
+version = 1
+backends = ["rocm"]
+
+[agent]
+domain = "llm-serving"
+interface = "service"
+
+[accuracy]
+command = ["uv", "run", "python", "-I", "${PROJECT_ROOT}/.vibesys/tasks/default/accuracy_checker/checker.py"]
+timeout_seconds = 300
+
+[evaluator]
+name = "vibesys-evaluator-request-factory"
+version = "0.1.0"
+
+[benchmark]
+entrypoint = "request-factory-adapter"
+args = ["${PROJECT_ROOT}/.vibesys/shared/tracelab/replay.py"]
+timeout_seconds = 3600
+result_protocol = 2
+
+[catalogue]
+domain = "llm-serving"
+
+[catalogue.hardware]
+accelerator = "AMD MI300X"
+count = 1
+vendor = "amd"
+
+[catalogue.model]
+name = "Qwen3.6 35B A3B"
+maker = "qwen"

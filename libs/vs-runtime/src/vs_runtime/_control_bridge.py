@@ -322,7 +322,7 @@ class RunControlBridge:
             # The environment's stop is the host's, under core's own id (never ``op-``), so it
             # ends the run for good; it carries the cancel the channel now holds.
             stop = ControlInput(
-                control_id=ControlId(root=f"{ENVIRONMENT_STOP}:{core.records.recovery.epoch}"),
+                control_id=_environment_stop_id(core),
                 action="stop",
                 mode=StopMode.CANCEL,
             )
@@ -1020,6 +1020,17 @@ class OperatorInbox:
 def _held(core: CoreState) -> dict[ControlId, ControlInput]:
     """Each control core records, by its identity."""
     return {control.control_id: control for control in core.run.controls}
+
+
+def _environment_stop_id(core: CoreState) -> ControlId:
+    """The id of the environment's stop in the run's present standing, one per Resume.
+
+    A Resume lifts the stop before it, so a stop after it is a new control. Counting the
+    resumes core holds keeps the id the same on every poll of one standing, which the bridge
+    relies on to record it once, and new after each lift.
+    """
+    lifts = sum(1 for control in core.run.controls if control.action == "resume")
+    return ControlId(root=f"{ENVIRONMENT_STOP}:{lifts}")
 
 
 def _identity(control_id: str) -> ControlId:

@@ -28,7 +28,8 @@ clients/libs/run-state/      Pure backend-event projection (the run fold)
 libs/                    Reusable standalone libraries
 examples/                Candidate repositories, tasks, and input bundles
 resources/evaluators/    Reusable versioned evaluator packages
-resources/skills/        Bundled Agent Skills and reference material
+skills/domains/          Bundled Agent Skills and reference material
+third_party/             Vendored reference repositories (git submodules)
 resources/profilers/     Profiler MCP servers and support packages
 docs/                    Contributor and subsystem guides
 tests/                   Python and integration tests
@@ -311,7 +312,7 @@ Use the guide that matches the surface you are adding:
 
 - [Add or customize a domain](domains.md) for new
   problem-space prompts, hooks, and domain registration.
-- [Add or update Agent Skills](https://github.com/uw-syfi/vibesys/blob/main/resources/skills/README.md) and read the
+- [Add or update Agent Skills](https://github.com/uw-syfi/vibesys/blob/main/skills/domains/README.md) and read the
   [VibeSys skill metadata guide](skill-metadata.md) when routing skills by
   backend or domain.
 - [Extend profilers](extending-profilers.md) for profiler support packages,

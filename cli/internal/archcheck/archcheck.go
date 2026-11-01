@@ -28,7 +28,7 @@ const (
 // itself. An entry ending in "/" allows the whole subtree. A package with Go files and no entry
 // fails the check, so a new package states its layer in the change that adds it.
 var rules = map[string][]string{
-	"cmd/vibesys-cli":               {"gen/", "internal/wire"},
+	"cmd/vibesys-cli":               {"gen/", "internal/wire", "internal/upgrade/"},
 	"internal/core":                 {},
 	"internal/store":                {"internal/core"},
 	"internal/store/ledger":         {"internal/core", "internal/store"},
@@ -39,6 +39,8 @@ var rules = map[string][]string{
 	"internal/environment":          {"internal/core"},
 	"internal/backend":              {"internal/core"},
 	"internal/wire":                 {"internal/core", "gen/"},
+	"internal/upgrade":              {"internal/upgrade/upgradetest"},
+	"internal/upgrade/upgradetest":  {"internal/upgrade"},
 	"internal/archcheck":            {},
 }
 

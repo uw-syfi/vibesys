@@ -88,7 +88,14 @@ def _expected(ideas: list[_Measured], direction: str) -> list[datetime]:
 
 
 _IDEAS = st.lists(
-    st.builds(_Measured, st.booleans(), st.floats(20, 500, allow_nan=False)), max_size=150
+    st.builds(
+        _Measured,
+        st.booleans(),
+        # The digest rebuilds the input's value from a ratio, so a reading within rounding of
+        # it is a tie there, and is not drawn.
+        st.floats(20, 500, allow_nan=False).filter(lambda value: abs(value - 100) > 1e-6),
+    ),
+    max_size=150,
 )
 _CLIMB = st.integers(min_value=DASHBOARD_MAX_POINTS + 1, max_value=DASHBOARD_MAX_POINTS * 3)
 

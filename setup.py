@@ -29,7 +29,7 @@ from packaging_support import (  # noqa: E402
 )
 
 # lint-waiver: LW-008021 [E402]; This standalone bundle adds a sibling module directory to sys.path before importing its modules.
-from resources_packaging import stage_resources, stage_sdk  # noqa: E402
+from resources_packaging import stage_resources, stage_sdk, stage_skills  # noqa: E402
 
 
 class BuildPy(_build_py):
@@ -41,6 +41,7 @@ class BuildPy(_build_py):
         super().run()
         vibesys_package_root = Path(self.build_lib) / "vibesys"
         stage_resources(_REPO_ROOT, vibesys_package_root / "_resources", required=True)
+        stage_skills(_REPO_ROOT, vibesys_package_root / "_skills", required=True)
         stage_sdk(_REPO_ROOT, vibesys_package_root / "_sdk", required=True)
 
 
