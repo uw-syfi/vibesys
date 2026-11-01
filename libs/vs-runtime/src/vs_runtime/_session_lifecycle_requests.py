@@ -41,7 +41,7 @@ observation. Only terminal observations are stored.
 from __future__ import annotations
 
 from functools import partial
-from typing import TYPE_CHECKING, Protocol, assert_never
+from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
@@ -83,13 +83,7 @@ from vs_runtime._observation_factory import (
     ObservationSubject,
 )
 from vs_runtime._receipt_store import (
-    Conflict,
-    Declined,
-    Performed,
     ReceiptCorruptError,
-    Replayed,
-    Settled,
-    Transient,
     owner_key,
 )
 from vs_runtime._session_requests import (
@@ -311,30 +305,11 @@ class SessionLifecycleRequests:
         if not isinstance(request, _HANDLED):
             return self._result(request, context, _rejected(f"{request.kind} is not executed here"))
 
-        async def perform(*, repeat: bool) -> Settled[ExecutionResult] | Transient[ExecutionResult]:
-            del repeat  # every step inspects durable evidence before it acts
-            try:
-                result = await self._perform(request, request_id, context)
-            except ReceiptCorruptError as error:
-                result = self._result(request, context, _unknown(str(error)))
-            return Settled(result) if result.observation.observation.terminal else Transient(result)
-
-        execution = await self._store.run_once(
-            request_id.root,
-            owner=owner_key(request),
-            context=context,
-            result_type=ExecutionResult,
-            perform=perform,
-        )
-        match execution:
-            case Replayed(result) | Performed(result):
-                return result
-            case Conflict():
-                return self._result(request, context, ObservationFacts.payload_conflict())
-            case Declined(reason):
-                return self._result(request, context, _unknown(reason))
-            case _:
-                assert_never(execution)
+        # Every step inspects durable evidence before it acts, so a repeat needs no flag.
+        try:
+            return await self._perform(request, request_id, context)
+        except ReceiptCorruptError as error:
+            return self._result(request, context, _unknown(str(error)))
 
     def _result(
         self,

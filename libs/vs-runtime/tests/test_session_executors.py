@@ -324,6 +324,5 @@ async def test_pause_drain_cancels_every_admitted_preparation_boundary(tmp_path:
                 saved = run.journal.load_optional()
                 assert saved is not None
                 assert all(record.interrupted for record in saved.invocations.values())
-                assert await run.execute(run.dispatch()) == result
             for host in env.hosts:
                 await host.close()

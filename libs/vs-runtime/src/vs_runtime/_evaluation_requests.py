@@ -64,7 +64,7 @@ from vs_evaluation.api import (
     PollPhase,
 )
 from vs_runtime._core_identity import core_identity, core_named
-from vs_runtime._core_requests import ExecutionContext, ExecutionResult, settle
+from vs_runtime._core_requests import ExecutionContext, ExecutionResult
 from vs_runtime._effect_fence import (
     EffectFences,
     Entered,
@@ -94,14 +94,14 @@ from vs_runtime._observation_factory import (
     ObservationFacts,
     ObservationSubject,
 )
-from vs_runtime._receipt_store import Conflict, Declined, Performed, Replayed, owner_key
+from vs_runtime._receipt_store import owner_key
 
 if TYPE_CHECKING:
     from vs_core.api.recovery import OwnerEvent
     from vs_evaluation.api import PollingEvaluationExecutor
     from vs_runtime._core_identity import CoreRequestId
     from vs_runtime._core_requests import EvaluationRoleRequest
-    from vs_runtime._receipt_store import ReceiptStore, Settled, Transient
+    from vs_runtime._receipt_store import ReceiptStore
     from vs_runtime._run_control import RunControlChannel
 
 _FENCED = "scope episode is closed or the job was cancelled"
@@ -171,36 +171,9 @@ class MeasurementRequests:
     async def execute(
         self, request: EvaluationRoleRequest, context: ExecutionContext
     ) -> ExecutionResult:
-        """Run one authorized request at most once under its canonical identity."""
-        request_id = _identity(request)
-
-        async def perform(*, repeat: bool) -> Settled[ExecutionResult] | Transient[ExecutionResult]:
-            return settle(await self._perform(request, context, repeat=repeat))
-
-        execution = await self._store.run_once(
-            request_id.root,
-            owner=owner_key(request),
-            context=context,
-            result_type=ExecutionResult,
-            perform=perform,
-        )
-        match execution:
-            case Replayed(result) | Performed(result):
-                return result
-            case Conflict():
-                return ExecutionResult(
-                    observation=RequestObserved(
-                        observation=self._observations.observe(
-                            ObservationSubject.of(request),
-                            ObservationFacts.payload_conflict(),
-                            observed_at=context.now_at,
-                        )
-                    )
-                )
-            case Declined(reason):
-                return self._unknown(request, context, reason)
-            case _:
-                assert_never(execution)
+        """Run one request. A repeat (``context.repeat``) finds its job by polling it first."""
+        _identity(request)
+        return await self._perform(request, context, repeat=context.repeat)
 
     async def _perform(
         self, request: EvaluationRoleRequest, context: ExecutionContext, *, repeat: bool

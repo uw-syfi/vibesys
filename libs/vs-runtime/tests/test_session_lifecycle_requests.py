@@ -252,8 +252,14 @@ async def test_a_cancel_answered_as_nothing_held_is_never_followed_by_a_provider
                 case _:
                     answers[step] = await w.execute(dispatch_request("req-d", "inv-1"))
         if repeat_dispatch:
-            again = await w.execute(dispatch_request("req-d", "inv-1"))
-            assert again.observation.observation == answers["dispatch"].observation.observation
+            again = (await w.execute(dispatch_request("req-d", "inv-1"))).observation.observation
+            first = answers["dispatch"].observation.observation
+            assert (again.status, again.terminal, again.accepted, again.released) == (
+                first.status,
+                first.terminal,
+                first.accepted,
+                first.released,
+            )
         cancel = answers["cancel"]
         if holds_nothing(cancel):
             assert status(cancel) is ObservationStatus.REJECTED
@@ -571,44 +577,6 @@ async def test_resume_needs_charge_class_resume_and_a_matching_continuation() ->
 
 
 # the shared contract
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ["cancel", "close", "resume"])
-async def test_a_stale_host_performs_nothing_and_a_later_host_completes(kind: str) -> None:
-    async with world() as w:
-        await w.started()
-        request = {"cancel": cancel_request, "close": close_request, "resume": resume_request}[
-            kind
-        ]()
-        lost = RevocableLease()
-        lost.valid = False
-        stale = await w.execute(request, lease=lost)
-        assert status(stale) is ObservationStatus.UNKNOWN
-        assert not stale.observation.observation.terminal
-        assert len(w.host.turns) == 1
-        assert released_keys(w.host) == cancelled_keys(w.host) == 0
-        later = await w.execute(request)
-        assert later.observation.observation.terminal
-        assert_core_accepts([stale, later], expect_retry=True)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ["cancel", "close", "resume"])
-async def test_another_payload_under_one_request_identity_is_rejected(kind: str) -> None:
-    async with world() as w:
-        await w.started()
-        request = {"cancel": cancel_request, "close": close_request, "resume": resume_request}[
-            kind
-        ]()
-        first = await w.execute(request)
-        turns = len(w.host.turns)
-        context = context_for(request).model_copy(update={"payload_digest": "another-payload"})
-        outcome = await lifecycle_executor(w.host, w.store()).execute(cast("Any", request), context)
-        assert isinstance(outcome, ExecutionResult)
-        assert status(outcome) is ObservationStatus.REJECTED
-        assert len(w.host.turns) == turns
-        assert_core_accepts([first, outcome], expect_retry=False)
 
 
 @settings(

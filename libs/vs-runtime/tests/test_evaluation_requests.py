@@ -50,7 +50,6 @@ from vs_runtime.api.core import (
     MeasurementRequests,
     ReceiptStore,
     RequestExecutors,
-    SealedExecution,
     StageRun,
     StageSettled,
     StageStarted,
@@ -74,7 +73,7 @@ from vs_slurm.api import SlurmJobStatus
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
 
-    from vs_core.api import Observation, RequestBase
+    from vs_core.api import Observation
     from vs_evaluation.api import (
         AvailabilitySnapshot,
         EvaluationRequest,
@@ -120,6 +119,8 @@ def context_for(
     lease: FakeLease | None = None,
     epoch: int = 1,
     now_at: float = 5.0,
+    *,
+    repeat: bool = False,
 ) -> ExecutionContext:
     return ExecutionContext(
         fence=HostFence(host_id=HostId(root="host"), epoch=epoch),
@@ -127,6 +128,7 @@ def context_for(
         payload_digest=hashlib.sha256(request.model_dump_json().encode()).hexdigest(),
         lease=lease or FakeLease(),
         until=Until(at=100.0),
+        repeat=repeat,
     )
 
 
@@ -215,10 +217,15 @@ def resource_of(result: ExecutionResult) -> ResourceId:
 
 
 async def run(
-    w: World, request: EvaluationRoleRequest, crash_at: int | None = None, epoch: int = 1
+    w: World,
+    request: EvaluationRoleRequest,
+    crash_at: int | None = None,
+    epoch: int = 1,
+    *,
+    repeat: bool = False,
 ) -> ExecutionResult:
     requests, _ = w.requests(crash_at)
-    return await requests.execute(request, context_for(request, epoch=epoch))
+    return await requests.execute(request, context_for(request, epoch=epoch, repeat=repeat))
 
 
 class Recorder:
@@ -363,31 +370,6 @@ async def test_observe_never_submits_or_creates_workspaces() -> None:
 
 
 # replay and sequences
-
-
-async def test_replay_returns_the_stored_result_unchanged() -> None:
-    async with world() as w:
-        sub = submission(candidate=w.stack.snapshot)
-        ctx = context_for(sub)
-        requests, _ = w.requests()
-        first = await requests.execute(sub, ctx)
-        resource = resource_of(first)
-        await settled(w, resource)
-        assert await requests.execute(sub, ctx) == first
-        inspect = query(InspectOwnedJob, "inspect", resource)
-        one = await requests.execute(inspect, context_for(inspect))
-        assert await requests.execute(inspect, context_for(inspect)) == one
-        assert w.cluster.submissions == [resource.root]
-
-
-async def test_same_request_with_another_payload_conflicts() -> None:
-    async with world() as w:
-        await submit(w)
-        other = submission(override=plan(stages=("accuracy",), candidate=w.stack.snapshot))
-        requests, _ = w.requests()
-        outcome = await requests.execute(other, context_for(other))
-        assert outcome.observation.observation.status is ObservationStatus.REJECTED
-        assert "another payload" in outcome.observation.observation.diagnostic
 
 
 async def test_job_observations_increase_strictly_and_stale_replays_are_not_fresh() -> None:
@@ -673,7 +655,7 @@ async def test_crash_at_every_write_boundary_recovers_exactly_once(name: str) ->
                 assert crash_at < writes
             else:
                 assert crash_at == writes
-            recovered = await run(w, request)
+            recovered = await run(w, request, repeat=True)
             got = recovered.observation.observation
             if name == "submit" and got.resource_id is not None:
                 await settled(w, got.resource_id)
@@ -688,15 +670,17 @@ async def test_crash_at_every_write_boundary_recovers_exactly_once(name: str) ->
             ]
             assert len(w.cluster.submissions) == len(set(w.cluster.submissions))
             assert len(w.cluster.submissions) == len(before) + (1 if name == "submit" else 0)
-            # A second recovery is a replay of the first.
-            assert await run(w, request) == recovered or got.status is ObservationStatus.UNKNOWN
+            # A second repeat finds the same job: it reports the job as it is now, and submits no more.
+            again = (await run(w, request, repeat=True)).observation.observation
+            assert (again.accepted, again.request_id) == (got.accepted, got.request_id)
+            assert len(w.cluster.submissions) == len(before) + (1 if name == "submit" else 0)
 
 
-async def test_crash_between_submission_and_seal_does_not_resubmit() -> None:
+async def test_a_submission_repeated_after_its_last_write_does_not_resubmit() -> None:
     async with world() as w:
         sub = submission(candidate=w.stack.snapshot)
         _, probe = w.requests()
-        # Die at the last write: the job was submitted, the result was not sealed.
+        # Die at the last write: the job was submitted, the result was not reported.
         async with world() as other:
             requests, store = other.requests()
             await requests.execute(submission(candidate=other.stack.snapshot), context_for(sub))
@@ -704,7 +688,7 @@ async def test_crash_between_submission_and_seal_does_not_resubmit() -> None:
         requests, _ = w.requests(last)
         with pytest.raises(ProcessKilledError):
             await requests.execute(sub, context_for(sub))
-        resumed = await run(w, sub)
+        resumed = await run(w, sub, repeat=True)
         await settled(w, resource_of(resumed))
         assert len(w.cluster.submissions) == 1
         del probe
@@ -842,13 +826,6 @@ def _requests_over(w: World, polls: _ScriptedPolls) -> MeasurementRequests:
     return MeasurementRequests(polls, store)
 
 
-def _sealed(w: World, request: RequestBase) -> bool:
-    project = Project.open(w.base / "project")
-    store = ReceiptStore(project.state.state_store_namespace("run"), threads=SimThreads())
-    assert request.request_id is not None
-    return isinstance(store.history(request.request_id.root), SealedExecution)
-
-
 EXECUTOR_DOWN = "executor unreachable"
 
 
@@ -858,17 +835,14 @@ def _raise_on_first(poll_number: int, polled: ExecutorPoll) -> ExecutorPoll:
     return polled
 
 
-async def test_a_submission_whose_view_poll_failed_is_not_sealed_and_a_retry_reports_the_job() -> (
-    None
-):
-    """D-C: Unknown is never sealed, so the retry re-polls and core learns the job exists."""
+async def test_a_submission_whose_view_poll_failed_is_retried_and_reports_the_job() -> None:
+    """D-C: the retry re-polls, and core learns the job exists."""
     async with world() as w:
         polls = _ScriptedPolls(w.stack.executor, _raise_on_first)
         requests = _requests_over(w, polls)
         sub = submission(candidate=w.stack.snapshot)
         first = await requests.execute(sub, context_for(sub))
         assert first.observation.observation.status is ObservationStatus.UNKNOWN
-        assert not _sealed(w, sub)
 
         retried = await requests.execute(sub, context_for(sub))
         seen = retried.observation.observation
@@ -879,8 +853,8 @@ async def test_a_submission_whose_view_poll_failed_is_not_sealed_and_a_retry_rep
         assert_core_accepts([first, retried], expect_retry=True)
 
 
-async def test_a_cancel_that_has_not_ended_the_job_is_not_sealed_and_a_retry_releases() -> None:
-    """D5: CANCELLED with released=False must not replay forever."""
+async def test_a_cancel_that_has_not_ended_the_job_is_not_final_and_a_retry_releases() -> None:
+    """D5: CANCELLED with released=False must not be the last word."""
     cluster = ScenarioCluster()
     cluster.states = (SlurmJobStatus.PENDING,)
     async with world(cluster) as w:
@@ -899,12 +873,10 @@ async def test_a_cancel_that_has_not_ended_the_job_is_not_sealed_and_a_retry_rel
         first = await requests.execute(cancel, context_for(cancel))
         assert first.observation.observation.status is ObservationStatus.CANCELLED
         assert not first.observation.observation.released
-        assert not _sealed(w, cancel)
         holding["open"] = False
 
         retried = await requests.execute(cancel, context_for(cancel))
         assert retried.observation.observation.released
-        assert _sealed(w, cancel)
         assert_core_accepts([first, retried], expect_retry=True)
 
 

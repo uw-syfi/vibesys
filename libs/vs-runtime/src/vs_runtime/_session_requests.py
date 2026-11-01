@@ -103,13 +103,7 @@ from vs_runtime._observation_factory import (
     ObservationSubject,
 )
 from vs_runtime._receipt_store import (
-    Conflict,
-    Declined,
-    Performed,
     ReceiptCorruptError,
-    Replayed,
-    Settled,
-    Transient,
     owner_key,
 )
 from vs_runtime._session_operation import await_session_operation
@@ -612,43 +606,20 @@ class RuntimeSessionRequests:
         call = _Call(request, ReceiptKey(canonical.root), canonical, context, mark)
         lock_key = f"{owner_key(request)}/{self._session_id(request).root}"
         async with self._locks.setdefault(lock_key, asyncio.Lock()):
-            return (await self._performed(call)).result
+            return await self._performed(call)
 
-    async def _performed(
-        self, call: _Call
-    ) -> Settled[ExecutionResult] | Transient[ExecutionResult]:
+    async def _performed(self, call: _Call) -> ExecutionResult:
         try:
             facts = await self._perform(call)
         except _RefusalError as refusal:
             facts = refusal.facts
         except ReceiptCorruptError as error:
             facts = _unknown(str(error))
-        result = self._result(call.request, call.context, facts)
-        return Settled(result) if result.observation.observation.terminal else Transient(result)
+        return self._result(call.request, call.context, facts)
 
     async def _run(self, call: _Call) -> ExecutionOutcome:
-        request, context = call.request, call.context
-
-        async def perform(*, repeat: bool) -> Settled[ExecutionResult] | Transient[ExecutionResult]:
-            del repeat  # the journal, not this flag, says whether a dispatch happened
-            return await self._performed(call)
-
-        execution = await self._store.run_once(
-            call.receipt_key,
-            owner=owner_key(request),
-            context=context,
-            result_type=ExecutionResult,
-            perform=perform,
-        )
-        match execution:
-            case Replayed(result) | Performed(result):
-                return result
-            case Conflict():
-                return self._result(request, context, _conflict())
-            case Declined(reason):
-                return self._result(request, context, _unknown(reason))
-            case _:
-                assert_never(execution)
+        """One attempt of the request; the journal, not a flag, says whether a dispatch happened."""
+        return await self._performed(call)
 
     @staticmethod
     def _session_id(request: EnsureSession | DispatchTurn) -> SessionId:

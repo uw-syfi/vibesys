@@ -5,9 +5,9 @@ with none. The shared ``StepRunnerContract`` runs against every kind over a worl
 state a step leaves and the work still going. And every kind runs on its real executor, killed at
 durable-write boundaries and run again, so "safe to repeat" is read from the executors' own disk.
 
-The real executors run with receipts disabled (``UnreceiptedStore``): they keep no begun marker and
-replay no sealed result, so a repeat reaches the same end only through ``ExecutionContext.repeat``
-and the effect itself, as it must once the runner loop owns repeats.
+The real executors keep no begun marker and replay no sealed result, so a repeat reaches the same
+end only through ``ExecutionContext.repeat`` and the effect itself. The generated programs of runs,
+kills, restarts and clears hold each kind to the effects of one unkilled run: it never acts twice.
 """
 
 from __future__ import annotations
@@ -474,7 +474,7 @@ class Reference:
 
 
 async def reference_of(case: ExecutorCase, scenario: Scenario) -> Reference:
-    async with case.world(receipted=False) as world:
+    async with case.world() as world:
         request = await prepared(world, scenario)
         assert request.request_id is not None
         done = (
@@ -495,7 +495,7 @@ def sampled(boundaries: int) -> list[int]:
 async def killed_then_run_again(
     case: ExecutorCase, scenario: Scenario, boundary: int, reference: Reference
 ) -> None:
-    async with case.world(receipted=False) as world:
+    async with case.world() as world:
         request = await prepared(world, scenario)
         assert request.request_id is not None
         tag = request.request_id
@@ -526,7 +526,7 @@ async def test_a_step_killed_at_a_durable_write_runs_again_to_the_effects_of_an_
 async def test_a_step_that_finished_runs_again_to_the_same_result_and_effects(
     case: ExecutorCase, scenario: Scenario
 ) -> None:
-    async with case.world(receipted=False) as world:
+    async with case.world() as world:
         request = await prepared(world, scenario)
         assert request.request_id is not None
         tag = request.request_id
@@ -549,7 +549,7 @@ async def test_a_snapshot_that_ran_again_after_the_tree_moved_returns_the_snapsh
     case: ExecutorCase, scenario: Scenario
 ) -> None:
     """The repeat finds the snapshot by its label; committing again would retain the moved tree."""
-    async with case.world(receipted=False) as world:
+    async with case.world() as world:
         assert isinstance(world, WorkspacesWorld)
         request = await prepared(world, scenario)
         assert request.request_id is not None
@@ -589,7 +589,7 @@ async def test_a_session_ensure_killed_at_any_durable_write_runs_again_and_binds
 async def test_an_ensure_whose_session_ended_without_acceptance_runs_again_to_a_result() -> None:
     """#3458: the session was ensured and closed with no turn accepted, then the ensure's result was lost."""
     case = case_named("session-lifecycle")
-    async with case.world(receipted=False) as world:
+    async with case.world() as world:
         rig = Rig(world)
         ensure, close = ensure_request(), close_request()
         assert ensure.request_id is not None
@@ -627,7 +627,7 @@ async def test_whatever_the_order_of_runs_kills_restarts_and_clears_a_step_ends_
     reference = await reference_of(case, scenario)
     for seed in range(examples(pr=3, nightly=30)):
         rng = SeededRandom(seed)
-        async with case.world(receipted=False) as world:
+        async with case.world() as world:
             request = await prepared(world, scenario)
             assert request.request_id is not None
             tag = request.request_id

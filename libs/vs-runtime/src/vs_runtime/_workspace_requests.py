@@ -73,15 +73,6 @@ from vs_runtime._observation_factory import (
     ObservationFacts,
     ObservationSubject,
 )
-from vs_runtime._receipt_store import (
-    Conflict,
-    Declined,
-    Performed,
-    Replayed,
-    Settled,
-    Transient,
-    owner_key,
-)
 from vs_runtime._workspace_lookup import candidate_member_id, find_attempt_workspace
 from vs_runtime._workspace_receipts import (
     AttemptBinding,
@@ -140,19 +131,6 @@ class _Facts:
     checkout: CheckoutUpdate | None = None
     holding_nothing: ObservationFacts | None = None
     """The facts as ``refused`` or ``never_held`` built them, when the answer holds nothing."""
-
-
-def _conflict() -> _Facts:
-    """The refusal of a reused identity: it proves nothing about what the identity holds."""
-    facts = ObservationFacts.payload_conflict()
-    return _Facts(
-        facts.status,
-        terminal=facts.terminal,
-        released=facts.released,
-        children_complete=facts.children_complete,
-        diagnostic=facts.diagnostic,
-        setup_failure=SetupFailureKind.PERMANENT,
-    )
 
 
 def _rejected(diagnostic: str) -> _Facts:
@@ -343,32 +321,9 @@ class RuntimeWorkspaceRequests:
             )
         lock = self._locks.setdefault(self._serialization_key(request), asyncio.Lock())
         async with lock:
-
-            async def perform(
-                *, repeat: bool
-            ) -> Settled[ExecutionResult] | Transient[ExecutionResult]:
-                result = self._result(
-                    request, context, await self._perform(request, context, repeat=repeat)
-                )
-                observation = result.observation.observation
-                return Settled(result) if observation.terminal else Transient(result)
-
-            execution = await self._store.run_once(
-                request_id.root,
-                owner=owner_key(request),
-                context=context,
-                result_type=ExecutionResult,
-                perform=perform,
+            return self._result(
+                request, context, await self._perform(request, context, repeat=context.repeat)
             )
-        match execution:
-            case Replayed(result) | Performed(result):
-                return result
-            case Conflict():
-                return self._result(request, context, _conflict())
-            case Declined(reason):
-                return self._result(request, context, _unknown(reason))
-            case _:
-                assert_never(execution)
 
     @staticmethod
     def _serialization_key(request: Request) -> str:
