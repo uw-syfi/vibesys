@@ -1065,7 +1065,7 @@ skill):
 - A file there defines or imports a name in `DELETED_SYMBOLS`.
 
 Both are plain tuples at the top of the file, one line each, and each pull request that deletes part of the
-layer adds what it removed. The guard holds the keyed-replay modules and `ReplayUnknown` today. The names the
+layer adds what it removed. The guard holds the keyed-replay modules, `ReplayUnknown` and the old shell runtime (`_core_loop`, `_core_run`, `_core_wiring`, `_core_publications` and the names they defined) today. The names the
 inventory above marks for deletion (`RecoveryBarrier`, `RecoveryCheck`, `HostEpoch`, `ChildLease`,
 `InspectRequest`, `InspectTurn`, `InspectOwnedJob`, `CancelOwnedResource`, `BlockRequest`, `EffectFences`,
 `NothingHeld`, `MayHold`, `StoreFence`, `HostFence`) join the list in the pull request that deletes each.
