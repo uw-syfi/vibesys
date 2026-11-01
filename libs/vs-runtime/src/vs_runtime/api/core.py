@@ -135,13 +135,6 @@ from vs_runtime._operation_catalog import (
     OperationOwner,
     RefusalReason,
 )
-from vs_runtime._operation_receipts import (
-    NamespaceOperationReceipts,
-    OperationReceipts,
-    RecordReceipt,
-    ResultReceipt,
-)
-from vs_runtime._operation_requests import RegisteredOperationRequests
 from vs_runtime._operation_wiring import (
     OperationPorts,
     OperationRole,
@@ -168,15 +161,8 @@ from vs_runtime._receipt_store import (
     result_type_name,
 )
 from vs_runtime._render_operation import RenderArtifactsOwner, reply_variable
-from vs_runtime._request_inspection import (
-    NOT_TARGET_FACTS,
-    Inspected,
-    RecordedRequestInspector,
-    as_target,
-)
 from vs_runtime._rerun_policy import KeyedWrite, ReadOnly, read_or_keyed
 from vs_runtime._run_timing import RunTiming
-from vs_runtime._semantic_events import BlockDiagnostic, JournalSemanticEvents
 from vs_runtime._session_lifecycle_requests import (
     ContinuationBinding,
     ReleasedRunInvocations,
@@ -229,7 +215,6 @@ __all__ = [
     "BOARD_KEY",
     "EVALUATION_TOOL_ID",
     "HAND_ROLLED_ROLES",
-    "NOT_TARGET_FACTS",
     "REQUEST_DISPATCH",
     "RUNTIME_SCHEMA_VERSION",
     "AccessGrant",
@@ -249,7 +234,6 @@ __all__ = [
     "BaselineEntry",
     "BaselineEntryKind",
     "BegunUnsealed",
-    "BlockDiagnostic",
     "BoardTexts",
     "CancellableOwner",
     "Cancelled",
@@ -285,7 +269,6 @@ __all__ = [
     "IgnoreCommits",
     "IgnoreMeasurement",
     "Indeterminate",
-    "Inspected",
     "Inspection",
     "IntentJournal",
     "InterpretEvidenceOwner",
@@ -294,7 +277,6 @@ __all__ = [
     "JobRecord",
     "JobRegistry",
     "JournalRunInvocations",
-    "JournalSemanticEvents",
     "KeyedWrite",
     "LifecycleReportingExecutor",
     "MayHold",
@@ -304,7 +286,6 @@ __all__ = [
     "MeasurementRequests",
     "MeasurementServices",
     "MidTurnSteering",
-    "NamespaceOperationReceipts",
     "NeverBegun",
     "NotApplied",
     "NothingHeld",
@@ -317,7 +298,6 @@ __all__ = [
     "OperationExecutor",
     "OperationOwner",
     "OperationPorts",
-    "OperationReceipts",
     "OperationRole",
     "OperatorInbox",
     "OwedKey",
@@ -336,11 +316,8 @@ __all__ = [
     "ReceiptCorruptError",
     "ReceiptEvidenceLedger",
     "ReceiptStore",
-    "RecordReceipt",
-    "RecordedRequestInspector",
     "RefusalReason",
     "RefusingRequestExecution",
-    "RegisteredOperationRequests",
     "ReleasedRunInvocations",
     "Removed",
     "RenderArtifactsOwner",
@@ -348,7 +325,6 @@ __all__ = [
     "RequestExecutors",
     "ResolvedCoreResume",
     "ResolverInputs",
-    "ResultReceipt",
     "ResumeDiagnostic",
     "RetainRevisionOwner",
     "RootBaseline",
@@ -396,7 +372,6 @@ __all__ = [
     "WorkspaceReceipts",
     "WorkspaceRequests",
     "adoption_commit_message",
-    "as_target",
     "build_operation_catalog",
     "commit_of",
     "core_executors",

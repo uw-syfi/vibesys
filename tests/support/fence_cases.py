@@ -47,17 +47,8 @@ from vs_core.api import (
     DecisionId,
     DiscardWorkspace,
     EnsureWorkspace,
-    ExecuteRegisteredOperation,
-    InspectRequest,
-    LifecycleClass,
-    ObservationStatus,
-    OperationDescriptor,
-    OperationId,
-    OperationRegistration,
-    OperationRegistry,
     RequestId,
     ResourceId,
-    SchemaRef,
     Scope,
     SubmitMeasurement,
     WorkspaceMode,
@@ -67,19 +58,11 @@ from vs_evaluation.api import EvaluationState, ExecutorObservation, ExecutorPoll
 from vs_project.api import Project
 from vs_project.api.testing import world_git
 from vs_runtime.api.core import (
-    Applied,
     ExecutionResult,
     FenceKind,
-    KeyedWrite,
     MeasurementRequests,
-    NamespaceOperationReceipts,
-    NotApplied,
-    ObservationFactory,
-    OperationCatalog,
-    OperationEntry,
     ReceiptEvidenceLedger,
     ReceiptStore,
-    RegisteredOperationRequests,
     RuntimeWorkspaceRequests,
     SessionBinding,
     handle_for,
@@ -88,8 +71,6 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.api.executor_contexts import context_for
 from vs_runtime.api.fence_contracts import answered_released
-from vs_runtime.api.operation_fixtures import SCOPE as OPERATION_SCOPE
-from vs_runtime.api.operation_fixtures import EchoOutcome, EchoRequest
 from vs_runtime.api.slurm_evaluation_stack import ADMISSION, SCOPE, plan
 from vs_sim.api import OsThreads
 
@@ -98,10 +79,9 @@ if TYPE_CHECKING:
 
     from tests.support.session_world import SessionHost
 
-    from vs_core.api import OperationRequest, RequestBase
+    from vs_core.api import RequestBase
     from vs_evaluation.api import EvaluationRequest
     from vs_project.api import GitRepository, StateNamespace
-    from vs_runtime.api.core import ExecutionContext, Inspection
     from vs_runtime.api.fence_contracts import FenceHost, FenceWorld, HostLife
     from vs_sim.api import BlockingRunner
 
@@ -419,140 +399,12 @@ class _EvaluationPair:
             yield _EvaluationWorld(Path(raw), cancel=self.cancel)
 
 
-# operations
-
-_OPERATION = "exec-a"
-_ECHO = OperationRegistration(
-    descriptor=OperationDescriptor(
-        kind="test.echo",
-        request_schema=SchemaRef(name="test-echo", version=1),
-        outcome_schema=SchemaRef(name="test-echo-outcome", version=1),
-        lifecycle=LifecycleClass.IDEMPOTENT_WRITE,
-        inspect=True,
-        cancel=False,
-    ),
-    request_model=EchoRequest,
-    outcome_model=EchoOutcome,
-)
-
-
-_REGISTRY = OperationRegistry((_ECHO,))
-
-
-class _EchoOwner:
-    """An owner whose effect, one line in a log every host shares, lands a few calls late."""
-
-    def __init__(self, effects: list[str], blocking: BlockingRunner) -> None:
-        self._effects = effects
-        self._blocking = blocking
-
-    async def execute(self, request: OperationRequest, context: ExecutionContext) -> EchoOutcome:
-        del context
-        assert isinstance(request, EchoRequest)
-        for _ in range(_SUBMIT_STEPS):
-            await self._blocking.run(lambda: None)
-        await self._blocking.run(self._effects.append, request.text)
-        return EchoOutcome(text=request.text)
-
-    async def inspect(self, request: OperationRequest, context: ExecutionContext) -> Inspection:
-        del context
-        assert isinstance(request, EchoRequest)
-        landed = await self._blocking.run(self._effects.count, request.text)
-        return Applied(EchoOutcome(text=request.text)) if landed else NotApplied()
-
-
-class _OperationWorld:
-    def __init__(self, base: Path) -> None:
-        (base / "project").mkdir()
-        self._project = Project.open(base / "project")
-        self._effects: list[str] = []
-
-    async def prepare(self, host: FenceHost) -> None:
-        del host
-
-    def setup(self, identity: str) -> RequestBase:
-        return ExecuteRegisteredOperation(
-            request_id=RequestId(root=f"exec-{identity}"),
-            scope=OPERATION_SCOPE,
-            operation_id=OperationId(root=f"op:{identity}"),
-            operation=_REGISTRY.encode(EchoRequest(text=identity)),
-            retry_limit=0,
-        )
-
-    def release(self, identity: str) -> RequestBase:
-        return InspectRequest(
-            request_id=RequestId(root=f"inspect-{identity}"),
-            scope=OPERATION_SCOPE,
-            target=RequestId(root=_OPERATION),
-            resource_id=None,
-        )
-
-    def host(self, epoch: int, life: HostLife, blocking: BlockingRunner) -> FenceHost:
-        store = ReceiptStore(life.namespace(self._namespace()), threads=OsThreads())
-        owner = _EchoOwner(self._effects, blocking)
-        catalog = OperationCatalog(
-            _REGISTRY, (OperationEntry.owned(_ECHO, owner, KeyedWrite("the echoed text")),)
-        )
-        executor = RegisteredOperationRequests(
-            catalog, NamespaceOperationReceipts(store), ObservationFactory(store)
-        )
-        return _Host(executor, epoch)
-
-    def _namespace(self) -> StateNamespace:
-        return self._project.state.state_store_namespace("run")
-
-    def created(self) -> int:
-        """Effects of the inspected operation; a late setup's own operation is not it."""
-        return self._effects.count("a")
-
-    def held(self) -> int:
-        """Any effect of the operation contradicts an answer that it never ran."""
-        return self.created()
-
-    def released(self, result: ExecutionResult) -> bool:
-        """The inspection sealed that the operation never ran, which holds for good."""
-        target = result.observation.target
-        if target is None or target.observation.status is not ObservationStatus.REJECTED:
-            return False
-        sealed = NamespaceOperationReceipts(
-            ReceiptStore(self._namespace(), threads=OsThreads())
-        ).result(_OPERATION)
-        return sealed is not None and sealed.status is ObservationStatus.REJECTED
-
-    def settled(self, result: ExecutionResult) -> bool:
-        """The target's answer is terminal, unless the operation never recorded itself.
-
-        A delivery that died after its begun marker and before its record leaves nothing an
-        inspection can ask the owner about; that answer stays Unknown (recovery's case).
-        """
-        target = result.observation.target
-        if target is not None and target.observation.terminal:
-            return True
-        return (
-            NamespaceOperationReceipts(ReceiptStore(self._namespace(), threads=OsThreads())).record(
-                _OPERATION
-            )
-            is None
-        )
-
-
-class _OperationPair:
-    name = "operation-inspect"
-    kind = FenceKind.OPERATION
-
-    @asynccontextmanager
-    async def world(self) -> AsyncIterator[FenceWorld]:
-        with tempfile.TemporaryDirectory() as raw:
-            yield _OperationWorld(Path(raw))
-
-
 FENCE_PAIRS = (
     _SessionPair("session-close", _SessionCloseWorld, FenceKind.SESSION_EPISODE),
     _SessionPair("turn-cancel", _TurnCancelWorld, FenceKind.INVOCATION),
     _WorkspacePair(),
     _EvaluationPair("scope-close", cancel=False, kind=FenceKind.SCOPE_EPISODE),
     _EvaluationPair("job-cancel", cancel=True, kind=FenceKind.MEASUREMENT_JOB),
-    _OperationPair(),
 )
 
 __all__ = ["FENCE_PAIRS"]

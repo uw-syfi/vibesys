@@ -59,8 +59,6 @@ class FenceKind(StrEnum):
     """The measurement jobs of one scope admission episode (SubmitMeasurement, CloseAttemptScope)."""
     MEASUREMENT_JOB = "measurement-job"
     """One measurement job of one scope episode (SubmitMeasurement, CancelOwnedJob)."""
-    OPERATION = "operation"
-    """The effect of one registered operation (ExecuteRegisteredOperation, InspectRequest)."""
 
 
 @dataclass(frozen=True)

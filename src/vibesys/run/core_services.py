@@ -326,7 +326,6 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
             control=resources.control,
         ),
         sessions=sessions,
-        operations=catalog,
     )
     runner_services = RunnerServices(
         run_id=run_id,

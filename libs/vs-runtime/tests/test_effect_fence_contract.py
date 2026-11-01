@@ -143,29 +143,3 @@ def test_a_job_cancel_never_answers_released_before_its_submission_submits(
     """
     report = _run(_JOB_CANCEL, runs, schedule_seed)
     assert not report.violations, report.violations
-
-
-_OPERATION_INSPECT = next(pair for pair in FENCE_PAIRS if pair.name == "operation-inspect")
-
-
-@pytest.mark.parametrize(
-    ("runs", "schedule_seed"),
-    [
-        ((HostRun(("setup", "release")),), 0),
-        ((HostRun(("setup", "release"), stagger=(0, 1)),), 1),
-        ((HostRun(("setup", "release"), stagger=(0, 3)),), 7),
-    ],
-)
-def test_an_inspection_never_seals_never_ran_before_the_owner_runs_the_operation(
-    runs: tuple[HostRun, ...], schedule_seed: int
-) -> None:
-    """The inspection ran while a delivery of its target was between its record and its owner.
-
-    The owner had not run the operation yet, so the inspection sealed "never ran"; the
-    delivery then ran it, and sealed its success over that answer, or the inspection's seal
-    failed against the success it raced. Now the inspection closes the operation's fence
-    before it trusts "not applied": a delivery still inside makes the answer Unknown, and
-    one that has not entered again by then never runs the owner.
-    """
-    report = _run(_OPERATION_INSPECT, runs, schedule_seed)
-    assert not report.violations, report.violations

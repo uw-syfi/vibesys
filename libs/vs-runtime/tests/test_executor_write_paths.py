@@ -17,12 +17,11 @@ from vs_runtime.api import core
 SOURCE = Path(core.__file__).parents[1]  # the package's own source, scanned below
 
 # The only modules that may write execution records or observation rows: the store and
-# the factory, plus the operation receipt wrapper that seals a result an inspection proved.
+# the factory.
 OWNERS = frozenset(
     {
         "_receipt_store.py",
         "_observation_factory.py",
-        "_operation_receipts.py",
         # The scripted shell test kit: it stands in for the executors, so it builds the
         # observations their translators would.
         "_shell_kit.py",

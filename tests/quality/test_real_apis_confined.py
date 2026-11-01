@@ -1875,10 +1875,6 @@ PARSE_EDGE_MODULES: dict[str, tuple[ParseKind, str]] = {
         ParseKind.OWN_STORE,
         "evaluation receipts this runtime persisted",
     ),
-    "libs/vs-runtime/src/vs_runtime/_request_inspection.py": (
-        ParseKind.OWN_STORE,
-        "execution results this runtime recorded",
-    ),
     "libs/vs-runtime/src/vs_runtime/_shell_kit.py": (
         ParseKind.FAKE,
         "the shell test kit's scripted agent answers",

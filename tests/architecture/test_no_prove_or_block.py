@@ -70,6 +70,12 @@ DELETED_MODULES: tuple[str, ...] = (
     "vs_runtime._evaluation_recovery",
     "vs_runtime._writer_reconciliation",
     "vs_runtime.api.replay",
+    # The receipt-backed executor of registered operations, the BlockRequest publisher and the
+    # InspectRequest answer (#3475 6b): a registered operation runs on OperationStepRunner.
+    "vs_runtime._operation_receipts",
+    "vs_runtime._operation_requests",
+    "vs_runtime._request_inspection",
+    "vs_runtime._semantic_events",
 )
 """Dotted module paths that no file under ``src/`` or ``libs/*/src`` may provide, as a module or
 as a package (a listed ``a.b`` also forbids ``a.b.c``)."""

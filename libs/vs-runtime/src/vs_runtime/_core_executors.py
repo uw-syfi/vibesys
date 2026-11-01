@@ -22,10 +22,7 @@ from vs_runtime._measurement_progress import (
 )
 from vs_runtime._observation_factory import ObservationFactory
 from vs_runtime._operation_catalog import OperationCatalog
-from vs_runtime._operation_receipts import NamespaceOperationReceipts
-from vs_runtime._operation_requests import RegisteredOperationRequests
 from vs_runtime._receipt_store import ReceiptStore
-from vs_runtime._semantic_events import JournalSemanticEvents
 from vs_runtime._session_lifecycle_requests import ReleasedRunInvocations, SessionRequestRouter
 from vs_runtime._session_requests import JournalRunInvocations
 from vs_runtime._session_resolver import SessionExecutors, session_executors
@@ -112,7 +109,6 @@ def core_executors(  # noqa: PLR0913  # lint-waiver: LW-260141 [PLR0913]; the ru
     sessions: SessionServices | None = None,
     threads: Threads,
     blocking: BlockingRunner,
-    operations: OperationCatalog | None = None,
 ) -> CoreExecutors:
     """Bind every request role over one shared receipt store.
 
@@ -125,13 +121,10 @@ def core_executors(  # noqa: PLR0913  # lint-waiver: LW-260141 [PLR0913]; the ru
     requests use the runtime's explicit unbound-role refusal and invocation snapshots
     have no terminal-writer proof. This is the production composition for a policy
     that declares no agent roles.
-    ``operations`` defaults to the empty catalog, which serves a strategy that declares
-    no registered operations; pass the same catalog to ``new_core_state(offered=)``.
     ``threads`` locks the receipt store; ``blocking`` runs the executors' synchronous
     journal, provider and disk calls off the event loop.
     """
     store = ReceiptStore(receipts, threads)
-    catalog = operations or empty_catalog()
     if sessions is None:
         session = None
         session_requests = RefusingRequestExecution(ExecutorRole.SESSIONS)
@@ -156,10 +149,6 @@ def core_executors(  # noqa: PLR0913  # lint-waiver: LW-260141 [PLR0913]; the ru
             measurement.decisions,
             control=measurement.control,
         ),
-        operations=RegisteredOperationRequests(
-            catalog, NamespaceOperationReceipts(store), observations
-        ),
-        semantic_events=JournalSemanticEvents(store, receipts),
     )
     return CoreExecutors(
         executors,
