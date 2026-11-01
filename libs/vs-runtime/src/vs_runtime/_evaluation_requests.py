@@ -1,12 +1,10 @@
-"""The EVALUATION role: measurement jobs driven through durable receipts.
+"""The EVALUATION role: measurement jobs driven through a durable job registry.
 
-Every request runs through ``ReceiptStore.run_once``, so it is idempotent by its
-canonical identity: a begun marker precedes the effect and a sealed result is
-replayed verbatim and never recomputed. Only a definitive result is sealed (see
-``settle``); Unknown, an unproven acceptance and an unreleased cancellation are
-returned unsealed so a retry re-observes them. A job is registered (its intent) before
-any executor contact, and a restarted host inspects the executor before it
-considers submitting again, so one submission identity is one executor job.
+Every request is idempotent by its canonical identity through the effect, not through a receipt
+of its result: a job is registered (its intent) before any executor contact, and a repeat of a
+request inspects the executor before it considers submitting again, so one submission identity is
+one executor job. A request's observation is rebuilt from the executor's state each time, so a
+retry re-observes Unknown, an unproven acceptance and an unreleased cancellation.
 
 A submission enters the effect fences (``vs_runtime._effect_fence``) of its scope episode
 and of its job in the same locked step as it registers the job, and again just before it
@@ -93,7 +91,6 @@ from vs_runtime._observation_factory import (
     ObservationFacts,
     ObservationSubject,
 )
-from vs_runtime._receipt_store import owner_key
 
 if TYPE_CHECKING:
     from vs_core.api.recovery import OwnerEvent
@@ -298,10 +295,6 @@ class MeasurementRequests:
 
     # observations
 
-    def _authority_problem(self, request: RequestBase, context: ExecutionContext) -> str | None:
-        """Why this host may not run an effect now, or None. Checked before every effect."""
-        return self._store.authorize(owner_key(request), context)
-
     def _own(  # noqa: PLR0913  # lint-waiver: LW-940007 [PLR0913]; each argument is an independent fact of the request's own observation.
         self,
         request: RequestBase,
@@ -500,9 +493,6 @@ class MeasurementRequests:
         if request.reuses is not None:
             return await self._attach(request, request.reuses, context, handle)
         if (await self._poll(handle)).phase is PollPhase.UNSUBMITTED:
-            problem = self._authority_problem(request, context)
-            if problem is not None:
-                return self._unknown(request, context, problem)
             if not self._enter(_fences_of(request, handle), core_identity(request), context):
                 # Fenced while the executor held nothing: the job never will exist.
                 return self._rejected(request, context, _FENCED)
@@ -635,9 +625,6 @@ class MeasurementRequests:
             return self._never_held(
                 request, context, proof, fence, "job is not owned by this scope"
             )
-        problem = self._authority_problem(request, context)
-        if problem is not None:
-            return self._unknown(request, context, problem)
         try:
             if record.reuses is None:
                 # A reusing job runs nothing of its own, and the run it reads is not its to end.
@@ -697,9 +684,6 @@ class MeasurementRequests:
                     )
                     self._registry.replace(record)
             if (await self._poll(record.executor_handle)).phase is PollPhase.UNSUBMITTED:
-                problem = self._authority_problem(request, context)
-                if problem is not None:
-                    return self._unknown(request, context, problem)
                 eval_request = measurement_request(
                     record.plan,
                     record.scope,
@@ -725,9 +709,6 @@ class MeasurementRequests:
     async def _close(
         self, request: CloseAttemptScope, context: ExecutionContext
     ) -> ExecutionResult:
-        problem = self._authority_problem(request, context)
-        if problem is not None:
-            return self._unknown(request, context, problem)
         # Fence first: a submission that has not entered by now submits nothing.
         with self._store.exclusive():
             closure = self._fences.close(
@@ -741,9 +722,6 @@ class MeasurementRequests:
         submitting = isinstance(closure, MayHold) and closure.live
         ended = []
         for handle in handles:
-            if self._authority_problem(request, context) is not None:
-                ended.append(False)
-                continue
             record = self._record(handle)
             if record is None or record.reuses is None:
                 # A reusing job launched nothing; the executor holds no job under its handle.

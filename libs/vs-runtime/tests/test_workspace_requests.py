@@ -1739,7 +1739,7 @@ def test_f7_a_failed_discard_is_not_stored_and_a_retry_completes_it(tmp_path: Pa
 
         async def exercise() -> None:
             workspaces = env.hosts[0]
-            executor, receipts = _executor(workspaces)
+            executor, _ = _executor(workspaces)
             attempt = _attempt()
             path = await _ensure_at(executor, workspaces, attempt, "e1")
             discard = DiscardWorkspace(**_common(attempt, "d1"), attempt=attempt)
@@ -1747,7 +1747,6 @@ def test_f7_a_failed_discard_is_not_stored_and_a_retry_completes_it(tmp_path: Pa
             first = await _run(executor, discard)
             assert _status(first) is ObservationStatus.FAILED
             assert not first.observation.observation.terminal
-            assert receipts.sealed("d1", ExecutionResult) is None
             second = await _run(executor, discard)
             observation = second.observation.observation
             assert _status(second) is ObservationStatus.SUCCEEDED
@@ -1889,12 +1888,11 @@ def test_f13_a_transient_create_failure_is_retried_not_stored(tmp_path: Path) ->
 
         async def exercise() -> None:
             workspaces = env.hosts[0]
-            executor, receipts = _executor(workspaces)
+            executor, _ = _executor(workspaces)
             request = _ensure(workspaces, _attempt(), "e1")
             _faults(env).fail_creates = 1
             failed = await _run(executor, request)
             assert _status(failed) is ObservationStatus.FAILED
-            assert receipts.sealed("e1", ExecutionResult) is None
             retried = await _run(executor, request)
             assert _status(retried) is ObservationStatus.SUCCEEDED
 

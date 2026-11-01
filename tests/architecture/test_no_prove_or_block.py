@@ -103,6 +103,13 @@ DELETED_SYMBOLS: tuple[str, ...] = (
     "StoreFence",
     "StoreOperations",
     "mutate_if_fenced",
+    # The receipt store's execution rule: replay, identity, authority and the begun marker.
+    "BegunUnsealed",
+    "ExecutionHistory",
+    "NeverBegun",
+    "Performer",
+    "SealedExecution",
+    "run_once",
 )
 """Names that no file under ``src/`` or ``libs/*/src`` may define or import."""
 

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from pydantic import BaseModel, ConfigDict
 from tests.support.session_lifecycle_world import resume_request
 from tests.support.session_world import (
     SCOPE,
@@ -47,7 +48,6 @@ from vs_runtime.api.agent_step_runners import (
 from vs_runtime.api.core import (
     ReceiptStore,
     RuntimeSessionRequests,
-    SealedExecution,
     SessionLifecycleRequests,
 )
 from vs_runtime.api.docker_agent_work_reaper import DockerAgentWorkReaper
@@ -600,6 +600,12 @@ def test_a_restarted_runner_clears_what_an_earlier_one_started_from_the_step_alo
     world.run(main())
 
 
+class _AnyDocument(BaseModel):
+    """Any document a store holds: it reads whatever was written under a key."""
+
+    model_config = ConfigDict(extra="allow")
+
+
 @pytest.mark.parametrize("kind", list(Kind))
 def test_the_runner_leaves_the_result_of_a_step_to_the_loop_and_seals_no_receipt_of_it(
     tmp_path: Path, kind: Kind
@@ -613,7 +619,7 @@ def test_the_runner_leaves_the_result_of_a_step_to_the_loop_and_seals_no_receipt
 
     world.run(main())
     for key in (tag.root, f"{tag.root}.dispatch"):
-        assert not isinstance(world.state.store.history(key), SealedExecution)
+        assert world.state.store.load("executions", "execution", key, _AnyDocument) is None
 
 
 @pytest.mark.parametrize("answer", ["none", "another-id"])

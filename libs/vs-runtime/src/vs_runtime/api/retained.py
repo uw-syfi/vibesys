@@ -22,8 +22,13 @@ from vs_runtime._effect_fence import _FenceRecord
 from vs_runtime._evidence_ledger import EvidenceEntry
 from vs_runtime._job_registry import JobRecord, ScopeJobs
 from vs_runtime._owed_submissions import _Entries
-from vs_runtime._receipt_store import ExecutionPhase, ExecutionRecord
-from vs_runtime._retained_receipts import Published, RecordReceipt, ResultReceipt
+from vs_runtime._retained_receipts import (
+    ExecutionPhase,
+    ExecutionRecord,
+    Published,
+    RecordReceipt,
+    ResultReceipt,
+)
 from vs_runtime._session_requests import DispatchRecord, SessionBinding
 from vs_runtime._workspace_receipts import (
     AttemptBinding,

@@ -1,32 +1,24 @@
-"""The one crash-safe receipt store behind every runtime request executor.
+"""The crash-safe keyed document store behind the runtime's executors.
 
-A receipt is one atomically written file keyed by (family, part, key) below a
-Project state namespace. Every read-modify-write runs under an exclusive
-``flock`` on one lock file in that namespace, so two processes cannot both
-begin a request, both advance a counter, or both claim a holder.
-
-``run_once`` is the single execution rule: an executor supplies only the effect.
-The store replays a sealed result, rejects the same request identity with another
-payload, refuses to start an effect when host authority is not held (the lease
-must verify and the host fence must be the newest seen for the owner), writes a
-``begun`` marker before the effect so a restart knows an effect may have started,
-and seals the result only while authority still holds. A restarted effect is told
-it is a repeat, so it reaches the same end instead of doing the work twice.
+A receipt is one atomically written file keyed by (family, part, key) below a Project state
+namespace. Every read-modify-write runs under an exclusive ``flock`` on one lock file in that
+namespace, so two processes cannot both begin a request, both advance a counter, or both claim a
+holder. The store keeps documents (workspace bindings and receipts, access receipts, the
+evaluation job registry, the evidence ledger, observation sequences). It no longer decides
+whether an effect runs: the step loop owns that, and an executor repeats an effect through
+``ExecutionContext.repeat``.
 """
 
 from __future__ import annotations
 
-import asyncio
 import fcntl
 import hashlib
 from contextlib import contextmanager
-from dataclasses import dataclass
-from enum import StrEnum
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel
 
-from vs_core.api import ContractError, HostFence
+from vs_core.api import ContractError
 from vs_project.api import StateDocumentDamagedError
 
 if TYPE_CHECKING:
@@ -34,7 +26,6 @@ if TYPE_CHECKING:
 
     from vs_core.api import RequestBase
     from vs_project.api import StateNamespace
-    from vs_runtime._core_requests import ExecutionContext
     from vs_sim.api import Threads
 
 
@@ -42,130 +33,8 @@ class ReceiptCorruptError(Exception):
     """A stored receipt cannot be read back; an executor reports Unknown."""
 
 
-class ExecutionPhase(StrEnum):
-    """How far one request's effect progressed."""
-
-    BEGUN = "begun"
-    DONE = "done"
-
-
-class ExecutionRecord(BaseModel):
-    """Durable intent (``begun``) or sealed result (``done``) of one request."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-    payload_digest: str
-    phase: ExecutionPhase
-    result_json: str | None = None
-    result_type: str | None = None
-
-
-@dataclass(frozen=True)
-class NeverBegun:
-    """No execution record exists: the store holds no trace that the effect began.
-
-    ``run_once`` writes the begun marker before the effect, so for a kind that runs
-    on it this is positive proof that the effect never started.
-    """
-
-
-@dataclass(frozen=True)
-class BegunUnsealed:
-    """The effect may have started and has no sealed result yet."""
-
-    result_type: str | None
-    payload_digest: str
-
-
-@dataclass(frozen=True)
-class SealedExecution:
-    """The sealed result of the request, still encoded as ``result_type``."""
-
-    result_type: str | None
-    payload_digest: str
-    result_json: str
-
-
-type ExecutionHistory = NeverBegun | BegunUnsealed | SealedExecution
-
-
-def result_type_name(model: type[BaseModel]) -> str:
-    """The tag a record carries so an inspection can decode its result without its executor."""
-    return f"{model.__module__}.{model.__qualname__}"
-
-
-@dataclass(frozen=True)
-class Settled[ResultT: BaseModel]:
-    """The effect reached a terminal result: seal it for replay."""
-
-    result: ResultT
-
-
-@dataclass(frozen=True)
-class Transient[ResultT: BaseModel]:
-    """The effect has no final answer yet (Unknown, retryable failure): never sealed."""
-
-    result: ResultT
-
-
-@dataclass(frozen=True)
-class Replayed[ResultT: BaseModel]:
-    """A sealed result of an earlier execution, returned without any effect."""
-
-    result: ResultT
-
-
-@dataclass(frozen=True)
-class Performed[ResultT: BaseModel]:
-    """The result of the effect that ran now; sealed only if it was ``Settled``."""
-
-    result: ResultT
-
-
-@dataclass(frozen=True)
-class Conflict:
-    """The request identity was recorded for another payload; no effect ran."""
-
-
-@dataclass(frozen=True)
-class Declined:
-    """No effect ran: host authority is not held, or a receipt is unreadable."""
-
-    reason: str
-
-
-class Performer[ResultT: BaseModel](Protocol):
-    """The effect of one request, told whether an earlier attempt may have run it."""
-
-    async def __call__(self, *, repeat: bool) -> Settled[ResultT] | Transient[ResultT]: ...
-
-
-type Execution[ResultT: BaseModel] = Replayed[ResultT] | Performed[ResultT] | Conflict | Declined
-
-
-@dataclass(frozen=True, slots=True)
-class _Returned:
-    execution: object
-
-
-@dataclass(frozen=True, slots=True)
-class _Raised:
-    error: BaseException
-
-
-type _RunOutcome = _Returned | _Raised
-
-
-@dataclass(frozen=True, slots=True)
-class _RunGate:
-    payload_digest: str
-    outcome: asyncio.Future[_RunOutcome]
-
-
 class ReceiptStore:
     """Atomic, cross-process receipt files below one state namespace."""
-
-    _EXECUTIONS = "executions"
-    _FENCES = "fences"
 
     def __init__(self, namespace: StateNamespace, threads: Threads) -> None:
         """Bind to the namespace that holds this run's receipts; ``threads`` makes its lock."""
@@ -173,7 +42,6 @@ class ReceiptStore:
         self._lock_path = namespace.external_directory() / "receipts.lock"
         self._guard = threads.rlock()
         self._depth = 0
-        self._run_gates: dict[str, _RunGate] = {}
 
     @staticmethod
     def _path(family: str, part: str, key: str) -> str:
@@ -252,236 +120,10 @@ class ReceiptStore:
                 self._namespace.save(self._path(family, part, key), stored)
             return result
 
-    def sealed[ResultT: BaseModel](
-        self, key: str, result_type: type[ResultT]
-    ) -> tuple[str, ResultT] | None:
-        """The payload digest and sealed result of request *key*, or None before it is sealed."""
-        record = self.load(self._EXECUTIONS, "execution", key, ExecutionRecord)
-        if record is None or record.phase is not ExecutionPhase.DONE:
-            return None
-        return record.payload_digest, _decode(record, result_type)
-
-    def history(self, key: str) -> ExecutionHistory:
-        """What the store recorded about request *key*: never begun, begun, or sealed.
-
-        This is the one answer to "did this request's effect happen?" for every kind
-        that runs on ``run_once``. Raises ``ReceiptCorruptError`` for an unreadable record.
-        """
-        record = self.load(self._EXECUTIONS, "execution", key, ExecutionRecord)
-        if record is None:
-            return NeverBegun()
-        if record.phase is not ExecutionPhase.DONE:
-            return BegunUnsealed(record.result_type, record.payload_digest)
-        if record.result_json is None:
-            message = "sealed execution receipt has no result"
-            raise ReceiptCorruptError(message)
-        return SealedExecution(record.result_type, record.payload_digest, record.result_json)
-
-    def seal(self, key: str, digest: str, result: BaseModel) -> None:
-        """Seal *result* for request *key* outside ``run_once`` (an inspection that proved it).
-
-        Sealing the identical result again is a no-op; another result or payload
-        for a sealed identity raises ``ContractError``.
-        """
-        sealed = ExecutionRecord(
-            payload_digest=digest,
-            phase=ExecutionPhase.DONE,
-            result_json=result.model_dump_json(),
-            result_type=result_type_name(type(result)),
-        )
-        with self.exclusive():
-            prior = self.load(self._EXECUTIONS, "execution", key, ExecutionRecord)
-            if prior == sealed:
-                return
-            if prior is not None and (
-                prior.phase is ExecutionPhase.DONE or prior.payload_digest != digest
-            ):
-                raise ContractError(("request_id",), "same request identity with another payload")
-            self._namespace.save(self._path(self._EXECUTIONS, "execution", key), sealed)
-
-    def authorize(self, owner: str, context: ExecutionContext) -> str | None:
-        """Why this host may not perform an effect for *owner* now, or None when it may.
-
-        The lease must verify at the current time, and the host fence must be the
-        newest seen for the owner: a lower epoch, or the same epoch from another
-        host, is a stale host. The newest fence is recorded.
-        """
-        if context.lease is None or not context.lease.verify(now_at=context.now_at):
-            return "host authority is not held"
-        fence = context.fence
-
-        def decide(stored: HostFence | None) -> tuple[HostFence | None, bool]:
-            if stored is not None and (
-                fence.epoch < stored.epoch
-                or (fence.epoch == stored.epoch and fence.host_id != stored.host_id)
-            ):
-                return None, False
-            return (None if stored == fence else fence), True
-
-        if not self.modify(self._FENCES, "fence", owner, HostFence, decide):
-            return "host fence is older than the newest seen"
-        return None
-
-    async def run_once[ResultT: BaseModel](
-        self,
-        key: str,
-        *,
-        owner: str,
-        context: ExecutionContext,
-        result_type: type[ResultT],
-        perform: Performer[ResultT],
-    ) -> Execution[ResultT]:
-        """Run *perform* at most once per request identity ``key``.
-
-        ``perform`` receives ``repeat``: true when an earlier attempt may have run this
-        request, so the effect must reach the same end again without doing twice what
-        it did before. The caller says so with ``context.repeat``, and the begun marker
-        says so for a caller that does not. A ``Settled`` result is sealed only while authority
-        still holds; a ``Transient`` one is returned unsealed, and the next attempt
-        resumes from the ``begun`` marker. Concurrent identical deliveries to this
-        live store share one outcome by ``key``. Only a delivery arriving after that
-        in-flight outcome retires can resume an unsealed attempt.
-        """
-        admitted = self._admit_run(key, context.payload_digest)
-        if isinstance(admitted, Conflict):
-            return admitted
-        gate, leader = admitted
-        if not leader:
-            return await self._share_run(gate)
-        try:
-            execution = await self._execute_once(
-                key,
-                owner=owner,
-                context=context,
-                result_type=result_type,
-                perform=perform,
-            )
-        except BaseException as error:
-            gate.outcome.set_result(_Raised(error))
-            raise
-        else:
-            gate.outcome.set_result(_Returned(execution))
-            return execution
-        finally:
-            self._retire_run(key, gate)
-
-    def _admit_run(self, key: str, payload_digest: str) -> tuple[_RunGate, bool] | Conflict:
-        """Join an identical in-flight run, reject a conflict, or become its leader."""
-        with self._guard:
-            gate = self._run_gates.get(key)
-            if gate is not None:
-                if gate.payload_digest != payload_digest:
-                    return Conflict()
-                return gate, False
-            gate = _RunGate(payload_digest, asyncio.get_running_loop().create_future())
-            self._run_gates[key] = gate
-            return gate, True
-
-    async def _share_run[ResultT: BaseModel](self, gate: _RunGate) -> Execution[ResultT]:
-        """Wait without letting this follower cancel the shared leader."""
-        outcome = await asyncio.shield(gate.outcome)
-        if isinstance(outcome, _Raised):
-            raise outcome.error
-        return cast("Execution[ResultT]", outcome.execution)
-
-    def _retire_run(self, key: str, gate: _RunGate) -> None:
-        """Forget the completed leader so a later delivery can resume durable state."""
-        with self._guard:
-            if self._run_gates.get(key) is gate:
-                del self._run_gates[key]
-
-    async def _execute_once[ResultT: BaseModel](
-        self,
-        key: str,
-        *,
-        owner: str,
-        context: ExecutionContext,
-        result_type: type[ResultT],
-        perform: Performer[ResultT],
-    ) -> Execution[ResultT]:
-        """Apply the durable receipt state machine for one admitted leader."""
-        try:
-            start = self._start(key, owner, context, result_type)
-            if not isinstance(start, bool):
-                return start
-            settled = await perform(repeat=context.repeat or start)
-            if isinstance(settled, Transient):
-                return Performed(settled.result)
-            reason = self.authorize(owner, context)
-            if reason is not None:
-                return Declined(f"{reason} before the result was recorded")
-            self.replace(
-                self._EXECUTIONS,
-                "execution",
-                key,
-                ExecutionRecord(
-                    payload_digest=context.payload_digest,
-                    phase=ExecutionPhase.DONE,
-                    result_json=settled.result.model_dump_json(),
-                    result_type=result_type_name(result_type),
-                ),
-            )
-            return Performed(settled.result)
-        except ReceiptCorruptError as error:
-            return Declined(str(error))
-
-    def _start[ResultT: BaseModel](
-        self, key: str, owner: str, context: ExecutionContext, result_type: type[ResultT]
-    ) -> Replayed[ResultT] | Conflict | Declined | bool:
-        """Replay, conflict or refusal; else write the begun marker and say if one was there."""
-        sealed = self.load(self._EXECUTIONS, "execution", key, ExecutionRecord)
-        if sealed is not None and sealed.payload_digest != context.payload_digest:
-            return Conflict()
-        if sealed is not None and sealed.phase is ExecutionPhase.DONE:
-            return Replayed(_decode(sealed, result_type))
-        reason = self.authorize(owner, context)
-        if reason is not None:
-            return Declined(reason)
-        begun = ExecutionRecord(
-            payload_digest=context.payload_digest,
-            phase=ExecutionPhase.BEGUN,
-            result_type=result_type_name(result_type),
-        )
-
-        def begin(stored: ExecutionRecord | None) -> tuple[ExecutionRecord | None, bool]:
-            return (begun if stored is None else None), stored is not None
-
-        return self.modify(self._EXECUTIONS, "execution", key, ExecutionRecord, begin)
-
 
 def owner_key(request: RequestBase) -> str:
     """The fence owner of a request: its scope's owner and generation."""
     return f"{request.scope.owner.kind}:{request.scope.owner.root}:{request.scope.generation}"
 
 
-def _decode[ResultT: BaseModel](record: ExecutionRecord, model: type[ResultT]) -> ResultT:
-    if record.result_json is None:
-        message = "sealed execution receipt has no result"
-        raise ReceiptCorruptError(message)
-    try:
-        return model.model_validate_json(record.result_json)
-    except ValidationError as error:
-        message = "sealed execution result is unreadable"
-        raise ReceiptCorruptError(message) from error
-
-
-__all__ = [
-    "BegunUnsealed",
-    "Conflict",
-    "Declined",
-    "Execution",
-    "ExecutionHistory",
-    "ExecutionPhase",
-    "ExecutionRecord",
-    "NeverBegun",
-    "Performed",
-    "Performer",
-    "ReceiptCorruptError",
-    "ReceiptStore",
-    "Replayed",
-    "SealedExecution",
-    "Settled",
-    "Transient",
-    "owner_key",
-    "result_type_name",
-]
+__all__ = ["ReceiptCorruptError", "ReceiptStore", "owner_key"]
