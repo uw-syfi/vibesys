@@ -28,6 +28,7 @@ commands = [
   ["python3", "scripts/check_doc_links.py"],
   ["python3", "-m", "scripts.check_doc_citations"],
   ["python3", "-m", "scripts.check_skills"],
+  ["python3", "-m", "scripts.published_skills"],
 ]
 # Every command here takes under a second or two, so the pre-push gate runs them all.
 gate_commands = [
@@ -39,6 +40,7 @@ gate_commands = [
   ["python3", "scripts/check_doc_links.py"],
   ["python3", "-m", "scripts.check_doc_citations"],
   ["python3", "-m", "scripts.check_skills"],
+  ["python3", "-m", "scripts.published_skills"],
 ]
 
 [[check_groups]]
@@ -103,6 +105,9 @@ commands = [
   # Also in test.yml's always-on `doc-checks` job: components.toml ignores `.agents/`, so a
   # skills-only change selects no Python job and would otherwise skip this check.
   ["uv", "run", "python", "-m", "scripts.check_skills"],
+  # Also in test.yml's always-on `doc-checks` job: `.claude-plugin/` is not a component root, so a
+  # manifest-only change selects no Python job.
+  ["uv", "run", "python", "-m", "scripts.published_skills"],
   ["uv", "run", "vibesys", "--headless", "--help"],
   ["uv", "run", "python", "scripts/check_lint_waivers.py"],
 ]

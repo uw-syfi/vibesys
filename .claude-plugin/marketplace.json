@@ -1,0 +1,40 @@
+{
+  "name": "vibesys",
+  "description": "Skills that run VibeSys-style, measurement-driven optimization inside Claude Code.",
+  "owner": {
+    "name": "uw-syfi"
+  },
+  "plugins": [
+    {
+      "name": "vibesys",
+      "source": "./skills",
+      "description": "VibeSys's optimization method as Claude Code skills: domain skills for kernels, LLM serving, microservices, Tokio services and Neuron.",
+      "version": "0.1.0",
+      "strict": false,
+      "skills": [
+        "./domains/dial9-tokio/dial9-rank-bottlenecks",
+        "./domains/dial9-tokio/skills/dial9-diagnose-long-poll",
+        "./domains/dial9-tokio/skills/dial9-red-flags",
+        "./domains/dial9-tokio/skills/dial9-runtime",
+        "./domains/dial9-tokio/skills/dial9-toolkit",
+        "./domains/dial9-tokio/skills/dial9-trace-analysis",
+        "./domains/dial9-tokio/skills/dial9-trace-loading",
+        "./domains/dial9-tokio/skills/dial9-trace-recipes",
+        "./domains/dial9-tokio/skills/dial9-zoom-window",
+        "./domains/kernel-correctness",
+        "./domains/kernel-ncu-analysis",
+        "./domains/kernel-performance",
+        "./domains/kernel-rocprof-analysis",
+        "./domains/kernel-timeline-analysis",
+        "./domains/microservice-optimization",
+        "./domains/neuron-agentic-development/skills/neuron-explorer-profile-schema",
+        "./domains/neuron-agentic-development/skills/neuron-nki-debugging",
+        "./domains/neuron-agentic-development/skills/neuron-nki-docs",
+        "./domains/neuron-agentic-development/skills/neuron-nki-profile-querying",
+        "./domains/neuron-agentic-development/skills/neuron-nki-profiling",
+        "./domains/neuron-agentic-development/skills/neuron-nki-writing",
+        "./domains/serving-systems"
+      ]
+    }
+  ]
+}
