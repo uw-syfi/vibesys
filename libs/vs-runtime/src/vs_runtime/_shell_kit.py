@@ -227,6 +227,7 @@ class ScriptedExecutors:
                 children_complete=terminal or (accepted and isinstance(request, SubmitMeasurement)),
                 resource_id=resource_id,
                 revision=answer.revision if succeeded else None,
+                measured_input=answer.measured_input if succeeded else None,
             )
         observation = Observation(
             event_id=EventId(root=f"{key}:observation:{sequence}"),
@@ -242,6 +243,7 @@ class ScriptedExecutors:
             children_complete=facts.children_complete,
             resource_id=facts.resource_id,
             revision=facts.revision,
+            measured_input=facts.measured_input,
         )
         if isinstance(answer, Failed):
             return RequestObserved(

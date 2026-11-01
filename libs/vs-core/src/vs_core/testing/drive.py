@@ -119,6 +119,9 @@ class Succeeded:
     evidence: tuple[EvidenceRef, ...] = ()
     facts: EvaluationTerminalFacts | None = None
     suspension: Continuation | None = None
+    measured_input: str | None = None
+    """What the evaluation reads at the revision, as a workspace executor digests it: the
+    attempt's base input, which a comparison with its candidates needs."""
 
 
 @dataclass(frozen=True)
@@ -829,6 +832,7 @@ class _Driver[S: StrategyState]:
                 else None
             ),
             revision=answer.revision if isinstance(answer, Succeeded) else None,
+            measured_input=answer.measured_input if isinstance(answer, Succeeded) else None,
         )
         if isinstance(answer, Failed):
             return RequestObserved(
