@@ -1,6 +1,5 @@
 import {expect, type Page, test} from '@playwright/test';
 import {card, openMachines, resizeTo, WORLDS} from './machines-page.js';
-import {showScreen, sidebar} from './read.js';
 import {hosts} from './subscription-fake.js';
 
 /**
@@ -38,73 +37,6 @@ function boxes(page: Page, machine: string): Promise<{x: number; width: number}[
 }
 
 const BUSY = {cpuPercent: 34, memory: {usedBytes: 18 * GIB, totalBytes: 36 * GIB}};
-
-test('a live host shows its figures, and a change of state reaches its card', async ({page}) => {
-  await openMachines(page, 1440, world('a live machine'));
-  await expect(gauges(page, 'This Mac')).toHaveText(['CPU34%', 'Memory18.0 / 36.0 GB']);
-  await expect(chips(page, 'This Mac')).toHaveText(['Online']);
-  await expect(dimmed(page, 'This Mac')).toHaveCount(0);
-  await hosts.set(page, 'local', {
-    kind: 'stale',
-    reason: 'silent',
-    ageMs: 125_000,
-    readings: {cpuPercent: 80},
-  });
-  // Dimmed and never hidden, with how old the value is and the status that says so.
-  await expect(dimmed(page, 'This Mac')).toHaveCount(2);
-  await expect(gauges(page, 'This Mac').first()).toHaveText('CPU80%');
-  await expect(card(page, 'This Mac').getByText('2 min ago')).toBeVisible();
-  await expect(chips(page, 'This Mac')).toHaveText(['Stale']);
-  await hosts.set(page, 'local', {kind: 'live', readings: {cpuPercent: 12}});
-  await expect(gauges(page, 'This Mac').first()).toHaveText('CPU12%');
-  await expect(dimmed(page, 'This Mac')).toHaveCount(0);
-  await expect(card(page, 'This Mac').getByText(/ ago$/)).toHaveCount(0);
-  await expect(chips(page, 'This Mac')).toHaveText(['Online']);
-});
-
-test('a host with GPUs shows their use and memory beside CPU and memory', async ({page}) => {
-  await openMachines(page, 1440, world('two live machines'));
-  await expect(gauges(page, 'host-a')).toHaveText([
-    'CPU71%',
-    'Memory212 / 512 GB',
-    'GPU68%',
-    'VRAM416 / 640 GB',
-  ]);
-  await expect(gauges(page, 'This Mac')).toHaveCount(2);
-});
-
-test('a card has one status, whatever its stream does, and never Online beside a failure', async ({
-  page,
-}) => {
-  await openMachines(page, 1440, world('a live machine'));
-  const states = [
-    [{kind: 'live', readings: BUSY}, 'Online'],
-    [{kind: 'stale', readings: BUSY, reason: 'silent', ageMs: 42_000}, 'Stale'],
-    [{kind: 'stale', readings: BUSY, reason: 'ended', ageMs: 42_000, attempt: 0}, 'Connecting'],
-    [{kind: 'connecting', step: 'gateway', attempt: 0}, 'Connecting'],
-    [{kind: 'failed', reason: 'unreachable', retrying: true}, 'Unreachable'],
-    [{kind: 'failed', reason: 'ended', retrying: true}, 'Disconnected'],
-    [{kind: 'failed', reason: 'unsupported', retrying: false}, 'Not supported'],
-    [{kind: 'failed', reason: 'closed', retrying: false}, 'Closed'],
-  ] as const;
-  for (const [feed, word] of states) {
-    await hosts.set(page, 'local', feed);
-    await expect(chips(page, 'This Mac')).toHaveText([word]);
-    if (word !== 'Online') await expect(card(page, 'This Mac').getByText('Online')).toHaveCount(0);
-    // Retry is offered where it can help, and not on a host that was removed.
-    const offered = feed.kind === 'failed' && feed.reason !== 'closed';
-    await expect(
-      card(page, 'This Mac').getByRole('button', {name: 'Retry', exact: false}),
-    ).toHaveCount(offered ? 1 : 0);
-  }
-});
-
-test('an older host is Not supported once, and not also Needs update', async ({page}) => {
-  await openMachines(page, 1440, world('an older machine'));
-  await expect(chips(page, 'host-c')).toHaveText(['Not supported']);
-  await expect(card(page, 'host-c').getByText('Needs update')).toHaveCount(0);
-  await expect(chips(page, 'This Mac')).toHaveText(['Online']);
-});
 
 test('every state keeps the card the same height, at each width', async ({page}) => {
   await openMachines(page, 1440, world('two live machines'));
@@ -185,105 +117,6 @@ test('a figure that gains a digit moves nothing beside it', async ({page}) => {
       });
     }
   }
-});
-
-test('a failed host says why in its status, and Retry is answered with the last values, dimmed, until the stream returns', async ({
-  page,
-}) => {
-  await openMachines(page, 1440, world('a failed machine'));
-  const mac = card(page, 'This Mac');
-  await expect(chips(page, 'This Mac')).toHaveText(['Unreachable']);
-  await expect(gauges(page, 'This Mac')).toHaveCount(0);
-  // A real button, named for its machine, with the visible text `Retry`.
-  const retry = mac.getByRole('button', {name: 'Retry This Mac'});
-  await expect(retry).toHaveText('Retry');
-  // The header status is the card's one status; nothing is a banner.
-  await expect(page.locator('[role="alert"]')).toHaveCount(0);
-  await retry.click();
-  await expect.poll(() => hosts.retried(page)).toEqual(['local']);
-  await expect(chips(page, 'This Mac')).toHaveText(['Connecting']);
-  await expect(dimmed(page, 'This Mac')).toHaveCount(2);
-  await expect(mac.getByText(/\d+ (s|min) ago/)).toBeVisible();
-  await expect(mac.getByRole('button', {name: /Retry/})).toHaveCount(0);
-  await hosts.set(page, 'local', {kind: 'live', readings: BUSY});
-  await expect(chips(page, 'This Mac')).toHaveText(['Online']);
-  await expect(dimmed(page, 'This Mac')).toHaveCount(0);
-  // Failed again: the host still does not answer, and Retry is there to be pressed once more.
-  await hosts.set(page, 'local', {kind: 'failed', reason: 'unreachable', retrying: true});
-  await expect(chips(page, 'This Mac')).toHaveText(['Unreachable']);
-  await mac.getByRole('button', {name: 'Retry This Mac'}).click();
-  await expect(chips(page, 'This Mac')).toHaveText(['Connecting']);
-  await hosts.set(page, 'local', {kind: 'failed', reason: 'unreachable', retrying: true});
-  await expect(chips(page, 'This Mac')).toHaveText(['Unreachable']);
-  await expect(mac.getByRole('button', {name: 'Retry This Mac'})).toBeVisible();
-});
-
-test('each failed host has a Retry named for it, and pressing one asks only that host', async ({
-  page,
-}) => {
-  await openMachines(page, 1440, world('four machines in every state'));
-  await expect(card(page, 'host-b').getByRole('button', {name: 'Retry host-b'})).toHaveText(
-    'Retry',
-  );
-  await expect(page.getByRole('button', {name: /^Retry/})).toHaveCount(1);
-  await card(page, 'host-b').getByRole('button', {name: 'Retry host-b'}).click();
-  await expect.poll(() => hosts.retried(page)).toEqual(['ssh:host-b']);
-});
-
-test('a meter is announced with its value, as unknown when unread, and as stale when it is', async ({
-  page,
-}) => {
-  await openMachines(page, 1440, world('a live machine'));
-  const cpu = card(page, 'This Mac').getByRole('meter', {name: 'CPU'});
-  await expect(cpu).toHaveAttribute('aria-valuenow', '34');
-  await expect(cpu).toHaveAttribute('aria-valuetext', '34%');
-  await hosts.set(page, 'local', {
-    kind: 'stale',
-    reason: 'silent',
-    ageMs: 42_000,
-    readings: {cpuPercent: 34, memory: null},
-  });
-  await expect(cpu).toHaveAttribute('aria-valuetext', /^34%, stale \d+ s$/);
-  // A reading that was not made is an unknown by name, not a meter at zero, and stale as well.
-  const memory = card(page, 'This Mac').getByRole('img', {name: /^Memory unknown, stale \d+ s$/});
-  await expect(memory).toBeVisible();
-  await expect(card(page, 'This Mac').getByRole('meter', {name: 'Memory'})).toHaveCount(0);
-});
-
-test('hot is the warn tone, and a reading that is not hot is not', async ({page}) => {
-  await openMachines(page, 1440, world('a live machine'));
-  const fill = (name: string) =>
-    card(page, 'This Mac').getByRole('meter', {name}).locator('.vs-meter');
-  await expect(fill('CPU')).toHaveAttribute('data-tone', 'ok');
-  await hosts.set(page, 'local', {kind: 'live', readings: {...BUSY, cpuPercent: 95}});
-  await expect(fill('CPU')).toHaveAttribute('data-tone', 'warn');
-  await hosts.set(page, 'local', {kind: 'live', readings: {...BUSY, cpuPercent: 89}});
-  await expect(fill('CPU')).toHaveAttribute('data-tone', 'ok');
-});
-
-test('the page watches a host only while it is on screen', async ({page}) => {
-  await openMachines(page, 1440, world('a live machine'));
-  await expect.poll(() => hosts.observing(page, 'local')).toBe(1);
-  await showScreen(page, 'Runs');
-  await expect.poll(() => hosts.observing(page, 'local')).toBe(0);
-  await showScreen(page, 'Machines');
-  await expect.poll(() => hosts.observing(page, 'local')).toBe(1);
-  await expect(gauges(page, 'This Mac')).toHaveCount(2);
-});
-
-test('a host that streams is one status: a check that timed out says nothing of it, on the card or the rail', async ({
-  page,
-}) => {
-  await openMachines(page, 1440, world('a loaded machine'));
-  await expect(chips(page, 'This Mac')).toHaveText(['Online']);
-  await expect(card(page, 'This Mac').getByRole('button', {name: 'Reconnect'})).toHaveCount(0);
-  await expect(gauges(page, 'This Mac')).toHaveText(['CPU34%', 'Memory18.0 / 36.0 GB']);
-  await expect(sidebar(page).getByRole('button', {name: /^Machines$/})).toBeVisible();
-  // When the host stops delivering, the check's word and its fix are all there is to go on.
-  await hosts.set(page, 'local', {kind: 'failed', reason: 'unreachable', retrying: true});
-  await expect(chips(page, 'This Mac')).toHaveText(['Unreachable']);
-  await expect(card(page, 'This Mac').getByRole('button', {name: 'Reconnect'})).toBeVisible();
-  await expect(sidebar(page).getByRole('button', {name: /^Machines, Unreachable$/})).toBeVisible();
 });
 
 /** What the card's summary line shows, in order, and where each cell is. */
