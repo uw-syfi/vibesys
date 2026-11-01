@@ -21,7 +21,15 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
-from tests.system.agent_tools.world import ROLE, SCOPE, AgentToolWorld, Program, Turn, new_bridge
+from tests.system.agent_tools.world import (
+    FACTS,
+    ROLE,
+    SCOPE,
+    AgentToolWorld,
+    Program,
+    Turn,
+    new_bridge,
+)
 
 from vs_core.api import CoreState, RunStatus, SessionPhase, SubmitMeasurement
 from vs_dst.api import (
@@ -140,6 +148,13 @@ def test_an_agent_submits_through_the_tool_and_core_measures_the_candidate_once(
         if isinstance(row.request, SubmitMeasurement)
     )
     assert purposes == ["baseline", "local-validation", "official"]
+    # A process that resumes a run computes its own environment identity; the run's measurements,
+    # the agent's included, keep the one the run began with, or they would not be samples of it.
+    assert {
+        row.request.plan.environment_digest
+        for row in state.records.records
+        if isinstance(row.request, SubmitMeasurement)
+    } == {FACTS.environment_digest}
     assert world.unacknowledged == (), "the client confirmed it read the handle"
 
 

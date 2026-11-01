@@ -84,10 +84,12 @@ if TYPE_CHECKING:
 ROLE = AgentRole(
     id="implementer", system_prompt="implement", extra_tools=(AgentTool(id="evaluation"),)
 )
+PROCESS_DIGEST = "cd" * 32
+"""The environment identity a resumed process computes afresh, which is not the run's own."""
 POLICY = AgentEvaluationPolicy(
     evaluator_digest=DIGEST,
     workload_digest=DIGEST,
-    environment_digest=DIGEST,
+    environment_digest=PROCESS_DIGEST,
     recipe=ArtifactRef(artifact_id=ArtifactId(root="recipe"), digest=DIGEST),
     stages=(("accuracy", 10.0), ("benchmark", 10.0)),
     queue_allowance=880.0,
@@ -441,7 +443,9 @@ class _Host:
         )
         self._bridge.attach(_ShownAdmission(self._admission, closing), self._clock)
         try:
-            assert self._bridge.yielded(request) is None, "the gate refuses at the end of the turn"
+            if self._bridge.yielded(request) is not None:
+                # Not an assertion: the loop would charge a raising effect and run it again.
+                self._world.halts.append("the gate did not refuse the wait at the end of the turn")
         finally:
             self._bridge.attach(self._admission, self._clock)
         return None
@@ -580,6 +584,7 @@ class _Host:
 
 
 __all__ = [
+    "FACTS",
     "ROLE",
     "SCOPE",
     "AgentToolWorld",
