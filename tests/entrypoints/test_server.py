@@ -33,6 +33,7 @@ from tests.entrypoints.support import (
     FakeWebInstanceFinder,
     gateway_record,
 )
+from tests.support.process_descriptors import PER_PROCESS_DESCRIPTORS, seen
 
 import entrypoints.server as server_entrypoint
 import server.runtime as runtime_module
@@ -541,7 +542,10 @@ def test_detached_startup_refuses_to_clobber_a_gateway_that_still_holds_the_log(
     # message names the measured holder rather than assuming `stop` can help.
     assert log_path.read_text() == "output from the gateway that is still running\n"
     assert effects.command == []
-    assert f"open under {instance_path.parent}: {running.pid}" in str(failure.value)
+    # The holders are named where the host can list them (see `tests.support.process_descriptors`).
+    assert (f"open under {instance_path.parent}: {running.pid}" in str(failure.value)) is (
+        PER_PROCESS_DESCRIPTORS
+    )
 
 
 def test_detached_startup_reports_a_published_record(
@@ -915,7 +919,7 @@ def test_detached_gateway_effects_read_a_record_and_observe_without_probing(
     descriptor = os.open(WebInstanceHold.log_path(instance_path), os.O_CREAT | os.O_RDWR, 0o600)
     try:
         assert WebInstanceHold.take(descriptor) is True
-        assert effects.observe(instance_path) == WebInstanceHold(holders=(), log_locked=True)
+        assert effects.observe(instance_path) == WebInstanceHold(holders=seen(), log_locked=True)
     finally:
         os.close(descriptor)
 

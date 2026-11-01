@@ -18,6 +18,7 @@ from tests.server.support import (
     RecordingObserver,
     build_server_parts,
 )
+from tests.support.process_descriptors import PER_PROCESS_DESCRIPTORS, seen
 
 from entrypoints.production import production_runs
 from server.api.protocol import SnapshotQuery, StopCommand, SubscribeRequest
@@ -281,7 +282,7 @@ def test_an_idle_instance_directory_reads_free(tmp_path: Path) -> None:
 
     # Asking whether the instance is in use must not create the file it reads,
     # and the caller's own process is never one of the holders it is told about.
-    assert hold == WebInstanceHold(holders=(), log_locked=False)
+    assert hold == WebInstanceHold(holders=seen(), log_locked=False)
     assert hold.free is True
     assert not log_path.exists()
 
@@ -317,7 +318,7 @@ def test_the_hold_outlives_the_record_and_the_launcher(tmp_path: Path) -> None:
         # inherited-descriptor property the whole postcondition rests on.
         assert not instance_path.exists()
         hold = WebInstanceHold.observe(instance_path)
-        assert hold == WebInstanceHold(holders=(child.pid,), log_locked=True)
+        assert hold == WebInstanceHold(holders=seen(child.pid), log_locked=True)
         assert hold.free is False
     finally:
         stop_process(child)
@@ -347,9 +348,11 @@ def test_a_process_using_the_directory_without_the_lock_is_still_reported(
             )
         try:
             hold = WebInstanceHold.observe(instance_path)
-            assert hold.holders == (child.pid,)
+            assert hold.holders == seen(child.pid)
             assert hold.log_locked is False
-            assert hold.free is False
+            # Without per-process descriptors nothing here can see the user, and `free` says so:
+            # that limit is the contract (`holders is None`), not a wrong answer.
+            assert hold.free is (not PER_PROCESS_DESCRIPTORS)
         finally:
             stop_process(child)
 
@@ -384,7 +387,7 @@ def test_observing_the_hold_does_not_make_the_observer_a_holder(tmp_path: Path) 
         # that holds only a shared lock is therefore not a lock holder here.
         hold = WebInstanceHold.observe(instance_path)
         assert hold.log_locked is False
-        assert hold.holders == (reader.pid,)
+        assert hold.holders == seen(reader.pid)
     finally:
         stop_process(reader)
 

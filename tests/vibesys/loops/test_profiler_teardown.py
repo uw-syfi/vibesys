@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import signal
 import subprocess
+import sys
 from pathlib import Path
 from signal import Signals
 from tempfile import TemporaryDirectory
@@ -819,6 +820,9 @@ def test_transient_unfinalized_writer_prevents_completion(
         assert clock.now >= GRACE_S
 
 
+@pytest.mark.skipif(
+    sys.platform != "linux", reason="LinuxProcessTable reads /proc and needs pidfds"
+)
 def test_polling_process_table_cannot_prove_writer_history() -> None:
     table = runtime.LinuxProcessTable()
     assert not table.history_complete(set())
