@@ -100,15 +100,6 @@ jobs:
           ./support/repoctl/repoctl verify-policy --cases tests/repoctl/cases.toml
           ./support/repoctl/repoctl plan --github-event --github-output "$GITHUB_OUTPUT"
 
-      # Stale reverts and tools' leftover files, on every change whatever it touches.
-      # Here rather than in python-checks, which a workflow, client or docs change skips.
-      # Stdlib scripts over the history this job already fetched, about a second, and
-      # first: a stale revert stops the run before any other job starts.
-      - name: Check for stale reverts and leftover files
-        run: |
-          python3 scripts/check_stale_revert.py --base-ref origin/main
-          python3 scripts/check_stray_files.py
-
       # An example repository's pinned commit moves only on purpose: a commit message of the
       # change names it (`Example-Bump: <path>`). On a pull request only: the queue's squash
       # message need not carry the trailer, and validate-examples runs there regardless. The
@@ -185,6 +176,29 @@ jobs:
       # so a skills-only change selects no Python job. Stdlib only, about a second.
       - name: Check agent skills
         run: python3 -m scripts.check_skills
+
+  # Stale reverts and tools' leftover files, on every change whatever it touches. A job of
+  # its own, not a step of `changes`: every other job waits for `changes`, and `git blame`
+  # over a `blob:none` clone fetches blobs on demand, which took 4 to 42 s (median 14 s) of
+  # the queue run's critical path across 17 runs. Here it runs beside the test shards
+  # and still blocks the merge, since Required PR CI waits for it. Not in python-checks,
+  # which a workflow, client or docs change skips.
+  history-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      # Full history (the stale-revert check compares each file with its history on main)
+      # without the blobs of every old revision.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          filter: blob:none
+
+      - name: Check for stale reverts and leftover files
+        run: |
+          python3 scripts/check_stale_revert.py --base-ref origin/main
+          python3 scripts/check_stray_files.py
 
   stitch:
     needs: changes
@@ -1503,6 +1517,7 @@ jobs:
     needs:
       - changes
       - doc-checks
+      - history-checks
       - python-checks
       - python-guards
       - typecheck
@@ -1573,6 +1588,7 @@ jobs:
     needs:
       - changes
       - doc-checks
+      - history-checks
       - python-checks
       - python-guards
       - test-impact

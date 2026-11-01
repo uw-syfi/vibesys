@@ -9,7 +9,7 @@ rust = [
   ["cargo", "test", "--locked"],
 ]
 
-# Scripts the changes job and the doc-checks job run on every pull request.
+# Scripts the changes, doc-checks and history-checks jobs run on every pull request.
 # No trigger job: a change that selects nothing still runs them. The workflow
 # invokes the same programs; TestAlwaysOnCommandsAreWhatCIRunsOnEveryChange
 # fails if this list and that workflow disagree.

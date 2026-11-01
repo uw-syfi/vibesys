@@ -384,7 +384,7 @@ command. The wrapper runs the repository's Go tool, so install Go 1.25 first:
 `repoctl test` runs the groups whose `trigger_job` the change selects, both
 the test groups and the quality groups (`python_quality`, `python_guards`,
 `python_types`, `clients_quality`, `clients_build`), plus the scripts the
-changes job and the doc-checks job run on every pull request. `--checks-only`
+changes, doc-checks and history-checks jobs run on every pull request. `--checks-only`
 keeps the quality groups and those scripts and leaves the test groups.
 `--dry-run` lists either selection.
 
