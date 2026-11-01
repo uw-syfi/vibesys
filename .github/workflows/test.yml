@@ -847,6 +847,16 @@ jobs:
           VIBESYS_RECORD_SHARD_DURATIONS: shard-durations-${{ matrix.shard }}.json
         run: ./support/repoctl/repoctl run-checks --group python_ci_tests_shard
 
+      # The test ids this shard failed (pytest's own record), for `classify-failures`.
+      - name: Upload the failed test ids
+        if: failure() && github.event_name == 'merge_group'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: failed-tests-${{ matrix.shard }}
+          path: .pytest_cache/v/cache/lastfailed
+          include-hidden-files: true
+          if-no-files-found: ignore
+
       - name: Upload coverage data
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -860,6 +870,54 @@ jobs:
         with:
           name: shard-durations-${{ matrix.shard }}
           path: shard-durations-${{ matrix.shard }}.json
+
+  # Explains a failed queue run, never changes it. When a shard of `test` fails in the merge
+  # queue, this reruns only the tests it failed, once, on the main the queue branched from
+  # (`base_sha`, which does not contain this pull request), and labels each in the job summary:
+  # "fails on main (flaky or broken main)" or "fails only with this PR"
+  # (scripts/classify_failed_tests.py). The pull request's own result is not retried: the shards
+  # stay red and the queue still ejects it. `continue-on-error` keeps a failure here from adding
+  # a second red job to `Required PR CI`.
+  classify-failures:
+    needs: [changes, test]
+    if: always() && github.event_name == 'merge_group' && needs.test.result == 'failure'
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Record when this job's cancel clock started
+        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.merge_group.base_sha }}
+
+      - name: Pass the pytest cancel deadline
+        run: python3 scripts/pytest_job_deadline.py
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.14
+
+      - name: Install dependencies
+        run: uv sync --dev --python 3.14
+
+      - name: Download the failed test ids
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: failed-tests-*
+          path: failed-tests
+
+      - name: Rerun the failed tests on main and label them
+        env:
+          BASE_SHA: ${{ github.event.merge_group.base_sha }}
+        run: uv run --no-sync python scripts/classify_failed_tests.py run failed-tests/*/lastfailed
 
   # Keeps the shard balance current without a hand-edited record: a green run on
   # main merges its shards' measured seconds into a cache entry, which the
@@ -1414,6 +1472,7 @@ jobs:
       - real-tiers-slurm
       - real-tiers-minimal-container
       - test
+      - classify-failures
       - record-durations
       - coverage
       - seed-exploration
