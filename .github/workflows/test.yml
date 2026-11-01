@@ -1044,8 +1044,10 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
 
+      # Only coverage and diff-cover (the `coverage-report` group): this job imports none of the
+      # project, and the whole `dev` environment took 6 s of the queue run's critical path.
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --only-group coverage-report
 
       - name: Set up repoctl
         uses: ./.github/actions/setup-repoctl

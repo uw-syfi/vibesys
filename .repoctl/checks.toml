@@ -448,7 +448,7 @@ name = "patch_coverage"
 language = "python"
 directory = "."
 timeout_seconds = 300
-commands = [["uv", "run", "diff-cover", "coverage.xml", "--compare-branch=origin/main", "--fail-under=80"]]
+commands = [["uv", "run", "--no-sync", "diff-cover", "coverage.xml", "--compare-branch=origin/main", "--fail-under=80"]]
 
 [[native_check_overrides]]
 root = "sdk/vs-evaluator/vseval"

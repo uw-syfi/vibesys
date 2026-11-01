@@ -3064,6 +3064,10 @@ dependencies = [
 ]
 
 [package.dev-dependencies]
+coverage-report = [
+    { name = "coverage" },
+    { name = "diff-cover" },
+]
 dev = [
     { name = "auditwheel" },
     { name = "chardet" },
@@ -3122,6 +3126,10 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
+coverage-report = [
+    { name = "coverage" },
+    { name = "diff-cover" },
+]
 dev = [
     { name = "auditwheel", specifier = "==6.8.0" },
     { name = "chardet", specifier = "<6" },
