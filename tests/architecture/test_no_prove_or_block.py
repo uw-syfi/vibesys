@@ -4,8 +4,8 @@ A run that cannot tell what an interruption left behind runs the step again, and
 ``clear`` makes that safe (``docs/contributing/run-recovery.md``). The layer that proved or
 blocked instead (recovery barriers, inspections, receipts, effect fences, the lease and the
 fence) is deleted module by module. Each deleting pull request adds what it removed to
-``DELETED_MODULES`` or ``DELETED_SYMBOLS`` below, one line each, so the layer cannot come back
-under the same name. Unenforced remainder: a new mechanism under a different name that does
+``DELETED_MODULES``, ``DELETED_SYMBOLS`` or ``DELETED_MEMBERS`` below, one line each, so the layer
+cannot come back under the same name. Unenforced remainder: a new mechanism under a different name that does
 the same job; review applies the rule "no result means run again".
 """
 
@@ -113,6 +113,13 @@ DELETED_SYMBOLS: tuple[str, ...] = (
 )
 """Names that no file under ``src/`` or ``libs/*/src`` may define or import."""
 
+DELETED_MEMBERS: tuple[tuple[str, str], ...] = ()
+"""``(class, member)`` pairs: no class of that name under ``src/`` or ``libs/*/src`` may define a
+member of that name, as an enum member, a field or a method. For a value that leaves a type the
+type keeps, such as ``ObservationStatus.UNKNOWN``, where listing the member's name alone would ban
+it from every other class. A deleting pull request adds one line here. The scan reads Python, so
+a ``.proto`` value is held by its generated class, which changes with the proto."""
+
 _ROOT = Path(__file__).resolve().parents[2]
 _RULE = "docs/contributing/run-recovery.md, 'Keeping the deleted modules from coming back'"
 
@@ -181,6 +188,42 @@ def deleted_symbols_defined(
     ]
 
 
+def deleted_members_defined(
+    path: str, source: str, deleted: tuple[tuple[str, str], ...] = DELETED_MEMBERS
+) -> list[str]:
+    """One message per line of *source* that defines a deleted member of a class of that name."""
+    members: dict[str, set[str]] = {}
+    for owner, member in deleted:
+        members.setdefault(owner, set()).add(member)
+    found: list[tuple[int, str, str]] = []
+    for node in walk_nodes(parse_source(source, path)):
+        if not (isinstance(node, ast.ClassDef) and node.name in members):
+            continue
+        for statement in node.body:
+            match statement:
+                case ast.Assign():
+                    names = [
+                        (statement.lineno, target.id)
+                        for target in statement.targets
+                        if isinstance(target, ast.Name)
+                    ]
+                case ast.AnnAssign(target=ast.Name(id=name)):
+                    names = [(statement.lineno, name)]
+                case ast.FunctionDef() | ast.AsyncFunctionDef() | ast.ClassDef():
+                    names = [(statement.lineno, statement.name)]
+                case _:
+                    names = []
+            found.extend(
+                (line, node.name, name) for line, name in names if name in members[node.name]
+            )
+    return [
+        f"{path}:{line}: `{owner}` defines `{member}`, which the prove-or-block cleanup deleted"
+        f" ({_RULE}). Do not bring it back; if the concept is wanted again, remove the pair from"
+        " DELETED_MEMBERS in the pull request that argues for it."
+        for line, owner, member in sorted(found)
+    ]
+
+
 def _product_files(root: Path) -> dict[str, Path]:
     """Each product source file, by its repository path."""
     return {
@@ -210,6 +253,17 @@ def test_no_deleted_name_is_defined_or_imported_by_the_product() -> None:
     assert not violations, "\n".join(violations)
 
 
+def test_no_deleted_member_is_defined_by_the_product() -> None:
+    owners = {owner for owner, _ in DELETED_MEMBERS}
+    violations = [
+        message
+        for path, location in _product_files(_ROOT).items()
+        if any(owner in (text := location.read_text(encoding="utf-8")) for owner in owners)
+        for message in deleted_members_defined(path, text)
+    ]
+    assert not violations, "\n".join(violations)
+
+
 def test_every_listed_name_is_a_plain_dotted_path_or_identifier() -> None:
     assert len(set(DELETED_MODULES)) == len(DELETED_MODULES)
     assert len(set(DELETED_SYMBOLS)) == len(DELETED_SYMBOLS)
@@ -217,6 +271,10 @@ def test_every_listed_name_is_a_plain_dotted_path_or_identifier() -> None:
         "DELETED_MODULES holds dotted module paths"
     )
     assert all(name.isidentifier() for name in DELETED_SYMBOLS), "DELETED_SYMBOLS holds names"
+    assert len(set(DELETED_MEMBERS)) == len(DELETED_MEMBERS)
+    assert all(
+        owner.isidentifier() and member.isidentifier() for owner, member in DELETED_MEMBERS
+    ), "DELETED_MEMBERS holds (class, member) pairs of names"
 
 
 def _layout(module: str, *, package: bool) -> str:
@@ -305,3 +363,58 @@ def test_a_package_init_provides_its_package_and_other_paths_provide_nothing() -
     assert module_at(PurePosixPath("src/vibesys/_a.py")) == "vibesys._a"
     assert module_at(PurePosixPath("libs/vs-core/tests/test_a.py")) is None
     assert module_at(PurePosixPath("tests/architecture/test_a.py")) is None
+
+
+_IDENTIFIERS = st.from_regex(r"[A-Za-z][A-Za-z0-9_]{0,10}", fullmatch=True)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "{member} = 1",
+        "{member}: int = 1",
+        "{member}: int",
+        "def {member}(self): ...",
+        "async def {member}(self): ...",
+        "class {member}: ...",
+        "x = 1\n    {member} = {member}2 = 3",
+    ],
+)
+@given(owner=_IDENTIFIERS, member=_IDENTIFIERS)
+def test_a_member_is_found_in_every_form_a_class_can_define_it(
+    body: str, owner: str, member: str
+) -> None:
+    source = f"class {owner}:\n    {body.format(member=member)}\n"
+    found = deleted_members_defined("p.py", source, deleted=((owner, member),))
+    assert len(found) == 1
+    assert f"`{owner}` defines `{member}`" in found[0]
+
+
+@given(owner=_IDENTIFIERS, other=_IDENTIFIERS, member=_IDENTIFIERS)
+def test_the_same_member_in_another_class_or_a_use_of_it_passes(
+    owner: str, other: str, member: str
+) -> None:
+    source = (
+        f"class {other}x:\n    {member} = 1\n"
+        f"class {owner}:\n    kept = {member}\n    def f(self):\n        return self.{member}\n"
+        f"value = {owner}.{member}\n"
+    )
+    assert deleted_members_defined("p.py", source, deleted=((owner, member),)) == []
+
+
+@given(owner=_IDENTIFIERS, member=_IDENTIFIERS)
+def test_a_member_defined_below_a_nested_class_of_the_same_name_is_found(
+    owner: str, member: str
+) -> None:
+    source = f"class Outer:\n    class {owner}:\n        {member} = 1\n"
+    assert len(deleted_members_defined("p.py", source, deleted=((owner, member),))) == 1
+
+
+def test_a_member_failure_names_the_file_the_line_and_the_fix() -> None:
+    [message] = deleted_members_defined(
+        "src/a.py",
+        "x = 1\nclass Status:\n    UNKNOWN = 'unknown'\n",
+        deleted=(("Status", "UNKNOWN"),),
+    )
+    assert message.startswith("src/a.py:3: `Status` defines `UNKNOWN`")
+    assert "DELETED_MEMBERS" in message

@@ -1063,18 +1063,19 @@ PR 6a and 6b land back to back, with no cleanup deferred, as #3408 required of i
 
 ### Keeping the deleted modules from coming back
 
-`tests/architecture/test_no_prove_or_block.py` fails when either of these holds (see the `enforce-rules`
+`tests/architecture/test_no_prove_or_block.py` fails when any of these holds (see the `enforce-rules`
 skill):
 
 - A file under `src/` or `libs/*/src` provides a module in `DELETED_MODULES`, as a module or as a package.
 - A file there defines or imports a name in `DELETED_SYMBOLS`.
+- A class named in `DELETED_MEMBERS` defines the member listed with it.
 
 Both are plain tuples at the top of the file, one line each, and each pull request that deletes part of the
 layer adds what it removed. The guard holds the keyed-replay modules, `ReplayUnknown`, the old shell runtime (`_core_loop`, `_core_run`, `_core_wiring`, `_core_publications` and the names they defined), the keyed replay store and the state store's writer half (`_store_operations`, `CommitFault`, `StoreOperations`, `mutate_if_fenced` and kin) today. The names the
 inventory above marks for deletion (`RecoveryBarrier`, `RecoveryCheck`, `HostEpoch`, `ChildLease`,
 `InspectRequest`, `InspectTurn`, `InspectOwnedJob`, `CancelOwnedResource`, `BlockRequest`, `EffectFences`,
 `NothingHeld`, `MayHold`, `HostFence`) join the list in the pull request that deletes each.
-`ObservationStatus.UNKNOWN` joins as a member list in the pull request that removes the value. Unenforced:
+`DELETED_MEMBERS` holds `(class, member)` pairs for a value that leaves a type the type keeps: `ObservationStatus.UNKNOWN` joins it in the pull request that removes the value. Unenforced:
 that every `StepRunner` implementation is in the contract suite's parametrization; no check holds it yet.
 The guard is an AST scan like `tests/architecture/test_epoch_ending_authority.py`. Unenforced remainder: the
 guard cannot tell a new mechanism with a different name that does the same job; review applies the rule "no
