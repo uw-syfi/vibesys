@@ -241,6 +241,12 @@ def test_the_headline_while_the_run_works_is_the_last_kept_point(
 
 
 @example(
+    ideas=[_Idea("passed", 150.0, 0.0), _Idea("passed", 150.00000001, 1.0)],
+    direction="max",
+    metric=None,
+    unit=None,
+)
+@example(
     ideas=[_Idea("passed", 113.0, 0.0), _Idea("passed", 100.0, 0.0)],
     direction="min",
     metric=None,
