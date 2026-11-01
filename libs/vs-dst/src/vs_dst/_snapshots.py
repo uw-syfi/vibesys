@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from vs_dst._interruptions import Action, Interruption, Moment
+from vs_project.api.testing import FakeControlInbox
 from vs_runlog.api import MemoryFoldCache
 from vs_runtime.api.testing import FakeRunRecords
 
@@ -22,6 +23,7 @@ if TYPE_CHECKING:
     from vs_dst._effects import Effects
     from vs_dst._world import World
     from vs_proto.api import Record
+    from vs_runtime.api.infrastructure import ControlRequest
     from vs_runtime.api.step_runner import FoldStart
     from vs_sim.api.testing import VirtualClock
 
@@ -41,6 +43,10 @@ class RunningHost(Protocol):
 
     def submit(self, event: CoreEvent) -> None:
         """Hand the run an input core delivers itself (the deadline's stop): no channel carries it."""
+        ...
+
+    def post(self, request: ControlRequest) -> None:
+        """Post ``request`` to the run's control inbox, as ``vibesys control`` does."""
         ...
 
     def pause(self, control_id: str) -> None:
@@ -157,6 +163,8 @@ class RecordingRecords(FakeRunRecords):
         self.cache = MemoryFoldCache()
         """The fold cache of the run (``state.pb``), which a host's start reads and its log writes."""
         self.starts: list[FoldStart] = []
+        self.inbox = FakeControlInbox()
+        """The run's durable control inbox, where ``vibesys control`` posts: it survives a host."""
         """How each host that opened the log got its fold: from the cache, or the whole log and why."""
 
     def __deepcopy__(self, memo: dict[int, object]) -> RecordingRecords:
@@ -168,6 +176,7 @@ class RecordingRecords(FakeRunRecords):
         copied.last_clock = self.last_clock
         copied.cache = copy.deepcopy(self.cache, memo)
         copied.starts = list(self.starts)
+        copied.inbox = copy.deepcopy(self.inbox, memo)
         return copied
 
     def observe(self) -> object | None:

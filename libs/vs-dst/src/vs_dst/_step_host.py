@@ -37,7 +37,7 @@ from vs_dst._snapshots import RecordingRecords
 from vs_dst._world import ClearFailingWorld, HoldingWorld, ServingWorld
 from vs_proto.api import EpochStarted, Timestamp
 from vs_runlog.api import ConfirmedLog
-from vs_runtime.api.core import ExecutionContext, OperatorControls, RunControlBridge
+from vs_runtime.api.core import ExecutionContext, OperatorControls, OperatorInbox, RunControlBridge
 from vs_runtime.api.infrastructure import (
     ChannelRunControl,
     PauseRequest,
@@ -79,7 +79,9 @@ if TYPE_CHECKING:
     from vs_dst._effects import Effects
     from vs_dst._snapshots import OutsideWorld, Store, Watcher
     from vs_dst._world import Serving, World
+    from vs_project.api.testing import FakeControlInbox
     from vs_runtime.api.core import ExecutionResult
+    from vs_runtime.api.infrastructure import ControlRequest
     from vs_runtime.api.step_runner import CancelSignal, StepRecord
     from vs_runtime.api.testing import HostOptions
 
@@ -230,7 +232,7 @@ class _Host:
         registry = setup.harness.registry
         driver = launch.search.driver(launch.config, registry)
         search = RecordingSearch(driver, self._decisions)
-        operator = _Operator()
+        operator = _Operator(self._records.inbox)
         handle = _HostHandle(clock, self._decisions, operator)
         if watcher is not None:
             watcher.watch(self._records, handle)
@@ -285,6 +287,8 @@ class _Host:
                     await serving.close()
             finally:
                 inputs.leave()
+                # An ended run answers every control left; a run that may resume keeps its requests.
+                operator.controls.end(log.state)
         return self._result(inputs, halted=halted)
 
     @staticmethod
@@ -350,6 +354,11 @@ class _Texts:
         self.held[ref.artifact_id.root] = text
 
 
+def _live() -> str | None:
+    """A poster's view of a run that has not ended."""
+    return None
+
+
 class _Operator:
     """The operator's side of one host: the control channel and the bridge the loop polls.
 
@@ -360,19 +369,25 @@ class _Operator:
     (``lifts_standing_stop``).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, inbox: FakeControlInbox) -> None:
         threads = loop_threads()
+        self._inbox = inbox
         self._channel = create_run_control_channel(FakeRunControlEventSink(), threads)
         self._control = ChannelRunControl(self._channel, threads)
         self.controls = OperatorControls(
             RunControlBridge(
                 self._channel,
                 _Texts(),
+                inbox=OperatorInbox(inbox, self._control),
                 control=self._control,
                 lifts_standing_stop=True,
             ),
             None,
         )
+
+    def post(self, request: ControlRequest) -> None:
+        """Post to the run's control inbox; the bridge applies it at its next poll."""
+        self._inbox.post(request.control_id, request.model_dump_json().encode(), ended=_live)
 
     def pause(self, control_id: str) -> None:
         """The operator's Pause: the run winds down and parks."""
@@ -441,6 +456,10 @@ class _HostHandle:
         if self.inputs is None:
             raise HostNotOpenError
         self.inputs.offer(event)
+
+    def post(self, request: ControlRequest) -> None:
+        self._opened()
+        self._operator.post(request)
 
     def pause(self, control_id: str) -> None:
         self._opened()

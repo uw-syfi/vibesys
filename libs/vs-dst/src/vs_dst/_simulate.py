@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from vs_core.api.testing import Budget, liveness
 from vs_dst import _interrupt
 from vs_dst._crash_points import CrashKind, CrashPoint, crash_point_policy
-from vs_dst._delivery import Delivery
+from vs_dst._delivery import Delivery, OperatorRequest
 from vs_dst._effects import Effects
 from vs_dst._host import (
     FIRST_HOST_STARTS_AT,
@@ -31,6 +31,8 @@ from vs_dst._stops import StopKind, Stopped, StopPoint, stop_points
 from vs_runtime.api.testing import HostOptions
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from vs_core.api import CoreState, Decision, RunResultProposal, StrategyState
     from vs_core.api.testing import Journal, Violation
     from vs_dst._interrupt import Interrupted
@@ -274,6 +276,37 @@ class SimulatedRun:
         operator = _interrupt.Operator(self._plan, expected)
         return _interrupt.killed_while_draining(
             operator, self._pristine, self._started.clock_at, first, kill
+        )
+
+    def operate(
+        self, requests: Sequence[OperatorRequest], kill: Interruption | None = None
+    ) -> Interrupted:
+        """What becomes of the run when the operator posts ``requests`` to its control inbox.
+
+        The world runs from its start with each request posted when the run reaches its point
+        (an index counts over the whole run, as for `interrupt`), through the host's production
+        `RunControlBridge`. The host dies at ``kill`` if given, and the operator resumes the
+        run as after any interruption. The result carries the inbox, so a suite can read what
+        became of each request.
+        """
+        self._require_uninterrupted()
+        if not requests:
+            message = "operate posts at least one request"
+            raise ValueError(message)
+        if kill is not None and kill.action is not Action.KILL:
+            message = f"the operator's requests are followed by a kill, not by {kill.kind}"
+            raise ValueError(message)
+        expected = Expectation(self.result, self._duration)
+        operator = _interrupt.Operator(self._plan, expected)
+        deliveries = [
+            (
+                Interruption(Action.PAUSE, sent.moment, sent.index),
+                Delivery.request(sent.moment, sent.index, sent.request),
+            )
+            for sent in requests
+        ]
+        return _interrupt.requested(
+            operator, self._pristine, self._started.clock_at, deliveries, kill
         )
 
     def stop_points(self) -> tuple[StopPoint, ...]:
