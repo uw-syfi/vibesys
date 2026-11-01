@@ -717,7 +717,7 @@ class _ProductHostFactory:
         cancels the jobs still on the cluster when ``close_core_services`` closes it as the
         run exits; with the operator's evaluation ledger, #2757, it cancels those no other run
         wants, unless the ledger policy keeps jobs on a stop
-        (``tests/system/agent_evaluation/test_stops_on_stop.py``,
+        (``tests/system/agent_tools/test_tool_calls.py``,
         ``libs/vs-sandbox/tests/test_slurm_shutdown_leaves_no_job.py``). The legacy
         evaluation service this hook once cancelled was never installed on a core run.
         """
