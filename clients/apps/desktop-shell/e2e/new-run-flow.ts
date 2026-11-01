@@ -32,7 +32,6 @@ export async function openAt(
 }
 
 export const main = (page: Page) => page.getByRole('main');
-export const steps = (page: Page) => page.getByRole('navigation', {name: 'New run steps'});
 export const question = (page: Page, title: string | RegExp) =>
   main(page).getByRole('heading', {level: 1, name: title});
 
