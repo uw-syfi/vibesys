@@ -26,6 +26,11 @@ commit <40-character sha>" (what ``git revert`` writes), "Reverts #2071" (what G
 revert button writes, with an optional "owner/repo" before the "#"), "Reland #2071" or
 "Restores #2163" (a file moved back after a rename).
 
+A generated file (one whose first lines say "do not edit" or ``@generated``) is left out of the
+line pass: its generator numbers and rewraps its entries, so deleting one entry can write back
+lines an earlier commit replaced, which reads as an undo and is not one. A stale copy of such a
+file cannot pass anyway, because the proto check regenerates it and diffs the result.
+
 A golden file whose base copy has a line starting with ``# append-only`` records history
 that one checkout cannot recompute (the schema hash pinned for each past version). A change
 may only add lines at its end: one that edits or drops a line the base copy has, or deletes
@@ -80,6 +85,10 @@ _DECLARATION = re.compile(
 )
 APPEND_ONLY_MARKER = "# append-only"
 """A line of a file that starts with this makes the file append-only."""
+
+GENERATED_HEADER_LINES = 5
+"""How many leading lines of a file may say it is generated."""
+_GENERATED = re.compile(r"do not edit|@generated", re.IGNORECASE)
 
 _HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@")
 _BLAME_HEADER = re.compile(r"^([0-9a-f]{40}) \d+ (\d+)")
@@ -228,6 +237,12 @@ def _blame(root: Path, base: str, oldest: str | None, path: str) -> dict[int, st
     return {number: sha for number, sha in owner.items() if sha not in boundary}
 
 
+def _is_generated(root: Path, base: str, path: str) -> bool:
+    """Whether ``path`` at ``base`` says in its first lines that a generator wrote it."""
+    head = _git(root, "show", f"{base}:{path}").splitlines()[:GENERATED_HEADER_LINES]
+    return any(_GENERATED.search(line) for line in head)
+
+
 def _removed_by(root: Path, commit: str, path: str) -> set[str]:
     """The distinct, non-trivial lines ``commit`` removed from ``path``,."""
     diff = _git(root, "show", "-U0", "--no-renames", "--format=", commit, "--", path)
@@ -257,7 +272,7 @@ def _undone_lines(
     oldest = recent[-1] if len(recent) == RECENT_COMMITS else None
     found: list[StaleFile] = []
     for path, edit in sorted(_edits(root, base, head, changed).items())[:MAX_BLAMED_FILES]:
-        if not edit.deleted:
+        if not edit.deleted or _is_generated(root, base, path):
             continue
         owner = _blame(root, base, oldest, path)
         standing = Counter(owner.values())
