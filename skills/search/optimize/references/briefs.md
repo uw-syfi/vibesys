@@ -1,9 +1,7 @@
 # Brief templates
 
 A subagent knows nothing of this optimization. A brief is the whole of what it knows, so it must
-stand on its own. Dispatch a general-purpose subagent with a fresh context, running in the background
-(see [harness/](harness/README.md)). Do not create agent definition files or add
-a second automatic worktree: the lead already created the checkout. Layout and plan files:
+stand on its own. Dispatch a general-purpose subagent with a fresh context, running in the background. Do not create agent definition files or add a second automatic worktree: the lead already created the checkout. Layout and plan files:
 `vibesys:state`. Workers and judges never edit plan files.
 
 ## Common header (worker, judge, combine, profile)

@@ -10,10 +10,12 @@ worktree of that exact commit and recorded by a script. Never trust a number tha
 record.
 
 The script: `measurements.py` in this skill's `scripts/` directory, run with `python3` (standard library
-only; how to locate it: [harness reference](../optimize/references/harness/README.md)).
+only).
 `--dir` is the optimization's state directory, `.vibesys-state/optimize/<task>` (see
 `vibesys:state`). Details of every step and flag are
 in [measuring.md](references/measuring.md).
+
+Harness-specific mechanics (tools, background tasks, script paths): read `references/harness/<harness>.md` for the harness you are running in.
 
 ## Steps
 
@@ -47,7 +49,7 @@ brief's budget; identical readings on both sides remain inconclusive even after 
 code 2 means the input was invalid and the message says which part.
 
 Run each measurement's build/check/benchmark/record sequence as one background task your harness
-tracks and reports on when it finishes (see [harness reference](../optimize/references/harness/README.md)).
+tracks and reports on when it finishes.
 Never detach the whole sequence with `nohup`, `setsid`, shell `&` or `disown`: the harness must
 track completion and notify the lead. Serialize by starting the
 next measurement only when the previous task's completion notification arrives. Do not

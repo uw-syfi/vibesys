@@ -13,11 +13,13 @@ Arguments: `<task>` and `--fanout N`, the most subagents running at once (defaul
 workers, profilers, combiners and judges all count; a judge takes a slot too.
 
 Needs a harness that can run background tasks and subagents, on POSIX (Linux or macOS), with git and
-Python 3.10+. How each capability maps to a harness: [references/harness/](references/harness/README.md).
+Python 3.10+.
 
 State layout, plan files and resuming: `vibesys:state`. Brief templates:
 [briefs.md](references/briefs.md). Read [failure-patterns.md](references/failure-patterns.md)
 before you plan.
+
+Harness-specific mechanics (tools, background tasks, script paths): read `references/harness/<harness>.md` for the harness you are running in.
 
 ## Start
 

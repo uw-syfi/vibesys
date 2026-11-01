@@ -8,6 +8,8 @@ description: "Use when a vibesys optimize brief asks you to independently review
 You decide whether a candidate's claim is supported. You did not write it and you edit nothing.
 The checklist and the verdict format are in [review.md](references/review.md).
 
+Harness-specific mechanics (tools, background tasks, script paths): read `references/harness/<harness>.md` for the harness you are running in.
+
 ## Start
 
 Run the first command of your brief and confirm the worktree. It is a checkout of the candidate
@@ -27,7 +29,7 @@ Start from the diff against the parent (`git diff <parent> <candidate>`) and the
 3. **Honest?** Does it special-case the benchmark's inputs, cache on its seed, skip or weaken a
    check, stub work, or touch `.vibesys/`, the checker or the benchmark?
 4. **Real?** Is the gain beyond noise? The recorded verdict decides this:
-   Run the script `measurements.py` from the measure skill's `scripts/` directory (how to locate it: [harness reference](../optimize/references/harness/README.md)):
+   Run the script `measurements.py` from the measure skill's `scripts/` directory:
    `python3 measurements.py compare --dir <dir> --commit <candidate> --base <parent> --json` yourself and read its output.
    Confirm the full commit SHA and recorded samples support the claimed gain; worker text
    is not measurement evidence. Fail a claim
@@ -47,7 +49,7 @@ Use the measure skill's `scripts/service.py` owner for every required service. S
 It starts a new process group, fails on exhausted readiness, and stops and verifies the
 whole group on every exit. Never use handwritten background-shell PID or startup-sleep recipes.
 Run any load, including short sanity/tuning benchmarks, through
-the script `measurements.py` from the measure skill's `scripts/` directory (how to locate it: [harness reference](../optimize/references/harness/README.md)): `python3 measurements.py run -- <command>`.
+the script `measurements.py` from the measure skill's `scripts/` directory: `python3 measurements.py run -- <command>`.
 This host-wide lock applies to recorded and unrecorded benchmarks alike.
 
 ## Return

@@ -16,11 +16,27 @@ newer for its standard-library measurement scripts. It does not need the VibeSys
 
 ## Harness neutrality
 
-The search skills are provider-neutral. They describe abstract capabilities (subagents, tracked
-background tasks, locating scripts), and the provider mappings live in
-`skills/search/optimize/references/harness/<provider>.md`. The plugin packaging
+The search skills are harness-neutral. A harness is the program running the agent loop (Claude
+Code, opencode, ...), not the model. The skills describe abstract capabilities; a skill that
+needs any carries `references/harness/<harness>.md`, and its `SKILL.md` points there in one
+sentence. Skills with no harness need have no such folder. The plugin packaging
 (`.claude-plugin/`) is Claude Code's delivery format and is the only Claude-specific part outside
-that folder.
+those folders.
+
+A harness file answers only the capabilities its skill uses, under these headings:
+
+1. Dispatch a subagent with a fresh context
+2. Run a long command as a tracked background task
+3. Locate a skill's own scripts
+4. Schedule periodic work
+5. Wait for work without polling
+6. Packaging
+
+To add a harness, copy an existing file of the skill to `<harness>.md`, named after the harness,
+keep the headings and wording, and fill each with that harness's mechanism. When a capability is
+missing, say what to do instead (no scheduler: report whenever a task finishes). Provider and
+tool names appear only in these files. If a model ever needs different handling, add it as a
+short section in the harness file.
 
 ## Layout
 

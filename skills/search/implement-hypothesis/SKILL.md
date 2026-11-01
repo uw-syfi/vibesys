@@ -9,6 +9,8 @@ You own one hypothesis (a plan) in one worktree. You never edit plan files. Your
 parent commit and the scope. Details of the steps and the handoff are in
 [handoff.md](references/handoff.md).
 
+Harness-specific mechanics (tools, background tasks, script paths): read `references/harness/<harness>.md` for the harness you are running in.
+
 ## Start
 
 1. Run the first command of your brief and confirm the worktree and branch. Do not go on if they
@@ -38,7 +40,7 @@ Use the measure skill's `scripts/service.py` owner for every required service. S
 It starts a new process group, fails on exhausted readiness, and stops and verifies the
 whole group on every exit. Never use handwritten background-shell PID or startup-sleep recipes.
 Run any load, including short sanity/tuning benchmarks, through
-the script `measurements.py` from the measure skill's `scripts/` directory (how to locate it: [harness reference](../optimize/references/harness/README.md)): `python3 measurements.py run -- <command>`.
+the script `measurements.py` from the measure skill's `scripts/` directory: `python3 measurements.py run -- <command>`.
 This host-wide lock applies to recorded and unrecorded benchmarks alike.
 
 ## Never
