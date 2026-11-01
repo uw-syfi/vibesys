@@ -360,6 +360,14 @@ select_all_collections = true
 # tests (the `impact` job), because CI runs the rest and no repoctl change can break them.
 local_jobs = ["impact"]
 
+# The tracked git hooks. The pre-push hook runs `repoctl gate`, so a change to it is checked by
+# repoctl's own tests (the `impact` job), which also hold its executable bit and its call.
+[[components]]
+id = "git_hooks"
+class = "manual"
+job = "impact"
+root = ".githooks"
+
 [[components]]
 id = "workflow_references"
 class = "manual"

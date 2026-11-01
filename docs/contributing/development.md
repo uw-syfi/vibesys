@@ -393,16 +393,42 @@ with its reason in the script.
 `tests/quality/test_check_clients_matches_ci.py` fails when CI gains a client group the script
 neither runs nor lists, so the two cannot drift.
 
-To run it before every push that changes `clients/`, install the opt-in hook once per clone:
+Every push already runs a faster subset of these through the pre-push gate below.
+
+### Pre-push gate
+
+Every `git push` runs `repoctl gate` (`.githooks/pre-push`) and is refused when it fails. The gate
+is the fast subset of what CI runs for the change, aimed at about 60 seconds on a laptop: the
+format, lint, type and repository-policy checks, the Python tests the change can reach through
+imports (`scripts/impacted_tests.py`, at most 30 seconds of tests on 4 workers), and for a change
+under `clients/` biome, the architecture and unused-code checks, each package's checks, and the
+tests of the packages the change touches. Which checks run for which paths comes from the same
+selection as `repoctl test`; each check group lists its gate commands as `gate_commands` and
+`gate_package_commands` in `.repoctl/checks.toml`, and CI never reads them. The groups run
+side by side and the gate prints each one's time.
 
 ```bash
-./scripts/install_pre_push_hook.sh            # install
-./scripts/install_pre_push_hook.sh --remove   # remove
+./support/repoctl/repoctl gate --dry-run   # the commands the gate would run for this change
+./support/repoctl/repoctl gate             # run it by hand
 ```
 
-Nothing installs the hook for you. Pushing with `--no-verify` skips it for one push. The hook
-runs the private-terms check below on every push, not only pushes that change `clients/`.
-Re-run the installer after pulling a change to the hook.
+Nothing is installed by hand. The first repoctl command in a clone points the repository at the
+tracked hooks with `git config core.hooksPath .githooks`; the setting lives in the repository's
+own config, so it covers every linked worktree. When `core.hooksPath` already names another
+directory repoctl leaves it and warns on every run that pushes are unchecked; call
+`./support/repoctl/repoctl gate` from your own hook, or unset it. CI and runs that set
+`REPOCTL_NO_HOOKS` leave the configuration alone.
+
+The gate checks the working tree at `HEAD`, and its private-terms leg runs on every push (see
+below). For an emergency, set the reason and push:
+
+```bash
+VIBESYS_SKIP_GATE='the reason' git push
+```
+
+The gate passes, prints that it was skipped, and appends the time, user, branch, commit and reason
+to `vibesys-gate-skips.log` in the repository's git directory. CI and the merge queue still run
+every check. `git push --no-verify` also skips the hook but leaves no record; use the variable.
 
 ### Private terms
 
@@ -416,7 +442,7 @@ list makes the check print one line and pass, so it costs nothing on a machine w
 
 The report lists `file:line` and never repeats the matched text, so its output is safe to paste.
 The check cannot run in CI, and no CI job checks for these terms: the terms are private by design,
-so a list CI could read would itself be the leak. It runs on your machine, from the hook above.
+so a list CI could read would itself be the leak. It runs on your machine, from the pre-push hook.
 `tests/quality/test_check_private_terms.py` covers the check with made-up terms.
 
 Use `./support/repoctl/repoctl plan` to inspect the selection without running checks.

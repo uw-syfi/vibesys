@@ -22,6 +22,12 @@ From a repository root:
 ./support/repoctl/repoctl run-checks --group python_quality
 ```
 
+`gate` runs the fast subset that the pre-push hook enforces: it plans like `test`, but runs each
+selected group's `gate_commands` and `gate_package_commands` (a group with neither is not part of
+the gate), one concurrent lane per group, and refuses with the failing lane's output. The
+`VIBESYS_SKIP_GATE` variable is the logged emergency skip. Any repoctl command outside CI points
+`core.hooksPath` at the tracked `.githooks` directory when nothing else is set (see
+[the contributor guide](../../docs/contributing/development.md#pre-push-gate)).
 `test` and `plan` accept `--base`, `--head`, and `--event`. `test` also includes
 staged, unstaged, and untracked local paths; `plan` uses only committed changes
 for CI. Pull requests compare against the merge base; pushes use the exact
