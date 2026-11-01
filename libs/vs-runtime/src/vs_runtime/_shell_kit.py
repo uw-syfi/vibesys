@@ -53,7 +53,6 @@ from vs_runtime._observation_factory import ObservationFacts
 from vs_runtime.api.core import (
     DispatchCapExceededError,
     ExecutionResult,
-    RequestExecutors,
 )
 
 if TYPE_CHECKING:
@@ -437,13 +436,3 @@ class HostOptions:
     resumed: bool = False
     """The process was started by the operator's explicit resume of the run, so it lifts the pause
     or the stop the run's record holds."""
-
-
-def request_executors(executor: ScriptedExecutors) -> RequestExecutors:
-    return RequestExecutors(
-        workspaces=executor,  # type: ignore[arg-type]  # one scripted object serves every role
-        sessions=executor,  # type: ignore[arg-type]  # the same scripted object serves this role
-        evaluation=executor,  # type: ignore[arg-type]  # the same scripted object serves this role
-        operations=executor,  # type: ignore[arg-type]  # the same scripted object serves this role
-        semantic_events=executor,  # type: ignore[arg-type]  # the same scripted object serves this role
-    )
