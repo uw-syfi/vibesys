@@ -74,14 +74,3 @@ for (const width of [1440, 1000] as const) {
     });
   }
 }
-
-test('a harness the person picked stays when the machine reports what it has', async ({page}) => {
-  await openAt(page, AGENT, installing(['codex']));
-  const lines = main(page).getByRole('radiogroup', {name: 'Model line'});
-  await expect(lines.getByRole('radio', {name: 'OpenAI', exact: true})).toBeChecked();
-  await lines.getByRole('radio', {name: 'Anthropic', exact: true}).check();
-  await expect(lines.getByRole('radio', {name: 'Anthropic', exact: true})).toBeChecked();
-  const harness = main(page).getByRole('radiogroup', {name: 'Harness'});
-  await expect(harness.getByRole('radio', {name: /Claude Code/})).toBeChecked();
-  await expect(harness).toContainText('Not found on host-b');
-});

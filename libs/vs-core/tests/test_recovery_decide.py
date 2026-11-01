@@ -6,6 +6,7 @@ and restarted), so the model says what is true after every record and the rule i
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
@@ -85,6 +86,7 @@ def seed_state() -> core.CoreState:
 
 
 SEED = seed_state()
+RETRIES = SEED.run.limits.request_retries
 RETURNED = [why for why in Interruption if why is not Interruption.LOST]
 
 
@@ -124,6 +126,8 @@ class Step:
     unsettled: bool = False
     running: bool = False
     done: bool = False
+    charged_at: float | None = None
+    """The run clock of the record that last charged an attempt."""
 
     @property
     def tag(self) -> core.RequestId:
@@ -137,6 +141,13 @@ class Step:
         A crashed attempt is no debit until ``clear`` finds its work lost (``unsettled``).
         """
         return self.started - self.uncharged > self.request.retry_limit
+
+    @property
+    def retry_at(self) -> float:
+        """The run clock before which the backoff of its charges keeps its next attempt waiting."""
+        if self.charged_at is None:
+            return -math.inf
+        return self.charged_at + RETRIES.delay(self.started - self.uncharged)
 
     def crash(self) -> None:
         """A crash ends the running attempt: it is not charged until ``clear`` says it was lost."""
@@ -152,7 +163,13 @@ class Step:
 
     def snapshot(self) -> Step:
         return Step(
-            self.request, self.started, self.uncharged, self.unsettled, self.running, self.done
+            self.request,
+            self.started,
+            self.uncharged,
+            self.unsettled,
+            self.running,
+            self.done,
+            self.charged_at,
         )
 
 
@@ -172,11 +189,17 @@ class Builder:
         self.steps: list[Step] = []
         self.script = Script(open_steps=[[]])
         self.epoch = 1
+        self.last = 0.0
 
-    def append(self, body: Body) -> None:
+    def clock(self, not_before: float = 0.0) -> float:
+        """The run clock of the record appended next: one second after the last, or ``not_before``."""
+        return max(float(len(self.script.records) + 1), not_before, self.last)
+
+    def append(self, body: Body, *, not_before: float = 0.0) -> None:
         seq = len(self.script.records) + 1
+        self.last = self.clock(not_before)
         record = Record(
-            seq=seq, epoch=self.epoch, at=Timestamp(seconds=seq), clock=float(seq), body=body
+            seq=seq, epoch=self.epoch, at=Timestamp(seconds=seq), clock=self.last, body=body
         )
         self.script.records.append(record)
         self.script.epochs.append(self.epoch)
@@ -193,21 +216,29 @@ class Builder:
         self.append(Oneof("core_input", input_message(event)))
 
     def start(self, step: Step) -> None:
+        not_before = step.retry_at
         step.started += 1
         step.running = True
         step.unsettled = False
         run = Run(step.request, step.tag, step.started, 100.0)
-        self.append(Oneof("step_started", started_message(run)))
+        self.append(Oneof("step_started", started_message(run)), not_before=not_before)
+
+    def tick(self) -> None:
+        """The run clock moves a second with no step doing anything: a clock input."""
+        event = core.ClockAdvanced(now_at=self.clock())
+        self.append(Oneof("core_input", input_message(event)))
 
     def interrupt(self, step: Step, why: Interruption) -> None:
         step.running = False
         step.uncharged += 0 if why.charged else 1
+        step.charged_at = self.clock() if why.charged else step.charged_at
         self.append(Oneof("attempt_interrupted", interrupted_message(step.tag, step.started, why)))
 
     def lose(self, step: Step) -> None:
         """``clear`` found nothing of the work a crash left: the attempt it ended is charged."""
         step.uncharged -= 1
         step.unsettled = False
+        step.charged_at = self.clock()
         self.append(
             Oneof(
                 "attempt_interrupted",
@@ -234,8 +265,8 @@ def scripts(draw: st.DrawFn) -> Script:
         open_steps = [step for step in build.steps if not step.done]
         running = [step for step in open_steps if step.running]
         idle = [step for step in open_steps if not step.running]
-        choices = ["restart", *(["prepare"] if len(build.steps) < 3 else [])]
-        startable = [step for step in idle if not step.spent]
+        choices = ["restart", "tick", *(["prepare"] if len(build.steps) < 3 else [])]
+        startable = [step for step in idle if not step.spent and build.clock() >= step.retry_at]
         choices += ["start"] if startable else []
         lost = [step for step in idle if step.unsettled]
         choices += ["lose"] if lost else []
@@ -249,6 +280,8 @@ def scripts(draw: st.DrawFn) -> Script:
                 build.interrupt(draw(st.sampled_from(running)), draw(st.sampled_from(RETURNED)))
             case "lose":
                 build.lose(draw(st.sampled_from(lost)))
+            case "tick":
+                build.tick()
             case "finish":
                 step = draw(st.sampled_from(running))
                 build.end(step, Finished(observation=success(step.request)))
@@ -301,15 +334,44 @@ def kinds(actions: tuple[Action, ...]) -> set[type]:
     return {type(action) for action in actions}
 
 
+def raised_twice() -> Script:
+    """One step whose first two attempts raised: its third waits two seconds after the second."""
+    build = Builder()
+    build.prepare(3)
+    step = build.steps[0]
+    for _ in range(2):
+        build.start(step)
+        build.interrupt(step, Interruption.RAISED)
+    return build.script
+
+
+def raised_then_lost() -> Script:
+    """One step whose first attempt raised and whose second a dead host lost."""
+    build = Builder()
+    build.prepare(3)
+    step = build.steps[0]
+    build.start(step)
+    build.interrupt(step, Interruption.RAISED)
+    build.start(step)
+    build.restart()
+    build.lose(step)
+    return build.script
+
+
 @settings(max_examples=examples(pr=12, nightly=200))
 @given(script=scripts())
+@example(script=raised_twice())
+@example(script=raised_then_lost())
 def test_a_crash_at_every_record_leaves_every_open_step_to_run_again(script: Script) -> None:
+    """Every open step runs again once its backoff has passed, and settles when its tries are spent."""
     for length, (state, open_steps) in enumerate(states(script)):
         crashed = fold([restarted(script, length)], state)
-        actions = decide(crashed, clock_of(length))
+        now = clock_of(length)
+        actions = decide(crashed, now)
         assert kinds(actions) <= {Run, Cancel, Settle, Wait, End}
         runs = {action.tag: action for action in actions if isinstance(action, Run)}
         settled = {action.tag: action for action in actions if isinstance(action, Settle)}
+        waiting = {}
         assert not [action for action in actions if isinstance(action, Cancel)]
         for step in map(Step.after_crash, open_steps):
             if step.spent:
@@ -317,12 +379,40 @@ def test_a_crash_at_every_record_leaves_every_open_step_to_run_again(script: Scr
                     reason=core.FailureReason.ATTEMPTS_EXHAUSTED
                 )
                 assert step.tag not in runs
+            elif now < step.retry_at:
+                waiting[step.tag] = step.retry_at
+                assert step.tag not in runs
+                assert step.tag not in settled
             else:
                 assert runs[step.tag].attempt == step.started + 1
                 assert runs[step.tag].step == step.request
                 assert runs[step.tag].clear_first == (step.started > 0)
                 assert step.tag not in settled
-        assert set(runs) | set(settled) == {step.tag for step in open_steps}
+        assert set(runs) | set(settled) | set(waiting) == {step.tag for step in open_steps}
+        if waiting and not runs and not settled:
+            assert actions == (Wait(until=min(waiting.values())),)
+
+
+@settings(max_examples=examples(pr=12, nightly=200))
+@given(script=scripts())
+@example(script=raised_twice())
+@example(script=raised_then_lost())
+def test_no_step_starts_inside_the_backoff_of_its_charges(script: Script) -> None:
+    """At every record and every moment after it, ``decide`` runs a step only once its backoff is over.
+
+    A step that raised or whose work a dead host lost waits ``delay(charged)`` from the record
+    that charged it, however the log went on (a pause, a restart, a finish of another step).
+    """
+    for length, (state, open_steps) in enumerate(states(script)):
+        for step in open_steps:
+            if step.running or step.spent:
+                continue
+            idle = step.after_crash() if step.unsettled else step
+            for now in (clock_of(length), idle.retry_at - 0.5, idle.retry_at, idle.retry_at + 0.5):
+                if now < clock_of(length) or math.isinf(now):
+                    continue
+                runs = [a for a in decide(state, now) if isinstance(a, Run) and a.tag == step.tag]
+                assert bool(runs) == (now >= idle.retry_at), f"step at {now}, retry {idle.retry_at}"
 
 
 @settings(max_examples=examples(pr=12, nightly=200))
@@ -668,7 +758,9 @@ def test_a_step_whose_runner_always_raises_runs_its_bound_and_then_fails(retries
     build.prepare(retries)
     step = build.steps[0]
     for attempt in range(1, retries + 2):
-        (action,) = decide(fold(build.script.records, SEED), clock_of(len(build.script.records)))
+        state = fold(build.script.records, SEED)
+        now = max(clock_of(len(build.script.records)), step.retry_at)
+        (action,) = decide(state, now)
         assert isinstance(action, Run)
         assert action.attempt == attempt
         build.start(step)
@@ -677,6 +769,25 @@ def test_a_step_whose_runner_always_raises_runs_its_bound_and_then_fails(retries
     assert action == Settle(
         tag=step.tag, result=Failed(reason=core.FailureReason.ATTEMPTS_EXHAUSTED)
     )
+
+
+@settings(max_examples=examples(pr=12, nightly=100))
+@given(retries=st.integers(1, 3))
+def test_a_step_whose_runner_always_raises_waits_the_doubling_backoff_before_each_rerun(
+    retries: int,
+) -> None:
+    """A step that raised is not run again until ``delay(charged)`` has passed on the run clock."""
+    build = Builder()
+    build.prepare(retries)
+    step = build.steps[0]
+    for charged in range(1, retries + 1):
+        build.start(step)
+        build.interrupt(step, Interruption.RAISED)
+        at = float(len(build.script.records))
+        state = fold(build.script.records, SEED)
+        wait = RETRIES.delay(charged)
+        assert decide(state, at) == (Wait(until=at + wait),)
+        assert [a for a in decide(state, at + wait) if isinstance(a, Run)] != []
 
 
 @settings(max_examples=examples(pr=12, nightly=100))

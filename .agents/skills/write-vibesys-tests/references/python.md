@@ -179,7 +179,7 @@ CI runs with `-n auto --dist loadgroup`; the `serial` marker is a last resort
 for a host-wide resource. The Python test job splits the suite over the CI
 workflow's shard matrix (`--shard=I/N` or `VIBESYS_TEST_SHARD=I/N`), balanced
 by recorded seconds per file. A test must not depend on running beside another
-test of its file. Every green run on main caches its measured seconds; a
+test of its file. Every green run on main averages its measured seconds into the cached record; a
 checked-in duration table is only the cold start, refreshed with
 `python -m scripts.refresh_shard_durations`.
 

@@ -13,6 +13,7 @@ when its host died left nothing and runs again.
 from __future__ import annotations
 
 import asyncio
+import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -20,10 +21,13 @@ from vs_core.api import (
     ContractError,
     ControlId,
     ControlInput,
+    ControlRefusedError,
+    DispatchTurn,
     FlowCodeChanged,
     HostFence,
     HostId,
     ObservationStatus,
+    ResumeSessionTurn,
     RunControlEvent,
     RunStatus,
     SubmitMeasurement,
@@ -77,6 +81,9 @@ TIMING = StepLoopTiming(
     cancel_grace_s=1.0, clear_timeout_s=5.0, clear_backoff_s=1.0, clear_backoff_max_s=8.0
 )
 """The loop's bounds on a runner, in virtual seconds."""
+
+QUOTA_POLL_S = 1.0
+"""How often a turn the quota holds in its call looks whether the run is still held, in virtual seconds."""
 
 RUN_FAILURES = (ContractError, FlowCodeChanged, RuntimeError, ValueError)
 """What a host that fails by its own contract raises: core or the fold refusing a record, a search
@@ -213,8 +220,9 @@ class _Host:
         serving = (
             world.serve(_Admitting(inputs), clock) if isinstance(world, ServingWorld) else None
         )
+        handle.serving = serving
         runner = _WorldRunner(
-            _executors(self._outside, self._journal, lambda: log.state, watcher, serving),
+            _executors(self._outside, self._journal, lambda: log.state, watcher, handle),
             self._outside.effects,
             clock,
             epoch,
@@ -235,6 +243,7 @@ class _Host:
                     await serving.close()
             finally:
                 inputs.leave()
+                await handle.close()
         return self._result(inputs, halted=halted)
 
     def _resume(self, log: RunLogStepLog, epoch: int, clock: VirtualClock) -> None:
@@ -319,7 +328,7 @@ class _Admitting:
 
 
 class _HostHandle:
-    """What an interruption needs of this host: its clock, its decisions, an input.
+    """What an interruption and the host's executors need of this host: its clock, its decisions, an input, its service.
 
     The records are watched from the host's first append, before its inputs exist, so the inputs
     are bound once they do; an input before then has nowhere to go and is a defect.
@@ -329,6 +338,30 @@ class _HostHandle:
         self._clock = clock
         self._decisions = decisions
         self.inputs: CoreInputs | None = None
+        self.serving: Serving | None = None
+        """What the world serves this host with, once the host's inputs exist (`ServingWorld`)."""
+        self._timers: list[asyncio.Future[None]] = []
+        self.held_until = -math.inf
+        """The virtual time until which the provider's quota holds every turn in its call."""
+
+    def hold_turns(self, seconds: float) -> None:
+        self.held_until = self._clock.now() + seconds
+
+    def submit_after(self, seconds: float, event: Callable[[float], CoreEvent]) -> None:
+        self._timers.append(asyncio.ensure_future(self._later(seconds, event)))
+
+    async def _later(self, seconds: float, event: Callable[[float], CoreEvent]) -> None:
+        await self._clock.sleep(seconds)
+        try:
+            self.submit(event(self._clock.now()))
+        except ControlRefusedError:
+            return  # the run was resumed before the timer fired: there is nothing left to lift
+
+    async def close(self) -> None:
+        """End the timers the process owned: they die with it."""
+        for timer in self._timers:
+            timer.cancel()
+        await asyncio.gather(*self._timers, return_exceptions=True)
 
     @property
     def clock(self) -> VirtualClock:
@@ -488,9 +521,13 @@ def _executors(
     journal: Journal,
     core: Callable[[], CoreState],
     watcher: Watcher | None,
-    serving: Serving | None,
+    handle: _HostHandle,
 ) -> RecoverableExecutors:
-    """The world's executors for this host, hearing each effect as it begins."""
+    """The world's executors for this host, hearing each effect as it begins.
+
+    A turn the provider's quota stops waits in its call, begun and sealing nothing, until the
+    quota lifts: the capacity gate of the real executors.
+    """
     world = outside.world
     setup = world.setup
 
@@ -500,8 +537,14 @@ def _executors(
                 watcher.reached(Moment.IN_FLIGHT, index)
 
         async def _running(self, request: Request) -> None:
-            if serving is not None:
-                await serving.during(request, core())
+            if handle.serving is not None:
+                await handle.serving.during(request, core())
+
+        async def _enacted(self, request: Request, result: ExecutionResult) -> ExecutionResult:
+            if isinstance(request, DispatchTurn | ResumeSessionTurn):
+                while handle.clock.now() < handle.held_until:
+                    await handle.clock.sleep(QUOTA_POLL_S)
+            return result
 
     return HostExecutors(
         world, core, setup.harness.registry, setup.schemas, journal, outside.effects

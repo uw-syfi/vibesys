@@ -2,7 +2,7 @@
 import {fileURLToPath} from 'node:url';
 import type {Page} from '@playwright/test';
 import {buildSync} from 'esbuild';
-import type {HostFeed, RunsFeed, SubscriptionSeed} from './subscription-preload.js';
+import type {HostFeed, RunsFeed, SubscriptionSeed} from '../src/testing/subscription-preload.js';
 
 export type {HostFeed, RunsFeed, SubscriptionSeed};
 
@@ -11,7 +11,9 @@ let preload: string | undefined;
 /** An init script that installs `window.vibesysSubscription` serving `seed`. */
 export function subscriptionScript(seed: SubscriptionSeed): string {
   preload ??= buildSync({
-    entryPoints: [fileURLToPath(new URL('./subscription-preload.ts', import.meta.url))],
+    entryPoints: [
+      fileURLToPath(new URL('../src/testing/subscription-preload.ts', import.meta.url)),
+    ],
     bundle: true,
     write: false,
     format: 'iife',

@@ -35,9 +35,23 @@ def operator_control(point: Interruption) -> ControlInput:
                 action="pause",
                 owner=PauseOwner.OPERATOR,
             )
+        case Action.QUOTA_PAUSE:
+            return ControlInput(
+                control_id=ControlId(root=f"quota-pause-{serial}"),
+                action="pause",
+                owner=PauseOwner.QUOTA,
+            )
         case Action.KILL:
             message = "a kill is no control the operator sends to a live host"
             raise ValueError(message)
+
+
+def quota_lift(point: Interruption) -> ControlInput:
+    """The resume the quota's timed lift sends once ``point``'s wait is over."""
+    serial = f"{point.moment.name.lower()}-{point.index}"
+    return ControlInput(
+        control_id=ControlId(root=f"quota-lift-{serial}"), action="resume", when="now"
+    )
 
 
 class Delivery:
@@ -48,10 +62,21 @@ class Delivery:
     still starting is. It is delivered once.
     """
 
-    def __init__(self, moment: Moment, index: int, control: ControlInput) -> None:
-        """Deliver ``control`` once the run reaches the ``index``-th commit or effect of ``moment``."""
+    def __init__(
+        self,
+        moment: Moment,
+        index: int,
+        control: ControlInput,
+        lift: tuple[float, ControlInput] | None = None,
+    ) -> None:
+        """Deliver ``control`` once the run reaches the ``index``-th commit or effect of ``moment``.
+
+        ``lift`` is a control the host takes that many seconds after ``control``, if it is still
+        running then: a quota's timed resume.
+        """
         self._at = (moment, index)
         self._control = control
+        self._lift = lift
         self._host: RunningHost | None = None
         self._due = False
         self.delivered_at: float | None = None
@@ -64,8 +89,9 @@ class Delivery:
 
     @classmethod
     def operator(cls, point: Interruption) -> Delivery:
-        """The operator's pause or stop at ``point``."""
-        return cls(point.moment, point.index, operator_control(point))
+        """The operator's pause or stop, or the provider's quota pause with its timed lift, at ``point``."""
+        lift = (point.wait, quota_lift(point)) if point.action is Action.QUOTA_PAUSE else None
+        return cls(point.moment, point.index, operator_control(point), lift)
 
     @property
     def stopped(self) -> bool:
@@ -90,3 +116,7 @@ class Delivery:
         except HostNotOpenError:
             return
         self.delivered_at = now
+        if self._lift is not None:
+            wait, lift = self._lift
+            self._host.hold_turns(wait)
+            self._host.submit_after(wait, lambda at: RunControlEvent(control=lift, now_at=at))

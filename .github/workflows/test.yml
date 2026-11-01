@@ -960,7 +960,7 @@ jobs:
         run: uv run --no-sync python scripts/classify_failed_tests.py run failed-tests/*/lastfailed
 
   # Keeps the shard balance current without a hand-edited record: a green run on
-  # main merges its shards' measured seconds into a cache entry, which the
+  # main averages its shards' measured seconds into the previous record and caches the result, which the
   # `changes` job of every later run restores. Off the critical path (it runs
   # beside `coverage`), and advisory: its failure does not fail the run.
   record-durations:
@@ -994,9 +994,20 @@ jobs:
           path: measured-durations
           merge-multiple: true
 
+      # The record the run balanced on, so the merge averages this run into it (see
+      # `SMOOTHING_WEIGHT` in tests/support/sharding.py). Best effort like the restore in `changes`.
+      - name: Restore the previous shard durations
+        continue-on-error: true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/shard-durations
+          key: shard-durations-no-exact-match
+          restore-keys: shard-durations-
+
       - name: Merge the shards' durations
         run: |
           uv run --no-sync python -m scripts.refresh_shard_durations measured-durations \
+            --previous "$RUNNER_TEMP/shard-durations/shard_durations.json" \
             --output "$RUNNER_TEMP/shard-durations/shard_durations.json"
 
       - name: Cache the merged durations for later runs

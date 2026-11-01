@@ -11,11 +11,13 @@ import pytest
 import yaml
 from hypothesis import given
 from hypothesis import strategies as st
+from scripts.refresh_shard_durations import main as refresh_main
 from tests.support.child_pytest import BARE_PYTEST
 from tests.support.sharding import (
     DEFAULT_DURATIONS,
     HEAVY_SHARE,
     SHARD_BUDGET_SECONDS,
+    SMOOTHING_WEIGHT,
     WORKERS_PER_SHARD,
     assign_heavy_items,
     assign_shards,
@@ -34,6 +36,7 @@ from tests.support.sharding import (
     record_durations,
     shard_loads,
     slowest_files,
+    smooth_durations,
 )
 
 pytest_plugins = ["pytester"]
@@ -190,6 +193,114 @@ def test_merging_shard_records_keeps_every_file_and_adds_its_seconds(
         assert seconds == pytest.approx(
             sum(r.get(name, 0.0) for r in records), abs=0.01 * len(records)
         )
+
+
+_SECONDS = st.floats(min_value=0, max_value=500)
+
+
+@given(
+    previous=st.dictionaries(_NAMES, _SECONDS, max_size=10),
+    measured=st.dictionaries(_NAMES, _SECONDS, max_size=10),
+    weight=st.floats(min_value=0, max_value=1),
+)
+def test_a_run_moves_each_measured_file_part_of_the_way_and_drops_the_files_it_did_not_run(
+    previous: dict[str, float], measured: dict[str, float], weight: float
+) -> None:
+    smoothed = smooth_durations(previous, measured, weight)
+
+    assert set(smoothed) == set(measured)
+    for name, seconds in smoothed.items():
+        low, high = sorted((measured[name], previous.get(name, measured[name])))
+        assert low - 0.01 <= seconds <= high + 0.01
+
+
+@given(previous=st.dictionaries(_NAMES, _SECONDS, max_size=10), measured=_DURATIONS)
+def test_a_weight_of_one_is_the_last_run_and_a_weight_of_zero_is_the_old_record(
+    previous: dict[str, float], measured: dict[str, float]
+) -> None:
+    assert smooth_durations(previous, measured, 1.0) == {
+        name: round(seconds, 2) for name, seconds in sorted(measured.items())
+    }
+    assert smooth_durations(previous, measured, 0.0) == {
+        name: round(previous.get(name, seconds), 2) for name, seconds in sorted(measured.items())
+    }
+
+
+@given(
+    seconds=st.floats(min_value=1, max_value=500),
+    start=st.floats(min_value=1, max_value=500),
+    runs=st.integers(1, 12),
+)
+def test_a_file_that_keeps_taking_the_same_seconds_is_recorded_ever_closer_to_them(
+    seconds: float, start: float, runs: int
+) -> None:
+    record = {"f.py": start}
+    for _ in range(runs):
+        record = smooth_durations(record, {"f.py": seconds})
+
+    assert (
+        abs(record["f.py"] - seconds)
+        <= abs(start - seconds) * (1 - SMOOTHING_WEIGHT) ** runs + 0.01 * runs
+    )
+
+
+def test_a_file_that_swings_between_runs_is_recorded_between_its_swings() -> None:
+    """The case behind the weight: 102 s then 48 s then 100 s, the last run alone moved 54 s each time."""
+    record = {"smoke.py": 100.0}
+    seen = []
+    for seconds in (48.0, 100.0, 48.0, 100.0):
+        record = smooth_durations(record, {"smoke.py": seconds})
+        seen.append(record["smoke.py"])
+
+    assert max(seen) - min(seen) < 100.0 - 48.0
+    assert all(48.0 < value < 100.0 for value in seen)
+
+
+@given(
+    weight=st.one_of(st.floats(max_value=-0.001), st.floats(min_value=1.001))
+    | st.just(float("nan"))
+)
+def test_a_weight_outside_zero_to_one_is_refused(weight: float) -> None:
+    with pytest.raises(ValueError, match="smoothing weight"):
+        smooth_durations({}, {}, weight)
+
+
+def _artifact(directory: Path, name: str, record: dict[str, float]) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / name).write_text(json.dumps(record), encoding="utf-8")
+
+
+def test_the_refresh_averages_the_runs_seconds_into_the_previous_record(tmp_path: Path) -> None:
+    artifacts, output = tmp_path / "artifacts", tmp_path / "out" / "record.json"
+    _artifact(artifacts, "shard-durations-1.json", {"a.py": 40.0, "split.py": 10.0})
+    _artifact(artifacts, "shard-durations-2.json", {"split.py": 30.0})
+    previous = tmp_path / "previous.json"
+    previous.write_text(json.dumps({"a.py": 100.0, "split.py": 40.0, "gone.py": 9.0}))
+
+    assert refresh_main([str(artifacts), "--previous", str(previous), "--output", str(output)]) == 0
+
+    assert json.loads(output.read_text()) == {"a.py": 70.0, "split.py": 40.0}
+
+
+@pytest.mark.parametrize("previous", [None, "missing", "not json", '{"a.py": -1}', "[]"])
+def test_the_refresh_takes_this_runs_seconds_when_there_is_no_usable_previous_record(
+    tmp_path: Path, previous: str | None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    artifacts, output = tmp_path / "artifacts", tmp_path / "record.json"
+    _artifact(artifacts, "shard-durations-1.json", {"a.py": 40.0})
+    arguments = [str(artifacts), "--output", str(output)]
+    if previous is not None:
+        path = tmp_path / "previous.json"
+        if previous != "missing":
+            path.write_text(previous)
+        arguments += ["--previous", str(path)]
+
+    assert refresh_main(arguments) == 0
+
+    assert json.loads(output.read_text()) == {"a.py": 40.0}
+    assert ("ignoring the previous record" in capsys.readouterr().err) is (
+        previous not in (None, "missing")
+    )
 
 
 def test_a_file_missing_from_the_record_or_far_over_it_is_reported_as_stale() -> None:

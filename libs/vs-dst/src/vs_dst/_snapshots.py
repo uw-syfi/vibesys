@@ -17,6 +17,8 @@ from vs_dst._interruptions import Action, Interruption, Moment
 from vs_runtime.api.testing import FakeRunRecords
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from vs_core.api import CoreEvent, Decision
     from vs_dst._effects import Effects
     from vs_dst._world import World
@@ -39,6 +41,21 @@ class RunningHost(Protocol):
 
     def submit(self, event: CoreEvent) -> None:
         """Hand the run an input from outside its loop, as an operator does."""
+        ...
+
+    def hold_turns(self, seconds: float) -> None:
+        """The provider's quota holds every turn in its call for ``seconds`` from now.
+
+        It is the far side's fact: the capacity gate holds the turn from the instant the provider
+        stops it, and core learns of it as the run's quota pause, a control poll later.
+        """
+        ...
+
+    def submit_after(self, seconds: float, event: Callable[[float], CoreEvent]) -> None:
+        """Hand the run ``event(now)`` once ``seconds`` have passed, if the host is still running.
+
+        A host that ends first never takes it: the timer died with the process.
+        """
         ...
 
 
