@@ -38,8 +38,10 @@ Harness-specific mechanics (tools, background tasks, script paths): read `refere
 
 1. Dispatch planners (fresh context each) with the task name, a plan number and optionally one
    nudge, per [plan-hypotheses](../plan-hypotheses/SKILL.md). Vary nudges across a round; give at
-   least one planner none.
-2. Read the proposals. Dedupe, check that chosen plans touch disjoint files, and write each
+   least one planner none, and every few rounds one the nudge "bold" (a high-risk, high-reward
+   idea). Fund a bold plan by expected value, upside times chance, and start it with its
+   feasibility step; a low chance alone is no reason to drop it. Keep one bold track alive.
+2. Read the proposals. Dedupe, check each against the rules in `OBJECTIVE.md` before funding it, check that chosen plans touch disjoint files, and write each
    decision in the plan's Decision section.
 3. Dispatch workers for chosen plans with a self-contained brief from briefs.md; save the brief
    text in the plan's Result section. Branch new ideas from the current winner.
@@ -47,6 +49,9 @@ Harness-specific mechanics (tools, background tasks, script paths): read `refere
    Combine parked or won plans with combine-candidates, and use profile-revision when a question
    needs evidence. Record outcomes, record ids and lessons in the plan, set `status` and `gain`.
 5. Keep slots busy; when you leave one idle, state the reason in your next report.
+6. After every profile or promotion that moves the bottleneck, re-triage the parked and rejected
+   plans: reopen any whose reason no longer holds (time, size, an old profile, a gain that was
+   too small before). A plan is never closed for good by a verdict on an older base.
 
 ## Rules
 
@@ -59,7 +64,9 @@ Harness-specific mechanics (tools, background tasks, script paths): read `refere
   its last move.
 - Slow measurements (a cluster queue) start per commit as soon as the commit exists and rely on
   multi-sample records, not one quick sample.
-- Never ask the user: decide, and write the decision into the plan.
+- Run fully autonomously and never block on a question to the user, unless the user asked to be
+  consulted. Decide, write the decision into the plan, keep going, and report it in the next
+  report so the user can reverse it.
 - Measurement hygiene lives in `vibesys:measure`: tracked background tasks only, no
   `nohup`, `setsid` or shell `&`, no `pkill -f` from a shell that matches itself, and a queue
   check for duplicate jobs after a relaunch.
@@ -70,9 +77,15 @@ Harness-specific mechanics (tools, background tasks, script paths): read `refere
 
 ## Reporting
 
+Report to the user every hour, unless the user names another schedule. At the start, and again on
+every resume, schedule it with the harness's periodic-work mechanism (the harness file, "Schedule
+periodic work"); with no scheduler, report whenever a task finishes. How to write a report:
+[report-progress](../report-progress/SKILL.md).
+
 Describe each item in plain words, then its code name in parentheses, such as "paged attention
-for decode (plan-004)". Lead with what changed. Every periodic report ends with this self-check,
-answered honestly with record ids and commit SHAs:
+for decode (plan-004)". Lead with what changed. Keep ids and SHAs out of the main text; they go
+in parentheses. Every periodic report ends with this self-check, answered honestly, with record
+ids and commit SHAs allowed here:
 
 1. Each promotion since the last report has a judge pass and a `better` record.
 2. The headline number is from a measurement of main's current head after its last move.

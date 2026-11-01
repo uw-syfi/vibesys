@@ -37,6 +37,7 @@ Plan: plan-NNN-<slug>: <a claim that a measurement can falsify>
 Why: <the evidence: a profile, a measurement, a code reading>
 Pass criteria: <what you will observe if it is right, in the task's metric>
 Scope: <files or components you may change; what to leave alone>
+Specialize to: <what the task fixes, from OBJECTIVE.md: model, hardware, workload class>. Where the task fixes them, generality is not a cost, but keep a specialization only if it shows a measured benefit (performance, memory footprint, ...). Never specialize to the benchmark's own content; note any dependence on the workload's shape in the commit message.
 First step: <the smallest change to the claim that you can finish, commit and measure in this
   turn>. Do it and measure it before anything larger.
 Parent: <base commit, or the candidate commit you build on and its measured value>

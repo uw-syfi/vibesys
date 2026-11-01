@@ -21,6 +21,8 @@ Rule risk: <numerics, delegation, benchmark tuning, memory budget; or "none foun
 How to test: <the smallest change or measurement that reaches a result in one worker pass, and
   the cheap checks that need no measurement slot>
 Rejected alternatives: <idea> - <the evidence that rules it out>
+Bold (only for a high-risk, high-reward idea): upside if it works, rough chance it works, the
+  feasibility check that comes first, the kill criterion, and the full cost if it passes.
 
 ## Decision
 

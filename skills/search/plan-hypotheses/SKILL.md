@@ -15,8 +15,20 @@ short nudge. Nothing else: finding the idea is your job. State layout and plan f
 A nudge is a way of looking, never a target: find the bottlenecks (profile first, attack the
 largest measured cost); close the gap to the speed of light the most effective way; redesign from
 first principles; remove work (computation, copies, launches that need not happen); stack what
-exists (combine parked or won plans); reduce variance and tails. With no nudge, look however the
+exists (combine parked or won plans); mine prior art (the domain skill, published state of the
+art) and apply an idea directly or combine several that fit this task's specialization; reduce
+variance and tails. With no nudge, look however the
 evidence suggests.
+
+## Bold ideas
+
+The nudge "bold" asks for a high-risk, high-reward idea: one that costs a lot to build, may
+replace how the work is done today, and pays off a lot if it works. Out-of-the-box is the point,
+so do not trim it to the next small step, and do not drop it for low confidence. Two things stay
+binding. The upside is still capped by the headroom you computed. And you plan it in stages:
+the first step is a cheap feasibility check with a stated kill criterion (the number below which
+you stop), so a miss costs one worker pass. Fill the Bold fields in
+[proposal.md](references/proposal.md).
 
 ## Work
 

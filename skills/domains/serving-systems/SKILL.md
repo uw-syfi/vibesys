@@ -73,6 +73,8 @@ One directory per compute backend, each with `floor.md`, `hardware.md`, and `pro
 
 - [`references/algorithms/radix-prefix-caching.md`](references/algorithms/radix-prefix-caching.md) — Share KV cache across requests with common prefixes via a radix tree with LRU eviction.
 
+- [`references/algorithms/specialization.md`](references/algorithms/specialization.md) — Bespoke engine for one model, one device, one workload class: what to hardcode, prepack and tune, and where specialization becomes benchmark gaming.
+
 - [`references/algorithms/speculative-decoding.md`](references/algorithms/speculative-decoding.md) — Draft proposals verified in one target pass. Contract; variable accept length is handled per-platform.
 
 - [`references/algorithms/structured-output.md`](references/algorithms/structured-output.md) — Grammar-guided decoding (XGrammar, Outlines, llguidance), JSON mode, regex constraints, tool calling, logits biasing.
