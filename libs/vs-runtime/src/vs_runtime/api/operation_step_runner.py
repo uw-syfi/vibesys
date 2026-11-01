@@ -7,7 +7,6 @@ from vs_runtime._rerun_policy import (
     OtherRunner,
     ReadOnly,
     RerunPolicy,
-    UnwiredWorkCleaner,
     WorkCleaner,
 )
 
@@ -18,6 +17,5 @@ __all__ = [
     "OtherRunner",
     "ReadOnly",
     "RerunPolicy",
-    "UnwiredWorkCleaner",
     "WorkCleaner",
 ]

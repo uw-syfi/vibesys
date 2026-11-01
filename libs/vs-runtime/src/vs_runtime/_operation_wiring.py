@@ -32,12 +32,9 @@ from vs_runtime._local_validation import LocalValidator
 from vs_runtime._operation_catalog import OperationCatalog, OperationEntry, RefusalReason
 from vs_runtime._render_operation import RenderArtifactsOwner
 from vs_runtime._rerun_policy import (
-    ClearedWork,
     KeyedWrite,
     ReadOnly,
     RerunPolicy,
-    UnwiredWorkCleaner,
-    WorkCleaner,
 )
 from vs_runtime._validate_local_operation import ValidateLocalOwner
 from vs_runtime._verify_revision_operation import VerifyRevisionOwner
@@ -190,18 +187,18 @@ def production_owners(
 
 
 # What a rerun of each role's operation may repeat: the role fixes it, not the owner instance.
-# The two command roles run a process, so their policy is a cleaner the run supplies.
+# The two command roles run in a throwaway candidate named by the request's identity: the
+# workspaces replace a dead host's candidate when the rerun opens it and refuse while a command's
+# stop is unconfirmed, and the command's sandbox closed with its host. A rerun needs no clear.
 _RERUN_OF_ROLE: Mapping[OperationRole, RerunPolicy] = {
     OperationRole.RENDER_ARTIFACTS: KeyedWrite("the digest of the rendered artifact"),
     OperationRole.VERIFY_REVISION: ReadOnly(),
     OperationRole.INTERPRET_EVIDENCE: ReadOnly(),
     OperationRole.RETAIN_REVISION: KeyedWrite("the retention label of the request"),
+    OperationRole.CAPTURE_COMMAND: ReadOnly(),
+    OperationRole.VALIDATE_LOCAL: ReadOnly(),
     OperationRole.EXPORT_PATCH: ReadOnly(),
 }
-
-
-def _rerun_of(role: OperationRole, cleaner: WorkCleaner) -> RerunPolicy:
-    return _RERUN_OF_ROLE.get(role) or ClearedWork(cleaner)
 
 
 def build_operation_catalog(
@@ -209,18 +206,14 @@ def build_operation_catalog(
     owners: Mapping[OperationRole, OperationOwner],
     *,
     extra: tuple[OperationEntry, ...] = (),
-    cleaner: WorkCleaner | None = None,
 ) -> OperationCatalog:
     """The closed catalog for the roles a strategy registered.
 
     Each registered role has its owner when ``owners`` supplies one, else a typed
     refusal. Only roles with a declared refusal may lack an owner, and an owner for
     an unregistered role is an error, so wiring drift fails here and not mid-run.
-    ``extra`` carries entries for operations outside these roles. *cleaner* ends the
-    work a command role's interrupted attempt left; a run that wires none cannot clear
-    one, which the step loop reports instead of repeating it.
+    ``extra`` carries entries for operations outside these roles.
     """
-    work = cleaner or UnwiredWorkCleaner()
     stray = sorted(role for role in owners if role not in registrations)
     if stray:
         raise ContractError(("owners", stray[0]), "owner supplied for a role with no registration")
@@ -228,7 +221,7 @@ def build_operation_catalog(
     for role, registration in registrations.items():
         owner = owners.get(role)
         if owner is not None:
-            entries.append(OperationEntry.owned(registration, owner, _rerun_of(role, work)))
+            entries.append(OperationEntry.owned(registration, owner, _RERUN_OF_ROLE[role]))
         elif role in _REFUSALS:
             reason, detail = _REFUSALS[role]
             entries.append(OperationEntry.refused(registration, reason, detail))
