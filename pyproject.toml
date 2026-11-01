@@ -80,6 +80,10 @@ vs_runlog = ["py.typed"]
 
 [dependency-groups]
 proto = ["buf-bin==1.73.0", "protoc-gen-py==0.6.0"]
+# All the `coverage` job installs: it combines the shards' data and reads it with `coverage` and
+# `diff-cover`, and imports none of the project. Installing `dev` there cost 6 s of the queue run's
+# critical path (about ten packages against the whole development environment).
+coverage-report = ["coverage", "diff-cover"]
 dev = [
     "auditwheel==6.8.0",
     "chardet<6",
