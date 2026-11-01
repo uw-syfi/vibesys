@@ -469,10 +469,15 @@ func (x *ReplayMeasurementJob) GetResource() string {
 }
 
 type ReplayCancelMeasurement struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Resource      string                 `protobuf:"bytes,1,opt,name=resource,proto3" json:"resource,omitempty"`
-	ForPark       bool                   `protobuf:"varint,2,opt,name=for_park,json=forPark,proto3" json:"for_park,omitempty"`
-	Immediate     bool                   `protobuf:"varint,3,opt,name=immediate,proto3" json:"immediate,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Resource string                 `protobuf:"bytes,1,opt,name=resource,proto3" json:"resource,omitempty"`
+	// Set by the old shell's park cancellation, which no longer exists. Never written; a reader
+	// ignores it. It stays declared so records already stored keep decoding (the breaking-change
+	// check refuses to delete a field, reserved or not).
+	//
+	// Deprecated: Marked as deprecated in vibesys/core/v1/replay_evaluation.proto.
+	ForPark       bool `protobuf:"varint,2,opt,name=for_park,json=forPark,proto3" json:"for_park,omitempty"`
+	Immediate     bool `protobuf:"varint,3,opt,name=immediate,proto3" json:"immediate,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -514,6 +519,7 @@ func (x *ReplayCancelMeasurement) GetResource() string {
 	return ""
 }
 
+// Deprecated: Marked as deprecated in vibesys/core/v1/replay_evaluation.proto.
 func (x *ReplayCancelMeasurement) GetForPark() bool {
 	if x != nil {
 		return x.ForPark
@@ -958,10 +964,10 @@ const file_vibesys_core_v1_replay_evaluation_proto_rawDesc = "" +
 	"\x06reuses\x18\x02 \x01(\v2\x1a.vibesys.core.v1.RequestIdB\x04\xe0\xf9\x18\x01R\x06reuses\x122\n" +
 	"\x04base\x18\x03 \x01(\v2\x18.vibesys.core.v1.BaseRefB\x04\xe0\xf9\x18\x01R\x04base:\x04\xf0\xf9\x18\x01\";\n" +
 	"\x14ReplayMeasurementJob\x12#\n" +
-	"\bresource\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\bresource\"w\n" +
+	"\bresource\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\bresource\"{\n" +
 	"\x17ReplayCancelMeasurement\x12#\n" +
-	"\bresource\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\bresource\x12\x19\n" +
-	"\bfor_park\x18\x02 \x01(\bR\aforPark\x12\x1c\n" +
+	"\bresource\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\bresource\x12\x1d\n" +
+	"\bfor_park\x18\x02 \x01(\bB\x02\x18\x01R\aforPark\x12\x1c\n" +
 	"\timmediate\x18\x03 \x01(\bR\timmediate\"\x19\n" +
 	"\x17ReplayCloseMeasurements\"\xd3\x04\n" +
 	"\x17ReplayEvaluationRequest\x128\n" +
