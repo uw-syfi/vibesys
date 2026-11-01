@@ -185,13 +185,7 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Record when this job's cancel clock started
-        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
-
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Pass the pytest cancel deadline
-        run: python3 scripts/pytest_job_deadline.py
 
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
@@ -214,6 +208,39 @@ jobs:
 
       - name: Run Python quality checks
         run: ./support/repoctl/repoctl run-checks --group python_quality
+
+  # The Python repo-policy guards (tests/quality and tests/ci) beside `python-checks`, not after
+  # it: the two are independent check groups, and run one after the other they were the longest
+  # job of the commit stage (about 105 s of quality checks, then 74 s of guards).
+  python-guards:
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Record when this job's cancel clock started
+        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Pass the pytest cancel deadline
+        run: python3 scripts/pytest_job_deadline.py
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Set up repoctl
+        uses: ./.github/actions/setup-repoctl
 
       - name: Run Python repo-policy guards
         run: ./support/repoctl/repoctl run-checks --group python_guards
@@ -1368,6 +1395,7 @@ jobs:
       - changes
       - doc-checks
       - python-checks
+      - python-guards
       - typecheck
       - test-impact
       - clients-quality
@@ -1436,6 +1464,7 @@ jobs:
       - changes
       - doc-checks
       - python-checks
+      - python-guards
       - test-impact
       - clients-quality
       - clients-tests

@@ -49,7 +49,7 @@ REQUIRED_JOBS = {
     ("test.yml", "agent-image"),
     ("test.yml", "clients-quality"),
     ("test.yml", "native-evaluator-examples"),
-    ("test.yml", "python-checks"),
+    ("test.yml", "python-guards"),
     ("test.yml", "real-tiers-minimal-container"),
     ("test.yml", "real-tiers-slurm"),
     ("test.yml", "sandbox-linux"),
