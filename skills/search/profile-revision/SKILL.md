@@ -10,7 +10,7 @@ lead plans its next work from your answer, so a clear "unsupported" beats a gues
 
 ## Start
 
-Run the first command of your brief and confirm the worktree: a checkout of the revision. Read
+Run the first command of your brief and confirm the worktree: a checkout of the revision. Layout of the state: `vibesys:state`. Read
 the question and the decision it informs. Read `OBJECTIVE.md`. Load the domain skills the brief
 names; they usually say which profiler fits. Details are in
 [findings.md](references/findings.md).
@@ -19,7 +19,7 @@ names; they usually say which profiler fits. Details are in
 
 1. Decide what evidence would answer the question, and the cheapest way to capture it.
 2. Build in the checkout if the task needs it. Edit no tracked file. Scratch output, traces and
-   reports go in the artifacts directory the brief gives, not in the checkout.
+   reports go in `scratch/` of the optimization state (`vibesys:state`), not in the checkout.
 3. Capture on the workload the benchmark uses, or one close enough to say so.
 4. Answer from what you captured. Aggregate timings do not show where time goes inside a phase;
    if the evidence does not cover part of the question, say which part and what is missing.

@@ -22,9 +22,7 @@ says the part wins.
 
 For a combine, the result is a new candidate, judged and compared like any other.
 
-For promotion into main, use the run controller documented in
-[run-state.md](../../optimize/references/run-state.md). Record the independent judge pass,
-transition the item to won, and run `run.py move-main --run <dir> --id <item>`.
-The controller requires `better` against current main and a passing check; a result within
-noise cannot move main. Never merge or reset main by hand. If main moved since dispatch,
-measure against its current head before retrying promotion.
+Promotion into main is the lead's decision (see the optimize skill): it needs an independent
+judge pass and a recorded `better` comparison against current main, and a result within noise
+cannot move main. If main moved since dispatch, measure against its current head before
+retrying promotion.

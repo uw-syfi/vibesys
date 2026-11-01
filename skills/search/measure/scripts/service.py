@@ -51,7 +51,7 @@ class Host(Protocol):
         """Check readiness within a bound."""
 
     def client(self, argv: list[str], timeout: float) -> int:
-        """Execute the foreground client with a deadline."""
+        """Execute the foreground client with a time limit."""
 
     def stop(self, handle: object, timeout: float) -> None:
         """Stop and verify the entire owned group."""
@@ -136,11 +136,11 @@ if __name__ == "__main__":
     parser.add_argument("--service", type=json.loads, required=True)
     parser.add_argument("--probe", type=json.loads, required=True)
     parser.add_argument("--client", type=json.loads, required=True)
-    parser.add_argument("--timeout", type=float, default=30)
+    parser.add_argument("--limit", type=float, default=30, help="seconds")
     args = parser.parse_args()
     signal.signal(signal.SIGTERM, _terminate)
     try:
-        sys.exit(serve(args.service, args.probe, args.client, PosixHost(), timeout=args.timeout))
+        sys.exit(serve(args.service, args.probe, args.client, PosixHost(), timeout=args.limit))
     except (ValueError, OSError, subprocess.SubprocessError) as error:
         sys.stderr.write(f"error: {error}\n")
         sys.exit(2)

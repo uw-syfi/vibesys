@@ -13,7 +13,10 @@ import importlib.util
 import io
 import json
 import math
+import os
 import re
+import shutil
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -45,6 +48,7 @@ def _load_script() -> ModuleType:
 
 script = _load_script()
 
+GIT = shutil.which("git") or "git"
 SHA_A = "a" * 40
 SHA_B = "b" * 40
 SHA_C = "c" * 40
@@ -54,21 +58,46 @@ DIRECTIONS = st.sampled_from(("max", "min"))
 
 
 class Run:
-    """A repository with one task and one run directory, driven through the command line."""
+    """A repository with one task and one state directory, driven through the command line."""
 
     def __init__(self, root: Path) -> None:
         self.root = root
         self.task = root / ".vibesys" / "tasks" / "demo"
         self.task.mkdir(parents=True)
         (self.task / "OBJECTIVE.md").write_text("Maximize throughput.\n")
-        self.dir = root / ".vibesys-optimize" / "run-1"
+        self.dir = root / ".vibesys-state" / "optimize" / "demo"
         self.dir.mkdir(parents=True)
-        (self.dir / "run.json").write_text(json.dumps({"task": "demo", "base_commit": SHA_A}))
 
     @property
     def lines(self) -> list[str]:
-        path = self.dir / "measurements.jsonl"
-        return path.read_text().splitlines() if path.exists() else []
+        shards = sorted((self.dir / "measurements").glob("*.jsonl"))
+        return [line for path in shards for line in path.read_text().splitlines()]
+
+    def check(self, *extra: str) -> tuple[int, dict]:
+        code, out, err = self.cli("check", "--dir", str(self.dir), "--json", *extra)
+        assert code in (0, 1), err
+        return code, json.loads(out)
+
+    def git(self, *argv: str) -> str:
+        env = {
+            "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@t", "PATH": os.environ["PATH"], "HOME": str(self.root),
+        }  # fmt: skip
+        done = subprocess.run(  # noqa: S603  # LW-100373; fixed git argv in a temp repository.
+            [GIT, "-C", str(self.root), *argv], check=True, capture_output=True, text=True,
+            env=env,
+        )  # fmt: skip
+        # > Tests need a real repository for `check`; a Fake of git would test the Fake.
+        return done.stdout.strip()
+
+    def commit(self, name: str) -> str:
+        """A new commit on the current branch; its full SHA."""
+        if not (self.root / ".git").exists():
+            self.git("init", "-q", "-b", "main")
+        (self.root / name).write_text(name)
+        self.git("add", name)
+        self.git("commit", "-q", "-m", name)
+        return self.git("rev-parse", "HEAD")
 
     def cli(self, *argv: str, host: str = "host-a") -> tuple[int, str, str]:
         out, err = io.StringIO(), io.StringIO()
@@ -92,7 +121,7 @@ class Run:
         assert set(overrides) <= set(fields), overrides
         fields.update(overrides)
         argv = [
-            "record", "--run", str(self.dir), "--commit", commit, "--role", fields["role"],
+            "record", "--dir", str(self.dir), "--commit", commit, "--role", fields["role"],
             "--label", "run", "--metric", fields["metric"], "--direction", fields["direction"],
             "--command", "bench",
         ]  # fmt: skip
@@ -105,18 +134,18 @@ class Run:
 
     def compare(self, commit: str, *extra: str) -> dict:
         code, out, err = self.cli(
-            "compare", "--run", str(self.dir), "--commit", commit, "--json", *extra
+            "compare", "--dir", str(self.dir), "--commit", commit, "--json", *extra
         )
         assert code == 0, err
         return json.loads(out)
 
     def best(self) -> dict:
-        code, out, err = self.cli("best", "--run", str(self.dir), "--json")
+        code, out, err = self.cli("best", "--dir", str(self.dir), "--json")
         assert code == 0, err
         return json.loads(out)
 
     def show(self, *extra: str) -> list[dict]:
-        code, out, err = self.cli("show", "--run", str(self.dir), "--json", *extra)
+        code, out, err = self.cli("show", "--dir", str(self.dir), "--json", *extra)
         assert code == 0, err
         return json.loads(out)
 
@@ -413,7 +442,7 @@ def test_a_dirty_tree_marker_is_named_in_the_refusal(new_run: NewRun) -> None:
 def test_a_sample_that_is_not_a_finite_number_is_refused(new_run: NewRun, bad: str) -> None:
     run = new_run()
     code, _, err = run.cli(
-        "record", "--run", str(run.dir), "--commit", SHA_A, "--role", "base", "--label", "x",
+        "record", "--dir", str(run.dir), "--commit", SHA_A, "--role", "base", "--label", "x",
         "--metric", "ops", "--direction", "max", "--command", "c", "--sample", "1", "--sample", bad,
     )  # fmt: skip
     assert code == 2
@@ -434,7 +463,7 @@ def test_a_sample_that_is_not_a_finite_number_is_refused(new_run: NewRun, bad: s
 def test_an_unknown_flag_or_value_is_refused(new_run: NewRun, extra: list[str]) -> None:
     run = new_run()
     argv = [
-        "record", "--run", str(run.dir), "--commit", SHA_A, "--role", "base", "--label", "x",
+        "record", "--dir", str(run.dir), "--commit", SHA_A, "--role", "base", "--label", "x",
         "--metric", "ops", "--direction", "max", "--command", "c", "--sample", "1", *extra,
     ]  # fmt: skip
     code, _, err = run.cli(*argv)
@@ -443,21 +472,21 @@ def test_an_unknown_flag_or_value_is_refused(new_run: NewRun, extra: list[str]) 
     assert run.lines == []
 
 
-def test_a_directory_that_is_not_a_run_is_refused(tmp_path: Path) -> None:
+def test_a_directory_that_is_not_a_state_directory_is_refused(tmp_path: Path) -> None:
     out, err = io.StringIO(), io.StringIO()
     code = script.main(
-        ["show", "--run", str(tmp_path / "missing")], now=lambda: STAMP, out=out, err=err, host="h"
+        ["show", "--dir", str(tmp_path / "missing")], now=lambda: STAMP, out=out, err=err, host="h"
     )
     assert code == 2
     (tmp_path / "bare").mkdir()
     out, err = io.StringIO(), io.StringIO()
     code = script.main(
-        ["record", "--run", str(tmp_path / "bare"), "--commit", SHA_A, "--role", "base",
+        ["record", "--dir", str(tmp_path / "bare"), "--commit", SHA_A, "--role", "base",
          "--label", "x", "--metric", "m", "--direction", "max", "--command", "c", "--sample", "1"],
         now=lambda: STAMP, out=out, err=err, host="h",
     )  # fmt: skip
     assert code == 2
-    assert "run.json" in err.getvalue()
+    assert ".vibesys-state/optimize" in err.getvalue()
 
 
 def test_one_run_has_one_base_and_a_base_is_not_a_candidate(new_run: NewRun) -> None:
@@ -484,10 +513,10 @@ def test_a_metric_keeps_one_direction(new_run: NewRun) -> None:
 def test_a_damaged_file_is_named_by_line_and_stops_every_reader(new_run: NewRun) -> None:
     run = new_run()
     run.record(SHA_A, [1.0], role="base")
-    with (run.dir / "measurements.jsonl").open("a") as handle:
+    with (run.dir / "measurements" / f"{SHA_A}.jsonl").open("a") as handle:
         handle.write('{"schema": 1, "extra": true}\n')
     for argv in (["show"], ["best"], ["compare", "--commit", SHA_B]):
-        code, _, err = run.cli(*argv[:1], "--run", str(run.dir), *argv[1:])
+        code, _, err = run.cli(*argv[:1], "--dir", str(run.dir), *argv[1:])
         assert code == 2
         assert "line 2" in err
 
@@ -579,14 +608,14 @@ def test_compare_warns_about_hosts_and_shared_machines(new_run: NewRun) -> None:
 
 def test_compare_names_what_is_missing(new_run: NewRun) -> None:
     run = new_run()
-    code, _, err = run.cli("compare", "--run", str(run.dir), "--commit", SHA_B)
+    code, _, err = run.cli("compare", "--dir", str(run.dir), "--commit", SHA_B)
     assert code == 2
     assert "base" in err
     _seeded(run)
-    code, _, err = run.cli("compare", "--run", str(run.dir), "--commit", SHA_B)
+    code, _, err = run.cli("compare", "--dir", str(run.dir), "--commit", SHA_B)
     assert code == 2
     assert SHA_B in err
-    code, _, err = run.cli("compare", "--run", str(run.dir), "--commit", "HEAD")
+    code, _, err = run.cli("compare", "--dir", str(run.dir), "--commit", "HEAD")
     assert code == 2
 
 
@@ -594,7 +623,7 @@ def test_compare_prints_a_line_a_person_can_read(new_run: NewRun) -> None:
     run = new_run()
     _seeded(run)
     run.record(SHA_B, FAST)
-    code, out, _ = run.cli("compare", "--run", str(run.dir), "--commit", SHA_B)
+    code, out, _ = run.cli("compare", "--dir", str(run.dir), "--commit", SHA_B)
     assert code == 0
     assert "better" in out
     assert "ratio" in out
@@ -628,7 +657,7 @@ def test_best_with_no_win_says_so_and_still_exits_cleanly(new_run: NewRun) -> No
     assert run.best() == {"best": None}
     _seeded(run)
     run.record(SHA_B, [100.0, 130.0, 70.0, 105.0, 95.0])
-    code, out, _ = run.cli("best", "--run", str(run.dir))
+    code, out, _ = run.cli("best", "--dir", str(run.dir))
     assert code == 0
     assert "no commit" in out
 
@@ -659,10 +688,10 @@ def test_show_filters_by_commit(new_run: NewRun) -> None:
     _seeded(run)
     run.record(SHA_B, FAST)
     assert [r["commit"] for r in run.show("--commit", SHA_B)] == [SHA_B]
-    code, out, _ = run.cli("show", "--run", str(run.dir))
+    code, out, _ = run.cli("show", "--dir", str(run.dir))
     assert code == 0
     assert out.count("\n") == 2
-    assert run.cli("show", "--run", str(run.dir), "--commit", SHA_C)[1] == "no records\n"
+    assert run.cli("show", "--dir", str(run.dir), "--commit", SHA_C)[1] == "no records\n"
 
 
 @pytest.mark.parametrize("stamp", ["not-a-date", "2026-01-01T00:00:00", "2026-99-99T00:00:00Z"])
@@ -687,14 +716,106 @@ def test_task_hash_ignores_generated_results_and_environment(new_run: NewRun) ->
     assert script.task_fingerprint(run.task) != before
 
 
-def test_first_base_record_must_match_controller_base(new_run: NewRun) -> None:
+def test_each_commit_has_its_own_shard_and_readers_see_all_of_them(new_run: NewRun) -> None:
     run = new_run()
-    (run.dir / "run.json").write_text(json.dumps({"task": "demo", "base_commit": SHA_B}))
-    code, _, err = run.record(SHA_A, [1, 2, 3], role="base")
+    run.record(SHA_A, BASE, role="base")
+    run.record(SHA_B, FAST)
+    run.record(SHA_B, FAST)
+    shards = sorted(p.name for p in (run.dir / "measurements").glob("*.jsonl"))
+    assert shards == [f"{SHA_A}.jsonl", f"{SHA_B}.jsonl"]
+    assert len((run.dir / "measurements" / f"{SHA_B}.jsonl").read_text().splitlines()) == 2
+    assert [r["commit"] for r in run.show()] == [SHA_A, SHA_B, SHA_B]
+    assert run.compare(SHA_B)["verdict"] == "better"
+
+
+def test_a_record_in_another_commits_shard_is_refused(new_run: NewRun) -> None:
+    run = new_run()
+    run.record(SHA_A, BASE, role="base")
+    shard = run.dir / "measurements"
+    (shard / f"{SHA_B}.jsonl").write_text((shard / f"{SHA_A}.jsonl").read_text())
+    code, _, err = run.cli("show", "--dir", str(run.dir))
     assert code == 2
-    assert "base_commit" in err
-    assert run.lines == []
-    assert run.record(SHA_B, [1, 2, 3], role="base")[0] == 0
+    assert SHA_B in err
+
+
+# --- check -------------------------------------------------------------------------------------
+
+
+def _branch_with_base(run: Run) -> str:
+    base = run.commit("base")
+    run.git("checkout", "-q", "-b", "vibesys/demo")
+    assert run.record(base, BASE, role="base")[0] == 0
+    return base
+
+
+def test_check_passes_when_the_head_has_a_passing_better_record(new_run: NewRun) -> None:
+    run = new_run()
+    base = _branch_with_base(run)
+    head = run.commit("win")
+    run.record(head, FAST)
+    code, result = run.check()
+    assert code == 0
+    assert (result["proven"], result["head"], result["base"]) == (True, head, base)
+    assert result["unrecorded"] == []
+    assert run.cli("check", "--dir", str(run.dir))[0] == 0
+
+
+def test_check_fails_when_the_head_has_no_record_and_lists_unrecorded_commits(
+    new_run: NewRun,
+) -> None:
+    run = new_run()
+    _branch_with_base(run)
+    first = run.commit("one")
+    head = run.commit("two")
+    run.record(first, FAST)
+    code, result = run.check()
+    assert code == 1
+    assert result["proven"] is False
+    assert result["unrecorded"] == [head]
+    code, out, _ = run.cli("check", "--dir", str(run.dir))
+    assert code == 1
+    assert head[:12] in out
+    assert "NO RECORD" in out
+
+
+@pytest.mark.parametrize(
+    ("samples", "check"),
+    [(FAST, "fail"), (BASE, "pass"), ([100.0, 130.0, 70.0, 105.0, 95.0], "pass"), (FAST, None)],
+)
+def test_check_fails_for_a_head_that_is_not_proven_better_with_a_passing_check(
+    new_run: NewRun, samples: list[float], check: str | None
+) -> None:
+    run = new_run()
+    _branch_with_base(run)
+    head = run.commit("x")
+    run.record(head, samples, check=check)
+    code, result = run.check()
+    assert code == 1
+    assert result["proven"] is False
+
+
+def test_check_reads_a_named_branch_and_never_writes(new_run: NewRun) -> None:
+    run = new_run()
+    _branch_with_base(run)
+    head = run.commit("win")
+    run.record(head, FAST)
+    run.git("checkout", "-q", "-b", "other")
+    before = run.lines
+    stamps = {p: p.stat().st_mtime_ns for p in run.dir.rglob("*") if p.is_file()}
+    assert run.check("--branch", "vibesys/demo")[0] == 0
+    assert run.check("--branch", "other")[0] == 0
+    assert run.lines == before
+    assert {p: p.stat().st_mtime_ns for p in run.dir.rglob("*") if p.is_file()} == stamps
+
+
+def test_check_names_a_missing_base_or_branch(new_run: NewRun) -> None:
+    run = new_run()
+    run.commit("base")
+    assert run.cli("check", "--dir", str(run.dir))[0] == 2
+    run.record(run.git("rev-parse", "HEAD"), BASE, role="base")
+    code, _, err = run.cli("check", "--dir", str(run.dir), "--branch", "nope")
+    assert code == 2
+    assert "nope" in err
 
 
 def test_observation_ranges_pool_only_recorded_comparable_data(new_run: NewRun) -> None:
@@ -711,7 +832,7 @@ def test_observation_ranges_pool_only_recorded_comparable_data(new_run: NewRun) 
         "latency_p99_ms": [0.15, 0.401],
     }
     assert result["verdict"] == "better"
-    code, out, err = run.cli("compare", "--run", str(run.dir), "--commit", SHA_B)
+    code, out, err = run.cli("compare", "--dir", str(run.dir), "--commit", SHA_B)
     assert code == 0, err
     assert "0.401" in out
 

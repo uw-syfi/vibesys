@@ -5,7 +5,7 @@ description: "Use when a vibesys optimize brief gives you one hypothesis to impl
 
 # Implement a hypothesis
 
-You own one hypothesis in one worktree. Your brief names the claim, the pass criteria, the
+You own one hypothesis (a plan) in one worktree. You never edit plan files. Your brief names the claim, the pass criteria, the
 parent commit and the scope. Details of the steps and the handoff are in
 [handoff.md](references/handoff.md).
 
@@ -27,14 +27,14 @@ parent commit and the scope. Details of the steps and the handoff are in
    before you run the check again. When output is long, write it to a file and read the file.
 3. Commit in your worktree. If your brief grants no measurement slot, return the SHA as
    `ready for measurement`; the lead measures it before judging it. Otherwise measure that commit with `vibesys:measure`: the correctness
-   check, then at least 5 benchmark samples, recorded in the run directory. Compare with the
+   check, then at least 5 benchmark samples, recorded in the state directory (`--dir`; `vibesys:state`). Compare with the
    base: `compare --commit <sha>`. Add `--base <sha>` when you built on a candidate, to see the
    gain over your parent.
 4. With the verdict in hand, build the next step on it, or stop.
 
 
 Use the measure skill's `scripts/service.py` owner for every required service. Supply
-`--service`, `--probe`, and `--client` as JSON argv arrays, with a positive `--timeout`.
+`--service`, `--probe`, and `--client` as JSON argv arrays, with a positive `--limit`.
 It starts a new process group, fails on exhausted readiness, and stops and verifies the
 whole group on every exit. Never use handwritten background-shell PID or startup-sleep recipes.
 Run any load, including short sanity/tuning benchmarks, through

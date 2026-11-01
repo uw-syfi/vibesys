@@ -11,8 +11,8 @@ claude plugin marketplace add uw-syfi/vibesys
 claude plugin install vibesys@vibesys
 ```
 
-The optimize loop needs Claude Code with background Bash/Agent execution and session scheduling,
-and Python 3.10 or newer for its standard-library measurement and hook scripts. It does not need the VibeSys Python package.
+The optimize loop needs Claude Code with background Bash/Agent execution, git and Python 3.10 or
+newer for its standard-library measurement scripts. It does not need the VibeSys Python package.
 
 ## Layout
 
@@ -20,11 +20,11 @@ and Python 3.10 or newer for its standard-library measurement and hook scripts. 
   Neuron. Both the plugin and VibeSys runs use them: a run reads only this tree, and the
   sidecar in it decides which skills a run installs for its backend and domain
   ([skill metadata](../docs/contributing/skill-metadata.md)).
-- `hooks/`: the automatically loaded Stop hook and its tests. The hook finds run state
-  from `CLAUDE_PROJECT_DIR` or ancestors of the event directory, including run worktrees.
 - `search/`: the optimization loop for the plugin alone. VibeSys runs never install it,
-  because they read only `domains/`. Invoke `/vibesys:optimize <task> --time 90m` to run a portfolio of hypotheses,
-  measure exact commits, judge gains and leave a report.
+  because they read only `domains/`. Invoke `/vibesys:optimize <task> [--fanout N]` to start or resume the task's one long-running
+  optimization: planners write hypotheses as plan files, workers try them, every commit is
+  measured and judged. Its state is described by the `state` skill. Search skills are named verb-first
+  (`measure`, `judge-candidate`, ...) except `state`.
 
 Assets that only the VibeSys app uses (evaluators, profilers, the chat agent's skills) stay in
 `resources/`. The reference engine repositories the serving skill cites are submodules in
@@ -50,7 +50,7 @@ tool that only a VibeSys run offers, such as `submit_evaluation`. Vendored packs
 byte-identical with upstream, are exempt from the tool-name rule.
 
 Bump the marketplace plugin version for every release that changes files under `skills/`
-or its hooks, including fixes to scripts and instructions. Use a patch bump for compatible
+including fixes to scripts and instructions. Use a patch bump for compatible
 fixes, a minor bump for new capabilities, and a major bump for incompatible contracts.
 The generator preserves this manually chosen release version; CI checks the generated list,
 not release intent. Without a bump, installed Claude Code caches may retain the old payload.

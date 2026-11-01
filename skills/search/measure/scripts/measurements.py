@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
-"""Record and compare benchmark measurements of commits for one optimization run.
+"""Record and compare benchmark measurements of commits for one optimization.
 
-The single writer of a run's ``measurements.jsonl``. It uses only the Python standard
-library (3.10 or newer) and runs from an installed Claude Code plugin, outside any VibeSys
-package, so nothing here may import one.
+The single writer of an optimization's ``measurements/<commit-sha>.jsonl`` shards. It uses only
+the Python standard library (3.10 or newer) and runs from an installed Claude Code plugin,
+outside any VibeSys package, so nothing here may import one.
 
-Subcommands use ``--run DIR`` (``.vibesys-optimize/<run-id>``), except ``run``:
+Subcommands use ``--dir DIR`` (the state directory ``.vibesys-state/optimize/<task>``), except
+``run``. The task and the repository root follow from that path.
 
 * ``run -- <command>``: execute any benchmark load under the host-wide lock.
-* ``record``: validate one measurement and append it.
+* ``record``: validate one measurement and append it to its commit's shard.
 * ``compare``: a commit's samples against the base's.
 * ``best``: the commit with the best verdict-backed result.
-* ``show``: the records.
+* ``show``: the records of all shards.
+* ``check [--branch B]``: read-only; does the branch head have a passing, ``better`` record?
 
-``--json`` makes ``compare``, ``best`` and ``show`` print JSON. Exit codes: 0 ok, 2 invalid input.
+``--json`` makes ``compare``, ``best``, ``show`` and ``check`` print JSON. Exit codes: 0 ok,
+1 ``check`` found the head unproven, 2 invalid input.
 
 The comparison is VibeSys's rule for a task that declares no noise: Welch's t test on each
 side's own spread. A verdict needs three samples on each side that are not all alike; the bar is
@@ -31,6 +34,7 @@ import json
 import math
 import platform
 import re
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -53,7 +57,8 @@ __all__ = [
 ]
 
 SCHEMA_VERSION = 1
-MEASUREMENTS_FILE = "measurements.jsonl"
+MEASUREMENTS_DIR = "measurements"
+STATE_PARENT = (".vibesys-state", "optimize")
 MIN_SAMPLES = 3
 """The fewest samples a side needs before a verdict is possible."""
 
@@ -318,27 +323,28 @@ def _validate_observations(record: dict[str, Any]) -> None:
         _validate_samples(values)
 
 
-def load_records(run: Path) -> list[dict[str, Any]]:
-    """Read validated records; malformed lines name their file and line."""
-    path = run / MEASUREMENTS_FILE
-    if not path.exists():
-        return []
+def load_records(state: Path) -> list[dict[str, Any]]:
+    """Read validated records of every shard, oldest first; malformed lines name file and line."""
     records = []
-    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        if not line.strip():
-            continue
-        try:
-            records.append(validate_record(json.loads(line)))
-        except (ValueError, InvalidInputError) as error:
-            raise InvalidInputError(f"{path} line {number}: {error}") from error
-    return records
+    for path in sorted((state / MEASUREMENTS_DIR).glob("*.jsonl")):
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            if not line.strip():
+                continue
+            try:
+                record = validate_record(json.loads(line))
+            except (ValueError, InvalidInputError) as error:
+                raise InvalidInputError(f"{path} line {number}: {error}") from error
+            if path.stem != record["commit"]:
+                raise InvalidInputError(f"{path} line {number}: record is for {record['commit']}")
+            records.append(record)
+    return sorted(records, key=lambda r: r["recorded_at"])  # stable: ties keep shard order
 
 
 def _check_against_history(new: dict[str, Any], history: list[dict[str, Any]]) -> None:
     bases = {r["commit"] for r in history if r["role"] == "base"}
     if new["role"] == "base" and bases and new["commit"] not in bases:
         raise InvalidInputError(
-            f"the run's base is {sorted(bases)[0]}; a second base commit is not allowed"
+            f"the base is {sorted(bases)[0]}; a second base commit is not allowed"
         )
     if new["role"] == "candidate" and new["commit"] in bases:
         raise InvalidInputError("this is the base commit: record it with --role base")
@@ -353,22 +359,23 @@ def _check_against_history(new: dict[str, Any], history: list[dict[str, Any]]) -
             )
 
 
-def _task_dir(run: Path) -> Path:
-    meta = run / "run.json"
-    if not meta.is_file():
-        raise InvalidInputError(f"{meta} does not exist: this is not a run directory")
-    try:
-        task = json.loads(meta.read_text(encoding="utf-8"))["task"]
-    except (ValueError, KeyError, TypeError) as error:
-        raise InvalidInputError(f'{meta} has no readable "task"') from error
-    directory = run.parent.parent / ".vibesys" / "tasks" / str(task)
+def _repo_root(state: Path) -> Path:
+    if state.parent.parts[-2:] != STATE_PARENT:
+        raise InvalidInputError(
+            f"{state} is not a state directory: expected <repo>/{'/'.join(STATE_PARENT)}/<task>"
+        )
+    return state.parents[2]
+
+
+def _task_dir(state: Path) -> Path:
+    directory = _repo_root(state) / ".vibesys" / "tasks" / state.name
     if not directory.is_dir():
         raise InvalidInputError(f"the task directory {directory} does not exist")
     return directory
 
 
 def _record_from(
-    args: argparse.Namespace, run: Path, host: str, now: Callable[[], datetime]
+    args: argparse.Namespace, state: Path, host: str, now: Callable[[], datetime]
 ) -> dict[str, Any]:
     return {
         "schema": SCHEMA_VERSION,
@@ -383,7 +390,7 @@ def _record_from(
         "samples": args.sample,
         "check": args.check,
         "exclusive": args.exclusive,
-        "evaluator": task_fingerprint(_task_dir(run)),
+        "evaluator": task_fingerprint(_task_dir(state)),
         "observations": json.loads(args.observations.read_text()) if args.observations else {},
     }
 
@@ -517,28 +524,29 @@ def _emit(env: _Env, payload: object, text: str, *, as_json: bool) -> None:
 
 
 def _cmd_record(args: argparse.Namespace, env: _Env) -> None:
-    run = Path(args.run)
-    record = _record_from(args, run, env.host, env.now)
+    state = Path(args.dir)
+    record = _record_from(args, state, env.host, env.now)
     validate_record(record)
-    meta = json.loads((run / "run.json").read_text())
-    if args.role == "base" and meta.get("base_commit") != args.commit:
-        raise InvalidInputError("--role base must match run.json base_commit")
-    _check_against_history(record, load_records(run))
-    with (run / MEASUREMENTS_FILE).open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(record, sort_keys=False) + "\n")
+    shards = state / MEASUREMENTS_DIR
+    shards.mkdir(exist_ok=True)
+    with (shards / ".lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        _check_against_history(record, load_records(state))
+        with (shards / f"{record['commit']}.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, sort_keys=False) + "\n")
     env.out.write(
         f"recorded {record['role']} {record['commit'][:12]} ({len(args.sample)} samples)\n"
     )
 
 
 def _cmd_compare(args: argparse.Namespace, env: _Env) -> None:
-    records = load_records(Path(args.run))
+    records = load_records(Path(args.dir))
     result = compare_commit(records, _validate_commit(args.commit), args.base)
     _emit(env, result, _format_comparison(result), as_json=args.json)
 
 
 def _cmd_best(args: argparse.Namespace, env: _Env) -> None:
-    records = load_records(Path(args.run))
+    records = load_records(Path(args.dir))
     candidates = list(dict.fromkeys(r["commit"] for r in records if r["role"] == "candidate"))
     won = []
     for commit in candidates:
@@ -558,6 +566,75 @@ def _cmd_best(args: argparse.Namespace, env: _Env) -> None:
     _emit(env, payload, _format_comparison(best), as_json=args.json)
 
 
+_GIT = shutil.which("git") or "git"
+
+
+def _git(root: Path, *argv: str) -> str:
+    done = subprocess.run(  # noqa: S603  # LW-100372; fixed read-only git argv, no shell.
+        [_GIT, "-C", str(root), *argv],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    # > A shell would add quoting hazards for branch names; an allowlist wrapper adds
+    # > indirection around one fixed command without making the argv safer.
+    if done.returncode != 0:
+        raise InvalidInputError(f"git {' '.join(argv)} failed: {done.stderr.strip()}")
+    return done.stdout.strip()
+
+
+def _commit_status(records: list[dict[str, Any]], commit: str) -> dict[str, Any]:
+    """One commit's evidence: whether it is recorded, its check and its verdict against base."""
+    if not any(r["commit"] == commit for r in records):
+        return {"commit": commit, "recorded": False, "check": None, "verdict": None}
+    result = compare_commit(records, commit, None)
+    return {
+        "commit": commit,
+        "recorded": True,
+        "check": result["check"],
+        "verdict": result["verdict"],
+    }
+
+
+def _cmd_check(args: argparse.Namespace, env: _Env) -> int:
+    """Read-only: is the branch head proven? Exit 1 when it has no passing ``better`` record."""
+    state = Path(args.dir)
+    branch = args.branch or f"vibesys/{state.name}"
+    root = _repo_root(state)
+    records = load_records(state)
+    base = next((r["commit"] for r in records if r["role"] == "base"), None)
+    if base is None:
+        raise InvalidInputError("no base measurement is recorded: measure the base first")
+    head = _git(root, "rev-parse", "--verify", f"{branch}^{{commit}}")
+    listed = _git(root, "rev-list", "--reverse", f"{base}..{head}").split()
+    rows = [_commit_status(records, c) for c in listed]
+    if head == base:
+        head_row = _commit_status(records, base)
+        proven = head_row["check"] == "pass"
+    else:
+        head_row = rows[-1] if rows else _commit_status(records, head)
+        proven = head_row["check"] == "pass" and head_row["verdict"] == "better"
+    unrecorded = [r["commit"] for r in rows if not r["recorded"]]
+    payload = {
+        "branch": branch,
+        "base": base,
+        "head": head,
+        "proven": proven,
+        "commits": rows,
+        "unrecorded": unrecorded,
+    }
+    lines = [f"{branch} head {head[:12]} base {base[:12]}: {'proven' if proven else 'NOT proven'}"]
+    lines += [
+        f"{r['commit'][:12]}  {'recorded' if r['recorded'] else 'NO RECORD':<9}  "
+        f"check {r['check'] or '-':<7} verdict {r['verdict'] or '-'}"
+        for r in rows
+    ]
+    if unrecorded:
+        lines.append(f"{len(unrecorded)} commit(s) on the branch have no record")
+    _emit(env, payload, "\n".join(lines), as_json=args.json)
+    return 0 if proven else 1
+
+
 def _format_record(record: dict[str, Any]) -> str:
     samples = ", ".join(f"{s:g}" for s in record["samples"])
     return (
@@ -569,7 +646,7 @@ def _format_record(record: dict[str, Any]) -> str:
 
 
 def _cmd_show(args: argparse.Namespace, env: _Env) -> None:
-    records = load_records(Path(args.run))
+    records = load_records(Path(args.dir))
     if args.commit:
         records = [r for r in records if r["commit"] == _validate_commit(args.commit)]
     _emit(
@@ -606,7 +683,7 @@ def _parser() -> argparse.ArgumentParser:
     runner.add_argument("argv", nargs=argparse.REMAINDER)
 
     record = commands.add_parser("record", help="append one validated measurement")
-    record.add_argument("--run", required=True)
+    record.add_argument("--dir", required=True)
     record.add_argument("--commit", required=True)
     record.add_argument("--role", required=True, choices=_ROLES)
     record.add_argument("--label", required=True)
@@ -621,17 +698,22 @@ def _parser() -> argparse.ArgumentParser:
     record.add_argument("--exclusive", choices=_YES_NO)
 
     compare = commands.add_parser("compare", help="compare a commit with the base")
-    compare.add_argument("--run", required=True)
+    compare.add_argument("--dir", required=True)
     compare.add_argument("--commit", required=True)
     compare.add_argument("--base")
     compare.add_argument("--json", action="store_true")
 
     best = commands.add_parser("best", help="the best verdict-backed commit")
-    best.add_argument("--run", required=True)
+    best.add_argument("--dir", required=True)
     best.add_argument("--json", action="store_true")
 
+    check = commands.add_parser("check", help="is the branch head proven? (read-only)")
+    check.add_argument("--dir", required=True)
+    check.add_argument("--branch", help="default: vibesys/<task>")
+    check.add_argument("--json", action="store_true")
+
     show = commands.add_parser("show", help="print the records")
-    show.add_argument("--run", required=True)
+    show.add_argument("--dir", required=True)
     show.add_argument("--commit")
     show.add_argument("--json", action="store_true")
     return parser
@@ -642,14 +724,16 @@ _COMMANDS = {
     "compare": _cmd_compare,
     "best": _cmd_best,
     "show": _cmd_show,
+    "check": _cmd_check,
 }
 
 
-def _run_directory(value: str) -> Path:
-    run = Path(value).resolve()
-    if not run.is_dir():
-        raise InvalidInputError(f"the run directory {value} does not exist")
-    return run
+def _state_directory(value: str) -> Path:
+    state = Path(value).resolve()
+    if not state.is_dir():
+        raise InvalidInputError(f"the state directory {value} does not exist")
+    _repo_root(state)
+    return state
 
 
 def _benchmark_run(command: list[str]) -> int:
@@ -683,11 +767,8 @@ def main(
         args = _parser().parse_args(argv)
         if args.command_name == "run":
             return _benchmark_run(args.argv)
-        run = _run_directory(args.run)
-        args.run = str(run)
-        with (run / "run.lock").open("a") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            _COMMANDS[args.command_name](args, _Env(out=out, now=now, host=host))
+        args.dir = str(_state_directory(args.dir))
+        return _COMMANDS[args.command_name](args, _Env(out=out, now=now, host=host)) or 0
     except (InvalidInputError, OSError, ValueError) as error:
         err.write(f"error: {error}\n")
         return 2

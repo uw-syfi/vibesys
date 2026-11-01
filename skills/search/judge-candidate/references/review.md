@@ -15,7 +15,7 @@
 
 ## Reading the measurement
 
-`show --run <dir> --commit <candidate>` lists the records. Look at: the metric and direction are
+`show --dir <dir> --commit <candidate>` lists the records. Look at: the metric and direction are
 the task's; the evaluator fingerprint is the same as the base's; the check is `pass`; the
 samples were taken on a comparable host. `compare` gives the verdict and the oriented ratio
 (above 1 is better).

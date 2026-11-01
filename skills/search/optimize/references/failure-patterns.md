@@ -1,6 +1,6 @@
 # Failure patterns
 
-Read before planning and before wrap-up. Each pattern says what it looks like and what to do.
+Read before planning. Each pattern says what it looks like and what to do.
 
 **Chasing noise.** A candidate "wins" by 1-3% on one run. Trust only a `better` verdict from
 `vibesys:measure compare`, which needs 3 samples a side and a gap beyond the spread. For a close
@@ -17,8 +17,7 @@ forbids. The judge reads the diff for this and for every rule in OBJECTIVE.md. A
 with a failing or weakened check is a fail.
 
 **Losing results to context limits.** Findings that stay in your head are gone after a
-compaction. Put each decision in `ledger.md`, each result through the run controller, and each
-expectation in `notes/` as it happens.
+compaction. Put each decision, result and expectation in the plan file as it happens.
 
 **A merge measured on the wrong commit.** Main moved while a combine was running, or the
 combine measured a branch tip that was not its commit. Merge one at a time, base every combine
@@ -32,10 +31,10 @@ hypotheses that can each succeed or fail alone.
 too large. Name the exact blocker and give the narrower step it proposed. Two tries in a row
 without convergence: park the direction and say why.
 
-**Idle slots.** A free slot before wrap-up. Dispatch a new idea branched from the winner, or record
-why not through `run.py idle --reason`. Re-decide after an item returns or main moves.
+**Idle slots.** A free slot with no reason. Dispatch a new planner or a worker branched from the winner, or state
+why not in the next report. Re-decide after an item returns or main moves.
 
 **Long measurements in the foreground.** A 25-minute benchmark loop in your own turn. Use the tracked Bash recipe in `vibesys:measure` and go back to the other slots.
 
 **Trusting a handoff.** "Tests pass" without a command, "measured" without a record. Run
-`measurements.py show --commit <SHA>` and read it.
+`measurements.py show --dir <state dir> --commit <SHA>` and read it.

@@ -11,7 +11,7 @@ The checklist and the verdict format are in [review.md](references/review.md).
 ## Start
 
 Run the first command of your brief and confirm the worktree. It is a checkout of the candidate
-commit. Read `OBJECTIVE.md` in the task directory for context. Load `vibesys:measure`.
+commit. Read `OBJECTIVE.md` in the task directory for context. You never edit plan files; layout: `vibesys:state`. Load `vibesys:measure`.
 
 ## Decide
 
@@ -28,7 +28,7 @@ Start from the diff against the parent (`git diff <parent> <candidate>`) and the
    check, stub work, or touch `.vibesys/`, the checker or the benchmark?
 4. **Real?** Is the gain beyond noise? The recorded verdict decides this:
    Run `python3 "${CLAUDE_SKILL_DIR}/../measure/scripts/measurements.py" compare
-   --run <dir> --commit <candidate> --base <parent> --json` yourself and read its output.
+   --dir <dir> --commit <candidate> --base <parent> --json` yourself and read its output.
    Confirm the full commit SHA and recorded samples support the claimed gain; worker text
    is not measurement evidence. Fail a claim
    about speed only when a recorded result shows it is not there. If no comparable verdict
@@ -43,7 +43,7 @@ Report any declared objective limits seen in the logs; they never block the verd
 
 
 Use the measure skill's `scripts/service.py` owner for every required service. Supply
-`--service`, `--probe`, and `--client` as JSON argv arrays, with a positive `--timeout`.
+`--service`, `--probe`, and `--client` as JSON argv arrays, with a positive `--limit`.
 It starts a new process group, fails on exhausted readiness, and stops and verifies the
 whole group on every exit. Never use handwritten background-shell PID or startup-sleep recipes.
 Run any load, including short sanity/tuning benchmarks, through

@@ -1,11 +1,12 @@
 # Brief templates
 
-A subagent knows nothing of this run. A brief is the whole of what it knows, so it must stand on
-its own. Fill every field; delete none. Dispatch with the Agent tool using a general-purpose
-subagent and background execution (`run_in_background: true` where offered). Do not create agent
-definition files or add a second automatic worktree: the lead already created the checkout.
+A subagent knows nothing of this optimization. A brief is the whole of what it knows, so it must
+stand on its own. Dispatch with the Agent tool using a general-purpose subagent and background
+execution (`run_in_background: true` where offered). Do not create agent definition files or add
+a second automatic worktree: the lead already created the checkout. Layout and plan files:
+`vibesys:state`. Workers and judges never edit plan files.
 
-## Common header (every kind)
+## Common header (worker, judge, combine, profile)
 
 ```
 Goal: <what you want and why, in two or three sentences>
@@ -13,14 +14,12 @@ Worktree: <absolute path>      Branch: <branch or detached>      Base commit: <f
 First run: cd <worktree> && git rev-parse --show-toplevel && git branch --show-current
 Confirm both match before you change anything (an empty branch name means detached HEAD).
 Work only in this worktree.
-Return by: <ISO timestamp before the run deadline>; stop work and hand back by this time.
 Measurement setup: <build/start/readiness/stop commands, runtime arguments, resource allocation>.
-Measurement script: <absolute installed path to measure/scripts/measurements.py; no filesystem search>
+Measurement script: <absolute installed path to measure/scripts/measurements.py>
 Service owner: <absolute installed path to measure/scripts/service.py>
 Every benchmark, even unrecorded sanity load, uses the measurement script run -- wrapper.
-Task: .vibesys/tasks/<task>/ (read OBJECTIVE.md). Run directory: <abs path of $RUN>
-Load these skills first: <vibesys:implement-hypothesis | plan-hypotheses | judge-candidate | combine-candidates |
-  profile-revision>, vibesys:measure, and <domain skills>.
+Task: .vibesys/tasks/<task>/ (read OBJECTIVE.md). State dir (--dir): <abs path>
+Load these skills first: <the matching vibesys skill>, vibesys:measure, and <domain skills>.
 Rules:
 - Never edit anything under .vibesys/, the task's checker or its benchmark.
 - No stub, special case or shortcut that makes a check pass or a number rise without the
@@ -29,15 +28,14 @@ Rules:
 ```
 
 Domain skills: pick from the plugin's skill list those whose description fits the task's
-`[agent] domain` and `backends` in `vibesys.input.toml`. Give their full namespaced names. When
-none fits, name none.
+`[agent] domain` and `backends` in `vibesys.input.toml`. Give their full namespaced names.
 
 ## Implement
 
 Add:
 
 ```
-Hypothesis <id>: <a claim that a measurement can falsify>
+Plan: plan-NNN-<slug>: <a claim that a measurement can falsify>
 Why: <the evidence: a profile, a measurement, a code reading>
 Pass criteria: <what you will observe if it is right, in the task's metric>
 Scope: <files or components you may change; what to leave alone>
@@ -50,52 +48,32 @@ Hand back: claim, commit SHA, the verdict from vibesys:measure, what you learned
 
 ## Judge
 
-Add:
+Give the judge a detached worktree of the candidate: `git worktree add --detach <path> <SHA>`.
 
 ```
 Candidate: <full SHA>      Parent: <full SHA>
 Claim: <the implementer's claim>      Recorded verdict: <from vibesys:measure compare, or none>
 Read only. Edit nothing. Run the task correctness command yourself in this worktree,
-on your allocated port. Use the supplied service owner with JSON service/probe/client argv.
-It bounds readiness and stops/verifies the whole group; never hand-write PID/sleep recipes.
-Run the supplied absolute measurement script compare for this exact candidate and parent.
-Read its samples, gain and pooled observed ranges. Missing speed evidence is unmeasured.
+on your allocated port, with the supplied service owner (JSON service/probe/client argv).
+Run the supplied measurement script compare for this exact candidate and parent.
+Missing speed evidence is unmeasured.
 Return pass, fail or unmeasured with the command, port, exit status and reasons.
 ```
 
-Give the judge a detached worktree of the candidate: `git worktree add --detach <path> <SHA>`.
-
-## Combine (and merge)
-
-Add:
+## Combine
 
 ```
 Main commit: <SHA>      Apply in this order, each as the diff from where it was built:
-  1. <hypothesis id> at <SHA>, built on <parent SHA>
+  1. plan-NNN at <SHA>, built on <parent SHA>
   2. ...
 How to combine them: <which side wins a conflict; what must survive>
 Watch for: <where the parts interact>
 Hand back: the commit, the parts you could not apply and why, the checks you ran.
 ```
 
-A merge is a combine whose result may become main. The lead decides that after measuring it.
-
-## Plan
-
-Planners propose; the lead merges duplicates, checks that picked ideas touch disjoint files,
-and chooses. Give each planner a lens, the evidence paths and the measured peaks, and list what
-is already in flight and already rejected. Load `vibesys:plan-hypotheses`. Read-only worktree of
-the revision, as for the judge.
-
-```
-Lens: <the part of the system this planner covers>      Revision: <SHA>
-Evidence: <profiles, records, logs, ledger paths>       In flight / rejected: <ids and reasons>
-Change no code. Hand back ranked ideas in the idea template.
-```
-
 ## Profile
 
-Add:
+Read-only worktree of the revision, as for the judge. Artifacts go in `scratch/`.
 
 ```
 Question: <one question about one revision>      Revision: <SHA>
@@ -104,5 +82,12 @@ Change no code. Hand back findings with the evidence for each, and say which dec
 inform.
 ```
 
-Read-only worktree of the revision, as for the judge.
-Artifacts go in `<run dir>/profiles/<id>/`.
+## Plan
+
+A planner gets ONLY this, in a fresh context. No idea, no area.
+
+```
+Task: <task>      Plan number: NNN      Nudge: <optional, one short phrase, or none>
+State dir: <abs path>
+Load vibesys:plan-hypotheses and vibesys:state. Write only your own plan file.
+```

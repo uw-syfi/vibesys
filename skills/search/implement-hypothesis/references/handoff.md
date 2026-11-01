@@ -5,12 +5,12 @@ The lead acts on your handoff without seeing your work. Write it so it can be ch
 ## Format
 
 ```
-Hypothesis: <id>      Outcome: candidate | no candidate
+Plan: <plan-NNN>      Outcome: candidate | no candidate
 Claim: <the claim as you tested it; say if you narrowed it>
 Commit: <full SHA>    Branch: <branch>    Parent: <full SHA>
 Checks: <commands you ran and their result>
 Measurement: <the compare output for the commit, and the base value; the records are in the
-  run directory>
+  state directory>
 Learned: <what the result says about the hypothesis, in one or two sentences>
 Next: <the step you would take, and why>
 Unapplied / open: <anything in the brief you did not do, and why>
@@ -33,4 +33,4 @@ the direction parked.
 
 ## Evidence
 
-Keep long output in files in the run directory and give their paths. The handoff stays short.
+Keep long output in files in `scratch/` of the state directory and give their paths. The handoff stays short.

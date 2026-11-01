@@ -42,17 +42,17 @@ the TOML prefix.
    to measure. Do not dispatch overlapping measurement windows. This also
    requires every load command, including unrecorded profiling or sanity runs, to take
    the host-wide `measurements.py run -- <command>` lock. Recorder validation and append
-   also take the controller transaction lock.
-2. Use an absolute `RUN` path. Resolve the full commit SHA and create a new detached worktree:
-   `git worktree add --detach "$RUN/measure/<work-id>-<attempt>" <SHA>`.
+   also take the shard lock.
+2. Use the absolute state directory `D` (`vibesys:state`). Resolve the full commit SHA and create a new detached worktree:
+   `git worktree add --detach "$D/worktrees/measure-<work-id>-<attempt>" <SHA>`.
    Use a fresh attempt ID for every remeasurement. Make the parent directory first.
 3. From that checkout, execute the brief's build and service recipe, then the check. Use `service.py` with JSON service/probe/client argv to bound readiness
    and own cleanup of the entire group. Save logs
-   under the attempt's artifacts directory. Abort on build or correctness failure.
+   under `scratch/`. Abort on build or correctness failure.
 4. Execute the benchmark five times, appending its declared `json_argument` and a distinct
    absolute JSON output path each time. Abort on a nonzero exit, timeout, missing output,
    missing metric. Never reuse output from an earlier attempt.
-5. Use `--role base` whenever the measured SHA equals `run.json`'s `base_commit`, otherwise
+5. Use `--role base` whenever the measured SHA equals the optimization's base commit (the first base record), otherwise
    `--role candidate`, including remeasurements. Read the metric from each fresh JSON and
    call the recording CLI once with one `--sample`
    flag per value, `--check pass`, and the full command. Store auxiliary numeric samples
@@ -65,7 +65,7 @@ samples fit, record what completed and report `inconclusive` when there are too 
 verdict.
 
 A commit whose build or check fails has no samples to record. Record nothing for it; put the
-output in a file under the run directory and return the failure in the handoff so the lead records a controller transition.
+output in a file under `scratch/` and return the failure in the handoff.
 Use `--check fail` only when a later re-check of a commit that already has samples fails, with
 the samples that commit was measured with: `best` skips any commit that has a failed check.
 
@@ -85,9 +85,17 @@ at the fewest samples, down to 2.04). Everything else is `inconclusive`.
   directory) are compared. If `OBJECTIVE.md` or the checker changes, old samples stop being
   comparable and the compare says so.
 - The oriented `ratio` is above 1 when the commit is better, whatever the direction.
-- One run has one base. A second `--role base` record must name the same commit.
+- One optimization has one base. A second `--role base` record must name the same commit.
 - To ask "is this no worse than main", record main's samples (base role for the initial commit, candidate otherwise) and
   compare with `--base <main SHA>`.
+
+## Shards and `check`
+
+`record` appends to `measurements/<commit-sha>.jsonl` in the state directory; `compare`, `best`
+and `show` read every shard. `check --dir D [--branch vibesys/<task>]` is read-only: it asks git
+and the records whether the branch head has a passing check and a `better` verdict against the
+base, lists the commits since the base that have no record, and exits 1 when the head is not
+proven. It records nothing.
 
 ## Cleaning up
 
