@@ -17,17 +17,35 @@ on:
   merge_group:
     types: [checks_requested]
 
+# CI runs in two stages (docs/contributing/development.md, "CI gates"):
+#
+# - The commit stage runs on `pull_request`: change selection, format, lint, types, the
+#   Python repository-policy checks, the Python tests the change reaches through imports
+#   (`test-impact`), and the client quality, unit-test and build checks. It is the fast
+#   signal on every push and has a budget of about 270 s.
+# - The full stage runs on `merge_group` (and on `push` to main): the commit stage's checks
+#   and everything else, every Python test shard, the client end-to-end shards, seed
+#   exploration, coverage, the real-system tiers and the example and image jobs. Every
+#   test therefore still runs before every merge, on the tree the merge will produce.
+#
+# A job that belongs to the full stage only carries `github.event_name != 'pull_request'` in
+# its `if`. `Required PR CI` and `ci-budget` run on both events.
+
 env:
   # Wall-clock thresholds for a whole run, checked by `ci-budget` below (issue
   # #474): a warning above the first, a failure above the second. Kept here so
   # raising or lowering them is a one-line change and the guard and the
-  # documentation can't disagree.
+  # documentation can't disagree. The first pair is the full stage (`merge_group`,
+  # `push`), the second the commit stage (`pull_request`).
   # The budget is under 5 minutes with no added compute (no bigger runners, no
   # more shards). 270 s warns that a run is near it. The failure stays at 600 s
   # until p95 execution is under about 260 s: runs measured 250 to 280 s with
   # slow-runner outliers to 373 s, so failing at 300 s now would be noise.
   CI_WALL_TIME_WARN_SECONDS: '270'
   CI_WALL_TIME_ERROR_SECONDS: '600'
+  # The commit stage is the one that has to stay fast, so it fails sooner than the full stage.
+  CI_COMMIT_STAGE_WARN_SECONDS: '270'
+  CI_COMMIT_STAGE_ERROR_SECONDS: '360'
 
 jobs:
   # This job decides which parts of the tree a change can affect. The workflow
@@ -137,7 +155,7 @@ jobs:
 
   stitch:
     needs: changes
-    if: needs.changes.outputs.stitch == 'true'
+    if: github.event_name != 'pull_request' && needs.changes.outputs.stitch == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -227,6 +245,48 @@ jobs:
 
       - name: Check Python types
         run: ./support/repoctl/repoctl run-checks --group python_types
+
+  # The commit stage's Python tests: the test files the change can reach through imports,
+  # closest first, cheapest first, within a time budget (scripts/impacted_tests.py; the
+  # `python_impact_tests` group names the command and the budget). Pull requests only: the
+  # full stage runs every shard on the merge queue's tree. What the budget leaves out is
+  # listed in the step's report.
+  test-impact:
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Record when this job's cancel clock started
+        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
+      # The history back to the merge base with main: the selection reads the diff.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          filter: blob:none
+
+      - name: Pass the pytest cancel deadline
+        run: python3 scripts/pytest_job_deadline.py
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Set up repoctl
+        uses: ./.github/actions/setup-repoctl
+
+      - name: Run the Python tests the change reaches
+        run: ./support/repoctl/repoctl run-checks --group python_impact_tests
 
   # The client work is four jobs, one per independent check group, so its wall time
   # is the slowest leg rather than the sum (issue #1678). Each job has its own
@@ -340,7 +400,7 @@ jobs:
   # `fail-fast: false` lets a red shard finish its siblings so one run lists every failure.
   clients-e2e:
     needs: changes
-    if: needs.changes.outputs.clients == 'true'
+    if: github.event_name != 'pull_request' && needs.changes.outputs.clients == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
@@ -381,7 +441,7 @@ jobs:
 
   queue-native:
     needs: changes
-    if: needs.changes.outputs.evaluators == 'true'
+    if: github.event_name != 'pull_request' && needs.changes.outputs.evaluators == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -475,7 +535,7 @@ jobs:
   # workload checks below stay explicit because their flags differ per task.
   validate-examples:
     needs: changes
-    if: needs.changes.outputs.examples == 'true'
+    if: github.event_name != 'pull_request' && needs.changes.outputs.examples == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -522,7 +582,7 @@ jobs:
   # runner's own Go, Rust and C++ toolchains are what the shards used.
   native-evaluator-examples:
     needs: changes
-    if: needs.changes.outputs.examples == 'true'
+    if: github.event_name != 'pull_request' && needs.changes.outputs.examples == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -567,7 +627,7 @@ jobs:
   # `cpu_check` project's own and takes ~3 s to build.
   validate-examples-cpu-check:
     needs: changes
-    if: needs.changes.outputs.examples == 'true'
+    if: github.event_name != 'pull_request' && needs.changes.outputs.examples == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
@@ -611,7 +671,7 @@ jobs:
   # image's contents or the sandbox backend pays for this job's build time.
   agent-image:
     needs: changes
-    if: needs.changes.outputs.agent_image == 'true'
+    if: github.event_name != 'pull_request' && needs.changes.outputs.agent_image == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -699,8 +759,9 @@ jobs:
   test:
     needs: changes
     if: >-
-      needs.changes.outputs.python == 'true' ||
-      needs.changes.outputs.clients == 'true'
+      github.event_name != 'pull_request' &&
+      (needs.changes.outputs.python == 'true' ||
+      needs.changes.outputs.clients == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
@@ -825,8 +886,9 @@ jobs:
   coverage:
     needs: [changes, test]
     if: >-
-      needs.changes.outputs.python == 'true' ||
-      needs.changes.outputs.clients == 'true'
+      github.event_name != 'pull_request' &&
+      (needs.changes.outputs.python == 'true' ||
+      needs.changes.outputs.clients == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -868,8 +930,10 @@ jobs:
           name: coverage-xml
           path: coverage.xml
 
+      # Against main as the queue saw it, so it is the merge's own change. A pull request
+      # run has no coverage; the full stage owns it.
       - name: Check patch coverage
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'merge_group'
         run: ./support/repoctl/repoctl run-checks --group patch_coverage
 
   # Reruns the tests a pull request adds or changes across many seeds and schedule
@@ -880,11 +944,12 @@ jobs:
   # head commit salts the seeds and where each round of tests starts, so a PR too large
   # for one push's cap gets its other tests explored on later pushes; the job summary lists
   # what the cap left out. A PR that touches no test pays for the checkout and a
-  # stdlib-only diff scan only (no environment setup). Pull requests only; the merge queue
-  # has already seen the result.
+  # stdlib-only diff scan only (no environment setup). Merge queue entries only: the commit
+  # stage of a pull request leaves it to the full stage, which explores the change the queue
+  # is about to merge, against the main the queue branched from.
   seed-exploration:
     needs: changes
-    if: github.event_name == 'pull_request' && needs.changes.outputs.python == 'true'
+    if: github.event_name == 'merge_group' && needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
     # A backstop only: the cap ends the exploration step after 150 s.
     timeout-minutes: 6
@@ -903,7 +968,7 @@ jobs:
 
       - name: Select the tests this pull request adds or changes
         id: select
-        run: python3 scripts/explore_changed_tests.py select --base "origin/${{ github.base_ref }}" --ids-file "$RUNNER_TEMP/changed-tests.txt"
+        run: python3 scripts/explore_changed_tests.py select --base "${{ github.event.merge_group.base_sha }}" --ids-file "$RUNNER_TEMP/changed-tests.txt"
 
       - name: Install uv
         if: steps.select.outputs.selected == 'true'
@@ -920,31 +985,11 @@ jobs:
         if: steps.select.outputs.selected == 'true'
         run: uv sync --dev
 
-      # The (test, seed) pairs that failed on this PR's previous push, replayed first so a
-      # failure found under a salted seed is retried until it passes. One entry per run;
-      # the newest of this PR's entries is restored. Best effort: a miss replays nothing.
-      - name: Restore this pull request's failing seeds
-        if: steps.select.outputs.selected == 'true'
-        continue-on-error: true
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/seed-failures.jsonl
-          key: seed-failures-pr-${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: seed-failures-pr-${{ github.event.pull_request.number }}-
-
       - name: Explore the changed tests across seeds and schedules
         if: steps.select.outputs.selected == 'true'
         env:
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: uv run --no-sync python scripts/explore_changed_tests.py run --ids-file "$RUNNER_TEMP/changed-tests.txt" --salt "$HEAD_SHA" --failures-file "$RUNNER_TEMP/seed-failures.jsonl"
-
-      - name: Save this pull request's failing seeds
-        if: always() && steps.select.outputs.selected == 'true'
-        continue-on-error: true
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/seed-failures.jsonl
-          key: seed-failures-pr-${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ github.run_attempt }}
+          HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+        run: uv run --no-sync python scripts/explore_changed_tests.py run --ids-file "$RUNNER_TEMP/changed-tests.txt" --salt "$HEAD_SHA"
 
   # Exercises the real Linux workspace-confinement boundary (issue #149). The
   # main `test` job skips these (no bubblewrap), so this job installs it and
@@ -952,7 +997,7 @@ jobs:
   # broken sandbox into a failure instead of a silent skip.
   sandbox-linux:
     needs: changes
-    if: needs.changes.outputs.python == 'true'
+    if: github.event_name != 'pull_request' && needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -1014,7 +1059,7 @@ jobs:
   # run (and fail loudly) rather than skip.
   sandbox-macos:
     needs: changes
-    if: needs.changes.outputs.python == 'true'
+    if: github.event_name != 'pull_request' && needs.changes.outputs.python == 'true'
     runs-on: macos-latest
     timeout-minutes: 10
 
@@ -1053,7 +1098,9 @@ jobs:
   # lives on the runner's local disk.
   real-tiers-slurm:
     needs: changes
-    if: needs.changes.outputs.real_tiers == 'true' || github.event_name == 'merge_group'
+    if: >-
+      github.event_name != 'pull_request' &&
+      (needs.changes.outputs.real_tiers == 'true' || github.event_name == 'merge_group')
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -1134,7 +1181,9 @@ jobs:
   # ROCm bases are about 25 GB each to pull.
   real-tiers-minimal-container:
     needs: changes
-    if: needs.changes.outputs.real_tiers == 'true' || github.event_name == 'merge_group'
+    if: >-
+      github.event_name != 'pull_request' &&
+      (needs.changes.outputs.real_tiers == 'true' || github.event_name == 'merge_group')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1227,7 +1276,7 @@ jobs:
   # Every successful event saves missing entries, including PRs and merge groups.
   feature-tests:
     needs: changes
-    if: needs.changes.outputs.agent_image == 'true'
+    if: github.event_name != 'pull_request' && needs.changes.outputs.agent_image == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1320,6 +1369,7 @@ jobs:
       - doc-checks
       - python-checks
       - typecheck
+      - test-impact
       - clients-quality
       - clients-tests
       - clients-build
@@ -1364,7 +1414,8 @@ jobs:
           PY
 
   # Reports the run's execution time against CI_WALL_TIME_WARN_SECONDS and
-  # CI_WALL_TIME_ERROR_SECONDS (issue #474). Over the warn threshold it
+  # CI_WALL_TIME_ERROR_SECONDS (issue #474), or against the CI_COMMIT_STAGE_* pair when the
+  # run is a pull request's commit stage. Over the warn threshold it
   # annotates the run; over the error threshold the job fails, so a slow run is
   # visibly red instead of a green run nobody inspects. It is not a required
   # check (Required PR CI does not need it), so a slow run is still mergeable.
@@ -1385,6 +1436,7 @@ jobs:
       - changes
       - doc-checks
       - python-checks
+      - test-impact
       - clients-quality
       - clients-tests
       - clients-build
@@ -1424,8 +1476,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
-          WARN_SECONDS: ${{ env.CI_WALL_TIME_WARN_SECONDS }}
-          ERROR_SECONDS: ${{ env.CI_WALL_TIME_ERROR_SECONDS }}
+          WARN_SECONDS: ${{ github.event_name == 'pull_request' && env.CI_COMMIT_STAGE_WARN_SECONDS || env.CI_WALL_TIME_WARN_SECONDS }}
+          ERROR_SECONDS: ${{ github.event_name == 'pull_request' && env.CI_COMMIT_STAGE_ERROR_SECONDS || env.CI_WALL_TIME_ERROR_SECONDS }}
         run: |
           set -euo pipefail
           # This job is still running, so its own row has an empty
