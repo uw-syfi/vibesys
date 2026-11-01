@@ -87,14 +87,23 @@ class Folded:
     state: CoreState
     owed: Translated = field(default_factory=Translated)
 
-    def encode(self) -> bytes:
-        """The canonical JSON of this fold, for a cache of it."""
-        return encode_fold(self.state, self.owed.events, self.owed.discarded)
+    def encode(self, rules: str | None = None) -> bytes:
+        """The canonical JSON of this fold, for a cache of it, naming the rules that made it.
+
+        ``rules`` is the identity of those rules: this code's unless a test stands in for another.
+        """
+        return encode_fold(self.state, self.owed.events, self.owed.discarded, rules)
 
     @classmethod
-    def decode(cls, data: bytes, registry: OperationRegistry | None = None) -> Folded:
-        """The fold ``encode`` wrote, refused with a ``ValueError`` when it cannot be read."""
-        state, events, discarded = decode_fold(data, registry)
+    def decode(
+        cls, data: bytes, registry: OperationRegistry | None = None, rules: str | None = None
+    ) -> Folded:
+        """The fold ``encode`` wrote, refused with a ``ValueError`` when it cannot be read.
+
+        A fold made by other rules than ``rules`` (this code's unless a test stands in for
+        another) raises ``FoldRulesChangedError``: a cache is valid under the rules that folded it.
+        """
+        state, events, discarded = decode_fold(data, registry, rules)
         return cls(state, Translated(events, discarded))
 
 

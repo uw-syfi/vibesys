@@ -26,6 +26,7 @@ from vs_proto.api import (
     RunEnded as RunEndedRecord,
 )
 
+from ._fold_rules import fold_rules
 from ._refusal import RecordRefusedError, RefusalReason
 from .types.common import Value
 from .types.kernel import CoreEvent, CoreState
@@ -59,10 +60,24 @@ class _FinishedBody(Value):
     owner_events: tuple[OwnerEvent, ...] = ()
 
 
+class FoldRulesChangedError(ValueError):
+    """A cached fold was made by other rules than the ones reading it, so it cannot stand for a fold."""
+
+    def __init__(self, written: str, reading: str) -> None:
+        """Name the rules that wrote the fold and the ones that read it, shortened."""
+        self.written = written
+        self.reading = reading
+        super().__init__(
+            f"the fold was made by rules {written[:12] or '(unknown)'}, not by {reading[:12] or '(unknown)'}"
+        )
+
+
 class _FoldBody(Value):
     """A cached fold: core's state, and the events the search has yet to hear."""
 
     schema_version: int = SCHEMA_VERSION
+    rules: str
+    """The identity of the rules that folded it (``_fold_rules``)."""
     state: CoreState
     events: tuple[Event, ...] = ()
     discarded: tuple[Discarded, ...] = ()
@@ -171,18 +186,33 @@ def decode_saved(encoded: EncodedSavedRun, registry: OperationRegistry | None) -
 
 
 def encode_fold(
-    state: CoreState, events: tuple[Event, ...], discarded: tuple[Discarded, ...]
+    state: CoreState,
+    events: tuple[Event, ...],
+    discarded: tuple[Discarded, ...],
+    rules: str | None = None,
 ) -> bytes:
-    """The canonical JSON of a fold: a state and what the search still has to hear."""
-    return _FOLD.dump_json(_FoldBody(state=state, events=events, discarded=discarded))
+    """The canonical JSON of a fold: a state and what the search still has to hear.
+
+    ``rules`` is the identity of the rules that folded it, the running ones unless a test says.
+    """
+    named = fold_rules() if rules is None else rules
+    return _FOLD.dump_json(_FoldBody(rules=named, state=state, events=events, discarded=discarded))
 
 
 def decode_fold(
-    data: bytes, registry: OperationRegistry | None
+    data: bytes, registry: OperationRegistry | None, rules: str | None = None
 ) -> tuple[CoreState, tuple[Event, ...], tuple[Discarded, ...]]:
-    """A fold written by ``encode_fold``, refused when another encoding or damaged wrote it."""
+    """A fold written by ``encode_fold``, refused when another encoding, other rules or damage made it.
+
+    A fold made by other rules than ``rules`` (the running ones unless a test says), or by rules
+    that are unknown, raises ``FoldRulesChangedError``: the records after it would be folded by
+    rules the state was not made under.
+    """
     body = _FOLD.validate_json(data, context=_context(registry))
     _same_encoding(body.schema_version)
+    reading = fold_rules() if rules is None else rules
+    if not reading or body.rules != reading:
+        raise FoldRulesChangedError(body.rules, reading)
     return body.state, body.events, body.discarded
 
 

@@ -2,8 +2,9 @@
 
 The cache holds the bytes of a fold (the writer's own encoding, opaque here), the number of records
 it covers and the digest of those records. It is never authoritative: a start that finds it absent,
-unreadable, ahead of the log or not the fold of the log's own first records folds the whole log, and
-the result is the same. Deleting it, corrupting it or truncating the log under it changes no result.
+unreadable, ahead of the log, not the fold of the log's own first records, or made by other rules than
+the ones that fold now, folds the whole log, and the result is the same. Deleting it, corrupting it or
+truncating the log under it changes no result.
 """
 
 from __future__ import annotations
@@ -36,7 +37,9 @@ class CacheMiss(StrEnum):
     DIGEST_MISMATCH = "digest_mismatch"
     """The cache is not the fold of the log's own first records."""
     STATE_REFUSED = "state_refused"
-    """The fold in the cache could not be read by the code that wrote it."""
+    """The fold in the cache could not be read: damaged, or written in another encoding."""
+    RULES_CHANGED = "rules_changed"
+    """The fold in the cache was made by other rules than the ones that fold now."""
 
 
 @dataclass(frozen=True)

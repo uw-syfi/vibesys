@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vs_core.api.recovery import Folded
+from vs_core.api.recovery import Folded, FoldRulesChangedError
 from vs_runlog.api import CachedFold, CacheMiss, PrefixDigest, judge
 from vs_runtime._saved_run_record import fold_log
 
@@ -44,6 +44,16 @@ type FoldStart = CacheUsed | CacheMiss
 """How a start got its fold: from a cache, or from the whole log for a typed reason."""
 
 
+@dataclass(frozen=True)
+class Keeping:
+    """How a keeper writes the cache: how often, and under which rules."""
+
+    every: int
+    """Core records a process appends between two writes while the run goes on."""
+    rules: str | None = None
+    """The identity of the rules that fold: this code's unless a test stands in for other code."""
+
+
 class FoldKeeper:
     """The cache of a run's fold: what a start used of it, and when it is written again."""
 
@@ -53,14 +63,13 @@ class FoldKeeper:
         digest: PrefixDigest,
         kept: Folded | None,
         start: FoldStart,
-        *,
-        every: int,
+        keeping: Keeping,
     ) -> None:
         """Keep ``kept``, the fold of the first ``digest.count`` records, in ``cache``."""
         self._cache = cache
         self._digest = digest
         self._kept = kept
-        self._every = every
+        self._keeping = keeping
         self._written_at = 0
         self.start = start
 
@@ -79,7 +88,7 @@ class FoldKeeper:
         older, and the next record tries again.
         """
         if appended == self._written_at or not (
-            resting or appended - self._written_at >= self._every
+            resting or appended - self._written_at >= self._keeping.every
         ):
             return
         tail = log.records()[self._digest.count :]
@@ -88,7 +97,9 @@ class FoldKeeper:
         self._written_at = appended
         if self._kept is None:
             return
-        cached = CachedFold(self._digest.count, self._digest.value(), self._kept.encode())
+        cached = CachedFold(
+            self._digest.count, self._digest.value(), self._kept.encode(self._keeping.rules)
+        )
         try:
             self._cache.store(cached)
         except OSError:
@@ -101,12 +112,15 @@ def start_fold(
     registry: OperationRegistry,
     *,
     every: int = CACHE_EVERY,
+    rules: str | None = None,
 ) -> tuple[Folded | None, FoldKeeper | None]:
     """The fold of ``prefix``, None while it holds no seed, and the keeper that goes on from it.
 
-    With a cache that is the fold of ``prefix``'s own first records, only the records after it are
-    folded. A cache that is not (see ``CacheMiss``), or whose fold cannot be read, is ignored and
-    the whole of ``prefix`` is folded: the result is the same.
+    With a cache that is the fold of ``prefix``'s own first records, made by the rules that fold
+    now, only the records after it are folded. A cache that is not (see ``CacheMiss``), made by
+    other rules (a code change since it was written), or whose fold cannot be read, is ignored and
+    the whole of ``prefix`` is folded: the result is the same. ``rules`` is the identity of the
+    rules that fold, this code's unless a test stands in for other code.
     """
     if cache is None:
         return fold_log(prefix, registry), None
@@ -114,12 +128,14 @@ def start_fold(
     verdict = judge(cache.load(), prefix, digest)
     if isinstance(verdict, CachedFold):
         try:
-            cached = Folded.decode(verdict.state, registry)
+            cached = Folded.decode(verdict.state, registry, rules)
+        except FoldRulesChangedError:
+            verdict = CacheMiss.RULES_CHANGED
         except ValueError:
             verdict = CacheMiss.STATE_REFUSED
         else:
             folded = fold_log(prefix[verdict.through_seq :], registry, cached)
             start = CacheUsed(verdict.through_seq)
-            return folded, FoldKeeper(cache, digest, folded, start, every=every)
+            return folded, FoldKeeper(cache, digest, folded, start, Keeping(every, rules))
     folded = fold_log(prefix, registry)
-    return folded, FoldKeeper(cache, digest, folded, verdict, every=every)
+    return folded, FoldKeeper(cache, digest, folded, verdict, Keeping(every, rules))
