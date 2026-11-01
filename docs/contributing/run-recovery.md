@@ -131,8 +131,8 @@ Paths are under `libs/vs-runtime/src/vs_runtime/`.
 
 | Module | Lines | Callers | Verdict |
 |---|---|---|---|
-| `_effect_fence.py` | 365 | `_evaluation_requests.py`, `_observation_factory.py`, `_session_requests.py`, `_session_lifecycle_requests.py`, `api/core.py`, `api/retained.py`, `api/fence_contracts.py` | Delete. `NothingHeld` and `MayHold` exist to prove "nothing is held"; `clear` replaces them. The workspace executor no longer enters or closes a fence: a discard of an unbound generation removes the worktree an ensure left, and the step loop's scope order starts no ensure after it. The session, lifecycle and evaluation executors still do |
-| `_receipt_store.py` | 486 | 27 modules | Deleted `run_once`, `authorize`, `history`, `seal`, the execution record types (the schemas move to `_retained_receipts.py` for the retained-run import) and the `Settled`/`Transient`/`Replayed` result types: 330 lines of the 486. Kept: `exclusive`, `load`, `record_once`, `replace`, `modify`, the crash-safe keyed document store behind workspace receipts, the evaluation job registry and the evidence ledger |
+| `_effect_fence.py` | 365 | the five executors that entered or closed a fence | Deleted with `api/fence_contracts.py` and its contract. No executor enters or closes a fence: a close, cancel or discard runs only after the steps of its scope have a result (`decide`'s scope order), and a discard of an unbound generation removes what an ensure left. The schema of the fence records moves to `_retained_receipts.py` for the retained-run import |
+| `_keyed_documents.py` | 486 | 27 modules | Deleted `run_once`, `authorize`, `history`, `seal`, the execution record types (the schemas move to `_retained_receipts.py` for the retained-run import) and the `Settled`/`Transient`/`Replayed` result types: 330 lines of the 486. Kept: `exclusive`, `load`, `record_once`, `replace`, `modify`, the crash-safe keyed document store behind workspace receipts, the evaluation job registry and the evidence ledger |
 | `_access_settlement.py` | 377 | `_session_requests.py`, `_session_lifecycle_requests.py`, `api/core.py`, `api/retained.py` | Delete `access_unproven`. Keep the rest. `begin` and `settle` enforce the role's workspace grant and revert unauthorized writes, which is policy, not recovery. The runners also use `fence`, `receipt`, `restore_interrupted` and the new `rewind`, which `clear` of a turn calls to return the workspace to the baseline its receipt retains and reopen the key for the next attempt. `begin` calls `require_clear` and `blocking`, and the workspace's snapshot guard calls `fenced_by`, so the unsettled-writer index stays too: the 103 lines this row first counted for deletion are not removable without redesigning that guard |
 | `_evaluation_recovery.py` | 311 | `_polling_evaluation.py` and `_semantic_slurm_evaluation.py` took it as an optional argument that no production wiring passed; `api/slurm_evaluation_stack.py` | Deleted, with the optional `receipts` and `recovery` arguments and their branches
 | `_writer_reconciliation.py` | 326 | `_run_environment.py` (`reconcile_writers` on four environments), `_evaluation_recovery.py` | Deleted, with `reconcile_writers` on every environment. The no-op `_NoopWorkspaceRecovery` mixin stays for its `reap_orphans`, `repair_workspace` and `remove_workspace_child`
@@ -145,7 +145,7 @@ Paths are under `libs/vs-runtime/src/vs_runtime/`.
 
 | Module | Lines | Callers | Verdict |
 |---|---|---|---|
-| `_store_operations.py` | 443 | `_state_store.py`, `_core_loop.py` (`acquire`, `renew`, `release`, `verify`, `mutate_if_fenced`, `commit`), `_receipt_store.py:authorize` | Deleted (#3475 6b): the lease, the fence, the compare-and-swap record, `lease.json` and the store.json version 1 to 2 move, and with them `acquire`, `renew`, `release`, `verify`, `mutate_if_fenced`, `commit` and `quarantine`. The run's lock replaces the lease. `state.pb` is written by the one writer with an atomic rename, never compared and swapped. `_store_document.py` keeps the reading of the document |
+| `_store_operations.py` | 443 | `_state_store.py`, `_core_loop.py` (`acquire`, `renew`, `release`, `verify`, `mutate_if_fenced`, `commit`), `_keyed_documents.py:authorize` | Deleted (#3475 6b): the lease, the fence, the compare-and-swap record, `lease.json` and the store.json version 1 to 2 move, and with them `acquire`, `renew`, `release`, `verify`, `mutate_if_fenced`, `commit` and `quarantine`. The run's lock replaces the lease. `state.pb` is written by the one writer with an atomic rename, never compared and swapped. `_store_document.py` keeps the reading of the document |
 | `_state_store.py`, `api/state_store.py` | 314, 208 | `project.py`, `libs/vs-runtime/src/vs_runtime/_core_preflight.py`, `_run_end.py`, `src/vibesys/run/store_migration.py` | Kept as a reader (`observe`, `load`) of a legacy run's `store.json`, which the migration reads until it is deleted. `StoreFence` is deleted with the two writer-proof modules that named it |
 
 ### Tests
@@ -1073,8 +1073,7 @@ skill):
 Both are plain tuples at the top of the file, one line each, and each pull request that deletes part of the
 layer adds what it removed. The guard holds the keyed-replay modules, `ReplayUnknown`, the old shell runtime (`_core_loop`, `_core_run`, `_core_wiring`, `_core_publications` and the names they defined), the keyed replay store and the state store's writer half (`_store_operations`, `CommitFault`, `StoreOperations`, `mutate_if_fenced` and kin) today. The names the
 inventory above marks for deletion (`RecoveryBarrier`, `RecoveryCheck`, `HostEpoch`, `ChildLease`,
-`InspectRequest`, `InspectTurn`, `InspectOwnedJob`, `CancelOwnedResource`, `BlockRequest`, `EffectFences`,
-`NothingHeld`, `MayHold`, `HostFence`) join the list in the pull request that deletes each.
+`InspectRequest`, `InspectTurn`, `InspectOwnedJob`, `CancelOwnedResource`, `BlockRequest`, `HostFence`) join the list in the pull request that deletes each.
 `DELETED_MEMBERS` holds `(class, member)` pairs for a value that leaves a type the type keeps: `ObservationStatus.UNKNOWN` joins it in the pull request that removes the value. Unenforced:
 that every `StepRunner` implementation is in the contract suite's parametrization; no check holds it yet.
 The guard is an AST scan like `tests/architecture/test_epoch_ending_authority.py`. Unenforced remainder: the
@@ -1121,10 +1120,10 @@ These are facts the implementation must settle, found while checking the design 
   a provider that cannot resume from it falls back to a fresh conversation from retained content, which the
   client already does for a standalone message.
 - **Clear completeness on the Host run environment.** See [what fits none](#what-fits-none).
-- **The turn runner still goes through the session executor's fences.** `RuntimeSessionRequests.attempt`
-  skips the receipt of the result (`run_once`), but `_dispatch` still enters `EffectFences` and records a
-  `DispatchRecord` before the provider call. They hold across a rerun because `clear` runs first, and the
-  cutover removes them from `_dispatch` together with `_effect_fence.py`.
+- **The turn runner enters no fence.** `RuntimeSessionRequests.attempt` keeps no receipt of the result and
+  `_dispatch` enters no fence: it records a `DispatchRecord` before the provider call, which a later
+  `CancelTurn` finds. The record holds across a rerun because `clear` runs first, and `decide` runs a
+  cancel only after the turn's dispatch has a result or was cancelled.
 - **Registered `SESSION_TURN` operations carry the reply as a turn does.** The runner puts the reply in the
   report's `outcome_schema` and `outcome_json`, and leaves `operation_schema` unset: setting it needs the
   registry's codec context, which only the wiring has. No production operation has that lifecycle today, so

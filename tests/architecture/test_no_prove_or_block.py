@@ -76,6 +76,13 @@ DELETED_MODULES: tuple[str, ...] = (
     "vs_runtime._operation_requests",
     "vs_runtime._request_inspection",
     "vs_runtime._semantic_events",
+    # The effect fences: an executor entered one before it created something, and a cancel,
+    # close or discard closed it before answering "nothing held" (#3475 6b). The step loop's
+    # scope order and clear replaced them.
+    "vs_runtime._effect_fence",
+    "vs_runtime.api.fence_contracts",
+    # The receipt store: what it kept is the keyed document store, now named for that.
+    "vs_runtime._receipt_store",
 )
 """Dotted module paths that no file under ``src/`` or ``libs/*/src`` may provide, as a module or
 as a package (a listed ``a.b`` also forbids ``a.b.c``)."""
@@ -110,6 +117,13 @@ DELETED_SYMBOLS: tuple[str, ...] = (
     "Performer",
     "SealedExecution",
     "run_once",
+    # The effect fences.
+    "EffectFences",
+    "FenceKey",
+    "FenceKind",
+    "MayHold",
+    "NothingHeld",
+    "never_held",
 )
 """Names that no file under ``src/`` or ``libs/*/src`` may define or import."""
 

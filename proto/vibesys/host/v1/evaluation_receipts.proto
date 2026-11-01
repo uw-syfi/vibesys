@@ -4,6 +4,10 @@ package vibesys.host.v1;
 import "buf/validate/validate.proto";
 import "vibesys/host/v1/operation_options.proto";
 
+// Deprecated (#3475): every message of this file was read and written only by the local evaluation
+// receipts and the workspace acquisition of the replay recovery, which no run wired and which are
+// deleted. The messages stay, not deleted, so a receipt a test or an old checkout holds still decodes.
+option deprecated = true;
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1";
 
 enum LocalEvaluationState {

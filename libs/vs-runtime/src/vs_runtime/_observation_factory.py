@@ -16,7 +16,7 @@ sample of the request's state, and the newer sample supersedes it. Identity (eve
 request, scope, admission) is derived from the request and never supplied by
 the caller.
 
-Rows live in the shared ``ReceiptStore`` beside the executor's receipts, and the
+Rows live in the shared ``KeyedDocuments`` beside the executor's receipts, and the
 read-decide-write of one row is atomic across processes. An unreadable row raises ``ObservationLedgerCorruptError`` because a
 sequence cannot be chosen without it.
 """
@@ -37,12 +37,11 @@ from vs_core.api import (
     Scope,
 )
 from vs_runtime._core_identity import CoreRequestId, core_identity
-from vs_runtime._receipt_store import ReceiptCorruptError
+from vs_runtime._keyed_documents import DocumentCorruptError
 
 if TYPE_CHECKING:
     from vs_core.api import RequestBase
-    from vs_runtime._effect_fence import FenceKey, NothingHeld
-    from vs_runtime._receipt_store import ReceiptStore
+    from vs_runtime._keyed_documents import KeyedDocuments
 
 
 _FAMILY = "observations"
@@ -67,8 +66,8 @@ class ObservationFacts:
 
     Facts that hold nothing (a terminal release that accepts nothing and names no resource)
     end core's owning record, so they come only from a constructor that states why the
-    request holds nothing: ``never_held`` (a closed effect fence proves it), ``nothing_held`` (a
-    removal), ``refused`` (a self-refusal) or ``not_begun`` (an inspection; core resends the request). Built
+    request holds nothing: ``nothing_held`` (a removal or an unregistered target), ``refused`` (a
+    self-refusal) or ``not_begun`` (an inspection; core resends the request). Built
     any other way they raise ``TypeError``.
     """
 
@@ -89,7 +88,7 @@ class ObservationFacts:
 
     def __post_init__(self, _vouch: object) -> None:
         if self.holds_nothing and _vouch is not _VOUCHED:
-            message = "facts that hold nothing come only from never_held, nothing_held, refused or not_begun"
+            message = "facts that hold nothing come only from nothing_held, refused or not_begun"
             raise TypeError(message)
 
     @property
@@ -108,20 +107,6 @@ class ObservationFacts:
         return cls(status=ObservationStatus.REJECTED, diagnostic=PAYLOAD_CONFLICT)
 
     @classmethod
-    def never_held(cls, proof: NothingHeld, key: FenceKey, diagnostic: str) -> ObservationFacts:
-        """A terminal answer that what the request names holds nothing, now or later.
-
-        Only a closed effect fence proves it (``EffectFences.close`` or ``cleared``): a
-        cancel, close or discard of something no request entered the fence to create, or
-        whose entries the closer removed. Core ends an owning record only on a proven
-        release, so a bare rejection there would leave it waiting for an answer that never
-        comes. ``key`` is the fence of what the request names; a proof about another fence,
-        or a copy of a proof, raises ``TypeError``.
-        """
-        proof.vouch(key)
-        return cls._holding_nothing(diagnostic)
-
-    @classmethod
     def nothing_held(cls, diagnostic: str) -> ObservationFacts:
         """A terminal answer that what the request names holds nothing now, because it was removed.
 
@@ -137,7 +122,7 @@ class ObservationFacts:
 
         The refusal is sealed with the request's identity, so the request never acts later
         and holds nothing. It is never an answer about what another request created: that
-        is ``never_held``, which needs a closed fence.
+        is ``nothing_held``.
         """
         return cls._holding_nothing(diagnostic)
 
@@ -184,14 +169,14 @@ class ObservationSubject:
 class ObservationFactory:
     """Issue observations whose sequence core accepts across retries and restarts."""
 
-    def __init__(self, store: ReceiptStore) -> None:
+    def __init__(self, store: KeyedDocuments) -> None:
         self._store = store
 
     def latest(self, request_id: RequestId) -> Observation | None:
         """The last observation issued for *request_id*, or None when none was."""
         try:
             return self._store.load(_FAMILY, _PART, request_id.root, Observation)
-        except ReceiptCorruptError as error:
+        except DocumentCorruptError as error:
             message = f"observation row for {request_id.root} is unreadable"
             raise ObservationLedgerCorruptError(message) from error
 
@@ -242,7 +227,7 @@ class ObservationFactory:
 
         try:
             return self._store.modify(_FAMILY, _PART, key, Observation, decide)
-        except ReceiptCorruptError as error:
+        except DocumentCorruptError as error:
             message = f"observation row for {key} is unreadable"
             raise ObservationLedgerCorruptError(message) from error
 

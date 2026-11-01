@@ -8,7 +8,7 @@ from vs_core.api import HostFence, HostId, Until
 from vs_project.api import StateNamespace
 from vs_project.api.testing import scratch_state_directory
 from vs_runtime._core_requests import payload_digest_of
-from vs_runtime.api.core import ExecutionContext, ReceiptStore
+from vs_runtime.api.core import ExecutionContext, KeyedDocuments
 from vs_sim.api.testing import SimThreads
 
 if TYPE_CHECKING:
@@ -52,8 +52,8 @@ def context_for(
     )
 
 
-def receipt_store_in(directory: Path) -> ReceiptStore:
+def receipt_store_in(directory: Path) -> KeyedDocuments:
     """A receipt store over a scratch state directory below *directory*, as a run's has."""
     state = scratch_state_directory(directory, "receipts")
     namespace = StateNamespace(project_root=directory, root=state, portable=False)
-    return ReceiptStore(namespace, threads=SimThreads())
+    return KeyedDocuments(namespace, threads=SimThreads())

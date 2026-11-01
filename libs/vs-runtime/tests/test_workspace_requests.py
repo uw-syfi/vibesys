@@ -65,8 +65,8 @@ from vs_runtime.api import RuntimeContractError
 from vs_runtime.api.core import (
     ExecutionContext,
     ExecutionResult,
+    KeyedDocuments,
     ReceiptEvidenceLedger,
-    ReceiptStore,
     RequestExecutors,
     RuntimeWorkspaceRequests,
     revision_ref,
@@ -183,9 +183,9 @@ class _Env:
         _ENVS[runtime.workspaces] = self
         return runtime.workspaces
 
-    def store(self) -> ReceiptStore:
+    def store(self) -> KeyedDocuments:
         """A store over the run's durable receipts (a new one models a restart)."""
-        return ReceiptStore(
+        return KeyedDocuments(
             self.project.state.local_namespace(self.run_id, "receipts"), threads=SimThreads()
         )
 
@@ -349,8 +349,8 @@ def _git(path: Path, *args: str) -> str:
 
 
 def _executor(
-    workspaces: RuntimeWorkspaces, store: ReceiptStore | None = None
-) -> tuple[RuntimeWorkspaceRequests, ReceiptStore]:
+    workspaces: RuntimeWorkspaces, store: KeyedDocuments | None = None
+) -> tuple[RuntimeWorkspaceRequests, KeyedDocuments]:
     """A host's executor over the run's durable receipts (a new one models a restart)."""
     chosen = store or _ENVS[workspaces].store()
     executor = RuntimeWorkspaceRequests(
@@ -532,7 +532,7 @@ def test_a_snapshot_of_a_workspace_holding_a_nested_repository_fails_and_names_i
         asyncio.run(exercise(workspaces))
 
 
-class _FailingStore(ReceiptStore):
+class _FailingStore(KeyedDocuments):
     """A real store whose chosen writes fail, as when a host dies at that point."""
 
     def __init__(self, namespace: StateNamespace) -> None:

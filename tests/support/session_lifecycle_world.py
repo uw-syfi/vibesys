@@ -34,7 +34,7 @@ from vs_core.api import (
 )
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api.core import (
-    ReceiptStore,
+    KeyedDocuments,
     RuntimeSessionRequests,
     SessionLifecycleRequests,
     SessionRequestRouter,
@@ -122,7 +122,7 @@ def open_lifecycle_host(
 
 def lifecycle_executor(
     host: SessionHost,
-    store: ReceiptStore,
+    store: KeyedDocuments,
     sessions: FakeAgentSessions | None = None,
     blocking: BlockingRunner | None = None,
     yields: TurnYields | None = None,

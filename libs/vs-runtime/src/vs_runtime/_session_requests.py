@@ -4,13 +4,10 @@ Core names sessions by ``SessionId`` and turns by ``InvocationRef``. This module
 maps them onto durable ``vs_agent`` conversations (``AgentSessions``) and
 translates what the journal proves back into core observations.
 
-Rules every kind follows (the shared ``ReceiptStore.run_once`` enforces the first
-four; see ``_receipt_store``):
+Rules every kind follows:
 
-* a sealed result is replayed, never recomputed;
-* another payload under one request identity is a REJECTED observation;
-* a stale lease or host fence performs no effect and reports Unknown;
-* a ``begun`` marker is written before the effect, so a restarted effect inspects;
+* a repeated request (``ExecutionContext.repeat``) finds what an earlier attempt made: the
+  binding, the dispatch record and the journal row, and never makes a second of them;
 * an existing conversation is reattached positively. A missing binding or a lost
   provider checkpoint is a typed rejection; a fresh conversation never takes its
   place, whatever the reuse policy says.
@@ -96,15 +93,14 @@ from vs_runtime._access_settlement import (
 )
 from vs_runtime._core_identity import CoreRequestId, ReceiptKey, core_identity, core_named
 from vs_runtime._core_requests import ExecutionContext, ExecutionOutcome, ExecutionResult
-from vs_runtime._effect_fence import EffectFences, Entered, Fenced, FenceKey, FenceKind
+from vs_runtime._keyed_documents import (
+    DocumentCorruptError,
+    owner_key,
+)
 from vs_runtime._observation_factory import (
     ObservationFactory,
     ObservationFacts,
     ObservationSubject,
-)
-from vs_runtime._receipt_store import (
-    ReceiptCorruptError,
-    owner_key,
 )
 from vs_runtime._session_operation import await_session_operation
 
@@ -116,7 +112,6 @@ if TYPE_CHECKING:
     from vs_agent.api import AgentSessions, AgentSessionSpec, ClientAgentSessions, InvocationOutcome
     from vs_core.api import (
         Continuation,
-        DecisionId,
         InvocationId,
         MidTurnOffer,
         Observation,
@@ -125,7 +120,7 @@ if TYPE_CHECKING:
     from vs_core.api.recovery import OwnerEvent
     from vs_prompts.api import RenderedPrompt
     from vs_runtime._core_requests import SessionRoleRequest
-    from vs_runtime._receipt_store import ReceiptStore
+    from vs_runtime._keyed_documents import KeyedDocuments
     from vs_runtime._workspace_access import AccessGrant, AccessGuardedWorkspace
     from vs_sim.api import BlockingRunner
 
@@ -156,7 +151,7 @@ def conversation_key(request: RequestBase, session: SessionSpec) -> AgentSession
     )
 
 
-def load_session_binding(store: ReceiptStore, bkey: str) -> SessionBinding | None:
+def load_session_binding(store: KeyedDocuments, bkey: str) -> SessionBinding | None:
     """Read a binding; the only reader of the binding family outside this module's writers."""
     return store.load(_BINDINGS, "binding", bkey, SessionBinding)
 
@@ -171,27 +166,10 @@ def conversation_established(
 
 
 def load_dispatch_record(
-    store: ReceiptStore, bkey: str, invocation_id: InvocationId
+    store: KeyedDocuments, bkey: str, invocation_id: InvocationId
 ) -> DispatchRecord | None:
     """Read the dispatch record for one invocation of a bound session."""
     return store.load(_DISPATCHES, "dispatch", f"{bkey}/{invocation_id.root}", DispatchRecord)
-
-
-def invocation_fence(bkey: str, invocation_id: str) -> FenceKey:
-    """The fence of one invocation's provider turn: DispatchTurn enters it, CancelTurn closes it."""
-    return FenceKey(FenceKind.INVOCATION, f"{bkey}/{invocation_id}")
-
-
-def episode_fence(bkey: str, episode: DecisionId | None) -> FenceKey:
-    """The fence of one admission episode of a session: EnsureSession enters it, CloseSession closes it.
-
-    A later episode reattaches the same session under the same binding key, so the fence
-    names the episode the close ended, never the session alone.
-    """
-    return FenceKey(
-        FenceKind.SESSION_EPISODE,
-        f"{bkey}/run" if episode is None else f"{bkey}/episode:{episode.root}",
-    )
 
 
 class SessionResolver(Protocol):
@@ -452,13 +430,6 @@ def _stands_alone(turn: TurnSpec) -> bool:
     return turn.charge_class in ("paid", "free") and turn.predecessor is None
 
 
-_WITHDRAWN = "the invocation was withdrawn before dispatch"
-
-
-class _WithdrawnError(Exception):
-    """A cancel closed the invocation's fence before the provider call began."""
-
-
 class _RefusalError(Exception):
     """A validation step ended the request with these terminal or unknown facts."""
 
@@ -502,7 +473,7 @@ class RuntimeSessionRequests:
         self,
         sessions: ClientAgentSessions,
         resolver: SessionResolver,
-        store: ReceiptStore,
+        store: KeyedDocuments,
         yields: TurnYields[DispatchTurn, Continuation] | None = None,
         *,
         blocking: BlockingRunner,
@@ -514,7 +485,6 @@ class RuntimeSessionRequests:
         self._sessions = sessions
         self._resolver = resolver
         self._store = store
-        self._fences = EffectFences(store)
         self._yields = yields
         self._blocking = blocking
         self.settlement = AccessSettlement(store, resolver.workspace_for)
@@ -537,7 +507,7 @@ class RuntimeSessionRequests:
             binding = load_session_binding(
                 self._store, scope_binding_key(offer.scope, invocation.session_id)
             )
-        except ReceiptCorruptError:
+        except DocumentCorruptError:
             return SteerOutcome.NO_RUNNING_TURN
         message = self._resolver.mid_turn_message(offer.input)
         if binding is None or message is None:
@@ -613,7 +583,7 @@ class RuntimeSessionRequests:
             facts = await self._perform(call)
         except _RefusalError as refusal:
             facts = refusal.facts
-        except ReceiptCorruptError as error:
+        except DocumentCorruptError as error:
             facts = _unknown(str(error))
         return self._result(call.request, call.context, facts)
 
@@ -730,7 +700,7 @@ class RuntimeSessionRequests:
             session_key=str(conversation_key(request, spec)),
             turn_timeout_seconds=None if timeout is None else timeout.total_seconds(),
         )
-        binding = self._bind(key, wanted, required, episode_fence(key, request.admission_id), call)
+        binding = self._bind(key, wanted, required)
         if not _same_session(binding.spec, spec):
             raise _RefusalError(
                 _rejected("session identity is bound to another spec", binding.resource_id)
@@ -748,18 +718,11 @@ class RuntimeSessionRequests:
         return _Facts(ObservationStatus.SUCCEEDED, accepted=True, resource_id=binding.resource_id)
 
     def _bind(
-        self,
-        key: str,
-        wanted: SessionBinding,
-        required: ResourceId | None,
-        fence: FenceKey,
-        call: _Call,
+        self, key: str, wanted: SessionBinding, required: ResourceId | None
     ) -> SessionBinding:
         """The session's binding: created for a fresh identity, never for a required reattach.
 
-        The binding is written in the same locked step as the ensure enters its episode's
-        fence, so a close of the episode either comes first and no binding is ever made for
-        it, or comes after and finds the binding to release.
+        The binding is written once under the store's lock, so a repeated ensure finds it.
         """
         if required is not None and wanted.spec.policy != "reuse":
             raise _RefusalError(_rejected("a required resource needs the reuse policy", required))
@@ -773,15 +736,9 @@ class RuntimeSessionRequests:
                         required,
                     )
                 )
-            admission = self._fences.enter(fence, by=call.canonical, host=call.context.fence)
-            if isinstance(admission, Fenced) and not (
-                admission.entered_before and stored is not None
-            ):
-                raise _RefusalError(_rejected("the session was closed before this ensure bound it"))
             if stored is None:
                 self._store.replace(_BINDINGS, "binding", key, wanted)
                 stored = wanted
-            self._fences.leave(fence, by=call.canonical)
             return stored
 
     async def _require_checkpoint(self, binding: SessionBinding) -> None:
@@ -872,15 +829,10 @@ class RuntimeSessionRequests:
                 return _rejected(str(error), binding.resource_id)
             except AccessSettlementError as error:
                 return _retryable(str(error), binding.resource_id)
-        fence = invocation_fence(bkey, dispatch.invocation)
         ended = await self._admit(request, call, bkey, binding, dispatch)
         if ended is not None:
             return ended
-        try:
-            return await self._run_turn(request, bkey, binding, dispatch, call)
-        finally:
-            # Whatever this delivery started is in the journal now: a cancel may judge it.
-            self._fences.leave(fence, by=call.canonical)
+        return await self._run_turn(request, bkey, binding, dispatch)
 
     async def _settle_ended_peers(self, workspace: Path, key: AccessKey) -> None:
         """Judge the unsettled turns of this workspace whose journal proves they ended.
@@ -931,7 +883,6 @@ class RuntimeSessionRequests:
         bkey: str,
         binding: SessionBinding,
         dispatch: _Dispatch,
-        call: _Call,
     ) -> _Facts:
         turn = request.turn
         access_key = AccessKey(binding=bkey, invocation=dispatch.invocation)
@@ -947,7 +898,7 @@ class RuntimeSessionRequests:
             # The baseline was refused, so no provider call began: ask again, do not inspect.
             return _retryable(str(error), binding.resource_id)
         try:
-            outcome = await self._judged_outcome(access_key, bkey, binding, dispatch, call)
+            outcome = await self._judged_outcome(access_key, bkey, binding, dispatch)
             if isinstance(outcome, _Facts):
                 return outcome
             return await self._finish(outcome, bkey, binding, dispatch, turn.output_schema)
@@ -963,26 +914,21 @@ class RuntimeSessionRequests:
         bkey: str,
         binding: SessionBinding,
         dispatch: _Dispatch,
-        call: _Call,
     ) -> InvocationOutcome | _Facts:
         """The dispatch's journal outcome, or the facts of a dispatch that ended without one."""
         try:
-            return await self._outcome(bkey, binding, dispatch, call)
-        except (AgentExecutionCancelledError, _WithdrawnError) as cancelled:
+            return await self._outcome(bkey, binding, dispatch)
+        except AgentExecutionCancelledError as cancelled:
             # Cancelled before the provider call: no turn ran, so it wrote nothing to judge.
             try:
                 await self.settlement.settle(access_key)
             except AccessSettlementError as error:
                 return _unknown(str(error), binding.resource_id)
-            return (
-                _Facts(
-                    ObservationStatus.CANCELLED,
-                    accepted=True,
-                    resource_id=binding.resource_id,
-                    diagnostic=str(cancelled),
-                )
-                if isinstance(cancelled, AgentExecutionCancelledError)
-                else _rejected(_WITHDRAWN, binding.resource_id)
+            return _Facts(
+                ObservationStatus.CANCELLED,
+                accepted=True,
+                resource_id=binding.resource_id,
+                diagnostic=str(cancelled),
             )
         except InvocationConflictError as error:
             return _rejected(f"invocation conflicts with its journal: {error}", binding.resource_id)
@@ -992,14 +938,12 @@ class RuntimeSessionRequests:
             return _unknown(f"dispatch state is unreadable: {error}", binding.resource_id)
 
     async def _outcome(
-        self, bkey: str, binding: SessionBinding, dispatch: _Dispatch, call: _Call
+        self, bkey: str, binding: SessionBinding, dispatch: _Dispatch
     ) -> InvocationOutcome:
         """The journal's outcome for the invocation, dispatching it only if it never ended.
 
         A turn that already ended is read back: dispatching it through the other of
-        start and resume would look like a changed payload to the journal. Just before the
-        provider call the dispatch enters its fence again, so a cancel that closed it in
-        the meantime stops the call (``_WithdrawnError``).
+        start and resume would look like a changed payload to the journal.
         """
         recorded = await self._blocking.run(
             self._sessions.inspect, dispatch.key, dispatch.invocation
@@ -1009,15 +953,6 @@ class RuntimeSessionRequests:
         established = await self._established(bkey, excluding=dispatch.invocation)
         if established:
             await self._require_checkpoint(binding)
-        fence = invocation_fence(bkey, dispatch.invocation)
-        if isinstance(
-            self._fences.enter(fence, by=call.canonical, host=call.context.fence), Fenced
-        ):
-            if self._never_journaled(dispatch.invocation):
-                raise _WithdrawnError
-            return await self._blocking.run(
-                self._sessions.inspect, dispatch.key, dispatch.invocation
-            )
         return await await_session_operation(
             asyncio.create_task(
                 self._blocking.run(self._start_or_resume, dispatch, established=established)
@@ -1096,32 +1031,12 @@ class RuntimeSessionRequests:
                 return _rejected("the turn deadline passed before dispatch", binding.resource_id)
             # A recorded dispatch may have started: replay what the journal proves, never reject.
             return await self._after_deadline(bkey, binding, dispatch, turn.output_schema)
-        # The dispatch enters the invocation's fence and records itself in one locked step,
-        # before any provider call: a cancel either came first and no call ever begins, or
-        # finds this record and judges the turn.
-        fence = invocation_fence(bkey, dispatch.invocation)
+        # The dispatch records itself before any provider call: a cancel that runs later finds
+        # this record and judges the turn.
         with self._store.exclusive():
-            admission = self._fences.enter(fence, by=call.canonical, host=call.context.fence)
-            if isinstance(admission, Entered):
-                self._store.record_once(_DISPATCHES, "dispatch", record_key, link)
-        if isinstance(admission, Fenced):
-            return await self._after_cancel(admission, bkey, binding, dispatch, turn.output_schema)
+            self._store.record_once(_DISPATCHES, "dispatch", record_key, link)
         self._note_dispatch(bkey, dispatch.invocation)
         return None
-
-    async def _after_cancel(
-        self,
-        admission: Fenced,
-        bkey: str,
-        binding: SessionBinding,
-        dispatch: _Dispatch,
-        ref: SchemaRef,
-    ) -> _Facts:
-        """A dispatch a cancel fenced off: report what the journal holds, start nothing."""
-        if not admission.entered_before or self._never_journaled(dispatch.invocation):
-            # No provider call began before the cancel, and none will.
-            return _rejected(_WITHDRAWN, binding.resource_id)
-        return await self._after_deadline(bkey, binding, dispatch, ref)
 
     async def _after_deadline(
         self, bkey: str, binding: SessionBinding, dispatch: _Dispatch, ref: SchemaRef
@@ -1211,7 +1126,7 @@ class RuntimeSessionRequests:
             return await self._inspect_facts(request, context)
         except _RefusalError as refusal:
             return self._result(request, context, refusal.facts)
-        except ReceiptCorruptError as error:
+        except DocumentCorruptError as error:
             return self._result(request, context, _unknown(str(error)))
 
     async def _inspect_facts(
@@ -1341,7 +1256,7 @@ class JournalRunInvocations:
     not yet reverted, because a snapshot would retain them.
     """
 
-    def __init__(self, sessions: ClientAgentSessions, store: ReceiptStore) -> None:
+    def __init__(self, sessions: ClientAgentSessions, store: KeyedDocuments) -> None:
         """Read the same journal and bindings the session executor writes."""
         self._sessions = sessions
         self._store = store
@@ -1364,7 +1279,7 @@ class JournalRunInvocations:
                 AgentSessionKey.parse(binding.session_key), invocation.invocation_id.root
             )
         except (
-            ReceiptCorruptError,
+            DocumentCorruptError,
             SessionPersistenceError,
             SessionConfigurationError,
             InvocationConflictError,

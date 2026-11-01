@@ -187,7 +187,6 @@
 {"path": "tests/support/core_host_world.py", "rule": "real_impl", "count": 5}
 {"path": "tests/support/docker_environment.py", "rule": "real_impl", "count": 2}
 {"path": "tests/support/executor_cases.py", "rule": "real_impl", "count": 4}
-{"path": "tests/support/fence_cases.py", "rule": "real_impl", "count": 4}
 {"path": "tests/support/owed_submissions.py", "rule": "real_impl", "count": 1}
 {"path": "tests/support/real_git.py", "rule": "real_impl", "count": 1}
 {"path": "tests/support/session_lifecycle_world.py", "rule": "real_impl", "count": 4}

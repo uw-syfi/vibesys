@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.12
 // 	protoc        (unknown)
-// source: vibesys/host/v1/evaluation_receipts.proto
+// vibesys/host/v1/evaluation_receipts.proto is a deprecated file.
 
 package hostv1
 
@@ -22,15 +22,22 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 type LocalEvaluationState int32
 
 const (
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 	LocalEvaluationState_LOCAL_EVALUATION_STATE_UNSPECIFIED LocalEvaluationState = 0
-	LocalEvaluationState_LOCAL_EVALUATION_STATE_QUEUED      LocalEvaluationState = 1
-	LocalEvaluationState_LOCAL_EVALUATION_STATE_RUNNING     LocalEvaluationState = 2
-	LocalEvaluationState_LOCAL_EVALUATION_STATE_SUCCEEDED   LocalEvaluationState = 3
-	LocalEvaluationState_LOCAL_EVALUATION_STATE_FAILED      LocalEvaluationState = 4
-	LocalEvaluationState_LOCAL_EVALUATION_STATE_CANCELED    LocalEvaluationState = 5
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	LocalEvaluationState_LOCAL_EVALUATION_STATE_QUEUED LocalEvaluationState = 1
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	LocalEvaluationState_LOCAL_EVALUATION_STATE_RUNNING LocalEvaluationState = 2
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	LocalEvaluationState_LOCAL_EVALUATION_STATE_SUCCEEDED LocalEvaluationState = 3
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	LocalEvaluationState_LOCAL_EVALUATION_STATE_FAILED LocalEvaluationState = 4
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	LocalEvaluationState_LOCAL_EVALUATION_STATE_CANCELED LocalEvaluationState = 5
 )
 
 // Enum value maps for LocalEvaluationState.
@@ -80,13 +87,18 @@ func (LocalEvaluationState) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_host_v1_evaluation_receipts_proto_rawDescGZIP(), []int{0}
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 type LocalStageState int32
 
 const (
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 	LocalStageState_LOCAL_STAGE_STATE_UNSPECIFIED LocalStageState = 0
-	LocalStageState_LOCAL_STAGE_STATE_SUCCEEDED   LocalStageState = 1
-	LocalStageState_LOCAL_STAGE_STATE_FAILED      LocalStageState = 2
-	LocalStageState_LOCAL_STAGE_STATE_SKIPPED     LocalStageState = 3
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	LocalStageState_LOCAL_STAGE_STATE_SUCCEEDED LocalStageState = 1
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	LocalStageState_LOCAL_STAGE_STATE_FAILED LocalStageState = 2
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	LocalStageState_LOCAL_STAGE_STATE_SKIPPED LocalStageState = 3
 )
 
 // Enum value maps for LocalStageState.
@@ -132,12 +144,16 @@ func (LocalStageState) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_host_v1_evaluation_receipts_proto_rawDescGZIP(), []int{1}
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 type LocalStageFailureKind int32
 
 const (
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 	LocalStageFailureKind_LOCAL_STAGE_FAILURE_KIND_UNSPECIFIED LocalStageFailureKind = 0
-	LocalStageFailureKind_LOCAL_STAGE_FAILURE_KIND_EXECUTION   LocalStageFailureKind = 1
-	LocalStageFailureKind_LOCAL_STAGE_FAILURE_KIND_COLLECTION  LocalStageFailureKind = 2
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	LocalStageFailureKind_LOCAL_STAGE_FAILURE_KIND_EXECUTION LocalStageFailureKind = 1
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	LocalStageFailureKind_LOCAL_STAGE_FAILURE_KIND_COLLECTION LocalStageFailureKind = 2
 )
 
 // Enum value maps for LocalStageFailureKind.
@@ -181,14 +197,20 @@ func (LocalStageFailureKind) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_host_v1_evaluation_receipts_proto_rawDescGZIP(), []int{2}
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 type LocalEvidenceKind int32
 
 const (
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 	LocalEvidenceKind_LOCAL_EVIDENCE_KIND_UNSPECIFIED LocalEvidenceKind = 0
-	LocalEvidenceKind_LOCAL_EVIDENCE_KIND_BUILD       LocalEvidenceKind = 1
-	LocalEvidenceKind_LOCAL_EVIDENCE_KIND_ACCURACY    LocalEvidenceKind = 2
-	LocalEvidenceKind_LOCAL_EVIDENCE_KIND_BENCHMARK   LocalEvidenceKind = 3
-	LocalEvidenceKind_LOCAL_EVIDENCE_KIND_PROFILE     LocalEvidenceKind = 4
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	LocalEvidenceKind_LOCAL_EVIDENCE_KIND_BUILD LocalEvidenceKind = 1
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	LocalEvidenceKind_LOCAL_EVIDENCE_KIND_ACCURACY LocalEvidenceKind = 2
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	LocalEvidenceKind_LOCAL_EVIDENCE_KIND_BENCHMARK LocalEvidenceKind = 3
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	LocalEvidenceKind_LOCAL_EVIDENCE_KIND_PROFILE LocalEvidenceKind = 4
 )
 
 // Enum value maps for LocalEvidenceKind.
@@ -236,13 +258,18 @@ func (LocalEvidenceKind) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_host_v1_evaluation_receipts_proto_rawDescGZIP(), []int{3}
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 type LocalEvidenceOutcome int32
 
 const (
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 	LocalEvidenceOutcome_LOCAL_EVIDENCE_OUTCOME_UNSPECIFIED LocalEvidenceOutcome = 0
-	LocalEvidenceOutcome_LOCAL_EVIDENCE_OUTCOME_PASSED      LocalEvidenceOutcome = 1
-	LocalEvidenceOutcome_LOCAL_EVIDENCE_OUTCOME_FAILED      LocalEvidenceOutcome = 2
-	LocalEvidenceOutcome_LOCAL_EVIDENCE_OUTCOME_OBSERVED    LocalEvidenceOutcome = 3
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	LocalEvidenceOutcome_LOCAL_EVIDENCE_OUTCOME_PASSED LocalEvidenceOutcome = 1
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	LocalEvidenceOutcome_LOCAL_EVIDENCE_OUTCOME_FAILED LocalEvidenceOutcome = 2
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	LocalEvidenceOutcome_LOCAL_EVIDENCE_OUTCOME_OBSERVED LocalEvidenceOutcome = 3
 )
 
 // Enum value maps for LocalEvidenceOutcome.
@@ -288,13 +315,18 @@ func (LocalEvidenceOutcome) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_host_v1_evaluation_receipts_proto_rawDescGZIP(), []int{4}
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 type LocalEvidenceFailureKind int32
 
 const (
-	LocalEvidenceFailureKind_LOCAL_EVIDENCE_FAILURE_KIND_UNSPECIFIED    LocalEvidenceFailureKind = 0
-	LocalEvidenceFailureKind_LOCAL_EVIDENCE_FAILURE_KIND_WORKLOAD       LocalEvidenceFailureKind = 1
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	LocalEvidenceFailureKind_LOCAL_EVIDENCE_FAILURE_KIND_UNSPECIFIED LocalEvidenceFailureKind = 0
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	LocalEvidenceFailureKind_LOCAL_EVIDENCE_FAILURE_KIND_WORKLOAD LocalEvidenceFailureKind = 1
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 	LocalEvidenceFailureKind_LOCAL_EVIDENCE_FAILURE_KIND_INFRASTRUCTURE LocalEvidenceFailureKind = 2
-	LocalEvidenceFailureKind_LOCAL_EVIDENCE_FAILURE_KIND_AMBIGUOUS      LocalEvidenceFailureKind = 3
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	LocalEvidenceFailureKind_LOCAL_EVIDENCE_FAILURE_KIND_AMBIGUOUS LocalEvidenceFailureKind = 3
 )
 
 // Enum value maps for LocalEvidenceFailureKind.
@@ -340,12 +372,16 @@ func (LocalEvidenceFailureKind) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_host_v1_evaluation_receipts_proto_rawDescGZIP(), []int{5}
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 type LocalMetricDirection int32
 
 const (
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 	LocalMetricDirection_LOCAL_METRIC_DIRECTION_UNSPECIFIED LocalMetricDirection = 0
-	LocalMetricDirection_LOCAL_METRIC_DIRECTION_MAX         LocalMetricDirection = 1
-	LocalMetricDirection_LOCAL_METRIC_DIRECTION_MIN         LocalMetricDirection = 2
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	LocalMetricDirection_LOCAL_METRIC_DIRECTION_MAX LocalMetricDirection = 1
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	LocalMetricDirection_LOCAL_METRIC_DIRECTION_MIN LocalMetricDirection = 2
 )
 
 // Enum value maps for LocalMetricDirection.
@@ -389,10 +425,13 @@ func (LocalMetricDirection) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_host_v1_evaluation_receipts_proto_rawDescGZIP(), []int{6}
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 type LocalContentDigest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Algorithm     string                 `protobuf:"bytes,1,opt,name=algorithm,proto3" json:"algorithm,omitempty"`
-	Value         string                 `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Algorithm string `protobuf:"bytes,1,opt,name=algorithm,proto3" json:"algorithm,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Value         string `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -427,6 +466,7 @@ func (*LocalContentDigest) Descriptor() ([]byte, []int) {
 	return file_vibesys_host_v1_evaluation_receipts_proto_rawDescGZIP(), []int{0}
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalContentDigest) GetAlgorithm() string {
 	if x != nil {
 		return x.Algorithm
@@ -434,6 +474,7 @@ func (x *LocalContentDigest) GetAlgorithm() string {
 	return ""
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalContentDigest) GetValue() string {
 	if x != nil {
 		return x.Value
@@ -441,12 +482,17 @@ func (x *LocalContentDigest) GetValue() string {
 	return ""
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 type LocalEvidenceFingerprints struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Candidate     *LocalContentDigest    `protobuf:"bytes,1,opt,name=candidate,proto3" json:"candidate,omitempty"`
-	Evaluator     *LocalContentDigest    `protobuf:"bytes,2,opt,name=evaluator,proto3" json:"evaluator,omitempty"`
-	Workload      *LocalContentDigest    `protobuf:"bytes,3,opt,name=workload,proto3" json:"workload,omitempty"`
-	Environment   *LocalContentDigest    `protobuf:"bytes,4,opt,name=environment,proto3" json:"environment,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Candidate *LocalContentDigest `protobuf:"bytes,1,opt,name=candidate,proto3" json:"candidate,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Evaluator *LocalContentDigest `protobuf:"bytes,2,opt,name=evaluator,proto3" json:"evaluator,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Workload *LocalContentDigest `protobuf:"bytes,3,opt,name=workload,proto3" json:"workload,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Environment   *LocalContentDigest `protobuf:"bytes,4,opt,name=environment,proto3" json:"environment,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -481,6 +527,7 @@ func (*LocalEvidenceFingerprints) Descriptor() ([]byte, []int) {
 	return file_vibesys_host_v1_evaluation_receipts_proto_rawDescGZIP(), []int{1}
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvidenceFingerprints) GetCandidate() *LocalContentDigest {
 	if x != nil {
 		return x.Candidate
@@ -488,6 +535,7 @@ func (x *LocalEvidenceFingerprints) GetCandidate() *LocalContentDigest {
 	return nil
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvidenceFingerprints) GetEvaluator() *LocalContentDigest {
 	if x != nil {
 		return x.Evaluator
@@ -495,6 +543,7 @@ func (x *LocalEvidenceFingerprints) GetEvaluator() *LocalContentDigest {
 	return nil
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvidenceFingerprints) GetWorkload() *LocalContentDigest {
 	if x != nil {
 		return x.Workload
@@ -502,6 +551,7 @@ func (x *LocalEvidenceFingerprints) GetWorkload() *LocalContentDigest {
 	return nil
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvidenceFingerprints) GetEnvironment() *LocalContentDigest {
 	if x != nil {
 		return x.Environment
@@ -509,12 +559,17 @@ func (x *LocalEvidenceFingerprints) GetEnvironment() *LocalContentDigest {
 	return nil
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 type LocalEvidenceMetric struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Value         float64                `protobuf:"fixed64,2,opt,name=value,proto3" json:"value,omitempty"`
-	Direction     *LocalMetricDirection  `protobuf:"varint,3,opt,name=direction,proto3,enum=vibesys.host.v1.LocalMetricDirection,oneof" json:"direction,omitempty"`
-	Unit          *string                `protobuf:"bytes,4,opt,name=unit,proto3,oneof" json:"unit,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Value float64 `protobuf:"fixed64,2,opt,name=value,proto3" json:"value,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Direction *LocalMetricDirection `protobuf:"varint,3,opt,name=direction,proto3,enum=vibesys.host.v1.LocalMetricDirection,oneof" json:"direction,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Unit          *string `protobuf:"bytes,4,opt,name=unit,proto3,oneof" json:"unit,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -549,6 +604,7 @@ func (*LocalEvidenceMetric) Descriptor() ([]byte, []int) {
 	return file_vibesys_host_v1_evaluation_receipts_proto_rawDescGZIP(), []int{2}
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvidenceMetric) GetName() string {
 	if x != nil {
 		return x.Name
@@ -556,6 +612,7 @@ func (x *LocalEvidenceMetric) GetName() string {
 	return ""
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvidenceMetric) GetValue() float64 {
 	if x != nil {
 		return x.Value
@@ -563,6 +620,7 @@ func (x *LocalEvidenceMetric) GetValue() float64 {
 	return 0
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvidenceMetric) GetDirection() LocalMetricDirection {
 	if x != nil && x.Direction != nil {
 		return *x.Direction
@@ -570,6 +628,7 @@ func (x *LocalEvidenceMetric) GetDirection() LocalMetricDirection {
 	return LocalMetricDirection_LOCAL_METRIC_DIRECTION_UNSPECIFIED
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvidenceMetric) GetUnit() string {
 	if x != nil && x.Unit != nil {
 		return *x.Unit
@@ -577,11 +636,15 @@ func (x *LocalEvidenceMetric) GetUnit() string {
 	return ""
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 type LocalMeasurementProgress struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Completed     uint64                 `protobuf:"varint,1,opt,name=completed,proto3" json:"completed,omitempty"`
-	Required      uint64                 `protobuf:"varint,2,opt,name=required,proto3" json:"required,omitempty"`
-	Unit          string                 `protobuf:"bytes,3,opt,name=unit,proto3" json:"unit,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Completed uint64 `protobuf:"varint,1,opt,name=completed,proto3" json:"completed,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Required uint64 `protobuf:"varint,2,opt,name=required,proto3" json:"required,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Unit          string `protobuf:"bytes,3,opt,name=unit,proto3" json:"unit,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -616,6 +679,7 @@ func (*LocalMeasurementProgress) Descriptor() ([]byte, []int) {
 	return file_vibesys_host_v1_evaluation_receipts_proto_rawDescGZIP(), []int{3}
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalMeasurementProgress) GetCompleted() uint64 {
 	if x != nil {
 		return x.Completed
@@ -623,6 +687,7 @@ func (x *LocalMeasurementProgress) GetCompleted() uint64 {
 	return 0
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalMeasurementProgress) GetRequired() uint64 {
 	if x != nil {
 		return x.Required
@@ -630,6 +695,7 @@ func (x *LocalMeasurementProgress) GetRequired() uint64 {
 	return 0
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalMeasurementProgress) GetUnit() string {
 	if x != nil {
 		return x.Unit
@@ -637,13 +703,20 @@ func (x *LocalMeasurementProgress) GetUnit() string {
 	return ""
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 type LocalPartialMeasurement struct {
-	state         protoimpl.MessageState    `protogen:"open.v1"`
-	Name          string                    `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Value         float64                   `protobuf:"fixed64,2,opt,name=value,proto3" json:"value,omitempty"`
-	Direction     LocalMetricDirection      `protobuf:"varint,3,opt,name=direction,proto3,enum=vibesys.host.v1.LocalMetricDirection" json:"direction,omitempty"`
-	Unit          *string                   `protobuf:"bytes,4,opt,name=unit,proto3,oneof" json:"unit,omitempty"`
-	Target        *float64                  `protobuf:"fixed64,5,opt,name=target,proto3,oneof" json:"target,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Value float64 `protobuf:"fixed64,2,opt,name=value,proto3" json:"value,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Direction LocalMetricDirection `protobuf:"varint,3,opt,name=direction,proto3,enum=vibesys.host.v1.LocalMetricDirection" json:"direction,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Unit *string `protobuf:"bytes,4,opt,name=unit,proto3,oneof" json:"unit,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Target *float64 `protobuf:"fixed64,5,opt,name=target,proto3,oneof" json:"target,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 	Progress      *LocalMeasurementProgress `protobuf:"bytes,6,opt,name=progress,proto3" json:"progress,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -679,6 +752,7 @@ func (*LocalPartialMeasurement) Descriptor() ([]byte, []int) {
 	return file_vibesys_host_v1_evaluation_receipts_proto_rawDescGZIP(), []int{4}
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalPartialMeasurement) GetName() string {
 	if x != nil {
 		return x.Name
@@ -686,6 +760,7 @@ func (x *LocalPartialMeasurement) GetName() string {
 	return ""
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalPartialMeasurement) GetValue() float64 {
 	if x != nil {
 		return x.Value
@@ -693,6 +768,7 @@ func (x *LocalPartialMeasurement) GetValue() float64 {
 	return 0
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalPartialMeasurement) GetDirection() LocalMetricDirection {
 	if x != nil {
 		return x.Direction
@@ -700,6 +776,7 @@ func (x *LocalPartialMeasurement) GetDirection() LocalMetricDirection {
 	return LocalMetricDirection_LOCAL_METRIC_DIRECTION_UNSPECIFIED
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalPartialMeasurement) GetUnit() string {
 	if x != nil && x.Unit != nil {
 		return *x.Unit
@@ -707,6 +784,7 @@ func (x *LocalPartialMeasurement) GetUnit() string {
 	return ""
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalPartialMeasurement) GetTarget() float64 {
 	if x != nil && x.Target != nil {
 		return *x.Target
@@ -714,6 +792,7 @@ func (x *LocalPartialMeasurement) GetTarget() float64 {
 	return 0
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalPartialMeasurement) GetProgress() *LocalMeasurementProgress {
 	if x != nil {
 		return x.Progress
@@ -721,10 +800,13 @@ func (x *LocalPartialMeasurement) GetProgress() *LocalMeasurementProgress {
 	return nil
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 type LocalArtifactDigest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
-	Digest        *LocalContentDigest    `protobuf:"bytes,2,opt,name=digest,proto3" json:"digest,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Path string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Digest        *LocalContentDigest `protobuf:"bytes,2,opt,name=digest,proto3" json:"digest,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -759,6 +841,7 @@ func (*LocalArtifactDigest) Descriptor() ([]byte, []int) {
 	return file_vibesys_host_v1_evaluation_receipts_proto_rawDescGZIP(), []int{5}
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalArtifactDigest) GetPath() string {
 	if x != nil {
 		return x.Path
@@ -766,6 +849,7 @@ func (x *LocalArtifactDigest) GetPath() string {
 	return ""
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalArtifactDigest) GetDigest() *LocalContentDigest {
 	if x != nil {
 		return x.Digest
@@ -773,25 +857,41 @@ func (x *LocalArtifactDigest) GetDigest() *LocalContentDigest {
 	return nil
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 type LocalTrustedEvidence struct {
-	state              protoimpl.MessageState     `protogen:"open.v1"`
-	EvidenceId         string                     `protobuf:"bytes,1,opt,name=evidence_id,json=evidenceId,proto3" json:"evidence_id,omitempty"`
-	EvaluationId       string                     `protobuf:"bytes,2,opt,name=evaluation_id,json=evaluationId,proto3" json:"evaluation_id,omitempty"`
-	StageName          string                     `protobuf:"bytes,3,opt,name=stage_name,json=stageName,proto3" json:"stage_name,omitempty"`
-	ResultProtocol     uint32                     `protobuf:"varint,4,opt,name=result_protocol,json=resultProtocol,proto3" json:"result_protocol,omitempty"`
-	Kind               LocalEvidenceKind          `protobuf:"varint,5,opt,name=kind,proto3,enum=vibesys.host.v1.LocalEvidenceKind" json:"kind,omitempty"`
-	Fingerprints       *LocalEvidenceFingerprints `protobuf:"bytes,6,opt,name=fingerprints,proto3" json:"fingerprints,omitempty"`
-	TrustedInputs      *LocalContentDigest        `protobuf:"bytes,7,opt,name=trusted_inputs,json=trustedInputs,proto3" json:"trusted_inputs,omitempty"`
-	Outcome            LocalEvidenceOutcome       `protobuf:"varint,8,opt,name=outcome,proto3,enum=vibesys.host.v1.LocalEvidenceOutcome" json:"outcome,omitempty"`
-	SemanticSummary    *string                    `protobuf:"bytes,9,opt,name=semantic_summary,json=semanticSummary,proto3,oneof" json:"semantic_summary,omitempty"`
-	Metrics            []*LocalEvidenceMetric     `protobuf:"bytes,10,rep,name=metrics,proto3" json:"metrics,omitempty"`
-	PartialMeasurement *LocalPartialMeasurement   `protobuf:"bytes,11,opt,name=partial_measurement,json=partialMeasurement,proto3" json:"partial_measurement,omitempty"`
-	FailureKind        *LocalEvidenceFailureKind  `protobuf:"varint,12,opt,name=failure_kind,json=failureKind,proto3,enum=vibesys.host.v1.LocalEvidenceFailureKind,oneof" json:"failure_kind,omitempty"`
-	UnmetRequirement   *string                    `protobuf:"bytes,13,opt,name=unmet_requirement,json=unmetRequirement,proto3,oneof" json:"unmet_requirement,omitempty"`
-	Artifacts          []*LocalArtifactDigest     `protobuf:"bytes,14,rep,name=artifacts,proto3" json:"artifacts,omitempty"`
-	AcceptedRound      uint64                     `protobuf:"varint,15,opt,name=accepted_round,json=acceptedRound,proto3" json:"accepted_round,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	EvidenceId string `protobuf:"bytes,1,opt,name=evidence_id,json=evidenceId,proto3" json:"evidence_id,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	EvaluationId string `protobuf:"bytes,2,opt,name=evaluation_id,json=evaluationId,proto3" json:"evaluation_id,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	StageName string `protobuf:"bytes,3,opt,name=stage_name,json=stageName,proto3" json:"stage_name,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	ResultProtocol uint32 `protobuf:"varint,4,opt,name=result_protocol,json=resultProtocol,proto3" json:"result_protocol,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Kind LocalEvidenceKind `protobuf:"varint,5,opt,name=kind,proto3,enum=vibesys.host.v1.LocalEvidenceKind" json:"kind,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Fingerprints *LocalEvidenceFingerprints `protobuf:"bytes,6,opt,name=fingerprints,proto3" json:"fingerprints,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	TrustedInputs *LocalContentDigest `protobuf:"bytes,7,opt,name=trusted_inputs,json=trustedInputs,proto3" json:"trusted_inputs,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Outcome LocalEvidenceOutcome `protobuf:"varint,8,opt,name=outcome,proto3,enum=vibesys.host.v1.LocalEvidenceOutcome" json:"outcome,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	SemanticSummary *string `protobuf:"bytes,9,opt,name=semantic_summary,json=semanticSummary,proto3,oneof" json:"semantic_summary,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Metrics []*LocalEvidenceMetric `protobuf:"bytes,10,rep,name=metrics,proto3" json:"metrics,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	PartialMeasurement *LocalPartialMeasurement `protobuf:"bytes,11,opt,name=partial_measurement,json=partialMeasurement,proto3" json:"partial_measurement,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	FailureKind *LocalEvidenceFailureKind `protobuf:"varint,12,opt,name=failure_kind,json=failureKind,proto3,enum=vibesys.host.v1.LocalEvidenceFailureKind,oneof" json:"failure_kind,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	UnmetRequirement *string `protobuf:"bytes,13,opt,name=unmet_requirement,json=unmetRequirement,proto3,oneof" json:"unmet_requirement,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Artifacts []*LocalArtifactDigest `protobuf:"bytes,14,rep,name=artifacts,proto3" json:"artifacts,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	AcceptedRound uint64 `protobuf:"varint,15,opt,name=accepted_round,json=acceptedRound,proto3" json:"accepted_round,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *LocalTrustedEvidence) Reset() {
@@ -824,6 +924,7 @@ func (*LocalTrustedEvidence) Descriptor() ([]byte, []int) {
 	return file_vibesys_host_v1_evaluation_receipts_proto_rawDescGZIP(), []int{6}
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalTrustedEvidence) GetEvidenceId() string {
 	if x != nil {
 		return x.EvidenceId
@@ -831,6 +932,7 @@ func (x *LocalTrustedEvidence) GetEvidenceId() string {
 	return ""
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalTrustedEvidence) GetEvaluationId() string {
 	if x != nil {
 		return x.EvaluationId
@@ -838,6 +940,7 @@ func (x *LocalTrustedEvidence) GetEvaluationId() string {
 	return ""
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalTrustedEvidence) GetStageName() string {
 	if x != nil {
 		return x.StageName
@@ -845,6 +948,7 @@ func (x *LocalTrustedEvidence) GetStageName() string {
 	return ""
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalTrustedEvidence) GetResultProtocol() uint32 {
 	if x != nil {
 		return x.ResultProtocol
@@ -852,6 +956,7 @@ func (x *LocalTrustedEvidence) GetResultProtocol() uint32 {
 	return 0
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalTrustedEvidence) GetKind() LocalEvidenceKind {
 	if x != nil {
 		return x.Kind
@@ -859,6 +964,7 @@ func (x *LocalTrustedEvidence) GetKind() LocalEvidenceKind {
 	return LocalEvidenceKind_LOCAL_EVIDENCE_KIND_UNSPECIFIED
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalTrustedEvidence) GetFingerprints() *LocalEvidenceFingerprints {
 	if x != nil {
 		return x.Fingerprints
@@ -866,6 +972,7 @@ func (x *LocalTrustedEvidence) GetFingerprints() *LocalEvidenceFingerprints {
 	return nil
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalTrustedEvidence) GetTrustedInputs() *LocalContentDigest {
 	if x != nil {
 		return x.TrustedInputs
@@ -873,6 +980,7 @@ func (x *LocalTrustedEvidence) GetTrustedInputs() *LocalContentDigest {
 	return nil
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalTrustedEvidence) GetOutcome() LocalEvidenceOutcome {
 	if x != nil {
 		return x.Outcome
@@ -880,6 +988,7 @@ func (x *LocalTrustedEvidence) GetOutcome() LocalEvidenceOutcome {
 	return LocalEvidenceOutcome_LOCAL_EVIDENCE_OUTCOME_UNSPECIFIED
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalTrustedEvidence) GetSemanticSummary() string {
 	if x != nil && x.SemanticSummary != nil {
 		return *x.SemanticSummary
@@ -887,6 +996,7 @@ func (x *LocalTrustedEvidence) GetSemanticSummary() string {
 	return ""
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalTrustedEvidence) GetMetrics() []*LocalEvidenceMetric {
 	if x != nil {
 		return x.Metrics
@@ -894,6 +1004,7 @@ func (x *LocalTrustedEvidence) GetMetrics() []*LocalEvidenceMetric {
 	return nil
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalTrustedEvidence) GetPartialMeasurement() *LocalPartialMeasurement {
 	if x != nil {
 		return x.PartialMeasurement
@@ -901,6 +1012,7 @@ func (x *LocalTrustedEvidence) GetPartialMeasurement() *LocalPartialMeasurement 
 	return nil
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalTrustedEvidence) GetFailureKind() LocalEvidenceFailureKind {
 	if x != nil && x.FailureKind != nil {
 		return *x.FailureKind
@@ -908,6 +1020,7 @@ func (x *LocalTrustedEvidence) GetFailureKind() LocalEvidenceFailureKind {
 	return LocalEvidenceFailureKind_LOCAL_EVIDENCE_FAILURE_KIND_UNSPECIFIED
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalTrustedEvidence) GetUnmetRequirement() string {
 	if x != nil && x.UnmetRequirement != nil {
 		return *x.UnmetRequirement
@@ -915,6 +1028,7 @@ func (x *LocalTrustedEvidence) GetUnmetRequirement() string {
 	return ""
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalTrustedEvidence) GetArtifacts() []*LocalArtifactDigest {
 	if x != nil {
 		return x.Artifacts
@@ -922,6 +1036,7 @@ func (x *LocalTrustedEvidence) GetArtifacts() []*LocalArtifactDigest {
 	return nil
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalTrustedEvidence) GetAcceptedRound() uint64 {
 	if x != nil {
 		return x.AcceptedRound
@@ -929,22 +1044,35 @@ func (x *LocalTrustedEvidence) GetAcceptedRound() uint64 {
 	return 0
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 type LocalEvaluationStepResult struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	Name            string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	State           LocalStageState        `protobuf:"varint,2,opt,name=state,proto3,enum=vibesys.host.v1.LocalStageState" json:"state,omitempty"`
-	Result          *LocalTrustedEvidence  `protobuf:"bytes,3,opt,name=result,proto3" json:"result,omitempty"`
-	Failure         *string                `protobuf:"bytes,4,opt,name=failure,proto3,oneof" json:"failure,omitempty"`
-	OperatorFailure *string                `protobuf:"bytes,5,opt,name=operator_failure,json=operatorFailure,proto3,oneof" json:"operator_failure,omitempty"`
-	OperatorSummary *string                `protobuf:"bytes,6,opt,name=operator_summary,json=operatorSummary,proto3,oneof" json:"operator_summary,omitempty"`
-	FailureKind     *LocalStageFailureKind `protobuf:"varint,7,opt,name=failure_kind,json=failureKind,proto3,enum=vibesys.host.v1.LocalStageFailureKind,oneof" json:"failure_kind,omitempty"`
-	DurationS       *float64               `protobuf:"fixed64,8,opt,name=duration_s,json=durationS,proto3,oneof" json:"duration_s,omitempty"`
-	StdoutTail      *string                `protobuf:"bytes,9,opt,name=stdout_tail,json=stdoutTail,proto3,oneof" json:"stdout_tail,omitempty"`
-	StderrTail      *string                `protobuf:"bytes,10,opt,name=stderr_tail,json=stderrTail,proto3,oneof" json:"stderr_tail,omitempty"`
-	ServiceLogTail  *string                `protobuf:"bytes,11,opt,name=service_log_tail,json=serviceLogTail,proto3,oneof" json:"service_log_tail,omitempty"`
-	Host            *string                `protobuf:"bytes,12,opt,name=host,proto3,oneof" json:"host,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	State LocalStageState `protobuf:"varint,2,opt,name=state,proto3,enum=vibesys.host.v1.LocalStageState" json:"state,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Result *LocalTrustedEvidence `protobuf:"bytes,3,opt,name=result,proto3" json:"result,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Failure *string `protobuf:"bytes,4,opt,name=failure,proto3,oneof" json:"failure,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	OperatorFailure *string `protobuf:"bytes,5,opt,name=operator_failure,json=operatorFailure,proto3,oneof" json:"operator_failure,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	OperatorSummary *string `protobuf:"bytes,6,opt,name=operator_summary,json=operatorSummary,proto3,oneof" json:"operator_summary,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	FailureKind *LocalStageFailureKind `protobuf:"varint,7,opt,name=failure_kind,json=failureKind,proto3,enum=vibesys.host.v1.LocalStageFailureKind,oneof" json:"failure_kind,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	DurationS *float64 `protobuf:"fixed64,8,opt,name=duration_s,json=durationS,proto3,oneof" json:"duration_s,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	StdoutTail *string `protobuf:"bytes,9,opt,name=stdout_tail,json=stdoutTail,proto3,oneof" json:"stdout_tail,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	StderrTail *string `protobuf:"bytes,10,opt,name=stderr_tail,json=stderrTail,proto3,oneof" json:"stderr_tail,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	ServiceLogTail *string `protobuf:"bytes,11,opt,name=service_log_tail,json=serviceLogTail,proto3,oneof" json:"service_log_tail,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Host          *string `protobuf:"bytes,12,opt,name=host,proto3,oneof" json:"host,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *LocalEvaluationStepResult) Reset() {
@@ -977,6 +1105,7 @@ func (*LocalEvaluationStepResult) Descriptor() ([]byte, []int) {
 	return file_vibesys_host_v1_evaluation_receipts_proto_rawDescGZIP(), []int{7}
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvaluationStepResult) GetName() string {
 	if x != nil {
 		return x.Name
@@ -984,6 +1113,7 @@ func (x *LocalEvaluationStepResult) GetName() string {
 	return ""
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvaluationStepResult) GetState() LocalStageState {
 	if x != nil {
 		return x.State
@@ -991,6 +1121,7 @@ func (x *LocalEvaluationStepResult) GetState() LocalStageState {
 	return LocalStageState_LOCAL_STAGE_STATE_UNSPECIFIED
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvaluationStepResult) GetResult() *LocalTrustedEvidence {
 	if x != nil {
 		return x.Result
@@ -998,6 +1129,7 @@ func (x *LocalEvaluationStepResult) GetResult() *LocalTrustedEvidence {
 	return nil
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvaluationStepResult) GetFailure() string {
 	if x != nil && x.Failure != nil {
 		return *x.Failure
@@ -1005,6 +1137,7 @@ func (x *LocalEvaluationStepResult) GetFailure() string {
 	return ""
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvaluationStepResult) GetOperatorFailure() string {
 	if x != nil && x.OperatorFailure != nil {
 		return *x.OperatorFailure
@@ -1012,6 +1145,7 @@ func (x *LocalEvaluationStepResult) GetOperatorFailure() string {
 	return ""
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvaluationStepResult) GetOperatorSummary() string {
 	if x != nil && x.OperatorSummary != nil {
 		return *x.OperatorSummary
@@ -1019,6 +1153,7 @@ func (x *LocalEvaluationStepResult) GetOperatorSummary() string {
 	return ""
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvaluationStepResult) GetFailureKind() LocalStageFailureKind {
 	if x != nil && x.FailureKind != nil {
 		return *x.FailureKind
@@ -1026,6 +1161,7 @@ func (x *LocalEvaluationStepResult) GetFailureKind() LocalStageFailureKind {
 	return LocalStageFailureKind_LOCAL_STAGE_FAILURE_KIND_UNSPECIFIED
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvaluationStepResult) GetDurationS() float64 {
 	if x != nil && x.DurationS != nil {
 		return *x.DurationS
@@ -1033,6 +1169,7 @@ func (x *LocalEvaluationStepResult) GetDurationS() float64 {
 	return 0
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvaluationStepResult) GetStdoutTail() string {
 	if x != nil && x.StdoutTail != nil {
 		return *x.StdoutTail
@@ -1040,6 +1177,7 @@ func (x *LocalEvaluationStepResult) GetStdoutTail() string {
 	return ""
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvaluationStepResult) GetStderrTail() string {
 	if x != nil && x.StderrTail != nil {
 		return *x.StderrTail
@@ -1047,6 +1185,7 @@ func (x *LocalEvaluationStepResult) GetStderrTail() string {
 	return ""
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvaluationStepResult) GetServiceLogTail() string {
 	if x != nil && x.ServiceLogTail != nil {
 		return *x.ServiceLogTail
@@ -1054,6 +1193,7 @@ func (x *LocalEvaluationStepResult) GetServiceLogTail() string {
 	return ""
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvaluationStepResult) GetHost() string {
 	if x != nil && x.Host != nil {
 		return *x.Host
@@ -1061,14 +1201,21 @@ func (x *LocalEvaluationStepResult) GetHost() string {
 	return ""
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 type LocalEvaluationObservation struct {
-	state                     protoimpl.MessageState       `protogen:"open.v1"`
-	State                     LocalEvaluationState         `protobuf:"varint,1,opt,name=state,proto3,enum=vibesys.host.v1.LocalEvaluationState" json:"state,omitempty"`
-	CurrentStage              *string                      `protobuf:"bytes,2,opt,name=current_stage,json=currentStage,proto3,oneof" json:"current_stage,omitempty"`
-	StageResults              []*LocalEvaluationStepResult `protobuf:"bytes,3,rep,name=stage_results,json=stageResults,proto3" json:"stage_results,omitempty"`
-	Failure                   *string                      `protobuf:"bytes,4,opt,name=failure,proto3,oneof" json:"failure,omitempty"`
-	OperatorFailure           *string                      `protobuf:"bytes,5,opt,name=operator_failure,json=operatorFailure,proto3,oneof" json:"operator_failure,omitempty"`
-	RunEnvironmentUnavailable bool                         `protobuf:"varint,6,opt,name=run_environment_unavailable,json=runEnvironmentUnavailable,proto3" json:"run_environment_unavailable,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	State LocalEvaluationState `protobuf:"varint,1,opt,name=state,proto3,enum=vibesys.host.v1.LocalEvaluationState" json:"state,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	CurrentStage *string `protobuf:"bytes,2,opt,name=current_stage,json=currentStage,proto3,oneof" json:"current_stage,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	StageResults []*LocalEvaluationStepResult `protobuf:"bytes,3,rep,name=stage_results,json=stageResults,proto3" json:"stage_results,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Failure *string `protobuf:"bytes,4,opt,name=failure,proto3,oneof" json:"failure,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	OperatorFailure *string `protobuf:"bytes,5,opt,name=operator_failure,json=operatorFailure,proto3,oneof" json:"operator_failure,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	RunEnvironmentUnavailable bool `protobuf:"varint,6,opt,name=run_environment_unavailable,json=runEnvironmentUnavailable,proto3" json:"run_environment_unavailable,omitempty"`
 	unknownFields             protoimpl.UnknownFields
 	sizeCache                 protoimpl.SizeCache
 }
@@ -1103,6 +1250,7 @@ func (*LocalEvaluationObservation) Descriptor() ([]byte, []int) {
 	return file_vibesys_host_v1_evaluation_receipts_proto_rawDescGZIP(), []int{8}
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvaluationObservation) GetState() LocalEvaluationState {
 	if x != nil {
 		return x.State
@@ -1110,6 +1258,7 @@ func (x *LocalEvaluationObservation) GetState() LocalEvaluationState {
 	return LocalEvaluationState_LOCAL_EVALUATION_STATE_UNSPECIFIED
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvaluationObservation) GetCurrentStage() string {
 	if x != nil && x.CurrentStage != nil {
 		return *x.CurrentStage
@@ -1117,6 +1266,7 @@ func (x *LocalEvaluationObservation) GetCurrentStage() string {
 	return ""
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvaluationObservation) GetStageResults() []*LocalEvaluationStepResult {
 	if x != nil {
 		return x.StageResults
@@ -1124,6 +1274,7 @@ func (x *LocalEvaluationObservation) GetStageResults() []*LocalEvaluationStepRes
 	return nil
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvaluationObservation) GetFailure() string {
 	if x != nil && x.Failure != nil {
 		return *x.Failure
@@ -1131,6 +1282,7 @@ func (x *LocalEvaluationObservation) GetFailure() string {
 	return ""
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvaluationObservation) GetOperatorFailure() string {
 	if x != nil && x.OperatorFailure != nil {
 		return *x.OperatorFailure
@@ -1138,6 +1290,7 @@ func (x *LocalEvaluationObservation) GetOperatorFailure() string {
 	return ""
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvaluationObservation) GetRunEnvironmentUnavailable() bool {
 	if x != nil {
 		return x.RunEnvironmentUnavailable
@@ -1146,21 +1299,34 @@ func (x *LocalEvaluationObservation) GetRunEnvironmentUnavailable() bool {
 }
 
 // Evidence and obligations only. This receipt never authorizes replay dispatch.
+//
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 type LocalEvaluationReceipt struct {
-	state           protoimpl.MessageState      `protogen:"open.v1"`
-	Handle          string                      `protobuf:"bytes,1,opt,name=handle,proto3" json:"handle,omitempty"`
-	RequestDigest   string                      `protobuf:"bytes,2,opt,name=request_digest,json=requestDigest,proto3" json:"request_digest,omitempty"`
-	Snapshot        string                      `protobuf:"bytes,3,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
-	StartedStages   []string                    `protobuf:"bytes,4,rep,name=started_stages,json=startedStages,proto3" json:"started_stages,omitempty"`
-	Observation     *LocalEvaluationObservation `protobuf:"bytes,5,opt,name=observation,proto3" json:"observation,omitempty"`
-	CleanupRequired bool                        `protobuf:"varint,6,opt,name=cleanup_required,json=cleanupRequired,proto3" json:"cleanup_required,omitempty"`
-	Workspace       string                      `protobuf:"bytes,7,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	Cleaned         bool                        `protobuf:"varint,8,opt,name=cleaned,proto3" json:"cleaned,omitempty"`
-	CleanupStarted  bool                        `protobuf:"varint,9,opt,name=cleanup_started,json=cleanupStarted,proto3" json:"cleanup_started,omitempty"`
-	Backing         string                      `protobuf:"bytes,11,opt,name=backing,proto3" json:"backing,omitempty"`
-	Stages          []string                    `protobuf:"bytes,10,rep,name=stages,proto3" json:"stages,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Handle string `protobuf:"bytes,1,opt,name=handle,proto3" json:"handle,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	RequestDigest string `protobuf:"bytes,2,opt,name=request_digest,json=requestDigest,proto3" json:"request_digest,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Snapshot string `protobuf:"bytes,3,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	StartedStages []string `protobuf:"bytes,4,rep,name=started_stages,json=startedStages,proto3" json:"started_stages,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Observation *LocalEvaluationObservation `protobuf:"bytes,5,opt,name=observation,proto3" json:"observation,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	CleanupRequired bool `protobuf:"varint,6,opt,name=cleanup_required,json=cleanupRequired,proto3" json:"cleanup_required,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Workspace string `protobuf:"bytes,7,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Cleaned bool `protobuf:"varint,8,opt,name=cleaned,proto3" json:"cleaned,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	CleanupStarted bool `protobuf:"varint,9,opt,name=cleanup_started,json=cleanupStarted,proto3" json:"cleanup_started,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Backing string `protobuf:"bytes,11,opt,name=backing,proto3" json:"backing,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Stages        []string `protobuf:"bytes,10,rep,name=stages,proto3" json:"stages,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *LocalEvaluationReceipt) Reset() {
@@ -1193,6 +1359,7 @@ func (*LocalEvaluationReceipt) Descriptor() ([]byte, []int) {
 	return file_vibesys_host_v1_evaluation_receipts_proto_rawDescGZIP(), []int{9}
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvaluationReceipt) GetHandle() string {
 	if x != nil {
 		return x.Handle
@@ -1200,6 +1367,7 @@ func (x *LocalEvaluationReceipt) GetHandle() string {
 	return ""
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvaluationReceipt) GetRequestDigest() string {
 	if x != nil {
 		return x.RequestDigest
@@ -1207,6 +1375,7 @@ func (x *LocalEvaluationReceipt) GetRequestDigest() string {
 	return ""
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvaluationReceipt) GetSnapshot() string {
 	if x != nil {
 		return x.Snapshot
@@ -1214,6 +1383,7 @@ func (x *LocalEvaluationReceipt) GetSnapshot() string {
 	return ""
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvaluationReceipt) GetStartedStages() []string {
 	if x != nil {
 		return x.StartedStages
@@ -1221,6 +1391,7 @@ func (x *LocalEvaluationReceipt) GetStartedStages() []string {
 	return nil
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvaluationReceipt) GetObservation() *LocalEvaluationObservation {
 	if x != nil {
 		return x.Observation
@@ -1228,6 +1399,7 @@ func (x *LocalEvaluationReceipt) GetObservation() *LocalEvaluationObservation {
 	return nil
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvaluationReceipt) GetCleanupRequired() bool {
 	if x != nil {
 		return x.CleanupRequired
@@ -1235,6 +1407,7 @@ func (x *LocalEvaluationReceipt) GetCleanupRequired() bool {
 	return false
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvaluationReceipt) GetWorkspace() string {
 	if x != nil {
 		return x.Workspace
@@ -1242,6 +1415,7 @@ func (x *LocalEvaluationReceipt) GetWorkspace() string {
 	return ""
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvaluationReceipt) GetCleaned() bool {
 	if x != nil {
 		return x.Cleaned
@@ -1249,6 +1423,7 @@ func (x *LocalEvaluationReceipt) GetCleaned() bool {
 	return false
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvaluationReceipt) GetCleanupStarted() bool {
 	if x != nil {
 		return x.CleanupStarted
@@ -1256,6 +1431,7 @@ func (x *LocalEvaluationReceipt) GetCleanupStarted() bool {
 	return false
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvaluationReceipt) GetBacking() string {
 	if x != nil {
 		return x.Backing
@@ -1263,6 +1439,7 @@ func (x *LocalEvaluationReceipt) GetBacking() string {
 	return ""
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *LocalEvaluationReceipt) GetStages() []string {
 	if x != nil {
 		return x.Stages
@@ -1270,12 +1447,17 @@ func (x *LocalEvaluationReceipt) GetStages() []string {
 	return nil
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 type EvaluationRecoveryBlock struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Environment   string                 `protobuf:"bytes,1,opt,name=environment,proto3" json:"environment,omitempty"`
-	Backing       string                 `protobuf:"bytes,2,opt,name=backing,proto3" json:"backing,omitempty"`
-	Outstanding   []string               `protobuf:"bytes,3,rep,name=outstanding,proto3" json:"outstanding,omitempty"`
-	Prerequisite  string                 `protobuf:"bytes,4,opt,name=prerequisite,proto3" json:"prerequisite,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Environment string `protobuf:"bytes,1,opt,name=environment,proto3" json:"environment,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Backing string `protobuf:"bytes,2,opt,name=backing,proto3" json:"backing,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Outstanding []string `protobuf:"bytes,3,rep,name=outstanding,proto3" json:"outstanding,omitempty"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Prerequisite  string `protobuf:"bytes,4,opt,name=prerequisite,proto3" json:"prerequisite,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1310,6 +1492,7 @@ func (*EvaluationRecoveryBlock) Descriptor() ([]byte, []int) {
 	return file_vibesys_host_v1_evaluation_receipts_proto_rawDescGZIP(), []int{10}
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *EvaluationRecoveryBlock) GetEnvironment() string {
 	if x != nil {
 		return x.Environment
@@ -1317,6 +1500,7 @@ func (x *EvaluationRecoveryBlock) GetEnvironment() string {
 	return ""
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *EvaluationRecoveryBlock) GetBacking() string {
 	if x != nil {
 		return x.Backing
@@ -1324,6 +1508,7 @@ func (x *EvaluationRecoveryBlock) GetBacking() string {
 	return ""
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *EvaluationRecoveryBlock) GetOutstanding() []string {
 	if x != nil {
 		return x.Outstanding
@@ -1331,6 +1516,7 @@ func (x *EvaluationRecoveryBlock) GetOutstanding() []string {
 	return nil
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *EvaluationRecoveryBlock) GetPrerequisite() string {
 	if x != nil {
 		return x.Prerequisite
@@ -1340,9 +1526,12 @@ func (x *EvaluationRecoveryBlock) GetPrerequisite() string {
 
 // Retained acquisition intents survive new handles and fresh owner instances.
 // Live-process caches and terminal job receipts cannot erase this writer manifest.
+//
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 type EvaluationWorkspaceAcquisitions struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Handles       []string               `protobuf:"bytes,1,rep,name=handles,proto3" json:"handles,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
+	Handles       []string `protobuf:"bytes,1,rep,name=handles,proto3" json:"handles,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1377,6 +1566,7 @@ func (*EvaluationWorkspaceAcquisitions) Descriptor() ([]byte, []int) {
 	return file_vibesys_host_v1_evaluation_receipts_proto_rawDescGZIP(), []int{11}
 }
 
+// Deprecated: The entire proto file vibesys/host/v1/evaluation_receipts.proto is marked as deprecated.
 func (x *EvaluationWorkspaceAcquisitions) GetHandles() []string {
 	if x != nil {
 		return x.Handles
@@ -1563,7 +1753,7 @@ const file_vibesys_host_v1_evaluation_receipts_proto_rawDesc = "" +
 	"\x14LocalMetricDirection\x12&\n" +
 	"\"LOCAL_METRIC_DIRECTION_UNSPECIFIED\x10\x00\x12'\n" +
 	"\x1aLOCAL_METRIC_DIRECTION_MAX\x10\x01\x1a\a\xd2\xf3\x18\x03max\x12'\n" +
-	"\x1aLOCAL_METRIC_DIRECTION_MIN\x10\x02\x1a\a\xd2\xf3\x18\x03minB?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1b\x06proto3"
+	"\x1aLOCAL_METRIC_DIRECTION_MIN\x10\x02\x1a\a\xd2\xf3\x18\x03minBBZ=github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1\xb8\x01\x01b\x06proto3"
 
 var (
 	file_vibesys_host_v1_evaluation_receipts_proto_rawDescOnce sync.Once

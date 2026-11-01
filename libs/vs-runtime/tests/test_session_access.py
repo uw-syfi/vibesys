@@ -40,7 +40,7 @@ from vs_runtime.api.core import (
     AccessSettlementError,
     ExecutionResult,
     JournalRunInvocations,
-    ReceiptStore,
+    KeyedDocuments,
     ReleasedRunInvocations,
     RuntimeSessionRequests,
 )
@@ -137,7 +137,7 @@ class StoreFault(StrEnum):
     SETTLEMENT_INDEX_BEFORE_WRITE = "settlement-index-before-write"
 
 
-class FaultingAccessStore(ReceiptStore):
+class FaultingAccessStore(KeyedDocuments):
     """A real receipt store with one scheduled access-receipt write failure."""
 
     def __init__(self, world: AccessWorld) -> None:
@@ -226,7 +226,7 @@ class SettlementWorld:
 def settlement_world(
     world: AccessWorld,
     *,
-    store: ReceiptStore | None = None,
+    store: KeyedDocuments | None = None,
     access: WorkspaceAccess = WorkspaceAccess.READ_ONLY,
 ) -> SettlementWorld:
     """Build the smallest public access-settlement composition."""
@@ -319,8 +319,8 @@ class AccessWorld:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(text, encoding="utf-8")
 
-    def store(self) -> ReceiptStore:
-        return ReceiptStore(self.env.receipts_namespace(), threads=OsThreads())
+    def store(self) -> KeyedDocuments:
+        return KeyedDocuments(self.env.receipts_namespace(), threads=OsThreads())
 
     async def execute(self, request: RequestBase) -> ExecutionResult:
         return await self.host.run(request, self.store())

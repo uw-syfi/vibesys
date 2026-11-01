@@ -18,13 +18,13 @@ from vs_core.api import AttemptRef, HostFence, Observation
 from vs_decode.api import Unreadable, ValidationOptions, decode_json
 from vs_runtime._access_settlement import AccessReceipt, UnsettledInvocations
 from vs_runtime._core_requests import ExecutionResult
-from vs_runtime._effect_fence import _FenceRecord
 from vs_runtime._evidence_ledger import EvidenceEntry
 from vs_runtime._job_registry import JobRecord, ScopeJobs
 from vs_runtime._owed_submissions import _Entries
 from vs_runtime._retained_receipts import (
     ExecutionPhase,
     ExecutionRecord,
+    FenceRecord,
     Published,
     RecordReceipt,
     ResultReceipt,
@@ -84,7 +84,7 @@ _READERS = {
     ("agent-owed-submissions", "owed"): _Entries,
     ("session-access", "access"): AccessReceipt,
     ("session-access-unsettled", "workspace"): UnsettledInvocations,
-    ("effect-fences", "fence"): _FenceRecord,
+    ("effect-fences", "fence"): FenceRecord,
     ("evaluation-jobs", "job"): JobRecord,
     ("evaluation-scopes", "scope"): ScopeJobs,
     ("evidence-ledger", "evidence"): EvidenceEntry,
@@ -169,7 +169,7 @@ def _external(value: BaseModel) -> tuple[RetainedExternalIdentity, ...]:
         result = tuple(
             RetainedExternalIdentity("unsettled-invocation", key.text) for key in value.keys
         )
-    elif isinstance(value, _FenceRecord):
+    elif isinstance(value, FenceRecord):
         result = tuple(
             RetainedExternalIdentity(
                 "unsettled-effect", entry.request_id.root, entry.request_id.root

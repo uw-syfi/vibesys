@@ -19,7 +19,7 @@ import pytest
 from vs_core.api import HostFence, HostId, ObservationStatus, Until
 from vs_evaluation.api import EvaluationStep, ProfileField, SemanticEvaluationStage
 from vs_project.api import Project
-from vs_runtime.api.core import ExecutionContext, MeasurementRequests, ReceiptStore
+from vs_runtime.api.core import ExecutionContext, KeyedDocuments, MeasurementRequests
 from vs_runtime.api.slurm_evaluation_stack import build_stack, plan, submission
 from vs_sim.api.testing import SimThreads
 
@@ -111,7 +111,7 @@ async def test_a_request_the_capture_cannot_satisfy_resolves_as_a_rejection_nami
         stack = await build_stack(base / "stack", profile_command=CAPTURE)
         try:
             project = Project.open(base / "project")
-            store = ReceiptStore(project.state.state_store_namespace("run"), threads=SimThreads())
+            store = KeyedDocuments(project.state.state_store_namespace("run"), threads=SimThreads())
             requests = MeasurementRequests(_RequiringFields(stack.executor, fields), store)
             request = submission(
                 "profile",

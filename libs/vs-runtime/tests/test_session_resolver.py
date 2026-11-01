@@ -47,8 +47,8 @@ from vs_core.api import (
 from vs_runtime.api import AgentRole, ArtifactStore, WorkspaceAccess
 from vs_runtime.api.core import (
     ExecutionResult,
+    KeyedDocuments,
     ProductionSessionResolver,
-    ReceiptStore,
     ResolverInputs,
     StoreWorkspaceReceipts,
     open_session_requests,
@@ -80,7 +80,7 @@ class Production:
     env: WorkspaceEnv
     artifacts: ArtifactStore
     resolver: ProductionSessionResolver
-    store: ReceiptStore
+    store: KeyedDocuments
     requests: Any
     turns: list[AgentTurnRequest]
 
@@ -102,7 +102,7 @@ class Production:
 
 
 def open_production(env: WorkspaceEnv, declared: AgentRole) -> Production:
-    store = ReceiptStore(env.receipts_namespace(), threads=SimThreads())
+    store = KeyedDocuments(env.receipts_namespace(), threads=SimThreads())
     artifacts = ArtifactStore(env.project.state.local_namespace(RUN_ID, "artifacts"))
     turns: list[AgentTurnRequest] = []
 

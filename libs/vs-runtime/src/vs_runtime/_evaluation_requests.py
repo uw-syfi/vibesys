@@ -6,11 +6,9 @@ request inspects the executor before it considers submitting again, so one submi
 one executor job. A request's observation is rebuilt from the executor's state each time, so a
 retry re-observes Unknown, an unproven acceptance and an unreleased cancellation.
 
-A submission enters the effect fences (``vs_runtime._effect_fence``) of its scope episode
-and of its job in the same locked step as it registers the job, and again just before it
-contacts the executor; closing the scope closes the episode's fence first, and cancelling a
-job closes the job's. So a submission the close or cancel did not see submits nothing, and
-neither answers released while a registered submission may still reach the executor.
+The step loop orders the requests of a scope: a close or a cancel of a job runs only after the
+job's submission has a result or was cancelled, so neither answers released while a submission
+may still reach the executor.
 
 A submission that reuses an earlier run (``SubmitMeasurement.reuses``, decided by core) launches
 nothing: its job reads the earlier run's ended job, and its records are that run's records,
@@ -60,17 +58,8 @@ from vs_evaluation.api import (
     ExecutorRejectedError,
     PollPhase,
 )
-from vs_runtime._core_identity import core_identity, core_named
+from vs_runtime._core_identity import core_named
 from vs_runtime._core_requests import ExecutionContext, ExecutionResult
-from vs_runtime._effect_fence import (
-    EffectFences,
-    Entered,
-    FenceKey,
-    FenceKind,
-    MayHold,
-    NothingHeld,
-    Unrecorded,
-)
 from vs_runtime._evaluation_jobs import (
     JobView,
     RejectedPlanError,
@@ -79,7 +68,7 @@ from vs_runtime._evaluation_jobs import (
     measurement_request,
 )
 from vs_runtime._evidence_ledger import ReceiptEvidenceLedger, ledgered_poll
-from vs_runtime._job_registry import JobRecord, JobRegistry, scope_key
+from vs_runtime._job_registry import JobRecord, JobRegistry
 from vs_runtime._measurement_progress import (
     IgnoreMeasurement,
     MeasurementDecisions,
@@ -95,12 +84,10 @@ from vs_runtime._observation_factory import (
 if TYPE_CHECKING:
     from vs_core.api.recovery import OwnerEvent
     from vs_evaluation.api import PollingEvaluationExecutor
-    from vs_runtime._core_identity import CoreRequestId
     from vs_runtime._core_requests import EvaluationRoleRequest
-    from vs_runtime._receipt_store import ReceiptStore
+    from vs_runtime._keyed_documents import KeyedDocuments
     from vs_runtime._run_control import RunControlChannel
 
-_FENCED = "scope episode is closed or the job was cancelled"
 _UNREADABLE_RUN = "the run this measurement reuses can no longer be read as ended"
 
 
@@ -110,32 +97,8 @@ def _identity(request: RequestBase) -> RequestId:
     return request.request_id
 
 
-def _close_diagnostic(*, released: bool, submitting: bool) -> str:
-    if released:
-        return ""
-    if submitting:
-        return "a submission may still reach the executor"
-    return "some jobs have not been observed to end"
-
-
-def scope_fence(scope: Scope, admission_id: DecisionId | None) -> FenceKey:
-    """The fence of one scope episode's jobs: submissions enter it, closing the scope closes it."""
-    return FenceKey(FenceKind.SCOPE_EPISODE, scope_key(scope, admission_id))
-
-
-def job_fence(scope: Scope, admission_id: DecisionId | None, handle: str) -> FenceKey:
-    """The fence of one job: its submission enters it, a cancel of it closes it.
-
-    Keyed by the episode too, so a cancel from another scope closes only a fence of its own.
-    """
-    return FenceKey(FenceKind.MEASUREMENT_JOB, f"{scope_key(scope, admission_id)}/{handle}")
-
-
-def _fences_of(request: RequestBase, handle: str) -> tuple[FenceKey, FenceKey]:
-    return (
-        scope_fence(request.scope, request.admission_id),
-        job_fence(request.scope, request.admission_id, handle),
-    )
+def _close_diagnostic(*, released: bool) -> str:
+    return "" if released else "some jobs have not been observed to end"
 
 
 class MeasurementRequests:
@@ -144,7 +107,7 @@ class MeasurementRequests:
     def __init__(
         self,
         jobs: PollingEvaluationExecutor,
-        store: ReceiptStore,
+        store: KeyedDocuments,
         observer: MeasurementObserver | None = None,
         decisions: MeasurementDecisions | None = None,
         *,
@@ -161,7 +124,6 @@ class MeasurementRequests:
         self._store = store
         self._progress = MeasurementProgress(observer or IgnoreMeasurement())
         self._observations = ObservationFactory(store)
-        self._fences = EffectFences(store)
         self._registry = JobRegistry(store)
 
     async def execute(
@@ -218,23 +180,14 @@ class MeasurementRequests:
         """Drop *handle* from its scope's index: its submission was refused, so it never was a job.
 
         A close lists every indexed handle as a resource core may own, and core would look
-        for one it never heard of. An episode that already closed has listed the handle, so
-        its index is left as the close read it.
+        for one it never heard of. The loop closes a scope only after every other step of it
+        has a result, so the close reads the index after this.
         """
         with self._store.exclusive():
-            if self._fences.is_closed(scope_fence(scope, admission_id)):
-                return
             self._registry.unindex(scope, admission_id, handle)
 
     def _handles(self, scope: Scope, admission_id: DecisionId | None) -> tuple[str, ...]:
         return self._registry.handles(scope, admission_id)
-
-    def _enter(
-        self, fences: tuple[FenceKey, ...], by: CoreRequestId, context: ExecutionContext
-    ) -> bool:
-        """Enter every fence of a submission; True when all are open. Call under ``exclusive``."""
-        admissions = [self._fences.enter(fence, by=by, host=context.fence) for fence in fences]
-        return all(isinstance(admission, Entered) for admission in admissions)
 
     async def _poll(self, handle_id: str) -> ExecutorPoll:
         try:
@@ -350,18 +303,13 @@ class MeasurementRequests:
             ),
         )
 
-    def _never_held(
-        self,
-        request: RequestBase,
-        context: ExecutionContext,
-        proof: NothingHeld,
-        fence: FenceKey,
-        reason: str,
+    def _nothing_held(
+        self, request: RequestBase, context: ExecutionContext, reason: str
     ) -> ExecutionResult:
-        """The job a release names holds nothing, now or later: its fence proves it."""
+        """The job a release names holds nothing: it was never registered under this scope."""
         observed = self._observations.observe(
             ObservationSubject.of(request),
-            ObservationFacts.never_held(proof, fence, reason),
+            ObservationFacts.nothing_held(reason),
             observed_at=context.now_at,
         )
         return ExecutionResult(observation=RequestObserved(observation=observed))
@@ -442,22 +390,12 @@ class MeasurementRequests:
             )
         except RejectedPlanError as error:
             return self._rejected(request, context, str(error), failure=MeasurementFailure.WORKLOAD)
-        fences = _fences_of(request, handle)
-        by = core_identity(request)
         with self._store.exclusive():
-            admitted = self._enter(fences, by, context)
             record = self._record(handle)
-            if record is None and admitted:
+            if record is None:
                 record = JobRecord.of(request, request_id, handle, context.payload_digest)
                 self._registry.register(record)
-        if record is None:
-            # The scope closed, or the job was cancelled, before this submission registered.
-            return self._rejected(request, context, _FENCED)
-        try:
-            refused = await self._launch(request, context, eval_request, handle)
-        finally:
-            for fence in fences:
-                self._fences.leave(fence, by=by)
+        refused = await self._launch(request, context, eval_request, handle)
         if refused is not None:
             return refused
         view, _ = await self._view(record, context)
@@ -493,9 +431,6 @@ class MeasurementRequests:
         if request.reuses is not None:
             return await self._attach(request, request.reuses, context, handle)
         if (await self._poll(handle)).phase is PollPhase.UNSUBMITTED:
-            if not self._enter(_fences_of(request, handle), core_identity(request), context):
-                # Fenced while the executor held nothing: the job never will exist.
-                return self._rejected(request, context, _FENCED)
             if self._control is not None and request.decision_id is None:
                 self._control.prepare_evaluation(handle, request.scope, permit=context.permit)
             try:
@@ -539,9 +474,7 @@ class MeasurementRequests:
         record = self._owned(request, request.resource_id)
         if record is None:
             return self._rejected(request, context, "job is not owned by this scope")
-        record = await self._relaunch(record, request, context)
-        if isinstance(record, ExecutionResult):
-            return record
+        record = await self._relaunch(record, context)
         view, _ = await self._view(record, context)
         own = self._own(
             request,
@@ -597,34 +530,10 @@ class MeasurementRequests:
     # cancel
 
     async def _cancel(self, request: CancelOwnedJob, context: ExecutionContext) -> ExecutionResult:
-        # Fence first: a submission of this job that has not entered by now submits nothing.
-        fence = job_fence(request.scope, request.admission_id, request.resource_id.root)
-
-        def episode_job() -> JobRecord | None:
-            record = self._owned(request, request.resource_id)
-            return (
-                record
-                if record is not None and record.admission_id == request.admission_id
-                else None
-            )
-
-        closure, record = self._fences.close_and_load(
-            fence, by=core_identity(request), host=context.fence, load=episode_job
-        )
-        submitting = isinstance(closure, MayHold) and closure.live
-        if isinstance(record, Unrecorded):
-            # A submission that entered registers in the same step, so one that left no
-            # record was fenced before it registered, or died first.
-            if submitting:
-                return self._unknown(request, context, "the job's submission is still running")
-            proof = (
-                closure
-                if isinstance(closure, NothingHeld)
-                else self._fences.cleared(closure, record)
-            )
-            return self._never_held(
-                request, context, proof, fence, "job is not owned by this scope"
-            )
+        record = self._owned(request, request.resource_id)
+        if record is None or record.admission_id != request.admission_id:
+            # Nothing registered the job under this scope and episode: it holds nothing.
+            return self._nothing_held(request, context, "job is not owned by this scope")
         try:
             if record.reuses is None:
                 # A reusing job runs nothing of its own, and the run it reads is not its to end.
@@ -637,9 +546,9 @@ class MeasurementRequests:
             return self._unknown(request, context, f"cancellation outcome unknown: {error}")
         except Exception as error:  # noqa: BLE001  # lint-waiver: LW-940009 [BLE001]; a failed cancel leaves the job owned and running, so it is reported unproven and retried rather than halting the run.
             return self._unknown(request, context, f"cancel raised {type(error).__name__}: {error}")
-        # A job the executor holds no record of is ended by the cancel only once no submission
-        # of it can still reach the executor.
-        view, ended = await self._view(record, context, cancelled=not submitting)
+        # A job the executor holds no record of is ended by the cancel: the loop runs a cancel
+        # only after the job's submission has a result or was cancelled.
+        view, ended = await self._view(record, context, cancelled=True)
         own = self._own(
             request,
             context,
@@ -654,12 +563,7 @@ class MeasurementRequests:
             observation=RequestObserved(observation=own), owner_events=self._events(view)
         )
 
-    async def _relaunch(
-        self,
-        record: JobRecord,
-        request: ObserveOwnedJob | InspectOwnedJob,
-        context: ExecutionContext,
-    ) -> JobRecord | ExecutionResult:
+    async def _relaunch(self, record: JobRecord, context: ExecutionContext) -> JobRecord:
         """Rerun a parked physical job under a new handle, retaining its logical resource id.
 
         The next poll after resume owns this step. Persist the new handle before submit,
@@ -672,29 +576,21 @@ class MeasurementRequests:
             and (await self._poll(record.executor_handle)).phase is not PollPhase.UNSUBMITTED
         ):
             return record
-        fences = _fences_of(request, record.handle_id)
-        by = core_identity(request)
-        try:
-            with self._store.exclusive():
-                if not self._enter(fences, by, context):
-                    return self._rejected(request, context, _FENCED)
-                if record.parked:
-                    record = record.model_copy(
-                        update={"parked": False, "relaunch": record.relaunch + 1}
-                    )
-                    self._registry.replace(record)
-            if (await self._poll(record.executor_handle)).phase is PollPhase.UNSUBMITTED:
-                eval_request = measurement_request(
-                    record.plan,
-                    record.scope,
-                    record.executor_handle,
-                    deadline_at=context.now_at + record.plan.time_bound,
+        with self._store.exclusive():
+            if record.parked:
+                record = record.model_copy(
+                    update={"parked": False, "relaunch": record.relaunch + 1}
                 )
-                await self._jobs.submit(eval_request, handle_id=record.executor_handle)
-            return record
-        finally:
-            for fence in fences:
-                self._fences.leave(fence, by=by)
+                self._registry.replace(record)
+        if (await self._poll(record.executor_handle)).phase is PollPhase.UNSUBMITTED:
+            eval_request = measurement_request(
+                record.plan,
+                record.scope,
+                record.executor_handle,
+                deadline_at=context.now_at + record.plan.time_bound,
+            )
+            await self._jobs.submit(eval_request, handle_id=record.executor_handle)
+        return record
 
     async def _cancel_for_close(self, handle: str) -> None:
         """Ask the executor to cancel *handle*; nothing the cancel does decides the handle's fate."""
@@ -709,17 +605,10 @@ class MeasurementRequests:
     async def _close(
         self, request: CloseAttemptScope, context: ExecutionContext
     ) -> ExecutionResult:
-        # Fence first: a submission that has not entered by now submits nothing.
+        # The loop holds a close until every other step of the scope has a result, so no
+        # submission of the scope is still reaching the executor.
         with self._store.exclusive():
-            closure = self._fences.close(
-                scope_fence(request.scope, request.admission_id),
-                by=core_identity(request),
-                host=context.fence,
-            )
             handles = self._handles(request.scope, request.admission_id)
-        # A submission still inside the fence may yet reach the executor, so a handle that
-        # polls unsubmitted is ended only once no submission can still be submitting.
-        submitting = isinstance(closure, MayHold) and closure.live
         ended = []
         for handle in handles:
             record = self._record(handle)
@@ -730,10 +619,8 @@ class MeasurementRequests:
                 record.executor_handle if record is not None and record.reuses is None else handle
             )
             phase = (await self._poll(physical)).phase
-            ended.append(
-                phase is PollPhase.ENDED or (phase is PollPhase.UNSUBMITTED and not submitting)
-            )
-        released = all(ended) and not submitting
+            ended.append(phase in (PollPhase.ENDED, PollPhase.UNSUBMITTED))
+        released = all(ended)
         own = self._own(
             request,
             context,
@@ -743,6 +630,6 @@ class MeasurementRequests:
             released=released,
             children=tuple(ResourceId(root=handle) for handle in handles),
             manifest=True,
-            diagnostic=_close_diagnostic(released=released, submitting=submitting),
+            diagnostic=_close_diagnostic(released=released),
         )
         return ExecutionResult(observation=RequestObserved(observation=own))

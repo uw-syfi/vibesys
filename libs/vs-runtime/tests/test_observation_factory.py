@@ -26,11 +26,11 @@ from vs_core.api.proofs import Proven, fresh_observation
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
 from vs_runtime.api.core import (
+    KeyedDocuments,
     ObservationFactory,
     ObservationFacts,
     ObservationLedgerCorruptError,
     ObservationSubject,
-    ReceiptStore,
 )
 from vs_sim.api.testing import SimThreads, examples
 
@@ -94,13 +94,13 @@ def test_every_issued_observation_is_fresh_for_core_across_restarts(
         env.setenv("VIBESYS_STATE_HOME", str(Path(directory) / "state"))
         namespace = _namespace(Path(directory))
         request = _request("request")
-        factory = ObservationFactory(ReceiptStore(namespace, threads=SimThreads()))
+        factory = ObservationFactory(KeyedDocuments(namespace, threads=SimThreads()))
         history: list[Observation] = []
         previous: ObservationFacts | None = None
         sequence = -1
         for index, (facts, restart) in enumerate(steps):
             if restart:
-                factory = ObservationFactory(ReceiptStore(namespace, threads=SimThreads()))
+                factory = ObservationFactory(KeyedDocuments(namespace, threads=SimThreads()))
             observation = factory.observe(
                 ObservationSubject.of(request), facts, observed_at=float(index)
             )
@@ -122,11 +122,11 @@ def test_replay_returns_the_stored_observation_unchanged_even_at_a_later_time(
 ) -> None:
     namespace = _namespace(tmp_path)
     request = _request("r1")
-    first = ObservationFactory(ReceiptStore(namespace, threads=SimThreads())).observe(
+    first = ObservationFactory(KeyedDocuments(namespace, threads=SimThreads())).observe(
         ObservationSubject.of(request), _FACTS[0], observed_at=1.0
     )
     assert (
-        ObservationFactory(ReceiptStore(namespace, threads=SimThreads())).observe(
+        ObservationFactory(KeyedDocuments(namespace, threads=SimThreads())).observe(
             ObservationSubject.of(request), _FACTS[0], observed_at=9.0
         )
         == first
@@ -135,7 +135,7 @@ def test_replay_returns_the_stored_observation_unchanged_even_at_a_later_time(
 
 def test_requests_have_independent_sequences(tmp_path: Path) -> None:
     namespace = _namespace(tmp_path)
-    factory = ObservationFactory(ReceiptStore(namespace, threads=SimThreads()))
+    factory = ObservationFactory(KeyedDocuments(namespace, threads=SimThreads()))
     factory.observe(ObservationSubject.of(_request("r1")), _FACTS[0], observed_at=1.0)
     factory.observe(ObservationSubject.of(_request("r1")), _FACTS[2], observed_at=2.0)
     assert (
@@ -147,7 +147,7 @@ def test_requests_have_independent_sequences(tmp_path: Path) -> None:
 def test_an_unreadable_row_is_a_typed_error_not_a_reused_sequence(tmp_path: Path) -> None:
     namespace = _namespace(tmp_path)
     request = _request("r1")
-    factory = ObservationFactory(ReceiptStore(namespace, threads=SimThreads()))
+    factory = ObservationFactory(KeyedDocuments(namespace, threads=SimThreads()))
     factory.observe(ObservationSubject.of(request), _FACTS[0], observed_at=1.0)
     (name,) = namespace.entries("observations")
     namespace.write_bytes(f"observations/{name}", b"not json")
@@ -182,7 +182,7 @@ def test_only_a_named_constructor_builds_facts_that_hold_nothing(
         )
 
     if terminal and released and not accepted and not named:
-        with pytest.raises(TypeError, match="never_held, nothing_held, refused or not_begun"):
+        with pytest.raises(TypeError, match="nothing_held, refused or not_begun"):
             build()
     else:
         assert not build().holds_nothing

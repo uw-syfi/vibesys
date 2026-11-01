@@ -41,11 +41,11 @@ from vs_runtime.api.core import (
     Cancelled,
     ExecutionResult,
     Indeterminate,
+    KeyedDocuments,
     NotApplied,
     ObservationFactory,
     OperationCatalog,
     OperationEntry,
-    ReceiptStore,
 )
 from vs_runtime.api.observation_contracts import assert_core_accepts
 from vs_runtime.api.operation_fixtures import (
@@ -202,7 +202,7 @@ class Harness:
 
     world: World
     catalog: OperationCatalog
-    store: ReceiptStore
+    store: KeyedDocuments
     clock: VirtualClock
     policy: RerunPolicy
     request: type[Work]
@@ -242,7 +242,7 @@ def harness_of(root: Path, request: type[Work], world: World, policy: RerunPolic
     namespace_cm = namespace_in(root)
     namespace = namespace_cm.__enter__()
     return Harness(
-        world, catalog, ReceiptStore(namespace, SimThreads()), VirtualClock(), policy, request
+        world, catalog, KeyedDocuments(namespace, SimThreads()), VirtualClock(), policy, request
     )
 
 
@@ -517,7 +517,7 @@ class DyingOwner:
 @contextmanager
 def scenario_world(
     died: str | None = None, only: str | None = None
-) -> Iterator[tuple[tuple[OperationScenario, ...], ReceiptStore, VirtualClock]]:
+) -> Iterator[tuple[tuple[OperationScenario, ...], KeyedDocuments, VirtualClock]]:
     with tempfile.TemporaryDirectory() as raw:
         root = Path(raw)
         (root / "project").mkdir()
@@ -536,11 +536,11 @@ def scenario_world(
                 else item
                 for item in items
             )
-        yield items, ReceiptStore(namespace, SimThreads()), VirtualClock()
+        yield items, KeyedDocuments(namespace, SimThreads()), VirtualClock()
 
 
 def scenario_runner(
-    items: tuple[OperationScenario, ...], store: ReceiptStore, clock: VirtualClock
+    items: tuple[OperationScenario, ...], store: KeyedDocuments, clock: VirtualClock
 ) -> OperationStepRunner:
     return OperationStepRunner(catalog_of(items), ObservationFactory(store), clock=clock)
 

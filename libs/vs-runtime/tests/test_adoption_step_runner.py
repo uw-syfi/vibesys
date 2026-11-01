@@ -27,7 +27,7 @@ from vs_core.api.recovery import Cancelled, CancelReason, Finished
 from vs_project.api import Project
 from vs_runtime.api import RuntimeContractError
 from vs_runtime.api.adoption_step_runner import AdoptionStepRunner
-from vs_runtime.api.core import ObservationFactory, ReceiptStore
+from vs_runtime.api.core import KeyedDocuments, ObservationFactory
 from vs_runtime.api.operation_fixtures import revision
 from vs_runtime.api.step_runner import CancelSignal, Cleared, ClearUnavailableError
 from vs_runtime.api.testing import (
@@ -108,7 +108,7 @@ class PublishingWorkspaces(FakeWorkspaces):
 class Harness:
     world: World
     workspaces: PublishingWorkspaces
-    store: ReceiptStore
+    store: KeyedDocuments
     clock: VirtualClock
 
     def runner(self, *, publishes: bool = True) -> AdoptionStepRunner:
@@ -126,7 +126,7 @@ def harness_in(root: Path) -> Harness:
     namespace = Project.open(root).state.state_store_namespace("run")
     world = World()
     workspaces = PublishingWorkspaces(FlakyRoot(world, root / "workspace"), world)
-    return Harness(world, workspaces, ReceiptStore(namespace, SimThreads()), VirtualClock())
+    return Harness(world, workspaces, KeyedDocuments(namespace, SimThreads()), VirtualClock())
 
 
 def adopt(tag: RequestId, commit: str) -> AdoptRevision:

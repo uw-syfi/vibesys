@@ -153,12 +153,16 @@ message ReplayPhysical {
 // tool/build jobs and grants belonging to other runs. Closing this ledger
 // forbids further grants in the execution domain; it does not prove death.
 message WriterBacking {
+  // Deprecated (#3475): only the deleted writer reconciliation read or wrote it, and no run did.
+  option deprecated = true;
   string environment = 1 [(buf.validate.field).string.min_len = 1];
   string identity = 2 [(buf.validate.field).string.min_len = 1];
   uint64 generation = 3;
   string authority = 4 [(buf.validate.field).string.min_len = 1];
 }
 message WriterIdentity {
+  // Deprecated (#3475): only the deleted writer reconciliation read or wrote it, and no run did.
+  option deprecated = true;
   string run_id = 1 [(buf.validate.field).string.min_len = 1];
   string host_incarnation = 2 [(buf.validate.field).string.min_len = 1];
   string physical_id = 3 [(buf.validate.field).string.min_len = 1];
@@ -166,6 +170,8 @@ message WriterIdentity {
   string domain_id = 4 [(buf.validate.field).string.min_len = 1];
 }
 message WriterManifest {
+  // Deprecated (#3475): only the deleted writer reconciliation read or wrote it, and no run did.
+  option deprecated = true;
   option (buf.validate.message).cel = {
     id: "writer_manifest.unique"
     message: "writer physical identities must be unique"
@@ -176,6 +182,8 @@ message WriterManifest {
   bool closed = 3;
 }
 message WriterTerminationProof {
+  // Deprecated (#3475): only the deleted writer reconciliation read or wrote it, and no run did.
+  option deprecated = true;
   option (buf.validate.message).cel = {
     id: "writer_proof.closed"
     message: "termination proof needs a closed manifest and every domain verified absent"
@@ -185,6 +193,8 @@ message WriterTerminationProof {
   repeated string absent_domains = 2 [(buf.validate.field).repeated.unique = true];
 }
 enum WriterReconciliationStatus {
+  // Deprecated (#3475): only the deleted writer reconciliation read or wrote it, and no run did.
+  option deprecated = true;
   WRITER_RECONCILIATION_STATUS_UNSPECIFIED = 0;
   WRITER_RECONCILIATION_STATUS_PROVEN_STOPPED = 1;
   WRITER_RECONCILIATION_STATUS_PENDING = 2;
@@ -192,6 +202,8 @@ enum WriterReconciliationStatus {
   WRITER_RECONCILIATION_STATUS_UNSUPPORTED = 4;
 }
 message WriterReconciliation {
+  // Deprecated (#3475): only the deleted writer reconciliation read or wrote it, and no run did.
+  option deprecated = true;
   option (buf.validate.message).cel = {
     id: "writer_reconciliation.proof"
     message: "ProvenStopped requires termination proof for the exact reconciliation manifest"
@@ -203,6 +215,8 @@ message WriterReconciliation {
   string detail = 4;
 }
 message WriterRegistryState {
+  // Deprecated (#3475): only the deleted writer reconciliation read or wrote it, and no run did.
+  option deprecated = true;
   option (buf.validate.message).cel = {
     id: "writer_registry.proof"
     message: "registry proof must bind its exact manifest"
