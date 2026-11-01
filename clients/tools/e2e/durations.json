@@ -6,7 +6,6 @@
   "desktop-shell/e2e/chart-hint.spec.ts": 2.015,
   "desktop-shell/e2e/chip-hint.spec.ts": 2.423,
   "desktop-shell/e2e/gateway-records.spec.ts": 19.296,
-  "desktop-shell/e2e/home.spec.ts": 2.302,
   "desktop-shell/e2e/liveness.spec.ts": 7.331,
   "desktop-shell/e2e/machines-add-unreachable.spec.ts": 0.438,
   "desktop-shell/e2e/machines-live-screens.spec.ts": 11.319,
@@ -15,7 +14,6 @@
   "desktop-shell/e2e/machines-page.spec.ts": 7.527,
   "desktop-shell/e2e/machines.spec.ts": 2.786,
   "desktop-shell/e2e/narrow-shell.spec.ts": 0.853,
-  "desktop-shell/e2e/new-run-destination.spec.ts": 3.702,
   "desktop-shell/e2e/new-run-installed.spec.ts": 3.52,
   "desktop-shell/e2e/new-run-screens.spec.ts": 40.91,
   "desktop-shell/e2e/new-run.spec.ts": 53.755,
@@ -64,6 +62,5 @@
   "desktop-shell/e2e/shell.spec.ts": 2.273,
   "desktop-shell/e2e/toasts.spec.ts": 10.577,
   "desktop-shell/e2e/usage.spec.ts": 40.791,
-  "desktop-shell/e2e/world-agreement.spec.ts": 15.653,
   "ui-gallery/e2e/gallery.spec.ts": 25.7
 }

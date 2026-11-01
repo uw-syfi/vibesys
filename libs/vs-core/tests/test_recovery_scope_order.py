@@ -95,8 +95,13 @@ DESCRIPTORS = tuple(descriptor(kind) for kind in REGISTERED)
 
 
 def seed() -> core.CoreState:
+    """A run whose steps may run once more: a ``CRASHED`` attempt is charged, so a limit of 0 spends it."""
     state = core.initial_state()
-    run = state.run.model_copy(update={"capabilities": core.Capabilities(operations=DESCRIPTORS)})
+    bound = state.run.limits.request_retries.model_copy(update={"limit": 1})
+    limits = state.run.limits.model_copy(update={"request_retries": bound})
+    run = state.run.model_copy(
+        update={"capabilities": core.Capabilities(operations=DESCRIPTORS), "limits": limits}
+    )
     return state.model_copy(update={"registry": DESCRIPTORS, "run": run})
 
 

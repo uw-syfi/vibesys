@@ -866,3 +866,95 @@ test('no page draws a role, harness, model or example id as raw text', async () 
   }
   expect(raw).toEqual([]);
 });
+
+const DESTINATION = '~/vibesys-projects/stack';
+
+/** New run on a helper that answers `destinations`, with the stack example answered through to Review. */
+async function reviewTheStack(
+  destinations: Readonly<Record<string, {state: string; project: string | null}>>,
+): Promise<OpenShell> {
+  const shell = await open(
+    withNewRun({
+      destinations,
+      features: [
+        ...REQUIRED_HELPER_FEATURES,
+        'run_roles',
+        'example_catalogue',
+        'example_destination',
+      ],
+    }),
+  );
+  await choose(shell, 'Start from', 'An example');
+  await proceed(shell);
+  await choose(shell, 'Domain', 'Data structures');
+  await proceed(shell);
+  await choose(shell, 'Structure', /stack/);
+  await proceed(shell);
+  await choose(shell, 'Workload', /Multiple producers, multiple consumers/);
+  await proceed(shell);
+  await proceed(shell, 'Looks right');
+  await proceed(shell);
+  await proceed(shell);
+  one(main(shell), {role: 'heading', name: 'Ready to start?'});
+  return shell;
+}
+
+const createButtons = (shell: OpenShell): Element[] =>
+  all(main(shell), {role: 'button', name: 'Create the project'});
+
+test('a destination that is taken offers another name, and a free one creates', async () => {
+  const shell = await reviewTheStack({[DESTINATION]: {state: 'occupied', project: null}});
+  await see(main(shell), `${DESTINATION} is taken`);
+  expect(createButtons(shell)).toHaveLength(0);
+  expect(startClosed(shell)).toBe(true);
+  await press(button(main(shell), 'Choose another name'));
+  await settle();
+  const where = () => field(main(shell), 'Create the example at') as HTMLInputElement;
+  expect(where().value).toBe(DESTINATION);
+  await see(main(shell), 'Taken');
+  await fillIn(where(), '~/vibesys-projects/stack-2');
+  await pause();
+  await until('the free name to offer Create', () => createButtons(shell).length === 1);
+  await press(button(main(shell), 'Create the project'));
+  await settle();
+  await until('Start run to open', () => !startClosed(shell));
+  await pressStart(shell);
+  expect(started().map(run => (run as {project: string}).project)).toEqual([
+    '~/vibesys-projects/stack-2',
+  ]);
+});
+
+test('the example project already there is used as it is', async () => {
+  const shell = await reviewTheStack({
+    [DESTINATION]: {state: 'example_project', project: DESTINATION},
+  });
+  expect(createButtons(shell)).toHaveLength(0);
+  await press(button(main(shell), 'Use it'));
+  await settle();
+  await until('Start run to open', () => !startClosed(shell));
+  await pressStart(shell);
+  expect(started().map(run => (run as {project: string}).project)).toEqual([DESTINATION]);
+});
+
+test('an empty directory is created in, as an absent one is', async () => {
+  const shell = await reviewTheStack({[DESTINATION]: {state: 'empty', project: null}});
+  await press(button(main(shell), 'Create the project'));
+  await settle();
+  await until('Start run to open', () => !startClosed(shell));
+});
+
+test('a harness the person picked stays when the machine reports what it has', async () => {
+  const machine = newRunOf(SEED).machine as Record<string, unknown>;
+  const shell = await openAt(
+    pageNamed('agent'),
+    withNewRun({machine: {...machine, harness_clis: ['codex']}}),
+  );
+  const lines = () => radiogroup(main(shell), 'Model line');
+  expect(checked(radio(lines(), 'OpenAI', true))).toBe(true);
+  await press(radio(lines(), 'Anthropic', true));
+  await settle();
+  expect(checked(radio(lines(), 'Anthropic', true))).toBe(true);
+  const harness = () => radiogroup(main(shell), 'Harness');
+  expect(checked(radio(harness(), /Claude Code/))).toBe(true);
+  expect(textOf(harness())).toContain('Not found on host-b');
+});

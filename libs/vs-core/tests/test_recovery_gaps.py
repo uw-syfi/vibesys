@@ -259,6 +259,8 @@ def test_open_step_counts_the_attempts_that_began_across_epochs() -> None:
     loop = started((100.0,))
     play(loop, ("crash", None))
     loop.tick()
+    loop.sleep_until_woken()
+    loop.tick()
     (row,) = loop.state.records.records
     view = open_step(loop.state, row.request_id)
     assert view is not None

@@ -46,9 +46,10 @@ once. An **open step** is a step with no result. An **epoch** is one process lif
    holds, wait for both, then end.
 5. **A step that cannot conclude is bounded.** An executor that answers with an observation that is not
    final has given the step no result: the attempt raised, it is charged as a crash is, and nothing it
-   left is adopted. The step runs again at most `request_retries` more times and then ends `Failed`
-   (`ATTEMPTS_EXHAUSTED`), so a run whose far side never answers ends or halts on a typed stop and
-   never waits on it. A `clear` that keeps failing is the one wait the loop does not bound: it shows
+   left is adopted. The step runs again at most `request_retries` more times, each after a backoff on the
+   run clock that doubles with every charged attempt up to `request_backoff_cap_seconds`, and then ends
+   `Failed` (`ATTEMPTS_EXHAUSTED`), so a run whose far side never answers ends or halts on a typed stop
+   and never waits on it, and a runner that fails at once does not spend every try in one instant. A `clear` that keeps failing is the one wait the loop does not bound: it shows
    on the `StallBoard`, and a pause or an ending abandons it. `vs-dst` holds its worlds to the rule
    (`test_a_request_the_world_never_answers_finally_is_asked_within_the_retry_bound_and_the_run_halts`).
 
@@ -157,7 +158,7 @@ These behaviors live in the files above and stay, so deleting the files is not e
 | A capacity-gate hold does not spend a turn's limit | `_turn_holds.py`, `_proofs.py:occupied_episode` | Keep `_turn_holds.py`; move `occupied_episode` |
 | Stop modes (drain, cancel), what a pause holds, admission budget | `_proofs.py` (`stop_mode`, `draining`, `continues_admitted_work`, `admission_remaining`) | `_run_stop.py` and `_admission.py` |
 | Workspace grant enforcement | `_access_settlement.py:AccessSettlement.begin`, `settle` | Stays; becomes part of the agent-turn runner's `run` |
-| Attempt retry bound and backoff | `_request_ledger.py:retry_delay`, `_exhausted`, `due_retries`, `Limits.request_retries` | Keep. Re-run attempts after a restart spend the same bound as retryable failures, so a step that kills its process every time ends as a typed failure |
+| Attempt retry bound and backoff | `_request_ledger.py:retry_delay`, `_exhausted`, `due_retries`, `Limits.request_retries` | Replaced by `decide`: the bound is `StepAttempts.charged`, the backoff is `Limits.request_retries.delay(charged)` counted from `StepAttempts.charged_at`, the run clock of the record that last charged an attempt. Re-run attempts after a restart spend the same bound as retryable failures, so a step that kills its process every time ends as a typed failure |
 | Pause and park admission | `_run_park.py` (278), `_run_pause.py` (269), `_parked_admission.py` (80), runtime `_bounded_stop.py` (254) | Keep; the pause change in #3475 item 1 owns them |
 
 The issue's target of under 1,000 lines for "recovery, pause and fence code" cannot hold as written:
@@ -562,6 +563,12 @@ kind. The rule is:
   has charged, exceed the step's retry limit (`retry_limit` of the request, else
   `Limits.request_retries.limit`), so an attempt that raised or whose work a dead host lost is charged
   and a step that always does ends as a typed failure;
+- an open step that has a charged attempt is not `Run` before `StepAttempts.charged_at` plus
+  `Limits.request_retries.delay(charged)`: the fold records the run clock of the `RAISED` record, and of the
+  `LOST` record that charged a dead host's attempt, and `decide` waits (`Wait` until that time) instead. A
+  pause or an adopted attempt charges nothing and waits for nothing, and neither does a step of a run that
+  is ending: ending needs no time, so its cleanup runs again at once, still within the retry bound. The
+  step's own limit still ends it: a backoff never outlasts `Settle(Cancelled(DEADLINE))`;
 - an open step marked `on_interrupt = CANCEL` whose attempt ended without a result, by an interruption
   record or by its process, is `Settle(Cancelled(INTERRUPTED))`;
 - an open step whose dependency can never succeed is `Settle(Cancelled(WITHDRAWN))`; one whose dependency is

@@ -7,18 +7,10 @@
 import type {Page} from '@playwright/test';
 import {expect} from '@playwright/test';
 import type {WelcomeBridge} from '@vibesys/ipc';
-import {
-  clusterTestsByAlias,
-  type EndOutcome,
-  loginStartsByProvider,
-  machineSettingsWorld,
-  type RunFixture,
-  splitLive,
-} from '@vibesys/run-fixtures';
+import {type RunFixture, splitLive} from '@vibesys/run-fixtures';
 import {
   type CoreMethods,
   type ExampleDestinationMethods,
-  type FakeBridgeSeed,
   installFakeBridge,
   installFakeChrome,
   installFakeExampleDestination,
@@ -31,25 +23,18 @@ import {
   installFakeUsagePrices,
   installFakeWindows,
   installRequestBound,
-  MAC_CHROME,
   type MachineSettingsMethods,
   type MachinesMethods,
   type NewRunMethods,
   type UsageMethods,
   type WindowsMethods,
 } from '../src/testing/fake-bridge.js';
-import {FAKE_OFFER} from '../src/testing/fake-offer.js';
-import {STARTED_AT} from '../src/testing/started-at.js';
+import {seedOf} from '../src/testing/fixture-seed.js';
 import {addInitScripts, initScript as script} from './init-scripts.js';
 import {type NativeFixtureOptions, nativeFixtureScript} from './native-fixture.js';
 import {whenRead} from './read.js';
 import {installGatewayOnly, type RetiredRunMethods} from './retired-run-bridge.js';
 
-const PROJECT = '/work/queue-rs';
-const TASK = 'mpmc';
-const INSTANCE = '00000000000a';
-const HOST = 'ssh:remote-host';
-const CHECKOUT = '~/vibesys';
 /** How often a page may ask the bridge for the same thing; far above any screen's own reads. */
 const REQUEST_LIMIT = 100;
 
@@ -85,98 +70,6 @@ interface FixtureWindow extends Window {
 
 export interface OpenOptions extends NativeFixtureOptions {
   readonly theme?: 'ink' | 'paper';
-}
-
-/** The registry phase a run that ended with `outcome` stays in. */
-function phaseOf(outcome: EndOutcome | undefined): string {
-  if (outcome === undefined) return 'running';
-  if (outcome === 'failed' || outcome === 'adoption-failed') return 'failed';
-  if (outcome === 'stopped' || outcome === 'force_stopped') return 'stopped';
-  return 'completed';
-}
-
-function server(fixture: RunFixture): Record<string, unknown> {
-  const end = fixture.end;
-  const phase = phaseOf(end?.outcome);
-  return {
-    id: INSTANCE,
-    projectRoot: PROJECT,
-    runId: fixture.runId,
-    status: phase,
-    phase,
-    paused: null,
-    end: end === undefined ? null : {...end, resumable: false},
-    startedAt: STARTED_AT,
-    reason: null,
-  };
-}
-
-/** A listing of the fixture's run, live or ended as the fixture says. */
-function listingOf(fixture: RunFixture): Record<string, unknown> {
-  const run = server(fixture);
-  const live = fixture.state === 'live';
-  return {
-    kind: 'listed',
-    host: HOST,
-    live: live ? [run] : [],
-    ended: live ? [] : [run],
-    unreadable: [],
-    unverified: [],
-  };
-}
-
-/**
- * The runs `host` lists for `PROJECT`: those its servers and registry hold, and those the user
- * opened (Recent), as `runs.list` would answer. The one place the world says which runs a machine
- * has, so the dashboard and the machines agree.
- */
-function projectRuns(
-  listing: Record<string, unknown>,
-  recent: readonly Record<string, unknown>[],
-): Record<string, readonly unknown[]> {
-  const servers = [...(listing['live'] as unknown[]), ...(listing['ended'] as unknown[])];
-  const runs = new Map<string, unknown>();
-  for (const each of servers) {
-    const {runId, startedAt} = each as {runId: string; startedAt: number};
-    runs.set(runId, {runId, task: TASK, createdAt: startedAt * 1000});
-  }
-  for (const each of recent) {
-    const {runId, task, attachedAt} = each as {runId: string; task: string; attachedAt: number};
-    if (!runs.has(runId)) runs.set(runId, {runId, task, createdAt: attachedAt});
-  }
-  return {[`${HOST}|${PROJECT}`]: [...runs.values()]};
-}
-
-function seedOf(fixture: RunFixture, theme: 'ink' | 'paper'): FakeBridgeSeed {
-  const listing = listingOf(fixture);
-  const recent = [
-    {
-      host: HOST,
-      hostLabel: 'remote-host',
-      project: PROJECT,
-      task: TASK,
-      runId: fixture.runId,
-      instanceId: fixture.state === 'live' ? INSTANCE : null,
-      attachedAt: 3,
-    },
-  ];
-  return {
-    theme,
-    chromeInset: MAC_CHROME,
-    appearance: {mode: theme === 'ink' ? 'dark' : 'light', light: 'paper', dark: 'ink'},
-    listings: [listing],
-    recent,
-    // The machines are the ones the run is on: This Mac, and its host with the run's checkout.
-    machines: [
-      {host: 'local', label: 'This Mac', checkout: CHECKOUT},
-      {host: HOST, label: 'remote-host', checkout: CHECKOUT},
-    ],
-    projectRuns: projectRuns(listing, recent),
-    newRun: {...FAKE_OFFER, projects: {[PROJECT]: [TASK]}},
-    machineSettings: machineSettingsWorld,
-    clusterTests: clusterTestsByAlias,
-    loginStarts: loginStartsByProvider,
-  };
 }
 
 /**
@@ -250,14 +143,6 @@ export async function playLive(page: Page, fixture: RunFixture): Promise<void> {
   await expect
     .poll(async () => (await subscriptions()).every((count, index) => count > (before[index] ?? 0)))
     .toBe(true);
-}
-
-/** Fails the test when the page asked the bridge for the same thing over and over. */
-export async function expectNoRequestLoops(page: Page): Promise<void> {
-  const loops = await page.evaluate(
-    () => (window as unknown as FixtureWindow).fakeHost.requestLoops ?? [],
-  );
-  expect(loops, 'requests the page repeated without end').toEqual([]);
 }
 
 /** Lets a held history read finish, so the run's screen settles. */

@@ -55,6 +55,11 @@ if TYPE_CHECKING:
     from vibesys.plugin_registration import OrchestrationRegistration
     from vs_runtime.api import CorePlan, OrchestrationPlugin, RunFacts
 
+# The dynamic search's contexts come from hypothesis `find`, 1 to 4 s each and cached per process,
+# so spreading this file's tests over the shard's workers repeats them in each: four workers cost
+# four times the one that runs the whole file (30 s of CPU against 7 s).
+pytestmark = pytest.mark.xdist_group("domain-sections-in-prompts")
+
 _RolePrompts = tuple[tuple[DomainRole, "BaseModel"], ...]
 _CRITERIA = "criteria"
 _REV = RevisionRef(revision_id=RevisionId(root="a1"), digest="git-commit:a1")
