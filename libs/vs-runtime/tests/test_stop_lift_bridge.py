@@ -145,3 +145,24 @@ def test_a_resumed_process_lifts_each_old_host_stop(stopper: str, *, replayed: b
         run.poll()
         assert run.channel.stop_requested()
         assert requested_stop_mode(run.core.run) is StopMode.CANCEL
+
+
+@pytest.mark.parametrize("lifts", [1, 2, 3])
+def test_the_environments_stop_is_recorded_again_after_every_resume(lifts: int) -> None:
+    """Each process's environment stop is its own control: a Resume lifts one, not the next.
+
+    The stop's id was derived from ``records.recovery.epoch``, which no process ever advances,
+    so the second process's stop carried the first's id, core held it already and the bridge
+    recorded nothing: the channel stopped the run and core never heard.
+    """
+    run = _run()
+    for _ in range(lifts):
+        run.channel.request_environment_stop()
+        run.poll()
+        assert requested_stop_mode(run.core.run) is StopMode.CANCEL
+        run = _new_process(run, resumed=True)
+        run.poll()
+        assert requested_stop_mode(run.core.run) is None
+    run.channel.request_environment_stop()
+    run.poll()
+    assert requested_stop_mode(run.core.run) is StopMode.CANCEL
