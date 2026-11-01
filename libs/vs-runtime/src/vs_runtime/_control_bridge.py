@@ -770,8 +770,6 @@ class RunControlBridge:
         if control is None:
             return False
         if _is_held(entry, control):
-            if control.action in ("park", "pause", "pause_now") and not self._channel.drain_ready:
-                return True
             if self._inbox is not None:
                 self._report_outcome(entry.request_id, None)
                 self._inbox.requests.settle(entry.request_id)
@@ -905,30 +903,9 @@ class RunControlBridge:
         ):
             self._park_landed = True
             self._pause_now_landed = immediate
-            self._channel.land_park(
-                tuple(
-                    job.resource_id.root
-                    for job in (*core.evaluation.jobs, *core.evaluation.registered_jobs)
-                    if not job.terminal and job.resource_id is not None
-                ),
-                immediate=immediate,
-                parked=core.run.status is RunStatus.PARKED,
-            )
+            self._channel.land_park(immediate=immediate, parked=core.run.status is RunStatus.PARKED)
         held = {control.control_id for control in core.run.controls}
-        self._settle_inbox(
-            sorted(
-                r
-                for r in self._submitted
-                if _identity(r) in held
-                and (
-                    self._channel.drain_ready
-                    or not any(
-                        c.control_id == _identity(r) and c.action in ("park", "pause", "pause_now")
-                        for c in core.run.controls
-                    )
-                )
-            )
-        )
+        self._settle_inbox(sorted(r for r in self._submitted if _identity(r) in held))
         for identity, change in self._asked.items():
             if change.action_request is not None and identity in held:
                 self._channel.notify_action_applied(action_summary(change.action_request))

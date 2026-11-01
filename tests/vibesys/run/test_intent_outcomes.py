@@ -7,9 +7,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
+import vs_core.api as core
 import vs_proto.api as p
 from vibesys.events import CoreEventType, RunStartedData
 from vibesys.run import EventJournal
@@ -140,6 +141,60 @@ def test_a_committed_refusal_is_not_reapplied_after_a_crash_before_its_inbox_mar
     assert status.reason == reason
     events.close()
     assert_recorded_outcomes(project, run_id, [request.control_id])
+
+
+@pytest.mark.regression
+@given(
+    request=st.sampled_from([PauseRequest(control_id="pause"), PauseNowRequest(control_id="stop")]),
+    live=st.integers(min_value=1, max_value=3),
+)
+@example(request=PauseRequest(control_id="pause"), live=1)
+def test_a_pause_is_answered_while_a_job_is_live(
+    request: PauseRequest | PauseNowRequest, live: int
+) -> None:
+    """A pause that lands over live jobs is answered; the jobs run on and are no barrier.
+
+    The channel held a barrier on every job live at the pause that only the old shell's
+    executors released, so on the step loop the request stayed unanswered while the run was
+    parked, and the operator saw an intent no outcome ever answered.
+    """
+    with TemporaryDirectory() as directory:
+        project = inbox_project(Path(directory))
+        run_id = "run-outcomes"
+        inbox = project.state.control_inbox(run_id)
+        clock = ManualClock(start=100)
+        events = open_journal(project, run_id, clock)
+        # A request names the epoch it was made in; the step loop has opened the first.
+        request = request.model_copy(update={"expected_epoch": 1})
+        inbox.post(request.control_id, request.model_dump_json().encode(), ended=lambda: None)
+        controls = inbox_bridge(project, run_id, events)
+        state = initial_state()
+        scope = core.Scope(owner=state.run.run_id, generation=0)
+        jobs = tuple(
+            core.RegisteredOwnedJob(
+                operation_id=core.OperationId(root="job-operation"),
+                request_id=core.RequestId(root=f"submit-{index}"),
+                scope=scope,
+                resource_pool=core.PoolId(root="pool"),
+                resource_id=core.ResourceId(root=f"job-{index}"),
+                wait=core.WaitOn(timer=0.0),
+            )
+            for index in range(live)
+        )
+        state = state.model_copy(
+            update={
+                "evaluation": state.evaluation.model_copy(update={"registered_jobs": jobs}),
+                "steps": state.steps.model_copy(update={"epoch": 1}),
+            }
+        )
+        for change in controls.poll(state, clock.now()):
+            state = step(state, change).state
+        assert state.run.status in {RunStatus.DRAINING, RunStatus.PARKED}
+        controls.settled(state, running=False)
+        status = inbox.status(request.control_id, ended=None)
+        assert status is not None
+        assert status.state is RequestState.APPLIED
+        events.close()
 
 
 @dataclass(frozen=True)

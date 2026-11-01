@@ -1119,6 +1119,11 @@ class CancelOwnedJob(RequestBase):
 
     kind: Literal["cancel_owned_job"] = "cancel_owned_job"
     for_park: bool = False
+    """Never set: only the old shell's park cancellation set it.
+
+    It stays so that an envelope saved with it still loads; the persisted-shape check refuses to
+    drop a field without an envelope version bump, so it goes with the next bump.
+    """
     immediate: bool = False
     """Release the physical job while preserving the logical measurement for relaunch."""
     resource_id: ResourceId

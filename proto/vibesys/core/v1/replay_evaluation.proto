@@ -78,7 +78,10 @@ message ReplayMeasurementJob {
 
 message ReplayCancelMeasurement {
   string resource = 1 [(buf.validate.field).string.min_len = 1];
-  bool for_park = 2;
+  // Set by the old shell's park cancellation, which no longer exists. Never written; a reader
+  // ignores it. It stays declared so records already stored keep decoding (the breaking-change
+  // check refuses to delete a field, reserved or not).
+  bool for_park = 2 [deprecated = true];
   bool immediate = 3;
 }
 
