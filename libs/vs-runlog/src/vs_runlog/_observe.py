@@ -77,21 +77,8 @@ class HeadObserver:
         with _damage_is_typed(path):
             head = _read_raw_head(path)
             log = path.with_name("run.log")
-            wants_input = (
-                head.objective is not None
-                and not head.objective.input_stated
-                and not head.objective.has_field("input_value")
-            )
-            wants_performance = not head.performance_stated
-            if (head.epoch == 0 or wants_input or wants_performance) and log.exists():
-                recovered = self._recovered(log, head)
-                head.epoch = head.epoch or recovered.epoch.number
-                if wants_input and recovered.input_value is not None and head.objective is not None:
-                    head.objective.input_value = recovered.input_value
-                if wants_performance and recovered.head is not None:
-                    projected = RunHead.from_binary(recovered.head.to_binary())
-                    projected.process = head.process
-                    head = projected
+            if needs_recovery(head) and log.exists():
+                head = apply_recovered(head, self._recovered(log, head))
             return head
 
     def current_epoch(self, path: Path) -> CurrentEpoch | None:
@@ -155,6 +142,32 @@ def _prefix(log: Path, head: RunHead | None) -> _Prefix:
     return _Prefix(
         stat.st_dev, stat.st_ino, stat.st_mtime_ns, stat.st_size, committed, headed=head is not None
     )
+
+
+def needs_recovery(head: RunHead) -> bool:
+    """Whether a stated head leaves a fact to the log: its epoch, input or performance."""
+    return head.epoch == 0 or _wants_input(head) or not head.performance_stated
+
+
+def _wants_input(head: RunHead) -> bool:
+    return (
+        head.objective is not None
+        and not head.objective.input_stated
+        and not head.objective.has_field("input_value")
+    )
+
+
+def apply_recovered(head: RunHead, recovered: _Recovered) -> RunHead:
+    """The head a reader observes: ``head`` with the facts ``recovered`` supplies it, never more."""
+    wants_input, wants_performance = _wants_input(head), not head.performance_stated
+    head.epoch = head.epoch or recovered.epoch.number
+    if wants_input and recovered.input_value is not None and head.objective is not None:
+        head.objective.input_value = recovered.input_value
+    if wants_performance and recovered.head is not None:
+        projected = RunHead.from_binary(recovered.head.to_binary())
+        projected.process = head.process
+        return projected
+    return head
 
 
 _OBSERVER = HeadObserver()
