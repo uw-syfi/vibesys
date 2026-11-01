@@ -193,6 +193,24 @@ def test_a_turn_whose_wait_is_refused_at_its_end_releases_the_handles_it_waited_
 
 
 @pytest.mark.parametrize(
+    "job", ["job:not-owned", "vs-" + "0" * 40, "x"], ids=["unowned", "handle-shaped", "short"]
+)
+def test_a_wait_core_refuses_at_commit_ends_the_turn_and_the_run_goes_on(
+    tmp_path: Path, job: str
+) -> None:
+    """A wait core cannot honor (a job the run does not own) ends the turn: no suspension is committed."""
+    run = _play(tmp_path, (Turn(foreign_wait=job),), 1)
+    world = check(run)
+
+    assert world.suspended == 0, "the bridge accepted no wait: this one is the strategy's own"
+    assert run.core.evaluation.continuations == ()
+    assert [
+        row.invocation.invocation_id.root.endswith("/resume")
+        for row in run.core.sessions.invocations
+    ] in ([], [False]), "no resume followed"
+
+
+@pytest.mark.parametrize(
     "turns",
     [
         (Turn(late=(("submit",), ("wait", (0,)))),),
@@ -283,6 +301,22 @@ def _some[T](points: tuple[T, ...], sample: int) -> list[T]:
     return [points[index] for index in evenly_spaced(len(points), count)]
 
 
+def _assert_one_charge_per_candidate_asked(state: CoreState, turns: tuple[Turn, ...]) -> None:
+    """Successive turns of one workstream ask for the same and for new candidates: a candidate is charged once.
+
+    A turn that leaves the candidate as it was asks for an evaluation that exists, and a turn that
+    edits asks for a new one; every ask for a candidate, from any turn, is answered with its handle.
+    """
+    contents = 0
+    asked: set[int] = set()
+    for turn in turns:
+        contents += turn.edit
+        if any(step[0] in ("submit", "lose", "timeout_retry") for step in turn.program):
+            asked.add(contents)
+    charged = {c.request_id for c in state.evaluation.agent_calls if not c.repeat and c.request_id}
+    assert len(charged) == len(asked)
+
+
 def _swept(run: SimulatedRun) -> None:
     """Kill the host at a sample of commit boundaries, and interrupt it where its agent is calling."""
     for crash in _some(run.crash_points(), SAMPLE_CRASHES):
@@ -313,7 +347,9 @@ def test_no_restart_loses_or_repeats_a_charged_submission(
     same run record and the same owed record.
     """
     run = _play(tmp_path, turns, len(turns))
-    check(run)
+    world = check(run)
+    if world.seen == len(turns):
+        _assert_one_charge_per_candidate_asked(run.core, turns)
     _swept(run)
 
 

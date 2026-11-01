@@ -39,9 +39,13 @@ from vs_core.api import (
     ArtifactId,
     ArtifactRef,
     Continuation,
+    ContinuationId,
+    ContinuationPhase,
     DispatchTurn,
     EvidenceKind,
     ExecuteRegisteredOperation,
+    InvocationId,
+    InvocationRef,
     RenderedArtifacts,
     ResourceId,
     ResumeSessionTurn,
@@ -125,6 +129,8 @@ class Turn:
     """The agent clones a repository into its workspace and submits, then removes it."""
     closing_at_yield: bool = False
     """The run stops taking suspensions between the agent's wait and the end of its turn."""
+    foreign_wait: str | None = None
+    """The turn ends waiting on this job, which the run does not own, in place of what it waited on."""
 
 
 def _commit(label: str) -> str:
@@ -320,6 +326,27 @@ class AgentToolWorld:
         return self._evaluator(request, core)
 
 
+def _foreign_wait(request: DispatchTurn, job: str) -> Continuation:
+    """A wait on a job the run does not own, which core refuses when it commits the suspension."""
+    turn = request.turn
+    name = turn.invocation_id.root
+    session, generation = turn.session.session_id, request.scope.generation
+    return Continuation(
+        continuation_id=ContinuationId(root=f"{name}/evaluation"),
+        invocation=InvocationRef(
+            session_id=session, invocation_id=turn.invocation_id, generation=generation
+        ),
+        next_invocation=InvocationRef(
+            session_id=session,
+            invocation_id=InvocationId(root=f"{name}/resume"),
+            generation=generation,
+        ),
+        jobs=(ResourceId(root=job),),
+        deadline_at=500.0,
+        phase=ContinuationPhase.WAITING,
+    )
+
+
 def new_bridge(
     world: AgentToolWorld,
     held: HeldSnapshot | None = None,
@@ -365,7 +392,10 @@ class _Host:
             if isinstance(request, DispatchTurn):
                 # A turn that ended waiting yields its continuation, as the session executor asks.
                 self._world.yielded = self._yielded(request)
-                self._world.suspended += self._world.yielded is not None
+                self._world.suspended += (
+                    self._world.yielded is not None
+                    and self._world.turns[self._world.seen - 1].foreign_wait is None
+                )
                 if self._world.turns[self._world.seen - 1].closing_at_yield:
                     # The turn is over for the bridge: the handles it waited on are no longer its own.
                     await self._call(self._token(), ("wait", (0,)), count=False)
@@ -396,6 +426,8 @@ class _Host:
     def _yielded(self, request: DispatchTurn) -> Continuation | None:
         """The bridge's yield for the turn, with the run shown closing if the turn asked for it."""
         turn = self._world.turns[self._world.seen - 1] if self._world.seen else Turn()
+        if turn.foreign_wait is not None:
+            return _foreign_wait(request, turn.foreign_wait)
         if not turn.closing_at_yield:
             return self._bridge.yielded(request)
         core = self._admission.admitted_core
