@@ -27,6 +27,7 @@ from vs_dst._interrupt import MAX_RESUMES, Interrupted, Outcome
 from vs_dst._interruptions import (
     QUOTA_OUTLASTS_PATIENCE_S,
     QUOTA_WAIT_S,
+    SWEPT_MOMENTS,
     Action,
     Interruption,
     Moment,
@@ -53,6 +54,7 @@ __all__ = [
     "QUOTA_WAIT_S",
     "SAMPLED",
     "SAMPLE_SIZE",
+    "SWEPT_MOMENTS",
     "STEP_LOOP_TIMING",
     "Action",
     "Admission",

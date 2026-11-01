@@ -35,6 +35,9 @@ class Effects:
     sealed result was interrupted: its effect began and left nothing a restart can read."""
     finished: dict[str, int] = field(default_factory=dict)
     """How many times each request's effect finished and sealed a result."""
+    clear_awaits: int = 0
+    """How many awaits the ``clear`` of any step has passed, over all hosts: the numbering of
+    ``Moment.IN_CLEAR``."""
 
 
 class RecoverableExecutors(ScriptedExecutors):

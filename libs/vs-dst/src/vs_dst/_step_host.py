@@ -269,6 +269,7 @@ class _Host:
             self._outside.effects,
             clock,
             world,
+            watcher,
         )
         loop = asyncio.ensure_future(
             run_step_loop(_Counting(inputs), runner, clock, TIMING, StallBoard())
@@ -496,8 +497,10 @@ class _WorldRunner:
         effects: Effects,
         clock: VirtualClock,
         world: World,
+        watcher: Watcher | None = None,
     ) -> None:
         self._executors = executors
+        self._watcher = watcher
         self._effects = effects
         self._clock = clock
         self._holds = _holds_of(world)
@@ -546,13 +549,30 @@ class _WorldRunner:
     async def clear(self, step: Request, tag: RequestId) -> Adopted | Cleared:
         """Adopt the result the step's effect sealed, or find nothing.
 
+        Three awaits, as a real runner's ``clear`` has (it reaches its far side, reads its
+        ledger, and settles what it found): a host can die, be paused or be stopped at each, and
+        asking again from the start must give the same answer, because ``clear`` changes nothing
+        a restart would read.
+
         A world whose far side cannot be reached (`ClearFailingWorld`) proves nothing about the
         tag, so it raises what a real runner raises then.
         """
+        await self._await_in_clear()
         if self._clear_fails(step):
             raise ClearUnavailableError(tag, "the world's far side")
+        await self._await_in_clear()
         sealed = self._sealed(step, tag)
+        await self._await_in_clear()
         return Cleared() if sealed is None else Adopted(sealed)
+
+    async def _await_in_clear(self) -> None:
+        """One await of a ``clear``: the moment an interruption can land inside it, then a yield."""
+        effects = self._effects
+        index = effects.clear_awaits
+        effects.clear_awaits += 1
+        if self._watcher is not None:
+            self._watcher.reached(Moment.IN_CLEAR, index)
+        await self._clock.sleep(0)
 
     def _sealed(self, step: Request, tag: RequestId) -> Finished | None:
         """The result the step's effect sealed; None when it sealed none that ends the step.

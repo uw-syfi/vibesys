@@ -42,6 +42,11 @@ class Moment(StrEnum):
     AFTER_COMMIT = "after commit"
     IN_FLIGHT = "in flight"
     """A request's effect has begun and has no sealed result."""
+    IN_CLEAR = "in clear"
+    """A ``clear`` of a step is at one of its awaits. A run that is not interrupted never clears a
+    step, so this moment is not offered by `choose`: it is named by a suite that has interrupted
+    the run once, and then lands in the ``clear`` of the host that takes over (its index counts
+    ``clear`` awaits over the whole run, as the others count over theirs)."""
 
 
 QUOTA_WAIT_S = 150.0
@@ -96,8 +101,11 @@ class Interruption:
     __repr__ = __str__
 
 
-KINDS = tuple((action, moment) for action in Action for moment in Moment)
-"""Every class of interruption, in the order a report lists them."""
+SWEPT_MOMENTS = tuple(moment for moment in Moment if moment is not Moment.IN_CLEAR)
+"""The moments an uninterrupted run offers: it has commits and effects, and no ``clear``."""
+
+KINDS = tuple((action, moment) for action in Action for moment in SWEPT_MOMENTS)
+"""Every class of interruption an uninterrupted run offers, in the order a report lists them."""
 
 
 def choose(policy: CrashPointPolicy, commits: int, effects: int) -> tuple[Interruption, ...]:

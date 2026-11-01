@@ -220,6 +220,28 @@ def killed_while_draining(
     return _interrupted(kill, operator.expected, left, operator.resume(left, restart, []))
 
 
+def killed_again(
+    operator: Operator,
+    outside: OutsideWorld,
+    clock_at: float,
+    first: Interruption,
+    kill: Interruption,
+) -> Interrupted:
+    """Resume the run ``outside`` holds after its host was killed at ``first``, and kill that host at ``kill``.
+
+    ``kill`` lands in the host that took over (its ``clear`` of a step, say), which the operator
+    resumes once more. A host that ends before it reaches ``kill`` was only resumed.
+    """
+    snapshots = Snapshots(outside, frozenset({kill}))
+    host = operator.plan.run(outside, clock_at, snapshots, patience=operator.expected.patience)
+    snapshot = snapshots.by_point.get(kill)
+    if snapshot is None:
+        return _interrupted(first, operator.expected, outside, [host])
+    left = snapshot.outside
+    restart = operator.plan.restart_at(clock_at, left.store)
+    return _interrupted(kill, operator.expected, left, operator.resume(left, restart, []))
+
+
 class Together:
     """Hears each moment for several watchers at once, as a store has the one."""
 
