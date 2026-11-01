@@ -1057,21 +1057,22 @@ PR 6a and 6b land back to back, with no cleanup deferred, as #3408 required of i
 
 ### Keeping the deleted modules from coming back
 
-`tests/architecture/test_no_prove_or_block.py` fails when any of these holds, in the strongest form each
-allows (see the `enforce-rules` skill):
+`tests/architecture/test_no_prove_or_block.py` fails when either of these holds (see the `enforce-rules`
+skill):
 
-- A listed module path exists.
-- A listed identifier (`RecoveryBarrier`, `RecoveryCheck`, `HostEpoch`, `ChildLease`, `InspectRequest`,
-  `InspectTurn`, `InspectOwnedJob`, `CancelOwnedResource`, `BlockRequest`, `EffectFences`, `NothingHeld`,
-  `MayHold`, `ReplayUnknown`, `StoreFence`, `HostFence`) is defined or imported in `src/` or `libs/*/src`.
-- `ObservationStatus` has a member named `UNKNOWN`, or any member of `vs_core.api.recovery.Action` or
-  `StepResult` has a `kind` containing `blocked` or `unknown`. This one is a type check: the closed union
-  cannot represent the state.
-- A `StepRunner` implementation is not listed in the contract suite's parametrization.
+- A file under `src/` or `libs/*/src` provides a module in `DELETED_MODULES`, as a module or as a package.
+- A file there defines or imports a name in `DELETED_SYMBOLS`.
 
-The first two are an AST scan like `tests/architecture/test_epoch_ending_authority.py`. Unenforced
-remainder: the guard cannot tell a new mechanism with a different name that does the same job; review
-applies the rule "no result means run again".
+Both are plain tuples at the top of the file, one line each, and each pull request that deletes part of the
+layer adds what it removed. The guard holds the keyed-replay modules and `ReplayUnknown` today. The names the
+inventory above marks for deletion (`RecoveryBarrier`, `RecoveryCheck`, `HostEpoch`, `ChildLease`,
+`InspectRequest`, `InspectTurn`, `InspectOwnedJob`, `CancelOwnedResource`, `BlockRequest`, `EffectFences`,
+`NothingHeld`, `MayHold`, `StoreFence`, `HostFence`) join the list in the pull request that deletes each.
+`ObservationStatus.UNKNOWN` joins as a member list in the pull request that removes the value. Unenforced:
+that every `StepRunner` implementation is in the contract suite's parametrization; no check holds it yet.
+The guard is an AST scan like `tests/architecture/test_epoch_ending_authority.py`. Unenforced remainder: the
+guard cannot tell a new mechanism with a different name that does the same job; review applies the rule "no
+result means run again".
 
 ## Future features
 
