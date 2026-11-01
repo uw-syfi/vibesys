@@ -120,8 +120,11 @@ export interface MachineModel<M extends AnyStateMachine> {
     live: Live,
     snapshot: SnapshotFrom<M>,
   ) => {readonly type: string} | null;
-  /** What else must hold after every step; returns the violations (empty when none). */
-  readonly invariants?: (snapshot: SnapshotFrom<M>) => string[];
+  /**
+   * What else must hold after every step, of the snapshot and of the work live beside it; returns
+   * the violations (empty when none).
+   */
+  readonly invariants?: (snapshot: SnapshotFrom<M>, live: Live) => string[];
   /** More properties of one step; throws when one fails. */
   readonly also?: (
     before: SnapshotFrom<M>,
@@ -189,7 +192,7 @@ function checkSeed<M extends AnyStateMachine>(
     const problems = [
       ...ledger.problems.splice(0),
       ...holdProblems(snapshot, ledger, owners),
-      ...(model.invariants?.(snapshot) ?? []),
+      ...(model.invariants?.(snapshot, liveOf(ledger)) ?? []),
     ];
     try {
       model.also?.(before, event, snapshot, actions as readonly MachineAction[]);
