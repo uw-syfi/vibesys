@@ -12,14 +12,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, NamedTuple
 
 import pytest
-from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
-from vs_sim.api.testing import examples
 
-from .test_measurements import submitted
-from .test_silent_executor_deadline import BOUND, _silent
+from .test_silent_executor_deadline import _silent
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -119,36 +116,6 @@ def _settle(
     return state
 
 
-def _close_after(
-    state: core.CoreState, *, restart: bool, late_by: float, stop_first: bool
-) -> core.CoreState:
-    """Close the run around a record that goes blocked, as the shell would drive it."""
-    late = BOUND + late_by
-    if stop_first:
-        state = core.step(state, _STOP).state
-    result = (
-        core.step(state, core.RecoveryStarted(epoch=2, now_at=late))
-        if restart
-        else core.step(state, core.ClockAdvanced(now_at=late))
-    )
-    state = _settle(result.state, result.requests, late)
-    record = _original(state)
-    if restart:
-        # The restart moved the record's limit past the downtime: the deadline comes then.
-        late = max(late, record.until.at)
-        result = core.step(
-            state, core.ReconciliationDeadline(request_id=record.request_id, now_at=late)
-        )
-        state = _settle(result.state, result.requests, late)
-    if not stop_first:
-        result = core.step(state, _STOP)
-        state = _settle(result.state, result.requests, late)
-    for tick in (late + 1.0, late + 100.0):
-        result = core.step(state, core.ClockAdvanced(now_at=tick))
-        state = _settle(result.state, result.requests, tick)
-    return state
-
-
 class _Case(NamedTuple):
     """One generated world: a record kind and answer, a host restart, and how late it is."""
 
@@ -173,118 +140,9 @@ _CASES = st.builds(
 )
 
 
-def _assert_records_name_what_addresses_them(state: core.CoreState) -> None:
-    """Each record names, in registration order, exactly the commands core sent about it."""
-    commands = (core.InspectRequest, core.CancelOwnedResource, core.BlockRequest)
-    for record in state.records.records:
-        expected = tuple(
-            row.request_id
-            for row in state.records.records
-            if isinstance(row.request, commands) and row.request.target == record.request_id
-        )
-        assert record.addressed_by == expected
-
-
 @pytest.mark.parametrize("kind", list(core.WaitKind))
 def test_every_wait_kind_has_a_resolution(kind: core.WaitKind) -> None:
     assert kind in core.RESOLUTIONS
-
-
-def _poll_blocked_by_late_restart(down_for: float) -> core.CoreState:
-    """A paced job whose poll was in flight when the host died and came back ``down_for`` late."""
-    state, _ = submitted()
-    [job] = state.evaluation.jobs
-    assert job.wait is not None
-    assert job.wait.timer is not None
-    polled = core.step(state, core.ClockAdvanced(now_at=job.wait.timer))
-    state = polled.state
-    for request in polled.requests:
-        assert request.request_id is not None
-        state = core.step(state, core.DispatchAuthorized(request_id=request.request_id)).state
-    poll = next(row for row in state.records.records if row.request.kind == "observe_owned_job")
-    restart = poll.until.at + down_for
-    state = core.step(state, core.RecoveryStarted(epoch=2, now_at=restart)).state
-    # The restart inspects the poll first; its passed limit ends it once that inspection's own
-    # bound passes with no answer.
-    late = restart + state.run.limits.reconciliation_bound
-    result = core.step(state, core.ReconciliationDeadline(request_id=poll.request_id, now_at=late))
-    return _settle_blocks(result.state, result.requests, late)
-
-
-def _settle_blocks(
-    state: core.CoreState, requests: Iterable[core.Request], now_at: float
-) -> core.CoreState:
-    for request in requests:
-        if isinstance(request, core.BlockRequest) and request.request_id is not None:
-            state = core.step(state, core.DispatchAuthorized(request_id=request.request_id)).state
-            answer = _answer(request, now_at).model_copy(
-                update={"admission_id": request.admission_id}
-            )
-            state = core.step(state, core.RequestObserved(observation=answer)).state
-    return state
-
-
-@settings(max_examples=examples(pr=4, nightly=100))
-@given(down_for=st.floats(min_value=0.0, max_value=10_000.0))
-def test_a_job_whose_poll_blocked_while_the_host_was_down_is_polled_again(down_for: float) -> None:
-    """Downtime past any reconciliation bound leaves the job a producer, never an orphan.
-
-    The blocked poll wakes the job, which waits on its backoff timer and polls when it comes.
-    """
-    state = _poll_blocked_by_late_restart(down_for)
-    assert any(row.phase == core.RequestPhase.BLOCKED for row in state.records.records)
-    assert [
-        wait for wait in core.orphan_waits(state) if wait.waiter == core.WaitKind.OWNED_JOB
-    ] == []
-    [job] = state.evaluation.jobs
-    assert job.wait is not None
-    assert job.wait.requests == ()
-    assert job.wait.timer is not None
-    result = core.step(state, core.ClockAdvanced(now_at=max(job.wait.timer, state.run.now_at)))
-    assert "observe_owned_job" in [request.kind for request in result.requests]
-
-
-@settings(max_examples=examples(pr=4, nightly=100))
-@given(case=_CASES)
-def test_a_closed_blocked_request_survives_writer_recovery_and_operator_resume(
-    case: _Case,
-) -> None:
-    """A new epoch opens admission; the old record's forced outcome remains history."""
-    state = _record(case.lifecycle, case.answer, accepted=case.accepted, named=case.named)
-    closed = _close_after(
-        state, restart=case.restart, late_by=case.late_by, stop_first=case.stop_first
-    )
-    if closed.run.status != core.RunStatus.TERMINAL:
-        return
-    recovered = core.step(closed, core.RecoveryStarted(epoch=3, now_at=BOUND + case.late_by + 200))
-    assert recovered.requests == ()
-    assert recovered.state.run.status == core.RunStatus.TERMINAL
-    restarted = core.step(
-        recovered.state, core.EpochResumed(epoch=4, now_at=BOUND + case.late_by + 201)
-    )
-    assert all(isinstance(request, core.InspectRequest) for request in restarted.requests)
-    assert restarted.state.run.status == core.RunStatus.RUNNING
-    assert restarted.state.run.park is None
-    assert not restarted.state.scheduling.admission_closed
-    assert _original(restarted.state).request == _original(closed).request
-    assert _original(restarted.state).failure == _original(closed).failure
-
-
-@settings(max_examples=examples(pr=4, nightly=100))
-@given(
-    down_for=st.floats(min_value=0.0, max_value=10_000.0),
-    down_again_for=st.floats(min_value=0.0, max_value=10_000.0),
-)
-def test_a_host_that_restarts_while_a_blocked_job_poll_is_inspected_still_has_a_producer(
-    down_for: float, down_again_for: float
-) -> None:
-    """The next host inspects the blocked poll before polling again: the job is waited on."""
-    state = _poll_blocked_by_late_restart(down_for)
-    restart = core.RecoveryStarted(epoch=3, now_at=state.run.now_at + down_again_for)
-    restarted = core.step(state, restart).state
-    assert [
-        wait for wait in core.orphan_waits(restarted) if wait.waiter == core.WaitKind.OWNED_JOB
-    ] == []
 
 
 _DID_NOT_SUCCEED = {

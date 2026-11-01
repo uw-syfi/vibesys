@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from hypothesis import given, note, settings
+from hypothesis import example, given, note, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic._host import (
     OUTLINER_LABEL,
@@ -84,21 +84,56 @@ def _check_order(host: Host, plan: list[dict[str, Any]]) -> None:
 
 
 def _greedy_order(plan: list[dict[str, Any]]) -> list[str]:
-    """The first declared step whose dependencies are done, one at a time."""
+    """The first declared step whose dependencies are done, one at a time.
+
+    A trusted step is measured after its work ends, and a slot frees when the work ends, so a
+    step that depends on the one just started waits behind any other step that can start.
+    """
     order: list[str] = []
     while len(order) < len(plan):
-        order.append(
-            next(
-                item["id"]
-                for item in plan
-                if item["id"] not in order and all(dep in order for dep in item["depends_on"])
-            )
-        )
+        ready = [
+            item
+            for item in plan
+            if item["id"] not in order and all(dep in order for dep in item["depends_on"])
+        ]
+        measuring = {item["id"] for item in plan if item["evaluate"] == "trusted"} & set(order[-1:])
+        unblocked = [item for item in ready if not measuring.intersection(item["depends_on"])]
+        order.append((unblocked or ready)[0]["id"])
     return order
 
 
 @MODES
 @settings(max_examples=examples(pr=12, nightly=100), deadline=None, derandomize=True, database=None)
+@example(
+    plan=[
+        {
+            "id": "s0",
+            "title": "t",
+            "documents": [],
+            "done_when": "d",
+            "evaluate": "trusted",
+            "depends_on": [],
+        },
+        {
+            "id": "s1",
+            "title": "t",
+            "documents": [],
+            "done_when": "d",
+            "evaluate": "none",
+            "depends_on": ["s0"],
+        },
+        {
+            "id": "s2",
+            "title": "t",
+            "documents": [],
+            "done_when": "d",
+            "evaluate": "none",
+            "depends_on": [],
+        },
+    ],
+    width=1,
+    picks=[],
+)
 @given(plan=plan_steps(), width=st.integers(1, 3), picks=st.lists(st.integers(0, 7), max_size=80))
 def test_steps_start_once_their_dependencies_are_done_from_the_latest_one_without_a_planner(
     *, restarting: bool, plan: list[dict[str, Any]], width: int, picks: list[int]

@@ -161,6 +161,13 @@ def _settings(
     return check
 
 
+@pytest.mark.parametrize("option", list(RunOption))
+def test_every_typed_option_is_worded_in_the_cause_that_refuses_it(option: RunOption) -> None:
+    text = cause_text(OptionNotAccepted(option=option))
+
+    assert "_" not in text
+
+
 @given(cause=_ANY_CAUSE)
 def test_every_cause_round_trips_through_the_report_and_the_check(cause: Cause) -> None:
     report = _invalid(cause)

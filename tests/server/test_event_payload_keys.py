@@ -52,6 +52,24 @@ _RETIRING = [case for case in _CASES if case[1].retired_keys]
 _INPUT_FAILED = [case for case in _CASES if case[1] in {CoreInputFailed, ServerInputFailed}]
 
 
+@pytest.mark.parametrize(
+    "case", _CASES, ids=lambda case: f"{case[0].__name__}-{case[1].model_fields['kind'].default}"
+)
+@settings(max_examples=examples(pr=40, nightly=200))
+@given(data=st.data())
+def test_every_payload_kind_is_drawn_valid(
+    case: tuple[type[RunEvent | CoreEvent], type[EventPayload]], data: st.DataObject
+) -> None:
+    """The generator draws each kind within its own rules (field constraints, finite numbers).
+
+    A kind it cannot draw would fail the properties above only on the nights that happen to draw
+    its invalid corner, so each kind is drawn here at the pull-request depth too.
+    """
+    _, kind = case
+    payload = data.draw(_payloads(kind))
+    assert kind.model_validate(payload.model_dump(mode="python")) == payload
+
+
 @settings(max_examples=examples(pr=20, nightly=200))
 @given(case=st.sampled_from(_INPUT_FAILED), data=st.data())
 def test_a_failed_input_measurement_payload_is_drawn_and_read_back(

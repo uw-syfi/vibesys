@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 
 from entrypoints.control import control_main, time_ordered_id
@@ -105,9 +105,12 @@ class _Texts:
 
 
 _COMMANDS = st.one_of(
-    st.builds(lambda text: ["steer", text], st.text(min_size=1, max_size=20).filter(str.strip)),
+    # ``--`` ends the options, so a text that starts with a dash is still the text.
     st.builds(
-        lambda text, role: ["steer", text, "--role", role],
+        lambda text: ["steer", "--", text], st.text(min_size=1, max_size=20).filter(str.strip)
+    ),
+    st.builds(
+        lambda text, role: ["steer", "--role", role, "--", text],
         st.text(min_size=1, max_size=20).filter(str.strip),
         st.sampled_from(["dynamic-planner", "dynamic-worker"]),
     ),
@@ -117,6 +120,7 @@ _COMMANDS = st.one_of(
 
 
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=25)
+@example(command=["steer", "--", "-="])
 @given(command=_COMMANDS)
 def test_a_posted_control_is_what_the_run_records(
     tmp_path_factory: pytest.TempPathFactory, command: list[str]

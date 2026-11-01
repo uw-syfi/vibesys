@@ -41,6 +41,20 @@ func TestLayerRules(t *testing.T) {
 		{"the store cannot import its implementation", map[string]string{"cli/internal/store/a.go": goFile(module + "internal/store/filestore")}, true},
 		{"generated code imports only generated code", map[string]string{"cli/gen/vibesys/cli/v1/a.go": goFile(module + "internal/core")}, true},
 		{"a package with no rule fails", map[string]string{"cli/internal/newthing/a.go": goFile("time")}, true},
+		{"ledger imports core and the store", map[string]string{"cli/internal/store/ledger/a.go": goFile(module+"internal/core", module+"internal/store")}, false},
+		{"the ledger cannot import an implementation", map[string]string{"cli/internal/store/ledger/a.go": goFile(module + "internal/store/memstore")}, true},
+		{"memstore imports the ledger", map[string]string{"cli/internal/store/memstore/a.go": goFile(module + "internal/store/ledger")}, false},
+		{"filestore imports the ledger and its filesystem seam", map[string]string{"cli/internal/store/filestore/a.go": goFile(module+"internal/store/ledger", module+"internal/store/filestore/fsys")}, false},
+		{"the filesystem seam imports nothing of the module", map[string]string{"cli/internal/store/filestore/fsys/a.go": goFile(module + "internal/core")}, true},
+		{"the ledger cannot import the filesystem seam", map[string]string{"cli/internal/store/ledger/a.go": goFile(module + "internal/store/filestore/fsys")}, true},
+		{"memstore and filestore cannot import each other", map[string]string{"cli/internal/store/memstore/a.go": goFile(module + "internal/store/filestore")}, true},
+		{"filestore code cannot import the contract suite", map[string]string{"cli/internal/store/filestore/a.go": goFile(module + "internal/store/storetest")}, true},
+		{"memstore code cannot import the contract suite", map[string]string{"cli/internal/store/memstore/a.go": goFile(module + "internal/store/storetest")}, true},
+		{"a memstore test runs the contract suite", map[string]string{"cli/internal/store/memstore/a_test.go": goFile(module + "internal/store/storetest")}, false},
+		{"a filestore test runs the suite and compares with memstore", map[string]string{"cli/internal/store/filestore/a_test.go": goFile(module+"internal/store/storetest", module+"internal/store/memstore")}, false},
+		{"a memstore test cannot import filestore", map[string]string{"cli/internal/store/memstore/a_test.go": goFile(module + "internal/store/filestore")}, true},
+		{"the contract suite imports core and the store", map[string]string{"cli/internal/store/storetest/a.go": goFile(module+"internal/core", module+"internal/store")}, false},
+		{"the contract suite cannot import an implementation", map[string]string{"cli/internal/store/storetest/a.go": goFile(module + "internal/store/memstore")}, true},
 		{"an unparsable file fails", map[string]string{"cli/internal/core/a.go": "package ("}, true},
 	}
 	for _, c := range cases {
@@ -55,6 +69,7 @@ func TestLayoutNamesStayInsideFilestore(t *testing.T) {
 	names := []string{
 		`".vibesys-state"`, `"events.jsonl"`, `"~/.local/state/vibesys"`, `os.Getenv("XDG_STATE_HOME")`,
 		`"results/" + key`, `filepath.Join(dir, "runs", id)`, `path.Join("logs", id)`,
+		`"jobs/" + id`, `"plans/1.json"`, `path.Join(root, "promotions")`, `filepath.Join(dir, "jobs", id)`,
 	}
 	property := func(pick uint8, before, after string) bool {
 		source := "package p\n\nvar _ = " + before + names[int(pick)%len(names)] + after + "\n"

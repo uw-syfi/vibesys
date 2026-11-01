@@ -20,11 +20,14 @@ from vs_dst._interruptions import Action, Interruption, Moment
 from vs_dst._snapshots import RecordingRecords, Snapshots
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from vs_core.api import CoreState, RunResultProposal
     from vs_dst._effects import Effects
     from vs_dst._host import Hosted, HostPlan
     from vs_dst._snapshots import OutsideWorld, RunningHost, Store, Watcher
     from vs_dst._world import World
+    from vs_project.api.testing import FakeControlInbox
     from vs_proto.api import Record
 
 MAX_RESUMES = 2
@@ -100,6 +103,8 @@ class Interrupted:
     cores: tuple[CoreState | None, ...] = ()
     """Core's state as each host left it, in order: the hosts of ``history``, one that died
     having none."""
+    inbox: FakeControlInbox | None = None
+    """The run's control inbox as the hosts left it, with what became of each request posted."""
 
     @property
     def result(self) -> RunResultProposal | None:
@@ -242,6 +247,37 @@ def killed_again(
     return _interrupted(kill, operator.expected, left, operator.resume(left, restart, []))
 
 
+def requested(
+    operator: Operator,
+    pristine: OutsideWorld,
+    clock_at: float,
+    deliveries: Sequence[tuple[Interruption, Delivery]],
+    kill: Interruption | None,
+) -> Interrupted:
+    """Run the world from its start with the operator's requests posted, kill it, resume it.
+
+    Each delivery is the operator's request posted to the control inbox (`Delivery.request`);
+    ``deliveries`` pair it with the point it lands on. The host that dies at ``kill`` leaves the
+    inbox as it was, and the host the operator resumes it with applies what is still there.
+    """
+    outside = pristine.copy()
+    snapshots = Snapshots(outside, frozenset() if kill is None else frozenset({kill}))
+    host = operator.plan.run(
+        outside,
+        clock_at,
+        Together(*(sender for _, sender in deliveries), snapshots),
+        patience=operator.expected.patience,
+    )
+    snapshot = None if kill is None else snapshots.by_point.get(kill)
+    if kill is not None and snapshot is not None:
+        left = snapshot.outside
+        restart = operator.plan.restart_at(clock_at, left.store)
+        return _interrupted(kill, operator.expected, left, operator.resume(left, restart, []))
+    first = deliveries[0][0]
+    hosts = operator.resume(outside, host.ended_at + 1, [host])
+    return _interrupted(first, operator.expected, outside, hosts)
+
+
 class Together:
     """Hears each moment for several watchers at once, as a store has the one."""
 
@@ -281,6 +317,7 @@ def _interrupted(
         outside.world,
         records,
         tuple(host.core for host in hosts),
+        store.inbox if isinstance(store, RecordingRecords) else None,
     )
 
 

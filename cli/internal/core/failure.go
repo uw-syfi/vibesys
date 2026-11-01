@@ -1,5 +1,7 @@
 package core
 
+import "fmt"
+
 // FailureKind is why a command could not do what it was asked.
 type FailureKind string
 
@@ -25,3 +27,8 @@ type Failure struct {
 
 // Error implements error.
 func (f *Failure) Error() string { return string(f.Kind) + ": " + f.Message }
+
+// failf builds a Failure of a kind with a formatted message.
+func failf(kind FailureKind, format string, args ...any) *Failure {
+	return &Failure{Kind: kind, Message: fmt.Sprintf(format, args...)}
+}

@@ -10,6 +10,7 @@ host's `RunControlBridge` turns into the controls core records, and the deadline
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vs_core.api import RunControlEvent
@@ -21,6 +22,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_dst._snapshots import RunningHost, Store
+    from vs_runtime.api.infrastructure import ControlRequest
 
 
 def _serial(point: Interruption) -> str:
@@ -61,6 +63,16 @@ def _stops(kind: StopKind, serial: str = "") -> Callable[[RunningHost], None]:
             )
 
 
+@dataclass(frozen=True)
+class OperatorRequest:
+    """A request the operator posts to the run's control inbox when the run reaches a point."""
+
+    moment: Moment
+    index: int
+    """The ``index``-th commit's moment, or the ``index``-th effect to begin."""
+    request: ControlRequest
+
+
 class Delivery:
     """Sends one control to the host when its run reaches a moment, and as soon as the host can.
 
@@ -88,6 +100,11 @@ class Delivery:
         self._due = False
         self.delivered_at: float | None = None
         """The virtual time the control reached the host; None until then."""
+
+    @classmethod
+    def request(cls, moment: Moment, index: int, request: ControlRequest) -> Delivery:
+        """The operator's ``request``, posted to the run's control inbox at ``moment`` ``index``."""
+        return cls(moment, index, lambda host: host.post(request))
 
     @classmethod
     def stop(cls, moment: Moment, index: int, kind: StopKind) -> Delivery:

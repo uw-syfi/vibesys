@@ -659,9 +659,9 @@ def _load_flows() -> dict[str, object]:
 
 
 def _load_records() -> dict[str, object]:
-    from vs_core.records import advance_record, recover
+    from vs_core.records import advance_record
 
-    return {"advance_record": advance_record, "recover": recover}
+    return {"advance_record": advance_record}
 
 
 def _load_scheduling() -> dict[str, object]:
@@ -1300,8 +1300,6 @@ def _load_types_records() -> dict[str, object]:
         OperationRetireRequested,
         OperationView,
         Outbound,
-        ReconciliationCommandLapsed,
-        ReconciliationDeadline,
         ReconciliationRequest,
         RecordsEvent,
         RecordsState,
@@ -1343,8 +1341,6 @@ def _load_types_records() -> dict[str, object]:
         "OperationRetireRequested": OperationRetireRequested,
         "OperationView": OperationView,
         "Outbound": Outbound,
-        "ReconciliationCommandLapsed": ReconciliationCommandLapsed,
-        "ReconciliationDeadline": ReconciliationDeadline,
         "ReconciliationRequest": ReconciliationRequest,
         "RecordsEvent": RecordsEvent,
         "RecordsState": RecordsState,

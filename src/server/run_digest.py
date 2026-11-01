@@ -27,6 +27,7 @@ Public surface: ``digest_journal``, ``journal_kept_landings``, ``run_attention``
 
 from __future__ import annotations
 
+import math
 from collections import deque
 from datetime import UTC, datetime
 from importlib import import_module
@@ -359,10 +360,12 @@ class _Fold:
         """
         ideas = self._candidates()
         standing: float | None = None
+        rebuilt = False
         for idea in ideas:
             measure = idea.measure
             if measure and measure.value is not None and measure.ratio:
                 standing = measure.value / measure.ratio
+                rebuilt = True
                 break
 
         def plotted_at(idea: _Idea) -> float:
@@ -377,9 +380,10 @@ class _Fold:
             elif idea.outcome == "failed":
                 verdict = IdeaVerdict.FAILED
             elif value is not None and (
-                standing is None or (value < standing if self.minimize else value > standing)
+                standing is None
+                or _beats(value, standing, minimize=self.minimize, tie_within_rounding=rebuilt)
             ):
-                verdict, standing = IdeaVerdict.KEPT, value
+                verdict, standing, rebuilt = IdeaVerdict.KEPT, value, False
             else:
                 verdict = IdeaVerdict.NOT_BETTER
             landed = measure.wall if measure and measure.value is not None else idea.wall
@@ -542,6 +546,18 @@ def run_attention(digest: RunDigest, *, phase: RunPhase | None, now: float) -> R
     if dashboard.failed_streak >= REPEATED_FAILURE_AFTER:
         return RunAttention.REPEATED_FAILURE
     return RunAttention.NONE
+
+
+def _beats(value: float, standing: float, *, minimize: bool, tie_within_rounding: bool) -> bool:
+    """Whether ``value`` is better than ``standing``.
+
+    The input's value is rebuilt as a measurement over its ratio, which is off by rounding: a
+    reading equal to the input must not beat it by the last digit. Between two readings, any
+    difference counts.
+    """
+    if tie_within_rounding and math.isclose(value, standing, rel_tol=1e-9, abs_tol=0.0):
+        return False
+    return value < standing if minimize else value > standing
 
 
 def _dashboard_points(

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 from tests.support.example_checkout import example_checkout, example_task
 from tests.support.example_materializer import FakeExampleMaterializer
@@ -152,6 +152,7 @@ _NAMES = st.from_regex(r"[a-z]{1,6}", fullmatch=True)
     max_examples=examples(pr=20, nightly=200),
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
+@example(files={"a": "\r"})
 @given(
     files=st.dictionaries(
         st.lists(_NAMES, min_size=1, max_size=3).map("/".join),
@@ -172,14 +173,14 @@ def test_copying_out_any_tree_reproduces_it(
         if any(parent.is_file() for parent in target.parents) or target.is_dir():
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text, encoding="utf-8")
+        target.write_bytes(text.encode("utf-8"))
         written[relative] = text
     folder.mkdir(parents=True, exist_ok=True)
 
     HelperExampleProjects(None, FakeExampleMaterializer()).copy_out(folder, root / "copy")
 
     copied = {
-        path.relative_to(root / "copy").as_posix(): path.read_text(encoding="utf-8")
+        path.relative_to(root / "copy").as_posix(): path.read_bytes().decode("utf-8")
         for path in (root / "copy").rglob("*")
         if path.is_file()
     }

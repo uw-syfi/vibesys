@@ -17,9 +17,10 @@ enum VerdictKind {
 // InconclusiveReason says why a comparison reached no verdict.
 enum InconclusiveReason {
   INCONCLUSIVE_REASON_UNSPECIFIED = 0;
-  // A side has fewer than 3 samples.
+  // A side has fewer than 3 samples and the task declares no noise floor.
   INCONCLUSIVE_REASON_TOO_FEW_SAMPLES = 1;
-  // Both sides are constant, so the test has no spread to work with.
+  // The samples show no noise to test against: both sides are constant, or the candidate's mean is
+  // zero so the ratio's noise is zero.
   INCONCLUSIVE_REASON_CONSTANT_SAMPLES = 2;
   // The sides measured different metrics.
   INCONCLUSIVE_REASON_METRIC_MISMATCH = 3;
@@ -27,8 +28,9 @@ enum InconclusiveReason {
   INCONCLUSIVE_REASON_TASK_VERSION_MISMATCH = 4;
 }
 
-// Verdict is a pure function of the two sample sets and the metric's direction: the same samples
-// always give the same verdict (Welch's t test, at least 3 samples a side).
+// Verdict is a pure function of the two sample sets, the metric's direction and the task's declared
+// noise floor: the same samples always give the same verdict. Without a declared floor it is Welch's
+// t test at 95% and needs at least 3 samples a side; with one, a difference must exceed 2 noises.
 message Verdict {
   VerdictKind kind = 1;
   // Set only when kind is INCONCLUSIVE.
@@ -37,8 +39,10 @@ message Verdict {
   uint32 base_samples = 4;
   double candidate_mean = 5;
   double base_mean = 6;
-  // The two-sided p-value of the test. Zero when no test ran.
-  double p_value = 7;
+  // candidate_mean / base_mean, raw: not oriented by the metric's direction, and never rounded.
+  double ratio = 7;
+  // One standard error of the ratio. The verdict compares the gain against a multiple of it.
+  double noise = 8;
 }
 
 // Comparison is a verdict with what it compared.

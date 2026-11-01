@@ -1,11 +1,10 @@
 """Descendant ancestry and cleanup guards through the public kernel step."""
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import given
 from hypothesis import strategies as st
 
 import vs_core.api as core
-from vs_sim.api.testing import examples
 
 from .restart import unaddressed
 from .test_request_recovery import (
@@ -123,83 +122,6 @@ def test_prepared_source_with_descendants_cannot_be_safe_to_dispatch(count: int)
     replay = core.step(reload(result.state), event)
     assert replay.requests == ()
     assert replay.state.records == result.state.records
-
-
-@settings(max_examples=examples(pr=4, nightly=100))
-@given(st.lists(st.integers(min_value=100, max_value=200), min_size=1, max_size=10))
-def test_reattached_parent_deadlines_cancel_only_unreleased_descendants(times: list[int]) -> None:
-    original = pending_record()
-    parent = core.ResourceId(root="parent-resource")
-    resource = core.ResourceId(root="child-resource")
-    original = original.model_copy(
-        update={
-            "observation": observed(
-                original,
-                accepted=True,
-                status=core.ObservationStatus.SUCCEEDED,
-                resource_id=parent,
-                children_complete=True,
-                children=(resource,),
-            )
-        }
-    )
-    assert isinstance(original.request, core.EnsureSession)
-    session = core.SessionView(
-        spec=original.request.spec,
-        scope=original.request.scope,
-        generation=original.request.scope.generation,
-        phase=core.SessionPhase.IDLE,
-        accepted=True,
-        resource_id=parent,
-        pending_records=(original.request_id,),
-    )
-    child = core.ChildLease(
-        resource_id=resource,
-        scope=original.request.scope,
-        source_requests=(original.request_id,),
-        parent_resources=(parent,),
-        observation=observed(
-            original,
-            accepted=True,
-            status=core.ObservationStatus.PENDING,
-            resource_id=resource,
-            children_complete=True,
-        ),
-    )
-    assert child.observation is not None
-    child = child.model_copy(
-        update={
-            "observation_watermarks": (
-                core.ChildObservationWatermark(
-                    source_request=original.request_id, observation=child.observation
-                ),
-            ),
-            "watermark_history_complete": True,
-        }
-    )
-    state = recovering_state(original)
-    state = state.model_copy(
-        update={
-            "sessions": core.SessionsState(sessions=(session,)),
-            "records": state.records.model_copy(update={"children": (child,)}),
-        }
-    )
-    emitted = set()
-    for now_at in times:
-        event = core.ReconciliationDeadline(request_id=original.request_id, now_at=float(now_at))
-        result = core.step(reload(state), event)
-        assert result == core.step(state, event)
-        assert result.state.sessions == state.sessions
-        assert result.state.records.children == (child,)
-        assert result.state.records.recovery == state.records.recovery
-        for request in result.requests:
-            assert isinstance(request, core.BlockRequest | core.CancelOwnedResource)
-            if isinstance(request, core.CancelOwnedResource):
-                assert request.resource_id == resource
-            assert request.request_id not in emitted
-            emitted.add(request.request_id)
-        state = result.state
-    assert len(emitted) == 2
 
 
 @given(st.text(alphabet="abc123", min_size=1, max_size=20))

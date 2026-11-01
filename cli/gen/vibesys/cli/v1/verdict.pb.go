@@ -82,9 +82,10 @@ type InconclusiveReason int32
 
 const (
 	InconclusiveReason_INCONCLUSIVE_REASON_UNSPECIFIED InconclusiveReason = 0
-	// A side has fewer than 3 samples.
+	// A side has fewer than 3 samples and the task declares no noise floor.
 	InconclusiveReason_INCONCLUSIVE_REASON_TOO_FEW_SAMPLES InconclusiveReason = 1
-	// Both sides are constant, so the test has no spread to work with.
+	// The samples show no noise to test against: both sides are constant, or the candidate's mean is
+	// zero so the ratio's noise is zero.
 	InconclusiveReason_INCONCLUSIVE_REASON_CONSTANT_SAMPLES InconclusiveReason = 2
 	// The sides measured different metrics.
 	InconclusiveReason_INCONCLUSIVE_REASON_METRIC_MISMATCH InconclusiveReason = 3
@@ -137,8 +138,9 @@ func (InconclusiveReason) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_cli_v1_verdict_proto_rawDescGZIP(), []int{1}
 }
 
-// Verdict is a pure function of the two sample sets and the metric's direction: the same samples
-// always give the same verdict (Welch's t test, at least 3 samples a side).
+// Verdict is a pure function of the two sample sets, the metric's direction and the task's declared
+// noise floor: the same samples always give the same verdict. Without a declared floor it is Welch's
+// t test at 95% and needs at least 3 samples a side; with one, a difference must exceed 2 noises.
 type Verdict struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Kind  VerdictKind            `protobuf:"varint,1,opt,name=kind,proto3,enum=vibesys.cli.v1.VerdictKind" json:"kind,omitempty"`
@@ -148,8 +150,10 @@ type Verdict struct {
 	BaseSamples      uint32             `protobuf:"varint,4,opt,name=base_samples,json=baseSamples,proto3" json:"base_samples,omitempty"`
 	CandidateMean    float64            `protobuf:"fixed64,5,opt,name=candidate_mean,json=candidateMean,proto3" json:"candidate_mean,omitempty"`
 	BaseMean         float64            `protobuf:"fixed64,6,opt,name=base_mean,json=baseMean,proto3" json:"base_mean,omitempty"`
-	// The two-sided p-value of the test. Zero when no test ran.
-	PValue        float64 `protobuf:"fixed64,7,opt,name=p_value,json=pValue,proto3" json:"p_value,omitempty"`
+	// candidate_mean / base_mean, raw: not oriented by the metric's direction, and never rounded.
+	Ratio float64 `protobuf:"fixed64,7,opt,name=ratio,proto3" json:"ratio,omitempty"`
+	// One standard error of the ratio. The verdict compares the gain against a multiple of it.
+	Noise         float64 `protobuf:"fixed64,8,opt,name=noise,proto3" json:"noise,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -226,9 +230,16 @@ func (x *Verdict) GetBaseMean() float64 {
 	return 0
 }
 
-func (x *Verdict) GetPValue() float64 {
+func (x *Verdict) GetRatio() float64 {
 	if x != nil {
-		return x.PValue
+		return x.Ratio
+	}
+	return 0
+}
+
+func (x *Verdict) GetNoise() float64 {
+	if x != nil {
+		return x.Noise
 	}
 	return 0
 }
@@ -308,15 +319,16 @@ var File_vibesys_cli_v1_verdict_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_verdict_proto_rawDesc = "" +
 	"\n" +
-	"\x1cvibesys/cli/v1/verdict.proto\x12\x0evibesys.cli.v1\x1a vibesys/cli/v1/environment.proto\"\xa3\x02\n" +
+	"\x1cvibesys/cli/v1/verdict.proto\x12\x0evibesys.cli.v1\x1a vibesys/cli/v1/environment.proto\"\xb6\x02\n" +
 	"\aVerdict\x12/\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x1b.vibesys.cli.v1.VerdictKindR\x04kind\x12:\n" +
 	"\x06reason\x18\x02 \x01(\x0e2\".vibesys.cli.v1.InconclusiveReasonR\x06reason\x12+\n" +
 	"\x11candidate_samples\x18\x03 \x01(\rR\x10candidateSamples\x12!\n" +
 	"\fbase_samples\x18\x04 \x01(\rR\vbaseSamples\x12%\n" +
 	"\x0ecandidate_mean\x18\x05 \x01(\x01R\rcandidateMean\x12\x1b\n" +
-	"\tbase_mean\x18\x06 \x01(\x01R\bbaseMean\x12\x17\n" +
-	"\ap_value\x18\a \x01(\x01R\x06pValue\"\xbb\x01\n" +
+	"\tbase_mean\x18\x06 \x01(\x01R\bbaseMean\x12\x14\n" +
+	"\x05ratio\x18\a \x01(\x01R\x05ratio\x12\x14\n" +
+	"\x05noise\x18\b \x01(\x01R\x05noise\"\xbb\x01\n" +
 	"\n" +
 	"Comparison\x12\x16\n" +
 	"\x06commit\x18\x01 \x01(\tR\x06commit\x12\x18\n" +

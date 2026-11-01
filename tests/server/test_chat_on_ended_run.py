@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.server.support import REQUEST_TIME, build_server_parts, run_record, sim_platform
 from tests.support.chat_run import project_with_run, seed_agent_state
@@ -128,6 +128,12 @@ class _Reader:
         self.closed = True
 
 
+def _journal_lines(path: Path) -> list[str]:
+    """A journal's records, split on newlines only: ``str.splitlines`` also splits a record's
+    own text at U+0085, U+2028 and the control separators, which JSON leaves unescaped."""
+    return path.read_text(encoding="utf-8").split("\n")[:-1]
+
+
 class _EndedRun:
     """A finished run: its saved project, and the journal it ended with."""
 
@@ -160,7 +166,7 @@ class _EndedRun:
         )
 
     def lines(self) -> list[str]:
-        return (self.journal / RUN_EVENTS_FILE).read_text().splitlines()
+        return _journal_lines(self.journal / RUN_EVENTS_FILE)
 
 
 @pytest.fixture(scope="module")
@@ -217,6 +223,7 @@ def _commands(text: str, control_id: str) -> list[ProtocolRequest]:
 
 
 @_SEEDS
+@example(seed=0, text="a\x85b\u2028c", control_id="mm", script=["question"], which=0)
 @given(
     seed=st.integers(0, 2**32),
     text=_TEXT,
@@ -273,7 +280,7 @@ def test_nothing_but_the_conversation_is_added_to_a_finished_runs_journal(  # no
 
     refused, _threads = threads.run(main)
 
-    after = (copy / RUN_EVENTS_FILE).read_text().splitlines()
+    after = _journal_lines(copy / RUN_EVENTS_FILE)
     assert after[: len(before)] == before
     added = {json.loads(line)["type"] for line in after[len(before) :]}
     assert added <= {event.value for event in READER_APPENDABLE_EVENTS}

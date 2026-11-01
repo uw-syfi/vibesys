@@ -240,6 +240,18 @@ def test_the_headline_while_the_run_works_is_the_last_kept_point(
     assert digest.best_so_far_ratio == (pytest.approx(kept[-1]) if kept else None)
 
 
+@example(
+    ideas=[_Idea("passed", 150.0, 0.0), _Idea("passed", 150.00000001, 1.0)],
+    direction="max",
+    metric=None,
+    unit=None,
+)
+@example(
+    ideas=[_Idea("passed", 113.0, 0.0), _Idea("passed", 100.0, 0.0)],
+    direction="min",
+    metric=None,
+    unit=None,
+)
 @given(
     ideas=_IDEAS,
     direction=_DIRECTIONS,

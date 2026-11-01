@@ -14,8 +14,6 @@ from .types.records import (
     DispatchAuthorized,
     HostRenewed,
     OperationRetireRequested,
-    ReconciliationCommandLapsed,
-    ReconciliationDeadline,
     RecoveryCheckWaitLapsed,
     RecoveryReady,
     RecoveryStarted,
@@ -57,8 +55,6 @@ EVENT_TO_SUBAREA: Mapping[type[RecordsEvent], Reducer] = MappingProxyType(
         OperationRetireRequested: _request_ledger.advance,
         RecoveryStarted: _request_recovery.advance,
         RecoveryReady: _request_recovery.advance,
-        ReconciliationDeadline: _request_recovery.advance,
-        ReconciliationCommandLapsed: _request_recovery.advance,
         RetryDue: _request_ledger.advance,
         RequestUndispatchable: _request_ledger.advance,
         BlockedRecordStalled: _request_ledger.advance,
@@ -75,18 +71,6 @@ def advance_record(
     """Route closed events to their owners, sharing observations atomically."""
     reducer: Reducer = EVENT_TO_SUBAREA[type(event)]
     return reducer(state, context, event)
-
-
-def recover(
-    state: RecordsState, context: RecordsContext, event: RecordsEvent
-) -> AreaChange[RecordsState]:
-    """Apply recovery to committed ledger facts, preserving all ledger fields.
-
-    Observation callers must first commit the query and canonical root facts.
-    The kernel uses ``advance_record`` to commit both owners atomically; this
-    recovery-only entry point also permits independent Records B adoption.
-    """
-    return _request_recovery.advance(state, context, event)
 
 
 def open_host_epoch(state: RecordsState, run: RunState, event: RecoveryStarted) -> RecordsState:
