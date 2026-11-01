@@ -38,9 +38,13 @@ export interface OpenShell {
 
 const ignore = (): void => undefined;
 
-/** The app opened on `screen` over the world `seed`, with `draft` as this window's New run. */
+/**
+ * The app opened on `screen` over the world `seed`, with `draft` as this window's New run; with
+ * no `screen` it opens as it does at launch, on the screen the window's address and the runs it
+ * finds decide.
+ */
 export async function openShell(
-  screen: Screen,
+  screen: Screen | null,
   options: {
     readonly schedule: ScheduleTimeout;
     readonly seed?: FakeBridgeSeed;
@@ -100,7 +104,9 @@ export async function openShell(
   document.body.append(container);
   const root = createRoot(container);
   await act(async () => root.render(<Shell stores={stores} version="0" />));
-  await act(async () => stores.sidebar.store.dispatch({type: 'select', screen}));
+  if (screen !== null) {
+    await act(async () => stores.sidebar.store.dispatch({type: 'select', screen}));
+  }
   const read = async (): Promise<void> => {
     for (let turn = 0; turn < READ_TURNS; turn += 1) {
       await act(async () => Promise.resolve());

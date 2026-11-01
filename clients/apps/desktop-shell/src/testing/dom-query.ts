@@ -34,6 +34,8 @@ const TAGS: Readonly<Record<string, string>> = {
   h5: 'heading',
   h6: 'heading',
   dialog: 'dialog',
+  option: 'option',
+  optgroup: 'group',
   table: 'table',
   tr: 'row',
   th: 'columnheader',
