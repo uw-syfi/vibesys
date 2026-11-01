@@ -471,7 +471,6 @@
  "libs/vs-runtime/tests/test_export_patch.py": 0.05,
  "libs/vs-runtime/tests/test_failure_classification.py": 0.23,
  "libs/vs-runtime/tests/test_fake_evaluation.py": 0.12,
- "libs/vs-runtime/tests/test_holding_step_runner.py": 0.23,
  "libs/vs-runtime/tests/test_host_environment.py": 0.07,
  "libs/vs-runtime/tests/test_image_features.py": 0.24,
  "libs/vs-runtime/tests/test_input_project.py": 0.21,
