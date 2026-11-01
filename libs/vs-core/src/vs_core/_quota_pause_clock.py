@@ -16,6 +16,13 @@ extra time, which is bounded by the pause.
 A turn the run's capacity gate reports it holds (``capacity_hold``) is skipped: the gate parks
 it for the pause and ``_turn_holds`` credits that wait from the report, so moving its limit here
 as well would credit the pause twice.
+
+The step's own limit is kept in two places, the record's and the attempts' (``StepAttempts.
+deadline_at``, the limit a step returned to unstarted takes back, see ``_step_attempts.unstarted``).
+A credit moves both, in one function, so a step that returns to unstarted after the wait (an
+interrupted attempt, a raise, a crash) keeps it: a credit written to the record alone was given
+back at the return, and ``decide`` ended the turn as timed out against the limit it had before the
+pause. A cap on one attempt (``_turn_permit``) moves the record alone, by design.
 """
 
 from __future__ import annotations
@@ -31,6 +38,7 @@ from .types.sessions import DispatchTurn, ResumeSessionTurn
 if TYPE_CHECKING:
     from .types.kernel import CoreState
     from .types.records import RequestRecord
+    from .types.steps import StepAttempts
 
 
 def credit_quota_pause(state: CoreState, now_at: float) -> CoreState:
@@ -48,23 +56,36 @@ def credit_quota_pause(state: CoreState, now_at: float) -> CoreState:
     if pause is None or pause.owner is not PauseOwner.QUOTA:
         return state
 
-    def moved(record: RequestRecord) -> RequestRecord:
-        if not (
+    def credited(record: RequestRecord) -> bool:
+        return (
             is_open(record)
             and record.phase == RequestPhase.DISPATCHED
             and isinstance(record.request, DispatchTurn | ResumeSessionTurn)
             and not (record.capacity_hold is not None and record.capacity_hold.holding)
-        ):
-            return record
-        at = record.until.at + gap
-        if record.until.at <= run.deadline_at:
-            at = min(at, run.deadline_at)
-        if at == record.until.at:
+        )
+
+    def later(at: float) -> float:
+        """``at`` moved by the gap, as far as the run deadline when it was not already past it."""
+        moved = at + gap
+        return min(moved, run.deadline_at) if at <= run.deadline_at else moved
+
+    def moved(record: RequestRecord) -> RequestRecord:
+        at = later(record.until.at)
+        if not credited(record) or at == record.until.at:
             return record
         return record.model_copy(update={"until": record.until.model_copy(update={"at": at})})
 
+    tags = {record.request_id for record in state.records.records if credited(record)}
+
+    def kept(row: StepAttempts) -> StepAttempts:
+        if row.tag not in tags or row.deadline_at is None:
+            return row
+        return row.model_copy(update={"deadline_at": later(row.deadline_at)})
+
     records = tuple(moved(record) for record in state.records.records)
-    if records == state.records.records:
+    attempts = tuple(kept(row) for row in state.steps.attempts)
+    if records == state.records.records and attempts == state.steps.attempts:
         return state
     held = state.records.model_copy(update={"records": records})
-    return state.model_copy(update={"records": held})
+    steps = state.steps.model_copy(update={"attempts": attempts})
+    return state.model_copy(update={"records": held, "steps": steps})
