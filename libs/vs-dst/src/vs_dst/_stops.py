@@ -20,9 +20,10 @@ from vs_core.api import (
     RunControlEvent,
     StopMode,
 )
-from vs_dst._crash_points import crash_point_policy
+from vs_dst._crash_points import EVERY_POINT, CrashPointPolicy
 from vs_dst._interruptions import Moment
 from vs_dst._step_host import HostNotOpenError
+from vs_sim.api.testing import Depth, depth
 
 if TYPE_CHECKING:
     from vs_core.api import CoreState
@@ -31,6 +32,10 @@ if TYPE_CHECKING:
 
 FIRST_EPOCH = 1
 """The epoch of the first host, which the host's own stops are named for."""
+
+STOP_SAMPLE_SIZE = 4
+"""Points tried per moment when a suite samples: a stop is tried by four kinds in every world,
+and each stop is a whole run, so a pull request tries fewer places than an interruption does."""
 
 
 class StopKind(StrEnum):
@@ -83,10 +88,10 @@ class StopPoint:
 def stop_points(commits: int, effects: int) -> tuple[StopPoint, ...]:
     """The places in a run of ``commits`` commits and ``effects`` begun effects a suite stops it.
 
-    The same sample as an interruption's (a sample on pull requests, every point under
-    ``--depth=nightly``).
+    A sample on pull requests (`STOP_SAMPLE_SIZE` per moment, the first and the last included),
+    every point under ``--depth=nightly``.
     """
-    policy = crash_point_policy()
+    policy = EVERY_POINT if depth() is Depth.NIGHTLY else CrashPointPolicy(STOP_SAMPLE_SIZE)
     return tuple(
         StopPoint(moment, index)
         for moment in Moment

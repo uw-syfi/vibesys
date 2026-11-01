@@ -18,7 +18,7 @@ from functools import cache
 import pytest
 
 from vs_core.api import SessionPhase
-from vs_dst.api import StepLoopHosting, StopKind, Stopped, simulate
+from vs_dst.api import SimulatedRun, StepLoopHosting, StopKind, Stopped, simulate
 
 from ._tiny import TinyWorld
 from ._turns import WITHIN, HeldTurnsWorld, TurnsWorld
@@ -44,10 +44,17 @@ Nothing else in these worlds outlives a stop that asks for no waiting."""
 
 
 @cache
-def _stops(world: str, kind: StopKind) -> tuple[Stopped, ...]:
-    """The run of ``world`` stopped by ``kind`` at each point of the sweep."""
+def _normal(world: str) -> SimulatedRun:
+    """The run of ``world`` that nothing stops (one per world, which every kind of stop starts from)."""
     normal = simulate(WORLDS[world](), StepLoopHosting())
     assert normal.finished
+    return normal
+
+
+@cache
+def _stops(world: str, kind: StopKind) -> tuple[Stopped, ...]:
+    """The run of ``world`` stopped by ``kind`` at each point of the sweep."""
+    normal = _normal(world)
     return tuple(normal.stop(point, kind) for point in normal.stop_points())
 
 
