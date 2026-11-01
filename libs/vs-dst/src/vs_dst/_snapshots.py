@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from vs_dst._interruptions import Action, Interruption, Moment
+from vs_runlog.api import MemoryFoldCache
 from vs_runtime.api.testing import FakeRunRecords
 
 if TYPE_CHECKING:
@@ -23,6 +24,7 @@ if TYPE_CHECKING:
     from vs_dst._effects import Effects
     from vs_dst._world import World
     from vs_proto.api import Record
+    from vs_runtime.api.step_runner import FoldStart
     from vs_sim.api.testing import VirtualClock
 
 
@@ -138,7 +140,8 @@ class RecordingRecords(FakeRunRecords):
     """A run.log kept in memory that tells its watcher before and after each append.
 
     Each append of a record is one commit: a kill just before it leaves the log without the
-    record, a kill just after leaves it.
+    record, a kill just after leaves it. The run's ``state.pb`` is kept beside it, as it is
+    beside the file: it survives a host and is copied with the log.
     """
 
     def __init__(self) -> None:
@@ -148,6 +151,10 @@ class RecordingRecords(FakeRunRecords):
         self.last_clock = 0.0
         """The latest run-clock time of a record in the log."""
         self.watcher: Watcher | None = None
+        self.cache = MemoryFoldCache()
+        """The fold cache of the run (``state.pb``), which a host's start reads and its log writes."""
+        self.starts: list[FoldStart] = []
+        """How each host that opened the log got its fold: from the cache, or the whole log and why."""
 
     def __deepcopy__(self, memo: dict[int, object]) -> RecordingRecords:
         """A copy is the log of the outside world, not of the watching: it has no watcher."""
@@ -156,6 +163,8 @@ class RecordingRecords(FakeRunRecords):
         copied.records = copy.deepcopy(self.records, memo)
         copied.commits = self.commits
         copied.last_clock = self.last_clock
+        copied.cache = copy.deepcopy(self.cache, memo)
+        copied.starts = list(self.starts)
         return copied
 
     def observe(self) -> object | None:

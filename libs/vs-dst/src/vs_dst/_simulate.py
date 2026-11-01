@@ -36,7 +36,11 @@ if TYPE_CHECKING:
     from vs_dst._interrupt import Interrupted
     from vs_dst._world import World
     from vs_proto.api import Record
-    from vs_runtime.api.step_runner import DispatchCapExceededError, StepLoopStalledError
+    from vs_runtime.api.step_runner import (
+        DispatchCapExceededError,
+        FoldStart,
+        StepLoopStalledError,
+    )
 
 
 @dataclass(frozen=True)
@@ -133,6 +137,16 @@ class SimulatedRun:
         """The records of the run.log the run left, in order."""
         store = self._outside.store
         return tuple(store.records) if isinstance(store, RecordingRecords) else ()
+
+    @property
+    def cache_starts(self) -> tuple[FoldStart, ...]:
+        """How each host of the run got its fold, the first's included, in the order they started.
+
+        Each is `CacheUsed` (the host folded only the records after ``state.pb``) or the typed
+        reason it folded the whole log. A run that started from a crash carries its earlier hosts'.
+        """
+        store = self._outside.store
+        return tuple(store.starts) if isinstance(store, RecordingRecords) else ()
 
     @property
     def commits(self) -> int:

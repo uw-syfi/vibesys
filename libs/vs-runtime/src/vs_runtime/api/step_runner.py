@@ -34,6 +34,7 @@ from vs_runtime._step_runner import (
     ClearUnavailableError,
     StepRunner,
 )
+from vs_runtime._step_start import RunOpening, StartedRun, resume_paused, start_run
 
 type StepRunnerDecorator = Callable[[StepRunner], StepRunner]
 """Wraps the runner a run composes; a test places a hold or a fault at the seam every step crosses."""
@@ -55,11 +56,13 @@ __all__ = [
     "RestAnnouncer",
     "RunLogStepLog",
     "RunLogUncertainError",
+    "RunOpening",
     "SearchHearing",
     "SearchRun",
     "Stall",
     "StallBoard",
     "StallKind",
+    "StartedRun",
     "StepLog",
     "StepLoopStalledError",
     "StepLoopTiming",
@@ -71,8 +74,10 @@ __all__ = [
     "fold_rules",
     "package_sources",
     "restore_log",
+    "resume_paused",
     "run_step_loop",
     "saved_run_in",
     "snapshot_message",
     "start_fold",
+    "start_run",
 ]
