@@ -364,8 +364,12 @@ class _Host:
             await self._turn()
             if isinstance(request, DispatchTurn):
                 # A turn that ended waiting yields its continuation, as the session executor asks.
-                self._world.yielded = self._yielded(request)  # type: ignore[assignment]
+                self._world.yielded = self._yielded(request)
                 self._world.suspended += self._world.yielded is not None
+                if self._world.turns[self._world.seen - 1].closing_at_yield:
+                    # The turn is over for the bridge: the handles it waited on are no longer its own.
+                    await self._call(self._token(), ("wait", (0,)), count=False)
+                    assert "were not submitted by this agent in this turn" in self._world.errors[-1]
 
     async def close(self) -> None:
         """The host ended: call as an agent holding an old token does, then close the bridge."""

@@ -24,9 +24,17 @@ from hypothesis import strategies as st
 from tests.system.agent_tools.world import ROLE, SCOPE, AgentToolWorld, Program, Turn, new_bridge
 
 from vs_core.api import CoreState, RunStatus, SessionPhase, SubmitMeasurement
-from vs_dst.api import Action, Moment, SimulatedRun, StepLoopHosting, StopKind, simulate
+from vs_dst.api import (
+    Action,
+    CrashKind,
+    Moment,
+    SimulatedRun,
+    StepLoopHosting,
+    StopKind,
+    simulate,
+)
 from vs_runtime.api.core import handle_for
-from vs_sim.api.testing import Depth, depth, evenly_spaced, examples
+from vs_sim.api.testing import Depth, depth, evenly_spaced, examples, using_depth
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -317,3 +325,35 @@ async def test_the_tool_server_is_offered_without_an_interpreter_or_import_path(
 
     assert descriptor.command == "python"
     assert "PYTHONPATH" not in dict(descriptor.env)
+
+
+def test_a_submission_the_agent_never_read_is_its_retry_after_a_kill_at_every_point(
+    tmp_path: Path,
+) -> None:
+    """The failing live shape: a lost reply, a restart, then the retry on unchanged content.
+
+    The first turn's reply is lost (the connection was abandoned) and the host dies at some
+    point, with the charge committed or not depending on where. The second turn finds the
+    candidate as it was and submits again. Before the fix the owed submission lived in the first
+    host's memory: the retry was refused as an exhausted budget and the first measurement ran on
+    with nobody waiting for it.
+    """
+    turns = (Turn(program=(("lose",),)), Turn(program=(("submit",),), edit=False))
+    normal = _play(tmp_path, turns, 2)
+    with using_depth(Depth.NIGHTLY):
+        every = [p for p in normal.crash_points() if p.kind is CrashKind.AFTER_COMMIT]
+    points = _some(tuple(every), 12)
+    assert points
+    for point in points:
+        recovered = normal.rerun_with_crash(point)
+        world = _world(recovered.world)
+        check_owed(recovered.core, world)
+        charged = [
+            c.request_id for c in recovered.core.evaluation.agent_calls if c.request_id is not None
+        ]
+        assert len(charged) == 1, f"the budget is charged once ({point})"
+        assert world.errors == [], point
+        assert world.handles == [handle_for(charged[0])], (
+            f"the retry got the first handle ({point})"
+        )
+        assert world.unacknowledged == (), point
