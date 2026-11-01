@@ -692,7 +692,10 @@ end.
   cleanup bound, and the cap belongs to the attempt in flight. `StepAttempts.deadline_at` keeps the limit
   the first attempt started with, and whoever returns the step to unstarted (the fold, on the record of
   the attempt's end, or the drain, which lets a job go at once) gives it back (`unstarted`), so a step
-  that was paused and resumed has the limit it would have had.
+  that was paused and resumed has the limit it would have had. A credit the run gives a step (a turn's
+  wait under a quota pause, `credit_quota_pause`) moves the record's limit and `deadline_at` together,
+  so it survives every return to unstarted: a pause, a raise, a crash. A credit written to the record
+  alone was given back at the return, and `decide` then ended the turn as timed out.
 - **A pause leaves the jobs of a loop-hosted run alone.** The request that watches a job goes back to
   unstarted, the job runs on, and the next epoch runs the request again, where its runner finds the job
   with `clear` and attaches to it. The kernel issues no cancel of a job and holds no park for it. A run
