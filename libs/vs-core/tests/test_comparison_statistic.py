@@ -29,6 +29,15 @@ SCOPE = core.Scope(owner=core.AttemptId(root="attempt"), generation=0)
 ANCHOR = core.BaseRef(commit=core.RevisionRef.of_git_commit("base"), measured_input="base-input")
 VALUES = st.floats(min_value=1.0, max_value=1e4, allow_nan=False, allow_infinity=False)
 FLOORS = st.floats(min_value=0.0, max_value=0.2, allow_nan=False)
+"""Any floor a task may carry. 0 declares nothing, so it is the other estimator (`DECLARED_FLOORS`)."""
+DECLARED_FLOORS = st.floats(min_value=0.0, max_value=0.2, exclude_min=True, allow_nan=False)
+"""A floor a task declares: noise is pooled and bounded below by it, never from the runs alone.
+
+Properties that set two floors side by side draw both from here. A floor of 0 does not sit at
+the bottom of this scale: without a declared floor the noise is Welch's estimate from each
+side's own spread, which neither bounds nor is bounded by any pooled estimate, so the two
+cannot be ordered (`test_declaring_a_floor_replaces_the_runs_own_estimate_of_the_noise`).
+"""
 
 
 def sample(value: float, *, direction: Direction = "max", measured_input: str = "x") -> core.Sample:
@@ -149,23 +158,48 @@ def test_the_noise_is_never_below_what_the_declared_floor_gives_the_samples_held
 @given(
     mine=st.lists(VALUES, min_size=1, max_size=6),
     theirs=st.lists(VALUES, min_size=1, max_size=6),
-    floor=FLOORS,
+    floor=DECLARED_FLOORS,
     extra=st.floats(min_value=0.0, max_value=0.2),
 )
 def test_a_higher_floor_never_turns_an_undecided_result_into_a_verdict(
     mine: list[float], theirs: list[float], floor: float, extra: float
 ) -> None:
-    """Among floors a task declares. An undeclared floor (0) is not the bottom of the scale.
+    """Among floors a task declares: a higher one never lowers the noise or frees a verdict.
 
-    Without a declared floor the noise is estimated from the runs, so a verdict needs three
-    runs a side and the wider Student-t bar, where a declared floor uses two noises from one
-    run a side (`test_without_a_declared_floor_a_verdict_needs_three_runs_a_side_with_a_spread`).
+    Both floors are declared (`DECLARED_FLOORS`): the noise is the pooled spread bounded below
+    by the floor, so it can only grow with it.
     """
     low = compared(mine, theirs, floor=floor)
     high = compared(mine, theirs, floor=floor + extra)
-    if low.verdict is core.ComparisonVerdict.WITHIN_NOISE and floor > 0:
+    if low.verdict is core.ComparisonVerdict.WITHIN_NOISE:
         assert high.verdict is core.ComparisonVerdict.WITHIN_NOISE
     assert high.noise >= low.noise - 1e-12
+
+
+@given(
+    mine=st.lists(VALUES, min_size=1, max_size=6),
+    theirs=st.lists(VALUES, min_size=1, max_size=6),
+    floor=DECLARED_FLOORS,
+)
+@example(mine=[1.0, 2.0], theirs=[1.0, 1.0, 1.0], floor=0.125)
+def test_declaring_a_floor_replaces_the_runs_own_estimate_of_the_noise(
+    mine: list[float], theirs: list[float], floor: float
+) -> None:
+    """A floor of 0 is no floor: its noise is the runs' own, and no declared floor bounds it.
+
+    The nightly found a higher floor lowering the noise: candidate 1, 2 against base 1, 1, 1
+    at floor 0 (nothing declared) has Welch's 0.5 from the two runs' own spread, and at a
+    floor of 0.125 the declared pooled estimate is 0.373. Neither is wrong: a task that
+    declares a floor has stated its noise and gets a verdict from one run a side, where one that
+    declares none gets one only from the runs it measures. So a declared floor with the same
+    samples is a verdict-giving comparison, and the undeclared one is `INCONCLUSIVE` unless it
+    holds three runs a side with a spread, which is no ordering of the two.
+    """
+    declared = compared(mine, theirs, floor=floor)
+    undeclared = compared(mine, theirs, floor=0.0)
+    assert declared.verdict is not core.ComparisonVerdict.INCONCLUSIVE
+    if min(len(mine), len(theirs)) < MIN:
+        assert undeclared.verdict is core.ComparisonVerdict.INCONCLUSIVE
 
 
 @given(
