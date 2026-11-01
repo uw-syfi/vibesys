@@ -37,7 +37,6 @@ import {
   type RunSummary,
   type TaskGoal,
   type UnreadableRecord,
-  type UsageWindowReply,
 } from '@vibesys/contracts/host-helper';
 import {ConnectionError} from '../shell/helper-channel.js';
 import type {Link} from '../shell/link.js';
@@ -173,34 +172,7 @@ export interface FakeHost {
   logins: AgentLogin[];
   /** What `agent_logins.start` answers per provider; a provider not named has no login command. */
   readonly loginStarts: Map<string, LoginStarted | LoginUnavailable>;
-  /**
-   * What `usage.window` answers per project: the figures it holds, whatever the window. The reply
-   * echoes the window asked for and names as `missing_runs` the requested runs the project's
-   * `runHistory` does not list; a project not named here has spent nothing.
-   */
-  readonly usage: Map<string, UsageFigures>;
 }
-
-/** The figures of a `usage.window` reply that do not depend on which window was asked. */
-type UsageFigures = Omit<
-  UsageWindowReply,
-  'type' | 'request_id' | 'since' | 'until' | 'missing_runs'
->;
-
-/** A project that spent nothing: the figures `usage.window` answers for a project with no entry. */
-const NO_USAGE: UsageFigures = {
-  spent_usd: 0,
-  spend_per_hour_usd: 0,
-  tokens: {input: null, cache_read: null, cache_write: null, output: null, reasoning: null},
-  turns: 0,
-  unpriced_turns: 0,
-  untimed_turns: 0,
-  new_bests: 0,
-  cost_per_new_best_usd: null,
-  by_run: [],
-  by_agent: [],
-  agents_omitted: 0,
-};
 
 /** `listing` as a helper answers a client that does not set `with_catalogue`. */
 function withoutTaskDetails(listing: ExampleList): ExampleList {
@@ -431,7 +403,6 @@ export class FakeHelper {
     clusterTests: new Map(),
     logins: [],
     loginStarts: new Map(),
-    usage: new Map(),
   };
   /** Exit every new channel at once with this status and stdout, as a failing bootstrap does. */
   bootstrapExit: {readonly code: number; readonly stdout: string} | null = null;
@@ -492,7 +463,6 @@ export class FakeHelper {
     'agent_logins',
     'project_goal',
     'example_destination',
-    'usage_window',
     'chat_ended_runs',
     'chat_ended_run_questions',
   ]);
@@ -807,7 +777,6 @@ class HelperSession {
       case 'runs.events_for_span':
       case 'runs.read_tail':
       case 'runs.summary':
-      case 'usage.window':
         this.#readRunHistory(request);
         return;
       case 'machine.describe':
@@ -915,21 +884,6 @@ class HelperSession {
         });
         return;
     }
-  }
-
-  /** The figures the host holds for the (known) project, in the window asked for. */
-  #usage(request: Extract<HelperRequest, {type: 'usage.window'}>): void {
-    const id = request.request_id;
-    const host = this.#helper.host;
-    const known = new Set((host.runHistory.get(request.project) ?? []).map(run => run.run_id));
-    this.#send({
-      ...(host.usage.get(request.project) ?? NO_USAGE),
-      type: 'usage.window',
-      request_id: id,
-      since: request.since,
-      until: request.until,
-      missing_runs: [...new Set(request.run_ids)].filter(run => !known.has(run)),
-    });
   }
 
   #harnesses(request: Extract<HelperRequest, {type: 'harnesses.list'}>): void {
@@ -1349,27 +1303,18 @@ class HelperSession {
     });
   }
 
-  /** The fake host records no runs, so every run of a known project is unknown; usage is what it holds. */
+  /** The fake host records no runs, so every run of a known project is unknown. */
   #readRunHistory(
     request: Extract<
       HelperRequest,
       {
-        type:
-          | 'runs.read_events'
-          | 'runs.events_for_span'
-          | 'runs.read_tail'
-          | 'runs.summary'
-          | 'usage.window';
+        type: 'runs.read_events' | 'runs.events_for_span' | 'runs.read_tail' | 'runs.summary';
       }
     >,
   ): void {
     const id = request.request_id;
     if (!this.#helper.host.projects.has(request.project)) {
       this.#send({...this.#error(id, 'project_missing', 'no such project'), path: request.project});
-      return;
-    }
-    if (request.type === 'usage.window') {
-      this.#usage(request);
       return;
     }
     if (request.type === 'runs.read_events') {

@@ -395,11 +395,6 @@ const cluster = {
 const deadlineInputs = {
   listTasks: {project: '/project'},
   listRunDigests: {project: '/project'},
-  usageWindow: {
-    project: '/project',
-    since: {seconds: 1n, nanos: 0},
-    until: {seconds: 2n, nanos: 0},
-  },
   usageSummary: {
     projects: ['/project'],
     edges: [

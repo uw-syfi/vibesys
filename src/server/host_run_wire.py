@@ -1,10 +1,10 @@
-"""The run digests and the usage window as the registered reads' messages.
+"""The run digests as the registered read's message.
 
-The helper's models (``RunSummary``, ``UsageWindowReply``) stay the one definition of what a
-digest or a window says; this module only restates them as the generated messages the gateway
-serves. A value the model leaves ``None`` is absent in the message, never a zero.
+The helper's model (``RunSummary``) stays the one definition of what a digest says; this module
+only restates it as the generated message the gateway serves. A value the model leaves ``None``
+is absent in the message, never a zero.
 
-Public surface: ``digests_response`` and ``usage_response``.
+Public surface: ``digests_response``.
 """
 
 from __future__ import annotations
@@ -20,10 +20,9 @@ if TYPE_CHECKING:
 
     from server.host_api import RunList
     from server.host_run_dashboard import BestReading, IdeaPoint, RunDashboard
-    from server.host_run_summary import TokenTally, UsageWindowReply
     from vs_proto.api import host_payloads as pb
 
-__all__ = ["digests_response", "usage_response"]
+__all__ = ["digests_response"]
 
 
 def _wire() -> ModuleType:
@@ -121,54 +120,3 @@ def digests_response(request_id: str, runs: RunList) -> pb.ListRunDigestsRespons
             )
         )
     return wire.ListRunDigestsResponse(request_id=request_id, digests=entries)
-
-
-def _tokens(tally: TokenTally) -> pb.TokenTally:
-    result = _wire().host_payloads.TokenTally()
-    for name in ("input", "cache_read", "cache_write", "output", "reasoning"):
-        value = getattr(tally, name)
-        if value is not None:
-            setattr(result, name, value)
-    return result
-
-
-def usage_response(request_id: str, reply: UsageWindowReply) -> pb.UsageWindowResponse:
-    """The usage window ``reply`` states, restated."""
-    wire = _wire().host_payloads
-    by_run = []
-    for spend in reply.by_run:
-        row = wire.RunSpend(
-            run_id=spend.run_id, cost_usd=spend.cost_usd, unpriced_turns=spend.unpriced_turns
-        )
-        if spend.task is not None:
-            row.task = spend.task
-        by_run.append(row)
-    by_agent = []
-    for agent in reply.by_agent:
-        entry = wire.AgentSpend(
-            cost_usd=agent.cost_usd, turns=agent.turns, unpriced_turns=agent.unpriced_turns
-        )
-        for name in ("role", "harness", "model"):
-            value = getattr(agent, name)
-            if value is not None:
-                setattr(entry, name, value)
-        by_agent.append(entry)
-    result = wire.UsageWindowResponse(
-        request_id=request_id,
-        since=_timestamp(reply.since),
-        until=_timestamp(reply.until),
-        spent_usd=reply.spent_usd,
-        spend_per_hour_usd=reply.spend_per_hour_usd,
-        tokens=_tokens(reply.tokens),
-        turns=reply.turns,
-        unpriced_turns=reply.unpriced_turns,
-        untimed_turns=reply.untimed_turns,
-        new_bests=reply.new_bests,
-        by_run=by_run,
-        by_agent=by_agent,
-        agents_omitted=reply.agents_omitted,
-        missing_runs=list(reply.missing_runs),
-    )
-    if reply.cost_per_new_best_usd is not None:
-        result.cost_per_new_best_usd = reply.cost_per_new_best_usd
-    return result

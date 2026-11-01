@@ -123,12 +123,7 @@ from server.host_run_events import (
     RunsReadTailRequest,
 )
 from server.host_run_reader import RunReaderReply, RunReaderRequest
-from server.host_run_summary import (
-    RunsSummaryReply,
-    RunsSummaryRequest,
-    UsageWindowReply,
-    UsageWindowRequest,
-)
+from server.host_run_summary import RunsSummaryReply, RunsSummaryRequest
 from vs_decode.api import Unreadable, decode_json
 
 PROTOCOL_VERSION = 1
@@ -1173,7 +1168,6 @@ HELPER_REQUEST_FEATURES: Final[Mapping[type[HelperRequestBase], HelperFeature]] 
     ComputeRemoveClusterRequest: HelperFeature.MACHINE_COMPUTE,
     AgentLoginsListRequest: HelperFeature.AGENT_LOGINS,
     AgentLoginsStartRequest: HelperFeature.AGENT_LOGINS,
-    UsageWindowRequest: HelperFeature.USAGE_WINDOW,
     RunReaderRequest: HelperFeature.CHAT_ENDED_RUNS,
 }
 """The feature each gated request needs, exported with the generated wire contract."""
@@ -1260,7 +1254,6 @@ HelperRequest = Annotated[
     | AgentLoginsStartRequest
     | ProjectTaskGoalRequest
     | ExamplesDestinationRequest
-    | UsageWindowRequest
     | RunReaderRequest,
     Field(discriminator="type"),
 ]
@@ -1737,7 +1730,6 @@ HelperReply = (
     | AgentLoginsStartReply
     | ProjectTaskGoalReply
     | ExamplesDestinationReply
-    | UsageWindowReply
     | RunReaderReply
 )
 """A request's result; its ``type`` is the request's."""

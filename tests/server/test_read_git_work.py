@@ -223,18 +223,6 @@ _REQUESTS: dict[str, Callable[[str], ReadRequest]] = {
             pb.ListRunDigestsRequest(request_id="r", project=project, run_ids=list(_NAMED)),
         )
     ),
-    "usage_window": lambda project: ReadRequest(
-        method=Oneof(
-            "usage_window",
-            pb.UsageWindowRequest(
-                request_id="r",
-                project=project,
-                run_ids=list(_NAMED),
-                since=Timestamp.from_seconds(1_790_000_000),
-                until=Timestamp.from_seconds(1_790_086_400),
-            ),
-        )
-    ),
     "usage_rates_refresh": lambda _project: ReadRequest(
         method=Oneof(
             "usage_rates_refresh",
@@ -328,19 +316,15 @@ def test_no_registered_read_asks_git_more_of_a_project_with_more_runs(
     assert reply.result.field == slot, f"{slot} did not answer: {reply.result.value}"
 
 
-@pytest.mark.parametrize("slot", ["list_run_digests", "usage_window"])
-def test_the_reads_that_name_runs_answer_for_those_runs(tmp_path: Path, slot: str) -> None:
-    work, reply = _git_work(tmp_path, slot, _SMALL)
+def test_the_digest_read_answers_for_the_runs_it_names(tmp_path: Path) -> None:
+    work, reply = _git_work(tmp_path, "list_run_digests", _SMALL)
 
     assert reply.result is not None
-    assert reply.result.field == slot
+    assert reply.result.field == "list_run_digests"
     assert work.calls["repositories opened"] > 0
     answer = reply.result.value
-    if isinstance(answer, pb.ListRunDigestsResponse):
-        assert [entry.run_id for entry in answer.digests] == list(_NAMED)
-    else:
-        assert isinstance(answer, pb.UsageWindowResponse)
-        assert answer.missing_runs == []
+    assert isinstance(answer, pb.ListRunDigestsResponse)
+    assert [entry.run_id for entry in answer.digests] == list(_NAMED)
 
 
 def _listing_work(tmp_path: Path, runs: int) -> tuple[_GitWork, int]:

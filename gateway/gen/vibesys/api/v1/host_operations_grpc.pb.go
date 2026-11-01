@@ -45,7 +45,6 @@ const (
 	HostOperationsService_ListAgentLogins_FullMethodName    = "/vibesys.api.v1.HostOperationsService/ListAgentLogins"
 	HostOperationsService_CreateChatSession_FullMethodName  = "/vibesys.api.v1.HostOperationsService/CreateChatSession"
 	HostOperationsService_ListRunDigests_FullMethodName     = "/vibesys.api.v1.HostOperationsService/ListRunDigests"
-	HostOperationsService_UsageWindow_FullMethodName        = "/vibesys.api.v1.HostOperationsService/UsageWindow"
 	HostOperationsService_UsageSummary_FullMethodName       = "/vibesys.api.v1.HostOperationsService/UsageSummary"
 	HostOperationsService_UsageRatesRefresh_FullMethodName  = "/vibesys.api.v1.HostOperationsService/UsageRatesRefresh"
 	HostOperationsService_UsageLimits_FullMethodName        = "/vibesys.api.v1.HostOperationsService/UsageLimits"
@@ -97,10 +96,9 @@ type HostOperationsServiceClient interface {
 	TerminateRun(ctx context.Context, in *v1.TerminateRunRequest, opts ...grpc.CallOption) (*v1.TerminateRunResponse, error)
 	ListAgentLogins(ctx context.Context, in *v1.ListAgentLoginsRequest, opts ...grpc.CallOption) (*v1.ListAgentLoginsResponse, error)
 	CreateChatSession(ctx context.Context, in *CreateChatSessionRequest, opts ...grpc.CallOption) (*CreateChatSessionResponse, error)
-	// The digests and the usage window read each run's journal; they are served beside, not through,
-	// the saved-run listing.
+	// The digests read each run's journal; they are served beside, not through, the saved-run
+	// listing.
 	ListRunDigests(ctx context.Context, in *v1.ListRunDigestsRequest, opts ...grpc.CallOption) (*v1.ListRunDigestsResponse, error)
-	UsageWindow(ctx context.Context, in *v1.UsageWindowRequest, opts ...grpc.CallOption) (*v1.UsageWindowResponse, error)
 	// The Usage screen's read: one call per host, for every project, in the buckets the caller cuts.
 	UsageSummary(ctx context.Context, in *v1.UsageSummaryRequest, opts ...grpc.CallOption) (*v1.UsageSummaryResponse, error)
 	// Fetch the price list if one is due. A read: it changes only the host's cache of the list.
@@ -386,16 +384,6 @@ func (c *hostOperationsServiceClient) ListRunDigests(ctx context.Context, in *v1
 	return out, nil
 }
 
-func (c *hostOperationsServiceClient) UsageWindow(ctx context.Context, in *v1.UsageWindowRequest, opts ...grpc.CallOption) (*v1.UsageWindowResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(v1.UsageWindowResponse)
-	err := c.cc.Invoke(ctx, HostOperationsService_UsageWindow_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *hostOperationsServiceClient) UsageSummary(ctx context.Context, in *v1.UsageSummaryRequest, opts ...grpc.CallOption) (*v1.UsageSummaryResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(v1.UsageSummaryResponse)
@@ -481,10 +469,9 @@ type HostOperationsServiceServer interface {
 	TerminateRun(context.Context, *v1.TerminateRunRequest) (*v1.TerminateRunResponse, error)
 	ListAgentLogins(context.Context, *v1.ListAgentLoginsRequest) (*v1.ListAgentLoginsResponse, error)
 	CreateChatSession(context.Context, *CreateChatSessionRequest) (*CreateChatSessionResponse, error)
-	// The digests and the usage window read each run's journal; they are served beside, not through,
-	// the saved-run listing.
+	// The digests read each run's journal; they are served beside, not through, the saved-run
+	// listing.
 	ListRunDigests(context.Context, *v1.ListRunDigestsRequest) (*v1.ListRunDigestsResponse, error)
-	UsageWindow(context.Context, *v1.UsageWindowRequest) (*v1.UsageWindowResponse, error)
 	// The Usage screen's read: one call per host, for every project, in the buckets the caller cuts.
 	UsageSummary(context.Context, *v1.UsageSummaryRequest) (*v1.UsageSummaryResponse, error)
 	// Fetch the price list if one is due. A read: it changes only the host's cache of the list.
@@ -576,9 +563,6 @@ func (UnimplementedHostOperationsServiceServer) CreateChatSession(context.Contex
 }
 func (UnimplementedHostOperationsServiceServer) ListRunDigests(context.Context, *v1.ListRunDigestsRequest) (*v1.ListRunDigestsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListRunDigests not implemented")
-}
-func (UnimplementedHostOperationsServiceServer) UsageWindow(context.Context, *v1.UsageWindowRequest) (*v1.UsageWindowResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method UsageWindow not implemented")
 }
 func (UnimplementedHostOperationsServiceServer) UsageSummary(context.Context, *v1.UsageSummaryRequest) (*v1.UsageSummaryResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UsageSummary not implemented")
@@ -1049,24 +1033,6 @@ func _HostOperationsService_ListRunDigests_Handler(srv interface{}, ctx context.
 	return interceptor(ctx, in, info, handler)
 }
 
-func _HostOperationsService_UsageWindow_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(v1.UsageWindowRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(HostOperationsServiceServer).UsageWindow(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: HostOperationsService_UsageWindow_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(HostOperationsServiceServer).UsageWindow(ctx, req.(*v1.UsageWindowRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _HostOperationsService_UsageSummary_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(v1.UsageSummaryRequest)
 	if err := dec(in); err != nil {
@@ -1237,10 +1203,6 @@ var HostOperationsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListRunDigests",
 			Handler:    _HostOperationsService_ListRunDigests_Handler,
-		},
-		{
-			MethodName: "UsageWindow",
-			Handler:    _HostOperationsService_UsageWindow_Handler,
 		},
 		{
 			MethodName: "UsageSummary",

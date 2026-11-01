@@ -255,29 +255,6 @@ def accept_list_run_digests(
     return ListRunDigests.accept(request)
 
 
-UsageWindow = Operation(
-    "UsageWindow",
-    42,
-    42,
-    42,
-    25000,
-    5000,
-    1,
-    2,
-    1,
-    1,
-    None,
-    None,
-    pb.UsageWindowRequest,
-    pb.UsageWindowResponse,
-    ((("request_id",), ("request_id",)),),
-)
-
-
-def accept_usage_window(request: pb.UsageWindowRequest) -> AcceptedRequest[pb.UsageWindowRequest]:
-    return UsageWindow.accept(request)
-
-
 UsageSummary = Operation(
     "UsageSummary",
     44,
@@ -613,7 +590,6 @@ OPERATIONS: tuple[Operation, ...] = (
     InspectDestination,
     ListAgentLogins,
     ListRunDigests,
-    UsageWindow,
     UsageSummary,
     UsageRatesRefresh,
     UsageLimits,
@@ -644,7 +620,6 @@ class Handlers:
     inspect_destination: Callable[[pb.InspectDestinationRequest], pb.InspectDestinationResponse]
     list_agent_logins: Callable[[pb.ListAgentLoginsRequest], pb.ListAgentLoginsResponse]
     list_run_digests: Callable[[pb.ListRunDigestsRequest], pb.ListRunDigestsResponse]
-    usage_window: Callable[[pb.UsageWindowRequest], pb.UsageWindowResponse]
     usage_summary: Callable[[pb.UsageSummaryRequest], pb.UsageSummaryResponse]
     usage_rates_refresh: Callable[[pb.UsageRatesRefreshRequest], pb.UsageRatesRefreshResponse]
     usage_limits: Callable[[pb.UsageLimitsRequest], pb.UsageLimitsResponse]
@@ -690,10 +665,6 @@ class Handlers:
             case 41:
                 return ListRunDigests.validate_response(
                     request, self.list_run_digests(ListRunDigests.request_value(request))
-                )
-            case 42:
-                return UsageWindow.validate_response(
-                    request, self.usage_window(UsageWindow.request_value(request))
                 )
             case 44:
                 return UsageSummary.validate_response(
@@ -873,7 +844,6 @@ READS: dict[str, Operation] = {
     "inspect_destination": InspectDestination,
     "list_agent_logins": ListAgentLogins,
     "list_run_digests": ListRunDigests,
-    "usage_window": UsageWindow,
     "usage_summary": UsageSummary,
     "usage_rates_refresh": UsageRatesRefresh,
     "usage_limits": UsageLimits,
@@ -889,7 +859,6 @@ READ_CALLS: tuple[HostCall, ...] = (
     HostCall("inspect_destination", "inspect-destination", 23, 23, 10000, 5000),
     HostCall("list_agent_logins", "list-agent-logins", 19, 19, 25000, 5000),
     HostCall("list_run_digests", "list-run-digests", 41, 41, 25000, 5000),
-    HostCall("usage_window", "usage-window", 42, 42, 25000, 5000),
     HostCall("usage_summary", "usage-summary", 44, 44, 25000, 5000),
     HostCall("usage_rates_refresh", "usage-rates-refresh", 45, 45, 60000, 5000),
     HostCall("usage_limits", "usage-limits", 47, 47, 30000, 5000),

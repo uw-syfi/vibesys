@@ -57,7 +57,6 @@ def _slots() -> tuple[str, ...]:
     return (
         "list_tasks",
         "list_run_digests",
-        "usage_window",
         "usage_summary",
         "usage_rates_refresh",
         "usage_limits",
@@ -159,9 +158,11 @@ def test_duplicate_identifiers_fail_generation(field: str) -> None:
         ("response_tag", 0, "response_tag"),
         ("first_event_ms", 1, "first_event"),
         ("progress_ms", 1, "progress_ms"),
-        ("operation_id", 37, "retired"),
-        ("request_tag", 37, "retired"),
-        ("response_tag", 37, "retired"),
+        *(
+            (field, retired, "retired")
+            for retired in (37, 42)
+            for field in ("operation_id", "request_tag", "response_tag")
+        ),
     ],
 )
 def test_invalid_policies_name_the_method(field: str, value: int, message: str) -> None:

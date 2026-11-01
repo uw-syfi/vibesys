@@ -1,11 +1,10 @@
-"""A project's runs, their digests and what they spent: the reads shared by every transport.
+"""A project's runs and their digests: the reads shared by every transport.
 
-The helper's ``runs.list`` and ``usage.window`` and the registered ``ListRunDigests`` and
-``UsageWindow`` answer from these functions, so one definition says what a digest and a window
-hold. Nothing here knows which transport asked.
+The helper's ``runs.list`` and the registered ``ListRunDigests`` answer from these functions, so
+one definition says what a digest holds. Nothing here knows which transport asked.
 
-Public surface: ``ProjectRun``, ``RunProjects``, ``RunFacts``, ``run_summaries``, ``project_runs``,
-``named_run_digests`` and ``usage_window_reply``.
+Public surface: ``ProjectRun``, ``RunProjects``, ``RunFacts``, ``run_summaries``, ``project_runs``
+and ``named_run_digests``.
 """
 
 from __future__ import annotations
@@ -21,9 +20,6 @@ from server.host_api import (
     RunList,
     RunSummary,
 )
-from server.host_envelope import HelperErrorCode
-from server.host_examples import ProjectLookupError
-from server.host_run_dashboard import IdeaVerdict
 from server.run_digest import run_attention
 
 if TYPE_CHECKING:
@@ -31,7 +27,6 @@ if TYPE_CHECKING:
     from datetime import datetime
     from pathlib import Path
 
-    from server.host_run_summary import UsageWindowReply, UsageWindowRequest
     from server.registry import LiveRegistry
     from server.run_summary import Summarized
     from vs_sim.api import Clock
@@ -186,40 +181,3 @@ def run_summaries(
             )
         )
     return RunList(project_root=project_root, runs=tuple(summaries))
-
-
-def usage_window_reply(
-    request: UsageWindowRequest, host: RunFacts, project: Path
-) -> UsageWindowReply:
-    """Answer what the named runs spent in the window, from each run's usage records.
-
-    A run's records are its summary's (``Projects.run_summary``, the cache beside the journal) and
-    its bests are the kept points of its digest, so each run costs a cache read and what its journal
-    gained since. A run the project does not have, or whose journal this machine does not hold, is
-    ``missing``. ``project`` is the request's project directory, resolved on this host.
-    """
-    # lint-waiver: LW-271612 [PLC0415]; the helper answers hello without loading the aggregation.
-    # > `server.usage_window` is a module the helper's start-up budget
-    # > (`tests/e2e/test_host_helper.py`) has no room for, and only a `usage.window` request needs
-    # > it; the request and reply messages stay with the other messages so `host_api` can name them.
-    from server.usage_window import RunUsage, usage_window  # noqa: PLC0415
-
-    root, known = host.projects.named_runs(project, request.run_ids)
-    tasks = {run.run_id: run.task for run in known}
-    found: list[RunUsage] = []
-    missing: list[str] = []
-    for run_id in dict.fromkeys(request.run_ids):
-        try:
-            records = host.projects.run_summary(project, run_id).fold.records
-        except ProjectLookupError as error:
-            if error.code is not HelperErrorCode.UNKNOWN_RUN:
-                raise
-            missing.append(run_id)
-            continue
-        digest = host.projects.run_digest(root, run_id)
-        points = (
-            digest.dashboard.points if isinstance(digest, RunDigest) and digest.dashboard else ()
-        )
-        bests = [point.at for point in points if point.verdict is IdeaVerdict.KEPT and point.at]
-        found.append(RunUsage(run_id, tasks.get(run_id), records, bests))
-    return usage_window(request, found, missing)

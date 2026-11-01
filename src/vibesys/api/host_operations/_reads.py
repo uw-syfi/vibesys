@@ -21,10 +21,6 @@ class ReadSource(Protocol):
         """What each requested run's journal says at a glance."""
         ...
 
-    def usage_window(self, request: pb.UsageWindowRequest) -> pb.UsageWindowResponse:
-        """What the requested runs spent in the window."""
-        ...
-
     def usage_summary(self, request: pb.UsageSummaryRequest) -> pb.UsageSummaryResponse:
         """What the host's runs and its people's CLI use cost, in the buckets the request cuts."""
         ...

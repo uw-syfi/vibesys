@@ -207,22 +207,6 @@ class HostReadSource:
         )
         return host_run_wire.digests_response(request.request_id, runs)
 
-    def usage_window(self, request: pb.UsageWindowRequest) -> pb.UsageWindowResponse:
-        """Sum the runs' usage through the owner of the helper's usage window."""
-        if request.since is None or request.until is None:
-            message = "since and until: a window needs both ends"
-            raise ValueError(message)
-        legacy = host_run_summary.UsageWindowRequest(
-            request_id=request.request_id,
-            deadline_ms=wire.host_operations.UsageWindow.total_ms,
-            project=request.project,
-            run_ids=tuple(request.run_ids),
-            since=request.since.to_datetime(),
-            until=request.until.to_datetime(),
-        )
-        reply = host_run_reads.usage_window_reply(legacy, self._host, self._path(request.project))
-        return host_run_wire.usage_response(request.request_id, reply)
-
     def usage_summary(self, request: pb.UsageSummaryRequest) -> pb.UsageSummaryResponse:
         """Cut the host's runs into the request's buckets, through the owners of the rollup and the summary."""
         if request.now is None:

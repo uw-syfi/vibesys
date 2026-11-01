@@ -20,7 +20,6 @@ export const operationPolicies = Object.freeze({
   InspectDestination: Object.freeze({name: 'InspectDestination', id: 23, requestTag: 23, responseTag: 23, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
   ListAgentLogins: Object.freeze({name: 'ListAgentLogins', id: 19, requestTag: 19, responseTag: 19, capMs: 25000, graceMs: 5000, totalMs: 30000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
   ListRunDigests: Object.freeze({name: 'ListRunDigests', id: 41, requestTag: 41, responseTag: 41, capMs: 25000, graceMs: 5000, totalMs: 30000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
-  UsageWindow: Object.freeze({name: 'UsageWindow', id: 42, requestTag: 42, responseTag: 42, capMs: 25000, graceMs: 5000, totalMs: 30000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
   UsageSummary: Object.freeze({name: 'UsageSummary', id: 44, requestTag: 44, responseTag: 44, capMs: 25000, graceMs: 5000, totalMs: 30000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
   UsageRatesRefresh: Object.freeze({name: 'UsageRatesRefresh', id: 45, requestTag: 45, responseTag: 45, capMs: 60000, graceMs: 5000, totalMs: 65000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
   UsageLimits: Object.freeze({name: 'UsageLimits', id: 47, requestTag: 47, responseTag: 47, capMs: 30000, graceMs: 5000, totalMs: 35000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
@@ -112,12 +111,6 @@ export function acceptListRunDigests(input: MessageInitShape<typeof pb.ListRunDi
 }
 export async function callListRunDigests(transport: OperationTransport, request: Accepted<"ListRunDigests">, signal: OperationSignal): Promise<pb.ListRunDigestsResponse> {
   return call(transport, {policy: operationPolicies.ListRunDigests, requestSchema: pb.ListRunDigestsRequestSchema, responseSchema: pb.ListRunDigestsResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
-}
-export function acceptUsageWindow(input: MessageInitShape<typeof pb.UsageWindowRequestSchema>): Accepted<"UsageWindow"> {
-  return accept(operationPolicies.UsageWindow, pb.UsageWindowRequestSchema, input);
-}
-export async function callUsageWindow(transport: OperationTransport, request: Accepted<"UsageWindow">, signal: OperationSignal): Promise<pb.UsageWindowResponse> {
-  return call(transport, {policy: operationPolicies.UsageWindow, requestSchema: pb.UsageWindowRequestSchema, responseSchema: pb.UsageWindowResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
 }
 export function acceptUsageSummary(input: MessageInitShape<typeof pb.UsageSummaryRequestSchema>): Accepted<"UsageSummary"> {
   return accept(operationPolicies.UsageSummary, pb.UsageSummaryRequestSchema, input);
@@ -235,7 +228,6 @@ export const readBudgets = Object.freeze({
   inspectDestination: Object.freeze({capMs: 10000, graceMs: 5000, totalMs: 15000} as const),
   listAgentLogins: Object.freeze({capMs: 25000, graceMs: 5000, totalMs: 30000} as const),
   listRunDigests: Object.freeze({capMs: 25000, graceMs: 5000, totalMs: 30000} as const),
-  usageWindow: Object.freeze({capMs: 25000, graceMs: 5000, totalMs: 30000} as const),
   usageSummary: Object.freeze({capMs: 25000, graceMs: 5000, totalMs: 30000} as const),
   usageRatesRefresh: Object.freeze({capMs: 60000, graceMs: 5000, totalMs: 65000} as const),
   usageLimits: Object.freeze({capMs: 30000, graceMs: 5000, totalMs: 35000} as const),
@@ -266,8 +258,6 @@ export function encodeHostRead(checkout: string, name: string, payload: Uint8Arr
       return toBinary(ReadRequestSchema, create(ReadRequestSchema, {checkout, method: {case: 'listAgentLogins', value: fromBinary(pb.ListAgentLoginsRequestSchema, payload)}}));
     case 'ListRunDigests':
       return toBinary(ReadRequestSchema, create(ReadRequestSchema, {checkout, method: {case: 'listRunDigests', value: fromBinary(pb.ListRunDigestsRequestSchema, payload)}}));
-    case 'UsageWindow':
-      return toBinary(ReadRequestSchema, create(ReadRequestSchema, {checkout, method: {case: 'usageWindow', value: fromBinary(pb.UsageWindowRequestSchema, payload)}}));
     case 'UsageSummary':
       return toBinary(ReadRequestSchema, create(ReadRequestSchema, {checkout, method: {case: 'usageSummary', value: fromBinary(pb.UsageSummaryRequestSchema, payload)}}));
     case 'UsageRatesRefresh':
@@ -319,9 +309,6 @@ export function decodeHostRead(name: string, payload: Uint8Array): Uint8Array {
     case 'ListRunDigests':
       if (result.case !== 'listRunDigests') throw new Error('response correlation mismatch');
       return toBinary(pb.ListRunDigestsResponseSchema, result.value);
-    case 'UsageWindow':
-      if (result.case !== 'usageWindow') throw new Error('response correlation mismatch');
-      return toBinary(pb.UsageWindowResponseSchema, result.value);
     case 'UsageSummary':
       if (result.case !== 'usageSummary') throw new Error('response correlation mismatch');
       return toBinary(pb.UsageSummaryResponseSchema, result.value);

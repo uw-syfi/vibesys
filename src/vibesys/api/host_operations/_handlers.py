@@ -22,11 +22,6 @@ class _Reads:
         response.request_id = request.request_id
         return response
 
-    def usage_window(self, request: pb.UsageWindowRequest) -> pb.UsageWindowResponse:
-        response = self._source.usage_window(request)
-        response.request_id = request.request_id
-        return response
-
     def usage_summary(self, request: pb.UsageSummaryRequest) -> pb.UsageSummaryResponse:
         response = self._source.usage_summary(request)
         response.request_id = request.request_id
@@ -134,7 +129,6 @@ def handlers(source: ReadSource) -> host_operations.Handlers:
     return Handlers(
         list_tasks=reads.list_tasks,
         list_run_digests=reads.list_run_digests,
-        usage_window=reads.usage_window,
         usage_summary=reads.usage_summary,
         usage_rates_refresh=reads.usage_rates_refresh,
         usage_limits=reads.usage_limits,

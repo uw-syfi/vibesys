@@ -83,7 +83,6 @@ gateway receives it."""
 
 _TASK = "default"
 _RUN = "20261001-000000-00000000-proj-20261001-000000"
-_WINDOW_END = datetime(2026, 10, 30, tzinfo=UTC)
 
 _OPERATIONS = "vibesys.api.host_operations"
 
@@ -97,7 +96,7 @@ class Group(StrEnum):
     READ_ADAPTER = "the registered-read adapter and the host facts it builds"
     RUN_STREAM = "the run-listing stream"
     RUN_READS = "the readers of a run's digest and usage"
-    USAGE = "the usage window's fold"
+    USAGE = "a run's usage records"
     USAGE_SUMMARY = "the usage summary's rollup, pricing and scan of transcripts"
     PROJECT_HOST = "the helper's project adapters and registry"
     WHOLE_HOST = "the helper's whole host"
@@ -134,7 +133,7 @@ GROUPS: dict[Group, tuple[str, ...]] = {
     ),
     Group.RUN_STREAM: (f"{_OPERATIONS}.saved_runs", "server.host_saved_runs"),
     Group.RUN_READS: ("server.host_run_reads", "server.host_run_wire"),
-    Group.USAGE: ("server.usage_window", "server.run_usage", "server.run_summary"),
+    Group.USAGE: ("server.run_usage", "server.run_summary"),
     Group.USAGE_SUMMARY: (
         "server.usage_scan",
         "server.usage_rollup",
@@ -210,16 +209,6 @@ def _watch(project: Path) -> WatchRequest:
         method=Oneof(
             "stream_saved_runs", pb.StreamSavedRunsRequest(request_id="r", project=str(project))
         ),
-    )
-
-
-def _window(project: Path) -> pb.UsageWindowRequest:
-    return pb.UsageWindowRequest(
-        request_id="r",
-        project=str(project),
-        run_ids=[_RUN],
-        since=Timestamp.from_datetime(datetime(2026, 10, 29, tzinfo=UTC)),
-        until=Timestamp.from_datetime(_WINDOW_END),
     )
 
 
@@ -344,15 +333,6 @@ READS: tuple[_Read, ...] = (
         "list_run_digests",
         modules=580,
         allowed=_PROJECT_READ | {Group.RUN_READS},
-    ),
-    _Read(
-        "usage-window",
-        lambda project: ReadRequest(
-            checkout=_CHECKOUT, method=Oneof("usage_window", _window(project))
-        ),
-        "usage_window",
-        modules=590,
-        allowed=_PROJECT_READ | {Group.RUN_READS, Group.USAGE},
     ),
     _Read(
         "usage-summary",

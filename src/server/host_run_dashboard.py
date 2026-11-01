@@ -52,7 +52,7 @@ class IdeaPoint(BaseModel):
     ``at`` is when the idea's result landed, by the journal's event clock: the time of the gate event
     that last wrote the reading the idea is plotted by, else of the idea's last event; ``None`` when
     the journal's event has no readable time. It is the one definition of when a ``kept`` idea became
-    the best (``usage.window`` counts new bests by it); the span clock orders the chart but is not a
+    the best (the usage rollup counts new bests by it); the span clock orders the chart but is not a
     time of day.
     """
 
@@ -66,9 +66,9 @@ class IdeaPoint(BaseModel):
 def kept_landings(points: Iterable[IdeaPoint]) -> tuple[datetime, ...]:
     """When each ``kept`` idea of ``points`` landed, in the order of the points.
 
-    The one definition of a new best's time, shared by every count of them (``usage.window``
-    and the usage rollup), so two counts of one run cannot disagree. A kept point whose journal
-    event had no readable time has none and is not counted.
+    The one definition of a new best's time, shared by every count of them (the usage rollup and
+    the digest), so two counts of one run cannot disagree. A kept point whose journal event had no
+    readable time has none and is not counted.
     """
     return tuple(
         point.at for point in points if point.verdict is IdeaVerdict.KEPT and point.at is not None

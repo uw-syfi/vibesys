@@ -160,10 +160,6 @@ function cases(random: Seeded): Case[] {
     ],
     [bridge => bridge.cancelProjectRuns(token), {kind: 'cancel-project-runs', token}],
     [
-      bridge => bridge.usageWindow(key, path, [name], 1_000, 2_000),
-      {kind: 'usage-window', host, project: path, runIds: [name], since: 1_000, until: 2_000},
-    ],
-    [
       bridge => bridge.usageSummary(key, [path], [0, 900_000], 1_000),
       {kind: 'usage-summary', host, projects: [path], edges: [0, 900_000], now: 1_000},
     ],

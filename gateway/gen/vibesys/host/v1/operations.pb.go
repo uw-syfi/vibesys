@@ -10284,469 +10284,6 @@ func (x *ListRunDigestsResponse) GetDigests() []*RunDigestEntry {
 	return nil
 }
 
-// What runs spent in a window of time. A count a provider did not report is absent, not zero.
-type TokenTally struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Input         *uint64                `protobuf:"varint,1,opt,name=input,proto3,oneof" json:"input,omitempty"`
-	CacheRead     *uint64                `protobuf:"varint,2,opt,name=cache_read,json=cacheRead,proto3,oneof" json:"cache_read,omitempty"`
-	CacheWrite    *uint64                `protobuf:"varint,3,opt,name=cache_write,json=cacheWrite,proto3,oneof" json:"cache_write,omitempty"`
-	Output        *uint64                `protobuf:"varint,4,opt,name=output,proto3,oneof" json:"output,omitempty"`
-	Reasoning     *uint64                `protobuf:"varint,5,opt,name=reasoning,proto3,oneof" json:"reasoning,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *TokenTally) Reset() {
-	*x = TokenTally{}
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[135]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *TokenTally) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*TokenTally) ProtoMessage() {}
-
-func (x *TokenTally) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[135]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use TokenTally.ProtoReflect.Descriptor instead.
-func (*TokenTally) Descriptor() ([]byte, []int) {
-	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{135}
-}
-
-func (x *TokenTally) GetInput() uint64 {
-	if x != nil && x.Input != nil {
-		return *x.Input
-	}
-	return 0
-}
-
-func (x *TokenTally) GetCacheRead() uint64 {
-	if x != nil && x.CacheRead != nil {
-		return *x.CacheRead
-	}
-	return 0
-}
-
-func (x *TokenTally) GetCacheWrite() uint64 {
-	if x != nil && x.CacheWrite != nil {
-		return *x.CacheWrite
-	}
-	return 0
-}
-
-func (x *TokenTally) GetOutput() uint64 {
-	if x != nil && x.Output != nil {
-		return *x.Output
-	}
-	return 0
-}
-
-func (x *TokenTally) GetReasoning() uint64 {
-	if x != nil && x.Reasoning != nil {
-		return *x.Reasoning
-	}
-	return 0
-}
-
-type RunSpend struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RunId         string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
-	Task          *string                `protobuf:"bytes,2,opt,name=task,proto3,oneof" json:"task,omitempty"`
-	CostUsd       float64                `protobuf:"fixed64,3,opt,name=cost_usd,json=costUsd,proto3" json:"cost_usd,omitempty"`
-	UnpricedTurns uint32                 `protobuf:"varint,4,opt,name=unpriced_turns,json=unpricedTurns,proto3" json:"unpriced_turns,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *RunSpend) Reset() {
-	*x = RunSpend{}
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[136]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *RunSpend) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*RunSpend) ProtoMessage() {}
-
-func (x *RunSpend) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[136]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use RunSpend.ProtoReflect.Descriptor instead.
-func (*RunSpend) Descriptor() ([]byte, []int) {
-	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{136}
-}
-
-func (x *RunSpend) GetRunId() string {
-	if x != nil {
-		return x.RunId
-	}
-	return ""
-}
-
-func (x *RunSpend) GetTask() string {
-	if x != nil && x.Task != nil {
-		return *x.Task
-	}
-	return ""
-}
-
-func (x *RunSpend) GetCostUsd() float64 {
-	if x != nil {
-		return x.CostUsd
-	}
-	return 0
-}
-
-func (x *RunSpend) GetUnpricedTurns() uint32 {
-	if x != nil {
-		return x.UnpricedTurns
-	}
-	return 0
-}
-
-type AgentSpend struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Role          *string                `protobuf:"bytes,1,opt,name=role,proto3,oneof" json:"role,omitempty"`
-	Harness       *string                `protobuf:"bytes,2,opt,name=harness,proto3,oneof" json:"harness,omitempty"`
-	Model         *string                `protobuf:"bytes,3,opt,name=model,proto3,oneof" json:"model,omitempty"`
-	CostUsd       float64                `protobuf:"fixed64,4,opt,name=cost_usd,json=costUsd,proto3" json:"cost_usd,omitempty"`
-	Turns         uint32                 `protobuf:"varint,5,opt,name=turns,proto3" json:"turns,omitempty"`
-	UnpricedTurns uint32                 `protobuf:"varint,6,opt,name=unpriced_turns,json=unpricedTurns,proto3" json:"unpriced_turns,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *AgentSpend) Reset() {
-	*x = AgentSpend{}
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[137]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *AgentSpend) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*AgentSpend) ProtoMessage() {}
-
-func (x *AgentSpend) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[137]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use AgentSpend.ProtoReflect.Descriptor instead.
-func (*AgentSpend) Descriptor() ([]byte, []int) {
-	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{137}
-}
-
-func (x *AgentSpend) GetRole() string {
-	if x != nil && x.Role != nil {
-		return *x.Role
-	}
-	return ""
-}
-
-func (x *AgentSpend) GetHarness() string {
-	if x != nil && x.Harness != nil {
-		return *x.Harness
-	}
-	return ""
-}
-
-func (x *AgentSpend) GetModel() string {
-	if x != nil && x.Model != nil {
-		return *x.Model
-	}
-	return ""
-}
-
-func (x *AgentSpend) GetCostUsd() float64 {
-	if x != nil {
-		return x.CostUsd
-	}
-	return 0
-}
-
-func (x *AgentSpend) GetTurns() uint32 {
-	if x != nil {
-		return x.Turns
-	}
-	return 0
-}
-
-func (x *AgentSpend) GetUnpricedTurns() uint32 {
-	if x != nil {
-		return x.UnpricedTurns
-	}
-	return 0
-}
-
-type UsageWindowRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	Project       string                 `protobuf:"bytes,2,opt,name=project,proto3" json:"project,omitempty"`
-	RunIds        []string               `protobuf:"bytes,3,rep,name=run_ids,json=runIds,proto3" json:"run_ids,omitempty"`
-	Since         *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=since,proto3" json:"since,omitempty"`
-	Until         *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=until,proto3" json:"until,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *UsageWindowRequest) Reset() {
-	*x = UsageWindowRequest{}
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[138]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *UsageWindowRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*UsageWindowRequest) ProtoMessage() {}
-
-func (x *UsageWindowRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[138]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use UsageWindowRequest.ProtoReflect.Descriptor instead.
-func (*UsageWindowRequest) Descriptor() ([]byte, []int) {
-	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{138}
-}
-
-func (x *UsageWindowRequest) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *UsageWindowRequest) GetProject() string {
-	if x != nil {
-		return x.Project
-	}
-	return ""
-}
-
-func (x *UsageWindowRequest) GetRunIds() []string {
-	if x != nil {
-		return x.RunIds
-	}
-	return nil
-}
-
-func (x *UsageWindowRequest) GetSince() *timestamppb.Timestamp {
-	if x != nil {
-		return x.Since
-	}
-	return nil
-}
-
-func (x *UsageWindowRequest) GetUntil() *timestamppb.Timestamp {
-	if x != nil {
-		return x.Until
-	}
-	return nil
-}
-
-type UsageWindowResponse struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	RequestId         string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	Since             *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=since,proto3" json:"since,omitempty"`
-	Until             *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=until,proto3" json:"until,omitempty"`
-	SpentUsd          float64                `protobuf:"fixed64,4,opt,name=spent_usd,json=spentUsd,proto3" json:"spent_usd,omitempty"`
-	SpendPerHourUsd   float64                `protobuf:"fixed64,5,opt,name=spend_per_hour_usd,json=spendPerHourUsd,proto3" json:"spend_per_hour_usd,omitempty"`
-	Tokens            *TokenTally            `protobuf:"bytes,6,opt,name=tokens,proto3" json:"tokens,omitempty"`
-	Turns             uint32                 `protobuf:"varint,7,opt,name=turns,proto3" json:"turns,omitempty"`
-	UnpricedTurns     uint32                 `protobuf:"varint,8,opt,name=unpriced_turns,json=unpricedTurns,proto3" json:"unpriced_turns,omitempty"`
-	UntimedTurns      uint32                 `protobuf:"varint,9,opt,name=untimed_turns,json=untimedTurns,proto3" json:"untimed_turns,omitempty"`
-	NewBests          uint32                 `protobuf:"varint,10,opt,name=new_bests,json=newBests,proto3" json:"new_bests,omitempty"`
-	CostPerNewBestUsd *float64               `protobuf:"fixed64,11,opt,name=cost_per_new_best_usd,json=costPerNewBestUsd,proto3,oneof" json:"cost_per_new_best_usd,omitempty"`
-	// The costliest run first.
-	ByRun []*RunSpend `protobuf:"bytes,12,rep,name=by_run,json=byRun,proto3" json:"by_run,omitempty"`
-	// The costliest agent first.
-	ByAgent       []*AgentSpend `protobuf:"bytes,13,rep,name=by_agent,json=byAgent,proto3" json:"by_agent,omitempty"`
-	AgentsOmitted uint32        `protobuf:"varint,14,opt,name=agents_omitted,json=agentsOmitted,proto3" json:"agents_omitted,omitempty"`
-	MissingRuns   []string      `protobuf:"bytes,15,rep,name=missing_runs,json=missingRuns,proto3" json:"missing_runs,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *UsageWindowResponse) Reset() {
-	*x = UsageWindowResponse{}
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[139]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *UsageWindowResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*UsageWindowResponse) ProtoMessage() {}
-
-func (x *UsageWindowResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[139]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use UsageWindowResponse.ProtoReflect.Descriptor instead.
-func (*UsageWindowResponse) Descriptor() ([]byte, []int) {
-	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{139}
-}
-
-func (x *UsageWindowResponse) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *UsageWindowResponse) GetSince() *timestamppb.Timestamp {
-	if x != nil {
-		return x.Since
-	}
-	return nil
-}
-
-func (x *UsageWindowResponse) GetUntil() *timestamppb.Timestamp {
-	if x != nil {
-		return x.Until
-	}
-	return nil
-}
-
-func (x *UsageWindowResponse) GetSpentUsd() float64 {
-	if x != nil {
-		return x.SpentUsd
-	}
-	return 0
-}
-
-func (x *UsageWindowResponse) GetSpendPerHourUsd() float64 {
-	if x != nil {
-		return x.SpendPerHourUsd
-	}
-	return 0
-}
-
-func (x *UsageWindowResponse) GetTokens() *TokenTally {
-	if x != nil {
-		return x.Tokens
-	}
-	return nil
-}
-
-func (x *UsageWindowResponse) GetTurns() uint32 {
-	if x != nil {
-		return x.Turns
-	}
-	return 0
-}
-
-func (x *UsageWindowResponse) GetUnpricedTurns() uint32 {
-	if x != nil {
-		return x.UnpricedTurns
-	}
-	return 0
-}
-
-func (x *UsageWindowResponse) GetUntimedTurns() uint32 {
-	if x != nil {
-		return x.UntimedTurns
-	}
-	return 0
-}
-
-func (x *UsageWindowResponse) GetNewBests() uint32 {
-	if x != nil {
-		return x.NewBests
-	}
-	return 0
-}
-
-func (x *UsageWindowResponse) GetCostPerNewBestUsd() float64 {
-	if x != nil && x.CostPerNewBestUsd != nil {
-		return *x.CostPerNewBestUsd
-	}
-	return 0
-}
-
-func (x *UsageWindowResponse) GetByRun() []*RunSpend {
-	if x != nil {
-		return x.ByRun
-	}
-	return nil
-}
-
-func (x *UsageWindowResponse) GetByAgent() []*AgentSpend {
-	if x != nil {
-		return x.ByAgent
-	}
-	return nil
-}
-
-func (x *UsageWindowResponse) GetAgentsOmitted() uint32 {
-	if x != nil {
-		return x.AgentsOmitted
-	}
-	return 0
-}
-
-func (x *UsageWindowResponse) GetMissingRuns() []string {
-	if x != nil {
-		return x.MissingRuns
-	}
-	return nil
-}
-
 // What the Usage screen shows for one host: the estimate of what the host's runs and its
 // people's CLI use would cost at today's list prices, in the buckets the caller asks for.
 //
@@ -10771,7 +10308,7 @@ type UsageSummaryRequest struct {
 
 func (x *UsageSummaryRequest) Reset() {
 	*x = UsageSummaryRequest{}
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[140]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[135]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10783,7 +10320,7 @@ func (x *UsageSummaryRequest) String() string {
 func (*UsageSummaryRequest) ProtoMessage() {}
 
 func (x *UsageSummaryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[140]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[135]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10796,7 +10333,7 @@ func (x *UsageSummaryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UsageSummaryRequest.ProtoReflect.Descriptor instead.
 func (*UsageSummaryRequest) Descriptor() ([]byte, []int) {
-	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{140}
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{135}
 }
 
 func (x *UsageSummaryRequest) GetRequestId() string {
@@ -10845,7 +10382,7 @@ type UsageSeriesKey struct {
 
 func (x *UsageSeriesKey) Reset() {
 	*x = UsageSeriesKey{}
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[141]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[136]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10857,7 +10394,7 @@ func (x *UsageSeriesKey) String() string {
 func (*UsageSeriesKey) ProtoMessage() {}
 
 func (x *UsageSeriesKey) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[141]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[136]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10870,7 +10407,7 @@ func (x *UsageSeriesKey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UsageSeriesKey.ProtoReflect.Descriptor instead.
 func (*UsageSeriesKey) Descriptor() ([]byte, []int) {
-	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{141}
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{136}
 }
 
 func (x *UsageSeriesKey) GetOrigin() UsageOrigin {
@@ -10951,7 +10488,7 @@ type UsageSeries struct {
 
 func (x *UsageSeries) Reset() {
 	*x = UsageSeries{}
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[142]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[137]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -10963,7 +10500,7 @@ func (x *UsageSeries) String() string {
 func (*UsageSeries) ProtoMessage() {}
 
 func (x *UsageSeries) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[142]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[137]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -10976,7 +10513,7 @@ func (x *UsageSeries) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UsageSeries.ProtoReflect.Descriptor instead.
 func (*UsageSeries) Descriptor() ([]byte, []int) {
-	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{142}
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{137}
 }
 
 func (x *UsageSeries) GetKey() *UsageSeriesKey {
@@ -11111,7 +10648,7 @@ type UsageBucketCount struct {
 
 func (x *UsageBucketCount) Reset() {
 	*x = UsageBucketCount{}
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[143]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[138]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11123,7 +10660,7 @@ func (x *UsageBucketCount) String() string {
 func (*UsageBucketCount) ProtoMessage() {}
 
 func (x *UsageBucketCount) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[143]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[138]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11136,7 +10673,7 @@ func (x *UsageBucketCount) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UsageBucketCount.ProtoReflect.Descriptor instead.
 func (*UsageBucketCount) Descriptor() ([]byte, []int) {
-	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{143}
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{138}
 }
 
 func (x *UsageBucketCount) GetBucket() uint32 {
@@ -11178,7 +10715,7 @@ type UsageBucketBests struct {
 
 func (x *UsageBucketBests) Reset() {
 	*x = UsageBucketBests{}
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[144]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[139]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11190,7 +10727,7 @@ func (x *UsageBucketBests) String() string {
 func (*UsageBucketBests) ProtoMessage() {}
 
 func (x *UsageBucketBests) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[144]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[139]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11203,7 +10740,7 @@ func (x *UsageBucketBests) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UsageBucketBests.ProtoReflect.Descriptor instead.
 func (*UsageBucketBests) Descriptor() ([]byte, []int) {
-	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{144}
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{139}
 }
 
 func (x *UsageBucketBests) GetBucket() uint32 {
@@ -11232,7 +10769,7 @@ type UsageProviderCost struct {
 
 func (x *UsageProviderCost) Reset() {
 	*x = UsageProviderCost{}
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[145]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[140]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11244,7 +10781,7 @@ func (x *UsageProviderCost) String() string {
 func (*UsageProviderCost) ProtoMessage() {}
 
 func (x *UsageProviderCost) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[145]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[140]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11257,7 +10794,7 @@ func (x *UsageProviderCost) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UsageProviderCost.ProtoReflect.Descriptor instead.
 func (*UsageProviderCost) Descriptor() ([]byte, []int) {
-	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{145}
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{140}
 }
 
 func (x *UsageProviderCost) GetProvider() string {
@@ -11302,7 +10839,7 @@ type UsageRunRow struct {
 
 func (x *UsageRunRow) Reset() {
 	*x = UsageRunRow{}
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[146]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[141]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11314,7 +10851,7 @@ func (x *UsageRunRow) String() string {
 func (*UsageRunRow) ProtoMessage() {}
 
 func (x *UsageRunRow) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[146]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[141]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11327,7 +10864,7 @@ func (x *UsageRunRow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UsageRunRow.ProtoReflect.Descriptor instead.
 func (*UsageRunRow) Descriptor() ([]byte, []int) {
-	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{146}
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{141}
 }
 
 func (x *UsageRunRow) GetProject() uint32 {
@@ -11362,7 +10899,7 @@ type UsageAgentRow struct {
 
 func (x *UsageAgentRow) Reset() {
 	*x = UsageAgentRow{}
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[147]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[142]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11374,7 +10911,7 @@ func (x *UsageAgentRow) String() string {
 func (*UsageAgentRow) ProtoMessage() {}
 
 func (x *UsageAgentRow) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[147]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[142]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11387,7 +10924,7 @@ func (x *UsageAgentRow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UsageAgentRow.ProtoReflect.Descriptor instead.
 func (*UsageAgentRow) Descriptor() ([]byte, []int) {
-	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{147}
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{142}
 }
 
 func (x *UsageAgentRow) GetRole() string {
@@ -11440,7 +10977,7 @@ type UsageSource struct {
 
 func (x *UsageSource) Reset() {
 	*x = UsageSource{}
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[148]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[143]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11452,7 +10989,7 @@ func (x *UsageSource) String() string {
 func (*UsageSource) ProtoMessage() {}
 
 func (x *UsageSource) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[148]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[143]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11465,7 +11002,7 @@ func (x *UsageSource) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UsageSource.ProtoReflect.Descriptor instead.
 func (*UsageSource) Descriptor() ([]byte, []int) {
-	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{148}
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{143}
 }
 
 func (x *UsageSource) GetKind() UsageSourceKind {
@@ -11567,7 +11104,7 @@ type UsageResolvedRate struct {
 
 func (x *UsageResolvedRate) Reset() {
 	*x = UsageResolvedRate{}
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[149]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[144]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11579,7 +11116,7 @@ func (x *UsageResolvedRate) String() string {
 func (*UsageResolvedRate) ProtoMessage() {}
 
 func (x *UsageResolvedRate) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[149]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[144]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11592,7 +11129,7 @@ func (x *UsageResolvedRate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UsageResolvedRate.ProtoReflect.Descriptor instead.
 func (*UsageResolvedRate) Descriptor() ([]byte, []int) {
-	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{149}
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{144}
 }
 
 func (x *UsageResolvedRate) GetProvider() string {
@@ -11666,7 +11203,7 @@ type UsageSummaryResponse struct {
 
 func (x *UsageSummaryResponse) Reset() {
 	*x = UsageSummaryResponse{}
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[150]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[145]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11678,7 +11215,7 @@ func (x *UsageSummaryResponse) String() string {
 func (*UsageSummaryResponse) ProtoMessage() {}
 
 func (x *UsageSummaryResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[150]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[145]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11691,7 +11228,7 @@ func (x *UsageSummaryResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UsageSummaryResponse.ProtoReflect.Descriptor instead.
 func (*UsageSummaryResponse) Descriptor() ([]byte, []int) {
-	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{150}
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{145}
 }
 
 func (x *UsageSummaryResponse) GetRequestId() string {
@@ -11843,7 +11380,7 @@ type UsageRatesRefreshRequest struct {
 
 func (x *UsageRatesRefreshRequest) Reset() {
 	*x = UsageRatesRefreshRequest{}
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[151]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[146]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11855,7 +11392,7 @@ func (x *UsageRatesRefreshRequest) String() string {
 func (*UsageRatesRefreshRequest) ProtoMessage() {}
 
 func (x *UsageRatesRefreshRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[151]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[146]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11868,7 +11405,7 @@ func (x *UsageRatesRefreshRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UsageRatesRefreshRequest.ProtoReflect.Descriptor instead.
 func (*UsageRatesRefreshRequest) Descriptor() ([]byte, []int) {
-	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{151}
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{146}
 }
 
 func (x *UsageRatesRefreshRequest) GetRequestId() string {
@@ -11902,7 +11439,7 @@ type UsageRatesRefreshResponse struct {
 
 func (x *UsageRatesRefreshResponse) Reset() {
 	*x = UsageRatesRefreshResponse{}
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[152]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[147]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11914,7 +11451,7 @@ func (x *UsageRatesRefreshResponse) String() string {
 func (*UsageRatesRefreshResponse) ProtoMessage() {}
 
 func (x *UsageRatesRefreshResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[152]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[147]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11927,7 +11464,7 @@ func (x *UsageRatesRefreshResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UsageRatesRefreshResponse.ProtoReflect.Descriptor instead.
 func (*UsageRatesRefreshResponse) Descriptor() ([]byte, []int) {
-	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{152}
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{147}
 }
 
 func (x *UsageRatesRefreshResponse) GetRequestId() string {
@@ -11961,7 +11498,7 @@ type UsageLimitsRequest struct {
 
 func (x *UsageLimitsRequest) Reset() {
 	*x = UsageLimitsRequest{}
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[153]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[148]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -11973,7 +11510,7 @@ func (x *UsageLimitsRequest) String() string {
 func (*UsageLimitsRequest) ProtoMessage() {}
 
 func (x *UsageLimitsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[153]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[148]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -11986,7 +11523,7 @@ func (x *UsageLimitsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UsageLimitsRequest.ProtoReflect.Descriptor instead.
 func (*UsageLimitsRequest) Descriptor() ([]byte, []int) {
-	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{153}
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{148}
 }
 
 func (x *UsageLimitsRequest) GetRequestId() string {
@@ -12023,7 +11560,7 @@ type UsageProviderLimits struct {
 
 func (x *UsageProviderLimits) Reset() {
 	*x = UsageProviderLimits{}
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[154]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[149]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12035,7 +11572,7 @@ func (x *UsageProviderLimits) String() string {
 func (*UsageProviderLimits) ProtoMessage() {}
 
 func (x *UsageProviderLimits) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[154]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[149]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12048,7 +11585,7 @@ func (x *UsageProviderLimits) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UsageProviderLimits.ProtoReflect.Descriptor instead.
 func (*UsageProviderLimits) Descriptor() ([]byte, []int) {
-	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{154}
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{149}
 }
 
 func (x *UsageProviderLimits) GetProvider() string {
@@ -12090,7 +11627,7 @@ type UsageLimitsResponse struct {
 
 func (x *UsageLimitsResponse) Reset() {
 	*x = UsageLimitsResponse{}
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[155]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[150]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12102,7 +11639,7 @@ func (x *UsageLimitsResponse) String() string {
 func (*UsageLimitsResponse) ProtoMessage() {}
 
 func (x *UsageLimitsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[155]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[150]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12115,7 +11652,7 @@ func (x *UsageLimitsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UsageLimitsResponse.ProtoReflect.Descriptor instead.
 func (*UsageLimitsResponse) Descriptor() ([]byte, []int) {
-	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{155}
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{150}
 }
 
 func (x *UsageLimitsResponse) GetRequestId() string {
@@ -12156,7 +11693,7 @@ type UsagePricesSaveRequest struct {
 
 func (x *UsagePricesSaveRequest) Reset() {
 	*x = UsagePricesSaveRequest{}
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[156]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[151]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12168,7 +11705,7 @@ func (x *UsagePricesSaveRequest) String() string {
 func (*UsagePricesSaveRequest) ProtoMessage() {}
 
 func (x *UsagePricesSaveRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[156]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[151]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12181,7 +11718,7 @@ func (x *UsagePricesSaveRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UsagePricesSaveRequest.ProtoReflect.Descriptor instead.
 func (*UsagePricesSaveRequest) Descriptor() ([]byte, []int) {
-	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{156}
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{151}
 }
 
 func (x *UsagePricesSaveRequest) GetRequestId() string {
@@ -12224,7 +11761,7 @@ type UsagePricesSaveResponse struct {
 
 func (x *UsagePricesSaveResponse) Reset() {
 	*x = UsagePricesSaveResponse{}
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[157]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[152]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12236,7 +11773,7 @@ func (x *UsagePricesSaveResponse) String() string {
 func (*UsagePricesSaveResponse) ProtoMessage() {}
 
 func (x *UsagePricesSaveResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_host_v1_operations_proto_msgTypes[157]
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[152]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12249,7 +11786,7 @@ func (x *UsagePricesSaveResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UsagePricesSaveResponse.ProtoReflect.Descriptor instead.
 func (*UsagePricesSaveResponse) Descriptor() ([]byte, []int) {
-	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{157}
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{152}
 }
 
 func (x *UsagePricesSaveResponse) GetRequestId() string {
@@ -13099,70 +12636,7 @@ const file_vibesys_host_v1_operations_proto_rawDesc = "" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01\x18\x80\x01R\trequestId\x12C\n" +
-	"\adigests\x18\x02 \x03(\v2\x1f.vibesys.host.v1.RunDigestEntryB\b\xbaH\x05\x92\x01\x02\x10dR\adigests\"\xf3\x01\n" +
-	"\n" +
-	"TokenTally\x12\x19\n" +
-	"\x05input\x18\x01 \x01(\x04H\x00R\x05input\x88\x01\x01\x12\"\n" +
-	"\n" +
-	"cache_read\x18\x02 \x01(\x04H\x01R\tcacheRead\x88\x01\x01\x12$\n" +
-	"\vcache_write\x18\x03 \x01(\x04H\x02R\n" +
-	"cacheWrite\x88\x01\x01\x12\x1b\n" +
-	"\x06output\x18\x04 \x01(\x04H\x03R\x06output\x88\x01\x01\x12!\n" +
-	"\treasoning\x18\x05 \x01(\x04H\x04R\treasoning\x88\x01\x01B\b\n" +
-	"\x06_inputB\r\n" +
-	"\v_cache_readB\x0e\n" +
-	"\f_cache_writeB\t\n" +
-	"\a_outputB\f\n" +
-	"\n" +
-	"_reasoning\"\xcc\x01\n" +
-	"\bRunSpend\x12?\n" +
-	"\x06run_id\x18\x01 \x01(\tB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$R\x05runId\x12\"\n" +
-	"\x04task\x18\x02 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04H\x00R\x04task\x88\x01\x01\x12+\n" +
-	"\bcost_usd\x18\x03 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\acostUsd\x12%\n" +
-	"\x0eunpriced_turns\x18\x04 \x01(\rR\runpricedTurnsB\a\n" +
-	"\x05_task\"\x86\x02\n" +
-	"\n" +
-	"AgentSpend\x12!\n" +
-	"\x04role\x18\x01 \x01(\tB\b\xbaH\x05r\x03(\x80 H\x00R\x04role\x88\x01\x01\x12'\n" +
-	"\aharness\x18\x02 \x01(\tB\b\xbaH\x05r\x03(\x80 H\x01R\aharness\x88\x01\x01\x12#\n" +
-	"\x05model\x18\x03 \x01(\tB\b\xbaH\x05r\x03(\x80 H\x02R\x05model\x88\x01\x01\x12+\n" +
-	"\bcost_usd\x18\x04 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\acostUsd\x12\x14\n" +
-	"\x05turns\x18\x05 \x01(\rR\x05turns\x12%\n" +
-	"\x0eunpriced_turns\x18\x06 \x01(\rR\runpricedTurnsB\a\n" +
-	"\x05_roleB\n" +
-	"\n" +
-	"\b_harnessB\b\n" +
-	"\x06_model\"\xce\x03\n" +
-	"\x12UsageWindowRequest\x12)\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tB\n" +
-	"\xbaH\ar\x05\x10\x01\x18\x80\x01R\trequestId\x12$\n" +
-	"\aproject\x18\x02 \x01(\tB\n" +
-	"\xbaH\ar\x05\x10\x01(\x80 R\aproject\x12J\n" +
-	"\arun_ids\x18\x03 \x03(\tB1\xbaH.\x92\x01+\x10d\x18\x01\"%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$R\x06runIds\x128\n" +
-	"\x05since\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x05since\x128\n" +
-	"\x05until\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x05until:\xa6\x01\xbaH\xa2\x01\x1a\x9f\x01\n" +
-	"\x13usage_window.bounds\x12<since must be before until, and the window at most 336 hours\x1aJthis.since < this.until && this.until - this.since <= duration('1209600s')\"\x93\x06\n" +
-	"\x13UsageWindowResponse\x12)\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tB\n" +
-	"\xbaH\ar\x05\x10\x01\x18\x80\x01R\trequestId\x128\n" +
-	"\x05since\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x05since\x128\n" +
-	"\x05until\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x05until\x12-\n" +
-	"\tspent_usd\x18\x04 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\bspentUsd\x12=\n" +
-	"\x12spend_per_hour_usd\x18\x05 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\x0fspendPerHourUsd\x12;\n" +
-	"\x06tokens\x18\x06 \x01(\v2\x1b.vibesys.host.v1.TokenTallyB\x06\xbaH\x03\xc8\x01\x01R\x06tokens\x12\x14\n" +
-	"\x05turns\x18\a \x01(\rR\x05turns\x12%\n" +
-	"\x0eunpriced_turns\x18\b \x01(\rR\runpricedTurns\x12#\n" +
-	"\runtimed_turns\x18\t \x01(\rR\funtimedTurns\x12\x1b\n" +
-	"\tnew_bests\x18\n" +
-	" \x01(\rR\bnewBests\x12G\n" +
-	"\x15cost_per_new_best_usd\x18\v \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00H\x00R\x11costPerNewBestUsd\x88\x01\x01\x12:\n" +
-	"\x06by_run\x18\f \x03(\v2\x19.vibesys.host.v1.RunSpendB\b\xbaH\x05\x92\x01\x02\x10dR\x05byRun\x12@\n" +
-	"\bby_agent\x18\r \x03(\v2\x1b.vibesys.host.v1.AgentSpendB\b\xbaH\x05\x92\x01\x02\x10@R\abyAgent\x12%\n" +
-	"\x0eagents_omitted\x18\x0e \x01(\rR\ragentsOmitted\x12+\n" +
-	"\fmissing_runs\x18\x0f \x03(\tB\b\xbaH\x05\x92\x01\x02\x10dR\vmissingRunsB\x18\n" +
-	"\x16_cost_per_new_best_usd\"\xee\x02\n" +
+	"\adigests\x18\x02 \x03(\v2\x1f.vibesys.host.v1.RunDigestEntryB\b\xbaH\x05\x92\x01\x02\x10dR\adigests\"\xee\x02\n" +
 	"\x13UsageSummaryRequest\x12)\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tB\n" +
@@ -13514,7 +12988,7 @@ func file_vibesys_host_v1_operations_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_host_v1_operations_proto_enumTypes = make([]protoimpl.EnumInfo, 27)
-var file_vibesys_host_v1_operations_proto_msgTypes = make([]protoimpl.MessageInfo, 160)
+var file_vibesys_host_v1_operations_proto_msgTypes = make([]protoimpl.MessageInfo, 155)
 var file_vibesys_host_v1_operations_proto_goTypes = []any{
 	(Maker)(0),                                   // 0: vibesys.host.v1.Maker
 	(AcceleratorVendor)(0),                       // 1: vibesys.host.v1.AcceleratorVendor
@@ -13678,46 +13152,41 @@ var file_vibesys_host_v1_operations_proto_goTypes = []any{
 	(*RunDigestEntry)(nil),                       // 159: vibesys.host.v1.RunDigestEntry
 	(*ListRunDigestsRequest)(nil),                // 160: vibesys.host.v1.ListRunDigestsRequest
 	(*ListRunDigestsResponse)(nil),               // 161: vibesys.host.v1.ListRunDigestsResponse
-	(*TokenTally)(nil),                           // 162: vibesys.host.v1.TokenTally
-	(*RunSpend)(nil),                             // 163: vibesys.host.v1.RunSpend
-	(*AgentSpend)(nil),                           // 164: vibesys.host.v1.AgentSpend
-	(*UsageWindowRequest)(nil),                   // 165: vibesys.host.v1.UsageWindowRequest
-	(*UsageWindowResponse)(nil),                  // 166: vibesys.host.v1.UsageWindowResponse
-	(*UsageSummaryRequest)(nil),                  // 167: vibesys.host.v1.UsageSummaryRequest
-	(*UsageSeriesKey)(nil),                       // 168: vibesys.host.v1.UsageSeriesKey
-	(*UsageSeries)(nil),                          // 169: vibesys.host.v1.UsageSeries
-	(*UsageBucketCount)(nil),                     // 170: vibesys.host.v1.UsageBucketCount
-	(*UsageBucketBests)(nil),                     // 171: vibesys.host.v1.UsageBucketBests
-	(*UsageProviderCost)(nil),                    // 172: vibesys.host.v1.UsageProviderCost
-	(*UsageRunRow)(nil),                          // 173: vibesys.host.v1.UsageRunRow
-	(*UsageAgentRow)(nil),                        // 174: vibesys.host.v1.UsageAgentRow
-	(*UsageSource)(nil),                          // 175: vibesys.host.v1.UsageSource
-	(*UsageResolvedRate)(nil),                    // 176: vibesys.host.v1.UsageResolvedRate
-	(*UsageSummaryResponse)(nil),                 // 177: vibesys.host.v1.UsageSummaryResponse
-	(*UsageRatesRefreshRequest)(nil),             // 178: vibesys.host.v1.UsageRatesRefreshRequest
-	(*UsageRatesRefreshResponse)(nil),            // 179: vibesys.host.v1.UsageRatesRefreshResponse
-	(*UsageLimitsRequest)(nil),                   // 180: vibesys.host.v1.UsageLimitsRequest
-	(*UsageProviderLimits)(nil),                  // 181: vibesys.host.v1.UsageProviderLimits
-	(*UsageLimitsResponse)(nil),                  // 182: vibesys.host.v1.UsageLimitsResponse
-	(*UsagePricesSaveRequest)(nil),               // 183: vibesys.host.v1.UsagePricesSaveRequest
-	(*UsagePricesSaveResponse)(nil),              // 184: vibesys.host.v1.UsagePricesSaveResponse
-	nil,                                          // 185: vibesys.host.v1.MachineDescription.HarnessCliNamesEntry
-	nil,                                          // 186: vibesys.host.v1.PreflightRunRequestAgents.ItemsEntry
-	(*timestamppb.Timestamp)(nil),                // 187: google.protobuf.Timestamp
-	(*v1.RunProcess)(nil),                        // 188: vibesys.store.v1.RunProcess
-	(UsageOrigin)(0),                             // 189: vibesys.host.v1.UsageOrigin
-	(v1.UsageSpeed)(0),                           // 190: vibesys.store.v1.UsageSpeed
-	(UsageEstimateSource)(0),                     // 191: vibesys.host.v1.UsageEstimateSource
-	(UsageSourceKind)(0),                         // 192: vibesys.host.v1.UsageSourceKind
-	(UsageSourceStatus)(0),                       // 193: vibesys.host.v1.UsageSourceStatus
-	(*UsageRate)(nil),                            // 194: vibesys.host.v1.UsageRate
-	(*UsagePricing)(nil),                         // 195: vibesys.host.v1.UsagePricing
-	(*UsagePriceBook)(nil),                       // 196: vibesys.host.v1.UsagePriceBook
-	(UsagePricesStatus)(0),                       // 197: vibesys.host.v1.UsagePricesStatus
-	(*UsageAccountLimits)(nil),                   // 198: vibesys.host.v1.UsageAccountLimits
-	(UsageLimitsUnavailable)(0),                  // 199: vibesys.host.v1.UsageLimitsUnavailable
-	(*UsageRateOverride)(nil),                    // 200: vibesys.host.v1.UsageRateOverride
-	(*UsageAlias)(nil),                           // 201: vibesys.host.v1.UsageAlias
+	(*UsageSummaryRequest)(nil),                  // 162: vibesys.host.v1.UsageSummaryRequest
+	(*UsageSeriesKey)(nil),                       // 163: vibesys.host.v1.UsageSeriesKey
+	(*UsageSeries)(nil),                          // 164: vibesys.host.v1.UsageSeries
+	(*UsageBucketCount)(nil),                     // 165: vibesys.host.v1.UsageBucketCount
+	(*UsageBucketBests)(nil),                     // 166: vibesys.host.v1.UsageBucketBests
+	(*UsageProviderCost)(nil),                    // 167: vibesys.host.v1.UsageProviderCost
+	(*UsageRunRow)(nil),                          // 168: vibesys.host.v1.UsageRunRow
+	(*UsageAgentRow)(nil),                        // 169: vibesys.host.v1.UsageAgentRow
+	(*UsageSource)(nil),                          // 170: vibesys.host.v1.UsageSource
+	(*UsageResolvedRate)(nil),                    // 171: vibesys.host.v1.UsageResolvedRate
+	(*UsageSummaryResponse)(nil),                 // 172: vibesys.host.v1.UsageSummaryResponse
+	(*UsageRatesRefreshRequest)(nil),             // 173: vibesys.host.v1.UsageRatesRefreshRequest
+	(*UsageRatesRefreshResponse)(nil),            // 174: vibesys.host.v1.UsageRatesRefreshResponse
+	(*UsageLimitsRequest)(nil),                   // 175: vibesys.host.v1.UsageLimitsRequest
+	(*UsageProviderLimits)(nil),                  // 176: vibesys.host.v1.UsageProviderLimits
+	(*UsageLimitsResponse)(nil),                  // 177: vibesys.host.v1.UsageLimitsResponse
+	(*UsagePricesSaveRequest)(nil),               // 178: vibesys.host.v1.UsagePricesSaveRequest
+	(*UsagePricesSaveResponse)(nil),              // 179: vibesys.host.v1.UsagePricesSaveResponse
+	nil,                                          // 180: vibesys.host.v1.MachineDescription.HarnessCliNamesEntry
+	nil,                                          // 181: vibesys.host.v1.PreflightRunRequestAgents.ItemsEntry
+	(*timestamppb.Timestamp)(nil),                // 182: google.protobuf.Timestamp
+	(*v1.RunProcess)(nil),                        // 183: vibesys.store.v1.RunProcess
+	(UsageOrigin)(0),                             // 184: vibesys.host.v1.UsageOrigin
+	(v1.UsageSpeed)(0),                           // 185: vibesys.store.v1.UsageSpeed
+	(UsageEstimateSource)(0),                     // 186: vibesys.host.v1.UsageEstimateSource
+	(UsageSourceKind)(0),                         // 187: vibesys.host.v1.UsageSourceKind
+	(UsageSourceStatus)(0),                       // 188: vibesys.host.v1.UsageSourceStatus
+	(*UsageRate)(nil),                            // 189: vibesys.host.v1.UsageRate
+	(*UsagePricing)(nil),                         // 190: vibesys.host.v1.UsagePricing
+	(*UsagePriceBook)(nil),                       // 191: vibesys.host.v1.UsagePriceBook
+	(UsagePricesStatus)(0),                       // 192: vibesys.host.v1.UsagePricesStatus
+	(*UsageAccountLimits)(nil),                   // 193: vibesys.host.v1.UsageAccountLimits
+	(UsageLimitsUnavailable)(0),                  // 194: vibesys.host.v1.UsageLimitsUnavailable
+	(*UsageRateOverride)(nil),                    // 195: vibesys.host.v1.UsageRateOverride
+	(*UsageAlias)(nil),                           // 196: vibesys.host.v1.UsageAlias
 }
 var file_vibesys_host_v1_operations_proto_depIdxs = []int32{
 	28,  // 0: vibesys.host.v1.TaskList.tasks:type_name -> vibesys.host.v1.TaskSummary
@@ -13740,7 +13209,7 @@ var file_vibesys_host_v1_operations_proto_depIdxs = []int32{
 	44,  // 17: vibesys.host.v1.MachineDescription.checkout:type_name -> vibesys.host.v1.MachineCheckout
 	43,  // 18: vibesys.host.v1.MachineDescription.hardware:type_name -> vibesys.host.v1.Hardware
 	98,  // 19: vibesys.host.v1.MachineDescription.docker:type_name -> vibesys.host.v1.MachineDescriptionDocker
-	185, // 20: vibesys.host.v1.MachineDescription.harness_cli_names:type_name -> vibesys.host.v1.MachineDescription.HarnessCliNamesEntry
+	180, // 20: vibesys.host.v1.MachineDescription.harness_cli_names:type_name -> vibesys.host.v1.MachineDescription.HarnessCliNamesEntry
 	46,  // 21: vibesys.host.v1.MachineDescription.runs:type_name -> vibesys.host.v1.RunCounts
 	5,   // 22: vibesys.host.v1.ClusterHardware.accelerator:type_name -> vibesys.host.v1.Accelerator
 	49,  // 23: vibesys.host.v1.ComputeSettings.clusters:type_name -> vibesys.host.v1.ListedCluster
@@ -13812,7 +13281,7 @@ var file_vibesys_host_v1_operations_proto_depIdxs = []int32{
 	55,  // 89: vibesys.host.v1.MeasurementTargetMisfitTarget.modal_target:type_name -> vibesys.host.v1.ModalTarget
 	59,  // 90: vibesys.host.v1.MeasurementTargetNotConfiguredTarget.slurm_target:type_name -> vibesys.host.v1.SlurmTarget
 	55,  // 91: vibesys.host.v1.MeasurementTargetNotConfiguredTarget.modal_target:type_name -> vibesys.host.v1.ModalTarget
-	186, // 92: vibesys.host.v1.PreflightRunRequestAgents.items:type_name -> vibesys.host.v1.PreflightRunRequestAgents.ItemsEntry
+	181, // 92: vibesys.host.v1.PreflightRunRequestAgents.items:type_name -> vibesys.host.v1.PreflightRunRequestAgents.ItemsEntry
 	58,  // 93: vibesys.host.v1.PreflightRunRequestMeasureOn.same_machine:type_name -> vibesys.host.v1.SameMachine
 	59,  // 94: vibesys.host.v1.PreflightRunRequestMeasureOn.slurm_target:type_name -> vibesys.host.v1.SlurmTarget
 	55,  // 95: vibesys.host.v1.PreflightRunRequestMeasureOn.modal_target:type_name -> vibesys.host.v1.ModalTarget
@@ -13844,11 +13313,11 @@ var file_vibesys_host_v1_operations_proto_depIdxs = []int32{
 	123, // 121: vibesys.host.v1.StartRunRequest.measure_on:type_name -> vibesys.host.v1.StartRunMeasure
 	115, // 122: vibesys.host.v1.LoginResponse.started:type_name -> vibesys.host.v1.LoginStartedBody
 	116, // 123: vibesys.host.v1.LoginResponse.unavailable:type_name -> vibesys.host.v1.LoginUnavailableBody
-	187, // 124: vibesys.host.v1.SavedRun.created_at:type_name -> google.protobuf.Timestamp
+	182, // 124: vibesys.host.v1.SavedRun.created_at:type_name -> google.protobuf.Timestamp
 	19,  // 125: vibesys.host.v1.SavedRun.imported:type_name -> vibesys.host.v1.SavedRunImport
 	143, // 126: vibesys.host.v1.StreamSavedRunsResponse.runs:type_name -> vibesys.host.v1.SavedRun
-	188, // 127: vibesys.host.v1.TerminateRunRequest.expected_process:type_name -> vibesys.store.v1.RunProcess
-	187, // 128: vibesys.host.v1.TerminateRunRequest.deadline:type_name -> google.protobuf.Timestamp
+	183, // 127: vibesys.host.v1.TerminateRunRequest.expected_process:type_name -> vibesys.store.v1.RunProcess
+	182, // 128: vibesys.host.v1.TerminateRunRequest.deadline:type_name -> google.protobuf.Timestamp
 	20,  // 129: vibesys.host.v1.TerminateRunResponse.outcome:type_name -> vibesys.host.v1.TerminateRunOutcome
 	148, // 130: vibesys.host.v1.AgentLoginHow.account:type_name -> vibesys.host.v1.LoginAccount
 	149, // 131: vibesys.host.v1.AgentLoginHow.api_key:type_name -> vibesys.host.v1.LoginApiKey
@@ -13857,68 +13326,61 @@ var file_vibesys_host_v1_operations_proto_depIdxs = []int32{
 	151, // 134: vibesys.host.v1.ListAgentLoginsResponse.logins:type_name -> vibesys.host.v1.AgentLogin
 	22,  // 135: vibesys.host.v1.RunEnding.outcome:type_name -> vibesys.host.v1.RunEndOutcome
 	24,  // 136: vibesys.host.v1.IdeaPoint.verdict:type_name -> vibesys.host.v1.IdeaVerdict
-	187, // 137: vibesys.host.v1.IdeaPoint.at:type_name -> google.protobuf.Timestamp
+	182, // 137: vibesys.host.v1.IdeaPoint.at:type_name -> google.protobuf.Timestamp
 	155, // 138: vibesys.host.v1.RunDashboard.points:type_name -> vibesys.host.v1.IdeaPoint
-	187, // 139: vibesys.host.v1.RunDashboard.last_event_at:type_name -> google.protobuf.Timestamp
+	182, // 139: vibesys.host.v1.RunDashboard.last_event_at:type_name -> google.protobuf.Timestamp
 	156, // 140: vibesys.host.v1.RunDashboard.best:type_name -> vibesys.host.v1.BestReading
 	25,  // 141: vibesys.host.v1.RunDashboard.attention:type_name -> vibesys.host.v1.RunAttention
 	154, // 142: vibesys.host.v1.RunDigest.ending:type_name -> vibesys.host.v1.RunEnding
 	23,  // 143: vibesys.host.v1.RunDigest.closing:type_name -> vibesys.host.v1.RunClosing
 	157, // 144: vibesys.host.v1.RunDigest.dashboard:type_name -> vibesys.host.v1.RunDashboard
-	187, // 145: vibesys.host.v1.RunDigestEntry.created_at:type_name -> google.protobuf.Timestamp
+	182, // 145: vibesys.host.v1.RunDigestEntry.created_at:type_name -> google.protobuf.Timestamp
 	158, // 146: vibesys.host.v1.RunDigestEntry.digest:type_name -> vibesys.host.v1.RunDigest
 	159, // 147: vibesys.host.v1.ListRunDigestsResponse.digests:type_name -> vibesys.host.v1.RunDigestEntry
-	187, // 148: vibesys.host.v1.UsageWindowRequest.since:type_name -> google.protobuf.Timestamp
-	187, // 149: vibesys.host.v1.UsageWindowRequest.until:type_name -> google.protobuf.Timestamp
-	187, // 150: vibesys.host.v1.UsageWindowResponse.since:type_name -> google.protobuf.Timestamp
-	187, // 151: vibesys.host.v1.UsageWindowResponse.until:type_name -> google.protobuf.Timestamp
-	162, // 152: vibesys.host.v1.UsageWindowResponse.tokens:type_name -> vibesys.host.v1.TokenTally
-	163, // 153: vibesys.host.v1.UsageWindowResponse.by_run:type_name -> vibesys.host.v1.RunSpend
-	164, // 154: vibesys.host.v1.UsageWindowResponse.by_agent:type_name -> vibesys.host.v1.AgentSpend
-	187, // 155: vibesys.host.v1.UsageSummaryRequest.edges:type_name -> google.protobuf.Timestamp
-	187, // 156: vibesys.host.v1.UsageSummaryRequest.now:type_name -> google.protobuf.Timestamp
-	189, // 157: vibesys.host.v1.UsageSeriesKey.origin:type_name -> vibesys.host.v1.UsageOrigin
-	190, // 158: vibesys.host.v1.UsageSeriesKey.speed:type_name -> vibesys.store.v1.UsageSpeed
-	191, // 159: vibesys.host.v1.UsageSeriesKey.source:type_name -> vibesys.host.v1.UsageEstimateSource
-	168, // 160: vibesys.host.v1.UsageSeries.key:type_name -> vibesys.host.v1.UsageSeriesKey
-	172, // 161: vibesys.host.v1.UsageRunRow.costs:type_name -> vibesys.host.v1.UsageProviderCost
-	172, // 162: vibesys.host.v1.UsageAgentRow.costs:type_name -> vibesys.host.v1.UsageProviderCost
-	192, // 163: vibesys.host.v1.UsageSource.kind:type_name -> vibesys.host.v1.UsageSourceKind
-	193, // 164: vibesys.host.v1.UsageSource.status:type_name -> vibesys.host.v1.UsageSourceStatus
-	190, // 165: vibesys.host.v1.UsageResolvedRate.speed:type_name -> vibesys.store.v1.UsageSpeed
-	194, // 166: vibesys.host.v1.UsageResolvedRate.rate:type_name -> vibesys.host.v1.UsageRate
-	191, // 167: vibesys.host.v1.UsageResolvedRate.source:type_name -> vibesys.host.v1.UsageEstimateSource
-	169, // 168: vibesys.host.v1.UsageSummaryResponse.series:type_name -> vibesys.host.v1.UsageSeries
-	170, // 169: vibesys.host.v1.UsageSummaryResponse.counts:type_name -> vibesys.host.v1.UsageBucketCount
-	171, // 170: vibesys.host.v1.UsageSummaryResponse.bests:type_name -> vibesys.host.v1.UsageBucketBests
-	173, // 171: vibesys.host.v1.UsageSummaryResponse.runs:type_name -> vibesys.host.v1.UsageRunRow
-	172, // 172: vibesys.host.v1.UsageSummaryResponse.runs_other:type_name -> vibesys.host.v1.UsageProviderCost
-	174, // 173: vibesys.host.v1.UsageSummaryResponse.agents:type_name -> vibesys.host.v1.UsageAgentRow
-	172, // 174: vibesys.host.v1.UsageSummaryResponse.agents_other:type_name -> vibesys.host.v1.UsageProviderCost
-	172, // 175: vibesys.host.v1.UsageSummaryResponse.recent:type_name -> vibesys.host.v1.UsageProviderCost
-	175, // 176: vibesys.host.v1.UsageSummaryResponse.sources:type_name -> vibesys.host.v1.UsageSource
-	195, // 177: vibesys.host.v1.UsageSummaryResponse.pricing:type_name -> vibesys.host.v1.UsagePricing
-	196, // 178: vibesys.host.v1.UsageSummaryResponse.prices:type_name -> vibesys.host.v1.UsagePriceBook
-	176, // 179: vibesys.host.v1.UsageSummaryResponse.rates:type_name -> vibesys.host.v1.UsageResolvedRate
-	187, // 180: vibesys.host.v1.UsageSummaryResponse.read_at:type_name -> google.protobuf.Timestamp
-	197, // 181: vibesys.host.v1.UsageSummaryResponse.prices_status:type_name -> vibesys.host.v1.UsagePricesStatus
-	187, // 182: vibesys.host.v1.UsageRatesRefreshRequest.now:type_name -> google.protobuf.Timestamp
-	195, // 183: vibesys.host.v1.UsageRatesRefreshResponse.pricing:type_name -> vibesys.host.v1.UsagePricing
-	187, // 184: vibesys.host.v1.UsageLimitsRequest.now:type_name -> google.protobuf.Timestamp
-	26,  // 185: vibesys.host.v1.UsageProviderLimits.status:type_name -> vibesys.host.v1.UsageLimitsStatus
-	198, // 186: vibesys.host.v1.UsageProviderLimits.limits:type_name -> vibesys.host.v1.UsageAccountLimits
-	199, // 187: vibesys.host.v1.UsageProviderLimits.unavailable:type_name -> vibesys.host.v1.UsageLimitsUnavailable
-	181, // 188: vibesys.host.v1.UsageLimitsResponse.providers:type_name -> vibesys.host.v1.UsageProviderLimits
-	187, // 189: vibesys.host.v1.UsageLimitsResponse.read_at:type_name -> google.protobuf.Timestamp
-	200, // 190: vibesys.host.v1.UsagePricesSaveRequest.overrides:type_name -> vibesys.host.v1.UsageRateOverride
-	201, // 191: vibesys.host.v1.UsagePricesSaveRequest.aliases:type_name -> vibesys.host.v1.UsageAlias
-	196, // 192: vibesys.host.v1.UsagePricesSaveResponse.prices:type_name -> vibesys.host.v1.UsagePriceBook
-	54,  // 193: vibesys.host.v1.PreflightRunRequestAgents.ItemsEntry.value:type_name -> vibesys.host.v1.HarnessChoice
-	194, // [194:194] is the sub-list for method output_type
-	194, // [194:194] is the sub-list for method input_type
-	194, // [194:194] is the sub-list for extension type_name
-	194, // [194:194] is the sub-list for extension extendee
-	0,   // [0:194] is the sub-list for field type_name
+	182, // 148: vibesys.host.v1.UsageSummaryRequest.edges:type_name -> google.protobuf.Timestamp
+	182, // 149: vibesys.host.v1.UsageSummaryRequest.now:type_name -> google.protobuf.Timestamp
+	184, // 150: vibesys.host.v1.UsageSeriesKey.origin:type_name -> vibesys.host.v1.UsageOrigin
+	185, // 151: vibesys.host.v1.UsageSeriesKey.speed:type_name -> vibesys.store.v1.UsageSpeed
+	186, // 152: vibesys.host.v1.UsageSeriesKey.source:type_name -> vibesys.host.v1.UsageEstimateSource
+	163, // 153: vibesys.host.v1.UsageSeries.key:type_name -> vibesys.host.v1.UsageSeriesKey
+	167, // 154: vibesys.host.v1.UsageRunRow.costs:type_name -> vibesys.host.v1.UsageProviderCost
+	167, // 155: vibesys.host.v1.UsageAgentRow.costs:type_name -> vibesys.host.v1.UsageProviderCost
+	187, // 156: vibesys.host.v1.UsageSource.kind:type_name -> vibesys.host.v1.UsageSourceKind
+	188, // 157: vibesys.host.v1.UsageSource.status:type_name -> vibesys.host.v1.UsageSourceStatus
+	185, // 158: vibesys.host.v1.UsageResolvedRate.speed:type_name -> vibesys.store.v1.UsageSpeed
+	189, // 159: vibesys.host.v1.UsageResolvedRate.rate:type_name -> vibesys.host.v1.UsageRate
+	186, // 160: vibesys.host.v1.UsageResolvedRate.source:type_name -> vibesys.host.v1.UsageEstimateSource
+	164, // 161: vibesys.host.v1.UsageSummaryResponse.series:type_name -> vibesys.host.v1.UsageSeries
+	165, // 162: vibesys.host.v1.UsageSummaryResponse.counts:type_name -> vibesys.host.v1.UsageBucketCount
+	166, // 163: vibesys.host.v1.UsageSummaryResponse.bests:type_name -> vibesys.host.v1.UsageBucketBests
+	168, // 164: vibesys.host.v1.UsageSummaryResponse.runs:type_name -> vibesys.host.v1.UsageRunRow
+	167, // 165: vibesys.host.v1.UsageSummaryResponse.runs_other:type_name -> vibesys.host.v1.UsageProviderCost
+	169, // 166: vibesys.host.v1.UsageSummaryResponse.agents:type_name -> vibesys.host.v1.UsageAgentRow
+	167, // 167: vibesys.host.v1.UsageSummaryResponse.agents_other:type_name -> vibesys.host.v1.UsageProviderCost
+	167, // 168: vibesys.host.v1.UsageSummaryResponse.recent:type_name -> vibesys.host.v1.UsageProviderCost
+	170, // 169: vibesys.host.v1.UsageSummaryResponse.sources:type_name -> vibesys.host.v1.UsageSource
+	190, // 170: vibesys.host.v1.UsageSummaryResponse.pricing:type_name -> vibesys.host.v1.UsagePricing
+	191, // 171: vibesys.host.v1.UsageSummaryResponse.prices:type_name -> vibesys.host.v1.UsagePriceBook
+	171, // 172: vibesys.host.v1.UsageSummaryResponse.rates:type_name -> vibesys.host.v1.UsageResolvedRate
+	182, // 173: vibesys.host.v1.UsageSummaryResponse.read_at:type_name -> google.protobuf.Timestamp
+	192, // 174: vibesys.host.v1.UsageSummaryResponse.prices_status:type_name -> vibesys.host.v1.UsagePricesStatus
+	182, // 175: vibesys.host.v1.UsageRatesRefreshRequest.now:type_name -> google.protobuf.Timestamp
+	190, // 176: vibesys.host.v1.UsageRatesRefreshResponse.pricing:type_name -> vibesys.host.v1.UsagePricing
+	182, // 177: vibesys.host.v1.UsageLimitsRequest.now:type_name -> google.protobuf.Timestamp
+	26,  // 178: vibesys.host.v1.UsageProviderLimits.status:type_name -> vibesys.host.v1.UsageLimitsStatus
+	193, // 179: vibesys.host.v1.UsageProviderLimits.limits:type_name -> vibesys.host.v1.UsageAccountLimits
+	194, // 180: vibesys.host.v1.UsageProviderLimits.unavailable:type_name -> vibesys.host.v1.UsageLimitsUnavailable
+	176, // 181: vibesys.host.v1.UsageLimitsResponse.providers:type_name -> vibesys.host.v1.UsageProviderLimits
+	182, // 182: vibesys.host.v1.UsageLimitsResponse.read_at:type_name -> google.protobuf.Timestamp
+	195, // 183: vibesys.host.v1.UsagePricesSaveRequest.overrides:type_name -> vibesys.host.v1.UsageRateOverride
+	196, // 184: vibesys.host.v1.UsagePricesSaveRequest.aliases:type_name -> vibesys.host.v1.UsageAlias
+	191, // 185: vibesys.host.v1.UsagePricesSaveResponse.prices:type_name -> vibesys.host.v1.UsagePriceBook
+	54,  // 186: vibesys.host.v1.PreflightRunRequestAgents.ItemsEntry.value:type_name -> vibesys.host.v1.HarnessChoice
+	187, // [187:187] is the sub-list for method output_type
+	187, // [187:187] is the sub-list for method input_type
+	187, // [187:187] is the sub-list for extension type_name
+	187, // [187:187] is the sub-list for extension extendee
+	0,   // [0:187] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_host_v1_operations_proto_init() }
@@ -14031,19 +13493,15 @@ func file_vibesys_host_v1_operations_proto_init() {
 		(*RunDigestEntry_Digest)(nil),
 		(*RunDigestEntry_Unreadable)(nil),
 	}
-	file_vibesys_host_v1_operations_proto_msgTypes[135].OneofWrappers = []any{}
-	file_vibesys_host_v1_operations_proto_msgTypes[136].OneofWrappers = []any{}
-	file_vibesys_host_v1_operations_proto_msgTypes[137].OneofWrappers = []any{}
-	file_vibesys_host_v1_operations_proto_msgTypes[139].OneofWrappers = []any{}
+	file_vibesys_host_v1_operations_proto_msgTypes[144].OneofWrappers = []any{}
 	file_vibesys_host_v1_operations_proto_msgTypes[149].OneofWrappers = []any{}
-	file_vibesys_host_v1_operations_proto_msgTypes[154].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_host_v1_operations_proto_rawDesc), len(file_vibesys_host_v1_operations_proto_rawDesc)),
 			NumEnums:      27,
-			NumMessages:   160,
+			NumMessages:   155,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

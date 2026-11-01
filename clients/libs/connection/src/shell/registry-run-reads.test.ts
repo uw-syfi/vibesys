@@ -9,7 +9,6 @@ import {
   RunAttention,
   RunClosing,
   RunEndOutcome,
-  UsageWindowResponseSchema,
 } from '@vibesys/proto';
 import fc from 'fast-check';
 import {digestEntries, registryRunReads} from './registry-run-reads.js';
@@ -117,55 +116,6 @@ test('digests ask for the named runs with their tiles and restate each digest in
     },
   });
   expect(answer.runs.get('run-b')).toMatchObject({kind: 'unreadable', message: 'unreadable'});
-});
-
-test('the usage window carries the span to the millisecond and restates the figures', async () => {
-  const {reads, requests} = answering(method => {
-    if (method.case !== 'usageWindow') throw new Error('unexpected read');
-    const {since, until} = method.value;
-    return response({
-      result: {
-        case: 'usageWindow',
-        value: create(UsageWindowResponseSchema, {
-          requestId: method.value.requestId,
-          since,
-          until,
-          spentUsd: 3,
-          spendPerHourUsd: 1.5,
-          tokens: {output: 8n},
-          turns: 2,
-          unpricedTurns: 1,
-          newBests: 2,
-          costPerNewBestUsd: 1.5,
-          byRun: [{runId: 'run-a', costUsd: 3, unpricedTurns: 1}],
-          byAgent: [{role: 'implementer', costUsd: 3, turns: 2}],
-          missingRuns: ['run-z'],
-        }),
-      },
-    });
-  });
-
-  const outcome = await reads.usageWindow(
-    HOST,
-    '/project',
-    ['run-a'],
-    1_790_000_000_123,
-    1_790_003_600_456,
-    new AbortController().signal,
-  );
-
-  expect(requests[0]).toMatchObject({case: 'usageWindow', value: {project: '/project'}});
-  if (outcome.kind !== 'usage') throw new Error('usage required');
-  expect(outcome.usage).toMatchObject({
-    since: 1_790_000_000_123,
-    until: 1_790_003_600_456,
-    spentUsd: 3,
-    tokens: {input: null, output: 8, reasoning: null},
-    newBests: 2,
-    costPerNewBestUsd: 1.5,
-    byAgent: [{role: 'implementer', harness: null, model: null, turns: 2}],
-    missingRuns: ['run-z'],
-  });
 });
 
 test('property: a digest is over exactly when it has an ending or a closing, and no defined value is refused', () => {

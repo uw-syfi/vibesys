@@ -23,7 +23,6 @@ message AcceptedOperation {
     InspectDestinationRequest inspect_destination = 23;
     ListAgentLoginsRequest list_agent_logins = 19;
     ListRunDigestsRequest list_run_digests = 41;
-    UsageWindowRequest usage_window = 42;
     UsageSummaryRequest usage_summary = 44;
     UsageRatesRefreshRequest usage_rates_refresh = 45;
     UsageLimitsRequest usage_limits = 47;
@@ -55,7 +54,6 @@ message OperationResult {
     InspectDestinationResponse inspect_destination = 23;
     ListAgentLoginsResponse list_agent_logins = 19;
     ListRunDigestsResponse list_run_digests = 41;
-    UsageWindowResponse usage_window = 42;
     UsageSummaryResponse usage_summary = 44;
     UsageRatesRefreshResponse usage_rates_refresh = 45;
     UsageLimitsResponse usage_limits = 47;

@@ -118,12 +118,3 @@ export {
   type UsageSummaryOutcome,
   usageSummaryRefusal,
 } from './usage-summary.js';
-export {
-  type AgentSpend,
-  type RunSpend,
-  USAGE_WINDOW_MAX_HOURS,
-  USAGE_WINDOW_MAX_RUNS,
-  type UsageWindowEntry,
-  type UsageWindowOutcome,
-  usageWindowRefusal,
-} from './usage-window.js';
