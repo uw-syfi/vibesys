@@ -6,15 +6,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Mapping
+    from collections.abc import Callable, Mapping
 
     from pydantic import BaseModel
 
     from vs_core.api import CoreState, Request, SchemaRef
     from vs_core.api.testing import Answer, Harness
-    from vs_runtime.api.core import CoreRuntime, ExecutionResult
     from vs_runtime.api.testing import Launch
-    from vs_sim.api.testing import VirtualClock
 
 
 @dataclass(frozen=True)
@@ -33,12 +31,6 @@ class RunSetup:
     A host that resumes a run (the operator's Resume after a pause or a crash) runs this search
     instead of ``new_launch``'s; the first host of a run never does. ``None``: the code does not
     change."""
-    max_concurrent: int = 1
-    """How many requests the loop executes at once."""
-    controlled: bool = False
-    """Whether the loop has an idle run-control channel, as a product run has, so it looks at the
-    shell every control-poll interval while requests run (a world whose agents act on the shell
-    while their turn runs needs it)."""
 
 
 class World(Protocol):
@@ -64,33 +56,11 @@ class World(Protocol):
 class HoldingWorld(Protocol):
     """A world whose far side can hold a request forever: a job queued that nothing ever starts.
 
-    The step loop's host honours it: the effect of a request the world holds began, never ends by
-    itself and seals nothing, and it ends only when the loop cancels it, as a job held pending in a
-    scheduler's queue ends only by a cancel. The production shell has no cancel of a request to
-    hold, so a shell host ignores it.
+    The host honours it: the effect of a request the world holds began, never ends by itself and
+    seals nothing, and it ends only when the loop cancels it, as a job held pending in a
+    scheduler's queue ends only by a cancel.
     """
 
     def holds(self, request: Request) -> bool:
         """Whether the effect of ``request`` stays pending until the loop cancels it."""
-        ...
-
-
-type Enact = Callable[[Request, ExecutionResult], Awaitable[ExecutionResult]]
-"""What happens around an executed request: given the request and the result its executor
-produced, the result the shell is told (after the world's own side effects on the host, such as
-an agent calling a tool server while its turn runs)."""
-
-
-@runtime_checkable
-class HostedWorld(Protocol):
-    """A world that also acts on the host: it hears each host's shell and clock.
-
-    `attach` is called once per host, so a restarted host gets its own, once its `CoreRuntime`
-    and clock exist and before the loop starts. Everything that belongs to a host (a tool server
-    bound to the shell, the clock) is created there and kept in the returned `Enact`, never in
-    the world, because the world is copied at crash points and a host is not.
-    """
-
-    def attach(self, shell: CoreRuntime[Any], clock: VirtualClock) -> Enact | None:
-        """Bind this host's ``shell`` and ``clock``; return how its executed requests are enacted."""
         ...

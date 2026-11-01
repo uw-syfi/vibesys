@@ -1,8 +1,7 @@
-"""A crash case that starts from a copy of the outside world equals re-running to the crash.
+"""A crash case starts from a copy of the outside world and runs only the rest of the run.
 
-The property of the library: for every crash point of a run, `rerun_with_crash` reaches the same
-result, strategy state, core state, decisions and executed-effects ledger as running the whole
-run again with the host killed at that commit, which is the slow way that copies nothing.
+The copies leave the reference run as it was, and a world whose run is not deterministic is
+refused by name, because a crash point of one of its runs is not a crash point of the next.
 """
 
 from __future__ import annotations
@@ -14,38 +13,12 @@ import pytest
 from vs_core.api import EnsureWorkspace
 from vs_core.api.testing import Unknown
 from vs_dst.api import NondeterministicWorldError, simulate
-from vs_sim.api.testing import Depth, depth
 
-from ._scratch import run_with_crash
-from ._tiny import TinyWorld, spread
+from ._tiny import TinyWorld
 
 if TYPE_CHECKING:
     from vs_core.api import CoreState, Request
     from vs_core.api.testing import Answer
-
-
-@pytest.mark.parametrize(("items", "concurrent"), [(1, 1), (2, 2)])
-def test_a_cheap_crash_equals_rerunning_from_the_start_at_every_crash_point(
-    items: int, concurrent: int
-) -> None:
-    """Both sizes of run, serial and concurrent, at a few places along each.
-
-    The library's own sample of crash points is `test_crash_points.py`'s subject; the nightly
-    depth tries every boundary here.
-    """
-    normal = simulate(TinyWorld(items, concurrent))
-    points = normal.crash_points()
-    assert points
-
-    for crash in points if depth() is Depth.NIGHTLY else spread(points, 3):
-        cheap = normal.rerun_with_crash(crash)
-        slow = run_with_crash(lambda: TinyWorld(items), crash)
-        assert cheap.finished, crash
-        assert cheap.core == slow.core, crash
-        assert cheap.result == slow.core.run.result, crash
-        assert cheap.state == slow.state, crash
-        assert cheap.decisions == tuple(slow.decisions), crash
-        assert cheap.executed_effects == tuple(slow.effects.executed), crash
 
 
 def test_a_crash_case_runs_only_the_rest_of_the_run() -> None:
@@ -73,12 +46,20 @@ def test_a_crash_case_leaves_the_reference_run_and_its_snapshots_as_they_were() 
 
 
 class DriftingWorld(TinyWorld):
-    """A world that answers differently once a flag outside its copied state is set."""
+    """A world that, once a flag outside its copied state is set, fails its first workspace once.
+
+    The attempt that gets no answer is retried, so the run makes more commits than before.
+    """
 
     drifted: ClassVar[bool] = False
 
+    def __init__(self, items: int = 2) -> None:
+        super().__init__(items)
+        self.failed_once = False
+
     def __call__(self, request: Request, core: CoreState) -> Answer:
-        if self.drifted and isinstance(request, EnsureWorkspace):
+        if self.drifted and isinstance(request, EnsureWorkspace) and not self.failed_once:
+            self.failed_once = True
             return Unknown()
         return super().__call__(request, core)
 

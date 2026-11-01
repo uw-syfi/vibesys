@@ -87,9 +87,7 @@ async def tiny(ctx: Flow, config: TinyConfig) -> None:
                 ctx.workspaces.keep(workspace, BASELINE, KEPT)
 
 
-def tiny_setup(
-    items: int, max_concurrent: int = 1, patience: float = PATIENCE, *, retain: bool = False
-) -> RunSetup:
+def tiny_setup(items: int, patience: float = PATIENCE, *, retain: bool = False) -> RunSetup:
     """The tiny search over ``items`` items, hosted with no operations."""
     return RunSetup(
         new_launch=lambda: Launch(tiny, TinyConfig(items=items, patience=patience, retain=retain)),
@@ -105,7 +103,6 @@ def tiny_setup(
             envelope_type=RunEnvelope[FlowState],
         ),
         schemas={},
-        max_concurrent=max_concurrent,
     )
 
 
@@ -115,12 +112,11 @@ class TinyWorld:
     def __init__(
         self,
         items: int = 2,
-        max_concurrent: int = 1,
         patience: float = PATIENCE,
         *,
         retain: bool = False,
     ) -> None:
-        self.setup = tiny_setup(items, max_concurrent, patience, retain=retain)
+        self.setup = tiny_setup(items, patience, retain=retain)
         self.workspaces_handed_out = 0
         self.seen: list[str] = []
 

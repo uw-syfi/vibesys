@@ -10,7 +10,6 @@ requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2",
     "vs-core",
-    "vs-project",
     "vs-proto",
     "vs-runlog",
     "vs-runtime",
@@ -25,7 +24,6 @@ vs_dst = ["py.typed"]
 
 [tool.uv.sources]
 vs-core = { workspace = true }
-vs-project = { workspace = true }
 vs-proto = { workspace = true }
 vs-runlog = { workspace = true }
 vs-runtime = { workspace = true }

@@ -36,11 +36,9 @@ from vs_core.api.testing import Harness, Succeeded, sample_limits, sample_retrie
 from vs_core.flows import search
 from vs_dst.api import (
     Action,
-    Hosting,
     Interruption,
     Moment,
     RunSetup,
-    ShellHosting,
     SimulatedRun,
     StepLoopHosting,
     simulate,
@@ -62,16 +60,6 @@ TERMINAL = AttemptPhase.TERMINAL
 
 def fields_of(records: tuple[Record, ...]) -> list[str]:
     return [record.body.field for record in records if record.body is not None]
-
-
-def test_a_run_on_the_step_loop_ends_as_it_does_on_the_shell() -> None:
-    on_step_loop = simulate(TinyWorld(3), STEP_LOOP)
-    on_shell = simulate(TinyWorld(3))
-
-    assert on_step_loop.finished
-    assert on_step_loop.halted is None
-    assert on_step_loop.result == on_shell.result
-    assert len(on_step_loop.executed_effects) == len(on_shell.executed_effects)
 
 
 def test_the_log_of_a_run_starts_with_its_seed_and_ends_with_the_end_of_the_run() -> None:
@@ -245,14 +233,11 @@ def test_a_restart_from_an_older_checkpoint_never_reuses_a_decision_id_the_dead_
             assert settled_twice(interrupted.world) <= interrupted.world.items, point
 
 
-@pytest.mark.parametrize("hosting", [ShellHosting(), STEP_LOOP], ids=["shell", "step-loop"])
-def test_a_resume_on_changed_code_lets_go_of_work_the_new_code_does_not_ask_for(
-    hosting: Hosting,
-) -> None:
+def test_a_resume_on_changed_code_lets_go_of_work_the_new_code_does_not_ask_for() -> None:
     """A run killed or paused anywhere and resumed on code that names its attempts differently ends,
     with every attempt closed: the work the dead flows had in flight and the new code never asks for
     is carried out through its attempt's closure, which frees the slot only once that is done."""
-    normal = simulate(RestartableWorld(4, changed=True), hosting)
+    normal = simulate(RestartableWorld(4, changed=True), STEP_LOOP)
 
     for action in Action:
         for moment in Moment:
@@ -295,13 +280,10 @@ def search_bytes(records: tuple[Record, ...]) -> int:
 
 
 WORLDS = {
-    f"{name}-{label}": (hosting, make)
-    for label, hosting in (("shell", ShellHosting()), ("step-loop", STEP_LOOP))
-    for name, make in (
-        ("tiny", lambda: TinyWorld(3)),
-        ("restartable", lambda: RestartableWorld(4, changed=False)),
-    )
-} | {"retaining-step-loop": (STEP_LOOP, lambda: TinyWorld(2, retain=True))}
+    "tiny-step-loop": lambda: TinyWorld(3),
+    "restartable-step-loop": lambda: RestartableWorld(4, changed=False),
+    "retaining-step-loop": lambda: TinyWorld(2, retain=True),
+}
 
 
 @dataclass(frozen=True)
@@ -316,8 +298,7 @@ class Stops:
 
 @pytest.fixture(scope="module", params=sorted(WORLDS))
 def stops(request: pytest.FixtureRequest) -> Stops:
-    hosting, make = WORLDS[request.param]
-    normal = simulate(make(), hosting)
+    normal = simulate(WORLDS[request.param](), STEP_LOOP)
     pauses = normal.interruptions(Action.PAUSE)
     kills = normal.interruptions(Action.KILL)
     return Stops(normal, pauses + kills, pauses, kills)

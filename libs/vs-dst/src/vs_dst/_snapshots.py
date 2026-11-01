@@ -1,10 +1,9 @@
 """Copies of the outside world at the boundaries of a run.
 
-A host that dies loses its memory, so what survives a crash is the outside world: the store,
-the effects ledger, the publication delivery, and the world's own position (the replies it has
-handed out). `Snapshots` copies exactly those just before and just after every commit of the
-run it watches, and as each effect begins, in one `copy.deepcopy` so objects that share a
-reference keep sharing it. A crash case then starts a new host on a copy instead of re-running
+A host that dies loses its memory, so what survives a crash is the outside world: the run.log,
+the effects ledger, and the world's own position (the replies it has handed out). `Snapshots`
+copies exactly those just before and just after every commit of the run it watches, and as each
+effect begins, in one `copy.deepcopy` so objects that share a reference keep sharing it. A crash case then starts a new host on a copy instead of re-running
 the prefix.
 """
 
@@ -12,19 +11,16 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, Protocol
 
 from vs_dst._interruptions import Action, Interruption, Moment
-from vs_project.api import FakeStateStore
 from vs_runtime.api.testing import FakeRunRecords
 
 if TYPE_CHECKING:
     from vs_core.api import CoreEvent, Decision
     from vs_dst._effects import Effects
     from vs_dst._world import World
-    from vs_project.api import CommitOutcome, StoredEnvelope, StoreFence
     from vs_proto.api import Record
-    from vs_runtime.api.testing import FakePublicationDelivery
     from vs_sim.api.testing import VirtualClock
 
 
@@ -98,7 +94,6 @@ class OutsideWorld:
     """Everything outside a host: what survives it, and the one run's host starts over."""
 
     store: Store
-    delivery: FakePublicationDelivery
     effects: Effects
     world: World
 
@@ -160,41 +155,6 @@ class RecordingRecords(FakeRunRecords):
         self.last_clock = max(self.last_clock, record.clock or 0.0)
         if self.watcher is not None:
             self.watcher.reached(Moment.AFTER_COMMIT, index)
-
-
-class RecordingStore(FakeStateStore):
-    """A store that tells its watcher before and after each commit, and counts them."""
-
-    def __init__(self) -> None:
-        """Start empty, watched by nobody."""
-        super().__init__()
-        self.commits = 0
-        self.lease_ends_at = 0.0
-        """The latest moment the committing hosts held the lease until, as the commits showed it."""
-        self.watcher: Watcher | None = None
-
-    def __deepcopy__(self, memo: dict[int, object]) -> RecordingStore:
-        """A copy is a store of the outside world, not of the watching: it has no watcher."""
-        memo[id(self.watcher)] = None
-        return cast("RecordingStore", super().__deepcopy__(memo))
-
-    def commit(
-        self,
-        expected_revision: int | None,
-        envelope: StoredEnvelope,
-        fence: StoreFence,
-        now: float,
-    ) -> CommitOutcome:
-        """Commit, with the watcher told just before the store changes and just after."""
-        index = self.commits
-        self.commits += 1
-        self.lease_ends_at = max(self.lease_ends_at, fence.expires_at, now)
-        if self.watcher is not None:
-            self.watcher.reached(Moment.BEFORE_COMMIT, index)
-        outcome = super().commit(expected_revision, envelope, fence, now)
-        if self.watcher is not None:
-            self.watcher.reached(Moment.AFTER_COMMIT, index)
-        return outcome
 
 
 class Snapshots:
