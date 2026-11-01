@@ -41,6 +41,7 @@
         "./search/optimize",
         "./search/plan-hypotheses",
         "./search/profile-revision",
+        "./search/report-progress",
         "./search/state"
       ]
     }
