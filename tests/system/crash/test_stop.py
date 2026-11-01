@@ -68,16 +68,10 @@ def _assert_nothing_left(core: CoreState | None, why: str) -> None:
     assert unreleased == [], f"{why}: {unreleased}"
 
 
-def _delivered(interrupted: Interrupted) -> bool:
-    """Whether the stop reached a host: one that comes before the host has opened its log has
-    nowhere to go, and fails that host (the operator's Resume starts the run)."""
-    return interrupted.cores[0] is not None
-
-
-def _stopped_at(normal: SimulatedRun, point: Interruption) -> Interrupted | None:
+def _stopped_at(normal: SimulatedRun, point: Interruption) -> Interrupted:
     """Stop at ``point``: the host leaves nothing open, and the resumed run ends by itself.
 
-    Returns what became of the run, or None when the stop reached no host.
+    A stop due before the host has opened its log is held until it has, so it always reaches one.
     """
     interrupted = normal.interrupt(point)
     why = f"{point}: {interrupted.outcome.value}; hosts {interrupted.history}; {interrupted.detail}"
@@ -85,8 +79,6 @@ def _stopped_at(normal: SimulatedRun, point: Interruption) -> Interrupted | None
     assert interrupted.every_step_finished_once(), why
     if point.moment is not Moment.IN_FLIGHT:
         assert interrupted.reruns == 0, why
-    if not _delivered(interrupted):
-        return None
     _assert_nothing_left(interrupted.cores[0], f"{why}: the host that was stopped")
     _assert_nothing_left(interrupted.core, f"{why}: the host that resumed the run")
     assert interrupted.result is not None, why
@@ -107,7 +99,21 @@ def test_a_stop_in_the_middle_of_each_class_ends_the_run_with_nothing_open_and_a
 
     for moment in Moment:
         points = normal.interruptions(STOP, moment)
-        assert _stopped_at(normal, points[len(points) // 2]) is not None, moment
+        _stopped_at(normal, points[len(points) // 2])
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("world", sorted(WORLDS))
+def test_a_stop_at_the_first_point_of_each_class_is_held_for_the_host_and_a_resume_goes_on(
+    world: str,
+) -> None:
+    """Regression: a stop due before the host had opened its log failed that host, and a stop
+    that landed before the search's first checkpoint made the Resume fail as ``FlowCodeChanged``,
+    so these points were never tried. Every one reaches a host and the run goes on."""
+    normal = _normal(world)
+
+    for moment in Moment:
+        _stopped_at(normal, normal.interruptions(STOP, moment)[0])
 
 
 @pytest.mark.slow
@@ -145,7 +151,6 @@ def test_a_stop_that_races_the_adoption_of_the_winner_leaves_a_run_a_resume_take
 
     for point in stops:
         interrupted = _stopped_at(normal, point)
-        assert interrupted is not None, point
         assert interrupted.result is not None, point
         assert "adoption-failed" not in interrupted.result.reason, point
 

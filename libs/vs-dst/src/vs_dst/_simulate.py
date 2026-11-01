@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from vs_core.api.testing import Budget, liveness
 from vs_dst import _interrupt
 from vs_dst._crash_points import CrashKind, CrashPoint, crash_point_policy
+from vs_dst._delivery import Delivery
 from vs_dst._effects import Effects
 from vs_dst._host import (
     FIRST_HOST_STARTS_AT,
@@ -26,7 +27,7 @@ from vs_dst._snapshots import (
     Snapshots,
 )
 from vs_dst._step_host import StepLoopHosting
-from vs_dst._stops import StopKind, Stopped, Stopper, StopPoint, stop_points
+from vs_dst._stops import StopKind, Stopped, StopPoint, stop_points
 from vs_runtime.api.testing import HostOptions
 
 if TYPE_CHECKING:
@@ -280,7 +281,7 @@ class SimulatedRun:
         """
         self._require_uninterrupted()
         outside = self._pristine.copy()
-        stopper = Stopper(point, kind)
+        stopper = Delivery.stop(point.moment, point.index, kind)
         patience = Expectation(self.result, self._duration).patience
         hosted = self._plan.run(outside, self._started.clock_at, stopper, patience=patience)
         store = outside.store

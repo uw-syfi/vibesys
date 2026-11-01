@@ -405,6 +405,32 @@ pnpm --dir clients install --frozen-lockfile
 ./support/repoctl/repoctl run-checks --group clients_e2e
 ```
 
+A pull request runs the desktop specs its change can affect, not the whole suite, so a
+change that breaks a spec is found before the merge queue (which runs every spec and
+ejects the change and the entries behind it). `clients/tools/scripts/e2e_affected.mjs`
+selects them from the path list: a changed spec runs; a changed helper runs the specs
+that import it; a changed app file runs the app's specs; a changed workspace package runs
+the specs that depend on it, through the dependencies of the spec's area
+(`clients/tools/e2e/areas.json`, one entry per family of desktop-shell specs naming the
+feature packages it exercises) and through the packages its imports reach. A spec the table
+does not place depends on everything its app does, so an unplaced spec costs a run, never a
+miss, and a lockfile change that only records what a workspace package asks for selects
+nothing. The commit stage has a time budget (`ci-budget`), so a pull request runs the
+selected specs up to `SPEC_BUDGET_SECONDS` of recorded time (about half the suite): a changed
+spec always, then the specs importing a changed helper, then those of a changed app file,
+then the specs a package change reaches, nearest first, each tier fastest first so more
+distinct specs run. The log names the specs left to the queue, which runs every spec.
+A job whose slice holds none of an app's specs skips that app's build and run (`with_e2e_specs.mjs`).
+To see the selection for your branch:
+
+```bash
+node clients/tools/scripts/e2e_affected.mjs --mode selected --base origin/main --head HEAD
+```
+
+Place a new desktop-shell spec in the area it exercises by adding its file name to that
+area's `specs`; the area table's tests fail on a spec two areas claim or a name that
+matches no spec.
+
 `clients_e2e` and the real-tier groups are the `local_skip` entries. Other
 groups without `include_in_test` or `include_in_checks` are the CI form of a
 suite the local command already runs, or they need artifacts only CI has.
