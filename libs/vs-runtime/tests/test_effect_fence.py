@@ -36,7 +36,7 @@ from vs_sim.api.testing import SimThreads, examples
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-_KEYS = (FenceKey(FenceKind.INVOCATION, "s/i1"), FenceKey(FenceKind.ATTEMPT_WORKSPACE, "a1:0"))
+_KEYS = (FenceKey(FenceKind.INVOCATION, "s/i1"), FenceKey(FenceKind.SESSION_EPISODE, "s/e1"))
 _REQUESTS = ("dispatch-a", "dispatch-b", "cancel-r")
 
 _operation = st.tuples(

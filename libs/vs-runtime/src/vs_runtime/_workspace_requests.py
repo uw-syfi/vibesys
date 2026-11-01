@@ -1,12 +1,8 @@
 """Workspace request executors: core workspace requests over ``RuntimeWorkspaces``.
 
-Each request is executed at most once per canonical request identity. A durable
-receipt store records an intent before the side effect and the typed result
-after it. Re-executing a request with a stored result returns that result;
-re-executing one with only an intent inspects the workspace and either
-reattaches, repeats a naturally idempotent effect, or returns an explicit
-Unknown observation. No path fabricates a second snapshot, restore or
-candidate.
+A request repeated after an attempt that may have run (``ExecutionContext.repeat``) inspects the
+workspace and either reattaches, repeats a naturally idempotent effect, or returns an explicit
+Unknown observation. No path fabricates a second snapshot, restore or candidate.
 
 Revision identity: ``RevisionRef.revision_id`` is the Git commit and
 ``RevisionRef.digest`` is ``git-commit:<commit>``. Core defines no stronger
@@ -54,19 +50,10 @@ from vs_core.api import (
 )
 from vs_project.api import NestedRepositoryError
 from vs_runtime._adoption_commit import adoption_commit_message
-from vs_runtime._core_identity import core_identity
 from vs_runtime._core_requests import (
     ExecutionContext,
     ExecutionOutcome,
     ExecutionResult,
-)
-from vs_runtime._effect_fence import (
-    EffectFences,
-    Entered,
-    FenceKey,
-    FenceKind,
-    MayHold,
-    NothingHeld,
 )
 from vs_runtime._observation_factory import (
     ObservationFactory,
@@ -86,8 +73,6 @@ from vs_runtime._workspace_receipts import (
 from vs_runtime.contracts import RuntimeContractError, WorkspaceRestoreError
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
-
     from vs_core.api import Request
     from vs_core.api.recovery import OwnerEvent
     from vs_runtime._evidence_ledger import EvidenceLookup
@@ -143,11 +128,9 @@ def _rejected(diagnostic: str) -> _Facts:
     return _holding_nothing(ObservationFacts.refused(diagnostic))
 
 
-def _never_held(proof: NothingHeld, attempt: AttemptRef, diagnostic: str) -> _Facts:
-    """The discard's answer that the attempt holds no workspace, now or later (a closed fence)."""
-    return _holding_nothing(
-        ObservationFacts.never_held(proof, workspace_fence(attempt), diagnostic)
-    )
+def _nothing_held(diagnostic: str) -> _Facts:
+    """The discard's answer that the attempt holds no workspace: none was bound, none is left."""
+    return _holding_nothing(ObservationFacts.nothing_held(diagnostic))
 
 
 def _holding_nothing(facts: ObservationFacts) -> _Facts:
@@ -159,11 +142,6 @@ def _holding_nothing(facts: ObservationFacts) -> _Facts:
         setup_failure=SetupFailureKind.PERMANENT,
         holding_nothing=facts,
     )
-
-
-def workspace_fence(attempt: AttemptRef) -> FenceKey:
-    """The fence of one attempt generation's workspace: ensure enters it, discard closes it."""
-    return FenceKey(FenceKind.ATTEMPT_WORKSPACE, attempt_key(attempt))
 
 
 def _unknown(diagnostic: str, *, resource_id: ResourceId | None = None) -> _Facts:
@@ -300,7 +278,6 @@ class RuntimeWorkspaceRequests:
         self._store = store
         self._receipts: WorkspaceReceipts = StoreWorkspaceReceipts(store)
         self._observations = ObservationFactory(store)
-        self._fences = EffectFences(store)
         self._locks: dict[str, asyncio.Lock] = {}
 
     def protect_adoption(self) -> None:
@@ -322,7 +299,7 @@ class RuntimeWorkspaceRequests:
         lock = self._locks.setdefault(self._serialization_key(request), asyncio.Lock())
         async with lock:
             return self._result(
-                request, context, await self._perform(request, context, repeat=context.repeat)
+                request, context, await self._perform(request, repeat=context.repeat)
             )
 
     @staticmethod
@@ -391,20 +368,18 @@ class RuntimeWorkspaceRequests:
             owner_events=events,
         )
 
-    async def _perform(
-        self, request: Request, context: ExecutionContext, *, repeat: bool
-    ) -> _Facts:
+    async def _perform(self, request: Request, *, repeat: bool) -> _Facts:
         if isinstance(request, _HANDLED) and not self._receipts.admit_generation(request.attempt):
             return _rejected("a newer generation of this attempt exists")
         match request:
             case EnsureWorkspace():
-                return await self._fenced_ensure(request, context)
+                return await self._ensure(request)
             case SnapshotAndRetainRun():
                 return await self._run_snapshot(request, repeat=repeat)
             case AdoptRevision() | VerifyAdoption():
                 return await self._adoption(request)
             case RestoreRevision() | RetainRevision() | SnapshotAndRetain() | DiscardWorkspace():
-                return await self._attempt_request(request, context, repeat=repeat)
+                return await self._attempt_request(request, repeat=repeat)
             case _:
                 return _rejected(f"{request.kind} cannot be executed against a workspace")
 
@@ -422,56 +397,43 @@ class RuntimeWorkspaceRequests:
             owner=_RUN_OWNER,
         )
 
-    async def _withdraw_or_discard(
-        self, request: DiscardWorkspace, context: ExecutionContext, *, repeat: bool
-    ) -> _Facts:
-        """Close the attempt's workspace fence, then discard what its ensures made, if anything."""
+    async def _withdraw_or_discard(self, request: DiscardWorkspace, *, repeat: bool) -> _Facts:
+        """Discard the attempt's workspace; a generation no ensure bound ends unbound, holding none."""
         attempt = request.attempt
         with self._store.exclusive():
-            closure = self._fences.close(
-                workspace_fence(attempt), by=core_identity(request), host=context.fence
-            )
             bound = self._receipts.load_binding(attempt)
             if bound is None:
                 # The generation ends unbound: it never holds the exclusive root again.
                 self._receipts.mark_released(attempt)
         if bound is not None:
             return await self._discard(request, bound, repeat=repeat)
-        if isinstance(closure, NothingHeld):
-            return _never_held(closure, attempt, _WITHDRAWN)
-        return await self._remove_unbound(attempt, closure)
+        return await self._remove_unbound(attempt)
 
-    async def _remove_unbound(self, attempt: AttemptRef, closure: MayHold) -> _Facts:
-        """Remove a worktree an ensure created but never bound, once no ensure can still create.
+    async def _remove_unbound(self, attempt: AttemptRef) -> _Facts:
+        """Remove a worktree an ensure created but never bound, so the attempt holds nothing.
 
         An ensure that stopped between creating its worktree and binding it left the worktree
-        behind: removing it makes "nothing held" true now, and the closed fence keeps it so.
+        behind: removing it makes "nothing held" true now.
         """
-        if closure.live:
-            return _unknown("an ensure of the attempt's workspace is in flight")
         member = candidate_member_id(attempt)
-
-        async def find() -> Callable[[], Awaitable[None]] | None:
-            leftover = self._workspaces.live_candidate(member)
-            if leftover is None:
-                leftover = await self._workspaces.reattach_candidate(member)
-            return None if leftover is None else leftover.discard
-
+        leftover = self._workspaces.live_candidate(member)
+        if leftover is None:
+            leftover = await self._workspaces.reattach_candidate(member)
         try:
-            removed = await self._fences.remove(closure, find)
+            if leftover is not None:
+                await leftover.discard()
         except (OSError, BaseExceptionGroup) as error:
             return _unknown(f"an unbound worktree of the attempt was not removed: {error}")
-        return _never_held(self._fences.cleared(closure, removed), attempt, _WITHDRAWN)
+        return _nothing_held(_WITHDRAWN)
 
     async def _attempt_request(
         self,
         request: RestoreRevision | RetainRevision | SnapshotAndRetain | DiscardWorkspace,
-        context: ExecutionContext,
         *,
         repeat: bool,
     ) -> _Facts:
         if isinstance(request, DiscardWorkspace):
-            return await self._withdraw_or_discard(request, context, repeat=repeat)
+            return await self._withdraw_or_discard(request, repeat=repeat)
         binding = self._receipts.load_binding(request.attempt)
         if binding is None:
             return _rejected("no workspace was ensured for this attempt")
@@ -591,20 +553,7 @@ class RuntimeWorkspaceRequests:
             return _retryable("tree does not match the revision after restore", resource_id)
         return None
 
-    async def _fenced_ensure(self, request: EnsureWorkspace, context: ExecutionContext) -> _Facts:
-        """Ensure inside the attempt's workspace fence; a discard that closed it stops the ensure."""
-        fence = workspace_fence(request.attempt)
-        by = core_identity(request)
-        if not isinstance(self._fences.enter(fence, by=by, host=context.fence), Entered):
-            # A discard closed the fence first: this ensure creates nothing.
-            return _rejected(_WITHDRAWN)
-        try:
-            return await self._ensure(request, context)
-        finally:
-            # Whatever this delivery made is on disk or bound now: a discard may judge it.
-            self._fences.leave(fence, by=by)
-
-    async def _ensure(self, request: EnsureWorkspace, context: ExecutionContext) -> _Facts:
+    async def _ensure(self, request: EnsureWorkspace) -> _Facts:
         plan = request.plan
         attempt = request.attempt
         existing = self._receipts.load_binding(attempt)
@@ -618,12 +567,10 @@ class RuntimeWorkspaceRequests:
         if base is None:
             return _rejected("base revision is not a revision of this run")
         if plan.mode is WorkspaceMode.EXCLUSIVE_ROOT:
-            return await self._ensure_root(request, context, base=base)
-        return await self._ensure_candidate(request, context, existing, base)
+            return await self._ensure_root(request, base=base)
+        return await self._ensure_candidate(request, existing, base)
 
-    async def _ensure_root(
-        self, request: EnsureWorkspace, context: ExecutionContext, *, base: str
-    ) -> _Facts:
+    async def _ensure_root(self, request: EnsureWorkspace, *, base: str) -> _Facts:
         """Grant the root, and make its tree the plan's base before the attempt may use it.
 
         The restore runs before the binding is stored, so a crash anywhere in between
@@ -656,8 +603,7 @@ class RuntimeWorkspaceRequests:
                 )
                 if failure is not None:
                     return failure
-            if self._bind(request, context, resource_id, None) is None:
-                return _rejected(_WITHDRAWN)
+            self._bind(request, resource_id, None)
         return _Facts(
             ObservationStatus.SUCCEEDED,
             accepted=True,
@@ -686,7 +632,6 @@ class RuntimeWorkspaceRequests:
     async def _ensure_candidate(
         self,
         request: EnsureWorkspace,
-        context: ExecutionContext,
         existing: AttemptBinding | None,
         base: str,
     ) -> _Facts:
@@ -710,18 +655,7 @@ class RuntimeWorkspaceRequests:
             if existing is not None
             else ResourceId(root=f"workspace:{attempt_key(attempt)}:{request.request_id.root}")
         )
-        binding = self._bind(request, context, resource_id, live.id)
-        if binding is None:
-            if existing is not None:
-                # Bound before the discard closed the fence: the discard removes it.
-                return _rejected("attempt workspace was released")
-            # Withdrawn after this ensure created or reopened the worktree: remove it, so the
-            # discard that withdrew the generation stays the truth.
-            try:
-                await live.discard()
-            except (OSError, BaseExceptionGroup) as error:
-                return _unknown(f"withdrawn workspace not removed: {error}")
-            return _rejected(_WITHDRAWN)
+        binding = self._bind(request, resource_id, live.id)
         return _Facts(
             ObservationStatus.SUCCEEDED,
             accepted=True,
@@ -732,17 +666,9 @@ class RuntimeWorkspaceRequests:
         )
 
     def _bind(
-        self,
-        request: EnsureWorkspace,
-        context: ExecutionContext,
-        resource_id: ResourceId,
-        workspace_id: str | None,
-    ) -> AttemptBinding | None:
-        """Bind the attempt's workspace, or ``None`` when a discard closed its fence first.
-
-        The ensure enters the fence again in the same locked step as it binds, so a discard
-        that closed the fence while the workspace was being made stops the binding.
-        """
+        self, request: EnsureWorkspace, resource_id: ResourceId, workspace_id: str | None
+    ) -> AttemptBinding:
+        """Bind the attempt's workspace, or find the binding an earlier attempt made."""
         assert request.request_id is not None  # noqa: S101  # lint-waiver: LW-402302 [S101]; execute() rejects a missing identity.
         binding = AttemptBinding(
             ensure_request=request.request_id,
@@ -751,11 +677,7 @@ class RuntimeWorkspaceRequests:
             resource_id=resource_id,
             workspace_id=workspace_id,
         )
-        fence = workspace_fence(request.attempt)
         with self._store.exclusive():
-            admission = self._fences.enter(fence, by=core_identity(request), host=context.fence)
-            if not isinstance(admission, Entered):
-                return None
             return self._receipts.bind(request.attempt, binding)
 
     async def _restore(
