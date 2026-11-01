@@ -1,6 +1,6 @@
 /**
- * An opt-in amplifier for the Fake welcome bridge: a seeded random delay on the reply of every
- * request method (every method whose name does not start with `on`, which only subscribes).
+ * An opt-in amplifier for the Fake welcome bridge: a seeded random delay on the reply (not the
+ * arrival) of every request method (every method whose name does not start with `on`, which only subscribes).
  * It changes how the page's work interleaves with a spec's inputs, which CPU load and throttling
  * do not, so a spec that acts before the page has read what it shows fails under it on every
  * seed. `E2E_JITTER_SEED=<n> pnpm e2e` turns it on for every world (`addInitScripts` appends it
@@ -52,10 +52,11 @@ export function installBridgeJitter(config: BridgeJitter): void {
   if (bridge === undefined) return;
   for (const [name, method] of Object.entries(bridge)) {
     if (typeof method !== 'function' || name.startsWith('on')) continue;
-    bridge[name] = (...args: unknown[]) =>
-      new Promise(resolve => {
-        const wait = Math.floor(draw() * config.maxMs);
-        setTimeout(() => resolve((method as (...a: unknown[]) => unknown)(...args)), wait);
-      });
+    // The host receives the request when it is made, as over IPC; only its reply is late.
+    bridge[name] = (...args: unknown[]) => {
+      const reply = (method as (...a: unknown[]) => unknown)(...args);
+      const wait = Math.floor(draw() * config.maxMs);
+      return new Promise(resolve => setTimeout(() => resolve(reply), wait));
+    };
   }
 }
