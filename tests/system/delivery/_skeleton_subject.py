@@ -1,6 +1,6 @@
 """The skeleton search as a subject for the delivery-fault tests.
 
-The delivery and stop tests (`test_delivery_faults.py`, `test_stop.py`, `test_request_kinds.py`)
+The delivery tests (`test_delivery_faults.py`, `test_request_kinds.py`)
 drive the skeleton search (`tests/support/skeleton_strategy.py`) through core and the production
 shell with a scripted far side. This module is that far side: the harness that hosts the search,
 the world that answers every request, and the wrappers that make an answer unknown, retryable or

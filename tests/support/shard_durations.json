@@ -1026,7 +1026,6 @@
  "tests/system/crash/test_never_stuck.py": 32.76,
  "tests/system/delivery/test_delivery_faults.py": 5.01,
  "tests/system/delivery/test_request_kinds.py": 3.96,
- "tests/system/delivery/test_stop.py": 6.42,
  "tests/system/git_backends/test_git_backends.py": 1.93,
  "tests/system/quota/test_outage_never_ends_a_run.py": 40.17,
  "tests/system/quota/test_quota_through_the_core_loop.py": 7.58,

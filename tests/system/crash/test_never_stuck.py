@@ -32,9 +32,12 @@ from vs_sim.api.testing import evenly_spaced
 SAMPLE = 3
 """Points of each class of interruption a pull request tries."""
 
-CLASSES = [(action, moment) for action in Action for moment in Moment]
-
 KILL, PAUSE = Action.KILL, Action.PAUSE
+
+CLASSES = [(action, moment) for action in (KILL, PAUSE) for moment in Moment]
+"""Every kill and pause: a run resumed after either ends as the uninterrupted run did. A stop is
+not one of them (the stop ends the run, and a Resume reopens it to an end of its own): see
+`test_stop.py`."""
 IN_FLIGHT = Moment.IN_FLIGHT
 
 STEP_LOOP = StepLoopHosting()
