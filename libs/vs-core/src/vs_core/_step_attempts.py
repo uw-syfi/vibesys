@@ -5,10 +5,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ._actions import OpenStep
+from ._failure_routing import FailureHearer, failure_hearer
 from ._job_reports import ended_job_events
 from ._ownership import unreleased_records
 from ._refusal import RecordRefusedError, RefusalReason
 from ._request_ledger import resent
+from ._watches import fired_watch
 from .types.common import EventId, Observation, ObservationStatus, RunStatus
 from .types.records import (
     RequestObserved,
@@ -27,7 +29,8 @@ from .types.steps import (
     OwnerEvent,
     StepAttempts,
 )
-from .types.until import Until
+from .types.until import Failed as OwnerFailure
+from .types.until import FailureReason, Until
 
 if TYPE_CHECKING:
     from .types.common import RequestId
@@ -365,6 +368,62 @@ def finish(
             return result.report, (*result.owner_events, *ended_job_events(record, result))
         case Failed() | Cancelled():
             return _concluded(record, result, state.run.now_at), ()
+
+
+def ended_failure(
+    state: CoreState, record: RequestRecord, result: StepResult
+) -> OwnerFailure | None:
+    """The typed failure the asker hears when core ends the open step ``record``, else ``None``.
+
+    Core ends a step itself when its limit passes (``Cancelled(DEADLINE)``) or a watch it declared
+    fires (``Cancelled(WITHDRAWN)`` with ``fired_watch``). Nothing its runner reported says why, so
+    the failure names the limit or the watch. A step cancelled for any other reason ended because
+    its asker no longer wants it, and is not a failure.
+    """
+    if not isinstance(result, Cancelled):
+        return None
+    decision = record.request.decision_id
+    if result.reason is CancelReason.DEADLINE:
+        return OwnerFailure(
+            reason=FailureReason.TIMED_OUT, decision=decision, limit_at=record.until.at
+        )
+    fired = fired_watch(state, record) if result.reason is CancelReason.WITHDRAWN else None
+    if fired is None:
+        return None
+    watch, reason = fired
+    return OwnerFailure(reason=reason, decision=decision, watch=watch)
+
+
+def failed_step(
+    state: CoreState, tag: RequestId, failure: OwnerFailure | None
+) -> tuple[CoreState, tuple[OwnerFailure, ...]]:
+    """``state`` with the ended step ``tag`` holding ``failure``, and what its asker hears of it.
+
+    A decision hears of its ending once: its later requests end quietly, as the owner has moved
+    on. A step only the area that sent it hears of ends without telling the decision.
+    """
+    if failure is None:
+        return state, ()
+    (record,) = state.records.find(tag)
+    heard = (
+        (failure,)
+        if failure_hearer(record.request) is FailureHearer.DECISION
+        and not _decision_ended(state, record)
+        else ()
+    )
+    return _replaced(state, record.model_copy(update={"failure": failure})), heard
+
+
+def _decision_ended(state: CoreState, record: RequestRecord) -> bool:
+    """Whether another request of the record's decision already ended with a failure."""
+    decision = record.request.decision_id
+    return decision is not None and any(
+        row.failure is not None
+        and failure_hearer(row.request) is FailureHearer.DECISION
+        and row.request.decision_id == decision
+        and row.request_id != record.request_id
+        for row in state.records.records
+    )
 
 
 def _speaks_for(record: RequestRecord, fact: object) -> None:

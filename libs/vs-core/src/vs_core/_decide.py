@@ -20,7 +20,7 @@ from ._request_ledger import dispatch_until, retry_limit
 from ._run_park import pause_cancels, starts
 from ._scope_order import withdrawn_by_close
 from ._search_events import Translated, translate
-from ._step import advance_run_time, settle_end, settle_park, step, step_recorded
+from ._step import advance_run_time, lost_turn, settle_end, settle_park, step, step_recorded
 from ._step_attempts import (
     commands_lapsed,
     concluded,
@@ -28,8 +28,10 @@ from ._step_attempts import (
     end_lifted,
     ended,
     ended_by_core,
+    ended_failure,
     ended_unconcluded,
     epoch_opened,
+    failed_step,
     finish,
     forgotten,
     interrupted,
@@ -48,7 +50,8 @@ from ._step_log import (
     decode_seed,
     encode_fold,
 )
-from ._wait_clock import job_step_until
+from ._wait_clock import job_step_until, turn_bound
+from ._watches import fired_watch
 from .types.common import (
     DependencyStatus,
     EndPolicy,
@@ -58,7 +61,13 @@ from .types.common import (
     RunStatus,
     StopMode,
 )
-from .types.records import is_open, request_end_policy, request_interrupt_policy, request_lifecycle
+from .types.records import (
+    RequestPhase,
+    is_open,
+    request_end_policy,
+    request_interrupt_policy,
+    request_lifecycle,
+)
 from .types.steps import Cancelled, CancelReason, Failed
 from .types.until import FailureReason, Until
 
@@ -224,6 +233,16 @@ def _park_is_due(recorded: CoreState, now: CoreState) -> bool:
     )
 
 
+def limit_of(state: CoreState, record: RequestRecord) -> float:
+    """The run-clock time at which the open step ``record`` ends: the one limit ``decide`` ends it at.
+
+    The limit the step was stated with, extended by the time the capacity gate held its turn for the
+    provider (``turn_bound``), and never past the run's deadline. It is read from the log, so every
+    process that folds the log ends the step at the same time.
+    """
+    return turn_bound(record, state.run).at
+
+
 def _running(state: CoreState, record: RequestRecord) -> bool:
     attempts = state.steps.of(record.request_id)
     return attempts is not None and not attempts.ended
@@ -340,22 +359,42 @@ def _finish(
     state: CoreState, message: StepFinished, registry: OperationRegistry | None
 ) -> tuple[CoreState, tuple[StrategyEvent, ...]]:
     tag = RequestId(root=message.tag)
+    return finished(state, tag, message.attempt, decode_result(message, registry))
+
+
+def finished(
+    state: CoreState, tag: RequestId, attempt: int, result: StepResult
+) -> tuple[CoreState, tuple[StrategyEvent, ...]]:
+    """``state`` once attempt ``attempt`` of step ``tag`` has its ``result`` recorded, and what it published.
+
+    This is what the fold of a ``StepFinished`` record does, for a result already decoded.
+    """
     by_core = ended_by_core(state, tag)
-    reported_by(state, tag, message.attempt)  # core ending the step excuses no stale attempt
+    reported_by(state, tag, attempt)  # core ending the step excuses no stale attempt
     if by_core:
-        state, published = _concluded_by_core(state, tag, decode_result(message, registry))
+        state, published = _concluded_by_core(state, tag, result)
         return settle_park(state), published
+    record = open_record(state, tag)
+    started = record.phase is not RequestPhase.PREPARED
     state = dispatched(state, tag)
-    report, owner_events = finish(state, tag, decode_result(message, registry))
+    failure = ended_failure(state, open_record(state, tag), result)
+    published: tuple[StrategyEvent, ...] = ()
+    if failure is not None and started and (lost := lost_turn(state, record)) is not None:
+        # A lost turn is answered by its session once it is cancelled: the ask hears that, not a
+        # failure of the record, which would discard that answer as a late result.
+        transition = step_recorded(state, lost)
+        state, published, failure = transition.state, transition.events, None
+    report, owner_events = finish(state, tag, result)
     transition = step_recorded(state, report)
-    state, published = transition.state, transition.events
+    state, published = transition.state, (*published, *transition.events)
     for event in owner_events:
         transition = step_recorded(state, event)
         state, published = transition.state, (*published, *transition.events)
     if any(is_open(row) for row in state.records.find(tag)):
         problem = f"the log finishes step {tag.root} with an observation that does not end it"
         raise RecordRefusedError(RefusalReason.RESULT_MISMATCH, problem, tag)
-    return settle_park(forgotten(state, tag)), published
+    state, heard = failed_step(state, tag, failure)
+    return settle_park(forgotten(state, tag)), (*published, *heard)
 
 
 def _concluded_by_core(
@@ -459,6 +498,12 @@ def _of_step(state: CoreState, record: RequestRecord, now: float) -> Action | No
             if running
             else Settle(tag=tag, result=Cancelled(reason=CancelReason.WITHDRAWN))
         )
+    if fired_watch(state, record) is not None:
+        return (
+            Cancel(tag=tag, reason=CancelReason.WITHDRAWN)
+            if running
+            else Settle(tag=tag, result=Cancelled(reason=CancelReason.WITHDRAWN))
+        )
     if running:
         return _stop_running(state, record, now)
     return _start_or_settle(state, record, now)
@@ -491,7 +536,7 @@ def _run_ends_step(state: CoreState, record: RequestRecord) -> bool:
 def _stop_running(state: CoreState, record: RequestRecord, now: float) -> Cancel | None:
     tag = record.request_id
     park = state.run.park
-    if now >= record.until.at:
+    if now >= limit_of(state, record):
         return Cancel(tag=tag, reason=CancelReason.DEADLINE)
     if park is not None and pause_cancels(state, record.request):
         released = request_lifecycle(record.request) is LifecycleClass.OWNED_JOB
@@ -514,7 +559,7 @@ def _start_or_settle(state: CoreState, record: RequestRecord, now: float) -> Run
             return Settle(tag=tag, result=Cancelled(reason=CancelReason.INTERRUPTED))
         if attempts.charged > retry_limit(state.run, record.request):
             return Settle(tag=tag, result=Failed(reason=FailureReason.ATTEMPTS_EXHAUSTED))
-    if now >= record.until.at:
+    if now >= limit_of(state, record):
         return Settle(tag=tag, result=Cancelled(reason=CancelReason.DEADLINE))
     if not starts(state, record, dependencies) or now < _retry_at(state, attempts):
         return None
@@ -557,7 +602,7 @@ def _started_until(state: CoreState, record: RequestRecord) -> Until:
 def _wake_at(state: CoreState, open_steps: tuple[RequestRecord, ...], now: float) -> float | None:
     """The next time anything is due: a step's limit, or the end of a pause's drain."""
     park = state.run.park
-    due = [record.until.at for record in open_steps]
+    due = [limit_of(state, record) for record in open_steps]
     due.extend(
         _retry_at(state, attempts)
         for record in open_steps

@@ -3,19 +3,23 @@
 Each way a wait can end (a watch fires mid-wait, a limit passes for a record that is only
 reattached) ends it once, with the typed failure that names the cause, and leaves nothing
 for the clock to act on again. Results and failures that are core's own never reach the
-search. Pure core, no real time: a test moves the clock by stepping ``ClockAdvanced``.
+search. Pure core, no real time: a test moves the clock with ``reach``, which records what the
+runner loop records once time reaches a moment (``decide`` ends a step at its limit or when its
+watch fires; nothing else does).
 """
 
 from hypothesis import given
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_core.api.testing import reach
 
 from .proof_digest import value_digest
 from .test_attempt_retirement import fixture, retirement
 from .test_measurements import plan as measurement_plan
 from .test_session_turns import invocation, scope, turn, waiting_turn_state
 from .wait_support import (
+    OPEN,
     dispatch_all,
     failures,
     fresh,
@@ -32,7 +36,7 @@ LIMITS = st.floats(min_value=5.0, max_value=200.0, allow_nan=False)
 def _quiet(state: core.CoreState) -> None:
     """The ended wait is not raised again, however far the clock moves."""
     assert open_records(state) == []
-    again = core.step(state, core.ClockAdvanced(now_at=state.run.now_at + 1_000.0))
+    again = reach(state, state.run.now_at + 1_000.0)
     assert [f for f in failures(again) if f.decision is not None] == []
     assert operations(again.state) == operations(state)
 
@@ -59,14 +63,16 @@ def test_a_wait_watching_a_workspace_ends_when_it_closes_mid_wait(limit: float) 
     state = dispatch_all(submit(state, wait(codec, "w", core.Within(limit=limit) | watch)).state)
     assert [r.phase for r in open_records(state)] == [core.RequestPhase.DISPATCHED]
 
-    closed = core.step(state, retirement(ref))
+    retired = core.step(state, retirement(ref))
+    assert failures(retired) == [], "core ends nothing itself: the loop does"
+    closed = reach(retired.state, retired.state.run.now_at)
 
     (failure,) = failures(closed)
     assert failure.reason is core.FailureReason.WORKSPACE_CLOSED
     assert failure.decision == core.DecisionId(root="w")
     assert failure.watch == watch
     (record,) = operations(closed.state)
-    assert record.phase is core.RequestPhase.BLOCKED
+    assert record.phase is core.RequestPhase.COMPLETED
     assert record.failure == failure
     assert closed.state.run.now_at < record.until.at, "it ended before its limit"
     _quiet(closed.state)
@@ -116,16 +122,16 @@ def test_a_wait_watching_a_job_ends_with_owner_gone_when_the_job_is_gone_mid_wai
     watch = core.WhileAlive(job=job)
     state = dispatch_all(submit(state, wait(codec, "w", core.Within(limit=limit) | watch)).state)
     assert [r.phase for r in open_records(state)] == [core.RequestPhase.DISPATCHED]
-    assert failures(core.step(state, core.ClockAdvanced(now_at=state.run.now_at))) == []
+    assert failures(reach(state, state.run.now_at)) == []
 
-    gone = core.step(_job_ended(state, job), core.ClockAdvanced(now_at=state.run.now_at))
+    gone = reach(_job_ended(state, job), state.run.now_at)
 
     (failure,) = failures(gone)
     assert failure.reason is core.FailureReason.OWNER_GONE
     assert failure.decision == core.DecisionId(root="w")
     assert failure.watch == watch
     (record,) = operations(gone.state)
-    assert record.phase is core.RequestPhase.BLOCKED
+    assert record.phase is core.RequestPhase.COMPLETED
     assert record.failure == failure
     _quiet(gone.state)
 
@@ -176,7 +182,7 @@ def test_a_result_that_arrives_after_its_request_ended_is_discarded_not_delivere
         assert event.decision == core.DecisionId(root="w")
         assert heard.discarded == ()
 
-    ended = core.step(state, core.ClockAdvanced(now_at=limit + 1.0))
+    ended = reach(state, limit + 1.0)
     (record,) = operations(ended.state)
     assert record.failure is not None
     for result in _late_results(record):
@@ -266,7 +272,7 @@ def test_cleanup_after_a_stop_is_bounded_by_its_budget_not_the_run_left(
     assert {r.until.at for r in issued} == {state.run.now_at + budget}
 
     # The answer is lost: once the bound passes, nothing core sent is still awaited.
-    lapsed = core.step(state, core.ClockAdvanced(now_at=state.run.now_at + budget + 1.0)).state
+    lapsed = reach(state, state.run.now_at + budget + 1.0).state
     assert all(
         r.phase is not core.RequestPhase.DISPATCHED
         for r in lapsed.records.records
@@ -293,7 +299,7 @@ def test_cleanup_after_the_run_deadline_completes_within_its_budget(budget: floa
     (first,) = [r for r in state.records.records if r.phase is core.RequestPhase.PREPARED]
     state = core.step(state, core.DispatchAuthorized(request_id=first.request_id)).state
 
-    inside = core.step(state, core.ClockAdvanced(now_at=state.run.now_at + budget * 0.5))
+    inside = reach(state, state.run.now_at + budget * 0.5)
     assert failures(inside) == []
     answered = core.step(
         inside.state,
@@ -326,12 +332,13 @@ def test_unanswered_cleanup_ends_at_its_budget_and_only_core_hears_of_it(budget:
         if record.phase is core.RequestPhase.PREPARED:
             state = core.step(state, core.DispatchAuthorized(request_id=record.request_id)).state
 
-    ended = core.step(state, core.ClockAdvanced(now_at=state.run.now_at + budget))
+    asked = {r.request_id for r in state.records.records if r.phase is core.RequestPhase.DISPATCHED}
+    assert asked
 
-    own = failures(ended)
-    assert own, "an unanswered cleanup request does not wait forever"
-    assert {f.reason for f in own} == {core.FailureReason.TIMED_OUT}
-    assert all(f.decision is None for f in own), "core's own requests name no decision"
+    ended = reach(state, state.run.now_at + budget)
+
+    assert not [r for r in ended.state.records.records if r.request_id in asked and r.phase in OPEN]
+    assert all(f.decision is None for f in failures(ended)), "core's own requests name no decision"
     heard = core.translate(ended.state, ended.events)
     assert [e for e in heard.events if isinstance(e, core.Failed)] == []
     assert {d.reason for d in heard.discarded} == {core.DiscardReason.INTERNAL_FAILURE}
@@ -412,8 +419,8 @@ def test_a_decision_hears_of_its_ending_once_however_many_requests_it_held(
     first_limit = min(row.until.at for row in operations(state))
     last_limit = max(row.until.at for row in operations(state))
 
-    first = core.step(state, core.ClockAdvanced(now_at=first_limit))
-    last = core.step(first.state, core.ClockAdvanced(now_at=last_limit))
+    first = reach(state, first_limit)
+    last = reach(first.state, last_limit)
 
     (failure,) = failures(first)
     assert failure.reason is core.FailureReason.TIMED_OUT

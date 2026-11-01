@@ -76,6 +76,7 @@ from vs_core.api import (
     subjects,
     waits,
 )
+from vs_core.api.testing import reach
 from vs_sim.api.testing import examples
 
 from .test_measurements import submitted
@@ -87,6 +88,7 @@ from .test_request_recovery import (
     turn_record,
 )
 from .test_write_turn_retention import write_turn_world
+from .wait_support import OPEN
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -1058,16 +1060,17 @@ def test_a_closing_session_whose_close_ended_unanswered_closes_once_more(
     assert not [r for r in second.requests if isinstance(r, CloseSession)]
     assert [w.waiter for w in orphan_waits(second.state)] == [WaitKind.SESSION]
 
-    # The same when the core ends the second close itself at its limit: the blocked close
-    # stays among the session's records, so hours of lapses send no third close.
+    # The same when the loop ends the second close at its limit: the ended close stays among the
+    # session's records, so hours of lapses send no third close.
     later, sent = first.state, []
     for hours in range(1, 6):
-        stepped = step(later, ClockAdvanced(now_at=state.run.now_at + 3600.0 * hours))
+        moment = state.run.now_at + 3600.0 * hours
+        stepped = step(reach(later, moment).state, ClockAdvanced(now_at=moment))
         later = stepped.state
         sent += [r for r in stepped.requests if isinstance(r, CloseSession)]
     assert sent == []
     phases = {row.request_id: row.phase for row in later.records.records}
-    assert phases[again.request_id] == RequestPhase.BLOCKED
+    assert phases[again.request_id] not in OPEN
     (stuck,) = later.sessions.sessions
     assert again.request_id in stuck.pending_records
     assert [w.waiter for w in orphan_waits(later)] == [WaitKind.SESSION]

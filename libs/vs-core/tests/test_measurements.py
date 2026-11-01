@@ -627,18 +627,13 @@ def _step_job_polls(statuses: list[core.ObservationStatus]) -> core.CoreState:
         state = step.state
         assert state.evaluation.jobs[0].observation == polled
         assert not [r for r in step.requests if isinstance(r, core.ObserveOwnedJob)]
-        # Each poll of a live job comes due once, and an ended job is never polled again.
-        # The submission request stays open in the ledger (job observations never reach it),
-        # so the run loop also wakes at that request's limit.
+        # Each poll of a live job comes due once, and an ended job is never polled again. The
+        # submission request stays open in the ledger (job observations never reach it); its
+        # limit is the runner loop's to wake at (`decide`), not a time core asks the clock for.
         job_wait = state.evaluation.jobs[0].wait
         job_due = None if job_wait is None else job_wait.timer
-        limits = [
-            row.until.at
-            for row in state.records.records
-            if row.phase in (core.RequestPhase.PREPARED, core.RequestPhase.DISPATCHED)
-        ]
-        wakes = [due for due in (job_due, *limits) if due is not None]
-        assert core.project(state).next_observe_at == min(wakes)
+        wakes = [] if job_due is None else [job_due]
+        assert core.project(state).next_observe_at == min(wakes, default=None)
         if terminal:
             assert state.evaluation.jobs[0].wait is None
         if not terminal:

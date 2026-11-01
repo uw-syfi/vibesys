@@ -19,7 +19,6 @@ from ._proofs import (
     stop_mode,
 )
 from ._request_ledger import due_retries
-from ._request_recovery import overdue_reconciliations
 from .types.attempts import AttemptPhase, RetireRequested
 from .types.common import (
     AttemptRef,
@@ -667,7 +666,6 @@ def schedule(
                         *filled.signals,
                         ObservationsDue(now_at=context.run.now_at),
                         *due_retries(context.records, context.run.now_at),
-                        *overdue_reconciliations(context.records, context.evaluation, context.run),
                     )
                 }
             )

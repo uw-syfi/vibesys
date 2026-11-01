@@ -28,6 +28,7 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_core.api.testing import reach
 from vs_sim.api.testing import examples
 
 from .test_baseline_in_flight import strategy_baseline
@@ -471,7 +472,7 @@ def test_a_base_run_whose_collection_ends_without_records_is_replaced() -> None:
     collect = ended_without_records(lab, base)
     row = lab.state.records.record(collect)
     assert row is not None
-    lab.state = transition(lab.state, core.ClockAdvanced(now_at=row.until.at + 1.0)).state
+    lab.state = reach(lab.state, row.until.at + 1.0).state
     (again,) = running(lab)
     assert again.plan.purpose == "baseline"
     assert again.request_id != base.request_id

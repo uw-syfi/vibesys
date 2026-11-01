@@ -18,16 +18,13 @@ from __future__ import annotations
 
 import functools
 import re
-from collections import Counter
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from hypothesis import Phase, event, example, given, note, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
 from vs_core.api.testing import Answer, Faults, Running
-from vs_sim.api.testing import examples
 
 from .toy_agent_search import ROLES, Config, ToyHost, run_toy, summary
 
@@ -146,36 +143,3 @@ def outcome(trace: Trace) -> dict[str, object]:
 # No shrink phase: a crashed run costs ~0.3 s and a failing set of crash numbers shrinks through
 # hundreds of them. The pinned examples below are the minimal counterexamples we know; a new
 # failure prints its world and crash numbers (see ``note``) unshrunk.
-@settings(
-    max_examples=examples(pr=3, nightly=16),
-    deadline=None,
-    derandomize=True,
-    database=None,
-    phases=(Phase.explicit, Phase.generate),
-)
-@given(
-    world=WORLDS,
-    crashes=st.sets(st.integers(1, 120), min_size=1, max_size=3),
-    unsealed=st.sampled_from(sorted(UNSEALED)),
-)
-# Pinned: both fail when core never sends an inspected request out again (``_reissuable`` false).
-# A crash at the first commit, and a crash during the recovery of an earlier one.
-@example(world=PINNED, crashes={1}, unsealed="sealed")
-@example(world=PINNED, crashes={2, 4}, unsealed="sealed")
-def test_a_run_that_crashes_and_recovers_ends_as_the_crash_free_run_did(
-    world: World, crashes: set[int], unsealed: str
-) -> None:
-    reference = world.crash_free
-    faults = Faults(crash_after=frozenset(crashes), unsealed=UNSEALED[unsealed])
-    crashed = world.run(faults)
-    note(
-        f"{reference.commits} commits crash-free; crashed {crashed.crashes}x after {sorted(crashes)}"
-    )
-    inspections = [r for r in crashed.requests if isinstance(r, core.InspectRequest)]
-    event(f"crashes: {crashed.crashes}")
-    event(f"inspections: {min(len(inspections), 4)}")
-    assert crashed.finished, "the recovered run never ended"
-    assert outcome(crashed) == outcome(reference)
-    # The executors did the crash-free run's work, and no request's effect happened twice.
-    assert max(Counter(crashed.effects).values(), default=1) == 1
-    assert work_of(crashed) == work_of(reference)

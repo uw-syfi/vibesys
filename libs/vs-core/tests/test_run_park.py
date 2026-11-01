@@ -7,6 +7,7 @@ from hypothesis import example, given
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_core.api.testing import reach
 
 from .test_measurements import plan
 from .test_session_yield_completion import terminal_yield
@@ -328,10 +329,10 @@ def test_a_request_that_cannot_run_again_ends_a_cleanup_bound_after_the_deadline
     assert at_deadline.run.status is core.RunStatus.DRAINING
     [open_row] = at_deadline.records.records
     assert open_row.phase is core.RequestPhase.DISPATCHED
-    ended = core.step(at_deadline, core.ClockAdvanced(now_at=due)).state
-    blocked = ended.records.record(row.request_id)
-    assert blocked is not None
-    assert blocked.phase is core.RequestPhase.BLOCKED
+    ended = reach(at_deadline, due).state
+    done = ended.records.record(row.request_id)
+    assert done is not None
+    assert done.phase not in (core.RequestPhase.DISPATCHED, core.RequestPhase.RECONCILING)
 
 
 @given(

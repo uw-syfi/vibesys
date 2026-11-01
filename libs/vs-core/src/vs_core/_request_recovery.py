@@ -98,10 +98,8 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from .types.common import Observation, ResourceId
-    from .types.evaluation import EvaluationState
     from .types.kernel import RecordsContext, RunState, Signal
     from .types.records import (
-        HostEpoch,
         RecordsEvent,
         RecordsState,
         Request,
@@ -1844,54 +1842,6 @@ def _replace_record(state: RecordsState, record: RequestRecord) -> RecordsState:
                 record if row.request_id == record.request_id else row for row in state.records
             )
         }
-    )
-
-
-def _limit_passed(
-    record: RequestRecord, evaluation: EvaluationState, run: RunState, hosts: tuple[HostEpoch, ...]
-) -> bool:
-    return _wait_clock.record_bound(record, evaluation, run, hosts).at <= run.now_at
-
-
-def overdue_reconciliations(
-    state: RecordsState, evaluation: EvaluationState, run: RunState
-) -> tuple[ReconciliationDeadline | ReconciliationCommandLapsed, ...]:
-    """One deadline event per open record, or lapse per open command, whose limit has passed.
-
-    A record's limit is its bound, derived from its jobs' facts (``_wait_clock.record_bound``).
-    """
-    now_at = run.now_at
-    return (
-        *(
-            ReconciliationDeadline(request_id=record.request_id, now_at=now_at)
-            for record in state.records
-            if is_open(record) and _limit_passed(record, evaluation, run, state.hosts)
-        ),
-        *(
-            ReconciliationCommandLapsed(request_id=record.request_id, now_at=now_at)
-            for record in state.records
-            if command_open(record) and record.until.at <= now_at
-        ),
-    )
-
-
-def next_reconciliation_at(
-    state: RecordsState, evaluation: EvaluationState, run: RunState
-) -> float | None:
-    """The earliest time a ``ClockAdvanced`` would end an open record at its limit."""
-    limits = (
-        (
-            record,
-            _wait_clock.record_bound(record, evaluation, run, state.hosts).at
-            if is_open(record)
-            else record.until.at,
-        )
-        for record in state.records
-        if is_open(record) or command_open(record)
-    )
-    return min(
-        (max(limit_at, _awaiting_report(state, record) or limit_at) for record, limit_at in limits),
-        default=None,
     )
 
 

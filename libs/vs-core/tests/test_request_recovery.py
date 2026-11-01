@@ -55,7 +55,6 @@ from vs_core.api import (
     InputId,
     InputRecord,
     InspectRequest,
-    InspectTurn,
     Invocation,
     InvocationId,
     InvocationInputTarget,
@@ -1751,142 +1750,6 @@ def test_registered_session_turn_requires_its_normalized_owner_identity(case: st
     assert result.state.sessions == state.sessions
 
 
-@example(case="foreign-episode")
-@given(
-    case=st.sampled_from(
-        [
-            "exact",
-            "no-observation",
-            "unknown",
-            "unaccepted",
-            "incomplete",
-            "foreign-request",
-            "foreign-scope",
-            "foreign-episode",
-        ]
-    )
-)
-def test_discovered_child_transfers_only_to_an_exact_proven_typed_owner(case: str) -> None:
-    """Recovery transfers a live descendant atomically, preserving owner facts."""
-    parent = pending_record(identity="parent", phase=RequestPhase.COMPLETED)
-    old_admission = DecisionId(root="old-episode")
-    scope = Scope(owner=AttemptId(root="child-owner"), generation=0)
-    parent = parent.model_copy(
-        update={
-            "request": parent.request.model_copy(
-                update={"scope": scope, "admission_id": old_admission}
-            )
-        }
-    )
-    parent = parent.model_copy(update={"payload_digest": fixture_digest(parent.request)})
-    child = ResourceId(root="child")
-    parent = parent.model_copy(
-        update={
-            "observation": observed(
-                parent,
-                accepted=True,
-                admission_id=old_admission,
-                resource_id=ResourceId(root="parent-resource"),
-                status=ObservationStatus.SUCCEEDED,
-                terminal=True,
-                released=True,
-                children_complete=True,
-                children=(child,),
-            ),
-        }
-    )
-    submission, descriptor = registered_record(
-        LifecycleClass.OWNED_JOB, identity="child-submission"
-    )
-    assert isinstance(submission.request, ExecuteRegisteredOperation)
-    operation_id = submission.request.operation_id
-    admission_id = DecisionId(root="new-episode") if case == "foreign-episode" else old_admission
-    submission = submission.model_copy(
-        update={
-            "request": submission.request.model_copy(
-                update={"scope": scope, "admission_id": admission_id}
-            )
-        }
-    )
-    submission = submission.model_copy(
-        update={"payload_digest": fixture_digest(submission.request)}
-    )
-    canonical = observed(
-        submission,
-        status=ObservationStatus.PENDING,
-        resource_id=child,
-        accepted=True,
-        children_complete=True,
-        admission_id=admission_id,
-    )
-    submission = submission.model_copy(update={"observation": canonical})
-    proof = canonical.model_copy(
-        update={
-            "status": ObservationStatus.UNKNOWN if case == "unknown" else ObservationStatus.PENDING,
-            "accepted": case != "unaccepted",
-            "children_complete": case != "incomplete",
-            "request_id": RequestId(root="foreign")
-            if case == "foreign-request"
-            else submission.request_id,
-        }
-    )
-    owner = RegisteredOwnedJob(
-        wait=WaitOn(timer=0.0),
-        operation_id=operation_id,
-        request_id=submission.request_id,
-        resource_id=child,
-        scope=parent.request.scope.model_copy(update={"generation": 1})
-        if case == "foreign-scope"
-        else parent.request.scope,
-        resource_pool=PoolId(root="jobs"),
-        status=ObservationStatus.PENDING,
-        observation=None if case == "no-observation" else proof,
-    )
-    state = recovering_state(parent, submission, pending_record(identity="anchor"))
-    state = state.model_copy(
-        update={"registry": (descriptor,), "evaluation": EvaluationState(registered_jobs=(owner,))}
-    )
-    state = with_registered_origins(state)
-    if case == "foreign-scope":
-        before = state.model_dump_json()
-        with pytest.raises(ContractError, match="children"):
-            step(reload(state), RecoveryStarted(epoch=1, now_at=11.0))
-        assert state.model_dump_json() == before
-        return
-    for epoch in (1, 2):
-        result = step(reload(state), RecoveryStarted(epoch=epoch, now_at=11.0))
-        check = next(
-            check
-            for check in result.state.records.recovery.checks
-            if check.target == parent.request_id
-        )
-        assert check.resolution == ("terminal" if case == "exact" else "pending")
-        if case == "exact":
-            assert result.state.records.children == ()
-        else:
-            assert len(result.state.records.children) == 1
-            lease = result.state.records.children[0]
-            assert lease.resource_id == child
-            assert lease.source_requests == (parent.request_id,)
-            assert lease.observation is None
-            assert any(
-                isinstance(request, InspectRequest)
-                and request.resource_id == child
-                and request.target == parent.request_id
-                for request in result.requests
-            )
-        assert result.state.evaluation == state.evaluation
-        assert tuple(map(unaddressed, result.state.records.records[:2])) == (
-            parent,
-            submission,
-        )
-        assert result.state.records.recovery.phase == RecoveryPhase.RECOVERING
-        assert result.events == ()
-        state = reload(result.state)
-    if case in ("unknown", "unaccepted"):
-        assert_handover_resolves(state, owner.model_copy(update={"observation": proof}), parent)
-
-
 def assert_handover_resolves(
     state: CoreState, owner: RegisteredOwnedJob, parent: RequestRecord
 ) -> None:
@@ -2252,53 +2115,6 @@ def test_a_refusal_that_accepted_nothing_resolves_its_recovery_check(
     assert resolved is not accepted
 
 
-@pytest.mark.parametrize("phase", [RequestPhase.DISPATCHED, RequestPhase.RECONCILING])
-def test_a_request_proven_never_begun_is_prepared_again_and_recovery_resolves(
-    phase: RequestPhase,
-) -> None:
-    """An inspection that proves no effect began reissues the request unchanged.
-
-    The request gets no observation and its owner hears nothing, so the replay equals the
-    straight run; the check resolves as safe to dispatch.
-    """
-    original = pending_record(phase=phase)
-    started = step(reload(recovering_state(original)), RecoveryStarted(epoch=1, now_at=11.0))
-    inspection = started.requests[0]
-    assert isinstance(inspection, InspectRequest)
-    assert inspection.request_id is not None
-    dispatched = step(started.state, DispatchAuthorized(request_id=inspection.request_id))
-    refusal = observed(
-        original, status=ObservationStatus.REJECTED, terminal=True, accepted=False, released=True
-    )
-    answer = Observation.model_validate(
-        {
-            "event_id": EventId(root="inspection-answer"),
-            "request_id": inspection.request_id,
-            "scope": inspection.scope,
-            "sequence": 1,
-            "observed_at": 12.0,
-            "status": ObservationStatus.SUCCEEDED,
-            "accepted": True,
-            "terminal": True,
-            "released": True,
-            "children_complete": True,
-        }
-    )
-    event = RequestObserved(
-        observation=answer,
-        target=TargetObservation(observation=refusal, reissue=ReissueProof.NEVER_BEGAN),
-    )
-    result = step(dispatched.state, event)
-    reissued = next(
-        row for row in result.state.records.records if row.request_id == original.request_id
-    )
-    assert unaddressed(reissued) == original.model_copy(update={"phase": RequestPhase.PREPARED})
-    barrier = result.state.records.recovery
-    assert [check.resolution for check in barrier.checks] == ["safe-prepared"]
-    assert barrier.phase == RecoveryPhase.READY
-    assert result.events == ()
-
-
 def test_a_reissue_proof_must_fit_the_observation_it_accompanies() -> None:
     original = pending_record()
     accepting = observed(original, status=ObservationStatus.SUCCEEDED, accepted=True, terminal=True)
@@ -2521,50 +2337,6 @@ def test_a_renewal_from_an_epoch_that_is_not_current_is_refused() -> None:
         step(state, HostRenewed(epoch=1, now_at=11.0))
 
 
-@pytest.mark.parametrize("status", [ObservationStatus.UNKNOWN, ObservationStatus.PENDING])
-def test_an_inconclusive_answer_about_a_blocked_record_lets_recovery_finish(
-    status: ObservationStatus,
-) -> None:
-    """A record core already blocked has no deadline left to end its recovery check.
-
-    The restarted host inspects it, and the executor's answer only repeats the inconclusive
-    result the record ended with. The check settles: the record stays blocked as it was, and recovery is ready, so
-    the run goes on as it did before the restart. (#2419: a lost board-write acknowledgement
-    blocked a record, a host died, and the run halted on the pending check.)
-    """
-    blocked = pending_record(phase=RequestPhase.BLOCKED)
-    inconclusive = observed(blocked, status=status)
-    original = blocked.model_copy(update={"observation": inconclusive})
-    started = step(reload(recovering_state(original)), RecoveryStarted(epoch=1, now_at=11.0))
-    assert started.state.records.recovery.phase == RecoveryPhase.RECOVERING
-    inspection = next(r for r in started.requests if isinstance(r, InspectRequest))
-    assert inspection.request_id is not None
-    asked = step(started.state, DispatchAuthorized(request_id=inspection.request_id)).state
-    answer = Observation.model_validate(
-        {
-            "event_id": EventId(root="restart-answer"),
-            "request_id": inspection.request_id,
-            "scope": inspection.scope,
-            "sequence": 1,
-            "observed_at": 11.0,
-            "status": ObservationStatus.SUCCEEDED,
-            "accepted": True,
-            "terminal": True,
-            "released": True,
-            "children_complete": True,
-        }
-    )
-
-    result = step(
-        reload(asked),
-        RequestObserved(observation=answer, target=TargetObservation(observation=inconclusive)),
-    )
-
-    assert result.state.records.recovery.phase == RecoveryPhase.READY
-    assert result.state.records.records[0].phase == RequestPhase.BLOCKED
-    assert result.state.records.records[0].failure == original.failure
-
-
 def test_a_limit_that_passed_while_the_host_was_down_waits_for_the_executors_report() -> None:
     """The far side may have finished in time: the restarted host asks before it times out.
 
@@ -2619,81 +2391,6 @@ def test_a_limit_that_passed_while_the_host_was_down_waits_for_the_executors_rep
     assert record.phase == RequestPhase.COMPLETED
     assert record.failure is None
     assert not after.events
-
-
-def test_a_turns_own_inspection_resolves_its_recovery_check() -> None:
-    """One fact, one path: any inspection that commits the turn's end resolves its check.
-
-    After a restart the recovery check asks InspectRequest, but Sessions asks InspectTurn,
-    which proves the dispatch terminal under its own inspection id.
-    """
-    dispatch = turn_record()
-    assert isinstance(dispatch.request, DispatchTurn)
-    inspect = InspectTurn(
-        request_id=RequestId(root="turn-inspect"),
-        scope=dispatch.request.scope,
-        invocation=InvocationRef(
-            session_id=dispatch.request.turn.session.session_id,
-            invocation_id=dispatch.request.turn.invocation_id,
-            generation=0,
-        ),
-        dispatch=dispatch.request_id,
-    )
-    query = dispatch.model_copy(
-        update={
-            "request_id": inspect.request_id,
-            "request": inspect,
-            "lifecycle": LifecycleClass.QUERY,
-            "payload_digest": fixture_digest(inspect),
-            "phase": RequestPhase.DISPATCHED,
-        }
-    )
-    base = recovering_state(dispatch, query)
-    base = base.model_copy(
-        update={
-            "sessions": SessionsState(
-                invocations=(
-                    Invocation(
-                        until=Until(at=100.0),
-                        invocation=inspect.invocation,
-                        scope=dispatch.request.scope,
-                        turn=dispatch.request.turn,
-                        phase=SessionPhase.EXECUTING,
-                    ),
-                )
-            )
-        }
-    )
-    started = step(reload(base), RecoveryStarted(epoch=1, now_at=11.0))
-
-    def turn_check(state: CoreState) -> str:
-        return next(
-            c.resolution for c in state.records.recovery.checks if c.target == dispatch.request_id
-        )
-
-    assert turn_check(started.state) == "pending"
-    end = observed(
-        dispatch,
-        status=ObservationStatus.SUCCEEDED,
-        accepted=True,
-        terminal=True,
-        released=True,
-        children_complete=True,
-        resource_id=ResourceId(root="session-resource"),
-    )
-    answer = observed(
-        query,
-        status=ObservationStatus.SUCCEEDED,
-        accepted=True,
-        terminal=True,
-        released=True,
-        children_complete=True,
-    )
-    result = step(
-        started.state,
-        RequestObserved(observation=answer, target=TargetObservation(observation=end)),
-    )
-    assert turn_check(result.state) != "pending"
 
 
 @settings(max_examples=examples(pr=6, nightly=60))

@@ -15,8 +15,10 @@ from hypothesis import strategies as st
 from pydantic import BaseModel
 
 import vs_core.api as core
+from vs_core.api.testing import reach
 
 from .test_measurements import observation, requested
+from .wait_support import OPEN
 
 _LIMIT = st.integers(min_value=1, max_value=90).map(float)
 _QUEUED = st.integers(min_value=0, max_value=5000).map(float)
@@ -81,8 +83,8 @@ def _record(state: core.CoreState, request: core.Request) -> core.RequestRecord:
 
 
 def _blocked_at(state: core.CoreState, request: core.Request, at: float) -> bool:
-    after = core.step(state, core.ClockAdvanced(now_at=at)).state
-    return _record(after, request).phase == core.RequestPhase.BLOCKED
+    after = reach(state, at).state
+    return _record(after, request).phase not in OPEN
 
 
 @given(limit=_LIMIT, queued=_QUEUED)
@@ -90,7 +92,7 @@ def test_a_queued_operation_spends_none_of_its_limit(limit: float, queued: float
     state, request = _operation(limit)
     assert request.request_id is not None
 
-    state = core.step(state, core.ClockAdvanced(now_at=queued)).state
+    state = reach(state, queued).state
     assert _record(state, request).phase == core.RequestPhase.PREPARED
 
     state = core.step(

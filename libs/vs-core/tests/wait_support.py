@@ -11,6 +11,9 @@ import vs_core.api as core
 
 RUN_DEADLINE = 10_000.0
 
+OPEN = (core.RequestPhase.PREPARED, core.RequestPhase.DISPATCHED, core.RequestPhase.RECONCILING)
+"""The phases of a request that has no result yet."""
+
 
 class Written(core.Value):
     done: bool
@@ -86,7 +89,8 @@ def operations(state: core.CoreState) -> list[core.RequestRecord]:
 
 
 def open_records(state: core.CoreState) -> list[core.RequestRecord]:
-    return [r for r in operations(state) if r.phase is not core.RequestPhase.BLOCKED]
+    """The operations that have no result yet."""
+    return [r for r in operations(state) if r.phase in OPEN]
 
 
 def failures(transition: core.Transition) -> list[core.Failed]:

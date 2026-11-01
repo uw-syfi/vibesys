@@ -37,6 +37,7 @@ from vs_core.testing.flows import (
     code_changed,
     fake_search,
 )
+from vs_core.testing.limits import next_end, reach
 from vs_core.testing.liveness import Budget, End, Journal, Violation, assert_live, liveness
 from vs_core.testing.persisted_schema import (
     Incompatibility,
@@ -84,7 +85,9 @@ __all__ = [
     "fake_search",
     "liveness",
     "new_run",
+    "next_end",
     "parse_schema_snapshot",
+    "reach",
     "sample_limits",
     "sample_retries",
     "schema_digest",

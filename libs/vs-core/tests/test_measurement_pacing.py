@@ -169,22 +169,6 @@ def polls_after(world: World) -> list[core.ObserveOwnedJob]:
     return world.tick(world.clock)
 
 
-@given(interval=intervals, extra=caps)
-def test_a_poll_that_reached_its_limit_is_polled_anew_once_after_its_backoff(
-    interval: float, extra: float
-) -> None:
-    world = World(limits(interval, extra))
-    assert [p.resource_id for p in world.tick(interval)] == [JOB]
-    late = interval + world.limits.reconciliation_bound + QUARTER
-    # The limit blocks the poll in the step that advances the clock; the ended poll wakes the
-    # job, which waits on its backoff timer and asks anew when that comes.
-    assert world.tick(late) == []
-    assert world.due is not None
-    assert world.due - world.clock <= world.limits.observe_backoff_cap
-    assert [p.resource_id for p in world.tick(world.due)] == [JOB]
-    assert world.tick(world.clock + QUARTER) == []
-
-
 @settings(max_examples=examples(pr=4, nightly=100))
 @given(interval=intervals, extra=caps, retries=st.integers(min_value=1, max_value=12))
 def test_an_unknown_poll_is_retried_within_the_backoff_bound(

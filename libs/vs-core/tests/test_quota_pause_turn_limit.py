@@ -31,9 +31,11 @@ from vs_core.api.recovery import (
     interrupted_message,
     started_message,
 )
+from vs_core.api.testing import reach
 from vs_proto.api import EpochStarted, Oneof, Record, Timestamp
 
 from .test_turn_limit_from_dispatch import _RUN_DEADLINE, _prepared, _reserved
+from .wait_support import OPEN
 
 _LIMIT = st.integers(min_value=10, max_value=1000).map(float)
 
@@ -68,13 +70,15 @@ def _record(state: core.CoreState, request_id: core.RequestId) -> core.RequestRe
 
 
 def _ticked(state: core.CoreState, times: list[float]) -> core.CoreState:
+    """The run clock reaches each time in turn, and the loop records what `decide` ends."""
     for at in times:
-        state = core.step(state, core.ClockAdvanced(now_at=at)).state
+        state = reach(state, at).state
     return state
 
 
 def _blocked(state: core.CoreState, request_id: core.RequestId) -> bool:
-    return _record(state, request_id).phase == core.RequestPhase.BLOCKED
+    """Whether the turn's dispatch has ended: its limit passed and the loop recorded it."""
+    return _record(state, request_id).phase not in OPEN
 
 
 @given(
