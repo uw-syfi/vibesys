@@ -526,9 +526,11 @@ def _retry_at(state: CoreState, attempts: StepAttempts | None) -> float:
 
     The wait counts from the record that last charged an attempt and doubles with each charge
     (``Limits.request_retries``), so a runner that raises at once, or a host that dies each time,
-    spends its tries over time and not in one instant. A step with no charge starts at once.
+    spends its tries over time and not in one instant. A step with no charge starts at once, and so
+    does one of a run that is ending: ending a run needs no time (rule 4), so its cleanup retries
+    at once, still within the step's bound.
     """
-    if attempts is None or attempts.charged_at is None:
+    if attempts is None or attempts.charged_at is None or _run_is_ending(state):
         return -math.inf
     return attempts.charged_at + state.run.limits.request_retries.delay(attempts.charged)
 

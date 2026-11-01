@@ -566,8 +566,9 @@ kind. The rule is:
 - an open step that has a charged attempt is not `Run` before `StepAttempts.charged_at` plus
   `Limits.request_retries.delay(charged)`: the fold records the run clock of the `RAISED` record, and of the
   `LOST` record that charged a dead host's attempt, and `decide` waits (`Wait` until that time) instead. A
-  pause or an adopted attempt charges nothing and waits for nothing. The step's own limit still ends it:
-  a backoff never outlasts `Settle(Cancelled(DEADLINE))`;
+  pause or an adopted attempt charges nothing and waits for nothing, and neither does a step of a run that
+  is ending: ending needs no time, so its cleanup runs again at once, still within the retry bound. The
+  step's own limit still ends it: a backoff never outlasts `Settle(Cancelled(DEADLINE))`;
 - an open step marked `on_interrupt = CANCEL` whose attempt ended without a result, by an interruption
   record or by its process, is `Settle(Cancelled(INTERRUPTED))`;
 - an open step whose dependency can never succeed is `Settle(Cancelled(WITHDRAWN))`; one whose dependency is
