@@ -1,0 +1,134 @@
+syntax = "proto3";
+package vibesys.cli.v1;
+
+import "vibesys/cli/v1/failure.proto";
+import "vibesys/cli/v1/job.proto";
+import "vibesys/cli/v1/version.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
+
+// SupervisorService is what one job's supervisor serves over a private Unix socket in the job's
+// run directory. The daemon is its only client: it dials a supervisor when it starts the job, and
+// again after a restart of its own, so a supervisor never has to find the daemon.
+//
+// A supervisor starts parked. It runs nothing until Start, so the daemon can record the job as
+// running before the command runs, and a job that was never recorded as running never runs. After
+// the command ends the supervisor keeps the outcome and the output until Release, so a daemon
+// that was away still collects both. A call that cannot complete returns a gRPC error status whose
+// details carry a Failure.
+service SupervisorService {
+  // Handshake is the version handshake. The daemon sends COMPONENT_DAEMON and its versions, and
+  // goes on only if the answer is COMPATIBLE. The answer carries the supervisor's own versions.
+  rpc Handshake(HandshakeRequest) returns (HandshakeResponse);
+
+  // Start begins the job. It is idempotent: a started supervisor answers the same way.
+  rpc Start(StartRequest) returns (StartResponse);
+
+  // Attach streams the job's output from an offset and then, once the command has ended, its
+  // outcome as the last message. A caller that comes back with the offset it already holds
+  // receives each byte once, so the daemon can resume after its own restart. Attach does not end
+  // the supervisor.
+  rpc Attach(AttachRequest) returns (stream AttachResponse);
+
+  // CancelJob asks the supervisor to end the whole process group of the job. It returns once the
+  // request is recorded, not once the group has ended: the outcome says that. A cancel after the
+  // command ended changes nothing. The first reason wins.
+  rpc CancelJob(CancelJobRequest) returns (CancelJobResponse);
+
+  // Release ends the supervisor and removes what it kept. It refuses a job that is running,
+  // since a running job is cancelled first and released after its outcome is recorded. A parked
+  // supervisor is released to abort a job that never started.
+  rpc Release(ReleaseRequest) returns (ReleaseResponse);
+}
+
+// Launch is what one supervisor runs: a job as the daemon resolved it. The daemon writes it into
+// the run directory before it starts the supervisor, so the supervisor decides nothing: the
+// environment is a concrete kind, never unspecified, and a command's timeout is positive.
+message Launch {
+  // The repository and task name the store the job belongs to; the daemon reads them back after a
+  // restart to find that store.
+  string repository = 1;
+  string task = 2;
+  string job_id = 3;
+  JobSpec spec = 4;
+}
+
+// ExecutionKind is how a command ended.
+enum ExecutionKind {
+  EXECUTION_KIND_UNSPECIFIED = 0;
+  EXECUTION_KIND_EXITED = 1;
+  EXECUTION_KIND_TIMED_OUT = 2;
+  EXECUTION_KIND_CANCELLED = 3;
+  EXECUTION_KIND_SERVICE_NOT_READY = 4;
+  EXECUTION_KIND_SERVICE_EXITED = 5;
+  // The environment cannot say what happened, such as a lost connection to a container. It is
+  // neither success nor failure.
+  EXECUTION_KIND_UNKNOWN = 6;
+}
+
+message ExecutionOutcome {
+  ExecutionKind kind = 1;
+  // Set when kind is EXITED.
+  int32 exit_code = 2;
+}
+
+// SupervisorOutcome is the one report a supervisor makes about its job.
+message SupervisorOutcome {
+  oneof result {
+    // The command ran, or was killed, and this is how it ended.
+    ExecutionOutcome executed = 1;
+    // The command could not be attempted, such as a checkout or an environment that failed.
+    Failure not_attempted = 2;
+  }
+  // The reason of the cancel request, present when one reached the supervisor before the command
+  // ended. The reason may be empty, so presence and not the text says that a cancel was asked. A
+  // command that ended on its own before the request still reports how it ended.
+  optional string cancel_reason = 3;
+}
+
+message HandshakeRequest {
+  // Always COMPONENT_DAEMON: the daemon is the only caller of a supervisor.
+  Component component = 1;
+  // The caller's versions.
+  BuildVersions versions = 2;
+}
+
+message HandshakeResponse {
+  // The supervisor's own versions.
+  BuildVersions versions = 1;
+  // Whether the two builds can talk, judged from the supervisor's side.
+  Compatibility compatibility = 2;
+}
+
+message StartRequest {}
+
+message StartResponse {}
+
+message AttachRequest {
+  // Where in the job's output to continue from.
+  uint64 offset = 1;
+}
+
+message OutputChunk {
+  // Where this chunk begins in the job's output.
+  uint64 offset = 1;
+  bytes data = 2;
+}
+
+message AttachResponse {
+  oneof item {
+    OutputChunk output = 1;
+    // The last message of a stream: every byte of output was sent before it.
+    SupervisorOutcome outcome = 2;
+  }
+}
+
+message CancelJobRequest {
+  string reason = 1;
+}
+
+message CancelJobResponse {}
+
+message ReleaseRequest {}
+
+message ReleaseResponse {}

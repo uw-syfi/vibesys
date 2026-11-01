@@ -1,0 +1,117 @@
+package app
+
+import (
+	"context"
+	"fmt"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"strings"
+	"sync"
+
+	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/store"
+	"github.com/uw-syfi/vibesys/cli/internal/store/memstore"
+)
+
+// Scope names the store a request is about: one task in one repository.
+type Scope struct {
+	Repository string
+	Task       string
+}
+
+// Validate checks the scope is one a store can be made for, naming the field that is not.
+func (s Scope) Validate() error {
+	if !filepath.IsAbs(s.Repository) {
+		return &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("context.repository: %q is not an absolute path", s.Repository)}
+	}
+	if !taskName.MatchString(s.Task) || strings.HasPrefix(s.Task, ".") {
+		return &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf(
+			"context.task: %q is not a task name (1 to 128 of A-Z, a-z, 0-9, dot, underscore and hyphen, not starting with a dot)", s.Task)}
+	}
+	return nil
+}
+
+var taskName = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
+
+// Stores opens the stores the daemon serves. The daemon is the only user of a store, so an
+// implementation hands the same store to every Open of a scope for as long as it lives.
+type Stores interface {
+	// Open returns the store of the scope, creating it when it is missing, and records that the
+	// scope has one, so that Known finds it after a restart.
+	Open(ctx context.Context, scope Scope) (store.Store, error)
+
+	// Known returns every scope that has a store.
+	Known(ctx context.Context) ([]Scope, error)
+}
+
+// Rules returns the task-dependent decisions of internal/core that a store is opened with. Reuse
+// is core.PlanCache asked about one saved result: a saved result answers a submission only when
+// the cache would reuse it as it is, so a measurement with too few samples is topped up and not
+// reused. defaultSamples is the task's default sample count.
+func Rules(defaultSamples uint32) store.Rules {
+	return store.Rules{
+		DefaultSamples: defaultSamples,
+		Reuse: func(saved core.Result, want core.Submission) bool {
+			plan, err := core.PlanCache(core.CacheQuery{
+				Key:            want.Key,
+				Settings:       want.Spec.Settings,
+				DefaultSamples: defaultSamples,
+				NoCache:        want.NoCache,
+				Saved:          []core.Result{saved},
+			})
+			return err == nil && plan.Action == core.CacheReuse
+		},
+	}
+}
+
+// MemoryStores is Stores over in-memory stores. It stands for the disk in tests: building a new
+// App over the same MemoryStores is a daemon that restarts.
+type MemoryStores struct {
+	rules store.Rules
+
+	mu     sync.Mutex
+	stores map[Scope]*memstore.Store
+}
+
+var _ Stores = (*MemoryStores)(nil)
+
+// NewMemoryStores returns Stores whose stores are opened with the rules.
+func NewMemoryStores(rules store.Rules) *MemoryStores {
+	return &MemoryStores{rules: rules, stores: map[Scope]*memstore.Store{}}
+}
+
+// Open implements Stores.
+func (m *MemoryStores) Open(ctx context.Context, scope Scope) (store.Store, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.stores[scope]
+	if !ok {
+		s = memstore.New(memstore.WithRules(m.rules))
+		m.stores[scope] = s
+	}
+	return s, nil
+}
+
+// Known implements Stores.
+func (m *MemoryStores) Known(ctx context.Context) ([]Scope, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]Scope, 0, len(m.stores))
+	for scope := range m.stores {
+		out = append(out, scope)
+	}
+	slices.SortFunc(out, func(a, b Scope) int {
+		if c := strings.Compare(a.Repository, b.Repository); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Task, b.Task)
+	})
+	return out, nil
+}

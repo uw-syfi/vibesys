@@ -55,6 +55,27 @@ func TestLayerRules(t *testing.T) {
 		{"a memstore test cannot import filestore", map[string]string{"cli/internal/store/memstore/a_test.go": goFile(module + "internal/store/filestore")}, true},
 		{"the contract suite imports core and the store", map[string]string{"cli/internal/store/storetest/a.go": goFile(module+"internal/core", module+"internal/store")}, false},
 		{"the contract suite cannot import an implementation", map[string]string{"cli/internal/store/storetest/a.go": goFile(module + "internal/store/memstore")}, true},
+		{"the command line cannot import the domain", map[string]string{"cli/cmd/vibesys-cli/a.go": goFile(module + "internal/core")}, true},
+		{"the command line imports the client", map[string]string{"cli/cmd/vibesys-cli/a.go": goFile(module+"internal/client", module+"gen/vibesys/cli/v1", module+"internal/wire")}, false},
+		{"the command line cannot import the daemon", map[string]string{"cli/cmd/vibesys-cli/a.go": goFile(module + "internal/daemon")}, true},
+		{"the client cannot import the domain", map[string]string{"cli/internal/client/a.go": goFile(module + "internal/core")}, true},
+		{"the client cannot import the daemon", map[string]string{"cli/internal/client/a.go": goFile(module + "internal/daemon")}, true},
+		{"the daemon cannot import the client", map[string]string{"cli/internal/daemon/a.go": goFile(module + "internal/client")}, true},
+		{"the daemon imports the job flows", map[string]string{"cli/internal/daemon/a.go": goFile(module+"internal/app", module+"internal/wire")}, false},
+		{"the job flows cannot import the daemon", map[string]string{"cli/internal/app/a.go": goFile(module + "internal/daemon")}, true},
+		{"the job flows cannot import generated types", map[string]string{"cli/internal/app/a.go": goFile(module + "gen/vibesys/cli/v1")}, true},
+		{"the lifecycle machine cannot import the store", map[string]string{"cli/internal/lifecycle/a.go": goFile(module + "internal/store")}, true},
+		{"the domain cannot import the lifecycle machine", map[string]string{"cli/internal/core/a.go": goFile(module + "internal/lifecycle")}, true},
+		{"a supervisor cannot import the daemon", map[string]string{"cli/internal/supervisor/a.go": goFile(module + "internal/daemon")}, true},
+		{"the supervisor domain cannot import its transport", map[string]string{"cli/internal/supervisor/a.go": goFile(module + "internal/supervisor/rpc")}, true},
+		{"the transport imports the supervisor domain", map[string]string{"cli/internal/supervisor/rpc/a.go": goFile(module+"internal/supervisor", module+"internal/wire")}, false},
+		{"the wiring imports the daemon and the client", map[string]string{"cli/internal/production/a.go": goFile(module+"internal/daemon", module+"internal/client")}, false},
+		{"nothing but the wiring and the command line imports the wiring", map[string]string{"cli/internal/daemon/a.go": goFile(module + "internal/production")}, true},
+		{"a daemon test composes fakes", map[string]string{"cli/internal/daemon/a_test.go": goFile(module + "internal/environment/fakeenv")}, false},
+		{"daemon code cannot import a fake", map[string]string{"cli/internal/daemon/a.go": goFile(module + "internal/environment/fakeenv")}, true},
+		{"the wiring cannot import a fake", map[string]string{"cli/internal/production/a.go": goFile(module + "internal/environment/fakeenv")}, true},
+		{"the wiring cannot import the test daemon", map[string]string{"cli/internal/production/a.go": goFile(module + "internal/daemon/daemontest")}, true},
+		{"the command line's tests compose a daemon", map[string]string{"cli/cmd/vibesys-cli/a_test.go": goFile(module+"internal/daemon/daemontest", module+"internal/core")}, false},
 		{"an unparsable file fails", map[string]string{"cli/internal/core/a.go": "package ("}, true},
 	}
 	for _, c := range cases {
@@ -130,5 +151,29 @@ func TestRepositoryObeysTheRules(t *testing.T) {
 	}
 	for _, line := range archcheck.Violations(files) {
 		t.Error(line)
+	}
+}
+
+// Product code never imports a package that exists for tests: a fake, a contract suite or a test
+// daemon. Each support package is allowed to be imported by test files only, in every package.
+func TestSupportPackagesAreImportedByTestsOnly(t *testing.T) {
+	support := []string{
+		"internal/environment/fakeenv", "internal/supervisor/suptest", "internal/daemon/daemontest",
+		"internal/store/storetest",
+	}
+	var productDirs []string
+	for dir := range archcheck.Rules() {
+		productDirs = append(productDirs, dir)
+	}
+	for _, target := range support {
+		for _, dir := range productDirs {
+			if dir == target || strings.HasSuffix(dir, "test") || strings.HasSuffix(dir, "fakeenv") {
+				continue
+			}
+			got := archcheck.Violations(map[string]string{"cli/" + dir + "/a.go": goFile(module + target)})
+			if len(got) == 0 {
+				t.Errorf("product code in %s may import the test support package %s", dir, target)
+			}
+		}
 	}
 }
