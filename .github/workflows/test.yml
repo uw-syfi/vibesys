@@ -70,6 +70,7 @@ jobs:
       pnpm_packages: ${{ steps.filter.outputs.pnpm_packages }}
       impact: ${{ steps.filter.outputs.impact }}
       gateway: ${{ steps.filter.outputs.gateway }}
+      cli: ${{ steps.filter.outputs.cli }}
       example_pointers: ${{ steps.example-pointers.outputs.example_pointers }}
       e2e_specs: ${{ steps.e2e.outputs.specs }}
       e2e_shards: ${{ steps.e2e.outputs.shards }}
@@ -586,6 +587,26 @@ jobs:
 
       - name: Check the host gateway
         run: ./support/repoctl/repoctl run-checks --group gateway_checks
+
+  # Runs on every push to main for the same reason as `gateway`: a merge-queue run restores the
+  # Go caches a passing main run saved.
+  cli:
+    needs: changes
+    if: needs.changes.outputs.cli == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: Check vibesys-cli
+        run: ./support/repoctl/repoctl run-checks --group cli_checks
 
   impact-tool:
     needs: changes
@@ -1532,6 +1553,7 @@ jobs:
       - stitch
       - impact-tool
       - gateway
+      - cli
       - validate-examples
       - validate-examples-cpu-check
       - native-evaluator-examples
@@ -1601,6 +1623,7 @@ jobs:
       - queue-native
       - impact-tool
       - gateway
+      - cli
       - validate-examples
       - validate-examples-cpu-check
       - native-evaluator-examples

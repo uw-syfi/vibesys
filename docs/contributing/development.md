@@ -344,7 +344,7 @@ every test still runs before every merge:
 
 | Stage | Event | What runs | Budget |
 | --- | --- | --- | --- |
-| Commit stage | `pull_request` | Change selection, format, lint, types, the Python repository-policy checks and guards (`python-checks`, `python-guards`), the Python tests the change reaches through imports (`test-impact`), the client quality, unit-test and build checks, the gateway and `repoctl` tests | warns at 270 s, fails at 360 s |
+| Commit stage | `pull_request` | Change selection, format, lint, types, the Python repository-policy checks and guards (`python-checks`, `python-guards`), the Python tests the change reaches through imports (`test-impact`), the client quality, unit-test and build checks, the gateway, `vibesys-cli` and `repoctl` tests | warns at 270 s, fails at 360 s |
 | Full stage | `merge_group`, `push` to `main` | The commit stage's checks and everything else: every Python test shard, the client end-to-end shards, seed exploration, coverage and patch coverage, the real-system tiers, the examples, the agent image and Feature tests, the sandbox jobs | warns at 270 s, fails at 600 s |
 
 The merge queue runs the full stage on the tree the merge will produce, so a change that passes
