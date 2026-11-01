@@ -8,16 +8,13 @@
 import {afterAll, afterEach, beforeAll, test} from 'bun:test';
 import {create, toBinary} from '@bufbuild/protobuf';
 import {RecordSchema, RunEntrySchema, RunLiveness} from '@vibesys/proto';
-import {fixtureNamed, storeRunFixture} from '@vibesys/run-fixtures';
+import {storeRunFixture} from '@vibesys/run-fixtures';
 import {FakeClock} from '@vibesys/transport/testing';
-import {IDBFactory} from 'fake-indexeddb';
 import {Window} from 'happy-dom';
 import {act} from 'react';
 import {notSee, see} from './testing/dom-query.js';
-import {seedOf} from './testing/fixture-seed.js';
-import {wire} from './testing/gateway-fixture.js';
-import {openRun} from './testing/run-screen.js';
-import {type OpenShell, openShell} from './testing/shell-world.js';
+import {shellOnRun, storedWorld} from './testing/run-screen.js';
+import type {OpenShell} from './testing/shell-world.js';
 
 const window = new Window();
 const installed = Object.getOwnPropertyNames(window).filter(name => !(name in globalThis));
@@ -42,10 +39,8 @@ afterEach(async () => {
   shell = undefined;
 });
 
-/** The run's listing on the dashboard and its replay in the Fake gateway. */
+/** The run's records in the Fake gateway and the host's word of its liveness, the shell open on it. */
 async function opened(kind: 'live' | 'short', liveness: RunLiveness, hold?: boolean) {
-  // A fresh copy keeps nothing the last one cached.
-  Object.assign(globalThis, {indexedDB: new IDBFactory()});
   const fixture = storeRunFixture(kind);
   const records =
     hold === undefined
@@ -67,13 +62,10 @@ async function opened(kind: 'live' | 'short', liveness: RunLiveness, hold?: bool
             },
           }),
         ];
-  const input = wire({...fixture, records, initialCount: records.length}, liveness);
-  shell = await openShell(null, {
-    schedule: new FakeClock().schedule,
-    seed: seedOf({...fixtureNamed('finished-run'), runId: 'run-a'}, 'ink'),
-    run: {input, updates: {}},
-  });
-  await openRun(shell);
+  shell = await shellOnRun(
+    storedWorld({...fixture, records, initialCount: records.length}, liveness),
+    new FakeClock().schedule,
+  );
   return shell;
 }
 
