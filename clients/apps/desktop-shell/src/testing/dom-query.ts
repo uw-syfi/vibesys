@@ -34,6 +34,10 @@ const TAGS: Readonly<Record<string, string>> = {
   h5: 'heading',
   h6: 'heading',
   dialog: 'dialog',
+  table: 'table',
+  tr: 'row',
+  th: 'columnheader',
+  td: 'cell',
 };
 
 const INPUTS: Readonly<Record<string, string>> = {
@@ -237,4 +241,21 @@ export function drawnTexts(scope: Element): {element: Element; text: string}[] {
   };
   walk(scope);
   return found;
+}
+
+/**
+ * Puts a checkbox or radio in the state `on`, as Playwright's `check` and `uncheck` do: it presses
+ * until the control reads as wanted, for the few turns a late reply may take to settle the state
+ * the press was made against (a dialog whose draft arrives after it opens).
+ */
+export async function setChecked(element: Element, on: boolean): Promise<void> {
+  for (let turn = 0; turn < TURNS; turn += 1) {
+    if (checked(element) === on) {
+      await settle();
+      if (checked(element) === on) return;
+    }
+    await act(async () => (element as HTMLElement).click());
+    await settle();
+  }
+  throw new Error(`the control did not become ${on ? 'checked' : 'unchecked'} in ${TURNS} presses`);
 }
