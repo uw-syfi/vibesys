@@ -12,6 +12,7 @@
       "version": "0.1.0",
       "strict": false,
       "skills": [
+        "./domains/dial9-tokio/dial9-rank-bottlenecks",
         "./domains/dial9-tokio/skills/dial9-diagnose-long-poll",
         "./domains/dial9-tokio/skills/dial9-red-flags",
         "./domains/dial9-tokio/skills/dial9-runtime",
