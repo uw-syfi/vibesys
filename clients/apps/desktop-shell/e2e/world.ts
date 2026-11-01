@@ -143,7 +143,12 @@ export async function open(page: Page, seed: FakeBridgeSeed = SEED): Promise<voi
   await expect(page.getByRole('navigation', {name: 'VibeSys'})).toBeVisible();
 }
 
-/** Opens the app and goes to New run by the rail, as a user starts a run. */
+/**
+ * Opens the app and goes to New run by the rail, as a user starts a run, and returns once the
+ * screen has read what it shows (the runs the form follows, the machines, what the machine offers).
+ * The screen says so itself, as `data-state` on the page: first paint is not that, and a spec that
+ * acts at first paint races the bridge's replies.
+ */
 export async function openNewRun(page: Page, seed: FakeBridgeSeed = SEED): Promise<void> {
   // The run that Start run opens is read over the gateway like every run.
   await installGateway(page, wire(storeRunFixture('live')));
@@ -152,7 +157,7 @@ export async function openNewRun(page: Page, seed: FakeBridgeSeed = SEED): Promi
     .getByRole('navigation', {name: 'VibeSys'})
     .getByRole('button', {name: 'New', exact: true})
     .click();
-  await expect(page.getByRole('main')).toBeVisible();
+  await expect(page.getByRole('main')).toHaveAttribute('data-state', 'ready');
 }
 
 /** The rail: the app's one navigation. */

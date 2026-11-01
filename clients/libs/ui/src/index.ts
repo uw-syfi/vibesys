@@ -63,6 +63,7 @@ export {
   type GridColumn,
   type Justify,
   Page,
+  type PageState,
   type PageWidth,
   Reserve,
   Row,
