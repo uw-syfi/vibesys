@@ -21,7 +21,7 @@ count. It fails if RF reports that the pool is too short for a prompt.
 
 The evaluator injects the trusted RF engine path. For CPU-only request-path
 validation, run `uv run python -m tests.examples.request_factory_cpu_smoke
---profile examples/model-serving/qwen3.6-35b-a3b-2xh100/.vibesys/tasks/default/benchmark/cpu_smoke.toml
+--profile examples/model-serving/qwen3.6-35b-a3b/.vibesys/tasks/default/benchmark/cpu_smoke.toml
 --request-factory-engine <RF_ENGINE>`. The fake validates request shape,
 protocol-v2 output, and HTTP, malformed/truncated SSE, and output-mismatch
 failures. Fake-server metrics are not serving-performance results.
