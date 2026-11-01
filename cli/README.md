@@ -9,22 +9,22 @@ The Python package installs a different command, `vibesys`, and `vibesys compare
 else there. The Go binary keeps the name `vibesys-cli`.
 
 Work is landing in stages. The `cmd/vibesys-cli` entrypoint prints its version and nothing else
-yet. This page describes the foundation that later pieces build on: the module layout, the layer
-rules, and the contract.
+yet. The module so far is the foundation later pieces build on: the layout, the layer rules, the
+contract, the domain types and the interfaces. Rows marked "planned" below do not exist yet.
 
 ## Layout
 
 | Path | Role |
 | --- | --- |
 | `cmd/vibesys-cli/` | Argument parsing and output. Nothing else. |
-| `internal/core/` | Pure domain types and rules: no I/O, no clock, no goroutines. |
+| `internal/core/` | Pure domain types, and later the pure rules (keys, verdicts, promotion checks): no I/O, no clock, no goroutines. |
 | `internal/store/` | `Store`: the logical interface to results, events, logs, job state and plans. No paths, no formats. |
-| `internal/store/filestore/` | The only code that knows the on-disk layout. Owns migrations. |
-| `internal/store/memstore/` | In-memory `Store` for tests. Passes the same contract suite as `filestore`. |
+| `internal/store/filestore/` | The only code that knows the on-disk layout. Owns migrations. Planned: the package holds only its doc comment so far. |
+| `internal/store/memstore/` | Planned: in-memory `Store` for tests. Passes the same contract suite as `filestore`. |
 | `internal/environment/` | `Environment`: where a job's commands run (`host`, `docker`). |
 | `internal/backend/` | `Backend`: facts about the compute hardware a task targets. |
-| `internal/wire/` | Translation between `core` types and the generated contract types. |
-| `internal/archcheck/` | The layer and layout rules below, as a check the tests run. |
+| `internal/wire/` | Planned: translation between `core` types and the generated contract types. |
+| `internal/archcheck/` | The layer and layout rules below, as a check `go test` runs. |
 | `gen/` | Generated Go for `proto/vibesys/cli/v1`. Never edited by hand. |
 
 ## Layer rules
