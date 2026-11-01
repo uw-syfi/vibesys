@@ -83,7 +83,7 @@ import type {SubscriptionPort} from '@vibesys/subscription';
 import {applyTheme, Card, EmptyState, Page, type ThemeTarget, WindowFrame} from '@vibesys/ui';
 import {type JSX, useCallback, useMemo, useSyncExternalStore} from 'react';
 import {GatewayRun} from './gateway-run.js';
-import {openScreen} from './screen-opening.js';
+import {openRailWhenSettled, openScreen, type Sleepers} from './screen-opening.js';
 import {
   machinesSettled,
   newRunSettled,
@@ -217,7 +217,7 @@ export function createShellStores(
   let {recent, selection} = sidebar.store.getState();
   // A screen's reads start when it is first shown, after what it was opened for (the machine New
   // run starts on, the section Settings lands on) is in place, so they are read once.
-  const sleepers = {machines, newRun: newRun.store};
+  const sleepers: Sleepers = {machines, newRun: newRun.store};
   sidebar.store.subscribe(() => {
     const next = sidebar.store.getState();
     if (next.recent !== recent) {
@@ -260,6 +260,19 @@ export function createShellStores(
     page,
     problems,
   };
+}
+
+/**
+ * The main window's rail: the machines' checks its warning mark rests on start once Runs has read
+ * what it shows. A run window has no rail and does not call this.
+ */
+export function wakeRail(stores: ShellStores): void {
+  const {sidebar, machines, newRun} = stores;
+  openRailWhenSettled(
+    {machines, newRun},
+    [sidebar.store, machines],
+    () => runsSettled(sidebar.store.getState(), machines.getState()) === 'ready',
+  );
 }
 
 /**

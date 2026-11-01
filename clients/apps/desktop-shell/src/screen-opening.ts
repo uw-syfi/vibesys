@@ -10,6 +10,9 @@
 import type {Screen} from '@vibesys/feature-app-shell/state';
 import {OPEN, type Openable} from '@vibesys/store';
 
+/** What the main window's rail shows beside the selected screen, and the stores that decide it. */
+const RAIL: readonly (keyof Sleepers)[] = ['machines'];
+
 /** The stores whose reads wait for a screen to be shown. */
 export interface Sleepers {
   /** The machines' checks: their status and what needs attention, on Machines and in Settings. */
@@ -32,4 +35,30 @@ const WAKES: Readonly<Record<Screen['kind'], readonly (keyof Sleepers)[]>> = {
 /** Wakes the stores `screen` needs: each starts its reads on the first time, and none again. */
 export function openScreen(sleepers: Sleepers, screen: Screen): void {
   for (const store of WAKES[screen.kind]) sleepers[store].dispatch(OPEN);
+}
+
+/**
+ * The rail is on screen from the first frame, and its Machines mark warns of a machine that cannot
+ * be reached: that rests on the machines' checks, so they are visible reads. They start once Runs
+ * has read what it shows (`settled`), not at launch beside its reads and not on a timer, so the
+ * first screen's reads never wait behind them. `sources` are the stores `settled` is computed from.
+ */
+export function openRailWhenSettled(
+  sleepers: Sleepers,
+  sources: readonly Subscribable[],
+  settled: () => boolean,
+): void {
+  const stops: (() => void)[] = [];
+  const wake = (): void => {
+    if (!settled()) return;
+    for (const stop of stops.splice(0)) stop();
+    for (const store of RAIL) sleepers[store].dispatch(OPEN);
+  };
+  for (const source of sources) stops.push(source.subscribe(wake));
+  wake();
+}
+
+/** What `settled` is computed from: a store that says when it changed. */
+interface Subscribable {
+  subscribe(listener: () => void): () => void;
 }

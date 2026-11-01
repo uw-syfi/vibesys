@@ -7,7 +7,7 @@ import fc from 'fast-check';
 import {Window} from 'happy-dom';
 import {act} from 'react';
 import {createRoot} from 'react-dom/client';
-import {createShellStores, Shell} from './shell.js';
+import {createShellStores, Shell, wakeRail} from './shell.js';
 import {FakeWindowAddress} from './testing/fake-address.js';
 
 const window = new Window();
@@ -28,10 +28,10 @@ afterAll(async () => {
 });
 
 /**
- * A launch starts the reads of the screen it opens on and of the rail, and nothing for a screen
- * nobody has opened: each host read is a fresh process, and a cold launch's first answer waits its
- * turn behind all of them. A screen starts its own reads when it is first opened, once, however
- * often the user comes back to it.
+ * A launch starts the reads of the screen it opens on, then the rail's (its Machines mark rests on
+ * the machines' checks), and nothing for a screen nobody has opened: each host read is a fresh
+ * process, and a cold launch's first answer waits its turn behind all of them. A screen starts its
+ * own reads when it is first opened, once, however often the user comes back to it.
  */
 const ignore = (): void => undefined;
 const REMOTE: HostKey = 'ssh:gpu';
@@ -44,6 +44,9 @@ const LAUNCH_READS: readonly string[] = [
   'projectRuns',
   'runDigests',
 ];
+
+/** The reads the rail asks once Runs has read what it shows. */
+const RAIL_READS: readonly string[] = ['machine'];
 
 /**
  * The reads each screen starts when first opened, by bridge method. Usage reads on every visit by
@@ -68,6 +71,11 @@ const OPENS: Readonly<Record<Exclude<Screen['kind'], 'run'>, readonly string[]>>
 
 const VISITS = Object.keys(OPENS) as (keyof typeof OPENS)[];
 
+/** The reads of a launch that say what exists, which a held window answers late. */
+const HELD: Readonly<Record<string, true>> = {overview: true, machines: true, preferences: true};
+
+const HOLDING: readonly string[] = Object.keys(HELD);
+
 const REFUSED: WelcomeResult<never> = {
   ok: false,
   error: 'the machine did not answer',
@@ -79,7 +87,8 @@ const REFUSED: WelcomeResult<never> = {
  * answers at once (the three that say what exists with it, the rest with a refusal, which is an
  * answer too), and each call is recorded as the method and its text arguments.
  */
-function recordingBridge() {
+function recordingBridge(held = false) {
+  const gate = Promise.withResolvers<void>();
   /** Each call, with the screen the window was on when it was made. */
   const calls: {readonly call: string; readonly on: string}[] = [];
   const window = {on: 'runs'};
@@ -128,12 +137,14 @@ function recordingBridge() {
             call: [name, ...args.filter(arg => typeof arg === 'string')].join(' '),
             on: window.on,
           });
-          return Promise.resolve(answers[name] ?? REFUSED);
+          const answer = answers[name] ?? REFUSED;
+          // A held window gets the three replies that say what exists only when the test lets them.
+          return name in HELD && held ? gate.promise.then(() => answer) : Promise.resolve(answer);
         };
       },
     },
   ) as unknown as WelcomeBridge;
-  return {bridge, calls, window};
+  return {bridge, calls, window, release: () => gate.resolve()};
 }
 
 /** Lets what has arrived reach the stores and the page. */
@@ -143,11 +154,11 @@ async function settle(): Promise<void> {
 
 const methodOf = (call: string): string => call.split(' ')[0] ?? call;
 
-/** The shell opened on Runs, then the screens `visits` names selected in order; the reads it started. */
-async function startedBy(
-  visits: readonly (keyof typeof OPENS)[],
-): Promise<readonly {readonly call: string; readonly on: string}[]> {
-  const world = recordingBridge();
+/** The main window over `world`: its stores and rail as `main.tsx` makes them, drawn in a DOM. */
+async function withWindow<T>(
+  world: ReturnType<typeof recordingBridge>,
+  use: (stores: ReturnType<typeof createShellStores>) => Promise<T>,
+): Promise<T> {
   const clock = new FakeClock();
   const stores = createShellStores(
     world.bridge,
@@ -164,27 +175,49 @@ async function startedBy(
     },
     {},
   );
+  wakeRail(stores);
   const container = document.createElement('div');
   const root = createRoot(container);
   try {
     await act(async () => root.render(<Shell stores={stores} version="0" />));
     await settle();
+    return await use(stores);
+  } finally {
+    await act(async () => root.unmount());
+  }
+}
+
+/** The shell opened on Runs, then the screens `visits` names selected in order; the reads it started. */
+async function startedBy(
+  visits: readonly (keyof typeof OPENS)[],
+): Promise<readonly {readonly call: string; readonly on: string}[]> {
+  const world = recordingBridge();
+  return withWindow(world, async stores => {
     for (const kind of visits) {
       world.window.on = kind;
       await act(async () => stores.sidebar.store.dispatch({type: 'select', screen: {kind}}));
       await settle();
     }
     return world.calls;
-  } finally {
-    await act(async () => root.unmount());
-  }
+  });
 }
 
-test('a launch on Runs starts the reads of Runs and the rail and no other', async () => {
-  const names = (await startedBy([])).map(each => methodOf(each.call));
-  expect(names.filter(name => !LAUNCH_READS.includes(name))).toEqual([]);
-  // Runs did read: the overview and the machines it lists.
-  expect(names).toEqual(expect.arrayContaining(['overview', 'machines']));
+test('a launch starts the reads of Runs first, then only the rail, and no other', async () => {
+  const world = recordingBridge(true);
+  await withWindow(world, async () => {
+    // Runs has not read what it shows: nothing beside its own reads has started.
+    const early = world.calls.map(each => methodOf(each.call));
+    expect(early.filter(name => !HOLDING.includes(name))).toEqual([]);
+    world.release();
+    await settle();
+    const names = world.calls.map(each => methodOf(each.call));
+    expect(
+      names.filter(name => !LAUNCH_READS.includes(name) && !RAIL_READS.includes(name)),
+    ).toEqual([]);
+    // The rail checks each machine it lists, after the machines are listed.
+    expect(names).toEqual(expect.arrayContaining(['overview', 'machines', 'machine']));
+    expect(names.indexOf('machine')).toBeGreaterThan(names.indexOf('machines'));
+  });
 });
 
 test('property: a screen starts its reads when first opened, once, whatever the visits', async () => {
@@ -199,7 +232,7 @@ test('property: a screen starts its reads when first opened, once, whatever the 
         new Set(hidden).size,
       );
       // Exactly the screens opened start their reads: the methods are those of the opened set.
-      const opened = new Set(visits.flatMap(kind => OPENS[kind]));
+      const opened = new Set([...RAIL_READS, ...visits.flatMap(kind => OPENS[kind])]);
       expect(new Set(hidden.map(methodOf))).toEqual(opened);
     }),
     {numRuns: 30, seed: 3597},
