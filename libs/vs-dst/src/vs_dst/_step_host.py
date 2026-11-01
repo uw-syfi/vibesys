@@ -361,9 +361,8 @@ class _WorldRunner:
         del attempt
         if type(step) not in LIVE_REQUEST_KINDS:
             raise NoRunnerError(type(step).__name__)
-        sealed = self._effects.sealed.get(tag.root)
-        if sealed is not None:
-            return _result_of(step, tag, sealed)
+        if (sealed := self._sealed(step, tag)) is not None:
+            return sealed
         if self._holds(step):
             # The job is queued and nothing starts it: it began, ends by no one's doing, and
             # seals nothing, so only the loop's cancel ends the step.
@@ -389,8 +388,18 @@ class _WorldRunner:
 
     async def clear(self, step: Request, tag: RequestId) -> Adopted | Cleared:
         """Adopt the result the step's effect sealed, or find nothing."""
+        sealed = self._sealed(step, tag)
+        return Cleared() if sealed is None else Adopted(sealed)
+
+    def _sealed(self, step: Request, tag: RequestId) -> Finished | None:
+        """The result the step's effect sealed; None when it sealed none that ends the step.
+
+        An effect whose answer was not final left nothing to adopt, as the executors of the
+        production runners leave nothing when they cannot conclude: the attempt raised, it is
+        charged, and the step runs again until its retries are spent.
+        """
         sealed = self._effects.sealed.get(tag.root)
-        return Cleared() if sealed is None else Adopted(_result_of(step, tag, sealed))
+        return None if sealed is None else _final_result(step, sealed)
 
 
 class StepWithoutResultError(Exception):
@@ -405,6 +414,16 @@ class StepWithoutResultError(Exception):
 
 def _result_of(step: Request, tag: RequestId, result: ExecutionResult) -> Finished:
     """The step's result: what the executor observed, which must be final.
+
+    An observation that is not final is an attempt with no result (``StepWithoutResultError``).
+    """
+    if (finished := _final_result(step, result)) is None:
+        raise StepWithoutResultError(tag, result.observation.observation)
+    return finished
+
+
+def _final_result(step: Request, result: ExecutionResult) -> Finished | None:
+    """What the executor's answer ends the step with; None when the answer is not final.
 
     A measurement submission is the one step the world answers with a job still running: the
     job runner of a step follows its job to the end, so the step ends with the job accepted and
@@ -426,7 +445,7 @@ def _result_of(step: Request, tag: RequestId, result: ExecutionResult) -> Finish
         return Finished(
             observation=ended, observed=observed.model_copy(update={"observation": ended})
         )
-    raise StepWithoutResultError(tag, view)
+    return None
 
 
 def _holds_of(world: World) -> Callable[[Request], bool]:
