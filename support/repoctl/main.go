@@ -169,6 +169,29 @@ func snapshotConfigPath(root, snapshotRoot, configPath string) (string, error) {
 	return filepath.Join(snapshotRoot, rel), nil
 }
 
+// localChangePlan is what `repoctl test` and `repoctl gate` plan from: the committed changes
+// since the base plus the staged, unstaged and untracked ones. g must be the local view.
+func localChangePlan(root, configPath string, g graph, base, head, event string) (plan, error) {
+	p, err := planAtRevisions(root, configPath, g, base, head, event, true)
+	if err != nil {
+		return plan{}, err
+	}
+	localChanges, err := gitrepo.WorktreeChanges(root)
+	if err != nil || len(localChanges) == 0 {
+		return p, err
+	}
+	localBase, cleanup, err := policyGraphAtRevision(root, configPath, head)
+	if err != nil {
+		return plan{}, err
+	}
+	defer cleanup()
+	local, err := selectChangedRecords(localBase.forLocalTest(), g, localChanges)
+	if err != nil {
+		return plan{}, err
+	}
+	return mergePlans(p, local), nil
+}
+
 func cli(args []string) error {
 	return cliWithRunner(args, execution.OSRunner{})
 }
@@ -193,7 +216,7 @@ func cliWithRunner(args []string, runner execution.Runner) error {
 	}
 	args = filtered
 	if len(args) == 0 {
-		return fmt.Errorf("usage: repoctl {plan|test|dev|run-checks|run-native|verify-policy|explain|validate}")
+		return fmt.Errorf("usage: repoctl {plan|test|gate|dev|run-checks|run-native|verify-policy|explain|validate}")
 	}
 	root, err := rootPath(configPath)
 	if err != nil {
@@ -203,7 +226,10 @@ func cliWithRunner(args []string, runner execution.Runner) error {
 	if err != nil {
 		return err
 	}
+	ensureHooks(root, os.Stderr)
 	switch args[0] {
+	case "gate":
+		return runGate(root, configPath, g, args[1:], os.Stdout)
 	case "dev":
 		return runDev(root, configPath, args[1:])
 	case "verify-policy":
@@ -250,25 +276,9 @@ func cliWithRunner(args []string, runner execution.Runner) error {
 			return fmt.Errorf("--coverage-only cannot combine with --checks-only; --coverage-test requires --coverage-only")
 		}
 		g = g.forLocalTest()
-		p, err := planAtRevisions(root, configPath, g, *base, *head, *event, true)
+		p, err := localChangePlan(root, configPath, g, *base, *head, *event)
 		if err != nil {
 			return err
-		}
-		localChanges, err := gitrepo.WorktreeChanges(root)
-		if err != nil {
-			return err
-		}
-		if len(localChanges) > 0 {
-			localBase, cleanup, err := policyGraphAtRevision(root, configPath, *head)
-			if err != nil {
-				return err
-			}
-			defer cleanup()
-			localPlan, err := selectChangedRecords(localBase.forLocalTest(), g, localChanges)
-			if err != nil {
-				return err
-			}
-			p = mergePlans(p, localPlan)
 		}
 		if err := emit(p, false); err != nil {
 			return err

@@ -28,6 +28,16 @@ commands = [
   ["python3", "-m", "scripts.check_doc_citations"],
   ["python3", "-m", "scripts.check_skills"],
 ]
+# Every command here takes under a second or two, so the pre-push gate runs them all.
+gate_commands = [
+  ["./support/repoctl/repoctl", "validate"],
+  ["./support/repoctl/repoctl", "verify-policy", "--cases", "tests/repoctl/cases.toml"],
+  ["python3", "scripts/check_stale_revert.py", "--base-ref", "origin/main"],
+  ["python3", "scripts/check_stray_files.py"],
+  ["python3", "scripts/check_doc_links.py"],
+  ["python3", "-m", "scripts.check_doc_citations"],
+  ["python3", "-m", "scripts.check_skills"],
+]
 
 [[check_groups]]
 name = "stitch_checks"
@@ -55,6 +65,19 @@ timeout_seconds = 1800
 # default took 19+. Four, not `auto`: `repoctl test` often runs under a 4-CPU cap.
 commands = [["uv", "run", "python", "-m", "pytest", "-q", "-n", "4", "--no-cov"]]
 
+# The Python tests a change can reach through imports, within a time budget (scripts/impacted_tests.py).
+# CI's pull-request commit stage runs this group; the full suite runs in the merge queue. The pre-push
+# gate runs the same selection with a smaller budget. Neither runs under a plain `repoctl test`,
+# which already runs the whole suite as `python_tests`.
+[[check_groups]]
+name = "python_impact_tests"
+trigger_job = "python"
+language = "python"
+directory = "."
+timeout_seconds = 600
+commands = [["uv", "run", "--no-sync", "python", "-m", "scripts.impacted_tests", "run", "--base-ref", "origin/main", "--budget-seconds", "100", "--workers", "4"]]
+gate_commands = [["uv", "run", "python", "-m", "scripts.impacted_tests", "run", "--base-ref", "origin/main", "--budget-seconds", "30", "--workers", "4"]]
+
 [[check_groups]]
 name = "python_quality"
 trigger_job = "python"
@@ -79,6 +102,20 @@ commands = [
   # skills-only change selects no Python job and would otherwise skip this check.
   ["uv", "run", "python", "-m", "scripts.check_skills"],
   ["uv", "run", "vibesys", "--headless", "--help"],
+  ["uv", "run", "python", "scripts/check_lint_waivers.py"],
+]
+# The pre-push gate runs the checks that fail most often and take seconds. The repository-wide
+# scans over git history or the whole tree (contract_sot, persisted_schema_compat, the
+# `vibesys --headless --help` smoke) are left to CI.
+gate_commands = [
+  ["./scripts/check_format.sh"],
+  ["./scripts/check_lint.sh"],
+  ["uv", "run", "python", "scripts/check_file_length.py"],
+  ["uv", "run", "python", "-m", "scripts.check_purity", "--base-ref", "origin/main"],
+  ["uv", "run", "python", "scripts/check_test_isolation.py"],
+  ["uv", "run", "python", "scripts/check_tach.py"],
+  ["uv", "run", "python", "scripts/check_member_dependencies.py"],
+  ["uv", "run", "python", "scripts/check_tach_graph.py", "--check"],
   ["uv", "run", "python", "scripts/check_lint_waivers.py"],
 ]
 
@@ -122,6 +159,7 @@ language = "python"
 directory = "."
 timeout_seconds = 600
 commands = [["./scripts/check_types.sh"]]
+gate_commands = [["./scripts/check_types.sh"]]
 
 [[check_groups]]
 name = "clients_tests"
@@ -138,6 +176,7 @@ timeout_seconds = 1200
 # package runs through the same task graph, so it gets that preparation too.
 commands = [["pnpm", "turbo", "run", "test"]]
 package_commands = [["pnpm", "turbo", "run", "test", "--filter", "{package}"]]
+gate_package_commands = [["pnpm", "turbo", "run", "test", "--filter", "{package}"]]
 always_commands = [
   ["pnpm", "test:ts-architecture"],
   ["pnpm", "test:conformance"],
@@ -160,6 +199,14 @@ commands = [
   ["pnpm", "--dir", "libs/contracts", "generate:protocol"],
   ["git", "diff", "--exit-code", "--", "libs/contracts/src/generated/"],
   ["pnpm", "--dir", "libs/ui", "check:tokens"],
+  ["pnpm", "check:clients"],
+]
+# Gate: lint and format, the package-graph and architecture checks, unused code, and each package's
+# own checks (Turborepo skips what its cache holds). Protocol-binding regeneration is left to CI.
+gate_commands = [
+  ["pnpm", "check:ts"],
+  ["pnpm", "check:ts-architecture"],
+  ["pnpm", "check:knip"],
   ["pnpm", "check:clients"],
 ]
 

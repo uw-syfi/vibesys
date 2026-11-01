@@ -6,6 +6,7 @@ package execution
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -42,7 +43,13 @@ type Suite struct {
 	AlwaysCommands  [][]string `toml:"always_commands"`
 	Commands        [][]string `toml:"commands"`
 	PackageCommands [][]string `toml:"package_commands"`
-	Collection      string     `toml:"collection"`
+	// GateCommands, with GatePackageCommands, are the fast subset of the group that
+	// `repoctl gate` (the pre-push hook) runs, in place of Commands and
+	// PackageCommands. A group with none is not part of the gate. CI never reads them:
+	// its jobs run the full commands.
+	GateCommands        [][]string `toml:"gate_commands"`
+	GatePackageCommands [][]string `toml:"gate_package_commands"`
+	Collection          string     `toml:"collection"`
 	// LocalPaths narrows `repoctl test` only (never `run-checks`, which CI
 	// uses): when set, the group runs locally only if a changed path equals or
 	// is under one of these repository-relative paths.
@@ -76,6 +83,18 @@ func Commands(suite Suite) ([]Check, error) {
 	return checksForCommands(suite, append(append([][]string{}, suite.AlwaysCommands...), suite.Commands...))
 }
 
+// ForGate returns the suite with its gate commands in place of its full ones, so
+// the language planners expand the gate's package commands as they do the full ones.
+func (s Suite) ForGate() Suite {
+	s.AlwaysCommands = nil
+	s.Commands = s.GateCommands
+	s.PackageCommands = s.GatePackageCommands
+	if len(s.GatePackageCommands) == 0 {
+		s.Collection = ""
+	}
+	return s
+}
+
 // Always builds checks which run before any selected collection values.
 func Always(suite Suite) ([]Check, error) {
 	return checksForCommands(suite, suite.AlwaysCommands)
@@ -102,10 +121,12 @@ type Runner interface {
 	Run(context.Context, string, Check) error
 }
 
-// OSRunner runs checks with inherited standard output and error streams.
-type OSRunner struct{}
+// OSRunner runs checks, writing to Stdout and Stderr, which default to the process's own.
+type OSRunner struct {
+	Stdout, Stderr io.Writer
+}
 
-func (OSRunner) Run(parent context.Context, root string, check Check) error {
+func (r OSRunner) Run(parent context.Context, root string, check Check) error {
 	if len(check.Args) == 0 || check.Args[0] == "" {
 		return fmt.Errorf("%s: empty command", check.Label)
 	}
@@ -118,8 +139,13 @@ func (OSRunner) Run(parent context.Context, root string, check Check) error {
 	cmd := exec.CommandContext(ctx, check.Args[0], check.Args[1:]...)
 	cmd.Dir = filepath.Join(root, filepath.FromSlash(check.Directory))
 	cmd.Env = mergedEnvironment(os.Environ(), check.Env)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout, cmd.Stderr = r.Stdout, r.Stderr
+	if cmd.Stdout == nil {
+		cmd.Stdout = os.Stdout
+	}
+	if cmd.Stderr == nil {
+		cmd.Stderr = os.Stderr
+	}
 	err := cmd.Run()
 	if ctx.Err() == context.DeadlineExceeded {
 		return fmt.Errorf("%s: %s: timed out after %s", check.Label, strings.Join(check.Args, " "), check.Timeout)

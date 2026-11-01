@@ -3,7 +3,7 @@
 # the repository: $VIBESYS_PRIVATE_TERMS, default ~/.config/vibesys/private-terms.txt, one
 # case-insensitive regex per line. A missing list passes with a one-line note. Findings are
 # file:line and never echo the matched text. The logic and its tests are in
-# check_private_terms.py; the opt-in pre-push hook (install_pre_push_hook.sh) runs this on
+# check_private_terms.py; the tracked pre-push hook (.githooks/pre-push) runs this on
 # every push. CI cannot run it: the terms are private by design.
 set -euo pipefail
 exec python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/check_private_terms.py" "$@"
