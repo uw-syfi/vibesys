@@ -67,8 +67,8 @@ from vs_core.testing.builders import initial_state
 from vs_project.api import Project
 from vs_runtime.api.core import (
     ExecutionResult,
+    KeyedDocuments,
     MidTurnSteering,
-    ReceiptStore,
     RuntimeSessionRequests,
 )
 from vs_runtime.api.executor_contexts import context_for
@@ -282,7 +282,7 @@ async def test_the_session_executor_reaches_only_the_turn_it_runs_for_the_offer(
         (base / "workspace").mkdir()
         project = Project.open(base / "project")
         host = open_host(base / "workspace", hang_until_cancelled=True)
-        store = ReceiptStore(project.state.state_store_namespace("run"), threads=SimThreads())
+        store = KeyedDocuments(project.state.state_store_namespace("run"), threads=SimThreads())
         await host.run(ensure_request(), store)
         executor = host.executor(store)
         request = dispatch_request()
@@ -323,7 +323,7 @@ async def test_a_refused_steer_is_released_by_the_turn_result_ahead_of_its_end(
                 answers.append(executor_holder[0].offer_mid_turn(_offer("inv-1")))
 
         host = open_host(base / "workspace", effect=steer_now, steering=steering)
-        store = ReceiptStore(project.state.state_store_namespace("run"), threads=SimThreads())
+        store = KeyedDocuments(project.state.state_store_namespace("run"), threads=SimThreads())
         await host.run(ensure_request(), store)
         executor = host.executor(store)
         executor_holder.append(executor)
@@ -370,7 +370,7 @@ async def test_a_restarted_host_settles_the_refusals_of_a_finished_turn_from_its
                 executor_holder[0].offer_mid_turn(_offer("inv-1"))
 
         host = open_host(base / "workspace", effect=steer_now, steering=steering)
-        store = ReceiptStore(project.state.state_store_namespace("run"), threads=SimThreads())
+        store = KeyedDocuments(project.state.state_store_namespace("run"), threads=SimThreads())
         await host.run(ensure_request(), store)
         executor_holder.append(host.executor(store))
         request = dispatch_request()

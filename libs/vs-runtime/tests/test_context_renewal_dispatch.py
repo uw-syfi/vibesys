@@ -30,7 +30,7 @@ from vs_agent.api.testing import FakeProvider, FakeTurnScript
 from vs_core.api import DispatchTurn, InvocationId, InvocationRef, ObservationStatus, RequestId
 from vs_project.api import Project
 from vs_prompts.api import TemplateRenderer
-from vs_runtime.api.core import ExecutionResult, ReceiptStore
+from vs_runtime.api.core import ExecutionResult, KeyedDocuments
 from vs_sim.api.testing import ManualClock, SimThreads, examples, run_virtual
 
 if TYPE_CHECKING:
@@ -70,7 +70,7 @@ def _correction(invocation: str, follows: str) -> DispatchTurn:
 async def _three_turns(host: SessionHost, base: Path) -> list[ExecutionResult]:
     """Two free turns of one session, then a correction of the second."""
     (base / "project").mkdir()
-    store = ReceiptStore(
+    store = KeyedDocuments(
         Project.open(base / "project").state.state_store_namespace("run"), threads=SimThreads()
     )
     await host.run(ensure_request(), store)

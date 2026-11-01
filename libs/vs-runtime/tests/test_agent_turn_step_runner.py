@@ -46,7 +46,7 @@ from vs_runtime.api.agent_step_runners import (
     TurnWithoutResultError,
 )
 from vs_runtime.api.core import (
-    ReceiptStore,
+    KeyedDocuments,
     RuntimeSessionRequests,
     SessionLifecycleRequests,
 )
@@ -237,7 +237,7 @@ def open_world(root: Path, kind: Kind = Kind.DISPATCH) -> World:
     namespace = project.state.state_store_namespace("run")
     clock = VirtualClock()
     threads = SimThreads(clock)
-    store = ReceiptStore(namespace, threads=threads)
+    store = KeyedDocuments(namespace, threads=threads)
     engine = FakeDockerEngine(
         root / "docker", agent_ids=(1000, 1000), launcher=FakePipedProcessLauncher()
     )

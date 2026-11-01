@@ -48,7 +48,7 @@ if TYPE_CHECKING:
     from vs_mcp.api import ToolServerDescriptor
     from vs_prompts.api import RenderedPrompt
     from vs_runtime._artifact_store import ArtifactStore
-    from vs_runtime._receipt_store import ReceiptStore
+    from vs_runtime._keyed_documents import KeyedDocuments
     from vs_runtime._run_control import RunControlChannel
     from vs_runtime._session_requests import SessionResolver, TurnYields
     from vs_runtime._workspace_access import AccessGuardedWorkspace
@@ -271,7 +271,7 @@ def open_session_requests(  # noqa: PLR0913  # lint-waiver: LW-260142 [PLR0913];
     *,
     client: AgentTurnExecutor,
     invocation_slot: AgentInvocationStore,
-    store: ReceiptStore,
+    store: KeyedDocuments,
     threads: Threads,
     blocking: BlockingRunner,
     yields: TurnYields[DispatchTurn, Continuation] | None = None,
@@ -297,7 +297,7 @@ def open_session_requests(  # noqa: PLR0913  # lint-waiver: LW-260142 [PLR0913];
 def session_executors(
     sessions: ClientAgentSessions,
     resolver: SessionResolver,
-    store: ReceiptStore,
+    store: KeyedDocuments,
     yields: TurnYields[DispatchTurn, Continuation] | None,
     blocking: BlockingRunner,
 ) -> SessionExecutors:

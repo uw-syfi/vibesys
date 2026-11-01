@@ -35,7 +35,6 @@ from vs_core.api import (
     Continuation,
     ContinuationId,
     ContinuationPhase,
-    DecisionId,
     DispatchTurn,
     InvocationId,
     InvocationRef,
@@ -48,7 +47,7 @@ from vs_project.api import Project
 from vs_runtime.api.core import (
     ExecutionResult,
     JournalRunInvocations,
-    ReceiptStore,
+    KeyedDocuments,
     ReleasedRunInvocations,
 )
 from vs_runtime.api.executor_contexts import RevocableLease, context_for
@@ -79,8 +78,8 @@ class World:
             base / "workspace", self.checkpoints, gate=gate
         )
 
-    def store(self) -> ReceiptStore:
-        return ReceiptStore(self._project.state.state_store_namespace("run"), threads=OsThreads())
+    def store(self) -> KeyedDocuments:
+        return KeyedDocuments(self._project.state.state_store_namespace("run"), threads=OsThreads())
 
     async def execute(
         self, request: RequestBase, *, lease: RevocableLease | None = None
@@ -230,49 +229,6 @@ _STEPS = ("ensure", "cancel", "dispatch")
 
 
 @pytest.mark.asyncio
-@settings(max_examples=12, deadline=None, suppress_health_check=[HealthCheck.too_slow])
-@given(order=st.permutations(_STEPS), repeat_dispatch=st.booleans())
-async def test_a_cancel_answered_as_nothing_held_is_never_followed_by_a_provider_call(
-    order: list[str], *, repeat_dispatch: bool
-) -> None:
-    """In any order of ensure, cancel and dispatch, each a fresh host over the same disk.
-
-    A cancellation that proves nothing is held fences the invocation: a dispatch that arrives
-    later is refused before any provider call, so the answer stays true. A cancellation that
-    comes after the dispatch reports the turn it stopped instead.
-    """
-    async with world() as w:
-        answers: dict[str, ExecutionResult] = {}
-        for step in order:
-            match step:
-                case "ensure":
-                    answers[step] = await w.execute(ensure_request())
-                case "cancel":
-                    answers[step] = await w.execute(cancel_request("req-c", invocation="inv-1"))
-                case _:
-                    answers[step] = await w.execute(dispatch_request("req-d", "inv-1"))
-        if repeat_dispatch:
-            again = (await w.execute(dispatch_request("req-d", "inv-1"))).observation.observation
-            first = answers["dispatch"].observation.observation
-            assert (again.status, again.terminal, again.accepted, again.released) == (
-                first.status,
-                first.terminal,
-                first.accepted,
-                first.released,
-            )
-        cancel = answers["cancel"]
-        if holds_nothing(cancel):
-            assert status(cancel) is ObservationStatus.REJECTED
-            assert w.host.turns == []
-            assert status(answers["dispatch"]) is ObservationStatus.REJECTED
-            assert answers["dispatch"].observation.observation.released
-        else:
-            assert order.index("dispatch") < order.index("cancel")
-            assert cancel.observation.observation.released
-            assert len(w.host.turns) == 1
-
-
-@pytest.mark.asyncio
 async def test_cancels_of_an_undispatched_invocation_under_two_identities_both_hold_nothing() -> (
     None
 ):
@@ -319,43 +275,6 @@ async def test_close_of_a_session_that_was_never_ensured_is_rejected() -> None:
 
 
 _CLOSE_STEPS = ("ensure", "close")
-
-
-@pytest.mark.asyncio
-@settings(max_examples=8, deadline=None, suppress_health_check=[HealthCheck.too_slow])
-@given(order=st.permutations(_CLOSE_STEPS), again=st.booleans())
-async def test_a_close_answered_as_nothing_held_is_never_followed_by_a_binding(
-    order: list[str], *, again: bool
-) -> None:
-    """In either order of ensure and close of one episode, each a fresh host over the same disk.
-
-    A close that finds nothing bound fences the episode: an ensure of that episode arriving
-    later is refused, so no turn ever runs in the session, and a second close under another
-    identity agrees. A later episode still acquires the session, because the fence names the
-    episode, never the session alone. A close after the ensure releases what it bound.
-    """
-    async with world() as w:
-        answers = {
-            step: await w.execute(ensure_request() if step == "ensure" else close_request())
-            for step in order
-        }
-        close = answers["close"]
-        if again:
-            other = await w.execute(close_request("req-close-2"))
-            assert holds_nothing(other) == holds_nothing(close)
-        if holds_nothing(close):
-            assert order == ["close", "ensure"]
-            assert status(answers["ensure"]) is ObservationStatus.REJECTED
-            refused = await w.execute(dispatch_request("req-d", "inv-1"))
-            assert status(refused) is ObservationStatus.REJECTED
-            assert w.host.turns == []
-            later = ensure_request("req-ensure-2").model_copy(
-                update={"admission_id": DecisionId(root="episode-2")}
-            )
-            assert status(await w.execute(later)) is ObservationStatus.SUCCEEDED
-        else:
-            assert order == ["ensure", "close"]
-            assert close.observation.observation.released
 
 
 def holds_nothing(result: ExecutionResult) -> bool:

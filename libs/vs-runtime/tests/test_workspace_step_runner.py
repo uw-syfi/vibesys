@@ -17,7 +17,7 @@ from vs_core.api.recovery import Failed, Finished
 from vs_project.api import Project
 from vs_runtime.api import RuntimeContractError, WorkspaceAccess
 from vs_runtime.api.agent_step_runners import WorkspaceStepRunner, WorkspaceTarget
-from vs_runtime.api.core import AccessGrant, AccessKey, AccessSettlement, ReceiptStore
+from vs_runtime.api.core import AccessGrant, AccessKey, AccessSettlement, KeyedDocuments
 from vs_runtime.api.step_runner import CancelSignal, ClearUnavailableError
 from vs_runtime.api.testing import (
     AttemptHangs,
@@ -94,7 +94,7 @@ def open_world(
         del ref
         return workspace
 
-    settlement = AccessSettlement(ReceiptStore(namespace, threads=SimThreads()), lookup)
+    settlement = AccessSettlement(KeyedDocuments(namespace, threads=SimThreads()), lookup)
     workspace.access_recovery.guard(lambda: settlement.fenced_by(workspace.path))
 
     def behave(

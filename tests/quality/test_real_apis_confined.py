@@ -922,7 +922,7 @@ REAL_API_EDGES: dict[Key, str] = {
                 "FileAdmissionStore's identity and target locks",
             ),
             ("libs/vs-runtime/src/vs_runtime/_artifact_store.py", "artifact files and receipts"),
-            ("libs/vs-runtime/src/vs_runtime/_receipt_store.py", "the receipt namespace lock"),
+            ("libs/vs-runtime/src/vs_runtime/_keyed_documents.py", "the receipt namespace lock"),
             ("libs/vs-runtime/src/vs_runtime/_slot_meter.py", "the lease ledger"),
             ("libs/vs-logs/src/vs_logs/_volume.py", "atomic pipe-mark file replacement"),
             ("libs/vs-evaluation/src/vs_evaluation/filesystem_store.py", "the lifecycle store"),
@@ -1399,7 +1399,7 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
         EdgeKind.AGENT_WORKSPACE,
         "materializes the project tree",
     ),
-    "libs/vs-runtime/src/vs_runtime/_receipt_store.py": (EdgeKind.STORE, "evaluation receipts"),
+    "libs/vs-runtime/src/vs_runtime/_keyed_documents.py": (EdgeKind.STORE, "evaluation receipts"),
     "libs/vs-runtime/src/vs_runtime/_skills.py": (EdgeKind.PACKAGED_RESOURCE, "skill trees"),
     "libs/vs-runtime/src/vs_runtime/_slot_meter.py": (EdgeKind.STORE, "the slot usage meter"),
     "libs/vs-runtime/src/vs_runtime/api/operation_fixtures.py": (

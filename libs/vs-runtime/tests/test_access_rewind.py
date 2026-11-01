@@ -14,7 +14,7 @@ import pytest
 import vs_core.api as core
 from vs_project.api import Project
 from vs_runtime.api import RuntimeContractError, WorkspaceAccess
-from vs_runtime.api.core import AccessGrant, AccessKey, AccessSettlement, ReceiptStore
+from vs_runtime.api.core import AccessGrant, AccessKey, AccessSettlement, KeyedDocuments
 from vs_runtime.api.testing import FakeWorkspace
 from vs_sim.api.testing import SimThreads, VirtualClock, run_virtual
 
@@ -42,7 +42,7 @@ def settlement(root: Path, workspace: ProtectedWorkspace) -> AccessSettlement:
         del ref
         return workspace
 
-    return AccessSettlement(ReceiptStore(namespace, threads=SimThreads()), lookup)
+    return AccessSettlement(KeyedDocuments(namespace, threads=SimThreads()), lookup)
 
 
 async def rewound(root: Path, access: WorkspaceAccess) -> AccessSettlement:

@@ -27,7 +27,7 @@ from vs_agent.api.testing import FakeProvider, FakeTurnScript
 from vs_core.api import ObservationStatus, ReplyErrorCode
 from vs_project.api import Project
 from vs_runtime.api import AgentId
-from vs_runtime.api.core import ExecutionResult, ReceiptStore
+from vs_runtime.api.core import ExecutionResult, KeyedDocuments
 from vs_sim.api.testing import ManualClock, SimThreads, examples, run_virtual
 
 
@@ -45,7 +45,7 @@ _ERRORS = st.text(st.characters(codec="ascii", categories=("L", "N", "P", "Zs"))
 async def _turn(host: SessionHost, base: Path, threads: SimThreads) -> ExecutionResult:
     """Bind the session of ``host`` and dispatch one turn of it, on a store of its own."""
     (base / "project").mkdir()
-    store = ReceiptStore(
+    store = KeyedDocuments(
         Project.open(base / "project").state.state_store_namespace("run"), threads=threads
     )
     await host.run(ensure_request(), store)

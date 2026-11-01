@@ -25,7 +25,7 @@ from vs_runtime._measurement_progress import (
 if TYPE_CHECKING:
     from vs_core.api import SubmitMeasurement
     from vs_runtime._evidence_ledger import EvidenceLedger
-    from vs_runtime._receipt_store import ReceiptStore
+    from vs_runtime._keyed_documents import KeyedDocuments
 
 _JOBS = "evaluation-jobs"
 _SCOPES = "evaluation-scopes"
@@ -72,7 +72,7 @@ class JobRecord(BaseModel):
 class ScopeJobs(BaseModel):
     """The jobs registered under one admission episode of one scope.
 
-    Whether the episode closed is its effect fence's to say (``scope_fence``).
+    The step loop closes a scope only after every other step of it has a result.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
@@ -110,7 +110,7 @@ class JobBooks:
 class JobRegistry:
     """The records of the jobs submitted under one run's receipt store."""
 
-    def __init__(self, store: ReceiptStore) -> None:
+    def __init__(self, store: KeyedDocuments) -> None:
         """Keep the records in *store*, the one its evaluation executor reads."""
         self._store = store
 

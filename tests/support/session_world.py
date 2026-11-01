@@ -59,7 +59,7 @@ from vs_prompts.api import RenderedPrompt, TemplateRenderer
 from vs_runtime.api.core import (
     AccessGrant,
     ExecutionResult,
-    ReceiptStore,
+    KeyedDocuments,
     RuntimeSessionRequests,
 )
 from vs_runtime.api.executor_contexts import context_for
@@ -273,7 +273,7 @@ def turn_output(result: ExecutionResult) -> str | None:
     return None
 
 
-class CrashOnReplace(ReceiptStore):
+class CrashOnReplace(KeyedDocuments):
     """A receipt store whose host dies at the first record it overwrites.
 
     After a provider turn, every overwrite (settling its workspace access, sealing the
@@ -307,7 +307,7 @@ class SessionHost:
     driver: FakeProvider | None = None
     turn_started: threading.Event = field(default_factory=threading.Event)
 
-    def executor(self, store: ReceiptStore) -> RuntimeSessionRequests:
+    def executor(self, store: KeyedDocuments) -> RuntimeSessionRequests:
         """A freshly started host over the same journal and provider conversation."""
         resolver: SessionResolver = self.resolver
         return RuntimeSessionRequests(
@@ -325,7 +325,7 @@ class SessionHost:
     async def run(
         self,
         request: RequestBase,
-        store: ReceiptStore,
+        store: KeyedDocuments,
         *,
         lease: RevocableLease | None = None,
         now_at: float | None = None,
@@ -336,7 +336,7 @@ class SessionHost:
         return await self.run_in(request, store, context)
 
     async def run_in(
-        self, request: RequestBase, store: ReceiptStore, context: ExecutionContext
+        self, request: RequestBase, store: KeyedDocuments, context: ExecutionContext
     ) -> ExecutionResult:
         """Execute *request* once on a freshly started host over *store*, under *context*."""
         outcome = await self.executor(store).execute(cast("Any", request), context)

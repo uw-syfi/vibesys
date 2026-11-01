@@ -14,6 +14,7 @@ from vs_core.api import OperationRegistry
 from vs_runtime._core_requests import ExecutorRole, RefusingRequestExecution, RequestExecutors
 from vs_runtime._evaluation_requests import MeasurementRequests
 from vs_runtime._evidence_ledger import ReceiptEvidenceLedger
+from vs_runtime._keyed_documents import KeyedDocuments
 from vs_runtime._measurement_progress import (
     IgnoreMeasurement,
     MeasurementDecisions,
@@ -22,7 +23,6 @@ from vs_runtime._measurement_progress import (
 )
 from vs_runtime._observation_factory import ObservationFactory
 from vs_runtime._operation_catalog import OperationCatalog
-from vs_runtime._receipt_store import ReceiptStore
 from vs_runtime._session_lifecycle_requests import ReleasedRunInvocations, SessionRequestRouter
 from vs_runtime._session_requests import JournalRunInvocations
 from vs_runtime._session_resolver import SessionExecutors, session_executors
@@ -86,7 +86,7 @@ class CoreExecutors:
     """One translator per request role."""
     sessions: SessionExecutors | None
     """The turn and lifecycle executors behind the SESSIONS role; ``None`` for a run with no roles."""
-    store: ReceiptStore
+    store: KeyedDocuments
     """The receipt store every executor of the run writes through."""
     observations: ObservationFactory
     """Builds the observation a runner reports for an operation or an adoption."""
@@ -124,7 +124,7 @@ def core_executors(  # noqa: PLR0913  # lint-waiver: LW-260141 [PLR0913]; the ru
     ``threads`` locks the receipt store; ``blocking`` runs the executors' synchronous
     journal, provider and disk calls off the event loop.
     """
-    store = ReceiptStore(receipts, threads)
+    store = KeyedDocuments(receipts, threads)
     if sessions is None:
         session = None
         session_requests = RefusingRequestExecution(ExecutorRole.SESSIONS)

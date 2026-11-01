@@ -40,13 +40,13 @@ from vs_runtime.api.core import (
     CoreStartup,
     IgnoreCommits,
     IgnoreMeasurement,
+    KeyedDocuments,
     MeasurementDecisions,
     MeasurementServices,
     OperationPorts,
     OwedSubmissions,
     ProductionSessionResolver,
     ReceiptEvidenceLedger,
-    ReceiptStore,
     ResolverInputs,
     ScopeWorkspaces,
     SessionServices,
@@ -240,7 +240,7 @@ class CoreResources:
 class _SessionComposition:
     """Shared resources for resolving and executing the run's declared roles."""
 
-    receipts: ReceiptStore
+    receipts: KeyedDocuments
     artifacts: ArtifactStore
     bridge: AgentEvaluationBridge | None
     stateless: StatelessToolServers
@@ -293,7 +293,7 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
     state_dir = resources.project.state
     receipts = state_dir.local_namespace(run_id, "receipts")
     artifacts = ArtifactStore(state_dir.portable_namespace(run_id, "artifacts"))
-    receipt_store = ReceiptStore(receipts, resources.threads)
+    receipt_store = KeyedDocuments(receipts, resources.threads)
     try:
         plan = policy.plan(_context(resources, artifacts))
         _validate_plan(plan)
@@ -479,7 +479,7 @@ def _refuse_unbridged_tools(
 def _agent_bridge(
     plan: CorePlan,
     resources: CoreResources,
-    receipts: ReceiptStore,
+    receipts: KeyedDocuments,
     evidence: ReceiptEvidenceLedger,
 ) -> AgentEvaluationBridge | None:
     """The in-turn evaluation tool service, when the plan offers the tool."""
