@@ -1,7 +1,7 @@
 """Ways a run is interrupted, and which of them a suite tries.
 
-An interruption is one of two actions (the host is killed, or the operator pauses the run and
-the process exits) at one of three moments: just before a commit reaches the store, just after
+An interruption is one of three actions (the host is killed, the operator pauses the run and the
+process exits, or the operator stops the run and its host ends it) at one of three moments: just before a commit reaches the store, just after
 it, or while a request's effect is in flight (it has begun, and nothing of its result is
 sealed or committed). Which moments a run offers follows the same search depth as its crash
 points.
@@ -26,6 +26,9 @@ class Action(StrEnum):
     """The host dies: its memory is gone and nothing it was doing is finished."""
     PAUSE = "pause"
     """The operator pauses the run: the host winds down and exits."""
+    STOP = "stop"
+    """The operator stops the run (a drain): the host winds down and ends the run, which a Resume
+    reopens."""
 
 
 class Moment(StrEnum):

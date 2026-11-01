@@ -28,6 +28,8 @@ from vs_core.api import (
     RunStatus,
     SubmitMeasurement,
     Until,
+    control_refusal,
+    requested_stop_mode,
 )
 from vs_core.api.recovery import Cancelled, Finished, RunRest, at_rest
 from vs_core.api.testing import Journal, new_run
@@ -228,21 +230,26 @@ class _Host:
         return self._result(inputs, halted=halted)
 
     def _resume(self, log: RunLogStepLog, epoch: int, clock: VirtualClock) -> None:
-        """The operator resumes a run that stood paused when its last process ended.
+        """The operator resumes a run that stood paused, or was stopped, when its last process ended.
 
         The first Resume is always taken: a refusal fails the host, so a run that needs a second
-        Resume is an error and not a quiet retry.
+        Resume is an error and not a quiet retry. A stop the log holds is lifted only when core
+        takes the Resume (a run whose ending has begun may not), as the control bridge of a
+        launched process does.
         """
         state = log.state
         paused = at_rest(state) is RunRest.PARKED or state.run.status in (
             RunStatus.PAUSED,
             RunStatus.DRAINING,
         )
-        if not (self._options.resumed and paused):
-            return
         control = ControlInput(
             control_id=ControlId(root=f"operator-resume:{epoch}"), action="resume", when="now"
         )
+        stopped = (
+            requested_stop_mode(state.run) is not None and control_refusal(state, control) is None
+        )
+        if not (self._options.resumed and (paused or stopped)):
+            return
         log.input(RunControlEvent(control=control, now_at=clock.now()))
 
     @staticmethod
