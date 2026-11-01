@@ -40,6 +40,8 @@ export interface OpenShell {
   readonly emit: (sources: readonly number[]) => void;
   /** Returns once the page says it has read what it shows (`data-state="ready"`). */
   readonly read: () => Promise<void>;
+  /** The window's history: Back and Forward move the location the Run screen's zoom lives in. */
+  readonly address: FakeWindowAddress;
   readonly close: () => Promise<void>;
 }
 
@@ -145,6 +147,7 @@ export async function openShell(
   }
   if (options.draft !== undefined)
     host.sessionStorage.setItem(DRAFT_KEY, storeDraft(options.draft));
+  const address = new FakeWindowAddress();
   const stores = createShellStores(
     bridge,
     {mode: 'light', onChange: ignore},
@@ -152,7 +155,7 @@ export async function openShell(
     options.schedule,
     {
       messages: {addEventListener: ignore, removeEventListener: ignore},
-      address: new FakeWindowAddress(),
+      address,
       now: () => options.now ?? 0,
       ...(options.subscriptions === undefined ? {} : {subscriptions: subscriptionPort(options)}),
       ...(gateway === null ? {} : {subscriptions: gateway.port}),
@@ -189,6 +192,7 @@ export async function openShell(
     gateway: gateway?.controls ?? null,
     emit: sources => gateway?.emit(sources),
     read,
+    address,
     close: async () => {
       await act(async () => root.unmount());
       container.remove();
