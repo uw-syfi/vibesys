@@ -49,6 +49,7 @@ const CHANNELS: Channels = {
   usageWindow: 'vibesys:welcome:usage-window',
   usageSummary: 'vibesys:welcome:usage-summary',
   usageRatesRefresh: 'vibesys:welcome:usage-rates-refresh',
+  usageLimits: 'vibesys:welcome:usage-limits',
   usagePricesSave: 'vibesys:welcome:usage-prices-save',
   preferences: 'vibesys:welcome:preferences',
   setAppearance: 'vibesys:welcome:set-appearance',
@@ -150,6 +151,7 @@ function createWelcomePreload(capabilities: WelcomePreloadCapabilities): Welcome
     usageSummary: (host, projects, edges, now) =>
       call(CHANNELS.usageSummary, host, projects, edges, now),
     usageRatesRefresh: (host, force, now) => call(CHANNELS.usageRatesRefresh, host, force, now),
+    usageLimits: (host, maxAgeS, now) => call(CHANNELS.usageLimits, host, maxAgeS, now),
     usagePricesSave: (host, baseRevision, overrides, aliases) =>
       call(CHANNELS.usagePricesSave, host, baseRevision, overrides, aliases),
     connectRun: id => capabilities.connectRun(id),

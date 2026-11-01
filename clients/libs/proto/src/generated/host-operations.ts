@@ -23,6 +23,7 @@ export const operationPolicies = Object.freeze({
   UsageWindow: Object.freeze({name: 'UsageWindow', id: 42, requestTag: 42, responseTag: 42, capMs: 25000, graceMs: 5000, totalMs: 30000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
   UsageSummary: Object.freeze({name: 'UsageSummary', id: 44, requestTag: 44, responseTag: 44, capMs: 25000, graceMs: 5000, totalMs: 30000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
   UsageRatesRefresh: Object.freeze({name: 'UsageRatesRefresh', id: 45, requestTag: 45, responseTag: 45, capMs: 60000, graceMs: 5000, totalMs: 65000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
+  UsageLimits: Object.freeze({name: 'UsageLimits', id: 47, requestTag: 47, responseTag: 47, capMs: 30000, graceMs: 5000, totalMs: 35000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
   CreateExample: Object.freeze({name: 'CreateExample', id: 34, requestTag: 34, responseTag: 34, capMs: 120000, graceMs: 5000, totalMs: 125000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
   CopyProject: Object.freeze({name: 'CopyProject', id: 35, requestTag: 35, responseTag: 35, capMs: 120000, graceMs: 5000, totalMs: 125000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
   PutCluster: Object.freeze({name: 'PutCluster', id: 31, requestTag: 31, responseTag: 31, capMs: 65000, graceMs: 5000, totalMs: 70000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined, progressMs: undefined} as const),
@@ -130,6 +131,12 @@ export function acceptUsageRatesRefresh(input: MessageInitShape<typeof pb.UsageR
 export async function callUsageRatesRefresh(transport: OperationTransport, request: Accepted<"UsageRatesRefresh">, signal: OperationSignal): Promise<pb.UsageRatesRefreshResponse> {
   return call(transport, {policy: operationPolicies.UsageRatesRefresh, requestSchema: pb.UsageRatesRefreshRequestSchema, responseSchema: pb.UsageRatesRefreshResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
 }
+export function acceptUsageLimits(input: MessageInitShape<typeof pb.UsageLimitsRequestSchema>): Accepted<"UsageLimits"> {
+  return accept(operationPolicies.UsageLimits, pb.UsageLimitsRequestSchema, input);
+}
+export async function callUsageLimits(transport: OperationTransport, request: Accepted<"UsageLimits">, signal: OperationSignal): Promise<pb.UsageLimitsResponse> {
+  return call(transport, {policy: operationPolicies.UsageLimits, requestSchema: pb.UsageLimitsRequestSchema, responseSchema: pb.UsageLimitsResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
+}
 export function acceptCreateExample(input: MessageInitShape<typeof pb.CreateExampleRequestSchema>): Accepted<"CreateExample"> {
   return accept(operationPolicies.CreateExample, pb.CreateExampleRequestSchema, input);
 }
@@ -231,6 +238,7 @@ export const readBudgets = Object.freeze({
   usageWindow: Object.freeze({capMs: 25000, graceMs: 5000, totalMs: 30000} as const),
   usageSummary: Object.freeze({capMs: 25000, graceMs: 5000, totalMs: 30000} as const),
   usageRatesRefresh: Object.freeze({capMs: 60000, graceMs: 5000, totalMs: 65000} as const),
+  usageLimits: Object.freeze({capMs: 30000, graceMs: 5000, totalMs: 35000} as const),
 } as const);
 export function encodeHostRead(checkout: string, name: string, payload: Uint8Array): Uint8Array {
   switch (name) {
@@ -264,6 +272,8 @@ export function encodeHostRead(checkout: string, name: string, payload: Uint8Arr
       return toBinary(ReadRequestSchema, create(ReadRequestSchema, {checkout, method: {case: 'usageSummary', value: fromBinary(pb.UsageSummaryRequestSchema, payload)}}));
     case 'UsageRatesRefresh':
       return toBinary(ReadRequestSchema, create(ReadRequestSchema, {checkout, method: {case: 'usageRatesRefresh', value: fromBinary(pb.UsageRatesRefreshRequestSchema, payload)}}));
+    case 'UsageLimits':
+      return toBinary(ReadRequestSchema, create(ReadRequestSchema, {checkout, method: {case: 'usageLimits', value: fromBinary(pb.UsageLimitsRequestSchema, payload)}}));
     default: throw new Error("unknown read");
   }
 }
@@ -318,6 +328,9 @@ export function decodeHostRead(name: string, payload: Uint8Array): Uint8Array {
     case 'UsageRatesRefresh':
       if (result.case !== 'usageRatesRefresh') throw new Error('response correlation mismatch');
       return toBinary(pb.UsageRatesRefreshResponseSchema, result.value);
+    case 'UsageLimits':
+      if (result.case !== 'usageLimits') throw new Error('response correlation mismatch');
+      return toBinary(pb.UsageLimitsResponseSchema, result.value);
     default: throw new Error("unknown read");
   }
 }

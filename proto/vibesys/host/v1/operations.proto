@@ -2258,6 +2258,68 @@ message UsageRatesRefreshResponse {
   UsagePricing pricing = 2 [(buf.validate.field).required = true];
 }
 
+// How a provider's limits in a `UsageLimitsResponse` were come by.
+enum UsageLimitsStatus {
+  USAGE_LIMITS_STATUS_UNSPECIFIED = 0;
+  // Read from the provider's CLI by this call.
+  USAGE_LIMITS_STATUS_LIVE = 1;
+  // A reading the host held that was younger than the request's `max_age_s`.
+  USAGE_LIMITS_STATUS_STORED = 2;
+  // The read failed, so this is the last good reading, as old as its `read_at` says.
+  USAGE_LIMITS_STATUS_STALE = 3;
+  // The read failed and there is no earlier reading: `unavailable` says why.
+  USAGE_LIMITS_STATUS_UNAVAILABLE = 4;
+}
+
+// What each provider's plan limits are now: the windows, the share used and when each refills,
+// and the reset credits. The host asks each provider's CLI in the environment a run finds it in,
+// with no prompt and no model call, and keeps the last good reading of each in `limits.pb`, so a
+// second client within `max_age_s` gets the stored reading and a failed read shows the last good
+// one with its age. One call per host.
+message UsageLimitsRequest {
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  google.protobuf.Timestamp now = 2 [(buf.validate.field) = {
+    required: true
+    timestamp: {
+      gte: {seconds: 0}
+      lte: {seconds: 253402300799}
+    }
+  }];
+  // A stored reading younger than this is answered as it is. Zero reads every provider again.
+  uint32 max_age_s = 3 [(buf.validate.field).uint32.lte = 86400];
+}
+
+message UsageProviderLimits {
+  option (buf.validate.message).cel = {
+    id: "usage_provider_limits.reading"
+    message: "a reading is absent exactly when the provider is unavailable"
+    expression: "(this.status == 4) == !has(this.limits)"
+  };
+  string provider = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 64
+  }];
+  UsageLimitsStatus status = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional UsageAccountLimits limits = 3;
+  // Why the last read failed, when it did; set with `STALE` and with `UNAVAILABLE`.
+  optional UsageLimitsUnavailable unavailable = 4 [(buf.validate.field).enum.defined_only = true];
+}
+
+message UsageLimitsResponse {
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  repeated UsageProviderLimits providers = 2 [(buf.validate.field).repeated.max_items = 8];
+  google.protobuf.Timestamp read_at = 3 [(buf.validate.field).required = true];
+}
+
 // Replace the prices a person set on this host. The book is saved whole, against the revision it
 // was read at: when the host's revision has moved the host changes nothing and answers with its
 // book, so two clients editing at once cannot overwrite each other unseen. A request that equals

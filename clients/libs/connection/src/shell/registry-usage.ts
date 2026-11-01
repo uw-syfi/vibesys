@@ -8,6 +8,7 @@ import type {
   HostId,
   UsageAliasEntry,
   UsageEstimateSourceName,
+  UsageLimitsOutcome,
   UsagePriceBookEntry,
   UsagePricesOutcome,
   UsagePricingEntry,
@@ -21,9 +22,11 @@ import type {
   UsageSummaryOutcome,
 } from '@vibesys/hosts';
 import {
+  acceptUsageLimits,
   acceptUsagePricesSave,
   acceptUsageRatesRefresh,
   acceptUsageSummary,
+  callUsageLimits,
   callUsagePricesSave,
   callUsageRatesRefresh,
   callUsageSummary,
@@ -44,6 +47,7 @@ import {
 } from '@vibesys/proto';
 import {newRequestId} from '@vibesys/request-identity';
 import {type RegistryReadPorts, registryTransport, requireCheckout} from './registry-reads.js';
+import {usageLimitsEntry} from './usage-limits-entry.js';
 
 export interface RegistryUsage {
   /** The host's usage cut into the buckets between `edges` (milliseconds, whole quarter hours). */
@@ -61,6 +65,16 @@ export interface RegistryUsage {
     now: number,
     signal: AbortSignal,
   ): Promise<UsageRatesOutcome>;
+  /**
+   * Each provider's plan limits: the host answers a stored reading younger than `maxAgeS` seconds
+   * as it is, and reads its providers again otherwise.
+   */
+  limits(
+    host: HostId,
+    maxAgeS: number,
+    now: number,
+    signal: AbortSignal,
+  ): Promise<UsageLimitsOutcome>;
   /** Replace the host's price book, edited from `baseRevision`. */
   savePrices(
     host: HostId,
@@ -293,6 +307,14 @@ export function registryUsage(ports: RegistryUsagePorts): RegistryUsage {
       );
       if (response.pricing === undefined) throw new Error('the host sent no pricing');
       return {kind: 'pricing', pricing: pricingEntry(response.pricing)};
+    },
+    async limits(host, maxAgeS, now, signal) {
+      const response = await callUsageLimits(
+        await reads(host),
+        acceptUsageLimits({requestId: newRequestId(), maxAgeS, now: stamp(now)}),
+        signal,
+      );
+      return {kind: 'limits', limits: usageLimitsEntry(response)};
     },
     async savePrices(host, baseRevision, overrides, aliases, signal) {
       const response = await callUsagePricesSave(

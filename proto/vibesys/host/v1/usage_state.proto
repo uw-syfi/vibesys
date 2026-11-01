@@ -303,3 +303,84 @@ message TranscriptScanCache {
   uint32 version = 1;
   repeated TranscriptRootState roots = 2;
 }
+
+// What a window is, in words every provider shares.
+enum UsageLimitKind {
+  USAGE_LIMIT_KIND_UNSPECIFIED = 0;
+  USAGE_LIMIT_KIND_SESSION = 1;
+  USAGE_LIMIT_KIND_WEEKLY = 2;
+  USAGE_LIMIT_KIND_MONTHLY = 3;
+  USAGE_LIMIT_KIND_OTHER = 4;
+}
+
+// Why a provider has no windows.
+enum UsageLimitsUnavailable {
+  USAGE_LIMITS_UNAVAILABLE_UNSPECIFIED = 0;
+  // The provider has no way to read its limits.
+  USAGE_LIMITS_UNAVAILABLE_UNSUPPORTED = 1;
+  // The login is billed by token, so no plan applies.
+  USAGE_LIMITS_UNAVAILABLE_API_KEY = 2;
+  // The CLI is not installed or signed in, did not answer in time, or answered with an error.
+  USAGE_LIMITS_UNAVAILABLE_PROBE_FAILED = 3;
+}
+
+// One limit of an account: a share of an allowance and when it refills.
+message UsageLimitWindow {
+  // Stable for the same window across reads; readings merge by it.
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 128
+  }];
+  UsageLimitKind kind = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  string label = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 128
+  }];
+  // The share used; above 1 when the provider reports over-use.
+  double used_fraction = 4 [(buf.validate.field).double = {
+    finite: true
+    gte: 0
+    lte: 1000000
+  }];
+  optional google.protobuf.Timestamp resets_at = 5;
+  optional uint32 window_minutes = 6;
+}
+
+// A credit that refills the account's limits at once when spent.
+message UsageResetCredit {
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 256
+  }];
+  optional google.protobuf.Timestamp expires_at = 2;
+  optional string title = 3 [(buf.validate.field).string.max_bytes = 128];
+}
+
+// One provider's account as a read found it.
+message UsageAccountLimits {
+  string provider = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 64
+  }];
+  // A digest of the account, never an email or an id: equal across hosts for one account.
+  optional string account = 2 [(buf.validate.field).string.max_bytes = 64];
+  // The provider's own plan word, for example `team` or `pro`.
+  optional string plan = 3 [(buf.validate.field).string.max_bytes = 64];
+  repeated UsageLimitWindow windows = 4 [(buf.validate.field).repeated.max_items = 16];
+  // The count the provider states; `reset_credits` can list fewer.
+  optional uint32 reset_credits_available = 5;
+  repeated UsageResetCredit reset_credits = 6 [(buf.validate.field).repeated.max_items = 16];
+  optional string usage_url = 7 [(buf.validate.field).string.max_bytes = 512];
+  // When the windows were read.
+  google.protobuf.Timestamp read_at = 8 [(buf.validate.field).required = true];
+}
+
+// The last good reading of each provider on this host. A cache of the providers, persisted as
+// `limits.pb`: a file that fails its rules is rebuilt by the next read.
+message UsageLimitsState {
+  uint32 version = 1;
+  repeated UsageAccountLimits providers = 2 [(buf.validate.field).repeated.max_items = 8];
+}

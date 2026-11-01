@@ -532,6 +532,24 @@ service HostOperationsService {
       }
     };
   }
+  // The Limits tab's read: each provider's plan limits, from its CLI or the host's last good reading.
+  rpc UsageLimits(vibesys.host.v1.UsageLimitsRequest) returns (vibesys.host.v1.UsageLimitsResponse) {
+    option (vibesys.host.v1.operation) = {
+      operation_id: 47
+      request_tag: 47
+      response_tag: 47
+      cap_ms: 30000
+      grace_ms: 5000
+      effect: OPERATION_EFFECT_READ
+      retry: RETRY_BOUNDED_READ
+      cardinality: CARDINALITY_UNARY
+      executor: EXECUTOR_CHECKOUT
+      correlation: {
+        request_path: 1
+        response_path: 1
+      }
+    };
+  }
   rpc UsagePricesSave(vibesys.host.v1.UsagePricesSaveRequest) returns (vibesys.host.v1.UsagePricesSaveResponse) {
     option (vibesys.host.v1.operation) = {
       operation_id: 46

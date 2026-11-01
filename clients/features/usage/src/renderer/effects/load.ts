@@ -16,6 +16,7 @@ import {
   changedBook,
   checkRate,
   type HostReply,
+  type LimitsAnswer,
   type ModelName,
   type PeriodEdges,
   type ReadAnswer,
@@ -26,7 +27,13 @@ import {
 /** The bridge calls the page makes. */
 export type UsageBridge = Pick<
   WelcomeBridge,
-  'overview' | 'usageSummary' | 'usageRatesRefresh' | 'usagePricesSave' | 'harnesses' | 'onListing'
+  | 'overview'
+  | 'usageSummary'
+  | 'usageLimits'
+  | 'usageRatesRefresh'
+  | 'usagePricesSave'
+  | 'harnesses'
+  | 'onListing'
 >;
 
 /** The most projects a question names (the host's bound). */
@@ -137,6 +144,61 @@ export async function readUsage(
     names: names.flat(),
     olderRunsUnread: known.some(each => each.length > PROJECTS_MAX),
   };
+}
+
+/**
+ * Each connected machine's plan limits, except those switched off; a stored reading younger than
+ * `maxAgeS` seconds is what a host answers as it is. Rejects, naming why, when the app cannot list
+ * its machines or none could be read; `signal` stops asking once the question is no longer wanted.
+ */
+export async function readLimits(
+  bridge: UsageBridge,
+  maxAgeS: number,
+  now: number,
+  hostsOff: readonly HostKey[],
+  signal: AbortSignal,
+): Promise<LimitsAnswer> {
+  const overview = await attempt(() => bridge.overview());
+  if (!overview.ok) throw new Error(overview.error);
+  signal.throwIfAborted();
+  const wanted = overview.value.listings.filter(listing => !hostsOff.includes(listing.host));
+  const listed = wanted.filter(listing => listing.kind === 'listed');
+  // A machine that is still connecting has not failed: it is waited for, not counted as down.
+  const connecting = wanted.flatMap(listing =>
+    listing.kind === 'unavailable' &&
+    (listing.connection.kind === 'connecting' || listing.connection.kind === 'reconnecting')
+      ? [listing.host]
+      : [],
+  );
+  const down = wanted.flatMap(listing =>
+    listing.kind !== 'listed' && !connecting.includes(listing.host) ? [listing.host] : [],
+  );
+  const asked = await Promise.all(
+    listed.map(async listing => ({
+      host: listing.host,
+      outcome: value(await attempt(() => bridge.usageLimits(listing.host, maxAgeS, now))),
+    })),
+  );
+  signal.throwIfAborted();
+  const replies = asked.flatMap(({host, outcome}) =>
+    outcome?.kind === 'limits' ? [{host, limits: outcome.limits}] : [],
+  );
+  const unreachable = [
+    ...down,
+    ...asked.flatMap(({host, outcome}) => (outcome === null ? [host] : [])),
+  ];
+  const unsupported = asked.flatMap(({host, outcome}) =>
+    outcome?.kind === 'unsupported' ? [host] : [],
+  );
+  if (
+    replies.length === 0 &&
+    unsupported.length === 0 &&
+    unreachable.length > 0 &&
+    connecting.length === 0
+  ) {
+    throw new Error('nothing could be read');
+  }
+  return {replies, unreachable, unsupported, connecting};
 }
 
 /** Ask each of `hosts` to fetch its price list; a failure leaves the page working on the old one. */

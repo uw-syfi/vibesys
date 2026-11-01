@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# The pre-push gate: the fast subset of what CI runs for this change (format, lint, types, the
+# repository's policy checks, and the tests the change can reach), refusing the push on a failure.
+# `repoctl` turns it on for every clone and worktree (`git config core.hooksPath .githooks`) the
+# first time any repoctl command runs, so nothing has to be installed by hand.
+#
+# The gate checks the working tree at HEAD. For an emergency, set VIBESYS_SKIP_GATE to the reason:
+#   VIBESYS_SKIP_GATE='production is down' git push
+# The skip and its reason are logged in the repository's git directory; CI and the merge queue
+# still run every check. A push that only deletes refs runs nothing.
+set -euo pipefail
+
+deleting=1
+while read -r _ local_sha _ _; do
+  if [[ "${local_sha//0/}" != "" ]]; then
+    deleting=0
+  fi
+done
+if [[ "$deleting" == 1 ]]; then
+  exit 0
+fi
+
+cd "$(git rev-parse --show-toplevel)"
+./scripts/check_private_terms.sh
+exec ./support/repoctl/repoctl gate

@@ -80,6 +80,17 @@ export {
   type RunDigestsReply,
 } from './run-digest.js';
 export {type EndKind, type EndLook, type EndTone, endedLook} from './run-look.js';
+export type {
+  UsageAccountLimitsEntry,
+  UsageLimitKindName,
+  UsageLimitsEntry,
+  UsageLimitsOutcome,
+  UsageLimitsStatusName,
+  UsageLimitsUnavailableName,
+  UsageLimitWindowEntry,
+  UsageProviderLimitsEntry,
+  UsageResetCreditEntry,
+} from './usage-limits.js';
 export {
   USAGE_QUARTER_MS,
   USAGE_SUMMARY_MAX_EDGES,

@@ -11,6 +11,7 @@ import {
   type ListedRun,
   type RunDigestsReply,
   type UsageAliasEntry,
+  type UsageLimitsOutcome,
   type UsagePricesOutcome,
   type UsageRateEntry,
   type UsageRateOverrideEntry,
@@ -39,6 +40,7 @@ export const RUN_CONTROL_CHANNELS = {
   usageWindow: 'vibesys:welcome:usage-window',
   usageSummary: 'vibesys:welcome:usage-summary',
   usageRatesRefresh: 'vibesys:welcome:usage-rates-refresh',
+  usageLimits: 'vibesys:welcome:usage-limits',
   usagePricesSave: 'vibesys:welcome:usage-prices-save',
 } as const;
 
@@ -277,6 +279,15 @@ export interface RunControlWelcomeBridge {
     now: number,
   ): Promise<WelcomeResult<UsageRatesOutcome>>;
   /**
+   * Ask `host` for each provider's plan limits; a stored reading younger than `maxAgeS` seconds is
+   * answered as it is.
+   */
+  usageLimits(
+    host: HostKey,
+    maxAgeS: number,
+    now: number,
+  ): Promise<WelcomeResult<UsageLimitsOutcome>>;
+  /**
    * Replace the prices a person set on `host`, edited from the book at `baseRevision`: the book is
    * saved whole, or the host answers with the book that moved.
    */
@@ -370,6 +381,12 @@ export type RunControlRequest =
       readonly now: number;
     }
   | {
+      readonly kind: 'usage-limits';
+      readonly host: HostId;
+      readonly maxAgeS: number;
+      readonly now: number;
+    }
+  | {
       readonly kind: 'usage-prices-save';
       readonly host: HostId;
       readonly baseRevision: number;
@@ -410,6 +427,18 @@ function runIds(value: unknown): string[] {
     throw new Error(`name at most ${RUN_DIGESTS_MAX} runs`);
   }
   return value.map(each => exactResumeRunId(each));
+}
+
+/** The longest a stored limits reading may be served as it is: the host's bound, one day. */
+const LIMITS_MAX_AGE_S = 86_400;
+
+function ageSeconds(value: unknown): number {
+  if (!Number.isInteger(value) || (value as number) < 0 || (value as number) > LIMITS_MAX_AGE_S) {
+    throw new Error(
+      'the age a stored limits reading may have must be whole seconds, at most a day',
+    );
+  }
+  return value as number;
 }
 
 function instant(value: unknown, which: string): number {
@@ -497,7 +526,28 @@ function aliasList(value: unknown): UsageAliasEntry[] {
 type UsageChannel =
   | typeof RUN_CONTROL_CHANNELS.usageSummary
   | typeof RUN_CONTROL_CHANNELS.usageRatesRefresh
+  | typeof RUN_CONTROL_CHANNELS.usageLimits
   | typeof RUN_CONTROL_CHANNELS.usagePricesSave;
+
+const USAGE_CHANNELS: ReadonlySet<string> = new Set<UsageChannel>([
+  RUN_CONTROL_CHANNELS.usageSummary,
+  RUN_CONTROL_CHANNELS.usageRatesRefresh,
+  RUN_CONTROL_CHANNELS.usageLimits,
+  RUN_CONTROL_CHANNELS.usagePricesSave,
+]);
+
+function isUsageChannel(channel: string): channel is UsageChannel {
+  return USAGE_CHANNELS.has(channel);
+}
+
+function usageLimitsRequest(host: unknown, maxAge: unknown, now: unknown): RunControlRequest {
+  return {
+    kind: 'usage-limits',
+    host: hostFromKey(host),
+    maxAgeS: ageSeconds(maxAge),
+    now: instant(now, 'now'),
+  };
+}
 
 /** The typed request of a Usage page channel; throws naming the first invalid value. */
 function parseUsageRequest(channel: UsageChannel, args: readonly unknown[]): RunControlRequest {
@@ -519,6 +569,8 @@ function parseUsageRequest(channel: UsageChannel, args: readonly unknown[]): Run
         force: second,
         now: instant(third, 'now'),
       };
+    case RUN_CONTROL_CHANNELS.usageLimits:
+      return usageLimitsRequest(first, second, third);
     case RUN_CONTROL_CHANNELS.usagePricesSave:
       return {
         kind: 'usage-prices-save',
@@ -535,6 +587,7 @@ export function parseRunControlRequest(
   channel: ChannelOf<typeof RUN_CONTROL_CHANNELS>,
   args: readonly unknown[],
 ): RunControlRequest {
+  if (isUsageChannel(channel)) return parseUsageRequest(channel, args);
   const [first, second, third, fourth, fifth, sixth] = args;
   switch (channel) {
     case RUN_CONTROL_CHANNELS.attach:
@@ -621,9 +674,5 @@ export function parseRunControlRequest(
         until,
       };
     }
-    case RUN_CONTROL_CHANNELS.usageSummary:
-    case RUN_CONTROL_CHANNELS.usageRatesRefresh:
-    case RUN_CONTROL_CHANNELS.usagePricesSave:
-      return parseUsageRequest(channel, args);
   }
 }

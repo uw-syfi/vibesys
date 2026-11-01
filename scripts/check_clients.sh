@@ -11,8 +11,8 @@
 #                     that a baseline update is deterministic (needs Docker)
 #
 # `tests/quality/test_check_clients_matches_ci.py` fails when a group CI runs for clients/ is in
-# neither list below, so this command cannot drift from CI. Install it as an opt-in pre-push
-# hook with scripts/install_pre_push_hook.sh.
+# neither list below, so this command cannot drift from CI. The pre-push gate (`repoctl gate`)
+# runs a faster subset of these on every push.
 #
 #   ./scripts/check_clients.sh            # run every leg, stop at the first failure
 #   ./scripts/check_clients.sh --dry-run  # print the commands without running them

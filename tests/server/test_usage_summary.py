@@ -382,20 +382,46 @@ def test_the_largest_reply_the_proto_allows_fits_the_bound() -> None:
     assert len(response.to_binary()) <= USAGE_REPLY_MAX_BYTES
 
 
+def _run_of(provider: str) -> RunInput:
+    """One run with one row of ``provider`` in the first quarter."""
+    row = usage_state.UsageRollupRow(
+        quarter=FIRST_QUARTER,
+        provider=provider,
+        model="opus-5-5",
+        speed=UsageSpeed.STANDARD,
+        basis=UsageCostBasis.PRICE_TABLE,
+        input=1,
+        turns=1,
+    )
+    journal = usage_state.JournalIdentity(boundary=1, head_sha256="0" * 64, tail_sha256="0" * 64)
+    return RunInput(
+        project=0,
+        run_id="20261010-120000-aaaaaaaa-dynamic",
+        rollup=usage_state.RunUsageRollup(version=1, journal=journal, rows=[row]),
+    )
+
+
+_FIRST_TWO_EDGES = [
+    datetime.fromtimestamp((FIRST_QUARTER + mark) * QUARTER_SECONDS, UTC) for mark in (0, 1)
+]
+
+
 @given(runs=run_inputs(max_runs=3), edges=edge_lists())
+@example(runs=[_run_of("a")], edges=_FIRST_TWO_EDGES)
+@example(runs=[_run_of("A" * 40)], edges=_FIRST_TWO_EDGES)
 def test_a_garbled_provider_is_other_and_at_most_sixteen_are_named(
     runs: list[RunInput], edges: list[datetime]
 ) -> None:
     response = _summary(runs, edges)
+    asked = {row.provider for run in runs for row in run.rollup.rows}
     named = {_key(series).provider for series in response.series}
     assert len(named) <= MAX_PROVIDERS
     for series in response.series:
-        assert _key(series).provider == OTHER or _key(series).provider in {
-            "claude_code",
-            "codex",
-            "opencode",
-            "gemini",
-        }
+        provider = _key(series).provider
+        # A provider is named as it was given if it is an id, else `other`: never invented, and a
+        # name that is no id (empty, too long) is never one of the names.
+        assert provider == OTHER or provider in asked
+        assert provider not in {"", "A" * 40}
         validate(series)
 
 

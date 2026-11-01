@@ -166,6 +166,7 @@ if TYPE_CHECKING:
         host_operation_types_generated,
         host_preflight,
         host_run_reads,
+        usage_limits_store,
     )
     from server.host_agent_logins import AgentLogin, LoginStarted, LoginUnavailable
     from server.host_api import HarnessChoice, RunDigestUnreadable
@@ -186,6 +187,7 @@ if TYPE_CHECKING:
     from server.registry import InstanceInspector, LiveRegistry, StopEffects
     from server.run_summary import Summarized
     from vibesys.api.host_operations import reads as read_operations
+    from vs_agent.api.usage_limits import LimitsReader
     from vs_project.api import OperatorDialer
     from vs_proto import api as wire
     from vs_proto.api import host_payloads as pb
@@ -195,6 +197,7 @@ else:
     host_operation_reads = lazy_module("server.host_operation_reads")
     host_operation_types_generated = lazy_module("server.host_operation_types_generated")
     host_preflight = lazy_module("server.host_preflight")
+    usage_limits_store = lazy_module("server.usage_limits_store")
     host_run_reads = lazy_module("server.host_run_reads")
     read_operations = lazy_module("vibesys.api.host_operations.reads")
     wire = lazy_module("vs_proto.api")
@@ -1381,13 +1384,24 @@ def read_reply(request: HelperRequest, source: HostReadSource) -> HelperReply | 
     return _REPLY.validate_python({"type": request.type, **wire.to_mapping(response)})
 
 
+def _limits_reader() -> LimitsReader:
+    """The reader of provider limits; the agent library loads when a limits read asks."""
+    return usage_limits_store.reader_here()
+
+
 def registry_read_source(
-    host: HelperHost, request: HelperRequest | None = None, *, https: HttpsGet | None = None
+    host: HelperHost,
+    request: HelperRequest | None = None,
+    *,
+    https: HttpsGet | None = None,
+    limits: Callable[[], LimitsReader] = _limits_reader,
 ) -> HostReadSource:
     """Bind shared read facts; preserve only a legacy request's role display order.
 
     ``https`` is the client for the price list's fetch; a read source without one answers every
     read but that refresh (``entrypoints.host_reads`` builds the real one when a refresh asks).
+    ``limits`` builds the reader of provider limits: the host's own CLIs, unless a test hands in
+    a fake.
     """
     role_order = (
         tuple(request.agents)
@@ -1399,7 +1413,10 @@ def registry_read_source(
         role_order,
         describe=lambda: describe_machine(host),
         preflight=lambda value: preflight_facts(value, host),
-        https=None if https is None else (lambda: https),
+        outside=host_operation_reads.Outside(
+            https=None if https is None else (lambda: https),
+            limits=limits,
+        ),
     )
 
 

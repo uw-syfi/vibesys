@@ -16,7 +16,8 @@ import {bucketLabel} from './edges.js';
 import {dollars, percent, plainName, tokens, turnsWords} from './format.js';
 import type {DenseSeries, Field, Merged, ProviderCost} from './merge.js';
 
-export type UsageTab = 'cost' | 'tokens';
+/** What the page measures; `limits` is the tab of plan limits, which no figure of the period feeds. */
+export type UsageTab = 'cost' | 'tokens' | 'limits';
 export type UsageSourceChoice = 'all' | 'run' | 'outside';
 
 /** What the person chose to look at; the same answers, filtered. */

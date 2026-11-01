@@ -1178,6 +1178,7 @@ describe('Hosts.usageWindow', () => {
 class FakeUsage implements RegistryUsage {
   readonly summaries: {projects: readonly string[]; edges: readonly number[]; now: number}[] = [];
   readonly refreshes: {force: boolean}[] = [];
+  readonly limitsAsked: {maxAgeS: number; now: number}[] = [];
   readonly saves: {baseRevision: number}[] = [];
   failure: Error | null = null;
 
@@ -1189,6 +1190,12 @@ class FakeUsage implements RegistryUsage {
 
   async refreshRates(_host: HostId, force: boolean) {
     this.refreshes.push({force});
+    if (this.failure !== null) throw this.failure;
+    return {kind: 'unsupported' as const};
+  }
+
+  async limits(_host: HostId, maxAgeS: number, now: number) {
+    this.limitsAsked.push({maxAgeS, now});
     if (this.failure !== null) throw this.failure;
     return {kind: 'unsupported' as const};
   }
@@ -1288,6 +1295,8 @@ describe('Hosts usage reads', () => {
       kind: 'unsupported',
     });
     await expect(hosts.usageRatesRefresh(LOCAL, false, 1)).resolves.toEqual({kind: 'unsupported'});
+    await expect(hosts.usageLimits(LOCAL, 60, 1)).resolves.toEqual({kind: 'unsupported'});
+    expect(usage.limitsAsked).toEqual([{maxAgeS: 60, now: 1}]);
     await expect(hosts.usagePricesSave(LOCAL, 0, [], [])).resolves.toEqual({kind: 'unsupported'});
 
     usage.failure = new Error('the host fell over');

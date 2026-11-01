@@ -7,6 +7,7 @@ import type {
   HostKey,
   HostListing,
   UsageAliasEntry,
+  UsageLimitsEntry,
   UsagePriceBookEntry,
   UsagePricingEntry,
   UsageRateOverrideEntry,
@@ -266,6 +267,21 @@ export class FakeUsageBridge implements UsageBridge {
     const book = this.bookOf(host);
     const summary = found.answer(Math.max(0, edges.length - 1), book);
     return ok({kind: 'summary' as const, summary: {...summary, prices: book}});
+  };
+
+  /** Every limits question asked, to say how often a page asks and how old a reading it accepts. */
+  readonly limitsAsked: {host: HostKey; maxAgeS: number; now: number}[] = [];
+
+  /** What each host answers a limits question: one reading per provider, or that it cannot. */
+  limitsOf: Record<string, UsageLimitsEntry | 'fails' | 'unsupported'> = {};
+
+  usageLimits: UsageBridge['usageLimits'] = async (host, maxAgeS, now) => {
+    this.limitsAsked.push({host, maxAgeS, now});
+    if (this.#down.has(host)) return failed('The connection is down');
+    const found = this.limitsOf[host];
+    if (found === undefined || found === 'unsupported') return ok({kind: 'unsupported' as const});
+    if (found === 'fails') return failed('Could not read the limits');
+    return ok({kind: 'limits' as const, limits: found});
   };
 
   usageRatesRefresh: UsageBridge['usageRatesRefresh'] = async (host, force) => {

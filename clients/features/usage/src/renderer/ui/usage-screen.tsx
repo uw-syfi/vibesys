@@ -53,6 +53,7 @@ import {
   type UsageTab,
   type UsageView,
 } from '../../state/index.js';
+import {LimitsPanel} from './limits-panel.js';
 
 /** A run of a project on a machine, as a row of the page names it. */
 export interface SpendRunRef {
@@ -79,6 +80,7 @@ export interface UsageScreenProps {
 const TABS: readonly {readonly value: UsageTab; readonly label: string}[] = [
   {value: 'cost', label: 'Cost'},
   {value: 'tokens', label: 'Tokens'},
+  {value: 'limits', label: 'Limits'},
 ];
 
 const SOURCES: readonly SelectOption<UsageSourceChoice>[] = [
@@ -716,7 +718,7 @@ function Header(props: {
           <Text as="h1" variant="title">
             Usage
           </Text>
-          {state.status === null ? null : (
+          {state.status === null || state.tab === 'limits' ? null : (
             <Text variant="small" tone="muted">
               {state.status}
             </Text>
@@ -730,17 +732,21 @@ function Header(props: {
             value={state.tab}
             change={actions.tab}
           />
-          <Field label="Period" hideLabel>
-            <Select
-              size="sm"
-              value={state.period}
-              options={USAGE_PERIODS}
-              change={actions.period}
-            />
-          </Field>
-          <Field label="Source" hideLabel>
-            <Select size="sm" value={state.source} options={SOURCES} change={actions.source} />
-          </Field>
+          {state.tab === 'limits' ? null : (
+            <>
+              <Field label="Period" hideLabel>
+                <Select
+                  size="sm"
+                  value={state.period}
+                  options={USAGE_PERIODS}
+                  change={actions.period}
+                />
+              </Field>
+              <Field label="Source" hideLabel>
+                <Select size="sm" value={state.source} options={SOURCES} change={actions.source} />
+              </Field>
+            </>
+          )}
           <Button text="Refresh" variant="secondary" size="sm" press={actions.refresh} />
         </Row>
       </Row>
@@ -765,7 +771,11 @@ export function UsageScreen(props: UsageScreenProps): JSX.Element {
   const {state, actions} = props;
   return (
     <Page width="wide" header={<Header state={state} actions={actions} />}>
-      <Body {...props} />
+      {state.tab === 'limits' ? (
+        <LimitsPanel limits={state.limits} refresh={actions.refresh} />
+      ) : (
+        <Body {...props} />
+      )}
       <Dialogs dialog={state.dialog} tab={state.tab} actions={actions} />
     </Page>
   );
