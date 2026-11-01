@@ -1,0 +1,16 @@
+# Go bindings for vibesys-cli's contract, generated into its own module. The other templates
+# exclude this package (see buf.gen.yaml), so the gateway's bindings are unaffected.
+version: v2
+clean: true
+inputs:
+  - directory: proto
+    paths: [proto/vibesys/cli]
+plugins:
+  - local: [go, -C, cli, tool, protoc-gen-go]
+    strategy: all
+    out: cli/gen
+    opt: paths=source_relative
+  - local: [go, -C, cli, tool, protoc-gen-go-grpc]
+    strategy: all
+    out: cli/gen
+    opt: paths=source_relative

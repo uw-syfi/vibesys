@@ -1,0 +1,52 @@
+syntax = "proto3";
+package vibesys.cli.v1;
+
+import "vibesys/cli/v1/environment.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
+
+// VerdictKind is the outcome of comparing a commit's samples with a base's.
+enum VerdictKind {
+  VERDICT_KIND_UNSPECIFIED = 0;
+  VERDICT_KIND_BETTER = 1;
+  VERDICT_KIND_WORSE = 2;
+  VERDICT_KIND_WITHIN_NOISE = 3;
+  VERDICT_KIND_INCONCLUSIVE = 4;
+}
+
+// InconclusiveReason says why a comparison reached no verdict.
+enum InconclusiveReason {
+  INCONCLUSIVE_REASON_UNSPECIFIED = 0;
+  // A side has fewer than 3 samples.
+  INCONCLUSIVE_REASON_TOO_FEW_SAMPLES = 1;
+  // Both sides are constant, so the test has no spread to work with.
+  INCONCLUSIVE_REASON_CONSTANT_SAMPLES = 2;
+  // The sides measured different metrics.
+  INCONCLUSIVE_REASON_METRIC_MISMATCH = 3;
+  // The sides were measured under different task versions.
+  INCONCLUSIVE_REASON_TASK_VERSION_MISMATCH = 4;
+}
+
+// Verdict is a pure function of the two sample sets and the metric's direction: the same samples
+// always give the same verdict (Welch's t test, at least 3 samples a side).
+message Verdict {
+  VerdictKind kind = 1;
+  // Set only when kind is INCONCLUSIVE.
+  InconclusiveReason reason = 2;
+  uint32 candidate_samples = 3;
+  uint32 base_samples = 4;
+  double candidate_mean = 5;
+  double base_mean = 6;
+  // The two-sided p-value of the test. Zero when no test ran.
+  double p_value = 7;
+}
+
+// Comparison is a verdict with what it compared.
+message Comparison {
+  string commit = 1;
+  string against = 2;
+  Verdict verdict = 3;
+  // The one environment both sides were measured in. A comparison across environments is refused,
+  // not given a verdict.
+  EnvironmentFingerprint environment = 4;
+}

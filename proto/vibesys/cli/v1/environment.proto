@@ -1,0 +1,56 @@
+syntax = "proto3";
+package vibesys.cli.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
+
+// EnvironmentKind is where a job's commands run.
+enum EnvironmentKind {
+  ENVIRONMENT_KIND_UNSPECIFIED = 0;
+  ENVIRONMENT_KIND_HOST = 1;
+  ENVIRONMENT_KIND_DOCKER = 2;
+}
+
+// BackendKind is the compute stack a task targets. It is closed: a new stack is a contract change.
+enum BackendKind {
+  BACKEND_KIND_UNSPECIFIED = 0;
+  BACKEND_KIND_CPU = 1;
+  BACKEND_KIND_CUDA = 2;
+  BACKEND_KIND_ROCM = 3;
+  BACKEND_KIND_METAL = 4;
+  BACKEND_KIND_TRAINIUM = 5;
+}
+
+// EnvironmentFingerprint identifies the environment a result was taken in. Two results are
+// comparable, and a check pass is reusable, only when their fingerprints are equal. It is part of
+// the cache key.
+message EnvironmentFingerprint {
+  EnvironmentKind kind = 1;
+  BackendKind backend = 2;
+  // The exact image digest ("sha256:..."), set for the docker environment and empty for host.
+  string image_digest = 3;
+  // Facts the environment pinned, by name: operating system, architecture, toolchain versions.
+  // Equality is over the whole map, so the names an environment reports are part of its contract.
+  map<string, string> facts = 4;
+}
+
+// MachineFacts describes the machine a result was taken on.
+message MachineFacts {
+  string host_id = 1;
+  string os = 2;
+  string arch = 3;
+  string cpu_model = 4;
+  uint32 logical_cpus = 5;
+  uint64 memory_bytes = 6;
+}
+
+// MachineLoad is the machine's load when it was sampled. The CLI reports it and never acts on it:
+// load from outside VibeSys is neither detected nor prevented.
+message MachineLoad {
+  google.protobuf.Timestamp sampled_at = 1;
+  double load_average_1m = 2;
+  // The fraction of CPU time spent busy, from 0 to 1, over the sampling interval.
+  double cpu_busy_fraction = 3;
+  uint64 memory_available_bytes = 4;
+}

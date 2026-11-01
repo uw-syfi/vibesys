@@ -1,0 +1,282 @@
+syntax = "proto3";
+package vibesys.cli.v1;
+
+import "google/protobuf/timestamp.proto";
+import "vibesys/cli/v1/job.proto";
+import "vibesys/cli/v1/plan.proto";
+import "vibesys/cli/v1/promote.proto";
+import "vibesys/cli/v1/result.proto";
+import "vibesys/cli/v1/verdict.proto";
+import "vibesys/cli/v1/version.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
+
+// DaemonService is what the per-user daemon serves over a private Unix socket. The daemon owns
+// the queue, the job states and all store access; the CLI is a thin client of it. The response
+// messages are also the `--json` output of the command that made the call.
+//
+// A call that cannot complete returns a gRPC error status whose details carry a Failure.
+// A client calls Hello first and goes on only if the answer is COMPATIBLE.
+service DaemonService {
+  rpc Hello(HelloRequest) returns (HelloResponse);
+  rpc Status(StatusRequest) returns (StatusResponse);
+  // Stop ends the daemon. Running jobs have their own supervisors and are not affected.
+  rpc Stop(StopRequest) returns (StopResponse);
+
+  // Submit queues a job, or returns the queued or running job with the same key, or answers from
+  // a reusable result.
+  rpc Submit(SubmitRequest) returns (SubmitResponse);
+  // Watch streams the watched jobs' states: first their current states, then each change, and it
+  // ends when all are final. A client implements `wait`, with its `--any` and `--timeout`, over
+  // this stream, so a timeout is only a client closing the stream and never cancels a job.
+  rpc Watch(WatchRequest) returns (stream WatchResponse);
+  // Cancel stops a job, whole process group included, and does so for every waiter on a shared
+  // job. A cancelled measure saves nothing.
+  rpc Cancel(CancelRequest) returns (CancelResponse);
+  rpc AddNote(AddNoteRequest) returns (AddNoteResponse);
+  rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
+  // ReadLogs streams a job's output from an offset, and with follow keeps streaming until the job
+  // is final.
+  rpc ReadLogs(ReadLogsRequest) returns (stream ReadLogsResponse);
+
+  rpc Show(ShowRequest) returns (ShowResponse);
+  rpc Compare(CompareRequest) returns (CompareResponse);
+  // Promote moves the result branch to a commit, or refuses with typed reasons. A refusal is a
+  // normal response, not an error.
+  rpc Promote(PromoteRequest) returns (PromoteResponse);
+  rpc CurrentResult(CurrentResultRequest) returns (CurrentResultResponse);
+
+  rpc CreatePlan(CreatePlanRequest) returns (CreatePlanResponse);
+  rpc ListPlans(ListPlansRequest) returns (ListPlansResponse);
+  rpc ViewPlan(ViewPlanRequest) returns (ViewPlanResponse);
+  rpc EditPlan(EditPlanRequest) returns (EditPlanResponse);
+  rpc CommentPlan(CommentPlanRequest) returns (CommentPlanResponse);
+  rpc ClosePlan(ClosePlanRequest) returns (ClosePlanResponse);
+}
+
+// CallContext identifies who is calling and about what. The daemon serves many repositories and
+// agents, so every call carries it, and it fills the envelope of the event the call appends.
+message CallContext {
+  // The absolute path of the git repository the command ran in.
+  string repository = 1;
+  string task = 2;
+  string run_id = 3;
+  // The agent harness, such as "claude-code".
+  string harness = 4;
+  string agent = 5;
+}
+
+message HelloRequest {
+  Component component = 1;
+  BuildVersions versions = 2;
+}
+
+message HelloResponse {
+  // The daemon's own versions.
+  BuildVersions versions = 1;
+  Compatibility compatibility = 2;
+}
+
+message StatusRequest {}
+
+message StatusResponse {
+  BuildVersions versions = 1;
+  uint32 pid = 2;
+  google.protobuf.Timestamp started_at = 3;
+  uint32 queued_jobs = 4;
+  uint32 running_jobs = 5;
+}
+
+message StopRequest {}
+
+message StopResponse {}
+
+message SubmitRequest {
+  CallContext context = 1;
+  JobSpec spec = 2;
+  // Run a new job even when a reusable result or a matching queued or running job exists.
+  bool no_cache = 3;
+  // A note to attach to the job, including one reached by a cache hit or a duplicate.
+  string note = 4;
+  // A plan to link the job to, or zero.
+  uint32 plan = 5;
+}
+
+// SubmitDisposition says what a submission turned into.
+enum SubmitDisposition {
+  SUBMIT_DISPOSITION_UNSPECIFIED = 0;
+  // A new job was queued.
+  SUBMIT_DISPOSITION_CREATED = 1;
+  // A queued or running job had the same key; this is that job.
+  SUBMIT_DISPOSITION_JOINED = 2;
+  // A saved result answers the submission; this is the job that produced it.
+  SUBMIT_DISPOSITION_REUSED = 3;
+}
+
+message SubmitResponse {
+  Job job = 1;
+  SubmitDisposition disposition = 2;
+}
+
+message WatchRequest {
+  CallContext context = 1;
+  repeated string job_ids = 2;
+}
+
+message WatchResponse {
+  Job job = 1;
+}
+
+message CancelRequest {
+  CallContext context = 1;
+  string job_id = 2;
+  string reason = 3;
+}
+
+message CancelResponse {
+  Job job = 1;
+}
+
+message AddNoteRequest {
+  CallContext context = 1;
+  string job_id = 2;
+  string text = 3;
+}
+
+message AddNoteResponse {
+  Job job = 1;
+}
+
+message ListJobsRequest {
+  CallContext context = 1;
+  // Filters combine with AND; an empty one matches everything.
+  string commit = 2;
+  repeated JobState states = 3;
+  JobKind kind = 4;
+  string note_contains = 5;
+}
+
+message ListJobsResponse {
+  repeated Job jobs = 1;
+}
+
+message ReadLogsRequest {
+  CallContext context = 1;
+  string job_id = 2;
+  uint64 offset = 3;
+  bool follow = 4;
+}
+
+message ReadLogsResponse {
+  bytes data = 1;
+  // Where the next read continues.
+  uint64 next_offset = 2;
+}
+
+message ShowRequest {
+  CallContext context = 1;
+  string commit = 2;
+}
+
+message ShowResponse {
+  repeated Result results = 1;
+}
+
+message CompareRequest {
+  CallContext context = 1;
+  string commit = 2;
+  // The commit to compare against. Empty means the current result branch head.
+  string against = 3;
+}
+
+message CompareResponse {
+  Comparison comparison = 1;
+}
+
+message PromoteRequest {
+  CallContext context = 1;
+  string commit = 2;
+}
+
+message PromoteResponse {
+  oneof outcome {
+    Promotion promoted = 1;
+    PromoteRefusal refused = 2;
+  }
+}
+
+message CurrentResultRequest {
+  CallContext context = 1;
+}
+
+message CurrentResultResponse {
+  oneof state {
+    CurrentResult current = 1;
+    NoCurrentResult none = 2;
+  }
+}
+
+message CreatePlanRequest {
+  CallContext context = 1;
+  string title = 2;
+  string body = 3;
+}
+
+message CreatePlanResponse {
+  Plan plan = 1;
+}
+
+message ListPlansRequest {
+  CallContext context = 1;
+  repeated PlanStatus statuses = 2;
+  // Matches a plan whose title or body contains the text.
+  string text = 3;
+}
+
+message ListPlansResponse {
+  repeated Plan plans = 1;
+}
+
+message ViewPlanRequest {
+  CallContext context = 1;
+  uint32 number = 2;
+}
+
+message ViewPlanResponse {
+  PlanView view = 1;
+}
+
+message EditPlanRequest {
+  CallContext context = 1;
+  uint32 number = 2;
+  // A field that is absent is left as it is.
+  optional string title = 3;
+  optional string body = 4;
+  optional PlanStatus status = 5;
+}
+
+message EditPlanResponse {
+  Plan plan = 1;
+}
+
+message CommentPlanRequest {
+  CallContext context = 1;
+  uint32 number = 2;
+  string text = 3;
+}
+
+message CommentPlanResponse {
+  Plan plan = 1;
+}
+
+// ClosePlan sets a status and adds a comment as one change. Any status but OPEN closes.
+message ClosePlanRequest {
+  CallContext context = 1;
+  uint32 number = 2;
+  PlanStatus status = 3;
+  string comment = 4;
+}
+
+message ClosePlanResponse {
+  Plan plan = 1;
+}
