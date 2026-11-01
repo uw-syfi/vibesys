@@ -76,7 +76,7 @@ language = "python"
 directory = "."
 timeout_seconds = 600
 commands = [["uv", "run", "--no-sync", "python", "scripts/impacted_tests.py", "run", "--base-ref", "origin/main", "--budget-seconds", "100", "--workers", "4"]]
-gate_commands = [["uv", "run", "python", "scripts/impacted_tests.py", "run", "--base-ref", "origin/main", "--budget-seconds", "30", "--workers", "4"]]
+gate_commands = [["uv", "run", "python", "scripts/impacted_tests.py", "run", "--base-ref", "origin/main", "--budget-seconds", "30", "--workers", "4", "--maxfail", "3"]]
 
 [[check_groups]]
 name = "python_quality"
