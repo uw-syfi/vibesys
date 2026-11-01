@@ -57,6 +57,7 @@ from vs_core.api import (
 )
 from vs_core.api.recovery import OwnerEvent
 from vs_project.api import Committed, StateStore, StoredEnvelope, StoreFence, Unknown
+from vs_runtime._commit_observer import CommitObserver, IgnoreCommits
 from vs_runtime._core_preflight import resolve_core_resume
 from vs_runtime._core_record import (
     Publication,
@@ -71,6 +72,7 @@ from vs_runtime._core_requests import (
     counts_toward_concurrency,
 )
 from vs_runtime._evaluation_jobs import awaits_submissions
+from vs_runtime._step_loop import DispatchCapExceededError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
@@ -203,18 +205,6 @@ class OrphanWaitError(RuntimeCommitError):
         super().__init__(f"orphan waits, nothing will end them: {named}")
 
 
-class DispatchCapExceededError(RuntimeCommitError):
-    """``run_until_idle`` executed more requests than its cap: a request cycle that never ends.
-
-    ``kinds`` counts the request kinds dispatched, so the cycle is named in the failure.
-    """
-
-    def __init__(self, cap: int, kinds: dict[str, int]) -> None:
-        self.cap = cap
-        self.kinds = dict(kinds)
-        super().__init__(f"more than {cap} dispatches without going idle; kinds seen: {kinds}")
-
-
 class DispatchProgress(StrEnum):
     """Distinguish no eligible request from a completed executor call."""
 
@@ -232,27 +222,6 @@ class PublicationDelivery(Protocol):
     async def publish(
         self, publication: Publication, context: PublicationContext
     ) -> PublicationAcknowledgement: ...
-
-
-class CommitObserver(Protocol):
-    """Hears each runtime record the store confirmed, for display and projections only.
-
-    It runs after the commit is durable and on the loop's thread, and it must not raise.
-    ``previous`` is the record this process held before the commit: the last durable one,
-    the fresh record of a run that had none, or None when it held nothing.
-    """
-
-    def committed(self, previous: RuntimeRecord[Any] | None, current: RuntimeRecord[Any]) -> object:
-        """One commit became durable."""
-        ...
-
-
-class IgnoreCommits:
-    """The observer of a host that shows nothing about commits."""
-
-    def committed(self, previous: RuntimeRecord[Any] | None, current: RuntimeRecord[Any]) -> None:
-        """Drop the report."""
-        del previous, current
 
 
 class _Input[S: StrategyState](BaseModel):

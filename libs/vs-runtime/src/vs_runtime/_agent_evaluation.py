@@ -128,7 +128,6 @@ from vs_evaluation.api.tools import (
 )
 from vs_project.api import NestedRepositoryError
 from vs_runtime._agent_tool_errors import ToolRefusal, ToolRefusedError, render_tool_refusal
-from vs_runtime._core_loop import AdmissionBusyError
 from vs_runtime._evaluation_jobs import handle_for
 from vs_runtime._owed_submissions import OwedKey, OwedSubmission, OwedSubmissions
 from vs_runtime._workspace_lookup import find_scope_workspace
@@ -510,7 +509,7 @@ class AgentEvaluationBridge:
     ) -> None:
         """Bind the socket path, the plan policy, the workspace lookup, the records and a log sink.
 
-        ``diagnostics`` hears one line for each call refused as busy, for the run's journal.
+        ``diagnostics`` hears one line for each accept failure, for the run's journal.
         ``network`` binds the socket path and ``threads`` reads each connection.
         """
         self._socket_path = socket_path
@@ -929,19 +928,12 @@ class AgentEvaluationBridge:
         return acknowledge
 
     def _admit(self, shell: AdmissionShell, event: CoreEvent, now: float) -> Transition:
-        """Ask core about the event; only the shell's busy refusal (``AdmissionBusyError``) is transient.
+        """Ask core about the event.
 
-        Every other failure is run state that cannot be trusted (a halted shell, an
-        uncertain commit, a core contract gap) or a core invariant, and must reach the
-        run's halt instead of telling the agent to retry.
+        Any failure is run state that cannot be trusted (a halted run, an uncertain record)
+        or a core invariant, and must reach the run's halt instead of telling the agent to retry.
         """
-        try:
-            return shell.admit(event, now_at=now)
-        except AdmissionBusyError as error:
-            self._diagnostics(
-                f"agent evaluation call refused as busy: {type(error).__name__}: {error}"
-            )
-            raise ToolRefusedError(ToolRefusal.BUSY) from error
+        return shell.admit(event, now_at=now)
 
     def _scoped(self, scope: Scope) -> _Scoped:
         """The scope's record, joined to the turn executing in it now."""

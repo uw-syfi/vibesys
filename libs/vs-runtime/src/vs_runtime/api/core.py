@@ -24,6 +24,7 @@ from vs_runtime._agent_evaluation import (
     SnapshotWorkspace,
 )
 from vs_runtime._capture_command_operation import CaptureCommandOwner
+from vs_runtime._commit_observer import CommitObserver, IgnoreCommits
 from vs_runtime._control_bridge import (
     IntentJournal,
     OperatorInbox,
@@ -32,14 +33,11 @@ from vs_runtime._control_bridge import (
 )
 from vs_runtime._core_loop import (
     AdmissionBusyError,
-    CommitObserver,
     CoreContractGapError,
     CoreRuntime,
     CoreRuntimeBindings,
     CoreTransitions,
-    DispatchCapExceededError,
     DispatchProgress,
-    IgnoreCommits,
     LeaseUnavailableError,
     ObservationRejectedError,
     OrphanWaitError,
@@ -98,7 +96,6 @@ from vs_runtime._core_run import (
     RunLoopConfig,
     RunOutcome,
     RunStalledError,
-    RunTiming,
     StallNotes,
     core_next_wake,
     drive_core,
@@ -212,6 +209,7 @@ from vs_runtime._request_inspection import (
     as_target,
 )
 from vs_runtime._rerun_policy import KeyedWrite, ReadOnly, read_or_keyed
+from vs_runtime._run_timing import RunTiming
 from vs_runtime._semantic_events import BlockDiagnostic, JournalSemanticEvents
 from vs_runtime._session_lifecycle_requests import (
     ContinuationBinding,
@@ -237,6 +235,7 @@ from vs_runtime._session_resolver import (
     open_session_requests,
     session_executors,
 )
+from vs_runtime._step_loop import DispatchCapExceededError
 from vs_runtime._tool_servers import CombinedToolServers, StatelessToolServers
 from vs_runtime._turn_lifecycle import LifecycleReportingExecutor, report_turns
 from vs_runtime._validate_local_operation import ValidateLocalOwner

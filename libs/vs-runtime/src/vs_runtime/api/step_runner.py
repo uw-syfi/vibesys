@@ -13,6 +13,7 @@ from vs_runtime._run_log_step_log import (
 )
 from vs_runtime._saved_run_record import fold_log, restore_log, saved_run_in, snapshot_message
 from vs_runtime._step_loop import (
+    DispatchCapExceededError,
     Interrupted,
     Recorded,
     Stall,
@@ -45,6 +46,7 @@ __all__ = [
     "Cleared",
     "Controls",
     "CoreInputs",
+    "DispatchCapExceededError",
     "FoldStart",
     "Interrupted",
     "OpenStep",

@@ -40,7 +40,6 @@ from tests.support.synthesized_evidence import SynthesizedEvidence
 from vs_core.api import (
     ArtifactId,
     ArtifactRef,
-    ClockAdvanced,
     CoreState,
     DispatchTurn,
     EvidenceKind,
@@ -76,7 +75,6 @@ from vs_runtime.api.core import (
     RunLoopConfig,
     RunStalledError,
     RuntimeCommitError,
-    RuntimeCommitUncertainError,
     drive_core,
     handle_for,
     start_core,
@@ -240,9 +238,6 @@ class ShellView:
     def __init__(self, shell: CoreRuntime[Any]) -> None:
         self._shell = shell
         self.shown: CoreState | None = None
-        self.admitting: CoreRuntime[Any] | None = None
-        """Another shell to admit through, to stand for a halted or failing one."""
-        self.admit_error: Exception | None = None
 
     @property
     def record(self) -> ShellView:
@@ -265,10 +260,8 @@ class ShellView:
         return self.shown if self.shown is not None else self._shell.admitted_core
 
     def admit(self, event: CoreEvent, *, now_at: float) -> Transition:
-        """The real shell's admission, unless a test made the shell fail."""
-        if self.admit_error is not None:
-            raise self.admit_error
-        return (self.admitting or self._shell).admit(event, now_at=now_at)
+        """The real shell's admission."""
+        return self._shell.admit(event, now_at=now_at)
 
 
 def _submitted(request: SubmitMeasurement) -> Answer:
@@ -807,27 +800,6 @@ def _failed_calls(played: Played) -> list[str]:
     return played.agent.errors
 
 
-async def _queue_input_then_submit(agent: Agent) -> None:
-    """Admission needs an idle queue: with an input queued the shell says so, transiently."""
-    assert agent.shell is not None
-    now = agent.shell.record.envelope.core.run.now_at
-    agent.shell.submit(ClockAdvanced(now_at=now), now_at=now)
-    scope = Scope(owner=ATTEMPT.attempt_id, generation=0)
-    assert not await agent.call(agent.token(scope), ("submit",), count=False)
-
-
-def test_an_admission_refused_for_a_busy_queue_is_busy_and_is_journaled() -> None:
-    """The one transient shell refusal tells the agent to call again, and leaves a trace."""
-    played = play((Turn(at_start=_queue_input_then_submit),), 1)
-    check(played)
-    assert played.agent.errors == [
-        "the run could not take this call right now; call the tool again"
-    ]
-    assert played.agent.diagnostics == [
-        "agent evaluation call refused as busy: AdmissionBusyError: admission needs an idle input queue"
-    ]
-
-
 async def _nest_a_repository_then_submit(agent: Agent) -> None:
     """The agent clones a repository into its workspace and submits; then it removes it."""
     agent.workspaces.nested = ("vendor/lib/.git",)
@@ -842,58 +814,6 @@ def test_a_submit_from_a_workspace_holding_a_nested_repository_is_refused_not_ha
     check(played)
     assert len(played.agent.errors) == 1
     assert "nested Git repository" in played.agent.errors[0]
-
-
-def _failing_admission(error: Exception | None) -> Callable[[Agent], Awaitable[None]]:
-    """A probe whose submit meets ``error`` from the shell (an unstarted shell when None)."""
-
-    async def probe(agent: Agent) -> None:
-        assert agent.view is not None
-        scope = Scope(owner=ATTEMPT.attempt_id, generation=0)
-        frame = SubmitCall(token=agent.token(scope)).model_dump_json().encode()
-        if error is None:
-            idle = cast(
-                "CoreRuntime[Any]",
-                CoreRuntime(
-                    FakeStateStore(),
-                    skeleton.driver(SkeletonConfig(), OPERATIONS.registry()),
-                    agent.view.core,  # type: ignore[arg-type]
-                    config=SkeletonConfig(),
-                ),
-            )
-            agent.view.admitting = idle
-        else:
-            agent.view.admit_error = error
-        try:
-            assert agent.bridge is not None
-            with pytest.raises(RuntimeCommitError) as raised:
-                await agent.bridge.answer(frame)
-            assert type(raised.value) is type(error or RuntimeCommitError())
-        finally:
-            agent.view.admitting = None
-            agent.view.admit_error = None
-
-    return probe
-
-
-@pytest.mark.parametrize(
-    "error",
-    [
-        None,
-        RuntimeCommitUncertainError(candidate_visible=True),
-        OrphanWaitError(()),
-        RuntimeCommitError("admission needs an idle input queue"),
-    ],
-    ids=["halted-or-inactive-shell", "uncertain-commit", "orphan-wait", "busy-lookalike"],
-)
-def test_a_shell_that_cannot_be_trusted_is_never_reported_to_the_agent_as_busy(
-    error: Exception | None,
-) -> None:
-    """Only ``AdmissionBusyError`` is busy, whatever the text; every other failure reaches the halt."""
-    played = play((Turn(at_start=_failing_admission(error)),), 1)
-    check(played)
-    assert played.agent.errors == []
-    assert played.agent.diagnostics == []
 
 
 async def _stop_the_run_before_the_yield(agent: Agent, request: DispatchTurn) -> bool:
