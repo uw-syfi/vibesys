@@ -17,17 +17,14 @@ from vs_core.api import (
     ENVIRONMENT_STOP,
     ControlId,
     ControlInput,
-    RunControlEvent,
     StopMode,
 )
 from vs_dst._crash_points import EVERY_POINT, CrashPointPolicy
 from vs_dst._interruptions import Moment
-from vs_dst._step_host import HostNotOpenError
 from vs_sim.api.testing import Depth, depth
 
 if TYPE_CHECKING:
     from vs_core.api import CoreState
-    from vs_dst._snapshots import RunningHost, Store
     from vs_proto.api import Record
 
 FIRST_EPOCH = 1
@@ -58,12 +55,15 @@ class StopKind(StrEnum):
             case StopKind.OPERATOR_DRAIN | StopKind.DEADLINE:
                 return StopMode.DRAIN
 
-    @property
-    def control(self) -> ControlInput:
-        """The control the host or the operator delivers, under the id core names that stop by."""
+    def control(self, serial: str = "") -> ControlInput:
+        """The control the host or the operator delivers, under the id core names that stop by.
+
+        A ``serial`` makes it one more stop of its kind, which core takes as its own control;
+        only the operator's kinds take one, because core names the host's two by their epoch.
+        """
         match self:
             case StopKind.OPERATOR_CANCEL | StopKind.OPERATOR_DRAIN:
-                identity = f"operator-stop-{self.mode.value}"
+                identity = "-".join(filter(None, (f"operator-stop-{self.mode.value}", serial)))
             case StopKind.DEADLINE:
                 identity = f"{DEADLINE_STOP}:{FIRST_EPOCH}"
             case StopKind.ENVIRONMENT:
@@ -134,38 +134,3 @@ class Stopped:
             return f"{type(self.halted).__name__}: {self.halted}"
         status = "no state" if self.core is None else self.core.run.status.value
         return f"run {status} when the host gave up on it"
-
-
-class Stopper:
-    """Stops the run the way the operator or the host does, when the run reaches one point.
-
-    A stop that is due before the host has opened its log waits for the first moment after: the
-    operator's request is held until the process can take it.
-    """
-
-    def __init__(self, point: StopPoint, kind: StopKind) -> None:
-        """Deliver ``kind`` when the run reaches ``point``."""
-        self._point = point
-        self._kind = kind
-        self._host: RunningHost | None = None
-        self._due = False
-        self.delivered_at: float | None = None
-
-    def watch(self, store: Store, host: RunningHost) -> None:
-        """Start hearing ``store``'s commits, for the run ``host`` drives."""
-        self._host = host
-        store.watcher = self
-
-    def reached(self, moment: Moment, index: int) -> None:
-        """Submit the stop once the run is at the point, and as soon as the host can take it."""
-        if self._host is None or self.delivered_at is not None:
-            return
-        self._due = self._due or (moment, index) == (self._point.moment, self._point.index)
-        if not self._due:
-            return
-        now = self._host.clock.now()
-        try:
-            self._host.submit(RunControlEvent(control=self._kind.control, now_at=now))
-        except HostNotOpenError:
-            return
-        self.delivered_at = now

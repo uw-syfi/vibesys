@@ -156,6 +156,34 @@ def test_a_task_the_stop_already_ended_stays_ended_after_the_lift(begin: Begin) 
     assert not run.state.live.stop
 
 
+@pytest.mark.regression
+@pytest.mark.parametrize("stop_in", range(_ROUNDS))
+def test_a_lift_after_a_stop_ended_a_search_that_never_checkpointed_starts_it_again(
+    begin: Begin,
+    stop_in: int,
+) -> None:
+    """Regression: the lift restarted every flow from a snapshot it recorded, and a flow that had
+    recorded none made the resume fail as ``FlowCodeChanged`` though no code had changed, so a run
+    stopped before its first checkpoint could never be resumed. Its flows start from the argument
+    they began with, with the stop taken back."""
+    run = begin(rounds)
+    for index in range(_ROUNDS):
+        asked = run.expect_turn(f"round-{index}")
+        if index == stop_in:
+            run.stop()
+            run.reply(asked, Plan(n=index * 10))
+            break
+        run.reply(asked, Plan(n=index * 10))
+    assert run.finished is not None
+
+    run.lift_stop()
+
+    assert not run.state.live.stop
+    for index in range(_ROUNDS):
+        run.reply(run.expect_turn(f"round-{index}"), Plan(n=index * 10))
+    assert _history(run) == History(answers=(0, 10, 20))
+
+
 def test_a_run_saved_stopped_by_the_previous_version_resumes_and_lifts() -> None:
     """A saved envelope holds the stop in core's controls and in the flows' state; both lift."""
     saved = Path(__file__).parent / "envelopes" / "v36-stopped.json"

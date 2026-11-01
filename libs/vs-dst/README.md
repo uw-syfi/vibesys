@@ -97,6 +97,8 @@ something that is not coming is given up on instead of waited for. It returns an
 - `STUCK`: it did not end after the resumes, or ended with recovery blocked;
 - `ERRORED`: the host that was meant to carry on raised.
 
+A pause or a stop due before the host has opened its run.log is held until it has, as an operator's request to a process that is still starting is, and delivered once; one `Delivery` sends every pause and stop, the operator's and the host's.
+
 A kill starts from a copy of the outside world at its point, like `rerun_with_crash`. A pause or
 a stop cannot: the host that is paused or stopped is alive and winds down, so the world runs again
 from its start with the operator's control planted. A stop ends the run, so a run resumed after

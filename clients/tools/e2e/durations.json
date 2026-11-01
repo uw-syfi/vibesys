@@ -59,7 +59,6 @@
   "desktop-shell/e2e/runs-dashboard.spec.ts": 4.633,
   "desktop-shell/e2e/screen-checks.spec.ts": 6.23,
   "desktop-shell/e2e/screens.spec.ts": 116.941,
-  "desktop-shell/e2e/settings-machine-controls.spec.ts": 51.288,
   "desktop-shell/e2e/settings-machine-screens.spec.ts": 13.281,
   "desktop-shell/e2e/settings-machine.spec.ts": 4.178,
   "desktop-shell/e2e/settings-polish.spec.ts": 8.063,

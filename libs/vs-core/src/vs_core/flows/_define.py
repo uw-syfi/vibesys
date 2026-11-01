@@ -262,7 +262,7 @@ class FlowDriver[C]:
             # lift, so every flow starts again from its latest checkpoint, with the stop taken
             # back. A run that was only paused, or that concluded for its own reasons while it
             # was, goes on as it was: its ending is still the search's to propose.
-            state, run, restarting = self._restart(state, view, lifted=True)
+            state, run, restarting = self._restart(state, view, lifted=True, from_start=True)
             restarted.extend(restarting)
         decisions = run.feed(item, view, None)
         step = Step(
@@ -418,15 +418,24 @@ class FlowDriver[C]:
         return run
 
     def _restart(
-        self, state: FlowState, view: RunView, *, lifted: bool = False
+        self, state: FlowState, view: RunView, *, lifted: bool = False, from_start: bool = False
     ) -> tuple[FlowState, _Run, list[Decision]]:
         """Start every running flow again from its latest snapshot, with a fresh journal.
 
         A task that is not a registered flow has no snapshot to start from; ``restore`` drops it
         and leaves it to its parent, which restarts from its own snapshot, to start again.
         ``lifted`` starts them with the stop that stood taken back (a resume lifted it).
+        ``from_start`` is a restart by the code that recorded the state, which starts a flow
+        that never checkpointed from the argument it began with: that argument becomes the
+        snapshot the restart records for it, so the journal of the restart replays as it ran.
         """
         live = state.live.model_copy(update={"stop": None}) if lifted else state.live
+        if from_start:
+            flows = tuple(
+                flow.model_copy(update={"checkpointed": True}) if flow.name is not None else flow
+                for flow in live.flows
+            )
+            live = live.model_copy(update={"flows": flows})
         run = self._new_run(state.facts)
         decisions = run.restore(live, view, None)
         restarted = self._first_state(run, state.facts, live, decisions)

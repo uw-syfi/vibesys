@@ -1,0 +1,43 @@
+{
+  "frame": ["@vibesys/feature-app-shell"],
+  "desktop-shell": {
+    "new-run": {
+      "specs": ["new-run*.spec.ts"],
+      "packages": ["@vibesys/feature-new-run"]
+    },
+    "machines": {
+      "specs": ["machines*.spec.ts"],
+      "packages": ["@vibesys/feature-machines"]
+    },
+    "settings": {
+      "specs": ["settings-*.spec.ts"],
+      "packages": ["@vibesys/feature-settings"]
+    },
+    "usage": {
+      "specs": ["usage.spec.ts"],
+      "packages": ["@vibesys/feature-usage"]
+    },
+    "runs-dashboard": {
+      "specs": ["runs-dashboard*.spec.ts"],
+      "packages": ["@vibesys/feature-runs-dashboard"]
+    },
+    "run": {
+      "specs": [
+        "chart-hint.spec.ts",
+        "chip-hint.spec.ts",
+        "controls-*.spec.ts",
+        "gateway-records.spec.ts",
+        "liveness.spec.ts",
+        "recorded-facts.spec.ts",
+        "relaunch.spec.ts",
+        "run-*.spec.ts"
+      ],
+      "packages": [
+        "@vibesys/feature-run-chat",
+        "@vibesys/feature-run-intents",
+        "@vibesys/feature-run-page",
+        "@vibesys/feature-run-sessions"
+      ]
+    }
+  }
+}

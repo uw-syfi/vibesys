@@ -94,6 +94,27 @@ function specFiles(directory: URL, prefix: string, insideE2e: boolean): string[]
 }
 
 /**
+ * The specs `VIBESYS_E2E_SPECS` selects (a JSON array of spec paths), or `undefined` when it is
+ * unset or empty. A path that is not a spec fails the run by name instead of silently selecting
+ * nothing, which would hide a stale selection.
+ */
+export function e2eSelection(
+  specs: readonly string[],
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): string[] | undefined {
+  const value = env['VIBESYS_E2E_SPECS'];
+  if (value === undefined || value === '') return undefined;
+  const parsed: unknown = JSON.parse(value);
+  if (!Array.isArray(parsed) || parsed.some(path => typeof path !== 'string')) {
+    throw new Error('VIBESYS_E2E_SPECS must be a JSON array of spec paths');
+  }
+  const selected = parsed as string[];
+  const unknown = selected.filter(path => !specs.includes(path));
+  if (unknown.length > 0) throw new Error(`VIBESYS_E2E_SPECS names no spec: ${unknown.join(', ')}`);
+  return [...new Set(selected)].sort();
+}
+
+/**
  * This app's exact files in the shared plan; no shard variable keeps all its files.
  * The configs do not also use Playwright's count-based shard, which would split the plan twice.
  * A shard may own no file of one app; the app commands use --pass-with-no-tests for that case.
@@ -103,8 +124,11 @@ export function e2eTestMatch(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): string[] {
   const specs = e2eSpecs();
-  const owned = specs.filter(path => path.startsWith(`${app}/`));
-  if (owned.length === 0) throw new Error(`${app}: no e2e specs`);
+  if (!specs.some(path => path.startsWith(`${app}/`))) throw new Error(`${app}: no e2e specs`);
+  // The plan covers the selected specs when a pull request runs only those a change can affect,
+  // and every spec otherwise (the merge queue and a local run).
+  const planned = e2eSelection(specs, env) ?? specs;
+  const owned = planned.filter(path => path.startsWith(`${app}/`));
   const shard = e2eShard('VIBESYS_E2E_SHARD', env);
   if (shard === undefined) return owned.map(path => `**/${path}`);
   const raw: unknown = JSON.parse(readFileSync(TIMINGS, 'utf8'));
@@ -118,6 +142,6 @@ export function e2eTestMatch(
     }
     seconds[path] = value;
   }
-  const assigned = assignE2eSpecs(specs, seconds, shard.total);
+  const assigned = assignE2eSpecs(planned, seconds, shard.total);
   return owned.filter(path => assigned.get(path) === shard.current).map(path => `**/${path}`);
 }
