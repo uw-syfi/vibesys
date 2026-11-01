@@ -1,0 +1,99 @@
+/**
+ * The declarative run scenarios of the journeys (`e2e/scenarios/*.json`) and the native records
+ * the shipping projection makes of them, as data: the first batch of a run, the records a live run
+ * delivers after it, and the lifecycle a scenario moves to. The browser journeys feed these to a
+ * page (`e2e/journey-world.ts`); the DOM tests of the shell feed them to the window's Fake gateway
+ * (`shell-world.tsx`). Nothing of a browser is in it.
+ */
+import {readFileSync} from 'node:fs';
+import {create, fromBinary, type MessageShape, toBinary} from '@bufbuild/protobuf';
+import {ClientReplaySchema, RecordSchema, TailResponseSchema} from '@vibesys/proto';
+import {parseFixture, type RunFixture} from '@vibesys/run-fixtures';
+import {derivedReplay} from '@vibesys/run-fixtures/derived';
+
+export type Journey =
+  | 'trace'
+  | 'agents'
+  | 'prototype'
+  | 'lineage10'
+  | 'lineage600'
+  | 'live'
+  | 'empty'
+  | 'quota'
+  | 'parked'
+  | 'stopped'
+  | 'stopped-empty'
+  | 'startup';
+
+/** The lifecycles `transitionJourney` moves between: the journeys, and the startup phases. */
+export type NativeJourney = Journey | 'startup-running' | 'startup-draining' | 'startup-ended';
+
+export function journeyFixture(name: Journey): RunFixture {
+  const {
+    lineage: _lineage,
+    nativeLifecycles: _native,
+    nativeStreams: _streams,
+    nativeTransitions: _transitions,
+    ...fixture
+  } = JSON.parse(
+    readFileSync(new URL(`../../e2e/scenarios/${name}.json`, import.meta.url), 'utf8'),
+  );
+  return parseFixture(fixture);
+}
+
+/** The replay the Python projector made of a journey, which the Fake gateway serves. */
+export function journeyReplay(
+  name: NativeJourney | 'live.initial' | `live.${number}`,
+): MessageShape<typeof ClientReplaySchema> {
+  return fromBinary(ClientReplaySchema, derivedReplay('journeys', name));
+}
+
+/** The next native records and stream writes of a live journey, for one source sequence. */
+export function journeyUpdate(sequence: number): {
+  readonly tail: number[];
+  readonly streams: Record<string, number[]>;
+  readonly hasRecords: boolean;
+} {
+  const replay = journeyReplay(`live.${sequence}`);
+  const records = replay.batches.flatMap(batch => batch.records);
+  const tail = [
+    ...toBinary(
+      TailResponseSchema,
+      create(TailResponseSchema, {
+        records,
+        throughSeq: records.length
+          ? fromBinary(RecordSchema, records[records.length - 1] ?? new Uint8Array()).seq
+          : 0n,
+      }),
+    ),
+  ];
+  const streams = Object.fromEntries(
+    Object.entries(replay.streams).map(([id, bytes]) => [id, [...bytes]]),
+  );
+  return {tail, streams, hasRecords: records.length > 0};
+}
+
+/** The sequence of the last record a journey's replay holds. */
+export function journeyHead(name: Journey): bigint {
+  return journeyReplay(name)
+    .batches.flatMap(batch => batch.records)
+    .reduce((head, bytes) => {
+      const {seq} = fromBinary(RecordSchema, bytes);
+      return seq > head ? seq : head;
+    }, 0n);
+}
+
+/** The tail that takes a run at the end of `from` to the end of `to`: the records `to` has beyond `from`. */
+export function journeyTransition(from: NativeJourney, to: NativeJourney): number[] {
+  const prefix = journeyReplay(from)
+    .batches.flatMap(batch => batch.records)
+    .map(bytes => fromBinary(RecordSchema, bytes));
+  const after = prefix.at(-1)?.seq ?? 0n;
+  const records = journeyReplay(to)
+    .batches.flatMap(batch => batch.records)
+    .filter(bytes => fromBinary(RecordSchema, bytes).seq > after);
+  const throughSeq = records.length
+    ? fromBinary(RecordSchema, records[records.length - 1] ?? new Uint8Array()).seq
+    : after;
+  return [...toBinary(TailResponseSchema, create(TailResponseSchema, {records, throughSeq}))];
+}
