@@ -12,6 +12,7 @@ import {
   installFakeNewRun,
   installFakeProjectRuns,
   installFakeUsage,
+  installFakeUsageLimits,
   installFakeUsagePrices,
 } from './fake-bridge.js';
 import {addInitScripts, initScript} from './init-scripts.js';
@@ -61,6 +62,7 @@ async function open(page: Page, usage: UsageCase, width: number): Promise<void> 
     initScript(installFakeNewRun, seed),
     initScript(installFakeUsagePrices, undefined),
     initScript(installFakeUsage, seed),
+    initScript(installFakeUsageLimits, seed),
     nativeFixtureScript(runFixtureFor(usage)),
   ]);
   await page.goto('./shell.html');
@@ -369,6 +371,7 @@ test('Usage asks nothing until it is shown, and again each time it is shown', as
     initScript(installFakeNewRun, seed),
     initScript(installFakeUsagePrices, undefined),
     initScript(installFakeUsage, seed),
+    initScript(installFakeUsageLimits, seed),
   ]);
   await page.goto('./shell.html');
   const rail = page.getByRole('navigation', {name: 'VibeSys'});

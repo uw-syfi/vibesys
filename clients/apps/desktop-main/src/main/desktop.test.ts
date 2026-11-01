@@ -230,6 +230,10 @@ function desktopWorld(cleanups: RetirementCleanups = {}, skipped: SkippedRecent[
       events.push(`usage-rates-refresh:${JSON.stringify([id, force, now])}`);
       return {kind: 'unsupported'};
     },
+    usageLimits: async (id, maxAgeS, now) => {
+      events.push(`usage-limits:${JSON.stringify([id, maxAgeS, now])}`);
+      return {kind: 'unsupported'};
+    },
     usagePricesSave: async (id, baseRevision, overrides, aliases) => {
       events.push(`usage-prices-save:${JSON.stringify([id, baseRevision, overrides, aliases])}`);
       return {kind: 'unsupported'};
@@ -603,6 +607,17 @@ describe('Desktop usage summary reads', () => {
     );
     expect(reply).toMatchObject({ok: false});
     expect(w.events.filter(event => event.startsWith('usage-summary:'))).toEqual([]);
+  });
+
+  test('a limits question reaches the host for the machine it names, and a bad age never does', async () => {
+    const w = desktopWorld();
+    await w.ipc.invoke('10:100', WELCOME_CHANNELS.usageLimits, 'local', 300, 5_000);
+    expect(w.events).toContain(`usage-limits:${JSON.stringify([{kind: 'local'}, 300, 5000])}`);
+    for (const age of [-1, 1.5, 86_401, '60', null]) {
+      const reply = await w.ipc.invoke('10:100', WELCOME_CHANNELS.usageLimits, 'local', age, 5_000);
+      expect(reply).toMatchObject({ok: false});
+    }
+    expect(w.events.filter(event => event.startsWith('usage-limits:'))).toHaveLength(1);
   });
 
   test('a price refresh and a price save reach the host for the machine they name', async () => {

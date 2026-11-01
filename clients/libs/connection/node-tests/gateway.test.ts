@@ -409,6 +409,7 @@ const deadlineInputs = {
     now: {seconds: 900n, nanos: 0},
   },
   usageRatesRefresh: {force: false, now: {seconds: 900n, nanos: 0}},
+  usageLimits: {maxAgeS: 60, now: {seconds: 900n, nanos: 0}},
   usagePricesSave: {baseRevision: 0n, overrides: [], aliases: []},
   listHarnesses: {},
   listExamples: {},
