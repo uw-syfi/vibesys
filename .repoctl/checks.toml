@@ -176,7 +176,9 @@ timeout_seconds = 1200
 # package runs through the same task graph, so it gets that preparation too.
 commands = [["pnpm", "turbo", "run", "test"]]
 package_commands = [["pnpm", "turbo", "run", "test", "--filter", "{package}"]]
-gate_package_commands = [["pnpm", "turbo", "run", "test", "--filter", "{package}"]]
+# Gate: one Turborepo run over the packages changed since main and the packages that depend on them,
+# in parallel, which takes a third of the time of one run per selected package.
+gate_commands = [["pnpm", "turbo", "run", "test", "--filter=...[origin/main]"]]
 always_commands = [
   ["pnpm", "test:ts-architecture"],
   ["pnpm", "test:conformance"],

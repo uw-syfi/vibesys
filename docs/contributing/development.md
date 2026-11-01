@@ -427,10 +427,11 @@ is the fast subset of what CI runs for the change, aimed at about 60 seconds on 
 format, lint, type and repository-policy checks, the Python tests the change can reach through
 imports (`scripts/impacted_tests.py`, at most 30 seconds of tests on 4 workers), and for a change
 under `clients/` biome, the architecture and unused-code checks, each package's checks, and the
-tests of the packages the change touches. Which checks run for which paths comes from the same
-selection as `repoctl test`; each check group lists its gate commands as `gate_commands` and
-`gate_package_commands` in `.repoctl/checks.toml`, and CI never reads them. The groups run
-side by side and the gate prints each one's time.
+tests of the packages the change touches and the packages that depend on them (the client tests
+need the Bun version pinned in `packaging/fetch_bun.py`, as above). Which checks run for which
+paths comes from the same selection as `repoctl test`; each check group lists its gate commands
+as `gate_commands` in `.repoctl/checks.toml`, and CI never reads them. The groups run side by
+side and the gate prints each one's time.
 
 ```bash
 ./support/repoctl/repoctl gate --dry-run   # the commands the gate would run for this change
