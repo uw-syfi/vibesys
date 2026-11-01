@@ -42,11 +42,9 @@ const groups = (page: Page): Promise<string[]> =>
 function wholeWidthAndTiles(width: number): void {
   test('takes the whole row, and its tiles say what the header says', async ({page}) => {
     await open(page, width);
+    // The text is in the page at every width, though a narrow header hides what follows the figure.
     const header =
-      (await page
-        .locator('main .vs-text', {hasText: /^· in /})
-        .first()
-        .textContent()) ?? '';
+      (await page.locator('.vs-stat', {hasText: 'Tokens'}).first().textContent()) ?? '';
     await showUsage(page);
     expect(await page.locator('.vs-panes > .vs-pane').count()).toBe(1);
     const sizes = await page.evaluate(() => ({
@@ -58,8 +56,8 @@ function wholeWidthAndTiles(width: number): void {
     for (const name of ['Cost', 'Tokens', 'Cached input', 'Per idea']) {
       await expect(tiles.getByText(name, {exact: true})).toBeVisible();
     }
-    const input = /in ([\d.]+[kMB]?)/.exec(header)?.[1] ?? 'none';
-    const cached = /\(([\d.]+[kMB]?) cached\)/.exec(header)?.[1] ?? 'none';
+    const input = /([\d.]+[kMB]?) input/.exec(header)?.[1] ?? 'none';
+    const cached = /([\d.]+[kMB]?) cached/.exec(header)?.[1] ?? 'none';
     await expect(tiles).toContainText(`in ${input} ·`);
     await expect(tiles).toContainText(`${cached} of ${input} read from cache`);
   });

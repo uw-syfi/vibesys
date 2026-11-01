@@ -295,10 +295,15 @@ test('the performance row is one element whatever idea is open: dots are singled
   }
   await draw('i1');
   expect(kinds()).toEqual(['-', 'focus', '-']);
-  // The legend names the ring only while an idea is open.
-  expect(container.textContent).toContain('Selected');
+  // The legend names the ring only while an idea is open; otherwise it keeps the entry's room,
+  // unseen, so opening an idea does not change the width of the line it shares with the stats.
+  const ring = (): Element | undefined =>
+    [...container.querySelectorAll('.vs-chart-legend li')].find(item =>
+      item.textContent?.includes('Selected'),
+    );
+  expect(ring()?.hasAttribute('data-reserved')).toBe(false);
   await draw(null);
-  expect(container.textContent).not.toContain('Selected');
+  expect(ring()?.hasAttribute('data-reserved')).toBe(true);
   await draw('i1');
 
   const third = container.querySelectorAll('.vs-chart-pick')[2];

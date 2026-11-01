@@ -28,6 +28,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  container: screen-header / inline-size;
 }
 .vs-screen-body {
   flex: 1 1 auto;
@@ -116,7 +117,9 @@ button.vs-crumb:focus-visible {
 }
 /* Panes that hold a list in columns keep the height of its rows: the screen's body scrolls to them. */
 .vs-panes:has(.vs-columnlist) {
-  flex: 1 0 auto;
+  /* A list in columns takes the height the screen leaves it and scrolls its rows inside, under its
+     header; the screen's body scrolls only when what sits above leaves less than nine rows. */
+  min-height: calc(var(--row) * 9 + var(--space-8) * 2);
 }
 /* A body scrolled to such a list stays where the reader put it when the list's rows change height:
    the browser's own anchoring would move the page by the difference, and the charts with it. */
@@ -617,6 +620,10 @@ button.vs-crumb:focus-visible {
   line-height: var(--text-body-strong-line);
   font-weight: var(--text-body-strong-weight);
 }
+.vs-screen[data-density="compact"] .vs-pane[data-bare] > .vs-pane-body {
+  /* No header above the body: its own controls start close to the pane's edge. */
+  padding-top: var(--space-1);
+}
 .vs-screen[data-density="compact"] .vs-pane-body {
   gap: var(--space-3);
   padding: var(--space-3) var(--space-3);
@@ -1065,14 +1072,12 @@ button.vs-crumb:focus-visible {
   color: var(--muted);
 }
 /*
- * The rows take the height they have, up to sixteen of them: a list of a run's ideas is read by
- * scrolling the page, not through a short window of its own. Past that many rows the list scrolls
- * inside itself, and draws only the rows near the visible part.
+ * The rows fill the height the list is given and scroll inside it, under the header, drawing only
+ * the rows near the visible part.
  */
 .vs-columnlist-rows {
-  flex: 0 1 auto;
+  flex: 1 1 0;
   min-height: 0;
-  max-height: calc(var(--row) * 16);
   overflow-y: auto;
 }
 .vs-columnlist-rows:focus-visible {
@@ -1090,6 +1095,10 @@ button.vs-crumb:focus-visible {
 .vs-columnlist-row:hover {
   background: var(--panel-2);
 }
+/* A compact screen keeps a row to its text: nine rows and more show beside a screen's header. */
+.vs-screen[data-density="compact"] .vs-columnlist-row {
+  min-height: calc(var(--row) - var(--space-3));
+}
 .vs-columnlist-row:focus-visible {
   outline: var(--focus-ring) solid var(--accent);
   outline-offset: var(--focus-offset);
@@ -1105,41 +1114,37 @@ button.vs-crumb:focus-visible {
   animation: vs-pane-flash calc(var(--duration-base) * 8) var(--easing);
 }
 /*
- * A list without room drops its optional columns and the parts of a cell marked optional, and
- * keeps the rest on one grid; a part marked `data-narrow-only` is drawn only then (a figure that a
- * dropped column states while the list is wide).
+ * A list without room for every column (`data-tier`, set from its measured width) drops its
+ * optional columns and the parts of a cell marked optional, and keeps the rest on one grid; a part
+ * marked `data-narrow-only` is drawn only then (a figure that a dropped column states while the
+ * list is wide).
  */
 .vs-columnlist [data-narrow-only] {
   display: none;
 }
-@container (max-width: 1100px) {
-  .vs-columnlist-head,
-  .vs-columnlist-row {
-    grid-template-columns: var(--columns-narrow);
-    column-gap: var(--space-2);
-  }
-  .vs-columnlist [data-optional] {
-    display: none;
-  }
-  .vs-columnlist [data-narrow-only] {
-    display: inline;
-  }
+.vs-columnlist:not([data-tier="wide"]) .vs-columnlist-head,
+.vs-columnlist:not([data-tier="wide"]) .vs-columnlist-row {
+  grid-template-columns: var(--columns-narrow);
+  column-gap: var(--space-2);
+}
+.vs-columnlist:not([data-tier="wide"]) [data-optional] {
+  display: none;
+}
+.vs-columnlist:not([data-tier="wide"]) [data-narrow-only] {
+  display: inline;
 }
 /* A crowded list (a column for each of several objectives) in a pane a half row wide. */
-@container (max-width: 560px) {
-  .vs-columnlist[data-crowded] .vs-columnlist-head,
-  .vs-columnlist[data-crowded] .vs-columnlist-row {
-    grid-template-columns: var(--columns-tight);
-    column-gap: var(--space-2);
-  }
-  .vs-columnlist[data-crowded] [data-tight-hide],
-  .vs-columnlist[data-crowded] .vs-columnlist-lines > :not(:first-child) {
-    display: none;
-  }
-  /* A header over a column cut to its mark keeps its place and says nothing. */
-  .vs-columnlist[data-crowded] [data-tight-blank] > * {
-    visibility: hidden;
-  }
+.vs-columnlist[data-tier="tight"] .vs-columnlist-head,
+.vs-columnlist[data-tier="tight"] .vs-columnlist-row {
+  grid-template-columns: var(--columns-tight);
+}
+.vs-columnlist[data-tier="tight"] [data-tight-hide],
+.vs-columnlist[data-tier="tight"] .vs-columnlist-lines > :not(:first-child) {
+  display: none;
+}
+/* A header over a column cut to its mark keeps its place and says nothing. */
+.vs-columnlist[data-tier="tight"] [data-tight-blank] > * {
+  visibility: hidden;
 }
 .vs-columnlist-cell {
   min-width: 0;
@@ -1543,6 +1548,9 @@ button.vs-crumb:focus-visible {
 .vs-chart-legend {
   gap: var(--space-5);
 }
+.vs-chart-legend .vs-dotlegend-item[data-reserved] {
+  visibility: hidden;
+}
 .vs-chart-legend-mark {
   flex: none;
   display: inline-block;
@@ -1594,6 +1602,32 @@ button.vs-crumb:focus-visible {
   display: grid;
   gap: var(--space-6);
   grid-template-columns: repeat(auto-fit, minmax(var(--chart-min), 1fr));
+}
+.vs-chart-columns[data-across] {
+  /* Side by side while each chart keeps the width it is read at; a narrower window wraps the last. */
+  grid-template-columns: repeat(
+    auto-fit,
+    minmax(
+      max(var(--chart-min-across), calc((100% - (var(--across) - 1) * var(--space-6)) / var(--across))),
+      1fr
+    )
+  );
+}
+/* A heading on one line: the note gives way, with an ellipsis, before the figure goes under the name. */
+.vs-chart-panel-head[data-one-line] {
+  flex-wrap: nowrap;
+}
+.vs-chart-panel-head[data-one-line] .vs-chart-panel-title {
+  flex-wrap: nowrap;
+  flex: 0 1 auto;
+}
+.vs-chart-panel-head[data-one-line] .vs-chart-panel-note {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vs-chart-panel-head[data-one-line] .vs-chart-figure {
+  flex: none;
 }
 
 /* --- flat lists: a trailing column ("from <parent>") -------------------------------------------- */

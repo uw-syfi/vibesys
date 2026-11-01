@@ -1,5 +1,6 @@
 import {type JSX, type ReactNode, useId, useState} from 'react';
 import {MONO_ADVANCE, TYPE} from '../tokens/index.js';
+import type {StyleWithVars} from './css-vars.js';
 import {useInlineSize} from './label-fit.js';
 import {Text} from './text.js';
 
@@ -46,7 +47,7 @@ export interface ChartTick {
  */
 const FALLBACK_WIDTH = 1000;
 const MIN_WIDTH = 240;
-const HEIGHT = {default: 260, strip: 150} as const;
+const HEIGHT = {default: 260, strip: 150, compact: 136} as const;
 export type ChartSize = keyof typeof HEIGHT;
 /** The x labels sit in the band below the plot; a caption adds a line under them. */
 const X_BAND = 20;
@@ -705,6 +706,8 @@ export type ChartLegendMark = 'line' | 'dot' | 'ring';
 export interface ChartLegendItem {
   readonly label: string;
   readonly mark: ChartLegendMark;
+  /** Not named now, but its room kept, so the entry appearing later does not move what shares the line. */
+  readonly reserved?: boolean;
 }
 
 /** A one-line key to what a chart draws: each mark as the chart draws it, and its word. */
@@ -715,7 +718,12 @@ export function ChartLegend(props: {
   return (
     <ul className="vs-dotlegend vs-serieslegend vs-chart-legend" aria-label={props.label}>
       {props.items.map(item => (
-        <li key={item.label} className="vs-dotlegend-item">
+        <li
+          key={item.label}
+          className="vs-dotlegend-item"
+          data-reserved={item.reserved || undefined}
+          aria-hidden={item.reserved || undefined}
+        >
           <span className="vs-chart-legend-mark" data-mark={item.mark} aria-hidden="true" />
           <Text variant="small" tone="muted">
             {item.label}
@@ -735,6 +743,11 @@ export function ChartLegend(props: {
 export function ChartPanel(props: {
   readonly title: string;
   readonly note?: string;
+  /**
+   * The heading stays on one line, so charts side by side start at the same height: the note is cut
+   * with an ellipsis (its words on hover) before the figure goes under the name.
+   */
+  readonly oneLine?: boolean;
   readonly figure?: string;
   readonly tone?: 'ok' | 'err' | 'muted';
   readonly hint?: string;
@@ -742,13 +755,15 @@ export function ChartPanel(props: {
 }): JSX.Element {
   return (
     <section className="vs-chart-panel" aria-label={props.title}>
-      <div className="vs-chart-panel-head">
+      <div className="vs-chart-panel-head" data-one-line={props.oneLine || undefined}>
         <span className="vs-chart-panel-title">
           <Text variant="item">{props.title}</Text>
           {props.note === undefined ? null : (
-            <Text variant="small" tone="muted">
-              {props.note}
-            </Text>
+            <span className="vs-chart-panel-note" title={props.note}>
+              <Text variant="small" tone="muted">
+                {props.note}
+              </Text>
+            </span>
           )}
         </span>
         {props.figure === undefined ? null : (
@@ -777,6 +792,16 @@ export function ChartPanel(props: {
  * Charts side by side, as wide as the others and none narrower than a chart and its axis titles can be read:
  * as many to a row as fit, the rest on the rows below.
  */
-export function ChartColumns(props: {readonly children: ReactNode}): JSX.Element {
-  return <div className="vs-chart-columns">{props.children}</div>;
+export function ChartColumns(props: {
+  readonly children: ReactNode;
+  /** At most this many to a row, equally wide whatever the room; the rest wrap below. */
+  readonly across?: number;
+}): JSX.Element {
+  const style: StyleWithVars | undefined =
+    props.across === undefined ? undefined : {'--across': props.across};
+  return (
+    <div className="vs-chart-columns" data-across={props.across} style={style}>
+      {props.children}
+    </div>
+  );
 }

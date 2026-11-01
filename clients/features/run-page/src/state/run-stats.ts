@@ -26,6 +26,7 @@ import type {RunModel} from './run-model.js';
 import {runningTimeOf, runningWords} from './running-time.js';
 import type {RunPosition} from './time-position.js';
 import {tokensAt} from './token-usage.js';
+import {tokensTitle} from './token-words.js';
 
 /** A stretch of the run clock. */
 interface Interval {
@@ -143,6 +144,8 @@ export interface StatTile {
   /** The figure is a word (`Not reported`), not a number. */
   readonly quiet: boolean;
   readonly note: string;
+  /** The figure whole, for the pointer (the token counts in full); null for none. */
+  readonly title: string | null;
 }
 
 const NOT_REPORTED = 'Not reported';
@@ -156,6 +159,7 @@ function tokenTile(tally: TokenTally | null): StatTile {
       unit: null,
       quiet: true,
       note: '',
+      title: null,
     };
   }
   const count = (value: number | null): string =>
@@ -170,6 +174,7 @@ function tokenTile(tally: TokenTally | null): StatTile {
       `${tally.cacheRead === null ? 'cached unknown' : `${compactTokens(tally.cacheRead)} cached`}`,
       `${count(tally.output)} output`,
     ].join(' · '),
+    title: tokensTitle(tally),
   };
 }
 
@@ -188,6 +193,7 @@ export function statTiles(stats: RunStats): readonly StatTile[] {
       unit: null,
       quiet: false,
       note: ideaNote,
+      title: null,
     },
     {
       id: 'measurements',
@@ -196,6 +202,7 @@ export function statTiles(stats: RunStats): readonly StatTile[] {
       unit: null,
       quiet: false,
       note: `${measurements.failed} failed`,
+      title: null,
     },
     {
       id: 'agent-time',
@@ -204,6 +211,7 @@ export function statTiles(stats: RunStats): readonly StatTile[] {
       unit: null,
       quiet: false,
       note: stats.runningSeconds === null ? '' : `of ${runningWords(stats.runningSeconds)} running`,
+      title: null,
     },
     tokenTile(stats.tokens),
   ];

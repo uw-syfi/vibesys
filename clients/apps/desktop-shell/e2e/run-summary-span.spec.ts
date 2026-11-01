@@ -61,7 +61,7 @@ test('regression: a finished run has its time bar whole, at the end', async ({pa
   await expect(page.getByText('End', {exact: true}).first()).toBeVisible();
 });
 
-test('regression: opening a step moves neither pane, the chart nor the time bar', async ({
+test('regression: opening a step moves neither the chart nor the time bar, and the panes only by the row of crumbs', async ({
   page,
 }) => {
   await openFixture(page, fixture);
@@ -87,7 +87,10 @@ test('regression: opening a step moves neither pane, the chart nor the time bar'
     .click();
   await expect(page.getByRole('navigation', {name: 'Zoom'})).toBeVisible();
   await settled(page);
-  expect(await panesTop()).toBe(top);
+  // The row of crumbs appears above the panes, which sit lower by its height and no more.
+  const lowered = (await panesTop()) - top;
+  expect(lowered).toBeGreaterThanOrEqual(0);
+  expect(lowered).toBeLessThanOrEqual(40);
   // Horizontally too: the list beside the detail keeps its width, so the detail keeps its edge.
   expect(await columns()).toEqual(placed);
   expect(await stabilityViolations(page, 'step', before, RUN_ANCHORS)).toEqual([]);

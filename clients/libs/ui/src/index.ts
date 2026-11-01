@@ -44,6 +44,12 @@ export {
   type ListColumn,
   type RowMarks,
 } from './components/column-list.js';
+export {
+  type ColumnTier,
+  columnTier,
+  type TrackedColumn,
+  widthToShowAll,
+} from './components/column-tracks.js';
 export {Dialog} from './components/dialog.js';
 export {
   EmptyState,

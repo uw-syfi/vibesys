@@ -84,8 +84,8 @@ function lines(container: HTMLElement): Line[] {
     return {
       title: cells[0]?.querySelector('.vs-text')?.textContent ?? '',
       tag: cells[0]?.querySelector('.vs-chip')?.textContent ?? '',
-      builtOn: cells[1]?.textContent ?? '',
-      status: cells[2]?.textContent ?? '',
+      builtOn: row.querySelector('[data-column="built-on"]')?.textContent ?? '',
+      status: row.querySelector('[data-column="status"]')?.textContent ?? '',
     };
   });
 }

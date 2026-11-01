@@ -2,7 +2,7 @@ import {describe, expect, test} from 'bun:test';
 import type {Candidate} from '@vibesys/run-state/candidates';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
 import {openIdeaId} from './idea-focus.js';
-import {objectiveCharts} from './objective-chart.js';
+import {chartsAcross, inLastChartRow, objectiveCharts} from './objective-chart.js';
 import type {RunModel} from './run-model.js';
 import {idea, modelOf} from './timeline-fixtures.js';
 import type {Route} from './zoom.js';
@@ -257,5 +257,38 @@ describe('the chart scrubbed', () => {
     const {cursor: _, ...rest} = scrubbed ?? {};
     const {cursor: __, ...whole} = live ?? {};
     expect(rest).toEqual(whole);
+  });
+});
+
+describe('the rows the performance section lays its charts in', () => {
+  const counts = Array.from({length: 12}, (_, at) => at + 1);
+
+  test('up to three charts share one row, and more wrap in rows of two or three', () => {
+    for (const count of counts) {
+      const across = chartsAcross(count);
+      expect(across).toBeGreaterThanOrEqual(1);
+      expect(across).toBeLessThanOrEqual(3);
+      if (count <= 3) expect(across).toBe(count);
+      else expect(across).toBeLessThan(count);
+    }
+  });
+
+  test('a row is never narrower than a run of two charts, so four make two by two', () => {
+    expect(chartsAcross(4)).toBe(2);
+    for (const count of counts.filter(each => each > 4)) expect(chartsAcross(count)).toBe(3);
+  });
+
+  test('the last row holds one to `across` charts, and every chart is in some row', () => {
+    for (const count of counts) {
+      const across = chartsAcross(count);
+      const last = Array.from({length: count}, (_, at) => at).filter(at =>
+        inLastChartRow(at, count),
+      );
+      expect(last.length).toBeGreaterThanOrEqual(1);
+      expect(last.length).toBeLessThanOrEqual(across);
+      // The last row is the tail: the final chart is in it, and the ones before it are contiguous.
+      expect(last.at(-1)).toBe(count - 1);
+      expect(last).toEqual(Array.from({length: last.length}, (_, at) => count - last.length + at));
+    }
   });
 });

@@ -1,24 +1,22 @@
-import {type CSSProperties, type FocusEvent, type JSX, type ReactNode, useId} from 'react';
+import {
+  type CSSProperties,
+  type FocusEvent,
+  type JSX,
+  type ReactNode,
+  useCallback,
+  useId,
+  useRef,
+} from 'react';
 import {SIZE} from '../tokens/index.js';
+import {type ColumnSize, columnTier, tracksOf} from './column-tracks.js';
 import {Icon} from './icon.js';
+import {useInlineSize} from './label-fit.js';
 import {navigationKeys, pickKeys} from './listbox.js';
 import {Text} from './text.js';
 import {InSlot, useSlot, useWindowed} from './windowing.js';
 
-/** How wide a column is: the rest of the row, a name's width, a figure's, or a mark and a few digits. */
-export type ColumnSize = 'fill' | 'wide' | 'medium' | 'short' | 'compact' | 'dot';
-
-/** A fill column keeps a readable width while the list has room for every column. */
-const TRACKS: Readonly<Record<ColumnSize, string>> = {
-  fill: 'minmax(var(--column-tile), 1fr)',
-  wide: 'calc(var(--gantt-figure) + var(--space-8))',
-  medium: 'calc(var(--gantt-figure) + var(--space-3))',
-  short: 'var(--gantt-figure)',
-  compact: 'calc(var(--gantt-figure) * 0.7)',
-  dot: 'calc(var(--dot) + var(--space-6))',
-};
-
 /** One column of a `ColumnList`: its header, how a row fills its cell, and how the header sorts. */
+export type {ColumnSize};
 export interface ListColumn<Row> {
   readonly key: string;
   readonly header: string;
@@ -27,9 +25,9 @@ export interface ListColumn<Row> {
   /** Drawn only while the list has room: it gives way when the list is narrow. */
   readonly optional?: boolean;
   /**
-   * Pressing the column's cell acts on its own (a link to another row) and picks nothing; it says
-   * whether it did, and a press it did not take picks the row. The row holds the press: a cell has
-   * no control of its own inside the option.
+   * Pressing the `CellLink` word of the column's cell acts on its own (a link to another row) and
+   * picks nothing; it says whether it did, and a press it did not take, or one anywhere else in the
+   * cell, picks the row. The row holds the press: a cell has no control of its own inside the option.
    */
   readonly act?: (row: Row) => boolean;
   /** The cell's text wraps onto more lines instead of being cut short. */
@@ -58,12 +56,37 @@ export interface RowMarks {
   readonly fresh?: boolean;
 }
 
+/**
+ * A callback ref that calls `changed` whenever the element's width changes after the first
+ * measure, with the latest `changed` of the render (no effect hook: the observer lives and dies with
+ * the element).
+ */
+function useWidthWatch(
+  changed: () => void,
+): (element: HTMLElement | null) => (() => void) | undefined {
+  const latest = useRef(changed);
+  latest.current = changed;
+  return useCallback((element: HTMLElement | null) => {
+    if (element === null || typeof ResizeObserver === 'undefined') return undefined;
+    let width = element.getBoundingClientRect().width;
+    const watch = new ResizeObserver(entries => {
+      const next = entries.at(-1)?.contentRect.width;
+      if (next === undefined || Math.abs(next - width) < 1) return;
+      width = next;
+      latest.current();
+    });
+    watch.observe(element);
+    return () => watch.disconnect();
+  }, []);
+}
+
 function Header<Row>(props: {
   readonly columns: readonly ListColumn<Row>[];
   readonly id: string;
+  readonly watch: (element: HTMLElement | null) => (() => void) | undefined;
 }): JSX.Element {
   return (
-    <div className="vs-columnlist-head" id={props.id}>
+    <div className="vs-columnlist-head" id={props.id} ref={props.watch}>
       {props.columns.map(column => (
         <span
           key={column.key}
@@ -107,11 +130,13 @@ function Row<Row>(props: {
 }): JSX.Element {
   const slot = useSlot();
   const {hover} = props;
+  const nameId = useId();
   return (
     <div
       className="vs-columnlist-row"
       ref={slot?.measure}
       role="option"
+      aria-labelledby={nameId}
       tabIndex={props.selected ? 0 : -1}
       aria-selected={props.selected}
       aria-description={props.describe}
@@ -120,9 +145,12 @@ function Row<Row>(props: {
       data-lineage={props.marks.lineage || undefined}
       data-fresh={props.marks.fresh || undefined}
       onClick={event => {
-        const cell = event.target instanceof Element ? event.target.closest('[data-column]') : null;
+        // Only the link's own word acts; the rest of its cell, like the rest of the row, picks the row.
+        const target = event.target instanceof Element ? event.target : null;
+        const cell = target?.closest('[data-column]') ?? null;
         const column = props.columns.find(each => each.key === cell?.getAttribute('data-column'));
-        if (column?.act?.(props.row) !== true) props.select();
+        const onLink = target?.closest('.vs-columnlist-link') != null;
+        if (!onLink || column?.act?.(props.row) !== true) props.select();
       }}
       onMouseEnter={hover === undefined ? undefined : () => hover(true)}
       onMouseLeave={hover === undefined ? undefined : () => hover(false)}
@@ -132,9 +160,10 @@ function Row<Row>(props: {
         if (event.target === event.currentTarget) pickKeys(event, props.select);
       }}
     >
-      {props.columns.map(column => (
+      {props.columns.map((column, at) => (
         <span
           key={column.key}
+          id={at === 0 ? nameId : undefined}
           className="vs-columnlist-cell"
           data-column={column.key}
           data-align={column.align}
@@ -155,6 +184,8 @@ function Row<Row>(props: {
  * the visible part, so any number of rows costs a screenful (the same windowing as `PickList`). The
  * keys reach every row: Up and Down step, Page Up and Down move a screenful, Home and End jump,
  * Enter and Space pick. `selected` is the picked row's key; `marks` adds a bar to rows on its path.
+ * A row is named by its first column, as a screen reader hears it, and `describe` says the rest, so
+ * a cell that names another row (a link to the row it builds on) does not rename this one.
  */
 export function ColumnList<Row>(props: {
   readonly label: string;
@@ -165,7 +196,7 @@ export function ColumnList<Row>(props: {
   readonly select: (key: string) => void;
   readonly hover?: (key: string | null) => void;
   readonly marks?: (row: Row) => RowMarks;
-  /** The row's figures whole, for assistive technology: a cell may show them cut short or compact. */
+  /** What the row says besides its name, whole, for assistive technology: a cell may show it cut short or compact. */
   readonly describe?: (row: Row) => string | undefined;
   /**
    * Too many columns for the room a narrow list has: below its tight width the columns take their
@@ -188,28 +219,21 @@ export function ColumnList<Row>(props: {
     if (event.target !== event.currentTarget) return;
     win.reveal(selectedIndex >= 0 ? selectedIndex : 0, row => row.focus());
   };
-  const tracksOf = (
-    columns: readonly ListColumn<Row>[],
-    tier: 'wide' | 'narrow' | 'tight',
-  ): string =>
-    columns
-      .map(column => {
-        const size =
-          tier === 'wide'
-            ? column.size
-            : ((tier === 'tight' ? column.tight : undefined) ?? column.narrow ?? column.size);
-        return tier !== 'wide' && column.size === 'fill' ? 'minmax(0, 1fr)' : TRACKS[size];
-      })
-      .join(' ');
-  const kept = props.columns.filter(column => column.optional !== true);
+  const [measure, width] = useInlineSize();
+  // A width that changes rewraps the rows: the picked row stays in view, as an idea opened beside the
+  // list narrows it.
+  const watch = useWidthWatch(() => {
+    if (selectedIndex >= 0) win.reveal(selectedIndex, () => undefined);
+  });
+  const tier = columnTier(width, props.columns, props.crowded === true);
   const tracks = {
     '--columns': tracksOf(props.columns, 'wide'),
-    '--columns-narrow': tracksOf(kept, 'narrow'),
-    '--columns-tight': tracksOf(kept, 'tight'),
+    '--columns-narrow': tracksOf(props.columns, 'narrow'),
+    '--columns-tight': tracksOf(props.columns, 'tight'),
   } as CSSProperties;
   return (
-    <div className="vs-columnlist" style={tracks} data-crowded={props.crowded || undefined}>
-      <Header columns={props.columns} id={headerId} />
+    <div className="vs-columnlist" ref={measure} style={tracks} data-tier={tier}>
+      <Header columns={props.columns} id={headerId} watch={watch} />
       <div
         ref={win.scroller}
         className="vs-columnlist-rows"

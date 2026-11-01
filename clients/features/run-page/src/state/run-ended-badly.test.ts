@@ -9,7 +9,7 @@ import {heroView} from './headline.js';
 import {outcomeWords} from './idea-words.js';
 import {ageWords, IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
 import {failuresAt} from './input-gates.js';
-import {clockAt, clockStart, nowView} from './run-level.js';
+import {clockAt, clockStart, ideaDoing} from './run-level.js';
 import {createRunReader, type RunModel} from './run-model.js';
 import {
   type RunPageRequest,
@@ -195,7 +195,7 @@ describe('a run that crashed with work open', () => {
   test('no idea, step or agent reads as running', () => {
     expect(model.candidates.candidates.map(idea => idea.outcome)).toEqual(['failed']);
     expect(model.agents.agents.every(agent => agent.status !== 'running')).toBe(true);
-    expect(nowView(model)).toEqual([]);
+    expect(ideaDoing(model).size).toBe(0);
     const view = ideasView(model, IDEAS_FILTER_DEFAULT);
     expect(view.counts).toEqual({running: 0, passed: 0, failed: 1});
     expect(view.rows.map(row => row.state.label)).toEqual(['Failed · run failed']);
@@ -257,7 +257,7 @@ describe('the same run opened from its summary', () => {
     expect(from.candidates.candidates).toEqual(whole.candidates.candidates);
     expect(from.agents.agents).toEqual(whole.agents.agents);
     expect(from.latest).toBe(whole.latest);
-    expect(nowView(from)).toEqual([]);
+    expect(ideaDoing(from).size).toBe(0);
   });
 
   test('holds the failed input gates as the whole history does', () => {
@@ -304,7 +304,7 @@ describe('how the run ended settles what it left open', () => {
       // Whatever prefix the run reached, none of it still runs once the run is over.
       expect(whole.candidates.candidates.every(idea => idea.outcome !== 'running')).toBe(true);
       expect(whole.agents.agents.every(agent => agent.status !== 'running')).toBe(true);
-      expect(nowView(whole)).toEqual([]);
+      expect(ideaDoing(whole).size).toBe(0);
       for (const idea of whole.candidates.candidates) {
         expect(idea.endedAt ?? Number.NaN).toBeGreaterThanOrEqual(idea.startedAt);
       }

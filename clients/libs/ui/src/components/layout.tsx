@@ -14,6 +14,8 @@ export type GridColumn = 'field' | 'tile' | 'swatch' | 'swatch-row';
 
 interface FlexProps {
   readonly gap?: SpaceToken;
+  /** The gap between the lines of a wrapped row, when it is not the gap inside a line. */
+  readonly rowGap?: SpaceToken;
   readonly align?: Align;
   readonly justify?: Justify;
   readonly wrap?: boolean;
@@ -34,8 +36,10 @@ interface FlexProps {
   readonly children: ReactNode;
 }
 
-function gapStyle(gap: SpaceToken): CSSProperties {
-  return {gap: `var(--${gap})`};
+function gapStyle(gap: SpaceToken, rowGap?: SpaceToken): CSSProperties {
+  return rowGap === undefined
+    ? {gap: `var(--${gap})`}
+    : {columnGap: `var(--${gap})`, rowGap: `var(--${rowGap})`};
 }
 
 function Flex(props: FlexProps & {readonly direction: 'row' | 'column'}): JSX.Element {
@@ -51,7 +55,7 @@ function Flex(props: FlexProps & {readonly direction: 'row' | 'column'}): JSX.El
       data-grow={grow || undefined}
       data-apart={apart || undefined}
       data-width={props.width}
-      style={gapStyle(gap)}
+      style={gapStyle(gap, props.rowGap)}
     >
       {props.children}
     </div>

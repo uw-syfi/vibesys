@@ -24,28 +24,32 @@ test('on a 600-idea run the first row opens its idea without lineage controls', 
   await expect(page.getByRole('button', {name: 'Close idea'})).toBeVisible();
 });
 
-test('at 1000 px the Now pane keeps the role and the idea name readable and says the role once', async ({
+test('at 1000 px a running idea keeps its name and what it is doing readable, and says the role once', async ({
   page,
 }) => {
   await page.setViewportSize({width: 1000, height: 900});
   const fixture = fixtureNamed('queue-rs-live');
   await openFixture(page, fixture);
   await playLive(page, fixture);
-  const now = page.getByRole('listbox', {name: 'Running now'});
-  const rows = now.getByRole('option');
+  const rows = page
+    .getByRole('listbox', {name: 'Ideas'})
+    .getByRole('option')
+    .filter({has: page.locator('[data-column="idea"] .vs-columnlist-lines > .vs-text')});
   await expect(rows.first()).toBeVisible();
   const lines = await rows.evaluateAll(options =>
     options.map(option =>
-      [...option.querySelectorAll('.vs-pickrow-text > .vs-text')].map(text => ({
-        text: text.textContent ?? '',
-        cut: text.scrollWidth > text.clientWidth + 1,
-      })),
+      [...option.querySelectorAll('[data-column="idea"] .vs-columnlist-lines > .vs-text')].map(
+        text => ({
+          text: text.textContent ?? '',
+          cut: text.scrollWidth > text.clientWidth + 1,
+        }),
+      ),
     ),
   );
   expect(lines.length).toBeGreaterThan(0);
-  for (const [name, doing] of lines) {
-    expect(name?.text.length ?? 0).toBeGreaterThan(0);
-    // The line under the name is the role (or what the role is doing): never cut, never doubled.
+  for (const [doing] of lines) {
+    // The line under the name is what the idea is doing: never cut, never doubled.
+    expect(doing?.text.length ?? 0).toBeGreaterThan(0);
     expect(doing?.cut, `"${doing?.text}" is cut`).toBe(false);
     expect(doing?.text ?? '').not.toMatch(/^(\S+) · \1$/i);
   }

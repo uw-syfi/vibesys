@@ -23,7 +23,7 @@ import {
   Text,
   type TextTone,
 } from '@vibesys/ui';
-import type {JSX} from 'react';
+import type {JSX, ReactNode} from 'react';
 import {
   compactValue,
   endOf,
@@ -129,14 +129,20 @@ function ObjectiveFigure(props: {
   );
 }
 
+/** The idea's name with its tags, and what it is doing under them while it runs. */
 function IdeaName(props: {readonly row: IdeaTableRow}): JSX.Element {
   const {row} = props;
   return (
-    <CellInline>
-      <Text variant="code">{markdownToPlain(row.title)}</Text>
-      {row.adopted ? <Chip label="Adopted" tone="ok" /> : null}
-      {row.best ? <Chip label="Best" tone="ok" /> : null}
-    </CellInline>
+    <CellLines
+      main={
+        <CellInline>
+          <Text variant="code">{markdownToPlain(row.title)}</Text>
+          {row.adopted ? <Chip label="Adopted" tone="ok" /> : null}
+          {row.best ? <Chip label="Best" tone="ok" /> : null}
+        </CellInline>
+      }
+      note={row.doing}
+    />
   );
 }
 
@@ -167,7 +173,7 @@ function objectiveColumns(
     (column, at): Column => ({
       key: `objective-${column.index}`,
       header: column.title,
-      size: table.form === 'multiple' ? 'short' : 'wide',
+      size: table.form === 'multiple' ? 'short' : 'medium',
       narrow: 'short',
       tight: 'compact',
       hint: row => {
@@ -223,7 +229,7 @@ function singleColumns(table: IdeasTableView): readonly Column[] {
   const share: Column = {
     key: 'share',
     header: 'Share of gain',
-    size: 'wide',
+    size: 'medium',
     optional: true,
     cell: row =>
       row.share === null ? (
@@ -237,7 +243,28 @@ function singleColumns(table: IdeasTableView): readonly Column[] {
   return [...(known ? [vsInput] : []), ...comparisons, ...(table.shares ? [share] : [])];
 }
 
-function leadColumns(base: ViewBase): readonly Column[] {
+/**
+ * What the idea was built on, a link to that idea. It sits after the figures, not beside the name:
+ * a press on the middle of a row picks the row, and the middle of a row is not on a link.
+ */
+function builtOnColumn(base: ViewBase): Column {
+  return {
+    key: 'built-on',
+    header: 'Built on',
+    size: 'shrink',
+    optional: true,
+    hint: row => markdownToPlain(row.builtOn.label),
+    act: row => openParent(base, row),
+    cell: row =>
+      row.builtOn.parent === null ? (
+        quiet(row.builtOn.label)
+      ) : (
+        <CellLink label={markdownToPlain(row.builtOn.label)} lit={row.lineage || row.selected} />
+      ),
+  };
+}
+
+function leadColumns(): readonly Column[] {
   return [
     {
       key: 'idea',
@@ -248,24 +275,9 @@ function leadColumns(base: ViewBase): readonly Column[] {
       cell: row => <IdeaName row={row} />,
     },
     {
-      key: 'built-on',
-      header: 'Built on',
-      size: 'wide',
-      optional: true,
-      hint: row => markdownToPlain(row.builtOn.label),
-      act: row => openParent(base, row),
-      cell: row =>
-        row.builtOn.parent === null ? (
-          quiet(row.builtOn.label)
-        ) : (
-          <CellLink label={markdownToPlain(row.builtOn.label)} lit={row.lineage || row.selected} />
-        ),
-    },
-    {
       key: 'status',
       header: 'Status',
-      size: 'wide',
-      narrow: 'medium',
+      size: 'medium',
       tight: 'dot',
       hint: row => [row.status.word, row.status.cause].filter(part => part !== null).join(' · '),
       cell: row => (
@@ -295,9 +307,10 @@ function columnsOf(
     press: () => setSort(sameSort(by, table.defaultSort) ? null : by),
   });
   return [
-    ...leadColumns(base),
+    ...leadColumns(),
     ...objectiveColumns(table, sorted),
     ...(table.form === 'value' ? singleColumns(table) : []),
+    builtOnColumn(base),
     {
       key: 'agent-time',
       header: 'Agent time',
@@ -331,15 +344,19 @@ function Chips(props: {
   return <DotLegend items={items} />;
 }
 
-/** The exact figures of a row, each under its objective's name: the cells show them compact. */
-function describeFigures(table: IdeasTableView, row: IdeaTableRow): string | undefined {
+/** What a row says besides its name, whole: its status, what it built on, and its figures under each objective's name. */
+function describeRow(table: IdeasTableView, row: IdeaTableRow): string {
   const figures = table.columns.flatMap((column, at) => {
     const value = row.cells[at]?.value;
     return value == null
       ? []
       : [`${column.title} ${`${formatValue(value)} ${column.unit}`.trim()}`];
   });
-  return figures.length === 0 ? undefined : figures.join(', ');
+  return [
+    [row.status.word, row.status.cause].filter(part => part !== null).join(', '),
+    `built on ${markdownToPlain(row.builtOn.label)}`,
+    ...figures,
+  ].join(', ');
 }
 
 export function IdeasTable(props: {
@@ -349,6 +366,8 @@ export function IdeasTable(props: {
   readonly setSort: (sort: IdeasSort | null) => void;
   readonly selected: string | null;
   readonly dispatch: (action: RunPageAction) => void;
+  /** What leads the row of chips and search (the face switcher), so the table starts higher. */
+  readonly lead?: ReactNode;
 }): JSX.Element {
   const {base, filter, sort} = props;
   const table = ideasTable(base.model, {
@@ -360,9 +379,12 @@ export function IdeasTable(props: {
   });
   const shown = table.rows.length;
   return (
-    <Stack gap="space-2">
-      <Row gap="space-1" align="center" wrap justify="between">
-        <Chips table={table} filter={filter} dispatch={props.dispatch} />
+    <Stack gap="space-3" grow>
+      <Row gap="space-2" align="center" wrap justify="between">
+        <Row gap="space-5" align="center" wrap>
+          {props.lead}
+          <Chips table={table} filter={filter} dispatch={props.dispatch} />
+        </Row>
         <SearchBox
           label="Search ideas"
           placeholder="Search ideas"
@@ -382,7 +404,7 @@ export function IdeasTable(props: {
           select={id => base.zoom({type: 'open-idea', idea: id})}
           hover={id => props.dispatch({type: 'ideas-hover', idea: id})}
           marks={row => ({lineage: row.lineage, fresh: row.fresh})}
-          describe={row => describeFigures(table, row)}
+          describe={row => describeRow(table, row)}
           crowded={table.columns.length > 1}
         />
       )}

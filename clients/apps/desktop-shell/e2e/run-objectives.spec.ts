@@ -31,7 +31,7 @@ async function objectiveHeaders(page: Page): Promise<string[]> {
     const to = text.indexOf('Agent time');
     return text
       .slice(from, to < 0 ? text.length : to)
-      .filter(each => each !== 'vs input' && each !== 'Share of gain');
+      .filter(each => each !== 'vs input' && each !== 'Share of gain' && each !== 'Built on');
   });
 }
 
@@ -92,12 +92,14 @@ for (const {name, objectives, run} of RUNS) {
       const ideas = page.getByRole('listbox', {name: 'Ideas'});
       await expect(ideas.getByRole('option').first()).toBeVisible();
       await settled(page);
-      const tile = async (index: number) =>
-        (await page.locator('.vs-stat').nth(index).innerText()).split('\n');
-      const tried = async () => Number((await tile(0))[1]);
+      const tile = async (label: string) =>
+        (await page.locator('.vs-stat').filter({hasText: label}).first().innerText()).split('\n');
+      /** The figure of the first tile, the ideas tried: the first whole number after its label. */
+      const tried = async () =>
+        Number(/\d+/.exec((await tile('Ideas tried')).join(' ').replace(/ideas tried/i, ''))?.[0]);
       const wholeRun = await ideas.getByRole('option').count();
       expect(await tried()).toBe(wholeRun);
-      const spentAtEnd = (await tile(3)).join(' ');
+      const spentAtEnd = (await tile('Tokens')).join(' ');
       await scrubTo(page, 0.6);
       await scrolledToEnd(page);
       const atScrub = await ideas.getByRole('option').count();
@@ -105,7 +107,7 @@ for (const {name, objectives, run} of RUNS) {
       expect(await tried()).toBe(atScrub);
       // What the run spent by then is not what it spent in all.
       if (!spentAtEnd.includes('Not reported'))
-        expect((await tile(3)).join(' ')).not.toBe(spentAtEnd);
+        expect((await tile('Tokens')).join(' ')).not.toBe(spentAtEnd);
       // The multiples are those of the readings by then: none beyond the best the chart names.
       const best = await page.locator('.vs-chart-figure').first().innerText();
       const figure = Number(/([\d.]+)×/.exec(best)?.[1]);
@@ -113,9 +115,12 @@ for (const {name, objectives, run} of RUNS) {
         .getByRole('option')
         .first()
         .evaluate(row =>
-          [...row.querySelectorAll('[data-column^="objective"]')]
+          [...row.querySelectorAll('[data-column^="objective"], [data-column="vs-input"]')]
             .filter(each => getComputedStyle(each).display !== 'none')
-            .map(each => Number(/([\d.]+)×/.exec((each as HTMLElement).innerText)?.[1])),
+            .flatMap(each => {
+              const multiple = /([\d.]+)×/.exec((each as HTMLElement).innerText);
+              return multiple === null ? [] : [Number(multiple[1])];
+            }),
         );
       expect(multiples[0] ?? Number.NaN).toBeGreaterThan(0);
       expect(figure).toBeGreaterThan(0);

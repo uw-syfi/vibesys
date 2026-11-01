@@ -49,6 +49,7 @@ export type SizeToken =
   | 'column-metric'
   | 'column-chart'
   | 'chart-min'
+  | 'chart-min-across'
   | 'chart-height'
   | 'pane-list'
   | 'pane-outline'
@@ -89,6 +90,7 @@ export const SIZE: Readonly<Record<SizeToken, number>> = {
   'column-metric': 360,
   'column-chart': 248,
   'chart-min': 360,
+  'chart-min-across': 290,
   'chart-height': 48,
   'pane-list': 380,
   'pane-outline': 340,

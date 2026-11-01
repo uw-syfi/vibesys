@@ -80,7 +80,7 @@ test('the performance row is a chart with a headline and values that carry a uni
   const key = page.getByRole('list', {name: 'Chart key'});
   await expect(key.getByText('Best so far', {exact: true})).toBeVisible();
   await expect(key.getByText('Reading', {exact: true})).toBeVisible();
-  await expect(key.getByText('Selected', {exact: true})).toHaveCount(0);
+  await expect(key.getByText('Selected', {exact: true})).toBeHidden();
   await shot(page, 'ten-ideas-hero');
 });
 
@@ -101,9 +101,11 @@ test('tokens are split into input with its cached share, and output, where they 
   page,
 }) => {
   await openFixture(page, fixtureNamed('finished-ten-ideas'));
-  // The run header: input (cached share) then output; the cached share is a lower bound because
+  // The stats row: input, its cached share, then output; the cached share is a lower bound because
   // one turn reported no cache counts.
-  await expect(page.getByText(/· in 8\.1M \(6\.5M cached\) · out 459k$/)).toBeVisible();
+  await expect(page.locator('.vs-stat', {hasText: 'Tokens'})).toContainText(
+    /8\.1M input\s*· 6\.5M cached · 459k output/,
+  );
   await expect(page.getByText(/tokens/)).toHaveCount(0);
 
   await page.getByRole('radio', {name: 'Agents'}).check({force: true});

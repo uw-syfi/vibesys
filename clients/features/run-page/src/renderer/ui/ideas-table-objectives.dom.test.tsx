@@ -157,8 +157,9 @@ test('objectives past the fourth are counted in the header of the last column', 
 test('a row says its exact figures whole, each under its objective, while its cells are compact', async () => {
   const screen = await drawn(runOf(2));
   const row = screen.container.querySelector('[role="option"]');
+  // Its name is the idea's; the rest it says is its status, what it built on, and its figures.
   expect(row?.getAttribute('aria-description')).toMatch(
-    /^Throughput [\d,]+ .*, P99 latency [\d,]+/,
+    /, built on .*, Throughput [\d,]+ .*, P99 latency [\d,]+/,
   );
   const cell = row?.querySelector('[data-column="objective-0"]');
   expect(cell?.getAttribute('title')).toMatch(/^[\d,.]+/);

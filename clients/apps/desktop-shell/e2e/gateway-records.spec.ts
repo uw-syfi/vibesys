@@ -61,7 +61,7 @@ for (const kind of ['short', 'live', 'blobs'] as const)
         await capture(mode.toLowerCase());
       }
       await page.getByRole('radio', {name: 'Ideas', exact: true}).click();
-      await page.getByRole('option', {name: /^Idea 1 /}).click();
+      await page.getByRole('option', {name: /^Idea 1(?!\d)/}).click();
       await capture('idea');
       await page
         .getByRole('listbox', {name: /steps$/})

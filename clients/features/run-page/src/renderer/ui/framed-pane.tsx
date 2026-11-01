@@ -28,6 +28,8 @@ export function FramedPane(props: {
   readonly fixed?: boolean;
   /** The title is a name (an idea's). */
   readonly mono?: boolean;
+  /** No header: the view brings its own controls, and the kicker and title only name the region. */
+  readonly bare?: boolean;
   readonly header: PaneHeader;
   readonly children: ReactNode;
 }): JSX.Element {
@@ -44,6 +46,7 @@ export function FramedPane(props: {
       {...(props.enterKey === undefined ? {} : {enterKey: props.enterKey})}
       {...(props.fixed === true ? {fixed: true} : {})}
       {...(props.mono === true ? {mono: true} : {})}
+      {...(props.bare === true ? {bare: true} : {})}
     >
       {props.children}
     </Pane>

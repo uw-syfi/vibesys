@@ -218,14 +218,18 @@ test('pressing the idea a row was built on opens that idea and does not pick the
   const row = screen.container.querySelectorAll(ROWS)[0] as HTMLElement;
   const builtOn = row.querySelector('[data-column="built-on"]') as HTMLElement;
   expect(builtOn.textContent).toBe('idea 5');
-  await act(async () => builtOn.click());
+  await act(async () => (builtOn.querySelector('.vs-columnlist-link') as HTMLElement).click());
   expect(screen.zoomed).toEqual([{type: 'open-idea', idea: 'n5'}]);
-  // The input has no idea to open: its cell picks the row, as every cell without an action does.
+  // Only the link's word acts: the rest of its cell picks the row, as every cell without an action does.
+  await act(async () => builtOn.click());
+  expect(screen.zoomed).toHaveLength(2);
+  expect(screen.zoomed[1]).not.toEqual({type: 'open-idea', idea: 'n5'});
+  // The input has no idea to open: its cell picks the row too.
   const input = [...screen.container.querySelectorAll(ROWS)].find(
     each => each.querySelector('[data-column="built-on"]')?.textContent === 'Input',
   ) as HTMLElement;
   await act(async () => (input.querySelector('[data-column="built-on"]') as HTMLElement).click());
-  expect(screen.zoomed).toHaveLength(2);
+  expect(screen.zoomed).toHaveLength(3);
   await screen.done();
 });
 
