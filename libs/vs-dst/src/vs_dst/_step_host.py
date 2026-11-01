@@ -41,7 +41,7 @@ from vs_dst._effects import RecoverableExecutors
 from vs_dst._host import FIRST_HOST_STARTS_AT, Hosted, WrongStoreError
 from vs_dst._interruptions import Moment
 from vs_dst._snapshots import RecordingRecords
-from vs_dst._world import HoldingWorld
+from vs_dst._world import HoldingWorld, ServingWorld
 from vs_proto.api import EpochStarted, Timestamp
 from vs_runlog.api import ConfirmedLog
 from vs_runtime.api.core import ExecutionContext
@@ -64,12 +64,12 @@ from vs_sim.api.testing import VirtualClock, loop_threads, run_virtual
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_core.api import CoreEvent, CoreState, Observation, Request, RequestId
+    from vs_core.api import CoreEvent, CoreState, Observation, Request, RequestId, Transition
     from vs_core.api.recovery import End, Interruption, OpenStep, RecordRefusal, StepResult
     from vs_core.api.recovery import Run as RunAction
     from vs_dst._effects import Effects
     from vs_dst._snapshots import OutsideWorld, Store, Watcher
-    from vs_dst._world import World
+    from vs_dst._world import Serving, World
     from vs_runtime.api.core import ExecutionResult
     from vs_runtime.api.step_runner import CancelSignal, StepRecord
     from vs_runtime.api.testing import HostOptions
@@ -217,6 +217,10 @@ class _Host:
         self.state = log.state
         handle.inputs = inputs
         self._resume(log, epoch, clock)
+        serving = (
+            world.serve(_Admitting(inputs), clock) if isinstance(world, ServingWorld) else None
+        )
+        handle.serving = serving
         runner = _WorldRunner(
             _executors(self._outside, self._journal, lambda: log.state, watcher, handle),
             self._outside.effects,
@@ -234,8 +238,12 @@ class _Host:
             halted = stopped
         finally:
             self.state = log.state
-            inputs.leave()
-            await handle.close()
+            try:
+                if serving is not None:
+                    await serving.close()
+            finally:
+                inputs.leave()
+                await handle.close()
         return self._result(inputs, halted=halted)
 
     def _resume(self, log: RunLogStepLog, epoch: int, clock: VirtualClock) -> None:
@@ -304,8 +312,23 @@ class SearchNeverAdvancedError(RuntimeError):
         super().__init__("the host's search has no progress, though its log is open")
 
 
+class _Admitting:
+    """The host's inputs as the service of a world admits through them: the committed state, and a commit."""
+
+    def __init__(self, inputs: CoreInputs) -> None:
+        self._inputs = inputs
+
+    @property
+    def admitted_core(self) -> CoreState:
+        return self._inputs.state
+
+    def admit(self, event: CoreEvent, *, now_at: float) -> Transition:
+        del now_at
+        return self._inputs.admit(event)
+
+
 class _HostHandle:
-    """What an interruption needs of this host: its clock, its decisions, an input.
+    """What an interruption and the host's executors need of this host: its clock, its decisions, an input, its service.
 
     The records are watched from the host's first append, before its inputs exist, so the inputs
     are bound once they do; an input before then has nowhere to go and is a defect.
@@ -315,6 +338,8 @@ class _HostHandle:
         self._clock = clock
         self._decisions = decisions
         self.inputs: CoreInputs | None = None
+        self.serving: Serving | None = None
+        """What the world serves this host with, once the host's inputs exist (`ServingWorld`)."""
         self._timers: list[asyncio.Future[None]] = []
         self.held_until = -math.inf
         """The virtual time until which the provider's quota holds every turn in its call."""
@@ -510,6 +535,10 @@ def _executors(
         def _began(self, index: int) -> None:
             if watcher is not None:
                 watcher.reached(Moment.IN_FLIGHT, index)
+
+        async def _running(self, request: Request) -> None:
+            if handle.serving is not None:
+                await handle.serving.during(request, core())
 
         async def _enacted(self, request: Request, result: ExecutionResult) -> ExecutionResult:
             if isinstance(request, DispatchTurn | ResumeSessionTurn):

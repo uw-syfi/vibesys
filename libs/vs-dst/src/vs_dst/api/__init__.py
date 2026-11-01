@@ -35,7 +35,7 @@ from vs_dst._simulate import SimulatedRun, simulate
 from vs_dst._snapshots import NondeterministicWorldError, WorldNotCopyableError
 from vs_dst._step_host import StepLoopHosting
 from vs_dst._stops import StopKind, Stopped, StopPoint
-from vs_dst._world import HoldingWorld, RunSetup, World
+from vs_dst._world import Admission, HoldingWorld, RunSetup, Serving, ServingWorld, World
 
 __all__ = [
     "EVERY_POINT",
@@ -45,6 +45,7 @@ __all__ = [
     "SAMPLED",
     "SAMPLE_SIZE",
     "Action",
+    "Admission",
     "CrashKind",
     "CrashPoint",
     "CrashPointPolicy",
@@ -58,6 +59,8 @@ __all__ = [
     "Outcome",
     "RecoverableExecutors",
     "RunSetup",
+    "Serving",
+    "ServingWorld",
     "SimulatedRun",
     "StepLoopHosting",
     "StopKind",

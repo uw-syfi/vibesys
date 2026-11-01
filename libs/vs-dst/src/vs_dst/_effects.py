@@ -60,6 +60,7 @@ class RecoverableExecutors(ScriptedExecutors):
             raise ContractError(("request_id",), "a dispatched request carries its identity")
         identity = request.request_id.root
         self.begin(identity)
+        await self._running(request)
         result = await self._enacted(request, await super().execute(request, context))
         self._effects.sealed[identity] = result
         self._effects.finished[identity] = self._effects.finished.get(identity, 0) + 1
@@ -76,6 +77,10 @@ class RecoverableExecutors(ScriptedExecutors):
     def _began(self, index: int) -> None:
         """The ``index``-th effect of the run has begun, and nothing of it is sealed yet."""
         del index
+
+    async def _running(self, request: Request) -> None:
+        """What the host's own side does while the effect of ``request`` is in flight."""
+        del request
 
     async def _enacted(self, request: Request, result: ExecutionResult) -> ExecutionResult:
         """What the shell is told once the effect's side effects on the host have played out."""

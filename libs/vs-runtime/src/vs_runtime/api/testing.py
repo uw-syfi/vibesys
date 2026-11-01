@@ -4,11 +4,6 @@ from vs_runtime._control_schema import UnsafeControlSchemaError, control_schema_
 from vs_runtime._counter_search import CounterConfig, counter
 from vs_runtime._environment_system import EnvironmentSystem
 from vs_runtime._evidence_ledger import FakeEvidenceLedger
-from vs_runtime._fake_core_execution import (
-    ExecutedRequest,
-    FakePublicationDelivery,
-    FakeRequestExecution,
-)
 from vs_runtime._fake_stage_work_reaper import FakeStageWorkReaper
 from vs_runtime._fake_step_log import (
     FakeQuery,
@@ -118,7 +113,6 @@ __all__ = [
     "CounterConfig",
     "CrashableRunClock",
     "DaemonBackend",
-    "ExecutedRequest",
     "FakeAccuracyCall",
     "FakeAgentExecutionEnvironment",
     "FakeAgentExecutionLifecycleSink",
@@ -135,9 +129,7 @@ __all__ = [
     "FakeModelVolumeProvisioner",
     "FakeModelVolumeRequest",
     "FakeProjectMaterializationEffects",
-    "FakePublicationDelivery",
     "FakeQuery",
-    "FakeRequestExecution",
     "FakeRunControlEventSink",
     "FakeRunHandle",
     "FakeRunRecords",
