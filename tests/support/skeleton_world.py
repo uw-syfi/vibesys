@@ -31,6 +31,7 @@ from tests.support.skeleton_strategy import (
     Implementation,
     SkeletonStrategy,
 )
+from tests.support.slurm_evaluation_world import slurm_evaluation
 from tests.support.workspace_world import (
     RUN_ID,
     ExecutionTopology,
@@ -54,7 +55,7 @@ from vs_core.api.testing import sample_limits
 from vs_evaluation.api import ExecutorPoll, PollPhase
 from vs_project.api.testing import CliWorldGit, GitKind, WorldGit, world_git
 from vs_prompts.api import TemplateRenderer
-from vs_runtime.api import ArtifactStore, render_stage_failure
+from vs_runtime.api import ArtifactStore
 from vs_runtime.api.core import (
     CoreRunHost,
     CoreRuntime,
@@ -79,18 +80,8 @@ from vs_runtime.api.core import (
     operation_roles,
     revision_ref,
 )
-from vs_runtime.api.infrastructure import (
-    ScalarBenchmarkContract,
-    SemanticSlurmEvaluationExecutor,
-    TrustedEvaluationPlan,
-)
 from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster
-from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmExecutionPolicy
-from vs_sim.api.testing import NO_PROCESSES, ManualClock, clock_from, current_virtual_clock
-from vs_slurm.api import (
-    SlurmConfig,
-    SlurmSshTransport,
-)
+from vs_sim.api.testing import ManualClock, clock_from
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterator, Mapping
@@ -115,15 +106,14 @@ if TYPE_CHECKING:
         TurnSteering,
         TurnYields,
     )
-    from vs_runtime.api.infrastructure import RunControlChannel, RuntimeWorkspaces
+    from vs_runtime.api.infrastructure import (
+        RunControlChannel,
+        RuntimeWorkspaces,
+        SemanticSlurmEvaluationExecutor,
+    )
     from vs_sim.api import Clock, SleepingClock, Threads
 
 LEASE = 100.0
-# A Slurm job that runs this long, or waits this long in the queue, is cancelled and fails: well
-# inside the run deadline (1000 s), so a job that never leaves the queue fails on its own queue
-# deadline instead of running into the run's.
-JOB_TIMEOUT_S = 300
-QUEUE_TIMEOUT_S = 300
 
 
 @dataclass
@@ -180,14 +170,6 @@ class TimedPolls:
         if self.clock.now() >= seen + self.runtime:
             return polled
         return ExecutorPoll(phase=PollPhase.RUNNING, current_stage=polled.current_stage)
-
-
-class _LoopPacing:
-    """Paces job polls on the virtual loop the world runs on, so polling lets run time pass."""
-
-    async def sleep(self, seconds: float) -> None:
-        """Sleep on the running virtual loop's clock."""
-        await current_virtual_clock().sleep(seconds)
 
 
 @dataclass
@@ -264,38 +246,13 @@ class World:
     def bindings(self) -> CoreRuntimeBindings:
         """Executors for one host process: new workspaces and evaluation over the shared disk."""
         workspaces = self.env.start_host()
-        namespace = self.env.project.state.local_namespace(RUN_ID, "evaluation")
-        evaluation = SemanticSlurmEvaluationExecutor(
-            SlurmConfig(
-                name="test",
-                remote_workspace_root="/runs",
-                transport=SlurmSshTransport(host="test"),
-                job_timeout_seconds=JOB_TIMEOUT_S,
-                queue_timeout_seconds=QUEUE_TIMEOUT_S,
-            ),
-            SlurmExecutionPolicy(),
-            SlurmEvaluationPlan(
-                config_path=self.root / "slurm.toml",
-                accuracy_command=("python", "accuracy.py"),
-                benchmark_command=("python", "benchmark.py"),
-            ),
-            TrustedEvaluationPlan(
-                accuracy_command="unused",
-                benchmark_command="unused",
-                benchmark_contract=ScalarBenchmarkContract(
-                    output_argument="--output", metric="throughput"
-                ),
-            ),
+        evaluation = slurm_evaluation(
+            self.env,
+            self.root,
+            self.cluster,
             workspaces,
-            namespace,  # type: ignore[arg-type]  # the evaluation namespace is a StateNamespace
-            self.root / "handles",
-            stage_failure_text=render_stage_failure,
             clock=self.job_clock,
-            sleeper=_LoopPacing(),
-            cluster=self.cluster,
             control=self.control,
-            blocking=self.env.execution.blocking,
-            processes=NO_PROCESSES,
         )
         self.evaluations.append(evaluation)
         if self.timed is not None:
