@@ -26,7 +26,6 @@ from vs_project.api import (
     QuarantinedEnvelope,
     StateDocumentDamagedError,
     StoredEnvelope,
-    StoreFence,
 )
 from vs_project.api.testing import seed_store_document, seed_stored_record, stored_record_bytes
 from vs_sim.api.testing import examples
@@ -212,13 +211,10 @@ def test_a_store_below_a_traverse_only_ancestor_is_read(
             {"revision": 1, "schema_version": 1, "payload": b"", "reason": ""},
             "reason",
         ),
-        (StoreFence, {"host_id": "", "epoch": 1, "expires_at": 10}, "host_id"),
-        (StoreFence, {"host_id": "host-a", "epoch": 0, "expires_at": 10}, "epoch"),
-        (StoreFence, {"host_id": "host-a", "epoch": 1, "expires_at": float("nan")}, "expires_at"),
     ],
 )
 def test_contract_models_reject_invalid_values_and_unknown_keys(
-    model: type[StoredEnvelope | QuarantinedEnvelope | StoreFence],
+    model: type[StoredEnvelope | QuarantinedEnvelope],
     values: dict[str, object],
     key: str,
 ) -> None:

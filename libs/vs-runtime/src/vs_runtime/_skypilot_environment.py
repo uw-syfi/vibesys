@@ -46,9 +46,6 @@ from vs_runtime._trusted_evaluation_preparation import (
     evaluator_agent_toolchains,
     remote_evaluator_setup_command,
 )
-from vs_runtime._writer_reconciliation import (
-    UnsupportedWriterReconciler,
-)
 from vs_sandbox.api import (
     SandboxKind,
     deduplicate_host_resources,
@@ -78,7 +75,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from vs_project.api import RunResourceRequest, StateNamespace
-    from vs_proto.api import replay as writer_pb
     from vs_runtime._environment_system import EnvironmentSystem
     from vs_runtime._local_job_step_runner import StageWorkReaper
     from vs_runtime._run_environment import _AgentPathSandbox
@@ -133,18 +129,6 @@ class SkyPilotEnvironment(RefusesDockerInDocker, DockerEnvironment):
     materialize_local_model_weights = False
     default_profiler_id = "none"
     supported_profiler_ids: frozenset[str] | None = frozenset({"auto", "none"})
-
-    def reconcile_writers(
-        self,
-        manifest: writer_pb.WriterManifest,
-        *,
-        system: EnvironmentSystem,
-        log: Callable[[str], None],
-    ) -> writer_pb.WriterReconciliation:
-        del system, log
-        return UnsupportedWriterReconciler("skypilot: remote writer jobs").reconcile_writers(
-            manifest
-        )
 
     def _docker_settings(self) -> DockerEnvironmentConfig:
         """The editor container's Docker client is the host's own: SkyPilot's config names none."""
