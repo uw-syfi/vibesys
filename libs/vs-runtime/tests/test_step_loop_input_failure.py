@@ -14,7 +14,7 @@ import asyncio
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from vs_runtime.api.step_runner import StallBoard, StepLoopTiming, run_step_loop
@@ -108,6 +108,7 @@ def holds(_step: Request, _tag: RequestId, _attempt: int) -> Behavior:
 @pytest.mark.regression
 @settings(max_examples=examples(pr=8, nightly=60))
 @given(after=st.floats(min_value=0.0, max_value=500.0, allow_nan=False))
+@example(after=0.0)
 def test_an_input_that_fails_ends_the_loop_with_its_failure_whenever_it_fails(after: float) -> None:
     """The failure of the loop's input, at any time while a step is in flight, is what the loop raises."""
     clock = VirtualClock()
