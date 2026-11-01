@@ -34,6 +34,23 @@ export interface Store<S, A> {
 }
 
 /**
+ * The action of a store whose reads wait for the screen that shows them. Until the first `open`
+ * the store asks nothing (each read costs a process, and a launch pays for every one of them
+ * whether or not anyone looks at its screen); the first starts every read the state calls for, and
+ * each later one changes nothing. The shell sends it when the screen is first selected, so a store
+ * that takes it needs no knowledge of which screen that is.
+ */
+export interface Open {
+  readonly type: 'open';
+}
+
+/** The one value of `Open`, for a caller that has nothing to add to it. */
+export const OPEN: Open = {type: 'open'};
+
+/** A store that starts its reads when opened: the only thing the shell knows of it. */
+export type Openable = Pick<Store<unknown, Open>, 'dispatch'>;
+
+/**
  * A subscriber collection whose delivery is isolated from each subscriber's failure and mutation.
  * Each `subscribe` call is one independent subscription, even when several use the same callback.
  * `notify` visits every subscription present when that delivery began exactly once: unsubscribing

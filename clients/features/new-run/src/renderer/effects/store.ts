@@ -7,7 +7,7 @@ import type {CompletionAction, CompletionState, HostKey} from '@vibesys/hosts';
 import {attempt, type WelcomeBridge, type WelcomeResult} from '@vibesys/ipc';
 import {clockFrom, type ScheduleTimeout} from '@vibesys/machine';
 import type {RecentRun, RunRef} from '@vibesys/runs';
-import {createListenerDelivery, type Store} from '@vibesys/store';
+import {createListenerDelivery, OPEN, type Store} from '@vibesys/store';
 import {type Actor, createActor, fromPromise} from 'xstate';
 import {
   type Draft,
@@ -142,6 +142,9 @@ export function createNewRunStore(
   // arrive after the store was made), so it is prefilled from the last run, on its machine.
   let edited = false;
   let moreOpen = options.moreOptions?.read() ?? {};
+  // Whether the screen was ever opened: a form replaced while it is open (a run started, the runs
+  // opened since arriving before the user typed) is opened at once, so its reads are not lost.
+  let opened = false;
   const restored = options.draft?.read() ?? null;
   // What is stored is what the store holds until the form changes it.
   let kept = restored === null ? null : storeDraft(restored);
@@ -167,6 +170,7 @@ export function createNewRunStore(
       delivery.notify();
     });
     actor.start();
+    if (opened) actor.send(OPEN);
     return actor;
   };
   // A window that kept a draft is past the first change: the form is the user's, not the last run's.
@@ -176,6 +180,11 @@ export function createNewRunStore(
     getState: () => current.getSnapshot(),
     subscribe: delivery.subscribe,
     dispatch: event => {
+      if (event.type === 'open') {
+        opened = true;
+        current.send(event);
+        return;
+      }
       if (event.type === 'more_options') {
         // A choice of the page, not an input of the run: it neither edits the form nor is lost
         // when the form is replaced.

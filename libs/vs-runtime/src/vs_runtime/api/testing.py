@@ -44,7 +44,6 @@ from vs_runtime._shell_kit import (
     Run,
     Script,
     ScriptedExecutors,
-    request_executors,
 )
 from vs_runtime._validation_passes import MemoryValidationPasses
 from vs_runtime.api.stage_work_contracts import (
@@ -186,6 +185,5 @@ __all__ = [
     "fake_run_seed",
     "finished_result",
     "idle_environment_system",
-    "request_executors",
     "unconfined_host_environment",
 ]

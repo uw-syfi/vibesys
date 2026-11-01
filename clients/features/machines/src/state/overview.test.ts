@@ -8,6 +8,7 @@ import type {
   Offered,
   SlurmClusterSettings,
 } from '@vibesys/ipc';
+import {OPEN} from '@vibesys/store';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
 import {RETRYABLE_REASONS, TERMINAL_REASONS} from '@vibesys/subscription';
 import fc from 'fast-check';
@@ -77,6 +78,7 @@ const offered = (names: readonly string[], modal = false): Offered<ComputeSettin
 function ready(hosts: readonly string[]): MachinesState {
   const entries: MachineEntry[] = hosts.map(host => ({host, label: host, checkout: '~/vibesys'}));
   let {state} = initialMachines();
+  state = machinesStep(state, OPEN).state;
   state = machinesStep(state, {type: 'listed', token: 1, result: {ok: true, value: entries}}).state;
   for (const machine of state.machines) {
     state = machinesStep(state, {

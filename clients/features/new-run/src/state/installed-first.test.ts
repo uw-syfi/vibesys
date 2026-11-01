@@ -11,6 +11,7 @@ import {describe, expect, test} from 'bun:test';
 import type {ExampleList, HelperFeature, MachineDescription} from '@vibesys/contracts/host-helper';
 import {type HostKey, REQUIRED_HELPER_FEATURES} from '@vibesys/hosts';
 import type {HarnessOffer, Offered} from '@vibesys/ipc';
+import {OPEN} from '@vibesys/store';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
 import {createActor, fromPromise, type SnapshotFrom} from 'xstate';
 import {installedFirst} from './agents.js';
@@ -185,6 +186,7 @@ describe('the form starts with an installed harness', () => {
         const installed = installedOn(random);
         const run = newRunOn();
         run.actor.start();
+        run.actor.send(OPEN);
 
         if (order === 'the description first') {
           run.description.settle(described(installed));
@@ -215,6 +217,7 @@ describe('the form starts with an installed harness', () => {
       const listed = catalog(new Seeded(seed));
       const run = newRunOn();
       run.actor.start();
+      run.actor.send(OPEN);
       run.description.settle({kind: 'unsupported'});
       run.harnesses.settle(listed);
       await run.until(snapshot => snapshot.matches(LOADED));
@@ -232,6 +235,7 @@ describe('the form starts with an installed harness', () => {
       const installed = installedOn(random);
       const run = newRunOn();
       run.actor.start();
+      run.actor.send(OPEN);
       run.harnesses.settle(listed);
       await run.until(snapshot => snapshot.matches({editing: {harnesses: 'ready'}}));
       const picked = random.pick(listed);

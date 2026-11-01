@@ -227,11 +227,20 @@ function write(element: HTMLInputElement | HTMLTextAreaElement, value: string): 
   for (const type of ['input', 'change', 'keyup']) element.dispatchEvent(eventOf(element, type));
 }
 
+/** Clicks `element`; a mark drawn in SVG has no `click()`, so it gets the event a pointer sends. */
+function click(element: Element): void {
+  if (element instanceof HTMLElement) {
+    element.click();
+    return;
+  }
+  const view = element.ownerDocument.defaultView;
+  if (view === null) throw new Error('the screen is not in a window');
+  element.dispatchEvent(new view.MouseEvent('click', {bubbles: true, cancelable: true}));
+}
+
 /** Presses `element`. */
 export async function press(element: Element): Promise<void> {
-  await act(async () => {
-    (element as HTMLElement).click();
-  });
+  await act(async () => click(element));
 }
 
 /** Types `text` into a field. */
@@ -247,7 +256,7 @@ export async function pickLabel(select: HTMLSelectElement, label: string): Promi
   const option = [...select.options].find(each => text(each) === label);
   if (option === undefined) throw new Error(`the select has no option "${label}"`);
   await act(async () => {
-    select.value = option.value;
+    option.selected = true;
     select.dispatchEvent(eventOf(select, 'change'));
   });
 }
@@ -261,14 +270,14 @@ export async function use(scope: Element, control: Control): Promise<void> {
       if (other === undefined) {
         throw new Error(`${describeControl(control)} has nothing else to pick`);
       }
-      element.value = other.value;
+      other.selected = true;
       element.dispatchEvent(eventOf(element, 'change'));
     } else if (control.role === 'slider' && element instanceof HTMLInputElement) {
       write(element, element.min === '' ? '0' : element.min);
     } else if (control.role === 'textbox' || control.role === 'searchbox') {
       write(element as HTMLInputElement | HTMLTextAreaElement, 'no idea reads like this');
     } else {
-      (element as HTMLElement).click();
+      click(element);
     }
   });
 }
@@ -294,7 +303,12 @@ function describe(node: Element): string[] {
     .join(' ');
   const lines = [`<${node.tagName.toLowerCase()} ${attributes}>`];
   if (node instanceof HTMLSelectElement) {
-    lines.push([...node.selectedOptions].map(option => text(option)).join('|'));
+    lines.push(
+      [...node.options]
+        .filter(option => option.selected)
+        .map(option => text(option))
+        .join('|'),
+    );
   } else if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement) {
     if (node.type !== 'radio' && node.type !== 'checkbox') lines.push(`value=${node.value}`);
   }

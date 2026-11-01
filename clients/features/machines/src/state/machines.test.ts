@@ -9,6 +9,7 @@ import type {
   Offered,
   SlurmClusterSettings,
 } from '@vibesys/ipc';
+import {OPEN} from '@vibesys/store';
 import {checkModel, type Seeded} from '@vibesys/store/testing';
 import fc from 'fast-check';
 import {
@@ -18,6 +19,7 @@ import {
   type MachinesAction,
   type MachinesRequest,
   type MachinesState,
+  type MachinesStep,
   machineCounts,
   machineFacts,
   machineStatus,
@@ -42,6 +44,11 @@ const ENTRIES: readonly MachineEntry[] = [
   {host: 'ssh:host-b', label: 'host-b', checkout: '~/vibesys'},
   {host: 'ssh:host-c', label: 'host-c', checkout: '~/vibesys'},
 ];
+/** The store with its screen shown: the machines it lists are checked as they come. */
+function openedMachines(): MachinesStep {
+  return machinesStep(initialMachines().state, OPEN);
+}
+
 const HOSTS = [...ENTRIES.map(entry => entry.host), 'ssh:gone'];
 const PATHS = ['/home/me/vibesys', '/home/me/vibesys-old', '/home/me/src'];
 const FORMS: readonly FormName[] = ['add', 'fix'];
@@ -220,6 +227,20 @@ function issued(request: MachinesRequest): number | null {
   return request.kind === 'cancel-save' ? null : request.token;
 }
 
+/** Checks start only once a screen that shows them is open, and open starts every machine's, once. */
+function checkOpening(
+  before: MachinesState,
+  action: MachinesAction,
+  after: MachinesState,
+  requests: readonly MachinesRequest[],
+): void {
+  if (!after.opened) expect(requests.filter(request => request.kind === 'report')).toEqual([]);
+  if (action.type === 'open') {
+    const hosts = requests.flatMap(request => (request.kind === 'report' ? [request.host] : []));
+    expect(hosts).toEqual(before.opened ? [] : before.machines.map(machine => machine.host));
+  }
+}
+
 /** The step properties beyond token bookkeeping: what each kind of request is allowed to say. */
 function checkRequests(
   before: MachinesState,
@@ -231,6 +252,7 @@ function checkRequests(
   const counts = machineCounts(after);
   expect(counts.count).toBe(after.machines.length);
   expect(counts.attention).toBeLessThanOrEqual(counts.count);
+  checkOpening(before, action, after, requests);
   for (const request of requests) {
     if (request.kind === 'save') {
       expect(action.type).toBe('submit');
@@ -259,10 +281,14 @@ describe('machinesStep', () => {
       {
         initial: initialMachines().state,
         step: machinesStep,
-        action: (random, tokens, state) =>
-          random.next() < 0.45
+        // The user acts on a screen that is shown, which opens the store; before that only the
+        // listing can arrive.
+        action: (random, tokens, state) => {
+          if (!state.opened && random.next() < 0.3) return OPEN;
+          return state.opened && random.next() < 0.45
             ? userAction(random, state)
-            : replyAction(random, random.pick(tokens)),
+            : replyAction(random, random.pick(tokens));
+        },
         issues: issued,
         awaited: machinesAwaited,
         reply: replySlot,
@@ -273,8 +299,44 @@ describe('machinesStep', () => {
     );
   });
 
+  test('a listing asks for no check until the store is opened, and open asks for each machine once', () => {
+    const listed = machinesStep(initialMachines().state, {
+      type: 'listed',
+      token: 1,
+      result: {ok: true, value: ENTRIES},
+    });
+    // The machines are known (the rail and Runs name them) and none is being checked.
+    expect(listed.requests).toEqual([]);
+    expect(listed.state.machines.map(machine => machine.host)).toEqual(
+      ENTRIES.map(entry => entry.host),
+    );
+    expect(listed.state.machines.every(machine => machine.checking === null)).toBe(true);
+    expect(machinesInvariants(listed.state)).toEqual([]);
+    const opened = machinesStep(listed.state, OPEN);
+    expect(opened.requests).toMatchObject(
+      ENTRIES.map(entry => ({kind: 'report', host: entry.host})),
+    );
+    expect(opened.state.machines.map(machine => machine.checking)).toEqual(
+      opened.requests.map(issued),
+    );
+    expect(machinesInvariants(opened.state)).toEqual([]);
+    // Opened again, nothing is asked and nothing changes.
+    expect(machinesStep(opened.state, OPEN)).toEqual({state: opened.state, requests: []});
+  });
+
+  test('opened before the listing arrives, the listing asks for each check as before', () => {
+    const opened = machinesStep(initialMachines().state, OPEN);
+    expect(opened.requests).toEqual([]);
+    const listed = machinesStep(opened.state, {
+      type: 'listed',
+      token: 1,
+      result: {ok: true, value: ENTRIES},
+    });
+    expect(listed.requests.map(request => request.kind)).toEqual(ENTRIES.map(() => 'report'));
+  });
+
   test('a machine whose checkout is gone opens its fix inline, and a saved fix checks it again', () => {
-    let {state} = initialMachines();
+    let {state} = openedMachines();
     const run = (action: MachinesAction): readonly MachinesRequest[] => {
       const step = machinesStep(state, action);
       state = step.state;
@@ -311,7 +373,7 @@ describe('machinesStep', () => {
   });
 
   test('regression: the Machines count follows the list when a machine is added or removed', () => {
-    let {state} = initialMachines();
+    let {state} = openedMachines();
     const run = (action: MachinesAction): void => {
       state = machinesStep(state, action).state;
     };
@@ -334,7 +396,7 @@ describe('machinesStep', () => {
   });
 
   test('regression: no count is worded while the machines are being read or could not be', () => {
-    const {state: reading} = initialMachines();
+    const {state: reading} = openedMachines();
     expect(machineCounts(reading)).toEqual({count: 0, attention: 0, listed: false});
 
     const failed = machinesStep(reading, {
@@ -349,7 +411,7 @@ describe('machinesStep', () => {
   });
 
   test('regression: a sign-in awaited for a machine the next listing drops is forgotten', () => {
-    let {state} = initialMachines();
+    let {state} = openedMachines();
     const run = (action: MachinesAction): void => {
       state = machinesStep(state, action).state;
     };
@@ -364,7 +426,7 @@ describe('machinesStep', () => {
   });
 
   test('checkout save and removal for one machine are mutually exclusive', () => {
-    const listed = machinesStep(initialMachines().state, {
+    const listed = machinesStep(openedMachines().state, {
       type: 'listed',
       token: 1,
       result: {ok: true, value: [ENTRIES[2] as MachineEntry]},
@@ -392,7 +454,7 @@ describe('machinesStep', () => {
   });
 
   test('Add refuses a host or path it cannot use, naming the problem, and asks nothing', () => {
-    const listed = machinesStep(initialMachines().state, {
+    const listed = machinesStep(openedMachines().state, {
       type: 'listed',
       token: 1,
       result: {ok: true, value: [ENTRIES[2] as MachineEntry]},
@@ -417,7 +479,7 @@ describe('machinesStep', () => {
   });
 
   test('checkout suggestions carry the version each checkout reports', () => {
-    let state = machinesStep(initialMachines().state, {type: 'open-add'}).state;
+    let state = machinesStep(openedMachines().state, {type: 'open-add'}).state;
     let requests: readonly MachinesRequest[] = [];
     for (const action of [
       {type: 'add-host', value: 'host-c'},
@@ -461,7 +523,7 @@ describe('machinesStep', () => {
   });
 
   test('a ready machine lists its facts', () => {
-    const step = machinesStep(initialMachines().state, {
+    const step = machinesStep(openedMachines().state, {
       type: 'listed',
       token: 1,
       result: {ok: true, value: [ENTRIES[2] as MachineEntry]},
@@ -490,7 +552,7 @@ describe('a host that streams though its check found it unreachable', () => {
 
   /** Machines each listed and each checked, with the check `report` of each by host. */
   function checked(reports: Readonly<Record<string, MachineReport>>): MachinesState {
-    let {state} = initialMachines();
+    let {state} = openedMachines();
     const entries = NAMES.map(host => ({host, label: host, checkout: '~/vibesys'}));
     state = machinesStep(state, {
       type: 'listed',

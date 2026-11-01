@@ -4,6 +4,7 @@ import {REQUIRED_HELPER_FEATURES} from '@vibesys/hosts';
 import type {DestinationFound, MeasureTarget, Offered} from '@vibesys/ipc';
 import {computeSettings, exampleCatalogue} from '@vibesys/run-fixtures';
 import type {RecentRun, RunRef} from '@vibesys/runs';
+import {OPEN} from '@vibesys/store';
 import type {Draft, NewRunEvent} from '../../state/index.js';
 import {
   backendOf,
@@ -14,7 +15,21 @@ import {
   rolesView,
   startBlocked,
 } from '../ui/view.js';
-import {createNewRunStore, type NewRunBridge, type NewRunStoreOptions} from './store.js';
+import {
+  createNewRunStore as createStore,
+  type NewRunBridge,
+  type NewRunStoreOptions,
+} from './store.js';
+
+/** The store of a screen that is shown: the shell opens it when the screen is first selected. */
+function createNewRunStore(
+  bridge: NewRunBridge,
+  options: NewRunStoreOptions,
+): ReturnType<typeof createStore> {
+  const created = createStore(bridge, options);
+  created.store.dispatch(OPEN);
+  return created;
+}
 
 const ok = <T>(value: T) => Promise.resolve({ok: true as const, value});
 
@@ -1160,3 +1175,72 @@ for (const [name, target] of MEASURED_ON) {
     }
   });
 }
+
+/** The bridge of `fakeBridge`, each read recorded as the method and the machine it asked. */
+function readingBridge(reads: string[]): NewRunBridge {
+  const bridge = fakeBridge();
+  const read =
+    <A extends unknown[], R>(name: string, call: (...args: A) => R) =>
+    (host: string, ...rest: A): R => {
+      reads.push(`${name} ${host}`);
+      return call(...rest);
+    };
+  return {
+    ...bridge,
+    describeMachine: read('describeMachine', () => bridge.describeMachine('local')),
+    helperFeatures: read('helperFeatures', () => bridge.helperFeatures('local')),
+    harnesses: read('harnesses', () => bridge.harnesses('local')),
+    examples: read('examples', () => bridge.examples('local')),
+  };
+}
+
+test('a store nobody opened reads nothing, however its form changes; opening starts the reads once', async () => {
+  const reads: string[] = [];
+  const clock = manualSchedule();
+  const {store} = createStore(readingBridge(reads), {
+    recent: [],
+    schedule: clock.schedule,
+    started: () => undefined,
+  });
+  // The shell tells an unopened screen what it will need: the runs opened, a machine to start on.
+  store.dispatch({type: 'recent', recent: [recentRun('ssh:gpu', '/p', 2)]});
+  store.dispatch({type: 'machine', machine: 'ssh:a'});
+  store.dispatch({type: 'reset'});
+  await settle();
+  expect(reads).toEqual([]);
+  expect(store.getState().context.form.machine).toBe('ssh:a');
+  expect(store.getState().matches('idle')).toBe(true);
+
+  store.dispatch(OPEN);
+  store.dispatch(OPEN);
+  await settle();
+  expect([...reads].sort()).toEqual([
+    'describeMachine ssh:a',
+    'examples ssh:a',
+    'harnesses ssh:a',
+    'helperFeatures ssh:a',
+  ]);
+  expect(store.getState().matches('idle')).toBe(false);
+});
+
+test('a form replaced after the screen was opened is read at once, not left idle', async () => {
+  const reads: string[] = [];
+  const clock = manualSchedule();
+  const {store} = createStore(readingBridge(reads), {
+    recent: [],
+    schedule: clock.schedule,
+    started: () => undefined,
+  });
+  store.dispatch(OPEN);
+  await settle();
+  expect(reads.filter(read => read.startsWith('harnesses'))).toEqual(['harnesses local']);
+  // The runs opened arrive after the user opened the screen and before they typed: the form moves
+  // to the machine of the last run, which is a new form, and it reads as the first did.
+  store.dispatch({type: 'recent', recent: [recentRun('ssh:gpu', '/p', 2)]});
+  await settle();
+  expect(reads.filter(read => read.startsWith('harnesses'))).toEqual([
+    'harnesses local',
+    'harnesses ssh:gpu',
+  ]);
+  expect(store.getState().matches('idle')).toBe(false);
+});
