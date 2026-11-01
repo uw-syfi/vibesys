@@ -1,5 +1,5 @@
 import {expect, type Page, test} from '@playwright/test';
-import type {FakeBridgeSeed} from './fake-bridge.js';
+import type {FakeBridgeSeed} from '../src/testing/fake-bridge.js';
 import {pressMark, showScreen, sidebar} from './read.js';
 import {type FakeHostWindow, listed, open, SEED, server} from './world.js';
 

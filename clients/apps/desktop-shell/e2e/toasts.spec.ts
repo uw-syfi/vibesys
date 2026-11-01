@@ -10,8 +10,6 @@ import {join} from 'node:path';
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
 import type {ChromeInset} from '@vibesys/ipc';
-import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
-import {settled} from './checks/settle.js';
 import {
   type FakeBridgeSeed,
   installFakeBridge,
@@ -25,7 +23,9 @@ import {
   installFakeUsagePrices,
   MAC_CHROME,
   WINDOWS_CHROME,
-} from './fake-bridge.js';
+} from '../src/testing/fake-bridge.js';
+import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
+import {settled} from './checks/settle.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {journeyScript} from './journey-world.js';
 import {showScreen, sidebar} from './read.js';

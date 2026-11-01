@@ -173,6 +173,12 @@ heads with a populated epoch cache avoid this scan. Python observation readers u
 `read_run_head`, which decodes missing caches through the same committed-prefix fold
 as `read_current_epoch`; clients consume the canonical response field directly. Lock probes still decide liveness independently.
 
+A list row's digest needs the head and the skeleton of every run a launch lists, and every read is
+a new process, so a digest reads the prefix through `read_committed_prefix`: it folds once from
+the nearest keyframe and derives the head `read_run_head` would recover from that fold. Its cost is
+the records after the keyframe, never the log; damage before the keyframe is left to the readers
+that scan the whole prefix.
+
 ## Intents and epochs
 
 **Operator controls** are Pause, Pause now, Resume and Guidance. A viewer posts a typed intent
@@ -260,7 +266,10 @@ connect; a release build later downloads the released binary instead. It is stat
 
 - **Transport.** One HTTP/2 connection per host, speaking gRPC. Remote: `ssh host vibesysd connect`
   pipes its stdio to the gateway's Unix socket, and Electron main runs Node `http2` over that
-  duplex. Local: main dials the socket. Requests are client-to-server unary; updates are
+  duplex. Local: main dials the socket, and starts This Mac's gateway when the app starts, beside the
+  window's load, so the first read waits for the longer of the two. An installed binary that already
+  holds the shipped bytes is left alone: the OS checks a new file again on its first run, which costs
+  a start 0.3 s against 0.04 s. Requests are client-to-server unary; updates are
   server-to-client streams.
 - **Renderer.** The renderer makes two generic calls through main, `unary(method, bytes)` and
   `stream(method, bytes)`. Main owns the connection, reconnects, and re-issues streams from a

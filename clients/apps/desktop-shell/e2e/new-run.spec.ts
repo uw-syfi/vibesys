@@ -8,15 +8,15 @@ import {
   queueRsCatalogue,
   storeRunFixture,
 } from '@vibesys/run-fixtures';
-import {rawTextOf} from './checks/screen-check.js';
-import {settled} from './checks/settle.js';
 import {
   installFakeBridge,
   installFakeChrome,
   installFakeMachines,
   installFakeNewRun,
   installFakeProjectRuns,
-} from './fake-bridge.js';
+} from '../src/testing/fake-bridge.js';
+import {rawTextOf} from './checks/screen-check.js';
+import {settled} from './checks/settle.js';
 import {installGateway, wire} from './fake-gateway.js';
 import {installFakeRun} from './fake-run.js';
 import {addInitScripts, initScript} from './init-scripts.js';

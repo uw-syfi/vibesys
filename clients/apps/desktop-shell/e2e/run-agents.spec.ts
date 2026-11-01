@@ -7,10 +7,10 @@ import {
   installFakeMachines,
   installFakeProjectRuns,
   MAC_CHROME,
-} from './fake-bridge.js';
+} from '../src/testing/fake-bridge.js';
+import {STARTED_AT} from '../src/testing/started-at.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {journeyScript} from './journey-world.js';
-import {STARTED_AT} from './started-at.js';
 
 /**
  * The Agents face of the Run screen against the Fake bridge and a fake run server whose span

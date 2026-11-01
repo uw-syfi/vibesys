@@ -4,7 +4,7 @@
  * choosing a machine and a section, and the fake helper's record of what was done.
  */
 import {expect, type Page} from '@playwright/test';
-import type {FakeBridgeSeed, FakeMachineSettings} from './fake-bridge.js';
+import type {FakeBridgeSeed, FakeMachineSettings} from '../src/testing/fake-bridge.js';
 import {showScreen} from './read.js';
 import {open, SEED} from './world.js';
 
