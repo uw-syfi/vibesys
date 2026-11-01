@@ -4,6 +4,8 @@ import {checkMachine} from '@vibesys/machine/testing';
 import {FakeClock} from '@vibesys/transport/testing';
 import {createActor, fromPromise} from 'xstate';
 import {
+  LIMITS_CONNECT_POLL_MS,
+  LIMITS_CONNECT_POLLS_MAX,
   LIMITS_DEADLINE_MS,
   LIMITS_FLOOR_MS,
   LIMITS_STORED_AGE_S,
@@ -12,7 +14,8 @@ import {
 } from './limits-machine.js';
 
 const NOW = Date.UTC(2026, 9, 31, 12, 0, 0);
-const NOTHING: LimitsAnswer = {replies: [], unreachable: [], unsupported: []};
+const NOTHING: LimitsAnswer = {replies: [], unreachable: [], unsupported: [], connecting: []};
+const WAITING: LimitsAnswer = {...NOTHING, connecting: ['local']};
 
 interface Pending {
   readonly maxAgeS: number;
@@ -101,6 +104,45 @@ describe('limitsMachine', () => {
     asked[2]?.resolve(NOTHING);
     await flush();
     expect(phase()).toBe('idle');
+  });
+
+  test('while every machine is connecting the tab waits and asks again, and shows nothing as limits', async () => {
+    const {actor, asked, time, phase, flush} = harness();
+    actor.send({type: 'open', now: NOW});
+    asked[0]?.resolve(WAITING);
+    await flush();
+    expect(phase()).toBe('connecting');
+    expect(actor.getSnapshot().context.answer).toBeNull();
+    time.advanceBy(LIMITS_CONNECT_POLL_MS);
+    expect(phase()).toBe('checking');
+    expect(asked).toHaveLength(2);
+    asked[1]?.resolve(NOTHING);
+    await flush();
+    expect(phase()).toBe('idle');
+    expect(actor.getSnapshot().context.answer).toBe(NOTHING);
+  });
+
+  test('the wait for a connection is bounded: the last answer is shown as it is', async () => {
+    const {actor, asked, time, phase, flush} = harness();
+    actor.send({type: 'open', now: NOW});
+    for (let poll = 0; poll <= LIMITS_CONNECT_POLLS_MAX; poll += 1) {
+      asked[poll]?.resolve(WAITING);
+      await flush();
+      if (phase() === 'connecting') time.advanceBy(LIMITS_CONNECT_POLL_MS);
+    }
+    expect(phase()).toBe('idle');
+    expect(asked).toHaveLength(LIMITS_CONNECT_POLLS_MAX + 1);
+    expect(actor.getSnapshot().context.answer).toBe(WAITING);
+  });
+
+  test('Refresh while waiting asks the CLIs at once', async () => {
+    const {actor, asked, phase, flush} = harness();
+    actor.send({type: 'open', now: NOW});
+    asked[0]?.resolve(WAITING);
+    await flush();
+    actor.send({type: 'refresh', now: NOW + 5});
+    expect(phase()).toBe('checking');
+    expect(asked.map(each => each.maxAgeS)).toEqual([LIMITS_STORED_AGE_S, 0]);
   });
 
   test('opening while a question runs asks nothing more', () => {

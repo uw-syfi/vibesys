@@ -6,8 +6,8 @@ import {Button, Card, Chip, LoadingBar, Meter, Row, Stack, Text} from '@vibesys/
 import type {JSX} from 'react';
 import type {LimitBar, LimitCard, LimitsScreenState} from '../../state/index.js';
 
-/** A window is running out from this much used. */
-const WARN_FROM = 0.8;
+/** A window is running out when this share or less of it is left. */
+const WARN_LEFT = 0.2;
 
 function Bar(props: {readonly bar: LimitBar; readonly dim: boolean}): JSX.Element {
   const {bar, dim} = props;
@@ -24,8 +24,8 @@ function Bar(props: {readonly bar: LimitBar; readonly dim: boolean}): JSX.Elemen
       </Row>
       <Meter
         label={`${bar.label} ${bar.leftText}`}
-        value={bar.used}
-        tone={bar.used >= WARN_FROM ? 'warn' : 'accent'}
+        value={bar.left / 100}
+        tone={bar.left / 100 <= WARN_LEFT ? 'warn' : 'accent'}
         dim={dim}
       />
     </Stack>

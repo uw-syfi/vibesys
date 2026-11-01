@@ -20,6 +20,8 @@ export {
   turnsWords,
 } from './format.js';
 export {
+  LIMITS_CONNECT_POLL_MS,
+  LIMITS_CONNECT_POLLS_MAX,
   LIMITS_DEADLINE_MS,
   LIMITS_FLOOR_MS,
   LIMITS_STORED_AGE_S,

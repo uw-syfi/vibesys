@@ -161,8 +161,17 @@ export async function readLimits(
   const overview = await attempt(() => bridge.overview());
   if (!overview.ok) throw new Error(overview.error);
   signal.throwIfAborted();
-  const listed = overview.value.listings.filter(
-    listing => listing.kind === 'listed' && !hostsOff.includes(listing.host),
+  const wanted = overview.value.listings.filter(listing => !hostsOff.includes(listing.host));
+  const listed = wanted.filter(listing => listing.kind === 'listed');
+  // A machine that is still connecting has not failed: it is waited for, not counted as down.
+  const connecting = wanted.flatMap(listing =>
+    listing.kind === 'unavailable' &&
+    (listing.connection.kind === 'connecting' || listing.connection.kind === 'reconnecting')
+      ? [listing.host]
+      : [],
+  );
+  const down = wanted.flatMap(listing =>
+    listing.kind !== 'listed' && !connecting.includes(listing.host) ? [listing.host] : [],
   );
   const asked = await Promise.all(
     listed.map(async listing => ({
@@ -174,14 +183,22 @@ export async function readLimits(
   const replies = asked.flatMap(({host, outcome}) =>
     outcome?.kind === 'limits' ? [{host, limits: outcome.limits}] : [],
   );
-  const unreachable = asked.flatMap(({host, outcome}) => (outcome === null ? [host] : []));
+  const unreachable = [
+    ...down,
+    ...asked.flatMap(({host, outcome}) => (outcome === null ? [host] : [])),
+  ];
   const unsupported = asked.flatMap(({host, outcome}) =>
     outcome?.kind === 'unsupported' ? [host] : [],
   );
-  if (replies.length === 0 && unsupported.length === 0 && unreachable.length > 0) {
+  if (
+    replies.length === 0 &&
+    unsupported.length === 0 &&
+    unreachable.length > 0 &&
+    connecting.length === 0
+  ) {
     throw new Error('nothing could be read');
   }
-  return {replies, unreachable, unsupported};
+  return {replies, unreachable, unsupported, connecting};
 }
 
 /** Ask each of `hosts` to fetch its price list; a failure leaves the page working on the old one. */

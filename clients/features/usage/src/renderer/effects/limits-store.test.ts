@@ -138,6 +138,33 @@ describe('the Limits tab', () => {
     old.stop();
   });
 
+  test('while the machine is connecting the tab loads and then shows its limits, never No limits', async () => {
+    const bridge = new FakeUsageBridge({
+      hosts: [{host: 'local', answer: (_, book) => emptySummary(book)}],
+      connecting: ['local'],
+    });
+    bridge.limitsOf = {local: entry(provider('codex', 0.25))};
+    const made = createUsageStore(bridge, {
+      schedule: new FakeClock().schedule,
+      clock: () => ({now: NOW, zone: 'UTC'}),
+    });
+    const unsubscribe = made.store.subscribe(() => undefined);
+    made.actions.tab('limits');
+    await settle(made.store);
+    expect(made.store.getState().limits).toMatchObject({view: null, checking: true, failed: false});
+    expect(bridge.limitsAsked).toEqual([]);
+    bridge.connect('local');
+    // The machine coming up asks again at once, without waiting for the next poll.
+    for (let turn = 0; turn < 200 && made.store.getState().limits.view === null; turn += 1) {
+      await Promise.resolve();
+    }
+    expect(made.store.getState().limits.view?.cards.map(card => card.providerName)).toEqual([
+      'Codex',
+    ]);
+    unsubscribe();
+    made.stop();
+  });
+
   test('the state is the same object until something changed', async () => {
     const {store, actions, stop} = world(entry(provider('codex', 0.5)));
     const unsubscribe = store.subscribe(() => undefined);

@@ -260,7 +260,7 @@ function limitsFolds(): (snapshot: {
     const screen: LimitsScreenState = {
       view:
         context.answer === null ? null : limitsView(context.answer.replies, context.askedAt ?? 0),
-      checking: snapshot.value === 'checking',
+      checking: snapshot.value === 'checking' || snapshot.value === 'connecting',
       failed: context.failed,
       unsupported:
         context.answer !== null &&

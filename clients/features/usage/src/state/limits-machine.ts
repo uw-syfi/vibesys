@@ -9,6 +9,8 @@
  * - Refresh asks now and asks the CLIs, whatever the floor: the person pressed it.
  * - A question that is still running when another is asked is stopped; a deadline ends one a host
  *   never answers. A failed question keeps the figures already shown and says so.
+ * - While every machine is still connecting there is nothing to read: the machine waits a moment
+ *   and asks again, a bounded number of times, instead of saying there are no limits.
  *
  * Time arrives on the events: the machine reads no clock.
  */
@@ -24,6 +26,8 @@ export interface LimitsAnswer {
   readonly unreachable: readonly HostKey[];
   /** Hosts whose VibeSys does not offer the question. */
   readonly unsupported: readonly HostKey[];
+  /** Hosts whose connection is still coming up: not read yet, and not failed. */
+  readonly connecting: readonly HostKey[];
 }
 
 export interface LimitsContext {
@@ -35,6 +39,8 @@ export interface LimitsContext {
   readonly maxAgeS: number;
   /** Whether the last question failed. */
   readonly failed: boolean;
+  /** How many times the question was asked again while every machine was still connecting. */
+  readonly polls: number;
 }
 
 export type LimitsEvent =
@@ -52,6 +58,16 @@ export const LIMITS_FLOOR_MS = 5 * 60_000;
 export const LIMITS_STORED_AGE_S = 300;
 /** How long a question may take, in milliseconds: a little over the host's own bound. */
 export const LIMITS_DEADLINE_MS = 45_000;
+/** How often a tab waiting for its machines to connect asks again, and how many times at most. */
+export const LIMITS_CONNECT_POLL_MS = 1_500;
+export const LIMITS_CONNECT_POLLS_MAX = 40;
+
+/** Whether nothing was read because every machine that was asked is still connecting. */
+export function stillConnecting(answer: LimitsAnswer): boolean {
+  return (
+    answer.replies.length === 0 && answer.unsupported.length === 0 && answer.connecting.length > 0
+  );
+}
 
 export const limitsMachine = setup({
   types: {context: {} as LimitsContext, events: {} as LimitsEvent},
@@ -60,7 +76,9 @@ export const limitsMachine = setup({
     ask: assign((_, params: {readonly now: number; readonly maxAgeS: number}) => ({
       askedAt: params.now,
       maxAgeS: params.maxAgeS,
+      polls: 0,
     })),
+    poll: assign({polls: ({context}) => context.polls + 1}),
     show: assign((_, params: {readonly answer: LimitsAnswer}) => ({
       answer: params.answer,
       failed: false,
@@ -70,11 +88,13 @@ export const limitsMachine = setup({
   guards: {
     pastFloor: ({context}, params: {readonly now: number}) =>
       context.askedAt === null || params.now - context.askedAt >= LIMITS_FLOOR_MS,
+    waitsForConnection: ({context}, params: {readonly answer: LimitsAnswer}) =>
+      stillConnecting(params.answer) && context.polls < LIMITS_CONNECT_POLLS_MAX,
   },
-  delays: {deadline: LIMITS_DEADLINE_MS},
+  delays: {deadline: LIMITS_DEADLINE_MS, connectPoll: LIMITS_CONNECT_POLL_MS},
 }).createMachine({
   id: 'usage-limits',
-  context: {answer: null, askedAt: null, maxAgeS: LIMITS_STORED_AGE_S, failed: false},
+  context: {answer: null, askedAt: null, maxAgeS: LIMITS_STORED_AGE_S, failed: false, polls: 0},
   initial: 'idle',
   states: {
     idle: {
@@ -98,10 +118,17 @@ export const limitsMachine = setup({
         id: 'check',
         src: 'check',
         input: ({context}) => ({maxAgeS: context.maxAgeS}),
-        onDone: {
-          target: 'idle',
-          actions: {type: 'show', params: ({event}) => ({answer: event.output})},
-        },
+        onDone: [
+          {
+            guard: {type: 'waitsForConnection', params: ({event}) => ({answer: event.output})},
+            target: 'connecting',
+            actions: 'poll',
+          },
+          {
+            target: 'idle',
+            actions: {type: 'show', params: ({event}) => ({answer: event.output})},
+          },
+        ],
         onError: {target: 'idle', actions: 'fail'},
       },
       after: {deadline: {target: 'idle', actions: 'fail'}},
@@ -109,6 +136,16 @@ export const limitsMachine = setup({
         refresh: {
           target: 'checking',
           reenter: true,
+          actions: {type: 'ask', params: ({event}) => ({now: event.now, maxAgeS: 0})},
+        },
+      },
+    },
+    /** Every machine is still connecting: nothing to show yet, and a moment to wait. */
+    connecting: {
+      after: {connectPoll: 'checking'},
+      on: {
+        refresh: {
+          target: 'checking',
           actions: {type: 'ask', params: ({event}) => ({now: event.now, maxAgeS: 0})},
         },
       },
