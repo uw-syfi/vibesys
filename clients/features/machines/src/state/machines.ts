@@ -15,6 +15,7 @@ import {
   validHostPath,
 } from '@vibesys/hosts';
 import type {CheckoutInspection, FailureCause, MachineEntry, MachineReport} from '@vibesys/ipc';
+import type {Open} from '@vibesys/store';
 import {
   formAwaited,
   inspectedReply,
@@ -115,6 +116,12 @@ export interface MachinesState {
    * unreachable, for as long as they keep streaming: one more check per spell of streaming.
    */
   readonly rechecked: readonly HostKey[];
+  /**
+   * Whether a screen that shows the checks has been opened. The machines are listed at launch (the
+   * rail and Runs name them), but each one's check is a host process that only those screens
+   * need, so none starts until the first `open`.
+   */
+  readonly opened: boolean;
   readonly lastToken: number;
 }
 
@@ -124,6 +131,7 @@ type Outcome<T> =
 
 export type MachinesAction =
   | PlacesAction
+  | Open
   /** Check the machine again, signing in first when it is waiting for that. */
   | {readonly type: 'reconnect'; readonly host: HostKey}
   /** The hosts whose stream delivers now: each one whose check failed is checked again, once. */
@@ -225,6 +233,7 @@ export function initialMachines(): MachinesStep {
     actionProblem: null,
     places: {},
     rechecked: [],
+    opened: false,
     lastToken: 1,
   };
   return {state, requests: [{kind: 'list', token: 1}]};
@@ -270,7 +279,10 @@ function relist(state: MachinesState, select: HostKey): MachinesStep {
   };
 }
 
-/** The listed machines, each re-checked, keeping what was known about the ones that stay. */
+/**
+ * The listed machines, each re-checked once the checks have been asked for (`opened`), keeping what
+ * was known about the ones that stay.
+ */
 function adoptList(
   state: MachinesState,
   entries: readonly MachineEntry[],
@@ -280,9 +292,10 @@ function adoptList(
   const requests: MachinesRequest[] = [];
   const machines = entries.map(entry => {
     const known = state.machines.find(machine => machine.host === entry.host);
+    const report = known?.checkout === entry.checkout ? known.report : null;
+    if (!state.opened) return {...entry, report, checking: null};
     last += 1;
     requests.push({kind: 'report', token: last, host: entry.host});
-    const report = known?.checkout === entry.checkout ? known.report : null;
     return {...entry, report, checking: last};
   });
   const wanted = select ?? state.selected;
@@ -312,6 +325,19 @@ function adoptList(
     },
     requests: dropped === null ? requests : [...requests, {kind: 'cancel-save', token: dropped}],
   };
+}
+
+/** The first `open`: every machine listed so far is checked; one listed later is checked as it comes. */
+function open(state: MachinesState): MachinesStep {
+  if (state.opened) return same(state);
+  let last = state.lastToken;
+  const requests: MachinesRequest[] = [];
+  const machines = state.machines.map(machine => {
+    last += 1;
+    requests.push({kind: 'report', token: last, host: machine.host});
+    return {...machine, checking: last};
+  });
+  return {state: {...state, machines, opened: true, lastToken: last}, requests};
 }
 
 function withForm(
@@ -668,6 +694,8 @@ function fixIfMissing(step: MachinesStep): MachinesStep {
 /** The next state and the requests to make, for `action` in `state`. */
 export function machinesStep(state: MachinesState, action: MachinesAction): MachinesStep {
   switch (action.type) {
+    case 'open':
+      return open(state);
     case 'listed':
       if (state.listing?.token !== action.token) return same(state);
       if (!action.result.ok)
@@ -765,6 +793,8 @@ function namingProblems(state: MachinesState): string[] {
 /** What must hold in every state; empty when all do. */
 export function machinesInvariants(state: MachinesState): string[] {
   const problems = namingProblems(state);
+  if (!state.opened && state.machines.some(machine => machine.checking !== null))
+    problems.push('a machine is being checked before any screen asked for the checks');
   for (const form of [state.adding, state.fixing]) {
     if (form !== null && form.saving !== null && form.problem !== null)
       problems.push('a failed check shows while another is awaited');

@@ -13,7 +13,7 @@ import {createRoot} from 'react-dom/client';
 import {followMouseButtons, windowAddress} from './address.js';
 import {ProblemHost} from './problem-host.js';
 import {shellSessionOptions} from './run-session.js';
-import {createShellStores, RunWindow, Shell} from './shell.js';
+import {createShellStores, RunWindow, Shell, wakeRail} from './shell.js';
 
 declare global {
   interface Window {
@@ -67,6 +67,7 @@ if (bridge === undefined) {
     },
   );
   if (run === null) {
+    wakeRail(stores);
     bridge.onOpenSettings(() =>
       stores.sidebar.store.dispatch({type: 'select', screen: {kind: 'settings'}}),
     );

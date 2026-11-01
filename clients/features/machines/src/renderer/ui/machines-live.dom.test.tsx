@@ -3,6 +3,7 @@ import {SUBSCRIPTION_LINGER_MS} from '@vibesys/connection';
 import {type FakeSubscribeStream, hubRig, settle} from '@vibesys/connection/testing';
 import type {MachineDescription} from '@vibesys/hosts';
 import type {MachineEntry, MachineReport} from '@vibesys/ipc';
+import {OPEN} from '@vibesys/store';
 import {
   backoffMs,
   CONNECTING,
@@ -64,6 +65,7 @@ function listed(
 ): MachinesState {
   const entries: MachineEntry[] = hosts.map(host => ({host, label: host, checkout: '~/vibesys'}));
   let {state} = initialMachines();
+  state = machinesStep(state, OPEN).state;
   state = machinesStep(state, {type: 'listed', token: 1, result: {ok: true, value: entries}}).state;
   for (const machine of state.machines) {
     state = machinesStep(state, {

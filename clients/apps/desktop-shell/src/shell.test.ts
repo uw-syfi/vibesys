@@ -194,13 +194,9 @@ test('Settings opened for a machine and section lands there, reads the machine, 
     machine: 'ssh:gpu-box',
     section: 'logins',
   });
-  // The machines New run was for are read once each; Settings read gpu-box already.
-  expect(read.sort()).toEqual([
-    'compute local',
-    'compute ssh:gpu-box',
-    'logins local',
-    'logins ssh:gpu-box',
-  ]);
+  // Only the machine New run was opened for is read, once; Settings read it already. This Mac, on
+  // which the form never started, is not read: New run was idle until it was opened on gpu-box.
+  expect(read.sort()).toEqual(['compute ssh:gpu-box', 'logins ssh:gpu-box']);
   address.back();
   expect(stores.sidebar.store.getState().selection).toMatchObject({kind: 'new-run'});
   expect(stores.newRun.getState()).toBe(before);

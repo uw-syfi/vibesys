@@ -83,6 +83,7 @@ import type {SubscriptionPort} from '@vibesys/subscription';
 import {applyTheme, Card, EmptyState, Page, type ThemeTarget, WindowFrame} from '@vibesys/ui';
 import {type JSX, useCallback, useMemo, useSyncExternalStore} from 'react';
 import {GatewayRun} from './gateway-run.js';
+import {openRailWhenSettled, openScreen, type Sleepers} from './screen-opening.js';
 import {
   machinesSettled,
   newRunSettled,
@@ -214,6 +215,9 @@ export function createShellStores(
   followCompute(newRun.store, machineSettings);
   rereadOnReconnect(sidebar.store, machineSettings);
   let {recent, selection} = sidebar.store.getState();
+  // A screen's reads start when it is first shown, after what it was opened for (the machine New
+  // run starts on, the section Settings lands on) is in place, so they are read once.
+  const sleepers: Sleepers = {machines, newRun: newRun.store};
   sidebar.store.subscribe(() => {
     const next = sidebar.store.getState();
     if (next.recent !== recent) {
@@ -230,8 +234,10 @@ export function createShellStores(
           section: selection.section ?? 'clusters',
         });
       }
+      openScreen(sleepers, selection);
     }
   });
+  openScreen(sleepers, selection);
   return {
     sidebar,
     grouping: createGroupingStore(),
@@ -257,15 +263,30 @@ export function createShellStores(
 }
 
 /**
+ * The main window's rail: the machines' checks its warning mark rests on start once Runs has read
+ * what it shows. A run window has no rail and does not call this.
+ */
+export function wakeRail(stores: ShellStores): void {
+  const {sidebar, machines, newRun} = stores;
+  openRailWhenSettled(
+    {machines, newRun},
+    [sidebar.store, machines],
+    () => runsSettled(sidebar.store.getState(), machines.getState()) === 'ready',
+  );
+}
+
+/**
  * What the machine New run is for has set up to measure on is what its Settings data says: that
  * data is read once for the machine, and each change of it (a cluster added in Settings) reaches
- * New run as an event, so the two never disagree.
+ * New run as an event, so the two never disagree. Until New run is opened it reads nothing, and
+ * it is told nothing: it asks for what it follows when it wakes.
  */
 function followCompute(
   newRun: ShellStores['newRun'],
   machineSettings: ShellStores['machineSettings'],
 ): void {
   const follow = (): void => {
+    if (newRun.getState().matches('idle')) return;
     const machine = newRun.getState().context.form.machine;
     const view = machineSettings.getState().views[machine]?.compute;
     if (view === undefined) {
