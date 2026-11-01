@@ -15,6 +15,15 @@ is the runner wait summed along it, and execution is the difference. Only
 execution is compared with the warn and error thresholds; queue stays visible in
 the summary and the annotation so contention is seen without failing the run.
 
+A job's own timestamps are not always trustworthy. During the repeated hour of a
+clock change (the night daylight saving time ends) the API reported job-level times an
+hour ahead of the true UTC instants, while the job's steps carried the true ones: on
+2026-11-01 one run read as 3901 s of execution for a five-minute job and failed the
+budget. A job with steps therefore takes its start and finish from its first and last
+step whenever its own times differ from theirs by whole hours, which no genuine delay
+produces, and its creation moves by the same hours when that is what puts it before its
+start.
+
 Usage:
     gh api "repos/$REPO/actions/runs/$RUN_ID/jobs?per_page=100" --paginate \\
         --jq '.jobs[]' > jobs.ndjson
@@ -28,12 +37,17 @@ import json
 import os
 import sys
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 # A job becomes ready a moment after its last dependency completes; timestamps
 # have one-second resolution, so allow that much slack when matching them.
 READY_EPSILON_SECONDS = 2.0
+
+# A job starts and finishes within seconds of its first and last step. Anything near a
+# whole number of hours beyond that is the API's clock-change skew, not a delay.
+STEP_SKEW_SECONDS = 60.0
+HOUR_SECONDS = 3600.0
 
 
 @dataclass(frozen=True)
@@ -88,9 +102,46 @@ def job_from_record(record: dict[str, object]) -> Job | None:
     conclusion = _text(record.get("conclusion")) or ""
     if conclusion == "skipped" or created is None or started is None or completed is None:
         return None
+    created, started, completed = _trusting_steps(record.get("steps"), created, started, completed)
     if started < created or completed < created:
         return None
     return Job(_text(record.get("name")) or "", conclusion, created, started, completed)
+
+
+def _trusting_steps(
+    steps: object, created: datetime, started: datetime, completed: datetime
+) -> tuple[datetime, datetime, datetime]:
+    """Undo a whole-hour error in the job's own times, using the times of its steps."""
+    firsts: list[datetime] = []
+    lasts: list[datetime] = []
+    for step in steps if isinstance(steps, list) else []:
+        if not isinstance(step, dict):
+            continue
+        begin = parse_moment(_text(step.get("started_at")))
+        end = parse_moment(_text(step.get("completed_at")))
+        if begin is not None:
+            firsts.append(begin)
+        if end is not None:
+            lasts.append(end)
+    if firsts:
+        started_error = _whole_hours_apart(started, min(firsts))
+        started -= started_error
+        # A job is created before it starts; a creation after the corrected start
+        # carries the same error.
+        if created > started:
+            created -= started_error
+    if lasts:
+        completed -= _whole_hours_apart(completed, max(lasts))
+    return created, started, completed
+
+
+def _whole_hours_apart(moment: datetime, step_moment: datetime) -> timedelta:
+    """The whole hours *moment* is ahead of *step_moment*, or zero when it is anywhere else."""
+    offset = (moment - step_moment).total_seconds()
+    hours = round(offset / HOUR_SECONDS)
+    if hours != 0 and abs(offset - hours * HOUR_SECONDS) <= STEP_SKEW_SECONDS:
+        return timedelta(hours=hours)
+    return timedelta(0)
 
 
 def _text(value: object) -> str | None:
