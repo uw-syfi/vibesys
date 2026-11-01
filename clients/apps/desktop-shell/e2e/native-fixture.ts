@@ -1,16 +1,63 @@
+/** Native fixture data comes from the shipping pure projection, once per derived replay set. */
+import {execFileSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
+import {existsSync, readFileSync} from 'node:fs';
+import {join} from 'node:path';
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {
-  type ClientReplaySchema,
+  ClientReplaySchema,
   RecordSchema,
   RunEntrySchema,
   RunLiveness,
+  type Record as StoreRecord,
   TailResponseSchema,
 } from '@vibesys/proto';
 import type {RunFixture, StoreRunFixture} from '@vibesys/run-fixtures';
-import {replayFor} from '../src/testing/native-records.js';
+import {derivedVariantsDirectory} from '@vibesys/run-fixtures/derived';
+import {declaredReplay, ROOT, recordsOf} from '../src/testing/native-records.js';
 import {gatewayScript, wire} from './fake-gateway.js';
 
-export {nativeRecords} from '../src/testing/native-records.js';
+const projector = join(ROOT, 'tests/e2e/retained_client_fixture.py');
+
+function hash(bytes: string | Uint8Array): string {
+  return createHash('sha256').update(bytes).digest('hex');
+}
+
+/**
+ * The replay of a fixture that differs from its declaration, projected once and kept inside the
+ * derived set, so it is exactly as current as the canonical replays beside it.
+ */
+function variantReplay(fixture: RunFixture) {
+  const variants = derivedVariantsDirectory();
+  const key = hash(JSON.stringify(fixture));
+  if (!existsSync(join(variants, key, '.complete'))) {
+    try {
+      execFileSync('uv', ['run', '--locked', '--project', ROOT, 'python', projector, variants], {
+        input: JSON.stringify([{key, fixture}]),
+        maxBuffer: 16 << 20,
+        timeout: 120000,
+      });
+    } catch (error) {
+      throw new Error(
+        `cannot project the replay of fixture ${fixture.name} (it differs from its declaration): ` +
+          `${error instanceof Error ? error.message : error}. The Linux image has no uv; run the ` +
+          'spec once on the host so the replay is kept in the derived replay set.',
+        {cause: error},
+      );
+    }
+  }
+  return fromBinary(ClientReplaySchema, readFileSync(join(variants, key, 'replay.pb')));
+}
+
+/** The replay of `fixture`: the one generated from its declaration, else the one projected for it. */
+function replayFor(fixture: RunFixture) {
+  return declaredReplay(fixture) ?? variantReplay(fixture);
+}
+
+/** Every record the shipping projection makes of the fixture's run, in log order. */
+export function nativeRecords(fixture: RunFixture): StoreRecord[] {
+  return recordsOf(replayFor(fixture));
+}
 
 export interface NativeFixtureOptions {
   readonly refuseActions?: readonly string[];

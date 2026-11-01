@@ -1,63 +1,30 @@
 /**
- * The records the shipping projection makes of a run fixture, once per derived replay set: the
- * data the native gateway Fake serves, for the browser journeys (`e2e/native-fixture.ts`) and for
- * the DOM tests of the Run screen. It imports nothing of Playwright.
+ * The records the shipping projection makes of a run fixture, read from the derived replay set the
+ * run started with: the data the native gateway Fake serves, for the browser journeys
+ * (`e2e/native-fixture.ts`) and for the DOM tests of the Run screen. It imports nothing of
+ * Playwright and starts no process: a fixture that differs from its declaration has no replay here,
+ * and the browser journeys project it (`e2e/native-fixture.ts`).
  */
-import {execFileSync} from 'node:child_process';
-import {createHash} from 'node:crypto';
 import {existsSync, readFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {fromBinary, type MessageShape} from '@bufbuild/protobuf';
 import {ClientReplaySchema, RecordSchema, type Record as StoreRecord} from '@vibesys/proto';
 import {parseFixture, type RunFixture, type StoreRunFixture} from '@vibesys/run-fixtures';
-import {
-  type DerivedReplaySet,
-  derivedReplay,
-  derivedVariantsDirectory,
-} from '@vibesys/run-fixtures/derived';
+import {type DerivedReplaySet, derivedReplay} from '@vibesys/run-fixtures/derived';
 
-const root = fileURLToPath(new URL('../../../../../', import.meta.url));
-const projector = join(root, 'tests/e2e/retained_client_fixture.py');
+type Replay = MessageShape<typeof ClientReplaySchema>;
 
-function hash(bytes: string | Uint8Array): string {
-  return createHash('sha256').update(bytes).digest('hex');
-}
+export const ROOT = fileURLToPath(new URL('../../../../../', import.meta.url));
 
 /**
- * The replay of a fixture that differs from its declaration, projected once and kept inside the
- * derived set, so it is exactly as current as the canonical replays beside it.
+ * The replay generated from the declaration `fixture` equals, or `undefined` when it equals none
+ * (a set that lacks the replay of a declaration fails naming it).
  */
-function variantReplay(fixture: RunFixture) {
-  const variants = derivedVariantsDirectory();
-  const key = hash(JSON.stringify(fixture));
-  if (!existsSync(join(variants, key, '.complete'))) {
-    try {
-      execFileSync('uv', ['run', '--locked', '--project', root, 'python', projector, variants], {
-        input: JSON.stringify([{key, fixture}]),
-        maxBuffer: 16 << 20,
-        timeout: 120000,
-      });
-    } catch (error) {
-      throw new Error(
-        `cannot project the replay of fixture ${fixture.name} (it differs from its declaration): ` +
-          `${error instanceof Error ? error.message : error}. The Linux image has no uv; run the ` +
-          'spec once on the host so the replay is kept in the derived replay set.',
-        {cause: error},
-      );
-    }
-  }
-  return fromBinary(ClientReplaySchema, readFileSync(join(variants, key, 'replay.pb')));
-}
-
-/**
- * A fixture equal to a declaration reads the replay generated from it, and a set that lacks that
- * replay fails naming it; any other fixture is projected by the same real projector.
- */
-export function replayFor(fixture: RunFixture): MessageShape<typeof ClientReplaySchema> {
+export function declaredReplay(fixture: RunFixture): Replay | undefined {
   const sources: readonly {data: string; set: DerivedReplaySet}[] = [
-    {data: join(root, 'clients/libs/run-fixtures/src/data'), set: 'shared'},
-    {data: join(root, 'clients/apps/desktop-shell/e2e/scenarios'), set: 'journeys'},
+    {data: join(ROOT, 'clients/libs/run-fixtures/src/data'), set: 'shared'},
+    {data: join(ROOT, 'clients/apps/desktop-shell/e2e/scenarios'), set: 'journeys'},
   ];
   for (const source of sources) {
     const declaration = join(source.data, `${fixture.name}.json`);
@@ -75,18 +42,24 @@ export function replayFor(fixture: RunFixture): MessageShape<typeof ClientReplay
       return fromBinary(ClientReplaySchema, derivedReplay(source.set, fixture.name));
     }
   }
-  return variantReplay(fixture);
+  return undefined;
 }
-/** Every record the shipping projection makes of the fixture's run, in log order. */
-export function nativeRecords(fixture: RunFixture): StoreRecord[] {
-  return replayFor(fixture)
-    .batches.flatMap(batch => batch.records.map(bytes => fromBinary(RecordSchema, bytes)))
+
+/** Every record of `replay`, in log order. */
+export function recordsOf(replay: Replay): StoreRecord[] {
+  return replay.batches
+    .flatMap(batch => batch.records.map(bytes => fromBinary(RecordSchema, bytes)))
     .sort((a, b) => Number(a.seq - b.seq));
 }
 
-/** The run `fixture` is once it has ended, or at its end, as the store holds it. */
+/** The run `fixture` is at its end, as the store holds it. */
 export function nativeStoreFixture(fixture: RunFixture): StoreRunFixture {
-  const replay = replayFor(fixture);
-  const records = nativeRecords(fixture);
+  const replay = declaredReplay(fixture);
+  if (replay === undefined) {
+    throw new Error(
+      `fixture ${fixture.name} differs from its declaration: it has no derived replay`,
+    );
+  }
+  const records = recordsOf(replay);
   return {records, initialCount: records.length, blobs: replay.blobs, streams: replay.streams};
 }
