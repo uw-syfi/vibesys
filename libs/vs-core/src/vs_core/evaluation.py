@@ -81,7 +81,7 @@ def advance_evaluation(
     # So is every comparison the step settled, however the run that fed it ended, after the
     # step's own results.
     moment = moment_of(context.run)
-    settled = comparisons_settled(state, after.state, moment)
+    settled = comparisons_settled(state, after.state)
     return after.model_copy(
         update={
             "state": closed_answers(after.state, moment),
