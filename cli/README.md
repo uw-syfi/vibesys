@@ -100,15 +100,28 @@ default to the environment variables shown:
 | `note <job> <text>` | Add a note to a job in any state. |
 | `jobs [--commit rev] [--state s] [--note-contains text]` | List the task's jobs, oldest first. |
 | `logs <job> [--follow]` | Print a job's output, and with `--follow` keep printing until it ends. |
+| `plan create --title t [--body text \| --body-file path]` | Store a plan, open, and print its number. `--body -` and `--body-file -` read standard input. |
+| `plan list [--status s] [--search text]` | List the task's plans by number. With no `--status` every plan is listed. |
+| `plan view <n>` | Print a plan, its comments and the jobs linked to it (`submit --plan <n>` links one). |
+| `plan edit <n> [--title t] [--body text \| --body-file path] [--status s]` | Change what is given and keep the rest. |
+| `plan comment <n> --body text \| --body-file path` | Add a comment, which carries a decision or a result. |
+| `plan close <n> --status s [--comment text \| --comment-file path]` | Set a status other than `open` and add a comment, as one change. |
 | `daemon status\|stop\|restart` | Report on, stop, or restart the daemon. `daemon install` is not available yet. |
+
+Plans belong to a task, are numbered 1, 2, ... by the daemon and never renumbered, and take one of
+five statuses: `open`, `chosen`, `won`, `parked` and `rejected`. The CLI orders none of them, so an
+agent may move a plan from any status to any other, and it stores the body and the comments as they
+are given. A plan number may be written `3` or `#3`. `plan view` shows the jobs linked to a plan; the
+verdict of each against the result branch is not shown yet, because `compare` is not available in
+this build.
 
 Exit codes: `0` ok (for `wait`, every job it waited on succeeded), `1` failed (a job did not
 succeed, or the call was refused), `2` invalid input, `3` a `wait` timed out.
 
 With `--json`, a command prints the contract's messages in protobuf's canonical JSON form with the
 original field names, one compact message per line: the response for `submit`, `cancel`, `note`,
-`jobs`, `logs` and `daemon status`; one `WatchResponse` per job for `wait` (the contract has no
-message for it); and, on stderr, a `Failure` for any error.
+`jobs`, `logs`, `daemon status` and the `plan` subcommands; one `WatchResponse` per job for `wait`
+(the contract has no message for it); and, on stderr, a `Failure` for any error.
 
 A signal ends the command and nothing more. A job the command submitted or waits on keeps running.
 

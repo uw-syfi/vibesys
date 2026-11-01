@@ -39,33 +39,3 @@ func (*Server) Promote(context.Context, *cliv1.PromoteRequest) (*cliv1.PromoteRe
 func (*Server) CurrentResult(context.Context, *cliv1.CurrentResultRequest) (*cliv1.CurrentResultResponse, error) {
 	return nil, notInThisBuild("CurrentResult")
 }
-
-// CreatePlan implements cliv1.DaemonServiceServer.
-func (*Server) CreatePlan(context.Context, *cliv1.CreatePlanRequest) (*cliv1.CreatePlanResponse, error) {
-	return nil, notInThisBuild("CreatePlan")
-}
-
-// ListPlans implements cliv1.DaemonServiceServer.
-func (*Server) ListPlans(context.Context, *cliv1.ListPlansRequest) (*cliv1.ListPlansResponse, error) {
-	return nil, notInThisBuild("ListPlans")
-}
-
-// ViewPlan implements cliv1.DaemonServiceServer.
-func (*Server) ViewPlan(context.Context, *cliv1.ViewPlanRequest) (*cliv1.ViewPlanResponse, error) {
-	return nil, notInThisBuild("ViewPlan")
-}
-
-// EditPlan implements cliv1.DaemonServiceServer.
-func (*Server) EditPlan(context.Context, *cliv1.EditPlanRequest) (*cliv1.EditPlanResponse, error) {
-	return nil, notInThisBuild("EditPlan")
-}
-
-// CommentPlan implements cliv1.DaemonServiceServer.
-func (*Server) CommentPlan(context.Context, *cliv1.CommentPlanRequest) (*cliv1.CommentPlanResponse, error) {
-	return nil, notInThisBuild("CommentPlan")
-}
-
-// ClosePlan implements cliv1.DaemonServiceServer.
-func (*Server) ClosePlan(context.Context, *cliv1.ClosePlanRequest) (*cliv1.ClosePlanResponse, error) {
-	return nil, notInThisBuild("ClosePlan")
-}

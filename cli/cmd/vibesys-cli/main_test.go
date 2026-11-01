@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -27,11 +28,14 @@ type cli struct {
 	timers  *clock.ManualTimers
 	git     *gitrepo.Fake
 	env     map[string]string
+	// stdin and files are what a command reads when given "-" or a path.
+	stdin string
+	files map[string]string
 }
 
 func newCLI(t *testing.T) *cli {
 	t.Helper()
-	c := &cli{t: t, world: daemontest.NewWorld(t), timers: clock.NewManualTimers(), git: gitrepo.NewFake(), env: map[string]string{}}
+	c := &cli{t: t, world: daemontest.NewWorld(t), timers: clock.NewManualTimers(), git: gitrepo.NewFake(), env: map[string]string{}, files: map[string]string{}}
 	c.git.AddRepo("/repo", map[string]core.Commit{"HEAD": full, "main": full})
 	dir := daemontest.RuntimeDir(t)
 	c.starter = &daemontest.Starter{Dir: dir, Version: version, Runtime: c.world.Runtime}
@@ -53,6 +57,13 @@ func (c *cli) run(args ...string) result {
 		getenv: func(k string) string { return c.env[k] },
 		cwd:    "/repo",
 		git:    c.git,
+		stdin:  strings.NewReader(c.stdin),
+		readFile: func(path string) ([]byte, error) {
+			if text, ok := c.files[path]; ok {
+				return []byte(text), nil
+			}
+			return nil, fmt.Errorf("open %s: no such file or directory", path)
+		},
 		options: func() (client.Options, error) {
 			return client.Options{Dir: c.starter.Dir, Version: version, Starter: c.starter, Timers: c.timers}, nil
 		},
