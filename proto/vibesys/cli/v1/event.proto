@@ -1,0 +1,81 @@
+syntax = "proto3";
+package vibesys.cli.v1;
+
+import "google/protobuf/timestamp.proto";
+import "vibesys/cli/v1/failure.proto";
+import "vibesys/cli/v1/job.proto";
+import "vibesys/cli/v1/plan.proto";
+import "vibesys/cli/v1/promote.proto";
+import "vibesys/cli/v1/result.proto";
+import "vibesys/cli/v1/verdict.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
+
+// Command names a CLI command. Subcommands that differ in what they do are separate values.
+enum Command {
+  COMMAND_UNSPECIFIED = 0;
+  COMMAND_SUBMIT_CHECK = 1;
+  COMMAND_SUBMIT_COMMAND = 2;
+  COMMAND_SUBMIT_MEASURE = 3;
+  COMMAND_WAIT = 4;
+  COMMAND_CANCEL = 5;
+  COMMAND_NOTE = 6;
+  COMMAND_JOBS = 7;
+  COMMAND_SHOW = 8;
+  COMMAND_LOGS = 9;
+  COMMAND_COMPARE = 10;
+  COMMAND_PROMOTE = 11;
+  COMMAND_RESULT = 12;
+  COMMAND_PLAN_CREATE = 13;
+  COMMAND_PLAN_LIST = 14;
+  COMMAND_PLAN_VIEW = 15;
+  COMMAND_PLAN_EDIT = 16;
+  COMMAND_PLAN_COMMENT = 17;
+  COMMAND_PLAN_CLOSE = 18;
+  COMMAND_DAEMON = 19;
+}
+
+enum CommandOutcome {
+  COMMAND_OUTCOME_UNSPECIFIED = 0;
+  COMMAND_OUTCOME_SUCCEEDED = 1;
+  // The command could not do its work. detail carries a Failure.
+  COMMAND_OUTCOME_FAILED = 2;
+  // The command was refused as a normal answer, such as a refused promotion.
+  COMMAND_OUTCOME_REFUSED = 3;
+}
+
+// Event is one entry of the append-only record of what the commands did, kept for features that
+// read it later. Every command appends one, failures and refusals included.
+message Event {
+  // Position in the run's log: starts at 1 and has no gaps. The store assigns it when it appends.
+  uint64 sequence = 1;
+  uint32 schema_version = 2;
+  string run_id = 3;
+  string host_id = 4;
+  string task = 5;
+  // The commit the command was about, when it had one.
+  string commit = 6;
+  // The number of the plan the command was linked to, or zero.
+  uint32 plan_number = 7;
+  // The agent harness that called the command, such as "claude-code".
+  string harness = 8;
+  // The agent that called it.
+  string agent = 9;
+  google.protobuf.Timestamp at = 10;
+  Command command = 11;
+  CommandOutcome outcome = 12;
+  // The job the command acted on, when it acted on one.
+  string job_id = 13;
+  oneof detail {
+    // The job after a submit, cancel, note or state change.
+    Job job = 20;
+    // A result that was saved.
+    Result result = 21;
+    // The verdict a compare gave.
+    Verdict verdict = 22;
+    Promotion promotion = 23;
+    PromoteRefusal refusal = 24;
+    Failure failure = 25;
+    Plan plan = 26;
+  }
+}

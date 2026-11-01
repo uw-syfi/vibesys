@@ -1,0 +1,78 @@
+syntax = "proto3";
+package vibesys.cli.v1;
+
+import "google/protobuf/timestamp.proto";
+import "vibesys/cli/v1/environment.proto";
+import "vibesys/cli/v1/result.proto";
+import "vibesys/cli/v1/verdict.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
+
+// PromoteRefusalKind is one reason a promotion was refused. A refusal can carry several.
+enum PromoteRefusalKind {
+  PROMOTE_REFUSAL_KIND_UNSPECIFIED = 0;
+  // The commit has no measurement.
+  PROMOTE_REFUSAL_KIND_UNMEASURED = 1;
+  // The commit has no passing check for its task version and environment.
+  PROMOTE_REFUSAL_KIND_CHECK_MISSING = 2;
+  // The verdict against the current result branch is worse.
+  PROMOTE_REFUSAL_KIND_WORSE = 3;
+  PROMOTE_REFUSAL_KIND_WITHIN_NOISE = 4;
+  PROMOTE_REFUSAL_KIND_INCONCLUSIVE = 5;
+  // The result branch moved after the measurement the verdict rests on.
+  PROMOTE_REFUSAL_KIND_STALE = 6;
+  // The commit and the result branch were measured in different environments.
+  PROMOTE_REFUSAL_KIND_ENVIRONMENT_MISMATCH = 7;
+}
+
+message PromoteRefusalReason {
+  PromoteRefusalKind kind = 1;
+  // Display text. Callers branch on kind.
+  string message = 2;
+  // The verdict the refusal rests on. Set for WORSE, WITHIN_NOISE and INCONCLUSIVE.
+  Verdict verdict = 3;
+  // The result branch head the commit was measured against. Set for STALE.
+  string measured_against = 4;
+  // The result branch head now. Set for STALE.
+  string current_head = 5;
+}
+
+// PromoteRefusal is a normal answer to a promotion, not an error: `promote` moves the result
+// branch only when the commit is better than its current head, and otherwise says why not.
+message PromoteRefusal {
+  repeated PromoteRefusalReason reasons = 1;
+}
+
+// Promotion is a result branch move that happened.
+message Promotion {
+  string commit = 1;
+  // The head before the move. Empty for the first promotion.
+  string previous_head = 2;
+  Verdict verdict = 3;
+  EnvironmentFingerprint environment = 4;
+  // The measurement the promotion rests on.
+  string result_job_id = 5;
+  google.protobuf.Timestamp at = 6;
+}
+
+// NoCurrentResultReason is why `result` has nothing to report.
+enum NoCurrentResultReason {
+  NO_CURRENT_RESULT_REASON_UNSPECIFIED = 0;
+  // Nothing was promoted, so there is no head.
+  NO_CURRENT_RESULT_REASON_NO_HEAD = 1;
+  // The head has no measurement and check taken after its last move. The cache cannot supply one,
+  // because reusing the samples that picked a winner would overstate its score.
+  NO_CURRENT_RESULT_REASON_NOT_MEASURED_SINCE_PROMOTION = 2;
+}
+
+// CurrentResult is the head and a final number measured after the head last moved.
+message CurrentResult {
+  string head = 1;
+  Result result = 2;
+}
+
+message NoCurrentResult {
+  NoCurrentResultReason reason = 1;
+  // The head, when there is one.
+  string head = 2;
+}

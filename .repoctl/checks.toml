@@ -478,3 +478,14 @@ directory = "gateway"
 # test of the host and a vet per other release target); a warm one a few seconds.
 timeout_seconds = 150
 commands = [["./check.sh"]]
+
+[[check_groups]]
+name = "cli_checks"
+trigger_job = "cli"
+include_in_test = true
+language = "go"
+directory = "cli"
+# Same shape as gateway_checks: a cold Go cache costs about 70 s on a CI runner (module download,
+# then vet and test of the host and a vet per other release target); a warm one a few seconds.
+timeout_seconds = 150
+commands = [["./check.sh"]]

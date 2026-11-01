@@ -1,7 +1,9 @@
 version: v2
 clean: true
 inputs:
+  # vibesys-cli's contract has its own template (buf.gen.cli.yaml) and only Go bindings.
   - directory: proto
+    exclude_paths: [proto/vibesys/cli]
 managed:
   enabled: true
   # check_schema_hashes requires embedded descriptors to retain source options.

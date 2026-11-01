@@ -1,0 +1,64 @@
+syntax = "proto3";
+package vibesys.cli.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "vibesys/cli/v1/environment.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
+
+// Direction says which way a metric improves.
+enum Direction {
+  DIRECTION_UNSPECIFIED = 0;
+  DIRECTION_MAXIMIZE = 1;
+  DIRECTION_MINIMIZE = 2;
+}
+
+message Metric {
+  string name = 1;
+  Direction direction = 2;
+}
+
+// Observation is a named series of auxiliary readings, such as latency, kept beside the scored
+// metric. It is never part of a verdict.
+message Observation {
+  string name = 1;
+  repeated double values = 2;
+}
+
+// CheckResult is a passed correctness check. A failed check saves no result: its job is `failed`
+// and its output is in the job's logs.
+message CheckResult {
+  google.protobuf.Duration duration = 1;
+}
+
+// MeasureResult is the official measurement of a commit.
+message MeasureResult {
+  Metric metric = 1;
+  // The scored metric's samples, in the order they were taken.
+  repeated double samples = 2;
+  repeated Observation observations = 3;
+  // The check pass this measurement relies on, whether it ran in the same job or was reused.
+  string check_job_id = 4;
+}
+
+// Result is one saved outcome of a job. A result is immutable once saved.
+message Result {
+  // The job that produced it, which is also the result's identity.
+  string job_id = 1;
+  // The cache key it answers.
+  string key = 2;
+  string task = 3;
+  string task_version = 4;
+  // The full commit the result was taken from.
+  string commit = 5;
+  uint32 schema_version = 6;
+  EnvironmentFingerprint environment = 7;
+  MachineFacts machine = 8;
+  MachineLoad load = 9;
+  google.protobuf.Timestamp recorded_at = 10;
+  oneof outcome {
+    CheckResult check = 11;
+    MeasureResult measure = 12;
+  }
+}

@@ -1,0 +1,101 @@
+syntax = "proto3";
+package vibesys.cli.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "vibesys/cli/v1/environment.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
+
+enum JobKind {
+  JOB_KIND_UNSPECIFIED = 0;
+  // Build and run the task's correctness check.
+  JOB_KIND_CHECK = 1;
+  // An agent-defined, cheap job. Never cached and never deduplicated.
+  JOB_KIND_COMMAND = 2;
+  // The official measurement: build, check, benchmark samples, saved result.
+  JOB_KIND_MEASURE = 3;
+}
+
+// JobState is where a job is. SUCCEEDED, FAILED, CANCELLED and LOST are final.
+enum JobState {
+  JOB_STATE_UNSPECIFIED = 0;
+  JOB_STATE_QUEUED = 1;
+  JOB_STATE_RUNNING = 2;
+  JOB_STATE_SUCCEEDED = 3;
+  JOB_STATE_FAILED = 4;
+  JOB_STATE_CANCELLED = 5;
+  // The machine or the supervisor went away while the job ran. A lost job is never retried.
+  JOB_STATE_LOST = 6;
+}
+
+message CheckSettings {}
+
+// ServiceSpec is a long-lived process a command job runs against. The environment owns its
+// lifecycle: it starts the service, waits for the probe to succeed, and kills the whole process
+// group when the job ends.
+message ServiceSpec {
+  repeated string argv = 1;
+  // Succeeds when the service is ready. Empty means ready as soon as it starts.
+  repeated string probe = 2;
+}
+
+message CommandSettings {
+  repeated string argv = 1;
+  ServiceSpec service = 2;
+  // Zero means the default limit.
+  google.protobuf.Duration timeout = 3;
+}
+
+message MeasureSettings {
+  // How many benchmark samples the measurement needs. Zero means the task's default.
+  uint32 samples = 1;
+  // Run a fresh check instead of reusing a matching pass.
+  bool recheck = 2;
+}
+
+// JobSpec is what a submission asks for. The job kind is the settings case, so it cannot disagree
+// with its settings.
+message JobSpec {
+  // The full commit to run from, 40 hexadecimal characters. The CLI resolves a ref before it calls.
+  string commit = 1;
+  // The environment the caller asks for. Unspecified lets the task choose.
+  EnvironmentKind environment = 2;
+  oneof settings {
+    CheckSettings check = 10;
+    CommandSettings command = 11;
+    MeasureSettings measure = 12;
+  }
+}
+
+// Note is free text attached to a job. It never takes part in a cache key, a verdict or a
+// promotion.
+message Note {
+  string text = 1;
+  google.protobuf.Timestamp at = 2;
+  string agent = 3;
+}
+
+message Job {
+  string id = 1;
+  JobSpec spec = 2;
+  JobState state = 3;
+  // The cache key. Empty for command jobs, which are never cached.
+  string key = 4;
+  // The environment the job runs in, pinned when it starts. Unset while queued.
+  EnvironmentFingerprint environment = 5;
+  repeated Note notes = 6;
+  // Every plan a submission linked this job to, in link order.
+  repeated uint32 plans = 7;
+  google.protobuf.Timestamp submitted_at = 8;
+  google.protobuf.Timestamp started_at = 9;
+  google.protobuf.Timestamp finished_at = 10;
+  // Set when state is CANCELLED.
+  string cancel_reason = 11;
+  // Set when state is FAILED or SUCCEEDED for a command job.
+  optional int32 exit_code = 12;
+  // The result a check or measure job saved. Empty when it saved none.
+  string result_job_id = 13;
+  // The check pass a measure job links to.
+  string check_job_id = 14;
+}

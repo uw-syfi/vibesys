@@ -1,0 +1,41 @@
+syntax = "proto3";
+package vibesys.cli.v1;
+
+option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
+
+// Component names a process role that speaks this contract. The CLI and the daemon are the two
+// ends of every call; the job supervisor runs one per job and must stay compatible with the
+// daemon that started it across upgrades.
+enum Component {
+  COMPONENT_UNSPECIFIED = 0;
+  COMPONENT_CLI = 1;
+  COMPONENT_DAEMON = 2;
+  COMPONENT_SUPERVISOR = 3;
+}
+
+// BuildVersions is what one build of the binary carries. It is also the `--version --json` output.
+message BuildVersions {
+  // The release version, or "dev" for a build that is not a release. Display only: callers never
+  // compare it.
+  string binary_version = 1;
+  // The revision of this contract's behavior the build speaks. It starts at 1 and increases only
+  // when a change breaks an older peer.
+  uint32 protocol_version = 2;
+  // The oldest protocol_version this build still serves. A peer below it is too old.
+  uint32 min_protocol_version = 3;
+  // The revision of the stored data and of the cache key. It is part of every cache key, so a
+  // bump retires every cached result.
+  uint32 schema_version = 4;
+}
+
+// Compatibility is the answer to a handshake, from the daemon's side.
+enum Compatibility {
+  COMPATIBILITY_UNSPECIFIED = 0;
+  // The two builds can talk.
+  COMPATIBILITY_COMPATIBLE = 1;
+  // The client's protocol_version is below the daemon's min_protocol_version: upgrade the client.
+  COMPATIBILITY_CLIENT_TOO_OLD = 2;
+  // The daemon's protocol_version is below the client's min_protocol_version: restart the daemon
+  // from the client's binary. Running jobs survive the restart.
+  COMPATIBILITY_DAEMON_TOO_OLD = 3;
+}

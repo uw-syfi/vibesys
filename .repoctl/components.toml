@@ -1,6 +1,6 @@
 # Repository component ownership, discovery, and change impact policy.
 default_base = "main"
-jobs = ["python", "clients", "examples", "agent_image", "real_tiers", "evaluators", "impact", "stitch", "proto", "gateway"]
+jobs = ["python", "clients", "examples", "agent_image", "real_tiers", "evaluators", "impact", "stitch", "proto", "gateway", "cli"]
 
 ignored_roots = ["website", "third_party", ".agents", ".claude", ".github/ISSUE_TEMPLATE", ".github/DISCUSSION_TEMPLATE"]
 ignored_files = ["AGENTS.md", "CLAUDE.md", "LICENSE", "agent.toml.example", ".env.example", ".gitattributes", ".gitignore", ".github/CODEOWNERS", ".github/pull_request_template.md", ".github/delegated-merge.md"]
@@ -379,8 +379,8 @@ root = ".github/workflows"
 id = "proto"
 class = "manual"
 job = "proto"
-roots = ["proto", "scripts/corevalue", "scripts/host_operations", "libs/vs-core/src/vs_core/_generated", "libs/vs-runtime/src/vs_runtime/_core_values", "libs/vs-proto", "clients/libs/proto", "gateway/gen", "gateway/schemahash", "gateway/cmd/schema-hashes"]
-files = ["buf.yaml", "buf.gen.yaml", "buf.gen.core.yaml", "scripts/check_proto_layers.py", "scripts/protoc_gen_corevalue.py", "scripts/generate_proto.sh", "scripts/check_schema_hashes.sh", "scripts/generate_proto_framing.py", "scripts/check_proto.sh", "scripts/check_proto_breaking.sh", "scripts/tests/test_proto_breaking.sh", "gateway/go.mod", "gateway/go.sum", "clients/package.json", "clients/pnpm-lock.yaml", "pyproject.toml", "uv.lock"]
+roots = ["proto", "scripts/corevalue", "scripts/host_operations", "libs/vs-core/src/vs_core/_generated", "libs/vs-runtime/src/vs_runtime/_core_values", "libs/vs-proto", "clients/libs/proto", "gateway/gen", "gateway/schemahash", "gateway/cmd/schema-hashes", "cli/gen"]
+files = ["buf.yaml", "buf.gen.yaml", "buf.gen.core.yaml", "buf.gen.cli.yaml", "scripts/check_proto_layers.py", "scripts/protoc_gen_corevalue.py", "scripts/generate_proto.sh", "scripts/check_schema_hashes.sh", "scripts/generate_proto_framing.py", "scripts/check_proto.sh", "scripts/check_proto_breaking.sh", "scripts/tests/test_proto_breaking.sh", "gateway/go.mod", "gateway/go.sum", "cli/go.mod", "cli/go.sum", "clients/package.json", "clients/pnpm-lock.yaml", "pyproject.toml", "uv.lock"]
 
 [[components]]
 id = "gateway"
@@ -389,3 +389,12 @@ job = "gateway"
 # The gateway tests read the conversion and retained goldens and compare the Skeleton wire golden
 # byte for byte, so a change to any of them runs them.
 roots = ["gateway", "proto/testdata"]
+
+[[components]]
+id = "cli"
+class = "manual"
+job = "cli"
+# The contract the CLI is generated from selects its checks too, so an edit to it cannot leave the
+# Go bindings unvetted. The proto job checks that the bindings are current.
+roots = ["cli", "proto/vibesys/cli"]
+files = ["buf.gen.cli.yaml"]
