@@ -3,7 +3,8 @@
  * "State"); the guided form is data in its context (`answers`, the step `at`, and the run's
  * `form`, which the answers name: `flow.ts`). While editing, parallel regions load what the
  * machine offers (its facts, vetted harnesses, examples), the project's tasks, and the "Ready to
- * start" checks for the current inputs, debounced; one more region runs a fix or the start.
+ * start" checks for the current inputs (asked at once, or once typing pauses); one more region runs
+ * a fix or the start.
  * Changing an input re-enters the regions that depend on it, which stops their work in flight, and
  * a reply is applied only for the inputs it was asked for, so a slow reply never overwrites newer
  * state. Start is enabled only when the checks are for the current inputs and none fails.
@@ -27,7 +28,7 @@ import type {
 } from '@vibesys/ipc';
 import {unprovided} from '@vibesys/machine';
 import type {RecentRun, RunStart} from '@vibesys/runs';
-import {and, assign, raise, type SnapshotFrom, setup} from 'xstate';
+import {and, assign, not, or, raise, type SnapshotFrom, setup, stateIn} from 'xstate';
 import {installedFirst, roleProviders} from './agents.js';
 import type {AnswerChange, Answers, StepId} from './answers.js';
 import type {CatalogueEntry} from './catalogue.js';
@@ -514,6 +515,14 @@ export const newRunMachine = setup({
     changesGoal: ({event}) =>
       event.type === 'answer' && ['project', 'task', 'from'].includes(event.change.kind),
     hasInputs: ({context}) => inputsKey(context.form) !== null,
+    // The reads that settle the inputs (each ends by raising `recheck`) are still out: asking now
+    // would ask what the next of them changes. The region asks once the last of them is in.
+    inputsArriving: or([
+      stateIn({editing: {helper: 'loading'}}),
+      stateIn({editing: {facts: 'loading'}}),
+      stateIn({editing: {harnesses: 'loading'}}),
+      stateIn({editing: {tasks: 'loading'}}),
+    ]),
     // The destination of an example not made yet is asked of a helper that can say what it holds.
     asksDestination: ({context}) =>
       destinationKey(context.form) !== null &&
@@ -997,8 +1006,9 @@ export const newRunMachine = setup({
             budget: {target: '.deciding', actions: 'input'},
             measure: {target: '.deciding', actions: 'input'},
             compute: {target: '.deciding', actions: 'compute'},
-            advanced: {target: '.deciding', actions: 'input'},
-            destination: {target: '.deciding', actions: 'input'},
+            // A text field changes with every key: the checks wait for the typing to pause.
+            advanced: {target: '.pausing', actions: 'input'},
+            destination: {target: '.pausing', actions: 'input'},
             recheck: '.deciding',
             refresh: '.deciding',
             retry: {
@@ -1009,13 +1019,30 @@ export const newRunMachine = setup({
           },
           states: {
             // Whether the inputs are to be checked is decided where they change, so that only
-            // inputs that will be checked wait for the debounce and the answer, and a form with
-            // none is at rest at once.
+            // inputs that will be checked wait for the answer, and a form with none is at rest at
+            // once. Typed inputs wait for the typing to pause; the others, once the reads that
+            // settle them are in, are asked at once, with no time to wait out.
             deciding: {
+              always: [
+                {
+                  guard: and(['hasInputs', 'offersChecks', not('inputsArriving')]),
+                  target: 'checking',
+                },
+                {guard: and(['hasInputs', 'offersChecks']), target: 'settling'},
+                {target: 'incomplete'},
+              ],
+            },
+            // The inputs are being typed: asked once the typing pauses, if they can be checked.
+            pausing: {
               always: [
                 {guard: and(['hasInputs', 'offersChecks']), target: 'waiting'},
                 {target: 'incomplete'},
               ],
+            },
+            // The inputs may still change as the reads that settle them arrive: asked when the
+            // last is in. Each of those reads carries the tag, so the screen is awaiting meanwhile.
+            settling: {
+              always: [{guard: not('inputsArriving'), target: 'deciding'}],
             },
             waiting: {
               tags: AWAITING,

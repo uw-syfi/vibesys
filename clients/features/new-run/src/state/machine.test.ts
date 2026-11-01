@@ -20,7 +20,13 @@ import {checkMachine, type Live} from '@vibesys/machine/testing';
 import {exampleCatalogue} from '@vibesys/run-fixtures';
 import type {RecentRun} from '@vibesys/runs';
 import type {Seeded} from '@vibesys/store/testing';
-import {createActor, fromPromise, SimulatedClock, type SnapshotFrom} from 'xstate';
+import {
+  type ActorRefFrom,
+  createActor,
+  fromPromise,
+  SimulatedClock,
+  type SnapshotFrom,
+} from 'xstate';
 import {type AnswerChange, chosenEntry, NO_ANSWERS, stepIds} from './answers.js';
 import type {CatalogueEntry} from './catalogue.js';
 import type {Draft} from './draft.js';
@@ -913,19 +919,19 @@ describe('the run reports its roles', () => {
     actor.start();
     actor.send({type: 'again', run: RECENT[2] as RecentRun});
     await until(actor, snapshot => snapshot.matches(LOADED));
-    // The recorded run set `judge`, which the reported roles do not have.
-    expect(actor.getSnapshot().context.form.agent?.roles.map(role => role.role)).toEqual(['judge']);
-    clock.increment(CHECK_DEBOUNCE_MS);
-    await until(actor, snapshot => snapshot.context.roles !== null);
+    // No time passes: the inputs are asked once the reads that settle them are in, and the run's
+    // roles replace the settings of the recorded run, which changes the inputs: asked again.
+    await until(
+      actor,
+      snapshot => asked.length === 2 && snapshot.matches({editing: {checks: 'ready'}}),
+    );
     const {context} = actor.getSnapshot();
     expect(context.roles).toEqual(['multi-orchestrator', 'multi-implementer']);
     expect(context.form.agent?.roles).toEqual([
       {role: 'multi-orchestrator', agent: null, effort: 'default'},
       {role: 'multi-implementer', agent: null, effort: 'default'},
     ]);
-    // The dropped setting changed the inputs: they are checked again, without it.
-    clock.increment(CHECK_DEBOUNCE_MS);
-    await until(actor, () => asked.length === 2);
+    // The first check carried the recorded run's `judge`, which the reported roles do not have.
     expect(asked[0]?.options.roles).toEqual([
       {role: 'judge', model: null, reasoning_effort: 'high'},
     ]);
@@ -942,10 +948,96 @@ describe('the run reports its roles', () => {
     actor.start();
     actor.send({type: 'again', run: RECENT[0] as RecentRun});
     await until(actor, snapshot => snapshot.matches(LOADED));
-    clock.increment(CHECK_DEBOUNCE_MS);
-    await until(actor, () => asked.length === 1);
     await until(actor, snapshot => snapshot.matches({editing: {checks: 'ready'}}));
+    expect(asked).toHaveLength(1);
     expect(actor.getSnapshot().context.roles).toBeNull();
+    actor.stop();
+  });
+});
+
+describe('when the inputs are checked', () => {
+  const READY = {editing: {checks: 'ready'}} as const;
+
+  function untilActor(
+    actor: ActorRefFrom<typeof newRunMachine>,
+    ready: (snapshot: SnapshotFrom<typeof newRunMachine>) => boolean,
+  ): Promise<void> {
+    return new Promise<void>(resolve => {
+      if (ready(actor.getSnapshot())) {
+        resolve();
+        return;
+      }
+      const done = actor.subscribe(snapshot => {
+        if (ready(snapshot)) {
+          done.unsubscribe();
+          resolve();
+        }
+      });
+    });
+  }
+
+  async function opened(asked: RunInputs[], clock: SimulatedClock) {
+    const actor = createActor(
+      newRunMachine.provide({
+        actors: {
+          describe: fromPromise<Offered<MachineDescription>, {readonly host: HostKey}>(
+            async () => ({kind: 'unsupported'}),
+          ),
+          examples: fromPromise<Offered<ExampleList>, {readonly host: HostKey}>(async () => ({
+            kind: 'unsupported',
+          })),
+          harnesses: fromPromise<readonly HarnessOffer[], {readonly host: HostKey}>(
+            async () => OFFERS,
+          ),
+          features: fromPromise<readonly HelperFeature[], {readonly host: HostKey}>(async () => [
+            ...REQUIRED_HELPER_FEATURES,
+          ]),
+          tasks: fromPromise<readonly string[], {readonly host: HostKey; readonly project: string}>(
+            async () => ['spsc'],
+          ),
+          preflight: fromPromise<
+            Offered<PreflightResult>,
+            {readonly host: HostKey; readonly inputs: RunInputs}
+          >(async ({input}) => {
+            asked.push(input.inputs);
+            return {kind: 'offered', value: {checks: [], roles: null, backend: null}};
+          }),
+        },
+      }),
+      {input: {machine: 'local', recent: RECENT, moreOpen: {}}, clock},
+    );
+    actor.start();
+    actor.send({type: 'again', run: RECENT[0] as RecentRun});
+    await untilActor(actor, snapshot => snapshot.matches(READY));
+    return actor;
+  }
+
+  test('inputs that are not typed are asked as soon as the reads that settle them are in, once', async () => {
+    const asked: RunInputs[] = [];
+    const actor = await opened(asked, new SimulatedClock());
+    // No time passed, and the one check asked what the reads settled on.
+    expect(asked).toHaveLength(1);
+    // A choice is one change: asked at once, with no time to wait out.
+    actor.send({type: 'budget', budget: {...actor.getSnapshot().context.form.budget, rounds: 3}});
+    await untilActor(actor, snapshot => asked.length === 2 && snapshot.matches(READY));
+    expect(asked[1]?.options.rounds).toBe(3);
+    actor.stop();
+  });
+
+  test('typed inputs are asked when the typing pauses, and not before', async () => {
+    const asked: RunInputs[] = [];
+    const clock = new SimulatedClock();
+    const actor = await opened(asked, clock);
+    expect(asked).toHaveLength(1);
+    for (const advanced of ['--a', '--a 1', '--a 12']) {
+      actor.send({type: 'advanced', advanced});
+      clock.increment(CHECK_DEBOUNCE_MS - 1);
+    }
+    expect(asked).toHaveLength(1);
+    expect(actor.getSnapshot().matches({editing: {checks: 'waiting'}})).toBe(true);
+    clock.increment(1);
+    await untilActor(actor, snapshot => asked.length === 2 && snapshot.matches(READY));
+    expect(asked[1]?.args).toEqual(['--a', '12']);
     actor.stop();
   });
 });

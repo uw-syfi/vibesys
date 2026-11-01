@@ -18,11 +18,15 @@ import {createNewRunStore, type NewRunBridge, type NewRunStoreOptions} from './s
 
 const ok = <T>(value: T) => Promise.resolve({ok: true as const, value});
 
-/** The bridge calls New run makes, answering at once from memory, from a helper with `features`. */
+/**
+ * The bridge calls New run makes, answering at once from memory, from a helper with `features`;
+ * the checks wait for `release` when the test holds them.
+ */
 function fakeBridge(
   features: readonly string[] = REQUIRED_HELPER_FEATURES,
   asked: string[] = [],
   roles: readonly string[] | null = null,
+  release: Promise<void> = Promise.resolve(),
 ): NewRunBridge {
   const record = <T>(name: string, value: T) => {
     asked.push(name);
@@ -36,7 +40,9 @@ function fakeBridge(
     tasks: () => ok(['mpmc']),
     taskGoal: () => ok({kind: 'unsupported' as const}),
     preflight: () =>
-      record('preflight', {kind: 'offered' as const, value: {checks: [], roles, backend: null}}),
+      release.then(() =>
+        record('preflight', {kind: 'offered' as const, value: {checks: [], roles, backend: null}}),
+      ),
     createFromExample: (_host, _example, destination) =>
       ok({kind: 'created' as const, created: {project: destination, tasks: ['a']}}),
     exampleDestination: () => ok({kind: 'unsupported' as const}),
@@ -167,11 +173,15 @@ test('a started run is handed on, and a fresh form on the same machine follows i
 
 test('Start says why it waits: inputs missing, being checked, or an item to fix', async () => {
   const clock = manualSchedule();
-  const {store} = createNewRunStore(fakeBridge(), {
-    recent: [],
-    schedule: clock.schedule,
-    started: () => undefined,
-  });
+  const checks = Promise.withResolvers<void>();
+  const {store} = createNewRunStore(
+    fakeBridge(REQUIRED_HELPER_FEATURES, [], null, checks.promise),
+    {
+      recent: [],
+      schedule: clock.schedule,
+      started: () => undefined,
+    },
+  );
   await settle();
   expect(startBlocked(store.getState())).toBe('Choose a project, task and agent to start.');
   chooseFolder(store, '/p');
@@ -183,7 +193,7 @@ test('Start says why it waits: inputs missing, being checked, or an item to fix'
   const line = readinessStatus(waiting).text;
   expect(line).toBe('Checking');
   expect(waiting.flatMap(item => [item.label, item.detail])).not.toContain(line);
-  clock.runDue();
+  checks.resolve();
   await settle();
   expect(startBlocked(store.getState())).toBeUndefined();
   store.dispatch({type: 'advanced', advanced: '--model x'});
@@ -300,12 +310,15 @@ test('the role table is read from the run: pending, then its roles, from a helpe
   const clock = manualSchedule();
   const roles = ['multi-orchestrator', 'multi-judge'];
   const features = [...REQUIRED_HELPER_FEATURES, 'run_roles'];
-  const {store} = runAgain(fakeBridge(features, [], roles), recentRun('ssh:gpu', '/p', 2), {
-    schedule: clock.schedule,
-  });
+  const checks = Promise.withResolvers<void>();
+  const {store} = runAgain(
+    fakeBridge(features, [], roles, checks.promise),
+    recentRun('ssh:gpu', '/p', 2),
+    {schedule: clock.schedule},
+  );
   await settle();
   expect(rolesView(store.getState().context)).toEqual({kind: 'pending'});
-  clock.runDue();
+  checks.resolve();
   await settle();
   expect(rolesView(store.getState().context)).toEqual({kind: 'ready', roles});
   expect(store.getState().context.form.agent?.roles.map(role => role.role)).toEqual(roles);
