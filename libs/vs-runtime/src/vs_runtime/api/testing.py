@@ -1,6 +1,7 @@
 """Owned in-memory test implementations for :mod:`vs_runtime.api`."""
 
 from vs_runtime._control_schema import UnsafeControlSchemaError, control_schema_fields
+from vs_runtime._counter_search import CounterConfig, counter
 from vs_runtime._environment_system import EnvironmentSystem
 from vs_runtime._evidence_ledger import FakeEvidenceLedger
 from vs_runtime._fake_core_execution import (
@@ -123,6 +124,7 @@ __all__ = [
     "AttemptRaises",
     "AttemptReturns",
     "Behavior",
+    "CounterConfig",
     "CrashableRunClock",
     "DaemonBackend",
     "ExecutedRequest",
@@ -188,6 +190,7 @@ __all__ = [
     "TranslatorFactory",
     "UnsafeControlSchemaError",
     "control_schema_fields",
+    "counter",
     "daemon_docker_config",
     "daemon_engine",
     "drive_shell",

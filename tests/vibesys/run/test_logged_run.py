@@ -31,8 +31,8 @@ from vs_project.api import Project
 from vs_proto.api import EpochStarted, Oneof, Record, Timestamp
 from vs_runlog.api import ConfirmedLog, FileRunLogWriter
 from vs_runtime.api.core import RuntimeRecord
-from vs_runtime.api.core_shell_fixtures import CounterConfig
 from vs_runtime.api.step_runner import RunLogStepLog, SearchRun, fold_log, snapshot_message
+from vs_runtime.api.testing import CounterConfig
 from vs_sim.api.testing import ManualClock, SimThreads, VirtualClock, examples, run_virtual
 
 if TYPE_CHECKING:
