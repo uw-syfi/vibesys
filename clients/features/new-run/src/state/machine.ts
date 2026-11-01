@@ -515,9 +515,6 @@ export const newRunMachine = setup({
     changesGoal: ({event}) =>
       event.type === 'answer' && ['project', 'task', 'from'].includes(event.change.kind),
     hasInputs: ({context}) => inputsKey(context.form) !== null,
-    // A text field changes with every key, so the checks wait for the typing to pause. Every other
-    // cause (a choice, a machine's answer, opening the page) is one change, checked at once.
-    typing: ({event}) => event.type === 'advanced' || event.type === 'destination',
     // The reads that settle the inputs (each ends by raising `recheck`) are still out: asking now
     // would ask what the next of them changes. The region asks once the last of them is in.
     inputsArriving: or([
@@ -1009,8 +1006,9 @@ export const newRunMachine = setup({
             budget: {target: '.deciding', actions: 'input'},
             measure: {target: '.deciding', actions: 'input'},
             compute: {target: '.deciding', actions: 'compute'},
-            advanced: {target: '.deciding', actions: 'input'},
-            destination: {target: '.deciding', actions: 'input'},
+            // A text field changes with every key: the checks wait for the typing to pause.
+            advanced: {target: '.pausing', actions: 'input'},
+            destination: {target: '.pausing', actions: 'input'},
             recheck: '.deciding',
             refresh: '.deciding',
             retry: {
@@ -1026,12 +1024,18 @@ export const newRunMachine = setup({
             // settle them are in, are asked at once, with no time to wait out.
             deciding: {
               always: [
-                {guard: and(['hasInputs', 'offersChecks', 'typing']), target: 'waiting'},
                 {
                   guard: and(['hasInputs', 'offersChecks', not('inputsArriving')]),
                   target: 'checking',
                 },
                 {guard: and(['hasInputs', 'offersChecks']), target: 'settling'},
+                {target: 'incomplete'},
+              ],
+            },
+            // The inputs are being typed: asked once the typing pauses, if they can be checked.
+            pausing: {
+              always: [
+                {guard: and(['hasInputs', 'offersChecks']), target: 'waiting'},
                 {target: 'incomplete'},
               ],
             },
