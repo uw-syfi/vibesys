@@ -26,7 +26,6 @@ from vs_proto.api import (
     RunEnded as RunEndedRecord,
 )
 
-from ._fold_rules import fold_rules
 from ._refusal import RecordRefusedError, RefusalReason
 from .types.common import Value
 from .types.kernel import CoreEvent, CoreState
@@ -189,30 +188,28 @@ def encode_fold(
     state: CoreState,
     events: tuple[Event, ...],
     discarded: tuple[Discarded, ...],
-    rules: str | None = None,
+    rules: str,
 ) -> bytes:
     """The canonical JSON of a fold: a state and what the search still has to hear.
 
-    ``rules`` is the identity of the rules that folded it, the running ones unless a test says.
+    ``rules`` is the identity of the rules that folded it (``rules_digest``).
     """
-    named = fold_rules() if rules is None else rules
-    return _FOLD.dump_json(_FoldBody(rules=named, state=state, events=events, discarded=discarded))
+    return _FOLD.dump_json(_FoldBody(rules=rules, state=state, events=events, discarded=discarded))
 
 
 def decode_fold(
-    data: bytes, registry: OperationRegistry | None, rules: str | None = None
+    data: bytes, registry: OperationRegistry | None, rules: str
 ) -> tuple[CoreState, tuple[Event, ...], tuple[Discarded, ...]]:
     """A fold written by ``encode_fold``, refused when another encoding, other rules or damage made it.
 
-    A fold made by other rules than ``rules`` (the running ones unless a test says), or by rules
-    that are unknown, raises ``FoldRulesChangedError``: the records after it would be folded by
-    rules the state was not made under.
+    A fold made by other rules than ``rules``, or by rules that are unknown (the empty identity),
+    raises ``FoldRulesChangedError``: the records after it would be folded by rules the state was not
+    made under.
     """
     body = _FOLD.validate_json(data, context=_context(registry))
     _same_encoding(body.schema_version)
-    reading = fold_rules() if rules is None else rules
-    if not reading or body.rules != reading:
-        raise FoldRulesChangedError(body.rules, reading)
+    if not rules or body.rules != rules:
+        raise FoldRulesChangedError(body.rules, rules)
     return body.state, body.events, body.discarded
 
 

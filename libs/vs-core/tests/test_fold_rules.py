@@ -8,20 +8,16 @@ state the new rules would not have made. The identity of the rules is a digest o
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
 
-import vs_core
 import vs_core.api as core
 from vs_core.api.recovery import (
     Folded,
     FoldRulesChangedError,
-    fold_rules,
-    package_sources,
     rules_digest,
 )
 
@@ -64,21 +60,6 @@ def test_rules_with_no_source_have_no_identity() -> None:
     assert rules_digest({}) == ""
 
 
-def test_the_running_rules_are_the_digest_of_every_source_file_of_core_that_is_not_test_support() -> (
-    None
-):
-    root = Path(vs_core.__file__).parent
-    expected = {
-        str(path.relative_to(root))
-        for path in root.rglob("*.py")
-        if "testing" not in path.relative_to(root).parts
-    }
-    sources = package_sources()
-    assert set(sources) == expected
-    assert "_decide.py" in sources
-    assert fold_rules() == rules_digest(sources) != ""
-
-
 def folded() -> Folded:
     return Folded(core.initial_state())
 
@@ -99,7 +80,3 @@ def test_a_fold_is_refused_by_other_rules_and_by_unknown_ones(written: str, read
         return
     with pytest.raises(FoldRulesChangedError):
         Folded.decode(folded().encode(written), None, reading)
-
-
-def test_a_fold_made_by_this_code_is_read_by_this_code() -> None:
-    assert Folded.decode(folded().encode()) == folded()

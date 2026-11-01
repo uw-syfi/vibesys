@@ -27,7 +27,7 @@ from vs_core._decide import (
     start_due,
     starts_run,
 )
-from vs_core._fold_rules import fold_rules, package_sources, rules_digest
+from vs_core._fold_rules import rules_digest
 from vs_core._refusal import RecordRefusal, RecordRefusedError, RefusalReason
 from vs_core._request_recovery import COMMAND_KINDS
 from vs_core._search_events import Translated
@@ -124,14 +124,12 @@ __all__ = [
     "ended_message",
     "finished_message",
     "fold",
-    "fold_rules",
     "fold_run",
     "input_message",
     "interrupted_message",
     "interruption_of",
     "may_start",
     "open_step",
-    "package_sources",
     "request_close_policy",
     "request_effect",
     "request_end_policy",

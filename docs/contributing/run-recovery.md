@@ -465,8 +465,10 @@ As built (PR 6a-3m):
   written from the fold a later start computes cannot differ from it. A failed write leaves the cache
   before it, which is only older.
 - A cache is keyed by the log's bytes and by the code that folds them. The fold in it (`Folded.encode`)
-  names its rules: `vs_core.api.recovery.fold_rules()`, a SHA-256 over the path and the bytes of every
-  source file of `vs_core` outside `testing/`, read once per process. A process whose reducers changed
+  names its rules: `vs_runtime.api.step_runner.fold_rules()`, a SHA-256 (`vs_core.api.recovery.rules_digest`)
+  over the path and the bytes of every source file of `vs_core` outside `testing/`, read once per
+  process. Core is pure and cannot read its own source, so the shell names the rules and core compares
+  the name a fold carries with the one it is read under. A process whose reducers changed
   since the write (a fix between a pause and the Resume) finds other rules, `Folded.decode` raises
   `FoldRulesChangedError`, and the start folds the whole log: the cached state plus the records after it
   would not equal the new rules' own fold. Any change to a `vs_core` file changes the identity, so an

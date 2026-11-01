@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from vs_core.api.recovery import Folded, FoldRulesChangedError
 from vs_runlog.api import CachedFold, CacheMiss, PrefixDigest, judge
+from vs_runtime._fold_rules import fold_rules
 from vs_runtime._saved_run_record import fold_log
 
 if TYPE_CHECKING:
@@ -50,8 +51,8 @@ class Keeping:
 
     every: int
     """Core records a process appends between two writes while the run goes on."""
-    rules: str | None = None
-    """The identity of the rules that fold: this code's unless a test stands in for other code."""
+    rules: str
+    """The identity of the rules that fold (``fold_rules``), or a test's stand-in for other code."""
 
 
 class FoldKeeper:
@@ -124,11 +125,12 @@ def start_fold(
     """
     if cache is None:
         return fold_log(prefix, registry), None
+    named = fold_rules() if rules is None else rules
     digest = PrefixDigest()
     verdict = judge(cache.load(), prefix, digest)
     if isinstance(verdict, CachedFold):
         try:
-            cached = Folded.decode(verdict.state, registry, rules)
+            cached = Folded.decode(verdict.state, registry, named)
         except FoldRulesChangedError:
             verdict = CacheMiss.RULES_CHANGED
         except ValueError:
@@ -136,6 +138,6 @@ def start_fold(
         else:
             folded = fold_log(prefix[verdict.through_seq :], registry, cached)
             start = CacheUsed(verdict.through_seq)
-            return folded, FoldKeeper(cache, digest, folded, start, Keeping(every, rules))
+            return folded, FoldKeeper(cache, digest, folded, start, Keeping(every, named))
     folded = fold_log(prefix, registry)
-    return folded, FoldKeeper(cache, digest, folded, verdict, Keeping(every, rules))
+    return folded, FoldKeeper(cache, digest, folded, verdict, Keeping(every, named))
