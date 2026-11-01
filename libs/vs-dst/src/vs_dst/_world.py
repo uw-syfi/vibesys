@@ -10,9 +10,11 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vs_core.api import CoreState, Request, SchemaRef
+    from vs_core.api import CoreEvent, CoreState, Request, SchemaRef, Transition
     from vs_core.api.testing import Answer, Harness
+    from vs_runtime.api.core import ExecutionResult
     from vs_runtime.api.testing import Launch
+    from vs_sim.api import Clock
 
 
 @dataclass(frozen=True)
@@ -63,4 +65,54 @@ class HoldingWorld(Protocol):
 
     def holds(self, request: Request) -> bool:
         """Whether the effect of ``request`` stays pending until the loop cancels it."""
+        ...
+
+
+class Admission(Protocol):
+    """The run as a service the host runs beside the loop sees it: commit an input, then answer.
+
+    This is how a tool an agent calls during its turn reaches core, as the production host's
+    evaluation bridge does: the input is in the run.log before the call returns.
+    """
+
+    @property
+    def admitted_core(self) -> CoreState:
+        """The committed core, including every input admitted so far."""
+        ...
+
+    def admit(self, event: CoreEvent, *, now_at: float) -> Transition:
+        """Commit core's step of ``event`` before returning; a refusal commits nothing."""
+        ...
+
+
+class Serving(Protocol):
+    """What a world runs inside one host process: its memory, which ends with the host."""
+
+    async def during(self, request: Request, core: CoreState) -> None:
+        """Act while the effect of ``request`` is in flight (an agent's tool calls in its turn).
+
+        The effect has begun and nothing of it is sealed, so a host that dies here leaves the
+        calls made and the effect to run again, as a real turn does.
+        """
+        ...
+
+    async def enacted(self, request: Request, result: ExecutionResult) -> ExecutionResult:
+        """What the host is told of ``request`` once the world answered it: the result as it is."""
+        ...
+
+    async def close(self) -> None:
+        """The host's loop has returned, or been cancelled: release what the service holds."""
+        ...
+
+
+@runtime_checkable
+class ServingWorld(Protocol):
+    """A world that serves each host process, through the run's admission of inputs.
+
+    The world stays the outside world's position (plain data, copied with a crash); what it
+    serves is the host's own and is made again by every host, from that position.
+    """
+
+    def serve(self, admission: Admission, clock: Clock) -> Serving:
+        """The service of a new host: it admits inputs through ``admission``, on ``clock``."""
         ...
