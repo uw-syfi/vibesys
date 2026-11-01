@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {assignE2eSpecs, e2eShard, e2eSpecs, e2eTestMatch} from '../e2e/shard.mts';
+import {assignE2eSpecs, e2eSelection, e2eShard, e2eSpecs, e2eTestMatch} from '../e2e/shard.mts';
 
 const VARIABLE = 'VIBESYS_E2E_SHARD';
 
@@ -91,4 +91,52 @@ test('every repository spec belongs to exactly one app slice for every matrix si
   }
   assert.deepEqual(apps.flatMap(app => e2eTestMatch(app, {})).sort(), expected);
   assert.throws(() => e2eTestMatch('missing-app', {}), /missing-app: no e2e specs/);
+});
+
+const SPECS_VARIABLE = 'VIBESYS_E2E_SPECS';
+const APPS = ['desktop-main', 'desktop-shell', 'ui-gallery'];
+
+test('an unset or empty selection plans every spec', () => {
+  const specs = e2eSpecs();
+  assert.equal(e2eSelection(specs, {}), undefined);
+  assert.equal(e2eSelection(specs, {[SPECS_VARIABLE]: ''}), undefined);
+});
+
+test('a selection names specs that exist, or fails naming the ones that do not', () => {
+  const specs = e2eSpecs();
+  assert.throws(
+    () =>
+      e2eSelection(specs, {
+        [SPECS_VARIABLE]: JSON.stringify([specs[0], 'desktop-shell/e2e/gone.spec.ts']),
+      }),
+    /names no spec: desktop-shell\/e2e\/gone\.spec\.ts/,
+  );
+  assert.throws(() => e2eSelection(specs, {[SPECS_VARIABLE]: '{"a":1}'}), /JSON array/);
+});
+
+test('every job of a selection runs its slice, and together they run each selected spec once', () => {
+  const specs = e2eSpecs();
+  const selection = specs.filter((_, index) => index % 3 === 0);
+  for (let total = 1; total <= 5; total += 1) {
+    const ran = [];
+    for (let current = 1; current <= total; current += 1) {
+      const env = {
+        VIBESYS_E2E_SHARD: `${current}/${total}`,
+        [SPECS_VARIABLE]: JSON.stringify(selection),
+      };
+      for (const app of APPS) ran.push(...e2eTestMatch(app, env));
+    }
+    assert.deepEqual(ran.sort(), selection.map(path => `**/${path}`).sort(), `${total} jobs`);
+  }
+});
+
+test('a selection without a shard runs exactly the selected specs of each app', () => {
+  const specs = e2eSpecs();
+  const selection = specs.filter(path => path.startsWith('desktop-shell/')).slice(0, 4);
+  const env = {[SPECS_VARIABLE]: JSON.stringify(selection)};
+  assert.deepEqual(
+    e2eTestMatch('desktop-shell', env),
+    selection.map(path => `**/${path}`),
+  );
+  assert.deepEqual(e2eTestMatch('desktop-main', env), []);
 });
