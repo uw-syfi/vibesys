@@ -169,7 +169,7 @@ describe('limitsMachine', () => {
       event: (random, live) => {
         const operation = live.operations[0];
         const delay = live.delays[0];
-        const now = NOW + random.int(0, 3 * LIMITS_FLOOR_MS);
+        const now = NOW + random.int(3 * LIMITS_FLOOR_MS);
         const events = [
           {type: 'open', now},
           {type: 'refresh', now},
