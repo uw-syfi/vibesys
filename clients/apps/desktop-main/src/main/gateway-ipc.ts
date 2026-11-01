@@ -13,7 +13,7 @@ import {
   READ_METHOD,
   SshLink,
 } from '@vibesys/connection';
-import {type HostId, type HostKey, hostFromKey} from '@vibesys/hosts';
+import {type HostId, type HostKey, hostFromKey, hostKey} from '@vibesys/hosts';
 import {GATEWAY_CHANNEL, gatewayReply, parseGatewayRequest} from '@vibesys/ipc';
 import {configuredHostCall, configuredRead, HOST_CALL_METHOD} from '@vibesys/runs/intents';
 import type {ScheduleTimeout} from '@vibesys/transport';
@@ -32,8 +32,14 @@ export function createGatewayCalls(
     (host, diagnostic) => log(`${host} gateway call failed: ${diagnostic}`),
   );
   manager.onDisposing(() => calls.close());
+  // This Mac's gateway may have to be started, which takes 0.3 s, and the window needs about as
+  // long to load before its first call: start it now so that the two run side by side.
+  calls.warm(hostKey({kind: 'local'}), LOCAL_GATEWAY_WARM_MS);
   return calls;
 }
+
+/** How long a session started ahead of the first call waits for it: a slow window on a busy Mac. */
+const LOCAL_GATEWAY_WARM_MS = 15_000;
 
 export function installGatewayIpc(
   ipc: PortIpc,

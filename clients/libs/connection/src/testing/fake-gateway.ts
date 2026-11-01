@@ -104,6 +104,8 @@ export class FakeGateway implements GatewayDialer {
   readonly readsReceived: ReadRequest[] = [];
   readonly #reads: FakeRead[] = [];
   readonly #readWaiters: Array<(call: FakeRead) => void> = [];
+  readonly #dialWaiters: Array<() => void> = [];
+  #dialsTaken = 0;
   readonly #waiters: Array<(tail: FakeTail) => void> = [];
 
   constructor() {
@@ -118,6 +120,9 @@ export class FakeGateway implements GatewayDialer {
       const messages: Uint8Array[] = [];
       stream.on('data', (chunk: Buffer) => messages.push(...decoder.push(chunk)));
       stream.on('end', () => {
+        // A client that reset the stream (a session closed while its Hello was in flight) is
+        // owed no answer, as the real server owes none.
+        if (stream.destroyed) return;
         decoder.finish();
         const method = headers[':path'];
         stream.respond(
@@ -279,6 +284,7 @@ export class FakeGateway implements GatewayDialer {
   async dial(signal: AbortSignal, force: boolean): Promise<Duplex> {
     if (signal.aborted) throw new Error('dial cancelled');
     this.forces.push(force);
+    this.#dialWaiters.shift()?.();
     const incoming = new PassThrough();
     const outgoing = new PassThrough();
     const client = Duplex.from({readable: incoming, writable: outgoing});
@@ -332,6 +338,20 @@ export class FakeGateway implements GatewayDialer {
     return subscribe === undefined
       ? new Promise(resolve => this.#subscribeWaiters.push(resolve))
       : Promise.resolve(subscribe);
+  }
+
+  /** Settles when the client has dialed once more than the dials already taken: before any call. */
+  nextDial(): Promise<void> {
+    if (this.forces.length > this.#dialsTaken) {
+      this.#dialsTaken += 1;
+      return Promise.resolve();
+    }
+    return new Promise(resolve =>
+      this.#dialWaiters.push(() => {
+        this.#dialsTaken += 1;
+        resolve();
+      }),
+    );
   }
 
   nextRead(): Promise<FakeRead> {
