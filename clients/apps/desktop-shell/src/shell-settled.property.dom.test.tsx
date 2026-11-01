@@ -31,7 +31,8 @@ afterAll(async () => {
  * Every screen the shell draws from the bridge's replies says when it has read what it shows, as
  * `data-state` on its page, and the rail says it for what decides its mark. A screen added to the
  * shell must be added here (the table is typed over every screen kind but the Run screen, which
- * reads through its own session), and then holds the property below or fails it.
+ * reads through its own session; the run page's tests hold its states), and then holds the
+ * property below or fails it.
  */
 const SCREENS: Readonly<Record<Exclude<Screen['kind'], 'run'>, Screen>> = {
   'new-run': {kind: 'new-run'},

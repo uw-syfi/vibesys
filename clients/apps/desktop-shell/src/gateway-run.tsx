@@ -112,6 +112,7 @@ export function GatewayRun(props: GatewayRunProps): JSX.Element {
         else page.dispatch(action);
       }}
       chat={sessions}
+      loading={page.load.kind === 'loading' || page.load.kind === 'reconnecting'}
       toolbar={intents.controls}
       {...(props.navigation.runs === undefined ? {} : {runs: props.navigation.runs})}
       supplemental={

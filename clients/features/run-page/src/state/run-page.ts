@@ -1305,3 +1305,17 @@ export function runPageInvariants(state: RunPageState): string[] {
   }
   return problems;
 }
+
+/**
+ * Whether the run page still waits for a read it asked for: the ended run's summary, its history,
+ * the trace's history, or the opened step's transcript. What the page shows may change until none
+ * is under way. A read that failed has answered: the page shows its problem.
+ */
+export function runAwaiting(state: RunPageState): boolean {
+  return (
+    state.summary.kind === 'reading' ||
+    state.history.kind === 'reading' ||
+    state.traceHistory.kind === 'reading' ||
+    state.detail.kind === 'reading'
+  );
+}
