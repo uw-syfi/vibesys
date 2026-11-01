@@ -83,6 +83,7 @@ import type {SubscriptionPort} from '@vibesys/subscription';
 import {applyTheme, Card, EmptyState, Page, type ThemeTarget, WindowFrame} from '@vibesys/ui';
 import {type JSX, useCallback, useMemo, useSyncExternalStore} from 'react';
 import {GatewayRun} from './gateway-run.js';
+import {newRunDataRead} from './new-run-read.js';
 import {loadingMachines, runInput} from './shell-runs.js';
 
 /** The clock the shell's screens time their bounds on: the window's own timers, in `main.tsx`. */
@@ -421,9 +422,16 @@ function NewRunRoute(props: {
   const {newRun, newRunCompletion} = props.stores;
   const snapshot = useStore(newRun);
   const completion = useStore(newRunCompletion);
+  const machineSettings = useStore(props.stores.machineSettings);
   return (
     <NewRunScreen
       snapshot={snapshot}
+      shellRead={newRunDataRead(
+        props.sidebar,
+        props.machines,
+        machineSettings,
+        snapshot.context.form.machine,
+      )}
       dispatch={newRun.dispatch}
       machines={machineOptions(hostsOf(props.machines, props.sidebar))}
       completion={{state: completion, dispatch: newRunCompletion.dispatch}}

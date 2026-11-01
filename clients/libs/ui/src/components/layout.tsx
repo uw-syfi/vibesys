@@ -4,6 +4,9 @@ import {Icon} from './icon.js';
 
 /** The page content's max width: `content` (1060), `wide` (1100) or `narrow` (900). */
 export type PageWidth = 'content' | 'wide' | 'narrow' | 'fill';
+
+/** Whether what a page shows has settled (`Page`'s `state`). */
+export type PageState = 'loading' | 'ready';
 export type Align = 'start' | 'center' | 'end' | 'stretch' | 'baseline';
 export type Justify = 'start' | 'center' | 'end' | 'between';
 /**
@@ -80,12 +83,17 @@ export function Page(props: {
   readonly header?: ReactNode;
   /** What stays in view below a body that scrolls: the page's primary action. */
   readonly footer?: ReactNode;
+  /**
+   * Whether what the page shows has settled: `loading` while a reply it asked for is outstanding,
+   * `ready` once none is, as `data-state` on the page. Absent for a page that does not say.
+   */
+  readonly state?: PageState;
   readonly children: ReactNode;
 }): JSX.Element {
   const width = props.width ?? 'content';
   if (props.header === undefined && props.footer === undefined) {
     return (
-      <main className="vs-page">
+      <main className="vs-page" data-state={props.state}>
         <div className="vs-page-content" data-width={width}>
           {props.children}
         </div>
@@ -93,7 +101,12 @@ export function Page(props: {
     );
   }
   return (
-    <main className="vs-page" data-fixed-header="" data-side-action={props.sideAction || undefined}>
+    <main
+      className="vs-page"
+      data-fixed-header=""
+      data-side-action={props.sideAction || undefined}
+      data-state={props.state}
+    >
       <div className="vs-page-content" data-width={width}>
         {props.header === undefined ? null : <div className="vs-page-header">{props.header}</div>}
         <div className="vs-page-scroll">

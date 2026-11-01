@@ -69,6 +69,30 @@ describe('checkMachine', () => {
     );
   });
 
+  test('hands an invariant the work live beside the snapshot', () => {
+    expect(() =>
+      checkMachine({
+        machine: loader(),
+        input: undefined,
+        event,
+        // The state that invokes the load is the one that is loading, whatever the order of events.
+        invariants: (snapshot, live) =>
+          live.operations.includes('load') === snapshot.matches('loading')
+            ? []
+            : ['the load and its state disagree'],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      checkMachine({
+        machine: loader(),
+        input: undefined,
+        event,
+        invariants: (snapshot, live) =>
+          live.operations.length === 0 || snapshot.matches('idle') ? [] : ['loading'],
+      }),
+    ).toThrow(/checkMachine seed \d+, step \d+ \(ask\): loading/);
+  });
+
   test('fails a machine whose own invariant breaks, naming the seed', () => {
     expect(() =>
       checkMachine({

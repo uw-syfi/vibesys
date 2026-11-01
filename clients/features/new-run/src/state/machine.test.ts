@@ -16,7 +16,7 @@ import type {
   PreflightResult,
   RunInputs,
 } from '@vibesys/ipc';
-import {checkMachine} from '@vibesys/machine/testing';
+import {checkMachine, type Live} from '@vibesys/machine/testing';
 import {exampleCatalogue} from '@vibesys/run-fixtures';
 import type {RecentRun} from '@vibesys/runs';
 import type {Seeded} from '@vibesys/store/testing';
@@ -34,6 +34,7 @@ import {
   type FixDone,
   formWithRoles,
   inputsKey,
+  isAwaiting,
   measureOptions,
   missingFeatures,
   type NewRunEvent,
@@ -360,6 +361,25 @@ function expectInputApplied(before: Snapshot, event: NewRunEvent, after: Snapsho
   }
 }
 
+/**
+ * `isAwaiting` says whether the screen still waits on a reply it asked for: it holds while an
+ * operation is live (or one is about to start: the examples' bound, the checks' debounce), and
+ * holds no longer once none is. So the screen is never ready with a reply outstanding, an
+ * operation added without its tag is caught here, and it is never loading with nothing left to
+ * end it.
+ */
+function awaitingProblems(snapshot: Snapshot, live: Live): string[] {
+  if (live.operations.length > 0 && !isAwaiting(snapshot)) {
+    return [`${live.operations.join(', ')} is live but the screen is not awaiting`];
+  }
+  // Waiting on a bound or a debounce is waiting on an operation that has not started yet.
+  const waiting = live.delays.some(delay => /examplesBound|debounce/.test(delay));
+  if (isAwaiting(snapshot) && live.operations.length === 0 && !waiting) {
+    return ['the screen is awaiting with nothing live to end it'];
+  }
+  return [];
+}
+
 /** The run is never measured on a target the machine's Settings data says it does not offer. */
 function unofferedMeasure(snapshot: Snapshot): string[] {
   const {compute, form} = snapshot.context;
@@ -434,9 +454,9 @@ describe('newRunMachine', () => {
             ...live.operations.map(operation => live.error(operation, new Error('refused'))),
             ...live.delays.map(delay => live.fire(delay)),
           ]),
-        invariants: snapshot => {
+        invariants: (snapshot, live) => {
           const {form, harnesses} = snapshot.context;
-          const problems: string[] = [];
+          const problems: string[] = awaitingProblems(snapshot, live);
           if (form.agent !== null && harnesses !== null) {
             if (!vettedModels(harnesses.list, form.agent.provider).includes(form.agent.model)) {
               problems.push(`model ${form.agent.model} is not vetted for ${form.agent.provider}`);

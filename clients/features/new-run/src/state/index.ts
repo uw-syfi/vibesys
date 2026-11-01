@@ -130,6 +130,7 @@ export {
   CHECK_DEBOUNCE_MS,
   EXAMPLES_BOUND_MS,
   type FixDone,
+  isAwaiting,
   type NewRunContext,
   type NewRunEvent,
   type NewRunInput,

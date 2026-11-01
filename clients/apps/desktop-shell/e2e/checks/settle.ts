@@ -3,8 +3,10 @@
  * of it on the way: the page's fonts are loaded, and the page's own text and the boxes of its
  * elements (to a tenth of a pixel, finer than the stability check's half) are the same on `FRAMES`
  * consecutive animation frames in a row. The wait is a state, not
- * a duration: it ends when the state holds, however fast or slow the machine is. `LIMIT` frames is
- * only a guard against a page that never settles, which fails with that said.
+ * a duration: it ends when the state holds, however fast or slow the machine is. A page that says
+ * it is loading (`data-state="loading"`, a reply it asked for still outstanding) is not at rest
+ * whatever its frames show: the reply may change them. `LIMIT` frames is only a guard against a
+ * page that never settles, which fails with that said.
  */
 import type {Page} from '@playwright/test';
 
@@ -30,12 +32,13 @@ export async function settled(page: Page): Promise<void> {
       };
       const frame = (): Promise<void> =>
         new Promise(resolve => requestAnimationFrame(() => resolve()));
+      const loading = (): boolean => document.querySelector('main[data-state="loading"]') !== null;
       let last = '';
       let same = 0;
       for (let seen = 0; seen < limit; seen += 1) {
         await frame();
         const now = signature();
-        same = now === last ? same + 1 : 0;
+        same = now === last && !loading() ? same + 1 : 0;
         last = now;
         if (same >= frames) return true;
       }
