@@ -1,4 +1,8 @@
-"""Find the published skills and check each against the Claude Code skill rules."""
+"""Find the published skills and check each against the Agent Skills specification.
+
+The specification (https://agentskills.io/specification) is what Claude Code, Codex and the
+``skills`` CLI all read, so a skill that passes here installs in each of them.
+"""
 
 from __future__ import annotations
 
@@ -22,6 +26,12 @@ VENDOR_MARKER = "update.sh"
 NAME_PATTERN = re.compile(r"\A[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 MAX_NAME_LENGTH = 64
 MAX_DESCRIPTION_LENGTH = 1024
+MAX_COMPATIBILITY_LENGTH = 500
+SPEC_FIELDS = frozenset(
+    {"name", "description", "license", "allowed-tools", "metadata", "compatibility"}
+)
+"""The frontmatter fields the specification defines; the reference validator rejects others."""
+STRING_FIELDS = ("license", "compatibility", "allowed-tools")
 
 VIBESYS_TOOL_NAMES = ("submit_evaluation", "validate_evaluation_wait", "read_queue_status")
 """Agent tools only a VibeSys run offers; a domain skill that names one fails outside a run.
@@ -100,13 +110,31 @@ def _is_vendored(relative: Path, base: Path) -> bool:
 def check_skills(root: Path) -> list[Finding]:
     """Check every published skill; an empty result means all pass."""
     findings: list[Finding] = []
-    for skill in discover(root):
+    skills = discover(root)
+    findings.extend(_check_unique_names(skills))
+    for skill in skills:
         file = root / PUBLISHED_ROOT / skill.path / SKILL_FILE
         shown = (PUBLISHED_ROOT / skill.path / SKILL_FILE).as_posix()
         text = file.read_text(encoding="utf-8")
         findings.extend(_check_frontmatter(shown, skill, text))
         if skill.path.startswith(f"./{DOMAINS_TREE}/") and not skill.vendored:
             findings.extend(_check_tool_names(root / PUBLISHED_ROOT / skill.path, root))
+    return findings
+
+
+def _check_unique_names(skills: list[PublishedSkill]) -> list[Finding]:
+    """One finding per skill whose name another skill already uses.
+
+    The ``skills`` CLI keeps only the first skill of a name and Codex lists both, so a
+    repeated name is ambiguous in every installer.
+    """
+    first: dict[str, str] = {}
+    findings: list[Finding] = []
+    for skill in skills:
+        earlier = first.setdefault(skill.folder, skill.path)
+        if earlier != skill.path:
+            shown = (PUBLISHED_ROOT / skill.path / SKILL_FILE).as_posix()
+            findings.append(Finding(shown, f"name `{skill.folder}` is also used by `{earlier}`"))
     return findings
 
 
@@ -143,6 +171,39 @@ def _check_frontmatter(shown: str, skill: PublishedSkill, text: str) -> list[Fin
                 f"{MAX_DESCRIPTION_LENGTH}",
             )
         )
+    if not skill.vendored:
+        unknown = sorted(set(frontmatter) - SPEC_FIELDS)
+        if unknown:
+            findings.append(
+                Finding(
+                    shown,
+                    f"unknown frontmatter field(s) {', '.join(f'`{key}`' for key in unknown)}; "
+                    f"the Agent Skills specification allows {', '.join(sorted(SPEC_FIELDS))}",
+                )
+            )
+    findings.extend(_check_optional_fields(shown, frontmatter))
+    return findings
+
+
+def _check_optional_fields(
+    shown: str, frontmatter: dict[str, str | dict[str, str]]
+) -> list[Finding]:
+    findings = [
+        Finding(shown, f"`{key}` must be a string")
+        for key in STRING_FIELDS
+        if key in frontmatter and not isinstance(frontmatter[key], str)
+    ]
+    compatibility = frontmatter.get("compatibility")
+    if isinstance(compatibility, str) and not 1 <= len(compatibility) <= MAX_COMPATIBILITY_LENGTH:
+        findings.append(
+            Finding(
+                shown,
+                f"`compatibility` is {len(compatibility)} characters; it must be 1 to "
+                f"{MAX_COMPATIBILITY_LENGTH}",
+            )
+        )
+    if "metadata" in frontmatter and not isinstance(frontmatter["metadata"], dict):
+        findings.append(Finding(shown, "`metadata` must be a mapping of string keys to strings"))
     return findings
 
 
