@@ -371,6 +371,12 @@ commands = [
   ["go", "test", "-run=^$", "-fuzz=^FuzzGraphSelection$", "-fuzztime=20000x", "-parallel=2", "."],
   ["go", "test", "-run=^$", "-fuzz=^FuzzParseNameStatusZ$", "-fuzztime=20000x", "-parallel=2", "."],
 ]
+# The tests and vet, without the fuzz runs: a change to repoctl or its policy is checked by them,
+# and a policy change can break a test that reads the workflow or the policy.
+gate_commands = [
+  ["go", "test", "./..."],
+  ["go", "vet", "./..."],
+]
 
 [[check_groups]]
 name = "sandbox_tests"
