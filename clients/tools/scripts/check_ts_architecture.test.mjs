@@ -472,6 +472,43 @@ test('a symlinked package costs only its own subtree the git answer', async t =>
   assert.deepEqual(layout.scanRoots, ['linked/coverage', 'linked/src', 'stub/src']);
 });
 
+test('the git answer comes from the tree, not from the repository a git hook names', async t => {
+  // The workspace is a subdirectory of its repository, as `clients/` is, and the repository's
+  // `.gitignore` sits above it.
+  const repository = await scratchDirectory(t, 'vibesys-layout-hook-env-');
+  const root = join(repository, 'clients');
+  await mkdir(root);
+  await writeFile(
+    join(root, 'pnpm-workspace.yaml'),
+    'packages:\n  - "*"\n  - "libs/*"\n  - "features/*"\n  - "apps/*"\n',
+  );
+  await writeFile(join(repository, '.gitignore'), 'coverage/\n');
+  execFileSync('git', ['init', '--quiet'], {cwd: repository});
+  await writePackage(root, 'stub', '@vibesys/stub', ['src', 'coverage']);
+  const expected = workspaceLayout(root).scanRoots;
+  assert.deepEqual(expected, ['stub/src']);
+
+  // A pre-push hook runs with `GIT_DIR` (and `GIT_PREFIX`, `GIT_INDEX_FILE`) set for the
+  // repository being pushed. Inherited, `GIT_DIR` makes git take the working directory, here
+  // `clients/`, as the top of the tree, so the `.gitignore` above it is never read and
+  // `check-ignore` fails or answers wrongly. The real hook run then scanned `node_modules` and
+  // `dist`: the gate passed in a shell and failed in the hook.
+  const hookEnvironment = {GIT_DIR: join(repository, '.git'), GIT_PREFIX: 'clients/'};
+  const before = {};
+  for (const [name, value] of Object.entries(hookEnvironment)) {
+    before[name] = process.env[name];
+    process.env[name] = value;
+  }
+  t.after(() => {
+    for (const [name, value] of Object.entries(before)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+
+  assert.deepEqual(workspaceLayout(root).scanRoots, expected);
+});
+
 test('workspace layout reports a package whose own directory git ignores', async t => {
   const root = await workspaceFixture(t, 'vibesys-layout-ignored-member-');
   // `pnpm -r` runs this member's `build`, `check`, and `test` whatever `.gitignore` says, and this
