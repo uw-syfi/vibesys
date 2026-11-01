@@ -97,14 +97,21 @@ const noop = (): void => undefined;
 
 describe('Screen', () => {
   test('is comfortable unless told otherwise, and says its density to the components inside', async () => {
-    const plain = await mount(<Screen header="Head">body</Screen>);
+    const plain = await mount(
+      <Screen header="Head" state="ready">
+        body
+      </Screen>,
+    );
     expect(one(plain.container, 'main').getAttribute('data-density')).toBe('comfortable');
     const compact = await mount(
-      <Screen header="Head" density="compact">
+      <Screen header="Head" density="compact" state="loading">
         body
       </Screen>,
     );
     expect(one(compact.container, 'main').getAttribute('data-density')).toBe('compact');
+    // As the page's main landmark it says whether it has settled; one inside another does not.
+    expect(one(plain.container, 'main').getAttribute('data-state')).toBe('ready');
+    expect(one(compact.container, 'main').getAttribute('data-state')).toBe('loading');
     expect(compact.container.textContent).toBe('Headbody');
     const inner = await mount(
       <Screen header="Head" landmark="none">
@@ -112,6 +119,7 @@ describe('Screen', () => {
       </Screen>,
     );
     expect(inner.container.querySelector('main')).toBeNull();
+    expect(one(inner.container, '.vs-screen').hasAttribute('data-state')).toBe(false);
     expect(one(inner.container, '.vs-screen').getAttribute('data-density')).toBe('comfortable');
   });
 });

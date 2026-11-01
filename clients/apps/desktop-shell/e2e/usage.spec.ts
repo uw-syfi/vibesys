@@ -17,6 +17,7 @@ import {
 } from './fake-bridge.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {nativeFixtureScript} from './native-fixture.js';
+import {showScreen} from './read.js';
 import {runFixtureFor, seedFor, USAGE_CASES, type UsageCase} from './usage-world.js';
 
 /**
@@ -66,10 +67,7 @@ async function open(page: Page, usage: UsageCase, width: number): Promise<void> 
     nativeFixtureScript(runFixtureFor(usage)),
   ]);
   await page.goto('./shell.html');
-  await page
-    .getByRole('navigation', {name: 'VibeSys'})
-    .getByRole('button', {name: 'Usage'})
-    .click();
+  await showScreen(page, 'Usage');
   await expect(page.getByRole('heading', {name: 'Usage', level: 1})).toBeVisible();
   // The page has read its figures once nothing is loading, or has said why it cannot.
   await idle(page);
@@ -374,16 +372,15 @@ test('Usage asks nothing until it is shown, and again each time it is shown', as
     initScript(installFakeUsageLimits, seed),
   ]);
   await page.goto('./shell.html');
-  const rail = page.getByRole('navigation', {name: 'VibeSys'});
   await expect(page.getByRole('heading', {name: 'Runs', level: 1})).toBeVisible();
   expect((await asked(page)).length).toBe(0);
-  await rail.getByRole('button', {name: 'Usage'}).click();
+  await showScreen(page, 'Usage');
   await expect(hero(page)).toHaveText('$817.00');
   const first = (await asked(page)).length;
   expect(first).toBeGreaterThan(0);
-  await rail.getByRole('button', {name: 'Runs'}).click();
+  await showScreen(page, 'Runs');
   await expect(page.getByRole('heading', {name: 'Runs', level: 1})).toBeVisible();
-  await rail.getByRole('button', {name: 'Usage'}).click();
+  await showScreen(page, 'Usage');
   await expect(hero(page)).toHaveText('$817.00');
   expect((await asked(page)).length).toBeGreaterThan(first);
 });

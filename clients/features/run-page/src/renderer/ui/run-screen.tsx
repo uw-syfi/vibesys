@@ -13,6 +13,7 @@ import {
   Menu,
   type MenuItem,
   markdownToPlain,
+  pageState,
   Row,
   Screen,
   Stack,
@@ -47,6 +48,7 @@ import {
   roleLabel,
   roundsBeforeTrace,
   routeLevel,
+  runAwaiting,
   runGoneWords,
   runHasEnded,
   runNow,
@@ -417,7 +419,11 @@ function pendingRunScreen(
     const blocked = machineBlockWords(state);
     const unplaced = unplacedRun(state);
     return (
-      <Screen density="compact" header={header}>
+      <Screen
+        density="compact"
+        header={header}
+        state={pageState(blocked === null && unplaced === null)}
+      >
         {blocked !== null ? (
           <RunGone words={blocked} />
         ) : unplaced === null ? (
@@ -434,7 +440,7 @@ function pendingRunScreen(
     state.run.core === null
   ) {
     return (
-      <Screen density="compact" header={header}>
+      <Screen density="compact" header={header} state="loading">
         <InitialRunLoading stage="summary" />
       </Screen>
     );
@@ -442,7 +448,7 @@ function pendingRunScreen(
   const gone = runGoneWords(state);
   if (gone !== null) {
     return (
-      <Screen density="compact" header={header}>
+      <Screen density="compact" header={header} state="ready">
         <RunGone words={gone} />
       </Screen>
     );
@@ -450,7 +456,7 @@ function pendingRunScreen(
   const loading = historyLoading(state);
   if (loading !== null) {
     return (
-      <Screen density="compact" header={header}>
+      <Screen density="compact" header={header} state="loading">
         <HistoryLoading progress={loading} />
       </Screen>
     );
@@ -464,7 +470,7 @@ function pendingRunScreen(
     !state.followingLogs
   ) {
     return (
-      <Screen density="compact" header={header}>
+      <Screen density="compact" header={header} state="ready">
         <RunLoadError
           message={problem}
           retry={() => dispatch({type: 'retry-load'})}
@@ -501,6 +507,11 @@ export function RunScreen(props: {
   readonly supplemental?: ReactNode;
   /** Goes up to the Runs dashboard; absent in a run's own window, which has none. */
   readonly runs?: () => void;
+  /**
+   * The app is still reading the run's log, or making its connection again: the page is `loading`
+   * besides while the run's own reads (summary, history, a step's transcript) are under way.
+   */
+  readonly loading?: boolean;
 }): JSX.Element {
   const {chat, ...rest} = props;
   return (
@@ -557,6 +568,7 @@ function RunScreenBody(props: {
   readonly toolbar?: ReactNode;
   readonly supplemental?: ReactNode;
   readonly runs?: () => void;
+  readonly loading?: boolean;
 }): JSX.Element {
   const {state, model, route, zoom, dispatch} = props;
   const names = props.modelNames ?? NO_MODEL_NAMES;
@@ -624,6 +636,7 @@ function RunScreenBody(props: {
   return (
     <Screen
       density="compact"
+      state={pageState(props.loading === true || runAwaiting(state))}
       header={
         <RunHeader
           state={state}

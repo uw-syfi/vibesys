@@ -1,5 +1,6 @@
 import {expect, type Page, test} from '@playwright/test';
-import {card, openMachines, rail, resizeTo, WORLDS} from './machines-page.js';
+import {card, openMachines, resizeTo, WORLDS} from './machines-page.js';
+import {showScreen, sidebar} from './read.js';
 import {hosts} from './subscription-fake.js';
 
 /**
@@ -263,9 +264,9 @@ test('hot is the warn tone, and a reading that is not hot is not', async ({page}
 test('the page watches a host only while it is on screen', async ({page}) => {
   await openMachines(page, 1440, world('a live machine'));
   await expect.poll(() => hosts.observing(page, 'local')).toBe(1);
-  await rail(page).getByRole('button', {name: 'Runs'}).click();
+  await showScreen(page, 'Runs');
   await expect.poll(() => hosts.observing(page, 'local')).toBe(0);
-  await rail(page).getByRole('button', {name: 'Machines'}).click();
+  await showScreen(page, 'Machines');
   await expect.poll(() => hosts.observing(page, 'local')).toBe(1);
   await expect(gauges(page, 'This Mac')).toHaveCount(2);
 });
@@ -277,12 +278,12 @@ test('a host that streams is one status: a check that timed out says nothing of 
   await expect(chips(page, 'This Mac')).toHaveText(['Online']);
   await expect(card(page, 'This Mac').getByRole('button', {name: 'Reconnect'})).toHaveCount(0);
   await expect(gauges(page, 'This Mac')).toHaveText(['CPU34%', 'Memory18.0 / 36.0 GB']);
-  await expect(rail(page).getByRole('button', {name: /^Machines$/})).toBeVisible();
+  await expect(sidebar(page).getByRole('button', {name: /^Machines$/})).toBeVisible();
   // When the host stops delivering, the check's word and its fix are all there is to go on.
   await hosts.set(page, 'local', {kind: 'failed', reason: 'unreachable', retrying: true});
   await expect(chips(page, 'This Mac')).toHaveText(['Unreachable']);
   await expect(card(page, 'This Mac').getByRole('button', {name: 'Reconnect'})).toBeVisible();
-  await expect(rail(page).getByRole('button', {name: /^Machines, Unreachable$/})).toBeVisible();
+  await expect(sidebar(page).getByRole('button', {name: /^Machines, Unreachable$/})).toBeVisible();
 });
 
 /** What the card's summary line shows, in order, and where each cell is. */

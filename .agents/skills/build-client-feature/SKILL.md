@@ -84,10 +84,16 @@ core; it owns sockets, timers and processes.
    parsers. `check_package_graph` fails by rule name (`preload-sandbox`,
    `runtime-reachability`), and `desktop-preloads-import-only-ipc-and-electron`
    covers preloads.
-10. **Build, check, test with Turborepo** (from the clients workspace root): `pnpm check:ts`,
+10. **Say when a screen has read what it shows.** A `Page` takes a required `state`
+    (`loading` while a reply it asked for is outstanding, `ready` once none is) as `data-state`,
+    and the rail says it for its mark; the shell derives each from what the features' state awaits,
+    never a timer. A desktop spec presses the rail through `showScreen` or `pressMark`, which
+    wait for it. The `Page` type refuses a screen without one, and the Grit rule
+    `e2e-rail-through-read` a rail pressed by hand.
+11. **Build, check, test with Turborepo** (from the clients workspace root): `pnpm check:ts`,
     `pnpm check:ts-architecture`, `pnpm check:knip`, `pnpm check:clients`,
     `pnpm test:clients`; `./scripts/check_clients.sh` runs CI's client checks together.
-11. **Before opening a pull request that changes what a user sees, run the
+12. **Before opening a pull request that changes what a user sees, run the
     `verify-desktop-ui` skill**: replay fixtures through the built app, pass the
     screen checks, attach the contact sheet, judge the screens. The Run screen
     lives in `@vibesys/feature-run-page` (`./state`, `./renderer`) and is

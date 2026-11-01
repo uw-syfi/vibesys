@@ -1,7 +1,8 @@
 import {expect, type Page, test} from '@playwright/test';
 import {frameProblems, STACKED_FRAME} from './checks/main-above-fold.js';
 import {MAC_CHROME} from './fake-bridge.js';
-import {open, sidebar} from './world.js';
+import {sidebar} from './read.js';
+import {open} from './world.js';
 
 /**
  * The page is first on screen at every window width: the rail stays beside the page, at every

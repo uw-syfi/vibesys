@@ -6,6 +6,7 @@ import {
   Field,
   Grid,
   Page,
+  type PageState,
   Row,
   SectionLayout,
   SegmentedControl,
@@ -243,6 +244,8 @@ function SettingsNav(props: {
  */
 export function SettingsScreen(props: {
   readonly state: SettingsState;
+  /** Whether the page waits for a reply (the preferences, the machines, the machine shown). */
+  readonly settled: PageState;
   readonly dispatch: (action: SettingsAction) => void;
   readonly back: () => void;
   readonly machinesContent: ReactNode;
@@ -262,6 +265,7 @@ export function SettingsScreen(props: {
   return (
     <Page
       width="wide"
+      state={props.settled}
       header={
         <Row gap="space-2">
           <Button variant="quiet" size="sm" icon="chevron-left" label="Back" press={props.back} />

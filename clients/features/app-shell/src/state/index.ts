@@ -5,6 +5,7 @@
 
 export {projectRunGaps} from './all-runs.js';
 export {type DashboardRow, dashboardRows, type RunLabel, runLabels} from './all-runs-rows.js';
+export {sidebarAwaiting} from './awaiting.js';
 export {machineLoads, type RunsKnown, runsKnown} from './home.js';
 export {fragmentOf, screenOf} from './location.js';
 export {type NoticeKind, type RunNotice, runNotices} from './notices.js';

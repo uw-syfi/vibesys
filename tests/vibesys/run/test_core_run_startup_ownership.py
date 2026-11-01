@@ -23,7 +23,6 @@ from vs_project.api import Project
 from vs_project.api.testing import FakeControlInbox
 from vs_runtime.api import ArtifactStore
 from vs_runtime.api.core import IgnoreCommits, RunTiming
-from vs_runtime.api.core_shell_fixtures import CounterConfig
 from vs_runtime.api.infrastructure import (
     PauseRequest,
     RunControlTransitionKind,
@@ -31,7 +30,7 @@ from vs_runtime.api.infrastructure import (
     create_run_control_channel,
 )
 from vs_runtime.api.step_runner import StepLoopStalledError
-from vs_runtime.api.testing import FakeRunControlEventSink, FakeStepRunner
+from vs_runtime.api.testing import CounterConfig, FakeRunControlEventSink, FakeStepRunner
 from vs_sim.api.testing import SimThreads, VirtualClock, run_virtual
 
 if TYPE_CHECKING:

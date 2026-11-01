@@ -29,7 +29,7 @@ function Entry(props: {readonly name: ComponentName}): JSX.Element {
 /** Every public component in every state, in `theme`, with links to the other themes. */
 export function Gallery(props: {readonly theme: ThemeName}): JSX.Element {
   return (
-    <Page width="wide">
+    <Page width="wide" state="ready">
       <Stack gap="space-3">
         <Text as="h1" variant="title">
           Components in {props.theme}

@@ -8,8 +8,9 @@ import {
 } from './fake-bridge.js';
 import {openFixture} from './fixture-world.js';
 import {addInitScripts, initScript} from './init-scripts.js';
+import {showScreen} from './read.js';
 import {revealNav} from './settings-machine.js';
-import {SEED, sidebar} from './world.js';
+import {SEED} from './world.js';
 
 /**
  * Settings and All runs at the widths users see. Every width is set with `setViewportSize` and
@@ -40,7 +41,7 @@ async function openSettings(
   ]);
   await page.goto('./shell.html');
   expect(await page.evaluate(() => window.innerWidth)).toBe(width);
-  await sidebar(page).getByRole('button', {name: 'Settings'}).click();
+  await showScreen(page, 'Settings');
 }
 
 const openMachines = async (page: Page): Promise<void> => {
@@ -153,7 +154,7 @@ for (const width of WIDTHS) {
     await resize(page, width);
     await openFixture(page, fixtureNamed('weeks-600-ideas'));
     expect(await page.evaluate(() => window.innerWidth)).toBe(width);
-    await sidebar(page).getByRole('button', {name: /^Runs/}).click();
+    await showScreen(page, 'Runs');
     await expect(page.getByRole('heading', {name: 'Runs'})).toBeVisible();
     await expect(page.locator('main .vs-overview-tile')).toHaveCount(1);
   });

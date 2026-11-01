@@ -27,6 +27,7 @@ function railEntries(state: SidebarState, home: 'new-run' | 'runs'): string[] {
   const html = renderToStaticMarkup(
     <AppShell
       state={state}
+      settled="ready"
       dispatch={() => {}}
       badges={{needsYou: 0, machineWarning: null}}
       home={{kind: home}}

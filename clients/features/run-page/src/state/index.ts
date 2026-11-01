@@ -126,6 +126,7 @@ export {
   type RunPageState,
   type RunRecord,
   type RunView,
+  runAwaiting,
   runHasEnded,
   runNow,
   runPageInitial,

@@ -80,3 +80,21 @@ export interface UsageActions {
   readonly save: () => void;
   readonly close: () => void;
 }
+
+/** Whether each phase still waits for a reply (or for the machines to come up), so the page may change. */
+const PHASE_AWAITS: Readonly<Record<UsagePhase, boolean>> = {
+  loading: true,
+  connecting: true,
+  scanning: true,
+  refreshing: true,
+  rating: true,
+  ready: false,
+  saving: true,
+  unsupported: false,
+  failed: false,
+};
+
+/** Whether the page waits for a reply: its figures (any phase but a resting one) or the Limits question. */
+export function usageAwaiting(state: UsageScreenState): boolean {
+  return PHASE_AWAITS[state.phase] || state.limits.checking;
+}

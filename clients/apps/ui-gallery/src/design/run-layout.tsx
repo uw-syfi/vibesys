@@ -1130,7 +1130,11 @@ export function RunLayoutDesign(props: {
   const zoomed = zoom.c !== null || zoom.agent !== null;
   return (
     <AppFrame label="Runs" nav={<Sidebar />}>
-      <Screen density="compact" header={<Header flags={props.flags} compactHero={zoomed} />}>
+      <Screen
+        density="compact"
+        state="ready"
+        header={<Header flags={props.flags} compactHero={zoomed} />}
+      >
         {zoomed ? <Breadcrumb label="Zoom" items={crumbs(zoom, setZoom)} /> : null}
         <Body zoom={zoom} flags={props.flags} go={setZoom} />
       </Screen>

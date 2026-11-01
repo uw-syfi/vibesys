@@ -17,6 +17,7 @@ import {
   installFakeProjectRuns,
 } from './fake-bridge.js';
 import {addInitScripts, initScript} from './init-scripts.js';
+import {whenRead} from './read.js';
 import {SEED} from './world.js';
 
 export const NOW = Date.parse('2026-10-17T12:00:00Z');
@@ -188,6 +189,7 @@ export async function open(page: Page, world: FakeBridgeSeed): Promise<void> {
   ]);
   await page.goto('./shell.html');
   await expect(page.getByRole('heading', {name: 'Runs'})).toBeVisible();
+  await whenRead(page);
 }
 
 const CLIMB = [

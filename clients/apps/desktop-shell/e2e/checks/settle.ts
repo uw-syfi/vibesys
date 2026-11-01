@@ -5,17 +5,22 @@
  * consecutive animation frames in a row. The wait is a state, not
  * a duration: it ends when the state holds, however fast or slow the machine is. A page that says
  * it is loading (`data-state="loading"`, a reply it asked for still outstanding) is not at rest
- * whatever its frames show: the reply may change them. `LIMIT` frames is only a guard against a
- * page that never settles, which fails with that said.
+ * whatever its frames show: the reply may change them. A spec whose subject is the loading state
+ * itself (a slow load, a reconnect, a history held half read) asks for `'as shown'`: the layout at
+ * rest in the state the screen says it is in, loading included. `LIMIT` frames is only a guard
+ * against a page that never settles, which fails with that said.
  */
 import type {Page} from '@playwright/test';
 
 const FRAMES = 6;
 const LIMIT = 1200;
 
-export async function settled(page: Page): Promise<void> {
+/** What `settled` waits for besides stable frames: the page has read what it shows, or not. */
+export type Rest = 'read' | 'as shown';
+
+export async function settled(page: Page, rest: Rest = 'read'): Promise<void> {
   const stable = await page.evaluate(
-    async ([frames, limit]) => {
+    async ([frames, limit, shown]) => {
       await document.fonts.ready;
       const signature = (): string => {
         const parts: string[] = [document.body.innerText.length.toString()];
@@ -32,7 +37,8 @@ export async function settled(page: Page): Promise<void> {
       };
       const frame = (): Promise<void> =>
         new Promise(resolve => requestAnimationFrame(() => resolve()));
-      const loading = (): boolean => document.querySelector('main[data-state="loading"]') !== null;
+      const loading = (): boolean =>
+        !shown && document.querySelector('main[data-state="loading"]') !== null;
       let last = '';
       let same = 0;
       for (let seen = 0; seen < limit; seen += 1) {
@@ -44,7 +50,7 @@ export async function settled(page: Page): Promise<void> {
       }
       return false;
     },
-    [FRAMES, LIMIT] as const,
+    [FRAMES, LIMIT, rest === 'as shown'] as const,
   );
   if (!stable) throw new Error(`the screen did not settle in ${LIMIT} frames`);
 }

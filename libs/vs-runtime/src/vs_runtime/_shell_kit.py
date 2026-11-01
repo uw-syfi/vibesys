@@ -1,18 +1,16 @@
-"""Run a strategy through the production shell with scripted executors.
+"""Scripted executors for a strategy run: the far end of a simulated host.
 
-The loop, the lease, the fence, the clock, the durable commit and the owner-event
-queue are the real `vs_runtime` ones (`CoreRuntime` driven by `drive_core`), so the
-event protocol cannot drift from production. Only the executors at the far end are
-scripted: `ScriptedExecutors` turns what a script says an executor saw (an `Answer`)
-into the `ExecutionResult` a production translator returns for that request, owner
-events included. A script never builds an event, and nothing here decides a
-lifecycle fact: a missing or wrong observation shows up as core rejecting it.
+`ScriptedExecutors` turns what a script says an executor saw (an `Answer`) into the
+`ExecutionResult` a production translator returns for that request, owner events included. A
+script never builds an event, and nothing here decides a lifecycle fact: a missing or wrong
+observation shows up as core rejecting it. `RecordingSearch` keeps what a search decided and
+`Run` is what one host left of a run; the hosts themselves are `vs_dst`'s.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
@@ -26,10 +24,8 @@ from vs_core.api import (
     EnsureSession,
     EnsureWorkspace,
     EventId,
-    FlowState,
     InvocationRef,
     JobObserved,
-    LifecycleCapability,
     MeasurementSubmissionObserved,
     Observation,
     ObservationStatus,
@@ -47,32 +43,18 @@ from vs_core.api import (
 )
 from vs_core.api.testing import (
     Failed,
-    Harness,
     Journal,
     Retryable,
     Running,
     Succeeded,
     Unknown,
-    new_run,
 )
-from vs_project.api import FakeStateStore
-from vs_runtime._fake_core_execution import FakePublicationDelivery
 from vs_runtime._observation_factory import ObservationFacts
 from vs_runtime.api.core import (
-    CoreRunHost,
-    CoreRuntime,
-    CoreRuntimeBindings,
     DispatchCapExceededError,
     ExecutionResult,
     RequestExecutors,
-    RunControlBridge,
-    RunLoopConfig,
-    RunStalledError,
-    drive_core,
-    start_core,
 )
-from vs_runtime.api.infrastructure import RunStopped, create_run_control_channel
-from vs_sim.api.testing import SimThreads, VirtualClock, run_virtual
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -80,7 +62,6 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vs_core.api import (
-        CoreEvent,
         CoreState,
         Decision,
         Event,
@@ -94,19 +75,11 @@ if TYPE_CHECKING:
         SearchDef,
         SearchDriver,
         StrategyState,
-        Transition,
     )
     from vs_core.api.recovery import OwnerEvent
     from vs_core.api.testing import Answer
     from vs_runtime._step_loop import StepLoopStalledError
     from vs_runtime.api.core import ExecutionContext
-
-
-@runtime_checkable
-class Admitting(Protocol):
-    """A script whose executors call into the shell, as the agent evaluation bridge does."""
-
-    admit: Callable[[CoreEvent, float], Transition] | None
 
 
 type Script = Callable[[Request, CoreState], Answer]
@@ -454,175 +427,16 @@ class Run:
     journal: Journal = field(default_factory=Journal)
     # The loop gave up on the run: its dispatch cap was hit (it never went idle) or it
     # stalled (open work and nothing to wake it).
-    halted: DispatchCapExceededError | RunStalledError | StepLoopStalledError | None = None
-    # An operator stop interrupted the run: it stays open for a resume (`RunStopped`).
-    stopped: bool = False
-
-
-LEASE = 1000.0
-MAX_DISPATCHES = 400
-
-
-type TranslatorFactory = Callable[
-    [
-        Script,
-        Callable[[], CoreState],
-        OperationRegistry,
-        Mapping[SchemaRef, type[BaseModel]],
-        Journal,
-    ],
-    ScriptedExecutors,
-]
-"""Builds the executors of a host from the script, a read of core's state, the operation codec,
-the reply types and the journal; a `ScriptedExecutors` subclass is one."""
+    halted: DispatchCapExceededError | StepLoopStalledError | None = None
 
 
 @dataclass(frozen=True)
 class HostOptions:
-    """How the production host around the strategy is arranged for one run."""
+    """How a host of the simulated run is arranged."""
 
-    max_concurrent: int = 1
-    """Requests the loop executes at once."""
-    translator: TranslatorFactory = ScriptedExecutors
-    """The executors' factory; a test whose turns reach a real host service subclasses
-    `ScriptedExecutors` and passes the class."""
-    attach: Callable[[CoreRuntime[Any], VirtualClock], None] | None = None
-    """Hears the shell and clock once they exist."""
-    controlled: bool = False
-    """Give the loop an idle run-control channel, as a product run has, so it looks at the
-    shell every control-poll interval while requests run."""
-    lifecycle: frozenset[LifecycleCapability] = frozenset()
-    """Lifecycle capabilities the run offers its strategy (such as ``suspend``)."""
     resumed: bool = False
-    """The process was started by the operator's explicit resume of the run, so its controls
-    lift the stop the run's record holds (and reopen a run that stop ended)."""
-
-
-@dataclass
-class ScriptedHost:
-    """One production host (shell, loop config, clock) over a store, ready to run."""
-
-    shell: CoreRuntime[FlowState]
-    host: CoreRunHost
-    config: RunLoopConfig
-    clock: VirtualClock
-    decisions: list[Decision]
-    journal: Journal
-
-    def run(self) -> Run:
-        """Start the host over its store (a new run, or the one the store holds) and drive it.
-
-        An exception that is not the loop's own backstop or an operator stop (a host that
-        died, for one) propagates.
-        """
-        start_core(self.host, self.config)
-        halted = None
-        stopped = False
-        try:
-            run_virtual(self.clock, drive_core(self.host, self.config))
-        except RunStopped:
-            stopped = True
-        except (DispatchCapExceededError, RunStalledError) as error:
-            # These are the loop's backstops. Return the run so the liveness check names the
-            # invariant it broke and the requests that led there.
-            halted = error
-        return Run(
-            core=self.shell.record.envelope.core,
-            state=self.shell.record.envelope.strategy,
-            decisions=self.decisions,
-            journal=self.journal,
-            halted=halted,
-            stopped=stopped,
-        )
-
-
-def scripted_host[C](  # noqa: PLR0913  # lint-waiver: LW-994707 [PLR0913]; a restarted host inherits the dead one's store, delivery and start time beside the run's description.
-    # > Bundling the three inherited values into one holder adds a type that only this signature uses, and splitting the function would repeat the shell wiring it exists to share.
-    launch: Launch[C],
-    script: Script,
-    harness: Harness,
-    schemas: Mapping[SchemaRef, type[BaseModel]],
-    host_options: HostOptions | None = None,
-    *,
-    store: FakeStateStore | None = None,
-    delivery: FakePublicationDelivery | None = None,
-    clock_at: float = 1.0,
-) -> ScriptedHost:
-    """A production shell and loop over a search with every executor answered by ``script``.
-
-    ``store`` and ``delivery`` default to new ones; pass the ones a dead host left to start its
-    successor over them. ``clock_at`` is the new host's virtual time.
-    """
-    options = host_options or HostOptions()
-    decisions: list[Decision] = []
-    search = launch.search
-    driver = search.driver(launch.config, harness.registry)
-    recorded = RecordingSearch(driver, decisions)
-    store = FakeStateStore() if store is None else store
-    journal = Journal()
-    shell: CoreRuntime[FlowState] = CoreRuntime(
-        store,
-        recorded,
-        new_run(driver, harness),
-        config=launch.config,
-        bindings=CoreRuntimeBindings(
-            registry=harness.registry,
-            executors=request_executors(
-                options.translator(
-                    script, lambda: shell.record.envelope.core, harness.registry, schemas, journal
-                )
-            ),
-        ),
-    )
-    if isinstance(script, Admitting):
-        script.admit = lambda event, now_at: shell.admit(event, now_at=now_at)
-    clock = VirtualClock(clock_at)
-    if options.attach is not None:
-        options.attach(shell, clock)
-    controls = (
-        RunControlBridge(
-            create_run_control_channel(_IgnoredTransitions(), SimThreads()),
-            _NoSteer(),
-            lifts_standing_stop=options.resumed,
-        )
-        if options.controlled or options.resumed
-        else None
-    )
-    host = CoreRunHost(
-        shell, FakePublicationDelivery() if delivery is None else delivery, clock, controls
-    )
-    config = RunLoopConfig(
-        host_id="scenario",
-        lease_duration=LEASE,
-        max_dispatches=MAX_DISPATCHES,
-        max_concurrent=options.max_concurrent,
-    )
-    return ScriptedHost(shell, host, config, clock, decisions, journal)
-
-
-def drive_shell[C](
-    launch: Launch[C],
-    script: Script,
-    harness: Harness,
-    schemas: Mapping[SchemaRef, type[BaseModel]],
-    host_options: HostOptions | None = None,
-) -> Run:
-    """Run a search to the end of its run on the production shell and loop."""
-    return scripted_host(launch, script, harness, schemas, host_options).run()
-
-
-class _IgnoredTransitions:
-    """A run-control event sink for a channel nobody records."""
-
-    def __call__(self, transition: object) -> None:
-        del transition
-
-
-class _NoSteer:
-    """A steer store for a channel that never carries steer text."""
-
-    def put(self, ref: object, text: str) -> None:
-        raise AssertionError((ref, text))
+    """The process was started by the operator's explicit resume of the run, so it lifts the pause
+    or the stop the run's record holds."""
 
 
 def request_executors(executor: ScriptedExecutors) -> RequestExecutors:

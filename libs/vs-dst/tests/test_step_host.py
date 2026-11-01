@@ -26,6 +26,7 @@ from vs_core.api import (
     OperationRegistry,
     ResourceId,
     RunEnvelope,
+    RunStatus,
     Value,
     Within,
     WorkspaceMode,
@@ -34,6 +35,7 @@ from vs_core.api import (
 from vs_core.api.recovery import CHECKPOINT_GROWTH
 from vs_core.api.testing import Harness, Succeeded, sample_limits, sample_retries
 from vs_core.flows import search
+from vs_core.testing.liveness import End, final_state
 from vs_dst.api import (
     Action,
     Interruption,
@@ -52,6 +54,7 @@ from ._tiny import FACTS, PATIENCE, TinyWorld
 if TYPE_CHECKING:
     from vs_core.api import CoreState, Request
     from vs_core.api.testing import Answer
+    from vs_dst.api import Interrupted
     from vs_proto.api import Record
 
 STEP_LOOP = StepLoopHosting()
@@ -382,19 +385,109 @@ def test_a_resume_after_a_kill_in_the_middle_of_a_drain_is_taken_the_first_time(
     assert interrupted.every_step_finished_once()
 
 
-def test_a_run_is_paused_and_then_killed_and_not_the_other_way_round() -> None:
+@pytest.mark.parametrize("action", [Action.PAUSE, Action.STOP])
+def test_a_run_is_paused_or_stopped_and_then_killed_and_not_the_other_way_round(
+    action: Action,
+) -> None:
     normal = simulate(TinyWorld(2), STEP_LOOP)
-    pause = normal.interruptions(Action.PAUSE)[0]
+    first = normal.interruptions(action)[0]
     kill = normal.interruptions(Action.KILL)[0]
 
-    with pytest.raises(ValueError, match="paused at a pause and killed at a kill"):
-        normal.interrupt_while_draining(kill, pause)
+    with pytest.raises(ValueError, match="paused or stopped at a pause or a stop and killed"):
+        normal.interrupt_while_draining(kill, first)
 
 
-def test_a_resumed_host_is_stopped_again_by_a_pause_and_not_by_a_kill() -> None:
+@pytest.mark.parametrize("action", [Action.PAUSE, Action.STOP])
+def test_a_resumed_host_is_stopped_again_by_a_pause_or_a_stop_and_not_by_a_kill(
+    action: Action,
+) -> None:
     normal = simulate(TinyWorld(2), STEP_LOOP)
-    first, *_ = normal.interruptions(Action.PAUSE)
+    first, *_ = normal.interruptions(action)
     kill = normal.interruptions(Action.KILL)[0]
 
-    with pytest.raises(ValueError, match="stopped again by a pause"):
+    with pytest.raises(ValueError, match="stopped again by a pause or a stop"):
         normal.interrupt(first, then=kill)
+
+
+@pytest.fixture(scope="module")
+def stoppable() -> SimulatedRun:
+    """A run of the checkpointing search: a search whose flows are resumable can be stopped and
+    resumed (the tiny search's root flow is not, so a stop ends it for good)."""
+    return simulate(RestartableWorld(4, changed=False), STEP_LOOP)
+
+
+def _delivered(interrupted: Interrupted) -> bool:
+    """Whether the operator's stop reached a host: one before the host opened its log has nowhere to go."""
+    return interrupted.cores[0] is not None
+
+
+def _held_open(core: CoreState | None) -> list[object]:
+    """What a run left that a terminal run must not: liveness violations and attempts not closed."""
+    assert core is not None
+    return [
+        *final_state(core, End.TERMINAL),
+        *[a.attempt_id.root for a in core.attempts.attempts if a.phase is not TERMINAL],
+    ]
+
+
+def test_a_stop_ends_the_run_with_nothing_left_open_and_a_resume_reopens_it(
+    stoppable: SimulatedRun,
+) -> None:
+    """The host that receives the operator's stop winds down and ends the run; the operator's
+    Resume lifts the stop, and the run goes on to an end of its own, every step finishing once."""
+    points = stoppable.interruptions(Action.STOP)
+    stopped = 0
+
+    for point in points:
+        interrupted = stoppable.interrupt(point)
+        assert interrupted.never_stuck(), (point, interrupted.detail)
+        assert interrupted.every_step_finished_once(), point
+        if not _delivered(interrupted):
+            continue
+        stopped += 1
+        first = interrupted.cores[0]
+        assert first is not None
+        assert first.run.status is RunStatus.TERMINAL, point
+        assert first.run.result is not None, point
+        assert _held_open(first) == [], point
+        assert _held_open(interrupted.core) == [], point
+        assert interrupted.result is not None, point
+        assert interrupted.result.outcome != "cancelled", (point, interrupted.detail)
+        assert interrupted.resumes == 1, (point, interrupted.history)
+    assert stopped > 0, "no stop reached a host"
+
+
+@settings(max_examples=examples(pr=8, nightly=60), deadline=None)
+@given(data=st.data())
+def test_a_run_stopped_and_killed_while_it_winds_down_ends_by_itself_after_the_resume(
+    stoppable: SimulatedRun, data: st.DataObject
+) -> None:
+    """The host dies while it drains after the operator's stop, anywhere: the resume lifts the
+    stop the log holds, and the run ends with nothing open and every step finished once."""
+    stop = data.draw(st.sampled_from(stoppable.interruptions(Action.STOP)))
+    kill = data.draw(st.sampled_from(stoppable.interruptions(Action.KILL)))
+    interrupted = stoppable.interrupt_while_draining(stop, kill)
+
+    assert interrupted.never_stuck(), (stop, kill, interrupted.detail)
+    assert interrupted.every_step_finished_once(), (stop, kill)
+    assert _held_open(interrupted.core) == [], (stop, kill)
+    assert interrupted.result is not None
+    assert interrupted.result.outcome != "cancelled", (stop, kill, interrupted.detail)
+
+
+@settings(max_examples=examples(pr=8, nightly=60), deadline=None)
+@given(data=st.data())
+def test_a_run_stopped_again_after_a_resume_is_resumable_again(
+    stoppable: SimulatedRun, data: st.DataObject
+) -> None:
+    """The host that reopened a stopped run is stopped in turn, anywhere: the run ends by itself
+    after one more Resume, and no stop ends it for good."""
+    first = data.draw(st.sampled_from(stoppable.interruptions(Action.STOP)))
+    second = data.draw(st.sampled_from(stoppable.interruptions(Action.STOP)))
+    interrupted = stoppable.interrupt(first, then=second)
+
+    assert interrupted.never_stuck(), (first, second, interrupted.detail)
+    assert interrupted.every_step_finished_once(), (first, second)
+    assert _held_open(interrupted.core) == [], (first, second)
+    assert interrupted.result is not None
+    assert interrupted.result.outcome != "cancelled", (first, second, interrupted.detail)

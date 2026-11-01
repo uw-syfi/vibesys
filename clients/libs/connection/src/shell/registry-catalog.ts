@@ -32,7 +32,12 @@ import {
   ReasoningEffort,
   RunResults,
 } from '@vibesys/proto';
-import {type RegistryReadPorts, registryTransport, requireCheckout} from './registry-reads.js';
+import {
+  READ_REQUEST_ID,
+  type RegistryReadPorts,
+  registryTransport,
+  requireCheckout,
+} from './registry-reads.js';
 import type {RegistryRunInputs} from './registry-start.js';
 
 export interface RegistryRunCatalog {
@@ -63,7 +68,7 @@ export function registryRunCatalog(ports: RegistryReadPorts): RegistryRunCatalog
     async logins(host, signal) {
       const reply = await callListAgentLogins(
         await transport(host, signal),
-        acceptListAgentLogins({requestId: 'catalog'}),
+        acceptListAgentLogins({requestId: READ_REQUEST_ID}),
         signal,
       );
       return (projectMessage(ListAgentLoginsResponseSchema, reply) as {logins: AgentLogin[]})
@@ -72,7 +77,7 @@ export function registryRunCatalog(ports: RegistryReadPorts): RegistryRunCatalog
     async tasks(host, project, signal) {
       const reply = await callListTasks(
         await transport(host, signal),
-        acceptListTasks({requestId: 'catalog', project}),
+        acceptListTasks({requestId: READ_REQUEST_ID, project}),
         signal,
       );
       if (reply.tasks === undefined) throw new Error('task response is missing its catalog');
@@ -81,7 +86,7 @@ export function registryRunCatalog(ports: RegistryReadPorts): RegistryRunCatalog
     async harnesses(host, signal) {
       const reply = await callListHarnesses(
         await transport(host, signal),
-        acceptListHarnesses({requestId: 'catalog', withGenerations: true}),
+        acceptListHarnesses({requestId: READ_REQUEST_ID, withGenerations: true}),
         signal,
       );
       return (
@@ -93,7 +98,7 @@ export function registryRunCatalog(ports: RegistryReadPorts): RegistryRunCatalog
     async examples(host, signal) {
       const reply = await callListExamples(
         await transport(host, signal),
-        acceptListExamples({requestId: 'catalog', withCatalogue: true}),
+        acceptListExamples({requestId: READ_REQUEST_ID, withCatalogue: true}),
         signal,
       );
       return (projectMessage(ListExamplesResponseSchema, reply) as {listing: ExampleList}).listing;
@@ -101,7 +106,7 @@ export function registryRunCatalog(ports: RegistryReadPorts): RegistryRunCatalog
     async taskGoal(host, project, task, signal) {
       const reply = await callGetTaskGoal(
         await transport(host, signal),
-        acceptGetTaskGoal({requestId: 'catalog', project, task}),
+        acceptGetTaskGoal({requestId: READ_REQUEST_ID, project, task}),
         signal,
       );
       return (projectMessage(GetTaskGoalResponseSchema, reply) as {goal: TaskGoal}).goal;
@@ -135,7 +140,7 @@ function preflightRequest(
   const options = inputs.options;
   const measure = inputs.measure_on;
   return {
-    requestId: 'catalog',
+    requestId: READ_REQUEST_ID,
     project: inputs.project,
     task: inputs.task,
     args: [...inputs.args],

@@ -92,14 +92,15 @@ export {
   type RateText,
   textOfRate,
 } from './price-drafts.js';
-export type {
-  DialogState,
-  HostRow,
-  LimitsScreenState,
-  UsageActions,
-  UsagePhase,
-  UsageScreenState,
-  UsageStatusWord,
+export {
+  type DialogState,
+  type HostRow,
+  type LimitsScreenState,
+  type UsageActions,
+  type UsagePhase,
+  type UsageScreenState,
+  type UsageStatusWord,
+  usageAwaiting,
 } from './screen.js';
 export {
   type AgentRow,

@@ -20,6 +20,7 @@ export {
   machineCounts,
   machineStatus,
   machinesAwaited,
+  machinesAwaiting,
   machinesInvariants,
   machinesStep,
   selectedMachine,

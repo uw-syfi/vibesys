@@ -1,9 +1,10 @@
 """Interrupt a run, resume it, and say whether it ever got stuck.
 
-A run is interrupted by killing its host or by the operator pausing it (`Interruption`). What
-follows is what an operator does: Resume, a new host over what the old one left, again if that
-host does not end the run, up to `MAX_RESUMES` times. Whatever the last host left is the
-outcome of the interruption.
+A run is interrupted by killing its host, by the operator pausing it or by the operator stopping
+it (`Interruption`). What follows is what an operator does: Resume, a new host over what the old
+one left, again if that host does not end the run or ended it only because the operator stopped
+it, up to `MAX_RESUMES` times. A Resume lifts the pause or the stop the log holds. Whatever the
+last host left is the outcome of the interruption.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from vs_core.api import (
     RecoveryPhase,
     RequestPhase,
     RunControlEvent,
+    StopMode,
 )
 from vs_dst._host import has_ended
 from vs_dst._interruptions import Action, Interruption, Moment
@@ -102,6 +104,9 @@ class Interrupted:
     """The world as the hosts of the interrupted run left it: what it handed out."""
     log_records: tuple[Record, ...] = ()
     """The run.log the hosts left, in order."""
+    cores: tuple[CoreState | None, ...] = ()
+    """Core's state as each host left it, in order: the hosts of ``history``, one that died
+    having none."""
 
     @property
     def result(self) -> RunResultProposal | None:
@@ -129,12 +134,17 @@ class Interrupted:
         return all(count == 1 for count in self.effects.finished.values())
 
 
-class Pauser:
-    """Pauses the run the way an operator does, when the run reaches one moment."""
+class Sender:
+    """Sends the operator's pause or stop to the run, when the run reaches one moment."""
 
     def __init__(self, point: Interruption) -> None:
+        if point.action is Action.KILL:
+            message = "a kill is no control the operator sends to a live host"
+            raise ValueError(message)
         self._point = point
         self._host: RunningHost | None = None
+        self.stopped = False
+        """Whether the operator's stop has reached the host."""
 
     def watch(self, store: Store, host: RunningHost) -> None:
         """Start hearing ``store``'s commits, for the run ``host`` drives."""
@@ -142,42 +152,55 @@ class Pauser:
         store.watcher = self
 
     def reached(self, moment: Moment, index: int) -> None:
-        """Submit the operator's pause when the run is at the moment the interruption names."""
+        """Submit the operator's control when the run is at the moment the interruption names."""
         if self._host is None or (moment, index) != (self._point.moment, self._point.index):
             return
-        # A pause is its own control: a second one, on a resumed host, must not be taken for the
+        # Each is its own control: a second one, on a resumed host, must not be taken for the
         # first, which the log still holds.
-        name = f"operator-pause-{self._point.moment.name.lower()}-{self._point.index}"
-        control = ControlInput(
-            control_id=ControlId(root=name),
-            action="pause",
-            owner=PauseOwner.OPERATOR,
-        )
+        name = f"operator-{self._point.action.value}-{self._point.moment.name.lower()}-{self._point.index}"
+        if self._point.action is Action.STOP:
+            self.stopped = True
+            control = ControlInput(
+                control_id=ControlId(root=name), action="stop", mode=StopMode.DRAIN
+            )
+        else:
+            control = ControlInput(
+                control_id=ControlId(root=name), action="pause", owner=PauseOwner.OPERATOR
+            )
         self._host.submit(RunControlEvent(control=control, now_at=self._host.clock.now()))
 
 
 @dataclass(frozen=True)
 class Operator:
-    """What the operator does after a stop: resume the run, and stop it again if asked."""
+    """What the operator does after an interruption: resume the run, and stop it again if asked."""
 
     plan: HostPlan
     expected: Expectation
     again: Interruption | None = None
-    """A pause for the first host that resumes the run. Its index counts over the whole run, so
-    it only takes hold if that host gets there."""
+    """A pause or a stop for the first host that resumes the run. Its index counts over the whole
+    run, so it only takes hold if that host gets there."""
 
-    def resume(self, outside: OutsideWorld, clock_at: float, hosts: list[Hosted]) -> list[Hosted]:
+    def resume(
+        self,
+        outside: OutsideWorld,
+        clock_at: float,
+        hosts: list[Hosted],
+        *,
+        stopped: bool = False,
+    ) -> list[Hosted]:
         """Resume until a host ends the run or the operator has resumed `MAX_RESUMES` times.
 
         ``hosts`` holds the host that ended before the first resume: none when it was killed.
-        Returns it with the hosts the resumes started.
+        ``stopped`` says the last of them ended the run because the operator stopped it, which a
+        Resume reopens. Returns ``hosts`` with the hosts the resumes started.
         """
         resumes = 0
-        while not hosts or (resumes < MAX_RESUMES and not hosts[-1].finished):
+        while not hosts or (resumes < MAX_RESUMES and (stopped or not hosts[-1].finished)):
             # A host that dies before the run's first commit leaves nothing to resume.
             resuming = self.plan.resuming(resumed=outside.store.observe() is not None)
-            stop = Pauser(self.again) if self.again is not None and resumes == 0 else None
-            hosts.append(resuming.run(outside, clock_at, stop, patience=self.expected.patience))
+            sender = Sender(self.again) if self.again is not None and resumes == 0 else None
+            hosts.append(resuming.run(outside, clock_at, sender, patience=self.expected.patience))
+            stopped = sender is not None and sender.stopped
             clock_at = hosts[-1].ended_at + 1
             resumes += 1
         return hosts
@@ -194,16 +217,21 @@ def killed(
     return _interrupted(point, operator.expected, outside, hosts)
 
 
-def paused(
+def operated(
     operator: Operator,
     pristine: OutsideWorld,
     clock_at: float,
     point: Interruption,
 ) -> Interrupted:
-    """Run the world from its start, pause it at ``point``, and resume it after the host exits."""
+    """Run the world from its start, pause or stop it at ``point``, and resume it after the host.
+
+    The host is alive and must be there to wind down; it exits when the run parks, or ends the run
+    when the operator stopped it.
+    """
     outside = pristine.copy()
-    first = operator.plan.run(outside, clock_at, Pauser(point), patience=operator.expected.patience)
-    hosts = operator.resume(outside, first.ended_at + 1, [first])
+    sender = Sender(point)
+    first = operator.plan.run(outside, clock_at, sender, patience=operator.expected.patience)
+    hosts = operator.resume(outside, first.ended_at + 1, [first], stopped=sender.stopped)
     return _interrupted(point, operator.expected, outside, hosts)
 
 
@@ -211,22 +239,23 @@ def killed_while_draining(
     operator: Operator,
     pristine: OutsideWorld,
     clock_at: float,
-    pause: Interruption,
+    first: Interruption,
     kill: Interruption,
 ) -> Interrupted:
-    """Pause the run at ``pause``, kill the host that is winding down at ``kill``, and resume it.
+    """Pause or stop the run at ``first``, kill the host that is winding down at ``kill``, resume it.
 
-    A host that winds down and exits before it reaches ``kill`` is an ordinary pause.
+    A host that winds down before it reaches ``kill`` was only paused or stopped.
     """
     outside = pristine.copy()
     snapshots = Snapshots(outside, frozenset({kill}))
-    first = operator.plan.run(
-        outside, clock_at, Together(Pauser(pause), snapshots), patience=operator.expected.patience
+    sender = Sender(first)
+    host = operator.plan.run(
+        outside, clock_at, Together(sender, snapshots), patience=operator.expected.patience
     )
     snapshot = snapshots.by_point.get(kill)
     if snapshot is None:
-        hosts = operator.resume(outside, first.ended_at + 1, [first])
-        return _interrupted(pause, operator.expected, outside, hosts)
+        hosts = operator.resume(outside, host.ended_at + 1, [host], stopped=sender.stopped)
+        return _interrupted(first, operator.expected, outside, hosts)
     left = snapshot.outside
     restart = operator.plan.restart_at(clock_at, left.store)
     return _interrupted(kill, operator.expected, left, operator.resume(left, restart, []))
@@ -255,7 +284,7 @@ def _interrupted(
     point: Interruption, expected: Expectation, outside: OutsideWorld, hosts: list[Hosted]
 ) -> Interrupted:
     outcome, detail = _classify(hosts[-1], expected.result)
-    resumes = len(hosts) - (point.action is Action.PAUSE)
+    resumes = len(hosts) - (point.action is not Action.KILL)
     history = tuple(_short(host.how, _HOW_LIMIT) for host in hosts)
     store = outside.store
     records = tuple(store.records) if isinstance(store, RecordingRecords) else ()
@@ -270,6 +299,7 @@ def _interrupted(
         expected.result,
         outside.world,
         records,
+        tuple(host.core for host in hosts),
     )
 
 

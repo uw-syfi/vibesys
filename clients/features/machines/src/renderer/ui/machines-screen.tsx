@@ -14,6 +14,7 @@ import {
   Grid,
   KeyValue,
   Page,
+  type PageState,
   PathInput,
   Row,
   Split,
@@ -340,14 +341,24 @@ function MachineList(props: {
 }
 
 /** The Machines screen over its store's `state`; `newRun` opens New run on a machine. */
-export function MachinesScreen(props: {
-  readonly state: MachinesState;
-  readonly dispatch: Dispatch;
-  readonly newRun: (host: HostKey) => void;
-  readonly back: () => void;
-  /** Settings supplies the surrounding section navigation and page header. */
-  readonly embedded?: boolean;
-}): JSX.Element {
+export function MachinesScreen(
+  props: {
+    readonly state: MachinesState;
+    readonly dispatch: Dispatch;
+    readonly newRun: (host: HostKey) => void;
+    readonly back: () => void;
+  } & (
+    | {
+        /** Settings supplies the surrounding section navigation and page header, and says when it has settled. */
+        readonly embedded: true;
+      }
+    | {
+        readonly embedded?: false;
+        /** Whether the page waits for a reply; it is the page's `data-state`. */
+        readonly settled: PageState;
+      }
+  ),
+): JSX.Element {
   const {state, dispatch, newRun} = props;
   const machine = selectedMachine(state);
   const header = (
@@ -395,5 +406,9 @@ export function MachinesScreen(props: {
         {content}
       </Stack>
     );
-  return <Page header={header}>{content}</Page>;
+  return (
+    <Page state={props.settled} header={header}>
+      {content}
+    </Page>
+  );
 }

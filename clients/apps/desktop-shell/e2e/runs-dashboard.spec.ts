@@ -11,6 +11,7 @@ import {
   type RunCase,
 } from './dashboard-world.js';
 import {installGateway, wire} from './fake-gateway.js';
+import {pressMark, showScreen, sidebar} from './read.js';
 import type {FakeHostWindow} from './world.js';
 
 /**
@@ -156,12 +157,12 @@ test('the rail counts the runs that need the user, and Runs and the mark both go
   page,
 }) => {
   await open(page, dashboardWorld(MANY_RUNS));
-  const rail = page.getByRole('navigation', {name: 'VibeSys'});
+  const rail = sidebar(page);
 
   await expect(rail.getByRole('button', {name: /^Runs/})).toHaveAccessibleName(/2 need you/);
-  await rail.getByRole('button', {name: 'New', exact: true}).click();
+  await showScreen(page, 'New');
   await expect(page.getByRole('heading', {name: 'Runs'})).toHaveCount(0);
-  await rail.getByRole('button', {name: 'VibeSys'}).click();
+  await pressMark(page);
   await expect(page.getByRole('heading', {name: 'Runs'})).toBeVisible();
   await expect(rail.getByRole('button', {name: /^Runs/})).toHaveAttribute('aria-current', 'page');
 });
@@ -175,7 +176,7 @@ test('a tile opens its run, and the rail keeps Runs as where it came from', asyn
     .click();
 
   await expect(page.getByRole('heading', {name: 'Runs'})).toHaveCount(0);
-  const rail = page.getByRole('navigation', {name: 'VibeSys'});
+  const rail = sidebar(page);
   await expect(rail.getByRole('button', {name: /^Runs/})).toHaveAttribute('aria-current', 'page');
 });
 
@@ -274,7 +275,7 @@ test('a host that sends no chart data still shows each run as a tile without a c
 test('Machines carries a warning dot while a machine cannot be reached', async ({page}) => {
   const world = dashboardWorld(ONE_RUN as readonly RunCase[]);
   await open(page, {...world, reports: {'ssh:host-b': {kind: 'unavailable', detail: 'down'}}});
-  const rail = page.getByRole('navigation', {name: 'VibeSys'});
+  const rail = sidebar(page);
 
   await expect(rail.getByRole('button', {name: /^Machines/})).toHaveAccessibleName(/Unreachable/);
 });

@@ -40,7 +40,7 @@ def test_a_restart_after_any_crash_finishes_the_same_run():
   `before commit 17`) and the one setting that chooses which of them a suite tries
   (`CrashPointPolicy`, `SAMPLED`, `EVERY_POINT`, `crash_point_policy()`, which follows `vs_sim`'s `--depth`).
 
-- `Interruption` (an `Action`, `KILL` or `PAUSE`, at a `Moment`: `BEFORE_COMMIT`,
+- `Interruption` (an `Action`, `KILL`, `PAUSE` or `STOP`, at a `Moment`: `BEFORE_COMMIT`,
   `AFTER_COMMIT` or `IN_FLIGHT`; it prints as `kill in flight 5`), `Interrupted` and `Outcome`.
   See "Interruptions and the never-stuck property" below.
 
@@ -82,9 +82,12 @@ pull requests, every one under `--depth=nightly`):
 | `kill before commit`, `kill after commit` | the host dies just before or after commit k reaches the store |
 | `kill in flight` | the host dies as the k-th effect begins: it has begun and sealed nothing |
 | `pause before commit`, `pause after commit`, `pause in flight` | the operator pauses the run at that moment; the host winds down and exits |
+| `stop before commit`, `stop after commit`, `stop in flight` | the operator stops the run (a drain) at that moment; the host winds down and ends the run |
 
 `interrupt(point)` then does what an operator does: Resume, a new host over what the old one left,
-again if that host does not end the run, up to `MAX_RESUMES` times. A resumed host is waited on
+again if that host does not end the run, or ended it only because the operator stopped it, up to
+`MAX_RESUMES` times. A Resume lifts the pause or the stop the log holds, when core takes it (a
+run whose ending has begun takes none, and the host finishes the ending). A resumed host is waited on
 for `max(300, 2 x the uninterrupted run's duration)` virtual seconds, so a run that waits on
 something that is not coming is given up on instead of waited for. It returns an `Interrupted`
 (never raises for a failure of the run itself) whose `outcome` is:
@@ -94,15 +97,21 @@ something that is not coming is given up on instead of waited for. It returns an
 - `STUCK`: it did not end after the resumes, or ended with recovery blocked;
 - `ERRORED`: the host that was meant to carry on raised.
 
-A kill starts from a copy of the outside world at its point, like `rerun_with_crash`. A pause
-cannot: the host that is paused is alive and winds down, so the world runs again from its start
-with the pause planted. `Interrupted.never_stuck()` is the property: the run continued or ended
+A kill starts from a copy of the outside world at its point, like `rerun_with_crash`. A pause or
+a stop cannot: the host that is paused or stopped is alive and winds down, so the world runs again
+from its start with the operator's control planted. A stop ends the run, so a run resumed after
+one ends as the uninterrupted run did only when the search's adoption is one a Resume takes back
+(a verified adoption; a failed one stays failed): assert `never_stuck()` and that nothing is left
+open, not `matches_uninterrupted()`, for a stop. `cores` is core's state as each host left it,
+so the host that was stopped can be held to its own end (`interrupt(point, then=...)` stops the
+host that resumed the run again, with a pause or a stop; `interrupt_while_draining` kills the host
+that winds down after either). `Interrupted.never_stuck()` is the property: the run continued or ended
 with a named reason, and never ended stuck or errored. `every_step_finished_once()` says no
 request's effect sealed a result more than once, and `reruns` counts the effects that began
 again for a request whose effect had begun before (`no_effect_ran_twice()` is `reruns == 0`).
 `history` says how each host after the interruption ended, and `detail` the error, reason, or
 the request kinds the run is stuck on.
 
-The effects ledger answers an inspection of an effect that began and sealed nothing as the
-production receipt store does: unknown, with the proof that the request may be sent again
-(`ReissueProof.BEGUN_UNSEALED`).
+The effects ledger seals the result of each effect that finishes, keyed by the step's tag, as a
+keyed write or a job's ledger entry is: `clear` adopts a sealed result, and an effect that began
+and sealed nothing runs again.

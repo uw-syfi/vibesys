@@ -5,8 +5,17 @@ import {Icon} from './icon.js';
 /** The page content's max width: `content` (1060), `wide` (1100) or `narrow` (900). */
 export type PageWidth = 'content' | 'wide' | 'narrow' | 'fill';
 
-/** Whether what a page shows has settled (`Page`'s `state`). */
+/**
+ * Whether what a screen shows has settled: `loading` while a reply it asked for is outstanding (the
+ * reply may change what it shows), `ready` once none is. A screen carries it as `data-state` on its
+ * page, so a test or a script waits for a state, not for a duration.
+ */
 export type PageState = 'loading' | 'ready';
+
+/** `loading` while `awaiting`, else `ready`: the one place the two words are chosen. */
+export function pageState(awaiting: boolean): PageState {
+  return awaiting ? 'loading' : 'ready';
+}
 export type Align = 'start' | 'center' | 'end' | 'stretch' | 'baseline';
 export type Justify = 'start' | 'center' | 'end' | 'between';
 /**
@@ -96,10 +105,10 @@ export function Page(props: {
   /** What stays in view below a body that scrolls: the page's primary action. */
   readonly footer?: ReactNode;
   /**
-   * Whether what the page shows has settled: `loading` while a reply it asked for is outstanding,
-   * `ready` once none is, as `data-state` on the page. Absent for a page that does not say.
+   * Whether what the page shows has settled, as `data-state` on the page. Required: a page that
+   * reads nothing says `ready`, so no page is silent about it.
    */
-  readonly state?: PageState;
+  readonly state: PageState;
   readonly children: ReactNode;
 }): JSX.Element {
   const width = props.width ?? 'content';

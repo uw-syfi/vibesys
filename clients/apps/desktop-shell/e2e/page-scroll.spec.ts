@@ -1,8 +1,9 @@
 import {mkdirSync, writeFileSync} from 'node:fs';
 import {expect, type Page, test} from '@playwright/test';
 import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
+import {showScreen} from './read.js';
 import {revealNav} from './settings-machine.js';
-import {open, SEED, sidebar} from './world.js';
+import {open, SEED} from './world.js';
 
 /**
  * A top-level page's header never scrolls away. On Machines and Settings the window
@@ -89,10 +90,8 @@ async function atBottom(page: Page): Promise<Geometry> {
 }
 
 async function goTo(page: Page, where: Where): Promise<void> {
-  if (where === 'Settings') {
-    await sidebar(page).getByRole('button', {name: where}).click();
-  } else {
-    await sidebar(page).getByRole('button', {name: 'Settings'}).click();
+  await showScreen(page, 'Settings');
+  if (where === 'Machines') {
     await revealNav(page);
     await page
       .getByRole('navigation', {name: 'Settings sections'})
