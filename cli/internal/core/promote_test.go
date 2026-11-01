@@ -54,7 +54,7 @@ func TestAClearWinIsPromoted(t *testing.T) {
 	if !ok {
 		t.Fatalf("%+v, want a promotion", got)
 	}
-	if got.Commit != candidateCommit || got.PreviousHead != "" || got.ResultJob != "cand" || !got.At.Equal(promoteAt) || !got.Environment.Equal(hostEnv) {
+	if got.Commit != candidateCommit || got.PreviousHead != baseCommit || got.ResultJob != "cand" || !got.At.Equal(promoteAt) || !got.Environment.Equal(hostEnv) {
 		t.Fatalf("%+v", got)
 	}
 	if got.Verdict.Kind != core.Better || got.Verdict.CandidateSamples != 5 || got.Verdict.BaseSamples != 5 {
@@ -276,11 +276,7 @@ func TestDecisionMatchesTheRulesOverRandomScenarios(t *testing.T) {
 			if !ok {
 				t.Fatalf("%+v, want a promotion", got)
 			}
-			wantPrevious := core.Commit("")
-			if len(req.Promotions) > 0 {
-				wantPrevious = baseCommit
-			}
-			if p.Commit != candidateCommit || p.PreviousHead != wantPrevious || p.ResultJob != "cand" {
+			if p.Commit != candidateCommit || p.PreviousHead != baseCommit || p.ResultJob != "cand" {
 				t.Fatalf("%+v", p)
 			}
 			continue

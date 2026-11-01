@@ -69,15 +69,18 @@ var rules = map[string][]string{
 	"internal/app": {
 		"internal/changed", "internal/clock", "internal/core", "internal/environment", "internal/lifecycle",
 		"internal/store", "internal/store/memstore", "internal/supervisor",
+		"internal/gitrepo",
 	},
 	"internal/app/filestores": {"internal/app", "internal/store", "internal/store/filestore"},
 	"internal/daemon": {
 		"gen/", "internal/app", "internal/clock", "internal/core", "internal/environment",
 		"internal/runtimedir", "internal/supervisor", "internal/wire",
+		"internal/gitrepo",
 	},
 	"internal/daemon/daemontest": {
 		"internal/app", "internal/clock", "internal/core", "internal/daemon", "internal/environment/fakeenv",
 		"internal/runtimedir", "internal/supervisor",
+		"internal/gitrepo",
 	},
 	"internal/client": {"gen/", "internal/clock", "internal/runtimedir", "internal/wire"},
 
@@ -86,6 +89,7 @@ var rules = map[string][]string{
 		"internal/app", "internal/app/filestores", "internal/client", "internal/clock", "internal/core",
 		"internal/daemon", "internal/environment", "internal/runtimedir", "internal/store/filestore",
 		"internal/supervisor", "internal/supervisor/host",
+		"internal/gitrepo",
 	},
 
 	// Replacing the running binary with a newer release.
@@ -105,9 +109,9 @@ var testRules = map[string][]string{
 	"internal/supervisor":      {"internal/environment/fakeenv", "internal/supervisor/suptest"},
 	"internal/supervisor/rpc":  {"internal/environment/fakeenv", "internal/supervisor/suptest"},
 	"internal/supervisor/host": {"internal/environment/fakeenv", "internal/supervisor/suptest"},
-	"internal/app":             {"internal/environment/fakeenv"},
+	"internal/app":             {"internal/environment/fakeenv", "internal/store/storetest"},
 	"internal/app/filestores":  {"internal/core"},
-	"internal/daemon":          {"internal/environment/fakeenv"},
+	"internal/daemon":          {"internal/environment/fakeenv", "internal/store/storetest"},
 	"internal/client": {
 		"internal/app", "internal/core", "internal/daemon", "internal/daemon/daemontest",
 		"internal/environment/fakeenv", "internal/supervisor",
@@ -116,6 +120,7 @@ var testRules = map[string][]string{
 		"internal/app", "internal/app/filestores", "internal/clock", "internal/core", "internal/daemon",
 		"internal/daemon/daemontest", "internal/environment/fakeenv", "internal/runtimedir",
 		"internal/store/filestore", "internal/supervisor/host",
+		"internal/store", "internal/store/storetest",
 	},
 }
 

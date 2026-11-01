@@ -6,15 +6,20 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
+	"github.com/uw-syfi/vibesys/cli/internal/gitrepo"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
 )
 
-// Config is what an App is made of. Clock, Stores, Environments and Supervisors are required.
+// Config is what an App is made of. Clock, Stores, Environments and Supervisors are required, and Branches for the commands that
+// read or move the result branch.
 type Config struct {
 	Clock        clock.Clock
 	Stores       Stores
 	Environments environment.Environments
 	Supervisors  supervisor.Supervisors
+	// Branches reads and moves the result branch. Without it, compare against the branch, promote
+	// and result fail as unavailable.
+	Branches gitrepo.Branches
 
 	// DefaultEnvironment is the kind a job runs in when its submission leaves the environment
 	// unspecified. Until tasks declare their own, it is the host.

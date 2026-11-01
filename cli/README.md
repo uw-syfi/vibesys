@@ -170,6 +170,10 @@ default to the environment variables shown:
 | `note <job> <text>` | Add a note to a job in any state. |
 | `jobs [--commit rev] [--state s] [--note-contains text]` | List the task's jobs, oldest first. |
 | `logs <job> [--follow]` | Print a job's output, and with `--follow` keep printing until it ends. |
+| `show <commit>` | Every result saved for a commit, checks and measurements, oldest first. |
+| `compare <commit> [--against rev]` | `better`, `worse`, `within_noise` or `inconclusive`, against the result branch head unless `--against` names a commit. Refuses to mix environments. |
+| `promote <commit>` | Fast-forward the result branch to a commit that is `better` than its head, or print every reason it was refused. A refusal exits `1` and is printed on stdout. |
+| `result` | The head and a final number measured after the head last moved, or why there is none (exit `1`). |
 | `daemon status\|stop\|restart` | Report on, stop, or restart the daemon. `daemon install` is not available yet. |
 
 Exit codes: `0` ok (for `wait`, every job it waited on succeeded), `1` failed (a job did not
@@ -177,8 +181,11 @@ succeed, or the call was refused), `2` invalid input, `3` a `wait` timed out.
 
 With `--json`, a command prints the contract's messages in protobuf's canonical JSON form with the
 original field names, one compact message per line: the response for `submit`, `cancel`, `note`,
-`jobs`, `logs` and `daemon status`; one `WatchResponse` per job for `wait` (the contract has no
+`jobs`, `logs`, `show`, `compare`, `promote`, `result` and `daemon status`; one `WatchResponse` per job for `wait` (the contract has no
 message for it); and, on stderr, a `Failure` for any error.
+
+Text output rounds numbers to four significant digits. `--json` and the verdicts behind it carry
+the exact values.
 
 A signal ends the command and nothing more. A job the command submitted or waits on keeps running.
 
@@ -223,10 +230,27 @@ the store records the job running, and only then does the supervisor start the c
 
 The shipped binary has no usable environment yet. It runs with `environment.None` and no checkouts,
 so a command job queues, runs in order, and ends not-attempted with a reason saying so. The host and
-docker environments land later, and with them `submit check`, `submit measure`, the result cache,
-`show`, `compare` and `promote`. Until then `submit check` and `submit measure` are refused locally
-as unavailable, the calls that need results answer with an unavailable refusal that names the call,
-and the lifecycle commands above work end to end against a `fakeenv` in tests.
+docker environments land later, and with them `submit check`, `submit measure` and the result
+cache. Until then `submit check` and `submit measure` are refused locally as unavailable, and the
+lifecycle commands above work end to end against a `fakeenv` in tests. `show`, `compare`, `promote`
+and `result` read what the stores hold, so they work now on results saved by any means.
+
+## The result branch
+
+Each task has a result branch, `vibesys/result/<task>`, in the repository the command runs in. Create
+it at the commit the run starts from (`git branch vibesys/result/<task> <commit>`); a command that
+needs it and does not find it says so. It must not be checked out. Only `promote` moves it, and only
+forward: the new head must contain the old one, which a commit that does not is told as a
+`conflict` failure.
+
+`promote` decides from the saved measurements alone (internal/core), in this order: it is refused
+with every reason that applies (`unmeasured`, `check_missing`, `worse`, `within_noise`,
+`inconclusive`, `stale`, `environment_mismatch`), or it records the promotion in the store and
+then moves the branch. A crash between the two leaves a recorded promotion the branch has not
+caught up with; the daemon completes the move the next time it looks at the branch (any of
+`compare`, `promote` or `result`, or on start), so the branch is never ahead of the record. The
+branch is read as the head to beat, so a branch moved by hand is the head the next commands use, and
+`result` reports no number for a head the last promotion did not set.
 
 ## Contract
 

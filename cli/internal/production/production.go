@@ -15,6 +15,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/daemon"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
+	"github.com/uw-syfi/vibesys/cli/internal/gitrepo"
 	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
 	"github.com/uw-syfi/vibesys/cli/internal/store/filestore"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
@@ -78,6 +79,7 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 				return exec.Command(p.Executable, "supervisor", "serve", "--run-dir", runDir)
 			}, p.Version),
 			Environments: environment.None{},
+			Branches:     gitrepo.System{},
 		},
 	})
 }
