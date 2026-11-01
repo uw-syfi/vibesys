@@ -19,7 +19,7 @@ import asyncio
 import hashlib
 import json
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -42,10 +42,12 @@ from vs_core.api import (
     ContinuationId,
     ContinuationPhase,
     DispatchTurn,
+    EnsureWorkspace,
     EvidenceKind,
     ExecuteRegisteredOperation,
     InvocationId,
     InvocationRef,
+    Reading,
     RenderedArtifacts,
     ResourceId,
     ResumeSessionTurn,
@@ -54,6 +56,9 @@ from vs_core.api import (
     RunStatus,
     Scope,
     SubmitMeasurement,
+    TaskObjective,
+    TaskStage,
+    TaskTerms,
 )
 from vs_core.api.testing import Harness, Running, Succeeded, sample_limits, sample_retries
 from vs_dst.api import RunSetup
@@ -105,6 +110,30 @@ FACTS = RunFacts(
 )
 SCOPE = Scope(owner=ATTEMPT.attempt_id, generation=0)
 """The scope of the skeleton's one attempt, which every turn of its implementer works in."""
+BASE_INPUT = "input:base"
+"""What the evaluation reads at the revision every attempt's workspace opens on."""
+BASE_READING = 100.0
+CANDIDATE_READING = 125.0
+"""What a measured world's base and any candidate read: a candidate is 25% over its base."""
+BASE_STALENESS_S = 60.0
+"""Seconds after which the base's sample no longer counts on the run clock, in a measured world."""
+TASK = TaskTerms(
+    recipe=ArtifactRef(artifact_id=ArtifactId(root="recipe"), digest=DIGEST),
+    stages=(
+        TaskStage(stage_id="accuracy", execution_seconds=10.0),
+        TaskStage(stage_id="benchmark", execution_seconds=10.0),
+    ),
+    measured=("accuracy", "benchmark"),
+    queue_allowance=880.0,
+    accuracy_stage="accuracy",
+    benchmark_stage="benchmark",
+    accuracy_gated=(EvidenceKind.CORRECTNESS, EvidenceKind.BENCHMARK),
+    operation_seconds=10.0,
+    objectives=(TaskObjective(name="throughput", direction="max"),),
+    base_staleness=BASE_STALENESS_S,
+)
+MEASURED_FACTS = FACTS.model_copy(update={"task": TASK})
+"""The run's facts when its measurements carry readings: the task compares a candidate with its base."""
 REPLY = TypeAdapter(SocketSuccess | SocketFailure)
 
 type Step = (
@@ -133,6 +162,8 @@ class Turn:
     """The run stops taking suspensions between the agent's wait and the end of its turn."""
     foreign_wait: str | None = None
     """The turn ends waiting on this job, which the run does not own, in place of what it waited on."""
+    thinks_s: float = 0.0
+    """How long the agent works before its first call, on the run clock."""
 
 
 def _commit(label: str) -> str:
@@ -255,14 +286,20 @@ class AgentToolWorld:
         *,
         total: int,
         finished_in_submit_round: bool = False,
+        measured: bool = False,
     ) -> None:
-        """Script a run of ``total`` implementer turns, with the owed record below ``directory``."""
+        """Script a run of ``total`` implementer turns, with the owed record below ``directory``.
+
+        With ``measured`` every measurement ends as it is accepted with a headline reading (the
+        base's and each candidate's), and the task states how to compare them, so a reply to a
+        call the run already measured carries the framework's comparison.
+        """
         selected = SkeletonConfig(turns=total)
         self.setup = RunSetup(
             new_launch=lambda: Launch(skeleton, selected),
             harness=Harness(
                 registry=OPERATIONS.registry(),
-                facts=FACTS,
+                facts=MEASURED_FACTS if measured else FACTS,
                 lifecycle=frozenset({"suspend"}),
                 limits=sample_limits(max_turns=4 * total + 4, request_retries=sample_retries(2)),
                 deadline_at=1000.0,
@@ -272,6 +309,7 @@ class AgentToolWorld:
         )
         self.turns = turns
         self.finished_in_submit_round = finished_in_submit_round
+        self.measured = measured
         self._evaluator = Executors(submit=_submitted)
         self.owed = _Directory(directory / "owed")
         self.owed.path.mkdir(parents=True)
@@ -291,6 +329,8 @@ class AgentToolWorld:
         """How many turns ended with a continuation the bridge yielded."""
         self.read: list[tuple[str, str]] = []
         """(candidate content, handle) for every handle reply the agent read."""
+        self.comparisons: list[tuple[str, dict[str, object] | None]] = []
+        """(candidate content, the comparison the reply carried) for every handle reply the agent read."""
         self.budget_refused: list[str] = []
         """The candidate content of every submit that core's budget refused."""
         self.after_run: list[str] = []
@@ -319,6 +359,10 @@ class AgentToolWorld:
                 artifact_id=ArtifactId(root=f"prompt:{request.operation_id.root}"), digest="prompt"
             )
             return Succeeded(outcome=RenderedArtifacts(status="succeeded", prompts=(prompt,)))
+        if self.measured:
+            measured = self._measured(request, core)
+            if measured is not None:
+                return measured
         if (
             self.finished_in_submit_round
             and isinstance(request, SubmitMeasurement)
@@ -326,6 +370,28 @@ class AgentToolWorld:
         ):
             return self._evaluator.finished_agent_evaluation(request)
         return self._evaluator(request, core)
+
+    def _measured(self, request: Request, core: CoreState) -> Answer | None:
+        """What a measured world's evaluator answers: the base input, and finished readings."""
+        if isinstance(request, EnsureWorkspace):
+            opened = self._evaluator(request, core)
+            assert isinstance(opened, Succeeded)
+            return replace(opened, measured_input=BASE_INPUT)
+        if not isinstance(request, SubmitMeasurement):
+            return None
+        finished = self._evaluator.finished_agent_evaluation(request)
+        assert isinstance(finished, Succeeded)
+        value = BASE_READING if request.plan.purpose == "baseline" else CANDIDATE_READING
+        reading = Reading(metric="throughput", value=value, direction="max", unit="tokens/s")
+        return replace(
+            finished,
+            evidence=tuple(
+                ref.model_copy(update={"reading": reading})
+                if ref.kind is EvidenceKind.BENCHMARK
+                else ref
+                for ref in finished.evidence
+            ),
+        )
 
 
 def _foreign_wait(request: DispatchTurn, job: str) -> Continuation:
@@ -460,6 +526,8 @@ class _Host:
             world.edits.append(_commit(f"edit:{len(world.edits)}"))
         token = self._token()
         world.waiting = False
+        if turn.thinks_s:
+            await self._clock.sleep(turn.thinks_s)
         if turn.nested:
             world.nested = ("vendor/lib/.git",)
             await self._call(token, ("submit",), count=False)
@@ -578,12 +646,19 @@ class _Host:
             ), "the charge must be durable before the agent reads its handle"
             world.handles.append(handle)
             world.read.append((world.edits[-1], handle))
+            comparison = result.get("comparison")
+            world.comparisons.append(
+                (world.edits[-1], comparison if isinstance(comparison, dict) else None)
+            )
         elif count:
             world.waits_accepted += 1
         return True
 
 
 __all__ = [
+    "BASE_READING",
+    "BASE_STALENESS_S",
+    "CANDIDATE_READING",
     "FACTS",
     "ROLE",
     "SCOPE",
