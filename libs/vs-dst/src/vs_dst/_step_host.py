@@ -29,13 +29,12 @@ from vs_core.api import (
     ObservationStatus,
     ResumeSessionTurn,
     RunControlEvent,
-    RunStatus,
     SubmitMeasurement,
     Until,
     control_refusal,
     requested_stop_mode,
 )
-from vs_core.api.recovery import Cancelled, Finished, RunRest, at_rest
+from vs_core.api.recovery import Cancelled, Finished, RunRest
 from vs_core.api.testing import Journal, new_run
 from vs_dst._effects import RecoverableExecutors
 from vs_dst._host import FIRST_HOST_STARTS_AT, Hosted, WrongStoreError
@@ -52,11 +51,14 @@ from vs_runtime.api.step_runner import (
     CoreInputs,
     DispatchCapExceededError,
     RunLogStepLog,
+    RunOpening,
     SearchRun,
     StallBoard,
     StepLoopStalledError,
     StepLoopTiming,
+    resume_paused,
     run_step_loop,
+    start_run,
 )
 from vs_runtime.api.testing import RecordingSearch, Run
 from vs_sim.api.testing import VirtualClock, loop_threads, run_virtual
@@ -81,6 +83,12 @@ TIMING = StepLoopTiming(
     cancel_grace_s=1.0, clear_timeout_s=5.0, clear_backoff_s=1.0, clear_backoff_max_s=8.0
 )
 """The loop's bounds on a runner, in virtual seconds."""
+
+HOST_CACHE_EVERY = 8
+"""Core records a host appends between two writes of the run's fold cache.
+
+Small, so that a kill lands after a write and before the next record in a world of a few
+hundred records (the product's is `vs_runtime.api.step_runner.CACHE_EVERY`, 1024)."""
 
 QUOTA_POLL_S = 1.0
 """How often a turn the quota holds in its call looks whether the run is still held, in virtual seconds."""
@@ -202,21 +210,29 @@ class _Host:
         confirmed = ConfirmedLog(self._records, loop_threads())
         epoch = (self._records.records[-1].epoch if self._records.records else 0) + 1
         confirmed.append(EpochStarted(epoch=epoch), epoch=epoch, at=Timestamp(), clock=clock.now())
-        run_search = SearchRun.restored(confirmed.records(), search, launch.config, registry)
-        self._search = run_search
-        log = RunLogStepLog.open(
+        started = start_run(
             confirmed,
+            confirmed.records(),
+            RunOpening(
+                driver=search,
+                config=launch.config,
+                registry=registry,
+                seed=new_run(driver, setup.harness),
+                clock=clock,
+                cache=self._records.cache,
+                cache_every=HOST_CACHE_EVERY,
+            ),
             epoch=epoch,
-            seed=new_run(driver, setup.harness),
-            registry=registry,
-            clock=clock,
-            search=run_search,
         )
+        log, run_search = started.log, started.search
+        self._records.starts.append(log.cache_start)
+        self._search = run_search
         inputs = CoreInputs(log, run_search, clock)
         self._inputs = inputs
         self.state = log.state
         handle.inputs = inputs
-        self._resume(log, epoch, clock)
+        resume_paused(log, now_at=clock.now(), epoch=epoch, resumed=started.resumed)
+        self._lift_standing_stop(log, epoch, clock, resumed=started.resumed)
         serving = (
             world.serve(_Admitting(inputs), clock) if isinstance(world, ServingWorld) else None
         )
@@ -246,28 +262,28 @@ class _Host:
                 await handle.close()
         return self._result(inputs, halted=halted)
 
-    def _resume(self, log: RunLogStepLog, epoch: int, clock: VirtualClock) -> None:
-        """The operator resumes a run that stood paused, or was stopped, when its last process ended.
+    @staticmethod
+    def _lift_standing_stop(
+        log: RunLogStepLog, epoch: int, clock: VirtualClock, *, resumed: bool
+    ) -> None:
+        """The operator's Resume lifts the stop the log holds, as a launched process's bridge does.
 
-        The first Resume is always taken: a refusal fails the host, so a run that needs a second
-        Resume is an error and not a quiet retry. A stop the log holds is lifted only when core
-        takes the Resume (a run whose ending has begun may not), as the control bridge of a
-        launched process does.
+        A run that stood paused is resumed by `resume_paused`, which takes the stop with it.
+        A stop alone is lifted only when core takes the Resume (a run whose ending has begun may
+        not), as the control bridge of a launched process does on its first poll.
         """
         state = log.state
-        paused = at_rest(state) is RunRest.PARKED or state.run.status in (
-            RunStatus.PAUSED,
-            RunStatus.DRAINING,
-        )
         control = ControlInput(
-            control_id=ControlId(root=f"operator-resume:{epoch}"), action="resume", when="now"
+            control_id=ControlId(root=f"operator-resume-stop:{epoch}"),
+            action="resume",
+            when="now",
         )
-        stopped = (
-            requested_stop_mode(state.run) is not None and control_refusal(state, control) is None
-        )
-        if not (self._options.resumed and (paused or stopped)):
-            return
-        log.input(RunControlEvent(control=control, now_at=clock.now()))
+        if (
+            resumed
+            and requested_stop_mode(state.run) is not None
+            and control_refusal(state, control) is None
+        ):
+            log.input(RunControlEvent(control=control, now_at=clock.now()))
 
     @staticmethod
     async def _until(

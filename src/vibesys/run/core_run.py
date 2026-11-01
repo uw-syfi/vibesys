@@ -11,7 +11,6 @@ returns. It chooses no policy: the strategy, limits and deadline were fixed by c
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -24,16 +23,12 @@ from vibesys.run.stall_report import StallReporter
 from vibesys.run.store_migration import migrate_saved_run
 from vs_core.api import (
     AttemptPhase,
-    ControlId,
-    ControlInput,
-    ControlRefusedError,
     EndReason,
     RetainedCandidate,
-    RunControlEvent,
     RunResultProposal,
 )
 from vs_core.api import RunStatus as CoreRunStatus
-from vs_core.api.recovery import RunRest, at_rest, starts_run
+from vs_core.api.recovery import RunRest
 from vs_project.api import Project
 from vs_runlog.api import FileFoldCache
 from vs_runtime.api import RunStatus
@@ -47,10 +42,12 @@ from vs_runtime.api.infrastructure import RunStopped, core_workspace_holds
 from vs_runtime.api.step_runner import (
     CoreInputs,
     RunLogStepLog,
-    SearchRun,
+    RunOpening,
     StallBoard,
     StepLoopTiming,
+    resume_paused,
     run_step_loop,
+    start_run,
 )
 
 if TYPE_CHECKING:
@@ -142,20 +139,25 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
         stamp=clock.stamp,
     )
     records = log_file.records()
-    resumed = any(starts_run(record) for record in records)
     start_clock_from(clock, records, epoch)
-    search = SearchRun.restored(records, driver, services.config, services.registry)
-    log = RunLogStepLog.open(
+    started = start_run(
         log_file,
+        records,
+        RunOpening(
+            driver=driver,
+            config=services.config,
+            registry=services.registry,
+            seed=services.state,
+            clock=clock,
+            stamp=clock.stamp,
+            cache=FileFoldCache(
+                Project.state_cache_path_for(services.project.root, services.run_id)
+            ),
+            announcer=integration.events,
+        ),
         epoch=epoch,
-        seed=services.state,
-        registry=services.registry,
-        clock=clock,
-        search=search,
-        stamp=clock.stamp,
-        cache=FileFoldCache(Project.state_cache_path_for(services.project.root, services.run_id)),
-        announcer=integration.events,
     )
+    log, search, resumed = started.log, started.search, started.resumed
     controls = OperatorControls(
         RunControlBridge(
             integration.control,
@@ -197,7 +199,8 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
         if bridge is not None:
             bridge.attach(observed, clock)
             await bridge.serve()
-        _resume_operator(log, controls, clock.now(), epoch=epoch, resumed=resumed)
+        resume_paused(log, now_at=clock.now(), epoch=epoch, resumed=resumed)
+        controls.bring_in(log, clock.now())
         rest = await run_step_loop(
             observed,
             services.runner(clock, epoch),
@@ -219,29 +222,6 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
         await _leave(bridge, controls, inputs, log.state, run_error)
         _record_ending(log.state, integration)
     return _run_end(rest, log.state, integration.environment_failure.reason)
-
-
-def _resume_operator(
-    log: RunLogStepLog, controls: OperatorControls, now_at: float, *, epoch: int, resumed: bool
-) -> None:
-    """Bring in what the operator asked before the run is looked at: the relaunch is a resume.
-
-    A process that opens a run that already started is the operator's resume of it, as the
-    control bridge assumes. A paused or parked run does not move until it is resumed, and the
-    loop returns at once for a run at rest, so the resume is in the log before the loop starts.
-    """
-    state = log.state
-    paused = at_rest(state) is RunRest.PARKED or state.run.status in (
-        CoreRunStatus.PAUSED,
-        CoreRunStatus.DRAINING,
-    )
-    if resumed and paused:
-        resume = ControlInput(
-            control_id=ControlId(root=f"operator-resume:{epoch}"), action="resume", when="now"
-        )
-        with contextlib.suppress(ControlRefusedError):
-            log.input(RunControlEvent(control=resume, now_at=now_at))
-    controls.bring_in(log, now_at)
 
 
 async def _follow_core(host: CoreHost, log: RunLogStepLog) -> None:

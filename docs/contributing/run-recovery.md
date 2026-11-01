@@ -63,7 +63,7 @@ once. An **open step** is a step with no result. An **epoch** is one process lif
 | Part | Status |
 |---|---|
 | Core inputs as log records: `CoreInput`, `StepStarted`, `StepFinished`, `AttemptInterrupted`, and the confirmed append in `vs_runlog` | in use (#3475 item 4a) |
-| `RunStarted` (the seed of a fold) and `StrategyAdvanced` (one advance of the search) records, `RunLogStepLog`, `CoreInputs`, `StepRouter`, one appender and one lock for the run's records | in use; also run in simulation by `vs_dst.StepLoopHosting` (PR 6a-2) |
+| `RunStarted` (the seed of a fold) and `StrategyAdvanced` (one advance of the search) records, `RunLogStepLog`, `CoreInputs`, `StepRouter`, one appender and one lock for the run's records; `start_run` (the log opened over `state.pb`, the search restored) and `resume_paused` (the relaunch's Resume of a paused or parked run), the start `drive_core_run` and the simulation both take | in use; also run in simulation by `vs_dst.StepLoopHosting` (PR 6a-2), over a `state.pb` kept in memory that a kill leaves behind (`libs/vs-dst/tests/test_host_start.py`) |
 | `CoreSnapshot` record, the seed of a migrated run, and `vibesys.run.store_migration`, the one-time migration of a run's `store.json` into it | in use (PR 6a-3m); the migration is deleted seven days after the cutover ships |
 | `fold(log)` and `decide(state, now) -> actions` in `vs_core` | in use (#3475 item 4a) |
 | Parked, draining, ended and resumed runs in the fold: the `RunEnded` record, `open_step`, the park advance (#3475, core gaps) | in use |
