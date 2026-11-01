@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from hypothesis import assume, given, settings
+from hypothesis import assume, example, given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic._host import TERMS
 from tests.vibesys.orchestration.dynamic._values import (
@@ -286,13 +286,14 @@ def test_a_profile_workstream_settles_ineligible_and_discarded_whatever_it_measu
 
 
 @settings(max_examples=examples(pr=8, nightly=100))
+@example(accuracy=True, retention="candidate", kind=WorkKind.MERGE, with_proof=True)
 @given(
     accuracy=st.none() | st.booleans(),
     retention=st.sampled_from(["discard", "wip", "candidate"]),
     kind=st.sampled_from(WorkKind),
     with_proof=st.booleans(),
 )
-def test_a_parent_is_offered_only_for_a_retained_accuracy_proven_candidate_of_an_implement(
+def test_a_parent_is_offered_only_for_a_retained_accuracy_proven_candidate_of_an_implement_or_a_merge(
     *, accuracy: bool | None, retention: str, kind: WorkKind, with_proof: bool
 ) -> None:
     finished = finished_workstream(
@@ -300,7 +301,10 @@ def test_a_parent_is_offered_only_for_a_retained_accuracy_proven_candidate_of_an
     )
     parent = snapshot_of(finished)
     offered = (
-        retention == "candidate" and kind is WorkKind.IMPLEMENT and accuracy is True and with_proof
+        retention == "candidate"
+        and kind is not WorkKind.PROFILE
+        and accuracy is True
+        and with_proof
     )
     assert (parent is not None) == offered
     if parent is not None:
