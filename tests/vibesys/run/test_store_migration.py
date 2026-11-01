@@ -49,9 +49,8 @@ from vs_project.api.testing import run_execution_record
 from vs_proto.api import EpochStarted, Oneof, Record, Timestamp
 from vs_runlog.api import ConfirmedLog
 from vs_runtime.api.core import CoreResumeError, RuntimeRecord
-from vs_runtime.api.core_shell_fixtures import CounterConfig, counter
 from vs_runtime.api.step_runner import fold_log, restore_log, snapshot_message
-from vs_runtime.api.testing import FakeRunRecords
+from vs_runtime.api.testing import CounterConfig, FakeRunRecords, counter
 from vs_sim.api.testing import SimThreads, examples
 
 if TYPE_CHECKING:

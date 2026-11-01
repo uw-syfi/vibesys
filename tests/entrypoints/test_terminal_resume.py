@@ -26,7 +26,7 @@ from vs_core.api.testing import FakeView
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord, StoredEnvelope
 from vs_project.api.testing import run_execution_record
 from vs_runtime.api.core import RuntimeRecord
-from vs_runtime.api.core_shell_fixtures import CounterConfig, counter
+from vs_runtime.api.testing import CounterConfig, counter
 
 if TYPE_CHECKING:
     from pathlib import Path

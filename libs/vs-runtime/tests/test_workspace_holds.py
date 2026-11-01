@@ -40,8 +40,8 @@ from vs_core.api import (
 from vs_runtime.api.core import (
     revision_ref,
 )
-from vs_runtime.api.core_shell_fixtures import counter
 from vs_runtime.api.infrastructure import WorkspaceHolds, core_workspace_holds
+from vs_runtime.api.testing import counter
 
 _ATTEMPTS = ("a0", "a1", "a2")
 

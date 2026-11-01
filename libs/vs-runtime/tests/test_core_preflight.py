@@ -29,14 +29,12 @@ from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecor
 from vs_project.api.testing import run_execution_record
 from vs_runtime.api.core import (
     CoreResumeError,
-    CoreRuntime,
-    CoreRuntimeBindings,
     RuntimeRecord,
     reject_legacy_resume,
     resolve_core_resume,
 )
-from vs_runtime.api.core_shell_fixtures import CounterConfig, ShellTraceTransitions, counter
 from vs_runtime.api.infrastructure import recorded_ending
+from vs_runtime.api.testing import CounterConfig, counter
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -250,38 +248,14 @@ def test_a_run_saved_at_an_older_supported_version_resumes_at_the_current_one(
     assert resolved.record.envelope.schema_version == ENVELOPE_SCHEMA_VERSION
 
 
-def test_resume_factory_enforces_legacy_preflight_before_start(tmp_path: Path) -> None:
+def test_resume_resolution_enforces_legacy_preflight_before_any_start(tmp_path: Path) -> None:
     project, run_id = project_run(tmp_path)
     namespace = project.state.portable_namespace(run_id, "dynamic")
     namespace.write_bytes("state.json", b'{"schema_version":9}')
     before = project.state.portable_run_export(run_id)
     with pytest.raises(CoreResumeError, match="legacy dynamic resume unsupported"):
-        CoreRuntime[FlowState].resume(project, driver(), config=CounterConfig())
+        resolve_core_resume(project, driver())
     assert project.state.portable_run_export(run_id) == before
-
-
-def test_resume_factory_acquires_new_epoch_and_commits_recovery(tmp_path: Path) -> None:
-    project, run_id = project_run(tmp_path)
-    store = project.state_store(run_id)
-    fence = store.acquire("writer", now=0, duration=1)
-    assert fence is not None
-    candidate = record(run_id)
-    store.commit(
-        None,
-        StoredEnvelope(revision=0, schema_version=1, payload=candidate.model_dump_json().encode()),
-        fence,
-        now=0,
-    )
-    shell = CoreRuntime[FlowState].resume(
-        project,
-        driver(),
-        config=CounterConfig(),
-        bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions()),
-    )
-    shell.start("reader", now_at=1, lease_duration=10)
-    assert shell.record.envelope.fence.epoch > candidate.envelope.fence.epoch
-    assert shell.record.envelope.core.records.recovery.epoch == shell.record.envelope.fence.epoch
-    assert shell.storage_revision == 1
 
 
 def commit_record(project: Project, run_id: str) -> None:
@@ -557,16 +531,8 @@ def test_a_run_resumes_under_code_that_changed_its_roles(
     )
 
     resolved = resolve_core_resume(project, driver())
-    shell = CoreRuntime[FlowState].resume(
-        project,
-        driver(),
-        config=CounterConfig(),
-        bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions()),
-    )
-    shell.start("reader", now_at=1, lease_duration=10)
 
     assert resolved.record.envelope.core.run.declaration.roles == declaration.roles
-    assert shell.record.envelope.core.run.declaration.roles == declaration.roles
 
 
 def test_the_run_s_end_is_read_from_its_core_record(tmp_path: Path) -> None:
