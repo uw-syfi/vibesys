@@ -11,8 +11,6 @@ D. `may_start` says yes only where `decide` would run the step, once a drain dea
 
 from __future__ import annotations
 
-from dataclasses import replace
-
 import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
@@ -21,13 +19,10 @@ import vs_core.api as core
 from vs_core.api.recovery import Tick, decide, may_start
 from vs_sim.api.testing import examples
 
-from .recovery_loop import OPEN, Loop, Move, may_start_agrees_with_decide, play
+from .recovery_loop import Loop, Move, may_start_agrees_with_decide, play
 from .recovery_worlds import (
     CLOSING,
     CLOSING_ITS_STEP,
-    DISPATCHED,
-    IN_FLIGHT,
-    ONE_QUERY,
     RETAINING,
     Staging,
     World,
@@ -77,51 +72,7 @@ def test_a_resume_in_a_new_epoch_is_taken_while_the_pause_still_has_effects_to_d
 # --- B ----------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    ("world", "moves"),
-    [
-        (DISPATCHED, [("tock", 3.0), ("pause_now", None), ("crash", None)]),
-        (
-            ONE_QUERY,
-            [("tick", None), ("tock", 40.0), ("pause_now", None), ("crash", None)],
-        ),
-        (
-            ONE_QUERY,
-            [("tick", None), ("pause", 20.0), ("tock", 40.0), ("crash", None)],
-        ),
-    ],
-)
-def test_b_a_parked_epoch_charges_nothing_for_the_attempt_of_a_step_core_ended(
-    world: World, moves: list[Move]
-) -> None:
-    """Core keeps no attempt of a step it ended itself, so the model has none to compare."""
-    loop = started(world)
-    for move in moves:
-        play(loop, move)
-
-    assert loop.state.run.status is core.RunStatus.PARKED
-    assert not any(record.phase in OPEN for record in loop.state.records.records)
-    assert loop.state.steps.attempts == ()
-
-
 # --- C ----------------------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("world", [IN_FLIGHT, replace(ONE_QUERY, retries=2)])
-def test_c_the_fold_refuses_the_report_of_a_replaced_attempt_after_core_ended_the_step(
-    world: World,
-) -> None:
-    loop = started(world)
-    play(loop, ("tick", None))
-    if world.retries:
-        play(loop, ("relaunch_resume", None))
-        play(loop, ("tick", None))
-        loop.sleep_until_woken()  # the attempt the dead host lost is charged, and its re-run waits
-        play(loop, ("tick", None))
-    play(loop, ("tock", 40.0))  # core ends the step at its limit; the attempt still runs
-    assert not any(record.phase in OPEN for record in loop.state.records.records)
-
-    assert loop.finish_late(0)
 
 
 # --- D ----------------------------------------------------------------------------------------

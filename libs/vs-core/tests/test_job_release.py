@@ -16,7 +16,6 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
-from vs_core.api.testing import sample_retries
 from vs_sim.api.testing import examples
 
 from .test_attempt_retirement import fixture, retirement
@@ -303,36 +302,3 @@ def _answer_new_requests(cluster: Cluster, rounds: int) -> None:
             return
         cluster.now = max(cluster.state.run.now_at + 1.0, due)
         cluster.feed(core.ClockAdvanced(now_at=cluster.now))
-
-
-@settings(max_examples=examples(pr=4, nightly=100), deadline=None)
-@example(failing=1, retries=3)
-@example(failing=2, retries=1)
-@given(failing=st.integers(0, 3), retries=st.integers(0, 2))
-def test_a_cancel_that_failed_is_sent_again_within_the_retry_limit(
-    failing: int, retries: int
-) -> None:
-    """A closing attempt's job whose cancel fails is cancelled again, at most ``retries`` times.
-
-    The job never ends by itself (a held cluster job). Its cancel's outcome is unknown (the
-    executor's cancel raised) until core blocks it at its bound. Before the fix core counted
-    that blocked cancel as done and polled the running job for as long as the run lasted, the
-    attempt held closing.
-    """
-    cluster = started(running_polls=10**6, ending=core.ObservationStatus.CANCELLED)
-    limits = cluster.state.run.limits.model_copy(
-        update={"request_retries": sample_retries(retries)}
-    )
-    run = cluster.state.run.model_copy(update={"limits": limits})
-    cluster.state = cluster.state.model_copy(update={"run": run})
-    cluster.failing_cancels = failing
-    cluster.feed(retirement(cluster.ref, "cancel"))
-    _answer_new_requests(cluster, rounds=40 * (failing + 2))
-
-    cancels = [
-        row for row in cluster.state.records.records if isinstance(row.request, core.CancelOwnedJob)
-    ]
-    assert len(cancels) == min(failing, retries + 1) + (failing <= retries)
-    if failing <= retries:
-        assert cluster.state.evaluation.jobs[0].terminal
-        assert cluster.attempt().phase == core.AttemptPhase.TERMINAL

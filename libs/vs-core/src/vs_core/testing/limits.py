@@ -7,11 +7,12 @@ does when time reaches a moment: it records, one at a time, what ``decide`` asks
 
 from __future__ import annotations
 
-from vs_core._actions import Cancel, Settle
+from vs_core._actions import Cancel, Settle, Tick
 from vs_core._decide import decide, finished, limit_of
-from vs_core._step import advance_run_time
+from vs_core._step import advance_run_time, settle_park, step_recorded
 from vs_core.types.kernel import CoreState, StrategyEvent, Transition
 from vs_core.types.records import is_open
+from vs_core.types.scheduling import ClockAdvanced
 from vs_core.types.steps import Cancelled
 
 
@@ -34,7 +35,12 @@ def end_one(state: CoreState, now: float) -> tuple[CoreState, tuple[StrategyEven
     taken the record: the search's answer to what it heard may change what `decide` asks.
     """
     state = advance_run_time(state, now)
-    ending = [action for action in decide(state, now) if isinstance(action, Settle | Cancel)]
+    actions = decide(state, now)
+    if (tick := next((a for a in actions if isinstance(a, Tick)), None)) is not None:
+        # A pause's drain that ran out its deadline parks the run through the clock, as a record.
+        moved = step_recorded(state, ClockAdvanced(now_at=tick.at))
+        return settle_park(moved.state), tuple(moved.events)
+    ending = [action for action in actions if isinstance(action, Settle | Cancel)]
     if not ending:
         return None
     action = ending[0]

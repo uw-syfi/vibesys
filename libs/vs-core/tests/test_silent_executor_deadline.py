@@ -1,9 +1,9 @@
-"""An open record ends at its limit, so an executor that went silent is blocked on time.
+"""An open record ends at its limit, so an executor that went silent is ended on time.
 
-Core learns time only from ``ClockAdvanced``. Any tick at or after an open record's
-``until`` blocks it (a ``BlockRequest`` request and a ``Failed(TIMED_OUT)`` event), earlier
-ticks do not, the run's recovery barrier stays open for scheduling, and the projected next
-wake names the limit so a shell sleeps toward it instead of stalling.
+``decide`` is the one rule that ends a step at its limit, whatever its executor last said: at or
+after an open record's ``until`` it settles the step ``Cancelled(DEADLINE)`` and the loop records
+that (``reach``), and the fold names the limit in the record's ``Failed(TIMED_OUT)``. Earlier
+times end nothing, and `next_end` names the limit so the loop sleeps toward it instead of stalling.
 """
 
 from hypothesis import given
@@ -11,8 +11,6 @@ from hypothesis import strategies as st
 
 from vs_core.api import (
     Access,
-    BlockRequest,
-    ClockAdvanced,
     CoreState,
     EnsureSession,
     EventId,
@@ -33,9 +31,8 @@ from vs_core.api import (
     SessionSpec,
     Until,
     initial_state,
-    project,
-    step,
 )
+from vs_core.testing.limits import next_end, reach
 
 BOUND = 100.0
 
@@ -93,19 +90,30 @@ ANSWERS = st.sampled_from(
 )
 
 
+def _ended_at_its_limit(state: CoreState, now: float) -> bool:
+    """Whether the loop, with the run clock at ``now``, ended the one record, and how it ended it."""
+    after = reach(state, now)
+    record = after.state.records.records[0]
+    if now < BOUND:
+        assert record.phase in (RequestPhase.DISPATCHED, RequestPhase.RECONCILING)
+        assert record.failure is None
+        assert after.events == ()
+        return False
+    assert record.phase == RequestPhase.COMPLETED
+    assert record.failure == Failed(reason=FailureReason.TIMED_OUT, decision=None, limit_at=BOUND)
+    assert reach(after.state, now + 1_000.0).events == (), "the end is recorded once"
+    return True
+
+
 @given(answer=ANSWERS, now=st.floats(min_value=1.0, max_value=1000.0))
-def test_a_tick_blocks_a_silent_record_exactly_when_its_bound_has_passed(
+def test_a_silent_record_ends_exactly_when_its_limit_has_passed(
     answer: tuple[RequestPhase, ObservationStatus, bool], now: float
 ) -> None:
     phase, status, terminal = answer
     state = _silent(phase, status, terminal=terminal)
-    assert project(state).next_observe_at == BOUND
+    assert next_end(state) == BOUND
 
-    after = step(state, ClockAdvanced(now_at=now))
-
-    blocks = [r for r in after.requests if isinstance(r, BlockRequest)]
-    assert (len(blocks) == 1) == (now >= BOUND)
-    assert after.state.records.recovery.phase == RecoveryPhase.READY
+    assert _ended_at_its_limit(state, now) is (now >= BOUND)
 
 
 def test_a_record_still_executing_ends_at_its_limit_like_any_open_record() -> None:
@@ -120,11 +128,9 @@ def test_a_record_still_executing_ends_at_its_limit_like_any_open_record() -> No
             )
         }
     )
-    assert project(state).next_observe_at == BOUND
-    assert not step(state, ClockAdvanced(now_at=BOUND - 1.0)).requests
-    after = step(state, ClockAdvanced(now_at=10_000.0))
-    assert [type(r) for r in after.requests] == [BlockRequest]
-    assert after.state.records.records[0].phase == RequestPhase.BLOCKED
+    assert next_end(state) == BOUND
+    assert not _ended_at_its_limit(state, BOUND - 1.0)
+    assert _ended_at_its_limit(state, 10_000.0)
 
 
 @given(
@@ -135,22 +141,6 @@ def test_every_open_record_ends_exactly_at_its_limit_whatever_the_executor_last_
 ) -> None:
     """The limit passing ends the record with ``Failed(TIMED_OUT)`` naming that limit."""
     state = _silent(RequestPhase.DISPATCHED, status, terminal=False)
-    assert project(state).next_observe_at == BOUND
-    after = step(state, ClockAdvanced(now_at=now))
-    blocks = [r for r in after.requests if isinstance(r, BlockRequest)]
-    record = after.state.records.records[0]
-    if now < BOUND:
-        assert not blocks
-        assert record.phase == RequestPhase.DISPATCHED
-        assert record.failure is None
-        assert after.events == ()
-        return
-    failed = Failed(
-        reason=FailureReason.TIMED_OUT,
-        decision=None,
-        limit_at=BOUND,
-    )
-    assert len(blocks) == 1
-    assert record.phase == RequestPhase.BLOCKED
-    assert record.failure == failed
-    assert after.events == (failed,)
+    assert next_end(state) == BOUND
+
+    assert _ended_at_its_limit(state, now) is (now >= BOUND)

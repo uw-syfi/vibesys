@@ -7,6 +7,7 @@ from hypothesis import example, given
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_core.testing.limits import reach
 
 from .test_session_yield_completion import terminal_yield
 from .test_write_turn_retention import write_turn_world
@@ -187,14 +188,16 @@ def test_pause_now_ends_a_dispatch_that_never_returns_a_cleanup_bound_after_its_
         row for row in state.records.records if isinstance(row.request, core.CancelTurn)
     )
     state = core.step(state, core.DispatchAuthorized(request_id=cancellation.request_id)).state
-    state = core.step(state, core.ClockAdvanced(now_at=1 + bound)).state
+    state = reach(state, 1 + bound - 0.5).state
     assert state.run.status is core.RunStatus.DRAINING
-    ended = core.step(state, core.ClockAdvanced(now_at=1 + 2 * bound))
+    ended = reach(state, 1 + 2 * bound)
     assert ended.state.run.status is core.RunStatus.PARKED
     assert ended.state.run.result is None
     retained = ended.state.records.record(turn.request_id)
     assert retained is not None
-    assert retained.phase is core.RequestPhase.BLOCKED
+    # The drain capped the turn at the cleanup bound past its deadline, and the loop ended it
+    # there, which is what let the run park.
+    assert retained.phase is core.RequestPhase.COMPLETED
 
 
 @pytest.mark.regression
