@@ -215,20 +215,14 @@ function Header(props: {
         ]),
   ];
   return (
-    <Row justify="between" align="center" wrap>
+    <Row gap="space-2" justify="between" align="center" wrap>
       {/* Grown from no width: the actions keep the title's line and the facts give way first. */}
-      <Row align="center" grow>
+      <Row gap="space-2" align="center" grow>
         <RunFacts header={header} historyProblem={props.historyProblem} />
       </Row>
       <Row gap="space-2" align="center">
         {props.runs === undefined ? null : (
-          <Button
-            variant="quiet"
-            size="sm"
-            icon="chevron-left"
-            text="Runs"
-            press={props.runs}
-          />
+          <Button variant="quiet" size="sm" icon="chevron-left" text="Runs" press={props.runs} />
         )}
         {props.toolbar}
         {header.resume.shown ? (

@@ -42,7 +42,9 @@ const groups = (page: Page): Promise<string[]> =>
 function wholeWidthAndTiles(width: number): void {
   test('takes the whole row, and its tiles say what the header says', async ({page}) => {
     await open(page, width);
-    const header = await page.locator('.vs-stat', {hasText: 'Tokens'}).first().innerText();
+    // The text is in the page at every width, though a narrow header hides what follows the figure.
+    const header =
+      (await page.locator('.vs-stat', {hasText: 'Tokens'}).first().textContent()) ?? '';
     await showUsage(page);
     expect(await page.locator('.vs-panes > .vs-pane').count()).toBe(1);
     const sizes = await page.evaluate(() => ({

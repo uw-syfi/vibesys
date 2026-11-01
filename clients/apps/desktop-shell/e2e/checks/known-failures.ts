@@ -69,7 +69,6 @@ export const KNOWN_FAILURES: readonly KnownFailure[] = [
     /^8 px between groups is not more than the 12 px inside one: "IdeasTimeline/,
   ),
   visual('run-header-gaps-rail', 'dashboard', 'spacing-order', RUN_HEADER_GAPS),
-  visual('run-header-gaps-chat', 'run-chat', 'spacing-order', RUN_HEADER_GAPS),
   visual('chat-even-gaps', 'run-chat', 'spacing-order', EVEN_GAPS),
   visual(
     'chat-turn-gaps',

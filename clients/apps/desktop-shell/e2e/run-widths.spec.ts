@@ -11,6 +11,9 @@ import {openFixture, playLive} from './fixture-world.js';
  */
 const DOCK_BESIDE_FROM = 760 + MAC_CHROME.startWidth;
 
+/** The narrowest window that keeps the run's controls on the title's line. */
+const BESIDE_FROM = 760;
+
 /** Sweep the input space around the dock and rail breakpoints, including 660 and 1000 px. */
 test('the run header stays beside its controls and chat preserves the main at dock widths', async ({
   page,
@@ -30,12 +33,15 @@ test('the run header stays beside its controls and chat preserves the main at do
     expect(title).not.toBeNull();
     expect(action).not.toBeNull();
     if (!title || !action) throw new Error(`Missing header at ${width}px`);
-    expect(action.y, `controls stay beside the title at ${width}px`).toBeLessThan(
-      title.y + title.height,
-    );
-    expect(action.x, `title leaves room for controls at ${width}px`).toBeGreaterThanOrEqual(
-      title.x + title.width,
-    );
+    // A window too narrow for the title and the controls puts the controls under the title.
+    if (width >= BESIDE_FROM) {
+      expect(action.y, `controls stay beside the title at ${width}px`).toBeLessThan(
+        title.y + title.height,
+      );
+      expect(action.x, `title leaves room for controls at ${width}px`).toBeGreaterThanOrEqual(
+        title.x + title.width,
+      );
+    }
     if (width <= DOCK_BESIDE_FROM) continue;
     await chat.click();
     await expect(page.getByRole('region', {name: 'Chat'})).toBeVisible();
@@ -45,10 +51,12 @@ test('the run header stays beside its controls and chat preserves the main at do
 });
 
 /**
- * A window too short for what sits above the panes scrolls the screen's body; the Ideas list takes
- * the height of its rows and never a short window of its own: eight rows whole at every size.
+ * The Ideas list fills the window below the performance row and scrolls its rows under its header:
+ * six rows whole at every supported size (the compact-top spec holds nine at a laptop's size).
  */
-test('the Ideas list keeps eight full rows at every supported window size', async ({page}) => {
+const ROWS_WHOLE = 6;
+
+test('the Ideas list keeps six full rows at every supported window size', async ({page}) => {
   const fixture = fixtureNamed('finished-ten-ideas');
   await openFixture(page, fixture);
   await playLive(page, fixture);
@@ -62,8 +70,8 @@ test('the Ideas list keeps eight full rows at every supported window size', asyn
       expect(row, `a row at ${width}x${height}`).not.toBeNull();
       expect(
         list?.height ?? 0,
-        `eight rows of the list at ${width}x${height}`,
-      ).toBeGreaterThanOrEqual(8 * (row?.height ?? Number.POSITIVE_INFINITY));
+        `${ROWS_WHOLE} rows of the list at ${width}x${height}`,
+      ).toBeGreaterThanOrEqual(ROWS_WHOLE * (row?.height ?? Number.POSITIVE_INFINITY));
     }
   }
 });

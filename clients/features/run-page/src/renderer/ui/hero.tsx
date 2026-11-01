@@ -14,6 +14,7 @@ import {
   Chart,
   ChartColumns,
   ChartLegend,
+  type ChartLegendItem,
   ChartPanel,
   Fact,
   FactLine,
@@ -63,6 +64,17 @@ const LEGEND_WORDS: Readonly<
   reading: {label: 'Reading', mark: 'dot'},
   selected: {label: 'Selected', mark: 'ring'},
 };
+
+/**
+ * The key's entries, the ring's word last: kept in the line's width while no idea is selected, so
+ * selecting one does not wrap the line it shares with the stats and move the charts below it.
+ */
+function legendItems(legend: readonly ChartLegendEntry[]): readonly ChartLegendItem[] {
+  const named = legend.map(entry => LEGEND_WORDS[entry]);
+  return legend.includes('selected')
+    ? named
+    : [...named, {...LEGEND_WORDS.selected, reserved: true}];
+}
 
 /** What a chart's heading says of which way is better, and the same in fewer words for a crowded row. */
 const BETTER_WORDS = {higher: 'higher is better', lower: 'lower is better'} as const;
@@ -163,9 +175,7 @@ export function heroParts(props: HeroProps): HeroParts {
       />
     ),
     legend:
-      legend.length === 0 ? null : (
-        <ChartLegend label="Chart key" items={legend.map(entry => LEGEND_WORDS[entry])} />
-      ),
+      legend.length === 0 ? null : <ChartLegend label="Chart key" items={legendItems(legend)} />,
     charts: (
       <ChartColumns across={chartsAcross(panels)}>
         {charts.map((chart, at) => (

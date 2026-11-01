@@ -264,17 +264,14 @@ test('opening an idea preserves the Ideas list and controls at wide and narrow w
     ideas.evaluate(list => {
       const pane = list.closest('.vs-pane');
       const row = list.querySelector('.vs-columnlist-row');
-      const figure = row?.querySelectorAll('.vs-columnlist-cell')[2];
       const bounds = (element: Element | null | undefined) => {
         const rect = element?.getBoundingClientRect();
         return rect === undefined ? null : [rect.x, rect.y, rect.width, rect.height];
       };
       return {
-        // Where the list starts, not how wide it is: an idea opened beside it takes its width.
+        // Where the pane starts, not how wide it is: an idea opened beside it takes its width, and
+        // the controls above the rows wrap to the room they have.
         pane: bounds(pane)?.slice(1, 2),
-        list: bounds(list)?.slice(1, 2),
-        row: bounds(row)?.slice(1, 2),
-        figure: bounds(figure)?.slice(1, 2),
         scrollTop: list.scrollTop,
         text: row?.querySelector('.vs-columnlist-cell')?.textContent,
       };

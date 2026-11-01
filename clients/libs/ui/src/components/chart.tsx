@@ -706,6 +706,8 @@ export type ChartLegendMark = 'line' | 'dot' | 'ring';
 export interface ChartLegendItem {
   readonly label: string;
   readonly mark: ChartLegendMark;
+  /** Not named now, but its room kept, so the entry appearing later does not move what shares the line. */
+  readonly reserved?: boolean;
 }
 
 /** A one-line key to what a chart draws: each mark as the chart draws it, and its word. */
@@ -716,7 +718,12 @@ export function ChartLegend(props: {
   return (
     <ul className="vs-dotlegend vs-serieslegend vs-chart-legend" aria-label={props.label}>
       {props.items.map(item => (
-        <li key={item.label} className="vs-dotlegend-item">
+        <li
+          key={item.label}
+          className="vs-dotlegend-item"
+          data-reserved={item.reserved || undefined}
+          aria-hidden={item.reserved || undefined}
+        >
           <span className="vs-chart-legend-mark" data-mark={item.mark} aria-hidden="true" />
           <Text variant="small" tone="muted">
             {item.label}

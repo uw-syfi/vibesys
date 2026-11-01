@@ -1,4 +1,12 @@
-import {type CSSProperties, type FocusEvent, type JSX, type ReactNode, useId} from 'react';
+import {
+  type CSSProperties,
+  type FocusEvent,
+  type JSX,
+  type ReactNode,
+  useCallback,
+  useId,
+  useRef,
+} from 'react';
 import {SIZE} from '../tokens/index.js';
 import {type ColumnSize, columnTier, tracksOf} from './column-tracks.js';
 import {Icon} from './icon.js';
@@ -48,12 +56,37 @@ export interface RowMarks {
   readonly fresh?: boolean;
 }
 
+/**
+ * A callback ref that calls `changed` whenever the element's width changes after the first
+ * measure, with the latest `changed` of the render (no effect hook: the observer lives and dies with
+ * the element).
+ */
+function useWidthWatch(
+  changed: () => void,
+): (element: HTMLElement | null) => (() => void) | undefined {
+  const latest = useRef(changed);
+  latest.current = changed;
+  return useCallback((element: HTMLElement | null) => {
+    if (element === null || typeof ResizeObserver === 'undefined') return undefined;
+    let width = element.getBoundingClientRect().width;
+    const watch = new ResizeObserver(entries => {
+      const next = entries.at(-1)?.contentRect.width;
+      if (next === undefined || Math.abs(next - width) < 1) return;
+      width = next;
+      latest.current();
+    });
+    watch.observe(element);
+    return () => watch.disconnect();
+  }, []);
+}
+
 function Header<Row>(props: {
   readonly columns: readonly ListColumn<Row>[];
   readonly id: string;
+  readonly watch: (element: HTMLElement | null) => (() => void) | undefined;
 }): JSX.Element {
   return (
-    <div className="vs-columnlist-head" id={props.id}>
+    <div className="vs-columnlist-head" id={props.id} ref={props.watch}>
       {props.columns.map(column => (
         <span
           key={column.key}
@@ -187,6 +220,11 @@ export function ColumnList<Row>(props: {
     win.reveal(selectedIndex >= 0 ? selectedIndex : 0, row => row.focus());
   };
   const [measure, width] = useInlineSize();
+  // A width that changes rewraps the rows: the picked row stays in view, as an idea opened beside the
+  // list narrows it.
+  const watch = useWidthWatch(() => {
+    if (selectedIndex >= 0) win.reveal(selectedIndex, () => undefined);
+  });
   const tier = columnTier(width, props.columns, props.crowded === true);
   const tracks = {
     '--columns': tracksOf(props.columns, 'wide'),
@@ -195,7 +233,7 @@ export function ColumnList<Row>(props: {
   } as CSSProperties;
   return (
     <div className="vs-columnlist" ref={measure} style={tracks} data-tier={tier}>
-      <Header columns={props.columns} id={headerId} />
+      <Header columns={props.columns} id={headerId} watch={watch} />
       <div
         ref={win.scroller}
         className="vs-columnlist-rows"

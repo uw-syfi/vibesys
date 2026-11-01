@@ -5,7 +5,7 @@
  * the engine also handled would move two entries.
  */
 import {expect, type Page, test} from '@playwright/test';
-import {scrolledToEnd} from './checks/settle.js';
+import {settled} from './checks/settle.js';
 import {
   type FakeBridgeSeed,
   installFakeBridge,
@@ -128,28 +128,21 @@ test('the Runs crumb goes up to the dashboard from any level, and Back returns t
   await expect(crumbs(page)).toBeVisible();
 });
 
-/** Where the Ideas list sits in the screen's body, whatever the body is scrolled to. */
-async function placeInBody(page: Page) {
-  return ideas(page).evaluate(list => {
-    const {x, y, width, height} = list.getBoundingClientRect();
-    return {x, y: y + (document.querySelector('.vs-screen-body')?.scrollTop ?? 0), width, height};
-  });
-}
-
-test('opening an idea keeps the list where it starts', async ({page}) => {
+test('opening an idea moves neither the charts nor the time bar', async ({page}) => {
   await openShell(page);
   await run(page).click();
-  // The list is under the charts, so a reader scrolls to it first. A zoom that leaves a shorter page
-  // takes a scrolled body back to its end: the list is held by its place in the body.
-  await scrolledToEnd(page);
-  const before = await placeInBody(page);
+  const bar = page.getByRole('slider', {name: 'Run position'});
+  const chart = page.locator('.vs-chart-panel').first();
+  await expect(ideas(page)).toBeVisible();
+  await settled(page);
+  const before = {bar: await bar.boundingBox(), chart: await chart.boundingBox()};
   await ideas(page)
     .getByRole('option', {name: /Combine W1 ring/})
     .click();
   await expect(opened(page)).toBeVisible();
-  // The idea opens beside the list, which gives it room: the list starts where it did.
-  const {x, y} = await placeInBody(page);
-  expect({x, y}).toEqual({x: before.x, y: before.y});
+  await settled(page);
+  // The idea opens beside the list, which gives it room: the list narrows, the performance row stays.
+  expect({bar: await bar.boundingBox(), chart: await chart.boundingBox()}).toEqual(before);
 });
 
 test('Back crosses screens, and each screen keeps one entry', async ({page}) => {

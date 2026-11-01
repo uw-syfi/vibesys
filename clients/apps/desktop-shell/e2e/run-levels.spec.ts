@@ -258,23 +258,23 @@ test('every level opens by click and walks back by Escape, the crumbs and Back',
   await expect(turn).toBeVisible();
   expect(await page.evaluate(() => window.location.hash)).toBe(stepHash);
   await crumbs.getByRole('button', {name: 'Run', exact: true}).click();
-  await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
+  await expect(page.getByRole('listbox', {name: 'Ideas'})).toBeVisible();
   await expect(page).toHaveURL(RUN_LEVEL);
   await page.goBack();
   await expect(turn).toBeVisible();
   await page.goForward();
-  await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
+  await expect(page.getByRole('listbox', {name: 'Ideas'})).toBeVisible();
 
-  // Now jumps straight to the live step; Escape walks up to the run.
+  // A running idea's row opens its idea; Escape walks up to the run.
   await page
-    .getByRole('listbox', {name: 'Running now'})
+    .getByRole('listbox', {name: 'Ideas'})
     .getByRole('option', {name: /Combine W1 ring/})
     .first()
     .click();
-  await expect(page.getByRole('heading', {name: 'correctness + benchmark'})).toBeVisible();
+  await expect(page.getByRole('heading', {name: 'Combine W1 ring with W2 padding'})).toBeVisible();
   await page.keyboard.press('Escape');
-  await page.keyboard.press('Escape');
-  await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
+  await expect(page.getByRole('listbox', {name: 'Ideas'})).toBeVisible();
+  await expect(page.getByRole('heading', {name: 'Combine W1 ring with W2 padding'})).toHaveCount(0);
 });
 
 /** The performance chart of the run, which every level keeps on screen. */
@@ -352,7 +352,7 @@ test('the performance row is the same element, in the same place and size, at ev
   await expect(page.getByText('queue/mpmc time: 41.2 ms')).toBeVisible();
   await unchanged();
   for (const _level of ['item', 'step', 'idea']) await page.keyboard.press('Escape');
-  await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
+  await expect(page.getByRole('listbox', {name: 'Ideas'})).toBeVisible();
   await unchanged();
   // The run's other faces and the idea's Logs face keep it too.
   await page.getByRole('radiogroup', {name: 'Show'}).getByText('Logs').click();
@@ -366,7 +366,7 @@ test('an open idea is singled out on the chart: its reading ringed, the steps of
   const ideas = page.getByRole('listbox', {name: 'Ideas'});
   const key = page.getByRole('list', {name: 'Chart key'});
   expect(await ringed(page)).toEqual({selected: [], lineage: []});
-  await expect(key.getByText('Selected', {exact: true})).toHaveCount(0);
+  await expect(key.getByText('Selected', {exact: true})).toBeHidden();
 
   // A measured idea: its own reading is ringed, every reading stays, and the key names the ring.
   await ideas.getByRole('option', {name: /Cache-line padding/}).click();
@@ -381,11 +381,11 @@ test('an open idea is singled out on the chart: its reading ringed, the steps of
   await page.keyboard.press('Escape');
   await ideas.getByRole('option', {name: /Combine W1 ring with W2 padding/}).click();
   expect((await ringed(page)).selected).toEqual([]);
-  await expect(key.getByText('Selected', {exact: true})).toHaveCount(0);
+  await expect(key.getByText('Selected', {exact: true})).toBeHidden();
 
   // Back at the run nothing is ringed.
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
+  await expect(page.getByRole('listbox', {name: 'Ideas'})).toBeVisible();
   expect(await ringed(page)).toEqual({selected: [], lineage: []});
 });
 
@@ -630,6 +630,7 @@ test('every face of the run level keeps the time bar and the hero in view', asyn
     ).toBe(true);
   }
   // A running idea keeps what it does whole (the role and the step), even in a narrow window.
+  await show.getByText('Ideas', {exact: true}).click();
   await page.setViewportSize({width: 1024, height: 800});
   const doings = page
     .getByRole('listbox', {name: 'Ideas'})
