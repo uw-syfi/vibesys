@@ -1,78 +1,12 @@
-"""A virtual clock that can kill the simulated host at its next clock call, and one that records waits."""
+"""The error of a simulated host that died, and a helper that moves the loop's virtual clock."""
 
 from __future__ import annotations
 
-import asyncio
-from typing import TYPE_CHECKING
-
 from vs_sim.virtual import VirtualClock, current_virtual_clock
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 
 class HostCrashedError(RuntimeError):
-    """The simulated host process died (see ``CrashableClock.crash_on_next_clock_call``)."""
-
-
-def _in_task(name: str | None) -> bool:
-    """Whether the caller is the asyncio task called ``name`` (false outside an event loop)."""
-    if name is None:
-        return False
-    try:
-        current = asyncio.current_task()
-    except RuntimeError:
-        return False
-    return current is not None and current.get_name() == name
-
-
-class CrashableClock(VirtualClock):
-    """The virtual clock, plus a scripted host death.
-
-    ``crash_on_next_clock_call`` arms a crash for the loop's next clock read or wait, after
-    whatever the host committed before it. A scenario arms it from inside a scripted turn to
-    choose the commit the crash follows. A background task named ``exempt_task`` (for example
-    a lease heartbeat, which runs beside an in-flight turn) never takes the crash: it would
-    land before the turn's reply is committed, not at the loop's next step.
-    """
-
-    def __init__(
-        self, at: float = 0.0, *, limit: float | None = None, exempt_task: str | None = None
-    ) -> None:
-        """Start the timeline at ``at`` seconds; ``exempt_task`` names a task that never crashes."""
-        super().__init__(at, limit=limit)
-        self._armed = False
-        self._aftermath: Callable[[], None] | None = None
-        self._exempt_task = exempt_task
-
-    def crash_on_next_clock_call(self, *, aftermath: Callable[[], None] | None = None) -> None:
-        """Kill the simulated host at the loop's next clock read or wait.
-
-        The run raises :class:`HostCrashedError` from that call, so nothing the host would
-        have done afterwards happens. ``aftermath`` runs at the moment of death, to leave
-        behind what a dying process leaves (for example an unreadable file).
-        """
-        self._armed = True
-        self._aftermath = aftermath
-
-    def now(self) -> float:
-        """The current virtual time, or the host's death if one is armed."""
-        self._crash_if_armed("a clock read")
-        return super().now()
-
-    async def sleep(self, seconds: float) -> None:
-        """Wait on the virtual timeline, or die first if a crash is armed."""
-        self._crash_if_armed(f"a wait of {seconds:g} s")
-        await super().sleep(seconds)
-
-    def _crash_if_armed(self, where: str) -> None:
-        if _in_task(self._exempt_task) or not self._armed:
-            return
-        self._armed = False
-        if self._aftermath is not None:
-            self._aftermath()
-        message = f"host crashed at {where} (now {self.at:g} s)"
-        raise HostCrashedError(message)
+    """The simulated host process died."""
 
 
 def clock_from(start: float) -> VirtualClock:
@@ -85,41 +19,3 @@ def clock_from(start: float) -> VirtualClock:
     clock = current_virtual_clock()
     clock.at = start
     return clock
-
-
-class ProbedClock:
-    """The loop's virtual clock, recording the waits the code under test makes.
-
-    ``sleeps`` lists the durations of every wait except those of the task called
-    ``exempt_task`` (a background renewal is not what a pacing test counts). ``at`` reads and
-    moves the shared timeline, for a scenario that lets time pass while a call is in flight.
-    """
-
-    def __init__(self, inner: VirtualClock, *, exempt_task: str | None = None) -> None:
-        """Wrap ``inner``, the clock of the virtual loop the test runs on."""
-        self._inner = inner
-        self._exempt_task = exempt_task
-        self.sleeps: list[float] = []
-
-    @property
-    def at(self) -> float:
-        """The shared virtual time."""
-        return self._inner.at
-
-    @at.setter
-    def at(self, value: float) -> None:
-        self._inner.at = value
-
-    def now(self) -> float:
-        """The current virtual time."""
-        return self._inner.now()
-
-    async def sleep(self, seconds: float) -> None:
-        """Wait on the shared timeline, recording the wait unless it is the exempt task's."""
-        if not _in_task(self._exempt_task):
-            self.sleeps.append(seconds)
-        await self._inner.sleep(seconds)
-
-    async def pass_time(self, seconds: float) -> None:
-        """Let ``seconds`` of the shared timeline pass for the scenario, not as a recorded wait."""
-        await self._inner.sleep(seconds)

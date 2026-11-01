@@ -55,7 +55,7 @@ Where the rest went:
 
 | Helper | Home |
 | --- | --- |
-| crashable and probing virtual clocks, `clock_from`, `pairwise_rows`, `file_size_limit`, fault counting, matching and seeded streams | `vs_sim.api.testing` |
+| `clock_from`, `pairwise_rows`, `file_size_limit`, fault counting, matching and seeded streams | `vs_sim.api.testing` |
 | `wait_until_executor_started` | `vs_evaluation.api.testing` |
 | liveness invariants | `vs_core.testing.liveness` |
 | `FakeDockerConfinement` | `vs_sandbox.api.testing` |

@@ -524,10 +524,6 @@ class RunControlChannel(Protocol):
         """
         ...
 
-    def evaluation_is_dependency(self, resource_id: str) -> bool:
-        """Whether an executing turn still owns this evaluation dependency."""
-        ...
-
     def prepare_execution(
         self, execution_id: str, scope: Scope, permit: TurnPermit | None = None
     ) -> None:
@@ -539,10 +535,6 @@ class RunControlChannel(Protocol):
 
     def finish_execution(self, execution_id: str) -> None:
         """Release the authority of a turn that finished executing."""
-        ...
-
-    def holds_permit(self, key: str) -> bool:
-        """Whether ``key`` was prepared with a logical-turn permit core issued."""
         ...
 
     def start_execution(
@@ -769,12 +761,6 @@ class RuntimeRunControlChannel:
             if first and permit is not None:
                 self._permits[resource_id] = permit
 
-    def evaluation_is_dependency(self, resource_id: str) -> bool:
-        """A turn that requested this evaluation must still be executing."""
-        with self._lock:
-            owners = self._evaluation_dependencies.get(resource_id, frozenset())
-            return not self._stop_requested and not owners.isdisjoint(self._executing)
-
     def prepare_execution(
         self, execution_id: str, scope: Scope, permit: TurnPermit | None = None
     ) -> None:
@@ -783,11 +769,6 @@ class RuntimeRunControlChannel:
             self._prepared_executions[execution_id] = scope
             if permit is not None:
                 self._permits[execution_id] = permit
-
-    def holds_permit(self, key: str) -> bool:
-        """Whether ``key`` was prepared with a logical-turn permit."""
-        with self._lock:
-            return key in self._permits
 
     def finish_execution(self, execution_id: str) -> None:
         """Release this execution's dependency authority after the provider returns."""

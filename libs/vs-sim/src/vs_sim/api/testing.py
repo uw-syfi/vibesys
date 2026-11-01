@@ -83,7 +83,7 @@ from vs_sim.fakes import (
 from vs_sim.faults import CallCounter, ScheduledRule, fault_stream, match_rule
 from vs_sim.file_effects import file_size_limit
 from vs_sim.gate import Gate, arrival, start_thread, wait_until_started, wait_until_started_sync
-from vs_sim.host_clock import CrashableClock, HostCrashedError, ProbedClock, clock_from
+from vs_sim.host_clock import HostCrashedError, clock_from
 from vs_sim.hostile_input import DEEP_NESTING, OVERSIZED_BYTES, hostile_json_frames
 from vs_sim.manual import ManualClock
 from vs_sim.output_contracts import (
@@ -170,7 +170,6 @@ __all__ = [
     "ClockContract",
     "ClockUnderTest",
     "CommandProbeContract",
-    "CrashableClock",
     "Depth",
     "DetachedBlockingRunner",
     "End",
@@ -216,7 +215,6 @@ __all__ = [
     "PipedStart",
     "PipedUnderTest",
     "ProbeUnderTest",
-    "ProbedClock",
     "ProcessLauncherContract",
     "ProcessScript",
     "ProcessSignallerContract",
