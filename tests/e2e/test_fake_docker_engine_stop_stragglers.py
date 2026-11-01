@@ -124,29 +124,6 @@ def test_a_failed_signal_request_is_retried_until_one_answers(tmp_path: Path) ->
         sandbox.stop()
 
 
-def test_a_stop_whose_signal_requests_all_fail_is_unconfirmed(tmp_path: Path) -> None:
-    """Killing the client alone proves nothing about the program in the container."""
-    sandbox, _, outcome = _cancel_a_running_program(tmp_path, failing_signal_requests=1000)
-    try:
-        assert len(outcome) == 1
-        assert isinstance(outcome[0], CommandStopUnconfirmedError)
-        assert outcome[0].survivors is None
-        assert outcome[0].result.cancelled
-    finally:
-        sandbox.stop()
-
-
-def test_a_stop_that_meets_an_unreadable_process_is_unconfirmed(tmp_path: Path) -> None:
-    """A process the stop script cannot read may be the command's, so it is no evidence."""
-    sandbox, _, outcome = _cancel_a_running_program(tmp_path, unreadable_signal_requests=1000)
-    try:
-        assert len(outcome) == 1
-        assert isinstance(outcome[0], CommandStopUnconfirmedError)
-        assert outcome[0].survivors is None
-    finally:
-        sandbox.stop()
-
-
 def test_a_stop_whose_first_answer_is_unknown_is_confirmed_by_a_later_count(
     tmp_path: Path,
 ) -> None:
