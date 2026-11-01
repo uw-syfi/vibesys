@@ -15,7 +15,10 @@ is the default ``sbatch``. The cluster has two modes, chosen by files in
   the local filesystem. ``remote_workspace_root`` must be a local absolute
   directory; every ``exec`` runs under ``bash``, transfers copy files, and
   ``sbatch`` runs the job script to completion before it returns, so the job
-  is ``COMPLETED`` or ``FAILED`` at its first poll and nobody waits. Job ids
+  is ``COMPLETED`` or ``FAILED`` at its first poll and nobody waits. A job runs inside the
+  process that started it; when that process dies before the job ends, the job is not lost, as
+  a scheduler does not lose a job whose submitter died: the next ``squeue`` or ``sacct`` of its
+  id runs it again to its end. Job ids
   are unique. While ``hold`` exists, a new job is not run and stays
   ``PENDING`` until ``scancel`` or :func:`release_job` starts its retained script.
 
@@ -63,6 +66,7 @@ from typing import TYPE_CHECKING, TypedDict, Unpack
 from vs_decode.api import Unreadable, ValidationOptions, decode_json
 from vs_sim.api import (
     OutputStream,
+    PidfdProcessSignaller,
     ProcessOutcome,
     ProcessOutputTooLarge,
     forward_output,
@@ -347,6 +351,7 @@ def release_job(state: Path, job_id: str) -> None:
         Path(token.split("=", 1)[1]) for token in tokens[start:] if token.startswith("--output=")
     )
     script = Path(tokens[-1])
+    record.with_suffix(".owner").write_text(str(os.getpid()), encoding="utf-8")
     record.write_text("RUNNING", encoding="utf-8")
     with output.open("w", encoding="utf-8") as log:
         # lint-waiver: LW-140001 [S603]; the Fake cluster runs the exact
@@ -371,11 +376,33 @@ def _job_state(state: Path, job_id: str) -> str:
     return record.read_text(encoding="utf-8") if record.is_file() else ""
 
 
+def _requeued_if_orphaned(state: Path, job_id: str) -> None:
+    """Run again a job whose runner died before it ended: the job does not depend on its submitter.
+
+    A job is ``RUNNING`` while the process that started it runs its script. If that process is
+    gone (a host killed mid-job), nothing would ever end the job and every poll would read it
+    running; a scheduler keeps such a job going, so the call that finds it runs it to its end.
+    """
+    if _job_state(state, job_id) != "RUNNING":
+        return
+    owner = (state / _JOBS_DIRECTORY / job_id).with_suffix(".owner")
+    try:
+        pid = int(owner.read_text(encoding="utf-8"))
+    except (FileNotFoundError, ValueError):
+        return
+    if pid == os.getpid() or PidfdProcessSignaller().exists(pid):
+        return
+    (state / _JOBS_DIRECTORY / job_id).write_text(_PENDING, encoding="utf-8")
+    release_job(state, job_id)
+
+
 def _executing_exec(state: Path, command: str) -> tuple[int, str, str]:
     tokens = shlex.split(command)
     if "sbatch" in tokens:
         return 0, _submit(state, tokens), ""
     if tokens[:1] in (["squeue"], ["sacct"]):
+        if "-j" in tokens:
+            _requeued_if_orphaned(state, tokens[tokens.index("-j") + 1])
         if "-j" in tokens and not _job_state(state, tokens[tokens.index("-j") + 1]):
             return 0, "", ""
         return 0, _pending_query(state, tokens), ""
