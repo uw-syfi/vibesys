@@ -1,7 +1,5 @@
 """The step runner interface and the loop that executes core's actions through it."""
 
-from collections.abc import Callable
-
 from vs_core.api.recovery import OpenStep
 from vs_runtime._core_inputs import Controls, CoreInputs, SearchRun
 from vs_runtime._fold_keeper import CACHE_EVERY, CacheUsed, FoldStart, start_fold
@@ -36,9 +34,6 @@ from vs_runtime._step_runner import (
 )
 from vs_runtime._step_start import RunOpening, StartedRun, resume_paused, start_run
 
-type StepRunnerDecorator = Callable[[StepRunner], StepRunner]
-"""Wraps the runner a run composes; a test places a hold or a fault at the seam every step crosses."""
-
 __all__ = [
     "CACHE_EVERY",
     "Adopted",
@@ -69,7 +64,6 @@ __all__ = [
     "StepLoopTimingError",
     "StepRecord",
     "StepRunner",
-    "StepRunnerDecorator",
     "fold_log",
     "fold_rules",
     "package_sources",

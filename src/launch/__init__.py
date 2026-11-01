@@ -49,7 +49,6 @@ if TYPE_CHECKING:
     from vs_project.api import GitRepositoryFactory, Project
     from vs_runtime.api.core import RunTiming
     from vs_runtime.api.infrastructure import RunState, StopTimer
-    from vs_runtime.api.step_runner import StepRunnerDecorator
     from vs_sandbox.api import ComputeBackendImpl
     from vs_sim.api import (
         BlockingRunner,
@@ -94,8 +93,6 @@ class LaunchSettings:
     """Checks native profiler availability; ``None`` probes the host through ``processes``."""
     login_environment: Callable[[], Mapping[str, str]] | None = None
     """Reads the user's login shell environment; ``None`` reads it as provider CLIs are found."""
-    step_runner_decorator: StepRunnerDecorator | None = None
-    """Wraps the run's step runner; a test holds steps at a window through it. ``None`` in production."""
     process_table: ProcessTable = field(default_factory=NoProcessTable)
     """Finds and ends a host agent's processes; the entrypoint builds the real one.
 
@@ -195,7 +192,6 @@ def _implementations(
         git=Git(settings.processes),
         github=GitHubCLI(settings.processes),
         git_repository=settings.git_repository,
-        step_runner_decorator=settings.step_runner_decorator,
         system=EnvironmentSystem(
             login_environment=(
                 launch_shell_environment
