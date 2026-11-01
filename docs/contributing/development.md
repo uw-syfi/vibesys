@@ -105,6 +105,15 @@ checkout):
 uv run python scripts/example_repositories.py
 ```
 
+A worktree often shows an example's submodule as modified, because the checked-out
+commit is not the pinned one. Stage explicit paths, never `git add -A` or `git commit -a`
+over `examples/`. A change that moves the pin of an `examples/*/repositories/*` submodule
+fails `check_example_pointers` (the pre-push gate and CI's `changes` job) unless a commit
+message of the change declares it with a line `Example-Bump: <path of the submodule>`, one
+per pin. A declared bump also runs `validate-examples` in the pull request's CI instead of
+waiting for the merge queue. To put an accidental pin back, run
+`git checkout origin/main -- <path>`.
+
 The example evaluators' build-and-run tests (they compile an example's native code and
 run the real Go evaluator on it) carry the `native_build` marker and are deselected by
 default. CI's `native-evaluator-examples` job runs them when an example or the evaluator

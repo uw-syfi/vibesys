@@ -337,6 +337,7 @@ func TestAlwaysOnCommandsAreWhatCIRunsOnEveryChange(t *testing.T) {
 		"verify-policy",
 		"scripts/check_stale_revert.py",
 		"scripts/check_stray_files.py",
+		"scripts.check_example_pointers",
 		"scripts/check_doc_links.py",
 		"scripts.check_doc_citations",
 		"scripts.check_skills",
