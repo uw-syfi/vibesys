@@ -18,7 +18,7 @@ from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.events import CoreEventType, RunEndingData, RunFailure, RunFailureKind
 from vibesys.run.commit_view import ObservedInputs, RecordView
 from vibesys.run.run_clock import start_clock_from
-from vibesys.run.run_controls import OperatorControls, StoredSteerArtifacts
+from vibesys.run.run_controls import StoredSteerArtifacts
 from vibesys.run.stall_report import StallReporter
 from vibesys.run.store_migration import migrate_saved_run
 from vs_core.api import (
@@ -34,6 +34,7 @@ from vs_runlog.api import FileFoldCache
 from vs_runtime.api import RunStatus
 from vs_runtime.api.core import (
     CoreResumeError,
+    OperatorControls,
     OperatorInbox,
     RunControlBridge,
     reject_legacy_resume,
