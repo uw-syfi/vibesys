@@ -87,11 +87,3 @@ def scripted_client(
     """The scripted client over this scenario's workload, as the launcher's factory builds it."""
     setup = scripted_setup(spec=spec, events=events, log_dir=log_dir)
     return ScriptedAgentClient(setup, threads=OsThreads())
-
-
-class NoAgents:
-    """Stands where the harness expects its Fake clients: the scripted factory replaces it."""
-
-    def client(self, **_kwargs: object) -> AgentClientProtocol:
-        message = "an agent-less run builds its clients with the scripted factory"
-        raise AssertionError(message)

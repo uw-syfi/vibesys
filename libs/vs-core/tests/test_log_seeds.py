@@ -244,15 +244,17 @@ def test_a_fold_started_from_its_cache_is_the_fold_of_the_whole_log(
     cut = data.draw(st.integers(0, len(tail)), label="records the cache covers")
     whole = fold_run(tail, seed, registry=loop.registry)
     cached = fold_run(tail[:cut], seed, registry=loop.registry)
-    restored = Folded.decode(cached.encode(), loop.registry)
+    restored = Folded.decode(cached.encode("rules"), loop.registry, "rules")
     assert restored == cached
     assert fold_run(tail[cut:], restored, registry=loop.registry) == whole
 
 
 def test_a_cache_written_by_another_encoding_or_damaged_is_refused() -> None:
     state, registry = build(World(()))
-    encoded = Folded(state).encode()
+    encoded = Folded(state).encode("rules")
     with pytest.raises(ValueError, match="encoding version 2"):
-        Folded.decode(encoded.replace(b'"schema_version":1', b'"schema_version":2', 1), registry)
+        Folded.decode(
+            encoded.replace(b'"schema_version":1', b'"schema_version":2', 1), registry, "rules"
+        )
     with pytest.raises(ValueError, match=r"does not|invalid|JSON"):
-        Folded.decode(encoded[: len(encoded) // 2], registry)
+        Folded.decode(encoded[: len(encoded) // 2], registry, "rules")

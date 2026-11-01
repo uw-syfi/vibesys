@@ -16,6 +16,7 @@ not record the deadline of its drain.
 from __future__ import annotations
 
 import asyncio
+import itertools
 import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -34,6 +35,7 @@ from vs_core.api.recovery import (
     RecordRefusal,
     Run,
     RunRest,
+    at_rest,
     finished_message,
     fold,
 )
@@ -94,6 +96,7 @@ RAISES = AttemptRaises(OSError("the host lost the process"))
 HANGS = AttemptHangs()
 DEAF = AttemptHangs(ignoring_signal=True)
 UNCHARGED = (InterruptionReason.PAUSE, InterruptionReason.SHUTDOWN)
+CHARGING = (InterruptionReason.RAISED, InterruptionReason.LOST)
 
 
 @dataclass(frozen=True)
@@ -122,7 +125,13 @@ class Scenario:
     clear_failures: int = 0
     """How many calls of ``clear`` raise an error that is not ``ClearUnavailableError``."""
     pause_at: float | None = None
-    """When the operator pauses the run now (core's ``pause_now``)."""
+    """When the operator pauses the run now (core's ``pause_now``), or drains it (``drain``)."""
+    drain: bool = False
+    """Whether the pause at ``pause_at`` is a drain (core's ``pause``) that lets admitted work finish."""
+    drain_seconds: float | None = None
+    """How long the drain waits before it gives up on what still runs; ``None`` waits without bound."""
+    escalate_at: float | None = None
+    """When the operator, who drained the run, pauses it now instead."""
     stop_at: float | None = None
     """When the operator stops the run; ``None`` waits until every step has its result."""
     race: bool = False
@@ -145,6 +154,8 @@ class World:
     watch: Watch
     boundaries: int = 0
     exits: list[RunRest] = field(default_factory=list)
+    exit_times: list[float] = field(default_factory=list)
+    """The run clock when each process of the run returned."""
     unproven: list[core.RequestId] = field(default_factory=list)
     """The steps an ending recorded without proof that their work ended."""
     running_at_park: list[str] = field(default_factory=list)
@@ -209,14 +220,18 @@ class Watch:
             if stall.error is not None:
                 self.errors.append(stall.error)
 
-    def before_record(self, what: str, tag: core.RequestId) -> None:
-        """No record on a tag while a call on it is unfinished, nor a result over live work."""
+    def before_record(self, what: str, tag: core.RequestId, *, parked: bool = False) -> None:
+        """No record on a tag while a call on it is unfinished, nor a result over live work.
+
+        A result asked of a parked log is no result: the log records the attempt as interrupted
+        (``Interrupted``), which a parked run leaves to its next process to adopt or clear.
+        """
         if self.runner is None:
             return
         if tag in self.runner.pending():
             self.problems.append(f"{what} on {tag.root} while a call of it is unfinished")
         unproven = any(stall.tag == tag for stall in self.board.unproven())
-        if what == "step_finished" and tag in self.runner.running() and not unproven:
+        if what == "step_finished" and not parked and tag in self.runner.running() and not unproven:
             self.problems.append(f"step_finished on {tag.root} over work still going")
 
 
@@ -306,7 +321,8 @@ class CrashingLog:
     async def step_finished(
         self, tag: core.RequestId, attempt: int, result: StepResult
     ) -> StepRecord:
-        self._watch.before_record("step_finished", tag)
+        parked = at_rest(self._inner.state) is RunRest.PARKED
+        self._watch.before_record("step_finished", tag, parked=parked)
         if self._faults.before_result is not None:
             await self._faults.before_result(tag, attempt)
         return await self._around(lambda: self._inner.step_finished(tag, attempt, result))
@@ -368,6 +384,16 @@ def pause_event(clock: VirtualClock) -> core.RunControlEvent:
     return core.RunControlEvent(control=control, now_at=clock.now())
 
 
+def drain_event(clock: VirtualClock, seconds: float | None) -> core.RunControlEvent:
+    """The operator's Pause: admitted work finishes, for as long as ``seconds`` says (no bound: None)."""
+    control = core.ControlInput(
+        control_id=core.ControlId(root="operator-drain"),
+        action="pause",
+        owner=core.PauseOwner.OPERATOR,
+    )
+    return core.RunControlEvent(control=control, now_at=clock.now(), drain_seconds=seconds)
+
+
 def stop_event(clock: VirtualClock) -> core.RunControlEvent:
     control = core.ControlInput(
         control_id=core.ControlId(root="operator-stop"),
@@ -390,6 +416,15 @@ async def operator(
     if scenario.pause_at is not None and "pause" not in delivered:
         await clock.sleep(max(0.0, scenario.pause_at - clock.now()))
         delivered.add("pause")
+        if scenario.drain:
+            log.push(drain_event(clock, scenario.drain_seconds))
+            world.accepted.add("operator-drain")
+        else:
+            log.push(pause_event(clock))
+            world.accepted.add("operator-pause")
+    if scenario.escalate_at is not None and "escalate" not in delivered:
+        await clock.sleep(max(0.0, scenario.escalate_at - clock.now()))
+        delivered.add("escalate")
         log.push(pause_event(clock))
         world.accepted.add("operator-pause")
     if "stop" in delivered:
@@ -516,6 +551,7 @@ async def run_epochs(world: World, clock: VirtualClock, kill_at: int | None) -> 
         if isinstance(outcome, BaseException):
             raise outcome
         world.exits.append(outcome)
+        world.exit_times.append(clock.now())
         if outcome is RunRest.ENDED:
             return world
         parked = True
@@ -602,6 +638,7 @@ def check_world(world: World) -> None:
     for tag in world.seed.tags:
         check_log_of(world, tag)
     check_clear_precedes_every_rerun(world)
+    check_retries_back_off(world)
     check_runs_carry_the_step_limit(world)
     assert set(world.runner.running()) <= set(world.unproven), "work was left running"
     assert world.runner.violations == ()
@@ -617,9 +654,10 @@ def cooperative(scenario: Scenario) -> bool:
 
     A deaf or held attempt can outlive the park: the loop shows it and leaves it to the process
     exit, and the log still has it running. A parked run therefore holds an attempt only for a call
-    the loop showed held (``check_world``), and the next epoch ends it uncharged.
+    the loop showed held (``check_world``), and the next epoch ends it uncharged. A ``clear`` that
+    outlives its timeout holds its tag the same way, so a run that parks over it keeps the attempt.
     """
-    return not any(
+    return scenario.clear_holds == 0 and not any(
         isinstance(behavior, AttemptHolds)
         or (isinstance(behavior, AttemptHangs) and behavior.ignoring_signal)
         for spec in scenario.steps
@@ -645,6 +683,40 @@ def check_clear_precedes_every_rerun(world: World) -> None:
                 f"attempt {call.attempt} had no clear"
             )
             cleared[call.tag] = False
+
+
+def check_retries_back_off(world: World) -> None:
+    """Consecutive attempts of a step are at least the declared backoff apart on the run clock.
+
+    An attempt that raised, or whose work a dead host lost, is charged to the step. The attempt
+    after it starts no sooner than ``request_retries.delay`` of the charges so far, counted from
+    the record that charged it, so a runner that fails at once cannot spend every try in one
+    instant. Pauses and adopted work are not charged and wait for nothing.
+    """
+    retries = world.seed.state.run.limits.request_retries
+    for tag in world.seed.tags:
+        charged = 0
+        charged_at: float | None = None
+        for record in world.records.records:
+            body = record.body
+            if body is None:
+                continue
+            message = body.value
+            if isinstance(message, AttemptInterrupted) and message.tag == tag.root:
+                if message.reason in CHARGING:
+                    charged += 1
+                    charged_at = record.clock
+            elif (
+                isinstance(message, StepStarted)
+                and message.tag == tag.root
+                and charged_at is not None
+            ):
+                backoff = retries.delay(charged)
+                assert record.clock >= charged_at + backoff, (
+                    f"{tag.root} attempt {message.attempt} started "
+                    f"{record.clock - charged_at}s after its charge, inside the backoff of "
+                    f"{backoff}s"
+                )
 
 
 def check_runs_carry_the_step_limit(world: World) -> None:
@@ -694,6 +766,22 @@ def test_a_runner_that_raises_is_cleared_and_run_again_charged_as_a_try() -> Non
     check_world(world)
     assert attempts_started(world, 0) == [1, 2]
     assert interruption_reasons(world) == [InterruptionReason.RAISED]
+
+
+def test_a_runner_that_raises_at_once_is_run_again_only_after_the_backoff() -> None:
+    """Each re-run waits the doubling backoff on the run clock, and the bound on tries holds."""
+    world = run_world(Scenario((step(RAISES, RAISES, RAISES, FINISHES),), retries=3))
+    check_world(world)
+    retries = world.seed.state.run.limits.request_retries
+    started = [
+        record.clock
+        for record in world.records.records
+        if record.body is not None and record.body.field == "step_started"
+    ]
+    assert len(started) == 4
+    waited = [later - earlier for earlier, later in itertools.pairwise(started)]
+    assert all(wait >= retries.delay(n) for n, wait in enumerate(waited, 1))
+    assert was_finished(world, 0)
 
 
 def step_messages(world: World, tag: core.RequestId) -> list[Message]:
@@ -815,6 +903,30 @@ def test_a_pause_does_not_wait_for_an_unreachable_backend() -> None:
     scenario = Scenario((step(RAISES, FINISHES),), unavailable=50, pause_at=0.5)
     world = run_world(scenario)
     assert world.exits[0] is RunRest.PARKED
+
+
+def test_a_plain_drain_waits_for_a_clear_that_keeps_failing_and_pause_now_ends_the_wait() -> None:
+    """A drain with no deadline is the operator asking to wait for the admitted work, a re-run's
+    ``clear`` included, however long it takes: the run parks when the operator escalates."""
+    scenario = Scenario(
+        (step(RAISES, FINISHES),), unavailable=30, pause_at=0.5, drain=True, escalate_at=30.0
+    )
+    world = run_world(scenario)
+    check_world(world)
+    assert world.exits[0] is RunRest.PARKED
+    assert world.exit_times[0] >= 30.0, "the drain gave up on a clear no one told it to abandon"
+    assert StallKind.CLEAR_UNAVAILABLE in world.watch.shown
+
+
+def test_a_drain_with_a_deadline_gives_up_on_a_clear_that_keeps_failing_when_it_passes() -> None:
+    """The deadline of the drain parks the run, and the parked run abandons the failing ``clear``."""
+    scenario = Scenario(
+        (step(RAISES, FINISHES),), unavailable=30, pause_at=0.5, drain=True, drain_seconds=5.0
+    )
+    world = run_world(scenario)
+    check_world(world)
+    assert world.exits[0] is RunRest.PARKED
+    assert 5.5 <= world.exit_times[0] < 30.0, "the run parked at the end of its drain"
 
 
 def test_the_run_ends_even_when_the_backend_stays_unreachable() -> None:

@@ -43,6 +43,14 @@ def test_a_restart_after_any_crash_finishes_the_same_run():
 - `Interruption` (an `Action`, `KILL`, `PAUSE` or `STOP`, at a `Moment`: `BEFORE_COMMIT`,
   `AFTER_COMMIT` or `IN_FLIGHT`; it prints as `kill in flight 5`), `Interrupted` and `Outcome`.
   See "Interruptions and the never-stuck property" below.
+- `ServingWorld`, `Serving` and `Admission`: a world that serves each host process. The world
+  stays the outside world's position; `serve(admission, clock)` makes the host's own service, which
+  is its memory and ends with it. `Admission` is the run as a service beside the loop sees it
+  (`admitted_core`, and `admit(event, now_at=)`, which commits the input before it returns, as the
+  production host's evaluation bridge does). The service's `during(request, core)` runs while the
+  effect of each request is in flight (an agent's tool calls in its turn), and its `close()` once
+  the host's loop has returned or been cancelled, whatever ended the host. A host that is killed
+  closes nothing: its memory is gone.
 
 ## Cheap crashes
 

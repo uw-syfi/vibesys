@@ -1,5 +1,6 @@
 """Real inbox requests are answered durably through the typed journal."""
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
@@ -46,29 +47,60 @@ _REQUESTS = [
 ]
 
 
-def test_all_inbox_actions_have_one_outcome_across_relaunch(tmp_path: Path) -> None:
-    assert_outcomes(tmp_path, list(range(len(_REQUESTS))), crash_before_ack=True)
+@pytest.mark.parametrize(
+    "actions",
+    [list(range(len(_REQUESTS) // 2)), list(range(len(_REQUESTS) // 2, len(_REQUESTS)))],
+    ids=["first-half", "second-half"],
+)
+def test_all_inbox_actions_have_one_outcome_across_relaunch(
+    tmp_path: Path, actions: list[int]
+) -> None:
+    """Every kind of request once, a crash before each acknowledgement, in two halves.
+
+    A relaunch reads the whole log back, so the cost of a run of requests grows faster than
+    their number: two halves cover every kind for about half the cost of the whole list.
+    """
+    assert_outcomes(tmp_path, RequestRun(actions, crash_before_ack=True))
 
 
 def test_outcomes_follow_posting_order_for_a_batch_of_applied_and_refused_requests(
     tmp_path: Path,
 ) -> None:
-    assert_outcomes(tmp_path, [0, 4, 1, 5, 2, 6], crash_before_ack=False, post_all=True)
+    assert_outcomes(tmp_path, RequestRun([0, 4, 1, 5, 2, 6], post_all=True))
+
+
+# Ids whose string order differs from any posting order a test sends them in: ``request-10``
+# sorts before ``request-2``, and a capital before a lower-case letter.
+_ID_POOL = ["request-10", "request-9", "request-2", "request-1", "B", "a", "a.b", "0", "Zz", "k_1"]
 
 
 @given(
-    actions=st.lists(st.integers(min_value=0, max_value=7), min_size=1, max_size=12),
-    crash_before_ack=st.booleans(),
+    actions=st.lists(st.integers(min_value=0, max_value=7), min_size=1, max_size=6),
+    ids=st.permutations(_ID_POOL),
+    arrival=st.sampled_from(["one-by-one", "one-by-one-crashing-before-the-marker", "as-a-batch"]),
 )
 def test_outcomes_are_idempotent_over_request_sequences(
-    actions: list[int], *, crash_before_ack: bool
+    actions: list[int], ids: list[str], arrival: str
 ) -> None:
+    """Any requests under any ids, a relaunch between each: one outcome each, in posting order.
+
+    A relaunch reads the whole log back, so the cost of a sequence grows faster than its length;
+    ids drawn from names whose string order differs from the posting order put what a longer
+    sequence of ``request-N`` would (an id order taken for the posting order) in two requests,
+    and a batch is the arrival that has an order to keep.
+    """
+    run = RequestRun(
+        actions,
+        crash_before_ack=arrival == "one-by-one-crashing-before-the-marker",
+        post_all=arrival == "as-a-batch",
+        ids=ids[: len(actions)],
+    )
     with TemporaryDirectory() as directory:
-        assert_outcomes(Path(directory), actions, crash_before_ack=crash_before_ack)
+        assert_outcomes(Path(directory), run)
 
 
 def test_outcome_recovery_uses_typed_records_after_a_crash_before_mirroring(tmp_path: Path) -> None:
-    assert_outcomes(tmp_path, [0, 1, 2, 3], crash_before_ack=True, mirror_gap=True)
+    assert_outcomes(tmp_path, RequestRun([0, 1, 2, 3], crash_before_ack=True, mirror_gap=True))
 
 
 @pytest.mark.parametrize("terminal", [False, True])
@@ -110,14 +142,22 @@ def test_a_committed_refusal_is_not_reapplied_after_a_crash_before_its_inbox_mar
     assert_recorded_outcomes(project, run_id, [request.control_id])
 
 
-def assert_outcomes(
-    root: Path,
-    actions: list[int],
-    *,
-    crash_before_ack: bool,
-    post_all: bool = False,
-    mirror_gap: bool = False,
-) -> None:
+@dataclass(frozen=True)
+class RequestRun:
+    """Requests sent one after another, and what happens to the process around them."""
+
+    actions: list[int]
+    crash_before_ack: bool = False
+    post_all: bool = False
+    mirror_gap: bool = False
+    ids: list[str] | None = None
+    """The control id of each request; ``request-N`` when absent."""
+
+
+def assert_outcomes(root: Path, sequence: RequestRun) -> None:
+    actions, crash_before_ack = sequence.actions, sequence.crash_before_ack
+    post_all, mirror_gap = sequence.post_all, sequence.mirror_gap
+    names = sequence.ids or [f"request-{index}" for index in range(len(actions))]
     project = inbox_project(root)
     run_id = "run-outcomes"
     inbox = project.state.control_inbox(run_id)
@@ -128,11 +168,11 @@ def assert_outcomes(
     events = journal()
     if post_all:
         for index, action in enumerate(actions):
-            request = _REQUESTS[action].model_copy(update={"control_id": f"request-{index}"})
+            request = _REQUESTS[action].model_copy(update={"control_id": names[index]})
             inbox.post(request.control_id, request.model_dump_json().encode(), ended=lambda: None)
     expected_ids = []
     for index, action in enumerate(actions):
-        request = _REQUESTS[action].model_copy(update={"control_id": f"request-{index}"})
+        request = _REQUESTS[action].model_copy(update={"control_id": names[index]})
         expected_ids.append(request.control_id)
         # Posting while the process is down must not consume the request.
         events.close()

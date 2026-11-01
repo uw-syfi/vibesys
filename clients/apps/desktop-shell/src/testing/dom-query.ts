@@ -34,6 +34,9 @@ const TAGS: Readonly<Record<string, string>> = {
   h5: 'heading',
   h6: 'heading',
   dialog: 'dialog',
+  section: 'region',
+  option: 'option',
+  optgroup: 'group',
   table: 'table',
   tr: 'row',
   th: 'columnheader',
@@ -61,6 +64,9 @@ const NAMED_BY_CONTENT: ReadonlySet<string> = new Set([
   'treeitem',
   'heading',
   'link',
+  'row',
+  'cell',
+  'columnheader',
 ]);
 
 /** The role of `element`: its own `role`, else the one its tag (and type) gives. */

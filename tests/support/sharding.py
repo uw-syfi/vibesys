@@ -28,8 +28,9 @@ so the shards partition the suite: each test runs in exactly one shard.
 
 Every CI shard records its measured seconds (``--record-shard-durations=PATH``,
 or ``$VIBESYS_RECORD_SHARD_DURATIONS``) and uploads them as a
-``shard-durations-I`` artifact; a run on main merges them into a cache entry that
-later runs read through ``$VIBESYS_SHARD_DURATIONS`` (``.github/workflows/test.yml``),
+``shard-durations-I`` artifact; a run on main averages them into the previous record
+(``SMOOTHING_WEIGHT``) and caches the result for later runs to read through
+``$VIBESYS_SHARD_DURATIONS`` (``.github/workflows/test.yml``),
 and ``scripts/refresh_shard_durations.py`` can still merge a run's artifacts into the
 checked-in ``shard_durations.json``, the cold-start record used when that cache is empty. Each shard also warns when it
 overran ``SHARD_BUDGET_SECONDS`` or ran files the record underestimates. A
@@ -68,6 +69,12 @@ WORKERS_PER_SHARD = 4
 #: Wall seconds one shard's tests may take; above this the shards need rebalancing
 #: or more of them. Leaves room under ten minutes for runner setup.
 SHARD_BUDGET_SECONDS = 400.0
+#: How much of the latest run the cached record takes: ``new = WEIGHT * measured + (1 - WEIGHT) *
+#: previous``. A file's measured seconds swing with what ran beside it (a CPU-bound sim test took
+#: 64 s in one run and 34 s in the next), so a record that is the last run alone moves the swing from
+#: shard to shard: the shards balanced on it ended a run at 283, 259 and 426 s. Replaying 11 runs of
+#: recorded main seconds, the heaviest shard's excess over an even split fell from 72 to 37 CPU-seconds.
+SMOOTHING_WEIGHT = 0.5
 #: Granularity used to project the even spread of heavy files.
 _PROJECTION_UNITS = 200
 
@@ -267,6 +274,25 @@ def merge_durations(records: Iterable[Mapping[str, float]]) -> dict[str, float]:
         for name, seconds in record.items():
             total[name] += seconds
     return {name: round(seconds, 2) for name, seconds in sorted(total.items())}
+
+
+def smooth_durations(
+    previous: Mapping[str, float], measured: Mapping[str, float], weight: float = SMOOTHING_WEIGHT
+) -> dict[str, float]:
+    """The record after a run: each measured file moves ``weight`` of the way to its seconds.
+
+    A file the previous record lacks takes its measured seconds. A file the run did not measure
+    drops out, since it no longer exists or no longer runs.
+    """
+    if not 0.0 <= weight <= 1.0:
+        message = f"the smoothing weight must be between 0 and 1, got {weight!r}"
+        raise ValueError(message)
+    return {
+        name: round(
+            seconds if name not in previous else weight * seconds + (1 - weight) * previous[name], 2
+        )
+        for name, seconds in sorted(measured.items())
+    }
 
 
 def record_durations(measured: Mapping[str, float], previous: Path) -> dict[str, float]:

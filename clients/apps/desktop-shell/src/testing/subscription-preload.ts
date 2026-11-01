@@ -128,7 +128,10 @@ class FixtureSubscriptions {
   readonly #feeds = new Map<string, HostFeed>();
   readonly #runs = new Map<string, RunsFeed>();
 
-  constructor(private readonly seed: SubscriptionSeed) {
+  constructor(
+    private readonly seed: SubscriptionSeed,
+    private readonly now: () => number,
+  ) {
     for (const [host, feed] of Object.entries(seed.hosts)) this.#feeds.set(host, feed);
     for (const [host, feed] of Object.entries(seed.runs ?? {})) this.#runs.set(host, feed);
   }
@@ -138,7 +141,7 @@ class FixtureSubscriptions {
     this.#feeds.set(host, feed);
     for (const observer of this.observers) {
       if (observer.host === host && observer.arm === 'machineStats')
-        this.#send(observer, updatesOf(feed, Date.now()));
+        this.#send(observer, updatesOf(feed, this.now()));
     }
   }
 
@@ -147,7 +150,7 @@ class FixtureSubscriptions {
     this.#runs.set(host, feed);
     for (const observer of this.observers) {
       if (observer.host === host && observer.arm === 'runs')
-        this.#send(observer, runUpdates(feed, Date.now()));
+        this.#send(observer, runUpdates(feed, this.now()));
     }
   }
 
@@ -181,7 +184,7 @@ class FixtureSubscriptions {
           throw new Error(`the fixture host does not serve ${String(arm)}`);
         const observer = {host: call.host, arm, receive};
         this.observers.add(observer);
-        const updates = this.#updatesFor(arm, call.host, Date.now());
+        const updates = this.#updatesFor(arm, call.host, this.now());
         if (updates === undefined) receive(gatewayEnd(`no scripted ${arm}: ${call.host}`));
         else this.#send(observer, updates);
         return {cancel: () => void this.observers.delete(observer)};
@@ -190,8 +193,13 @@ class FixtureSubscriptions {
   }
 }
 
-export function installSubscriptions(seed: SubscriptionSeed): void {
-  const fixture = new FixtureSubscriptions(seed);
+/**
+ * Installs the port on the window: `vibesysSubscription` for the shell, and `fakeSubscriptions` for
+ * a test to drive the hosts. The page's own clock times what the hosts say (`now`); a test that
+ * holds the clock passes it.
+ */
+export function installSubscriptions(seed: SubscriptionSeed, now: () => number = Date.now): void {
+  const fixture = new FixtureSubscriptions(seed, now);
   Object.assign(window, {
     vibesysSubscription: fixture.port(),
     fakeSubscriptions: {

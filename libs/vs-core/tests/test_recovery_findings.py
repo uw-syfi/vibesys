@@ -203,6 +203,7 @@ def test_a_finish_of_an_attempt_that_was_replaced_is_refused() -> None:
     loop = opened(World((StepSpec(100.0),)))
     loop.tick()
     play(loop, ("raise", 0))
+    loop.sleep_until_woken()
     loop.tick()
     assert loop.finish_late(0), "attempt 2 runs and a finish of attempt 1 arrived"
 

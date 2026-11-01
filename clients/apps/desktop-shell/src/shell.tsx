@@ -598,7 +598,10 @@ function UsageRoute(props: {
   const {stores, select} = props;
   const {store, actions} = stores.usage;
   const state = useStore(store);
-  const label = useMemo(() => runLabels(props.sidebar, viewerClock()), [props.sidebar]);
+  const label = useMemo(
+    () => runLabels(props.sidebar, viewerClock(stores.page.now)),
+    [props.sidebar, stores.page.now],
+  );
   return (
     <UsageScreen
       state={state}
@@ -625,8 +628,9 @@ export function Shell(props: {
   const sidebarState = useStore(sidebar.store);
   const machinesState = useStore(machines);
   const newRunState = useStore(newRun);
-  const rows = useMemo(() => dashboardRows(sidebarState, viewerClock()), [sidebarState]);
-  const tiles = useMemo(() => tilesOf(rows.map(row => runInput(row, Date.now()))), [rows]);
+  const {now} = props.stores.page;
+  const rows = useMemo(() => dashboardRows(sidebarState, viewerClock(now)), [sidebarState, now]);
+  const tiles = useMemo(() => tilesOf(rows.map(row => runInput(row, now()))), [rows, now]);
   const select = (screen: Screen): void => sidebar.store.dispatch({type: 'select', screen});
   // On the Machines screen the rail folds what the cards fold: a host that delivers is reached.
   // The store hears which hosts deliver, and checks again one whose check found it unreachable.
@@ -706,8 +710,8 @@ export function Shell(props: {
   );
 }
 
-/** The moment Recent's times are worded against: now, in the viewer's own zone. */
-const viewerClock = (): Clock => ({now: Date.now()});
+/** The moment Recent's times are worded against: now on the window's clock, in the viewer's own zone. */
+const viewerClock = (now: () => number): Clock => ({now: now()});
 
 /**
  * A run window: the Run screen for `run` alone, with no rail, in the same frame as the main window's

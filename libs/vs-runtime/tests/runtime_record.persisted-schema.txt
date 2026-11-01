@@ -1764,6 +1764,7 @@ Step.event optional {"anyOf":[{"$ref":"#/$defs/JournaledEvent"},{"type":"null"}]
 Step.reads optional {"default":[],"items":{"type":"string"},"type":"array"}
 Step.recorded optional {"anyOf":[{"$ref":"#/$defs/Recorded"},{"type":"null"}],"default":null}
 StepAttempts {"additionalProperties":false,"type":"object"}
+StepAttempts.charged_at optional {"anyOf":[{"$ref":"#/$defs/vs_core__types__common__Seconds__1"},{"type":"null"}],"default":null}
 StepAttempts.deadline_at optional {"anyOf":[{"$ref":"#/$defs/vs_core__types__common__Seconds__1"},{"type":"null"}],"default":null}
 StepAttempts.ended optional {"default":false,"type":"boolean"}
 StepAttempts.started required {"minimum":1,"type":"integer"}

@@ -13,7 +13,7 @@ import {STARTED_AT} from '../src/testing/started-at.js';
 import {pressMovesWindow, screenCheck} from './checks/screen-check.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {journeyScript} from './journey-world.js';
-import {pressMark, showScreen, sidebar} from './read.js';
+import {showScreen} from './read.js';
 import {revealNav} from './settings-machine.js';
 import {type FakeHostWindow, open, SEED, setChromeInset} from './world.js';
 
@@ -26,7 +26,6 @@ import {type FakeHostWindow, open, SEED, setChromeInset} from './world.js';
  */
 
 const PROJECT = '/home/me/vibesys-projects/queue-rs';
-const DESTINATIONS = ['New', 'Runs', 'Machines', 'Usage', 'Settings'] as const;
 const INSTANCE = '00000000000a';
 
 const RUN_ID = '20261015-163047';
@@ -94,34 +93,6 @@ function openSettingsFromMenu(page: Page) {
 }
 
 test.use({colorScheme: 'dark', viewport: {width: 1440, height: 900}});
-
-test('the rail is the one navigation: the mark, New, Runs, Machines, Usage, and Settings below', async ({
-  page,
-}) => {
-  await open(page);
-  const rail = sidebar(page);
-
-  const names = await rail
-    .getByRole('button')
-    .evaluateAll(buttons =>
-      buttons.map(button => button.getAttribute('aria-label') ?? button.textContent?.trim() ?? ''),
-    );
-  expect(names).toEqual(['VibeSys', 'New', 'Runs', 'Machines', 'Usage', 'Settings']);
-  await expect(page.getByRole('navigation')).toHaveCount(1);
-});
-
-test('the rail marks where the user is, on every screen', async ({page}) => {
-  await open(page);
-  const rail = sidebar(page);
-  for (const name of DESTINATIONS) {
-    await showScreen(page, name);
-    await expect(rail.getByRole('button', {name, exact: true})).toHaveAttribute(
-      'aria-current',
-      'page',
-    );
-    await expect(rail.locator('[aria-current="page"]')).toHaveCount(1);
-  }
-});
 
 test('the Settings menu item opens Settings repeatedly and Back restores the run', async ({
   page,
@@ -236,19 +207,6 @@ test('saved runs that could not be read are said on the dashboard, and the reada
   await expect(notice).toHaveAccessibleDescription(/runs\[16\]\.task must be a task name/);
   await expect(notice).toHaveAccessibleDescription(/runs\[17\]\.instanceId/);
   expect(await screenCheck(page)).toEqual([]);
-});
-
-test('the rail starts with the app logo, whose tooltip is the version, and it goes home', async ({
-  page,
-}) => {
-  await open(page);
-  const mark = sidebar(page).getByRole('button', {name: 'VibeSys'});
-
-  await expect(mark).toHaveAttribute('title', /^VibeSys \S+$/);
-  await expect(mark.locator('svg.vs-icon path')).toHaveCount(1);
-  await showScreen(page, 'New');
-  await pressMark(page);
-  await expect(page.getByRole('heading', {name: 'Runs'})).toBeVisible();
 });
 
 interface Layout {

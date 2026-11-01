@@ -116,6 +116,8 @@ def test_c_the_fold_refuses_the_report_of_a_replaced_attempt_after_core_ended_th
     if world.retries:
         play(loop, ("relaunch_resume", None))
         play(loop, ("tick", None))
+        loop.sleep_until_woken()  # the attempt the dead host lost is charged, and its re-run waits
+        play(loop, ("tick", None))
     play(loop, ("tock", 40.0))  # core ends the step at its limit; the attempt still runs
     assert not any(record.phase in OPEN for record in loop.state.records.records)
 

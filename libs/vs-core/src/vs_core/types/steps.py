@@ -152,8 +152,14 @@ class StepAttempts(Value):
     charges the attempt; adopted work is alive, and the attempt is never charged. The next attempt
     to begin settles it either way."""
     deadline_at: Seconds | None = Field(default=None, exclude_if=unset)
-    """The limit the first attempt started with: the step's own, which a cap on one attempt does
-    not move. A drain caps the request it cannot interrupt; the cap ends with that attempt."""
+    """The step's own limit: the one its first attempt started with, moved by every credit the run
+    gives the step (a quota pause, ``_quota_pause_clock``), which a cap on one attempt does not
+    move. A drain caps the request it cannot interrupt; the cap ends with that attempt."""
+    charged_at: Seconds | None = Field(default=None, exclude_if=unset)
+    """The run clock at the record that last charged an attempt: a raised one, or one ``clear``
+    found lost. The next attempt waits ``request_retries.delay(charged)`` from it, so a runner that
+    fails at once cannot spend every try in one instant. A pause charges nothing and waits for
+    nothing."""
 
     @property
     def charged(self) -> int:

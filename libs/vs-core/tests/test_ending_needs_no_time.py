@@ -27,7 +27,7 @@ from vs_core.api.recovery import EndPolicy, RunRest, Wait, at_rest, decide, requ
 from vs_sim.api.testing import examples
 
 from .recovery_loop import MOVES, Loop, Move, opens_no_unserved_step, play
-from .recovery_worlds import World, build, worlds
+from .recovery_worlds import Kind, Standing, StepSpec, World, build, worlds
 from .test_measurements import requested
 
 _RESTARTS = frozenset({"crash", "relaunch_resume"})
@@ -138,6 +138,13 @@ def test_a_cancelled_run_holding_a_measurement_ends_with_no_time_passing(
         stop_and_end(loop, late, by_search=by_search)
 
 
+@example(
+    world=World(steps=(StepSpec(2.0, Kind.QUERY, 0, Standing.PREPARED),), retries=1, closes=(0,)),
+    moves=[("tick", None), ("finish", 0), ("raise", 0)],
+    lag=False,
+    late=[],
+    by_search=False,
+)
 @settings(max_examples=examples(pr=10, nightly=300), deadline=None)
 @given(world=worlds(), moves=_STEADY, lag=st.booleans(), late=_LATE, by_search=st.booleans())
 def test_a_cancelled_run_of_any_world_ends_with_no_time_passing(

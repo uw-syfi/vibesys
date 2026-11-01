@@ -69,9 +69,12 @@ def lost(loop: Loop) -> Oneof:
 @given(retries=st.integers(0, 3))
 def test_a_step_whose_work_every_crash_loses_runs_its_bound_and_then_fails(retries: int) -> None:
     loop = started(retries)
-    for _ in range(retries + 1):
+    for crashes in range(1, retries + 2):
         play(loop, ("crash", None))
         loop.tick()
+        if crashes <= retries:  # a try remains: its re-run waits out the backoff of the loss
+            loop.sleep_until_woken()
+            loop.tick()
         invariants(loop)
     assert attempts_of(loop) == retries + 1
     assert [action for action in decide(loop.state, loop.clock) if isinstance(action, Run)] == []

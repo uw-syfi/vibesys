@@ -27,6 +27,7 @@ from vs_core._decide import (
     start_due,
     starts_run,
 )
+from vs_core._fold_rules import rules_digest
 from vs_core._refusal import RecordRefusal, RecordRefusedError, RefusalReason
 from vs_core._request_recovery import COMMAND_KINDS
 from vs_core._search_events import Translated
@@ -42,6 +43,7 @@ from vs_core._step import advance_run_time
 from vs_core._step_attempts import open_step
 from vs_core._step_log import (
     EncodedSavedRun,
+    FoldRulesChangedError,
     SavedRun,
     decode_saved,
     decode_seed,
@@ -88,6 +90,7 @@ __all__ = [
     "EndPolicy",
     "Failed",
     "Finished",
+    "FoldRulesChangedError",
     "Folded",
     "InterruptPolicy",
     "Interruption",
@@ -132,6 +135,7 @@ __all__ = [
     "request_end_policy",
     "request_interrupt_policy",
     "restore",
+    "rules_digest",
     "seed_message",
     "start_due",
     "started_message",
