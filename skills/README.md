@@ -1,27 +1,43 @@
 # Skills
 
-Everything in this directory is published as the `vibesys` plugin for Claude Code, and nothing
-outside it is. Claude Code copies a plugin's source directory when it installs it, so a skill
-that lives elsewhere in the repository cannot reach a plugin user.
+Everything in this directory is published as the `vibesys` plugin and as a set of Agent Skills,
+and nothing outside it is. Claude Code and Codex copy a plugin's source directory when they
+install it, so a skill that lives elsewhere in the repository cannot reach a user.
 
 ## Install
 
-```bash
-claude plugin marketplace add uw-syfi/vibesys
-claude plugin install vibesys@vibesys
-```
+Pick the tool you run. Each reads the same skills.
 
-The optimize loop needs Claude Code with background Bash/Agent execution, git and Python 3.10 or
+| Tool | Install | Skill names |
+| --- | --- | --- |
+| Claude Code | `claude plugin marketplace add uw-syfi/vibesys`, then `claude plugin install vibesys@vibesys` | `vibesys:optimize` |
+| Codex | `codex plugin marketplace add uw-syfi/vibesys`, then `codex plugin add vibesys@vibesys` | `vibesys:optimize` |
+| Any agent, through [`npx skills`](https://github.com/vercel-labs/skills) | `npx skills add uw-syfi/vibesys/skills --skill '*' --agent <agent>` | `optimize` |
+
+Codex reads the `.claude-plugin/marketplace.json` described below, so the repository has one
+manifest for both. `npx skills` copies each skill into the chosen agent's skills directory
+(`.agents/skills/` for Codex; add `--global` for the user-level one), with no `vibesys:` prefix:
+read `vibesys:measure` in a skill as the skill `measure`. Give it the `/skills` path, as above,
+because the repository also holds developer skills in `.agents/skills/` that
+`npx skills add uw-syfi/vibesys` would offer too. `--list` shows what a command would install.
+
+The optimize loop needs a harness with subagents and background commands, git and Python 3.10 or
 newer for its standard-library measurement scripts. It does not need the VibeSys Python package.
+
+| Harness | Domain skills | `optimize` loop |
+| --- | --- | --- |
+| Claude Code | supported | supported |
+| Codex | supported | harness mechanisms written from Codex's docs and source; **untested end to end** |
+| Other agents (`npx skills`) | supported | needs a harness file for that agent, as described below |
 
 ## Harness neutrality
 
 The search skills are harness-neutral. A harness is the program running the agent loop (Claude
-Code, opencode, ...), not the model. The skills describe abstract capabilities; a skill that
+Code, Codex, ...), not the model. The skills describe abstract capabilities; a skill that
 needs any carries `references/harness/<harness>.md`, and its `SKILL.md` points there in one
 sentence. Skills with no harness need have no such folder. The plugin packaging
-(`.claude-plugin/`) is Claude Code's delivery format and is the only Claude-specific part outside
-those folders.
+(`.claude-plugin/`) is Claude Code's delivery format, which Codex and `npx skills` also read, and
+is the only Claude-specific part outside those folders.
 
 A harness file answers only the capabilities its skill uses, under these headings:
 
@@ -58,8 +74,9 @@ them is published.
 ## Manifest
 
 `.claude-plugin/marketplace.json` declares one plugin, `vibesys`, whose source is this
-directory. Its `skills` list is generated from the tree, and its `version` is set by hand:
-without one, every commit would look like a plugin update.
+directory. Claude Code and Codex install from it, and `npx skills` uses it to find the skills
+inside vendored packs. Its `skills` list is generated from the tree, and its `version` is set
+by hand: without one, every commit would look like a plugin update.
 
 ```bash
 python3 -m scripts.published_skills --write   # regenerate the skill list after adding or removing a skill
@@ -67,14 +84,20 @@ python3 -m scripts.published_skills           # what CI runs: manifest is curren
 claude plugin validate .                      # Claude Code's own check of the manifest
 ```
 
-The check fails when the manifest differs from the tree, when a skill's `name` differs from its
-folder or breaks Claude Code's limits (lowercase letters, digits and hyphens; at most 64
-characters; a `description` of at most 1,024 characters), and when a domain skill names a
-tool that only a VibeSys run offers, such as `submit_evaluation`. Vendored packs, which stay
-byte-identical with upstream, are exempt from the tool-name rule.
+The check fails when the manifest differs from the tree, and when a skill breaks the
+[Agent Skills specification](https://agentskills.io/specification) that all three tools read:
+a `name` that differs from its folder or is not lowercase letters, digits and single hyphens
+(at most 64 characters), a `description` over 1,024 characters, a `compatibility` over 500, a
+frontmatter field the specification does not define, or a name another skill also uses. It also
+fails when a domain skill names a tool that only a VibeSys run offers, such as
+`submit_evaluation`, and when a skill's `references/harness/` files use a heading outside the
+list above or answer different capabilities from each other. Vendored packs, which stay
+byte-identical with upstream, are exempt from the tool-name rule and from the field rule: the
+Neuron pack's `argument-hint` and `context` fields are Claude Code extensions that the
+specification's reference validator rejects.
 
 Bump the marketplace plugin version for every release that changes files under `skills/`
 including fixes to scripts and instructions. Use a patch bump for compatible
 fixes, a minor bump for new capabilities, and a major bump for incompatible contracts.
 The generator preserves this manually chosen release version; CI checks the generated list,
-not release intent. Without a bump, installed Claude Code caches may retain the old payload.
+not release intent. Without a bump, installed Claude Code and Codex caches may retain the old payload.

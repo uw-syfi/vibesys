@@ -13,7 +13,9 @@ import pytest
 from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 from scripts.published_skills import (
+    HARNESS_HEADINGS,
     MANIFEST_PATH,
+    SPEC_FIELDS,
     VIBESYS_TOOL_NAMES,
     ManifestError,
     check_manifest,
@@ -53,6 +55,14 @@ def _skill(
     folder.mkdir(parents=True, exist_ok=True)
     shown = folder.name if name is None else name
     (folder / "SKILL.md").write_text(f"---\nname: {shown}\ndescription: {description}\n---\n{body}")
+
+
+def _skill_with_fields(root: Path, relative: str, fields: str) -> None:
+    """A skill whose frontmatter holds ``fields`` after a valid name and description."""
+    folder = root / "skills" / relative
+    folder.mkdir(parents=True, exist_ok=True)
+    head = f"name: {folder.name}\ndescription: Use when x.\n{fields}"
+    (folder / "SKILL.md").write_text(f"---\n{head}---\nbody\n")
 
 
 def _manifest(root: Path, manifest: object = MANIFEST) -> None:
@@ -230,6 +240,143 @@ def test_a_description_at_the_limit_and_a_missing_one_are_distinguished(tmp_path
     assert len(messages) == 1
     assert "no-description/SKILL.md" in messages[0]
     assert "`description`" in messages[0]
+
+
+SPEC_OPTIONAL = (
+    "license: Apache-2.0\n"
+    "compatibility: Needs git.\n"
+    "allowed-tools: Bash(git:*) Read\n"
+    "metadata:\n  author: example-org\n  version: 1\n"
+)
+
+
+def test_every_optional_field_the_specification_defines_is_accepted(tmp_path: Path) -> None:
+    _skill_with_fields(tmp_path, "search/optimize", SPEC_OPTIONAL)
+
+    assert _messages(tmp_path) == []
+
+
+@settings(suppress_health_check=TMP)
+@given(field=st.from_regex(r"\A[a-z][a-z-]{0,12}\Z").filter(lambda f: f not in SPEC_FIELDS))
+def test_a_field_outside_the_specification_is_reported_by_name(
+    tmp_path_factory: pytest.TempPathFactory, field: str
+) -> None:
+    root = tmp_path_factory.mktemp("tree")
+    _skill_with_fields(root, "search/optimize", f"{field}: x\n")
+
+    messages = _messages(root)
+
+    assert len(messages) == 1
+    assert f"`{field}`" in messages[0]
+
+
+def test_a_vendored_pack_may_use_fields_the_specification_lacks(tmp_path: Path) -> None:
+    _skill_with_fields(tmp_path, "domains/pack/skills/pack-runtime", "argument-hint: x\n")
+    (tmp_path / "skills/domains/pack/update.sh").write_text("#!/bin/sh\n")
+
+    assert _messages(tmp_path) == []
+
+
+@pytest.mark.parametrize(("length", "findings"), [(1, 0), (500, 0), (501, 1)])
+def test_compatibility_is_limited_to_500_characters(
+    tmp_path: Path, length: int, findings: int
+) -> None:
+    _skill_with_fields(tmp_path, "search/optimize", f"compatibility: {'x' * length}\n")
+
+    assert len(_messages(tmp_path)) == findings
+
+
+def test_metadata_must_be_a_mapping(tmp_path: Path) -> None:
+    _skill_with_fields(tmp_path, "search/optimize", "metadata: plain\n")
+
+    messages = _messages(tmp_path)
+
+    assert len(messages) == 1
+    assert "`metadata` must be a mapping" in messages[0]
+
+
+def test_two_skills_with_one_name_are_reported_once_at_the_later_path(tmp_path: Path) -> None:
+    _skill(tmp_path, "domains/pack-a/same")
+    _skill(tmp_path, "search/same")
+    _skill(tmp_path, "search/other")
+
+    messages = _messages(tmp_path)
+
+    assert len(messages) == 1
+    assert "search/same/SKILL.md" in messages[0]
+    assert "`./domains/pack-a/same`" in messages[0]
+
+
+def _harness_file(root: Path, relative: str, harness: str, headings: list[str]) -> None:
+    folder = root / "skills" / relative / "references/harness"
+    folder.mkdir(parents=True, exist_ok=True)
+    body = "".join(f"\n## {heading}\n\nText.\n" for heading in headings)
+    (folder / f"{harness}.md").write_text(f"# {harness}\n{body}")
+
+
+@settings(suppress_health_check=TMP)
+@given(
+    headings=st.sets(st.sampled_from(HARNESS_HEADINGS), min_size=1).map(
+        lambda chosen: [h for h in HARNESS_HEADINGS if h in chosen]
+    )
+)
+def test_harness_files_answering_the_same_capabilities_pass(
+    tmp_path_factory: pytest.TempPathFactory, headings: list[str]
+) -> None:
+    root = tmp_path_factory.mktemp("tree")
+    _skill(root, "search/measure")
+    for harness in ("claude-code", "codex"):
+        _harness_file(root, "search/measure", harness, headings)
+
+    assert _messages(root) == []
+
+
+def test_a_heading_outside_the_capability_list_is_reported(tmp_path: Path) -> None:
+    _skill(tmp_path, "search/measure")
+    _harness_file(tmp_path, "search/measure", "codex", ["Packaging", "Install notes"])
+
+    messages = _messages(tmp_path)
+
+    assert len(messages) == 1
+    assert "codex.md" in messages[0]
+    assert "`Install notes`" in messages[0]
+
+
+def test_headings_in_the_wrong_order_or_repeated_are_reported(tmp_path: Path) -> None:
+    _skill(tmp_path, "search/measure")
+    _harness_file(tmp_path, "search/measure", "a", [HARNESS_HEADINGS[5], HARNESS_HEADINGS[0]])
+    _harness_file(
+        tmp_path,
+        "search/measure",
+        "b",
+        [HARNESS_HEADINGS[0], HARNESS_HEADINGS[0], HARNESS_HEADINGS[5]],
+    )
+
+    messages = _messages(tmp_path)
+
+    assert len(messages) == 2
+    assert all("in the order of skills/README.md" in m for m in messages)
+
+
+def test_a_harness_that_skips_a_capability_another_answers_is_reported(tmp_path: Path) -> None:
+    _skill(tmp_path, "search/measure")
+    _harness_file(tmp_path, "search/measure", "claude-code", list(HARNESS_HEADINGS[:3]))
+    _harness_file(tmp_path, "search/measure", "codex", list(HARNESS_HEADINGS[:2]))
+
+    messages = _messages(tmp_path)
+
+    assert len(messages) == 1
+    assert "codex.md" in messages[0]
+    assert "says what to do instead" in messages[0]
+
+
+def test_a_heading_inside_a_code_fence_is_not_a_capability(tmp_path: Path) -> None:
+    _skill(tmp_path, "search/measure")
+    folder = tmp_path / "skills/search/measure/references/harness"
+    folder.mkdir(parents=True)
+    (folder / "codex.md").write_text("# Codex\n\n## Packaging\n\n```\n## not a heading\n```\n")
+
+    assert _messages(tmp_path) == []
 
 
 def test_unreadable_frontmatter_is_reported_with_the_path(tmp_path: Path) -> None:

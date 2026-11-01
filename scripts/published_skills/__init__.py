@@ -2,7 +2,7 @@
 
 Everything under ``skills/`` ships in the ``vibesys`` plugin and nothing outside it does, so
 the manifest's skill list is derived from the tree rather than written by hand, and every
-listed skill is checked against the Claude Code skill limits.
+listed skill is checked against the Agent Skills specification.
 
 Stdlib only apart from the frontmatter reader it shares with ``scripts.check_skills``, so CI's
 always-on job can run it without installing the environment.
@@ -11,6 +11,8 @@ always-on job can run it without installing the environment.
     python3 -m scripts.published_skills --write    # rewrite the manifest's skill list
 """
 
+from scripts.published_skills.findings import Finding
+from scripts.published_skills.harness import HARNESS_HEADINGS
 from scripts.published_skills.manifest import (
     MANIFEST_PATH,
     ManifestError,
@@ -18,15 +20,17 @@ from scripts.published_skills.manifest import (
     render_manifest,
 )
 from scripts.published_skills.skills import (
+    SPEC_FIELDS,
     VIBESYS_TOOL_NAMES,
-    Finding,
     PublishedSkill,
     check_skills,
     discover,
 )
 
 __all__ = [
+    "HARNESS_HEADINGS",
     "MANIFEST_PATH",
+    "SPEC_FIELDS",
     "VIBESYS_TOOL_NAMES",
     "Finding",
     "ManifestError",
