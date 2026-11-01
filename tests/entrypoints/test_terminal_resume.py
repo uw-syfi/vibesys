@@ -24,7 +24,7 @@ from vs_core.api import (
 from vs_core.api import RunStatus as CoreRunStatus
 from vs_core.api.testing import FakeView
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord, StoredEnvelope
-from vs_project.api.testing import run_execution_record
+from vs_project.api.testing import run_execution_record, seed_stored_record
 from vs_runtime.api.core import RuntimeRecord
 from vs_runtime.api.testing import CounterConfig, counter
 
@@ -95,14 +95,10 @@ def _commit_core(root: Path, *, status: CoreRunStatus, result: RunResultProposal
         event_cursor=EventCursor(sequence=0),
     )
     record = RuntimeRecord[FlowState].fresh(envelope)
-    store = Project.open(root).state_store(_RUN_ID)
-    fence = store.acquire("writer", now=0, duration=1)
-    assert fence is not None
-    store.commit(
-        None,
+    seed_stored_record(
+        Project.open(root),
+        _RUN_ID,
         StoredEnvelope(revision=0, schema_version=1, payload=record.model_dump_json().encode()),
-        fence,
-        now=0,
     )
 
 

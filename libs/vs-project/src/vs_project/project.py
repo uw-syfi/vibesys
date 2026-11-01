@@ -31,7 +31,6 @@ if TYPE_CHECKING:
     from vs_project._git_process import Git
     from vs_project._state_io import StoreDurabilityEffects
     from vs_project.api.state_store import (
-        CommitFault,
         ObservationFault,
         StateStore,
         StoreRecord,
@@ -85,22 +84,15 @@ class Project:
         self,
         run_id: str,
         *,
-        fault_plan: Iterable[CommitFault | None] = (),
-        lease_fault_plan: Iterable[CommitFault | None] = (),
         observation_fault_plan: Iterable[ObservationFault | None] = (),
         effects: StoreDurabilityEffects | None = None,
     ) -> StateStore:
-        """Open the shared atomic record and host fence for one validated run.
+        """Open the reader of one validated run's record from before the step loop.
 
         ``effects`` is the durability operations; the default is the local filesystem.
         """
         return LocalStateStore(
-            self,
-            run_id,
-            fault_plan=fault_plan,
-            lease_fault_plan=lease_fault_plan,
-            observation_fault_plan=observation_fault_plan,
-            effects=effects,
+            self, run_id, observation_fault_plan=observation_fault_plan, effects=effects
         )
 
     def stored_record(self, run_id: str) -> StoreRecord | None:

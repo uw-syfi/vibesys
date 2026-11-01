@@ -37,7 +37,7 @@ from vs_project.api import (
     RunEnvironmentRecord,
     StoredEnvelope,
 )
-from vs_project.api.testing import run_execution_record
+from vs_project.api.testing import run_execution_record, seed_stored_record
 from vs_runtime.api.core import OperatorInbox, RunControlBridge
 from vs_runtime.api.infrastructure import (
     ChannelRunControl,
@@ -78,11 +78,12 @@ def _project_with_run(root: Path, *, served: bool = True) -> str:
 
 def _record_core(root: Path, run_id: str, core: CoreState) -> None:
     """Commit ``core`` as the run's durable core record, as the run's loop would."""
-    store = Project.open(root).state_store(run_id)
-    fence = store.acquire("writer", now=0, duration=1)
-    assert fence is not None
     payload = json.dumps({"envelope": {"core": core.model_dump(mode="json")}}).encode()
-    store.commit(None, StoredEnvelope(revision=0, schema_version=1, payload=payload), fence, now=0)
+    seed_stored_record(
+        Project.open(root),
+        run_id,
+        StoredEnvelope(revision=0, schema_version=1, payload=payload),
+    )
 
 
 def _terminal(core: CoreState) -> CoreState:

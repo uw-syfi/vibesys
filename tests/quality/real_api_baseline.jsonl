@@ -8,9 +8,6 @@
 {"path": "libs/vs-faults/tests/test_faults.py", "rule": "subprocess", "count": 2}
 {"path": "libs/vs-faults/tests/test_faults.py", "rule": "interpreter", "count": 2}
 {"path": "libs/vs-project/tests/test_git_tracker_head.py", "rule": "subprocess", "count": 1}
-{"path": "libs/vs-project/tests/test_state_store_contract.py", "rule": "bare_wait", "count": 2}
-{"path": "libs/vs-project/tests/test_state_store_contract.py", "rule": "executor", "count": 2}
-{"path": "libs/vs-project/tests/test_state_store_contract.py", "rule": "threading", "count": 2}
 {"path": "libs/vs-runtime/tests/test_artifact_store.py", "rule": "executor", "count": 1}
 {"path": "libs/vs-runtime/tests/test_docker_evaluator_tools.py", "rule": "subprocess", "count": 2}
 {"path": "libs/vs-runtime/tests/test_macos_cpu_profiler.py", "rule": "subprocess", "count": 4}
@@ -145,7 +142,6 @@
 {"path": "libs/vs-project/tests/test_git_tracker_guards.py", "rule": "real_impl", "count": 2}
 {"path": "libs/vs-project/tests/test_git_tracker_staging.py", "rule": "real_impl", "count": 2}
 {"path": "libs/vs-project/tests/test_git_tracker_state_writer_interleaving.py", "rule": "real_impl", "count": 1}
-{"path": "libs/vs-project/tests/test_state_store_contract.py", "rule": "real_impl", "count": 1}
 {"path": "libs/vs-runtime/tests/test_project_materialization.py", "rule": "real_impl", "count": 1}
 {"path": "libs/vs-runtime/tests/test_project_run_resources.py", "rule": "real_impl", "count": 1}
 {"path": "libs/vs-runtime/tests/test_trusted_evaluation.py", "rule": "real_impl", "count": 2}

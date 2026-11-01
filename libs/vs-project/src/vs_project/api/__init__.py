@@ -24,7 +24,6 @@ from vs_project._control_inbox import (
     ended_unapplied,
     validate_request_id,
 )
-from vs_project._decode_memo import DecodeMemo
 from vs_project._git_backend import (
     DEFAULT_GIT_BACKEND,
     GIT_BACKEND_ENV,
@@ -118,7 +117,6 @@ from vs_project._state_io import (
 )
 from vs_project._state_models import FakeStateModels, validate_state_namespace
 from vs_project._state_store import FakeStateStore, LocalStateStore
-from vs_project._store_operations import StoreFile
 from vs_project._task_files import (
     DEFAULT_READY_TIMEOUT_SECONDS,
     OBJECTIVES_NAME,
@@ -160,19 +158,12 @@ from vs_project.api.git_repository import (
 from vs_project.api.run_history import RecordedRuns, RunHistory
 from vs_project.api.state_models import StateModels
 from vs_project.api.state_store import (
-    CommitFault,
-    CommitOutcome,
-    Committed,
-    Conflict,
-    ConflictReason,
     ObservationFault,
     QuarantinedEnvelope,
     StateStore,
-    StateStoreWriteError,
     StoredEnvelope,
     StoreFence,
     StoreRecord,
-    Unknown,
 )
 from vs_project.errors import ProjectError, StateDocumentDamagedError
 from vs_project.project import IndexedRun, Project
@@ -235,17 +226,11 @@ __all__ = [
     "CatalogueInput",
     "CheckoutOutcome",
     "CliGitRepository",
-    "CommitFault",
-    "CommitOutcome",
     "CommitSubject",
-    "Committed",
     "ComparisonInput",
     "ComparisonName",
     "ConfigurationRoot",
-    "Conflict",
-    "ConflictReason",
     "ControlInbox",
-    "DecodeMemo",
     "Ended",
     "ExampleDomain",
     "FakeStateModels",
@@ -329,18 +314,15 @@ __all__ = [
     "StateSlot",
     "StateSnapshot",
     "StateStore",
-    "StateStoreWriteError",
     "StateTransition",
     "StoreDurabilityEffects",
     "StoreFence",
-    "StoreFile",
     "StoreRecord",
     "StoredEnvelope",
     "TaskDirectory",
     "TaskName",
     "TaskNotFoundError",
     "TasksRoot",
-    "Unknown",
     "UnsafeProjectPathError",
     "WorkloadInput",
     "adoption_branch",

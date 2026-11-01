@@ -23,7 +23,7 @@ from vibesys.events import CoreEventType, RunStartedData
 from vibesys.run import EventJournal
 from vs_core.api import RunResultProposal, RunStatus, initial_state
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord, StoredEnvelope
-from vs_project.api.testing import run_execution_record
+from vs_project.api.testing import run_execution_record, seed_stored_record
 from vs_proto.api import (
     CancelAttemptIntent,
     CancelItemIntent,
@@ -282,18 +282,14 @@ def test_ended_run_refuses_new_requests_but_accepts_an_applied_retry(
             )
         }
     )
-    store = owner.state_store(run_id)
-    fence = store.acquire("writer", now=0, duration=1)
-    assert fence is not None
-    store.commit(
-        None,
+    seed_stored_record(
+        owner,
+        run_id,
         StoredEnvelope(
             revision=0,
             schema_version=1,
             payload=json.dumps({"envelope": {"core": ended.model_dump(mode="json")}}).encode(),
         ),
-        fence,
-        now=0,
     )
     accepted = call(owner, run_id, Oneof("pause", PauseIntent()))
     assert accepted.result is not None
@@ -389,18 +385,14 @@ def _store_observed_epoch(owner: Project, run_id: str) -> None:
             )
         }
     )
-    store = owner.state_store(run_id)
-    fence = store.acquire("writer", now=0, duration=1)
-    assert fence is not None
-    store.commit(
-        None,
+    seed_stored_record(
+        owner,
+        run_id,
         StoredEnvelope(
             revision=0,
             schema_version=1,
             payload=json.dumps({"envelope": {"core": core.model_dump(mode="json")}}).encode(),
         ),
-        fence,
-        now=0,
     )
 
 
@@ -424,18 +416,14 @@ def _store_ending(owner: Project, run_id: str, ending: str) -> None:
                 )
             }
         )
-        store = owner.state_store(run_id)
-        fence = store.acquire("writer", now=0, duration=1)
-        assert fence is not None
-        store.commit(
-            None,
+        seed_stored_record(
+            owner,
+            run_id,
             StoredEnvelope(
                 revision=0,
                 schema_version=1,
                 payload=json.dumps({"envelope": {"core": ended.model_dump(mode="json")}}).encode(),
             ),
-            fence,
-            now=0,
         )
 
 
