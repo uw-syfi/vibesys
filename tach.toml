@@ -234,7 +234,7 @@ depends_on = ["vs_decode.api", "server.host_api", "server.host_helper_requests",
 [[modules]]
 # The host helper's request answering: one request through the host's interfaces.
 path = "server.host_helper_requests"
-depends_on = ["server.host_operation_reads", "server.host_operation_types_generated", "vibesys.api.host_operations", "vs_proto", "vs_decode.api", "server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_examples", "server.host_compute_runtime", "server.host_helper_logs", "server.host_helper_preflight", "server.host_machine_facts", "server.host_preflight", "server.host_run_dashboard", "server.host_run_events", "server.host_run_reader", "server.host_run_summary", "server.host_helper_readers", "server.registry", "server.relay", "server.run_digest", "server.run_summary", "server.usage_window", "vs_project", "vs_sim.api", "server.host_run_reads", "server", "server.host_harness", "server.usage_limits", "server.usage_limits_store", "vs_agent.api.usage_limits"]
+depends_on = ["server.host_operation_reads", "server.host_operation_types_generated", "vibesys.api.host_operations", "vs_proto", "vs_decode.api", "server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_examples", "server.host_compute_runtime", "server.host_helper_logs", "server.host_helper_preflight", "server.host_machine_facts", "server.host_preflight", "server.host_run_dashboard", "server.host_run_events", "server.host_run_reader", "server.host_run_summary", "server.host_helper_readers", "server.registry", "server.relay", "server.run_digest", "server.run_summary", "vs_project", "vs_sim.api", "server.host_run_reads", "server", "server.host_harness", "server.usage_limits", "server.usage_limits_store", "vs_agent.api.usage_limits"]
 
 [[modules]]
 # The read-only servers Chat reads ended runs through: found by run, started on demand.
@@ -379,12 +379,6 @@ depends_on = ["server.host_api", "server.run_digest", "server.run_summary", "ser
 [[interfaces]]
 from = ["server.usage_scan"]
 expose = ["COLD_BUDGET_BYTES", "CollectedRuns", "FilePriceBook", "FileRollupStore", "JsonlUsageJournal", "ProtoRateStore", "RATES_REFRESH_TIMEOUT_S", "UsageProjects", "collect_runs", "refresh_rates", "save_prices", "HttpsFetcher", "source_identity", "stored_pricing", "usage_directory", "usage_summary"]
-
-[[modules]]
-# What runs spent in a window, summed from their usage records: a pure function. Light, and
-# loaded by the host helper on the first usage.window request, not for hello.
-path = "server.usage_window"
-depends_on = ["server.host_envelope", "server.host_run_summary"]
 
 [[modules]]
 # A run's digest (ideas, best ratio, duration, ending) folded from its journal in one pass.
@@ -2352,23 +2346,23 @@ from = ["server.host_operation_reads"]
 expose = ["HostReadFacts", "HostReadSource", "ReadRefusedError", "read_failure_category", "answer_registered_read"]
 
 [[modules]]
-# The reads of a project's runs (listing, digests, usage window), shared by the helper's runs.list
-# and usage.window and the registered ListRunDigests and UsageWindow. Light, like the helper.
+# The reads of a project's runs (listing, digests), shared by the helper's runs.list and the
+# registered ListRunDigests. Light, like the helper.
 path = "server.host_run_reads"
-depends_on = ["server.host_api", "server.host_envelope", "server.host_examples", "server.host_run_dashboard", "server.host_run_summary", "server.registry", "server.run_digest", "server.run_summary", "server.usage_window", "vs_sim.api"]
+depends_on = ["server.host_api", "server.host_envelope", "server.host_examples", "server.host_run_dashboard", "server.host_run_summary", "server.registry", "server.run_digest", "server.run_summary", "vs_sim.api"]
 
 [[interfaces]]
 from = ["server.host_run_reads"]
-expose = ["ProjectRun", "RunProjects", "RunFacts", "run_summaries", "project_runs", "named_run_digests", "usage_window_reply"]
+expose = ["ProjectRun", "RunProjects", "RunFacts", "run_summaries", "project_runs", "named_run_digests"]
 
 [[modules]]
-# The digests and the usage window restated as the registered reads' messages.
+# The run digests restated as the registered read's message.
 path = "server.host_run_wire"
-depends_on = ["server.host_api", "server.host_run_dashboard", "server.host_run_summary", "vs_proto"]
+depends_on = ["server.host_api", "server.host_run_dashboard", "vs_proto"]
 
 [[interfaces]]
 from = ["server.host_run_wire"]
-expose = ["digests_response", "usage_response"]
+expose = ["digests_response"]
 
 [[interfaces]]
 from = ["server.host_compute_runtime"]

@@ -39,7 +39,6 @@ from server.host_api import (
     RunStartRequest,
     RunStopRequest,
     TasksListRequest,
-    UsageWindowRequest,
 )
 
 REGISTRY_READ_METHODS = frozenset(
@@ -68,7 +67,6 @@ RegistryReadRequest = (
 )
 UnmigratedHelperRequest = (
     RunReaderRequest
-    | UsageWindowRequest
     | AgentLoginsStartRequest
     | ComputeRemoveClusterRequest
     | ComputeAddClusterRequest

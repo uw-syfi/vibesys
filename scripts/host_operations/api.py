@@ -42,8 +42,9 @@ _BOUNDED_READ = 2
 _STREAM = 2
 _CHECKOUT = 1
 _FAILURE_RESPONSE_TAG = 2
-_RETIRED_OPERATIONS = frozenset({37})
-"""Ids and tags of removed operations: the paged ``ListSavedRuns``. A new use would misroute a peer."""
+_RETIRED_OPERATIONS = frozenset({37, 42})
+"""Ids and tags of removed operations: the paged ``ListSavedRuns`` and ``UsageWindow``. A new use
+would misroute a peer."""
 # Tags and length prefixes of the response, the entry, its key and its value.
 _ENTRY_FRAMING_BYTES = 16
 

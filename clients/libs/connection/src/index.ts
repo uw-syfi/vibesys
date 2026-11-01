@@ -70,7 +70,6 @@ export {
   digestEntries,
   type RegistryRunReads,
   registryRunReads,
-  usageWindowEntry,
 } from './shell/registry-run-reads.js';
 export {
   type RegistrySavedRuns,

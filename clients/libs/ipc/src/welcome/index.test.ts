@@ -73,7 +73,6 @@ const VALID_ARGUMENTS: Readonly<
   [WELCOME_CHANNELS.runDigests]: ['local', '/srv/project', ['run-1']],
   [WELCOME_CHANNELS.projectRuns]: ['local', '/srv/project', 1],
   [WELCOME_CHANNELS.cancelProjectRuns]: [1],
-  [WELCOME_CHANNELS.usageWindow]: ['local', '/srv/project', ['run-1'], 1_000, 2_000],
   [WELCOME_CHANNELS.usageSummary]: ['local', ['/srv/project'], [0, 900_000], 1_000],
   [WELCOME_CHANNELS.usageRatesRefresh]: ['local', false, 1_000],
   [WELCOME_CHANNELS.usageLimits]: ['local', 60, 1_000],
@@ -176,17 +175,6 @@ describe('parseWelcomeRequest', () => {
     expect(() =>
       parseWelcomeRequest(WELCOME_CHANNELS.resume, ['local', '/p', '-oProxyCommand']),
     ).toThrow('a run id is 1-128 lowercase');
-  });
-
-  test('a usage window is refused when the helper would refuse it, before any request', () => {
-    const ask = (since: unknown, until: unknown, ids: unknown = ['run-1']) =>
-      parseWelcomeRequest(WELCOME_CHANNELS.usageWindow, ['local', '/p', ids, since, until]);
-    expect(ask(1_000, 2_000)).toMatchObject({kind: 'usage-window', since: 1_000, until: 2_000});
-    expect(() => ask(2_000, 2_000)).toThrow('must end after it begins');
-    expect(() => ask(0, 337 * 3_600_000)).toThrow('at most 336 hours');
-    expect(() => ask('0', 2_000)).toThrow('start');
-    expect(() => ask(0, Number.NaN)).toThrow('end');
-    expect(() => ask(0, 2_000, 'run-1')).toThrow('at most 100 runs');
   });
 
   test('a usage summary is refused when the host would refuse it, before any request', () => {

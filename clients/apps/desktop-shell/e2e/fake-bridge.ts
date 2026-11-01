@@ -65,12 +65,7 @@ export type NewRunMethods =
   | 'startRun';
 
 /** What `installFakeUsage` provides: what a machine made of its usage, its prices, and saving them. */
-export type UsageMethods =
-  | 'usageWindow'
-  | 'usageSummary'
-  | 'usageLimits'
-  | 'usageRatesRefresh'
-  | 'usagePricesSave';
+export type UsageMethods = 'usageSummary' | 'usageLimits' | 'usageRatesRefresh' | 'usagePricesSave';
 
 /** What `installFakeExampleDestination` provides: what an example's destination holds. */
 export type ExampleDestinationMethods = 'exampleDestination';
@@ -513,8 +508,6 @@ export function installFakeUsage(seed: FakeBridgeSeed): void {
     };
   };
   Object.assign((window as unknown as {vibesysWelcome: object}).vibesysWelcome, {
-    // The question this page replaced: no screen asks it any more.
-    usageWindow: () => Promise.resolve({ok: true, value: {kind: 'unsupported'}}),
     usageSummary: (host: string, projects: unknown, edges: number[], now: number) => {
       asked.push({host, projects, edges, now});
       const own = answers[host];
@@ -525,7 +518,7 @@ export function installFakeUsage(seed: FakeBridgeSeed): void {
           : {kind: 'summary', summary: summaryOf(host, own, edges)};
       return Promise.resolve({ok: true, value});
     },
-  } satisfies FakeProvides<'usageWindow' | 'usageSummary'>);
+  } satisfies FakeProvides<'usageSummary'>);
 }
 
 /**

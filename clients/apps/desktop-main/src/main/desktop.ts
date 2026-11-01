@@ -50,7 +50,6 @@ export interface DesktopDeps {
     | 'readSpan'
     | 'runDigests'
     | 'projectRuns'
-    | 'usageWindow'
     | 'usageSummary'
     | 'usageRatesRefresh'
     | 'usageLimits'
@@ -270,7 +269,6 @@ export class Desktop {
       WelcomeRequest,
       {
         readonly kind:
-          | 'usage-window'
           | 'usage-summary'
           | 'usage-rates-refresh'
           | 'usage-limits'
@@ -280,15 +278,6 @@ export class Desktop {
   ): Promise<unknown> {
     const {hosts} = this.#deps;
     switch (request.kind) {
-      case 'usage-window':
-        return hosts.usageWindow(
-          request.host,
-          request.project,
-          request.runIds,
-          request.since,
-          request.until,
-        );
-
       case 'usage-summary':
         return hosts.usageSummary(request.host, request.projects, request.edges, request.now);
       case 'usage-rates-refresh':
@@ -373,7 +362,6 @@ export class Desktop {
       case 'project-runs':
       case 'cancel-project-runs':
         return this.#listing(request, rendererGeneration);
-      case 'usage-window':
       case 'usage-summary':
       case 'usage-rates-refresh':
       case 'usage-limits':

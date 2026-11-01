@@ -267,70 +267,6 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "AgentLoginsStartRequest",
       "type": "object"
     },
-    "AgentSpend": {
-      "additionalProperties": false,
-      "description": "What one kind of agent spent in the window: a role on a harness and model.\n\nA part the journal did not record for a turn is ``None``, so the turns of an execution whose\nstart is missing form their own entry.",
-      "properties": {
-        "role": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Role"
-        },
-        "harness": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Harness"
-        },
-        "model": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Model"
-        },
-        "cost_usd": {
-          "minimum": 0,
-          "title": "Cost Usd",
-          "type": "number"
-        },
-        "turns": {
-          "minimum": 0,
-          "title": "Turns",
-          "type": "integer"
-        },
-        "unpriced_turns": {
-          "default": 0,
-          "minimum": 0,
-          "title": "Unpriced Turns",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "role",
-        "harness",
-        "model",
-        "cost_usd",
-        "turns"
-      ],
-      "title": "AgentSpend",
-      "type": "object"
-    },
     "ApiKeyLogin": {
       "additionalProperties": false,
       "description": "Signed in with an API key; where it is held is named, the key never.",
@@ -2724,7 +2660,6 @@ const hostHelperSchema: Record<string, unknown> = {
         "agent_logins",
         "project_goal",
         "example_destination",
-        "usage_window",
         "run_trace",
         "run_ending",
         "chat_ended_runs",
@@ -2735,7 +2670,7 @@ const hostHelperSchema: Record<string, unknown> = {
     },
     "IdeaPoint": {
       "additionalProperties": false,
-      "description": "One idea of a run on the performance chart: its result against the input and its verdict.\n\n``ratio`` is worded like ``RunDigest.adopted_ratio`` (an improvement over the input, for a\n``min`` objective the input's value over the result's); ``None`` when the idea has no\nmeasurement against the input (it failed before one, or still works).\n\n``at`` is when the idea's result landed, by the journal's event clock: the time of the gate event\nthat last wrote the reading the idea is plotted by, else of the idea's last event; ``None`` when\nthe journal's event has no readable time. It is the one definition of when a ``kept`` idea became\nthe best (``usage.window`` counts new bests by it); the span clock orders the chart but is not a\ntime of day.",
+      "description": "One idea of a run on the performance chart: its result against the input and its verdict.\n\n``ratio`` is worded like ``RunDigest.adopted_ratio`` (an improvement over the input, for a\n``min`` objective the input's value over the result's); ``None`` when the idea has no\nmeasurement against the input (it failed before one, or still works).\n\n``at`` is when the idea's result landed, by the journal's event clock: the time of the gate event\nthat last wrote the reading the idea is plotted by, else of the idea's last event; ``None`` when\nthe journal's event has no readable time. It is the one definition of when a ``kept`` idea became\nthe best (the usage rollup counts new bests by it); the span clock orders the chart but is not a\ntime of day.",
       "properties": {
         "ratio": {
           "anyOf": [
@@ -6036,46 +5971,6 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "RunRole",
       "type": "string"
     },
-    "RunSpend": {
-      "additionalProperties": false,
-      "description": "What one run spent in the window; only runs that had a turn end in it are listed.",
-      "properties": {
-        "run_id": {
-          "minLength": 1,
-          "title": "Run Id",
-          "type": "string"
-        },
-        "task": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Task"
-        },
-        "cost_usd": {
-          "minimum": 0,
-          "title": "Cost Usd",
-          "type": "number"
-        },
-        "unpriced_turns": {
-          "default": 0,
-          "minimum": 0,
-          "title": "Unpriced Turns",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "run_id",
-        "task",
-        "cost_usd"
-      ],
-      "title": "RunSpend",
-      "type": "object"
-    },
     "RunStartCompensationEvidence": {
       "discriminator": {
         "mapping": {
@@ -8298,187 +8193,6 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "UsageRecord",
       "type": "object"
     },
-    "UsageWindowReply": {
-      "additionalProperties": false,
-      "description": "What the Usage page shows for one window.\n\nCosts are the sums of the turns' reported ``cost_usd`` (a turn that reported none counts in\n``unpriced_turns`` and adds nothing, so a total is a lower bound while it is not zero). A turn\nwith no recorded end time cannot be placed in a window: it counts in ``untimed_turns`` and\nnowhere else. ``new_bests`` counts the ideas kept (``IdeaVerdict.KEPT``) whose result landed in\nthe window, and ``cost_per_new_best_usd`` is ``spent_usd`` over it, ``None`` when there is none.\nA run's kept ideas beyond ``DASHBOARD_MAX_POINTS`` are not counted.",
-      "properties": {
-        "request_id": {
-          "maxLength": 128,
-          "minLength": 1,
-          "title": "Request Id",
-          "type": "string"
-        },
-        "type": {
-          "const": "usage.window",
-          "default": "usage.window",
-          "title": "Type",
-          "type": "string"
-        },
-        "since": {
-          "format": "date-time",
-          "title": "Since",
-          "type": "string"
-        },
-        "until": {
-          "format": "date-time",
-          "title": "Until",
-          "type": "string"
-        },
-        "spent_usd": {
-          "minimum": 0,
-          "title": "Spent Usd",
-          "type": "number"
-        },
-        "spend_per_hour_usd": {
-          "minimum": 0,
-          "title": "Spend Per Hour Usd",
-          "type": "number"
-        },
-        "tokens": {
-          "$ref": "#/$defs/TokenTally"
-        },
-        "turns": {
-          "minimum": 0,
-          "title": "Turns",
-          "type": "integer"
-        },
-        "unpriced_turns": {
-          "minimum": 0,
-          "title": "Unpriced Turns",
-          "type": "integer"
-        },
-        "untimed_turns": {
-          "minimum": 0,
-          "title": "Untimed Turns",
-          "type": "integer"
-        },
-        "new_bests": {
-          "minimum": 0,
-          "title": "New Bests",
-          "type": "integer"
-        },
-        "cost_per_new_best_usd": {
-          "anyOf": [
-            {
-              "minimum": 0,
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Cost Per New Best Usd"
-        },
-        "by_run": {
-          "items": {
-            "$ref": "#/$defs/RunSpend"
-          },
-          "maxItems": 100,
-          "title": "By Run",
-          "type": "array"
-        },
-        "by_agent": {
-          "items": {
-            "$ref": "#/$defs/AgentSpend"
-          },
-          "maxItems": 64,
-          "title": "By Agent",
-          "type": "array"
-        },
-        "agents_omitted": {
-          "minimum": 0,
-          "title": "Agents Omitted",
-          "type": "integer"
-        },
-        "missing_runs": {
-          "items": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "maxItems": 100,
-          "title": "Missing Runs",
-          "type": "array"
-        }
-      },
-      "required": [
-        "request_id",
-        "type",
-        "since",
-        "until",
-        "spent_usd",
-        "spend_per_hour_usd",
-        "tokens",
-        "turns",
-        "unpriced_turns",
-        "untimed_turns",
-        "new_bests",
-        "cost_per_new_best_usd",
-        "by_run",
-        "by_agent",
-        "agents_omitted",
-        "missing_runs"
-      ],
-      "title": "UsageWindowReply",
-      "type": "object"
-    },
-    "UsageWindowRequest": {
-      "additionalProperties": false,
-      "description": "What the named runs of a project spent in ``[since, until)``.\n\n``until`` is \"now\" for the reply: the helper reads no clock for it, so a client names the time it\nis asking at (or the end of a past window) and the answer is a function of the journals and\nthese two instants. A turn is placed at the time it ended (``UsageRecord.ended_at``).",
-      "properties": {
-        "request_id": {
-          "maxLength": 128,
-          "minLength": 1,
-          "title": "Request Id",
-          "type": "string"
-        },
-        "deadline_ms": {
-          "exclusiveMinimum": 0,
-          "maximum": 3600000,
-          "title": "Deadline Ms",
-          "type": "integer"
-        },
-        "type": {
-          "const": "usage.window",
-          "default": "usage.window",
-          "title": "Type",
-          "type": "string"
-        },
-        "project": {
-          "title": "Project",
-          "type": "string"
-        },
-        "run_ids": {
-          "items": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "maxItems": 100,
-          "title": "Run Ids",
-          "type": "array"
-        },
-        "since": {
-          "format": "date-time",
-          "title": "Since",
-          "type": "string"
-        },
-        "until": {
-          "format": "date-time",
-          "title": "Until",
-          "type": "string"
-        }
-      },
-      "required": [
-        "request_id",
-        "deadline_ms",
-        "type",
-        "project",
-        "run_ids",
-        "since",
-        "until"
-      ],
-      "title": "UsageWindowRequest",
-      "type": "object"
-    },
     "WorkerStartRefusedCompensationFailure": {
       "additionalProperties": false,
       "description": "The helper could not start the worker that owns the compensating stop.",
@@ -8568,8 +8282,7 @@ const hostHelperSchema: Record<string, unknown> = {
           "runs.read_events": "#/$defs/RunsReadEventsRequest",
           "runs.read_tail": "#/$defs/RunsReadTailRequest",
           "runs.summary": "#/$defs/RunsSummaryRequest",
-          "tasks.list": "#/$defs/TasksListRequest",
-          "usage.window": "#/$defs/UsageWindowRequest"
+          "tasks.list": "#/$defs/TasksListRequest"
         },
         "propertyName": "type"
       },
@@ -8677,9 +8390,6 @@ const hostHelperSchema: Record<string, unknown> = {
           "$ref": "#/$defs/ExamplesDestinationRequest"
         },
         {
-          "$ref": "#/$defs/UsageWindowRequest"
-        },
-        {
           "$ref": "#/$defs/RunReaderRequest"
         }
       ],
@@ -8724,8 +8434,7 @@ const hostHelperSchema: Record<string, unknown> = {
           "runs.read_events": "#/$defs/RunsReadEventsReply",
           "runs.read_tail": "#/$defs/RunsReadTailReply",
           "runs.summary": "#/$defs/RunsSummaryReply",
-          "tasks.list": "#/$defs/TasksListReply",
-          "usage.window": "#/$defs/UsageWindowReply"
+          "tasks.list": "#/$defs/TasksListReply"
         },
         "propertyName": "type"
       },
@@ -8833,9 +8542,6 @@ const hostHelperSchema: Record<string, unknown> = {
           "$ref": "#/$defs/ExamplesDestinationReply"
         },
         {
-          "$ref": "#/$defs/UsageWindowReply"
-        },
-        {
           "$ref": "#/$defs/RunReaderReply"
         },
         {
@@ -8889,7 +8595,6 @@ const hostHelperSchema: Record<string, unknown> = {
     "compute.remove_cluster": "machine_compute",
     "agent_logins.list": "agent_logins",
     "agent_logins.start": "agent_logins",
-    "usage.window": "usage_window",
     "run.reader": "chat_ended_runs"
   },
   "x-vibesys-feature-by-field": {

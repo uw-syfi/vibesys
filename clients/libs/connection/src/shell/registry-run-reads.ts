@@ -1,8 +1,7 @@
-/** Run digests and the usage window, read through the gateway's registered reads.
+/** Run digests, read through the gateway's registered reads.
 
-A digest says at a glance what a run's journal holds (the sidebar's rows and the dashboard's tiles);
-the usage window sums what runs spent in a span of time. Both come from the host's one reader of
-a project's runs, so neither depends on a helper connection. */
+A digest says at a glance what a run's journal holds (the sidebar's rows and the dashboard's tiles).
+It comes from the host's one reader of a project's runs, so it depends on no helper connection. */
 import {type Timestamp, timestampMs} from '@bufbuild/protobuf/wkt';
 import type {RunAttention, RunClosing} from '@vibesys/contracts/host-helper';
 import type {
@@ -11,18 +10,12 @@ import type {
   RunDigestEntry,
   RunDigestsReply,
   RunEnd,
-  RunSpend,
-  UsageWindowEntry,
-  UsageWindowOutcome,
 } from '@vibesys/hosts';
 import {
   acceptListRunDigests,
-  acceptUsageWindow,
   callListRunDigests,
-  callUsageWindow,
   IdeaVerdict,
   type ListRunDigestsResponse,
-  type UsageWindowResponse,
   RunAttention as WireAttention,
   RunClosing as WireClosing,
   type RunDashboard as WireDashboard,
@@ -41,15 +34,6 @@ export interface RegistryRunReads {
     runIds: readonly string[],
     signal: AbortSignal,
   ): Promise<RunDigestsReply>;
-  /** What `runIds` spent in `[since, until)`, both in milliseconds. */
-  usageWindow(
-    host: HostId,
-    project: string,
-    runIds: readonly string[],
-    since: number,
-    until: number,
-    signal: AbortSignal,
-  ): Promise<UsageWindowOutcome>;
 }
 
 type RunDigestOutcome = NonNullable<RunEnd>['outcome'];
@@ -155,50 +139,6 @@ export function digestEntries(response: ListRunDigestsResponse): Map<string, Run
   return entries;
 }
 
-/** What a usage window response says, in the app's terms. */
-export function usageWindowEntry(response: UsageWindowResponse): UsageWindowEntry {
-  const count = (value: bigint | undefined): number | null =>
-    value === undefined ? null : Number(value);
-  const tokens = response.tokens;
-  return {
-    since: ms(response.since) ?? 0,
-    until: ms(response.until) ?? 0,
-    spentUsd: response.spentUsd,
-    spendPerHourUsd: response.spendPerHourUsd,
-    tokens: {
-      input: count(tokens?.input),
-      cache_read: count(tokens?.cacheRead),
-      cache_write: count(tokens?.cacheWrite),
-      output: count(tokens?.output),
-      reasoning: count(tokens?.reasoning),
-    },
-    turns: response.turns,
-    unpricedTurns: response.unpricedTurns,
-    unpricedItemised: true,
-    untimedTurns: response.untimedTurns,
-    newBests: response.newBests,
-    costPerNewBestUsd: response.costPerNewBestUsd ?? null,
-    byRun: response.byRun.map(
-      (run): RunSpend => ({
-        runId: run.runId,
-        task: run.task ?? null,
-        costUsd: run.costUsd,
-        unpricedTurns: run.unpricedTurns,
-      }),
-    ),
-    byAgent: response.byAgent.map(agent => ({
-      role: agent.role ?? null,
-      harness: agent.harness ?? null,
-      model: agent.model ?? null,
-      costUsd: agent.costUsd,
-      turns: agent.turns,
-      unpricedTurns: agent.unpricedTurns,
-    })),
-    agentsOmitted: response.agentsOmitted,
-    missingRuns: [...response.missingRuns],
-  };
-}
-
 export function registryRunReads(ports: RegistryReadPorts): RegistryRunReads {
   async function transport(host: HostId) {
     const checkout = requireCheckout(await ports.checkout(host), null);
@@ -217,20 +157,6 @@ export function registryRunReads(ports: RegistryReadPorts): RegistryRunReads {
         signal,
       );
       return {kind: 'digests', runs: digestEntries(response)};
-    },
-    async usageWindow(host, project, runIds, since, until, signal) {
-      const response = await callUsageWindow(
-        await transport(host),
-        acceptUsageWindow({
-          requestId: newRequestId(),
-          project,
-          runIds: [...runIds],
-          since: {seconds: BigInt(Math.floor(since / 1000)), nanos: (since % 1000) * 1_000_000},
-          until: {seconds: BigInt(Math.floor(until / 1000)), nanos: (until % 1000) * 1_000_000},
-        }),
-        signal,
-      );
-      return {kind: 'usage', usage: usageWindowEntry(response)};
     },
   };
 }

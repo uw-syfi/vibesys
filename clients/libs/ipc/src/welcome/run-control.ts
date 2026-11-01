@@ -17,9 +17,7 @@ import {
   type UsageRateOverrideEntry,
   type UsageRatesOutcome,
   type UsageSummaryOutcome,
-  type UsageWindowOutcome,
   usageSummaryRefusal,
-  usageWindowRefusal,
 } from '@vibesys/hosts';
 import {exactResumeRunId, type ResumeRunId} from '@vibesys/runs';
 import type {WelcomeResult} from './types.js';
@@ -37,7 +35,6 @@ export const RUN_CONTROL_CHANNELS = {
   runDigests: 'vibesys:welcome:run-digests',
   projectRuns: 'vibesys:welcome:project-runs',
   cancelProjectRuns: 'vibesys:welcome:cancel-project-runs',
-  usageWindow: 'vibesys:welcome:usage-window',
   usageSummary: 'vibesys:welcome:usage-summary',
   usageRatesRefresh: 'vibesys:welcome:usage-rates-refresh',
   usageLimits: 'vibesys:welcome:usage-limits',
@@ -250,18 +247,6 @@ export interface RunControlWelcomeBridge {
   /** End the listing `token` named, which the view no longer wants; one that answered is a no-op. */
   cancelProjectRuns(token: number): Promise<WelcomeResult<null>>;
   /**
-   * What `runIds` of `project` on `host` spent in `[since, until)`, both in milliseconds
-   * (`usage.window`, feature `usage_window`); or that this host's VibeSys does not offer it.
-   * `until` is "now" for the rate: the view names it.
-   */
-  usageWindow(
-    host: HostKey,
-    project: string,
-    runIds: readonly string[],
-    since: number,
-    until: number,
-  ): Promise<WelcomeResult<UsageWindowOutcome>>;
-  /**
    * What `host` made of its usage over the buckets between `edges` (milliseconds, whole quarter
    * hours, increasing) in each of `projects`: figures priced at today's list prices; or that this
    * host's VibeSys does not offer it. `now` is the time the view asks at: the host reads no clock.
@@ -360,14 +345,6 @@ export type RunControlRequest =
     }
   | {readonly kind: 'cancel-project-runs'; readonly token: number}
   | {
-      readonly kind: 'usage-window';
-      readonly host: HostId;
-      readonly project: string;
-      readonly runIds: readonly string[];
-      readonly since: number;
-      readonly until: number;
-    }
-  | {
       readonly kind: 'usage-summary';
       readonly host: HostId;
       readonly projects: readonly string[];
@@ -443,7 +420,7 @@ function ageSeconds(value: unknown): number {
 
 function instant(value: unknown, which: string): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
-    throw new Error(`the usage window's ${which} must be a time in milliseconds`);
+    throw new Error(`the usage ${which} must be a time in milliseconds`);
   }
   return value;
 }
@@ -659,20 +636,5 @@ export function parseRunControlRequest(
       };
     case RUN_CONTROL_CHANNELS.cancelProjectRuns:
       return {kind: 'cancel-project-runs', token: operationToken(first, 'project listing')};
-    case RUN_CONTROL_CHANNELS.usageWindow: {
-      const ids = runIds(third);
-      const since = instant(fourth, 'start');
-      const until = instant(fifth, 'end');
-      const refusal = usageWindowRefusal(ids, since, until);
-      if (refusal !== null) throw new Error(refusal);
-      return {
-        kind: 'usage-window',
-        host: hostFromKey(first),
-        project: project(second),
-        runIds: ids,
-        since,
-        until,
-      };
-    }
   }
 }

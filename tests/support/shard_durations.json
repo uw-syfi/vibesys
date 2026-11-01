@@ -998,7 +998,6 @@
  "tests/server/test_subscription_tracker.py": 0.15,
  "tests/server/test_transport_subscription.py": 8.94,
  "tests/server/test_unix_transport_faults.py": 2.91,
- "tests/server/test_usage_window.py": 1.04,
  "tests/server/test_web_port_discovery.py": 0.12,
  "tests/server/test_websocket_transport.py": 7.37,
  "tests/slurm_cluster/test_agent_surface.py": 0.0,

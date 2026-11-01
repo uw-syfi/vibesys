@@ -24,7 +24,6 @@ import {
   type HostListing,
   hostKey,
   usageSummaryRefusal,
-  usageWindowRefusal,
 } from '@vibesys/hosts';
 import {FailureCategory, OperationFailed, RunLiveness} from '@vibesys/proto';
 import {
@@ -1026,14 +1025,9 @@ describe('Hosts.readSummary', () => {
   });
 });
 
-/** The registered reads for digests and the usage window, answering what the test says. */
+/** The registered read for digests, answering what the test says. */
 class FakeRunReads implements RegistryRunReads {
   readonly digested: {readonly project: string; readonly runIds: readonly string[]}[] = [];
-  readonly windows: {
-    readonly runIds: readonly string[];
-    readonly since: number;
-    readonly until: number;
-  }[] = [];
   failure: Error | null = null;
 
   async digests(_host: HostId, project: string, runIds: readonly string[]) {
@@ -1041,21 +1035,9 @@ class FakeRunReads implements RegistryRunReads {
     if (this.failure !== null) throw this.failure;
     return {kind: 'digests' as const, runs: new Map()};
   }
-
-  async usageWindow(
-    _host: HostId,
-    _project: string,
-    runIds: readonly string[],
-    since: number,
-    until: number,
-  ) {
-    this.windows.push({runIds, since, until});
-    if (this.failure !== null) throw this.failure;
-    return {kind: 'unsupported' as const};
-  }
 }
 
-/** Hosts whose helper cannot start: digests and the usage window must not need it. */
+/** Hosts whose helper cannot start: digests must not need it. */
 function runReadsSubject() {
   const reads = new FakeRunReads();
   let helperAcquisitions = 0;
@@ -1118,59 +1100,6 @@ describe('Hosts.runDigests', () => {
     reads.failure = new Error('project missing');
 
     await expect(hosts.runDigests(LOCAL, '/srv/nowhere', [])).rejects.toThrow('project missing');
-  });
-});
-
-describe('Hosts.usageWindow', () => {
-  const SINCE = Date.parse('2026-10-17T00:00:00Z');
-  const UNTIL = Date.parse('2026-10-18T00:00:00Z');
-
-  test('asks the registered read for the window in milliseconds and never the helper', async () => {
-    const {hosts, reads, manager, acquisitions} = runReadsSubject();
-    await using _manager = manager;
-
-    await hosts.usageWindow(LOCAL, '/srv/project', ['run-1', 'run-9'], SINCE, UNTIL);
-
-    expect(reads.windows).toEqual([{runIds: ['run-1', 'run-9'], since: SINCE, until: UNTIL}]);
-    expect(acquisitions()).toBe(0);
-  });
-
-  test('a host without the read answers a typed unsupported outcome', async () => {
-    const {hosts, reads, manager} = runReadsSubject();
-    await using _manager = manager;
-    reads.failure = new OperationFailed(FailureCategory.UNSUPPORTED, 'older checkout');
-
-    await expect(hosts.usageWindow(LOCAL, '/srv/project', [], SINCE, UNTIL)).resolves.toEqual({
-      kind: 'unsupported',
-    });
-  });
-
-  test('property: a window or run list the host would refuse is refused here, and only that', async () => {
-    await fc.assert(
-      fc.asyncProperty(
-        fc.nat({max: 120}),
-        fc.integer({min: -10, max: 400}),
-        fc.integer({min: -10, max: 400}),
-        async (count, sinceHours, untilHours) => {
-          const {hosts, reads, manager} = runReadsSubject();
-          await using _manager = manager;
-          const ids = Array.from({length: count}, (_, at) => `run-${at}`);
-          const since = SINCE + sinceHours * 3_600_000;
-          const until = SINCE + untilHours * 3_600_000;
-          const refused = usageWindowRefusal(ids, since, until) !== null;
-
-          const asked = hosts.usageWindow(LOCAL, '/srv/project', ids, since, until);
-
-          if (refused) await expect(asked).rejects.toThrow();
-          else await asked;
-          expect(reads.windows).toHaveLength(refused ? 0 : 1);
-          expect(refused).toBe(
-            count > 100 || untilHours <= sinceHours || untilHours - sinceHours > 336,
-          );
-        },
-      ),
-      {numRuns: 80, seed: 4313},
-    );
   });
 });
 

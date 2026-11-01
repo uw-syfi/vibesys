@@ -39,7 +39,6 @@ const NATIVE: Readonly<Record<HelperFeature, true>> = {
   agent_logins: true,
   project_goal: true,
   example_destination: true,
-  usage_window: true,
   run_trace: true,
   run_ending: true,
   chat_ended_runs: true,

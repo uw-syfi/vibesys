@@ -43,9 +43,7 @@ import {
   type UsageRateOverrideEntry,
   type UsageRatesOutcome,
   type UsageSummaryOutcome,
-  type UsageWindowOutcome,
   usageSummaryRefusal,
-  usageWindowRefusal,
   validHostPath,
 } from '@vibesys/hosts';
 import type {
@@ -114,7 +112,7 @@ export interface HostsDeps {
    */
   readonly subscriptions: Pick<Subscriptions, 'closeHost'>;
   readonly savedRuns?: RegistrySavedRuns;
-  /** Digests and the usage window, read through the gateway. */
+  /** Digests, read through the gateway. */
   readonly runReads?: RegistryRunReads;
   /** The Usage page's summary, price refresh and price book, through the gateway. */
   readonly usage?: RegistryUsage;
@@ -589,36 +587,6 @@ export class Hosts {
     } catch (error) {
       if (isHostUnsupported(error)) return {kind: 'unsupported'};
       throw plain(error, 'Could not read the runs of the project');
-    }
-  }
-
-  /**
-   * What `runIds` of `project` on `id` spent in `[since, until)`, both in milliseconds;
-   * `unsupported` when the host's VibeSys does not offer it. `until` is "now" for the rate: the
-   * host reads no clock. A window or list the host would refuse (see `usageWindowRefusal`) is a
-   * mistake of the caller and throws before any request.
-   */
-  async usageWindow(
-    id: HostId,
-    project: string,
-    runIds: readonly string[],
-    since: number,
-    until: number,
-  ): Promise<UsageWindowOutcome> {
-    const refusal = usageWindowRefusal(runIds, since, until);
-    if (refusal !== null) throw new Error(refusal);
-    try {
-      return await this.#runReads().usageWindow(
-        id,
-        project,
-        runIds,
-        since,
-        until,
-        new AbortController().signal,
-      );
-    } catch (error) {
-      if (isHostUnsupported(error)) return {kind: 'unsupported'};
-      throw plain(error, 'Could not read what the runs of the project spent');
     }
   }
 

@@ -46,7 +46,6 @@ const CHANNELS: Channels = {
   runDigests: 'vibesys:welcome:run-digests',
   projectRuns: 'vibesys:welcome:project-runs',
   cancelProjectRuns: 'vibesys:welcome:cancel-project-runs',
-  usageWindow: 'vibesys:welcome:usage-window',
   usageSummary: 'vibesys:welcome:usage-summary',
   usageRatesRefresh: 'vibesys:welcome:usage-rates-refresh',
   usageLimits: 'vibesys:welcome:usage-limits',
@@ -146,8 +145,6 @@ function createWelcomePreload(capabilities: WelcomePreloadCapabilities): Welcome
     runDigests: (host, project, runIds) => call(CHANNELS.runDigests, host, project, runIds),
     projectRuns: (host, project, token) => call(CHANNELS.projectRuns, host, project, token),
     cancelProjectRuns: token => call(CHANNELS.cancelProjectRuns, token),
-    usageWindow: (host, project, runIds, since, until) =>
-      call(CHANNELS.usageWindow, host, project, runIds, since, until),
     usageSummary: (host, projects, edges, now) =>
       call(CHANNELS.usageSummary, host, projects, edges, now),
     usageRatesRefresh: (host, force, now) => call(CHANNELS.usageRatesRefresh, host, force, now),

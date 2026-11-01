@@ -102,7 +102,6 @@ const WELCOME_ARGUMENT_COUNTS = {
   [WELCOME_CHANNELS.runDigests]: 3,
   [WELCOME_CHANNELS.projectRuns]: 3,
   [WELCOME_CHANNELS.cancelProjectRuns]: 1,
-  [WELCOME_CHANNELS.usageWindow]: 5,
   [WELCOME_CHANNELS.usageSummary]: 4,
   [WELCOME_CHANNELS.usageRatesRefresh]: 3,
   [WELCOME_CHANNELS.usageLimits]: 3,

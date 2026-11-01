@@ -11,8 +11,8 @@ decisions it needs (:func:`negotiate`, :func:`select_completions`,
 Light like the channel: the standard library, Pydantic, ``vs_sim.api`` and light
 ``server`` modules only.
 
-The reads of a project's runs (``ProjectRun``, ``run_summaries``, ``project_runs``,
-``usage_window_reply``) are ``server.host_run_reads``', shared with the registered reads.
+The reads of a project's runs (``ProjectRun``, ``run_summaries``, ``project_runs``) are
+``server.host_run_reads``', shared with the registered reads.
 
 Public surface: ``answer``, ``apply_registered_project``, ``RegisteredProjectHost``,
 ``launch_registered_run``, ``registry_start_request``,
@@ -145,7 +145,6 @@ from server.host_run_events import (
     RunsReadTailRequest,
 )
 from server.host_run_reader import RunReaderReply, RunReaderRequest
-from server.host_run_summary import UsageWindowReply, UsageWindowRequest
 from server.registry import driving
 from server.relay import (
     BridgeResult,
@@ -903,7 +902,6 @@ def _answer(
             | RunsEventsForSpanRequest()
             | RunsReadTailRequest()
             | RunsSummaryRequest()
-            | UsageWindowRequest()
         ):
             reply = _run_history_reply(request, host)
         case (
@@ -1068,27 +1066,15 @@ def _run_history_reply(
     request: RunsReadEventsRequest
     | RunsEventsForSpanRequest
     | RunsReadTailRequest
-    | RunsSummaryRequest
-    | UsageWindowRequest,
+    | RunsSummaryRequest,
     host: HelperHost,
-) -> (
-    RunsReadEventsReply
-    | RunsEventsForSpanReply
-    | RunsReadTailReply
-    | RunsSummaryReply
-    | UsageWindowReply
-):
+) -> RunsReadEventsReply | RunsEventsForSpanReply | RunsReadTailReply | RunsSummaryReply:
     """Answer one read of a run's recorded history.
 
-    Its events (from a sequence, of a span, or the newest), its summary, or what its turns spent
-    in a window.
+    Its events (from a sequence, of a span, or the newest), or its summary.
     """
     if isinstance(request, RunsSummaryRequest):
         return _run_summary_reply(request, host)
-    if isinstance(request, UsageWindowRequest):
-        return host_run_reads.usage_window_reply(
-            request, host, Path(_host_path(request.project, host.directories))
-        )
     project = Path(_host_path(request.project, host.directories))
     if isinstance(request, RunsEventsForSpanRequest):
         span_page = host.projects.run_span_events(
