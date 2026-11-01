@@ -24,7 +24,13 @@ from vs_dst._crash_points import (
 from vs_dst._effects import Effects, RecoverableExecutors
 from vs_dst._host import Hosting
 from vs_dst._interrupt import MAX_RESUMES, Interrupted, Outcome
-from vs_dst._interruptions import Action, Interruption, Moment
+from vs_dst._interruptions import (
+    QUOTA_OUTLASTS_PATIENCE_S,
+    QUOTA_WAIT_S,
+    Action,
+    Interruption,
+    Moment,
+)
 from vs_dst._simulate import SimulatedRun, simulate
 from vs_dst._snapshots import NondeterministicWorldError, WorldNotCopyableError
 from vs_dst._step_host import StepLoopHosting
@@ -34,6 +40,8 @@ from vs_dst._world import HoldingWorld, RunSetup, World
 __all__ = [
     "EVERY_POINT",
     "MAX_RESUMES",
+    "QUOTA_OUTLASTS_PATIENCE_S",
+    "QUOTA_WAIT_S",
     "SAMPLED",
     "SAMPLE_SIZE",
     "Action",

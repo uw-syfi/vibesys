@@ -1,10 +1,10 @@
 """Ways a run is interrupted, and which of them a suite tries.
 
-An interruption is one of three actions (the host is killed, the operator pauses the run and the
-process exits, or the operator stops the run and its host ends it) at one of three moments: just before a commit reaches the store, just after
-it, or while a request's effect is in flight (it has begun, and nothing of its result is
-sealed or committed). Which moments a run offers follows the same search depth as its crash
-points.
+An interruption is one of four actions (the host is killed, the operator pauses the run and the
+process exits, the operator stops the run and its host ends it, or the provider's quota holds the
+run) at one of three moments: just before a commit reaches the store, just after it, or while a
+request's effect is in flight (it has begun, and nothing of its result is sealed or committed).
+Which moments a run offers follows the same search depth as its crash points.
 """
 
 from __future__ import annotations
@@ -29,6 +29,10 @@ class Action(StrEnum):
     STOP = "stop"
     """The operator stops the run (a drain): the host winds down and ends the run, which a Resume
     reopens."""
+    QUOTA_PAUSE = "quota pause"
+    """The provider's quota holds the run: nothing new starts, and the turns in flight wait in their
+    calls. The quota lifts after ``Interruption.wait`` seconds if the host is alive then; a host that
+    is given up on first is a host that died in the pause, and the operator's Resume lifts it."""
 
 
 class Moment(StrEnum):
@@ -40,6 +44,16 @@ class Moment(StrEnum):
     """A request's effect has begun and has no sealed result."""
 
 
+QUOTA_WAIT_S = 150.0
+"""How long a quota pause holds the run before its timed lift: past the time a turn is given
+(``WITHIN`` of the turn worlds), so a turn that waits it out has spent its own limit, and within the
+patience an interrupted run's host is given."""
+
+QUOTA_OUTLASTS_PATIENCE_S = 10_000.0
+"""A quota wait no host outlasts: the operator gives up on the host first, which is a host that
+died in the pause."""
+
+
 @dataclass(frozen=True, repr=False)
 class Interruption:
     """An action at a moment: the ``index``-th commit, or the ``index``-th effect to begin."""
@@ -47,6 +61,8 @@ class Interruption:
     action: Action
     moment: Moment
     index: int
+    wait: float = 0.0
+    """For ``Action.QUOTA_PAUSE``: the virtual seconds the quota holds the run before it lifts."""
 
     @classmethod
     def kill(cls, point: CrashPoint) -> Interruption:
@@ -74,7 +90,8 @@ class Interruption:
 
     def __str__(self) -> str:
         """Read as a sentence in an assertion message: ``pause in flight 17``."""
-        return f"{self.kind} {self.index}"
+        waits = f" for {self.wait:g}s" if self.wait else ""
+        return f"{self.kind} {self.index}{waits}"
 
     __repr__ = __str__
 
@@ -92,5 +109,6 @@ def choose(policy: CrashPointPolicy, commits: int, effects: int) -> tuple[Interr
     points: list[Interruption] = []
     for action, moment in KINDS:
         count = effects if moment is Moment.IN_FLIGHT else commits
-        points.extend(Interruption(action, moment, index) for index in policy.indexes(count))
+        wait = QUOTA_WAIT_S if action is Action.QUOTA_PAUSE else 0.0
+        points.extend(Interruption(action, moment, index, wait) for index in policy.indexes(count))
     return tuple(points)
