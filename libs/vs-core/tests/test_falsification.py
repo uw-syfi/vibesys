@@ -19,9 +19,7 @@ from vs_core.api import (
     AttemptRef,
     AttemptsState,
     AttemptView,
-    BlockRequest,
     Cancel,
-    Capabilities,
     CloseAttemptScope,
     CloseSession,
     CoreEvent,
@@ -39,8 +37,6 @@ from vs_core.api import (
     EvidenceRef,
     EvidenceRequirement,
     EvidenceRequirements,
-    ExecuteRegisteredOperation,
-    InspectRequest,
     Invocation,
     InvocationId,
     InvocationRef,
@@ -51,18 +47,11 @@ from vs_core.api import (
     MeasurementStage,
     Observation,
     ObservationStatus,
-    OperationDescriptor,
-    OperationId,
-    OperationSchemaRef,
-    OperationWire,
     OwnedJob,
-    ReconciliationDeadline,
-    RecoveryStarted,
     Request,
     RequestId,
     RequestObserved,
     RequestPhase,
-    RequestPrepared,
     RequestRecord,
     ResourceId,
     RestoreRevision,
@@ -137,13 +126,6 @@ def cleanup_result(
     if isinstance(request, CloseSession):
         return SessionObserved(session_id=request.session_id, observation=observation)
     raise AssertionError(type(request))
-
-
-def cleanup_revision(request: Request, retained: RevisionRef | None) -> RevisionRef | None:
-    """The immutable revision a retention acknowledgement reports, if any."""
-    if isinstance(request, RetainRevision):
-        return request.revision
-    return retained if isinstance(request, SnapshotAndRetain) else None
 
 
 def acknowledge_cleanup(result: Transition, retained: RevisionRef | None) -> CoreState:
@@ -517,94 +499,6 @@ def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None
         late_settle = step(retired, event)
         assert late_settle.state.settlement.settlements == retired.settlement.settlements
     assert sum(value.eligible for value in state.settlement.settlements) == 1
-
-
-def test_lost_write_acceptance_cannot_blindly_redispatch_after_restart() -> None:
-    state = initial_state()
-    schema = OperationSchemaRef(
-        kind="project.artifact.put",
-        request_schema=SchemaRef(name="artifact-put", version=1),
-        outcome_schema=SchemaRef(name="artifact-put-outcome", version=1),
-        lifecycle=LifecycleClass.IDEMPOTENT_WRITE,
-    )
-    request = ExecuteRegisteredOperation(
-        request_id=RequestId(root="write"),
-        scope=Scope(owner=state.run.run_id, generation=0),
-        operation_id=OperationId(root="operation"),
-        operation=OperationWire(
-            schema_ref=schema, payload_json='{"content":"same immutable payload"}'
-        ),
-        retry_limit=1,
-    )
-    state = state.model_copy(
-        update={
-            "registry": (OperationDescriptor(**schema.model_dump(mode="python"), inspect=True),),
-            "run": state.run.model_copy(
-                update={
-                    "capabilities": Capabilities(
-                        operations=(
-                            OperationDescriptor(**schema.model_dump(mode="python"), inspect=True),
-                        )
-                    )
-                }
-            ),
-        }
-    )
-    prepared = step(
-        state,
-        RequestPrepared(
-            until=Until(at=100.0), request=request, lifecycle=LifecycleClass.IDEMPOTENT_WRITE
-        ),
-    ).state
-    assert request.request_id is not None
-    dispatched = step(prepared, DispatchAuthorized(request_id=request.request_id)).state
-    assert dispatched.records.records[0].phase == RequestPhase.DISPATCHED
-    prepared = dispatched
-    restarted = CoreState.model_validate_json(prepared.model_dump_json())
-    result = step(restarted, RecoveryStarted(epoch=1, now_at=10.0))
-    assert len(result.requests) == 1
-    inspection = result.requests[0]
-    assert isinstance(inspection, InspectRequest)
-    assert inspection.target == request.request_id
-    assert all(value.kind != "execute_registered_operation" for value in result.requests)
-    assert inspection.request_id is not None
-    query = step(result.state, DispatchAuthorized(request_id=inspection.request_id)).state
-    observation = Observation(
-        event_id=EventId(root="lost-acceptance"),
-        request_id=inspection.request_id,
-        scope=inspection.scope,
-        sequence=1,
-        observed_at=20.0,
-        status=ObservationStatus.UNKNOWN,
-    )
-    unknown = step(query, RequestObserved(observation=observation))
-    blocked = step(
-        unknown.state, ReconciliationDeadline(request_id=request.request_id, now_at=200.0)
-    )
-    block = next(value for value in blocked.requests if isinstance(value, BlockRequest))
-    assert all(value.kind != "execute_registered_operation" for value in blocked.requests)
-    assert block.request_id is not None
-    # The block command is recorded, then fences its target pending reconciliation.
-    sent = step(blocked.state, DispatchAuthorized(request_id=block.request_id)).state
-    done = step(
-        sent,
-        RequestObserved(
-            observation=Observation(
-                event_id=EventId(root="block-recorded"),
-                request_id=block.request_id,
-                scope=block.scope,
-                sequence=0,
-                observed_at=101.0,
-                status=ObservationStatus.SUCCEEDED,
-                accepted=True,
-                terminal=True,
-                released=True,
-                children_complete=True,
-            )
-        ),
-    )
-    assert done.state.records.records[0].phase == RequestPhase.BLOCKED
-    assert all(value.kind != "execute_registered_operation" for value in done.requests)
 
 
 class WrongLaneError(AssertionError):

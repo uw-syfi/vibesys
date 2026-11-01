@@ -66,8 +66,6 @@ from .types.records import (
     DispatchAuthorized,
     HostRenewed,
     OperationRetireRequested,
-    ReconciliationCommandLapsed,
-    ReconciliationDeadline,
     RecoveryCheckWaitLapsed,
     RecoveryReady,
     RecoveryStarted,
@@ -254,11 +252,9 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | RequestObserved()
             | RecoveryStarted()
             | RecoveryReady()
-            | ReconciliationDeadline()
             | RetryDue()
             | RequestUndispatchable()
             | BlockedRecordStalled()
-            | ReconciliationCommandLapsed()
             | HostRenewed()
             | TurnHeld()
             | RecoveryCheckWaitLapsed()

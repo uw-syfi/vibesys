@@ -3,7 +3,6 @@
 {"path": "libs/vs-agent/tests/test_task_image.py", "test": "test_identical_inputs_at_two_locations_have_the_same_inputs_digest"}
 {"path": "libs/vs-core/tests/test_closure_fencing.py", "test": "test_a_blocked_record_is_carried_only_by_the_commands_it_names"}
 {"path": "libs/vs-core/tests/test_request_recovery.py", "test": "test_a_crash_loop_credits_a_limit_the_time_no_host_was_alive"}
-{"path": "libs/vs-core/tests/test_request_recovery.py", "test": "test_a_restart_gives_an_open_record_back_the_time_no_host_was_alive"}
 {"path": "libs/vs-core/tests/test_run_scoped_input_delivery.py", "test": "test_a_closed_reserver_returns_a_run_input_to_pending"}
 {"path": "libs/vs-core/tests/test_waits.py", "test": "test_a_step_that_records_a_wait_on_nothing_open_fails_loudly"}
 {"path": "libs/vs-core/tests/test_yield_waits.py", "test": "test_a_yield_is_an_orphan_exactly_when_its_recorded_wait_names_nothing_open"}
