@@ -152,7 +152,10 @@ test('guidance opens beside the controls and posts the typed text', async () => 
   const {container} = shell;
   await press(button(container, 'Guidance'));
   const dialog = one(container, {role: 'dialog', name: 'Guidance', exact: true});
-  await fillIn(one(dialog, {role: 'textbox'}) as HTMLTextAreaElement, 'Measure contention');
+  await fillIn(
+    one(dialog, {role: 'textbox', name: 'Guidance', exact: true}) as HTMLTextAreaElement,
+    'Measure contention',
+  );
   await press(one(dialog, {role: 'button', name: 'Send guidance'}));
   await until(
     'the dialog closed',

@@ -105,7 +105,14 @@ export function text(element: Element | null): string {
 
 /** The text of the `label` that names a field: the one for its id, else the one around it. */
 function labelOf(element: Element, root: Document): string {
-  if (!(element instanceof HTMLInputElement || element instanceof HTMLSelectElement)) return '';
+  if (
+    !(
+      element instanceof HTMLInputElement ||
+      element instanceof HTMLSelectElement ||
+      element instanceof HTMLTextAreaElement
+    )
+  )
+    return '';
   if (
     element instanceof HTMLInputElement &&
     (element.type === 'button' || element.type === 'submit')
