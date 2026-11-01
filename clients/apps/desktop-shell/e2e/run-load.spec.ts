@@ -4,7 +4,7 @@ import {expect, type Page, test} from '@playwright/test';
 import {fixtureNamed, storeRunFixture} from '@vibesys/run-fixtures';
 import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
 import {screenCheck} from './checks/screen-check.js';
-import {settled} from './checks/settle.js';
+import {type Rest, settled} from './checks/settle.js';
 import {type GatewayBehavior, installGateway, wire} from './fake-gateway.js';
 import {openFixture} from './fixture-world.js';
 
@@ -13,8 +13,9 @@ const shots = process.env['SCREENS_DIR'];
 const NOT_FOUND = 5;
 const UNAVAILABLE = 14;
 
-async function capture(page: Page, name: string, file: string): Promise<void> {
-  await settled(page);
+/** `rest` is `'as shown'` for a state that is the point of the spec: loading, reconnecting. */
+async function capture(page: Page, name: string, file: string, rest: Rest = 'read'): Promise<void> {
+  await settled(page, rest);
   expect(await screenCheck(page)).toEqual([]);
   if (!shots) return;
   mkdirSync(shots, {recursive: true});
@@ -43,7 +44,7 @@ test('a slow load paints from the first reply and shows the history filling in',
   await openRun(page, {holdTail: true}, 6);
   await expect(page.getByRole('heading', {name: 'queue-rs · mpmc'})).toBeVisible();
   await expect(page.getByText(/^History \d+ of \d+$/)).toBeVisible();
-  await capture(page, 'slow load, mid-history', 'load-slow.png');
+  await capture(page, 'slow load, mid-history', 'load-slow.png', 'as shown');
   await page.evaluate(() =>
     (window as unknown as {fakeGateway: {releaseTail(): void}}).fakeGateway.releaseTail(),
   );
@@ -73,7 +74,7 @@ test('a transient failure shows reconnecting, backs off, and ends in a status wo
   await page.clock.install();
   await openRun(page, {skeleton: {status: UNAVAILABLE, message: 'unavailable'}});
   await expect(page.getByText('Reconnecting', {exact: true}).first()).toBeVisible();
-  await capture(page, 'transient failure, retrying', 'load-reconnecting.png');
+  await capture(page, 'transient failure, retrying', 'load-reconnecting.png', 'as shown');
   // Each retry is armed after its failure settles, so time moves in steps of the backoff cap.
   for (let step = 0; step < 8; step += 1) await page.clock.fastForward(31_000);
   await expect(page.getByText('Unreachable', {exact: true})).toBeVisible();

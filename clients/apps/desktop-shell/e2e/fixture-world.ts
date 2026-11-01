@@ -41,6 +41,7 @@ import {
 import {FAKE_OFFER} from './fake-offer.js';
 import {addInitScripts, initScript as script} from './init-scripts.js';
 import {type NativeFixtureOptions, nativeFixtureScript} from './native-fixture.js';
+import {whenRead} from './read.js';
 import {installGatewayOnly, type RetiredRunMethods} from './retired-run-bridge.js';
 import {STARTED_AT} from './started-at.js';
 
@@ -216,6 +217,8 @@ export async function openFixture(
     script(installRequestBound, REQUEST_LIMIT),
   ]);
   await page.goto('./shell.html');
+  // The dashboard has read the runs it lists before the run is picked from it.
+  await whenRead(page);
   await page
     .getByRole('main')
     .getByRole('button', {name: /^queue-rs · mpmc/})

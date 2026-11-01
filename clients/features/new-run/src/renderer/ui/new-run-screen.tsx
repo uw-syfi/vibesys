@@ -6,11 +6,20 @@
  * wordmark above its question; the others do not.
  */
 import type {HostKey} from '@vibesys/hosts';
-import {Button, Page, Row, SectionLayout, SidebarItem, Stack, Text, Wordmark} from '@vibesys/ui';
+import {
+  Button,
+  Page,
+  type PageState,
+  Row,
+  SectionLayout,
+  SidebarItem,
+  Stack,
+  Text,
+  Wordmark,
+} from '@vibesys/ui';
 import type {JSX} from 'react';
 import {
   examplesStatus,
-  isAwaiting,
   isDone,
   type NewRunContext,
   type NewRunEvent,
@@ -78,10 +87,10 @@ interface ScreenProps {
   readonly snapshot: NewRunSnapshot;
   readonly dispatch: Dispatch;
   /**
-   * Whether what the shell reads for the screen has answered (the runs the form follows, the
-   * machines, the machine's Settings data). The screen is `ready` once that and its own reads have.
+   * Whether the screen waits for a reply: what the shell reads for it (the runs the form follows,
+   * the machines, the machine's Settings data) or what its own machine does. The page's `data-state`.
    */
-  readonly shellRead: boolean;
+  readonly settled: PageState;
   readonly machines: readonly MachineOption[];
   /** Open Machines, where the machine's VibeSys checkout is chosen. */
   readonly chooseCheckout: () => void;
@@ -241,7 +250,7 @@ export function NewRunScreen(props: ScreenProps): JSX.Element {
   return (
     <Page
       width="wide"
-      state={props.shellRead && !isAwaiting(snapshot) ? 'ready' : 'loading'}
+      state={props.settled}
       {...(at === null ? {} : {footer: <StepNav {...props} at={at} first={index === 0} />})}
     >
       <SectionLayout

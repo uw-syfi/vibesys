@@ -1,6 +1,7 @@
 import {expect, type Page, test} from '@playwright/test';
 import {FIXTURE_NAMES, fixtureNamed} from '@vibesys/run-fixtures';
 import {expectNoRequestLoops, openFixture} from './fixture-world.js';
+import {showScreen} from './read.js';
 
 /**
  * One world, one set of counts: for every fixture, the machines and runs that the Runs dashboard,
@@ -8,11 +9,9 @@ import {expectNoRequestLoops, openFixture} from './fixture-world.js';
  * never "No machine yet", and a machine with a run is never missing from Settings' Machines.
  */
 
-const nav = (page: Page) => page.getByRole('navigation', {name: 'VibeSys'});
-
 /** The machines the dashboard shows runs under, with how many runs each. */
 async function dashboardRuns(page: Page): Promise<Map<string, number>> {
-  await nav(page).getByRole('button', {name: /^Runs/}).click();
+  await showScreen(page, 'Runs');
   await expect(page.getByRole('heading', {name: 'Runs'})).toBeVisible();
   await page.getByRole('combobox', {name: 'Group by'}).selectOption('machine');
   const groups = await page.locator('.vs-overview-group').all();
@@ -26,7 +25,7 @@ async function dashboardRuns(page: Page): Promise<Map<string, number>> {
 }
 
 async function machinesListed(page: Page): Promise<string[]> {
-  await nav(page).getByRole('button', {name: 'Settings'}).click();
+  await showScreen(page, 'Settings');
   await page
     .getByRole('navigation', {name: 'Settings sections'})
     .getByRole('button', {name: /Machines/})
@@ -56,7 +55,7 @@ for (const name of FIXTURE_NAMES) {
     await expect(page.getByText('No machine yet')).toHaveCount(0);
     for (const machine of onDashboard.keys()) expect(machines).toContain(machine);
 
-    await nav(page).getByRole('button', {name: 'New', exact: true}).click();
+    await showScreen(page, 'New');
     await page.getByRole('radio', {name: /Your project/}).check();
     await page.getByRole('button', {name: 'Continue'}).click();
     const offered = await page

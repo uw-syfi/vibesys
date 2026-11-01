@@ -21,14 +21,8 @@ import {installGateway, wire} from './fake-gateway.js';
 import {installFakeRun} from './fake-run.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {choose, main, NEW_RUN_PAGES, openAt, proceed, question, steps} from './new-run-flow.js';
-import {
-  type FakeHostWindow,
-  openNewRun as open,
-  PROJECT,
-  SEED,
-  showNewRun,
-  sidebar,
-} from './world.js';
+import {showScreen, sidebar} from './read.js';
+import {type FakeHostWindow, openNewRun as open, PROJECT, SEED, showNewRun} from './world.js';
 
 const start = (page: Page) => main(page).getByRole('button', {name: 'Start run'});
 
@@ -521,9 +515,8 @@ test('an unfinished run is a draft: it is offered on the Runs dashboard, kept ac
   page,
 }) => {
   await open(page);
-  const rail = page.getByRole('navigation', {name: 'VibeSys'});
   const home = async (): Promise<void> => {
-    await rail.getByRole('button', {name: /^Runs/}).click();
+    await showScreen(page, 'Runs');
     await expect(page.getByRole('heading', {name: 'Runs'})).toBeVisible();
   };
   await home();
@@ -1012,10 +1005,7 @@ test("Machines' New run here opens New run on that machine", async ({page}) => {
       .getByRole('radiogroup', {name: 'Agent works on'})
       .getByRole('radio', {name: /host-b/}),
   ).toBeChecked();
-  await page
-    .getByRole('navigation', {name: 'VibeSys'})
-    .getByRole('button', {name: 'Settings'})
-    .click();
+  await showScreen(page, 'Settings');
   await page
     .getByRole('navigation', {name: 'Settings sections'})
     .getByRole('button', {name: /Machines/})
@@ -1056,10 +1046,7 @@ test('a bridge call that throws is worded plainly, names what failed, and Try ag
     }, undefined),
   ]);
   await page.goto('./shell.html');
-  await page
-    .getByRole('navigation', {name: 'VibeSys'})
-    .getByRole('button', {name: 'New', exact: true})
-    .click();
+  await showScreen(page, 'New');
 
   const failed = page.getByText('Not read', {exact: true});
   await expect(failed).toBeVisible();

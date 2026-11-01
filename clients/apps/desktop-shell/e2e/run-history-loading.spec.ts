@@ -46,7 +46,8 @@ for (const width of WIDTHS) {
       // in records: there is no total of events or bytes to name any more.
       await expect(main.getByRole('heading', {level: 1})).toBeVisible();
       await expect(main.getByText(/^History \d+ of \d+$/)).toBeVisible();
-      await settled(page);
+      // The history is held half read: the screen is loading, and that is what is looked at.
+      await settled(page, 'as shown');
       expect(ledger.unexplained(name, await screenCheck(page, SCREEN_CHECKS))).toEqual([]);
       if (shots !== undefined) {
         await page.screenshot({path: `${shots}/${name.replaceAll('/', '__')}.png`});

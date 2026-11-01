@@ -7,6 +7,7 @@ function screen(state: SettingsState): string {
   return renderToStaticMarkup(
     <SettingsScreen
       state={state}
+      settled="ready"
       dispatch={() => undefined}
       back={() => undefined}
       machinesContent={null}

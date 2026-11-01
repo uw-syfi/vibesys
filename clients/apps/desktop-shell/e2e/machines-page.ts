@@ -17,6 +17,7 @@ import {
   installFakeProjectRuns,
 } from './fake-bridge.js';
 import {addInitScripts, initScript} from './init-scripts.js';
+import {showScreen} from './read.js';
 import {
   type HostFeed,
   type RunsFeed,
@@ -370,7 +371,6 @@ export async function resizeTo(page: Page, width: number): Promise<void> {
 }
 
 /** The rail: the app's one navigation. */
-export const rail = (page: Page) => page.getByRole('navigation', {name: 'VibeSys'});
 
 /** Opens the app over `world` at `width` (measured) and goes to Machines by the rail. */
 export async function openMachines(page: Page, width: number, world: MachinesWorld): Promise<void> {
@@ -395,7 +395,7 @@ export async function openMachines(page: Page, width: number, world: MachinesWor
   ]);
   await page.goto('./shell.html');
   await resizeTo(page, width);
-  await rail(page).getByRole('button', {name: 'Machines'}).click();
+  await showScreen(page, 'Machines');
   await expect(page.getByRole('heading', {level: 1, name: 'Machines'})).toBeVisible();
   const first = seed.machines?.[0]?.label ?? '';
   await expect(card(page, first)).toBeVisible();

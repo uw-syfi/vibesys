@@ -156,6 +156,10 @@
       "plugins": ["./tools/lint-rules/control-state-no-store-kernel.grit"]
     },
     {
+      "includes": ["apps/desktop-shell/e2e/**/*.ts", "!apps/desktop-shell/e2e/read.ts"],
+      "plugins": ["./tools/lint-rules/e2e-rail-through-read.grit"]
+    },
+    {
       "includes": ["**/*.test.ts", "**/*.test.tsx"],
       "linter": {
         "rules": {

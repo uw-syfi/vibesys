@@ -15,6 +15,7 @@ import {
   type RunCase,
 } from './dashboard-world.js';
 import {openFixture, playLive} from './fixture-world.js';
+import {showScreen} from './read.js';
 
 /**
  * The rail and the Runs dashboard, checked against their real layout (`checks/screen-check.ts`) at
@@ -128,10 +129,7 @@ for (const width of WIDTHS) {
   test(`the rail on Settings/${width}`, async ({page}) => {
     await page.setViewportSize({width, height: 900});
     await open(page, dashboardWorld(ONE_RUN));
-    await page
-      .getByRole('navigation', {name: 'VibeSys'})
-      .getByRole('button', {name: 'Settings'})
-      .click();
+    await showScreen(page, 'Settings');
     await expect(page.getByRole('heading', {name: 'Appearance'})).toBeVisible();
     // The theme swatches are a picker, not a chart: the legend check does not apply.
     await check(page, `rail/settings/${width}`, ['legend']);

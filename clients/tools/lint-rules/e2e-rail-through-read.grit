@@ -1,0 +1,18 @@
+// A screen says when it has read what it shows (`data-state` on its page and on the rail), and a
+// spec waits for that. Pressing a destination of the rail by hand returns at first paint of the
+// screen it opens, so the spec acts before the screen's replies arrive. The rail is pressed through
+// `showScreen` and `pressMark` (e2e/read.ts), which wait, and it is found through `sidebar(page)`.
+language js;
+
+or {
+  `$target.click()` where {
+    $target <: contains or {`sidebar($_)`, `rail`}
+  },
+  `$page.getByRole('navigation', {name: 'VibeSys'})`
+} as $call where {
+  register_diagnostic(
+    span = $call,
+    message = "Press the rail through showScreen or pressMark (e2e/read.ts), which wait until the screen has read what it shows, and find it through sidebar(page).",
+    severity = "error"
+  )
+}

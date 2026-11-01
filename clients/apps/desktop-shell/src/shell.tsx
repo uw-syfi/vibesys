@@ -83,7 +83,13 @@ import type {SubscriptionPort} from '@vibesys/subscription';
 import {applyTheme, Card, EmptyState, Page, type ThemeTarget, WindowFrame} from '@vibesys/ui';
 import {type JSX, useCallback, useMemo, useSyncExternalStore} from 'react';
 import {GatewayRun} from './gateway-run.js';
-import {newRunDataRead} from './new-run-read.js';
+import {
+  machinesSettled,
+  newRunSettled,
+  runsSettled,
+  settingsSettled,
+  usageSettled,
+} from './screen-state.js';
 import {loadingMachines, runInput} from './shell-runs.js';
 
 /** The clock the shell's screens time their bounds on: the window's own timers, in `main.tsx`. */
@@ -369,7 +375,7 @@ function RunRoute(props: {
   const address = useMemo(() => runAddress(stores, run), [stores, run]);
   const {subscriptions} = stores;
   return gateway === undefined || subscriptions === null ? (
-    <Page>
+    <Page state="ready">
       <Card>
         <EmptyState title="Run service unavailable" />
       </Card>
@@ -426,12 +432,7 @@ function NewRunRoute(props: {
   return (
     <NewRunScreen
       snapshot={snapshot}
-      shellRead={newRunDataRead(
-        props.sidebar,
-        props.machines,
-        machineSettings,
-        snapshot.context.form.machine,
-      )}
+      settled={newRunSettled(props.sidebar, props.machines, machineSettings, snapshot)}
       dispatch={newRun.dispatch}
       machines={machineOptions(hostsOf(props.machines, props.sidebar))}
       completion={{state: completion, dispatch: newRunCompletion.dispatch}}
@@ -458,6 +459,7 @@ function SettingsRoute(props: {
   return (
     <SettingsScreen
       state={settingsState}
+      settled={settingsSettled(settingsState, machinesState, machineSettingsState)}
       dispatch={settings.dispatch}
       back={props.stores.page.address.back}
       machinesContent={
@@ -486,15 +488,18 @@ function RunsRoute(props: {
   readonly stores: ShellStores;
   readonly draft: RunsDraft | null;
   readonly loads: readonly MachineSteps[];
+  readonly machines: MachinesState;
   readonly select: (screen: Screen) => void;
 }): JSX.Element {
   const {rows, stores, select} = props;
   const {by, machine} = useStore(stores.grouping);
-  const gaps = projectRunGaps(useStore(stores.sidebar.store).allRuns);
+  const sidebar = useStore(stores.sidebar.store);
+  const gaps = projectRunGaps(sidebar.allRuns);
   const runOf = (id: string): RunRef | null =>
     rows.find(each => digestKey(each.row.run) === id)?.row.run ?? null;
   return (
     <RunsScreen
+      settled={runsSettled(sidebar, props.machines)}
       tiles={props.tiles}
       by={by}
       machine={machine}
@@ -544,6 +549,7 @@ function MachinesRoute(props: {
   return (
     <MachinesPage
       state={props.machines}
+      settled={machinesSettled(props.machines)}
       dispatch={stores.machines.dispatch}
       {...(live === null
         ? {}
@@ -575,6 +581,7 @@ function UsageRoute(props: {
   return (
     <UsageScreen
       state={state}
+      settled={usageSettled(state)}
       actions={actions}
       label={label}
       openRun={(run: SpendRunRef) => {
@@ -643,6 +650,7 @@ export function Shell(props: {
             stores={props.stores}
             draft={draft}
             loads={loadingMachines(machineLoads(sidebarState, saved), sidebar.actions.retryLoad)}
+            machines={machinesState}
             select={select}
           />
         );
@@ -664,6 +672,7 @@ export function Shell(props: {
   return (
     <AppShell
       state={sidebarState}
+      settled={runsSettled(sidebarState, machinesState)}
       dispatch={sidebar.store.dispatch}
       version={props.version}
       badges={{

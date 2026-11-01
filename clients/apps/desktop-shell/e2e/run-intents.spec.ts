@@ -22,7 +22,7 @@ import {
 import {fixtureNamed, INTENT_REPLAYS, intentReplay, storeRunFixture} from '@vibesys/run-fixtures';
 import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
 import {screenCheck} from './checks/screen-check.js';
-import {settled} from './checks/settle.js';
+import {type Rest, settled} from './checks/settle.js';
 import {installGateway, wire} from './fake-gateway.js';
 import {openFixture} from './fixture-world.js';
 
@@ -212,8 +212,9 @@ for (const width of [800, 1440]) {
 
 const shots = process.env['SCREENS_DIR'];
 const sheet: SheetEntry[] = [];
-async function capture(page: Page, name: string): Promise<void> {
-  await settled(page);
+/** `rest` is `'as shown'` for a state that is the point of the spec: a history still loading. */
+async function capture(page: Page, name: string, rest: Rest = 'read'): Promise<void> {
+  await settled(page, rest);
   expect(await screenCheck(page)).toEqual([]);
   if (!shots) return;
   mkdirSync(shots, {recursive: true});
@@ -379,7 +380,7 @@ test('Pause now is reachable while a live run is still loading history', async (
   const pauseNow = page.getByRole('button', {name: 'Pause now', exact: true});
   await expect(pauseNow).toBeEnabled();
   await expect(pauseNow).toBeInViewport();
-  await capture(page, 'controls-loading-v2');
+  await capture(page, 'controls-loading-v2', 'as shown');
   await pauseNow.click();
   await expect(page.getByText('Pause now · Pending', {exact: true})).toBeVisible();
   expect(requests[0]?.request.intent.case).toBe('pauseNow');

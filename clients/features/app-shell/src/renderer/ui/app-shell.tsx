@@ -1,4 +1,4 @@
-import {RailFrame, RailItem} from '@vibesys/ui';
+import {type PageState, RailFrame, RailItem} from '@vibesys/ui';
 import type {JSX, ReactNode} from 'react';
 import type {Screen, SidebarAction, SidebarState} from '../../state/index.js';
 
@@ -22,6 +22,8 @@ function within(selected: Screen, screen: Screen['kind']): boolean {
  */
 export function AppShell(props: {
   readonly state: SidebarState;
+  /** Whether what the rail's choices rest on has been read (where the mark goes); its `data-state`. */
+  readonly settled: PageState;
   readonly dispatch: (action: SidebarAction) => void;
   readonly badges: RailBadges;
   /** The screen the mark goes to: the Runs dashboard, or New run when there is no run. */
@@ -36,6 +38,7 @@ export function AppShell(props: {
   return (
     <RailFrame
       label="VibeSys"
+      state={props.settled}
       top={
         <>
           <RailItem

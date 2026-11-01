@@ -13,6 +13,7 @@ import {
 } from './fake-bridge.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {journeyScript} from './journey-world.js';
+import {sidebar} from './read.js';
 import {installGatewayOnly} from './retired-run-bridge.js';
 import {listed, SEED, server} from './world.js';
 
@@ -55,8 +56,6 @@ async function commands(page: Page): Promise<string[]> {
     ...(window as unknown as {fakeHost: {commands: string[]}}).fakeHost.commands,
   ]);
 }
-
-const sidebar = (page: Page) => page.getByRole('navigation', {name: 'VibeSys'});
 
 test('a run opens in a window of its own, shown alone and live there', async ({page, context}) => {
   await install(context);
