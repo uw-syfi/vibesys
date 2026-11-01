@@ -7,6 +7,20 @@ type JobID string
 // exists, so a Commit always names the exact tree a result came from.
 type Commit string
 
+// Valid reports whether the commit is 40 lowercase hexadecimal characters. Two spellings of one
+// commit would be two cache keys, so a Commit is lowercase before it is used.
+func (c Commit) Valid() bool {
+	if len(c) != 40 {
+		return false
+	}
+	for _, r := range c {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
 // JobKey is the cache key of a job: a digest of KeyInputs. Command jobs have none.
 type JobKey string
 

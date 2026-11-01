@@ -1,0 +1,1471 @@
+{
+ "description": "Shared comparison vectors for the Go CLI and vs_core. 'expected' was computed by running vs_core.api.compare (origin/main 1d5f6eb) with ComparisonPolicy(noise_floor=relative_noise). expected=null means vs_core returns None (no comparison). Compare numbers with relative tolerance 1e-9 (absolute 1e-12 for noise); verdict and sample counts exactly. 'ratio' is raw candidate_mean/base_mean (NOT direction-oriented).",
+ "source_commit": "origin/main 1d5f6eb520b1ee3ddc0447f651bc69969f99e7d4",
+ "vectors": [
+  {
+   "name": "welch_better_max",
+   "note": "clear gain, 3v3 with spread",
+   "candidate": [
+    20,
+    21,
+    22
+   ],
+   "base": [
+    10,
+    10.5,
+    9.5
+   ],
+   "direction": "max",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "better",
+    "candidate_mean": 21.0,
+    "base_mean": 10.0,
+    "ratio": 2.1,
+    "noise": 0.08371578903249574,
+    "candidate_samples": 3,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "welch_worse_max",
+   "note": "clear loss",
+   "candidate": [
+    5,
+    5.5,
+    4.5
+   ],
+   "base": [
+    10,
+    10.5,
+    9.5
+   ],
+   "direction": "max",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "worse",
+    "candidate_mean": 5.0,
+    "base_mean": 10.0,
+    "ratio": 0.5,
+    "noise": 0.032274861218395144,
+    "candidate_samples": 3,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "welch_within_noise_max",
+   "note": "overlapping samples",
+   "candidate": [
+    10,
+    11,
+    12
+   ],
+   "base": [
+    10,
+    10.5,
+    9.5
+   ],
+   "direction": "max",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "within_noise",
+    "candidate_mean": 11.0,
+    "base_mean": 10.0,
+    "ratio": 1.1,
+    "noise": 0.06589132466923599,
+    "candidate_samples": 3,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "welch_better_min",
+   "note": "min metric: lower is better",
+   "candidate": [
+    5,
+    5.5,
+    4.5
+   ],
+   "base": [
+    10,
+    10.5,
+    9.5
+   ],
+   "direction": "min",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "better",
+    "candidate_mean": 5.0,
+    "base_mean": 10.0,
+    "ratio": 0.5,
+    "noise": 0.032274861218395144,
+    "candidate_samples": 3,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "welch_worse_min",
+   "note": "min metric: higher is worse",
+   "candidate": [
+    20,
+    21,
+    22
+   ],
+   "base": [
+    10,
+    10.5,
+    9.5
+   ],
+   "direction": "min",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "worse",
+    "candidate_mean": 21.0,
+    "base_mean": 10.0,
+    "ratio": 2.1,
+    "noise": 0.08371578903249574,
+    "candidate_samples": 3,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "welch_within_noise_min",
+   "note": "min metric, overlapping",
+   "candidate": [
+    10,
+    11,
+    12
+   ],
+   "base": [
+    10,
+    10.5,
+    9.5
+   ],
+   "direction": "min",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "within_noise",
+    "candidate_mean": 11.0,
+    "base_mean": 10.0,
+    "ratio": 1.1,
+    "noise": 0.06589132466923599,
+    "candidate_samples": 3,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "direction_flip_same_data_min",
+   "note": "same samples as previous, min: better and worse swap",
+   "candidate": [
+    12,
+    13,
+    12.5
+   ],
+   "base": [
+    10,
+    10.2,
+    9.9
+   ],
+   "direction": "min",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "worse",
+    "candidate_mean": 12.5,
+    "base_mean": 10.033333333333333,
+    "ratio": 1.2458471760797343,
+    "noise": 0.030785162880951317,
+    "candidate_samples": 3,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "one_vs_one",
+   "note": "one run a side: inconclusive (ratio still reported)",
+   "candidate": [
+    20
+   ],
+   "base": [
+    10
+   ],
+   "direction": "max",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "inconclusive",
+    "candidate_mean": 20.0,
+    "base_mean": 10.0,
+    "ratio": 2.0,
+    "noise": 0.0,
+    "candidate_samples": 1,
+    "base_samples": 1
+   }
+  },
+  {
+   "name": "two_vs_two",
+   "note": "two a side: below the minimum",
+   "candidate": [
+    20,
+    21
+   ],
+   "base": [
+    10,
+    10.5
+   ],
+   "direction": "max",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "inconclusive",
+    "candidate_mean": 20.5,
+    "base_mean": 10.25,
+    "ratio": 2.0,
+    "noise": 0.06898602743283391,
+    "candidate_samples": 2,
+    "base_samples": 2
+   }
+  },
+  {
+   "name": "two_vs_three",
+   "note": "candidate has 2",
+   "candidate": [
+    20,
+    21
+   ],
+   "base": [
+    10,
+    10.5,
+    9.5
+   ],
+   "direction": "max",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "inconclusive",
+    "candidate_mean": 20.5,
+    "base_mean": 10.0,
+    "ratio": 2.05,
+    "noise": 0.07747311361584311,
+    "candidate_samples": 2,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "three_vs_two",
+   "note": "base has 2",
+   "candidate": [
+    20,
+    21,
+    22
+   ],
+   "base": [
+    10,
+    10.5
+   ],
+   "direction": "max",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "inconclusive",
+    "candidate_mean": 21.0,
+    "base_mean": 10.25,
+    "ratio": 2.048780487804878,
+    "noise": 0.07529768335549994,
+    "candidate_samples": 3,
+    "base_samples": 2
+   }
+  },
+  {
+   "name": "one_vs_three",
+   "note": "candidate has 1",
+   "candidate": [
+    20
+   ],
+   "base": [
+    10,
+    10.5,
+    9.5
+   ],
+   "direction": "max",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "inconclusive",
+    "candidate_mean": 20.0,
+    "base_mean": 10.0,
+    "ratio": 2.0,
+    "noise": 0.05773502691896258,
+    "candidate_samples": 1,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "three_vs_one",
+   "note": "base has 1",
+   "candidate": [
+    20,
+    21,
+    22
+   ],
+   "base": [
+    10
+   ],
+   "direction": "max",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "inconclusive",
+    "candidate_mean": 21.0,
+    "base_mean": 10.0,
+    "ratio": 2.1,
+    "noise": 0.057735026918962574,
+    "candidate_samples": 3,
+    "base_samples": 1
+   }
+  },
+  {
+   "name": "two_vs_three_huge_gain",
+   "note": "large ratio on too few runs is never noise",
+   "candidate": [
+    1000,
+    1001
+   ],
+   "base": [
+    10,
+    10.5,
+    9.5
+   ],
+   "direction": "max",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "inconclusive",
+    "candidate_mean": 1000.5,
+    "base_mean": 10.0,
+    "ratio": 100.05,
+    "noise": 2.8886274855024148,
+    "candidate_samples": 2,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "all_identical_both",
+   "note": "3v3 all alike: no noise estimate, inconclusive",
+   "candidate": [
+    12,
+    12,
+    12
+   ],
+   "base": [
+    10,
+    10,
+    10
+   ],
+   "direction": "max",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "inconclusive",
+    "candidate_mean": 12.0,
+    "base_mean": 10.0,
+    "ratio": 1.2,
+    "noise": 0.0,
+    "candidate_samples": 3,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "all_identical_both_equal_means",
+   "note": "identical and equal",
+   "candidate": [
+    10,
+    10,
+    10
+   ],
+   "base": [
+    10,
+    10,
+    10
+   ],
+   "direction": "max",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "inconclusive",
+    "candidate_mean": 10.0,
+    "base_mean": 10.0,
+    "ratio": 1.0,
+    "noise": 0.0,
+    "candidate_samples": 3,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "candidate_identical_base_varied",
+   "note": "one side alike: still a verdict from the other side (df=base n-1=2)",
+   "candidate": [
+    15,
+    15,
+    15
+   ],
+   "base": [
+    10,
+    10.5,
+    9.5
+   ],
+   "direction": "max",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "better",
+    "candidate_mean": 15.0,
+    "base_mean": 10.0,
+    "ratio": 1.5,
+    "noise": 0.04330127018922193,
+    "candidate_samples": 3,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "base_identical_candidate_varied",
+   "note": "base alike, candidate varied",
+   "candidate": [
+    14,
+    15,
+    16
+   ],
+   "base": [
+    10,
+    10,
+    10
+   ],
+   "direction": "max",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "better",
+    "candidate_mean": 15.0,
+    "base_mean": 10.0,
+    "ratio": 1.5,
+    "noise": 0.057735026918962574,
+    "candidate_samples": 3,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "identical_float_mean_trap",
+   "note": "mean of identical 0.1s is not 0.1 in floats; must still count as zero spread",
+   "candidate": [
+    0.1,
+    0.1,
+    0.1
+   ],
+   "base": [
+    0.2,
+    0.2,
+    0.2
+   ],
+   "direction": "max",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "inconclusive",
+    "candidate_mean": 0.10000000000000002,
+    "base_mean": 0.20000000000000004,
+    "ratio": 0.5,
+    "noise": 0.0,
+    "candidate_samples": 3,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "identical_five_vs_varied_three",
+   "note": "many identical on one side",
+   "candidate": [
+    1.5,
+    1.5,
+    1.5,
+    1.5,
+    1.5
+   ],
+   "base": [
+    1.0,
+    1.1,
+    0.9
+   ],
+   "direction": "max",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "better",
+    "candidate_mean": 1.5,
+    "base_mean": 1.0,
+    "ratio": 1.5,
+    "noise": 0.08660254037844389,
+    "candidate_samples": 5,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "base_mean_zero",
+   "note": "base mean 0: no comparison exists (vs_core returns none)",
+   "candidate": [
+    1,
+    2,
+    3
+   ],
+   "base": [
+    0,
+    0,
+    0
+   ],
+   "direction": "max",
+   "relative_noise": 0.0,
+   "expected": null
+  },
+  {
+   "name": "base_mean_zero_cancelling",
+   "note": "base mean 0 from signed samples",
+   "candidate": [
+    1,
+    2,
+    3
+   ],
+   "base": [
+    -1,
+    0,
+    1
+   ],
+   "direction": "max",
+   "relative_noise": 0.0,
+   "expected": null
+  },
+  {
+   "name": "candidate_mean_zero_max",
+   "note": "ratio 0 under Welch: noise 0, inconclusive",
+   "candidate": [
+    0,
+    0,
+    0
+   ],
+   "base": [
+    10,
+    10.5,
+    9.5
+   ],
+   "direction": "max",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "inconclusive",
+    "candidate_mean": 0.0,
+    "base_mean": 10.0,
+    "ratio": 0.0,
+    "noise": 0.0,
+    "candidate_samples": 3,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "candidate_mean_zero_min",
+   "note": "min with candidate 0: raw ratio 0",
+   "candidate": [
+    0,
+    0,
+    0
+   ],
+   "base": [
+    10,
+    10.5,
+    9.5
+   ],
+   "direction": "min",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "inconclusive",
+    "candidate_mean": 0.0,
+    "base_mean": 10.0,
+    "ratio": 0.0,
+    "noise": 0.0,
+    "candidate_samples": 3,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "candidate_zero_mean_spread",
+   "note": "candidate mean 0 with spread: relative variance 0 for that side",
+   "candidate": [
+    -1,
+    0,
+    1
+   ],
+   "base": [
+    10,
+    10.5,
+    9.5
+   ],
+   "direction": "max",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "inconclusive",
+    "candidate_mean": 0.0,
+    "base_mean": 10.0,
+    "ratio": 0.0,
+    "noise": 0.0,
+    "candidate_samples": 3,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "negative_means",
+   "note": "both means negative",
+   "candidate": [
+    -8,
+    -8.5,
+    -7.5
+   ],
+   "base": [
+    -10,
+    -10.5,
+    -9.5
+   ],
+   "direction": "max",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "worse",
+    "candidate_mean": -8.0,
+    "base_mean": -10.0,
+    "ratio": 0.8,
+    "noise": 0.03696845502136472,
+    "candidate_samples": 3,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "negative_base_positive_candidate",
+   "note": "ratio negative",
+   "candidate": [
+    10,
+    11,
+    12
+   ],
+   "base": [
+    -10,
+    -10.5,
+    -9.5
+   ],
+   "direction": "max",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "worse",
+    "candidate_mean": 11.0,
+    "base_mean": -10.0,
+    "ratio": -1.1,
+    "noise": 0.06589132466923599,
+    "candidate_samples": 3,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "negative_means_min",
+   "note": "negative means, min direction",
+   "candidate": [
+    -12,
+    -12.5,
+    -11.5
+   ],
+   "base": [
+    -10,
+    -10.5,
+    -9.5
+   ],
+   "direction": "min",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "worse",
+    "candidate_mean": -12.0,
+    "base_mean": -10.0,
+    "ratio": 1.2,
+    "noise": 0.04509249752822894,
+    "candidate_samples": 3,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "unequal_3_vs_10",
+   "note": "df between sides; Welch not pooled",
+   "candidate": [
+    20,
+    21,
+    22
+   ],
+   "base": [
+    10,
+    10.3,
+    9.7,
+    10.1,
+    9.9,
+    10.2,
+    9.8,
+    10.05,
+    9.95,
+    10.4
+   ],
+   "direction": "max",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "better",
+    "candidate_mean": 21.0,
+    "base_mean": 10.040000000000001,
+    "ratio": 2.091633466135458,
+    "noise": 0.05927652000566762,
+    "candidate_samples": 3,
+    "base_samples": 10
+   }
+  },
+  {
+   "name": "forty_vs_forty",
+   "note": "df far above 30: table's last entry 2.042 used",
+   "candidate": [
+    100,
+    107,
+    103,
+    110,
+    106,
+    102,
+    109,
+    105,
+    101,
+    108,
+    104,
+    100,
+    107,
+    103,
+    110,
+    106,
+    102,
+    109,
+    105,
+    101,
+    108,
+    104,
+    100,
+    107,
+    103,
+    110,
+    106,
+    102,
+    109,
+    105,
+    101,
+    108,
+    104,
+    100,
+    107,
+    103,
+    110,
+    106,
+    102,
+    109
+   ],
+   "base": [
+    95,
+    100,
+    105,
+    97,
+    102,
+    107,
+    99,
+    104,
+    96,
+    101,
+    106,
+    98,
+    103,
+    95,
+    100,
+    105,
+    97,
+    102,
+    107,
+    99,
+    104,
+    96,
+    101,
+    106,
+    98,
+    103,
+    95,
+    100,
+    105,
+    97,
+    102,
+    107,
+    99,
+    104,
+    96,
+    101,
+    106,
+    98,
+    103,
+    95
+   ],
+   "direction": "max",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "better",
+    "candidate_mean": 105.05,
+    "base_mean": 100.85,
+    "ratio": 1.0416460089241448,
+    "noise": 0.008113291296283897,
+    "candidate_samples": 40,
+    "base_samples": 40
+   }
+  },
+  {
+   "name": "thirty_one_vs_thirty_one",
+   "note": "31 vs 31 samples (df > 30, table clamp)",
+   "candidate": [
+    100,
+    107,
+    103,
+    110,
+    106,
+    102,
+    109,
+    105,
+    101,
+    108,
+    104,
+    100,
+    107,
+    103,
+    110,
+    106,
+    102,
+    109,
+    105,
+    101,
+    108,
+    104,
+    100,
+    107,
+    103,
+    110,
+    106,
+    102,
+    109,
+    105,
+    101
+   ],
+   "base": [
+    100,
+    105,
+    110,
+    102,
+    107,
+    112,
+    104,
+    109,
+    101,
+    106,
+    111,
+    103,
+    108,
+    100,
+    105,
+    110,
+    102,
+    107,
+    112,
+    104,
+    109,
+    101,
+    106,
+    111,
+    103,
+    108,
+    100,
+    105,
+    110,
+    102,
+    107
+   ],
+   "direction": "max",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "within_noise",
+    "candidate_mean": 104.93548387096774,
+    "base_mean": 105.80645161290323,
+    "ratio": 0.9917682926829268,
+    "noise": 0.00846258634151079,
+    "candidate_samples": 31,
+    "base_samples": 31
+   }
+  },
+  {
+   "name": "tiny_values",
+   "note": "1e-9 scale invariance",
+   "candidate": [
+    2e-09,
+    2.1e-09,
+    2.2e-09
+   ],
+   "base": [
+    1e-09,
+    1.05e-09,
+    9.5e-10
+   ],
+   "direction": "max",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "better",
+    "candidate_mean": 2.1e-09,
+    "base_mean": 1e-09,
+    "ratio": 2.1,
+    "noise": 0.08371578903249571,
+    "candidate_samples": 3,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "huge_values",
+   "note": "1e12 scale invariance",
+   "candidate": [
+    2000000000000.0,
+    2100000000000.0,
+    2200000000000.0
+   ],
+   "base": [
+    1000000000000.0,
+    1050000000000.0,
+    950000000000.0
+   ],
+   "direction": "max",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "better",
+    "candidate_mean": 2100000000000.0,
+    "base_mean": 1000000000000.0,
+    "ratio": 2.1,
+    "noise": 0.08371578903249574,
+    "candidate_samples": 3,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "df_slack_exact_four",
+   "note": "df is 4 in exact arithmetic, 3.9999999999999996 in floats; slack 1e-9 must keep 4 (t=2.776 not 3.182)",
+   "candidate": [
+    12.45,
+    8.964,
+    4.98
+   ],
+   "base": [
+    7.5,
+    5.4,
+    3.0
+   ],
+   "direction": "max",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "within_noise",
+    "candidate_mean": 8.798,
+    "base_mean": 5.3,
+    "ratio": 1.6600000000000001,
+    "noise": 0.5758250693587055,
+    "candidate_samples": 3,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "df_slack_exact_four_b",
+   "note": "same flaw, other data",
+   "candidate": [
+    25.844,
+    14.484,
+    17.324
+   ],
+   "base": [
+    9.1,
+    5.1,
+    6.1
+   ],
+   "direction": "max",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "within_noise",
+    "candidate_mean": 19.217333333333332,
+    "base_mean": 6.766666666666666,
+    "ratio": 2.8400000000000003,
+    "noise": 0.7133603654484489,
+    "candidate_samples": 3,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "df_slack_changes_verdict",
+   "note": "without the slack, floor(df)=3 gives t=3.182 and within_noise; with it t=2.776 and better",
+   "candidate": [
+    13.091,
+    18.031,
+    11.362
+   ],
+   "base": [
+    5.3,
+    7.3,
+    4.6
+   ],
+   "direction": "max",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "better",
+    "candidate_mean": 14.161333333333332,
+    "base_mean": 5.733333333333333,
+    "ratio": 2.4699999999999998,
+    "noise": 0.49287994982877165,
+    "candidate_samples": 3,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "df_fractional_floor",
+   "note": "non-integer df is floored, never rounded up (df ~2.6)",
+   "candidate": [
+    10,
+    11,
+    12.5
+   ],
+   "base": [
+    10.0,
+    10.1,
+    10.2,
+    10.05,
+    9.95
+   ],
+   "direction": "max",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "within_noise",
+    "candidate_mean": 11.166666666666666,
+    "base_mean": 10.059999999999999,
+    "ratio": 1.1100066269052353,
+    "noise": 0.07237080180099871,
+    "candidate_samples": 3,
+    "base_samples": 5
+   }
+  },
+  {
+   "name": "bar_just_above_bar",
+   "note": "gain/bar = 1.00000100: sits above the Student-t bar",
+   "candidate": [
+    11.278151038761946,
+    11.842058590700043,
+    10.714243486823849
+   ],
+   "base": [
+    10,
+    10.5,
+    9.5
+   ],
+   "direction": "max",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "better",
+    "candidate_mean": 11.278151038761946,
+    "base_mean": 10.0,
+    "ratio": 1.1278151038761945,
+    "noise": 0.04604285881167806,
+    "candidate_samples": 3,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "bar_just_below_bar",
+   "note": "gain/bar = 0.99999900: sits below the Student-t bar",
+   "candidate": [
+    11.27814815572947,
+    11.842055563515943,
+    10.714240747942997
+   ],
+   "base": [
+    10,
+    10.5,
+    9.5
+   ],
+   "direction": "max",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "within_noise",
+    "candidate_mean": 11.27814815572947,
+    "base_mean": 10.0,
+    "ratio": 1.127814815572947,
+    "noise": 0.046042847041747256,
+    "candidate_samples": 3,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "bar_min_just_above_bar",
+   "note": "min direction, gain/bar = 1.00000100",
+   "candidate": [
+    8.98206412137068,
+    9.431167327439214,
+    8.532960915302146
+   ],
+   "base": [
+    10,
+    10.5,
+    9.5
+   ],
+   "direction": "min",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "better",
+    "candidate_mean": 8.98206412137068,
+    "base_mean": 10.0,
+    "ratio": 0.898206412137068,
+    "noise": 0.036669123223863793,
+    "candidate_samples": 3,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "bar_min_just_below_bar",
+   "note": "min direction, gain/bar = 0.99999900",
+   "candidate": [
+    8.98206595000229,
+    9.431169247502407,
+    8.532962652502176
+   ],
+   "base": [
+    10,
+    10.5,
+    9.5
+   ],
+   "direction": "min",
+   "relative_noise": 0.0,
+   "expected": {
+    "verdict": "within_noise",
+    "candidate_mean": 8.982065950002292,
+    "base_mean": 10.0,
+    "ratio": 0.8982065950002293,
+    "noise": 0.036669130689221126,
+    "candidate_samples": 3,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "floor_one_vs_one_better",
+   "note": "declared 5%: verdict from one run each",
+   "candidate": [
+    120
+   ],
+   "base": [
+    100
+   ],
+   "direction": "max",
+   "relative_noise": 0.05,
+   "expected": {
+    "verdict": "better",
+    "candidate_mean": 120.0,
+    "base_mean": 100.0,
+    "ratio": 1.2,
+    "noise": 0.08485281374238571,
+    "candidate_samples": 1,
+    "base_samples": 1
+   }
+  },
+  {
+   "name": "floor_one_vs_one_within",
+   "note": "gain inside 2 noises",
+   "candidate": [
+    102
+   ],
+   "base": [
+    100
+   ],
+   "direction": "max",
+   "relative_noise": 0.05,
+   "expected": {
+    "verdict": "within_noise",
+    "candidate_mean": 102.0,
+    "base_mean": 100.0,
+    "ratio": 1.02,
+    "noise": 0.07212489168102786,
+    "candidate_samples": 1,
+    "base_samples": 1
+   }
+  },
+  {
+   "name": "floor_one_vs_one_worse_min",
+   "note": "min, worse",
+   "candidate": [
+    120
+   ],
+   "base": [
+    100
+   ],
+   "direction": "min",
+   "relative_noise": 0.05,
+   "expected": {
+    "verdict": "worse",
+    "candidate_mean": 120.0,
+    "base_mean": 100.0,
+    "ratio": 1.2,
+    "noise": 0.08485281374238571,
+    "candidate_samples": 1,
+    "base_samples": 1
+   }
+  },
+  {
+   "name": "floor_one_vs_one_better_min",
+   "note": "min, better",
+   "candidate": [
+    80
+   ],
+   "base": [
+    100
+   ],
+   "direction": "min",
+   "relative_noise": 0.05,
+   "expected": {
+    "verdict": "better",
+    "candidate_mean": 80.0,
+    "base_mean": 100.0,
+    "ratio": 0.8,
+    "noise": 0.05656854249492382,
+    "candidate_samples": 1,
+    "base_samples": 1
+   }
+  },
+  {
+   "name": "floor_three_identical_better",
+   "note": "identical runs are fine under a floor",
+   "candidate": [
+    120,
+    120,
+    120
+   ],
+   "base": [
+    100,
+    100,
+    100
+   ],
+   "direction": "max",
+   "relative_noise": 0.05,
+   "expected": {
+    "verdict": "better",
+    "candidate_mean": 120.0,
+    "base_mean": 100.0,
+    "ratio": 1.2,
+    "noise": 0.04898979485566356,
+    "candidate_samples": 3,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "floor_identical_equal_means",
+   "note": "ratio exactly 1: within noise",
+   "candidate": [
+    100,
+    100,
+    100
+   ],
+   "base": [
+    100,
+    100,
+    100
+   ],
+   "direction": "max",
+   "relative_noise": 0.05,
+   "expected": {
+    "verdict": "within_noise",
+    "candidate_mean": 100.0,
+    "base_mean": 100.0,
+    "ratio": 1.0,
+    "noise": 0.040824829046386304,
+    "candidate_samples": 3,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "floor_spread_above_floor",
+   "note": "observed pooled spread exceeds the floor, so it governs",
+   "candidate": [
+    100,
+    130,
+    160
+   ],
+   "base": [
+    100,
+    101,
+    99
+   ],
+   "direction": "max",
+   "relative_noise": 0.01,
+   "expected": {
+    "verdict": "within_noise",
+    "candidate_mean": 130.0,
+    "base_mean": 100.0,
+    "ratio": 1.3,
+    "noise": 0.1733676248130929,
+    "candidate_samples": 3,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "floor_spread_below_floor",
+   "note": "floor governs when runs look tighter",
+   "candidate": [
+    120,
+    120.1,
+    119.9
+   ],
+   "base": [
+    100,
+    100.1,
+    99.9
+   ],
+   "direction": "max",
+   "relative_noise": 0.1,
+   "expected": {
+    "verdict": "better",
+    "candidate_mean": 120.0,
+    "base_mean": 100.0,
+    "ratio": 1.2,
+    "noise": 0.09797958971132711,
+    "candidate_samples": 3,
+    "base_samples": 3
+   }
+  },
+  {
+   "name": "floor_candidate_zero_max",
+   "note": "c=0: noise 0, still a verdict: worse (gain -1)",
+   "candidate": [
+    0
+   ],
+   "base": [
+    100
+   ],
+   "direction": "max",
+   "relative_noise": 0.05,
+   "expected": {
+    "verdict": "worse",
+    "candidate_mean": 0.0,
+    "base_mean": 100.0,
+    "ratio": 0.0,
+    "noise": 0.0,
+    "candidate_samples": 1,
+    "base_samples": 1
+   }
+  },
+  {
+   "name": "floor_candidate_zero_min",
+   "note": "c=0 min: better",
+   "candidate": [
+    0
+   ],
+   "base": [
+    100
+   ],
+   "direction": "min",
+   "relative_noise": 0.05,
+   "expected": {
+    "verdict": "better",
+    "candidate_mean": 0.0,
+    "base_mean": 100.0,
+    "ratio": 0.0,
+    "noise": 0.0,
+    "candidate_samples": 1,
+    "base_samples": 1
+   }
+  },
+  {
+   "name": "floor_base_zero",
+   "note": "base mean 0 even under a floor: no comparison",
+   "candidate": [
+    1
+   ],
+   "base": [
+    0
+   ],
+   "direction": "max",
+   "relative_noise": 0.05,
+   "expected": null
+  },
+  {
+   "name": "floor_unequal_counts",
+   "note": "2 vs 5 under floor",
+   "candidate": [
+    110,
+    112
+   ],
+   "base": [
+    100,
+    101,
+    99,
+    100.5,
+    99.5
+   ],
+   "direction": "max",
+   "relative_noise": 0.02,
+   "expected": {
+    "verdict": "better",
+    "candidate_mean": 111.0,
+    "base_mean": 100.0,
+    "ratio": 1.11,
+    "noise": 0.01857385258905648,
+    "candidate_samples": 2,
+    "base_samples": 5
+   }
+  },
+  {
+   "name": "floor_large",
+   "note": "floor 0.5 swamps a 30% gain",
+   "candidate": [
+    130
+   ],
+   "base": [
+    100
+   ],
+   "direction": "max",
+   "relative_noise": 0.5,
+   "expected": {
+    "verdict": "within_noise",
+    "candidate_mean": 130.0,
+    "base_mean": 100.0,
+    "ratio": 1.3,
+    "noise": 0.9192388155425119,
+    "candidate_samples": 1,
+    "base_samples": 1
+   }
+  },
+  {
+   "name": "floor_just_inside_two_noises",
+   "note": "1v1, floor 5%: gain/noise = 2*(1-1e-6), within noise",
+   "candidate": [
+    116.47154777830178
+   ],
+   "base": [
+    100
+   ],
+   "direction": "max",
+   "relative_noise": 0.05,
+   "expected": {
+    "verdict": "within_noise",
+    "candidate_mean": 116.47154777830178,
+    "base_mean": 100.0,
+    "ratio": 1.1647154777830178,
+    "noise": 0.08235782124933015,
+    "candidate_samples": 1,
+    "base_samples": 1
+   }
+  },
+  {
+   "name": "floor_just_beyond_two_noises",
+   "note": "1v1, floor 5%: gain/noise = 2*(1+1e-6), better",
+   "candidate": [
+    116.47158614768607
+   ],
+   "base": [
+    100
+   ],
+   "direction": "max",
+   "relative_noise": 0.05,
+   "expected": {
+    "verdict": "better",
+    "candidate_mean": 116.47158614768607,
+    "base_mean": 100.0,
+    "ratio": 1.1647158614768607,
+    "noise": 0.08235784838058198,
+    "candidate_samples": 1,
+    "base_samples": 1
+   }
+  }
+ ]
+}

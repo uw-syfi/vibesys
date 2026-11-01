@@ -1,6 +1,9 @@
 package core
 
-import "time"
+import (
+	"slices"
+	"time"
+)
 
 // JobKind is what a job does.
 type JobKind string
@@ -34,15 +37,10 @@ func JobStates() []JobState {
 	return []JobState{JobQueued, JobRunning, JobSucceeded, JobFailed, JobCancelled, JobLost}
 }
 
-// Final reports whether a job in this state can no longer change state.
+// Final reports whether a job in this state can no longer change state: a known state with no
+// legal move out of it (see CanMoveTo).
 func (s JobState) Final() bool {
-	switch s {
-	case JobSucceeded, JobFailed, JobCancelled, JobLost:
-		return true
-	case JobQueued, JobRunning:
-		return false
-	}
-	return false
+	return slices.Contains(JobStates(), s) && len(s.next()) == 0
 }
 
 // Settings is what a kind of job is configured with: exactly one of CheckSettings,
