@@ -7,7 +7,7 @@
 import type {Screen} from '@vibesys/feature-app-shell/state';
 import {browserDraftMemory, browserMoreOptionsMemory} from '@vibesys/feature-new-run/renderer';
 import {DRAFT_KEY, type Draft, storeDraft} from '@vibesys/feature-new-run/state';
-import type {WelcomeBridge} from '@vibesys/ipc';
+import {subscriptionBridge, type WelcomeBridge} from '@vibesys/ipc';
 import type {ScheduleTimeout} from '@vibesys/transport';
 import {act} from 'react';
 import {createRoot} from 'react-dom/client';
@@ -24,6 +24,7 @@ import {
   installFakeProjectRuns,
 } from './fake-bridge.js';
 import {SEED} from './seed.js';
+import {installSubscriptions, type SubscriptionSeed} from './subscription-preload.js';
 
 /** The bounded number of turns a window gets to read what it shows before the test says it never did. */
 const READ_TURNS = 64;
@@ -37,6 +38,20 @@ export interface OpenShell {
 }
 
 const ignore = (): void => undefined;
+
+/** The window's second port over the hosts `options` script, timed by the window's own clock. */
+function subscriptionPort(options: {
+  readonly subscriptions?: SubscriptionSeed;
+  readonly now?: number;
+}) {
+  if (options.subscriptions === undefined) throw new Error('no hosts are scripted');
+  installSubscriptions(options.subscriptions, () => options.now ?? 0);
+  const host = globalThis.window as unknown as Window & {
+    vibesysSubscription?: Parameters<typeof subscriptionBridge>[0];
+  };
+  if (host.vibesysSubscription === undefined) throw new Error('the Fake installed no port');
+  return subscriptionBridge(host.vibesysSubscription);
+}
 
 /**
  * The app opened on `screen` over the world `seed`, with `draft` as this window's New run; with
@@ -53,6 +68,8 @@ export async function openShell(
     readonly now?: number;
     /** Keeps the window's storage as it is, as a reload does, instead of starting it empty. */
     readonly keepStorage?: boolean;
+    /** The hosts' live data the window's second port serves (their machine stats and their runs). */
+    readonly subscriptions?: SubscriptionSeed;
     /** Fakes of more of the bridge, installed after the usual ones (what the Usage page asks of a host). */
     readonly installs?: readonly ((seed: FakeBridgeSeed) => void)[];
     /** Changes the bridge before the shell reads from it (a call a bridge built earlier lacks). */
@@ -91,6 +108,7 @@ export async function openShell(
       messages: {addEventListener: ignore, removeEventListener: ignore},
       address: new FakeWindowAddress(),
       now: () => options.now ?? 0,
+      ...(options.subscriptions === undefined ? {} : {subscriptions: subscriptionPort(options)}),
       session: () => {
         throw new Error('no run is opened in this window');
       },

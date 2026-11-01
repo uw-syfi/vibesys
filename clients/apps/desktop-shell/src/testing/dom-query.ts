@@ -64,6 +64,9 @@ const NAMED_BY_CONTENT: ReadonlySet<string> = new Set([
   'treeitem',
   'heading',
   'link',
+  'row',
+  'cell',
+  'columnheader',
 ]);
 
 /** The role of `element`: its own `role`, else the one its tag (and type) gives. */
