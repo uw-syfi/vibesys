@@ -68,7 +68,7 @@ exactly one span, grouped per task) and emits one stable, validated JSON report.
 All dial9 and Node knowledge sits on one side of a JSON boundary (`extract/`),
 all ranking policy on the other (`analyze_dial9.py`). `update.sh` wipes and
 recreates only `skills/`, so `ranker/` survives a re-vendor untouched. Because
-it lives under `resources/skills/`, which the repo's ruff and ty configs exempt
+it lives under `skills/domains/`, which the repo's ruff and ty configs exempt
 as vendored, the ranker is not linted or type-checked by repo tooling; it is
 held to the repo baseline by hand.
 

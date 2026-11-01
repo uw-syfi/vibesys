@@ -26,13 +26,12 @@ prune src/*.egg-info
 prune libs/*/src/*.egg-info
 
 # Include the resource trees so a source build can stage them into
-# vibesys/_resources. Vendored skill repo checkouts stay out of the sdist.
+# vibesys/_resources and vibesys/_skills. Vendored skill repo checkouts stay out of the sdist.
 graft resources/evaluators
 graft resources/profilers
-graft resources/skills
+graft skills/domains
 graft resources/chat-skills
 prune resources/evaluators/*/native_runner/target
-prune resources/skills/serving-systems/repos
 
 # Bundle the installable input SDK source without its tests or local artifacts.
 include sdk/vs-bench/pyproject.toml

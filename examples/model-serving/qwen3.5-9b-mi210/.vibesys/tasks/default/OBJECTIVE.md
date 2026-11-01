@@ -7,7 +7,7 @@ while passing the accuracy checker. Expose an OpenAI-compatible
 
 `reference/` (under `.vibesys/tasks/default/`) is a minimal, correct, unoptimized
 PyTorch engine and server to start from. The ROCm optimization floor in
-`resources/skills/serving-systems/references/platforms/rocm/floor.md`
+`skills/domains/serving-systems/references/platforms/rocm/floor.md`
 (continuous batching, paged KV, prefix caching, chunked prefill) applies in
 design. Its kernel-library specifics (AITER, CK, FP8) target MI300-class
 gfx942; treat them as hypotheses to re-verify on gfx90a, per

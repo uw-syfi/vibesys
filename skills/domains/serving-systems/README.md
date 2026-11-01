@@ -43,11 +43,11 @@ via the `--skills-dir` flag (default in `vibesys/cli_common.py`),
 copying the skill tree into each workspace's `.claude/skills/` so the
 in-workspace coding agent picks it up.
 
-The reference engines (`repos/{vllm,sglang,TensorRT-LLM}/`) are tracked as
+The reference engines (`third_party/serving-repos/{vllm,sglang,TensorRT-LLM}/` at the repository root) are tracked as
 git submodules — initialize with:
 
 ```bash
-git submodule update --init --checkout resources/skills/serving-systems/repos
+git submodule update --init --checkout third_party/serving-repos
 ```
 
 `update-repos.sh` is the upstream sparse-checkout helper, kept for parity
@@ -91,9 +91,12 @@ vibesys-skills/
 ├── tooling/                      fastapi-serving, openai-api,
 │                                 accuracy-checker, serving-benchmark,
 │                                 profiler, io-handling, lora-serving
-└── repos/                        vllm, sglang, TensorRT-LLM (git submodules)
 ```
 
 ## Authoring
 
 See [CLAUDE.md](CLAUDE.md) for skill-authoring conventions used in this repo.
+
+The `SERVE_REPOS=<vibesys-root>/third_party/serving-repos` layout exists only
+in a VibeSys checkout. In another repository, set `SERVE_REPOS` to your own
+reference-engine checkout directory; installing the skill does not install engines.

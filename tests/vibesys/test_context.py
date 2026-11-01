@@ -355,7 +355,7 @@ def test_run_resolves_source_resource_citations_before_exposing_the_objective(
     (skill / "SKILL.md").write_text(
         "---\nname: serving-systems\ndescription: Serving.\n---\nRead references.\n"
     )
-    source = f"resources/skills/serving-systems/{reference.as_posix()}"
+    source = f"skills/domains/serving-systems/{reference.as_posix()}"
     installed = f".agents/skills/serving-systems/{reference.as_posix()}"
     objective = f"Read `{source}`. Operator constraint: use the CPU-check script.\n"
     with _create_context(
@@ -391,7 +391,7 @@ def test_run_exposes_the_rewritten_objective_and_leaves_the_operators_file_as_wr
         "---\nname: objective-policy\ndescription: Preserve accuracy.\n---\n# Policy\n"
     )
     (skill / "floor.md").write_text("Preserve accuracy.\n")
-    written = "Raise queue throughput. Follow resources/skills/objective-policy/floor.md.\n"
+    written = "Raise queue throughput. Follow skills/domains/objective-policy/floor.md.\n"
     operators_file = task_path(project) / "OBJECTIVE.md"
     operators_file.write_text(written, encoding="utf-8")
     with _create_context(
@@ -399,7 +399,7 @@ def test_run_exposes_the_rewritten_objective_and_leaves_the_operators_file_as_wr
     ) as ctx:
         copy = Path(ctx.environment_resources.view.paths.objective)
         assert copy != operators_file
-        assert copy.read_text() == written.replace("resources/skills/", ".agents/skills/")
+        assert copy.read_text() == written.replace("skills/domains/", ".agents/skills/")
 
     assert operators_file.read_text(encoding="utf-8") == written
 
