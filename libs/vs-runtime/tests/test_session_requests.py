@@ -31,7 +31,6 @@ from vs_core.api import (
 )
 from vs_project.api import Project
 from vs_runtime.api.core import ExecutionResult, JournalRunInvocations, ReceiptStore
-from vs_runtime.api.executor_contexts import RevocableLease
 from vs_runtime.api.observation_contracts import assert_core_accepts
 from vs_sim.api.testing import SimThreads, examples, wait_until_started
 
@@ -39,6 +38,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from vs_core.api import RequestBase
+    from vs_runtime.api.executor_contexts import RevocableLease
 
 
 class World:
@@ -366,17 +366,6 @@ async def test_only_a_settled_turn_proves_the_run_writer_ended() -> None:
         assert proof.unproven(run_snapshot("inv-2")) is None
         assert proof.unproven(run_snapshot("inv-1")) is not None  # acceptance unknown
         assert proof.unproven(run_snapshot("inv-9")) is not None  # never dispatched
-
-
-@pytest.mark.asyncio
-async def test_stale_host_dispatches_nothing() -> None:
-    async with world() as w:
-        await w.execute(ensure_request())
-        lost = RevocableLease()
-        lost.valid = False
-        result = await w.execute(dispatch_request(), lease=lost)
-        assert status(result) is ObservationStatus.UNKNOWN
-        assert w.host.turns == []
 
 
 @settings(max_examples=examples(pr=5, nightly=25), deadline=None)

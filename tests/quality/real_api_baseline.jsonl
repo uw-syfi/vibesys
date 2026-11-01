@@ -196,7 +196,6 @@
 {"path": "tests/support/real_git.py", "rule": "real_impl", "count": 1}
 {"path": "tests/support/session_lifecycle_world.py", "rule": "real_impl", "count": 4}
 {"path": "tests/support/session_world.py", "rule": "real_impl", "count": 5}
-{"path": "tests/support/skeleton_world.py", "rule": "real_impl", "count": 1}
 {"path": "tests/support/stream_session_world.py", "rule": "real_impl", "count": 3}
 {"path": "tests/support/workspace_world.py", "rule": "real_impl", "count": 4}
 {"path": "tests/vibesys/agents/test_stub_runner.py", "rule": "real_impl", "count": 4}

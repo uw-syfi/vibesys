@@ -130,7 +130,7 @@ def test_intent_admission_loads_contracts_without_the_run_engine(
     loaded = loaded_modules(result.stderr.decode())
     assert "vs_proto.api" in loaded
     engines = (
-        "vs_runtime._core_loop",
+        "vs_runtime._step_loop",
         "vs_runtime.api.infrastructure",
         "vibesys.run",
         "vibesys.api.transport",

@@ -136,7 +136,8 @@ Paths are under `libs/vs-runtime/src/vs_runtime/`.
 | `_access_settlement.py` | 377 | `_session_requests.py`, `_session_lifecycle_requests.py`, `api/core.py`, `api/retained.py` | Delete `access_unproven`. Keep the rest. `begin` and `settle` enforce the role's workspace grant and revert unauthorized writes, which is policy, not recovery. The runners also use `fence`, `receipt`, `restore_interrupted` and the new `rewind`, which `clear` of a turn calls to return the workspace to the baseline its receipt retains and reopen the key for the next attempt. `begin` calls `require_clear` and `blocking`, and the workspace's snapshot guard calls `fenced_by`, so the unsettled-writer index stays too: the 103 lines this row first counted for deletion are not removable without redesigning that guard |
 | `_evaluation_recovery.py` | 311 | `_polling_evaluation.py` and `_semantic_slurm_evaluation.py` take it as an optional argument that no production wiring passes; `api/slurm_evaluation_stack.py` | Delete |
 | `_writer_reconciliation.py` | 326 | `_run_environment.py` (`reconcile_writers` on four environments), `_evaluation_recovery.py` | Delete, with `reconcile_writers` and the no-op recovery mixins in `_run_environment.py` |
-| `_core_loop.py`, `_core_run.py`, `_core_preflight.py`, `_core_wiring.py` | 1,590, 616, 220, 53 | Tests only. Production reads what these held through `_core_executors.py` (`core_executors`), `_core_state.py` (`new_core_state`, `CoreStartup`) and `_run_clocks.py` (`HEARTBEAT_TASK`) | Delete the four. The runner loop replaced them. Recovery start, `HostRenewed`, lease upkeep, `_recovery_cannot_open` and `_blocked_for_good` go with them |
+| `_core_loop.py`, `_core_run.py`, `_core_wiring.py`, `_core_publications.py` | 1,590, 616, 53, 84 | Deleted (#3475 6b). Production reads what these held through `_core_executors.py` (`core_executors`) and `_core_state.py` (`new_core_state`, `CoreStartup`) | The runner loop replaced them. Recovery start, `HostRenewed`, lease upkeep, `_recovery_cannot_open` and `_blocked_for_good` went with them |
+| `_core_preflight.py` | 220 | `src/vibesys/run/core_run.py` (`reject_legacy_resume`), `src/vibesys/run/store_migration.py` (`resolve_core_resume`) | Keep. It reads a legacy run's store for the migration and refuses to resume one; it goes with the legacy store reader, not with the shell |
 | `libs/vs-runtime/src/vs_runtime/_replay_store.py`, `api/replay.py` | 167 and 33 | `_replay_store.py` has no importer but `api/replay.py`, which now exports it with the writer-proof and evaluation-recovery modules above | Delete both with the layer. `RunLogReplayStore` stays only until its log-append discipline, which item 4a moves to `vs_runlog.ConfirmedLog`, has no other user. Its contract suite (`libs/vs-runtime/tests/test_replay_store_contract.py`) drives the store directly |
 
 ### vs-project
@@ -1035,7 +1036,7 @@ PR 6a and 6b land back to back, with no cleanup deferred, as #3408 required of i
 
 - **Saved-result reuse stays as the ledger already does it.** A finished request is a `COMPLETED` record in
   the fold, and the shell dispatches only `PREPARED` records
-  (`libs/vs-runtime/src/vs_runtime/_core_loop.py:CoreRuntime._authorized`). No keyed code is needed for it.
+  (the old shell's `CoreRuntime._authorized`, deleted with it; `libs/vs-runtime/src/vs_runtime/_step_loop.py` is the loop now). No keyed code is needed for it.
 - **Kept, moved:** the log-append commit discipline of `RunLogReplayStore` (torn tail repaired, complete
   corruption fails, uncertain commit authorizes no dispatch), into `vs_runlog`.
 - **Deleted:** the whole `vs_runtime` driver half (`_replay_runtime.py`, `_replay_run.py` and the fourteen
@@ -1064,7 +1065,7 @@ skill):
 - A file there defines or imports a name in `DELETED_SYMBOLS`.
 
 Both are plain tuples at the top of the file, one line each, and each pull request that deletes part of the
-layer adds what it removed. The guard holds the keyed-replay modules and `ReplayUnknown` today. The names the
+layer adds what it removed. The guard holds the keyed-replay modules, `ReplayUnknown` and the old shell runtime (`_core_loop`, `_core_run`, `_core_wiring`, `_core_publications` and the names they defined) today. The names the
 inventory above marks for deletion (`RecoveryBarrier`, `RecoveryCheck`, `HostEpoch`, `ChildLease`,
 `InspectRequest`, `InspectTurn`, `InspectOwnedJob`, `CancelOwnedResource`, `BlockRequest`, `EffectFences`,
 `NothingHeld`, `MayHold`, `StoreFence`, `HostFence`) join the list in the pull request that deletes each.
@@ -1127,13 +1128,15 @@ These are facts the implementation must settle, found while checking the design 
   (`SessionResumeError`) instead of resuming; the fix belongs to that provider's contract case.
 - **The executor kinds repeat by tag, without receipts.** The loop records an attempt before any of its
   I/O, so an attempt after the first proves an earlier one may have run. `ExecutorStepRunner` passes that
-  as `ExecutionContext.repeat`, which replaces the `resumed` flag the begun marker of `run_once` used to
-  give (`run_once` now hands its performers `repeat` from the context or the marker, so the production
-  loop is unchanged). Every test of a repeat runs the real executors over an `UnreceiptedStore`, which
-  keeps no execution record: each of the 13 kinds is killed at sampled durable writes (every write, for
-  `EnsureSession`), cleared and run again, and so is a generated program of runs, kills, restarts and
-  clears, with the effects and the result of an unkilled run. Two kinds were safe only through the
-  marker:
+  as `ExecutionContext.repeat`, which replaced the `resumed` flag the begun marker of `run_once` gave.
+  The workspace, session, session-lifecycle and evaluation executors no longer call `run_once`: they
+  keep no execution record, so a repeat reaches the same end only through that flag and the effect itself.
+  Every test of a repeat runs the real executors: each of the 13 kinds is killed at sampled durable writes
+  (every write, for `EnsureSession`), cleared and run again, and so is a generated program of runs, kills,
+  restarts and clears, which holds the effects at every point to those of an unkilled run, so no
+  executor acts twice for one step
+  (`test_whatever_the_order_of_runs_kills_restarts_and_clears_a_step_ends_as_an_unkilled_one`). Two
+  kinds were safe only through the marker:
   - `DiscardWorkspace` answered `children_complete=False` ("released without a recorded session close")
     for a worktree its killed first attempt had already removed, unless it was told it was a repeat.
   - `SnapshotAndRetain` and `SnapshotAndRetainRun` look for the snapshot an earlier attempt committed by
