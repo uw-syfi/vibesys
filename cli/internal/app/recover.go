@@ -91,6 +91,7 @@ func (a *App) Start(ctx context.Context) error {
 		m.event = found
 		a.post(m)
 	}
+	a.settleBranches(ctx, scopes)
 	a.post(message{event: lifecycle.RecoveryDone{}, then: func() { a.sweep(named(a.ctx, "sweep")) }})
 	return nil
 }

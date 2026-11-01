@@ -33,6 +33,21 @@ type NoCurrentResult struct {
 func (CurrentResult) resultAnswer()   {}
 func (NoCurrentResult) resultAnswer() {}
 
+// CurrentResultAt decides what `result` reports when the result branch is at head. It is
+// CurrentResultOf, except that a head the last promotion did not set has no number: the branch
+// moved by some other means, so no measurement of the last promoted commit speaks for it, and the
+// answer is NotMeasuredSincePromotion for the head it is at. A branch that was never promoted has
+// no head to report, whatever commit it is at.
+func CurrentResultAt(head Commit, promotions []Promotion, results []Result) ResultAnswer {
+	if len(promotions) == 0 {
+		return NoCurrentResult{Reason: NoHead}
+	}
+	if head != promotions[len(promotions)-1].Commit {
+		return NoCurrentResult{Reason: NotMeasuredSincePromotion, Head: head}
+	}
+	return CurrentResultOf(promotions, results)
+}
+
 // CurrentResultOf decides what `result` reports. The head is the commit of the last promotion
 // (promotions are oldest first). The answer is its latest measurement that was recorded after the
 // head last moved and rests on a passing check that was also recorded after it. A measurement
