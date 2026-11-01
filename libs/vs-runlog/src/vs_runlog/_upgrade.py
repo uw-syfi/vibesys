@@ -115,6 +115,12 @@ def upgrade_skeleton(state: Keyframe) -> Keyframe:
     lifecycle remains independent. Neither retained files nor the caller's snapshot change.
     """
     result = Keyframe.from_binary(state.to_binary())
+    upgrade_in_place(result)
+    return result
+
+
+def upgrade_in_place(result: Keyframe) -> float | None:
+    """Upgrade ``result`` in place; the caller owns it. Returns the latest measured input value."""
     events: list[tuple[int, EpochStarted | Span | MetricPoint]] = [
         (version.seq, version.epoch) for version in result.epochs if version.epoch is not None
     ]
@@ -145,4 +151,4 @@ def upgrade_skeleton(state: Keyframe) -> Keyframe:
         or result.head.committed_seq != result.through_seq
     ):
         result.head = project_head(result)
-    return result
+    return upgrade.measured
