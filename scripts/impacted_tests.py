@@ -17,8 +17,8 @@ The real-system tiers (`tests/e2e`, `tests/slurm_cluster`, `tests/minimal_contai
 selected: they need Docker, a cluster or credentials and have their own CI jobs.
 
 Usage:
-    uv run python -m scripts.impacted_tests select --base-ref origin/main
-    uv run python -m scripts.impacted_tests run --base-ref origin/main --budget-seconds 30 --workers 4
+    uv run python scripts/impacted_tests.py select --base-ref origin/main
+    uv run python scripts/impacted_tests.py run --base-ref origin/main --budget-seconds 30 --workers 4
 """
 
 from __future__ import annotations

@@ -56,6 +56,7 @@ REQUIRED_JOBS = {
     ("test.yml", "sandbox-macos"),
     ("test.yml", "seed-exploration"),
     ("test.yml", "test"),
+    ("test.yml", "test-impact"),
     ("test.yml", "validate-examples"),
     ("test.yml", "validate-examples-cpu-check"),
 }
