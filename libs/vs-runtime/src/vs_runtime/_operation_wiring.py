@@ -3,14 +3,13 @@
 A strategy declares its operations (codec registrations) and says which role each
 plays. The runtime owns what performs each role. This module joins the two:
 ``build_operation_catalog`` makes the closed catalog, giving every role an owner or
-a typed refusal, and ``bind_operations`` is the startup gate. It rejects a strategy
-whose required operation has no owner, then returns the shell bindings that execute
-the catalog. Tests build their catalogs through the same functions.
+a typed refusal. ``OperationCatalog.require_owned`` is the startup gate that rejects a
+strategy whose required operation has no owner. Tests build their catalogs through the
+same functions.
 """
 
 from __future__ import annotations
 
-import dataclasses
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -27,15 +26,10 @@ from vs_core.api import (
     OperationRegistry,
 )
 from vs_runtime._capture_command_operation import CaptureCommandOwner
-from vs_runtime._core_loop import CoreRuntimeBindings
 from vs_runtime._evidence_operations import InterpretEvidenceOwner, RetainRevisionOwner
 from vs_runtime._export_patch_operation import ExportPatchOwner
 from vs_runtime._local_validation import LocalValidator
-from vs_runtime._observation_factory import ObservationFactory
 from vs_runtime._operation_catalog import OperationCatalog, OperationEntry, RefusalReason
-from vs_runtime._operation_receipts import NamespaceOperationReceipts
-from vs_runtime._operation_requests import RegisteredOperationRequests
-from vs_runtime._receipt_store import ReceiptStore
 from vs_runtime._render_operation import RenderArtifactsOwner
 from vs_runtime._rerun_policy import (
     ClearedWork,
@@ -57,19 +51,15 @@ if TYPE_CHECKING:
         OperationRegistration,
         RevisionRef,
         SchemaRef,
-        SearchDeclaration,
         StrategyOperations,
     )
-    from vs_project.api import StateNamespace
     from vs_prompts.api import TemplateRenderer
     from vs_runtime._artifact_store import ArtifactStore
-    from vs_runtime._core_requests import RequestExecutors
     from vs_runtime._evidence_ledger import EvidenceLookup
     from vs_runtime._local_validation import LocalValidationEvents
     from vs_runtime._operation_catalog import OperationOwner
     from vs_runtime._validation_passes import ValidationPasses
     from vs_runtime.contracts import CaptureCommands, Commands, RevisionLedger, Workspaces
-    from vs_sim.api import Threads
 
 
 class OperationRole(StrEnum):
@@ -247,27 +237,3 @@ def build_operation_catalog(
     all_entries = (*entries, *extra)
     registry = OperationRegistry(tuple(entry.registration for entry in all_entries))
     return OperationCatalog(registry, all_entries)
-
-
-def bind_operations(
-    declaration: SearchDeclaration,
-    catalog: OperationCatalog,
-    receipts: StateNamespace,
-    *,
-    threads: Threads,
-    base: CoreRuntimeBindings | None = None,
-) -> CoreRuntimeBindings:
-    """Startup gate and shell bindings: reject unowned required operations, then execute the catalog.
-
-    Raises ``ContractError`` naming the first required operation that is missing
-    or refused. ``base`` supplies the other executor roles unchanged; ``threads``
-    locks the receipt store.
-    """
-    catalog.require_owned(declaration)
-    selected = base or CoreRuntimeBindings()
-    store = ReceiptStore(receipts, threads)
-    operations = RegisteredOperationRequests(
-        catalog, NamespaceOperationReceipts(store), ObservationFactory(store)
-    )
-    executors: RequestExecutors = dataclasses.replace(selected.executors, operations=operations)
-    return dataclasses.replace(selected, registry=catalog.registry, executors=executors)

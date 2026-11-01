@@ -178,7 +178,6 @@ from vs_runtime._operation_requests import RegisteredOperationRequests
 from vs_runtime._operation_wiring import (
     OperationPorts,
     OperationRole,
-    bind_operations,
     build_operation_catalog,
     operation_roles,
     production_owners,
@@ -455,7 +454,6 @@ __all__ = [
     "WorkspaceRequests",
     "adoption_commit_message",
     "as_target",
-    "bind_operations",
     "build_operation_catalog",
     "commit_of",
     "core_bindings",

@@ -7,9 +7,8 @@ next host. Here every commit of a skeleton run, straight through and across a re
 loaded back from disk the moment it is durable: it decodes to the record the host committed,
 and encoding the decoded record gives the stored bytes again.
 
-`libs/vs-runtime/tests/test_core_shell.py` holds the same property for a run that only
-advances its clock; a skeleton run reaches every kind of record core keeps (attempts,
-sessions and their turns, owned jobs, settlement, adoption, recovery barriers).
+A skeleton run reaches every kind of record core keeps (attempts, sessions and their turns,
+owned jobs, settlement, adoption, recovery barriers).
 """
 
 from __future__ import annotations
@@ -72,9 +71,7 @@ _CASES = [
 ]
 
 
-# The nightly job plays every search both ways. A pull request plays one case of it, and already
-# holds the property for a run that only advances its clock
-# (`libs/vs-runtime/tests/test_core_shell.py`).
+# The nightly job plays every search both ways. A pull request plays one case of it.
 @pytest.mark.slow
 @pytest.mark.parametrize(("strategy", "crash"), _CASES)
 async def test_every_committed_record_reads_back_as_itself(
