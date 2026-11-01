@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 from ._adoption import view as adoption_view
 from ._operator_actions import parallel_limit
 from ._request_ledger import next_retry_at
-from ._request_recovery import next_reconciliation_at
 from .types.common import ChargeKind
 from .types.kernel import CoreState, CoreView, RunSummary
 from .types.records import (
@@ -163,7 +162,6 @@ def project(state: CoreState) -> CoreView:
         adoption=adoption_view(state.settlement, state.records),
         next_observe_at=_earliest(
             next_observe_at(state.evaluation),
-            next_reconciliation_at(state.records, state.evaluation, run),
             next_retry_at(state.records),
         ),
     )

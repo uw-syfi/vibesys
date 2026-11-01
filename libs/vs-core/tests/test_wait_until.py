@@ -1,7 +1,7 @@
-"""A wait states how long it may take; core ends it at that limit or when a watch fires.
+"""A wait states how long it may take; ``decide`` ends it at that limit or when a watch fires.
 
-Properties over the public API with the pure core and no real time: the clock is the
-``ClockAdvanced`` event, so a test moves time by stepping it.
+Properties over the pure core and no real time: the run clock moves by ``reach``, which records
+what the runner loop records once time reaches a moment (``vs_core.testing.limits``).
 """
 
 import pytest
@@ -9,6 +9,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_core.testing.limits import reach
 
 from .wait_support import (
     RUN_DEADLINE,
@@ -31,17 +32,19 @@ def test_a_wait_past_its_limit_ends_with_timed_out(limit: float, later: float) -
     (record,) = operations(state)
     assert record.until.at == pytest.approx(limit)
 
-    just_before = core.step(state, core.ClockAdvanced(now_at=limit * 0.99))
+    just_before = reach(state, limit * 0.99)
     assert failures(just_before) == []
     assert [r.phase for r in open_records(just_before.state)] != []
 
-    ended = core.step(state, core.ClockAdvanced(now_at=limit + later))
+    ended = reach(state, limit + later)
     (failure,) = failures(ended)
     assert failure.reason is core.FailureReason.TIMED_OUT
     assert failure.decision == core.DecisionId(root="w")
+    assert failure.limit_at == pytest.approx(limit)
     (done,) = operations(ended.state)
-    assert done.phase is core.RequestPhase.BLOCKED
+    assert done.phase is core.RequestPhase.COMPLETED
     assert done.failure == failure
+    assert failures(reach(ended.state, limit + later + 1_000.0)) == []
 
 
 @given(limits=st.lists(LIMITS, min_size=1, max_size=5))
@@ -53,7 +56,7 @@ def test_no_wait_stays_open_past_the_latest_limit(limits: list[float]) -> None:
     assert latest == pytest.approx(max(limits))
     # Time passes in steps; at the latest limit nothing canonical is still open.
     for moment in sorted({*(r.until.at for r in operations(state)), latest}):
-        state = core.step(state, core.ClockAdvanced(now_at=moment)).state
+        state = reach(state, moment).state
     assert open_records(state) == []
 
 
@@ -97,7 +100,7 @@ def test_a_fired_watch_ends_exactly_the_waits_that_declared_it(
         )
         for i, watched in enumerate(declared)
     ]
-    result = submit(state, *waits)
+    result = reach(submit(state, *waits).state, 1.0)
     ended = {f.decision: f for f in failures(result)}
     expected = {core.DecisionId(root=f"w{i}") for i, watched in enumerate(declared) if watched}
     assert set(ended) == expected

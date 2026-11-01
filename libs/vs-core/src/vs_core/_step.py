@@ -66,7 +66,6 @@ from ._waits import (
     undispatchable_requests,
     unmet_waits,
 )
-from ._watches import watch_deadlines
 from .types.attempts import (
     AttemptAdmitted,
     AttemptRegistered,
@@ -803,7 +802,6 @@ def _stall_entries(
         *lapsed_job_waits(state),
         *lapsed_session_waits(state),
         *lapsed_check_waits(state),
-        *watch_deadlines(state),
     )
     return [
         (signal, None, _signal_admission(state, signal))
@@ -899,7 +897,7 @@ def propagate(
             for outbound in change.requests
         )
         events.extend(change.events)
-    return _end_fired_watches(_registered_transition(state, requests, events), dispatch)
+    return _registered_transition(state, requests, events)
 
 
 def _attributed(
@@ -918,22 +916,6 @@ def _attributed(
                 }
             )
         }
-    )
-
-
-def _end_fired_watches(transition: Transition, dispatch: Dispatch) -> Transition:
-    """Also end the waits whose watch had already fired for work requested in this step.
-
-    Such work only now has a record to end.
-    """
-    fired = watch_deadlines(transition.state)
-    if not fired:
-        return transition
-    follow = propagate(transition.state, fired, dispatch)
-    return Transition(
-        state=follow.state,
-        requests=(*transition.requests, *follow.requests),
-        events=(*transition.events, *follow.events),
     )
 
 
