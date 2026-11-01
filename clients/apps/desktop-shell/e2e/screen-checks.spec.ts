@@ -1,9 +1,12 @@
+import {mkdtempSync, rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {expect, type Page, test} from '@playwright/test';
 import fc from 'fast-check';
 import {BAD_SCREENS, CLEAN_CHROME_SCREEN, CLEAN_PAGE, CLEAN_SCREEN} from './checks/bad-dom.js';
 import {contactSheetHtml} from './checks/contact-sheet.js';
 import {isKnown, KNOWN_FAILURES, type KnownFailure} from './checks/known-failures.js';
-import {KnownLedger} from './checks/known-ledger.js';
+import {KnownLedger, recordedMatches, staleFailures} from './checks/known-ledger.js';
 import {IN_PAGE_CHECKS, pressMovesWindow, report, screenCheck} from './checks/screen-check.js';
 import {settled} from './checks/settle.js';
 import {anchorsOf, RUN_ANCHORS, stabilityViolations} from './checks/stability.js';
@@ -383,4 +386,61 @@ test('a ledger names a suite’s entries no screen showed, and leaves other suit
   ]);
   expect(ledger.screens).toBe(1);
   expect(ledger.stale()).toEqual(['fixed']);
+});
+
+test('the screens of a suite walked by any workers leave the stale entries of one worker walking all', () => {
+  const failures: KnownFailure[] = Array.from({length: 6}, (_, index) => ({
+    id: `entry-${index}`,
+    suite: 'settings',
+    check: 'hollow-box',
+    message: new RegExp(`box ${index}$`),
+    issue: 'https://github.com/uw-syfi/vibesys/issues/1',
+  }));
+  const violation = (index: number) =>
+    ({check: 'hollow-box', message: `a box ${index}`, where: 'div'}) as const;
+  fc.assert(
+    fc.property(
+      // Each screen shows some entries' defects and goes to one of up to four workers.
+      fc.array(
+        fc.record({
+          shows: fc.subarray([0, 1, 2, 3, 4, 5]),
+          worker: fc.integer({min: 0, max: 3}),
+        }),
+        {maxLength: 24},
+      ),
+      screens => {
+        const directory = mkdtempSync(join(tmpdir(), 'vibesys-ledger-'));
+        try {
+          const workers = Array.from({length: 4}, () => {
+            const ledger = new KnownLedger('settings', failures, directory);
+            ledger.requireEveryFailure();
+            return ledger;
+          });
+          const alone = new KnownLedger('settings', failures);
+          for (const [index, screen] of screens.entries()) {
+            const found = screen.shows.map(violation);
+            workers[screen.worker]?.unexplained(`settings/screen-${index}`, found);
+            alone.unexplained(`settings/screen-${index}`, found);
+          }
+          const recorded = recordedMatches('settings', directory);
+          expect(recorded === null ? null : staleFailures(failures, recorded)).toEqual(
+            screens.length === 0 ? null : alone.stale(),
+          );
+        } finally {
+          rmSync(directory, {recursive: true, force: true});
+        }
+      },
+    ),
+    {numRuns: 50},
+  );
+});
+
+test('a ledger that does not own its suite records nothing', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'vibesys-ledger-'));
+  try {
+    new KnownLedger('settings', [], directory).unexplained('settings/screen', []);
+    expect(recordedMatches('settings', directory)).toBeNull();
+  } finally {
+    rmSync(directory, {recursive: true, force: true});
+  }
 });
