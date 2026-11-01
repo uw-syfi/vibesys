@@ -24,6 +24,7 @@ import {act} from 'react';
 import {createRoot} from 'react-dom/client';
 import {GatewayRun} from './gateway-run.js';
 import {wire} from './testing/gateway-wire.js';
+import {MemoryAddress} from './testing/memory-address.js';
 import {RunPeer} from './testing/run-peer.js';
 
 const window = new Window();
@@ -45,22 +46,6 @@ afterAll(async () => {
 
 const FACES = ['ideas', 'timeline', 'agents', 'usage', 'logs'] as const;
 const NAVIGATION = {runAgain: () => undefined, openWindow: () => undefined};
-/** The run's location in memory: the zoom a navigation moved to, told to whoever follows it. */
-class MemoryAddress {
-  #zoom = '';
-  readonly #listeners = new Set<() => void>();
-  readonly zoom = (): string => this.#zoom;
-  readonly move = (zoom: string): void => {
-    this.#zoom = zoom;
-    for (const listener of this.#listeners) listener();
-  };
-  readonly subscribe = (listener: () => void): (() => void) => {
-    this.#listeners.add(listener);
-    return () => this.#listeners.delete(listener);
-  };
-  readonly onEscape = (): (() => void) => () => undefined;
-}
-
 /** The text of each face of the run `fixture` is, as the screen draws it. */
 async function facesOf(fixture: StoreRunFixture): Promise<readonly string[]> {
   const peer = new RunPeer(wire(fixture), [...fixture.records], false);
