@@ -8,10 +8,40 @@ does when time reaches a moment: it records, one at a time, what ``decide`` asks
 from __future__ import annotations
 
 from vs_core._actions import Cancel, Settle
-from vs_core._decide import decide, finished
+from vs_core._decide import decide, finished, limit_of
 from vs_core._step import advance_run_time
 from vs_core.types.kernel import CoreState, StrategyEvent, Transition
+from vs_core.types.records import is_open
 from vs_core.types.steps import Cancelled
+
+
+def next_end(state: CoreState) -> float | None:
+    """The next run-clock time at which an open step reaches its limit, or None."""
+    return min(
+        (
+            limit
+            for record in state.records.records
+            if is_open(record) and (limit := limit_of(state, record)) > state.run.now_at
+        ),
+        default=None,
+    )
+
+
+def end_one(state: CoreState, now: float) -> tuple[CoreState, tuple[StrategyEvent, ...]] | None:
+    """The record the loop writes at ``now`` to end one step, and what the search hears of it.
+
+    None when `decide` asks to end no step. The caller asks again of the state it holds once it has
+    taken the record: the search's answer to what it heard may change what `decide` asks.
+    """
+    state = advance_run_time(state, now)
+    ending = [action for action in decide(state, now) if isinstance(action, Settle | Cancel)]
+    if not ending:
+        return None
+    action = ending[0]
+    result = action.result if isinstance(action, Settle) else Cancelled(reason=action.reason)
+    attempts = state.steps.of(action.tag)
+    ended, heard = finished(state, action.tag, 0 if attempts is None else attempts.started, result)
+    return ended, tuple(heard)
 
 
 def reach(state: CoreState, now: float) -> Transition:
@@ -23,14 +53,7 @@ def reach(state: CoreState, now: float) -> Transition:
     """
     state = advance_run_time(state, now)
     events: list[StrategyEvent] = []
-    while True:
-        ending = [action for action in decide(state, now) if isinstance(action, Settle | Cancel)]
-        if not ending:
-            return Transition(state=state, requests=(), events=tuple(events))
-        action = ending[0]
-        result = action.result if isinstance(action, Settle) else Cancelled(reason=action.reason)
-        attempts = state.steps.of(action.tag)
-        state, heard = finished(
-            state, action.tag, 0 if attempts is None else attempts.started, result
-        )
+    while (ended := end_one(state, now)) is not None:
+        state, heard = ended
         events.extend(heard)
+    return Transition(state=state, requests=(), events=tuple(events))

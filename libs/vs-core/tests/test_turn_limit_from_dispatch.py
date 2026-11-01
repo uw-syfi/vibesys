@@ -12,9 +12,11 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_core.testing.limits import reach
 
 from .test_session_turns import invocation, scope, turn, waiting_turn_state
 from .test_silent_executor_deadline import _silent
+from .wait_support import OPEN
 
 _LIMIT = st.integers(min_value=1, max_value=1000).map(float)
 _QUEUED = st.integers(min_value=0, max_value=5000).map(float)
@@ -23,7 +25,7 @@ _RUN_DEADLINE = 1_000_000.0
 
 def _ended(state: core.CoreState, request_id: core.RequestId) -> bool:
     record = next(row for row in state.records.records if row.request_id == request_id)
-    return record.phase == core.RequestPhase.BLOCKED
+    return record.phase not in OPEN
 
 
 def _prepared(state: core.CoreState, kind: type[core.Request]) -> core.RequestRecord:
@@ -67,7 +69,7 @@ def _reserved(limit: float) -> core.CoreState:
 
 
 def _blocked_after(state: core.CoreState, request_id: core.RequestId, at: float) -> bool:
-    return _ended(core.step(state, core.ClockAdvanced(now_at=at)).state, request_id)
+    return _ended(reach(state, at).state, request_id)
 
 
 @given(limit=_LIMIT, queued=_QUEUED)
@@ -79,7 +81,7 @@ def test_a_queued_session_acquisition_spends_none_of_the_turns_limit(
     request_id = record.request_id
 
     # Waiting for a slot, however long, ends nothing: only the run deadline bounds it.
-    state = core.step(state, core.ClockAdvanced(now_at=queued)).state
+    state = reach(state, queued).state
     assert not _ended(state, request_id)
 
     state = core.step(state, core.DispatchAuthorized(request_id=request_id, now_at=queued)).state

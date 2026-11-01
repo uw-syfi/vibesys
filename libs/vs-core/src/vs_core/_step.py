@@ -50,10 +50,12 @@ from ._proofs import (
 )
 from ._quota_pause_clock import credit_quota_pause
 from ._registry import ContractError
+from ._request_forward import turn_of
 from ._routing import SIGNAL_ORDER, event_area
 from ._run_pause import EpochFacts, control_refusal, pause_outlived, reopened, stop_standing
 from ._session_inputs import check_declared_target, may_have_been_read
 from ._session_inputs import mid_turn_offers as _mid_turn_offers
+from ._session_scope import lost_turn_authority
 from ._validation import validate_decision
 from ._values import digest, share_unchanged
 from ._waits import (
@@ -172,6 +174,7 @@ from .types.sessions import (
     CheckpointStalled,
     InputWithdrawRequested,
     InterruptRequested,
+    InvocationCancellationRequested,
     SessionsEvent,
     SessionsState,
     SteerReceived,
@@ -1780,6 +1783,22 @@ def step_recorded(state: CoreState, event: CoreEvent) -> Transition:
     that rebuilds state from it must apply every fact, or a result core was told of is lost.
     """
     return consume(state, event, _dispatch, compact_ledger, recorded=True)
+
+
+def lost_turn(state: CoreState, record: RequestRecord) -> InvocationCancellationRequested | None:
+    """The cancellation that ends the turn of the dispatch ``record``, when core ends that dispatch.
+
+    A dispatch that ends at its limit (or a watch) with no result leaves its session executing
+    with nothing to answer it. The turn is lost like one whose acceptance stayed unknown: Sessions
+    cancels it and answers its invocation as lost, and the search's role decides whether to ask
+    again. None for a record that is not a turn's dispatch.
+    """
+    invocation = turn_of(_context(state, RecordsContext), record)
+    if invocation is None:
+        return None
+    return InvocationCancellationRequested(
+        invocation=invocation, authority=lost_turn_authority(invocation)
+    )
 
 
 def settle_park(state: CoreState) -> CoreState:

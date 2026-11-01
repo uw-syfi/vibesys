@@ -86,6 +86,7 @@ from vs_core.api import (
     SubmitMeasurement,
     TargetObservation,
     TimeReached,
+    Transition,
     TurnObserved,
     VerifyAdoption,
     WorkspaceObserved,
@@ -98,6 +99,7 @@ from vs_core.api import (
     validate_startup,
 )
 from vs_core.testing.builders import initial_state, sample_limits
+from vs_core.testing.limits import end_one, next_end
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -430,6 +432,9 @@ class _Driver[S: StrategyState]:
         asked = project(trace.core).next_observe_at
         if asked is not None:
             due.append(asked)
+        limit = next_end(trace.core)
+        if limit is not None:
+            due.append(limit)
         if not due and trace.core == self.ticked:
             return False
         # The shell's loop delivers the clock after every pass that changed state, even with
@@ -440,6 +445,7 @@ class _Driver[S: StrategyState]:
         reached = tuple(TimeReached(time=wake) for wake in sorted(self.wakes) if wake <= moment)
         self.wakes = [wake for wake in self.wakes if wake > moment]
         self.consume(ClockAdvanced(now_at=moment), extra=reached)
+        self.end_at_limits()
         self.ticked = trace.core
         self.commit()
         return trace.core != before or bool(reached)
@@ -873,7 +879,17 @@ class _Driver[S: StrategyState]:
         trace = self.trace
         if isinstance(event, RequestObserved):
             trace.log.append(event)
-        transition = self.step(trace.core, event)
+        self.take_transition(self.step(trace.core, event), extra)
+
+    def end_at_limits(self) -> None:
+        """What the runner loop records at the run clock: the end of every step past its limit."""
+        while (ended := end_one(self.trace.core, self.trace.core.run.now_at)) is not None:
+            state, heard = ended
+            self.take_transition(Transition(state=state, requests=(), events=heard), ())
+            self.commit()
+
+    def take_transition(self, transition: Transition, extra: tuple[Event, ...]) -> None:
+        trace = self.trace
         translated = translate(transition.state, transition.events)
         incoming = (*translated.events, *extra)
         advanced = advance(

@@ -20,7 +20,7 @@ from ._request_ledger import dispatch_until, retry_limit
 from ._run_park import pause_cancels, starts
 from ._scope_order import withdrawn_by_close
 from ._search_events import Translated, translate
-from ._step import advance_run_time, settle_end, settle_park, step, step_recorded
+from ._step import advance_run_time, lost_turn, settle_end, settle_park, step, step_recorded
 from ._step_attempts import (
     commands_lapsed,
     concluded,
@@ -61,7 +61,13 @@ from .types.common import (
     RunStatus,
     StopMode,
 )
-from .types.records import is_open, request_end_policy, request_interrupt_policy, request_lifecycle
+from .types.records import (
+    RequestPhase,
+    is_open,
+    request_end_policy,
+    request_interrupt_policy,
+    request_lifecycle,
+)
 from .types.steps import Cancelled, CancelReason, Failed
 from .types.until import FailureReason, Until
 
@@ -368,11 +374,19 @@ def finished(
     if by_core:
         state, published = _concluded_by_core(state, tag, result)
         return settle_park(state), published
+    record = open_record(state, tag)
+    started = record.phase is not RequestPhase.PREPARED
     state = dispatched(state, tag)
     failure = ended_failure(state, open_record(state, tag), result)
+    published: tuple[StrategyEvent, ...] = ()
+    if failure is not None and started and (lost := lost_turn(state, record)) is not None:
+        # A lost turn is answered by its session once it is cancelled: the ask hears that, not a
+        # failure of the record, which would discard that answer as a late result.
+        transition = step_recorded(state, lost)
+        state, published, failure = transition.state, transition.events, None
     report, owner_events = finish(state, tag, result)
     transition = step_recorded(state, report)
-    state, published = transition.state, transition.events
+    state, published = transition.state, (*published, *transition.events)
     for event in owner_events:
         transition = step_recorded(state, event)
         state, published = transition.state, (*published, *transition.events)
