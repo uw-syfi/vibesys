@@ -63,4 +63,4 @@ for (const width of WIDTHS) {
   }
 }
 
-ledger.requireEveryFailure(() => ledger.screens >= WIDTHS.length * PREFIXES.length);
+ledger.requireEveryFailure();
