@@ -3,8 +3,8 @@
  * has cut into the buckets of the question (or could not, or does not offer to). Every figure is a
  * plain number the page words; nothing here names a real machine, path or person.
  */
-import type {FakeBridgeSeed} from './fake-bridge.js';
-import {FAKE_OFFER} from './fake-offer.js';
+import type {FakeBridgeSeed} from '../src/testing/fake-bridge.js';
+import {FAKE_OFFER} from '../src/testing/fake-offer.js';
 import {journeyFixture} from './journey-world.js';
 import {PROJECT, SEED} from './world.js';
 

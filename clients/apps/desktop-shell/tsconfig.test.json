@@ -9,12 +9,7 @@
   },
   "include": [
     "src/**/*.ts",
-    "src/**/*.tsx",
-    "e2e/fake-bridge.ts",
-    "e2e/fake-offer.ts",
-    "e2e/new-run-pages.ts",
-    "e2e/seed.ts",
-    "e2e/started-at.ts"
+    "src/**/*.tsx"
   ],
   "exclude": [],
   "references": [

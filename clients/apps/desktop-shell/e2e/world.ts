@@ -13,11 +13,11 @@ import {
   installFakeMachines,
   installFakeNewRun,
   installFakeProjectRuns,
-} from './fake-bridge.js';
+} from '../src/testing/fake-bridge.js';
+import {SEED} from '../src/testing/seed.js';
 import {installGateway, wire} from './fake-gateway.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {showScreen, sidebar, whenRead} from './read.js';
-import {SEED} from './seed.js';
 
 export interface FakeHostWindow extends Window {
   fakeHost: {
@@ -29,7 +29,7 @@ export interface FakeHostWindow extends Window {
   };
 }
 
-export {listed, PROJECT, SEED, server} from './seed.js';
+export {listed, PROJECT, SEED, server} from '../src/testing/seed.js';
 
 export async function open(page: Page, seed: FakeBridgeSeed = SEED): Promise<void> {
   await addInitScripts(page, [

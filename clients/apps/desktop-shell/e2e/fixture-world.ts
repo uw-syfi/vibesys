@@ -37,13 +37,13 @@ import {
   type NewRunMethods,
   type UsageMethods,
   type WindowsMethods,
-} from './fake-bridge.js';
-import {FAKE_OFFER} from './fake-offer.js';
+} from '../src/testing/fake-bridge.js';
+import {FAKE_OFFER} from '../src/testing/fake-offer.js';
+import {STARTED_AT} from '../src/testing/started-at.js';
 import {addInitScripts, initScript as script} from './init-scripts.js';
 import {type NativeFixtureOptions, nativeFixtureScript} from './native-fixture.js';
 import {whenRead} from './read.js';
 import {installGatewayOnly, type RetiredRunMethods} from './retired-run-bridge.js';
-import {STARTED_AT} from './started-at.js';
 
 const PROJECT = '/work/queue-rs';
 const TASK = 'mpmc';

@@ -1,7 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Locator, type Page, test} from '@playwright/test';
 import type {RunFixture} from '@vibesys/run-fixtures';
-import {scrolledToEnd} from './checks/settle.js';
 import {
   type FakeBridgeSeed,
   type FakeWindows,
@@ -11,11 +10,12 @@ import {
   installFakeProjectRuns,
   installFakeWindows,
   MAC_CHROME,
-} from './fake-bridge.js';
+} from '../src/testing/fake-bridge.js';
+import {STARTED_AT} from '../src/testing/started-at.js';
+import {scrolledToEnd} from './checks/settle.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {appendJourney, journeyFixture, journeyScript, transitionJourney} from './journey-world.js';
 import {nativeFixtureScript} from './native-fixture.js';
-import {STARTED_AT} from './started-at.js';
 
 /**
  * The Run screen's levels against the Fake bridge and native gateway records, including

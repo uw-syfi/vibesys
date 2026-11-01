@@ -1,8 +1,8 @@
 import {mkdirSync} from 'node:fs';
 import {expect, test} from '@playwright/test';
+import type {FakeBridgeSeed} from '../src/testing/fake-bridge.js';
 import {KnownLedger} from './checks/known-ledger.js';
 import {SCREEN_CHECKS, screenCheck} from './checks/screen-check.js';
-import type {FakeBridgeSeed} from './fake-bridge.js';
 import {main, NEW_RUN_PAGES, openAt} from './new-run-flow.js';
 import {SEED} from './world.js';
 

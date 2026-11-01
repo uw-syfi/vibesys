@@ -6,11 +6,11 @@
  */
 import {expect, type Page} from '@playwright/test';
 import {DRAFT_KEY, storeDraft} from '@vibesys/feature-new-run/state';
-import type {FakeBridgeSeed} from './fake-bridge.js';
-import {draftAt, type NewRunPage} from './new-run-pages.js';
+import type {FakeBridgeSeed} from '../src/testing/fake-bridge.js';
+import {draftAt, type NewRunPage} from '../src/testing/new-run-pages.js';
 import {openNewRun, SEED} from './world.js';
 
-export {NEW_RUN_PAGES, type NewRunPage} from './new-run-pages.js';
+export {NEW_RUN_PAGES, type NewRunPage} from '../src/testing/new-run-pages.js';
 
 /** Opens the app showing `page`, as if its answers had been given in this window. */
 export async function openAt(

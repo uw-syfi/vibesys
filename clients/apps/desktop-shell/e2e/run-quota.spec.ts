@@ -1,6 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
-import {Controls} from './chat-controls.js';
 import {
   type FakeBridgeSeed,
   installFakeBridge,
@@ -8,11 +7,12 @@ import {
   installFakeMachines,
   installFakeProjectRuns,
   MAC_CHROME,
-} from './fake-bridge.js';
+} from '../src/testing/fake-bridge.js';
+import {STARTED_AT} from '../src/testing/started-at.js';
+import {Controls} from './chat-controls.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {journeyFixture, journeyScript} from './journey-world.js';
 import {installGatewayOnly} from './retired-run-bridge.js';
-import {STARTED_AT} from './started-at.js';
 
 /** Quota holds stay internal; Pause now remains available to close the epoch. */
 

@@ -1,8 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
 import fc from 'fast-check';
-import {scrolledToEnd, settled} from './checks/settle.js';
-import {type Anchor, anchorsOf, RUN_ANCHORS, stabilityViolations} from './checks/stability.js';
 import {
   type FakeBridgeSeed,
   installFakeBridge,
@@ -10,10 +8,12 @@ import {
   installFakeMachines,
   installFakeProjectRuns,
   MAC_CHROME,
-} from './fake-bridge.js';
+} from '../src/testing/fake-bridge.js';
+import {STARTED_AT} from '../src/testing/started-at.js';
+import {scrolledToEnd, settled} from './checks/settle.js';
+import {type Anchor, anchorsOf, RUN_ANCHORS, stabilityViolations} from './checks/stability.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {journeyScript} from './journey-world.js';
-import {STARTED_AT} from './started-at.js';
 
 const PROJECT = '/home/me/vibesys-projects/queue-rs';
 const INSTANCE = '00000000000a';

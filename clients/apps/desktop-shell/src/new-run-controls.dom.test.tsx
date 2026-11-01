@@ -6,8 +6,8 @@
  * is drawn by the shell's own stores and screens in about 25 ms.
  */
 import {afterAll, beforeAll, expect, test} from 'bun:test';
+import {FakeClock} from '@vibesys/transport/testing';
 import {Window} from 'happy-dom';
-import {draftAt, NEW_RUN_PAGES} from '../e2e/new-run-pages.js';
 import {
   type Control,
   controlsOf,
@@ -15,6 +15,7 @@ import {
   readScreen,
   use,
 } from './testing/dom-controls.js';
+import {draftAt, NEW_RUN_PAGES} from './testing/new-run-pages.js';
 import {openShell} from './testing/shell-world.js';
 
 const window = new Window();
@@ -61,7 +62,8 @@ const main = (container: HTMLElement): Element => {
 for (const each of NEW_RUN_PAGES) {
   test(`every control of the ${each.name} page acts`, async () => {
     const exempt = INERT_BY_DESIGN.filter(rule => rule.page.test(each.name));
-    const open = () => openShell({kind: 'new-run'}, {draft: draftAt(each)});
+    const open = () =>
+      openShell({kind: 'new-run'}, {draft: draftAt(each), schedule: new FakeClock().schedule});
     const first = await open();
     const controls: Control[] = controlsOf(main(first.container)).filter(
       control => !exempt.some(rule => rule.name.test(control.name)),

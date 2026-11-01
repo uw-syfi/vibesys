@@ -1,5 +1,5 @@
 /** Fail a journey immediately if the native page accidentally calls a retired run reader. */
-import type {FakeProvides} from './fake-bridge.js';
+import type {FakeProvides} from '../src/testing/fake-bridge.js';
 
 export type RetiredRunMethods =
   | 'attach'
