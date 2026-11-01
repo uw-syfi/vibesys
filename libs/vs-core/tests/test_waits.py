@@ -76,7 +76,7 @@ from vs_core.api import (
     subjects,
     waits,
 )
-from vs_core.testing.limits import reach
+from vs_core.api.testing import reach
 from vs_sim.api.testing import examples
 
 from .test_measurements import submitted

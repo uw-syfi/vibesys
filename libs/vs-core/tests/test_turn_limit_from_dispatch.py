@@ -12,7 +12,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 import vs_core.api as core
-from vs_core.testing.limits import reach
+from vs_core.api.testing import reach
 
 from .test_session_turns import invocation, scope, turn, waiting_turn_state
 from .test_silent_executor_deadline import _silent

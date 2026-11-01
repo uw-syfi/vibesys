@@ -32,7 +32,7 @@ from vs_core.api import (
     Until,
     initial_state,
 )
-from vs_core.testing.limits import next_end, reach
+from vs_core.api.testing import next_end, reach
 
 BOUND = 100.0
 

@@ -12,7 +12,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 import vs_core.api as core
-from vs_core.testing.limits import reach
+from vs_core.api.testing import reach
 
 from .proof_digest import value_digest
 from .test_attempt_retirement import fixture, retirement

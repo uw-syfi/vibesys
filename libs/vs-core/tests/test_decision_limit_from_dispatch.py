@@ -15,7 +15,7 @@ from hypothesis import strategies as st
 from pydantic import BaseModel
 
 import vs_core.api as core
-from vs_core.testing.limits import reach
+from vs_core.api.testing import reach
 
 from .test_measurements import observation, requested
 from .wait_support import OPEN

@@ -7,7 +7,7 @@ from hypothesis import example, given
 from hypothesis import strategies as st
 
 import vs_core.api as core
-from vs_core.testing.limits import reach
+from vs_core.api.testing import reach
 
 from .test_measurements import plan
 from .test_session_yield_completion import terminal_yield

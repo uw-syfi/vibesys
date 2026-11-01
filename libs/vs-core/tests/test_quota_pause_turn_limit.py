@@ -31,7 +31,7 @@ from vs_core.api.recovery import (
     interrupted_message,
     started_message,
 )
-from vs_core.testing.limits import reach
+from vs_core.api.testing import reach
 from vs_proto.api import EpochStarted, Oneof, Record, Timestamp
 
 from .test_turn_limit_from_dispatch import _RUN_DEADLINE, _prepared, _reserved
