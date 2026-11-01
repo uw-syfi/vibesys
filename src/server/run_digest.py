@@ -360,10 +360,12 @@ class _Fold:
         """
         ideas = self._candidates()
         standing: float | None = None
+        rebuilt = False
         for idea in ideas:
             measure = idea.measure
             if measure and measure.value is not None and measure.ratio:
                 standing = measure.value / measure.ratio
+                rebuilt = True
                 break
 
         def plotted_at(idea: _Idea) -> float:
@@ -378,9 +380,10 @@ class _Fold:
             elif idea.outcome == "failed":
                 verdict = IdeaVerdict.FAILED
             elif value is not None and (
-                standing is None or _beats(value, standing, minimize=self.minimize)
+                standing is None
+                or _beats(value, standing, minimize=self.minimize, tie_within_rounding=rebuilt)
             ):
-                verdict, standing = IdeaVerdict.KEPT, value
+                verdict, standing, rebuilt = IdeaVerdict.KEPT, value, False
             else:
                 verdict = IdeaVerdict.NOT_BETTER
             landed = measure.wall if measure and measure.value is not None else idea.wall
@@ -545,13 +548,14 @@ def run_attention(digest: RunDigest, *, phase: RunPhase | None, now: float) -> R
     return RunAttention.NONE
 
 
-def _beats(value: float, standing: float, *, minimize: bool) -> bool:
-    """Whether ``value`` is better than ``standing``, a tie within rounding not counting.
+def _beats(value: float, standing: float, *, minimize: bool, tie_within_rounding: bool) -> bool:
+    """Whether ``value`` is better than ``standing``.
 
-    The input's value is rebuilt as a measurement over its ratio to the input, which is off by
-    rounding: a reading equal to the input must not beat it by the last digit.
+    The input's value is rebuilt as a measurement over its ratio, which is off by rounding: a
+    reading equal to the input must not beat it by the last digit. Between two readings, any
+    difference counts.
     """
-    if math.isclose(value, standing, rel_tol=1e-9, abs_tol=0.0):
+    if tie_within_rounding and math.isclose(value, standing, rel_tol=1e-9, abs_tol=0.0):
         return False
     return value < standing if minimize else value > standing
 
