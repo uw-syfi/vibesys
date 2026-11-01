@@ -45,10 +45,10 @@ from vs_runtime.api.core import (
     ExecutionContext,
     ExecutionResult,
     ExecutorRole,
+    KeyedDocuments,
     MeasurementDecisions,
     MeasurementObserver,
     MeasurementRequests,
-    ReceiptStore,
     RequestExecutors,
     StageRun,
     StageSettled,
@@ -151,14 +151,14 @@ class World:
         """Executors over the run's real disk; the process dies just before write ``crash_at``.
 
         Every durable write goes through the faulting namespace, including the
-        read-modify-write ones (``ReceiptStore.modify``), the begun marker and the fence.
+        read-modify-write ones (``KeyedDocuments.modify``), the begun marker and the fence.
         """
         project = Project.open(self.base / "project")
         faulting = FaultingNamespace(
             project.state.state_store_namespace("run"),
             None if crash_at is None else 2 * crash_at,
         )
-        store = ReceiptStore(cast("StateNamespace", faulting), threads=SimThreads())
+        store = KeyedDocuments(cast("StateNamespace", faulting), threads=SimThreads())
         executor = self.stack.executor if self.executor is None else self.executor
         return MeasurementRequests(executor, store, self.observer, control=self.control), faulting
 
@@ -294,7 +294,7 @@ async def test_a_stage_of_a_submitted_measurement_names_the_decision_it_answers(
     async with world() as w:
         decisions = MeasurementDecisions()
         _requests, faulting = w.requests()
-        store = ReceiptStore(cast("StateNamespace", faulting), threads=SimThreads())
+        store = KeyedDocuments(cast("StateNamespace", faulting), threads=SimThreads())
         requests = MeasurementRequests(w.stack.executor, store, decisions=decisions)
         sub = submission("sub", candidate=w.stack.snapshot).model_copy(
             update={"decision_id": DecisionId(root="measure-1")}
@@ -447,7 +447,7 @@ async def test_cancel_is_followed_by_an_inspection_and_reports_what_it_saw() -> 
         assert cluster.cancelled
 
 
-async def test_close_fences_the_episode_and_lists_children() -> None:
+async def test_close_lists_the_jobs_of_the_scope_as_its_children() -> None:
     cluster = ScenarioCluster()
     cluster.states = (SlurmJobStatus.PENDING,)
     async with world(cluster) as w:
@@ -457,8 +457,6 @@ async def test_close_fences_the_episode_and_lists_children() -> None:
         own = closed.observation.observation
         assert own.children == (resource,)
         assert own.children_complete
-        late = await submit(w, "late")
-        assert late.observation.observation.status is ObservationStatus.REJECTED
         assert w.cluster.submissions == [resource.root]
 
 
@@ -486,13 +484,6 @@ async def test_close_releases_every_job_however_far_its_submission_got() -> None
                     break
             assert own.released, f"write {crash_at}: {own.diagnostic}"
             assert len(own.children) <= 1
-            # The released close is sealed, and the retried submission can launch nothing.
-            assert await run(w, close_request(f"close-{attempt}"), epoch=2) == closed
-            before = list(w.cluster.submissions)
-            retried = await run(w, sub, epoch=2)
-            assert w.cluster.submissions == before
-            if not before:
-                assert retried.observation.observation.status is ObservationStatus.REJECTED
 
 
 async def test_a_revision_the_workspace_named_is_measurable() -> None:
@@ -758,7 +749,7 @@ type PollScript = Callable[[int, ExecutorPoll], ExecutorPoll]
 
 def _requests_over(w: World, polls: _ScriptedPolls) -> MeasurementRequests:
     project = Project.open(w.base / "project")
-    store = ReceiptStore(project.state.state_store_namespace("run"), threads=SimThreads())
+    store = KeyedDocuments(project.state.state_store_namespace("run"), threads=SimThreads())
     return MeasurementRequests(polls, store)
 
 

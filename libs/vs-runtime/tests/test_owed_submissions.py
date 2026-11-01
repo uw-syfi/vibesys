@@ -15,7 +15,7 @@ from hypothesis import strategies as st
 
 from vs_core.api import AttemptId, RunId, Scope
 from vs_project.api import Project
-from vs_runtime.api.core import OwedKey, OwedSubmission, OwedSubmissions, ReceiptStore
+from vs_runtime.api.core import KeyedDocuments, OwedKey, OwedSubmission, OwedSubmissions
 from vs_sim.api.testing import SimThreads
 
 type Parts = tuple[Scope, str, str]
@@ -33,7 +33,7 @@ KEYS = st.tuples(
 
 def owed_in(root: Path) -> OwedSubmissions:
     namespace = Project.open(root).state.state_store_namespace("owed")
-    return OwedSubmissions(ReceiptStore(namespace, threads=SimThreads()))
+    return OwedSubmissions(KeyedDocuments(namespace, threads=SimThreads()))
 
 
 def key_of(parts: Parts) -> OwedKey:

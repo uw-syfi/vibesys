@@ -4,7 +4,7 @@ A serial strategy runs one attempt after another in the run's own root directory
 each attempt with a `DiscardWorkspace`; the next attempt is granted the root, and its tree
 must be the plan's base again, with the run's declared artifact directory kept.
 
-Every durable write goes through one `ReceiptStore`, so a store that raises at its n-th
+Every durable write goes through one `KeyedDocuments`, so a store that raises at its n-th
 operation models a host that died between two durable writes. The restore of the root tree is
 a sequence of Git steps (reset the index, clean untracked and ignored files, restore tracked
 files), and a repository wrapper that raises at the n-th step models a host that died before,
@@ -35,8 +35,8 @@ from vs_core.api import (
 )
 from vs_runtime.api.core import (
     ExecutionResult,
+    KeyedDocuments,
     ReceiptEvidenceLedger,
-    ReceiptStore,
     RuntimeWorkspaceRequests,
     StoreWorkspaceReceipts,
     revision_ref,
@@ -82,7 +82,7 @@ _LEFTOVERS = (
 """Files an attempt may leave: untracked ones and ones the ignore rules hide."""
 
 
-class MortalStore(ReceiptStore):
+class MortalStore(KeyedDocuments):
     """A real store that raises at the n-th durable operation while armed."""
 
     def __init__(self, env: WorkspaceEnv) -> None:
@@ -153,7 +153,7 @@ class Host:
     crash: RestoreCrash = field(default_factory=RestoreCrash)
     epoch: int = 1
 
-    def executor(self, store: ReceiptStore) -> RuntimeWorkspaceRequests:
+    def executor(self, store: KeyedDocuments) -> RuntimeWorkspaceRequests:
         return RuntimeWorkspaceRequests(
             self.env.hosts[-1],
             store,

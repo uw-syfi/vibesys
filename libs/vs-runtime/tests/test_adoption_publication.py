@@ -22,7 +22,7 @@ from vs_core.api import (
 )
 from vs_project.api import GitTracker, NullGitTrackerEvents, adoption_branch
 from vs_project.api.testing import FakeGitRepositories
-from vs_runtime.api.core import ReceiptStore
+from vs_runtime.api.core import KeyedDocuments
 from vs_sim.api.testing import InlineBlockingRunner, SimThreads, examples
 
 from .test_adoption_commit import _SCOPE, _executor
@@ -152,7 +152,7 @@ def test_f17_resumed_epoch_adopts_with_dirty_staged_operator_files(tmp_path: Pat
     async def exercise() -> None:
         with open_workspace_env(tmp_path) as env:
             world = env.hosts[0]
-            store = ReceiptStore(env.receipts_namespace(), threads=SimThreads())
+            store = KeyedDocuments(env.receipts_namespace(), threads=SimThreads())
             executor = _executor(world, store)
             attempt = _attempt()
             try:
@@ -180,7 +180,7 @@ def test_f17_resumed_epoch_adopts_with_dirty_staged_operator_files(tmp_path: Pat
                 await world.close()
                 world = env.start_host(InlineBlockingRunner())
                 executor = _executor(
-                    world, ReceiptStore(env.receipts_namespace(), threads=SimThreads())
+                    world, KeyedDocuments(env.receipts_namespace(), threads=SimThreads())
                 )
                 request = AdoptRevision(
                     request_id=RequestId(root="resumed-adoption"),

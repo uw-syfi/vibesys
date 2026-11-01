@@ -36,7 +36,7 @@ from vs_runtime.contracts import RuntimeContractError, WorkspaceAccess
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from vs_runtime._receipt_store import ReceiptStore
+    from vs_runtime._keyed_documents import KeyedDocuments
     from vs_runtime._workspace_access import AccessGuardedWorkspace
 
 _ACCESS = "session-access"
@@ -114,7 +114,7 @@ class UnsettledInvocations(BaseModel):
 class AccessSettlement:
     """The one place that begins, settles and fences invocation access receipts."""
 
-    def __init__(self, store: ReceiptStore, workspace_for: WorkspaceLookup) -> None:
+    def __init__(self, store: KeyedDocuments, workspace_for: WorkspaceLookup) -> None:
         """Bind the shared receipt store and the run's workspace lookup."""
         self._store = store
         self._workspace_for = workspace_for
@@ -368,7 +368,7 @@ class AccessSettlement:
         )
 
 
-def access_unproven(store: ReceiptStore, key: AccessKey) -> str | None:
+def access_unproven(store: KeyedDocuments, key: AccessKey) -> str | None:
     """None when the invocation's receipt is settled; otherwise why its writes are unjudged.
 
     The one check behind every run-invocation proof, so "ended" cannot be reported

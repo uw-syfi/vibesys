@@ -33,7 +33,7 @@ from vs_core.api import ObservationStatus
 from vs_faults.api import Boundary, FaultPlan, FaultRule, ProcessFault
 from vs_project.api import Project
 from vs_prompts.api import TemplateRenderer
-from vs_runtime.api.core import ExecutionResult, ReceiptStore
+from vs_runtime.api.core import ExecutionResult, KeyedDocuments
 from vs_runtime.api.observation_contracts import assert_core_accepts
 from vs_sim.api.testing import SimThreads
 
@@ -63,8 +63,10 @@ class _World:
             provider, answering_with(provider, lambda: ANSWER), resolver, plan
         )
 
-    def store(self) -> ReceiptStore:
-        return ReceiptStore(self._project.state.state_store_namespace("run"), threads=SimThreads())
+    def store(self) -> KeyedDocuments:
+        return KeyedDocuments(
+            self._project.state.state_store_namespace("run"), threads=SimThreads()
+        )
 
     async def run(self, request: RequestBase, *, now_at: float | None = None) -> ExecutionResult:
         return await self.stream.host.run(request, self.store(), now_at=now_at)

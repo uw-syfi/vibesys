@@ -24,8 +24,8 @@ from vs_runtime.api.core import (
     AgentEvaluationBridge,
     AgentEvaluationPolicy,
     AgentEvaluationRecords,
+    KeyedDocuments,
     OwedSubmissions,
-    ReceiptStore,
     ScopeWorkspaces,
     StoreWorkspaceReceipts,
 )
@@ -57,10 +57,10 @@ def _bridge(tmp_path: Path, socket: Path | None = None) -> AgentEvaluationBridge
         policy,
         ScopeWorkspaces(
             cast("RuntimeWorkspaces", FakeWorkspaces(FakeWorkspace(path=Path("/workspace")))),
-            StoreWorkspaceReceipts(ReceiptStore(namespace, threads=OsThreads())),
+            StoreWorkspaceReceipts(KeyedDocuments(namespace, threads=OsThreads())),
         ),
         AgentEvaluationRecords(
-            OwedSubmissions(ReceiptStore(namespace, threads=OsThreads())), SynthesizedEvidence()
+            OwedSubmissions(KeyedDocuments(namespace, threads=OsThreads())), SynthesizedEvidence()
         ),
         network=UnixNetwork(),
         threads=OsThreads(),

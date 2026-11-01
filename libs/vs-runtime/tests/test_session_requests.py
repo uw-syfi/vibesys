@@ -30,7 +30,7 @@ from vs_core.api import (
     ResourceId,
 )
 from vs_project.api import Project
-from vs_runtime.api.core import ExecutionResult, JournalRunInvocations, ReceiptStore
+from vs_runtime.api.core import ExecutionResult, JournalRunInvocations, KeyedDocuments
 from vs_runtime.api.observation_contracts import assert_core_accepts
 from vs_sim.api.testing import SimThreads, examples, wait_until_started
 
@@ -50,12 +50,12 @@ class World:
         self._project = Project.open(base / "project")
         self.host: SessionHost = open_host(base / "workspace")
 
-    def store(self, *, dies_before_seal: bool = False) -> ReceiptStore:
+    def store(self, *, dies_before_seal: bool = False) -> KeyedDocuments:
         namespace = self._project.state.state_store_namespace("run")
         return (
             CrashOnReplace(namespace, threads=SimThreads())
             if dies_before_seal
-            else ReceiptStore(namespace, threads=SimThreads())
+            else KeyedDocuments(namespace, threads=SimThreads())
         )
 
     async def execute(
@@ -407,7 +407,7 @@ async def test_cancelling_a_dispatch_cancels_the_hung_provider_turn_exactly_once
         (base / "workspace").mkdir()
         project = Project.open(base / "project")
         host = open_host(base / "workspace", hang_until_cancelled=True)
-        store = ReceiptStore(project.state.state_store_namespace("run"), threads=SimThreads())
+        store = KeyedDocuments(project.state.state_store_namespace("run"), threads=SimThreads())
         await host.run(ensure_request(), store)
         dispatch = asyncio.ensure_future(host.run(dispatch_request(), store))
         # The turn is running in the provider and would never return on its own.

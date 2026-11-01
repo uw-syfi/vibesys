@@ -57,13 +57,13 @@ from vs_runtime.api.core import (
     Applied,
     ExecutionContext,
     InterpretEvidenceOwner,
+    KeyedDocuments,
     MeasurementRequests,
     NotApplied,
     ObservationFactory,
     OperationPorts,
     OperationRole,
     ReceiptEvidenceLedger,
-    ReceiptStore,
     RetainRevisionOwner,
     build_operation_catalog,
     commit_of,
@@ -99,9 +99,9 @@ def _key(source: str, evidence_id: EvidenceId) -> EvidenceKey:
     return EvidenceKey(source_request=RequestId(root=source), evidence_id=evidence_id)
 
 
-def _store(root: Path) -> ReceiptStore:
+def _store(root: Path) -> KeyedDocuments:
     (root / "project").mkdir(exist_ok=True)
-    return ReceiptStore(
+    return KeyedDocuments(
         Project.open(root / "project").state.state_store_namespace("run"), threads=SimThreads()
     )
 
@@ -683,7 +683,7 @@ async def test_a_strategy_requiring_interpretation_starts_and_runs_with_producti
         base = Path(raw)
         (base / "project").mkdir()
         namespace = Project.open(base / "project").state.state_store_namespace("run")
-        evidence = ReceiptEvidenceLedger(ReceiptStore(namespace, threads=SimThreads()))
+        evidence = ReceiptEvidenceLedger(KeyedDocuments(namespace, threads=SimThreads()))
         recorded = _evidence(7, value=3.0)
         evidence.record(RequestId(root=SOURCE), recorded, "official")
         workspaces = FakeWorkspaces(FakeWorkspace(path=Path("/workspace")))
@@ -701,7 +701,7 @@ async def test_a_strategy_requiring_interpretation_starts_and_runs_with_producti
         catalog.require_owned(declaration)
         assert {d.kind for d in catalog.offered_operations} == {"test.interpret", "test.retain"}
         validate_startup(declaration, Capabilities(operations=catalog.offered_operations))
-        store = ReceiptStore(namespace, threads=SimThreads())
+        store = KeyedDocuments(namespace, threads=SimThreads())
         runner = OperationStepRunner(catalog, ObservationFactory(store), clock=VirtualClock())
         request = execute_request(catalog, _Interpret(evidence=(_ref(recorded),)), "interpret")
         assert request.request_id is not None
