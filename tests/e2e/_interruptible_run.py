@@ -11,12 +11,9 @@ pipe, one dict per message: each run event as ``{"event": ..., "stage": ...}``,
 ``{"held": AT:KIND}`` when the hold is reached, and last ``{"outcome": ...}``. ``resume``
 relaunches the saved run as a new epoch, as ``vibesys --resume`` does.
 
-``hold`` stops the first turn of the agent ``KIND`` until the test sends on the release pipe, so
-the test places an interruption inside that turn without a sleep: ``start`` holds the turn
-before its agent session exists, ``turn`` holds it once the session is open and the agent is
-working. ``ensure`` and ``ensured`` hold the first ``EnsureSession`` step of the role ``KIND`` at
-the step runner, ``ensure`` before the session is acquired and ``ensured`` once it is acquired
-and before core hears of it, the window in which a kill leaves an effect without a result.
+``hold`` stops the first turn of the agent ``KIND``, once its session is open and the agent is
+working, until the test sends on the release pipe, so the test places an interruption inside
+that turn without a sleep.
 """
 
 from __future__ import annotations
@@ -33,12 +30,10 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 from tests.e2e.dynamic_loop_harness import LoopInput, resume_request, run_request
-from tests.e2e.scripted_value_run import NoAgents, scripted_setup
+from tests.e2e.scripted_value_run import scripted_setup
 
 from vibesys.events import CoreEventType, WinnerSelectedData
 from vs_agent.api import ScriptedAgentClient
-from vs_core.api import EnsureSession
-from vs_runtime.api.testing import HoldAt, HoldingStepRunner
 from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
@@ -49,26 +44,13 @@ if TYPE_CHECKING:
     from vs_agent.api import (
         AgentClientProtocol,
         AgentEventSink,
-        AgentObserver,
-        AgentSessionKey,
-        AgentSessionSpec,
         AgentSpec,
-        AgentTurnRequest,
-        AgentTurnResult,
-        ScriptedClientSetup,
         ScriptedTurn,
     )
     from vs_agent.fake_client import ResponseSource, ResponseValue
-    from vs_core.api import Request, RequestId
-    from vs_runtime.api.step_runner import StepRunner, StepRunnerDecorator
-    from vs_sim.api import Threads
 
 ROUNDS = 1
-START = "start"
 TURN = "turn"
-ENSURE = "ensure"
-ENSURED = "ensured"
-_ENSURE_WINDOWS = {ENSURE: HoldAt.BEFORE, ENSURED: HoldAt.AFTER_EFFECT}
 
 
 @dataclass(frozen=True)
@@ -81,11 +63,8 @@ class Hold:
     @classmethod
     def parse(cls, text: str) -> Hold:
         at, _, kind = text.partition(":")
-        if at not in {START, TURN, ENSURE, ENSURED} or not kind:
-            message = (
-                f"a hold is {START}:KIND, {TURN}:KIND, {ENSURE}:KIND or {ENSURED}:KIND, "
-                f"not {text!r}"
-            )
+        if at != TURN or not kind:
+            message = f"a hold is {TURN}:KIND, not {text!r}"
             raise ValueError(message)
         return cls(at, kind)
 
@@ -126,27 +105,6 @@ class _Gate:
         self._channel.wait_for_release()
 
 
-class _HeldClient(ScriptedAgentClient):
-    """A scripted client whose turns reach the gate before their agent session starts."""
-
-    def __init__(self, gate: _Gate, setup: ScriptedClientSetup, *, threads: Threads) -> None:
-        super().__init__(setup, threads=threads)
-        self._gate = gate
-
-    def run(
-        self,
-        *,
-        session_spec: AgentSessionSpec,
-        turn: AgentTurnRequest,
-        session_key: AgentSessionKey | None = None,
-        observer: AgentObserver | None = None,
-    ) -> AgentTurnResult:
-        self._gate.reach(START, session_spec.role)
-        return super().run(
-            session_spec=session_spec, turn=turn, session_key=session_key, observer=observer
-        )
-
-
 def _held_client_factory(hold: Hold | None, channel: Channel) -> Callable[..., AgentClientProtocol]:
     gate = None if hold is None else _Gate(hold, channel)
 
@@ -160,7 +118,7 @@ def _held_client_factory(hold: Hold | None, channel: Channel) -> Callable[..., A
             kind: _held_responder(gate, kind, responder)
             for kind, responder in setup.responders.items()
         }
-        return _HeldClient(gate, replace(setup, responders=responders), threads=OsThreads())
+        return ScriptedAgentClient(replace(setup, responders=responders), threads=OsThreads())
 
     return build
 
@@ -171,27 +129,6 @@ def _held_responder(gate: _Gate, kind: str, responder: ResponseSource) -> Respon
         return responder if isinstance(responder, BaseModel | dict) else responder(turn)
 
     return answer
-
-
-def _held_runner(hold: Hold | None, channel: Channel) -> StepRunnerDecorator | None:
-    """The decorator that stops the first ``EnsureSession`` of the held role, or none."""
-    if hold is None or hold.at not in _ENSURE_WINDOWS:
-        return None
-    spent = False
-
-    async def reach(step: Request, _tag: RequestId, _attempt: int) -> None:
-        nonlocal spent
-        if spent or not isinstance(step, EnsureSession) or step.spec.role_id.root != hold.kind:
-            return
-        spent = True
-        channel.say(held=f"{hold.at}:{hold.kind}")
-        # The loop keeps running while the step is held: a pause arrives through it.
-        await asyncio.get_running_loop().run_in_executor(None, channel.wait_for_release)
-
-    def decorate(inner: StepRunner) -> StepRunner:
-        return HoldingStepRunner(inner, frozenset({EnsureSession}), _ENSURE_WINDOWS[hold.at], reach)
-
-    return decorate
 
 
 def _report(event: CoreEvent, channel: Channel) -> None:
@@ -219,11 +156,8 @@ def main(base: Path, resume: str | None, hold: Hold | None, channel: Channel) ->
     reporters: list[asyncio.Task[None]] = []
     run = run_request(
         request,
-        NoAgents(),
         client_factory=_held_client_factory(hold, channel),
-        step_runner_decorator=_held_runner(hold, channel),
         slurm_processes=loop_input.connector,
-        verify=False,
         relaunch_saved=resume is not None,
         on_handle=lambda handle: reporters.append(
             asyncio.ensure_future(_report_all(handle, channel))

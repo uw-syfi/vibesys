@@ -1,38 +1,28 @@
-"""Scenario harness for the dynamic search on the core path, over the production host.
+"""Scenario harness for the scripted run, over the production host.
 
 A scenario runs the way the product does: a CLI-built request goes through
 ``launch.default_runs`` and the production host composition (real Git worktrees, the
-real ``.vibesys`` state store, the runtime's run loop, the trusted evaluation scripts).
+real ``.vibesys`` state store, the runtime's step loop, the trusted evaluation scripts).
 The core policy is the built-in ``dynamic`` registration, so the scenarios run the
 same catalog the entrypoints use. Two things are Fake because they are external:
 
 - the cluster: ``vs_slurm.fake_connector`` in executing mode runs every production job
   script on this host, so a job finishes at its first poll;
-- the agents: :class:`ScriptedAgents` answers each turn from a per-role script. A
-  core turn is reply-driven: an implementer edits its worktree and replies, the
-  framework measures the nominated candidate, and no agent calls an evaluation tool.
+- the agents: the scripted agents of ``tests.e2e.scripted_value_run`` answer each turn.
 
 The input project's benchmark reports ``throughput = VALUE`` from ``queue.py`` and its
 accuracy check raises ``ValueError`` when ``VALUE`` is negative, so an agent's edit
-decides every trusted outcome. A candidate that also sets ``REQUIRED`` above ``VALUE``
-fails its benchmark the way a warmup cut short does: an ``error`` record whose partial
-measurement is ``VALUE`` rounds per second out of ``REQUIRED``.
+decides every trusted outcome.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
-import re
-import threading
-from collections import defaultdict, deque
-from collections.abc import Mapping
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Protocol
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from pydantic import ValidationError
 from tests.support.docker_environment import host_container_backend
-from tests.support.loop_invariants import RunRecords, check, terminal_event
 from tests.support.loop_spec import loop_spec
 from tests.support.real_git import REAL_PROCESSES
 from tests.support.slurm_environment import with_fake_image_build
@@ -42,7 +32,6 @@ import launch
 from entrypoints.cli import build_run_request, parse_cli_invocation
 from launch import LaunchSettings
 from vibesys.api import (
-    CoreEventType,
     ResumeRef,
     RunRequest,
     RunResult,
@@ -50,21 +39,12 @@ from vibesys.api import (
     RunStopped,
     relaunch,
 )
-from vibesys.candidates import api as candidates
-from vibesys.dynamic_roles import IMPLEMENTER, JUDGE, ORCHESTRATOR
-from vibesys.orchestration.dynamic.search.api import (
-    FinishedWork,
-    HypothesisRecord,
-    RunSnapshot,
-)
+from vibesys.orchestration.dynamic.search.api import RunSnapshot
 from vibesys.run.logged_run import read_logged_run
-from vs_agent.api import NULL_SKILL_SELECTION, AgentCapabilities, SessionScope
-from vs_agent.api.testing import FakeAgentClient
 from vs_core.api import CoreState, FlowDriver, FlowState
-from vs_core.testing.liveness import Budget, End, Journal, assert_live
 from vs_project.api import Project
 from vs_runtime.api.core import RunTiming
-from vs_runtime.api.testing import CrashableRunClock, FakeStopTimer
+from vs_runtime.api.testing import FakeStopTimer
 from vs_sim.api import (
     OsThreads,
     SubprocessPipedProcessLauncher,
@@ -72,31 +52,16 @@ from vs_sim.api import (
     ThreadBlockingRunner,
     UnixNetwork,
 )
-from vs_sim.api.testing import run_virtual
-from vs_slurm.fake_connector import HOLD_FILE, SUBMITTED_FILE, FakeConnector, recorded_commands
+from vs_slurm.fake_connector import HOLD_FILE, FakeConnector
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable
     from pathlib import Path
     from typing import Any
 
-    from pydantic import BaseModel
-
     from vibesys.api import CoreEvent, RunHandle
-    from vs_agent.api import AgentClientProtocol, AgentSessionKey, SessionStore, SkillSelection
-    from vs_agent.api.testing import FakeInvocation
-    from vs_runtime.api.infrastructure import StopTimer
-    from vs_runtime.api.step_runner import StepRunnerDecorator
-    from vs_sandbox.api import ComputeBackendImpl
+    from vs_agent.api import AgentClientProtocol
     from vs_sim.api import Processes
-
-# Simulated seconds one run may wait; a healthy scenario needs a small fraction of it.
-SIMULATED_BUDGET_S = 120.0
-
-_PLANNER_SLOTS = re.compile(r"Schedule at most (\d+) ")
-_MEMBER = re.compile(
-    r"^(?:Own|Review) hypothesis `(?P<id>[^\n]*)` (?:in this isolated|without editing)"
-)
 
 _BENCHMARK = """\
 import json, pathlib, sys
@@ -141,315 +106,6 @@ check(namespace["VALUE"])
 """
 
 _AGENT_CONFIG = "[evaluation]\nobserve_interval_seconds = 1\nobserve_backoff_cap_seconds = 1\n"
-
-
-class _SharedCancelClient(FakeAgentClient):
-    """A Fake client that also reports its cancellations to the scenario's shared event."""
-
-    def __init__(
-        self,
-        seen: threading.Event,
-        *,
-        capabilities: AgentCapabilities,
-        session_store: SessionStore | None,
-        skill_selection: SkillSelection,
-        log_dir: Path | None,
-    ) -> None:
-        super().__init__(
-            capabilities=capabilities,
-            session_reuse=True,
-            session_store=session_store,
-            skill_selection=skill_selection,
-            log_dir=log_dir,
-            threads=OsThreads(),
-        )
-        self._seen = seen
-
-    def cancel(self) -> None:
-        super().cancel()
-        self._seen.set()
-
-    def cancel_session(self, key: AgentSessionKey) -> None:
-        super().cancel_session(key)
-        self._seen.set()
-
-
-class ScriptExhaustedError(AssertionError):
-    """An agent turn arrived that the scenario did not script."""
-
-
-class AgentTransportError(RuntimeError):
-    """A scripted agent CLI failure (the process died mid-turn)."""
-
-
-@dataclass(frozen=True, slots=True)
-class Turn:
-    """One agent turn as the scripted agent sees it."""
-
-    invocation: FakeInvocation
-
-    @property
-    def prompt(self) -> str:
-        """Return the user prompt the orchestration sent."""
-        return self.invocation.user_prompt
-
-    @property
-    def workspace(self) -> Path:
-        """Return the agent's working directory (a real worktree)."""
-        return self.invocation.workspace
-
-    @property
-    def slots(self) -> int:
-        """Return how many workstreams a planning prompt asks for."""
-        match = _PLANNER_SLOTS.search(self.prompt)
-        if match is None:
-            message = "planner prompt does not state its free slots"
-            raise AssertionError(message)
-        return int(match.group(1))
-
-    def set_value(self, value: int) -> None:
-        """Edit the candidate, as an implementer does."""
-        (self.workspace / "queue.py").write_text(f"VALUE = {value}\n", encoding="utf-8")
-
-    def write_queue(self, text: str) -> None:
-        """Replace the candidate's ``queue.py`` with ``text``."""
-        (self.workspace / "queue.py").write_text(text, encoding="utf-8")
-
-    def value(self) -> int:
-        """Return the candidate's current ``VALUE``."""
-        text = (self.workspace / "queue.py").read_text(encoding="utf-8")
-        return int(text.split("=", 1)[1].split()[0])
-
-
-type AgentReply = BaseModel | dict[str, object]
-"""What the Fake client accepts as one turn's reply."""
-type Reply = Mapping[str, object] | BaseException | Callable[[Turn], Mapping[str, object]]
-
-
-@dataclass
-class ScriptedAgents:
-    """Per-role agent scripts behind one Fake client.
-
-    Planner replies are consumed in call order. Implementer and judge replies are keyed
-    by hypothesis id, because parallel workstreams interleave. A turn with no scripted
-    reply fails the turn and is recorded in ``unscripted``, which every scenario asserts
-    is empty.
-    """
-
-    planner: deque[Reply] = field(default_factory=deque)
-    implementers: dict[str, deque[Reply]] = field(default_factory=lambda: defaultdict(deque))
-    judges: dict[str, deque[Reply]] = field(default_factory=lambda: defaultdict(deque))
-    unscripted: list[str] = field(default_factory=list)
-    turns: list[tuple[str, str | None, str]] = field(default_factory=list)
-    _lock: threading.Lock = field(default_factory=threading.Lock)
-    _cancel_seen: threading.Event = field(default_factory=threading.Event)
-    _clients: list[FakeAgentClient] = field(default_factory=list)
-    _members: dict[AgentSessionKey, str] = field(default_factory=dict)
-
-    def plan(self, *replies: Reply) -> ScriptedAgents:
-        """Queue planner replies."""
-        self.planner.extend(replies)
-        return self
-
-    def implement(self, hypothesis_id: str, *replies: Reply) -> ScriptedAgents:
-        """Queue implementer replies for one hypothesis."""
-        self.implementers[hypothesis_id].extend(replies)
-        return self
-
-    def judge(self, hypothesis_id: str, *replies: Reply) -> ScriptedAgents:
-        """Queue judge replies for one hypothesis."""
-        self.judges[hypothesis_id].extend(replies)
-        return self
-
-    def prompts(self, role: str, hypothesis_id: str | None = None) -> list[str]:
-        """Return the prompts one role (and hypothesis) received, in order."""
-        return [
-            prompt
-            for kind, member, prompt in self.turns
-            if kind == role and (hypothesis_id is None or member == hypothesis_id)
-        ]
-
-    def invocations(self, role: str, hypothesis_id: str | None = None) -> list[FakeInvocation]:
-        """Return the Fake client's recorded calls, including durable session identity."""
-        return [
-            call
-            for client in self._clients
-            for call in client.calls_for(role)
-            if hypothesis_id is None or _member(call) == hypothesis_id
-        ]
-
-    def client(
-        self,
-        *,
-        session_store: SessionStore | None = None,
-        skill_selection: SkillSelection = NULL_SKILL_SELECTION,
-        log_dir: Path | None = None,
-        **_kwargs: object,
-    ) -> FakeAgentClient:
-        """Build a Fake client with the capabilities the agent CLI drivers report."""
-        client = _SharedCancelClient(
-            self._cancel_seen,
-            capabilities=AgentCapabilities(session_reuse=True, provider_session_resume=True),
-            session_store=session_store,
-            skill_selection=skill_selection,
-            log_dir=log_dir,
-        )
-        for role in (ORCHESTRATOR.id, IMPLEMENTER.id, JUDGE.id):
-            client.set_response(role, self._answer)
-        self._clients.append(client)
-        return client
-
-    def wait_cancelled(self, timeout: float) -> bool:
-        """Block a scripted turn until the run cancels a turn of any of its agent clients.
-
-        The host builds one client per agent execution, so the cancel lands on the
-        client of the turn it ends, not on a fixed one. ``timeout`` is a deadlock guard.
-        """
-        return self._cancel_seen.wait(timeout)
-
-    def _answer(self, invocation: FakeInvocation) -> AgentReply:
-        member = _prompt_member(invocation)
-        with self._lock:
-            if invocation.session_key is not None:
-                if member is not None:
-                    self._members[invocation.session_key] = member
-                else:
-                    member = self._members.get(invocation.session_key)
-            if member is None:
-                member = _member(invocation)
-            self.turns.append((invocation.kind, member, invocation.user_prompt))
-            queue = self._queue(invocation.kind, member)
-            if not queue:
-                self.unscripted.append(f"{invocation.kind}:{member}")
-                message = f"no scripted reply for {invocation.kind} {member!r}"
-                raise ScriptExhaustedError(message)
-            reply = queue.popleft()
-        if isinstance(reply, BaseException):
-            raise reply
-        payload = dict(reply) if isinstance(reply, Mapping) else dict(reply(Turn(invocation)))
-        return _on_the_wire(invocation, payload)
-
-    def _queue(self, kind: str, member: str | None) -> deque[Reply]:
-        if kind == ORCHESTRATOR.id:
-            return self.planner
-        if member is None:
-            return deque()
-        if kind == IMPLEMENTER.id:
-            return self.implementers[member]
-        if kind == JUDGE.id:
-            return self.judges[member]
-        return deque()
-
-
-def _on_the_wire(invocation: FakeInvocation, payload: dict[str, object]) -> AgentReply:
-    """The reply as the provider returns it: decoded from JSON into the turn's reply type.
-
-    A role that may wait for evaluations answers inside a ``reply`` envelope, which is also
-    where a wait goes; a scenario scripts the bare result. A reply that is not valid for the
-    type is handed on as it is, so the client reports its fields the way a provider's reply
-    would be refused.
-    """
-    wrapped = payload
-    if (
-        invocation.kind in {IMPLEMENTER.id, JUDGE.id}
-        and "reply" not in payload
-        and payload.get("kind") != "waiting_for_evaluation"
-    ):
-        wrapped = {"reply": payload}
-    reply_type = invocation.response_cls
-    if reply_type is None:
-        return wrapped
-    try:
-        return reply_type.model_validate_json(json.dumps(wrapped))
-    except ValidationError:
-        return wrapped
-
-
-def _prompt_member(invocation: FakeInvocation) -> str | None:
-    match = _MEMBER.match(invocation.user_prompt)
-    return match.group("id") if match is not None else None
-
-
-def _member(invocation: FakeInvocation) -> str | None:
-    prompted = _prompt_member(invocation)
-    if prompted is not None:
-        return prompted
-    key = invocation.session_key
-    if key is None:
-        return None
-    if key.scope is SessionScope.MEMBER:
-        role, separator, member = key.identifier.partition(":")
-        return member if separator and role == invocation.kind else None
-    if key.scope is SessionScope.MEMBER_GENERATION:
-        role, member, _generation = json.loads(key.identifier)
-        return member if role == invocation.kind else None
-    return None
-
-
-def workstream(
-    identifier: str,
-    *,
-    title: str | None = None,
-    task: str | None = None,
-    continue_hypothesis: bool = False,
-    parent_hypothesis_id: str | None = None,
-) -> dict[str, object]:
-    """Return one planner implement-workstream entry."""
-    return {
-        "kind": "implement",
-        "hypothesis_id": identifier,
-        "title": title or f"Investigate {identifier}"[:80],
-        "hypothesis": f"Mechanism {identifier} limits throughput.",
-        "task": task or f"Implement and verify {identifier}.",
-        "pass_criteria": "Accuracy passes and throughput improves.",
-        "continue_hypothesis": continue_hypothesis,
-        "parent_hypothesis_id": parent_hypothesis_id,
-    }
-
-
-def portfolio(
-    *workstreams: Mapping[str, object], updates: Iterable[Mapping[str, object]] = ()
-) -> dict[str, object]:
-    """Return one planner reply, with a handoff note expecting something of each workstream."""
-    return {
-        "reasoning": "Independent mechanisms limit throughput.",
-        "workstreams": list(workstreams),
-        "hypothesis_updates": list(updates),
-        "handoff": {
-            "expectations": [
-                {
-                    "work_id": item.get("hypothesis_id", item.get("profile_id")),
-                    "expected": "Throughput improves.",
-                    "if_it_succeeds": "Build on it.",
-                    "if_it_fails": "Try another mechanism.",
-                }
-                for item in workstreams
-            ],
-            "doubts": [],
-        },
-    }
-
-
-def implemented(identifier: str, *, outcome: str = "nominated") -> dict[str, object]:
-    """Return one implementer reply."""
-    return {
-        "summary": f"Implemented {identifier}.",
-        "outcome": outcome,
-        "evidence": [{"location": "queue.py", "purpose": "the change"}],
-    }
-
-
-def edit_to(value: int, identifier: str) -> Callable[[Turn], Mapping[str, object]]:
-    """Return an implementer turn that sets ``VALUE`` and nominates the candidate."""
-
-    def turn(agent: Turn) -> dict[str, object]:
-        agent.set_value(value)
-        return implemented(identifier)
-
-    return turn
-
-
-PASS = {"passed": True, "analysis": "The change is correct and evidenced.", "feedback": ""}
 
 
 @dataclass(frozen=True, slots=True)
@@ -543,23 +199,6 @@ class LoopInput:
         """Leave every job submitted from now on pending until it is cancelled."""
         (self.cluster / HOLD_FILE).touch()
 
-    def release_jobs(self) -> None:
-        """Run jobs submitted from now on again."""
-        (self.cluster / HOLD_FILE).unlink()
-
-    def cluster_commands(self) -> list[str]:
-        """Return every command the cluster received."""
-        return recorded_commands(self.cluster)
-
-    def sbatch_count(self) -> int:
-        """Return how many jobs were submitted to the cluster."""
-        return sum("sbatch " in command for command in self.cluster_commands())
-
-    @property
-    def submitted(self) -> Path:
-        """Return the cluster's pending-job announcement path (create a FIFO there)."""
-        return self.cluster / SUBMITTED_FILE
-
     def request(self, **flags: float | str) -> RunRequest:
         """Build the run request from the command line, as the operator's CLI does.
 
@@ -597,7 +236,6 @@ class LoopRun:
     result: RunResult | None
     error: BaseException | None
     events: list[CoreEvent]
-    clock: CrashableRunClock | None
 
     @property
     def succeeded(self) -> bool | None:
@@ -614,78 +252,30 @@ class LoopRun:
         if self.error is not None:
             raise self.error
 
-    def notes(self) -> list[str]:
-        """Return the framework warnings the run published."""
-        return [
-            str(getattr(event.data, "summary", ""))
-            for event in self.events
-            if event.type is CoreEventType.FRAMEWORK_WARNING
-        ]
 
-
-class AgentsSource(Protocol):
-    """What a run needs of its agents: a factory for the Fake client behind each turn."""
-
-    def client(
-        self,
-        *,
-        session_store: SessionStore | None = None,
-        skill_selection: SkillSelection = NULL_SKILL_SELECTION,
-        log_dir: Path | None = None,
-        **kwargs: object,
-    ) -> AgentClientProtocol:
-        """Build the client one agent execution talks to."""
-        ...
-
-
-# lint-waiver: LW-136101 [PLR0913]; one entry point whose keywords are independent optional test seams.
-# > Bundling them in a settings object adds a wrapper type every scenario must build,
-# > and splitting the function duplicates the host composition below.
-def run_request(  # noqa: PLR0913
+def run_request(
     request: RunRequest,
-    agents: AgentsSource,
     *,
-    verify: bool = True,
+    client_factory: Callable[..., AgentClientProtocol],
     relaunch_saved: bool = False,
-    budget_s: float = SIMULATED_BUDGET_S,
     on_handle: Callable[[RunHandle], None] | None = None,
-    stop_timer: StopTimer | None = None,
-    client_factory: Callable[..., AgentClientProtocol] | None = None,
-    clock: CrashableRunClock | None = None,
-    backend_factory: Callable[..., ComputeBackendImpl] | None = None,
     slurm_processes: Processes | None = None,
-    step_runner_decorator: StepRunnerDecorator | None = None,
 ) -> LoopRun:
-    """Execute a built request through the production host composition.
-
-    Without ``clock`` the run uses the production wall clock. A scenario that resumes a
-    crashed run passes one ``simulated_clock()`` to both runs, and waiting advances it at once.
-    Such a run that waits more than ``SIMULATED_BUDGET_S`` simulated seconds fails instead of
-    spinning.
-    Simulated time decouples the loop from the agent turns that run in threads,
-    so scenarios that depend on a turn finishing within one poll still use the wall clock.
-    """
-    if clock is not None:
-        clock.limit = clock.at + budget_s
+    """Execute a built request through the production host composition, on the wall clock."""
     runs = launch.default_runs(
         LaunchSettings(
             blocking=ThreadBlockingRunner(),
             network=UnixNetwork(),
-            agent_client_factory=client_factory or agents.client,
-            backend_factory=backend_factory or host_container_backend,
-            stop_timer=stop_timer or FakeStopTimer(threads=OsThreads()),
-            timing=(
-                RunTiming(SystemClock(), OsThreads())
-                if clock is None
-                else RunTiming(clock, OsThreads())
-            ),
+            agent_client_factory=client_factory,
+            backend_factory=host_container_backend,
+            stop_timer=FakeStopTimer(threads=OsThreads()),
+            timing=RunTiming(SystemClock(), OsThreads()),
             # The agent's container mounts the repository's `.git` read-only, so the
             # repository must exist on disk: these runs use the product's real Git.
             processes=REAL_PROCESSES,
             piped_processes=SubprocessPipedProcessLauncher(),
             git_repository=None,
             slurm_processes=slurm_processes,
-            step_runner_decorator=step_runner_decorator,
         )
     )
     events: list[CoreEvent] = []
@@ -709,46 +299,11 @@ def run_request(  # noqa: PLR0913
         # > couple the harness to how the host wraps a failure.
         except (Exception, RunStopped) as error:  # noqa: BLE001
             await asyncio.gather(collector, return_exceptions=True)
-            return LoopRun(handle.run_id, None, error, events, clock)
+            return LoopRun(handle.run_id, None, error, events)
         await asyncio.gather(collector, return_exceptions=True)
-        return LoopRun(result.run_id, result, None, events, clock)
+        return LoopRun(result.run_id, result, None, events)
 
-    finished = asyncio.run(run()) if clock is None else run_virtual(clock, run())
-    if verify and finished.error is None:
-        _assert_invariants(request, finished)
-    return finished
-
-
-def _assert_invariants(request: RunRequest, run: LoopRun) -> None:
-    """Fail the scenario when the run's own records violate a loop invariant.
-
-    A run that raised (a crash or stall) has no terminal event by design, so only runs
-    that ended on their own terms are checked.
-    """
-    root = request.project_root
-    loaded = load_run(Project.open(root), run.run_id, plugin_id=request.orchestration.id)
-    records = RunRecords.from_core(
-        [event.model_dump(mode="json") for event in run.events],
-        None if loaded is None else loaded.envelope,
-        root.parent / "cluster",
-        Project.log_directory_for(root, run.run_id),
-    )
-    violations = check(records)
-    assert not violations, [f"{v.invariant}: {v.detail}" for v in violations]
-    ended = terminal_event(records)
-    stopped = ended is not None and ended.get("status") == "interrupted"
-    assert loaded is not None, "a run that ended committed no core record"
-    assert_run_live(loaded.core, End.STOPPED if stopped else End.TERMINAL)
-
-
-def assert_run_live(core: CoreState, end: End = End.TERMINAL) -> None:
-    """Fail when the run's core state shows a run that did not make bounded progress.
-
-    The state is the run's intent ledger and final state (`vs_core.testing.liveness`).
-    """
-    assert_live(
-        Journal.from_ledger(core), core, Budget(retries=core.run.limits.request_retries.limit), end
-    )
+    return asyncio.run(run())
 
 
 @dataclass(frozen=True)
@@ -775,92 +330,16 @@ def load_run(project: Project, run_id: str, *, plugin_id: str = "dynamic") -> Lo
     return LoadedRun(logged.core, envelope, logged.strategy)
 
 
-def simulated_clock() -> CrashableRunClock:
-    """A run clock for a crash and its resume: waits advance it without waiting."""
-    return CrashableRunClock()
-
-
 def resume_request(request: RunRequest, run_id: str) -> RunRequest:
     """Return ``request`` as a resume of ``run_id``."""
     return request.model_copy(update={"resume": ResumeRef(run_id=run_id), "exp_name": run_id})
 
 
-class CoreRecords:
-    """A finished run's committed core record, folded from its run.log."""
-
-    def __init__(self, loop_input: LoopInput, run_id: str) -> None:
-        """Load the run's committed envelope; fail when none was committed."""
-        self.loop_input = loop_input
-        self.run_id = run_id
-        self.project = loop_input.project()
-        loaded = load_run(self.project, run_id)
-        assert loaded is not None, f"no committed record for {run_id}"
-        assert loaded.strategy is not None, f"the search of {run_id} logged no whole state"
-        self.envelope: dict[str, Any] = loaded.envelope
-        published = FlowDriver.published(loaded.strategy, RunSnapshot)
-        assert published is not None, "the search published no record"
-        self.snapshot: RunSnapshot = published
-
-    @property
-    def core(self) -> dict[str, Any]:
-        """Return the core's committed run state."""
-        return self.envelope["core"]
-
-    @property
-    def strategy(self) -> dict[str, Any]:
-        """Return what the search published of its record, as JSON."""
-        return self.snapshot.model_dump(mode="json")
-
-    @property
-    def run(self) -> dict[str, Any]:
-        """Return the core run record (status, facts, result)."""
-        return self.core["run"]
-
-    @property
-    def outcome(self) -> tuple[str, str | None]:
-        """Return the run's (status, result outcome)."""
-        result = self.run.get("result")
-        return self.run["status"], (result or {}).get("outcome")
-
-    @property
-    def selection(self) -> dict[str, Any] | None:
-        """Return the run's selected result, if any."""
-        return (self.run.get("result") or {}).get("selection")
-
-    def baseline_metric(self) -> float | None:
-        """Return the trusted baseline's first metric value, if it was measured."""
-        baseline = self.snapshot.baseline
-        reading = None if baseline is None else candidates.reading(baseline)
-        return reading.metrics[0].value if reading is not None and reading.metrics else None
-
-    def baseline_failure(self) -> candidates.InputFailure | None:
-        """Return why the input could not be measured, or None when it was (or is still pending)."""
-        baseline = self.snapshot.baseline
-        return None if baseline is None else candidates.failure(baseline)
-
-    def hypothesis(self, hypothesis_id: str) -> HypothesisRecord:
-        """Return the search's record of one hypothesis."""
-        rows = [row for row in self.snapshot.hypotheses if row.hypothesis_id == hypothesis_id]
-        assert rows, f"no hypothesis {hypothesis_id!r}"
-        return rows[0]
-
-    def finished(self, hypothesis_id: str) -> FinishedWork:
-        """Return the search's record of the last workstream that worked on one hypothesis."""
-        rows = [row for row in self.snapshot.finished if row.plan.work_id == hypothesis_id]
-        assert rows, f"no finished workstream of {hypothesis_id!r}"
-        return rows[-1]
-
-    def publications(self) -> bytes:
-        """Return the run's journaled publications."""
-        journal = self.project.state.portable_namespace(self.run_id, "publications").read_bytes(
-            "publications.json"
-        )
-        assert journal is not None, "the run journaled no publications"
-        return journal
-
-
-def logs_dir(loop_input: LoopInput, run_id: str) -> Path:
-    """Return a run's logs directory."""
-    found = sorted(loop_input.root.glob(f".vibesys/state/**/runs/{run_id}/logs"))
-    assert found, f"no logs for {run_id}"
-    return found[0]
+def published_snapshot(project: Project, run_id: str) -> RunSnapshot:
+    """The record the search published, folded from the run's run.log; fails when it published none."""
+    loaded = load_run(project, run_id)
+    assert loaded is not None, f"no committed record for {run_id}"
+    assert loaded.strategy is not None, f"the search of {run_id} logged no whole state"
+    published = FlowDriver.published(loaded.strategy, RunSnapshot)
+    assert published is not None, "the search published no record"
+    return published

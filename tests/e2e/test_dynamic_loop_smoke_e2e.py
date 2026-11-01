@@ -38,7 +38,7 @@ from typing import TYPE_CHECKING
 
 import agentshim
 import pytest
-from tests.e2e.dynamic_loop_harness import CoreRecords, LoopInput, load_run
+from tests.e2e.dynamic_loop_harness import LoopInput, load_run, published_snapshot
 from tests.support import run_test_command
 from tests.support.docker_environment import host_container_backend
 from tests.support.loop_invariants import (
@@ -942,7 +942,7 @@ def test_core_path_runs_the_fake_slurm_search(
     )
     # The search published its record: the run.log holds the state it published, which is the
     # one place a run's publications are kept (the loop journals none beside it).
-    assert CoreRecords(loop_input, result.run_id).snapshot is not None
+    assert published_snapshot(run, result.run_id) is not None
     assert (
         not run.state.portable_namespace(result.run_id, PLUGIN.id)
         .external_directory()
