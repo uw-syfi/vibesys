@@ -5,8 +5,8 @@ import {
   areaErrors,
   loadWorld,
   MAX_SHARDS,
-  PACKAGE_SPEC_BUDGET_SECONDS,
   SECONDS_PER_SHARD,
+  SPEC_BUDGET_SECONDS,
   shardsFor,
   specPackages,
   withinBudget,
@@ -217,12 +217,30 @@ test('the whole suite across the queue jobs fits the recorded seconds', () => {
 
 const total = (specs, recorded) => specs.reduce((sum, spec) => sum + (recorded[spec] ?? 0), 0);
 
-test('a pull request runs every spec with direct evidence, over budget if need be', () => {
+test('a pull request always runs a changed spec, over budget if need be', () => {
   const world = toyWorld();
   const recorded = Object.fromEntries(world.specs.map(spec => [spec, 1000]));
-  const direct = affectedSpecs(['clients/apps/shell/e2e/deep.ts'], world);
-  assert.deepEqual(withinBudget(direct, recorded, 10).run, direct.specs);
-  assert.deepEqual(withinBudget(direct, recorded, 10).deferred, []);
+  const changed = affectedSpecs(['clients/apps/shell/e2e/c.spec.ts'], world);
+  assert.deepEqual(withinBudget(changed, recorded, 10).run, ['apps/shell/e2e/c.spec.ts']);
+});
+
+test('the specs of a changed helper run before those of a changed package, fastest first', () => {
+  const world = toyWorld();
+  const recorded = {
+    'apps/shell/e2e/a.spec.ts': 90,
+    'apps/shell/e2e/b.spec.ts': 30,
+    'apps/shell/e2e/c.spec.ts': 10,
+    'apps/other/e2e/d.spec.ts': 10,
+  };
+  const selection = affectedSpecs(
+    ['clients/apps/shell/e2e/deep.ts', 'clients/libs/lib/src/x.ts'],
+    world,
+  );
+  // a and b import the helper (rank 1); lib reaches d with no steps (rank 3: d's app names it) and
+  // c through the feature (rank 4: c is in no area, so it names its app's packages).
+  const bounded = withinBudget(selection, recorded, 40);
+  assert.deepEqual(bounded.run, ['apps/other/e2e/d.spec.ts', 'apps/shell/e2e/b.spec.ts']);
+  assert.deepEqual(bounded.deferred, ['apps/shell/e2e/a.spec.ts', 'apps/shell/e2e/c.spec.ts']);
 });
 
 test('a package change runs the closest specs first and leaves the rest to the queue', () => {
@@ -247,11 +265,10 @@ test('what a pull request runs of a package change fits the budget, whatever the
     if (pkg.directory.startsWith('apps/')) continue;
     const selection = affectedSpecs([`clients/${pkg.directory}/src/changed.ts`], WORLD);
     const bounded = withinBudget(selection, WORLD.seconds);
-    const isDirect = spec => selection.distances.get(spec) === null;
-    const optional = bounded.run.filter(spec => !isDirect(spec));
-    const direct = bounded.run.filter(isDirect);
-    const room = Math.max(0, PACKAGE_SPEC_BUDGET_SECONDS - total(direct, WORLD.seconds));
-    assert.ok(total(optional, WORLD.seconds) <= room, `${pkg.name} runs more than its budget`);
+    const changedSpecs = bounded.run.filter(spec => selection.ranks.get(spec) === 0);
+    const others = bounded.run.filter(spec => selection.ranks.get(spec) !== 0);
+    const room = Math.max(0, SPEC_BUDGET_SECONDS - total(changedSpecs, WORLD.seconds));
+    assert.ok(total(others, WORLD.seconds) <= room, `${pkg.name} runs more than its budget`);
     assert.deepEqual([...bounded.run, ...bounded.deferred].sort(), selection.specs, pkg.name);
     assert.ok(shardsFor(bounded.run, WORLD.seconds) <= MAX_SHARDS, pkg.name);
   }

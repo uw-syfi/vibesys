@@ -24,13 +24,14 @@
  *   configuration, unit tests, documents) selects every spec. A path outside `clients/` selects
  *   none: no Python or workflow change is bundled into the app.
  *
- * `withinBudget` then bounds what a pull request runs. Direct evidence (a changed spec or helper, a
- * changed app file, a file the rule cannot place) always runs. A package change reaches specs by
- * dependencies, and a shared package (`proto`, `contracts`, `ui`) reaches nearly all of them, which
- * would take the whole suite and more than the stage's budget allows. Those specs run closest
- * first (fewest dependency steps between the spec's own packages and the changed one, then
- * shortest) up to `PACKAGE_SPEC_BUDGET_SECONDS`; the rest are named in the log and left to the
- * merge queue, which runs every spec.
+ * `withinBudget` then bounds what a pull request runs. A pull request has a stage budget (the
+ * commit stage's `ci-budget`), and the specs of a broad change (an app file, a shared package such
+ * as `proto`, `contracts` or `ui`) cost more than it allows. The specs run by how direct the
+ * evidence is, then fastest first so more distinct specs run: a changed spec always, then the
+ * specs importing a changed helper, then the specs of a changed app file or of a path the rule
+ * cannot place, then the specs a package change reaches, nearest first (fewest dependency steps
+ * between the spec's own packages and the changed one). They run up to `SPEC_BUDGET_SECONDS`; the
+ * log names the rest, and the merge queue runs every spec.
  *
  * `shardsFor` sizes the job from the recorded seconds of the specs it runs, never above the
  * queue's `MAX_SHARDS`, which is also the queue's matrix.
@@ -49,13 +50,17 @@ const CLIENTS_PREFIX = 'clients/';
 /** The queue runs the whole suite across this many jobs; a pull request never uses more. */
 export const MAX_SHARDS = 5;
 /** A job should hold about this many recorded seconds of specs before another job is worth its setup. */
-export const SECONDS_PER_SHARD = 140;
+export const SECONDS_PER_SHARD = 100;
 /**
- * What a pull request's jobs run of the specs a package change reaches only through dependencies:
- * the recorded seconds that fit the jobs, so the stage stays near its budget. The queue runs the rest.
+ * The recorded seconds a pull request's jobs run in all. A job takes about 35 s to set up, 110 s to
+ * build the three apps, and 1.4 to 1.7 times a spec's recorded seconds to run it, unevenly across
+ * jobs: 100 recorded seconds a job keeps the longest job near 330 s, inside the commit stage's
+ * 360 s budget. The queue runs every spec.
  */
-export const PACKAGE_SPEC_BUDGET_SECONDS = MAX_SHARDS * SECONDS_PER_SHARD;
+export const SPEC_BUDGET_SECONDS = MAX_SHARDS * SECONDS_PER_SHARD;
 
+/** The rank of a spec a package change reaches at no dependency steps (see `specsOf`). */
+const PACKAGE_RANK = 3;
 const SOURCE_FILE = /\.(?:[cm]?ts|tsx|mjs|js)$/;
 const SOURCE_EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.mjs', '.json'];
 const IMPORT_SPECIFIER =
@@ -360,8 +365,9 @@ function effectOf(path, world) {
 }
 
 /**
- * The `[spec, reason, distance]` triples one effect selects; the distance is `null` for direct
- * evidence and the dependency steps from the spec to the changed package otherwise.
+ * The `[spec, reason, rank]` triples one effect selects: 0 for a changed spec, 1 for an importer of
+ * a changed helper, 2 for an app file or a path the rule cannot place, and 3 plus the dependency
+ * steps from the spec to the changed package for a package.
  *
  * @param {ReturnType<typeof effectOf>} effect
  * @param {E2eWorld} world
@@ -370,14 +376,14 @@ function effectOf(path, world) {
  */
 function specsOf(effect, world, needs) {
   const ofApp = (app, why) =>
-    world.specs.filter(spec => appOf(spec) === app).map(spec => [spec, why, null]);
+    world.specs.filter(spec => appOf(spec) === app).map(spec => [spec, why, 2]);
   switch (effect.kind) {
     case 'none':
       return [];
     case 'spec':
-      return [[effect.file, `${effect.file} changed`, null]];
+      return [[effect.file, `${effect.file} changed`, 0]];
     case 'all':
-      return world.specs.map(spec => [spec, effect.why, null]);
+      return world.specs.map(spec => [spec, effect.why, 2]);
     case 'app':
       return ofApp(effect.app, effect.why);
     case 'helper': {
@@ -390,10 +396,9 @@ function specsOf(effect, world, needs) {
       const importers = world.specs.filter(spec =>
         targets.some(target => importClosure(world, [spec]).has(target)),
       );
-      if (importers.length > 0)
-        return importers.map(spec => [spec, `imports ${effect.file}`, null]);
+      if (importers.length > 0) return importers.map(spec => [spec, `imports ${effect.file}`, 1]);
       if (effect.app !== undefined) return ofApp(effect.app, `${effect.file} is read by no import`);
-      return world.specs.map(spec => [spec, `${effect.file} is shared by every app`, null]);
+      return world.specs.map(spec => [spec, `${effect.file} is shared by every app`, 2]);
     }
     default:
       return specsOfPackage(effect.name, world, needs);
@@ -415,56 +420,60 @@ function specsOfPackage(name, world, needs) {
     ...reached.map(spec => [
       spec,
       `depends on ${name}`,
-      distanceTo(world, directPackages(world, spec), name),
+      PACKAGE_RANK + distanceTo(world, directPackages(world, spec), name),
     ]),
     ...unreached.map(spec => [
       spec,
       `${name} reaches no spec of its app by a declared relation`,
-      null,
+      2,
     ]),
   ];
 }
 
 /**
- * The specs a change can affect, with the reason each is selected.
+ * The specs a change can affect, with the reason and the rank (see `specsOf`) each is selected by.
  *
  * @param {readonly string[]} changed repository-relative paths
  * @param {E2eWorld} world
- * @returns {{specs: string[], reasons: Map<string, string>}}
+ * @returns {{specs: string[], reasons: Map<string, string>, ranks: Map<string, number>}}
  */
 export function affectedSpecs(changed, world) {
   const needs = specPackages(world);
   const reasons = new Map();
-  const distances = new Map();
+  const ranks = new Map();
   for (const path of changed) {
-    for (const [spec, reason, distance] of specsOf(effectOf(path, world), world, needs)) {
-      if (!reasons.has(spec)) reasons.set(spec, reason);
-      // Direct evidence (`null`) outranks any dependency distance; otherwise the closest wins.
-      const known = distances.get(spec);
-      if (known !== null)
-        distances.set(spec, distance === null ? null : Math.min(known ?? distance, distance));
+    for (const [spec, reason, rank] of specsOf(effectOf(path, world), world, needs)) {
+      if (!reasons.has(spec) || rank < ranks.get(spec)) reasons.set(spec, reason);
+      ranks.set(spec, Math.min(ranks.get(spec) ?? rank, rank));
     }
   }
-  return {specs: [...reasons.keys()].sort(), reasons, distances};
+  return {specs: [...reasons.keys()].sort(), reasons, ranks};
+}
+
+/** A spec's recorded seconds, or the median of the recorded ones for a spec with none. */
+function secondsOf(seconds) {
+  const measured = Object.values(seconds).sort((a, b) => a - b);
+  const fallback = measured[Math.floor(measured.length / 2)] ?? 1;
+  return spec => seconds[spec] ?? fallback;
 }
 
 /**
- * The specs a pull request runs and those it leaves to the queue: every spec with direct
- * evidence, then the others closest first while their recorded seconds fit `budget`.
+ * The specs a pull request runs and those it leaves to the queue: a changed spec always, then the
+ * others by rank and fastest first, while their recorded seconds fit `budget`.
  *
- * @param {{specs: string[], distances: Map<string, number | null>}} selection
+ * @param {{specs: string[], ranks: Map<string, number>}} selection
  * @param {Record<string, number>} seconds
  * @param {number} [budget]
  */
-export function withinBudget(selection, seconds, budget = PACKAGE_SPEC_BUDGET_SECONDS) {
-  const weight = spec => seconds[spec] ?? 0;
-  const run = selection.specs.filter(spec => selection.distances.get(spec) === null);
+export function withinBudget(selection, seconds, budget = SPEC_BUDGET_SECONDS) {
+  const weight = secondsOf(seconds);
+  const run = selection.specs.filter(spec => selection.ranks.get(spec) === 0);
   let used = run.reduce((sum, spec) => sum + weight(spec), 0);
   const rest = selection.specs
-    .filter(spec => selection.distances.get(spec) !== null)
+    .filter(spec => selection.ranks.get(spec) !== 0)
     .sort(
       (a, b) =>
-        selection.distances.get(a) - selection.distances.get(b) ||
+        selection.ranks.get(a) - selection.ranks.get(b) ||
         weight(a) - weight(b) ||
         a.localeCompare(b),
     );
@@ -487,9 +496,8 @@ export function withinBudget(selection, seconds, budget = PACKAGE_SPEC_BUDGET_SE
  */
 export function shardsFor(specs, seconds) {
   if (specs.length === 0) return 0;
-  const measured = Object.values(seconds).sort((a, b) => a - b);
-  const fallback = measured[Math.floor(measured.length / 2)] ?? 1;
-  const total = specs.reduce((sum, spec) => sum + (seconds[spec] ?? fallback), 0);
+  const weight = secondsOf(seconds);
+  const total = specs.reduce((sum, spec) => sum + weight(spec), 0);
   return Math.min(MAX_SHARDS, Math.max(1, Math.ceil(total / SECONDS_PER_SHARD)));
 }
 
@@ -597,7 +605,7 @@ function main(argv) {
       console.log(`e2e: ${spec.slice('apps/'.length)}: ${selected.reasons.get(spec)}`);
     for (const spec of bounded.deferred)
       console.log(
-        `e2e: ${spec.slice('apps/'.length)}: left to the merge queue (${selected.reasons.get(spec)}, ${selected.distances.get(spec)} steps away)`,
+        `e2e: ${spec.slice('apps/'.length)}: left to the merge queue (${selected.reasons.get(spec)})`,
       );
     console.log(
       `e2e: ${specs.length} of ${world.specs.length} specs across ${shards} jobs; ${bounded.deferred.length} left to the merge queue`,

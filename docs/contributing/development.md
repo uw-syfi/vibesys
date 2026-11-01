@@ -415,10 +415,12 @@ the specs that depend on it, through the dependencies of the spec's area
 feature packages it exercises) and through the packages its imports reach. A spec the table
 does not place depends on everything its app does, so an unplaced spec costs a run, never a
 miss, and a lockfile change that only records what a workspace package asks for selects
-nothing. A pull request runs the specs with direct evidence in full; the specs a package
-change reaches only through dependencies run closest first up to the recorded seconds the
-jobs can take in the stage's budget (`PACKAGE_SPEC_BUDGET_SECONDS`), and the log names the
-rest as left to the queue. To see the selection for your branch:
+nothing. The commit stage has a time budget (`ci-budget`), so a pull request runs the
+selected specs up to `SPEC_BUDGET_SECONDS` of recorded time (about half the suite): a changed
+spec always, then the specs importing a changed helper, then those of a changed app file,
+then the specs a package change reaches, nearest first, each tier fastest first so more
+distinct specs run. The log names the specs left to the queue, which runs every spec.
+To see the selection for your branch:
 
 ```bash
 node clients/tools/scripts/e2e_affected.mjs --mode selected --base origin/main --head HEAD
