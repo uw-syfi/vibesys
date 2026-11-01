@@ -14,7 +14,7 @@
     "build": "vite build",
     "check": "tsc -b",
     "test": "node ../../tools/scripts/run_bun_tests.mjs ./src",
-    "test:e2e": "pnpm build && pnpm e2e",
+    "test:e2e": "node ../../tools/scripts/with_e2e_specs.mjs desktop-shell \"pnpm build && pnpm e2e\"",
     "e2e:linux": "node ../../tools/scripts/with_derived_replays.mjs bash scripts/linux-e2e.sh",
     "e2e": "node ../../tools/scripts/with_derived_replays.mjs node --conditions=@vibesys/source ../../node_modules/@playwright/test/cli.js test --pass-with-no-tests",
     "dev:fixture": "node ../../tools/scripts/with_derived_replays.mjs bun --conditions=@vibesys/source e2e/tools/dev-fixture.ts",
