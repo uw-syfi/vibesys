@@ -2,9 +2,18 @@
  * The layout and wording checks, as they run inside the page against its real layout. Every
  * function here is sent to the page by source (`screen-check.ts` joins them into one script), so
  * each is self-contained: it uses only the DOM, its own arguments and the other functions in
- * `HELPERS`, and no import. A check reads the screen and returns what is wrong with it; it never
+ * `HELPERS` (and `RAW_TEXT_HELPERS`), and no import. A check reads the screen and returns what is wrong with it; it never
  * changes the page.
  */
+
+import type {DrawnText, RawTextFinding, RawTextInput} from '../../src/testing/raw-text.js';
+
+// The helpers the wording check shares with the DOM tests of the shell live in
+// `src/testing/raw-text.ts` and are joined into the page's script with these (`RAW_TEXT_HELPERS`,
+// read by `screen-check.ts`). Here they are only named, so each check below can call them.
+declare function inCode(element: Element): boolean;
+declare function describe(element: Element): string;
+declare function rawTextIn(boxes: readonly DrawnText[], input: RawTextInput): RawTextFinding[];
 
 export type CheckId =
   | 'overlap'
@@ -44,16 +53,7 @@ export interface Violation {
 }
 
 /** The words a check reads from the page: the run's closed sets that must never show raw. */
-export interface CheckInput {
-  /** Enum values that never read as words (`implementation-failed`). */
-  readonly rawWords: readonly string[];
-  /** The ids the backend registries name (harnesses, models, roles): none may be drawn as text. */
-  readonly ids: readonly string[];
-  /** The names the registries give them: none may be drawn in lowercase. */
-  readonly names: readonly string[];
-  /** Names the user typed (a folder, an SSH alias): identifiers of theirs, not the app's code names. */
-  readonly userNames: readonly string[];
-}
+export type CheckInput = RawTextInput;
 
 interface Box {
   readonly left: number;
@@ -70,17 +70,6 @@ interface TextBox {
   readonly lines: readonly Box[];
   /** Whether a line runs past the window's edge without any container clipping it there. */
   readonly spills: boolean;
-}
-
-/** Whether `element` is code a person reads as code: identifiers are allowed there. */
-function inCode(element: Element): boolean {
-  return element.closest('code, pre, kbd, samp, script, style, textarea, [data-mono-id]') !== null;
-}
-
-function describe(element: Element): string {
-  const classes = [...element.classList].slice(0, 2).join('.');
-  const text = (element.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 40);
-  return `${element.tagName.toLowerCase()}${classes === '' ? '' : `.${classes}`} "${text}"`;
 }
 
 function boxOf(rect: DOMRect): Box {
@@ -340,82 +329,10 @@ export function truncationCheck(): Violation[] {
   return found;
 }
 
-/**
- * The labels in a text: its parts between the separators the screens join labels with (`·`, a
- * comma, a colon, parentheses), so a code name standing as a label is told from a hyphenated
- * word inside a sentence ("per-slot sequence numbers").
- */
-function labelsOf(text: string): string[] {
-  return text
-    .split(/\s[·•|/+]\s|,\s|:\s|\s\(|\)/)
-    .map(part => part.trim())
-    .filter(part => part !== '');
-}
-
-/** Whether `text` has `id` standing as its own word, not inside a longer identifier. */
-function hasIdAsWord(text: string, id: string): boolean {
-  const escaped = id.replace(/[.*+?^${}()|[\]\\/-]/g, '\\$&');
-  return new RegExp(`(?<![\\w.\\-/])${escaped}(?![\\w\\-/]|\\.\\w)`).test(text);
-}
-
-/** The registry ids that stand as a label of `text`: a label is a few words, a longer run is a sentence. */
-function idHits(text: string, input: CheckInput): string[] {
-  const labels = labelsOf(text).filter(label => label.split(' ').length <= 4);
-  return input.ids
-    .filter(id => labels.some(label => hasIdAsWord(label, id)))
-    .map(id => `registry id "${id}"`);
-}
-
-/** The labels of `text` that are a kebab-case code name, or a registry name drawn in lowercase. */
-function nameHits(text: string, input: CheckInput): string[] {
-  const lowered = new Set(input.names.map(name => name.toLowerCase()));
-  return labelsOf(text).flatMap(label => {
-    if (/^[a-z]+(?:-[a-z0-9]+)+$/.test(label)) {
-      return input.userNames.includes(label) ? [] : [`code name "${label}"`];
-    }
-    return lowered.has(label) && !input.names.includes(label) ? [`lowercase name "${label}"`] : [];
-  });
-}
-
-/**
- * Code shown to a person: snake_case, template holes, undefined, NaN, null, long hashes, raw enums,
- * and the code names of the registries: a harness, model or role id drawn as text, a kebab-case
- * identifier standing as a label (`opus-5-5`), and a registry name drawn in lowercase as a label
- * (`claude code`). Ids are matched in labels (at most four words between separators), not in
- * sentences. Genuine identifiers a person may copy sit in a `data-mono-id` element.
- */
+/** What the screen draws that no person should read as it is: see `rawTextIn`. */
 export function rawTextCheck(input: CheckInput): Violation[] {
-  const patterns: [string, RegExp][] = [
-    ['snake_case identifier', /\b[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+\b/],
-    ['template hole', /\$\{/],
-    ['undefined', /\bundefined\b/],
-    ['NaN', /\bNaN\b/],
-    ['null', /\bnull\b/],
-    ['raw hash or id', /\b[0-9a-f]{12,}\b/i],
-    ['raw markdown', /`|\*\*/],
-  ];
-  const found: Violation[] = [];
-  for (const {element, text} of textBoxes()) {
-    if (inCode(element)) continue;
-    const hits = [
-      ...patterns.flatMap(([name, pattern]) => {
-        const match = pattern.exec(text);
-        return match === null ? [] : [`${name} "${match[0]}"`];
-      }),
-      ...input.rawWords.filter(word => text.includes(word)).map(word => `enum value "${word}"`),
-      ...idHits(text, input),
-      // An agent's own prose (rendered markdown) lists hyphenated words between commas: not labels.
-      ...(element.closest('.vs-markdown') === null ? nameHits(text, input) : []),
-    ];
-    for (const hit of [...new Set(hits)]) {
-      found.push({
-        check: 'raw-text',
-        message: `raw text shown: ${hit} in "${text.slice(0, 50)}"`,
-        where: describe(element),
-      });
-    }
-  }
-  return found;
+  const drawn = textBoxes().map(({element, text}) => ({element, text}));
+  return rawTextIn(drawn, input).map(each => ({check: 'raw-text', ...each}));
 }
 
 /** Whether a label or unit (letters, %, ×) sits within three levels around the number's element. */
@@ -1548,10 +1465,8 @@ export function dragRegionCheck(): Violation[] {
 
 /** What `screen-check.ts` sends to the page ahead of a check. */
 export const HELPERS: readonly ((...args: never[]) => unknown)[] = [
-  inCode,
   sharedRow,
   outOfLine,
-  describe,
   boxOf,
   cut,
   drawnOver,
@@ -1575,10 +1490,6 @@ export const HELPERS: readonly ((...args: never[]) => unknown)[] = [
   legendColors,
   columnOf,
   isProseFragment,
-  labelsOf,
-  hasIdAsWord,
-  idHits,
-  nameHits,
   frameOf,
   commonAncestor,
   depthBelow,

@@ -94,11 +94,12 @@ function roleOf(element: Element): ControlRole | null {
   return null;
 }
 
-function hidden(element: Element): boolean {
+/** Whether `element` or what holds it is not drawn: marked hidden, aria-hidden or inert. */
+export function hidden(element: Element): boolean {
   return element.closest('[hidden], [aria-hidden="true"], [inert]') !== null;
 }
 
-function text(element: Element | null): string {
+export function text(element: Element | null): string {
   return (element?.textContent ?? '').replace(/\s+/g, ' ').trim();
 }
 
@@ -138,7 +139,7 @@ function contentOf(element: Element | null): string {
 }
 
 /** The name a person reads for `element`: its label, what labels it, else the text inside it. */
-function nameOf(element: Element, root: Document): string {
+export function nameOf(element: Element, root: Document): string {
   const label = element.getAttribute('aria-label');
   if (label !== null) return label.trim();
   const labelledBy = element.getAttribute('aria-labelledby');
