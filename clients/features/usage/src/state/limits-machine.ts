@@ -63,7 +63,7 @@ export const LIMITS_CONNECT_POLL_MS = 1_500;
 export const LIMITS_CONNECT_POLLS_MAX = 40;
 
 /** Whether nothing was read because every machine that was asked is still connecting. */
-export function stillConnecting(answer: LimitsAnswer): boolean {
+function stillConnecting(answer: LimitsAnswer): boolean {
   return (
     answer.replies.length === 0 && answer.unsupported.length === 0 && answer.connecting.length > 0
   );
