@@ -24,13 +24,23 @@ import argparse
 import re
 import subprocess
 import sys
+from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from scripts.check_stale_revert import GIT_COMMAND_TIMEOUT_SECONDS, bounded_git_argv
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+
+
+class Git(Protocol):
+    """Runs one git subcommand in the repository and returns its standard output."""
+
+    def __call__(self, *args: str) -> str:
+        """Run ``git *args``; raise ``RuntimeError`` if git fails."""
+        ...
+
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 
@@ -69,7 +79,8 @@ def undeclared(changed: Iterable[str], message: str) -> list[str]:
     return sorted(path for path in changed if path not in declared)
 
 
-def _git(root: Path, *args: str) -> str:
+def run_git(root: Path, *args: str) -> str:
+    """Run ``git *args`` in ``root`` with the stale-revert check's bounds and return its output."""
     argv = bounded_git_argv(*args)
     # lint-waiver: LW-428117 [S603]; fixed git subcommands over refs and repo-relative paths, no shell; stdlib so CI runs it before installing the environment.
     result = subprocess.run(  # noqa: S603
@@ -86,11 +97,10 @@ def _git(root: Path, *args: str) -> str:
     return result.stdout
 
 
-def pointer_changes(root: Path, base_ref: str, head: str = "HEAD") -> tuple[list[str], str]:
+def pointer_changes(git: Git, base_ref: str, head: str = "HEAD") -> tuple[list[str], str]:
     """The pins ``head`` moves relative to ``base_ref``'s merge base, and the change's messages."""
-    base = _git(root, "merge-base", head, base_ref).strip()
-    raw = _git(
-        root,
+    base = git("merge-base", head, base_ref).strip()
+    raw = git(
         "diff",
         "--raw",
         "-z",
@@ -101,10 +111,10 @@ def pointer_changes(root: Path, base_ref: str, head: str = "HEAD") -> tuple[list
         "--",
         "examples",
     )
-    return changed_pointers(raw), _git(root, "log", "--format=%B", f"{base}..{head}")
+    return changed_pointers(raw), git("log", "--format=%B", f"{base}..{head}")
 
 
-def main(argv: list[str] | None = None, *, root: Path = REPOSITORY_ROOT) -> int:
+def main(argv: list[str] | None = None, *, git: Git | None = None) -> int:
     """Report each undeclared pin and fail, or pass silently."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--base-ref", required=True)
@@ -112,7 +122,9 @@ def main(argv: list[str] | None = None, *, root: Path = REPOSITORY_ROOT) -> int:
     parser.add_argument("--github-output", type=Path)
     args = parser.parse_args(argv)
     try:
-        changed, message = pointer_changes(root, args.base_ref, args.head)
+        changed, message = pointer_changes(
+            git or partial(run_git, REPOSITORY_ROOT), args.base_ref, args.head
+        )
     except (RuntimeError, subprocess.TimeoutExpired) as error:
         sys.stderr.write(f"example-pointer check: {error}\n")
         return 2

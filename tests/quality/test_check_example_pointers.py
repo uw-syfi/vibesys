@@ -1,13 +1,11 @@
 """The example-pointer check refuses a pin moved without an ``Example-Bump:`` line naming it.
 
-The parsing is checked over generated diffs and messages; one case builds the situation of
-#3568 in a temporary repository: a change that commits a worktree's checked-out submodule commit.
+The parsing is checked over generated diffs and messages, and the command over a fake git; the
+situation of #3568 in a real repository is `tests/e2e/test_check_example_pointers_e2e.py`.
 """
 
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from hypothesis import given
@@ -21,10 +19,10 @@ from scripts.check_example_pointers import (
     pointer_changes,
     undeclared,
 )
-from tests.support import run_test_command
-from tests.support.real_git import REAL_GIT
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     import pytest
 
 _NAMES = st.text(st.sampled_from("abcxyz-"), min_size=1, max_size=6)
@@ -94,80 +92,52 @@ def test_a_path_is_an_example_repository_only_at_the_one_depth() -> None:
     assert not is_example_repository("resources/skills/serving-systems/repos/vllm")
 
 
-def _git(root: Path, *args: str) -> str:
-    return REAL_GIT.run_text(list(args), cwd=root).check().stdout.strip()
+class _FakeGit:
+    """Answers the three git subcommands the check runs from a diff and a message, and records them."""
+
+    def __init__(self, raw_diff: str, message: str) -> None:
+        self.raw_diff = raw_diff
+        self.message = message
+        self.calls: list[tuple[str, ...]] = []
+
+    def __call__(self, *args: str) -> str:
+        self.calls.append(args)
+        match args[0]:
+            case "merge-base":
+                return "b" * 40 + "\n"
+            case "diff":
+                return self.raw_diff
+            case "log":
+                return self.message
+        message = f"unexpected git {args}"
+        raise AssertionError(message)
 
 
-def _commit_pin(root: Path, pin: str, message: str) -> None:
-    _git(
-        root,
-        "update-index",
-        "--add",
-        "--cacheinfo",
-        f"{GITLINK_MODE},{pin},examples/family/repositories/masa",
-    )
-    # The product Git policy sets diff.ignoreSubmodules=all; plain git commits the index-only pin.
-    run_test_command(["git", "commit", "-q", "-m", message], cwd=root, check=True)
+def test_the_check_asks_git_for_gitlinks_between_the_merge_base_and_head() -> None:
+    git = _FakeGit(_raw([(GITLINK_MODE, GITLINK_MODE, "examples/f/repositories/n")]), "m")
 
-
-def test_a_change_that_commits_the_checked_out_pin_fails_unless_it_declares_the_bump() -> None:
-    with tempfile.TemporaryDirectory() as directory:
-        root = Path(directory)
-        _git(root, "init", "-q", "--initial-branch=main")
-        _git(root, "config", "user.name", "Pointer fixture")
-        _git(root, "config", "user.email", "pointer@example.invalid")
-        (root / "README.md").write_text("base\n")
-        _git(root, "add", "-A")
-        _git(root, "commit", "-q", "-m", "base")
-        _commit_pin(root, "1" * 40, "main: pin the example")
-        _git(root, "checkout", "-q", "-b", "change")
-        (root / "README.md").write_text("change\n")
-        _git(root, "commit", "-qam", "change: an ordinary edit")
-
-        assert pointer_changes(root, "main") == ([], "change: an ordinary edit\n\n")
-
-        _commit_pin(root, "2" * 40, "change: record the worktree's commit")
-        changed, message = pointer_changes(root, "main")
-        assert changed == ["examples/family/repositories/masa"]
-        assert undeclared(changed, message) == changed
-
-        _commit_pin(
-            root,
-            "3" * 40,
-            "change: bump masa\n\nExample-Bump: examples/family/repositories/masa",
-        )
-        changed, message = pointer_changes(root, "main")
-        assert undeclared(changed, message) == []
+    assert pointer_changes(git, "origin/main", "HEAD") == (["examples/f/repositories/n"], "m")
+    diff = next(call for call in git.calls if call[0] == "diff")
+    assert "--ignore-submodules=none" in diff, "the product Git policy hides gitlinks otherwise"
+    assert diff[-4:] == ("b" * 40, "HEAD", "--", "examples")
+    assert ("log", "--format=%B", f"{'b' * 40}..HEAD") in git.calls
 
 
 def test_the_command_names_the_pin_and_the_fix_and_writes_the_ci_output(
-    capsys: pytest.CaptureFixture[str],
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
-    with tempfile.TemporaryDirectory() as directory:
-        root = Path(directory)
-        _git(root, "init", "-q", "--initial-branch=main")
-        _git(root, "config", "user.name", "Pointer fixture")
-        _git(root, "config", "user.email", "pointer@example.invalid")
-        (root / "README.md").write_text("base\n")
-        _git(root, "add", "-A")
-        _git(root, "commit", "-q", "-m", "base")
-        _git(root, "checkout", "-q", "-b", "change")
-        output = root / "github-output"
-        arguments = ["--base-ref", "main", "--github-output", str(output)]
+    pin = "examples/family/repositories/masa"
+    output = tmp_path / "github-output"
+    arguments = ["--base-ref", "origin/main", "--github-output", str(output)]
 
-        assert main(arguments, root=root) == 0
-        assert output.read_text() == "example_pointers=false\n"
+    assert main(arguments, git=_FakeGit("", "an ordinary change")) == 0
+    assert output.read_text() == "example_pointers=false\n"
 
-        _commit_pin(root, "2" * 40, "change: record the worktree's commit")
-        assert main(arguments, root=root) == 1
-        report = capsys.readouterr().out
-        assert "examples/family/repositories/masa" in report
-        assert "Example-Bump: examples/family/repositories/masa" in report
-        assert output.read_text().endswith("example_pointers=true\n")
+    moved = _raw([(GITLINK_MODE, GITLINK_MODE, pin)])
+    assert main(arguments, git=_FakeGit(moved, "record the worktree's commit")) == 1
+    report = capsys.readouterr().out
+    assert pin in report
+    assert f"Example-Bump: {pin}" in report
+    assert output.read_text().endswith("example_pointers=true\n")
 
-        _commit_pin(
-            root,
-            "3" * 40,
-            "change: bump masa\n\nExample-Bump: examples/family/repositories/masa",
-        )
-        assert main(arguments, root=root) == 0
+    assert main(arguments, git=_FakeGit(moved, f"bump masa\n\nExample-Bump: {pin}\n")) == 0
