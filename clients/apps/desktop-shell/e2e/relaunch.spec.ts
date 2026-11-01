@@ -156,30 +156,29 @@ async function newEpoch(page: Page, fixture: StoreRunFixture): Promise<void> {
     {tail, watch},
   );
 }
-test('Relaunch header action, results and new epoch survive Tail before acknowledgement', async ({
-  context,
-}) => {
-  test.setTimeout(90_000);
-  const shots = process.env['SCREENS_DIR'];
-  const entries: SheetEntry[] = [];
-  const capture = async (page: Page, name: string): Promise<void> => {
-    await settled(page);
-    expect(await screenCheck(page)).toEqual([]);
-    if (!shots) return;
-    mkdirSync(shots, {recursive: true});
-    const file = `${name}.png`;
-    await page.screenshot({path: join(shots, file)});
-    entries.push({name, file});
-  };
-  for (const width of [1000, 1440, 1920]) {
-    for (const state of [
-      'parked',
-      'stopped-resumable',
-      'interrupted',
-      'finished',
-      'failed',
-    ] as const) {
-      const page = await context.newPage();
+const shots = process.env['SCREENS_DIR'];
+const entries: SheetEntry[] = [];
+
+/** The screen checks on the page as it is, and its screenshot when a contact sheet is asked for. */
+async function capture(page: Page, name: string): Promise<void> {
+  await settled(page);
+  expect(await screenCheck(page)).toEqual([]);
+  if (!shots) return;
+  mkdirSync(shots, {recursive: true});
+  const file = `${name}.png`;
+  await page.screenshot({path: join(shots, file)});
+  entries.push({name, file});
+}
+
+const STATES = ['parked', 'stopped-resumable', 'interrupted', 'finished', 'failed'] as const;
+
+// One test for each state and width, so the runner shares them among its workers: the three
+// pictures of one run (ready, launching, on the new epoch) follow each other inside it.
+for (const width of [1000, 1440, 1920]) {
+  for (const state of STATES) {
+    test(`Relaunch of a ${state} run at ${width}px survives Tail before acknowledgement`, async ({
+      page,
+    }) => {
       await page.setViewportSize({width, height: 900});
       const world = await openRelaunch(page, state);
       await capture(page, `${state}-${width}-ready`);
@@ -198,16 +197,17 @@ test('Relaunch header action, results and new epoch survive Tail before acknowle
       // An applied request has no row: the host's record of the new epoch settles Resume's own line.
       await expect(page.getByText('Resume · Applied', {exact: true})).toHaveCount(0);
       await capture(page, `${state}-${width}-epoch`);
-      await page.close();
-    }
+    });
   }
-  for (const [result, label] of [
-    ['locked', 'Refused: locked'],
-    ['checkout', 'Refused: checkout missing'],
-    ['changed', 'Refused: epoch changed'],
-    ['uncertain', 'Resume not confirmed. Check the timeline before trying again.'],
-  ] as const) {
-    const page = await context.newPage();
+}
+
+for (const [result, label] of [
+  ['locked', 'Refused: locked'],
+  ['checkout', 'Refused: checkout missing'],
+  ['changed', 'Refused: epoch changed'],
+  ['uncertain', 'Resume not confirmed. Check the timeline before trying again.'],
+] as const) {
+  test(`Resume of an interrupted run answered ${result} says so`, async ({page}) => {
     await page.setViewportSize({width: 1000, height: 900});
     const world = await openRelaunch(page, 'interrupted', result);
     await page.getByRole('button', {name: 'Resume', exact: true}).click();
@@ -216,10 +216,14 @@ test('Relaunch header action, results and new epoch survive Tail before acknowle
       page.getByText(result === 'uncertain' ? label : `Resume · ${label}`, {exact: true}),
     ).toBeVisible();
     await capture(page, result);
-    await page.close();
-  }
+  });
+}
+
+// Last in its file: a capture run keeps to one worker, which runs the file's tests in order.
+test('relaunch contact sheet', async ({browser}) => {
+  test.skip(!shots, 'set SCREENS_DIR to write the screenshots and the contact sheet');
   if (!shots) return;
-  const page = await context.newPage();
+  const page = await browser.newPage();
   writeFileSync(join(shots, 'relaunch-contact-sheet.html'), contactSheetHtml(entries, 3));
   await page.goto(`file://${join(shots, 'relaunch-contact-sheet.html')}`);
   await page.screenshot({path: join(shots, 'relaunch-contact-sheet.png'), fullPage: true});
