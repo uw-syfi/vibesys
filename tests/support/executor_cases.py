@@ -35,9 +35,7 @@ from vs_core.api import (
     AdoptRevision,
     AttemptId,
     AttemptRef,
-    BlockRequest,
     CancelOwnedJob,
-    CancelOwnedResource,
     CancelTurn,
     CloseAttemptScope,
     CloseSession,
@@ -47,16 +45,12 @@ from vs_core.api import (
     DispatchTurn,
     EnsureSession,
     EnsureWorkspace,
-    ExecuteRegisteredOperation,
-    FailureReason,
     InspectOwnedJob,
-    InspectRequest,
     InspectTurn,
     InvocationId,
     InvocationRef,
     ObserveOwnedJob,
     RequestId,
-    ResourceId,
     RestoreRevision,
     ResumeSessionTurn,
     RetainedCandidate,
@@ -77,13 +71,9 @@ from vs_project.api.testing import WorldGit, world_git
 from vs_runtime.api.core import (
     ContinuationBinding,
     ExecutionResult,
-    JournalSemanticEvents,
     MeasurementRequests,
-    NamespaceOperationReceipts,
-    ObservationFactory,
     ReceiptEvidenceLedger,
     ReceiptStore,
-    RegisteredOperationRequests,
     RuntimeWorkspaceRequests,
     SessionBinding,
     owner_key,
@@ -91,7 +81,6 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.api.executor_contexts import RevocableLease, context_for
 from vs_runtime.api.executor_contracts import FaultingNamespace, Scenario
-from vs_runtime.api.operation_fixtures import SCOPE, catalog_of, execute_request, scenarios
 from vs_runtime.api.slurm_evaluation_stack import (
     ADMISSION,
     ScenarioCluster,
@@ -110,7 +99,6 @@ if TYPE_CHECKING:
     from vs_core.api import Request, RequestBase, RevisionRef
     from vs_project.api import StateNamespace
     from vs_runtime.api.executor_contracts import CaseWorld
-    from vs_runtime.api.operation_fixtures import OperationScenario
 
 
 class _World:
@@ -141,30 +129,6 @@ class _World:
         return self.base / "owners"
 
 
-async def inspect_request_of(world: CaseWorld, target: RequestBase) -> ExecutionResult:
-    """What a recovering shell learns from ``InspectRequest`` for *target*, on a fresh executor.
-
-    Inspection is routed like production does (to the operations role), over the
-    same disk as the world's executor, whatever kind the target is.
-    """
-    target_id = cast("RequestId", target.request_id)
-    namespace = world.receipts_namespace()
-    store = ReceiptStore(namespace, threads=OsThreads())
-    inspector = RegisteredOperationRequests(
-        catalog_of(scenarios(world.owners_root(), namespace)),
-        NamespaceOperationReceipts(store),
-        ObservationFactory(store),
-    )
-    request = InspectRequest(
-        request_id=RequestId(root=f"inspect-of-{target_id.root}"),
-        scope=target.scope,
-        admission_id=target.admission_id,
-        target=target_id,
-        resource_id=None,
-    )
-    return await inspector.execute(request, context_for(request))
-
-
 async def inspect_dispatch_of(
     world: CaseWorld, dispatching: DispatchTurn | ResumeSessionTurn
 ) -> ExecutionResult:
@@ -178,121 +142,6 @@ async def inspect_dispatch_of(
         lease=RevocableLease(),
         crash_at=None,
     )
-
-
-# operations
-
-
-class _OperationsWorld(_World):
-    def _items(self) -> tuple[OperationScenario, ...]:
-        return scenarios(self.base / "owners", self.real_namespace())
-
-    async def prepare(self, scenario: Scenario) -> RequestBase:
-        catalog = catalog_of(self._items())
-        echo = next(item for item in self._items() if item.name == "echo")
-        if scenario.kind is ExecuteRegisteredOperation:
-            return execute_request(catalog, echo.request, "req-exec")
-        seed = execute_request(catalog, echo.request, "req-seed")
-        await self.execute(seed, lease=RevocableLease(), crash_at=None)
-        if scenario.kind is InspectRequest:
-            return InspectRequest(
-                request_id=RequestId(root="req-inspect"),
-                scope=SCOPE,
-                target=RequestId(root="req-seed"),
-                resource_id=None,
-            )
-        return CancelOwnedResource(
-            request_id=RequestId(root="req-cancel"),
-            scope=SCOPE,
-            resource_id=ResourceId(root="resource"),
-            target=RequestId(root="req-seed"),
-        )
-
-    async def execute(
-        self,
-        request: RequestBase,
-        *,
-        lease: RevocableLease,
-        crash_at: int | None,
-        digest: str | None = None,
-        repeat: bool = False,
-    ) -> ExecutionResult:
-        faulting = self.faulting(crash_at)
-        store = self.store(faulting)
-        runner = RegisteredOperationRequests(
-            catalog_of(self._items()), NamespaceOperationReceipts(store), ObservationFactory(store)
-        )
-        context = context_for(request, lease=lease).model_copy(update={"repeat": repeat})
-        if digest is not None:
-            context = context.model_copy(update={"payload_digest": digest})
-        try:
-            return await runner.execute(cast("ExecuteRegisteredOperation", request), context)
-        finally:
-            self._writes = faulting.writes
-
-    def effects(self) -> int:
-        return next(item for item in self._items() if item.name == "echo").effects()
-
-
-class _OperationsCase:
-    name = "operations"
-    scenarios = (
-        Scenario("execute", ExecuteRegisteredOperation, effectful=True),
-        Scenario("inspect", InspectRequest, effectful=False),
-        Scenario("cancel", CancelOwnedResource, effectful=True),
-    )
-
-    @asynccontextmanager
-    async def world(self) -> AsyncIterator[_OperationsWorld]:
-        with tempfile.TemporaryDirectory() as raw:
-            yield _OperationsWorld(Path(raw))
-
-
-# semantic events
-
-
-class _SemanticWorld(_World):
-    async def prepare(self, scenario: Scenario) -> RequestBase:
-        del scenario
-        return BlockRequest(
-            request_id=RequestId(root="block"),
-            scope=SCOPE,
-            target=RequestId(root="target"),
-            reason=FailureReason.LOST,
-        )
-
-    async def execute(
-        self,
-        request: RequestBase,
-        *,
-        lease: RevocableLease,
-        crash_at: int | None,
-        digest: str | None = None,
-        repeat: bool = False,
-    ) -> ExecutionResult:
-        faulting = self.faulting(crash_at)
-        events = JournalSemanticEvents(self.store(faulting), cast("StateNamespace", faulting))
-        context = context_for(request, lease=lease).model_copy(update={"repeat": repeat})
-        if digest is not None:
-            context = context.model_copy(update={"payload_digest": digest})
-        try:
-            return await events.execute(cast("BlockRequest", request), context)
-        finally:
-            self._writes = faulting.writes
-
-    def effects(self) -> int:
-        real = self.real_namespace()
-        return len(JournalSemanticEvents(ReceiptStore(real, threads=OsThreads()), real).read())
-
-
-class _SemanticEventsCase:
-    name = "semantic_events"
-    scenarios = (Scenario("block", BlockRequest, effectful=True),)
-
-    @asynccontextmanager
-    async def world(self) -> AsyncIterator[_SemanticWorld]:
-        with tempfile.TemporaryDirectory() as raw:
-            yield _SemanticWorld(Path(raw))
 
 
 # evaluation
@@ -691,8 +540,6 @@ def state_home(path: Path) -> Iterator[None]:
 
 
 CASES = (
-    _OperationsCase(),
-    _SemanticEventsCase(),
     _EvaluationCase(),
     _WorkspacesCase(),
     _SessionsCase(),

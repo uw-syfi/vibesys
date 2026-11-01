@@ -41,6 +41,7 @@ from vs_core.api import (
     Value,
     validate_startup,
 )
+from vs_core.api.recovery import Finished
 from vs_evaluation.api import (
     ContentDigest,
     EvidenceFingerprints,
@@ -55,17 +56,14 @@ from vs_runtime.api import ArtifactStore, BenchmarkFailureKind
 from vs_runtime.api.core import (
     Applied,
     ExecutionContext,
-    ExecutionResult,
     InterpretEvidenceOwner,
     MeasurementRequests,
-    NamespaceOperationReceipts,
     NotApplied,
     ObservationFactory,
     OperationPorts,
     OperationRole,
     ReceiptEvidenceLedger,
     ReceiptStore,
-    RegisteredOperationRequests,
     RetainRevisionOwner,
     build_operation_catalog,
     commit_of,
@@ -74,6 +72,7 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.api.infrastructure import ProtocolBenchmarkContract
 from vs_runtime.api.operation_fixtures import execute_request
+from vs_runtime.api.operation_step_runner import OperationStepRunner
 from vs_runtime.api.slurm_evaluation_stack import (
     ADMISSION,
     SCOPE,
@@ -81,13 +80,14 @@ from vs_runtime.api.slurm_evaluation_stack import (
     build_stack,
     submission,
 )
+from vs_runtime.api.step_runner import CancelSignal
 from vs_runtime.api.testing import (
     FakeEvidenceLedger,
     FakeWorkspace,
     FakeWorkspaces,
     MemoryValidationPasses,
 )
-from vs_sim.api.testing import SimThreads, examples
+from vs_sim.api.testing import SimThreads, VirtualClock, examples
 
 pytestmark = pytest.mark.asyncio
 
@@ -702,14 +702,13 @@ async def test_a_strategy_requiring_interpretation_starts_and_runs_with_producti
         assert {d.kind for d in catalog.offered_operations} == {"test.interpret", "test.retain"}
         validate_startup(declaration, Capabilities(operations=catalog.offered_operations))
         store = ReceiptStore(namespace, threads=SimThreads())
-        operations = RegisteredOperationRequests(
-            catalog, NamespaceOperationReceipts(store), ObservationFactory(store)
-        )
+        runner = OperationStepRunner(catalog, ObservationFactory(store), clock=VirtualClock())
         request = execute_request(catalog, _Interpret(evidence=(_ref(recorded),)), "interpret")
-        result = await operations.execute(request, _eval_context(request))
-        assert isinstance(result, ExecutionResult)
-        assert result.observation.observation.status is ObservationStatus.SUCCEEDED
-        outcome = result.observation.outcome
+        assert request.request_id is not None
+        result = await runner.run(request, request.request_id, 1, 600.0, CancelSignal())
+        assert isinstance(result, Finished)
+        assert result.observation.status is ObservationStatus.SUCCEEDED
+        outcome = result.report.outcome
         assert outcome is not None
         assert isinstance(outcome, _Readings)
         assert outcome.readings[0].stage == "benchmark"
