@@ -64,7 +64,7 @@ from vs_core.api import (
 )
 from vs_core.api.search import TaskStage, TaskTerms
 from vs_core.testing.builders import initial_state, sample_retries
-from vs_core.testing.drive import Answer, Harness, Running, Succeeded, Unknown
+from vs_core.testing.drive import Answer, Harness, Succeeded, Unknown
 from vs_runtime.api.core import handle_for
 
 if TYPE_CHECKING:
@@ -262,8 +262,7 @@ class Executors:
             return self.finished_agent_evaluation(request)
         if self.submit is not None:
             return self.submit(request)
-        self.jobs += 1
-        return Running(resource_id=ResourceId(root=f"job:{self.jobs}"))
+        return self.finished_agent_evaluation(request)
 
     # -- agents -----------------------------------------------------------
 
