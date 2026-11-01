@@ -11,7 +11,7 @@ import type {WelcomeBridge} from '@vibesys/ipc';
 import type {ScheduleTimeout} from '@vibesys/transport';
 import {act} from 'react';
 import {createRoot} from 'react-dom/client';
-import {createShellStores, Shell} from '../shell.js';
+import {createShellStores, Shell, wakeRail} from '../shell.js';
 import {FakeWindowAddress} from './fake-address.js';
 import {
   type FakeBridgeSeed,
@@ -100,6 +100,8 @@ export async function openShell(
       draft: browserDraftMemory(() => host.sessionStorage),
     },
   );
+  // As the app does, once the stores exist: the rail's machine checks start when Runs has read.
+  wakeRail(stores);
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
