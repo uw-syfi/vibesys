@@ -25,7 +25,6 @@ import {
   FAILURE_PAGES,
   MAX_ATTEMPTS,
   RECORD_WINDOW,
-  RETRY_CAP_MS,
 } from '@vibesys/run-skeleton';
 import {FakeSkeletonCache} from '@vibesys/run-skeleton/cache';
 import {gatewayReader} from '@vibesys/run-skeleton/reader';
