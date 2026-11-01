@@ -6,12 +6,17 @@ answers outside the script's protocol costs nothing, and the bound on attempts i
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vs_sandbox.api.testing import ScriptedDockerCli, docker_result, docker_timed_out
+from vs_sandbox.api.testing import (
+    DockerCliOutcome,
+    ScriptedDockerCli,
+    docker_result,
+    docker_timed_out,
+)
 
 # test-isolation: the exec stop adapter and its attempt bound are internal to the Docker sandbox; this pins how a stop answers.
 from vs_sandbox.docker_sandbox import _SIGNAL_ATTEMPTS, _ExecStop
@@ -19,16 +24,13 @@ from vs_sandbox.docker_sandbox import _SIGNAL_ATTEMPTS, _ExecStop
 # test-isolation: the stop signals and the remote-processes answer are internal to the command runners; the stop adapter above speaks them.
 from vs_sandbox.process_execution import KILL, TERMINATE, RemoteProcesses, StopSignal
 
-if TYPE_CHECKING:
-    import subprocess
-
 type Failure = Literal["nonzero", "oserror", "timeout", "garbled"]
 _FAILURES: list[Failure] = ["nonzero", "oserror", "timeout", "garbled"]
 _CONTAINER = "c0ffee"
 _EXEC_ID = "exec-1"
 
 
-def _failing(kind: Failure) -> subprocess.CompletedProcess[str] | BaseException:
+def _failing(kind: Failure) -> DockerCliOutcome:
     if kind == "oserror":
         return OSError("cannot reach the daemon")
     if kind == "timeout":
@@ -38,7 +40,7 @@ def _failing(kind: Failure) -> subprocess.CompletedProcess[str] | BaseException:
     return docker_result(returncode=1, stderr="signal request failed\n")
 
 
-def _answer(survivors: int | None) -> subprocess.CompletedProcess[str]:
+def _answer(survivors: int | None) -> DockerCliOutcome:
     return docker_result(stdout=f"{'unknown' if survivors is None else survivors} -\n")
 
 
