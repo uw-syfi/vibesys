@@ -45,8 +45,12 @@ export async function openShell(
     readonly schedule: ScheduleTimeout;
     readonly seed?: FakeBridgeSeed;
     readonly draft?: Draft;
+    /** The window's clock, in milliseconds (default 0, the start of time: a page that cuts days wants a real one). */
+    readonly now?: number;
     /** Keeps the window's storage as it is, as a reload does, instead of starting it empty. */
     readonly keepStorage?: boolean;
+    /** Fakes of more of the bridge, installed after the usual ones (what the Usage page asks of a host). */
+    readonly installs?: readonly ((seed: FakeBridgeSeed) => void)[];
     /** Changes the bridge before the shell reads from it (a call a bridge built earlier lacks). */
     readonly prepare?: (bridge: Record<string, unknown>) => void;
   },
@@ -61,6 +65,7 @@ export async function openShell(
     installFakeNewRun,
     installFakeProjectRuns,
     installFakeExampleDestination,
+    ...(options.installs ?? []),
   ]) {
     install(seed);
   }
@@ -81,7 +86,7 @@ export async function openShell(
     {
       messages: {addEventListener: ignore, removeEventListener: ignore},
       address: new FakeWindowAddress(),
-      now: () => 0,
+      now: () => options.now ?? 0,
       session: () => {
         throw new Error('no run is opened in this window');
       },
