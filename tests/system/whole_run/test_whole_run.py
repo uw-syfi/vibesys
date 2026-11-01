@@ -735,7 +735,7 @@ def _assert_invariants(outcome: _Outcome, sim: Sim, faults: _Faults) -> None:
     terminal = [event["type"] for event in outcome.client.events if event["type"] in _TERMINAL]
     assert len(terminal) == 1, (context, terminal)
     assert (terminal[0] == "run_finished") == succeeded, (context, terminal)
-    # Every container the run created is gone, and the run's host lock is free.
+    # Every container the run created is gone, and the run's host lease is free.
     assert outcome.daemon.containers == {}, context
     project = Project.open(outcome.root)
     with Project.run_log_path_for(project.root, _RUN_ID).open("rb") as stream:
