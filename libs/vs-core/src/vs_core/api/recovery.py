@@ -53,11 +53,12 @@ from vs_core._step_log import (
     seed_message,
     started_message,
 )
-from vs_core.types.common import ClosePolicy
+from vs_core.types.common import ClosePolicy, EndPolicy
 from vs_core.types.records import (
     StepEffect,
     request_close_policy,
     request_effect,
+    request_end_policy,
     request_interrupt_policy,
 )
 from vs_core.types.steps import (
@@ -84,6 +85,7 @@ __all__ = [
     "ClosePolicy",
     "EncodedSavedRun",
     "End",
+    "EndPolicy",
     "Failed",
     "Finished",
     "Folded",
@@ -127,6 +129,7 @@ __all__ = [
     "open_step",
     "request_close_policy",
     "request_effect",
+    "request_end_policy",
     "request_interrupt_policy",
     "restore",
     "seed_message",

@@ -26,6 +26,7 @@ from .common import (
     ClosePolicy,
     ContractValidationError,
     Count,
+    EndPolicy,
     ExecuteRegisteredOperation,
     InterruptPolicy,
     InvocationId,
@@ -1110,6 +1111,58 @@ def request_close_policy(
             | BlockRequest()
         ):
             return ClosePolicy.WAIT
+        case _:
+            assert_never(request)
+
+
+def request_end_policy(request: Request, registry: tuple[OperationDescriptor, ...]) -> EndPolicy:
+    """What a run that ends by a cancel does with this open step, as its kind declares.
+
+    A cancel withdraws the work: the turns, the jobs, the setup and the reads. It does not
+    withdraw what frees the resources the run holds, because the run has not ended while a
+    session, a workspace, a job or a scope is still held: the closes, the discards and the
+    cancels of a turn or a job run on to their own result. A registered operation releases when
+    its descriptor says it discards a workspace (``RevisionAuthority.DISCARD``). The match is
+    exhaustive, so a new kind of step has to take a side here.
+    """
+    match request:
+        case ExecuteRegisteredOperation():
+            kind = request.operation.schema_ref.kind
+            descriptor = next((row for row in registry if row.kind == kind), None)
+            discards = (
+                descriptor is not None
+                and descriptor.revision_authority is RevisionAuthority.DISCARD
+            )
+            return EndPolicy.RELEASE if discards else EndPolicy.CANCEL
+        case (
+            CloseSession()
+            | CancelTurn()
+            | DiscardWorkspace()
+            | CloseAttemptScope()
+            | CancelOwnedJob()
+        ):
+            return EndPolicy.RELEASE
+        case (
+            DispatchTurn()
+            | ResumeSessionTurn()
+            | SubmitMeasurement()
+            | EnsureWorkspace()
+            | RestoreRevision()
+            | SnapshotAndRetain()
+            | SnapshotAndRetainRun()
+            | RetainRevision()
+            | InspectTurn()
+            | ObserveOwnedJob()
+            | InspectOwnedJob()
+            | CollectEvidence()
+            | InspectRequest()
+            | VerifyAdoption()
+            | EnsureSession()
+            | AdoptRevision()
+            | CancelOwnedResource()
+            | BlockRequest()
+        ):
+            return EndPolicy.CANCEL
         case _:
             assert_never(request)
 

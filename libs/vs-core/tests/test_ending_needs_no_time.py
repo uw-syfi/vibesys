@@ -1,15 +1,18 @@
 """A run the operator stops by cancel ends at the instant its last step has a result.
 
 Rule 4 of the recovery design: ending a run cannot fail and waits for nothing but the steps the
-loop has cancelled. The loop cancels (`CancelReason.RUN_ENDING`) every step a cancelled run holds
-and starts none, so core must not hold the run `closing` on an answer that only a step the loop
-no longer runs could bring: a poll of a job, an inspection, a release no one will prove. Core
+loop has cancelled and the cleanup that frees what the run holds. The loop cancels
+(`CancelReason.RUN_ENDING`) the work a cancelled run holds and starts none, and runs on the steps
+that release (`EndPolicy.RELEASE`: a session's close, a workspace's discard, a scope's close),
+which end by themselves. So core must not hold the run `closing` on an answer that only a step the
+loop no longer runs could bring: a poll of a job, an inspection, a release no one will prove. Core
 would otherwise ask again after a backoff, and a run that closes only when a timer fires ends
 after the host's stop grace, as `stopped` and not as what it was stopped for.
 
 The property is over the loop model of `recovery_loop.py`: whatever the run went through before
-the stop (pauses, a crash, clock jumps, steps that finished or raised), the loop that cancels what
-runs and settles what is open reaches the run's end at the clock the stop was given at. The worlds
+the stop (pauses, a crash, clock jumps, steps that finished or raised), the loop that cancels the
+work that runs, settles the work that is open and lets the cleanup finish reaches the run's end at
+the clock the stop was given at. The worlds
 hold a measurement job the way a job step reports it (one terminal, released observation of the
 submission, with no poll after it) and the steps of every kind the rule treats differently.
 """
@@ -20,7 +23,7 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
-from vs_core.api.recovery import RunRest, Wait, at_rest, decide
+from vs_core.api.recovery import EndPolicy, RunRest, Wait, at_rest, decide, request_end_policy
 from vs_sim.api.testing import examples
 
 from .recovery_loop import MOVES, Loop, Move, opens_no_unserved_step, play
@@ -58,6 +61,13 @@ def world_loop(world: World) -> Loop:
     return loop
 
 
+def releases(loop: Loop, tag: core.RequestId) -> bool:
+    """Whether the step ``tag`` frees what the run holds, so a cancelled run lets it run on."""
+    record = loop.state.records.record(tag)
+    assert record is not None
+    return request_end_policy(record.request, loop.state.registry) is EndPolicy.RELEASE
+
+
 def stop_and_end(loop: Loop, late: list[int], *, by_search: bool) -> None:
     """Stop the run by cancel, and let the loop that cancels and settles run, with no time passing.
 
@@ -84,6 +94,14 @@ def stop_and_end(loop: Loop, late: list[int], *, by_search: bool) -> None:
     clock = loop.clock
     for _ in range(_SPENT):
         actions = decide(loop.state, loop.clock)
+        if all(isinstance(action, Wait) for action in actions) and loop.running():
+            # Only cleanup still runs (the rule cancelled the rest), and it takes no time: the
+            # runner of a release finishes it.
+            assert all(releases(loop, tag) for tag in loop.running()), (
+                "work runs on in a cancelled run"
+            )
+            loop.finish_running(0)
+            continue
         waits = [action for action in actions if isinstance(action, Wait)]
         if waits and waits[0].until is not None:
             raise WaitedForTimeError(loop.state.run.status, waits[0].until, clock)
