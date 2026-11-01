@@ -57,9 +57,15 @@ class AttemptReturns:
 
 @dataclass(frozen=True)
 class AttemptRaises:
-    """The attempt raises ``error``, leaving its work running: a crash with no result."""
+    """The attempt raises ``error``, leaving its work running: a crash with no result.
+
+    The work goes on without the call. By default it never ends; with ``work_ends_after_s`` it
+    ends by itself that many seconds after the raise with ``finished_result``, as a cluster job
+    does when only the call that watched it broke: ``clear`` then adopts a result.
+    """
 
     error: Exception
+    work_ends_after_s: float | None = None
 
 
 @dataclass(frozen=True)
@@ -302,8 +308,11 @@ class FakeStepRunner:
         match behavior:
             case AttemptReturns(result, after_s):
                 self._work[tag] = _Work(now + after_s, result or finished_result(tag))
-            case AttemptRaises(error):
-                self._work[tag] = _Work(None, None)
+            case AttemptRaises(error, work_ends_after_s):
+                if work_ends_after_s is None:
+                    self._work[tag] = _Work(None, None)
+                else:
+                    self._work[tag] = _Work(now + work_ends_after_s, finished_result(tag))
                 raise error
             case AttemptHangs():
                 self._work[tag] = _Work(None, None)
