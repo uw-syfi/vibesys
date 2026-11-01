@@ -342,11 +342,16 @@ class SimulatedRun:
         self._snapshots.update(snapshots.by_point)
 
 
-def simulate(world: World, hosting: Hosting | None = None) -> SimulatedRun:
+def simulate(
+    world: World, hosting: Hosting | None = None, *, patience: float | None = None
+) -> SimulatedRun:
     """Run ``world``'s strategy to the end of its run on a host, and keep the means to crash it.
 
     The host is the step loop over an in-memory run.log (`StepLoopHosting`) unless ``hosting``
-    says another. The run copies nothing while it goes (it counts its log records), so a test
+    says another. A host that has neither ended the run nor parked it after ``patience`` virtual
+    seconds is given up on, as the operator gives up on a resumed host (`SimulatedRun.finished` is then
+    false); without it the host is waited on for as long as it runs, which a run that waits on
+    something that never comes does without end. The run copies nothing while it goes (it counts its log records), so a test
     that never crashes it pays one copy of the initial world; `rerun_with_crash` runs the world
     once more to take the copies a crash sweep needs. A world that cannot be deep-copied raises
     `WorldNotCopyableError`.
@@ -355,4 +360,5 @@ def simulate(world: World, hosting: Hosting | None = None) -> SimulatedRun:
     outside = OutsideWorld(hosting.new_store(), Effects(), world)
     pristine = outside.copy()  # also fails now, naming the world, if it cannot be copied
     plan = HostPlan(hosting, HostOptions())
-    return SimulatedRun(plan.run(outside, FIRST_HOST_STARTS_AT), outside, plan, pristine)
+    hosted = plan.run(outside, FIRST_HOST_STARTS_AT, patience=patience)
+    return SimulatedRun(hosted, outside, plan, pristine)

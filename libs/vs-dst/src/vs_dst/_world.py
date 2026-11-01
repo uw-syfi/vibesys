@@ -67,6 +67,22 @@ class HoldingWorld(Protocol):
         ...
 
 
+@runtime_checkable
+class ClearFailingWorld(Protocol):
+    """A world whose far side cannot be reached to clear a request: a Docker daemon that is down.
+
+    The host honours it: the runner's ``clear`` of a request the world says it cannot clear
+    raises ``ClearUnavailableError``, as the real runners' do when their backend is unreachable,
+    so the loop retries it with backoff and records no result over it. It is asked at every
+    ``clear``, which a step takes only when work of it may exist (after a kill, or an attempt
+    that ended without a result).
+    """
+
+    def clear_fails(self, request: Request) -> bool:
+        """Whether ``clear`` of ``request`` cannot reach its backend now."""
+        ...
+
+
 class Admission(Protocol):
     """The run as a service the host runs beside the loop sees it: commit an input, then answer.
 

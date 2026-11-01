@@ -40,7 +40,7 @@ from vs_dst._effects import RecoverableExecutors
 from vs_dst._host import FIRST_HOST_STARTS_AT, Hosted, WrongStoreError
 from vs_dst._interruptions import Moment
 from vs_dst._snapshots import RecordingRecords
-from vs_dst._world import HoldingWorld, ServingWorld
+from vs_dst._world import ClearFailingWorld, HoldingWorld, ServingWorld
 from vs_proto.api import EpochStarted, Timestamp
 from vs_runlog.api import ConfirmedLog
 from vs_runtime.api.core import ExecutionContext
@@ -48,6 +48,7 @@ from vs_runtime.api.step_router import LIVE_REQUEST_KINDS, NoRunnerError
 from vs_runtime.api.step_runner import (
     Adopted,
     Cleared,
+    ClearUnavailableError,
     CoreInputs,
     DispatchCapExceededError,
     RunLogStepLog,
@@ -242,7 +243,7 @@ class _Host:
             self._outside.effects,
             clock,
             epoch,
-            holds=_holds_of(world),
+            world,
         )
         loop = asyncio.ensure_future(
             run_step_loop(_Counting(inputs), runner, clock, TIMING, StallBoard())
@@ -415,13 +416,13 @@ class _WorldRunner:
         effects: Effects,
         clock: VirtualClock,
         epoch: int,
-        *,
-        holds: Callable[[Request], bool],
+        world: World,
     ) -> None:
         self._executors = executors
         self._effects = effects
         self._clock = clock
-        self._holds = holds
+        self._holds = _holds_of(world)
+        self._clear_fails = _clear_failures_of(world)
         self._fence = HostFence(host_id=HostId(root="dst"), epoch=epoch)
 
     async def run(
@@ -466,7 +467,13 @@ class _WorldRunner:
         return Cancelled(reason=await cancel.wait())
 
     async def clear(self, step: Request, tag: RequestId) -> Adopted | Cleared:
-        """Adopt the result the step's effect sealed, or find nothing."""
+        """Adopt the result the step's effect sealed, or find nothing.
+
+        A world whose far side cannot be reached (`ClearFailingWorld`) proves nothing about the
+        tag, so it raises what a real runner raises then.
+        """
+        if self._clear_fails(step):
+            raise ClearUnavailableError(tag, "the world's far side")
         sealed = self._sealed(step, tag)
         return Cleared() if sealed is None else Adopted(sealed)
 
@@ -525,6 +532,11 @@ def _final_result(step: Request, result: ExecutionResult) -> Finished | None:
             observation=ended, observed=observed.model_copy(update={"observation": ended})
         )
     return None
+
+
+def _clear_failures_of(world: World) -> Callable[[Request], bool]:
+    """When the world's far side cannot be reached to clear: never, unless it says so (`ClearFailingWorld`)."""
+    return world.clear_fails if isinstance(world, ClearFailingWorld) else lambda _request: False
 
 
 def _holds_of(world: World) -> Callable[[Request], bool]:
