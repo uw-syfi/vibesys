@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from hypothesis import given, note, settings
+from hypothesis import example, given, note, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic._host import (
     OUTLINER_LABEL,
@@ -104,6 +104,36 @@ def _greedy_order(plan: list[dict[str, Any]]) -> list[str]:
 
 @MODES
 @settings(max_examples=examples(pr=12, nightly=100), deadline=None, derandomize=True, database=None)
+@example(
+    plan=[
+        {
+            "id": "s0",
+            "title": "t",
+            "documents": [],
+            "done_when": "d",
+            "evaluate": "trusted",
+            "depends_on": [],
+        },
+        {
+            "id": "s1",
+            "title": "t",
+            "documents": [],
+            "done_when": "d",
+            "evaluate": "none",
+            "depends_on": ["s0"],
+        },
+        {
+            "id": "s2",
+            "title": "t",
+            "documents": [],
+            "done_when": "d",
+            "evaluate": "none",
+            "depends_on": [],
+        },
+    ],
+    width=1,
+    picks=[],
+)
 @given(plan=plan_steps(), width=st.integers(1, 3), picks=st.lists(st.integers(0, 7), max_size=80))
 def test_steps_start_once_their_dependencies_are_done_from_the_latest_one_without_a_planner(
     *, restarting: bool, plan: list[dict[str, Any]], width: int, picks: list[int]

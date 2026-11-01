@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 from tests.server.host_helper_support import fake_host
 from tests.support.task_project import task_path, write_task
@@ -60,6 +60,7 @@ def _ask(project: Path, task: str) -> ProjectTaskGoalReply | HelperError:
     return reply
 
 
+@example(goal="\r", axes=[])
 @given(goal=_GOALS, axes=_AXES)
 @_KEEP
 def test_the_reply_is_the_goal_cut_to_its_bound_and_the_declared_axes(
@@ -73,7 +74,8 @@ def test_the_reply_is_the_goal_cut_to_its_bound_and_the_declared_axes(
     reply = _ask(project, "mine")
 
     assert isinstance(reply, ProjectTaskGoalReply)
-    expected, truncated = bounded_goal(goal)
+    # The file is read as text, so a lone carriage return reads as a newline.
+    expected, truncated = bounded_goal((directory / "OBJECTIVE.md").read_text(encoding="utf-8"))
     assert reply.goal.task == "mine"
     assert (reply.goal.goal, reply.goal.goal_truncated) == (expected, truncated)
     assert [(o.metric, o.direction) for o in reply.goal.objectives] == axes
