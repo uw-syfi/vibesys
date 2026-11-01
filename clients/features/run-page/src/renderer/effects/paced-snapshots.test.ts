@@ -46,6 +46,7 @@ function loader() {
           committedSeq: BigInt(records.length),
           complete,
           windowFrom: undefined,
+          backfill: undefined,
           failuresBefore: undefined,
         },
         progress: complete

@@ -1,7 +1,14 @@
 import {unprovided} from '@vibesys/machine';
 import type {SkeletonResponse, Record as StoreRecord, TailResponse} from '@vibesys/proto';
+import {isCoreBody} from '@vibesys/run-state/records';
 import {assign, setup} from 'xstate';
-import {ingestSkeleton, ingestTail, isFinalLoad, type SkeletonLoad} from './loading.js';
+import {
+  type Backfill,
+  ingestSkeleton,
+  ingestTail,
+  isFinalLoad,
+  type SkeletonLoad,
+} from './loading.js';
 import {absorbFailures, absorbRecordFacts} from './model.js';
 import {type LoadRefusal, refusalOf} from './status.js';
 
@@ -16,6 +23,11 @@ export interface TailInput {
   readonly cursor: bigint;
   readonly receive: (event: LoaderEvent) => void;
 }
+export interface BackfillInput {
+  readonly runId: string;
+  readonly backfill: Backfill | undefined;
+  readonly receive: (event: LoaderEvent) => void;
+}
 export interface FailuresInput {
   readonly runId: string;
   /** The records from here on were read; the error notices before it are still to be found. */
@@ -28,6 +40,8 @@ export interface FailuresInput {
 export type LoaderEvent =
   | {type: 'history'; records: readonly StoreRecord[]; through: bigint}
   | {type: 'failures'; records: readonly StoreRecord[]}
+  /** A page of rows from before the window was read: the next page ends at `backfill.before`. */
+  | {type: 'backfilled'; backfill: Backfill}
   | {type: 'tail'; response: TailResponse}
   /** A Tail message that only fed the record log reached `through`: a resume starts after it. */
   | {type: 'window'; through: bigint}
@@ -65,6 +79,7 @@ export const skeletonLoaderMachine = setup({
     skeleton: unprovided<SkeletonResponse, string>('skeleton'),
     tail: unprovided<void, TailInput>('tail'),
     failures: unprovided<void, FailuresInput>('failures'),
+    backfill: unprovided<void, BackfillInput>('backfill'),
   },
   delays: {
     deadline: ({context}) => context.timeoutMs,
@@ -179,6 +194,7 @@ export const skeletonLoaderMachine = setup({
                       event.records,
                       event.through,
                     ),
+                    backfill: countedRows(context.load, event.records),
                   },
                 },
           ),
@@ -193,6 +209,11 @@ export const skeletonLoaderMachine = setup({
                     skeleton: absorbFailures(context.load.skeleton, event.records),
                   },
                 },
+          ),
+        },
+        backfilled: {
+          actions: assign(({context, event}) =>
+            context.load === undefined ? {} : {load: {...context.load, backfill: event.backfill}},
           ),
         },
         window: {
@@ -229,29 +250,47 @@ export const skeletonLoaderMachine = setup({
         /** Caught up. With nothing to show yet, the wait for the first record is bounded. */
         live: {
           // Once caught up, page in what an old keyframe never said of failures; it is done once.
-          invoke: {
-            id: 'failures',
-            src: 'failures',
-            input: ({context, self}) => {
-              const skeleton = context.load?.skeleton;
-              const epoch = skeleton?.epochs.at(-1)?.epoch?.epoch ?? 0;
-              return {
+          invoke: [
+            {
+              id: 'failures',
+              src: 'failures',
+              input: ({context, self}) => {
+                const skeleton = context.load?.skeleton;
+                const epoch = skeleton?.epochs.at(-1)?.epoch?.epoch ?? 0;
+                return {
+                  runId: context.runId,
+                  before: context.load?.failuresBefore,
+                  epoch,
+                  epochStart: skeleton?.epochs.find(item => item.epoch?.epoch === epoch)?.seq ?? 0n,
+                  receive: event => self.send(event),
+                };
+              },
+              onDone: {
+                actions: assign(({context}) =>
+                  context.load === undefined
+                    ? {}
+                    : {load: {...context.load, failuresBefore: undefined}},
+                ),
+              },
+              onError: {actions: 'ignore'},
+            },
+            {
+              // Core's records take room in the window; page in rows from before it, once.
+              id: 'backfill',
+              src: 'backfill',
+              input: ({context, self}) => ({
                 runId: context.runId,
-                before: context.load?.failuresBefore,
-                epoch,
-                epochStart: skeleton?.epochs.find(item => item.epoch?.epoch === epoch)?.seq ?? 0n,
+                backfill: context.load?.backfill,
                 receive: event => self.send(event),
-              };
+              }),
+              onDone: {
+                actions: assign(({context}) =>
+                  context.load === undefined ? {} : {load: {...context.load, backfill: undefined}},
+                ),
+              },
+              onError: {actions: 'ignore'},
             },
-            onDone: {
-              actions: assign(({context}) =>
-                context.load === undefined
-                  ? {}
-                  : {load: {...context.load, failuresBefore: undefined}},
-              ),
-            },
-            onError: {actions: 'ignore'},
-          },
+          ],
           initial: 'routing',
           states: {
             routing: {always: [{guard: 'unpainted', target: 'waiting'}, {target: 'populated'}]},
@@ -283,6 +322,16 @@ export const skeletonLoaderMachine = setup({
     failed: {type: 'final'},
   },
 });
+
+/** The first Tail's window counts the rows among its records; core's records are not rows. */
+function countedRows(load: SkeletonLoad, records: readonly StoreRecord[]): Backfill | undefined {
+  const {backfill} = load;
+  if (backfill === undefined) return undefined;
+  const rows = records.filter(
+    record => record.seq < load.nextSeq && !isCoreBody(record.body),
+  ).length;
+  return {...backfill, rows: backfill.rows + rows};
+}
 
 function safely(fold: () => SkeletonLoad): Partial<Context> {
   try {

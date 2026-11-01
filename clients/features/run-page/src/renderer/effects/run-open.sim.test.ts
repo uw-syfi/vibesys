@@ -19,8 +19,8 @@ import {
   SkeletonResponseSchema,
   TailRequestSchema,
 } from '@vibesys/proto';
-import {storeRunFixture} from '@vibesys/run-fixtures';
-import {FAILURE_PAGES, MAX_ATTEMPTS, RECORD_WINDOW} from '@vibesys/run-skeleton';
+import {storeRunFixture, withCoreRecords} from '@vibesys/run-fixtures';
+import {BACKFILL_PAGES, FAILURE_PAGES, MAX_ATTEMPTS, RECORD_WINDOW} from '@vibesys/run-skeleton';
 import {FakeSkeletonCache} from '@vibesys/run-skeleton/cache';
 import {gatewayReader} from '@vibesys/run-skeleton/reader';
 import {
@@ -31,6 +31,7 @@ import {
   SimGateway,
   type SimRun,
 } from '@vibesys/run-skeleton/testing';
+import {isCoreBody} from '@vibesys/run-state/records';
 import {Seeded} from '@vibesys/store/testing';
 import {FakeClock} from '@vibesys/transport/testing';
 import {
@@ -172,6 +173,43 @@ test('the history converges on the full replay with one Tail that never re-reads
     const wanted = Math.min(Number(RECORD_WINDOW), run.records.length);
     expect(rows.slice(-wanted).map(row => row.seq)).toEqual(
       run.records.slice(-wanted).map(record => String(record.seq)),
+    );
+    actor.stop();
+  }
+});
+
+test('the history window holds a window of rows however many core records sit among them', async () => {
+  for (let seed = 1; seed <= 6; seed += 1) {
+    const random = new Seeded(seed);
+    const rows = storeRunFixture('short', 100 + random.int(300), seed).records;
+    // Core records written before random rows, from none to several times the window.
+    const core = Array.from({length: rows.length}, () => 0);
+    for (let count = random.int(4 * Number(RECORD_WINDOW)); count > 0; count -= 1) {
+      const at = random.int(rows.length);
+      core[at] = (core[at] ?? 0) + 1;
+    }
+    const records = withCoreRecords(rows, core);
+    const keyframes = random.pick([[], [records.length], [Math.ceil(records.length / 2)]]);
+    const link = {rttMs: 20 + random.int(180), bytesPerMs: 700 * (1 + random.int(4))};
+    const {clock, gateway, actor} = open(
+      {records, keyframes, replyBytes: GATEWAY_REPLY_BYTES},
+      link,
+    );
+    const wanted = Math.min(Number(RECORD_WINDOW), rows.length);
+    const ordinary = records.filter(record => !isCoreBody(record.body));
+    const settled = await until(
+      clock,
+      () => (actor.getSnapshot().context.ui.recordLog?.length ?? 0) >= wanted,
+    );
+    const label = `seed ${seed}: ${rows.length} rows, ${records.length - rows.length} core`;
+    expect(settled, label).toBeDefined();
+    expect(
+      actor.getSnapshot().context.ui.recordLog?.map(row => row.seq),
+      label,
+    ).toEqual(ordinary.slice(-wanted).map(record => String(record.seq)));
+    // Paging back is bounded: the window's Tail, the failures' pages, and the backfill's pages.
+    expect(gateway.callsTo('Tail').length, label).toBeLessThanOrEqual(
+      1 + FAILURE_PAGES + BACKFILL_PAGES,
     );
     actor.stop();
   }
