@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from vs_core.api import EnsureWorkspace, ResourceId
@@ -100,6 +100,31 @@ def test_a_pause_parks_the_host_that_receives_it_and_resuming_reruns_nothing() -
         interrupted = normal.interrupt(pause)
         assert interrupted.history[0] == "parked", pause
         assert interrupted.reruns == 0, pause
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("action", [Action.PAUSE, Action.STOP])
+@pytest.mark.parametrize("moment", Moment)
+@settings(deadline=None, max_examples=examples(pr=3, nightly=10), derandomize=True, database=None)
+@given(items=st.integers(min_value=1, max_value=3), where=st.integers(min_value=0, max_value=1))
+@example(items=1, where=0)
+def test_a_pause_or_a_stop_due_before_the_host_opens_its_log_is_held_and_taken_after(
+    action: Action, moment: Moment, items: int, where: int
+) -> None:
+    """Regression: a stop (and a pause) due before the first host had opened its run.log was
+    submitted to a host with no inputs and failed that host, so the interruption never reached it.
+    One delivery holds it until the host can take it, for every action and moment."""
+    normal = simulate(TinyWorld(items))
+    points = normal.interruptions(action, moment)
+    point = points[0] if where == 0 else points[-1]
+
+    interrupted = normal.interrupt(point)
+
+    # A pause that lands as the run ends finds it ended; one that lands earlier parks it.
+    taken = ("parked", "terminal") if action is Action.PAUSE else ("terminal",)
+    assert interrupted.cores[0] is not None, point
+    assert interrupted.history[0] in taken, (point, interrupted.history)
+    assert interrupted.never_stuck(), point
 
 
 class _AfterRestart(TinyWorld):
