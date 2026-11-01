@@ -23,7 +23,7 @@ From a repository root:
 ```
 
 `gate` runs the fast subset that the pre-push hook enforces: it plans like `test`, but runs each
-selected group's `gate_commands` and `gate_package_commands` (a group with neither is not part of
+selected group's `gate_commands` (a group with none is not part of
 the gate), one concurrent lane per group, and refuses with the failing lane's output. The
 `VIBESYS_SKIP_GATE` variable is the logged emergency skip. Any repoctl command outside CI points
 `core.hooksPath` at the tracked `.githooks` directory when nothing else is set (see
