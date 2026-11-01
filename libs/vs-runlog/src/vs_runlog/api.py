@@ -47,6 +47,7 @@ from vs_runlog._observe import (
     read_current_epoch,
     read_run_head,
 )
+from vs_runlog._prefix import CommittedPrefix, read_committed_prefix
 from vs_runlog._upgrade import upgrade_skeleton
 
 __all__ = [
@@ -54,6 +55,7 @@ __all__ = [
     "CacheMiss",
     "CacheUnderTest",
     "CachedFold",
+    "CommittedPrefix",
     "ConfirmedLog",
     "CoreMessage",
     "CurrentEpoch",
@@ -90,6 +92,7 @@ __all__ = [
     "observe_writer_identity",
     "open_run_log",
     "project_head",
+    "read_committed_prefix",
     "read_committed_records",
     "read_current_epoch",
     "read_run_head",

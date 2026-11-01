@@ -1247,6 +1247,10 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
         EdgeKind.LOG,
         "the observation reader of run.head and the committed run.log prefix; the upgrade stays pure",
     ),
+    "libs/vs-runlog/src/vs_runlog/_prefix.py": (
+        EdgeKind.LOG,
+        "the observation reader of a run's keyframes and committed prefix; fold and upgrade stay pure",
+    ),
     "src/vibesys/run/runlog_conversion.py": (
         EdgeKind.LOG,
         "the one-shot run.log sink that reads the authoritative JSONL journal and stages conversion",
@@ -1549,10 +1553,6 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
         "OS adapter and project pyproject loader for the host helper",
     ),
     "src/server/registry.py": (EdgeKind.STORE, "the server instance registry"),
-    "src/server/run_digest_store.py": (
-        EdgeKind.STORE,
-        "FileProjects reads committed run heads, keyframes and their bounded log suffix",
-    ),
     "src/server/run_summary_cache.py": (
         EdgeKind.STORE,
         "the run summary's cache beside the event journal",

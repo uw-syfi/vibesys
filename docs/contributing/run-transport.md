@@ -173,6 +173,12 @@ heads with a populated epoch cache avoid this scan. Python observation readers u
 `read_run_head`, which decodes missing caches through the same committed-prefix fold
 as `read_current_epoch`; clients consume the canonical response field directly. Lock probes still decide liveness independently.
 
+A list row's digest needs the head and the skeleton of every run a launch lists, and every read is
+a new process, so a digest reads the prefix through `read_committed_prefix`: it folds once from
+the nearest keyframe and derives the head `read_run_head` would recover from that fold. Its cost is
+the records after the keyframe, never the log; damage before the keyframe is left to the readers
+that scan the whole prefix.
+
 ## Intents and epochs
 
 **Operator controls** are Pause, Pause now, Resume and Guidance. A viewer posts a typed intent
