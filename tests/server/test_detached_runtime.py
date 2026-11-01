@@ -8,6 +8,7 @@ import socket
 import subprocess
 import sys
 import threading
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -35,7 +36,6 @@ from vs_sim.api.testing import FakeProcessSignaller, stop_process
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
 
 def test_detached_runtime_runs_without_a_subscriber_and_exits_when_the_run_ends(
@@ -271,6 +271,17 @@ def test_an_unavailable_gateway_with_a_live_owner_keeps_its_record(tmp_path: Pat
     assert WebInstanceRecord.read(path) == record
 
 
+# `WebInstanceHold.holders` lists the processes with a file open under the directory by reading
+# per-process descriptors (procfs). A host without them (macOS) answers `None` by contract, and
+# `log_locked` is then the only evidence, so each test below states what its host can observe.
+_PER_PROCESS_DESCRIPTORS = Path("/proc/self/fd").is_dir()
+
+
+def _seen(*pids: int) -> tuple[int, ...] | None:
+    """The `holders` this host reports when exactly ``pids`` have a file open under the directory."""
+    return pids if _PER_PROCESS_DESCRIPTORS else None
+
+
 def test_an_idle_instance_directory_reads_free(tmp_path: Path) -> None:
     instance_path = tmp_path / ".vibesys" / "web-gateway.json"
     instance_path.parent.mkdir(parents=True)
@@ -281,7 +292,7 @@ def test_an_idle_instance_directory_reads_free(tmp_path: Path) -> None:
 
     # Asking whether the instance is in use must not create the file it reads,
     # and the caller's own process is never one of the holders it is told about.
-    assert hold == WebInstanceHold(holders=(), log_locked=False)
+    assert hold == WebInstanceHold(holders=_seen(), log_locked=False)
     assert hold.free is True
     assert not log_path.exists()
 
@@ -317,7 +328,7 @@ def test_the_hold_outlives_the_record_and_the_launcher(tmp_path: Path) -> None:
         # inherited-descriptor property the whole postcondition rests on.
         assert not instance_path.exists()
         hold = WebInstanceHold.observe(instance_path)
-        assert hold == WebInstanceHold(holders=(child.pid,), log_locked=True)
+        assert hold == WebInstanceHold(holders=_seen(child.pid), log_locked=True)
         assert hold.free is False
     finally:
         stop_process(child)
@@ -347,9 +358,11 @@ def test_a_process_using_the_directory_without_the_lock_is_still_reported(
             )
         try:
             hold = WebInstanceHold.observe(instance_path)
-            assert hold.holders == (child.pid,)
+            assert hold.holders == _seen(child.pid)
             assert hold.log_locked is False
-            assert hold.free is False
+            # Without per-process descriptors nothing here can see the user, and `free` says so:
+            # that limit is the contract (`holders is None`), not a wrong answer.
+            assert hold.free is (not _PER_PROCESS_DESCRIPTORS)
         finally:
             stop_process(child)
 
@@ -384,7 +397,7 @@ def test_observing_the_hold_does_not_make_the_observer_a_holder(tmp_path: Path) 
         # that holds only a shared lock is therefore not a lock holder here.
         hold = WebInstanceHold.observe(instance_path)
         assert hold.log_locked is False
-        assert hold.holders == (reader.pid,)
+        assert hold.holders == _seen(reader.pid)
     finally:
         stop_process(reader)
 
