@@ -11,11 +11,11 @@ import {
   installFakeNewRun,
   installFakeProjectRuns,
   MAC_CHROME,
-} from './fake-bridge.js';
+} from '../src/testing/fake-bridge.js';
+import {STARTED_AT} from '../src/testing/started-at.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {journeyScript, type NativeJourney, transitionJourney} from './journey-world.js';
 import {installGatewayOnly} from './retired-run-bridge.js';
-import {STARTED_AT} from './started-at.js';
 
 /** The Run screen starts, drains, cancels, and resumes through its shipping bridge. */
 

@@ -15,7 +15,7 @@ import {
   installFakeMachineSettings,
   installFakeMachines,
   installFakeProjectRuns,
-} from './fake-bridge.js';
+} from '../src/testing/fake-bridge.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {showScreen} from './read.js';
 import {

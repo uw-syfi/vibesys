@@ -1,5 +1,4 @@
 import {expect, type Page, test} from '@playwright/test';
-import {pressMovesWindow, screenCheck} from './checks/screen-check.js';
 import {
   type FakeBridgeSeed,
   FULL_SCREEN_CHROME,
@@ -9,12 +8,13 @@ import {
   installFakeProjectRuns,
   MAC_CHROME,
   WINDOWS_CHROME,
-} from './fake-bridge.js';
+} from '../src/testing/fake-bridge.js';
+import {STARTED_AT} from '../src/testing/started-at.js';
+import {pressMovesWindow, screenCheck} from './checks/screen-check.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {journeyScript} from './journey-world.js';
 import {pressMark, showScreen, sidebar} from './read.js';
 import {revealNav} from './settings-machine.js';
-import {STARTED_AT} from './started-at.js';
 import {type FakeHostWindow, open, SEED, setChromeInset} from './world.js';
 
 /**

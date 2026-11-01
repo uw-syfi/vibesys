@@ -5,7 +5,7 @@
  * `window.fakeHost.calls`. `installFakeRun` runs in the page after `installFakeBridge`
  * (one ordered `addInitScripts` call), so it is self-contained and adds to that bridge.
  */
-import type {FakeProvides} from './fake-bridge.js';
+import type {FakeProvides} from '../src/testing/fake-bridge.js';
 
 /** What `installFakeRun` provides: the log streams and the run commands. */
 type RunMethods = 'logs' | 'releaseLogs' | 'resume';

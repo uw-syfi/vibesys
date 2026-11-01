@@ -10,15 +10,15 @@ import {mkdirSync, writeFileSync} from 'node:fs';
 import {expect, type Page, test} from '@playwright/test';
 import {REQUIRED_HELPER_FEATURES} from '@vibesys/hosts';
 import {clusterTestsByAlias, fixtureNamed} from '@vibesys/run-fixtures';
-import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
-import {screenCheck} from './checks/screen-check.js';
-import {dashboardWorld, MANY_RUNS, open as openDashboard} from './dashboard-world.js';
 import {
   type FakeBridgeSeed,
   installFakeBridge,
   installFakeMachines,
   installFakeNewRun,
-} from './fake-bridge.js';
+} from '../src/testing/fake-bridge.js';
+import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
+import {screenCheck} from './checks/screen-check.js';
+import {dashboardWorld, MANY_RUNS, open as openDashboard} from './dashboard-world.js';
 import {openFixture} from './fixture-world.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {NEW_RUN_PAGES, main as newRunMain, openAt as openNewRunAt} from './new-run-flow.js';

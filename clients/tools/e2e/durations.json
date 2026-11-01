@@ -17,7 +17,6 @@
   "desktop-shell/e2e/machines-page.spec.ts": 7.527,
   "desktop-shell/e2e/machines.spec.ts": 2.786,
   "desktop-shell/e2e/narrow-shell.spec.ts": 0.853,
-  "desktop-shell/e2e/new-run-controls.spec.ts": 104.871,
   "desktop-shell/e2e/new-run-destination.spec.ts": 3.702,
   "desktop-shell/e2e/new-run-installed.spec.ts": 3.52,
   "desktop-shell/e2e/new-run-screens.spec.ts": 40.91,
