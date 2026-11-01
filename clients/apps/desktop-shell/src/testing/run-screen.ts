@@ -12,7 +12,8 @@ import {act} from 'react';
 import {maybe, one, until} from './dom-query.js';
 import {seedOf} from './fixture-seed.js';
 import {wire} from './gateway-fixture.js';
-import type {ReplayWorld} from './replay-world.js';
+import {declaredReplay} from './native-records.js';
+import {type ReplayWorld, replayWorld} from './replay-world.js';
 import {type OpenShell, openShell} from './shell-world.js';
 
 /** The run the journeys' worlds list on the dashboard: the queue example's task. */
@@ -37,6 +38,17 @@ async function openRun(
 /** The Fake gateway serving the records of `fixture` as one batch, the host saying `liveness` of the run (default: from its end). */
 export function storedWorld(fixture: StoreRunFixture, liveness?: RunLiveness): ReplayWorld {
   return {input: wire(fixture, liveness), updates: {}};
+}
+
+/** The Fake gateway serving the replay the shipping projection made of the declared `fixture`. */
+export function fixtureWorld(fixture: RunFixture): ReplayWorld {
+  const replay = declaredReplay(fixture);
+  if (replay === undefined) {
+    throw new Error(
+      `fixture ${fixture.name} differs from its declaration: it has no derived replay`,
+    );
+  }
+  return replayWorld(fixture, replay);
 }
 
 /**
