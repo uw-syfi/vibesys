@@ -212,26 +212,6 @@ func TestAFailedCallCarriesAFailure(t *testing.T) {
 	}
 }
 
-// The calls that arrive with later work are refused as unavailable, each by name.
-func TestCallsOfLaterWorkAreUnavailable(t *testing.T) {
-	r := newRig(t)
-	ctx := ctxFor(t)
-	calls := map[string]func() error{
-		"CreatePlan":  func() error { _, err := r.client.CreatePlan(ctx, &cliv1.CreatePlanRequest{}); return err },
-		"ListPlans":   func() error { _, err := r.client.ListPlans(ctx, &cliv1.ListPlansRequest{}); return err },
-		"ViewPlan":    func() error { _, err := r.client.ViewPlan(ctx, &cliv1.ViewPlanRequest{}); return err },
-		"EditPlan":    func() error { _, err := r.client.EditPlan(ctx, &cliv1.EditPlanRequest{}); return err },
-		"CommentPlan": func() error { _, err := r.client.CommentPlan(ctx, &cliv1.CommentPlanRequest{}); return err },
-		"ClosePlan":   func() error { _, err := r.client.ClosePlan(ctx, &cliv1.ClosePlanRequest{}); return err },
-	}
-	for name, call := range calls {
-		f, ok := wire.FailureOf(call())
-		if !ok || f.Kind != core.FailureUnavailable || !strings.Contains(f.Message, name) {
-			t.Errorf("%s: failure = %+v ok %v, want unavailable naming the call", name, f, ok)
-		}
-	}
-}
-
 // Hello answers what core says of the two builds' versions, for any client versions.
 func TestHelloAnswersWhatCoreSays(t *testing.T) {
 	r := newRig(t)

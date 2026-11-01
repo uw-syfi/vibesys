@@ -190,8 +190,22 @@ default to the environment variables shown:
 | `compare <commit> [--against rev]` | `better`, `worse`, `within_noise` or `inconclusive`, against the result branch head unless `--against` names a commit. Refuses to mix environments. |
 | `promote <commit>` | Fast-forward the result branch to a commit that is `better` than its head, or print every reason it was refused. A refusal exits `1` and is printed on stdout. |
 | `result` | The head and a final number measured after the head last moved, or why there is none (exit `1`). |
+| `plan create --title t [--body text \| --body-file path]` | Store a plan, open, and print its number. `--body -` and `--body-file -` read standard input. |
+| `plan list [--status s] [--search text]` | List the task's plans by number. With no `--status` every plan is listed. |
+| `plan view <n>` | Print a plan, its comments and the jobs linked to it (`submit --plan <n>` links one). |
+| `plan edit <n> [--title t] [--body text \| --body-file path] [--status s]` | Change what is given and keep the rest. |
+| `plan comment <n> --body text \| --body-file path` | Add a comment, which carries a decision or a result. |
+| `plan close <n> --status s [--comment text \| --comment-file path]` | Set a status other than `open` and add a comment, as one change. |
 | `daemon status\|stop\|restart` | Report on, stop, or restart the daemon. `daemon install` is not available yet. |
 | `daemon forget <repository>` | Give up a repository that is gone for good, such as a removed worktree: its jobs leave the daemon, what is left of their supervisors is let go of, and its stores leave the index. Nothing is touched where the repository was. A repository that is there, or that the daemon does not know, is refused. |
+
+Plans belong to a task, are numbered 1, 2, ... by the daemon and never renumbered, and take one of
+five statuses: `open`, `chosen`, `won`, `parked` and `rejected`. The CLI orders none of them, so an
+agent may move a plan from any status to any other, and it stores the body and the comments as they
+are given. A plan number may be written `3` or `#3`. `plan view` shows the jobs linked to a plan; the
+verdict of each against the result branch is not shown yet, because `compare` is not available in
+this build. Only a submission makes a task's store, so the plan commands that write or view refuse a
+task that has had no job with a "no store" error, and `plan list` prints nothing for it.
 
 Exit codes: `0` ok (for `wait`, every job it waited on succeeded), `1` failed (a job did not
 succeed, or the call was refused), `2` invalid input or a job that does not exist, `3` a `wait`
@@ -201,8 +215,9 @@ they may still succeed. A `wait` whose connection to the daemon breaks connects 
 
 With `--json`, a command prints the contract's messages in protobuf's canonical JSON form with the
 original field names, one compact message per line: the response for `submit`, `cancel`, `note`,
-`jobs`, `logs`, `show`, `compare`, `promote`, `result` and `daemon status`; one `WatchResponse` per job for `wait` (the contract has no
-message for it); and, on stderr, a `Failure` for an error that a command reports: a refusal from
+`jobs`, `logs`, `show`, `compare`, `promote`, `result`, `daemon status` and the `plan`
+subcommands; one `WatchResponse` per job for `wait` (the contract has no message for it); and, on
+stderr, a `Failure` for an error that a command reports: a refusal from
 the daemon, a missing argument, a job that does not exist, a `wait` that gave up (exit `4`).
 
 Some errors are plain text on stderr even with `--json`, because they come before the command has
