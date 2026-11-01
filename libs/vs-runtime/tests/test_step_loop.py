@@ -16,6 +16,7 @@ not record the deadline of its drain.
 from __future__ import annotations
 
 import asyncio
+import itertools
 import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -94,6 +95,7 @@ RAISES = AttemptRaises(OSError("the host lost the process"))
 HANGS = AttemptHangs()
 DEAF = AttemptHangs(ignoring_signal=True)
 UNCHARGED = (InterruptionReason.PAUSE, InterruptionReason.SHUTDOWN)
+CHARGING = (InterruptionReason.RAISED, InterruptionReason.LOST)
 
 
 @dataclass(frozen=True)
@@ -602,6 +604,7 @@ def check_world(world: World) -> None:
     for tag in world.seed.tags:
         check_log_of(world, tag)
     check_clear_precedes_every_rerun(world)
+    check_retries_back_off(world)
     check_runs_carry_the_step_limit(world)
     assert set(world.runner.running()) <= set(world.unproven), "work was left running"
     assert world.runner.violations == ()
@@ -646,6 +649,40 @@ def check_clear_precedes_every_rerun(world: World) -> None:
                 f"attempt {call.attempt} had no clear"
             )
             cleared[call.tag] = False
+
+
+def check_retries_back_off(world: World) -> None:
+    """Consecutive attempts of a step are at least the declared backoff apart on the run clock.
+
+    An attempt that raised, or whose work a dead host lost, is charged to the step. The attempt
+    after it starts no sooner than ``request_retries.delay`` of the charges so far, counted from
+    the record that charged it, so a runner that fails at once cannot spend every try in one
+    instant. Pauses and adopted work are not charged and wait for nothing.
+    """
+    retries = world.seed.state.run.limits.request_retries
+    for tag in world.seed.tags:
+        charged = 0
+        charged_at: float | None = None
+        for record in world.records.records:
+            body = record.body
+            if body is None:
+                continue
+            message = body.value
+            if isinstance(message, AttemptInterrupted) and message.tag == tag.root:
+                if message.reason in CHARGING:
+                    charged += 1
+                    charged_at = record.clock
+            elif (
+                isinstance(message, StepStarted)
+                and message.tag == tag.root
+                and charged_at is not None
+            ):
+                backoff = retries.delay(charged)
+                assert record.clock >= charged_at + backoff, (
+                    f"{tag.root} attempt {message.attempt} started "
+                    f"{record.clock - charged_at}s after its charge, inside the backoff of "
+                    f"{backoff}s"
+                )
 
 
 def check_runs_carry_the_step_limit(world: World) -> None:
@@ -695,6 +732,22 @@ def test_a_runner_that_raises_is_cleared_and_run_again_charged_as_a_try() -> Non
     check_world(world)
     assert attempts_started(world, 0) == [1, 2]
     assert interruption_reasons(world) == [InterruptionReason.RAISED]
+
+
+def test_a_runner_that_raises_at_once_is_run_again_only_after_the_backoff() -> None:
+    """Each re-run waits the doubling backoff on the run clock, and the bound on tries holds."""
+    world = run_world(Scenario((step(RAISES, RAISES, RAISES, FINISHES),), retries=3))
+    check_world(world)
+    retries = world.seed.state.run.limits.request_retries
+    started = [
+        record.clock
+        for record in world.records.records
+        if record.body is not None and record.body.field == "step_started"
+    ]
+    assert len(started) == 4
+    waited = [later - earlier for earlier, later in itertools.pairwise(started)]
+    assert all(wait >= retries.delay(n) for n, wait in enumerate(waited, 1))
+    assert was_finished(world, 0)
 
 
 def step_messages(world: World, tag: core.RequestId) -> list[Message]:

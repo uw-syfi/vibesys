@@ -7,6 +7,7 @@ request the loop hands to a runner whole, so nothing here names a step kind. The
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, overload
 
@@ -71,7 +72,7 @@ if TYPE_CHECKING:
     from ._step_log import SavedRun
     from .types.kernel import CoreEvent, CoreState, StrategyEvent
     from .types.records import RequestRecord
-    from .types.steps import StepResult
+    from .types.steps import StepAttempts, StepResult
 
 
 @dataclass(frozen=True)
@@ -509,7 +510,7 @@ def _start_or_settle(state: CoreState, record: RequestRecord, now: float) -> Run
             return Settle(tag=tag, result=Failed(reason=FailureReason.ATTEMPTS_EXHAUSTED))
     if now >= record.until.at:
         return Settle(tag=tag, result=Cancelled(reason=CancelReason.DEADLINE))
-    if not starts(state, record, dependencies):
+    if not starts(state, record, dependencies) or now < _retry_at(state, attempts):
         return None
     return Run(
         step=record.request,
@@ -518,6 +519,18 @@ def _start_or_settle(state: CoreState, record: RequestRecord, now: float) -> Run
         deadline_at=_started_until(state, record).at,
         clear_first=attempts is not None,
     )
+
+
+def _retry_at(state: CoreState, attempts: StepAttempts | None) -> float:
+    """The run clock at which the step's next attempt may start: the backoff of its charges has passed.
+
+    The wait counts from the record that last charged an attempt and doubles with each charge
+    (``Limits.request_retries``), so a runner that raises at once, or a host that dies each time,
+    spends its tries over time and not in one instant. A step with no charge starts at once.
+    """
+    if attempts is None or attempts.charged_at is None:
+        return -math.inf
+    return attempts.charged_at + state.run.limits.request_retries.delay(attempts.charged)
 
 
 def _started_until(state: CoreState, record: RequestRecord) -> Until:
@@ -537,6 +550,11 @@ def _wake_at(state: CoreState, open_steps: tuple[RequestRecord, ...], now: float
     """The next time anything is due: a step's limit, or the end of a pause's drain."""
     park = state.run.park
     due = [record.until.at for record in open_steps]
+    due.extend(
+        _retry_at(state, attempts)
+        for record in open_steps
+        if (attempts := state.steps.of(record.request_id)) is not None and attempts.ended
+    )
     if park is not None and park.deadline_at is not None:
         due.append(park.deadline_at)
     return min((at for at in due if at > now), default=None)
