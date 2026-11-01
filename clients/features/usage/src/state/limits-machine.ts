@@ -47,9 +47,15 @@ export type LimitsEvent =
   | {readonly type: 'open'; readonly now: number}
   | {readonly type: 'refresh'; readonly now: number};
 
-/** What the question is told: how old a stored reading a host may answer as it is. */
+/**
+ * What a question is told. It has one time, the moment the person asked (`now`): the host stamps
+ * its reading with it, and the screen counts a window's refill from it, so the two agree whatever
+ * the clock did while the question started. ``null`` only for a question that was never asked.
+ */
 export interface LimitsQuestion {
+  /** How old a stored reading a host may answer as it is, in seconds. */
   readonly maxAgeS: number;
+  readonly now: number | null;
 }
 
 /** How long after a question the tab opening asks again, in milliseconds. */
@@ -117,7 +123,7 @@ export const limitsMachine = setup({
       invoke: {
         id: 'check',
         src: 'check',
-        input: ({context}) => ({maxAgeS: context.maxAgeS}),
+        input: ({context}) => ({maxAgeS: context.maxAgeS, now: context.askedAt}),
         onDone: [
           {
             guard: {type: 'waitsForConnection', params: ({event}) => ({answer: event.output})},

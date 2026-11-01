@@ -1,6 +1,11 @@
 import {describe, expect, test} from 'bun:test';
-import type {UsageLimitsEntry, UsageProviderLimitsEntry} from '@vibesys/hosts';
+import type {
+  UsageAccountLimitsEntry,
+  UsageLimitsEntry,
+  UsageProviderLimitsEntry,
+} from '@vibesys/hosts';
 import {FakeClock} from '@vibesys/transport/testing';
+import fc from 'fast-check';
 import {LIMITS_FLOOR_MS, LIMITS_STORED_AGE_S} from '../../state/index.js';
 import {emptySummary, FakeUsageBridge} from './fake-bridge.js';
 import {createUsageStore} from './store.js';
@@ -163,6 +168,58 @@ describe('the Limits tab', () => {
     ]);
     unsubscribe();
     made.stop();
+  });
+
+  test('property: when a window refills does not depend on how long the question took to start', async () => {
+    // A real clock moves between the moment the page asks and the moment the question reaches the
+    // bridge. The question has one time: the window's span is from it, whatever the clock did.
+    await fc.assert(
+      fc.asyncProperty(fc.integer({min: 0, max: 3_600_000}), async step => {
+        const bridge = new FakeUsageBridge({
+          hosts: [{host: 'local', answer: (_, book) => emptySummary(book)}],
+        });
+        // A provider that says when it refills relative to the moment it was asked.
+        bridge.limitsOf = {
+          local: now => ({
+            readAt: now,
+            providers: [
+              {
+                ...provider('codex', 0.25),
+                limits: {
+                  ...(provider('codex', 0.25).limits as UsageAccountLimitsEntry),
+                  windows: [
+                    {
+                      id: 'codex:w',
+                      kind: 'weekly' as const,
+                      label: 'Weekly',
+                      usedFraction: 0.25,
+                      resetsAt: now + 5 * HOUR,
+                      windowMinutes: 10_080,
+                    },
+                  ],
+                  readAt: now,
+                },
+              },
+            ],
+          }),
+        };
+        let now = NOW;
+        const made = createUsageStore(bridge, {
+          schedule: new FakeClock().schedule,
+          clock: () => {
+            now += step;
+            return {now, zone: 'UTC'};
+          },
+        });
+        const unsubscribe = made.store.subscribe(() => undefined);
+        made.actions.tab('limits');
+        await settle(made.store);
+        expect(made.store.getState().limits.view?.cards[0]?.bars[0]?.resets).toBe('5 h');
+        unsubscribe();
+        made.stop();
+      }),
+      {numRuns: 30, seed: 4417},
+    );
   });
 
   test('the state is the same object until something changed', async () => {

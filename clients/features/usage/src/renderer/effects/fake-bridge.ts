@@ -273,7 +273,10 @@ export class FakeUsageBridge implements UsageBridge {
   readonly limitsAsked: {host: HostKey; maxAgeS: number; now: number}[] = [];
 
   /** What each host answers a limits question: one reading per provider, or that it cannot. */
-  limitsOf: Record<string, UsageLimitsEntry | 'fails' | 'unsupported'> = {};
+  limitsOf: Record<
+    string,
+    UsageLimitsEntry | ((now: number) => UsageLimitsEntry) | 'fails' | 'unsupported'
+  > = {};
 
   usageLimits: UsageBridge['usageLimits'] = async (host, maxAgeS, now) => {
     this.limitsAsked.push({host, maxAgeS, now});
@@ -281,7 +284,7 @@ export class FakeUsageBridge implements UsageBridge {
     const found = this.limitsOf[host];
     if (found === undefined || found === 'unsupported') return ok({kind: 'unsupported' as const});
     if (found === 'fails') return failed('Could not read the limits');
-    return ok({kind: 'limits' as const, limits: found});
+    return ok({kind: 'limits' as const, limits: typeof found === 'function' ? found(now) : found});
   };
 
   usageRatesRefresh: UsageBridge['usageRatesRefresh'] = async (host, force) => {
