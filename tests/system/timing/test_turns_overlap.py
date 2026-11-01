@@ -11,8 +11,7 @@ Past bugs these guard, and the commits before which they fail:
   run's ``max_parallel`` (#1375): the overlap and critical-path checks;
 - a finished turn's follow-up waited for every other running turn (#1375): the follow-up check;
 - one dispatch longer than the lease lost the lease (#1370): the durations longer than the lease
-  (``LEASE``) end the run only if the lease was renewed beside the turns; the renewal floor
-  (#1370) is checked in ``libs/vs-runtime/tests/test_core_shell.py``.
+  (``LEASE``) end the run only if the lease was renewed beside the turns.
 """
 
 from __future__ import annotations

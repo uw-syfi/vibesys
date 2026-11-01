@@ -146,7 +146,6 @@
 {"path": "libs/vs-project/tests/test_git_tracker_staging.py", "rule": "real_impl", "count": 2}
 {"path": "libs/vs-project/tests/test_git_tracker_state_writer_interleaving.py", "rule": "real_impl", "count": 1}
 {"path": "libs/vs-project/tests/test_state_store_contract.py", "rule": "real_impl", "count": 1}
-{"path": "libs/vs-runtime/tests/test_core_publications.py", "rule": "real_impl", "count": 1}
 {"path": "libs/vs-runtime/tests/test_project_materialization.py", "rule": "real_impl", "count": 1}
 {"path": "libs/vs-runtime/tests/test_project_run_resources.py", "rule": "real_impl", "count": 1}
 {"path": "libs/vs-runtime/tests/test_trusted_evaluation.py", "rule": "real_impl", "count": 2}

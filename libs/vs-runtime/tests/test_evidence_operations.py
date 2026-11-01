@@ -58,13 +58,15 @@ from vs_runtime.api.core import (
     ExecutionResult,
     InterpretEvidenceOwner,
     MeasurementRequests,
+    NamespaceOperationReceipts,
     NotApplied,
+    ObservationFactory,
     OperationPorts,
     OperationRole,
     ReceiptEvidenceLedger,
     ReceiptStore,
+    RegisteredOperationRequests,
     RetainRevisionOwner,
-    bind_operations,
     build_operation_catalog,
     commit_of,
     production_owners,
@@ -699,9 +701,12 @@ async def test_a_strategy_requiring_interpretation_starts_and_runs_with_producti
         catalog.require_owned(declaration)
         assert {d.kind for d in catalog.offered_operations} == {"test.interpret", "test.retain"}
         validate_startup(declaration, Capabilities(operations=catalog.offered_operations))
-        bindings = bind_operations(declaration, catalog, namespace, threads=SimThreads())
+        store = ReceiptStore(namespace, threads=SimThreads())
+        operations = RegisteredOperationRequests(
+            catalog, NamespaceOperationReceipts(store), ObservationFactory(store)
+        )
         request = execute_request(catalog, _Interpret(evidence=(_ref(recorded),)), "interpret")
-        result = await bindings.executors.operations.execute(request, _eval_context(request))
+        result = await operations.execute(request, _eval_context(request))
         assert isinstance(result, ExecutionResult)
         assert result.observation.observation.status is ObservationStatus.SUCCEEDED
         outcome = result.observation.outcome

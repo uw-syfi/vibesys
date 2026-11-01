@@ -880,8 +880,7 @@ agents, recorded round records and endings) before the switch and commit them as
 A single suite, parametrized by a strategy factory and a generator of executor scripts, lives
 with the test kit (T1). It uses no async, sleeps, wall-clock or Fakes in the pure tier, per
 the `testing` skill, and the shell tier uses the promoted runtime shell with scripted
-executors. A "durable boundary" is one committed envelope. The crash points are the three in
-`libs/vs-runtime/tests/test_core_dispatch.py`: before the commit of a step, after the commit
+executors. A "durable boundary" is one committed envelope. The crash points are the three: before the commit of a step, after the commit
 and before dispatch, and after dispatch and before the observation is committed.
 
 | # | Property | Generated input |
