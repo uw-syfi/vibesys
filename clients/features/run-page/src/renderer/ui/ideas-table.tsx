@@ -406,6 +406,7 @@ export function IdeasTable(props: {
           marks={row => ({lineage: row.lineage, fresh: row.fresh})}
           describe={row => describeRow(table, row)}
           crowded={table.columns.length > 1}
+          size="fill"
         />
       )}
     </Stack>

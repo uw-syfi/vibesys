@@ -185,7 +185,8 @@ function Row<Row>(props: {
  * keys reach every row: Up and Down step, Page Up and Down move a screenful, Home and End jump,
  * Enter and Space pick. `selected` is the picked row's key; `marks` adds a bar to rows on its path.
  * A row is named by its first column, as a screen reader hears it, and `describe` says the rest, so
- * a cell that names another row (a link to the row it builds on) does not rename this one.
+ * a cell that names another row (a link to the row it builds on) does not rename this one. The rows
+ * scroll at most sixteen rows tall (`size` `fill` takes the height of its container, as in a pane).
  */
 export function ColumnList<Row>(props: {
   readonly label: string;
@@ -204,6 +205,8 @@ export function ColumnList<Row>(props: {
    * its dot).
    */
   readonly crowded?: boolean;
+  /** `fill`: the rows take the height the container gives the list; the default is their own, to a cap. */
+  readonly size?: 'default' | 'fill';
 }): JSX.Element {
   const headerId = useId();
   const ids = props.rows.map(props.rowKey);
@@ -232,7 +235,13 @@ export function ColumnList<Row>(props: {
     '--columns-tight': tracksOf(props.columns, 'tight'),
   } as CSSProperties;
   return (
-    <div className="vs-columnlist" ref={measure} style={tracks} data-tier={tier}>
+    <div
+      className="vs-columnlist"
+      ref={measure}
+      style={tracks}
+      data-tier={tier}
+      data-size={props.size ?? 'default'}
+    >
       <Header columns={props.columns} id={headerId} watch={watch} />
       <div
         ref={win.scroller}

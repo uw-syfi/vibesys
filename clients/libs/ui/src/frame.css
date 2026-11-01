@@ -1072,13 +1072,18 @@ button.vs-crumb:focus-visible {
   color: var(--muted);
 }
 /*
- * The rows fill the height the list is given and scroll inside it, under the header, drawing only
- * the rows near the visible part.
+ * The rows scroll inside the list, under the header, drawing only the rows near the visible part:
+ * at most sixteen rows tall, or, in a list that fills (`data-size`), the height it is given.
  */
 .vs-columnlist-rows {
-  flex: 1 1 0;
+  flex: 0 1 auto;
   min-height: 0;
+  max-height: calc(var(--row) * 16);
   overflow-y: auto;
+}
+.vs-columnlist[data-size="fill"] > .vs-columnlist-rows {
+  flex: 1 1 0;
+  max-height: none;
 }
 .vs-columnlist-rows:focus-visible {
   outline: var(--focus-ring) solid var(--accent);
