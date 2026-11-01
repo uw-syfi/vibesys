@@ -191,6 +191,15 @@ export interface NewRunInput {
   readonly draft?: Draft | null;
 }
 
+/**
+ * The tag of every state that waits on a read the screen started by itself: the helper's features,
+ * the machine's facts, harnesses and examples, the project's tasks and goal, an example's
+ * destination, and the checks of inputs that will be checked (the run's roles come from them). A
+ * fix or start (`action`) answers a press of the user and is not among them. A new read gets the
+ * tag on its state, or the model test of `isReading` fails on it.
+ */
+const READING = 'reading';
+
 /** How long the inputs must stay still before they are checked, in milliseconds. */
 export const CHECK_DEBOUNCE_MS = 400;
 
@@ -471,6 +480,7 @@ export const newRunMachine = setup({
     context: {} as NewRunContext,
     events: {} as NewRunEvent,
     input: {} as NewRunInput,
+    tags: {} as typeof READING,
   },
   actors: {
     describe: unprovided<Offered<MachineDescription>, {readonly host: HostKey}>('describe'),
@@ -638,6 +648,7 @@ export const newRunMachine = setup({
           },
           states: {
             loading: {
+              tags: READING,
               invoke: {
                 id: 'features',
                 src: 'features',
@@ -678,6 +689,7 @@ export const newRunMachine = setup({
           },
           states: {
             loading: {
+              tags: READING,
               invoke: {
                 id: 'describe',
                 src: 'describe',
@@ -729,6 +741,7 @@ export const newRunMachine = setup({
           },
           states: {
             loading: {
+              tags: READING,
               invoke: {
                 id: 'harnesses',
                 src: 'harnesses',
@@ -766,6 +779,7 @@ export const newRunMachine = setup({
             // A helper without `examples` is never asked: it offers none. One that cannot be
             // reached, or never answers, offers none either: the screen says so.
             pending: {
+              tags: READING,
               always: [
                 {guard: 'offersExamples', target: 'loading'},
                 {
@@ -788,6 +802,7 @@ export const newRunMachine = setup({
               },
             },
             loading: {
+              tags: READING,
               after: {
                 examplesBound: {
                   target: 'ready',
@@ -836,6 +851,7 @@ export const newRunMachine = setup({
             },
             none: {},
             loading: {
+              tags: READING,
               invoke: {
                 id: 'tasks',
                 src: 'tasks',
@@ -881,6 +897,7 @@ export const newRunMachine = setup({
             // Until the helper says it can read a goal, there is nothing to ask.
             waiting: {always: {guard: 'readsGoal', target: 'loading'}},
             loading: {
+              tags: READING,
               invoke: {
                 id: 'goal',
                 src: 'goal',
@@ -931,6 +948,7 @@ export const newRunMachine = setup({
             waiting: {always: {guard: 'asksDestination', target: 'loading'}},
             typing: {after: {debounce: 'choosing'}},
             loading: {
+              tags: READING,
               invoke: {
                 id: 'destination',
                 src: 'destination',
@@ -970,26 +988,36 @@ export const newRunMachine = setup({
           },
         },
         checks: {
-          initial: 'waiting',
+          initial: 'deciding',
           on: {
-            answer: {target: '.waiting', actions: 'answer'},
-            agent: {target: '.waiting', actions: 'input'},
-            role: {target: '.waiting', actions: 'input'},
-            budget: {target: '.waiting', actions: 'input'},
-            measure: {target: '.waiting', actions: 'input'},
-            compute: {target: '.waiting', actions: 'compute'},
-            advanced: {target: '.waiting', actions: 'input'},
-            destination: {target: '.waiting', actions: 'input'},
-            recheck: '.waiting',
-            refresh: '.waiting',
+            answer: {target: '.deciding', actions: 'answer'},
+            agent: {target: '.deciding', actions: 'input'},
+            role: {target: '.deciding', actions: 'input'},
+            budget: {target: '.deciding', actions: 'input'},
+            measure: {target: '.deciding', actions: 'input'},
+            compute: {target: '.deciding', actions: 'compute'},
+            advanced: {target: '.deciding', actions: 'input'},
+            destination: {target: '.deciding', actions: 'input'},
+            recheck: '.deciding',
+            refresh: '.deciding',
             retry: {
               guard: {type: 'failedAt', params: {step: 'preflight'}},
-              target: '.waiting',
+              target: '.deciding',
               actions: 'clearProblem',
             },
           },
           states: {
+            // Whether the inputs are to be checked is decided where they change, so that only
+            // inputs that will be checked wait for the debounce and the answer, and a form with
+            // none is at rest at once.
+            deciding: {
+              always: [
+                {guard: and(['hasInputs', 'offersChecks']), target: 'waiting'},
+                {target: 'incomplete'},
+              ],
+            },
             waiting: {
+              tags: READING,
               // Checked only on a helper that takes the checks and typed options.
               after: {
                 debounce: [
@@ -1000,6 +1028,7 @@ export const newRunMachine = setup({
             },
             incomplete: {},
             checking: {
+              tags: READING,
               invoke: {
                 id: 'preflight',
                 src: 'preflight',
@@ -1013,7 +1042,7 @@ export const newRunMachine = setup({
                       type: 'rolesChangeInputs',
                       params: ({event}) => ({answer: event.output}),
                     },
-                    target: 'waiting',
+                    target: 'deciding',
                     actions: assign(({context, event}) => afterPreflight(context, event.output)),
                   },
                   {
@@ -1123,3 +1152,12 @@ export const newRunMachine = setup({
 
 /** What the screen renders: the machine's snapshot. */
 export type NewRunSnapshot = SnapshotFrom<typeof newRunMachine>;
+
+/**
+ * Whether a read the screen started is still unanswered, so that what the screen shows (its
+ * examples, the goal, the machine's agents) may still change without an input of the user. A read
+ * that failed has answered: the screen shows its problem.
+ */
+export function isReading(snapshot: NewRunSnapshot): boolean {
+  return snapshot.hasTag(READING);
+}
