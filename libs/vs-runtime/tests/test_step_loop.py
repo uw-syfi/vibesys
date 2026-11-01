@@ -617,9 +617,10 @@ def cooperative(scenario: Scenario) -> bool:
 
     A deaf or held attempt can outlive the park: the loop shows it and leaves it to the process
     exit, and the log still has it running. A parked run therefore holds an attempt only for a call
-    the loop showed held (``check_world``), and the next epoch ends it uncharged.
+    the loop showed held (``check_world``), and the next epoch ends it uncharged. A ``clear`` that
+    outlives its timeout holds its tag the same way, so a run that parks over it keeps the attempt.
     """
-    return not any(
+    return scenario.clear_holds == 0 and not any(
         isinstance(behavior, AttemptHolds)
         or (isinstance(behavior, AttemptHangs) and behavior.ignoring_signal)
         for spec in scenario.steps
