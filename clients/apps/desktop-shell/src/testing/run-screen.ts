@@ -18,15 +18,19 @@ import {type OpenShell, openShell} from './shell-world.js';
 /** The run the journeys' worlds list on the dashboard: the queue example's task. */
 const RUN_BUTTON = /^queue-rs · mpmc/;
 
-async function openRun(shell: OpenShell, button: RegExp = RUN_BUTTON): Promise<void> {
+async function openRun(
+  shell: OpenShell,
+  button: RegExp = RUN_BUTTON,
+  read: 'read' | 'as shown' = 'read',
+): Promise<void> {
   const main = one(shell.container, {role: 'main'});
   const press = one(main, {role: 'button', name: button});
   await act(async () => press.click());
   await until(
-    'the Run screen reading its run',
+    'the Run screen showing its run',
     () =>
       maybe(shell.container, {role: 'heading', name: 'queue-rs · mpmc'}) !== null &&
-      shell.container.querySelector('main[data-state="ready"]') !== null,
+      (read === 'as shown' || shell.container.querySelector('main[data-state="ready"]') !== null),
   );
 }
 
@@ -37,16 +41,18 @@ export function storedWorld(fixture: StoreRunFixture, liveness?: RunLiveness): R
 
 /**
  * The shell on `world`, with the run open: the dashboard lists `listed` (the finished run of the
- * journeys' fixture world, whose listing the run's records do not change).
+ * journeys' fixture world, whose listing the run's records do not change). `read` is `'as shown'`
+ * for a state that is the point of the test: a history still loading, which is not yet read.
  */
 export async function shellOnRun(
   world: ReplayWorld,
   schedule: ScheduleTimeout,
   listed: RunFixture = {...fixtureNamed('finished-run'), runId: 'run-a'},
+  read: 'read' | 'as shown' = 'read',
 ): Promise<OpenShell> {
   // A fresh copy keeps nothing the last one cached.
   Object.assign(globalThis, {indexedDB: new IDBFactory()});
   const shell = await openShell(null, {schedule, seed: seedOf(listed, 'ink'), run: world});
-  await openRun(shell);
+  await openRun(shell, RUN_BUTTON, read);
   return shell;
 }
