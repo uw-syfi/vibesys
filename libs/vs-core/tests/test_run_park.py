@@ -8,7 +8,6 @@ from hypothesis import strategies as st
 
 import vs_core.api as core
 
-from .test_measurement_pacing import World, limits
 from .test_measurements import plan
 from .test_session_yield_completion import terminal_yield
 from .test_silent_executor_deadline import BOUND, _silent
@@ -51,55 +50,6 @@ def test_an_idle_park_is_terminal_for_the_epoch_and_idempotent(ticks: int) -> No
     ):
         with pytest.raises(core.ControlRefusedError, match="epoch"):
             core.step(result.state, core.RunControlEvent(control=control, now_at=0))
-
-
-@given(st.integers(min_value=1, max_value=20))
-def test_park_cancels_each_job_once_and_keeps_its_measurement_pending(ticks: int) -> None:
-    world = World(limits(1, 1))
-    result = park(world.state)
-    assert result.state.run.status == core.RunStatus.DRAINING
-    cancels = [request for request in result.requests if isinstance(request, core.CancelOwnedJob)]
-    assert len(cancels) == 1
-    cancel = cancels[0]
-    assert cancel.for_park
-    assert result.state.evaluation.jobs == world.state.evaluation.jobs
-    state = result.state
-    for index in range(ticks):
-        result = core.step(state, core.ClockAdvanced(now_at=float(index)))
-        assert not any(isinstance(request, core.CancelOwnedJob) for request in result.requests)
-        state = result.state
-    assert state.run.status == core.RunStatus.DRAINING
-    # Ordinary work can be prepared by a previously committed callback, but never dispatched.
-    for record in state.records.records:
-        if isinstance(record.request, core.ObserveOwnedJob):
-            with pytest.raises(core.ContractError, match="park"):
-                core.step(
-                    state,
-                    core.DispatchAuthorized(request_id=record.request_id, now_at=state.run.now_at),
-                )
-
-    assert cancel.request_id is not None
-    state = core.step(
-        state, core.DispatchAuthorized(request_id=cancel.request_id, now_at=state.run.now_at)
-    ).state
-    observation = core.Observation(
-        event_id=core.EventId(root="park-cancelled"),
-        request_id=cancel.request_id,
-        scope=cancel.scope,
-        admission_id=cancel.admission_id,
-        sequence=1,
-        observed_at=state.run.now_at,
-        status=core.ObservationStatus.SUCCEEDED,
-        accepted=True,
-        terminal=True,
-        released=True,
-        resource_id=cancel.resource_id,
-    )
-    completed = core.step(state, core.RequestObserved(observation=observation))
-    assert completed.state.run.status == core.RunStatus.PARKED
-    assert not completed.state.evaluation.jobs[0].terminal
-    assert completed.state.evaluation.jobs[0].plan == world.job.plan
-    assert not completed.requests
 
 
 @given(access=st.sampled_from([core.Access.READ_ONLY, core.Access.WRITE_CANDIDATE]))

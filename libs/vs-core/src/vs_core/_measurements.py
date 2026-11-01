@@ -1861,9 +1861,7 @@ def cancel_settled(records: RecordsState, run: RunState, resource: ResourceId) -
     end, as it did before any retry.
     """
     cancels = tuple(
-        row
-        for row in records.about_resource(resource)
-        if isinstance(row.request, CancelOwnedJob) and not row.request.for_park
+        row for row in records.about_resource(resource) if isinstance(row.request, CancelOwnedJob)
     )
     blocked = sum(
         1 for row in cancels if row.phase == RequestPhase.BLOCKED or row.failure is not None

@@ -20,7 +20,6 @@ from vs_agent.api import (
 )
 from vs_agent.api.testing import FakeProvider, FakeTurnScript
 from vs_core.api import (
-    CancelOwnedJob,
     InvocationId,
     InvocationRef,
     RunId,
@@ -28,7 +27,7 @@ from vs_core.api import (
     SessionId,
     TurnPermit,
 )
-from vs_evaluation.api import EvaluationState, PollPhase
+from vs_evaluation.api import EvaluationState
 from vs_runtime.api import AccuracyEvaluation, PollingEvaluationExecutor
 from vs_runtime.api.core import report_turns
 from vs_runtime.api.infrastructure import (
@@ -37,7 +36,6 @@ from vs_runtime.api.infrastructure import (
     AgentExecutionStatus,
     create_run_control_channel,
 )
-from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster
 from vs_runtime.api.testing import (
     FakeAgentExecutionLifecycleSink,
     FakeEvaluation,
@@ -53,9 +51,7 @@ from vs_sim.api.testing import (
     SimThreads,
     loop_threads,
 )
-from vs_slurm.api import SlurmJobStatus
 
-from .test_evaluation_requests import query, resource_of, run, settled, submit, world
 from .test_polling_stage_output import _HANDLE, _request, _terminal
 
 if TYPE_CHECKING:
@@ -254,38 +250,6 @@ async def test_pause_drain_allows_the_evaluation_an_executing_turn_is_waiting_fo
     await agent
     assert not control.evaluation_is_dependency(request.key)
     await executor.close()
-
-
-async def test_pause_drain_cancels_scheduler_queued_work_before_confirming_application() -> None:
-    control = create_run_control_channel(FakeRunControlEventSink(), threads=loop_threads())
-    cluster = ScenarioCluster()
-    cluster.states = (SlurmJobStatus.PENDING,)
-    async with world(cluster) as w:
-        w.control = control
-        accepted = await submit(w)
-        resource = resource_of(accepted)
-        await settled(w, resource)
-        assert (await w.stack.executor.poll(resource.root)).phase is PollPhase.QUEUED
-        control.land_park((resource.root,))
-        assert not control.drain_ready
-        drain = query(CancelOwnedJob, "pause-drain", resource).model_copy(update={"for_park": True})
-        released = await run(w, drain)
-        assert released.observation.observation.released
-        assert control.drain_ready
-        assert resource.root in cluster.cancelled
-        assert (await w.stack.executor.poll(resource.root)).phase is PollPhase.ENDED
-
-
-def test_pause_drain_job_confirmation_never_requests_a_stop() -> None:
-    channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
-    stops: list[bool] = []
-    channel.on_stop_requested(lambda: stops.append(True))
-    channel.land_park(("queued-job",))
-    assert not channel.drain_ready
-    channel.settle_drain_job("queued-job")
-    assert channel.drain_ready
-    assert not stops
-    assert not channel.stop_requested()
 
 
 def _permit(invocation: str) -> TurnPermit:

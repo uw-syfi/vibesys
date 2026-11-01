@@ -444,9 +444,7 @@ class RunControlChannel(Protocol):
         """Drain queued operator actions exactly once."""
         ...
 
-    def land_park(
-        self, jobs: tuple[str, ...] = (), *, immediate: bool = False, parked: bool = False
-    ) -> None:
+    def land_park(self, *, immediate: bool = False, parked: bool = False) -> None:
         """Report that core committed a park drain; ``parked`` when the run has already parked."""
         ...
 
@@ -560,15 +558,6 @@ class RunControlChannel(Protocol):
         execution or evaluation was prepared with a permit. The channel does
         not decide which work was admitted.
         """
-        ...
-
-    @property
-    def drain_ready(self) -> bool:
-        """Every queued job has been fenced or positively observed executing."""
-        ...
-
-    def settle_drain_job(self, resource_id: str) -> None:
-        """Release the queue barrier for this job."""
         ...
 
     def wait_while_paused(self) -> None:
@@ -751,7 +740,6 @@ class RuntimeRunControlChannel:
         self._prepared_executions: dict[str, Scope] = {}
         self._evaluation_dependencies: dict[str, frozenset[str]] = {}
         self._executing: dict[str, Scope] = {}
-        self._drain_jobs: set[str] = set()
         self._now = threads.now
         self._capacity_turns = 0
         self._timed_turns = 0
@@ -828,17 +816,6 @@ class RuntimeRunControlChannel:
                 if scope is not None:
                     self._executing[execution_id] = scope
             started()
-
-    @property
-    def drain_ready(self) -> bool:
-        """Queued jobs have either ended or been positively observed already executing."""
-        with self._lock:
-            return not self._drain_jobs
-
-    def settle_drain_job(self, resource_id: str) -> None:
-        """Release a queued-job barrier for the run's next control poll."""
-        with self._lock:
-            self._drain_jobs.discard(resource_id)
 
     @property
     def _paused(self) -> bool:
@@ -1137,9 +1114,7 @@ class RuntimeRunControlChannel:
             pending, self._pending_actions = self._pending_actions, []
         return pending
 
-    def land_park(
-        self, jobs: tuple[str, ...] = (), *, immediate: bool = False, parked: bool = False
-    ) -> None:
+    def land_park(self, *, immediate: bool = False, parked: bool = False) -> None:
         """Report core's accepted drain, after it is persisted.
 
         A run that has already parked shows no drain: the log announced the park when it
@@ -1150,7 +1125,6 @@ class RuntimeRunControlChannel:
             if immediate:
                 self._executing.clear()
                 self._permits.clear()
-            self._drain_jobs.update(jobs)
             if not parked:
                 self._emit(RunControlTransitionKind.PARK_REQUESTED)
 
