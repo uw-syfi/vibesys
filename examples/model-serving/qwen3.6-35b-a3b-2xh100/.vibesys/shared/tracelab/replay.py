@@ -126,7 +126,7 @@ def _run(args: argparse.Namespace, temporary: Path) -> dict[str, float]:
         "--summary-path",
         str(summary),
     ]
-    # lint-waiver: LW-040001 [S603]; the evaluator injects the trusted binary;
+    # lint-waiver: LW-994901 [S603]; the evaluator injects the trusted binary;
     # argv execution preserves its boundary, whereas a shell adds interpretation.
     subprocess.run(command, check=True, timeout=3000)  # noqa: S603
     return summary_metrics(
