@@ -458,10 +458,10 @@ As built (PR 6a-3m):
   strict as the file, and both pass `FoldCacheContract`. The cache holds the bytes of a fold (the
   `Folded` of `vs_core`, encoded by `Folded.encode`: core's state and the events the search has yet to
   hear), the number of records it covers and the SHA-256 of those records.
-- A start (`start_fold`) uses the cache only if its digest is that of the log's own first records.
-  Otherwise it folds the whole log and says why in a typed `CacheMiss`: `ABSENT`, `UNREADABLE`,
-  `AHEAD_OF_LOG`, `DIGEST_MISMATCH` or `STATE_REFUSED` (the fold in the cache cannot be read by this
-  code). `RunLogStepLog.cache_start` reports which. The cost that remains is hashing the log's records
+- A start (`start_fold`) uses the cache only if its digest is that of the log's own first records and
+  the fold in it was made by the rules that fold now (below). Otherwise it folds the whole log and says
+  why in a typed `CacheMiss`: `ABSENT`, `UNREADABLE`, `AHEAD_OF_LOG`, `DIGEST_MISMATCH`,
+  `STATE_REFUSED` (the fold in the cache is damaged or in another encoding) or `RULES_CHANGED`. `RunLogStepLog.cache_start` reports which. The cost that remains is hashing the log's records
   (about 4 microseconds each) and the search's restore, which still reads the log's advance records.
 - `RunLogStepLog` writes the cache when the run comes to rest (parked or ended) and every `CACHE_EVERY`
   (1,024) core records its process appended. The keeper folds the log itself from where its cache stopped
@@ -469,8 +469,18 @@ As built (PR 6a-3m):
   projection's records, which a fold reads for their epoch and clock, are in the log between them. A cache
   written from the fold a later start computes cannot differ from it. A failed write leaves the cache
   before it, which is only older.
-- Not covered: a process that changes the fold's code between the write and the read. The cache is read
-  as the code that reads it decodes it, and a state it cannot decode is `STATE_REFUSED`.
+- A cache is keyed by the log's bytes and by the code that folds them. The fold in it (`Folded.encode`)
+  names its rules: `vs_runtime.api.step_runner.fold_rules()`, a SHA-256 (`vs_core.api.recovery.rules_digest`)
+  over the path and the bytes of every source file of `vs_core` outside `testing/`, read once per
+  process. Core is pure and cannot read its own source, so the shell names the rules and core compares
+  the name a fold carries with the one it is read under. A process whose reducers changed
+  since the write (a fix between a pause and the Resume) finds other rules, `Folded.decode` raises
+  `FoldRulesChangedError`, and the start folds the whole log: the cached state plus the records after it
+  would not equal the new rules' own fold. Any change to a `vs_core` file changes the identity, so an
+  upgrade costs one full fold of each run's log, and is never wrong. A build that ships no source has no
+  identity (the empty string), which matches no cache. The fold also reads `vs_proto` and the shell's
+  record reader (`fold_log`), which the identity does not cover: they decode and route records and hold
+  no reducer.
 
 ## Interfaces
 
