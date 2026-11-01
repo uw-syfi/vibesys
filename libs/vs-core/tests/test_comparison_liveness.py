@@ -711,24 +711,30 @@ def test_every_candidate_with_a_sample_gets_a_comparison_and_the_runs_stay_bound
             assert comparison.candidate_samples <= core.MIN_SAMPLES_WITHOUT_FLOOR
 
 
-SIMULATED = 300
+TRIALS_PER_SPREAD = 20
 
 
 @pytest.mark.parametrize("spread", [0.005, 0.02, 0.05])
-def test_at_equal_means_one_evaluation_and_its_official_check_rarely_give_a_verdict(
+def test_at_equal_means_one_evaluation_and_its_official_check_take_bounded_runs_and_leave_none(
     spread: float,
 ) -> None:
     """Seeded simulation of the production path at no floor: equal true means, noisy runs.
 
     Each trial is one commit evaluated once by its agent, everything core takes for its
-    comparison, then the official check. Any verdict is false. At most 7% of trials give one
-    (Welch's test at 95%, conservative), every trial takes at most two extra runs of the
-    candidate and two of the base before the official check, and the official check adds at
-    most one run.
+    comparison, then the official check. Every trial takes at most two extra runs of the
+    candidate and two of the base before the official check, the official check adds at most
+    one run, nothing is left running, and the comparison ends holding exactly the base runs a
+    verdict needs and at most one more candidate run than that.
+
+    How rare a false verdict is at equal means is not asserted here: it depends on the two
+    sides' sample counts and spreads only, through the statistic, which
+    ``test_comparison_statistic`` simulates 4000 times for 13 (counts, spreads) cases
+    including the counts this path ends at, and shows scale-free (a unit change changes no
+    verdict). Counting verdicts over this kernel path repeated that claim at 7% with the cost
+    of the whole kernel per trial.
     """
     draw = seeded(f"equal-means:{spread}")
-    verdicts = 0
-    for trial in range(SIMULATED):
+    for trial in range(TRIALS_PER_SPREAD):
         lab = Lab.of("a", floor=0.0)
         bench = Bench({"input-1": 100.0, "base": 100.0}, spread, draw)
         lab.call("a", "c1", "input-1")
@@ -742,9 +748,6 @@ def test_at_equal_means_one_evaluation_and_its_official_check_rarely_give_a_verd
         last = compared(lab, "a", "input-1")[-1]
         assert last.candidate_samples <= core.MIN_SAMPLES_WITHOUT_FLOOR + 1
         assert last.base_samples == core.MIN_SAMPLES_WITHOUT_FLOOR
-        if last.verdict in (core.ComparisonVerdict.BETTER, core.ComparisonVerdict.WORSE):
-            verdicts += 1
-    assert verdicts / SIMULATED <= 0.07, verdicts
 
 
 @pytest.mark.regression
