@@ -20,12 +20,7 @@ import {
   TailRequestSchema,
 } from '@vibesys/proto';
 import {storeRunFixture, withCoreRecords} from '@vibesys/run-fixtures';
-import {
-  BACKFILL_PAGES,
-  FAILURE_PAGES,
-  MAX_ATTEMPTS,
-  RECORD_WINDOW,
-} from '@vibesys/run-skeleton';
+import {BACKFILL_PAGES, FAILURE_PAGES, MAX_ATTEMPTS, RECORD_WINDOW} from '@vibesys/run-skeleton';
 import {FakeSkeletonCache} from '@vibesys/run-skeleton/cache';
 import {gatewayReader} from '@vibesys/run-skeleton/reader';
 import {
