@@ -27,6 +27,7 @@ Public surface: ``digest_journal``, ``journal_kept_landings``, ``run_attention``
 
 from __future__ import annotations
 
+import math
 from collections import deque
 from datetime import UTC, datetime
 from importlib import import_module
@@ -377,7 +378,7 @@ class _Fold:
             elif idea.outcome == "failed":
                 verdict = IdeaVerdict.FAILED
             elif value is not None and (
-                standing is None or (value < standing if self.minimize else value > standing)
+                standing is None or _beats(value, standing, minimize=self.minimize)
             ):
                 verdict, standing = IdeaVerdict.KEPT, value
             else:
@@ -542,6 +543,17 @@ def run_attention(digest: RunDigest, *, phase: RunPhase | None, now: float) -> R
     if dashboard.failed_streak >= REPEATED_FAILURE_AFTER:
         return RunAttention.REPEATED_FAILURE
     return RunAttention.NONE
+
+
+def _beats(value: float, standing: float, *, minimize: bool) -> bool:
+    """Whether ``value`` is better than ``standing``, a tie within rounding not counting.
+
+    The input's value is rebuilt as a measurement over its ratio to the input, which is off by
+    rounding: a reading equal to the input must not beat it by the last digit.
+    """
+    if math.isclose(value, standing, rel_tol=1e-9, abs_tol=0.0):
+        return False
+    return value < standing if minimize else value > standing
 
 
 def _dashboard_points(

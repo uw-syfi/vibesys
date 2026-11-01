@@ -124,7 +124,8 @@ def test_any_bytes_decode_to_a_request_or_a_typed_rejection(frame: bytes) -> Non
 
 
 @settings(max_examples=examples(pr=20, nightly=300))
-@given(request_id=st.text(min_size=1), client_id=st.text())
+@example(request_id="r", client_id="c" * 128)
+@given(request_id=st.text(min_size=1, max_size=128), client_id=st.text(max_size=128))
 def test_a_rejection_echoes_the_ids_of_an_object_frame(request_id: str, client_id: str) -> None:
     frame = json.dumps({"request_id": request_id, "client_id": client_id, "type": "no.such.type"})
 
@@ -223,3 +224,12 @@ def test_an_invalid_frame_names_its_failing_paths(after_sequence: object) -> Non
     assert isinstance(decoded, Response)
     assert decoded.diagnostic is not None
     assert ("subscribe", "after_sequence") in (decoded.diagnostic.validation_paths or ())
+
+
+def test_a_rejection_does_not_echo_an_id_past_the_correlation_bound() -> None:
+    frame = json.dumps({"request_id": "r" * 129, "client_id": "c" * 129, "type": "no.such.type"})
+
+    decoded = decode_request(frame, clock=ManualClock())
+
+    assert isinstance(decoded, Response)
+    assert (decoded.request_id, decoded.client_id) == ("unknown", "")
