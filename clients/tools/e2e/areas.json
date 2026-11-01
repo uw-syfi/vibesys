@@ -26,7 +26,6 @@
         "chart-hint.spec.ts",
         "chip-hint.spec.ts",
         "controls-*.spec.ts",
-        "core-records.spec.ts",
         "gateway-records.spec.ts",
         "liveness.spec.ts",
         "recorded-facts.spec.ts",

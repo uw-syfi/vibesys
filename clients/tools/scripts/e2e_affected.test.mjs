@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {
   affectedSpecs,
-  areaErrors,
+  areaProblems,
   loadWorld,
   MAX_SHARDS,
   SECONDS_PER_SHARD,
@@ -137,11 +137,38 @@ test('selection is the union of the selections of each changed path', () => {
   }
 });
 
-test('the repository is classified: no area errors, and every spec has a package closure', () => {
-  assert.deepEqual(areaErrors(WORLD), []);
+test('every spec of the repository has a package closure', () => {
   const closures = specPackages(WORLD);
   for (const spec of WORLD.specs)
     assert.ok(closures.get(spec)?.size, `${spec} depends on no package`);
+});
+
+test('the area table reports a stale glob, an unknown package and an ambiguous spec, and raises nothing', () => {
+  const world = toyWorld();
+  world.areas = {
+    frame: ['@t/gone'],
+    apps: {
+      shell: {
+        one: {specs: ['a.spec.ts', 'removed.spec.ts'], packages: ['@t/feature']},
+        two: {specs: ['a.spec.ts'], packages: ['@t/lib']},
+      },
+      absent: {area: {specs: ['x.spec.ts'], packages: []}},
+    },
+  };
+  const problems = areaProblems(world);
+  assert.deepEqual(problems.sort(), [
+    'tools/e2e/areas.json: @t/gone is not a workspace package',
+    'tools/e2e/areas.json: absent has no e2e specs',
+    'tools/e2e/areas.json: absent/area: x.spec.ts matches no spec',
+    'tools/e2e/areas.json: apps/shell/e2e/a.spec.ts is in one and two; place it in one area',
+    'tools/e2e/areas.json: shell/one: removed.spec.ts matches no spec',
+  ]);
+  // The selection still works over the table, and the ambiguous spec depends on both areas.
+  assert.deepEqual(
+    selected(['clients/libs/lib/src/x.ts'], world).includes('apps/shell/e2e/a.spec.ts'),
+    true,
+  );
+  assert.deepEqual(areaProblems(toyWorld()), []);
 });
 
 test('every spec is selected by a change to itself and by one to each package it depends on', () => {

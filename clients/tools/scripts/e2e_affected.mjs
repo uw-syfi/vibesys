@@ -503,12 +503,15 @@ export function shardsFor(specs, seconds) {
 
 /**
  * Problems with the area table: a spec two areas claim, a glob no spec matches, a package that
- * does not exist. Each names the offender, since a person fixes it by editing the table.
+ * does not exist. Each names the offender, since a person fixes it by editing the table. They are
+ * reported, never raised: a spec or a package another change removes or adds between this one's
+ * checks and the queue's would otherwise fail every run, and a stale entry only narrows what the
+ * table says (an unplaced spec depends on everything).
  *
  * @param {E2eWorld} world
  * @returns {string[]}
  */
-export function areaErrors(world) {
+export function areaProblems(world) {
   const named = [
     ...world.areas.frame,
     ...Object.values(world.areas.apps).flatMap(areas =>
@@ -570,53 +573,68 @@ function main(argv) {
   const options = new Map();
   for (let index = 0; index < argv.length; index += 2) options.set(argv[index], argv[index + 1]);
   const world = loadWorld();
-  const errors = areaErrors(world);
-  if (errors.length > 0) throw new Error(errors.join('\n'));
-  const output = options.get('--github-output');
-  const mode = options.get('--mode') ?? 'selected';
-  let specs;
-  let shards;
-  if (mode === 'all') {
-    specs = [];
-    shards = MAX_SHARDS;
-    console.log(`e2e: the whole suite across ${shards} jobs`);
-  } else {
-    const base = options.get('--base') ?? 'origin/main';
-    const head = options.get('--head') ?? 'HEAD';
-    const git = (...args) => execFileSync('git', args, {cwd: CLIENTS_ROOT, encoding: 'utf8'});
-    const mergeBase = git('merge-base', head, base).trim();
-    const lockfile = `${CLIENTS_PREFIX}pnpm-lock.yaml`;
-    const touched = git('diff', '--name-only', '--no-renames', mergeBase, head)
-      .split('\n')
-      .filter(Boolean);
-    const changed = touched.filter(
-      path =>
-        path !== lockfile ||
-        lockfileChangesResolutions(
-          git('show', `${mergeBase}:${lockfile}`),
-          git('show', `${head}:${lockfile}`),
-        ),
-    );
-    const selected = affectedSpecs(changed, world);
-    const bounded = withinBudget(selected, world.seconds);
-    specs = bounded.run.map(spec => spec.slice('apps/'.length));
-    shards = shardsFor(bounded.run, world.seconds);
-    for (const spec of bounded.run)
-      console.log(`e2e: ${spec.slice('apps/'.length)}: ${selected.reasons.get(spec)}`);
-    for (const spec of bounded.deferred)
-      console.log(
-        `e2e: ${spec.slice('apps/'.length)}: left to the merge queue (${selected.reasons.get(spec)})`,
+  for (const problem of areaProblems(world)) console.log(`::warning::${problem}`);
+  let plan;
+  if ((options.get('--mode') ?? 'selected') === 'selected') {
+    try {
+      plan = planOfPullRequest(
+        world,
+        options.get('--base') ?? 'origin/main',
+        options.get('--head') ?? 'HEAD',
       );
-    console.log(
-      `e2e: ${specs.length} of ${world.specs.length} specs across ${shards} jobs; ${bounded.deferred.length} left to the merge queue`,
-    );
+    } catch (error) {
+      // A selector that fails must not stop the run: fall back to the whole suite.
+      console.log(`::warning::e2e selection failed (${error.message}); running the whole suite`);
+    }
   }
+  plan ??= {specs: [], shards: MAX_SHARDS};
+  if (plan.specs.length === 0 && plan.shards === MAX_SHARDS) {
+    console.log(`e2e: the whole suite across ${MAX_SHARDS} jobs`);
+  }
+  const output = options.get('--github-output');
   if (output !== undefined) {
+    const matrix = Array.from({length: plan.shards}, (_, index) => index + 1);
     appendFileSync(
       output,
-      `specs=${JSON.stringify(specs)}\nshards=${JSON.stringify(Array.from({length: shards}, (_, index) => index + 1))}\n`,
+      `specs=${JSON.stringify(plan.specs)}\nshards=${JSON.stringify(matrix)}\n`,
     );
   }
+}
+
+/**
+ * The specs a pull request runs and the jobs to run them in, logging each decision.
+ *
+ * @param {E2eWorld} world
+ * @param {string} base
+ * @param {string} head
+ */
+function planOfPullRequest(world, base, head) {
+  const git = (...args) => execFileSync('git', args, {cwd: CLIENTS_ROOT, encoding: 'utf8'});
+  const mergeBase = git('merge-base', head, base).trim();
+  const lockfile = `${CLIENTS_PREFIX}pnpm-lock.yaml`;
+  const touched = git('diff', '--name-only', '--no-renames', mergeBase, head)
+    .split('\n')
+    .filter(Boolean);
+  const changed = touched.filter(
+    path =>
+      path !== lockfile ||
+      lockfileChangesResolutions(
+        git('show', `${mergeBase}:${lockfile}`),
+        git('show', `${head}:${lockfile}`),
+      ),
+  );
+  const selected = affectedSpecs(changed, world);
+  const bounded = withinBudget(selected, world.seconds);
+  const short = spec => spec.slice('apps/'.length);
+  for (const spec of bounded.run) console.log(`e2e: ${short(spec)}: ${selected.reasons.get(spec)}`);
+  for (const spec of bounded.deferred) {
+    console.log(`e2e: ${short(spec)}: left to the merge queue (${selected.reasons.get(spec)})`);
+  }
+  const shards = shardsFor(bounded.run, world.seconds);
+  console.log(
+    `e2e: ${bounded.run.length} of ${world.specs.length} specs across ${shards} jobs; ${bounded.deferred.length} left to the merge queue`,
+  );
+  return {specs: bounded.run.map(short), shards};
 }
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
