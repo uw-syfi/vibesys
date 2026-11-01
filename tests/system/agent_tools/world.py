@@ -399,7 +399,12 @@ class _Host:
                 if self._world.turns[self._world.seen - 1].closing_at_yield:
                     # The turn is over for the bridge: the handles it waited on are no longer its own.
                     await self._call(self._token(), ("wait", (0,)), count=False)
-                    assert "were not submitted by this agent in this turn" in self._world.errors[-1]
+                    if not self._world.errors or (
+                        "were not submitted by this agent in this turn"
+                        not in self._world.errors[-1]
+                    ):
+                        # Not an assertion: the loop would charge a raising effect and run it again.
+                        self._world.halts.append("a wait after the turn's yield was not refused")
 
     async def close(self) -> None:
         """The host ended: call as an agent holding an old token does, then close the bridge."""
