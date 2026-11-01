@@ -70,18 +70,13 @@ func (g *graph) validateCheckGroups(groups []execution.Suite) error {
 		if err := planner.Validate(suite, collections); err != nil {
 			return err
 		}
-		if gate := suite.ForGate(); len(gate.Commands)+len(gate.PackageCommands) > 0 {
-			if suite.LocalSkip != "" {
-				return fmt.Errorf("check_groups.%s: gate_commands cannot be combined with local_skip", suite.Name)
-			}
-			if err := planner.Validate(gate, collections); err != nil {
-				return fmt.Errorf("gate of %w", err)
-			}
+		if len(suite.GateCommands) > 0 && suite.LocalSkip != "" {
+			return fmt.Errorf("check_groups.%s: gate_commands cannot be combined with local_skip", suite.Name)
 		}
 		if len(suite.Commands) == 0 && len(suite.AlwaysCommands) == 0 {
 			return fmt.Errorf("check_groups.%s: commands or always_commands must not be empty", suite.Name)
 		}
-		for _, commands := range [][][]string{suite.AlwaysCommands, suite.Commands, suite.PackageCommands, suite.GateCommands, suite.GatePackageCommands} {
+		for _, commands := range [][][]string{suite.AlwaysCommands, suite.Commands, suite.PackageCommands, suite.GateCommands} {
 			for _, args := range commands {
 				if len(args) == 0 || strings.TrimSpace(args[0]) == "" {
 					return fmt.Errorf("check_groups.%s: empty command", suite.Name)
