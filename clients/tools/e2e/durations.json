@@ -7,7 +7,6 @@
   "desktop-shell/e2e/chip-hint.spec.ts": 2.423,
   "desktop-shell/e2e/controls-act.spec.ts": 75.731,
   "desktop-shell/e2e/controls-checks.spec.ts": 1.268,
-  "desktop-shell/e2e/core-records.spec.ts": 32.338,
   "desktop-shell/e2e/gateway-records.spec.ts": 19.296,
   "desktop-shell/e2e/home.spec.ts": 2.302,
   "desktop-shell/e2e/liveness.spec.ts": 7.331,
