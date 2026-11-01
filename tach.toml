@@ -1025,7 +1025,7 @@ depends_on = ["vibesys", "vibesys.run.measurement_events", "vs_core", "vs_logs",
 [[modules]]
 path = "vs_dst"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_core", "vs_project", "vs_proto", "vs_runlog", "vs_runtime", "vs_sim.api", "vs_sim.api.testing"]
+depends_on = ["vs_core", "vs_proto", "vs_runlog", "vs_runtime", "vs_sim.api", "vs_sim.api.testing"]
 
 [[modules]]
 path = "vs_sim.blocking"
