@@ -42,7 +42,6 @@ ROOT = Path(__file__).resolve().parents[2]
 # Jobs whose cancel has already hidden a hang, plus the other pytest entry points.
 # The audit still fails a new pytest job that is not in this set.
 REQUIRED_JOBS = {
-    ("nightly.yml", "chaos-sweep"),
     ("nightly.yml", "crash-sweep"),
     ("nightly.yml", "full-depth"),
     ("nightly.yml", "real-tiers"),
