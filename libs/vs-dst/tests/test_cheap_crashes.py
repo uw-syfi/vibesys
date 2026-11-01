@@ -46,12 +46,20 @@ def test_a_crash_case_leaves_the_reference_run_and_its_snapshots_as_they_were() 
 
 
 class DriftingWorld(TinyWorld):
-    """A world that answers differently once a flag outside its copied state is set."""
+    """A world that, once a flag outside its copied state is set, fails its first workspace once.
+
+    The attempt that gets no answer is retried, so the run makes more commits than before.
+    """
 
     drifted: ClassVar[bool] = False
 
+    def __init__(self, items: int = 2) -> None:
+        super().__init__(items)
+        self.failed_once = False
+
     def __call__(self, request: Request, core: CoreState) -> Answer:
-        if self.drifted and isinstance(request, EnsureWorkspace):
+        if self.drifted and isinstance(request, EnsureWorkspace) and not self.failed_once:
+            self.failed_once = True
             return Unknown()
         return super().__call__(request, core)
 
