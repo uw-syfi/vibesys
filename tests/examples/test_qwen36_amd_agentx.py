@@ -14,7 +14,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 from tests.examples.example_task import load_example_task, task_root
 
-_PROJECT = Path(__file__).parents[2] / "examples/model-serving/qwen3.6-35b-a3b-2xh100"
+_PROJECT = Path(__file__).parents[2] / "examples/model-serving/qwen3.6-35b-a3b"
 _TRACE = _PROJECT / ".vibesys/shared/tracelab"
 _REPLAY = SimpleNamespace(**runpy.run_path(str(_TRACE / "replay.py")))
 

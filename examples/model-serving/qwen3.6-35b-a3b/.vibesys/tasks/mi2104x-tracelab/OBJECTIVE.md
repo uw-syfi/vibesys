@@ -1,13 +1,13 @@
-# Qwen3.6 TraceLab serving on 1 AMD MI300X GPU
+# Qwen3.6 TraceLab serving on 4 AMD MI210 GPUs
 
 Build an OpenAI-compatible serving system for `Qwen/Qwen3.6-35B-A3B` on
-**1 AMD MI300X GPU**. This project supplies no candidate engine or validated
+**4 AMD MI210 GPUs**. This project supplies no candidate engine or validated
 AMD baseline. Implementing and optimizing the ROCm serving path is the task.
 The candidate lives in the project root, outside trusted `.vibesys/` inputs.
 
-Keep BF16 weights on the single allocated GPU. Optimize fused expert kernels,
-continuous batching, prefix caching and recurrent-state management without
-cross-GPU communication.
+Partition BF16 weights across the four GPUs. Explore tensor, expert or pipeline
+parallelism, or two replicas of two GPUs each. Include collective and dispatch
+costs, and preserve session affinity for replicas.
 
 ## Model and hardware contract
 
@@ -46,7 +46,7 @@ No full-size AMD run has validated this example yet.
 ## TraceLab recorded workload and objectives
 
 Replay the trusted recorded sample: 48 sessions and 303 rounds, published as
-`examples/multi_session_large.csv` in Request Factory revision
+[`multi_session_large.csv`](https://github.com/uw-syfi/request-factory/blob/89dce4a64ae12e7084fbe464ddda882fa0a4c482/examples/multi_session_large.csv) in Request Factory revision
 `89dce4a64ae12e7084fbe464ddda882fa0a4c482`, materialized from TraceLab rounds.
 This is the recorded sample, not the larger statistically resampled Qwen trace
 or the complete TraceLab public release. The adapter verifies its SHA256.

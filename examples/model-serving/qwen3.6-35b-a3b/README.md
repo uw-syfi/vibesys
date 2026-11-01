@@ -1,17 +1,20 @@
-# Qwen3.6-35B-A3B From-Scratch 2xH100 Input
+# Qwen3.6-35B-A3B serving
 
-Use:
+One candidate project supports these hardware and workload tasks:
 
-- `--input examples/model-serving/qwen3.6-35b-a3b-2xh100`
-- `--runs-dir /work/vibesys-runs`
-- `--local`
-- `--interface service`
-- `--modal` for H100-backed runs
+| Task | Hardware | Workload |
+| --- | --- | --- |
+| `default` | 2 NVIDIA H100 GPUs | Fixed-text Request Factory |
+| `mi2104x-agentx` | 4 AMD MI210 GPUs | AgentX |
+| `mi300x-agentx` | 1 AMD MI300X GPU | AgentX |
+| `mi2104x-tracelab` | 4 AMD MI210 GPUs | TraceLab recorded sessions |
+| `mi300x-tracelab` | 1 AMD MI300X GPU | TraceLab recorded sessions |
 
-This input provides no serving engine and no pre-cloned engine source: the candidate
-builds the sparse-MoE serving stack for `Qwen/Qwen3.6-35B-A3B` from scratch and
-distributes it across 2 H100s. It is the from-scratch counterpart to
-`qwen3.6-35b-a3b-2xh100-vllm`.
+Use `examples/model-serving/qwen3.6-35b-a3b` as the input project and select
+the task when creating a run. This input provides no serving engine or
+pre-cloned engine source: the candidate implements the sparse-MoE serving
+stack for `Qwen/Qwen3.6-35B-A3B` from scratch on the selected hardware.
+The H100 `default` task supports Modal-backed runs.
 
 ## AMD AgentX tasks
 
@@ -24,8 +27,7 @@ This project also offers two tasks over the same candidate codebase:
   64 GB HBM each. Partition weights and optimize communication, expert dispatch
   and hybrid recurrent state across devices.
 
-Select the task when creating a run. The directory retains its existing name
-for compatibility; `default` still targets two H100s and Request Factory.
+Select the task when creating a run. `default` targets two H100s and Request Factory.
 The AMD tasks use [the shared AgentX evaluator](../../../resources/evaluators/agentx/README.md)
 and five throughput/TTFT/TPOT objectives with 3% relative noise tolerance.
 They pin weights and tokenizer to revision
