@@ -132,6 +132,7 @@ func (KeyComponentKind) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{1}
 }
 
+// Deprecated: Marked as deprecated in vibesys/store/v1/replay.proto.
 type WriterReconciliationStatus int32
 
 const (
@@ -1113,6 +1114,8 @@ func (x *ReplayPhysical) GetGuidance() []string {
 // The environment records every writable grant before execution, including
 // tool/build jobs and grants belonging to other runs. Closing this ledger
 // forbids further grants in the execution domain; it does not prove death.
+//
+// Deprecated: Marked as deprecated in vibesys/store/v1/replay.proto.
 type WriterBacking struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Environment   string                 `protobuf:"bytes,1,opt,name=environment,proto3" json:"environment,omitempty"`
@@ -1181,6 +1184,7 @@ func (x *WriterBacking) GetAuthority() string {
 	return ""
 }
 
+// Deprecated: Marked as deprecated in vibesys/store/v1/replay.proto.
 type WriterIdentity struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	RunId           string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
@@ -1250,6 +1254,7 @@ func (x *WriterIdentity) GetDomainId() string {
 	return ""
 }
 
+// Deprecated: Marked as deprecated in vibesys/store/v1/replay.proto.
 type WriterManifest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Backing       *WriterBacking         `protobuf:"bytes,1,opt,name=backing,proto3" json:"backing,omitempty"`
@@ -1310,6 +1315,7 @@ func (x *WriterManifest) GetClosed() bool {
 	return false
 }
 
+// Deprecated: Marked as deprecated in vibesys/store/v1/replay.proto.
 type WriterTerminationProof struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Manifest      *WriterManifest        `protobuf:"bytes,1,opt,name=manifest,proto3" json:"manifest,omitempty"`
@@ -1362,6 +1368,7 @@ func (x *WriterTerminationProof) GetAbsentDomains() []string {
 	return nil
 }
 
+// Deprecated: Marked as deprecated in vibesys/store/v1/replay.proto.
 type WriterReconciliation struct {
 	state         protoimpl.MessageState     `protogen:"open.v1"`
 	Manifest      *WriterManifest            `protobuf:"bytes,1,opt,name=manifest,proto3" json:"manifest,omitempty"`
@@ -1430,6 +1437,7 @@ func (x *WriterReconciliation) GetDetail() string {
 	return ""
 }
 
+// Deprecated: Marked as deprecated in vibesys/store/v1/replay.proto.
 type WriterRegistryState struct {
 	state         protoimpl.MessageState  `protogen:"open.v1"`
 	Manifest      *WriterManifest         `protobuf:"bytes,1,opt,name=manifest,proto3" json:"manifest,omitempty"`
@@ -2999,40 +3007,40 @@ const file_vibesys_store_v1_replay_proto_rawDesc = "" +
 	"\x13_withdrawn_sequenceB\x14\n" +
 	"\x12_observed_sequenceB\x1b\n" +
 	"\x19_termination_proof_digestB\x16\n" +
-	"\x14_settlement_sequence\"\xa6\x01\n" +
+	"\x14_settlement_sequence\"\xaa\x01\n" +
 	"\rWriterBacking\x12)\n" +
 	"\venvironment\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\venvironment\x12#\n" +
 	"\bidentity\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\bidentity\x12\x1e\n" +
 	"\n" +
 	"generation\x18\x03 \x01(\x04R\n" +
 	"generation\x12%\n" +
-	"\tauthority\x18\x04 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\tauthority\"\xb4\x01\n" +
+	"\tauthority\x18\x04 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\tauthority:\x02\x18\x01\"\xb8\x01\n" +
 	"\x0eWriterIdentity\x12\x1e\n" +
 	"\x06run_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\x122\n" +
 	"\x10host_incarnation\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x0fhostIncarnation\x12(\n" +
 	"\vphysical_id\x18\x03 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\n" +
 	"physicalId\x12$\n" +
-	"\tdomain_id\x18\x04 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\bdomainId\"\x9e\x02\n" +
+	"\tdomain_id\x18\x04 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\bdomainId:\x02\x18\x01\"\xa0\x02\n" +
 	"\x0eWriterManifest\x12A\n" +
 	"\abacking\x18\x01 \x01(\v2\x1f.vibesys.store.v1.WriterBackingB\x06\xbaH\x03\xc8\x01\x01R\abacking\x12:\n" +
 	"\awriters\x18\x02 \x03(\v2 .vibesys.store.v1.WriterIdentityR\awriters\x12\x16\n" +
-	"\x06closed\x18\x03 \x01(\bR\x06closed:u\xbaHr\x1ap\n" +
-	"\x16writer_manifest.unique\x12)writer physical identities must be unique\x1a+this.writers.map(x, x.physical_id).unique()\"\xbc\x03\n" +
+	"\x06closed\x18\x03 \x01(\bR\x06closed:w\xbaHr\x1ap\n" +
+	"\x16writer_manifest.unique\x12)writer physical identities must be unique\x1a+this.writers.map(x, x.physical_id).unique()\x18\x01\"\xbe\x03\n" +
 	"\x16WriterTerminationProof\x12D\n" +
 	"\bmanifest\x18\x01 \x01(\v2 .vibesys.store.v1.WriterManifestB\x06\xbaH\x03\xc8\x01\x01R\bmanifest\x12/\n" +
-	"\x0eabsent_domains\x18\x02 \x03(\tB\b\xbaH\x05\x92\x01\x02\x18\x01R\rabsentDomains:\xaa\x02\xbaH\xa6\x02\x1a\xa3\x02\n" +
-	"\x13writer_proof.closed\x12Jtermination proof needs a closed manifest and every domain verified absent\x1a\xbf\x01has(this.manifest) && this.manifest.closed && this.manifest.writers.all(x, x.domain_id in this.absent_domains) && this.absent_domains.all(x, this.manifest.writers.exists(w, w.domain_id == x))\"\xe2\x03\n" +
+	"\x0eabsent_domains\x18\x02 \x03(\tB\b\xbaH\x05\x92\x01\x02\x18\x01R\rabsentDomains:\xac\x02\xbaH\xa6\x02\x1a\xa3\x02\n" +
+	"\x13writer_proof.closed\x12Jtermination proof needs a closed manifest and every domain verified absent\x1a\xbf\x01has(this.manifest) && this.manifest.closed && this.manifest.writers.all(x, x.domain_id in this.absent_domains) && this.absent_domains.all(x, this.manifest.writers.exists(w, w.domain_id == x))\x18\x01\"\xe4\x03\n" +
 	"\x14WriterReconciliation\x12D\n" +
 	"\bmanifest\x18\x01 \x01(\v2 .vibesys.store.v1.WriterManifestB\x06\xbaH\x03\xc8\x01\x01R\bmanifest\x12P\n" +
 	"\x06status\x18\x02 \x01(\x0e2,.vibesys.store.v1.WriterReconciliationStatusB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06status\x12>\n" +
 	"\x05proof\x18\x03 \x01(\v2(.vibesys.store.v1.WriterTerminationProofR\x05proof\x12\x16\n" +
-	"\x06detail\x18\x04 \x01(\tR\x06detail:\xd9\x01\xbaH\xd5\x01\x1a\xd2\x01\n" +
-	"\x1bwriter_reconciliation.proof\x12NProvenStopped requires termination proof for the exact reconciliation manifest\x1ac(this.status == 1) == has(this.proof) && (!has(this.proof) || this.proof.manifest == this.manifest)\"\xa2\x02\n" +
+	"\x06detail\x18\x04 \x01(\tR\x06detail:\xdb\x01\xbaH\xd5\x01\x1a\xd2\x01\n" +
+	"\x1bwriter_reconciliation.proof\x12NProvenStopped requires termination proof for the exact reconciliation manifest\x1ac(this.status == 1) == has(this.proof) && (!has(this.proof) || this.proof.manifest == this.manifest)\x18\x01\"\xa4\x02\n" +
 	"\x13WriterRegistryState\x12D\n" +
 	"\bmanifest\x18\x01 \x01(\v2 .vibesys.store.v1.WriterManifestB\x06\xbaH\x03\xc8\x01\x01R\bmanifest\x12>\n" +
-	"\x05proof\x18\x02 \x01(\v2(.vibesys.store.v1.WriterTerminationProofR\x05proof:\x84\x01\xbaH\x80\x01\x1a~\n" +
-	"\x15writer_registry.proof\x12+registry proof must bind its exact manifest\x1a8!has(this.proof) || this.proof.manifest == this.manifest\"V\n" +
+	"\x05proof\x18\x02 \x01(\v2(.vibesys.store.v1.WriterTerminationProofR\x05proof:\x86\x01\xbaH\x80\x01\x1a~\n" +
+	"\x15writer_registry.proof\x12+registry proof must bind its exact manifest\x1a8!has(this.proof) || this.proof.manifest == this.manifest\x18\x01\"V\n" +
 	"\vReplayClock\x12G\n" +
 	"\tallowance\x18\x01 \x01(\v2!.vibesys.store.v1.ReplayAllowanceB\x06\xbaH\x03\xc8\x01\x01R\tallowance\"\xad\x02\n" +
 	"\fReplayNotice\x12\x17\n" +
@@ -3149,13 +3157,13 @@ const file_vibesys_store_v1_replay_proto_rawDesc = "" +
 	"\x17KEY_COMPONENT_KIND_ITEM\x10\x02\x12\x1d\n" +
 	"\x19KEY_COMPONENT_KIND_SAMPLE\x10\x03\x12\x1f\n" +
 	"\x1bKEY_COMPONENT_KIND_REVISION\x10\x04\x12(\n" +
-	"$KEY_COMPONENT_KIND_RECORDED_POSITION\x10\x05*\xfd\x01\n" +
+	"$KEY_COMPONENT_KIND_RECORDED_POSITION\x10\x05*\x81\x02\n" +
 	"\x1aWriterReconciliationStatus\x12,\n" +
 	"(WRITER_RECONCILIATION_STATUS_UNSPECIFIED\x10\x00\x12/\n" +
 	"+WRITER_RECONCILIATION_STATUS_PROVEN_STOPPED\x10\x01\x12(\n" +
 	"$WRITER_RECONCILIATION_STATUS_PENDING\x10\x02\x12(\n" +
 	"$WRITER_RECONCILIATION_STATUS_UNKNOWN\x10\x03\x12,\n" +
-	"(WRITER_RECONCILIATION_STATUS_UNSUPPORTED\x10\x04*y\n" +
+	"(WRITER_RECONCILIATION_STATUS_UNSUPPORTED\x10\x04\x1a\x02\x18\x01*y\n" +
 	"\x12ReplayControlStale\x12$\n" +
 	" REPLAY_CONTROL_STALE_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x1aREPLAY_CONTROL_STALE_EPOCH\x10\x01\x12\x1d\n" +
