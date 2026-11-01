@@ -25,6 +25,19 @@ import (
 // FailureConflict when a precondition no longer holds, FailureInvalidInput for a value the
 // store cannot hold, and FailureInternal for anything else. A cancelled context fails with the
 // context's error and changes nothing.
+//
+// Values. Every implementation holds the same values, and a value it cannot hold is rejected
+// whole, with FailureInvalidInput naming the field, before anything changes:
+//
+//   - A string is valid UTF-8 and a float is finite, so what comes back is what went in.
+//   - A time is stored and returned in UTC, to the nanosecond, in years 0 to 9999. An empty slice
+//     or map comes back nil, and an interface field holds a struct value, never a pointer.
+//   - A job key and a run id are names: 1 to 128 of A-Z, a-z, 0-9, dot, underscore and hyphen,
+//     not starting with a dot. A command job has no key and every other job has one.
+//   - The store assigns job ids ("j1", "j2", ...) and plan numbers (1, 2, ...) in order. Neither
+//     is ever reused.
+//
+// Values come back as copies: changing one never changes the store.
 type Store interface {
 	JobStore
 	ResultStore
@@ -36,9 +49,10 @@ type Store interface {
 // JobStore holds job state.
 type JobStore interface {
 	// Submit queues a job, or lands on an existing one, as one change. Unless the submission sets
-	// NoCache, a command job excepted, a queued or running job with the same Key is joined, so
-	// parallel duplicate submissions make one job; and a finished job that has a reusable saved
-	// result is returned as reused. The note and plan link are appended to the job it lands on.
+	// NoCache, a command job excepted, the oldest queued or running job that core.CanJoin accepts
+	// is joined, so parallel duplicate submissions make one job; and a finished job that has a
+	// reusable saved result is returned as reused. The note and plan link are appended to the job
+	// it lands on.
 	Submit(ctx context.Context, submission core.Submission) (core.SubmitOutcome, error)
 
 	// Job returns one job.
@@ -48,9 +62,10 @@ type JobStore interface {
 	Jobs(ctx context.Context, filter core.JobFilter) ([]core.Job, error)
 
 	// Transition applies a state change if the job is still in the state the transition moves
-	// from, and fails with FailureConflict otherwise. A transition that carries a result saves it
-	// and the new state together, so no result exists for a job that did not succeed, and an
-	// interrupted measure leaves none. Whether the move is legal is core's decision.
+	// from, and fails with FailureConflict otherwise. Whether the move is legal, and which effects
+	// go with it, is the decision of core.Job.Apply, and a move it refuses changes nothing and
+	// fails as it does. A transition that carries a result saves it and the new state together,
+	// so no result exists for a job that did not succeed, and an interrupted measure leaves none.
 	Transition(ctx context.Context, transition core.Transition) (core.Job, error)
 
 	// AddNote appends a note to a job in any state.
@@ -110,3 +125,23 @@ type LogStore interface {
 	// no limit.
 	ReadLog(ctx context.Context, id core.JobID, offset uint64, max int) (core.LogChunk, error)
 }
+
+// Rules are the decisions of internal/core that depend on the task, which the daemon passes to an
+// implementation when it opens the store. The zero Rules is a store for a task that declares
+// nothing.
+type Rules struct {
+	// Reuse decides whether a saved result answers a submission with the same key. A nil Reuse
+	// accepts every saved result with the key, which is right when the key already covers
+	// everything a result depends on. A key does not cover how many samples a measurement
+	// holds, so a daemon that tops up measurements passes a Reuse built from core.PlanCache.
+	Reuse ReusePolicy
+	// DefaultSamples is the task's default sample count, the number of samples a measure
+	// submission asks for when its settings leave Samples at zero. core.CanJoin needs it to say
+	// whether a job in flight takes as many samples as a submission asks for; with the zero value
+	// a submission that leaves Samples at zero joins nothing.
+	DefaultSamples uint32
+}
+
+// ReusePolicy decides whether a saved result answers a submission with the same key. The rule
+// belongs to internal/core.
+type ReusePolicy func(saved core.Result, want core.Submission) bool

@@ -28,15 +28,26 @@ const (
 // itself. An entry ending in "/" allows the whole subtree. A package with Go files and no entry
 // fails the check, so a new package states its layer in the change that adds it.
 var rules = map[string][]string{
-	"cmd/vibesys-cli":          {"gen/", "internal/wire"},
-	"internal/core":            {},
-	"internal/store":           {"internal/core"},
-	"internal/store/filestore": {"internal/core", "internal/store"},
-	"internal/store/memstore":  {"internal/core", "internal/store"},
-	"internal/environment":     {"internal/core"},
-	"internal/backend":         {"internal/core"},
-	"internal/wire":            {"internal/core", "gen/"},
-	"internal/archcheck":       {},
+	"cmd/vibesys-cli":               {"gen/", "internal/wire"},
+	"internal/core":                 {},
+	"internal/store":                {"internal/core"},
+	"internal/store/ledger":         {"internal/core", "internal/store"},
+	"internal/store/storetest":      {"internal/core", "internal/store"},
+	"internal/store/memstore":       {"internal/core", "internal/store", "internal/store/ledger"},
+	"internal/store/filestore":      {"internal/core", "internal/store", "internal/store/ledger", "internal/store/filestore/fsys"},
+	"internal/store/filestore/fsys": {},
+	"internal/environment":          {"internal/core"},
+	"internal/backend":              {"internal/core"},
+	"internal/wire":                 {"internal/core", "gen/"},
+	"internal/archcheck":            {},
+}
+
+// testRules lists, for each package directory under cli/, the packages only its test files may
+// import in addition to rules: the contract suite an implementation runs, and another
+// implementation to compare it with. Product code reaches neither.
+var testRules = map[string][]string{
+	"internal/store/memstore":  {"internal/store/storetest"},
+	"internal/store/filestore": {"internal/store/storetest", "internal/store/memstore"},
 }
 
 // layoutNames are spellings that only the on-disk layout may use: the state directory, the event
@@ -46,8 +57,8 @@ var layoutNames = []*regexp.Regexp{
 	regexp.MustCompile(`events\.jsonl`),
 	regexp.MustCompile(`\.local/state`),
 	regexp.MustCompile(`XDG_STATE_HOME`),
-	regexp.MustCompile(`"(results|runs|logs)/`),
-	regexp.MustCompile(`(?:filepath|path)\.Join\([^)]*"(results|runs|logs)"`),
+	regexp.MustCompile(`"(jobs|plans|promotions|results|runs|logs)/`),
+	regexp.MustCompile(`(?:filepath|path)\.Join\([^)]*"(jobs|plans|promotions|results|runs|logs)"`),
 }
 
 // Violations checks the files, keyed by slash-separated path from the repository root, and
@@ -81,7 +92,11 @@ func layering(name, source string) []string {
 	if !ok {
 		return []string{fmt.Sprintf("%s: package %s has no layer rule; add it to archcheck's rules", name, dir)}
 	}
-	return disallowed(name, imports, append(slices.Clone(allowed), dir))
+	allowed = append(slices.Clone(allowed), dir)
+	if strings.HasSuffix(name, "_test.go") {
+		allowed = append(allowed, testRules[dir]...)
+	}
+	return disallowed(name, imports, allowed)
 }
 
 func moduleImports(name, source string) ([]string, error) {
