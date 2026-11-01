@@ -14,7 +14,7 @@
 import {act} from 'react';
 
 /** The roles the audit uses, and how it uses each. */
-export type ControlRole =
+type ControlRole =
   | 'button'
   | 'tab'
   | 'radio'
