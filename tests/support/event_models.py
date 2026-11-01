@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import collections.abc
 import math
 import types
 import typing
@@ -11,7 +12,7 @@ from pydantic import BaseModel, TypeAdapter
 
 from server.events import ChatThreadId
 from vibesys.api import SteerDelivery, SteerDeliveryState, SteerMode, WireSpan
-from vibesys.events import EventPayload, RunFailure, RunFailureKind
+from vibesys.events import EventPayload, RunFailure, RunFailureKind, WorkspaceRootProbeData
 
 
 def _deliveries() -> st.SearchStrategy[SteerDelivery]:
@@ -64,6 +65,7 @@ _FIELD_VALUES: dict[str, st.SearchStrategy[object]] = {
 # name, so a new field that reuses a name (``failure`` of an input measurement is an enum) is
 # still drawn from its own type.
 _TYPE_VALUES: dict[object, st.SearchStrategy[object]] = {
+    typing.Any: _JSON_SCALARS,
     # Its optional constrained ``adopted_candidate`` trips its length filter on ``None``.
     RunFailure: st.builds(
         RunFailure,
@@ -77,8 +79,47 @@ _TYPE_VALUES: dict[object, st.SearchStrategy[object]] = {
 }
 
 
+def _root_probes() -> st.SearchStrategy[WorkspaceRootProbeData]:
+    """Probes with exactly the facts each state names (a probe with any other is invalid)."""
+    seconds = st.floats(min_value=0, max_value=1e6)
+    text = st.text(max_size=8)
+    return st.sampled_from(["queued", "retrying", "proven", "failed"]).flatmap(
+        lambda state: st.builds(
+            WorkspaceRootProbeData,
+            state=st.just(state),
+            job_id=st.text(min_size=1, max_size=8) if state == "queued" else st.none(),
+            waited_seconds=seconds if state == "queued" else st.none(),
+            pending_reason=st.none() | text,
+            queue_timeout_seconds=st.none() | st.floats(min_value=1, max_value=1e6),
+            failure=text if state in {"failed", "retrying"} else st.none(),
+            attempt=st.integers(min_value=2, max_value=9) if state == "retrying" else st.none(),
+            retry_in_seconds=seconds if state == "retrying" else st.none(),
+        )
+    )
+
+
+# Payloads whose fields constrain one another, drawn whole: field by field they are invalid.
+_PAYLOAD_VALUES: dict[type[BaseModel], st.SearchStrategy[BaseModel]] = {
+    WorkspaceRootProbeData: _root_probes(),
+}
+
+
 def payload_models(union: object) -> tuple[type[EventPayload], ...]:
     return typing.get_args(typing.get_args(union)[0])
+
+
+def _items_of(annotation: object) -> st.SearchStrategy[object] | None:
+    """Values of a list, sequence or ``tuple[X, ...]`` annotation, its items drawn by ``_values``."""
+    origin = typing.get_origin(annotation)
+    args = typing.get_args(annotation)
+    sequence = origin in (list, collections.abc.Sequence) and len(args) == 1
+    homogeneous_tuple = origin is tuple and len(args) == 2 and args[1] is Ellipsis
+    if not (sequence or homogeneous_tuple):
+        return None
+    # A container's items are drawn like a field's: ``st.from_type`` would build a nested
+    # model from its signature, with unbounded floats and none of its bounds.
+    items = st.lists(_values(args[0], []), max_size=4)
+    return items.map(tuple) if origin is tuple else items
 
 
 def _values(annotation: object, metadata: list[object]) -> st.SearchStrategy[object]:
@@ -89,12 +130,12 @@ def _values(annotation: object, metadata: list[object]) -> st.SearchStrategy[obj
     """
     if annotation in _TYPE_VALUES:
         return _TYPE_VALUES[annotation]
-    if annotation is typing.Any:
-        return _JSON_SCALARS
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
         return _models(annotation)
     if isinstance(annotation, types.UnionType) or typing.get_origin(annotation) is typing.Union:
         return st.one_of(*(_values(arg, metadata) for arg in typing.get_args(annotation)))
+    if (items := _items_of(annotation)) is not None:
+        return items
     # ``Annotated`` keeps the field's bounds, which ``st.from_type`` reads; built at runtime, it
     # is no static type, hence the cast.
     bounded = typing.Annotated[annotation, *metadata] if metadata else annotation
@@ -106,6 +147,8 @@ def _values(annotation: object, metadata: list[object]) -> st.SearchStrategy[obj
 
 def _models[M: BaseModel](model: type[M]) -> st.SearchStrategy[M]:
     """Instances of ``model`` with every required field generated and the rest defaulted."""
+    if model in _PAYLOAD_VALUES:
+        return typing.cast("st.SearchStrategy[M]", _PAYLOAD_VALUES[model])
     required = {
         name: _FIELD_VALUES[name]
         if name in _FIELD_VALUES

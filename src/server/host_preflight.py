@@ -289,7 +289,7 @@ class OptionNotAccepted(BaseModel):
 
     def plain(self) -> str:
         """The fact as one plain line."""
-        return f"this search does not take the {_OPTION_WORDS[self.option]} setting"
+        return f"this search does not take the {self.option.value.replace('_', ' ')} setting"
 
 
 class GitHubUnavailable(BaseModel):
@@ -368,14 +368,6 @@ Each is a fact the app words for its own controls. A check's ``detail`` says the
 line that names no flag and carries none of a cause's raw ``problem`` text; the raw text is for a
 collapsible detail, never a headline.
 """
-
-_OPTION_WORDS = {
-    RunOption.ROUNDS: "rounds",
-    RunOption.TIME_LIMIT: "time limit",
-    RunOption.RESULTS: "results",
-    RunOption.ROLE_MODEL: "role model",
-    RunOption.ROLE_REASONING_EFFORT: "role reasoning effort",
-}
 
 
 def backend_unavailable_text(cause: BackendUnavailable) -> str:
