@@ -471,16 +471,21 @@ As built (PR 6a-3m):
   before it, which is only older.
 - A cache is keyed by the log's bytes and by the code that folds them. The fold in it (`Folded.encode`)
   names its rules: `vs_runtime.api.step_runner.fold_rules()`, a SHA-256 (`vs_core.api.recovery.rules_digest`)
-  over the path and the bytes of every source file of `vs_core` outside `testing/`, read once per
-  process. Core is pure and cannot read its own source, so the shell names the rules and core compares
-  the name a fold carries with the one it is read under. A process whose reducers changed
-  since the write (a fix between a pause and the Resume) finds other rules, `Folded.decode` raises
-  `FoldRulesChangedError`, and the start folds the whole log: the cached state plus the records after it
-  would not equal the new rules' own fold. Any change to a `vs_core` file changes the identity, so an
-  upgrade costs one full fold of each run's log, and is never wrong. A build that ships no source has no
-  identity (the empty string), which matches no cache. The fold also reads `vs_proto` and the shell's
-  record reader (`fold_log`), which the identity does not cover: they decode and route records and hold
-  no reducer.
+  over the path and the bytes of the source files that decide a fold (`fold_sources()`), read once per
+  process: every file of `vs_core` outside `testing/`, and what it imports, found by reading import
+  statements and not listed (`vs_proto`, the schema the records decode with, and `vs_decode`, each whole),
+  and the shell's record reader, the module of `fold_log`, with the modules of its own package that it
+  imports. Core is pure and cannot read its own source, so the shell names the rules and core compares
+  the name a fold carries with the one it is read under. A process whose reducers, record schema or
+  reader changed since the write (a fix between a pause and the Resume) finds other rules,
+  `Folded.decode` raises `FoldRulesChangedError`, and the start folds the whole log: the cached state
+  plus the records after it would not equal the new rules' own fold. Any change to one of those files
+  changes the identity, so an upgrade costs one full fold of each run's log, and is never wrong. A build
+  that ships no source for any of them has no identity (the empty string), which matches no cache. Not
+  covered: a library from outside the repository (the lockfile pins it) and an import made by name at
+  run time. `libs/vs-runtime/tests/test_fold_sources.py` holds the derivation over generated source
+  trees, and an independent reading of every import of the real tree
+  (`test_nothing_a_covered_file_imports_is_left_out_of_the_identity`).
 
 ## Interfaces
 

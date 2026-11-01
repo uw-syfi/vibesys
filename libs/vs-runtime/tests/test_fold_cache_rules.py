@@ -8,16 +8,14 @@ its rules, and a start under other rules folds the whole log.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-import vs_core
-from vs_core.api.recovery import Folded, RunRest, at_rest, fold_run, rules_digest, starts_run
+from vs_core.api.recovery import Folded, RunRest, at_rest, fold_run, starts_run
 from vs_runlog.api import CachedFold, CacheMiss, MemoryFoldCache, PrefixDigest
-from vs_runtime.api.step_runner import CacheUsed, fold_rules, package_sources, start_fold
+from vs_runtime.api.step_runner import CacheUsed, start_fold
 from vs_sim.api.testing import examples
 
 from .test_run_log_step_log_cache import display, operator, process
@@ -135,21 +133,6 @@ def test_a_cache_the_keeper_writes_is_used_by_the_next_start_of_the_same_rules()
     assert changed is not None
     assert changed.start is CacheMiss.RULES_CHANGED
     assert other == whole
-
-
-def test_the_running_rules_are_the_digest_of_every_source_file_of_core_that_is_not_test_support() -> (
-    None
-):
-    root = Path(vs_core.__file__).parent
-    expected = {
-        path.relative_to(root).as_posix()
-        for path in root.rglob("*.py")
-        if "testing" not in path.relative_to(root).parts
-    }
-    sources = package_sources()
-    assert set(sources) == expected
-    assert "_decide.py" in sources
-    assert fold_rules() == rules_digest(sources) != ""
 
 
 def test_the_rules_of_a_build_with_no_source_match_no_cache() -> None:

@@ -1229,7 +1229,7 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
     ),
     "libs/vs-runtime/src/vs_runtime/_fold_rules.py": (
         EdgeKind.PACKAGED_RESOURCE,
-        "the source files of vs_core, hashed to name the rules that fold a log; core is pure",
+        "the source files that decide a fold (vs_core, what it imports, the record reader), hashed to name the rules that fold a log; core is pure",
     ),
     "libs/vs-runlog/src/vs_runlog/_atomic.py": (
         EdgeKind.LOG,

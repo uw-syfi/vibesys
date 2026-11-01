@@ -5,7 +5,7 @@ from collections.abc import Callable
 from vs_core.api.recovery import OpenStep
 from vs_runtime._core_inputs import Controls, CoreInputs, SearchRun
 from vs_runtime._fold_keeper import CACHE_EVERY, CacheUsed, FoldStart, start_fold
-from vs_runtime._fold_rules import fold_rules, package_sources
+from vs_runtime._fold_rules import fold_rules, fold_sources
 from vs_runtime._run_log_step_log import (
     RestAnnouncer,
     RunLogStepLog,
@@ -72,7 +72,7 @@ __all__ = [
     "StepRunnerDecorator",
     "fold_log",
     "fold_rules",
-    "package_sources",
+    "fold_sources",
     "restore_log",
     "resume_paused",
     "run_step_loop",
