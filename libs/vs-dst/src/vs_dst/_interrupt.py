@@ -13,15 +13,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from vs_core.api import (
-    ControlId,
-    ControlInput,
-    PauseOwner,
-    RecoveryPhase,
-    RequestPhase,
-    RunControlEvent,
-    StopMode,
-)
+from vs_core.api import RecoveryPhase, RequestPhase
+from vs_dst._delivery import Delivery
 from vs_dst._host import has_ended
 from vs_dst._interruptions import Action, Interruption, Moment
 from vs_dst._snapshots import RecordingRecords, Snapshots
@@ -134,42 +127,6 @@ class Interrupted:
         return all(count == 1 for count in self.effects.finished.values())
 
 
-class Sender:
-    """Sends the operator's pause or stop to the run, when the run reaches one moment."""
-
-    def __init__(self, point: Interruption) -> None:
-        if point.action is Action.KILL:
-            message = "a kill is no control the operator sends to a live host"
-            raise ValueError(message)
-        self._point = point
-        self._host: RunningHost | None = None
-        self.stopped = False
-        """Whether the operator's stop has reached the host."""
-
-    def watch(self, store: Store, host: RunningHost) -> None:
-        """Start hearing ``store``'s commits, for the run ``host`` drives."""
-        self._host = host
-        store.watcher = self
-
-    def reached(self, moment: Moment, index: int) -> None:
-        """Submit the operator's control when the run is at the moment the interruption names."""
-        if self._host is None or (moment, index) != (self._point.moment, self._point.index):
-            return
-        # Each is its own control: a second one, on a resumed host, must not be taken for the
-        # first, which the log still holds.
-        name = f"operator-{self._point.action.value}-{self._point.moment.name.lower()}-{self._point.index}"
-        if self._point.action is Action.STOP:
-            self.stopped = True
-            control = ControlInput(
-                control_id=ControlId(root=name), action="stop", mode=StopMode.DRAIN
-            )
-        else:
-            control = ControlInput(
-                control_id=ControlId(root=name), action="pause", owner=PauseOwner.OPERATOR
-            )
-        self._host.submit(RunControlEvent(control=control, now_at=self._host.clock.now()))
-
-
 @dataclass(frozen=True)
 class Operator:
     """What the operator does after an interruption: resume the run, and stop it again if asked."""
@@ -198,7 +155,9 @@ class Operator:
         while not hosts or (resumes < MAX_RESUMES and (stopped or not hosts[-1].finished)):
             # A host that dies before the run's first commit leaves nothing to resume.
             resuming = self.plan.resuming(resumed=outside.store.observe() is not None)
-            sender = Sender(self.again) if self.again is not None and resumes == 0 else None
+            sender = (
+                Delivery.operator(self.again) if self.again is not None and resumes == 0 else None
+            )
             hosts.append(resuming.run(outside, clock_at, sender, patience=self.expected.patience))
             stopped = sender is not None and sender.stopped
             clock_at = hosts[-1].ended_at + 1
@@ -229,7 +188,7 @@ def operated(
     when the operator stopped it.
     """
     outside = pristine.copy()
-    sender = Sender(point)
+    sender = Delivery.operator(point)
     first = operator.plan.run(outside, clock_at, sender, patience=operator.expected.patience)
     hosts = operator.resume(outside, first.ended_at + 1, [first], stopped=sender.stopped)
     return _interrupted(point, operator.expected, outside, hosts)
@@ -248,7 +207,7 @@ def killed_while_draining(
     """
     outside = pristine.copy()
     snapshots = Snapshots(outside, frozenset({kill}))
-    sender = Sender(first)
+    sender = Delivery.operator(first)
     host = operator.plan.run(
         outside, clock_at, Together(sender, snapshots), patience=operator.expected.patience
     )
