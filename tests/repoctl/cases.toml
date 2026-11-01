@@ -172,6 +172,24 @@ native_targets = []
 pnpm_packages = []
 
 [[cases]]
+name = "the vibesys-cli contract selects the cli and contract checks but no client job"
+paths = ["proto/vibesys/cli/v1/job.proto"]
+jobs = ["cli", "proto"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "the vibesys-cli release workflow selects the cli checks"
+paths = [".github/workflows/cli-release.yml"]
+jobs = ["cli", "examples"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
 name = "generated vibesys-cli bindings select the cli checks and the contract check"
 paths = ["cli/gen/vibesys/cli/v1/job.pb.go"]
 jobs = ["cli", "proto"]

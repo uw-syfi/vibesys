@@ -137,12 +137,21 @@ depends_on = ["server_protocol", "server_transport", "bun_fetcher"]
 # are key-only, so editing the runtime or the sandbox regenerates the set but does not run the
 # client jobs. The projection snapshots and the conversion golden, which the Python job runs,
 # still see a change from them. The two declaration directories also sit under `clients`.
+# The contract is listed by directory, not as `proto/vibesys`, so `proto/vibesys/cli` (the contract of
+# the Go `vibesys-cli`, which no client or replay reads) selects the `cli` and `proto` jobs only. A new
+# directory under `proto/vibesys` must be added here, or declared as not read by the replays.
 [[components]]
 id = "derived_replays"
 class = "manual"
 job = "clients"
 roots = [
-  "proto/vibesys",
+  "proto/vibesys/api",
+  "proto/vibesys/core",
+  "proto/vibesys/desktop",
+  "proto/vibesys/host",
+  "proto/vibesys/search",
+  "proto/vibesys/store",
+  "proto/vibesys/testing",
   { path = "libs/vs-agent/src", selects = false },
   { path = "libs/vs-async-ops/src", selects = false },
   "libs/vs-core/src",
@@ -397,4 +406,5 @@ job = "cli"
 # The contract the CLI is generated from selects its checks too, so an edit to it cannot leave the
 # Go bindings unvetted. The proto job checks that the bindings are current.
 roots = ["cli", "proto/vibesys/cli"]
-files = ["buf.gen.cli.yaml"]
+# The release workflow builds and publishes what these checks build, so a change to it runs them too.
+files = ["buf.gen.cli.yaml", ".github/workflows/cli-release.yml"]
