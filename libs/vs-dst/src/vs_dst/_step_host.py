@@ -18,20 +18,15 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from vs_core.api import (
-    DEADLINE_STOP,
     ContractError,
-    ControlId,
-    ControlInput,
-    ControlRefusedError,
     DispatchTurn,
     FlowCodeChanged,
     ObservationStatus,
+    PauseOwner,
     ResumeSessionTurn,
-    RunControlEvent,
+    StopMode,
     SubmitMeasurement,
     Until,
-    control_refusal,
-    requested_stop_mode,
 )
 from vs_core.api.recovery import Cancelled, Finished, RunRest
 from vs_core.api.testing import Journal, new_run
@@ -42,7 +37,12 @@ from vs_dst._snapshots import RecordingRecords
 from vs_dst._world import ClearFailingWorld, HoldingWorld, ServingWorld
 from vs_proto.api import EpochStarted, Timestamp
 from vs_runlog.api import ConfirmedLog
-from vs_runtime.api.core import ExecutionContext
+from vs_runtime.api.core import ExecutionContext, OperatorControls, RunControlBridge
+from vs_runtime.api.infrastructure import (
+    ChannelRunControl,
+    PauseRequest,
+    create_run_control_channel,
+)
 from vs_runtime.api.step_router import LIVE_REQUEST_KINDS, NoRunnerError
 from vs_runtime.api.step_runner import (
     Adopted,
@@ -50,7 +50,6 @@ from vs_runtime.api.step_runner import (
     ClearUnavailableError,
     CoreInputs,
     DispatchCapExceededError,
-    RunLogStepLog,
     RunOpening,
     SearchRun,
     StallBoard,
@@ -60,13 +59,21 @@ from vs_runtime.api.step_runner import (
     run_step_loop,
     start_run,
 )
-from vs_runtime.api.testing import RecordingSearch, Run
+from vs_runtime.api.testing import FakeRunControlEventSink, RecordingSearch, Run
 from vs_sim.api.testing import VirtualClock, loop_threads, run_virtual
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_core.api import CoreEvent, CoreState, Observation, Request, RequestId, Transition
+    from vs_core.api import (
+        ArtifactRef,
+        CoreEvent,
+        CoreState,
+        Observation,
+        Request,
+        RequestId,
+        Transition,
+    )
     from vs_core.api.recovery import End, Interruption, OpenStep, RecordRefusal, StepResult
     from vs_core.api.recovery import Run as RunAction
     from vs_dst._effects import Effects
@@ -223,7 +230,8 @@ class _Host:
         registry = setup.harness.registry
         driver = launch.search.driver(launch.config, registry)
         search = RecordingSearch(driver, self._decisions)
-        handle = _HostHandle(clock, self._decisions)
+        operator = _Operator()
+        handle = _HostHandle(clock, self._decisions, operator)
         if watcher is not None:
             watcher.watch(self._records, handle)
         confirmed = ConfirmedLog(self._records, loop_threads())
@@ -246,12 +254,12 @@ class _Host:
         log, run_search = started.log, started.search
         self._records.starts.append(log.cache_start)
         self._search = run_search
-        inputs = CoreInputs(log, run_search, clock)
+        inputs = CoreInputs(log, run_search, clock, controls=operator.controls)
         self._inputs = inputs
         self.state = log.state
         handle.inputs = inputs
         resume_paused(log, now_at=clock.now(), epoch=epoch, resumed=started.resumed)
-        self._lift_standing_stop(log, epoch, clock, resumed=started.resumed)
+        operator.controls.bring_in(log, clock.now())
         serving = (
             world.serve(_Admitting(inputs), clock) if isinstance(world, ServingWorld) else None
         )
@@ -277,31 +285,7 @@ class _Host:
                     await serving.close()
             finally:
                 inputs.leave()
-                await handle.close()
         return self._result(inputs, halted=halted)
-
-    @staticmethod
-    def _lift_standing_stop(
-        log: RunLogStepLog, epoch: int, clock: VirtualClock, *, resumed: bool
-    ) -> None:
-        """The operator's Resume lifts the stop the log holds, as a launched process's bridge does.
-
-        A run that stood paused is resumed by `resume_paused`, which takes the stop with it.
-        A stop alone is lifted only when core takes the Resume (a run whose ending has begun may
-        not), as the control bridge of a launched process does on its first poll.
-        """
-        state = log.state
-        control = ControlInput(
-            control_id=ControlId(root=f"operator-resume-stop:{epoch}"),
-            action="resume",
-            when="now",
-        )
-        if (
-            resumed
-            and requested_stop_mode(state.run) is not None
-            and control_refusal(state, control) is None
-        ):
-            log.input(RunControlEvent(control=control, now_at=clock.now()))
 
     @staticmethod
     async def _until(
@@ -356,6 +340,62 @@ class SearchNeverAdvancedError(RuntimeError):
         super().__init__("the host's search has no progress, though its log is open")
 
 
+class _Texts:
+    """Where the bridge keeps a steer's text: the sim world's steers carry none a run reads."""
+
+    def __init__(self) -> None:
+        self.held: dict[str, str] = {}
+
+    def put(self, ref: ArtifactRef, text: str) -> None:
+        self.held[ref.artifact_id.root] = text
+
+
+class _Operator:
+    """The operator's side of one host: the control channel and the bridge the loop polls.
+
+    Whoever acts for the operator (an interruption, a stop sweep) writes to the channel, as the
+    server's socket and the session do, and the production bridge turns what the channel holds
+    into the controls core records. A process that opens an existing run is the operator's
+    explicit resume of it, so the bridge lifts the stop the log holds on its first poll
+    (``lifts_standing_stop``).
+    """
+
+    def __init__(self) -> None:
+        threads = loop_threads()
+        self._channel = create_run_control_channel(FakeRunControlEventSink(), threads)
+        self._control = ChannelRunControl(self._channel, threads)
+        self.controls = OperatorControls(
+            RunControlBridge(
+                self._channel,
+                _Texts(),
+                control=self._control,
+                lifts_standing_stop=True,
+            ),
+            None,
+        )
+
+    def pause(self, control_id: str) -> None:
+        """The operator's Pause: the run winds down and parks."""
+        self._control.submit(PauseRequest(control_id=control_id))
+
+    def stop(self, mode: StopMode, control_id: str) -> None:
+        """The operator's Stop, draining or cancelling."""
+        self._channel.request_stop(mode, control_id)
+
+    def environment_stop(self) -> None:
+        """The run environment can run none of the run's work: it cancels the run for good."""
+        self._channel.request_environment_stop()
+
+    def quota_pause(self, seconds: float) -> None:
+        """The capacity gate pauses the run on the provider's quota, which lifts after ``seconds``."""
+        self._channel.pause_for_quota(seconds)
+
+    def quota_holds(self) -> bool:
+        """Whether a quota pause holds the run now; polling it fires the pause's timed lift."""
+        pause = self._channel.pause_state()
+        return pause is not None and pause.owner is PauseOwner.QUOTA
+
+
 class _Admitting:
     """The host's inputs as the service of a world admits through them: the committed state, and a commit."""
 
@@ -378,36 +418,15 @@ class _HostHandle:
     are bound once they do; an input before then has nowhere to go and is a defect.
     """
 
-    def __init__(self, clock: VirtualClock, decisions: list[Any]) -> None:
+    def __init__(self, clock: VirtualClock, decisions: list[Any], operator: _Operator) -> None:
         self._clock = clock
         self._decisions = decisions
+        self._operator = operator
         self.inputs: CoreInputs | None = None
         self.serving: Serving | None = None
         """What the world serves this host with, once the host's inputs exist (`ServingWorld`)."""
-        self._timers: list[asyncio.Future[None]] = []
         self.stop_reached = asyncio.Event()
-        """Set once a stop reached this host through the control channel (`_is_channel_stop`)."""
-        self.held_until = -math.inf
-        """The virtual time until which the provider's quota holds every turn in its call."""
-
-    def hold_turns(self, seconds: float) -> None:
-        self.held_until = self._clock.now() + seconds
-
-    def submit_after(self, seconds: float, event: Callable[[float], CoreEvent]) -> None:
-        self._timers.append(asyncio.ensure_future(self._later(seconds, event)))
-
-    async def _later(self, seconds: float, event: Callable[[float], CoreEvent]) -> None:
-        await self._clock.sleep(seconds)
-        try:
-            self.submit(event(self._clock.now()))
-        except ControlRefusedError:
-            return  # the run was resumed before the timer fired: there is nothing left to lift
-
-    async def close(self) -> None:
-        """End the timers the process owned: they die with it."""
-        for timer in self._timers:
-            timer.cancel()
-        await asyncio.gather(*self._timers, return_exceptions=True)
+        """Set once a stop reached this host through the control channel."""
 
     @property
     def clock(self) -> VirtualClock:
@@ -418,24 +437,35 @@ class _HostHandle:
         return self._decisions
 
     def submit(self, event: CoreEvent) -> None:
+        """An input core delivers itself (the deadline's stop): no channel carries it."""
         if self.inputs is None:
             raise HostNotOpenError
         self.inputs.offer(event)
-        if _is_channel_stop(event):
-            self.stop_reached.set()
 
+    def pause(self, control_id: str) -> None:
+        self._opened()
+        self._operator.pause(control_id)
 
-def _is_channel_stop(event: CoreEvent) -> bool:
-    """Whether ``event`` is a stop that reaches the host through its control channel.
+    def stop(self, mode: StopMode, control_id: str) -> None:
+        self._opened()
+        self._operator.stop(mode, control_id)
+        self.stop_reached.set()
 
-    The operator's stops and the run environment's do, and the host bounds each with its stop
-    grace. The deadline's does not: core delivers it itself, so no grace is armed for it.
-    """
-    return (
-        isinstance(event, RunControlEvent)
-        and event.control.action == "stop"
-        and event.control.control_id.root.partition(":")[0] != DEADLINE_STOP
-    )
+    def environment_stop(self) -> None:
+        self._opened()
+        self._operator.environment_stop()
+        self.stop_reached.set()
+
+    def quota_pause(self, seconds: float) -> None:
+        self._opened()
+        self._operator.quota_pause(seconds)
+
+    def quota_holds(self) -> bool:
+        return self._operator.quota_holds()
+
+    def _opened(self) -> None:
+        if self.inputs is None:
+            raise HostNotOpenError
 
 
 async def _stop_outlives(handle: _HostHandle, clock: VirtualClock, grace_s: float) -> None:
@@ -617,7 +647,7 @@ def _executors(
 
         async def _enacted(self, request: Request, result: ExecutionResult) -> ExecutionResult:
             if isinstance(request, DispatchTurn | ResumeSessionTurn):
-                while handle.clock.now() < handle.held_until:
+                while handle.quota_holds():
                     await handle.clock.sleep(QUOTA_POLL_S)
             return result
 

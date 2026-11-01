@@ -127,6 +127,7 @@ from vs_runtime._operation_wiring import (
     operation_roles,
     production_owners,
 )
+from vs_runtime._operator_controls import OperatorControls
 from vs_runtime._owed_submissions import OwedKey, OwedSubmission, OwedSubmissions
 from vs_runtime._render_operation import RenderArtifactsOwner, reply_variable
 from vs_runtime._rerun_policy import KeyedWrite, ReadOnly, read_or_keyed
@@ -254,6 +255,7 @@ __all__ = [
     "OperationOwner",
     "OperationPorts",
     "OperationRole",
+    "OperatorControls",
     "OperatorInbox",
     "OwedKey",
     "OwedSubmission",

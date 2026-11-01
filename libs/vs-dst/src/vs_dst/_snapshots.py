@@ -18,9 +18,7 @@ from vs_runlog.api import MemoryFoldCache
 from vs_runtime.api.testing import FakeRunRecords
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from vs_core.api import CoreEvent, Decision
+    from vs_core.api import CoreEvent, Decision, StopMode
     from vs_dst._effects import Effects
     from vs_dst._world import World
     from vs_proto.api import Record
@@ -42,21 +40,26 @@ class RunningHost(Protocol):
         ...
 
     def submit(self, event: CoreEvent) -> None:
-        """Hand the run an input from outside its loop, as an operator does."""
+        """Hand the run an input core delivers itself (the deadline's stop): no channel carries it."""
         ...
 
-    def hold_turns(self, seconds: float) -> None:
-        """The provider's quota holds every turn in its call for ``seconds`` from now.
-
-        It is the far side's fact: the capacity gate holds the turn from the instant the provider
-        stops it, and core learns of it as the run's quota pause, a control poll later.
-        """
+    def pause(self, control_id: str) -> None:
+        """The operator's Pause, sent to the control channel as the socket and the session send it."""
         ...
 
-    def submit_after(self, seconds: float, event: Callable[[float], CoreEvent]) -> None:
-        """Hand the run ``event(now)`` once ``seconds`` have passed, if the host is still running.
+    def stop(self, mode: StopMode, control_id: str) -> None:
+        """The operator's Stop, sent to the control channel."""
+        ...
 
-        A host that ends first never takes it: the timer died with the process.
+    def environment_stop(self) -> None:
+        """The run environment's stop: the host cancels the run for good."""
+        ...
+
+    def quota_pause(self, seconds: float) -> None:
+        """The capacity gate pauses the run on the provider's quota, which lifts after ``seconds``.
+
+        The turns in flight wait in their calls while the pause holds. A host that ends first
+        never lifts it: the timer died with the process.
         """
         ...
 
