@@ -291,7 +291,7 @@ transcript golden (3.4) at the commit that introduced it.
 | B14 | built | Contract `vs_core.api.CaptureCommandBase`, `CommandCapture` (optional member of `StrategyOperations`); owner `vs_runtime.api.core.CaptureCommandOwner`; role `OperationRole.CAPTURE_COMMAND` | #1992 |
 | B15 | built | `AgentTool.stateless`; `StatelessToolServers`, `CombinedToolServers`; `CoreResources.stateless_tool_servers`; admission in `vibesys.run.core_services` | #1992 |
 | B16 | built | by the workspace executor change that preceded this list | n/a |
-| T1 | built | `vs_runtime.api.testing`: `ScriptedExecutors`, `drive_shell`, `Run`, `HostOptions`, `Script`, `request_executors`, on `vs_core.api.testing` | #1993 |
+| T1 | built | `vs_runtime.api.testing`: `ScriptedExecutors`, `Run`, `HostOptions`, `Script`, `request_executors`, on `vs_core.api.testing` (the host that drove them, `drive_shell`, went with the old shell; `vs_dst` hosts a world on the step loop) | #1993 |
 | T2 | seam | `tests/support/loop_spec.py`: `LoopSpec` keyed by plugin id (CLI selection and envelope codec). The harness and chaos driver stay under `tests/composition/dynamic` until a second strategy draws the split | #1993 |
 
 Why B7 and B10 are in `vs-core`, not `vs-runtime` as the table in 3.1 first said: the pure strategy

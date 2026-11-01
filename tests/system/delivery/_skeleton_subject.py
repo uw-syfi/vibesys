@@ -1,10 +1,10 @@
 """The skeleton search as a subject for the delivery-fault tests.
 
-The delivery tests (`test_delivery_faults.py`, `test_request_kinds.py`)
-drive the skeleton search (`tests/support/skeleton_strategy.py`) through core and the production
-shell with a scripted far side. This module is that far side: the harness that hosts the search,
+The delivery tests (`test_delivery_faults.py`, `test_request_kinds.py`) drive the skeleton search
+(`tests/support/skeleton_strategy.py`) through core with a scripted far side. This module is that
+far side: the harness that hosts the search,
 the world that answers every request, and the wrappers that make an answer unknown, retryable or
-silent, or stop the run while a request executes.
+silent.
 
 The skeleton is the one subject because the guarantees checked here belong to the shell and core,
 not to a search. A search that is correct on core's contract inherits them (see
@@ -16,7 +16,7 @@ from __future__ import annotations
 import hashlib
 from collections import Counter
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from tests.support.dynamic_script import FACTS, Executors, lease
 from tests.support.skeleton_strategy import (
@@ -34,8 +34,6 @@ from tests.support.skeleton_strategy import (
 from vs_core.api import (
     ArtifactId,
     ArtifactRef,
-    ControlId,
-    ControlInput,
     DispatchTurn,
     ExecuteRegisteredOperation,
     FlowState,
@@ -46,9 +44,7 @@ from vs_core.api import (
     RenderedArtifacts,
     ResourceId,
     ResumeSessionTurn,
-    RunControlEvent,
     RunEnvelope,
-    StopMode,
     SubmitMeasurement,
 )
 from vs_core.api.testing import sample_limits
@@ -65,8 +61,6 @@ from vs_runtime.api.testing import Launch
 
 if TYPE_CHECKING:
     from vs_core.api import CoreState, Request
-    from vs_runtime.api.core import CoreRuntime
-    from vs_sim.api.testing import VirtualClock
 
 COMMIT = hashlib.sha256(ATTEMPT.attempt_id.root.encode()).hexdigest()[:40]
 """The commit the scripted implementer reports: the one core's snapshot of the attempt makes."""
@@ -141,64 +135,25 @@ def _nth(outcomes: tuple[str, ...], position: int, default: str) -> str:
 
 
 class Faulted:
-    """A world whose measurements and turns go the way `Outcomes` says, over the scripted world.
-
-    With ``stop_at`` the operator's stop arrives while the ``stop_at``-th request executes,
-    the way a control arrives mid-run in production (the shell admits it between steps); a tuple
-    stops the run at each of those requests, across the hosts a resume starts.
-    """
+    """A world whose measurements and turns go the way `Outcomes` says, over the scripted world."""
 
     def __init__(
-        self,
-        outcomes: Outcomes | None = None,
-        *,
-        stop_at: int | tuple[int, ...] | None = None,
-        base: SkeletonScript | None = None,
+        self, outcomes: Outcomes | None = None, *, base: SkeletonScript | None = None
     ) -> None:
         """Layer ``outcomes`` over ``base`` (a plain scripted world by default)."""
         self._base = base or SkeletonScript()
         self._outcomes = outcomes or Outcomes()
-        self._stops = (stop_at,) if isinstance(stop_at, int) else stop_at or ()
-        self._shell: CoreRuntime[Any] | None = None
-        self.clock: VirtualClock | None = None
-        """The clock of the host that is running, for an executor that waits on it."""
-        self.requests = 0
         self._submitted = 0
         self._asked = 0
         self._infrastructure: set[str] = set()
-        self.stopped = False
         self.executed: Counter[str] = Counter()
-        self.kinds: list[str] = []
-        """The kind of every request the run executed, in order: where a stop point lands."""
-        self.cores: list[CoreState] = []
-        """The core state each request executed in, in order: where a control can land."""
-
-    def attach(self, shell: CoreRuntime[Any], clock: VirtualClock) -> None:
-        """Hear the shell once it exists: the operator's stop is submitted to it, as a control is."""
-        self._shell = shell
-        self.clock = clock
 
     def __call__(self, request: Request, core: CoreState) -> Answer:
         """Answer from the generated outcome when there is one, else from the scripted world."""
         if request.request_id is not None:
             self.executed[request.request_id.root] += 1
-        self.kinds.append(request.kind)
-        self.cores.append(core)
-        self._maybe_control(core)
         faulted = self._measurement(request) or self._job(request, core) or self._turn(request)
         return self._base(request, core) if faulted is None else faulted
-
-    def _maybe_control(self, core: CoreState) -> None:
-        position, self.requests = self.requests, self.requests + 1
-        if self._shell is None:
-            return
-        now_at = core.run.now_at
-        if position in self._stops:
-            self.stopped = True
-            stop = ControlInput(
-                control_id=ControlId(root=f"stop-{position}"), action="stop", mode=StopMode.DRAIN
-            )
-            self._shell.submit(RunControlEvent(control=stop, now_at=now_at), now_at=now_at)
 
     def _measurement(self, request: Request) -> Answer | None:
         if not isinstance(request, SubmitMeasurement):

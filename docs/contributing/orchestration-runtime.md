@@ -211,8 +211,8 @@ modules; `tests/architecture/test_flow_code_is_restricted.py` checks the flow co
 ## Testing a strategy (state-machine form)
 
 Drive the strategy as the shell does: build `CoreView`s, feed `StrategyEvent`s, and assert on
-the proposals. `vs_runtime.api.testing` offers the runtime shell kit (`ScriptedExecutors`,
-`drive_shell`, restart-at-boundary) for tests that run a strategy against scripted
-executors, and `tests/support/core_plugins.py` offers stub core plugins for tests of the
+the proposals. `vs_runtime.api.testing` offers scripted executors (`ScriptedExecutors`) and
+`vs_dst` hosts a strategy over them on the step loop, killing, pausing or stopping it at any
+boundary, for tests that run a strategy against scripted executors, and `tests/support/core_plugins.py` offers stub core plugins for tests of the
 wiring around a run (registration, launch, projection, resource lifetime) that need a plugin
 that composes and ends rather than one that searches.
