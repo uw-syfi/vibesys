@@ -1,8 +1,6 @@
 {
   "desktop-main/e2e/gateway.spec.ts": 74.603,
   "desktop-main/e2e/welcome-recovery.spec.ts": 2.75,
-  "desktop-shell/e2e/controls-act.spec.ts": 94.637,
-  "desktop-shell/e2e/controls-checks.spec.ts": 2.026,
   "desktop-shell/e2e/gateway-records.spec.ts": 34.26,
   "desktop-shell/e2e/home.spec.ts": 2.747,
   "desktop-shell/e2e/liveness.spec.ts": 9.255,
