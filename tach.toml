@@ -669,7 +669,7 @@ depends_on = ["vs_runlog", "vs_proto", "vs_async_ops.api", "vs_core", "vs_decode
 [[modules]]
 path = "vs_agent"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_decode.api", "vs_sandbox", "vs_project", "vs_prompts", "vs_mcp", "vs_faults", "vs_sim.api", "vs_sim.api.testing"]
+depends_on = ["vs_decode.api", "vs_sandbox", "vs_project", "vs_prompts", "vs_mcp", "vs_faults", "vs_sim.api", "vs_sim.api.testing", "vs_agent.api.usage_limits"]
 
 [[modules]]
 # The Usage screen's one door to agentshim's price list and cost arithmetic. Its only importer is
@@ -682,6 +682,13 @@ depends_on = []
 # A person's own CLI use on a host, read from the transcripts the provider CLIs keep. Its only
 # importer is `server.usage_transcripts`.
 path = "vs_agent.api.usage_transcripts"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+# A provider account's plan limits, read on request through agentshim. Its only importers are
+# `server.usage_limits` (the host's reading and its stored copy) and the agent library's own fake.
+path = "vs_agent.api.usage_limits"
 layer = "prompts_and_lower_libs"
 depends_on = []
 
