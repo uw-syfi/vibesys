@@ -123,7 +123,8 @@ class RunProcess:
                 line = self.lines.get(timeout=SILENCE_GUARD_S)
             except queue.Empty:
                 message = (
-                    f"the run reported nothing for {SILENCE_GUARD_S:g} s; seen {self.seen[-5:]}"
+                    f"the run reported nothing for {SILENCE_GUARD_S:g} s; seen {self.seen[-5:]}; "
+                    f"where it waits: {self._stacks()}"
                 )
                 raise AssertionError(message) from None
             if line is None:
@@ -135,6 +136,19 @@ class RunProcess:
             self.seen.append(line)
             if matches(line):
                 return line
+
+    def _stacks(self) -> str:
+        """Every thread's stack of the silent run, from the process itself (its stderr file).
+
+        Asked for only as the test fails: the run writes the stacks on ``SIGUSR1`` and the report
+        waits for the next line or two seconds of the run's own reports, which the stacks do not
+        affect.
+        """
+        os.kill(self.pid, signal.SIGUSR1)
+        with contextlib.suppress(queue.Empty):
+            # test-isolation: only lets the run write its stacks before the report; a failure is already certain.
+            self.lines.get(timeout=2.0)
+        return self.errors.read_text()[-6000:]
 
     @property
     def run_id(self) -> str:

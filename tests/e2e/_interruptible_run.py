@@ -22,7 +22,9 @@ and before core hears of it, the window in which a kill leaves an effect without
 from __future__ import annotations
 
 import asyncio
+import faulthandler
 import os
+import signal
 import sys
 import threading
 from dataclasses import dataclass, replace
@@ -269,12 +271,15 @@ def run_process(spec: RunSpec, reports: Connection, releases: Connection) -> Non
 
     The fork server ends a process without shutting its interpreter down, so the imported product
     is not freed on the way out (1.5 to 3 s a process). A failure leaves its traceback in
-    ``spec.errors`` and a nonzero status, which the test reports.
+    ``spec.errors`` and a nonzero status, which the test reports. ``SIGUSR1`` writes every
+    thread's stack to ``spec.errors``: a test that finds the run silent asks for it before it fails,
+    so a stall says where the run waits.
     """
     os.setsid()
     os.environ.clear()
     os.environ.update(spec.environment)
     os.chdir(spec.cwd)
     os.dup2(os.open(spec.errors, os.O_WRONLY | os.O_CREAT | os.O_TRUNC), sys.stderr.fileno())
+    faulthandler.register(signal.SIGUSR1, file=sys.stderr, all_threads=True)
     held = None if spec.hold is None else Hold.parse(spec.hold)
     main(Path(spec.base), spec.resume, held, Channel(reports, releases))
