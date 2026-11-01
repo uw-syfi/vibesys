@@ -1,4 +1,4 @@
-"""Run a world's strategy to the end on the production shell, and from any crash of it."""
+"""Run a world's strategy to the end on the step loop, and from any crash of it."""
 
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ from vs_dst._host import (
     Hosted,
     Hosting,
     HostPlan,
-    ShellHosting,
     has_ended,
 )
 from vs_dst._interrupt import Expectation
@@ -26,7 +25,8 @@ from vs_dst._snapshots import (
     Snapshot,
     Snapshots,
 )
-from vs_runtime.api.testing import FakePublicationDelivery, HostOptions
+from vs_dst._step_host import StepLoopHosting
+from vs_runtime.api.testing import HostOptions
 
 if TYPE_CHECKING:
     from vs_core.api import CoreState, Decision, RunResultProposal, StrategyState
@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     from vs_dst._interrupt import Interrupted
     from vs_dst._world import World
     from vs_proto.api import Record
-    from vs_runtime.api.core import DispatchCapExceededError, RunStalledError
+    from vs_runtime.api.core import DispatchCapExceededError
     from vs_runtime.api.step_runner import StepLoopStalledError
 
 
@@ -94,7 +94,7 @@ class SimulatedRun:
 
     @property
     def state(self) -> StrategyState:
-        """The strategy state the shell last persisted."""
+        """The strategy state the run last logged."""
         return self._run.state
 
     @property
@@ -113,7 +113,7 @@ class SimulatedRun:
         return has_ended(self._run.core)
 
     @property
-    def halted(self) -> DispatchCapExceededError | RunStalledError | StepLoopStalledError | None:
+    def halted(self) -> DispatchCapExceededError | StepLoopStalledError | None:
         """Why the loop gave up on the run (dispatch cap, stall), or None."""
         return self._run.halted
 
@@ -134,13 +134,13 @@ class SimulatedRun:
 
     @property
     def log_records(self) -> tuple[Record, ...]:
-        """The records of the run.log a step-loop run left, in order; none for a shell run."""
+        """The records of the run.log the run left, in order."""
         store = self._outside.store
         return tuple(store.records) if isinstance(store, RecordingRecords) else ()
 
     @property
     def commits(self) -> int:
-        """How many commits the store was asked for, over all hosts of the run."""
+        """How many records the run.log was asked to append, over all hosts of the run."""
         return self._outside.store.commits
 
     @property
@@ -176,9 +176,9 @@ class SimulatedRun:
     def rerun_with_crash(self, point: CrashPoint) -> SimulatedRun:
         """The run that results when the host dies at ``point`` and a new host takes over.
 
-        The new host (a new `CoreRuntime` over a new strategy instance) starts on a copy of the
-        outside world as it stood at ``point``, after the dead host's lease has expired, and runs
-        to the end. The prefix of the run is not run again.
+        The new host (a new process over a new strategy instance) starts on a copy of the
+        outside world as it stood at ``point`` and runs to the end. The prefix of the run is not
+        run again.
 
         The first call runs the world once more from its start and copies the outside world at
         every point `crash_points()` offers (it raises `NondeterministicWorldError` if that run
@@ -294,20 +294,14 @@ class SimulatedRun:
 def simulate(world: World, hosting: Hosting | None = None) -> SimulatedRun:
     """Run ``world``'s strategy to the end of its run on a host, and keep the means to crash it.
 
-    ``hosting`` says which host: the production shell (``CoreRuntime``) by default, with its
-    loop, lease, fence, clock, durable commit and owner-event queue on a virtual clock and an
-    in-memory store, or the step loop (`StepLoopHosting`) over an in-memory run.log. The run
-    copies nothing while it goes (it counts its commits), so a test that never crashes it pays
-    one copy of the initial world; `rerun_with_crash` runs the world once more to take the copies
-    a crash sweep needs. A world that cannot be deep-copied raises `WorldNotCopyableError`.
-
-    How the host is arranged (its concurrency, a run-control channel) is the world's
-    `RunSetup`; a `HostedWorld` also hears each host's shell and clock.
+    The host is the step loop over an in-memory run.log (`StepLoopHosting`) unless ``hosting``
+    says another. The run copies nothing while it goes (it counts its log records), so a test
+    that never crashes it pays one copy of the initial world; `rerun_with_crash` runs the world
+    once more to take the copies a crash sweep needs. A world that cannot be deep-copied raises
+    `WorldNotCopyableError`.
     """
-    hosting = ShellHosting() if hosting is None else hosting
-    setup = world.setup
-    options = HostOptions(max_concurrent=setup.max_concurrent, controlled=setup.controlled)
-    outside = OutsideWorld(hosting.new_store(), FakePublicationDelivery(), Effects(), world)
+    hosting = StepLoopHosting() if hosting is None else hosting
+    outside = OutsideWorld(hosting.new_store(), Effects(), world)
     pristine = outside.copy()  # also fails now, naming the world, if it cannot be copied
-    plan = HostPlan(hosting, options)
+    plan = HostPlan(hosting, HostOptions())
     return SimulatedRun(plan.run(outside, FIRST_HOST_STARTS_AT), outside, plan, pristine)

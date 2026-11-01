@@ -10,26 +10,18 @@ from __future__ import annotations
 
 from functools import cache
 
-import pytest
-
-from vs_dst.api import Action, Hosting, Interrupted, Moment, ShellHosting, StepLoopHosting, simulate
+from vs_dst.api import Action, Interrupted, Moment, StepLoopHosting, simulate
 from vs_sim.api.testing import Depth, using_depth
 
 from ._turns import TurnsWorld
 
-SHELL_FINISH_TWICE = (
-    "on the shell host a pause that lands as the search finishes ends the resumed run in a Finish "
-    "core refuses twice; it fails the same way at the merge base, and the step loop replaces the host"
-)
-
-
-HOSTINGS: dict[str, Hosting] = {"shell": ShellHosting(), "step-loop": StepLoopHosting()}
+STEP_LOOP = StepLoopHosting()
 
 
 @cache
-def _pauses(hosting: str) -> tuple[Interrupted, ...]:
-    """The run paused at every point of every moment, and resumed (one sweep per host)."""
-    normal = simulate(TurnsWorld(2), HOSTINGS[hosting])
+def _pauses() -> tuple[Interrupted, ...]:
+    """The run paused at every point of every moment, and resumed."""
+    normal = simulate(TurnsWorld(2), STEP_LOOP)
     assert normal.finished
     with using_depth(Depth.NIGHTLY):
         points = [p for moment in Moment for p in normal.interruptions(Action.PAUSE, moment)]
@@ -38,34 +30,22 @@ def _pauses(hosting: str) -> tuple[Interrupted, ...]:
 
 
 @cache
-def _answered(hosting: str) -> int:
+def _answered() -> int:
     """How many turns the far side answers when the run is not interrupted."""
-    world = simulate(TurnsWorld(2), HOSTINGS[hosting]).world
+    world = simulate(TurnsWorld(2), STEP_LOOP).world
     assert isinstance(world, TurnsWorld)
     return world.turns_answered
 
 
-@pytest.mark.parametrize("hosting", HOSTINGS)
-def test_a_pause_at_every_point_of_a_run_with_turns_loses_none_of_its_turns(hosting: str) -> None:
-    for interrupted in _pauses(hosting):
+def test_a_pause_at_every_point_of_a_run_with_turns_loses_none_of_its_turns() -> None:
+    for interrupted in _pauses():
         assert isinstance(interrupted.world, TurnsWorld)
-        assert interrupted.world.turns_answered == _answered(hosting), interrupted.interruption
+        assert interrupted.world.turns_answered == _answered(), interrupted.interruption
         assert interrupted.reruns == 0, interrupted.interruption
 
 
-@pytest.mark.parametrize(
-    "hosting",
-    [
-        pytest.param(
-            "shell", marks=pytest.mark.xfail(strict=True, reason=SHELL_FINISH_TWICE), id="shell"
-        ),
-        pytest.param("step-loop", id="step-loop"),
-    ],
-)
-def test_a_pause_at_every_point_of_a_run_with_turns_resumes_to_the_uninterrupted_result(
-    hosting: str,
-) -> None:
-    for interrupted in _pauses(hosting):
+def test_a_pause_at_every_point_of_a_run_with_turns_resumes_to_the_uninterrupted_result() -> None:
+    for interrupted in _pauses():
         why = f"{interrupted.interruption}: {interrupted.outcome.value}; {interrupted.detail}"
         assert interrupted.matches_uninterrupted(), why
         assert interrupted.never_stuck(), why
