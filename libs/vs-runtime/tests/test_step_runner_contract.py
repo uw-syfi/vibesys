@@ -148,6 +148,42 @@ def test_a_raising_attempt_leaves_its_work_and_clear_ends_it() -> None:
     run_virtual(clock, main())
 
 
+def test_an_adopting_runner_hands_back_the_result_of_work_that_ended_under_a_raising_call() -> None:
+    clock = VirtualClock()
+    runner = FakeStepRunner(clock, adopts=True)
+    tag = tag_named("a")
+    runner.script(tag, AttemptRaises(OSError("lost the call"), work_ends_after_s=2.0))
+
+    async def main() -> None:
+        with pytest.raises(OSError, match="lost the call"):
+            await runner.run(a_step(tag), tag, 1, DEADLINE_AT, CancelSignal())
+        assert runner.running() == (tag,)
+        assert await runner.clear(a_step(tag), tag) == Adopted(None)
+        await clock.sleep(2.0)
+        assert runner.running() == ()
+        assert await runner.clear(a_step(tag), tag) == Adopted(finished_result(tag))
+
+    run_virtual(clock, main())
+
+
+def test_a_runner_that_does_not_adopt_ends_the_work_a_raising_call_left_even_when_it_would_end() -> (
+    None
+):
+    clock = VirtualClock()
+    runner = FakeStepRunner(clock)
+    tag = tag_named("a")
+    runner.script(tag, AttemptRaises(OSError("lost the call"), work_ends_after_s=2.0))
+
+    async def main() -> None:
+        with pytest.raises(OSError, match="lost the call"):
+            await runner.run(a_step(tag), tag, 1, DEADLINE_AT, CancelSignal())
+        await clock.sleep(2.0)
+        assert await runner.clear(a_step(tag), tag) == Cleared()
+        assert runner.left_behind() == ()
+
+    run_virtual(clock, main())
+
+
 def test_clear_while_an_attempt_is_awaited_is_a_violation() -> None:
     clock = VirtualClock()
     runner = FakeStepRunner(clock)

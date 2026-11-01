@@ -93,6 +93,9 @@ TIMING = StepLoopTiming(
 )
 FINISHES = AttemptReturns(after_s=1.0)
 RAISES = AttemptRaises(OSError("the host lost the process"))
+CALL_LOST_OVER_ENDING_WORK = AttemptRaises(
+    OSError("the call that watched the work broke"), work_ends_after_s=1.0
+)
 HANGS = AttemptHangs()
 DEAF = AttemptHangs(ignoring_signal=True)
 UNCHARGED = (InterruptionReason.PAUSE, InterruptionReason.SHUTDOWN)
@@ -203,10 +206,13 @@ class Watch:
         """Every error the board showed with a stall."""
         self.cleared: list[tuple[core.RequestId, Adopted | Cleared]] = []
         """What each call of ``clear`` answered, in order, in every process of the run."""
+        self.in_hand: dict[core.RequestId, StepResult] = {}
+        """The result of ended work that the latest ``clear`` of each tag handed to the loop."""
 
     def new_board(self) -> StallBoard:
         """The board of the next process: a restart starts with nothing stalled."""
         self.board = HeldBoard(self.held)
+        self.in_hand.clear()
         return self.board
 
     def boundary(self) -> None:
@@ -220,11 +226,21 @@ class Watch:
             if stall.error is not None:
                 self.errors.append(stall.error)
 
-    def before_record(self, what: str, tag: core.RequestId, *, parked: bool = False) -> None:
+    def before_record(
+        self,
+        what: str,
+        tag: core.RequestId,
+        *,
+        parked: bool = False,
+        result: StepResult | None = None,
+    ) -> None:
         """No record on a tag while a call on it is unfinished, nor a result over live work.
 
         A result asked of a parked log is no result: the log records the attempt as interrupted
         (``Interrupted``), which a parked run leaves to its next process to adopt or clear.
+
+        A result of ended work in the loop's hand is the step's: the loop records it, whatever
+        core settled in its absence, and never records an interruption in its place.
         """
         if self.runner is None:
             return
@@ -233,6 +249,13 @@ class Watch:
         unproven = any(stall.tag == tag for stall in self.board.unproven())
         if what == "step_finished" and not parked and tag in self.runner.running() and not unproven:
             self.problems.append(f"step_finished on {tag.root} over work still going")
+        held = self.in_hand.get(tag)
+        if held is None:
+            return
+        if what == "attempt_interrupted":
+            self.problems.append(f"attempt_interrupted on {tag.root} with its result in hand")
+        elif what == "step_finished" and not parked and result != held:
+            self.problems.append(f"step_finished on {tag.root} replaced the result in hand")
 
 
 class WatchedClock:
@@ -322,7 +345,7 @@ class CrashingLog:
         self, tag: core.RequestId, attempt: int, result: StepResult
     ) -> StepRecord:
         parked = at_rest(self._inner.state) is RunRest.PARKED
-        self._watch.before_record("step_finished", tag, parked=parked)
+        self._watch.before_record("step_finished", tag, parked=parked, result=result)
         if self._faults.before_result is not None:
             await self._faults.before_result(tag, attempt)
         return await self._around(lambda: self._inner.step_finished(tag, attempt, result))
@@ -370,8 +393,11 @@ class CrashingRunner:
     async def clear(self, step: core.Request, tag: core.RequestId) -> Adopted | Cleared:
         self._watch.boundary()
         self._switch.tick()
+        self._watch.in_hand.pop(tag, None)
         outcome = await self._inner.clear(step, tag)
         self._watch.cleared.append((tag, outcome))
+        if isinstance(outcome, Adopted) and outcome.result is not None:
+            self._watch.in_hand[tag] = outcome.result
         self._watch.boundary()
         self._switch.tick()
         return outcome
@@ -847,6 +873,66 @@ def test_a_kill_in_an_attempt_whose_work_survives_charges_it_only_when_clear_fin
     assert seen == {"adopted", "lost"}, "the sweep must adopt the work of one kill and lose another"
 
 
+def test_work_that_ended_under_a_call_that_raised_is_the_step_s_result_and_costs_no_try() -> None:
+    """A job finished while the call that watched it broke: its result is the step's, never core's.
+
+    Finite and exhaustive over the try bound, the time ``clear`` takes and the time the work takes.
+    The work ends ``ends`` seconds after the raise and ``clear`` looks at it after ``takes``.
+    Whatever ``clear`` hands over is the step's one result, even over core's settle of exhausted
+    tries (``retries=0``): the loop never records anything over a result in hand (``Watch``).
+    When the first ``clear`` finds the work done, the raise charges nothing and no second attempt
+    starts; when it finds the work going, the raise is a failed attempt and is charged.
+    """
+    adopted_after_a_charge = False
+    for retries, takes, ends in itertools.product((0, 1, 2), (0.0, 0.5, 1.0, 2.0), (0.5, 1.0, 3.0)):
+        scenario = Scenario(
+            (step(AttemptRaises(OSError("the call broke"), work_ends_after_s=ends), FINISHES),),
+            retries=retries,
+            adopts=True,
+            clear_takes_s=takes,
+        )
+        world = run_world(scenario)
+        check_world(world)
+        label = f"retries={retries} clear_takes_s={takes} work_ends_after_s={ends}"
+        adopted = world.runner.adopted_results.get(world.seed.tags[0])
+        if adopted is not None:
+            assert result_matches(world, 0, adopted), label
+        found_at_once = takes >= ends
+        assert (InterruptionReason.RAISED not in interruption_reasons(world)) == found_at_once, (
+            label
+        )
+        if retries > 0:
+            assert (attempts_started(world, 0) == [1]) == found_at_once, label
+        adopted_after_a_charge |= adopted is not None and not found_at_once
+    assert adopted_after_a_charge, "the matrix must adopt the work of a charged attempt"
+
+
+def test_a_kill_at_any_boundary_never_replaces_or_charges_a_result_the_loop_holds() -> None:
+    """The two ways to drop a result in hand, each killed at every boundary of its run.
+
+    Retries spent: core settles the step as exhausted while the work has ended, and the settle
+    must not replace the result. A try left: the raise must not be charged and run again. A host
+    that dies after a call delivered a result and before the log took it loses it (the work is
+    collected on delivery), which is a charge and not a drop: ``Watch`` judges only a result the
+    loop still holds.
+    """
+    shapes = (
+        Scenario((step(CALL_LOST_OVER_ENDING_WORK),), retries=0, adopts=True, clear_takes_s=0.5),
+        Scenario(
+            (step(CALL_LOST_OVER_ENDING_WORK, FINISHES),),
+            retries=1,
+            adopts=True,
+            clear_takes_s=2.0,
+        ),
+    )
+    for scenario in shapes:
+        clean = run_world(scenario)
+        check_world(clean)
+        assert was_finished(clean, 0)
+        for kill_at in range(clean.boundaries):
+            check_world(run_world(scenario, kill_at))
+
+
 def test_a_step_that_raises_past_its_retry_bound_ends_as_failed() -> None:
     world = run_world(Scenario((step(RAISES),), retries=1))
     check_world(world)
@@ -1100,6 +1186,11 @@ def test_a_pause_that_lands_while_a_start_waits_behind_the_writer_is_not_started
 behaviors = st.one_of(
     st.builds(AttemptReturns, after_s=st.sampled_from([0.0, 1.0, 4.0])),
     st.just(RAISES),
+    st.builds(
+        AttemptRaises,
+        st.just(OSError("the call that watched the work broke")),
+        work_ends_after_s=st.sampled_from([0.5, 3.0]),
+    ),
     st.just(HANGS),
     st.just(DEAF),
     st.builds(AttemptHolds, for_s=st.sampled_from([3.0, 10.0, 25.0]), returns_anyway=st.booleans()),
@@ -1120,7 +1211,7 @@ def scenarios(draw: st.DrawFn) -> Scenario:
         steps,
         retries=draw(st.integers(1, 3)),
         adopts=draw(st.booleans()),
-        clear_takes_s=draw(st.sampled_from([0.0, 0.5])),
+        clear_takes_s=draw(st.sampled_from([0.0, 0.5, 2.0])),
         cancel_polls=draw(st.sampled_from([0, 0, 1, 3])),
         clear_holds=draw(st.sampled_from([0, 0, 1])),
         clear_failures=draw(st.sampled_from([0, 0, 1, 3])),
