@@ -173,7 +173,7 @@ def _startup_host(
         catalog=cast("OperationCatalog", object()),
         steering=None,
         commit_observer=IgnoreCommits(),
-        runner=lambda step_clock, _epoch: FakeStepRunner(step_clock),
+        runner=lambda step_clock: FakeStepRunner(step_clock),
         evaluation=cast("ClosableEvaluation", object()),
         artifacts=ArtifactStore(namespace),
         clock=RunClock(clock),
