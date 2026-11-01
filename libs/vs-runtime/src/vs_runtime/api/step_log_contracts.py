@@ -17,7 +17,7 @@ one that reaches a parked run is not recorded as a result and leaves the log as 
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from vs_core.api import RequestId
@@ -220,7 +220,10 @@ class StepLogContract:
         subject.drive(main())
 
     def test_what_was_appended_survives_a_restart(self) -> None:
-        """The reopened log has every open step as the first one left it, attempts ended."""
+        """The reopened log has every open step as the first one left it, attempts ended.
+
+        The attempt the dead process left is unsettled: ``clear`` says whether its work is lost.
+        """
         subject = self.step_log_under_test()
         first, *rest = subject.runs
 
@@ -231,13 +234,44 @@ class StepLogContract:
                 await subject.log.step_finished(
                     rest[0].tag, rest[0].attempt, Cancelled(reason=CancelReason.WITHDRAWN)
                 )
+            before = subject.log.open_step(first.tag)
+            assert before is not None
             reopened = subject.reopen()
-            assert reopened.open_step(first.tag) == subject.log.open_step(first.tag)
+            assert reopened.open_step(first.tag) == replace(before, unsettled=True)
             attempts = reopened.state.steps.of(first.tag)
             assert attempts is not None
             assert attempts.ended, "the dead process's attempt must read as ended"
             if rest:
                 assert reopened.open_step(rest[0].tag) is None
+
+        subject.drive(main())
+
+    def test_an_attempt_a_dead_process_left_is_charged_only_by_a_lost_record(self) -> None:
+        """A restart charges nothing; ``LOST`` charges the attempt once, and a second is refused."""
+        subject = self.step_log_under_test()
+        first = subject.runs[0]
+
+        async def main() -> None:
+            await subject.log.step_started(first)
+            reopened = subject.reopen()
+            left = reopened.state.steps.of(first.tag)
+            assert left is not None
+            assert left.unsettled
+            assert left.charged == 0, "a crash alone charges the attempt"
+            await reopened.attempt_interrupted(first.tag, first.attempt, Interruption.LOST)
+            charged = reopened.state.steps.of(first.tag)
+            assert charged is not None
+            assert not charged.unsettled
+            assert charged.charged == 1
+            before = reopened.state
+            refused = False
+            try:
+                await reopened.attempt_interrupted(first.tag, first.attempt, Interruption.LOST)
+            except RecordRefusedError as error:
+                refused = error.refusal.reason is RefusalReason.ATTEMPT_MISMATCH
+            assert refused, "a log took a second loss of one attempt"
+            assert reopened.state == before
+            assert subject.reopen().state.steps.of(first.tag) == charged
 
         subject.drive(main())
 

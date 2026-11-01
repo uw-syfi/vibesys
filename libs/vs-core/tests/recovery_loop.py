@@ -43,6 +43,7 @@ from vs_core.api.recovery import (
     interrupted_message,
     interruption_of,
     may_start,
+    open_step,
     request_effect,
     start_due,
     started_message,
@@ -114,6 +115,8 @@ class Loop:
     """The limit each step was first started with: a step's limit is its own, whatever happens."""
     reopened: int = 0
     """How many records the log held when a resume last reopened an ended run."""
+    surviving: set[core.RequestId] = field(default_factory=set)
+    """The steps whose work a crash left alive: ``clear`` adopts it, where it finds the rest gone."""
 
     def add(self, body: Body) -> None:
         record = Record(
@@ -127,10 +130,12 @@ class Loop:
         self.records.append(record)
         self.state = folded
 
-    def open_epoch(self) -> None:
+    def open_epoch(self, *, survivors: bool = False) -> None:
         """The process died, or a new one started: its first record opens the next epoch.
 
-        What a parked run held ended with the pause, so no attempt of it is charged like a crash.
+        No attempt it ends is charged yet: what a parked run held ended with the pause, and what a
+        crash ended waits for ``clear`` (``clear_before``). With ``survivors`` the work of every
+        attempt the crash ended is still alive, as a job on a cluster is.
         A step core ended itself has its result and keeps no attempt into the epoch: only the steps
         still open are compared.
         """
@@ -141,11 +146,16 @@ class Loop:
             for row in self.state.steps.attempts
             if row.tag in open_steps
         }
+        ended = {tag for tag in open_steps if tag in self.running()}
         self.epoch += 1
         self.add(Oneof("epoch_started", EpochStarted(epoch=self.epoch)))
-        if parked:
-            after = {row.tag: row.charged for row in self.state.steps.attempts}
-            assert after == owed, "an attempt a parked run held was charged to the step"
+        after = {row.tag: row.charged for row in self.state.steps.attempts if row.tag in owed}
+        assert after == owed, "an attempt the end of an epoch ended was charged to the step"
+        unsettled = {row.tag for row in self.state.steps.attempts if row.unsettled}
+        assert {tag for tag in unsettled if tag in ended} == (set() if parked else ended)
+        self.surviving = (ended if survivors and not parked else set()) | (
+            self.surviving & unsettled
+        )
 
     def running(self) -> list[core.RequestId]:
         return [row.tag for row in self.state.steps.attempts if not row.ended]
@@ -188,6 +198,8 @@ class Loop:
         if isinstance(action, Run):
             self.closes_only_a_finished_scope(action)
             self.runs_only_what_a_runner_serves(action)
+            if action.clear_first and not self.clear_before(action):
+                return
         before = self.state
         try:
             self.add(body)
@@ -200,6 +212,21 @@ class Loop:
             assert self.state.run.status is core.RunStatus.TERMINAL, (
                 "the end was recorded and the run is not over"
             )
+
+    def clear_before(self, run: Run) -> bool:
+        """What the loop does before it starts an attempt that may have work; whether it may start.
+
+        ``clear`` finds the work a dead host left alive, and adopts it, or finds nothing. Only
+        nothing charges the attempt that host ended, in a record of its own. That record can be
+        the one that uses the step's bound, and the step then does not start.
+        """
+        open_step_ = open_step(self.state, run.tag)
+        survives = run.tag in self.surviving
+        self.surviving.discard(run.tag)
+        if open_step_ is not None and open_step_.unsettled and not survives:
+            lost = interrupted_message(run.tag, open_step_.started, Interruption.LOST)
+            self.add(Oneof("attempt_interrupted", lost))
+        return may_start(self.state, run.tag, self.clock)
 
     def runs_only_what_a_runner_serves(self, run: Run) -> None:
         """The rule never starts a request of the prove-or-block layer: no runner serves one.
@@ -418,6 +445,7 @@ MOVES: st.SearchStrategy[Move] = st.one_of(
     st.just(("resume_now", None)),
     st.just(("capacity_returns", None)),
     st.just(("crash", None)),
+    st.just(("crash_leaving_work", None)),
     st.just(("relaunch_resume", None)),
 )
 
@@ -433,7 +461,9 @@ WORK: st.SearchStrategy[Move] = st.one_of(
     st.tuples(st.just("clock"), st.sampled_from([3.0, 40.0, 500.0])),
     st.tuples(st.just("finish"), st.integers(0, 1)),
 )
-EPOCH_ENDS: st.SearchStrategy[Move] = st.sampled_from([("crash", None), ("relaunch_resume", None)])
+EPOCH_ENDS: st.SearchStrategy[Move] = st.sampled_from(
+    [("crash", None), ("crash_leaving_work", None), ("relaunch_resume", None)]
+)
 
 
 def epoch_scripts() -> st.SearchStrategy[list[Move]]:
@@ -471,6 +501,8 @@ def play(loop: Loop, move: Move) -> None:
             loop.offer(core.ClockAdvanced(now_at=loop.clock))
         case "crash":
             loop.open_epoch()
+        case "crash_leaving_work":
+            loop.open_epoch(survivors=True)
         case "relaunch_resume":
             before = loop.state
             loop.open_epoch()

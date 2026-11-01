@@ -89,6 +89,7 @@ _INTERRUPTIONS = {
     Interruption.PAUSE: InterruptionReason.PAUSE,
     Interruption.SHUTDOWN: InterruptionReason.SHUTDOWN,
     Interruption.RAISED: InterruptionReason.RAISED,
+    Interruption.LOST: InterruptionReason.LOST,
 }
 _INTERRUPTION_NAMES = {stored: why for why, stored in _INTERRUPTIONS.items()}
 

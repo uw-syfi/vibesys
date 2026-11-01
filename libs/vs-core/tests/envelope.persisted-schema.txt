@@ -1352,6 +1352,7 @@ StepAttempts.ended optional {"default":false,"type":"boolean"}
 StepAttempts.started required {"minimum":1,"type":"integer"}
 StepAttempts.tag required {"$ref":"#/$defs/RequestId"}
 StepAttempts.uncharged optional {"$ref":"#/$defs/Count","default":0}
+StepAttempts.unsettled optional {"default":false,"type":"boolean"}
 StepsState {"additionalProperties":false,"type":"object"}
 StepsState.attempts optional {"default":[],"items":{"$ref":"#/$defs/StepAttempts"},"type":"array"}
 StepsState.ended optional {"anyOf":[{"$ref":"#/$defs/RunResultProposal"},{"type":"null"}],"default":null}

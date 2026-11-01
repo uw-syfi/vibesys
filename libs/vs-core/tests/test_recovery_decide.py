@@ -85,6 +85,7 @@ def seed_state() -> core.CoreState:
 
 
 SEED = seed_state()
+RETURNED = [why for why in Interruption if why is not Interruption.LOST]
 
 
 def request_of(name: str, retries: int) -> core.ExecuteRegisteredOperation:
@@ -120,6 +121,7 @@ class Step:
     request: core.ExecuteRegisteredOperation
     started: int = 0
     uncharged: int = 0
+    unsettled: bool = False
     running: bool = False
     done: bool = False
 
@@ -130,11 +132,28 @@ class Step:
 
     @property
     def spent(self) -> bool:
-        """Whether its attempts used the bound: a pause is no debit, a crash or a raise is one."""
+        """Whether its attempts used the bound: a pause is no debit, a raise or a lost attempt is one.
+
+        A crashed attempt is no debit until ``clear`` finds its work lost (``unsettled``).
+        """
         return self.started - self.uncharged > self.request.retry_limit
 
+    def crash(self) -> None:
+        """A crash ends the running attempt: it is not charged until ``clear`` says it was lost."""
+        self.uncharged += int(self.running)
+        self.unsettled = self.unsettled or self.running
+        self.running = False
+
+    def after_crash(self) -> Step:
+        """What the model says of the step once a crash ended its running attempt."""
+        step = self.snapshot()
+        step.crash()
+        return step
+
     def snapshot(self) -> Step:
-        return Step(self.request, self.started, self.uncharged, self.running, self.done)
+        return Step(
+            self.request, self.started, self.uncharged, self.unsettled, self.running, self.done
+        )
 
 
 @dataclass
@@ -176,6 +195,7 @@ class Builder:
     def start(self, step: Step) -> None:
         step.started += 1
         step.running = True
+        step.unsettled = False
         run = Run(step.request, step.tag, step.started, 100.0)
         self.append(Oneof("step_started", started_message(run)))
 
@@ -183,6 +203,17 @@ class Builder:
         step.running = False
         step.uncharged += 0 if why.charged else 1
         self.append(Oneof("attempt_interrupted", interrupted_message(step.tag, step.started, why)))
+
+    def lose(self, step: Step) -> None:
+        """``clear`` found nothing of the work a crash left: the attempt it ended is charged."""
+        step.uncharged -= 1
+        step.unsettled = False
+        self.append(
+            Oneof(
+                "attempt_interrupted",
+                interrupted_message(step.tag, step.started, Interruption.LOST),
+            )
+        )
 
     def end(self, step: Step, result: StepResult) -> None:
         step.running = False
@@ -192,7 +223,7 @@ class Builder:
     def restart(self) -> None:
         self.epoch += 1
         for step in self.steps:
-            step.running = False
+            step.crash()
         self.append(Oneof("epoch_started", EpochStarted(epoch=self.epoch)))
 
 
@@ -206,6 +237,8 @@ def scripts(draw: st.DrawFn) -> Script:
         choices = ["restart", *(["prepare"] if len(build.steps) < 3 else [])]
         startable = [step for step in idle if not step.spent]
         choices += ["start"] if startable else []
+        lost = [step for step in idle if step.unsettled]
+        choices += ["lose"] if lost else []
         choices += ["interrupt", "finish", "cancel"] if running else []
         match draw(st.sampled_from(choices)):
             case "prepare":
@@ -213,7 +246,9 @@ def scripts(draw: st.DrawFn) -> Script:
             case "start":
                 build.start(draw(st.sampled_from(startable)))
             case "interrupt":
-                build.interrupt(draw(st.sampled_from(running)), draw(st.sampled_from(Interruption)))
+                build.interrupt(draw(st.sampled_from(running)), draw(st.sampled_from(RETURNED)))
+            case "lose":
+                build.lose(draw(st.sampled_from(lost)))
             case "finish":
                 step = draw(st.sampled_from(running))
                 build.end(step, Finished(observation=success(step.request)))
@@ -276,7 +311,7 @@ def test_a_crash_at_every_record_leaves_every_open_step_to_run_again(script: Scr
         runs = {action.tag: action for action in actions if isinstance(action, Run)}
         settled = {action.tag: action for action in actions if isinstance(action, Settle)}
         assert not [action for action in actions if isinstance(action, Cancel)]
-        for step in open_steps:
+        for step in map(Step.after_crash, open_steps):
             if step.spent:
                 assert settled[step.tag].result == Failed(
                     reason=core.FailureReason.ATTEMPTS_EXHAUSTED
@@ -285,6 +320,7 @@ def test_a_crash_at_every_record_leaves_every_open_step_to_run_again(script: Scr
             else:
                 assert runs[step.tag].attempt == step.started + 1
                 assert runs[step.tag].step == step.request
+                assert runs[step.tag].clear_first == (step.started > 0)
                 assert step.tag not in settled
         assert set(runs) | set(settled) == {step.tag for step in open_steps}
 
@@ -663,16 +699,39 @@ def test_a_pause_or_shutdown_never_wears_a_step_out(
     assert action.attempt == cycles + 1
 
 
+def lost_record(row: StepAttempts, epoch: int) -> Record:
+    return Record(
+        seq=100,
+        epoch=epoch,
+        at=Timestamp(seconds=100),
+        clock=100.0,
+        body=Oneof(
+            "attempt_interrupted", interrupted_message(row.tag, row.started, Interruption.LOST)
+        ),
+    )
+
+
 @settings(max_examples=examples(pr=12, nightly=100))
 @given(script=scripts())
-def test_a_later_epoch_ends_every_running_attempt_and_charges_it(script: Script) -> None:
+def test_a_later_epoch_ends_every_running_attempt_and_leaves_it_to_clear_to_charge(
+    script: Script,
+) -> None:
     state = fold(script.records, SEED)
     reopened = fold([epoch_record(state.steps.epoch + 1)], state)
     assert reopened.steps.epoch == state.steps.epoch + 1
     assert [row.tag for row in reopened.steps.attempts] == [row.tag for row in state.steps.attempts]
     for before, after in zip(state.steps.attempts, reopened.steps.attempts, strict=True):
+        running = not before.ended
         assert after.ended
-        assert (after.started, after.uncharged) == (before.started, before.uncharged)
+        assert after.started == before.started
+        assert after.unsettled == (before.unsettled or running)
+        assert after.charged == before.charged - int(running), "a crash alone charges nothing"
+        if after.unsettled:
+            lost = fold([lost_record(after, reopened.steps.epoch)], reopened)
+            row = lost.steps.of(after.tag)
+            assert row is not None
+            assert not row.unsettled
+            assert row.charged == after.charged + 1, "a lost attempt is charged once"
     assert fold([epoch_record(state.steps.epoch)], state).steps == state.steps
 
 

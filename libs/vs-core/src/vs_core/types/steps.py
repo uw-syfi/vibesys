@@ -75,10 +75,17 @@ class Interruption(StrEnum):
     RAISED = "raised"
     """The runner raised or gave nothing back: charged, as a crash of the attempt is."""
 
+    LOST = "lost"
+    """The attempt's process died with its host and ``clear`` found nothing of its work: charged.
+
+    A later record than the epoch that ended the attempt, written once ``clear`` has answered
+    ``Cleared`` (``StepAttempts.unsettled``). Work ``clear`` adopted is never charged.
+    """
+
     @property
     def charged(self) -> bool:
         """Whether the attempt this ended counts against the step's retry bound."""
-        return self is Interruption.RAISED
+        return self in (Interruption.RAISED, Interruption.LOST)
 
 
 class Finished(Value):
@@ -127,8 +134,8 @@ class StepAttempts(Value):
     Attempts are numbered from 1 and run one at a time, so the latest one stands for the rest.
     It runs now until a record ends it: an interruption of it, or the first record of a later
     epoch, which proves its process dead. ``uncharged`` counts the attempts a pause or shutdown
-    ended; every other attempt that began, a crashed or a raised one included, counts against
-    the step's retry bound.
+    ended; every other attempt that began, a raised one or one whose work a dead host lost,
+    counts against the step's retry bound.
     """
 
     tag: RequestId
@@ -137,7 +144,13 @@ class StepAttempts(Value):
     ended: bool = False
     """Whether the latest attempt ended without a result."""
     uncharged: Count = 0
-    """The attempts a pause or shutdown ended."""
+    """The attempts a pause or shutdown ended, and the one a dead host ended until ``clear`` says
+    whether its work is lost (``unsettled``)."""
+    unsettled: bool = Field(default=False, exclude_if=lambda unsettled: not unsettled)
+    """Whether the latest attempt ended with a dead host and nothing yet says whether its work is
+    lost. ``clear`` of the step answers: ``Cleared`` means the work is gone, a ``LOST`` record then
+    charges the attempt; adopted work is alive, and the attempt is never charged. The next attempt
+    to begin settles it either way."""
     deadline_at: Seconds | None = Field(default=None, exclude_if=unset)
     """The limit the first attempt started with: the step's own, which a cap on one attempt does
     not move. A drain caps the request it cannot interrupt; the cap ends with that attempt."""

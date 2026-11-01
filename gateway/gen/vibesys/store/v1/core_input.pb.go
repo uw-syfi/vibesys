@@ -102,6 +102,10 @@ const (
 	// The runner raised, or gave nothing back. Unlike the two above it is charged to the step's
 	// retry bound, as a crash of the attempt is.
 	InterruptionReason_INTERRUPTION_REASON_RAISED InterruptionReason = 3
+	// The attempt's process died with its host, and `clear` of the step then found nothing of its
+	// work: the attempt is lost, and charged to the step's retry bound. Written after the epoch
+	// that ended the attempt; work `clear` found alive is adopted and never charged.
+	InterruptionReason_INTERRUPTION_REASON_LOST InterruptionReason = 4
 )
 
 // Enum value maps for InterruptionReason.
@@ -111,12 +115,14 @@ var (
 		1: "INTERRUPTION_REASON_PAUSE",
 		2: "INTERRUPTION_REASON_SHUTDOWN",
 		3: "INTERRUPTION_REASON_RAISED",
+		4: "INTERRUPTION_REASON_LOST",
 	}
 	InterruptionReason_value = map[string]int32{
 		"INTERRUPTION_REASON_UNSPECIFIED": 0,
 		"INTERRUPTION_REASON_PAUSE":       1,
 		"INTERRUPTION_REASON_SHUTDOWN":    2,
 		"INTERRUPTION_REASON_RAISED":      3,
+		"INTERRUPTION_REASON_LOST":        4,
 	}
 )
 
@@ -717,7 +723,8 @@ func (*StepFinished_Failed) isStepFinished_Result() {}
 func (*StepFinished_Cancelled) isStepFinished_Result() {}
 
 // AttemptInterrupted is an attempt that ended without a result. The step stays open. A pause or
-// shutdown is not charged an attempt of its retry bound; a runner that raised is.
+// shutdown is not charged an attempt of its retry bound; a runner that raised, or whose work a
+// dead host lost, is.
 type AttemptInterrupted struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Tag           string                 `protobuf:"bytes,1,opt,name=tag,proto3" json:"tag,omitempty"`
@@ -899,12 +906,13 @@ const file_vibesys_store_v1_core_input_proto_rawDesc = "" +
 	" STEP_CANCEL_REASON_DRAIN_EXPIRED\x10\x03\x12!\n" +
 	"\x1dSTEP_CANCEL_REASON_RUN_ENDING\x10\x04\x12 \n" +
 	"\x1cSTEP_CANCEL_REASON_WITHDRAWN\x10\x05\x12\"\n" +
-	"\x1eSTEP_CANCEL_REASON_INTERRUPTED\x10\x06*\x9a\x01\n" +
+	"\x1eSTEP_CANCEL_REASON_INTERRUPTED\x10\x06*\xb8\x01\n" +
 	"\x12InterruptionReason\x12#\n" +
 	"\x1fINTERRUPTION_REASON_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19INTERRUPTION_REASON_PAUSE\x10\x01\x12 \n" +
 	"\x1cINTERRUPTION_REASON_SHUTDOWN\x10\x02\x12\x1e\n" +
-	"\x1aINTERRUPTION_REASON_RAISED\x10\x03BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3"
+	"\x1aINTERRUPTION_REASON_RAISED\x10\x03\x12\x1c\n" +
+	"\x18INTERRUPTION_REASON_LOST\x10\x04BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3"
 
 var (
 	file_vibesys_store_v1_core_input_proto_rawDescOnce sync.Once

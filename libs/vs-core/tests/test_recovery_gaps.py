@@ -64,6 +64,7 @@ def test_a_parked_run_settles_nothing_even_when_a_step_it_holds_is_spent() -> No
     """The step has used its attempts, so a running run would settle it; a parked one waits."""
     loop = started((100.0,), retries=0)
     play(loop, ("crash", None))
+    loop.tick()  # `clear` finds nothing of the attempt: it is charged, and the step is spent
     spent = decide(loop.state, loop.clock)
     assert [type(action) for action in spent] == [Settle]
     pause(loop)
