@@ -20,7 +20,7 @@ from vs_core.api import (
     StopMode,
 )
 from vs_dst._crash_points import EVERY_POINT, CrashPointPolicy
-from vs_dst._interruptions import Moment
+from vs_dst._interruptions import SWEPT_MOMENTS, Moment
 from vs_sim.api.testing import Depth, depth
 
 if TYPE_CHECKING:
@@ -94,7 +94,7 @@ def stop_points(commits: int, effects: int) -> tuple[StopPoint, ...]:
     policy = EVERY_POINT if depth() is Depth.NIGHTLY else CrashPointPolicy(STOP_SAMPLE_SIZE)
     return tuple(
         StopPoint(moment, index)
-        for moment in Moment
+        for moment in SWEPT_MOMENTS
         for index in policy.indexes(effects if moment is Moment.IN_FLIGHT else commits)
     )
 
