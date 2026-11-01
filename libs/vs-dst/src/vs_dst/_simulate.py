@@ -209,8 +209,8 @@ class SimulatedRun:
     ) -> tuple[Interruption, ...]:
         """The interruptions of this run that the suite's policy tries.
 
-        A kill or a pause, just before a commit, just after one, or while an effect is in flight
-        (`Moment`). A sample of each on pull requests, every one under ``--depth=nightly``.
+        A kill, a pause or a stop, just before a commit, just after one, or while an effect is in
+        flight (`Moment`). A sample of each on pull requests, every one under ``--depth=nightly``.
         ``action`` and ``moment`` keep one class of them. Only a run no interruption has touched
         offers them: its numbering is the whole run's.
         """
@@ -222,46 +222,49 @@ class SimulatedRun:
         """What becomes of the run when ``point`` interrupts it and the operator resumes it.
 
         A kill starts from a copy of the outside world at ``point`` (the prefix is not run
-        again); a pause runs the world from its start with the operator's pause planted at
-        ``point``, since the host that is paused is alive and must be there to wind down. The
-        operator then resumes the run, again if that host does not end it, up to
+        again); a pause or a stop runs the world from its start with the operator's control
+        planted at ``point``, since the host that is paused or stopped is alive and must be there
+        to wind down. The operator then resumes the run, which lifts what the log holds: again if
+        that host does not end the run, or ended it because the operator stopped it, up to
         `MAX_RESUMES` times. The result says how the run ended up (`Outcome`): never an
         exception, whatever a resume raises.
 
         The first kill runs the world once more from its start, copying the outside world at
         every kill the policy offers, as `rerun_with_crash` does.
 
-        ``then`` stops the run again: the operator pauses the host that resumed it at that point
-        (a pause is the only second stop a resumed host can be given). Its index counts over the
-        whole run, the way ``point``'s does, so a point the resumed host never reaches stops nothing.
+        ``then`` stops the run again: the operator pauses or stops the host that resumed it at
+        that point (a kill is no second stop a resumed host can be given). Its index counts over
+        the whole run, the way ``point``'s does, so a point the resumed host never reaches stops
+        nothing.
         """
         self._require_uninterrupted()
-        if then is not None and then.action is not Action.PAUSE:
-            message = f"a resumed host is stopped again by a pause, not by {then.kind}"
+        if then is not None and then.action is Action.KILL:
+            message = f"a resumed host is stopped again by a pause or a stop, not by {then.kind}"
             raise ValueError(message)
         expected = Expectation(self.result, self._duration)
         operator = _interrupt.Operator(self._plan, expected, then)
-        if point.action is Action.PAUSE:
-            return _interrupt.paused(operator, self._pristine, self._started.clock_at, point)
+        if point.action is not Action.KILL:
+            return _interrupt.operated(operator, self._pristine, self._started.clock_at, point)
         snapshot = self._snapshot(point, frozenset(self.interruptions(Action.KILL)))
         outside = snapshot.outside.copy()
         return _interrupt.killed(operator, outside, self._restart_at(snapshot), point)
 
-    def interrupt_while_draining(self, pause: Interruption, kill: Interruption) -> Interrupted:
-        """What becomes of the run paused at ``pause``, killed while winding down, and resumed.
+    def interrupt_while_draining(self, first: Interruption, kill: Interruption) -> Interrupted:
+        """What becomes of the run paused or stopped at ``first``, killed while winding down, and resumed.
 
-        The operator pauses the run at ``pause``, the host dies at ``kill`` before it has wound
-        down, and the operator resumes it. The indices count over the whole run, as for `interrupt`. A host that finishes winding
-        down before it reaches ``kill`` was only paused.
+        The operator pauses or stops the run at ``first``, the host dies at ``kill`` before it has
+        wound down, and the operator resumes it. The indices count over the whole run, as for
+        `interrupt`. A host that finishes winding down before it reaches ``kill`` was only paused
+        or stopped.
         """
         self._require_uninterrupted()
-        if pause.action is not Action.PAUSE or kill.action is not Action.KILL:
-            message = "a run is paused at a pause and killed at a kill, in that order"
+        if first.action is Action.KILL or kill.action is not Action.KILL:
+            message = "a run is paused or stopped at a pause or a stop and killed at a kill, in that order"
             raise ValueError(message)
         expected = Expectation(self.result, self._duration)
         operator = _interrupt.Operator(self._plan, expected)
         return _interrupt.killed_while_draining(
-            operator, self._pristine, self._started.clock_at, pause, kill
+            operator, self._pristine, self._started.clock_at, first, kill
         )
 
     def stop_points(self) -> tuple[StopPoint, ...]:
