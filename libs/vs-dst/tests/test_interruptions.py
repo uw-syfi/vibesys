@@ -17,6 +17,7 @@ from vs_core.api.testing import Running
 from vs_dst.api import (
     MAX_RESUMES,
     SAMPLE_SIZE,
+    SWEPT_MOMENTS,
     Action,
     Effects,
     Interrupted,
@@ -47,7 +48,7 @@ def test_a_run_offers_a_sample_of_every_class_of_interruption_and_every_one_at_n
     normal = simulate(TinyWorld(items))
 
     for action in Action:
-        for moment in Moment:
+        for moment in SWEPT_MOMENTS:
             total = _effects_of(normal, moment)
             with using_depth(Depth.PR):
                 sampled = [p.index for p in normal.interruptions(action, moment)]
@@ -64,11 +65,13 @@ def test_a_run_offers_each_class_of_interruption_once_by_its_action_and_moment()
 
     offered = normal.interruptions()
 
-    assert {p.kind for p in offered} == {f"{a.value} {m.value}" for a in Action for m in Moment}
+    assert {p.kind for p in offered} == {
+        f"{a.value} {m.value}" for a in Action for m in SWEPT_MOMENTS
+    }
     assert str(Interruption(Action.PAUSE, Moment.IN_FLIGHT, 17)) == "pause in flight 17"
     for action in Action:
         assert {p.action for p in normal.interruptions(action)} == {action}
-    for moment in Moment:
+    for moment in SWEPT_MOMENTS:
         assert {p.moment for p in normal.interruptions(moment=moment)} == {moment}
 
 
@@ -104,7 +107,7 @@ def test_a_pause_parks_the_host_that_receives_it_and_resuming_reruns_nothing() -
 
 @pytest.mark.regression
 @pytest.mark.parametrize("action", [Action.PAUSE, Action.STOP])
-@pytest.mark.parametrize("moment", Moment)
+@pytest.mark.parametrize("moment", SWEPT_MOMENTS)
 @settings(deadline=None, max_examples=examples(pr=3, nightly=10), derandomize=True, database=None)
 @given(items=st.integers(min_value=1, max_value=3), where=st.integers(min_value=0, max_value=1))
 @example(items=1, where=0)

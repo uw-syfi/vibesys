@@ -13,7 +13,7 @@ if git cat-file -e "$base:buf.yaml" 2>/dev/null; then
   trap 'rm -rf "$baseline"' EXIT
   # Git resolves promised blobs through this clone's remote before Buf reads them.
   git archive --format=tar "$base" buf.yaml proto/ > "$baseline/base.tar"
-  uv run --project "$root" --locked --group proto buf breaking --path proto/vibesys/store/v1 --path proto/vibesys/search/v1 --path proto/vibesys/core/v1 \
+  uv run --project "$root" --locked --group proto buf breaking --path proto/vibesys/store/v1 --path proto/vibesys/search/v1 --path proto/vibesys/core/v1 --path proto/vibesys/cli/v1 \
     --against "$baseline/base.tar"
 elif git cat-file -e "$base:proto/vibesys/store/v1" 2>/dev/null; then
   echo "Store exists at $base but buf.yaml is missing; restore its breaking-check configuration." >&2

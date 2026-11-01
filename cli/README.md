@@ -15,6 +15,75 @@ agent can submit a command job, watch it, read its output, cancel it, and find i
 client, the daemon or the machine went away. Checking and measuring a commit need a real
 environment and are not available in this build; see "What this build runs" below.
 
+## Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/uw-syfi/vibesys/main/cli/install.sh | sh
+```
+
+The script picks the binary for your operating system (Linux or macOS) and architecture (amd64 or
+arm64), checks it against the SHA-256 the release publishes, and installs it as
+`~/.local/bin/vibesys-cli`. It needs `curl` or `wget` and `sha256sum` or `shasum`, never asks for
+root, and does not edit your shell profile; if `~/.local/bin` is not on your `PATH` it says so.
+A download that does not match the published checksum installs nothing and leaves any earlier
+install in place.
+
+| Setting | Effect |
+| --- | --- |
+| `VIBESYS_CLI_VERSION=0.2.0` | Install that version instead of the newest. |
+| `VIBESYS_CLI_INSTALL_DIR=/path` | Install there instead of `~/.local/bin`. |
+| `VIBESYS_CLI_RELEASES_URL=https://host/path` | Read release assets from a mirror. The default is `https://github.com/uw-syfi/vibesys/releases/download`. |
+
+Check what you installed:
+
+```sh
+vibesys-cli --version
+```
+
+The checksum guards against a damaged or truncated download. To check that a binary was built by
+this repository's release workflow, verify its build attestation with the GitHub CLI:
+
+```sh
+gh attestation verify ~/.local/bin/vibesys-cli --repo uw-syfi/vibesys
+```
+
+## Upgrade
+
+```sh
+vibesys-cli upgrade
+```
+
+It reads the newest release, and if its version differs from the running binary's it downloads the
+binary for this platform, checks the SHA-256 against the release's `checksums.txt`, and renames it
+over the running file. The rename is atomic, so a process that is starting sees the old binary or
+the new one, never half of one. A download that is cut short, corrupted, or has no published
+checksum is refused with an error and the installed binary is untouched. If the directory holding
+the binary is not writable (for example `/usr/local/bin`), the command says so; reinstall with
+`install.sh` into a directory you own. A development build reports version `dev` and upgrades to
+the newest release.
+
+## Releases
+
+A tag `cli-v<version>` (for example `cli-v0.2.0`) starts `.github/workflows/cli-release.yml`. It
+checks the module, builds a static binary for each of linux/amd64, linux/arm64, darwin/amd64 and
+darwin/arm64 with `cli/build_release.sh`, attests them, and publishes a release for the version.
+A version with a suffix (`cli-v0.2.0-rc.1`) is a GitHub pre-release and is not offered to anyone
+who has not asked for it by version.
+
+The files have the same names in every release, with no version in them:
+
+| File | Content |
+| --- | --- |
+| `vibesys-cli_<os>_<arch>` | The binary. |
+| `checksums.txt` | `sha256sum` output for the four binaries. |
+| `VERSION` | The release version. |
+
+The newest stable release is also published under the tag `cli-latest`, so
+`https://github.com/uw-syfi/vibesys/releases/download/cli-latest/<file>` is a fixed address.
+GitHub's own `releases/latest/download/<file>` is not used: this repository also publishes
+releases of the Python package, and the marker goes to the newest release created, whichever it
+is. Publishing details are in [docs/contributing/publishing.md](../docs/contributing/publishing.md).
+
 ## Layout
 
 | Path | Role |
@@ -46,6 +115,7 @@ environment and are not available in this build; see "What this build runs" belo
 | `internal/daemon/daemontest/` | A daemon started in a test's process on a test directory. Tests only. |
 | `internal/client/` | What a command line calls: connect (starting the daemon under a lock when none runs), the version handshake, and `Wait`. It speaks the contract's messages and never imports `core`. |
 | `internal/production/` | The wiring of the shipped binary: which environment, stores and supervisors the daemon runs with. |
+| `internal/upgrade/` | `vibesys-cli upgrade`: the release asset names, a `Source` of releases (GitHub over HTTP, or the in-memory fake in `upgradetest/`), and the verify-then-rename install. |
 | `internal/archcheck/` | The layer and layout rules below, as a check `go test` runs. |
 | `gen/` | Generated Go for `proto/vibesys/cli/v1`. Never edited by hand. |
 
@@ -181,8 +251,9 @@ fails on a stale `gen/`.
 ```
 
 runs `gofmt`, `go vet` and the tests, runs the concurrency tests again with the race detector, then
-vets for each release target (Linux and macOS, amd64 and arm64). CI runs the same script as the `cli`
-job. To run the whole store suite under the race detector, which takes several times longer:
+vets for each release target (Linux and macOS, amd64 and arm64). The tests include building a real
+release with `build_release.sh` and installing it with `install.sh`, so they need `go`, `curl`, `awk`
+and `sha256sum` or `shasum`. CI runs the same script as the `cli` job. To run the whole store suite under the race detector, which takes several times longer:
 
 ```sh
 go test -race ./internal/store/...

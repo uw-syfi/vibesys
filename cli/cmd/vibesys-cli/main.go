@@ -44,6 +44,9 @@ type deps struct {
 	options func() (client.Options, error)
 	// process runs the daemon and supervisor processes, which are this same binary.
 	process production.Process
+	// upgrade makes what `vibesys-cli upgrade` acts on: where releases come from and which binary
+	// to replace.
+	upgrade func() (upgradeEnv, error)
 }
 
 func main() {
@@ -57,7 +60,7 @@ func realDeps(stdout, stderr io.Writer) deps {
 	p := production.Process{Version: version, Executable: exe, Getenv: os.Getenv, UID: os.Getuid(), Home: home}
 	return deps{
 		stdout: stdout, stderr: stderr, getenv: os.Getenv, cwd: cwd,
-		git: gitrepo.System{}, options: p.ClientOptions, process: p,
+		git: gitrepo.System{}, options: p.ClientOptions, process: p, upgrade: productionUpgrade,
 	}
 }
 
@@ -71,6 +74,7 @@ var commands = map[string]func(context.Context, deps, []string) int{
 	"logs":       logsCommand,
 	"daemon":     daemonCommand,
 	"supervisor": supervisorCommand,
+	"upgrade":    upgradeCommand,
 }
 
 const usage = `usage: vibesys-cli <command> [flags]
@@ -83,9 +87,11 @@ commands:
   jobs [--commit rev] [--state s] [--note-contains text]
   logs <job> [--follow]                          print a job's output
   daemon status|stop|restart                     manage the daemon
+  upgrade                                        replace this binary with the newest release
 
-Every command takes --json, and --repo, --task, --run, --harness and --agent, which default to the
-environment variables VIBESYS_REPO, VIBESYS_TASK, VIBESYS_RUN, VIBESYS_HARNESS and VIBESYS_AGENT.
+Every job and daemon command takes --json, and --repo, --task, --run, --harness and --agent, which
+default to the environment variables VIBESYS_REPO, VIBESYS_TASK, VIBESYS_RUN, VIBESYS_HARNESS and
+VIBESYS_AGENT.
 Exit codes: 0 ok, 1 failed, 2 invalid input, 3 wait timed out.
 `
 

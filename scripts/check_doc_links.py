@@ -66,7 +66,7 @@ EXCLUDED_PREFIXES = (
     "porcupine_checker/vendor/",
     "third_party/",
     "node_modules/",
-    "resources/skills/neuron-agentic-development/",
+    "skills/domains/neuron-agentic-development/",
 )
 MARKDOWN_SUFFIXES = (".md", ".mdx")
 

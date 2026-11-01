@@ -112,8 +112,10 @@ _TURNS = st.lists(
     st.builds(Turn, program=_PROGRAM, late=_PROGRAM, edit=st.booleans()), min_size=1, max_size=3
 ).map(tuple)
 
+# At nightly depth each example sweeps every commit and effect, about 30 s each, so the count is
+# what fits the per-test bound (300 s) with the pinned examples; 60 ran for over 450 s.
 _SETTINGS = settings(
-    max_examples=examples(pr=5, nightly=60),
+    max_examples=examples(pr=5, nightly=3),
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow],
 )

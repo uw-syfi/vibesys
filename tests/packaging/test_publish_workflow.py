@@ -66,3 +66,14 @@ def test_installed_wheel_check_uses_distinct_clean_install_and_runtime_homes() -
     assert script.index('find "$install_home"') < script.index('HOME="$install_home"')
     assert script.index('find "$verify_home"') < script.index('HOME="$verify_home"')
     assert '--constraints "$RUNNER_TEMP/release-verify-constraints.txt"' in script
+
+
+def test_publish_workflow_ignores_vibesys_cli_releases() -> None:
+    # `publish` needs `build`, so skipping `build` skips the PyPI upload too.
+    workflow = _publish_workflow()
+    jobs = workflow["jobs"]
+    assert isinstance(jobs, dict)
+    assert jobs["publish"]["needs"] == "build"
+    condition = jobs["build"]["if"]
+    assert "startsWith(github.event.release.tag_name, 'cli-')" in condition
+    assert "github.event_name != 'release'" in condition
