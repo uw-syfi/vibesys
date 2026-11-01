@@ -7,6 +7,7 @@ role is given.
 
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -96,9 +97,13 @@ async def test_the_bridge_never_creates_its_sockets_directory(tmp_path: Path) ->
     then served inside it. The directory is the caller's to create, through
     ``prepare_evaluation_socket``'s ownership and mode check.
     """
-    missing = tmp_path / "absent"
-    bridge = _bridge(tmp_path, missing / "evaluation.sock")
+    # A unix socket path is limited (104 bytes on macOS, where pytest's tmp_path is longer), and
+    # bind reports a path over the limit before it reports a missing directory. The system
+    # temporary directory is short on every platform.
+    with tempfile.TemporaryDirectory() as short:
+        missing = Path(short) / "absent"
+        bridge = _bridge(tmp_path, missing / "evaluation.sock")
 
-    with pytest.raises(FileNotFoundError):
-        await bridge.serve()
-    assert not missing.exists()
+        with pytest.raises(FileNotFoundError):
+            await bridge.serve()
+        assert not missing.exists()
