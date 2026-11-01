@@ -10,7 +10,6 @@ import pytest
 from tests.slurm_cluster.cluster import HANG_GUARD_SECONDS, docker
 from tests.slurm_cluster.harness import (
     ALL_KINDS,
-    GPU_KINDS,
     in_background,
     open_run,
     run_container_ids,
@@ -23,6 +22,9 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.slurm_cluster
 
 _HOLD = '"$VIBESYS_GPU" -- sleep 600'
+#: The kind whose held job is stopped. The deprecated alias translates to the same
+#: environment, so its close is the same code; opening it (below) proves its broker.
+_HOLDING_KIND = "slurm-local-gpu"
 
 
 def _broker_sockets(run: OpenRun) -> list[Path]:
@@ -36,11 +38,10 @@ def _broker_sockets(run: OpenRun) -> list[Path]:
     return sockets
 
 
-@pytest.mark.parametrize("kind", GPU_KINDS)
 def test_stopping_the_agent_container_cancels_its_running_job(
-    kind: str, slurm_cluster: SlurmCluster, workdir: Path, agent_image_id: str
+    slurm_cluster: SlurmCluster, workdir: Path, agent_image_id: str
 ) -> None:
-    with open_run(kind, slurm_cluster, workdir, agent_image_id) as run:
+    with open_run(_HOLDING_KIND, slurm_cluster, workdir, agent_image_id) as run:
         pending = in_background(lambda: run.agent(_HOLD))
         job = slurm_cluster.wait_for_job("")
 
@@ -70,7 +71,8 @@ def test_closing_the_session_cancels_jobs_and_removes_brokers_sockets_and_contai
         assert len(sockets) == int(run.has_gpu_commands) + int(kind == "slurm")
         assert all(socket.exists() for socket in sockets)
         assert run_container_ids(run.run_id)
-        pending = in_background(lambda: run.agent(_HOLD)) if run.has_gpu_commands else None
+        holds_a_job = kind == _HOLDING_KIND
+        pending = in_background(lambda: run.agent(_HOLD)) if holds_a_job else None
         job = slurm_cluster.wait_for_job("") if pending is not None else None
 
         run.session.close()

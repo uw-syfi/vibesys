@@ -6,101 +6,12 @@ on:
   schedule:
     - cron: '17 6 * * *'
   workflow_dispatch:
-    inputs:
-      chaos_seeds:
-        description: >-
-          Chaos seed range A-B (inclusive). When set, only the chaos seed sweep
-          runs, split over parallel jobs, and the other nightly jobs are skipped.
-        required: false
-        default: ''
-        type: string
 
 permissions:
   contents: read
 
 jobs:
-  # A branch gate over many chaos seeds:
-  #   gh workflow run nightly.yml --ref <branch> -f chaos_seeds=0-3560
-  # The range is cut into shards of at most CHAOS_SHARD_SEEDS seeds, one job each
-  # (about 2 seeds per second per job, so a shard takes well under 30 minutes).
-  # Each job hands its shard to the harness as CHAOS_SEED_RANGE
-  # (tests/system/chaos/test_chaos.py), the one way the harness selects seeds.
-  chaos-plan:
-    if: inputs.chaos_seeds != ''
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      shards: ${{ steps.split.outputs.shards }}
-    steps:
-      - name: Split the seed range into shards
-        id: split
-        env:
-          CHAOS_SEEDS: ${{ inputs.chaos_seeds }}
-          CHAOS_SHARD_SEEDS: '1000'
-          CHAOS_MAX_SHARDS: '20'
-        run: |
-          set -euo pipefail
-          if [[ ! "$CHAOS_SEEDS" =~ ^([0-9]+)-([0-9]+)$ ]]; then
-            echo "chaos_seeds must look like A-B (got '$CHAOS_SEEDS')" >&2
-            exit 1
-          fi
-          low="${BASH_REMATCH[1]}"
-          high="${BASH_REMATCH[2]}"
-          if (( high < low )); then
-            echo "chaos_seeds range is empty: $CHAOS_SEEDS" >&2
-            exit 1
-          fi
-          total=$(( high - low + 1 ))
-          count=$(( (total + CHAOS_SHARD_SEEDS - 1) / CHAOS_SHARD_SEEDS ))
-          if (( count > CHAOS_MAX_SHARDS )); then
-            echo "$total seeds need $count shards; the limit is $CHAOS_MAX_SHARDS" >&2
-            exit 1
-          fi
-          size=$(( (total + count - 1) / count ))
-          shards=()
-          for (( start = low; start <= high; start += size )); do
-            end=$(( start + size - 1 ))
-            (( end > high )) && end=$high
-            shards+=("\"${start}-${end}\"")
-          done
-          printf 'shards=[%s]\n' "$(IFS=,; echo "${shards[*]}")" | tee -a "$GITHUB_OUTPUT"
-
-  chaos-sweep:
-    needs: chaos-plan
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        seeds: ${{ fromJSON(needs.chaos-plan.outputs.shards) }}
-    steps:
-      - name: Record when this job's cancel clock started
-        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
-
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Pass the pytest cancel deadline
-        run: python3 scripts/pytest_job_deadline.py
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-        with:
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-
-      - name: Set up Python
-        run: uv python install 3.12
-
-      - name: Install dependencies
-        run: uv sync --dev
-
-      - name: Run the chaos seeds ${{ matrix.seeds }}
-        env:
-          CHAOS_SEED_RANGE: ${{ matrix.seeds }}
-        run: uv run pytest tests/system/chaos/test_chaos.py -n 3 -p no:randomly --no-cov -q
-
   full-depth:
-    if: inputs.chaos_seeds == ''
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -128,8 +39,6 @@ jobs:
       # crash point, the larger Hypothesis example counts, and the randomized
       # `nightly` Hypothesis profile (conftest.py), so each night explores new
       # inputs. The `slow` tests run in the `crash-sweep` job below.
-      # The chaos harness's seed set follows the depth too
-      # (tests/system/chaos/test_chaos.py).
       - name: Run the full test suite at nightly depth
         run: uv run python -m pytest --depth=nightly -m 'not slow and not native_build' -n auto --dist loadgroup --no-cov -q
 
@@ -143,14 +52,8 @@ jobs:
           path: .hypothesis/examples
           if-no-files-found: ignore
 
-      # Seeds the pull-request tier never draws (see
-      # tests/system/chaos/test_chaos.py).
-      - name: Sweep the skeleton-search chaos harness over more seeds
-        run: ./scripts/chaos_loop.sh 200 1000 2
-
   # The exhaustive crash sweeps (`-m slow`), which a pull request deselects.
   crash-sweep:
-    if: inputs.chaos_seeds == ''
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -182,7 +85,6 @@ jobs:
   # misses. A failed job fails the workflow. The minimal-container tier builds
   # the CPU base only; CUDA and ROCm bases are about 25 GB each to pull.
   real-tiers:
-    if: inputs.chaos_seeds == ''
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:

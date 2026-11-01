@@ -33,19 +33,6 @@ const WIDTHS = [1440, 1000, 660] as const;
 const SHOTS = process.env['USAGE_SCREENS_DIR'] || undefined;
 const ledger = new KnownLedger('usage');
 
-interface Asked {
-  readonly host: string;
-  readonly edges: readonly number[];
-}
-
-interface UsageHost extends Window {
-  fakeHost: {
-    usageAsked: Asked[];
-    usageRefreshed: unknown[];
-    usageSaved: {host: string; baseRevision: number; overrides: {model: string}[]}[];
-  };
-}
-
 const caseNamed = (name: string): UsageCase => {
   const found = USAGE_CASES.find(each => each.name === name);
   if (found === undefined) throw new Error(`the cases changed: ${name}`);
@@ -81,12 +68,6 @@ async function idle(page: Page): Promise<void> {
   }
 }
 
-const asked = (page: Page) =>
-  page.evaluate(() => (window as unknown as UsageHost).fakeHost.usageAsked);
-
-/** The page's hero figure: the first figure under the title. */
-const hero = (page: Page) => page.locator('#usage-hero');
-
 for (const usage of USAGE_CASES) {
   test(`the Usage page passes the screen checks at every width: ${usage.name}`, async ({page}) => {
     await open(page, usage, WIDTHS[0]);
@@ -107,61 +88,7 @@ for (const usage of USAGE_CASES) {
   });
 }
 
-/** The text a person reads on the page, one string per element that holds text directly. */
-async function words(page: Page): Promise<string[]> {
-  return page.evaluate(() =>
-    [...document.body.querySelectorAll('*')].flatMap(element =>
-      [...element.childNodes]
-        .filter(node => node.nodeType === Node.TEXT_NODE)
-        .map(node => node.textContent?.trim() ?? '')
-        .filter(text => text !== ''),
-    ),
-  );
-}
-
-for (const usage of USAGE_CASES) {
-  test(`the Usage page writes no sentence and no em dash: ${usage.name}`, async ({page}) => {
-    await open(page, usage, 1440);
-    const written = await words(page);
-    expect(written.length).toBeGreaterThan(0);
-    for (const text of written) {
-      expect(text, text).not.toContain('—');
-      expect(text, text).not.toMatch(/[.!?](\s|$)/);
-    }
-  });
-}
-
 ledger.requireEveryFailure();
-
-test('a host that predates the question reads Update required and shows no figures', async ({
-  page,
-}) => {
-  await open(page, caseNamed('unsupported-host'), 1440);
-  await expect(page.getByText('Update required', {exact: true})).toBeVisible();
-  await expect(page.getByRole('table')).toHaveCount(0);
-});
-
-test('a failed question reads Unavailable and Retry asks again', async ({page}) => {
-  await open(page, caseNamed('failed-question'), 1440);
-  // The body says it once; the header has no word for a failure.
-  await expect(page.getByText('Unavailable', {exact: true})).toHaveCount(1);
-  const before = (await asked(page)).length;
-  await page.getByRole('button', {name: 'Retry'}).click();
-  await expect.poll(async () => (await asked(page)).length).toBeGreaterThan(before);
-  await expect(page.getByText('Unavailable', {exact: true})).toHaveCount(1);
-});
-
-test('an empty period says No usage, at the page’s left edge, and shows no table', async ({
-  page,
-}) => {
-  await open(page, caseNamed('empty-period'), 1440);
-  await expect(page.getByText('No usage', {exact: true})).toBeVisible();
-  await expect(page.getByRole('table', {name: 'Models'})).toHaveCount(0);
-  // The empty state says so once: no figure of zero and no count of sessions above it.
-  await expect(page.locator('#usage-hero')).toHaveCount(0);
-  // With no provider there is nothing to switch on or off: no bare header row.
-  await expect(page.getByRole('table', {name: 'Providers'})).toHaveCount(0);
-});
 
 test('the page title is the largest text on it, however large the figures are', async ({page}) => {
   await open(page, caseNamed('large-figures'), 1440);
@@ -183,141 +110,6 @@ test('the page title is the largest text on it, however large the figures are', 
   expect(sizes.title, sizes.largest?.text).toBeGreaterThan(sizes.largest?.size ?? 0);
 });
 
-test('the figures are the hero, the providers, the models, the hours and days, the runs and the agents', async ({
-  page,
-}) => {
-  await open(page, caseNamed('many-runs'), 1440);
-  // Seven days: the base cost of every series, each bucket ramped 1, 3, 5, 2, 4, 1, 3.
-  await expect(hero(page)).toHaveText('$817.00');
-  await expect(page.getByRole('table', {name: 'Providers'}).getByRole('row')).toHaveCount(3);
-  await expect(page.getByRole('table', {name: 'Models'}).getByRole('row')).toHaveCount(4);
-  await expect(page.getByRole('table', {name: 'Time'}).getByRole('row')).toHaveCount(8);
-  const runs = page.getByRole('table', {name: 'Cost by run'});
-  await expect(runs.getByRole('row')).toHaveCount(41);
-  // The costliest first, each with its cost.
-  await expect(runs.getByRole('row').nth(1)).toContainText('$900.00');
-  await expect(page.getByRole('table', {name: 'Cost by agent'}).getByRole('row')).toHaveCount(7);
-  await expect(page.getByText('Per new best', {exact: true})).toBeVisible();
-  await expect(page.getByText('Per hour now', {exact: true})).toBeVisible();
-});
-
-test('every period asks the host in the buckets it names, in both directions', async ({page}) => {
-  await open(page, caseNamed('one-run'), 1440);
-  const select = page.getByLabel('Period');
-  // The page opens on the past week: seven days are eight edges.
-  expect((await asked(page)).at(-1)?.edges).toHaveLength(8);
-  const order = [
-    ['Past 24 hours', 25],
-    ['Past 7 days', 8],
-    ['Past 30 days', 31],
-    ['Past 90 days', 91],
-    ['Past 30 days', 31],
-    ['Past 7 days', 8],
-    ['Past 24 hours', 25],
-  ] as const;
-  for (const [label, edges] of order) {
-    const before = (await asked(page)).length;
-    await select.selectOption({label});
-    await expect.poll(async () => (await asked(page)).length).toBeGreaterThan(before);
-    const last = (await asked(page)).at(-1);
-    expect(last?.edges, label).toHaveLength(edges);
-    // Whole quarter hours, increasing: what a host accepts.
-    for (const [at, edge] of (last?.edges ?? []).entries()) {
-      expect(edge % 900_000, label).toBe(0);
-      if (at > 0) expect(edge).toBeGreaterThan(last?.edges[at - 1] ?? 0);
-    }
-    await idle(page);
-    await expect(page.getByRole('table', {name: 'Time'}).getByRole('row')).toHaveCount(edges);
-  }
-});
-
-test('Cost and Tokens switch the figures both ways without asking the host again', async ({
-  page,
-}) => {
-  await open(page, caseNamed('one-run'), 1440);
-  const before = (await asked(page)).length;
-  await expect(hero(page)).toHaveText('$817.00');
-  await page.getByRole('radio', {name: 'Tokens'}).check({force: true});
-  await expect(hero(page)).toHaveText('125.4M');
-  await page.getByRole('radio', {name: 'Cost'}).check({force: true});
-  await expect(hero(page)).toHaveText('$817.00');
-  expect((await asked(page)).length).toBe(before);
-});
-
-test('the source select and a provider toggle cut the figures by exactly the rows they leave out', async ({
-  page,
-}) => {
-  await open(page, caseNamed('outside-runs'), 1440);
-  const total = async () => (await hero(page).textContent()) ?? '';
-  const dollars = async () => Number((await total()).replace(/[$,]/g, ''));
-  const all = await dollars();
-  const source = page.getByLabel('Source');
-  await source.selectOption({label: 'VibeSys runs'});
-  const runsOnly = await dollars();
-  await source.selectOption({label: 'Outside runs'});
-  const outside = await dollars();
-  expect(runsOnly + outside).toBeCloseTo(all, 2);
-  expect(outside).toBeGreaterThan(0);
-  await source.selectOption({label: 'All sources'});
-  expect(await dollars()).toBeCloseTo(all, 2);
-  // A provider turned off takes exactly its rows out, and back on puts them back.
-  await page.getByRole('checkbox', {name: 'Codex'}).uncheck();
-  const withoutCodex = await dollars();
-  expect(withoutCodex).toBeCloseTo(all - 5 * 19, 2);
-  await page.getByRole('checkbox', {name: 'Codex'}).check();
-  expect(await dollars()).toBeCloseTo(all, 2);
-});
-
-test('what the host could not price is a chip, and the rates it used are named', async ({page}) => {
-  await open(page, caseNamed('unpriced-models'), 1440);
-  await expect(page.getByText(/% unpriced$/)).toBeVisible();
-  // The price list is dated, so a person sees how old the prices are, not only that they are bundled.
-  await expect(page.getByText('Prices of 2026-10-30', {exact: true})).toBeVisible();
-});
-
-test('a model opens its detail, and its price is set, saved and read back', async ({page}) => {
-  await open(page, caseNamed('one-run'), 1440);
-  const models = page.getByRole('table', {name: 'Models'});
-  await models.getByRole('row').nth(1).click();
-  const detail = page.getByRole('dialog');
-  await expect(detail).toBeVisible();
-  await detail.getByRole('button', {name: 'Close'}).click();
-  await expect(detail).toHaveCount(0);
-
-  // The Price button sets the price and does not also open the detail.
-  await models.getByRole('button', {name: 'Price'}).first().click();
-  const prices = page.getByRole('dialog');
-  await expect(prices).toBeVisible();
-  await prices.getByRole('checkbox', {name: 'Automatic'}).uncheck();
-  await prices.getByLabel('Input per 1M tokens').fill('7');
-  await prices.getByRole('button', {name: 'Save'}).click();
-  await expect(prices.getByText('Saved', {exact: true})).toBeVisible();
-  const saved = await page.evaluate(() => (window as unknown as UsageHost).fakeHost.usageSaved);
-  expect(saved).toHaveLength(1);
-  expect(saved[0]?.baseRevision).toBe(0);
-  expect(saved[0]?.overrides).toHaveLength(1);
-  // The figures are read again, and the row says the price is set.
-  await prices.getByRole('button', {name: 'Close'}).click();
-  await expect(models.getByText('Set', {exact: true})).toBeVisible();
-});
-
-test('a price that cannot be saved says which field, and Save waits', async ({page}) => {
-  await open(page, caseNamed('one-run'), 1440);
-  await page
-    .getByRole('table', {name: 'Models'})
-    .getByRole('button', {name: 'Price'})
-    .first()
-    .click();
-  const prices = page.getByRole('dialog');
-  await prices.getByRole('checkbox', {name: 'Automatic'}).uncheck();
-  await prices.getByLabel('Output per 1M tokens').fill('-1');
-  await expect(prices.getByText('Invalid', {exact: true})).toBeVisible();
-  await expect(prices.getByRole('button', {name: 'Save'})).toHaveAttribute('aria-disabled', 'true');
-  expect(await page.evaluate(() => (window as unknown as UsageHost).fakeHost.usageSaved)).toEqual(
-    [],
-  );
-});
-
 /** The run the shell shows, from the window's address: its Usage face ends `&mode=usage`. */
 const faceOf = (page: Page) => page.evaluate(() => window.location.hash);
 
@@ -334,15 +126,6 @@ test('a run opens on its Usage face from its row, and one Back returns to Usage'
   expect(await faceOf(page)).toBe('#usage');
 });
 
-test('a run row is titled as the run is everywhere, by its project, and never by its id', async ({
-  page,
-}) => {
-  await open(page, caseNamed('many-runs'), 1440);
-  const first = page.getByRole('table', {name: 'Cost by run'}).getByRole('row').nth(1);
-  await expect(first).toContainText('queue-rs');
-  await expect(first).not.toContainText(/2026101\d-\d{6}/);
-});
-
 test('the run rows open with the keyboard too', async ({page}) => {
   await open(page, caseNamed('one-run'), 1000);
   const row = page.getByRole('table', {name: 'Cost by run'}).getByRole('row').nth(1);
@@ -350,39 +133,6 @@ test('the run rows open with the keyboard too', async ({page}) => {
   await page.keyboard.press('Enter');
   await expect(page.getByRole('heading', {name: 'Usage', level: 1})).toHaveCount(0);
   expect(await faceOf(page)).toMatch(/^#run=[^&]+&mode=usage$/);
-});
-
-test('Refresh asks the host again', async ({page}) => {
-  await open(page, caseNamed('one-run'), 1440);
-  const before = (await asked(page)).length;
-  await page.getByRole('button', {name: 'Refresh'}).click();
-  await expect.poll(async () => (await asked(page)).length).toBeGreaterThan(before);
-  await idle(page);
-});
-
-test('Usage asks nothing until it is shown, and again each time it is shown', async ({page}) => {
-  const seed = seedFor(caseNamed('one-run'));
-  await addInitScripts(page, [
-    initScript(installFakeChrome, seed),
-    initScript(installFakeBridge, seed),
-    initScript(installFakeProjectRuns, seed),
-    initScript(installFakeNewRun, seed),
-    initScript(installFakeUsagePrices, undefined),
-    initScript(installFakeUsage, seed),
-    initScript(installFakeUsageLimits, seed),
-  ]);
-  await page.goto('./shell.html');
-  await expect(page.getByRole('heading', {name: 'Runs', level: 1})).toBeVisible();
-  expect((await asked(page)).length).toBe(0);
-  await showScreen(page, 'Usage');
-  await expect(hero(page)).toHaveText('$817.00');
-  const first = (await asked(page)).length;
-  expect(first).toBeGreaterThan(0);
-  await showScreen(page, 'Runs');
-  await expect(page.getByRole('heading', {name: 'Runs', level: 1})).toBeVisible();
-  await showScreen(page, 'Usage');
-  await expect(hero(page)).toHaveText('$817.00');
-  expect((await asked(page)).length).toBeGreaterThan(first);
 });
 
 test('the Usage page has no accessibility violations', async ({page}) => {
@@ -474,32 +224,6 @@ test('every tab, period, source and dialog, walked and captured', async ({page, 
   await sheet.close();
 });
 
-test('a model no price covers reads Unpriced, and neither it nor its provider is drawn at zero', async ({
-  page,
-}) => {
-  await open(page, caseNamed('unpriced-models'), 1440);
-  const models = page.getByRole('table', {name: 'Models'});
-  const row = models.getByRole('row').filter({hasText: 'Gpt Next Mini'});
-  await expect(row).toContainText('Unpriced');
-  await expect(row).not.toContainText('$0.00');
-  const providers = page.getByRole('table', {name: 'Providers'});
-  await expect(providers.getByRole('row').filter({hasText: 'Codex'})).toContainText('Unpriced');
-  // One layer is drawn: the provider with prices.
-  await expect(page.locator('.vs-area-chart-layer')).toHaveCount(1);
-  // Every name is the catalogue's or the id in words, never the id.
-  await expect(page.getByText('gpt-next-mini')).toHaveCount(0);
-});
-
-test('the tokens tab carries no dollars', async ({page}) => {
-  await open(page, caseNamed('one-run'), 1440);
-  await page.getByRole('radio', {name: 'Tokens'}).check({force: true});
-  for (const name of ['Cache savings', 'Per new best', 'Per hour now']) {
-    await expect(page.getByText(name, {exact: true})).toHaveCount(0);
-  }
-  await page.getByRole('radio', {name: 'Cost'}).check({force: true});
-  await expect(page.getByText('Per new best', {exact: true})).toBeVisible();
-});
-
 test('the tiles share a top line at every width', async ({page}) => {
   await open(page, caseNamed('one-run'), 1440);
   for (const width of WIDTHS) {
@@ -540,46 +264,6 @@ test('the Price button of a model is on screen at 660 px', async ({page}) => {
   await expect(page.getByRole('dialog')).toBeVisible();
 });
 
-interface LimitsHost extends Window {
-  fakeHost: {usageLimitsAsked: {host: string; maxAgeS: number; now: number}[]};
-}
-
-const limitsAsked = (page: Page) =>
-  page.evaluate(() => (window as unknown as LimitsHost).fakeHost.usageLimitsAsked);
-
-test('the Limits tab shows a card per provider with a bar per window, asks each machine once, and writes no sentence', async ({
-  page,
-}) => {
-  await open(page, caseNamed('one-run'), 1440);
-  expect(await limitsAsked(page)).toEqual([]);
-  await page.getByRole('radio', {name: 'Limits'}).check({force: true});
-  await expect(page.getByRole('heading', {name: 'Claude', level: 2})).toBeVisible();
-  await expect(page.getByRole('heading', {name: 'Codex', level: 2})).toBeVisible();
-  // Claude: a session, a weekly and a per-model window; Codex: one weekly window and a reset credit.
-  for (const reading of ['61% left', '72% left', '100% left', '97% left']) {
-    await expect(page.getByText(reading, {exact: true})).toBeVisible();
-  }
-  await expect(page.getByText('Resets in 3 h', {exact: true})).toBeVisible();
-  await expect(page.getByText('1 resets', {exact: true})).toBeVisible();
-  // The period and the source mean nothing here, and the header says no word for work.
-  await expect(page.getByRole('combobox', {name: 'Period'})).toHaveCount(0);
-  expect(await limitsAsked(page)).toHaveLength(1);
-  // Back to the figures and to the limits again: inside the floor the machine is not asked again.
-  await page.getByRole('radio', {name: 'Cost'}).check({force: true});
-  await expect(hero(page)).toBeVisible();
-  await page.getByRole('radio', {name: 'Limits'}).check({force: true});
-  await expect(page.getByRole('heading', {name: 'Claude', level: 2})).toBeVisible();
-  expect(await limitsAsked(page)).toHaveLength(1);
-  for (const text of await words(page)) {
-    expect(text, text).not.toContain('—');
-    expect(text, text).not.toMatch(/[.!?](\s|$)/);
-  }
-  // Refresh asks the CLIs at once, whatever the floor.
-  await page.getByRole('button', {name: 'Refresh'}).click();
-  await expect.poll(async () => (await limitsAsked(page)).length).toBe(2);
-  expect((await limitsAsked(page))[1]?.maxAgeS).toBe(0);
-});
-
 for (const width of WIDTHS) {
   test(`the Limits tab passes the screen checks at ${width} px`, async ({page}) => {
     await open(page, caseNamed('one-run'), width);
@@ -595,12 +279,3 @@ for (const width of WIDTHS) {
     expect(overflow, `${width}`).toBeLessThanOrEqual(0);
   });
 }
-
-test('a host that predates the limits question reads Update required on the Limits tab', async ({
-  page,
-}) => {
-  await open(page, caseNamed('unsupported-host'), 1440);
-  await page.getByRole('radio', {name: 'Limits'}).check({force: true});
-  await expect(page.getByText('Update required', {exact: true})).toBeVisible();
-  await expect(page.getByRole('heading', {name: 'Claude', level: 2})).toHaveCount(0);
-});

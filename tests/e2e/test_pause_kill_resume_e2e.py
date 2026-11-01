@@ -1,4 +1,10 @@
-"""Real-process proof that a scripted run survives a pause or a kill at any step, and resumes.
+"""Real-process proof that a scripted run survives a pause or a kill, and resumes.
+
+What only a real process shows is here: the operator's ``vibesys control`` reaching a run through
+its inbox, a real SIGKILL whose lock the kernel drops, and the processes and cluster jobs a
+dead or paused run leaves. Where in a run an interruption lands, and that every step finishes
+once, is `vs-dst`'s sweep of every commit and every effect on the production step loop
+(`tests/system/crash/test_never_stuck.py`, `libs/vs-dst/tests`).
 
 The run is a real process (``tests.e2e._interruptible_run``, forked from a fork server that
 imports the product once): the production host composition over the product's on-disk
@@ -9,8 +15,7 @@ process; a resume is a new process that relaunches the saved run as a new epoch,
 ``vibesys --resume`` does.
 
 The interruption lands inside a step the run process itself announces it holds (an agent turn
-before its session exists, an agent turn at work, an evaluation job pending on the cluster), so
-no test sleeps to place it. Every case then resumes and must end as an uninterrupted run of the
+at work, an evaluation job pending on the cluster), so no test sleeps to place it. Every case then resumes and must end as an uninterrupted run of the
 same script ends: completed, the same winner selection, the same adopted project file, and
 nothing left running (no process in the run's group, no job on the cluster).
 """
@@ -31,14 +36,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.e2e._interruptible_run import ENSURE, ENSURED, START, TURN, RunSpec, run_process
+from tests.e2e._interruptible_run import TURN, RunSpec, run_process
 from tests.e2e.dynamic_loop_harness import _AGENT_CONFIG, LoopInput
 from tests.e2e.scripted_value_run import SEED
 from tests.support.scratch_tree import remove_scratch_tree
 
 from entrypoints.control import control_main, time_ordered_id
 from vibesys.events import CoreEventType
-from vibesys.orchestration.dynamic.scripted.api import IMPLEMENTER_KIND, JUDGE_KIND, PLANNER_KIND
+from vibesys.orchestration.dynamic.scripted.api import IMPLEMENTER_KIND
 from vs_project.api import Project
 from vs_runlog.api import read_current_epoch
 from vs_sim.api import OsThreads
@@ -349,49 +354,14 @@ def _pause(scenario: Scenario, run: RunProcess) -> None:
     run.wait_for(_event(CoreEventType.PARK_REQUESTED))
 
 
-@pytest.mark.parametrize(
-    ("at", "kind"),
-    [(START, PLANNER_KIND), (TURN, IMPLEMENTER_KIND)],
-    ids=["planner-session-start", "agent-turn"],
-)
 def test_a_run_paused_in_an_agent_turn_resumes_to_the_uninterrupted_result(
-    scenario: Scenario, uninterrupted: dict[str, object], at: str, kind: str
+    scenario: Scenario, uninterrupted: dict[str, object]
 ) -> None:
-    first = scenario.hold(at, kind)
-    first.wait_for(lambda line: line.get("held") == f"{at}:{kind}")
+    first = scenario.hold(TURN, IMPLEMENTER_KIND)
+    first.wait_for(lambda line: line.get("held") == f"{TURN}:{IMPLEMENTER_KIND}")
     _pause(scenario, first)
     first.release()
     assert first.finish()["status"] == _PARKED
-
-    resumed = scenario.resume(first.run_id)
-
-    _assert_ends_as_uninterrupted(scenario, resumed.finish(), uninterrupted)
-
-
-@pytest.mark.parametrize("at", [ENSURE, ENSURED], ids=["before-the-session", "after-the-session"])
-def test_a_run_paused_as_a_session_is_ensured_resumes_to_the_uninterrupted_result(
-    scenario: Scenario, uninterrupted: dict[str, object], at: str
-) -> None:
-    first = scenario.hold(at, PLANNER_KIND)
-    first.wait_for(lambda line: line.get("held") == f"{at}:{PLANNER_KIND}")
-    _pause(scenario, first)
-    first.release()
-    assert first.finish()["status"] == _PARKED
-
-    resumed = scenario.resume(first.run_id)
-
-    _assert_ends_as_uninterrupted(scenario, resumed.finish(), uninterrupted)
-
-
-@pytest.mark.parametrize("at", [ENSURE, ENSURED], ids=["before-the-session", "after-the-session"])
-def test_a_run_killed_as_a_session_is_ensured_resumes_to_the_uninterrupted_result(
-    scenario: Scenario, uninterrupted: dict[str, object], at: str
-) -> None:
-    """After the session is ensured and before core hears of it is the worst window: the effect
-    happened and nothing records it, so the step runs again on the same tag."""
-    first = scenario.hold(at, PLANNER_KIND)
-    first.wait_for(lambda line: line.get("held") == f"{at}:{PLANNER_KIND}")
-    first.kill()
 
     resumed = scenario.resume(first.run_id)
 
@@ -413,12 +383,11 @@ def test_a_run_paused_in_an_evaluation_resumes_to_the_uninterrupted_result(
     _assert_ends_as_uninterrupted(scenario, resumed.finish(), uninterrupted)
 
 
-@pytest.mark.parametrize("kind", [IMPLEMENTER_KIND, JUDGE_KIND], ids=["implementer", "judge"])
 def test_a_run_killed_in_an_agent_turn_resumes_to_the_uninterrupted_result(
-    scenario: Scenario, uninterrupted: dict[str, object], kind: str
+    scenario: Scenario, uninterrupted: dict[str, object]
 ) -> None:
-    first = scenario.hold(TURN, kind)
-    first.wait_for(lambda line: line.get("held") == f"{TURN}:{kind}")
+    first = scenario.hold(TURN, IMPLEMENTER_KIND)
+    first.wait_for(lambda line: line.get("held") == f"{TURN}:{IMPLEMENTER_KIND}")
     first.kill()
 
     resumed = scenario.resume(first.run_id)
@@ -427,59 +396,23 @@ def test_a_run_killed_in_an_agent_turn_resumes_to_the_uninterrupted_result(
     _assert_ends_as_uninterrupted(scenario, resumed.finish(), uninterrupted)
 
 
-def test_a_run_killed_in_an_evaluation_resumes_to_the_uninterrupted_result(
+def test_a_run_killed_as_its_evaluation_is_pending_resumes_to_the_uninterrupted_result(
     scenario: Scenario, uninterrupted: dict[str, object]
 ) -> None:
-    scenario.hold_evaluations()
-    first = scenario.start()
-    _wait_until_only_evaluations_remain(scenario, first)
-    first.kill()
-    scenario.release_evaluations()
-
-    resumed = scenario.resume(first.run_id)
-
-    _assert_ends_as_uninterrupted(scenario, resumed.finish(), uninterrupted)
-
-
-@pytest.mark.parametrize("released", ["before-resume", "after-resume"])
-def test_a_run_killed_as_its_evaluation_is_pending_resumes_whichever_the_job_ends_first(
-    scenario: Scenario, uninterrupted: dict[str, object], released: str
-) -> None:
-    """The kill lands with only the held evaluations left, and the job ends before or after the resume.
+    """The kill lands with only the held evaluations left, and the job ends after the resume.
 
     The kill is placed by the run's own report that its judge's step ended, never by the first
     pending job: the input's measurement is pending as the run starts, so that job alone puts
     the kill anywhere from the planner's turn to the judge's, and each place is a different
-    recovery. The judge's step has its own case (``test_a_run_killed_in_an_agent_turn_...``).
+    recovery. The job is still on the cluster when the next process starts, which must find it
+    and leave none behind.
     """
     scenario.hold_evaluations()
     first = scenario.start()
     _wait_until_only_evaluations_remain(scenario, first)
     first.kill()
-    if released == "before-resume":
-        scenario.release_evaluations()
 
     resumed = scenario.resume(first.run_id)
-    if released == "after-resume":
-        scenario.release_evaluations()
+    scenario.release_evaluations()
 
     _assert_ends_as_uninterrupted(scenario, resumed.finish(), uninterrupted)
-
-
-def test_a_run_paused_again_after_it_resumed_still_resumes_to_the_uninterrupted_result(
-    scenario: Scenario, uninterrupted: dict[str, object]
-) -> None:
-    first = scenario.hold(START, PLANNER_KIND)
-    first.wait_for(lambda line: line.get("held") == f"{START}:{PLANNER_KIND}")
-    _pause(scenario, first)
-    first.release()
-    assert first.finish()["status"] == _PARKED
-
-    second = scenario.resume(first.run_id, hold=f"{TURN}:{IMPLEMENTER_KIND}")
-    second.wait_for(lambda line: line.get("held") == f"{TURN}:{IMPLEMENTER_KIND}")
-    _pause(scenario, second)
-    second.release()
-    assert second.finish()["status"] == _PARKED
-    third = scenario.resume(first.run_id)
-
-    _assert_ends_as_uninterrupted(scenario, third.finish(), uninterrupted)

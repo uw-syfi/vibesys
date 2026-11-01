@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from tests.support.session_world import SESSION, turn_spec
 
 from vs_core.api import (
     ArtifactRef,
@@ -27,17 +28,29 @@ from vs_core.api import (
     AttemptPhase,
     AttemptView,
     CoreState,
+    EventId,
+    InputDelivered,
     InputDropped,
     InputDropReason,
+    InputId,
     InputTarget,
+    Invocation,
+    InvocationId,
+    InvocationRef,
     ItemId,
     ItemInputTarget,
+    Observation,
+    ObservationStatus,
+    RequestId,
     RoleId,
     RoleInputTarget,
     RunControlEvent,
+    RunId,
     Scope,
     ScopeInputTarget,
     SessionInputReceived,
+    SessionPhase,
+    Until,
     WorkspaceMode,
     WorkspacePlan,
     initial_state,
@@ -536,3 +549,119 @@ def test_a_refusal_bounds_the_ids_it_offers() -> None:
     assert refusal is not None
     assert "and 28 more" in refusal.reason
     assert "a39" not in refusal.reason
+
+
+def _turn_of(
+    core: CoreState, *, attempt: str, input_id: InputId | None, mid_turn: bool
+) -> CoreState:
+    """``core`` after a turn of the attempt received the one steer input (or only the guidance).
+
+    The input is delivered to the turn, in its prompt or while it ran (``mid_turn``), and a
+    standing steer is among the guidance the turn was given.
+    """
+    (record,) = core.sessions.inputs
+    ref = InvocationRef(session_id=SESSION, invocation_id=InvocationId(root="inv-7"), generation=0)
+    scope = Scope(owner=RunId(root=attempt), generation=0)
+    invocation = Invocation(
+        invocation=ref,
+        scope=scope,
+        turn=turn_spec("inv-7"),
+        phase=SessionPhase.EXECUTING,
+        until=Until(at=60.0),
+        guidance_ids=() if input_id is None else (input_id,),
+    )
+    observation = Observation(
+        event_id=EventId(root="e1"),
+        request_id=RequestId(root="dispatch"),
+        scope=scope,
+        sequence=1,
+        observed_at=3.0,
+        status=ObservationStatus.SUCCEEDED,
+        accepted=True,
+    )
+    receipt = (
+        None
+        if input_id is not None
+        else InputDelivered(
+            input_id=record.input.input_id,
+            invocation=ref,
+            observation=observation,
+            mid_turn=mid_turn,
+        )
+    )
+    return core.model_copy(
+        update={
+            "sessions": core.sessions.model_copy(
+                update={
+                    "inputs": (record.model_copy(update={"receipt": receipt}),),
+                    "invocations": (*core.sessions.invocations, invocation),
+                }
+            )
+        }
+    )
+
+
+def _sent(run: _Run, mode: SteerMode, *, attempt: str = "live") -> CoreState:
+    """A run whose bridge recorded one steer ``s1`` of ``mode`` for the attempt, not yet delivered."""
+    core = _core()
+    run.bridge.poll(core, 1.0)
+    target = SteerTarget(kind=SteerTargetKind.ATTEMPT, id=attempt)
+    run.control.submit(SteerRequest(control_id="s1", text="look again", target=target, mode=mode))
+    for event in run.bridge.poll(core, 2.0):
+        core = step(core, event).state
+    return core
+
+
+@pytest.mark.parametrize(
+    ("mode", "mid_turn", "state", "note"),
+    [
+        (SteerMode.NEXT_TURN, False, SteerDeliveryState.REACHED, ""),
+        (SteerMode.INTERRUPT, True, SteerDeliveryState.REACHED_MID_TURN, ""),
+        (
+            SteerMode.INTERRUPT,
+            False,
+            SteerDeliveryState.REACHED,
+            "interrupt steer s1 reached the next turn: no running turn kept it",
+        ),
+    ],
+)
+def test_a_steer_a_turn_received_is_reported_once_with_the_turn_it_reached(
+    mode: SteerMode, *, mid_turn: bool, state: SteerDeliveryState, note: str
+) -> None:
+    run = _run()
+    core = _turn_of(_sent(run, mode), attempt="live", input_id=None, mid_turn=mid_turn)
+
+    run.bridge.poll(core, 3.0)
+    run.bridge.poll(core, 4.0)
+
+    (reached,) = _steps(run, state)
+    assert (reached.control_id, reached.role, reached.attempt_id) == ("s1", "worker", "live")
+    reports = [
+        t for t in run.sink.transitions if t.delivery is not None and t.delivery.state is state
+    ]
+    assert [(t.round_label, t.execution_id, t.text) for t in reports] == [("live", "inv-7", note)]
+    assert _drops(run) == []
+
+
+def test_standing_guidance_reports_the_first_turn_it_reached_once() -> None:
+    run = _run()
+    sent = _sent(run, SteerMode.STANDING)
+    (record,) = sent.sessions.inputs
+    core = _turn_of(sent, attempt="live", input_id=record.input.input_id, mid_turn=False)
+
+    run.bridge.poll(core, 3.0)
+    run.bridge.poll(core, 4.0)
+
+    (reached,) = _steps(run, SteerDeliveryState.IN_FORCE)
+    assert (reached.control_id, reached.role, reached.attempt_id) == ("s1", "worker", "live")
+
+
+def test_a_restarted_bridge_does_not_report_a_turn_a_steer_already_reached() -> None:
+    run = _run()
+    core = _turn_of(_sent(run, SteerMode.NEXT_TURN), attempt="live", input_id=None, mid_turn=False)
+
+    restarted = _run()
+    restarted.bridge.poll(core, 3.0)
+    restarted.bridge.poll(core, 4.0)
+
+    assert _steps(restarted, SteerDeliveryState.REACHED) == []

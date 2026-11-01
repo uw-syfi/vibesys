@@ -52,6 +52,8 @@ signal.pause()
             max_gpus=1,
             max_time_minutes=5,
             default_time_minutes=5,
+            # The queue answers at once; the default 5 s between the six checks is 25 s of waiting.
+            queue_check_interval_seconds=0.05,
         ),
         (sys.executable, "-c", wrapper),
         probe=probe,

@@ -95,8 +95,8 @@ ordinal of the matching call, and the fault) drives
 `vs_faults.api.FaultyToolDispatch` (a tool dispatcher keyed by tool name), and
 the fault-injecting Slurm connector wrapper, which wraps any Slurm connector
 command. `vs_agent.api.testing.generated_replies` answers a Fake agent client
-from each turn's declared schema. The chaos sweep in the system test layer
-shows how to compose them.
+from each turn's declared schema. The runtime library's cluster-fault test shows a
+generated property over the production Slurm executor.
 
 The untrusted-input corpus every JSON decoder runs against is
 `vs_sim.api.testing.hostile_json_frames`.

@@ -14,6 +14,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from vs_sandbox.api import CommandStopUnconfirmedError
 from vs_sandbox.api.testing import (
     FakeStoppableProcess,
     ProcessHarness,
@@ -362,3 +363,40 @@ def test_a_lost_client_gives_a_result_with_no_exit_code_and_a_notice() -> None:
     assert result.exit_code is None
     assert not result.cancelled
     assert "exit status is unknown" in result.stderr
+
+
+@given(
+    cancelled=st.booleans(),
+    survivors=st.one_of(st.none(), st.integers(1, 5)),
+)
+def test_a_command_stopped_with_its_remote_side_unproven_ends_in_the_unconfirmed_error(
+    *, cancelled: bool, survivors: int | None
+) -> None:
+    """A cancel or a timeout the remote side never shows ended is an error, never a result.
+
+    The error carries the survivors (``None``: the signal never answered) and the stopped
+    command's result, which says whether the caller's cancel was the reason.
+    """
+    threads = SimThreads()
+    process = FakeStoppableProcess(threads, StoppableScript(runs_for=None, term_delay=0.0))
+    cancel = threads.event()
+    if cancelled:
+        cancel.set()
+
+    def run() -> object:
+        return execute_command(
+            "work",
+            timeout=1,
+            default_timeout=1,
+            cancel=cancel if cancelled else None,
+            max_output_chars=1000,
+            launch=lambda: process,
+            signal_remote=_Remote(survivors, survivors, survivors),
+            threads=threads,
+        )
+
+    with pytest.raises(CommandStopUnconfirmedError) as raised:
+        threads.run(run)
+
+    assert raised.value.survivors == survivors
+    assert raised.value.result.cancelled is cancelled

@@ -47,7 +47,7 @@ export async function open(page: Page, seed: FakeBridgeSeed = SEED): Promise<voi
 }
 
 /** Goes to New run by the rail, as a user does, and returns once the screen has read what it shows. */
-export const showNewRun = (page: Page): Promise<void> => showScreen(page, 'New');
+const showNewRun = (page: Page): Promise<void> => showScreen(page, 'New');
 
 /** Opens the app and goes to New run by the rail, as a user starts a run. */
 export async function openNewRun(page: Page, seed: FakeBridgeSeed = SEED): Promise<void> {

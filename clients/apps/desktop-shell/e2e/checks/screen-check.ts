@@ -6,9 +6,9 @@
  * moment of the call, so the caller fixes the viewport, theme and fonts and lets the page settle.
  */
 import type {Page} from '@playwright/test';
-import {CODE_IDS, roleName} from '@vibesys/contracts';
-import {FAILURE_REASONS} from '@vibesys/run-fixtures';
 import {foreignFontUses} from '../../../../tools/e2e/bundled-fonts.mjs';
+import {RAW_TEXT_HELPERS} from '../../src/testing/raw-text.js';
+import {RAW_TEXT_INPUT} from '../../src/testing/raw-text-input.js';
 import {
   bannerCheck,
   type CheckId,
@@ -85,45 +85,12 @@ const VISUAL_CHECKS: readonly PageCheckId[] = [
   'title-strip',
 ];
 
-/** Enum values that never read as words: the failure reasons spelled with a hyphen or underscore. */
-const RAW_WORDS: readonly string[] = FAILURE_REASONS.filter(reason => /[-_]/.test(reason));
-
-/** The ids the backend registries name, so the list of what must not show raw cannot drift. */
-const REGISTRY_IDS: readonly string[] = [
-  ...CODE_IDS.harnesses,
-  ...CODE_IDS.models,
-  ...CODE_IDS.roles,
-];
-
-/** The role names the catalog gives: none may be drawn in lowercase. */
-const REGISTRY_NAMES: readonly string[] = CODE_IDS.roles.map(roleName);
-
-/**
- * The names the fixture worlds' user typed: a project folder, an SSH alias, a task. They are the
- * user's own identifiers, shown as they were typed, not code names the app made up.
- */
-const USER_NAMES: readonly string[] = [
-  ...Array.from({length: 9}, (_, index) => `queue-rs-run${index + 1}`),
-  'queue-rs',
-  'queue-rs-2',
-  'remote-host',
-  'host-a',
-  'host-b',
-  'host-c',
-  // The clusters and SSH aliases the machine Settings journeys type or list.
-  'lab-h100',
-  'lab-login',
-  'amd-login',
-  'cluster-m',
-  'no-workspace',
-  'no-scheduler',
-  // An example's own name, which New run shows in the code face as the catalogue names it.
-  'kv-store',
-];
+/** The helpers every check may call: the layout ones and the wording ones, defined in one scope. */
+const PAGE_HELPERS = [...RAW_TEXT_HELPERS, ...HELPERS];
 
 /** The script that defines the helpers and the checks in the page and runs `only` of them. */
 function script(only: readonly PageCheckId[], input: CheckInput): string {
-  const sources = [...HELPERS, ...Object.values(CHECKS)].map(each => each.toString());
+  const sources = [...PAGE_HELPERS, ...Object.values(CHECKS)].map(each => each.toString());
   const calls = only.map(id => `...${CHECKS[id].name}(input)`);
   return `(() => {\n${sources.join('\n')}\nconst input = ${JSON.stringify(input)};\nreturn [${calls.join(', ')}];\n})()`;
 }
@@ -157,14 +124,7 @@ export async function screenCheck(
   only: readonly (PageCheckId | 'bundled-font')[] = JOURNEY_CHECKS,
 ): Promise<Violation[]> {
   const inPage = only.filter((id): id is PageCheckId => id !== 'bundled-font');
-  const violations = await page.evaluate<Violation[]>(
-    script(inPage, {
-      rawWords: RAW_WORDS,
-      ids: REGISTRY_IDS,
-      names: REGISTRY_NAMES,
-      userNames: USER_NAMES,
-    }),
-  );
+  const violations = await page.evaluate<Violation[]>(script(inPage, RAW_TEXT_INPUT));
   return only.includes('bundled-font')
     ? [...violations, ...(await bundledFontCheck(page))]
     : violations;
@@ -175,7 +135,7 @@ export async function pressMovesWindow(
   page: Page,
   points: readonly (readonly [number, number])[],
 ): Promise<boolean[]> {
-  const sources = HELPERS.map(each => each.toString());
+  const sources = PAGE_HELPERS.map(each => each.toString());
   return page.evaluate<boolean[]>(
     `(() => {\n${sources.join('\n')}\nconst regions = dragRegions();\nreturn ${JSON.stringify(points)}.map(([x, y]) => dragsAt(regions, x, y));\n})()`,
   );

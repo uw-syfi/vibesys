@@ -61,7 +61,9 @@ _SQUEUE_TIMEOUT_SECONDS = 30
 #: queue response as proof that no late submission can still appear.
 _CONFIRM_ABSENT_OBSERVATIONS = 6
 _CONFIRM_MAX_OBSERVATIONS = 12
-_CONFIRM_INTERVAL_SECONDS = 5
+#: The default pause between those queue checks, so the window of proof is
+#: ``(_CONFIRM_ABSENT_OBSERVATIONS - 1)`` times this many seconds.
+_DEFAULT_QUEUE_CHECK_INTERVAL_SECONDS = 5.0
 #: How long ``run`` waits for the cancel worker once ``srun`` exited. It bounds
 #: every ``scancel`` attempt; the worker returns at once in every other state.
 _WATCHER_JOIN_SECONDS = _SCANCEL_ATTEMPTS * _SCANCEL_TIMEOUT_SECONDS + _CANCEL_GRACE_SECONDS
@@ -153,6 +155,13 @@ class AgentGpuConfig(BaseModel):
     served, and is submitted when one of the run's jobs ends; its ``--time``
     limit starts at submission. The cap keeps one run from monopolizing a
     shared partition with a steady stream of short jobs.
+
+    After a command that ended with a nonzero status or was stopped, the launcher
+    checks the queue until the job has been absent from it for
+    ``queue_check_interval_seconds`` times five consecutive checks, so a job whose
+    submission was acknowledged late is not mistaken for gone. A command that ends
+    nonzero returns its status only after that window, so a shorter interval
+    shortens the window and the wait.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
@@ -165,6 +174,9 @@ class AgentGpuConfig(BaseModel):
     srun_arguments: tuple[str, ...] = ()
     read_only_paths: tuple[str, ...] = ()
     max_concurrent_jobs: Annotated[int, Field(gt=0)] | None = None
+    queue_check_interval_seconds: Annotated[float, Field(gt=0, allow_inf_nan=False)] = (
+        _DEFAULT_QUEUE_CHECK_INTERVAL_SECONDS
+    )
     job_name_prefix: Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")] = (
         "vibesys-gpu"
     )
@@ -853,7 +865,7 @@ class AgentGpuLauncher:
         absent = 0
         for attempt in range(_CONFIRM_MAX_OBSERVATIONS):
             if attempt:
-                self._threads.sleep(_CONFIRM_INTERVAL_SECONDS)
+                self._threads.sleep(self._config.queue_check_interval_seconds)
             result = self._probe.run(argv, timeout_seconds=_SQUEUE_TIMEOUT_SECONDS)
             if result is not None and result.returncode == 0 and not result.stdout.strip():
                 absent += 1
