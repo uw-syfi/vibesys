@@ -16,7 +16,6 @@ from vs_project.api import StoredEnvelope
 from vs_project.api.retained import decode_store
 from vs_runtime.api.retained import decode_receipt
 
-from ._accounting import AccountingUnreconciled, accounting_evidence
 from ._controls import import_control
 from ._events import import_events
 from ._facts import FactSet, content
@@ -33,11 +32,9 @@ if TYPE_CHECKING:
 
 __all__ = [
     "MAX_SOURCE_BYTES",
-    "AccountingUnreconciled",
     "FactImportError",
     "ImportSource",
     "SourceFormat",
-    "accounting_evidence",
     "import_run_facts",
     "manifest_strategy",
 ]
