@@ -80,7 +80,22 @@ def _answered_once(interrupted: Interrupted, control_id: str, why: object) -> Re
     assert status.state is not RequestState.PENDING, f"{why}: {control_id} was never answered"
     assert recorded == (status.state is RequestState.APPLIED), f"{why}: {control_id} {status}"
     assert (status.state is RequestState.REJECTED) == bool(status.reason), why
+    if status.state is RequestState.APPLIED:
+        _applied_in_its_epoch(interrupted, control_id, why)
     return status.state
+
+
+def _applied_in_its_epoch(interrupted: Interrupted, control_id: str, why: object) -> None:
+    """A pause names the process it is for: no later process applies it."""
+    held = f'"op-{control_id}"'.encode()
+    epochs = [
+        record.epoch
+        for record in interrupted.log_records
+        if (body := record.body) is not None
+        and body.field == "core_input"
+        and held in body.value.event
+    ]
+    assert epochs == [EPOCH] or not control_id.startswith("p"), f"{why}: {control_id} in {epochs}"
 
 
 def _ended_as_the_uninterrupted_run(interrupted: Interrupted, why: object) -> None:
