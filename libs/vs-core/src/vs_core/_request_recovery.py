@@ -27,6 +27,7 @@ from ._recovery_owners import known_owner, operation_decision, typed_job_owner
 from ._recovery_unanswered import Inspection, Settlement, settlement
 from ._registry import ContractError
 from ._request_forward import turn_of
+from ._request_ledger import resent
 from ._session_scope import lost_turn_authority
 from ._waits import owned_job_subject, recovery_waits
 from .types.attempts import (
@@ -77,6 +78,8 @@ from .types.records import (
     RecoveryStarted,
     RequestObserved,
     RequestPhase,
+    command_open,
+    is_open,
     within,
 )
 from .types.scope_reopen import ScopedAdmissionReopenOutcome
@@ -1841,62 +1844,6 @@ def _replace_record(state: RecordsState, record: RequestRecord) -> RecordsState:
                 record if row.request_id == record.request_id else row for row in state.records
             )
         }
-    )
-
-
-COMMAND_KINDS: frozenset[type[Request]] = frozenset(
-    {InspectRequest, CancelOwnedResource, BlockRequest}
-)
-"""The commands of reconciliation. Every other kind is a canonical request: a step ``decide`` runs."""
-
-
-def _canonical(record: RequestRecord) -> bool:
-    return type(record.request) not in COMMAND_KINDS
-
-
-def is_step(record: RequestRecord) -> bool:
-    """A canonical request, which the recovery rule runs: not a command of reconciliation."""
-    return _canonical(record)
-
-
-def is_open(record: RequestRecord) -> bool:
-    """A canonical record that has not ended: core owes it a result by its ``until``."""
-    return _canonical(record) and record.phase in (
-        RequestPhase.PREPARED,
-        RequestPhase.DISPATCHED,
-        RequestPhase.RECONCILING,
-    )
-
-
-def resent(record: RequestRecord, now_at: float, reconciliation_bound: float) -> RequestRecord:
-    """An open record the executor can account for, back to PREPARED to go out again unchanged.
-
-    It is neither observed nor reported to its owner: the owner never learns it was
-    interrupted, and the replay equals the straight run. A command (an inspection, cancel or
-    block) is core's own and has no owner's limit: sent again, it gets a fresh reconciliation
-    bound from *now_at*, or a re-send that waited out its first bound would lapse before it is
-    answered.
-    """
-    until = record.until
-    if command_open(record):
-        until = until.model_copy(update={"at": max(until.at, now_at + reconciliation_bound)})
-    return record.model_copy(
-        update={
-            "phase": RequestPhase.PREPARED,
-            "observation": None,
-            "sequence": None,
-            "retry_at": None,
-            "until": until,
-        }
-    )
-
-
-def command_open(record: RequestRecord) -> bool:
-    """An inspection, cancel or block that has not ended: its limit ends it if nothing else."""
-    return not _canonical(record) and record.phase in (
-        RequestPhase.PREPARED,
-        RequestPhase.DISPATCHED,
-        RequestPhase.RECONCILING,
     )
 
 

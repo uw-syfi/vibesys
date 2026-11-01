@@ -34,7 +34,6 @@ from ._proofs import (
 )
 from ._registry import ClosedRecordContradictionError, ContractError
 from ._request_forward import declaration, owner_signals, records_own
-from ._request_recovery import resent
 from ._session_scope import lost_turn_cancellation
 from ._turn_permit import cap_dispatch_until, facts_for
 from ._values import digest
@@ -74,6 +73,7 @@ from .types.records import (
     RequestUndispatchable,
     RetryDue,
     TargetObservation,
+    command_open,
     request_lifecycle,
     success_without_reply,
     within,
@@ -439,6 +439,29 @@ def _reissuable(record: RequestRecord, proof: ReissueProof) -> bool:
     """
     return record.phase in (RequestPhase.DISPATCHED, RequestPhase.RECONCILING) and not (
         proof == ReissueProof.BEGUN_UNSEALED and record.lifecycle == LifecycleClass.SESSION_TURN
+    )
+
+
+def resent(record: RequestRecord, now_at: float, reconciliation_bound: float) -> RequestRecord:
+    """An open record the executor can account for, back to PREPARED to go out again unchanged.
+
+    It is neither observed nor reported to its owner: the owner never learns it was
+    interrupted, and the replay equals the straight run. A command (an inspection, cancel or
+    block) is core's own and has no owner's limit: sent again, it gets a fresh reconciliation
+    bound from *now_at*, or a re-send that waited out its first bound would lapse before it is
+    answered.
+    """
+    until = record.until
+    if command_open(record):
+        until = until.model_copy(update={"at": max(until.at, now_at + reconciliation_bound)})
+    return record.model_copy(
+        update={
+            "phase": RequestPhase.PREPARED,
+            "observation": None,
+            "sequence": None,
+            "retry_at": None,
+            "until": until,
+        }
     )
 
 

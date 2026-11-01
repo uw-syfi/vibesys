@@ -17,7 +17,6 @@ from ._actions import Action, Cancel, End, Run, RunRest, Settle, Tick, Wait, at_
 from ._proofs import request_dependency_status, stop_mode
 from ._refusal import RecordRefusal, RecordRefusedError, RefusalReason
 from ._request_ledger import dispatch_until, retry_limit
-from ._request_recovery import is_open
 from ._run_park import pause_cancels, starts
 from ._scope_order import withdrawn_by_close
 from ._search_events import Translated, translate
@@ -59,7 +58,7 @@ from .types.common import (
     RunStatus,
     StopMode,
 )
-from .types.records import request_end_policy, request_interrupt_policy, request_lifecycle
+from .types.records import is_open, request_end_policy, request_interrupt_policy, request_lifecycle
 from .types.steps import Cancelled, CancelReason, Failed
 from .types.until import FailureReason, Until
 
