@@ -9,7 +9,7 @@
     "noEmit": true,
     "tsBuildInfoFile": ".tsbuild/node.tsbuildinfo"
   },
-  "include": ["vite.config.ts", "playwright.config.ts", "../../tools/e2e/bundled-fonts.mts", "../../tools/e2e/free-port.mts", "../../tools/e2e/shard.mts", "../../tools/e2e/workers.mts", "e2e/**/*.ts", "src/testing/fake-bridge.ts", "src/testing/fake-offer.ts", "src/testing/dashboard-world.ts", "src/testing/fixture-seed.ts", "src/testing/gateway-wire.ts", "src/testing/native-records.ts", "src/testing/machine-entry.ts", "src/testing/machines-world.ts", "src/testing/new-run-pages.ts", "src/testing/raw-text-input.ts", "src/testing/raw-text.ts", "src/testing/seed.ts", "src/testing/settings-pages.ts", "src/testing/subscription-preload.ts", "src/testing/started-at.ts", "src/testing/usage-world.ts"],
+  "include": ["vite.config.ts", "playwright.config.ts", "../../tools/e2e/bundled-fonts.mts", "../../tools/e2e/free-port.mts", "../../tools/e2e/shard.mts", "../../tools/e2e/workers.mts", "e2e/**/*.ts", "src/testing/fake-bridge.ts", "src/testing/fake-offer.ts", "src/testing/dashboard-world.ts", "src/testing/fixture-seed.ts", "src/testing/gateway-fixture.ts", "src/testing/gateway-wire.ts", "src/testing/journey-records.ts", "src/testing/native-records.ts", "src/testing/machine-entry.ts", "src/testing/machines-world.ts", "src/testing/new-run-pages.ts", "src/testing/raw-text-input.ts", "src/testing/raw-text.ts", "src/testing/replay-world.ts", "src/testing/seed.ts", "src/testing/settings-pages.ts", "src/testing/subscription-preload.ts", "src/testing/started-at.ts", "src/testing/usage-world.ts"],
   "references": [
     {"path": "../../libs/contracts/tsconfig.lib.json"},
     {"path": "../../libs/ipc/tsconfig.lib.json"},

@@ -23,6 +23,8 @@ import {
   installFakeNewRun,
   installFakeProjectRuns,
 } from './fake-bridge.js';
+import {type FakeGateway, installGateway} from './gateway-preload.js';
+import {connectUpdates, type ReplayWorld} from './replay-world.js';
 import {SEED} from './seed.js';
 import {installSubscriptions, type SubscriptionSeed} from './subscription-preload.js';
 
@@ -32,6 +34,10 @@ const READ_TURNS = 64;
 export interface OpenShell {
   readonly container: HTMLElement;
   readonly stores: ReturnType<typeof createShellStores>;
+  /** The Fake gateway the window's Run screen reads, when the shell was opened over a run (`options.run`). */
+  readonly gateway: FakeGateway | null;
+  /** Delivers the live run's next records, as the browser journeys' `playLive` does (`options.run.updates`). */
+  readonly emit: (sources: readonly number[]) => void;
   /** Returns once the page says it has read what it shows (`data-state="ready"`). */
   readonly read: () => Promise<void>;
   readonly close: () => Promise<void>;
@@ -54,6 +60,37 @@ function subscriptionPort(options: {
 }
 
 /**
+ * Installs the Fake gateway on the window as the Electron preload does, and returns its second
+ * port (the run's liveness), the controls the journeys reach as `window.fakeGateway`, and the way
+ * the live run's later records arrive.
+ */
+function serveRun(
+  host: Window,
+  world: ReplayWorld,
+): {
+  readonly port: ReturnType<typeof subscriptionBridge>;
+  readonly controls: FakeGateway;
+  readonly emit: (sources: readonly number[]) => void;
+} {
+  installGateway(world.input);
+  const served = host as unknown as Window & {
+    vibesysSubscription?: Parameters<typeof subscriptionBridge>[0];
+    fakeGateway?: FakeGateway;
+    fakeHost?: {emit?: (events: readonly {sequence?: number}[]) => void};
+  };
+  if (served.vibesysSubscription === undefined || served.fakeGateway === undefined)
+    throw new Error('the Fake gateway installed no ports');
+  connectUpdates(world.updates);
+  const emit = served.fakeHost?.emit;
+  if (emit === undefined) throw new Error('the Fake gateway installed no way to deliver records');
+  return {
+    port: subscriptionBridge(served.vibesysSubscription),
+    controls: served.fakeGateway,
+    emit: sources => emit(sources.map(sequence => ({sequence}))),
+  };
+}
+
+/**
  * The app opened on `screen` over the world `seed`, with `draft` as this window's New run; with
  * no `screen` it opens as it does at launch, on the screen the window's address and the runs it
  * finds decide.
@@ -70,6 +107,12 @@ export async function openShell(
     readonly keepStorage?: boolean;
     /** The hosts' live data the window's second port serves (their machine stats and their runs). */
     readonly subscriptions?: SubscriptionSeed;
+    /**
+     * The run the window's Run screen reads: the browser journeys' Fake gateway (`gateway-preload.ts`)
+     * serving `world.input`, which is also the window's port to the run's liveness. Open the run as
+     * a person does, from the dashboard (`openRun`). Excludes `subscriptions`.
+     */
+    readonly run?: ReplayWorld;
     /** Fakes of more of the bridge, installed after the usual ones (what the Usage page asks of a host). */
     readonly installs?: readonly ((seed: FakeBridgeSeed) => void)[];
     /** Changes the bridge before the shell reads from it (a call a bridge built earlier lacks). */
@@ -78,6 +121,8 @@ export async function openShell(
 ): Promise<OpenShell> {
   const seed = options.seed ?? SEED;
   const host = globalThis.window as unknown as Window & {vibesysWelcome?: WelcomeBridge};
+  if (options.run !== undefined && options.subscriptions !== undefined)
+    throw new Error('the window has one port to the hosts: a run or their scripted data, not both');
   for (const install of [
     installFakeChrome,
     installFakeBridge,
@@ -93,6 +138,7 @@ export async function openShell(
   const bridge = host.vibesysWelcome;
   if (bridge === undefined) throw new Error('the Fake bridge installed no window.vibesysWelcome');
   options.prepare?.(bridge as unknown as Record<string, unknown>);
+  const gateway = options.run === undefined ? null : serveRun(host, options.run);
   if (options.keepStorage !== true) {
     host.sessionStorage.clear();
     host.localStorage.clear();
@@ -109,6 +155,7 @@ export async function openShell(
       address: new FakeWindowAddress(),
       now: () => options.now ?? 0,
       ...(options.subscriptions === undefined ? {} : {subscriptions: subscriptionPort(options)}),
+      ...(gateway === null ? {} : {subscriptions: gateway.port}),
       session: () => {
         throw new Error('no run is opened in this window');
       },
@@ -139,6 +186,8 @@ export async function openShell(
   return {
     container,
     stores,
+    gateway: gateway?.controls ?? null,
+    emit: sources => gateway?.emit(sources),
     read,
     close: async () => {
       await act(async () => root.unmount());

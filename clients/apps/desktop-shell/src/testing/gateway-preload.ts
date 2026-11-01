@@ -29,7 +29,7 @@ import {
 } from '@vibesys/proto';
 import {foldSkeleton, observeRun, seedSkeleton} from '@vibesys/run-skeleton';
 import {ChatPeer} from './chat-peer.js';
-import type {WireFixture} from './fake-gateway.js';
+import type {WireFixture} from './gateway-fixture.js';
 
 type Receive = (bytes: Uint8Array) => void;
 
@@ -288,6 +288,9 @@ class FixtureGateway {
     };
   }
 }
+
+/** What a journey reaches as `window.fakeGateway`: what the Fake gateway lets a test do to the run it serves. */
+export type FakeGateway = ReturnType<FixtureGateway['controls']>;
 
 export function installGateway(input: WireFixture): void {
   const gateway = new FixtureGateway(input);
