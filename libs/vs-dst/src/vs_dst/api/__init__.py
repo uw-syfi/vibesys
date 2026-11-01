@@ -21,6 +21,7 @@ from vs_dst._crash_points import (
     CrashPointPolicy,
     crash_point_policy,
 )
+from vs_dst._delivery import OperatorRequest
 from vs_dst._effects import Effects, RecoverableExecutors
 from vs_dst._host import Hosting
 from vs_dst._interrupt import MAX_RESUMES, Interrupted, Outcome
@@ -67,6 +68,7 @@ __all__ = [
     "Interruption",
     "Moment",
     "NondeterministicWorldError",
+    "OperatorRequest",
     "Outcome",
     "RecoverableExecutors",
     "RunSetup",
