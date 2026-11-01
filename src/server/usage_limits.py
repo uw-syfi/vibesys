@@ -40,9 +40,10 @@ if TYPE_CHECKING:
 LIMITS_FILE: Final = "limits.pb"
 LIMITS_VERSION: Final = 1
 
-PROBE_TIMEOUT_S: Final = 12.0
-"""What one provider's read may take. The providers are read one after another, so two stay inside
-the operation's 30 second cap."""
+PROBE_TIMEOUT_S: Final = 9.0
+"""What one provider's read may take. A read is a new process that first captures the login shell's
+environment (bounded at 10 seconds by the agent library), then reads the providers one after
+another: 10 + 2 * 9 stays inside the operation's 30 second cap with a second to answer."""
 
 _KINDS: Final = {
     "session": usage_state.UsageLimitKind.SESSION,
