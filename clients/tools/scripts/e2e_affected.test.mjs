@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
+import {e2eSpecs, e2eTestMatch} from '../e2e/shard.mts';
 import {
   affectedSpecs,
   areaProblems,
   loadWorld,
   MAX_SHARDS,
+  planOutputs,
   SECONDS_PER_SHARD,
   SPEC_BUDGET_SECONDS,
   shardsFor,
@@ -299,4 +301,41 @@ test('what a pull request runs of a package change fits the budget, whatever the
     assert.deepEqual([...bounded.run, ...bounded.deferred].sort(), selection.specs, pkg.name);
     assert.ok(shardsFor(bounded.run, WORLD.seconds) <= MAX_SHARDS, pkg.name);
   }
+});
+
+/** What the jobs read of the plan's outputs: the environment each shard of the matrix is started with. */
+function jobsOf(plan) {
+  const outputs = Object.fromEntries(
+    planOutputs(plan)
+      .split('\n')
+      .filter(Boolean)
+      .map(line => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]),
+  );
+  return JSON.parse(outputs.shards).map(shard => ({
+    VIBESYS_E2E_SPECS: outputs.specs,
+    VIBESYS_E2E_SHARD: `${shard}/${JSON.parse(outputs.shards).length}`,
+  }));
+}
+
+/** Every spec the jobs of `plan` run, for every app, as the apps' configs match them. */
+function runBy(plan) {
+  const apps = ['desktop-main', 'desktop-shell', 'ui-gallery'];
+  return jobsOf(plan).flatMap(env => apps.flatMap(app => e2eTestMatch(app, env)));
+}
+
+test('the merge queue runs every spec: the whole-suite plan, as the jobs read it, selects them all once', () => {
+  const ran = runBy({specs: [], shards: MAX_SHARDS});
+  assert.deepEqual(
+    ran.toSorted(),
+    e2eSpecs()
+      .map(spec => `**/${spec}`)
+      .toSorted(),
+  );
+});
+
+test('a pull request runs the specs its plan names, once each, and none when the plan names none', () => {
+  const some = e2eSpecs().slice(0, 7);
+  const ran = runBy({specs: some, shards: 2});
+  assert.deepEqual(ran.toSorted(), some.map(spec => `**/${spec}`).toSorted());
+  assert.deepEqual(runBy({specs: [], shards: 0}), []);
 });
