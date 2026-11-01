@@ -204,6 +204,7 @@ def started(
         started=attempt,
         uncharged=0 if previous is None else previous.uncharged,
         deadline_at=deadline.at if previous is None else previous.deadline_at,
+        charged_at=None if previous is None else previous.charged_at,
     )
     return _with(_replaced(state, record), tag, row)
 
@@ -223,8 +224,10 @@ def interrupted(state: CoreState, tag: RequestId, attempt: int, why: Interruptio
     if by_core:
         return forgotten(state, tag)
     uncharged = row.uncharged + (0 if why.charged else 1)
+    charged_at = state.run.now_at if why.charged else row.charged_at
     state = _returned(state, tag)
-    return _with(state, tag, row.model_copy(update={"ended": True, "uncharged": uncharged}))
+    update = {"ended": True, "uncharged": uncharged, "charged_at": charged_at}
+    return _with(state, tag, row.model_copy(update=update))
 
 
 def _lost(
@@ -242,9 +245,8 @@ def _lost(
         raise RecordRefusedError(RefusalReason.ATTEMPT_MISMATCH, message, tag)
     if by_core:
         return forgotten(state, tag)
-    return _with(
-        state, tag, row.model_copy(update={"uncharged": row.uncharged - 1, "unsettled": False})
-    )
+    update = {"uncharged": row.uncharged - 1, "unsettled": False, "charged_at": state.run.now_at}
+    return _with(state, tag, row.model_copy(update=update))
 
 
 def _returned(state: CoreState, tag: RequestId) -> CoreState:

@@ -263,6 +263,17 @@ class Loop:
             done += not isinstance(action, Wait)
         return done
 
+    def sleep_until_woken(self) -> None:
+        """The loop has nothing to do but wait: the run clock reaches the time ``decide`` asked for.
+
+        A step that raised, or whose work a dead host lost, is not run again before its backoff
+        has passed, so ``decide`` returns only a ``Wait`` until then.
+        """
+        actions = decide(self.state, self.clock)
+        if all(isinstance(action, Wait) for action in actions):
+            wake = max((a.until for a in actions if isinstance(a, Wait) and a.until), default=None)
+            self.clock = self.clock if wake is None else max(self.clock, wake)
+
     def finish_running(self, index: int) -> None:
         running = self.running()
         if not running:
@@ -561,12 +572,27 @@ def settle(loop: Loop, rounds: int = 80) -> None:
     raise RunDidNotRestError
 
 
+def backoffs(loop: Loop) -> set[float]:
+    """The run clocks at which a step that raised or lost its work may be run again."""
+    retries = loop.state.run.limits.request_retries
+    return {
+        row.charged_at + retries.delay(row.charged)
+        for row in loop.state.steps.attempts
+        if row.ended and row.charged_at is not None
+    }
+
+
 def never_idle_draining(loop: Loop) -> None:
-    """A draining run with no attempt running has finished draining: it is parked, or has work."""
+    """A draining run with no attempt running has finished draining: it is parked, or has work.
+
+    A re-run that waits out its backoff is work: the wake is timed (at its backoff, or at the end
+    of the drain, whichever comes first), and the run drains on.
+    """
     if loop.state.run.status is not core.RunStatus.DRAINING or loop.running():
         return
     actions = decide(loop.state, loop.clock)
-    assert any(not isinstance(action, Wait) for action in actions), (
+    timed = any(isinstance(a, Wait) and a.until is not None for a in actions)
+    assert any(not isinstance(action, Wait) for action in actions) or (timed and backoffs(loop)), (
         "a draining run with nothing running and nothing to do never parks"
     )
 

@@ -184,10 +184,12 @@ class StepLogContract:
         async def main() -> None:
             charged = 0
             reasons = (Interruption.PAUSE, Interruption.RAISED, Interruption.SHUTDOWN)
+            retries = subject.log.state.run.limits.request_retries
             for attempt, why in enumerate(reasons, start=1):
                 await subject.log.step_started(Run(run.step, run.tag, attempt, run.deadline_at))
                 await subject.log.attempt_interrupted(run.tag, attempt, why)
                 charged += int(why.charged)
+                await subject.elapse(retries.delay(charged))  # the backoff of the charge
                 open_step = subject.log.open_step(run.tag)
                 assert open_step is not None
                 assert open_step.started == attempt
@@ -195,6 +197,30 @@ class StepLogContract:
                 assert attempts is not None
                 assert attempts.ended
                 assert attempts.charged == charged
+
+        subject.drive(main())
+
+    def test_a_start_inside_the_backoff_of_a_charged_attempt_is_refused_and_appends_nothing(
+        self,
+    ) -> None:
+        """A raised attempt is retried after ``request_retries.delay``; a pause is retried at once."""
+        subject = self.step_log_under_test()
+        run = subject.runs[0]
+
+        async def main() -> None:
+            first = await subject.log.step_started(run)
+            assert isinstance(first, Run)
+            await subject.log.attempt_interrupted(run.tag, run.attempt, Interruption.RAISED)
+            retry = Run(run.step, run.tag, run.attempt + 1, first.deadline_at)
+            backoff = subject.log.state.run.limits.request_retries.delay(1)
+            await subject.elapse(backoff / 2)
+            before = subject.log.state
+            refused = await subject.log.step_started(retry)
+            assert isinstance(refused, RecordRefusal)
+            assert (refused.reason, refused.tag) == (RefusalReason.START_NOT_DUE, run.tag)
+            assert subject.log.state == before
+            await subject.elapse(backoff / 2)
+            assert isinstance(await subject.log.step_started(retry), Run)
 
         subject.drive(main())
 
