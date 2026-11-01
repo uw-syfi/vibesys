@@ -76,7 +76,7 @@ language = "python"
 directory = "."
 timeout_seconds = 600
 commands = [["uv", "run", "--no-sync", "python", "scripts/impacted_tests.py", "run", "--base-ref", "origin/main", "--budget-seconds", "100", "--workers", "4"]]
-gate_commands = [["uv", "run", "python", "scripts/impacted_tests.py", "run", "--base-ref", "origin/main", "--budget-seconds", "30", "--workers", "4"]]
+gate_commands = [["uv", "run", "python", "scripts/impacted_tests.py", "run", "--base-ref", "origin/main", "--budget-seconds", "30", "--workers", "4", "--maxfail", "3"]]
 
 [[check_groups]]
 name = "python_quality"
@@ -176,7 +176,9 @@ timeout_seconds = 1200
 # package runs through the same task graph, so it gets that preparation too.
 commands = [["pnpm", "turbo", "run", "test"]]
 package_commands = [["pnpm", "turbo", "run", "test", "--filter", "{package}"]]
-gate_package_commands = [["pnpm", "turbo", "run", "test", "--filter", "{package}"]]
+# Gate: one Turborepo run over the packages changed since main and the packages that depend on them,
+# in parallel, which takes a third of the time of one run per selected package.
+gate_commands = [["pnpm", "turbo", "run", "test", "--filter=...[origin/main]"]]
 always_commands = [
   ["pnpm", "test:ts-architecture"],
   ["pnpm", "test:conformance"],
@@ -368,6 +370,12 @@ commands = [
   ["go", "vet", "./..."],
   ["go", "test", "-run=^$", "-fuzz=^FuzzGraphSelection$", "-fuzztime=20000x", "-parallel=2", "."],
   ["go", "test", "-run=^$", "-fuzz=^FuzzParseNameStatusZ$", "-fuzztime=20000x", "-parallel=2", "."],
+]
+# The tests and vet, without the fuzz runs: a change to repoctl or its policy is checked by them,
+# and a policy change can break a test that reads the workflow or the policy.
+gate_commands = [
+  ["go", "test", "./..."],
+  ["go", "vet", "./..."],
 ]
 
 [[check_groups]]

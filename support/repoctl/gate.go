@@ -180,12 +180,34 @@ func ensureHooks(root string, out io.Writer) {
 		fmt.Fprintf(out, "repoctl: could not enable the pre-push gate: %v\n", err)
 	case state == gitrepo.HooksInstalled:
 		fmt.Fprintf(out, "repoctl: enabled the pre-push gate (git config core.hooksPath %s); every git push now runs `repoctl gate`.\n", current)
+	case state == gitrepo.HooksAbsent:
+		// Not our repository, or a fixture: nothing to say.
 	case state == gitrepo.HooksForeign:
 		fmt.Fprintf(out, "repoctl: WARNING: core.hooksPath is %q, so the pre-push gate in %s does not run and a push is not checked. Unset it with `git config --unset core.hooksPath`, or call `./support/repoctl/repoctl gate` from your own hook.\n", current, gateHooksDir)
 	}
 }
 
+// leaveGitHookEnvironment unsets the variables git exports to a hook to say which repository
+// it is in. The lanes inherit them, so a test that makes a repository of its own in a temporary
+// directory (`git init` there) would otherwise act on this one, or fail with "must be run in a
+// work tree". The repository is found from the working directory, as it is outside a hook.
+func leaveGitHookEnvironment(root string) error {
+	names, err := gitrepo.LocalEnvVars(root)
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		if err := os.Unsetenv(name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func runGate(root, configPath string, g graph, args []string, out io.Writer) error {
+	if err := leaveGitHookEnvironment(root); err != nil {
+		return err
+	}
 	newRunner := func(w io.Writer) execution.Runner {
 		return execution.OSRunner{Stdout: w, Stderr: w, OwnProcessGroup: true}
 	}

@@ -19,6 +19,7 @@ selected: they need Docker, a cluster or credentials and have their own CI jobs.
 Usage:
     uv run python scripts/impacted_tests.py select --base-ref origin/main
     uv run python scripts/impacted_tests.py run --base-ref origin/main --budget-seconds 30 --workers 4
+    uv run python scripts/impacted_tests.py run --maxfail 3   # refuse sooner when tests fail
 """
 
 from __future__ import annotations
@@ -269,6 +270,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--base-ref", default="origin/main")
     parser.add_argument("--budget-seconds", type=float, default=60.0)
     parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument(
+        "--maxfail",
+        type=int,
+        default=0,
+        help="stop after this many failed tests (0: run every selected test)",
+    )
     args = parser.parse_args(argv)
     selection = _selection(args)
     _report(selection)
@@ -285,6 +292,7 @@ def main(argv: list[str] | None = None) -> int:
             "-n",
             str(args.workers),
             "--no-cov",
+            *([f"--maxfail={args.maxfail}"] if args.maxfail else []),
             *selection.files,
         ],
         cwd=REPO_ROOT,

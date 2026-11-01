@@ -1,7 +1,6 @@
 package gitrepo
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +18,9 @@ const (
 	HooksInstalled
 	// HooksForeign: core.hooksPath names another directory, which this call leaves alone.
 	HooksForeign
+	// HooksAbsent: the repository tracks no pre-push hook in the directory, so there is
+	// nothing to enable (repoctl run against another repository, or a fixture).
+	HooksAbsent
 )
 
 // EnsureHooksPath points the repository at the tracked hooks directory dir (relative to
@@ -29,7 +31,7 @@ const (
 func EnsureHooksPath(root, dir string) (HooksState, string, error) {
 	hook := filepath.Join(root, filepath.FromSlash(dir), "pre-push")
 	if info, err := os.Stat(hook); err != nil || info.IsDir() {
-		return HooksActive, "", fmt.Errorf("no pre-push hook at %s", hook)
+		return HooksAbsent, "", nil
 	}
 	out, err := command.Run(root, "git", "config", "--default", "", "--get", "core.hooksPath")
 	if err != nil {
@@ -67,4 +69,14 @@ func Head(root string) (branch, sha string) {
 		sha = strings.TrimSpace(string(out))
 	}
 	return branch, sha
+}
+
+// LocalEnvVars names the environment variables git sets for a hook and reads to find the
+// repository (GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE and the like), from git itself.
+func LocalEnvVars(root string) ([]string, error) {
+	out, err := command.Run(root, "git", "rev-parse", "--local-env-vars")
+	if err != nil {
+		return nil, err
+	}
+	return strings.Fields(string(out)), nil
 }
