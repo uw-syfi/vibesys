@@ -10,6 +10,7 @@ to fail in every profiler turn.
 from __future__ import annotations
 
 import itertools
+import platform
 
 import pytest
 from tests.support.task_project import write_task
@@ -183,7 +184,8 @@ def test_auto_falls_back_to_none_with_a_logged_reason_when_the_tool_cannot_run(
 
     assert resolved is ProfilerKind.NONE
     assert len(logs) == 1
-    assert "`perf`" in logs[0]
+    # `auto` picks the host's native CPU profiler for a generic workload.
+    assert ("`sample`" if platform.system() == "Darwin" else "`perf`") in logs[0]
     assert "falling back to 'none'" in logs[0]
 
 

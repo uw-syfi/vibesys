@@ -117,7 +117,7 @@ def test_a_buffer_decodes_to_exactly_the_recorded_intervals(
     buffer: tuple[bytes, list[list[tuple[int, int, int]]], int],
 ) -> None:
     data, writers, _ = buffer
-    with tempfile.TemporaryDirectory(dir="/dev/shm") as directory:
+    with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "timeline.u64"
         path.write_bytes(data)
         reply = _call("summary", path=str(path), event_names=list(_NAMES), top=10)
@@ -156,7 +156,7 @@ def test_event_skew_names_the_block_that_finished_last(tmp_path: Path) -> None:
 @settings(max_examples=examples(pr=8, nightly=200), deadline=None)
 @given(data=st.binary(max_size=256))
 def test_arbitrary_bytes_are_a_reply_or_a_tool_error(data: bytes) -> None:
-    with tempfile.TemporaryDirectory(dir="/dev/shm") as directory:
+    with tempfile.TemporaryDirectory() as directory:
         for suffix in (".u64", ".json"):
             path = Path(directory) / f"timeline{suffix}"
             path.write_bytes(data)
