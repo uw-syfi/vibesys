@@ -1871,10 +1871,6 @@ PARSE_EDGE_MODULES: dict[str, tuple[ParseKind, str]] = {
         ParseKind.FAKE,
         "the in-memory evaluation store's values",
     ),
-    "libs/vs-runtime/src/vs_runtime/_receipt_store.py": (
-        ParseKind.OWN_STORE,
-        "evaluation receipts this runtime persisted",
-    ),
     "libs/vs-runtime/src/vs_runtime/_shell_kit.py": (
         ParseKind.FAKE,
         "the shell test kit's scripted agent answers",

@@ -34,7 +34,6 @@ from vs_core.api import (
     InspectOwnedJob,
     InspectRequest,
     InspectTurn,
-    ObservationStatus,
     ObserveOwnedJob,
     Request,
     RequestBase,
@@ -51,7 +50,6 @@ from vs_core.api import (
     VerifyAdoption,
 )
 from vs_core.api.recovery import OwnerEvent
-from vs_runtime._receipt_store import Settled, Transient
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -139,25 +137,6 @@ class ExecutorRefusal(BaseModel):
 
 
 type ExecutionOutcome = ExecutionResult | ExecutorRefusal
-
-
-def settle(result: ExecutionResult) -> Settled[ExecutionResult] | Transient[ExecutionResult]:
-    """The one constructor of a sealable result: only a definitive one may be sealed.
-
-    A sealed result is replayed forever, so it must not be one that a later
-    observation is expected to change: Unknown (nothing proven), an acceptance not
-    proven while a live resource is named, and a cancellation whose job
-    has not been seen to end (not released). Those are
-    ``Transient``: returned to the shell unsealed, and re-observed by the retry.
-    """
-    seen = result.observation.observation
-    live = seen.resource_id is not None and not seen.terminal
-    undecided = (
-        seen.status is ObservationStatus.UNKNOWN
-        or (not seen.accepted and live)
-        or (seen.status is ObservationStatus.CANCELLED and not seen.released)
-    )
-    return Transient(result) if undecided else Settled(result)
 
 
 # Role request unions are explicit: a shared alias such as WorkspaceRequest also
@@ -254,42 +233,6 @@ REQUEST_DISPATCH: Mapping[type[RequestBase], ExecutorRole] = MappingProxyType(
         BlockRequest: ExecutorRole.SEMANTIC_EVENTS,
     }
 )
-
-
-RECEIPT_BACKED_ROLES = frozenset(
-    {
-        ExecutorRole.WORKSPACES,
-        ExecutorRole.EVALUATION,
-        ExecutorRole.OPERATIONS,
-        ExecutorRole.SEMANTIC_EVENTS,
-    }
-)
-
-
-# Roles whose executors still keep receipts outside ``ReceiptStore.run_once``. Their
-# requests leave no execution record, so a missing record proves nothing about them
-# and ``InspectRequest`` cannot answer "never started" while this set is non-empty.
-# Each role leaves the set when it moves onto ``run_once``.
-HAND_ROLLED_ROLES: frozenset[ExecutorRole] = frozenset()
-
-
-# Session kinds whose executors run on the shared ReceiptStore. Each session
-# executor module appends its kinds here when it lands; unlisted SESSIONS kinds
-# are still refused by the unbound default and need no harness scenario yet.
-SESSION_RECEIPT_KINDS: frozenset[type[RequestBase]] = frozenset(
-    {EnsureSession, DispatchTurn, InspectTurn, CancelTurn, CloseSession, ResumeSessionTurn}
-)
-
-
-def receipt_executor_kinds() -> frozenset[type[RequestBase]]:
-    """Request kinds whose executors run on the shared ``ReceiptStore``.
-
-    The executor harness registers a scenario for each of these and fails when the
-    registered set differs, so a new receipt-backed kind cannot ship untested.
-    """
-    return SESSION_RECEIPT_KINDS | frozenset(
-        kind for kind, role in REQUEST_DISPATCH.items() if role in RECEIPT_BACKED_ROLES
-    )
 
 
 def counts_toward_concurrency(request: Request) -> bool:
