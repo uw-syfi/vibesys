@@ -93,6 +93,9 @@ path = "examples/model-serving/Llama-3.1-8B-Instruct-MLX-8bit"
 path = "examples/model-serving/deepseek-v3.2-8xb200"
 
 [[example]]
+path = "examples/model-serving/flint"
+
+[[example]]
 path = "examples/model-serving/glm-5.2-8xb200"
 
 [[example]]
