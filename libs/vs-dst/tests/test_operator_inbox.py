@@ -9,7 +9,7 @@ with a host killed after the post, and each ends as the uninterrupted run did an
 
 from __future__ import annotations
 
-import random
+import hashlib
 from functools import cache
 from typing import TYPE_CHECKING
 
@@ -165,22 +165,25 @@ def test_a_host_killed_after_the_post_applies_the_request_in_the_next_process_on
         _answered_once(interrupted, "p", (point, kill))
 
 
+def _draw(seed: int, label: str, count: int) -> int:
+    """A reproducible choice among ``count`` for this ``seed``: test cases, not a secret."""
+    return int.from_bytes(hashlib.sha256(f"{seed}/{label}".encode()).digest()[:8]) % count
+
+
 def _mix(seed: int) -> tuple[list[OperatorRequest], Interruption | None]:
     """A few requests of different kinds at random points, and maybe a kill."""
-    rng = random.Random(seed)  # noqa: S311  # a seeded draw of test cases, not a secret
     requests: list[OperatorRequest] = []
-    for index in range(rng.randint(1, 4)):
-        point = rng.choice(_points())
+    for index in range(1 + _draw(seed, "count", 4)):
+        point = _points()[_draw(seed, f"point{index}", len(_points()))]
         control_id = f"m{index}"
-        request: ControlRequest = rng.choice(
-            [
-                PauseRequest(control_id=control_id, expected_epoch=EPOCH),
-                ResumeRequest(control_id=control_id),
-                ResumeRequest(control_id=control_id, when="capacity_returns"),
-            ]
-        )
+        request: ControlRequest = (
+            PauseRequest(control_id=control_id, expected_epoch=EPOCH),
+            ResumeRequest(control_id=control_id),
+            ResumeRequest(control_id=control_id, when="capacity_returns"),
+        )[_draw(seed, f"kind{index}", 3)]
         requests.append(_at(point, request))
-    return requests, (rng.choice(_kills()) if rng.random() < 0.5 else None)
+    killed = _draw(seed, "killed", 2) == 0
+    return requests, (_kills()[_draw(seed, "kill", len(_kills()))] if killed else None)
 
 
 def test_any_mix_of_requests_and_a_kill_ends_as_before_with_every_request_answered_once() -> None:
