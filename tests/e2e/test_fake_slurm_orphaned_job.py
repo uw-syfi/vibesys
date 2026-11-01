@@ -19,6 +19,7 @@ import subprocess
 import sys
 from typing import TYPE_CHECKING
 
+from vs_sim.api.testing import HANG_GUARD_S
 from vs_slurm.fake_connector import active_jobs, executing_cluster
 
 if TYPE_CHECKING:
@@ -50,6 +51,9 @@ class _Cluster:
         command = (
             f"cd {self.base} && sbatch --job-name=orphan --output={self.base}/out.log {self.script}"
         )
+        # lint-waiver: LW-160201 [S603]; the real tier starts the Fake connector with the current
+        # > interpreter and no shell; the submitting process must run beside the test and be
+        # > killable mid-job, which a run-to-completion process runner cannot do.
         process = subprocess.Popen(  # noqa: S603
             (*_CONNECTOR, str(self.state)), stdin=subprocess.PIPE, stdout=subprocess.PIPE
         )
@@ -72,6 +76,9 @@ class _Cluster:
 
     def state_of(self, job_id: str) -> str:
         """What ``sacct`` says of the job, asked through a connector process of its own."""
+        # lint-waiver: LW-160202 [S603]; the real tier asks the Fake connector, as production asks
+        # > its transport, through a process of its own with the current interpreter and no shell;
+        # > the answer must come from a process other than the one that started the job.
         reply = subprocess.run(  # noqa: S603
             (*_CONNECTOR, str(self.state)),
             input=self._request(f"sacct -n -X -j {job_id} --format=State,ExitCode"),
@@ -92,14 +99,14 @@ def test_a_job_whose_runner_was_killed_is_run_to_its_end_by_the_next_poll(tmp_pa
         cluster.wait_until_running()
         (job_id,) = active_jobs(cluster.state)
         submitter.kill()
-        submitter.wait()
+        submitter.wait(HANG_GUARD_S)
         cluster.let_go()
 
         assert cluster.state_of(job_id) == "COMPLETED"
     finally:
         cluster.let_go()
         submitter.kill()
-        submitter.wait()
+        submitter.wait(HANG_GUARD_S)
 
 
 def test_a_job_whose_runner_is_alive_is_left_to_it(tmp_path: Path) -> None:
@@ -112,9 +119,9 @@ def test_a_job_whose_runner_is_alive_is_left_to_it(tmp_path: Path) -> None:
         assert cluster.state_of(job_id) == "RUNNING"
 
         cluster.let_go()
-        submitter.wait()
+        submitter.wait(HANG_GUARD_S)
         assert cluster.state_of(job_id) == "COMPLETED"
     finally:
         cluster.let_go()
         submitter.kill()
-        submitter.wait()
+        submitter.wait(HANG_GUARD_S)
