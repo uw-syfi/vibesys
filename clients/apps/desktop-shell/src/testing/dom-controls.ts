@@ -196,7 +196,8 @@ export function controlsOf(scope: Element): Control[] {
   return found;
 }
 
-function elementOf(scope: Element, control: Control): Element {
+/** The element of the `nth` control of `role` named `name` inside `scope`. */
+export function find(scope: Element, control: Control): Element {
   let index = 0;
   for (const element of scope.querySelectorAll(CANDIDATES)) {
     if (roleOf(element) !== control.role || hidden(element)) continue;
@@ -214,18 +215,46 @@ function eventOf(element: Element, type: string): Event {
   return new view.Event(type, {bubbles: true});
 }
 
-/** Writes `value` into a field as typing does, so a controlled field's handler sees it. */
+/**
+ * Writes `value` into a field as typing does, so a controlled field's handler sees it. Under
+ * happy-dom React takes a text field's change from `keyup` on the focused field, not from `input`.
+ */
 function write(element: HTMLInputElement | HTMLTextAreaElement, value: string): void {
   const prototype = Object.getPrototypeOf(element) as object;
   const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+  element.focus();
   setter?.call(element, value);
-  element.dispatchEvent(eventOf(element, 'input'));
-  element.dispatchEvent(eventOf(element, 'change'));
+  for (const type of ['input', 'change', 'keyup']) element.dispatchEvent(eventOf(element, type));
+}
+
+/** Presses `element`. */
+export async function press(element: Element): Promise<void> {
+  await act(async () => {
+    (element as HTMLElement).click();
+  });
+}
+
+/** Types `text` into a field. */
+export async function fillIn(
+  element: HTMLInputElement | HTMLTextAreaElement,
+  text: string,
+): Promise<void> {
+  await act(async () => write(element, text));
+}
+
+/** Picks the option of `select` that reads `label`. */
+export async function pickLabel(select: HTMLSelectElement, label: string): Promise<void> {
+  const option = [...select.options].find(each => text(each) === label);
+  if (option === undefined) throw new Error(`the select has no option "${label}"`);
+  await act(async () => {
+    select.value = option.value;
+    select.dispatchEvent(eventOf(select, 'change'));
+  });
 }
 
 /** Uses `control` as a person would: presses it, types in it, picks another option, or moves it. */
 export async function use(scope: Element, control: Control): Promise<void> {
-  const element = elementOf(scope, control);
+  const element = find(scope, control);
   await act(async () => {
     if (element instanceof HTMLSelectElement) {
       const other = [...element.options].find(option => option.value !== element.value);

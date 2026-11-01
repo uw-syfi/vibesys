@@ -1,9 +1,11 @@
 /**
  * The pages of machine-scoped Settings, each reached the way a user reaches it, so the layout
- * checks and the every-control-acts check look at the same screens.
+ * checks look at the screens the DOM tests audit: the steps are `src/testing/settings-pages.ts`'s,
+ * read here with a browser.
  */
 import {expect, type Page} from '@playwright/test';
-import {main, openSection, revealNav} from './settings-machine.js';
+import {SETTINGS_PAGES as PAGES, type Step} from '../src/testing/settings-pages.js';
+import {main, openSection} from './settings-machine.js';
 
 export interface SettingsPage {
   readonly name: string;
@@ -11,99 +13,27 @@ export interface SettingsPage {
   reach(page: Page): Promise<void>;
 }
 
-async function openForm(page: Page): Promise<void> {
-  await main(page).getByRole('button', {name: 'Add a cluster'}).click();
-  await expect(main(page).getByRole('heading', {name: 'Add a Slurm cluster'})).toBeVisible();
+async function take(page: Page, step: Step): Promise<void> {
+  if ('open' in step) {
+    await openSection(page, step.open, step.machine ?? null);
+  } else if ('press' in step) {
+    await main(page).getByRole(step.role, {name: step.press}).first().click();
+  } else if ('choose' in step) {
+    await main(page).getByRole('radio', {name: step.choose}).check();
+  } else if ('fill' in step) {
+    await main(page).getByRole('textbox', {name: step.fill}).fill(step.text);
+  } else if (step.heading === true) {
+    await expect(main(page).getByRole('heading', {name: step.see})).toBeVisible();
+  } else if (step.inAlert === true) {
+    await expect(main(page).getByRole('alert').getByText(step.see)).toBeVisible();
+  } else {
+    await expect(main(page).getByText(step.see, {exact: true})).toBeVisible();
+  }
 }
 
-async function fillForm(page: Page, alias: string): Promise<void> {
-  await main(page).getByRole('textbox', {name: 'Name'}).fill('lab-h100');
-  await main(page)
-    .getByRole('textbox', {name: 'Workspace on the cluster'})
-    .fill('/scratch/vibesys');
-  await main(page).getByRole('textbox', {name: 'SSH host alias'}).fill(alias);
-  await main(page).getByRole('button', {name: 'Test connection'}).click();
-}
-
-export const SETTINGS_PAGES: readonly SettingsPage[] = [
-  {
-    name: 'clusters',
-    reach: async page => {
-      await openSection(page, 'Clusters and clouds');
-      await expect(main(page).getByRole('heading', {name: 'cluster-m'})).toBeVisible();
-    },
+export const SETTINGS_PAGES: readonly SettingsPage[] = PAGES.map(each => ({
+  name: each.name,
+  reach: async page => {
+    for (const step of each.steps) await take(page, step);
   },
-  {
-    name: 'clusters with the sections open',
-    reach: async page => {
-      await openSection(page, 'Clusters and clouds');
-      await revealNav(page);
-      await expect(main(page).getByRole('heading', {name: 'cluster-m'})).toBeVisible();
-    },
-  },
-  {
-    name: 'clusters empty',
-    reach: async page => {
-      await openSection(page, 'Clusters and clouds', 'host-b');
-      await expect(main(page).getByText('No Slurm cluster yet')).toBeVisible();
-    },
-  },
-  {
-    name: 'clusters add form',
-    reach: async page => {
-      await openSection(page, 'Clusters and clouds', 'host-b');
-      await openForm(page);
-    },
-  },
-  {
-    name: 'clusters add form tested',
-    reach: async page => {
-      await openSection(page, 'Clusters and clouds', 'host-b');
-      await openForm(page);
-      await fillForm(page, 'lab-login');
-      await expect(main(page).getByText('Connection works', {exact: true})).toBeVisible();
-    },
-  },
-  {
-    name: 'clusters add form failed',
-    reach: async page => {
-      await openSection(page, 'Clusters and clouds', 'host-b');
-      await openForm(page);
-      await fillForm(page, 'no-workspace');
-      // The failed test is said in the form, above its actions.
-      await expect(
-        main(page).getByRole('alert').getByText('The workspace is not usable'),
-      ).toBeVisible();
-    },
-  },
-  {
-    name: 'clusters login node',
-    reach: async page => {
-      await openSection(page, 'Clusters and clouds', 'host-b');
-      await openForm(page);
-      await main(page).getByRole('radio', {name: 'This machine is a login node'}).check();
-    },
-  },
-  {
-    name: 'clusters too old',
-    reach: async page => {
-      await openSection(page, 'Clusters and clouds', 'host-c');
-      await expect(main(page).getByText('Needs an update', {exact: true})).toBeVisible();
-    },
-  },
-  {
-    name: 'logins',
-    reach: async page => {
-      await openSection(page, 'Agent logins');
-      await expect(main(page).getByRole('heading', {name: 'Aider'})).toBeVisible();
-    },
-  },
-  {
-    name: 'logins started',
-    reach: async page => {
-      await openSection(page, 'Agent logins', 'host-b');
-      await main(page).getByRole('button', {name: 'Sign in'}).first().click();
-      await expect(main(page).getByText('Login started', {exact: true})).toBeVisible();
-    },
-  },
-];
+}));

@@ -5,17 +5,9 @@
  */
 import {expect, type Page} from '@playwright/test';
 import type {FakeBridgeSeed, FakeMachineSettings} from '../src/testing/fake-bridge.js';
+import {SETTINGS_MACHINES, type SectionName} from '../src/testing/settings-pages.js';
 import {showScreen} from './read.js';
 import {open, SEED} from './world.js';
-
-const MACHINES = [
-  {host: 'local', label: 'This Mac', checkout: '~/projs/vibesys'},
-  {host: 'ssh:host-b', label: 'host-b', checkout: '/home/me/vibesys'},
-  {host: 'ssh:host-c', label: 'host-c', checkout: '/home/me/vibesys'},
-] as const;
-
-const SECTIONS = ['Clusters and clouds', 'Agent logins'] as const;
-export type SectionName = (typeof SECTIONS)[number];
 
 export const nav = (page: Page) => page.getByRole('navigation', {name: 'Settings sections'});
 export const main = (page: Page) => page.getByRole('main');
@@ -24,7 +16,7 @@ export const main = (page: Page) => page.getByRole('main');
 export async function openSettingsAt(
   page: Page,
   width: number,
-  seed: FakeBridgeSeed = {...SEED, machines: MACHINES},
+  seed: FakeBridgeSeed = {...SEED, machines: SETTINGS_MACHINES},
 ): Promise<void> {
   await page.setViewportSize({width, height: 900});
   await open(page, seed);
