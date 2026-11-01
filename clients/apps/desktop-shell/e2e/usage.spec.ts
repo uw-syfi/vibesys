@@ -133,7 +133,7 @@ for (const usage of USAGE_CASES) {
   });
 }
 
-ledger.requireEveryFailure(() => ledger.screens >= WIDTHS.length * USAGE_CASES.length);
+ledger.requireEveryFailure();
 
 test('a host that predates the question reads Update required and shows no figures', async ({
   page,

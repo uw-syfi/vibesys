@@ -138,7 +138,7 @@ for (const width of WIDTHS) {
   });
 }
 
-ledger.requireEveryFailure(() => ledger.screens >= WIDTHS.length * (DASHBOARDS.length + 3));
+ledger.requireEveryFailure();
 
 test('the contact sheet shows every dashboard and rail screen', async ({browser}) => {
   test.skip(shots === undefined, 'set SCREENS_DIR to write the screenshots and the contact sheet');

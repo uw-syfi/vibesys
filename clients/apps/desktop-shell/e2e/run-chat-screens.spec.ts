@@ -301,4 +301,4 @@ test('a new chat shows the harness picker and an empty thread', async ({page}) =
   await check(page, 'picker-open');
 });
 
-ledger.requireEveryFailure(() => ledger.screens >= 19);
+ledger.requireEveryFailure();

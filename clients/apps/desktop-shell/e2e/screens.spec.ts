@@ -94,7 +94,6 @@ const ledger = new KnownLedger('run-matrix');
  */
 const OTHER_SCRIPTS: ReadonlySet<string> = new Set(['long-titles']);
 
-let walked = 0;
 const sheet: SheetEntry[] = [];
 const shots = process.env['SCREENS_DIR'] || undefined;
 if (shots !== undefined) mkdirSync(shots, {recursive: true});
@@ -129,14 +128,13 @@ for (const cell of CELLS) {
       }
     });
     const lines = [...unexplained, ...ledger.unexplained(nameOf(cell, 'walk'), moved)];
-    walked += 1;
     expect(lines, `screens that break the layout or wording checks:\n${lines.join('\n')}`).toEqual(
       [],
     );
   });
 }
 
-ledger.requireEveryFailure(() => walked >= CELLS.length);
+ledger.requireEveryFailure();
 
 test('the contact sheet shows every screen', async ({browser}) => {
   test.skip(shots === undefined, 'set SCREENS_DIR to write the screenshots and the contact sheet');

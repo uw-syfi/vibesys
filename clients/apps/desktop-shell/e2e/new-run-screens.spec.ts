@@ -58,7 +58,7 @@ for (const theme of THEMES) {
   }
 }
 
-ledger.requireEveryFailure(() => ledger.screens >= (WIDTHS.length + 1) * NEW_RUN_PAGES.length);
+ledger.requireEveryFailure();
 
 test('the contact sheet of the New run pages', async ({browser}) => {
   test.skip(shots === undefined, 'set SCREENS_DIR to write the screenshots and the contact sheet');
