@@ -127,7 +127,9 @@ test('property: core records among the ordinary ones change no face of the Run s
     fc.asyncProperty(
       fc.constantFrom(...KINDS),
       fc.constantFrom<typeof INTERRUPTED_THEN_RERUN | undefined>(undefined, INTERRUPTED_THEN_RERUN),
-      fc.array(fc.nat(4), {minLength: 1, maxLength: 40}),
+      fc
+        .array(fc.nat(4), {minLength: 1, maxLength: 40})
+        .filter(core => core.some(count => count > 0)),
       async (kind, bodies, placements) => {
         const plain = plains[kind] as StoreRunFixture;
         const records = mixed(plain, placements, bodies);
