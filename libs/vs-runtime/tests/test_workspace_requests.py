@@ -28,8 +28,6 @@ from vs_core.api import (
     DecisionId,
     DiscardWorkspace,
     EnsureWorkspace,
-    HostFence,
-    HostId,
     InvocationId,
     InvocationRef,
     ObservationStatus,
@@ -71,7 +69,6 @@ from vs_runtime.api.core import (
     RuntimeWorkspaceRequests,
     revision_ref,
 )
-from vs_runtime.api.executor_contexts import RevocableLease
 from vs_runtime.api.infrastructure import (
     AgentPaths,
     BlockingOperations,
@@ -111,7 +108,6 @@ if TYPE_CHECKING:
     from vs_core.api import Request
     from vs_project.api import OrchestrationRunManifest, StateNamespace
     from vs_runtime.api import AgentRole, OrchestrationResumeDecision
-    from vs_runtime.api.core import ExecutionLease
     from vs_runtime.api.infrastructure import AgentExecutionConfiguration, WorkspaceResourceProvider
     from vs_sandbox.api import CommandRunner
     from vs_sim.api import BlockingRunner, Event
@@ -323,20 +319,11 @@ def _common(attempt: AttemptRef, name: str) -> _Common:
     }
 
 
-def _context(
-    request: Request,
-    *,
-    epoch: int = 1,
-    host: str = "host",
-    lease: ExecutionLease | None = None,
-    repeat: bool = False,
-) -> ExecutionContext:
+def _context(request: Request, *, repeat: bool = False) -> ExecutionContext:
     digest = hashlib.sha256(repr(request).encode()).hexdigest()
     return ExecutionContext(
-        fence=HostFence(host_id=HostId(root=host), epoch=epoch),
         now_at=1.0,
         payload_digest=digest,
-        lease=lease or RevocableLease(),
         until=Until(at=100.0),
         repeat=repeat,
     )
@@ -367,14 +354,10 @@ async def _run(
     executor: RuntimeWorkspaceRequests,
     request: Request,
     *,
-    epoch: int = 1,
-    host: str = "host",
     repeat: bool = False,
 ) -> ExecutionResult:
     """Run *request*; with *repeat*, as an attempt after one that may have run."""
-    outcome = await executor.execute(
-        request, _context(request, epoch=epoch, host=host, repeat=repeat)
-    )
+    outcome = await executor.execute(request, _context(request, repeat=repeat))
     assert isinstance(outcome, ExecutionResult), outcome
     return outcome
 
@@ -442,7 +425,7 @@ def test_ensure_replay_after_restart_reuses_the_durable_receipt(tmp_path: Path) 
         first = await _run(first_host, request)
         before = _worktrees(workspaces)
         restarted, _ = _executor(workspaces)
-        assert await _run(restarted, request, epoch=2) == first
+        assert await _run(restarted, request) == first
         assert _worktrees(workspaces) == before
 
     with _workspaces(tmp_path) as workspaces:
@@ -491,8 +474,8 @@ def test_snapshot_replay_makes_one_commit_and_binds_the_receipt(tmp_path: Path) 
         assert observed.revision.digest == f"git-commit:{observed.revision.revision_id.root}"
         commits = _commits(workspaces)
         restarted, _ = _executor(workspaces)
-        assert await _run(restarted, request, epoch=2) == first
-        assert await _run(executor, request, epoch=2) == first
+        assert await _run(restarted, request) == first
+        assert await _run(executor, request) == first
         assert _commits(workspaces) == commits
 
     with _workspaces(tmp_path) as workspaces:
@@ -642,11 +625,11 @@ def test_interrupted_snapshot_is_recovered_by_its_label_without_a_second_commit(
             taken = await _run(executor, request)  # the host dies before its result is recorded
             commits = _commits(workspaces)
             restarted, _ = _executor(workspaces)
-            recovered = await _run(restarted, request, epoch=2, repeat=True)
+            recovered = await _run(restarted, request, repeat=True)
             assert recovered.observation.observation.status is ObservationStatus.SUCCEEDED
             assert recovered.observation.revision == taken.observation.revision
             assert _commits(workspaces) == commits
-            again = await _run(restarted, request, epoch=2, repeat=True)
+            again = await _run(restarted, request, repeat=True)
             assert again.observation.revision == recovered.observation.revision
             assert _commits(workspaces) == commits
 
@@ -762,7 +745,7 @@ def test_run_snapshot_binds_invocation_request_and_retention(tmp_path: Path) -> 
         assert event.revision is not None
         assert event.observation == first.observation.observation
         commits = _commits(workspaces)
-        assert await _run(executor, request, epoch=2) == first
+        assert await _run(executor, request) == first
         assert _commits(workspaces) == commits
         assert _git(workspaces.root.path, "rev-parse", event.revision.revision_id.root)
 
@@ -904,29 +887,27 @@ def test_adoption_publishes_and_legacy_verification_reads_publication(tmp_path: 
         assert isinstance(applied.owner_events[0], AdoptionObserved)
         root_file = workspaces.root.path / "candidate.py"
         assert root_file.read_text(encoding="utf-8") == "VALUE = 2\n"
-        replayed = await _run(executor, adopt, epoch=2, repeat=True)
+        replayed = await _run(executor, adopt, repeat=True)
         assert replayed.observation.observation.status is ObservationStatus.SUCCEEDED
         assert replayed.observation.revision == applied.observation.revision
         before_head = workspaces.root.revision
         same = AdoptRevision(request_id=_rid("adopt-same"), scope=run_scope, selection=selection)
-        checked = await _run(executor, same, epoch=2)
+        checked = await _run(executor, same)
         assert checked.observation.observation.status is ObservationStatus.SUCCEEDED
         assert workspaces.root.revision == before_head
-        proof = await _run(executor, verify("verify-1"), epoch=2)
+        proof = await _run(executor, verify("verify-1"))
         assert proof.observation.observation.status is ObservationStatus.SUCCEEDED
         assert proof.observation.revision == winner
         # Interrupted after publication: the source receipt proves the same commit,
         # so the retry never restores the root or creates a second publication.
         again = AdoptRevision(request_id=_rid("adopt-2"), scope=run_scope, selection=selection)
-        published = await _run(
-            executor, again, epoch=3
-        )  # the host dies before it records the result
-        resumed = await _run(executor, again, epoch=3, repeat=True)
+        published = await _run(executor, again)  # the host dies before it records the result
+        resumed = await _run(executor, again, repeat=True)
         assert resumed.observation.observation.status is ObservationStatus.SUCCEEDED
         assert resumed.observation.revision == published.observation.revision
         # Checkout drift does not invalidate a durable publication.
         root_file.write_text("VALUE = 3\n", encoding="utf-8")
-        drifted = await _run(executor, verify("verify-2"), epoch=3)
+        drifted = await _run(executor, verify("verify-2"))
         assert drifted.observation.observation.status is ObservationStatus.SUCCEEDED
         assert drifted.observation.observation.terminal
         assert root_file.read_text() == "VALUE = 3\n"
@@ -1078,13 +1059,10 @@ async def _snapshot_of(
     attempt: AttemptRef,
     name: str,
     retention: Literal["wip", "candidate"] = "candidate",
-    *,
-    epoch: int = 1,
 ) -> RevisionRef:
     result = await _run(
         executor,
         SnapshotAndRetain(**_common(attempt, name), attempt=attempt, retention=retention),
-        epoch=epoch,
     )
     assert result.observation.revision is not None
     return result.observation.revision
@@ -1300,16 +1278,15 @@ def test_f3_restart_between_binding_and_result_reattaches_instead_of_rejecting(
 
             second_host = env.start_host()
             restarted, _ = _executor(second_host)
-            again = await _run(restarted, request, epoch=2, repeat=True)
+            again = await _run(restarted, request, repeat=True)
             assert _status(again) is ObservationStatus.SUCCEEDED
             assert _worktree_paths(second_host) == {path}
             assert (path / "work.txt").read_text(encoding="utf-8") == "in progress\n"
             # Every attempt request works on the reattached workspace; none is a stored rejection.
-            revision = await _snapshot_of(restarted, attempt, "s1", epoch=2)
+            revision = await _snapshot_of(restarted, attempt, "s1")
             restored = await _run(
                 restarted,
                 RestoreRevision(**_common(attempt, "r1"), attempt=attempt, revision=revision),
-                epoch=2,
             )
             assert _status(restored) is ObservationStatus.SUCCEEDED
             assert (path / "work.txt").read_text(encoding="utf-8") == "in progress\n"
@@ -1330,7 +1307,6 @@ def test_f3_restart_after_a_recorded_result_still_serves_the_attempt(tmp_path: P
             snapshot = await _run(
                 restarted,
                 SnapshotAndRetain(**_common(attempt, "s1"), attempt=attempt, retention="wip"),
-                epoch=2,
             )
             assert _status(snapshot) is ObservationStatus.SUCCEEDED
 
@@ -1386,14 +1362,13 @@ def test_a_clean_host_stop_keeps_every_attempt_workspace_for_the_next_host(
             restarted, _ = _executor(second_host)
             for attempt, path, files in zip(attempts, paths, expected, strict=True):
                 name = attempt.attempt_id.root
-                revision = await _snapshot_of(restarted, attempt, f"s-{name}", "wip", epoch=2)
+                revision = await _snapshot_of(restarted, attempt, f"s-{name}", "wip")
                 assert _visible_files(path) == files
                 restored = await _run(
                     restarted,
                     RestoreRevision(
                         **_common(attempt, f"r-{name}"), attempt=attempt, revision=revision
                     ),
-                    epoch=2,
                 )
                 assert _status(restored) is ObservationStatus.SUCCEEDED
                 assert _visible_files(path) == files
@@ -1523,26 +1498,22 @@ def test_f4_exclusive_root_is_held_by_one_attempt_generation(tmp_path: Path) -> 
         assert not other.observation.observation.terminal
         # A restarted executor sees the same holder.
         restarted, _ = _executor(workspaces)
-        again = await _run(
-            restarted, _ensure(workspaces, b, "eb2", WorkspaceMode.EXCLUSIVE_ROOT), epoch=2
-        )
+        again = await _run(restarted, _ensure(workspaces, b, "eb2", WorkspaceMode.EXCLUSIVE_ROOT))
         assert _status(again) is ObservationStatus.UNKNOWN
         # A newer generation of the holder supersedes it; the old generation is then refused.
         newer = _attempt("a", 1)
         granted = await _run(
-            restarted, _ensure(workspaces, newer, "ea1", WorkspaceMode.EXCLUSIVE_ROOT), epoch=2
+            restarted, _ensure(workspaces, newer, "ea1", WorkspaceMode.EXCLUSIVE_ROOT)
         )
         assert _status(granted) is ObservationStatus.SUCCEEDED
         stale = await _run(
             restarted,
             SnapshotAndRetain(**_common(a, "stale"), attempt=a, retention="wip"),
-            epoch=2,
         )
         assert _status(stale) is ObservationStatus.REJECTED
         old = await _run(
             restarted,
             _ensure(workspaces, _attempt("a", 0), "ea0b", WorkspaceMode.EXCLUSIVE_ROOT),
-            epoch=2,
         )
         assert _status(old) is ObservationStatus.REJECTED
 
@@ -1616,7 +1587,7 @@ def test_f6_foreign_dangling_and_unretained_revisions_are_rejected(tmp_path: Pat
         )
         assert _status(retained) is ObservationStatus.SUCCEEDED
         restarted, _ = _executor(workspaces)
-        assert _status(await _run(restarted, restore("shared", revision_b), epoch=2)) is (
+        assert _status(await _run(restarted, restore("shared", revision_b))) is (
             ObservationStatus.SUCCEEDED
         )
 
@@ -1773,11 +1744,11 @@ def test_f8_a_crash_between_the_discard_and_its_record_recovers_to_complete(
                 await _run(executor, discard)
             assert not path.exists()
             crashing.fail_release_mark = False
-            again = await _run(_executor(workspaces)[0], discard, epoch=2, repeat=True)
+            again = await _run(_executor(workspaces)[0], discard, repeat=True)
             observation = again.observation.observation
             assert observation.released
             assert observation.children_complete
-            assert _status(await _run(_executor(workspaces)[0], discard, epoch=2, repeat=True)) is (
+            assert _status(await _run(_executor(workspaces)[0], discard, repeat=True)) is (
                 ObservationStatus.SUCCEEDED
             )
 
@@ -1796,7 +1767,7 @@ def test_f8_a_release_by_anyone_else_does_not_claim_completeness(tmp_path: Path)
             _git(workspaces.root.path, "worktree", "prune")
             restarted, _ = _executor(env.start_host())
             discard = DiscardWorkspace(**_common(attempt, "d1"), attempt=attempt)
-            observation = (await _run(restarted, discard, epoch=2)).observation.observation
+            observation = (await _run(restarted, discard)).observation.observation
             assert observation.released
             assert not observation.children_complete
 
@@ -1865,7 +1836,7 @@ def test_f9_interrupted_restore_is_completed_or_confirmed_on_retry(tmp_path: Pat
             restore = RestoreRevision(**_common(attempt, "r1"), attempt=attempt, revision=base)
             await _run(executor, restore)  # the host dies before its result is recorded
             restarted, _ = _executor(workspaces)
-            result = await _run(restarted, restore, epoch=2, repeat=True)
+            result = await _run(restarted, restore, repeat=True)
             assert _status(result) is ObservationStatus.SUCCEEDED
             assert (path / "candidate.py").read_text(encoding="utf-8") == "VALUE = 1\n"
 

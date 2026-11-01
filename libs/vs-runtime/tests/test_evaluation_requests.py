@@ -22,8 +22,6 @@ from vs_core.api import (
     CloseAttemptScope,
     CollectEvidence,
     DecisionId,
-    HostFence,
-    HostId,
     InspectOwnedJob,
     JobObserved,
     MeasurementFailure,
@@ -100,33 +98,12 @@ type EvaluationRoleRequest = (
 )
 
 
-class FakeLease:
-    """A lease the test can revoke."""
-
-    def __init__(self) -> None:
-        self.valid = True
-
-    def renew(self, *, now_at: float, lease_duration: float) -> None:
-        del now_at, lease_duration
-
-    def verify(self, *, now_at: float) -> bool:
-        del now_at
-        return self.valid
-
-
 def context_for(
-    request: EvaluationRoleRequest,
-    lease: FakeLease | None = None,
-    epoch: int = 1,
-    now_at: float = 5.0,
-    *,
-    repeat: bool = False,
+    request: EvaluationRoleRequest, now_at: float = 5.0, *, repeat: bool = False
 ) -> ExecutionContext:
     return ExecutionContext(
-        fence=HostFence(host_id=HostId(root="host"), epoch=epoch),
         now_at=now_at,
         payload_digest=hashlib.sha256(request.model_dump_json().encode()).hexdigest(),
-        lease=lease or FakeLease(),
         until=Until(at=100.0),
         repeat=repeat,
     )
@@ -220,12 +197,11 @@ async def run(
     w: World,
     request: EvaluationRoleRequest,
     crash_at: int | None = None,
-    epoch: int = 1,
     *,
     repeat: bool = False,
 ) -> ExecutionResult:
     requests, _ = w.requests(crash_at)
-    return await requests.execute(request, context_for(request, epoch=epoch, repeat=repeat))
+    return await requests.execute(request, context_for(request, repeat=repeat))
 
 
 class Recorder:
@@ -478,7 +454,7 @@ async def test_close_releases_every_job_however_far_its_submission_got() -> None
             # The submitting process died: the close runs on the host that replaced it.
             # Core retries a close that could not yet prove release, under a new request.
             for attempt in range(5):
-                closed = await run(w, close_request(f"close-{attempt}"), epoch=2)
+                closed = await run(w, close_request(f"close-{attempt}"))
                 own = closed.observation.observation
                 if own.released:
                     break

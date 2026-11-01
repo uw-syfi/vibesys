@@ -19,8 +19,6 @@ from vs_core.api import (
     EvidenceKey,
     EvidenceKind,
     EvidenceRef,
-    HostFence,
-    HostId,
     InspectOwnedJob,
     LifecycleClass,
     Observation,
@@ -222,7 +220,6 @@ class _Retain(OperationRequest):
 
 def _context() -> ExecutionContext:
     return ExecutionContext(
-        fence=HostFence(host_id=HostId(root="host"), epoch=1),
         now_at=1.0,
         payload_digest="d",
         until=Until(at=100.0),
@@ -451,10 +448,8 @@ class _Lease:
 
 def _eval_context(request: BaseModel) -> ExecutionContext:
     return ExecutionContext(
-        fence=HostFence(host_id=HostId(root="host"), epoch=1),
         now_at=5.0,
         payload_digest=hashlib.sha256(request.model_dump_json().encode()).hexdigest(),
-        lease=_Lease(),
         until=Until(at=100.0),
     )
 

@@ -50,7 +50,7 @@ from vs_runtime.api.core import (
     KeyedDocuments,
     ReleasedRunInvocations,
 )
-from vs_runtime.api.executor_contexts import RevocableLease, context_for
+from vs_runtime.api.executor_contexts import context_for
 from vs_runtime.api.observation_contracts import assert_core_accepts
 from vs_sim.api import OsThreads
 from vs_sim.api.testing import examples, wait_until_started
@@ -81,10 +81,8 @@ class World:
     def store(self) -> KeyedDocuments:
         return KeyedDocuments(self._project.state.state_store_namespace("run"), threads=OsThreads())
 
-    async def execute(
-        self, request: RequestBase, *, lease: RevocableLease | None = None
-    ) -> ExecutionResult:
-        context = context_for(request, lease=lease)
+    async def execute(self, request: RequestBase) -> ExecutionResult:
+        context = context_for(request)
         outcome = await lifecycle_executor(self.host, self.store(), self.sessions).execute(
             cast("Any", request), context
         )

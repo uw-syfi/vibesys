@@ -15,8 +15,6 @@ from vs_core.api import (
     EvidenceId,
     EvidenceKind,
     EvidenceRef,
-    HostFence,
-    HostId,
     ObservationStatus,
     RequestId,
     RevisionId,
@@ -133,7 +131,6 @@ class PromptRender:
             self.replies,
         )
         fence = ExecutionContext(
-            fence=HostFence(host_id=HostId(root="host"), epoch=1),
             now_at=1.0,
             payload_digest="d",
             until=Until(at=100.0),

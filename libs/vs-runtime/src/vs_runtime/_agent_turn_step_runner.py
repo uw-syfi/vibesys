@@ -55,7 +55,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from vs_agent.api import AgentSessions
-    from vs_core.api import HostFence, Observation, Request, RequestId, TurnSpec
+    from vs_core.api import Observation, Request, RequestId, TurnSpec
     from vs_core.api.recovery import StepResult
     from vs_runtime._core_requests import ExecutionResult
     from vs_runtime._keyed_documents import KeyedDocuments
@@ -122,19 +122,6 @@ class _Plan:
 
 
 @dataclass(frozen=True)
-class RunWriter:
-    """The one writer of a run: its id, and the host fence it holds.
-
-    The run's lock makes one process the only writer, so the fence does not change within a
-    run. The id names the run in the mark of every agent process, because two runs on one host
-    can reuse a request id.
-    """
-
-    run_id: str
-    fence: HostFence
-
-
-@dataclass(frozen=True)
 class TurnState:
     """The durable state the turn path writes, and the runner that keeps blocking calls off the loop."""
 
@@ -151,10 +138,10 @@ class AgentTurnStepRunner:
         paths: TurnPaths,
         state: TurnState,
         clock: Clock,
-        writer: RunWriter,
+        run_id: str,
         reaper: StageWorkReaper,
     ) -> None:
-        """Bind the turn executors, the durable state they write, the run clock, the writer and the reaper.
+        """Bind the turn executors, the durable state they write, the run clock, the run's id and the reaper.
 
         *state* is what the executors were built with. *reaper* ends the processes of a step by its
         tag (the environment's: containers, or host processes found by their mark). *clock* is the
@@ -165,7 +152,7 @@ class AgentTurnStepRunner:
         self._store = state.store
         self._blocking = ShieldedBlockingRunner(state.blocking)
         self._clock = clock
-        self._writer = writer
+        self._run_id = run_id
         self._reaper = reaper
 
     async def run(
@@ -180,12 +167,11 @@ class AgentTurnStepRunner:
         del attempt
         plan = self._plan(step, tag)
         context = ExecutionContext(
-            fence=self._writer.fence,
             now_at=self._clock.now(),
             until=Until(at=deadline_at),
             payload_digest=hashlib.sha256(step.model_dump_json().encode()).hexdigest(),
         )
-        mark = agent_mark(self._writer.run_id, tag)
+        mark = agent_mark(self._run_id, tag)
         execution = asyncio.ensure_future(plan.start(context, mark))
         try:
             return await self._ended(execution, plan, tag, cancel)

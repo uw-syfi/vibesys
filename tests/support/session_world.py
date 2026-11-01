@@ -74,7 +74,6 @@ if TYPE_CHECKING:
 
     from vs_core.api import RequestBase
     from vs_runtime.api.core import AccessGuardedWorkspace, ExecutionContext, SessionResolver
-    from vs_runtime.api.executor_contexts import RevocableLease
 
 SCOPE = Scope(owner=RunId(root="run"), generation=0)
 ROLE = RoleId(root="worker")
@@ -327,12 +326,11 @@ class SessionHost:
         request: RequestBase,
         store: KeyedDocuments,
         *,
-        lease: RevocableLease | None = None,
         now_at: float | None = None,
         digest: str | None = None,
     ) -> ExecutionResult:
         """Execute *request* once on a freshly started host over *store*."""
-        context = session_context(request, lease=lease, now_at=now_at, digest=digest)
+        context = session_context(request, now_at=now_at, digest=digest)
         return await self.run_in(request, store, context)
 
     async def run_in(
@@ -353,12 +351,11 @@ class SessionHost:
 def session_context(
     request: RequestBase,
     *,
-    lease: RevocableLease | None = None,
     now_at: float | None = None,
     digest: str | None = None,
 ) -> ExecutionContext:
     """The context a shell would build for a session *request*, ending at 100 s."""
-    context = context_for(request, lease=lease).model_copy(update={"until": Until(at=100.0)})
+    context = context_for(request).model_copy(update={"until": Until(at=100.0)})
     if now_at is not None:
         context = context.model_copy(update={"now_at": now_at})
     if digest is not None:

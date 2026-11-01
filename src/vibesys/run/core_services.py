@@ -269,7 +269,7 @@ class CoreServices:
     """Reaches the turns this host runs while they run; ``None`` offers no input mid-turn."""
     commit_observer: CommitObserver
     """Hears the run's state after each record, for the committed view and its events."""
-    runner: Callable[[SleepingClock, int], StepRunner]
+    runner: Callable[[SleepingClock], StepRunner]
     evaluation: ClosableEvaluation
     artifacts: ArtifactStore
     clock: RunClock
@@ -345,9 +345,7 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         catalog=catalog,
         steering=None if bound.sessions is None else bound.sessions.turns,
         commit_observer=resources.commit_observer,
-        runner=lambda clock, epoch: build_run_runner(
-            runner_services, _seams(resources), clock=clock, epoch=epoch
-        ),
+        runner=lambda clock: build_run_runner(runner_services, _seams(resources), clock=clock),
         evaluation=resources.evaluation,
         artifacts=artifacts,
         clock=resources.run_clock,

@@ -13,7 +13,7 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Protocol, assert_never, cast
 
-from pydantic import BaseModel, ConfigDict, Field, SkipValidation
+from pydantic import BaseModel, ConfigDict, Field
 
 from vs_core.api import (
     AdoptRevision,
@@ -30,7 +30,6 @@ from vs_core.api import (
     EnsureSession,
     EnsureWorkspace,
     ExecuteRegisteredOperation,
-    HostFence,
     InspectOwnedJob,
     InspectRequest,
     InspectTurn,
@@ -65,30 +64,15 @@ class ExecutorRole(StrEnum):
     SEMANTIC_EVENTS = "semantic_events"
 
 
-class ExecutionLease(Protocol):
-    """Host authority handle for I/O that outlives the lease it started under.
-
-    The shell does not read a clock; the caller supplies times. Long executors
-    call renew with the current time, and verify before irreversible effects.
-    A rejected renewal halts the shell and raises, so the executor must stop.
-    """
-
-    def renew(self, *, now_at: float, lease_duration: float) -> None: ...
-
-    def verify(self, *, now_at: float) -> bool: ...
-
-
 class ExecutionContext(BaseModel):
-    """Current host authorization, distinct from stable request/payload identity.
+    """What an executor is told of one attempt of a request, besides the request itself.
 
-    lease is process-local authority, never part of the request identity or of
-    any persisted value. It is None only for contexts built outside the shell.
+    The run lock makes one process the only writer, so the context carries no host authority.
     """
 
     model_config = ConfigDict(
         extra="forbid", frozen=True, strict=True, arbitrary_types_allowed=True
     )
-    fence: HostFence
     now_at: float = Field(ge=0, allow_inf_nan=False)
     payload_digest: str = Field(min_length=1)
     until: Until
@@ -98,7 +82,6 @@ class ExecutionContext(BaseModel):
     a request that is still running once the time passes or a watch fires, and core
     reports the request as ``Failed``.
     """
-    lease: SkipValidation[ExecutionLease | None] = Field(default=None, exclude=True, repr=False)
     permit: TurnPermit | None = None
     """The logical-turn permit core issued for this request, when the request consumes one."""
     repeat: bool = False

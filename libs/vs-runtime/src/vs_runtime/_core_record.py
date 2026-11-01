@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated, Any, Literal, Protocol, Self
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Self
 
 from pydantic import (
     BaseModel,
     BeforeValidator,
     ConfigDict,
     Field,
-    SkipValidation,
     model_validator,
 )
 
@@ -24,11 +23,8 @@ from vs_core.api import (
     decode_stored,
 )
 from vs_core.api.recovery import OwnerEvent
-from vs_runtime._core_requests import ExecutionLease
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from vs_core.api import Comparison, Runaway
     from vs_project.api import StoredEnvelope
 
@@ -134,31 +130,6 @@ class RuntimeRecord[S: StrategyState](BaseModel):
             type(record.envelope), record.envelope.model_dump_json()
         )
         return record.model_copy(update={"envelope": envelope})
-
-
-class PublicationLease(ExecutionLease, Protocol):
-    """The host's lease, as a publication delivery uses it to write."""
-
-    def write_if_held(self, mutation: Callable[[], None]) -> bool:
-        """Run *mutation* in the store transaction that checks this host still owns the run.
-
-        Ownership is judged at the latest time the host has seen, with its current fence,
-        not at the time the publication started: a renewal while a delivery awaits moves
-        the store's time watermark past that start, and the host still owns the run.
-        Returns False, without running *mutation*, when the host no longer does.
-        """
-        ...
-
-
-class PublicationContext(BaseModel):
-    """Publication execution epoch, separate from its stable identity."""
-
-    model_config = ConfigDict(
-        extra="forbid", frozen=True, strict=True, arbitrary_types_allowed=True
-    )
-    now_at: float = Field(ge=0, allow_inf_nan=False)
-    """When the publication started; ownership at the write is the lease's to judge."""
-    lease: SkipValidation[PublicationLease] = Field(exclude=True, repr=False)
 
 
 class PublicationAcknowledgement(BaseModel):

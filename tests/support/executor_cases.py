@@ -79,7 +79,7 @@ from vs_runtime.api.core import (
     owner_key,
     revision_ref,
 )
-from vs_runtime.api.executor_contexts import RevocableLease, context_for
+from vs_runtime.api.executor_contexts import context_for
 from vs_runtime.api.executor_contracts import FaultingNamespace, Scenario
 from vs_runtime.api.slurm_evaluation_stack import (
     ADMISSION,
@@ -139,7 +139,6 @@ async def inspect_dispatch_of(
             dispatching.turn.invocation_id.root,
             dispatch=cast("RequestId", dispatching.request_id).root,
         ),
-        lease=RevocableLease(),
         crash_at=None,
     )
 
@@ -157,7 +156,6 @@ class _EvaluationWorld(_World):
             return submission("sub", candidate=self.stack.snapshot)
         seed = await self.execute(
             submission("seed", candidate=self.stack.snapshot),
-            lease=RevocableLease(),
             crash_at=None,
         )
         resource = seed.observation.observation.resource_id
@@ -187,14 +185,13 @@ class _EvaluationWorld(_World):
         self,
         request: RequestBase,
         *,
-        lease: RevocableLease,
         crash_at: int | None,
         digest: str | None = None,
         repeat: bool = False,
     ) -> ExecutionResult:
         faulting = self.faulting(crash_at)
         requests = MeasurementRequests(self.stack.executor, self.store(faulting))
-        context = context_for(request, lease=lease).model_copy(update={"repeat": repeat})
+        context = context_for(request).model_copy(update={"repeat": repeat})
         if digest is not None:
             context = context.model_copy(update={"payload_digest": digest})
         try:
@@ -271,7 +268,7 @@ class WorkspacesWorld:
         return candidate
 
     async def _seed(self, request: RequestBase) -> ExecutionResult:
-        return await self.execute(request, lease=RevocableLease(), crash_at=None)
+        return await self.execute(request, crash_at=None)
 
     def drift(self, request: RequestBase) -> None:
         """Change the files *request* snapshots, as a writer that outlived its attempt would."""
@@ -328,7 +325,6 @@ class WorkspacesWorld:
         self,
         request: RequestBase,
         *,
-        lease: RevocableLease,
         crash_at: int | None,
         digest: str | None = None,
         repeat: bool = False,
@@ -342,7 +338,7 @@ class WorkspacesWorld:
             blocking=ThreadBlockingRunner(),
             evidence=ReceiptEvidenceLedger(store),
         )
-        context = context_for(request, lease=lease).model_copy(update={"repeat": repeat})
+        context = context_for(request).model_copy(update={"repeat": repeat})
         if digest is not None:
             context = context.model_copy(update={"payload_digest": digest})
         try:
@@ -404,7 +400,7 @@ class _SessionsWorld(_World):
         self.host: SessionHost = open_host(base / "workspace")
 
     async def _seed(self, request: RequestBase) -> None:
-        await self.execute(request, lease=RevocableLease(), crash_at=None)
+        await self.execute(request, crash_at=None)
 
     async def prepare(self, scenario: Scenario) -> RequestBase:
         if scenario.kind is EnsureSession:
@@ -419,14 +415,13 @@ class _SessionsWorld(_World):
         self,
         request: RequestBase,
         *,
-        lease: RevocableLease,
         crash_at: int | None,
         digest: str | None = None,
         repeat: bool = False,
     ) -> ExecutionResult:
         faulting = self.faulting(crash_at)
         try:
-            context = session_context(request, lease=lease, digest=digest)
+            context = session_context(request, digest=digest)
             context = context.model_copy(update={"repeat": repeat})
             return await self.host.run_in(request, self.store(faulting), context)
         finally:
@@ -480,14 +475,13 @@ class _SessionLifecycleWorld(_SessionsWorld):
         self,
         request: RequestBase,
         *,
-        lease: RevocableLease,
         crash_at: int | None,
         digest: str | None = None,
         repeat: bool = False,
     ) -> ExecutionResult:
         faulting = self.faulting(crash_at)
         executor = lifecycle_executor(self.host, self.store(faulting))
-        context = context_for(request, lease=lease).model_copy(update={"repeat": repeat})
+        context = context_for(request).model_copy(update={"repeat": repeat})
         if digest is not None:
             context = context.model_copy(update={"payload_digest": digest})
         try:

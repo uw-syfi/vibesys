@@ -1,10 +1,10 @@
-"""What runtime executor tests run an executor with: a context, a revocable lease, a store."""
+"""What runtime executor tests run an executor with: a context and a store."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vs_core.api import HostFence, HostId, Until
+from vs_core.api import Until
 from vs_project.api import StateNamespace
 from vs_project.api.testing import scratch_state_directory
 from vs_runtime._core_requests import payload_digest_of
@@ -17,38 +17,19 @@ if TYPE_CHECKING:
     from vs_core.api import RequestBase
 
 
-class RevocableLease:
-    """A host lease the test can revoke."""
-
-    def __init__(self) -> None:
-        """Start with the lease held."""
-        self.valid = True
-
-    def renew(self, *, now_at: float, lease_duration: float) -> None:
-        """Accept any renewal."""
-        del now_at, lease_duration
-
-    def verify(self, *, now_at: float) -> bool:
-        """Whether the lease is still held."""
-        del now_at
-        return self.valid
-
-
 def context_for(
-    request: RequestBase,
-    *,
-    lease: RevocableLease | None = None,
-    epoch: int = 1,
-    host: str = "host",
-    now_at: float = 5.0,
+    request: RequestBase, *, now_at: float = 5.0, repeat: bool = False
 ) -> ExecutionContext:
-    """The context a shell would build for *request* on one host, ending 600 s later."""
+    """The context the step runner builds for *request*, ending 600 s later.
+
+    With *repeat*, an earlier attempt of the request may have run, as for any attempt after
+    the first.
+    """
     return ExecutionContext(
-        fence=HostFence(host_id=HostId(root=host), epoch=epoch),
         now_at=now_at,
         until=Until(at=now_at + 600.0),
         payload_digest=payload_digest_of(request),
-        lease=lease or RevocableLease(),
+        repeat=repeat,
     )
 
 
