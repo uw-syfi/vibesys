@@ -37,8 +37,6 @@ from vs_runtime._run_clocks import CrashableRunClock, ProbedRunClock
 from vs_runtime._run_environment import HostEnvironment
 from vs_runtime._runs import FakeRunHandle, FakeRuns
 from vs_runtime._shell_kit import (
-    LEASE,
-    Admitting,
     HostOptions,
     InvalidReply,
     Launch,
@@ -46,11 +44,7 @@ from vs_runtime._shell_kit import (
     Run,
     Script,
     ScriptedExecutors,
-    ScriptedHost,
-    TranslatorFactory,
-    drive_shell,
     request_executors,
-    scripted_host,
 )
 from vs_runtime._validation_passes import MemoryValidationPasses
 from vs_runtime.api.stage_work_contracts import (
@@ -117,8 +111,6 @@ def idle_environment_system(slurm_processes: Processes = NO_PROCESSES) -> Enviro
 
 
 __all__ = [
-    "LEASE",
-    "Admitting",
     "AttemptHangs",
     "AttemptHolds",
     "AttemptRaises",
@@ -177,7 +169,6 @@ __all__ = [
     "RunnerMethod",
     "Script",
     "ScriptedExecutors",
-    "ScriptedHost",
     "StageWorkPlace",
     "StageWorkReaperContract",
     "StageWorkUnderTest",
@@ -187,17 +178,14 @@ __all__ = [
     "StepRunnerUnderTest",
     "StepTagMismatchError",
     "StillRunningAfterCancelError",
-    "TranslatorFactory",
     "UnsafeControlSchemaError",
     "control_schema_fields",
     "counter",
     "daemon_docker_config",
     "daemon_engine",
-    "drive_shell",
     "fake_run_seed",
     "finished_result",
     "idle_environment_system",
     "request_executors",
-    "scripted_host",
     "unconfined_host_environment",
 ]

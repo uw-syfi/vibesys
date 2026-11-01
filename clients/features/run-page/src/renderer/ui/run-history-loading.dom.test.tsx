@@ -116,6 +116,9 @@ function replay(size: number, total: number | undefined): readonly RunPageState[
   return states;
 }
 
+/** What the page of `state` says of itself, `data-state`, besides its text. */
+let lastPageState: string | null = null;
+
 async function screenText(state: RunPageState, resume?: RunPageStore): Promise<string> {
   const container = document.createElement('div');
   document.body.append(container);
@@ -153,6 +156,7 @@ async function screenText(state: RunPageState, resume?: RunPageStore): Promise<s
     ).toBe('true');
   }
   const text = container.textContent ?? '';
+  lastPageState = container.querySelector('main')?.getAttribute('data-state') ?? null;
   unsubscribe?.();
   await act(async () => root.unmount());
   container.remove();
@@ -188,6 +192,18 @@ test('the same prefixes read as a run in progress when drawn as the run: the tes
     drawnRunning ||= /running/i.test(text);
   }
   expect(drawnRunning).toBe(true);
+});
+
+test('the page says loading while the history is read, and ready once it is', async () => {
+  for (const total of [undefined, FIXTURE.events.length]) {
+    const states = replay(5, total);
+    for (const [index, state] of states.entries()) {
+      await screenText(state);
+      expect(lastPageState, `after ${index} of ${states.length - 1} steps`).toBe(
+        state.history.kind === 'reading' ? 'loading' : 'ready',
+      );
+    }
+  }
 });
 
 test('the last page settles the screen: the run, final, with no loading left', async () => {

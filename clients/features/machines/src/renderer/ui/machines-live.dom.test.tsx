@@ -99,6 +99,7 @@ function rig(withRuns = false) {
       root.render(
         <MachinesPage
           state={listed(shown, report)}
+          settled="ready"
           dispatch={() => undefined}
           live={(host, render) => <WithHostLive live={live} host={host} render={render} />}
           showRuns={() => undefined}

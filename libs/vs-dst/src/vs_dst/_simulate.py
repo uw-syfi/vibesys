@@ -35,8 +35,7 @@ if TYPE_CHECKING:
     from vs_dst._interrupt import Interrupted
     from vs_dst._world import World
     from vs_proto.api import Record
-    from vs_runtime.api.core import DispatchCapExceededError, RunStalledError
-    from vs_runtime.api.step_runner import StepLoopStalledError
+    from vs_runtime.api.step_runner import DispatchCapExceededError, StepLoopStalledError
 
 
 @dataclass(frozen=True)
@@ -114,7 +113,7 @@ class SimulatedRun:
         return has_ended(self._run.core)
 
     @property
-    def halted(self) -> DispatchCapExceededError | RunStalledError | StepLoopStalledError | None:
+    def halted(self) -> DispatchCapExceededError | StepLoopStalledError | None:
         """Why the loop gave up on the run (dispatch cap, stall), or None."""
         return self._run.halted
 
@@ -127,11 +126,6 @@ class SimulatedRun:
         """
         budget = Budget(retries=self._outside.world.setup.harness.limits.request_retries.limit)
         return tuple(liveness(self._run.journal, self._run.core, budget))
-
-    @property
-    def stopped(self) -> bool:
-        """Whether an operator stop interrupted the run."""
-        return self._run.stopped
 
     @property
     def log_records(self) -> tuple[Record, ...]:

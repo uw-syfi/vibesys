@@ -1,6 +1,7 @@
 import {expect, type Page, test} from '@playwright/test';
 import type {FakeBridgeSeed} from './fake-bridge.js';
-import {type FakeHostWindow, listed, open, SEED, server, sidebar} from './world.js';
+import {pressMark, showScreen, sidebar} from './read.js';
+import {type FakeHostWindow, listed, open, SEED, server} from './world.js';
 
 /**
  * The app never changes screen by itself. It opens on Runs, which shows each machine's steps while
@@ -43,15 +44,15 @@ test('with no run on any machine the app opens on Runs, which says so and offers
 
 test('the mark goes to New run while there is no run, from any screen', async ({page}) => {
   await open(page, NO_RUNS);
-  await rail(page, 'Usage').click();
+  await showScreen(page, 'Usage');
   await expect(rail(page, 'Usage')).toHaveAttribute('aria-current', 'page');
-  await rail(page, 'VibeSys').click();
+  await pressMark(page);
   await expectNewRun(page);
 });
 
 test('a run appearing sends the mark to the dashboard, without leaving New run', async ({page}) => {
   await open(page, NO_RUNS);
-  await rail(page, 'VibeSys').click();
+  await pressMark(page);
   await expectNewRun(page);
   await page.evaluate(
     listing => (window as unknown as FakeHostWindow).fakeHost.listing(listing),
@@ -59,8 +60,8 @@ test('a run appearing sends the mark to the dashboard, without leaving New run',
   );
   // The user is not taken from New run by it.
   await expectNewRun(page);
-  await rail(page, 'Usage').click();
-  await rail(page, 'VibeSys').click();
+  await showScreen(page, 'Usage');
+  await pressMark(page);
   await expect(page.getByRole('heading', {name: 'Runs', level: 1})).toBeVisible();
   await expect(rail(page, 'Runs')).toHaveAttribute('aria-current', 'page');
 });
@@ -96,7 +97,7 @@ test('a machine still connecting keeps the mark on Runs until it answers', async
       },
     ],
   });
-  await rail(page, 'VibeSys').click();
+  await pressMark(page);
   await expect(page.getByRole('heading', {name: 'Runs', level: 1})).toBeVisible();
   await page.evaluate(() =>
     (window as unknown as FakeHostWindow).fakeHost.listing({
@@ -108,7 +109,7 @@ test('a machine still connecting keeps the mark on Runs until it answers', async
       unverified: [],
     }),
   );
-  await rail(page, 'VibeSys').click();
+  await pressMark(page);
   await expectNewRun(page);
 });
 

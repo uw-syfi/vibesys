@@ -22,8 +22,9 @@ import {
 import {openFixture} from './fixture-world.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {NEW_RUN_PAGES, main as newRunMain, openAt as openNewRunAt} from './new-run-flow.js';
+import {showScreen} from './read.js';
 import {nav, openSection, openSettingsAt, main as settingsMain} from './settings-machine.js';
-import {listed, open, SEED, sidebar} from './world.js';
+import {listed, open, SEED} from './world.js';
 
 const shots = process.env['NO_BANNERS_DIR'] || undefined;
 if (shots !== undefined) mkdirSync(shots, {recursive: true});
@@ -227,7 +228,7 @@ async function machinesStatus(page: Page, look: Look): Promise<void> {
     initScript(installFakeNewRun, seed),
   ]);
   await page.goto('./shell.html');
-  await sidebar(page).getByRole('button', {name: 'Settings'}).click();
+  await showScreen(page, 'Settings');
   await page
     .getByRole('navigation', {name: 'Settings sections'})
     .getByRole('button', {name: /Machines/})

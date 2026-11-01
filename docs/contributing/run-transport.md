@@ -67,6 +67,12 @@ read path and journal projection from the native core and control work still to 
    (the run engine, the admission modules, the run-listing stream, the helper's OS adapters, the
    agent library) it does not list, or that starts a process.
 
+   Reads that are the same question share one process. The app's main process answers callers
+   that ask a host for the same bytes while one such read is in flight with that read's one
+   answer (`GatewayCalls.unary`), keeps nothing after it, and cancels it when its last caller
+   cancels. So a read that changes nothing carries one fixed request id, and two screens that
+   want a machine's description at launch cost one process.
+
 ## What a run writes
 
 One directory per run, opened only through `vs-project`'s `Project`.

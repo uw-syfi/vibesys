@@ -34,6 +34,7 @@ function screen(
 ): string {
   return renderToStaticMarkup(
     <RunsScreen
+      settled="ready"
       tiles={tiles ? [TILE] : []}
       by="status"
       machine={machine}

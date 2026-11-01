@@ -48,6 +48,10 @@ export interface FakeHostCall {
 
 export interface FakeRead {
   readonly request: ReadRequest;
+  /** Settles when the client has ended this call: read the answer, cancelled it, or closed. */
+  readonly closed: Promise<void>;
+  /** Answer with one message and a clean end, as the gateway does. */
+  respond(bytes: Uint8Array): void;
   end(code?: number, detail?: string): void;
 }
 
@@ -96,6 +100,8 @@ export class FakeGateway implements GatewayDialer {
   readonly #subscribeWaiters: Array<(subscribe: FakeSubscribe) => void> = [];
   readonly #watches: FakeWatch[] = [];
   readonly #watchWaiters: Array<(watch: FakeWatch) => void> = [];
+  /** Every read the peer has received, in the order it arrived, whether or not it was taken. */
+  readonly readsReceived: ReadRequest[] = [];
   readonly #reads: FakeRead[] = [];
   readonly #readWaiters: Array<(call: FakeRead) => void> = [];
   readonly #waiters: Array<(tail: FakeTail) => void> = [];
@@ -230,8 +236,14 @@ export class FakeGateway implements GatewayDialer {
   #read(stream: ServerHttp2Stream, bytes: Uint8Array): void {
     const call: FakeRead = {
       request: fromBinary(ReadRequestSchema, bytes),
+      closed: new Promise<void>(resolve => stream.once('close', () => resolve())),
+      respond: reply => {
+        stream.write(grpcFrame(reply));
+        end(stream);
+      },
       end: (code, detail) => end(stream, code, detail),
     };
+    this.readsReceived.push(call.request);
     const waiter = this.#readWaiters.shift();
     if (waiter === undefined) this.#reads.push(call);
     else waiter(call);

@@ -9,6 +9,7 @@ import {
   OverviewGroup,
   OverviewTile,
   Page,
+  type PageState,
   ResultChart,
   ResultChartKey,
   Row,
@@ -140,6 +141,8 @@ function Draft(props: {readonly draft: RunsDraft}): JSX.Element {
  * (`open` is handed the tile's id); `menu` is a tile's row menu.
  */
 export function RunsScreen(props: {
+  /** Whether the page waits for a reply (the runs of each machine); it is the page's `data-state`. */
+  readonly settled: PageState;
   readonly tiles: readonly Tile[];
   readonly by: GroupBy;
   /** The machine the runs are narrowed to (as a tile names it), shown as a chip; null for all. */
@@ -164,6 +167,7 @@ export function RunsScreen(props: {
   return (
     <Page
       width="fill"
+      state={props.settled}
       header={
         <Stack gap="space-4">
           <Row justify="between" gap="space-4" wrap>

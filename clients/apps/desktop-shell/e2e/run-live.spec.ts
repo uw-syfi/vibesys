@@ -13,6 +13,7 @@ import {
 } from './fake-bridge.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {journeyFixture, journeyHead, journeyScript, transitionJourney} from './journey-world.js';
+import {showScreen} from './read.js';
 import {installGatewayOnly} from './retired-run-bridge.js';
 import {STARTED_AT} from './started-at.js';
 
@@ -146,7 +147,6 @@ test('a live run drains from the header over its session, and is let go', async 
     journeyScript('empty'),
   ]);
   await page.goto('./shell.html');
-  const nav = page.getByRole('navigation', {name: 'VibeSys'});
   await page
     .getByRole('main')
     .getByRole('button', {name: /^queue-rs · mpmc/})
@@ -189,7 +189,7 @@ test('a live run drains from the header over its session, and is let go', async 
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
   if (shots !== undefined) await page.screenshot({path: `${shots}/ink-live-paused.png`});
 
-  await nav.getByRole('button', {name: 'Settings'}).click();
+  await showScreen(page, 'Settings');
   await expect
     .poll(() =>
       page.evaluate(() =>

@@ -487,6 +487,18 @@ function awaited(view: MachineView): number[] {
   return tokens.filter((token): token is number => token !== null);
 }
 
+/**
+ * Whether the machine the screen shows awaits any reply (its readings, a removal, a save or test
+ * of a cluster, a login's start): a machine section may still change until none is awaited. The
+ * other sections read nothing of a machine. A machine shown but not read yet awaits its reading.
+ */
+export function machineSettingsAwaiting(state: MachineSettingsState): boolean {
+  const host = shownMachine(state);
+  if (host === null || (state.section !== 'clusters' && state.section !== 'logins')) return false;
+  const view = state.views[host];
+  return view === undefined || awaited(view).length > 0;
+}
+
 /** What must hold in every state; empty when all do. */
 export function machineSettingsInvariants(state: MachineSettingsState): string[] {
   return Object.entries(state.views).flatMap(([host, view]) => [

@@ -28,8 +28,9 @@ import {
 } from './fake-bridge.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {journeyScript} from './journey-world.js';
+import {showScreen, sidebar} from './read.js';
 import {installGatewayOnly} from './retired-run-bridge.js';
-import {sidebar, SEED as WORLD} from './world.js';
+import {SEED as WORLD} from './world.js';
 
 const SHOTS = process.env['TOASTS_SCREENSHOTS'];
 
@@ -148,15 +149,13 @@ interface Screen {
   readonly reach: (page: Page) => Promise<void>;
 }
 
-const rail = (page: Page, name: string | RegExp, exact = false) =>
-  sidebar(page).getByRole('button', {name, exact});
 const heading = (page: Page, name: string) => page.getByRole('heading', {name, level: 1});
 
 const RUNS: Screen = {
   name: 'Runs',
   header: true,
   reach: async page => {
-    await rail(page, /^Runs/).click();
+    await showScreen(page, 'Runs');
     await expect(heading(page, 'Runs')).toBeVisible();
   },
 };
@@ -179,7 +178,7 @@ const SCREENS: readonly Screen[] = [
     name: 'New run',
     header: false,
     reach: async page => {
-      await rail(page, 'New', true).click();
+      await showScreen(page, 'New');
       await expect(page.getByLabel('New run steps')).toBeVisible();
     },
   },
@@ -187,7 +186,7 @@ const SCREENS: readonly Screen[] = [
     name: 'Machines',
     header: true,
     reach: async page => {
-      await rail(page, 'Machines').click();
+      await showScreen(page, 'Machines');
       await expect(heading(page, 'Machines')).toBeVisible();
     },
   },
@@ -195,7 +194,7 @@ const SCREENS: readonly Screen[] = [
     name: 'Usage',
     header: true,
     reach: async page => {
-      await rail(page, 'Usage').click();
+      await showScreen(page, 'Usage');
       await expect(heading(page, 'Usage')).toBeVisible();
     },
   },
@@ -203,7 +202,7 @@ const SCREENS: readonly Screen[] = [
     name: 'Settings',
     header: true,
     reach: async page => {
-      await rail(page, 'Settings').click();
+      await showScreen(page, 'Settings');
       await expect(page.getByRole('navigation', {name: 'Settings sections'})).toBeVisible();
     },
   },
@@ -373,10 +372,7 @@ for (const width of [1440, 660]) {
     page,
   }) => {
     await open(page, 1440, 900, false);
-    await page
-      .getByRole('navigation', {name: 'VibeSys'})
-      .getByRole('button', {name: 'Settings'})
-      .click();
+    await showScreen(page, 'Settings');
     await page
       .getByRole('navigation', {name: 'Settings sections'})
       .getByRole('button', {name: /Machines/})

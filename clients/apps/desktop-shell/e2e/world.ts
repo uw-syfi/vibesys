@@ -23,6 +23,7 @@ import {
 import {installGateway, wire} from './fake-gateway.js';
 import {FAKE_OFFER} from './fake-offer.js';
 import {addInitScripts, initScript} from './init-scripts.js';
+import {showScreen, sidebar, whenRead} from './read.js';
 import {STARTED_AT} from './started-at.js';
 
 export interface FakeHostWindow extends Window {
@@ -140,22 +141,12 @@ export async function open(page: Page, seed: FakeBridgeSeed = SEED): Promise<voi
     initScript(installFakeExampleDestination, seed),
   ]);
   await page.goto('./shell.html');
-  await expect(page.getByRole('navigation', {name: 'VibeSys'})).toBeVisible();
+  await expect(sidebar(page)).toBeVisible();
+  await whenRead(page);
 }
 
-/**
- * Goes to New run by the rail, as a user does, and returns once the screen has read what it shows
- * (the runs the form follows, the machines, what the machine offers). The screen says so itself,
- * as `data-state` on the page: first paint is not that, and a spec that acts at first paint races
- * the bridge's replies.
- */
-export async function showNewRun(page: Page): Promise<void> {
-  await page
-    .getByRole('navigation', {name: 'VibeSys'})
-    .getByRole('button', {name: 'New', exact: true})
-    .click();
-  await expect(page.getByRole('main')).toHaveAttribute('data-state', 'ready');
-}
+/** Goes to New run by the rail, as a user does, and returns once the screen has read what it shows. */
+export const showNewRun = (page: Page): Promise<void> => showScreen(page, 'New');
 
 /** Opens the app and goes to New run by the rail, as a user starts a run. */
 export async function openNewRun(page: Page, seed: FakeBridgeSeed = SEED): Promise<void> {
@@ -164,9 +155,6 @@ export async function openNewRun(page: Page, seed: FakeBridgeSeed = SEED): Promi
   await open(page, seed);
   await showNewRun(page);
 }
-
-/** The rail: the app's one navigation. */
-export const sidebar = (page: Page) => page.getByRole('navigation', {name: 'VibeSys'});
 
 /**
  * What the host does when the window enters or leaves full screen: the controls' inset changes on

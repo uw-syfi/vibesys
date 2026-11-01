@@ -13,6 +13,7 @@ import {
   EmptyState,
   Meter,
   Page,
+  type PageState,
   Row,
   Stack,
   Table,
@@ -255,6 +256,8 @@ function MachineCard(props: {
  */
 export function MachinesPage(props: {
   readonly state: MachinesState;
+  /** Whether the page waits for a reply (the listing, a machine's check); it is its `data-state`. */
+  readonly settled: PageState;
   readonly dispatch: Dispatch;
   /** A machine's live data, handed to its card to draw; without it the cards show none. */
   readonly live?: LiveSlot;
@@ -268,7 +271,7 @@ export function MachinesPage(props: {
     </Text>
   );
   return (
-    <Page header={header}>
+    <Page state={props.settled} header={header}>
       <Stack>
         {state.listing !== null && state.machines.length === 0 ? (
           <Card>

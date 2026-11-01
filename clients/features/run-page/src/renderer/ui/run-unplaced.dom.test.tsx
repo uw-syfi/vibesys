@@ -74,10 +74,15 @@ async function screen(state: RunPageState): Promise<HTMLElement> {
 for (const why of ['machine', 'unconfirmed'] as const) {
   test(`an unplaced run (${why}) shows a status word and its reason once the wait is bounded out`, async () => {
     const waiting = opened(why);
-    expect((await screen(waiting)).textContent).toContain('Finding the run');
+    const finding = await screen(waiting);
+    expect(finding.textContent).toContain('Finding the run');
+    // Looking for the run is a wait: the page is loading until it has an answer or the bound ends.
+    expect(finding.querySelector('main')?.getAttribute('data-state')).toBe('loading');
     const bound = waiting.locate.kind === 'waiting' ? waiting.locate.bound : -1;
     const settled = runPageStep(waiting, {type: 'bound-elapsed', token: bound}).state;
-    const text = (await screen(settled)).textContent ?? '';
+    const answered = await screen(settled);
+    expect(answered.querySelector('main')?.getAttribute('data-state')).toBe('ready');
+    const text = answered.textContent ?? '';
     expect(text).not.toContain('Finding the run');
     expect(text).not.toContain('Looking for the run');
     expect(text).toContain(

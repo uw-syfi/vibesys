@@ -76,6 +76,7 @@ export const OVERVIEW_ENTRIES: Pick<
     render: () => (
       <RailFrame
         label="Rail"
+        state="ready"
         top={
           <>
             <RailItem icon="mark" label="Home" hideLabel press={noop} />

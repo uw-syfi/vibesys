@@ -66,6 +66,7 @@ async function mount(
   await act(async () => {
     createRoot(container).render(
       <RunsScreen
+        settled="ready"
         tiles={runs.map(tileOf)}
         by={by}
         machine={null}

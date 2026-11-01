@@ -15,6 +15,7 @@ import {
 } from './fake-bridge.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {journeyScript} from './journey-world.js';
+import {showScreen, sidebar} from './read.js';
 import {STARTED_AT} from './started-at.js';
 
 const PROJECT = '/home/me/vibesys-projects/queue-rs';
@@ -147,12 +148,12 @@ test('opening an idea moves neither the charts nor the time bar', async ({page})
 
 test('Back crosses screens, and each screen keeps one entry', async ({page}) => {
   await openShell(page);
-  const rail = page.getByRole('navigation', {name: 'VibeSys'});
+  const rail = sidebar(page);
   const machines = rail.getByRole('button', {name: /^Machines/});
   await machines.click();
   await machines.click();
-  await rail.getByRole('button', {name: 'Settings'}).click();
-  await rail.getByRole('button', {name: 'Settings'}).click();
+  await showScreen(page, 'Settings');
+  await showScreen(page, 'Settings');
   await page.getByRole('main').getByRole('button', {name: 'Back'}).click();
   await expect(page).toHaveURL(/#machines$/);
   await page.goBack();
@@ -178,10 +179,7 @@ test('a reload at a zoom shows the same run at the same zoom, and Back still lea
 test('leaving a zoomed run keeps its zoom from the next run opened', async ({page}) => {
   await openShell(page);
   await openIdea(page);
-  await page
-    .getByRole('navigation', {name: 'VibeSys'})
-    .getByRole('button', {name: /^Runs/})
-    .click();
+  await showScreen(page, 'Runs');
   await expect(dashboard(page)).toBeVisible();
   await expect(page).not.toHaveURL(/idea=/);
   await run(page).click();
@@ -218,13 +216,12 @@ test('Back and Forward return a screen to where it was scrolled, and a new visit
 }) => {
   await page.setViewportSize({width: 1000, height: 420});
   await openShell(page);
-  const rail = page.getByRole('navigation', {name: 'VibeSys'});
   await run(page).click();
   await expect(ideas(page)).toBeVisible();
   await scrollEverything(page, 60);
   const onRun = await scrolls(page);
   expect(Object.values(onRun).length).toBeGreaterThan(0);
-  await rail.getByRole('button', {name: 'Settings'}).click();
+  await showScreen(page, 'Settings');
   await expect(page).toHaveURL(/#settings$/);
   await scrollEverything(page, 40);
   const onSettings = await scrolls(page);
@@ -233,11 +230,11 @@ test('Back and Forward return a screen to where it was scrolled, and a new visit
   await expect.poll(() => scrolls(page)).toEqual(onRun);
   await press(page, 'forward');
   await expect.poll(() => scrolls(page)).toEqual(onSettings);
-  await rail.getByRole('button', {name: /^Machines/}).click();
+  await showScreen(page, 'Machines');
   await press(page, 'back');
   await expect.poll(() => scrolls(page)).toEqual(onSettings);
   // Opening a screen anew starts it at the top.
-  await rail.getByRole('button', {name: /^Runs/}).click();
+  await showScreen(page, 'Runs');
   await run(page).click();
   await expect(ideas(page)).toBeVisible();
   expect(Object.values(await scrolls(page)).every(top => top === 0)).toBe(true);

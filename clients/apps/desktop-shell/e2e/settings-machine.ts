@@ -5,7 +5,8 @@
  */
 import {expect, type Page} from '@playwright/test';
 import type {FakeBridgeSeed, FakeMachineSettings} from './fake-bridge.js';
-import {open, SEED, sidebar} from './world.js';
+import {showScreen} from './read.js';
+import {open, SEED} from './world.js';
 
 const MACHINES = [
   {host: 'local', label: 'This Mac', checkout: '~/projs/vibesys'},
@@ -30,7 +31,7 @@ export async function openSettingsAt(
   expect(await page.evaluate(() => window.innerWidth), 'the window is as wide as asked').toBe(
     width,
   );
-  await sidebar(page).getByRole('button', {name: 'Settings'}).click();
+  await showScreen(page, 'Settings');
 }
 
 /** Opens the section list where the window is narrow enough to fold it under one line. */

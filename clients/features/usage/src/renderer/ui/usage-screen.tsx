@@ -19,6 +19,7 @@ import {
   LoadingBar,
   Meter,
   Page,
+  type PageState,
   Row,
   SegmentedControl,
   Select,
@@ -70,6 +71,8 @@ export interface SpendRunLabel {
 
 export interface UsageScreenProps {
   readonly state: UsageScreenState;
+  /** Whether the page waits for a reply; it is the page's `data-state`. */
+  readonly settled: PageState;
   readonly actions: UsageActions;
   /** What a run's row is called; the shell owns run titles. */
   readonly label: (run: SpendRunRef) => SpendRunLabel;
@@ -770,7 +773,7 @@ function Header(props: {
 export function UsageScreen(props: UsageScreenProps): JSX.Element {
   const {state, actions} = props;
   return (
-    <Page width="wide" header={<Header state={state} actions={actions} />}>
+    <Page width="wide" state={props.settled} header={<Header state={state} actions={actions} />}>
       {state.tab === 'limits' ? (
         <LimitsPanel limits={state.limits} refresh={actions.refresh} />
       ) : (

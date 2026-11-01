@@ -112,6 +112,6 @@ again for a request whose effect had begun before (`no_effect_ran_twice()` is `r
 `history` says how each host after the interruption ended, and `detail` the error, reason, or
 the request kinds the run is stuck on.
 
-The effects ledger answers an inspection of an effect that began and sealed nothing as the
-production receipt store does: unknown, with the proof that the request may be sent again
-(`ReissueProof.BEGUN_UNSEALED`).
+The effects ledger seals the result of each effect that finishes, keyed by the step's tag, as a
+keyed write or a job's ledger entry is: `clear` adopts a sealed result, and an effect that began
+and sealed nothing runs again.

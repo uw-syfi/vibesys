@@ -28,7 +28,7 @@ if (root === null) throw new Error('shell.html has no #root');
 const bridge = window.vibesysWelcome;
 if (bridge === undefined) {
   createRoot(root).render(
-    <Page>
+    <Page state="ready">
       <Card>
         <EmptyState
           title="Open this in the VibeSys app"
