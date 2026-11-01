@@ -13,7 +13,7 @@ export function sequenceAfter(fixture: string): number {
   return Math.max(...events.map(each => each.sequence ?? 0)) + 1;
 }
 
-export function chatEvent(
+function chatEvent(
   sequence: number,
   type: string,
   thread: string,
