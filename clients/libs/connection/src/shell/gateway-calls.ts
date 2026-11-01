@@ -1,13 +1,21 @@
 /** Shared main-process ownership for the generic bridge: one session per host. */
 import type {HostKey, ListingStep} from '@vibesys/hosts';
 import {grpcCode, registerAbort, type ScheduleTimeout} from '@vibesys/transport';
-import {GatewayConnection, type GatewayDialer} from './gateway.js';
+import {GatewayConnection, type GatewayDialer, READ_METHOD} from './gateway.js';
 import {failureDiagnostic} from './gateway-failures.js';
+
+/** One wire read that every caller asking for the same bytes waits on. */
+interface SharedRead {
+  readonly abort: AbortController;
+  readonly reply: Promise<Uint8Array>;
+  callers: number;
+}
 
 export class GatewayCalls {
   #closed = false;
   readonly #requests = new Set<AbortController>();
   readonly #hosts = new Map<HostKey, {connection: GatewayConnection; users: number}>();
+  readonly #reads = new Map<string, SharedRead>();
   constructor(
     private readonly dialer: (host: HostKey) => GatewayDialer,
     private readonly schedule: ScheduleTimeout,
@@ -16,6 +24,74 @@ export class GatewayCalls {
   ) {}
 
   unary(
+    host: HostKey,
+    method: string,
+    bytes: Uint8Array,
+    signal: AbortSignal,
+  ): Promise<Uint8Array> {
+    if (method === READ_METHOD) return this.#sharedRead(host, bytes, signal);
+    return this.#unary(host, method, bytes, signal);
+  }
+
+  /**
+   * A read is idempotent, so callers that ask a host for the same bytes while one such read is in
+   * flight wait for its one answer instead of each starting a host process. Nothing outlives the
+   * answer: the next caller after it reads again. The read is cancelled when its last caller
+   * cancels, and a cancelled caller never cancels another.
+   */
+  #sharedRead(host: HostKey, bytes: Uint8Array, signal: AbortSignal): Promise<Uint8Array> {
+    if (signal.aborted)
+      return Promise.reject(signal.reason ?? new Error('gateway caller cancelled'));
+    const encoded = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString(
+      'base64',
+    );
+    const key = `${host}\0${encoded}`;
+    const shared = this.#reads.get(key) ?? this.#startRead(key, host, bytes);
+    shared.callers += 1;
+    return new Promise<Uint8Array>((resolve, reject) => {
+      let waiting = true;
+      const registration = registerAbort(signal, () => {
+        if (!waiting) return;
+        waiting = false;
+        shared.callers -= 1;
+        if (shared.callers === 0) {
+          this.#forgetRead(key, shared);
+          shared.abort.abort();
+        }
+        reject(signal.reason ?? new Error('gateway caller cancelled'));
+      });
+      shared.reply.then(
+        reply => {
+          registration.detach();
+          // Each caller owns its bytes: a decoder that keeps or edits them cannot show another.
+          // (`slice` of a Node Buffer is a view of the same memory, so copy by element.)
+          if (waiting) resolve(new Uint8Array(reply));
+          waiting = false;
+        },
+        (error: unknown) => {
+          registration.detach();
+          if (waiting) reject(error);
+          waiting = false;
+        },
+      );
+    });
+  }
+
+  #startRead(key: string, host: HostKey, bytes: Uint8Array): SharedRead {
+    const abort = new AbortController();
+    const reply = this.#unary(host, READ_METHOD, bytes, abort.signal);
+    const shared: SharedRead = {abort, reply, callers: 0};
+    this.#reads.set(key, shared);
+    const forget = (): void => this.#forgetRead(key, shared);
+    reply.then(forget, forget);
+    return shared;
+  }
+
+  #forgetRead(key: string, shared: SharedRead): void {
+    if (this.#reads.get(key) === shared) this.#reads.delete(key);
+  }
+
+  #unary(
     host: HostKey,
     method: string,
     bytes: Uint8Array,
