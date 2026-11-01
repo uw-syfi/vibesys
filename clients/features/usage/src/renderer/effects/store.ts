@@ -334,7 +334,7 @@ function limitsStore(
     limitsMachine.provide({
       actors: {
         check: fromPromise(({input, signal}) =>
-          readLimits(bridge, input.maxAgeS, options.clock().now, hostsOff(), signal),
+          readLimits(bridge, input.maxAgeS, input.now ?? options.clock().now, hostsOff(), signal),
         ),
       },
     }),

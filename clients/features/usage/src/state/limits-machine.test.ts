@@ -19,6 +19,7 @@ const WAITING: LimitsAnswer = {...NOTHING, connecting: ['local']};
 
 interface Pending {
   readonly maxAgeS: number;
+  readonly now: number | null;
   readonly resolve: (answer: LimitsAnswer) => void;
   readonly reject: (error: Error) => void;
 }
@@ -33,7 +34,7 @@ function harness() {
         check: fromPromise(
           ({input}) =>
             new Promise<LimitsAnswer>((resolve, reject) => {
-              asked.push({maxAgeS: input.maxAgeS, resolve, reject});
+              asked.push({maxAgeS: input.maxAgeS, now: input.now, resolve, reject});
             }),
         ),
       },
@@ -58,6 +59,16 @@ describe('limitsMachine', () => {
     await flush();
     expect(phase()).toBe('idle');
     expect(actor.getSnapshot().context.answer).toBe(NOTHING);
+  });
+
+  test('the question carries the time it was asked at, again when it asks again while connecting', async () => {
+    const {actor, asked, time, flush} = harness();
+    actor.send({type: 'open', now: NOW});
+    asked[0]?.resolve(WAITING);
+    await flush();
+    time.advanceBy(LIMITS_CONNECT_POLL_MS);
+    actor.send({type: 'refresh', now: NOW + 7});
+    expect(asked.map(each => each.now)).toEqual([NOW, NOW, NOW + 7]);
   });
 
   test('opening again inside the floor asks nothing, and again after it asks again', async () => {
