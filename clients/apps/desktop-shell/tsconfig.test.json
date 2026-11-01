@@ -9,10 +9,21 @@
   },
   "include": [
     "src/**/*.ts",
-    "src/**/*.tsx"
+    "src/**/*.tsx",
+    "e2e/fake-bridge.ts",
+    "e2e/fake-offer.ts",
+    "e2e/new-run-pages.ts",
+    "e2e/seed.ts",
+    "e2e/started-at.ts"
   ],
   "exclude": [],
   "references": [
+    {
+      "path": "../../libs/contracts/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/run-fixtures/tsconfig.lib.json"
+    },
     {
       "path": "../../features/app-shell/tsconfig.renderer.json"
     },
