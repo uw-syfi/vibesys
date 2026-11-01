@@ -1,4 +1,4 @@
-"""A world that serves its host: a service per process, in the turn while it is in flight, closed at its end.
+"""A world that serves its host: a service per process, acting while a turn is in flight, closed at its end.
 
 A tool an agent calls during its turn reaches core through the run's admission of inputs, as the
 production host's evaluation bridge does. The service a world opens is the host's memory: every
@@ -18,7 +18,6 @@ from ._turns import TurnsWorld
 if TYPE_CHECKING:
     from vs_core.api import CoreState, Request
     from vs_dst.api import Admission
-    from vs_runtime.api.core import ExecutionResult
     from vs_sim.api import Clock
 
 STEP_LOOP = StepLoopHosting()
@@ -33,7 +32,6 @@ class ServedTurns(TurnsWorld):
         self.closed = 0
         self.turns_in_flight: list[bool] = []
         """For each turn that began: whether the admission showed that turn executing."""
-        self.enacted: list[str] = []
 
     def serve(self, admission: Admission, clock: Clock) -> _Service:
         del clock
@@ -58,10 +56,6 @@ class _Service:
         assert core is not None
         self._world.turns_in_flight.append(invocation in executing)
 
-    async def enacted(self, request: Request, result: ExecutionResult) -> ExecutionResult:
-        self._world.enacted.append(type(request).__name__)
-        return result
-
     async def close(self) -> None:
         self._world.closed += 1
 
@@ -78,7 +72,6 @@ def test_a_host_serves_each_turn_while_it_is_in_flight_and_closes_its_service_on
     assert run.finished
     assert (world.opened, world.closed) == (1, 1)
     assert world.turns_in_flight == [True, True], "the admission shows the turn executing"
-    assert world.enacted.count("DispatchTurn") + world.enacted.count("ResumeSessionTurn") == 2
 
 
 def test_a_host_that_takes_over_a_killed_one_serves_on_its_own_and_the_dead_one_closes_nothing() -> (

@@ -503,9 +503,6 @@ def _executors(
             if serving is not None:
                 await serving.during(request, core())
 
-        async def _enacted(self, request: Request, result: ExecutionResult) -> ExecutionResult:
-            return result if serving is None else await serving.enacted(request, result)
-
     return HostExecutors(
         world, core, setup.harness.registry, setup.schemas, journal, outside.effects
     )

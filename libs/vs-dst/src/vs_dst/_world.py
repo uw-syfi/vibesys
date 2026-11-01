@@ -12,7 +12,6 @@ if TYPE_CHECKING:
 
     from vs_core.api import CoreEvent, CoreState, Request, SchemaRef, Transition
     from vs_core.api.testing import Answer, Harness
-    from vs_runtime.api.core import ExecutionResult
     from vs_runtime.api.testing import Launch
     from vs_sim.api import Clock
 
@@ -94,10 +93,6 @@ class Serving(Protocol):
         The effect has begun and nothing of it is sealed, so a host that dies here leaves the
         calls made and the effect to run again, as a real turn does.
         """
-        ...
-
-    async def enacted(self, request: Request, result: ExecutionResult) -> ExecutionResult:
-        """What the host is told of ``request`` once the world answered it: the result as it is."""
         ...
 
     async def close(self) -> None:
