@@ -49,8 +49,13 @@ once. An **open step** is a step with no result. An **epoch** is one process lif
    left is adopted. The step runs again at most `request_retries` more times, each after a backoff on the
    run clock that doubles with every charged attempt up to `request_backoff_cap_seconds`, and then ends
    `Failed` (`ATTEMPTS_EXHAUSTED`), so a run whose far side never answers ends or halts on a typed stop
-   and never waits on it, and a runner that fails at once does not spend every try in one instant. A `clear` that keeps failing is the one wait the loop does not bound: it shows
-   on the `StallBoard`, and a pause or an ending abandons it. `vs-dst` holds its worlds to the rule
+   and never waits on it, and a runner that fails at once does not spend every try in one instant. Two waits are not bounded by the loop: a `clear` that keeps failing,
+   and an attach to work a cancel left running (`_end_alive`). Both show on the `StallBoard`. Pause now, a
+   pause whose drain deadline passed (`drain_seconds`, which parks the run) and, for `clear`, an ending
+   abandon the first. A plain drain, the operator's request to wait for the admitted work without bound, waits
+   for a re-run's `clear` as it waits for any admitted work, until the operator escalates to Pause now.
+   The second is abandoned only by a park: an ending waits for it, because a job still running holds the
+   cluster, and the loop never records a step cancelled over work it cannot show ended. `vs-dst` holds its worlds to the rule
    (`test_a_request_the_world_never_answers_finally_is_asked_within_the_retry_bound_and_the_run_halts`).
 
 ## Status
@@ -68,7 +73,7 @@ once. An **open step** is a step with no result. An **epoch** is one process lif
 | Runners: registered operation and adoption | in use: `vs_runtime.api.operation_step_runner` and `vs_runtime.api.adoption_step_runner`, each in the contract suite (#3475 item 5c) |
 | Runner of the 13 executor kinds: `ExecutorStepRunner` | in use: `vs_runtime.api.executor_step_runner`, in the contract suite for every kind (#3475 item 5d) |
 | Per-environment `clear` (Docker, SkyPilot, Modal, Slurm, Host) | in use: `RunEnvironment.agent_work_reaper` (#3475 item 5e); every environment clears an agent step, the Host environment on macOS through a leader that carries the mark, see [open risks](#open-risks) |
-| Pause drains within a deadline and records `Parked` | in progress (#3475 item 1) |
+| Pause drains within a deadline and records `Parked` | in use: `Tick` and `_park_is_due` put the park in the log, `RunPark.deadline_at` bounds the drain (#3475 item 1) |
 | `vs-dst` kills and pauses at every log write and every await | built; `StepLoopHosting` runs the production loop for all five searches (PR 6a-2). Every kill resumes to the uninterrupted result, and so does every pause, and a resumed host paused again (`interrupt(point, then=...)`); a stop (`Action.STOP`) ends the run with nothing open and a Resume reopens it to an end of its own (`tests/system/crash/test_stop.py`); a pause's drain lets the turns it admitted go on (`admitted_work_proceeds`) |
 | `state.pb` as a cache of the fold: `FoldCache` in `vs_runlog`, the start from it and its writes in `RunLogStepLog` | in use (PR 6a-3m); the one-append commit is the log's `ConfirmedLog` |
 | Prove-or-block layer ([inventory](#consumer-inventory)) | built; deleted at the cutover |
@@ -213,9 +218,9 @@ lands it. "Executor step" below means a step that runs on its role's existing ex
 | Session | `DispatchTurn` | `AgentTurnStepRunner` | in use (5a) |
 | Session | `ResumeSessionTurn` | `AgentTurnStepRunner` | in use (5a) |
 | Operation | `ExecuteRegisteredOperation` of lifecycle `SESSION_TURN` | `AgentTurnStepRunner`, through an `OperationTurns` the wiring supplies | in use (5a), wired by `vibesys.run.step_runners` (PR 6a-3) |
-| Operation | `ExecuteRegisteredOperation` of lifecycle `OWNED_JOB` | `SlurmJobStepRunner` or `LocalJobStepRunner` | 5b |
+| Operation | `ExecuteRegisteredOperation` of lifecycle `OWNED_JOB` | `SlurmJobStepRunner` or `LocalJobStepRunner` | in use (5b) |
 | Operation | `ExecuteRegisteredOperation` of lifecycle `QUERY` or `IDEMPOTENT_WRITE` | `OperationStepRunner` | in use (5c) |
-| Evaluation | `SubmitMeasurement` | `SlurmJobStepRunner` or `LocalJobStepRunner` | 5b |
+| Evaluation | `SubmitMeasurement` | `SlurmJobStepRunner` or `LocalJobStepRunner` | in use (5b) |
 | Adoption | `AdoptRevision`, `VerifyAdoption` | `AdoptionStepRunner` | in use (5c) |
 | Workspace | `EnsureWorkspace`, `RestoreRevision`, `DiscardWorkspace`, `CloseAttemptScope` | `ExecutorStepRunner` | in use (5d) |
 | Workspace | `SnapshotAndRetain`, `RetainRevision` | `ExecutorStepRunner`; they need their scope's writers ended first | in use (5d) |
@@ -827,11 +832,19 @@ class Cleared:
 
 class StepRunner(Protocol):
     async def run(
-        self, step: Request, tag: RequestId, attempt: int, cancel: CancelSignal
+        self,
+        step: Request,
+        tag: RequestId,
+        attempt: int,
+        deadline_at: float,      # run-clock second at which core cancels the attempt
+        cancel: CancelSignal,
     ) -> StepResult: ...
 
-    async def clear(self, tag: RequestId) -> Adopted | Cleared: ...
+    async def clear(self, step: Request, tag: RequestId) -> Adopted | Cleared: ...
 ```
+
+`clear` takes the step because a runner finds what an attempt left from the request the log holds, and
+keeps no index from tag to step; `run` takes the deadline the log made durable in `StepStarted`.
 
 Contract, which every implementation passes in `vs_runtime.api.testing.step_runner_contract`:
 

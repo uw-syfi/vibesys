@@ -124,7 +124,13 @@ class Scenario:
     clear_failures: int = 0
     """How many calls of ``clear`` raise an error that is not ``ClearUnavailableError``."""
     pause_at: float | None = None
-    """When the operator pauses the run now (core's ``pause_now``)."""
+    """When the operator pauses the run now (core's ``pause_now``), or drains it (``drain``)."""
+    drain: bool = False
+    """Whether the pause at ``pause_at`` is a drain (core's ``pause``) that lets admitted work finish."""
+    drain_seconds: float | None = None
+    """How long the drain waits before it gives up on what still runs; ``None`` waits without bound."""
+    escalate_at: float | None = None
+    """When the operator, who drained the run, pauses it now instead."""
     stop_at: float | None = None
     """When the operator stops the run; ``None`` waits until every step has its result."""
     race: bool = False
@@ -147,6 +153,8 @@ class World:
     watch: Watch
     boundaries: int = 0
     exits: list[RunRest] = field(default_factory=list)
+    exit_times: list[float] = field(default_factory=list)
+    """The run clock when each process of the run returned."""
     unproven: list[core.RequestId] = field(default_factory=list)
     """The steps an ending recorded without proof that their work ended."""
     running_at_park: list[str] = field(default_factory=list)
@@ -370,6 +378,16 @@ def pause_event(clock: VirtualClock) -> core.RunControlEvent:
     return core.RunControlEvent(control=control, now_at=clock.now())
 
 
+def drain_event(clock: VirtualClock, seconds: float | None) -> core.RunControlEvent:
+    """The operator's Pause: admitted work finishes, for as long as ``seconds`` says (no bound: None)."""
+    control = core.ControlInput(
+        control_id=core.ControlId(root="operator-drain"),
+        action="pause",
+        owner=core.PauseOwner.OPERATOR,
+    )
+    return core.RunControlEvent(control=control, now_at=clock.now(), drain_seconds=seconds)
+
+
 def stop_event(clock: VirtualClock) -> core.RunControlEvent:
     control = core.ControlInput(
         control_id=core.ControlId(root="operator-stop"),
@@ -392,6 +410,15 @@ async def operator(
     if scenario.pause_at is not None and "pause" not in delivered:
         await clock.sleep(max(0.0, scenario.pause_at - clock.now()))
         delivered.add("pause")
+        if scenario.drain:
+            log.push(drain_event(clock, scenario.drain_seconds))
+            world.accepted.add("operator-drain")
+        else:
+            log.push(pause_event(clock))
+            world.accepted.add("operator-pause")
+    if scenario.escalate_at is not None and "escalate" not in delivered:
+        await clock.sleep(max(0.0, scenario.escalate_at - clock.now()))
+        delivered.add("escalate")
         log.push(pause_event(clock))
         world.accepted.add("operator-pause")
     if "stop" in delivered:
@@ -518,6 +545,7 @@ async def run_epochs(world: World, clock: VirtualClock, kill_at: int | None) -> 
         if isinstance(outcome, BaseException):
             raise outcome
         world.exits.append(outcome)
+        world.exit_times.append(clock.now())
         if outcome is RunRest.ENDED:
             return world
         parked = True
@@ -869,6 +897,30 @@ def test_a_pause_does_not_wait_for_an_unreachable_backend() -> None:
     scenario = Scenario((step(RAISES, FINISHES),), unavailable=50, pause_at=0.5)
     world = run_world(scenario)
     assert world.exits[0] is RunRest.PARKED
+
+
+def test_a_plain_drain_waits_for_a_clear_that_keeps_failing_and_pause_now_ends_the_wait() -> None:
+    """A drain with no deadline is the operator asking to wait for the admitted work, a re-run's
+    ``clear`` included, however long it takes: the run parks when the operator escalates."""
+    scenario = Scenario(
+        (step(RAISES, FINISHES),), unavailable=30, pause_at=0.5, drain=True, escalate_at=30.0
+    )
+    world = run_world(scenario)
+    check_world(world)
+    assert world.exits[0] is RunRest.PARKED
+    assert world.exit_times[0] >= 30.0, "the drain gave up on a clear no one told it to abandon"
+    assert StallKind.CLEAR_UNAVAILABLE in world.watch.shown
+
+
+def test_a_drain_with_a_deadline_gives_up_on_a_clear_that_keeps_failing_when_it_passes() -> None:
+    """The deadline of the drain parks the run, and the parked run abandons the failing ``clear``."""
+    scenario = Scenario(
+        (step(RAISES, FINISHES),), unavailable=30, pause_at=0.5, drain=True, drain_seconds=5.0
+    )
+    world = run_world(scenario)
+    check_world(world)
+    assert world.exits[0] is RunRest.PARKED
+    assert 5.5 <= world.exit_times[0] < 30.0, "the run parked at the end of its drain"
 
 
 def test_the_run_ends_even_when_the_backend_stays_unreachable() -> None:
