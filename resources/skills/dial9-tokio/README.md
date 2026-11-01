@@ -1,7 +1,9 @@
 # dial9 (Tokio runtime trace skills + ranker)
 
-This bundle has two parts: **vendored** dial9 Agent Skills under `skills/`, and a
-**first-party** trace ranker under `ranker/` (see "First-party: the ranker").
+This bundle has three parts: **vendored** dial9 Agent Skills under `skills/`, a
+**first-party** trace ranker under `ranker/`, and a **first-party** workflow
+skill under `dial9-rank-bottlenecks/` that ties them together (see "First-party:
+the ranker and the ranking workflow").
 
 The skills are **vendored** from the open-source
 [`dial9-rs/dial9`](https://github.com/dial9-rs/dial9) project, licensed under
@@ -47,7 +49,7 @@ the Rust crates are intentionally omitted.
    VibeSys validates frontmatter with rejects. The script double-quotes the
    scalar, preserving the text.
 
-## First-party: the ranker
+## First-party: the ranker and the ranking workflow
 
 `ranker/` is **not** vendored. It is first-party VibeSys tooling that turns a
 dial9 trace into the profile-guided result protocol, and it is what makes this
@@ -69,6 +71,13 @@ recreates only `skills/`, so `ranker/` survives a re-vendor untouched. Because
 it lives under `resources/skills/`, which the repo's ruff and ty configs exempt
 as vendored, the ranker is not linted or type-checked by repo tooling; it is
 held to the repo baseline by hand.
+
+`dial9-rank-bottlenecks/` is the first-party **workflow skill**: a single
+`SKILL.md` that teaches an agent to run the ranker, read the slow-versus-starved
+verdict, and hand off to the vendored `dial9-*` skills to root-cause a finding.
+It is the entry point to the bundle. Like `ranker/`, it is a sibling of
+`skills/`, so `update.sh` leaves it untouched, and the `dial9-tokio` routing
+rule in `../.vibesys.toml` already covers it, so no per-skill rule is needed.
 
 ## Provenance
 
