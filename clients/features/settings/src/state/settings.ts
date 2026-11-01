@@ -145,6 +145,11 @@ export function shownTheme(state: SettingsState, fallback: Appearance): ThemeNam
   return effectiveTheme(state.kind === 'ready' ? state.shown.appearance : fallback, state.os);
 }
 
+/** Whether the preferences are being read, or a change is being saved: what is shown may change. */
+export function settingsAwaiting(state: SettingsState): boolean {
+  return state.kind === 'loading' || (state.kind === 'ready' && state.saving !== null);
+}
+
 /** What must hold in every state; empty when all do. */
 export function settingsInvariants(state: SettingsState): string[] {
   if (state.kind !== 'ready') return state.token > 0 ? [] : ['the load token is not positive'];

@@ -17,7 +17,7 @@ import {type RecordsFanout, type RecordsListener, recordsFanout} from '@vibesys/
 import {gatewayContentCache} from '@vibesys/run-skeleton/cache';
 import {type GatewayReader, gatewayReader} from '@vibesys/run-skeleton/reader';
 import type {SubscriptionPort} from '@vibesys/subscription';
-import {Card, EmptyState, Page, Text} from '@vibesys/ui';
+import {Card, EmptyState, Page, pageState, Text} from '@vibesys/ui';
 import {type JSX, useMemo} from 'react';
 import {useGatewayChat} from './gateway-chat.js';
 import {gatewayTransport} from './gateway-transport.js';
@@ -80,11 +80,13 @@ export function GatewayRun(props: GatewayRunProps): JSX.Element {
     page.whole === null ||
     !snapshot.matches('active')
   ) {
+    // Until the run is shown the page waits for it, unless it has said why it cannot be.
+    const error = snapshot.context.error ?? page.projectionError;
     return (
-      <Page>
+      <Page state={pageState(!error && page.load.kind !== 'failed')}>
         <Card>
-          {(snapshot.context.error ?? page.projectionError) ? (
-            <EmptyState title={snapshot.context.error ?? page.projectionError ?? ''} />
+          {error ? (
+            <EmptyState title={error} />
           ) : (
             <LoadStatus view={page.load} retry={page.retry} />
           )}

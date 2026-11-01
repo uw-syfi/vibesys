@@ -19,10 +19,12 @@ import {
   Fact,
   FactLine,
   Field,
+  Page,
   type ParetoAxis,
   ParetoChart,
   type ParetoPoint,
   PathInput,
+  pageState,
   RailFrame,
   RailItem,
   Scrubber,
@@ -300,6 +302,7 @@ describe('RailFrame', () => {
     const container = await mount(
       <RailFrame
         label="App"
+        state="ready"
         top={
           <>
             <RailItem icon="plus" label="New" press={() => undefined} />
@@ -323,6 +326,43 @@ describe('RailFrame', () => {
     ]);
     expect(one(frame, '.vs-app-content main').textContent).toBe('Page');
     expect(frame.querySelector('.vs-window-start')).toBeNull();
+  });
+});
+
+describe('the state a screen says', () => {
+  const STATES = ['loading', 'ready'] as const;
+
+  test('a page carries its state as data-state, with or without a header and a footer', async () => {
+    for (const state of STATES) {
+      for (const bars of [{}, {header: <h1>Title</h1>}, {footer: <p>Action</p>}]) {
+        const container = await mount(
+          <Page state={state} {...bars}>
+            Body
+          </Page>,
+        );
+        expect(one(container, 'main').getAttribute('data-state')).toBe(state);
+      }
+    }
+  });
+
+  test('the rail carries its state as data-state', async () => {
+    for (const state of STATES) {
+      const container = await mount(
+        <RailFrame
+          label="App"
+          state={state}
+          top={<RailItem icon="plus" label="New" press={() => undefined} />}
+        >
+          <main>Page</main>
+        </RailFrame>,
+      );
+      expect(one(container, 'nav').getAttribute('data-state')).toBe(state);
+    }
+  });
+
+  test('a screen that waits for a reply is loading, and one that waits for none is ready', () => {
+    expect(pageState(true)).toBe('loading');
+    expect(pageState(false)).toBe('ready');
   });
 });
 

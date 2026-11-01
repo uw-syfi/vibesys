@@ -734,6 +734,14 @@ export function machinesAwaited(state: MachinesState): Record<string, number | n
   return awaited;
 }
 
+/**
+ * Whether the state awaits any reply (the listing, a machine's check, a save, a directory, a
+ * cluster's test): a screen over it may still change until none is awaited.
+ */
+export function machinesAwaiting(state: MachinesState): boolean {
+  return Object.values(machinesAwaited(state)).some(token => token !== null);
+}
+
 /** What must hold of the machines a state names: each listed once, and each named one listed. */
 function namingProblems(state: MachinesState): string[] {
   const problems: string[] = [];

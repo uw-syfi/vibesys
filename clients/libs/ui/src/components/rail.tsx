@@ -1,5 +1,6 @@
 import type {JSX, ReactNode} from 'react';
 import {Icon, type IconName} from './icon.js';
+import type {PageState} from './layout.js';
 import {Text} from './text.js';
 import {WindowFrame} from './window-frame.js';
 
@@ -8,10 +9,13 @@ import {WindowFrame} from './window-frame.js';
  * the main area beside it, which holds a `Page`; the `WindowFrame` around them keeps both clear of
  * the window's own controls. The window's controls sit at the rail's top and its items start
  * below them. `top` and `bottom` are the rail's two groups of `RailItem`s, the first from the top
- * and the second from the bottom. `label` names the rail for assistive technology.
+ * and the second from the bottom. `label` names the rail for assistive technology. `state` says
+ * whether what the rail's own choices rest on has been read (such as where the mark goes), as
+ * `data-state` on the rail: the rail is the app's navigation, so it says so for every screen.
  */
 export function RailFrame(props: {
   readonly label: string;
+  readonly state: PageState;
   readonly top: ReactNode;
   readonly bottom?: ReactNode;
   readonly children: ReactNode;
@@ -19,7 +23,7 @@ export function RailFrame(props: {
   return (
     <WindowFrame
       start={
-        <nav className="vs-rail" aria-label={props.label}>
+        <nav className="vs-rail" aria-label={props.label} data-state={props.state}>
           <div className="vs-rail-group">{props.top}</div>
           {props.bottom === undefined ? null : (
             <div className="vs-rail-group" data-end>

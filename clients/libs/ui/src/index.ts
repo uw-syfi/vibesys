@@ -81,6 +81,7 @@ export {
   Page,
   type PageState,
   type PageWidth,
+  pageState,
   Reserve,
   Row,
   SectionLayout,
