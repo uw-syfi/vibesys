@@ -272,6 +272,7 @@ func TestChecksOnlyExcludesTestGroups(t *testing.T) {
 // must be include_in_test, include_in_checks, or local_skip, not a new entry here.
 var ciFormGroups = map[string]string{
 	"python_ci_tests_shard":        "local group python_tests runs the suite; CI shards it, and the job is python or clients, which one trigger_job cannot express",
+	"python_impact_tests":          "CI's commit-stage form of python_tests (and the pre-push gate's, through gate_commands); `repoctl test` already runs the whole suite as python_tests",
 	"python_ci_coverage":           "needs the shards' coverage data",
 	"patch_coverage":               "needs coverage.xml from the shards",
 	"sandbox_tests":                "needs bubblewrap on Linux; the group is opt-in",
