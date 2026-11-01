@@ -1,4 +1,5 @@
 import {expect, test} from 'bun:test';
+import {OPEN} from '@vibesys/store';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {
   initialMachines,
@@ -12,14 +13,14 @@ import {MachinesScreen} from './machines-screen.js';
 const RAW = 'connection down: ssh: connect to host nowhere port 22: Connection refused';
 
 function drive(actions: readonly MachinesAction[]): MachinesState {
-  let {state} = initialMachines();
+  let {state} = machinesStep(initialMachines().state, OPEN);
   for (const action of actions) state = machinesStep(state, action).state;
   return state;
 }
 
 /** The Add form after Check and add failed with `result`. */
 function failedAdd(result: Extract<MachinesAction, {type: 'saved'}>['result']): MachinesState {
-  let {state} = initialMachines();
+  let {state} = machinesStep(initialMachines().state, OPEN);
   const run = (action: MachinesAction) => {
     const step = machinesStep(state, action);
     state = step.state;
@@ -114,7 +115,7 @@ test('a machine that needs a sign-in has its status word, the reason as its desc
 });
 
 test('a failed Remove is a toast with its detail, and a status word on its machine until an action succeeds', () => {
-  let {state} = initialMachines();
+  let {state} = machinesStep(initialMachines().state, OPEN);
   const run = (action: MachinesAction) => {
     const step = machinesStep(state, action);
     state = step.state;

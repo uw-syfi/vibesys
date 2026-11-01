@@ -1,5 +1,6 @@
 import {expect, test} from 'bun:test';
 import {UNEXPECTED_FAILURE} from '@vibesys/ipc';
+import {OPEN} from '@vibesys/store';
 import {createMachinesStore, type MachinesBridge} from './store.js';
 
 async function settle(): Promise<void> {
@@ -64,4 +65,34 @@ test('an Add whose connection failed keeps the failure’s typed cause with its 
   await settle();
 
   expect(store.getState().adding?.problem).toMatchObject({field: 'host', text: raw, cause: 'link'});
+});
+
+test('the machines are listed at launch, and each one is checked only once the store is opened', async () => {
+  const checked: string[] = [];
+  const bridge: MachinesBridge = {
+    ...bridgeListing(() =>
+      Promise.resolve({
+        ok: true as const,
+        value: [
+          {host: 'local', label: 'This Mac', checkout: '~/vibesys'},
+          {host: 'ssh:host-a', label: 'host-a', checkout: '~/vibesys'},
+        ],
+      }),
+    ),
+    machine: host => {
+      checked.push(host);
+      return Promise.resolve({ok: true as const, value: {kind: 'ready' as const, facts: null}});
+    },
+  };
+  const store = createMachinesStore(bridge);
+  await settle();
+
+  expect(store.getState().machines.map(machine => machine.host)).toEqual(['local', 'ssh:host-a']);
+  expect(checked).toEqual([]);
+  store.dispatch(OPEN);
+  store.dispatch(OPEN);
+  await settle();
+
+  expect(checked).toEqual(['local', 'ssh:host-a']);
+  expect(store.getState().machines.every(machine => machine.report?.kind === 'ready')).toBe(true);
 });

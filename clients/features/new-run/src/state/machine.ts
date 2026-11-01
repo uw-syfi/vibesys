@@ -1,7 +1,8 @@
 /**
  * The New run screen's control state, as a machine (docs/contributing/clients-architecture.md,
  * "State"); the guided form is data in its context (`answers`, the step `at`, and the run's
- * `form`, which the answers name: `flow.ts`). While editing, parallel regions load what the
+ * `form`, which the answers name: `flow.ts`). The machine is idle, reading nothing, until the
+ * screen is opened (`open`); from then on, while editing, parallel regions load what the
  * machine offers (its facts, vetted harnesses, examples), the project's tasks, and the "Ready to
  * start" checks for the current inputs (asked at once, or once typing pauses); one more region runs
  * a fix or the start.
@@ -28,6 +29,7 @@ import type {
 } from '@vibesys/ipc';
 import {unprovided} from '@vibesys/machine';
 import type {RecentRun, RunStart} from '@vibesys/runs';
+import type {Open} from '@vibesys/store';
 import {and, assign, not, or, raise, type SnapshotFrom, setup, stateIn} from 'xstate';
 import {installedFirst, roleProviders} from './agents.js';
 import type {AnswerChange, Answers, StepId} from './answers.js';
@@ -142,6 +144,11 @@ export interface NewRunContext {
 }
 
 export type NewRunEvent =
+  /**
+   * The screen is shown: the machine starts the reads it needs. Until then it only follows what the
+   * shell tells it (the machine, the runs opened, a run to run again), and asks nothing.
+   */
+  | Open
   | {readonly type: 'machine'; readonly machine: HostKey}
   | {readonly type: 'again'; readonly run: RecentRun}
   /** Answer the question of the step shown; `advance` moves on to the next step. */
@@ -562,6 +569,19 @@ export const newRunMachine = setup({
   },
   delays: {debounce: CHECK_DEBOUNCE_MS, examplesBound: EXAMPLES_BOUND_MS},
   actions: {
+    // Where the form is for, and what it starts from: the same whether or not the reads have started.
+    moveTo: assign(({context, event}) =>
+      movedParts(context, (event as Extract<NewRunEvent, {type: 'machine'}>).machine),
+    ),
+    runAgain: assign(({context, event}) => {
+      const {run} = event as Extract<NewRunEvent, {type: 'again'}>;
+      return {
+        ...freshParts(run.host, context.recent),
+        ...fromFlow({answers: againAnswers(run), at: 'review', form: againForm(run)}),
+        rerun: run.start ?? null,
+      };
+    }),
+    startOver: assign(({context}) => freshParts(context.form.machine, context.recent)),
     clearProblem: assign({problem: null}),
     fail: assign((_, params: {readonly step: Step; readonly error: unknown}) => ({
       problem: problemOf(params.step, params.error),
@@ -599,35 +619,36 @@ export const newRunMachine = setup({
     started: null,
     moreOpen: input.moreOpen,
   }),
-  initial: 'editing',
+  initial: 'idle',
+  // The events every state takes the same way: the runs opened and More options are kept whether or
+  // not the screen has been opened.
+  on: {
+    recent: {actions: assign(({event}) => ({recent: event.recent}))},
+    more_options: {
+      actions: assign(({context, event}) => ({
+        moreOpen: {...context.moreOpen, [event.machine]: event.open},
+      })),
+    },
+  },
   states: {
+    // Nothing has been read: the window opens on another screen, and every read of this one is a
+    // host process that Runs would wait behind. The form is still known (the draft the dashboard
+    // offers, the machine of the run opened last) and follows what the shell says until `open`.
+    idle: {
+      on: {
+        open: 'editing',
+        machine: {actions: 'moveTo'},
+        again: {actions: 'runAgain'},
+        reset: {actions: 'startOver'},
+      },
+    },
     editing: {
       type: 'parallel',
       on: {
-        machine: {
-          target: 'editing',
-          reenter: true,
-          actions: assign(({context, event}) => movedParts(context, event.machine)),
-        },
+        machine: {target: 'editing', reenter: true, actions: 'moveTo'},
         // Run again: the run's place and options, its agent once the harnesses are known.
-        again: {
-          target: 'editing',
-          reenter: true,
-          actions: assign(({context, event}) => ({
-            ...freshParts(event.run.host, context.recent),
-            ...fromFlow({
-              answers: againAnswers(event.run),
-              at: 'review',
-              form: againForm(event.run),
-            }),
-            rerun: event.run.start ?? null,
-          })),
-        },
-        reset: {
-          target: 'editing',
-          reenter: true,
-          actions: assign(({context}) => freshParts(context.form.machine, context.recent)),
-        },
+        again: {target: 'editing', reenter: true, actions: 'runAgain'},
+        reset: {target: 'editing', reenter: true, actions: 'startOver'},
         go: {
           actions: assign(({context, event}) =>
             fromFlow(flowGo(flowOf(context), event.step, entriesOf(context))),
@@ -638,12 +659,6 @@ export const newRunMachine = setup({
         },
         back: {
           actions: assign(({context}) => fromFlow(flowBack(flowOf(context), entriesOf(context)))),
-        },
-        recent: {actions: assign(({event}) => ({recent: event.recent}))},
-        more_options: {
-          actions: assign(({context, event}) => ({
-            moreOpen: {...context.moreOpen, [event.machine]: event.open},
-          })),
         },
       },
       states: {

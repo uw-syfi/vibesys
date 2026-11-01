@@ -19,6 +19,7 @@ import type {
 import {checkMachine, type Live} from '@vibesys/machine/testing';
 import {exampleCatalogue} from '@vibesys/run-fixtures';
 import type {RecentRun} from '@vibesys/runs';
+import {OPEN} from '@vibesys/store';
 import type {Seeded} from '@vibesys/store/testing';
 import {
   type ActorRefFrom,
@@ -229,6 +230,12 @@ function answerChange(random: Seeded): AnswerChange {
 function agentEvent(random: Seeded): NewRunEvent {
   const provider = random.pick(['claude', 'codex']);
   return {type: 'agent', provider, model: random.pick(vettedModels(OFFERS, provider))};
+}
+
+/** Until the screen is opened the machine asks nothing: no read in flight, no delay set. */
+function idleProblems(snapshot: Snapshot, live: Live): string[] {
+  const working = live.operations.length > 0 || live.delays.length > 0;
+  return snapshot.matches('idle') && working ? ['an idle machine has work or a delay set'] : [];
 }
 
 function inputEvent(random: Seeded, snapshot: SnapshotFrom<typeof newRunMachine>): NewRunEvent {
@@ -454,6 +461,8 @@ describe('newRunMachine', () => {
         input: {machine: 'local', recent: RECENT, moreOpen: {}},
         event: (random, live, snapshot) =>
           random.pick([
+            // The screen is opened at some point, and opening it again changes nothing.
+            OPEN,
             inputEvent(random, snapshot),
             inputEvent(random, snapshot),
             ...live.operations.map(operation => live.done(operation, output(operation, random))),
@@ -463,6 +472,7 @@ describe('newRunMachine', () => {
         invariants: (snapshot, live) => {
           const {form, harnesses} = snapshot.context;
           const problems: string[] = awaitingProblems(snapshot, live);
+          problems.push(...idleProblems(snapshot, live));
           if (form.agent !== null && harnesses !== null) {
             if (!vettedModels(harnesses.list, form.agent.provider).includes(form.agent.model)) {
               problems.push(`model ${form.agent.model} is not vetted for ${form.agent.provider}`);
@@ -528,6 +538,7 @@ describe('newRunMachine', () => {
       {input: {machine: 'local', recent: RECENT, moreOpen: {}}},
     );
     actor.start();
+    actor.send(OPEN);
     actor.send({type: 'again', run: again});
     await new Promise<void>(resolve => {
       const done = actor.subscribe(snapshot => {
@@ -578,6 +589,7 @@ describe('newRunMachine', () => {
   test("a new form knows no project; it carries the last run's agent and budget on its machine", async () => {
     const actor = liveActor({machine: 'ssh:gpu'});
     actor.start();
+    actor.send(OPEN);
     await until(actor, snapshot => snapshot.matches({editing: {harnesses: 'ready'}}));
     const {form, answers, at} = actor.getSnapshot().context;
     expect(form.project).toBeNull();
@@ -592,6 +604,7 @@ describe('newRunMachine', () => {
   test("the tasks of the user's project are read; a project with one has it answered", async () => {
     const actor = liveActor({tasks: ['only']});
     actor.start();
+    actor.send(OPEN);
     actor.send({type: 'answer', change: {kind: 'from', from: 'project'}, advance: true});
     actor.send({
       type: 'answer',
@@ -614,6 +627,7 @@ describe('newRunMachine', () => {
       goalsAsked: asked,
     });
     actor.start();
+    actor.send(OPEN);
     await until(actor, snapshot => snapshot.matches({editing: {helper: 'ready'}}));
     const send = (change: AnswerChange) => actor.send({type: 'answer', change, advance: true});
     send({kind: 'from', from: 'project'});
@@ -643,6 +657,7 @@ describe('newRunMachine', () => {
     const asked: string[] = [];
     const actor = liveActor({tasks: ['only'], goalsAsked: asked});
     actor.start();
+    actor.send(OPEN);
     await until(actor, snapshot => snapshot.matches({editing: {helper: 'ready'}}));
     actor.send({type: 'answer', change: {kind: 'from', from: 'project'}, advance: true});
     actor.send({
@@ -660,6 +675,7 @@ describe('newRunMachine', () => {
   test('a task the project does not have is not kept, and the goal must be read again', async () => {
     const actor = liveActor({tasks: ['one', 'two']});
     actor.start();
+    actor.send(OPEN);
     actor.send({type: 'again', run: RECENT[0] as RecentRun});
     await until(actor, snapshot => snapshot.matches({editing: {tasks: 'ready'}}));
     // The run's task, `mpmc`, is not among the project's.
@@ -673,6 +689,7 @@ describe('newRunMachine', () => {
   test('an example answered through its questions is an example project until it is made', async () => {
     const actor = liveActor({examples: {kind: 'offered', value: exampleCatalogue}});
     actor.start();
+    actor.send(OPEN);
     await until(actor, snapshot => snapshot.matches({editing: {examples: 'ready'}}));
     for (const change of [
       {kind: 'from', from: 'example'},
@@ -718,6 +735,7 @@ describe('newRunMachine', () => {
   test("moving to another machine drops the user's project but keeps the example chosen", async () => {
     const actor = liveActor({examples: {kind: 'offered', value: exampleCatalogue}});
     actor.start();
+    actor.send(OPEN);
     await until(actor, snapshot => snapshot.matches({editing: {examples: 'ready'}}));
     for (const change of [
       {kind: 'from', from: 'example'},
@@ -763,6 +781,7 @@ describe('newRunMachine', () => {
     } as const;
     const actor = liveActor({machine: 'ssh:gpu', draft});
     actor.start();
+    actor.send(OPEN);
     const {context} = actor.getSnapshot();
     expect(context.at).toBe('where');
     expect(context.answers.task).toBe('spsc');
@@ -917,6 +936,7 @@ describe('the run reports its roles', () => {
     const clock = new SimulatedClock();
     const actor = actorOn(['multi-orchestrator', 'multi-implementer'], asked, clock);
     actor.start();
+    actor.send(OPEN);
     actor.send({type: 'again', run: RECENT[2] as RecentRun});
     await until(actor, snapshot => snapshot.matches(LOADED));
     // No time passes: the inputs are asked once the reads that settle them are in, and the run's
@@ -946,6 +966,7 @@ describe('the run reports its roles', () => {
     const clock = new SimulatedClock();
     const actor = actorOn([], asked, clock);
     actor.start();
+    actor.send(OPEN);
     actor.send({type: 'again', run: RECENT[0] as RecentRun});
     await until(actor, snapshot => snapshot.matches(LOADED));
     await until(actor, snapshot => snapshot.matches({editing: {checks: 'ready'}}));
@@ -1007,6 +1028,7 @@ describe('when the inputs are checked', () => {
       {input: {machine: 'local', recent: RECENT, moreOpen: {}}, clock},
     );
     actor.start();
+    actor.send(OPEN);
     actor.send({type: 'again', run: RECENT[0] as RecentRun});
     await untilActor(actor, snapshot => snapshot.matches(READY));
     return actor;
@@ -1128,6 +1150,7 @@ describe('a machine whose examples cannot be listed', () => {
       clock,
     );
     actor.start();
+    actor.send(OPEN);
     await settle();
     expect(status(actor, 'local')).toBe('failed');
     actor.send({type: 'machine', machine: 'ssh:gpu'});
@@ -1143,6 +1166,7 @@ describe('a machine whose examples cannot be listed', () => {
     const clock = new SimulatedClock();
     const actor = actorWith(listings, features, clock);
     actor.start();
+    actor.send(OPEN);
     await settle();
     expect(status(actor, 'local')).toBe('listing');
     clock.increment(EXAMPLES_BOUND_MS - 1);
@@ -1156,6 +1180,7 @@ describe('a machine whose examples cannot be listed', () => {
     const clock = new SimulatedClock();
     const actor = actorWith({local: 'fails'}, 'answers', clock);
     actor.start();
+    actor.send(OPEN);
     await settle();
     expect(status(actor, 'local')).toBe('failed');
     actor.send({type: 'machine', machine: 'local'});
