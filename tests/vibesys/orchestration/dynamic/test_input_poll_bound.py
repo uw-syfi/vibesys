@@ -162,14 +162,15 @@ def test_an_unanswered_poll_never_ends_the_input_measurement(
     )
 
 
-def test_a_measurement_whose_polls_never_answer_ends_at_its_own_limit_and_cancels_its_job() -> None:
+def test_a_measurement_whose_polls_never_answer_ends_at_its_own_limit() -> None:
     """With no poll ever answered, the measurement still ends: at its own limit, not a poll's.
 
-    Its job is then cancelled, never left in the scheduler's queue with nothing waiting on it.
+    Its limit is `decide`'s to end. The job it submitted is its runner's to cancel when the loop
+    cancels the step, so core sends no cancel of its own.
     """
     # The job is never seen to end (no poll answers), so the drive stops after its steps;
     # the measurement's limit falls well inside them.
-    trace, script = _run(frozenset(range(10_000)), 0, steps=300)
+    trace, _ = _run(frozenset(range(10_000)), 0, steps=300)
 
     decisions = _input_decisions(trace)
     (submission,) = (
@@ -189,9 +190,3 @@ def test_a_measurement_whose_polls_never_answer_ends_at_its_own_limit_and_cancel
     assert submission.dispatched_at is not None
     assert submission.limit_from_dispatch is not None
     assert failed[0].limit_at == submission.dispatched_at + submission.limit_from_dispatch
-    cancels = [
-        request
-        for request in trace.requests
-        if isinstance(request, CancelOwnedJob) and request.resource_id.root in script.baseline
-    ]
-    assert len(cancels) == 1

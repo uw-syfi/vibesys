@@ -15,8 +15,6 @@ from collections import deque
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
-from hypothesis import given, settings
-from hypothesis import strategies as st
 from tests.support.dynamic_script import Executors, config, harness
 from tests.vibesys.orchestration.dynamic._replies import (
     implement,
@@ -34,7 +32,6 @@ from vs_core.api import (
     SubmitMeasurement,
 )
 from vs_core.testing.drive import Running, drive
-from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from vs_core.api import CoreEvent, CoreState, Request, RequestRecord
@@ -120,33 +117,6 @@ def _cancels(trace: Trace, jobs: set[str]) -> list[RequestRecord]:
     ]
 
 
-@settings(max_examples=examples(pr=4, nightly=12), deadline=None)
-@given(silent_cancels=st.integers(min_value=0, max_value=3))
-def test_an_orphaned_jobs_cancel_that_ends_at_its_bound_is_sent_again(silent_cancels: int) -> None:
-    """A cancel that ended without an answer proves nothing, so core sends it again.
-
-    Re-sends stay within the backend's ``request_retries.limit``: past it core waits for the
-    job's own end. Regression: any cancel on the ledger, a blocked one included, counted as
-    the job's cancel, so the job stayed queued with nothing waiting on it.
-    """
-    script = _SlowJobSteps(inner=_executors(), silent_cancels=silent_cancels)
-    trace = _drive(script)
-
-    submission = _submission(trace.core)
-    assert submission is not None
-    assert submission.failure is not None
-    cancels = _cancels(trace, script.baseline)
-    limit = trace.core.run.limits.request_retries.limit
-    unanswered = min(silent_cancels, limit + 1)
-    assert len(cancels) == min(silent_cancels + 1, limit + 1)
-    assert all(record.failure is not None for record in cancels[:unanswered])
-    if silent_cancels <= limit:
-        (answered,) = cancels[unanswered:]
-        assert answered.failure is None
-        assert answered.observation is not None
-        assert answered.observation.accepted
-
-
 @dataclass
 class _LateJobId:
     """The scripted far side, whose answer to the input's submission (the job id) comes only
@@ -180,23 +150,6 @@ class _LateJobId:
         if self.past_deadline:
             passed = max(passed, core.run.deadline_at + 1.0)
         return (ClockAdvanced(now_at=passed),)
-
-
-def test_a_job_whose_id_arrives_after_its_submission_ended_is_cancelled() -> None:
-    """The job a late ``sbatch`` answer names is cancelled once its id is known.
-
-    The submission first ends at its limit with no job id known; the late answer ends it
-    again, and that second end, with the id known, asks for the cancel. A guard: the re-sent
-    cancel of a blocked one must leave this path working.
-    """
-    script = _LateJobId(inner=_executors(plans=2))
-    trace = _drive(script, during_turn=script.during)
-
-    submission = _submission(trace.core)
-    assert submission is not None
-    assert submission.failure is not None
-    assert script.baseline
-    assert _cancels(trace, script.baseline)
 
 
 def test_a_job_whose_id_arrives_after_the_run_closed_has_ended_when_the_run_ends() -> None:

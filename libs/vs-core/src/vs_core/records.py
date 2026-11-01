@@ -37,27 +37,15 @@ type Reducer = Callable[[RecordsState, RecordsContext, RecordsEvent], AreaChange
 def _observation(
     state: RecordsState, context: RecordsContext, event: RecordsEvent
 ) -> AreaChange[RecordsState]:
-    """Commit request-ledger facts and descendant/recovery facts atomically.
+    """Commit the request ledger's facts of an observation; a late or spent answer changes nothing.
 
-    The same canonical observation reaches both owners because inspected child
-    facts are not persisted in the request ledger. Recovery preserves ledger
-    fields; the wrapper merges outputs before the kernel registers any request.
+    The ledger alone takes an observation: no other owner reads one for descendants or recovery.
     """
     if isinstance(event, RequestObserved) and (
         _request_ledger.is_late(state, event) or spent_answer(state, event)
     ):
         return AreaChange(state=state)
-    ledger = _request_ledger.advance(state, context, event)
-    if isinstance(event, RequestObserved):
-        event = _request_ledger.canonical(ledger.state, event)
-    recovery = _request_recovery.advance(ledger.state, context, event)
-    return recovery.model_copy(
-        update={
-            "signals": (*ledger.signals, *recovery.signals),
-            "requests": (*ledger.requests, *recovery.requests),
-            "events": (*ledger.events, *recovery.events),
-        }
-    )
+    return _request_ledger.advance(state, context, event)
 
 
 # Only this wrapper changes event ownership; leaves preserve sibling-owned fields.

@@ -186,8 +186,9 @@ class CoreView(Value):
     controls: tuple[ControlInput, ...]
     inputs: tuple[InputRecord, ...]
     adoption: AdoptionView | None = None
-    # Earliest core time a ClockAdvanced does work: a paced job poll comes due, or an
-    # answered-but-open record passes its reconciliation bound. None when neither is scheduled.
+    # Earliest core time a ClockAdvanced does work: a paced job poll or a request's retry comes
+    # due. None when none is scheduled. A step's limit is not one: `decide` ends it, and the
+    # runner loop wakes at it.
     next_observe_at: Seconds | None = None
 
 
