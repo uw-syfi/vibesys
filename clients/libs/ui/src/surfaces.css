@@ -459,8 +459,15 @@
 .vs-stat[data-inline] {
   flex-direction: row;
   align-items: baseline;
-  gap: var(--space-3);
+  gap: var(--space-2);
   white-space: nowrap;
+}
+/* A narrow header keeps each figure and drops the line after it, so the row stays one line high
+   while the figures change with the time bar. */
+@container screen-header (max-width: 1000px) {
+  .vs-stat[data-inline] .vs-stat-sub {
+    display: none;
+  }
 }
 .vs-stat-figure .vs-text {
   font-weight: var(--text-body-strong-weight);

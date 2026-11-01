@@ -102,28 +102,34 @@ export function Stat(props: {
   readonly quiet?: boolean;
   /** On one line: the label, the value in the code face, then its unit and sub-label. */
   readonly inline?: boolean;
+  /** What the pointer shows over the figure: its whole value. */
+  readonly title?: string;
 }): JSX.Element {
   if (props.inline === true) {
     return (
-      <div className="vs-stat" data-inline="">
+      <div className="vs-stat" data-inline="" title={props.title}>
         <Text variant="section">{props.label}</Text>
         {props.quiet === true ? (
           <Text tone="muted">{props.value}</Text>
         ) : (
           <span className="vs-stat-figure">
-            <Text variant="code">{props.unit === undefined ? props.value : `${props.value} ${props.unit}`}</Text>
+            <Text variant="code">
+              {props.unit === undefined ? props.value : `${props.value} ${props.unit}`}
+            </Text>
           </span>
         )}
         {props.sub === undefined ? null : (
-          <Text variant="small" tone="muted">
-            {`· ${props.sub}`}
-          </Text>
+          <span className="vs-stat-sub">
+            <Text variant="small" tone="muted">
+              {`· ${props.sub}`}
+            </Text>
+          </span>
         )}
       </div>
     );
   }
   return (
-    <div className="vs-stat">
+    <div className="vs-stat" title={props.title}>
       <Text variant="section">{props.label}</Text>
       <span className="vs-stat-value">
         {props.quiet === true ? (

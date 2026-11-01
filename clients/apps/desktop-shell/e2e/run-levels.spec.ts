@@ -156,11 +156,11 @@ test('every level opens from the keyboard alone, and Escape walks back', async (
   await expect(page.getByText('queue/mpmc time: 41.2 ms')).toBeVisible();
 
   for (const _level of ['step', 'idea', 'run']) await page.keyboard.press('Escape');
-  await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
+  await expect(page.getByRole('listbox', {name: 'Ideas'})).toBeVisible();
   await expect(page.getByRole('heading', {name: 'Combine W1 ring with W2 padding'})).toHaveCount(0);
 });
 
-test('the run level shows the best ratio, the ideas running first, and what runs now', async ({
+test('the run level shows the best ratio, and the ideas running first with what they do', async ({
   page,
 }) => {
   await openRun(page);
@@ -177,8 +177,10 @@ test('the run level shows the best ratio, the ideas running first, and what runs
     /^Spin then park idle consumers/,
   ]);
   await expect(page.getByText('1.18×').first()).toBeVisible();
-  const now = page.getByRole('listbox', {name: 'Running now'});
-  await expect(now.getByRole('option', {name: /Combine W1 ring/}).first()).toBeVisible();
+  // A running idea says what it is doing under its name.
+  await expect(
+    ideas.getByRole('option', {name: /Combine W1 ring/}).locator('.vs-columnlist-lines > .vs-text'),
+  ).toHaveText(/correctness \+ benchmark/);
   await check(page, 'ink-run');
 
   // The dropped are listed; their chip narrows the list to them and a second press brings the rest
@@ -627,12 +629,13 @@ test('every face of the run level keeps the time bar and the hero in view', asyn
       await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight),
     ).toBe(true);
   }
-  // Now keeps what runs whole (the role and what it does), even in a narrow window; the idea's name gives way.
+  // A running idea keeps what it does whole (the role and the step), even in a narrow window.
   await page.setViewportSize({width: 1024, height: 800});
-  const rows = page.getByRole('listbox', {name: 'Running now'}).getByRole('option');
-  await expect(rows.first()).toBeVisible();
-  for (const row of await rows.all()) {
-    const doing = row.locator('.vs-pickrow-text > :nth-child(2)');
+  const doings = page
+    .getByRole('listbox', {name: 'Ideas'})
+    .locator('[data-column="idea"] .vs-columnlist-lines > .vs-text');
+  await expect(doings.first()).toBeVisible();
+  for (const doing of await doings.all()) {
     await expect(doing).toHaveText(/\S/);
     expect(await doing.evaluate(each => each.scrollWidth <= each.clientWidth)).toBe(true);
   }

@@ -5,7 +5,7 @@
  */
 import type {TokenLedger} from '@vibesys/run-state';
 import {Row, Stat} from '@vibesys/ui';
-import type {JSX, ReactNode} from 'react';
+import type {JSX} from 'react';
 import {type RunModel, type RunPosition, runStats, statTiles} from '../../state/index.js';
 
 export function RunStats(props: {
@@ -17,8 +17,6 @@ export function RunStats(props: {
   readonly start: number;
   /** What the run's turns spent, to its end. */
   readonly ledger: TokenLedger;
-  /** More facts of the run for the same line (the models that built it). */
-  readonly more?: ReactNode;
 }): JSX.Element {
   const tiles = statTiles(runStats(props.model, props.position, props.start, props.ledger));
   return (
@@ -32,9 +30,9 @@ export function RunStats(props: {
           quiet={tile.quiet}
           {...(tile.unit === null ? {} : {unit: tile.unit})}
           {...(tile.note === '' ? {} : {sub: tile.note})}
+          {...(tile.title === null ? {} : {title: tile.title})}
         />
       ))}
-      {props.more}
     </Row>
   );
 }

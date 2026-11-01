@@ -1,6 +1,6 @@
 import {type CSSProperties, type FocusEvent, type JSX, type ReactNode, useId} from 'react';
-import {type ColumnSize, columnTier, tracksOf} from './column-tracks.js';
 import {SIZE} from '../tokens/index.js';
+import {type ColumnSize, columnTier, tracksOf} from './column-tracks.js';
 import {Icon} from './icon.js';
 import {useInlineSize} from './label-fit.js';
 import {navigationKeys, pickKeys} from './listbox.js';
@@ -17,9 +17,9 @@ export interface ListColumn<Row> {
   /** Drawn only while the list has room: it gives way when the list is narrow. */
   readonly optional?: boolean;
   /**
-   * Pressing the column's cell acts on its own (a link to another row) and picks nothing; it says
-   * whether it did, and a press it did not take picks the row. The row holds the press: a cell has
-   * no control of its own inside the option.
+   * Pressing the `CellLink` word of the column's cell acts on its own (a link to another row) and
+   * picks nothing; it says whether it did, and a press it did not take, or one anywhere else in the
+   * cell, picks the row. The row holds the press: a cell has no control of its own inside the option.
    */
   readonly act?: (row: Row) => boolean;
   /** The cell's text wraps onto more lines instead of being cut short. */
@@ -97,11 +97,13 @@ function Row<Row>(props: {
 }): JSX.Element {
   const slot = useSlot();
   const {hover} = props;
+  const nameId = useId();
   return (
     <div
       className="vs-columnlist-row"
       ref={slot?.measure}
       role="option"
+      aria-labelledby={nameId}
       tabIndex={props.selected ? 0 : -1}
       aria-selected={props.selected}
       aria-description={props.describe}
@@ -110,9 +112,12 @@ function Row<Row>(props: {
       data-lineage={props.marks.lineage || undefined}
       data-fresh={props.marks.fresh || undefined}
       onClick={event => {
-        const cell = event.target instanceof Element ? event.target.closest('[data-column]') : null;
+        // Only the link's own word acts; the rest of its cell, like the rest of the row, picks the row.
+        const target = event.target instanceof Element ? event.target : null;
+        const cell = target?.closest('[data-column]') ?? null;
         const column = props.columns.find(each => each.key === cell?.getAttribute('data-column'));
-        if (column?.act?.(props.row) !== true) props.select();
+        const onLink = target?.closest('.vs-columnlist-link') != null;
+        if (!onLink || column?.act?.(props.row) !== true) props.select();
       }}
       onMouseEnter={hover === undefined ? undefined : () => hover(true)}
       onMouseLeave={hover === undefined ? undefined : () => hover(false)}
@@ -122,9 +127,10 @@ function Row<Row>(props: {
         if (event.target === event.currentTarget) pickKeys(event, props.select);
       }}
     >
-      {props.columns.map(column => (
+      {props.columns.map((column, at) => (
         <span
           key={column.key}
+          id={at === 0 ? nameId : undefined}
           className="vs-columnlist-cell"
           data-column={column.key}
           data-align={column.align}
@@ -145,6 +151,8 @@ function Row<Row>(props: {
  * the visible part, so any number of rows costs a screenful (the same windowing as `PickList`). The
  * keys reach every row: Up and Down step, Page Up and Down move a screenful, Home and End jump,
  * Enter and Space pick. `selected` is the picked row's key; `marks` adds a bar to rows on its path.
+ * A row is named by its first column, as a screen reader hears it, and `describe` says the rest, so
+ * a cell that names another row (a link to the row it builds on) does not rename this one.
  */
 export function ColumnList<Row>(props: {
   readonly label: string;
@@ -155,7 +163,7 @@ export function ColumnList<Row>(props: {
   readonly select: (key: string) => void;
   readonly hover?: (key: string | null) => void;
   readonly marks?: (row: Row) => RowMarks;
-  /** The row's figures whole, for assistive technology: a cell may show them cut short or compact. */
+  /** What the row says besides its name, whole, for assistive technology: a cell may show it cut short or compact. */
   readonly describe?: (row: Row) => string | undefined;
   /**
    * Too many columns for the room a narrow list has: below its tight width the columns take their
@@ -186,12 +194,7 @@ export function ColumnList<Row>(props: {
     '--columns-tight': tracksOf(props.columns, 'tight'),
   } as CSSProperties;
   return (
-    <div
-      className="vs-columnlist"
-      ref={measure}
-      style={tracks}
-      data-tier={tier}
-    >
+    <div className="vs-columnlist" ref={measure} style={tracks} data-tier={tier}>
       <Header columns={props.columns} id={headerId} />
       <div
         ref={win.scroller}

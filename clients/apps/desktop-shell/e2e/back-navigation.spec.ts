@@ -102,11 +102,11 @@ test('the mouse buttons retrace a run’s zooms, leave it for the dashboard, and
   await openIdea(page);
   await press(page, 'back');
   await expect(opened(page)).toHaveCount(0);
-  await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
+  await expect(ideas(page)).toBeVisible();
   await press(page, 'back');
   await expect(dashboard(page)).toBeVisible();
   await press(page, 'forward');
-  await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
+  await expect(ideas(page)).toBeVisible();
   await press(page, 'forward');
   await expect(opened(page)).toBeVisible();
 });
@@ -116,10 +116,16 @@ test('the Runs crumb goes up to the dashboard from any level, and Back returns t
 }) => {
   await openShell(page);
   await openIdea(page);
+  // The row of crumbs, with the way up to the dashboard first, shows from the idea's steps on.
+  await page
+    .getByRole('listbox', {name: /steps$/})
+    .getByRole('option')
+    .first()
+    .click();
   await crumbs(page).getByRole('button', {name: 'Runs', exact: true}).click();
   await expect(dashboard(page)).toBeVisible();
   await page.goBack();
-  await expect(opened(page)).toBeVisible();
+  await expect(crumbs(page)).toBeVisible();
 });
 
 /** Where the Ideas list sits in the screen's body, whatever the body is scrolled to. */
@@ -130,7 +136,7 @@ async function placeInBody(page: Page) {
   });
 }
 
-test('zooming keeps the crumbs in their row, so what is below them stays put', async ({page}) => {
+test('opening an idea keeps the list where it starts', async ({page}) => {
   await openShell(page);
   await run(page).click();
   // The list is under the charts, so a reader scrolls to it first. A zoom that leaves a shorter page
@@ -141,7 +147,9 @@ test('zooming keeps the crumbs in their row, so what is below them stays put', a
     .getByRole('option', {name: /Combine W1 ring/})
     .click();
   await expect(opened(page)).toBeVisible();
-  expect(await placeInBody(page)).toEqual(before);
+  // The idea opens beside the list, which gives it room: the list starts where it did.
+  const {x, y} = await placeInBody(page);
+  expect({x, y}).toEqual({x: before.x, y: before.y});
 });
 
 test('Back crosses screens, and each screen keeps one entry', async ({page}) => {
@@ -169,7 +177,7 @@ test('a reload at a zoom shows the same run at the same zoom, and Back still lea
   await page.reload();
   await expect(opened(page)).toBeVisible();
   await press(page, 'back');
-  await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
+  await expect(ideas(page)).toBeVisible();
   await press(page, 'back');
   await expect(dashboard(page)).toBeVisible();
 });
@@ -184,7 +192,7 @@ test('leaving a zoomed run keeps its zoom from the next run opened', async ({pag
   await expect(dashboard(page)).toBeVisible();
   await expect(page).not.toHaveURL(/idea=/);
   await run(page).click();
-  await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
+  await expect(ideas(page)).toBeVisible();
   await expect(opened(page)).toHaveCount(0);
 });
 
@@ -219,7 +227,7 @@ test('Back and Forward return a screen to where it was scrolled, and a new visit
   await openShell(page);
   const rail = page.getByRole('navigation', {name: 'VibeSys'});
   await run(page).click();
-  await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
+  await expect(ideas(page)).toBeVisible();
   await scrollEverything(page, 60);
   const onRun = await scrolls(page);
   expect(Object.values(onRun).length).toBeGreaterThan(0);
@@ -238,6 +246,6 @@ test('Back and Forward return a screen to where it was scrolled, and a new visit
   // Opening a screen anew starts it at the top.
   await rail.getByRole('button', {name: /^Runs/}).click();
   await run(page).click();
-  await expect(page.getByRole('listbox', {name: 'Running now'})).toBeVisible();
+  await expect(ideas(page)).toBeVisible();
   expect(Object.values(await scrolls(page)).every(top => top === 0)).toBe(true);
 });

@@ -94,7 +94,8 @@ for (const {name, objectives, run} of RUNS) {
       await settled(page);
       const tile = async (index: number) =>
         (await page.locator('.vs-stat').nth(index).innerText()).split('\n');
-      const tried = async () => Number((await tile(0))[1]);
+      /** The figure of the first tile, the ideas tried: the first whole number after its label. */
+      const tried = async () => Number(/\d+/.exec((await tile(0)).slice(1).join(' '))?.[0]);
       const wholeRun = await ideas.getByRole('option').count();
       expect(await tried()).toBe(wholeRun);
       const spentAtEnd = (await tile(3)).join(' ');

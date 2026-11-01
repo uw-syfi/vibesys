@@ -124,8 +124,8 @@ test('the agents tree shows who started whom, and an agent opens beside it with 
 test('the run, each agent and each turn name the tokens they spent', async ({page}) => {
   await openRun(page);
   // The run: every turn's input (with its cached share) and output, exact on hover.
-  const total = page.getByText('in 1.5M (1.3M cached) · out 51.1k');
-  await expect(total).toBeVisible();
+  const total = page.locator('.vs-stat', {hasText: 'Tokens'});
+  await expect(total).toContainText(/1\.5M input\s*· 1\.3M cached · 51\.1k output/);
   await expect(total).toHaveAttribute(
     'title',
     'Input 1,466,600 (1,299,500 cached, 167,100 uncached)\nOutput 51,100 (17,100 reasoning)\nTotal 1,517,700',
@@ -179,7 +179,9 @@ test.describe('at 1000px', () => {
 
   test('the token figures fit beside the run’s other facts', async ({page}) => {
     await openRun(page);
-    await expect(page.getByText('in 1.5M (1.3M cached) · out 51.1k')).toBeVisible();
+    await expect(page.locator('.vs-stat', {hasText: 'Tokens'})).toContainText(
+      /1\.5M input\s*· 1\.3M cached · 51\.1k output/,
+    );
     await page.getByRole('radiogroup', {name: 'Show'}).getByText('Agents').click();
     const agents = page.getByRole('listbox', {name: 'Agents'});
     await expect(agents.getByRole('option', {name: /builder/i}).nth(0)).toContainText('1.2M');

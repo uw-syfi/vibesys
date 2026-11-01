@@ -1,7 +1,7 @@
 import {type JSX, type ReactNode, useId, useState} from 'react';
 import {MONO_ADVANCE, TYPE} from '../tokens/index.js';
-import {useInlineSize} from './label-fit.js';
 import type {StyleWithVars} from './css-vars.js';
+import {useInlineSize} from './label-fit.js';
 import {Text} from './text.js';
 
 /**
@@ -47,7 +47,7 @@ export interface ChartTick {
  */
 const FALLBACK_WIDTH = 1000;
 const MIN_WIDTH = 240;
-const HEIGHT = {default: 260, strip: 150, compact: 180} as const;
+const HEIGHT = {default: 260, strip: 150, compact: 140} as const;
 export type ChartSize = keyof typeof HEIGHT;
 /** The x labels sit in the band below the plot; a caption adds a line under them. */
 const X_BAND = 20;

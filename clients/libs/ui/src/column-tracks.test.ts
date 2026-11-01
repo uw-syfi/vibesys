@@ -10,7 +10,15 @@ function random(seed: number): () => number {
   };
 }
 
-const SIZES: readonly ColumnSize[] = ['fill', 'shrink', 'wide', 'medium', 'short', 'compact', 'dot'];
+const SIZES: readonly ColumnSize[] = [
+  'fill',
+  'shrink',
+  'wide',
+  'medium',
+  'short',
+  'compact',
+  'dot',
+];
 
 function columnsOf(next: () => number): TrackedColumn[] {
   const count = 1 + Math.floor(next() * 9);
@@ -59,7 +67,8 @@ describe('columnTier', () => {
     for (let round = 0; round < 200; round += 1) {
       const columns = columnsOf(next);
       const width = next() * 2400;
-      if (columnTier(width, columns, false) === 'tight') throw new Error('an uncrowded list is tight');
+      if (columnTier(width, columns, false) === 'tight')
+        throw new Error('an uncrowded list is tight');
       if (columnTier(width, columns, true) === 'tight') expect(width).toBeLessThanOrEqual(560);
     }
   });

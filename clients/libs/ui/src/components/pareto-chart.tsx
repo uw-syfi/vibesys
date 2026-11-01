@@ -33,7 +33,7 @@ type Role = 'input' | 'frontier' | 'dominated' | 'failed';
  */
 const FALLBACK_WIDTH = 1000;
 const MIN_WIDTH = 288;
-const HEIGHT = {default: 380, strip: 260, compact: 180} as const;
+const HEIGHT = {default: 380, strip: 260, compact: 140} as const;
 export type ParetoSize = keyof typeof HEIGHT;
 /** Bands for the axis titles, above and below the plot, and the gutter around it. */
 const TOP_BAND = 28;

@@ -104,6 +104,7 @@
   --column-metric: 360px;
   --column-chart: 248px;
   --chart-min: 360px;
+  --chart-min-across: 290px;
   --chart-height: 48px;
   --pane-list: 380px;
   --pane-outline: 340px;

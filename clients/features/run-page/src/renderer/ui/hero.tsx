@@ -22,7 +22,7 @@ import {
   Stack,
   Text,
 } from '@vibesys/ui';
-import type {JSX, ReactNode} from 'react';
+import type {JSX} from 'react';
 import {
   type ChartLegendEntry,
   chartLegend,
@@ -132,8 +132,6 @@ export type HeroProps = ViewBase & {
   readonly lit?: ReadonlySet<string>;
   /** Called with an idea's id as the pointer enters its reading, and null as it leaves. */
   readonly hover?: (idea: string | null) => void;
-  /** More facts of the run for the stats line (the models that built it). */
-  readonly more?: ReactNode;
 };
 
 /**
@@ -162,7 +160,6 @@ export function heroParts(props: HeroProps): HeroParts {
         position={props.position}
         start={props.clock.start}
         ledger={props.tokens}
-        more={props.more}
       />
     ),
     legend:

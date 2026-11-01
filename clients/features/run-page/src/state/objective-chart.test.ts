@@ -281,7 +281,9 @@ describe('the rows the performance section lays its charts in', () => {
   test('the last row holds one to `across` charts, and every chart is in some row', () => {
     for (const count of counts) {
       const across = chartsAcross(count);
-      const last = Array.from({length: count}, (_, at) => at).filter(at => inLastChartRow(at, count));
+      const last = Array.from({length: count}, (_, at) => at).filter(at =>
+        inLastChartRow(at, count),
+      );
       expect(last.length).toBeGreaterThanOrEqual(1);
       expect(last.length).toBeLessThanOrEqual(across);
       // The last row is the tail: the final chart is in it, and the ones before it are contiguous.

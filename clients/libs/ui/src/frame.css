@@ -28,6 +28,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  container: screen-header / inline-size;
 }
 .vs-screen-body {
   flex: 1 1 auto;
@@ -618,6 +619,10 @@ button.vs-crumb:focus-visible {
   font-size: var(--text-body-strong-size);
   line-height: var(--text-body-strong-line);
   font-weight: var(--text-body-strong-weight);
+}
+.vs-screen[data-density="compact"] .vs-pane[data-bare] > .vs-pane-body {
+  /* No header above the body: its own controls start close to the pane's edge. */
+  padding-top: var(--space-1);
 }
 .vs-screen[data-density="compact"] .vs-pane-body {
   gap: var(--space-3);
@@ -1596,7 +1601,14 @@ button.vs-crumb:focus-visible {
   grid-template-columns: repeat(auto-fit, minmax(var(--chart-min), 1fr));
 }
 .vs-chart-columns[data-across] {
-  grid-template-columns: repeat(var(--across), minmax(0, 1fr));
+  /* Side by side while each chart keeps the width it is read at; a narrower window wraps the last. */
+  grid-template-columns: repeat(
+    auto-fit,
+    minmax(
+      max(var(--chart-min-across), calc((100% - (var(--across) - 1) * var(--space-6)) / var(--across))),
+      1fr
+    )
+  );
 }
 /* A heading on one line: the note gives way, with an ellipsis, before the figure goes under the name. */
 .vs-chart-panel-head[data-one-line] {

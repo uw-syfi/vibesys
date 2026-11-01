@@ -243,7 +243,28 @@ function singleColumns(table: IdeasTableView): readonly Column[] {
   return [...(known ? [vsInput] : []), ...comparisons, ...(table.shares ? [share] : [])];
 }
 
-function leadColumns(base: ViewBase): readonly Column[] {
+/**
+ * What the idea was built on, a link to that idea. It sits after the figures, not beside the name:
+ * a press on the middle of a row picks the row, and the middle of a row is not on a link.
+ */
+function builtOnColumn(base: ViewBase): Column {
+  return {
+    key: 'built-on',
+    header: 'Built on',
+    size: 'shrink',
+    optional: true,
+    hint: row => markdownToPlain(row.builtOn.label),
+    act: row => openParent(base, row),
+    cell: row =>
+      row.builtOn.parent === null ? (
+        quiet(row.builtOn.label)
+      ) : (
+        <CellLink label={markdownToPlain(row.builtOn.label)} lit={row.lineage || row.selected} />
+      ),
+  };
+}
+
+function leadColumns(): readonly Column[] {
   return [
     {
       key: 'idea',
@@ -252,20 +273,6 @@ function leadColumns(base: ViewBase): readonly Column[] {
       wrap: true,
       hint: row => markdownToPlain(row.title),
       cell: row => <IdeaName row={row} />,
-    },
-    {
-      key: 'built-on',
-      header: 'Built on',
-      size: 'shrink',
-      optional: true,
-      hint: row => markdownToPlain(row.builtOn.label),
-      act: row => openParent(base, row),
-      cell: row =>
-        row.builtOn.parent === null ? (
-          quiet(row.builtOn.label)
-        ) : (
-          <CellLink label={markdownToPlain(row.builtOn.label)} lit={row.lineage || row.selected} />
-        ),
     },
     {
       key: 'status',
@@ -300,9 +307,10 @@ function columnsOf(
     press: () => setSort(sameSort(by, table.defaultSort) ? null : by),
   });
   return [
-    ...leadColumns(base),
+    ...leadColumns(),
     ...objectiveColumns(table, sorted),
     ...(table.form === 'value' ? singleColumns(table) : []),
+    builtOnColumn(base),
     {
       key: 'agent-time',
       header: 'Agent time',
@@ -336,15 +344,19 @@ function Chips(props: {
   return <DotLegend items={items} />;
 }
 
-/** The exact figures of a row, each under its objective's name: the cells show them compact. */
-function describeFigures(table: IdeasTableView, row: IdeaTableRow): string | undefined {
+/** What a row says besides its name, whole: its status, what it built on, and its figures under each objective's name. */
+function describeRow(table: IdeasTableView, row: IdeaTableRow): string {
   const figures = table.columns.flatMap((column, at) => {
     const value = row.cells[at]?.value;
     return value == null
       ? []
       : [`${column.title} ${`${formatValue(value)} ${column.unit}`.trim()}`];
   });
-  return figures.length === 0 ? undefined : figures.join(', ');
+  return [
+    [row.status.word, row.status.cause].filter(part => part !== null).join(', '),
+    `built on ${markdownToPlain(row.builtOn.label)}`,
+    ...figures,
+  ].join(', ');
 }
 
 export function IdeasTable(props: {
@@ -367,8 +379,8 @@ export function IdeasTable(props: {
   });
   const shown = table.rows.length;
   return (
-    <Stack gap="space-2" grow>
-      <Row gap="space-3" align="center" wrap justify="between">
+    <Stack gap="space-3" grow>
+      <Row gap="space-2" align="center" wrap justify="between">
         <Row gap="space-5" align="center" wrap>
           {props.lead}
           <Chips table={table} filter={filter} dispatch={props.dispatch} />
@@ -392,7 +404,7 @@ export function IdeasTable(props: {
           select={id => base.zoom({type: 'open-idea', idea: id})}
           hover={id => props.dispatch({type: 'ideas-hover', idea: id})}
           marks={row => ({lineage: row.lineage, fresh: row.fresh})}
-          describe={row => describeFigures(table, row)}
+          describe={row => describeRow(table, row)}
           crowded={table.columns.length > 1}
         />
       )}

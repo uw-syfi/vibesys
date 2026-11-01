@@ -13,6 +13,7 @@ export function RelaunchAction(props: RelaunchView): JSX.Element | null {
   return (
     <Button
       text="Resume"
+      size="sm"
       variant="secondary"
       quietReason
       press={props.launch}
