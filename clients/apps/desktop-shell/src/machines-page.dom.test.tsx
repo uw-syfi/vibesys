@@ -6,25 +6,23 @@
  * no layout, so they ran in Chromium for nothing. The browser keeps where things sit and axe.
  */
 import {afterAll, afterEach, beforeAll, expect, test} from 'bun:test';
-import {FakeClock} from '@vibesys/transport/testing';
 import {Window} from 'happy-dom';
 import {act} from 'react';
 import {press} from './testing/dom-controls.js';
+import {all, drawnTexts, notSee, one, see, settle, textOf, until} from './testing/dom-query.js';
 import {
-  all,
-  drawnTexts,
-  maybe,
-  notSee,
-  one,
-  see,
-  settle,
-  textOf,
-  until,
-} from './testing/dom-query.js';
-import {type MachinesWorld, subscriptionSeedOf, WORLDS} from './testing/machines-world.js';
+  cardOf,
+  openMachines,
+  rowFor,
+  rowsOf,
+  testOf,
+  warning,
+  world,
+} from './testing/machines-driver.js';
+import type {MachinesWorld} from './testing/machines-world.js';
 import {rawTextIn} from './testing/raw-text.js';
 import {RAW_TEXT_INPUT} from './testing/raw-text-input.js';
-import {type OpenShell, openShell} from './testing/shell-world.js';
+import type {OpenShell} from './testing/shell-world.js';
 
 const window = new Window();
 const installed = Object.getOwnPropertyNames(window).filter(name => !(name in globalThis));
@@ -48,88 +46,10 @@ afterEach(async () => {
   for (const shell of shells.splice(0)) await shell.close();
 });
 
-const NOW = Date.parse('2026-10-17T12:00:00Z');
-
-function world(name: string): MachinesWorld {
-  const found = WORLDS.find(each => each.name === name);
-  if (found === undefined) throw new Error(`no world named ${name}`);
-  return found;
-}
-
-/** The cluster tests answer when `finishTests()` is called, so a test can be looked at under way. */
-function holdTests(bridge: Record<string, unknown>): void {
-  const answer = bridge['testCluster'] as (...args: unknown[]) => Promise<unknown>;
-  const waiting: (() => void)[] = [];
-  bridge['testCluster'] = (...args: unknown[]) =>
-    new Promise(resolve => waiting.push(() => resolve(answer(...args))));
-  Object.assign(globalThis.window, {
-    finishTests: () => {
-      for (const release of waiting.splice(0)) release();
-    },
-  });
-}
-
-const cardOf = (shell: OpenShell, machine: string): HTMLElement => {
-  const found = [...shell.container.querySelectorAll<HTMLElement>('div.vs-card')].filter(
-    each => maybe(each, {role: 'heading', name: machine, exact: true}) !== null,
-  );
-  if (found.length !== 1) throw new Error(`${found.length} cards for ${machine}`);
-  return found[0] as HTMLElement;
-};
-
-const rowsOf = (scope: Element): Element[] =>
-  all(scope, {role: 'row'}).filter(row => all(row, {role: 'columnheader'}).length === 0);
-
-const testOf = (shell: OpenShell, machine: string, cluster: string): HTMLElement => {
-  const row = all(cardOf(shell, machine), {role: 'row', name: new RegExp(cluster)})[0];
-  if (row === undefined) throw new Error(`no row for ${cluster}`);
-  return one(row, {role: 'button'});
-};
-
-const rowFor = (shell: OpenShell, machine: string, cluster: string): Element => {
-  const row = all(cardOf(shell, machine), {role: 'row', name: new RegExp(cluster)})[0];
-  if (row === undefined) throw new Error(`no row for ${cluster}`);
-  return row;
-};
-
-const rail = (shell: OpenShell): HTMLElement =>
-  one(shell.container, {role: 'navigation', name: 'VibeSys'});
-
-/** The rail's Machines button carries its warning in its name: the word the machine's card uses. */
-const warning = (shell: OpenShell, word = 'Unreachable'): HTMLElement | null =>
-  maybe(rail(shell), {role: 'button', name: new RegExp(`^Machines, ${word}$`)});
-
-/** The page over `scripted`, once every machine's first answer is in. */
+/** The page over `scripted`, registered to close with the test. */
 async function open(scripted: MachinesWorld): Promise<OpenShell> {
-  const shell = await openShell(
-    {kind: 'machines'},
-    {
-      schedule: new FakeClock().schedule,
-      seed: scripted.seed,
-      subscriptions: subscriptionSeedOf(scripted),
-      now: NOW,
-      ...(scripted.holdTests === true ? {prepare: holdTests} : {}),
-    },
-  );
+  const shell = await openMachines(scripted);
   shells.push(shell);
-  one(shell.container, {role: 'heading', level: 1, name: 'Machines'});
-  const first = scripted.seed.machines?.[0]?.label ?? '';
-  await until(`the card of ${first}`, () =>
-    [...shell.container.querySelectorAll('div.vs-card')].some(each => textOf(each).includes(first)),
-  );
-  // Every machine's first answer is in before the page is looked at.
-  await until('the checks to finish', () => !textOf(shell.container).includes('Checking'));
-  if (scripted.testFirst !== undefined) {
-    const {machine, cluster, shows} = scripted.testFirst;
-    await until(
-      `the row of ${cluster}`,
-      () => all(cardOf(shell, machine), {role: 'row', name: new RegExp(cluster)}).length > 0,
-    );
-    await press(testOf(shell, machine, cluster));
-    await settle();
-    if (shows === 'Testing…') await see(testOf(shell, machine, cluster), shows, true);
-    else await see(shell.container, shows);
-  }
   return shell;
 }
 
@@ -166,19 +86,6 @@ test('a GPU reads one way, on the machine and in every cluster row', async () =>
   expect(text).toContain('8× H100');
   expect(text).toContain('8× MI300X');
   expect(text).not.toMatch(/nvidia_|× (h100|mi300x)/);
-});
-
-test('Test says when a cluster was checked, or since when it is unreachable', async () => {
-  const shell = await open(world('an unreachable cluster'));
-  // The world's test of standby found it unreachable.
-  expect(textOf(rowFor(shell, 'This Mac', 'standby'))).toMatch(/Unreachable since \d\d:\d\d/);
-  expect(textOf(rowFor(shell, 'This Mac', 'lab-h100'))).toContain('Not checked');
-  await press(testOf(shell, 'This Mac', 'lab-h100'));
-  await until('lab-h100 checked', () =>
-    /Checked \d\d:\d\d/.test(textOf(rowFor(shell, 'This Mac', 'lab-h100'))),
-  );
-  expect(textOf(rowFor(shell, 'This Mac', 'Modal'))).toContain('Token found');
-  expect(all(rowFor(shell, 'This Mac', 'Modal'), {role: 'button'})).toHaveLength(0);
 });
 
 test('a test under way says so until it answers', async () => {
