@@ -36,7 +36,7 @@ Harness-specific mechanics (tools, background tasks, script paths): read `refere
 
 
 Use the measure skill's `scripts/service.py` owner for every required service. Supply
-`--service`, `--probe`, and `--client` as JSON argv arrays, with a positive `--limit`.
+`--service`, `--probe`, and `--client` as JSON argv arrays, with a positive `--timeout`.
 It starts a new process group, fails on exhausted readiness, and stops and verifies the
 whole group on every exit. Never use handwritten background-shell PID or startup-sleep recipes.
 Run any load, including short sanity/tuning benchmarks, through

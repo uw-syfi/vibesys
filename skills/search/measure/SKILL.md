@@ -62,7 +62,7 @@ call after notification. Never append `; tail ...` to a measurement. Record the 
 executed benchmark command, including dependency flags, port and output argument. Build
 that command once and execute the same value you record; do not reconstruct it from memory.
 Use `scripts/service.py --service '<JSON argv>' --probe '<JSON argv>'
---client '<JSON argv>' --limit <seconds>` to own services, readiness and cleanup.
+--client '<JSON argv>' --timeout <seconds>` to own services, readiness and cleanup.
 Keep the service in foreground mode; disable daemonization.
 It kills and verifies the whole process group, including wrapper descendants; readiness
 exhaustion fails before the client runs. Do not write `&`/PID/sleep recipes.
