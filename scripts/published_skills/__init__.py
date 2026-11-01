@@ -11,6 +11,8 @@ always-on job can run it without installing the environment.
     python3 -m scripts.published_skills --write    # rewrite the manifest's skill list
 """
 
+from scripts.published_skills.findings import Finding
+from scripts.published_skills.harness import HARNESS_HEADINGS
 from scripts.published_skills.manifest import (
     MANIFEST_PATH,
     ManifestError,
@@ -20,13 +22,13 @@ from scripts.published_skills.manifest import (
 from scripts.published_skills.skills import (
     SPEC_FIELDS,
     VIBESYS_TOOL_NAMES,
-    Finding,
     PublishedSkill,
     check_skills,
     discover,
 )
 
 __all__ = [
+    "HARNESS_HEADINGS",
     "MANIFEST_PATH",
     "SPEC_FIELDS",
     "VIBESYS_TOOL_NAMES",

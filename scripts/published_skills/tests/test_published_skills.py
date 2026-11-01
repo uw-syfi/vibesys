@@ -13,6 +13,7 @@ import pytest
 from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 from scripts.published_skills import (
+    HARNESS_HEADINGS,
     MANIFEST_PATH,
     SPEC_FIELDS,
     VIBESYS_TOOL_NAMES,
@@ -304,6 +305,78 @@ def test_two_skills_with_one_name_are_reported_once_at_the_later_path(tmp_path: 
     assert len(messages) == 1
     assert "search/same/SKILL.md" in messages[0]
     assert "`./domains/pack-a/same`" in messages[0]
+
+
+def _harness_file(root: Path, relative: str, harness: str, headings: list[str]) -> None:
+    folder = root / "skills" / relative / "references/harness"
+    folder.mkdir(parents=True, exist_ok=True)
+    body = "".join(f"\n## {heading}\n\nText.\n" for heading in headings)
+    (folder / f"{harness}.md").write_text(f"# {harness}\n{body}")
+
+
+@settings(suppress_health_check=TMP)
+@given(
+    headings=st.sets(st.sampled_from(HARNESS_HEADINGS), min_size=1).map(
+        lambda chosen: [h for h in HARNESS_HEADINGS if h in chosen]
+    )
+)
+def test_harness_files_answering_the_same_capabilities_pass(
+    tmp_path_factory: pytest.TempPathFactory, headings: list[str]
+) -> None:
+    root = tmp_path_factory.mktemp("tree")
+    _skill(root, "search/measure")
+    for harness in ("claude-code", "codex"):
+        _harness_file(root, "search/measure", harness, headings)
+
+    assert _messages(root) == []
+
+
+def test_a_heading_outside_the_capability_list_is_reported(tmp_path: Path) -> None:
+    _skill(tmp_path, "search/measure")
+    _harness_file(tmp_path, "search/measure", "codex", ["Packaging", "Install notes"])
+
+    messages = _messages(tmp_path)
+
+    assert len(messages) == 1
+    assert "codex.md" in messages[0]
+    assert "`Install notes`" in messages[0]
+
+
+def test_headings_in_the_wrong_order_or_repeated_are_reported(tmp_path: Path) -> None:
+    _skill(tmp_path, "search/measure")
+    _harness_file(tmp_path, "search/measure", "a", [HARNESS_HEADINGS[5], HARNESS_HEADINGS[0]])
+    _harness_file(
+        tmp_path,
+        "search/measure",
+        "b",
+        [HARNESS_HEADINGS[0], HARNESS_HEADINGS[0], HARNESS_HEADINGS[5]],
+    )
+
+    messages = _messages(tmp_path)
+
+    assert len(messages) == 2
+    assert all("in the order of skills/README.md" in m for m in messages)
+
+
+def test_a_harness_that_skips_a_capability_another_answers_is_reported(tmp_path: Path) -> None:
+    _skill(tmp_path, "search/measure")
+    _harness_file(tmp_path, "search/measure", "claude-code", list(HARNESS_HEADINGS[:3]))
+    _harness_file(tmp_path, "search/measure", "codex", list(HARNESS_HEADINGS[:2]))
+
+    messages = _messages(tmp_path)
+
+    assert len(messages) == 1
+    assert "codex.md" in messages[0]
+    assert "says what to do instead" in messages[0]
+
+
+def test_a_heading_inside_a_code_fence_is_not_a_capability(tmp_path: Path) -> None:
+    _skill(tmp_path, "search/measure")
+    folder = tmp_path / "skills/search/measure/references/harness"
+    folder.mkdir(parents=True)
+    (folder / "codex.md").write_text("# Codex\n\n## Packaging\n\n```\n## not a heading\n```\n")
+
+    assert _messages(tmp_path) == []
 
 
 def test_unreadable_frontmatter_is_reported_with_the_path(tmp_path: Path) -> None:

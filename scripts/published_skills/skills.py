@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from scripts.check_skills import FrontmatterError, parse_frontmatter
+from scripts.published_skills.findings import Finding
+from scripts.published_skills.harness import check_harness_files
 
 PUBLISHED_ROOT = Path("skills")
 """The plugin source root, relative to the repository: everything inside ships."""
@@ -59,18 +61,6 @@ class PublishedSkill:
         return self.path.rsplit("/", 1)[-1]
 
 
-@dataclass(frozen=True, slots=True)
-class Finding:
-    """One rule a published skill breaks."""
-
-    path: str
-    message: str
-
-    def __str__(self) -> str:
-        """The finding as one line, path first."""
-        return f"{self.path}: {self.message}"
-
-
 def discover(root: Path) -> list[PublishedSkill]:
     """Every skill folder under ``root/skills/{search,domains}``, sorted by path.
 
@@ -117,6 +107,9 @@ def check_skills(root: Path) -> list[Finding]:
         shown = (PUBLISHED_ROOT / skill.path / SKILL_FILE).as_posix()
         text = file.read_text(encoding="utf-8")
         findings.extend(_check_frontmatter(shown, skill, text))
+        findings.extend(
+            check_harness_files(root / PUBLISHED_ROOT / skill.path, shown.removesuffix("/SKILL.md"))
+        )
         if skill.path.startswith(f"./{DOMAINS_TREE}/") and not skill.vendored:
             findings.extend(_check_tool_names(root / PUBLISHED_ROOT / skill.path, root))
     return findings
