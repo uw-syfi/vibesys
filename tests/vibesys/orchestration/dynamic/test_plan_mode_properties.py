@@ -84,16 +84,22 @@ def _check_order(host: Host, plan: list[dict[str, Any]]) -> None:
 
 
 def _greedy_order(plan: list[dict[str, Any]]) -> list[str]:
-    """The first declared step whose dependencies are done, one at a time."""
+    """The first declared step whose dependencies are done, one at a time.
+
+    A trusted step is measured after its work ends, and a slot frees when the work ends, so a
+    step that depends on the one just started waits behind any other step that can start.
+    """
     order: list[str] = []
     while len(order) < len(plan):
-        order.append(
-            next(
-                item["id"]
-                for item in plan
-                if item["id"] not in order and all(dep in order for dep in item["depends_on"])
-            )
-        )
+        ready = [
+            item
+            for item in plan
+            if item["id"] not in order and all(dep in order for dep in item["depends_on"])
+        ]
+        last = next((item for item in plan if order and item["id"] == order[-1]), None)
+        measuring = last is not None and last["evaluate"] == "trusted"
+        unblocked = [item for item in ready if not (measuring and last["id"] in item["depends_on"])]
+        order.append((unblocked or ready)[0]["id"])
     return order
 
 
