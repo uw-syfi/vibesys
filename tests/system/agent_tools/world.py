@@ -84,7 +84,7 @@ if TYPE_CHECKING:
     from vs_core.api.testing import Answer
     from vs_dst.api import Admission
     from vs_runtime.api.core import SnapshotWorkspace
-    from vs_sim.api import Clock
+    from vs_sim.api import SleepingClock
 
 ROLE = AgentRole(
     id="implementer", system_prompt="implement", extra_tools=(AgentTool(id="evaluation"),)
@@ -340,7 +340,7 @@ class AgentToolWorld:
         self.unacknowledged: tuple[str, ...] = ()
         """The charged submissions whose handle never reached the agent, as the last host ended."""
 
-    def serve(self, admission: Admission, clock: Clock) -> _Host:
+    def serve(self, admission: Admission, clock: SleepingClock) -> _Host:
         """The bridge and the agent's calls of a new host."""
         return _Host(self, admission, clock)
 
@@ -438,7 +438,7 @@ def new_bridge(
 class _Host:
     """One host's bridge and the agent's calls through it; it ends with the host."""
 
-    def __init__(self, world: AgentToolWorld, admission: Admission, clock: Clock) -> None:
+    def __init__(self, world: AgentToolWorld, admission: Admission, clock: SleepingClock) -> None:
         self._world = world
         self._admission = admission
         self._clock = clock

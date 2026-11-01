@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from vs_core.api import CoreEvent, CoreState, Request, SchemaRef, Transition
     from vs_core.api.testing import Answer, Harness
     from vs_runtime.api.testing import Launch
-    from vs_sim.api import Clock
+    from vs_sim.api import SleepingClock
 
 
 @dataclass(frozen=True)
@@ -124,6 +124,6 @@ class ServingWorld(Protocol):
     serves is the host's own and is made again by every host, from that position.
     """
 
-    def serve(self, admission: Admission, clock: Clock) -> Serving:
+    def serve(self, admission: Admission, clock: SleepingClock) -> Serving:
         """The service of a new host: it admits inputs through ``admission``, on ``clock``."""
         ...
