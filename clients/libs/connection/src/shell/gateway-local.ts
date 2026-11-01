@@ -2,10 +2,10 @@
 
 import {randomUUID} from 'node:crypto';
 import {watch} from 'node:fs';
-import {chmod, mkdir, rename, rm, writeFile} from 'node:fs/promises';
+import {chmod, mkdir, readFile, rename, rm, writeFile} from 'node:fs/promises';
 import {connect, type Socket} from 'node:net';
 import {homedir} from 'node:os';
-import {join} from 'node:path';
+import {dirname, join} from 'node:path';
 import type {Duplex} from 'node:stream';
 import {registerAbort, type ScheduleTimeout} from '@vibesys/transport';
 import {GATEWAY_DIRECTORY, type GatewayTarget, gatewayArtifact} from './gateway-provision.js';
@@ -23,8 +23,21 @@ export async function localGateway(
   // Read first to fail clearly when development skipped the Go build.
   const bytes = await gatewayArtifact(resources, target);
   const binary = join(directory, 'vibesysd');
-  const temporary = join(directory, `.vibesysd-${randomUUID()}`);
-  // Atomic rename also permits replacing a binary an older serving process still has open.
+  await installGatewayBinary(binary, bytes);
+  return dialLocalGateway(join(directory, 'sock'), binary, signal, schedule);
+}
+
+/**
+ * Put `bytes` at `binary`, unless it already holds them. A new file of the same bytes is checked
+ * by the OS again on its first run, which costs a start 0.3 s where the file already run starts
+ * in 0.04 s, so a gateway that has to start again (after a login, say) keeps its file. A
+ * different build replaces it by an atomic rename, which also permits replacing a binary an older
+ * serving process still has open.
+ */
+export async function installGatewayBinary(binary: string, bytes: Uint8Array): Promise<void> {
+  const installed = await readFile(binary).catch(() => null);
+  if (installed !== null && Buffer.compare(installed, bytes) === 0) return;
+  const temporary = join(dirname(binary), `.vibesysd-${randomUUID()}`);
   try {
     await writeFile(temporary, bytes, {flag: 'wx', mode: 0o700});
     await chmod(temporary, 0o700);
@@ -32,7 +45,6 @@ export async function localGateway(
   } finally {
     await rm(temporary, {force: true});
   }
-  return dialLocalGateway(join(directory, 'sock'), binary, signal, schedule);
 }
 
 function dialLocalGateway(

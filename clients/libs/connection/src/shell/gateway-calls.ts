@@ -16,12 +16,33 @@ export class GatewayCalls {
   readonly #requests = new Set<AbortController>();
   readonly #hosts = new Map<HostKey, {connection: GatewayConnection; users: number}>();
   readonly #reads = new Map<string, SharedRead>();
+  readonly #holds = new Set<() => void>();
   constructor(
     private readonly dialer: (host: HostKey) => GatewayDialer,
     private readonly schedule: ScheduleTimeout,
     /** Told what a failed call left behind: the host's text, or the status the call ended with. */
     private readonly failed: (host: HostKey, diagnostic: string) => void = () => {},
   ) {}
+
+  /**
+   * Start the session to `host` now, ahead of its first call, so that what the host needs to
+   * start (a gateway process that must be exec'd, a handshake) runs beside whatever the caller is
+   * still doing instead of after it. A call that comes within `holdMs` finds the session ready or
+   * on its way; a session nobody has used by then is closed, as one with no call in flight is.
+   */
+  warm(host: HostKey, holdMs: number): void {
+    if (this.#closed) return;
+    const managed = this.#managed(host);
+    managed.users += 1;
+    let cancel = (): void => {};
+    const release = (): void => {
+      cancel();
+      this.#holds.delete(release);
+      this.#leave(host, managed);
+    };
+    this.#holds.add(release);
+    cancel = this.schedule(release, holdMs);
+  }
 
   unary(
     host: HostKey,
@@ -134,6 +155,7 @@ export class GatewayCalls {
 
   close(): void {
     this.#closed = true;
+    for (const release of [...this.#holds]) release();
     for (const abort of this.#requests) abort.abort();
     for (const host of this.#hosts.keys()) this.disable(host);
   }
@@ -174,25 +196,35 @@ export class GatewayCalls {
     this.#requests.add(abort);
     try {
       if (this.#closed || abort.signal.aborted) throw new Error('gateway caller cancelled');
-      let managed = this.#hosts.get(host);
-      if (managed === undefined || managed.connection.ended) {
-        managed = {connection: new GatewayConnection(this.dialer(host), this.schedule), users: 0};
-        this.#hosts.set(host, managed);
-      }
-      const owned = managed;
+      const owned = this.#managed(host);
       owned.users += 1;
       try {
         return await call(owned.connection, abort.signal);
       } finally {
-        owned.users -= 1;
-        if (owned.users === 0) {
-          owned.connection.close();
-          if (this.#hosts.get(host) === owned) this.#hosts.delete(host);
-        }
+        this.#leave(host, owned);
       }
     } finally {
       registration.detach();
       this.#requests.delete(abort);
+    }
+  }
+
+  /** The host's session, opened (and dialing) when there is none or the last one ended. */
+  #managed(host: HostKey): {connection: GatewayConnection; users: number} {
+    let managed = this.#hosts.get(host);
+    if (managed === undefined || managed.connection.ended) {
+      managed = {connection: new GatewayConnection(this.dialer(host), this.schedule), users: 0};
+      this.#hosts.set(host, managed);
+    }
+    return managed;
+  }
+
+  /** One user of the session is done; the last one out closes it. */
+  #leave(host: HostKey, managed: {connection: GatewayConnection; users: number}): void {
+    managed.users -= 1;
+    if (managed.users === 0) {
+      managed.connection.close();
+      if (this.#hosts.get(host) === managed) this.#hosts.delete(host);
     }
   }
 }
