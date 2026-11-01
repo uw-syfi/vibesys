@@ -470,6 +470,28 @@ the gallery's `every glyph the gallery draws comes from a bundled font` test and
 writes run titles in other scripts and emoji on purpose, to test wrapping, and is exempt
 (`OTHER_SCRIPTS` in `screens.spec.ts`).
 
+## Where a desktop shell test goes
+
+The shell's tests share one world: a seed for the Fake of the bridge (`apps/desktop-shell/src/testing`,
+`seed.ts`, `fixture-seed.ts`, `usage-world.ts`, `dashboard-world.ts`, `machines-world.ts`), with nothing of
+a browser in it.
+
+- **A behavior** (what a screen says of a world, what a press sends the host, how one screen leads to
+  another) is a DOM test, `src/*.dom.test.tsx`: `openShell` (`testing/shell-world.tsx`) draws the shell's
+  own stores and screens over the world in happy-dom, and `testing/dom-query.ts` finds what a person sees
+  by a role and a name, as Playwright's locators do. A page is drawn in about 25 ms.
+- **A layout** (where a control sits, what overflows or overlaps, what the window's controls cover, a
+  computed font, axe, a screenshot) needs a browser, so it is a Playwright spec in `e2e/`. A browser
+  test keeps its logic only where the layout check needs the state the logic reaches.
+- **A fact the feature tier already holds** (`features/<name>` tests, which draw the feature's own screen
+  over its own Fakes) is not tested again here. Before moving a browser test down, mutate the product the
+  test guards and run the feature's tests: if they fail, delete the browser test.
+
+A DOM has no stylesheet, so "shown" is what the markup says (`hidden`, `aria-hidden`, `inert`); the disclosure
+that stands for a list when the window is narrow (it has `aria-controls`) is told from the list.
+A spec file deleted from `e2e/` takes its line out of `tools/e2e/durations.json`: `e2eTestMatch` fails
+every shard on a recorded line for a spec that is gone.
+
 ## Where a Run screen change goes
 
 The Run screen is `clients/features/run-page`. Paths below are relative to its `src/`; a
