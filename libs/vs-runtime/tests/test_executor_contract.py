@@ -30,9 +30,15 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.asyncio
 
+RECEIPTED = ("operations", "semantic_events")
+"""The cases whose executors still keep receipts. The others keep none: a repeat reaches the same
+end through ``ExecutionContext.repeat`` and the effect itself, which ``test_executor_step_runner``
+holds for every kind the step loop runs."""
+
 PARAMS = [
     pytest.param(case, scenario, id=f"{case.name}-{scenario.name}")
     for case in CASES
+    if case.name in RECEIPTED
     for scenario in case.scenarios
 ]
 
@@ -104,11 +110,7 @@ async def test_a_kind_acts_once_under_its_lease_and_its_identity_and_core_accept
         assert_core_accepts([done, other], expect_retry=False)
 
 
-NEVER_SEEDED = [
-    pytest.param(case, scenario, id=f"{case.name}-{scenario.name}")
-    for case in CASES
-    for scenario in case.scenarios
-]
+NEVER_SEEDED = PARAMS
 
 
 @pytest.mark.parametrize(("case", "scenario"), NEVER_SEEDED)

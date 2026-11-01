@@ -63,10 +63,8 @@ from vs_project.api import (
 from vs_project.api.testing import run_execution_record
 from vs_runtime.api import RuntimeContractError
 from vs_runtime.api.core import (
-    REQUEST_DISPATCH,
     ExecutionContext,
     ExecutionResult,
-    ExecutorRole,
     ReceiptEvidenceLedger,
     ReceiptStore,
     RequestExecutors,
@@ -105,7 +103,7 @@ from vs_sim.api.testing import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Iterator
+    from collections.abc import Callable, Iterator
     from typing import TextIO
 
     from pydantic import BaseModel
@@ -327,7 +325,12 @@ def _common(attempt: AttemptRef, name: str) -> _Common:
 
 
 def _context(
-    request: Request, *, epoch: int = 1, host: str = "host", lease: ExecutionLease | None = None
+    request: Request,
+    *,
+    epoch: int = 1,
+    host: str = "host",
+    lease: ExecutionLease | None = None,
+    repeat: bool = False,
 ) -> ExecutionContext:
     digest = hashlib.sha256(repr(request).encode()).hexdigest()
     return ExecutionContext(
@@ -336,6 +339,7 @@ def _context(
         payload_digest=digest,
         lease=lease or RevocableLease(),
         until=Until(at=100.0),
+        repeat=repeat,
     )
 
 
@@ -361,9 +365,17 @@ def _executor(
 
 
 async def _run(
-    executor: RuntimeWorkspaceRequests, request: Request, *, epoch: int = 1, host: str = "host"
+    executor: RuntimeWorkspaceRequests,
+    request: Request,
+    *,
+    epoch: int = 1,
+    host: str = "host",
+    repeat: bool = False,
 ) -> ExecutionResult:
-    outcome = await executor.execute(request, _context(request, epoch=epoch, host=host))
+    """Run *request*; with *repeat*, as an attempt after one that may have run."""
+    outcome = await executor.execute(
+        request, _context(request, epoch=epoch, host=host, repeat=repeat)
+    )
     assert isinstance(outcome, ExecutionResult), outcome
     return outcome
 
@@ -526,14 +538,10 @@ class _FailingStore(ReceiptStore):
 
     def __init__(self, namespace: StateNamespace) -> None:
         super().__init__(namespace, SimThreads())
-        self.fail_done = False
         self.fail_release_mark = False
         self.fail_bind = False
 
     def replace(self, family: str, part: str, key: str, receipt: BaseModel) -> None:
-        if self.fail_done and family == "executions":
-            message = "host died before recording the result"
-            raise OSError(message)
         if self.fail_release_mark and family == "workspace-released":
             message = "host died before recording the release"
             raise OSError(message)
@@ -632,16 +640,16 @@ def test_interrupted_snapshot_is_recovered_by_its_label_without_a_second_commit(
             request = SnapshotAndRetain(
                 **_common(attempt, "snap-1"), attempt=attempt, retention="candidate"
             )
-            crashing.fail_done = True
-            with pytest.raises(OSError, match="host died"):
-                await _run(executor, request)
+            taken = await _run(executor, request)  # the host dies before its result is recorded
             commits = _commits(workspaces)
             restarted, _ = _executor(workspaces)
-            recovered = await _run(restarted, request, epoch=2)
+            recovered = await _run(restarted, request, epoch=2, repeat=True)
             assert recovered.observation.observation.status is ObservationStatus.SUCCEEDED
-            assert recovered.observation.revision is not None
+            assert recovered.observation.revision == taken.observation.revision
             assert _commits(workspaces) == commits
-            assert await _run(restarted, request, epoch=2) == recovered
+            again = await _run(restarted, request, epoch=2, repeat=True)
+            assert again.observation.revision == recovered.observation.revision
+            assert _commits(workspaces) == commits
 
         asyncio.run(exercise())
 
@@ -862,29 +870,6 @@ def test_discard_of_the_exclusive_root_releases_the_hold_and_keeps_the_root(tmp_
         asyncio.run(exercise(workspaces))
 
 
-def test_identity_conflicts_stale_hosts_and_unowned_requests(tmp_path: Path) -> None:
-    async def exercise(workspaces: RuntimeWorkspaces) -> None:
-        executor, _ = _executor(workspaces)
-        attempt = _attempt()
-        request = _ensure(workspaces, attempt, "ensure-1")
-        await _run(executor, request)
-        conflicting = DiscardWorkspace(**_common(attempt, "ensure-1"), attempt=attempt)
-        outcome = await _run(executor, conflicting)
-        assert outcome.observation.observation.status is ObservationStatus.REJECTED
-        fresh = _ensure(workspaces, attempt, "ensure-2")
-        await _run(executor, _ensure(workspaces, attempt, "ensure-3"), epoch=5)
-        # A stale host performs nothing new; replaying a sealed result is no effect.
-        stale = await executor.execute(fresh, _context(fresh, epoch=4))
-        assert isinstance(stale, ExecutionResult)
-        assert _status(stale) is ObservationStatus.UNKNOWN
-        replay = await executor.execute(request, _context(request, epoch=4))
-        assert isinstance(replay, ExecutionResult)
-        assert _status(replay) is ObservationStatus.SUCCEEDED
-
-    with _workspaces(tmp_path) as workspaces:
-        asyncio.run(exercise(workspaces))
-
-
 def test_adoption_publishes_and_legacy_verification_reads_publication(tmp_path: Path) -> None:
     async def exercise(workspaces: RuntimeWorkspaces) -> None:
         executor, _ = _executor(workspaces)
@@ -920,7 +905,9 @@ def test_adoption_publishes_and_legacy_verification_reads_publication(tmp_path: 
         assert isinstance(applied.owner_events[0], AdoptionObserved)
         root_file = workspaces.root.path / "candidate.py"
         assert root_file.read_text(encoding="utf-8") == "VALUE = 2\n"
-        assert await _run(executor, adopt, epoch=2) == applied
+        replayed = await _run(executor, adopt, epoch=2, repeat=True)
+        assert replayed.observation.observation.status is ObservationStatus.SUCCEEDED
+        assert replayed.observation.revision == applied.observation.revision
         before_head = workspaces.root.revision
         same = AdoptRevision(request_id=_rid("adopt-same"), scope=run_scope, selection=selection)
         checked = await _run(executor, same, epoch=2)
@@ -932,13 +919,12 @@ def test_adoption_publishes_and_legacy_verification_reads_publication(tmp_path: 
         # Interrupted after publication: the source receipt proves the same commit,
         # so the retry never restores the root or creates a second publication.
         again = AdoptRevision(request_id=_rid("adopt-2"), scope=run_scope, selection=selection)
-        crashing = _failing(_ENVS[workspaces])
-        flaky, _ = _executor(workspaces, crashing)
-        crashing.fail_done = True
-        with pytest.raises(OSError, match="host died"):
-            await _run(flaky, again, epoch=3)
-        resumed = await _run(executor, again, epoch=3)
+        published = await _run(
+            executor, again, epoch=3
+        )  # the host dies before it records the result
+        resumed = await _run(executor, again, epoch=3, repeat=True)
         assert resumed.observation.observation.status is ObservationStatus.SUCCEEDED
+        assert resumed.observation.revision == published.observation.revision
         # Checkout drift does not invalidate a durable publication.
         root_file.write_text("VALUE = 3\n", encoding="utf-8")
         drifted = await _run(executor, verify("verify-2"), epoch=3)
@@ -1306,19 +1292,16 @@ def test_f3_restart_between_binding_and_result_reattaches_instead_of_rejecting(
 
         async def exercise() -> None:
             first_host = env.hosts[0]
-            crashing = _failing(env)
-            executor, _ = _executor(first_host, crashing)
+            executor, _ = _executor(first_host)
             attempt = _attempt()
             request = _ensure(first_host, attempt, "e1")
-            crashing.fail_done = True
-            with pytest.raises(OSError, match="host died"):
-                await _run(executor, request)
+            await _run(executor, request)  # the host dies before its result is recorded
             (path,) = _worktree_paths(first_host)
             (path / "work.txt").write_text("in progress\n", encoding="utf-8")
 
             second_host = env.start_host()
             restarted, _ = _executor(second_host)
-            again = await _run(restarted, request, epoch=2)
+            again = await _run(restarted, request, epoch=2, repeat=True)
             assert _status(again) is ObservationStatus.SUCCEEDED
             assert _worktree_paths(second_host) == {path}
             assert (path / "work.txt").read_text(encoding="utf-8") == "in progress\n"
@@ -1599,25 +1582,6 @@ def test_a_lower_generation_is_rejected_once_a_higher_one_exists(
         asyncio.run(exercise(workspaces))
 
 
-def test_f5_fencing_is_durable_and_compares_the_whole_identity(tmp_path: Path) -> None:
-    async def exercise(workspaces: RuntimeWorkspaces) -> None:
-        first, _ = _executor(workspaces)
-        await _run(first, _ensure(workspaces, _attempt("a"), "ea"), epoch=5, host="h1")
-        restarted, _ = _executor(workspaces)
-        stale = _ensure(workspaces, _attempt("a"), "eb")
-        before = _worktrees(workspaces)
-        for epoch, host in ((1, "h1"), (5, "h2")):
-            outcome = await restarted.execute(stale, _context(stale, epoch=epoch, host=host))
-            assert isinstance(outcome, ExecutionResult)
-            assert _status(outcome) is ObservationStatus.UNKNOWN
-        assert _worktrees(workspaces) == before
-        newer = await restarted.execute(stale, _context(stale, epoch=6, host="h2"))
-        assert isinstance(newer, ExecutionResult)
-
-    with _workspaces(tmp_path) as workspaces:
-        asyncio.run(exercise(workspaces))
-
-
 def test_f6_foreign_dangling_and_unretained_revisions_are_rejected(tmp_path: Path) -> None:
     async def exercise(workspaces: RuntimeWorkspaces) -> None:
         executor, _ = _executor(workspaces)
@@ -1811,11 +1775,11 @@ def test_f8_a_crash_between_the_discard_and_its_record_recovers_to_complete(
                 await _run(executor, discard)
             assert not path.exists()
             crashing.fail_release_mark = False
-            again = await _run(_executor(workspaces)[0], discard, epoch=2)
+            again = await _run(_executor(workspaces)[0], discard, epoch=2, repeat=True)
             observation = again.observation.observation
             assert observation.released
             assert observation.children_complete
-            assert _status(await _run(_executor(workspaces)[0], discard, epoch=2)) is (
+            assert _status(await _run(_executor(workspaces)[0], discard, epoch=2, repeat=True)) is (
                 ObservationStatus.SUCCEEDED
             )
 
@@ -1905,20 +1869,15 @@ def test_f9_interrupted_restore_is_completed_or_confirmed_on_retry(tmp_path: Pat
 
         async def exercise() -> None:
             workspaces = env.hosts[0]
-            crashing = _failing(env)
-            executor, _ = _executor(workspaces, crashing)
+            executor, _ = _executor(workspaces)
             attempt = _attempt()
-            ensure = _ensure(workspaces, attempt, "e1")
             path = await _ensure_at(executor, workspaces, attempt, "e1")
-            del ensure
             (path / "candidate.py").write_text("VALUE = 2\n", encoding="utf-8")
             base = revision_ref(workspaces.root.revision or "")
             restore = RestoreRevision(**_common(attempt, "r1"), attempt=attempt, revision=base)
-            crashing.fail_done = True
-            with pytest.raises(OSError, match="host died"):
-                await _run(executor, restore)
+            await _run(executor, restore)  # the host dies before its result is recorded
             restarted, _ = _executor(workspaces)
-            result = await _run(restarted, restore, epoch=2)
+            result = await _run(restarted, restore, epoch=2, repeat=True)
             assert _status(result) is ObservationStatus.SUCCEEDED
             assert (path / "candidate.py").read_text(encoding="utf-8") == "VALUE = 1\n"
 
@@ -1976,47 +1935,6 @@ def test_f12_a_slow_discard_does_not_block_another_attempt(tmp_path: Path, sim: 
             env.hosts.clear()
 
 
-def test_corrupt_receipts_yield_unknown_not_an_exception(tmp_path: Path) -> None:
-    with _env(tmp_path) as env:
-
-        async def exercise() -> None:
-            workspaces = env.hosts[0]
-            executor, _ = _executor(workspaces)
-            request = _ensure(workspaces, _attempt(), "e1")
-            await _run(executor, request)
-            namespace = env.project.state.local_namespace(env.run_id, "receipts")
-            for name in namespace.entries("executions"):
-                namespace.write_bytes(f"executions/{name}", b"{")
-            result = await _run(executor, request)
-            assert _status(result) is ObservationStatus.UNKNOWN
-
-        asyncio.run(exercise())
-
-
-class _LostLease:
-    def renew(self, *, now_at: float, lease_duration: float) -> None:
-        del now_at, lease_duration
-
-    def verify(self, *, now_at: float) -> bool:
-        del now_at
-        return False
-
-
-def test_a_lost_lease_yields_unknown_and_changes_nothing(tmp_path: Path) -> None:
-    async def exercise(workspaces: RuntimeWorkspaces) -> None:
-        executor, receipts = _executor(workspaces)
-        request = _ensure(workspaces, _attempt(), "e1")
-        before = _worktrees(workspaces)
-        outcome = await executor.execute(request, _context(request, lease=_LostLease()))
-        assert isinstance(outcome, ExecutionResult)
-        assert _status(outcome) is ObservationStatus.UNKNOWN
-        assert _worktrees(workspaces) == before
-        assert receipts.sealed("e1", ExecutionResult) is None
-
-    with _workspaces(tmp_path) as workspaces:
-        asyncio.run(exercise(workspaces))
-
-
 def test_unsupported_requests_get_a_typed_observation_never_a_refusal(tmp_path: Path) -> None:
     async def exercise(workspaces: RuntimeWorkspaces) -> None:
         executor, _ = _executor(workspaces)
@@ -2028,150 +1946,3 @@ def test_unsupported_requests_get_a_typed_observation_never_a_refusal(tmp_path: 
 
     with _workspaces(tmp_path) as workspaces:
         asyncio.run(exercise(workspaces))
-
-
-# Observation contract: core accepts every output across a retry and restarts ----------------
-
-type _Prepare = Callable[
-    [RuntimeWorkspaceRequests, RuntimeWorkspaces, AttemptRef], Awaitable[Request]
-]
-
-
-async def _prepare_ensure(
-    executor: RuntimeWorkspaceRequests, workspaces: RuntimeWorkspaces, attempt: AttemptRef
-) -> Request:
-    del executor
-    return _ensure(workspaces, attempt, "target")
-
-
-async def _prepare_restore(
-    executor: RuntimeWorkspaceRequests, workspaces: RuntimeWorkspaces, attempt: AttemptRef
-) -> Request:
-    ensure = _ensure(workspaces, attempt, "setup-ensure")
-    await _run(executor, ensure)
-    return RestoreRevision(**_common(attempt, "target"), attempt=attempt, revision=ensure.plan.base)
-
-
-async def _prepare_snapshot(
-    executor: RuntimeWorkspaceRequests, workspaces: RuntimeWorkspaces, attempt: AttemptRef
-) -> Request:
-    await _ensure_at(executor, workspaces, attempt, "setup-ensure")
-    (_candidate_path(workspaces) / "candidate.py").write_text("VALUE = 2\n", encoding="utf-8")
-    return SnapshotAndRetain(**_common(attempt, "target"), attempt=attempt, retention="wip")
-
-
-async def _prepare_retain(
-    executor: RuntimeWorkspaceRequests, workspaces: RuntimeWorkspaces, attempt: AttemptRef
-) -> Request:
-    ensure = _ensure(workspaces, attempt, "setup-ensure")
-    await _run(executor, ensure)
-    return RetainRevision(
-        **_common(attempt, "target"), attempt=attempt, revision=ensure.plan.base, retention="wip"
-    )
-
-
-async def _prepare_discard(
-    executor: RuntimeWorkspaceRequests, workspaces: RuntimeWorkspaces, attempt: AttemptRef
-) -> Request:
-    await _run(executor, _ensure(workspaces, attempt, "setup-ensure"))
-    return DiscardWorkspace(**_common(attempt, "target"), attempt=attempt)
-
-
-async def _prepare_run_snapshot(
-    executor: RuntimeWorkspaceRequests, workspaces: RuntimeWorkspaces, attempt: AttemptRef
-) -> Request:
-    del executor, attempt
-    (workspaces.root.path / "candidate.py").write_text("VALUE = 9\n", encoding="utf-8")
-    return SnapshotAndRetainRun(
-        request_id=_rid("target"),
-        scope=Scope(owner=RunId(root="run-1"), generation=3),
-        invocation=InvocationRef(
-            session_id=SessionId(root="s1"), invocation_id=InvocationId(root="i1"), generation=3
-        ),
-        retention="candidate",
-    )
-
-
-async def _prepare_adopt(
-    executor: RuntimeWorkspaceRequests, workspaces: RuntimeWorkspaces, attempt: AttemptRef
-) -> Request:
-    await _ensure_at(executor, workspaces, attempt, "setup-ensure")
-    (_candidate_path(workspaces) / "candidate.py").write_text("VALUE = 2\n", encoding="utf-8")
-    winner = await _snapshot_of(executor, attempt, "setup-snapshot")
-    return _adopt("target", winner, AdoptRevision)
-
-
-async def _prepare_verify(
-    executor: RuntimeWorkspaceRequests, workspaces: RuntimeWorkspaces, attempt: AttemptRef
-) -> Request:
-    await _ensure_at(executor, workspaces, attempt, "setup-ensure")
-    (_candidate_path(workspaces) / "candidate.py").write_text("VALUE = 2\n", encoding="utf-8")
-    winner = await _snapshot_of(executor, attempt, "setup-snapshot")
-    await _run(executor, _adopt("setup-adopt", winner, AdoptRevision))
-    return _adopt("target", winner, VerifyAdoption)
-
-
-# One scenario per workspace request kind; the test below requires this to stay complete.
-_OBSERVATION_SCENARIOS: dict[type[Request], _Prepare] = {
-    EnsureWorkspace: _prepare_ensure,
-    RestoreRevision: _prepare_restore,
-    SnapshotAndRetain: _prepare_snapshot,
-    RetainRevision: _prepare_retain,
-    DiscardWorkspace: _prepare_discard,
-    SnapshotAndRetainRun: _prepare_run_snapshot,
-    AdoptRevision: _prepare_adopt,
-    VerifyAdoption: _prepare_verify,
-}
-
-
-def test_every_workspace_request_kind_has_an_observation_scenario() -> None:
-    routed = {kind for kind, role in REQUEST_DISPATCH.items() if role is ExecutorRole.WORKSPACES}
-    assert set(_OBSERVATION_SCENARIOS) == routed
-
-
-@pytest.mark.parametrize("kind", list(_OBSERVATION_SCENARIOS), ids=lambda kind: kind.__name__)
-def test_core_accepts_a_retry_after_unknown_and_replays_across_restarts(
-    tmp_path: Path, kind: type[Request]
-) -> None:
-    with _env(tmp_path) as env:
-
-        async def exercise() -> list[ExecutionResult]:
-            first_host = env.hosts[0]
-            executor, _ = _executor(first_host)
-            request = await _OBSERVATION_SCENARIOS[kind](executor, first_host, _attempt())
-            lost = await executor.execute(request, _context(request, lease=_LostLease()))
-            assert isinstance(lost, ExecutionResult)
-            assert _status(lost) is ObservationStatus.UNKNOWN
-            second, _ = _executor(env.start_host())
-            retried = await _run(second, request, epoch=2)
-            assert _status(retried) is ObservationStatus.SUCCEEDED
-            third, _ = _executor(env.start_host())
-            return [lost, retried, await _run(third, request, epoch=3)]
-
-        assert_core_accepts(asyncio.run(exercise()))
-
-
-@pytest.mark.parametrize("kind", list(_OBSERVATION_SCENARIOS), ids=lambda kind: kind.__name__)
-def test_the_same_request_identity_with_another_payload_is_a_rejected_observation(
-    tmp_path: Path, kind: type[Request]
-) -> None:
-    with _env(tmp_path) as env:
-
-        async def exercise() -> list[ExecutionResult]:
-            host = env.hosts[0]
-            executor, _ = _executor(host)
-            request = await _OBSERVATION_SCENARIOS[kind](executor, host, _attempt())
-            first = await _run(executor, request)
-            other = ExecutionContext(
-                fence=HostFence(host_id=HostId(root="host"), epoch=1),
-                now_at=2.0,
-                payload_digest="another-payload",
-                until=Until(at=100.0),
-            )
-            outcome = await executor.execute(request, other)
-            assert isinstance(outcome, ExecutionResult)
-            assert _status(outcome) is ObservationStatus.REJECTED
-            return [first, outcome]
-
-        first, rejected = asyncio.run(exercise())
-        assert rejected.observation.observation.sequence > first.observation.observation.sequence

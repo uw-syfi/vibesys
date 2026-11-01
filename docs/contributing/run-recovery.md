@@ -1127,13 +1127,15 @@ These are facts the implementation must settle, found while checking the design 
   (`SessionResumeError`) instead of resuming; the fix belongs to that provider's contract case.
 - **The executor kinds repeat by tag, without receipts.** The loop records an attempt before any of its
   I/O, so an attempt after the first proves an earlier one may have run. `ExecutorStepRunner` passes that
-  as `ExecutionContext.repeat`, which replaces the `resumed` flag the begun marker of `run_once` used to
-  give (`run_once` now hands its performers `repeat` from the context or the marker, so the production
-  loop is unchanged). Every test of a repeat runs the real executors over an `UnreceiptedStore`, which
-  keeps no execution record: each of the 13 kinds is killed at sampled durable writes (every write, for
-  `EnsureSession`), cleared and run again, and so is a generated program of runs, kills, restarts and
-  clears, with the effects and the result of an unkilled run. Two kinds were safe only through the
-  marker:
+  as `ExecutionContext.repeat`, which replaced the `resumed` flag the begun marker of `run_once` gave.
+  The workspace, session, session-lifecycle and evaluation executors no longer call `run_once`: they
+  keep no execution record, so a repeat reaches the same end only through that flag and the effect itself.
+  Every test of a repeat runs the real executors: each of the 13 kinds is killed at sampled durable writes
+  (every write, for `EnsureSession`), cleared and run again, and so is a generated program of runs, kills,
+  restarts and clears, which holds the effects at every point to those of an unkilled run, so no
+  executor acts twice for one step
+  (`test_whatever_the_order_of_runs_kills_restarts_and_clears_a_step_ends_as_an_unkilled_one`). Two
+  kinds were safe only through the marker:
   - `DiscardWorkspace` answered `children_complete=False` ("released without a recorded session close")
     for a worktree its killed first attempt had already removed, unless it was told it was a repeat.
   - `SnapshotAndRetain` and `SnapshotAndRetainRun` look for the snapshot an earlier attempt committed by
