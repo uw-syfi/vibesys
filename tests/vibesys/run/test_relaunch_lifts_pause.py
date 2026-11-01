@@ -110,10 +110,12 @@ def _process(
         assert spec.argv[-3:] == ("remote", "get-url", "origin")
         return ProcessScript(returncode=128, stderr=b"fatal: no origin")
 
-    events: list[CoreEvent] = []
+    def discard(event: CoreEvent) -> None:
+        del event
+
     session = create_session(
         _request(root, resumed=resumed),
-        sink=events.append,
+        sink=discard,
         registry=registry,
         settings=LaunchSettings(
             blocking=SimBlockingRunner(threads),
