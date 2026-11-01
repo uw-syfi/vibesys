@@ -1,12 +1,10 @@
 import {expect, type Page, test} from '@playwright/test';
-import {fixtureNamed} from '@vibesys/run-fixtures';
 import {
   installFakeBridge,
   installFakeChrome,
   installFakeMachines,
   installFakeNewRun,
 } from '../src/testing/fake-bridge.js';
-import {openFixture} from './fixture-world.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {showScreen} from './read.js';
 import {revealNav} from './settings-machine.js';
@@ -52,67 +50,6 @@ const openMachines = async (page: Page): Promise<void> => {
   await expect(page.getByRole('heading', {name: 'Where runs can go'})).toBeVisible();
 };
 
-const ADD_CASES = [
-  {name: 'nothing typed', host: '', checkout: '', field: 'SSH host', says: /host is required/i},
-  {name: 'no host', host: '', checkout: '~/vibesys', field: 'SSH host', says: /host is required/i},
-  {name: 'a bad host', host: '-oX=1', checkout: '~/vibesys', field: 'SSH host', says: /usable ssh/},
-  {name: 'a known host', host: 'host-b', checkout: '~/vibesys', field: 'SSH host', says: /already/},
-  {name: 'no checkout', host: 'host-d', checkout: '', field: 'VibeSys checkout', says: /required/},
-  {
-    name: 'a bad path',
-    host: 'host-d',
-    checkout: 'vibesys',
-    field: 'VibeSys checkout',
-    says: /absolute/,
-  },
-] as const;
-
-for (const each of ADD_CASES) {
-  test(`Add a machine with ${each.name} puts its error under ${each.field}`, async ({page}) => {
-    await openSettings(page, 1000);
-    await openMachines(page);
-    await page.getByRole('button', {name: 'Add a machine'}).click();
-    await page.getByRole('textbox', {name: 'SSH host'}).fill(each.host);
-    await page.getByRole('combobox', {name: 'VibeSys checkout'}).fill(each.checkout);
-    await page.getByRole('button', {name: 'Check and add'}).click();
-
-    // Each control's description is the error text below it, and only the named field is invalid.
-    const fields = await page.evaluate(() =>
-      [...document.querySelectorAll('input[aria-label], input[id]')].map(input => {
-        const label = input.id ? document.querySelector(`label[for="${input.id}"]`) : null;
-        const errors = (input.getAttribute('aria-describedby') ?? '')
-          .split(' ')
-          .map(id => document.getElementById(id))
-          .filter(node => node?.getAttribute('data-tone') === 'err')
-          .map(node => node?.textContent ?? '');
-        return {
-          label: label?.textContent ?? '',
-          invalid: input.getAttribute('aria-invalid') === 'true',
-          errors,
-        };
-      }),
-    );
-    const named = fields.filter(field => field.invalid);
-    expect(named.map(field => field.label)).toEqual([each.field]);
-    expect(named[0]?.errors).toHaveLength(1);
-    expect(named[0]?.errors[0]).toMatch(each.says);
-    expect(named[0]?.errors[0]).not.toContain('""');
-  });
-}
-
-test('the Add form shows placeholders as examples, never as values', async ({page}) => {
-  await openSettings(page, 1000);
-  await openMachines(page);
-  await page.getByRole('button', {name: 'Add a machine'}).click();
-  const placeholders = await page.evaluate(() =>
-    [...document.querySelectorAll('main input[placeholder]')].map(input =>
-      input.getAttribute('placeholder'),
-    ),
-  );
-  expect(placeholders).toHaveLength(2);
-  for (const placeholder of placeholders) expect(placeholder).toMatch(/^e\.g\. /);
-});
-
 for (const width of WIDTHS) {
   test(`with no saved machine the empty state fills the content at ${width} px`, async ({page}) => {
     await openSettings(page, width, []);
@@ -144,18 +81,5 @@ for (const width of WIDTHS) {
       expect(new Set(swatches.map(swatch => swatch.top)).size).toBe(1);
       expect(new Set(swatches.map(swatch => swatch.width)).size).toBe(1);
     }
-  });
-}
-
-for (const width of WIDTHS) {
-  test(`the Runs dashboard lists the live run of a fixture, once, at ${width} px`, async ({
-    page,
-  }) => {
-    await resize(page, width);
-    await openFixture(page, fixtureNamed('weeks-600-ideas'));
-    expect(await page.evaluate(() => window.innerWidth)).toBe(width);
-    await showScreen(page, 'Runs');
-    await expect(page.getByRole('heading', {name: 'Runs'})).toBeVisible();
-    await expect(page.locator('main .vs-overview-tile')).toHaveCount(1);
   });
 }

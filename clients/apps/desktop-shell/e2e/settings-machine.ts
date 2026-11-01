@@ -4,7 +4,7 @@
  * choosing a machine and a section, and the fake helper's record of what was done.
  */
 import {expect, type Page} from '@playwright/test';
-import type {FakeBridgeSeed, FakeMachineSettings} from '../src/testing/fake-bridge.js';
+import type {FakeBridgeSeed} from '../src/testing/fake-bridge.js';
 import {SETTINGS_MACHINES, type SectionName} from '../src/testing/settings-pages.js';
 import {showScreen} from './read.js';
 import {open, SEED} from './world.js';
@@ -55,13 +55,4 @@ export async function openSection(
   }
   await foldNav(page);
   await expect(main(page).getByRole('heading', {level: 1, name: section})).toBeVisible();
-}
-
-/** What the fake helper was asked to do, as the journey reads it. */
-export async function done(page: Page): Promise<FakeMachineSettings> {
-  return page.evaluate(
-    () =>
-      (window as unknown as {fakeHost: {machineSettings: FakeMachineSettings}}).fakeHost
-        .machineSettings,
-  );
 }
