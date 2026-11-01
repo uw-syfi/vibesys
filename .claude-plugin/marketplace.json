@@ -8,8 +8,8 @@
     {
       "name": "vibesys",
       "source": "./skills",
-      "description": "VibeSys's optimization method as Claude Code skills: domain skills for kernels, LLM serving, microservices, Tokio services and Neuron.",
-      "version": "0.1.0",
+      "description": "Resumable optimization with parallel hypotheses, measurements and independent judging, plus domain skills for kernels, LLM serving, microservices, Tokio services and Neuron.",
+      "version": "0.3.0",
       "strict": false,
       "skills": [
         "./domains/dial9-tokio/dial9-rank-bottlenecks",
@@ -33,7 +33,16 @@
         "./domains/neuron-agentic-development/skills/neuron-nki-profile-querying",
         "./domains/neuron-agentic-development/skills/neuron-nki-profiling",
         "./domains/neuron-agentic-development/skills/neuron-nki-writing",
-        "./domains/serving-systems"
+        "./domains/serving-systems",
+        "./search/combine-candidates",
+        "./search/implement-hypothesis",
+        "./search/judge-candidate",
+        "./search/measure",
+        "./search/optimize",
+        "./search/plan-hypotheses",
+        "./search/profile-revision",
+        "./search/report-progress",
+        "./search/state"
       ]
     }
   ]
