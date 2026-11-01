@@ -9,7 +9,7 @@
     "noEmit": true,
     "tsBuildInfoFile": ".tsbuild/node.tsbuildinfo"
   },
-  "include": ["vite.config.ts", "playwright.config.ts", "../../tools/e2e/bundled-fonts.mts", "../../tools/e2e/free-port.mts", "../../tools/e2e/shard.mts", "e2e/**/*.ts", "src/testing/fake-bridge.ts", "src/testing/fake-offer.ts", "src/testing/gateway-wire.ts", "src/testing/native-records.ts", "src/testing/new-run-pages.ts", "src/testing/seed.ts", "src/testing/settings-pages.ts", "src/testing/started-at.ts"],
+  "include": ["vite.config.ts", "playwright.config.ts", "../../tools/e2e/bundled-fonts.mts", "../../tools/e2e/free-port.mts", "../../tools/e2e/shard.mts", "../../tools/e2e/workers.mts", "e2e/**/*.ts", "src/testing/fake-bridge.ts", "src/testing/fake-offer.ts", "src/testing/gateway-wire.ts", "src/testing/native-records.ts", "src/testing/new-run-pages.ts", "src/testing/seed.ts", "src/testing/settings-pages.ts", "src/testing/started-at.ts"],
   "references": [
     {"path": "../../libs/contracts/tsconfig.lib.json"},
     {"path": "../../libs/ipc/tsconfig.lib.json"},

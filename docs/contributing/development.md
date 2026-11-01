@@ -396,7 +396,11 @@ the client and Python environments. The real-system tiers need Docker. Run
 asks the OS for a free port for its own server, so parallel runs on one machine
 do not collide. CI splits the group across runners with `VIBESYS_E2E_SHARD=i/N`
 (for example `2/5`), which each app's Playwright config reads; leave it unset
-to run every spec.
+to run every spec. The desktop shell's specs run on four workers (fewer on a
+smaller machine); `VIBESYS_E2E_WORKERS=<n>` names another count. A run that
+writes screenshots and a contact sheet (`SCREENS_DIR` and the other capture
+variables in `clients/tools/e2e/workers.mts`) builds each sheet from one
+worker's screens, so it runs on one.
 
 ```bash
 uv sync --dev

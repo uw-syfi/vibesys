@@ -33,4 +33,4 @@ for (const world of WORLDS) {
   });
 }
 
-ledger.requireEveryFailure(() => ledger.screens >= WIDTHS.length * WORLDS.length);
+ledger.requireEveryFailure();

@@ -39,7 +39,7 @@ for (const width of WIDTHS) {
   }
 }
 
-ledger.requireEveryFailure(() => ledger.screens >= WIDTHS.length * SETTINGS_PAGES.length);
+ledger.requireEveryFailure();
 
 test('the contact sheet of the machine Settings pages', async ({browser}) => {
   test.skip(shots === undefined, 'set SCREENS_DIR to write the screenshots and the contact sheet');
