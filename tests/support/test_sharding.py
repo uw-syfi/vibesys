@@ -463,7 +463,7 @@ def test_files_new_to_the_record_never_overload_a_shard(
 def test_a_crash_replay_file_missing_from_the_cache_is_spread_over_every_shard() -> None:
     """Regression: 24 tests of 60-77 s landed in one shard (shard 7 took 1005 s)."""
     durations = {f"tests/f{index}.py": 20.0 for index in range(30)}
-    crash = "tests/system/crash/test_crash_convergence.py"
+    crash = "tests/system/crash/test_never_stuck.py"
     whole, loads = shard_loads([*durations, crash], durations, 8)
     spread, _ = assign_heavy_items({crash: 24}, durations, loads)
 
