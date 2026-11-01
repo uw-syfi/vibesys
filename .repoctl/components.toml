@@ -137,21 +137,12 @@ depends_on = ["server_protocol", "server_transport", "bun_fetcher"]
 # are key-only, so editing the runtime or the sandbox regenerates the set but does not run the
 # client jobs. The projection snapshots and the conversion golden, which the Python job runs,
 # still see a change from them. The two declaration directories also sit under `clients`.
-# The contract is listed by directory, not as `proto/vibesys`, so `proto/vibesys/cli` (the contract of
-# the Go `vibesys-cli`, which no client or replay reads) selects the `cli` and `proto` jobs only. A new
-# directory under `proto/vibesys` must be added here, or declared as not read by the replays.
 [[components]]
 id = "derived_replays"
 class = "manual"
 job = "clients"
 roots = [
-  "proto/vibesys/api",
-  "proto/vibesys/core",
-  "proto/vibesys/desktop",
-  "proto/vibesys/host",
-  "proto/vibesys/search",
-  "proto/vibesys/store",
-  "proto/vibesys/testing",
+  "proto/vibesys",
   { path = "libs/vs-agent/src", selects = false },
   { path = "libs/vs-async-ops/src", selects = false },
   "libs/vs-core/src",

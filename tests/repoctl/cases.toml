@@ -172,9 +172,9 @@ native_targets = []
 pnpm_packages = []
 
 [[cases]]
-name = "the vibesys-cli contract selects the cli and contract checks but no client job"
+name = "the vibesys-cli contract selects the cli and contract checks and the replay clients"
 paths = ["proto/vibesys/cli/v1/job.proto"]
-jobs = ["cli", "proto"]
+jobs = ["cli", "clients", "proto"]
 [cases.collections]
 native_languages = []
 native_targets = []
