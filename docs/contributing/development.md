@@ -420,6 +420,7 @@ selected specs up to `SPEC_BUDGET_SECONDS` of recorded time (about half the suit
 spec always, then the specs importing a changed helper, then those of a changed app file,
 then the specs a package change reaches, nearest first, each tier fastest first so more
 distinct specs run. The log names the specs left to the queue, which runs every spec.
+A job whose slice holds none of an app's specs skips that app's build and run (`with_e2e_specs.mjs`).
 To see the selection for your branch:
 
 ```bash
