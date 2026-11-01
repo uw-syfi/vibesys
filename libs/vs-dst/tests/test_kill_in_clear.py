@@ -24,7 +24,9 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from protobuf import Oneof
 
-from vs_dst import _step_host
+from vs_dst import (
+    _step_host,
+)  # test-isolation: the mutation check replaces the world runner's clear rule, the seam under test
 from vs_dst.api import Action, Interruption, Moment, Outcome, simulate
 from vs_runtime.api.step_runner import Adopted, Cleared
 from vs_sim.api.testing import examples
@@ -36,7 +38,9 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from vs_core.api import Request, RequestId
-    from vs_dst._step_host import _WorldRunner
+    from vs_dst._step_host import (
+        _WorldRunner,
+    )  # test-isolation: the mutation check replaces the world runner's clear rule, the seam under test
     from vs_dst.api import Interrupted, SimulatedRun
     from vs_proto.api import Record
 
@@ -192,6 +196,6 @@ def test_a_broken_recovery_rule_in_clear_breaks_an_invariant(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The invariants catch a ``clear`` that loses a result or invents one (a mutation check)."""
-    monkeypatch.setattr(_step_host._WorldRunner, "clear", mutant)  # noqa: SLF001
+    monkeypatch.setattr(_step_host._WorldRunner, "clear", mutant)  # noqa: SLF001  # test-isolation: the mutation check replaces the world runner's clear rule, the seam under test
 
     assert _run_every_case() > 0, f"{mutant!r} is not caught by any kill in a clear"
