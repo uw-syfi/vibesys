@@ -279,3 +279,29 @@ and applies a 60 s deadline per request. It does not run session_runner's
 prefix-cache preflight or benchmark warmup, so a serving candidate below the
 benchmark gate can still provide a capture. This diagnostic load does not
 change accuracy or benchmark acceptance.
+
+## AgentX task
+
+The same candidate also has an [`agentx` task](.vibesys/tasks/agentx/OBJECTIVE.md),
+which optimizes the throughput/TTFT/TPOT frontier on the pinned public
+AgentX coding corpus. Select `agentx` in New run or with `--task agentx`.
+Its evaluator uses streaming chat, the model's native 262K context window and
+four concurrent session trees; the existing seed needs chat and long-context
+support before it can pass. The HF-golden accuracy gate remains shared with
+`default`. The task declares a vLLM comparison for independent harness checks.
+
+For a small diagnostic against a running chat-capable Qwen server:
+
+```bash
+uv run --locked --script /path/to/vibesys/resources/evaluators/agentx/agentx_eval.py \
+  --mode smoke --concurrency 1 --url http://127.0.0.1:8000 \
+  --model Qwen/Qwen3.5-9B --tokenizer Qwen/Qwen3.5-9B \
+  --tokenizer-revision c202236235762e1c871ad0ccb60c8ee5ba337b9a \
+  --max-context-length 262144 \
+  --artifact-dir /path/to/empty-agentx-smoke
+```
+
+This requires public corpus access and the pinned tokenizer (or its cached
+snapshot). Smoke results are unscored. Full measurements run for 15 minutes,
+plus dataset preparation, warmup and drain; see the task objective for the
+exact recipe and comparability limits.
