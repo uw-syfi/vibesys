@@ -1,0 +1,73 @@
+name: P2 probe
+
+on:
+  push:
+    branches: [ci/p2-probe]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        workers: [auto, '6']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv python install 3.14
+      - run: uv sync --dev --python 3.14
+      - name: Hardware
+        run: |
+          nproc; lscpu | grep -E "Model name|MHz|^CPU\(s\)"; free -m | head -2
+          python3 - <<'PY'
+          import time
+          t=time.perf_counter(); s=0
+          for i in range(20_000_000): s+=i
+          print("cpu probe seconds", round(time.perf_counter()-t,2))
+          PY
+      - name: Collection phases (cold coverage, warm coverage, warm no coverage)
+        env:
+          VIBESYS_TEST_SHARD: 1/3
+          COVERAGE_FILE: .coverage.probe
+          COVERAGE_CORE: sysmon
+        run: |
+          for mode in cold-cov warm-cov warm-nocov; do
+            case $mode in *nocov) extra="--no-cov";; *) extra="--cov-report=";; esac
+            /usr/bin/time -f "$mode wall %e s user %U s sys %S s" uv run --no-sync python -m pytest --collect-only -q -n0 -p no:cacheprovider $extra 2>&1 | grep -E "tests collected| wall "
+          done
+      - name: Real shard run with CPU samples
+        env:
+          VIBESYS_TEST_SHARD: 1/3
+          COVERAGE_FILE: .coverage.shard-1
+          COVERAGE_CORE: sysmon
+        run: |
+          (vmstat -n 2 | while read -r line; do echo "$(date +%s) $line"; done > vmstat.log) &
+          start=$(date +%s)
+          echo "run start $start"
+          uv run --no-sync python -u -m pytest -v -n ${{ matrix.workers }} --dist loadgroup --durations=25 --cov-report= 2>&1 | while IFS= read -r l; do echo "$(date +%s.%N | cut -c1-14) $l"; done > pytest.log || true
+          end=$(date +%s)
+          echo "run wall $((end-start))"
+          grep -E "test session starts|workers \[|passed|failed" pytest.log | cut -c1-200 | head -8
+          grep -m1 -E "\[gw[0-9]\] \[" pytest.log | cut -c1-120
+          python3 - <<'PY'
+          rows=[l.split() for l in open("vmstat.log") if l.split()[1].isdigit()]
+          t0=int(rows[0][0])
+          # columns: ts r b swpd free buff cache si so bi bo in cs us sy id wa st
+          import collections
+          buckets=collections.defaultdict(list)
+          for r in rows:
+              t=int(r[0])-t0; us,sy,idl,wa=int(r[13]),int(r[14]),int(r[15]),int(r[16]); buckets[t//30].append((us,sy,idl,wa))
+          for k in sorted(buckets):
+              b=buckets[k]; n=len(b)
+              print(f"t={k*30:4d}s user={sum(x[0] for x in b)/n:5.1f} sys={sum(x[1] for x in b)/n:5.1f} idle={sum(x[2] for x in b)/n:5.1f} wait={sum(x[3] for x in b)/n:5.1f}")
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: probe-${{ matrix.workers }}
+          path: |
+            pytest.log
+            vmstat.log
