@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from vs_core.api import (
+    DEADLINE_STOP,
     ContractError,
     ControlId,
     ControlInput,
@@ -101,7 +102,21 @@ the test, and propagates."""
 
 
 class StepLoopHosting:
-    """Hosts on the step loop over a run.log kept in memory."""
+    """Hosts on the step loop over a run.log kept in memory.
+
+    ``stop_grace_s`` is the host's bound on a stop: the production host (``bounded_stop``) cancels
+    the loop that long after the operator's or the environment's stop reached it, unless the run
+    ended first, and the run is then left as a crash leaves it (no end in the log). None, the
+    default, gives a stopped host no bound, which is a stop the host never escalates; the
+    deadline's own stop never has one, because core delivers it and not the control channel.
+    """
+
+    def __init__(self, stop_grace_s: float | None = None) -> None:
+        """Host with the production host's stop bound, or with none."""
+        if stop_grace_s is not None and not (math.isfinite(stop_grace_s) and stop_grace_s > 0):
+            message = f"a stop grace is a positive finite number of seconds, got {stop_grace_s!r}"
+            raise ValueError(message)
+        self._stop_grace_s = stop_grace_s
 
     def new_store(self) -> Store:
         """A run.log that tells its watcher about each record it takes."""
@@ -119,7 +134,7 @@ class StepLoopHosting:
         records = outside.store
         if not isinstance(records, RecordingRecords):
             raise WrongStoreError(records)
-        host = _Host(outside, records, options)
+        host = _Host(outside, records, options, self._stop_grace_s)
         started_at = records.last_clock if records.records else clock_at
         clock = VirtualClock(started_at)
         run = run_virtual(clock, host.run(clock, watcher, patience))
@@ -175,11 +190,16 @@ class _Host:
     """One process over the outside world: its log, search, operator input and runner."""
 
     def __init__(
-        self, outside: OutsideWorld, records: RecordingRecords, options: HostOptions
+        self,
+        outside: OutsideWorld,
+        records: RecordingRecords,
+        options: HostOptions,
+        stop_grace_s: float | None,
     ) -> None:
         self._outside = outside
         self._records = records
         self._options = options
+        self._stop_grace_s = stop_grace_s
         self._decisions: list[Any] = []
         self._journal = Journal()
         self._inputs: CoreInputs | None = None
@@ -250,7 +270,7 @@ class _Host:
         )
         halted: DispatchCapExceededError | StepLoopStalledError | None = None
         try:
-            await self._until(loop, clock, patience)
+            await self._until(loop, clock, patience, handle, self._stop_grace_s)
         except (DispatchCapExceededError, StepLoopStalledError) as stopped:
             halted = stopped
         finally:
@@ -288,12 +308,22 @@ class _Host:
 
     @staticmethod
     async def _until(
-        loop: asyncio.Future[RunRest], clock: VirtualClock, patience: float | None
+        loop: asyncio.Future[RunRest],
+        clock: VirtualClock,
+        patience: float | None,
+        handle: _HostHandle,
+        stop_grace_s: float | None,
     ) -> None:
-        """Wait for the loop, or give up on it after ``patience`` virtual seconds."""
+        """Wait for the loop, or give up on it after ``patience`` virtual seconds.
+
+        A stop the control channel took (`_HostHandle.stop_reached`) bounds the wait too: the host
+        cancels the loop ``stop_grace_s`` after it, as ``bounded_stop`` cancels the block.
+        """
         waits: set[asyncio.Future[Any]] = {loop}
         if patience is not None:
             waits.add(asyncio.ensure_future(clock.sleep(patience)))
+        if stop_grace_s is not None:
+            waits.add(asyncio.ensure_future(_stop_outlives(handle, clock, stop_grace_s)))
         await asyncio.wait(waits, return_when=asyncio.FIRST_COMPLETED)
         for wait in waits - {loop}:
             wait.cancel()
@@ -358,6 +388,8 @@ class _HostHandle:
         self.serving: Serving | None = None
         """What the world serves this host with, once the host's inputs exist (`ServingWorld`)."""
         self._timers: list[asyncio.Future[None]] = []
+        self.stop_reached = asyncio.Event()
+        """Set once a stop reached this host through the control channel (`_is_channel_stop`)."""
         self.held_until = -math.inf
         """The virtual time until which the provider's quota holds every turn in its call."""
 
@@ -392,6 +424,27 @@ class _HostHandle:
         if self.inputs is None:
             raise HostNotOpenError
         self.inputs.offer(event)
+        if _is_channel_stop(event):
+            self.stop_reached.set()
+
+
+def _is_channel_stop(event: CoreEvent) -> bool:
+    """Whether ``event`` is a stop that reaches the host through its control channel.
+
+    The operator's stops and the run environment's do, and the host bounds each with its stop
+    grace. The deadline's does not: core delivers it itself, so no grace is armed for it.
+    """
+    return (
+        isinstance(event, RunControlEvent)
+        and event.control.action == "stop"
+        and event.control.control_id.root.partition(":")[0] != DEADLINE_STOP
+    )
+
+
+async def _stop_outlives(handle: _HostHandle, clock: VirtualClock, grace_s: float) -> None:
+    """Return once a stop has been in force for ``grace_s`` seconds: the host cancels the run then."""
+    await handle.stop_reached.wait()
+    await clock.sleep(grace_s)
 
 
 class HostNotOpenError(RuntimeError):
