@@ -875,8 +875,8 @@ class RunControlBridge:
         """Answer the controls core committed or ``refused``, and report a pause once it landed.
 
         Call it once the shell has committed, or refused, every event the polls before it
-        emitted, ``refused`` being the controls core refused (``CoreRuntime.take_refused``),
-        and once more before the run loop exits. What core holds is then what it recorded,
+        emitted, ``refused`` being the controls core refused, and once more before the run loop
+        exits. What core holds is then what it recorded,
         so the bridge's record of the pause starts again from it. An inbox request core
         holds is settled now, an operator action core holds is reported applied, and every
         control core refused is refused (``_refuse``) with core's reason, so none waits for a

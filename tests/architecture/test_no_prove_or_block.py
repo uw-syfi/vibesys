@@ -55,11 +55,29 @@ DELETED_MODULES: tuple[str, ...] = (
     "vs_runtime._replay_tools",
     "vs_runtime._replay_wiring",
     "vs_runtime._replay_workspaces",
+    # The old shell runtime, which production left for the step loop (#3541, #3475 part 6b).
+    "vs_runtime._core_loop",
+    "vs_runtime._core_publications",
+    "vs_runtime._core_run",
+    "vs_runtime._core_wiring",
 )
 """Dotted module paths that no file under ``src/`` or ``libs/*/src`` may provide, as a module or
 as a package (a listed ``a.b`` also forbids ``a.b.c``)."""
 
-DELETED_SYMBOLS: tuple[str, ...] = ("ReplayUnknown",)
+DELETED_SYMBOLS: tuple[str, ...] = (
+    "ReplayUnknown",
+    # The old shell runtime (#3475 part 6b).
+    "CoreRunHost",
+    "CoreRuntime",
+    "CoreRuntimeBindings",
+    "JournalPublicationDelivery",
+    "LeaseUnavailableError",
+    "ProductionCoreTransitions",
+    "RunStalledError",
+    "core_bindings",
+    "drive_core",
+    "start_core",
+)
 """Names that no file under ``src/`` or ``libs/*/src`` may define or import."""
 
 _ROOT = Path(__file__).resolve().parents[2]
