@@ -397,4 +397,5 @@ job = "cli"
 # The contract the CLI is generated from selects its checks too, so an edit to it cannot leave the
 # Go bindings unvetted. The proto job checks that the bindings are current.
 roots = ["cli", "proto/vibesys/cli"]
-files = ["buf.gen.cli.yaml"]
+# The release workflow builds and publishes what these checks build, so a change to it runs them too.
+files = ["buf.gen.cli.yaml", ".github/workflows/cli-release.yml"]

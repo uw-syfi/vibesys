@@ -61,3 +61,30 @@ version in the PyPI project UI with a precise reason, mark the GitHub release as
 affected, fix forward, increment the version, and publish a new release. Yanking
 keeps exact pins available while preventing ordinary dependency resolution from
 selecting the bad version.
+
+## vibesys-cli releases
+
+The Go binary `vibesys-cli` is released separately from the wheel, by
+`.github/workflows/cli-release.yml`, and its releases never reach PyPI: `publish.yml` skips a
+release whose tag starts with `cli-`. Users install it with `cli/install.sh` and update it with
+`vibesys-cli upgrade` ([cli/README.md](https://github.com/uw-syfi/vibesys/blob/main/cli/README.md)).
+
+1. Merge the change to `main`. The workflow refuses a tag whose commit is not contained in it.
+2. Push a tag `cli-v<version>`, for example `cli-v0.2.0`. The version is whatever the tag says;
+   there is no version file to update. A suffix (`cli-v0.2.0-rc.1`) makes a pre-release.
+3. The workflow checks the module, builds the four binaries, attests them, and publishes the release
+   for that tag. For a stable version that is the newest, it then points the rolling tag
+   `cli-latest` at the same commit and replaces that release's assets.
+
+Two releases of this repository must not share GitHub's "latest" marker, which goes to the most
+recently created release that is not a pre-release. The Python releases keep it. Every `vibesys-cli`
+release is created with `--latest=false`, and `install.sh` and `vibesys-cli upgrade` read the
+`cli-latest` tag instead, so a Python release made after a CLI release cannot redirect them.
+
+`cli-latest` is moved, which a repository setting called immutable releases forbids. It is off
+today. If it is turned on, the alias step must delete and recreate the `cli-latest` release instead.
+
+Recovery follows the wheel's rule: do not rewrite a published version. If a binary is bad, publish
+a higher version; the alias then moves to it and `vibesys-cli upgrade` follows. Between two assets
+of the alias being replaced, a reader can see new binaries with old checksums for a moment. Both
+`install.sh` and `upgrade` refuse that mix and can simply be run again.
