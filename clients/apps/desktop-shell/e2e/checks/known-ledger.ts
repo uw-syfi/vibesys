@@ -19,7 +19,7 @@ import {report} from './screen-check.js';
  * Where the owners record what their screens matched. Playwright empties its output directory when
  * a run starts, so a run reads only what its own screens wrote.
  */
-export const LEDGER_DIRECTORY = fileURLToPath(
+const LEDGER_DIRECTORY = fileURLToPath(
   new URL('../../test-results/known-ledger/', import.meta.url),
 );
 
