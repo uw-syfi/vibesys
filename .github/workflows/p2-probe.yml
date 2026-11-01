@@ -5,9 +5,14 @@ on:
     branches: [ci/p2-probe]
 
 jobs:
-  bytecode:
+  order:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        order: [on, off]
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
@@ -16,25 +21,31 @@ jobs:
           cache-dependency-glob: uv.lock
       - run: uv python install 3.14
       - run: uv sync --dev --python 3.14
+      - name: Control uses main's sharding module
+        if: matrix.order == 'off'
+        run: git show origin/main:tests/support/sharding.py > tests/support/sharding.py || (git fetch origin main && git show origin/main:tests/support/sharding.py > tests/support/sharding.py)
       - name: Hardware
         run: lscpu | grep -E "Model name"
-      - name: Cold collection, parallel precompile, and what each saves
+      - name: Shard
         env:
-          VIBESYS_TEST_SHARD: 1/3
-          COVERAGE_FILE: .coverage.probe
+          VIBESYS_TEST_SHARD: ${{ matrix.shard }}/3
+          VIBESYS_SHARD_DURATIONS: tests/support/probe_durations.json
+          COVERAGE_FILE: .coverage.shard
           COVERAGE_CORE: sysmon
         run: |
-          clean() { find . -name __pycache__ -type d -not -path './clients/*' -prune -exec rm -rf {} + ; }
-          collect() { /usr/bin/time -f "$1 wall %e s" uv run --no-sync python -m pytest --collect-only -q -n0 -p no:cacheprovider --cov-report= 2>&1 | grep -E "tests collected| wall "; }
-          clean; collect "A cold"
-          collect "A warm"
-          clean
-          /usr/bin/time -f "precompile (compileall -j4 venv+project) wall %e s" .venv/bin/python -m compileall -q -j 4 .venv/lib src libs sdk scripts tests packaging conftest.py > /dev/null
-          collect "B after precompile (project and site-packages, no pytest rewrite)"
-          collect "B warm"
-          clean
-          /usr/bin/time -f "precompile venv only wall %e s" .venv/bin/python -m compileall -q -j 4 .venv/lib > /dev/null
-          collect "C after venv-only precompile"
-          du -sk $(find . -name __pycache__ -type d -not -path './clients/*' -not -path './.venv/*') | awk '{s+=$1} END {print "project pycache KB", s}'
-          du -sk $(find .venv -name __pycache__ -type d) | awk '{s+=$1} END {print "venv pycache KB", s}'
-          tar --zstd -cf /tmp/pyc.tzst $(find . -name __pycache__ -type d -not -path './clients/*') && ls -la /tmp/pyc.tzst | awk '{print "compressed bytes", $5}'
+          uv run --no-sync python -u -m pytest -v -n auto --dist loadgroup --durations=25 --cov-report= -p no:randomly 2>&1 | while IFS= read -r l; do echo "$(date +%s.%N | cut -c1-14) $l"; done > pytest.log || true
+          python3 - <<'PY'
+          import re
+          L=open("pytest.log",errors="replace").read().splitlines()
+          res=sorted((float(l.split()[0]),l) for l in L if re.match(r"^\d+\.\d+ \[gw\d\] \[",l))
+          first,last=res[0][0],res[-1][0]
+          lastw={}
+          for t,l in res: lastw[re.search(r"\[(gw\d)\]",l).group(1)]=t
+          print("order=${{ matrix.order }} shard=${{ matrix.shard }} first-result->last-result %.0f s"%(last-first))
+          print("idle per worker before the last result:",sorted(round(last-t) for t in lastw.values()))
+          print([l for l in L if re.search(r"(passed|failed).* in [0-9.]+s",l)][-1][:160])
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: order-${{ matrix.order }}-${{ matrix.shard }}
+          path: pytest.log
