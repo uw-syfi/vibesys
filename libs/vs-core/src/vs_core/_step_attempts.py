@@ -51,8 +51,9 @@ def open_record(state: CoreState, tag: RequestId) -> RequestRecord:
 def ended_by_core(state: CoreState, tag: RequestId) -> bool:
     """Whether core ended the step ``tag`` itself, so a record of its attempt is only history.
 
-    A clock tick past a step's limit ends it in the ledger while the loop's attempt still runs.
-    The step has its result; the attempt's end is recorded, and nothing it reports is applied. A
+    `decide` ends a step at its limit (`Settle(Cancelled(DEADLINE))`) while the loop's attempt may
+    still run. The step has its result; the attempt's end is recorded, and nothing it reports is
+    applied. A
     step the log never held is not this: it is refused, as a log other code wrote.
     """
     rows = state.records.find(tag)
@@ -66,9 +67,9 @@ def ended_by_core(state: CoreState, tag: RequestId) -> bool:
 
 
 def ended_unconcluded(state: CoreState) -> tuple[RequestRecord, ...]:
-    """The steps core ended itself (at their limit) that still hold the run's closure.
+    """The steps `decide` ended at their limit that still hold the run's closure.
 
-    The kernel ends a step whose limit passes under a clock input, whatever its runner is doing.
+    A step whose limit passes ends whatever its runner is doing.
     The step has its result, but a job or a turn it owns is released, and the run closes, only
     when the runner's end of the attempt concludes it (`concluded`), as it does any step.
     """
@@ -180,7 +181,7 @@ def _sent(record: RequestRecord) -> bool:
 def commands_lapsed(state: CoreState) -> CoreState:
     """``state`` with every inspection, cancel and block that is still open lapsed.
 
-    The kernel registers one when a limit passes under a clock input, for an executor to answer. A
+    Only a state saved before the step loop holds one (the kernel no longer registers any). A
     log has none: a step whose limit passed is ended by the record of its cancel, and one that
     must run again does so, so a command nothing sends would stay open and keep the run from
     parking, ending or coming to rest.
