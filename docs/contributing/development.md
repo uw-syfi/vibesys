@@ -346,6 +346,11 @@ one does not), and `ci-budget` checks the run's execution time against the stage
 `tests/quality/test_ci_stages.py` fails when a job runs on pull requests and nowhere else, or when
 `Required PR CI` does not wait for a job.
 
+When a Python shard fails in the merge queue, `classify-failures` reruns only the tests it failed,
+once, on the main the queue branched from, and labels each in its job summary: `fails on main
+(flaky or broken main)` or `fails only with this PR`. It explains the failure and changes nothing:
+the pull request's result is not retried and the queue still ejects it.
+
 `test-impact` runs `scripts/impacted_tests.py` through the `python_impact_tests` check group: the
 test files that import, directly or through other first-party modules, a module the change
 touches, closest and cheapest first, within 100 s of tests on 4 workers. It reports how many

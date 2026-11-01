@@ -47,6 +47,7 @@ REQUIRED_JOBS = {
     ("nightly.yml", "full-depth"),
     ("nightly.yml", "real-tiers"),
     ("test.yml", "agent-image"),
+    ("test.yml", "classify-failures"),
     ("test.yml", "clients-quality"),
     ("test.yml", "native-evaluator-examples"),
     ("test.yml", "python-checks"),
