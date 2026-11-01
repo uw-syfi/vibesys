@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-from . import _host_epochs, _request_ledger, _request_recovery, _turn_holds
+from . import _host_epochs, _request_ledger, _turn_holds
 from ._ledger_compaction import spent_answer
 from .types.kernel import AreaChange
 from .types.records import (
@@ -14,9 +14,6 @@ from .types.records import (
     DispatchAuthorized,
     HostRenewed,
     OperationRetireRequested,
-    RecoveryCheckWaitLapsed,
-    RecoveryReady,
-    RecoveryStarted,
     RequestObserved,
     RequestPrepared,
     RequestUndispatchable,
@@ -25,7 +22,7 @@ from .types.records import (
 )
 
 if TYPE_CHECKING:
-    from .types.kernel import RecordsContext, RunState
+    from .types.kernel import RecordsContext
     from .types.records import RecordsEvent, RecordsState
 
 
@@ -53,13 +50,10 @@ EVENT_TO_SUBAREA: Mapping[type[RecordsEvent], Reducer] = MappingProxyType(
         DispatchAuthorized: _request_ledger.advance,
         RequestObserved: _observation,
         OperationRetireRequested: _request_ledger.advance,
-        RecoveryStarted: _request_recovery.advance,
-        RecoveryReady: _request_recovery.advance,
         RetryDue: _request_ledger.advance,
         RequestUndispatchable: _request_ledger.advance,
         BlockedRecordStalled: _request_ledger.advance,
         HostRenewed: _host_epochs.renewed,
-        RecoveryCheckWaitLapsed: _request_recovery.advance,
         TurnHeld: _turn_holds.held,
     }
 )
@@ -71,8 +65,3 @@ def advance_record(
     """Route closed events to their owners, sharing observations atomically."""
     reducer: Reducer = EVENT_TO_SUBAREA[type(event)]
     return reducer(state, context, event)
-
-
-def open_host_epoch(state: RecordsState, run: RunState, event: RecoveryStarted) -> RecordsState:
-    """The host log with the epoch ``event`` opens, and open limits moved past the downtime."""
-    return _request_recovery.open_host_epoch(state, run, event)

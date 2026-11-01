@@ -368,27 +368,6 @@ def wait_deadline(state: EvaluationState, context: EvaluationContext, wait: Cont
     return min(bounds, key=lambda bound: bound.at, default=Bound(wait.deadline_at, WaitEnd.LIMIT))
 
 
-def credit_downtime(state: EvaluationState, run: RunState, credit: float) -> EvaluationState:
-    """Every open wait (waiting or parked, not frozen) credited ``credit`` seconds of downtime.
-
-    While no host runs nothing waits, so a wait's limit moves past the downtime exactly as an
-    open request record's does (``open_host_epoch``); ``_wait_clock`` caps it at the run
-    deadline the same way. A terminal run's waits are already ended.
-    """
-    if credit <= 0 or run.status == RunStatus.TERMINAL:
-        return state
-    open_phases = (ContinuationPhase.WAITING, ContinuationPhase.PARKED)
-    continuations = tuple(
-        row.model_copy(update={"downtime_credit": row.downtime_credit + credit})
-        if row.phase in open_phases and row.timeout is None
-        else row
-        for row in state.continuations
-    )
-    if continuations == state.continuations:
-        return state
-    return state.model_copy(update={"continuations": continuations})
-
-
 def bounded_wait(run: RunState, wait: Continuation) -> Continuation:
     """``wait`` with its deadline bounded to the run, the form every gate and row sees."""
     deadline = bound_to_run(run, wait.deadline_at)

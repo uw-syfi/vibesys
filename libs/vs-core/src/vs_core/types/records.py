@@ -826,31 +826,12 @@ class RequestObserved(OutcomeValue):
         return bind_outcome(self, info)
 
 
-class RecoveryStarted(Value):
-    """Reconcile a replacement writer at ``now_at`` under host authority ``epoch``.
-
-    This input preserves the run and its flow journal. ``EpochResumed`` alone
-    authorizes fresh run authority after an operator Resume.
-    """
-
-    kind: Literal["recovery_started"] = "recovery_started"
-    epoch: Count
-    now_at: Seconds
-
-
 class HostRenewed(Value):
     """The current epoch's host renewed its lease at ``now_at``, so it was alive then."""
 
     kind: Literal["host_renewed"] = "host_renewed"
     epoch: Count
     now_at: Seconds
-
-
-class RecoveryReady(Value):
-    """Current-epoch recovery completion wakes scheduling without unpausing."""
-
-    kind: Literal["recovery_ready"] = "recovery_ready"
-    epoch: Count
 
 
 class RetryDue(Value):
@@ -891,20 +872,6 @@ class BlockedRecordStalled(Value):
     request_id: RequestId
 
 
-class RecoveryCheckWaitLapsed(Value):
-    """Internal signal: nothing a pending recovery check names can still move it.
-
-    Raised by the step at quiescence while recovery waits on the check's target, when every
-    request the check names has ended and every entity it names stopped waiting. What the check
-    waited on may have settled its target meanwhile (a session it waited on became known), so
-    recovery resolves the check again from the current state and names what it waits on now.
-    Never shell input.
-    """
-
-    kind: Literal["recovery_check_wait_lapsed"] = "recovery_check_wait_lapsed"
-    target: RequestId
-
-
 class OperationRetireRequested(Value):
     """Explicit retirement of a registered owned operation, resolved by records."""
 
@@ -939,12 +906,9 @@ type RecordsEvent = Annotated[
     RequestPrepared
     | DispatchAuthorized
     | RequestObserved
-    | RecoveryStarted
-    | RecoveryReady
     | RetryDue
     | RequestUndispatchable
     | BlockedRecordStalled
-    | RecoveryCheckWaitLapsed
     | OperationRetireRequested
     | HostRenewed
     | TurnHeld,

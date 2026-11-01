@@ -4,9 +4,6 @@ import json
 from hashlib import sha256
 from typing import ClassVar, Literal
 
-import pytest
-from hypothesis import given
-from hypothesis import strategies as st
 from pydantic import BaseModel
 
 import vs_core.api as core
@@ -95,15 +92,6 @@ def _recovering(record: core.RequestRecord) -> core.CoreState:
     )
 
 
-def _resolution(state: core.CoreState, identity: core.RequestId) -> str:
-    result = core.step(state, core.RecoveryStarted(epoch=1, now_at=2.0))
-    assert result.state.sessions == state.sessions
-    assert result.state.evaluation == state.evaluation
-    return next(
-        row.resolution for row in result.state.records.recovery.checks if row.target == identity
-    )
-
-
 def _registered_turn(decision_root: str = "decision") -> tuple[core.CoreState, core.RequestRecord]:
     state = core.initial_state()
     scope = core.Scope(owner=state.run.run_id, generation=0)
@@ -182,57 +170,6 @@ def _registered_turn(decision_root: str = "decision") -> tuple[core.CoreState, c
     ), record
 
 
-@pytest.mark.parametrize(
-    "corruption", ["exact", "absent", "rejected", "feedback", "decision", "membership", "lifecycle"]
-)
-def test_registered_reattachment_needs_accepted_exact_origin(corruption: str) -> None:
-    """Rejected or misidentified operation receipts cannot reattach live turns."""
-    state, record = _registered_turn()
-    receipt = state.run.receipts[0]
-    if corruption == "rejected":
-        receipt = receipt.model_copy(
-            update={
-                "feedback": core.Rejected(
-                    decision_id=receipt.decision_id,
-                    code=core.RejectionCode.CAPABILITY,
-                    path=(),
-                    detail="denied",
-                )
-            }
-        )
-    elif corruption == "feedback":
-        receipt = receipt.model_copy(
-            update={
-                "feedback": receipt.feedback.model_copy(
-                    update={"decision_id": core.DecisionId(root="unrelated")}
-                )
-            }
-        )
-    elif corruption == "decision":
-        receipt = receipt.model_copy(update={"decision_id": core.DecisionId(root="unrelated")})
-    elif corruption == "membership":
-        receipt = receipt.model_copy(update={"request_ids": ()})
-    elif corruption == "lifecycle":
-        record = record.model_copy(update={"lifecycle": core.LifecycleClass.IDEMPOTENT_WRITE})
-        state = state.model_copy(
-            update={
-                "records": state.records.model_copy(
-                    update={"records": (record, state.records.records[1])}
-                )
-            }
-        )
-    state = state.model_copy(
-        update={
-            "run": state.run.model_copy(
-                update={"receipts": () if corruption == "absent" else (receipt,)}
-            )
-        }
-    )
-    assert _resolution(state, record.request_id) == (
-        "reattached" if corruption == "exact" else "pending"
-    )
-
-
 def measurement_fixture(
     suffix: str = "candidate",
 ) -> tuple[core.SubmitMeasurement, core.SubmissionBudget]:
@@ -273,38 +210,6 @@ def measurement_fixture(
         receipts=(core.PreparedSubmissionReceipt(request_id=request.request_id, ordinal=1),),
     )
     return request, budget
-
-
-@pytest.mark.parametrize(
-    "field",
-    [
-        "exact",
-        "candidate",
-        "purpose",
-        "evaluator_digest",
-        "workload_digest",
-        "environment_digest",
-        "recipe_digest",
-    ],
-)
-def test_budget_request_id_alone_cannot_prove_measurement_reattachment(field: str) -> None:
-    request, budget = measurement_fixture()
-    if field != "exact":
-        wrong = "baseline" if field == "purpose" else "different"
-        if field == "candidate":
-            wrong = core.RevisionRef(revision_id=core.RevisionId(root="other"), digest="other")
-        budget = budget.model_copy(
-            update={"identity": budget.identity.model_copy(update={field: wrong})}
-        )
-    record = _record(request, core.LifecycleClass.OWNED_JOB)
-    state = _recovering(record).model_copy(
-        update={
-            "evaluation": core.EvaluationState(submission_budgets=(budget,)),
-        }
-    )
-    assert _resolution(state, record.request_id) == (
-        "reattached" if field == "exact" else "pending"
-    )
 
 
 def cleanup_fixture() -> tuple[core.CoreState, core.RequestRecord, core.OperationDescriptor]:
@@ -374,37 +279,6 @@ def cleanup_fixture() -> tuple[core.CoreState, core.RequestRecord, core.Operatio
         ),
         record,
         descriptor,
-    )
-
-
-@pytest.mark.parametrize(
-    "field",
-    ["exact", "request_schema", "outcome_schema", "inspect", "offered_revision", "absent_offer"],
-)
-def test_registered_prepared_cleanup_needs_the_exact_descriptor(field: str) -> None:
-    state, record, descriptor = cleanup_fixture()
-    retained = descriptor
-    offered = descriptor
-    if field in ("request_schema", "outcome_schema"):
-        retained = retained.model_copy(update={field: core.SchemaRef(name="foreign", version=2)})
-    elif field == "inspect":
-        retained = retained.model_copy(update={"inspect": False})
-    elif field == "offered_revision":
-        offered = offered.model_copy(update={"revision_authority": core.RevisionAuthority.NONE})
-    state = state.model_copy(
-        update={
-            "registry": (retained,),
-            "run": state.run.model_copy(
-                update={
-                    "capabilities": core.Capabilities(
-                        operations=() if field == "absent_offer" else (offered,)
-                    ),
-                }
-            ),
-        }
-    )
-    assert _resolution(state, record.request_id) == (
-        "safe-prepared" if field == "exact" else "pending"
     )
 
 
@@ -489,61 +363,4 @@ def registered_measurement_fixture(
         ),
         record,
         job,
-    )
-
-
-@pytest.mark.parametrize(
-    "field",
-    [
-        "exact",
-        "absent",
-        "candidate",
-        "purpose",
-        "evaluator_digest",
-        "workload_digest",
-        "environment_digest",
-        "recipe_digest",
-    ],
-)
-@given(suffix=st.text(alphabet="abc123", min_size=1, max_size=12))
-def test_registered_measurement_reattachment_requires_owning_normalization(
-    field: str, suffix: str
-) -> None:
-    """Matching resource ownership cannot substitute a different measurement payload."""
-    state, record, job = registered_measurement_fixture(suffix)
-    assert job.expected_measurement is not None
-    expectation = job.expected_measurement
-    if field == "absent":
-        expectation = None
-    elif field != "exact":
-        wrong = "baseline" if field == "purpose" else "foreign"
-        if field == "candidate":
-            wrong = core.RevisionRef(revision_id=core.RevisionId(root="foreign"), digest="foreign")
-        expectation = expectation.model_copy(update={field: wrong})
-    job = job.model_copy(update={"expected_measurement": expectation})
-    state = state.model_copy(update={"evaluation": core.EvaluationState(registered_jobs=(job,))})
-    assert _resolution(state, record.request_id) == (
-        "reattached" if field == "exact" else "pending"
-    )
-
-
-@pytest.mark.parametrize("field", ["exact", "duplicate_invocation", "scope", "episode", "resource"])
-def test_reattached_invocation_has_unique_exact_retained_source(field: str) -> None:
-    state, record = _registered_turn()
-    invocation = state.sessions.invocations[0]
-    assert record.observation is not None
-    previous = record.observation
-    if field == "scope":
-        previous = previous.model_copy(
-            update={"scope": previous.scope.model_copy(update={"generation": 1})}
-        )
-    elif field == "episode":
-        previous = previous.model_copy(update={"admission_id": core.DecisionId(root="foreign")})
-    elif field == "resource":
-        previous = previous.model_copy(update={"resource_id": core.ResourceId(root="foreign")})
-    invocation = invocation.model_copy(update={"observation": previous})
-    invocations = (invocation, invocation) if field == "duplicate_invocation" else (invocation,)
-    state = state.model_copy(update={"sessions": core.SessionsState(invocations=invocations)})
-    assert _resolution(state, record.request_id) == (
-        "reattached" if field == "exact" else "pending"
     )

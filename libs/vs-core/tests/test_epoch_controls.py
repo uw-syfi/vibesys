@@ -60,35 +60,6 @@ def test_resume_accepts_every_prior_ending(outcome: str, source: str) -> None:
 
 
 @pytest.mark.regression
-@example(actions=["pause", "pause_now", "resume", "pause"])
-@given(actions=st.lists(st.sampled_from(["pause", "pause_now", "resume"]), min_size=1, max_size=40))
-def test_controls_are_fenced_to_their_epoch(actions: list[_Action]) -> None:
-    state = core.initial_state()
-    for index, action in enumerate(actions):
-        request = control(action, index)
-        if action == "resume" and state.run.status == core.RunStatus.PARKED:
-            state = core.step(
-                state,
-                core.EpochResumed(epoch=state.records.recovery.epoch + 1, now_at=float(index)),
-            ).state
-        refusal = core.control_refusal(state, request)
-        if refusal is not None:
-            assert state.run.status == core.RunStatus.PARKED
-            continue
-        transition = core.step(state, core.RunControlEvent(control=request, now_at=float(index)))
-        state = transition.state
-        assert state.run.result is None
-        assert not any(isinstance(event, core.Failed) for event in transition.events)
-        if action == "resume":
-            assert state.run.status == core.RunStatus.RUNNING
-            assert state.run.park is None
-            assert not state.scheduling.admission_closed
-        else:
-            assert state.run.status == core.RunStatus.PARKED
-            assert state.scheduling.admission_closed
-
-
-@pytest.mark.regression
 @example(immediate=False, independent=False)
 @given(immediate=st.booleans(), independent=st.booleans())
 def test_pause_preserves_only_an_admitted_logical_turns_successors(
@@ -198,87 +169,6 @@ def test_pause_now_ends_a_dispatch_that_never_returns_a_cleanup_bound_after_its_
     # The drain capped the turn at the cleanup bound past its deadline, and the loop ended it
     # there, which is what let the run park.
     assert retained.phase is core.RequestPhase.COMPLETED
-
-
-@pytest.mark.regression
-@example(epoch=1, immediate=False)
-@given(epoch=st.integers(min_value=1, max_value=100), immediate=st.booleans())
-def test_writer_recovery_keeps_pause_authority_until_operator_resume(
-    epoch: int, *, immediate: bool
-) -> None:
-    state = core.step(core.initial_state(), core.RecoveryStarted(epoch=epoch, now_at=0)).state
-    state = core.step(
-        state,
-        core.RunControlEvent(control=control("pause_now" if immediate else "pause", 1), now_at=1),
-    ).state
-    assert state.run.status is core.RunStatus.PARKED
-    park = state.run.park
-    assert park is not None
-    for recovered_epoch in (epoch + 1, epoch + 2):
-        recovered = core.step(state, core.RecoveryStarted(epoch=recovered_epoch, now_at=2))
-        assert recovered.state.run.status is core.RunStatus.PARKED
-        assert recovered.state.run.controls == state.run.controls
-        assert recovered.state.run.park is not None
-        assert recovered.state.run.park.control_id == park.control_id
-        assert recovered.state.run.park.epoch == recovered_epoch
-        assert recovered.state.scheduling.admission_closed
-        assert not any(isinstance(event, core.StopLiftRecorded) for event in recovered.events)
-        state = recovered.state
-    resumed = core.step(state, core.EpochResumed(epoch=epoch + 3, now_at=3))
-    assert resumed.state.run.status is core.RunStatus.RUNNING
-    assert resumed.state.run.park is None
-    assert [control.action for control in resumed.state.run.controls] == ["resume"]
-    assert not resumed.state.scheduling.admission_closed
-    assert any(
-        isinstance(event, core.StopLiftRecorded) and event.new_epoch for event in resumed.events
-    )
-
-
-@pytest.mark.regression
-@example(epoch=1, outcome="success")
-@example(epoch=1, outcome="cancelled")
-@given(
-    epoch=st.integers(min_value=1, max_value=100),
-    outcome=st.sampled_from(["success", "failure", "cancelled", "blocked"]),
-)
-def test_writer_recovery_keeps_the_completed_epoch_and_never_lifts_its_stop(
-    epoch: int, outcome: str
-) -> None:
-    state = core.step(core.initial_state(), core.RecoveryStarted(epoch=epoch, now_at=0)).state
-    ended = state.model_copy(
-        update={
-            "run": state.run.model_copy(
-                update={
-                    "status": core.RunStatus.TERMINAL,
-                    "result": core.RunResultProposal.model_validate(
-                        {"outcome": outcome, "reason": "done"}
-                    ),
-                    "controls": (
-                        core.ControlInput(
-                            control_id=core.ControlId(root="ending"),
-                            action="stop",
-                            mode=core.StopMode.DRAIN,
-                        ),
-                    ),
-                }
-            )
-        }
-    )
-    assert ended.run.status is core.RunStatus.TERMINAL
-    for recovered_epoch in (epoch + 1, epoch + 2):
-        recovered = core.step(ended, core.RecoveryStarted(epoch=recovered_epoch, now_at=2))
-        assert recovered.state.run.status is core.RunStatus.TERMINAL
-        assert recovered.state.run.result == ended.run.result
-        assert recovered.state.run.controls == ended.run.controls
-        assert recovered.state.run.receipts == ended.run.receipts
-        assert not recovered.requests
-        assert not any(isinstance(event, core.StopLiftRecorded) for event in recovered.events)
-        ended = recovered.state
-    resumed = core.step(ended, core.EpochResumed(epoch=epoch + 3, now_at=3))
-    assert resumed.state.run.status is core.RunStatus.RUNNING
-    assert resumed.state.run.result is None
-    assert [control.action for control in resumed.state.run.controls] == ["resume"]
-    assert core.requested_stop_mode(resumed.state.run) is None
 
 
 def test_a_parked_epoch_records_the_delivery_of_a_steer_it_already_holds() -> None:

@@ -6,10 +6,11 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_core.api import initial_state
 from vs_sim.api.testing import examples
 
+from .records_fixtures import fixture_digest, pending_record
 from .test_pending_suspension_contract import _invocation, _pending
-from .test_request_recovery import fixture_digest, initial_state, pending_record
 
 OWNER = core.AttemptId(root="attempt")
 

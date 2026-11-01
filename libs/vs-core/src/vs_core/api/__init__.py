@@ -528,7 +528,6 @@ if TYPE_CHECKING:
         DecisionCompleted,
         DecisionReceipt,
         DecisionSubmitted,
-        EpochResumed,
         EvaluationContext,
         ProposalSubmitted,
         RecordsContext,
@@ -581,10 +580,7 @@ if TYPE_CHECKING:
         RecordsState,
         RecoveryBarrier,
         RecoveryCheck,
-        RecoveryCheckWaitLapsed,
         RecoveryPhase,
-        RecoveryReady,
-        RecoveryStarted,
         RegisteredOperationRequest,
         ReissueProof,
         Request,
@@ -992,7 +988,7 @@ _MODULES: dict[str, str] = {
             "vs_core.types.kernel",
             (
                 "AreaChange AreaContext AttemptsContext ControlChanged CoreEvent CoreState CoreView "
-                "DecisionCompleted DecisionReceipt DecisionSubmitted EpochResumed EvaluationContext "
+                "DecisionCompleted DecisionReceipt DecisionSubmitted EvaluationContext "
                 "ProposalSubmitted RecordsContext RunControlEvent RunEnded RunEnvelope RunState "
                 "RunSummary SchedulingContext SessionsContext SettlementContext Signal "
                 "StopLiftRecorded StrategyEvent Transition "
@@ -1014,7 +1010,7 @@ _MODULES: dict[str, str] = {
                 "HostEpoch HostRenewed InspectRequest OperationResult OperationRetireRequested "
                 "OperationView Outbound "
                 "ReconciliationRequest RecordsEvent RecordsState RecoveryBarrier RecoveryCheck "
-                "RecoveryCheckWaitLapsed RecoveryPhase RecoveryReady RecoveryStarted "
+                "RecoveryPhase "
                 "RegisteredOperationRequest ReissueProof Request RequestObserved RequestPhase "
                 "RequestPrepared RequestRecord RequestUndispatchable RetryDue TargetObservation "
                 "TurnHeld inherit within "
@@ -1321,7 +1317,6 @@ __all__ = [
     "EndReason",
     "EnsureSession",
     "EnsureWorkspace",
-    "EpochResumed",
     "EvaluationChange",
     "EvaluationContext",
     "EvaluationEvent",
@@ -1504,10 +1499,7 @@ __all__ = [
     "RecordsState",
     "RecoveryBarrier",
     "RecoveryCheck",
-    "RecoveryCheckWaitLapsed",
     "RecoveryPhase",
-    "RecoveryReady",
-    "RecoveryStarted",
     "ReducerTrace",
     "RegisterAttempt",
     "RegisteredJobObserved",

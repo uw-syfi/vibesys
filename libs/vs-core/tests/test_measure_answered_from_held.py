@@ -21,7 +21,7 @@ from vs_sim.api.testing import examples
 
 from .test_measurement_comparison import ended_with
 from .test_measurement_reuse import revision
-from .test_measurements import plan, requested, roundtrip, transition
+from .test_measurements import plan, requested
 
 type Purpose = Literal["baseline", "official"]
 type Ending = Literal["passed", "failed", "running"]
@@ -115,29 +115,3 @@ def test_a_measurement_core_accepts_has_a_request_or_an_answer_addressed_to_it(
         state = step.state
         if started and ending != "running":
             state = ended_with(state, started[0], 100.0, failed=ending == "failed")
-
-
-def test_a_run_saved_before_the_answer_was_addressed_has_it_given_when_it_resumes() -> None:
-    """A decision saved accepted, with no request and no completion, is answered on resume.
-
-    This is the shape of a run a host saved before decisions answered at once were addressed:
-    its flow waits on an answer nobody sends. Recovery asks core again, and core answers from
-    what it holds; once answered, a later resume gives nothing more.
-    """
-    state, first = measured_input(failed=False)
-    again = requested(state, identity="measure.2", measurement=plan(submitted_at=2.0))
-    saved_receipts = tuple(
-        r.model_copy(update={"completion": None}) if r.decision_id.root == "measure.2" else r
-        for r in again.state.run.receipts
-    )
-    saved = again.state.model_copy(
-        update={"run": again.state.run.model_copy(update={"receipts": saved_receipts})}
-    )
-
-    resumed = transition(roundtrip(saved), core.RecoveryStarted(epoch=2, now_at=50.0))
-    (answer,) = answers(resumed.state, resumed, "measure.2")
-    assert answer.result.source_request == first.request_id
-    assert not [r for r in resumed.requests if isinstance(r, core.SubmitMeasurement)]
-
-    later = transition(roundtrip(resumed.state), core.RecoveryStarted(epoch=3, now_at=60.0))
-    assert answers(later.state, later, "measure.2") == [], "answered once; it stays answered"

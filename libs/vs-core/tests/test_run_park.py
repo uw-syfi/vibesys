@@ -3,7 +3,7 @@
 from typing import Literal
 
 import pytest
-from hypothesis import example, given
+from hypothesis import given
 from hypothesis import strategies as st
 
 import vs_core.api as core
@@ -147,57 +147,6 @@ def test_pause_drain_admits_only_an_executing_turns_evaluation_dependency(
         assert authorized.state.run.status is core.RunStatus.DRAINING
 
 
-@pytest.mark.regression
-@example(epoch=1, immediate=False)
-@given(epoch=st.integers(min_value=1, max_value=100), immediate=st.booleans())
-def test_successor_resume_clears_an_interrupted_drain(epoch: int, *, immediate: bool) -> None:
-    state, _ = write_turn_world(access=core.Access.READ_ONLY)
-    state = state.model_copy(
-        update={
-            "records": state.records.model_copy(
-                update={"recovery": state.records.recovery.model_copy(update={"epoch": epoch})}
-            )
-        }
-    )
-    paused = core.step(
-        state,
-        core.RunControlEvent(
-            control=core.ControlInput(
-                control_id=core.ControlId(root="pause-old"),
-                action="pause_now" if immediate else "pause",
-                owner=None if immediate else core.PauseOwner.OPERATOR,
-            ),
-            now_at=state.run.now_at,
-        ),
-    ).state
-    assert paused.run.status is core.RunStatus.DRAINING
-    resume = core.RunControlEvent(
-        control=core.ControlInput(
-            control_id=core.ControlId(root="resume-new"), action="resume", when="now"
-        ),
-        now_at=paused.run.now_at,
-    )
-    with pytest.raises(core.ControlRefusedError, match="epoch"):
-        core.step(paused, resume)
-    opening = core.step(
-        paused,
-        core.EpochResumed(
-            epoch=epoch + 1,
-            now_at=paused.run.now_at,
-        ),
-    )
-    successor = opening.state
-    assert successor.run.status is core.RunStatus.RUNNING
-    assert successor.run.park is None
-    reopened = core.step(successor, resume)
-    assert reopened.state.run.status is core.RunStatus.RUNNING
-    assert reopened.state.run.park is None
-    assert not reopened.state.scheduling.admission_closed
-    assert any(
-        isinstance(event, core.StopLiftRecorded) and event.new_epoch for event in opening.events
-    )
-
-
 _OPEN_RECORDS = [
     (core.RequestPhase.DISPATCHED, core.ObservationStatus.FAILED),
     (core.RequestPhase.RECONCILING, core.ObservationStatus.UNKNOWN),
@@ -219,78 +168,6 @@ def _pause(
             drain_seconds=drain_seconds,
         ),
     ).state
-
-
-@pytest.mark.regression
-@example(
-    open_record=_OPEN_RECORDS[0],
-    lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
-    action="pause_now",
-    drain_seconds=5.0,
-)
-@given(
-    open_record=st.sampled_from(_OPEN_RECORDS),
-    lifecycle=st.sampled_from([core.LifecycleClass.IDEMPOTENT_WRITE, core.LifecycleClass.QUERY]),
-    action=st.sampled_from(["pause", "pause_now"]),
-    drain_seconds=st.floats(min_value=1.0, max_value=BOUND * 0.8),
-)
-def test_a_pause_past_its_deadline_interrupts_a_request_that_can_run_again_and_the_resume_sends_it(
-    open_record: tuple[core.RequestPhase, core.ObservationStatus],
-    lifecycle: core.LifecycleClass,
-    action: Literal["pause", "pause_now"],
-    drain_seconds: float,
-) -> None:
-    """The park never leaves the request open, and it is no failure, no retry, no report.
-
-    Regression (#3475): a Pause-now exited with the session start of the planner in flight, so the
-    Resume had to prove what became of it and ended the run blocked.
-    """
-    phase, status = open_record
-    state = _silent(phase, status, terminal=False)
-    [row] = state.records.records
-    state = state.model_copy(
-        update={
-            "records": state.records.model_copy(
-                update={"records": (row.model_copy(update={"lifecycle": lifecycle}),)}
-            )
-        }
-    )
-    paused = _pause(state, action=action, drain_seconds=drain_seconds)
-    assert paused.run.status is core.RunStatus.DRAINING
-    assert paused.run.park is not None
-    deadline = paused.run.park.deadline_at
-    assert deadline == paused.run.now_at + drain_seconds
-    assert deadline is not None
-    waiting = core.step(paused, core.ClockAdvanced(now_at=deadline - 0.5))
-    assert waiting.state.run.status is core.RunStatus.DRAINING
-    [still] = waiting.state.records.records
-    assert still.phase is phase
-    interrupted = core.step(waiting.state, core.ClockAdvanced(now_at=deadline))
-    assert interrupted.state.run.status is core.RunStatus.PARKED
-    [sent_back] = interrupted.state.records.records
-    assert sent_back.phase is core.RequestPhase.PREPARED
-    assert sent_back.observation is None
-    assert sent_back.retry_count == row.retry_count
-    assert sent_back.request == row.request
-    assert not interrupted.requests
-    assert not any(isinstance(event, core.Failed) for event in interrupted.events)
-    # The next epoch dispatches the same request again.
-    epoch = interrupted.state.records.recovery.epoch + 1
-    resumed = core.step(
-        interrupted.state, core.EpochResumed(epoch=epoch, now_at=deadline + 1)
-    ).state
-    assert resumed.run.status is core.RunStatus.RUNNING
-    request_id = sent_back.request_id
-    while (record := resumed.records.record(request_id)) is not None and (
-        record.phase is core.RequestPhase.PREPARED
-        and resumed.records.recovery.phase is not core.RecoveryPhase.READY
-    ):
-        resumed = core.step(resumed, core.ClockAdvanced(now_at=resumed.run.now_at + 1)).state
-    authorized = core.step(resumed, core.DispatchAuthorized(request_id=request_id)).state
-    dispatched = authorized.records.record(request_id)
-    assert dispatched is not None
-    assert dispatched.phase is core.RequestPhase.DISPATCHED
-    assert dispatched.retry_count == row.retry_count
 
 
 @given(

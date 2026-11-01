@@ -69,6 +69,7 @@ from vs_core.api import (
     WaitSubject,
     WorkspaceMode,
     WorkspacePlan,
+    initial_state,
     orphan_waits,
     owned_job_subject,
     phase_waits,
@@ -79,14 +80,13 @@ from vs_core.api import (
 from vs_core.api.testing import reach
 from vs_sim.api.testing import examples
 
-from .test_measurements import submitted
-from .test_request_recovery import (
+from .records_fixtures import (
     fixture_digest,
-    initial_state,
     pending_record,
     recovering_state,
     turn_record,
 )
+from .test_measurements import submitted
 from .test_write_turn_retention import write_turn_world
 from .wait_support import OPEN
 

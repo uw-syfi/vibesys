@@ -56,7 +56,6 @@ from .types.kernel import (
     CoreEvent,
     DecisionCompleted,
     DecisionSubmitted,
-    EpochResumed,
     ProposalSubmitted,
     RunControlEvent,
     Signal,
@@ -66,9 +65,6 @@ from .types.records import (
     DispatchAuthorized,
     HostRenewed,
     OperationRetireRequested,
-    RecoveryCheckWaitLapsed,
-    RecoveryReady,
-    RecoveryStarted,
     RequestObserved,
     RequestPrepared,
     RequestUndispatchable,
@@ -250,19 +246,16 @@ def event_area(event: CoreEvent | Signal) -> Area:
             RequestPrepared()
             | DispatchAuthorized()
             | RequestObserved()
-            | RecoveryStarted()
-            | RecoveryReady()
             | RetryDue()
             | RequestUndispatchable()
             | BlockedRecordStalled()
             | HostRenewed()
             | TurnHeld()
-            | RecoveryCheckWaitLapsed()
             | OperationRetireRequested()
             | DecisionCompleted()
         ):
             return Area.RECORDS
-        case DecisionSubmitted() | ProposalSubmitted() | RunControlEvent() | EpochResumed():
+        case DecisionSubmitted() | ProposalSubmitted() | RunControlEvent():
             raise ContractError(("event",), "kernel event requires translation")
         case _:
             assert_never(event)

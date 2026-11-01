@@ -23,10 +23,10 @@ from vs_core.api import (
     OperationRef,
     OperationRetireRequested,
     RecordsChange,
-    RecoveryStarted,
     ReducerTrace,
     RequestId,
     RequestPhase,
+    RetryDue,
     RunControlEvent,
     RunId,
     RunStatus,
@@ -89,7 +89,7 @@ def test_fixed_order_and_one_revision_for_propagated_signals() -> None:
     state = initial_state()
     clock = ClockAdvanced(now_at=1.0)
     next_clock = ClockAdvanced(now_at=2.0)
-    recovery = RecoveryStarted(epoch=0, now_at=1.0)
+    recovery = RetryDue(request_id=RequestId(root="due"), now_at=1.0)
     trace = ReducerTrace(
         frames=(
             TraceFrame(

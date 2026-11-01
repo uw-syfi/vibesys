@@ -1,6 +1,6 @@
 """Which events a parked epoch still admits.
 
-A parked epoch ignores ordinary events. It keeps recovery, resume, controls, and
+A parked epoch ignores ordinary events. It keeps resume, controls, and
 decisions, and the session input that delivers a steer the epoch already holds
 when that delivery is not recorded yet. ``parked_epoch_drops`` is the only
 decision ``consume`` needs: true means the event leaves the epoch unchanged.
@@ -14,11 +14,10 @@ from ._run_pause import pause_outlived
 from .types.common import RunStatus
 from .types.kernel import (
     DecisionSubmitted,
-    EpochResumed,
     ProposalSubmitted,
     RunControlEvent,
 )
-from .types.records import DispatchAuthorized, RecoveryStarted
+from .types.records import DispatchAuthorized
 from .types.sessions import SessionInputReceived
 
 if TYPE_CHECKING:
@@ -28,7 +27,7 @@ if TYPE_CHECKING:
 def parked_epoch_drops(state: CoreState, event: CoreEvent) -> bool:
     """Whether a parked epoch ignores ``event``.
 
-    The epoch admits recovery, resume, controls, and decisions. It also admits the
+    The epoch admits resume, controls, and decisions. It also admits the
     session input that delivers a steer control it already holds when that input is
     not recorded yet: the control and its delivery are separate events, and a crash
     between them is repaired by a later poll. Dropping the delivery leaves the steer
@@ -39,12 +38,7 @@ def parked_epoch_drops(state: CoreState, event: CoreEvent) -> bool:
         return False
     if isinstance(
         event,
-        RecoveryStarted
-        | EpochResumed
-        | RunControlEvent
-        | DispatchAuthorized
-        | DecisionSubmitted
-        | ProposalSubmitted,
+        RunControlEvent | DispatchAuthorized | DecisionSubmitted | ProposalSubmitted,
     ):
         return False
     return not _repairs_unrecorded_steer(state, event)

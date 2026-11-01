@@ -9,7 +9,7 @@ fact at an accepted sequence is a typed rejection.
 
 Unknown acceptance and retryable failures keep the record open for a later,
 higher-sequence observation; only a conclusive terminal observation closes it,
-exactly once. Recovery (``_request_recovery``) reads this ledger and never writes
+exactly once. Recovery (``decide``) reads this ledger and never writes
 its request fields.
 """
 
