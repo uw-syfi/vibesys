@@ -72,10 +72,26 @@ export const generatedRuns: fc.Arbitrary<Run> = fc
     sessionInputs: [each.input, ...each.sessionInputs.slice(1)],
     // A writer may state the input itself as its best: nothing beat it.
     stated: each.stated === 'input' ? each.input : each.stated,
-    // The run states its input through at least one idea's ratio to it: the input gate ran before
-    // any idea, and only a session resumed later measures its ideas without one.
-    ideas: each.ideas.map((idea, at) => (at === 0 ? {...idea, compared: true} : idea)),
+    ideas: inTimeOrder(each.ideas),
   }));
+
+/**
+ * The ideas as a run has them: in the order they were measured, the ideas of a resumed session
+ * after those of every session before it, and the first idea of the run, which ran after the input
+ * gate, from the first session and stating its ratio to the input (a session resumed later may
+ * measure its ideas without one). An idea of a later session measured before the first idea of the
+ * run is not a run: its session's input would be the only input a time bar position before the
+ * rest could read.
+ */
+function inTimeOrder(ideas: readonly Generated[]): Generated[] {
+  let session = 0;
+  return [...ideas]
+    .sort((a, b) => a.at - b.at)
+    .map((idea, index) => {
+      session = index === 0 ? 0 : Math.max(session, idea.session);
+      return {...idea, session, compared: index === 0 ? true : idea.compared};
+    });
+}
 
 const NAME = 'metric';
 
