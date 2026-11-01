@@ -15,6 +15,8 @@ from vs_sandbox.api.testing import ScriptedDockerCli, docker_result, docker_time
 
 # test-isolation: the exec stop adapter and its attempt bound are internal to the Docker sandbox; this pins how a stop answers.
 from vs_sandbox.docker_sandbox import _SIGNAL_ATTEMPTS, _ExecStop
+
+# test-isolation: the stop signals and the remote-processes answer are internal to the command runners; the stop adapter above speaks them.
 from vs_sandbox.process_execution import KILL, TERMINATE, RemoteProcesses, StopSignal
 
 if TYPE_CHECKING:
