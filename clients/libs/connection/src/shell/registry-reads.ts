@@ -20,7 +20,13 @@ import {
   operationPolicies,
   projectMessage,
 } from '@vibesys/proto';
-import {newRequestId} from '@vibesys/request-identity';
+
+/**
+ * The request id of a read, which only pairs a reply with its request. A read changes nothing, so
+ * two asks of one question carry the same id and the same bytes, and the gateway calls answer them
+ * with one host process (`GatewayCalls.unary`).
+ */
+export const READ_REQUEST_ID = 'read';
 
 export interface RegistryCatalog {
   describeMachine(
@@ -83,7 +89,7 @@ export function registryReads(ports: RegistryReadPorts): RegistryCatalog {
     async describeMachine(host, expectedCheckout, signal) {
       const response = await callDescribeMachine(
         await transport(host, expectedCheckout, signal),
-        acceptDescribeMachine({requestId: newRequestId()}),
+        acceptDescribeMachine({requestId: READ_REQUEST_ID}),
         signal,
       );
       const projected = projectMessage(DescribeMachineResponseSchema, response) as {
@@ -94,7 +100,7 @@ export function registryReads(ports: RegistryReadPorts): RegistryCatalog {
     async listCompute(host, expectedCheckout, signal) {
       const response = await callListCompute(
         await transport(host, expectedCheckout, signal),
-        acceptListCompute({requestId: newRequestId()}),
+        acceptListCompute({requestId: READ_REQUEST_ID}),
         signal,
       );
       const projected = projectMessage(ListComputeResponseSchema, response) as {

@@ -23,8 +23,12 @@ import {
   type RunEnding as WireEnding,
   RunEndOutcome as WireOutcome,
 } from '@vibesys/proto';
-import {newRequestId} from '@vibesys/request-identity';
-import {type RegistryReadPorts, registryTransport, requireCheckout} from './registry-reads.js';
+import {
+  READ_REQUEST_ID,
+  type RegistryReadPorts,
+  registryTransport,
+  requireCheckout,
+} from './registry-reads.js';
 
 export interface RegistryRunReads {
   /** The digest of each of `runIds` the project has a journal of, with the tiles' data. */
@@ -149,7 +153,7 @@ export function registryRunReads(ports: RegistryReadPorts): RegistryRunReads {
       const response = await callListRunDigests(
         await transport(host),
         acceptListRunDigests({
-          requestId: newRequestId(),
+          requestId: READ_REQUEST_ID,
           project,
           runIds: [...runIds],
           withDashboard: true,
