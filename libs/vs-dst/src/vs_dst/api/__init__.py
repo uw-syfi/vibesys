@@ -33,9 +33,18 @@ from vs_dst._interruptions import (
 )
 from vs_dst._simulate import SimulatedRun, simulate
 from vs_dst._snapshots import NondeterministicWorldError, WorldNotCopyableError
+from vs_dst._step_host import TIMING as STEP_LOOP_TIMING
 from vs_dst._step_host import StepLoopHosting
 from vs_dst._stops import StopKind, Stopped, StopPoint
-from vs_dst._world import Admission, HoldingWorld, RunSetup, Serving, ServingWorld, World
+from vs_dst._world import (
+    Admission,
+    ClearFailingWorld,
+    HoldingWorld,
+    RunSetup,
+    Serving,
+    ServingWorld,
+    World,
+)
 
 __all__ = [
     "EVERY_POINT",
@@ -44,8 +53,10 @@ __all__ = [
     "QUOTA_WAIT_S",
     "SAMPLED",
     "SAMPLE_SIZE",
+    "STEP_LOOP_TIMING",
     "Action",
     "Admission",
+    "ClearFailingWorld",
     "CrashKind",
     "CrashPoint",
     "CrashPointPolicy",
