@@ -89,12 +89,18 @@ def test_the_epoch_end_of_a_parked_run_does_not_charge_the_attempt_it_held() -> 
     assert run.attempt == 2
 
 
-def test_the_epoch_end_of_a_draining_run_charges_the_attempt_like_a_crash() -> None:
+def test_the_epoch_end_of_a_draining_run_charges_the_attempt_like_a_crash_once_clear_finds_it_lost() -> (
+    None
+):
     loop = opened(World((StepSpec(100.0),), retries=0))
     loop.tick()
     play(loop, ("pause", None))
     assert loop.state.run.status is core.RunStatus.DRAINING
     play(loop, ("relaunch_resume", None))
+    (run,) = decide(loop.state, loop.clock)
+    assert isinstance(run, Run)
+    assert run.clear_first
+    loop.tick()
     assert [type(a) for a in decide(loop.state, loop.clock)] == [Settle]
 
 

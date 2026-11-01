@@ -60,4 +60,4 @@ def test_the_log_names_interruptions_as_core_does() -> None:
     assert {why.name for why in Interruption} == {
         why.name for why in InterruptionReason if why is not InterruptionReason.UNSPECIFIED
     }
-    assert {why for why in Interruption if why.charged} == {Interruption.RAISED}
+    assert {why for why in Interruption if why.charged} == {Interruption.RAISED, Interruption.LOST}

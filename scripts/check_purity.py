@@ -145,7 +145,7 @@ PURE_EXPORTS = {
         for name in ("EpochStarted", "ReplayStore", "Span", "Record")
     },
     "vs_proto.api.Change": frozenset({"STARTED", "UPDATED", "ENDED"}),
-    "vs_proto.api.InterruptionReason": frozenset({"PAUSE", "SHUTDOWN", "RAISED"}),
+    "vs_proto.api.InterruptionReason": frozenset({"PAUSE", "SHUTDOWN", "RAISED", "LOST"}),
     "vs_proto.api.StepCancelReason": frozenset(
         {"DEADLINE", "PAUSE_NOW", "DRAIN_EXPIRED", "RUN_ENDING", "WITHDRAWN", "INTERRUPTED"}
     ),

@@ -190,6 +190,8 @@ class Watch:
         """Every kind of stall the board showed at some boundary."""
         self.errors: list[BaseException] = []
         """Every error the board showed with a stall."""
+        self.cleared: list[tuple[core.RequestId, Adopted | Cleared]] = []
+        """What each call of ``clear`` answered, in order, in every process of the run."""
 
     def new_board(self) -> StallBoard:
         """The board of the next process: a restart starts with nothing stalled."""
@@ -353,6 +355,7 @@ class CrashingRunner:
         self._watch.boundary()
         self._switch.tick()
         outcome = await self._inner.clear(step, tag)
+        self._watch.cleared.append((tag, outcome))
         self._watch.boundary()
         self._switch.tick()
         return outcome
@@ -566,6 +569,8 @@ def check_log_of(world: World, tag: core.RequestId) -> None:
     charged = 0
     for message in messages(world):
         if isinstance(message, EpochStarted):
+            # A dead host's attempt is charged only once `clear` finds its work gone (`LOST`).
+            charged -= int(not over)
             over = True
         elif message.tag != tag.root:
             continue
@@ -578,6 +583,10 @@ def check_log_of(world: World, tag: core.RequestId) -> None:
                 charged += 1
             elif isinstance(message, AttemptInterrupted):
                 assert message.attempt == last
+                if message.reason is InterruptionReason.LOST:
+                    assert over, f"{tag.root} lost attempt {last} while it ran"
+                    charged += 1
+                    continue
                 over = True
                 charged -= int(message.reason in UNCHARGED)
             else:
@@ -685,6 +694,69 @@ def test_a_runner_that_raises_is_cleared_and_run_again_charged_as_a_try() -> Non
     check_world(world)
     assert attempts_started(world, 0) == [1, 2]
     assert interruption_reasons(world) == [InterruptionReason.RAISED]
+
+
+def step_messages(world: World, tag: core.RequestId) -> list[Message]:
+    return [m for m in messages(world) if not isinstance(m, EpochStarted) and m.tag == tag.root]
+
+
+def lost_records(world: World) -> int:
+    return interruption_reasons(world).count(InterruptionReason.LOST)
+
+
+def test_a_kill_in_an_attempt_whose_work_is_gone_charges_it_and_the_step_ends_exhausted() -> None:
+    """``clear`` finds nothing of the work the dead host ran: the attempt is lost, and charged."""
+    scenario = Scenario((step(FINISHES),), retries=0)
+    clean = run_world(scenario)
+    check_world(clean)
+    assert lost_records(clean) == 0
+    exhausted = Failed(reason=core.FailureReason.ATTEMPTS_EXHAUSTED)
+    killed_in_attempt = set()
+    for kill_at in range(clean.boundaries):
+        world = run_world(scenario, kill_at)
+        check_world(world)
+        is_exhausted = result_matches(world, 0, exhausted)
+        assert lost_records(world) == int(is_exhausted), "a loss is recorded for each charge"
+        assert is_exhausted or was_finished(world, 0)
+        killed_in_attempt.add(is_exhausted)
+    assert killed_in_attempt == {True, False}, "the sweep must kill inside the attempt and outside"
+
+
+def test_a_kill_in_an_attempt_whose_work_survives_charges_it_only_when_clear_finds_it_gone() -> (
+    None
+):
+    """A job on a cluster outlives the host: the next process adopts it, and its attempt is free.
+
+    The first ``clear`` after the kill decides, for each step: ``Cleared`` loses the attempt,
+    which with no retry left fails the step, and ``Adopted`` does not charge it.
+    """
+    long = AttemptReturns(after_s=10.0)
+    scenario = Scenario((step(long), step(FINISHES)), retries=0, adopts=True)
+    clean = run_world(scenario)
+    check_world(clean)
+    exhausted = Failed(reason=core.FailureReason.ATTEMPTS_EXHAUSTED)
+    seen: set[str] = set()
+    for kill_at in range(clean.boundaries):
+        world = run_world(scenario, kill_at)
+        check_world(world)
+        for index, tag in enumerate(world.seed.tags):
+            first = next(
+                (cleared for cleared_tag, cleared in world.watch.cleared if cleared_tag == tag),
+                None,
+            )
+            lost = sum(
+                m.reason is InterruptionReason.LOST
+                for m in step_messages(world, tag)
+                if isinstance(m, AttemptInterrupted)
+            )
+            assert lost == int(isinstance(first, Cleared)), f"step {index} killed at {kill_at}"
+            if isinstance(first, Adopted):
+                assert was_finished(world, index), "adopted work finishes the step"
+                seen.add("adopted")
+            if lost:
+                assert result_matches(world, index, exhausted)
+                seen.add("lost")
+    assert seen == {"adopted", "lost"}, "the sweep must adopt the work of one kill and lose another"
 
 
 def test_a_step_that_raises_past_its_retry_bound_ends_as_failed() -> None:

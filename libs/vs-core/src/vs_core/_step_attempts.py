@@ -75,11 +75,12 @@ def epoch_opened(state: CoreState, epoch: int) -> CoreState:
     """``state`` in epoch ``epoch``, with every attempt of an earlier epoch ended.
 
     A run has one writer, so a record of a later epoch proves the process that ran the earlier
-    epoch's attempts dead. They end without a result and count against the retry bound: the
-    attempt may have run, and a step that kills its process every time must end as a typed failure.
-    An attempt a parked run still held ended with the pause, and is not counted. Their steps go
-    back to the state of a step no one has started, which is what a draining run waits for before
-    it parks.
+    epoch's attempts dead. They end without a result. Whether they count against the retry bound
+    waits for ``clear`` of the step (``unsettled``): work it finds alive is adopted and never
+    charged, work it finds nothing of is lost, and a ``LOST`` record then charges the attempt, so a
+    step that kills its process every time still ends as a typed failure. An attempt a parked run
+    still held ended with the pause, and is not counted. Their steps go back to the state of a
+    step no one has started, which is what a draining run waits for before it parks.
 
     The kernel's host epoch moves with the log's, and ``RunPark.epoch`` does not: it stays the
     epoch the operator paused in. A drain in progress keeps its authority in the new epoch (see
@@ -94,10 +95,19 @@ def epoch_opened(state: CoreState, epoch: int) -> CoreState:
     for row in state.steps.attempts:
         if ended_by_core(state, row.tag):
             continue
-        # A park the process left with an attempt running (one that ignored the cancel) ended it:
-        # the exit was the pause's, so it is not charged like a crash.
-        spared = 1 if parked and not row.ended else 0
-        rows.append(row.model_copy(update={"ended": True, "uncharged": row.uncharged + spared}))
+        # An attempt a park left running (one that ignored the cancel) ended with the pause, so
+        # it is not charged. One a crash left running left its work in an unknown state: it is
+        # not charged until `clear` finds that lost.
+        running = not row.ended
+        rows.append(
+            row.model_copy(
+                update={
+                    "ended": True,
+                    "uncharged": row.uncharged + (1 if running else 0),
+                    "unsettled": row.unsettled or (running and not parked),
+                }
+            )
+        )
         state = _returned(state, row.tag)
     state = _with_attempts(state, tuple(rows))
     if origin:
@@ -205,6 +215,8 @@ def interrupted(state: CoreState, tag: RequestId, attempt: int, why: Interruptio
     """
     by_core = ended_by_core(state, tag)
     row = state.steps.of(tag)
+    if why is Interruption.LOST:
+        return _lost(state, tag, attempt, row, by_core=by_core)
     if row is None or row.started != attempt or row.ended:
         message = f"the log interrupts attempt {attempt} of step {tag.root}, which is not running"
         raise RecordRefusedError(RefusalReason.ATTEMPT_MISMATCH, message, tag)
@@ -213,6 +225,26 @@ def interrupted(state: CoreState, tag: RequestId, attempt: int, why: Interruptio
     uncharged = row.uncharged + (0 if why.charged else 1)
     state = _returned(state, tag)
     return _with(state, tag, row.model_copy(update={"ended": True, "uncharged": uncharged}))
+
+
+def _lost(
+    state: CoreState, tag: RequestId, attempt: int, row: StepAttempts | None, *, by_core: bool
+) -> CoreState:
+    """``state`` with attempt ``attempt`` of ``tag`` charged: its host died and ``clear`` found nothing.
+
+    Only the attempt an epoch ended and no one settled can be lost, once: its work is gone, so it
+    counts against the step's retry bound as a raised attempt does.
+    """
+    if row is None or row.started != attempt or not row.unsettled:
+        message = (
+            f"the log loses attempt {attempt} of step {tag.root}, which no dead host left open"
+        )
+        raise RecordRefusedError(RefusalReason.ATTEMPT_MISMATCH, message, tag)
+    if by_core:
+        return forgotten(state, tag)
+    return _with(
+        state, tag, row.model_copy(update={"uncharged": row.uncharged - 1, "unsettled": False})
+    )
 
 
 def _returned(state: CoreState, tag: RequestId) -> CoreState:
@@ -285,7 +317,12 @@ def open_step(state: CoreState, tag: RequestId) -> OpenStep | None:
         return None
     attempts = state.steps.of(tag)
     started_ = 0 if attempts is None else attempts.started
-    return OpenStep(step=rows[0].request, deadline_at=rows[0].until.at, started=started_)
+    return OpenStep(
+        step=rows[0].request,
+        deadline_at=rows[0].until.at,
+        started=started_,
+        unsettled=attempts is not None and attempts.unsettled,
+    )
 
 
 def dispatched(state: CoreState, tag: RequestId) -> CoreState:

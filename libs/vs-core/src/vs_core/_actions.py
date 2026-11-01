@@ -98,6 +98,12 @@ class OpenStep:
     """The run-clock limit of the step, once it has started."""
     started: int
     """The latest attempt that began; 0 before the first."""
+    unsettled: bool = False
+    """Whether a dead host ended that attempt and nothing yet says whether its work is lost.
+
+    The loop clears the step before it runs the next attempt; if ``clear`` finds nothing of the
+    work it records the attempt ``LOST``, which charges it to the step's retry bound.
+    """
 
 
 def interruption_of(reason: CancelReason) -> Interruption | None:

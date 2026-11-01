@@ -17,6 +17,9 @@ and waited for, never given up on: nothing starts, clears or records on that tag
 the tag is on the ``StallBoard`` for as long as it is held or failing. A result is recorded
 only over proof, which is a ``Cleared``, an ended ``Adopted`` or a returned result; a call
 that did not finish, or a ``clear`` that raised, proves nothing and goes back to ``clear``.
+
+An attempt whose host died is charged to its step's retry bound only over that proof too: a
+``Cleared`` before the next attempt records it ``LOST``, and an ``Adopted`` never does.
 """
 
 from __future__ import annotations
@@ -115,7 +118,8 @@ class StepLog(Protocol):
         """Record that an attempt ended and its step did not.
 
         ``why`` says whether the attempt is charged to the step's retry bound
-        (``Interruption.charged``).
+        (``Interruption.charged``). ``LOST`` is the one that ends nothing: it charges the attempt
+        a dead host ended, whose work ``clear`` then found gone.
         """
         ...
 
@@ -522,6 +526,16 @@ class _StepLoop:
         async with self._appending:
             await self._log.attempt_interrupted(tag, attempt, why)
 
+    async def _record_lost(self, tag: RequestId) -> None:
+        """``clear`` found nothing of the work a dead host left: charge that attempt to the step.
+
+        Core holds the attempt a new epoch ended as unsettled, not as charged: work ``clear``
+        adopts is alive and cost the step nothing. Only this answer proves it lost.
+        """
+        open_step = self._log.open_step(tag)
+        if open_step is not None and open_step.unsettled:
+            await self._record_interrupted(tag, open_step.started, Interruption.LOST)
+
     async def _record_ended(self, end: End) -> None:
         async with self._appending:
             await self._log.run_ended(end)
@@ -535,6 +549,8 @@ class _StepLoop:
         if cleared is None or (flight.signal.is_set() and isinstance(cleared, Cleared)):
             await self._finish_unstarted(flight)
             return
+        if run.clear_first and isinstance(cleared, Cleared):
+            await self._record_lost(flight.tag)
         started = await self._record_started(run)
         if started is None:
             return

@@ -346,7 +346,7 @@ New records (one proto envelope, `vibesys/store/v1/core_input.proto`, validated 
 | `CoreInput` | a decision or proposal, an owner event, an operator control, an epoch resume, a clock advance that changed state | the external inputs of `step` |
 | `StepStarted` | tag, attempt, request, deadline | durable intent before any I/O; makes a re-run visible |
 | `StepFinished` | tag, attempt, `Finished` (the report and the owner events), `Failed` or `Cancelled` with a typed reason | the result; one per step, and one atomic record, so a crash loses no owner event |
-| `AttemptInterrupted` | tag, attempt, reason (`PAUSE`, `SHUTDOWN`, `RAISED`) | an attempt that ended without ending the step; a `RAISED` one (the runner raised or gave nothing back) is charged to the retry bound, the other two are not. The loop writes `PAUSE` and `RAISED`; an orderly stop of the process (`SHUTDOWN`) is not built, and a cancelled loop is a crash |
+| `AttemptInterrupted` | tag, attempt, reason (`PAUSE`, `SHUTDOWN`, `RAISED`, `LOST`) | an attempt that ended without ending the step; a `RAISED` one (the runner raised or gave nothing back) and a `LOST` one (a dead host's attempt whose work `clear` found gone, see [vs-core: fold and decide](#vs-core-fold-and-decide)) are charged to the retry bound, the other two are not. The loop writes `PAUSE`, `RAISED` and `LOST`; an orderly stop of the process (`SHUTDOWN`) is not built, and a cancelled loop is a crash |
 | `RunEnded` | the run's result | the end of the run, published once nothing is open; a run has ended when this is in the log, not when the kernel reaches its terminal status |
 | `CoreSnapshot` | an old `RunEnvelope`: its core state, the owner events it had not applied, the search it left (state, wake-ups, held decisions) | the seed of a migrated or imported run only; never written for a new run |
 
@@ -550,9 +550,10 @@ kind. The rule is:
 - a running attempt past its deadline is `Cancel(DEADLINE)`; an open step with no running attempt past its
   deadline is `Settle(Cancelled(DEADLINE))`, because there is nothing to cancel;
 - an open step whose attempts are spent is `Settle(Failed(ATTEMPTS_EXHAUSTED))`: attempts that began, less
-  the ones a `PAUSE` or `SHUTDOWN` interruption ended, exceed the step's retry limit (`retry_limit` of
-  the request, else `Limits.request_retries.limit`), so an attempt that raised or whose process died is
-  charged and a step that always does ends as a typed failure;
+  the ones a `PAUSE` or `SHUTDOWN` interruption ended and the one a dead host ended that no `LOST` record
+  has charged, exceed the step's retry limit (`retry_limit` of the request, else
+  `Limits.request_retries.limit`), so an attempt that raised or whose work a dead host lost is charged
+  and a step that always does ends as a typed failure;
 - an open step marked `on_interrupt = CANCEL` whose attempt ended without a result, by an interruption
   record or by its process, is `Settle(Cancelled(INTERRUPTED))`;
 - an open step whose dependency can never succeed is `Settle(Cancelled(WITHDRAWN))`; one whose dependency is
@@ -574,7 +575,15 @@ A step runs now when its latest attempt has no record ending it. The first recor
 epoch header, `EpochStarted`, which the writer appends before anything else) ends every attempt that
 began before it: the run has one writer, so the earlier process is dead. The fold does this, not
 `decide`, so a state cached before the restart and a full fold agree, and `decide` issues `Run` for those
-steps as soon as the header is in the log. The ended attempts are charged, as a raised one is. Cleanup steps that core issues while a cancelling finish is committed are cancelled
+steps as soon as the header is in the log. An attempt a dead host ended is not charged yet: a new
+epoch proves the process dead, not the work (a job on a cluster outlives it), so the fold holds the
+attempt as *unsettled* (`StepAttempts.unsettled`, `OpenStep.unsettled`). The loop's `clear` before the
+next attempt says which it was. A `Cleared` is proof the work is gone, so the loop records
+`AttemptInterrupted(LOST)` for that attempt, which charges it as a raise is; the fold refuses a `LOST`
+for an attempt that is not unsettled, so it counts once. An `Adopted` is alive: nothing is recorded and
+the attempt stays free, so a job the cluster keeps running through any number of host crashes never
+wears its step out. A crash between the epoch and the `LOST` leaves the attempt unsettled, and the next
+process asks `clear` again. Cleanup steps that core issues while a cancelling finish is committed are cancelled
 like any other; whether cleanup should instead outlive the finish is left to the cutover.
 
 #### Rest, drain, end and resume
@@ -629,7 +638,8 @@ end.
   (a Pause now, or a pause past its deadline) does not wait for the attempt that runs a request
   (`_holds_park`): `decide` cancels it in the parked run, and a call that ignores the cancel dies with the
   process. The first record of the next epoch ends that attempt as interrupted, not charged like a crash
-  (`epoch_opened`), because the pause ended it; one a draining run held when it died is charged. A
+  (`epoch_opened`), because the pause ended it; one a draining run held when it died is unsettled, as a
+  crash leaves it, and charged only once `clear` finds its work gone. A
   parked run therefore never holds an attempt that nothing will end, and the only attempts it holds are
   those of a call the loop showed held (`StallBoard`), which the process exit ends.
 - **Core says whether work may exist.** `Run.clear_first` is true whenever the log or its seed shows the
@@ -804,7 +814,8 @@ The loop, `vs_runtime/_step_loop.py`:
 state = fold(log)                      # cache plus suffix, or the whole log
 repeat:
     for action in decide(state, clock.now()):
-        Run:    if clear_first: await runner.clear(step, tag)
+        Run:    if clear_first: cleared = await runner.clear(step, tag)
+                if Cleared and the previous attempt is unsettled: append AttemptInterrupted(LOST)
                 append StepStarted(tag, attempt)      # durable before I/O
                 start runner.run(...) as a task
         Cancel: set the signal; on return append StepFinished or AttemptInterrupted

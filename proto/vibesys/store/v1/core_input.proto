@@ -197,10 +197,15 @@ enum InterruptionReason {
   // The runner raised, or gave nothing back. Unlike the two above it is charged to the step's
   // retry bound, as a crash of the attempt is.
   INTERRUPTION_REASON_RAISED = 3;
+  // The attempt's process died with its host, and `clear` of the step then found nothing of its
+  // work: the attempt is lost, and charged to the step's retry bound. Written after the epoch
+  // that ended the attempt; work `clear` found alive is adopted and never charged.
+  INTERRUPTION_REASON_LOST = 4;
 }
 
 // AttemptInterrupted is an attempt that ended without a result. The step stays open. A pause or
-// shutdown is not charged an attempt of its retry bound; a runner that raised is.
+// shutdown is not charged an attempt of its retry bound; a runner that raised, or whose work a
+// dead host lost, is.
 message AttemptInterrupted {
   string tag = 1 [(buf.validate.field).string = {
     min_len: 1
