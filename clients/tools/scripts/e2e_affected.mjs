@@ -592,13 +592,21 @@ function main(argv) {
     console.log(`e2e: the whole suite across ${MAX_SHARDS} jobs`);
   }
   const output = options.get('--github-output');
-  if (output !== undefined) {
-    const matrix = Array.from({length: plan.shards}, (_, index) => index + 1);
-    appendFileSync(
-      output,
-      `specs=${JSON.stringify(plan.specs)}\nshards=${JSON.stringify(matrix)}\n`,
-    );
-  }
+  if (output !== undefined) appendFileSync(output, planOutputs(plan));
+}
+
+/**
+ * The plan as the `changes` job's outputs. The whole suite is the plan with no specs across every
+ * job, and the shards read it as an empty `specs`: `VIBESYS_E2E_SPECS` unset or empty selects every
+ * spec (`e2eSelection`), while `[]` selects none, which is what a pull request that affects no spec
+ * sends (and runs no job for).
+ *
+ * @param {{specs: string[], shards: number}} plan
+ */
+export function planOutputs(plan) {
+  const wholeSuite = plan.specs.length === 0 && plan.shards === MAX_SHARDS;
+  const matrix = Array.from({length: plan.shards}, (_, index) => index + 1);
+  return `specs=${wholeSuite ? '' : JSON.stringify(plan.specs)}\nshards=${JSON.stringify(matrix)}\n`;
 }
 
 /**
