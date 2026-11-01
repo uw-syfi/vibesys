@@ -42,7 +42,8 @@ once. An **open step** is a step with no result. An **epoch** is one process lif
    next attempt. The attempt number is recorded and shown.
 4. **Pause is not a crash.** Pause stops starting steps, lets running steps finish or cancels them
    within a deadline, records that the run is parked, and exits. A clean pause leaves no open attempt.
-   Ending a run cannot fail: cancel what is open, wait, then end.
+   Ending a run cannot fail: cancel the work that is open, run the cleanup that frees what the run
+   holds, wait for both, then end.
 
 ## Status
 
@@ -564,8 +565,10 @@ kind. The rule is:
   (`_run_park.pause_cancels`);
 - a parked run is at rest: it starts and settles nothing, whatever its steps hold or however late the clock is, and
   an attempt it still has running gets `Cancel(PAUSE_NOW)`; with none, `decide` returns only `Wait`;
-- a run whose committed finish is a cancel, or that has ended, gets `Cancel(RUN_ENDING)` for each running
-  step and `Settle(Cancelled(RUN_ENDING))` for each other open step, and starts none;
+- a run whose committed finish is a cancel gets `Cancel(RUN_ENDING)` for each running step and
+  `Settle(Cancelled(RUN_ENDING))` for each other open step that its kind declares as work, and starts
+  none of those; a step its kind declares as a release runs on to its own result ([What an ending does
+  with each step](#what-an-ending-does-with-each-step)); a run that has ended ends every open step;
 - a step that snapshots its scope's files waits while any step that writes them is open, and a step that
   writes them waits while a snapshot of its scope runs ([Scope order](#scope-order));
 - a run with a committed finish, no open step and no `RunEnded` record is `End`; once the record is in
@@ -583,8 +586,32 @@ next attempt says which it was. A `Cleared` is proof the work is gone, so the lo
 for an attempt that is not unsettled, so it counts once. An `Adopted` is alive: nothing is recorded and
 the attempt stays free, so a job the cluster keeps running through any number of host crashes never
 wears its step out. A crash between the epoch and the `LOST` leaves the attempt unsettled, and the next
-process asks `clear` again. Cleanup steps that core issues while a cancelling finish is committed are cancelled
-like any other; whether cleanup should instead outlive the finish is left to the cutover.
+process asks `clear` again.
+
+#### What an ending does with each step
+
+A run that ends by a cancel is closing until it holds nothing: every session, workspace, job and scope
+it opened is released, and a release is a step with its own result. Cancelling the release left the run
+closing on a session no one closed, until the host's stop grace (60 s) cancelled the whole run and it
+ended as `stopped`, a minute late. So each kind of step declares what an ending does with it
+(`request_end_policy`, beside `request_close_policy`; its match is exhaustive, so a new kind takes a
+side):
+
+- `CANCEL` is the default: work the run no longer wants (turns, measurements, setup, reads, snapshots).
+  `decide` returns `Cancel(RUN_ENDING)` while an attempt runs and `Settle(Cancelled(RUN_ENDING))`
+  while none does.
+- `RELEASE` frees what the run holds: `CloseSession`, `CloseAttemptScope`, `DiscardWorkspace`,
+  `CancelTurn`, `CancelOwnedJob`, and a registered operation whose descriptor discards a workspace.
+  It starts and runs like any step and ends within its own limit; the ending waits for it.
+
+A run that has ended (`TERMINAL`) ends every step whatever its kind. A drain stop is not an ending by
+cancel: it lets the admitted work finish, and the run ends when that work's limit does.
+`libs/vs-core/tests/test_recovery_run_ending.py` holds the rule over generated runs, and
+`libs/vs-dst/tests/test_stops_end_promptly.py` stops a run at every point by every kind of stop (operator
+cancel and drain, the deadline, the run environment) and requires it to end holding no session within
+the time its work needs. `_run_park._DRAIN_EFFECTS` is the pause's own list of what it lets finish; the two
+lists answer different questions (what a pause lets end, and what an ending must free) and share no
+member rule yet.
 
 #### Rest, drain, end and resume
 
