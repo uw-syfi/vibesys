@@ -6,6 +6,7 @@
  * no layout, so they ran in Chromium for nothing. The browser keeps where things sit and axe.
  */
 import {afterAll, afterEach, beforeAll, expect, test} from 'bun:test';
+import {FakeClock} from '@vibesys/transport/testing';
 import {Window} from 'happy-dom';
 import {act} from 'react';
 import {press} from './testing/dom-controls.js';
@@ -48,7 +49,7 @@ afterEach(async () => {
 
 /** The page over `scripted`, registered to close with the test. */
 async function open(scripted: MachinesWorld): Promise<OpenShell> {
-  const shell = await openMachines(scripted);
+  const shell = await openMachines(scripted, new FakeClock().schedule);
   shells.push(shell);
   return shell;
 }

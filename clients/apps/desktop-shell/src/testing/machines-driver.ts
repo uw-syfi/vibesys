@@ -3,7 +3,7 @@
  * Test, the rail's warning, and the page opened over a world with its hosts' live data scripted.
  * The caller closes the shell it is given.
  */
-import {FakeClock} from '@vibesys/transport/testing';
+import type {ScheduleTimeout} from '@vibesys/transport';
 import {press} from './dom-controls.js';
 import {all, maybe, one, see, settle, textOf, until} from './dom-query.js';
 import {type MachinesWorld, subscriptionSeedOf, WORLDS} from './machines-world.js';
@@ -61,11 +61,14 @@ export const warning = (shell: OpenShell, word = 'Unreachable'): HTMLElement | n
   maybe(rail(shell), {role: 'button', name: new RegExp(`^Machines, ${word}$`)});
 
 /** The page over `scripted`, once every machine's first answer is in. */
-export async function openMachines(scripted: MachinesWorld): Promise<OpenShell> {
+export async function openMachines(
+  scripted: MachinesWorld,
+  schedule: ScheduleTimeout,
+): Promise<OpenShell> {
   const shell = await openShell(
     {kind: 'machines'},
     {
-      schedule: new FakeClock().schedule,
+      schedule,
       seed: scripted.seed,
       subscriptions: subscriptionSeedOf(scripted),
       now: NOW,

@@ -6,6 +6,7 @@
  * the summary line's cells).
  */
 import {afterAll, afterEach, beforeAll, expect, test} from 'bun:test';
+import {FakeClock} from '@vibesys/transport/testing';
 import {Window} from 'happy-dom';
 import {act} from 'react';
 import {press} from './testing/dom-controls.js';
@@ -39,7 +40,7 @@ afterEach(async () => {
 
 async function open(name: string): Promise<OpenShell> {
   const scripted: MachinesWorld = world(name);
-  const shell = await openMachines(scripted);
+  const shell = await openMachines(scripted, new FakeClock().schedule);
   shells.push(shell);
   return shell;
 }
