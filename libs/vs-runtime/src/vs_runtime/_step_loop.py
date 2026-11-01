@@ -506,10 +506,18 @@ class _StepLoop:
         self._reap()
 
     def _reap(self) -> None:
+        """Take back the tasks that ended; a failure of one is the loop's own.
+
+        The input is a task like a flight: if it failed, the log refused what it was handed, and
+        asking for the next input again would fail again at once with nothing to wait on, so the
+        loop would spin without ever returning.
+        """
         for tag, flight in list(self._flights.items()):
             if flight.task is not None and flight.task.done():
                 del self._flights[tag]
                 flight.task.result()
+        if self._input is not None and self._input.done() and not self._input.cancelled():
+            self._input.result()
 
     async def _abandon_flights(self) -> None:
         tasks = [f.task for f in self._flights.values() if f.task is not None]
