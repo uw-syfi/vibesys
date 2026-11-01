@@ -172,6 +172,10 @@ function cases(random: Seeded): Case[] {
       {kind: 'usage-rates-refresh', host, force, now: 1_000},
     ],
     [
+      bridge => bridge.usageLimits(key, 60, 1_000),
+      {kind: 'usage-limits', host, maxAgeS: 60, now: 1_000},
+    ],
+    [
       bridge => bridge.usagePricesSave(key, 2, [], [{from: name, to: 'm'}]),
       {
         kind: 'usage-prices-save',

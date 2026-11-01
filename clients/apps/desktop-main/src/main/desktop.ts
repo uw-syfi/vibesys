@@ -53,6 +53,7 @@ export interface DesktopDeps {
     | 'usageWindow'
     | 'usageSummary'
     | 'usageRatesRefresh'
+    | 'usageLimits'
     | 'usagePricesSave'
     | 'logs'
     | 'recent'
@@ -272,6 +273,7 @@ export class Desktop {
           | 'usage-window'
           | 'usage-summary'
           | 'usage-rates-refresh'
+          | 'usage-limits'
           | 'usage-prices-save';
       }
     >,
@@ -291,6 +293,8 @@ export class Desktop {
         return hosts.usageSummary(request.host, request.projects, request.edges, request.now);
       case 'usage-rates-refresh':
         return hosts.usageRatesRefresh(request.host, request.force, request.now);
+      case 'usage-limits':
+        return hosts.usageLimits(request.host, request.maxAgeS, request.now);
       case 'usage-prices-save':
         return hosts.usagePricesSave(
           request.host,
@@ -372,6 +376,7 @@ export class Desktop {
       case 'usage-window':
       case 'usage-summary':
       case 'usage-rates-refresh':
+      case 'usage-limits':
       case 'usage-prices-save':
         return this.#answerUsage(request);
       case 'release-run':

@@ -48,6 +48,7 @@ const (
 	HostOperationsService_UsageWindow_FullMethodName        = "/vibesys.api.v1.HostOperationsService/UsageWindow"
 	HostOperationsService_UsageSummary_FullMethodName       = "/vibesys.api.v1.HostOperationsService/UsageSummary"
 	HostOperationsService_UsageRatesRefresh_FullMethodName  = "/vibesys.api.v1.HostOperationsService/UsageRatesRefresh"
+	HostOperationsService_UsageLimits_FullMethodName        = "/vibesys.api.v1.HostOperationsService/UsageLimits"
 	HostOperationsService_UsagePricesSave_FullMethodName    = "/vibesys.api.v1.HostOperationsService/UsagePricesSave"
 )
 
@@ -104,6 +105,8 @@ type HostOperationsServiceClient interface {
 	UsageSummary(ctx context.Context, in *v1.UsageSummaryRequest, opts ...grpc.CallOption) (*v1.UsageSummaryResponse, error)
 	// Fetch the price list if one is due. A read: it changes only the host's cache of the list.
 	UsageRatesRefresh(ctx context.Context, in *v1.UsageRatesRefreshRequest, opts ...grpc.CallOption) (*v1.UsageRatesRefreshResponse, error)
+	// The Limits tab's read: each provider's plan limits, from its CLI or the host's last good reading.
+	UsageLimits(ctx context.Context, in *v1.UsageLimitsRequest, opts ...grpc.CallOption) (*v1.UsageLimitsResponse, error)
 	UsagePricesSave(ctx context.Context, in *v1.UsagePricesSaveRequest, opts ...grpc.CallOption) (*v1.UsagePricesSaveResponse, error)
 }
 
@@ -413,6 +416,16 @@ func (c *hostOperationsServiceClient) UsageRatesRefresh(ctx context.Context, in 
 	return out, nil
 }
 
+func (c *hostOperationsServiceClient) UsageLimits(ctx context.Context, in *v1.UsageLimitsRequest, opts ...grpc.CallOption) (*v1.UsageLimitsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(v1.UsageLimitsResponse)
+	err := c.cc.Invoke(ctx, HostOperationsService_UsageLimits_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *hostOperationsServiceClient) UsagePricesSave(ctx context.Context, in *v1.UsagePricesSaveRequest, opts ...grpc.CallOption) (*v1.UsagePricesSaveResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(v1.UsagePricesSaveResponse)
@@ -476,6 +489,8 @@ type HostOperationsServiceServer interface {
 	UsageSummary(context.Context, *v1.UsageSummaryRequest) (*v1.UsageSummaryResponse, error)
 	// Fetch the price list if one is due. A read: it changes only the host's cache of the list.
 	UsageRatesRefresh(context.Context, *v1.UsageRatesRefreshRequest) (*v1.UsageRatesRefreshResponse, error)
+	// The Limits tab's read: each provider's plan limits, from its CLI or the host's last good reading.
+	UsageLimits(context.Context, *v1.UsageLimitsRequest) (*v1.UsageLimitsResponse, error)
 	UsagePricesSave(context.Context, *v1.UsagePricesSaveRequest) (*v1.UsagePricesSaveResponse, error)
 	mustEmbedUnimplementedHostOperationsServiceServer()
 }
@@ -570,6 +585,9 @@ func (UnimplementedHostOperationsServiceServer) UsageSummary(context.Context, *v
 }
 func (UnimplementedHostOperationsServiceServer) UsageRatesRefresh(context.Context, *v1.UsageRatesRefreshRequest) (*v1.UsageRatesRefreshResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UsageRatesRefresh not implemented")
+}
+func (UnimplementedHostOperationsServiceServer) UsageLimits(context.Context, *v1.UsageLimitsRequest) (*v1.UsageLimitsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UsageLimits not implemented")
 }
 func (UnimplementedHostOperationsServiceServer) UsagePricesSave(context.Context, *v1.UsagePricesSaveRequest) (*v1.UsagePricesSaveResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UsagePricesSave not implemented")
@@ -1085,6 +1103,24 @@ func _HostOperationsService_UsageRatesRefresh_Handler(srv interface{}, ctx conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _HostOperationsService_UsageLimits_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(v1.UsageLimitsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostOperationsServiceServer).UsageLimits(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostOperationsService_UsageLimits_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostOperationsServiceServer).UsageLimits(ctx, req.(*v1.UsageLimitsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _HostOperationsService_UsagePricesSave_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(v1.UsagePricesSaveRequest)
 	if err := dec(in); err != nil {
@@ -1213,6 +1249,10 @@ var HostOperationsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UsageRatesRefresh",
 			Handler:    _HostOperationsService_UsageRatesRefresh_Handler,
+		},
+		{
+			MethodName: "UsageLimits",
+			Handler:    _HostOperationsService_UsageLimits_Handler,
 		},
 		{
 			MethodName: "UsagePricesSave",

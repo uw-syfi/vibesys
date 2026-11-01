@@ -20,7 +20,14 @@ from server import lazy_module
 
 if TYPE_CHECKING:
     from entrypoints import host_helper
-    from server import host_api, host_helper_requests, host_machine_facts, host_operation_reads
+    from server import (
+        host_api,
+        host_helper_requests,
+        host_machine_facts,
+        host_operation_reads,
+        usage_limits_store,
+    )
+    from server.usage_limits import LimitsReader
     from vs_sim import api as sim
     from vs_sim.api import HttpsGet, Platform
 else:
@@ -28,6 +35,7 @@ else:
     sim = lazy_module("vs_sim.api")
     host_helper_requests = lazy_module("server.host_helper_requests")
     host_operation_reads = lazy_module("server.host_operation_reads")
+    usage_limits_store = lazy_module("server.usage_limits_store")
 
 
 class ReadHost(HostFacts):
@@ -54,6 +62,11 @@ def _https() -> HttpsGet:
     return sim.UrllibHttpsGet()
 
 
+def _limits() -> LimitsReader:
+    """The reader of provider limits; the agent library loads when a limits read asks."""
+    return usage_limits_store.reader_here()
+
+
 def read_source(platform: Platform) -> host_operation_reads.HostReadSource:
     """The read adapter over this process's user, host and ``platform``."""
     host = ReadHost(
@@ -64,7 +77,11 @@ def read_source(platform: Platform) -> host_operation_reads.HostReadSource:
         processes=platform.processes,
     )
     return host_operation_reads.HostReadSource(
-        host, None, describe=host.describe, preflight=host.preflight, https=_https
+        host,
+        None,
+        describe=host.describe,
+        preflight=host.preflight,
+        outside=host_operation_reads.Outside(https=_https, limits=_limits),
     )
 
 

@@ -65,7 +65,12 @@ export type NewRunMethods =
   | 'startRun';
 
 /** What `installFakeUsage` provides: what a machine made of its usage, its prices, and saving them. */
-export type UsageMethods = 'usageWindow' | 'usageSummary' | 'usageRatesRefresh' | 'usagePricesSave';
+export type UsageMethods =
+  | 'usageWindow'
+  | 'usageSummary'
+  | 'usageLimits'
+  | 'usageRatesRefresh'
+  | 'usagePricesSave';
 
 /** What `installFakeExampleDestination` provides: what an example's destination holds. */
 export type ExampleDestinationMethods = 'exampleDestination';
@@ -521,6 +526,75 @@ export function installFakeUsage(seed: FakeBridgeSeed): void {
       return Promise.resolve({ok: true, value});
     },
   } satisfies FakeProvides<'usageWindow' | 'usageSummary'>);
+}
+
+/**
+ * The limits part of the Usage Fake, a further init script: each reachable machine reads its two
+ * providers, Claude with a session, a weekly and a per-model window and Codex with one weekly
+ * window and a reset credit, the same numbers on every machine as one account on several would
+ * show. A machine `seed.usage` makes fail or lack the question fails or lacks this one; the
+ * questions asked are in `fakeHost.usageLimitsAsked`.
+ */
+export function installFakeUsageLimits(seed: FakeBridgeSeed): void {
+  const answers = (seed.usage ?? {}) as Record<string, UsageHostSeed | string>;
+  const asked: unknown[] = [];
+  (window as unknown as {fakeHost: Record<string, unknown>}).fakeHost['usageLimitsAsked'] = asked;
+  const hour = 3_600_000;
+  Object.assign((window as unknown as {vibesysWelcome: object}).vibesysWelcome, {
+    usageLimits: (host: string, maxAgeS: number, now: number) => {
+      asked.push({host, maxAgeS, now});
+      const own = answers[host];
+      if (own === 'failed') return Promise.resolve({ok: false, error: 'Could not read the limits'});
+      if (own === undefined || typeof own === 'string') {
+        return Promise.resolve({ok: true, value: {kind: 'unsupported'}});
+      }
+      const window = (id: string, kind: string, label: string, used: number, hours: number) => ({
+        id,
+        kind,
+        label,
+        usedFraction: used,
+        resetsAt: now + hours * hour,
+        windowMinutes: kind === 'session' ? 300 : 10_080,
+      });
+      const reading = (provider: string, plan: string, windows: unknown[], credits: number) => ({
+        provider,
+        status: 'live',
+        unavailable: null,
+        limits: {
+          provider,
+          account: `${provider}-account`,
+          plan,
+          windows,
+          resetCreditsAvailable: credits,
+          resetCredits: Array.from({length: credits}, (_, at) => ({
+            id: `credit-${at}`,
+            expiresAt: null,
+            title: 'Reset',
+          })),
+          usageUrl: null,
+          readAt: now,
+        },
+      });
+      const claude = [
+        window('five_hour', 'session', 'Session', 0.39, 3),
+        window('seven_day', 'weekly', 'Weekly', 0.28, 40),
+        window('seven_day_model-a', 'weekly', 'Weekly · Model A', 0, 40),
+      ];
+      return Promise.resolve({
+        ok: true,
+        value: {
+          kind: 'limits',
+          limits: {
+            readAt: now,
+            providers: [
+              reading('claude', 'team', claude, 0),
+              reading('codex', 'pro', [window('codex:primary', 'weekly', 'Weekly', 0.03, 150)], 1),
+            ],
+          },
+        },
+      });
+    },
+  } satisfies FakeProvides<'usageLimits'>);
 }
 
 /**

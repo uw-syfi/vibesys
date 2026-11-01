@@ -32,6 +32,7 @@ message ReadRequest {
     vibesys.host.v1.UsageWindowRequest usage_window = 42;
     vibesys.host.v1.UsageSummaryRequest usage_summary = 44;
     vibesys.host.v1.UsageRatesRefreshRequest usage_rates_refresh = 45;
+    vibesys.host.v1.UsageLimitsRequest usage_limits = 47;
   }
 }
 
@@ -55,5 +56,6 @@ message ReadResponse {
     vibesys.host.v1.UsageWindowResponse usage_window = 42;
     vibesys.host.v1.UsageSummaryResponse usage_summary = 44;
     vibesys.host.v1.UsageRatesRefreshResponse usage_rates_refresh = 45;
+    vibesys.host.v1.UsageLimitsResponse usage_limits = 47;
   }
 }

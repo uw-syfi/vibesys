@@ -76,6 +76,7 @@ const VALID_ARGUMENTS: Readonly<
   [WELCOME_CHANNELS.usageWindow]: ['local', '/srv/project', ['run-1'], 1_000, 2_000],
   [WELCOME_CHANNELS.usageSummary]: ['local', ['/srv/project'], [0, 900_000], 1_000],
   [WELCOME_CHANNELS.usageRatesRefresh]: ['local', false, 1_000],
+  [WELCOME_CHANNELS.usageLimits]: ['local', 60, 1_000],
   [WELCOME_CHANNELS.usagePricesSave]: [
     'local',
     0,

@@ -7,6 +7,10 @@ import {
   ReadRequestSchema,
   ReadResponseSchema,
   UsageEstimateSource,
+  UsageLimitKind,
+  UsageLimitsResponseSchema,
+  UsageLimitsStatus,
+  UsageLimitsUnavailable,
   UsageOrigin,
   UsagePricesSaveResponseSchema,
   UsagePricesStatus,
@@ -173,6 +177,92 @@ test('a refresh answers how current the host’s rates are after', async () => {
   expect(await usage.refreshRates(HOST, true, 1_000, LIVE)).toMatchObject({
     kind: 'pricing',
     pricing: {status: 'cached', refreshDue: true},
+  });
+});
+
+test('a limits question sends the age and the time, and reads each provider as stored, stale or none', async () => {
+  const READ_AT = {seconds: 1_790_000_000n, nanos: 0};
+  const {usage, sent} = answering(bytes =>
+    toBinary(
+      ReadResponseSchema,
+      create(ReadResponseSchema, {
+        result: {
+          case: 'usageLimits',
+          value: create(UsageLimitsResponseSchema, {
+            requestId: idOf(bytes, ReadRequestSchema),
+            readAt: READ_AT,
+            providers: [
+              {
+                provider: 'codex',
+                status: UsageLimitsStatus.STALE,
+                unavailable: UsageLimitsUnavailable.PROBE_FAILED,
+                limits: {
+                  provider: 'codex',
+                  account: 'digest',
+                  plan: 'pro',
+                  readAt: {seconds: 1_789_990_000n, nanos: 0},
+                  resetCreditsAvailable: 1,
+                  resetCredits: [{id: 'c1', title: 'Reset'}],
+                  windows: [
+                    {
+                      id: 'codex:primary',
+                      kind: UsageLimitKind.WEEKLY,
+                      label: 'Weekly',
+                      usedFraction: 0.25,
+                      resetsAt: {seconds: 1_790_500_000n, nanos: 0},
+                      windowMinutes: 10_080,
+                    },
+                  ],
+                },
+              },
+              {
+                provider: 'claude',
+                status: UsageLimitsStatus.UNAVAILABLE,
+                unavailable: UsageLimitsUnavailable.API_KEY,
+              },
+            ],
+          }),
+        },
+      }),
+    ),
+  );
+  const outcome = await usage.limits(HOST, 300, 1_790_000_000_000, LIVE);
+  const method = fromBinary(ReadRequestSchema, sent[0] ?? new Uint8Array()).method;
+  expect(method.case).toBe('usageLimits');
+  if (method.case !== 'usageLimits') return;
+  expect(method.value.maxAgeS).toBe(300);
+  expect(Number(method.value.now?.seconds)).toBe(1_790_000_000);
+  if (outcome.kind !== 'limits') throw new Error('expected limits');
+  expect(outcome.limits.readAt).toBe(1_790_000_000_000);
+  expect(outcome.limits.providers[0]).toEqual({
+    provider: 'codex',
+    status: 'stale',
+    unavailable: 'probe-failed',
+    limits: {
+      provider: 'codex',
+      account: 'digest',
+      plan: 'pro',
+      readAt: 1_789_990_000_000,
+      resetCreditsAvailable: 1,
+      resetCredits: [{id: 'c1', expiresAt: null, title: 'Reset'}],
+      usageUrl: null,
+      windows: [
+        {
+          id: 'codex:primary',
+          kind: 'weekly',
+          label: 'Weekly',
+          usedFraction: 0.25,
+          resetsAt: 1_790_500_000_000,
+          windowMinutes: 10_080,
+        },
+      ],
+    },
+  });
+  expect(outcome.limits.providers[1]).toEqual({
+    provider: 'claude',
+    status: 'unavailable',
+    unavailable: 'api-key',
+    limits: null,
   });
 });
 

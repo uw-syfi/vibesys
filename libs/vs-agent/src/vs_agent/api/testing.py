@@ -10,12 +10,18 @@ from typing import TYPE_CHECKING
 
 import agentshim
 from agentshim.testing import (
+    ClaudeStreamPeers,
+    CodexAccount,
+    CodexScript,
+    CodexWindow,
     FakeClock,
     FakeConfinement,
     FakeExecutor,
     FakeRun,
     SequentialIds,
     TokenUsage,
+    claude_account,
+    claude_usage,
     installed_mcp_servers,
     scripted_turn,
 )
@@ -32,6 +38,7 @@ from vs_agent.fake_docker_build_runner import (
     docker_result_without_output,
     docker_timed_out,
 )
+from vs_agent.fake_limits_reader import FakeLimitsReader, limits_executor
 from vs_agent.fault_injection import (
     KILLED_STATUS,
     MALFORMED_LINE,
@@ -88,6 +95,10 @@ __all__ = [
     "NOT_A_REPLY",
     "TURN_BUDGET_S",
     "AgentCrashError",
+    "ClaudeStreamPeers",
+    "CodexAccount",
+    "CodexScript",
+    "CodexWindow",
     "CommandExecutor",
     "CommandRequest",
     "ConversationFaultKind",
@@ -103,6 +114,7 @@ __all__ = [
     "FakeDockerBuildRunner",
     "FakeExecutor",
     "FakeInvocation",
+    "FakeLimitsReader",
     "FakeProvider",
     "FakeProviderError",
     "FakeRun",
@@ -120,6 +132,8 @@ __all__ = [
     "Transport",
     "answering_with",
     "assistant_text",
+    "claude_account",
+    "claude_usage",
     "docker_build_result",
     "docker_result",
     "docker_result_without_output",
@@ -129,6 +143,7 @@ __all__ = [
     "fake_stream_launcher",
     "generated_replies",
     "installed_mcp_servers",
+    "limits_executor",
     "scripted_turn",
     "stream_peers",
     "thinking",

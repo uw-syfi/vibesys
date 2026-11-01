@@ -26,6 +26,7 @@ message AcceptedOperation {
     UsageWindowRequest usage_window = 42;
     UsageSummaryRequest usage_summary = 44;
     UsageRatesRefreshRequest usage_rates_refresh = 45;
+    UsageLimitsRequest usage_limits = 47;
     CreateExampleRequest create_example = 34;
     CopyProjectRequest copy_project = 35;
     PutClusterRequest put_cluster = 31;
@@ -57,6 +58,7 @@ message OperationResult {
     UsageWindowResponse usage_window = 42;
     UsageSummaryResponse usage_summary = 44;
     UsageRatesRefreshResponse usage_rates_refresh = 45;
+    UsageLimitsResponse usage_limits = 47;
     CreateExampleResponse create_example = 34;
     CopyProjectResponse copy_project = 35;
     PutClusterResponse put_cluster = 31;

@@ -38,6 +38,7 @@ import {
   type ListedRun,
   type RunDigestsReply,
   type UsageAliasEntry,
+  type UsageLimitsOutcome,
   type UsagePricesOutcome,
   type UsageRateOverrideEntry,
   type UsageRatesOutcome,
@@ -650,6 +651,19 @@ export class Hosts {
     } catch (error) {
       if (isHostUnsupported(error)) return {kind: 'unsupported'};
       throw plain(error, 'Could not refresh the prices');
+    }
+  }
+
+  /**
+   * Ask `id` for each provider's plan limits; a stored reading younger than `maxAgeS` seconds is
+   * answered as it is.
+   */
+  async usageLimits(id: HostId, maxAgeS: number, now: number): Promise<UsageLimitsOutcome> {
+    try {
+      return await this.#usage().limits(id, maxAgeS, now, new AbortController().signal);
+    } catch (error) {
+      if (isHostUnsupported(error)) return {kind: 'unsupported'};
+      throw plain(error, 'Could not read the limits');
     }
   }
 

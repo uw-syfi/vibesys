@@ -38,6 +38,8 @@ func DispatchHostRead(request *apiv1.ReadRequest) (HostCall, bool) {
 		return HostCall{CLI: "usage-summary", Deadline: 25000 * time.Millisecond, Executor: 1, Effect: 1}, true
 	case request.GetUsageRatesRefresh() != nil:
 		return HostCall{CLI: "usage-rates-refresh", Deadline: 60000 * time.Millisecond, Executor: 1, Effect: 1}, true
+	case request.GetUsageLimits() != nil:
+		return HostCall{CLI: "usage-limits", Deadline: 30000 * time.Millisecond, Executor: 1, Effect: 1}, true
 	default:
 		return HostCall{}, false
 	}
@@ -90,6 +92,9 @@ func HostReadResponseValid(request *apiv1.ReadRequest, response *apiv1.ReadRespo
 	case request.GetUsageRatesRefresh() != nil:
 		got := response.GetUsageRatesRefresh()
 		return got != nil && got.GetRequestId() == request.GetUsageRatesRefresh().GetRequestId()
+	case request.GetUsageLimits() != nil:
+		got := response.GetUsageLimits()
+		return got != nil && got.GetRequestId() == request.GetUsageLimits().GetRequestId()
 	default:
 		return false
 	}

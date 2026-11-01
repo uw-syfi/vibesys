@@ -105,6 +105,7 @@ const WELCOME_ARGUMENT_COUNTS = {
   [WELCOME_CHANNELS.usageWindow]: 5,
   [WELCOME_CHANNELS.usageSummary]: 4,
   [WELCOME_CHANNELS.usageRatesRefresh]: 3,
+  [WELCOME_CHANNELS.usageLimits]: 3,
   [WELCOME_CHANNELS.usagePricesSave]: 4,
   [WELCOME_CHANNELS.preferences]: 0,
   [WELCOME_CHANNELS.setAppearance]: 1,

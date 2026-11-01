@@ -35,6 +35,10 @@ class ReadSource(Protocol):
         """Fetch the price list if one is due; how current the host's rates are after."""
         ...
 
+    def usage_limits(self, request: pb.UsageLimitsRequest) -> pb.UsageLimitsResponse:
+        """What each provider's plan limits are, from its CLI or the host's last good reading."""
+        ...
+
     def tasks(self, project: str) -> pb.TaskList:
         """The canonical project's task catalog."""
         ...

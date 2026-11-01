@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/host/v1/usage_state.proto.
  */
 export const file_vibesys_host_v1_usage_state: GenFile = /*@__PURE__*/
-  fileDesc("CiF2aWJlc3lzL2hvc3QvdjEvdXNhZ2Vfc3RhdGUucHJvdG8SD3ZpYmVzeXMuaG9zdC52MSKKAgoJVXNhZ2VSYXRlEigKBWlucHV0GAEgASgBQhm6SBYSFEABGQAAAACAhC5BKQAAAAAAAAAAEikKBm91dHB1dBgCIAEoAUIZukgWEhRAARkAAAAAgIQuQSkAAAAAAAAAABItCgpjYWNoZV9yZWFkGAMgASgBQhm6SBYSFEABGQAAAACAhC5BKQAAAAAAAAAAEi4KC2NhY2hlX3dyaXRlGAQgASgBQhm6SBYSFEABGQAAAACAhC5BKQAAAAAAAAAAEjYKDmNhY2hlX3dyaXRlXzFoGAUgASgBQhm6SBYSFEABGQAAAACAhC5BKQAAAAAAAAAASACIAQFCEQoPX2NhY2hlX3dyaXRlXzFoImAKEVVzYWdlUmF0ZU92ZXJyaWRlEhkKBW1vZGVsGAEgASgJQgq6SAdyBRABKIABEjAKBHJhdGUYAiABKAsyGi52aWJlc3lzLmhvc3QudjEuVXNhZ2VSYXRlQga6SAPIAQEiPgoKVXNhZ2VBbGlhcxIYCgRmcm9tGAEgASgJQgq6SAdyBRABKIABEhYKAnRvGAIgASgJQgq6SAdyBRABKIABIp0BCg5Vc2FnZVByaWNlQm9vaxIQCghyZXZpc2lvbhgBIAEoBBJACglvdmVycmlkZXMYAiADKAsyIi52aWJlc3lzLmhvc3QudjEuVXNhZ2VSYXRlT3ZlcnJpZGVCCbpIBpIBAxCAAhI3CgdhbGlhc2VzGAMgAygLMhsudmliZXN5cy5ob3N0LnYxLlVzYWdlQWxpYXNCCbpIBpIBAxCAAiLPAQoMVXNhZ2VQcmljaW5nEjMKBnN0YXR1cxgBIAEoDjIjLnZpYmVzeXMuaG9zdC52MS5Vc2FnZVByaWNpbmdTdGF0dXMSMwoKZmV0Y2hlZF9hdBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBIAIgBARIUCgxrbm93bl9tb2RlbHMYAyABKA0SEwoLcmVmcmVzaF9kdWUYBCABKAgSGwoKY2hlY2tlZF9vbhgFIAEoCUIHukgEcgIoEEINCgtfZmV0Y2hlZF9hdCLkAgoRVXNhZ2VSYXRlU25hcHNob3QSIQoIZG9jdW1lbnQYASABKAxCCrpIB3oFGICAgBBIAIgBARIzCgpmZXRjaGVkX2F0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEgBiAEBEjgKD2xhc3RfYXR0ZW1wdF9hdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBIAogBATqMAbpIiAEahQEKG3VzYWdlX3JhdGVfc25hcHNob3QuZmV0Y2hlZBI6YSBzbmFwc2hvdCBoYXMgYSBmZXRjaCB0aW1lIGV4YWN0bHkgd2hlbiBpdCBoYXMgYSBkb2N1bWVudBoqaGFzKHRoaXMuZG9jdW1lbnQpID09IGhhcyh0aGlzLmZldGNoZWRfYXQpQgsKCV9kb2N1bWVudEINCgtfZmV0Y2hlZF9hdEISChBfbGFzdF9hdHRlbXB0X2F0IjgKE1VzYWdlU291cmNlSWRlbnRpdHkSIQoCaWQYASABKAlCFbpIEnIQMg5eWzAtOWEtZl17MzJ9JCLyAgoMTGltaXRSZWFkaW5nEhoKCHByb3ZpZGVyGAEgASgJQgi6SAVyAyiAAhIdCgZ3aW5kb3cYAiABKAlCCLpIBXIDKIACSACIAQESHAoFbGltaXQYAyABKAlCCLpIBXIDKIACSAGIAQESLAoNdXNlZF9mcmFjdGlvbhgEIAEoAUIQukgNEgtAASkAAAAAAAAAAEgCiAEBEjIKCXJlc2V0c19hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBIA4gBARIbCg53aW5kb3dfbWludXRlcxgGIAEoDUgEiAEBEhEKCWV4aGF1c3RlZBgHIAEoCBIvCgtvYnNlcnZlZF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCCQoHX3dpbmRvd0IICgZfbGltaXRCEAoOX3VzZWRfZnJhY3Rpb25CDAoKX3Jlc2V0c19hdEIRCg9fd2luZG93X21pbnV0ZXMi0wMKDlJ1blVzYWdlUm9sbHVwEg8KB3ZlcnNpb24YASABKA0SOQoHam91cm5hbBgCIAEoCzIgLnZpYmVzeXMuaG9zdC52MS5Kb3VybmFsSWRlbnRpdHlCBrpIA8gBARItCgRyb3dzGAMgAygLMh8udmliZXN5cy5ob3N0LnYxLlVzYWdlUm9sbHVwUm93EhwKFHByb3ZpZGVyX3Nlc3Npb25faWRzGAQgAygJEhwKFHNlc3Npb25faWRzX2NvbXBsZXRlGAUgASgIEjYKDWZpcnN0X3R1cm5fYXQYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wSACIAQESNQoMbGFzdF90dXJuX2F0GAcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEgBiAEBEjIKC2xhc3RfbGltaXRzGAggAygLMh0udmliZXN5cy5ob3N0LnYxLkxpbWl0UmVhZGluZxItCgluZXdfYmVzdHMYCSADKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhUKDXVudGltZWRfdHVybnMYCiABKA1CEAoOX2ZpcnN0X3R1cm5fYXRCDwoNX2xhc3RfdHVybl9hdCJ7Cg9Kb3VybmFsSWRlbnRpdHkSEAoIYm91bmRhcnkYASABKAQSKgoLaGVhZF9zaGEyNTYYAiABKAlCFbpIEnIQMg5eWzAtOWEtZl17NjR9JBIqCgt0YWlsX3NoYTI1NhgDIAEoCUIVukgSchAyDl5bMC05YS1mXXs2NH0kIqQDCg5Vc2FnZVJvbGx1cFJvdxIPCgdxdWFydGVyGAEgASgDEhoKCHByb3ZpZGVyGAIgASgJQgi6SAVyAyiAAhIXCgVtb2RlbBgDIAEoCUIIukgFcgMogAQSNwoFc3BlZWQYBCABKA4yHC52aWJlc3lzLnN0b3JlLnYxLlVzYWdlU3BlZWRCCrpIB4IBBBABIAASFgoEcm9sZRgFIAEoCUIIukgFcgMogAISOwoFYmFzaXMYBiABKA4yIC52aWJlc3lzLnN0b3JlLnYxLlVzYWdlQ29zdEJhc2lzQgq6SAeCAQQQASAAEg0KBWlucHV0GAcgASgEEhIKCmNhY2hlX3JlYWQYCCABKAQSEwoLY2FjaGVfd3JpdGUYCSABKAQSFgoOY2FjaGVfd3JpdGVfMWgYCiABKAQSDgoGb3V0cHV0GAsgASgEEhEKCXJlYXNvbmluZxgMIAEoBBIrCgxyZWNvcmRlZF91c2QYDSABKAFCELpIDRILQAEpAAAAAAAAAABIAIgBARINCgV0dXJucxgOIAEoDUIPCg1fcmVjb3JkZWRfdXNkIqkCCg1UcmFuc2NyaXB0Um93Eg8KB3F1YXJ0ZXIYASABKAMSHAoKc2Vzc2lvbl9pZBgCIAEoCUIIukgFcgMogAISFQoDY3dkGAMgASgJQgi6SAVyAyiAIBIXCgVtb2RlbBgEIAEoCUIIukgFcgMogAQSNwoFc3BlZWQYBSABKA4yHC52aWJlc3lzLnN0b3JlLnYxLlVzYWdlU3BlZWRCCrpIB4IBBBABIAASDQoFaW5wdXQYBiABKAQSEgoKY2FjaGVfcmVhZBgHIAEoBBITCgtjYWNoZV93cml0ZRgIIAEoBBIWCg5jYWNoZV93cml0ZV8xaBgJIAEoBBIOCgZvdXRwdXQYCiABKAQSEQoJcmVhc29uaW5nGAsgASgEEg0KBXR1cm5zGAwgASgNIvQBChNUcmFuc2NyaXB0RmlsZVN0YXRlEhYKBHBhdGgYASABKAlCCLpIBXIDKIAgEgwKBHNpemUYAiABKAQSEAoIbXRpbWVfbnMYAyABKAMSDgoGb2Zmc2V0GAQgASgEEhQKDGd1YXJkX2xlbmd0aBgFIAEoDRISCgpndWFyZF9oYXNoGAYgASgNEhgKBXN0YXRlGAcgASgMQgm6SAZ6BBiAgEASEAoIY29tcGxldGUYCCABKAgSEQoJbWFsZm9ybWVkGAkgASgNEiwKBHJvd3MYCiADKAsyHi52aWJlc3lzLmhvc3QudjEuVHJhbnNjcmlwdFJvdyJ+ChNUcmFuc2NyaXB0Um9vdFN0YXRlEhoKCHByb3ZpZGVyGAEgASgJQgi6SAVyAyiAAhIWCgRwYXRoGAIgASgJQgi6SAVyAyiAIBIzCgVmaWxlcxgDIAMoCzIkLnZpYmVzeXMuaG9zdC52MS5UcmFuc2NyaXB0RmlsZVN0YXRlIlsKE1RyYW5zY3JpcHRTY2FuQ2FjaGUSDwoHdmVyc2lvbhgBIAEoDRIzCgVyb290cxgCIAMoCzIkLnZpYmVzeXMuaG9zdC52MS5UcmFuc2NyaXB0Um9vdFN0YXRlKu0BChNVc2FnZUVzdGltYXRlU291cmNlEiUKIVVTQUdFX0VTVElNQVRFX1NPVVJDRV9VTlNQRUNJRklFRBAAEiIKHlVTQUdFX0VTVElNQVRFX1NPVVJDRV9PVkVSUklERRABEiIKHlVTQUdFX0VTVElNQVRFX1NPVVJDRV9SRVBPUlRFRBACEiIKHlVTQUdFX0VTVElNQVRFX1NPVVJDRV9SRUNPUkRFRBADEh8KG1VTQUdFX0VTVElNQVRFX1NPVVJDRV9NT0RFTBAEEiIKHlVTQUdFX0VTVElNQVRFX1NPVVJDRV9VTlBSSUNFRBAFKmAKC1VzYWdlT3JpZ2luEhwKGFVTQUdFX09SSUdJTl9VTlNQRUNJRklFRBAAEhQKEFVTQUdFX09SSUdJTl9SVU4QARIdChlVU0FHRV9PUklHSU5fT1VUU0lERV9SVU5TEAIqdgoPVXNhZ2VTb3VyY2VLaW5kEiEKHVVTQUdFX1NPVVJDRV9LSU5EX1VOU1BFQ0lGSUVEEAASHQoZVVNBR0VfU09VUkNFX0tJTkRfSk9VUk5BTBABEiEKHVVTQUdFX1NPVVJDRV9LSU5EX1RSQU5TQ1JJUFRTEAIqtgEKEVVzYWdlU291cmNlU3RhdHVzEiMKH1VTQUdFX1NPVVJDRV9TVEFUVVNfVU5TUEVDSUZJRUQQABIaChZVU0FHRV9TT1VSQ0VfU1RBVFVTX09LEAESHwobVVNBR0VfU09VUkNFX1NUQVRVU19NSVNTSU5HEAISHwobVVNBR0VfU09VUkNFX1NUQVRVU19QQVJUSUFMEAMSHgoaVVNBR0VfU09VUkNFX1NUQVRVU19GQUlMRUQQBCqdAQoSVXNhZ2VQcmljaW5nU3RhdHVzEiQKIFVTQUdFX1BSSUNJTkdfU1RBVFVTX1VOU1BFQ0lGSUVEEAASHgoaVVNBR0VfUFJJQ0lOR19TVEFUVVNfRlJFU0gQARIfChtVU0FHRV9QUklDSU5HX1NUQVRVU19DQUNIRUQQAhIgChxVU0FHRV9QUklDSU5HX1NUQVRVU19CVU5ETEVEEAMqeAoRVXNhZ2VQcmljZXNTdGF0dXMSIwofVVNBR0VfUFJJQ0VTX1NUQVRVU19VTlNQRUNJRklFRBAAEhoKFlVTQUdFX1BSSUNFU19TVEFUVVNfT0sQARIiCh5VU0FHRV9QUklDRVNfU1RBVFVTX1VOUkVBREFCTEUQAkI/Wj1naXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9nYXRld2F5L2dlbi92aWJlc3lzL2hvc3QvdjE7aG9zdHYxYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_store_v1_agent_attrs]);
+  fileDesc("CiF2aWJlc3lzL2hvc3QvdjEvdXNhZ2Vfc3RhdGUucHJvdG8SD3ZpYmVzeXMuaG9zdC52MSKKAgoJVXNhZ2VSYXRlEigKBWlucHV0GAEgASgBQhm6SBYSFEABGQAAAACAhC5BKQAAAAAAAAAAEikKBm91dHB1dBgCIAEoAUIZukgWEhRAARkAAAAAgIQuQSkAAAAAAAAAABItCgpjYWNoZV9yZWFkGAMgASgBQhm6SBYSFEABGQAAAACAhC5BKQAAAAAAAAAAEi4KC2NhY2hlX3dyaXRlGAQgASgBQhm6SBYSFEABGQAAAACAhC5BKQAAAAAAAAAAEjYKDmNhY2hlX3dyaXRlXzFoGAUgASgBQhm6SBYSFEABGQAAAACAhC5BKQAAAAAAAAAASACIAQFCEQoPX2NhY2hlX3dyaXRlXzFoImAKEVVzYWdlUmF0ZU92ZXJyaWRlEhkKBW1vZGVsGAEgASgJQgq6SAdyBRABKIABEjAKBHJhdGUYAiABKAsyGi52aWJlc3lzLmhvc3QudjEuVXNhZ2VSYXRlQga6SAPIAQEiPgoKVXNhZ2VBbGlhcxIYCgRmcm9tGAEgASgJQgq6SAdyBRABKIABEhYKAnRvGAIgASgJQgq6SAdyBRABKIABIp0BCg5Vc2FnZVByaWNlQm9vaxIQCghyZXZpc2lvbhgBIAEoBBJACglvdmVycmlkZXMYAiADKAsyIi52aWJlc3lzLmhvc3QudjEuVXNhZ2VSYXRlT3ZlcnJpZGVCCbpIBpIBAxCAAhI3CgdhbGlhc2VzGAMgAygLMhsudmliZXN5cy5ob3N0LnYxLlVzYWdlQWxpYXNCCbpIBpIBAxCAAiLPAQoMVXNhZ2VQcmljaW5nEjMKBnN0YXR1cxgBIAEoDjIjLnZpYmVzeXMuaG9zdC52MS5Vc2FnZVByaWNpbmdTdGF0dXMSMwoKZmV0Y2hlZF9hdBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBIAIgBARIUCgxrbm93bl9tb2RlbHMYAyABKA0SEwoLcmVmcmVzaF9kdWUYBCABKAgSGwoKY2hlY2tlZF9vbhgFIAEoCUIHukgEcgIoEEINCgtfZmV0Y2hlZF9hdCLkAgoRVXNhZ2VSYXRlU25hcHNob3QSIQoIZG9jdW1lbnQYASABKAxCCrpIB3oFGICAgBBIAIgBARIzCgpmZXRjaGVkX2F0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEgBiAEBEjgKD2xhc3RfYXR0ZW1wdF9hdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBIAogBATqMAbpIiAEahQEKG3VzYWdlX3JhdGVfc25hcHNob3QuZmV0Y2hlZBI6YSBzbmFwc2hvdCBoYXMgYSBmZXRjaCB0aW1lIGV4YWN0bHkgd2hlbiBpdCBoYXMgYSBkb2N1bWVudBoqaGFzKHRoaXMuZG9jdW1lbnQpID09IGhhcyh0aGlzLmZldGNoZWRfYXQpQgsKCV9kb2N1bWVudEINCgtfZmV0Y2hlZF9hdEISChBfbGFzdF9hdHRlbXB0X2F0IjgKE1VzYWdlU291cmNlSWRlbnRpdHkSIQoCaWQYASABKAlCFbpIEnIQMg5eWzAtOWEtZl17MzJ9JCLyAgoMTGltaXRSZWFkaW5nEhoKCHByb3ZpZGVyGAEgASgJQgi6SAVyAyiAAhIdCgZ3aW5kb3cYAiABKAlCCLpIBXIDKIACSACIAQESHAoFbGltaXQYAyABKAlCCLpIBXIDKIACSAGIAQESLAoNdXNlZF9mcmFjdGlvbhgEIAEoAUIQukgNEgtAASkAAAAAAAAAAEgCiAEBEjIKCXJlc2V0c19hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBIA4gBARIbCg53aW5kb3dfbWludXRlcxgGIAEoDUgEiAEBEhEKCWV4aGF1c3RlZBgHIAEoCBIvCgtvYnNlcnZlZF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCCQoHX3dpbmRvd0IICgZfbGltaXRCEAoOX3VzZWRfZnJhY3Rpb25CDAoKX3Jlc2V0c19hdEIRCg9fd2luZG93X21pbnV0ZXMi0wMKDlJ1blVzYWdlUm9sbHVwEg8KB3ZlcnNpb24YASABKA0SOQoHam91cm5hbBgCIAEoCzIgLnZpYmVzeXMuaG9zdC52MS5Kb3VybmFsSWRlbnRpdHlCBrpIA8gBARItCgRyb3dzGAMgAygLMh8udmliZXN5cy5ob3N0LnYxLlVzYWdlUm9sbHVwUm93EhwKFHByb3ZpZGVyX3Nlc3Npb25faWRzGAQgAygJEhwKFHNlc3Npb25faWRzX2NvbXBsZXRlGAUgASgIEjYKDWZpcnN0X3R1cm5fYXQYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wSACIAQESNQoMbGFzdF90dXJuX2F0GAcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEgBiAEBEjIKC2xhc3RfbGltaXRzGAggAygLMh0udmliZXN5cy5ob3N0LnYxLkxpbWl0UmVhZGluZxItCgluZXdfYmVzdHMYCSADKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhUKDXVudGltZWRfdHVybnMYCiABKA1CEAoOX2ZpcnN0X3R1cm5fYXRCDwoNX2xhc3RfdHVybl9hdCJ7Cg9Kb3VybmFsSWRlbnRpdHkSEAoIYm91bmRhcnkYASABKAQSKgoLaGVhZF9zaGEyNTYYAiABKAlCFbpIEnIQMg5eWzAtOWEtZl17NjR9JBIqCgt0YWlsX3NoYTI1NhgDIAEoCUIVukgSchAyDl5bMC05YS1mXXs2NH0kIqQDCg5Vc2FnZVJvbGx1cFJvdxIPCgdxdWFydGVyGAEgASgDEhoKCHByb3ZpZGVyGAIgASgJQgi6SAVyAyiAAhIXCgVtb2RlbBgDIAEoCUIIukgFcgMogAQSNwoFc3BlZWQYBCABKA4yHC52aWJlc3lzLnN0b3JlLnYxLlVzYWdlU3BlZWRCCrpIB4IBBBABIAASFgoEcm9sZRgFIAEoCUIIukgFcgMogAISOwoFYmFzaXMYBiABKA4yIC52aWJlc3lzLnN0b3JlLnYxLlVzYWdlQ29zdEJhc2lzQgq6SAeCAQQQASAAEg0KBWlucHV0GAcgASgEEhIKCmNhY2hlX3JlYWQYCCABKAQSEwoLY2FjaGVfd3JpdGUYCSABKAQSFgoOY2FjaGVfd3JpdGVfMWgYCiABKAQSDgoGb3V0cHV0GAsgASgEEhEKCXJlYXNvbmluZxgMIAEoBBIrCgxyZWNvcmRlZF91c2QYDSABKAFCELpIDRILQAEpAAAAAAAAAABIAIgBARINCgV0dXJucxgOIAEoDUIPCg1fcmVjb3JkZWRfdXNkIqkCCg1UcmFuc2NyaXB0Um93Eg8KB3F1YXJ0ZXIYASABKAMSHAoKc2Vzc2lvbl9pZBgCIAEoCUIIukgFcgMogAISFQoDY3dkGAMgASgJQgi6SAVyAyiAIBIXCgVtb2RlbBgEIAEoCUIIukgFcgMogAQSNwoFc3BlZWQYBSABKA4yHC52aWJlc3lzLnN0b3JlLnYxLlVzYWdlU3BlZWRCCrpIB4IBBBABIAASDQoFaW5wdXQYBiABKAQSEgoKY2FjaGVfcmVhZBgHIAEoBBITCgtjYWNoZV93cml0ZRgIIAEoBBIWCg5jYWNoZV93cml0ZV8xaBgJIAEoBBIOCgZvdXRwdXQYCiABKAQSEQoJcmVhc29uaW5nGAsgASgEEg0KBXR1cm5zGAwgASgNIvQBChNUcmFuc2NyaXB0RmlsZVN0YXRlEhYKBHBhdGgYASABKAlCCLpIBXIDKIAgEgwKBHNpemUYAiABKAQSEAoIbXRpbWVfbnMYAyABKAMSDgoGb2Zmc2V0GAQgASgEEhQKDGd1YXJkX2xlbmd0aBgFIAEoDRISCgpndWFyZF9oYXNoGAYgASgNEhgKBXN0YXRlGAcgASgMQgm6SAZ6BBiAgEASEAoIY29tcGxldGUYCCABKAgSEQoJbWFsZm9ybWVkGAkgASgNEiwKBHJvd3MYCiADKAsyHi52aWJlc3lzLmhvc3QudjEuVHJhbnNjcmlwdFJvdyJ+ChNUcmFuc2NyaXB0Um9vdFN0YXRlEhoKCHByb3ZpZGVyGAEgASgJQgi6SAVyAyiAAhIWCgRwYXRoGAIgASgJQgi6SAVyAyiAIBIzCgVmaWxlcxgDIAMoCzIkLnZpYmVzeXMuaG9zdC52MS5UcmFuc2NyaXB0RmlsZVN0YXRlIlsKE1RyYW5zY3JpcHRTY2FuQ2FjaGUSDwoHdmVyc2lvbhgBIAEoDRIzCgVyb290cxgCIAMoCzIkLnZpYmVzeXMuaG9zdC52MS5UcmFuc2NyaXB0Um9vdFN0YXRlIqQCChBVc2FnZUxpbWl0V2luZG93EhYKAmlkGAEgASgJQgq6SAdyBRABKIABEjkKBGtpbmQYAiABKA4yHy52aWJlc3lzLmhvc3QudjEuVXNhZ2VMaW1pdEtpbmRCCrpIB4IBBBABIAASGQoFbGFiZWwYAyABKAlCCrpIB3IFEAEogAESMAoNdXNlZF9mcmFjdGlvbhgEIAEoAUIZukgWEhRAARkAAAAAgIQuQSkAAAAAAAAAABIyCglyZXNldHNfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wSACIAQESGwoOd2luZG93X21pbnV0ZXMYBiABKA1IAYgBAUIMCgpfcmVzZXRzX2F0QhEKD193aW5kb3dfbWludXRlcyKWAQoQVXNhZ2VSZXNldENyZWRpdBIWCgJpZBgBIAEoCUIKukgHcgUQASiAAhIzCgpleHBpcmVzX2F0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEgAiAEBEhwKBXRpdGxlGAMgASgJQgi6SAVyAyiAAUgBiAEBQg0KC19leHBpcmVzX2F0QggKBl90aXRsZSKqAwoSVXNhZ2VBY2NvdW50TGltaXRzEhsKCHByb3ZpZGVyGAEgASgJQgm6SAZyBBABKEASHQoHYWNjb3VudBgCIAEoCUIHukgEcgIoQEgAiAEBEhoKBHBsYW4YAyABKAlCB7pIBHICKEBIAYgBARI8Cgd3aW5kb3dzGAQgAygLMiEudmliZXN5cy5ob3N0LnYxLlVzYWdlTGltaXRXaW5kb3dCCLpIBZIBAhAQEiQKF3Jlc2V0X2NyZWRpdHNfYXZhaWxhYmxlGAUgASgNSAKIAQESQgoNcmVzZXRfY3JlZGl0cxgGIAMoCzIhLnZpYmVzeXMuaG9zdC52MS5Vc2FnZVJlc2V0Q3JlZGl0Qgi6SAWSAQIQEBIgCgl1c2FnZV91cmwYByABKAlCCLpIBXIDKIAESAOIAQESMwoHcmVhZF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBAUIKCghfYWNjb3VudEIHCgVfcGxhbkIaChhfcmVzZXRfY3JlZGl0c19hdmFpbGFibGVCDAoKX3VzYWdlX3VybCJlChBVc2FnZUxpbWl0c1N0YXRlEg8KB3ZlcnNpb24YASABKA0SQAoJcHJvdmlkZXJzGAIgAygLMiMudmliZXN5cy5ob3N0LnYxLlVzYWdlQWNjb3VudExpbWl0c0IIukgFkgECEAgq7QEKE1VzYWdlRXN0aW1hdGVTb3VyY2USJQohVVNBR0VfRVNUSU1BVEVfU09VUkNFX1VOU1BFQ0lGSUVEEAASIgoeVVNBR0VfRVNUSU1BVEVfU09VUkNFX09WRVJSSURFEAESIgoeVVNBR0VfRVNUSU1BVEVfU09VUkNFX1JFUE9SVEVEEAISIgoeVVNBR0VfRVNUSU1BVEVfU09VUkNFX1JFQ09SREVEEAMSHwobVVNBR0VfRVNUSU1BVEVfU09VUkNFX01PREVMEAQSIgoeVVNBR0VfRVNUSU1BVEVfU09VUkNFX1VOUFJJQ0VEEAUqYAoLVXNhZ2VPcmlnaW4SHAoYVVNBR0VfT1JJR0lOX1VOU1BFQ0lGSUVEEAASFAoQVVNBR0VfT1JJR0lOX1JVThABEh0KGVVTQUdFX09SSUdJTl9PVVRTSURFX1JVTlMQAip2Cg9Vc2FnZVNvdXJjZUtpbmQSIQodVVNBR0VfU09VUkNFX0tJTkRfVU5TUEVDSUZJRUQQABIdChlVU0FHRV9TT1VSQ0VfS0lORF9KT1VSTkFMEAESIQodVVNBR0VfU09VUkNFX0tJTkRfVFJBTlNDUklQVFMQAiq2AQoRVXNhZ2VTb3VyY2VTdGF0dXMSIwofVVNBR0VfU09VUkNFX1NUQVRVU19VTlNQRUNJRklFRBAAEhoKFlVTQUdFX1NPVVJDRV9TVEFUVVNfT0sQARIfChtVU0FHRV9TT1VSQ0VfU1RBVFVTX01JU1NJTkcQAhIfChtVU0FHRV9TT1VSQ0VfU1RBVFVTX1BBUlRJQUwQAxIeChpVU0FHRV9TT1VSQ0VfU1RBVFVTX0ZBSUxFRBAEKp0BChJVc2FnZVByaWNpbmdTdGF0dXMSJAogVVNBR0VfUFJJQ0lOR19TVEFUVVNfVU5TUEVDSUZJRUQQABIeChpVU0FHRV9QUklDSU5HX1NUQVRVU19GUkVTSBABEh8KG1VTQUdFX1BSSUNJTkdfU1RBVFVTX0NBQ0hFRBACEiAKHFVTQUdFX1BSSUNJTkdfU1RBVFVTX0JVTkRMRUQQAyp4ChFVc2FnZVByaWNlc1N0YXR1cxIjCh9VU0FHRV9QUklDRVNfU1RBVFVTX1VOU1BFQ0lGSUVEEAASGgoWVVNBR0VfUFJJQ0VTX1NUQVRVU19PSxABEiIKHlVTQUdFX1BSSUNFU19TVEFUVVNfVU5SRUFEQUJMRRACKqcBCg5Vc2FnZUxpbWl0S2luZBIgChxVU0FHRV9MSU1JVF9LSU5EX1VOU1BFQ0lGSUVEEAASHAoYVVNBR0VfTElNSVRfS0lORF9TRVNTSU9OEAESGwoXVVNBR0VfTElNSVRfS0lORF9XRUVLTFkQAhIcChhVU0FHRV9MSU1JVF9LSU5EX01PTlRITFkQAxIaChZVU0FHRV9MSU1JVF9LSU5EX09USEVSEAQqvQEKFlVzYWdlTGltaXRzVW5hdmFpbGFibGUSKAokVVNBR0VfTElNSVRTX1VOQVZBSUxBQkxFX1VOU1BFQ0lGSUVEEAASKAokVVNBR0VfTElNSVRTX1VOQVZBSUxBQkxFX1VOU1VQUE9SVEVEEAESJAogVVNBR0VfTElNSVRTX1VOQVZBSUxBQkxFX0FQSV9LRVkQAhIpCiVVU0FHRV9MSU1JVFNfVU5BVkFJTEFCTEVfUFJPQkVfRkFJTEVEEANCP1o9Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy9ob3N0L3YxO2hvc3R2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_store_v1_agent_attrs]);
 
 /**
  * US dollars per million tokens for one model at one speed. Zero is a price: a free model.
@@ -706,6 +706,170 @@ export const TranscriptScanCacheSchema: GenMessage<TranscriptScanCache> = /*@__P
   messageDesc(file_vibesys_host_v1_usage_state, 14);
 
 /**
+ * One limit of an account: a share of an allowance and when it refills.
+ *
+ * @generated from message vibesys.host.v1.UsageLimitWindow
+ */
+export type UsageLimitWindow = Message<"vibesys.host.v1.UsageLimitWindow"> & {
+  /**
+   * Stable for the same window across reads; readings merge by it.
+   *
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: vibesys.host.v1.UsageLimitKind kind = 2;
+   */
+  kind: UsageLimitKind;
+
+  /**
+   * @generated from field: string label = 3;
+   */
+  label: string;
+
+  /**
+   * The share used; above 1 when the provider reports over-use.
+   *
+   * @generated from field: double used_fraction = 4;
+   */
+  usedFraction: number;
+
+  /**
+   * @generated from field: optional google.protobuf.Timestamp resets_at = 5;
+   */
+  resetsAt?: Timestamp | undefined;
+
+  /**
+   * @generated from field: optional uint32 window_minutes = 6;
+   */
+  windowMinutes?: number | undefined;
+};
+
+/**
+ * Describes the message vibesys.host.v1.UsageLimitWindow.
+ * Use `create(UsageLimitWindowSchema)` to create a new message.
+ */
+export const UsageLimitWindowSchema: GenMessage<UsageLimitWindow> = /*@__PURE__*/
+  messageDesc(file_vibesys_host_v1_usage_state, 15);
+
+/**
+ * A credit that refills the account's limits at once when spent.
+ *
+ * @generated from message vibesys.host.v1.UsageResetCredit
+ */
+export type UsageResetCredit = Message<"vibesys.host.v1.UsageResetCredit"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: optional google.protobuf.Timestamp expires_at = 2;
+   */
+  expiresAt?: Timestamp | undefined;
+
+  /**
+   * @generated from field: optional string title = 3;
+   */
+  title?: string | undefined;
+};
+
+/**
+ * Describes the message vibesys.host.v1.UsageResetCredit.
+ * Use `create(UsageResetCreditSchema)` to create a new message.
+ */
+export const UsageResetCreditSchema: GenMessage<UsageResetCredit> = /*@__PURE__*/
+  messageDesc(file_vibesys_host_v1_usage_state, 16);
+
+/**
+ * One provider's account as a read found it.
+ *
+ * @generated from message vibesys.host.v1.UsageAccountLimits
+ */
+export type UsageAccountLimits = Message<"vibesys.host.v1.UsageAccountLimits"> & {
+  /**
+   * @generated from field: string provider = 1;
+   */
+  provider: string;
+
+  /**
+   * A digest of the account, never an email or an id: equal across hosts for one account.
+   *
+   * @generated from field: optional string account = 2;
+   */
+  account?: string | undefined;
+
+  /**
+   * The provider's own plan word, for example `team` or `pro`.
+   *
+   * @generated from field: optional string plan = 3;
+   */
+  plan?: string | undefined;
+
+  /**
+   * @generated from field: repeated vibesys.host.v1.UsageLimitWindow windows = 4;
+   */
+  windows: UsageLimitWindow[];
+
+  /**
+   * The count the provider states; `reset_credits` can list fewer.
+   *
+   * @generated from field: optional uint32 reset_credits_available = 5;
+   */
+  resetCreditsAvailable?: number | undefined;
+
+  /**
+   * @generated from field: repeated vibesys.host.v1.UsageResetCredit reset_credits = 6;
+   */
+  resetCredits: UsageResetCredit[];
+
+  /**
+   * @generated from field: optional string usage_url = 7;
+   */
+  usageUrl?: string | undefined;
+
+  /**
+   * When the windows were read.
+   *
+   * @generated from field: google.protobuf.Timestamp read_at = 8;
+   */
+  readAt?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message vibesys.host.v1.UsageAccountLimits.
+ * Use `create(UsageAccountLimitsSchema)` to create a new message.
+ */
+export const UsageAccountLimitsSchema: GenMessage<UsageAccountLimits> = /*@__PURE__*/
+  messageDesc(file_vibesys_host_v1_usage_state, 17);
+
+/**
+ * The last good reading of each provider on this host. A cache of the providers, persisted as
+ * `limits.pb`: a file that fails its rules is rebuilt by the next read.
+ *
+ * @generated from message vibesys.host.v1.UsageLimitsState
+ */
+export type UsageLimitsState = Message<"vibesys.host.v1.UsageLimitsState"> & {
+  /**
+   * @generated from field: uint32 version = 1;
+   */
+  version: number;
+
+  /**
+   * @generated from field: repeated vibesys.host.v1.UsageAccountLimits providers = 2;
+   */
+  providers: UsageAccountLimits[];
+};
+
+/**
+ * Describes the message vibesys.host.v1.UsageLimitsState.
+ * Use `create(UsageLimitsStateSchema)` to create a new message.
+ */
+export const UsageLimitsStateSchema: GenMessage<UsageLimitsState> = /*@__PURE__*/
+  messageDesc(file_vibesys_host_v1_usage_state, 18);
+
+/**
  * How the estimate of one series was reached, in the order the host tries them: an override the
  * person set, the cost the provider reported, the cost recorded for an older turn, the rate of the
  * model at today's list price, else none.
@@ -922,3 +1086,80 @@ export enum UsagePricesStatus {
  */
 export const UsagePricesStatusSchema: GenEnum<UsagePricesStatus> = /*@__PURE__*/
   enumDesc(file_vibesys_host_v1_usage_state, 5);
+
+/**
+ * What a window is, in words every provider shares.
+ *
+ * @generated from enum vibesys.host.v1.UsageLimitKind
+ */
+export enum UsageLimitKind {
+  /**
+   * @generated from enum value: USAGE_LIMIT_KIND_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: USAGE_LIMIT_KIND_SESSION = 1;
+   */
+  SESSION = 1,
+
+  /**
+   * @generated from enum value: USAGE_LIMIT_KIND_WEEKLY = 2;
+   */
+  WEEKLY = 2,
+
+  /**
+   * @generated from enum value: USAGE_LIMIT_KIND_MONTHLY = 3;
+   */
+  MONTHLY = 3,
+
+  /**
+   * @generated from enum value: USAGE_LIMIT_KIND_OTHER = 4;
+   */
+  OTHER = 4,
+}
+
+/**
+ * Describes the enum vibesys.host.v1.UsageLimitKind.
+ */
+export const UsageLimitKindSchema: GenEnum<UsageLimitKind> = /*@__PURE__*/
+  enumDesc(file_vibesys_host_v1_usage_state, 6);
+
+/**
+ * Why a provider has no windows.
+ *
+ * @generated from enum vibesys.host.v1.UsageLimitsUnavailable
+ */
+export enum UsageLimitsUnavailable {
+  /**
+   * @generated from enum value: USAGE_LIMITS_UNAVAILABLE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * The provider has no way to read its limits.
+   *
+   * @generated from enum value: USAGE_LIMITS_UNAVAILABLE_UNSUPPORTED = 1;
+   */
+  UNSUPPORTED = 1,
+
+  /**
+   * The login is billed by token, so no plan applies.
+   *
+   * @generated from enum value: USAGE_LIMITS_UNAVAILABLE_API_KEY = 2;
+   */
+  API_KEY = 2,
+
+  /**
+   * The CLI is not installed or signed in, did not answer in time, or answered with an error.
+   *
+   * @generated from enum value: USAGE_LIMITS_UNAVAILABLE_PROBE_FAILED = 3;
+   */
+  PROBE_FAILED = 3,
+}
+
+/**
+ * Describes the enum vibesys.host.v1.UsageLimitsUnavailable.
+ */
+export const UsageLimitsUnavailableSchema: GenEnum<UsageLimitsUnavailable> = /*@__PURE__*/
+  enumDesc(file_vibesys_host_v1_usage_state, 7);

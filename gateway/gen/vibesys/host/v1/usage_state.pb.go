@@ -354,6 +354,118 @@ func (UsagePricesStatus) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_host_v1_usage_state_proto_rawDescGZIP(), []int{5}
 }
 
+// What a window is, in words every provider shares.
+type UsageLimitKind int32
+
+const (
+	UsageLimitKind_USAGE_LIMIT_KIND_UNSPECIFIED UsageLimitKind = 0
+	UsageLimitKind_USAGE_LIMIT_KIND_SESSION     UsageLimitKind = 1
+	UsageLimitKind_USAGE_LIMIT_KIND_WEEKLY      UsageLimitKind = 2
+	UsageLimitKind_USAGE_LIMIT_KIND_MONTHLY     UsageLimitKind = 3
+	UsageLimitKind_USAGE_LIMIT_KIND_OTHER       UsageLimitKind = 4
+)
+
+// Enum value maps for UsageLimitKind.
+var (
+	UsageLimitKind_name = map[int32]string{
+		0: "USAGE_LIMIT_KIND_UNSPECIFIED",
+		1: "USAGE_LIMIT_KIND_SESSION",
+		2: "USAGE_LIMIT_KIND_WEEKLY",
+		3: "USAGE_LIMIT_KIND_MONTHLY",
+		4: "USAGE_LIMIT_KIND_OTHER",
+	}
+	UsageLimitKind_value = map[string]int32{
+		"USAGE_LIMIT_KIND_UNSPECIFIED": 0,
+		"USAGE_LIMIT_KIND_SESSION":     1,
+		"USAGE_LIMIT_KIND_WEEKLY":      2,
+		"USAGE_LIMIT_KIND_MONTHLY":     3,
+		"USAGE_LIMIT_KIND_OTHER":       4,
+	}
+)
+
+func (x UsageLimitKind) Enum() *UsageLimitKind {
+	p := new(UsageLimitKind)
+	*p = x
+	return p
+}
+
+func (x UsageLimitKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (UsageLimitKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_host_v1_usage_state_proto_enumTypes[6].Descriptor()
+}
+
+func (UsageLimitKind) Type() protoreflect.EnumType {
+	return &file_vibesys_host_v1_usage_state_proto_enumTypes[6]
+}
+
+func (x UsageLimitKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use UsageLimitKind.Descriptor instead.
+func (UsageLimitKind) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_usage_state_proto_rawDescGZIP(), []int{6}
+}
+
+// Why a provider has no windows.
+type UsageLimitsUnavailable int32
+
+const (
+	UsageLimitsUnavailable_USAGE_LIMITS_UNAVAILABLE_UNSPECIFIED UsageLimitsUnavailable = 0
+	// The provider has no way to read its limits.
+	UsageLimitsUnavailable_USAGE_LIMITS_UNAVAILABLE_UNSUPPORTED UsageLimitsUnavailable = 1
+	// The login is billed by token, so no plan applies.
+	UsageLimitsUnavailable_USAGE_LIMITS_UNAVAILABLE_API_KEY UsageLimitsUnavailable = 2
+	// The CLI is not installed or signed in, did not answer in time, or answered with an error.
+	UsageLimitsUnavailable_USAGE_LIMITS_UNAVAILABLE_PROBE_FAILED UsageLimitsUnavailable = 3
+)
+
+// Enum value maps for UsageLimitsUnavailable.
+var (
+	UsageLimitsUnavailable_name = map[int32]string{
+		0: "USAGE_LIMITS_UNAVAILABLE_UNSPECIFIED",
+		1: "USAGE_LIMITS_UNAVAILABLE_UNSUPPORTED",
+		2: "USAGE_LIMITS_UNAVAILABLE_API_KEY",
+		3: "USAGE_LIMITS_UNAVAILABLE_PROBE_FAILED",
+	}
+	UsageLimitsUnavailable_value = map[string]int32{
+		"USAGE_LIMITS_UNAVAILABLE_UNSPECIFIED":  0,
+		"USAGE_LIMITS_UNAVAILABLE_UNSUPPORTED":  1,
+		"USAGE_LIMITS_UNAVAILABLE_API_KEY":      2,
+		"USAGE_LIMITS_UNAVAILABLE_PROBE_FAILED": 3,
+	}
+)
+
+func (x UsageLimitsUnavailable) Enum() *UsageLimitsUnavailable {
+	p := new(UsageLimitsUnavailable)
+	*p = x
+	return p
+}
+
+func (x UsageLimitsUnavailable) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (UsageLimitsUnavailable) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_host_v1_usage_state_proto_enumTypes[7].Descriptor()
+}
+
+func (UsageLimitsUnavailable) Type() protoreflect.EnumType {
+	return &file_vibesys_host_v1_usage_state_proto_enumTypes[7]
+}
+
+func (x UsageLimitsUnavailable) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use UsageLimitsUnavailable.Descriptor instead.
+func (UsageLimitsUnavailable) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_usage_state_proto_rawDescGZIP(), []int{7}
+}
+
 // US dollars per million tokens for one model at one speed. Zero is a price: a free model.
 type UsageRate struct {
 	state      protoimpl.MessageState `protogen:"open.v1"`
@@ -1612,6 +1724,313 @@ func (x *TranscriptScanCache) GetRoots() []*TranscriptRootState {
 	return nil
 }
 
+// One limit of an account: a share of an allowance and when it refills.
+type UsageLimitWindow struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Stable for the same window across reads; readings merge by it.
+	Id    string         `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Kind  UsageLimitKind `protobuf:"varint,2,opt,name=kind,proto3,enum=vibesys.host.v1.UsageLimitKind" json:"kind,omitempty"`
+	Label string         `protobuf:"bytes,3,opt,name=label,proto3" json:"label,omitempty"`
+	// The share used; above 1 when the provider reports over-use.
+	UsedFraction  float64                `protobuf:"fixed64,4,opt,name=used_fraction,json=usedFraction,proto3" json:"used_fraction,omitempty"`
+	ResetsAt      *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=resets_at,json=resetsAt,proto3,oneof" json:"resets_at,omitempty"`
+	WindowMinutes *uint32                `protobuf:"varint,6,opt,name=window_minutes,json=windowMinutes,proto3,oneof" json:"window_minutes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UsageLimitWindow) Reset() {
+	*x = UsageLimitWindow{}
+	mi := &file_vibesys_host_v1_usage_state_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UsageLimitWindow) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UsageLimitWindow) ProtoMessage() {}
+
+func (x *UsageLimitWindow) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_usage_state_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UsageLimitWindow.ProtoReflect.Descriptor instead.
+func (*UsageLimitWindow) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_usage_state_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *UsageLimitWindow) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *UsageLimitWindow) GetKind() UsageLimitKind {
+	if x != nil {
+		return x.Kind
+	}
+	return UsageLimitKind_USAGE_LIMIT_KIND_UNSPECIFIED
+}
+
+func (x *UsageLimitWindow) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+func (x *UsageLimitWindow) GetUsedFraction() float64 {
+	if x != nil {
+		return x.UsedFraction
+	}
+	return 0
+}
+
+func (x *UsageLimitWindow) GetResetsAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ResetsAt
+	}
+	return nil
+}
+
+func (x *UsageLimitWindow) GetWindowMinutes() uint32 {
+	if x != nil && x.WindowMinutes != nil {
+		return *x.WindowMinutes
+	}
+	return 0
+}
+
+// A credit that refills the account's limits at once when spent.
+type UsageResetCredit struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	ExpiresAt     *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=expires_at,json=expiresAt,proto3,oneof" json:"expires_at,omitempty"`
+	Title         *string                `protobuf:"bytes,3,opt,name=title,proto3,oneof" json:"title,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UsageResetCredit) Reset() {
+	*x = UsageResetCredit{}
+	mi := &file_vibesys_host_v1_usage_state_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UsageResetCredit) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UsageResetCredit) ProtoMessage() {}
+
+func (x *UsageResetCredit) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_usage_state_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UsageResetCredit.ProtoReflect.Descriptor instead.
+func (*UsageResetCredit) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_usage_state_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *UsageResetCredit) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *UsageResetCredit) GetExpiresAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return nil
+}
+
+func (x *UsageResetCredit) GetTitle() string {
+	if x != nil && x.Title != nil {
+		return *x.Title
+	}
+	return ""
+}
+
+// One provider's account as a read found it.
+type UsageAccountLimits struct {
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Provider string                 `protobuf:"bytes,1,opt,name=provider,proto3" json:"provider,omitempty"`
+	// A digest of the account, never an email or an id: equal across hosts for one account.
+	Account *string `protobuf:"bytes,2,opt,name=account,proto3,oneof" json:"account,omitempty"`
+	// The provider's own plan word, for example `team` or `pro`.
+	Plan    *string             `protobuf:"bytes,3,opt,name=plan,proto3,oneof" json:"plan,omitempty"`
+	Windows []*UsageLimitWindow `protobuf:"bytes,4,rep,name=windows,proto3" json:"windows,omitempty"`
+	// The count the provider states; `reset_credits` can list fewer.
+	ResetCreditsAvailable *uint32             `protobuf:"varint,5,opt,name=reset_credits_available,json=resetCreditsAvailable,proto3,oneof" json:"reset_credits_available,omitempty"`
+	ResetCredits          []*UsageResetCredit `protobuf:"bytes,6,rep,name=reset_credits,json=resetCredits,proto3" json:"reset_credits,omitempty"`
+	UsageUrl              *string             `protobuf:"bytes,7,opt,name=usage_url,json=usageUrl,proto3,oneof" json:"usage_url,omitempty"`
+	// When the windows were read.
+	ReadAt        *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=read_at,json=readAt,proto3" json:"read_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UsageAccountLimits) Reset() {
+	*x = UsageAccountLimits{}
+	mi := &file_vibesys_host_v1_usage_state_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UsageAccountLimits) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UsageAccountLimits) ProtoMessage() {}
+
+func (x *UsageAccountLimits) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_usage_state_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UsageAccountLimits.ProtoReflect.Descriptor instead.
+func (*UsageAccountLimits) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_usage_state_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *UsageAccountLimits) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
+}
+
+func (x *UsageAccountLimits) GetAccount() string {
+	if x != nil && x.Account != nil {
+		return *x.Account
+	}
+	return ""
+}
+
+func (x *UsageAccountLimits) GetPlan() string {
+	if x != nil && x.Plan != nil {
+		return *x.Plan
+	}
+	return ""
+}
+
+func (x *UsageAccountLimits) GetWindows() []*UsageLimitWindow {
+	if x != nil {
+		return x.Windows
+	}
+	return nil
+}
+
+func (x *UsageAccountLimits) GetResetCreditsAvailable() uint32 {
+	if x != nil && x.ResetCreditsAvailable != nil {
+		return *x.ResetCreditsAvailable
+	}
+	return 0
+}
+
+func (x *UsageAccountLimits) GetResetCredits() []*UsageResetCredit {
+	if x != nil {
+		return x.ResetCredits
+	}
+	return nil
+}
+
+func (x *UsageAccountLimits) GetUsageUrl() string {
+	if x != nil && x.UsageUrl != nil {
+		return *x.UsageUrl
+	}
+	return ""
+}
+
+func (x *UsageAccountLimits) GetReadAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ReadAt
+	}
+	return nil
+}
+
+// The last good reading of each provider on this host. A cache of the providers, persisted as
+// `limits.pb`: a file that fails its rules is rebuilt by the next read.
+type UsageLimitsState struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Version       uint32                 `protobuf:"varint,1,opt,name=version,proto3" json:"version,omitempty"`
+	Providers     []*UsageAccountLimits  `protobuf:"bytes,2,rep,name=providers,proto3" json:"providers,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UsageLimitsState) Reset() {
+	*x = UsageLimitsState{}
+	mi := &file_vibesys_host_v1_usage_state_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UsageLimitsState) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UsageLimitsState) ProtoMessage() {}
+
+func (x *UsageLimitsState) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_usage_state_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UsageLimitsState.ProtoReflect.Descriptor instead.
+func (*UsageLimitsState) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_usage_state_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *UsageLimitsState) GetVersion() uint32 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
+func (x *UsageLimitsState) GetProviders() []*UsageAccountLimits {
+	if x != nil {
+		return x.Providers
+	}
+	return nil
+}
+
 var File_vibesys_host_v1_usage_state_proto protoreflect.FileDescriptor
 
 const file_vibesys_host_v1_usage_state_proto_rawDesc = "" +
@@ -1758,7 +2177,46 @@ const file_vibesys_host_v1_usage_state_proto_rawDesc = "" +
 	"\x05files\x18\x03 \x03(\v2$.vibesys.host.v1.TranscriptFileStateR\x05files\"k\n" +
 	"\x13TranscriptScanCache\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\rR\aversion\x12:\n" +
-	"\x05roots\x18\x02 \x03(\v2$.vibesys.host.v1.TranscriptRootStateR\x05roots*\xed\x01\n" +
+	"\x05roots\x18\x02 \x03(\v2$.vibesys.host.v1.TranscriptRootStateR\x05roots\"\xdc\x02\n" +
+	"\x10UsageLimitWindow\x12\x1a\n" +
+	"\x02id\x18\x01 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01(\x80\x01R\x02id\x12?\n" +
+	"\x04kind\x18\x02 \x01(\x0e2\x1f.vibesys.host.v1.UsageLimitKindB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04kind\x12 \n" +
+	"\x05label\x18\x03 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01(\x80\x01R\x05label\x12>\n" +
+	"\rused_fraction\x18\x04 \x01(\x01B\x19\xbaH\x16\x12\x14@\x01\x19\x00\x00\x00\x00\x80\x84.A)\x00\x00\x00\x00\x00\x00\x00\x00R\fusedFraction\x12<\n" +
+	"\tresets_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampH\x00R\bresetsAt\x88\x01\x01\x12*\n" +
+	"\x0ewindow_minutes\x18\x06 \x01(\rH\x01R\rwindowMinutes\x88\x01\x01B\f\n" +
+	"\n" +
+	"_resets_atB\x11\n" +
+	"\x0f_window_minutes\"\xac\x01\n" +
+	"\x10UsageResetCredit\x12\x1a\n" +
+	"\x02id\x18\x01 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01(\x80\x02R\x02id\x12>\n" +
+	"\n" +
+	"expires_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampH\x00R\texpiresAt\x88\x01\x01\x12#\n" +
+	"\x05title\x18\x03 \x01(\tB\b\xbaH\x05r\x03(\x80\x01H\x01R\x05title\x88\x01\x01B\r\n" +
+	"\v_expires_atB\b\n" +
+	"\x06_title\"\x83\x04\n" +
+	"\x12UsageAccountLimits\x12%\n" +
+	"\bprovider\x18\x01 \x01(\tB\t\xbaH\x06r\x04\x10\x01(@R\bprovider\x12&\n" +
+	"\aaccount\x18\x02 \x01(\tB\a\xbaH\x04r\x02(@H\x00R\aaccount\x88\x01\x01\x12 \n" +
+	"\x04plan\x18\x03 \x01(\tB\a\xbaH\x04r\x02(@H\x01R\x04plan\x88\x01\x01\x12E\n" +
+	"\awindows\x18\x04 \x03(\v2!.vibesys.host.v1.UsageLimitWindowB\b\xbaH\x05\x92\x01\x02\x10\x10R\awindows\x12;\n" +
+	"\x17reset_credits_available\x18\x05 \x01(\rH\x02R\x15resetCreditsAvailable\x88\x01\x01\x12P\n" +
+	"\rreset_credits\x18\x06 \x03(\v2!.vibesys.host.v1.UsageResetCreditB\b\xbaH\x05\x92\x01\x02\x10\x10R\fresetCredits\x12*\n" +
+	"\tusage_url\x18\a \x01(\tB\b\xbaH\x05r\x03(\x80\x04H\x03R\busageUrl\x88\x01\x01\x12;\n" +
+	"\aread_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x06readAtB\n" +
+	"\n" +
+	"\b_accountB\a\n" +
+	"\x05_planB\x1a\n" +
+	"\x18_reset_credits_availableB\f\n" +
+	"\n" +
+	"_usage_url\"y\n" +
+	"\x10UsageLimitsState\x12\x18\n" +
+	"\aversion\x18\x01 \x01(\rR\aversion\x12K\n" +
+	"\tproviders\x18\x02 \x03(\v2#.vibesys.host.v1.UsageAccountLimitsB\b\xbaH\x05\x92\x01\x02\x10\bR\tproviders*\xed\x01\n" +
 	"\x13UsageEstimateSource\x12%\n" +
 	"!USAGE_ESTIMATE_SOURCE_UNSPECIFIED\x10\x00\x12\"\n" +
 	"\x1eUSAGE_ESTIMATE_SOURCE_OVERRIDE\x10\x01\x12\"\n" +
@@ -1788,7 +2246,18 @@ const file_vibesys_host_v1_usage_state_proto_rawDesc = "" +
 	"\x11UsagePricesStatus\x12#\n" +
 	"\x1fUSAGE_PRICES_STATUS_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16USAGE_PRICES_STATUS_OK\x10\x01\x12\"\n" +
-	"\x1eUSAGE_PRICES_STATUS_UNREADABLE\x10\x02B?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1b\x06proto3"
+	"\x1eUSAGE_PRICES_STATUS_UNREADABLE\x10\x02*\xa7\x01\n" +
+	"\x0eUsageLimitKind\x12 \n" +
+	"\x1cUSAGE_LIMIT_KIND_UNSPECIFIED\x10\x00\x12\x1c\n" +
+	"\x18USAGE_LIMIT_KIND_SESSION\x10\x01\x12\x1b\n" +
+	"\x17USAGE_LIMIT_KIND_WEEKLY\x10\x02\x12\x1c\n" +
+	"\x18USAGE_LIMIT_KIND_MONTHLY\x10\x03\x12\x1a\n" +
+	"\x16USAGE_LIMIT_KIND_OTHER\x10\x04*\xbd\x01\n" +
+	"\x16UsageLimitsUnavailable\x12(\n" +
+	"$USAGE_LIMITS_UNAVAILABLE_UNSPECIFIED\x10\x00\x12(\n" +
+	"$USAGE_LIMITS_UNAVAILABLE_UNSUPPORTED\x10\x01\x12$\n" +
+	" USAGE_LIMITS_UNAVAILABLE_API_KEY\x10\x02\x12)\n" +
+	"%USAGE_LIMITS_UNAVAILABLE_PROBE_FAILED\x10\x03B?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1b\x06proto3"
 
 var (
 	file_vibesys_host_v1_usage_state_proto_rawDescOnce sync.Once
@@ -1802,8 +2271,8 @@ func file_vibesys_host_v1_usage_state_proto_rawDescGZIP() []byte {
 	return file_vibesys_host_v1_usage_state_proto_rawDescData
 }
 
-var file_vibesys_host_v1_usage_state_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
-var file_vibesys_host_v1_usage_state_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_vibesys_host_v1_usage_state_proto_enumTypes = make([]protoimpl.EnumInfo, 8)
+var file_vibesys_host_v1_usage_state_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_vibesys_host_v1_usage_state_proto_goTypes = []any{
 	(UsageEstimateSource)(0),      // 0: vibesys.host.v1.UsageEstimateSource
 	(UsageOrigin)(0),              // 1: vibesys.host.v1.UsageOrigin
@@ -1811,52 +2280,65 @@ var file_vibesys_host_v1_usage_state_proto_goTypes = []any{
 	(UsageSourceStatus)(0),        // 3: vibesys.host.v1.UsageSourceStatus
 	(UsagePricingStatus)(0),       // 4: vibesys.host.v1.UsagePricingStatus
 	(UsagePricesStatus)(0),        // 5: vibesys.host.v1.UsagePricesStatus
-	(*UsageRate)(nil),             // 6: vibesys.host.v1.UsageRate
-	(*UsageRateOverride)(nil),     // 7: vibesys.host.v1.UsageRateOverride
-	(*UsageAlias)(nil),            // 8: vibesys.host.v1.UsageAlias
-	(*UsagePriceBook)(nil),        // 9: vibesys.host.v1.UsagePriceBook
-	(*UsagePricing)(nil),          // 10: vibesys.host.v1.UsagePricing
-	(*UsageRateSnapshot)(nil),     // 11: vibesys.host.v1.UsageRateSnapshot
-	(*UsageSourceIdentity)(nil),   // 12: vibesys.host.v1.UsageSourceIdentity
-	(*LimitReading)(nil),          // 13: vibesys.host.v1.LimitReading
-	(*RunUsageRollup)(nil),        // 14: vibesys.host.v1.RunUsageRollup
-	(*JournalIdentity)(nil),       // 15: vibesys.host.v1.JournalIdentity
-	(*UsageRollupRow)(nil),        // 16: vibesys.host.v1.UsageRollupRow
-	(*TranscriptRow)(nil),         // 17: vibesys.host.v1.TranscriptRow
-	(*TranscriptFileState)(nil),   // 18: vibesys.host.v1.TranscriptFileState
-	(*TranscriptRootState)(nil),   // 19: vibesys.host.v1.TranscriptRootState
-	(*TranscriptScanCache)(nil),   // 20: vibesys.host.v1.TranscriptScanCache
-	(*timestamppb.Timestamp)(nil), // 21: google.protobuf.Timestamp
-	(v1.UsageSpeed)(0),            // 22: vibesys.store.v1.UsageSpeed
-	(v1.UsageCostBasis)(0),        // 23: vibesys.store.v1.UsageCostBasis
+	(UsageLimitKind)(0),           // 6: vibesys.host.v1.UsageLimitKind
+	(UsageLimitsUnavailable)(0),   // 7: vibesys.host.v1.UsageLimitsUnavailable
+	(*UsageRate)(nil),             // 8: vibesys.host.v1.UsageRate
+	(*UsageRateOverride)(nil),     // 9: vibesys.host.v1.UsageRateOverride
+	(*UsageAlias)(nil),            // 10: vibesys.host.v1.UsageAlias
+	(*UsagePriceBook)(nil),        // 11: vibesys.host.v1.UsagePriceBook
+	(*UsagePricing)(nil),          // 12: vibesys.host.v1.UsagePricing
+	(*UsageRateSnapshot)(nil),     // 13: vibesys.host.v1.UsageRateSnapshot
+	(*UsageSourceIdentity)(nil),   // 14: vibesys.host.v1.UsageSourceIdentity
+	(*LimitReading)(nil),          // 15: vibesys.host.v1.LimitReading
+	(*RunUsageRollup)(nil),        // 16: vibesys.host.v1.RunUsageRollup
+	(*JournalIdentity)(nil),       // 17: vibesys.host.v1.JournalIdentity
+	(*UsageRollupRow)(nil),        // 18: vibesys.host.v1.UsageRollupRow
+	(*TranscriptRow)(nil),         // 19: vibesys.host.v1.TranscriptRow
+	(*TranscriptFileState)(nil),   // 20: vibesys.host.v1.TranscriptFileState
+	(*TranscriptRootState)(nil),   // 21: vibesys.host.v1.TranscriptRootState
+	(*TranscriptScanCache)(nil),   // 22: vibesys.host.v1.TranscriptScanCache
+	(*UsageLimitWindow)(nil),      // 23: vibesys.host.v1.UsageLimitWindow
+	(*UsageResetCredit)(nil),      // 24: vibesys.host.v1.UsageResetCredit
+	(*UsageAccountLimits)(nil),    // 25: vibesys.host.v1.UsageAccountLimits
+	(*UsageLimitsState)(nil),      // 26: vibesys.host.v1.UsageLimitsState
+	(*timestamppb.Timestamp)(nil), // 27: google.protobuf.Timestamp
+	(v1.UsageSpeed)(0),            // 28: vibesys.store.v1.UsageSpeed
+	(v1.UsageCostBasis)(0),        // 29: vibesys.store.v1.UsageCostBasis
 }
 var file_vibesys_host_v1_usage_state_proto_depIdxs = []int32{
-	6,  // 0: vibesys.host.v1.UsageRateOverride.rate:type_name -> vibesys.host.v1.UsageRate
-	7,  // 1: vibesys.host.v1.UsagePriceBook.overrides:type_name -> vibesys.host.v1.UsageRateOverride
-	8,  // 2: vibesys.host.v1.UsagePriceBook.aliases:type_name -> vibesys.host.v1.UsageAlias
+	8,  // 0: vibesys.host.v1.UsageRateOverride.rate:type_name -> vibesys.host.v1.UsageRate
+	9,  // 1: vibesys.host.v1.UsagePriceBook.overrides:type_name -> vibesys.host.v1.UsageRateOverride
+	10, // 2: vibesys.host.v1.UsagePriceBook.aliases:type_name -> vibesys.host.v1.UsageAlias
 	4,  // 3: vibesys.host.v1.UsagePricing.status:type_name -> vibesys.host.v1.UsagePricingStatus
-	21, // 4: vibesys.host.v1.UsagePricing.fetched_at:type_name -> google.protobuf.Timestamp
-	21, // 5: vibesys.host.v1.UsageRateSnapshot.fetched_at:type_name -> google.protobuf.Timestamp
-	21, // 6: vibesys.host.v1.UsageRateSnapshot.last_attempt_at:type_name -> google.protobuf.Timestamp
-	21, // 7: vibesys.host.v1.LimitReading.resets_at:type_name -> google.protobuf.Timestamp
-	21, // 8: vibesys.host.v1.LimitReading.observed_at:type_name -> google.protobuf.Timestamp
-	15, // 9: vibesys.host.v1.RunUsageRollup.journal:type_name -> vibesys.host.v1.JournalIdentity
-	16, // 10: vibesys.host.v1.RunUsageRollup.rows:type_name -> vibesys.host.v1.UsageRollupRow
-	21, // 11: vibesys.host.v1.RunUsageRollup.first_turn_at:type_name -> google.protobuf.Timestamp
-	21, // 12: vibesys.host.v1.RunUsageRollup.last_turn_at:type_name -> google.protobuf.Timestamp
-	13, // 13: vibesys.host.v1.RunUsageRollup.last_limits:type_name -> vibesys.host.v1.LimitReading
-	21, // 14: vibesys.host.v1.RunUsageRollup.new_bests:type_name -> google.protobuf.Timestamp
-	22, // 15: vibesys.host.v1.UsageRollupRow.speed:type_name -> vibesys.store.v1.UsageSpeed
-	23, // 16: vibesys.host.v1.UsageRollupRow.basis:type_name -> vibesys.store.v1.UsageCostBasis
-	22, // 17: vibesys.host.v1.TranscriptRow.speed:type_name -> vibesys.store.v1.UsageSpeed
-	17, // 18: vibesys.host.v1.TranscriptFileState.rows:type_name -> vibesys.host.v1.TranscriptRow
-	18, // 19: vibesys.host.v1.TranscriptRootState.files:type_name -> vibesys.host.v1.TranscriptFileState
-	19, // 20: vibesys.host.v1.TranscriptScanCache.roots:type_name -> vibesys.host.v1.TranscriptRootState
-	21, // [21:21] is the sub-list for method output_type
-	21, // [21:21] is the sub-list for method input_type
-	21, // [21:21] is the sub-list for extension type_name
-	21, // [21:21] is the sub-list for extension extendee
-	0,  // [0:21] is the sub-list for field type_name
+	27, // 4: vibesys.host.v1.UsagePricing.fetched_at:type_name -> google.protobuf.Timestamp
+	27, // 5: vibesys.host.v1.UsageRateSnapshot.fetched_at:type_name -> google.protobuf.Timestamp
+	27, // 6: vibesys.host.v1.UsageRateSnapshot.last_attempt_at:type_name -> google.protobuf.Timestamp
+	27, // 7: vibesys.host.v1.LimitReading.resets_at:type_name -> google.protobuf.Timestamp
+	27, // 8: vibesys.host.v1.LimitReading.observed_at:type_name -> google.protobuf.Timestamp
+	17, // 9: vibesys.host.v1.RunUsageRollup.journal:type_name -> vibesys.host.v1.JournalIdentity
+	18, // 10: vibesys.host.v1.RunUsageRollup.rows:type_name -> vibesys.host.v1.UsageRollupRow
+	27, // 11: vibesys.host.v1.RunUsageRollup.first_turn_at:type_name -> google.protobuf.Timestamp
+	27, // 12: vibesys.host.v1.RunUsageRollup.last_turn_at:type_name -> google.protobuf.Timestamp
+	15, // 13: vibesys.host.v1.RunUsageRollup.last_limits:type_name -> vibesys.host.v1.LimitReading
+	27, // 14: vibesys.host.v1.RunUsageRollup.new_bests:type_name -> google.protobuf.Timestamp
+	28, // 15: vibesys.host.v1.UsageRollupRow.speed:type_name -> vibesys.store.v1.UsageSpeed
+	29, // 16: vibesys.host.v1.UsageRollupRow.basis:type_name -> vibesys.store.v1.UsageCostBasis
+	28, // 17: vibesys.host.v1.TranscriptRow.speed:type_name -> vibesys.store.v1.UsageSpeed
+	19, // 18: vibesys.host.v1.TranscriptFileState.rows:type_name -> vibesys.host.v1.TranscriptRow
+	20, // 19: vibesys.host.v1.TranscriptRootState.files:type_name -> vibesys.host.v1.TranscriptFileState
+	21, // 20: vibesys.host.v1.TranscriptScanCache.roots:type_name -> vibesys.host.v1.TranscriptRootState
+	6,  // 21: vibesys.host.v1.UsageLimitWindow.kind:type_name -> vibesys.host.v1.UsageLimitKind
+	27, // 22: vibesys.host.v1.UsageLimitWindow.resets_at:type_name -> google.protobuf.Timestamp
+	27, // 23: vibesys.host.v1.UsageResetCredit.expires_at:type_name -> google.protobuf.Timestamp
+	23, // 24: vibesys.host.v1.UsageAccountLimits.windows:type_name -> vibesys.host.v1.UsageLimitWindow
+	24, // 25: vibesys.host.v1.UsageAccountLimits.reset_credits:type_name -> vibesys.host.v1.UsageResetCredit
+	27, // 26: vibesys.host.v1.UsageAccountLimits.read_at:type_name -> google.protobuf.Timestamp
+	25, // 27: vibesys.host.v1.UsageLimitsState.providers:type_name -> vibesys.host.v1.UsageAccountLimits
+	28, // [28:28] is the sub-list for method output_type
+	28, // [28:28] is the sub-list for method input_type
+	28, // [28:28] is the sub-list for extension type_name
+	28, // [28:28] is the sub-list for extension extendee
+	0,  // [0:28] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_host_v1_usage_state_proto_init() }
@@ -1870,13 +2352,16 @@ func file_vibesys_host_v1_usage_state_proto_init() {
 	file_vibesys_host_v1_usage_state_proto_msgTypes[7].OneofWrappers = []any{}
 	file_vibesys_host_v1_usage_state_proto_msgTypes[8].OneofWrappers = []any{}
 	file_vibesys_host_v1_usage_state_proto_msgTypes[10].OneofWrappers = []any{}
+	file_vibesys_host_v1_usage_state_proto_msgTypes[15].OneofWrappers = []any{}
+	file_vibesys_host_v1_usage_state_proto_msgTypes[16].OneofWrappers = []any{}
+	file_vibesys_host_v1_usage_state_proto_msgTypes[17].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_host_v1_usage_state_proto_rawDesc), len(file_vibesys_host_v1_usage_state_proto_rawDesc)),
-			NumEnums:      6,
-			NumMessages:   15,
+			NumEnums:      8,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

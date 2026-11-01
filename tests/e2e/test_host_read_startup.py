@@ -373,6 +373,19 @@ READS: tuple[_Read, ...] = (
         allowed=_PROJECT_READ | {Group.USAGE, Group.USAGE_SUMMARY, Group.AGENT_LIBRARY},
     ),
     _Read(
+        "usage-limits",
+        lambda _project: ReadRequest(
+            checkout=_CHECKOUT,
+            method=Oneof(
+                "usage_limits",
+                pb.UsageLimitsRequest(request_id="r", now=Timestamp(seconds=1_790_001_000)),
+            ),
+        ),
+        "usage_limits",
+        modules=1100,
+        allowed=frozenset({Group.READ_ADAPTER, Group.AGENT_LIBRARY, Group.LOGINS}),
+    ),
+    _Read(
         "usage-rates-refresh",
         lambda _project: ReadRequest(
             checkout=_CHECKOUT,

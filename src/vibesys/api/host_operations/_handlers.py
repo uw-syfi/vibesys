@@ -39,6 +39,11 @@ class _Reads:
         response.request_id = request.request_id
         return response
 
+    def usage_limits(self, request: pb.UsageLimitsRequest) -> pb.UsageLimitsResponse:
+        response = self._source.usage_limits(request)
+        response.request_id = request.request_id
+        return response
+
     def list_tasks(self, request: pb.ListTasksRequest) -> pb.ListTasksResponse:
         return pb.ListTasksResponse(
             request_id=request.request_id, tasks=self._source.tasks(request.project)
@@ -132,6 +137,7 @@ def handlers(source: ReadSource) -> host_operations.Handlers:
         usage_window=reads.usage_window,
         usage_summary=reads.usage_summary,
         usage_rates_refresh=reads.usage_rates_refresh,
+        usage_limits=reads.usage_limits,
         list_harnesses=reads.list_harnesses,
         list_agent_logins=reads.list_agent_logins,
         list_examples=reads.list_examples,
