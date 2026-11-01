@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vs_runtime._core_run import HEARTBEAT_TASK
 from vs_sim.api.testing import CrashableClock, ProbedClock
 
 if TYPE_CHECKING:
     from vs_sim.api.testing import VirtualClock
+
+#: Name of the task that renews the lease while a drain is in flight; the clocks below never charge it.
+HEARTBEAT_TASK = "lease-heartbeat"
 
 
 class CrashableRunClock(CrashableClock):
