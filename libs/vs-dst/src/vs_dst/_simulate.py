@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     from vs_dst._interrupt import Interrupted
     from vs_dst._world import World
     from vs_proto.api import Record
-    from vs_runtime.api.core import DispatchCapExceededError
+    from vs_runtime.api.core import DispatchCapExceededError, RunStalledError
     from vs_runtime.api.step_runner import StepLoopStalledError
 
 
@@ -113,7 +113,7 @@ class SimulatedRun:
         return has_ended(self._run.core)
 
     @property
-    def halted(self) -> DispatchCapExceededError | StepLoopStalledError | None:
+    def halted(self) -> DispatchCapExceededError | RunStalledError | StepLoopStalledError | None:
         """Why the loop gave up on the run (dispatch cap, stall), or None."""
         return self._run.halted
 
