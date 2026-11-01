@@ -43,11 +43,13 @@ type Suite struct {
 	AlwaysCommands  [][]string `toml:"always_commands"`
 	Commands        [][]string `toml:"commands"`
 	PackageCommands [][]string `toml:"package_commands"`
-	// GateCommands are the fast subset of the group that `repoctl gate` (the pre-push
-	// hook) runs once, in place of its other commands. A group with none is not part of
-	// the gate. CI never reads them: its jobs run the full commands.
-	GateCommands [][]string `toml:"gate_commands"`
-	Collection   string     `toml:"collection"`
+	// GateCommands, with GatePackageCommands, are the fast subset of the group that
+	// `repoctl gate` (the pre-push hook) runs, in place of Commands and
+	// PackageCommands. A group with none is not part of the gate. CI never reads them:
+	// its jobs run the full commands.
+	GateCommands        [][]string `toml:"gate_commands"`
+	GatePackageCommands [][]string `toml:"gate_package_commands"`
+	Collection          string     `toml:"collection"`
 	// LocalPaths narrows `repoctl test` only (never `run-checks`, which CI
 	// uses): when set, the group runs locally only if a changed path equals or
 	// is under one of these repository-relative paths.
@@ -81,12 +83,15 @@ func Commands(suite Suite) ([]Check, error) {
 	return checksForCommands(suite, append(append([][]string{}, suite.AlwaysCommands...), suite.Commands...))
 }
 
-// ForGate returns the suite with only its gate commands, run once and never per package.
+// ForGate returns the suite with its gate commands in place of its full ones, so
+// the language planners expand the gate's package commands as they do the full ones.
 func (s Suite) ForGate() Suite {
 	s.AlwaysCommands = nil
 	s.Commands = s.GateCommands
-	s.PackageCommands = nil
-	s.Collection = ""
+	s.PackageCommands = s.GatePackageCommands
+	if len(s.GatePackageCommands) == 0 {
+		s.Collection = ""
+	}
 	return s
 }
 

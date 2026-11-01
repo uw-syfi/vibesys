@@ -31,7 +31,7 @@ func gateFixture() (graph, plan) {
 			GateCommands: [][]string{{"pnpm", "check"}}},
 		"clients_tests": {Name: "clients_tests", TriggerJob: "clients", IncludeInTest: true, Language: "typescript", Directory: "clients",
 			Collection: "pnpm_packages", Commands: [][]string{{"pnpm", "test"}}, PackageCommands: [][]string{{"pnpm", "{package}", "full"}},
-			GateCommands: [][]string{{"pnpm", "turbo", "gate"}}},
+			GatePackageCommands: [][]string{{"pnpm", "{package}", "gate"}}},
 		"docker": {Name: "docker", TriggerJob: "python", LocalSkip: "needs Docker", Language: "python", Directory: ".", TimeoutSeconds: 1,
 			Commands: [][]string{{"docker", "info"}}},
 	}
@@ -58,9 +58,10 @@ func TestGateRunsEachSelectedGroupsGateCommandsAndNothingElse(t *testing.T) {
 	want := map[string][][]string{
 		"always": {{"cheap-scan"}},
 		"types":  {{"ty", "gate"}},
-		// Gate commands run once even when packages are selected, never per package.
+		// A gate_commands group runs them once even when packages are selected; the
+		// package expansion belongs to gate_package_commands.
 		"clients_quality": {{"pnpm", "check"}},
-		"clients_tests":   {{"pnpm", "turbo", "gate"}},
+		"clients_tests":   {{"pnpm", "@example/a", "gate"}, {"pnpm", "@example/z", "gate"}},
 	}
 	if got := laneCommands(lanes); !reflect.DeepEqual(got, want) {
 		t.Fatalf("lanes = %v\nwant %v", got, want)
@@ -108,6 +109,8 @@ func TestGateCommandsMustBeValid(t *testing.T) {
 	bad := []execution.Suite{
 		{Name: "skip", TriggerJob: "python", LocalSkip: "needs Docker", Language: "python", Directory: ".", TimeoutSeconds: 1, Commands: [][]string{{"x"}}, GateCommands: [][]string{{"x"}}},
 		{Name: "empty", TriggerJob: "python", IncludeInChecks: true, Language: "python", Directory: ".", TimeoutSeconds: 1, Commands: [][]string{{"x"}}, GateCommands: [][]string{{}}},
+		{Name: "nopackage", TriggerJob: "clients", IncludeInChecks: true, Language: "typescript", Directory: "clients", Collection: "pnpm_packages", TimeoutSeconds: 1, Commands: [][]string{{"x"}}, PackageCommands: [][]string{{"x", "{package}"}}, GatePackageCommands: [][]string{{"x", "no placeholder"}}},
+		{Name: "nocollection", TriggerJob: "clients", IncludeInChecks: true, Language: "typescript", Directory: "clients", TimeoutSeconds: 1, Commands: [][]string{{"x"}}, GatePackageCommands: [][]string{{"x", "{package}"}}},
 	}
 	for _, suite := range bad {
 		g.CheckGroups = map[string]execution.Suite{}

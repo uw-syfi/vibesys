@@ -20,8 +20,8 @@ import (
 )
 
 // The pre-push gate is the fast subset of the checks CI runs for a change: each check
-// group may list gate_commands in .repoctl/checks.toml, the part of it worth running
-// before a push. The gate selects groups the way `repoctl test`
+// group may list gate_commands (and gate_package_commands) in .repoctl/checks.toml, the
+// part of it worth running before a push. The gate selects groups the way `repoctl test`
 // does, runs each selected group's gate commands as one lane, and runs the lanes
 // concurrently, so its wall time is the slowest lane rather than the sum. CI still runs
 // every check in full; the gate only moves the common failures to before the push.
@@ -63,7 +63,7 @@ func selectedGateLanes(g graph, p plan) ([]gateLane, error) {
 	lanes := []gateLane{}
 	for _, name := range names {
 		suite := g.CheckGroups[name]
-		if len(suite.GateCommands) == 0 {
+		if len(suite.GateCommands) == 0 && len(suite.GatePackageCommands) == 0 {
 			continue
 		}
 		triggered := suite.TriggerJob == "" && len(p.ChangedPaths) > 0 || suite.TriggerJob != "" && p.Jobs[suite.TriggerJob]
@@ -77,7 +77,8 @@ func selectedGateLanes(g graph, p plan) ([]gateLane, error) {
 		if !ok {
 			return nil, fmt.Errorf("check group %q: unknown language %q", suite.Name, suite.Language)
 		}
-		checks, err := planner.Plan(suite.ForGate(), nil)
+		gate := suite.ForGate()
+		checks, err := planner.Plan(gate, p.Collections[gate.Collection])
 		if err != nil {
 			return nil, err
 		}
