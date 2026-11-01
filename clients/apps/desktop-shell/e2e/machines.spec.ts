@@ -10,6 +10,7 @@ import {
   MAC_CHROME,
 } from './fake-bridge.js';
 import {addInitScripts, initScript} from './init-scripts.js';
+import {showScreen} from './read.js';
 
 /** Where the journey's Ink screenshots go, when `MACHINES_SCREENSHOTS` names a directory. */
 const SHOTS = process.env['MACHINES_SCREENSHOTS'];
@@ -72,10 +73,7 @@ async function openMachines(page: Page, seed: FakeBridgeSeed = SEED): Promise<vo
     initScript(installFakeNewRun, seed),
   ]);
   await page.goto('./shell.html');
-  await page
-    .getByRole('navigation', {name: 'VibeSys'})
-    .getByRole('button', {name: 'Settings'})
-    .click();
+  await showScreen(page, 'Settings');
   await page
     .getByRole('navigation', {name: 'Settings sections'})
     .getByRole('button', {name: /Machines/})
@@ -221,10 +219,7 @@ test('Escape closes Add a machine, which has the focus as it opens, and no empty
     initScript(installFakeNewRun, none),
   ]);
   await page.goto('./shell.html');
-  await page
-    .getByRole('navigation', {name: 'VibeSys'})
-    .getByRole('button', {name: 'Settings'})
-    .click();
+  await showScreen(page, 'Settings');
   await page
     .getByRole('navigation', {name: 'Settings sections'})
     .getByRole('button', {name: /Machines/})

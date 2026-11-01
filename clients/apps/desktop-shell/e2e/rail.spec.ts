@@ -12,9 +12,10 @@ import {
 } from './fake-bridge.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {journeyScript} from './journey-world.js';
+import {pressMark, showScreen, sidebar} from './read.js';
 import {revealNav} from './settings-machine.js';
 import {STARTED_AT} from './started-at.js';
-import {type FakeHostWindow, open, SEED, setChromeInset, sidebar} from './world.js';
+import {type FakeHostWindow, open, SEED, setChromeInset} from './world.js';
 
 /**
  * The rail: always there, beside every screen. Settings opened from the rail or the application
@@ -25,6 +26,7 @@ import {type FakeHostWindow, open, SEED, setChromeInset, sidebar} from './world.
  */
 
 const PROJECT = '/home/me/vibesys-projects/queue-rs';
+const DESTINATIONS = ['New', 'Runs', 'Machines', 'Usage', 'Settings'] as const;
 const INSTANCE = '00000000000a';
 
 const RUN_ID = '20261015-163047';
@@ -111,8 +113,8 @@ test('the rail is the one navigation: the mark, New, Runs, Machines, Usage, and 
 test('the rail marks where the user is, on every screen', async ({page}) => {
   await open(page);
   const rail = sidebar(page);
-  for (const name of ['New', 'Runs', 'Machines', 'Usage', 'Settings']) {
-    await rail.getByRole('button', {name, exact: true}).click();
+  for (const name of DESTINATIONS) {
+    await showScreen(page, name);
     await expect(rail.getByRole('button', {name, exact: true})).toHaveAttribute(
       'aria-current',
       'page',
@@ -135,7 +137,7 @@ test('the Settings menu item opens Settings repeatedly and Back restores the run
 
 test('Settings sections are peers; Back exits to the same run', async ({page}) => {
   await openRun(page);
-  await sidebar(page).getByRole('button', {name: 'Settings'}).click();
+  await showScreen(page, 'Settings');
   const sections = page.getByRole('navigation', {name: 'Settings sections'});
   const appearance = sections.getByRole('button', {name: 'Appearance'});
   const machines = sections.getByRole('button', {name: /Machines/});
@@ -165,7 +167,7 @@ test('Settings sections are peers; Back exits to the same run', async ({page}) =
 test('Settings section navigation remains reachable at narrow width', async ({page}) => {
   await page.setViewportSize({width: 800, height: 700});
   await openRun(page);
-  await sidebar(page).getByRole('button', {name: 'Settings'}).click();
+  await showScreen(page, 'Settings');
   const sections = page.getByRole('navigation', {name: 'Settings sections'});
   await expect(sections).toBeInViewport();
   await revealNav(page);
@@ -212,8 +214,8 @@ test('the page starts at the same height, beside a rail of the same width, on ev
     expect(home.left, `the rail is as wide as the corner the lights sit in at ${width} px`).toBe(
       MAC_CHROME.startWidth,
     );
-    for (const name of ['New', 'Machines', 'Usage', 'Settings']) {
-      await sidebar(page).getByRole('button', {name, exact: true}).click();
+    for (const name of ['New', 'Machines', 'Usage', 'Settings'] as const) {
+      await showScreen(page, name);
       expect(await place(), `${name} at ${width} px`).toEqual(home);
     }
   }
@@ -244,8 +246,8 @@ test('the rail starts with the app logo, whose tooltip is the version, and it go
 
   await expect(mark).toHaveAttribute('title', /^VibeSys \S+$/);
   await expect(mark.locator('svg.vs-icon path')).toHaveCount(1);
-  await sidebar(page).getByRole('button', {name: 'New', exact: true}).click();
-  await mark.click();
+  await showScreen(page, 'New');
+  await pressMark(page);
   await expect(page.getByRole('heading', {name: 'Runs'})).toBeVisible();
 });
 

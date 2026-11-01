@@ -1,5 +1,6 @@
 import {expect, type Page, test} from '@playwright/test';
-import {open, sidebar} from './world.js';
+import {showScreen} from './read.js';
+import {open} from './world.js';
 
 /**
  * The keyboard reaches the rail before the page, as the eye does: from a fresh load, Tab walks
@@ -10,7 +11,7 @@ const WIDTHS = [660, 1000, 1440] as const;
 const SCREENS = ['New', 'Runs', 'Settings'] as const;
 
 async function reach(page: Page, screen: (typeof SCREENS)[number]): Promise<void> {
-  await sidebar(page).getByRole('button', {name: screen, exact: true}).click();
+  await showScreen(page, screen);
   // A fresh load's focus start: the click moved it, so the page's own start is restored.
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
 }

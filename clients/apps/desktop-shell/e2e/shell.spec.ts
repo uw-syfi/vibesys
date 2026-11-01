@@ -2,11 +2,12 @@ import AxeBuilder from '@axe-core/playwright';
 import {expect, test} from '@playwright/test';
 import {rawTextOf, screenCheck} from './checks/screen-check.js';
 import {MAC_CHROME, WINDOWS_CHROME} from './fake-bridge.js';
-import {open, SEED, sidebar} from './world.js';
+import {showScreen, sidebar} from './read.js';
+import {open, SEED} from './world.js';
 
 test('Settings changes the theme at once and keeps it', async ({page}) => {
   await open(page);
-  await sidebar(page).getByRole('button', {name: 'Settings'}).click();
+  await showScreen(page, 'Settings');
   await expect(page.getByRole('heading', {name: 'Appearance'})).toBeVisible();
   await page.getByRole('radio', {name: 'Always dark'}).check();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'ink');
@@ -29,7 +30,7 @@ test('Settings changes the theme at once and keeps it', async ({page}) => {
 test('the sidebar and Settings draw no code names', async ({page}) => {
   await open(page);
   expect(await rawTextOf(page)).toEqual([]);
-  await sidebar(page).getByRole('button', {name: 'Settings'}).click();
+  await showScreen(page, 'Settings');
   await expect(page.getByRole('heading', {name: 'Appearance'})).toBeVisible();
   expect(await rawTextOf(page)).toEqual([]);
 });
@@ -37,7 +38,7 @@ test('the sidebar and Settings draw no code names', async ({page}) => {
 test('Match system follows the system appearance', async ({page}) => {
   await page.emulateMedia({colorScheme: 'dark'});
   await open(page, {...SEED, theme: 'ink'});
-  await sidebar(page).getByRole('button', {name: 'Settings'}).click();
+  await showScreen(page, 'Settings');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'ink');
   await page.emulateMedia({colorScheme: 'light'});
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'paper');

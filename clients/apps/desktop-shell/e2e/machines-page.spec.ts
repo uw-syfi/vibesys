@@ -1,7 +1,8 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
 import {rawTextOf} from './checks/screen-check.js';
-import {card, type MachinesWorld, openMachines, rail, testOf, WORLDS} from './machines-page.js';
+import {card, type MachinesWorld, openMachines, testOf, WORLDS} from './machines-page.js';
+import {sidebar} from './read.js';
 
 function world(name: string): MachinesWorld {
   const found = WORLDS.find(each => each.name === name);
@@ -154,7 +155,7 @@ test("a machine's Settings opens on its clusters, and Back returns to Machines",
 
 /** The rail's Machines button carries its warning in its name: the word the machine's card uses. */
 const warning = (page: Page, word = 'Unreachable') =>
-  rail(page).getByRole('button', {name: new RegExp(`^Machines, ${word}$`)});
+  sidebar(page).getByRole('button', {name: new RegExp(`^Machines, ${word}$`)});
 
 test('the rail warns of nothing while every machine and cluster is fine', async ({page}) => {
   await openMachines(page, 1440, world('one machine'));
