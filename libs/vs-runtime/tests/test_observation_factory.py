@@ -182,9 +182,13 @@ def test_only_a_named_constructor_builds_facts_that_hold_nothing(
         )
 
     if terminal and released and not accepted and not named:
-        with pytest.raises(TypeError, match="never_held, refused or not_begun"):
+        with pytest.raises(TypeError, match="never_held, nothing_held, refused or not_begun"):
             build()
     else:
         assert not build().holds_nothing
-    for vouched in (ObservationFacts.refused("x"), ObservationFacts.not_begun("x")):
+    for vouched in (
+        ObservationFacts.refused("x"),
+        ObservationFacts.not_begun("x"),
+        ObservationFacts.nothing_held("x"),
+    ):
         assert vouched.holds_nothing

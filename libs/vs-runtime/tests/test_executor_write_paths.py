@@ -1,10 +1,9 @@
-"""Executors record effects and observations only through the shared mechanisms.
+"""Executors record observations only through the factory, and write no execution record.
 
-Execution receipts (the begun marker and the sealed result) are written by
-``ReceiptStore.run_once`` and observations by ``ObservationFactory``. A hand-rolled
-path would skip the begun marker, which is exactly what makes "never started" a
-provable answer to ``InspectRequest``, and would issue observation sequences that
-core rejects. These checks fail when an executor grows such a path.
+Observations are numbered by ``ObservationFactory``: a hand-rolled path would issue sequences
+that core rejects. An execution record (the begun marker and the sealed result) is a schema the
+retained-run import reads (``_retained_receipts``) and nothing writes: the step loop owns
+whether an effect runs. These checks fail when an executor grows either path.
 """
 
 from __future__ import annotations
@@ -16,11 +15,11 @@ from vs_runtime.api import core
 
 SOURCE = Path(core.__file__).parents[1]  # the package's own source, scanned below
 
-# The only modules that may write execution records or observation rows: the store and
-# the factory.
+# The only modules that may build observations, write observation rows or name the execution
+# record: the factory, and the retained schemas.
 OWNERS = frozenset(
     {
-        "_receipt_store.py",
+        "_retained_receipts.py",
         "_observation_factory.py",
         # The scripted shell test kit: it stands in for the executors, so it builds the
         # observations their translators would.
@@ -47,15 +46,13 @@ def _violations(path: Path) -> list[str]:
             callee = node.func
             if isinstance(callee, ast.Name) and callee.id == "Observation":
                 found.append(f"{path.name}:{line} builds an Observation outside the factory")
-            if isinstance(callee, ast.Attribute) and callee.attr in {"seal", "sealed"}:
-                found.append(f"{path.name}:{line} calls .{callee.attr}( outside run_once")
             first = node.args[0] if node.args else None
             if isinstance(first, ast.Constant) and first.value in FAMILIES:
                 found.append(f"{path.name}:{line} writes the {first.value!r} family directly")
     return found
 
 
-def test_only_the_store_and_the_factory_write_execution_records_and_observations() -> None:
+def test_only_the_factory_writes_observations_and_nothing_writes_execution_records() -> None:
     problems = [
         problem
         for path in sorted(SOURCE.glob("*.py"))

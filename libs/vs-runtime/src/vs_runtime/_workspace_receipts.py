@@ -3,8 +3,8 @@
 Bindings, the exclusive-root holder, attempt generations, revision ownership and
 release proofs are records in the one crash-safe store every executor uses, so each
 read-modify-write that decides between two hosts runs under its cross-process lock.
-The per-request effect-once rule (begun marker, sealed result, fence and lease) is
-the store's ``run_once``, not this module's.
+Whether an effect runs again is not recorded here: the step loop owns it, and an executor
+repeats an effect through ``ExecutionContext.repeat``.
 """
 
 from __future__ import annotations
@@ -138,8 +138,7 @@ class WorkspaceReceipts(Protocol):
     def bind(self, attempt: AttemptRef, binding: AttemptBinding) -> AttemptBinding:
         """Store the binding if absent; return the binding that won.
 
-        The caller holds the attempt's workspace fence (``EffectFences``): a discard that
-        closed it first is what keeps a withdrawn generation from binding.
+        A repeated ensure finds the binding an earlier attempt made.
         """
         ...
 

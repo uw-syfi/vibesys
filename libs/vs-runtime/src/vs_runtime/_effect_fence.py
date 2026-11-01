@@ -53,8 +53,6 @@ class FenceKind(StrEnum):
     """The binding of one session in one admission episode (EnsureSession, CloseSession)."""
     INVOCATION = "invocation"
     """The provider turn of one invocation (DispatchTurn, CancelTurn, InspectTurn)."""
-    ATTEMPT_WORKSPACE = "attempt-workspace"
-    """The workspace of one attempt generation (EnsureWorkspace, DiscardWorkspace)."""
     SCOPE_EPISODE = "scope-episode"
     """The measurement jobs of one scope admission episode (SubmitMeasurement, CloseAttemptScope)."""
     MEASUREMENT_JOB = "measurement-job"

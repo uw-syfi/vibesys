@@ -131,8 +131,8 @@ Paths are under `libs/vs-runtime/src/vs_runtime/`.
 
 | Module | Lines | Callers | Verdict |
 |---|---|---|---|
-| `_effect_fence.py` | 365 | `_evaluation_requests.py`, `_observation_factory.py`, `_session_requests.py`, `_session_lifecycle_requests.py`, `_workspace_requests.py`, `_workspace_receipts.py`, `api/core.py`, `api/retained.py`, `api/fence_contracts.py` | Delete. `NothingHeld` and `MayHold` exist to prove "nothing is held"; `clear` replaces them |
-| `_receipt_store.py` | 486 | 27 modules; `run_once` is used by 11 executors | Delete 265: `run_once`, `authorize`, `history`, `seal`, the `Settled`/`Transient`/`Replayed` result types. Keep 220: `exclusive`, `load`, `record_once`, `replace`, `modify`, the crash-safe keyed document store behind workspace receipts, operation receipts and the evidence ledger |
+| `_effect_fence.py` | 365 | `_evaluation_requests.py`, `_observation_factory.py`, `_session_requests.py`, `_session_lifecycle_requests.py`, `api/core.py`, `api/retained.py`, `api/fence_contracts.py` | Delete. `NothingHeld` and `MayHold` exist to prove "nothing is held"; `clear` replaces them. The workspace executor no longer enters or closes a fence: a discard of an unbound generation removes the worktree an ensure left, and the step loop's scope order starts no ensure after it. The session, lifecycle and evaluation executors still do |
+| `_receipt_store.py` | 486 | 27 modules | Deleted `run_once`, `authorize`, `history`, `seal`, the execution record types (the schemas move to `_retained_receipts.py` for the retained-run import) and the `Settled`/`Transient`/`Replayed` result types: 330 lines of the 486. Kept: `exclusive`, `load`, `record_once`, `replace`, `modify`, the crash-safe keyed document store behind workspace receipts, the evaluation job registry and the evidence ledger |
 | `_access_settlement.py` | 377 | `_session_requests.py`, `_session_lifecycle_requests.py`, `api/core.py`, `api/retained.py` | Delete `access_unproven`. Keep the rest. `begin` and `settle` enforce the role's workspace grant and revert unauthorized writes, which is policy, not recovery. The runners also use `fence`, `receipt`, `restore_interrupted` and the new `rewind`, which `clear` of a turn calls to return the workspace to the baseline its receipt retains and reopen the key for the next attempt. `begin` calls `require_clear` and `blocking`, and the workspace's snapshot guard calls `fenced_by`, so the unsettled-writer index stays too: the 103 lines this row first counted for deletion are not removable without redesigning that guard |
 | `_evaluation_recovery.py` | 311 | `_polling_evaluation.py` and `_semantic_slurm_evaluation.py` took it as an optional argument that no production wiring passed; `api/slurm_evaluation_stack.py` | Deleted, with the optional `receipts` and `recovery` arguments and their branches
 | `_writer_reconciliation.py` | 326 | `_run_environment.py` (`reconcile_writers` on four environments), `_evaluation_recovery.py` | Deleted, with `reconcile_writers` on every environment. The no-op `_NoopWorkspaceRecovery` mixin stays for its `reap_orphans`, `repair_workspace` and `remove_workspace_child`
@@ -1272,11 +1272,10 @@ These are facts the implementation must settle, found while checking the design 
   to give each kind an equivalent that does the same job. Two need it spelled out: `EnsureSession` repeats
   safely only under the same request id, and `SnapshotAndRetain` and `SnapshotAndRetainRun` find the
   snapshot an interrupted attempt already made by its label only when they are resumed.
-- **The executor kinds repeat safely today because their executors keep receipts.** `ExecutorStepRunner`
-  runs on `RuntimeWorkspaceRequests`, `RuntimeSessionRequests` and the evaluation executor, which replay a
-  sealed result by request id and resume an unsealed one (`run_once`). Every kind passes a kill at sampled
-  durable writes through the runner (every write, for `EnsureSession`), but the cutover deletes
-  `run_once`, and these facts must then hold without it:
+- **The executor kinds repeat by tag, and `run_once` is deleted.** `ExecutorStepRunner` runs on
+  `RuntimeWorkspaceRequests`, `RuntimeSessionRequests` and the evaluation executor, which once replayed a
+  sealed result by request id and resumed an unsealed one. Every kind passes a kill at sampled durable
+  writes through the runner (every write, for `EnsureSession`), and these facts hold without the receipt:
   - `SnapshotAndRetain` and `SnapshotAndRetainRun` look for the snapshot an interrupted attempt already
     committed by its label only when resumed (`_snapshot`, `find_snapshot` under `if resumed`). Without
     the flag a repeat commits again: an unreferenced equal-tree commit, never a wrong result. The lookup

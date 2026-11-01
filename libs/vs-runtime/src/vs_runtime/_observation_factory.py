@@ -67,8 +67,8 @@ class ObservationFacts:
 
     Facts that hold nothing (a terminal release that accepts nothing and names no resource)
     end core's owning record, so they come only from a constructor that states why the
-    request holds nothing: ``never_held`` (a closed effect fence proves it), ``refused`` (a
-    sealed self-refusal) or ``not_begun`` (an inspection; core resends the request). Built
+    request holds nothing: ``never_held`` (a closed effect fence proves it), ``nothing_held`` (a
+    removal), ``refused`` (a self-refusal) or ``not_begun`` (an inspection; core resends the request). Built
     any other way they raise ``TypeError``.
     """
 
@@ -89,7 +89,7 @@ class ObservationFacts:
 
     def __post_init__(self, _vouch: object) -> None:
         if self.holds_nothing and _vouch is not _VOUCHED:
-            message = "facts that hold nothing come only from never_held, refused or not_begun"
+            message = "facts that hold nothing come only from never_held, nothing_held, refused or not_begun"
             raise TypeError(message)
 
     @property
@@ -119,6 +119,16 @@ class ObservationFacts:
         or a copy of a proof, raises ``TypeError``.
         """
         proof.vouch(key)
+        return cls._holding_nothing(diagnostic)
+
+    @classmethod
+    def nothing_held(cls, diagnostic: str) -> ObservationFacts:
+        """A terminal answer that what the request names holds nothing now, because it was removed.
+
+        A discard of a generation no ensure bound removes whatever the ensure left unbound, and
+        then holds nothing. The step loop's scope order starts no ensure of the generation
+        afterwards, so the answer stays true.
+        """
         return cls._holding_nothing(diagnostic)
 
     @classmethod

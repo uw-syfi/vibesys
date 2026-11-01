@@ -398,67 +398,7 @@ async def test_job_observations_increase_strictly_and_stale_replays_are_not_fres
             assert not isinstance(stale, Proven)
 
 
-async def test_retry_after_unknown_is_fresh_to_the_core() -> None:
-    async with world() as w:
-        lease = FakeLease()
-        lease.valid = False
-        requests, _ = w.requests()
-        sub = submission(candidate=w.stack.snapshot)
-        unknown = await requests.execute(sub, context_for(sub, lease))
-        first = unknown.observation.observation
-        assert first.status is ObservationStatus.UNKNOWN
-        assert w.cluster.submissions == []
-        retry = await requests.execute(sub, context_for(sub))
-        second = retry.observation.observation
-        assert second.status is ObservationStatus.PENDING
-        assert second.sequence > first.sequence
-        assert isinstance(fresh_observation((first,), second, complete=True), Proven)
-        resource = resource_of(retry)
-        await settled(w, resource)
-        inspected = await run(w, query(InspectOwnedJob, "inspect", resource))
-        target = inspected.observation.target
-        assert target is not None
-        assert isinstance(
-            fresh_observation((first, second), target.observation, complete=True), Proven
-        )
-
-
 # authority
-
-
-async def test_lost_lease_gives_unknown_and_no_effect_for_every_effectful_request() -> None:
-    cluster = ScenarioCluster()
-    cluster.states = (SlurmJobStatus.PENDING,)
-    async with world(cluster) as w:
-        resource = resource_of(await submit(w))
-        await settled(w, resource)
-        lease = FakeLease()
-        lease.valid = False
-        for request in (
-            submission("fresh", candidate=w.stack.snapshot),
-            query(CancelOwnedJob, "cancel", resource),
-            close_request(),
-        ):
-            requests, _ = w.requests()
-            got = await requests.execute(request, context_for(request, lease))
-            assert got.observation.observation.status is ObservationStatus.UNKNOWN
-            assert got.owner_events == ()
-        assert w.cluster.submissions == [resource.root]
-        assert w.cluster.cancelled == []
-        project_scope = (await run(w, query(InspectOwnedJob, "still", resource))).observation
-        assert project_scope.target is not None
-        assert not project_scope.target.observation.terminal
-
-
-async def test_stale_host_epoch_is_refused_before_the_effect() -> None:
-    async with world() as w:
-        requests, _ = w.requests()
-        warm = submission("warm", candidate=w.stack.snapshot)
-        await requests.execute(warm, context_for(warm, epoch=3))
-        late = submission("late", candidate=w.stack.snapshot)
-        got = await requests.execute(late, context_for(late, epoch=2))
-        assert got.observation.observation.status is ObservationStatus.UNKNOWN
-        assert len(w.cluster.submissions) <= 1
 
 
 # ownership
@@ -719,17 +659,13 @@ async def test_wiring_binds_every_evaluation_request_and_core_accepts_the_facts(
 # Observation contract: core accepts every output across retries and restarts ---------------
 
 
-async def _submit_after_unknown() -> list[ExecutionResult]:
+async def _submit_then_repeat() -> list[ExecutionResult]:
+    """Submit, then repeat the submission twice, as the loop does after an attempt that died."""
     async with world() as w:
         sub = submission(candidate=w.stack.snapshot)
-        lost = FakeLease()
-        lost.valid = False
-        requests, _ = w.requests()
-        unknown = await requests.execute(sub, context_for(sub, lost))
-        assert unknown.observation.observation.status is ObservationStatus.UNKNOWN
-        retried = await run(w, sub)
-        await settled(w, resource_of(retried))
-        return [unknown, retried, await run(w, sub)]
+        first = await run(w, sub)
+        await settled(w, resource_of(first))
+        return [first, await run(w, sub, repeat=True), await run(w, sub, repeat=True)]
 
 
 def _polled(
@@ -758,7 +694,7 @@ def _polled(
 
 
 OBSERVATION_SCENARIOS: dict[type, Callable[[], Awaitable[list[ExecutionResult]]]] = {
-    SubmitMeasurement: _submit_after_unknown,
+    SubmitMeasurement: _submit_then_repeat,
     ObserveOwnedJob: _polled(ObserveOwnedJob),
     InspectOwnedJob: _polled(InspectOwnedJob),
     CollectEvidence: _polled(CollectEvidence),

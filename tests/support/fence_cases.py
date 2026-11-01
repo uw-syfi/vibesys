@@ -23,7 +23,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from tests.support.executor_cases import state_home
 from tests.support.session_lifecycle_world import (
     cancel_request,
     close_request,
@@ -32,11 +31,9 @@ from tests.support.session_lifecycle_world import (
     released_keys,
 )
 from tests.support.session_world import (
-    SettledRunInvocations,
     dispatch_request,
     ensure_request,
 )
-from tests.support.workspace_world import WorkspaceEnv, open_workspace_env
 
 from vs_agent.api import AgentSessionState, DurableSessionStore, Pending
 from vs_core.api import (
@@ -44,30 +41,20 @@ from vs_core.api import (
     AttemptRef,
     CancelOwnedJob,
     CloseAttemptScope,
-    DecisionId,
-    DiscardWorkspace,
-    EnsureWorkspace,
     RequestId,
     ResourceId,
-    Scope,
     SubmitMeasurement,
-    WorkspaceMode,
-    WorkspacePlan,
 )
 from vs_evaluation.api import EvaluationState, ExecutorObservation, ExecutorPoll, PollPhase
 from vs_project.api import Project
-from vs_project.api.testing import world_git
 from vs_runtime.api.core import (
     ExecutionResult,
     FenceKind,
     MeasurementRequests,
-    ReceiptEvidenceLedger,
     ReceiptStore,
-    RuntimeWorkspaceRequests,
     SessionBinding,
     handle_for,
     owner_key,
-    revision_ref,
 )
 from vs_runtime.api.executor_contexts import context_for
 from vs_runtime.api.fence_contracts import answered_released
@@ -81,7 +68,7 @@ if TYPE_CHECKING:
 
     from vs_core.api import RequestBase
     from vs_evaluation.api import EvaluationRequest
-    from vs_project.api import GitRepository, StateNamespace
+    from vs_project.api import StateNamespace
     from vs_runtime.api.fence_contracts import FenceHost, FenceWorld, HostLife
     from vs_sim.api import BlockingRunner
 
@@ -193,92 +180,6 @@ class _SessionPair:
     async def world(self) -> AsyncIterator[FenceWorld]:
         with tempfile.TemporaryDirectory() as raw:
             yield self.world_type(Path(raw))
-
-
-# workspaces
-
-_ATTEMPT = AttemptRef(attempt_id=AttemptId(root="a1"), generation=0)
-
-
-def _attempt_fields(name: str) -> dict[str, Any]:
-    return {
-        "request_id": RequestId(root=name),
-        "scope": Scope(owner=_ATTEMPT.attempt_id, generation=_ATTEMPT.generation),
-        "admission_id": DecisionId(root="admit"),
-        "attempt": _ATTEMPT,
-    }
-
-
-class _CountingGit:
-    """A repository that counts the worktrees it was asked to add."""
-
-    def __init__(self, git: GitRepository, added: list[Path]) -> None:
-        self._git = git
-        self._added = added
-
-    def __getattr__(self, name: str) -> object:
-        return getattr(self._git, name)
-
-    def add_worktree(self, destination: Path, commit: str) -> None:
-        self._added.append(destination)
-        self._git.add_worktree(destination, commit)
-
-
-class _WorkspaceWorld(_ReleasesItself):
-    def __init__(self, env: WorkspaceEnv, added: list[Path]) -> None:
-        self._env = env
-        self._added = added
-        base = env.hosts[0].root.revision
-        assert base is not None
-        self._plan = WorkspacePlan(mode=WorkspaceMode.ISOLATED_CHILD, base=revision_ref(base))
-
-    async def prepare(self, host: FenceHost) -> None:
-        del host
-
-    def setup(self, identity: str) -> RequestBase:
-        return EnsureWorkspace(**_attempt_fields(f"ensure-{identity}"), plan=self._plan)
-
-    def release(self, identity: str) -> RequestBase:
-        return DiscardWorkspace(**_attempt_fields(f"discard-{identity}"))
-
-    def host(self, epoch: int, life: HostLife, blocking: BlockingRunner) -> FenceHost:
-        store = ReceiptStore(life.namespace(self._env.receipts_namespace()), threads=OsThreads())
-        workspaces = self._env.start_host(blocking)
-        executor = RuntimeWorkspaceRequests(
-            workspaces, store, SettledRunInvocations(), blocking, ReceiptEvidenceLedger(store)
-        )
-        return _Host(cast("Any", executor), epoch)
-
-    def created(self) -> int:
-        return len(self._added)
-
-    def held(self) -> int:
-        root = self._env.hosts[0].root.path.resolve()
-        git = world_git(root, self._env.git_disk)
-        return len([path for path in git.worktrees() if path != root])
-
-
-class _WorkspacePair:
-    name = "workspace-discard"
-    kind = FenceKind.ATTEMPT_WORKSPACE
-
-    @asynccontextmanager
-    async def world(self) -> AsyncIterator[FenceWorld]:
-        added: list[Path] = []
-
-        def counting(git: GitRepository) -> GitRepository:
-            return cast("GitRepository", _CountingGit(git, added))
-
-        with (
-            tempfile.TemporaryDirectory() as raw,
-            state_home(Path(raw) / "operator-state"),
-            open_workspace_env(Path(raw), wrap_git=counting) as env,
-        ):
-            try:
-                yield _WorkspaceWorld(env, added)
-            finally:
-                for host in reversed(env.hosts):
-                    await host.close()
 
 
 # evaluation
@@ -402,7 +303,6 @@ class _EvaluationPair:
 FENCE_PAIRS = (
     _SessionPair("session-close", _SessionCloseWorld, FenceKind.SESSION_EPISODE),
     _SessionPair("turn-cancel", _TurnCancelWorld, FenceKind.INVOCATION),
-    _WorkspacePair(),
     _EvaluationPair("scope-close", cancel=False, kind=FenceKind.SCOPE_EPISODE),
     _EvaluationPair("job-cancel", cancel=True, kind=FenceKind.MEASUREMENT_JOB),
 )

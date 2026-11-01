@@ -98,7 +98,6 @@ from vs_sim.api.testing import (
     Sim,
     SimThreads,
     examples,
-    swept,
     wait_or_fail,
 )
 
@@ -1739,7 +1738,7 @@ def test_f7_a_failed_discard_is_not_stored_and_a_retry_completes_it(tmp_path: Pa
 
         async def exercise() -> None:
             workspaces = env.hosts[0]
-            executor, receipts = _executor(workspaces)
+            executor, _ = _executor(workspaces)
             attempt = _attempt()
             path = await _ensure_at(executor, workspaces, attempt, "e1")
             discard = DiscardWorkspace(**_common(attempt, "d1"), attempt=attempt)
@@ -1747,7 +1746,6 @@ def test_f7_a_failed_discard_is_not_stored_and_a_retry_completes_it(tmp_path: Pa
             first = await _run(executor, discard)
             assert _status(first) is ObservationStatus.FAILED
             assert not first.observation.observation.terminal
-            assert receipts.sealed("d1", ExecutionResult) is None
             second = await _run(executor, discard)
             observation = second.observation.observation
             assert _status(second) is ObservationStatus.SUCCEEDED
@@ -1808,58 +1806,48 @@ def test_f8_a_release_by_anyone_else_does_not_claim_completeness(tmp_path: Path)
 _WITHDRAW_CASES = tuple(
     itertools.product(
         (WorkspaceMode.ISOLATED_CHILD, WorkspaceMode.EXCLUSIVE_ROOT),
-        (("ensure", "discard"), ("discard", "ensure")),
-        (False, True),  # the first ensure's host dies after making the workspace, before binding
-        (False, True),  # the ensure is retried at the end
+        (False, True),  # the ensure's host dies after making the workspace, before binding
     )
 )
 
 
-def test_a_discard_answered_as_nothing_held_is_never_followed_by_a_workspace(
+def test_a_discard_after_an_ensure_leaves_no_worktree_even_if_the_ensure_died_unbound(
     tmp_path: Path,
 ) -> None:
-    """Every order of ensure and discard of one attempt, over the same disk.
+    """The discard of one attempt after its ensure, over the same disk.
 
-    A discard that finds no binding fences the generation and removes any worktree an
-    interrupted ensure left: it holds nothing, and an ensure that arrives later is refused.
-    A discard after a bound ensure releases what it bound. Either way no worktree survives.
-    Each case runs on its own attempt of one run: a pull request samples six evenly spaced
-    cases (both modes, both orders, with and without the crash), nightly runs all sixteen.
+    A discard that finds no binding removes any worktree an interrupted ensure left: it holds
+    nothing. A discard after a bound ensure releases what it bound. Either way no worktree
+    survives. The loop runs a discard only after the attempt's ensure has a result or was
+    cancelled (``decide``'s scope order), so a discard before an ensure is not a case here.
+    Each case runs on its own attempt of one run.
     """
     with _env(tmp_path) as env:
 
-        async def case(
-            index: int, mode: WorkspaceMode, order: tuple[str, ...], *, crash: bool, retry: bool
-        ) -> None:
+        async def case(index: int, mode: WorkspaceMode, *, crash: bool) -> None:
             attempt = _attempt(f"a{index}")
             ensure = _ensure(env.hosts[0], attempt, f"e{index}", mode)
             discard = DiscardWorkspace(**_common(attempt, f"d{index}"), attempt=attempt)
-            answers: dict[str, ExecutionResult] = {}
             host = env.hosts[-1]
-            for step in (*order, *(("retry",) if retry else ())):
-                store = _failing(env)
-                store.fail_bind = crash and step == "ensure"
-                executor, _ = _executor(host, store)
-                try:
-                    answers[step] = await _run(executor, discard if step == "discard" else ensure)
-                except OSError:
-                    assert store.fail_bind
-                    host = env.start_host()  # the host died: the next step runs on a new one
-            withdrawn = answers["discard"].observation.observation
-            if withdrawn.status is ObservationStatus.REJECTED:
-                assert (withdrawn.released, withdrawn.children_complete) == (True, True)
-                assert withdrawn.resource_id is None
-                ensures = (answer for step, answer in answers.items() if step != "discard")
-                assert all(_status(answer) is ObservationStatus.REJECTED for answer in ensures)
-            else:
-                assert _status(answers["ensure"]) is ObservationStatus.SUCCEEDED
-                assert withdrawn.released
+            store = _failing(env)
+            store.fail_bind = crash
+            executor, _ = _executor(host, store)
+            try:
+                await _run(executor, ensure)
+            except OSError:
+                assert crash
+                host = env.start_host()  # the host died: the discard runs on a new one
+            executor, _ = _executor(host)
+            answer = (await _run(executor, discard, repeat=crash)).observation.observation
+            assert answer.released
+            assert answer.children_complete
+            if answer.status is ObservationStatus.REJECTED:
+                assert answer.resource_id is None
             assert _worktree_paths(env.hosts[-1]) == set()
 
         async def exercise() -> None:
-            for index in swept(len(_WITHDRAW_CASES), 6):
-                mode, order, crash, retry = _WITHDRAW_CASES[index]
-                await case(index, mode, order, crash=crash, retry=retry)
+            for index, (mode, crash) in enumerate(_WITHDRAW_CASES):
+                await case(index, mode, crash=crash)
 
         asyncio.run(exercise())
 
@@ -1889,12 +1877,11 @@ def test_f13_a_transient_create_failure_is_retried_not_stored(tmp_path: Path) ->
 
         async def exercise() -> None:
             workspaces = env.hosts[0]
-            executor, receipts = _executor(workspaces)
+            executor, _ = _executor(workspaces)
             request = _ensure(workspaces, _attempt(), "e1")
             _faults(env).fail_creates = 1
             failed = await _run(executor, request)
             assert _status(failed) is ObservationStatus.FAILED
-            assert receipts.sealed("e1", ExecutionResult) is None
             retried = await _run(executor, request)
             assert _status(retried) is ObservationStatus.SUCCEEDED
 
