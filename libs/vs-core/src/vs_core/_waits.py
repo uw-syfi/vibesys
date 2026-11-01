@@ -168,7 +168,7 @@ RESOLUTIONS: Mapping[WaitKind, Resolution] = MappingProxyType(
         ),
         WaitKind.RECOVERY_CHECK: Resolution(
             outcome=Outcome.FAILS_WITH_REASON,
-            reason="the check's inspection ends at its own limit (ReconciliationCommandLapsed); "
+            reason="the check's inspection ends at its own limit; "
             "at the target's limit the check ends blocked and recovery is BLOCKED with the "
             "target named",
         ),

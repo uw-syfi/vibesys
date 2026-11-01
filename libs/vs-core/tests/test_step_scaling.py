@@ -11,7 +11,6 @@ event's questions about each running job are counted the same way, as the calls 
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass, field
 from functools import cache
 from typing import TYPE_CHECKING
 
@@ -29,7 +28,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from types import CodeType, FrameType
 
-    from vs_core.api.testing import Answer
 
 _EQUALITY = BaseModel.__eq__.__code__
 
@@ -310,88 +308,3 @@ def test_a_restart_costs_in_proportion_to_the_ledger() -> None:
     restart = core.RecoveryStarted(epoch=state.records.recovery.epoch + 1, now_at=state.run.now_at)
     finished = _finished(run_toy(ToyHost(waits=(True,), polls=(2,)), Config()).core)
     assert _grows_linearly(state, restart, finished) is None
-
-
-def _blocked_answer(
-    state: core.CoreState, finished: core.RequestRecord, rows: int
-) -> tuple[core.CoreState, core.CoreEvent]:
-    """A restart over ``rows`` finished requests, blocked on the running job, and its next answer.
-
-    The restart checks every record; the job's submission outlives its reconciliation deadline,
-    which blocks the recovery; then the submission reports that it still does not know. That
-    answer resolves nothing, and recovery names the wait of every one of its checks again.
-    """
-    behind = _behind(state, finished, rows)
-    target = behind.records.records[-1]
-    restarted = core.step(
-        behind,
-        core.RecoveryStarted(epoch=behind.records.recovery.epoch + 1, now_at=behind.run.now_at),
-    ).state
-    blocked = core.step(
-        restarted,
-        core.ReconciliationDeadline(request_id=target.request_id, now_at=target.until.at + 1.0),
-    ).state
-    assert blocked.records.recovery.phase == core.RecoveryPhase.BLOCKED
-    answer = core.Observation.model_validate(
-        {
-            "event_id": core.EventId(root="late-answer"),
-            "request_id": target.request_id,
-            "scope": target.request.scope,
-            "admission_id": target.request.admission_id,
-            "sequence": 9,
-            "observed_at": blocked.run.now_at,
-            "status": core.ObservationStatus.UNKNOWN,
-        }
-    )
-    return blocked, core.RequestObserved(observation=answer)
-
-
-@dataclass
-class _Witness(ToyHost):
-    """The toy host, remembering the core state each request was answered in."""
-
-    answered: dict[core.RequestId, tuple[core.Request, core.CoreState]] = field(
-        default_factory=dict
-    )
-
-    def __call__(self, request: core.Request, state: core.CoreState) -> Answer:
-        """Remember the request and state, then answer as the toy host does."""
-        if request.request_id is not None:
-            self.answered[request.request_id] = (request, state)
-        return super().__call__(request, state)
-
-
-def test_every_answer_costs_in_proportion_to_the_ledger() -> None:
-    """Every executor answer of a whole toy run, on ``n``, ``4 * n`` and ``16 * n`` finished requests.
-
-    The answers cover a run's life: operations, sessions, turns, measurements, an attempt's
-    closing and adoption, and, since the toy run never restarts, an answer to a recovery that
-    a restart left blocked (recovery looks up the inspections of each of its checks). Closing an attempt asked, for every row, whether the ledger held
-    that row, and answered by scanning the ledger: on the 10-hour run, closing one attempt
-    after its judge's session closed held the run loop for 90 s, past its 60 s lease.
-    """
-    host = _Witness(waits=(True,), polls=(2,))
-    trace = run_toy(host, Config())
-    finished = _finished(trace.core)
-    answers = {
-        event.observation.request_id: event
-        for event in trace.log
-        if isinstance(event, core.RequestObserved)
-    }
-    quadratic = {
-        f"{type(request).__name__} {identity.root}": costs
-        for identity, (request, state) in host.answered.items()
-        if identity in answers
-        and (costs := _grows_linearly(state, answers[identity], finished)) is not None
-    }
-    assert {type(request) for request, _ in host.answered.values()} >= {
-        core.CloseSession,
-        core.CloseAttemptScope,
-        core.DispatchTurn,
-        core.ObserveOwnedJob,
-    }
-    running = started(running_polls=5, ending=core.ObservationStatus.SUCCEEDED).state
-    blocked = _quadratic(lambda rows: _iterations(*_blocked_answer(running, finished, rows)))
-    if blocked is not None:
-        quadratic["an answer to a blocked recovery"] = blocked
-    assert not quadratic, quadratic

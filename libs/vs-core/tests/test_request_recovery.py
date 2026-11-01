@@ -22,7 +22,6 @@ from vs_core.api import (
     AttemptRef,
     AttemptsState,
     AttemptView,
-    BlockRequest,
     CancelOwnedResource,
     Capabilities,
     ChargeId,
@@ -73,7 +72,6 @@ from vs_core.api import (
     OperationSchemaRef,
     OperationWire,
     PoolId,
-    ReconciliationDeadline,
     RecordsState,
     RecoveryBarrier,
     RecoveryPhase,
@@ -104,7 +102,6 @@ from vs_core.api import (
     Slot,
     StrategyState,
     TargetObservation,
-    Transition,
     TurnSpec,
     Until,
     Value,
@@ -485,150 +482,12 @@ def timed_out(record: RequestRecord) -> RequestRecord:
     )
 
 
-def request_until(state: CoreState, request: object) -> float:
-    """The absolute limit core stored on the record it registered for an emitted request."""
-    request_id = getattr(request, "request_id", None)
-    record = next(row for row in state.records.records if row.request_id == request_id)
-    return record.until.at
-
-
-def non_diagnostic(result: Transition) -> tuple[object, ...]:
-    """Strategy events other than the Failed result a deadline publishes."""
-    return tuple(event for event in result.events if not isinstance(event, Failed))
-
-
-@given(st.integers(min_value=0, max_value=99))
-def test_reconciliation_before_deadline_never_authorizes_cleanup(now_at: int) -> None:
-    original = pending_record()
-    started = step(recovering_state(original), RecoveryStarted(epoch=1, now_at=0.0))
-    result = step(
-        reload(started.state),
-        ReconciliationDeadline(request_id=original.request_id, now_at=float(now_at)),
-    )
-    assert result.requests == ()
-    assert result.events == ()
-    assert result.state.records == started.state.records
-    assert result.state.run.status == RunStatus.PAUSED
-
-
-def test_an_observation_that_resolves_nothing_leaves_a_blocked_recovery_blocked() -> None:
-    original = pending_record()
-    started = step(recovering_state(original), RecoveryStarted(epoch=1, now_at=0.0))
-    blocked = step(
-        reload(started.state),
-        ReconciliationDeadline(request_id=original.request_id, now_at=1000.0),
-    )
-    assert blocked.state.records.recovery.phase == RecoveryPhase.BLOCKED
-    later = step(
-        reload(blocked.state),
-        RequestObserved(observation=observed(blocked.state.records.records[0], sequence=2)),
-    )
-    assert later.state.records.recovery.phase == RecoveryPhase.BLOCKED
-    assert later.state.records.recovery.checks[0].resolution == "blocked"
-
-
-def test_a_restart_after_recovery_blocked_on_a_record_stays_blocked_on_it() -> None:
-    """A new host learns nothing by restarting, so the block survives it.
-
-    Before, the restarted recovery rebuilt its checks from the records alone: the next answer
-    that repeated "unknown" about the record core had ended counted as settled, and recovery
-    opened on a record the dead host had judged it could not get past.
-    """
-    original = pending_record()
-    started = step(recovering_state(original), RecoveryStarted(epoch=1, now_at=0.0))
-    blocked = step(
-        reload(started.state),
-        ReconciliationDeadline(request_id=original.request_id, now_at=1000.0),
-    )
-    assert blocked.state.records.recovery.phase == RecoveryPhase.BLOCKED
-    restarted = step(reload(blocked.state), RecoveryStarted(epoch=2, now_at=1001.0))
-    assert restarted.state.records.recovery.phase == RecoveryPhase.BLOCKED
-    record = next(
-        row for row in restarted.state.records.records if row.request_id == original.request_id
-    )
-    later = step(
-        reload(restarted.state),
-        RequestObserved(observation=observed(record, sequence=2)),
-    )
-    assert later.state.records.recovery.phase == RecoveryPhase.BLOCKED
-
-
-@pytest.mark.parametrize("now_at", [100.0, 101.0, 1000.0])
-def test_deadline_blocks_ambiguity_without_fabricating_terminal_ledger_fact(now_at: float) -> None:
-    original = pending_record()
-    started = step(recovering_state(original), RecoveryStarted(epoch=1, now_at=0.0))
-    event = ReconciliationDeadline(request_id=original.request_id, now_at=now_at)
-    result = step(reload(started.state), event)
-    assert result.state.records.recovery.phase == RecoveryPhase.BLOCKED
-    assert result.state.records.recovery.checks[0].resolution == "blocked"
-    expected_failure = timed_out(original).failure
-    assert unaddressed(result.state.records.records[0]) == timed_out(original)
-    assert result.state.run.status == RunStatus.PAUSED
-    blocks = [request for request in result.requests if isinstance(request, BlockRequest)]
-    inspections = [request for request in result.requests if isinstance(request, InspectRequest)]
-    assert len(blocks) == 1
-    assert blocks[0].target == original.request_id
-    assert blocks[0].request_id is not None
-    assert result.events == (expected_failure,)
-    wire = result.events[0].model_dump_json()
-    assert Failed.model_validate_json(wire) == result.events[0]
-    assert len(inspections) == 1
-    assert inspections[0].target == original.request_id
-    assert inspections[0].request_id == result.state.records.recovery.checks[0].inspection
-    repeated = step(reload(result.state), event)
-    assert repeated.requests == ()
-    assert repeated.state.records == result.state.records
-    assert repeated.events == ()
-
-
-def test_unknown_deadline_target_rejects_without_mutating_input() -> None:
-    state = recovering_state(pending_record())
-    before = state.model_dump_json()
-    with pytest.raises(ContractError):
-        step(state, ReconciliationDeadline(request_id=RequestId(root="foreign"), now_at=100.0))
-    assert state.model_dump_json() == before
-
-
 def test_cas_fence_reducer_side_requires_committed_recovery_before_dispatch() -> None:
     original = pending_record(phase=RequestPhase.PREPARED)
     state = recovering_state(original)
     with pytest.raises(ContractError, match="recovery"):
         step(reload(state), DispatchAuthorized(request_id=original.request_id))
     assert state.records.records == (original,)
-
-
-def test_child_ownership_survives_parent_deadline_and_cleanup_requests() -> None:
-    original = pending_operation()
-    root = ResourceId(root="parent")
-    child = ResourceId(root="late-child")
-    original = original.model_copy(
-        update={"observation": observed(original, resource_id=root, accepted=True)}
-    )
-    state = recovering_state(original)
-    lease = ChildLease(
-        resource_id=child,
-        scope=original.request.scope,
-        source_requests=(original.request_id,),
-        parent_resources=(root,),
-    )
-    state = state.model_copy(
-        update={"records": state.records.model_copy(update={"children": (lease,)})}
-    )
-    started = step(reload(state), RecoveryStarted(epoch=1, now_at=0.0))
-    result = step(
-        reload(started.state),
-        ReconciliationDeadline(request_id=original.request_id, now_at=100.0),
-    )
-    assert result.state.records.children == (lease,)
-    cancelled = {
-        request.resource_id
-        for request in result.requests
-        if isinstance(request, CancelOwnedResource)
-    }
-    assert cancelled == {root, child}
-    assert unaddressed(result.state.records.records[0]) == timed_out(original)
-    assert result.state.run.status == RunStatus.PAUSED
-    assert reload(result.state) == result.state
 
 
 @given(
@@ -675,69 +534,6 @@ def test_unknown_acceptance_flags_never_replace_positive_recovery_proof(
     assert reload(result.state) == result.state
 
 
-@given(
-    st.lists(
-        st.tuples(st.sampled_from(["startup", "deadline"]), st.integers(0, 4), st.integers(0, 150)),
-        min_size=1,
-        max_size=30,
-    )
-)
-def test_recovery_deadline_sequences_bound_requests_without_terminal_receipts(
-    sequence: list[tuple[str, int, int]],
-) -> None:
-    """Crash/replay at every supplied event keeps accounting and parent facts."""
-    original = pending_record()
-    state = recovering_state(original)
-    seen: set[RequestId] = set()
-    ended = False
-    for kind, epoch, now_at in sequence:
-        event = (
-            RecoveryStarted(epoch=epoch, now_at=float(now_at))
-            if kind == "startup"
-            else ReconciliationDeadline(request_id=original.request_id, now_at=float(now_at))
-        )
-        limit = state.records.records[0].until
-        result = step(state, event)
-        assert result == step(reload(state), event)
-        # Only a deadline event past the limit ends the record, and not while the executor is
-        # still being asked about it (the inspection already out has neither answered nor run
-        # out its bound); startup alone never does.
-        asked = {
-            check.inspection
-            for check in state.records.recovery.checks
-            if check.target == original.request_id and check.resolution == "pending"
-        }
-        inspection = next((row for row in state.records.records if row.request_id in asked), None)
-        asking = (
-            inspection is not None
-            and inspection.observation is None
-            and result.state.run.now_at < inspection.until.at
-        )
-        ended = ended or (kind == "deadline" and result.state.run.now_at >= limit.at and not asking)
-        # A restart moves the limit later by its downtime, never earlier; nothing else changes.
-        kept = unaddressed(result.state.records.records[0])
-        assert kept.until.at >= limit.at
-        moved = original.model_copy(update={"until": kept.until})
-        assert kept == (timed_out(moved) if ended else moved)
-        assert result.state.records.recovery.phase != RecoveryPhase.READY
-        assert result.state.run.status == RunStatus.PAUSED
-        assert not non_diagnostic(result)
-        assert result.state.run.receipts == state.run.receipts
-        assert result.state.scheduling == state.scheduling
-        assert result.state.attempts == state.attempts
-        assert result.state.sessions == state.sessions
-        for request in result.requests:
-            assert isinstance(request, InspectRequest | BlockRequest)
-            assert request.target == original.request_id
-            assert request.request_id is not None
-            assert request.request_id not in seen
-            seen.add(request.request_id)
-            if isinstance(request, BlockRequest):
-                assert result.state.run.now_at >= original.until.at
-        assert len(seen) <= 15
-        state = reload(result.state)
-
-
 @given(st.text(alphabet="abc123", min_size=1, max_size=20))
 def test_user_request_identity_prefix_never_hides_unresolved_authority(suffix: str) -> None:
     """Generated reconciliation IDs are not a reserved user identity namespace."""
@@ -781,47 +577,6 @@ def test_completed_but_live_session_with_incomplete_manifest_cannot_complete_rec
         for request in result.requests
     )
     assert unaddressed(result.state.records.records[0]) == original
-
-
-def test_parent_release_does_not_hide_live_child_at_deadline() -> None:
-    """Child ownership is independent even after a conclusive parent release."""
-    original = pending_record(phase=RequestPhase.COMPLETED)
-    root = ResourceId(root="released-parent")
-    child = ResourceId(root="still-live")
-    observation = observed(
-        original,
-        resource_id=root,
-        accepted=True,
-        terminal=True,
-        released=True,
-        children_complete=True,
-        children=(child,),
-    ).model_copy(update={"status": ObservationStatus.SUCCEEDED})
-    original = original.model_copy(update={"observation": observation})
-    lease = ChildLease(
-        resource_id=child,
-        scope=original.request.scope,
-        source_requests=(original.request_id,),
-        parent_resources=(root,),
-    )
-    state = recovering_state(original, pending_record(identity="anchor"))
-    state = state.model_copy(
-        update={"records": state.records.model_copy(update={"children": (lease,)})}
-    )
-    started = step(state, RecoveryStarted(epoch=1, now_at=10.0))
-    result = step(
-        reload(started.state),
-        ReconciliationDeadline(request_id=original.request_id, now_at=100.0),
-    )
-    assert {
-        request.resource_id
-        for request in result.requests
-        if isinstance(request, CancelOwnedResource)
-    } == {child}
-    assert result.state.records.children == (lease,)
-    # The setup concluded and its owner heard; only its unreleased child is cleaned up.
-    assert unaddressed(result.state.records.records[0]) == original
-    assert result.state.run.status == RunStatus.PAUSED
 
 
 def turn_record() -> RequestRecord:
@@ -1038,42 +793,6 @@ def test_accepted_owned_job_without_resource_identity_cannot_fabricate_terminal_
     )
 
 
-def test_child_release_requires_its_exact_source_request() -> None:
-    """A foreign root's terminal acknowledgement cannot clear this child lease."""
-    original = pending_record()
-    child = ResourceId(root="child")
-    observation = observed(
-        original,
-        request_id=RequestId(root="foreign"),
-        resource_id=child,
-        terminal=True,
-        released=True,
-        children_complete=True,
-        status=ObservationStatus.SUCCEEDED,
-    )
-    lease = ChildLease(
-        resource_id=child,
-        scope=original.request.scope,
-        source_requests=(original.request_id,),
-        observation=observation,
-    )
-    state = recovering_state(original)
-    state = state.model_copy(
-        update={"records": state.records.model_copy(update={"children": (lease,)})}
-    )
-    started = step(reload(state), RecoveryStarted(epoch=1, now_at=10.0))
-    assert started.state.records.recovery.checks[0].resolution == "pending"
-    result = step(
-        reload(started.state), ReconciliationDeadline(request_id=original.request_id, now_at=200.0)
-    )
-    assert {
-        request.resource_id
-        for request in result.requests
-        if isinstance(request, CancelOwnedResource)
-    } == {child}
-    assert result.state.records.children == (lease,)
-
-
 @given(st.lists(st.lists(st.integers(0, 5), max_size=6), min_size=1, max_size=4))
 def test_recovery_reconstructs_shared_descendant_proofs_canonically(
     manifests: list[list[int]],
@@ -1122,48 +841,6 @@ def test_recovery_reconstructs_shared_descendant_proofs_canonically(
     assert replay.requests == ()
     assert replay.state.records == result.state.records
     assert replay.events == ()
-
-
-@given(
-    st.tuples(
-        st.text(alphabet="abc123", min_size=1, max_size=6),
-        st.text(alphabet="abc123", min_size=1, max_size=6),
-        st.text(alphabet="abc123", min_size=1, max_size=6),
-    )
-)
-def test_composite_resource_ids_cannot_alias_another_targets_cleanup(
-    pieces: tuple[str, str, str],
-) -> None:
-    """Colon boundaries distinguish (a:b,c) from (a,b:c) cleanup identities."""
-    first, middle, last = pieces
-    originals = (
-        pending_operation(identity=f"{first}:{middle}"),
-        pending_operation(identity=first),
-    )
-    resources = (ResourceId(root=last), ResourceId(root=f"{middle}:{last}"))
-    records = tuple(
-        original.model_copy(
-            update={"observation": observed(original, accepted=True, resource_id=resource)}
-        )
-        for original, resource in zip(originals, resources, strict=True)
-    )
-    state = step(recovering_state(*records), RecoveryStarted(epoch=1, now_at=11.0)).state
-    cancels = []
-    for original, resource in zip(records, resources, strict=True):
-        event = ReconciliationDeadline(request_id=original.request_id, now_at=200.0)
-        result = step(reload(state), event)
-        requests = [
-            request for request in result.requests if isinstance(request, CancelOwnedResource)
-        ]
-        assert len(requests) == 1
-        assert requests[0].resource_id == resource
-        assert requests[0].target == original.request_id
-        cancels.append(requests[0])
-        state = reload(result.state)
-    assert cancels[0].request_id != cancels[1].request_id
-    assert tuple(map(unaddressed, state.records.records[:2])) == tuple(
-        timed_out(record) for record in records
-    )
 
 
 def with_sibling_history(state: CoreState, amounts: tuple[int, int]) -> CoreState:
@@ -1269,48 +946,6 @@ def with_sibling_history(state: CoreState, amounts: tuple[int, int]) -> CoreStat
     )
 
 
-@settings(max_examples=examples(pr=4, nightly=100))
-@given(
-    amounts=st.integers(1, 100).flatmap(
-        lambda charged: st.tuples(st.just(charged), st.integers(0, charged))
-    ),
-    sequence=st.lists(
-        st.tuples(st.sampled_from(["startup", "deadline"]), st.integers(0, 4), st.integers(0, 150)),
-        min_size=1,
-        max_size=20,
-    ),
-)
-def test_recovery_preserves_nonempty_sibling_accounting_and_terminal_inputs(
-    amounts: tuple[int, int], sequence: list[tuple[str, int, int]]
-) -> None:
-    """Legacy composed-recovery bounds and delivery/drop finality remain authoritative."""
-    original = pending_record()
-    state = with_sibling_history(recovering_state(original), amounts)
-    initial_attempts = state.attempts
-    initial_sessions = state.sessions
-    for kind, epoch, now_at in sequence:
-        event = (
-            RecoveryStarted(epoch=epoch, now_at=float(now_at))
-            if kind == "startup"
-            else ReconciliationDeadline(request_id=original.request_id, now_at=float(now_at))
-        )
-        result = step(reload(state), event)
-        assert result == step(state, event)
-        assert result.state.attempts == initial_attempts
-        assert result.state.sessions == initial_sessions
-        assert result.state.run.receipts == ()
-        assert not non_diagnostic(result)
-        projection = project(result.state)
-        assert projection.scheduling.charged == amounts[0]
-        assert projection.scheduling.refunded == amounts[1]
-        assert 0 <= projection.scheduling.refunded <= projection.scheduling.charged
-        assert len([record for record in projection.inputs if record.receipt is not None]) == 2
-        assert projection.inputs[0].receipt == initial_sessions.inputs[0].receipt
-        assert projection.inputs[1].receipt == initial_sessions.inputs[1].receipt
-        assert projection.inputs[2].receipt is None
-        state = reload(result.state)
-
-
 @pytest.mark.parametrize("case", ["orphan", "foreign-scope", "different-episode"])
 def test_recovery_rejects_child_sources_without_canonical_ownership(case: str) -> None:
     """A child cannot derive authority from an absent, foreign or reused episode."""
@@ -1351,102 +986,6 @@ def test_recovery_rejects_child_sources_without_canonical_ownership(case: str) -
     with pytest.raises(ContractError, match="children"):
         step(reload(state), RecoveryStarted(epoch=1, now_at=0.0))
     assert state.model_dump_json() == before
-
-
-@given(
-    status=st.sampled_from(list(ObservationStatus)),
-    terminal=st.booleans(),
-    released=st.booleans(),
-    complete=st.booleans(),
-)
-def test_known_resource_deadline_requires_conclusive_release_before_skipping_cancel(
-    status: ObservationStatus, *, terminal: bool, released: bool, complete: bool
-) -> None:
-    """F5: raw released flags and cancellation acknowledgement do not prove drain."""
-    original = pending_operation(phase=RequestPhase.COMPLETED)
-    resource = ResourceId(root="known-resource")
-    original = original.model_copy(
-        update={
-            "observation": observed(
-                original,
-                status=status,
-                resource_id=resource,
-                accepted=True,
-                terminal=terminal,
-                released=released,
-                children_complete=complete,
-            ),
-        }
-    )
-    state = recovering_state(original, pending_record(identity="anchor"))
-    started = step(reload(state), RecoveryStarted(epoch=1, now_at=11.0))
-    result = step(
-        reload(started.state), ReconciliationDeadline(request_id=original.request_id, now_at=100.0)
-    )
-    positive_release = (
-        terminal
-        and released
-        and complete
-        and status not in (ObservationStatus.UNKNOWN, ObservationStatus.PENDING)
-    )
-    resources = {
-        request.resource_id
-        for request in result.requests
-        if isinstance(request, CancelOwnedResource)
-    }
-    assert resources == (set() if positive_release else {resource})
-    assert unaddressed(result.state.records.records[0]) == original
-    assert result.state.sessions == state.sessions
-    assert result.state.attempts == state.attempts
-
-
-@given(st.integers(min_value=101, max_value=1500))
-def test_reordered_time_cannot_expire_new_inspection_and_cancellation_bounds(
-    logical_now: int,
-) -> None:
-    """Restart preserves the overdue original deadline and uses current supplied time."""
-    original = pending_operation()
-    resource = ResourceId(root="live-resource")
-    original = original.model_copy(
-        update={"observation": observed(original, accepted=True, resource_id=resource)}
-    )
-    state = recovering_state(original)
-    state = state.model_copy(
-        update={
-            "run": state.run.model_copy(
-                update={"now_at": float(logical_now), "deadline_at": 2000.0}
-            )
-        }
-    )
-    result = step(reload(state), RecoveryStarted(epoch=1, now_at=1.0))
-    assert result.state.run.now_at == float(logical_now)
-    assert all(
-        request_until(result.state, request) == logical_now + state.run.limits.reconciliation_bound
-        for request in result.requests
-    )
-    assert result.state.records.records[0].until.at == original.until.at
-    # The original limit is long past, but the executor is still being asked: the deadline
-    # waits for the inspection's bound, and a reordered, older time does not end that wait.
-    early = step(
-        reload(result.state), ReconciliationDeadline(request_id=original.request_id, now_at=100.0)
-    )
-    assert unaddressed(early.state.records.records[0]) == original
-    assert early.state.records.recovery.phase == RecoveryPhase.RECOVERING
-    waited = float(logical_now) + state.run.limits.reconciliation_bound
-    blocked = step(
-        reload(result.state),
-        ReconciliationDeadline(request_id=original.request_id, now_at=waited),
-    )
-    assert blocked.state.records.recovery.phase == RecoveryPhase.BLOCKED
-    for request in blocked.requests:
-        bound = (
-            state.run.limits.cancellation_bound
-            if isinstance(request, CancelOwnedResource)
-            else state.run.limits.reconciliation_bound
-        )
-        assert request_until(blocked.state, request) == waited + bound
-    assert any(isinstance(request, CancelOwnedResource) for request in blocked.requests)
-    assert unaddressed(blocked.state.records.records[0]) == timed_out(original)
 
 
 def registered_record(
@@ -1592,61 +1131,6 @@ def _assert_ambiguous_recovery(
     assert result.events == ()
 
 
-@pytest.mark.parametrize("cleanup", ["discard", "close"])
-def test_stale_retirement_recovery_cannot_release_newer_generation_or_episode(cleanup: str) -> None:
-    """Translate legacy test_stale_withdrawal_recovery_cannot_release_a_newer_generation."""
-    original = pending_record(identity="old-retirement")
-    old_attempt = AttemptRef(attempt_id=AttemptId(root="current-owner"), generation=1)
-    scope = Scope(owner=old_attempt.attempt_id, generation=old_attempt.generation)
-    request_model = DiscardWorkspace if cleanup == "discard" else CloseAttemptScope
-    request = request_model(
-        request_id=original.request_id,
-        scope=scope,
-        attempt=old_attempt,
-        admission_id=DecisionId(root="old-admission"),
-    )
-    original = original.model_copy(update={"request": request})
-    original = original.model_copy(
-        update={
-            "observation": observed(
-                original,
-                admission_id=request.admission_id,
-                resource_id=ResourceId(root="old-resource"),
-                accepted=True,
-            )
-        }
-    )
-    state = with_sibling_history(recovering_state(original), (2, 1))
-    owner = state.attempts.attempts[0]
-    assert owner.admission_id is not None
-    slot = Slot(
-        attempt=AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation),
-        admission_id=owner.admission_id,
-        admitted_at=0.0,
-    )
-    state = state.model_copy(update={"scheduling": SchedulingState(slots=(slot,))})
-    recovered = step(reload(state), RecoveryStarted(epoch=2, now_at=11.0))
-    assert all(isinstance(request, InspectRequest) for request in recovered.requests)
-    blocked = step(
-        reload(recovered.state),
-        ReconciliationDeadline(request_id=original.request_id, now_at=200.0),
-    )
-    assert blocked.state.attempts == state.attempts
-    assert blocked.state.scheduling == state.scheduling
-    assert blocked.state.attempts.attempts[0].generation == 2
-    assert blocked.state.attempts.attempts[0].phase == AttemptPhase.ACTIVE
-    assert all(
-        output.scope == scope and output.admission_id == request.admission_id
-        for output in blocked.requests
-    )
-    assert all(
-        isinstance(request, BlockRequest | InspectRequest | CancelOwnedResource)
-        for request in blocked.requests
-    )
-    assert not non_diagnostic(blocked)
-    assert unaddressed(blocked.state.records.records[0]) == timed_out(original)
-
-
 @given(
     case=st.sampled_from(
         [
@@ -1748,32 +1232,6 @@ def test_registered_session_turn_requires_its_normalized_owner_identity(case: st
     )
     assert check.resolution == ("reattached" if case == "exact" else "pending")
     assert result.state.sessions == state.sessions
-
-
-def assert_handover_resolves(
-    state: CoreState, owner: RegisteredOwnedJob, parent: RequestRecord
-) -> None:
-    """Chaos seeds 268 and 479: the ledger later proves it owns the job.
-
-    The next observation hands the child over, and the check that waited on the child
-    re-resolves with it, instead of waiting on a lease no inspection will ever settle.
-    """
-    assert owner.observation is not None
-    learned = owner.model_copy(
-        update={
-            "observation": owner.observation.model_copy(
-                update={"status": ObservationStatus.PENDING, "accepted": True}
-            )
-        }
-    )
-    state = state.model_copy(update={"evaluation": EvaluationState(registered_jobs=(learned,))})
-    anchor = state.records.records[2]
-    result = step(reload(state), RequestObserved(observation=observed(anchor)))
-    check = next(
-        check for check in result.state.records.recovery.checks if check.target == parent.request_id
-    )
-    assert result.state.records.children == ()
-    assert check.resolution == "terminal"
 
 
 @given(admission=st.sampled_from(["unknown", "closed", "reopened"]))
@@ -1952,99 +1410,6 @@ def test_registered_job_can_reattach_to_its_provisional_owner_without_inventing_
     assert result.events == ()
 
 
-@given(st.lists(st.integers(0, 100), min_size=1, max_size=30))
-def test_generated_successor_deadlines_reconcile_original_root_without_recursive_requests(
-    choices: list[int],
-) -> None:
-    """Fresh post-run timers reconcile the root without refreshing earlier successors."""
-    original = pending_record()
-    state = recovering_state(original)
-    state = state.model_copy(update={"run": state.run.model_copy(update={"deadline_at": 105.0})})
-    emitted: set[RequestId] = set()
-    for index, choice in enumerate(choices):
-        records = state.records.records
-        selected = records[choice % len(records)]
-        event = ReconciliationDeadline(request_id=selected.request_id, now_at=float(110 + index))
-        result = step(reload(state), event)
-        assert result == step(state, event)
-        assert unaddressed(result.state.records.records[0]) == timed_out(original)
-        assert result.state.records.records[1 : len(records)] == records[1:]
-        assert result.state.records.recovery.phase == RecoveryPhase.BLOCKED
-        assert {check.target for check in result.state.records.recovery.checks} == {
-            original.request_id
-        }
-        for request in result.requests:
-            assert isinstance(request, BlockRequest | InspectRequest)
-            assert request.target == original.request_id
-            assert request.request_id is not None
-            assert request.request_id not in emitted
-            assert request_until(result.state, request) == (
-                result.state.run.now_at + state.run.limits.reconciliation_bound
-            )
-            emitted.add(request.request_id)
-        assert len(emitted) <= 2
-        assert len(result.state.records.records) <= 3
-        assert not non_diagnostic(result)
-        state = reload(result.state)
-
-
-def test_late_child_cleanup_survives_previous_parent_block_and_cancel_requests() -> None:
-    """A reload with new child proof adds one cleanup, even when parent cleanup exists."""
-    original = pending_operation()
-    parent = ResourceId(root="parent")
-    original = original.model_copy(
-        update={"observation": observed(original, accepted=True, resource_id=parent)}
-    )
-    initial = step(
-        recovering_state(original),
-        ReconciliationDeadline(request_id=original.request_id, now_at=100.0),
-    )
-    parent_cancel = next(
-        request for request in initial.requests if isinstance(request, CancelOwnedResource)
-    )
-    assert parent_cancel.request_id is not None
-    child = ResourceId(root="late-child")
-    lease = ChildLease(
-        resource_id=child,
-        scope=original.request.scope,
-        source_requests=(original.request_id,),
-        parent_resources=(parent,),
-    )
-    # Persisted late discovery is a public state input. Full observation delivery
-    # remains blocked by the frozen records A wrapper in this isolated slice.
-    assert original.observation is not None
-    latest = initial.state.records.records[0].model_copy(
-        update={
-            "observation": original.observation.model_copy(
-                update={"sequence": 2, "observed_at": 120.0, "children": (child,)}
-            )
-        }
-    )
-    state = initial.state.model_copy(
-        update={
-            "records": initial.state.records.model_copy(
-                update={
-                    "records": (latest, *initial.state.records.records[1:]),
-                    "children": (lease,),
-                }
-            )
-        }
-    )
-    event = ReconciliationDeadline(request_id=parent_cancel.request_id, now_at=120.0)
-    result = step(reload(state), event)
-    assert len(result.requests) == 1
-    cleanup = result.requests[0]
-    assert isinstance(cleanup, CancelOwnedResource)
-    assert cleanup.resource_id == child
-    assert cleanup.target == original.request_id
-    assert result.state.records.children == (lease,)
-    assert unaddressed(result.state.records.records[0]) == unaddressed(latest)
-    repeated = step(reload(result.state), event)
-    assert repeated.requests == ()
-    assert repeated.state.records == result.state.records
-    assert repeated.events == ()
-
-
 @pytest.mark.parametrize("request_model", [DiscardWorkspace, CloseAttemptScope])
 @pytest.mark.parametrize("names_resource", [False, True])
 def test_a_request_that_completed_before_the_restart_resolves_its_own_recovery_check(
@@ -2167,65 +1532,6 @@ def hosted(state: CoreState, *hosts: HostEpoch) -> CoreState:
     return state.model_copy(update={"records": records})
 
 
-@settings(max_examples=examples(pr=10, nightly=300))
-@given(
-    died_at=st.integers(min_value=0, max_value=99),
-    downtime=st.integers(min_value=1, max_value=899),
-    phase=st.sampled_from([RequestPhase.DISPATCHED, RequestPhase.RECONCILING]),
-)
-def test_a_restart_gives_an_open_record_back_the_time_no_host_was_alive(
-    died_at: int, downtime: int, phase: RequestPhase
-) -> None:
-    """A limit counts only time a host was alive to wait: the restart moves it by the downtime.
-
-    The host dies with the request's limit not yet passed and restarts after it. The
-    executor's answer to the restart's inspection says nothing new (unknown), and a deadline
-    arriving before the moved limit ends nothing: the request still has the time it had when
-    the host died. (#2381, the crash walk that found it: a session turn begun and never
-    delivered, whose limit passed during four short-lived hosts, was ended before Sessions
-    learned the turn never started, so the attempt was lost.)
-    """
-    original = pending_record(phase=phase)
-    state = hosted(
-        recovering_state(original), HostEpoch(epoch=1, started_at=0.0, alive_at=float(died_at))
-    )
-    restart_at = float(died_at + downtime)
-    started = step(reload(state), RecoveryStarted(epoch=2, now_at=restart_at))
-    moved = started.state.records.records[0]
-    assert moved.until.at == min(original.until.at + downtime, state.run.deadline_at)
-    assert moved.until.at > restart_at
-    inspection = next(r for r in started.requests if isinstance(r, InspectRequest))
-    assert inspection.request_id is not None
-    asked = step(started.state, DispatchAuthorized(request_id=inspection.request_id)).state
-    answer = Observation.model_validate(
-        {
-            "event_id": EventId(root="restart-answer"),
-            "request_id": inspection.request_id,
-            "scope": inspection.scope,
-            "sequence": 1,
-            "observed_at": restart_at,
-            "status": ObservationStatus.SUCCEEDED,
-            "accepted": True,
-            "terminal": True,
-            "released": True,
-            "children_complete": True,
-        }
-    )
-    unknown = observed(original, status=ObservationStatus.UNKNOWN, observed_at=restart_at)
-    answered = step(
-        reload(asked),
-        RequestObserved(observation=answer, target=TargetObservation(observation=unknown)),
-    ).state
-    before_limit = ReconciliationDeadline(request_id=original.request_id, now_at=restart_at)
-
-    result = step(reload(answered), before_limit)
-
-    record = result.state.records.records[0]
-    assert record.phase in (RequestPhase.DISPATCHED, RequestPhase.RECONCILING)
-    assert record.failure is None
-    assert result.events == ()
-
-
 RENEWAL = 10
 """The longest a live host goes between proofs that it is alive (lease renewals or commits)."""
 
@@ -2335,102 +1641,3 @@ def test_a_renewal_from_an_epoch_that_is_not_current_is_refused() -> None:
 
     with pytest.raises(ContractError, match="not current"):
         step(state, HostRenewed(epoch=1, now_at=11.0))
-
-
-def test_a_limit_that_passed_while_the_host_was_down_waits_for_the_executors_report() -> None:
-    """The far side may have finished in time: the restarted host asks before it times out.
-
-    The host restarts at the run deadline, so the limit has passed when the first deadline
-    event arrives even though the restart moved it by the downtime (no further than the run
-    deadline). While the inspection of this epoch is out, that event ends nothing; the
-    executor's report that the request finished completes it without a failure.
-    """
-    original = pending_record(phase=RequestPhase.DISPATCHED)
-    late = original.until.at + 900.0
-    started = step(reload(recovering_state(original)), RecoveryStarted(epoch=1, now_at=late))
-    inspection = started.requests[0]
-    assert isinstance(inspection, InspectRequest)
-    assert inspection.request_id is not None
-    deadline = ReconciliationDeadline(request_id=original.request_id, now_at=late)
-
-    waiting = step(reload(started.state), deadline)
-
-    assert unaddressed(waiting.state.records.records[0]) == original
-    assert not waiting.events
-    assert not [r for r in waiting.requests if isinstance(r, BlockRequest)]
-    dispatched = step(waiting.state, DispatchAuthorized(request_id=inspection.request_id))
-    finished = observed(
-        original,
-        status=ObservationStatus.SUCCEEDED,
-        accepted=True,
-        terminal=True,
-        released=True,
-        children_complete=True,
-    )
-    answer = Observation.model_validate(
-        {
-            "event_id": EventId(root="inspection-answer"),
-            "request_id": inspection.request_id,
-            "scope": inspection.scope,
-            "sequence": 1,
-            "observed_at": late,
-            "status": ObservationStatus.SUCCEEDED,
-            "accepted": True,
-            "terminal": True,
-            "released": True,
-            "children_complete": True,
-        }
-    )
-    reported = step(
-        dispatched.state,
-        RequestObserved(observation=answer, target=TargetObservation(observation=finished)),
-    )
-    after = step(reload(reported.state), deadline)
-
-    record = after.state.records.records[0]
-    assert record.phase == RequestPhase.COMPLETED
-    assert record.failure is None
-    assert not after.events
-
-
-@settings(max_examples=examples(pr=6, nightly=60))
-@given(answers=st.integers(min_value=1, max_value=4), restart_between=st.booleans())
-def test_a_blocked_check_never_returns_to_pending(*, answers: int, restart_between: bool) -> None:
-    """The limit blocks the check and asks once more; however often the far side answers unknown.
-
-    An unknown answer cannot undo the block: a pending check of an ended record has no request
-    left in flight, so nothing would ever resolve it and the run would halt on an orphan wait.
-    """
-    original = pending_record(phase=RequestPhase.DISPATCHED)
-    started = step(reload(recovering_state(original)), RecoveryStarted(epoch=1, now_at=11.0))
-    deadline = ReconciliationDeadline(
-        request_id=original.request_id, now_at=original.until.at + 1.0
-    )
-    blocked = step(reload(started.state), deadline)
-    assert [check.resolution for check in blocked.state.records.recovery.checks] == ["blocked"]
-    inspection = next(r for r in blocked.requests if isinstance(r, InspectRequest))
-    assert inspection.request_id is not None
-    state = step(blocked.state, DispatchAuthorized(request_id=inspection.request_id)).state
-    for sequence in range(1, answers + 1):
-        unknown = observed(original, status=ObservationStatus.UNKNOWN)
-        answer = Observation.model_validate(
-            {
-                "event_id": EventId(root=f"deadline-answer-{sequence}"),
-                "request_id": inspection.request_id,
-                "scope": inspection.scope,
-                "sequence": sequence,
-                "observed_at": 200.0 + sequence,
-                "status": ObservationStatus.SUCCEEDED,
-                "accepted": True,
-                "terminal": True,
-                "released": True,
-                "children_complete": True,
-            }
-        )
-        state = step(
-            reload(state) if restart_between else state,
-            RequestObserved(observation=answer, target=TargetObservation(observation=unknown)),
-        ).state
-        barrier = state.records.recovery
-        assert [check.resolution for check in barrier.checks] == ["blocked"]
-        assert barrier.phase == RecoveryPhase.BLOCKED

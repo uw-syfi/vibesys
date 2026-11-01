@@ -19,10 +19,9 @@ from hypothesis import strategies as st
 import vs_core.api as core
 from vs_sim.api.testing import examples
 
-from .test_comparison_liveness import Bench, base_runs, died_steps, running, seeded
+from .test_comparison_liveness import Bench, died_steps, running, seeded
 from .test_measurement_comparison import FLOOR, Lab, ended_steps
 from .test_measurement_reuse import reloaded
-from .test_measurements import transition
 
 type Subject = tuple[core.Scope, str, str]
 type Step = tuple[Literal["call", "end"], int, int]
@@ -44,10 +43,9 @@ type End = Literal[
     "cancelled",
     "infrastructure",
     "refused",
-    "blocked",
     "resumed",
 ]
-"""How a run ends: `Outcome`; blocked at its limit before any observation; or a sample that
+"""How a run ends: `Outcome`; or a sample that
 reaches a host restarted from its stored state (the run ended while the host was down)."""
 ENDS: tuple[End, ...] = (
     "sample",
@@ -56,26 +54,8 @@ ENDS: tuple[End, ...] = (
     "cancelled",
     "infrastructure",
     "refused",
-    "blocked",
     "resumed",
 )
-
-
-def blocked_steps(
-    state: core.CoreState, run: core.SubmitMeasurement
-) -> tuple[core.Transition, ...]:
-    """Core ends ``run`` at its limit while it is still unobserved (its submission hung)."""
-    assert run.request_id is not None
-    record = state.records.record(run.request_id)
-    assert record is not None
-    assert record.observation is None
-    step = transition(
-        state, core.ReconciliationDeadline(request_id=run.request_id, now_at=record.until.at + 1.0)
-    )
-    ended = step.state.records.record(run.request_id)
-    assert ended is not None
-    assert ended.phase == core.RequestPhase.BLOCKED
-    return (step,)
 
 
 def ending(
@@ -90,8 +70,6 @@ def ending(
             return ended_steps(lab.state, run, bench.read(run.plan.measured_input))
         case "resumed":
             return ended_steps(reloaded(lab.state), run, bench.read(run.plan.measured_input))
-        case "blocked":
-            return blocked_steps(lab.state, run)
         case _:
             return died_steps(lab.state, run, how)
 
@@ -138,7 +116,7 @@ def check_told(lab: Lab, steps: tuple[core.Transition, ...]) -> None:
 @example(
     floor=FLOOR,
     spread=0.0,
-    steps=[("call", 0, 0, "sample"), ("call", 1, 0, "sample"), ("end", 0, 1, "blocked")],
+    steps=[("call", 0, 0, "sample"), ("call", 1, 0, "sample"), ("end", 0, 1, "cancelled")],
     seed=0,
 )
 @example(floor=0.0, spread=0.01, steps=[("call", 0, 0, "sample")], seed=0)
@@ -147,8 +125,7 @@ def test_every_end_of_a_run_tells_each_comparison_it_settles_exactly_once(
 ) -> None:
     """Whatever way each run ends, a comparison is told settled once, when its last run ends.
 
-    Runs end with a sample, without one (`Outcome`), blocked by core at their limit before
-    they were observed, or with a sample reaching a restarted host. After the steps every run
+    Runs end with a sample, without one (`Outcome`), or with a sample reaching a restarted host. After the steps every run
     left ends with a sample, so every close call takes the runs it earns.
     """
     lab = Lab.of("a", "b", floor=floor, staleness=1e9)
@@ -167,74 +144,6 @@ def test_every_end_of_a_run_tells_each_comparison_it_settles_exactly_once(
         check_told(lab, ending(lab, live[which % len(live)], how, bench))
     assert not running(lab), "the runs a comparison takes are bounded"
     assert not any(stated(lab).values()), "every comparison settles once its runs have ended"
-
-
-@pytest.mark.regression
-@pytest.mark.parametrize("floor", [FLOOR, 0.0], ids=["floor", "no-floor"])
-def test_a_base_run_core_blocks_before_it_is_observed_still_lets_its_comparisons_settle(
-    floor: float,
-) -> None:
-    """Two attempts share a base; a close call's extra base run hangs at submission.
-
-    Core blocks its record at the limit, before any observation. Before, the evaluation area
-    never heard of it: the run's budget entry stayed open and counted in flight for good, so
-    both attempts' comparisons stayed settling with no event (every verdict waited the full
-    bound) and no close call got another base run.
-    """
-    lab = Lab.of("a", "b", floor=floor, staleness=1e9)
-    bench = Bench({"input-1": 100.4, "base": 100.0}, 0.0, seeded("blocked"))
-    lab.call("a", "c-a", "input-1")
-    lab.call("b", "c-b", "input-1")
-    told: list[Subject] = []
-    blocked = False
-    for _ in range(40):
-        live = running(lab)
-        if not live:
-            break
-        extra = [r for r in live if r.plan.purpose == "baseline" and len(base_runs(lab)) > 1]
-        how: End = "blocked" if extra and not blocked else "sample"
-        blocked = blocked or how == "blocked"
-        steps = ending(lab, extra[0] if how == "blocked" else live[0], how, bench)
-        check_told(lab, steps)
-        told.extend(subject for step in steps for subject in told_in(step))
-    assert blocked, "a close call asked for one more base run"
-    assert not running(lab)
-    held = stated(lab)
-    assert set(held) == {(lab.scopes[name], "input-1", "base") for name in "ab"}
-    assert not any(held.values()), "no comparison is left settling with no run under way"
-    assert set(told) == set(held), "each attempt's flow is told its comparison settled"
-
-
-@pytest.mark.regression
-def test_a_base_run_a_restarted_host_cannot_find_ends_when_recovery_blocks_it() -> None:
-    """The host restarts before core's base run was dispatched; recovery blocks its record.
-
-    Before, the run stayed in flight for good, as for a block at the limit while the host ran.
-    """
-    lab = Lab.of("a", staleness=1e9)
-    bench = Bench({"input-1": 130.0, "base": 100.0}, 0.0, seeded("restart"))
-    candidate, base = lab.call("a", "c-a", "input-1")
-    check_told(lab, ending(lab, candidate, "sample", bench))
-    assert base.request_id is not None
-    record = lab.state.records.record(base.request_id)
-    assert record is not None
-    restart = record.until.at + 1.0
-    lab.state = transition(reloaded(lab.state), core.RecoveryStarted(epoch=2, now_at=restart)).state
-    check_told(
-        lab,
-        (
-            transition(
-                lab.state, core.ReconciliationDeadline(request_id=base.request_id, now_at=restart)
-            ),
-        ),
-    )
-    ended = lab.state.records.record(base.request_id)
-    assert ended is not None
-    assert ended.phase == core.RequestPhase.BLOCKED
-    lab.ended.add(base.request_id.root)
-    (again,) = running(lab)
-    check_told(lab, ending(lab, again, "sample", bench))
-    assert stated(lab) == {(lab.scopes["a"], "input-1", "base"): False}
 
 
 @pytest.mark.regression

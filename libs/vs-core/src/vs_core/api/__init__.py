@@ -262,7 +262,7 @@ if TYPE_CHECKING:
         resource,
         span_changes,
     )
-    from vs_core.records import advance_record, recover
+    from vs_core.records import advance_record
     from vs_core.scheduling import schedule
     from vs_core.sessions import advance_session
     from vs_core.settlement import advance_adoption, settle
@@ -576,8 +576,6 @@ if TYPE_CHECKING:
         OperationRetireRequested,
         OperationView,
         Outbound,
-        ReconciliationCommandLapsed,
-        ReconciliationDeadline,
         ReconciliationRequest,
         RecordsEvent,
         RecordsState,
@@ -907,7 +905,7 @@ _MODULES: dict[str, str] = {
                 "resource span_changes "
             ),
         ),
-        ("vs_core.records", ("advance_record recover ")),
+        ("vs_core.records", ("advance_record ")),
         ("vs_core.scheduling", ("schedule ")),
         ("vs_core.sessions", ("advance_session ")),
         ("vs_core.settlement", ("advance_adoption settle ")),
@@ -1014,7 +1012,7 @@ _MODULES: dict[str, str] = {
                 "Attribution BlockedRecordStalled BlockRequest CancelOwnedResource CapacityHold "
                 "ChildLease ChildObservationWatermark DispatchAuthorized ExecuteRegisteredOperation "
                 "HostEpoch HostRenewed InspectRequest OperationResult OperationRetireRequested "
-                "OperationView Outbound ReconciliationCommandLapsed ReconciliationDeadline "
+                "OperationView Outbound "
                 "ReconciliationRequest RecordsEvent RecordsState RecoveryBarrier RecoveryCheck "
                 "RecoveryCheckWaitLapsed RecoveryPhase RecoveryReady RecoveryStarted "
                 "RegisteredOperationRequest ReissueProof Request RequestObserved RequestPhase "
@@ -1499,8 +1497,6 @@ __all__ = [
     "QueueEntryRetired",
     "ReacquisitionReady",
     "Reading",
-    "ReconciliationCommandLapsed",
-    "ReconciliationDeadline",
     "ReconciliationRequest",
     "RecordsChange",
     "RecordsContext",
@@ -1821,7 +1817,6 @@ __all__ = [
     "policy_of",
     "project",
     "recorded_waits",
-    "recover",
     "reopened",
     "reply_errors",
     "requested_stop_mode",

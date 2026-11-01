@@ -1,21 +1,11 @@
 """Recovery commands retain canonical target identity across persistence replay."""
 
-from typing import TypedDict
-
-import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
 import vs_core.api as core
 
 from .restart import unaddressed
-
-
-class CommandFields(TypedDict):
-    request_id: core.RequestId
-    scope: core.Scope
-    admission_id: core.DecisionId | None
-    target: core.RequestId
 
 
 def state_with_root() -> tuple[core.CoreState, core.RequestRecord]:
@@ -81,94 +71,6 @@ def persisted_command(root: core.RequestRecord, request: core.Request) -> core.R
             "observation": None,
         }
     )
-
-
-@given(
-    case=st.sampled_from(
-        [
-            (command, fault)
-            for command in ("block", "inspect", "cancel")
-            for fault in ("target", "scope", "admission", "kind", "resource")
-            if (command, fault) != ("block", "resource")
-        ]
-    ),
-)
-def test_deadline_rejects_conflicting_committed_successor(case: tuple[str, str]) -> None:
-    """A deterministic successor ID never permits a different target or lease."""
-    command, fault = case
-    state, root = state_with_root()
-    event = core.ReconciliationDeadline(request_id=root.request_id, now_at=100.0)
-    first = core.step(state, event)
-    requests: dict[str, core.Request] = {row.kind: row for row in first.requests}
-    successor = requests[
-        {"block": "block_request", "inspect": "inspect_request", "cancel": "cancel_owned_resource"}[
-            command
-        ]
-    ]
-    updates: dict[str, object] = {
-        "target": core.RequestId(root="foreign"),
-        "scope": core.Scope(owner=root.request.scope.owner, generation=1),
-        "admission_id": core.DecisionId(root="foreign-episode"),
-        "resource_id": core.ResourceId(root="foreign-lease"),
-    }
-    if fault == "kind":
-        changed = root.request.model_copy(update={"request_id": successor.request_id})
-    else:
-        key = (
-            "admission_id"
-            if fault == "admission"
-            else "resource_id"
-            if fault == "resource"
-            else fault
-        )
-        changed = successor.model_copy(update={key: updates[key]})
-    record = persisted_command(root, changed)
-    state = state.model_copy(
-        update={"records": state.records.model_copy(update={"records": (root, record)})}
-    )
-    before = state.model_dump_json()
-    with pytest.raises(core.ContractError, match="successor identity conflict"):
-        core.step(state, event)
-    assert state.model_dump_json() == before
-
-
-@given(
-    command=st.sampled_from(["inspect", "cancel", "block"]),
-    fault=st.sampled_from(["cycle", "missing", "scope", "admission"]),
-)
-def test_deadline_rejects_corrupt_reconciliation_ancestry(command: str, fault: str) -> None:
-    """Inspection and cleanup deadlines cannot cross canonical scope or episode."""
-    state, root = state_with_root()
-    identity = core.RequestId(root="successor")
-    target = (
-        identity
-        if fault == "cycle"
-        else core.RequestId(root="missing")
-        if fault == "missing"
-        else root.request_id
-    )
-    common: CommandFields = {
-        "request_id": identity,
-        "scope": root.request.scope.model_copy(update={"generation": 1})
-        if fault == "scope"
-        else root.request.scope,
-        "admission_id": core.DecisionId(root="foreign") if fault == "admission" else None,
-        "target": target,
-    }
-    requests = {
-        "inspect": core.InspectRequest(**common),
-        "cancel": core.CancelOwnedResource(**common, resource_id=core.ResourceId(root="physical")),
-        "block": core.BlockRequest(**common, reason=core.FailureReason.TIMED_OUT),
-    }
-    record = persisted_command(root, requests[command])
-    state = state.model_copy(
-        update={"records": state.records.model_copy(update={"records": (root, record)})}
-    )
-    event = core.ReconciliationDeadline(request_id=identity, now_at=100.0)
-    before = state.model_dump_json()
-    with pytest.raises(core.ContractError, match=r"cyclic|missing canonical|conflicts with target"):
-        core.step(state, event)
-    assert state.model_dump_json() == before
 
 
 @given(generation=st.integers(min_value=0, max_value=5))

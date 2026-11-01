@@ -160,8 +160,6 @@ EXPECTED_TARGET = {
             (
                 "recovery_started",
                 "recovery_ready",
-                "reconciliation_deadline",
-                "reconciliation_command_lapsed",
                 "recovery_check_wait_lapsed",
             ),
         ),

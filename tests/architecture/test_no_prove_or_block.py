@@ -124,6 +124,25 @@ DELETED_SYMBOLS: tuple[str, ...] = (
     "MayHold",
     "NothingHeld",
     "never_held",
+    # The kernel's own end of a step at its limit (#3475 R4): `decide` is the one mechanism.
+    "ReconciliationDeadline",
+    "ReconciliationCommandLapsed",
+    "_lapse_command",
+    "_end_open_record",
+    "_lost_turn",
+    "_orphaned_jobs",
+    "_orphan_source",
+    "_submission_ended",
+    "_heard_by_decision",
+    "_deadline_barrier",
+    "_deadline_target",
+    "_awaiting_report",
+    "_pending_cancellations",
+    "_pending_probes",
+    "_inspection_exists",
+    "_child_release_signals",
+    "_cancelled_here",
+    "_sourced",
 )
 """Names that no file under ``src/`` or ``libs/*/src`` may define or import."""
 
