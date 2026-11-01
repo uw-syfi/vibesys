@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"repoctl/execution"
@@ -184,8 +186,14 @@ func ensureHooks(root string, out io.Writer) {
 }
 
 func runGate(root, configPath string, g graph, args []string, out io.Writer) error {
-	newRunner := func(w io.Writer) execution.Runner { return execution.OSRunner{Stdout: w, Stderr: w} }
-	return runGateWith(context.Background(), root, configPath, g, args, out, newRunner, time.Now)
+	newRunner := func(w io.Writer) execution.Runner {
+		return execution.OSRunner{Stdout: w, Stderr: w, OwnProcessGroup: true}
+	}
+	// Each lane runs in its own process group, which a terminal's Ctrl-C does not reach, so
+	// the interrupt cancels the lanes instead.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return runGateWith(ctx, root, configPath, g, args, out, newRunner, time.Now)
 }
 
 func runGateWith(parent context.Context, root, configPath string, g graph, args []string, out io.Writer, newRunner func(io.Writer) execution.Runner, now func() time.Time) error {

@@ -124,6 +124,10 @@ type Runner interface {
 // OSRunner runs checks, writing to Stdout and Stderr, which default to the process's own.
 type OSRunner struct {
 	Stdout, Stderr io.Writer
+	// OwnProcessGroup runs each check in a process group of its own that cancellation
+	// kills as a whole. Set it when the output is captured: a descendant that outlives
+	// its parent otherwise keeps the capture open and Run waits for it.
+	OwnProcessGroup bool
 }
 
 func (r OSRunner) Run(parent context.Context, root string, check Check) error {
@@ -139,6 +143,10 @@ func (r OSRunner) Run(parent context.Context, root string, check Check) error {
 	cmd := exec.CommandContext(ctx, check.Args[0], check.Args[1:]...)
 	cmd.Dir = filepath.Join(root, filepath.FromSlash(check.Directory))
 	cmd.Env = mergedEnvironment(os.Environ(), check.Env)
+	if r.OwnProcessGroup {
+		ownProcessGroup(cmd)
+		cmd.WaitDelay = 5 * time.Second
+	}
 	cmd.Stdout, cmd.Stderr = r.Stdout, r.Stderr
 	if cmd.Stdout == nil {
 		cmd.Stdout = os.Stdout
