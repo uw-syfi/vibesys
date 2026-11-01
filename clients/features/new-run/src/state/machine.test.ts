@@ -34,7 +34,7 @@ import {
   type FixDone,
   formWithRoles,
   inputsKey,
-  isReading,
+  isAwaiting,
   measureOptions,
   missingFeatures,
   type NewRunEvent,
@@ -361,25 +361,21 @@ function expectInputApplied(before: Snapshot, event: NewRunEvent, after: Snapsho
   }
 }
 
-/** The operations that answer a press of the user; every other one is a read the screen started. */
-const ANSWERS_TO_INPUTS: ReadonlySet<string> = new Set(['fix', 'start']);
-
 /**
- * `isReading` says whether the screen still waits on a read it started: it holds while one is live
- * (or one is about to start: the examples' bound, the checks' debounce), and holds no longer once
- * none is. So the screen is never ready
- * with a read outstanding, a read added without its tag is caught here, and it is never loading
- * with nothing left to end it.
+ * `isAwaiting` says whether the screen still waits on a reply it asked for: it holds while an
+ * operation is live (or one is about to start: the examples' bound, the checks' debounce), and
+ * holds no longer once none is. So the screen is never ready with a reply outstanding, an
+ * operation added without its tag is caught here, and it is never loading with nothing left to
+ * end it.
  */
-function readingProblems(snapshot: Snapshot, live: Live): string[] {
-  const reads = live.operations.filter(operation => !ANSWERS_TO_INPUTS.has(operation));
-  if (reads.length > 0 && !isReading(snapshot)) {
-    return [`${reads.join(', ')} is live but the screen is not reading`];
+function awaitingProblems(snapshot: Snapshot, live: Live): string[] {
+  if (live.operations.length > 0 && !isAwaiting(snapshot)) {
+    return [`${live.operations.join(', ')} is live but the screen is not awaiting`];
   }
-  // Waiting on a bound or a debounce is waiting on a read that has not started yet.
+  // Waiting on a bound or a debounce is waiting on an operation that has not started yet.
   const waiting = live.delays.some(delay => /examplesBound|debounce/.test(delay));
-  if (isReading(snapshot) && reads.length === 0 && !waiting) {
-    return ['the screen is reading with nothing live to end it'];
+  if (isAwaiting(snapshot) && live.operations.length === 0 && !waiting) {
+    return ['the screen is awaiting with nothing live to end it'];
   }
   return [];
 }
@@ -460,7 +456,7 @@ describe('newRunMachine', () => {
           ]),
         invariants: (snapshot, live) => {
           const {form, harnesses} = snapshot.context;
-          const problems: string[] = readingProblems(snapshot, live);
+          const problems: string[] = awaitingProblems(snapshot, live);
           if (form.agent !== null && harnesses !== null) {
             if (!vettedModels(harnesses.list, form.agent.provider).includes(form.agent.model)) {
               problems.push(`model ${form.agent.model} is not vetted for ${form.agent.provider}`);

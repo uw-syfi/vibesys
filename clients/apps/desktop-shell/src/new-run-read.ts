@@ -1,6 +1,6 @@
 /**
  * What the shell reads for New run, and whether it has all been answered: New run's own machine
- * reads what its machine offers (`isReading`), and the shell reads the rest, which the form
+ * reads what its machine offers (`isAwaiting`), and the shell reads the rest, which the form
  * follows: the runs list (the machine of the run opened last), the machines the form offers, and
  * the Settings data of the machine it is for (what it has set up to measure on).
  */

@@ -10,8 +10,8 @@ import {Button, Page, Row, SectionLayout, SidebarItem, Stack, Text, Wordmark} fr
 import type {JSX} from 'react';
 import {
   examplesStatus,
+  isAwaiting,
   isDone,
-  isReading,
   type NewRunContext,
   type NewRunEvent,
   type NewRunSnapshot,
@@ -241,7 +241,7 @@ export function NewRunScreen(props: ScreenProps): JSX.Element {
   return (
     <Page
       width="wide"
-      state={props.shellRead && !isReading(snapshot) ? 'ready' : 'loading'}
+      state={props.shellRead && !isAwaiting(snapshot) ? 'ready' : 'loading'}
       {...(at === null ? {} : {footer: <StepNav {...props} at={at} first={index === 0} />})}
     >
       <SectionLayout

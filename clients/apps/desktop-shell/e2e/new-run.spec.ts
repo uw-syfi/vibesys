@@ -21,7 +21,14 @@ import {installGateway, wire} from './fake-gateway.js';
 import {installFakeRun} from './fake-run.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {choose, main, NEW_RUN_PAGES, openAt, proceed, question, steps} from './new-run-flow.js';
-import {type FakeHostWindow, openNewRun as open, PROJECT, SEED, sidebar} from './world.js';
+import {
+  type FakeHostWindow,
+  openNewRun as open,
+  PROJECT,
+  SEED,
+  showNewRun,
+  sidebar,
+} from './world.js';
 
 const start = (page: Page) => main(page).getByRole('button', {name: 'Start run'});
 
@@ -521,7 +528,7 @@ test('an unfinished run is a draft: it is offered on the Runs dashboard, kept ac
   };
   await home();
   await expect(main(page).getByText('Draft', {exact: true})).toHaveCount(0);
-  await rail.getByRole('button', {name: 'New', exact: true}).click();
+  await showNewRun(page);
   await choose(page, 'Start from', 'An example');
   await proceed(page);
   await choose(page, 'Domain', 'LLM serving');
@@ -541,7 +548,7 @@ test('an unfinished run is a draft: it is offered on the Runs dashboard, kept ac
   await home();
   await main(page).getByRole('button', {name: 'Discard'}).click();
   await expect(main(page).getByText('Draft', {exact: true})).toHaveCount(0);
-  await rail.getByRole('button', {name: 'New', exact: true}).click();
+  await showNewRun(page);
   await expect(question(page, 'What do you want to optimize?')).toBeVisible();
 });
 
@@ -666,7 +673,7 @@ test('a start whose reply was lost says on the page that it may have started, an
     'page',
   );
   // Back at the form: the person has looked, so Start is open again.
-  await sidebar(page).getByRole('button', {name: 'New', exact: true}).click();
+  await showNewRun(page);
   await expect(main(page).getByText('May have started', {exact: true})).toHaveCount(0);
   await expect(start(page)).not.toHaveAttribute('aria-disabled', 'true');
 });
@@ -974,10 +981,7 @@ test('More options starts closed, says what it holds, and stays as left on each 
   await more.click();
   await expect(main(page).getByLabel('Extra arguments')).toBeVisible();
   await page.reload();
-  await page
-    .getByRole('navigation', {name: 'VibeSys'})
-    .getByRole('button', {name: 'New', exact: true})
-    .click();
+  await showNewRun(page);
   await expect(main(page).getByRole('button', {name: /More options/})).toHaveAttribute(
     'aria-expanded',
     'true',

@@ -5,7 +5,7 @@ import {Icon} from './icon.js';
 /** The page content's max width: `content` (1060), `wide` (1100) or `narrow` (900). */
 export type PageWidth = 'content' | 'wide' | 'narrow' | 'fill';
 
-/** Whether what a page shows has been read (`Page`'s `state`). */
+/** Whether what a page shows has settled (`Page`'s `state`). */
 export type PageState = 'loading' | 'ready';
 export type Align = 'start' | 'center' | 'end' | 'stretch' | 'baseline';
 export type Justify = 'start' | 'center' | 'end' | 'between';
@@ -84,7 +84,7 @@ export function Page(props: {
   /** What stays in view below a body that scrolls: the page's primary action. */
   readonly footer?: ReactNode;
   /**
-   * Whether what the page shows has been read: `loading` while a read it started is unanswered,
+   * Whether what the page shows has settled: `loading` while a reply it asked for is outstanding,
    * `ready` once none is, as `data-state` on the page. Absent for a page that does not say.
    */
   readonly state?: PageState;
