@@ -21,12 +21,17 @@ import {
   draftProblem,
   type HostReply,
   type HostRow,
+  type LimitsContext,
+  type LimitsScreenState,
+  limitsMachine,
+  limitsView,
   type Merged,
   mergeReplies,
   modelDetail,
   type PeriodEdges,
   pricesView,
   type ReadAnswer,
+  type SaveRequest,
   type UsageActions,
   type UsageClock,
   type UsageContext,
@@ -39,7 +44,7 @@ import {
   usageView,
   type ViewFilters,
 } from '../../state/index.js';
-import {readUsage, refreshRates, savePrices, type UsageBridge} from './load.js';
+import {readLimits, readUsage, refreshRates, savePrices, type UsageBridge} from './load.js';
 
 export interface UsageStoreOptions {
   readonly schedule: ScheduleTimeout;
@@ -79,6 +84,9 @@ const STATUS: Readonly<Record<UsagePhase, UsageStatusWord | null>> = {
   failed: null,
 };
 
+/** What the usage machine alone says of the screen; the store adds the Limits tab's. */
+type UsageBody = Omit<UsageScreenState, 'limits'>;
+
 interface Held {
   readonly answer: ReadAnswer;
   readonly edges: PeriodEdges;
@@ -98,7 +106,7 @@ class Folds {
   #last: {
     readonly value: unknown;
     readonly context: UsageContext;
-    readonly screen: UsageScreenState;
+    readonly screen: UsageBody;
   } | null = null;
 
   merged(context: UsageContext): Held | null {
@@ -115,7 +123,7 @@ class Folds {
     return this.#held;
   }
 
-  screen(snapshot: {readonly value: unknown; readonly context: UsageContext}): UsageScreenState {
+  screen(snapshot: {readonly value: unknown; readonly context: UsageContext}): UsageBody {
     if (
       this.#last !== null &&
       this.#last.value === snapshot.value &&
@@ -127,7 +135,8 @@ class Folds {
     const phase = phaseOf(snapshot.value);
     const held = this.merged(context);
     const filters: ViewFilters = {
-      tab: context.tab,
+      // The Limits tab shows no figure of the period; the figures stay as the cost tab has them.
+      tab: context.tab === 'limits' ? 'cost' : context.tab,
       source: context.source,
       hidden: new Set(context.hidden),
     };
@@ -160,7 +169,7 @@ class Folds {
         this.#view = {held, filters, overridden, view};
       }
     }
-    const screen: UsageScreenState = {
+    const screen: UsageBody = {
       phase,
       status: STATUS[phase],
       period: context.period,
@@ -232,15 +241,53 @@ function dialogOf(context: UsageContext, held: Held | null, filters: ViewFilters
   };
 }
 
-/** The Usage page's store over `bridge`. `stop` ends the machine and the question it is asking. */
-export function createUsageStore(
-  bridge: UsageBridge,
-  options: UsageStoreOptions,
-): {
-  readonly store: Store<UsageScreenState, never>;
-  readonly actions: UsageActions;
-  readonly stop: () => void;
-} {
+/** The Limits tab's screen state of a machine snapshot, folded once per change. */
+function limitsFolds(): (snapshot: {
+  readonly value: unknown;
+  readonly context: LimitsContext;
+}) => LimitsScreenState {
+  let last: {
+    readonly value: unknown;
+    readonly context: LimitsContext;
+    readonly screen: LimitsScreenState;
+  } | null = null;
+  return snapshot => {
+    const held = last;
+    if (held !== null && held.value === snapshot.value && held.context === snapshot.context) {
+      return held.screen;
+    }
+    const {context} = snapshot;
+    const screen: LimitsScreenState = {
+      view:
+        context.answer === null ? null : limitsView(context.answer.replies, context.askedAt ?? 0),
+      checking: snapshot.value === 'checking',
+      failed: context.failed,
+      unsupported:
+        context.answer !== null &&
+        context.answer.replies.length === 0 &&
+        context.answer.unsupported.length > 0,
+    };
+    last = {value: snapshot.value, context, screen};
+    return screen;
+  };
+}
+
+/** The save the open prices dialog asks for, or null when it is not open or a destination refuses it. */
+function saveRequestOf(context: UsageContext, held: Held | null): SaveRequest | null {
+  const dialog = context.dialog;
+  if (dialog?.kind !== 'prices' || held === null) return null;
+  const destinations = held.answer.replies
+    .filter(reply => dialog.apply.includes(reply.host))
+    .map(reply => ({host: reply.host, book: reply.summary.prices}));
+  const problem = destinations
+    .map(each => draftProblem(dialog.draft, each.book))
+    .find(each => each !== null);
+  if (problem !== undefined || destinations.length === 0) return null;
+  return {draft: dialog.draft, destinations};
+}
+
+/** The usage machine with its operations provided over `bridge`. */
+function usageActor(bridge: UsageBridge, options: UsageStoreOptions) {
   const logic = usageMachine.provide({
     actors: {
       read: fromPromise(({input, signal}) =>
@@ -252,12 +299,73 @@ export function createUsageStore(
       save: fromPromise(({input, signal}) => savePrices(bridge, input, signal)),
     },
   });
-  const actor = createActor(logic, {
+  return createActor(logic, {
     input: {period: options.period ?? '7d', clock: options.clock()},
     clock: clockFrom(options.schedule),
   });
+}
+
+/** The page's state: the usage machine's with the Limits tab's, the same object while neither changed. */
+function joinScreens(
+  body: () => UsageBody,
+  limits: () => LimitsScreenState,
+): () => UsageScreenState {
+  let joined: {
+    readonly body: UsageBody;
+    readonly limits: LimitsScreenState;
+    readonly screen: UsageScreenState;
+  } | null = null;
+  return () => {
+    const own = {body: body(), limits: limits()};
+    if (joined?.body !== own.body || joined.limits !== own.limits) {
+      joined = {...own, screen: {...own.body, limits: own.limits}};
+    }
+    return joined.screen;
+  };
+}
+
+/** The Limits tab's machine over `bridge`, as a store and the three things the page does to it. */
+function limitsStore(
+  bridge: UsageBridge,
+  options: UsageStoreOptions,
+  hostsOff: () => readonly HostKey[],
+) {
+  const actor = createActor(
+    limitsMachine.provide({
+      actors: {
+        check: fromPromise(({input, signal}) =>
+          readLimits(bridge, input.maxAgeS, options.clock().now, hostsOff(), signal),
+        ),
+      },
+    }),
+    {clock: clockFrom(options.schedule)},
+  );
+  const store = actorStore(actor, limitsFolds());
+  return {
+    getState: store.getState,
+    subscribe: store.subscribe,
+    start: () => actor.start(),
+    stop: () => actor.stop(),
+    open: (now: number) => actor.send({type: 'open', now}),
+    refresh: (now: number) => actor.send({type: 'refresh', now}),
+  };
+}
+
+/** The Usage page's store over `bridge`. `stop` ends the machine and the question it is asking. */
+export function createUsageStore(
+  bridge: UsageBridge,
+  options: UsageStoreOptions,
+): {
+  readonly store: Store<UsageScreenState, never>;
+  readonly actions: UsageActions;
+  readonly stop: () => void;
+} {
+  const actor = usageActor(bridge, options);
+  const limits = limitsStore(bridge, options, () => actor.getSnapshot().context.hostsOff);
   const folds = new Folds();
   const inner = actorStore(actor, snapshot => folds.screen(snapshot));
+  const getState = joinScreens(inner.getState, limits.getState);
+  const onLimitsTab = () => actor.getSnapshot().context.tab === 'limits';
   let started = false;
   let watching = 0;
   let listings: readonly HostListing[] = [];
@@ -265,23 +373,28 @@ export function createUsageStore(
     const reachable = hostsComeUp(listings, [event.value]).length > 0;
     listings = [...listings.filter(each => each.host !== event.value.host), event.value];
     // A page that is not shown asks again when it is.
-    if (reachable && watching > 0) actor.send({type: 'refresh', clock: options.clock()});
+    if (reachable && watching > 0) {
+      actor.send({type: 'refresh', clock: options.clock()});
+      if (onLimitsTab()) limits.refresh(options.clock().now);
+    }
   });
   const store: Store<UsageScreenState, never> = {
-    getState: inner.getState,
+    getState,
     dispatch: () => undefined,
     subscribe: listener => {
-      const unsubscribe = inner.subscribe(listener);
+      const unsubscribes = [inner.subscribe(listener), limits.subscribe(listener)];
       watching += 1;
       if (!started) {
         started = true;
         actor.start();
+        limits.start();
       } else if (watching === 1) {
         actor.send({type: 'refresh', clock: options.clock()});
+        if (onLimitsTab()) limits.open(options.clock().now);
       }
       return () => {
         watching -= 1;
-        unsubscribe();
+        for (const unsubscribe of unsubscribes) unsubscribe();
       };
     },
   };
@@ -290,11 +403,17 @@ export function createUsageStore(
     store,
     actions: {
       period: period => actor.send({type: 'period', period, clock: options.clock()}),
-      tab: tab => actor.send({type: 'tab', tab}),
+      tab: tab => {
+        actor.send({type: 'tab', tab});
+        if (tab === 'limits') limits.open(options.clock().now);
+      },
       source: source => actor.send({type: 'source', source}),
       provider: provider => actor.send({type: 'provider', provider}),
       host: host => actor.send({type: 'host', host}),
-      refresh: () => actor.send({type: 'refresh', clock: options.clock()}),
+      refresh: () => {
+        if (onLimitsTab()) limits.refresh(options.clock().now);
+        else actor.send({type: 'refresh', clock: options.clock()});
+      },
       model: key => actor.send({type: 'model', key}),
       setPrice: key => {
         const held = folds.merged(current());
@@ -320,20 +439,14 @@ export function createUsageStore(
       applyTo: host => actor.send({type: 'apply', host}),
       save: () => {
         const context = current();
-        const dialog = context.dialog;
-        const held = folds.merged(context);
-        if (dialog?.kind !== 'prices' || held === null) return;
-        const destinations = held.answer.replies
-          .filter(reply => dialog.apply.includes(reply.host))
-          .map(reply => ({host: reply.host, book: reply.summary.prices}));
-        const problem = destinations
-          .map(each => draftProblem(dialog.draft, each.book))
-          .find(each => each !== null);
-        if (problem !== undefined || destinations.length === 0) return;
-        actor.send({type: 'save', request: {draft: dialog.draft, destinations}});
+        const request = saveRequestOf(context, folds.merged(context));
+        if (request !== null) actor.send({type: 'save', request});
       },
       close: () => actor.send({type: 'close'}),
     },
-    stop: () => actor.stop(),
+    stop: () => {
+      limits.stop();
+      actor.stop();
+    },
   };
 }

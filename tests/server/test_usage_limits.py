@@ -100,6 +100,11 @@ def _reading(provider: str, says: str, used: float) -> ProviderLimits:
     }[says]
 
 
+def _read_at(account: usage_state.UsageAccountLimits) -> dt.datetime:
+    assert account.read_at is not None
+    return account.read_at.to_datetime()
+
+
 def _used(answer: host_payloads.UsageProviderLimits) -> float:
     assert answer.limits is not None
     return answer.limits.windows[0].used_fraction
@@ -161,7 +166,7 @@ def test_every_answer_is_what_the_model_says_and_the_store_holds_the_last_good_r
                 if says == "good":
                     assert answer.status == LIVE
                     assert answer.limits is not None
-                    assert answer.limits.read_at.to_datetime() == now
+                    assert _read_at(answer.limits) == now
                     assert _used(answer) == used
                     model[provider] = (now, used)
                 elif says == "failed" and held is not None:
@@ -169,7 +174,7 @@ def test_every_answer_is_what_the_model_says_and_the_store_holds_the_last_good_r
                     assert answer.unavailable == FAILED
                     assert _used(answer) == held[1]
                     assert answer.limits is not None
-                    assert answer.limits.read_at.to_datetime() == held[0]
+                    assert _read_at(answer.limits) == held[0]
                 else:
                     assert answer.status == UNAVAILABLE
                     assert answer.limits is None
@@ -178,7 +183,7 @@ def test_every_answer_is_what_the_model_says_and_the_store_holds_the_last_good_r
             kept = {each.provider: each for each in store.read().providers}
             assert set(kept) == set(model)
             for provider, (at, share) in model.items():
-                assert kept[provider].read_at.to_datetime() == at
+                assert _read_at(kept[provider]) == at
                 assert kept[provider].windows[0].used_fraction == share
 
 

@@ -31,7 +31,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Final, Protocol
 
 from server.host_agent_logins import launch_environment
-from vs_agent.api.usage_limits import AgentLimitsReader, UnavailableReason
+from vs_agent.api.usage_limits import AgentLimitsReader, LimitsReader, UnavailableReason
 from vs_agent.api.usage_limits import providers as readable_providers
 from vs_project.api import Project, ProjectError, atomic_write_bytes
 from vs_proto.api import Timestamp, ValidationError, host_payloads, usage_state, validate
@@ -40,7 +40,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
     from pathlib import Path
 
-    from vs_agent.api.usage_limits import LimitsReader, ProviderLimits, ResetCredit, Window
+    from vs_agent.api.usage_limits import ProviderLimits, ResetCredit, Window
 
 LIMITS_FILE: Final = "limits.pb"
 LIMITS_VERSION: Final = 1
@@ -109,7 +109,7 @@ def decide(stored: usage_state.UsageAccountLimits | None, *, now: datetime, max_
 
     A reading from the future (the clock moved back) is never fresh. Zero ages out everything.
     """
-    if stored is None or max_age_s <= 0:
+    if stored is None or stored.read_at is None or max_age_s <= 0:
         return False
     age = (now - stored.read_at.to_datetime()).total_seconds()
     return 0 <= age <= max_age_s
@@ -268,6 +268,7 @@ __all__ = [
     "LIMITS_FILE",
     "PROBE_TIMEOUT_S",
     "FileLimitsStore",
+    "LimitsReader",
     "LimitsStore",
     "Settled",
     "account_limits",

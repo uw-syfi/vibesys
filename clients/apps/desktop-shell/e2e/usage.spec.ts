@@ -542,3 +542,68 @@ test('the Price button of a model is on screen at 660 px', async ({page}) => {
   await price.click();
   await expect(page.getByRole('dialog')).toBeVisible();
 });
+
+interface LimitsHost extends Window {
+  fakeHost: {usageLimitsAsked: {host: string; maxAgeS: number; now: number}[]};
+}
+
+const limitsAsked = (page: Page) =>
+  page.evaluate(() => (window as unknown as LimitsHost).fakeHost.usageLimitsAsked);
+
+test('the Limits tab shows a card per provider with a bar per window, asks each machine once, and writes no sentence', async ({
+  page,
+}) => {
+  await open(page, caseNamed('one-run'), 1440);
+  expect(await limitsAsked(page)).toEqual([]);
+  await page.getByRole('radio', {name: 'Limits'}).check({force: true});
+  await expect(page.getByRole('heading', {name: 'Claude', level: 2})).toBeVisible();
+  await expect(page.getByRole('heading', {name: 'Codex', level: 2})).toBeVisible();
+  // Claude: a session, a weekly and a per-model window; Codex: one weekly window and a reset credit.
+  for (const reading of ['61% left', '72% left', '100% left', '97% left']) {
+    await expect(page.getByText(reading, {exact: true})).toBeVisible();
+  }
+  await expect(page.getByText('Resets in 3 h', {exact: true})).toBeVisible();
+  await expect(page.getByText('1 resets', {exact: true})).toBeVisible();
+  // The period and the source mean nothing here, and the header says no word for work.
+  await expect(page.getByRole('combobox', {name: 'Period'})).toHaveCount(0);
+  expect(await limitsAsked(page)).toHaveLength(1);
+  // Back to the figures and to the limits again: inside the floor the machine is not asked again.
+  await page.getByRole('radio', {name: 'Cost'}).check({force: true});
+  await expect(hero(page)).toBeVisible();
+  await page.getByRole('radio', {name: 'Limits'}).check({force: true});
+  await expect(page.getByRole('heading', {name: 'Claude', level: 2})).toBeVisible();
+  expect(await limitsAsked(page)).toHaveLength(1);
+  for (const text of await words(page)) {
+    expect(text, text).not.toContain('—');
+    expect(text, text).not.toMatch(/[.!?](\s|$)/);
+  }
+  // Refresh asks the CLIs at once, whatever the floor.
+  await page.getByRole('button', {name: 'Refresh'}).click();
+  await expect.poll(async () => (await limitsAsked(page)).length).toBe(2);
+  expect((await limitsAsked(page))[1]?.maxAgeS).toBe(0);
+});
+
+for (const width of WIDTHS) {
+  test(`the Limits tab passes the screen checks at ${width} px`, async ({page}) => {
+    await open(page, caseNamed('one-run'), width);
+    await page.getByRole('radio', {name: 'Limits'}).check({force: true});
+    await expect(page.getByRole('heading', {name: 'Claude', level: 2})).toBeVisible();
+    await settled(page);
+    expect(
+      ledger.unexplained(`usage/limits/${width}`, await screenCheck(page, SCREEN_CHECKS)),
+    ).toEqual([]);
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow, `${width}`).toBeLessThanOrEqual(0);
+  });
+}
+
+test('a host that predates the limits question reads Update required on the Limits tab', async ({
+  page,
+}) => {
+  await open(page, caseNamed('unsupported-host'), 1440);
+  await page.getByRole('radio', {name: 'Limits'}).check({force: true});
+  await expect(page.getByText('Update required', {exact: true})).toBeVisible();
+  await expect(page.getByRole('heading', {name: 'Claude', level: 2})).toHaveCount(0);
+});

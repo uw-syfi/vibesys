@@ -1,6 +1,7 @@
 /** What the Usage page renders and what it can do: the types its store and its screen share. */
 import type {HostKey} from '@vibesys/hosts';
 import type {UsagePeriod} from './edges.js';
+import type {LimitsView} from './limits-view.js';
 import type {ModelDetail, PricesView} from './model-view.js';
 import type {PriceDraft} from './price-drafts.js';
 import type {UsageSourceChoice, UsageTab, UsageView} from './usage-view.js';
@@ -34,6 +35,18 @@ export type DialogState =
   | {readonly kind: 'model'; readonly detail: ModelDetail | null}
   | {readonly kind: 'prices'; readonly prices: PricesView | null};
 
+/** What the Limits tab renders. */
+export interface LimitsScreenState {
+  /** The cards of the last answer; null before the first. */
+  readonly view: LimitsView | null;
+  /** Whether a question is being asked. */
+  readonly checking: boolean;
+  /** Whether the last question failed; the figures shown are the earlier ones. */
+  readonly failed: boolean;
+  /** Whether every machine that answered lacks the question: their VibeSys is older. */
+  readonly unsupported: boolean;
+}
+
 /** What the screen renders. */
 export interface UsageScreenState {
   readonly phase: UsagePhase;
@@ -50,6 +63,7 @@ export interface UsageScreenState {
   readonly problem: string | null;
   /** Whether the figures shown are being read again. */
   readonly stale: boolean;
+  readonly limits: LimitsScreenState;
 }
 
 export interface UsageActions {

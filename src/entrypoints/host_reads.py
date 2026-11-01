@@ -27,7 +27,7 @@ if TYPE_CHECKING:
         host_operation_reads,
         usage_limits,
     )
-    from vs_agent.api.usage_limits import LimitsReader
+    from server.usage_limits import LimitsReader
     from vs_sim import api as sim
     from vs_sim.api import HttpsGet, Platform
 else:

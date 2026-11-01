@@ -348,7 +348,7 @@ depends_on = ["server.host_agent_logins", "vs_agent.api.usage_limits", "vs_proje
 
 [[interfaces]]
 from = ["server.usage_limits"]
-expose = ["FileLimitsStore", "LIMITS_FILE", "LimitsStore", "PROBE_TIMEOUT_S", "Settled", "account_limits", "collect", "decide", "read_here", "reader_here", "settle"]
+expose = ["FileLimitsStore", "LIMITS_FILE", "LimitsReader", "LimitsStore", "PROBE_TIMEOUT_S", "Settled", "account_limits", "collect", "decide", "read_here", "reader_here", "settle"]
 
 [[modules]]
 # A person's own CLI use on a host: the provider transcripts, read incrementally into a cache.

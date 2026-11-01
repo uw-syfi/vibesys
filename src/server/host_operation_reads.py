@@ -173,7 +173,7 @@ class HostReadSource:
         preflight: Callable[
             [host_api.RunPreflightRequest], host_api.RunPreflightReply | host_api.HelperError
         ],
-        outside: Outside = Outside(),  # noqa: B008 - a frozen value
+        outside: Outside | None = None,
     ) -> None:
         """Bind host I/O and the existing machine/preflight probe adapters.
 
@@ -184,7 +184,7 @@ class HostReadSource:
         self._role_order = role_order
         self._describe = describe
         self._preflight = preflight
-        self._outside = outside
+        self._outside = Outside() if outside is None else outside
 
     def _path(self, text: str) -> Path:
         expanded = Path(self._host.directories.expand(text))
