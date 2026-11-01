@@ -28,6 +28,7 @@ commands = [
   ["python3", "scripts/check_doc_links.py"],
   ["python3", "-m", "scripts.check_doc_citations"],
   ["python3", "-m", "scripts.check_skills"],
+  ["python3", "-m", "scripts.published_skills"],
 ]
 # Every command here takes under a second or two, so the pre-push gate runs them all.
 gate_commands = [
