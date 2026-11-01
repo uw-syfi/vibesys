@@ -5,18 +5,18 @@
  * the engine also handled would move two entries.
  */
 import {expect, type Page, test} from '@playwright/test';
-import {settled} from './checks/settle.js';
 import {
   type FakeBridgeSeed,
   installFakeBridge,
   installFakeMachines,
   installFakeProjectRuns,
   MAC_CHROME,
-} from './fake-bridge.js';
+} from '../src/testing/fake-bridge.js';
+import {STARTED_AT} from '../src/testing/started-at.js';
+import {settled} from './checks/settle.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {journeyScript} from './journey-world.js';
 import {showScreen, sidebar} from './read.js';
-import {STARTED_AT} from './started-at.js';
 
 const PROJECT = '/home/me/vibesys-projects/queue-rs';
 const RUN_ID = '20261015-163047';

@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, test} from '@playwright/test';
+import {MAC_CHROME, WINDOWS_CHROME} from '../src/testing/fake-bridge.js';
 import {rawTextOf, screenCheck} from './checks/screen-check.js';
-import {MAC_CHROME, WINDOWS_CHROME} from './fake-bridge.js';
 import {showScreen, sidebar} from './read.js';
 import {open, SEED} from './world.js';
 

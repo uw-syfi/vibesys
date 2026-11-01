@@ -1,6 +1,6 @@
 import {expect, type Page, test} from '@playwright/test';
+import {MAC_CHROME} from '../src/testing/fake-bridge.js';
 import {frameProblems, STACKED_FRAME} from './checks/main-above-fold.js';
-import {MAC_CHROME} from './fake-bridge.js';
 import {sidebar} from './read.js';
 import {open} from './world.js';
 

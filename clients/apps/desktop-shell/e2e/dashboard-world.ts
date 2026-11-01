@@ -15,7 +15,7 @@ import {
   installFakeMachines,
   installFakeNewRun,
   installFakeProjectRuns,
-} from './fake-bridge.js';
+} from '../src/testing/fake-bridge.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {whenRead} from './read.js';
 import {SEED} from './world.js';

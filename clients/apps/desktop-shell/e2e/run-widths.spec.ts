@@ -1,7 +1,7 @@
 import {expect, test} from '@playwright/test';
 import {fixtureNamed} from '@vibesys/run-fixtures';
+import {MAC_CHROME} from '../src/testing/fake-bridge.js';
 import {settled} from './checks/settle.js';
-import {MAC_CHROME} from './fake-bridge.js';
 import {openFixture, playLive} from './fixture-world.js';
 
 /**

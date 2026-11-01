@@ -1,5 +1,4 @@
 import {type BrowserContext, expect, type Page, test} from '@playwright/test';
-import {pressMovesWindow, screenCheck} from './checks/screen-check.js';
 import {
   type FakeBridgeSeed,
   type FakeWindows,
@@ -10,7 +9,8 @@ import {
   installFakeProjectRuns,
   installFakeWindows,
   MAC_CHROME,
-} from './fake-bridge.js';
+} from '../src/testing/fake-bridge.js';
+import {pressMovesWindow, screenCheck} from './checks/screen-check.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {journeyScript} from './journey-world.js';
 import {sidebar} from './read.js';

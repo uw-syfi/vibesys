@@ -1,10 +1,6 @@
 import {mkdirSync, writeFileSync} from 'node:fs';
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
-import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
-import {KnownLedger} from './checks/known-ledger.js';
-import {SCREEN_CHECKS, screenCheck} from './checks/screen-check.js';
-import {settled} from './checks/settle.js';
 import {
   installFakeBridge,
   installFakeChrome,
@@ -14,7 +10,11 @@ import {
   installFakeUsage,
   installFakeUsageLimits,
   installFakeUsagePrices,
-} from './fake-bridge.js';
+} from '../src/testing/fake-bridge.js';
+import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
+import {KnownLedger} from './checks/known-ledger.js';
+import {SCREEN_CHECKS, screenCheck} from './checks/screen-check.js';
+import {settled} from './checks/settle.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {nativeFixtureScript} from './native-fixture.js';
 import {showScreen} from './read.js';
