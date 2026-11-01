@@ -1560,6 +1560,10 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
         EdgeKind.STORE,
         "the host's transcript scan cache, behind the incremental reader of the provider transcripts",
     ),
+    "src/server/usage_limits_store.py": (
+        EdgeKind.STORE,
+        "the host's last good reading of each provider's limits in limits.pb, behind LimitsStore",
+    ),
     "src/server/usage_scan.py": (
         EdgeKind.STORE,
         "the host's usage state: each run's rollup beside its journal, the price list, the person's prices and the source id, behind RollupStore and DocumentStore",

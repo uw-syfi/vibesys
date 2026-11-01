@@ -2,12 +2,11 @@
 
 ``usage.limits`` asks each provider's CLI (through ``vs_agent.api.usage_limits``, in the
 environment a run finds it in, with no prompt and no model call) for its account's windows and
-reset credits, and keeps the last good reading of each in ``limits.pb`` in the host's usage state
-directory. The file is a cache of the providers: damage rebuilds it with the next read.
+reset credits, and keeps the last good reading of each (``server.usage_limits_store`` keeps it in
+``limits.pb``). The readings are a cache of the providers: damage rebuilds them with the next read.
 
-Per provider, ``decide`` and ``settle`` are the whole policy and are pure; ``collect`` is the shell
-that reads the store, asks the reader for the providers ``decide`` says need it, and writes the
-store back:
+Per provider, ``decide`` and ``settle`` are the whole policy and are pure; ``collect`` asks the
+reader for the providers ``decide`` says need it, between a read and a write of the ``LimitsStore``:
 
 - a stored reading younger than the request's ``max_age_s`` is answered as it is (``STORED``), so a
   second client of the host does not start a CLI;
@@ -19,8 +18,8 @@ store back:
 
 A reply carries no detail text of a failure: it can name a path, and the screen shows a status word.
 
-Public surface: ``LIMITS_FILE``, ``PROBE_TIMEOUT_S``, ``LimitsStore``, ``FileLimitsStore``,
-``decide``, ``settle``, ``Settled``, ``collect``, ``read_here`` and ``reader_here``.
+Public surface: ``LIMITS_FILE``, ``LIMITS_VERSION``, ``PROBE_TIMEOUT_S``, ``LimitsReader``,
+``LimitsStore``, ``decide``, ``settle``, ``Settled``, ``account_limits`` and ``collect``.
 """
 
 from __future__ import annotations
@@ -30,15 +29,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Final, Protocol
 
-from server.host_agent_logins import launch_environment
-from vs_agent.api.usage_limits import AgentLimitsReader, LimitsReader, UnavailableReason
-from vs_agent.api.usage_limits import providers as readable_providers
-from vs_project.api import Project, ProjectError, atomic_write_bytes
-from vs_proto.api import Timestamp, ValidationError, host_payloads, usage_state, validate
+from vs_agent.api.usage_limits import LimitsReader, UnavailableReason
+from vs_proto.api import Timestamp, host_payloads, usage_state
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
-    from pathlib import Path
 
     from vs_agent.api.usage_limits import ProviderLimits, ResetCredit, Window
 
@@ -75,33 +70,6 @@ class LimitsStore(Protocol):
     def write(self, state: usage_state.UsageLimitsState) -> None:
         """Replace the stored readings; a write that fails loses only the next read's fallback."""
         ...
-
-
-class FileLimitsStore:
-    """``LimitsStore`` in ``limits.pb``, written atomically."""
-
-    def __init__(self, path: Path) -> None:
-        """Keep the readings at ``path``."""
-        self._path = path
-
-    def read(self) -> usage_state.UsageLimitsState:
-        """The stored readings; a missing, undecodable or invalid file is no readings."""
-        try:
-            found = usage_state.UsageLimitsState.from_binary(self._path.read_bytes())
-            validate(found)
-        except (OSError, ValueError, ValidationError):
-            return usage_state.UsageLimitsState(version=LIMITS_VERSION)
-        if found.version != LIMITS_VERSION:
-            return usage_state.UsageLimitsState(version=LIMITS_VERSION)
-        return found
-
-    def write(self, state: usage_state.UsageLimitsState) -> None:
-        """Replace the file, creating its directory; an I/O error loses only the fallback."""
-        try:
-            self._path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-            atomic_write_bytes(self._path, state.to_binary())
-        except (OSError, ProjectError):
-            return
 
 
 def decide(stored: usage_state.UsageAccountLimits | None, *, now: datetime, max_age_s: int) -> bool:
@@ -208,19 +176,6 @@ def collect(
     )
 
 
-def read_here(
-    request: host_payloads.UsageLimitsRequest, reader: LimitsReader
-) -> host_payloads.UsageLimitsResponse:
-    """The reply to ``request`` for every provider that has limits, kept in the host's usage state."""
-    store = FileLimitsStore(Project.usage_state_directory() / LIMITS_FILE)
-    return collect(request, reader, store, readable_providers())
-
-
-def reader_here() -> LimitsReader:
-    """The reader for this machine: each provider's CLI, found where a run finds it."""
-    return AgentLimitsReader(launch_environment(), PROBE_TIMEOUT_S)
-
-
 def _answer(
     provider: str,
     status: host_payloads.UsageLimitsStatus,
@@ -266,15 +221,13 @@ def _timestamp(at: datetime) -> Timestamp:
 
 __all__ = [
     "LIMITS_FILE",
+    "LIMITS_VERSION",
     "PROBE_TIMEOUT_S",
-    "FileLimitsStore",
     "LimitsReader",
     "LimitsStore",
     "Settled",
     "account_limits",
     "collect",
     "decide",
-    "read_here",
-    "reader_here",
     "settle",
 ]

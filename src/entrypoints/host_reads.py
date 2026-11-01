@@ -25,7 +25,7 @@ if TYPE_CHECKING:
         host_helper_requests,
         host_machine_facts,
         host_operation_reads,
-        usage_limits,
+        usage_limits_store,
     )
     from server.usage_limits import LimitsReader
     from vs_sim import api as sim
@@ -35,7 +35,7 @@ else:
     sim = lazy_module("vs_sim.api")
     host_helper_requests = lazy_module("server.host_helper_requests")
     host_operation_reads = lazy_module("server.host_operation_reads")
-    usage_limits = lazy_module("server.usage_limits")
+    usage_limits_store = lazy_module("server.usage_limits_store")
 
 
 class ReadHost(HostFacts):
@@ -64,7 +64,7 @@ def _https() -> HttpsGet:
 
 def _limits() -> LimitsReader:
     """The reader of provider limits; the agent library loads when a limits read asks."""
-    return usage_limits.reader_here()
+    return usage_limits_store.reader_here()
 
 
 def read_source(platform: Platform) -> host_operation_reads.HostReadSource:

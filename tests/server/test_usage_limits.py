@@ -21,7 +21,8 @@ from tests.server.host_helper_support import fake_host
 
 from server.host_helper_requests import registry_read_source
 from server.host_operation_reads import answer_registered_read
-from server.usage_limits import LIMITS_FILE, FileLimitsStore, collect, decide
+from server.usage_limits import LIMITS_FILE, collect, decide
+from server.usage_limits_store import FileLimitsStore
 from vs_agent.api.testing import FakeLimitsReader
 from vs_agent.api.usage_limits import (
     ProviderLimits,

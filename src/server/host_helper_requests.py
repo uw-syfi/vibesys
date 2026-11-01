@@ -166,7 +166,7 @@ if TYPE_CHECKING:
         host_operation_types_generated,
         host_preflight,
         host_run_reads,
-        usage_limits,
+        usage_limits_store,
     )
     from server.host_agent_logins import AgentLogin, LoginStarted, LoginUnavailable
     from server.host_api import HarnessChoice, RunDigestUnreadable
@@ -197,7 +197,7 @@ else:
     host_operation_reads = lazy_module("server.host_operation_reads")
     host_operation_types_generated = lazy_module("server.host_operation_types_generated")
     host_preflight = lazy_module("server.host_preflight")
-    usage_limits = lazy_module("server.usage_limits")
+    usage_limits_store = lazy_module("server.usage_limits_store")
     host_run_reads = lazy_module("server.host_run_reads")
     read_operations = lazy_module("vibesys.api.host_operations.reads")
     wire = lazy_module("vs_proto.api")
@@ -1386,7 +1386,7 @@ def read_reply(request: HelperRequest, source: HostReadSource) -> HelperReply | 
 
 def _limits_reader() -> LimitsReader:
     """The reader of provider limits; the agent library loads when a limits read asks."""
-    return usage_limits.reader_here()
+    return usage_limits_store.reader_here()
 
 
 def registry_read_source(

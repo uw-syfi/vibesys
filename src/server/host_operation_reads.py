@@ -33,7 +33,7 @@ if TYPE_CHECKING:
         host_run_summary,
         host_run_wire,
         host_saved_runs,
-        usage_limits,
+        usage_limits_store,
         usage_scan,
     )
     from server.host_agent_logins import AgentLogin
@@ -56,7 +56,7 @@ else:
     host_run_summary = lazy_module("server.host_run_summary")
     host_run_wire = lazy_module("server.host_run_wire")
     host_saved_runs = lazy_module("server.host_saved_runs")
-    usage_limits = lazy_module("server.usage_limits")
+    usage_limits_store = lazy_module("server.usage_limits_store")
     usage_scan = lazy_module("server.usage_scan")
     read_operations = lazy_module("vibesys.api.host_operations.reads")
     saved_runs = lazy_module("vibesys.api.host_operations.saved_runs")
@@ -268,7 +268,7 @@ class HostReadSource:
                     request_id=request.request_id,
                 )
             )
-        return usage_limits.read_here(request, self._outside.limits())
+        return usage_limits_store.read_here(request, self._outside.limits())
 
     def tasks(self, project: str) -> pb.TaskList:
         """Read through the existing project's task owner."""
