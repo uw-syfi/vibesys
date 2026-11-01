@@ -15,6 +15,7 @@ from scripts.refresh_shard_durations import main as refresh_main
 from tests.support.child_pytest import BARE_PYTEST
 from tests.support.sharding import (
     DEFAULT_DURATIONS,
+    DYNAMIC_DISTS,
     HEAVY_SHARE,
     SHARD_BUDGET_SECONDS,
     SMOOTHING_WEIGHT,
@@ -460,6 +461,62 @@ def test_a_shard_that_owns_no_test_under_the_given_path_passes(
 
     assert [result.ret for result in results] == [0, 0]
     assert sorted(result.parseoutcomes().get("passed", 0) for result in results) == [0, 1]
+
+
+def _dists_the_suite_runs() -> set[str]:
+    """Every ``--dist`` value the repository's pytest settings and CI shard command pass."""
+    settings = tomllib.loads((_REPO / "pyproject.toml").read_text(encoding="utf-8"))
+    checks = tomllib.loads((_REPO / ".repoctl" / "checks.toml").read_text(encoding="utf-8"))
+    shard_group = next(
+        group for group in checks["check_groups"] if group["name"] == "python_ci_tests_shard"
+    )
+    words = [
+        *settings["tool"]["pytest"]["ini_options"]["addopts"].split(),
+        *(word for command in shard_group["commands"] for word in command),
+    ]
+    return {words[at + 1] for at, word in enumerate(words[:-1]) if word == "--dist"}
+
+
+def test_every_dist_the_suite_runs_starts_the_expensive_files_first() -> None:
+    # The ordering was keyed on `load` while `addopts` and CI ran `loadgroup`, so no shard ever
+    # started its expensive files first and each ended with one worker running a long test alone.
+    dists = _dists_the_suite_runs()
+    assert dists, "no --dist found in the pytest settings or the CI shard command"
+    assert dists <= DYNAMIC_DISTS
+
+
+@pytest.mark.parametrize("dist", sorted(DYNAMIC_DISTS))
+def test_a_session_under_a_dynamic_dist_runs_the_expensive_file_before_a_cheaper_one_listed_first(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch, dist: str
+) -> None:
+    monkeypatch.setenv("PYTEST_ADDOPTS", "")
+    pytester.makepyfile(
+        test_a_cheap="def test_cheap(): pass",
+        test_z_expensive="def test_expensive(): pass",
+    )
+    durations = pytester.path / "durations.json"
+    durations.write_text(json.dumps({"test_a_cheap.py": 1.0, "test_z_expensive.py": 50.0}))
+
+    result = pytester.runpytest(
+        *BARE_PYTEST,
+        "-p",
+        "tests.support.sharding",
+        "-n",
+        "1",
+        "--dist",
+        dist,
+        "--shard-durations",
+        str(durations),
+        "-v",
+        "test_a_cheap.py",
+        "test_z_expensive.py",
+    )
+
+    text = result.stdout.str()
+    assert result.ret == 0
+    assert text.index("PASSED test_z_expensive.py::test_expensive") < text.index(
+        "PASSED test_a_cheap.py::test_cheap"
+    )
 
 
 @given(
