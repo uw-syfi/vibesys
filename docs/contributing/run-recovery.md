@@ -44,6 +44,13 @@ once. An **open step** is a step with no result. An **epoch** is one process lif
    within a deadline, records that the run is parked, and exits. A clean pause leaves no open attempt.
    Ending a run cannot fail: cancel the work that is open, run the cleanup that frees what the run
    holds, wait for both, then end.
+5. **A step that cannot conclude is bounded.** An executor that answers with an observation that is not
+   final has given the step no result: the attempt raised, it is charged as a crash is, and nothing it
+   left is adopted. The step runs again at most `request_retries` more times and then ends `Failed`
+   (`ATTEMPTS_EXHAUSTED`), so a run whose far side never answers ends or halts on a typed stop and
+   never waits on it. A `clear` that keeps failing is the one wait the loop does not bound: it shows
+   on the `StallBoard`, and a pause or an ending abandons it. `vs-dst` holds its worlds to the rule
+   (`test_a_request_the_world_never_answers_finally_is_asked_within_the_retry_bound_and_the_run_halts`).
 
 ## Status
 

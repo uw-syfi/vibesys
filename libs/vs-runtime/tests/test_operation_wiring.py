@@ -22,12 +22,10 @@ from vs_project.api import Project
 from vs_runtime.api.core import (
     OperationCatalog,
     OperationRole,
-    RegisteredOperationRequests,
-    bind_operations,
     build_operation_catalog,
 )
 from vs_runtime.api.operation_fixtures import SCENARIO_NAMES, OperationScenario, scenarios
-from vs_sim.api.testing import SimThreads, examples
+from vs_sim.api.testing import examples
 
 _STRATEGY_NAMES = tuple(name for name in SCENARIO_NAMES if name != "echo")
 
@@ -60,18 +58,15 @@ def _declaration(
 @given(required=st.lists(st.sampled_from(_STRATEGY_NAMES), unique=True, max_size=4))
 def test_startup_fails_exactly_when_a_required_operation_is_refused(required: list[str]) -> None:
     with tempfile.TemporaryDirectory() as raw:
-        items, catalog, project = _catalog_and_namespace(Path(raw))
+        items, catalog, _ = _catalog_and_namespace(Path(raw))
         declaration = _declaration(items, tuple(required))
         refused = [name for name in required if next(i for i in items if i.name == name).refused]
-        namespace = project.state.state_store_namespace("run")
         if not refused:
-            bindings = bind_operations(declaration, catalog, namespace, threads=SimThreads())
-            assert isinstance(bindings.executors.operations, RegisteredOperationRequests)
-            assert bindings.registry is catalog.registry
+            catalog.require_owned(declaration)
             return
         kind = next(i for i in items if i.name == refused[0]).entry.registration.descriptor.kind
         with pytest.raises(ContractError, match=re.escape(kind)):
-            bind_operations(declaration, catalog, namespace, threads=SimThreads())
+            catalog.require_owned(declaration)
 
 
 def test_a_refused_operation_is_registered_but_never_offered() -> None:

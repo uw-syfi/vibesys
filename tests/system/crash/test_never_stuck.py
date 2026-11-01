@@ -7,9 +7,9 @@ reason. It must never end with recovery blocked, with an exception, or waiting o
 is not coming (`Interrupted.never_stuck`). A step finishes once, and a pause or a kill at a commit
 re-runs nothing.
 
-A pull request tries a few points of the dynamic run here, and the known failures below. The
-exhaustive sweep of every search (`slow`, a sample per class at `--depth=pr`, every point under
-`--depth=nightly`) runs in the nightly crash sweep.
+A pull request tries a few points of the dynamic run here. The exhaustive sweep of every search
+(`slow`, a sample per class at `--depth=pr`, every point under `--depth=nightly`) runs in the
+nightly crash sweep.
 """
 
 from __future__ import annotations
@@ -21,18 +21,13 @@ from tests.system.crash._flow_worlds import WORLDS
 
 from vs_dst.api import (
     Action,
-    Hosting,
     Interruption,
     Moment,
-    ShellHosting,
     SimulatedRun,
     StepLoopHosting,
     simulate,
 )
 from vs_sim.api.testing import evenly_spaced
-
-REASON = "#3475 recovery redesign"
-"""Why a case that fails today is expected to fail: the redesign makes it pass."""
 
 SAMPLE = 3
 """Points of each class of interruption a pull request tries."""
@@ -42,35 +37,12 @@ CLASSES = [(action, moment) for action in Action for moment in Moment]
 KILL, PAUSE = Action.KILL, Action.PAUSE
 IN_FLIGHT = Moment.IN_FLIGHT
 
-KNOWN_FAILING: dict[str, tuple[Interruption, ...]] = {
-    "dynamic": (Interruption(KILL, IN_FLIGHT, 3),),
-    "evolve": (Interruption(KILL, IN_FLIGHT, 3),),
-}
-"""A few points that are stuck on today's main, which a pull request runs (the sweep below has the
-rest): a kill with a turn in flight leaves recovery blocked."""
-
-STUCK_GROUPS: frozenset[tuple[str, Action, Moment]] = frozenset(
-    {
-        *(("dynamic", KILL, IN_FLIGHT), ("dynamic-parallel", KILL, IN_FLIGHT)),
-        *(("evolve", KILL, IN_FLIGHT), ("issue-queue", KILL, IN_FLIGHT)),
-        *(("single", KILL, IN_FLIGHT), ("multi", KILL, IN_FLIGHT)),
-    }
-)
-"""The (search, class) pairs that have a stuck point on today's main, from sweeps of every point
-of the dynamic run and of a sample of the others (12 per class). The sweep of the rest runs
-nightly, and a pair it finds stuck belongs here."""
-
-
-SHELL = ShellHosting()
 STEP_LOOP = StepLoopHosting()
-HOSTINGS: dict[str, Hosting] = {"shell": SHELL, "step-loop": STEP_LOOP}
-"""The two hosts of a run: ``CoreRuntime``, which production runs today, and the step loop that
-replaces it. The tables above belong to the shell; the step loop has none (see below)."""
 
 
 @cache
-def _normal(world: str, hosting: str = "shell") -> SimulatedRun:
-    return simulate(WORLDS[world](), HOSTINGS[hosting])
+def _normal(world: str) -> SimulatedRun:
+    return simulate(WORLDS[world](), STEP_LOOP)
 
 
 def _assert_never_stuck(normal: SimulatedRun, point: Interruption) -> None:
@@ -94,62 +66,6 @@ def _class_id(case: tuple[Action, Moment]) -> str:
     return f"{case[0].value}-{case[1].value.replace(' ', '-')}"
 
 
-@pytest.mark.parametrize(
-    ("action", "moment"), [pytest.param(*case, id=_class_id(case)) for case in CLASSES]
-)
-def test_a_dynamic_run_interrupted_and_resumed_is_never_stuck_at_a_sample_of_points(
-    action: Action, moment: Moment
-) -> None:
-    normal = _normal("dynamic")
-    points = normal.interruptions(action, moment)
-    known = set(KNOWN_FAILING.get("dynamic", ()))
-
-    for index in evenly_spaced(len(points), SAMPLE):
-        if points[index] not in known:
-            _assert_never_stuck(normal, points[index])
-
-
-@pytest.mark.xfail(strict=True, reason=REASON)
-@pytest.mark.parametrize(
-    ("world", "point"),
-    [
-        pytest.param(world, point, id=f"{world}-{point}".replace(" ", "-"))
-        for world, points in KNOWN_FAILING.items()
-        for point in points
-    ],
-)
-def test_the_runs_that_get_stuck_today_are_never_stuck(world: str, point: Interruption) -> None:
-    _assert_never_stuck(_normal(world), point)
-
-
-@pytest.mark.slow
-@pytest.mark.parametrize(
-    ("world", "action_moment"),
-    [
-        pytest.param(
-            world,
-            case,
-            id=f"{world}-{_class_id(case)}",
-            marks=(
-                [pytest.mark.xfail(strict=True, reason=REASON)]
-                if (world, *case) in STUCK_GROUPS
-                else []
-            ),
-        )
-        for world in WORLDS
-        for case in CLASSES
-    ],
-)
-def test_a_run_interrupted_at_every_point_and_resumed_is_never_stuck(
-    world: str, action_moment: tuple[Action, Moment]
-) -> None:
-    normal = _normal(world)
-    for point in normal.interruptions(*action_moment):
-        _assert_never_stuck(normal, point)
-
-
-# --- the step loop ----------------------------------------------------------------------------
-#
 # The step loop runs the recovery rule of docs/contributing/run-recovery.md. Every kill, at every
 # point of every search, resumes to the uninterrupted result, and so does every pause; no step's
 # effect finishes twice. A kill with an effect in flight may run that effect again (it left no
@@ -166,7 +82,7 @@ drain must let both go on: the turn was lost, and the resumed run ended with no 
 
 @pytest.mark.parametrize("world", TURN_STARTING_WHEN_PAUSED)
 def test_a_pause_while_a_turn_starts_resumes_to_the_uninterrupted_result(world: str) -> None:
-    normal = _normal(world, "step-loop")
+    normal = _normal(world)
     point = TURN_STARTING_WHEN_PAUSED[world]
 
     _assert_resumed_as_uninterrupted(normal, point)
@@ -179,7 +95,7 @@ def test_a_pause_while_a_turn_starts_resumes_to_the_uninterrupted_result(world: 
 def test_a_dynamic_run_on_the_step_loop_interrupted_and_resumed_ends_as_it_did_at_a_sample_of_points(
     action: Action, moment: Moment
 ) -> None:
-    normal = _normal("dynamic", "step-loop")
+    normal = _normal("dynamic")
     points = normal.interruptions(action, moment)
 
     for index in evenly_spaced(len(points), SAMPLE):
@@ -203,7 +119,7 @@ def test_a_dynamic_run_on_the_step_loop_interrupted_and_resumed_ends_as_it_did_a
 def test_a_run_on_the_step_loop_interrupted_at_every_point_and_resumed_ends_as_it_did(
     world: str, action_moment: tuple[Action, Moment]
 ) -> None:
-    normal = _normal(world, "step-loop")
+    normal = _normal(world)
     for point in normal.interruptions(*action_moment):
         _assert_resumed_as_uninterrupted(normal, point)
         _assert_never_stuck(normal, point)

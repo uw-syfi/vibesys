@@ -81,10 +81,14 @@ def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]
     )
 
     def reaches(run_id: str) -> list[bool]:
-        socket = evaluation_socket_path(project_root, run_id)
+        # The run names its directory from the resolved project root and the temporary directory
+        # as the process sees it. Where either sits behind a symlink (macOS: /var -> /private/var)
+        # the host side of a mount is the resolved path, the container side the path as given.
+        socket = evaluation_socket_path(project_root.resolve(), run_id)
         return [
             any(
-                container_path == str(host_path) == str(socket.parent)
+                container_path == str(socket.parent)
+                and host_path.resolve() == socket.parent.resolve()
                 for container_path, host_path in container.mounts.items()
             )
             for container in engine.containers()

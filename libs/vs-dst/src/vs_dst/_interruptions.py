@@ -23,9 +23,9 @@ class Action(StrEnum):
     """What interrupts the run."""
 
     KILL = "kill"
-    """The host dies: its memory is gone and its lease is left to expire."""
+    """The host dies: its memory is gone and nothing it was doing is finished."""
     PAUSE = "pause"
-    """The operator pauses the run: the host winds down, exits and gives its lease back."""
+    """The operator pauses the run: the host winds down and exits."""
 
 
 class Moment(StrEnum):

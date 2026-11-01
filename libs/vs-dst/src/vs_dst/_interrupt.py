@@ -101,7 +101,7 @@ class Interrupted:
     world: World | None = None
     """The world as the hosts of the interrupted run left it: what it handed out."""
     log_records: tuple[Record, ...] = ()
-    """The run.log the hosts left, in order (a step-loop run; none for a shell run)."""
+    """The run.log the hosts left, in order."""
 
     @property
     def result(self) -> RunResultProposal | None:

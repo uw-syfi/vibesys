@@ -205,7 +205,6 @@ graph TD
     vs_core --> vs_decode
     vs_core --> vs_proto
     vs_dst --> vs_core
-    vs_dst --> vs_project
     vs_dst --> vs_proto
     vs_dst --> vs_runlog
     vs_dst --> vs_runtime

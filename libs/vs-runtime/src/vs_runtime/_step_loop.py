@@ -157,6 +157,19 @@ class StepLoopStalledError(RuntimeError):
         super().__init__(why)
 
 
+class DispatchCapExceededError(RuntimeError):
+    """A host ran more steps than its cap without the run going idle: a cycle that never ends.
+
+    ``kinds`` counts the step kinds started, so the cycle is named in the failure.
+    """
+
+    def __init__(self, cap: int, kinds: dict[str, int]) -> None:
+        """Name the cap and the kinds seen."""
+        self.cap = cap
+        self.kinds = dict(kinds)
+        super().__init__(f"more than {cap} dispatches without going idle; kinds seen: {kinds}")
+
+
 class StepLoopTimingError(ValueError):
     """A bound of the loop is not a positive finite number of seconds."""
 
@@ -767,6 +780,7 @@ def running_attempt(state: CoreState, tag: RequestId, attempt: int) -> bool:
 
 
 __all__ = [
+    "DispatchCapExceededError",
     "Interrupted",
     "Recorded",
     "Stall",

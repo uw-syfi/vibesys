@@ -57,7 +57,7 @@ if TYPE_CHECKING:
     from vs_runtime._control_bridge import RunControlBridge
     from vs_runtime._core_loop import CoreRuntime, PublicationDelivery
     from vs_runtime._core_requests import ExecutorRefusal
-    from vs_sim.api import SleepingClock, Threads
+    from vs_sim.api import SleepingClock
 
 
 #: Name of the task that renews the lease while a drain is in flight; fakes recognize it.
@@ -65,30 +65,6 @@ HEARTBEAT_TASK = "lease-heartbeat"
 
 #: Name of the task that sleeps while requests run; the sleep ends early when one finishes.
 WAIT_TASK = "loop-wait"
-
-
-@dataclass(frozen=True)
-class RunTiming:
-    """The time sources one run is composed with.
-
-    ``clock`` is the run's epoch timeline for the core loop and its timestamps;
-    ``threads`` is the blocking time (monotonic reads, sleeps, locks) that code on
-    worker threads, such as an agent turn, waits on. A production entrypoint builds
-    both from the real implementations; a simulated run builds them from one simulation.
-    ``control_poll_seconds`` is how often an idle loop reads the operator's controls (pause
-    and steer; a stop never waits for it). Production reads them every second; a simulated
-    run of many hours may read them less often, so its loop takes fewer idle steps.
-    """
-
-    clock: SleepingClock
-    threads: Threads
-    control_poll_seconds: float = 1.0
-
-    def __post_init__(self) -> None:
-        """Reject a control poll that never comes."""
-        if self.control_poll_seconds <= 0:
-            message = "control_poll_seconds must be positive"
-            raise ValueError(message)
 
 
 class NextWake(Protocol):

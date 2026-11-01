@@ -105,8 +105,13 @@ def test_a_pause_parks_the_host_that_receives_it_and_resuming_reruns_nothing() -
 class _AfterRestart(TinyWorld):
     """A world whose far side goes wrong once the run has been taken over by a second host."""
 
+    def __init__(self, items: int = 2) -> None:
+        super().__init__(items)
+        self.asked_after_restart = 0
+
     def __call__(self, request: Request, core: CoreState) -> Answer:
-        if isinstance(request, EnsureWorkspace) and len(core.records.hosts) > 1:
+        if isinstance(request, EnsureWorkspace) and core.steps.epoch > 1:
+            self.asked_after_restart += 1
             return self.after_restart(request)
         return super().__call__(request, core)
 
@@ -127,6 +132,18 @@ class _Explodes(_AfterRestart):
         raise RuntimeError(message)
 
 
+_ATTEMPTS_AFTER_A_RESTART = 2
+"""The step may run ``1 + request_retries`` attempts (the tiny world's limit is 2) and the killed
+host's attempt is the first, charged as a crash is, so the resumes ask for the rest, which ends
+the step as failed."""
+
+
+def _asked_after_a_restart(interrupted: Interrupted) -> int:
+    world = interrupted.world
+    assert isinstance(world, _AfterRestart)
+    return world.asked_after_restart
+
+
 def test_a_run_still_waiting_on_a_far_side_that_never_answers_is_stuck_not_waited_for() -> None:
     normal = simulate(_NeverAnswers(1))
     kill = normal.interruptions(Action.KILL, Moment.IN_FLIGHT)[0]
@@ -137,20 +154,21 @@ def test_a_run_still_waiting_on_a_far_side_that_never_answers_is_stuck_not_waite
     assert not interrupted.never_stuck()
     assert interrupted.resumes == MAX_RESUMES
     assert interrupted.history == ("running",) * MAX_RESUMES
-    assert "ensure_workspace" in interrupted.detail
+    assert _asked_after_a_restart(interrupted) == _ATTEMPTS_AFTER_A_RESTART
 
 
-def test_a_resume_that_fails_with_an_exception_is_an_errored_run_not_a_raised_test() -> None:
+def test_a_far_side_that_raises_after_a_resume_is_asked_within_the_retry_bound_not_failing_the_host() -> (
+    None
+):
     normal = simulate(_Explodes(1))
     kill = normal.interruptions(Action.KILL, Moment.IN_FLIGHT)[0]
 
     interrupted = normal.interrupt(kill)
 
-    assert interrupted.outcome is Outcome.ERRORED
+    assert interrupted.outcome is Outcome.STUCK
     assert not interrupted.never_stuck()
     assert interrupted.resumes == MAX_RESUMES
-    assert "the far side exploded" in interrupted.detail
-    assert "ensure_workspace" in interrupted.detail
+    assert _asked_after_a_restart(interrupted) == _ATTEMPTS_AFTER_A_RESTART
 
 
 @given(outcome=st.sampled_from(Outcome), finished=st.dictionaries(st.text(), st.integers(1, 3)))

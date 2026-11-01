@@ -51,7 +51,6 @@ class CountingWorld(DynamicWorld):
         self.setup = replace(
             self.setup,
             harness=replace(self.setup.harness, deadline_at=DEADLINE_AT),
-            max_concurrent=1,
         )
         self.executed: Counter[str] = Counter()
 
