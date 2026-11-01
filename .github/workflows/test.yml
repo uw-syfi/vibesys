@@ -29,7 +29,8 @@ on:
 #   test therefore still runs before every merge, on the tree the merge will produce.
 #
 # A job that belongs to the full stage only carries `github.event_name != 'pull_request'` in
-# its `if`. `Required PR CI` and `ci-budget` run on both events.
+# its `if`. `Required PR CI` and `ci-budget` run on both events. `validate-examples` also runs in
+# the commit stage when the change moves an example repository's pin (`example_pointers`).
 
 env:
   # Wall-clock thresholds for a whole run, checked by `ci-budget` below (issue
@@ -68,6 +69,7 @@ jobs:
       pnpm_packages: ${{ steps.filter.outputs.pnpm_packages }}
       impact: ${{ steps.filter.outputs.impact }}
       gateway: ${{ steps.filter.outputs.gateway }}
+      example_pointers: ${{ steps.example-pointers.outputs.example_pointers }}
       # The per-file test seconds the shards balance on, read once here so that
       # every shard of a run sees the same record (a shard that read a newer
       # cache entry than its siblings would break the partition of the suite).
@@ -103,6 +105,15 @@ jobs:
         run: |
           python3 scripts/check_stale_revert.py --base-ref origin/main
           python3 scripts/check_stray_files.py
+
+      # An example repository's pinned commit moves only on purpose: a commit message of the
+      # change names it (`Example-Bump: <path>`). On a pull request only: the queue's squash
+      # message need not carry the trailer, and validate-examples runs there regardless. The
+      # output below runs validate-examples on a pull request that moves a pin.
+      - name: Check example repository pins
+        id: example-pointers
+        if: github.event_name == 'pull_request'
+        run: python3 -m scripts.check_example_pointers --base-ref origin/main --github-output "$GITHUB_OUTPUT"
 
       # Best effort: a missing, evicted or malformed cache entry only means the
       # shards balance on the checked-in record, never that the run fails.
@@ -562,7 +573,7 @@ jobs:
   # workload checks below stay explicit because their flags differ per task.
   validate-examples:
     needs: changes
-    if: github.event_name != 'pull_request' && needs.changes.outputs.examples == 'true'
+    if: (github.event_name != 'pull_request' || needs.changes.outputs.example_pointers == 'true') && needs.changes.outputs.examples == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
