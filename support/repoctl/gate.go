@@ -180,6 +180,8 @@ func ensureHooks(root string, out io.Writer) {
 		fmt.Fprintf(out, "repoctl: could not enable the pre-push gate: %v\n", err)
 	case state == gitrepo.HooksInstalled:
 		fmt.Fprintf(out, "repoctl: enabled the pre-push gate (git config core.hooksPath %s); every git push now runs `repoctl gate`.\n", current)
+	case state == gitrepo.HooksAbsent:
+		// Not our repository, or a fixture: nothing to say.
 	case state == gitrepo.HooksForeign:
 		fmt.Fprintf(out, "repoctl: WARNING: core.hooksPath is %q, so the pre-push gate in %s does not run and a push is not checked. Unset it with `git config --unset core.hooksPath`, or call `./support/repoctl/repoctl gate` from your own hook.\n", current, gateHooksDir)
 	}

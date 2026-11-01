@@ -58,13 +58,14 @@ func TestEnsureHooksPathCoversEveryLinkedWorktree(t *testing.T) {
 	}
 }
 
-func TestEnsureHooksPathRefusesWhenTheHookIsMissing(t *testing.T) {
+func TestEnsureHooksPathLeavesARepositoryWithoutTheHookAlone(t *testing.T) {
 	root := t.TempDir()
 	initTestRepo(t, root)
-	if _, _, err := EnsureHooksPath(root, ".githooks"); err == nil {
-		t.Fatal("pointed core.hooksPath at a directory with no pre-push hook")
+	state, _, err := EnsureHooksPath(root, ".githooks")
+	if err != nil || state != HooksAbsent {
+		t.Fatalf("state %v, err %v; a repository with no pre-push hook has nothing to enable", state, err)
 	}
 	if got := gitTest(t, root, "config", "--default", "unset", "--get", "core.hooksPath"); got != "unset" {
-		t.Fatalf("core.hooksPath = %q after a refusal", got)
+		t.Fatalf("core.hooksPath = %q for a repository with no hook", got)
 	}
 }
