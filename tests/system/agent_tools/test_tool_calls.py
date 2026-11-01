@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
-from tests.system.agent_tools.world import AgentToolWorld, Program, Turn
+from tests.system.agent_tools.world import ROLE, SCOPE, AgentToolWorld, Program, Turn, new_bridge
 
 from vs_core.api import CoreState, RunStatus, SessionPhase, SubmitMeasurement
 from vs_dst.api import Action, Moment, SimulatedRun, StepLoopHosting, StopKind, simulate
@@ -307,3 +307,13 @@ def test_no_restart_loses_or_repeats_a_charged_submission(
     run = _play(tmp_path, turns, len(turns))
     check(run)
     _swept(run)
+
+
+async def test_the_tool_server_is_offered_without_an_interpreter_or_import_path(
+    tmp_path: Path,
+) -> None:
+    """The agent's tool server starts with the one command its image has, in an environment of its own."""
+    (descriptor,) = new_bridge(AgentToolWorld(tmp_path, (), total=1)).servers(ROLE, SCOPE)
+
+    assert descriptor.command == "python"
+    assert "PYTHONPATH" not in dict(descriptor.env)

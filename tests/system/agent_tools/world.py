@@ -149,7 +149,7 @@ class _Directory:
         return duplicate
 
 
-class _Held:
+class HeldSnapshot:
     """A snapshot that can be held, as one queued behind other work on a lock is."""
 
     def __init__(self) -> None:
@@ -170,7 +170,7 @@ class _Workspace:
     commit carries its own metadata); the same content gives the same snapshot.
     """
 
-    def __init__(self, world: AgentToolWorld, held: _Held) -> None:
+    def __init__(self, world: AgentToolWorld, held: HeldSnapshot) -> None:
         self._world = world
         self._held = held
 
@@ -199,7 +199,7 @@ class _Workspace:
 class _Workspaces:
     """Every scope's workspace is the one Fake."""
 
-    def __init__(self, world: AgentToolWorld, held: _Held) -> None:
+    def __init__(self, world: AgentToolWorld, held: HeldSnapshot) -> None:
         self._workspace = _Workspace(world, held)
 
     async def workspace_of(self, scope: Scope) -> SnapshotWorkspace | None:
@@ -320,6 +320,26 @@ class AgentToolWorld:
         return self._evaluator(request, core)
 
 
+def new_bridge(
+    world: AgentToolWorld,
+    held: HeldSnapshot | None = None,
+    diagnostics: Callable[[str], None] = print,
+) -> AgentEvaluationBridge:
+    """The evaluation bridge of one host: the agent's Fake workspace, the world's owed record."""
+    return AgentEvaluationBridge(
+        Path("unused.sock"),
+        POLICY,
+        _Workspaces(world, held or HeldSnapshot()),
+        AgentEvaluationRecords(
+            OwedSubmissions(ReceiptStore(owed_namespace(world.owed.path), threads=loop_threads())),
+            SynthesizedEvidence(),
+        ),
+        diagnostics,
+        network=SimNetwork(loop_threads()),
+        threads=loop_threads(),
+    )
+
+
 class _Host:
     """One host's bridge and the agent's calls through it; it ends with the host."""
 
@@ -328,21 +348,8 @@ class _Host:
         self._admission = admission
         self._clock = clock
         self._diagnostics: list[str] = []
-        self._held = _Held()
-        self._bridge = AgentEvaluationBridge(
-            Path("unused.sock"),
-            POLICY,
-            _Workspaces(world, self._held),
-            AgentEvaluationRecords(
-                OwedSubmissions(
-                    ReceiptStore(owed_namespace(world.owed.path), threads=loop_threads())
-                ),
-                SynthesizedEvidence(),
-            ),
-            self._diagnostics.append,
-            network=SimNetwork(loop_threads()),
-            threads=loop_threads(),
-        )
+        self._held = HeldSnapshot()
+        self._bridge = new_bridge(world, self._held, self._diagnostics.append)
         self._bridge.attach(admission, clock)
 
     # the service the host runs beside the loop
@@ -530,4 +537,13 @@ class _Host:
         return True
 
 
-__all__ = ["ROLE", "SCOPE", "AgentToolWorld", "Program", "Step", "Turn"]
+__all__ = [
+    "ROLE",
+    "SCOPE",
+    "AgentToolWorld",
+    "HeldSnapshot",
+    "Program",
+    "Step",
+    "Turn",
+    "new_bridge",
+]
