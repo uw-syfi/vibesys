@@ -12,7 +12,8 @@ from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 from typing import TYPE_CHECKING
 
-from hypothesis import assume, given
+import pytest
+from hypothesis import assume, example, given
 from hypothesis import strategies as st
 from scripts.ci_wall_time import (
     READY_EPSILON_SECONDS,
@@ -25,8 +26,7 @@ from scripts.ci_wall_time import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-    import pytest
-    from scripts.ci_wall_time import Job
+    from scripts.ci_wall_time import Job, Report
 
 EPOCH = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -51,6 +51,25 @@ def record(
         "created_at": stamp(created),
         "started_at": stamp(created + wait),
         "completed_at": stamp(created + wait + ran),
+    }
+
+
+def with_steps(item: dict[str, object]) -> dict[str, object]:
+    """Add the steps a runner reports: they start just after the job and end just before it."""
+    return {
+        **item,
+        "steps": [
+            {
+                "name": "Set up job",
+                "started_at": item["started_at"],
+                "completed_at": item["started_at"],
+            },
+            {
+                "name": "Complete job",
+                "started_at": item["completed_at"],
+                "completed_at": item["completed_at"],
+            },
+        ],
     }
 
 
@@ -314,3 +333,116 @@ def test_extra_runner_wait_moves_time_from_execution_to_queue_only(
     assert after is not None
     assert after.execution == before.execution
     assert after.queue == before.queue + extra
+
+
+CLOCK_CHANGE_SECONDS = 3600
+
+
+def as_the_api_reports_the_repeated_hour(
+    records: list[dict[str, object]], window_start: int
+) -> list[dict[str, object]]:
+    """Job-level times inside the repeated hour read an hour ahead; step times stay true.
+
+    The API did this on 2026-11-01, when daylight saving time ended: a five-minute run
+    of three jobs ended 3901 s after it began.
+    """
+
+    def shifted(value: object) -> str:
+        moment = datetime.strptime(str(value), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+        seconds = (moment - EPOCH).total_seconds()
+        if window_start <= seconds < window_start + CLOCK_CHANGE_SECONDS:
+            seconds += CLOCK_CHANGE_SECONDS
+        return stamp(seconds)
+
+    return [
+        {
+            **item,
+            "created_at": shifted(item["created_at"]),
+            "started_at": shifted(item["started_at"]),
+            "completed_at": shifted(item["completed_at"]),
+        }
+        for item in records
+    ]
+
+
+def the_run_in(report: Report | None) -> tuple[float, float, float, list[str]]:
+    assert report is not None
+    path = [job.name for job in report.critical_path]
+    return report.elapsed, report.queue, report.execution, path
+
+
+@pytest.mark.regression
+@example(graph=[(0, 2, 20), (22, 2, 10), (34, 2, 8)], window_start=21)
+@given(dags(), st.integers(0, 9000))
+def test_a_repeated_hour_of_a_clock_change_never_changes_the_run_it_reports(
+    graph: list[tuple[int, int, int]], window_start: int
+) -> None:
+    """A job the API stamps an hour ahead is judged by its steps, so the run reads as it was."""
+    true_records = [with_steps(item) for item in records_of(graph)]
+    reported = as_the_api_reports_the_repeated_hour(true_records, window_start)
+    # A job queued over the end of the repeated hour is created an hour late, after it
+    # started, and is dropped as one inherited from an earlier attempt would be.
+    assume(all(job_from_record(item) is not None for item in reported))
+
+    assert the_run_in(analyze(jobs_of(reported))) == the_run_in(analyze(jobs_of(true_records)))
+
+
+def test_the_failing_run_of_the_night_daylight_saving_time_ended_reads_as_five_minutes() -> None:
+    """The three jobs of run 41286944370: real step times, job times an hour ahead from 08:00."""
+
+    def job(
+        name: str, job_times: tuple[str, str, str], step_times: tuple[str, str]
+    ) -> dict[str, object]:
+        created, started, completed = job_times
+        first, last = step_times
+        return {
+            "name": name,
+            "conclusion": "success",
+            "created_at": created,
+            "started_at": started,
+            "completed_at": completed,
+            "steps": [
+                {"started_at": first, "completed_at": first},
+                {"started_at": last, "completed_at": last},
+            ],
+        }
+
+    records = [
+        job(
+            "changes",
+            ("2026-11-01T07:59:28Z", "2026-11-01T07:59:30Z", "2026-11-01T07:59:49Z"),
+            ("2026-11-01T07:59:31Z", "2026-11-01T07:59:48Z"),
+        ),
+        job(
+            "clients-quality",
+            ("2026-11-01T07:59:50Z", "2026-11-01T07:59:52Z", "2026-11-01T09:04:27Z"),
+            ("2026-11-01T07:59:53Z", "2026-11-01T08:04:25Z"),
+        ),
+        job(
+            "ci-budget",
+            ("2026-11-01T09:04:27Z", "2026-11-01T09:04:30Z", "2026-11-01T09:04:36Z"),
+            ("2026-11-01T08:04:31Z", "2026-11-01T08:04:34Z"),
+        ),
+    ]
+
+    report = analyze(jobs_of(records))
+
+    assert report is not None
+    assert [item.name for item in report.critical_path] == [
+        "changes",
+        "clients-quality",
+        "ci-budget",
+    ]
+    assert report.elapsed == 308
+    assert report.execution == report.elapsed - report.queue
+
+
+def test_a_job_that_waited_hours_is_not_taken_for_a_clock_change() -> None:
+    """Only a whole-hour disagreement with the steps is the API's error; a long gap is real."""
+    late = with_steps(record("late", 0, 0, 500))
+    late["completed_at"] = stamp(500 + 1800)
+
+    report = analyze(jobs_of([late]))
+
+    assert report is not None
+    assert report.elapsed == 500 + 1800
