@@ -18,6 +18,7 @@ from ._refusal import RecordRefusal, RecordRefusedError, RefusalReason
 from ._request_ledger import dispatch_until, retry_limit
 from ._request_recovery import is_open
 from ._run_park import pause_cancels, starts
+from ._scope_order import withdrawn_by_close
 from ._search_events import Translated, translate
 from ._step import advance_run_time, settle_end, settle_park, step, step_recorded
 from ._step_attempts import (
@@ -47,6 +48,7 @@ from ._step_log import (
     decode_seed,
     encode_fold,
 )
+from ._wait_clock import job_step_until
 from .types.common import (
     DependencyStatus,
     InterruptPolicy,
@@ -443,6 +445,12 @@ def _of_step(state: CoreState, record: RequestRecord, now: float) -> Action | No
             if running
             else Settle(tag=tag, result=Cancelled(reason=CancelReason.RUN_ENDING))
         )
+    if withdrawn_by_close(state, record):
+        return (
+            Cancel(tag=tag, reason=CancelReason.WITHDRAWN)
+            if running
+            else Settle(tag=tag, result=Cancelled(reason=CancelReason.WITHDRAWN))
+        )
     if running:
         return _stop_running(state, record, now)
     return _start_or_settle(state, record, now)
@@ -485,18 +493,26 @@ def _start_or_settle(state: CoreState, record: RequestRecord, now: float) -> Run
         return Settle(tag=tag, result=Cancelled(reason=CancelReason.DEADLINE))
     if not starts(state, record, dependencies):
         return None
-    deadline = (
-        record.until
-        if record.dispatched_at is not None
-        else dispatch_until(state.run, state.sessions, state.records, state.evaluation, record)
-    )
     return Run(
         step=record.request,
         tag=tag,
         attempt=1 if attempts is None else attempts.started + 1,
-        deadline_at=deadline.at,
+        deadline_at=_started_until(state, record).at,
         clear_first=attempts is not None,
     )
+
+
+def _started_until(state: CoreState, record: RequestRecord) -> Until:
+    """The limit of the step's first attempt: the one it started with, or the one it would get now.
+
+    A job step also gets the queue budget before its limit counts (``job_step_until``).
+    """
+    if record.dispatched_at is not None:
+        return record.until
+    until = dispatch_until(state.run, state.sessions, state.records, state.evaluation, record)
+    if request_lifecycle(record.request) is LifecycleClass.OWNED_JOB:
+        return job_step_until(state.run, until)
+    return until
 
 
 def _wake_at(state: CoreState, open_steps: tuple[RequestRecord, ...], now: float) -> float | None:

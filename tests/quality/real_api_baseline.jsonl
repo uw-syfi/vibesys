@@ -190,7 +190,7 @@
 {"path": "tests/server/test_transport_subscription.py", "rule": "real_impl", "count": 7}
 {"path": "tests/server/test_websocket_transport.py", "rule": "real_impl", "count": 68}
 {"path": "tests/support/agent_tool_world.py", "rule": "real_impl", "count": 1}
-{"path": "tests/support/core_host_world.py", "rule": "real_impl", "count": 6}
+{"path": "tests/support/core_host_world.py", "rule": "real_impl", "count": 5}
 {"path": "tests/support/docker_environment.py", "rule": "real_impl", "count": 2}
 {"path": "tests/support/executor_cases.py", "rule": "real_impl", "count": 6}
 {"path": "tests/support/fence_cases.py", "rule": "real_impl", "count": 8}
@@ -231,7 +231,7 @@
 {"path": "tests/vibesys/run/test_event_journal.py", "rule": "real_impl", "count": 4}
 {"path": "tests/vibesys/run/test_local_stage_failure_class.py", "rule": "real_impl", "count": 2}
 {"path": "tests/vibesys/run/test_run_control_adapter.py", "rule": "real_impl", "count": 1}
-{"path": "tests/vibesys/run/test_run_exit_cancels_slurm_jobs.py", "rule": "real_impl", "count": 9}
+{"path": "tests/vibesys/run/test_run_exit_cancels_slurm_jobs.py", "rule": "real_impl", "count": 8}
 {"path": "tests/vibesys/run/test_run_exit_stops_containers.py", "rule": "real_impl", "count": 7}
 {"path": "tests/vibesys/run/test_slurm_run_facts.py", "rule": "real_impl", "count": 2}
 {"path": "tests/vibesys/sandbox/test_run_environment.py", "rule": "real_impl", "count": 1}

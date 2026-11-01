@@ -31,7 +31,7 @@ from vs_runtime.api.core import RunTiming
 from vs_runtime.api.infrastructure import RunEnvironmentSpec, RunStopped
 from vs_runtime.api.testing import idle_environment_system
 from vs_sim.api import OsThreads, SystemClock, ThreadBlockingRunner, UnixNetwork
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import HANG_GUARD_S
 from vs_slurm.fake_connector import HOLD_FILE, SUBMITTED_FILE, executing_cluster, recorded_commands
 
 if TYPE_CHECKING:
@@ -106,8 +106,11 @@ def test_a_stopped_run_cancels_a_pending_benchmark_job(
     _write_slurm_config(config_path, state, "ssh")
     project_root = tmp_path / "project"
     _write_project(project_root)
+    # One real clock for the run: the cluster answers in real time from a child process, and a
+    # manual clock would age the run through its sleeps past its deadline before the answer.
+    clock = SystemClock()
     integration = LocalRunIntegration(
-        clock=ManualClock(),
+        clock=clock,
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
@@ -127,8 +130,8 @@ def test_a_stopped_run_cancels_a_pending_benchmark_job(
                     threads=OsThreads(),
                 ),
                 backend_factory=host_container_backend,
-                stop_timer=SystemClock().sleep,
-                timing=RunTiming(SystemClock(), 60.0, OsThreads()),
+                stop_timer=clock.sleep,
+                timing=RunTiming(clock, OsThreads()),
                 invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
                 blocking=ThreadBlockingRunner(),
                 network=UnixNetwork(),
@@ -137,7 +140,20 @@ def test_a_stopped_run_cancels_a_pending_benchmark_job(
         )
         # The run's input-baseline measurement is queued on the held cluster; stopping the run
         # must cancel it there instead of leaving it to the cluster's time limit.
-        submitted = await asyncio.to_thread((state / SUBMITTED_FILE).read_text, encoding="utf-8")
+        submission = asyncio.ensure_future(
+            asyncio.to_thread((state / SUBMITTED_FILE).read_text, encoding="utf-8")
+        )
+        await asyncio.wait(
+            {run, submission}, timeout=HANG_GUARD_S, return_when=asyncio.FIRST_COMPLETED
+        )
+        if not submission.done():
+            # The run ended, or hangs, with nothing submitted: opening the pipe for writing frees
+            # the reader, so that the test says how the run ended instead of waiting on a job.
+            (state / SUBMITTED_FILE).write_text("", encoding="utf-8")
+            await submission
+            ended = f"ended as {run.result()!r}" if run.done() else "is still running"
+            pytest.fail(f"the run submitted no job and {ended}")
+        submitted = submission.result()
         assert submitted.isdigit()
         submitted_ids.append(submitted)
         integration.control.request_stop(StopMode.CANCEL)

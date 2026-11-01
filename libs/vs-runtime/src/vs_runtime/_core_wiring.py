@@ -35,6 +35,7 @@ from vs_runtime._measurement_progress import (
     IgnoreMeasurement,
     MeasurementDecisions,
     MeasurementObserver,
+    MeasurementProgress,
 )
 from vs_runtime._observation_factory import ObservationFactory
 from vs_runtime._operation_catalog import OperationCatalog
@@ -44,7 +45,7 @@ from vs_runtime._receipt_store import ReceiptStore
 from vs_runtime._semantic_events import JournalSemanticEvents
 from vs_runtime._session_lifecycle_requests import ReleasedRunInvocations, SessionRequestRouter
 from vs_runtime._session_requests import JournalRunInvocations
-from vs_runtime._session_resolver import session_executors
+from vs_runtime._session_resolver import SessionExecutors, session_executors
 from vs_runtime._workspace_requests import RuntimeWorkspaceRequests
 
 if TYPE_CHECKING:
@@ -150,7 +151,35 @@ def new_core_state(
     )
 
 
-def core_bindings(  # noqa: PLR0913  # lint-waiver: LW-260141 [PLR0913]; the run's stores and services plus the two vs_sim roles its executors run on.
+@dataclasses.dataclass(frozen=True)
+class CoreExecutors:
+    """The executors of one run, over the one receipt store they share."""
+
+    executors: RequestExecutors
+    """One translator per request role."""
+    sessions: SessionExecutors | None
+    """The turn and lifecycle executors behind the SESSIONS role; ``None`` for a run with no roles."""
+    store: ReceiptStore
+    """The receipt store every executor of the run writes through."""
+    observations: ObservationFactory
+    """Builds the observation a runner reports for an operation or an adoption."""
+    evidence: ReceiptEvidenceLedger
+    """The run's evidence ledger, which an adoption reads."""
+    progress: MeasurementProgress
+    """Tells the run's observer each stage of a job that a step runner reported ended."""
+    decisions: MeasurementDecisions
+    """Which decision each submitted job answers, shared with the observer that names its spans."""
+
+    def bindings(self, registry: OperationRegistry) -> CoreRuntimeBindings:
+        """The old shell's bindings over these executors: the operation codec, the roles, steering."""
+        return CoreRuntimeBindings(
+            registry=registry,
+            executors=self.executors,
+            steering=None if self.sessions is None else self.sessions.turns,
+        )
+
+
+def core_executors(  # noqa: PLR0913  # lint-waiver: LW-260141 [PLR0913]; the run's stores and services plus the two vs_sim roles its executors run on.
     # > Bundling threads and blocking into one value would be a second ``Platform``, which
     # > only entrypoints and the server runtime take; folding them into ``SessionServices``
     # > would hide the workspace executor's runner inside the session bundle.
@@ -162,7 +191,7 @@ def core_bindings(  # noqa: PLR0913  # lint-waiver: LW-260141 [PLR0913]; the run
     threads: Threads,
     blocking: BlockingRunner,
     operations: OperationCatalog | None = None,
-) -> CoreRuntimeBindings:
+) -> CoreExecutors:
     """Bind every request role over one shared receipt store.
 
     When ``sessions`` is supplied, the session role is ``session_executors``:
@@ -193,10 +222,10 @@ def core_bindings(  # noqa: PLR0913  # lint-waiver: LW-260141 [PLR0913]; the run
         proof = ReleasedRunInvocations(
             JournalRunInvocations(sessions.agent_sessions, store), sessions.agent_sessions, store
         )
+    observations = ObservationFactory(store)
+    evidence = ReceiptEvidenceLedger(store)
     executors = RequestExecutors(
-        workspaces=RuntimeWorkspaceRequests(
-            workspaces, store, proof, blocking, ReceiptEvidenceLedger(store)
-        ),
+        workspaces=RuntimeWorkspaceRequests(workspaces, store, proof, blocking, evidence),
         sessions=session_requests,
         evaluation=MeasurementRequests(
             measurement.executor,
@@ -206,12 +235,40 @@ def core_bindings(  # noqa: PLR0913  # lint-waiver: LW-260141 [PLR0913]; the run
             control=measurement.control,
         ),
         operations=RegisteredOperationRequests(
-            catalog, NamespaceOperationReceipts(store), ObservationFactory(store)
+            catalog, NamespaceOperationReceipts(store), observations
         ),
         semantic_events=JournalSemanticEvents(store, receipts),
     )
-    return CoreRuntimeBindings(
-        registry=catalog.registry,
-        executors=executors,
-        steering=None if session is None else session.turns,
+    return CoreExecutors(
+        executors,
+        session,
+        store,
+        observations,
+        evidence,
+        MeasurementProgress(measurement.observer),
+        measurement.decisions,
     )
+
+
+def core_bindings(  # noqa: PLR0913  # lint-waiver: LW-263518 [PLR0913]; the same keyword arguments as ``core_executors``, which this wraps for the shell that has not been removed yet.
+    # > A settings object would be built at each call site and unpacked in the same line, and
+    # > the shell this serves is deleted in the next change, so the wrapper stays a plain call.
+    *,
+    receipts: StateNamespace,
+    workspaces: RuntimeWorkspaces,
+    measurement: MeasurementServices,
+    sessions: SessionServices | None = None,
+    threads: Threads,
+    blocking: BlockingRunner,
+    operations: OperationCatalog | None = None,
+) -> CoreRuntimeBindings:
+    """The old shell's bindings over ``core_executors``."""
+    return core_executors(
+        receipts=receipts,
+        workspaces=workspaces,
+        measurement=measurement,
+        sessions=sessions,
+        threads=threads,
+        blocking=blocking,
+        operations=operations,
+    ).bindings((operations or empty_catalog()).registry)

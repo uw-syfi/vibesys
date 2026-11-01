@@ -202,6 +202,18 @@ def read_current_epoch(path: Path) -> CurrentEpoch | None:
     return _OBSERVER.current_epoch(path)
 
 
+def read_committed_records(path: Path) -> tuple[Record, ...]:
+    """The records of the log's committed prefix, which an external reader may fold.
+
+    A complete frame can precede its fsync and its head, so the head bounds the prefix; a log
+    with no head is read whole. An unreadable head or prefix raises ``RunLogDamagedError``.
+    """
+    with _damage_is_typed(path):
+        head = _read_raw_head(path) if path.with_name("run.head").exists() else None
+        with path.open("rb") as stream:
+            return tuple(_head_records(RunLogReader(stream), head, path))
+
+
 def _legacy_epoch_record(record: Record) -> bool:
     body = record.body
     return bool(

@@ -38,14 +38,15 @@ from vs_runtime._evaluation_jobs import (
     job_view,
     measurement_request,
 )
+from vs_runtime._evidence_ledger import ledgered_poll
 from vs_runtime._job_registry import JobRecord
 from vs_runtime._observation_factory import ObservationFacts, ObservationSubject
 
 if TYPE_CHECKING:
     from vs_core.api import Request, RequestId
-    from vs_core.api.recovery import StepResult
+    from vs_core.api.recovery import CancelReason, StepResult
     from vs_evaluation.api import EvaluationRequest, ExecutorPoll, PollingEvaluationExecutor
-    from vs_runtime._job_registry import JobRegistry
+    from vs_runtime._job_registry import JobBooks
     from vs_runtime._step_runner import CancelSignal
     from vs_sim.api import Clock
 
@@ -70,22 +71,26 @@ class JobStepRun:
     def __init__(
         self,
         executor: PollingEvaluationExecutor,
-        registry: JobRegistry,
+        books: JobBooks,
         *,
         clock: Clock,
         poll_interval_s: float,
         outlives_host: bool,
     ) -> None:
-        """Run on *executor*, registering each job in *registry*; stamp observations with *clock*.
+        """Run on *executor*, keeping each job in *books*; stamp observations with *clock*.
 
-        A job is polled at least every *poll_interval_s*. *outlives_host* says the executor's
-        jobs survive this process, so a pause leaves them for the next attempt to adopt.
+        A job is registered before it is submitted and its readings are recorded before the step
+        reports its end. A job is polled at least every *poll_interval_s*. *outlives_host* says the
+        executor's jobs survive this process, so a pause leaves them for the next attempt to adopt.
         """
         if poll_interval_s <= 0:
             message = f"poll_interval_s must be positive, got {poll_interval_s}"
             raise ValueError(message)
         self._executor = executor
-        self._registry = registry
+        self._registry = books.registry
+        self._evidence = books.evidence
+        self._progress = books.progress
+        self._decisions = books.decisions
         self._clock = clock
         self._poll_interval_s = poll_interval_s
         self._outlives_host = outlives_host
@@ -99,9 +104,16 @@ class JobStepRun:
         ``deadline_at`` is the run-clock second the job's stages are told to end by.
         """
         submission = submission_of(step)
+        if cancel.is_set() and (await self._executor.poll(handle)).phase is PollPhase.UNSUBMITTED:
+            reason = _reason_of(cancel)
+            if not interruption_of(reason):
+                self.forget(submission, tag)
+            return Cancelled(reason=reason)
         try:
             request = evaluation_request(submission, handle, deadline_at=deadline_at)
             self._registry.register(JobRecord.of(submission, tag, handle, payload_digest_of(step)))
+            if submission.decision_id is not None:
+                self._decisions.record(handle, submission.decision_id.root)
             await self._executor.submit(request, handle_id=handle)
         except RejectedPlanError as error:
             return self._refused(submission, tag, str(error), MeasurementFailure.WORKLOAD)
@@ -115,6 +127,18 @@ class JobStepRun:
             if cancel.is_set():
                 return await self._cancelled(submission, tag, handle, cancel)
             await self._until_change_or_cancel(handle, cancel)
+
+    def forget(self, step: SubmitMeasurement, tag: RequestId) -> None:
+        """Take every handle of ``tag``'s step out of its scope's index: nothing of them lives.
+
+        Call it once the job of each handle has ended (a cancel confirmed it) or none was
+        started. A step that holds a job, running or finished, keeps its handle: core owns that
+        job and the close lists it.
+        """
+        for handle in self._registry.handles(step.scope, step.admission_id):
+            record = self._registry.record(handle)
+            if record is not None and record.request_id == tag.root:
+                self._registry.unindex(step.scope, step.admission_id, handle)
 
     async def read_ended(self, step: Request, tag: RequestId, source: str) -> StepResult:
         """The result of ``step`` read from the ended job of ``source``, which it reuses.
@@ -147,10 +171,7 @@ class JobStepRun:
         A pause that leaves the job running answers ``Cancelled`` at once: the attempt ends and the
         job does not.
         """
-        reason = cancel.reason
-        if reason is None:
-            message = "a job is cancelled only for a reason"
-            raise ContractError(("cancel", "reason"), message)
+        reason = _reason_of(cancel)
         if self._outlives_host and interruption_of(reason):
             return Cancelled(reason=reason)
         await self._executor.cancel(handle)
@@ -159,6 +180,7 @@ class JobStepRun:
             raise StillRunningAfterCancelError(handle)
         if polled.terminal is not None and polled.terminal.state is not EvaluationState.CANCELED:
             return self._finished(polled, step, tag, handle)
+        self.forget(step, tag)
         return Cancelled(reason=reason)
 
     def _finished(
@@ -166,6 +188,10 @@ class JobStepRun:
     ) -> StepResult:
         """The report of an ended job, whole: evidence, scientific facts and failure included."""
         subject = ObservationSubject(core_named(tag), step.scope, step.admission_id)
+        polled = ledgered_poll(
+            self._evidence, polled, source_request=subject.request_id, plan=step.plan
+        )
+        self._progress.report(handle, step.plan.purpose, polled, reused=step.reuses is not None)
         view = job_view(
             polled,
             step.plan,
@@ -216,6 +242,15 @@ class JobStepRun:
             children_complete=facts.children_complete,
             diagnostic=facts.diagnostic,
         )
+
+
+def _reason_of(cancel: CancelSignal) -> CancelReason:
+    """Why the step was cancelled; a job is cancelled only for a reason."""
+    reason = cancel.reason
+    if reason is None:
+        message = "a job is cancelled only for a reason"
+        raise ContractError(("cancel", "reason"), message)
+    return reason
 
 
 def submission_of(step: Request) -> SubmitMeasurement:

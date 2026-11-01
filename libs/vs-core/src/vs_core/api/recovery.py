@@ -28,6 +28,7 @@ from vs_core._decide import (
     starts_run,
 )
 from vs_core._refusal import RecordRefusal, RecordRefusedError, RefusalReason
+from vs_core._request_recovery import COMMAND_KINDS
 from vs_core._search_events import Translated
 from vs_core._search_log import (
     CHECKPOINT_GROWTH,
@@ -52,7 +53,13 @@ from vs_core._step_log import (
     seed_message,
     started_message,
 )
-from vs_core.types.records import StepEffect, request_effect, request_interrupt_policy
+from vs_core.types.common import ClosePolicy
+from vs_core.types.records import (
+    StepEffect,
+    request_close_policy,
+    request_effect,
+    request_interrupt_policy,
+)
 from vs_core.types.steps import (
     Cancelled,
     CancelReason,
@@ -68,11 +75,13 @@ from vs_core.types.steps import (
 
 __all__ = [
     "CHECKPOINT_GROWTH",
+    "COMMAND_KINDS",
     "Action",
     "Advancing",
     "Cancel",
     "CancelReason",
     "Cancelled",
+    "ClosePolicy",
     "EncodedSavedRun",
     "End",
     "Failed",
@@ -116,6 +125,7 @@ __all__ = [
     "interruption_of",
     "may_start",
     "open_step",
+    "request_close_policy",
     "request_effect",
     "request_interrupt_policy",
     "restore",

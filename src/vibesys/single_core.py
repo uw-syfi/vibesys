@@ -56,7 +56,6 @@ from vs_core.api import (
 from vs_core.api import RunFacts as CoreRunFacts
 from vs_runtime.api import CoreOperation, CorePlan, CorePolicy, OrchestrationPlugin
 from vs_runtime.api.core import (
-    RuntimeRecord,
     operation_roles,
 )
 
@@ -94,7 +93,6 @@ def single_projector(plugin_id: str) -> RuntimeRecordProjector[FlowState, Hypoth
     return RuntimeRecordProjector(
         plugin_id=plugin_id,
         state_type=FlowState,
-        record_type=RuntimeRecord[FlowState],
         operations=_registry(),
         published=published,
         project=project,

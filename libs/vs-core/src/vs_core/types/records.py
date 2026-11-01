@@ -23,6 +23,7 @@ from .attempts import (
     WorkspaceRequest,
 )
 from .common import (
+    ClosePolicy,
     ContractValidationError,
     Count,
     ExecuteRegisteredOperation,
@@ -1063,6 +1064,54 @@ def _operation_effect(
     if descriptor.lifecycle == LifecycleClass.QUERY:
         return StepEffect.NEITHER
     return StepEffect.WRITES
+
+
+def request_close_policy(
+    request: Request, registry: tuple[OperationDescriptor, ...]
+) -> ClosePolicy:
+    """What a scope that is closing does with this open step of its own, as its kind declares.
+
+    A step whose result only its own scope reads is withdrawn: a measurement job, whose evidence
+    nothing outside the closing attempt waits for. Everything else is waited for, and so is a
+    registered operation unless its descriptor in ``registry`` says it is withdrawn: the cleanup
+    the close depends on (a workspace discard, a snapshot, the close itself), the turns whose
+    workspace the snapshot reads, and every operation nobody declared. The match is exhaustive,
+    so a new kind of step has to take a side here.
+    """
+    match request:
+        case ExecuteRegisteredOperation():
+            kind = request.operation.schema_ref.kind
+            descriptor = next((row for row in registry if row.kind == kind), None)
+            return ClosePolicy.WAIT if descriptor is None else descriptor.on_close
+        case SubmitMeasurement():
+            return ClosePolicy.WITHDRAW
+        case (
+            DispatchTurn()
+            | ResumeSessionTurn()
+            | EnsureWorkspace()
+            | RestoreRevision()
+            | SnapshotAndRetain()
+            | SnapshotAndRetainRun()
+            | RetainRevision()
+            | CloseAttemptScope()
+            | InspectTurn()
+            | ObserveOwnedJob()
+            | InspectOwnedJob()
+            | CollectEvidence()
+            | InspectRequest()
+            | VerifyAdoption()
+            | DiscardWorkspace()
+            | EnsureSession()
+            | CancelTurn()
+            | CloseSession()
+            | CancelOwnedJob()
+            | AdoptRevision()
+            | CancelOwnedResource()
+            | BlockRequest()
+        ):
+            return ClosePolicy.WAIT
+        case _:
+            assert_never(request)
 
 
 def request_lifecycle(request: Request) -> LifecycleClass:

@@ -1,55 +1,73 @@
-"""Drive one core run with the runtime's production loop over the host's services.
+"""Drive one core run with the runtime's step loop over the host's services.
 
-``drive_core_run`` is the one place a core run's services reach the loop. It builds the
-shell over the run's durable store (a fresh run when the store is empty, a recovery of
-the committed envelope otherwise), joins it with the publication delivery, the run clock
-and the host's control channel, then runs ``vs_runtime``'s loop to the run's terminal
-status and maps that outcome to the status a plugin returns. It chooses no policy: the
-strategy, limits and deadline were fixed by composition (``CoreServices``).
+``drive_core_run`` is the one place a core run's services reach the loop. It opens the run's log
+(a fresh run when the log holds no start of the run, a fold of its records otherwise), joins it
+with the search, the operator's controls and the run clock, and runs ``vs_runtime``'s step loop to
+the run's rest: ended, or parked by a pause. It then maps that rest to the status a plugin
+returns. It chooses no policy: the strategy, limits and deadline were fixed by composition
+(``CoreServices``). The run's lock is the only fence, so there is no lease to take or release.
 """
 
 from __future__ import annotations
 
-import os
-import uuid
+import asyncio
+import contextlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.events import CoreEventType, RunEndingData, RunFailure, RunFailureKind
+from vibesys.run.commit_view import ObservedInputs, RecordView
+from vibesys.run.run_clock import start_clock_from
+from vibesys.run.run_controls import OperatorControls, StoredSteerArtifacts
+from vibesys.run.stall_report import StallReporter
+from vibesys.run.store_migration import migrate_saved_run
 from vs_core.api import (
     AttemptPhase,
+    ControlId,
+    ControlInput,
+    ControlRefusedError,
     EndReason,
     RetainedCandidate,
+    RunControlEvent,
     RunResultProposal,
 )
 from vs_core.api import RunStatus as CoreRunStatus
+from vs_core.api.recovery import RunRest, at_rest, starts_run
 from vs_project.api import Project
+from vs_runlog.api import FileFoldCache
 from vs_runtime.api import RunStatus
 from vs_runtime.api.core import (
     CoreResumeError,
-    CoreRunHost,
-    CoreRuntime,
-    JournalPublicationDelivery,
     OperatorInbox,
     RunControlBridge,
-    RunLoopConfig,
-    drive_core,
     reject_legacy_resume,
-    start_core_awaiting_lease,
 )
-from vs_runtime.api.infrastructure import RunStopped
+from vs_runtime.api.infrastructure import RunStopped, core_workspace_holds
+from vs_runtime.api.step_runner import (
+    CoreInputs,
+    RunLogStepLog,
+    SearchRun,
+    StallBoard,
+    StepLoopTiming,
+    run_step_loop,
+)
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
     from pathlib import Path
 
     from vibesys.run.host import CoreHost
     from vibesys.run.integration import LocalRunIntegration
-    from vs_core.api import ArtifactRef
-    from vs_runtime.api import ArtifactStore
-    from vs_runtime.api.core import AgentEvaluationBridge, ExecutorRefusal, RunTiming, StallNotes
+    from vs_core.api import CoreState
+    from vs_runtime.api.core import AgentEvaluationBridge
 
 _UNFINISHED_REASON = "the run ended without recording a result"
+
+CLEAR_TIMEOUT_SECONDS = 120.0
+"""How long one ``clear`` may take before the loop counts its backend as unreachable."""
+CLEAR_BACKOFF_SECONDS = 1.0
+CLEAR_BACKOFF_MAX_SECONDS = 30.0
 
 
 @dataclass(frozen=True)
@@ -64,44 +82,12 @@ class RunEnd:
     uncompared: bool = False
 
 
-class CoreRunRefusedError(RuntimeError):
-    """An executor the run needs is not composed, so the run cannot make progress."""
+class RunLogUnavailableError(RuntimeError):
+    """The run has no run.log to append to: the loop's records have nowhere to go."""
 
-    def __init__(self, run_id: str, refusal: ExecutorRefusal) -> None:
-        """Name the run, the request and the executor role that refused."""
-        self.refusal = refusal
-        super().__init__(
-            f"run {run_id!r}: no executor for {refusal.role.value} request "
-            f"{refusal.request_id.root!r}: {refusal.detail}"
-        )
-
-
-class StoredSteerArtifacts:
-    """Where steer text lives: the run's content-addressed artifact store.
-
-    A steer control carries only the digest of its text, so the text must be readable by
-    that digest before the control is submitted.
-    """
-
-    def __init__(self, artifacts: ArtifactStore) -> None:
-        """Store steer text in the run's content-addressed artifacts."""
-        self._artifacts = artifacts
-
-    def put(self, ref: ArtifactRef, text: str) -> None:
-        """Store the text; its content address must be the digest the control carries."""
-        receipt = self._artifacts.write(text.encode())
-        if receipt.sha256 != ref.digest:
-            message = f"steer artifact {ref.artifact_id.root!r} stored under {receipt.sha256}"
-            raise RuntimeError(message)
-
-
-def _loop_config(run_id: str, timing: RunTiming) -> RunLoopConfig:
-    # One lease holder per process: a restart of the same run is a new host.
-    return RunLoopConfig(
-        host_id=f"vibesys:{run_id}:{os.getpid()}:{uuid.uuid4().hex[:8]}",
-        lease_duration=timing.lease_seconds,
-        control_poll_interval=timing.control_poll_seconds,
-    )
+    def __init__(self, run_id: str) -> None:
+        """Name the run."""
+        super().__init__(f"run {run_id!r} has no run.log, so core has no log to run on")
 
 
 def ensure_resumable(project_root: Path, run_id: str) -> None:
@@ -129,116 +115,203 @@ def ensure_resumable(project_root: Path, run_id: str) -> None:
 
 
 async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> RunEnd:
-    """Run one core run to its terminal status over ``host.services``.
+    """Run one core run to its rest over ``host.services``.
 
     The loop reads operator controls from ``integration.control`` and, when the services
     carry one, from the run's control inbox, where ``vibesys control`` writes.
 
-    Raises ``RunStopped`` when the operator's stop ended the run, so the session reports
-    a stopped run, and ``CoreRunRefusedError`` when composition left an executor role
-    unserved. Every exit after core starts closes a configured evaluation bridge and
-    releases the run lease, including interruption while the bridge itself starts.
+    Raises ``OperatorPaused`` when the run parked, ``RunStopped`` when the operator's stop ended
+    it, so the session reports a stopped run, and ``StepLoopStalledError`` when the run waits on
+    nothing. Every exit after the run's log opens closes a configured evaluation bridge and
+    answers the controls left, including interruption while the bridge itself starts.
     """
     services = host.services
-    shell = CoreRuntime(
-        services.store,
-        services.search.driver(services.config, services.bindings.registry),
-        services.state,
-        config=services.config,
-        bindings=services.bindings,
+    log_file = integration.events.run_log
+    if log_file is None:
+        raise RunLogUnavailableError(services.run_id)
+    epoch = integration.events.epoch
+    clock = services.clock
+    driver = services.search.driver(services.config, services.registry)
+    migrate_saved_run(
+        services.project,
+        services.run_id,
+        log_file,
+        search=driver,
+        registry=services.registry,
+        epoch=epoch,
+        stamp=clock.stamp,
     )
-    delivery = JournalPublicationDelivery(services.publications, services.bindings.registry)
-    controls = RunControlBridge(
-        integration.control,
-        StoredSteerArtifacts(services.artifacts),
-        inbox=None
-        if services.control_inbox is None
-        else OperatorInbox(
-            services.control_inbox,
-            integration.run_control,
-            integration.events,
+    records = log_file.records()
+    resumed = any(starts_run(record) for record in records)
+    start_clock_from(clock, records, epoch)
+    search = SearchRun.restored(records, driver, services.config, services.registry)
+    log = RunLogStepLog.open(
+        log_file,
+        epoch=epoch,
+        seed=services.state,
+        registry=services.registry,
+        clock=clock,
+        search=search,
+        stamp=clock.stamp,
+        cache=FileFoldCache(Project.state_cache_path_for(services.project.root, services.run_id)),
+        announcer=integration.events,
+    )
+    controls = OperatorControls(
+        RunControlBridge(
+            integration.control,
+            StoredSteerArtifacts(services.artifacts),
+            inbox=None
+            if services.control_inbox is None
+            else OperatorInbox(
+                services.control_inbox,
+                integration.run_control,
+                integration.events,
+            ),
+            control=integration.run_control,
+            # A process that opens an existing run is the operator's explicit resume of it.
+            lifts_standing_stop=True,
         ),
-        control=integration.run_control,
-        # A process that opens an existing run is the operator's explicit resume of it.
-        lifts_standing_stop=True,
+        services.steering,
     )
-    loop = CoreRunHost(shell, delivery, services.clock, controls, workspaces=host.workspaces)
-    config = _loop_config(services.run_id, host.timing)
-    await start_core_awaiting_lease(loop, config)
+    inputs = CoreInputs(
+        log,
+        search,
+        clock,
+        controls=controls,
+        control_poll_seconds=host.timing.control_poll_seconds,
+    )
     bridge = services.agent_evaluation
+    observed = ObservedInputs(
+        inputs,
+        RecordView(search, services.search.declaration, epoch=epoch, run_id=services.run_id),
+        services.commit_observer,
+        _unacknowledged_notes(bridge),
+        clock,
+    )
+    board = StallBoard()
+    stalls = asyncio.ensure_future(StallReporter(board, integration.events).run(clock))
     run_error: BaseException | None = None
     try:
+        observed.begin(resumed=resumed)
+        await _follow_core(host, log)
         if bridge is not None:
-            bridge.attach(shell, services.clock)
+            bridge.attach(observed, clock)
             await bridge.serve()
-        outcome = await drive_core(loop, config, stall_notes=_unacknowledged_notes(bridge))
+        _resume_operator(log, controls, clock.now(), epoch=epoch, resumed=resumed)
+        rest = await run_step_loop(
+            observed,
+            services.runner(clock, epoch),
+            clock,
+            StepLoopTiming(
+                cancel_grace_s=services.cancellation_bound_seconds,
+                clear_timeout_s=CLEAR_TIMEOUT_SECONDS,
+                clear_backoff_s=CLEAR_BACKOFF_SECONDS,
+                clear_backoff_max_s=CLEAR_BACKOFF_MAX_SECONDS,
+            ),
+            board,
+        )
     except BaseException as error:
         run_error = error
         raise
     finally:
+        stalls.cancel()
+        await asyncio.gather(stalls, return_exceptions=True)
+        await _leave(bridge, controls, inputs, log.state, run_error)
+        _record_ending(log.state, integration)
+    return _run_end(rest, log.state, integration.environment_failure.reason)
+
+
+def _resume_operator(
+    log: RunLogStepLog, controls: OperatorControls, now_at: float, *, epoch: int, resumed: bool
+) -> None:
+    """Bring in what the operator asked before the run is looked at: the relaunch is a resume.
+
+    A process that opens a run that already started is the operator's resume of it, as the
+    control bridge assumes. A paused or parked run does not move until it is resumed, and the
+    loop returns at once for a run at rest, so the resume is in the log before the loop starts.
+    """
+    state = log.state
+    paused = at_rest(state) is RunRest.PARKED or state.run.status in (
+        CoreRunStatus.PAUSED,
+        CoreRunStatus.DRAINING,
+    )
+    if resumed and paused:
+        resume = ControlInput(
+            control_id=ControlId(root=f"operator-resume:{epoch}"), action="resume", when="now"
+        )
+        with contextlib.suppress(ControlRefusedError):
+            log.input(RunControlEvent(control=resume, now_at=now_at))
+    controls.bring_in(log, now_at)
+
+
+async def _follow_core(host: CoreHost, log: RunLogStepLog) -> None:
+    """Bind the run's workspaces to core's state and discard what core no longer references."""
+    host.workspaces.follow(lambda: core_workspace_holds(log.state))
+    await host.workspaces.release_unheld()
+
+
+async def _leave(
+    bridge: AgentEvaluationBridge | None,
+    controls: OperatorControls,
+    inputs: CoreInputs,
+    core: CoreState,
+    run_error: BaseException | None,
+) -> None:
+    """Close the evaluation bridge and answer the controls left, keeping the run's own error."""
+    try:
         try:
-            try:
-                if bridge is not None:
-                    await bridge.close()
-            except BaseException as cleanup_error:
-                if run_error is None:
-                    raise
-                run_error.add_note(
-                    "Additional error while closing the agent evaluation bridge: "
-                    f"{type(cleanup_error).__name__}: {cleanup_error}"
-                )
-        finally:
-            try:
-                # An ended run answers every control left, also when the loop raised after
-                # core recorded the end; a run that may resume keeps its requests.
-                controls.end(shell.record.envelope.core)
-            except BaseException as end_error:
-                if run_error is None:
-                    raise
-                run_error.add_note(
-                    "Additional error while answering the run's last controls: "
-                    f"{type(end_error).__name__}: {end_error}"
-                )
-            finally:
-                # A crashed process cannot reach this line, so its restart waits out the
-                # lease (see ``start_core_awaiting_lease``); any return or raise here frees it.
-                shell.release_lease(now_at=services.clock.now())
-                _record_ending(shell, integration)
-    if outcome.refusal is not None:
-        raise CoreRunRefusedError(services.run_id, outcome.refusal)
-    return _run_end(outcome.result, shell, integration.environment_failure.reason)
+            if bridge is not None:
+                await bridge.close()
+        except BaseException as cleanup_error:
+            if run_error is None:
+                raise
+            run_error.add_note(
+                "Additional error while closing the agent evaluation bridge: "
+                f"{type(cleanup_error).__name__}: {cleanup_error}"
+            )
+    finally:
+        try:
+            inputs.leave()
+            # An ended run answers every control left, also when the loop raised after core
+            # recorded the end; a run that may resume keeps its requests.
+            controls.end(core)
+        except BaseException as end_error:
+            if run_error is None:
+                raise
+            run_error.add_note(
+                "Additional error while answering the run's last controls: "
+                f"{type(end_error).__name__}: {end_error}"
+            )
 
 
-def _record_ending(shell: CoreRuntime, integration: LocalRunIntegration) -> None:
-    if shell.record.envelope.core.run.status != CoreRunStatus.PARKED:
-        integration.events.emit(CoreEventType.RUN_ENDING, data=run_ending(shell))
+def _record_ending(core: CoreState, integration: LocalRunIntegration) -> None:
+    if core.run.status != CoreRunStatus.PARKED:
+        integration.events.emit(CoreEventType.RUN_ENDING, data=run_ending(core))
 
 
-def _run_end(
-    result: RunResultProposal | None, shell: CoreRuntime, environment_failure: str | None
-) -> RunEnd:
+def _run_end(rest: RunRest, core: CoreState, environment_failure: str | None) -> RunEnd:
     """How the run ended: the environment's failure, when it stopped the run, else its result."""
-    if shell.record.envelope.core.run.status == CoreRunStatus.PARKED:
+    if rest is RunRest.PARKED:
         raise OperatorPaused
+    result = core.run.result
     uncompared = result is not None and result.uncompared
     if environment_failure is not None:
         # The environment's failure stopped the run; it ended as a failure, not a stop.
         return RunEnd(
             RunStatus.FAILED,
-            _environment_failure(environment_failure, shell),
+            _environment_failure(environment_failure, core),
             uncompared=uncompared,
         )
-    status = _status_of(result, shell)
+    status = _status_of(result, core)
     return RunEnd(
         status,
-        _failure_of(result, shell) if status is RunStatus.FAILED else None,
+        _failure_of(result, core) if status is RunStatus.FAILED else None,
         uncompared=uncompared,
     )
 
 
-def run_ending(shell: CoreRuntime) -> RunEndingData:
+def run_ending(core: CoreState) -> RunEndingData:
     """How the run's durable record stands now: its end reason, resumability and finished rounds."""
-    core = shell.record.envelope.core
     result = core.run.result
     reason = None
     if result is not None:
@@ -254,7 +327,7 @@ def run_ending(shell: CoreRuntime) -> RunEndingData:
     )
 
 
-def _unacknowledged_notes(bridge: AgentEvaluationBridge | None) -> StallNotes:
+def _unacknowledged_notes(bridge: AgentEvaluationBridge | None) -> Callable[[], Sequence[str]]:
     """A stalled run's report names submissions whose handle never reached their agent."""
 
     def notes() -> tuple[str, ...]:
@@ -284,7 +357,7 @@ class OperatorStopped(RunStopped):
         self.uncompared = uncompared
 
 
-def _status_of(result: RunResultProposal | None, shell: CoreRuntime) -> RunStatus:
+def _status_of(result: RunResultProposal | None, core: CoreState) -> RunStatus:
     """Map the run's recorded result to the status a plugin returns.
 
     The framework ends a stopped run, an operator's or the deadline's, ``cancelled`` after
@@ -298,11 +371,11 @@ def _status_of(result: RunResultProposal | None, shell: CoreRuntime) -> RunStatu
         raise OperatorStopped(
             result.reason, uncompared=result.uncompared
         )  # the session reports why it stopped
-    kept = _ended_by(result, EndReason.DEADLINE) and _adopted_candidate(shell) is not None
+    kept = _ended_by(result, EndReason.DEADLINE) and _adopted_candidate(core) is not None
     return RunStatus.SUCCEEDED if result.outcome == "success" or kept else RunStatus.FAILED
 
 
-def _failure_of(result: RunResultProposal | None, shell: CoreRuntime) -> RunFailure:
+def _failure_of(result: RunResultProposal | None, core: CoreState) -> RunFailure:
     """Why a failed run stopped, read from the result and the counts core kept.
 
     A failed strategy may still ask core to adopt its best partial candidate. Otherwise it
@@ -312,7 +385,6 @@ def _failure_of(result: RunResultProposal | None, shell: CoreRuntime) -> RunFail
     from the counts (``started >= budget``), so a strategy that gives up on its last permitted
     workstream is labelled the same.
     """
-    core = shell.record.envelope.core
     started = len(core.attempts.attempts)
     budget = core.run.limits.max_attempts
     if result is None:
@@ -333,26 +405,25 @@ def _failure_of(result: RunResultProposal | None, shell: CoreRuntime) -> RunFail
         workstreams_started=started,
         workstream_budget=budget,
         candidates_kept=sum(1 for item in core.settlement.settlements if item.eligible),
-        adopted_candidate=_adopted_candidate(shell),
+        adopted_candidate=_adopted_candidate(core),
     )
 
 
-def _environment_failure(reason: str, shell: CoreRuntime) -> RunFailure:
+def _environment_failure(reason: str, core: CoreState) -> RunFailure:
     """A run the environment ended: it could run none of its work, whatever it adopted."""
-    core = shell.record.envelope.core
     return RunFailure(
         kind=RunFailureKind.RUN_ENVIRONMENT_UNAVAILABLE,
         reason=reason,
         workstreams_started=len(core.attempts.attempts),
         workstream_budget=core.run.limits.max_attempts,
         candidates_kept=sum(1 for item in core.settlement.settlements if item.eligible),
-        adopted_candidate=_adopted_candidate(shell),
+        adopted_candidate=_adopted_candidate(core),
     )
 
 
-def _adopted_candidate(shell: CoreRuntime) -> str | None:
+def _adopted_candidate(core: CoreState) -> str | None:
     """The verified retained candidate's stable revision identity, if core adopted one."""
-    adoption = shell.record.envelope.core.settlement.adoption
+    adoption = core.settlement.adoption
     if (
         adoption is None
         or not adoption.verified
@@ -363,9 +434,10 @@ def _adopted_candidate(shell: CoreRuntime) -> str | None:
 
 
 __all__ = [
-    "CoreRunRefusedError",
+    "OperatorPaused",
+    "OperatorStopped",
     "RunEnd",
-    "StoredSteerArtifacts",
+    "RunLogUnavailableError",
     "drive_core_run",
     "ensure_resumable",
 ]

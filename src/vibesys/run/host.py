@@ -35,6 +35,7 @@ from vibesys.run.profilers import WITHHELD_TOOLS_ENV, ProfilerToolOffer, profile
 from vibesys.run.queue_status import queue_status_reader, queue_status_service
 from vibesys.run.resources import open_run_resources
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
+from vibesys.run.step_seams import step_seams
 from vs_agent.api import (
     AgentSessionKey,
     AgentSessionState,
@@ -93,6 +94,7 @@ if TYPE_CHECKING:
         StopTimer,
         WorkspaceRuntime,
     )
+    from vs_runtime.api.step_runner import StepRunnerDecorator
     from vs_sandbox.api import ComputeBackendImpl, DockerSandbox
     from vs_sim.api import BlockingRunner, Network, ReleaseStack
 
@@ -165,6 +167,7 @@ class _ProductHostFactory:
     options: BaseModel
     profiler_preflight: ProfilerPreflight
     stateless_tool_servers: Mapping[str, StatelessToolServer] | None = None
+    step_runner_decorator: StepRunnerDecorator | None = None
     core_services: CoreServices | None = field(default=None, init=False)
     local_evaluation: Evaluation | None = field(default=None, init=False)
     facts: RunFacts | None = field(default=None, init=False)
@@ -385,6 +388,21 @@ class _ProductHostFactory:
             stage_output,
             ledger_identity=(project.project.state.load_project().project_id, project.state.run_id),
         )
+        retrying = RetryingEvaluationExecutor(
+            executor
+            if executor is not None
+            else PollingEvaluationExecutor(
+                evaluation,
+                workspaces,
+                clock=self.timing.clock,
+                stage_output=stage_output,
+                control=self.integration.control,
+            ),
+            self.request.config.evaluation.evaluation_retries(),
+            project.project.state.local_namespace(project.state.run_id, "core-evaluation-tries"),
+            tries=tries,
+        )
+        environment = self._core_environment(resources)
         return build_core_services(
             policy,
             CoreResources(
@@ -394,23 +412,8 @@ class _ProductHostFactory:
                 facts=resources.facts,
                 options=self.options,
                 workspaces=workspaces,
-                evaluation=RetryingEvaluationExecutor(
-                    executor
-                    if executor is not None
-                    else PollingEvaluationExecutor(
-                        evaluation,
-                        workspaces,
-                        clock=self.timing.clock,
-                        stage_output=stage_output,
-                        control=self.integration.control,
-                    ),
-                    self.request.config.evaluation.evaluation_retries(),
-                    project.project.state.local_namespace(
-                        project.state.run_id, "core-evaluation-tries"
-                    ),
-                    tries=tries,
-                ),
-                environment=self._core_environment(resources),
+                evaluation=retrying,
+                environment=environment,
                 roles=roles,
                 role_models=role_models,
                 agents=agents,
@@ -422,6 +425,7 @@ class _ProductHostFactory:
                 network=self.network,
                 evaluation_diagnostics=self._evaluation_diagnostic,
                 stateless_tool_servers=stateless_servers,
+                step_runner_decorator=self.step_runner_decorator,
                 commands=agent_runtime.commands,
                 capture_commands=agent_runtime.capture_commands,
                 # No round_label: this instance is built once for the run and
@@ -436,6 +440,21 @@ class _ProductHostFactory:
                 epoch=lambda: self.integration.events.epoch,
                 commit_observer=self.integration.core_commit_observer(
                     project.state.run_id, self.projector, self.plugin.id
+                ),
+                run_clock=self.integration.events.run_clock,
+                seams=lambda: step_seams(
+                    run_id=project.state.run_id,
+                    environment=resources.environment,
+                    kind=resources.environment_resources.view.env_kind,
+                    system=self.integration.system,
+                    blocking=self.blocking,
+                    namespace=lambda name: project.project.state.local_namespace(
+                        project.state.run_id, name
+                    ),
+                    log=project.logger.lprint,
+                    evaluation=retrying,
+                    slurm=executor,
+                    poll_interval_s=self._job_poll_seconds(resources, environment),
                 ),
             ),
         )
@@ -650,6 +669,14 @@ class _ProductHostFactory:
             ),
         )
 
+    @staticmethod
+    def _job_poll_seconds(resources: _PreparedRun, environment: CoreEnvironment) -> float:
+        """How often a job step asks its executor: the cluster's own pace, else core's."""
+        cluster = resources.environment_resources.view.cluster_evaluation
+        if cluster is None:
+            return float(environment.observe_interval_seconds)
+        return float(cluster.settings.config.poll_interval_seconds)
+
     def _semantic_executor(
         self,
         resources: _PreparedRun,
@@ -743,11 +770,13 @@ async def open_product_core_host(  # noqa: PLR0913  # lint-waiver: LW-948092 [PL
     invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore]
     | None = None,
     stateless_tool_servers: Mapping[str, StatelessToolServer] | None = None,
+    step_runner_decorator: StepRunnerDecorator | None = None,
 ) -> AsyncIterator[CoreHost]:
     """Open the host of a plugin whose ``core`` policy the runtime drives.
 
     Composition builds every core service from the resources it opens, and fails with
-    ``CoreCompositionError`` naming what is missing. A stop requested while the caller's
+    ``CoreCompositionError`` naming what is missing, or when the run's timing clock is not its
+    journal's (a run counts its seconds on one clock). A stop requested while the caller's
     block runs is bounded: if the block is still running `STOP_GRACE_S` later (timed by
     *stop_timer*), its task is cancelled and the block ends in `RunStopped`. Teardown then
     releases the core services before the workspaces they evaluate in.
@@ -755,6 +784,12 @@ async def open_product_core_host(  # noqa: PLR0913  # lint-waiver: LW-948092 [PL
     if plugin.core is None:
         message = f"orchestration {plugin.id!r} has no core policy"
         raise CoreCompositionError("core", message)
+    if timing.clock is not integration.clock:
+        message = (
+            "the run's timing clock is not the clock its journal is timed by: the log dates its "
+            "records by one and the loop counts on the other"
+        )
+        raise CoreCompositionError("timing", message)
     factory = _ProductHostFactory(
         request=request,
         integration=integration,
@@ -771,6 +806,7 @@ async def open_product_core_host(  # noqa: PLR0913  # lint-waiver: LW-948092 [PL
         resume_policy=resume_policy,
         options=options,
         stateless_tool_servers=stateless_tool_servers,
+        step_runner_decorator=step_runner_decorator,
     )
     async with open_run_host(factory.prepare, runner=blocking) as host:
         try:

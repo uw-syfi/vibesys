@@ -31,7 +31,7 @@ from vs_sandbox.api import CaptureExecutionIdentity
 from vs_sim.api import CloseOnce, ReleaseStack, utc_datetime
 
 if TYPE_CHECKING:
-    from vs_project.api import GitRepositoryFactory, StateStoreFactory
+    from vs_project.api import GitRepositoryFactory
     from vs_runtime._environment_system import EnvironmentSystem
     from vs_runtime._project_materialization import ProjectMaterializer
     from vs_sim.api import Clock
@@ -184,8 +184,6 @@ class ProjectRunEffects:
 
     Production passes ``git_repositories(git)``; tests pass a Fake so a run needs no Git process.
     """
-    state_stores: StateStoreFactory | None = None
-    """Opens each run's ``StateStore``; ``None`` uses the project's crash-atomic local one."""
     resume_recovery: Callable[[], None] | None = None
     """Recover product resources after taking the run-host lock, before Git or state recovery."""
     capture_recovery: CaptureExecutionRecovery | None = None
@@ -444,7 +442,7 @@ def _assemble_project_run_resources(
         provisional_ownership.callback(request.provisional_project.discard_project)
 
     with boot_trace.span("project_open"):
-        project = Project.open(request.project_root, state_stores=effects.state_stores)
+        project = Project.open(request.project_root)
         project_state = project.state
         teardown_stack.enter_context(project_state.exclusive_run_host(request.run_id))
         if request.existing and effects.resume_recovery is not None:

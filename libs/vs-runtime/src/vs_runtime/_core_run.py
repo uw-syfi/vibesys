@@ -48,19 +48,15 @@ from vs_core.api import (
     project,
     unreleased_records,
 )
-from vs_runtime._core_loop import LeaseUnavailableError
 from vs_runtime._mid_turn_steering import MidTurnSteering
-from vs_runtime._workspace_holds import core_workspace_holds
-from vs_sim.api import yield_now
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Sequence
 
     from vs_core.api import CoreEvent
     from vs_runtime._control_bridge import RunControlBridge
     from vs_runtime._core_loop import CoreRuntime, PublicationDelivery
     from vs_runtime._core_requests import ExecutorRefusal
-    from vs_runtime._workspace_holds import WorkspaceHolds
     from vs_sim.api import SleepingClock, Threads
 
 
@@ -71,15 +67,9 @@ HEARTBEAT_TASK = "lease-heartbeat"
 WAIT_TASK = "loop-wait"
 
 
-# How long a run's state-store lease stays valid without renewal. The loop renews it every
-# third of this; a restart after a crash waits at most this long (see
-# ``start_core_awaiting_lease``).
-PRODUCTION_LEASE_SECONDS = 60.0
-
-
 @dataclass(frozen=True)
 class RunTiming:
-    """The time sources and lease length one run is composed with.
+    """The time sources one run is composed with.
 
     ``clock`` is the run's epoch timeline for the core loop and its timestamps;
     ``threads`` is the blocking time (monotonic reads, sleeps, locks) that code on
@@ -91,15 +81,11 @@ class RunTiming:
     """
 
     clock: SleepingClock
-    lease_seconds: float
     threads: Threads
     control_poll_seconds: float = 1.0
 
     def __post_init__(self) -> None:
-        """Reject a lease that could never be held, and a control poll that never comes."""
-        if self.lease_seconds <= 0:
-            message = "lease_seconds must be positive"
-            raise ValueError(message)
+        """Reject a control poll that never comes."""
         if self.control_poll_seconds <= 0:
             message = "control_poll_seconds must be positive"
             raise ValueError(message)
@@ -147,7 +133,6 @@ class RunLoopConfig:
     lease_duration: float
     control_poll_interval: float = 1.0
     min_sleep: float = 0.05
-    recovery_poll_interval: float = 1.0
     max_dispatches: int = 100_000
     max_concurrent: int | None = None
     """Requests the shell executes at once; None takes the run's ``Limits.max_parallel``.
@@ -161,12 +146,10 @@ class RunLoopConfig:
             if getattr(self, name) <= 0:
                 message = f"{name} must be positive"
                 raise ValueError(message)
-        if (
-            self.recovery_poll_interval <= 0
-            or self.max_dispatches <= 0
-            or (self.max_concurrent is not None and self.max_concurrent <= 0)
+        if self.max_dispatches <= 0 or (
+            self.max_concurrent is not None and self.max_concurrent <= 0
         ):
-            message = "recovery_poll_interval, max_dispatches and max_concurrent must be positive"
+            message = "max_dispatches and max_concurrent must be positive"
             raise ValueError(message)
 
 
@@ -179,32 +162,14 @@ class RunOutcome:
     refusal: ExecutorRefusal | None = None
 
 
-class CoreHeldWorkspaces(Protocol):
-    """The run's candidate workspaces, kept on disk across a host stop only while core holds them."""
-
-    def follow(self, holds: Callable[[], WorkspaceHolds]) -> None:
-        """Decide what outlives this host from what core references, as *holds* reads it."""
-        ...
-
-    async def release_unheld(self) -> None:
-        """Discard every candidate worktree on disk that core no longer references."""
-        ...
-
-
 @dataclass(frozen=True)
 class CoreRunHost:
-    """The process-local pieces one run loop drives.
-
-    ``workspaces``, when given, follow the run's core state: a start discards the worktrees a
-    stopped host left that core no longer references, and the host's close keeps only those
-    core still holds (none once the run's result is final).
-    """
+    """The process-local pieces one run loop drives."""
 
     shell: CoreRuntime
     delivery: PublicationDelivery
     clock: SleepingClock
     controls: RunControlBridge | None = None
-    workspaces: CoreHeldWorkspaces | None = None
 
 
 def start_core(host: CoreRunHost, config: RunLoopConfig) -> None:
@@ -220,78 +185,6 @@ def _take_lease(host: CoreRunHost, config: RunLoopConfig) -> None:
         lease_duration=config.lease_duration,
         resume=host.controls is not None and host.controls.resumes_run,
     )
-
-
-_PASSES_TO_WAKE_A_DUE_TIMER = 3
-
-
-async def start_core_awaiting_lease(host: CoreRunHost, config: RunLoopConfig) -> None:
-    """Start the shell, waiting out a lease a crashed host left behind.
-
-    A host that died keeps its lease until it expires, and a restart cannot tell a dead
-    holder from a live one, so it waits on the run clock, at most one lease duration
-    (a live holder renews, so it would still hold the lease after that). The wait is
-    in clock time: a simulated clock makes it instant. Raises ``LeaseUnavailableError``
-    naming the bound when the lease is still held after it.
-
-    The stored run is decoded and validated before the clock is read for the lease, with the
-    loop free to run in between (see ``CoreRuntime.prepare_start``).
-
-    Once started, the host's ``workspaces`` follow core's recovered state: worktrees a
-    stopped host left that core no longer references are discarded now. If following or
-    sweeping those workspaces fails or is cancelled, startup releases its newly acquired
-    lease before propagating the interruption.
-    """
-    give_up_at = host.clock.now() + config.lease_duration
-    while True:
-        # Take in the stored run first, then let the loop run, then read the clock for the
-        # lease: decoding a long run takes seconds, and the lease term should not include it.
-        # No lease is held yet, so the yields serve the loop's other tasks (the control
-        # watcher, a server), not the heartbeat, and they keep the decode and the start out of
-        # one unbroken hold on the loop. A task whose timer fell due during the decode needs
-        # two passes (the timer fires, then its future wakes the task); three leave one to
-        # spare, a margin that rests on asyncio's scheduling, not on a contract. Yielding
-        # waits on no clock.
-        host.shell.prepare_start(config.host_id)
-        for _ in range(_PASSES_TO_WAKE_A_DUE_TIMER):
-            await yield_now()
-        try:
-            _take_lease(host, config)
-        except LeaseUnavailableError as error:
-            remaining = give_up_at - host.clock.now()
-            if remaining <= 0:
-                message = (
-                    f"the run's lease is still held {config.lease_duration:g} s after this "
-                    "host started waiting for it: another host is running this run, or the "
-                    "clock is behind the run's last recorded time"
-                )
-                raise LeaseUnavailableError(message) from error
-            await host.clock.sleep(min(config.recovery_poll_interval, remaining))
-        else:
-            break
-    try:
-        await _follow_core(host)
-    except BaseException as start_error:
-        try:
-            host.shell.release_lease(now_at=host.clock.now())
-        except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-114090 [BLE001]; cancellation and other startup failures must retain their identity if lease rollback also fails.
-            # > Catching only Exception would let an unexpected BaseException from the release
-            # > boundary replace startup; separate handlers would duplicate one rollback rule.
-            start_error.add_note(
-                "Additional error while releasing the lease after core startup failed: "
-                f"{type(cleanup_error).__name__}: {cleanup_error}"
-            )
-        raise
-
-
-async def _follow_core(host: CoreRunHost) -> None:
-    """Bind the run's workspaces to core's state and discard what core no longer references."""
-    workspaces = host.workspaces
-    if workspaces is None:
-        return
-    shell = host.shell
-    workspaces.follow(lambda: core_workspace_holds(shell.record.envelope.core))
-    await workspaces.release_unheld()
 
 
 async def drive_core(
@@ -620,8 +513,6 @@ class _Loop:
         wake = [self._renewal_due()]
         if due is not None:
             wake.append(due)
-        if recovering and due is None:
-            wake.append(now + self._config.recovery_poll_interval)
         if self._controls is not None:
             wake.append(now + self._config.control_poll_interval)
         if not self._deadline_stop:

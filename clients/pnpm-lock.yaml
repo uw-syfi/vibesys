@@ -1120,6 +1120,9 @@ importers:
       '@vibesys/proto':
         specifier: workspace:*
         version: link:../proto
+      '@vibesys/run-state':
+        specifier: workspace:*
+        version: link:../run-state
     devDependencies:
       '@types/bun':
         specifier: 1.4.2
@@ -1127,9 +1130,6 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
-      '@vibesys/run-state':
-        specifier: workspace:*
-        version: link:../run-state
       '@vibesys/store':
         specifier: workspace:*
         version: link:../store

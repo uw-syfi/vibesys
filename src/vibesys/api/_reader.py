@@ -42,7 +42,6 @@ class _LocalRunReader:
         )
         self._integration = LocalRunIntegration(
             implementations.git_repository,
-            implementations.state_stores,
             clock=implementations.timing.clock,
             git=implementations.git,
             github=implementations.github,

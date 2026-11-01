@@ -35,9 +35,11 @@ from vs_dst._effects import RecoverableExecutors
 from vs_dst._host import FIRST_HOST_STARTS_AT, Hosted, WrongStoreError
 from vs_dst._interruptions import Moment
 from vs_dst._snapshots import RecordingRecords
+from vs_dst._world import HoldingWorld
 from vs_proto.api import EpochStarted, Timestamp
 from vs_runlog.api import ConfirmedLog
 from vs_runtime.api.core import DispatchCapExceededError, ExecutionContext
+from vs_runtime.api.step_router import LIVE_REQUEST_KINDS, NoRunnerError
 from vs_runtime.api.step_runner import (
     Adopted,
     Cleared,
@@ -60,6 +62,7 @@ if TYPE_CHECKING:
     from vs_core.api.recovery import Run as RunAction
     from vs_dst._effects import Effects
     from vs_dst._snapshots import OutsideWorld, Store, Watcher
+    from vs_dst._world import World
     from vs_runtime.api.core import ExecutionResult
     from vs_runtime.api.step_runner import CancelSignal, StepRecord
     from vs_runtime.api.testing import HostOptions
@@ -209,6 +212,7 @@ class _Host:
             self._outside.effects,
             clock,
             epoch,
+            holds=_holds_of(world),
         )
         loop = asyncio.ensure_future(
             run_step_loop(_Counting(inputs), runner, clock, TIMING, StallBoard())
@@ -327,11 +331,18 @@ class _WorldRunner:
     """
 
     def __init__(
-        self, executors: RecoverableExecutors, effects: Effects, clock: VirtualClock, epoch: int
+        self,
+        executors: RecoverableExecutors,
+        effects: Effects,
+        clock: VirtualClock,
+        epoch: int,
+        *,
+        holds: Callable[[Request], bool],
     ) -> None:
         self._executors = executors
         self._effects = effects
         self._clock = clock
+        self._holds = holds
         self._fence = HostFence(host_id=HostId(root="dst"), epoch=epoch)
 
     async def run(
@@ -342,11 +353,22 @@ class _WorldRunner:
         deadline_at: float,
         cancel: CancelSignal,
     ) -> StepResult:
-        """Perform the step, or return what its earlier attempt sealed."""
+        """Perform the step, or return what its earlier attempt sealed.
+
+        A kind the production router has no runner for is refused as it refuses it
+        (``NoRunnerError``), so a world cannot serve a step the real loop would stall on.
+        """
         del attempt
+        if type(step) not in LIVE_REQUEST_KINDS:
+            raise NoRunnerError(type(step).__name__)
         sealed = self._effects.sealed.get(tag.root)
         if sealed is not None:
             return _result_of(step, tag, sealed)
+        if self._holds(step):
+            # The job is queued and nothing starts it: it began, ends by no one's doing, and
+            # seals nothing, so only the loop's cancel ends the step.
+            self._effects.executed.append(tag.root)
+            return Cancelled(reason=await cancel.wait())
         context = ExecutionContext(
             fence=self._fence,
             now_at=self._clock.now(),
@@ -405,6 +427,11 @@ def _result_of(step: Request, tag: RequestId, result: ExecutionResult) -> Finish
             observation=ended, observed=observed.model_copy(update={"observation": ended})
         )
     raise StepWithoutResultError(tag, view)
+
+
+def _holds_of(world: World) -> Callable[[Request], bool]:
+    """What the world holds forever: nothing, unless it says so (`HoldingWorld`)."""
+    return world.holds if isinstance(world, HoldingWorld) else lambda _request: False
 
 
 def _executors(

@@ -24,7 +24,7 @@ from vibesys.api.metrics import MetricSpace
 from vibesys.api.request import load_task
 from vibesys.events import EventStatus, GateFinishedData, GateKind, RunStartedData
 from vs_project.api.testing import FakeGitRepositories, FakeGitRepository
-from vs_runtime.api.core import PRODUCTION_LEASE_SECONDS, RunTiming
+from vs_runtime.api.core import RunTiming
 from vs_runtime.api.testing import FakeStopTimer
 from vs_sandbox.api import CommandResult, SandboxKind
 from vs_sandbox.api.testing import FakeComputeBackend, FakeLifecycleRunner
@@ -166,7 +166,7 @@ def _run_input_check(
     processes = FakeProcesses(lambda _spec: ProcessScript(), pass_time=lambda _seconds: None)
     runs = default_runs(
         LaunchSettings(
-            timing=RunTiming(sim.clock, PRODUCTION_LEASE_SECONDS, threads),
+            timing=RunTiming(sim.clock, threads),
             processes=processes,
             piped_processes=FakePipedProcessLauncher(),
             blocking=InlineBlockingRunner(),

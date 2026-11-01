@@ -92,9 +92,7 @@ from vs_runtime._core_requests import (
 )
 from vs_runtime._core_run import (
     HEARTBEAT_TASK,
-    PRODUCTION_LEASE_SECONDS,
     WAIT_TASK,
-    CoreHeldWorkspaces,
     CoreRunHost,
     NextWake,
     RunLoopConfig,
@@ -105,13 +103,14 @@ from vs_runtime._core_run import (
     core_next_wake,
     drive_core,
     start_core,
-    start_core_awaiting_lease,
 )
 from vs_runtime._core_wiring import (
+    CoreExecutors,
     CoreStartup,
     MeasurementServices,
     SessionServices,
     core_bindings,
+    core_executors,
     empty_catalog,
     new_core_state,
 )
@@ -133,6 +132,7 @@ from vs_runtime._evaluation_jobs import handle_for
 from vs_runtime._evaluation_requests import MeasurementRequests
 from vs_runtime._evidence_ledger import (
     EvidenceEntry,
+    EvidenceLedger,
     EvidenceLookup,
     EvidenceRecorder,
     ReceiptEvidenceLedger,
@@ -140,11 +140,12 @@ from vs_runtime._evidence_ledger import (
 from vs_runtime._evidence_operations import InterpretEvidenceOwner, RetainRevisionOwner
 from vs_runtime._export_patch_operation import ExportPatchOwner
 from vs_runtime._issue_board_operations import BOARD_KEY, BoardTexts, IssueBoardOwner
-from vs_runtime._job_registry import JobRecord, JobRegistry
+from vs_runtime._job_registry import JobBooks, JobRecord, JobRegistry
 from vs_runtime._measurement_progress import (
     IgnoreMeasurement,
     MeasurementDecisions,
     MeasurementObserver,
+    MeasurementProgress,
     StageMetric,
     StageOutputOpener,
     StageRun,
@@ -265,7 +266,6 @@ __all__ = [
     "HAND_ROLLED_ROLES",
     "HEARTBEAT_TASK",
     "NOT_TARGET_FACTS",
-    "PRODUCTION_LEASE_SECONDS",
     "REQUEST_DISPATCH",
     "RUNTIME_SCHEMA_VERSION",
     "WAIT_TASK",
@@ -297,7 +297,7 @@ __all__ = [
     "Conflict",
     "ContinuationBinding",
     "CoreContractGapError",
-    "CoreHeldWorkspaces",
+    "CoreExecutors",
     "CoreResumeError",
     "CoreRunHost",
     "CoreRuntime",
@@ -312,6 +312,7 @@ __all__ = [
     "EvaluationRequests",
     "Evidence",
     "EvidenceEntry",
+    "EvidenceLedger",
     "EvidenceLookup",
     "EvidenceRecorder",
     "ExecutionContext",
@@ -333,6 +334,7 @@ __all__ = [
     "IntentJournal",
     "InterpretEvidenceOwner",
     "IssueBoardOwner",
+    "JobBooks",
     "JobRecord",
     "JobRegistry",
     "JournalPublicationDelivery",
@@ -344,6 +346,7 @@ __all__ = [
     "MayHold",
     "MeasurementDecisions",
     "MeasurementObserver",
+    "MeasurementProgress",
     "MeasurementRequests",
     "MeasurementServices",
     "MidTurnSteering",
@@ -457,6 +460,7 @@ __all__ = [
     "build_operation_catalog",
     "commit_of",
     "core_bindings",
+    "core_executors",
     "core_next_wake",
     "drive_core",
     "empty_catalog",
@@ -479,6 +483,5 @@ __all__ = [
     "session_executors",
     "settle",
     "start_core",
-    "start_core_awaiting_lease",
     "winner_selection",
 ]

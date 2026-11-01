@@ -840,6 +840,11 @@ REAL_API_EDGES: dict[Key, str] = {
         "syncs the directory descriptor a file was renamed in; vs_project's path-based "
         "directory sync would resolve the agent's tree again"
     ),
+    ("libs/vs-slurm/src/vs_slurm/fake_connector.py", "fs_sync"): (
+        "the executing Fake's job lock: a job's runner holds the flock of its job file while it "
+        "runs, and the lock goes with the process however it ends, which is how a later call "
+        "tells a running job from one whose runner died; the Fake is a process whose state is files"
+    ),
     ("libs/vs-sandbox/src/vs_sandbox/landlock.py", "process"): (
         f"{_SEPARATE_PROGRAM}: the confinement launcher execs the confined command"
     ),

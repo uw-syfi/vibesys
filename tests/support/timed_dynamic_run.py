@@ -51,7 +51,6 @@ from vs_core.api import (
 )
 from vs_core.testing.drive import Answer, Running, Succeeded, new_run
 from vs_project.api import FakeStateStore, StoreFence
-from vs_runtime.api.core import PRODUCTION_LEASE_SECONDS as LEASE_SECONDS
 from vs_runtime.api.core import (
     CoreRunHost,
     CoreRuntime,
@@ -93,6 +92,9 @@ _TOOL_CALL_AT = 0.5
 # a coarser cadence keeps a run of minutes at about a second of host time.
 OBSERVE_INTERVAL_S = 30.0
 _CONTROL_POLL_S = OBSERVE_INTERVAL_S
+
+LEASE_SECONDS = 60.0
+"""How long the old shell's state-store lease lasts in these runs."""
 
 
 @dataclass(frozen=True)

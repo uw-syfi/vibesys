@@ -77,7 +77,7 @@ def open_reader_resources(
     bundle = request.input_bundle
     run_id = request.resume.run_id
     project_root = request.project_root_for(run_id)
-    project = Project.open(project_root, state_stores=integration.state_stores)
+    project = Project.open(project_root)
     project.state.load_run(run_id)
     # The run's own log directory is its record: a reader writes what it logs (an agent's log, a
     # container's startup output) beside its own state.

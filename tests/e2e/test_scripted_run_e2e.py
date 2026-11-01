@@ -52,7 +52,6 @@ def test_scripted_agents_plan_edit_and_judge_through_the_real_backend(tmp_path: 
         NoAgents(),
         client_factory=scripted_client,
         slurm_processes=loop_input.connector,
-        state_stores=loop_input.state_stores,
         verify=False,
     )
 
@@ -78,7 +77,6 @@ def test_scripted_agents_plan_edit_and_judge_through_the_real_backend(tmp_path: 
 def test_scripted_run_relaunches_once_from_saved_state(tmp_path: Path) -> None:
     loop_input = LoopInput.create(
         tmp_path,
-        on_disk_state=True,
         agent_config=f"{_AGENT_CONFIG}[agent]\nscripted_seed = {SEED}\n",
     )
     request = loop_input.request(agent_backend="scripted", max_rounds=1, max_in_flight=1)
@@ -134,7 +132,6 @@ def test_scripted_run_relaunches_once_from_saved_state(tmp_path: Path) -> None:
 def test_a_scripted_run_pauses_then_resumes_without_overwriting_the_project(tmp_path: Path) -> None:
     loop_input = LoopInput.create(
         tmp_path,
-        on_disk_state=True,
         agent_config=f"{_AGENT_CONFIG}[agent]\nscripted_seed = {SEED}\n",
     )
     request = loop_input.request(agent_backend="scripted", max_rounds=ROUNDS, max_in_flight=2)

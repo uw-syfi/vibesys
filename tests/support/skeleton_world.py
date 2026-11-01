@@ -385,7 +385,6 @@ async def drive(
     config = RunLoopConfig(
         host_id="skeleton",
         lease_duration=LEASE,
-        recovery_poll_interval=50.0,
         max_dispatches=60,
     )
     try:

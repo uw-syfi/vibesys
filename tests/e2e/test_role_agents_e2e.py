@@ -69,7 +69,6 @@ def test_each_role_starts_its_agent_on_the_provider_and_model_its_own_entry_chos
         NoAgents(),
         client_factory=_scripted_client,
         slurm_processes=loop_input.connector,
-        state_stores=loop_input.state_stores,
         verify=False,
     )
 

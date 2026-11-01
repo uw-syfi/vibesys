@@ -425,27 +425,12 @@ class ScopeWorkspaces:
         return await find_scope_workspace(self._workspaces, self._receipts, scope)
 
 
-class _Envelope(Protocol):
-    @property
-    def core(self) -> CoreState: ...
-
-
-class _Record(Protocol):
-    @property
-    def envelope(self) -> _Envelope: ...
-
-
 class AdmissionShell(Protocol):
-    """The shell as the bridge sees it: commit an input before exposing its answer."""
-
-    @property
-    def record(self) -> _Record:
-        """The committed record; the loop may commit while an agent turn runs."""
-        ...
+    """The run as the bridge sees it: commit an input before exposing its answer."""
 
     @property
     def admitted_core(self) -> CoreState:
-        """The committed core, including every successful admission."""
+        """The committed core, including every successful admission; the loop may commit meanwhile."""
         ...
 
     def admit(self, event: CoreEvent, *, now_at: float) -> Transition:
@@ -561,7 +546,7 @@ class AgentEvaluationBridge:
         the base's would be another measurement than the official run's, and never samples of
         it. The facts are the run's one definition, so the plan takes them from there.
         """
-        facts = shell.record.envelope.core.run.facts
+        facts = shell.admitted_core.run.facts
         return replace(
             self._policy,
             evaluator_digest=facts.evaluator_digest,
@@ -970,7 +955,7 @@ class AgentEvaluationBridge:
         shell, _ = self._bound()
         running = [
             row.invocation
-            for row in shell.record.envelope.core.sessions.invocations
+            for row in shell.admitted_core.sessions.invocations
             if row.scope == scope and row.phase == SessionPhase.EXECUTING
         ]
         return running[0] if len(running) == 1 else None

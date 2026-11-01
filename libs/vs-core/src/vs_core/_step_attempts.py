@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ._actions import OpenStep
+from ._job_reports import ended_job_events
 from ._ownership import unreleased_records
 from ._refusal import RecordRefusedError, RefusalReason
 from ._request_recovery import command_open, is_open, is_step, resent
@@ -315,7 +316,7 @@ def finish(
         case Finished():
             for fact in (result.observation, *result.owner_events):
                 _speaks_for(record, fact)
-            return result.report, result.owner_events
+            return result.report, (*result.owner_events, *ended_job_events(record, result))
         case Failed() | Cancelled():
             return _concluded(record, result, state.run.now_at), ()
 

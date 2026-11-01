@@ -32,7 +32,6 @@ from typing import TYPE_CHECKING, Protocol
 
 from pydantic import ValidationError
 from tests.support.docker_environment import host_container_backend
-from tests.support.dynamic_script import REGISTRY
 from tests.support.loop_invariants import RunRecords, check, terminal_event
 from tests.support.loop_spec import loop_spec
 from tests.support.real_git import REAL_PROCESSES
@@ -58,12 +57,13 @@ from vibesys.orchestration.dynamic.search.api import (
     HypothesisRecord,
     RunSnapshot,
 )
+from vibesys.run.logged_run import read_logged_run
 from vs_agent.api import NULL_SKILL_SELECTION, AgentCapabilities, SessionScope
 from vs_agent.api.testing import FakeAgentClient
-from vs_core.api import FlowDriver, FlowState, RunEnvelope
+from vs_core.api import CoreState, FlowDriver, FlowState
 from vs_core.testing.liveness import Budget, End, Journal, assert_live
-from vs_project.api import FakeStateStores, Project, StoredEnvelope
-from vs_runtime.api.core import PRODUCTION_LEASE_SECONDS, RunTiming
+from vs_project.api import Project
+from vs_runtime.api.core import RunTiming
 from vs_runtime.api.testing import CrashableRunClock, FakeStopTimer
 from vs_sim.api import (
     OsThreads,
@@ -85,8 +85,8 @@ if TYPE_CHECKING:
     from vibesys.api import CoreEvent, RunHandle
     from vs_agent.api import AgentClientProtocol, AgentSessionKey, SessionStore, SkillSelection
     from vs_agent.api.testing import FakeInvocation
-    from vs_project.api import StateStoreFactory
     from vs_runtime.api.infrastructure import StopTimer
+    from vs_runtime.api.step_runner import StepRunnerDecorator
     from vs_sandbox.api import ComputeBackendImpl
     from vs_sim.api import Processes
 
@@ -462,12 +462,6 @@ class LoopInput:
     agent_config: Path
     connector: FakeConnector
     """The in-process Fake cluster; pass it to :func:`run_request` as ``slurm_processes``."""
-    state_stores: FakeStateStores | None
-    """The run's durable records, kept across a simulated crash; ``None`` is the real ``.vibesys``.
-
-    Pass it to :func:`run_request` as ``state_stores``. The Fake commits and fences exactly as
-    the local store does (both pass ``test_state_store_contract``), without an fsync per read.
-    """
     plugin_id: str = "dynamic"
     """The strategy under test, a key of `tests.support.loop_spec.LOOPS`."""
 
@@ -477,13 +471,10 @@ class LoopInput:
         base: Path,
         *,
         poll_interval_s: float = 1.0,
-        on_disk_state: bool = False,
         agent_config: str = _AGENT_CONFIG,
     ) -> LoopInput:
         """Write the input project, the executing cluster, and its Slurm config.
 
-        The run's durable records live in memory unless ``on_disk_state``, which keeps
-        the product's fsynced ``.vibesys`` store for the scenarios that prove it.
         ``agent_config`` is the operator's agent.toml.
         """
         root = base / "project"
@@ -526,7 +517,6 @@ class LoopInput:
             config,
             agent_config_file,
             connector,
-            None if on_disk_state else FakeStateStores(),
         )
 
     @classmethod
@@ -543,12 +533,11 @@ class LoopInput:
             base / "slurm.toml",
             base / "agent.toml",
             connector,
-            None,
         )
 
     def project(self) -> Project:
-        """Open the input project over the run's state stores."""
-        return Project.open(self.root, state_stores=self.state_stores)
+        """Open the input project."""
+        return Project.open(self.root)
 
     def hold_jobs(self) -> None:
         """Leave every job submitted from now on pending until it is cancelled."""
@@ -665,17 +654,14 @@ def run_request(  # noqa: PLR0913
     clock: CrashableRunClock | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
     slurm_processes: Processes | None = None,
-    state_stores: StateStoreFactory | None = None,
-    lease_seconds: float = PRODUCTION_LEASE_SECONDS,
+    step_runner_decorator: StepRunnerDecorator | None = None,
 ) -> LoopRun:
     """Execute a built request through the production host composition.
 
-    Without ``clock`` the run uses the production wall clock and lease. A scenario that
-    resumes a crashed run passes one ``simulated_clock()`` to both runs: the state store's
-    lease is compared on one shared timeline, and waiting advances it at once. Such a run
-    that waits more than ``SIMULATED_BUDGET_S`` simulated seconds fails instead of
-    spinning. ``lease_seconds`` is how long a writer's lease outlives it: a real-clock run that
-    resumes after its predecessor was killed waits that long, so such a scenario shortens it.
+    Without ``clock`` the run uses the production wall clock. A scenario that resumes a
+    crashed run passes one ``simulated_clock()`` to both runs, and waiting advances it at once.
+    Such a run that waits more than ``SIMULATED_BUDGET_S`` simulated seconds fails instead of
+    spinning.
     Simulated time decouples the loop from the agent turns that run in threads,
     so scenarios that depend on a turn finishing within one poll still use the wall clock.
     """
@@ -689,9 +675,9 @@ def run_request(  # noqa: PLR0913
             backend_factory=backend_factory or host_container_backend,
             stop_timer=stop_timer or FakeStopTimer(threads=OsThreads()),
             timing=(
-                RunTiming(SystemClock(), lease_seconds, OsThreads())
+                RunTiming(SystemClock(), OsThreads())
                 if clock is None
-                else RunTiming(clock, PRODUCTION_LEASE_SECONDS, OsThreads())
+                else RunTiming(clock, OsThreads())
             ),
             # The agent's container mounts the repository's `.git` read-only, so the
             # repository must exist on disk: these runs use the product's real Git.
@@ -699,7 +685,7 @@ def run_request(  # noqa: PLR0913
             piped_processes=SubprocessPipedProcessLauncher(),
             git_repository=None,
             slurm_processes=slurm_processes,
-            state_stores=state_stores,
+            step_runner_decorator=step_runner_decorator,
         )
     )
     events: list[CoreEvent] = []
@@ -729,22 +715,21 @@ def run_request(  # noqa: PLR0913
 
     finished = asyncio.run(run()) if clock is None else run_virtual(clock, run())
     if verify and finished.error is None:
-        _assert_invariants(request, finished, state_stores)
+        _assert_invariants(request, finished)
     return finished
 
 
-def _assert_invariants(
-    request: RunRequest, run: LoopRun, state_stores: StateStoreFactory | None
-) -> None:
+def _assert_invariants(request: RunRequest, run: LoopRun) -> None:
     """Fail the scenario when the run's own records violate a loop invariant.
 
     A run that raised (a crash or stall) has no terminal event by design, so only runs
     that ended on their own terms are checked.
     """
     root = request.project_root
+    loaded = load_run(Project.open(root), run.run_id, plugin_id=request.orchestration.id)
     records = RunRecords.from_core(
         [event.model_dump(mode="json") for event in run.events],
-        load_envelope(Project.open(root, state_stores=state_stores), run.run_id),
+        None if loaded is None else loaded.envelope,
         root.parent / "cluster",
         Project.log_directory_for(root, run.run_id),
     )
@@ -752,34 +737,42 @@ def _assert_invariants(
     assert not violations, [f"{v.invariant}: {v.detail}" for v in violations]
     ended = terminal_event(records)
     stopped = ended is not None and ended.get("status") == "interrupted"
-    assert_run_live(
-        records.envelope,
-        End.STOPPED if stopped else End.TERMINAL,
-        plugin_id=request.orchestration.id,
-    )
+    assert loaded is not None, "a run that ended committed no core record"
+    assert_run_live(loaded.core, End.STOPPED if stopped else End.TERMINAL)
 
 
-def assert_run_live(
-    envelope: Mapping[str, Any] | None, end: End = End.TERMINAL, *, plugin_id: str = "dynamic"
-) -> None:
-    """Fail when the committed core record shows a run that did not make bounded progress.
+def assert_run_live(core: CoreState, end: End = End.TERMINAL) -> None:
+    """Fail when the run's core state shows a run that did not make bounded progress.
 
-    The record is the run's intent ledger and final state (`vs_core.testing.liveness`).
+    The state is the run's intent ledger and final state (`vs_core.testing.liveness`).
     """
-    assert envelope is not None, "a run that ended committed no core record"
-    core = loop_spec(plugin_id).decode_core(json.dumps(envelope))
     assert_live(
         Journal.from_ledger(core), core, Budget(retries=core.run.limits.request_retries.limit), end
     )
 
 
-def load_envelope(project: Project, run_id: str) -> dict[str, Any] | None:
-    """Return the run's committed envelope, or None when none was committed."""
-    stored = project.stored_record(run_id)
-    if not isinstance(stored, StoredEnvelope):
+@dataclass(frozen=True)
+class LoadedRun:
+    """A run's core state folded from its run.log, and the same with the search's, as JSON."""
+
+    core: CoreState
+    envelope: dict[str, Any]
+    """``core`` and, once the search logged a whole state, ``strategy``."""
+    strategy: FlowState | None = None
+    """The search's state as of the last committed record, typed; None before its first whole state."""
+
+
+def load_run(project: Project, run_id: str, *, plugin_id: str = "dynamic") -> LoadedRun | None:
+    """The run as its run.log leaves it, through the one reader; None when it holds no start."""
+    logged = read_logged_run(
+        project, run_id, registry=loop_spec(plugin_id).registry(), state_type=FlowState
+    )
+    if logged is None:
         return None
-    envelope: dict[str, Any] = json.loads(stored.payload)["envelope"]
-    return envelope
+    envelope: dict[str, Any] = {"core": json.loads(logged.core.model_dump_json())}
+    if logged.strategy is not None:
+        envelope["strategy"] = json.loads(logged.strategy.model_dump_json())
+    return LoadedRun(logged.core, envelope, logged.strategy)
 
 
 def simulated_clock() -> CrashableRunClock:
@@ -793,18 +786,18 @@ def resume_request(request: RunRequest, run_id: str) -> RunRequest:
 
 
 class CoreRecords:
-    """A finished run's committed core record, read through the state store."""
+    """A finished run's committed core record, folded from its run.log."""
 
     def __init__(self, loop_input: LoopInput, run_id: str) -> None:
         """Load the run's committed envelope; fail when none was committed."""
         self.loop_input = loop_input
         self.run_id = run_id
         self.project = loop_input.project()
-        envelope = load_envelope(self.project, run_id)
-        assert envelope is not None, f"no committed record for {run_id}"
-        self.envelope: dict[str, Any] = envelope
-        decoded = REGISTRY.decode_envelope(RunEnvelope[FlowState], json.dumps(envelope))
-        published = FlowDriver.published(decoded.strategy, RunSnapshot)
+        loaded = load_run(self.project, run_id)
+        assert loaded is not None, f"no committed record for {run_id}"
+        assert loaded.strategy is not None, f"the search of {run_id} logged no whole state"
+        self.envelope: dict[str, Any] = loaded.envelope
+        published = FlowDriver.published(loaded.strategy, RunSnapshot)
         assert published is not None, "the search published no record"
         self.snapshot: RunSnapshot = published
 

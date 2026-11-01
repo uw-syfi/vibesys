@@ -28,7 +28,14 @@ from vs_core.api import (
     ResourceId,
 )
 from vs_core.api.recovery import Cancelled, CancelReason, Finished, interruption_of
-from vs_runtime.api.core import JobRegistry, MeasurementRequests, ReceiptStore, RequestExecutors
+from vs_runtime.api.core import (
+    JobBooks,
+    JobRegistry,
+    MeasurementRequests,
+    ReceiptEvidenceLedger,
+    ReceiptStore,
+    RequestExecutors,
+)
 from vs_runtime.api.evaluation_step_runners import SlurmJobStepRunner, SlurmScheduler
 from vs_runtime.api.executor_contexts import RevocableLease, receipt_store_in
 from vs_runtime.api.executor_step_runner import DECLARED_REPEATS, ExecutorStepRunner
@@ -122,7 +129,7 @@ class Process:
         self.runner = SlurmJobStepRunner(
             stack.executor,
             SlurmScheduler(world.ledger, world.cluster, world.blocking),
-            world.registry_of(holder),
+            world.books_of(holder),
             clock=world.clock,
             poll_interval_s=POLL_S,
         )
@@ -153,9 +160,10 @@ class World:
             self.stores[holder] = receipt_store_in(directory)
         return self.stores[holder]
 
-    def registry_of(self, holder: str) -> JobRegistry:
-        """The job registry of run *holder*, over its receipt store."""
-        return JobRegistry(self.store_of(holder))
+    def books_of(self, holder: str) -> JobBooks:
+        """The job registry and evidence ledger of run *holder*, over its receipt store."""
+        store = self.store_of(holder)
+        return JobBooks(JobRegistry(store), ReceiptEvidenceLedger(store))
 
     def run[T](self, main: Coroutine[Any, Any, T]) -> T:
         """Run to the end on the virtual clock."""
@@ -274,6 +282,10 @@ def test_a_restarted_process_adopts_the_job_a_killed_one_submitted_and_returns_i
         assert result.observation.request_id == tag
         assert result.report.evidence
         assert result.report.evaluation_result is not None
+        # Core takes the report as the job's last observation, so the readings are in the ledger
+        # the operation that decodes them reads by the time the step reports (not after a poll).
+        ledger = ReceiptEvidenceLedger(world.store_of("run-1"))
+        assert all(ledger.lookup(ref.key) is not None for ref in result.report.evidence)
         await world.close()
 
     world.run(main())
@@ -376,6 +388,124 @@ def test_a_cancel_that_ends_the_step_cancels_the_job_and_the_next_attempt_submit
     world.run(main())
     assert len(world.cluster.submissions) == 2
     assert world.cluster.live_jobs() == 0
+
+
+def listed(world: World, step: Request) -> tuple[str, ...]:
+    """The jobs a close of the step's scope lists as its children: every handle indexed under it."""
+    return world.books_of("run-1").registry.handles(step.scope, step.admission_id)
+
+
+@pytest.mark.parametrize(
+    "reason", [reason for reason in CancelReason if not interruption_of(reason)]
+)
+def test_a_step_a_cancel_ended_leaves_its_scope_no_job_to_list(
+    tmp_path: Path, reason: CancelReason
+) -> None:
+    """The step ends `Cancelled` with no job in its report: a close that listed it names a job
+    core never heard of, and the scope would wait for a release nothing proves."""
+    world = World(tmp_path)
+    runner = world.first.runner
+    tag = tag_of("ended")
+    step = world.step(tag, ends=False)
+
+    async def main() -> None:
+        cancel = CancelSignal()
+        task = asyncio.ensure_future(runner.run(step, tag, 1, DEADLINE_AT, cancel))
+        await yield_until(world.submitted, lambda jobs: jobs == 1, "the first job")
+        assert len(listed(world, step)) == 1
+        cancel.set(reason)
+        assert await task == Cancelled(reason=reason)
+        assert listed(world, step) == ()
+        await world.close()
+
+    world.run(main())
+
+
+@pytest.mark.parametrize("reason", [CancelReason.PAUSE_NOW, CancelReason.DRAIN_EXPIRED])
+def test_a_pause_leaves_the_job_listed_for_the_next_attempt_to_adopt(
+    tmp_path: Path, reason: CancelReason
+) -> None:
+    world = World(tmp_path)
+    runner = world.first.runner
+    tag = tag_of("paused")
+    step = world.step(tag, ends=False)
+
+    async def main() -> None:
+        cancel = CancelSignal()
+        task = asyncio.ensure_future(runner.run(step, tag, 1, DEADLINE_AT, cancel))
+        await yield_until(world.submitted, lambda jobs: jobs == 1, "the first job")
+        cancel.set(reason)
+        assert await task == Cancelled(reason=reason)
+        assert len(listed(world, step)) == 1
+        await world.close()
+
+    world.run(main())
+
+
+def test_a_step_cleared_of_every_job_lists_none(tmp_path: Path) -> None:
+    """A withdrawn request whose job ended left a handle indexed, and nothing of it lives."""
+    world = World(tmp_path)
+    left = tag_of("left")
+    step = world.submission(left)
+
+    async def main() -> None:
+        await world.die_mid_run(world.first, left, attempt=1)
+        assert len(listed(world, step)) == 1
+        _withdrawn(world, left)
+        second = await world.spawn()
+        assert await second.runner.clear(step, left) == Cleared()
+        assert listed(world, step) == ()
+        await world.close()
+
+    world.run(main())
+
+
+@pytest.mark.parametrize("reason", list(CancelReason))
+def test_a_step_cancelled_before_its_run_began_submits_nothing(
+    tmp_path: Path, reason: CancelReason
+) -> None:
+    """A closing scope withdraws a step that waits to start: its job is never submitted after."""
+    world = World(tmp_path)
+    runner = world.first.runner
+    tag = tag_of("early")
+
+    async def main() -> None:
+        cancel = CancelSignal()
+        cancel.set(reason)
+        assert await runner.run(
+            world.step(tag, ends=False), tag, 1, DEADLINE_AT, cancel
+        ) == Cancelled(reason=reason)
+        assert await runner.clear(world.submission(tag), tag) == Cleared()
+        await world.close()
+
+    world.run(main())
+    assert world.cluster.submissions == []
+    assert world.cluster.cancelled == []
+
+
+def test_a_withdrawn_step_of_the_content_another_step_submitted_leaves_that_job_alone(
+    tmp_path: Path,
+) -> None:
+    """The step found the job by its content, not by its tag: its withdrawal holds nothing to cancel."""
+    world = World(tmp_path)
+    first, second_tag = tag_of("first"), tag_of("second")
+
+    async def main() -> None:
+        await world.die_mid_run(world.first, first, attempt=1)
+        runner = (await world.spawn()).runner
+        assert await runner.clear(world.submission(second_tag), second_tag) == Adopted(None)
+        cancel = CancelSignal()
+        cancel.set(CancelReason.WITHDRAWN)
+        withdrawn = await runner.run(
+            world.step(second_tag, ends=False), second_tag, 1, DEADLINE_AT, cancel
+        )
+        assert withdrawn == Cancelled(reason=CancelReason.WITHDRAWN)
+        assert len(world.cluster.submissions) == 1
+        assert world.cluster.live_jobs() == 1
+        assert world.cluster.cancelled == []
+        await world.close()
+
+    world.run(main())
 
 
 def test_any_order_of_kills_pauses_restarts_and_clears_runs_one_job_and_cancels_none(

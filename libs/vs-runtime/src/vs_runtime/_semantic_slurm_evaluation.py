@@ -85,7 +85,7 @@ if TYPE_CHECKING:
         SlurmStageOutputOpener,
     )
     from vs_sim.api import BlockingRunner, Clock, OutputSink, Processes, Sleeper
-    from vs_slurm.api import Cluster, SlurmConfig, WorkspaceRootProof
+    from vs_slurm.api import Cluster, EvaluationLedger, SlurmConfig, WorkspaceRootProof
 
 _CLEANUP_FAILURE = "cleanup failed"
 SERVICE_LOG_SUMMARY_CHARS = 2_000
@@ -210,6 +210,16 @@ class SemanticSlurmEvaluationExecutor:
         self._closing = False
         self._ledger = ledger if ledger is not None else self._open_ledger(ledger_identity)
         self._availability = self._make_executor(workspaces.root.path)
+
+    @property
+    def cluster(self) -> Cluster:
+        """The scheduler this executor submits to."""
+        return self._availability.cluster
+
+    @property
+    def ledger(self) -> EvaluationLedger | None:
+        """The project's evaluation ledger this run is attached to, if the operator enabled one."""
+        return None if self._ledger is None else self._ledger.ledger
 
     async def availability(self, requirements: ResourceRequirements) -> AvailabilitySnapshot:
         """Report the shared scheduler admission queue."""

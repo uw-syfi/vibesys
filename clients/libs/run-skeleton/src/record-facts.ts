@@ -14,7 +14,8 @@ export const RECORD_FACTS = {
   blob: 'recordFacts',
   chat: 'recordFacts',
   legacyEvent: 'window',
-  // The records core folds into its state: no client fact depends on them, so only the window keeps them.
+  // The records core folds into its state: no client fact depends on them, and no row shows them
+  // (RECORD_BODY_KIND in @vibesys/run-state/records decides what a row is).
   coreInput: 'window',
   stepStarted: 'window',
   stepFinished: 'window',

@@ -15,7 +15,10 @@ is the default ``sbatch``. The cluster has two modes, chosen by files in
   the local filesystem. ``remote_workspace_root`` must be a local absolute
   directory; every ``exec`` runs under ``bash``, transfers copy files, and
   ``sbatch`` runs the job script to completion before it returns, so the job
-  is ``COMPLETED`` or ``FAILED`` at its first poll and nobody waits. Job ids
+  is ``COMPLETED`` or ``FAILED`` at its first poll and nobody waits. A job runs inside the
+  process that started it; when that process dies before the job ends, the job is not lost, as
+  a scheduler does not lose a job whose submitter died: the next ``squeue`` or ``sacct`` of its
+  id runs it again to its end. Job ids
   are unique. While ``hold`` exists, a new job is not run and stays
   ``PENDING`` until ``scancel`` or :func:`release_job` starts its retained script.
 
@@ -47,6 +50,7 @@ Other files in ``STATE_DIR``:
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
@@ -340,6 +344,18 @@ def release_job(state: Path, job_id: str) -> None:
         raise ValueError(message)
     if _job_state(state, job_id) != _PENDING:
         return
+    # The job's runner holds the owner file's lock while the job runs; the lock goes with the
+    # process, however it ends, which is how a later call tells a job that runs from one whose
+    # runner died (`_requeued_if_orphaned`).
+    with record.with_suffix(".owner").open("w", encoding="utf-8") as owner:
+        fcntl.flock(owner, fcntl.LOCK_EX)
+        record.write_text("RUNNING", encoding="utf-8")
+        _run_script(state, job_id)
+
+
+def _run_script(state: Path, job_id: str) -> None:
+    """Run the job's retained script to its end and record how it ended; the caller holds its lock."""
+    record = state / _JOBS_DIRECTORY / job_id
     tokens = json.loads(record.with_suffix(".request.json").read_text(encoding="utf-8"))
     start = tokens.index("sbatch")
     directory = Path(tokens[tokens.index("cd") + 1]) if "cd" in tokens[:start] else Path.cwd()
@@ -347,7 +363,6 @@ def release_job(state: Path, job_id: str) -> None:
         Path(token.split("=", 1)[1]) for token in tokens[start:] if token.startswith("--output=")
     )
     script = Path(tokens[-1])
-    record.write_text("RUNNING", encoding="utf-8")
     with output.open("w", encoding="utf-8") as log:
         # lint-waiver: LW-140001 [S603]; the Fake cluster runs the exact
         # > production-generated job script; reading the script instead of
@@ -371,11 +386,35 @@ def _job_state(state: Path, job_id: str) -> str:
     return record.read_text(encoding="utf-8") if record.is_file() else ""
 
 
+def _requeued_if_orphaned(state: Path, job_id: str) -> None:
+    """Run again a job whose runner died before it ended: the job does not depend on its submitter.
+
+    A job is ``RUNNING`` while the process that started it runs its script and holds the job's
+    lock. If that process is gone (a host killed mid-job) the lock is free and nothing would ever
+    end the job, so every poll would read it running; a scheduler keeps such a job going, so the
+    call that finds it runs it to its end, under the lock again.
+    """
+    if _job_state(state, job_id) != "RUNNING":
+        return
+    owner = (state / _JOBS_DIRECTORY / job_id).with_suffix(".owner")
+    if not owner.is_file():
+        return
+    with owner.open("a", encoding="utf-8") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return  # its runner is alive and still runs it
+        if _job_state(state, job_id) == "RUNNING":
+            _run_script(state, job_id)
+
+
 def _executing_exec(state: Path, command: str) -> tuple[int, str, str]:
     tokens = shlex.split(command)
     if "sbatch" in tokens:
         return 0, _submit(state, tokens), ""
     if tokens[:1] in (["squeue"], ["sacct"]):
+        if "-j" in tokens:
+            _requeued_if_orphaned(state, tokens[tokens.index("-j") + 1])
         if "-j" in tokens and not _job_state(state, tokens[tokens.index("-j") + 1]):
             return 0, "", ""
         return 0, _pending_query(state, tokens), ""

@@ -23,7 +23,7 @@ from vs_agent.api import AgentCapabilities, AgentSessionKey, Completed
 from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore, FakeInvocation
 from vs_project.api.testing import FakeGitRepositories, FakeGitRepository
 from vs_runtime.api import AgentRole
-from vs_runtime.api.core import PRODUCTION_LEASE_SECONDS, RunTiming
+from vs_runtime.api.core import RunTiming
 from vs_runtime.api.testing import FakeStopTimer
 from vs_sandbox.api import SandboxKind
 from vs_sandbox.api.testing import FakeComputeBackend, FakeLifecycleRunner
@@ -179,7 +179,7 @@ def test_launch_preserves_falsey_injected_implementations(tmp_path: Path, sim: S
     agents = FalseyFakeSessionAgents(agents_factory, network)
     invocation_stores = FalseyInvocationStoreFactory()
     settings = FalseyLaunchSettings(
-        timing=RunTiming(sim.clock, PRODUCTION_LEASE_SECONDS, threads),
+        timing=RunTiming(sim.clock, threads),
         processes=_processes(),
         piped_processes=FakePipedProcessLauncher(),
         registry=registry,
@@ -276,7 +276,7 @@ def test_launch_wires_durable_invocation_store(tmp_path: Path, sim: Sim, *, inje
         LaunchSettings(
             blocking=InlineBlockingRunner(),
             network=SimNetwork(threads),
-            timing=RunTiming(sim.clock, PRODUCTION_LEASE_SECONDS, threads),
+            timing=RunTiming(sim.clock, threads),
             processes=_processes(),
             piped_processes=FakePipedProcessLauncher(),
             registry=registry,

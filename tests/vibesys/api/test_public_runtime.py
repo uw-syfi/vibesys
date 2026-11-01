@@ -129,8 +129,9 @@ def test_root_workspace_capabilities(tmp_path: Path) -> None:
 def test_product_host_closes_resources_when_composition_fails(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     _write_project(project_root)
+    clock = SystemClock()
     integration = LocalRunIntegration(
-        clock=ManualClock(),
+        clock=clock,
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
@@ -148,7 +149,7 @@ def test_product_host_closes_resources_when_composition_fails(tmp_path: Path) ->
                 integration,
                 plugin=_AGENT_PLUGIN,
                 options=EmptyOptions(),
-                timing=RunTiming(SystemClock(), 60.0, OsThreads()),
+                timing=RunTiming(clock, OsThreads()),
                 backend_factory=backend_factory,
                 stop_timer=FakeStopTimer(threads=OsThreads()),
                 blocking=ThreadBlockingRunner(),

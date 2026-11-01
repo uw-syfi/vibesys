@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     )
     from vs_github.api import GitHubCLI
     from vs_mcp.api import ToolServerDescriptor
-    from vs_project.api import Git, GitRepositoryFactory, StateStoreFactory
+    from vs_project.api import Git, GitRepositoryFactory
     from vs_runtime.api.core import RunTiming
     from vs_runtime.api.infrastructure import (
         EnvironmentSystem,
@@ -32,6 +32,7 @@ if TYPE_CHECKING:
         ScopedAgentEnvironment,
         StopTimer,
     )
+    from vs_runtime.api.step_runner import StepRunnerDecorator
     from vs_sandbox.api import ComputeBackendImpl, HostResource
     from vs_sim.api import BlockingRunner, Network
 
@@ -94,8 +95,8 @@ class SessionImplementations:
     """The server of each tool that holds no run state, which a core run may offer a role."""
     git_repository: GitRepositoryFactory | None = None
     """Builds the run's ``GitRepository`` implementations; ``None`` opens the configured one."""
-    state_stores: StateStoreFactory | None = None
-    """Opens each run's ``StateStore``; ``None`` is the local crash-atomic one."""
+    step_runner_decorator: StepRunnerDecorator | None = None
+    """Wraps the run's step runner; ``None`` runs steps unwrapped, as production does."""
 
 
 __all__ = [

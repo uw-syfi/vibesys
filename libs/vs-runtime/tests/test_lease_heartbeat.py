@@ -40,7 +40,6 @@ from vs_runtime.api.core import (
     CoreRuntime,
     RunLoopConfig,
     start_core,
-    start_core_awaiting_lease,
 )
 from vs_runtime.api.core_shell_fixtures import CounterConfig, counter
 from vs_runtime.api.testing import (
@@ -51,7 +50,7 @@ from vs_runtime.api.testing import (
     ScriptedExecutors,
     scripted_host,
 )
-from vs_sim.api.testing import VirtualClock, examples, run_virtual
+from vs_sim.api.testing import VirtualClock, examples
 
 if TYPE_CHECKING:
     from vs_project.api import CommitOutcome, StoredEnvelope, StoreFence, StoreRecord
@@ -299,12 +298,9 @@ def test_a_restart_holds_its_lease_a_full_term_after_taking_it(cost: float) -> N
     clock.at += lease
     store.clock = clock
     restarted = shell()
-    run_virtual(
-        clock,
-        start_core_awaiting_lease(
-            CoreRunHost(restarted, FakePublicationDelivery(), clock),
-            RunLoopConfig(host_id="restart", lease_duration=lease),
-        ),
+    start_core(
+        CoreRunHost(restarted, FakePublicationDelivery(), clock),
+        RunLoopConfig(host_id="restart", lease_duration=lease),
     )
 
     assert restarted.holds_lease(now_at=clock.now() + lease - 1.0)

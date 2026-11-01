@@ -46,9 +46,10 @@ if TYPE_CHECKING:
     from vibesys.api.contracts import EventSink
     from vibesys.api.wiring import ProfilerPreflight, SessionAgents
     from vs_agent.api import AgentClientProtocol, AgentInvocationStore, AgentSessionKey
-    from vs_project.api import GitRepositoryFactory, Project, StateStoreFactory
+    from vs_project.api import GitRepositoryFactory, Project
     from vs_runtime.api.core import RunTiming
     from vs_runtime.api.infrastructure import RunState, StopTimer
+    from vs_runtime.api.step_runner import StepRunnerDecorator
     from vs_sandbox.api import ComputeBackendImpl
     from vs_sim.api import (
         BlockingRunner,
@@ -65,7 +66,7 @@ class LaunchSettings:
     """Implementations selected once at the application wiring boundary."""
 
     timing: RunTiming
-    """The run's time sources and lease; the entrypoint builds them from real or simulated time."""
+    """The run's time sources; the entrypoint builds them from real or simulated time."""
     processes: Processes
     """Starts the run's Git and GitHub CLI commands; the entrypoint builds real or fake ones."""
     piped_processes: PipedProcessLauncher
@@ -89,12 +90,12 @@ class LaunchSettings:
     """Builds the run's ``GitRepository`` implementations; ``None`` opens the configured one."""
     slurm_processes: Processes | None = None
     """Starts the Slurm transport's programs; ``None`` starts them with ``processes``."""
-    state_stores: StateStoreFactory | None = None
-    """Opens each run's ``StateStore``; ``None`` is the local crash-atomic one."""
     profiler_preflight: ProfilerPreflight | None = None
     """Checks native profiler availability; ``None`` probes the host through ``processes``."""
     login_environment: Callable[[], Mapping[str, str]] | None = None
     """Reads the user's login shell environment; ``None`` reads it as provider CLIs are found."""
+    step_runner_decorator: StepRunnerDecorator | None = None
+    """Wraps the run's step runner; a test holds steps at a window through it. ``None`` in production."""
     process_table: ProcessTable = field(default_factory=NoProcessTable)
     """Finds and ends a host agent's processes; the entrypoint builds the real one.
 
@@ -194,6 +195,7 @@ def _implementations(
         git=Git(settings.processes),
         github=GitHubCLI(settings.processes),
         git_repository=settings.git_repository,
+        step_runner_decorator=settings.step_runner_decorator,
         system=EnvironmentSystem(
             login_environment=(
                 launch_shell_environment
@@ -209,7 +211,6 @@ def _implementations(
             ),
             process_table=settings.process_table,
         ),
-        state_stores=settings.state_stores,
         agent_providers=tuple(sorted(SHIPPED_PROVIDERS)),
     )
 

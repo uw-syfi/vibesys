@@ -17,6 +17,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel, JsonValue
 from tests.support.core_plugins import failing_plugin
+from tests.support.logged_run import write_logged_run
 from tests.vibesys.orchestration.dynamic._host import begin, config
 
 from vibesys.candidates.api import InputReading, Measured, NotConfigured
@@ -63,7 +64,7 @@ from vs_core.api import (
     RunEnvelope,
 )
 from vs_core.testing.builders import initial_state
-from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord, StoredEnvelope
+from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
 from vs_runtime.api.core import RuntimeRecord
 from vs_sim.api.testing import examples
@@ -439,15 +440,7 @@ def _commit(project: Project, run_id: str, state: FlowState) -> RuntimeRecord[Fl
             event_cursor=EventCursor(sequence=0),
         )
     )
-    store = project.state_store(run_id)
-    fence = store.acquire("writer", now=0, duration=1)
-    assert fence is not None
-    store.commit(
-        None,
-        StoredEnvelope(revision=0, schema_version=1, payload=record.model_dump_json().encode()),
-        fence,
-        now=0,
-    )
+    write_logged_run(project, run_id, core, state)
     return record
 
 
@@ -491,7 +484,7 @@ def test_a_run_without_a_record_has_identity_and_status_only_and_stays_unopened(
         None,
         (),
     )
-    assert project.state.state_store_namespace(run_id).read_bytes("store.json") is None
+    assert not Project.run_log_path_for(project.root, run_id).exists()
 
 
 def test_a_record_that_published_nothing_projects_to_an_empty_run(tmp_path: Path) -> None:

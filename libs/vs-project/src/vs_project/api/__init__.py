@@ -117,7 +117,7 @@ from vs_project._state_io import (
     decode_state_document,
 )
 from vs_project._state_models import FakeStateModels, validate_state_namespace
-from vs_project._state_store import FakeStateStore, FakeStateStores, LocalStateStore
+from vs_project._state_store import FakeStateStore, LocalStateStore
 from vs_project._store_operations import StoreFile
 from vs_project._task_files import (
     DEFAULT_READY_TIMEOUT_SECONDS,
@@ -168,7 +168,6 @@ from vs_project.api.state_store import (
     ObservationFault,
     QuarantinedEnvelope,
     StateStore,
-    StateStoreFactory,
     StateStoreWriteError,
     StoredEnvelope,
     StoreFence,
@@ -251,7 +250,6 @@ __all__ = [
     "ExampleDomain",
     "FakeStateModels",
     "FakeStateStore",
-    "FakeStateStores",
     "FileAdmissionStore",
     "FileControlInbox",
     "FrameworkSnapshotStatus",
@@ -331,7 +329,6 @@ __all__ = [
     "StateSlot",
     "StateSnapshot",
     "StateStore",
-    "StateStoreFactory",
     "StateStoreWriteError",
     "StateTransition",
     "StoreDurabilityEffects",

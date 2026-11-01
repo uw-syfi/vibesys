@@ -9,12 +9,9 @@ or reconcile stable request identities before replay.
 
 from collections.abc import Callable
 from enum import StrEnum
-from typing import TYPE_CHECKING, Annotated, Literal, Protocol
+from typing import Annotated, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
-
-if TYPE_CHECKING:
-    from vs_project.project import Project
 
 
 class _Value(BaseModel):
@@ -202,7 +199,3 @@ class StateStore(Protocol):
         the store releases its transaction.
         """
         ...
-
-
-type StateStoreFactory = Callable[[Project, str], StateStore]
-"""Opens the ``StateStore`` of one run of a project; a Project's default is the local one."""

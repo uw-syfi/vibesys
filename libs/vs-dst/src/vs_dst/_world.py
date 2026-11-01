@@ -60,6 +60,21 @@ class World(Protocol):
         ...
 
 
+@runtime_checkable
+class HoldingWorld(Protocol):
+    """A world whose far side can hold a request forever: a job queued that nothing ever starts.
+
+    The step loop's host honours it: the effect of a request the world holds began, never ends by
+    itself and seals nothing, and it ends only when the loop cancels it, as a job held pending in a
+    scheduler's queue ends only by a cancel. The production shell has no cancel of a request to
+    hold, so a shell host ignores it.
+    """
+
+    def holds(self, request: Request) -> bool:
+        """Whether the effect of ``request`` stays pending until the loop cancels it."""
+        ...
+
+
 type Enact = Callable[[Request, ExecutionResult], Awaitable[ExecutionResult]]
 """What happens around an executed request: given the request and the result its executor
 produced, the result the shell is told (after the world's own side effects on the host, such as

@@ -3,6 +3,7 @@
 from vs_runtime._step_router import (
     LIVE_REQUEST_KINDS,
     RECOVERY_ONLY_KINDS,
+    UNSERVED_STEP_KINDS,
     NoRunnerError,
     StepRouter,
     StepRunnerParts,
@@ -14,6 +15,7 @@ from vs_runtime._step_router import (
 __all__ = [
     "LIVE_REQUEST_KINDS",
     "RECOVERY_ONLY_KINDS",
+    "UNSERVED_STEP_KINDS",
     "NoRunnerError",
     "StepRouter",
     "StepRunnerParts",

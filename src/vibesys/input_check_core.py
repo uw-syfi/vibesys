@@ -33,7 +33,7 @@ from vibesys.run.contracts import IterationTree, PluginProjection
 from vs_core.api import EvidenceRequirements, FlowDriver, FlowState, RevisionRef
 from vs_core.api import RunFacts as CoreRunFacts
 from vs_runtime.api import CoreOperation, CorePlan, CorePolicy, OrchestrationPlugin
-from vs_runtime.api.core import OperationCatalog, OperationPorts, RuntimeRecord, operation_roles
+from vs_runtime.api.core import OperationCatalog, OperationPorts, operation_roles
 
 if TYPE_CHECKING:
     from vs_core.api import TaskTerms
@@ -131,7 +131,6 @@ def _projector() -> RuntimeRecordProjector[FlowState, InputCheckSnapshot]:
     return RuntimeRecordProjector(
         plugin_id=_PLUGIN_ID,
         state_type=FlowState,
-        record_type=RuntimeRecord[FlowState],
         operations=OPERATIONS.registry(),
         published=published,
         project=project,

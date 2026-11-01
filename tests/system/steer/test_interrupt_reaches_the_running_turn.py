@@ -64,7 +64,7 @@ from vs_runtime.api.core import (
     RunLoopConfig,
     TurnMessages,
     drive_core,
-    start_core_awaiting_lease,
+    start_core,
 )
 from vs_runtime.api.infrastructure import RuntimeRunControlChannel, SteerMode
 from vs_runtime.api.testing import FakeRunControlEventSink
@@ -296,12 +296,15 @@ async def _run(world: World, scenario: Scenario) -> CoreState:
         config = RunLoopConfig(
             host_id=f"steer-{scenario.hosts}",
             lease_duration=LEASE,
-            recovery_poll_interval=50.0,
             control_poll_interval=1.0,
             max_dispatches=60,
         )
+        if scenario.hosts > 1:
+            # The runtime this test drives takes a lease, which a host that died keeps until it
+            # expires: a restart waits it out on the run clock.
+            await clock.sleep(LEASE)
         try:
-            await start_core_awaiting_lease(host, config)
+            start_core(host, config)
             await drive_core(host, config)
         except HostDiedError:
             continue

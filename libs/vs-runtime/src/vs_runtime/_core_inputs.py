@@ -239,8 +239,9 @@ class CoreInputs:
         What is due now is brought in first (the clock, the deadline, the operator, the search's
         wake-ups), so a timer that came due is never reported as a stall: if that appended
         anything the run is not stalled, and the loop decides again. A paused run waits for its
-        operator. Any other run that no timer, search wake-up or core clock will move is stuck on
-        the search, which stopped proposing, or on something core holds open that nothing ends.
+        operator, and a run with a timer ahead (``_timers``: a search wake-up, core's clock, the
+        deadline of a live run) waits for it. Any other run is stuck on the search, which stopped
+        proposing, or on something core holds open that nothing ends.
         """
         before = self._log.records_appended
         self._poll()
@@ -250,10 +251,7 @@ class CoreInputs:
         if state.run.status in (RunStatus.PAUSED, RunStatus.DRAINING, RunStatus.PARKED):
             return None
         now = self._clock.now()
-        progress = None if self._search is None else self._search.progress
-        wake = None if progress is None else progress.next_wake()
-        observe = project(state).next_observe_at
-        if any(at is not None and at > now for at in (wake, observe)):
+        if any(at > now for at in self._timers()):
             return None
         return _describe(state)
 
@@ -284,17 +282,46 @@ class CoreInputs:
 
     def _deadline(self, now: float) -> None:
         """Stop the run, draining, when its deadline passes; once per epoch."""
+        at = self._deadline_at()
+        if at is not None and now >= at:
+            control = ControlInput(
+                control_id=self._deadline_control(), action="stop", mode=StopMode.DRAIN
+            )
+            self._log.input(RunControlEvent(control=control, now_at=now))
+
+    def _deadline_control(self) -> ControlId:
+        return ControlId(root=f"deadline:{self.state.steps.epoch}")
+
+    def _deadline_at(self) -> float | None:
+        """When the deadline stops the run, None once it cannot.
+
+        It cannot once the run is not live, has its result, or has this epoch's deadline control.
+        """
         state = self.state
-        identity = ControlId(root=f"deadline:{state.steps.epoch}")
+        identity = self._deadline_control()
         live = state.run.status in (RunStatus.RUNNING, RunStatus.PAUSED)
         if (
-            now >= state.run.deadline_at
-            and live
+            live
             and state.run.result is None
             and all(control.control_id != identity for control in state.run.controls)
         ):
-            control = ControlInput(control_id=identity, action="stop", mode=StopMode.DRAIN)
-            self._log.input(RunControlEvent(control=control, now_at=now))
+            return state.run.deadline_at
+        return None
+
+    def _timers(self) -> tuple[float, ...]:
+        """The times at which the run moves with no one's help: the single definition of "waiting".
+
+        The search's next wake-up, the time core asked for (a paced poll, a wait's timer, a
+        request's retry) and the deadline that stops a live run. ``stalled`` and ``_due`` both
+        read it, so a run with no work in flight and a deadline ahead is waiting for it in both.
+        """
+        progress = None if self._search is None else self._search.progress
+        times = (
+            None if progress is None else progress.next_wake(),
+            project(self.state).next_observe_at,
+            self._deadline_at(),
+        )
+        return tuple(at for at in times if at is not None)
 
     def _tick(self, now: float) -> None:
         """Deliver the clock to core once a time it asked for has come, if that changes anything.
@@ -313,16 +340,11 @@ class CoreInputs:
 
     def _due(self) -> float | None:
         """Seconds until the next thing this wrapper must look at, None when none is set."""
-        state = self.state
         now = self._clock.now()
-        progress = None if self._search is None else self._search.progress
-        times = [
-            None if progress is None else progress.next_wake(),
-            project(state).next_observe_at,
-            state.run.deadline_at,
-            None if self._controls is None else now + self._poll_every,
-        ]
-        return min((t - now for t in times if t is not None and t > now), default=None)
+        times = self._timers()
+        if self._controls is not None:
+            times = (*times, now + self._poll_every)
+        return min((t - now for t in times if t > now), default=None)
 
 
 def _describe(core: CoreState) -> str:

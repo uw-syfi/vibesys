@@ -51,14 +51,12 @@ from vs_core.testing.builders import initial_state, sample_limits
 from vs_runtime.api.core import (
     CoreRunHost,
     DispatchCapExceededError,
-    LeaseUnavailableError,
     RunControlBridge,
     RunLoopConfig,
     RunOutcome,
     RunStalledError,
     drive_core,
     start_core,
-    start_core_awaiting_lease,
 )
 from vs_runtime.api.infrastructure import (
     RunControlTransition,
@@ -632,47 +630,6 @@ async def test_restart_mid_run_resumes_from_durable_state(tmp_path: Path) -> Non
     assert second.shell.record.envelope.core.revision > first.shell.record.envelope.core.revision
 
 
-@pytest.mark.parametrize("elapsed", [0.0, 7.0, LEASE - 0.5])
-async def test_a_restart_waits_in_clock_time_for_a_dead_hosts_lease(
-    tmp_path: Path, elapsed: float
-) -> None:
-    with open_skeleton_world(tmp_path, INERT) as world:
-        clock = ProbedRunClock(clock_from(1.0))
-        first, crashed = _host(world, clock)
-        start_core(crashed, _config())
-        del first  # the process dies holding its lease, which it never releases
-        clock.at += elapsed
-        _second, resumed = _host(world, clock)
-        started_at = clock.at
-
-        await start_core_awaiting_lease(resumed, _config())
-
-    # The wait ends at the first poll at or after the lease's expiry, never earlier.
-    waited = clock.at - started_at
-    assert LEASE - elapsed <= waited < LEASE - elapsed + 1.0
-
-
-async def test_a_restart_gives_up_after_one_lease_while_another_host_renews_it(
-    tmp_path: Path,
-) -> None:
-    with open_skeleton_world(tmp_path, INERT) as world:
-        clock = ProbedRunClock(clock_from(1.0))
-        holder, live = _host(world, clock)
-        start_core(live, _config())
-
-        class RenewingClock(ProbedRunClock):
-            async def sleep(self, seconds: float) -> None:
-                await super().sleep(seconds)
-                holder.shell.renew(now_at=self.at, lease_duration=LEASE)
-
-        waiting = RenewingClock(clock_from(clock.at))
-        _other, restarted = _host(world, waiting)
-        with pytest.raises(LeaseUnavailableError, match="still held"):
-            await start_core_awaiting_lease(restarted, _config())
-
-    assert LEASE <= sum(waiting.sleeps) <= LEASE + 1.0
-
-
 async def test_a_released_lease_is_free_at_once(tmp_path: Path) -> None:
     with open_skeleton_world(tmp_path, INERT) as world:
         clock = ProbedRunClock(clock_from(1.0))
@@ -681,7 +638,7 @@ async def test_a_released_lease_is_free_at_once(tmp_path: Path) -> None:
 
         first.shell.release_lease(now_at=clock.now())
         _second, restarted = _host(world, clock)
-        await start_core_awaiting_lease(restarted, _config())
+        start_core(restarted, _config())
 
     assert clock.sleeps == []
 
