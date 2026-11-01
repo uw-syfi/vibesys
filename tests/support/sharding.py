@@ -353,9 +353,17 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     )
 
 
+#: The xdist schedulers that hand a worker its next test as it finishes the last, so the order of
+#: the collected items decides who is still running when the others are done. ``loadgroup`` is the
+#: one the suite runs (``addopts`` and the CI shard command); ``load`` is the one a developer may
+#: pass. Starting the expensive files first only helps these: the others deal whole modules or
+#: classes, or every test to every worker.
+DYNAMIC_DISTS = frozenset({"load", "loadgroup"})
+
+
 def pytest_configure_node(node: WorkerController) -> None:
     """Forward the controller's scheduling choice before workers reset xdist options."""
-    node.workerinput["duration_order"] = node.config.getoption("dist") == "load"
+    node.workerinput["duration_order"] = node.config.getoption("dist") in DYNAMIC_DISTS
 
 
 _PLAN = pytest.StashKey["_Plan"]()

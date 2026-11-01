@@ -63,7 +63,7 @@ def _sharding_config(pytester: pytest.Pytester, *arguments: str) -> pytest.Confi
 
 @pytest.mark.parametrize(
     ("distribution", "expected"),
-    [("load", _SLOW_FIRST), ("loadgroup", _COLLECTED)],
+    [("load", _SLOW_FIRST), ("loadgroup", _SLOW_FIRST), ("loadscope", _COLLECTED)],
 )
 def test_duration_order_respects_the_distribution_mode(
     pytester: pytest.Pytester,
@@ -71,7 +71,7 @@ def test_duration_order_respects_the_distribution_mode(
     distribution: str,
     expected: list[str],
 ) -> None:
-    """The controller forwards duration order only to ``load``; the worker applies what it got."""
+    """The controller forwards duration order to the dynamic schedulers; the worker applies what it got."""
     monkeypatch.delenv("VIBESYS_TEST_SHARD", raising=False)
     pytester.makepyfile(test_fast="def test_fast(): pass", test_slow="def test_slow(): pass")
     items, _ = pytester.inline_genitems("-p", "no:tach")
