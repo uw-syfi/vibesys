@@ -17,7 +17,7 @@ contract, the domain types and the interfaces. Rows marked "planned" below do no
 | Path | Role |
 | --- | --- |
 | `cmd/vibesys-cli/` | Argument parsing and output. Nothing else. |
-| `internal/core/` | Pure domain types, and later the pure rules (keys, verdicts, promotion checks): no I/O, no clock, no goroutines. |
+| `internal/core/` | Pure domain types and rules (job keys, state machine, cache reuse, verdicts, promotion checks): no I/O, no clock, no goroutines. |
 | `internal/store/` | `Store`: the logical interface to results, events, logs, job state and plans. No paths, no formats. |
 | `internal/store/filestore/` | The only code that knows the on-disk layout. Owns migrations. Planned: the package holds only its doc comment so far. |
 | `internal/store/memstore/` | Planned: in-memory `Store` for tests. Passes the same contract suite as `filestore`. |
