@@ -204,7 +204,14 @@ floor = 40
 # comment naming why; do not add bare entries. Only list a module that
 # actually falls below the floor: allowlisting a covered module wrongly
 # implies it is untested.
-allowlist = []
+allowlist = [
+    # The old shell runtime (#3475 6b). The tool-call, bridge and comparison tests that ran it
+    # are gone; only the shell's own chaos sweep and a few support harnesses still do. The next
+    # step of the deletion removes these modules and these entries together.
+    "libs/vs-runtime/src/vs_runtime/_core_loop.py",
+    "libs/vs-runtime/src/vs_runtime/_core_publications.py",
+    "libs/vs-runtime/src/vs_runtime/_core_run.py",
+]
 
 [tool.vibesys.contract_sot]
 # Phase 3 generates the core types from these protos and deletes the hand-written
