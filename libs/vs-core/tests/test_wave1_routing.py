@@ -156,14 +156,6 @@ EXPECTED_TARGET = {
             ),
         ),
         (
-            "vs_core._request_recovery.advance",
-            (
-                "recovery_started",
-                "recovery_ready",
-                "recovery_check_wait_lapsed",
-            ),
-        ),
-        (
             "vs_core.scheduling.schedule",
             (
                 "attempt_requested",
