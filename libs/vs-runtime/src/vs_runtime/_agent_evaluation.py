@@ -2,9 +2,9 @@
 
 An agent submits a measurement of its own workspace from inside a turn. Core stays the
 only authority on admission, budget and identity: this module turns each tool call into
-one ``AgentMeasurementRequested`` event, asks core what it decides (``CoreRuntime.admit``
-runs core's pure step against the committed state and queues the event for the next
-commit), and answers the tool with core's decision. It decides nothing itself.
+one ``AgentMeasurementRequested`` event, asks core what it decides (``CoreInputs.admit``
+commits core's pure step to the run log before it returns), and answers the tool with core's
+decision. It decides nothing itself.
 
 Flow of one turn that waits on its measurements:
 
