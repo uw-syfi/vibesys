@@ -405,6 +405,22 @@ class ClosePolicy(StrEnum):
     scope reads its result, so waiting for it only keeps the scope open."""
 
 
+class EndPolicy(StrEnum):
+    """What a run that ends by a cancel does with an open step.
+
+    Every kind of step declares one (``request_end_policy``), so the rule never names a kind.
+    A cancel ends the work the run no longer wants and frees what the run holds.
+    """
+
+    CANCEL = "cancel"
+    """The run ends the step as work nobody wants: it cancels an attempt that runs and settles
+    a step that has not started. The default."""
+
+    RELEASE = "release"
+    """The step frees what the run holds (a session, a workspace, a job, a scope), so the run
+    cannot end before it has its result: it runs on, within its own limit."""
+
+
 class OperationSchemaRef(Value):
     """Operation schema ref lifecycle contract."""
 

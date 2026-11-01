@@ -92,12 +92,19 @@ class RecoverableExecutors(ScriptedExecutors):
         if request.request_id is None:
             raise ContractError(("request_id",), "a dispatched request carries its identity")
         identity = request.request_id.root
-        self._effects.executed.append(identity)
-        self._began(len(self._effects.executed) - 1)
+        self.begin(identity)
         result = await self._enacted(request, await super().execute(request, context))
         self._effects.sealed[identity] = result
         self._effects.finished[identity] = self._effects.finished.get(identity, 0) + 1
         return result
+
+    def begin(self, identity: str) -> None:
+        """The effect of the request ``identity`` has begun, and nothing of it is sealed yet.
+
+        A request the far side holds begins too: it is in flight until the loop cancels it.
+        """
+        self._effects.executed.append(identity)
+        self._began(len(self._effects.executed) - 1)
 
     def _began(self, index: int) -> None:
         """The ``index``-th effect of the run has begun, and nothing of it is sealed yet."""

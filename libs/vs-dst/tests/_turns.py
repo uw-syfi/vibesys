@@ -27,7 +27,9 @@ from vs_core.api import (
     ResumeSessionTurn,
     Role,
     RunEnvelope,
+    SearchDef,
     SessionId,
+    StopRequested,
     Value,
 )
 from vs_core.api.testing import (
@@ -103,10 +105,35 @@ async def tiny_turns(ctx: Flow, config: TurnsConfig) -> NoWinner:
     return NoWinner(reason="asked")
 
 
-def turns_setup(turns: int) -> RunSetup:
+async def ask_turns(ctx: Flow, config: TurnsConfig) -> None:
+    """Ask one session its turns, one after the other."""
+    session = ctx.agents.session(ASKER)
+    for _ in range(config.done, config.turns):
+        await session.turn(Prompt(text="turn"), within=WITHIN)
+
+
+@fake_search("tiny-stoppable-turns", TurnsConfig, (ASKER,), snapshot=TurnsConfig)
+async def stoppable_turns(ctx: Flow, config: TurnsConfig) -> NoWinner:
+    """Ask the turns in a group, as the product searches do: a stop ends the group's turn.
+
+    The group stops what it started when the run is stopped, so a turn in flight is cancelled
+    and the search ends the run at once, instead of finishing the turns it had begun.
+    """
+    ctx.checkpoint(config)
+    async with ctx.group() as asking:
+        asking.start("ask", ask_turns, config)
+        match await ctx.first(asking, ctx.stopped):
+            case StopRequested():
+                await ctx.first(asking)
+            case _:
+                pass
+    return NoWinner(reason="asked")
+
+
+def turns_setup(turns: int, search: SearchDef[TurnsConfig] = tiny_turns) -> RunSetup:
     """The tiny search over ``turns`` turns, hosted with the fake operations."""
     return RunSetup(
-        new_launch=lambda: Launch(tiny_turns, TurnsConfig(turns=turns)),
+        new_launch=lambda: Launch(search, TurnsConfig(turns=turns)),
         harness=Harness(
             registry=FAKE_REGISTRY,
             facts=FACTS,
@@ -117,9 +144,9 @@ def turns_setup(turns: int) -> RunSetup:
                 request_retries=sample_retries(2),
             ),
             envelope_type=RunEnvelope[FlowState],
-            schemas=tiny_turns.reply_schemas,
+            schemas=search.reply_schemas,
         ),
-        schemas=tiny_turns.reply_schemas,
+        schemas=search.reply_schemas,
     )
 
 
@@ -140,8 +167,8 @@ def _rendered(request: ExecuteRegisteredOperation) -> BaseModel:
 class TurnsWorld:
     """Executors that render a prompt, make a session and answer each turn with a plan."""
 
-    def __init__(self, turns: int = 2) -> None:
-        self.setup = turns_setup(turns)
+    def __init__(self, turns: int = 2, search: SearchDef[TurnsConfig] = tiny_turns) -> None:
+        self.setup = turns_setup(turns, search)
         self.turns_answered = 0
         """How many turns the far side has answered, whichever run asked them."""
 
@@ -161,3 +188,16 @@ class TurnsWorld:
                 return Succeeded(outcome=_rendered(request))
             case _:
                 return Succeeded()
+
+
+class HeldTurnsWorld(TurnsWorld):
+    """The far side holds every turn: it ends only when the loop cancels it, or at its limit.
+
+    The search asks its turns in a group, so a stop ends the turn in flight.
+    """
+
+    def __init__(self, turns: int = 2) -> None:
+        super().__init__(turns, stoppable_turns)
+
+    def holds(self, request: Request) -> bool:
+        return isinstance(request, DispatchTurn | ResumeSessionTurn)
