@@ -52,8 +52,6 @@ from vs_core.api import (
     ExecuteRegisteredOperation,
     FlowState,
     ObservationStatus,
-    ObserveOwnedJob,
-    OwnedJob,
     ResourceId,
     ResumeSessionTurn,
     RetainRevision,
@@ -64,7 +62,7 @@ from vs_core.api import (
     VerifyAdoption,
 )
 from vs_core.testing.builders import sample_retries
-from vs_core.testing.drive import Answer, Harness, Running, Succeeded, Unknown
+from vs_core.testing.drive import Answer, Harness, Succeeded, Unknown
 from vs_dst.api import RunSetup
 from vs_issue_tracker.api import FakeIssueTracker, LogProgress, MemoryProgressLog
 from vs_runtime.api.core import IssueBoardOwner, handle_for
@@ -74,7 +72,7 @@ from vs_sim.api.testing import ManualClock, SimThreads
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from vs_core.api import CoreState, Request
+    from vs_core.api import CoreState, MeasurementPlan, Request, RequestId, Scope
     from vs_issue_tracker.api import FaultPhase
 
 _REGISTRY = issue_queue.registry()
@@ -189,7 +187,6 @@ class IssueQueueWorld:
         unchanged: Sequence[str] = (),
         tracker_faults: Mapping[int, FaultPhase] | None = None,
         record_requests: bool = False,
-        polls: int = 0,
         checkpoints: Sequence[str] = (),
         **settings: object,
     ) -> None:
@@ -203,8 +200,7 @@ class IssueQueueWorld:
         nothing: the workspace executor retains the revision the attempt started from.
         ``tracker_faults`` maps the n-th call of the tracker's fault hook to the phase it fails
         in (see `ScheduledFaults`). ``record_requests`` keeps every request the executors
-        received in ``requests``. ``polls`` is how many polls each evaluation job reports
-        running; ``checkpoints`` answers the n-th checkpoint request ``succeeded``, ``failed``
+        received in ``requests``. ``checkpoints`` answers the n-th checkpoint request ``succeeded``, ``failed``
         or ``retryable`` (cycling). Any other option is an `IssueQueueConfig` field.
         """
         self.config = issue_queue_config(**settings)
@@ -230,9 +226,7 @@ class IssueQueueWorld:
         self._accurate = accurate
         self._silent_official = silent_official
         self._unchanged = frozenset(unchanged)
-        self._polls = polls
         self._checkpoints = FaultyCheckpoints(self._answer, tuple(checkpoints))
-        self._running: dict[str, int] = {}
         self._bases: dict[str, RevisionRef] = {}
         self._ranks: dict[str, int] = {}
 
@@ -268,10 +262,9 @@ class IssueQueueWorld:
 
     def _answer(self, request: Request, core: CoreState) -> Answer:
         """What an executor that needs no view beyond ``core`` reports for ``request``."""
+        del core
         answer: Answer
         match request:
-            case ObserveOwnedJob():
-                answer = self._observe(request, core)
             case ExecuteRegisteredOperation():
                 answer = self._operation(request)
             case SubmitMeasurement():
@@ -311,7 +304,14 @@ class IssueQueueWorld:
         if self._silent_official and request.plan.purpose == "official":
             return Unknown()
         assert request.request_id is not None
-        return Running(resource_id=ResourceId(root=handle_for(request.request_id)))
+        # The step loop ends a job's step when the job ends, so the submission is answered with
+        # the end and the evidence: there is no poll for the world to answer later.
+        return self._ended(
+            request.plan,
+            request.scope,
+            request.request_id,
+            ResourceId(root=handle_for(request.request_id)),
+        )
 
     def _environment(self, request: Request) -> Answer:
         """What the workspace, session and adoption executors report: they need no script."""
@@ -355,19 +355,10 @@ class IssueQueueWorld:
             return Succeeded(output_json=text, resource_id=lease(request.turn.session.session_id))
         return reply
 
-    def _observe(self, request: ObserveOwnedJob, core: CoreState) -> Answer:
-        """A trusted measurement job that ends with the verdict the world was set to."""
-        resource = request.resource_id.root
-        left = self._running.setdefault(resource, self._polls)
-        if left > 0:
-            self._running[resource] = left - 1
-            return Running(resource_id=request.resource_id)
-        job = next(
-            item
-            for item in core.evaluation.jobs
-            if isinstance(item, OwnedJob) and item.resource_id == request.resource_id
-        )
-        plan = job.plan
+    def _ended(
+        self, plan: MeasurementPlan, scope: Scope, submission: RequestId, resource_id: ResourceId
+    ) -> Answer:
+        """The job's end: its evidence, with the verdict the world was set to."""
         assert isinstance(plan.candidate, RevisionRef)
         commit = plan.candidate.revision_id.root
         status = ObservationStatus.SUCCEEDED if self._accurate else ObservationStatus.FAILED
@@ -380,8 +371,8 @@ class IssueQueueWorld:
                     evidence_id=EvidenceId(root=f"{stage.stage_id}:{plan.purpose}:{commit}"),
                     kind=_KINDS[stage.stage_id],
                     purpose=plan.purpose,
-                    scope=job.scope,
-                    source_request=job.submission_id,
+                    scope=scope,
+                    source_request=submission,
                     candidate=plan.candidate,
                     observation_sequence=0,
                     evaluator_digest=plan.evaluator_digest,
@@ -393,7 +384,7 @@ class IssueQueueWorld:
             )
             stages.append(EvaluationStageResult(stage_id=stage.stage_id, outcome=outcome))
         return Succeeded(
-            resource_id=request.resource_id,
+            resource_id=resource_id,
             evidence=tuple(refs),
             facts=EvaluationTerminalFacts(stages=tuple(stages), accuracy_passed=self._accurate),
         )

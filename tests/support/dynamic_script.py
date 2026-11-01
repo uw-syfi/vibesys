@@ -185,6 +185,10 @@ class Executors:
     throughputs: Sequence[float | None] = (100.0,)
     baseline_throughput: float | None = BASELINE_THROUGHPUT
     exhausted: str | None = None
+    ends_jobs_at_submission: bool = False
+    """Whether a measurement submission is answered with the job's end and its evidence. The step
+    loop ends a job's step when the job ends, as a job runner reports it, so a world it hosts has
+    no poll to answer later; a core-driven test polls and leaves this off."""
     jobs: int = 0
     readings: dict[EvidenceId, EvidenceReading] = field(default_factory=dict)
     handoffs: set[int] = field(default_factory=set)
@@ -262,6 +266,8 @@ class Executors:
             return self.finished_agent_evaluation(request)
         if self.submit is not None:
             return self.submit(request)
+        if self.ends_jobs_at_submission:
+            return self.finished_agent_evaluation(request)
         self.jobs += 1
         return Running(resource_id=ResourceId(root=f"job:{self.jobs}"))
 
