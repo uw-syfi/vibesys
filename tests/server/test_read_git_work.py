@@ -35,6 +35,7 @@ from server.host_api import RUN_EVENTS_FILE
 from server.host_helper_os import FileProjects
 from server.host_helper_requests import HelperHost, registry_read_source
 from server.host_operation_reads import answer_registered_read, stream_saved_runs
+from vs_agent.api.testing import FakeLimitsReader
 from vs_project.api import (
     OrchestrationDescriptor,
     Project,
@@ -240,6 +241,12 @@ _REQUESTS: dict[str, Callable[[str], ReadRequest]] = {
             pb.UsageRatesRefreshRequest(request_id="r", now=Timestamp.from_seconds(1_790_086_400)),
         )
     ),
+    "usage_limits": lambda _project: ReadRequest(
+        method=Oneof(
+            "usage_limits",
+            pb.UsageLimitsRequest(request_id="r", now=Timestamp.from_seconds(1_790_086_400)),
+        )
+    ),
     "usage_summary": lambda project: ReadRequest(
         method=Oneof(
             "usage_summary",
@@ -298,7 +305,11 @@ def _git_work(tmp_path: Path, slot: str, runs: int) -> tuple[_GitWork, ReadRespo
         reply = answer_registered_read(
             slot.replace("_", "-"),
             request.to_binary(),
-            registry_read_source(_host(repositories, work, catalog), https=FakeHttpsGet()),
+            registry_read_source(
+                _host(repositories, work, catalog),
+                https=FakeHttpsGet(),
+                limits=lambda: FakeLimitsReader({}),
+            ),
         )
     return work, ReadResponse.from_binary(reply)
 

@@ -943,6 +943,229 @@ class TranscriptScanCache(Message[_TranscriptScanCacheFields]):
         version: int
         roots: list[TranscriptRootState]
 
+_UsageLimitWindowFields: TypeAlias = Literal["id", "kind", "label", "used_fraction", "resets_at", "window_minutes"]
+
+class UsageLimitWindow(Message[_UsageLimitWindowFields]):
+    """
+    One limit of an account: a share of an allowance and when it refills.
+
+    ```proto
+    message vibesys.host.v1.UsageLimitWindow
+    ```
+
+    Attributes:
+        id:
+            Stable for the same window across reads; readings merge by it.
+
+            ```proto
+            string id = 1;
+            ```
+        kind:
+            ```proto
+            vibesys.host.v1.UsageLimitKind kind = 2;
+            ```
+        label:
+            ```proto
+            string label = 3;
+            ```
+        used_fraction:
+            The share used; above 1 when the provider reports over-use.
+
+            ```proto
+            double used_fraction = 4;
+            ```
+        resets_at:
+            ```proto
+            optional google.protobuf.Timestamp resets_at = 5;
+            ```
+        window_minutes:
+            ```proto
+            optional uint32 window_minutes = 6;
+            ```
+    """
+
+    __slots__ = ("id", "kind", "label", "used_fraction", "resets_at", "window_minutes")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            id: str = "",
+            kind: UsageLimitKind | None = None,
+            label: str = "",
+            used_fraction: float = 0,
+            resets_at: Timestamp | None = None,
+            window_minutes: int | None = None,
+        ) -> None:
+            pass
+
+        id: str
+        kind: UsageLimitKind
+        label: str
+        used_fraction: float
+        resets_at: Timestamp | None
+        window_minutes: int
+
+_UsageResetCreditFields: TypeAlias = Literal["id", "expires_at", "title"]
+
+class UsageResetCredit(Message[_UsageResetCreditFields]):
+    """
+    A credit that refills the account's limits at once when spent.
+
+    ```proto
+    message vibesys.host.v1.UsageResetCredit
+    ```
+
+    Attributes:
+        id:
+            ```proto
+            string id = 1;
+            ```
+        expires_at:
+            ```proto
+            optional google.protobuf.Timestamp expires_at = 2;
+            ```
+        title:
+            ```proto
+            optional string title = 3;
+            ```
+    """
+
+    __slots__ = ("id", "expires_at", "title")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            id: str = "",
+            expires_at: Timestamp | None = None,
+            title: str | None = None,
+        ) -> None:
+            pass
+
+        id: str
+        expires_at: Timestamp | None
+        title: str
+
+_UsageAccountLimitsFields: TypeAlias = Literal["provider", "account", "plan", "windows", "reset_credits_available", "reset_credits", "usage_url", "read_at"]
+
+class UsageAccountLimits(Message[_UsageAccountLimitsFields]):
+    """
+    One provider's account as a read found it.
+
+    ```proto
+    message vibesys.host.v1.UsageAccountLimits
+    ```
+
+    Attributes:
+        provider:
+            ```proto
+            string provider = 1;
+            ```
+        account:
+            A digest of the account, never an email or an id: equal across hosts for one account.
+
+            ```proto
+            optional string account = 2;
+            ```
+        plan:
+            The provider's own plan word, for example `team` or `pro`.
+
+            ```proto
+            optional string plan = 3;
+            ```
+        windows:
+            ```proto
+            repeated vibesys.host.v1.UsageLimitWindow windows = 4;
+            ```
+        reset_credits_available:
+            The count the provider states; `reset_credits` can list fewer.
+
+            ```proto
+            optional uint32 reset_credits_available = 5;
+            ```
+        reset_credits:
+            ```proto
+            repeated vibesys.host.v1.UsageResetCredit reset_credits = 6;
+            ```
+        usage_url:
+            ```proto
+            optional string usage_url = 7;
+            ```
+        read_at:
+            When the windows were read.
+
+            ```proto
+            optional google.protobuf.Timestamp read_at = 8;
+            ```
+    """
+
+    __slots__ = ("provider", "account", "plan", "windows", "reset_credits_available", "reset_credits", "usage_url", "read_at")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            provider: str = "",
+            account: str | None = None,
+            plan: str | None = None,
+            windows: list[UsageLimitWindow] | None = None,
+            reset_credits_available: int | None = None,
+            reset_credits: list[UsageResetCredit] | None = None,
+            usage_url: str | None = None,
+            read_at: Timestamp | None = None,
+        ) -> None:
+            pass
+
+        provider: str
+        account: str
+        plan: str
+        windows: list[UsageLimitWindow]
+        reset_credits_available: int
+        reset_credits: list[UsageResetCredit]
+        usage_url: str
+        read_at: Timestamp | None
+
+_UsageLimitsStateFields: TypeAlias = Literal["version", "providers"]
+
+class UsageLimitsState(Message[_UsageLimitsStateFields]):
+    """
+    The last good reading of each provider on this host. A cache of the providers, persisted as
+    `limits.pb`: a file that fails its rules is rebuilt by the next read.
+
+    ```proto
+    message vibesys.host.v1.UsageLimitsState
+    ```
+
+    Attributes:
+        version:
+            ```proto
+            uint32 version = 1;
+            ```
+        providers:
+            ```proto
+            repeated vibesys.host.v1.UsageAccountLimits providers = 2;
+            ```
+    """
+
+    __slots__ = ("version", "providers")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            version: int = 0,
+            providers: list[UsageAccountLimits] | None = None,
+        ) -> None:
+            pass
+
+        version: int
+        providers: list[UsageAccountLimits]
+
 class UsageEstimateSource(Enum):
     """
     How the estimate of one series was reached, in the order the host tries them: an override the
@@ -1155,9 +1378,84 @@ class UsagePricesStatus(Enum):
     OK = 1
     UNREADABLE = 2
 
+class UsageLimitKind(Enum):
+    """
+    What a window is, in words every provider shares.
+
+    ```proto
+    enum vibesys.host.v1.UsageLimitKind
+    ```
+
+    Attributes:
+        UNSPECIFIED:
+            ```proto
+            USAGE_LIMIT_KIND_UNSPECIFIED = 0
+            ```
+        SESSION:
+            ```proto
+            USAGE_LIMIT_KIND_SESSION = 1
+            ```
+        WEEKLY:
+            ```proto
+            USAGE_LIMIT_KIND_WEEKLY = 2
+            ```
+        MONTHLY:
+            ```proto
+            USAGE_LIMIT_KIND_MONTHLY = 3
+            ```
+        OTHER:
+            ```proto
+            USAGE_LIMIT_KIND_OTHER = 4
+            ```
+    """
+
+    UNSPECIFIED = 0
+    SESSION = 1
+    WEEKLY = 2
+    MONTHLY = 3
+    OTHER = 4
+
+class UsageLimitsUnavailable(Enum):
+    """
+    Why a provider has no windows.
+
+    ```proto
+    enum vibesys.host.v1.UsageLimitsUnavailable
+    ```
+
+    Attributes:
+        UNSPECIFIED:
+            ```proto
+            USAGE_LIMITS_UNAVAILABLE_UNSPECIFIED = 0
+            ```
+        UNSUPPORTED:
+            The provider has no way to read its limits.
+
+            ```proto
+            USAGE_LIMITS_UNAVAILABLE_UNSUPPORTED = 1
+            ```
+        API_KEY:
+            The login is billed by token, so no plan applies.
+
+            ```proto
+            USAGE_LIMITS_UNAVAILABLE_API_KEY = 2
+            ```
+        PROBE_FAILED:
+            The CLI is not installed or signed in, did not answer in time, or answered with an error.
+
+            ```proto
+            USAGE_LIMITS_UNAVAILABLE_PROBE_FAILED = 3
+            ```
+    """
+
+    UNSPECIFIED = 0
+    UNSUPPORTED = 1
+    API_KEY = 2
+    PROBE_FAILED = 3
+
 
 _DESC = file_desc(
-    b'\n!vibesys/host/v1/usage_state.proto\x12\x0fvibesys.host.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a"vibesys/store/v1/agent_attrs.proto"\xbe\x02\n\tUsageRate\x12/\n\x05input\x18\x01 \x01(\x01R\x05inputB\x19\xbaH\x16\x12\x14@\x01\x19\x00\x00\x00\x00\x80\x84.A)\x00\x00\x00\x00\x00\x00\x00\x00\x121\n\x06output\x18\x02 \x01(\x01R\x06outputB\x19\xbaH\x16\x12\x14@\x01\x19\x00\x00\x00\x00\x80\x84.A)\x00\x00\x00\x00\x00\x00\x00\x00\x128\n\ncache_read\x18\x03 \x01(\x01R\tcacheReadB\x19\xbaH\x16\x12\x14@\x01\x19\x00\x00\x00\x00\x80\x84.A)\x00\x00\x00\x00\x00\x00\x00\x00\x12:\n\x0bcache_write\x18\x04 \x01(\x01R\ncacheWriteB\x19\xbaH\x16\x12\x14@\x01\x19\x00\x00\x00\x00\x80\x84.A)\x00\x00\x00\x00\x00\x00\x00\x00\x12D\n\x0ecache_write_1h\x18\x05 \x01(\x01H\x00R\x0ccacheWrite1hB\x19\xbaH\x16\x12\x14@\x01\x19\x00\x00\x00\x00\x80\x84.A)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01B\x11\n\x0f_cache_write_1h"m\n\x11UsageRateOverride\x12 \n\x05model\x18\x01 \x01(\tR\x05modelB\n\xbaH\x07r\x05\x10\x01(\x80\x01\x126\n\x04rate\x18\x02 \x01(\x0b2\x1a.vibesys.host.v1.UsageRateR\x04rateB\x06\xbaH\x03\xc8\x01\x01"H\n\nUsageAlias\x12\x1e\n\x04from\x18\x01 \x01(\tR\x04fromB\n\xbaH\x07r\x05\x10\x01(\x80\x01\x12\x1a\n\x02to\x18\x02 \x01(\tR\x02toB\n\xbaH\x07r\x05\x10\x01(\x80\x01"\xbb\x01\n\x0eUsagePriceBook\x12\x1a\n\x08revision\x18\x01 \x01(\x04R\x08revision\x12K\n\toverrides\x18\x02 \x03(\x0b2".vibesys.host.v1.UsageRateOverrideR\toverridesB\t\xbaH\x06\x92\x01\x03\x10\x80\x02\x12@\n\x07aliases\x18\x03 \x03(\x0b2\x1b.vibesys.host.v1.UsageAliasR\x07aliasesB\t\xbaH\x06\x92\x01\x03\x10\x80\x02"\x86\x02\n\x0cUsagePricing\x12;\n\x06status\x18\x01 \x01(\x0e2#.vibesys.host.v1.UsagePricingStatusR\x06status\x12>\n\nfetched_at\x18\x02 \x01(\x0b2\x1a.google.protobuf.TimestampH\x00R\tfetchedAt\x88\x01\x01\x12!\n\x0cknown_models\x18\x03 \x01(\rR\x0bknownModels\x12\x1f\n\x0brefresh_due\x18\x04 \x01(\x08R\nrefreshDue\x12&\n\nchecked_on\x18\x05 \x01(\tR\tcheckedOnB\x07\xbaH\x04r\x02(\x10B\r\n\x0b_fetched_at"\x88\x03\n\x11UsageRateSnapshot\x12+\n\x08document\x18\x01 \x01(\x0cH\x00R\x08documentB\n\xbaH\x07z\x05\x18\x80\x80\x80\x10\x88\x01\x01\x12>\n\nfetched_at\x18\x02 \x01(\x0b2\x1a.google.protobuf.TimestampH\x01R\tfetchedAt\x88\x01\x01\x12G\n\x0flast_attempt_at\x18\x03 \x01(\x0b2\x1a.google.protobuf.TimestampH\x02R\rlastAttemptAt\x88\x01\x01B\x0b\n\t_documentB\r\n\x0b_fetched_atB\x12\n\x10_last_attempt_at:\x8c\x01\xbaH\x88\x01\x1a\x85\x01\n\x1busage_rate_snapshot.fetched\x12:a snapshot has a fetch time exactly when it has a document\x1a*has(this.document) == has(this.fetched_at)"<\n\x13UsageSourceIdentity\x12%\n\x02id\x18\x01 \x01(\tR\x02idB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{32}$"\xc9\x03\n\x0cLimitReading\x12$\n\x08provider\x18\x01 \x01(\tR\x08providerB\x08\xbaH\x05r\x03(\x80\x02\x12%\n\x06window\x18\x02 \x01(\tH\x00R\x06windowB\x08\xbaH\x05r\x03(\x80\x02\x88\x01\x01\x12#\n\x05limit\x18\x03 \x01(\tH\x01R\x05limitB\x08\xbaH\x05r\x03(\x80\x02\x88\x01\x01\x12:\n\rused_fraction\x18\x04 \x01(\x01H\x02R\x0cusedFractionB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x12<\n\tresets_at\x18\x05 \x01(\x0b2\x1a.google.protobuf.TimestampH\x03R\x08resetsAt\x88\x01\x01\x12*\n\x0ewindow_minutes\x18\x06 \x01(\rH\x04R\rwindowMinutes\x88\x01\x01\x12\x1c\n\texhausted\x18\x07 \x01(\x08R\texhausted\x12;\n\x0bobserved_at\x18\x08 \x01(\x0b2\x1a.google.protobuf.TimestampR\nobservedAtB\t\n\x07_windowB\x08\n\x06_limitB\x10\n\x0e_used_fractionB\x0c\n\n_resets_atB\x11\n\x0f_window_minutes"\xd0\x04\n\x0eRunUsageRollup\x12\x18\n\x07version\x18\x01 \x01(\rR\x07version\x12B\n\x07journal\x18\x02 \x01(\x0b2 .vibesys.host.v1.JournalIdentityR\x07journalB\x06\xbaH\x03\xc8\x01\x01\x123\n\x04rows\x18\x03 \x03(\x0b2\x1f.vibesys.host.v1.UsageRollupRowR\x04rows\x120\n\x14provider_session_ids\x18\x04 \x03(\tR\x12providerSessionIds\x120\n\x14session_ids_complete\x18\x05 \x01(\x08R\x12sessionIdsComplete\x12C\n\rfirst_turn_at\x18\x06 \x01(\x0b2\x1a.google.protobuf.TimestampH\x00R\x0bfirstTurnAt\x88\x01\x01\x12A\n\x0clast_turn_at\x18\x07 \x01(\x0b2\x1a.google.protobuf.TimestampH\x01R\nlastTurnAt\x88\x01\x01\x12>\n\x0blast_limits\x18\x08 \x03(\x0b2\x1d.vibesys.host.v1.LimitReadingR\nlastLimits\x127\n\tnew_bests\x18\t \x03(\x0b2\x1a.google.protobuf.TimestampR\x08newBests\x12#\n\runtimed_turns\x18\n \x01(\rR\x0cuntimedTurnsB\x10\n\x0e_first_turn_atB\x0f\n\r_last_turn_at"\x9d\x01\n\x0fJournalIdentity\x12\x1a\n\x08boundary\x18\x01 \x01(\x04R\x08boundary\x126\n\x0bhead_sha256\x18\x02 \x01(\tR\nheadSha256B\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$\x126\n\x0btail_sha256\x18\x03 \x01(\tR\ntailSha256B\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$"\xa5\x04\n\x0eUsageRollupRow\x12\x18\n\x07quarter\x18\x01 \x01(\x03R\x07quarter\x12$\n\x08provider\x18\x02 \x01(\tR\x08providerB\x08\xbaH\x05r\x03(\x80\x02\x12\x1e\n\x05model\x18\x03 \x01(\tR\x05modelB\x08\xbaH\x05r\x03(\x80\x04\x12>\n\x05speed\x18\x04 \x01(\x0e2\x1c.vibesys.store.v1.UsageSpeedR\x05speedB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x1c\n\x04role\x18\x05 \x01(\tR\x04roleB\x08\xbaH\x05r\x03(\x80\x02\x12B\n\x05basis\x18\x06 \x01(\x0e2 .vibesys.store.v1.UsageCostBasisR\x05basisB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x14\n\x05input\x18\x07 \x01(\x04R\x05input\x12\x1d\n\ncache_read\x18\x08 \x01(\x04R\tcacheRead\x12\x1f\n\x0bcache_write\x18\t \x01(\x04R\ncacheWrite\x12$\n\x0ecache_write_1h\x18\n \x01(\x04R\x0ccacheWrite1h\x12\x16\n\x06output\x18\x0b \x01(\x04R\x06output\x12\x1c\n\treasoning\x18\x0c \x01(\x04R\treasoning\x128\n\x0crecorded_usd\x18\r \x01(\x01H\x00R\x0brecordedUsdB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x12\x14\n\x05turns\x18\x0e \x01(\rR\x05turnsB\x0f\n\r_recorded_usd"\x96\x03\n\rTranscriptRow\x12\x18\n\x07quarter\x18\x01 \x01(\x03R\x07quarter\x12\'\n\nsession_id\x18\x02 \x01(\tR\tsessionIdB\x08\xbaH\x05r\x03(\x80\x02\x12\x1a\n\x03cwd\x18\x03 \x01(\tR\x03cwdB\x08\xbaH\x05r\x03(\x80 \x12\x1e\n\x05model\x18\x04 \x01(\tR\x05modelB\x08\xbaH\x05r\x03(\x80\x04\x12>\n\x05speed\x18\x05 \x01(\x0e2\x1c.vibesys.store.v1.UsageSpeedR\x05speedB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x14\n\x05input\x18\x06 \x01(\x04R\x05input\x12\x1d\n\ncache_read\x18\x07 \x01(\x04R\tcacheRead\x12\x1f\n\x0bcache_write\x18\x08 \x01(\x04R\ncacheWrite\x12$\n\x0ecache_write_1h\x18\t \x01(\x04R\x0ccacheWrite1h\x12\x16\n\x06output\x18\n \x01(\x04R\x06output\x12\x1c\n\treasoning\x18\x0b \x01(\x04R\treasoning\x12\x14\n\x05turns\x18\x0c \x01(\rR\x05turns"\xcb\x02\n\x13TranscriptFileState\x12\x1c\n\x04path\x18\x01 \x01(\tR\x04pathB\x08\xbaH\x05r\x03(\x80 \x12\x12\n\x04size\x18\x02 \x01(\x04R\x04size\x12\x19\n\x08mtime_ns\x18\x03 \x01(\x03R\x07mtimeNs\x12\x16\n\x06offset\x18\x04 \x01(\x04R\x06offset\x12!\n\x0cguard_length\x18\x05 \x01(\rR\x0bguardLength\x12\x1d\n\nguard_hash\x18\x06 \x01(\rR\tguardHash\x12\x1f\n\x05state\x18\x07 \x01(\x0cR\x05stateB\t\xbaH\x06z\x04\x18\x80\x80@\x12\x1a\n\x08complete\x18\x08 \x01(\x08R\x08complete\x12\x1c\n\tmalformed\x18\t \x01(\rR\tmalformed\x122\n\x04rows\x18\n \x03(\x0b2\x1e.vibesys.host.v1.TranscriptRowR\x04rows"\x95\x01\n\x13TranscriptRootState\x12$\n\x08provider\x18\x01 \x01(\tR\x08providerB\x08\xbaH\x05r\x03(\x80\x02\x12\x1c\n\x04path\x18\x02 \x01(\tR\x04pathB\x08\xbaH\x05r\x03(\x80 \x12:\n\x05files\x18\x03 \x03(\x0b2$.vibesys.host.v1.TranscriptFileStateR\x05files"k\n\x13TranscriptScanCache\x12\x18\n\x07version\x18\x01 \x01(\rR\x07version\x12:\n\x05roots\x18\x02 \x03(\x0b2$.vibesys.host.v1.TranscriptRootStateR\x05roots*\xed\x01\n\x13UsageEstimateSource\x12%\n!USAGE_ESTIMATE_SOURCE_UNSPECIFIED\x10\x00\x12"\n\x1eUSAGE_ESTIMATE_SOURCE_OVERRIDE\x10\x01\x12"\n\x1eUSAGE_ESTIMATE_SOURCE_REPORTED\x10\x02\x12"\n\x1eUSAGE_ESTIMATE_SOURCE_RECORDED\x10\x03\x12\x1f\n\x1bUSAGE_ESTIMATE_SOURCE_MODEL\x10\x04\x12"\n\x1eUSAGE_ESTIMATE_SOURCE_UNPRICED\x10\x05*`\n\x0bUsageOrigin\x12\x1c\n\x18USAGE_ORIGIN_UNSPECIFIED\x10\x00\x12\x14\n\x10USAGE_ORIGIN_RUN\x10\x01\x12\x1d\n\x19USAGE_ORIGIN_OUTSIDE_RUNS\x10\x02*v\n\x0fUsageSourceKind\x12!\n\x1dUSAGE_SOURCE_KIND_UNSPECIFIED\x10\x00\x12\x1d\n\x19USAGE_SOURCE_KIND_JOURNAL\x10\x01\x12!\n\x1dUSAGE_SOURCE_KIND_TRANSCRIPTS\x10\x02*\xb6\x01\n\x11UsageSourceStatus\x12#\n\x1fUSAGE_SOURCE_STATUS_UNSPECIFIED\x10\x00\x12\x1a\n\x16USAGE_SOURCE_STATUS_OK\x10\x01\x12\x1f\n\x1bUSAGE_SOURCE_STATUS_MISSING\x10\x02\x12\x1f\n\x1bUSAGE_SOURCE_STATUS_PARTIAL\x10\x03\x12\x1e\n\x1aUSAGE_SOURCE_STATUS_FAILED\x10\x04*\x9d\x01\n\x12UsagePricingStatus\x12$\n USAGE_PRICING_STATUS_UNSPECIFIED\x10\x00\x12\x1e\n\x1aUSAGE_PRICING_STATUS_FRESH\x10\x01\x12\x1f\n\x1bUSAGE_PRICING_STATUS_CACHED\x10\x02\x12 \n\x1cUSAGE_PRICING_STATUS_BUNDLED\x10\x03*x\n\x11UsagePricesStatus\x12#\n\x1fUSAGE_PRICES_STATUS_UNSPECIFIED\x10\x00\x12\x1a\n\x16USAGE_PRICES_STATUS_OK\x10\x01\x12"\n\x1eUSAGE_PRICES_STATUS_UNREADABLE\x10\x02B?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1b\x06proto3',
+    b'\n!vibesys/host/v1/usage_state.proto\x12\x0fvibesys.host.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a"vibesys/store/v1/agent_attrs.proto"\xbe\x02\n\tUsageRate\x12/\n\x05input\x18\x01 \x01(\x01R\x05inputB\x19\xbaH\x16\x12\x14@\x01\x19\x00\x00\x00\x00\x80\x84.A)\x00\x00\x00\x00\x00\x00\x00\x00\x121\n\x06output\x18\x02 \x01(\x01R\x06outputB\x19\xbaH\x16\x12\x14@\x01\x19\x00\x00\x00\x00\x80\x84.A)\x00\x00\x00\x00\x00\x00\x00\x00\x128\n\ncache_read\x18\x03 \x01(\x01R\tcacheReadB\x19\xbaH\x16\x12\x14@\x01\x19\x00\x00\x00\x00\x80\x84.A)\x00\x00\x00\x00\x00\x00\x00\x00\x12:\n\x0bcache_write\x18\x04 \x01(\x01R\ncacheWriteB\x19\xbaH\x16\x12\x14@\x01\x19\x00\x00\x00\x00\x80\x84.A)\x00\x00\x00\x00\x00\x00\x00\x00\x12D\n\x0ecache_write_1h\x18\x05 \x01(\x01H\x00R\x0ccacheWrite1hB\x19\xbaH\x16\x12\x14@\x01\x19\x00\x00\x00\x00\x80\x84.A)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01B\x11\n\x0f_cache_write_1h"m\n\x11UsageRateOverride\x12 \n\x05model\x18\x01 \x01(\tR\x05modelB\n\xbaH\x07r\x05\x10\x01(\x80\x01\x126\n\x04rate\x18\x02 \x01(\x0b2\x1a.vibesys.host.v1.UsageRateR\x04rateB\x06\xbaH\x03\xc8\x01\x01"H\n\nUsageAlias\x12\x1e\n\x04from\x18\x01 \x01(\tR\x04fromB\n\xbaH\x07r\x05\x10\x01(\x80\x01\x12\x1a\n\x02to\x18\x02 \x01(\tR\x02toB\n\xbaH\x07r\x05\x10\x01(\x80\x01"\xbb\x01\n\x0eUsagePriceBook\x12\x1a\n\x08revision\x18\x01 \x01(\x04R\x08revision\x12K\n\toverrides\x18\x02 \x03(\x0b2".vibesys.host.v1.UsageRateOverrideR\toverridesB\t\xbaH\x06\x92\x01\x03\x10\x80\x02\x12@\n\x07aliases\x18\x03 \x03(\x0b2\x1b.vibesys.host.v1.UsageAliasR\x07aliasesB\t\xbaH\x06\x92\x01\x03\x10\x80\x02"\x86\x02\n\x0cUsagePricing\x12;\n\x06status\x18\x01 \x01(\x0e2#.vibesys.host.v1.UsagePricingStatusR\x06status\x12>\n\nfetched_at\x18\x02 \x01(\x0b2\x1a.google.protobuf.TimestampH\x00R\tfetchedAt\x88\x01\x01\x12!\n\x0cknown_models\x18\x03 \x01(\rR\x0bknownModels\x12\x1f\n\x0brefresh_due\x18\x04 \x01(\x08R\nrefreshDue\x12&\n\nchecked_on\x18\x05 \x01(\tR\tcheckedOnB\x07\xbaH\x04r\x02(\x10B\r\n\x0b_fetched_at"\x88\x03\n\x11UsageRateSnapshot\x12+\n\x08document\x18\x01 \x01(\x0cH\x00R\x08documentB\n\xbaH\x07z\x05\x18\x80\x80\x80\x10\x88\x01\x01\x12>\n\nfetched_at\x18\x02 \x01(\x0b2\x1a.google.protobuf.TimestampH\x01R\tfetchedAt\x88\x01\x01\x12G\n\x0flast_attempt_at\x18\x03 \x01(\x0b2\x1a.google.protobuf.TimestampH\x02R\rlastAttemptAt\x88\x01\x01B\x0b\n\t_documentB\r\n\x0b_fetched_atB\x12\n\x10_last_attempt_at:\x8c\x01\xbaH\x88\x01\x1a\x85\x01\n\x1busage_rate_snapshot.fetched\x12:a snapshot has a fetch time exactly when it has a document\x1a*has(this.document) == has(this.fetched_at)"<\n\x13UsageSourceIdentity\x12%\n\x02id\x18\x01 \x01(\tR\x02idB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{32}$"\xc9\x03\n\x0cLimitReading\x12$\n\x08provider\x18\x01 \x01(\tR\x08providerB\x08\xbaH\x05r\x03(\x80\x02\x12%\n\x06window\x18\x02 \x01(\tH\x00R\x06windowB\x08\xbaH\x05r\x03(\x80\x02\x88\x01\x01\x12#\n\x05limit\x18\x03 \x01(\tH\x01R\x05limitB\x08\xbaH\x05r\x03(\x80\x02\x88\x01\x01\x12:\n\rused_fraction\x18\x04 \x01(\x01H\x02R\x0cusedFractionB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x12<\n\tresets_at\x18\x05 \x01(\x0b2\x1a.google.protobuf.TimestampH\x03R\x08resetsAt\x88\x01\x01\x12*\n\x0ewindow_minutes\x18\x06 \x01(\rH\x04R\rwindowMinutes\x88\x01\x01\x12\x1c\n\texhausted\x18\x07 \x01(\x08R\texhausted\x12;\n\x0bobserved_at\x18\x08 \x01(\x0b2\x1a.google.protobuf.TimestampR\nobservedAtB\t\n\x07_windowB\x08\n\x06_limitB\x10\n\x0e_used_fractionB\x0c\n\n_resets_atB\x11\n\x0f_window_minutes"\xd0\x04\n\x0eRunUsageRollup\x12\x18\n\x07version\x18\x01 \x01(\rR\x07version\x12B\n\x07journal\x18\x02 \x01(\x0b2 .vibesys.host.v1.JournalIdentityR\x07journalB\x06\xbaH\x03\xc8\x01\x01\x123\n\x04rows\x18\x03 \x03(\x0b2\x1f.vibesys.host.v1.UsageRollupRowR\x04rows\x120\n\x14provider_session_ids\x18\x04 \x03(\tR\x12providerSessionIds\x120\n\x14session_ids_complete\x18\x05 \x01(\x08R\x12sessionIdsComplete\x12C\n\rfirst_turn_at\x18\x06 \x01(\x0b2\x1a.google.protobuf.TimestampH\x00R\x0bfirstTurnAt\x88\x01\x01\x12A\n\x0clast_turn_at\x18\x07 \x01(\x0b2\x1a.google.protobuf.TimestampH\x01R\nlastTurnAt\x88\x01\x01\x12>\n\x0blast_limits\x18\x08 \x03(\x0b2\x1d.vibesys.host.v1.LimitReadingR\nlastLimits\x127\n\tnew_bests\x18\t \x03(\x0b2\x1a.google.protobuf.TimestampR\x08newBests\x12#\n\runtimed_turns\x18\n \x01(\rR\x0cuntimedTurnsB\x10\n\x0e_first_turn_atB\x0f\n\r_last_turn_at"\x9d\x01\n\x0fJournalIdentity\x12\x1a\n\x08boundary\x18\x01 \x01(\x04R\x08boundary\x126\n\x0bhead_sha256\x18\x02 \x01(\tR\nheadSha256B\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$\x126\n\x0btail_sha256\x18\x03 \x01(\tR\ntailSha256B\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$"\xa5\x04\n\x0eUsageRollupRow\x12\x18\n\x07quarter\x18\x01 \x01(\x03R\x07quarter\x12$\n\x08provider\x18\x02 \x01(\tR\x08providerB\x08\xbaH\x05r\x03(\x80\x02\x12\x1e\n\x05model\x18\x03 \x01(\tR\x05modelB\x08\xbaH\x05r\x03(\x80\x04\x12>\n\x05speed\x18\x04 \x01(\x0e2\x1c.vibesys.store.v1.UsageSpeedR\x05speedB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x1c\n\x04role\x18\x05 \x01(\tR\x04roleB\x08\xbaH\x05r\x03(\x80\x02\x12B\n\x05basis\x18\x06 \x01(\x0e2 .vibesys.store.v1.UsageCostBasisR\x05basisB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x14\n\x05input\x18\x07 \x01(\x04R\x05input\x12\x1d\n\ncache_read\x18\x08 \x01(\x04R\tcacheRead\x12\x1f\n\x0bcache_write\x18\t \x01(\x04R\ncacheWrite\x12$\n\x0ecache_write_1h\x18\n \x01(\x04R\x0ccacheWrite1h\x12\x16\n\x06output\x18\x0b \x01(\x04R\x06output\x12\x1c\n\treasoning\x18\x0c \x01(\x04R\treasoning\x128\n\x0crecorded_usd\x18\r \x01(\x01H\x00R\x0brecordedUsdB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x12\x14\n\x05turns\x18\x0e \x01(\rR\x05turnsB\x0f\n\r_recorded_usd"\x96\x03\n\rTranscriptRow\x12\x18\n\x07quarter\x18\x01 \x01(\x03R\x07quarter\x12\'\n\nsession_id\x18\x02 \x01(\tR\tsessionIdB\x08\xbaH\x05r\x03(\x80\x02\x12\x1a\n\x03cwd\x18\x03 \x01(\tR\x03cwdB\x08\xbaH\x05r\x03(\x80 \x12\x1e\n\x05model\x18\x04 \x01(\tR\x05modelB\x08\xbaH\x05r\x03(\x80\x04\x12>\n\x05speed\x18\x05 \x01(\x0e2\x1c.vibesys.store.v1.UsageSpeedR\x05speedB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x14\n\x05input\x18\x06 \x01(\x04R\x05input\x12\x1d\n\ncache_read\x18\x07 \x01(\x04R\tcacheRead\x12\x1f\n\x0bcache_write\x18\x08 \x01(\x04R\ncacheWrite\x12$\n\x0ecache_write_1h\x18\t \x01(\x04R\x0ccacheWrite1h\x12\x16\n\x06output\x18\n \x01(\x04R\x06output\x12\x1c\n\treasoning\x18\x0b \x01(\x04R\treasoning\x12\x14\n\x05turns\x18\x0c \x01(\rR\x05turns"\xcb\x02\n\x13TranscriptFileState\x12\x1c\n\x04path\x18\x01 \x01(\tR\x04pathB\x08\xbaH\x05r\x03(\x80 \x12\x12\n\x04size\x18\x02 \x01(\x04R\x04size\x12\x19\n\x08mtime_ns\x18\x03 \x01(\x03R\x07mtimeNs\x12\x16\n\x06offset\x18\x04 \x01(\x04R\x06offset\x12!\n\x0cguard_length\x18\x05 \x01(\rR\x0bguardLength\x12\x1d\n\nguard_hash\x18\x06 \x01(\rR\tguardHash\x12\x1f\n\x05state\x18\x07 \x01(\x0cR\x05stateB\t\xbaH\x06z\x04\x18\x80\x80@\x12\x1a\n\x08complete\x18\x08 \x01(\x08R\x08complete\x12\x1c\n\tmalformed\x18\t \x01(\rR\tmalformed\x122\n\x04rows\x18\n \x03(\x0b2\x1e.vibesys.host.v1.TranscriptRowR\x04rows"\x95\x01\n\x13TranscriptRootState\x12$\n\x08provider\x18\x01 \x01(\tR\x08providerB\x08\xbaH\x05r\x03(\x80\x02\x12\x1c\n\x04path\x18\x02 \x01(\tR\x04pathB\x08\xbaH\x05r\x03(\x80 \x12:\n\x05files\x18\x03 \x03(\x0b2$.vibesys.host.v1.TranscriptFileStateR\x05files"k\n\x13TranscriptScanCache\x12\x18\n\x07version\x18\x01 \x01(\rR\x07version\x12:\n\x05roots\x18\x02 \x03(\x0b2$.vibesys.host.v1.TranscriptRootStateR\x05roots"\xdc\x02\n\x10UsageLimitWindow\x12\x1a\n\x02id\x18\x01 \x01(\tR\x02idB\n\xbaH\x07r\x05\x10\x01(\x80\x01\x12?\n\x04kind\x18\x02 \x01(\x0e2\x1f.vibesys.host.v1.UsageLimitKindR\x04kindB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12 \n\x05label\x18\x03 \x01(\tR\x05labelB\n\xbaH\x07r\x05\x10\x01(\x80\x01\x12>\n\rused_fraction\x18\x04 \x01(\x01R\x0cusedFractionB\x19\xbaH\x16\x12\x14@\x01\x19\x00\x00\x00\x00\x80\x84.A)\x00\x00\x00\x00\x00\x00\x00\x00\x12<\n\tresets_at\x18\x05 \x01(\x0b2\x1a.google.protobuf.TimestampH\x00R\x08resetsAt\x88\x01\x01\x12*\n\x0ewindow_minutes\x18\x06 \x01(\rH\x01R\rwindowMinutes\x88\x01\x01B\x0c\n\n_resets_atB\x11\n\x0f_window_minutes"\xac\x01\n\x10UsageResetCredit\x12\x1a\n\x02id\x18\x01 \x01(\tR\x02idB\n\xbaH\x07r\x05\x10\x01(\x80\x02\x12>\n\nexpires_at\x18\x02 \x01(\x0b2\x1a.google.protobuf.TimestampH\x00R\texpiresAt\x88\x01\x01\x12#\n\x05title\x18\x03 \x01(\tH\x01R\x05titleB\x08\xbaH\x05r\x03(\x80\x01\x88\x01\x01B\r\n\x0b_expires_atB\x08\n\x06_title"\x83\x04\n\x12UsageAccountLimits\x12%\n\x08provider\x18\x01 \x01(\tR\x08providerB\t\xbaH\x06r\x04\x10\x01(@\x12&\n\x07account\x18\x02 \x01(\tH\x00R\x07accountB\x07\xbaH\x04r\x02(@\x88\x01\x01\x12 \n\x04plan\x18\x03 \x01(\tH\x01R\x04planB\x07\xbaH\x04r\x02(@\x88\x01\x01\x12E\n\x07windows\x18\x04 \x03(\x0b2!.vibesys.host.v1.UsageLimitWindowR\x07windowsB\x08\xbaH\x05\x92\x01\x02\x10\x10\x12;\n\x17reset_credits_available\x18\x05 \x01(\rH\x02R\x15resetCreditsAvailable\x88\x01\x01\x12P\n\rreset_credits\x18\x06 \x03(\x0b2!.vibesys.host.v1.UsageResetCreditR\x0cresetCreditsB\x08\xbaH\x05\x92\x01\x02\x10\x10\x12*\n\tusage_url\x18\x07 \x01(\tH\x03R\x08usageUrlB\x08\xbaH\x05r\x03(\x80\x04\x88\x01\x01\x12;\n\x07read_at\x18\x08 \x01(\x0b2\x1a.google.protobuf.TimestampR\x06readAtB\x06\xbaH\x03\xc8\x01\x01B\n\n\x08_accountB\x07\n\x05_planB\x1a\n\x18_reset_credits_availableB\x0c\n\n_usage_url"y\n\x10UsageLimitsState\x12\x18\n\x07version\x18\x01 \x01(\rR\x07version\x12K\n\tproviders\x18\x02 \x03(\x0b2#.vibesys.host.v1.UsageAccountLimitsR\tprovidersB\x08\xbaH\x05\x92\x01\x02\x10\x08*\xed\x01\n\x13UsageEstimateSource\x12%\n!USAGE_ESTIMATE_SOURCE_UNSPECIFIED\x10\x00\x12"\n\x1eUSAGE_ESTIMATE_SOURCE_OVERRIDE\x10\x01\x12"\n\x1eUSAGE_ESTIMATE_SOURCE_REPORTED\x10\x02\x12"\n\x1eUSAGE_ESTIMATE_SOURCE_RECORDED\x10\x03\x12\x1f\n\x1bUSAGE_ESTIMATE_SOURCE_MODEL\x10\x04\x12"\n\x1eUSAGE_ESTIMATE_SOURCE_UNPRICED\x10\x05*`\n\x0bUsageOrigin\x12\x1c\n\x18USAGE_ORIGIN_UNSPECIFIED\x10\x00\x12\x14\n\x10USAGE_ORIGIN_RUN\x10\x01\x12\x1d\n\x19USAGE_ORIGIN_OUTSIDE_RUNS\x10\x02*v\n\x0fUsageSourceKind\x12!\n\x1dUSAGE_SOURCE_KIND_UNSPECIFIED\x10\x00\x12\x1d\n\x19USAGE_SOURCE_KIND_JOURNAL\x10\x01\x12!\n\x1dUSAGE_SOURCE_KIND_TRANSCRIPTS\x10\x02*\xb6\x01\n\x11UsageSourceStatus\x12#\n\x1fUSAGE_SOURCE_STATUS_UNSPECIFIED\x10\x00\x12\x1a\n\x16USAGE_SOURCE_STATUS_OK\x10\x01\x12\x1f\n\x1bUSAGE_SOURCE_STATUS_MISSING\x10\x02\x12\x1f\n\x1bUSAGE_SOURCE_STATUS_PARTIAL\x10\x03\x12\x1e\n\x1aUSAGE_SOURCE_STATUS_FAILED\x10\x04*\x9d\x01\n\x12UsagePricingStatus\x12$\n USAGE_PRICING_STATUS_UNSPECIFIED\x10\x00\x12\x1e\n\x1aUSAGE_PRICING_STATUS_FRESH\x10\x01\x12\x1f\n\x1bUSAGE_PRICING_STATUS_CACHED\x10\x02\x12 \n\x1cUSAGE_PRICING_STATUS_BUNDLED\x10\x03*x\n\x11UsagePricesStatus\x12#\n\x1fUSAGE_PRICES_STATUS_UNSPECIFIED\x10\x00\x12\x1a\n\x16USAGE_PRICES_STATUS_OK\x10\x01\x12"\n\x1eUSAGE_PRICES_STATUS_UNREADABLE\x10\x02*\xa7\x01\n\x0eUsageLimitKind\x12 \n\x1cUSAGE_LIMIT_KIND_UNSPECIFIED\x10\x00\x12\x1c\n\x18USAGE_LIMIT_KIND_SESSION\x10\x01\x12\x1b\n\x17USAGE_LIMIT_KIND_WEEKLY\x10\x02\x12\x1c\n\x18USAGE_LIMIT_KIND_MONTHLY\x10\x03\x12\x1a\n\x16USAGE_LIMIT_KIND_OTHER\x10\x04*\xbd\x01\n\x16UsageLimitsUnavailable\x12(\n$USAGE_LIMITS_UNAVAILABLE_UNSPECIFIED\x10\x00\x12(\n$USAGE_LIMITS_UNAVAILABLE_UNSUPPORTED\x10\x01\x12$\n USAGE_LIMITS_UNAVAILABLE_API_KEY\x10\x02\x12)\n%USAGE_LIMITS_UNAVAILABLE_PROBE_FAILED\x10\x03B?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1b\x06proto3',
     [
         validate_pb.desc(),
         timestamp_pb.desc(),
@@ -1179,12 +1477,18 @@ _DESC = file_desc(
         "TranscriptFileState": TranscriptFileState,
         "TranscriptRootState": TranscriptRootState,
         "TranscriptScanCache": TranscriptScanCache,
+        "UsageLimitWindow": UsageLimitWindow,
+        "UsageResetCredit": UsageResetCredit,
+        "UsageAccountLimits": UsageAccountLimits,
+        "UsageLimitsState": UsageLimitsState,
         "UsageEstimateSource": UsageEstimateSource,
         "UsageOrigin": UsageOrigin,
         "UsageSourceKind": UsageSourceKind,
         "UsageSourceStatus": UsageSourceStatus,
         "UsagePricingStatus": UsagePricingStatus,
         "UsagePricesStatus": UsagePricesStatus,
+        "UsageLimitKind": UsageLimitKind,
+        "UsageLimitsUnavailable": UsageLimitsUnavailable,
     },
 )
 

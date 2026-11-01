@@ -60,6 +60,7 @@ def _slots() -> tuple[str, ...]:
         "usage_window",
         "usage_summary",
         "usage_rates_refresh",
+        "usage_limits",
         "list_harnesses",
         "list_examples",
         "get_task_goal",

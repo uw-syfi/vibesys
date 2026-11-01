@@ -328,6 +328,29 @@ def accept_usage_rates_refresh(
     return UsageRatesRefresh.accept(request)
 
 
+UsageLimits = Operation(
+    "UsageLimits",
+    47,
+    47,
+    47,
+    30000,
+    5000,
+    1,
+    2,
+    1,
+    1,
+    None,
+    None,
+    pb.UsageLimitsRequest,
+    pb.UsageLimitsResponse,
+    ((("request_id",), ("request_id",)),),
+)
+
+
+def accept_usage_limits(request: pb.UsageLimitsRequest) -> AcceptedRequest[pb.UsageLimitsRequest]:
+    return UsageLimits.accept(request)
+
+
 CreateExample = Operation(
     "CreateExample",
     34,
@@ -593,6 +616,7 @@ OPERATIONS: tuple[Operation, ...] = (
     UsageWindow,
     UsageSummary,
     UsageRatesRefresh,
+    UsageLimits,
     CreateExample,
     CopyProject,
     PutCluster,
@@ -623,6 +647,7 @@ class Handlers:
     usage_window: Callable[[pb.UsageWindowRequest], pb.UsageWindowResponse]
     usage_summary: Callable[[pb.UsageSummaryRequest], pb.UsageSummaryResponse]
     usage_rates_refresh: Callable[[pb.UsageRatesRefreshRequest], pb.UsageRatesRefreshResponse]
+    usage_limits: Callable[[pb.UsageLimitsRequest], pb.UsageLimitsResponse]
 
     def dispatch(self, request: AcceptedRequest) -> bytes:
         match request.operation.operation_id:
@@ -677,6 +702,10 @@ class Handlers:
             case 45:
                 return UsageRatesRefresh.validate_response(
                     request, self.usage_rates_refresh(UsageRatesRefresh.request_value(request))
+                )
+            case 47:
+                return UsageLimits.validate_response(
+                    request, self.usage_limits(UsageLimits.request_value(request))
                 )
             case _:
                 raise ValueError("unknown operation id")
@@ -847,6 +876,7 @@ READS: dict[str, Operation] = {
     "usage_window": UsageWindow,
     "usage_summary": UsageSummary,
     "usage_rates_refresh": UsageRatesRefresh,
+    "usage_limits": UsageLimits,
 }
 READ_CALLS: tuple[HostCall, ...] = (
     HostCall("list_tasks", "list-tasks", 10, 10, 10000, 5000),
@@ -862,6 +892,7 @@ READ_CALLS: tuple[HostCall, ...] = (
     HostCall("usage_window", "usage-window", 42, 42, 25000, 5000),
     HostCall("usage_summary", "usage-summary", 44, 44, 25000, 5000),
     HostCall("usage_rates_refresh", "usage-rates-refresh", 45, 45, 60000, 5000),
+    HostCall("usage_limits", "usage-limits", 47, 47, 30000, 5000),
 )
 MUTATIONS: dict[str, Operation] = {
     "create_example": CreateExample,

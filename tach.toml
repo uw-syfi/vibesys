@@ -89,7 +89,7 @@ layers_explicit_depends_on = true
 
 [[modules]]
 path = "entrypoints"
-depends_on = ["server.usage_pricing", "server.usage_scan", "server.chat", "vibesys.api.chat", "vs_proto", "vs_runlog", "vibesys.api.host", "vibesys.api.host_operations", "vibesys.api.transport", "server.api", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs", "server.host_helper_machine", "server.host_compute_runtime", "server.host_helper_readers", "server.host_agent_logins", "server.host_compute", "server.host_preflight", "server.host_examples", "server.host_harness", "server.host_machine_facts", "server.host_operation_reads", "server.host_task_goal", "server", "vibesys.comparisons"]
+depends_on = ["server.usage_pricing", "server.usage_scan", "server.usage_limits", "server.chat", "vibesys.api.chat", "vs_proto", "vs_runlog", "vibesys.api.host", "vibesys.api.host_operations", "vibesys.api.transport", "server.api", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs", "server.host_helper_machine", "server.host_compute_runtime", "server.host_helper_readers", "server.host_agent_logins", "server.host_compute", "server.host_preflight", "server.host_examples", "server.host_harness", "server.host_machine_facts", "server.host_operation_reads", "server.host_task_goal", "server", "vibesys.comparisons"]
 
 [[modules]]
 path = "headless"
@@ -234,7 +234,7 @@ depends_on = ["vs_decode.api", "server.host_api", "server.host_helper_requests",
 [[modules]]
 # The host helper's request answering: one request through the host's interfaces.
 path = "server.host_helper_requests"
-depends_on = ["server.host_operation_reads", "server.host_operation_types_generated", "vibesys.api.host_operations", "vs_proto", "vs_decode.api", "server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_examples", "server.host_compute_runtime", "server.host_helper_logs", "server.host_helper_preflight", "server.host_machine_facts", "server.host_preflight", "server.host_run_dashboard", "server.host_run_events", "server.host_run_reader", "server.host_run_summary", "server.host_helper_readers", "server.registry", "server.relay", "server.run_digest", "server.run_summary", "server.usage_window", "vs_project", "vs_sim.api", "server.host_run_reads", "server", "server.host_harness"]
+depends_on = ["server.host_operation_reads", "server.host_operation_types_generated", "vibesys.api.host_operations", "vs_proto", "vs_decode.api", "server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_examples", "server.host_compute_runtime", "server.host_helper_logs", "server.host_helper_preflight", "server.host_machine_facts", "server.host_preflight", "server.host_run_dashboard", "server.host_run_events", "server.host_run_reader", "server.host_run_summary", "server.host_helper_readers", "server.registry", "server.relay", "server.run_digest", "server.run_summary", "server.usage_window", "vs_project", "vs_sim.api", "server.host_run_reads", "server", "server.host_harness", "server.usage_limits", "vs_agent.api.usage_limits"]
 
 [[modules]]
 # The read-only servers Chat reads ended runs through: found by run, started on demand.
@@ -339,6 +339,16 @@ depends_on = ["server.usage_summary", "vs_agent.api.usage_pricing", "vs_proto"]
 [[interfaces]]
 from = ["server.usage_pricing"]
 expose = ["DocumentFetcher", "DocumentStore", "FetchError", "ListPricing", "PriceBookError", "PriceBookUnreadableError", "RateBook", "Rates", "RateDocument", "book_key", "check_book", "read_rate_book", "refresh_rate_book", "same_book", "saved_book"]
+
+[[modules]]
+# What each provider's plan limits are, and the host's last good reading of them in `limits.pb`.
+# Light, loaded on the first limits read.
+path = "server.usage_limits"
+depends_on = ["server.host_agent_logins", "vs_agent.api.usage_limits", "vs_project", "vs_proto"]
+
+[[interfaces]]
+from = ["server.usage_limits"]
+expose = ["FileLimitsStore", "LIMITS_FILE", "LimitsStore", "PROBE_TIMEOUT_S", "Settled", "account_limits", "collect", "decide", "read_here", "reader_here", "settle"]
 
 [[modules]]
 # A person's own CLI use on a host: the provider transcripts, read incrementally into a cache.
@@ -2310,7 +2320,7 @@ expose = ["pause_now", "serve_terminate", "terminate_run"]
 
 [[modules]]
 path = "server.host_operation_reads"
-depends_on = ["server.usage_pricing", "server.usage_scan", "server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_envelope", "server.host_examples", "server.host_machine_facts", "vs_proto", "vibesys.api.host_operations", "server.host_run_reads", "server.host_run_wire", "server.host_run_summary", "server.host_saved_runs", "server", "server.registry", "server.run_summary", "vs_sim.api"]
+depends_on = ["server.usage_pricing", "server.usage_scan", "server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_envelope", "server.host_examples", "server.host_machine_facts", "vs_proto", "vibesys.api.host_operations", "server.host_run_reads", "server.host_run_wire", "server.host_run_summary", "server.host_saved_runs", "server", "server.registry", "server.run_summary", "vs_sim.api", "server.usage_limits", "vs_agent.api.usage_limits"]
 
 [[interfaces]]
 from = ["server.host_operation_reads"]

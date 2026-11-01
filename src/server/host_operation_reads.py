@@ -8,13 +8,14 @@ category; callers receive a validated registry response.
 import is paid by every read. It therefore declares the modules only some reads use as lazy
 modules (``server.lazy_module``), loaded at the read or refusal that needs them.
 
-Public surface: HostReadFacts, HostReadSource, ReadRefusedError,
+Public surface: HostReadFacts, HostReadSource, Outside, ReadRefusedError,
 read_failure_category, answer_registered_read and stream_saved_runs.
 """
 
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
         host_run_summary,
         host_run_wire,
         host_saved_runs,
+        usage_limits,
         usage_scan,
     )
     from server.host_agent_logins import AgentLogin
@@ -40,6 +42,7 @@ if TYPE_CHECKING:
     from server.run_summary import Summarized
     from vibesys.api.host_operations import reads as read_operations
     from vibesys.api.host_operations import saved_runs
+    from vs_agent.api.usage_limits import LimitsReader
     from vs_proto import api as wire
     from vs_proto.api import FailureCategory
     from vs_proto.api import host_payloads as pb
@@ -53,6 +56,7 @@ else:
     host_run_summary = lazy_module("server.host_run_summary")
     host_run_wire = lazy_module("server.host_run_wire")
     host_saved_runs = lazy_module("server.host_saved_runs")
+    usage_limits = lazy_module("server.usage_limits")
     usage_scan = lazy_module("server.usage_scan")
     read_operations = lazy_module("vibesys.api.host_operations.reads")
     saved_runs = lazy_module("vibesys.api.host_operations.saved_runs")
@@ -144,6 +148,19 @@ class ReadRefusedError(Exception):
         super().__init__(refusal.message)
 
 
+@dataclass(frozen=True)
+class Outside:
+    """What only some reads reach beyond the host's files, each built when a read asks for it.
+
+    A host built without one refuses the read that needs it.
+    """
+
+    https: Callable[[], HttpsGet] | None = None
+    """The client for the one fetch a read makes, the price list."""
+    limits: Callable[[], LimitsReader] | None = None
+    """The reader of provider limits (``usage_limits.reader_here`` on a real host)."""
+
+
 class HostReadSource:
     """Translate existing host I/O results at the adapter boundary only."""
 
@@ -156,18 +173,18 @@ class HostReadSource:
         preflight: Callable[
             [host_api.RunPreflightRequest], host_api.RunPreflightReply | host_api.HelperError
         ],
-        https: Callable[[], HttpsGet] | None = None,
+        outside: Outside = Outside(),  # noqa: B008 - a frozen value
     ) -> None:
         """Bind host I/O and the existing machine/preflight probe adapters.
 
-        ``https`` builds the host's client for the one fetch it makes, the price list, when a
-        refresh asks for it; a host built without one refuses the refresh.
+        ``outside`` builds what the reads that go beyond the host's files reach: the client for
+        the price list's fetch and the reader of provider limits.
         """
         self._host = host
         self._role_order = role_order
         self._describe = describe
         self._preflight = preflight
-        self._https = https
+        self._outside = outside
 
     def _path(self, text: str) -> Path:
         expanded = Path(self._host.directories.expand(text))
@@ -223,7 +240,7 @@ class HostReadSource:
         self, request: pb.UsageRatesRefreshRequest
     ) -> pb.UsageRatesRefreshResponse:
         """Fetch the price list if one is due, through the owner of the host's usage state."""
-        if self._https is None or request.now is None:
+        if self._outside.https is None or request.now is None:
             raise ReadRefusedError(
                 host_api.HelperError(
                     code=host_envelope.HelperErrorCode.INTERNAL,
@@ -233,13 +250,25 @@ class HostReadSource:
             )
         pricing = usage_scan.refresh_rates(
             usage_scan.usage_directory(),
-            usage_scan.HttpsFetcher(self._https()),
+            usage_scan.HttpsFetcher(self._outside.https()),
             now=request.now.to_datetime(),
             force=request.force,
         )
         return wire.host_payloads.UsageRatesRefreshResponse(
             request_id=request.request_id, pricing=pricing
         )
+
+    def usage_limits(self, request: pb.UsageLimitsRequest) -> pb.UsageLimitsResponse:
+        """Each provider's plan limits, through the owner of the host's usage state."""
+        if self._outside.limits is None or request.now is None:
+            raise ReadRefusedError(
+                host_api.HelperError(
+                    code=host_envelope.HelperErrorCode.INTERNAL,
+                    message="this host has no way to read provider limits",
+                    request_id=request.request_id,
+                )
+            )
+        return usage_limits.read_here(request, self._outside.limits())
 
     def tasks(self, project: str) -> pb.TaskList:
         """Read through the existing project's task owner."""

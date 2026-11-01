@@ -38,12 +38,18 @@ class FakeLimitsReader:
 
     def __init__(
         self,
-        readings: Mapping[str, ProviderLimits],
+        readings: Mapping[str, ProviderLimits | Sequence[ProviderLimits]],
         *,
         holding: Mapping[str, Sequence[str]] | None = None,
     ) -> None:
-        """Answer ``readings`` by provider; ``holding`` are the reset credit ids each provider holds."""
-        self._readings = dict(readings)
+        """Answer ``readings`` by provider; ``holding`` are the reset credit ids each provider holds.
+
+        A provider given a sequence answers its readings in order and repeats the last one.
+        """
+        self._readings = {
+            provider: [reading] if isinstance(reading, ProviderLimits) else list(reading)
+            for provider, reading in readings.items()
+        }
         self._credits = {provider: tuple(ids) for provider, ids in (holding or {}).items()}
         self._spent: dict[str, list[str]] = {}
         self._answers: dict[tuple[str, str], SpendOutcome] = {}
@@ -55,7 +61,8 @@ class FakeLimitsReader:
     def read(self, provider: str) -> ProviderLimits:
         """The scripted reading, with spent credits applied."""
         self.reads.append(provider)
-        reading = self._readings.get(provider)
+        script = self._readings.get(provider)
+        reading = None if not script else (script.pop(0) if len(script) > 1 else script[0])
         if reading is None:
             return ProviderLimits(
                 provider=provider,
