@@ -15,7 +15,12 @@ from vs_project._fake_git_state import RepositoryCensus
 from vs_project._run_history import FakeRunHistory
 from vs_project.git_contract_scaffold import ContractProject, RepositoryFactory, twin
 from vs_project.run_execution_fixture import run_execution_record
-from vs_project.state_fixture import scratch_state_directory
+from vs_project.state_fixture import (
+    scratch_state_directory,
+    seed_store_document,
+    seed_stored_record,
+    stored_record_bytes,
+)
 from vs_project.world_git import (
     IN_MEMORY_GIT,
     CliWorldGit,
@@ -43,6 +48,9 @@ __all__ = [
     "WorldGitError",
     "run_execution_record",
     "scratch_state_directory",
+    "seed_store_document",
+    "seed_stored_record",
+    "stored_record_bytes",
     "twin",
     "world_git",
 ]

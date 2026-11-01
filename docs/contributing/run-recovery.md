@@ -138,14 +138,14 @@ Paths are under `libs/vs-runtime/src/vs_runtime/`.
 | `_writer_reconciliation.py` | 326 | `_run_environment.py` (`reconcile_writers` on four environments), `_evaluation_recovery.py` | Delete, with `reconcile_writers` and the no-op recovery mixins in `_run_environment.py` |
 | `_core_loop.py`, `_core_run.py`, `_core_wiring.py`, `_core_publications.py` | 1,590, 616, 53, 84 | Deleted (#3475 6b). Production reads what these held through `_core_executors.py` (`core_executors`) and `_core_state.py` (`new_core_state`, `CoreStartup`) | The runner loop replaced them. Recovery start, `HostRenewed`, lease upkeep, `_recovery_cannot_open` and `_blocked_for_good` went with them |
 | `_core_preflight.py` | 220 | `src/vibesys/run/core_run.py` (`reject_legacy_resume`), `src/vibesys/run/store_migration.py` (`resolve_core_resume`) | Keep. It reads a legacy run's store for the migration and refuses to resume one; it goes with the legacy store reader, not with the shell |
-| `libs/vs-runtime/src/vs_runtime/_replay_store.py`, `api/replay.py` | 167 and 33 | `_replay_store.py` has no importer but `api/replay.py`, which now exports it with the writer-proof and evaluation-recovery modules above | Delete both with the layer. `RunLogReplayStore` stays only until its log-append discipline, which item 4a moves to `vs_runlog.ConfirmedLog`, has no other user. Its contract suite (`libs/vs-runtime/tests/test_replay_store_contract.py`) drives the store directly |
+| `_replay_store.py`, `api/replay.py` | 167 and 33 | `_replay_store.py` had no importer but `api/replay.py`, which exports the writer-proof and evaluation-recovery modules above | `_replay_store.py` deleted with its contract suite (#3475 6b): `RunLogReplayStore` had no production user, and its log-append discipline lives in `vs_runlog.ConfirmedLog`. `api/replay.py` goes with the writer-proof and evaluation-recovery modules |
 
 ### vs-project
 
 | Module | Lines | Callers | Verdict |
 |---|---|---|---|
-| `_store_operations.py` | 443 | `_state_store.py`, `_core_loop.py` (`acquire`, `renew`, `release`, `verify`, `mutate_if_fenced`, `commit`), `_receipt_store.py:authorize` | Delete: the lease, the fence and the compare-and-swap record. The run's lock replaces the lease. `state.pb` is written by the one writer with an atomic rename, never compared and swapped |
-| `_state_store.py`, `api/state_store.py` | 314, 208 | `project.py`, `vs_dst/_snapshots.py`, `src/vibesys/run/core_services.py`, `src/launch`, `src/vibesys/api/assembly.py` | Delete with it |
+| `_store_operations.py` | 443 | `_state_store.py`, `_core_loop.py` (`acquire`, `renew`, `release`, `verify`, `mutate_if_fenced`, `commit`), `_receipt_store.py:authorize` | Deleted (#3475 6b): the lease, the fence, the compare-and-swap record, `lease.json` and the store.json version 1 to 2 move, and with them `acquire`, `renew`, `release`, `verify`, `mutate_if_fenced`, `commit` and `quarantine`. The run's lock replaces the lease. `state.pb` is written by the one writer with an atomic rename, never compared and swapped. `_store_document.py` keeps the reading of the document |
+| `_state_store.py`, `api/state_store.py` | 314, 208 | `project.py`, `libs/vs-runtime/src/vs_runtime/_core_preflight.py`, `_run_end.py`, `src/vibesys/run/store_migration.py` | Kept as a reader (`observe`, `load`) of a legacy run's `store.json`, which the migration reads until it is deleted. `StoreFence` stays only for `_evaluation_recovery.py` and `_writer_reconciliation.py`, which go with the prove-or-block layer |
 
 ### Tests
 
@@ -1065,7 +1065,7 @@ skill):
 - A file there defines or imports a name in `DELETED_SYMBOLS`.
 
 Both are plain tuples at the top of the file, one line each, and each pull request that deletes part of the
-layer adds what it removed. The guard holds the keyed-replay modules, `ReplayUnknown` and the old shell runtime (`_core_loop`, `_core_run`, `_core_wiring`, `_core_publications` and the names they defined) today. The names the
+layer adds what it removed. The guard holds the keyed-replay modules, `ReplayUnknown`, the old shell runtime (`_core_loop`, `_core_run`, `_core_wiring`, `_core_publications` and the names they defined), the keyed replay store and the state store's writer half (`_store_operations`, `CommitFault`, `StoreOperations`, `mutate_if_fenced` and kin) today. The names the
 inventory above marks for deletion (`RecoveryBarrier`, `RecoveryCheck`, `HostEpoch`, `ChildLease`,
 `InspectRequest`, `InspectTurn`, `InspectOwnedJob`, `CancelOwnedResource`, `BlockRequest`, `EffectFences`,
 `NothingHeld`, `MayHold`, `StoreFence`, `HostFence`) join the list in the pull request that deletes each.

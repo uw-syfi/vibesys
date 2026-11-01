@@ -505,15 +505,6 @@ shape raises its version together with a migration, and resume applies the
 chain from the run's version. A run older than the oldest supported version, or
 written by a newer VibeSys, is refused with an error naming both versions.
 
-One exception is the run's state store. Its lease moved out of `store.json`
-into its own `lease.json`, and `store.json` went from version 1 to version 2.
-A VibeSys that has this change resumes a version 1 run and converts it on its
-first write to the run. From then on, an older VibeSys refuses the run with
-`document version 2, this release reads version 1`. There is no way back:
-after one resume on the newer VibeSys, resume that run only with the newer
-VibeSys or a later one. The conversion is what keeps the two releases from
-holding the run's lease at once.
-
 For a SkyPilot run, the portable environment choice is recorded, while the
 operator profile and local profiles-file path must be supplied on the resuming
 host. Nonterminal evaluator identity and replayable results live in the run's

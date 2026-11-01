@@ -13,10 +13,10 @@ import pytest
 from vs_faults.api import Boundary, FaultGate, FaultPlan, FaultRule, HostCrashError, HostFault
 from vs_project.api import (
     AtomicWriteStream,
-    FakeStateStore,
     LocalAtomicWriteEffects,
     Project,
     StateNamespace,
+    StoreFence,
 )
 from vs_proto.api import replay
 from vs_runtime.api.replay import UnsupportedWriterReconciler, WriterRegistry
@@ -215,8 +215,7 @@ def test_a_failed_reuse_release_is_retried_and_refuses_before_exclusion_is_retak
     ledger = WriterRegistry(namespace, BACKING, threads)
     ledger.create()
     ledger.record(UnsupportedWriterReconciler("host").reconcile_writers(ledger.close()))
-    fence = FakeStateStore().acquire("host-a", 0, 10)
-    assert fence is not None
+    fence = StoreFence(host_id="host-a", epoch=1, expires_at=10)
     # The scope's exit is the next release: it fails and leaves the exclusion held.
     with (
         pytest.raises(OSError, match="lock release failed"),

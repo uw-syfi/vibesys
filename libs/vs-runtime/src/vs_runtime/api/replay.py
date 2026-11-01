@@ -1,4 +1,4 @@
-"""Writer proof, evaluation receipts and the run.log replay store, dormant until cutover."""
+"""Writer proof and evaluation receipts, dormant until cutover."""
 
 from vs_runtime._evaluation_recovery import (
     EvaluationReceiptUnconfirmedError,
@@ -7,7 +7,6 @@ from vs_runtime._evaluation_recovery import (
     EvaluationWriterReconciliation,
     LocalEvaluationReceipts,
 )
-from vs_runtime._replay_store import REPLAY_STORE_SCHEMA_VERSION, ReplayStore, RunLogReplayStore
 from vs_runtime._writer_reconciliation import (
     DockerWriterReconciler,
     ReplayRootReuse,
@@ -18,7 +17,6 @@ from vs_runtime._writer_reconciliation import (
 )
 
 __all__ = [
-    "REPLAY_STORE_SCHEMA_VERSION",
     "DockerWriterReconciler",
     "EvaluationReceiptUnconfirmedError",
     "EvaluationRecoveryBlockedError",
@@ -26,8 +24,6 @@ __all__ = [
     "EvaluationWriterReconciliation",
     "LocalEvaluationReceipts",
     "ReplayRootReuse",
-    "ReplayStore",
-    "RunLogReplayStore",
     "UnsupportedWriterReconciler",
     "WriterProofError",
     "WriterReconciler",

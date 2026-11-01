@@ -12,7 +12,7 @@ from hypothesis import strategies as st
 
 from vs_agent.api import reap_recorded_agents
 from vs_agent.api.testing import FakeConfinement
-from vs_project.api import FakeStateStore, Project
+from vs_project.api import Project, StoreFence
 from vs_proto.api import ValidationError, replay, validate
 from vs_runtime.api.infrastructure import RunEnvironmentSpec, build_run_environment
 from vs_runtime.api.replay import (
@@ -295,8 +295,7 @@ def test_reuse_holds_nonblocking_cross_run_exclusion_until_effect_finishes(tmp_p
     backing = deepcopy(BACKING)
     backing.generation += 1
     successor = WriterRegistry(namespace, backing, SimThreads())
-    fence = FakeStateStore().acquire("host-a", 0, 10)
-    assert fence is not None
+    fence = StoreFence(host_id="host-a", epoch=1, expires_at=10)
     with ledger.reuse(run_id="run-a", fence=fence) as proof:
         assert proof == ledger.require_proof()
         with ledger.reuse(run_id="run-a", fence=fence):
@@ -324,8 +323,7 @@ async def test_reuse_request_holds_exclusion_across_awaited_acquisition(
     ledger.record(UnsupportedWriterReconciler("host").reconcile_writers(ledger.close()))
     request = ReplayRootReuse(ledger.require_proof().to_binary())
     other = registry(tmp_path)
-    fence = FakeStateStore().acquire("host-a", 0, 10)
-    assert fence is not None
+    fence = StoreFence(host_id="host-a", epoch=1, expires_at=10)
     gate = GatedBlockingRunner(held=True)
 
     async def acquire() -> None:

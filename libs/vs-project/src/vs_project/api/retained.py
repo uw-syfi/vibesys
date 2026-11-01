@@ -2,7 +2,7 @@
 
 from vs_decode.api import Unreadable, decode_json
 from vs_project._retained import RetainedFile
-from vs_project._store_operations import StoreDocument
+from vs_project._store_document import StoreDocument
 from vs_project.api.state_store import StoreRecord
 
 __all__ = ["RetainedFile", "RetainedStoreError", "decode_store"]

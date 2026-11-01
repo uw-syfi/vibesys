@@ -45,7 +45,7 @@ from vs_project.api import (
     RunEnvironmentRecord,
     StoredEnvelope,
 )
-from vs_project.api.testing import run_execution_record
+from vs_project.api.testing import run_execution_record, seed_stored_record
 from vs_proto.api import EpochStarted, Oneof, Record, Timestamp
 from vs_runlog.api import ConfirmedLog
 from vs_runtime.api.core import CoreResumeError, RuntimeRecord
@@ -319,10 +319,9 @@ def saved_project(root: Path, *, wakes: tuple[float, ...] = (), claims: str | No
     project.state.create_run(manifest)
     run_id = manifest.run_id
     payload = saved_counter(claims or run_id, wakes=wakes).model_dump_json().encode()
-    store = project.state_store(run_id)
-    fence = store.acquire("writer", now=0, duration=1)
-    assert fence is not None
-    store.commit(None, StoredEnvelope(revision=0, schema_version=1, payload=payload), fence, now=0)
+    seed_stored_record(
+        project, run_id, StoredEnvelope(revision=0, schema_version=1, payload=payload)
+    )
     return Saved(project, run_id)
 
 

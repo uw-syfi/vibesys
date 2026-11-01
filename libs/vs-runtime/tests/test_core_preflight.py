@@ -26,7 +26,7 @@ from vs_core.api import (
 from vs_core.api import RunStatus as CoreRunStatus
 from vs_core.api.testing import FakeView
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord, StoredEnvelope
-from vs_project.api.testing import run_execution_record
+from vs_project.api.testing import run_execution_record, seed_stored_record
 from vs_runtime.api.core import (
     CoreResumeError,
     RuntimeRecord,
@@ -118,26 +118,24 @@ def test_journal_alone_does_not_authorize_resume(tmp_path: Path) -> None:
 
 def test_valid_new_envelope_preflight_is_read_only(tmp_path: Path) -> None:
     project, run_id = project_run(tmp_path)
-    store = project.state_store(run_id)
-    fence = store.acquire("writer", now=0, duration=1)
-    assert fence is not None
     candidate = record(run_id)
-    store.commit(
-        None,
+    seed_stored_record(
+        project,
+        run_id,
         StoredEnvelope(revision=0, schema_version=1, payload=candidate.model_dump_json().encode()),
-        fence,
-        now=0,
     )
+    # A run that was written has the store's lock file, which a read creates when it is absent.
+    project.state_store(run_id).load()
     before = project.state.portable_run_export(run_id)
     resolved = resolve_core_resume(project, driver())
     assert resolved.run_id == run_id
     assert resolved.record == candidate
-    assert resolved.store.load() == store.load()
+    assert resolved.store.load() == project.state_store(run_id).load()
     assert project.state.portable_run_export(run_id) == before
 
 
 @pytest.mark.parametrize("mutation", ["schema", "run_id", "missing_outbox", "unknown_key"])
-def test_invalid_new_record_rejects_before_acquiring_a_lease(tmp_path: Path, mutation: str) -> None:
+def test_invalid_new_record_is_rejected(tmp_path: Path, mutation: str) -> None:
     project, run_id = project_run(tmp_path)
     candidate = record("another-run" if mutation == "run_id" else run_id)
     source = candidate.model_dump_json()
@@ -145,21 +143,16 @@ def test_invalid_new_record_rejects_before_acquiring_a_lease(tmp_path: Path, mut
         source = source.replace('"pending_publications":[],', "")
     elif mutation == "unknown_key":
         source = source[:-1] + ',"unknown":1}'
-    store = project.state_store(run_id)
-    fence = store.acquire("writer", now=0, duration=1)
-    assert fence is not None
-    store.commit(
-        None,
+    seed_stored_record(
+        project,
+        run_id,
         StoredEnvelope(
             revision=0, schema_version=2 if mutation == "schema" else 1, payload=source.encode()
         ),
-        fence,
-        now=0,
     )
     with pytest.raises(CoreResumeError) as failure:
         resolve_core_resume(project, driver())
     assert failure.value.diagnostic.code == "core_resume_invalid"
-    assert store.acquire("next", now=1, duration=1) is not None
 
 
 @pytest.mark.parametrize(
@@ -181,11 +174,8 @@ def test_an_envelope_of_an_unsupported_version_names_the_vibesys_that_wrote_it(
     assert current in source
     # A field this version does not have, as an envelope of another shape would carry.
     source = source.replace(current, f'"envelope":{{"schema_version":{version},"moved":1,')
-    store = project.state_store(run_id)
-    fence = store.acquire("writer", now=0, duration=1)
-    assert fence is not None
-    store.commit(
-        None, StoredEnvelope(revision=0, schema_version=1, payload=source.encode()), fence, now=0
+    seed_stored_record(
+        project, run_id, StoredEnvelope(revision=0, schema_version=1, payload=source.encode())
     )
     with pytest.raises(CoreResumeError) as failure:
         resolve_core_resume(project, driver())
@@ -210,11 +200,8 @@ def test_a_record_with_a_field_a_newer_vibesys_added_names_the_vibesys_that_wrot
         if holder == "envelope"
         else '{"added_later":1,' + source.removeprefix("{")
     )
-    store = project.state_store(run_id)
-    fence = store.acquire("writer", now=0, duration=1)
-    assert fence is not None
-    store.commit(
-        None, StoredEnvelope(revision=0, schema_version=1, payload=added.encode()), fence, now=0
+    seed_stored_record(
+        project, run_id, StoredEnvelope(revision=0, schema_version=1, payload=added.encode())
     )
     with pytest.raises(CoreResumeError) as failure:
         resolve_core_resume(project, driver())
@@ -236,11 +223,8 @@ def test_a_run_saved_at_an_older_supported_version_resumes_at_the_current_one(
     source = saved.model_dump_json()
     assert current in source
     source = source.replace(current, f'"envelope":{{"schema_version":{version},')
-    store = project.state_store(run_id)
-    fence = store.acquire("writer", now=0, duration=1)
-    assert fence is not None
-    store.commit(
-        None, StoredEnvelope(revision=0, schema_version=1, payload=source.encode()), fence, now=0
+    seed_stored_record(
+        project, run_id, StoredEnvelope(revision=0, schema_version=1, payload=source.encode())
     )
     resolved = resolve_core_resume(project, driver())
     assert resolved.run_id == run_id
@@ -259,16 +243,12 @@ def test_resume_resolution_enforces_legacy_preflight_before_any_start(tmp_path: 
 
 
 def commit_record(project: Project, run_id: str) -> None:
-    store = project.state_store(run_id)
-    fence = store.acquire("writer", now=0, duration=1)
-    assert fence is not None
-    store.commit(
-        None,
+    seed_stored_record(
+        project,
+        run_id,
         StoredEnvelope(
             revision=0, schema_version=1, payload=record(run_id).model_dump_json().encode()
         ),
-        fence,
-        now=0,
     )
 
 
@@ -416,14 +396,10 @@ def test_a_damaged_store_document_is_a_resume_diagnostic(tmp_path: Path, damage:
 
 
 def _commit(project: Project, run_id: str, candidate: RuntimeRecord[FlowState]) -> None:
-    store = project.state_store(run_id)
-    fence = store.acquire("writer", now=0, duration=1)
-    assert fence is not None
-    store.commit(
-        None,
+    seed_stored_record(
+        project,
+        run_id,
         StoredEnvelope(revision=0, schema_version=1, payload=candidate.model_dump_json().encode()),
-        fence,
-        now=0,
     )
 
 

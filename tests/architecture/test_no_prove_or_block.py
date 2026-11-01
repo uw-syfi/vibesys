@@ -60,6 +60,11 @@ DELETED_MODULES: tuple[str, ...] = (
     "vs_runtime._core_publications",
     "vs_runtime._core_run",
     "vs_runtime._core_wiring",
+    # The keyed replay store, which only its own contract suite used (#3475 part 6b).
+    "vs_runtime._replay_store",
+    # The state store's lease, fence and compare-and-swap record (#3475 part 6b).
+    "vs_project._store_operations",
+    "vs_project._decode_memo",
 )
 """Dotted module paths that no file under ``src/`` or ``libs/*/src`` may provide, as a module or
 as a package (a listed ``a.b`` also forbids ``a.b.c``)."""
@@ -77,6 +82,15 @@ DELETED_SYMBOLS: tuple[str, ...] = (
     "core_bindings",
     "drive_core",
     "start_core",
+    # The state store's writer half (#3475 part 6b). StoreFence joins when its last two users go.
+    "CommitFault",
+    "CommitOutcome",
+    "ConflictReason",
+    "LeaseDocument",
+    "RunLogReplayStore",
+    "StateStoreWriteError",
+    "StoreOperations",
+    "mutate_if_fenced",
 )
 """Names that no file under ``src/`` or ``libs/*/src`` may define or import."""
 
