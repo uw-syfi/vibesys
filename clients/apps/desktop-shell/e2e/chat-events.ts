@@ -6,10 +6,15 @@ import {type ChatHistories, chatBatches, tailBytes} from '../src/testing/chat-re
 
 const histories = new WeakMap<Page, ChatHistories>();
 
-export async function emitChat(page: Page, events: readonly RunEvent[]): Promise<void> {
+/** `options.failed` names the turns (by request id) whose answer the provider failed. */
+export async function emitChat(
+  page: Page,
+  events: readonly RunEvent[],
+  options: {readonly failed?: readonly string[]} = {},
+): Promise<void> {
   const sessions = histories.get(page) ?? new Map<string, StoreRecord[]>();
   histories.set(page, sessions);
-  for (const [id, batch] of chatBatches(sessions, events)) {
+  for (const [id, batch] of chatBatches(sessions, events, new Set(options.failed))) {
     if (batch.length === 0) continue;
     await page.evaluate(
       ({id, bytes}) =>

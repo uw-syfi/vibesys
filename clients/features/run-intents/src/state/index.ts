@@ -2,6 +2,13 @@
 
 export {foldOutcomes, type OutcomeRow} from './history.js';
 export {
+  ACTION_LABELS,
+  type ErrorReport,
+  refusalReport,
+  shownReason,
+  updatesReport,
+} from './intent-words.js';
+export {
   historyEpoch,
   type IntentEntry,
   type IntentRow,

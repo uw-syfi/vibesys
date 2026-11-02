@@ -52,6 +52,8 @@ interface PendingQuestion {
   readonly threadId: string | null;
   readonly text: string;
   readonly requestId: string;
+  /** The user typed it; a question made from an error never goes back to the composer. */
+  readonly typed: boolean;
 }
 
 export type PanelEvent =
@@ -76,7 +78,13 @@ export type PanelMachineEvent =
       readonly type: 'submit';
       readonly threadId: string | null;
       readonly requestId: string;
-    };
+    }
+  /**
+   * Ask `text` in a new thread, whatever is shown or in flight, opening the panel: how an error is
+   * handed to the chat. The composer keeps what the user typed, and gets back a question of theirs
+   * that was in flight if it is empty; it never gets the question made from the error.
+   */
+  | {readonly type: 'ask-new'; readonly text: string; readonly requestId: string};
 
 function pendingQuestion(
   context: PanelContext,
@@ -91,6 +99,7 @@ function pendingQuestion(
       previous?.threadId === event.threadId && previous.text === text
         ? previous.requestId
         : event.requestId,
+    typed: true,
   };
 }
 
@@ -108,12 +117,22 @@ export const panelInitial: PanelContext = {
   error: null,
 };
 
-/** The patch for an ask or a thread creation that did not go through: the text is the user's again. */
+/**
+ * The composer once the question in flight is dropped: a question the user typed is theirs again,
+ * unless they have typed something since, which stays. A question made from an error is not theirs.
+ */
+function restoredComposer(context: PanelContext): string {
+  return context.composer === '' && context.pending?.typed === true
+    ? context.pending.text
+    : context.composer;
+}
+
+/** The patch for an ask or a thread creation that did not go through. */
 function failed(context: PanelContext, failure: ChatFailure): Partial<PanelContext> {
   return {
     pending: null,
     uncertain: context.pending,
-    composer: context.pending?.text ?? context.composer,
+    composer: restoredComposer(context),
     error: failure,
   };
 }
@@ -142,6 +161,26 @@ export const panelMachine = setup({
   },
   guards: {
     hasThread: ({event}) => event.type === 'submit' && event.threadId !== null,
+    asksSomething: ({event}) => event.type === 'ask-new' && event.text.trim() !== '',
+  },
+  actions: {
+    /**
+     * `ask-new`: leave what is shown, put back a question of the user's in flight, and create a
+     * thread for the new question.
+     */
+    askNew: assign(({context, event}) =>
+      event.type === 'ask-new'
+        ? {
+            choice: {kind: 'new' as const},
+            composer: restoredComposer(context),
+            pending: {threadId: null, text: event.text, requestId: event.requestId, typed: false},
+            uncertain: null,
+            error: null,
+            listOpen: false,
+            pickerOpen: false,
+          }
+        : {},
+    ),
   },
 }).createMachine({
   id: 'chatPanel',
@@ -172,14 +211,22 @@ export const panelMachine = setup({
     visibility: {
       initial: 'closed',
       states: {
-        closed: {on: {open: 'open', toggle: 'open'}},
+        closed: {
+          on: {open: 'open', toggle: 'open', 'ask-new': {guard: 'asksSomething', target: 'open'}},
+        },
         open: {on: {close: 'closed', toggle: 'closed'}},
       },
     },
     catalogue: {
       initial: 'idle',
       states: {
-        idle: {on: {open: 'loading', toggle: 'loading'}},
+        idle: {
+          on: {
+            open: 'loading',
+            toggle: 'loading',
+            'ask-new': {guard: 'asksSomething', target: 'loading'},
+          },
+        },
         loading: {
           invoke: {
             id: 'loadCatalogue',
@@ -223,6 +270,7 @@ export const panelMachine = setup({
       states: {
         idle: {
           on: {
+            'ask-new': {guard: 'asksSomething', target: 'preparing', actions: 'askNew'},
             submit: [
               {
                 guard: ({context}) => context.composer.trim() === '',
@@ -237,7 +285,7 @@ export const panelMachine = setup({
                 })),
               },
               {
-                target: 'creating',
+                target: 'preparing',
                 actions: assign(({context, event}) => ({
                   pending: pendingQuestion(context, event),
                   composer: '',
@@ -247,7 +295,16 @@ export const panelMachine = setup({
             ],
           },
         },
+        /**
+         * A question for a new thread waits for the catalogue, which the thread's harness is chosen
+         * from: an `ask-new` can open the panel and ask in the same step.
+         */
+        preparing: {
+          always: {guard: ({context}) => context.catalogue.kind !== 'loading', target: 'creating'},
+          on: {'ask-new': {guard: 'asksSomething', target: 'preparing', actions: 'askNew'}},
+        },
         creating: {
+          on: {'ask-new': {guard: 'asksSomething', target: 'preparing', actions: 'askNew'}},
           invoke: {
             id: 'createThread',
             src: 'createThread',
@@ -260,14 +317,10 @@ export const panelMachine = setup({
                 guard: ({event}) => event.output.ok,
                 target: 'asking',
                 actions: assign(({context, event}) =>
-                  event.output.ok
+                  event.output.ok && context.pending !== null
                     ? {
                         choice: {kind: 'thread' as const, id: event.output.threadId},
-                        pending: {
-                          threadId: event.output.threadId,
-                          text: context.pending?.text ?? '',
-                          requestId: context.pending?.requestId ?? '',
-                        },
+                        pending: {...context.pending, threadId: event.output.threadId},
                       }
                     : {},
                 ),
@@ -286,6 +339,7 @@ export const panelMachine = setup({
           },
         },
         asking: {
+          on: {'ask-new': {guard: 'asksSomething', target: 'preparing', actions: 'askNew'}},
           invoke: {
             id: 'ask',
             src: 'ask',

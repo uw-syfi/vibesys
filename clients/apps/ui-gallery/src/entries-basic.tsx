@@ -10,6 +10,7 @@ import {
   Chip,
   ChoiceTiles,
   type Completion,
+  ErrorActions,
   Field,
   Grid,
   ICON_NAMES,
@@ -582,6 +583,20 @@ export const BASIC_ENTRIES = {
           ]}
           retry={() => undefined}
         />
+      </Stack>
+    ),
+  },
+  ErrorActions: {
+    render: () => (
+      <Stack>
+        <Row gap="space-2" align="center" wrap>
+          <Text tone="err">The request was not taken.</Text>
+          <ErrorActions ask={() => undefined} />
+        </Row>
+        <Row gap="space-2" align="center" wrap>
+          <Text tone="err">The list could not be read.</Text>
+          <ErrorActions copy={'The list could not be read.\n\nThe connection was refused.'} />
+        </Row>
       </Stack>
     ),
   },

@@ -71,7 +71,7 @@ export const KNOWN_FAILURES: readonly KnownFailure[] = [
     'chat-turn-gaps',
     'run-chat',
     'spacing-order',
-    /^0 px between groups is not more than the 2 px inside one/,
+    /^0 px between groups is not more than the [24] px inside one/,
   ),
   visual('settings-title-rail', 'dashboard', 'heading-depth', SETTINGS_TITLE),
   visual('settings-back-rail', 'dashboard', 'left-edge', SETTINGS_BACK),

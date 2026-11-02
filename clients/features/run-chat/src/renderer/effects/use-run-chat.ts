@@ -15,6 +15,8 @@ import {
   type ChatPanelView,
   cardView,
   deliveriesOf,
+  type ErrorReport,
+  errorQuestion,
   type IdeaOf,
   type PanelContext,
   type PanelItem,
@@ -50,6 +52,11 @@ export interface RunChatHost {
   readonly toggle: () => void;
   /** What the panel draws; null while it is closed. */
   readonly panel: ChatPanelView | null;
+  /**
+   * Opens the panel on a new thread and asks it about the error; absent until the chat exists, and
+   * where it cannot ask (an ended run whose reader does not answer).
+   */
+  readonly askAboutError?: (report: ErrorReport) => void;
 }
 
 type PanelActor = Actor<typeof panelMachine>;
@@ -197,9 +204,17 @@ export function useRunChat(options: RunChatOptions): RunChatHost {
   const open = typeof value === 'object' && value.visibility === 'open';
   const chatState = typeof value === 'object' ? value.chat : 'idle';
   const shown = shownThread(core, context.choice);
+  const canAsk = !readOnly || options.askable === true;
+  const askAboutError = (report: ErrorReport): void =>
+    chat.actor.send({
+      type: 'ask-new',
+      text: errorQuestion(report, portsRef.current.maxQuestionBytes),
+      requestId: portsRef.current.newControlId(),
+    });
   return {
     open,
     toggle: () => chat.actor.send({type: 'toggle'}),
+    ...(canAsk ? {askAboutError} : {}),
     panel: open
       ? {
           panel: context,
@@ -209,7 +224,8 @@ export function useRunChat(options: RunChatOptions): RunChatHost {
           items: panelItems(chat, core, shown, context, readOnly),
           roles: runRoles(core.expectedRoles, options.roles ?? []),
           readOnly,
-          canAsk: !readOnly || options.askable === true,
+          canAsk,
+          ...(canAsk ? {askAboutError} : {}),
           dispatch: event =>
             chat.actor.send(
               event.type === 'submit'

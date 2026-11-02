@@ -343,6 +343,7 @@ CSS of their own. An app imports `./tokens.css`, `./fonts.css` and `./components
 | `Card` | `section?` (a titled region), `flush?` |
 | `Toast`, `ToastStack` | `Toast`: `tone: 'warn' \| 'err'`, `title`, `detail?`, `open`, `toggle(open)`, `dismiss()`. `ToastStack`: `label`, `toasts: {id, tone, title, detail?, open}[]` (newest first), `toggle(id, open)`, `dismiss(id)`; fixed at the top right, a small gap below the header row of the `Page` or `Screen` on show (the window's end strip where there is none), a labelled live region (an error is an `alert`, a warning a `status`); holds no state |
 | `Menu` | the trigger's `text` or `icon` + `label`, `items: {id, label, press \| href, danger?}[]`, `variant?`, `size?`; raised, keyboard navigable, closes on Esc, a choice or the focus leaving |
+| `ErrorActions` | `ask?`, `copy?` (the text), `size?`; sits beside an error: "Ask about this error" hands it to an assistant, "Copy details" writes `copy` to the clipboard and says whether that worked; nothing without either |
 | `Dialog` | `open`, `title`, `dismiss`, children, `actions?`; the native modal `<dialog>` at the `overlay` elevation |
 | `Table` | `label`, `columns: {key, header, cell(row), mono?, align?}[]`, `rows`, `rowKey`, `selected?`, `select?`; sticky header, scrolls sideways in its own focusable box |
 | `Tabs` | `label`, `tabs: {value, label}[]`, `value`, `change`, the panel as children; arrows move and choose |

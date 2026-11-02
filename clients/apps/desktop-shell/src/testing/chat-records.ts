@@ -18,8 +18,11 @@ type Body = NonNullable<MessageInitShape<typeof RecordSchema>['body']>;
 type ChatEvent = NonNullable<MessageInitShape<typeof ChatRecordSchema>['event']>;
 
 const chatBody = (event: ChatEvent): Body => ({case: 'chat', value: {event}});
-const messageBody = (requestId: string, role: ChatRole, text: string): Body =>
-  chatBody({case: 'message', value: {requestId, role, content: {case: 'text', value: text}}});
+const messageBody = (requestId: string, role: ChatRole, text: string, failed = false): Body =>
+  chatBody({
+    case: 'message',
+    value: {requestId, role, content: {case: 'text', value: text}, failed},
+  });
 
 function hasUserMessage(records: readonly StoreRecord[], requestId: string): boolean {
   return records.some(
@@ -45,6 +48,7 @@ function bodiesOf(
   id: string,
   records: readonly StoreRecord[],
   batch: readonly RunEvent[],
+  failed: ReadonlySet<string>,
 ): Body[] {
   const requestId =
     event.invocation_id ??
@@ -62,7 +66,10 @@ function bodiesOf(
     ];
   if (data?.kind === 'agent_execution_started') return question(data.user_prompt ?? '');
   if (data?.kind === 'chat')
-    return [...question(event.text ?? ''), messageBody(requestId, ChatRole.ASSISTANT, data.answer)];
+    return [
+      ...question(event.text ?? ''),
+      messageBody(requestId, ChatRole.ASSISTANT, data.answer, failed.has(requestId)),
+    ];
   if (data?.kind === 'agent_output_chunk' && data.channel === 'assistant')
     return [
       ...question(askedLater(batch, requestId)),
@@ -89,11 +96,13 @@ export type ChatHistories = Map<string, StoreRecord[]>;
 
 /**
  * The records the chat `events` add to `sessions` (which they extend), by thread: dense native
- * records, numbered after what the thread already holds.
+ * records, numbered after what the thread already holds. `failed` names the turns (by request id)
+ * whose answer the provider failed.
  */
 export function chatBatches(
   sessions: ChatHistories,
   events: readonly RunEvent[],
+  failed: ReadonlySet<string> = new Set(),
 ): Map<string, StoreRecord[]> {
   const updates = new Map<string, StoreRecord[]>();
   for (const event of events) {
@@ -102,7 +111,7 @@ export function chatBatches(
     sessions.set(id, records);
     const batch = updates.get(id) ?? [];
     updates.set(id, batch);
-    for (const body of bodiesOf(event, id, records, events)) {
+    for (const body of bodiesOf(event, id, records, events, failed)) {
       const record = create(RecordSchema, {
         seq: BigInt(records.length + 1),
         epoch: 1,

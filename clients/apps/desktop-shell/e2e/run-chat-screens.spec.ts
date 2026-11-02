@@ -302,3 +302,26 @@ test('a new chat shows the harness picker and an empty thread', async ({page}) =
 });
 
 ledger.requireEveryFailure();
+
+test('a failed answer offers to ask the chat about it', async ({page}) => {
+  await open(page, 1440);
+  const from = firstSequence();
+  await emitChat(
+    page,
+    [
+      created(from),
+      answered(
+        from + 1,
+        'What is the best idea?',
+        'The provider refused the request: quota exhausted.',
+        from,
+      ),
+    ],
+    {failed: [`turn-${from}`]},
+  );
+  await openPanel(page);
+  const answer = panel(page).locator('.vs-chat-message[data-side="start"]');
+  await expect(answer.getByText('Failed', {exact: true})).toBeVisible();
+  await expect(panel(page).getByRole('button', {name: 'Ask about this error'})).toBeVisible();
+  await check(page, 'failed-answer');
+});

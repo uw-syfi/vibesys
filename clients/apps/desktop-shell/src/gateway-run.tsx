@@ -1,6 +1,7 @@
 /** The gateway owns every run reader. */
 
 import {useRunIntents} from '@vibesys/feature-run-intents/renderer';
+import type {ErrorReport} from '@vibesys/feature-run-intents/state';
 import type {RunPageAddress, RunPageNavigation} from '@vibesys/feature-run-page/renderer';
 import {
   type GatewayRunPorts,
@@ -18,7 +19,7 @@ import {gatewayContentCache} from '@vibesys/run-skeleton/cache';
 import {type GatewayReader, gatewayReader} from '@vibesys/run-skeleton/reader';
 import type {SubscriptionPort} from '@vibesys/subscription';
 import {Card, EmptyState, Page, pageState, Text} from '@vibesys/ui';
-import {type JSX, useMemo} from 'react';
+import {type JSX, useMemo, useRef} from 'react';
 import {useGatewayChat} from './gateway-chat.js';
 import {gatewayTransport} from './gateway-transport.js';
 import {useReportedProblems} from './problem-host.js';
@@ -52,6 +53,9 @@ export function GatewayRun(props: GatewayRunProps): JSX.Element {
   useReportedProblems(props.problems, `run ${seed.identity.host} ${seed.identity.runId}`, reported);
   const {observation} = page.writer;
   const projectRoot = props.projectRoot;
+  // The chat is made after the controls (its readOnly reads `intents.steerable`), so the controls
+  // reach its asker through a ref set below, as `use-run-chat.ts` reads its ports through one.
+  const askRef = useRef<((report: ErrorReport) => void) | undefined>(undefined);
   const intents = useRunIntents({
     bridge,
     host: seed.identity.host,
@@ -62,6 +66,7 @@ export function GatewayRun(props: GatewayRunProps): JSX.Element {
     refreshWriter: page.refreshWriter,
     writer: page.writer,
     schedule,
+    askAboutError: report => askRef.current?.(report),
   });
   const sessions = useGatewayChat({
     bridge,
@@ -74,6 +79,7 @@ export function GatewayRun(props: GatewayRunProps): JSX.Element {
     epoch: observation?.epoch ?? 0n,
     readOnly: !intents.steerable,
   });
+  askRef.current = sessions.askAboutError;
   if (
     page.state === null ||
     page.model === null ||

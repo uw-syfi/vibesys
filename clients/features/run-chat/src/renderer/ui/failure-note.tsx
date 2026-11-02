@@ -1,9 +1,16 @@
-import {Collapsible, LogPane, Text} from '@vibesys/ui';
+import {Collapsible, ErrorActions, LogPane, Row, Text} from '@vibesys/ui';
 import {type JSX, useState} from 'react';
 import {type ChatFailure, DETAILS_LABEL} from '../../state/index.js';
 
-/** A failure's message, and its diagnostic under a disclosure that starts closed. */
-export function FailureNote(props: {readonly failure: ChatFailure}): JSX.Element {
+/**
+ * A failure's message, and its diagnostic under a disclosure that starts closed. With `ask`, it
+ * also offers to ask the chat about it; with `copy`, to copy that text.
+ */
+export function FailureNote(props: {
+  readonly failure: ChatFailure;
+  readonly ask?: () => void;
+  readonly copy?: string;
+}): JSX.Element {
   const [open, setOpen] = useState(false);
   const {message, detail} = props.failure;
   return (
@@ -20,6 +27,15 @@ export function FailureNote(props: {readonly failure: ChatFailure}): JSX.Element
             lines={detail.split('\n').map(text => ({text, stream: 'err' as const}))}
           />
         </Collapsible>
+      )}
+      {props.ask === undefined && props.copy === undefined ? null : (
+        <Row gap="space-2">
+          <ErrorActions
+            {...(props.ask === undefined ? {} : {ask: props.ask})}
+            {...(props.copy === undefined ? {} : {copy: props.copy})}
+            size="sm"
+          />
+        </Row>
       )}
     </>
   );
