@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from agentshim import Agent, ApprovalPolicy, NativePermissions, TransportKind
 from agentshim.testing import ClaudeFramePeer, FakeClock, FakeExecutor, SequentialIds
+
 from vs_sidecar.driver import AgentshimDriver, build_session
 from vs_sidecar.engine import Engine
 from vs_sidecar.main import (

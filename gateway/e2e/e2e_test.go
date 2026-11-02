@@ -53,7 +53,7 @@ func newRig(t *testing.T) *rig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	script, err := filepath.Abs("testdata/scripted_sidecar.py")
+	script, err := filepath.Abs("../../orchestrator/sidecar/e2e/scripted_sidecar.py")
 	if err != nil {
 		t.Fatal(err)
 	}
