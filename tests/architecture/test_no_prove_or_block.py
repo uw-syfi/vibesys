@@ -157,6 +157,18 @@ DELETED_SYMBOLS: tuple[str, ...] = (
     "unanswered_measures",
     "credit_downtime",
     "HostRenewed",
+    # The branches that read the constant recovery, hosts and children state (#3475 R5 group B).
+    "recovery_waits",
+    "record_bound",
+    "_check_waits",
+    "_child_dependencies",
+    "_child_release_confirmed",
+    "_child_released",
+    "_downtime_within",
+    "_historical_child_owned",
+    "_known_child_observation",
+    "_released_child",
+    "_released_child_source",
 )
 """Names that no file under ``src/`` or ``libs/*/src`` may define or import."""
 

@@ -122,3 +122,17 @@ def test_a_jobs_spent_queue_budget_ends_it_alone_and_its_running_sibling_is_deli
 
 DOWN = 500.0
 """A host outage longer than the job's remaining limit and its whole queue budget."""
+
+
+@pytest.mark.parametrize("silence", [5.0, 29.0, 31.0, 400.0])
+def test_a_pending_fact_earns_the_gap_since_the_last_one_up_to_the_backoff_cap(
+    silence: float,
+) -> None:
+    """A scheduler that answers polls never leaves a longer gap, so a longer one is an outage."""
+    run_limits = limits()
+    world = BUILDERS[Source.MEASURE](run_limits)
+    start = 1.0
+    world, events = fact(world, 0, start + silence, state="pending")
+    world = _apply(world, events)
+    (job,) = world.state.evaluation.jobs
+    assert job.queue_credit == min(silence, run_limits.observe_backoff_cap)
