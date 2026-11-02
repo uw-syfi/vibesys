@@ -17,12 +17,14 @@ Measurement script: <absolute installed path to measure/scripts/measurements.py>
 Service owner: <absolute installed path to measure/scripts/service.py>
 Every benchmark, even unrecorded sanity load, uses the measurement script run -- wrapper.
 Task: .vibesys/tasks/<task>/ (read OBJECTIVE.md). State dir (--dir): <abs path>
-Load these skills first: <the matching vibesys skill>, vibesys:measure, and <domain skills>.
+Load these skills first: <the matching vibesys skill>, vibesys:commit, vibesys:measure, and <domain skills>.
 Rules:
 - Never edit anything under .vibesys/, the task's checker or its benchmark.
 - No stub, special case or shortcut that makes a check pass or a number rise without the
   program really doing the work. Obey every rule in OBJECTIVE.md.
-- Implement and combine workers commit before reporting; judge and profile workers edit nothing.
+- Implement and combine workers commit as vibesys:commit says before reporting (the candidate is a
+  full commit with `Checks: pass`; the branch name and `Plan: NNN` come from the brief); judge and
+  profile workers edit nothing.
 ```
 
 Domain skills: pick from the plugin's skill list those whose description fits the task's
@@ -37,7 +39,7 @@ Plan: plan-NNN-<slug>: <a claim that a measurement can falsify>
 Why: <the evidence: a profile, a measurement, a code reading>
 Pass criteria: <what you will observe if it is right, in the task's metric>
 Scope: <files or components you may change; what to leave alone>
-Specialize to: <what the task fixes, from OBJECTIVE.md: model, hardware, workload class>. Where the task fixes them, generality is not a cost, but keep a specialization only if it shows a measured benefit (performance, memory footprint, ...). Never specialize to the benchmark's own content; note any dependence on the workload's shape in the commit message.
+Specialize to: <what the task fixes, from OBJECTIVE.md: model, hardware, workload class>. Where the task fixes them, generality is not a cost, but keep a specialization only if it shows a measured benefit (performance, memory footprint, ...). Never specialize to the benchmark's own content; note any dependence on the workload's shape in the commit body.
 First step: <the smallest change to the claim that you can finish, commit and measure in this
   turn>. Do it and measure it before anything larger.
 Parent: <base commit, or the candidate commit you build on and its measured value>

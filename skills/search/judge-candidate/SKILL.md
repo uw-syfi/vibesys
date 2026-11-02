@@ -17,7 +17,9 @@ commit. Read `OBJECTIVE.md` in the task directory for context. You never edit pl
 
 ## Decide
 
-Start from the diff against the parent (`git diff <parent> <candidate>`) and the claim. Answer:
+Start from the diff against the parent (`git diff <parent> <candidate>`) and the claim. Review the
+candidate's whole diff from its parent, not one commit: the candidate may sit on `wip` commits
+(`vibesys:commit`). Answer:
 
 1. **Correct?** Does the code do what the claim says, and does it still do everything it did?
    Run the task's declared correctness command yourself, in your own candidate worktree,

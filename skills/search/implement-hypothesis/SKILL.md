@@ -16,7 +16,7 @@ Harness-specific mechanics (tools, background tasks, script paths): read `refere
 1. Run the first command of your brief and confirm the worktree and branch. Do not go on if they
    differ. Everything you do happens in that worktree.
 2. Read `OBJECTIVE.md` in the task directory. Its rules bind you, whatever a measurement says.
-3. Load `vibesys:measure` and the domain skills the brief names.
+3. Load `vibesys:commit`, `vibesys:measure` and the domain skills the brief names.
 
 ## Work
 
@@ -25,9 +25,10 @@ Harness-specific mechanics (tools, background tasks, script paths): read `refere
    name the concrete blocker (the file, function, check or error) and the narrower step that
    would get past it.
 2. Build, then run the cheapest check that covers what you changed. Once it builds and one local
-   check passes, commit and measure; do not polish first. After a failure, change the code
+   check passes, make the candidate commit and measure; do not polish first. After a failure, change the code
    before you run the check again. When output is long, write it to a file and read the file.
-3. Commit in your worktree. If your brief grants no measurement slot, return the SHA as
+3. Commit in your worktree as `vibesys:commit` says: often, with `wip` checkpoints as you go, and the
+   candidate as a full commit with `Checks: pass`. If your brief grants no measurement slot, return the SHA as
    `ready for measurement`; the lead measures it before judging it. Otherwise measure that commit with `vibesys:measure`: the correctness
    check, then at least 5 benchmark samples, recorded in the state directory (`--dir`; `vibesys:state`). Compare with the
    base: `compare --commit <sha>`. Add `--base <sha>` when you built on a candidate, to see the
@@ -46,6 +47,7 @@ This host-wide lock applies to recorded and unrecorded benchmarks alike.
 ## Never
 
 - Edit anything under `.vibesys/`, the task's checker or its benchmark.
+- Amend, rebase or force-push a commit that was measured (`vibesys:commit`).
 - Add a stub, a special case for the benchmark's inputs, a skipped check or any shortcut that
   raises a number without the program doing the work. Obey every rule in `OBJECTIVE.md`.
 - Report a number that is not in the measurement record.

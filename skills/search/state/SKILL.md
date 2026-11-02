@@ -19,6 +19,11 @@ scratch/       disposable machine output: logs, raw JSON, profiler output, cache
 Result branch (the optimization's "main"): `vibesys/<task>`. Candidates: `vibesys-work/<task>/plan-NNN`.
 Pass this directory to `measurements.py --dir`.
 
+Commit rules: `vibesys:commit`. On first use, and after each `git worktree add` where anyone will
+commit, the lead runs `commit_schema.py install-hook --dir <state dir> --worktree <path>` (the
+`commit` skill's script; with no `--worktree` it covers every worktree under `worktrees/`). The
+hook is per-worktree and chains to the repository's own hooks, so the user's checkout is untouched.
+
 ## Plan files
 
 One hypothesis per file. The header is three single-line fields, then three sections, each with
@@ -62,4 +67,4 @@ evaluator fingerprint, so a relaunch never repeats or duplicates work.
 
 ## Housekeeping
 
-Remove the worktrees of closed plans; keep their branches. Put bulky output in `scratch/`.
+Remove the worktrees of closed plans; keep their branches (and never rewrite measured commits). Put bulky output in `scratch/`.

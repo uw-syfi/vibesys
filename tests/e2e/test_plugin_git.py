@@ -51,10 +51,9 @@ with open("/tmp/vibesys-benchmark.lock", "a") as lock:
     assert (
         module.main(
             ["run", "--", sys.executable, "-c", program],
-            now=lambda: datetime(2026, 1, 1, tzinfo=UTC),
+            context=module.Context(lambda: datetime(2026, 1, 1, tzinfo=UTC), "host-a"),
             out=io.StringIO(),
             err=io.StringIO(),
-            host="host-a",
         )
         == 0
     )

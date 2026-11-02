@@ -13,7 +13,12 @@ Subcommands use ``--dir DIR`` (the state directory ``.vibesys-state/optimize/<ta
 * ``compare``: a commit's samples against the base's.
 * ``best``: the commit with the best verdict-backed result.
 * ``show``: the records of all shards.
-* ``check [--branch B]``: read-only; does the branch head have a passing, ``better`` record?
+* ``check [--branch B]``: read-only; does the branch head have a passing, ``better`` record, and
+  does every commit since the base follow the commit schema?
+
+A candidate commit must follow the commit skill's schema (see ``commit_schema.py`` in the
+sibling ``commit`` skill) and say ``Checks: pass``; ``record`` and ``check`` load that script
+from the ``commit`` directory next to this skill and fail with exit 2 when it is not installed.
 
 ``--json`` makes ``compare``, ``best``, ``show`` and ``check`` print JSON. Exit codes: 0 ok,
 1 ``check`` found the head unproven, 2 invalid input.
@@ -30,6 +35,7 @@ from __future__ import annotations
 import argparse
 import fcntl
 import hashlib
+import importlib.util
 import json
 import math
 import platform
@@ -44,10 +50,12 @@ from typing import TYPE_CHECKING, Any, Literal, NoReturn
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+    from types import ModuleType
     from typing import TextIO
 
 __all__ = [
     "Comparison",
+    "Context",
     "InvalidInputError",
     "compare_commit",
     "compare_samples",
@@ -57,6 +65,8 @@ __all__ = [
 ]
 
 SCHEMA_VERSION = 1
+COMMIT_SCHEMA_SCRIPT = ("commit", "scripts", "commit_schema.py")
+"""Where the commit skill's checker sits, relative to the skills directory that holds this one."""
 MEASUREMENTS_DIR = "measurements"
 STATE_PARENT = (".vibesys-state", "optimize")
 MIN_SAMPLES = 3
@@ -403,6 +413,7 @@ class _Env:
     out: TextIO
     now: Callable[[], datetime]
     host: str
+    read_message: Callable[[Path, str], bytes]
 
 
 def _commit_check(records: list[dict[str, Any]]) -> str:
@@ -523,10 +534,73 @@ def _emit(env: _Env, payload: object, text: str, *, as_json: bool) -> None:
     env.out.write((json.dumps(payload, sort_keys=True) if as_json else text) + "\n")
 
 
+def _commit_schema() -> ModuleType:
+    """The commit skill's checker, loaded from the skill installed next to this one."""
+    path = Path(__file__).resolve().parents[2].joinpath(*COMMIT_SCHEMA_SCRIPT)
+    if not path.is_file():
+        raise InvalidInputError(
+            f"cannot check the commit message: the commit skill's script {path} is missing. "
+            "Install the `commit` skill next to `measure` (the vibesys plugin has both)"
+        )
+    spec = importlib.util.spec_from_file_location("vibesys_commit_schema", path)
+    if spec is None or spec.loader is None:
+        raise InvalidInputError(f"cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # dataclasses resolve their annotations through this
+    spec.loader.exec_module(module)
+    return module
+
+
+def git_message(root: Path, commit: str) -> bytes:
+    """A commit's message bytes, read from the repository at ``root``."""
+    done = subprocess.run(  # noqa: S603  # LW-100375; fixed read-only git argv, no shell.
+        [_GIT, "-C", str(root), "cat-file", "commit", commit],
+        check=False,
+        capture_output=True,
+    )
+    # > A shell adds quoting hazards; a wrapper around one fixed command adds indirection.
+    if done.returncode != 0:
+        raise InvalidInputError(
+            f"commit {commit} is not in the repository at {root}: "
+            f"{done.stderr.decode('utf-8', 'replace').strip()}"
+        )
+    return done.stdout.partition(b"\n\n")[2]
+
+
+@dataclass(frozen=True)
+class Context:
+    """What the script learns from the machine, so a test can fix each part.
+
+    ``now`` stamps records, ``host`` names the machine and ``read_message`` reads a commit's
+    message (a test may replace it with a Fake).
+    """
+
+    now: Callable[[], datetime]
+    host: str
+    read_message: Callable[[Path, str], bytes] = git_message
+
+
+def _require_schema_valid_candidate(args: argparse.Namespace, state: Path, env: _Env) -> None:
+    """Refuse a candidate commit whose message breaks the schema or is not ``Checks: pass``."""
+    schema = _commit_schema()
+    violations = schema.check_message_bytes(
+        env.read_message(_repo_root(state), args.commit),
+        commit=args.commit[:12],
+        require_pass=True,
+    )
+    if violations:
+        raise InvalidInputError(
+            "refusing to record a commit that is not a valid candidate:\n"
+            + "\n".join(f"  {v}" for v in violations)
+        )
+
+
 def _cmd_record(args: argparse.Namespace, env: _Env) -> None:
     state = Path(args.dir)
     record = _record_from(args, state, env.host, env.now)
     validate_record(record)
+    if args.role == "candidate":
+        _require_schema_valid_candidate(args, state, env)
     shards = state / MEASUREMENTS_DIR
     shards.mkdir(exist_ok=True)
     with (shards / ".lock").open("a") as lock:
@@ -596,6 +670,15 @@ def _commit_status(records: list[dict[str, Any]], commit: str) -> dict[str, Any]
     }
 
 
+def _range_violations(env: _Env, root: Path, listed: list[str], branch: str) -> list[str]:
+    """Schema violations among the commits since the base; the last one must be a candidate."""
+    if not listed:
+        return []
+    schema = _commit_schema()
+    commits = [(sha[:12], env.read_message(root, sha)) for sha in listed]
+    return [str(v) for v in schema.check_commits(commits, branch=branch)]
+
+
 def _cmd_check(args: argparse.Namespace, env: _Env) -> int:
     """Read-only: is the branch head proven? Exit 1 when it has no passing ``better`` record."""
     state = Path(args.dir)
@@ -615,6 +698,8 @@ def _cmd_check(args: argparse.Namespace, env: _Env) -> int:
         head_row = rows[-1] if rows else _commit_status(records, head)
         proven = head_row["check"] == "pass" and head_row["verdict"] == "better"
     unrecorded = [r["commit"] for r in rows if not r["recorded"]]
+    schema = _range_violations(env, root, listed, branch)
+    proven = proven and not schema
     payload = {
         "branch": branch,
         "base": base,
@@ -622,6 +707,7 @@ def _cmd_check(args: argparse.Namespace, env: _Env) -> int:
         "proven": proven,
         "commits": rows,
         "unrecorded": unrecorded,
+        "schema": schema,
     }
     lines = [f"{branch} head {head[:12]} base {base[:12]}: {'proven' if proven else 'NOT proven'}"]
     lines += [
@@ -631,6 +717,7 @@ def _cmd_check(args: argparse.Namespace, env: _Env) -> int:
     ]
     if unrecorded:
         lines.append(f"{len(unrecorded)} commit(s) on the branch have no record")
+    lines.extend(f"schema: {v}" for v in schema)
     _emit(env, payload, "\n".join(lines), as_json=args.json)
     return 0 if proven else 1
 
@@ -754,21 +841,28 @@ def _benchmark_run(command: list[str]) -> int:
 def main(
     argv: Sequence[str],
     *,
-    now: Callable[[], datetime],
+    context: Context,
     out: TextIO,
     err: TextIO,
-    host: str,
 ) -> int:
-    """Run one subcommand; return the exit code (0 ok, 2 invalid input).
-
-    ``now`` stamps records and ``host`` names the machine, so a caller (a test) fixes both.
-    """
+    """Run one subcommand; return the exit code (0 ok, 1 unproven, 2 invalid input)."""
     try:
         args = _parser().parse_args(argv)
         if args.command_name == "run":
             return _benchmark_run(args.argv)
         args.dir = str(_state_directory(args.dir))
-        return _COMMANDS[args.command_name](args, _Env(out=out, now=now, host=host)) or 0
+        return (
+            _COMMANDS[args.command_name](
+                args,
+                _Env(
+                    out=out,
+                    now=context.now,
+                    host=context.host,
+                    read_message=context.read_message,
+                ),
+            )
+            or 0
+        )
     except (InvalidInputError, OSError, ValueError) as error:
         err.write(f"error: {error}\n")
         return 2
@@ -779,10 +873,12 @@ if __name__ == "__main__":
     sys.exit(
         main(
             sys.argv[1:],
-            # LW-100357 [TID251]; standalone host clock; vs_sim adds a dependency, indirect lookup hides real I/O.
-            now=lambda: datetime.now(timezone.utc),  # noqa: TID251
+            context=Context(
+                # LW-100357 [TID251]; standalone host clock; vs_sim adds a dependency, indirect lookup hides real I/O.
+                now=lambda: datetime.now(timezone.utc),  # noqa: TID251
+                host=platform.node() or "unknown",
+            ),
             out=sys.stdout,
             err=sys.stderr,
-            host=platform.node() or "unknown",
         )
     )

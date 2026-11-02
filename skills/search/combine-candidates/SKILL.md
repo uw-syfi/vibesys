@@ -12,7 +12,7 @@ base commit the brief names. The steps and the lead's side of a merge are in
 ## Start
 
 Run the first command of your brief and confirm the worktree and branch. Read `OBJECTIVE.md`.
-Load `vibesys:measure` and the domain skills the brief names.
+Load `vibesys:commit`, `vibesys:measure` and the domain skills the brief names.
 
 ## Work
 
@@ -24,7 +24,7 @@ Load `vibesys:measure` and the domain skills the brief names.
 3. If an instruction cannot be followed without redesigning a candidate, stop and say which
    instruction and why. Main stays as it is.
 4. Run the project's fast tests and fix what the combination broke.
-5. Commit. Without a measurement slot, return the SHA as `ready for measurement` for the lead.
+5. Commit as `vibesys:commit` says: a full commit with `Checks: pass`. Without a measurement slot, return the SHA as `ready for measurement` for the lead.
    Otherwise measure the commit with `vibesys:measure`: the check, then at least 5 samples.
    Compare it with main: `compare --commit <sha> --base <main SHA>`, and with each part.
 
