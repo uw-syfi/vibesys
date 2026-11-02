@@ -80,6 +80,13 @@ func Run(ctx context.Context, cfg Config) (err error) {
 		return fmt.Errorf("daemon: the instance lock: %w", err)
 	}
 	defer lock.Unlock()
+	// The stores go before the lock: a client takes a free lock to mean the daemon is gone, and the
+	// next daemon must find its stores free. Run on after this point holds neither.
+	defer func() {
+		if err := cfg.Runtime.Stores.Close(); err != nil && cfg.Logf != nil {
+			cfg.Logf("giving up the stores: %v", err)
+		}
+	}()
 
 	// With the lock held, a socket in the way belongs to a daemon that died.
 	if err := os.Remove(cfg.Dir.Socket()); err != nil && !errors.Is(err, os.ErrNotExist) {

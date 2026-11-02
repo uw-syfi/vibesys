@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/store"
 	"github.com/uw-syfi/vibesys/cli/internal/store/filestore/fsys"
 )
 
@@ -50,7 +51,7 @@ func claim(b *backend, owner Owner) (*guard, error) {
 	lock, err := b.fs.Lock(path.Join(b.root, lockFile))
 	switch {
 	case errors.Is(err, fsys.ErrLocked):
-		return nil, refused("the store at %s is in use by %s: a store has one daemon, so stop that one or use it", b.root, describeOwner(b))
+		return nil, inUse(b, owner)
 	case errors.Is(err, fsys.ErrNoLocks):
 		return nil, refused("the store at %s cannot be kept to one daemon: %v: move the state to a filesystem with working locks, or mount this one without local_lock or nolock", b.root, err)
 	case err != nil:
@@ -112,13 +113,24 @@ func readOwner(b *backend, name string) (*ownerRec, error) {
 	return &rec, nil
 }
 
-// describeOwner names the owner in an error. A daemon that holds the lock may not have written its
+// leaving is a refusal the caller may try again: see store.ErrOwnerLeaving.
+type leaving struct{ *core.Failure }
+
+func (l leaving) Unwrap() []error { return []error{l.Failure, store.ErrOwnerLeaving} }
+
+// inUse refuses a store another hold has. A daemon that holds the lock may not have written its
 // record yet, and a record that cannot be read has a message of its own at the next Open.
-func describeOwner(b *backend) string {
-	if rec, err := readOwner(b, path.Join(b.root, ownerFile)); err == nil && rec != nil {
-		return rec.String()
+func inUse(b *backend, owner Owner) error {
+	const message = "the store at %s is in use by %s: a store has one daemon, so stop that one or use it"
+	rec, err := readOwner(b, path.Join(b.root, ownerFile))
+	if err != nil || rec == nil {
+		return refused(message, b.root, "another daemon")
 	}
-	return "another daemon"
+	failure := refused(message, b.root, rec)
+	if rec.Host == owner.Host && rec.Dir == owner.Dir {
+		return leaving{failure}
+	}
+	return failure
 }
 
 func (b *backend) hasRunningJob() (bool, error) {
@@ -165,6 +177,6 @@ func (g *guard) release() error {
 	return g.lock.Release()
 }
 
-func refused(format string, args ...any) error {
+func refused(format string, args ...any) *core.Failure {
 	return &core.Failure{Kind: core.FailureConflict, Message: fmt.Sprintf(format, args...)}
 }

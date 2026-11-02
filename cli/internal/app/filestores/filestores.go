@@ -35,7 +35,7 @@ func New(index *filestore.Index, rules store.Rules, owner filestore.Owner, opts 
 	return &FileStores{index: index, rules: rules, owner: owner, opts: opts, stores: map[app.Scope]*filestore.Store{}}
 }
 
-// Close gives up every store. Process death does the same, so a daemon need not call it.
+// Close implements app.Stores.
 func (f *FileStores) Close() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

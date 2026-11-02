@@ -80,11 +80,16 @@ var errNoScope = &core.Failure{Kind: core.FailureUnavailable, Message: "the daem
 // retry calls do until it works, fails for good, or the attempts run out, and returns its last
 // error. It waits between attempts through the timers. After the App closes, it stops waiting.
 func (a *App) retry(ctx context.Context, do func(ctx context.Context) error) error {
+	return a.retryWhile(ctx, transient, do)
+}
+
+// retryWhile is retry with the caller saying which failures are worth another try.
+func (a *App) retryWhile(ctx context.Context, again func(error) bool, do func(ctx context.Context) error) error {
 	delay := a.cfg.Retry.First
 	var err error
 	for attempt := 0; ; attempt++ {
 		err = do(ctx)
-		if err == nil || ctx.Err() != nil || a.ctx.Err() != nil || !transient(err) || attempt+1 >= a.cfg.Retry.Attempts {
+		if err == nil || ctx.Err() != nil || a.ctx.Err() != nil || !again(err) || attempt+1 >= a.cfg.Retry.Attempts {
 			return err
 		}
 		if !a.sleep(ctx, delay) {
@@ -113,6 +118,9 @@ func (a *App) sleep(ctx context.Context, d time.Duration) bool {
 func transient(err error) bool {
 	if errors.Is(err, supervisor.ErrGone) {
 		return false
+	}
+	if errors.Is(err, store.ErrOwnerLeaving) {
+		return true
 	}
 	var f *core.Failure
 	if errors.As(err, &f) {

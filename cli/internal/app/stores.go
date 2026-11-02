@@ -41,6 +41,10 @@ type Stores interface {
 	// Known returns every scope that has a store, including one whose store cannot be reached now:
 	// leaving that out would make its runs look like nobody's.
 	Known(ctx context.Context) ([]Scope, error)
+
+	// Close gives up every store. A daemon calls it before it lets go of the machine, so that once
+	// a daemon is seen to be gone, its stores are free. Nothing may use a store after it.
+	Close() error
 }
 
 // Rules returns the task-dependent decisions of internal/core that a store is opened with. Reuse

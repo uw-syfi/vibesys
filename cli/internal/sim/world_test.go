@@ -88,6 +88,9 @@ type world struct {
 	absent    map[string]bool
 	// down says the stores fail every call. Only the driver touches it.
 	down bool
+	// leaving is how many more opens find a store still held by the daemon that died, as the
+	// kernel frees the machine's lock before a store's. It is guarded by mu.
+	leaving int
 
 	// What happened, for the invariants.
 	killed     map[lifecycle.Ref]bool
@@ -204,6 +207,9 @@ func (s simStores) Open(ctx context.Context, scope app.Scope) (store.Store, erro
 		if s.w.isAbsent(scope.Repository) {
 			return nil, &core.Failure{Kind: core.FailureUnavailable, Message: "the repository is not there"}
 		}
+		if s.w.stillLeaving() {
+			return nil, errors.Join(&core.Failure{Kind: core.FailureConflict, Message: "the store is in use"}, store.ErrOwnerLeaving)
+		}
 		return gatedStore{Store: st, scope: scope, w: s.w, d: s.d}, nil
 	})
 }
@@ -211,6 +217,19 @@ func (s simStores) Open(ctx context.Context, scope app.Scope) (store.Store, erro
 // Known is as filestores.Known behaves: a repository that is away stays known.
 func (s simStores) Known(ctx context.Context) ([]app.Scope, error) {
 	return gated(ctx, s.w, s.d, "stores.Known", false, func() ([]app.Scope, error) { return slices.Clone(scopes), nil })
+}
+
+// Close has nothing to give up: the store outlives every daemon of the world.
+func (s simStores) Close() error { return nil }
+
+func (w *world) stillLeaving() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.leaving == 0 {
+		return false
+	}
+	w.leaving--
+	return true
 }
 
 func (w *world) isAbsent(repo string) bool {
@@ -498,6 +517,9 @@ func (w *world) crash() {
 	}
 	w.tracef("daemon %d dies", d.id)
 	d.dead.Store(true)
+	w.mu.Lock()
+	w.leaving = w.rng.IntN(4)
+	w.mu.Unlock()
 	close(d.dying)
 	// What a dead daemon was doing never answers anyone: its connections go first.
 	select {

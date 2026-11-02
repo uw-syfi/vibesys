@@ -55,7 +55,8 @@
 // The lock. Open takes a flock on .owner.lock, or fails. It ends with the process, however that
 // ends, so a crashed owner leaves nothing to clean up. On NFS a client machine that crashed keeps
 // it until its lease runs out or it reboots, and the store is refused until then with an error
-// that names that owner. A filesystem where the lock would keep nobody out is refused: see
+// that names that owner. A holder with the opener's own place can only be a daemon on its way out,
+// and that refusal is marked store.ErrOwnerLeaving. A filesystem where the lock would keep nobody out is refused: see
 // fsys.OS.Lock for how that is found. There is no falling back to no lock.
 //
 // The record. A lock says nobody is here now. It does not say the last owner's work is over: its

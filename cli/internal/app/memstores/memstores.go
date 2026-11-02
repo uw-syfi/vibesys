@@ -46,6 +46,9 @@ func (m *Stores) Open(ctx context.Context, scope app.Scope) (store.Store, error)
 	return s, nil
 }
 
+// Close implements app.Stores. Memory has nothing to give up.
+func (m *Stores) Close() error { return nil }
+
 // Known implements app.Stores.
 func (m *Stores) Known(ctx context.Context) ([]app.Scope, error) {
 	m.mu.Lock()

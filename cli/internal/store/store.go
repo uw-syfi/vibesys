@@ -8,6 +8,7 @@ package store
 
 import (
 	"context"
+	"errors"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 )
@@ -125,6 +126,11 @@ type LogStore interface {
 	// no limit.
 	ReadLog(ctx context.Context, id core.JobID, offset uint64, max int) (core.LogChunk, error)
 }
+
+// ErrOwnerLeaving marks a refused store whose holder has the caller's own place: the same machine
+// and runtime directory, which have one daemon. So it is a daemon on its way out, whose descriptors
+// the kernel is still closing, and trying again for a bounded time is the answer.
+var ErrOwnerLeaving = errors.New("the owner of the store is leaving")
 
 // Rules are the decisions of internal/core that depend on the task, which the daemon passes to an
 // implementation when it opens the store. The zero Rules is a store for a task that declares

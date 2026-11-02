@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
+	"github.com/uw-syfi/vibesys/cli/internal/store"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
 )
 
@@ -104,7 +106,15 @@ func presenceOf(r supervisor.Run) lifecycle.Presence {
 // recoverScope tells the machine of the unfinished jobs of one store, with what is left of their
 // runs, and takes those runs from byRef.
 func (a *App) recoverScope(ctx context.Context, scope Scope, byRef map[lifecycle.Ref]supervisor.Run) error {
-	st, err := a.cfg.Stores.Open(ctx, scope)
+	// Most failures here wait for the slow sweep, and hold up nothing. A daemon that died a moment
+	// ago is different: its store is free as soon as the kernel gets to it, and its jobs are this
+	// daemon's to answer for.
+	var st store.Store
+	err := a.retryWhile(ctx, ownerLeaving, func(ctx context.Context) error {
+		var err error
+		st, err = a.cfg.Stores.Open(ctx, scope)
+		return err
+	})
 	if err != nil {
 		return err
 	}
@@ -125,6 +135,8 @@ func (a *App) recoverScope(ctx context.Context, scope Scope, byRef map[lifecycle
 	}
 	return nil
 }
+
+func ownerLeaving(err error) bool { return errors.Is(err, store.ErrOwnerLeaving) }
 
 func storeIDOf(s Scope) lifecycle.StoreID { return lifecycle.StoreIDOf(s.Repository, s.Task) }
 

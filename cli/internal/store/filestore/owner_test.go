@@ -56,14 +56,22 @@ func start(t *testing.T, s store.Store, job core.Job) {
 
 // A daemon that holds a store shuts out every other, wherever it runs and whatever it is called,
 // and the refusal says which store and who has it.
+//
+// A place has one daemon, so a holder from the opener's own place can only be one on its way out,
+// and only that refusal says so: everywhere else it is a person's decision and no wait helps.
 func TestASecondOwnerIsRefusedWhileTheFirstLives(t *testing.T) {
-	for _, second := range []filestore.Owner{daemonA, daemonB, daemonC} {
+	successor := filestore.Owner{Host: daemonA.Host, Dir: daemonA.Dir, PID: 40}
+	for _, second := range []filestore.Owner{daemonA, successor, daemonB, daemonC} {
 		t.Run(fmt.Sprintf("%+v", second), func(t *testing.T) {
 			mem := fsys.NewMemFS()
 			first := mustOpenAs(t, mem, daemonA)
 			before := mem.Files()
 			_, err := openAs(mem, second)
 			wantFailure(t, "second Open", err, core.FailureConflict, stateDir, "host-a", "/run/user/1", "10")
+			samePlace := second.Host == daemonA.Host && second.Dir == daemonA.Dir
+			if got := errors.Is(err, store.ErrOwnerLeaving); got != samePlace {
+				t.Errorf("leaving = %v, want %v: %v", got, samePlace, err)
+			}
 			if got := mem.Files()[ownerRecord]; string(got) != string(before[ownerRecord]) {
 				t.Errorf("a refused Open wrote the record: %s", got)
 			}

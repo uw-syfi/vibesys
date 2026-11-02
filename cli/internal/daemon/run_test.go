@@ -213,6 +213,72 @@ func TestRunServesTheSocketPrivatelyAndStopsOnStop(t *testing.T) {
 	lock.Unlock()
 }
 
+// lockWatchingStores says, when it is closed, whether the instance lock was still held.
+type lockWatchingStores struct {
+	app.Stores
+	dir  runtimedir.Dir
+	seen chan error
+}
+
+func (s lockWatchingStores) Close() error {
+	lock, err := runtimedir.TryLock(s.dir.DaemonLock())
+	if err == nil {
+		lock.Unlock()
+	}
+	s.seen <- err
+	return s.Stores.Close()
+}
+
+// A free instance lock tells a client the daemon is gone, and the next daemon must find the stores
+// free. So however a daemon ends, the stores go first.
+func TestADaemonGivesUpItsStoresBeforeItLetsGoOfTheMachine(t *testing.T) {
+	cases := map[string]struct {
+		stores app.Stores
+		stop   bool
+	}{
+		"after serving":          {stores: memstores.New(app.Rules(5)), stop: true},
+		"after failing to start": {stores: brokenStores{}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := openDir(t)
+			survivors := supervisor.NewSurvivors()
+			defer survivors.Close()
+			watching := lockWatchingStores{Stores: tc.stores, dir: dir, seen: make(chan error, 1)}
+			r, w, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer r.Close()
+			rt := runtimeOf(t, survivors)
+			rt.Stores = watching
+			done := make(chan error, 1)
+			go func() {
+				done <- daemon.Run(ctxFor(t), daemon.Config{
+					Dir: dir, Version: "test", Runtime: rt, Clock: clock.System{}, Timers: clock.Immediate{Longest: time.Minute}, Ready: w,
+				})
+			}()
+			if tc.stop {
+				if _, err := io.ReadFull(r, make([]byte, 1)); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := dial(t, dir).Stop(ctxFor(t), &cliv1.StopRequest{}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			select {
+			case err := <-watching.seen:
+				if !errors.Is(err, runtimedir.ErrHeld) {
+					t.Fatalf("the stores closed with the instance lock free (taking it gave %v)", err)
+				}
+			case err := <-done:
+				t.Fatalf("Run ended (%v) and never closed the stores", err)
+			}
+			<-done
+		})
+	}
+}
+
 // A second daemon of the user does not start, and does not disturb the first.
 func TestASecondDaemonIsRefusedAndTheFirstIsUntouched(t *testing.T) {
 	dir := openDir(t)
@@ -292,3 +358,5 @@ type brokenStores struct{ app.Stores }
 func (brokenStores) Known(context.Context) ([]app.Scope, error) {
 	return nil, &core.Failure{Kind: core.FailureUnavailable, Message: "the disk is gone"}
 }
+
+func (brokenStores) Close() error { return nil }

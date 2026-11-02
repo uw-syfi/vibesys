@@ -77,6 +77,8 @@ func (s crashStores) Open(ctx context.Context, scope app.Scope) (store.Store, er
 
 func (s crashStores) Known(ctx context.Context) ([]app.Scope, error) { return s.inner.Known(ctx) }
 
+func (s crashStores) Close() error { return s.inner.Close() }
+
 type crashStore struct {
 	store.Store
 	c *crash
@@ -285,6 +287,79 @@ func scenario(t *testing.T, limit int64, reboot bool) int64 {
 	}
 	check(t, w, a2, reboot, limit)
 	return c.steps.Load()
+}
+
+// leavingStores refuses opens as a store is refused while the daemon before is still dying: the
+// kernel frees the machine's lock first and the store's a moment later.
+type leavingStores struct {
+	app.Stores
+	mu     sync.Mutex
+	left   int
+	opened int
+}
+
+func (s *leavingStores) Open(ctx context.Context, scope app.Scope) (store.Store, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.opened++
+	if s.left > 0 {
+		s.left--
+		return nil, errors.Join(&core.Failure{Kind: core.FailureConflict, Message: "in use"}, store.ErrOwnerLeaving)
+	}
+	return s.Stores.Open(ctx, scope)
+}
+
+func (s *leavingStores) attempts() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.opened
+}
+
+func (w *world) newAppOver(stores app.Stores) *app.App {
+	w.t.Helper()
+	a := app.New(instant(app.Config{
+		Clock: w.clock, Stores: stores, Environments: fakeenv.Environments{core.EnvironmentHost: w.env},
+		Supervisors: w.supervisors(),
+		Logf:        func(format string, args ...any) { w.t.Logf("daemon: "+format, args...) },
+	}))
+	w.apps = append(w.apps, a)
+	if err := a.Start(context.Background()); err != nil {
+		w.t.Fatalf("Start: %v", err)
+	}
+	return a
+}
+
+// A daemon started the moment the last one died answers for that one's jobs: it does not put the
+// store aside for the slow sweep because the store is not free yet.
+func TestARestartWaitsForADaemonThatIsStillLeaving(t *testing.T) {
+	w := newWorld(t)
+	a1 := w.newApp()
+	job := submit(t, a1, "hold", "g")
+	awaitState(t, a1, job.ID, core.JobRunning)
+	a1.Close()
+
+	stores := &leavingStores{Stores: w.stores, left: 3}
+	a2 := w.newAppOver(stores)
+	w.gates.Release("g")
+	if got := awaitFinal(t, a2, job.ID); got.State != core.JobSucceeded {
+		t.Fatalf("job = %s, want succeeded", got.State)
+	}
+}
+
+// A store that never comes free costs a bounded wait, and is then away like any other.
+func TestARestartStopsWaitingForAStoreThatStaysHeld(t *testing.T) {
+	w := newWorld(t)
+	a1 := w.newApp()
+	job := submit(t, a1, "hold", "g")
+	awaitState(t, a1, job.ID, core.JobRunning)
+	a1.Close()
+
+	stores := &leavingStores{Stores: w.stores, left: 1 << 30}
+	w.newAppOver(stores)
+	if got := stores.attempts(); got != 4 {
+		t.Fatalf("%d attempts at the store, want the 4 of the retry policy", got)
+	}
+	w.gates.Release("g")
 }
 
 // check says what must hold of the world after a crash and a restart, wherever the crash was.
