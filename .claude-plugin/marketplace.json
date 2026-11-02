@@ -43,7 +43,8 @@
         "./search/plan-hypotheses",
         "./search/profile-revision",
         "./search/report-progress",
-        "./search/state"
+        "./search/state",
+        "./search/visualize-progress"
       ]
     }
   ]
