@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import json
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -157,9 +158,15 @@ def test_legacy_loop_fixtures_import_without_upgrading_their_snapshots(name: str
     )
 
 
+@functools.cache
+def _canonical_import() -> bytes:
+    """The import of the sources in their declared order, computed once for every example."""
+    return _import(*_sources()).to_binary()
+
+
 @given(st.permutations(_sources()))
 def test_import_is_deterministic_over_source_order(sources: tuple[ImportSource, ...]) -> None:
-    assert _import(*sources).to_binary() == _import(*_sources()).to_binary()
+    assert _import(*sources).to_binary() == _canonical_import()
 
 
 @given(data=st.binary(max_size=2048), source_format=st.sampled_from(tuple(SourceFormat)))
