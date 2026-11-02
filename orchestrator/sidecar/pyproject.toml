@@ -1,0 +1,48 @@
+[project]
+name = "vibesys-sidecar"
+version = "0.1.0"
+description = "One process per agent session: drives a provider through agentshim and serves the orchestrator's SidecarService over a Unix socket."
+requires-python = ">=3.12"
+dependencies = [
+    "agentshim @ git+https://github.com/vic-lsh/agentshim@aeb95d8d70132e1f8f19a77af93fe235bddce1c9",
+    "grpcio==1.76.0",
+    "protobuf==6.33.5",
+    "jinja2>=3.1",
+    "protovalidate>=0.7",
+]
+
+[dependency-groups]
+dev = [
+    "grpcio-tools==1.76.0",
+    "hypothesis>=6.100",
+    "pytest>=8",
+    "ruff",
+    "pyright",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vs_sidecar"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.pytest.ini_options]
+# A rootdir of its own, so the repository's root conftest (vs_sim, which this project does not
+# have) is not collected.
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"
+
+[tool.ruff]
+# The repository's rules, applied here too, with the generated bindings left out. This project
+# has its own tree and lock, so the root configuration does not list it.
+extend = "../../pyproject.toml"
+src = ["src", "tests"]
+extend-exclude = ["src/vs_sidecar/gen"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "PLR2004", "D", "INP001", "ANN"]

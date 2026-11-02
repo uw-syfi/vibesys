@@ -1,0 +1,72 @@
+{
+  "name": "a_turn_runs_to_its_end",
+  "doc": "One turn: items, a tool that completes, and an end. The log is well formed and a follower can resume anywhere.",
+  "provider": [
+    [
+      {
+        "think": "hmm",
+        "item": "r1"
+      },
+      {
+        "say": "hello",
+        "item": "a1"
+      },
+      {
+        "tool": "Bash",
+        "id": "c1",
+        "output": "ok",
+        "exit_code": 0
+      },
+      {
+        "total": {
+          "input": 10,
+          "output": 2
+        }
+      }
+    ]
+  ],
+  "steps": [
+    {
+      "send": {
+        "effectId": "e1",
+        "startTurn": {
+          "session": {
+            "agentId": "agent-1",
+            "session": 1
+          },
+          "turnId": "t1",
+          "message": {
+            "id": "msg-t1",
+            "runId": "run-1",
+            "toAgentId": "agent-1",
+            "delivery": "DELIVERY_QUEUED",
+            "at": "1970-01-01T00:00:01Z",
+            "text": "go"
+          }
+        }
+      }
+    },
+    {
+      "await": {
+        "turn_ended": "t1"
+      }
+    }
+  ],
+  "checks": [
+    "opened_first",
+    "offsets_increase",
+    "one_end_per_turn",
+    "items_precede_end",
+    "no_running_item_after_end",
+    "usage_is_the_turn_result",
+    "follow_resumes"
+  ],
+  "expect": {
+    "usage": {
+      "t1": {
+        "input": 10,
+        "output": 2
+      }
+    }
+  }
+}

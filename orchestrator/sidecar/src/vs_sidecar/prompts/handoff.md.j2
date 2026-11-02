@@ -1,0 +1,13 @@
+Agent {{ message.from_agent_id }} handed off plan {{ handoff.plan_number }}.
+{% if handoff.has_candidate %}
+Candidate: commit {{ handoff.commit }} on branch {{ handoff.branch }} (parent {{ handoff.parent_commit }}).
+Claim: {{ handoff.claim }}
+Checks: {{ handoff.checks }}
+Measurement: {{ handoff.measurement }}
+{% else %}
+It produced no candidate.
+{% endif %}
+Learned: {{ handoff.learned }}
+Next: {{ handoff.next }}
+{% if handoff.open_items %}Open items: {{ handoff.open_items }}
+{% endif %}

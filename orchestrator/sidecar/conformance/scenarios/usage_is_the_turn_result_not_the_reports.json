@@ -1,0 +1,107 @@
+{
+  "name": "usage_is_the_turn_result_not_the_reports",
+  "doc": "Reports during a turn are not totals (a provider may report each message on its own), so a turn's usage is its result: one UsageReported with the result, or none when the turn has no result.",
+  "provider": [
+    [
+      {
+        "report": {
+          "input": 10,
+          "output": 1
+        }
+      },
+      {
+        "say": "a",
+        "item": "a1"
+      },
+      {
+        "report": {
+          "input": 25,
+          "output": 4
+        }
+      },
+      {
+        "total": {
+          "input": 30,
+          "output": 5
+        }
+      }
+    ],
+    [
+      {
+        "report": {
+          "input": 7,
+          "output": 1
+        }
+      },
+      {
+        "end": "failed"
+      }
+    ]
+  ],
+  "steps": [
+    {
+      "send": {
+        "effectId": "e1",
+        "startTurn": {
+          "session": {
+            "agentId": "agent-1",
+            "session": 1
+          },
+          "turnId": "t1",
+          "message": {
+            "id": "msg-t1",
+            "runId": "run-1",
+            "toAgentId": "agent-1",
+            "delivery": "DELIVERY_QUEUED",
+            "at": "1970-01-01T00:00:01Z",
+            "text": "go"
+          }
+        }
+      }
+    },
+    {
+      "await": {
+        "turn_ended": "t1"
+      }
+    },
+    {
+      "send": {
+        "effectId": "e2",
+        "startTurn": {
+          "session": {
+            "agentId": "agent-1",
+            "session": 1
+          },
+          "turnId": "t2",
+          "message": {
+            "id": "msg-t2",
+            "runId": "run-1",
+            "toAgentId": "agent-1",
+            "delivery": "DELIVERY_QUEUED",
+            "at": "1970-01-01T00:00:01Z",
+            "text": "again"
+          }
+        }
+      }
+    },
+    {
+      "await": {
+        "turn_ended": "t2"
+      }
+    }
+  ],
+  "checks": [
+    "opened_first",
+    "one_end_per_turn",
+    "usage_is_the_turn_result"
+  ],
+  "expect": {
+    "usage": {
+      "t1": {
+        "input": 30,
+        "output": 5
+      },
+      "t2": null
+    }
+  }
+}

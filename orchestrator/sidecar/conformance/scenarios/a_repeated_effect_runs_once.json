@@ -1,0 +1,95 @@
+{
+  "name": "a_repeated_effect_runs_once",
+  "doc": "The daemon delivers a command at least once; a repeat must change nothing. Turns run in order, so a repeated t1 that ran would end before t2.",
+  "provider": [
+    [
+      {
+        "say": "once",
+        "item": "a1"
+      }
+    ],
+    [
+      {
+        "say": "second",
+        "item": "a2"
+      }
+    ],
+    [
+      {
+        "say": "third",
+        "item": "a3"
+      }
+    ]
+  ],
+  "steps": [
+    {
+      "send": {
+        "effectId": "e1",
+        "startTurn": {
+          "session": {
+            "agentId": "agent-1",
+            "session": 1
+          },
+          "turnId": "t1",
+          "message": {
+            "id": "msg-t1",
+            "runId": "run-1",
+            "toAgentId": "agent-1",
+            "delivery": "DELIVERY_QUEUED",
+            "at": "1970-01-01T00:00:01Z",
+            "text": "go"
+          }
+        }
+      }
+    },
+    {
+      "send": {
+        "effectId": "e1",
+        "startTurn": {
+          "session": {
+            "agentId": "agent-1",
+            "session": 1
+          },
+          "turnId": "t1",
+          "message": {
+            "id": "msg-t1",
+            "runId": "run-1",
+            "toAgentId": "agent-1",
+            "delivery": "DELIVERY_QUEUED",
+            "at": "1970-01-01T00:00:01Z",
+            "text": "go"
+          }
+        }
+      }
+    },
+    {
+      "send": {
+        "effectId": "e2",
+        "startTurn": {
+          "session": {
+            "agentId": "agent-1",
+            "session": 1
+          },
+          "turnId": "t2",
+          "message": {
+            "id": "msg-t2",
+            "runId": "run-1",
+            "toAgentId": "agent-1",
+            "delivery": "DELIVERY_QUEUED",
+            "at": "1970-01-01T00:00:01Z",
+            "text": "go"
+          }
+        }
+      }
+    },
+    {
+      "await": {
+        "turn_ended": "t2"
+      }
+    }
+  ],
+  "checks": [
+    "one_end_per_turn",
+    "effect_repeat_dropped"
+  ]
+}
