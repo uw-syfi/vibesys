@@ -128,6 +128,14 @@ class _Model:
         """Whether posting ``payload`` under ``request_id`` must raise."""
         return request_id in self.posted and self.posted[request_id] != payload
 
+    def refusal(self, request_id: str) -> str:
+        """The message of the refusal of a post under ``request_id``.
+
+        An entry the inbox cannot read cannot be compared, so the post fails with whatever
+        says why it cannot be read; a readable one is named as a different request.
+        """
+        return "different request" if self.posted.get(request_id) is not None else ""
+
     def apply(self, operation: tuple[object, ...]) -> None:
         match operation:
             case ("post", str(request_id), bytes(payload)) if self.ended is None and not (
@@ -205,6 +213,10 @@ def _fake_inbox(_: Path) -> _Opened:
     ]
 )
 @example(operations=[("post-as-it-ends", "racing", b"{}")])
+@example(operations=[("post", "a", b"1"), ("settle", "b"), ("post-as-it-ends", "b", b"2")])
+@example(operations=[("post", "a", b"1"), ("end", "completed"), ("post-as-it-ends", "a", b"2")])
+@example(operations=[("unreadable", "a", "directory"), ("post", "a", b"1")])
+@example(operations=[("unreadable", "a", "symlink"), ("post-as-it-ends", "a", b"1")])
 def test_an_inbox_lists_what_was_posted_in_posting_order_and_reports_each_status(
     tmp_path_factory: pytest.TempPathFactory,
     opener: Callable[[Path], _Opened],
@@ -247,19 +259,22 @@ def _apply(inbox: ControlInbox, model: _Model, operation: tuple[object, ...]) ->
     ended = model.ended
     match operation:
         case ("post", str(request_id), bytes(payload)) if model.refuses(request_id, payload):
-            with pytest.raises(ProjectStateError, match="different request"):
+            with pytest.raises(ProjectStateError, match=model.refusal(request_id)):
                 inbox.post(request_id, payload, ended=lambda: ended)
         case ("post", str(request_id), bytes(payload)) if ended is not None:
             _post_to_ended(inbox, model, request_id, payload)
         case ("post", str(request_id), bytes(payload)):
             inbox.post(request_id, payload, ended=lambda: None)
+        case ("post-as-it-ends", str(request_id), bytes(payload)) if model.refuses(
+            request_id, payload
+        ):
+            reads = iter([None, "completed"])
+            with pytest.raises(ProjectStateError, match=model.refusal(request_id)):
+                inbox.post(request_id, payload, ended=lambda: ended or next(reads))
         case ("post-as-it-ends", str(request_id), bytes(payload)) if ended is None:
             reads = iter([None, "completed"])
-            applied = model.status(request_id) == RequestStatus(RequestState.APPLIED)
-            if model.refuses(request_id, payload):
-                with pytest.raises(ProjectStateError, match="different request"):
-                    inbox.post(request_id, payload, ended=lambda: next(reads))
-            elif applied:
+            # A marker left on the id before its first post applies it once posted.
+            if request_id in model.settled:
                 inbox.post(request_id, payload, ended=lambda: next(reads))
             else:
                 with pytest.raises(InboxClosedError, match="written as the run ended"):
