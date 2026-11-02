@@ -34,14 +34,14 @@ Use upstream implementations as references, but own the candidate serving path.
 
 ## Quantized correctness gate
 
-The trusted accuracy command downloads and SHA256-verifies the exact GGUF,
+The trusted accuracy command runs with its own pinned script dependencies,
+independent of candidate Python libraries. It downloads and SHA256-verifies the exact GGUF,
 downloads and verifies a pinned llama.cpp source archive, builds a CPU-only
 `llama-server`, and serves the reference on a private Unix socket. No GPU
 memory is reserved for the reference. It is not compared against BF16 weights.
 
-Provide a C++17 compiler, CMake, OpenSSL development headers, Python dependencies
-from the project, network access or prefilled HF caches, and at least 40 GiB
-available host RAM for the CPU reference plus candidate host memory. Allow
+Provide a C++17 compiler, CMake, OpenSSL development headers, `uv`, network
+access or prefilled HF caches, and at least 40 GiB available host RAM for the CPU reference plus candidate host memory. Allow
 8 GiB build memory and 5 GiB temporary build space. Source builds use two jobs
 and run per invocation; the one-hour accuracy deadline includes setup. Both
 build/runtime and numerical tolerances remain uncalibrated on a full-size AMD

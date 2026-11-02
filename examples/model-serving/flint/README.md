@@ -95,7 +95,9 @@ trained quantization; it does not optimize a new quantization recipe.
 The [quantized checker](.vibesys/shared/int4_checker.py) builds a pinned,
 CPU-only llama.cpp reference and scores against the same SHA256-verified GGUF.
 It reuses the BF16 checker's response validation and numerical error budgets,
-but does not load BF16 reference weights. Provision at least 40 GiB available
+but does not load BF16 reference weights. Its adjacent uv script lock pins the
+CPU checker dependencies independently of candidate Python libraries.
+Provision at least 40 GiB available
 host RAM for the reference plus candidate host memory, a C++17 compiler,
 CMake and OpenSSL development headers. Source builds use two jobs; allow
 5 GiB temporary build space and 8 GiB build memory. Full-size gate runtime,

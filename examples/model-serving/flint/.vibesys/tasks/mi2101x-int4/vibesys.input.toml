@@ -10,7 +10,7 @@ name = "vibesys-evaluator-agentx"
 version = "0.1.0"
 
 [accuracy]
-command = ["uv", "run", "python", "-I", "${PROJECT_ROOT}/.vibesys/shared/int4_checker.py"]
+command = ["uv", "run", "--locked", "--isolated", "--no-project", "--python", "3.12", "--script", "${PROJECT_ROOT}/.vibesys/shared/int4_checker.py"]
 timeout_seconds = 3600
 
 [benchmark]

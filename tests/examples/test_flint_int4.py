@@ -30,7 +30,9 @@ def test_int4_task_pins_quantized_weights_and_base_tokenizer() -> None:
         args[args.index("--tokenizer-revision") + 1] == "2a247be0c0aec895ccb0ac7ca92229ec6df37288"
     )
     assert manifest.accuracy.command is not None
-    assert "int4_checker.py" in manifest.accuracy.command[4]
+    assert manifest.accuracy.command[-1].endswith("int4_checker.py")
+    assert "--locked" in manifest.accuracy.command
+    assert "--isolated" in manifest.accuracy.command
     root = task_root(_PROJECT, "mi2101x-int4")
     assert json.loads((root / "reference/meta.json").read_text()) == {
         "model_id": _CHECKER.MODEL,

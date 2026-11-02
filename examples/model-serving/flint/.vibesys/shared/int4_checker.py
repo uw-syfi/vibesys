@@ -1,3 +1,7 @@
+# /// script
+# requires-python = ">=3.12,<3.14"
+# dependencies = ["httpx==0.28.1", "huggingface-hub==1.10.2"]
+# ///
 """Check candidate parity against the pinned Q4_1 GGUF on a CPU reference.
 
 Public API: ``parse_reference_step`` validates native llama.cpp probability
