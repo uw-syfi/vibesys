@@ -49,6 +49,12 @@ const (
 // Snapshot and follows from its sequence.
 var ErrCompacted = errors.New("store: events before the requested sequence were compacted")
 
+// ErrAheadOfLog says a reader's cursor is above the end of the log. A store under synchronous=NORMAL
+// can lose its last commits to a power cut, so a client may hold a sequence the log no longer
+// reaches. The reader's picture is then ahead of the store and cannot be continued: the daemon
+// answers with a fresh Snapshot and the client starts again from its sequence.
+var ErrAheadOfLog = errors.New("store: the cursor is above the end of the log")
+
 // Result is what one Decide produced, and what Commit makes durable.
 type Result struct {
 	Events  []core.Event
@@ -86,16 +92,24 @@ type Store interface {
 	Complete(ids ...OutboxID) error
 	// Release returns claimed effects to the outbox, for a retry.
 	Release(ids ...OutboxID) error
+	// Reclaim returns every claimed effect to the outbox and says how many there were, for a shell
+	// that lost the executors of its claims without restarting (a reopened store does the same).
+	// An effect it returns is offered again by Claim, so delivery stays at least once.
+	Reclaim() (int, error)
 	// NextDue is the earliest time an unclaimed timed effect becomes ready, so a shell knows when
 	// to look again. It says nothing of effects that are ready now.
 	NextDue() (time.Time, bool, error)
 
 	// Compact drops what recovery and the screens no longer need, without changing what Recover
-	// returns. See Retention.
+	// returns. See Retention. It takes time proportional to the state, but holds the writer only
+	// for short steps, so commits go on while it runs; two calls run one after the other.
 	Compact(Retention, time.Time) (Compaction, error)
 
-	// Verify checks the store against itself: the tables equal a projection of the committed
-	// events, the sequences have no gap, and every receipt row names an event. It reads
+	// Verify checks the store against itself, on one consistent snapshot, beside the writer: the
+	// sequences have no gap; every row of every table carries in its index columns what its body
+	// says, and equals the last retained event that wrote it, or has no retained event because
+	// Compact dropped its run's events; every entity the retained events write has its row; and the
+	// runs, agents, messages in transit and receipts equal what Recover returns. It reads
 	// everything, so it is for startup and tests.
 	Verify() error
 
@@ -112,7 +126,8 @@ type Reader interface {
 
 	// EventsAfter returns up to limit events with a sequence above after, oldest first, for one
 	// run, or for every run when run is empty. Events of a finished run may have been compacted:
-	// that is ErrCompacted, when after is below the last sequence the run dropped.
+	// that is ErrCompacted, when after is below the last sequence the run dropped. A cursor above
+	// the end of the log is ErrAheadOfLog, not an empty page.
 	EventsAfter(run core.RunID, after uint64, limit int) ([]EventRecord, error)
 
 	// Items returns a page of one agent's items. A zero before means the newest; otherwise the
@@ -120,7 +135,8 @@ type Reader interface {
 	// page's first ordinal is the next before. limit is capped at MaxPageItems.
 	Items(agent core.AgentID, before uint32, limit int) (ItemPage, error)
 
-	// Messages returns up to limit of a run's messages with a Seq above after, oldest first.
+	// Messages returns up to limit of a run's messages with a Seq above after, oldest first. A
+	// cursor above the end of the log is ErrAheadOfLog.
 	Messages(run core.RunID, after uint64, limit int) ([]MessageRecord, error)
 
 	// Turns returns the turns of a run that overlap [from, to]: started before to, and still
@@ -173,7 +189,17 @@ type Claimed struct {
 }
 
 // Retention says what Compact may drop. Nothing it drops changes what Recover returns or what a
-// Reader returns for a live run, and a finished run's events are all it ever removes from reads.
+// Reader returns for a live run.
+//
+// Retention covers the event log and the checkpoint, and nothing else. It drops the events of a
+// finished run, after which EventsAfter says ErrCompacted for that run, and it replaces the
+// checkpoint. It never drops the rows of the tables: a finished run's agents, turns, items and
+// messages stay readable through Items, Messages and Turns for as long as the file lives, because
+// those are the history the screens show of a past run. Their growth is the cost of that, and
+// bounding it is a separate decision (it needs an archive or a deletion, and a user-facing rule for
+// which runs go); Snapshot already bounds what a client loads at connect. Verify accepts exactly
+// this shape: a row with no retained event must belong to a run that was pruned past the row's
+// last write.
 type Retention struct {
 	// CheckpointAfter is how many events may follow the last checkpoint before Compact writes a new
 	// one, which bounds the work of Recover. Zero means a checkpoint on every Compact.

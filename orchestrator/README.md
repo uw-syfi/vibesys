@@ -80,8 +80,25 @@ is pure Go, so the daemon cross-compiles with no C toolchain.
 The state directory comes from `VIBESYS_ORCHESTRATOR_STATE_DIR`, or defaults to
 `$XDG_STATE_HOME/vibesys/orchestrator` and then `~/.local/state/vibesys/orchestrator`. SQLite cannot
 lock safely on NFS, SMB and their kin, so `localfs` follows symlinks and refuses such a directory
-before the database opens anything. There is no override: the error says to point the variable at a
-local path, and a default on a network filesystem is refused and never replaced by another place.
+before the database opens anything. The check fails closed: only filesystem types known to be local
+pass (a list for Linux and for macOS), a network type is refused and named, and so is a type nobody
+listed, with its statfs number. There is no override: the error says to point the variable at a local
+path, and a default on a network filesystem is refused and never replaced by another place. An empty
+home directory is an error, not a default relative to the working directory.
+
+Writes never block reads, and the long ones never block the writer for long. `Verify` and the
+read-heavy part of `Compact` run on a snapshot beside the writer. `Compact` writes in steps of at
+most `StepRows` rows (1000 by default), each its own short transaction, and a crash between steps
+leaves a store that recovers the same state. Retention covers the event log and the checkpoint only:
+a finished run's events go, and its agents, turns, items and messages stay readable (see
+`Retention`). A reader whose cursor is above the end of the log gets `ErrAheadOfLog`, because a
+power cut under `synchronous = NORMAL` can leave the log shorter than a sequence a client already
+saw; the daemon answers with a fresh snapshot.
+
+The crash tests fail or kill the store at every statement and every COMMIT of a commit, taken at the
+database driver (`store.Op`) and not at points the store names, and require that each result is
+whole, that every returned commit survives, and that the outbox holds exactly the effects of the
+events that did. Moving the outbox writes into a second transaction fails them.
 
 `ORCHESTRATOR_STORE_SCALE=1000000 go test ./internal/store -run TestMeasureScale -v` measures recovery
 time and read latency on generated data.

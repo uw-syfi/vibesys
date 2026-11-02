@@ -2,7 +2,7 @@ package store
 
 // schemaVersion is stored in meta. A file with another version is refused: a migration is its own
 // change.
-const schemaVersion = 1
+const schemaVersion = 2
 
 // The schema. It follows the draft in the design notes, with these deliberate differences:
 //
@@ -14,8 +14,12 @@ const schemaVersion = 1
 //     its place in the order must not.
 //   - events keep command_id and at as columns for the log's own queries, and the body is the
 //     bytes wire.EncodeEvent made, the same bytes every other table keeps.
-//   - checkpoint holds the events a core.State.Checkpoint made, and pruned remembers what Compact
-//     dropped, so a reader asking for dropped events is told and not given a silent gap.
+//   - checkpoint holds the events a core.State.Checkpoint made, in generations: Compact writes the
+//     next generation beside the one in force and switches meta to it with one small write, so the
+//     writer is never held for the length of a checkpoint. pruned remembers what Compact dropped,
+//     so a reader asking for dropped events is told and not given a silent gap.
+//   - an index serves one read and puts its rows in the order the read returns, so no screen read
+//     sorts: a test asks SQLite for each plan and rejects a temporary B-tree.
 //
 // Every table is WITHOUT ROWID where its key is not an integer, so a lookup by key is one B-tree
 // walk.
@@ -41,7 +45,8 @@ CREATE TABLE IF NOT EXISTS outbox (
   effect    BLOB NOT NULL,
   state     INTEGER NOT NULL,
   run_after INTEGER NOT NULL);
-CREATE INDEX IF NOT EXISTS outbox_ready ON outbox(state, run_after);
+CREATE INDEX IF NOT EXISTS outbox_due ON outbox(state, run_after);
+CREATE INDEX IF NOT EXISTS outbox_order ON outbox(state, id, run_after);
 
 CREATE TABLE IF NOT EXISTS runs (
   id               TEXT PRIMARY KEY,
@@ -70,7 +75,7 @@ CREATE TABLE IF NOT EXISTS turns (
   updated_sequence INTEGER NOT NULL,
   body             BLOB NOT NULL,
   PRIMARY KEY (agent_id, ordinal)) WITHOUT ROWID;
-CREATE INDEX IF NOT EXISTS turns_ended ON turns(run_id, ended_at);
+CREATE INDEX IF NOT EXISTS turns_window ON turns(run_id, started_at, id, ended_at);
 
 CREATE TABLE IF NOT EXISTS items (
   agent_id         TEXT NOT NULL,
@@ -91,7 +96,7 @@ CREATE TABLE IF NOT EXISTS messages (
   body             BLOB NOT NULL) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS messages_run ON messages(run_id, seq);
 
-CREATE TABLE IF NOT EXISTS checkpoint (idx INTEGER PRIMARY KEY, body BLOB NOT NULL);
+CREATE TABLE IF NOT EXISTS checkpoint (gen INTEGER NOT NULL, idx INTEGER NOT NULL, body BLOB NOT NULL, PRIMARY KEY (gen, idx)) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS pruned (run_id TEXT PRIMARY KEY, through INTEGER NOT NULL) WITHOUT ROWID;
 `
 
@@ -107,6 +112,7 @@ var screenQueries = map[string]string{
 	"turns in window":   queryTurns,
 	"receipt":           `SELECT result FROM command_receipts WHERE command_id = ?`,
 	"claim":             queryClaim,
+	"checkpoint":        queryCheckpoint,
 	"next due":          queryNextDue,
 }
 
@@ -117,10 +123,15 @@ const (
 	queryAllEvents      = `SELECT body FROM events WHERE sequence > ? ORDER BY sequence LIMIT ?`
 	queryItems          = `SELECT body FROM items WHERE agent_id = ? AND ordinal < ? ORDER BY ordinal DESC LIMIT ?`
 	queryMessages       = `SELECT body, seq FROM messages WHERE run_id = ? AND seq > ? ORDER BY seq LIMIT ?`
-	queryTurns          = `SELECT body, started_at, id FROM turns WHERE run_id = ?1 AND ended_at > ?2 AND started_at < ?3
-UNION ALL
-SELECT body, started_at, id FROM turns WHERE run_id = ?1 AND ended_at IS NULL AND started_at < ?3
+	// The turns that overlap a window, in start order. The index holds started_at in order and
+	// ended_at beside it, so the overlap test runs on the index entry and only a turn that passes is
+	// read. INDEXED BY keeps the planner from choosing another index and sorting.
+	queryTurns = `SELECT body, started_at, id FROM turns INDEXED BY turns_window
+WHERE run_id = ?1 AND started_at < ?3 AND (ended_at IS NULL OR ended_at > ?2)
 ORDER BY started_at, id LIMIT ?4`
-	queryClaim   = `SELECT id, effect FROM outbox WHERE state = 0 AND run_after <= ? ORDER BY id LIMIT ?`
-	queryNextDue = `SELECT MIN(run_after) FROM outbox WHERE state = 0 AND run_after > 0`
+	// The oldest ready effects first. outbox_order walks unclaimed rows in id order and tests
+	// run_after on the entry: only timers not yet due are skipped, and they are few.
+	queryClaim      = `SELECT id, effect FROM outbox INDEXED BY outbox_order WHERE state = 0 AND run_after <= ? ORDER BY id LIMIT ?`
+	queryCheckpoint = `SELECT body FROM checkpoint WHERE gen = ? ORDER BY idx`
+	queryNextDue    = `SELECT MIN(run_after) FROM outbox INDEXED BY outbox_due WHERE state = 0 AND run_after > 0`
 )

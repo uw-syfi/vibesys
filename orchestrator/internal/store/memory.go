@@ -227,6 +227,23 @@ func (m *Memory) Release(ids ...OutboxID) error {
 	return nil
 }
 
+// Reclaim implements Store.
+func (m *Memory) Reclaim() (int, error) {
+	unlock, err := m.lock()
+	if err != nil {
+		return 0, err
+	}
+	defer unlock()
+	n := 0
+	for i := range m.shared.outbox {
+		if m.shared.outbox[i].claimed {
+			m.shared.outbox[i].claimed = false
+			n++
+		}
+	}
+	return n, nil
+}
+
 // NextDue implements Store.
 func (m *Memory) NextDue() (time.Time, bool, error) {
 	unlock, err := m.lock()
@@ -375,6 +392,9 @@ func (m *Memory) EventsAfter(run core.RunID, after uint64, limit int) ([]EventRe
 	}
 	defer unlock()
 	d := m.shared
+	if after > d.last {
+		return nil, ErrAheadOfLog
+	}
 	if (run == "" && after < d.prunedMax) || (run != "" && after < d.pruned[run]) {
 		return nil, ErrCompacted
 	}
@@ -434,6 +454,9 @@ func (m *Memory) Messages(run core.RunID, after uint64, limit int) ([]MessageRec
 		return nil, err
 	}
 	defer unlock()
+	if after > m.shared.last {
+		return nil, ErrAheadOfLog
+	}
 	var all []MessageRecord
 	for _, r := range m.shared.tables.messages {
 		if msg := r.event.Body.(core.Message); msg.Run == run && r.first > after {

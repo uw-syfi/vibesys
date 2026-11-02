@@ -1,6 +1,7 @@
 package store
 
 import (
+	"cmp"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -9,56 +10,60 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	_ "modernc.org/sqlite" // A pure Go driver, so the daemon cross-compiles with no C toolchain.
+	"modernc.org/sqlite" // A pure Go driver, so the daemon cross-compiles with no C toolchain.
 
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/localfs"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
 )
 
-// Point is a place in Commit where a fault can be injected.
-type Point string
-
-// The points, in the order Commit passes them. Everything before PointAfterCommit is inside the
-// transaction: a failure or a kill there leaves no trace of the result. PointAfterCommit is after
-// the transaction, where a failure means the result is durable and its caller was not told.
-const (
-	PointBegin        Point = "begin"
-	PointEvents       Point = "events"
-	PointTables       Point = "tables"
-	PointOutbox       Point = "outbox"
-	PointBeforeCommit Point = "before-commit"
-	PointAfterCommit  Point = "after-commit"
-)
-
-// Points lists every commit boundary, for tests that visit each.
-var Points = []Point{PointBegin, PointEvents, PointTables, PointOutbox, PointBeforeCommit, PointAfterCommit}
-
 // SQLiteOptions tune a SQLite store. The zero value is what the daemon uses.
 type SQLiteOptions struct {
-	// Fault, when set, is called at each Point of every Commit. An error from it fails the commit
-	// there. It exists for tests: a hook that ends the process is a crash at that boundary.
-	Fault func(Point) error
+	// Fault, when set, is called at every step of every write the store makes to its file: before
+	// each statement, before and after each COMMIT (see Op). An error from it fails the step, and a
+	// hook that ends the process is a crash at that step. It exists for tests, and it sees the
+	// writes as the database driver does, so it covers whatever transactions the store uses.
+	Fault func(Op) error
+	// StepRows is how many rows one step of Compact writes before it lets the writer go. Zero means
+	// DefaultStepRows. Tests shrink it to see many steps in a small store.
+	StepRows int
 }
 
-// SQLite is a Store in one SQLite file: write-ahead log, synchronous NORMAL, one writer.
+// DefaultStepRows is how many rows a step of Compact writes: a checkpoint batch, or events dropped.
+// At a few microseconds a row it holds the writer for a few milliseconds.
+const DefaultStepRows = 1000
+
+// SQLite is a Store in one SQLite file: write-ahead log, synchronous NORMAL, one writer. Reads, Verify
+// and the long part of Compact run on snapshots of the file, beside the writer, which they never
+// hold for more than a short step.
 //
 // NORMAL means a power cut may lose the last commits, but never leaves a file that is not a prefix
 // of what was committed: the daemon's recovery relies on exactly that, and the crash tests check
 // it at every boundary of a commit. A process crash loses nothing that Commit returned.
 type SQLite struct {
 	path    string
-	fault   func(Point) error
+	fault   func(Op) error
 	release func()
 
-	mu     sync.Mutex // the writer: Commit, Compact, Claim, Complete, Release, Verify
-	w      *sql.DB
-	r      *sql.DB
-	last   uint64
-	closed bool
+	mu   sync.Mutex // the writer: every write to the file takes it, and no read does
+	w    *sql.DB
+	r    *sql.DB
+	last uint64
+	// closed is read without the writer lock, so that a read never waits for a write.
+	closed atomic.Bool
+	// step is how many rows one step of a long write holds the writer for.
+	step int
+
+	// compacting serializes Compact calls, which write in several short steps with the writer free
+	// between them.
+	compacting sync.Mutex
 }
+
+// readerConns is how many connections the readers may hold at once.
+const readerConns = 4
 
 // DatabaseFile is the name of the file in a state directory.
 const DatabaseFile = "orchestrator.db"
@@ -77,7 +82,7 @@ func OpenSQLite(dir localfs.Dir, opts SQLiteOptions) (*SQLite, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &SQLite{path: filepath.Join(dir.Path(), DatabaseFile), fault: opts.Fault, release: release}
+	s := &SQLite{path: filepath.Join(dir.Path(), DatabaseFile), fault: opts.Fault, release: release, step: cmp.Or(opts.StepRows, DefaultStepRows)}
 	if err := s.open(); err != nil {
 		s.close()
 		return nil, err
@@ -101,15 +106,20 @@ func (s *SQLite) dsn(readOnly bool) string {
 }
 
 func (s *SQLite) open() (err error) {
-	if s.w, err = sql.Open("sqlite", s.dsn(false)); err != nil {
+	base, err := sqlite.NewConnector(s.dsn(false))
+	if err != nil {
 		return fmt.Errorf("store: %w", err)
 	}
+	if s.fault != nil {
+		base = faultConnector{Connector: base, fault: s.fault}
+	}
+	s.w = sql.OpenDB(base)
 	s.w.SetMaxOpenConns(1)
 	if _, err := s.w.Exec(schema); err != nil {
 		return fmt.Errorf("store: create schema in %s: %w", s.path, err)
 	}
 	if _, err := s.w.Exec(`INSERT OR IGNORE INTO meta(key, value) VALUES
-		('schema_version', ?), ('last_sequence', 0), ('checkpoint_sequence', 0), ('pruned_max', 0)`, schemaVersion); err != nil {
+		('schema_version', ?), ('last_sequence', 0), ('checkpoint_sequence', 0), ('checkpoint_gen', 0), ('pruned_max', 0)`, schemaVersion); err != nil {
 		return fmt.Errorf("store: %w", err)
 	}
 	if v, err := s.meta(s.w, "schema_version"); err != nil || v != schemaVersion {
@@ -118,7 +128,7 @@ func (s *SQLite) open() (err error) {
 	if s.r, err = sql.Open("sqlite", s.dsn(true)); err != nil {
 		return fmt.Errorf("store: %w", err)
 	}
-	s.r.SetMaxOpenConns(4)
+	s.r.SetMaxOpenConns(readerConns)
 	if _, err := s.w.Exec(`UPDATE outbox SET state = 0 WHERE state = 1`); err != nil {
 		return fmt.Errorf("store: %w", err)
 	}
@@ -162,10 +172,9 @@ func (s *SQLite) Close() error {
 }
 
 func (s *SQLite) close() error {
-	if s.closed {
+	if s.closed.Swap(true) {
 		return nil
 	}
-	s.closed = true
 	var errs []error
 	if s.r != nil {
 		errs = append(errs, s.r.Close())
@@ -179,13 +188,6 @@ func (s *SQLite) close() error {
 	return errors.Join(errs...)
 }
 
-func (s *SQLite) at(p Point) error {
-	if s.fault == nil {
-		return nil
-	}
-	return s.fault(p)
-}
-
 // Commit implements Store.
 func (s *SQLite) Commit(r Result) (Committed, error) {
 	if len(r.Events) == 0 && len(r.Effects) == 0 {
@@ -193,7 +195,7 @@ func (s *SQLite) Commit(r Result) (Committed, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closed {
+	if s.closed.Load() {
 		return Committed{}, errClosed
 	}
 	first := s.last + 1
@@ -212,9 +214,6 @@ func (s *SQLite) Commit(r Result) (Committed, error) {
 			return Committed{}, fmt.Errorf("store: effect %d does not read back: %w", i+1, err)
 		}
 	}
-	if err := s.at(PointBegin); err != nil {
-		return Committed{}, err
-	}
 	tx, err := s.w.Begin()
 	if err != nil {
 		return Committed{}, fmt.Errorf("store: begin: %w", err)
@@ -227,16 +226,10 @@ func (s *SQLite) Commit(r Result) (Committed, error) {
 			return Committed{}, fmt.Errorf("store: write event %d: %w", first+uint64(i), err)
 		}
 	}
-	if err := s.at(PointEvents); err != nil {
-		return Committed{}, err
-	}
 	for i, b := range events {
 		if err := project(tx, first+uint64(i), r.Events[i], b); err != nil {
 			return Committed{}, err
 		}
-	}
-	if err := s.at(PointTables); err != nil {
-		return Committed{}, err
 	}
 	for i, b := range effects {
 		after, _ := runAfter(r.Effects[i])
@@ -251,74 +244,16 @@ func (s *SQLite) Commit(r Result) (Committed, error) {
 			return Committed{}, fmt.Errorf("store: %w", err)
 		}
 	}
-	if err := s.at(PointOutbox); err != nil {
-		return Committed{}, err
-	}
-	if err := s.at(PointBeforeCommit); err != nil {
-		return Committed{}, err
-	}
 	if err := tx.Commit(); err != nil {
+		// The error may be a reply lost after the file took the commit, so the file says where the log
+		// ends. Keeping the old end would make the next commit reuse a sequence.
+		if end, merr := s.meta(s.w, "last_sequence"); merr == nil {
+			s.last = end
+		}
 		return Committed{}, fmt.Errorf("store: commit: %w", err)
 	}
 	s.last = last
-	if err := s.at(PointAfterCommit); err != nil {
-		return Committed{}, err
-	}
 	return Committed{First: first, Last: last}, nil
-}
-
-// project writes one event's row in the table of its entity.
-func project(tx *sql.Tx, seq uint64, e core.Event, body []byte) error {
-	var res sql.Result
-	var err error
-	switch b := e.Body.(type) {
-	case core.Run:
-		res, err = tx.Exec(`INSERT INTO runs(id, status, updated_sequence, body) VALUES (?, ?, ?, ?)
-			ON CONFLICT(id) DO UPDATE SET status = excluded.status, updated_sequence = excluded.updated_sequence, body = excluded.body`,
-			string(b.ID), string(b.Status), seq, body)
-	case core.Agent:
-		res, err = tx.Exec(`INSERT INTO agents(id, run_id, parent_id, status, updated_sequence, body) VALUES (?, ?, ?, ?, ?, ?)
-			ON CONFLICT(id) DO UPDATE SET run_id = excluded.run_id, parent_id = excluded.parent_id, status = excluded.status,
-			updated_sequence = excluded.updated_sequence, body = excluded.body`,
-			string(b.ID), string(b.Run), string(b.Parent), string(b.Status), seq, body)
-	case core.Turn:
-		var ended any
-		if !b.EndedAt.IsZero() {
-			ended = b.EndedAt.UnixNano()
-		}
-		res, err = tx.Exec(`INSERT INTO turns(agent_id, ordinal, id, run_id, started_at, ended_at, updated_sequence, body)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT(agent_id, ordinal) DO UPDATE SET run_id = excluded.run_id, started_at = excluded.started_at,
-			ended_at = excluded.ended_at, updated_sequence = excluded.updated_sequence, body = excluded.body
-			WHERE turns.id = excluded.id`,
-			string(b.Agent), b.Ordinal, string(b.ID), string(e.Run), b.StartedAt.UnixNano(), ended, seq, body)
-	case core.Item:
-		res, err = tx.Exec(`INSERT INTO items(agent_id, ordinal, id, turn_id, updated_sequence, body) VALUES (?, ?, ?, ?, ?, ?)
-			ON CONFLICT(agent_id, ordinal) DO UPDATE SET turn_id = excluded.turn_id,
-			updated_sequence = excluded.updated_sequence, body = excluded.body
-			WHERE items.id = excluded.id`,
-			string(b.Agent), b.Ordinal, string(b.ID), string(b.Turn), seq, body)
-	case core.Message:
-		res, err = tx.Exec(`INSERT INTO messages(id, run_id, to_agent_id, delivery, seq, updated_sequence, body)
-			VALUES (?, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT(id) DO UPDATE SET run_id = excluded.run_id, to_agent_id = excluded.to_agent_id,
-			delivery = excluded.delivery, updated_sequence = excluded.updated_sequence, body = excluded.body`,
-			string(b.ID), string(b.Run), string(b.To), string(b.Delivery), seq, seq, body)
-	case core.Receipt:
-		res, err = tx.Exec(`INSERT INTO command_receipts(command_id, sequence, result) VALUES (?, ?, ?)
-			ON CONFLICT(command_id) DO UPDATE SET sequence = excluded.sequence, result = excluded.result`,
-			string(b.Command), seq, body)
-	default:
-		return fmt.Errorf("store: unknown event body %T", e.Body)
-	}
-	if err != nil {
-		return fmt.Errorf("store: project event %d (%T): %w", seq, e.Body, err)
-	}
-	if n, _ := res.RowsAffected(); n != 1 {
-		// Only an item or a turn can write nothing: its ordinal belongs to another id.
-		return fmt.Errorf("store: event %d (%T) reuses an ordinal of another entity", seq, e.Body)
-	}
-	return nil
 }
 
 // decodeRows reads the single body column of rows into events.
@@ -344,26 +279,71 @@ func entity[T core.EventBody](e core.Event) (T, error) {
 // per call.
 const batchSize = 4096
 
-// Recover implements Store.
-func (s *SQLite) Recover() (core.State, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
-		return core.State{}, errClosed
+// live reports errClosed once the store is closed. It takes no lock: a read must not wait for the writer.
+func (s *SQLite) live() error {
+	if s.closed.Load() {
+		return errClosed
 	}
-	return s.recover()
+	return nil
 }
 
-func (s *SQLite) recover() (core.State, error) {
-	tx, err := s.r.Begin()
-	if err != nil {
-		return core.State{}, fmt.Errorf("store: %w", err)
+// write runs f in one transaction on the writer, holding the writer for just that long.
+func (s *SQLite) write(f func(tx *sql.Tx) error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed.Load() {
+		return errClosed
 	}
-	defer tx.Rollback() //nolint:errcheck // A read-only transaction has nothing to undo.
-	var state core.State
-	ckpt, err := s.meta(tx, "checkpoint_sequence")
+	tx, err := s.w.Begin()
 	if err != nil {
+		return fmt.Errorf("store: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // After Commit it has nothing to undo.
+	if err := f(tx); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: %w", err)
+	}
+	return nil
+}
+
+// Recover implements Store. It reads a snapshot and does not wait for, or hold up, the writer.
+func (s *SQLite) Recover() (core.State, error) {
+	if err := s.live(); err != nil {
 		return core.State{}, err
+	}
+	var state core.State
+	err := s.reading(func(tx *sql.Tx) error {
+		var err error
+		state, _, err = recoverFrom(tx)
+		return err
+	})
+	return state, err
+}
+
+// recoverFrom folds the checkpoint in force and the events after it, as one read transaction sees
+// them, and returns the state with the sequence it is at.
+func recoverFrom(tx *sql.Tx) (core.State, uint64, error) {
+	var state core.State
+	m := func(key string) (uint64, error) {
+		var v int64
+		if err := tx.QueryRow(`SELECT value FROM meta WHERE key = ?`, key).Scan(&v); err != nil {
+			return 0, fmt.Errorf("store: meta %s: %w", key, err)
+		}
+		return uint64(v), nil
+	}
+	ckpt, err := m("checkpoint_sequence")
+	if err != nil {
+		return state, 0, err
+	}
+	gen, err := m("checkpoint_gen")
+	if err != nil {
+		return state, 0, err
+	}
+	last, err := m("last_sequence")
+	if err != nil {
+		return state, 0, err
 	}
 	var batch []core.Event
 	flush := func() {
@@ -392,56 +372,49 @@ func (s *SQLite) recover() (core.State, error) {
 		flush()
 		return rows.Err()
 	}
-	if err := read(`SELECT body FROM checkpoint ORDER BY idx`); err != nil {
-		return core.State{}, err
+	if err := read(queryCheckpoint, gen); err != nil {
+		return state, 0, err
 	}
 	if err := read(`SELECT body FROM events WHERE sequence > ? ORDER BY sequence`, ckpt); err != nil {
-		return core.State{}, err
+		return state, 0, err
 	}
-	return state, nil
+	return state, last, nil
 }
 
 // Claim implements Store.
 func (s *SQLite) Claim(now time.Time, limit int) ([]Claimed, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
-		return nil, errClosed
-	}
-	tx, err := s.w.Begin()
-	if err != nil {
-		return nil, fmt.Errorf("store: %w", err)
-	}
-	defer tx.Rollback() //nolint:errcheck // After Commit it has nothing to undo.
-	rows, err := tx.Query(queryClaim, now.UnixNano(), limit)
-	if err != nil {
-		return nil, fmt.Errorf("store: %w", err)
-	}
 	var out []Claimed
-	for rows.Next() {
-		var id int64
-		var b []byte
-		if err := rows.Scan(&id, &b); err != nil {
-			rows.Close()
-			return nil, fmt.Errorf("store: %w", err)
-		}
-		e, err := wire.DecodeEffect(b)
+	err := s.write(func(tx *sql.Tx) error {
+		rows, err := tx.Query(queryClaim, now.UnixNano(), limit)
 		if err != nil {
-			rows.Close()
-			return nil, corruptf("outbox row %d: %v", id, err)
+			return fmt.Errorf("store: %w", err)
 		}
-		out = append(out, Claimed{ID: OutboxID(id), Effect: e})
-	}
-	if err := rows.Close(); err != nil {
-		return nil, fmt.Errorf("store: %w", err)
-	}
-	for _, c := range out {
-		if _, err := tx.Exec(`UPDATE outbox SET state = 1 WHERE id = ?`, c.ID); err != nil {
-			return nil, fmt.Errorf("store: %w", err)
+		for rows.Next() {
+			var id int64
+			var b []byte
+			if err := rows.Scan(&id, &b); err != nil {
+				rows.Close()
+				return fmt.Errorf("store: %w", err)
+			}
+			e, err := wire.DecodeEffect(b)
+			if err != nil {
+				rows.Close()
+				return corruptf("outbox row %d: %v", id, err)
+			}
+			out = append(out, Claimed{ID: OutboxID(id), Effect: e})
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("store: %w", err)
+		if err := rows.Close(); err != nil {
+			return fmt.Errorf("store: %w", err)
+		}
+		for _, c := range out {
+			if _, err := tx.Exec(`UPDATE outbox SET state = 1 WHERE id = ?`, c.ID); err != nil {
+				return fmt.Errorf("store: %w", err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -457,22 +430,29 @@ func (s *SQLite) Release(ids ...OutboxID) error {
 }
 
 func (s *SQLite) settle(statement string, ids []OutboxID) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
-		return errClosed
-	}
-	tx, err := s.w.Begin()
-	if err != nil {
-		return fmt.Errorf("store: %w", err)
-	}
-	defer tx.Rollback() //nolint:errcheck // After Commit it has nothing to undo.
-	for _, id := range ids {
-		if _, err := tx.Exec(statement, id); err != nil {
+	return s.write(func(tx *sql.Tx) error {
+		for _, id := range ids {
+			if _, err := tx.Exec(statement, id); err != nil {
+				return fmt.Errorf("store: %w", err)
+			}
+		}
+		return nil
+	})
+}
+
+// Reclaim implements Store.
+func (s *SQLite) Reclaim() (int, error) {
+	n := 0
+	err := s.write(func(tx *sql.Tx) error {
+		res, err := tx.Exec(`UPDATE outbox SET state = 0 WHERE state = 1`)
+		if err != nil {
 			return fmt.Errorf("store: %w", err)
 		}
-	}
-	return tx.Commit()
+		c, _ := res.RowsAffected()
+		n = int(c)
+		return nil
+	})
+	return n, err
 }
 
 // NextDue implements Store.
@@ -484,29 +464,49 @@ func (s *SQLite) NextDue() (time.Time, bool, error) {
 	return time.Unix(0, nanos.Int64).UTC(), nanos.Valid, nil
 }
 
-// Compact implements Store.
+// Compact implements Store. The work is done on a snapshot, beside the writer, and the file is
+// written in steps of at most StepRows rows, each of which holds the writer for
+// its own length only. A crash between steps leaves a store that is consistent and recovers the same
+// state; the next Compact finishes the work.
 func (s *SQLite) Compact(p Retention, now time.Time) (Compaction, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
-		return Compaction{}, errClosed
+	s.compacting.Lock()
+	defer s.compacting.Unlock()
+	if err := s.live(); err != nil {
+		return Compaction{}, err
 	}
 	var out Compaction
-	ckpt, err := s.meta(s.w, "checkpoint_sequence")
+	var state core.State
+	var seq, ckpt, gen uint64
+	var due bool
+	err := s.reading(func(tx *sql.Tx) error {
+		var err error
+		if ckpt, err = s.meta(tx, "checkpoint_sequence"); err != nil {
+			return err
+		}
+		if gen, err = s.meta(tx, "checkpoint_gen"); err != nil {
+			return err
+		}
+		if seq, err = s.meta(tx, "last_sequence"); err != nil {
+			return err
+		}
+		if due = seq > ckpt && seq-ckpt >= p.CheckpointAfter; due {
+			state, _, err = recoverFrom(tx)
+		}
+		return err
+	})
 	if err != nil {
 		return Compaction{}, err
 	}
-	if s.last > ckpt && s.last-ckpt >= p.CheckpointAfter {
-		state, err := s.recover()
-		if err != nil {
+	if due {
+		if err := s.writeCheckpoint(state, seq, gen+1); err != nil {
 			return Compaction{}, err
 		}
-		if err := s.writeCheckpoint(state, s.last); err != nil {
-			return Compaction{}, err
-		}
-		ckpt, out.Checkpointed = s.last, true
+		ckpt, gen, out.Checkpointed = seq, gen+1, true
 	}
 	out.Checkpoint = ckpt
+	if err := s.dropCheckpoints(`gen < ?`, gen); err != nil {
+		return Compaction{}, err
+	}
 	dropped, err := s.prune(p, now, ckpt)
 	if err != nil {
 		return Compaction{}, err
@@ -515,136 +515,180 @@ func (s *SQLite) Compact(p Retention, now time.Time) (Compaction, error) {
 	return out, nil
 }
 
-// writeCheckpoint replaces the checkpoint with the state at a sequence, in one transaction.
-func (s *SQLite) writeCheckpoint(state core.State, seq uint64) error {
-	tx, err := s.w.Begin()
-	if err != nil {
-		return fmt.Errorf("store: %w", err)
+// writeCheckpoint writes the state as generation gen in batches, and then switches to it in one
+// write that touches two meta rows. Until the switch the generation in force is unchanged, so a
+// reader or a crash never sees a half-written checkpoint.
+func (s *SQLite) writeCheckpoint(state core.State, seq, gen uint64) error {
+	if err := s.dropCheckpoints(`gen >= ?`, gen); err != nil { // the leftovers of a Compact that died
+		return err
 	}
-	defer tx.Rollback() //nolint:errcheck // After Commit it has nothing to undo.
-	if _, err := tx.Exec(`DELETE FROM checkpoint`); err != nil {
-		return fmt.Errorf("store: %w", err)
-	}
-	for i, e := range state.Checkpoint() {
-		b, err := wire.EncodeEvent(seq, e)
+	events := state.Checkpoint()
+	for from := 0; from < len(events); from += s.step {
+		batch := events[from:min(from+s.step, len(events))]
+		err := s.write(func(tx *sql.Tx) error {
+			for i, e := range batch {
+				b, err := wire.EncodeEvent(seq, e)
+				if err != nil {
+					return fmt.Errorf("store: encode checkpoint event %d: %w", from+i, err)
+				}
+				if _, _, err := wire.DecodeEvent(b); err != nil {
+					return fmt.Errorf("store: checkpoint event %d does not read back: %w", from+i, err)
+				}
+				if _, err := tx.Exec(`INSERT INTO checkpoint(gen, idx, body) VALUES (?, ?, ?)`, gen, from+i+1, b); err != nil {
+					return fmt.Errorf("store: %w", err)
+				}
+			}
+			return nil
+		})
 		if err != nil {
-			return fmt.Errorf("store: encode checkpoint event %d: %w", i, err)
-		}
-		if _, _, err := wire.DecodeEvent(b); err != nil {
-			return fmt.Errorf("store: checkpoint event %d does not read back: %w", i, err)
-		}
-		if _, err := tx.Exec(`INSERT INTO checkpoint(idx, body) VALUES (?, ?)`, i+1, b); err != nil {
-			return fmt.Errorf("store: %w", err)
+			return err
 		}
 	}
-	if _, err := tx.Exec(`UPDATE meta SET value = ? WHERE key = 'checkpoint_sequence'`, seq); err != nil {
-		return fmt.Errorf("store: %w", err)
+	return s.write(func(tx *sql.Tx) error {
+		for key, value := range map[string]uint64{"checkpoint_sequence": seq, "checkpoint_gen": gen} {
+			if _, err := tx.Exec(`UPDATE meta SET value = ? WHERE key = ?`, value, key); err != nil {
+				return fmt.Errorf("store: %w", err)
+			}
+		}
+		return nil
+	})
+}
+
+// dropCheckpoints deletes the checkpoint rows that match a condition on gen, a batch at a time.
+func (s *SQLite) dropCheckpoints(cond string, gen uint64) error {
+	for {
+		var n int64
+		err := s.write(func(tx *sql.Tx) error {
+			res, err := tx.Exec(`DELETE FROM checkpoint WHERE (gen, idx) IN (SELECT gen, idx FROM checkpoint WHERE `+cond+` LIMIT ?)`, gen, s.step)
+			if err != nil {
+				return fmt.Errorf("store: %w", err)
+			}
+			n, _ = res.RowsAffected()
+			return nil
+		})
+		if err != nil || n < int64(s.step) {
+			return err
+		}
 	}
-	return tx.Commit()
 }
 
 // prune drops the events a checkpoint covers whose run is over and old enough, and records how far
-// it went for each run, so a reader asking for them is told they are gone.
+// it went for each run, so a reader asking for them is told they are gone. The tables keep the
+// entities: see Retention.
+//
+// Which runs and how far is decided on a snapshot. For each run the mark in pruned is written
+// first, then the events go in batches, so a reader is told the events are gone as soon as any
+// are, and a crash between batches leaves events that the next Compact removes.
 func (s *SQLite) prune(p Retention, now time.Time, ckpt uint64) (int, error) {
-	rows, err := s.w.Query(`SELECT body FROM runs WHERE status IN (?, ?)`, string(core.RunEnded), string(core.RunFailed))
+	type target struct {
+		run     core.RunID
+		through uint64
+	}
+	var targets []target
+	cutoff := now.Add(-p.KeepEvents).UnixNano()
+	err := s.reading(func(tx *sql.Tx) error {
+		var eligible []core.RunID
+		for _, status := range []core.RunStatus{core.RunEnded, core.RunFailed} {
+			rows, err := tx.Query(`SELECT body FROM runs WHERE status = ?`, string(status))
+			if err != nil {
+				return fmt.Errorf("store: %w", err)
+			}
+			err = scanEvents(rows, func(_ uint64, e core.Event) error {
+				run, err := entity[core.Run](e)
+				if err == nil && !run.EndedAt.Add(p.KeepEvents).After(now) {
+					eligible = append(eligible, run.ID)
+				}
+				return err
+			})
+			if err != nil {
+				return err
+			}
+		}
+		eligible = append(eligible, "") // commands refused before any run, aged by their own time
+		slices.Sort(eligible)
+		for _, run := range eligible {
+			var through sql.NullInt64
+			var err error
+			if run == "" {
+				err = tx.QueryRow(`SELECT MAX(sequence) FROM events WHERE run_id = '' AND sequence <= ? AND at <= ?`, ckpt, cutoff).Scan(&through)
+			} else {
+				err = tx.QueryRow(`SELECT MAX(sequence) FROM events WHERE run_id = ? AND sequence <= ?`, string(run), ckpt).Scan(&through)
+			}
+			if err != nil {
+				return fmt.Errorf("store: %w", err)
+			}
+			if through.Valid {
+				targets = append(targets, target{run, uint64(through.Int64)})
+			}
+		}
+		return nil
+	})
 	if err != nil {
-		return 0, fmt.Errorf("store: %w", err)
+		return 0, err
 	}
-	var eligible []core.RunID
-	for rows.Next() {
-		var body []byte
-		if err := rows.Scan(&body); err != nil {
-			rows.Close()
-			return 0, fmt.Errorf("store: %w", err)
-		}
-		_, e, err := decodeBody(body)
-		if err != nil {
-			rows.Close()
-			return 0, err
-		}
-		run, err := entity[core.Run](e)
-		if err != nil {
-			rows.Close()
-			return 0, err
-		}
-		if !run.EndedAt.Add(p.KeepEvents).After(now) {
-			eligible = append(eligible, run.ID)
-		}
-	}
-	if err := rows.Close(); err != nil {
-		return 0, fmt.Errorf("store: %w", err)
-	}
-	eligible = append(eligible, "")
-	slices.Sort(eligible)
-	tx, err := s.w.Begin()
-	if err != nil {
-		return 0, fmt.Errorf("store: %w", err)
-	}
-	defer tx.Rollback() //nolint:errcheck // After Commit it has nothing to undo.
 	total := 0
-	for _, run := range eligible {
-		query, args := `SELECT MAX(sequence) FROM events WHERE run_id = ? AND sequence <= ?`, []any{string(run), ckpt}
-		del, delArgs := `DELETE FROM events WHERE run_id = ? AND sequence <= ?`, []any{string(run), ckpt}
-		if run == "" {
-			// A command refused before any run has no run to end, so its age is its own.
-			cutoff := now.Add(-p.KeepEvents).UnixNano()
-			query, args = `SELECT MAX(sequence) FROM events WHERE run_id = '' AND sequence <= ? AND at <= ?`, []any{ckpt, cutoff}
-			del, delArgs = `DELETE FROM events WHERE run_id = '' AND sequence <= ? AND at <= ?`, []any{ckpt, cutoff}
-		}
-		var through sql.NullInt64
-		if err := tx.QueryRow(query, args...).Scan(&through); err != nil {
-			return 0, fmt.Errorf("store: %w", err)
-		}
-		if !through.Valid {
-			continue
-		}
-		res, err := tx.Exec(del, delArgs...)
+	for _, t := range targets {
+		err := s.write(func(tx *sql.Tx) error {
+			if _, err := tx.Exec(`INSERT INTO pruned(run_id, through) VALUES (?, ?)
+				ON CONFLICT(run_id) DO UPDATE SET through = MAX(through, excluded.through)`, string(t.run), t.through); err != nil {
+				return fmt.Errorf("store: %w", err)
+			}
+			if _, err := tx.Exec(`UPDATE meta SET value = MAX(value, ?) WHERE key = 'pruned_max'`, t.through); err != nil {
+				return fmt.Errorf("store: %w", err)
+			}
+			return nil
+		})
 		if err != nil {
-			return 0, fmt.Errorf("store: %w", err)
+			return total, err
 		}
-		n, _ := res.RowsAffected()
-		total += int(n)
-		// Dropping events with "at" above a cutoff leaves later ones in place, so "through" for the
-		// empty run is the last dropped, and a reader below it is told.
-		if _, err := tx.Exec(`INSERT INTO pruned(run_id, through) VALUES (?, ?)
-			ON CONFLICT(run_id) DO UPDATE SET through = MAX(through, excluded.through)`, string(run), through.Int64); err != nil {
-			return 0, fmt.Errorf("store: %w", err)
-		}
-		if _, err := tx.Exec(`UPDATE meta SET value = MAX(value, ?) WHERE key = 'pruned_max'`, through.Int64); err != nil {
-			return 0, fmt.Errorf("store: %w", err)
+		for {
+			var n int64
+			err := s.write(func(tx *sql.Tx) error {
+				// "at" bounds the empty run only; the others are dropped whole, up to the checkpoint.
+				res, err := tx.Exec(`DELETE FROM events WHERE sequence IN (
+					SELECT sequence FROM events WHERE run_id = ? AND sequence <= ? AND (run_id != '' OR at <= ?) LIMIT ?)`,
+					string(t.run), t.through, cutoff, s.step)
+				if err != nil {
+					return fmt.Errorf("store: %w", err)
+				}
+				n, _ = res.RowsAffected()
+				return nil
+			})
+			total += int(n)
+			if err != nil {
+				return total, err
+			}
+			if n < int64(s.step) {
+				break
+			}
 		}
 	}
-	return total, tx.Commit()
+	return total, nil
 }
 
-// Verify implements Store.
+// Verify implements Store. It reads one snapshot beside the writer, so commits go on while it runs.
 func (s *SQLite) Verify() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
-		return errClosed
-	}
-	state, err := s.recover()
-	if err != nil {
+	if err := s.live(); err != nil {
 		return err
 	}
-	tx, err := s.r.Begin()
-	if err != nil {
-		return fmt.Errorf("store: %w", err)
-	}
-	defer tx.Rollback() //nolint:errcheck // A read-only transaction has nothing to undo.
-	if err := s.verifyLog(tx); err != nil {
-		return err
-	}
-	if err := verifySummary(tx, state); err != nil {
-		return err
-	}
-	return s.verifyProjection(tx)
+	return s.reading(func(tx *sql.Tx) error {
+		state, last, err := recoverFrom(tx)
+		if err != nil {
+			return err
+		}
+		if err := s.verifyLog(tx, last); err != nil {
+			return err
+		}
+		if err := verifySummary(tx, state); err != nil {
+			return err
+		}
+		return verifyProjection(tx)
+	})
 }
 
 // verifyLog checks the events: ascending, with no gap above the checkpoint, each equal to its
-// columns, and the end where the store says.
-func (s *SQLite) verifyLog(tx *sql.Tx) error {
+// columns, and the end where the snapshot says.
+func (s *SQLite) verifyLog(tx *sql.Tx, last uint64) error {
 	ckpt, err := s.meta(tx, "checkpoint_sequence")
 	if err != nil {
 		return err
@@ -687,8 +731,8 @@ func (s *SQLite) verifyLog(tx *sql.Tx) error {
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("store: %w", err)
 	}
-	if end := max(next-1, ckpt); end != s.last {
-		return corruptf("the log ends at %d and the store says %d", end, s.last)
+	if end := max(next-1, ckpt); end != last {
+		return corruptf("the log ends at %d and the store says %d", end, last)
 	}
 	return nil
 }
@@ -746,91 +790,4 @@ func verifySummary(tx *sql.Tx, state core.State) error {
 		return err
 	}
 	return sm.check(state)
-}
-
-// verifyProjection checks that each entity the retained events write holds, in its table, the
-// bytes of the last such event: the tables are what a fold of the log leaves.
-func (s *SQLite) verifyProjection(tx *sql.Tx) error {
-	want := newTables()
-	rows, err := tx.Query(`SELECT sequence, body FROM events ORDER BY sequence`)
-	if err != nil {
-		return fmt.Errorf("store: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var seq uint64
-		var body []byte
-		if err := rows.Scan(&seq, &body); err != nil {
-			return fmt.Errorf("store: %w", err)
-		}
-		_, e, err := decodeBody(body)
-		if err != nil {
-			return err
-		}
-		if err := want.apply(seq, e, body); err != nil {
-			return err
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("store: %w", err)
-	}
-	same := func(what, key string, w row, query string, args ...any) error {
-		var body []byte
-		var last uint64
-		err := tx.QueryRow(query, args...).Scan(&body, &last)
-		switch {
-		case errors.Is(err, sql.ErrNoRows):
-			return corruptf("%s %s is written by the log and missing from its table", what, key)
-		case err != nil:
-			return fmt.Errorf("store: %w", err)
-		case last != w.last || !slices.Equal(body, w.body):
-			return corruptf("%s %s differs from the last event that wrote it (sequence %d)", what, key, w.last)
-		}
-		return nil
-	}
-	for id, w := range want.runs {
-		if err := same("run", string(id), w, `SELECT body, updated_sequence FROM runs WHERE id = ?`, string(id)); err != nil {
-			return err
-		}
-	}
-	for id, w := range want.agents {
-		if err := same("agent", string(id), w, `SELECT body, updated_sequence FROM agents WHERE id = ?`, string(id)); err != nil {
-			return err
-		}
-	}
-	for id, w := range want.turns {
-		t := w.event.Body.(core.Turn)
-		if err := same("turn", string(id), w, `SELECT body, updated_sequence FROM turns WHERE agent_id = ? AND ordinal = ?`, string(t.Agent), t.Ordinal); err != nil {
-			return err
-		}
-	}
-	for id, w := range want.items {
-		i := w.event.Body.(core.Item)
-		if err := same("item", string(id), w, `SELECT body, updated_sequence FROM items WHERE agent_id = ? AND ordinal = ?`, string(i.Agent), i.Ordinal); err != nil {
-			return err
-		}
-	}
-	for id, w := range want.receipts {
-		if err := same("receipt", string(id), w, `SELECT result, sequence FROM command_receipts WHERE command_id = ?`, string(id)); err != nil {
-			return err
-		}
-	}
-	for id, w := range want.messages {
-		var body []byte
-		var last, first uint64
-		err := tx.QueryRow(`SELECT body, updated_sequence, seq FROM messages WHERE id = ?`, string(id)).Scan(&body, &last, &first)
-		switch {
-		case errors.Is(err, sql.ErrNoRows):
-			return corruptf("message %s is written by the log and missing from its table", id)
-		case err != nil:
-			return fmt.Errorf("store: %w", err)
-		case last != w.last || !slices.Equal(body, w.body):
-			return corruptf("message %s differs from the last event that wrote it (sequence %d)", id, w.last)
-		case first > w.first:
-			// A message's place is its first event, which may have been dropped with its run. The
-			// table keeps the older place, so it can only be at or before what the log shows.
-			return corruptf("message %s is placed at %d, after its first retained event at %d", id, first, w.first)
-		}
-	}
-	return nil
 }

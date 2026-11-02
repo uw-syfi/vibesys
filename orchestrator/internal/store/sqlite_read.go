@@ -2,6 +2,7 @@ package store
 
 import (
 	"cmp"
+	"context"
 	"database/sql"
 	"fmt"
 	"math"
@@ -102,12 +103,69 @@ func (s *SQLite) Snapshot() (Snapshot, error) {
 	return out, err
 }
 
+// Settings are the connection settings that make the file safe and fast to share between the writer
+// and the readers.
+type Settings struct {
+	JournalMode   string
+	Synchronous   int
+	BusyTimeoutMS int
+	QueryOnly     int
+}
+
+func readSettings(q func(pragma string, dest any) error) (Settings, error) {
+	var out Settings
+	for pragma, dest := range map[string]any{
+		"journal_mode": &out.JournalMode, "synchronous": &out.Synchronous,
+		"busy_timeout": &out.BusyTimeoutMS, "query_only": &out.QueryOnly,
+	} {
+		if err := q("PRAGMA "+pragma, dest); err != nil {
+			return out, fmt.Errorf("store: %s: %w", pragma, err)
+		}
+	}
+	return out, nil
+}
+
+// Settings reports the settings of the writer's connection and of every connection the readers'
+// pool can hold, so that a test pins them all: a reader that quietly opened with defaults would
+// block the writer or read a stale file.
+func (s *SQLite) Settings() (writer Settings, readers []Settings, err error) {
+	ctx := context.Background()
+	wc, err := s.w.Conn(ctx)
+	if err != nil {
+		return writer, nil, fmt.Errorf("store: %w", err)
+	}
+	defer wc.Close()
+	if writer, err = readSettings(func(p string, d any) error { return wc.QueryRowContext(ctx, p).Scan(d) }); err != nil {
+		return writer, nil, err
+	}
+	// Hold every connection the pool allows at once, so that each is a different one.
+	var held []*sql.Conn
+	defer func() {
+		for _, c := range held {
+			c.Close()
+		}
+	}()
+	for range readerConns {
+		c, err := s.r.Conn(ctx)
+		if err != nil {
+			return writer, nil, fmt.Errorf("store: %w", err)
+		}
+		held = append(held, c)
+		got, err := readSettings(func(p string, d any) error { return c.QueryRowContext(ctx, p).Scan(d) })
+		if err != nil {
+			return writer, nil, err
+		}
+		readers = append(readers, got)
+	}
+	return writer, readers, nil
+}
+
 // Explain returns SQLite's query plan for each read that serves a screen, so that a test can hold
 // them to searches on an index.
 func (s *SQLite) Explain() (map[string][]string, error) {
 	args := map[string]int{
 		"snapshot runs": 2, "snapshot agents": 1, "events of a run": 3, "events of all": 2, "items page": 3,
-		"messages of a run": 3, "turns in window": 4, "receipt": 1, "claim": 2, "next due": 0,
+		"messages of a run": 3, "turns in window": 4, "receipt": 1, "claim": 2, "checkpoint": 1, "next due": 0,
 	}
 	out := map[string][]string{}
 	for name, query := range screenQueries {
@@ -139,9 +197,15 @@ func (s *SQLite) Explain() (map[string][]string, error) {
 func (s *SQLite) EventsAfter(run core.RunID, after uint64, limit int) ([]EventRecord, error) {
 	var out []EventRecord
 	err := s.reading(func(tx *sql.Tx) error {
+		last, err := s.meta(tx, "last_sequence")
+		if err != nil {
+			return err
+		}
+		if after > last {
+			return ErrAheadOfLog
+		}
 		var through uint64
 		if run == "" {
-			var err error
 			if through, err = s.meta(tx, "pruned_max"); err != nil {
 				return err
 			}
@@ -157,7 +221,6 @@ func (s *SQLite) EventsAfter(run core.RunID, after uint64, limit int) ([]EventRe
 		}
 		limit = pageLimit(limit, MaxPageEvents)
 		var rows *sql.Rows
-		var err error
 		if run == "" {
 			rows, err = tx.Query(queryAllEvents, after, limit)
 		} else {
@@ -222,6 +285,13 @@ func (s *SQLite) Items(agent core.AgentID, before uint32, limit int) (ItemPage, 
 func (s *SQLite) Messages(run core.RunID, after uint64, limit int) ([]MessageRecord, error) {
 	var out []MessageRecord
 	err := s.reading(func(tx *sql.Tx) error {
+		last, err := s.meta(tx, "last_sequence")
+		if err != nil {
+			return err
+		}
+		if after > last {
+			return ErrAheadOfLog
+		}
 		rows, err := tx.Query(queryMessages, string(run), after, pageLimit(limit, MaxPageMessages))
 		if err != nil {
 			return fmt.Errorf("store: %w", err)

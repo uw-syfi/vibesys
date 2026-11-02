@@ -74,6 +74,8 @@ func Contract(t *testing.T, newHarness func(t *testing.T) *Harness) {
 	t.Run("PagesHonorTheirCaps", func(t *testing.T) { pageCaps(t, newHarness(t)) })
 	t.Run("ReadersAndClaimersRunBesideTheWriter", func(t *testing.T) { concurrent(t, newHarness(t)) })
 	t.Run("SnapshotBoundsFinishedRuns", func(t *testing.T) { snapshotBound(t, newHarness(t)) })
+	t.Run("ACursorAboveTheLogIsAnError", func(t *testing.T) { aheadOfLog(t, newHarness(t)) })
+	t.Run("ReclaimReturnsClaimedEffects", func(t *testing.T) { reclaim(t, newHarness(t)) })
 	t.Run("TimersWaitForTheirTime", func(t *testing.T) { timers(t, newHarness(t)) })
 	t.Run("WorkloadMatchesModel", func(t *testing.T) {
 		for _, seed := range seeds(t) {
@@ -673,5 +675,82 @@ func concurrent(t *testing.T, h *Harness) {
 	defer mu.Unlock()
 	if !reflect.DeepEqual(claimed, total) {
 		t.Errorf("effects claimed %d distinct, committed %d distinct: each must be claimed exactly as often as it was committed", len(claimed), len(total))
+	}
+}
+
+// aheadOfLog checks that a reader whose cursor is above the end of the log is told so, however it
+// asks, and that a cursor at the end is an empty page. After a power cut the log can end below a
+// sequence a client already saw, and an empty page would leave that client waiting forever.
+func aheadOfLog(t *testing.T, h *Harness) {
+	w := NewWorkload(5)
+	var run core.RunID
+	for range 30 {
+		r := w.Next()
+		mustCommit(t, h.Store, r)
+		for _, e := range r.Events {
+			if e.Run != "" {
+				run = e.Run
+			}
+		}
+	}
+	for restart := range 2 {
+		snap, err := h.Store.Snapshot()
+		if err != nil || snap.Sequence == 0 {
+			t.Fatalf("snapshot: %+v %v", snap, err)
+		}
+		end := snap.Sequence
+		for _, scope := range []core.RunID{"", run} {
+			if got, err := h.Store.EventsAfter(scope, end, 10); err != nil || len(got) != 0 {
+				t.Fatalf("restart %d: a cursor at the end of the log (%d) must be an empty page: %v %v", restart, end, got, err)
+			}
+			if _, err := h.Store.EventsAfter(scope, end+1, 10); !errors.Is(err, store.ErrAheadOfLog) {
+				t.Fatalf("restart %d: EventsAfter(%q, %d) = %v, want ErrAheadOfLog", restart, scope, end+1, err)
+			}
+		}
+		if _, err := h.Store.Messages(run, end, 10); err != nil {
+			t.Fatalf("restart %d: Messages at the end of the log: %v", restart, err)
+		}
+		if _, err := h.Store.Messages(run, end+1, 10); !errors.Is(err, store.ErrAheadOfLog) {
+			t.Fatalf("restart %d: Messages above the log = %v, want ErrAheadOfLog", restart, err)
+		}
+		h.Restart()
+	}
+}
+
+// reclaim checks that Reclaim returns every claimed effect, and only claimed ones, to the outbox.
+func reclaim(t *testing.T, h *Harness) {
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	event := core.Event{Run: "run-x", At: at, Body: core.Run{
+		ID: "run-x", Repository: "r", Task: "t", Status: core.RunRunning, Lead: "agent-x", CreatedAt: at,
+	}}
+	effects := []core.Effect{
+		core.CloseSession{Session: core.Session{Agent: "a", N: 1}},
+		core.CloseSession{Session: core.Session{Agent: "b", N: 1}},
+		core.CloseSession{Session: core.Session{Agent: "c", N: 1}},
+	}
+	mustCommit(t, h.Store, store.Result{Events: []core.Event{event}, Effects: effects})
+	if n, err := h.Store.Reclaim(); err != nil || n != 0 {
+		t.Fatalf("Reclaim with nothing claimed = %d %v, want 0", n, err)
+	}
+	first, err := h.Store.Claim(farFuture, 2)
+	if err != nil || len(first) != 2 {
+		t.Fatalf("claim: %v %v", first, err)
+	}
+	if err := h.Store.Complete(first[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := h.Store.Reclaim(); err != nil || n != 1 {
+		t.Fatalf("Reclaim = %d %v, want the one claimed effect that was not completed", n, err)
+	}
+	again, err := h.Store.Claim(farFuture, 10)
+	if err != nil || len(again) != 2 || again[0].Effect.ID() != first[1].Effect.ID() || again[1].Effect.ID() != effects[2].ID() {
+		t.Fatalf("after Reclaim the reclaimed effect leads the rest in commit order: %v %v", again, err)
+	}
+	if n, _ := h.Store.Reclaim(); n != 2 {
+		t.Fatalf("second Reclaim = %d, want 2", n)
+	}
+	h.Restart()
+	if left, _ := h.Store.Claim(farFuture, 10); len(left) != 2 {
+		t.Fatalf("reclaimed effects must survive a restart: %v", left)
 	}
 }

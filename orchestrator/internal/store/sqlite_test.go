@@ -48,28 +48,81 @@ func TestSQLitePassesTheContract(t *testing.T) {
 	})
 }
 
-func TestScreenQueriesNeverScan(t *testing.T) {
+// planProblems says what is wrong with the plan SQLite gave for a screen read: a scan of a table, a
+// temporary B-tree (which is a sort or a distinct over every row the read matches, before its limit
+// can cut it short), or no search at all.
+func planProblems(lines []string) []string {
+	var out []string
+	searched := false
+	for _, line := range lines {
+		switch {
+		case strings.Contains(line, "SCAN") && !strings.Contains(line, "SCAN CONSTANT ROW"):
+			out = append(out, "scans: "+line)
+		case strings.Contains(line, "TEMP B-TREE"):
+			out = append(out, "sorts: "+line)
+		}
+		searched = searched || strings.Contains(line, "SEARCH")
+	}
+	if !searched {
+		out = append(out, "does not search an index")
+	}
+	return out
+}
+
+func TestThePlanCheckRejectsAScanAndASort(t *testing.T) {
+	cases := []struct {
+		name  string
+		lines []string
+		bad   bool
+	}{
+		{"an index search", []string{"SEARCH outbox USING INDEX outbox_order (state=?)"}, false},
+		{"a sort after a search", []string{"SEARCH outbox USING INDEX outbox_due (state=? AND run_after<?)", "USE TEMP B-TREE FOR ORDER BY"}, true},
+		{"a sort of a compound", []string{"MERGE (UNION ALL)", "LEFT", "SEARCH turns USING INDEX turns_ended (run_id=?)", "USE TEMP B-TREE FOR ORDER BY"}, true},
+		{"a scan", []string{"SCAN events"}, true},
+		{"no search", []string{"SCAN CONSTANT ROW"}, true},
+	}
+	for _, c := range cases {
+		if got := planProblems(c.lines); (len(got) > 0) != c.bad {
+			t.Errorf("%s: problems %v, want bad = %v", c.name, got, c.bad)
+		}
+	}
+}
+
+func TestScreenQueriesNeverScanOrSort(t *testing.T) {
 	s := openSQLite(t, localDir(t), store.SQLiteOptions{})
 	plans, err := s.Explain()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plans) < 10 {
+	if len(plans) < 11 {
 		t.Fatalf("explained only %d queries: %v", len(plans), plans)
 	}
 	for name, lines := range plans {
-		searched := false
-		for _, line := range lines {
-			if strings.Contains(line, "SCAN") && !strings.Contains(line, "SCAN CONSTANT ROW") {
-				t.Errorf("%s scans: %q\nplan: %v", name, line, lines)
-			}
-			searched = searched || strings.Contains(line, "SEARCH")
+		for _, problem := range planProblems(lines) {
+			t.Errorf("%s %s\nplan: %v", name, problem, lines)
 		}
-		if !searched && name != "next due" {
-			t.Errorf("%s does not search an index: %v", name, lines)
-		}
-	}
-	for name, lines := range plans {
 		t.Logf("%-18s %v", name, lines)
+	}
+}
+
+func TestEveryConnectionIsInWriteAheadLogModeWithItsBusyTimeout(t *testing.T) {
+	s := openSQLite(t, localDir(t), store.SQLiteOptions{})
+	writer, readers, err := s.Settings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(readers) < 2 {
+		t.Fatalf("checked only %d reader connections", len(readers))
+	}
+	const normal = 1 // PRAGMA synchronous: 0 OFF, 1 NORMAL, 2 FULL
+	want := store.Settings{JournalMode: "wal", Synchronous: normal, BusyTimeoutMS: 10000}
+	if writer != want {
+		t.Errorf("writer settings %+v, want %+v", writer, want)
+	}
+	want.QueryOnly = 1
+	for i, r := range readers {
+		if r != want {
+			t.Errorf("reader connection %d settings %+v, want %+v", i, r, want)
+		}
 	}
 }
