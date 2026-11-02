@@ -128,8 +128,8 @@ var testRules = map[string][]string{
 	},
 	"cmd/vibesys-cli": {
 		"internal/app", "internal/app/filestores", "internal/clock", "internal/core", "internal/daemon",
-		"internal/daemon/daemontest", "internal/environment/fakeenv", "internal/runtimedir",
-		"internal/store/filestore", "internal/supervisor/host",
+		"internal/daemon/daemontest", "internal/environment/fakeenv", "internal/lifecycle", "internal/runtimedir",
+		"internal/store/filestore", "internal/supervisor", "internal/supervisor/host",
 	},
 }
 

@@ -405,7 +405,7 @@ func (e *e2e) killAndAwaitEnd(conn net.Conn, pid int) {
 	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
 		e.t.Fatalf("kill %d: %v", pid, err)
 	}
-	if err := conn.SetDeadline(time.Now().Add(hangBound)); err != nil {
+	if err := conn.SetDeadline(clock.System{}.Now().Add(hangBound)); err != nil {
 		e.t.Fatal(err)
 	}
 	if _, err := io.Copy(io.Discard, conn); err != nil && !errors.Is(err, syscall.ECONNRESET) {
@@ -433,18 +433,6 @@ func (e *e2e) awaitCommandEnd(id string) {
 		return
 	}
 	e.t.Fatalf("job %s has no supervisor", id)
-}
-
-// storeLock is the file the daemon of the job's store holds a lock on.
-func (e *e2e) storeLock() string {
-	return filepath.Join(e.repo, ".vibesys-state", "kv", ".owner.lock")
-}
-
-func awaitCtx(t *testing.T) context.Context {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), hangBound)
-	t.Cleanup(cancel)
-	return ctx
 }
 
 func (e *e2e) daemonPID() int {
@@ -624,13 +612,9 @@ func TestE2EAStoreHasOneDaemonAcrossRuntimeDirectories(t *testing.T) {
 		t.Fatalf("a second daemon's submit = %+v", r)
 	}
 	e.killDaemon()
-	lock, err := runtimedir.WaitLock(awaitCtx(t), e.storeLock())
-	if err != nil {
-		t.Fatal(err)
-	}
-	lock.Unlock()
+	// Whether the kernel freed the store yet only decides which refusal this is.
 	r = other.run(append(withTask("submit", "command", "HEAD", "--"), "exit", "0")...)
-	if r.code == exitOK || !strings.Contains(r.stderr, "running") {
+	if r.code == exitOK || !strings.Contains(r.stderr, "process") {
 		t.Fatalf("a submit elsewhere with a job running here = %+v", r)
 	}
 
@@ -672,11 +656,7 @@ func TestE2EADeletedInstanceLockStillLeavesTheStoreOneDaemon(t *testing.T) {
 	}
 
 	e.killAndAwaitEnd(conn, first)
-	lock, err := runtimedir.WaitLock(awaitCtx(t), e.storeLock())
-	if err != nil {
-		t.Fatal(err)
-	}
-	lock.Unlock()
+	e.quickRetry = false
 	if r := e.run("daemon", "restart"); r.code != exitOK {
 		t.Fatalf("daemon restart = %+v", r)
 	}

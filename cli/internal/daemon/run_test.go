@@ -234,10 +234,11 @@ func (s lockWatchingStores) Close() error {
 func TestADaemonGivesUpItsStoresBeforeItLetsGoOfTheMachine(t *testing.T) {
 	cases := map[string]struct {
 		stores app.Stores
+		timers clock.Timers
 		stop   bool
 	}{
-		"after serving":          {stores: memstores.New(app.Rules(5)), stop: true},
-		"after failing to start": {stores: brokenStores{}},
+		"after serving":          {stores: memstores.New(app.Rules(5)), timers: clock.System{}, stop: true},
+		"after failing to start": {stores: brokenStores{}, timers: clock.Immediate{Longest: time.Minute}},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -255,7 +256,7 @@ func TestADaemonGivesUpItsStoresBeforeItLetsGoOfTheMachine(t *testing.T) {
 			done := make(chan error, 1)
 			go func() {
 				done <- daemon.Run(ctxFor(t), daemon.Config{
-					Dir: dir, Version: "test", Runtime: rt, Clock: clock.System{}, Timers: clock.Immediate{Longest: time.Minute}, Ready: w,
+					Dir: dir, Version: "test", Runtime: rt, Clock: clock.System{}, Timers: tc.timers, Ready: w,
 				})
 			}()
 			if tc.stop {
