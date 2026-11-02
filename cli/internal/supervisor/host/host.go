@@ -110,9 +110,9 @@ func (h *Host) spawn(ctx context.Context, dir runDir, launch lifecycle.Launch) (
 	pid := cmd.Process.Pid
 	exited := make(chan struct{})
 	// The daemon is the supervisor's parent while it lives, so it reaps it. A later daemon is
-	// not the parent, and the supervisor is then reaped by init. This goroutine has no owner to
-	// join it because it ends when the supervisor does, which is after the daemon.
-	go func() { cmd.Wait(); close(exited) }()
+	// not the parent, and the supervisor is then reaped by init. It ends when the supervisor does,
+	// which is after the daemon, so nothing can join it.
+	owned.Detached(func() { cmd.Wait(); close(exited) })
 	killGroup := func() {
 		syscall.Kill(-pid, syscall.SIGKILL)
 		<-exited

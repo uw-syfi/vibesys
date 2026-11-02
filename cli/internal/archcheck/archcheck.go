@@ -60,7 +60,7 @@ var rules = map[string][]string{
 
 	// Supervisors: the domain, its channel to the daemon, and the process that serves it.
 	"internal/supervisor":         {"internal/changed", "internal/core", "internal/environment", "internal/lifecycle", "internal/owned"},
-	"internal/supervisor/suptest": {"internal/core", "internal/lifecycle", "internal/supervisor"},
+	"internal/supervisor/suptest": {"internal/core", "internal/lifecycle", "internal/owned", "internal/supervisor"},
 	"internal/supervisor/rpc":     {"gen/", "internal/core", "internal/lifecycle", "internal/supervisor", "internal/wire"},
 	"internal/supervisor/host": {
 		"gen/", "internal/clock", "internal/core", "internal/environment", "internal/lifecycle", "internal/owned",
@@ -81,7 +81,7 @@ var rules = map[string][]string{
 	},
 	"internal/daemon/daemontest": {
 		"internal/app", "internal/app/memstores", "internal/clock", "internal/core", "internal/daemon",
-		"internal/environment/fakeenv", "internal/runtimedir", "internal/supervisor",
+		"internal/environment/fakeenv", "internal/owned", "internal/runtimedir", "internal/supervisor",
 	},
 	"internal/client": {"gen/", "internal/clock", "internal/runtimedir", "internal/wire"},
 
@@ -107,6 +107,7 @@ var rules = map[string][]string{
 // implementation to compare it with, and the packages a test composes a daemon from. Product code
 // reaches none of them, so a fake never ships.
 var testRules = map[string][]string{
+	"internal/store/ledger":    {"internal/clock"},
 	"internal/store/memstore":  {"internal/store/storetest"},
 	"internal/store/filestore": {"internal/store/storetest", "internal/store/memstore"},
 	"internal/supervisor":      {"internal/environment/fakeenv", "internal/supervisor/suptest"},

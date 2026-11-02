@@ -19,6 +19,7 @@ import (
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
+	"github.com/uw-syfi/vibesys/cli/internal/owned"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
 )
 
@@ -121,7 +122,8 @@ type seen struct {
 
 func watch(ctx context.Context, h supervisor.Handle, offset uint64) *seen {
 	s := &seen{changed: make(chan struct{}, 1), done: make(chan struct{})}
-	go func() {
+	var follower owned.Group // Joined through s.done, which a test can select on.
+	follower.Go(func() {
 		defer close(s.done)
 		s.outcome, s.err = h.Follow(ctx, offset, func(data []byte) error {
 			s.mu.Lock()
@@ -133,7 +135,7 @@ func watch(ctx context.Context, h supervisor.Handle, offset uint64) *seen {
 			}
 			return nil
 		})
-	}()
+	})
 	return s
 }
 

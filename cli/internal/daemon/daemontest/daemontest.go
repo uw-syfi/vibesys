@@ -14,6 +14,7 @@ import (
 
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/daemon"
+	"github.com/uw-syfi/vibesys/cli/internal/owned"
 	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
 )
 
@@ -56,11 +57,12 @@ func (s *Starter) Start(ctx context.Context) error {
 	if clk == nil {
 		clk = clock.System{}
 	}
-	go func() {
+	var process owned.Group // Joined through p.done, which carries its result.
+	process.Go(func() {
 		p.done <- daemon.Run(runCtx, daemon.Config{
 			Dir: s.Dir, Version: s.Version, Runtime: s.Runtime(), Clock: clk, Ready: w,
 		})
-	}()
+	})
 	buf := make([]byte, 1)
 	if _, err := io.ReadFull(r, buf); err != nil {
 		// A daemon that failed closed the pipe without a byte.

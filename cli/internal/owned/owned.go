@@ -16,3 +16,8 @@ func (g *Group) Go(fn func()) { g.wg.Go(fn) }
 
 // Wait returns when every goroutine of the group has returned.
 func (g *Group) Wait() { g.wg.Wait() }
+
+// Detached runs fn in a goroutine that nothing joins, because it outlives whoever starts it. It is
+// for waiting on a child process, which goes on after this one has gone. Anything else belongs in a
+// Group.
+func Detached(fn func()) { go fn() }

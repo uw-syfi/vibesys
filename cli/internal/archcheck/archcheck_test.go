@@ -283,9 +283,9 @@ func TestGoStatementsStartThroughTheOwnedGroup(t *testing.T) {
 
 // An exception excuses only its own file, and goes stale when its file stops breaking the rule.
 func TestExceptionsExcuseOnlyTheirFile(t *testing.T) {
-	clockList, goList := archcheck.Exceptions()
-	if len(clockList) == 0 || len(goList) == 0 {
-		t.Fatal("expected both rules to list an exception")
+	clockList, _ := archcheck.Exceptions()
+	if len(clockList) == 0 {
+		t.Fatal("expected the clock rule to list an exception")
 	}
 	clockBad := withTime(`"time"`, "_ = time.Now()")
 	if got := archcheck.Violations(map[string]string{clockList[0].File: clockBad}); hasLine(got, "real clock") {
@@ -295,15 +295,17 @@ func TestExceptionsExcuseOnlyTheirFile(t *testing.T) {
 		t.Errorf("a file beside an excepted one was not flagged: %v", got)
 	}
 	clean := "package p\n"
-	files := map[string]string{clockList[0].File: clean, goList[0].File: "package p\n\nfunc f() { go g() }\n"}
+	files := map[string]string{clockList[0].File: clean}
 	stale := archcheck.StaleExceptions(files)
 	if !hasLine(stale, clockList[0].File+": the clock exception is no longer needed") {
 		t.Errorf("a fixed clock exception was not reported stale: %v", stale)
 	}
-	if hasLine(stale, goList[0].File+": the go statement exception is no longer needed") {
-		t.Errorf("a needed go exception was reported stale: %v", stale)
+	files[clockList[0].File] = withTime(`"time"`, "_ = time.Now()")
+	if stale := archcheck.StaleExceptions(files); hasLine(stale, clockList[0].File+": the clock exception is no longer needed") {
+		t.Errorf("a needed clock exception was reported stale: %v", stale)
 	}
-	if !hasLine(stale, "names a file that does not exist") {
+	delete(files, clockList[0].File)
+	if stale := archcheck.StaleExceptions(files); !hasLine(stale, "names a file that does not exist") {
 		t.Errorf("a missing excepted file was not reported: %v", stale)
 	}
 }
