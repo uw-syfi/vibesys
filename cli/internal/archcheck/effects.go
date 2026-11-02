@@ -45,19 +45,10 @@ type Exception struct {
 var clockExceptions = []Exception{
 	{"cli/internal/store/storetest/concurrency.go",
 		"a hang guard: time.After bounds how long the suite waits for a store call that may never return, and no result depends on it"},
-	{"cli/internal/store/ledger/hold_test.go",
-		"TEMPORARY: reads time.Now() only to have an arbitrary instant with a monotonic reading to hold; replace with a literal instant"},
 }
 
 // goExceptions lists the files in goStatementScopes that start a goroutine without an owned.Group.
-var goExceptions = []Exception{
-	{"cli/internal/supervisor/host/host.go",
-		"TEMPORARY: reaps the supervisor child with cmd.Wait; a later daemon is not its parent, so no owner can join it; move behind owned.Group"},
-	{"cli/internal/supervisor/suptest/suptest.go",
-		"TEMPORARY: the test helper follows a supervisor in a goroutine it joins through a channel; move behind owned.Group"},
-	{"cli/internal/daemon/daemontest/daemontest.go",
-		"TEMPORARY: the test daemon runs daemon.Run in a goroutine it joins through a channel; move behind owned.Group"},
-}
+var goExceptions = []Exception{}
 
 // Exceptions returns the files excused from the clock rule and from the go-statement rule.
 func Exceptions() (clock, goStatements []Exception) {
