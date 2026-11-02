@@ -41,6 +41,9 @@ type MeasureOutcome struct {
 	Observations []Observation
 	// CheckJob is the check pass the measurement relies on, run in the same job or reused.
 	CheckJob JobID
+	// Objectives is what a measurement of a multi-objective task is judged on, and the zero value
+	// for any other task.
+	Objectives Objectives
 }
 
 func (CheckOutcome) outcome()   {}

@@ -24,9 +24,15 @@ type CompareRequest struct {
 //
 //   - They were taken in one environment, or the comparison is refused with a *Failure of kind
 //     FailureEnvironmentMismatch, and no verdict is given.
-//   - They were taken under one task version and score one metric in one direction, or the
-//     verdict is inconclusive with ReasonTaskVersionMismatch or ReasonMetricMismatch. The caller
-//     decides which measurements to pass; core never guesses a filter.
+//   - They were taken under one task version and score one metric in one direction, judged on
+//     the same objectives, or the verdict is inconclusive with ReasonTaskVersionMismatch or
+//     ReasonMetricMismatch. The caller decides which measurements to pass; core never guesses a
+//     filter.
+//
+// Measurements of a multi-objective task (Objectives.Pareto) are compared on every objective, each
+// with Compare under the objectives' noise floor, and the verdict is the overall one that
+// CombineObjectives gives; RelativeNoise is not used for them. Any other measurements are compared
+// on their one metric under RelativeNoise.
 //
 // A side with no measurement fails with FailureNotMeasured. Everything Compare refuses fails the
 // same way here.
@@ -52,6 +58,7 @@ func CompareCommits(req CompareRequest) (Comparison, error) {
 		Commit:      req.Commit,
 		Against:     req.Against,
 		Verdict:     compared.verdict,
+		Objectives:  compared.objectives,
 		Environment: compared.environment,
 	}, nil
 }
@@ -63,6 +70,8 @@ type measuredComparison struct {
 	mixedEnvironments string
 	environment       Fingerprint
 	verdict           Verdict
+	// objectives is the verdict on each objective of a multi-objective task, and empty otherwise.
+	objectives []ObjectiveVerdict
 }
 
 // compareMeasurements compares two non-empty sets of measurement results.
@@ -83,6 +92,11 @@ func compareMeasurements(candidate, base []Result, relativeNoise float64) (measu
 		}
 		return result, nil
 	}
+	if objectives := objectivesOf(all[0]); objectives.Pareto() {
+		verdict, verdicts, err := compareObjectives(candidate, base, objectives)
+		result.verdict, result.objectives = verdict, verdicts
+		return result, err
+	}
 	verdict, err := Compare(CompareInput{
 		Direction:     metricOf(all[0]).Direction,
 		Candidate:     candidateSamples,
@@ -94,12 +108,15 @@ func compareMeasurements(candidate, base []Result, relativeNoise float64) (measu
 }
 
 // mismatch says why measurements that were taken in one environment still cannot be pooled: they
-// were taken under different task versions, or score different metrics.
+// were taken under different task versions, or score different metrics or objectives.
 func mismatch(results []Result) InconclusiveReason {
+	first := objectivesOf(results[0])
 	switch {
 	case !uniform(results, func(r Result) string { return r.TaskVersion }):
 		return ReasonTaskVersionMismatch
 	case !uniform(results, metricOf):
+		return ReasonMetricMismatch
+	case slices.ContainsFunc(results, func(r Result) bool { return !objectivesOf(r).Equal(first) }):
 		return ReasonMetricMismatch
 	}
 	return ReasonNone

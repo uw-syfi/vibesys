@@ -10,11 +10,15 @@ type PromoteRefusalKind string
 
 // The refusal kinds.
 const (
-	RefusalUnmeasured          PromoteRefusalKind = "unmeasured"
-	RefusalCheckMissing        PromoteRefusalKind = "check_missing"
-	RefusalWorse               PromoteRefusalKind = "worse"
-	RefusalWithinNoise         PromoteRefusalKind = "within_noise"
-	RefusalInconclusive        PromoteRefusalKind = "inconclusive"
+	RefusalUnmeasured   PromoteRefusalKind = "unmeasured"
+	RefusalCheckMissing PromoteRefusalKind = "check_missing"
+	RefusalWorse        PromoteRefusalKind = "worse"
+	RefusalWithinNoise  PromoteRefusalKind = "within_noise"
+	RefusalInconclusive PromoteRefusalKind = "inconclusive"
+	// RefusalTradeoff is a multi-objective candidate that is better than the head on some
+	// objective and worse on another: it is not a step forward, and the frontier is where such a
+	// commit is kept.
+	RefusalTradeoff            PromoteRefusalKind = "tradeoff"
 	RefusalStale               PromoteRefusalKind = "stale"
 	RefusalEnvironmentMismatch PromoteRefusalKind = "environment_mismatch"
 )
@@ -23,8 +27,10 @@ const (
 type PromoteRefusalReason struct {
 	Kind    PromoteRefusalKind
 	Message string
-	// Verdict is set for worse, within_noise and inconclusive.
+	// Verdict is set for worse, within_noise, inconclusive and tradeoff.
 	Verdict *Verdict
+	// Objectives is the verdict on each objective, with Verdict, for a multi-objective task.
+	Objectives []ObjectiveVerdict
 	// MeasuredAgainst and CurrentHead are set for stale.
 	MeasuredAgainst Commit
 	CurrentHead     Commit
@@ -42,7 +48,9 @@ type Promotion struct {
 	// first promotion that is the commit the run started from.
 	PreviousHead Commit
 	Verdict      Verdict
-	Environment  Fingerprint
+	// Objectives is the verdict on each objective for a multi-objective task, and empty otherwise.
+	Objectives  []ObjectiveVerdict
+	Environment Fingerprint
 	// ResultJob is the measurement the promotion rests on.
 	ResultJob JobID
 	At        time.Time
@@ -104,8 +112,10 @@ type PromotionRequest struct {
 //   - RefusalCheckMissing: a measurement of the candidate does not rest on a passing check of
 //     the same commit, task version and environment: it names none, or names a job that is not
 //     such a pass. A check that ran inside the measuring job names that job.
-//   - RefusalWorse, RefusalWithinNoise and RefusalInconclusive: the verdict of CompareCommits is
-//     not better. Task version and metric mismatches are inconclusive.
+//   - RefusalWorse, RefusalWithinNoise, RefusalInconclusive and RefusalTradeoff: the verdict of
+//     CompareCommits is not better. Task version and metric mismatches are inconclusive. Only a
+//     multi-objective verdict is a tradeoff, and a multi-objective candidate is promoted only when
+//     its overall verdict is better: better on some objective and worse on none.
 //   - RefusalStale: the result branch moved after the candidate was measured, at or after the
 //     time of its oldest measurement, so the measurement was taken against an older head.
 //     Measure again, without the cache, after the move.
@@ -150,7 +160,7 @@ func DecidePromotion(req PromotionRequest) (PromotionDecision, error) {
 		})
 	}
 	if compared.mixedEnvironments == "" {
-		if reason, refused := verdictRefusal(compared.verdict); refused {
+		if reason, refused := verdictRefusal(compared.verdict, compared.objectives); refused {
 			reasons = append(reasons, reason)
 		}
 	}
@@ -173,6 +183,7 @@ func DecidePromotion(req PromotionRequest) (PromotionDecision, error) {
 		Commit:       req.Candidate,
 		PreviousHead: req.Head,
 		Verdict:      compared.verdict,
+		Objectives:   compared.objectives,
 		Environment:  compared.environment,
 		ResultJob:    candidate[len(candidate)-1].Job,
 		At:           req.At,
@@ -180,11 +191,12 @@ func DecidePromotion(req PromotionRequest) (PromotionDecision, error) {
 }
 
 // verdictRefusal is the refusal for a verdict that is not better.
-func verdictRefusal(verdict Verdict) (PromoteRefusalReason, bool) {
+func verdictRefusal(verdict Verdict, objectives []ObjectiveVerdict) (PromoteRefusalReason, bool) {
 	kinds := map[VerdictKind]PromoteRefusalKind{
 		Worse:        RefusalWorse,
 		WithinNoise:  RefusalWithinNoise,
 		Inconclusive: RefusalInconclusive,
+		Tradeoff:     RefusalTradeoff,
 	}
 	kind, refused := kinds[verdict.Kind]
 	if !refused {
@@ -198,8 +210,13 @@ func verdictRefusal(verdict Verdict) (PromoteRefusalReason, bool) {
 		text = "the candidate is within noise of the commit to beat"
 	case Inconclusive:
 		text = "the samples cannot say whether the candidate beats the commit to beat (" + string(verdict.Reason) + ")"
+	case Tradeoff:
+		text = "the candidate is better than the commit to beat on some objectives and worse on others"
 	}
-	return PromoteRefusalReason{Kind: kind, Message: text, Verdict: &verdict}, true
+	if len(objectives) > 0 {
+		text += " (" + describeObjectives(objectives) + ")"
+	}
+	return PromoteRefusalReason{Kind: kind, Message: text, Verdict: &verdict, Objectives: objectives}, true
 }
 
 // movedSince reports whether a promotion happened at or after a measurement was recorded, and the
