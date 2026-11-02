@@ -202,9 +202,8 @@ default to the environment variables shown:
 Plans belong to a task, are numbered 1, 2, ... by the daemon and never renumbered, and take one of
 five statuses: `open`, `chosen`, `won`, `parked` and `rejected`. The CLI orders none of them, so an
 agent may move a plan from any status to any other, and it stores the body and the comments as they
-are given. A plan number may be written `3` or `#3`. `plan view` shows the jobs linked to a plan; the
-verdict of each against the result branch is not shown yet, because `compare` is not available in
-this build. A submission or `plan create` makes a task's store, so a planner can write plans before
+are given. A plan number may be written `3` or `#3`. `plan view` shows the jobs linked to a plan; it
+does not show their verdicts, so run `compare` on a linked job's commit for one. A submission or `plan create` makes a task's store, so a planner can write plans before
 the first job. The other plan commands refuse a task with no store with a "no store" error, and
 `plan list` prints nothing for it.
 
