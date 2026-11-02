@@ -156,7 +156,12 @@ func (SessionClosed) factBody()      {}
 
 // SidecarLost says a session's sidecar is gone: the shell could not reach it, could not start it,
 // or found it missing after a restart. It is the one fact about a session no sidecar can send.
-type SidecarLost struct{ Session Session }
+type SidecarLost struct {
+	Session Session
+	// Detail says why, such as the error that stopped a launch. It reaches the agent's record and,
+	// for a subagent, its lead.
+	Detail string
+}
 
 func (SidecarLost) inputBody() {}
 

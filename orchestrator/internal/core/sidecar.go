@@ -133,7 +133,7 @@ func (t *tx) lost(b SidecarLost) {
 	if !ok {
 		return
 	}
-	t.sessionOver(a.ID, AgentLost, "")
+	t.sessionOver(a.ID, AgentLost, b.Detail)
 	t.sweep(a.Run)
 }
 

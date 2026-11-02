@@ -41,7 +41,7 @@ func (t *tx) route(m *Message, a agentState) {
 
 // resume opens a new session on an agent whose last one is over.
 func (t *tx) resume(a agentState) {
-	a.Status, a.Stop, a.Session, a.EndedAt, a.HandedOff = AgentLaunching, StopNone, a.Session+1, time.Time{}, false
+	a.Status, a.Stop, a.Session, a.EndedAt, a.HandedOff, a.EndDetail = AgentLaunching, StopNone, a.Session+1, time.Time{}, false, ""
 	t.emit(a.Run, a.Agent)
 	run := t.s.runs[a.Run]
 	t.effect(LaunchSession{
@@ -206,7 +206,7 @@ func (t *tx) sessionOver(id AgentID, status AgentStatus, detail string) {
 		t.endTurn(a, turnStatus, Usage{})
 		a = t.s.agents[id]
 	}
-	a.Status, a.Stop, a.EndedAt = status, StopNone, t.in.At
+	a.Status, a.Stop, a.EndedAt, a.EndDetail = status, StopNone, t.in.At, detail
 	if unasked {
 		a.SessionFailures++
 	}

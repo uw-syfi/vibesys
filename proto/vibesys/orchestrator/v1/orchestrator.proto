@@ -205,6 +205,9 @@ message Agent {
   bool handed_off = 17;
   // Sessions in a row that this agent lost or failed without completing a turn.
   uint32 session_failures = 18;
+  // Why the current session ended, when it was lost or failed: the launch error, for one that never
+  // started. Empty while the session is live.
+  string end_detail = 19 [(buf.validate.field).string.max_len = 1000];
 }
 
 // Capabilities are what a session can do. The sidecar reports them when the session opens, so
