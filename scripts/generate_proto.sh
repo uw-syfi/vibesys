@@ -31,6 +31,8 @@ uv run --locked --group proto buf generate --template buf.gen.core.yaml
 uv run --locked --group proto buf generate --template buf.gen.cli.yaml
 # The orchestrator's contract is Go only as well, generated into its own module.
 uv run --locked --group proto buf generate --template buf.gen.orchestrator.yaml
+# Its TypeScript bindings are a separate template, so the bindings of the existing clients are unchanged.
+uv run --locked --group proto buf generate --template buf.gen.orchestrator-ts.yaml
 uv run --locked --group proto buf generate --template scripts/corevalue/tests/buf.gen.yaml
 uv run --locked ruff check --select I --fix libs/vs-core/src/vs_core/_generated libs/vs-runtime/src/vs_runtime/_core_values
 uv run --locked ruff format libs/vs-core/src/vs_core/_generated libs/vs-runtime/src/vs_runtime/_core_values
