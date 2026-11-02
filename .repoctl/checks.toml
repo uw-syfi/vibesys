@@ -146,7 +146,9 @@ trigger_job = "python"
 include_in_checks = true
 language = "python"
 directory = "."
-timeout_seconds = 60
+# A hang guard, not a budget. One serial pytest process over about 930 tests: 69 s of test time
+# measured on 8 cores with a warm environment, so a 60 s limit failed a healthy run.
+timeout_seconds = 180
 commands = [[
   "uv", "run", "python", "-m", "pytest", "-q", "-n", "0", "--no-cov", "tests/architecture",
   "--ignore=tests/architecture/test_stack_evaluator.py",
