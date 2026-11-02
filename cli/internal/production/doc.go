@@ -5,7 +5,5 @@
 // their own, composed from fakes in tests and from these in the binary, so nothing they do
 // branches on which.
 //
-// This build ships no environment that can run a job: the host and docker environments arrive
-// with the work that checks out and measures commits. Until then every job ends as not attempted,
-// with that reason, and the daemon, the supervisors and the job lifecycle are complete.
+// Jobs run on the host or, for a task with a Dockerfile, in docker.
 package production

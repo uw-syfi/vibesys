@@ -28,7 +28,7 @@ type Config struct {
 	IDs IDs
 	// Scope is whose containers these are: a run removes the containers of its scope that no live
 	// run of this process owns, so two live runs in different processes must not share one. A
-	// daemon uses one scope for the jobs it runs one at a time.
+	// daemon uses one scope (ScopeFor) for the jobs it runs one at a time.
 	Scope string
 	// User is the user and group the commands run as. It is the invoking user, so the files the
 	// commands write are theirs.

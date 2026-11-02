@@ -121,7 +121,8 @@ var rules = map[string][]string{
 	// The wiring of the shipped binary.
 	"internal/production": {
 		"internal/app", "internal/app/filestores", "internal/backend/cpu", "internal/client", "internal/clock",
-		"internal/core", "internal/daemon", "internal/environment", "internal/environment/host", "internal/gitrepo",
+		"internal/core", "internal/daemon", "internal/environment", "internal/environment/docker",
+		"internal/environment/docker/dockercli", "internal/environment/host", "internal/gitrepo",
 		"internal/gitwork", "internal/hostfs", "internal/runtimedir", "internal/store/filestore",
 		"internal/supervisor", "internal/supervisor/host", "internal/task",
 	},
@@ -184,8 +185,9 @@ var testRules = map[string][]string{
 	},
 	"cmd/vibesys-cli": {
 		"internal/app", "internal/app/filestores", "internal/clock", "internal/core", "internal/daemon",
-		"internal/daemon/daemontest", "internal/environment/fakeenv", "internal/lifecycle", "internal/runtimedir",
-		"internal/store", "internal/store/filestore", "internal/store/storetest", "internal/supervisor", "internal/supervisor/host",
+		"internal/daemon/daemontest", "internal/environment/docker", "internal/environment/fakeenv",
+		"internal/lifecycle", "internal/runtimedir", "internal/store", "internal/store/filestore",
+		"internal/store/storetest", "internal/supervisor", "internal/supervisor/host",
 		"internal/task", "internal/task/tasktest",
 	},
 }
