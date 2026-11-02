@@ -58,6 +58,10 @@ message Launch {
   // What a check or a measure job runs, as the daemon decided it when the job started. It is set
   // for those kinds and unset for a command job.
   FlowPlan plan = 5;
+  // Where this attempt's output starts in the job's stored output: what earlier attempts of a job
+  // that was queued again left there. The supervisor's output offsets count from it, so a daemon
+  // follows the job from what its store holds, whichever attempt wrote it.
+  uint64 output_base = 6;
 }
 
 // PlanCommand is one command of a plan, with its argument vector as the task wrote it and its

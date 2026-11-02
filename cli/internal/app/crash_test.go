@@ -484,12 +484,21 @@ func check(t *testing.T, w *world, a *app.App, reboot bool, limit int64) {
 		} else {
 			name = "B"
 		}
-		// A command runs at most once, whatever happens to the daemon, and a lost job is not
-		// retried.
+		// A command runs at most once, whatever happens to the daemon: a command job runs again
+		// only when its attempt was cut off before its command started, and a lost job is not run
+		// again.
 		if n := w.ran(name); n > 1 {
 			t.Errorf("%s: command %s ran %d times", where, name, n)
 		}
-		out := logOf(t, a, j.ID)
+		out, cuts := withoutCutLines(logOf(t, a, j.ID))
+		if cuts != len(j.Attempts) || (cuts > 0 && !reboot) {
+			t.Errorf("%s: job %s has %d attempts cut off and says %d, with reboot %v", where, name, len(j.Attempts), cuts, reboot)
+		}
+		for _, past := range j.Attempts {
+			if _, before := past.Cut.(core.CutBeforeStart); !before {
+				t.Errorf("%s: command job %s was queued again after its command may have started: %+v", where, name, past)
+			}
+		}
 		switch j.State {
 		case core.JobSucceeded:
 			if out != want[name] {
@@ -522,6 +531,21 @@ func check(t *testing.T, w *world, a *app.App, reboot bool, limit int64) {
 	if w.env.Active() != 0 || w.checkouts.Open() != 0 {
 		t.Errorf("%s: %d commands and %d checkouts left", where, w.env.Active(), w.checkouts.Open())
 	}
+}
+
+// withoutCutLines returns a job's output less the lines that say an attempt was cut off and the
+// job runs again, and how many there were.
+func withoutCutLines(out string) (string, int) {
+	var kept strings.Builder
+	cuts := 0
+	for _, line := range strings.SplitAfter(out, "\n") {
+		if strings.HasPrefix(line, "vibesys-cli: attempt ") && strings.Contains(line, "running it again") {
+			cuts++
+			continue
+		}
+		kept.WriteString(line)
+	}
+	return kept.String(), cuts
 }
 
 func argvOf(j core.Job) []string {

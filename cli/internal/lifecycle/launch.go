@@ -18,6 +18,9 @@ type Launch struct {
 	// Plan is what a check or a measure job runs, as the daemon decided it when the job started.
 	// It is nil for a command job, which the spec alone describes.
 	Plan *flow.Plan
+	// OutputBase is where this attempt's output starts in the job's stored output, which holds what
+	// earlier attempts of a job queued again wrote. The supervisor's output offsets count from it.
+	OutputBase uint64
 }
 
 // Ref is the job's identity.

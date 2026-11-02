@@ -80,7 +80,7 @@ func (a *App) Submit(ctx context.Context, req SubmitRequest) (core.SubmitOutcome
 	if out.Disposition != core.SubmitReused && out.Job.State == core.JobQueued {
 		// Settled, so that a submission that returned is in Status.
 		a.settle(message{
-			event: lifecycle.Admitted{Ref: lifecycle.Ref{Store: storeIDOf(scope), Job: out.Job.ID}, SubmittedAt: out.Job.SubmittedAt},
+			event: admittedOf(lifecycle.Ref{Store: storeIDOf(scope), Job: out.Job.ID}, out.Job),
 			scope: &scope, changed: true,
 		})
 		return out, nil

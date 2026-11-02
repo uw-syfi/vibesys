@@ -7,13 +7,16 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 )
 
-// Settlement is the change a finished or abandoned job gets: the transition for its store, and
-// the line to add to its output when the outcome alone does not say why.
+// Settlement is the change a finished, abandoned or cut-off job gets: the transition for its store,
+// and the line to add to its output when the outcome alone does not say why.
 type Settlement struct {
 	Transition core.Transition
 	// Log is empty when the job's own output tells the story.
 	Log string
 }
+
+// Requeues says the settlement queues the job again, for another attempt, and does not end it.
+func (s Settlement) Requeues() bool { return s.Transition.Cut != nil }
 
 // Settle says what a supervisor's outcome means for its job, which was in state from. Nothing is
 // inferred: an outcome that does not say the job succeeded is not a success.
@@ -156,19 +159,70 @@ func stoppedJob(job core.JobID, f core.Failure, at time.Time) Settlement {
 	}
 }
 
-// lostJob is the end of a running job whose supervisor is gone.
+// lostJob is the end of a running job whose supervisor is gone, which is not run again.
 func lostJob(job core.JobID, at time.Time) Settlement {
 	return Settlement{
 		Transition: core.Transition{Job: job, From: core.JobRunning, To: core.JobLost, At: at},
-		Log:        "vibesys-cli: the job's supervisor went away, so the job is lost and is not retried",
+		Log:        "vibesys-cli: the job's supervisor went away, so the job is lost and is not run again",
+	}
+}
+
+// CutOff says what comes of a running job whose supervisor is proved gone: the job with policy had
+// attempts cut off before this one, proof is how the supervisor is known gone, and start what is
+// known of whether its command was told to start.
+//
+//   - A command that was never told to start ran nothing, so the job is queued again.
+//   - A command that may have started is queued again only under RerunAfterProvenDeath, the policy
+//     of a check or a measure job, which saves nothing until it passes.
+//   - Either way only while the job has had fewer than core.MaxAttempts attempts, this one
+//     included: at the bound it is lost.
+//   - A supervisor known gone only because it was released proves no cut: the job is lost.
+//
+// A nil start may have started, and an unknown policy reruns nothing after a start.
+func CutOff(job core.JobID, policy core.RerunPolicy, attempts int, proof DeathProof, start Start, at time.Time) Settlement {
+	var cause core.CutCause
+	switch proof {
+	case ProofLockFree:
+		cause = core.CutSupervisorDied
+	case ProofRebooted:
+		cause = core.CutRebooted
+	case ProofReleased:
+		return lostJob(job, at)
+	default:
+		return lostJob(job, at)
+	}
+	attempt := attempts + 1
+	var cut core.Cut
+	var how string
+	switch start.(type) {
+	case NeverStarted:
+		cut, how = core.CutBeforeStart{By: cause}, "before its command started"
+	case MayHaveStarted, nil:
+		if policy != core.RerunAfterProvenDeath {
+			return Settlement{
+				Transition: core.Transition{Job: job, From: core.JobRunning, To: core.JobLost, At: at},
+				Log:        fmt.Sprintf("vibesys-cli: the job's supervisor went away (%s) after its command may have started, so the job is lost and is not run again: a command job is never run twice", cause),
+			}
+		}
+		cut, how = core.CutMidCommand{By: cause}, "mid-command"
+	}
+	if attempt >= core.MaxAttempts {
+		return Settlement{
+			Transition: core.Transition{Job: job, From: core.JobRunning, To: core.JobLost, At: at},
+			Log:        fmt.Sprintf("vibesys-cli: attempt %d was cut off %s (%s), and a job gets %d attempts, so the job is lost and is not run again", attempt, how, cause, core.MaxAttempts),
+		}
+	}
+	return Settlement{
+		Transition: core.Transition{Job: job, From: core.JobRunning, To: core.JobQueued, At: at, Cut: cut},
+		Log:        fmt.Sprintf("vibesys-cli: attempt %d was cut off %s (%s); running it again as attempt %d of %d", attempt, how, cause, attempt+1, core.MaxAttempts),
 	}
 }
 
 // givenUpJob is a running job whose store gave up the place that ran it, with nothing here that can
-// be running its command.
+// be running its command. The user's word proves no death, so the job is not run again.
 func givenUpJob(job core.JobID, at time.Time) Settlement {
 	return Settlement{
 		Transition: core.Transition{Job: job, From: core.JobRunning, To: core.JobLost, At: at},
-		Log:        "vibesys-cli: the store's owner record was removed, which gives up the place that ran the job, and nothing here runs it, so the job is lost and is not retried",
+		Log:        "vibesys-cli: the store's owner record was removed, which gives up the place that ran the job, and nothing here runs it, so the job is lost and is not run again",
 	}
 }

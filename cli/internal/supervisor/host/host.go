@@ -37,6 +37,7 @@ type Host struct {
 	command       func(runDir string) *exec.Cmd
 	binaryVersion string
 	timers        clock.Timers
+	clock         clock.Clock
 
 	mu       sync.Mutex
 	released map[lifecycle.Ref]bool
@@ -61,13 +62,15 @@ type Config struct {
 	BinaryVersion string
 	// Timers bound how long a supervisor gets to answer a probe.
 	Timers clock.Timers
+	// Clock stamps the mark a run's record gets when its supervisor is told to start.
+	Clock clock.Clock
 }
 
 // New returns a Host.
 func New(cfg Config) *Host {
 	return &Host{
 		root: cfg.Root, records: cfg.Records, bootID: cfg.BootID, command: cfg.Command, binaryVersion: cfg.BinaryVersion,
-		timers: cfg.Timers, released: map[lifecycle.Ref]bool{},
+		timers: cfg.Timers, clock: cfg.Clock, released: map[lifecycle.Ref]bool{},
 	}
 }
 
@@ -212,11 +215,20 @@ func (h *handle) proved(err error) error {
 		return &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("job %s: its supervisor does not answer and may still live", h.ref)}
 	}
 	lock.Unlock()
-	return supervisor.Gone{Proof: lifecycle.ProofLockFree}
+	return supervisor.Gone{Proof: lifecycle.ProofLockFree, Start: h.host.startOf(h.ref)}
 }
 
-// Start implements supervisor.Handle.
-func (h *handle) Start(ctx context.Context) error { return h.proved(h.Client.Start(ctx)) }
+// Start implements supervisor.Handle. The mark goes into the run's record first: a supervisor runs
+// nothing before it is told, so a record without the mark proves the command never started.
+func (h *handle) Start(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := h.host.markStartSent(h.ref); err != nil {
+		return &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("job %s: marking its start: %v", h.ref, err)}
+	}
+	return h.proved(h.Client.Start(ctx))
+}
 
 // Cancel implements supervisor.Handle.
 func (h *handle) Cancel(ctx context.Context, reason string) error {
@@ -338,7 +350,7 @@ func (h *Host) Probe(ctx context.Context, ref lifecycle.Ref) (supervisor.Run, er
 		return nil, err
 	}
 	lock.Unlock()
-	return supervisor.Dead{Ref: ref, Proof: lifecycle.ProofLockFree, Launch: launch}, nil
+	return supervisor.Dead{Ref: ref, Proof: lifecycle.ProofLockFree, Start: h.startOf(ref), Launch: launch}, nil
 }
 
 // noDirectory judges a run with no directory by its record.
@@ -356,7 +368,11 @@ func (h *Host) noDirectory(ref lifecycle.Ref) (supervisor.Run, error) {
 		return nil, fmt.Errorf("reading the boot id: %w", err)
 	}
 	if rec.BootID != boot {
-		return supervisor.Dead{Ref: ref, Proof: lifecycle.ProofRebooted, Launch: &rec.Launch}, nil
+		start := lifecycle.Start(lifecycle.NeverStarted{})
+		if rec.StartSent {
+			start = lifecycle.MayHaveStarted{}
+		}
+		return supervisor.Dead{Ref: ref, Proof: lifecycle.ProofRebooted, Start: start, Launch: &rec.Launch}, nil
 	}
 	return supervisor.Unknown{Ref: ref, Launch: &rec.Launch}, nil
 }

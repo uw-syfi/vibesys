@@ -150,6 +150,11 @@ func (a *App) recoverScope(ctx context.Context, scope core.Scope, runOf func(lif
 
 func ownerLeaving(err error) bool { return errors.Is(err, store.ErrOwnerLeaving) }
 
+// admittedOf is the event that a queued job wants to run.
+func admittedOf(ref lifecycle.Ref, job core.Job) lifecycle.Admitted {
+	return lifecycle.Admitted{Ref: ref, SubmittedAt: job.SubmittedAt, Attempts: len(job.Attempts), Policy: core.RerunPolicyOf(job.Spec.Settings.Kind())}
+}
+
 func storeIDOf(s core.Scope) lifecycle.StoreID {
 	return lifecycle.StoreIDOf(string(s.Repository()), string(s.Task()))
 }
@@ -216,7 +221,7 @@ func (a *App) sweepStore(ctx context.Context, scope core.Scope) {
 		ref := lifecycle.Ref{Store: storeIDOf(scope), Job: job.ID}
 		switch {
 		case job.State == core.JobQueued:
-			a.post(message{event: lifecycle.Admitted{Ref: ref, SubmittedAt: job.SubmittedAt}, scope: &scope})
+			a.post(message{event: admittedOf(ref, job), scope: &scope})
 		case !held[ref]:
 			run := a.look(ctx, ref)
 			presence := a.presenceOf(run)

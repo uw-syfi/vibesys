@@ -103,6 +103,7 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 				},
 				BinaryVersion: p.Version,
 				Timers:        clock.System{},
+				Clock:         clock.System{},
 			}),
 			Environments: environments,
 			Branches:     gitrepo.System{},

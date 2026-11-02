@@ -13,8 +13,12 @@ import (
 // Gone, which carries the proof, makes a job lost.
 var ErrGone = errors.New("the job's supervisor is gone")
 
-// Gone says a supervisor is gone and how that is known. It is an ErrGone.
-type Gone struct{ Proof lifecycle.DeathProof }
+// Gone says a supervisor is gone and how that is known, and what is known of whether its command
+// was told to start. It is an ErrGone.
+type Gone struct {
+	Proof lifecycle.DeathProof
+	Start lifecycle.Start
+}
 
 func (g Gone) Error() string { return fmt.Sprintf("%v: %s", ErrGone, g.Proof) }
 
@@ -37,7 +41,9 @@ type Checkouts interface {
 // proved: asking again gives the Gone.
 type Handle interface {
 	// Start lets the parked supervisor run the command. It is idempotent: on a supervisor that
-	// started already it does nothing, and so a daemon that is not sure may call it again.
+	// started already it does nothing, and so a daemon that is not sure may call it again. Before it
+	// asks, it marks the run durably as told to start, so that a run found dead without the mark is
+	// known never to have started (see Dead.Start); it fails, asking nothing, when it cannot.
 	Start(ctx context.Context) error
 
 	// Cancel asks the supervisor to end the job's process group. It returns once the request is
@@ -84,9 +90,12 @@ type Alive struct {
 }
 
 // Dead is a run whose supervisor is proved gone. Launch is nil when its record cannot be read.
+// Start is NeverStarted only when the run's record is read and says its command was never told to
+// start; anything else may have started.
 type Dead struct {
 	Ref    lifecycle.Ref
 	Proof  lifecycle.DeathProof
+	Start  lifecycle.Start
 	Launch *lifecycle.Launch
 }
 
@@ -138,7 +147,7 @@ func (r Alive) Found() lifecycle.Presence {
 }
 
 // Found implements Run.
-func (r Dead) Found() lifecycle.Presence { return lifecycle.RunDead{Proof: r.Proof} }
+func (r Dead) Found() lifecycle.Presence { return lifecycle.RunDead{Proof: r.Proof, Start: r.Start} }
 
 // Found implements Run.
 func (r Unknown) Found() lifecycle.Presence {

@@ -150,11 +150,17 @@ func refusal(k core.FailureKind) bool {
 
 // goneProof returns the proof in an error that a supervisor is gone. ErrGone alone holds none.
 func goneProof(err error) (lifecycle.DeathProof, bool) {
+	g, ok := goneOf(err)
+	return g.Proof, ok
+}
+
+// goneOf returns the Gone in an error, with its proof, and false when it holds no proof.
+func goneOf(err error) (supervisor.Gone, bool) {
 	var g supervisor.Gone
 	if errors.As(err, &g) && g.Proof.Valid() {
-		return g.Proof, true
+		return g, true
 	}
-	return "", false
+	return supervisor.Gone{}, false
 }
 
 // errNoHandle says the daemon holds no connection to a job's supervisor, which proves nothing.
@@ -296,7 +302,12 @@ func (a *App) prepare(ctx context.Context, ref lifecycle.Ref, scope core.Scope) 
 	if err != nil {
 		return nil, false, err
 	}
-	launch := lifecycle.Launch{Repository: string(scope.Repository()), Task: string(scope.Task()), Job: job.ID, Spec: spec}
+	// An earlier attempt of a job queued again left output in the store, and this one's follows it.
+	base, err := logSize(ctx, st, job.ID)
+	if err != nil {
+		return nil, false, storeError{err}
+	}
+	launch := lifecycle.Launch{Repository: string(scope.Repository()), Task: string(scope.Task()), Job: job.ID, Spec: spec, OutputBase: base}
 	if spec.Settings.Kind() != core.JobCommand {
 		plan, err := a.planFlow(ctx, st, scope, job, fingerprint)
 		if err != nil {
@@ -350,7 +361,7 @@ func (a *App) follow(ctx context.Context, r lifecycle.Adopt, scope core.Scope, h
 				outcome, progress, err = a.followOnce(ctx, r.Ref.Job, st, h)
 			}
 		}
-		proof, gone := goneProof(err)
+		g, gone := goneOf(err)
 		switch {
 		case ctx.Err() != nil:
 			return
@@ -358,7 +369,7 @@ func (a *App) follow(ctx context.Context, r lifecycle.Adopt, scope core.Scope, h
 			a.tell(lifecycle.Finished{Ref: r.Ref, Outcome: outcome, At: a.now()})
 			return
 		case gone:
-			a.tell(lifecycle.SupervisorLost{Ref: r.Ref, Proof: proof, At: a.now()})
+			a.tell(lifecycle.SupervisorLost{Ref: r.Ref, Proof: g.Proof, Start: g.Start, At: a.now()})
 			return
 		}
 		a.cfg.Logf("job %s: following it: %v", r.Ref, err)
@@ -501,20 +512,21 @@ func (a *App) stopJob(ctx context.Context, r lifecycle.Stop, h supervisor.Handle
 			return err
 		})
 	}
-	proof, gone := goneProof(err)
+	g, gone := goneOf(err)
 	switch {
 	case ctx.Err() != nil:
 	case err == nil:
 		a.tell(lifecycle.Finished{Ref: r.Ref, Outcome: outcome, At: a.now()})
 	case gone:
-		a.tell(lifecycle.SupervisorLost{Ref: r.Ref, Proof: proof, At: a.now()})
+		a.tell(lifecycle.SupervisorLost{Ref: r.Ref, Proof: g.Proof, Start: g.Start, At: a.now()})
 	default:
 		a.tell(lifecycle.StopFailed{Ref: r.Ref, Failure: failureOf(err)})
 	}
 }
 
-// move records the end of a job: its explanation in the output first, so that a reader who sees
-// the job final sees the line, then the transition, then the release of the supervisor. The job
+// move records the end of a job, or the cut-off attempt of one queued again: its explanation in the
+// output first, so that a reader who sees the job final sees the line, then the transition, then
+// the release of the supervisor. The job
 // stays in the machine until the end is recorded. The supervisor is kept until then too, since it
 // holds the outcome. A release that fails after that loses nothing: the next start clears the run.
 func (a *App) move(ctx context.Context, m lifecycle.Move, scope core.Scope, known bool, h supervisor.Handle) {
@@ -531,6 +543,11 @@ func (a *App) move(ctx context.Context, m lifecycle.Move, scope core.Scope, know
 		return
 	}
 	a.notifyJobs()
+	if m.Settlement.Requeues() {
+		// The machine releases the run that was cut off before it launches the job again.
+		a.tell(lifecycle.Requeued{Ref: m.Ref})
+		return
+	}
 	if m.Release {
 		if err := a.release(ctx, m.Ref, h); err != nil {
 			a.cfg.Logf("job %s: releasing its supervisor: %v", m.Ref, err)
@@ -715,7 +732,9 @@ func (a *App) lookInStore(ctx context.Context, ref lifecycle.Ref, scope core.Sco
 // up. A running job the user gave up is given up only when no run of it is found here: a run found
 // here is this daemon's, so the job is taken back first.
 func (a *App) jobIn(ctx context.Context, scope core.Scope, job core.Job, presence lifecycle.Presence, given []core.JobID) lifecycle.JobIn {
-	in := lifecycle.JobIn{State: job.State, SubmittedAt: job.SubmittedAt}
+	in := lifecycle.JobIn{
+		State: job.State, SubmittedAt: job.SubmittedAt, Attempts: len(job.Attempts), Policy: core.RerunPolicyOf(job.Spec.Settings.Kind()),
+	}
 	if job.State != core.JobRunning || !slices.Contains(given, job.ID) {
 		return in
 	}
