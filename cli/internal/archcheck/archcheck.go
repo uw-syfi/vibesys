@@ -74,11 +74,13 @@ var rules = map[string][]string{
 	"internal/runtimedir": {"internal/core"},
 
 	// Storage.
-	"internal/store":                {"internal/core"},
-	"internal/store/ledger":         {"internal/core", "internal/store"},
-	"internal/store/storetest":      {"internal/core", "internal/store"},
-	"internal/store/memstore":       {"internal/core", "internal/store", "internal/store/ledger"},
-	"internal/store/filestore":      {"internal/core", "internal/store", "internal/store/ledger", "internal/store/filestore/fsys"},
+	"internal/store":           {"internal/core"},
+	"internal/store/ledger":    {"internal/core", "internal/store"},
+	"internal/store/storetest": {"internal/core", "internal/store"},
+	"internal/store/memstore":  {"internal/core", "internal/store", "internal/store/ledger"},
+	// The files of a store are the contract's messages in protojson, so the filestore speaks gen/
+	// and translates through wire; see storageEncoding for what it may not use instead.
+	"internal/store/filestore":      {"gen/", "internal/core", "internal/store", "internal/store/ledger", "internal/store/filestore/fsys", "internal/wire"},
 	"internal/store/filestore/fsys": {},
 
 	// The translation between the domain and the contract.
@@ -213,6 +215,7 @@ func Violations(files map[string]string) []string {
 		case strings.HasSuffix(name, ".go") && strings.HasPrefix(name, "cli/"):
 			found = append(found, layering(name, source)...)
 			found = append(found, layout(name, source)...)
+			found = append(found, storageEncoding(name, source)...)
 			found = append(found, effects(name, source)...)
 			found = append(found, approvalMints(name, source)...)
 			found = append(found, sweepViolations(name, source)...)

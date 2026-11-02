@@ -1,289 +1,77 @@
 package filestore
 
 import (
-	"bytes"
-	"encoding/json"
-	"errors"
 	"fmt"
+	"slices"
 	"time"
 
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/store/ledger"
+	"github.com/uw-syfi/vibesys/cli/internal/wire"
 )
 
 // formatVersion is the version of every record and of the layout. A program reads records of
-// this version and refuses a newer one; a change to a record that an older program could not
-// read raises it, and the code that reads the old version stays beside the new.
-const formatVersion = 1
+// this version and refuses any other: a newer one is reported as newer, and an older one as one
+// this program does not migrate. A change to a record that an older program could not read raises
+// it.
+//
+// Version 1 was a hand-written JSON encoding. Version 2 is protojson of the messages in
+// proto/vibesys/cli/v1/store.proto, so the stored form is generated from the contract and not kept
+// by hand. A prerelease store of version 1 is thrown away and never converted.
+const formatVersion = 2
 
-// The types in this file are the encoding of the store. They are not the core types: renaming a
-// core field must not change what is on disk, so every field is copied by name, enumerations
-// are plain strings, and a union is a record with a kind and the one body that kind has.
-
-type fingerprintRec struct {
-	Kind        string            `json:"kind"`
-	Backend     string            `json:"backend"`
-	ImageDigest string            `json:"image_digest"`
-	Facts       map[string]string `json:"facts"`
-}
-
-type machineRec struct {
-	HostID      string `json:"host_id"`
-	OS          string `json:"os"`
-	Arch        string `json:"arch"`
-	CPUModel    string `json:"cpu_model"`
-	LogicalCPUs uint32 `json:"logical_cpus"`
-	MemoryBytes uint64 `json:"memory_bytes"`
-}
-
-type loadRec struct {
-	SampledAt            time.Time `json:"sampled_at"`
-	LoadAverage1m        float64   `json:"load_average_1m"`
-	CPUBusyFraction      float64   `json:"cpu_busy_fraction"`
-	MemoryAvailableBytes uint64    `json:"memory_available_bytes"`
-}
-
-type noteRec struct {
-	Text  string    `json:"text"`
-	At    time.Time `json:"at"`
-	Agent string    `json:"agent"`
-}
-
-type serviceRec struct {
-	Argv  []string `json:"argv"`
-	Probe []string `json:"probe"`
-}
-
-type commandSettingsRec struct {
-	Argv      []string    `json:"argv"`
-	Service   *serviceRec `json:"service"`
-	TimeoutNS int64       `json:"timeout_ns"`
-}
-
-type measureSettingsRec struct {
-	Samples uint32 `json:"samples"`
-	Recheck bool   `json:"recheck"`
-}
-
-// settingsRec holds the body of the kind it names and no other.
-type settingsRec struct {
-	Kind    string              `json:"kind"`
-	Command *commandSettingsRec `json:"command,omitempty"`
-	Measure *measureSettingsRec `json:"measure,omitempty"`
-}
-
-type specRec struct {
-	Commit      string      `json:"commit"`
-	Environment string      `json:"environment"`
-	Settings    settingsRec `json:"settings"`
-}
-
-type jobRec struct {
-	ID           string          `json:"id"`
-	Spec         specRec         `json:"spec"`
-	State        string          `json:"state"`
-	Key          string          `json:"key"`
-	NoCache      bool            `json:"no_cache,omitempty"`
-	Environment  *fingerprintRec `json:"environment"`
-	Notes        []noteRec       `json:"notes"`
-	Plans        []uint32        `json:"plans"`
-	SubmittedAt  time.Time       `json:"submitted_at"`
-	StartedAt    *time.Time      `json:"started_at"`
-	FinishedAt   *time.Time      `json:"finished_at"`
-	CancelReason string          `json:"cancel_reason"`
-	ExitCode     *int            `json:"exit_code"`
-	ResultJob    string          `json:"result_job"`
-	CheckJob     string          `json:"check_job"`
-}
-
-type observationRec struct {
-	Name   string    `json:"name"`
-	Values []float64 `json:"values"`
-}
-
-type metricRec struct {
-	Name      string `json:"name"`
-	Direction string `json:"direction"`
-}
-
-type checkOutcomeRec struct {
-	DurationNS int64 `json:"duration_ns"`
-}
-
-type measureOutcomeRec struct {
-	Metric       metricRec        `json:"metric"`
-	Samples      []float64        `json:"samples"`
-	Observations []observationRec `json:"observations"`
-	CheckJob     string           `json:"check_job"`
-}
-
-type outcomeRec struct {
-	Kind    string             `json:"kind"`
-	Check   *checkOutcomeRec   `json:"check,omitempty"`
-	Measure *measureOutcomeRec `json:"measure,omitempty"`
-}
-
-type resultRec struct {
-	Job           string         `json:"job"`
-	Key           string         `json:"key"`
-	Task          string         `json:"task"`
-	TaskVersion   string         `json:"task_version"`
-	Commit        string         `json:"commit"`
-	SchemaVersion uint32         `json:"schema_version"`
-	Environment   fingerprintRec `json:"environment"`
-	Machine       machineRec     `json:"machine"`
-	Load          loadRec        `json:"load"`
-	RecordedAt    time.Time      `json:"recorded_at"`
-	Outcome       outcomeRec     `json:"outcome"`
-}
-
-type verdictRec struct {
-	Kind             string  `json:"kind"`
-	Reason           string  `json:"reason"`
-	CandidateSamples uint32  `json:"candidate_samples"`
-	BaseSamples      uint32  `json:"base_samples"`
-	CandidateMean    float64 `json:"candidate_mean"`
-	BaseMean         float64 `json:"base_mean"`
-	Ratio            float64 `json:"ratio"`
-	Noise            float64 `json:"noise"`
-}
-
-type promotionRec struct {
-	Commit       string         `json:"commit"`
-	PreviousHead string         `json:"previous_head"`
-	Verdict      verdictRec     `json:"verdict"`
-	Environment  fingerprintRec `json:"environment"`
-	ResultJob    string         `json:"result_job"`
-	At           time.Time      `json:"at"`
-}
-
-type refusalReasonRec struct {
-	Kind            string      `json:"kind"`
-	Message         string      `json:"message"`
-	Verdict         *verdictRec `json:"verdict"`
-	MeasuredAgainst string      `json:"measured_against"`
-	CurrentHead     string      `json:"current_head"`
-}
-
-type refusalRec struct {
-	Reasons []refusalReasonRec `json:"reasons"`
-}
-
-type failureRec struct {
-	Kind    string `json:"kind"`
-	Message string `json:"message"`
-}
-
-type commentRec struct {
-	Text  string    `json:"text"`
-	At    time.Time `json:"at"`
-	Agent string    `json:"agent"`
-}
-
-type planRec struct {
-	Number    uint32       `json:"number"`
-	Title     string       `json:"title"`
-	Body      string       `json:"body"`
-	Status    string       `json:"status"`
-	Comments  []commentRec `json:"comments"`
-	CreatedAt time.Time    `json:"created_at"`
-	UpdatedAt time.Time    `json:"updated_at"`
-}
-
-// detailRec holds the body of the kind it names and no other.
-type detailRec struct {
-	Kind      string        `json:"kind"`
-	Job       *jobRec       `json:"job,omitempty"`
-	Result    *resultRec    `json:"result,omitempty"`
-	Verdict   *verdictRec   `json:"verdict,omitempty"`
-	Promotion *promotionRec `json:"promotion,omitempty"`
-	Refusal   *refusalRec   `json:"refusal,omitempty"`
-	Failure   *failureRec   `json:"failure,omitempty"`
-	Plan      *planRec      `json:"plan,omitempty"`
-}
-
-type eventRec struct {
-	Sequence      uint64     `json:"sequence"`
-	SchemaVersion uint32     `json:"schema_version"`
-	Run           string     `json:"run"`
-	HostID        string     `json:"host_id"`
-	Task          string     `json:"task"`
-	Commit        string     `json:"commit"`
-	Plan          uint32     `json:"plan"`
-	Harness       string     `json:"harness"`
-	Agent         string     `json:"agent"`
-	At            time.Time  `json:"at"`
-	Command       string     `json:"command"`
-	Outcome       string     `json:"outcome"`
-	Job           string     `json:"job"`
-	Detail        *detailRec `json:"detail"`
-}
-
-// The files. Each starts with the format version of its content.
-
-type rootFile struct {
-	Format int `json:"format"`
-}
-
-type jobFile struct {
-	Format int    `json:"format"`
-	Job    jobRec `json:"job"`
-}
-
-type resultFile struct {
-	Format int       `json:"format"`
-	Seq    uint64    `json:"seq"`
-	Result resultRec `json:"result"`
-}
-
-type planFile struct {
-	Format int     `json:"format"`
-	Plan   planRec `json:"plan"`
-}
-
-type promotionFile struct {
-	Format    int          `json:"format"`
-	Seq       uint64       `json:"seq"`
-	Promotion promotionRec `json:"promotion"`
-}
-
-type eventFile struct {
-	Format int      `json:"format"`
-	Event  eventRec `json:"event"`
-}
+// The files of a store are the messages of store.proto in protojson: the proto field names, and
+// only the fields that are set, so that adding a field to a message does not change the bytes of
+// a record that leaves it unset. Decoding refuses an unknown field, which is how a record of a
+// different shape is told from one this program wrote.
+//
+// The output is indented for a person to read. Its exact spacing is not stable: protojson adds a
+// space after a colon or comma at random, differently for each build, to keep programs from
+// depending on it. Nothing here does: the store compares the owner record only with the bytes it
+// wrote itself, and every other file is read back through decode. A test that pins a file compares
+// it with its spaces removed.
+var (
+	encoder = protojson.MarshalOptions{UseProtoNames: true, Multiline: true, Indent: "  "}
+	// The first read of a file looks only at its version, so it discards what else the file holds.
+	versionReader = protojson.UnmarshalOptions{DiscardUnknown: true}
+	recordReader  = protojson.UnmarshalOptions{DiscardUnknown: false}
+)
 
 // encode writes a file's content: one JSON document and a newline.
-func encode(file any) ([]byte, error) {
-	data, err := json.Marshal(file)
+func encode(file proto.Message) ([]byte, error) {
+	data, err := encoder.Marshal(file)
 	if err != nil {
 		return nil, err
 	}
 	return append(data, '\n'), nil
 }
 
-// decode reads a file's content into file, which must be a pointer to one of the file types. It
-// refuses a version this program does not read, naming the file, before it looks at anything
-// else, so that a newer layout is reported as newer and not as a record with unknown fields. That
-// first read also refuses anything after the document. It then refuses unknown fields.
-func decode(name string, data []byte, file any) error {
-	var head struct {
-		Format *int `json:"format"`
-	}
-	if err := json.Unmarshal(data, &head); err != nil {
+// decode reads a file's content into file, which must be a pointer to one of the file messages. It
+// reads the version first and refuses one this program does not read, naming the file, so that a
+// newer layout is reported as newer and not as a record with unknown fields. That first read also
+// refuses anything after the document. It then refuses unknown fields.
+func decode(name string, data []byte, file proto.Message) error {
+	var head cliv1.FormatFile
+	if err := versionReader.Unmarshal(data, &head); err != nil {
 		return corrupt(name, "%v", err)
 	}
-	switch {
-	case head.Format == nil:
+	switch v := head.GetFormat(); {
+	case v == 0:
 		return corrupt(name, "it has no format version")
-	case *head.Format > formatVersion:
+	case v > formatVersion:
 		return &core.Failure{Kind: core.FailureIncompatible, Message: fmt.Sprintf(
-			"%s is format version %d, and this program reads up to version %d: upgrade vibesys-cli", name, *head.Format, formatVersion)}
-	case *head.Format < 1:
-		return corrupt(name, "its format version %d is not one this program knows", *head.Format)
+			"%s is format version %d, and this program reads version %d: upgrade vibesys-cli", name, v, formatVersion)}
+	case v < formatVersion:
+		return &core.Failure{Kind: core.FailureIncompatible, Message: fmt.Sprintf(
+			"%s is format version %d, from a prerelease encoding that this program does not read (it reads version %d): "+
+				"remove the store and let the daemon make it again", name, v, formatVersion)}
 	}
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(file); err != nil {
+	if err := recordReader.Unmarshal(data, file); err != nil {
 		return corrupt(name, "%v", err)
 	}
 	return nil
@@ -293,348 +81,333 @@ func corrupt(name, format string, args ...any) error {
 	return &core.Failure{Kind: core.FailureInternal, Message: fmt.Sprintf("%s is damaged: %s", name, fmt.Sprintf(format, args...))}
 }
 
-// Core to record.
+// Instants. A time is a Timestamp that is always set, so that a pointer to the zero time and a nil
+// pointer stay different; a plain time that is absent from a file is the zero time.
 
-func fingerprintToRec(f core.Fingerprint) fingerprintRec {
-	return fingerprintRec{Kind: string(f.Kind), Backend: string(f.Backend), ImageDigest: f.ImageDigest, Facts: f.Facts}
-}
+func stamp(t time.Time) *timestamppb.Timestamp { return timestamppb.New(t) }
 
-func fingerprintFromRec(r fingerprintRec) core.Fingerprint {
-	return core.Fingerprint{Kind: core.EnvironmentKind(r.Kind), Backend: core.BackendKind(r.Backend), ImageDigest: r.ImageDigest, Facts: r.Facts}
-}
-
-func fingerprintPtrToRec(f *core.Fingerprint) *fingerprintRec {
-	if f == nil {
+func stampPtr(t *time.Time) *timestamppb.Timestamp {
+	if t == nil {
 		return nil
 	}
-	r := fingerprintToRec(*f)
-	return &r
+	return stamp(*t)
 }
 
-func fingerprintPtrFromRec(r *fingerprintRec) *core.Fingerprint {
-	if r == nil {
+func instant(t *timestamppb.Timestamp) time.Time {
+	if t == nil {
+		return time.Time{}
+	}
+	return t.AsTime()
+}
+
+func instantPtr(t *timestamppb.Timestamp) *time.Time {
+	if t == nil {
 		return nil
 	}
-	f := fingerprintFromRec(*r)
-	return &f
+	v := t.AsTime()
+	return &v
 }
 
-func settingsToRec(s core.Settings) (settingsRec, error) {
-	switch s := s.(type) {
-	case core.CheckSettings:
-		return settingsRec{Kind: string(core.JobCheck)}, nil
-	case core.CommandSettings:
-		body := &commandSettingsRec{Argv: s.Argv, TimeoutNS: int64(s.Timeout)}
-		if s.Service != nil {
-			body.Service = &serviceRec{Argv: s.Service.Argv, Probe: s.Service.Probe}
-		}
-		return settingsRec{Kind: string(core.JobCommand), Command: body}, nil
-	case core.MeasureSettings:
-		return settingsRec{Kind: string(core.JobMeasure), Measure: &measureSettingsRec{Samples: s.Samples, Recheck: s.Recheck}}, nil
+// Core to message. The encoders of internal/wire do the work wherever they lose nothing: what
+// differs here is that the store keeps what the ledger held, so it does not ask for a full commit
+// hash or a kind the domain would not accept from a peer.
+
+func jobToMessage(j core.Job) (*cliv1.Job, error) {
+	if j.Spec.Settings == nil {
+		return nil, fmt.Errorf("job %s: settings of type %T have no encoding", j.ID, j.Spec.Settings)
 	}
-	return settingsRec{}, fmt.Errorf("settings of type %T have no encoding", s)
+	out := wire.Job(j)
+	out.StartedAt, out.FinishedAt = stampPtr(j.StartedAt), stampPtr(j.FinishedAt)
+	out.SubmittedAt = stamp(j.SubmittedAt)
+	return out, nil
 }
 
-func settingsFromRec(r settingsRec) (core.Settings, error) {
-	bodies := 0
-	for _, present := range []bool{r.Command != nil, r.Measure != nil} {
-		if present {
-			bodies++
-		}
+func resultToMessage(r core.Result) (*cliv1.Result, error) {
+	if r.Outcome == nil {
+		return nil, fmt.Errorf("result of job %s: an outcome of type %T has no encoding", r.Job, r.Outcome)
 	}
-	want := map[string]int{string(core.JobCheck): 0, string(core.JobCommand): 1, string(core.JobMeasure): 1}
-	if n, known := want[r.Kind]; !known || n != bodies {
-		return nil, fmt.Errorf("settings of kind %q with %d bodies", r.Kind, bodies)
+	out := wire.Result(r)
+	out.RecordedAt, out.Load.SampledAt = stamp(r.RecordedAt), stamp(r.Load.SampledAt)
+	return out, nil
+}
+
+func detailToMessage(d core.EventDetail) (*cliv1.Event, error) {
+	out := &cliv1.Event{}
+	switch d := d.(type) {
+	case nil:
+	case core.Job:
+		job, err := jobToMessage(d)
+		out.Detail = &cliv1.Event_Job{Job: job}
+		return out, err
+	case core.Result:
+		result, err := resultToMessage(d)
+		out.Detail = &cliv1.Event_Result{Result: result}
+		return out, err
+	case core.Verdict:
+		out.Detail = &cliv1.Event_Verdict{Verdict: wire.Verdict(d)}
+	case core.Promotion:
+		out.Detail = &cliv1.Event_Promotion{Promotion: wire.Promotion(d)}
+	case core.PromoteRefusal:
+		out.Detail = &cliv1.Event_Refusal{Refusal: wire.PromoteRefusal(d)}
+	case core.Failure:
+		out.Detail = &cliv1.Event_Failure{Failure: wire.Failure(d)}
+	case core.Plan:
+		out.Detail = &cliv1.Event_Plan{Plan: wire.Plan(d)}
+	default:
+		return nil, fmt.Errorf("an event detail of type %T has no encoding", d)
 	}
-	switch core.JobKind(r.Kind) {
-	case core.JobCommand:
-		if r.Command == nil {
-			return nil, errors.New("command settings without a command body")
-		}
-		s := core.CommandSettings{Argv: r.Command.Argv, Timeout: time.Duration(r.Command.TimeoutNS)}
-		if r.Command.Service != nil {
-			s.Service = &core.ServiceSpec{Argv: r.Command.Service.Argv, Probe: r.Command.Service.Probe}
-		}
-		return s, nil
-	case core.JobMeasure:
-		if r.Measure == nil {
-			return nil, errors.New("measure settings without a measure body")
-		}
-		return core.MeasureSettings{Samples: r.Measure.Samples, Recheck: r.Measure.Recheck}, nil
-	case core.JobCheck:
+	return out, nil
+}
+
+func eventToMessage(e core.Event) (*cliv1.Event, error) {
+	out, err := detailToMessage(e.Detail)
+	if err != nil {
+		return nil, fmt.Errorf("event %d of run %s: %w", e.Sequence, e.Run, err)
+	}
+	out.Sequence, out.SchemaVersion, out.RunId, out.HostId, out.Task = e.Sequence, e.SchemaVersion, string(e.Run), e.HostID, e.Task
+	out.Commit, out.PlanNumber, out.Harness, out.Agent, out.At = string(e.Commit), uint32(e.Plan), e.Harness, e.Agent, stamp(e.At)
+	out.Command, out.Outcome, out.JobId = wire.Command(e.Command), wire.CommandOutcome(e.Outcome), string(e.Job)
+	return out, nil
+}
+
+// Message to core.
+
+func fingerprintFromMessage(field string, f *cliv1.EnvironmentFingerprint) (core.Fingerprint, error) {
+	return wire.ToFingerprint(field, f)
+}
+
+func settingsFromMessage(s *cliv1.JobSpec) (core.Settings, error) {
+	switch settings := s.GetSettings().(type) {
+	case *cliv1.JobSpec_Check:
 		return core.CheckSettings{}, nil
+	case *cliv1.JobSpec_Command:
+		out := core.CommandSettings{Argv: slices.Clone(settings.Command.GetArgv())}
+		if svc := settings.Command.GetService(); svc != nil {
+			out.Service = &core.ServiceSpec{Argv: slices.Clone(svc.GetArgv()), Probe: slices.Clone(svc.GetProbe())}
+		}
+		if timeout := settings.Command.GetTimeout(); timeout != nil {
+			if err := timeout.CheckValid(); err != nil {
+				return nil, fmt.Errorf("command timeout: %v", err)
+			}
+			out.Timeout = timeout.AsDuration()
+		}
+		return out, nil
+	case *cliv1.JobSpec_Measure:
+		return core.MeasureSettings{Samples: settings.Measure.GetSamples(), Recheck: settings.Measure.GetRecheck()}, nil
 	}
-	return nil, fmt.Errorf("settings of kind %q", r.Kind)
+	return nil, fmt.Errorf("a spec with no settings")
 }
 
-func jobToRec(j core.Job) (jobRec, error) {
-	settings, err := settingsToRec(j.Spec.Settings)
+func jobFromMessage(m *cliv1.Job) (core.Job, error) {
+	fail := func(err error) (core.Job, error) { return core.Job{}, fmt.Errorf("job %s: %w", m.GetId(), err) }
+	settings, err := settingsFromMessage(m.GetSpec())
 	if err != nil {
-		return jobRec{}, fmt.Errorf("job %s: %w", j.ID, err)
+		return fail(err)
 	}
-	r := jobRec{
-		ID: string(j.ID), Spec: specRec{Commit: string(j.Spec.Commit), Environment: string(j.Spec.Environment), Settings: settings},
-		State: string(j.State), Key: string(j.Key), NoCache: j.NoCache, Environment: fingerprintPtrToRec(j.Environment),
-		SubmittedAt: j.SubmittedAt, StartedAt: j.StartedAt, FinishedAt: j.FinishedAt, CancelReason: j.CancelReason, ExitCode: j.ExitCode,
-		ResultJob: string(j.ResultJob), CheckJob: string(j.CheckJob),
-	}
-	for _, n := range j.Notes {
-		r.Notes = append(r.Notes, noteRec{Text: n.Text, At: n.At, Agent: n.Agent})
-	}
-	for _, p := range j.Plans {
-		r.Plans = append(r.Plans, uint32(p))
-	}
-	return r, nil
-}
-
-func jobFromRec(r jobRec) (core.Job, error) {
-	settings, err := settingsFromRec(r.Spec.Settings)
+	env, err := wire.ToEnvironmentKind("spec.environment", m.GetSpec().GetEnvironment())
 	if err != nil {
-		return core.Job{}, fmt.Errorf("job %s: %w", r.ID, err)
+		return fail(err)
+	}
+	state, err := wire.ToJobState("state", m.GetState())
+	if err != nil {
+		return fail(err)
 	}
 	j := core.Job{
-		ID: core.JobID(r.ID), Spec: core.JobSpec{Commit: core.Commit(r.Spec.Commit), Environment: core.EnvironmentKind(r.Spec.Environment), Settings: settings},
-		State: core.JobState(r.State), Key: core.JobKey(r.Key), NoCache: r.NoCache, Environment: fingerprintPtrFromRec(r.Environment),
-		SubmittedAt: r.SubmittedAt, StartedAt: r.StartedAt, FinishedAt: r.FinishedAt, CancelReason: r.CancelReason, ExitCode: r.ExitCode,
-		ResultJob: core.JobID(r.ResultJob), CheckJob: core.JobID(r.CheckJob),
+		ID: core.JobID(m.GetId()), Spec: core.JobSpec{Commit: core.Commit(m.GetSpec().GetCommit()), Environment: env, Settings: settings},
+		State: state, Key: core.JobKey(m.GetKey()), NoCache: m.GetNoCache(),
+		SubmittedAt: instant(m.GetSubmittedAt()), StartedAt: instantPtr(m.GetStartedAt()), FinishedAt: instantPtr(m.GetFinishedAt()),
+		CancelReason: m.GetCancelReason(), ResultJob: core.JobID(m.GetResultJobId()), CheckJob: core.JobID(m.GetCheckJobId()),
 	}
-	for _, n := range r.Notes {
-		j.Notes = append(j.Notes, core.Note{Text: n.Text, At: n.At, Agent: n.Agent})
+	if m.GetEnvironment() != nil {
+		fp, err := fingerprintFromMessage("environment", m.GetEnvironment())
+		if err != nil {
+			return fail(err)
+		}
+		j.Environment = &fp
 	}
-	for _, p := range r.Plans {
+	for _, n := range m.GetNotes() {
+		j.Notes = append(j.Notes, core.Note{Text: n.GetText(), At: instant(n.GetAt()), Agent: n.GetAgent()})
+	}
+	for _, p := range m.GetPlans() {
 		j.Plans = append(j.Plans, core.PlanNumber(p))
+	}
+	if m.ExitCode != nil {
+		code := int(m.GetExitCode())
+		j.ExitCode = &code
 	}
 	return j, nil
 }
 
-func outcomeToRec(o core.Outcome) (outcomeRec, error) {
-	switch o := o.(type) {
-	case core.CheckOutcome:
-		return outcomeRec{Kind: "check", Check: &checkOutcomeRec{DurationNS: int64(o.Duration)}}, nil
-	case core.MeasureOutcome:
-		body := &measureOutcomeRec{
-			Metric: metricRec{Name: o.Metric.Name, Direction: string(o.Metric.Direction)}, Samples: o.Samples, CheckJob: string(o.CheckJob),
-		}
-		for _, ob := range o.Observations {
-			body.Observations = append(body.Observations, observationRec{Name: ob.Name, Values: ob.Values})
-		}
-		return outcomeRec{Kind: "measure", Measure: body}, nil
+func resultFromMessage(m *cliv1.Result) (core.Result, error) {
+	fail := func(err error) (core.Result, error) {
+		return core.Result{}, fmt.Errorf("result of job %s: %w", m.GetJobId(), err)
 	}
-	return outcomeRec{}, fmt.Errorf("an outcome of type %T has no encoding", o)
-}
-
-func outcomeFromRec(r outcomeRec) (core.Outcome, error) {
-	switch {
-	case r.Kind == "check" && r.Check != nil && r.Measure == nil:
-		return core.CheckOutcome{Duration: time.Duration(r.Check.DurationNS)}, nil
-	case r.Kind == "measure" && r.Measure != nil && r.Check == nil:
-		o := core.MeasureOutcome{
-			Metric:  core.Metric{Name: r.Measure.Metric.Name, Direction: core.Direction(r.Measure.Metric.Direction)},
-			Samples: r.Measure.Samples, CheckJob: core.JobID(r.Measure.CheckJob),
-		}
-		for _, ob := range r.Measure.Observations {
-			o.Observations = append(o.Observations, core.Observation{Name: ob.Name, Values: ob.Values})
-		}
-		return o, nil
-	}
-	return nil, fmt.Errorf("an outcome of kind %q with the wrong bodies", r.Kind)
-}
-
-func resultToRec(r core.Result) (resultRec, error) {
-	outcome, err := outcomeToRec(r.Outcome)
+	env, err := fingerprintFromMessage("environment", m.GetEnvironment())
 	if err != nil {
-		return resultRec{}, fmt.Errorf("result of job %s: %w", r.Job, err)
+		return fail(err)
 	}
-	return resultRec{
-		Job: string(r.Job), Key: string(r.Key), Task: r.Task, TaskVersion: r.TaskVersion, Commit: string(r.Commit), SchemaVersion: r.SchemaVersion,
-		Environment: fingerprintToRec(r.Environment),
-		Machine: machineRec{
-			HostID: r.Machine.HostID, OS: r.Machine.OS, Arch: r.Machine.Arch, CPUModel: r.Machine.CPUModel,
-			LogicalCPUs: r.Machine.LogicalCPUs, MemoryBytes: r.Machine.MemoryBytes,
-		},
-		Load: loadRec{
-			SampledAt: r.Load.SampledAt, LoadAverage1m: r.Load.LoadAverage1m, CPUBusyFraction: r.Load.CPUBusyFraction,
-			MemoryAvailableBytes: r.Load.MemoryAvailableBytes,
-		},
-		RecordedAt: r.RecordedAt, Outcome: outcome,
-	}, nil
-}
-
-func resultFromRec(r resultRec) (core.Result, error) {
-	outcome, err := outcomeFromRec(r.Outcome)
-	if err != nil {
-		return core.Result{}, fmt.Errorf("result of job %s: %w", r.Job, err)
-	}
-	return core.Result{
-		Job: core.JobID(r.Job), Key: core.JobKey(r.Key), Task: r.Task, TaskVersion: r.TaskVersion, Commit: core.Commit(r.Commit), SchemaVersion: r.SchemaVersion,
-		Environment: fingerprintFromRec(r.Environment),
+	r := core.Result{
+		Job: core.JobID(m.GetJobId()), Key: core.JobKey(m.GetKey()), Task: m.GetTask(), TaskVersion: m.GetTaskVersion(),
+		Commit: core.Commit(m.GetCommit()), SchemaVersion: m.GetSchemaVersion(), Environment: env,
 		Machine: core.MachineFacts{
-			HostID: r.Machine.HostID, OS: r.Machine.OS, Arch: r.Machine.Arch, CPUModel: r.Machine.CPUModel,
-			LogicalCPUs: r.Machine.LogicalCPUs, MemoryBytes: r.Machine.MemoryBytes,
+			HostID: m.GetMachine().GetHostId(), OS: m.GetMachine().GetOs(), Arch: m.GetMachine().GetArch(), CPUModel: m.GetMachine().GetCpuModel(),
+			LogicalCPUs: m.GetMachine().GetLogicalCpus(), MemoryBytes: m.GetMachine().GetMemoryBytes(),
 		},
 		Load: core.MachineLoad{
-			SampledAt: r.Load.SampledAt, LoadAverage1m: r.Load.LoadAverage1m, CPUBusyFraction: r.Load.CPUBusyFraction,
-			MemoryAvailableBytes: r.Load.MemoryAvailableBytes,
+			SampledAt: instant(m.GetLoad().GetSampledAt()), LoadAverage1m: m.GetLoad().GetLoadAverage_1M(),
+			CPUBusyFraction: m.GetLoad().GetCpuBusyFraction(), MemoryAvailableBytes: m.GetLoad().GetMemoryAvailableBytes(),
 		},
-		RecordedAt: r.RecordedAt, Outcome: outcome,
+		RecordedAt: instant(m.GetRecordedAt()),
+	}
+	switch o := m.GetOutcome().(type) {
+	case *cliv1.Result_Check:
+		var d time.Duration
+		if o.Check.GetDuration() != nil {
+			if err := o.Check.GetDuration().CheckValid(); err != nil {
+				return fail(fmt.Errorf("check duration: %v", err))
+			}
+			d = o.Check.GetDuration().AsDuration()
+		}
+		r.Outcome = core.CheckOutcome{Duration: d}
+	case *cliv1.Result_Measure:
+		dir, err := wire.ToDirection("metric.direction", o.Measure.GetMetric().GetDirection())
+		if err != nil {
+			return fail(err)
+		}
+		out := core.MeasureOutcome{
+			Metric:  core.Metric{Name: o.Measure.GetMetric().GetName(), Direction: dir},
+			Samples: slices.Clone(o.Measure.GetSamples()), CheckJob: core.JobID(o.Measure.GetCheckJobId()),
+		}
+		// The headline is derived from the samples and stored beside them for readers of the file; a
+		// file whose two disagree has been edited, and is refused.
+		if o.Measure.GetValue() != core.Headline(out.Samples) {
+			return fail(fmt.Errorf("its headline value %v is not that of its samples", o.Measure.GetValue()))
+		}
+		for _, ob := range o.Measure.GetObservations() {
+			out.Observations = append(out.Observations, core.Observation{Name: ob.GetName(), Values: slices.Clone(ob.GetValues())})
+		}
+		r.Outcome = out
+	default:
+		return fail(fmt.Errorf("it says neither that it is a check nor a measurement"))
+	}
+	return r, nil
+}
+
+func verdictFromMessage(field string, v *cliv1.Verdict) (core.Verdict, error) {
+	kind, err := wire.ToVerdictKind(field+".kind", v.GetKind())
+	if err != nil {
+		return core.Verdict{}, err
+	}
+	reason, err := wire.ToInconclusiveReason(field+".reason", v.GetReason())
+	if err != nil {
+		return core.Verdict{}, err
+	}
+	return core.Verdict{
+		Kind: kind, Reason: reason, CandidateSamples: v.GetCandidateSamples(), BaseSamples: v.GetBaseSamples(),
+		CandidateMean: v.GetCandidateMean(), BaseMean: v.GetBaseMean(), Ratio: v.GetRatio(), Noise: v.GetNoise(),
 	}, nil
 }
 
-func verdictToRec(v core.Verdict) verdictRec {
-	return verdictRec{
-		Kind: string(v.Kind), Reason: string(v.Reason), CandidateSamples: v.CandidateSamples, BaseSamples: v.BaseSamples,
-		CandidateMean: v.CandidateMean, BaseMean: v.BaseMean, Ratio: v.Ratio, Noise: v.Noise,
+func promotionFromMessage(m *cliv1.Promotion) (core.Promotion, error) {
+	verdict, err := verdictFromMessage("promotion.verdict", m.GetVerdict())
+	if err != nil {
+		return core.Promotion{}, err
 	}
-}
-
-func verdictFromRec(r verdictRec) core.Verdict {
-	return core.Verdict{
-		Kind: core.VerdictKind(r.Kind), Reason: core.InconclusiveReason(r.Reason), CandidateSamples: r.CandidateSamples, BaseSamples: r.BaseSamples,
-		CandidateMean: r.CandidateMean, BaseMean: r.BaseMean, Ratio: r.Ratio, Noise: r.Noise,
+	env, err := fingerprintFromMessage("promotion.environment", m.GetEnvironment())
+	if err != nil {
+		return core.Promotion{}, err
 	}
-}
-
-func promotionToRec(p core.Promotion) promotionRec {
-	return promotionRec{
-		Commit: string(p.Commit), PreviousHead: string(p.PreviousHead), Verdict: verdictToRec(p.Verdict),
-		Environment: fingerprintToRec(p.Environment), ResultJob: string(p.ResultJob), At: p.At,
-	}
-}
-
-func promotionFromRec(r promotionRec) core.Promotion {
 	return core.Promotion{
-		Commit: core.Commit(r.Commit), PreviousHead: core.Commit(r.PreviousHead), Verdict: verdictFromRec(r.Verdict),
-		Environment: fingerprintFromRec(r.Environment), ResultJob: core.JobID(r.ResultJob), At: r.At,
-	}
+		Commit: core.Commit(m.GetCommit()), PreviousHead: core.Commit(m.GetPreviousHead()), Verdict: verdict,
+		Environment: env, ResultJob: core.JobID(m.GetResultJobId()), At: instant(m.GetAt()),
+	}, nil
 }
 
-func planToRec(p core.Plan) planRec {
-	r := planRec{
-		Number: uint32(p.Number), Title: p.Title, Body: p.Body, Status: string(p.Status), CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
+func refusalFromMessage(m *cliv1.PromoteRefusal) (core.PromoteRefusal, error) {
+	out := core.PromoteRefusal{}
+	for i, rr := range m.GetReasons() {
+		field := fmt.Sprintf("refusal.reasons[%d]", i)
+		kind, err := wire.ToPromoteRefusalKind(field+".kind", rr.GetKind())
+		if err != nil {
+			return core.PromoteRefusal{}, err
+		}
+		reason := core.PromoteRefusalReason{
+			Kind: kind, Message: rr.GetMessage(), MeasuredAgainst: core.Commit(rr.GetMeasuredAgainst()), CurrentHead: core.Commit(rr.GetCurrentHead()),
+		}
+		if rr.GetVerdict() != nil {
+			v, err := verdictFromMessage(field+".verdict", rr.GetVerdict())
+			if err != nil {
+				return core.PromoteRefusal{}, err
+			}
+			reason.Verdict = &v
+		}
+		out.Reasons = append(out.Reasons, reason)
 	}
-	for _, c := range p.Comments {
-		r.Comments = append(r.Comments, commentRec{Text: c.Text, At: c.At, Agent: c.Agent})
-	}
-	return r
+	return out, nil
 }
 
-func planFromRec(r planRec) core.Plan {
+func planFromMessage(m *cliv1.Plan) (core.Plan, error) {
+	status, err := wire.ToPlanStatus("plan.status", m.GetStatus())
+	if err != nil {
+		return core.Plan{}, err
+	}
 	p := core.Plan{
-		Number: core.PlanNumber(r.Number), Title: r.Title, Body: r.Body, Status: core.PlanStatus(r.Status), CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+		Number: core.PlanNumber(m.GetNumber()), Title: m.GetTitle(), Body: m.GetBody(), Status: status,
+		CreatedAt: instant(m.GetCreatedAt()), UpdatedAt: instant(m.GetUpdatedAt()),
 	}
-	for _, c := range r.Comments {
-		p.Comments = append(p.Comments, core.PlanComment{Text: c.Text, At: c.At, Agent: c.Agent})
+	for _, c := range m.GetComments() {
+		p.Comments = append(p.Comments, core.PlanComment{Text: c.GetText(), At: instant(c.GetAt()), Agent: c.GetAgent()})
 	}
-	return p
+	return p, nil
 }
 
-func detailToRec(d core.EventDetail) (*detailRec, error) {
-	switch d := d.(type) {
+func detailFromMessage(m *cliv1.Event) (core.EventDetail, error) {
+	switch d := m.GetDetail().(type) {
 	case nil:
 		return nil, nil
-	case core.Job:
-		job, err := jobToRec(d)
-		return &detailRec{Kind: "job", Job: &job}, err
-	case core.Result:
-		result, err := resultToRec(d)
-		return &detailRec{Kind: "result", Result: &result}, err
-	case core.Verdict:
-		v := verdictToRec(d)
-		return &detailRec{Kind: "verdict", Verdict: &v}, nil
-	case core.Promotion:
-		p := promotionToRec(d)
-		return &detailRec{Kind: "promotion", Promotion: &p}, nil
-	case core.PromoteRefusal:
-		r := refusalRec{}
-		for _, reason := range d.Reasons {
-			rr := refusalReasonRec{
-				Kind: string(reason.Kind), Message: reason.Message, MeasuredAgainst: string(reason.MeasuredAgainst), CurrentHead: string(reason.CurrentHead),
-			}
-			if reason.Verdict != nil {
-				v := verdictToRec(*reason.Verdict)
-				rr.Verdict = &v
-			}
-			r.Reasons = append(r.Reasons, rr)
-		}
-		return &detailRec{Kind: "refusal", Refusal: &r}, nil
-	case core.Failure:
-		return &detailRec{Kind: "failure", Failure: &failureRec{Kind: string(d.Kind), Message: d.Message}}, nil
-	case core.Plan:
-		p := planToRec(d)
-		return &detailRec{Kind: "plan", Plan: &p}, nil
+	case *cliv1.Event_Job:
+		return jobFromMessage(d.Job)
+	case *cliv1.Event_Result:
+		return resultFromMessage(d.Result)
+	case *cliv1.Event_Verdict:
+		return verdictFromMessage("verdict", d.Verdict)
+	case *cliv1.Event_Promotion:
+		return promotionFromMessage(d.Promotion)
+	case *cliv1.Event_Refusal:
+		return refusalFromMessage(d.Refusal)
+	case *cliv1.Event_Failure:
+		return wire.ToFailure(d.Failure), nil
+	case *cliv1.Event_Plan:
+		return planFromMessage(d.Plan)
 	}
-	return nil, fmt.Errorf("an event detail of type %T has no encoding", d)
+	return nil, fmt.Errorf("an event detail of type %T", m.GetDetail())
 }
 
-func detailFromRec(r *detailRec) (core.EventDetail, error) {
-	if r == nil {
-		return nil, nil
+func eventFromMessage(m *cliv1.Event) (core.Event, error) {
+	fail := func(err error) (core.Event, error) {
+		return core.Event{}, fmt.Errorf("event %d of run %s: %w", m.GetSequence(), m.GetRunId(), err)
 	}
-	bodies := 0
-	for _, present := range []bool{r.Job != nil, r.Result != nil, r.Verdict != nil, r.Promotion != nil, r.Refusal != nil, r.Failure != nil, r.Plan != nil} {
-		if present {
-			bodies++
-		}
-	}
-	if bodies != 1 {
-		return nil, fmt.Errorf("an event detail of kind %q with %d bodies", r.Kind, bodies)
-	}
-	switch {
-	case r.Kind == "job" && r.Job != nil:
-		return jobFromRec(*r.Job)
-	case r.Kind == "result" && r.Result != nil:
-		return resultFromRec(*r.Result)
-	case r.Kind == "verdict" && r.Verdict != nil:
-		return verdictFromRec(*r.Verdict), nil
-	case r.Kind == "promotion" && r.Promotion != nil:
-		return promotionFromRec(*r.Promotion), nil
-	case r.Kind == "refusal" && r.Refusal != nil:
-		out := core.PromoteRefusal{}
-		for _, rr := range r.Refusal.Reasons {
-			reason := core.PromoteRefusalReason{
-				Kind: core.PromoteRefusalKind(rr.Kind), Message: rr.Message, MeasuredAgainst: core.Commit(rr.MeasuredAgainst), CurrentHead: core.Commit(rr.CurrentHead),
-			}
-			if rr.Verdict != nil {
-				v := verdictFromRec(*rr.Verdict)
-				reason.Verdict = &v
-			}
-			out.Reasons = append(out.Reasons, reason)
-		}
-		return out, nil
-	case r.Kind == "failure" && r.Failure != nil:
-		return core.Failure{Kind: core.FailureKind(r.Failure.Kind), Message: r.Failure.Message}, nil
-	case r.Kind == "plan" && r.Plan != nil:
-		return planFromRec(*r.Plan), nil
-	}
-	return nil, fmt.Errorf("an event detail of kind %q with the wrong body", r.Kind)
-}
-
-func eventToRec(e core.Event) (eventRec, error) {
-	detail, err := detailToRec(e.Detail)
+	command, err := wire.ToCommand("command", m.GetCommand())
 	if err != nil {
-		return eventRec{}, fmt.Errorf("event %d of run %s: %w", e.Sequence, e.Run, err)
+		return fail(err)
 	}
-	return eventRec{
-		Sequence: e.Sequence, SchemaVersion: e.SchemaVersion, Run: string(e.Run), HostID: e.HostID, Task: e.Task, Commit: string(e.Commit),
-		Plan: uint32(e.Plan), Harness: e.Harness, Agent: e.Agent, At: e.At, Command: string(e.Command), Outcome: string(e.Outcome),
-		Job: string(e.Job), Detail: detail,
-	}, nil
-}
-
-func eventFromRec(r eventRec) (core.Event, error) {
-	detail, err := detailFromRec(r.Detail)
+	outcome, err := wire.ToCommandOutcome("outcome", m.GetOutcome())
 	if err != nil {
-		return core.Event{}, fmt.Errorf("event %d of run %s: %w", r.Sequence, r.Run, err)
+		return fail(err)
 	}
-	return core.Event{Sequence: r.Sequence, EventDraft: core.EventDraft{
-		SchemaVersion: r.SchemaVersion, Run: core.RunID(r.Run), HostID: r.HostID, Task: r.Task, Commit: core.Commit(r.Commit),
-		Plan: core.PlanNumber(r.Plan), Harness: r.Harness, Agent: r.Agent, At: r.At, Command: core.Command(r.Command), Outcome: core.CommandOutcome(r.Outcome),
-		Job: core.JobID(r.Job), Detail: detail,
+	detail, err := detailFromMessage(m)
+	if err != nil {
+		return fail(err)
+	}
+	return core.Event{Sequence: m.GetSequence(), EventDraft: core.EventDraft{
+		SchemaVersion: m.GetSchemaVersion(), Run: core.RunID(m.GetRunId()), HostID: m.GetHostId(), Task: m.GetTask(), Commit: core.Commit(m.GetCommit()),
+		Plan: core.PlanNumber(m.GetPlanNumber()), Harness: m.GetHarness(), Agent: m.GetAgent(), At: instant(m.GetAt()),
+		Command: command, Outcome: outcome, Job: core.JobID(m.GetJobId()), Detail: detail,
 	}}, nil
 }
 
 // savedToFile encodes a result with its place in the order results were saved.
-func savedToFile(s ledger.SavedResult) (resultFile, error) {
-	r, err := resultToRec(s.Result)
-	return resultFile{Format: formatVersion, Seq: s.Seq, Result: r}, err
+func savedToFile(s ledger.SavedResult) (*cliv1.ResultFile, error) {
+	r, err := resultToMessage(s.Result)
+	return &cliv1.ResultFile{Format: formatVersion, Seq: s.Seq, Result: r}, err
 }

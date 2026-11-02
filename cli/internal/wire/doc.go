@@ -1,6 +1,7 @@
 // Package wire translates between the domain types of internal/core (and internal/lifecycle) and
 // the generated contract types of gen/. It is the only package that imports both, so the three
-// models, domain, contract and on-disk encoding, stay separate.
+// models, domain and contract, stay separate. The store's files are the contract's messages in
+// protojson, so the store translates through this package as well.
 //
 // Translation toward the domain validates: a value the contract can say and the domain cannot
 // hold, such as an unspecified enum or a commit that is not 40 hexadecimal characters, is a

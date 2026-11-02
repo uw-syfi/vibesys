@@ -109,6 +109,37 @@ func TestLayoutNamesStayInsideFilestore(t *testing.T) {
 	}
 }
 
+// A store persists protojson of its messages, and describes no record by hand: no package under
+// internal/store, tests included, imports a hand encoding, and a package outside the store may.
+func TestStorePackagesImportNoHandEncoding(t *testing.T) {
+	encodings := []string{"encoding/json", "encoding/gob", "encoding/xml", "encoding/csv", "github.com/BurntSushi/toml"}
+	stores := []string{
+		"cli/internal/store/store.go", "cli/internal/store/ledger/a.go", "cli/internal/store/memstore/a_test.go",
+		"cli/internal/store/filestore/records.go", "cli/internal/store/filestore/owner_test.go", "cli/internal/store/filestore/fsys/a.go",
+		"cli/internal/store/storetest/a.go",
+	}
+	property := func(pickEncoding, pickFile uint8) bool {
+		encoding, file := encodings[int(pickEncoding)%len(encodings)], stores[int(pickFile)%len(stores)]
+		violations := archcheck.Violations(map[string]string{file: goFile(encoding, "google.golang.org/protobuf/encoding/protojson")})
+		flagged := 0
+		for _, line := range violations {
+			if strings.Contains(line, file) && strings.Contains(line, "imports "+encoding+";") {
+				flagged++
+			}
+		}
+		outside := archcheck.Violations(map[string]string{"cli/internal/reading/a.go": goFile(encoding)})
+		return flagged == 1 && !slices.ContainsFunc(outside, func(line string) bool { return strings.Contains(line, "protojson of a message") })
+	}
+	if err := quick.Check(property, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range stores {
+		if v := archcheck.Violations(map[string]string{file: goFile("google.golang.org/protobuf/encoding/protojson")}); slices.ContainsFunc(v, func(l string) bool { return strings.Contains(l, "hand") }) {
+			t.Errorf("protojson was flagged in %s: %v", file, v)
+		}
+	}
+}
+
 func hasLayout(violations []string) bool {
 	for _, line := range violations {
 		if strings.Contains(line, "names the storage layout") {

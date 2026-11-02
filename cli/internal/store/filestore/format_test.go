@@ -5,6 +5,7 @@ import (
 	"errors"
 	"maps"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -45,6 +46,18 @@ func wantFailure(t *testing.T, what string, err error, kind core.FailureKind, na
 	}
 }
 
+// versionIn matches the version a file starts with, in whatever spacing protojson wrote it.
+var versionIn = regexp.MustCompile(`"format":\s*\d+`)
+
+// withVersion returns the file with its version replaced.
+func withVersion(data []byte, version string) []byte {
+	return versionIn.ReplaceAll(data, []byte(`"format": `+version))
+}
+
+// unspaced is a file with its whitespace removed, which is what a test compares when the spacing of
+// protojson is not part of the format. The pinned values hold no text with a space in it.
+func unspaced(data []byte) string { return strings.Join(strings.Fields(string(data)), "") }
+
 func file(t *testing.T, mem *fsys.MemFS, name string) []byte {
 	t.Helper()
 	data, ok := mem.Files()[name]
@@ -64,7 +77,7 @@ const eventFileName = "state/runs/run-a/1.json"
 func TestNewerFormatIsRefusedWithTheFileNamed(t *testing.T) {
 	t.Run("the layout", func(t *testing.T) {
 		mem := populated(t)
-		mem.Put("state/format", []byte(`{"format":2}`))
+		mem.Put("state/format", []byte(`{"format":3}`))
 		_, err := filestore.Open(stateDir, filestore.WithFS(mem))
 		wantFailure(t, "newer format file", err, core.FailureIncompatible, "state/format")
 	})
@@ -72,7 +85,7 @@ func TestNewerFormatIsRefusedWithTheFileNamed(t *testing.T) {
 	for _, name := range recordFiles {
 		t.Run(name, func(t *testing.T) {
 			mem := populated(t)
-			mem.Put(name, bytes.Replace(file(t, mem, name), []byte(`"format":1`), []byte(`"format":2`), 1))
+			mem.Put(name, withVersion(file(t, mem, name), "3"))
 			_, err := filestore.Open(stateDir, filestore.WithFS(mem))
 			wantFailure(t, "newer record", err, core.FailureIncompatible, name)
 		})
@@ -80,7 +93,7 @@ func TestNewerFormatIsRefusedWithTheFileNamed(t *testing.T) {
 
 	t.Run("an event, read when asked for", func(t *testing.T) {
 		mem := populated(t)
-		mem.Put(eventFileName, bytes.Replace(file(t, mem, eventFileName), []byte(`"format":1`), []byte(`"format":2`), 1))
+		mem.Put(eventFileName, withVersion(file(t, mem, eventFileName), "3"))
 		s, err := filestore.Open(stateDir, filestore.WithFS(mem))
 		if err != nil {
 			t.Fatalf("Open: %v", err)
@@ -100,12 +113,12 @@ func TestDamagedFilesAreRefusedWithTheFileNamed(t *testing.T) {
 		"truncated":    func(v []byte) []byte { return v[:len(v)/2] },
 		"no version":   func([]byte) []byte { return []byte(`{"unrelated":1}`) },
 		"version zero": func([]byte) []byte { return []byte(`{"format":0}`) },
-		"no body":      func([]byte) []byte { return []byte(`{"format":1}`) },
+		"no body":      func([]byte) []byte { return []byte(`{"format":2}`) },
 		"an unknown field": func(v []byte) []byte {
-			return bytes.Replace(v, []byte(`"format":1`), []byte(`"format":1,"surprise":true`), 1)
+			return withVersion(v, "2, \"surprise\": true")
 		},
-		"data after it":     func(v []byte) []byte { return append(bytes.Clone(v), []byte(`{"format":1}`)...) },
-		"a wrong type":      func(v []byte) []byte { return bytes.Replace(v, []byte(`"format":1`), []byte(`"format":"one"`), 1) },
+		"data after it":     func(v []byte) []byte { return append(bytes.Clone(v), []byte(`{"format":2}`)...) },
+		"a wrong type":      func(v []byte) []byte { return withVersion(v, `"two"`) },
 		"binary":            func([]byte) []byte { return []byte{0, 1, 2, 0xff, 0xfe} },
 		"a different field": func(v []byte) []byte { return bytes.Replace(v, []byte(`"format"`), []byte(`"formats"`), 1) },
 	}
@@ -152,7 +165,7 @@ func TestInconsistentLayoutIsRefusedWithTheFileNamed(t *testing.T) {
 			mustRemove(t, m, "state/logs/j2")
 		}, []string{"j2 is missing"}},
 		{"a missing plan", func(m *fsys.MemFS) {
-			m.Put("state/plans/3.json", bytes.Replace(file(t, m, "state/plans/1.json"), []byte(`"number":1`), []byte(`"number":3`), 1))
+			m.Put("state/plans/3.json", regexp.MustCompile(`"number":\s*1`).ReplaceAll(file(t, m, "state/plans/1.json"), []byte(`"number": 3`)))
 		}, []string{"plan 2 is missing"}},
 		{"a plan under another plan's number", func(m *fsys.MemFS) { m.Put("state/plans/2.json", file(t, m, "state/plans/1.json")) }, []string{"state/plans/2.json"}},
 		{"a missing promotion", func(m *fsys.MemFS) { mustRemove(t, m, "state/promotions/1.json") }, []string{"state/promotions/1.json"}},
@@ -160,7 +173,7 @@ func TestInconsistentLayoutIsRefusedWithTheFileNamed(t *testing.T) {
 		{"a missing first log chunk", func(m *fsys.MemFS) { mustRemove(t, m, "state/logs/j1/00000000000000000000") }, []string{"state/logs/j1/00000000000000000006"}},
 		{"a job that names a result that is not there", func(m *fsys.MemFS) { mustRemove(t, m, "state/results/j1.json") }, []string{"j1"}},
 		{"a result whose job did not succeed", func(m *fsys.MemFS) {
-			m.Put("state/jobs/j1.json", bytes.Replace(file(t, m, "state/jobs/j1.json"), []byte(`"state":"succeeded"`), []byte(`"state":"failed"`), 1))
+			m.Put("state/jobs/j1.json", regexp.MustCompile(`"state":\s*"JOB_STATE_SUCCEEDED"`).ReplaceAll(file(t, m, "state/jobs/j1.json"), []byte(`"state": "JOB_STATE_FAILED"`)))
 		}, []string{"j1", "failed"}},
 		{"a file that is not a record in jobs", func(m *fsys.MemFS) { m.Put("state/jobs/notes.txt", []byte("hello")) }, []string{"state/jobs/notes.txt"}},
 		{"a record with no suffix in plans", func(m *fsys.MemFS) { m.Put("state/plans/3", []byte("{}")) }, []string{"state/plans/3"}},
@@ -297,21 +310,42 @@ func TestLeftoversOfACrashAreRemovedAndOrphansIgnored(t *testing.T) {
 }
 
 // The encoding is pinned: a change to what is written is a change to the format, and must come
-// with a version.
+// with a version. The files are protojson of the messages in store.proto, indented, with the proto
+// field names, and with the fields that are set.
 func TestEncodingIsPinned(t *testing.T) {
 	mem := fsys.NewMemFS()
 	s := openOn(t, mem)
 	if err := script()[0].run(t.Context(), s); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := string(file(t, mem, "state/format")), "{\"format\":1}\n"; got != want {
+	if got, want := unspaced(file(t, mem, "state/format")), `{"format":2}`; got != want {
 		t.Errorf("format file = %q, want %q", got, want)
 	}
-	const wantJob = `{"format":1,"job":{"id":"j1","spec":{"commit":"c1","environment":"","settings":{"kind":"measure","measure":{"samples":3,"recheck":false}}},` +
-		`"state":"queued","key":"k1","environment":null,"notes":[{"text":"first","at":"2026-11-01T00:00:01Z","agent":"agent-a"}],"plans":null,` +
-		`"submitted_at":"2026-11-01T00:00:01Z","started_at":null,"finished_at":null,"cancel_reason":"","exit_code":null,"result_job":"","check_job":""}}` + "\n"
-	if got := string(file(t, mem, "state/jobs/j1.json")); got != wantJob {
-		t.Errorf("job file =\n%s\nwant\n%s", got, wantJob)
+	const wantJob = `{
+  "format": 2,
+  "job": {
+    "id": "j1",
+    "spec": {
+      "commit": "c1",
+      "measure": {
+        "samples": 3
+      }
+    },
+    "state": "JOB_STATE_QUEUED",
+    "key": "k1",
+    "notes": [
+      {
+        "text": "first",
+        "at": "2026-11-01T00:00:01Z",
+        "agent": "agent-a"
+      }
+    ],
+    "submitted_at": "2026-11-01T00:00:01Z"
+  }
+}
+`
+	if got := unspaced(file(t, mem, "state/jobs/j1.json")); got != unspaced([]byte(wantJob)) {
+		t.Errorf("job file =\n%s\nwant\n%s", got, unspaced([]byte(wantJob)))
 	}
 	if got, want := slices.Sorted(maps.Keys(mem.Files())), []string{"state/.owner", "state/.owner.lock", "state/format", "state/jobs/j1.json"}; !slices.Equal(got, want) {
 		t.Errorf("files = %v, want %v", got, want)
@@ -320,11 +354,52 @@ func TestEncodingIsPinned(t *testing.T) {
 	if err := promotion("a promotion", "c1", "c0", 13).run(t.Context(), s); err != nil {
 		t.Fatal(err)
 	}
-	const wantPromotion = `{"format":1,"seq":1,"promotion":{"commit":"c1","previous_head":"c0","verdict":{"kind":"better","reason":"","candidate_samples":3,` +
-		`"base_samples":3,"candidate_mean":2.5,"base_mean":2,"ratio":1.25,"noise":0.5},"environment":{"kind":"host","backend":"cpu","image_digest":"","facts":null},` +
-		`"result_job":"j1","at":"2026-11-01T00:00:13Z"}}` + "\n"
-	if got := string(file(t, mem, "state/promotions/1.json")); got != wantPromotion {
-		t.Errorf("promotion file =\n%s\nwant\n%s", got, wantPromotion)
+	const wantPromotion = `{
+  "format": 2,
+  "seq": "1",
+  "promotion": {
+    "commit": "c1",
+    "previous_head": "c0",
+    "verdict": {
+      "kind": "VERDICT_KIND_BETTER",
+      "candidate_samples": 3,
+      "base_samples": 3,
+      "candidate_mean": 2.5,
+      "base_mean": 2,
+      "ratio": 1.25,
+      "noise": 0.5
+    },
+    "environment": {
+      "kind": "ENVIRONMENT_KIND_HOST",
+      "backend": "BACKEND_KIND_CPU"
+    },
+    "result_job_id": "j1",
+    "at": "2026-11-01T00:00:13Z"
+  }
+}
+`
+	if got := unspaced(file(t, mem, "state/promotions/1.json")); got != unspaced([]byte(wantPromotion)) {
+		t.Errorf("promotion file =\n%s\nwant\n%s", got, unspaced([]byte(wantPromotion)))
+	}
+}
+
+// A store of the hand-written encoding that came before protojson is refused, naming the file and
+// saying what to do, and nothing in it is read: there is no migration, because no release wrote one.
+func TestAStoreOfThePrereleaseEncodingIsRefusedWithTheFileNamed(t *testing.T) {
+	const oldJob = `{"format":1,"job":{"id":"j1","spec":{"commit":"c1","environment":"","settings":{"kind":"measure","measure":{"samples":3,"recheck":false}}},` +
+		`"state":"queued","key":"k1","environment":null,"notes":null,"plans":null,"submitted_at":"2026-11-01T00:00:01Z","started_at":null,` +
+		`"finished_at":null,"cancel_reason":"","exit_code":null,"result_job":"","check_job":""}}` + "\n"
+	for _, name := range append([]string{"state/format"}, recordFiles...) {
+		t.Run(name, func(t *testing.T) {
+			mem := populated(t)
+			content := []byte(oldJob)
+			if name == "state/format" {
+				content = []byte("{\"format\":1}\n")
+			}
+			mem.Put(name, content)
+			_, err := filestore.Open(stateDir, filestore.WithFS(mem))
+			wantFailure(t, "old encoding", err, core.FailureIncompatible, name, "prerelease")
+		})
 	}
 }
 
