@@ -7,6 +7,7 @@ package production
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -88,7 +89,9 @@ type Layout struct {
 const maxSocketPath = 100
 
 // LayoutFor resolves the layout from the environment. The agent socket goes under the user's
-// runtime directory when there is one, and in the state directory otherwise.
+// runtime directory when there is one, and in the state directory otherwise. In the runtime
+// directory its name carries a short hash of the state directory, so orchestrators with different
+// state directories never share, or take over, one agent socket.
 func LayoutFor(getenv func(string) string, home string) (Layout, error) {
 	state, err := localfs.StateDir(getenv, home, localfs.SystemDetector{})
 	if err != nil {
@@ -96,12 +99,18 @@ func LayoutFor(getenv func(string) string, home string) (Layout, error) {
 	}
 	agentSocket := filepath.Join(state.Path(), "agent.sock")
 	if runtimeDir := getenv("XDG_RUNTIME_DIR"); runtimeDir != "" {
-		agentSocket = filepath.Join(runtimeDir, "vibesys-orchestrator-agent.sock")
+		agentSocket = filepath.Join(runtimeDir, agentSocketName(state.Path()))
 	}
 	if len(agentSocket) > maxSocketPath {
 		return Layout{}, fmt.Errorf("the socket path %s is longer than %d bytes, which a Unix socket cannot hold: set a shorter state directory", agentSocket, maxSocketPath)
 	}
 	return Layout{State: state, AgentSocket: agentSocket}, nil
+}
+
+// agentSocketName is the agent socket's name in the runtime directory for a state directory.
+func agentSocketName(state string) string {
+	sum := sha256.Sum256([]byte(filepath.Clean(state)))
+	return "vibesys-orchestrator-" + hex.EncodeToString(sum[:8]) + ".sock"
 }
 
 // UnixDialer connects to a daemon's socket.
