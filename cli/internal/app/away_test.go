@@ -785,12 +785,27 @@ func TestACommandLeftByAForgetHoldsTheMachineUpToItsLimit(t *testing.T) {
 	awaitIdle(t, w)
 }
 
+// requireNoRun fails unless nothing is left of the job's run. A forget answers after this holds for
+// the runs it forgot; a run of another repository that the daemon lets go of on its own is no part
+// of that answer, so the test names the job it forgot.
+func requireNoRun(t *testing.T, sups supervisor.Supervisors, ref lifecycle.Ref) {
+	t.Helper()
+	run, err := sups.Probe(ctxFor(t), ref)
+	if err != nil {
+		t.Fatalf("Probe(%s): %v", ref, err)
+	}
+	if _, none := run.(supervisor.None); !none {
+		t.Fatalf("after the forget, the run of %s is %T, want none", ref, run)
+	}
+}
+
 // A repository that is gone for good is given up: its jobs leave the machine, what is left of its
 // runs is let go of, and its stores leave what the daemon knows. One that is there, one that cannot
 // be reached, and one the daemon never heard of are refused, as forgetting cannot be undone.
 func TestForgettingARepositoryThatIsGone(t *testing.T) {
 	w, o := newOutage(t)
-	a := o.start(w.supervisors())
+	sups := w.supervisors()
+	a := o.start(sups)
 	job := submitAs(t, a, callA, "hold", "g", ";", "exit", "0")
 	o.awaitIn(t, a, scopeA, job.ID, "running", func(j core.Job) bool { return j.State == core.JobRunning })
 	other := submitAs(t, a, callB, "print", "other", ";", "exit", "0")
@@ -805,7 +820,7 @@ func TestForgettingARepositoryThatIsGone(t *testing.T) {
 
 	o.takeAway(repoA)
 	a.Close()
-	a = o.start(w.supervisors())
+	a = o.start(sups)
 	// A store that cannot be read may be whole, with jobs that still run: only one whose place is
 	// not there is gone.
 	if _, err := a.ForgetRepository(ctxFor(t), repoA); !errors.As(err, &f) || f.Kind != core.FailureUnavailable {
@@ -819,6 +834,7 @@ func TestForgettingARepositoryThatIsGone(t *testing.T) {
 	if len(out.Tasks) != 1 || out.Tasks[0] != "task" || len(out.Left) != 0 {
 		t.Fatalf("forgotten = %+v, want its one task and nothing left", out)
 	}
+	requireNoRun(t, sups, lifecycle.Ref{Store: lifecycle.StoreIDOf(repoA, "task"), Job: job.ID})
 	awaitIdle(t, w)
 	if got := o.awaitFinalIn(t, a, scopeB, other.ID); got.State != core.JobSucceeded {
 		t.Fatalf("the other repository's job = %s", got.State)
