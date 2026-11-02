@@ -345,7 +345,7 @@ every test still runs before every merge:
 
 | Stage | Event | What runs | Budget |
 | --- | --- | --- | --- |
-| Commit stage | `pull_request` | Change selection, format, lint, types, the Python repository-policy checks and guards (`python-checks`, `python-guards`), the Python tests the change reaches through imports (`test-impact`), the client quality, unit-test and build checks, the gateway, `vibesys-cli` and `repoctl` tests | warns at 270 s, fails at 360 s |
+| Commit stage | `pull_request` | Change selection, format, lint, types, the Python repository-policy checks and guards (`python-checks`, `python-guards`), the Python tests the change reaches through imports (`test-impact`), the client quality, unit-test and build checks, the gateway, `vibesys-cli` and `repoctl` tests, and a build of each example Dockerfile the change touches (`example-dockerfiles`) | warns at 270 s, fails at 360 s |
 | Full stage | `merge_group`, `push` to `main` | The commit stage's checks and everything else: every Python test shard, the client end-to-end shards, seed exploration, coverage and patch coverage, the real-system tiers, the examples, the agent image and Feature tests, the sandbox jobs | warns at 270 s, fails at 600 s |
 
 The merge queue runs the full stage on the tree the merge will produce, so a change that passes
@@ -355,6 +355,17 @@ A job that belongs to the full stage only has `github.event_name != 'pull_reques
 one does not), and `ci-budget` checks the run's execution time against the stage's budget.
 `tests/quality/test_ci_stages.py` fails when a job runs on pull requests and nowhere else, or when
 `Required PR CI` does not wait for a job.
+
+`example-dockerfiles` builds, and only builds, the example Dockerfiles (the task Dockerfiles under
+`examples/`) that a change selects. repoctl discovers each `Dockerfile` as a component rooted at its
+directory, which is the build context, so a change to the file or to anything beside it selects that
+Dockerfile alone, and a change to no Dockerfile skips the job. The job has one matrix leg per
+selected directory and caches layers by the Dockerfile's content. A Dockerfile a CI runner cannot
+build (a GPU or Neuron base image) is listed under `excluded_roots` in the Dockerfile discovery
+entry of `.repoctl/components.toml`, with the reason; `repoctl validate` fails for a Dockerfile under
+`examples/` that is neither built nor listed, so a new one has to choose. The job is part of
+`Required PR CI` like every other job. Run one build locally with
+`./support/repoctl/repoctl run-checks --group example_dockerfile_builds --collection-json '["<dir>"]'`.
 
 When a Python shard fails in the merge queue, `classify-failures` reruns only the tests it failed,
 once, on the main the queue branched from, and labels each in its job summary: `fails on main

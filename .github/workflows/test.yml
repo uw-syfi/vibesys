@@ -61,6 +61,7 @@ jobs:
       clients: ${{ steps.filter.outputs.clients }}
       proto: ${{ steps.filter.outputs.proto }}
       examples: ${{ steps.filter.outputs.examples }}
+      dockerfiles: ${{ steps.filter.outputs.dockerfiles }}
       agent_image: ${{ steps.filter.outputs.agent_image }}
       real_tiers: ${{ steps.filter.outputs.real_tiers }}
       evaluators: ${{ steps.filter.outputs.evaluators }}
@@ -68,6 +69,7 @@ jobs:
       native_targets: ${{ steps.filter.outputs.native_targets }}
       native_languages: ${{ steps.filter.outputs.native_languages }}
       pnpm_packages: ${{ steps.filter.outputs.pnpm_packages }}
+      dockerfile_contexts: ${{ steps.filter.outputs.dockerfile_contexts }}
       impact: ${{ steps.filter.outputs.impact }}
       gateway: ${{ steps.filter.outputs.gateway }}
       cli: ${{ steps.filter.outputs.cli }}
@@ -767,6 +769,69 @@ jobs:
         env:
           CPU_CHECK_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
         run: ./support/repoctl/repoctl run-checks --group examples_cpu_check_shard
+
+  # Builds the example Dockerfiles a change selects, one matrix leg per Dockerfile directory (its
+  # build context): a Dockerfile, or a file next to it, changing builds that Dockerfile and nothing
+  # else, and a change to no Dockerfile skips the job. Build only: no benchmark, no secret, no GPU.
+  # The Dockerfiles a runner cannot build are listed with a reason in the discovery entry in
+  # .repoctl/components.toml, and `repoctl validate` fails for one that is neither built nor listed.
+  # The layer cache is named by the Dockerfile's own content, so the byte-identical Rust and Go files
+  # share one snapshot and a rebuild after a context-only change reuses every layer.
+  example-dockerfiles:
+    needs: changes
+    if: needs.changes.outputs.dockerfiles == 'true' && needs.changes.outputs.dockerfile_contexts != '[]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        context: ${{ fromJSON(needs.changes.outputs.dockerfile_contexts) }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up repoctl
+        uses: ./.github/actions/setup-repoctl
+
+      - name: Name the layer cache by the Dockerfile's content
+        id: dockerfile
+        env:
+          CONTEXT: ${{ matrix.context }}
+        run: echo "digest=$(sha256sum "$CONTEXT/Dockerfile" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Docker layer cache
+        id: docker-cache
+        uses: ./.github/actions/docker-image-cache
+        with:
+          mode: restore
+          path: ${{ runner.temp }}/docker-data.tar.zst
+          key: example-dockerfile-v1-${{ steps.dockerfile.outputs.digest }}
+
+      - name: Point Docker at the layer cache storage
+        run: ./scripts/ci_docker_data_root.sh attach "${{ runner.temp }}/docker-data.tar.zst"
+
+      - name: Build the Dockerfile
+        env:
+          CONTEXT: ${{ matrix.context }}
+        run: |
+          start=$(date +%s)
+          ./support/repoctl/repoctl run-checks --group example_dockerfile_builds --collection-json "$(jq -cn --arg context "$CONTEXT" '[$context]')"
+          echo "Built $CONTEXT in $(( $(date +%s) - start )) s (layer cache hit: ${{ steps.docker-cache.outputs.cache-hit }})" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Snapshot Docker layer cache
+        if: steps.docker-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        run: ./scripts/ci_docker_data_root.sh snapshot "${{ runner.temp }}/docker-data.tar.zst"
+
+      - name: Save Docker layer cache
+        if: steps.docker-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: ./.github/actions/docker-image-cache
+        with:
+          mode: save
+          path: ${{ runner.temp }}/docker-data.tar.zst
+          key: ${{ steps.docker-cache.outputs.cache-primary-key }}
 
   # Builds the CPU agent image for real and runs every shipped CLI inside it
   # as the non-root `agent` user (issue #675), then reuses that same build to
@@ -1562,6 +1627,7 @@ jobs:
       - validate-examples
       - validate-examples-cpu-check
       - native-evaluator-examples
+      - example-dockerfiles
       - agent-image
       - feature-tests
       - real-tiers-slurm
@@ -1632,6 +1698,7 @@ jobs:
       - validate-examples
       - validate-examples-cpu-check
       - native-evaluator-examples
+      - example-dockerfiles
       - agent-image
       - feature-tests
       - real-tiers-slurm
