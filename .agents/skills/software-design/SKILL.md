@@ -12,9 +12,9 @@ implementation that may be as complex as it needs to be. The rest of the system
 depends on the interface's guarantees and never thinks about what is behind it.
 Loose coupling and clear ownership follow.
 
-These rules are language- and codebase-independent. Read the reference for the
-language you are editing ([Python](references/python.md),
-[TypeScript](references/typescript.md), [Go](references/go.md)); a codebase's
+These rules are language- and codebase-independent. Read the reference for your
+language ([Python](references/python.md), [Go](references/go.md),
+[TypeScript](references/typescript.md), [Rust](references/rust.md)); a codebase's
 own tools, thresholds and module graph belong in its own skill, so load it too.
 
 ## Design checkpoint
