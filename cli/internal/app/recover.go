@@ -50,6 +50,7 @@ func (a *App) Start(ctx context.Context) error {
 	for ref, r := range byRef {
 		a.recovered(ref, "", at, at, r)
 	}
+	a.settleBranches(ctx, scopes)
 	a.dispatch(lifecycle.RecoveryDone{})
 	return nil
 }

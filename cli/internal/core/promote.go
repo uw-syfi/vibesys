@@ -38,7 +38,8 @@ type PromoteRefusal struct {
 // Promotion is a move of the result branch that happened.
 type Promotion struct {
 	Commit Commit
-	// PreviousHead is empty for the first promotion.
+	// PreviousHead is the head the move replaced: the commit the result branch was at. For the
+	// first promotion that is the commit the run started from.
 	PreviousHead Commit
 	Verdict      Verdict
 	Environment  Fingerprint
@@ -92,7 +93,7 @@ type PromotionRequest struct {
 // It fails with a *Failure, rather than refusing, when the two sides cannot be compared at all:
 // see Compare. The promotion it returns has the environment both sides were measured in, the
 // candidate's latest measurement as the one it rests on, and the head before the move, which is
-// empty for the first promotion.
+// the commit a stale refusal says the measurement was taken against.
 func DecidePromotion(req PromotionRequest) (PromotionDecision, error) {
 	if req.At.IsZero() {
 		return nil, failf(FailureInvalidInput, "promotion: no time")
@@ -146,13 +147,9 @@ func DecidePromotion(req PromotionRequest) (PromotionDecision, error) {
 		return PromoteRefusal{Reasons: reasons}, nil
 	}
 
-	var previous Commit
-	if len(req.Promotions) > 0 {
-		previous = req.Head
-	}
 	return Promotion{
 		Commit:       req.Candidate,
-		PreviousHead: previous,
+		PreviousHead: req.Head,
 		Verdict:      compared.verdict,
 		Environment:  compared.environment,
 		ResultJob:    candidate[len(candidate)-1].Job,

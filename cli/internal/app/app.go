@@ -27,6 +27,10 @@ type App struct {
 	// the machine having been told, and a cancel never reaches the machine before the job does.
 	admit sync.Mutex
 
+	// branchMu is held while a result branch is read for a decision or moved, so promotions go
+	// one at a time and nothing reads the branch between a recorded promotion and its move.
+	branchMu sync.Mutex
+
 	jobsChanged changed.Signal
 	logsChanged changed.Signal
 

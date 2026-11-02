@@ -20,26 +20,6 @@ func notInThisBuild(call string) error {
 	})
 }
 
-// Show implements cliv1.DaemonServiceServer.
-func (*Server) Show(context.Context, *cliv1.ShowRequest) (*cliv1.ShowResponse, error) {
-	return nil, notInThisBuild("Show")
-}
-
-// Compare implements cliv1.DaemonServiceServer.
-func (*Server) Compare(context.Context, *cliv1.CompareRequest) (*cliv1.CompareResponse, error) {
-	return nil, notInThisBuild("Compare")
-}
-
-// Promote implements cliv1.DaemonServiceServer.
-func (*Server) Promote(context.Context, *cliv1.PromoteRequest) (*cliv1.PromoteResponse, error) {
-	return nil, notInThisBuild("Promote")
-}
-
-// CurrentResult implements cliv1.DaemonServiceServer.
-func (*Server) CurrentResult(context.Context, *cliv1.CurrentResultRequest) (*cliv1.CurrentResultResponse, error) {
-	return nil, notInThisBuild("CurrentResult")
-}
-
 // CreatePlan implements cliv1.DaemonServiceServer.
 func (*Server) CreatePlan(context.Context, *cliv1.CreatePlanRequest) (*cliv1.CreatePlanResponse, error) {
 	return nil, notInThisBuild("CreatePlan")

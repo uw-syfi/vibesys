@@ -275,7 +275,8 @@ func (x *PromoteRefusal) GetReasons() []*PromoteRefusalReason {
 type Promotion struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	Commit string                 `protobuf:"bytes,1,opt,name=commit,proto3" json:"commit,omitempty"`
-	// The head before the move. Empty for the first promotion.
+	// The head before the move: the commit the result branch was at. For the first promotion that is
+	// the commit the run started from.
 	PreviousHead string                  `protobuf:"bytes,2,opt,name=previous_head,json=previousHead,proto3" json:"previous_head,omitempty"`
 	Verdict      *Verdict                `protobuf:"bytes,3,opt,name=verdict,proto3" json:"verdict,omitempty"`
 	Environment  *EnvironmentFingerprint `protobuf:"bytes,4,opt,name=environment,proto3" json:"environment,omitempty"`

@@ -72,6 +72,10 @@ var commands = map[string]func(context.Context, deps, []string) int{
 	"note":       noteCommand,
 	"jobs":       jobsCommand,
 	"logs":       logsCommand,
+	"show":       showCommand,
+	"compare":    compareCommand,
+	"promote":    promoteCommand,
+	"result":     resultCommand,
 	"daemon":     daemonCommand,
 	"supervisor": supervisorCommand,
 	"upgrade":    upgradeCommand,
@@ -86,6 +90,10 @@ commands:
   note <job> <text>                              add a note to a job
   jobs [--commit rev] [--state s] [--note-contains text]
   logs <job> [--follow]                          print a job's output
+  show <commit>                                  results saved for a commit
+  compare <commit> [--against rev]               better, worse, within_noise or inconclusive
+  promote <commit>                               move the result branch, or say why not
+  result                                         the head and a fresh final number
   daemon status|stop|restart                     manage the daemon
   upgrade                                        replace this binary with the newest release
 

@@ -14,6 +14,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/app"
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
+	"github.com/uw-syfi/vibesys/cli/internal/gitrepo"
 	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
 )
@@ -27,6 +28,7 @@ type Runtime struct {
 	Stores       app.Stores
 	Supervisors  supervisor.Supervisors
 	Environments environment.Environments
+	Branches     gitrepo.Branches
 }
 
 // Config is what Run needs.
@@ -78,6 +80,7 @@ func Run(ctx context.Context, cfg Config) (err error) {
 		Stores:       cfg.Runtime.Stores,
 		Environments: cfg.Runtime.Environments,
 		Supervisors:  cfg.Runtime.Supervisors,
+		Branches:     cfg.Runtime.Branches,
 		Logf:         cfg.Logf,
 	})
 	defer a.Close()

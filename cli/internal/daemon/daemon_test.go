@@ -216,16 +216,12 @@ func TestCallsOfLaterWorkAreUnavailable(t *testing.T) {
 	r := newRig(t)
 	ctx := ctxFor(t)
 	calls := map[string]func() error{
-		"Show":          func() error { _, err := r.client.Show(ctx, &cliv1.ShowRequest{}); return err },
-		"Compare":       func() error { _, err := r.client.Compare(ctx, &cliv1.CompareRequest{}); return err },
-		"Promote":       func() error { _, err := r.client.Promote(ctx, &cliv1.PromoteRequest{}); return err },
-		"CurrentResult": func() error { _, err := r.client.CurrentResult(ctx, &cliv1.CurrentResultRequest{}); return err },
-		"CreatePlan":    func() error { _, err := r.client.CreatePlan(ctx, &cliv1.CreatePlanRequest{}); return err },
-		"ListPlans":     func() error { _, err := r.client.ListPlans(ctx, &cliv1.ListPlansRequest{}); return err },
-		"ViewPlan":      func() error { _, err := r.client.ViewPlan(ctx, &cliv1.ViewPlanRequest{}); return err },
-		"EditPlan":      func() error { _, err := r.client.EditPlan(ctx, &cliv1.EditPlanRequest{}); return err },
-		"CommentPlan":   func() error { _, err := r.client.CommentPlan(ctx, &cliv1.CommentPlanRequest{}); return err },
-		"ClosePlan":     func() error { _, err := r.client.ClosePlan(ctx, &cliv1.ClosePlanRequest{}); return err },
+		"CreatePlan":  func() error { _, err := r.client.CreatePlan(ctx, &cliv1.CreatePlanRequest{}); return err },
+		"ListPlans":   func() error { _, err := r.client.ListPlans(ctx, &cliv1.ListPlansRequest{}); return err },
+		"ViewPlan":    func() error { _, err := r.client.ViewPlan(ctx, &cliv1.ViewPlanRequest{}); return err },
+		"EditPlan":    func() error { _, err := r.client.EditPlan(ctx, &cliv1.EditPlanRequest{}); return err },
+		"CommentPlan": func() error { _, err := r.client.CommentPlan(ctx, &cliv1.CommentPlanRequest{}); return err },
+		"ClosePlan":   func() error { _, err := r.client.ClosePlan(ctx, &cliv1.ClosePlanRequest{}); return err },
 	}
 	for name, call := range calls {
 		f, ok := wire.FailureOf(call())
