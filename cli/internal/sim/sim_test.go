@@ -38,10 +38,25 @@ type profile struct {
 	recovery bool
 	// probes makes a live supervisor sometimes fail to answer the probe of a restart.
 	probes bool
+	// hangs makes a store call sometimes not answer at all, as on a hard mount.
+	hangs bool
+	// lost makes one repository go away for good partway through, and nothing else go wrong but
+	// repositories going away, so that all that befalls any job is a repository's doing.
+	lost bool
+	// lostHangs says the lost repository does not fail its calls but never answers them.
+	lostHangs bool
+	// forget says the lost repository is given up with `daemon forget` when the world heals.
+	forget bool
 }
 
 func profileOf(r *rand.Rand) profile {
 	coin := func() bool { return r.IntN(2) == 0 }
+	if r.IntN(5) == 0 {
+		return profile{
+			lost: true, lostHangs: coin(), forget: coin(), unmount: true, outage: true, crashes: coin(),
+			attempts: 1 + r.IntN(3), chaosSteps: 80 + r.IntN(200), jobs: 2 + r.IntN(4),
+		}
+	}
 	if r.IntN(3) == 0 {
 		return profile{
 			recovery: true, crashes: true, unmount: coin(), probes: coin(),
@@ -50,7 +65,7 @@ func profileOf(r *rand.Rand) profile {
 	}
 	return profile{
 		storeWrites: coin(), storeReads: coin(), supervisorFaults: coin(),
-		crashes: coin(), machine: coin(), unmount: coin(), sever: coin(), outage: coin(),
+		crashes: coin(), machine: coin(), unmount: coin(), sever: coin(), outage: coin(), hangs: coin(),
 		attempts:     1 + r.IntN(4),
 		faultPercent: 3 + r.IntN(25),
 		chaosSteps:   80 + r.IntN(300),
@@ -74,12 +89,20 @@ type option struct {
 
 // faultFor picks how a call goes.
 func (w *world) faultFor(c *call, heal bool) verdict {
+	store, reads := strings.Contains(c.label, " store"), !c.write
+	if store {
+		if repo, absent := w.awayIn(c.label); absent {
+			if w.profile.lostHangs && repo == w.lost {
+				return hang
+			}
+			return away
+		}
+	}
 	if heal {
 		return pass
 	}
-	store, reads := strings.Contains(c.label, " store"), !c.write
 	if w.down && store {
-		return failBefore
+		return away
 	}
 	p := w.profile
 	allowed := (store && reads && p.storeReads) || (store && !reads && p.storeWrites) ||
@@ -94,6 +117,9 @@ func (w *world) faultFor(c *call, heal bool) verdict {
 	if !allowed || w.rng.IntN(100) >= p.faultPercent {
 		return pass
 	}
+	if store && p.hangs && w.rng.IntN(3) == 0 {
+		return hang
+	}
 	if !store && !strings.Contains(c.label, "sup.Follow") && w.rng.IntN(3) == 0 {
 		return hang
 	}
@@ -105,7 +131,7 @@ func (w *world) faultFor(c *call, heal bool) verdict {
 
 func (w *world) answer(c *call, v verdict) {
 	w.gate.remove(c)
-	w.tracef("    %s: %s", c.label, []string{"ok", "fails", "takes effect and fails", "dies before", "dies after", "never answers"}[v])
+	w.tracef("    %s: %s", c.label, []string{"ok", "fails", "takes effect and fails", "dies before", "dies after", "never answers", "is away"}[v])
 	c.decide <- v
 	switch v {
 	case crashBefore:
@@ -221,6 +247,40 @@ func (w *world) wait(l located) {
 	})
 }
 
+// forgetAttempts bounds an operator's patience, so that a daemon that keeps refusing to come up
+// ends in the world's own check and not in a loop no time passes in.
+const forgetAttempts = 20
+
+// forget gives up a repository that is gone, as an operator would: again until it is done, as a
+// daemon may die under the call or a store may not answer in time. It must not be refused, as the
+// repository is gone. A repository already forgotten is not known.
+func (w *world) forget(repo string) {
+	w.mu.Lock()
+	w.forgetting = true
+	w.mu.Unlock()
+	w.start("forget", func(ctx context.Context) string {
+		for range forgetAttempts {
+			if ctx.Err() != nil {
+				break
+			}
+			c, err := client.Connect(ctx, w.options())
+			if err != nil {
+				continue
+			}
+			_, err = c.ForgetRepository(ctx, repo)
+			c.Close()
+			var f *core.Failure
+			switch {
+			case err == nil, errors.As(err, &f) && f.Kind == core.FailureNotFound:
+				return ""
+			case f != nil && f.Kind == core.FailureConflict:
+				return fmt.Sprintf("forgetting %s was refused: %v", repo, err)
+			}
+		}
+		return ""
+	})
+}
+
 // finalWait is what the check after the chaos runs: every job, through a client, to its end.
 func (w *world) finalWait(l located) { w.wait(l) }
 
@@ -243,6 +303,9 @@ func (w *world) actions() []option {
 	follows := sortedKeys(mapKeysToString(w.follows))
 	w.mu.Unlock()
 	p := w.profile
+	// A profile of repositories going away lets work get going first, as a repository that is away
+	// from the start only refuses what it is sent.
+	outages := !p.lost || slices.ContainsFunc(all, func(l located) bool { return l.job.State == core.JobRunning })
 	if up && p.crashes && !p.recovery {
 		add("crash", w.crash)
 		add("restart", func() {
@@ -270,16 +333,47 @@ func (w *world) actions() []option {
 			}
 		})
 	}
-	if p.outage {
+	if p.outage && outages {
 		add("flip the stores", func() { w.down = !w.down })
 	}
-	if p.unmount {
+	if p.unmount && outages {
 		repo := scopes[w.rng.IntN(len(scopes))].Repository
 		add("flip "+repo, func() {
 			w.mu.Lock()
 			defer w.mu.Unlock()
-			w.absent[repo] = !w.absent[repo]
+			if repo != w.lost {
+				w.absent[repo] = !w.absent[repo]
+			}
 		})
+		add("every repository goes away", func() {
+			w.mu.Lock()
+			defer w.mu.Unlock()
+			for _, s := range scopes {
+				w.absent[s.Repository] = true
+			}
+		})
+		add("every repository comes back", func() {
+			w.mu.Lock()
+			defer w.mu.Unlock()
+			clear(w.absent)
+			if w.lost != "" {
+				w.absent[w.lost] = true
+			}
+		})
+	}
+	if p.lost && w.lost == "" {
+		// It strikes a repository with a job running, and with work of another repository waiting,
+		// and the daemon goes with it, which is what leaves only the supervisor to say what runs.
+		for _, repo := range w.struck(all) {
+			add(repo+" is gone for good", func() {
+				w.mu.Lock()
+				w.lost, w.absent[repo] = repo, true
+				w.mu.Unlock()
+				if up && p.crashes {
+					w.crash()
+				}
+			})
+		}
 	}
 	if p.sever {
 		for _, ref := range follows {
@@ -330,7 +424,11 @@ func (w *world) moves(heal bool) []option {
 	for _, name := range w.startLock.names() {
 		out = append(out, option{"start lock to " + name, func() { w.startLock.grant(name) }})
 	}
-	if at, ok := w.timers.next(); ok {
+	// Once the world is healed a call answers before any time goes by, so no limit falls on one
+	// that is merely waiting its turn. A store that hangs has answered with that, and takes time.
+	// Nothing but repositories goes wrong in a profile of them, and a late call is not one.
+	calls := len(w.gate.sorted())
+	if at, ok := w.timers.next(); ok && (!heal || len(out) == 0) && (!w.profile.lost || calls == 0) {
 		out = append(out, option{fmt.Sprintf("time moves to %s", at), func() { w.timers.advance(at) }})
 	}
 	return out
@@ -424,6 +522,9 @@ func (w *world) checkEnd(ref lifecycle.Ref, l located) {
 		if l.job.ExitCode == nil && !said {
 			w.violate("job %s failed with no exit code and no line saying why", ref)
 		}
+		if l.job.ExitCode == nil && w.profile.lost {
+			w.violate("job %s failed for what happened to a repository: %q", ref, out)
+		}
 		if l.job.ExitCode != nil && (*l.job.ExitCode != sc.code || out != sc.output()) {
 			w.violate("job %s failed with code %d and output %q", ref, *l.job.ExitCode, out)
 		}
@@ -474,10 +575,25 @@ func (w *world) finalCheck() {
 	}
 }
 
-// settled says everything ended.
+// struck is the repositories with a job running while another repository has one queued.
+func (w *world) struck(all []located) []string {
+	var out []string
+	for _, l := range all {
+		queued := slices.ContainsFunc(all, func(o located) bool {
+			return o.job.State == core.JobQueued && o.scope.Repository != l.scope.Repository
+		})
+		if l.job.State == core.JobRunning && queued && !slices.Contains(out, l.scope.Repository) {
+			out = append(out, l.scope.Repository)
+		}
+	}
+	return out
+}
+
+// settled says everything ended: every job, except the jobs of a repository that is gone, whose
+// waiters were told why. No fault of that repository keeps the rest from ending.
 func (w *world) settled() bool {
 	for _, l := range w.jobs() {
-		if !l.job.State.Final() {
+		if !l.job.State.Final() && l.scope.Repository != w.lost {
 			return false
 		}
 	}
@@ -596,9 +712,15 @@ func simulate(seed uint64) (string, string) {
 	w.mu.Lock()
 	w.down = false
 	clear(w.absent)
+	if w.lost != "" {
+		w.absent[w.lost] = true
+	}
 	w.mu.Unlock()
 	for _, l := range w.jobs() {
 		w.finalWait(l)
+	}
+	if w.profile.forget && w.lost != "" {
+		w.forget(w.lost)
 	}
 	if len(w.jobs()) == 0 {
 		w.start("hello", func(ctx context.Context) string {

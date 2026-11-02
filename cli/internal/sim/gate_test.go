@@ -33,11 +33,14 @@ const (
 	crashAfter
 	// hang is a call that never answers, which only its caller's deadline ends.
 	hang
+	// away is a call to a store that is not there.
+	away
 )
 
 var (
 	errInjected = &core.Failure{Kind: core.FailureInternal, Message: "injected failure"}
 	errCrashed  = errors.New("the daemon crashed")
+	errAway     = store.Mark(&core.Failure{Kind: core.FailureUnavailable, Message: "the repository is not there"}, store.ErrAway)
 )
 
 // call is one Fake call waiting for the driver.
@@ -116,6 +119,8 @@ func gated[T any](ctx context.Context, w *world, d *incarnation, label string, w
 	switch v {
 	case failBefore:
 		return zero, errInjected
+	case away:
+		return zero, errAway
 	case hang:
 		select {
 		case <-ctx.Done():
@@ -148,12 +153,15 @@ type gatedStore struct {
 	d     *incarnation
 }
 
+// where names a call's repository, so that a repository that is away fails what it holds open.
+func (s gatedStore) where(label string) string { return label + " in " + s.scope.Repository }
+
 func (s gatedStore) Submit(ctx context.Context, sub core.Submission) (core.SubmitOutcome, error) {
-	return gated(ctx, s.w, s.d, "store.Submit", true, func() (core.SubmitOutcome, error) { return s.Store.Submit(ctx, sub) })
+	return gated(ctx, s.w, s.d, s.where("store.Submit"), true, func() (core.SubmitOutcome, error) { return s.Store.Submit(ctx, sub) })
 }
 
 func (s gatedStore) Job(ctx context.Context, id core.JobID) (core.Job, error) {
-	return gated(ctx, s.w, s.d, "store.Job "+string(id), false, func() (core.Job, error) {
+	return gated(ctx, s.w, s.d, s.where("store.Job "+string(id)), false, func() (core.Job, error) {
 		j, err := s.Store.Job(ctx, id)
 		if err == nil && strings.HasPrefix(actorOf(ctx), "cancel") {
 			s.w.noteCancelRead(s.d, s.scope, j)
@@ -163,22 +171,22 @@ func (s gatedStore) Job(ctx context.Context, id core.JobID) (core.Job, error) {
 }
 
 func (s gatedStore) Jobs(ctx context.Context, f core.JobFilter) ([]core.Job, error) {
-	return gated(ctx, s.w, s.d, "store.Jobs", false, func() ([]core.Job, error) { return s.Store.Jobs(ctx, f) })
+	return gated(ctx, s.w, s.d, s.where("store.Jobs"), false, func() ([]core.Job, error) { return s.Store.Jobs(ctx, f) })
 }
 
 func (s gatedStore) Transition(ctx context.Context, t core.Transition) (core.Job, error) {
 	label := "store.Transition " + string(t.Job) + " " + string(t.From) + ">" + string(t.To)
-	return gated(ctx, s.w, s.d, label, true, func() (core.Job, error) {
+	return gated(ctx, s.w, s.d, s.where(label), true, func() (core.Job, error) {
 		return s.Store.Transition(ctx, t)
 	})
 }
 
 func (s gatedStore) AddNote(ctx context.Context, id core.JobID, n core.Note) (core.Job, error) {
-	return gated(ctx, s.w, s.d, "store.AddNote "+string(id), true, func() (core.Job, error) { return s.Store.AddNote(ctx, id, n) })
+	return gated(ctx, s.w, s.d, s.where("store.AddNote "+string(id)), true, func() (core.Job, error) { return s.Store.AddNote(ctx, id, n) })
 }
 
 func (s gatedStore) AppendLog(ctx context.Context, id core.JobID, data []byte) error {
-	_, err := gated(ctx, s.w, s.d, "store.AppendLog "+string(id), true, func() (struct{}, error) {
+	_, err := gated(ctx, s.w, s.d, s.where("store.AppendLog "+string(id)), true, func() (struct{}, error) {
 		s.w.noteAppend(s.scope, id)
 		return struct{}{}, s.Store.AppendLog(ctx, id, data)
 	})
@@ -186,7 +194,7 @@ func (s gatedStore) AppendLog(ctx context.Context, id core.JobID, data []byte) e
 }
 
 func (s gatedStore) ReadLog(ctx context.Context, id core.JobID, off uint64, max int) (core.LogChunk, error) {
-	return gated(ctx, s.w, s.d, "store.ReadLog "+string(id), false, func() (core.LogChunk, error) { return s.Store.ReadLog(ctx, id, off, max) })
+	return gated(ctx, s.w, s.d, s.where("store.ReadLog "+string(id)), false, func() (core.LogChunk, error) { return s.Store.ReadLog(ctx, id, off, max) })
 }
 
 // gatedHandle is a supervisor as a daemon reaches it.

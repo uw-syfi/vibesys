@@ -47,6 +47,8 @@ type message struct {
 	then func()
 	// done, when set, is closed once the loop has taken the event up.
 	done chan struct{}
+	// changed says a job changed in its store, so whoever waits looks again.
+	changed bool
 }
 
 // view is what the loop publishes for calls to read.
@@ -137,7 +139,7 @@ func (a *App) loop() {
 		state, reqs = lifecycle.Step(state, m.event)
 		// Before any effect starts: whoever sees an effect's work in a store finds the counts
 		// already past it.
-		a.publish(state, scopes)
+		a.publish(state, scopes, m.changed)
 		keepHandle(handles, m, reqs, state)
 		for _, r := range reqs {
 			a.startEffect(r, scopes, handles)
@@ -210,7 +212,7 @@ func refOf(e lifecycle.Event) (lifecycle.Ref, bool) {
 }
 
 // publish makes the machine's state readable, and wakes whoever new trouble concerns.
-func (a *App) publish(s lifecycle.State, scopes map[lifecycle.StoreID]Scope) {
+func (a *App) publish(s lifecycle.State, scopes map[lifecycle.StoreID]Scope, changed bool) {
 	next := &view{trouble: map[lifecycle.Ref]core.Failure{}, waits: map[lifecycle.Ref]core.Failure{}, held: map[lifecycle.Ref]bool{}}
 	next.queued, next.running = s.Counts()
 	for _, t := range s.Troubled() {
@@ -229,8 +231,10 @@ func (a *App) publish(s lifecycle.State, scopes map[lifecycle.StoreID]Scope) {
 	}
 	last := a.view.Load()
 	a.view.Store(next)
-	// Only what is new ends a wait. One that passes is seen at the next change of the job.
-	if appeared(next.trouble, last.trouble) || appeared(next.waits, last.waits) {
+	// One wake-up for a message, whatever it did: a waiter that re-arms between two would look once
+	// or twice, by the scheduler's choice. Only what is new ends a wait. One that passes is seen at
+	// the next change of the job.
+	if changed || appeared(next.trouble, last.trouble) || appeared(next.waits, last.waits) {
 		a.notifyJobs()
 	}
 }

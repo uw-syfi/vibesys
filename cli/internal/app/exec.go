@@ -247,8 +247,7 @@ func (a *App) launch(ctx context.Context, ref lifecycle.Ref, scope Scope, known 
 	case err != nil:
 		a.post(message{event: lifecycle.LaunchFailed{Ref: ref, Cause: causeOf(err), Failure: failureOf(err), At: a.now()}, handle: h})
 	default:
-		a.notifyJobs()
-		a.post(message{event: lifecycle.Launched{Ref: ref}, handle: h})
+		a.post(message{event: lifecycle.Launched{Ref: ref}, handle: h, changed: true})
 	}
 }
 

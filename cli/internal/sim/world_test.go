@@ -89,6 +89,13 @@ type world struct {
 	conns     []net.Conn
 	follows   map[lifecycle.Ref]context.CancelCauseFunc
 	absent    map[string]bool
+	// lost is the repository that went away for good, if one did.
+	lost string
+	// forgetting says an operator asked for the lost repository to be given up, which is the one
+	// thing that lets go of a run whose store shows it running.
+	forgetting bool
+	// forgotten are the stores the daemon gave up.
+	forgotten map[app.Scope]bool
 	// down says the stores fail every call. Only the driver touches it.
 	down bool
 	// leaving is how many more opens find a store still held by the daemon that died, as the
@@ -159,6 +166,7 @@ func newWorld(seed uint64) *world {
 		startLock: startLock{waiting: map[string]chan struct{}{}},
 		follows:   map[lifecycle.Ref]context.CancelCauseFunc{},
 		absent:    map[string]bool{},
+		forgotten: map[app.Scope]bool{},
 		killed:    map[lifecycle.Ref]bool{}, asked: map[lifecycle.Ref]bool{},
 		finals: map[lifecycle.Ref]core.JobState{}, flaky: map[lifecycle.Ref]bool{},
 		cancelSeen: map[lifecycle.Ref]*incarnation{}, cancelSent: map[lifecycle.Ref]bool{},
@@ -177,6 +185,18 @@ func newWorld(seed uint64) *world {
 		w.raw[s] = st
 	}
 	return w
+}
+
+// awayIn says which repository that is away a call's label names, if one is.
+func (w *world) awayIn(label string) (string, bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, s := range scopes {
+		if w.absent[s.Repository] && strings.Contains(label, s.Repository) {
+			return s.Repository, true
+		}
+	}
+	return "", false
 }
 
 func (w *world) tracef(format string, args ...any) {
@@ -226,7 +246,7 @@ func (s simStores) open(ctx context.Context, scope app.Scope) (store.Store, erro
 			return nil, &core.Failure{Kind: core.FailureInvalidInput, Message: "no such store in the simulation"}
 		}
 		if s.w.isAbsent(scope.Repository) {
-			return nil, &core.Failure{Kind: core.FailureUnavailable, Message: "the repository is not there"}
+			return nil, errAway
 		}
 		if s.w.stillLeaving() {
 			return nil, errors.Join(&core.Failure{Kind: core.FailureConflict, Message: "the store is in use"}, store.ErrOwnerLeaving)
@@ -235,13 +255,22 @@ func (s simStores) open(ctx context.Context, scope app.Scope) (store.Store, erro
 	})
 }
 
-// Known is as filestores.Known behaves: a repository that is away stays known.
+// Known is as filestores.Known behaves: a repository that is away stays known until it is forgotten.
 func (s simStores) Known(ctx context.Context) ([]app.Scope, error) {
-	return gated(ctx, s.w, s.d, "stores.Known", false, func() ([]app.Scope, error) { return slices.Clone(scopes), nil })
+	return gated(ctx, s.w, s.d, "stores.Known", false, func() ([]app.Scope, error) {
+		s.w.mu.Lock()
+		defer s.w.mu.Unlock()
+		return slices.DeleteFunc(slices.Clone(scopes), func(scope app.Scope) bool { return s.w.forgotten[scope] }), nil
+	})
 }
 
-// Forget has nothing to drop: the world's stores are fixed when it begins.
-func (s simStores) Forget(context.Context, app.Scope) error { return nil }
+// Forget drops a store from what the daemon knows. The world's own copy stays, for the invariants.
+func (s simStores) Forget(_ context.Context, scope app.Scope) error {
+	s.w.mu.Lock()
+	defer s.w.mu.Unlock()
+	s.w.forgotten[scope] = true
+	return nil
+}
 
 // Close has nothing to give up: the store outlives every daemon of the world.
 func (s simStores) Close() error { return nil }
@@ -263,6 +292,12 @@ func (w *world) stillLeaving() bool {
 	}
 	w.leaving--
 	return true
+}
+
+func (w *world) isForgetting(repo string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.forgetting && repo == w.lost
 }
 
 func (w *world) isAbsent(repo string) bool {
@@ -660,7 +695,7 @@ func (w *world) noteRelease(ref lifecycle.Ref) {
 			continue
 		}
 		j, err := w.raw[scope].Job(context.Background(), ref.Job)
-		if err == nil && j.State == core.JobRunning {
+		if err == nil && j.State == core.JobRunning && !w.isForgetting(scope.Repository) {
 			w.violate("the supervisor of %s was let go while its job is running", ref)
 		}
 	}
