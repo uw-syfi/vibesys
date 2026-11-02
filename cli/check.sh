@@ -27,3 +27,8 @@ done
 # release build and install.sh, which run real tools. The per-package timeout only guards against a
 # hang; the slowest package, the seeded simulation, takes about a minute under the detector.
 go test -race -count=1 -timeout 300s ./...
+
+# More seeds without the detector, since a race the detector finds needs a schedule the first few
+# hundred seeds may not reach. The count goes past seed 1519, which was the first to lose a cancel
+# across recovery, and the run takes about 30 seconds.
+VIBESYS_SIM_SEEDS=1530 go test -count=1 -timeout 300s -run TestSeedsHoldTheInvariants ./internal/sim

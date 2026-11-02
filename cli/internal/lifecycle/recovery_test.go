@@ -119,3 +119,27 @@ func TestARetryForAStepNoLongerWaitingRepeatsNothing(t *testing.T) {
 		t.Fatalf("the next failure asked for %v, want a retry", got)
 	}
 }
+
+// A cancel that arrived while a job could not act on it reaches the supervisor before the command
+// may start, on a second look as on a launch. A separate signal would race the start.
+func TestASecondLookAdoptsWithTheCancelFirst(t *testing.T) {
+	s, reqs := lifecycle.Step(lifecycle.State{}, lifecycle.Admitted{Ref: aRef, SubmittedAt: epoch})
+	if len(reqs) != 1 {
+		t.Fatalf("admitting: %v", reqs)
+	}
+	s, _ = lifecycle.Step(s, lifecycle.CancelAsked{Ref: aRef, Reason: "stop", State: core.JobQueued, SubmittedAt: epoch, At: epoch})
+	s, _ = lifecycle.Step(s, lifecycle.Launched{Ref: aRef})
+	s, _ = lifecycle.Step(s, lifecycle.FollowFailed{Ref: aRef, Failure: core.Failure{Message: "silent"}, At: epoch})
+	s, _ = lifecycle.Step(s, lifecycle.StopFailed{Ref: aRef, Failure: core.Failure{Message: "silent"}})
+	s, _ = lifecycle.Step(s, lifecycle.RetryDue{Ref: aRef})
+	_, reqs = lifecycle.Step(s, lifecycle.Recovered{
+		Ref: aRef, State: core.JobRunning, SubmittedAt: epoch, Supervisor: lifecycle.PresenceAlive, At: epoch,
+	})
+	if len(reqs) != 1 {
+		t.Fatalf("the second look asked for %v, want one Adopt", reqs)
+	}
+	adopt, ok := reqs[0].(lifecycle.Adopt)
+	if !ok || !adopt.CancelFirst || adopt.CancelReason != "stop" {
+		t.Fatalf("the second look asked for %#v, want an Adopt with the cancel first", reqs[0])
+	}
+}

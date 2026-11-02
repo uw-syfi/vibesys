@@ -397,13 +397,9 @@ func (s *State) recover(e Recovered) []Request {
 		switch {
 		case alive:
 			s.place(e, kept, PhaseRunning)
-			i := s.find(e.Ref)
-			reqs := []Request{Adopt{Ref: e.Ref}}
-			if s.entries[i].cancelAsked {
-				s.entries[i].cancelSent = true
-				reqs = append(reqs, SignalCancel{Ref: e.Ref, Reason: s.entries[i].cancelReason})
-			}
-			return reqs
+			cur := &s.entries[s.find(e.Ref)]
+			cur.cancelSent = cur.cancelAsked
+			return []Request{Adopt{Ref: e.Ref, CancelFirst: cur.cancelAsked, CancelReason: cur.cancelReason}}
 		case unknown:
 			return s.inDoubt(e, kept)
 		}
