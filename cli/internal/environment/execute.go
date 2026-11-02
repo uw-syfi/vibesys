@@ -33,10 +33,14 @@ func Validate(x core.Execution) error {
 	return nil
 }
 
-// Exit is how a process group's leader ended. Err is set when it could not be waited for.
+// Exit is how a process group's leader ended.
 type Exit struct {
 	Code int
-	Err  error
+	// Kind, when set, says the leader ended in a way that is not an exit status, such as a
+	// container the environment lost: the execution then ends with this kind.
+	Kind core.ExecKind
+	// Err is set when the leader could not be waited for.
+	Err error
 }
 
 // Process is a started process group.
@@ -114,6 +118,9 @@ func exited(st Exit) (core.ExecOutcome, error) {
 	if st.Err != nil {
 		return core.ExecOutcome{}, st.Err
 	}
+	if st.Kind != "" {
+		return core.ExecOutcome{Kind: st.Kind}, nil
+	}
 	return core.ExecOutcome{Kind: core.ExecExited, ExitCode: st.Code}, nil
 }
 
@@ -131,7 +138,7 @@ func awaitReady(l Launcher, probe []string, svc Process, ev Events) (outcome cor
 			if st.Err != nil {
 				return core.ExecOutcome{}, false, st.Err
 			}
-			if st.Code == 0 {
+			if st.Code == 0 && st.Kind == "" {
 				return core.ExecOutcome{}, true, nil
 			}
 		case <-svc.Exited():
