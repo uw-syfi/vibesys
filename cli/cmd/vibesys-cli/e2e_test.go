@@ -493,6 +493,20 @@ func (e *e2e) supervisors() []host.Info {
 	return infos
 }
 
+// supervisorsAmong returns those of the given supervisors that are still listed, by their job.
+func (e *e2e) supervisorsAmong(of []host.Info) []host.Info {
+	e.t.Helper()
+	var left []host.Info
+	for _, now := range e.supervisors() {
+		for _, was := range of {
+			if now.Ref == was.Ref {
+				left = append(left, now)
+			}
+		}
+	}
+	return left
+}
+
 func (e *e2e) killSupervisor(info host.Info) {
 	e.t.Helper()
 	if info.PID == 0 {
@@ -973,6 +987,12 @@ func TestE2EARepositoryGoneForGoodHoldsUpNoOtherAndIsForgotten(t *testing.T) {
 	}
 	e.release("g")
 	e.awaitCommandEnd(id)
+	// Only this repository's supervisor is in the runtime directory now: the daemon is dead and
+	// nothing else was submitted. Its entry is the one the forget has to remove.
+	mine := e.supervisors()
+	if len(mine) != 1 {
+		t.Fatalf("supervisors of the repository before the forget = %v, want one", mine)
+	}
 
 	next := b.submit("print", "B", ";", "exit", "0")
 	if r := b.waitThrough(next); r.code != exitOK || !strings.Contains(r.stdout, "succeeded (exit 0)") {
@@ -981,8 +1001,13 @@ func TestE2EARepositoryGoneForGoodHoldsUpNoOtherAndIsForgotten(t *testing.T) {
 	if r := b.run("daemon", "forget", e.repo); r.code != exitOK || !strings.Contains(r.stdout, "task") {
 		t.Fatalf("daemon forget = %+v", r)
 	}
-	if left := e.supervisors(); len(left) != 0 {
-		t.Fatalf("supervisors after the forget = %v, want none", left)
+	// The listing is of the whole runtime directory, and the other repository's job is in it until
+	// the daemon lets its supervisor go, which it does after recording the end that the wait above
+	// saw (see expectSupervisorGone). That entry is going away on its own, with the forget not
+	// involved, so only the forgotten repository's entry is looked at: the forget answers after
+	// removing it.
+	if left := e.supervisorsAmong(mine); len(left) != 0 {
+		t.Fatalf("supervisors of the forgotten repository after the forget = %v, want none", left)
 	}
 	if r := b.run("daemon", "forget", e.repo); r.code == exitOK {
 		t.Fatalf("a second forget = %+v, want it refused as unknown", r)
