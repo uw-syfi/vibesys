@@ -1,0 +1,32 @@
+version = 1
+backends = ["rocm"]
+
+[agent]
+domain = "llm-serving"
+interface = "service"
+
+[evaluator]
+name = "vibesys-evaluator-agentx"
+version = "0.1.0"
+
+[accuracy]
+command = ["uv", "run", "--locked", "--isolated", "--no-project", "--python", "3.12", "--script", "${PROJECT_ROOT}/.vibesys/shared/int4_checker.py"]
+timeout_seconds = 3600
+
+[benchmark]
+entrypoint = "agentx-v1"
+args = ["--mode", "full", "--model", "RecursiveSI/flint-int4-gguf", "--tokenizer", "RecursiveSI/flint", "--tokenizer-revision", "2a247be0c0aec895ccb0ac7ca92229ec6df37288", "--concurrency", "4", "--max-context-length", "262144"]
+timeout_seconds = 3600
+result_protocol = 2
+
+[catalogue]
+domain = "llm-serving"
+
+[catalogue.hardware]
+accelerator = "AMD MI210"
+count = 1
+vendor = "amd"
+
+[catalogue.model]
+name = "Flint 40B A2.5B INT4 Q4_1"
+maker = "other"
