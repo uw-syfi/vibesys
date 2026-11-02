@@ -161,12 +161,9 @@ func run(t *testing.T, env environment.Environment, dir string, argv ...string) 
 	var out strings.Builder
 	ctx, cancel := context.WithTimeout(context.Background(), envtest.Backstop)
 	defer cancel()
-	res, err := env.Run(ctx, core.Execution{
+	res := envtest.Ended(t, env.Run(ctx, core.Execution{
 		Checkout: core.Checkout{Commit: target.Commit, Dir: dir}, Argv: argv, Timeout: envtest.Backstop,
-	}, &syncWriter{b: &out})
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
+	}, &syncWriter{b: &out}))
 	return res, out.String()
 }
 
@@ -253,12 +250,12 @@ func TestACommandWritesToTheScratchDirectoryAndTheHostReadsIt(t *testing.T) {
 	var out strings.Builder
 	ctx, cancel := context.WithTimeout(context.Background(), envtest.Backstop)
 	defer cancel()
-	res, err := env.Run(ctx, core.Execution{
+	res := envtest.Ended(t, env.Run(ctx, core.Execution{
 		Checkout: core.Checkout{Commit: target.Commit, Dir: dir}, Scratch: scratch,
 		Argv: []string{"sh", "-c", `printf '{"ops": 1}' > "$1/sample-1.out"`, "sh", scratch}, Timeout: envtest.Backstop,
-	}, &syncWriter{b: &out})
-	if err != nil || res.Kind != core.ExecExited || res.ExitCode != 0 {
-		t.Fatalf("Run = %+v, %v, output %q", res, err, out.String())
+	}, &syncWriter{b: &out}))
+	if res.Kind != core.ExecExited || res.ExitCode != 0 {
+		t.Fatalf("Run = %+v, output %q", res, out.String())
 	}
 	data, err := os.ReadFile(scratch + "/sample-1.out")
 	if err != nil || string(data) != `{"ops": 1}` {
@@ -382,11 +379,10 @@ func TestAnImageWithoutAShellIsRefusedAtTheRun(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), envtest.Backstop)
 	defer cancel()
-	_, err = env.Run(ctx, core.Execution{
+	if f := envtest.NotStarted(t, env.Run(ctx, core.Execution{
 		Checkout: core.Checkout{Commit: target.Commit, Dir: t.TempDir()}, Argv: []string{"true"}, Timeout: envtest.Backstop,
-	}, discard{})
-	if err == nil || !strings.Contains(err.Error(), "no /bin/sh") {
-		t.Fatalf("Run in an image without a shell: %v, want it to say the image has no /bin/sh", err)
+	}, discard{})); !strings.Contains(f.Message, "no /bin/sh") {
+		t.Fatalf("Run in an image without a shell: %v, want it to say the image has no /bin/sh", f.Message)
 	}
 	left, err := newEngine().Containers(ctx, docker.Labels{docker.LabelScope: scope})
 	if err != nil || len(left) != 0 {

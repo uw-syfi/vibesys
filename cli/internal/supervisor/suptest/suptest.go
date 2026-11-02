@@ -509,18 +509,32 @@ func find(t *testing.T, s supervisor.Supervisors, ref lifecycle.Ref) supervisor.
 	return nil
 }
 
-// execOf is how the command of an outcome ended, zero when it did not run.
+// execOf is how the command of an outcome ended, zero when no ending was seen.
 func execOf(o lifecycle.Outcome) core.ExecOutcome {
-	if end, ok := o.End.(lifecycle.Ran); ok {
-		return end.Exec
+	switch end := o.End.(type) {
+	case lifecycle.CommandEnded:
+		if e, ok := end.Attempt.(core.Ended); ok {
+			return e.Exec
+		}
+	case lifecycle.FlowEnded:
+		if s, ok := end.Verdict.(lifecycle.Stopped); ok {
+			return s.Exec
+		}
 	}
 	return core.ExecOutcome{}
 }
 
-// notAttemptedOf is why an outcome's command was not attempted, nil when it was.
+// notAttemptedOf is why an outcome's command never started, nil when it did.
 func notAttemptedOf(o lifecycle.Outcome) *core.Failure {
-	if end, ok := o.End.(lifecycle.NotAttempted); ok {
-		return &end.Failure
+	switch end := o.End.(type) {
+	case lifecycle.CommandEnded:
+		if e, ok := end.Attempt.(core.NotStarted); ok {
+			return &e.Failure
+		}
+	case lifecycle.FlowEnded:
+		if n, ok := end.Verdict.(lifecycle.NotAttempted); ok {
+			return &n.Failure
+		}
 	}
 	return nil
 }

@@ -16,39 +16,89 @@ type Settlement struct {
 }
 
 // Settle says what a supervisor's outcome means for its job, which was in state from. Nothing is
-// inferred: an outcome that does not say the command succeeded is not a success.
+// inferred: an outcome that does not say the job succeeded is not a success.
 //
-//   - A command that exited with 0 succeeded, and one that exited with another code failed with
-//     that code. A timeout, a service that never became ready and a service that exited early
-//     fail the job and say so in its output.
+//   - A command job whose command exited with 0 succeeded, and one that exited with another code
+//     failed with that code. A timeout, a service that never became ready and a service that
+//     exited early fail the job and say so in its output.
+//   - A check or a measure job that passed succeeds with its result. One whose step stopped is
+//     settled as a command that ended that way, except that an exit code of 0 is no pass; one whose
+//     result was rejected fails, with the reason in its output.
 //   - A command ended by a cancel that reached the supervisor is cancelled, with that reason. One
 //     ended the same way with no request behind it, because the supervisor was stopped from
 //     outside, is lost: the user did not cancel it and it did not finish.
-//   - An outcome the environment could not observe, and one this build does not know, is lost.
-//   - A command that could not be attempted failed, with the reason in its output.
-//   - A check or a measure job that passed succeeds with its result, and one whose result was
-//     rejected fails, with the reason in its output.
+//   - A command that never started failed, with the reason in its output: nothing of it ran.
+//   - A command that started and was not seen to end is lost, with the reason in its output: it
+//     may have done anything, so it is neither a failure to run nor a result.
+//   - An outcome that says none of these is lost.
 func Settle(job core.JobID, from core.JobState, o Outcome, at time.Time) Settlement {
 	t := core.Transition{Job: job, From: from, At: at}
 	switch end := o.End.(type) {
-	case Ran:
-		return settleRan(t, end.Exec, o)
-	case NotAttempted:
-		t.To = core.JobFailed
-		return Settlement{Transition: t, Log: fmt.Sprintf("vibesys-cli: the job could not be run: %s", end.Failure.Message)}
+	case CommandEnded:
+		return settleAttempt(t, end.Attempt, o)
+	case FlowEnded:
+		return settleVerdict(t, end.Verdict, o)
+	default:
+		return unknownEnd(t)
+	}
+}
+
+// settleAttempt says what the end of a command job's attempt means.
+func settleAttempt(t core.Transition, a core.Attempt, o Outcome) Settlement {
+	switch a := a.(type) {
+	case core.Ended:
+		return settleRan(t, a.Exec, o)
+	case core.NotStarted:
+		return notStarted(t, a.Failure)
+	case core.Unobserved:
+		return unobserved(t, a.Failure)
+	default:
+		return unknownEnd(t)
+	}
+}
+
+// settleVerdict says what the end of a check or a measure job means.
+func settleVerdict(t core.Transition, v Verdict, o Outcome) Settlement {
+	switch v := v.(type) {
 	case Passed:
 		code := 0
-		result := end.Result
+		result := v.Result
 		t.To, t.ExitCode, t.Result = core.JobSucceeded, &code, &result
 		// The check pass a measurement links is in the result, and the job takes it from there:
 		// it is stored once, so the transition does not carry a second copy to disagree with it.
 		return Settlement{Transition: t}
+	case Stopped:
+		if v.Exec.Kind == core.ExecExited && v.Exec.ExitCode == 0 {
+			// Only Passed is a pass: a step that exited 0 did not stop the job.
+			t.To = core.JobLost
+			return Settlement{Transition: t, Log: "vibesys-cli: the supervisor said a step stopped the job and exited 0, which is no ending"}
+		}
+		return settleRan(t, v.Exec, o)
+	case NotAttempted:
+		return notStarted(t, v.Failure)
 	case Rejected:
 		t.To = core.JobFailed
-		return Settlement{Transition: t, Log: fmt.Sprintf("vibesys-cli: the job's result was rejected: %s", end.Reason)}
+		return Settlement{Transition: t, Log: fmt.Sprintf("vibesys-cli: the job's result was rejected: %s", v.Reason)}
+	case Lost:
+		return unobserved(t, v.Failure)
 	default:
-		return settleRan(t, core.ExecOutcome{Kind: core.ExecUnknown}, o)
+		return unknownEnd(t)
 	}
+}
+
+func notStarted(t core.Transition, f core.Failure) Settlement {
+	t.To = core.JobFailed
+	return Settlement{Transition: t, Log: fmt.Sprintf("vibesys-cli: the job could not be run: %s", f.Message)}
+}
+
+func unobserved(t core.Transition, f core.Failure) Settlement {
+	t.To = core.JobLost
+	return Settlement{Transition: t, Log: fmt.Sprintf("vibesys-cli: the job ran, and how it ended is not known: %s", f.Message)}
+}
+
+func unknownEnd(t core.Transition) Settlement {
+	t.To = core.JobLost
+	return Settlement{Transition: t, Log: "vibesys-cli: the supervisor did not say how the job ended"}
 }
 
 // settleRan says what a command's end means.
@@ -81,7 +131,7 @@ func settleRan(t core.Transition, exec core.ExecOutcome, o Outcome) Settlement {
 		return Settlement{Transition: t, Log: "vibesys-cli: the job was ended by something other than a cancel"}
 	default:
 		t.To = core.JobLost
-		return Settlement{Transition: t, Log: "vibesys-cli: the environment could not say how the job ended"}
+		return Settlement{Transition: t, Log: fmt.Sprintf("vibesys-cli: the job ended in a way this build does not know (%q)", exec.Kind)}
 	}
 }
 

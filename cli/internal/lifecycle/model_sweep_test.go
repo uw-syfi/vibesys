@@ -362,7 +362,7 @@ func (s search) finish(m *model, i int) {
 		kind = core.ExecCancelled
 	}
 	s.feed(m, lifecycle.Finished{Ref: s.ref(i), At: m.at(), Outcome: lifecycle.Outcome{
-		End: lifecycle.Ran{Exec: core.ExecOutcome{Kind: kind}}, CancelAsked: m.runs[i].cancel, CancelReason: "r",
+		End: lifecycle.CommandEnded{Attempt: core.Ended{Exec: core.ExecOutcome{Kind: kind}}}, CancelAsked: m.runs[i].cancel, CancelReason: "r",
 	}})
 }
 

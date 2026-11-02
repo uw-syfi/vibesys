@@ -17,36 +17,22 @@ import (
 // remove the containers earlier runs left, find or build the image, arm the limit, start the
 // container, and let environment.Execute decide how the commands end. The container is removed
 // whatever happened, with a context that the caller's cancellation cannot cut short.
-func (e *env) Run(ctx context.Context, x core.Execution, out io.Writer) (core.ExecOutcome, error) {
+func (e *env) Run(ctx context.Context, x core.Execution, out io.Writer) core.Attempt {
 	if err := environment.Validate(x); err != nil {
-		return core.ExecOutcome{}, err
+		return core.NotStarted{Failure: core.AsFailure(err)}
 	}
 	if ctx.Err() != nil {
-		return core.ExecOutcome{Kind: core.ExecCancelled}, nil
+		return core.Ended{Exec: core.ExecOutcome{Kind: core.ExecCancelled}}
 	}
 	if out == nil {
 		out = io.Discard
 	}
 	r := &run{e: e, ctx: ctx, x: x, sink: environment.NewSink(out)}
-	outcome, err := r.prepareAndExecute()
-	lost := r.end()
-	if err != nil && ctx.Err() != nil {
-		// A step that failed while the caller was cancelling it was ended by the cancellation.
-		outcome, err = core.ExecOutcome{Kind: core.ExecCancelled}, nil
-	}
-	switch {
-	case err != nil && lost != nil:
-		// Both matter: the run failed, and what it started may be left. The first error keeps its
-		// kind for the caller.
-		return core.ExecOutcome{}, errors.Join(err, lost)
-	case err != nil:
-		return core.ExecOutcome{}, err
-	case lost != nil:
-		// The command ran, but the container was not removed, or what it wrote was not kept: the
-		// environment cannot say what the run left behind or whether its result is whole.
-		return core.ExecOutcome{Kind: core.ExecUnknown}, lost
-	}
-	return outcome, nil
+	attempt := r.prepareAndExecute()
+	// A container that was not removed, or output that was not kept, makes the end of a command
+	// that ran one the environment cannot vouch for. Before any command ran, it only adds to why
+	// none did.
+	return environment.Finish(ctx, attempt, r.end())
 }
 
 // run is one call of Run: the container it started and what it needs to end it.
@@ -63,28 +49,31 @@ type run struct {
 	stopLimit func()
 }
 
-func (r *run) prepareAndExecute() (core.ExecOutcome, error) {
+// prepareAndExecute makes the container and runs the execution in it. Until a command starts in
+// the container nothing of the execution ran: the container itself runs only a process that waits.
+func (r *run) prepareAndExecute() core.Attempt {
+	notStarted := func(err error) core.Attempt { return core.NotStarted{Failure: core.AsFailure(err)} }
 	p := r.e.p
 	spec, err := r.e.spec(r.ctx)
 	if err != nil {
-		return core.ExecOutcome{}, err
+		return notStarted(err)
 	}
 	id := p.cfg.IDs.New()
 	if err := checkRunID(id); err != nil {
-		return core.ExecOutcome{}, err
+		return notStarted(err)
 	}
 	r.name = containerName(id)
 	if r.claimed = p.claim(r.name); !r.claimed {
-		return core.ExecOutcome{}, &core.Failure{Kind: core.FailureInternal, Message: fmt.Sprintf("docker: the run id %q is already in use", id)}
+		return notStarted(&core.Failure{Kind: core.FailureInternal, Message: fmt.Sprintf("docker: the run id %q is already in use", id)})
 	}
 	if err := p.sweep(r.ctx); err != nil {
-		return core.ExecOutcome{}, err
+		return notStarted(err)
 	}
 	// The build's output is not the command's: a run's output must not depend on whether its
 	// image was already built. A failed build says why in its error.
 	img, err := p.image(r.ctx, spec, io.Discard)
 	if err != nil {
-		return core.ExecOutcome{}, err
+		return notStarted(err)
 	}
 	// The limit bounds the commands and their service, and not the preparation above: building
 	// an image takes as long as it takes. It is armed before anything runs in the container.
@@ -103,7 +92,7 @@ func (r *run) prepareAndExecute() (core.ExecOutcome, error) {
 		Env: map[string]string{"HOME": "/tmp"},
 	})
 	if err != nil {
-		return core.ExecOutcome{}, err
+		return notStarted(err)
 	}
 	return environment.Execute(r.x, r.container, environment.Events{
 		Limit:     limit,

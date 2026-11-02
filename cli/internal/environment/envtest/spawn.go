@@ -38,7 +38,7 @@ func HelperMain(newEnv func() environment.Environment) bool {
 		os.Stderr.WriteString("envtest helper: " + err.Error() + "\n")
 		os.Exit(2)
 	}
-	_, _ = newEnv().Run(context.Background(), x, io.Discard)
+	_ = newEnv().Run(context.Background(), x, io.Discard)
 	return true
 }
 

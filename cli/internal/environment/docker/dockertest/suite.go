@@ -365,8 +365,8 @@ func caseKill(h *harness) {
 	proc.Kill()
 	select {
 	case exit := <-proc.Exited():
-		if exit.Kind != core.ExecUnknown || exit.Code != 0 || exit.Err != nil {
-			h.t.Errorf("a killed process ended %+v, want the unknown kind: the engine cannot say what became of its command", exit)
+		if !errors.Is(exit.Err, docker.ErrLost) || exit.Code != 0 {
+			h.t.Errorf("a killed process ended %+v, want docker.ErrLost: the engine cannot say what became of its command", exit)
 		}
 	case <-h.ctx.Done():
 		h.t.Fatal("a killed process never reported its end")
@@ -411,8 +411,8 @@ func caseLost(h *harness) {
 	}{proc, h.afterRemoval(c)} {
 		select {
 		case exit := <-p.Exited():
-			if exit.Kind != core.ExecUnknown {
-				h.t.Errorf("a command of a removed container ended %+v, want the unknown kind: the engine cannot say how it ended", exit)
+			if !errors.Is(exit.Err, docker.ErrLost) {
+				h.t.Errorf("a command of a removed container ended %+v, want docker.ErrLost: the engine cannot say how it ended", exit)
 			}
 		case <-h.ctx.Done():
 			h.t.Fatal("a command of a removed container never ended")

@@ -211,17 +211,17 @@ func (h *handle) finish(waitErr error, stderr string) environment.Exit {
 	if code < 0 {
 		// The client was killed, by Kill or by Close. What its command went on to do is not
 		// known: it runs on until the container is removed.
-		return environment.Exit{Kind: core.ExecUnknown}
+		return docker.Lost(fmt.Sprintf("the client following a command of %s was killed", h.name))
 	}
 	// The command's own standard error is merged into its output inside the container, so what
 	// the client writes to standard error is the engine's: it could not reach the container.
 	if strings.TrimSpace(stderr) != "" {
-		return environment.Exit{Kind: core.ExecUnknown}
+		return docker.Lost(fmt.Sprintf("the engine could not reach %s: %s", h.name, strings.TrimSpace(stderr)))
 	}
 	// A command killed by a signal and a command whose container was removed under it both exit
 	// with 128 plus the signal. Only a container that still runs says it was the command.
 	if code >= 128 && !h.running() {
-		return environment.Exit{Kind: core.ExecUnknown}
+		return docker.Lost(fmt.Sprintf("the container %s went away under the command", h.name))
 	}
 	return environment.Exit{Code: code}
 }

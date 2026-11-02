@@ -128,16 +128,17 @@ func TestEveryContractEnumValueIsTranslatedOrRefused(t *testing.T) {
 		}
 	}
 	for n, name := range cliv1.ExecutionKind_name {
-		kind := wire.ToExecKind(cliv1.ExecutionKind(n))
-		if name == "EXECUTION_KIND_UNSPECIFIED" && kind != core.ExecUnknown {
-			t.Fatalf("an unspecified ending is %q, want unknown", kind)
+		kind, err := wire.ToExecKind("kind", cliv1.ExecutionKind(n))
+		noEnding := name == "EXECUTION_KIND_UNSPECIFIED" || name == "EXECUTION_KIND_UNKNOWN"
+		if noEnding && err == nil {
+			t.Fatalf("%s is read as the ending %q, want it refused", name, kind)
 		}
-		if name != "EXECUTION_KIND_UNSPECIFIED" && wire.ExecutionKind(kind) != cliv1.ExecutionKind(n) {
-			t.Fatalf("%s: got %q", name, kind)
+		if !noEnding && (err != nil || wire.ExecutionKind(kind) != cliv1.ExecutionKind(n)) {
+			t.Fatalf("%s: got %q, %v", name, kind, err)
 		}
 	}
-	if got := wire.ToExecKind(cliv1.ExecutionKind(99)); got != core.ExecUnknown {
-		t.Fatalf("an ending from a newer build is %q, want unknown and never a success", got)
+	if got, err := wire.ToExecKind("kind", cliv1.ExecutionKind(99)); err == nil {
+		t.Fatalf("an ending from a newer build is %q, want it refused and never a success", got)
 	}
 	for n, name := range cliv1.FailureKind_name {
 		if name == "FAILURE_KIND_UNSPECIFIED" {
@@ -208,22 +209,37 @@ func TestAFailureKeepsItsKindAcrossAGRPCStatus(t *testing.T) {
 
 func TestAnOutcomeSurvivesTheContractAndBack(t *testing.T) {
 	r := newRand(3)
-	kinds := []core.ExecKind{core.ExecExited, core.ExecTimedOut, core.ExecCancelled, core.ExecServiceNotReady, core.ExecServiceExited, core.ExecUnknown}
+	kinds := []core.ExecKind{core.ExecExited, core.ExecTimedOut, core.ExecCancelled, core.ExecServiceNotReady, core.ExecServiceExited}
+	exec := func() core.ExecOutcome {
+		e := core.ExecOutcome{Kind: pick(r, kinds...)}
+		if e.Kind == core.ExecExited {
+			e.ExitCode = r.IntN(300) - 1
+		}
+		return e
+	}
+	failure := func() core.Failure {
+		return core.Failure{Kind: pick(r, core.FailureUnavailable, core.FailureInternal), Message: pick(r, "", "no image")}
+	}
 	for range 500 {
 		o := lifecycle.Outcome{}
-		switch r.IntN(7) {
+		switch r.IntN(9) {
 		case 0:
-			o.End = lifecycle.NotAttempted{Failure: core.Failure{Kind: pick(r, core.FailureUnavailable, core.FailureInternal), Message: "no image"}}
+			o.End = lifecycle.CommandEnded{Attempt: core.NotStarted{Failure: failure()}}
 		case 1:
-			o.End = lifecycle.Rejected{Reason: pick(r, "", "no result")}
+			o.End = lifecycle.CommandEnded{Attempt: core.Ended{Exec: exec()}}
 		case 2:
-			o.End = lifecycle.Passed{Result: aResult()}
+			o.End = lifecycle.CommandEnded{Attempt: core.Unobserved{Failure: failure()}}
+		case 3:
+			o.End = lifecycle.FlowEnded{Verdict: lifecycle.Passed{Result: aResult()}}
+		case 4:
+			o.End = lifecycle.FlowEnded{Verdict: lifecycle.Stopped{Exec: exec()}}
+		case 5:
+			o.End = lifecycle.FlowEnded{Verdict: lifecycle.NotAttempted{Failure: failure()}}
+		case 6:
+			o.End = lifecycle.FlowEnded{Verdict: lifecycle.Rejected{Reason: pick(r, "", "no result")}}
+		case 7:
+			o.End = lifecycle.FlowEnded{Verdict: lifecycle.Lost{Failure: failure()}}
 		default:
-			exec := core.ExecOutcome{Kind: pick(r, kinds...)}
-			if exec.Kind == core.ExecExited {
-				exec.ExitCode = r.IntN(300) - 1
-			}
-			o.End = lifecycle.Ran{Exec: exec}
 		}
 		if r.IntN(2) == 0 {
 			o.CancelAsked, o.CancelReason = true, pick(r, "", "stop")
@@ -232,14 +248,32 @@ func TestAnOutcomeSurvivesTheContractAndBack(t *testing.T) {
 			t.Fatalf("outcome came back changed: got %+v, want %+v", got, o)
 		}
 	}
-	unknown := lifecycle.Outcome{End: lifecycle.Ran{Exec: core.ExecOutcome{Kind: core.ExecUnknown}}}
-	if got := wire.ToOutcome(&cliv1.SupervisorOutcome{}); !reflect.DeepEqual(got, unknown) {
-		t.Fatalf("an empty outcome is %+v, want unknown", got)
+	if got := wire.ToOutcome(&cliv1.SupervisorOutcome{}); got.End != nil {
+		t.Fatalf("an empty outcome is %+v, want no end", got)
 	}
-	unreadable := &cliv1.SupervisorOutcome{Result: &cliv1.SupervisorOutcome_Passed{Passed: &cliv1.Result{}}}
-	if got := wire.ToOutcome(unreadable); !reflect.DeepEqual(got, unknown) {
-		t.Fatalf("a result that cannot be read is %+v, want unknown and never a success", got)
+	unreadable := &cliv1.SupervisorOutcome{Result: &cliv1.SupervisorOutcome_Flow{Flow: &cliv1.FlowEnd{Verdict: &cliv1.FlowEnd_Passed{Passed: &cliv1.Result{}}}}}
+	if got := wire.ToOutcome(unreadable); !isLost(got) {
+		t.Fatalf("a result that cannot be read is %+v, want lost and never a success", got)
 	}
+	unknownKind := &cliv1.SupervisorOutcome{Result: &cliv1.SupervisorOutcome_Command{Command: &cliv1.CommandEnd{
+		Attempt: &cliv1.CommandEnd_Ended{Ended: &cliv1.ExecutionOutcome{Kind: cliv1.ExecutionKind_EXECUTION_KIND_UNKNOWN}},
+	}}}
+	if got := wire.ToOutcome(unknownKind); !isLost(got) {
+		t.Fatalf("an ending of no kind is %+v, want one nobody saw", got)
+	}
+}
+
+// isLost says an outcome is an ending nobody saw.
+func isLost(o lifecycle.Outcome) bool {
+	switch end := o.End.(type) {
+	case lifecycle.CommandEnded:
+		_, ok := end.Attempt.(core.Unobserved)
+		return ok
+	case lifecycle.FlowEnded:
+		_, ok := end.Verdict.(lifecycle.Lost)
+		return ok
+	}
+	return false
 }
 
 // aResult is a result with every field set, as a supervisor reports it.

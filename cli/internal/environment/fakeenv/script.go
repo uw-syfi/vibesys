@@ -92,9 +92,9 @@ type interpreter struct {
 	dir string
 	// files is where the `emit` step writes; nil when the machine has no such files.
 	files Files
-	// ended is how a wait that its group ended reports, when it is not the default cancelled: a
-	// machine whose processes die with it cannot say how they ended.
-	ended core.ExecKind
+	// lostOnEnd is the error of a wait that its group ended, and nil for the default, a cancelled
+	// command: a machine whose processes die with it cannot say how they ended.
+	lostOnEnd error
 }
 
 // splitOutput separates the output file a command is told about from the rest of its script: a
@@ -120,7 +120,7 @@ func (in *interpreter) run(g *group, steps []step, out io.Writer, file string) (
 		switch w[0] {
 		case "print", "warn":
 			if _, err := fmt.Fprintln(out, strings.Join(w[1:], " ")); err != nil {
-				return core.ExecOutcome{Kind: core.ExecUnknown}, err
+				return core.ExecOutcome{}, err
 			}
 		case "emit":
 			if in.files == nil || file == "" {
@@ -129,15 +129,15 @@ func (in *interpreter) run(g *group, steps []step, out io.Writer, file string) (
 			in.files.Put(file, []byte(strings.Join(w[1:], " ")))
 		case "dir":
 			if _, err := fmt.Fprintln(out, in.dir); err != nil {
-				return core.ExecOutcome{Kind: core.ExecUnknown}, err
+				return core.ExecOutcome{}, err
 			}
 		case "hold":
 			if len(w) != 2 {
 				return exited(127)
 			}
 			if !in.gates.Wait(g.ctx, w[1]) {
-				if in.ended != "" {
-					return core.ExecOutcome{Kind: in.ended}, nil
+				if in.lostOnEnd != nil {
+					return core.ExecOutcome{}, in.lostOnEnd
 				}
 				return core.ExecOutcome{Kind: core.ExecCancelled}, nil
 			}
@@ -173,7 +173,7 @@ func (in *interpreter) run(g *group, steps []step, out io.Writer, file string) (
 		case "service-exited":
 			return core.ExecOutcome{Kind: core.ExecServiceExited}, nil
 		case "unknown":
-			return core.ExecOutcome{Kind: core.ExecUnknown}, nil
+			return core.ExecOutcome{}, errUnknown
 		case "fail":
 			return core.ExecOutcome{}, &core.Failure{Kind: core.FailureUnavailable, Message: strings.Join(w[1:], " ")}
 		default:
@@ -182,6 +182,11 @@ func (in *interpreter) run(g *group, steps []step, out io.Writer, file string) (
 	}
 	return exited(0)
 }
+
+var (
+	errEndedUnseen = &core.Failure{Kind: core.FailureUnavailable, Message: "fakeenv: the machine ended the command, and cannot say how it ended"}
+	errUnknown     = &core.Failure{Kind: core.FailureUnavailable, Message: "fakeenv: the script ended in a way the environment cannot say"}
+)
 
 // process is a started group of an execution: it implements environment.Process.
 type process struct {
@@ -215,6 +220,10 @@ func (l *launcher) Start(argv []string, sink io.Writer) (environment.Process, er
 	steps, ok := parse(argv)
 	if !ok {
 		steps = []step{{words: []string{"malformed"}}} // exits 127, as a shell does for a command it cannot run
+	}
+	if len(steps) > 0 && steps[0].words[0] == "fail" {
+		// A script that fails first is a command that cannot be started at all.
+		return nil, &core.Failure{Kind: core.FailureUnavailable, Message: strings.Join(steps[0].words[1:], " ")}
 	}
 	g := newGroup()
 	l.mu.Lock()

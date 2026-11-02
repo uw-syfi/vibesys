@@ -78,6 +78,7 @@ func Run(t *testing.T, rig Rig) {
 		{"output is delivered while the command still runs", caseStreaming},
 		{"a command that cannot be started is never a success", caseMissingCommand},
 		{"a cancelled context before the start runs nothing", caseCancelledBeforeStart},
+		{"a command whose output is lost ran, and its ending is not vouched for", caseOutputLost},
 		{"an execution that cannot be valid is refused and runs nothing", caseInvalid},
 		{"the fingerprint is stable and pins the environment", caseFingerprint},
 		{"cancelling ends the run and its whole process group", caseCancel},
@@ -185,8 +186,7 @@ type running struct {
 	cancel context.CancelFunc
 	done   chan struct{}
 
-	outcome core.ExecOutcome
-	err     error
+	attempt core.Attempt
 }
 
 // start begins a Run in the background. Its context is cancelled by cancel().
@@ -196,32 +196,50 @@ func (h *harness) start(x core.Execution) *running {
 	r := &running{h: h, out: newCapture(), cancel: cancel, done: make(chan struct{})}
 	h.runs.Go(func() {
 		defer close(r.done)
-		r.outcome, r.err = h.env.Run(ctx, x, r.out)
+		r.attempt = h.env.Run(ctx, x, r.out)
 	})
 	return r
 }
 
-// wait waits for the Run to return.
-func (r *running) wait() (core.ExecOutcome, error) {
+// wait waits for the Run to return, and fails the test unless the environment saw the command
+// end.
+func (r *running) wait() core.ExecOutcome {
 	r.h.t.Helper()
 	select {
 	case <-r.done:
-		return r.outcome, r.err
+		return Ended(r.h.t, r.attempt)
 	case <-r.h.ctx.Done():
 		r.h.t.Fatalf("Run did not return: the run is stuck")
-		return core.ExecOutcome{}, nil
+		return core.ExecOutcome{}
 	}
+}
+
+// Ended is how an attempt ended, and fails the test for one that did not end in a way the
+// environment saw.
+func Ended(t *testing.T, a core.Attempt) core.ExecOutcome {
+	t.Helper()
+	e, ok := a.(core.Ended)
+	if !ok {
+		t.Fatalf("Run: %+v, want an ending the environment saw", a)
+	}
+	return e.Exec
 }
 
 // run runs the program to its end.
 func (h *harness) run(p Program) (core.ExecOutcome, string) {
 	h.t.Helper()
 	r := h.start(h.exec(p))
-	out, err := r.wait()
-	if err != nil {
-		h.t.Fatalf("Run: %v", err)
+	return r.wait(), r.out.String()
+}
+
+// NotStarted is why an attempt never started, and fails the test for one that did.
+func NotStarted(t *testing.T, a core.Attempt) core.Failure {
+	t.Helper()
+	ns, ok := a.(core.NotStarted)
+	if !ok {
+		t.Fatalf("Run: %+v, want an attempt that never started", a)
 	}
-	return out, r.out.String()
+	return ns.Failure
 }
 
 func (h *harness) reached(point string) {
@@ -337,10 +355,7 @@ func caseStreaming(h *harness) {
 		h.t.Fatalf("the output shows what the command has not written yet: %q", r.out.String())
 	}
 	h.world.Release("go")
-	out, err := r.wait()
-	if err != nil {
-		h.t.Fatalf("Run: %v", err)
-	}
+	out := r.wait()
 	expectExit(h.t, out, 0)
 	if want := "first\nsecond\n"; r.out.String() != want {
 		h.t.Errorf("output %q, want %q", r.out.String(), want)
@@ -349,22 +364,39 @@ func caseStreaming(h *harness) {
 
 func caseMissingCommand(h *harness) {
 	x := core.Execution{Checkout: h.checkout, Argv: h.world.Missing(), Timeout: limit}
-	out, err := h.env.Run(h.ctx, x, newCapture())
-	if err == nil && out.Kind == core.ExecExited && out.ExitCode == 0 {
-		h.t.Fatalf("a command that does not exist reported success")
+	switch a := h.env.Run(h.ctx, x, newCapture()).(type) {
+	case core.NotStarted:
+	case core.Ended:
+		if a.Exec.Kind == core.ExecExited && a.Exec.ExitCode == 0 {
+			h.t.Fatalf("a command that does not exist reported success")
+		}
+	default:
+		h.t.Fatalf("a command that does not exist ended %+v: an environment that could not start it says so, and one that ran a shell for it saw the shell end", a)
 	}
 }
 
 func caseCancelledBeforeStart(h *harness) {
 	ctx, cancel := context.WithCancel(h.ctx)
 	cancel()
-	out, err := h.env.Run(ctx, h.exec(Program{Mark("ran")}), newCapture())
-	if err != nil {
-		h.t.Fatalf("Run: %v", err)
-	}
+	out := Ended(h.t, h.env.Run(ctx, h.exec(Program{Mark("ran")}), newCapture()))
 	expect(h.t, out, core.ExecCancelled)
 	if h.world.Marked("ran") {
 		h.t.Errorf("the command ran although the context was cancelled before the run")
+	}
+}
+
+// brokenOut is an output that takes nothing.
+type brokenOut struct{}
+
+func (brokenOut) Write([]byte) (int, error) { return 0, errors.New("envtest: the output is gone") }
+
+func caseOutputLost(h *harness) {
+	a := h.env.Run(h.ctx, h.exec(Program{Mark("ran"), Print("x")}), brokenOut{})
+	if _, ok := a.(core.Unobserved); !ok {
+		h.t.Fatalf("a command whose output was lost ended %+v, want an ending nobody vouches for: it ran, so it is never 'not started'", a)
+	}
+	if !h.world.Reached(h.ctx, "ran") {
+		h.t.Fatalf("the command never ran")
 	}
 }
 
@@ -389,10 +421,9 @@ func caseInvalid(h *harness) {
 	for name, mutate := range cases {
 		x := ok
 		mutate(&x)
-		_, err := h.env.Run(h.ctx, x, newCapture())
-		var failure *core.Failure
-		if !errors.As(err, &failure) || failure.Kind != core.FailureInvalidInput {
-			h.t.Errorf("%s: error %v, want an invalid_input failure", name, err)
+		a := h.env.Run(h.ctx, x, newCapture())
+		if ns, ok := a.(core.NotStarted); !ok || ns.Failure.Kind != core.FailureInvalidInput {
+			h.t.Errorf("%s: %+v, want not started with an invalid_input failure", name, a)
 		}
 	}
 	if h.world.Marked("ran") {
@@ -426,10 +457,7 @@ func caseCancel(h *harness) {
 	h.reached("up")
 	h.reached(AliveMark("child"))
 	r.cancel()
-	out, err := r.wait()
-	if err != nil {
-		h.t.Fatalf("Run: %v", err)
-	}
+	out := r.wait()
 	expect(h.t, out, core.ExecCancelled)
 	h.gone("main", "child")
 }
@@ -439,10 +467,7 @@ func caseLimit(h *harness) {
 	h.reached("up")
 	h.reached(AliveMark("child"))
 	h.limitTimer().Fire()
-	out, err := r.wait()
-	if err != nil {
-		h.t.Fatalf("Run: %v", err)
-	}
+	out := r.wait()
 	expect(h.t, out, core.ExecTimedOut)
 	h.gone("main", "child")
 }
@@ -451,10 +476,7 @@ func caseLeftovers(h *harness) {
 	r := h.start(h.exec(Program{Child(Alive("child"), Hold(Forever)), Hold("go"), Exit(3)}))
 	h.reached(AliveMark("child"))
 	h.world.Release("go")
-	out, err := r.wait()
-	if err != nil {
-		h.t.Fatalf("Run: %v", err)
-	}
+	out := r.wait()
 	expectExit(h.t, out, 3)
 	h.gone("child")
 }
@@ -496,10 +518,7 @@ func caseServiceNoProbe(h *harness) {
 	h.reached(AliveMark("service"))
 	h.reached(AliveMark("service-child"))
 	h.world.Release("go")
-	out, err := r.wait()
-	if err != nil {
-		h.t.Fatalf("Run: %v", err)
-	}
+	out := r.wait()
 	expectExit(h.t, out, 0)
 	h.gone("service", "service-child")
 }
@@ -516,10 +535,7 @@ func caseServiceProbe(h *harness) {
 	}
 	h.world.SetFlag("ready")
 	pause.Fire()
-	out, err := r.wait()
-	if err != nil {
-		h.t.Fatalf("Run: %v", err)
-	}
+	out := r.wait()
 	expectExit(h.t, out, 0)
 	if !h.world.Marked("ran") {
 		h.t.Errorf("the command never ran although the service became ready")
@@ -534,10 +550,7 @@ func caseServiceNeverReady(h *harness) {
 	h.timer(2)
 	h.reached(AliveMark("service-child"))
 	limit.Fire()
-	out, err := r.wait()
-	if err != nil {
-		h.t.Fatalf("Run: %v", err)
-	}
+	out := r.wait()
 	expect(h.t, out, core.ExecServiceNotReady)
 	if h.world.Marked("ran") {
 		h.t.Errorf("the command ran although the service was never ready")
@@ -552,10 +565,7 @@ func caseServiceExitsEarly(h *harness) {
 	h.timer(2) // the first probe failed and the environment is waiting to try again
 	h.reached(AliveMark("service-child"))
 	h.world.Release("die")
-	out, err := r.wait()
-	if err != nil {
-		h.t.Fatalf("Run: %v", err)
-	}
+	out := r.wait()
 	expect(h.t, out, core.ExecServiceExited)
 	if h.world.Marked("ran") {
 		h.t.Errorf("the command ran although the service exited before it was ready")
@@ -570,10 +580,7 @@ func caseServiceExitsLate(h *harness) {
 	h.reached(AliveMark("child"))
 	h.reached(AliveMark("service-child"))
 	h.world.Release("die")
-	out, err := r.wait()
-	if err != nil {
-		h.t.Fatalf("Run: %v", err)
-	}
+	out := r.wait()
 	expect(h.t, out, core.ExecServiceExited)
 	h.gone("main", "child", "service", "service-child")
 }
@@ -584,10 +591,7 @@ func caseServiceCancelWaiting(h *harness) {
 	h.timer(2)
 	h.reached(AliveMark("service-child"))
 	r.cancel()
-	out, err := r.wait()
-	if err != nil {
-		h.t.Fatalf("Run: %v", err)
-	}
+	out := r.wait()
 	expect(h.t, out, core.ExecCancelled)
 	if h.world.Marked("ran") {
 		h.t.Errorf("the command ran although the run was cancelled before the service was ready")
@@ -601,10 +605,7 @@ func caseServiceLimit(h *harness) {
 	h.reached(AliveMark("child"))
 	h.reached(AliveMark("service-child"))
 	h.limitTimer().Fire()
-	out, err := r.wait()
-	if err != nil {
-		h.t.Fatalf("Run: %v", err)
-	}
+	out := r.wait()
 	expect(h.t, out, core.ExecTimedOut)
 	h.gone("main", "child", "service", "service-child")
 }

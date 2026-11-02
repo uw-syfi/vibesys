@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"math/rand/v2"
 	"slices"
 	"strings"
@@ -38,20 +39,20 @@ func newScene(t *testing.T, o options) *scene {
 }
 
 // run runs a script to its end.
-func (s *scene) run(script ...string) (core.ExecOutcome, string, error) {
+func (s *scene) run(script ...string) (core.Attempt, string) {
 	s.t.Helper()
 	var out bytes.Buffer
 	ctx, cancel := context.WithTimeout(context.Background(), envtest.Backstop)
 	defer cancel()
-	outcome, err := s.env.Run(ctx, core.Execution{Checkout: checkout(s.t), Argv: script, Timeout: time.Hour}, &out)
-	return outcome, out.String(), err
+	attempt := s.env.Run(ctx, core.Execution{Checkout: checkout(s.t), Argv: script, Timeout: time.Hour}, &out)
+	return attempt, out.String()
 }
 
 func (s *scene) mustRun(script ...string) string {
 	s.t.Helper()
-	outcome, out, err := s.run(script...)
-	if err != nil || outcome.Kind != core.ExecExited || outcome.ExitCode != 0 {
-		s.t.Fatalf("run %v: %+v, %v", script, outcome, err)
+	attempt, out := s.run(script...)
+	if e, ok := attempt.(core.Ended); !ok || e.Exec.Kind != core.ExecExited || e.Exec.ExitCode != 0 {
+		s.t.Fatalf("run %v: %+v", script, attempt)
 	}
 	return out
 }
@@ -126,8 +127,8 @@ func TestARunStartsItsContainerAsTheUserInTheCheckout(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Go(func() {
 		defer close(done)
-		if _, err := s.env.Run(context.Background(), x, &bytes.Buffer{}); err != nil {
-			t.Error(err)
+		if a, ok := s.env.Run(context.Background(), x, &bytes.Buffer{}).(core.Ended); !ok {
+			t.Errorf("Run: %+v", a)
 		}
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), envtest.Backstop)
@@ -192,7 +193,11 @@ func TestWhatAContainerCannotGiveIsRefusedBeforeAnythingStarts(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			s := newScene(t, c.o)
 			_, errFingerprint := s.env.Fingerprint(context.Background())
-			_, _, errRun := s.run("print", "x")
+			attempt, _ := s.run("print", "x")
+			var errRun error = &core.Failure{Kind: core.FailureInternal, Message: fmt.Sprintf("%+v", attempt)}
+			if ns, ok := attempt.(core.NotStarted); ok {
+				errRun = &ns.Failure
+			}
 			for what, err := range map[string]error{"Fingerprint": errFingerprint, "Run": errRun} {
 				var f *core.Failure
 				if !errors.As(err, &f) || f.Kind != c.kind || !strings.Contains(f.Message, c.want) {
@@ -219,9 +224,8 @@ func TestAnErrorOfTheSourceStopsTheRunBeforeAnythingStarts(t *testing.T) {
 		t.Fatal(err)
 	}
 	e, _ := p.Environment(environment.Target{Task: "t"})
-	_, err = e.Run(context.Background(), core.Execution{Checkout: checkout(t), Argv: []string{"print", "x"}, Timeout: time.Hour}, nil)
-	if !errors.Is(err, missing) {
-		t.Fatalf("got %v, want the source's error", err)
+	if f := envtest.NotStarted(t, e.Run(context.Background(), core.Execution{Checkout: checkout(t), Argv: []string{"print", "x"}, Timeout: time.Hour}, nil)); f != *missing {
+		t.Fatalf("got %v, want the source's error", f)
 	}
 	if _, err := e.Fingerprint(context.Background()); !errors.Is(err, missing) {
 		t.Fatalf("Fingerprint: got %v, want the source's error", err)
@@ -325,8 +329,8 @@ func TestARunKeepsTheContainerOfAnotherLiveRunOfItsProcess(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		if out, err := s.env.Run(context.Background(), x, nil); err != nil || out.ExitCode != 0 {
-			t.Errorf("first run: %+v, %v", out, err)
+		if e, ok := s.env.Run(context.Background(), x, nil).(core.Ended); !ok || e.Exec.ExitCode != 0 {
+			t.Errorf("first run: %+v", e)
 		}
 	}()
 	ctx, cancel := context.WithTimeout(context.Background(), envtest.Backstop)
@@ -358,10 +362,9 @@ func TestAFailedSweepStopsTheRun(t *testing.T) {
 				}
 				return nil
 			})
-			outcome, _, err := s.run("print", "x")
-			var f *core.Failure
-			if !errors.As(err, &f) || f.Kind != core.FailureUnavailable || !strings.Contains(f.Message, "not starting") {
-				t.Errorf("%s late=%v: %+v, %v; want unavailable, not starting", failing, late, outcome, err)
+			attempt, _ := s.run("print", "x")
+			if f, ok := attempt.(core.NotStarted); !ok || f.Failure.Kind != core.FailureUnavailable || !strings.Contains(f.Failure.Message, "not starting") {
+				t.Errorf("%s late=%v: %+v; want not started, unavailable, not starting", failing, late, attempt)
 			}
 			if s.daemon.Builds() != 0 {
 				t.Errorf("%s late=%v: an image was built for a run that did not start", failing, late)
@@ -384,9 +387,8 @@ func TestACancellationDuringTheBuildEndsTheRunWithNothingStarted(t *testing.T) {
 		}
 		return nil
 	})
-	outcome, err := s.env.Run(ctx, core.Execution{Checkout: checkout(t), Argv: []string{"print", "x"}, Timeout: time.Hour}, nil)
-	if err != nil || outcome.Kind != core.ExecCancelled {
-		t.Fatalf("got %+v, %v, want a cancelled outcome", outcome, err)
+	if outcome := envtest.Ended(t, s.env.Run(ctx, core.Execution{Checkout: checkout(t), Argv: []string{"print", "x"}, Timeout: time.Hour}, nil)); outcome.Kind != core.ExecCancelled {
+		t.Fatalf("got %+v, want a cancelled outcome", outcome)
 	}
 	if len(s.daemon.Containers()) != 0 {
 		t.Fatalf("containers %+v left", s.daemon.Containers())
@@ -408,17 +410,16 @@ func TestTwoRunsThatShareAnIDAreNotBothAllowed(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_, _ = e.Run(context.Background(), x, nil)
+		_ = e.Run(context.Background(), x, nil)
 	}()
 	ctx, cancel := context.WithTimeout(context.Background(), envtest.Backstop)
 	defer cancel()
 	if !w.Reached(ctx, "up") {
 		t.Fatal("the first run never started")
 	}
-	_, err = e.Run(context.Background(), core.Execution{Checkout: checkout(t), Argv: []string{"print", "x"}, Timeout: time.Hour}, nil)
-	var f *core.Failure
-	if !errors.As(err, &f) || f.Kind != core.FailureInternal {
-		t.Errorf("the second run: %v, want an internal failure for the id in use", err)
+	second := e.Run(context.Background(), core.Execution{Checkout: checkout(t), Argv: []string{"print", "x"}, Timeout: time.Hour}, nil)
+	if f, ok := second.(core.NotStarted); !ok || f.Failure.Kind != core.FailureInternal {
+		t.Errorf("the second run: %+v, want not started with an internal failure for the id in use", second)
 	}
 	if got := d.Running(); len(got) != 1 {
 		t.Errorf("running containers %v, want the first run's alone", got)
@@ -443,10 +444,9 @@ func TestARunIDThatCannotNameAContainerIsRefused(t *testing.T) {
 			Timers: envtest.NewTimers(), IDs: fixedID(id), Scope: "test",
 		})
 		e, _ := p.Environment(environment.Target{Task: "t"})
-		_, err := e.Run(context.Background(), core.Execution{Checkout: checkout(t), Argv: []string{"print", "x"}, Timeout: time.Hour}, nil)
-		var f *core.Failure
-		if !errors.As(err, &f) || f.Kind != core.FailureInternal || len(d.Containers()) != 0 {
-			t.Errorf("id %q: %v, %d containers; want an internal failure and nothing started", id, err, len(d.Containers()))
+		a := e.Run(context.Background(), core.Execution{Checkout: checkout(t), Argv: []string{"print", "x"}, Timeout: time.Hour}, nil)
+		if f, ok := a.(core.NotStarted); !ok || f.Failure.Kind != core.FailureInternal || len(d.Containers()) != 0 {
+			t.Errorf("id %q: %+v, %d containers; want not started with an internal failure", id, a, len(d.Containers()))
 		}
 	}
 }
@@ -461,8 +461,8 @@ func TestARunWithoutScratchMountsOnlyTheCheckout(t *testing.T) {
 	x := core.Execution{Checkout: checkout(t), Argv: []string{"mark", "up", ";", "hold", "go"}, Timeout: time.Hour}
 	var wg sync.WaitGroup
 	wg.Go(func() {
-		if _, err := s.env.Run(context.Background(), x, &bytes.Buffer{}); err != nil {
-			t.Error(err)
+		if a, ok := s.env.Run(context.Background(), x, &bytes.Buffer{}).(core.Ended); !ok {
+			t.Errorf("Run: %+v", a)
 		}
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), envtest.Backstop)

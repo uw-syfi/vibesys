@@ -37,9 +37,11 @@ type Environment interface {
 	//
 	// It ends the whole process group of the command and of the service on every path: normal
 	// exit, timeout, cancellation of ctx and a service that never became ready, so nothing
-	// outlives the call. It returns the outcome as a value: a command that exits non-zero, a
-	// timeout and a cancellation are outcomes, not errors. It returns an error only when the
-	// execution could not be attempted or its result could not be observed, and an outcome of
-	// core.ExecUnknown when the environment cannot say what happened.
-	Run(ctx context.Context, execution core.Execution, out io.Writer) (core.ExecOutcome, error)
+	// outlives the call. It says what the attempt did as a closed union: core.NotStarted when no
+	// process of the execution started, core.Ended with how it ended when the environment saw it
+	// end, and core.Unobserved when a process started and the environment cannot vouch for its
+	// end or for what it left. A command that exits non-zero, a timeout and a cancellation are
+	// endings. An attempt that failed while ctx was being cancelled is core.Ended with
+	// core.ExecCancelled: the cancel is what ended it.
+	Run(ctx context.Context, execution core.Execution, out io.Writer) core.Attempt
 }

@@ -1,6 +1,7 @@
 package environment
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"path"
@@ -48,10 +49,11 @@ func overlap(a, b string) bool {
 // Exit is how a process group's leader ended.
 type Exit struct {
 	Code int
-	// Kind, when set, says the leader ended in a way that is not an exit status, such as a
-	// container the environment lost: the execution then ends with this kind.
+	// Kind, when set, says the leader ended in a way that is not an exit status, such as a fake's
+	// scripted timeout: the execution then ends with this kind.
 	Kind core.ExecKind
-	// Err is set when the leader could not be waited for.
+	// Err is set when the leader could not be waited for, such as a container the environment
+	// lost: how it ended is then not known.
 	Err error
 }
 
@@ -64,10 +66,10 @@ type Process interface {
 }
 
 // Launcher starts the processes of an execution. It is the I/O of an environment: a host starts
-// shell processes, a fake interprets scripts, and a docker environment would start containers.
+// shell processes, a fake interprets scripts, and a docker environment execs in a container.
 type Launcher interface {
 	// Start starts argv as the leader of a new process group, with its combined output going to
-	// sink. A command that cannot be started is an error, not an exit.
+	// sink. A command that cannot be started is an error, not an exit, and nothing of it ran.
 	Start(argv []string, sink io.Writer) (Process, error)
 }
 
@@ -88,26 +90,41 @@ type Events struct {
 // ExecServiceNotReady and a command that is running at the limit is ExecTimedOut; the service
 // ending while the command runs is ExecServiceExited unless the command ended too.
 //
+// A process that could not be started before any other was is core.NotStarted. Once one has
+// started, a failure to start the next or to wait for one is core.Unobserved: what ran may have
+// had effects.
+//
 // It starts processes through the launcher and ends none of them: ending the groups, and
 // everything else that must hold when the execution is over, is the caller's, on every path.
-func Execute(x core.Execution, l Launcher, ev Events, out io.Writer) (core.ExecOutcome, error) {
+func Execute(x core.Execution, l Launcher, ev Events, out io.Writer) core.Attempt {
+	started := false
+	failed := func(err error) core.Attempt {
+		if started {
+			return core.Unobserved{Failure: core.AsFailure(err)}
+		}
+		return core.NotStarted{Failure: core.AsFailure(err)}
+	}
 	var serviceExited <-chan Exit
 	if s := x.Service; s != nil {
 		svc, err := l.Start(s.Argv, out)
 		if err != nil {
-			return core.ExecOutcome{}, err
+			return failed(err)
 		}
+		started = true
 		serviceExited = svc.Exited()
 		if len(s.Probe) > 0 {
-			if outcome, ready, err := awaitReady(l, s.Probe, svc, ev); err != nil || !ready {
-				return outcome, err
+			if ended, err := awaitReady(l, s.Probe, svc, ev); err != nil {
+				return failed(err)
+			} else if ended != nil {
+				return core.Ended{Exec: *ended}
 			}
 		}
 	}
 	main, err := l.Start(x.Argv, out)
 	if err != nil {
-		return core.ExecOutcome{}, err
+		return failed(err)
 	}
+	started = true
 	select {
 	case st := <-main.Exited():
 		return exited(st)
@@ -117,51 +134,53 @@ func Execute(x core.Execution, l Launcher, ev Events, out io.Writer) (core.ExecO
 		case st := <-main.Exited():
 			return exited(st)
 		default:
-			return core.ExecOutcome{Kind: core.ExecServiceExited}, nil
+			return core.Ended{Exec: core.ExecOutcome{Kind: core.ExecServiceExited}}
 		}
 	case <-ev.Limit:
-		return core.ExecOutcome{Kind: core.ExecTimedOut}, nil
+		return core.Ended{Exec: core.ExecOutcome{Kind: core.ExecTimedOut}}
 	case <-ev.Cancelled:
-		return core.ExecOutcome{Kind: core.ExecCancelled}, nil
+		return core.Ended{Exec: core.ExecOutcome{Kind: core.ExecCancelled}}
 	}
 }
 
-func exited(st Exit) (core.ExecOutcome, error) {
+// exited is the end of a command whose leader was seen to end, or could not be waited for.
+func exited(st Exit) core.Attempt {
 	if st.Err != nil {
-		return core.ExecOutcome{}, st.Err
+		return core.Unobserved{Failure: core.AsFailure(st.Err)}
 	}
 	if st.Kind != "" {
-		return core.ExecOutcome{Kind: st.Kind}, nil
+		return core.Ended{Exec: core.ExecOutcome{Kind: st.Kind}}
 	}
-	return core.ExecOutcome{Kind: core.ExecExited, ExitCode: st.Code}, nil
+	return core.Ended{Exec: core.ExecOutcome{Kind: core.ExecExited, ExitCode: st.Code}}
 }
 
-// awaitReady probes the service until a probe succeeds. It returns ready, or the outcome that
-// ended the wait.
-func awaitReady(l Launcher, probe []string, svc Process, ev Events) (outcome core.ExecOutcome, ready bool, err error) {
+// awaitReady probes the service until a probe succeeds. It returns nil when the service is ready,
+// the ending that ended the wait, or an error when a probe could not be run or waited for.
+func awaitReady(l Launcher, probe []string, svc Process, ev Events) (*core.ExecOutcome, error) {
+	end := func(kind core.ExecKind) (*core.ExecOutcome, error) { return &core.ExecOutcome{Kind: kind}, nil }
 	for {
 		p, err := l.Start(probe, io.Discard)
 		if err != nil {
-			return core.ExecOutcome{}, false, err
+			return nil, err
 		}
 		select {
 		case st := <-p.Exited():
 			p.Kill()
 			if st.Err != nil {
-				return core.ExecOutcome{}, false, st.Err
+				return nil, st.Err
 			}
 			if st.Code == 0 && st.Kind == "" {
-				return core.ExecOutcome{}, true, nil
+				return nil, nil
 			}
 		case <-svc.Exited():
 			p.Kill()
-			return core.ExecOutcome{Kind: core.ExecServiceExited}, false, nil
+			return end(core.ExecServiceExited)
 		case <-ev.Limit:
 			p.Kill()
-			return core.ExecOutcome{Kind: core.ExecServiceNotReady}, false, nil
+			return end(core.ExecServiceNotReady)
 		case <-ev.Cancelled:
 			p.Kill()
-			return core.ExecOutcome{Kind: core.ExecCancelled}, false, nil
+			return end(core.ExecCancelled)
 		}
 		pause, stop := ev.Pause()
 		select {
@@ -169,13 +188,48 @@ func awaitReady(l Launcher, probe []string, svc Process, ev Events) (outcome cor
 			stop()
 		case <-svc.Exited():
 			stop()
-			return core.ExecOutcome{Kind: core.ExecServiceExited}, false, nil
+			return end(core.ExecServiceExited)
 		case <-ev.Limit:
 			stop()
-			return core.ExecOutcome{Kind: core.ExecServiceNotReady}, false, nil
+			return end(core.ExecServiceNotReady)
 		case <-ev.Cancelled:
 			stop()
-			return core.ExecOutcome{Kind: core.ExecCancelled}, false, nil
+			return end(core.ExecCancelled)
 		}
 	}
+}
+
+// Finish is the last word on an attempt. One that lost something on the way out, said by lost,
+// keeps its failure and says what was lost, and an Ended one becomes Unobserved: nobody can vouch
+// for how it ended. Otherwise an attempt that failed while ctx was being cancelled was ended by the
+// cancel. Every environment ends its Run with it, so the rule does not depend
+// on which environment ran the command.
+func Finish(ctx context.Context, a core.Attempt, lost error) core.Attempt {
+	switch a := a.(type) {
+	case core.NotStarted:
+		if lost != nil {
+			// Nothing ran, so what was not cleaned up held nothing of the command.
+			a.Failure.Message += "; and " + lost.Error()
+			return a
+		}
+		if ctx.Err() != nil {
+			return core.Ended{Exec: core.ExecOutcome{Kind: core.ExecCancelled}}
+		}
+		return a
+	case core.Unobserved:
+		if lost != nil {
+			a.Failure.Message += "; and " + lost.Error()
+			return a
+		}
+		if ctx.Err() != nil {
+			return core.Ended{Exec: core.ExecOutcome{Kind: core.ExecCancelled}}
+		}
+		return a
+	case core.Ended:
+		if lost != nil {
+			return core.Unobserved{Failure: core.AsFailure(lost)}
+		}
+		return a
+	}
+	return core.Unobserved{Failure: core.Failure{Kind: core.FailureInternal, Message: fmt.Sprintf("the environment ended with %T", a)}}
 }

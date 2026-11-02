@@ -2,6 +2,7 @@ package fakeenv_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"path/filepath"
 	"strings"
@@ -37,7 +38,7 @@ func TestFakePassesTheEnvironmentContract(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			env := newFake(w, envtest.NewTimers())
 			var wg sync.WaitGroup
-			wg.Go(func() { _, _ = env.Run(ctx, x, io.Discard) })
+			wg.Go(func() { _ = env.Run(ctx, x, io.Discard) })
 			var once sync.Once
 			kill := func() { once.Do(func() { cancel(); wg.Wait() }) }
 			t.Cleanup(kill)
@@ -58,9 +59,9 @@ func TestEmitWritesTheOutputFileTheCommandWasGiven(t *testing.T) {
 		Argv:     []string{"emit", "a", "b", ";", "exit", "3", "--out", "/scratch/x.out"},
 		Timeout:  1,
 	}
-	got, err := env.Run(context.Background(), x, io.Discard)
-	if err != nil || got.Kind != core.ExecExited || got.ExitCode != 3 {
-		t.Fatalf("Run = %+v, %v", got, err)
+	got := envtest.Ended(t, env.Run(context.Background(), x, io.Discard))
+	if got.Kind != core.ExecExited || got.ExitCode != 3 {
+		t.Fatalf("Run = %+v", got)
 	}
 	if string(put["/scratch/x.out"]) != "a b" || len(put) != 1 {
 		t.Errorf("files = %q", put)
@@ -87,8 +88,8 @@ func TestEmitFailsLikeAnyCommandThatCannotWriteItsFile(t *testing.T) {
 			}
 			env := fakeenv.New(core.EnvironmentHost, fakeenv.NewMemoryGates(), opts...)
 			x.Argv = c.argv
-			if got, err := env.Run(context.Background(), x, io.Discard); err != nil || got.ExitCode != 127 {
-				t.Errorf("Run = %+v, %v; want exit 127", got, err)
+			if got := envtest.Ended(t, env.Run(context.Background(), x, io.Discard)); got.ExitCode != 127 {
+				t.Errorf("Run = %+v; want exit 127", got)
 			}
 		})
 	}
@@ -98,7 +99,7 @@ func TestEmitFailsLikeAnyCommandThatCannotWriteItsFile(t *testing.T) {
 // ended, and ending the machine ends every process it started, the ones in the background too.
 func TestMachineRunsScriptsAndEndsEveryProcess(t *testing.T) {
 	gates := fakeenv.NewMemoryGates()
-	m := fakeenv.NewMachine(gates, "/work")
+	m := fakeenv.NewMachine(gates, "/work", errors.New("the machine is gone"))
 	var out syncBuffer
 	p, err := m.Start([]string{"dir", ";", "print", "hi", ";", "exit", "3"}, &out)
 	if err != nil {
