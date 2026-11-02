@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ._actions import OpenStep
-from ._failure_routing import FailureHearer, failure_hearer
+from ._failure_routing import hear_failure
 from ._job_reports import ended_job_events
 from ._ownership import unreleased_records
 from ._refusal import RecordRefusedError, RefusalReason
@@ -398,33 +398,10 @@ def ended_failure(
 def failed_step(
     state: CoreState, tag: RequestId, failure: OwnerFailure | None
 ) -> tuple[CoreState, tuple[OwnerFailure, ...]]:
-    """``state`` with the ended step ``tag`` holding ``failure``, and what its asker hears of it.
-
-    A decision hears of its ending once: its later requests end quietly, as the owner has moved
-    on. A step only the area that sent it hears of ends without telling the decision.
-    """
-    if failure is None:
-        return state, ()
+    """``state`` with the ended step ``tag`` holding ``failure``, and what its asker hears of it."""
     (record,) = state.records.find(tag)
-    heard = (
-        (failure,)
-        if failure_hearer(record.request) is FailureHearer.DECISION
-        and not _decision_ended(state, record)
-        else ()
-    )
-    return _replaced(state, record.model_copy(update={"failure": failure})), heard
-
-
-def _decision_ended(state: CoreState, record: RequestRecord) -> bool:
-    """Whether another request of the record's decision already ended with a failure."""
-    decision = record.request.decision_id
-    return decision is not None and any(
-        row.failure is not None
-        and failure_hearer(row.request) is FailureHearer.DECISION
-        and row.request.decision_id == decision
-        and row.request_id != record.request_id
-        for row in state.records.records
-    )
+    records, heard = hear_failure(state.records, record, failure)
+    return state.model_copy(update={"records": records}), heard
 
 
 def _speaks_for(record: RequestRecord, fact: object) -> None:
