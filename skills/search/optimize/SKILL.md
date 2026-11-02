@@ -86,7 +86,8 @@ Harness-specific mechanics (tools, background tasks, script paths): read `refere
 Report to the user every hour, unless the user names another schedule. At the start, and again on
 every resume, schedule it with the harness's periodic-work mechanism (the harness file, "Schedule
 periodic work"); with no scheduler, report whenever a task finishes. How to write a report:
-[report-progress](../report-progress/SKILL.md).
+[report-progress](../report-progress/SKILL.md). To attach charts of progress to a report, use
+[visualize-progress](../visualize-progress/SKILL.md).
 
 Describe each item in plain words, then its code name in parentheses, such as "paged attention
 for decode (plan-004)". Lead with what changed. Keep ids and SHAs out of the main text; they go
