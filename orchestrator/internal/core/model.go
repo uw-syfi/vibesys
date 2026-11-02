@@ -54,6 +54,9 @@ type Agent struct {
 	HandedOff bool
 	// SessionFailures counts sessions in a row lost or failed without completing a turn.
 	SessionFailures uint32
+	// EndDetail says why the current session ended when it was lost or failed, such as the launch
+	// error. It is empty while the session is live and when the end had no reason to give.
+	EndDetail string
 }
 
 // Usage is what a turn has cost. Fields a provider does not report are nil, never zero.

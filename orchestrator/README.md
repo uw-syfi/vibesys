@@ -6,10 +6,11 @@ them, and wakes a lead agent when a subagent or a job finishes. It sits beside t
 shares nothing with them: it has its own contract under `proto/vibesys/orchestrator/v1/`, its own
 module here, and it reaches `vibesys-cli` only through that tool's public contract.
 
-Work is landing in stages. This module so far holds the contract, the pure decision core, the
-interface over `vibesys-cli` jobs, the code that converts between the two, and the durable store
-with the check that keeps it off network filesystems. There is no daemon yet, and no sidecar, MCP
-server or desktop client.
+Work is landing in stages. This module holds the contract, the pure decision core, the interface
+over `vibesys-cli` jobs, the code that converts between the two, the store, the daemon with its
+live hub, the MCP server, a headless client and the `vibesys-orchestrator` command. The sidecar
+launcher and the plan reader are placeholders in production, and the job source is left unwired, until
+their items land (`internal/production`); there is no desktop client yet.
 
 ## Vocabulary
 
@@ -34,6 +35,13 @@ server or desktop client.
 | `internal/localfs` | Proof that the state directory is on a local filesystem | Nothing of this module |
 | `internal/store` | The durable record: atomic commits, recovery, outbox, paged reads, retention | `core`, `wire`, `localfs` |
 | `internal/store/storetest` | The contract every store passes, a workload from the real core, and a model | `core`, `store`, `wire` |
+| `internal/hub` | Live deltas to the clients watching an agent: merged, bounded, never stored | `core`, `gen` |
+| `internal/daemon` | The engine, effect worker, sidecar streams and `OrchestratorService`. No clock, no real I/O | `core`, `store`, `jobs`, `wire`, `hub`, `gen` |
+| `internal/daemon/daemontest` | The Fakes and the `Rig` that wire a whole daemon in memory | `daemon` and what it imports |
+| `internal/client` | The client library, `connect` and the headless commands, over the public service API | `gen` only |
+| `internal/mcp` | The stdio MCP server an agent talks to, over a small `Daemon` interface the client satisfies | `core`, `gen` |
+| `internal/production` | The one place that reads the real clock, sockets and files | `client`, `core`, `daemon`, `hub`, `jobs`, `localfs`, `store`, `gen` |
+| `cmd/vibesys-orchestrator` | The command | `client`, `core`, `daemon`, `mcp`, `production` |
 | `gen/` | Generated from the `.proto` files. Do not edit | Nothing of this module |
 
 `internal/archcheck` enforces this table and the purity of the core from the import graph of every
@@ -103,6 +111,70 @@ events that did. Moving the outbox writes into a second transaction fails them.
 `ORCHESTRATOR_STORE_SCALE=1000000 go test ./internal/store -run TestMeasureScale -v` measures recovery
 time and read latency on generated data.
 
+## The daemon and its commands
+
+One daemon runs per user per host, on two private Unix sockets (see "Who may call"). It is
+crash-only: starting is recovering. A serial loop feeds commands, sidecar events, job polls and timers to `Decide`, commits
+the result through the store, and then a worker carries out the effects at least once. Time and
+nonces are injected, and an input that changes nothing is logged.
+
+```sh
+vibesys-orchestrator daemon                         # serve on the private socket
+ssh host vibesys-orchestrator connect               # the one client transport: stdio to the socket
+vibesys-orchestrator mcp                            # stdio MCP server; identity comes from the environment
+vibesys-orchestrator run start --repository R --task T --brief B --harness claude_code
+vibesys-orchestrator run watch                      # a snapshot, then events, as JSON lines
+vibesys-orchestrator run stop RUN
+vibesys-orchestrator send AGENT "text"
+```
+
+### Who may call
+
+The daemon serves two sockets, and which one a caller reached decides who it is:
+
+- The **operator socket** takes calls with no credentials and refuses any call that carries an
+  agent's. It is what `vibesys-orchestrator run`, `send` and `connect` use, and it is never put in
+  an agent's environment.
+- The **agent socket** is the only socket a launched session is told (`VIBESYS_ORCHESTRATOR_SOCKET`).
+  Every call on it needs the credentials of the agent's current session (agent id, session number
+  and an HMAC token the daemon derives from a secret), and the daemon never reads the caller from a
+  request body. An agent may issue the commands its role allows and read the snapshot of its run.
+  It cannot read history or plans.
+
+An agent sees every agent's items of its own run through `WatchRuns`: that is intended, since a lead
+and its workers work from one picture of the run.
+
+The limit, stated plainly: agents run as the same Unix user as the daemon. A hostile process of that
+user can read the operator socket's path from the state directory, or the token secret from the file
+beside the database, and act as the operator. The split fences an agent's mistakes and a stale
+session, and makes the operator socket something no tool is pointed at. Holding a determined agent
+back is a matter of agent confinement and run environments, in `docs/contributing/sandboxing.md`.
+An operator token file was rejected: a same-user agent can read it too, so it adds a secret and no
+boundary.
+
+### Restarts, calls to the world and failures
+
+- A restart first carries out every effect the last daemon left in the outbox, and only then looks
+  for the sidecars of the other live sessions. A session whose launch was committed and not carried
+  out is therefore launched, and is never mistaken for one whose sidecar died.
+- Every call to a sidecar, the job source or the plan reader runs under a bound from an injected
+  source (30 seconds in production). A call that outlives it is retried, and the retry blocks the
+  loop for at most one bound, so a sidecar that stopped answering delays the others by that much
+  per attempt and loses nothing.
+- A failed effect holds back the later effects of its session in the same batch, so a stop never
+  reaches a session before the turn it stops. Outbox rows that the store could not settle are
+  settled by the next step.
+- A session that could not be launched or found carries the reason in the agent's `end_detail`, and
+  a subagent's lead is told it in the settled message. With no job source wired, the daemon asks
+  none; it does not pretend there are no jobs.
+- If either server or the loop stops, the daemon exits with the error, so it never stays up
+  serving nothing.
+
+Watching gives a snapshot and then the events after its sequence. A client too far behind gets a
+fresh snapshot, never a gap. Live deltas of a running item reach only the clients watching that
+agent, merge within 50 ms, are bounded per client, and are always superseded by the stored item of
+the same sequence.
+
 ## Testing
 
 `./check.sh` runs formatting, `go vet` and every test.
@@ -131,7 +203,22 @@ To search further than the default 40 seeds:
 ORCHESTRATOR_SIM_SEEDS=400 go test ./internal/core -run 'TestSimulation$' -timeout 10m
 ```
 
-`internal/wire` builds random messages from the `.proto` descriptors, so a field added to the
+`internal/daemon/sim_test.go` runs a whole daemon (engine, effect worker, sidecar streams, job poll,
+service and hub) over Fakes from one seed, while it kills and restarts the daemon, kills sidecars,
+repeats and conflicts commands, refuses bad credentials, fails launches and job reads, leaves
+clients that stop reading, makes sidecar calls hang until their bound ends, makes the store fail to
+settle rows, and ends the process inside a step (after the claim, after a command was sent, before
+the rows are completed). Besides the core's invariants it checks two promises: every effect
+committed for a session that is still live reaches its sidecar, and a restart alone never ends a
+live run or writes off a live agent. Replay one seed or search further the same way:
+
+```sh
+ORCHESTRATOR_SIM_SEED=7 go test ./internal/daemon -run 'TestDaemonSimulation$'
+ORCHESTRATOR_SIM_SEEDS=600 go test ./internal/daemon -run 'TestDaemonSimulation$'
+```
+
+`internal/client` drives a whole run from a client, and connects through a real pipe that fragments,
+delays and cuts. `internal/wire` builds random messages from the `.proto` descriptors, so a field added to the
 contract is tested with no change to the tests, and a mapper that forgets it fails its round trip.
 Its fuzz targets take untrusted bytes; `go test` runs their seeds, and this runs one for real:
 

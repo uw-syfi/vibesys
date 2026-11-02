@@ -887,8 +887,11 @@ type Agent struct {
 	HandedOff bool `protobuf:"varint,17,opt,name=handed_off,json=handedOff,proto3" json:"handed_off,omitempty"`
 	// Sessions in a row that this agent lost or failed without completing a turn.
 	SessionFailures uint32 `protobuf:"varint,18,opt,name=session_failures,json=sessionFailures,proto3" json:"session_failures,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Why the current session ended, when it was lost or failed: the launch error, for one that never
+	// started. Empty while the session is live.
+	EndDetail     string `protobuf:"bytes,19,opt,name=end_detail,json=endDetail,proto3" json:"end_detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Agent) Reset() {
@@ -1045,6 +1048,13 @@ func (x *Agent) GetSessionFailures() uint32 {
 		return x.SessionFailures
 	}
 	return 0
+}
+
+func (x *Agent) GetEndDetail() string {
+	if x != nil {
+		return x.EndDetail
+	}
+	return ""
 }
 
 // Capabilities are what a session can do. The sidecar reports them when the session opens, so
@@ -2162,7 +2172,7 @@ const file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc = "" +
 	"\vstop_reason\x18\t \x01(\x0e2&.vibesys.orchestrator.v1.RunStopReasonB\b\xbaH\x05\x82\x01\x02\x10\x01R\n" +
 	"stopReason\x125\n" +
 	"\bended_at\x18\n" +
-	" \x01(\v2\x1a.google.protobuf.TimestampR\aendedAt\"\xfc\x06\n" +
+	" \x01(\v2\x1a.google.protobuf.TimestampR\aendedAt\"\xa5\a\n" +
 	"\x05Agent\x12\x17\n" +
 	"\x02id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x02id\x12\x1e\n" +
 	"\x06run_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\x12&\n" +
@@ -2190,7 +2200,9 @@ const file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc = "" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\tstopStage\x12\x1d\n" +
 	"\n" +
 	"handed_off\x18\x11 \x01(\bR\thandedOff\x12)\n" +
-	"\x10session_failures\x18\x12 \x01(\rR\x0fsessionFailures\"c\n" +
+	"\x10session_failures\x18\x12 \x01(\rR\x0fsessionFailures\x12'\n" +
+	"\n" +
+	"end_detail\x18\x13 \x01(\tB\b\xbaH\x05r\x03\x18\xe8\aR\tendDetail\"c\n" +
 	"\fCapabilities\x12!\n" +
 	"\fstreams_text\x18\x01 \x01(\bR\vstreamsText\x12\x16\n" +
 	"\x06steers\x18\x02 \x01(\bR\x06steers\x12\x18\n" +

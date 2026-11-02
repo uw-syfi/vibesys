@@ -44,7 +44,7 @@ func agentOut(a core.Agent) *pb.Agent {
 		Status: agentStatuses.out(a.Status), ProviderConversationId: a.ConversationID,
 		Capabilities: capabilitiesOut(a.Capabilities), StartedAt: when(a.StartedAt), EndedAt: when(a.EndedAt),
 		Session: a.Session, StopStage: stopStages.out(a.Stop), HandedOff: a.HandedOff,
-		SessionFailures: a.SessionFailures,
+		SessionFailures: a.SessionFailures, EndDetail: a.EndDetail,
 	}
 }
 
@@ -60,6 +60,7 @@ func agentIn(a *pb.Agent, errs *errorList) core.Agent {
 		ConversationID: a.GetProviderConversationId(), Capabilities: capabilitiesIn(a.GetCapabilities()),
 		StartedAt: moment(a.GetStartedAt(), errs), EndedAt: moment(a.GetEndedAt(), errs), Session: a.GetSession(),
 		Stop: stopStages.in(a.GetStopStage(), errs), HandedOff: a.GetHandedOff(), SessionFailures: a.GetSessionFailures(),
+		EndDetail: a.GetEndDetail(),
 	}
 }
 

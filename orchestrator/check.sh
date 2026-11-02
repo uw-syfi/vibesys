@@ -11,8 +11,11 @@ fi
 
 go vet ./...
 
-# The core is pure and single-threaded, so only the store, which serves readers beside its writer,
-# runs under the race detector.
 go test -count=1 -timeout 180s ./...
+
+# The core is pure and single-threaded. The store serves readers beside its writer, and the other
+# packages hold the goroutines (streams, pipes, the serving loop), so they run again under the race
+# detector.
 go test -race -count=1 -timeout 180s -run 'PassesTheContract/ReadersAndClaimers' ./internal/store/
 go test -race -count=1 -timeout 180s -run 'TestCommitsAndCompactionsAndVerifiesInterleave|TestVerifyRunsBesideTheWriter' ./internal/store/
+go test -race -count=1 -timeout 300s ./internal/hub ./internal/daemon/... ./internal/client ./internal/mcp
