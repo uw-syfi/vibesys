@@ -2,13 +2,14 @@ import '@vibesys/ui/tokens.css';
 import '@vibesys/ui/fonts.css';
 import '@vibesys/ui/components.css';
 import {OrchestratorApp} from '@vibesys/feature-orchestrator/renderer';
+import {BackoffSchedule} from '@vibesys/transport';
 import {applyTheme} from '@vibesys/ui';
 import {DEFAULT_THEMES} from '@vibesys/ui/tokens';
 import {createRoot} from 'react-dom/client';
 import {FIXTURE_NAMES, type FixtureName, fixtureHosts} from './fixtures.js';
 
 /**
- * `?fixture=long-run` (the default), `reconnects` or `short-run` picks the hosts shown;
+ * `?fixture=long-run` (the default), `reconnects`, `short-run` or `disconnected` picks the hosts shown;
  * `?reveal=N` starts the live run with only its first N events and adds one every 400 ms.
  */
 const params = new URLSearchParams(window.location.search);
@@ -28,5 +29,10 @@ if (reveal !== null) {
 const root = document.getElementById('root');
 if (root === null) throw new Error('index.html has no #root');
 createRoot(root).render(
-  <OrchestratorApp connections={hosts.map(({host, ports}) => ({host, ports}))} now={() => now} />,
+  <OrchestratorApp
+    connections={hosts.map(({host, ports}) => ({host, ports}))}
+    now={() => now}
+    newId={() => crypto.randomUUID()}
+    backoff={() => new BackoffSchedule()}
+  />,
 );

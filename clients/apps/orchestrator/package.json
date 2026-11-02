@@ -18,8 +18,10 @@
   },
   "dependencies": {
     "@vibesys/feature-orchestrator": "workspace:*",
+    "@vibesys/hosts": "workspace:*",
     "@vibesys/orchestrator-fixtures": "workspace:*",
     "@vibesys/orchestrator-source": "workspace:*",
+    "@vibesys/transport": "workspace:*",
     "@vibesys/ui": "workspace:*",
     "react": "19.1.1",
     "react-dom": "19.1.1"

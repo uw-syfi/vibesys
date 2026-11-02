@@ -7,8 +7,8 @@ import {
   EventSchema,
   type Item,
   ItemSchema,
-  ItemsPageSchema,
   ItemStatus,
+  ItemsPageSchema,
   ReceiptSchema,
   type WatchAgentResponse,
   WatchAgentResponseSchema,
@@ -46,6 +46,25 @@ const known = (state: OrchestratorState) => ({
 /** Delivery orders: the stream cut at an arbitrary place, with arbitrary repeats and reorderings. */
 const delivery = (events: readonly Event[]) =>
   fc.array(fc.nat({max: Math.max(0, events.length - 1)}), {maxLength: events.length * 3});
+
+/** Two copies of one item chosen by `a` and `b`, the one committed earlier first. */
+function pairOf<T>(
+  copies: readonly T[],
+  a: number,
+  b: number,
+): readonly [T | undefined, T | undefined] {
+  const i = a % copies.length;
+  const j = b % copies.length;
+  return i <= j ? [copies[i], copies[j]] : [copies[j], copies[i]];
+}
+
+/** What a client holds after the agent stream delivers these copies, in this order. */
+function deliver(copies: readonly {item: Item; sequence: bigint}[]): OrchestratorState {
+  return copies.reduce(
+    (held, copy) => applyAgentFeed(held, frame({case: 'item', value: copy.item}, copy.sequence)),
+    emptyState,
+  );
+}
 
 describe('the event fold', () => {
   test('folding any split of the stream equals folding it whole', () => {
@@ -321,20 +340,13 @@ describe('whole items from the run stream and the agent stream', () => {
       fc.property(histories, fc.nat(), fc.nat(), ({events, versions}, a, b) => {
         // Every pair of copies of one item, delivered in either order.
         for (const [id, copies] of versions) {
-          const i = a % copies.length;
-          const j = b % copies.length;
-          const [older, newer] = i <= j ? [copies[i], copies[j]] : [copies[j], copies[i]];
+          const [older, newer] = pairOf(copies, a, b);
           if (older === undefined || newer === undefined) continue;
           for (const order of [
             [older, newer],
             [newer, older],
           ] as const) {
-            const state = order.reduce(
-              (held, copy) =>
-                applyAgentFeed(held, frame({case: 'item', value: copy.item}, copy.sequence)),
-              emptyState,
-            );
-            expect(state.items[id]).toEqual(newer.item);
+            expect(deliver(order).items[id]).toEqual(newer.item);
           }
         }
         expect(events.length).toBeGreaterThan(0);

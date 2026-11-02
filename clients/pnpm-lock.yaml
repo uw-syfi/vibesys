@@ -239,12 +239,18 @@ importers:
       '@vibesys/feature-orchestrator':
         specifier: workspace:*
         version: link:../../features/orchestrator
+      '@vibesys/hosts':
+        specifier: workspace:*
+        version: link:../../libs/hosts
       '@vibesys/orchestrator-fixtures':
         specifier: workspace:*
         version: link:../../libs/orchestrator-fixtures
       '@vibesys/orchestrator-source':
         specifier: workspace:*
         version: link:../../libs/orchestrator-source
+      '@vibesys/transport':
+        specifier: workspace:*
+        version: link:../../libs/transport
       '@vibesys/ui':
         specifier: workspace:*
         version: link:../../libs/ui
@@ -527,6 +533,9 @@ importers:
       '@vibesys/contracts':
         specifier: workspace:*
         version: link:../../libs/contracts
+      '@vibesys/hosts':
+        specifier: workspace:*
+        version: link:../../libs/hosts
       '@vibesys/machine':
         specifier: workspace:*
         version: link:../../libs/machine
@@ -542,6 +551,9 @@ importers:
       '@vibesys/store':
         specifier: workspace:*
         version: link:../../libs/store
+      '@vibesys/transport':
+        specifier: workspace:*
+        version: link:../../libs/transport
       '@vibesys/ui':
         specifier: workspace:*
         version: link:../../libs/ui
@@ -570,9 +582,6 @@ importers:
       '@vibesys/orchestrator-fixtures':
         specifier: workspace:*
         version: link:../../libs/orchestrator-fixtures
-      '@vibesys/transport':
-        specifier: workspace:*
-        version: link:../../libs/transport
       fast-check:
         specifier: 4.10.2
         version: 4.10.2
@@ -1209,9 +1218,6 @@ importers:
 
   libs/orchestrator-source:
     dependencies:
-      '@bufbuild/protobuf':
-        specifier: 2.16.0
-        version: 2.16.0
       '@vibesys/orchestrator-proto':
         specifier: workspace:*
         version: link:../orchestrator-proto
@@ -1219,12 +1225,6 @@ importers:
       '@types/bun':
         specifier: 1.4.2
         version: 1.4.2
-      '@types/node':
-        specifier: ^24.0.0
-        version: 24.13.3
-      fast-check:
-        specifier: 4.10.2
-        version: 4.10.2
       typescript:
         specifier: ^5.8.3
         version: 5.9.3

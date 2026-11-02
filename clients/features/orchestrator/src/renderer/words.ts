@@ -11,9 +11,11 @@ import {
   JobOutcome,
   PlanStatus,
   Refusal,
+  Rejection,
   RunStatus,
   TurnStatus,
 } from '@vibesys/orchestrator-proto';
+import type {Fault} from '../state/index.js';
 
 type Tone = 'neutral' | 'live' | 'ok' | 'warn' | 'err';
 
@@ -107,16 +109,29 @@ export const PLAN_ORDER: readonly PlanStatus[] = [
   PlanStatus.REJECTED,
 ];
 
-const DELIVERY: Readonly<Record<Delivery, string>> = {
-  [Delivery.UNSPECIFIED]: 'Not sent',
-  [Delivery.QUEUED]: 'Waiting for the agent to finish its current step',
-  [Delivery.STEERED]: 'Delivered into the step in progress',
-  [Delivery.NEW_TURN]: 'Started a new turn for the agent',
-  [Delivery.CONSUMED]: 'Read by the agent',
-  [Delivery.REJECTED]: 'Not delivered',
+/** Where a message stands, in the contract's own terms: a steered message is sent, not yet confirmed. */
+const DELIVERY: Readonly<Record<Delivery, Word>> = {
+  [Delivery.UNSPECIFIED]: {label: 'Not sent', tone: 'neutral'},
+  [Delivery.QUEUED]: {label: 'Accepted, waiting for the agent\u2019s next turn', tone: 'neutral'},
+  [Delivery.STEERED]: {label: 'Sent, not yet confirmed', tone: 'live'},
+  [Delivery.NEW_TURN]: {label: 'Being handled in the agent\u2019s current turn', tone: 'live'},
+  [Delivery.CONSUMED]: {label: 'Read by the agent', tone: 'ok'},
+  [Delivery.REJECTED]: {label: 'Not delivered', tone: 'err'},
 };
 
-export const deliveryWord = (delivery: Delivery): string => DELIVERY[delivery];
+export const deliveryWord = (delivery: Delivery): Word => DELIVERY[delivery];
+
+const REJECTION: Readonly<Record<Rejection, string>> = {
+  [Rejection.UNSPECIFIED]: 'No reason was given.',
+  [Rejection.AGENT_GONE]: 'The agent\u2019s session is over and cannot be resumed.',
+  [Rejection.FANOUT_LIMIT]: 'Waking the agent would go over the run\u2019s limit of agents.',
+  [Rejection.AGENT_STOPPING]: 'The agent is being stopped.',
+  [Rejection.RUN_STOPPING]: 'The run is stopping or over.',
+  [Rejection.ATTEMPTS_EXHAUSTED]:
+    'Every attempt to deliver it ended in an interrupted or failed turn.',
+};
+
+export const rejectionWord = (rejection: Rejection): string => REJECTION[rejection];
 
 const REFUSAL: Readonly<Record<Refusal, string>> = {
   [Refusal.UNSPECIFIED]: 'The message was not accepted.',
@@ -140,7 +155,7 @@ export function formatDuration(totalMs: number): string {
   return `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
 }
 
-/** A count in thousands (`12.3k`), or a dash where the tool reported nothing. */
+/** A count of tokens in thousands (`12.3k`), or `Not reported` where the tool said nothing. */
 export function formatTokens(count: number | null): string {
   if (count === null) return 'Not reported';
   return count < 1000 ? String(count) : `${(count / 1000).toFixed(1)}k`;
@@ -151,4 +166,63 @@ export const formatCost = (usd: number | null): string =>
 
 export function formatClock(atMs: number): string {
   return new Date(atMs).toISOString().slice(11, 16);
+}
+
+/** Why a connection or a request did not work, in a sentence a person can act on. */
+export function faultWord(kind: Fault['kind']): string {
+  switch (kind) {
+    case 'lost':
+      return 'The connection to the host was lost.';
+    case 'refused':
+      return 'The host refused the request.';
+    case 'invalid':
+      return 'The host sent something this app does not understand.';
+    case 'ended':
+      return 'The host closed the connection.';
+    case 'timeout':
+      return 'The host did not answer in time.';
+  }
+}
+
+/** A tool as a person names it, for the tools whose internal name is not a word. */
+const TOOL: Readonly<Record<string, string>> = {
+  shell: 'Command',
+  bash: 'Command',
+  exec: 'Command',
+  exec_command: 'Command',
+  read_file: 'Read a file',
+  write_file: 'Wrote a file',
+  apply_patch: 'Edited files',
+  edit: 'Edited a file',
+  grep: 'Searched the files',
+  glob: 'Looked for files',
+};
+
+export function toolLabel(tool: string): string {
+  const known = TOOL[tool];
+  if (known !== undefined) return known;
+  const words = tool.replace(/[_-]+/g, ' ').trim();
+  return words === '' ? 'Tool' : words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/**
+ * What a tool call was asked to do, as text a person reads: the command when the arguments have
+ * one, otherwise each argument on its own line. Never the JSON the tool received.
+ */
+export function describeArgs(argsJson: string): string | null {
+  if (argsJson === '') return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(argsJson);
+  } catch {
+    return argsJson;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return String(parsed);
+  const args = parsed as Record<string, unknown>;
+  const command = args['command'] ?? args['cmd'];
+  if (typeof command === 'string') return command;
+  if (Array.isArray(command)) return command.map(String).join(' ');
+  return Object.entries(args)
+    .map(([key, value]) => `${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`)
+    .join('\n');
 }

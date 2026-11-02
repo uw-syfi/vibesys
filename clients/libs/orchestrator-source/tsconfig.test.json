@@ -17,9 +17,6 @@
     },
     {
       "path": "../orchestrator-proto/tsconfig.lib.json"
-    },
-    {
-      "path": "./tsconfig.node.json"
     }
   ]
 }

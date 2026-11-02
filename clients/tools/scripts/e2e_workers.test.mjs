@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {readdirSync, readFileSync} from 'node:fs';
+import {existsSync, readdirSync, readFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {test} from 'node:test';
 import {fileURLToPath} from 'node:url';
@@ -58,7 +58,10 @@ function sourceFiles(directory) {
 function specVariables() {
   const found = new Set();
   for (const app of readdirSync(APPS)) {
-    for (const file of sourceFiles(join(APPS, app, 'e2e'))) {
+    // An app without browser specs (a page driven by fixtures) has no `e2e` folder.
+    const specs = join(APPS, app, 'e2e');
+    if (!existsSync(specs)) continue;
+    for (const file of sourceFiles(specs)) {
       for (const match of readFileSync(file, 'utf8').matchAll(/process\.env\['([A-Z_]+)'\]/g)) {
         found.add(match[1]);
       }

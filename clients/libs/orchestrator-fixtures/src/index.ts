@@ -4,5 +4,4 @@
  */
 export {FakeDaemon} from './fake-daemon.js';
 export {FixtureSource, type FixtureSourceOptions} from './fixture-source.js';
-export {loopbackLauncher} from './loopback.js';
 export {generateScenario, type Scenario, type ScenarioOptions} from './scenario.js';

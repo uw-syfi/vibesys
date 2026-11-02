@@ -1,14 +1,15 @@
 /**
- * The hosts the window shows when it is opened from a page rather than over ssh. Each is a fake
- * daemon serving a generated run through the same ports a remote daemon would, so the screens
- * cannot tell the difference. The real source plugs in at `connectionsFor`: a host name becomes
- * `portsOf(connectOverSsh(host))` from `@vibesys/feature-orchestrator/main`, with no screen change.
+ * The hosts the window shows when it is opened from a page rather than from the desktop app. Each
+ * is a fake daemon serving a generated run through the same ports a real host would, so the
+ * screens cannot tell the difference. The real source replaces `portsOf(new FixtureSource(...))`
+ * with ports over the host gateway connection, with no screen change.
  */
+import type {HostId} from '@vibesys/hosts';
 import {FakeDaemon, FixtureSource, generateScenario} from '@vibesys/orchestrator-fixtures';
-import {type HostPorts, portsOf} from '@vibesys/orchestrator-source';
+import {type HostPorts, portsOf, SourceError} from '@vibesys/orchestrator-source';
 
 export interface FixtureHost {
-  readonly host: string;
+  readonly host: HostId;
   readonly ports: HostPorts;
   /** Commits one more event, as if the run went on; false once everything is committed. */
   readonly advance: () => boolean;
@@ -16,7 +17,9 @@ export interface FixtureHost {
 }
 
 interface FixtureSpec {
-  readonly host: string;
+  readonly host: HostId;
+  /** The host cannot be reached: every dial fails at once. */
+  readonly unreachable?: boolean;
   readonly seed: number;
   readonly subagents: number;
   readonly live: boolean;
@@ -26,7 +29,7 @@ interface FixtureSpec {
 }
 
 const LONG_RUN: FixtureSpec = {
-  host: 'host-a',
+  host: {kind: 'ssh', alias: 'host-a'},
   seed: 5,
   subagents: 9,
   live: true,
@@ -34,7 +37,7 @@ const LONG_RUN: FixtureSpec = {
   dropsAfter: [],
 };
 const FINISHED_RUN: FixtureSpec = {
-  host: 'host-b',
+  host: {kind: 'ssh', alias: 'host-b'},
   seed: 8,
   subagents: 4,
   live: false,
@@ -45,6 +48,8 @@ const SPECS = {
   'long-run': [LONG_RUN, FINISHED_RUN],
   reconnects: [{...LONG_RUN, dropsAfter: [30, 45, 60]}],
   'short-run': [FINISHED_RUN],
+  // The first host answers; the second never does, so the window shows a lost connection.
+  disconnected: [LONG_RUN, {...FINISHED_RUN, unreachable: true}],
 } as const satisfies Record<string, readonly FixtureSpec[]>;
 
 export type FixtureName = keyof typeof SPECS;
@@ -55,9 +60,23 @@ export function fixtureHosts(name: FixtureName, revealed: number | null): Fixtur
   return SPECS[name].map(spec => {
     const scenario = generateScenario(spec);
     const daemon = new FakeDaemon(scenario, revealed ?? scenario.events.length);
+    const ports = portsOf(new FixtureSource(daemon, {dropsAfter: spec.dropsAfter}));
     return {
       host: spec.host,
-      ports: portsOf(new FixtureSource(daemon, {dropsAfter: spec.dropsAfter})),
+      ports:
+        spec.unreachable === true
+          ? {
+              ...ports,
+              openRuns: () => ({
+                frames: {
+                  [Symbol.asyncIterator]: () => ({
+                    next: () => Promise.reject(new SourceError('lost', 'no route to host')),
+                  }),
+                },
+                close: () => undefined,
+              }),
+            }
+          : ports,
       advance: () => {
         const before = daemon.sequence;
         daemon.commit(1);

@@ -15,8 +15,7 @@
   ],
   "exclude": [
     "src/**/*.test.ts",
-    "src/**/*.test.tsx",
-    "src/node/**"
+    "src/**/*.test.tsx"
   ],
   "references": [
     {

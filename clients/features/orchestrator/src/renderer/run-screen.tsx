@@ -52,6 +52,7 @@ function AgentTree(props: {
 /** One run: its agents beside either the chosen agent's turns or the run-wide views. */
 export function RunScreen(props: {
   readonly state: OrchestratorState;
+  /** What the host is called on screen. */
   readonly host: string;
   readonly runId: string;
   readonly nowMs: number;

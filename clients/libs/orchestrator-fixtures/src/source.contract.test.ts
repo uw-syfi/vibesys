@@ -6,14 +6,14 @@ import {
   Refusal,
   type WatchRunsResponse,
 } from '@vibesys/orchestrator-proto';
-import {type OrchestratorSource, SourceError, StdioSource} from '@vibesys/orchestrator-source';
+import {type OrchestratorSource, SourceError} from '@vibesys/orchestrator-source';
 import {
   applyEvent,
   applySnapshot,
   emptyState,
   type OrchestratorState,
 } from '@vibesys/orchestrator-state';
-import {FakeDaemon, FixtureSource, generateScenario, loopbackLauncher} from './index.js';
+import {FakeDaemon, FixtureSource, generateScenario} from './index.js';
 
 /** Apply one response of the stream to what the client holds. */
 function take(state: OrchestratorState, body: WatchRunsResponse['body']): OrchestratorState {
@@ -53,10 +53,6 @@ const scenario = generateScenario({seed: 5, subagents: 9, live: true});
 const drops = {dropsAfter: [4, 30, 8]};
 const sources: [string, (daemon: FakeDaemon) => OrchestratorSource][] = [
   ['the fixture source', daemon => new FixtureSource(daemon, drops)],
-  [
-    'the stdio source over a loopback daemon',
-    daemon => new StdioSource(loopbackLauncher(new FixtureSource(daemon, drops))),
-  ],
 ];
 
 describe.each(sources)('%s', (_name, make) => {

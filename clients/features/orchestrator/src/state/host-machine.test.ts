@@ -1,13 +1,17 @@
 import {describe, expect, test} from 'bun:test';
+import type {HostId} from '@vibesys/hosts';
 import {clockFrom} from '@vibesys/machine';
 import {FakeDaemon, FixtureSource, generateScenario} from '@vibesys/orchestrator-fixtures';
 import {ItemStatus} from '@vibesys/orchestrator-proto';
 import {type HostPorts, portsOf} from '@vibesys/orchestrator-source';
 import {applyEvent, emptyState, oldestOrdinal} from '@vibesys/orchestrator-state';
+import {BackoffSchedule} from '@vibesys/transport';
 import {FakeClock} from '@vibesys/transport/testing';
 import fc from 'fast-check';
+import {CONNECT_DEADLINE_MS, REQUEST_DEADLINE_MS, redialDelay} from './faults.js';
 import {createHostActor, type HostActor} from './host-actor.js';
 
+const HOST: HostId = {kind: 'ssh', alias: 'host-a'};
 const scenario = generateScenario({seed: 5, subagents: 9, live: true, depth: 30});
 const whole = scenario.events.reduce(applyEvent, emptyState);
 
@@ -44,12 +48,59 @@ function start(
   const clock = new FakeClock();
   const base = portsOf(new FixtureSource(daemon, {dropsAfter: drops}));
   const actor = createHostActor(
-    {host: 'host-a', ports: ports?.(base) ?? base},
+    {host: HOST, ports: ports?.(base) ?? base, backoff: () => new BackoffSchedule()},
     clockFrom(clock.schedule),
   );
   actor.start();
   return {actor, clock};
 }
+
+/** Ports that count what is open: every watch opened and every one closed. */
+function counting(base: HostPorts) {
+  const count = {opened: 0, closed: 0, released: 0};
+  const ports: HostPorts = {
+    ...base,
+    openRuns: after => {
+      const watch = base.openRuns(after);
+      count.opened += 1;
+      return {
+        frames: watch.frames,
+        close: () => {
+          count.closed += 1;
+          watch.close();
+        },
+      };
+    },
+    openAgent: (...args) => {
+      const watch = base.openAgent(...args);
+      count.opened += 1;
+      return {
+        frames: watch.frames,
+        close: () => {
+          count.closed += 1;
+          watch.close();
+        },
+      };
+    },
+    close: () => {
+      count.released += 1;
+    },
+  };
+  return {ports, count};
+}
+
+/** A watch that never answers: a host that accepted the connection and went quiet. */
+const silent = (base: HostPorts): HostPorts => ({
+  ...base,
+  openRuns: () => ({
+    frames: (async function* () {
+      await new Promise(() => undefined);
+    })(),
+    close: () => undefined,
+  }),
+});
+
+const openedAgent = (actor: HostActor) => Object.values(actor.getSnapshot().context.agents)[0];
 
 describe('the host machine', () => {
   test('reads a run from its snapshot and events', async () => {
@@ -94,25 +145,52 @@ describe('the host machine', () => {
     );
   });
 
-  test('a frame from a stream it replaced changes nothing', async () => {
-    const daemon = new FakeDaemon(scenario, 5);
-    const {actor} = start(daemon, [3]);
+  test('stopping the machine closes every watch it opened, however many redials and agents', async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(fc.integer({min: 1, max: 40}), {maxLength: 3}),
+        fc.boolean(),
+        async (drops, withAgent) => {
+          const daemon = new FakeDaemon(scenario);
+          const seen: {count: {opened: number; closed: number; released: number}}[] = [];
+          const {actor, clock} = start(daemon, drops, base => {
+            const made = counting(base);
+            seen.push(made);
+            return made.ports;
+          });
+          await settle(actor, clock);
+          if (withAgent) {
+            actor.send({type: 'agent.open', agentId: longestHistory()});
+            await flush();
+          }
+          actor.stop();
+          const count = seen[0]?.count;
+          expect(count?.opened).toBeGreaterThan(0);
+          expect(count?.closed).toBe(count?.opened);
+        },
+      ),
+      {numRuns: 15},
+    );
+  });
+
+  test('a host that goes quiet is given up on after the deadline, shown as such, and redialled by Retry', async () => {
+    const {actor, clock} = start(new FakeDaemon(scenario), [], silent);
     await flush();
-    daemon.commit(20);
-    await flush();
-    // The first stream dropped after three frames: the machine is waiting to dial again.
-    expect(actor.getSnapshot().value.runs).toBe('waiting');
-    const old = actor.getSnapshot().context.runsWatch;
-    if (old === null) throw new Error('the machine dialled a stream');
+    expect(actor.getSnapshot().value.runs).toEqual({open: 'connecting'});
+    // Every redial of the shared schedule meets the same silence.
+    let redials = 0;
+    for (let guard = 0; guard < 40 && actor.getSnapshot().value.runs !== 'gaveUp'; guard++) {
+      clock.runNext();
+      await flush();
+      if (actor.getSnapshot().value.runs === 'waiting') redials += 1;
+    }
+    expect(actor.getSnapshot().value.runs).toBe('gaveUp');
+    expect(redials).toBeGreaterThanOrEqual(1);
+    expect(actor.getSnapshot().context.runsFault?.kind).toBe('timeout');
+    expect(redialDelay(() => new BackoffSchedule(), 0)).toBeLessThan(CONNECT_DEADLINE_MS);
     actor.send({type: 'retry'});
-    await flush();
-    const mid = actor.getSnapshot().context.state;
-    actor.send({
-      type: 'runs.frame',
-      from: old,
-      body: {case: 'event', value: scenario.events[100] as never},
-    });
-    expect(actor.getSnapshot().context.state).toBe(mid);
+    expect(actor.getSnapshot().value.runs).toEqual({open: 'connecting'});
+    expect(actor.getSnapshot().context.runsAttempts).toBe(0);
     actor.stop();
   });
 
@@ -125,15 +203,15 @@ describe('the host machine', () => {
     const firstOldest = oldestOrdinal(actor.getSnapshot().context.state, agentId);
     expect(firstOldest).not.toBeNull();
     for (let page = 0; page < 20; page++) {
-      actor.send({type: 'agent.older'});
+      actor.send({type: 'agent.older', agentId});
       await flush();
     }
     expect(oldestOrdinal(actor.getSnapshot().context.state, agentId)).toBe(1);
-    expect(actor.getSnapshot().value.older).toBe('idle');
+    expect(openedAgent(actor)?.getSnapshot().value.older).toBe('idle');
     actor.stop();
   });
 
-  test('older history for an agent that is no longer open is not applied', async () => {
+  test('opening another agent starts it clean: nothing of the first one carries over', async () => {
     const gate: {release: () => void} = {release: () => undefined};
     const {actor, clock} = start(new FakeDaemon(scenario), [], base => ({
       ...base,
@@ -143,22 +221,31 @@ describe('the host machine', () => {
         });
         return base.listItems(...args);
       },
+      send: () => Promise.reject(new Error('down')),
     }));
     await settle(actor, clock);
     const [first, second] = Object.values(whole.agents).filter(agent => agent.role === 3);
-    actor.send({type: 'agent.open', agentId: first?.id ?? ''});
+    const a = first?.id ?? '';
+    const b = second?.id ?? '';
+    actor.send({type: 'agent.open', agentId: a});
     await flush();
     const count = (id: string) =>
       Object.values(actor.getSnapshot().context.state.items).filter(i => i.agentId === id).length;
-    const loaded = count(first?.id ?? '');
-    actor.send({type: 'agent.older'});
+    const loaded = count(a);
+    actor.send({type: 'agent.older', agentId: a});
+    actor.send({type: 'message.send', commandId: 'c1', agentId: a, text: 'hi'});
     await flush();
-    expect(actor.getSnapshot().value.older).toBe('loading');
-    actor.send({type: 'agent.open', agentId: second?.id ?? ''});
+    expect(openedAgent(actor)?.getSnapshot().value.older).toBe('loading');
+    actor.send({type: 'agent.open', agentId: b});
     gate.release();
     await flush();
-    expect(count(first?.id ?? '')).toBe(loaded);
-    expect(actor.getSnapshot().value.older).toBe('idle');
+    // The first agent's machine is stopped: its page is not applied, and the second starts clean.
+    expect(count(a)).toBe(loaded);
+    expect(Object.keys(actor.getSnapshot().context.agents)).toEqual([b]);
+    const fresh = openedAgent(actor)?.getSnapshot();
+    expect(fresh?.context.box.status).toBe('idle');
+    expect(fresh?.context.olderError).toBeNull();
+    expect(fresh?.context.fault).toBeNull();
     actor.stop();
   });
 
@@ -166,14 +253,13 @@ describe('the host machine', () => {
     const {actor, clock} = start(new FakeDaemon(scenario), []);
     await settle(actor, clock);
     const live = Object.values(whole.agents).find(agent => agent.status === 2)?.id ?? '';
+    actor.send({type: 'agent.open', agentId: live});
     actor.send({type: 'message.send', commandId: 'c1', agentId: live, text: 'hello'});
     await flush();
-    const answered = actor.getSnapshot().context.message;
-    expect(answered.status).toBe('answered');
-    actor.send({type: 'message.send', commandId: 'c2', agentId: 'nobody', text: 'hi'});
+    expect(openedAgent(actor)?.getSnapshot().context.box.status).toBe('answered');
+    actor.send({type: 'message.send', commandId: 'c2', agentId: live, text: 'again'});
     await flush();
-    const refused = actor.getSnapshot().context.message;
-    expect(refused.status === 'answered' && refused.receipt.refusal).toBeGreaterThan(0);
+    expect(openedAgent(actor)?.getSnapshot().context.box.status).toBe('answered');
     actor.stop();
   });
 
@@ -183,11 +269,42 @@ describe('the host machine', () => {
       send: () => Promise.reject(new Error('down')),
     }));
     await settle(actor, clock);
-    actor.send({type: 'message.send', commandId: 'c1', agentId: 'x', text: 'hello'});
+    const agentId = longestHistory();
+    actor.send({type: 'agent.open', agentId});
+    actor.send({type: 'message.send', commandId: 'c1', agentId, text: 'hello'});
     await flush();
-    expect(actor.getSnapshot().context.message.status).toBe('failed');
-    actor.send({type: 'message.dismiss'});
-    expect(actor.getSnapshot().context.message.status).toBe('idle');
+    expect(openedAgent(actor)?.getSnapshot().context.box.status).toBe('failed');
+    actor.send({type: 'message.dismiss', agentId});
+    expect(openedAgent(actor)?.getSnapshot().context.box.status).toBe('idle');
+    actor.stop();
+  });
+
+  test('a send that is never answered fails at the deadline', async () => {
+    const {actor, clock} = start(new FakeDaemon(scenario), [], base => ({
+      ...base,
+      send: () => new Promise(() => undefined),
+    }));
+    await settle(actor, clock);
+    const agentId = longestHistory();
+    actor.send({type: 'agent.open', agentId});
+    actor.send({type: 'message.send', commandId: 'c1', agentId, text: 'hello'});
+    await flush();
+    expect(openedAgent(actor)?.getSnapshot().context.box.status).toBe('sending');
+    clock.advanceBy(REQUEST_DEADLINE_MS);
+    await flush();
+    const box = openedAgent(actor)?.getSnapshot().context.box;
+    expect(box?.status === 'failed' && box.fault.kind).toBe('timeout');
+    actor.stop();
+  });
+
+  test('events for an agent that is not open are dropped', async () => {
+    const {actor, clock} = start(new FakeDaemon(scenario), []);
+    await settle(actor, clock);
+    const before = actor.getSnapshot().context;
+    actor.send({type: 'message.send', commandId: 'c1', agentId: 'nobody', text: 'hi'});
+    actor.send({type: 'agent.older', agentId: 'nobody'});
+    actor.send({type: 'agent.close', agentId: 'nobody'});
+    expect(actor.getSnapshot().context).toBe(before);
     actor.stop();
   });
 

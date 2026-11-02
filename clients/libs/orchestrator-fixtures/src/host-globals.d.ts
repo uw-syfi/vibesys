@@ -12,5 +12,3 @@ declare class AbortController {
   readonly signal: AbortSignal;
   abort(): void;
 }
-
-declare function queueMicrotask(callback: () => void): void;

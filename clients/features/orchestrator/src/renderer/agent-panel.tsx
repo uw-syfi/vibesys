@@ -1,7 +1,8 @@
 import {
   type Agent,
+  Delivery,
   ItemStatus,
-  type Receipt,
+  type Message,
   type ToolCall,
   TurnTrigger,
 } from '@vibesys/orchestrator-proto';
@@ -28,13 +29,18 @@ import {
   type ThreadItem,
 } from '@vibesys/ui';
 import {type JSX, useState} from 'react';
+import type {AgentView, MessageBox as Box, Fault} from '../state/index.js';
 import {
   agentWord,
   deliveryWord,
+  describeArgs,
+  faultWord,
   formatDuration,
   harnessWord,
   refusalWord,
+  rejectionWord,
   roleWord,
+  toolLabel,
   turnWord,
 } from './words.js';
 
@@ -52,13 +58,14 @@ const TRIGGER: Readonly<Record<TurnTrigger, string>> = {
 function toolItem(shown: ShownItem, call: ToolCall): ThreadItem {
   const {item} = shown;
   const running = item.status === ItemStatus.RUNNING;
+  const asked = describeArgs(call.argsJson);
   return {
     kind: 'tool',
     id: item.id,
-    name: call.tool,
+    name: toolLabel(call.tool),
     state: running ? 'pending' : call.isError ? 'failed' : 'ok',
-    summary: call.argsJson.slice(0, 80),
-    input: call.argsJson === '' ? null : call.argsJson,
+    summary: (asked ?? '').split('\n')[0]?.slice(0, 80) ?? '',
+    input: asked,
     output: shown.output === '' ? null : shown.output,
     ...(running ? {meta: 'In progress'} : {}),
   };
@@ -127,19 +134,28 @@ function capabilityLine(agent: Agent): string {
   return `${harnessWord(agent.harness)}: ${takes} ${streams} ${resumes}`;
 }
 
-function receiptLine(receipt: Receipt): string {
-  return receipt.refusal === 0 ? deliveryWord(receipt.delivery) : refusalWord(receipt.refusal);
+/** Where the message stands now, from the stored message when the host has told us about it. */
+function deliveryLine(box: Extract<Box, {status: 'answered'}>, message: Message | undefined) {
+  const {receipt} = box;
+  if (receipt.refusal !== 0) return {label: refusalWord(receipt.refusal), tone: 'err' as const};
+  const delivery = message?.delivery ?? receipt.delivery;
+  const word = deliveryWord(delivery);
+  const why =
+    delivery === Delivery.REJECTED && message !== undefined
+      ? ` ${rejectionWord(message.rejection)}`
+      : '';
+  return {label: `${word.label}.${why}`, tone: word.tone};
 }
 
-export interface MessageBoxView {
-  readonly status: 'idle' | 'sending' | 'answered' | 'failed';
-  readonly receipt?: Receipt;
-  readonly error?: string;
+function failureLine(fault: Fault): string {
+  return `Could not send. ${faultWord(fault.kind)}`;
 }
 
 function MessageBox(props: {
   readonly agent: Agent;
-  readonly box: MessageBoxView;
+  readonly box: Box;
+  /** The stored message the last answer named, which keeps changing as the agent reads it. */
+  readonly stored: Message | undefined;
   readonly send: (text: string) => void;
   readonly dismiss: () => void;
 }): JSX.Element {
@@ -156,7 +172,7 @@ function MessageBox(props: {
             rows={2}
           />
         </Field>
-        <Row gap="space-3">
+        <Row gap="space-3" wrap>
           <Button
             text={sending ? 'Sending' : 'Send'}
             variant="primary"
@@ -168,24 +184,22 @@ function MessageBox(props: {
               ? {disabledReason: sending ? 'Sending.' : 'Write a message first.', quietReason: true}
               : {})}
           />
-          {props.box.status === 'answered' && props.box.receipt !== undefined ? (
-            <Chip
-              label={receiptLine(props.box.receipt)}
-              tone={props.box.receipt.refusal === 0 ? 'ok' : 'err'}
-              dot
-            />
-          ) : null}
+          {props.box.status === 'answered'
+            ? (() => {
+                const line = deliveryLine(props.box, props.stored);
+                return <Chip label={line.label} tone={line.tone} dot />;
+              })()
+            : null}
           {props.box.status === 'failed' ? (
-            <Chip
-              label={`Could not send: ${props.box.error ?? 'connection lost'}`}
-              tone="err"
-              dot
-            />
+            <Chip label={failureLine(props.box.fault)} tone="err" dot />
           ) : null}
           {props.box.status === 'answered' || props.box.status === 'failed' ? (
             <Button text="Clear" variant="quiet" size="sm" press={props.dismiss} />
           ) : null}
         </Row>
+        {props.box.status === 'failed' ? (
+          <Text tone="muted" variant="small">{`Details: ${props.box.fault.detail}`}</Text>
+        ) : null}
       </Stack>
     </Card>
   );
@@ -196,9 +210,8 @@ export function AgentPanel(props: {
   readonly state: OrchestratorState;
   readonly agent: Agent;
   readonly name: string;
-  readonly older: 'idle' | 'loading';
-  readonly olderError: string | null;
-  readonly box: MessageBoxView;
+  /** This agent's own connection, history and message box. */
+  readonly view: AgentView;
   readonly showOlder: () => void;
   readonly send: (text: string) => void;
   readonly dismiss: () => void;
@@ -232,9 +245,13 @@ export function AgentPanel(props: {
             variant="secondary"
             size="sm"
             press={props.showOlder}
-            {...(props.older === 'loading' ? {disabledReason: 'Loading.', quietReason: true} : {})}
+            {...(props.view.older === 'loading'
+              ? {disabledReason: 'Loading.', quietReason: true}
+              : {})}
           />
-          {props.olderError === null ? null : <Text tone="muted">{props.olderError}</Text>}
+          {props.view.olderError === null ? null : (
+            <Text tone="muted">{`Could not load earlier steps. ${faultWord(props.view.olderError.kind)}`}</Text>
+          )}
         </Row>
       ) : null}
       {turns.length === 0 ? (
@@ -242,7 +259,17 @@ export function AgentPanel(props: {
       ) : (
         <Thread label={`${props.name}, turn by turn`} items={turns.flatMap(turnItems)} />
       )}
-      <MessageBox agent={agent} box={props.box} send={props.send} dismiss={props.dismiss} />
+      <MessageBox
+        agent={agent}
+        box={props.view.box}
+        stored={
+          props.view.box.status === 'answered'
+            ? state.messages[props.view.box.receipt.messageId]
+            : undefined
+        }
+        send={props.send}
+        dismiss={props.dismiss}
+      />
     </Stack>
   );
 }

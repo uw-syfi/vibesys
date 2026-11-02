@@ -1,13 +1,14 @@
 import type {Plan} from '@vibesys/orchestrator-proto';
 import {Card, EmptyState, Stack, Table, type TableColumn, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
-import {PLAN_ORDER, planWord} from './words.js';
+import type {Fault} from '../state/index.js';
+import {faultWord, PLAN_ORDER, planWord} from './words.js';
 
 export type IdeasLoad =
   | {readonly status: 'idle'}
   | {readonly status: 'loading'}
   | {readonly status: 'ready'; readonly plans: readonly Plan[]}
-  | {readonly status: 'failed'; readonly error: string};
+  | {readonly status: 'failed'; readonly fault: Fault};
 
 const COLUMNS: readonly TableColumn<Plan>[] = [
   {key: 'number', header: 'No.', mono: true, cell: plan => String(plan.number)},
@@ -28,7 +29,12 @@ export function IdeasView(props: {readonly load: IdeasLoad}): JSX.Element {
   if (load.status === 'idle' || load.status === 'loading')
     return <Text tone="muted">Loading ideas.</Text>;
   if (load.status === 'failed') {
-    return <EmptyState title="Could not load the ideas" body={load.error} />;
+    return (
+      <EmptyState
+        title="Could not load the ideas"
+        body={`${faultWord(load.fault.kind)} Open the Ideas tab again to retry.`}
+      />
+    );
   }
   if (load.plans.length === 0) {
     return (

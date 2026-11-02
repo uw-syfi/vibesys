@@ -19,6 +19,9 @@
   ],
   "references": [
     {
+      "path": "../../libs/hosts/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/machine/tsconfig.lib.json"
     },
     {
@@ -32,6 +35,9 @@
     },
     {
       "path": "../../libs/store/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/transport/tsconfig.lib.json"
     }
   ]
 }

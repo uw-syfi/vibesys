@@ -26,9 +26,6 @@
       "path": "./tsconfig.renderer.json"
     },
     {
-      "path": "./tsconfig.main.json"
-    },
-    {
       "path": "../../libs/machine/tsconfig.testing.json"
     },
     {
