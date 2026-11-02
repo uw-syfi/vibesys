@@ -28,6 +28,10 @@ place.
 - **Closed sets.** A string-literal union. When the values cross a process
   boundary, take the union from generated contract types, never a
   hand-written copy. Branch exhaustively so a new member is a compile error.
+- **Types first.** Model a lifecycle as a discriminated union, one variant per
+  state, not an object of optional fields; brand identifiers
+  (`string & {readonly __brand: "CommitId"}`) and construct them only in the
+  parser. See [types-and-data.md](types-and-data.md).
 - **Generated types.** Never edit generated files; regenerate them from the
   source of truth and review the diff.
 - **State.** Frontend state changes only from backend events; keep folds pure

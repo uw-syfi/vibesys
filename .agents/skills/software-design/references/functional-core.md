@@ -120,7 +120,7 @@ outcome with no "requested, unconfirmed" variant forced an error that ended a
 user-stopped run. Match unions exhaustively with `assert_never`, so the type checker
 enforces it. Parse, do not validate: the boundary parses a response into a proof type,
 and guards accept only proof types, never raw caller-supplied fields. See
-[python.md](python.md).
+[types-and-data.md](types-and-data.md) for the design and [python.md](python.md).
 
 ## Interface contracts
 

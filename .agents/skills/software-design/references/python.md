@@ -28,6 +28,9 @@ length, function complexity (`C901`), branches, statements and arguments
   A model that must accept unknown keys sets `extra` explicitly and says why.
 - **Closed sets.** `StrEnum` or `Literal`, never raw strings. Look up
   implementations in a registry keyed by the enum. Match exhaustively.
+- **Types first.** Model a lifecycle as a union of frozen dataclasses (or
+  models), one per state, not a class of flags and optionals; give identifiers
+  `NewType` or a frozen wrapper. See [types-and-data.md](types-and-data.md).
 - **Errors.** Typed errors that name the offending key or path.
 - **Proof types.** Parse an external response once into a frozen type that
   only the parser constructs, and make guards take that type, not raw fields

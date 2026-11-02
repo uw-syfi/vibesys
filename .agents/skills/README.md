@@ -10,8 +10,9 @@ enforces it, including that this index lists every skill under its kind.
 
 Engineering judgment that holds in any well-run codebase.
 
-- [software-design](software-design/SKILL.md): deep modules, declared
-  interfaces, one-way dependencies, fitting a change to the design.
+- [software-design](software-design/SKILL.md): data and types first, deep
+  modules, declared interfaces, one-way dependencies, fitting a change to the
+  design.
 - [testing](testing/SKILL.md): public-API tests, Fakes instead of mocks,
   property-based tests, no flakiness.
 
