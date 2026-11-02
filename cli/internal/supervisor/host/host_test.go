@@ -2,6 +2,7 @@ package host_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -195,4 +196,79 @@ func TestAReleasedSupervisorDoesNotWaitForACallerThatStoppedReading(t *testing.T
 		t.Fatalf("the released supervisor is still there: %v", err)
 	}
 	gone.Unlock()
+}
+
+// Only proof of death lets a run go. A supervisor that cannot be reached, here because its socket
+// is gone and for one of another build because the handshake refuses, may have a command running,
+// so it stays until its lock says otherwise. A done context says nothing about it at all.
+func TestOnlyProofOfDeathLetsARunGo(t *testing.T) {
+	r := openHostRig(t)
+	ctx, cancel := context.WithTimeout(context.Background(), suptest.Backstop)
+	defer cancel()
+	l := lifecycle.Launch{
+		Repository: "/repo", Task: "task", Job: "unreachable",
+		Spec: core.JobSpec{
+			Commit: "0123456789abcdef0123456789abcdef01234567", Environment: core.EnvironmentHost,
+			Settings: core.CommandSettings{Argv: []string{"exit", "0"}, Timeout: time.Hour},
+		},
+	}
+	if _, err := r.h.Spawn(ctx, l); err != nil {
+		t.Fatal(err)
+	}
+	infos, err := host.Inspect(r.root)
+	if err != nil || len(infos) != 1 {
+		t.Fatalf("Inspect = %+v, %v", infos, err)
+	}
+	if err := os.Remove(infos[0].Socket); err != nil {
+		t.Fatal(err)
+	}
+	next := r.newHost()
+	ref := l.Ref()
+	stillThere := func(when string) {
+		t.Helper()
+		if left, err := host.Inspect(r.root); err != nil || len(left) != 1 {
+			t.Fatalf("%s: run directories = %+v, %v", when, left, err)
+		}
+	}
+
+	run, err := next.Probe(ctx, ref)
+	if err != nil || run.Presence != lifecycle.PresenceUnknown || run.Launch.Ref() != ref {
+		t.Fatalf("Probe = %+v, %v; want an unknown run with its launch", run, err)
+	}
+	var refused *core.Failure
+	if err := next.Forget(ctx, ref); !errors.As(err, &refused) || refused.Kind != core.FailureConflict {
+		t.Fatalf("Forget of a run that may live = %v, want a conflict", err)
+	}
+	stillThere("after Forget")
+
+	done, stop := context.WithCancel(ctx)
+	stop()
+	if _, err := next.Probe(done, ref); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Probe with a done context = %v", err)
+	}
+	if _, err := next.Runs(done); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Runs with a done context = %v", err)
+	}
+	if err := next.Forget(done, ref); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Forget with a done context = %v", err)
+	}
+	stillThere("with a done context")
+
+	if err := syscall.Kill(infos[0].PID, syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	gone, err := runtimedir.WaitLock(ctx, infos[0].Alive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gone.Unlock()
+	if run, err := next.Probe(ctx, ref); err != nil || run.Presence != lifecycle.PresenceGone {
+		t.Fatalf("Probe of a dead supervisor = %+v, %v", run, err)
+	}
+	if err := next.Forget(ctx, ref); err != nil {
+		t.Fatal(err)
+	}
+	if left, err := host.Inspect(r.root); err != nil || len(left) != 0 {
+		t.Fatalf("after Forget of a dead run: %+v, %v", left, err)
+	}
 }
