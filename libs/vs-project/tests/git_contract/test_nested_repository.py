@@ -35,7 +35,6 @@ _OPERATIONS: dict[str, _Operation] = {
     "tracked_changes_since_head": lambda repo, _base: repo.tracked_changes_since_head(["."]),
     "changed_since": lambda repo, base: repo.changed_since(base, ["."]),
     "worktree_matches": lambda repo, base: repo.worktree_matches(base, ["."], include_ignored=True),
-    "commit_only": lambda repo, _base: repo.commit("partial", only=["a.txt"]),
 }
 
 
@@ -109,6 +108,19 @@ def test_a_command_scoped_by_pathspecs_refuses_only_a_repository_it_would_read(
     else:
         sandbox.repo.stage_all(["src/inner"])
         assert sandbox.repo.has_staged_changes(["src/inner"])
+
+
+@pytest.mark.parametrize("nested", ["src/.git", "repos/x/.git"])
+def test_a_commit_of_chosen_paths_ignores_a_repository_it_would_not_read(
+    sandbox: ContractProject, nested: str
+) -> None:
+    sandbox.start({"a.txt": "1\n", "src/b.txt": "2\n"})
+    sandbox.write("a.txt", "edited\n")
+    _plant(sandbox.root, nested, "directory")
+
+    sandbox.repo.commit("partial", only=["a.txt"])
+
+    assert sandbox.repo.uncommitted_paths(["a.txt"]) == ()
 
 
 def test_a_linked_worktree_inside_the_work_tree_is_not_a_nested_repository(
