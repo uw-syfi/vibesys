@@ -111,7 +111,7 @@ var screenQueries = map[string]string{
 }
 
 const (
-	querySnapshotRuns   = `SELECT body, updated_sequence FROM runs WHERE status = ? ORDER BY updated_sequence DESC LIMIT ?`
+	querySnapshotRuns   = `SELECT body FROM runs WHERE status = ? ORDER BY updated_sequence DESC LIMIT ?`
 	querySnapshotAgents = `SELECT body FROM agents WHERE run_id = ?`
 	queryRunEvents      = `SELECT body FROM events WHERE run_id = ? AND sequence > ? ORDER BY sequence LIMIT ?`
 	queryAllEvents      = `SELECT body FROM events WHERE sequence > ? ORDER BY sequence LIMIT ?`

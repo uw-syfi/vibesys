@@ -22,18 +22,18 @@ func (s *SQLite) reading(f func(tx *sql.Tx) error) error {
 }
 
 // scanEvents decodes the first column of each row as an event.
-func scanEvents(rows *sql.Rows, each func(seq uint64, e core.Event, rest []any) error, rest ...any) error {
+func scanEvents(rows *sql.Rows, each func(seq uint64, e core.Event) error) error {
 	defer rows.Close()
 	for rows.Next() {
 		var body []byte
-		if err := rows.Scan(append([]any{&body}, rest...)...); err != nil {
+		if err := rows.Scan(&body); err != nil {
 			return fmt.Errorf("store: %w", err)
 		}
 		seq, e, err := decodeBody(body)
 		if err != nil {
 			return err
 		}
-		if err := each(seq, e, rest); err != nil {
+		if err := each(seq, e); err != nil {
 			return err
 		}
 	}
@@ -62,8 +62,7 @@ func (s *SQLite) Snapshot() (Snapshot, error) {
 			if err != nil {
 				return fmt.Errorf("store: %w", err)
 			}
-			var last uint64
-			err = scanEvents(rows, func(_ uint64, e core.Event, _ []any) error {
+			err = scanEvents(rows, func(last uint64, e core.Event) error {
 				run, err := entity[core.Run](e)
 				if err != nil {
 					return err
@@ -74,7 +73,7 @@ func (s *SQLite) Snapshot() (Snapshot, error) {
 					out.Runs = append(out.Runs, run)
 				}
 				return nil
-			}, &last)
+			})
 			if err != nil {
 				return err
 			}
@@ -89,7 +88,7 @@ func (s *SQLite) Snapshot() (Snapshot, error) {
 			if err != nil {
 				return fmt.Errorf("store: %w", err)
 			}
-			if err := scanEvents(rows, func(_ uint64, e core.Event, _ []any) error {
+			if err := scanEvents(rows, func(_ uint64, e core.Event) error {
 				a, err := entity[core.Agent](e)
 				out.Agents = append(out.Agents, a)
 				return err
@@ -167,7 +166,7 @@ func (s *SQLite) EventsAfter(run core.RunID, after uint64, limit int) ([]EventRe
 		if err != nil {
 			return fmt.Errorf("store: %w", err)
 		}
-		return scanEvents(rows, func(seq uint64, e core.Event, _ []any) error {
+		return scanEvents(rows, func(seq uint64, e core.Event) error {
 			out = append(out, EventRecord{Sequence: seq, Event: e})
 			return nil
 		})

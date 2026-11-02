@@ -53,12 +53,12 @@ func isNetworkMount(fstype string) bool {
 }
 
 // TestRealDetectorAgreesWithTheMountTable runs the real detector over the directories of this host
-// and compares each answer with the mount table. On the development host /home is NFS and
-// /mnt/data is local, so both answers are exercised there; on another host the paths simply are what
+// and compares each answer with the mount table. A host that mounts one of these paths over a
+// network exercises the refusal; on another host every path is local, and the paths simply are what
 // they are.
 func TestRealDetectorAgreesWithTheMountTable(t *testing.T) {
 	cwd, _ := os.Getwd()
-	for _, path := range []string{"/", "/home", "/mnt/data", "/tmp", "/var", "/dev/shm", cwd} {
+	for _, path := range []string{"/", "/home", "/tmp", "/var", "/dev/shm", cwd} {
 		real, err := filepath.EvalSymlinks(path)
 		if err != nil {
 			continue
@@ -79,7 +79,7 @@ func TestRealDetectorAgreesWithTheMountTable(t *testing.T) {
 }
 
 func TestRealResolveRefusesNetworkAndAcceptsLocal(t *testing.T) {
-	for _, path := range []string{"/home", "/mnt/data", "/dev/shm"} {
+	for _, path := range []string{"/home", "/tmp", "/dev/shm"} {
 		real, err := filepath.EvalSymlinks(path)
 		if err != nil {
 			continue
