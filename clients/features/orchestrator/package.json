@@ -39,11 +39,23 @@
   },
   "dependencies": {
     "@vibesys/machine": "workspace:*",
+    "@vibesys/orchestrator-proto": "workspace:*",
+    "@vibesys/orchestrator-source": "workspace:*",
+    "@vibesys/orchestrator-state": "workspace:*",
+    "@vibesys/store": "workspace:*",
+    "@vibesys/ui": "workspace:*",
+    "react": "19.1.1",
+    "react-dom": "19.1.1",
     "xstate": "5.33.2"
   },
   "devDependencies": {
     "@types/bun": "1.4.2",
     "@types/node": "^24.0.0",
+    "@types/react": "19.1.13",
+    "@types/react-dom": "19.1.9",
+    "@vibesys/orchestrator-fixtures": "workspace:*",
+    "@vibesys/transport": "workspace:*",
+    "fast-check": "4.10.2",
     "typescript": "^5.8.3"
   }
 }

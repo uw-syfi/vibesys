@@ -20,6 +20,18 @@
   "references": [
     {
       "path": "../../libs/machine/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/orchestrator-proto/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/orchestrator-source/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/orchestrator-state/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/store/tsconfig.lib.json"
     }
   ]
 }

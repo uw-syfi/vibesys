@@ -6,6 +6,8 @@
  * The orchestrator's protos are not part of the bindings of `@vibesys/proto`, so the existing
  * clients generate what they always did.
  */
+
+export {sendMessageCommand} from './commands.js';
 export * from './generated/vibesys/orchestrator/v1/events_pb.js';
 export * from './generated/vibesys/orchestrator/v1/orchestrator_pb.js';
 export * from './generated/vibesys/orchestrator/v1/service_pb.js';

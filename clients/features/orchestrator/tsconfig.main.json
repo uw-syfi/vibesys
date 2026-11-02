@@ -22,6 +22,12 @@
   "references": [
     {
       "path": "./tsconfig.state.json"
+    },
+    {
+      "path": "../../libs/orchestrator-source/tsconfig.node.json"
+    },
+    {
+      "path": "../../libs/orchestrator-source/tsconfig.lib.json"
     }
   ]
 }

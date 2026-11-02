@@ -43,6 +43,8 @@ export interface ScenarioOptions {
   readonly subagents: number;
   /** Leave the last turns unfinished, so the run is live at the end. */
   readonly live: boolean;
+  /** Extra read-and-try steps in each subagent's first turn, to make long histories (default 0). */
+  readonly depth?: number;
 }
 
 export interface Scenario {
@@ -310,6 +312,7 @@ function workSteps(
       output: 'src/decode.py:41: def decode_step(...)',
       exit: 0,
     }),
+    ...investigation(builder, agent, builder.options.depth ?? 0),
     ...(worker
       ? [
           builder.step(agent, 'tool', 'python bench.py', {
@@ -331,6 +334,21 @@ function workSteps(
       ? [builder.step(agent, 'tool', 'tail -f bench.log', {output: '', status: ItemStatus.RUNNING})]
       : []),
   ];
+}
+
+/** `depth` more rounds of thinking and trying, so an agent's history can be long. */
+function investigation(builder: Builder, agent: Agent, depth: number): Step[] {
+  const steps: Step[] = [];
+  for (let round = 1; round <= depth; round++) {
+    steps.push(
+      builder.step(agent, 'reasoning', `Round ${round}: checking whether the change is safe.`),
+      builder.step(agent, 'tool', `pytest tests/test_decode.py -k case_${round}`, {
+        output: `${round} passed`,
+        exit: 0,
+      }),
+    );
+  }
+  return steps;
 }
 
 function addSubagent(builder: Builder, index: number, after: number, tail: boolean): Sub {

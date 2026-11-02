@@ -11,3 +11,13 @@ declare class TextDecoder {
   constructor(label?: string, options?: {fatal?: boolean});
   decode(input: Uint8Array): string;
 }
+
+declare class AbortController {
+  readonly signal: AbortSignal;
+  abort(): void;
+}
+
+interface AbortSignal {
+  readonly aborted: boolean;
+  addEventListener(type: 'abort', listener: () => void, options?: {once?: boolean}): void;
+}

@@ -496,6 +496,27 @@ importers:
       '@vibesys/machine':
         specifier: workspace:*
         version: link:../../libs/machine
+      '@vibesys/orchestrator-proto':
+        specifier: workspace:*
+        version: link:../../libs/orchestrator-proto
+      '@vibesys/orchestrator-source':
+        specifier: workspace:*
+        version: link:../../libs/orchestrator-source
+      '@vibesys/orchestrator-state':
+        specifier: workspace:*
+        version: link:../../libs/orchestrator-state
+      '@vibesys/store':
+        specifier: workspace:*
+        version: link:../../libs/store
+      '@vibesys/ui':
+        specifier: workspace:*
+        version: link:../../libs/ui
+      react:
+        specifier: 19.1.1
+        version: 19.1.1
+      react-dom:
+        specifier: 19.1.1
+        version: 19.1.1(react@19.1.1)
       xstate:
         specifier: 5.33.2
         version: 5.33.2
@@ -506,6 +527,21 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
+      '@types/react':
+        specifier: 19.1.13
+        version: 19.1.13
+      '@types/react-dom':
+        specifier: 19.1.9
+        version: 19.1.9(@types/react@19.1.13)
+      '@vibesys/orchestrator-fixtures':
+        specifier: workspace:*
+        version: link:../../libs/orchestrator-fixtures
+      '@vibesys/transport':
+        specifier: workspace:*
+        version: link:../../libs/transport
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
       typescript:
         specifier: ^5.8.3
         version: 5.9.3

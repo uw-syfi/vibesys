@@ -24,6 +24,21 @@
     },
     {
       "path": "../../libs/machine/tsconfig.testing.json"
+    },
+    {
+      "path": "../../libs/orchestrator-fixtures/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/orchestrator-proto/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/orchestrator-source/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/orchestrator-state/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/transport/tsconfig.testing.json"
     }
   ]
 }

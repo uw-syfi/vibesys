@@ -930,6 +930,10 @@ export const STRICT_WORKSPACE_IMPORTS = {
   '@vibesys/subscription': null,
   // Its entries are node-only, so `runtime-reachability` already keeps it in `./main` entries.
   '@vibesys/settings': null,
+  // The orchestrator screens read a run through these: its messages, its folds and its sources.
+  '@vibesys/orchestrator-proto': null,
+  '@vibesys/orchestrator-state': null,
+  '@vibesys/orchestrator-source': null,
 };
 /** An app imports the stylesheets of `@vibesys/ui` once, in its entry wiring. */
 const STRICT_APP_STYLESHEETS = ['./tokens.css', './fonts.css', './components.css'];
