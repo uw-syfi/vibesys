@@ -126,7 +126,7 @@ type world struct {
 	// vanished are the runs whose place is gone for good, and givenUp the jobs of each store whose
 	// owner record the operator removed, less the ones the daemon took back. Both are guarded by mu.
 	vanished map[lifecycle.Ref]bool
-	givenUp  map[app.Scope][]core.JobID
+	givenUp  map[core.Scope][]core.JobID
 
 	// What happened, for the invariants.
 	killed     map[lifecycle.Ref]bool
@@ -299,7 +299,7 @@ func (s simStores) Forget(_ context.Context, scope core.Scope) error {
 }
 
 // GivenUp is the jobs the operator gave up that the store still has running.
-func (s simStores) GivenUp(ctx context.Context, scope app.Scope) ([]core.JobID, error) {
+func (s simStores) GivenUp(ctx context.Context, scope core.Scope) ([]core.JobID, error) {
 	if _, err := s.open(ctx, scope); err != nil {
 		return nil, err
 	}
@@ -319,7 +319,7 @@ func (s simStores) GivenUp(ctx context.Context, scope app.Scope) ([]core.JobID, 
 }
 
 // Reclaim takes a job back from the operator's give-up.
-func (s simStores) Reclaim(ctx context.Context, scope app.Scope, job core.JobID) error {
+func (s simStores) Reclaim(ctx context.Context, scope core.Scope, job core.JobID) error {
 	if _, err := s.open(ctx, scope); err != nil {
 		return err
 	}

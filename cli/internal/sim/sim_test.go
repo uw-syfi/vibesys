@@ -345,8 +345,8 @@ func (w *world) awayNow() string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	for _, s := range scopes {
-		if w.absent[s.Repository] && s.Repository != w.lost {
-			return s.Repository
+		if repo := string(s.Repository()); w.absent[repo] && repo != w.lost {
+			return repo
 		}
 	}
 	return ""
@@ -519,7 +519,7 @@ func (w *world) moves(heal bool) []option {
 	}
 	if heal {
 		for _, scope := range w.toGiveUp() {
-			out = append(out, option{"the operator removes the owner record of " + scope.Repository + " " + scope.Task, func() { w.giveUp(scope) }})
+			out = append(out, option{"the operator removes the owner record of " + string(scope.Repository()) + " " + string(scope.Task()), func() { w.giveUp(scope) }})
 		}
 	}
 	return out
@@ -527,8 +527,8 @@ func (w *world) moves(heal bool) []option {
 
 // toGiveUp is the stores whose owner record an operator removes, as the daemon tells them to: a job
 // of each runs in it, whose place is gone for good, and was not given up yet.
-func (w *world) toGiveUp() []app.Scope {
-	var out []app.Scope
+func (w *world) toGiveUp() []core.Scope {
+	var out []core.Scope
 	for _, l := range w.jobs() {
 		ref := w.refIn(l.scope, l.job.ID)
 		w.mu.Lock()
@@ -543,7 +543,7 @@ func (w *world) toGiveUp() []app.Scope {
 
 // giveUp is the next owner of a store finding its record removed: every job it has running is
 // given up.
-func (w *world) giveUp(scope app.Scope) {
+func (w *world) giveUp(scope core.Scope) {
 	for _, l := range w.jobs() {
 		w.mu.Lock()
 		if l.scope == scope && l.job.State == core.JobRunning && !slices.Contains(w.givenUp[scope], l.job.ID) {
