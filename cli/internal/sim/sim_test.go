@@ -566,7 +566,7 @@ func simulate(seed uint64) (string, string) {
 		synctest.Wait()
 		w.check()
 		if w.violation != "" {
-			return w.violation, w.trace.String()
+			return w.violation, w.traced()
 		}
 		moves := w.moves(false)
 		if w.profile.recovery && slices.ContainsFunc(moves, launchRecording) && w.rng.IntN(2) == 0 {
@@ -587,7 +587,7 @@ func simulate(seed uint64) (string, string) {
 		w.lateRestart()
 	}
 	if w.violation != "" {
-		return w.violation, w.trace.String()
+		return w.violation, w.traced()
 	}
 	// Heal: no more faults, and everything reachable comes back. Every job gets a final wait.
 	w.tracef("heal")
@@ -613,23 +613,23 @@ func simulate(seed uint64) (string, string) {
 		synctest.Wait()
 		w.check()
 		if w.violation != "" {
-			return w.violation, w.trace.String()
+			return w.violation, w.traced()
 		}
 		if w.settled() {
 			w.finalCheck()
-			return w.violation, w.trace.String()
+			return w.violation, w.traced()
 		}
 		moves := w.moves(true)
 		if len(moves) == 0 {
 			w.violate("stuck: nothing can happen and work is left: %s", w.unfinished())
-			return w.violation, w.trace.String()
+			return w.violation, w.traced()
 		}
 		o := moves[w.rng.IntN(len(moves))]
 		w.tracef("h%d %s", step, o.label)
 		o.do()
 	}
 	w.violate("no progress in %d steps: %s", healBound, w.unfinished())
-	return w.violation, w.trace.String()
+	return w.violation, w.traced()
 }
 
 func (w *world) unfinished() string {

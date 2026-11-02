@@ -66,8 +66,11 @@ type world struct {
 	seed    uint64
 	rng     *rand.Rand
 	profile profile
-	trace   strings.Builder
 	group   owned.Group
+
+	// traceMu guards trace: the driver and the actors both write it.
+	traceMu sync.Mutex
+	trace   strings.Builder
 
 	clock     *clock.Manual
 	timers    *simTimers
@@ -177,7 +180,16 @@ func newWorld(seed uint64) *world {
 }
 
 func (w *world) tracef(format string, args ...any) {
+	w.traceMu.Lock()
+	defer w.traceMu.Unlock()
 	fmt.Fprintf(&w.trace, format+"\n", args...)
+}
+
+// traced returns the record so far.
+func (w *world) traced() string {
+	w.traceMu.Lock()
+	defer w.traceMu.Unlock()
+	return w.trace.String()
 }
 
 func (w *world) violate(format string, args ...any) {
