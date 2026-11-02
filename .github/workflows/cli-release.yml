@@ -1,0 +1,130 @@
+name: Build and publish vibesys-cli release
+
+# A tag cli-v<version> publishes the vibesys-cli binaries for Linux and macOS, amd64 and arm64.
+# See cli/README.md for how users install them and docs/contributing/publishing.md for the flow.
+on:
+  push:
+    tags:
+      - 'cli-v*'
+
+permissions:
+  contents: read
+
+# One release at a time, and a started release is never cancelled half published.
+concurrency:
+  group: cli-release
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ github.ref_name }}
+
+jobs:
+  build:
+    name: Build and verify the release assets
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: false
+
+      - name: Validate the tag
+        run: |
+          if [[ ! "$TAG" =~ ^cli-v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Tag '$TAG' must be cli-vMAJOR.MINOR.PATCH with an optional -suffix" >&2
+            exit 1
+          fi
+          # Never publish a commit that is not on main.
+          git fetch --no-tags origin main
+          release_commit="$(git rev-parse --verify "refs/tags/$TAG^{commit}")"
+          git merge-base --is-ancestor "$release_commit" origin/main
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: Check the module
+        run: ./cli/check.sh
+
+      - name: Build the release assets
+        run: ./cli/build_release.sh "${TAG#cli-v}" "$RUNNER_TEMP/release"
+
+      - name: Upload the assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cli-release
+          path: ${{ runner.temp }}/release/*
+          if-no-files-found: error
+
+  publish:
+    name: Attest and publish
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Download the assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: cli-release
+          path: release
+
+      - name: Attest the assets
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: release/*
+
+      # The release for this version, under its own tag. It never takes GitHub's "latest" marker:
+      # the repository's Python releases use it, and the next one created would take it back.
+      - name: Publish the release for this version
+        run: |
+          version="${TAG#cli-v}"
+          prerelease=()
+          if [[ "$version" == *-* ]]; then prerelease=(--prerelease); fi
+          if ! gh release view "$TAG" > /dev/null 2>&1; then
+            gh release create "$TAG" --verify-tag --latest=false "${prerelease[@]}" \
+              --title "vibesys-cli $version" \
+              --notes "Static vibesys-cli binaries for Linux and macOS, amd64 and arm64. Install with the script in cli/README.md. Each file has a build attestation: gh attestation verify <file> --repo $GITHUB_REPOSITORY"
+          fi
+          # A re-run after a partial failure replaces assets with identical content.
+          # The binaries go first and the files that name them last, so a reader that sees
+          # new checksums always finds the binaries they describe.
+          gh release upload "$TAG" release/vibesys-cli_* --clobber
+          gh release upload "$TAG" release/checksums.txt release/VERSION --clobber
+
+      # The rolling cli-latest release carries the same assets as the newest stable version, so
+      # install.sh and `vibesys-cli upgrade` read one fixed URL. A pre-release, or a version older
+      # than one already published, leaves it alone.
+      - name: Move cli-latest to this version
+        run: |
+          version="${TAG#cli-v}"
+          if [[ "$version" == *-* ]]; then
+            echo "$TAG is a pre-release; cli-latest stays where it is."
+            exit 0
+          fi
+          newest="$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/cli-v" --paginate --jq '.[].ref' \
+            | sed 's#^refs/tags/cli-v##' | grep -v -- '-' | sort -V | tail -n 1)"
+          if [[ "$newest" != "$version" ]]; then
+            echo "$TAG is not the newest stable version ($newest is); cli-latest stays where it is."
+            exit 0
+          fi
+          if gh release view cli-latest > /dev/null 2>&1; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/cli-latest" \
+              -f sha="$GITHUB_SHA" -F force=true > /dev/null
+          else
+            gh release create cli-latest --target "$GITHUB_SHA" --latest=false \
+              --title "vibesys-cli (newest)" \
+              --notes "The assets of the newest stable vibesys-cli release, under a tag that does not change name. Do not pin to this tag; use cli-v<version>."
+          fi
+          gh release upload cli-latest release/vibesys-cli_* --clobber
+          gh release upload cli-latest release/checksums.txt release/VERSION --clobber

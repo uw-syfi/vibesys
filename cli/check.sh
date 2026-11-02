@@ -10,7 +10,6 @@ if [[ -n "$unformatted" ]]; then
 fi
 
 go vet ./...
-go test -count=1 -timeout 45s ./...
 
 # The concurrency tests prove nothing without the race detector, and the whole suite under it takes
 # several times longer, so only they run with it. A new package's concurrency test belongs here by
@@ -18,10 +17,15 @@ go test -count=1 -timeout 45s ./...
 go test -race -count=1 -timeout 120s -run '^(TestContract.*|TestParallel.*)$/^concurrency$' ./internal/store/...
 
 # Compile every package's tests for each release target, so a symbol missing on
-# another OS fails here and not only in CI.
+# another OS fails here and not only in CI. This runs before the tests because the
+# release build test builds all four targets, and finds their standard library already
+# compiled.
 # The host target was vetted above, with the same compiled packages.
 host="$(go env GOOS)/$(go env GOARCH)"
 for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
   [[ "$target" == "$host" ]] && continue
   GOOS="${target%/*}" GOARCH="${target#*/}" go vet ./...
 done
+
+# The tests include the release build and install.sh, which run real tools.
+go test -count=1 -timeout 120s ./...

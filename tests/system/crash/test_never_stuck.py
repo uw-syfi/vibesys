@@ -20,6 +20,7 @@ import pytest
 from tests.system.crash._flow_worlds import WORLDS
 
 from vs_dst.api import (
+    SWEPT_MOMENTS,
     Action,
     Interruption,
     Moment,
@@ -34,7 +35,7 @@ SAMPLE = 3
 
 KILL, PAUSE = Action.KILL, Action.PAUSE
 
-CLASSES = [(action, moment) for action in (KILL, PAUSE) for moment in Moment]
+CLASSES = [(action, moment) for action in (KILL, PAUSE) for moment in SWEPT_MOMENTS]
 """Every kill and pause: a run resumed after either ends as the uninterrupted run did. A stop is
 not one of them (the stop ends the run, and a Resume reopens it to an end of its own): see
 `test_stop.py`."""

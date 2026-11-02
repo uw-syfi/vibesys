@@ -12,10 +12,11 @@ the same job; review applies the rule "no result means run again".
 from __future__ import annotations
 
 import ast
+import keyword
 from pathlib import Path, PurePosixPath
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source, walk_nodes
 
@@ -398,7 +399,9 @@ def test_a_package_init_provides_its_package_and_other_paths_provide_nothing() -
     assert module_at(PurePosixPath("tests/architecture/test_a.py")) is None
 
 
-_IDENTIFIERS = st.from_regex(r"[A-Za-z][A-Za-z0-9_]{0,10}", fullmatch=True)
+_IDENTIFIERS = st.from_regex(r"[A-Za-z][A-Za-z0-9_]{0,10}", fullmatch=True).filter(
+    lambda name: not keyword.iskeyword(name)
+)
 
 
 @pytest.mark.parametrize(
@@ -410,9 +413,10 @@ _IDENTIFIERS = st.from_regex(r"[A-Za-z][A-Za-z0-9_]{0,10}", fullmatch=True)
         "def {member}(self): ...",
         "async def {member}(self): ...",
         "class {member}: ...",
-        "x = 1\n    {member} = {member}2 = 3",
+        "_decoy = 1\n    {member} = {member}2 = 3",
     ],
 )
+@example(owner="A", member="x")
 @given(owner=_IDENTIFIERS, member=_IDENTIFIERS)
 def test_a_member_is_found_in_every_form_a_class_can_define_it(
     body: str, owner: str, member: str
@@ -423,13 +427,15 @@ def test_a_member_is_found_in_every_form_a_class_can_define_it(
     assert f"`{owner}` defines `{member}`" in found[0]
 
 
+@example(owner="Ax", other="A", member="x")
+@example(owner="A", other="B", member="f")
 @given(owner=_IDENTIFIERS, other=_IDENTIFIERS, member=_IDENTIFIERS)
 def test_the_same_member_in_another_class_or_a_use_of_it_passes(
     owner: str, other: str, member: str
 ) -> None:
     source = (
-        f"class {other}x:\n    {member} = 1\n"
-        f"class {owner}:\n    kept = {member}\n    def f(self):\n        return self.{member}\n"
+        f"class _{other}:\n    {member} = 1\n"
+        f"class {owner}:\n    _kept = {member}\n    def _f(self):\n        return self.{member}\n"
         f"value = {owner}.{member}\n"
     )
     assert deleted_members_defined("p.py", source, deleted=((owner, member),)) == []
@@ -439,7 +445,7 @@ def test_the_same_member_in_another_class_or_a_use_of_it_passes(
 def test_a_member_defined_below_a_nested_class_of_the_same_name_is_found(
     owner: str, member: str
 ) -> None:
-    source = f"class Outer:\n    class {owner}:\n        {member} = 1\n"
+    source = f"class _Outer:\n    class {owner}:\n        {member} = 1\n"
     assert len(deleted_members_defined("p.py", source, deleted=((owner, member),))) == 1
 
 

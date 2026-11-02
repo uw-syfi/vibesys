@@ -25,6 +25,7 @@ from tests.system.crash._flow_worlds import WORLDS
 from vs_core.api import OwnedJob, RegisteredOwnedJob, RunStatus
 from vs_core.testing.liveness import End, final_state
 from vs_dst.api import (
+    SWEPT_MOMENTS,
     Action,
     Interrupted,
     Interruption,
@@ -97,7 +98,7 @@ def test_a_stop_in_the_middle_of_each_class_ends_the_run_with_nothing_open_and_a
 ) -> None:
     normal = _normal(world)
 
-    for moment in Moment:
+    for moment in SWEPT_MOMENTS:
         points = normal.interruptions(STOP, moment)
         _stopped_at(normal, points[len(points) // 2])
 
@@ -112,12 +113,12 @@ def test_a_stop_at_the_first_point_of_each_class_is_held_for_the_host_and_a_resu
     so these points were never tried. Every one reaches a host and the run goes on."""
     normal = _normal(world)
 
-    for moment in Moment:
+    for moment in SWEPT_MOMENTS:
         _stopped_at(normal, normal.interruptions(STOP, moment)[0])
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("moment", [pytest.param(m, id=_class_id(m)) for m in Moment])
+@pytest.mark.parametrize("moment", [pytest.param(m, id=_class_id(m)) for m in SWEPT_MOMENTS])
 @pytest.mark.parametrize("world", sorted(WORLDS))
 def test_a_stop_at_every_point_ends_the_run_with_nothing_open_and_a_resume_goes_on(
     world: str, moment: Moment
