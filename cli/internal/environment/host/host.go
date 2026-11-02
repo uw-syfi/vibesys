@@ -4,7 +4,6 @@ package host
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"strconv"
 	"sync"
@@ -73,7 +72,7 @@ func (e *Environment) Fingerprint(ctx context.Context) (core.Fingerprint, error)
 
 // Run implements environment.Environment.
 func (e *Environment) Run(ctx context.Context, x core.Execution, out io.Writer) (core.ExecOutcome, error) {
-	if err := validate(x); err != nil {
+	if err := environment.Validate(x); err != nil {
 		return core.ExecOutcome{}, err
 	}
 	if ctx.Err() != nil {
@@ -97,29 +96,6 @@ func (e *Environment) Run(ctx context.Context, x core.Execution, out io.Writer) 
 		return core.ExecOutcome{Kind: core.ExecUnknown}, lost
 	}
 	return outcome, nil
-}
-
-func validate(x core.Execution) error {
-	invalid := func(format string, args ...any) error {
-		return &core.Failure{Kind: core.FailureInvalidInput, Message: "execution: " + fmt.Sprintf(format, args...)}
-	}
-	switch {
-	case len(x.Argv) == 0 || x.Argv[0] == "":
-		return invalid("no command to run")
-	case x.Timeout <= 0:
-		return invalid("the timeout must be positive, got %v", x.Timeout)
-	case x.Checkout.Dir == "" || x.Checkout.Dir[0] != '/':
-		return invalid("the checkout directory must be an absolute path, got %q", x.Checkout.Dir)
-	}
-	if s := x.Service; s != nil {
-		if len(s.Argv) == 0 || s.Argv[0] == "" {
-			return invalid("the service has no command to run")
-		}
-		if len(s.Probe) > 0 && s.Probe[0] == "" {
-			return invalid("the service's probe has an empty program name")
-		}
-	}
-	return nil
 }
 
 // lockedWriter serializes writes from the several processes of one run to its one sink, and

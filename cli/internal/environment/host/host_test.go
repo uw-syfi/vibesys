@@ -46,7 +46,9 @@ func checkout(t *testing.T) core.Checkout {
 // The host environment is held to the contract by running real shell commands.
 func TestHostPassesTheEnvironmentContract(t *testing.T) {
 	envtest.Run(t, envtest.Rig{
-		New:      func(t *testing.T, timers clock.Timers) environment.Environment { return newHost(timers) },
+		New: func(t *testing.T, _ envtest.World, timers clock.Timers) environment.Environment {
+			return newHost(timers)
+		},
 		World:    func(t *testing.T) envtest.World { return envtest.NewShellWorld(t) },
 		Checkout: checkout,
 		Spawn: func(t *testing.T, _ envtest.World, x core.Execution) func() {
