@@ -27,3 +27,6 @@
 .vs-chat-message[data-side="start"] > .vs-chat-message-text {
   overflow-wrap: anywhere;
 }
+.vs-chat-message[data-tone="err"] > .vs-chat-message-text {
+  color: var(--err);
+}

@@ -2,6 +2,7 @@ import type {HostKey} from '@vibesys/hosts';
 import type {GatewayBridge} from '@vibesys/ipc';
 import {clockFrom, type ScheduleTimeout} from '@vibesys/machine';
 import {
+  callFailure,
   HOST_CALL_METHOD,
   hostIntentRequest,
   hostIntentResponse,
@@ -45,7 +46,7 @@ export function intentsActor(input: {
             try {
               sendBack({type: 'outcomes', outcomes: intentOutcomes(records)});
             } catch (error) {
-              sendBack({type: 'watchFailed', error: String(error)});
+              sendBack({type: 'watchFailed', error: callFailure(error).message});
             }
           }),
         ),

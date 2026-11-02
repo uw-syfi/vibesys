@@ -11,8 +11,8 @@ import {sessionCore} from '@vibesys/feature-run-sessions/state';
 import {newRequestId} from '@vibesys/request-identity';
 import type {CoreState} from '@vibesys/run-state';
 import {chatControlIntent, createdSession, type HarnessOption} from '@vibesys/runs/chat';
-import {addressedIntent, runReference} from '@vibesys/runs/intents';
-import {Button, Chip, Row, Stack} from '@vibesys/ui';
+import {addressedIntent, callFailure, runReference} from '@vibesys/runs/intents';
+import {Button, Stack, Text} from '@vibesys/ui';
 import {useEffect, useMemo} from 'react';
 
 function harnessEntry(option: HarnessOption) {
@@ -69,13 +69,13 @@ export function useGatewayChatState(
     createThread: async (harness, signal, requestId) => {
       try {
         const choice = harness ?? (input.core ? runHarness(input.core) : null);
-        if (!choice) return {ok: false, message: 'Choose a harness and model'};
+        if (!choice) return {ok: false, message: 'Choose a harness and model', detail: null};
         const threadId = await service.create(`thread-${requestId}`, choice, signal);
         threads.created(createdSession(threadId, choice));
         threads.refresh();
         return {ok: true, threadId};
       } catch (error) {
-        return {ok: false, message: String(error)};
+        return {ok: false, ...callFailure(error)};
       }
     },
     ask: async (request, signal) => {
@@ -83,7 +83,7 @@ export function useGatewayChatState(
         await service.send(request.threadId, request.requestId, request.text, signal);
         return {ok: true};
       } catch (error) {
-        return {ok: false, message: String(error)};
+        return {ok: false, ...callFailure(error)};
       }
     },
     control: async request => {
@@ -99,7 +99,7 @@ export function useGatewayChatState(
         );
         return {kind: 'acknowledged'};
       } catch (error) {
-        return {kind: 'rejected', message: String(error)};
+        return {kind: 'rejected', ...callFailure(error)};
       }
     },
     newControlId: newRequestId,
@@ -139,10 +139,10 @@ export function useGatewayChat(input: Parameters<typeof useGatewayChatState>[0])
     panel: chat.panel ? (
       <Stack gap="space-2" grow>
         {error ? (
-          <Row gap="space-3" align="center" wrap>
-            <Chip label="Unavailable" tone="err" dot hint={error} />
+          <Stack gap="space-1">
+            <Text tone="err">{error}</Text>
             <Button text="Retry history" press={reload} />
-          </Row>
+          </Stack>
         ) : null}
         <ChatPanel {...chat.panel} />
       </Stack>

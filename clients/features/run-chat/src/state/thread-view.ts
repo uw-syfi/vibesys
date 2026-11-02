@@ -35,6 +35,8 @@ export type ThreadItem =
       readonly text: string;
       /** The agent is still writing this answer. */
       readonly streaming: boolean;
+      /** The turn failed: the text says why, not what the agent found. */
+      readonly failed: boolean;
     }
   | {readonly kind: 'proposal'; readonly proposal: ChatProposal}
   /** The question went out and nothing has come back yet. */
@@ -125,6 +127,7 @@ export function threadItems(
       id: answer.id,
       text: answer.content,
       streaming: answer.turnId !== undefined,
+      failed: answer.tone === 'failure',
     });
   });
   if (pending !== null && answers.length <= questions.length) {

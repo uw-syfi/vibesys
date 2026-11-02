@@ -95,13 +95,13 @@ test('a live run replays its chat, posts a steer and a question, streams the ans
   await act(async () =>
     shell.gateway?.sendChatFrame(chatTail([create(RecordSchema, {...answer, seq: 10n})])),
   );
-  await see(pane, 'Unavailable', true);
+  await see(pane, 'History unavailable', true);
   await press(one(pane, {role: 'button', name: 'Retry history'}));
   await until(
     'the history read again',
     () => maybe(pane, {role: 'button', name: 'Retry history'}) === null,
   );
-  notSee(pane, 'Unavailable', true);
+  notSee(pane, 'History unavailable', true);
   await see(pane, 'It reduces contention under load.', true);
   await press(one(pane, {role: 'button', name: 'Close', exact: true}));
   await until(

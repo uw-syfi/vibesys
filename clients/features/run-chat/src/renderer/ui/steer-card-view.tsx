@@ -20,6 +20,7 @@ import {
   targetOptions,
   targetValue,
 } from '../../state/index.js';
+import {FailureNote} from './failure-note.js';
 
 interface CardProps {
   readonly draft: SteerDraft;
@@ -53,11 +54,7 @@ function Draft(props: CardProps): JSX.Element {
           change={actions.setMode}
         />
       </Row>
-      {view.error === null ? null : (
-        <Text variant="small" tone="err">
-          {view.error}
-        </Text>
-      )}
+      {view.error === null ? null : <FailureNote failure={view.error} />}
       <Row gap="space-3" align="start">
         <Button
           variant="primary"
@@ -95,11 +92,7 @@ export function SteerCardView(props: CardProps): JSX.Element | null {
               <Button variant="quiet" size="sm" text="Withdraw" press={actions.withdraw} />
             ) : null}
           </Row>
-          {view.error === null ? null : (
-            <Text variant="small" tone="err">
-              {view.error}
-            </Text>
-          )}
+          {view.error === null ? null : <FailureNote failure={view.error} />}
         </Stack>
       )}
     </Card>

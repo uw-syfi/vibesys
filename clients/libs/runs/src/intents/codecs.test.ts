@@ -1,17 +1,20 @@
-import {expect, test} from 'bun:test';
+import {describe, expect, test} from 'bun:test';
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {
+  ConfigurationFailedSchema,
   HOST_UNSUPPORTED_MESSAGE,
   HostCallRequestSchema,
   HostCallResponseSchema,
   IntentAction,
   IntentStep,
+  OperationFailed,
   RecordSchema,
   SteerMode,
   SteerTargetKind,
   TerminateRunOutcome,
 } from '@vibesys/proto';
 import {
+  callFailure,
   configuredHostCall,
   hostIntentRequest,
   hostIntentResponse,
@@ -21,6 +24,7 @@ import {
   runIntent,
   runReference,
 } from '@vibesys/runs/intents';
+import {SEEDS, Seeded} from '@vibesys/store/testing';
 
 const identity = {runId: 'run-1', requestId: 'r-1', projectRoot: '/project', expectedEpoch: 1n};
 
@@ -203,4 +207,47 @@ test('every process outcome remains distinct and never confirms control applicat
     );
     expect(() => hostIntentResponse(bytes, 'r-1')).toThrow();
   }
+});
+
+describe('callFailure', () => {
+  const CODES = ['invalid_input', 'inbox_closed', 'host_unsupported', 'request_too_large'];
+  const MESSAGES = ['Request refused', 'Connection lost', 'two\nlines', ''];
+  const STDERR = ['', 'details', 'Error: usage: run\n  --flag', 'IntentRefused: x\n', 'a\n\nb'];
+
+  test('a refusal reads as its message, and its non-empty stderr is the detail', () => {
+    for (const seed of SEEDS.slice(0, 100)) {
+      const random = new Seeded(seed);
+      const failure = create(ConfigurationFailedSchema, {
+        code: random.pick(CODES),
+        stage: 'post_intent',
+        message: random.pick(MESSAGES),
+        stderr: random.pick(STDERR),
+        exitCode: random.int(3),
+      });
+      const refusal = new IntentRefused(failure);
+      const read = callFailure(refusal);
+      expect(read).toEqual({
+        message: refusal.message,
+        detail: failure.stderr === '' ? null : failure.stderr,
+      });
+      expect(read.message).not.toMatch(/^(Error|IntentRefused):/);
+    }
+  });
+
+  test('an operation failure reads as its message, and its diagnostic is the detail', () => {
+    expect(callFailure(new OperationFailed(0, 'trace'))).toEqual({
+      message: new OperationFailed(0, 'trace').message,
+      detail: 'trace',
+    });
+    expect(callFailure(new OperationFailed(0, ''))).toEqual({
+      message: new OperationFailed(0, '').message,
+      detail: null,
+    });
+  });
+
+  test('any other error or thrown value has no detail and no kind prefix', () => {
+    expect(callFailure(new Error('x'))).toEqual({message: 'x', detail: null});
+    expect(callFailure('x')).toEqual({message: 'x', detail: null});
+    expect(callFailure(undefined)).toEqual({message: 'undefined', detail: null});
+  });
 });

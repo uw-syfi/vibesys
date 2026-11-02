@@ -16,12 +16,15 @@ import type {JSX} from 'react';
 import {
   type ChatPanelView,
   effectiveHarness,
+  FAILED_ANSWER,
   modelOptions,
   type PanelItem,
   providerOptions,
+  WRITING_ANSWER,
   withProvider,
 } from '../../state/index.js';
 import {ChatBoundary} from './chat-boundary.js';
+import {FailureNote} from './failure-note.js';
 import {SteerCardView} from './steer-card-view.js';
 
 /** The harness, then the model: the two choices of a new chat in one compact row. */
@@ -132,7 +135,11 @@ function uiItem(item: PanelItem, roles: readonly string[]): UiThreadItem {
         <ChatMessage
           side="start"
           text={item.text}
-          {...(item.streaming ? {notice: 'Writing'} : {})}
+          {...(item.streaming
+            ? {notice: WRITING_ANSWER}
+            : item.failed
+              ? {notice: FAILED_ANSWER, tone: 'err' as const}
+              : {})}
         />,
       );
     case 'waiting':
@@ -161,11 +168,7 @@ function Composer(props: ChatPanelView): JSX.Element {
   const submit = (): void => dispatch({type: 'submit', threadId: props.shown});
   return (
     <Stack gap="space-3">
-      {panel.error === null ? null : (
-        <Text variant="small" tone="err">
-          {panel.error}
-        </Text>
-      )}
+      {panel.error === null ? null : <FailureNote failure={panel.error} />}
       <Field label="Message" hideLabel>
         <TextInput
           value={panel.composer}

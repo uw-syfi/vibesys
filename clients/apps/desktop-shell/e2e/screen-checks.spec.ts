@@ -192,7 +192,7 @@ test('a chip, a toast, a tile, a log and a status word beside its control are no
       <section class="vs-toast-stack" aria-live="polite"><div class="vs-toast" role="alert">Could not resume the run</div></section>
       <div class="vs-overview-tile" role="status">3 need you</div>
       <div class="vs-log"><div role="log"><span class="vs-text" data-tone="err" style="display:block">error: linker not found</span></div></div>
-      <div style="display:flex;gap:8px"><span class="vs-text" data-tone="err">Unavailable</span><button>Retry history</button></div>
+      <div style="display:flex;gap:8px"><span class="vs-text" data-tone="err">History unavailable</span><button>Retry history</button></div>
     </main>`,
   );
   expect(await screenCheck(page, ['status-row'])).toEqual([]);

@@ -9,6 +9,7 @@ import {
   type IntentState,
   IntentStateSchema,
   IntentStep,
+  OperationFailed,
   type PostIntentRequest,
   PostIntentRequestSchema,
   type PostIntentResponse,
@@ -103,6 +104,20 @@ export class IntentRefused extends Error {
     this.name = 'IntentRefused';
     this.diagnostic = failure.stderr;
   }
+}
+
+/** What a failed call says to a person and, apart, what it adds for diagnosis (a host's stderr). */
+export interface CallFailure {
+  readonly message: string;
+  readonly detail: string | null;
+}
+
+/** Reads a failure by its class, so a person never sees an `Error:` or `IntentRefused:` prefix. */
+export function callFailure(error: unknown): CallFailure {
+  if (error instanceof IntentRefused || error instanceof OperationFailed)
+    return {message: error.message, detail: error.diagnostic === '' ? null : error.diagnostic};
+  if (error instanceof Error) return {message: error.message, detail: null};
+  return {message: String(error), detail: null};
 }
 
 export function hostIntentResponse(bytes: Uint8Array, requestId: string): PostIntentResponse {

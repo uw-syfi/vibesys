@@ -1,6 +1,7 @@
 import {unprovided} from '@vibesys/machine';
 import type {IntentOutcome, PostIntentRequest, PostIntentResponse} from '@vibesys/runs/intents';
 import {
+  callFailure,
   copyIntent,
   IntentAction,
   IntentRefused,
@@ -16,6 +17,8 @@ export interface IntentEntry {
   readonly request: PostIntentRequest;
   readonly status: 'sending' | 'pending' | 'applied' | 'refused' | 'uncertain';
   readonly reason: string | null;
+  /** What the host added for diagnosis (its stderr) when it refused or failed the post. */
+  readonly detail: string | null;
 }
 export interface IntentRow {
   readonly id: string;
@@ -23,6 +26,8 @@ export interface IntentRow {
   readonly action: IntentAction;
   readonly status: IntentEntry['status'];
   readonly reason: string | null;
+  /** The host's diagnostic for a post it refused or failed; null for what the writer recorded. */
+  readonly detail: string | null;
   readonly epoch: bigint | null;
 }
 export interface RunIntentsContext {
@@ -52,6 +57,7 @@ function outcomeEntries(
       ...entry,
       status: outcome.status,
       reason: outcome.reason ?? null,
+      detail: null,
     };
   });
 }
@@ -70,10 +76,17 @@ export const runIntentsMachine = setup({
   },
   actions: {
     fail: assign(
-      ({context}, params: {readonly error: string; readonly status: 'refused' | 'uncertain'}) => ({
+      (
+        {context},
+        params: {
+          readonly error: string;
+          readonly detail: string | null;
+          readonly status: 'refused' | 'uncertain';
+        },
+      ) => ({
         entries: context.entries.map(entry =>
           entry.status === 'sending'
-            ? {...entry, status: params.status, reason: params.error}
+            ? {...entry, status: params.status, reason: params.error, detail: params.detail}
             : entry,
         ),
         error: params.status === 'uncertain' ? params.error : context.error,
@@ -114,7 +127,7 @@ export const runIntentsMachine = setup({
       invoke: {
         id: 'watch',
         src: 'watch',
-        onError: {actions: assign(({event}) => ({error: String(event.error)}))},
+        onError: {actions: assign(({event}) => ({error: callFailure(event.error).message}))},
       },
       on: {
         outcomes: {actions: 'apply'},
@@ -135,7 +148,7 @@ export const runIntentsMachine = setup({
                   error: null,
                   entries: [
                     ...context.entries,
-                    {request, status: 'sending' as const, reason: null},
+                    {request, status: 'sending' as const, reason: null, detail: null},
                   ],
                 };
               }),
@@ -154,7 +167,7 @@ export const runIntentsMachine = setup({
                 error: null,
                 entries: context.entries.map(entry =>
                   entry.request.requestId === event.requestId
-                    ? {...entry, status: 'sending' as const, reason: null}
+                    ? {...entry, status: 'sending' as const, reason: null, detail: null}
                     : entry,
                 ),
               })),
@@ -185,13 +198,14 @@ export const runIntentsMachine = setup({
               target: 'idle',
               actions: {
                 type: 'fail',
-                params: ({event}) => ({
-                  error:
-                    event.error instanceof IntentRefused
-                      ? event.error.message
-                      : String(event.error),
-                  status: event.error instanceof IntentRefused ? 'refused' : 'uncertain',
-                }),
+                params: ({event}) => {
+                  const failure = callFailure(event.error);
+                  return {
+                    error: failure.message,
+                    detail: failure.detail,
+                    status: event.error instanceof IntentRefused ? 'refused' : 'uncertain',
+                  };
+                },
               },
             },
           },
@@ -202,6 +216,7 @@ export const runIntentsMachine = setup({
                 type: 'fail',
                 params: {
                   error: 'No admission reply. Retry uses the same request id.',
+                  detail: null,
                   status: 'uncertain',
                 },
               },
@@ -241,11 +256,13 @@ export function intentRows(context: RunIntentsContext): readonly IntentRow[] {
       : IntentAction.UNSPECIFIED,
     status: entry.status,
     reason: entry.reason,
+    detail: entry.detail,
     epoch: entry.request.expectedEpoch,
   }));
   return [
     ...context.outcomes.map(row => ({
       ...row,
+      detail: null,
       epoch: row.epoch ?? local.find(entry => entry.id === row.id)?.epoch ?? null,
     })),
     ...local.filter(

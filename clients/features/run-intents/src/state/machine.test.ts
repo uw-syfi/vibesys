@@ -2,6 +2,7 @@ import {expect, test} from 'bun:test';
 import {create} from '@bufbuild/protobuf';
 import {checkMachine} from '@vibesys/machine/testing';
 import {
+  ConfigurationFailedSchema,
   IntentAction,
   IntentStateSchema,
   IntentStep,
@@ -9,6 +10,7 @@ import {
   PostIntentResponseSchema,
   TerminateRunOutcome,
 } from '@vibesys/proto';
+import {IntentRefused} from '@vibesys/runs/intents';
 import {getInitialSnapshot, getNextSnapshot} from 'xstate';
 import {runIntentsMachine} from './index.js';
 
@@ -230,4 +232,31 @@ test('replaying writer outcomes includes Resume and requests posted in another w
   if (!resume) throw new Error('missing resume outcome');
   resume.controlId = 'mutated';
   expect(state.context.outcomes[1]?.id).toBe('elsewhere-resume');
+});
+
+test("a refused post keeps the host's message and its diagnostic; a lost one keeps its message", () => {
+  const sending = getNextSnapshot(
+    runIntentsMachine,
+    getInitialSnapshot(runIntentsMachine, {enabled: true}),
+    {type: 'send', request},
+  );
+  const failWith = (error: unknown) =>
+    getNextSnapshot(runIntentsMachine, sending, {type: 'xstate.error.actor.post', error} as never)
+      .context.entries[0];
+  const refusal = create(ConfigurationFailedSchema, {
+    code: 'x',
+    stage: 's',
+    message: 'Refused by host',
+    stderr: 'trace',
+  });
+  expect(failWith(new IntentRefused(refusal))).toMatchObject({
+    status: 'refused',
+    reason: 'Refused by host',
+    detail: 'trace',
+  });
+  expect(failWith(new Error('lost'))).toMatchObject({
+    status: 'uncertain',
+    reason: 'lost',
+    detail: null,
+  });
 });

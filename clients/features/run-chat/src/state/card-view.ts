@@ -4,6 +4,7 @@
  * every state the card can be in has its words in one place.
  */
 import {type DeliveryState, deliveryEnded} from './delivery.js';
+import type {ChatFailure} from './failure.js';
 import {draftProblem, modeLabel, type SteerDraft, targetName} from './steer.js';
 import {inForce, type SteerCardContext} from './steer-card.js';
 
@@ -23,7 +24,7 @@ export interface CardView {
   /** Why Send is off, as a short word; null when the draft can be sent. */
   readonly sendBlocked: string | null;
   readonly withdrawable: boolean;
-  readonly error: string | null;
+  readonly error: ChatFailure | null;
 }
 
 /** The machine value, narrowed to what the view needs. */
