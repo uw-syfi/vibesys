@@ -538,7 +538,7 @@ func (e *e2e) expectLostOutput(id, ran string) {
 	e.t.Helper()
 	out := e.logs(id)
 	rest, found := strings.CutPrefix(out, ran)
-	if !found || strings.Count(rest, "\n") != 1 || !strings.Contains(rest, "is lost and is not retried") {
+	if !found || strings.Count(rest, "\n") != 1 || !strings.Contains(rest, "is lost and is not run again") {
 		e.t.Fatalf("output of the lost job = %q, want %q and one line saying the job is lost", out, ran)
 	}
 }

@@ -193,10 +193,9 @@ func CutOff(job core.JobID, policy core.RerunPolicy, attempts int, proof DeathPr
 	}
 	attempt := attempts + 1
 	var cut core.Cut
-	var how string
 	switch start.(type) {
 	case NeverStarted:
-		cut, how = core.CutBeforeStart{By: cause}, "before its command started"
+		cut = core.CutBeforeStart{By: cause}
 	case MayHaveStarted, nil:
 		if policy != core.RerunAfterProvenDeath {
 			return Settlement{
@@ -204,18 +203,35 @@ func CutOff(job core.JobID, policy core.RerunPolicy, attempts int, proof DeathPr
 				Log:        fmt.Sprintf("vibesys-cli: the job's supervisor went away (%s) after its command may have started, so the job is lost and is not run again: a command job is never run twice", cause),
 			}
 		}
-		cut, how = core.CutMidCommand{By: cause}, "mid-command"
+		cut = core.CutMidCommand{By: cause}
 	}
 	if attempt >= core.MaxAttempts {
 		return Settlement{
 			Transition: core.Transition{Job: job, From: core.JobRunning, To: core.JobLost, At: at},
-			Log:        fmt.Sprintf("vibesys-cli: attempt %d was cut off %s (%s), and a job gets %d attempts, so the job is lost and is not run again", attempt, how, cause, core.MaxAttempts),
+			Log:        fmt.Sprintf("vibesys-cli: attempt %d was cut off %s (%s), and a job gets %d attempts, so the job is lost and is not run again", attempt, howCut(cut), cause, core.MaxAttempts),
 		}
 	}
 	return Settlement{
 		Transition: core.Transition{Job: job, From: core.JobRunning, To: core.JobQueued, At: at, Cut: cut},
-		Log:        fmt.Sprintf("vibesys-cli: attempt %d was cut off %s (%s); running it again as attempt %d of %d", attempt, how, cause, attempt+1, core.MaxAttempts),
+		Log:        CutLine(attempt, cut),
 	}
+}
+
+// CutLine is the line a job's output gets for its attempt number attempt, which was cut off and
+// queued again. It is made from what the store records of the attempt alone, so a daemon that
+// finds the line missing writes the same one.
+func CutLine(attempt int, cut core.Cut) string {
+	return fmt.Sprintf("vibesys-cli: attempt %d was cut off %s (%s); running it again as attempt %d of %d", attempt, howCut(cut), cut.Cause(), attempt+1, core.MaxAttempts)
+}
+
+func howCut(cut core.Cut) string {
+	switch cut.(type) {
+	case core.CutBeforeStart:
+		return "before its command started"
+	case core.CutMidCommand:
+		return "mid-command"
+	}
+	return "for no recorded reason"
 }
 
 // givenUpJob is a running job whose store gave up the place that ran it, with nothing here that can

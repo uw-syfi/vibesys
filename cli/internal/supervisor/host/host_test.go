@@ -88,7 +88,7 @@ func (r *hostRig) newHost() *host.Host {
 			cmd.ExtraFiles = []*os.File{r.lifeline}
 			return cmd
 		},
-		BinaryVersion: "test", Timers: clock.System{}, Clock: clock.System{},
+		BinaryVersion: "test", Timers: clock.System{},
 	})
 }
 

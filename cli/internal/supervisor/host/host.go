@@ -37,7 +37,6 @@ type Host struct {
 	command       func(runDir string) *exec.Cmd
 	binaryVersion string
 	timers        clock.Timers
-	clock         clock.Clock
 
 	mu       sync.Mutex
 	released map[lifecycle.Ref]bool
@@ -62,15 +61,13 @@ type Config struct {
 	BinaryVersion string
 	// Timers bound how long a supervisor gets to answer a probe.
 	Timers clock.Timers
-	// Clock stamps the mark a run's record gets when its supervisor is told to start.
-	Clock clock.Clock
 }
 
 // New returns a Host.
 func New(cfg Config) *Host {
 	return &Host{
 		root: cfg.Root, records: cfg.Records, bootID: cfg.BootID, command: cfg.Command, binaryVersion: cfg.BinaryVersion,
-		timers: cfg.Timers, clock: cfg.Clock, released: map[lifecycle.Ref]bool{},
+		timers: cfg.Timers, released: map[lifecycle.Ref]bool{},
 	}
 }
 
@@ -223,6 +220,12 @@ func (h *handle) proved(err error) error {
 func (h *handle) Start(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	// A supervisor already dead is not marked: its command never starts, and its record keeps
+	// saying so. One that dies after this look is marked, which only claims less than is true.
+	if lock, err := proveDead(h.dir); err == nil {
+		lock.Unlock()
+		return supervisor.Gone{Proof: lifecycle.ProofLockFree, Start: h.host.startOf(h.ref)}
 	}
 	if err := h.host.markStartSent(h.ref); err != nil {
 		return &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("job %s: marking its start: %v", h.ref, err)}

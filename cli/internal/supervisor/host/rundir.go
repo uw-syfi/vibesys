@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -156,10 +155,10 @@ func (h *Host) markStartSent(ref lifecycle.Ref) error {
 	if err := proto.Unmarshal(data, &msg); err != nil {
 		return fmt.Errorf("run record: %w", err)
 	}
-	if msg.GetStartSentAt() != nil {
+	if msg.GetStartSent() {
 		return nil
 	}
-	msg.StartSentAt = timestamppb.New(h.clock.Now())
+	msg.StartSent = true
 	return h.putRecord(ref, &msg)
 }
 
@@ -193,7 +192,7 @@ func (h *Host) readRecord(ref lifecycle.Ref) (record, bool, error) {
 	if launch.Ref() != ref {
 		return record{}, false, fmt.Errorf("run record of job %s is for job %s", ref, launch.Ref())
 	}
-	return record{BootID: msg.GetBootId(), Launch: launch, StartSent: msg.GetStartSentAt() != nil}, true, nil
+	return record{BootID: msg.GetBootId(), Launch: launch, StartSent: msg.GetStartSent()}, true, nil
 }
 
 // removeRecord removes the record of a run. It is idempotent.

@@ -10,7 +10,6 @@ import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	durationpb "google.golang.org/protobuf/types/known/durationpb"
-	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -1090,10 +1089,10 @@ type RunRecord struct {
 	// The identity of the boot the run began in.
 	BootId string  `protobuf:"bytes,1,opt,name=boot_id,json=bootId,proto3" json:"boot_id,omitempty"`
 	Launch *Launch `protobuf:"bytes,2,opt,name=launch,proto3" json:"launch,omitempty"`
-	// When the daemon first told the supervisor to start the command. It is written before that
-	// request is sent, and a supervisor runs nothing before it, so a readable record without it proves
-	// the command never started.
-	StartSentAt   *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=start_sent_at,json=startSentAt,proto3" json:"start_sent_at,omitempty"`
+	// Says the daemon told, or was about to tell, the supervisor to start the command. It is written
+	// before that request is sent, and a supervisor runs nothing before it, so a readable record
+	// without it proves the command never started.
+	StartSent     bool `protobuf:"varint,3,opt,name=start_sent,json=startSent,proto3" json:"start_sent,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1142,11 +1141,11 @@ func (x *RunRecord) GetLaunch() *Launch {
 	return nil
 }
 
-func (x *RunRecord) GetStartSentAt() *timestamppb.Timestamp {
+func (x *RunRecord) GetStartSent() bool {
 	if x != nil {
-		return x.StartSentAt
+		return x.StartSent
 	}
-	return nil
+	return false
 }
 
 type StartRequest struct {
@@ -1558,7 +1557,7 @@ var File_vibesys_cli_v1_supervisor_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_supervisor_proto_rawDesc = "" +
 	"\n" +
-	"\x1fvibesys/cli/v1/supervisor.proto\x12\x0evibesys.cli.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a vibesys/cli/v1/environment.proto\x1a\x1cvibesys/cli/v1/failure.proto\x1a\x18vibesys/cli/v1/job.proto\x1a\x1bvibesys/cli/v1/result.proto\x1a\x1cvibesys/cli/v1/version.proto\"\xcf\x01\n" +
+	"\x1fvibesys/cli/v1/supervisor.proto\x12\x0evibesys.cli.v1\x1a\x1egoogle/protobuf/duration.proto\x1a vibesys/cli/v1/environment.proto\x1a\x1cvibesys/cli/v1/failure.proto\x1a\x18vibesys/cli/v1/job.proto\x1a\x1bvibesys/cli/v1/result.proto\x1a\x1cvibesys/cli/v1/version.proto\"\xcf\x01\n" +
 	"\x06Launch\x12\x1e\n" +
 	"\n" +
 	"repository\x18\x01 \x01(\tR\n" +
@@ -1625,11 +1624,12 @@ const file_vibesys_cli_v1_supervisor_proto_rawDesc = "" +
 	"\x11HandshakeResponse\x129\n" +
 	"\bversions\x18\x01 \x01(\v2\x1d.vibesys.cli.v1.BuildVersionsR\bversions\x12C\n" +
 	"\rcompatibility\x18\x02 \x01(\x0e2\x1d.vibesys.cli.v1.CompatibilityR\rcompatibility\x125\n" +
-	"\x05phase\x18\x03 \x01(\x0e2\x1f.vibesys.cli.v1.SupervisorPhaseR\x05phase\"\x94\x01\n" +
+	"\x05phase\x18\x03 \x01(\x0e2\x1f.vibesys.cli.v1.SupervisorPhaseR\x05phase\"s\n" +
 	"\tRunRecord\x12\x17\n" +
 	"\aboot_id\x18\x01 \x01(\tR\x06bootId\x12.\n" +
-	"\x06launch\x18\x02 \x01(\v2\x16.vibesys.cli.v1.LaunchR\x06launch\x12>\n" +
-	"\rstart_sent_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\vstartSentAt\"\x0e\n" +
+	"\x06launch\x18\x02 \x01(\v2\x16.vibesys.cli.v1.LaunchR\x06launch\x12\x1d\n" +
+	"\n" +
+	"start_sent\x18\x03 \x01(\bR\tstartSent\"\x0e\n" +
 	"\fStartRequest\"\x0f\n" +
 	"\rStartResponse\"'\n" +
 	"\rAttachRequest\x12\x16\n" +
@@ -1714,7 +1714,6 @@ var file_vibesys_cli_v1_supervisor_proto_goTypes = []any{
 	(Component)(0),                 // 29: vibesys.cli.v1.Component
 	(*BuildVersions)(nil),          // 30: vibesys.cli.v1.BuildVersions
 	(Compatibility)(0),             // 31: vibesys.cli.v1.Compatibility
-	(*timestamppb.Timestamp)(nil),  // 32: google.protobuf.Timestamp
 }
 var file_vibesys_cli_v1_supervisor_proto_depIdxs = []int32{
 	22, // 0: vibesys.cli.v1.Launch.spec:type_name -> vibesys.cli.v1.JobSpec
@@ -1746,24 +1745,23 @@ var file_vibesys_cli_v1_supervisor_proto_depIdxs = []int32{
 	31, // 26: vibesys.cli.v1.HandshakeResponse.compatibility:type_name -> vibesys.cli.v1.Compatibility
 	1,  // 27: vibesys.cli.v1.HandshakeResponse.phase:type_name -> vibesys.cli.v1.SupervisorPhase
 	2,  // 28: vibesys.cli.v1.RunRecord.launch:type_name -> vibesys.cli.v1.Launch
-	32, // 29: vibesys.cli.v1.RunRecord.start_sent_at:type_name -> google.protobuf.Timestamp
-	16, // 30: vibesys.cli.v1.AttachResponse.output:type_name -> vibesys.cli.v1.OutputChunk
-	9,  // 31: vibesys.cli.v1.AttachResponse.outcome:type_name -> vibesys.cli.v1.SupervisorOutcome
-	10, // 32: vibesys.cli.v1.SupervisorService.Handshake:input_type -> vibesys.cli.v1.HandshakeRequest
-	13, // 33: vibesys.cli.v1.SupervisorService.Start:input_type -> vibesys.cli.v1.StartRequest
-	15, // 34: vibesys.cli.v1.SupervisorService.Attach:input_type -> vibesys.cli.v1.AttachRequest
-	18, // 35: vibesys.cli.v1.SupervisorService.CancelJob:input_type -> vibesys.cli.v1.CancelJobRequest
-	20, // 36: vibesys.cli.v1.SupervisorService.Release:input_type -> vibesys.cli.v1.ReleaseRequest
-	11, // 37: vibesys.cli.v1.SupervisorService.Handshake:output_type -> vibesys.cli.v1.HandshakeResponse
-	14, // 38: vibesys.cli.v1.SupervisorService.Start:output_type -> vibesys.cli.v1.StartResponse
-	17, // 39: vibesys.cli.v1.SupervisorService.Attach:output_type -> vibesys.cli.v1.AttachResponse
-	19, // 40: vibesys.cli.v1.SupervisorService.CancelJob:output_type -> vibesys.cli.v1.CancelJobResponse
-	21, // 41: vibesys.cli.v1.SupervisorService.Release:output_type -> vibesys.cli.v1.ReleaseResponse
-	37, // [37:42] is the sub-list for method output_type
-	32, // [32:37] is the sub-list for method input_type
-	32, // [32:32] is the sub-list for extension type_name
-	32, // [32:32] is the sub-list for extension extendee
-	0,  // [0:32] is the sub-list for field type_name
+	16, // 29: vibesys.cli.v1.AttachResponse.output:type_name -> vibesys.cli.v1.OutputChunk
+	9,  // 30: vibesys.cli.v1.AttachResponse.outcome:type_name -> vibesys.cli.v1.SupervisorOutcome
+	10, // 31: vibesys.cli.v1.SupervisorService.Handshake:input_type -> vibesys.cli.v1.HandshakeRequest
+	13, // 32: vibesys.cli.v1.SupervisorService.Start:input_type -> vibesys.cli.v1.StartRequest
+	15, // 33: vibesys.cli.v1.SupervisorService.Attach:input_type -> vibesys.cli.v1.AttachRequest
+	18, // 34: vibesys.cli.v1.SupervisorService.CancelJob:input_type -> vibesys.cli.v1.CancelJobRequest
+	20, // 35: vibesys.cli.v1.SupervisorService.Release:input_type -> vibesys.cli.v1.ReleaseRequest
+	11, // 36: vibesys.cli.v1.SupervisorService.Handshake:output_type -> vibesys.cli.v1.HandshakeResponse
+	14, // 37: vibesys.cli.v1.SupervisorService.Start:output_type -> vibesys.cli.v1.StartResponse
+	17, // 38: vibesys.cli.v1.SupervisorService.Attach:output_type -> vibesys.cli.v1.AttachResponse
+	19, // 39: vibesys.cli.v1.SupervisorService.CancelJob:output_type -> vibesys.cli.v1.CancelJobResponse
+	21, // 40: vibesys.cli.v1.SupervisorService.Release:output_type -> vibesys.cli.v1.ReleaseResponse
+	36, // [36:41] is the sub-list for method output_type
+	31, // [31:36] is the sub-list for method input_type
+	31, // [31:31] is the sub-list for extension type_name
+	31, // [31:31] is the sub-list for extension extendee
+	0,  // [0:31] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_supervisor_proto_init() }

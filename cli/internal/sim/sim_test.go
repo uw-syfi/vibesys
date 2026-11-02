@@ -47,6 +47,18 @@ type profile struct {
 	// forget says the lost repository is given up with `daemon forget`, while the world is in
 	// chaos or when it heals.
 	forget bool
+	// cutoffs makes supervisors die between their spawn and their start, often, and nothing else go
+	// wrong but the machine, so that jobs are queued again up to their bound.
+	cutoffs bool
+}
+
+// cutoffsOf is a profile of cut-offs: supervisors die between their spawn and their start, often,
+// and the daemon crashes, and nothing else goes wrong.
+func cutoffsOf(r *rand.Rand) profile {
+	return profile{
+		cutoffs: true, machine: true, crashes: r.IntN(2) == 0, storeWrites: true,
+		chaosSteps: 80 + r.IntN(200), jobs: 1 + r.IntN(4),
+	}
 }
 
 func profileOf(r *rand.Rand) profile {
@@ -393,16 +405,33 @@ func (w *world) actions() []option {
 		add("reboot", func() {
 			w.crash()
 			for _, r := range w.spawned {
-				w.killed[r] = true
+				w.noteKill(r)
 			}
 			w.survivors.Reboot()
 		})
 		r := w.spawned[w.rng.IntN(len(w.spawned))]
 		add("kill "+r.String(), func() {
+			sent := w.survivors.StartSent(r)
 			if w.survivors.Kill(r) {
-				w.killed[r] = true
+				w.noteKillAs(r, sent)
 			}
 		})
+		// A supervisor killed in the moment between its spawn and its start is what runs a job
+		// again, so a parked one is offered on its own.
+		parked := w.survivors.Parked()
+		slices.SortFunc(parked, func(a, b lifecycle.Ref) int { return strings.Compare(a.String(), b.String()) })
+		for _, p := range parked {
+			kill := func() {
+				sent := w.survivors.StartSent(p)
+				if w.survivors.Kill(p) {
+					w.noteKillAs(p, sent)
+				}
+			}
+			add("kill parked "+p.String(), kill)
+			for range cutoffWeight(w.profile) {
+				add("kill parked "+p.String(), kill)
+			}
+		}
 		add("the place of "+r.String()+" is gone for good", func() {
 			if w.survivors.Vanish(r) {
 				w.mu.Lock()
@@ -548,8 +577,36 @@ func (w *world) giveUp(scope core.Scope) {
 		w.mu.Lock()
 		if l.scope == scope && l.job.State == core.JobRunning && !slices.Contains(w.givenUp[scope], l.job.ID) {
 			w.givenUp[scope] = append(w.givenUp[scope], l.job.ID)
+			w.everGivenUp[w.refIn(scope, l.job.ID)] = true
 		}
 		w.mu.Unlock()
+	}
+}
+
+// wasGivenUp says the job's place was given up at some point.
+func (w *world) wasGivenUp(ref lifecycle.Ref) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.everGivenUp[ref]
+}
+
+// cutoffWeight is how many more times a profile of cut-offs offers a parked supervisor's kill.
+func cutoffWeight(p profile) int {
+	if p.cutoffs {
+		return 12
+	}
+	return 0
+}
+
+// noteKill records a kill of a job's supervisor, and whether its start was marked by then.
+func (w *world) noteKill(r lifecycle.Ref) { w.noteKillAs(r, w.survivors.StartSent(r)) }
+
+func (w *world) noteKillAs(r lifecycle.Ref, sent bool) {
+	w.killed[r] = true
+	if sent {
+		w.startedKill[r] = true
+	} else {
+		w.unstarted[r]++
 	}
 }
 
@@ -579,10 +636,21 @@ func (w *world) check() {
 	if n := w.env.Active(); n > 1 {
 		w.violate("%d commands run at once", n)
 	}
+	// A command runs once, and again only for each attempt its job had cut off mid-command, which
+	// a command job never has.
 	starts := w.startsOf()
+	reruns := map[string]int{}
+	for _, l := range w.jobs() {
+		ref := w.refIn(l.scope, l.job.ID)
+		reruns[tokenOf(l.job)] = w.checkAttempts(ref, l.job)
+		if n := len(l.job.Attempts); n > w.requeues[ref] {
+			w.requeues[ref] = n
+			w.tracef("%s %s after attempt %d", requeuedMark, ref, n)
+		}
+	}
 	for _, token := range sortedKeys(w.tokens) {
-		if n := countOf(starts, token); n > 1 {
-			w.violate("command %s ran %d times", token, n)
+		if n := countOf(starts, token); n > 1+reruns[token] {
+			w.violate("command %s ran %d times, with %d reruns allowed", token, n, reruns[token])
 		}
 	}
 	for ref, n := range w.appends {
@@ -608,6 +676,27 @@ func (w *world) check() {
 	}
 }
 
+// checkAttempts checks the attempts a job had cut off, and returns how many of them its command may
+// have run in. Each is after a kill of its supervisor, and a command job's never started.
+func (w *world) checkAttempts(ref lifecycle.Ref, job core.Job) int {
+	if n := len(job.Attempts); n >= core.MaxAttempts {
+		w.violate("job %s has %d attempts cut off, and a job gets %d", ref, n, core.MaxAttempts)
+	}
+	if len(job.Attempts) > 0 && !w.killed[ref] {
+		w.violate("job %s has an attempt cut off though no supervisor of it was killed", ref)
+	}
+	mid := 0
+	for _, a := range job.Attempts {
+		if _, ok := a.Cut.(core.CutMidCommand); ok {
+			mid++
+		}
+	}
+	if mid > 0 && core.RerunPolicyOf(job.Spec.Settings.Kind()) != core.RerunAfterProvenDeath {
+		w.violate("command job %s was queued again after its command may have started", ref)
+	}
+	return mid
+}
+
 // checkEnd checks a job's end against what its command did.
 func (w *world) checkEnd(ref lifecycle.Ref, l located) {
 	sc := w.tokens[tokenOf(l.job)]
@@ -615,7 +704,10 @@ func (w *world) checkEnd(ref lifecycle.Ref, l located) {
 		w.violate("job %s has an unknown command", ref)
 		return
 	}
-	out := w.outputOf(l)
+	out, cuts := withoutCutLines(w.outputOf(l))
+	if cuts != len(l.job.Attempts) {
+		w.violate("job %s says %d attempts were cut off, and its store records %d", ref, cuts, len(l.job.Attempts))
+	}
 	var own []string
 	said := false
 	for _, line := range strings.Split(strings.TrimSuffix(out, "\n"), "\n") {
@@ -651,11 +743,33 @@ func (w *world) checkEnd(ref lifecycle.Ref, l located) {
 		if !w.killed[ref] {
 			w.violate("job %s is lost though no supervisor of it was killed", ref)
 		}
+		// A job whose every supervisor died before its start runs again until it had all its
+		// attempts, unless it was cancelled or the place that ran it was given up.
+		if !w.startedKill[ref] && !w.asked[ref] && !w.vanished[ref] && !w.wasGivenUp(ref) && w.unstarted[ref] < core.MaxAttempts {
+			w.violate("job %s is lost after %d kills, each before its command started", ref, w.unstarted[ref])
+		}
 	case core.JobCancelled:
 		if !w.asked[ref] {
 			w.violate("job %s is cancelled though nobody asked", ref)
 		}
 	}
+}
+
+// cutLine starts, and requeueLine is in, the line a job's output gets for each attempt that was cut
+// off and run again.
+const (
+	cutLine     = "vibesys-cli: attempt "
+	requeueLine = "; running it again as attempt "
+)
+
+// withoutCutLines is a job's output less the lines of its attempts that were cut off, and how many
+// there were.
+func withoutCutLines(out string) (string, int) {
+	lines := strings.SplitAfter(out, "\n")
+	kept := slices.DeleteFunc(slices.Clone(lines), func(line string) bool {
+		return strings.HasPrefix(line, cutLine) && strings.Contains(line, requeueLine)
+	})
+	return strings.Join(kept, ""), len(lines) - len(kept)
 }
 
 func countOf(list []string, s string) int {
@@ -801,8 +915,11 @@ func (w *world) lateRestart() {
 const healBound = 3000
 
 // simulate runs one seed and returns the violation, if any, and the trace.
-func simulate(seed uint64) (string, string) {
-	w := newWorld(seed)
+func simulate(seed uint64) (string, string) { return simulateWith(seed, profileOf) }
+
+// simulateWith is simulate with the profile pick draws.
+func simulateWith(seed uint64, pick func(*rand.Rand) profile) (string, string) {
+	w := newWorld(seed, pick)
 	w.tracef("profile %+v", w.profile)
 	defer w.teardown()
 	for step := range w.profile.chaosSteps {
@@ -909,12 +1026,36 @@ func seedRange() (uint64, uint64) {
 
 const defaultSeeds = 300
 
+// requeuedMark starts the trace line of a job its store shows queued again.
+const requeuedMark = "queued again:"
+
 func TestSeedsHoldTheInvariants(t *testing.T) {
 	first, count := seedRange()
+	runSeeds(t, first, count, profileOf)
+}
+
+// The seeds of cut-offs hold the same invariants, and the default range must reach the retry rule,
+// or the checks of it hold of nothing.
+func TestSeedsOfCutOffsHoldTheInvariants(t *testing.T) {
+	first, count := seedRange()
+	count = min(count, defaultSeeds/3)
+	if requeued := runSeeds(t, first, count, cutoffsOf); requeued == 0 && count == defaultSeeds/3 {
+		t.Errorf("no seed of %d queued a job again", count)
+	}
+}
+
+// runSeeds simulates count seeds from first with profiles pick draws, and returns how many of them
+// queued a job again.
+func runSeeds(t *testing.T, first, count uint64, pick func(*rand.Rand) profile) int {
+	t.Helper()
 	verbose := os.Getenv("VIBESYS_SIM_TRACE") != ""
+	requeued := 0
 	for seed := first; seed < first+count; seed++ {
 		var violation, trace string
-		synctest.Test(t, func(*testing.T) { violation, trace = simulate(seed) })
+		synctest.Test(t, func(*testing.T) { violation, trace = simulateWith(seed, pick) })
+		if strings.Contains(trace, requeuedMark) {
+			requeued++
+		}
 		if violation != "" {
 			if verbose {
 				t.Log(trace)
@@ -922,6 +1063,8 @@ func TestSeedsHoldTheInvariants(t *testing.T) {
 			t.Errorf("seed %d: %s", seed, violation)
 		}
 	}
+	t.Logf("%d of %d seeds queued a job again", requeued, count)
+	return requeued
 }
 
 func TestASeedReplaysExactly(t *testing.T) {

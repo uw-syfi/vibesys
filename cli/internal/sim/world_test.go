@@ -127,9 +127,17 @@ type world struct {
 	// owner record the operator removed, less the ones the daemon took back. Both are guarded by mu.
 	vanished map[lifecycle.Ref]bool
 	givenUp  map[core.Scope][]core.JobID
+	// everGivenUp says a job was given up at some point, taken back or not. It is guarded by mu.
+	everGivenUp map[lifecycle.Ref]bool
 
 	// What happened, for the invariants.
-	killed     map[lifecycle.Ref]bool
+	killed map[lifecycle.Ref]bool
+	// startedKill says a supervisor of the job was killed after its start mark, and unstarted counts
+	// the kills before it: only those let a command job run again.
+	startedKill map[lifecycle.Ref]bool
+	unstarted   map[lifecycle.Ref]int
+	// requeues is how many attempts of each job its store showed cut off, for the trace.
+	requeues   map[lifecycle.Ref]int
 	spawned    []lifecycle.Ref
 	asked      map[lifecycle.Ref]bool
 	finals     map[lifecycle.Ref]core.JobState
@@ -176,13 +184,13 @@ func (s *script) argv() []string {
 
 func (s *script) output() string { return strings.Join(s.lines, "\n") + "\n" }
 
-func newWorld(seed uint64) *world {
+func newWorld(seed uint64, pick func(*rand.Rand) profile) *world {
 	rng := rand.New(rand.NewPCG(seed, seed^0x9e3779b97f4a7c15))
 	c := clock.NewManual(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), 0)
 	gates := newSimGates()
 	ctx, stop := context.WithCancel(context.Background())
 	w := &world{
-		rng: rng, profile: profileOf(rng),
+		rng: rng, profile: pick(rng),
 		clock: c, timers: newSimTimers(c), gates: gates,
 		env:       fakeenv.New(core.EnvironmentHost, gates),
 		checkouts: &fakeenv.Checkouts{},
@@ -193,7 +201,7 @@ func newWorld(seed uint64) *world {
 		follows:   map[lifecycle.Ref]context.CancelCauseFunc{},
 		absent:    map[string]bool{},
 		forgotten: map[core.Scope]bool{},
-		killed:    map[lifecycle.Ref]bool{}, vanished: map[lifecycle.Ref]bool{}, givenUp: map[core.Scope][]core.JobID{}, asked: map[lifecycle.Ref]bool{},
+		killed:    map[lifecycle.Ref]bool{}, startedKill: map[lifecycle.Ref]bool{}, unstarted: map[lifecycle.Ref]int{}, requeues: map[lifecycle.Ref]int{}, everGivenUp: map[lifecycle.Ref]bool{}, vanished: map[lifecycle.Ref]bool{}, givenUp: map[core.Scope][]core.JobID{}, asked: map[lifecycle.Ref]bool{},
 		finals: map[lifecycle.Ref]core.JobState{}, flaky: map[lifecycle.Ref]bool{},
 		cancelSeen: map[lifecycle.Ref]*incarnation{}, cancelSent: map[lifecycle.Ref]bool{},
 		probes: map[lifecycle.Ref]int{}, unanswered: map[string]bool{}, seed: seed,

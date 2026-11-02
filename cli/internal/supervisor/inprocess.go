@@ -125,6 +125,19 @@ func (s *Survivors) StartSent(ref lifecycle.Ref) bool {
 	return ok && proc.startSent.Load()
 }
 
+// Parked lists the jobs whose supervisor lives and was not told to start yet, in no order.
+func (s *Survivors) Parked() []lifecycle.Ref {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []lifecycle.Ref
+	for ref, proc := range s.runs {
+		if !proc.startSent.Load() && !proc.dead() {
+			out = append(out, ref)
+		}
+	}
+	return out
+}
+
 // Wipe takes a job's run directory away and leaves its supervisor alive, as a logout that clears
 // the runtime directory does. It returns false for a job with no run.
 func (s *Survivors) Wipe(ref lifecycle.Ref) bool {

@@ -302,7 +302,11 @@ func (a *App) prepare(ctx context.Context, ref lifecycle.Ref, scope core.Scope) 
 	if err != nil {
 		return nil, false, err
 	}
-	// An earlier attempt of a job queued again left output in the store, and this one's follows it.
+	// An earlier attempt of a job queued again left output in the store, and this one's follows it,
+	// after the line that says why it runs again.
+	if err := ensureCutLine(ctx, st, job); err != nil {
+		return nil, false, storeError{err}
+	}
 	base, err := logSize(ctx, st, job.ID)
 	if err != nil {
 		return nil, false, storeError{err}
@@ -561,24 +565,65 @@ func (a *App) moveInStore(ctx context.Context, m lifecycle.Move, scope core.Scop
 	if err != nil {
 		return err
 	}
-	if m.Settlement.Log != "" {
+	if m.Settlement.Requeues() {
+		return a.requeueInStore(ctx, st, m)
+	}
+	if m.Settlement.Log == "" && m.Settlement.Transition.From != core.JobQueued {
+		return a.record(ctx, st, m.Settlement.Transition)
+	}
+	job, err := a.readJob(ctx, st, m.Ref.Job)
+	if err != nil {
+		return err
+	}
+	if job.State.Final() {
 		// An end that is recorded already has its own explanation, which a line after it would
 		// contradict: the job was not in the daemon's hands when this one was decided.
-		job, err := a.readJob(ctx, st, m.Ref.Job)
-		if err != nil {
-			return err
+		return nil
+	}
+	err = a.retry(ctx, func(ctx context.Context) error {
+		if job.State == core.JobQueued {
+			// A job that ends from the queue says first why it was there again.
+			if err := ensureCutLine(ctx, st, job); err != nil {
+				return err
+			}
 		}
-		if job.State.Final() {
+		if m.Settlement.Log == "" {
 			return nil
 		}
-		err = a.retry(ctx, func(ctx context.Context) error {
-			return appendLineOnce(ctx, st, m.Ref.Job, m.Settlement.Log)
-		})
-		if err != nil {
-			return fmt.Errorf("adding a line to its output: %w", err)
-		}
+		return appendLineOnce(ctx, st, m.Ref.Job, m.Settlement.Log)
+	})
+	if err != nil {
+		return fmt.Errorf("adding a line to its output: %w", err)
 	}
 	return a.record(ctx, st, m.Settlement.Transition)
+}
+
+// requeueInStore queues a job again and then says why in its output. The line promises the job runs
+// again, so it follows the transition: written first, a crash before the transition could leave it
+// in the output of a job that a later decision ends. A line lost to a crash after the transition is
+// written by the job's next launch (see ensureCutLine).
+func (a *App) requeueInStore(ctx context.Context, st store.Store, m lifecycle.Move) error {
+	if err := a.record(ctx, st, m.Settlement.Transition); err != nil {
+		return err
+	}
+	job, err := a.readJob(ctx, st, m.Ref.Job)
+	if err == nil && job.State == core.JobQueued {
+		err = a.retry(ctx, func(ctx context.Context) error { return ensureCutLine(ctx, st, job) })
+	}
+	if err != nil {
+		a.cfg.Logf("job %s: saying why it runs again: %v", m.Ref, err)
+	}
+	return nil
+}
+
+// ensureCutLine writes the line of a queued job's last attempt that was cut off, unless its output
+// ends with it already.
+func ensureCutLine(ctx context.Context, st store.Store, job core.Job) error {
+	n := len(job.Attempts)
+	if n == 0 {
+		return nil
+	}
+	return appendLineOnce(ctx, st, job.ID, lifecycle.CutLine(n, job.Attempts[n-1].Cut))
 }
 
 // discard clears what is left of a run, when no job needs it.

@@ -301,9 +301,15 @@ Recovery is the daemon's start, with no separate path:
 - Queued jobs are in the store, so they run after a restart or a reboot.
 - A running job whose supervisor is alive is re-adopted: the daemon follows it again, and if the
   job finished while the daemon was down, it records the outcome.
-- A running job whose supervisor is gone (the machine rebooted, or the supervisor was killed)
-  becomes `lost`, with one explanatory line in its output. A lost job is never retried: the
-  command may have had effects.
+- A running job whose supervisor is proved gone (the machine rebooted, or the supervisor was
+  killed) is cut off, with one explanatory line in its output. The run's record says whether the
+  daemon had told the supervisor to start the command. A job whose command never started goes
+  back to the queue in its old place. A check or a measure job also goes back after its command
+  may have started, as rerunning one only measures again. A command job whose command may have
+  started becomes `lost`: it may have had effects, so it is never run twice. A job gets
+  `MaxAttempts` (3) attempts; the job keeps each attempt that was cut off, and the last one cut
+  off makes it `lost`. A job that ran and failed or ran out of time is never run again, and a
+  supervisor that cannot be judged dead holds its job in doubt rather than running it again.
 - A supervisor that was started for a job the store never marked running is discarded.
 - A store that cannot be read, such as a repository on a disk that is not mounted, stays known and
   is read again every slow period. None of its jobs starts, and a run of it is kept, not released.

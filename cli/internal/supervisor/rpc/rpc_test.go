@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"google.golang.org/grpc"
@@ -41,9 +42,36 @@ type served struct {
 	listener *bufconn.Listener
 	server   *grpc.Server
 	gone     bool
+	// startSent is the run's start mark, which a daemon writes before it tells the supervisor to
+	// start, as the host's run record holds it.
+	startSent atomic.Bool
+	killed    atomic.Bool
+}
+
+// marking is a handle that marks the run before it tells the supervisor to start.
+type marking struct {
+	*rpc.Client
+	s *served
+}
+
+func (h marking) Start(ctx context.Context) error {
+	if h.s.killed.Load() {
+		// The process's lock is free: it is proved dead, and is not marked.
+		return supervisor.Gone{Proof: lifecycle.ProofLockFree, Start: h.s.start()}
+	}
+	h.s.startSent.Store(true)
+	return h.Client.Start(ctx)
+}
+
+func (s *served) start() lifecycle.Start {
+	if s.startSent.Load() {
+		return lifecycle.MayHaveStarted{}
+	}
+	return lifecycle.NeverStarted{}
 }
 
 func (s *served) kill() {
+	s.killed.Store(true)
 	s.server.Stop()
 	s.sup.Close()
 }
@@ -58,15 +86,19 @@ func (f *farm) closeAll() {
 
 var _ supervisor.Supervisors = (*remote)(nil)
 
-func (r *remote) connect(ctx context.Context, s *served) (*rpc.Client, error) {
+func (r *remote) connect(ctx context.Context, s *served) (marking, error) {
 	conn, err := grpc.NewClient("passthrough:///supervisor",
 		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return s.listener.DialContext(ctx) }),
 		grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		return nil, err
+		return marking{}, err
 	}
 	r.t.Cleanup(func() { conn.Close() })
-	return rpc.Connect(ctx, conn, "test")
+	c, err := rpc.Connect(ctx, conn, "test")
+	if err != nil {
+		return marking{}, err
+	}
+	return marking{Client: c, s: s}, nil
 }
 
 func (r *remote) Spawn(ctx context.Context, l lifecycle.Launch) (supervisor.Handle, error) {
@@ -88,7 +120,11 @@ func (r *remote) Spawn(ctx context.Context, l lifecycle.Launch) (supervisor.Hand
 		s.server.GracefulStop()
 	}()
 	r.farm.runs[l.Ref()] = s
-	return r.connect(ctx, s)
+	h, err := r.connect(ctx, s)
+	if err != nil {
+		return nil, err
+	}
+	return h, nil
 }
 
 func (r *remote) Runs(ctx context.Context) ([]supervisor.Run, error) {
@@ -104,7 +140,7 @@ func (r *remote) Runs(ctx context.Context) ([]supervisor.Run, error) {
 func (r *remote) probe(ctx context.Context, ref lifecycle.Ref, s *served) supervisor.Run {
 	h, err := r.connect(ctx, s)
 	if err != nil || s.sup.Phase() == lifecycle.RunReleased {
-		return supervisor.Dead{Ref: ref, Proof: lifecycle.ProofLockFree, Launch: &s.launch}
+		return supervisor.Dead{Ref: ref, Proof: lifecycle.ProofLockFree, Start: s.start(), Launch: &s.launch}
 	}
 	return supervisor.Alive{Ref: ref, Handle: h, Launch: s.launch, Phase: h.Phase()}
 }
