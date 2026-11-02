@@ -177,36 +177,54 @@ def work(
     engine: Engine,
     wakeup: Wakeup,
     stop: threading.Event,
-    record: Callable[[], None] = lambda: None,
 ) -> None:
     """The worker: run queued turns, poll the provider between them, until closed or stopped.
 
-    *record* runs after each step, to note the agent's process groups once it exists.
+    Raises a store failure that a command met on a server thread.
     """
     while not stop.is_set() and not engine.finished:
+        engine.check()
         seen = wakeup.version
-        ran = engine.run_next()
-        record()
-        if ran:
+        if engine.run_next():
             continue
         engine.poll_idle()
         wakeup.wait(seen, IDLE_TICK_SECONDS)
 
 
 class AgentGroups:
-    """Keeps ``agent.pgids`` naming the process groups of this process's children."""
+    """Keeps ``agent.pgids`` naming the process groups of this process's children.
 
-    def __init__(self, path: Path) -> None:
-        """Write to *path*."""
+    One thread calls ``record``; ``clear`` runs after that thread has stopped.
+    """
+
+    def __init__(self, path: Path, groups: Callable[[], list[int]] = agent_groups) -> None:
+        """Write to *path* the groups *groups* finds."""
         self._path = path
-        self._written = ""
+        self._groups = groups
+        self._written: str | None = None
 
     def record(self) -> None:
         """Rewrite the file if the groups changed."""
-        text = "".join(f"{pgid}\n" for pgid in agent_groups())
+        self._write("".join(f"{pgid}\n" for pgid in self._groups()))
+
+    def clear(self) -> None:
+        """Name no group: the agent is closed, so a later reap must kill nothing."""
+        self._write("")
+
+    def _write(self, text: str) -> None:
         if text != self._written:
             write_atomically(self._path, text)
             self._written = text
+
+
+def keep_recording(groups: AgentGroups, done: threading.Event) -> None:
+    """Record *groups* every tick until *done*.
+
+    An agent the provider respawns mid-turn is named within a tick of its start.
+    """
+    groups.record()
+    while not done.wait(IDLE_TICK_SECONDS):
+        groups.record()
 
 
 def serve_session(engine: Engine, wakeup: Wakeup, args: argparse.Namespace) -> None:
@@ -222,12 +240,16 @@ def serve_session(engine: Engine, wakeup: Wakeup, args: argparse.Namespace) -> N
     for number in (signal.SIGTERM, signal.SIGINT):
         signal.signal(number, lambda *_: (stop.set(), wake.set()))
     failure: list[BaseException] = []
+    recorded = threading.Event()
+    recorder = threading.Thread(
+        target=keep_recording, args=(groups, recorded), name="vs-sidecar-groups", daemon=True
+    )
+    recorder.start()
 
     def run() -> None:
         try:
             engine.start()
-            groups.record()
-            work(engine, wakeup, stop, groups.record)
+            work(engine, wakeup, stop)
         # lint-waiver: LW-770003 [BLE001]; the worker must report any failure to the main thread.
         # > A narrower except would let a store failure or a bug end the thread silently, and then
         # > the agent would be left running; the main thread re-raises what is caught here.
@@ -239,7 +261,8 @@ def serve_session(engine: Engine, wakeup: Wakeup, args: argparse.Namespace) -> N
     server = None
     try:
         server = serve(engine, wakeup, args.socket)
-        worker = threading.Thread(target=run, name="vs-sidecar-worker")
+        # A daemon thread: a worker still stuck after STOP_SECONDS must not hold the process open.
+        worker = threading.Thread(target=run, name="vs-sidecar-worker", daemon=True)
         worker.start()
         wake.wait()
         if stop.is_set():
@@ -249,6 +272,9 @@ def serve_session(engine: Engine, wakeup: Wakeup, args: argparse.Namespace) -> N
             stop.wait(LINGER_SECONDS)
     finally:
         engine.release()
+        recorded.set()
+        recorder.join()
+        groups.clear()
         if server is not None:
             server.stop(grace=1).wait()
     if failure:

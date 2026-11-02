@@ -284,7 +284,7 @@ class TurnNormalizer:
         return [self._event(item=finished.proto(item_id, self._turn_id))]
 
     def _delta(self, event: TextDelta) -> list[sc.SidecarEvent]:
-        if event.item_id is None or not event.text:
+        if not event.item_id or not event.text:
             return []
         delta = sc.SidecarDelta(item_id=event.item_id)
         if event.kind is TextKind.TOOL_OUTPUT:

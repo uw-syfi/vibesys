@@ -103,6 +103,7 @@ def test_deltas_name_their_item_and_split_assistant_text_from_command_output() -
             TextDelta("he", TextKind.ASSISTANT, "a1"),
             TextDelta("out", TextKind.TOOL_OUTPUT, "c1"),
             TextDelta("lost", TextKind.ASSISTANT, None),
+            TextDelta("unnamed", TextKind.ASSISTANT, ""),
             TextDelta("", TextKind.ASSISTANT, "a1"),
         ],
         DONE,
@@ -193,7 +194,7 @@ EVENT = st.one_of(
         TextDelta,
         st.text(min_size=1, max_size=3),
         st.sampled_from(list(TextKind)),
-        st.sampled_from(["a1", "c1", None]),
+        st.sampled_from(["a1", "c1", "", None]),
     ),
 )
 

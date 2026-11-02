@@ -5,7 +5,7 @@ requires-python = ">=3.12"
 [[package]]
 name = "agentshim"
 version = "0.26.0"
-source = { git = "https://github.com/vic-lsh/agentshim?rev=bd0bab2a016b46f4b4c6c028e46ab2b59b021636#bd0bab2a016b46f4b4c6c028e46ab2b59b021636" }
+source = { git = "https://github.com/vic-lsh/agentshim?rev=aeb95d8d70132e1f8f19a77af93fe235bddce1c9#aeb95d8d70132e1f8f19a77af93fe235bddce1c9" }
 
 [[package]]
 name = "colorama"
@@ -587,7 +587,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentshim", git = "https://github.com/vic-lsh/agentshim?rev=bd0bab2a016b46f4b4c6c028e46ab2b59b021636" },
+    { name = "agentshim", git = "https://github.com/vic-lsh/agentshim?rev=aeb95d8d70132e1f8f19a77af93fe235bddce1c9" },
     { name = "grpcio", specifier = "==1.76.0" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "protobuf", specifier = "==6.33.5" },

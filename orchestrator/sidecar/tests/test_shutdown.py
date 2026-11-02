@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import stat
 import tempfile
+import threading
 from pathlib import Path
 
 import pytest
@@ -12,11 +13,18 @@ from agentshim import AssistantText
 from google.protobuf import json_format
 
 from tests import helpers as h
-from tests.fakes import ScriptedDriver, TurnScript
+from tests.fakes import FaultyFiles, FileFaultError, ScriptedDriver, TurnScript
 from vs_sidecar.engine import Engine
-from vs_sidecar.main import LaunchError, agent_groups, child_pids, load_launch
+from vs_sidecar.main import (
+    AgentGroups,
+    LaunchError,
+    agent_groups,
+    child_pids,
+    load_launch,
+    work,
+)
 from vs_sidecar.server import Wakeup, serve
-from vs_sidecar.store import MemoryStore
+from vs_sidecar.store import FileStore, MemoryStore
 
 
 def _engine(driver: ScriptedDriver) -> tuple[Engine, MemoryStore]:
@@ -91,3 +99,32 @@ def test_the_socket_is_for_the_owner_alone_whatever_the_umask() -> None:
     finally:
         os.umask(previous)
     assert mode & 0o077 == 0, oct(mode)
+
+
+def test_agent_groups_names_the_live_groups_and_is_emptied_when_the_agent_is_closed(
+    tmp_path: Path,
+) -> None:
+    live = [41, 42]
+    path = tmp_path / "agent.pgids"
+    groups = AgentGroups(path, lambda: list(live))
+    groups.record()
+    assert path.read_text() == "41\n42\n"
+    live.append(43)  # the provider respawned the agent mid-turn
+    groups.record()
+    assert path.read_text() == "41\n42\n43\n"
+    groups.clear()
+    assert path.read_text() == ""
+
+
+def test_a_store_failure_on_a_command_thread_is_raised_by_the_worker_and_never_closes_in_memory() -> (
+    None
+):
+    files = FaultyFiles(fail_at=3)  # 1: the opened event, 2: the close's effect id, 3: closed
+    driver = ScriptedDriver()
+    engine = Engine(h.launch(), FileStore(files), lambda _sink: driver)
+    engine.start()
+    with pytest.raises(FileFaultError):
+        engine.send(h.close("e1"))
+    assert not engine.finished
+    with pytest.raises(FileFaultError):
+        work(engine, Wakeup(), threading.Event())

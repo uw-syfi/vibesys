@@ -89,6 +89,7 @@ class Engine:
         self._closing = False
         self._failed = False
         self._closed = False
+        self._store_failure: OSError | None = None
         self._validator = protovalidate.Validator()
 
     # -- start
@@ -204,17 +205,32 @@ class Engine:
         ):
             msg = f"command is for session {ref.agent_id}/{ref.session}, this is {self._launch.session.agent_id}/{self._launch.session.session}"
             raise InvalidCommandError(msg)
+        try:
+            with self._lock:
+                if not self._store.remember_effect(command.effect_id):
+                    return
+            if body == "start_turn":
+                self._start_turn(command.start_turn)
+            elif body == "steer":
+                self._steer(command.steer)
+            elif body == "interrupt":
+                self._interrupt(command.interrupt)
+            else:
+                self._close(command.close)
+        except OSError as error:
+            # A store failure is fatal wherever it happens: the worker raises it (``check``), so
+            # the process closes the agent and exits, and a restart reports the session lost.
+            with self._lock:
+                self._store_failure = self._store_failure or error
+            self._notify()
+            raise
+
+    def check(self) -> None:
+        """Raise the store failure a command met on another thread, if there was one."""
         with self._lock:
-            if not self._store.remember_effect(command.effect_id):
-                return
-        if body == "start_turn":
-            self._start_turn(command.start_turn)
-        elif body == "steer":
-            self._steer(command.steer)
-        elif body == "interrupt":
-            self._interrupt(command.interrupt)
-        else:
-            self._close(command.close)
+            failure = self._store_failure
+        if failure is not None:
+            raise failure
 
     def _start_turn(self, start: fx.StartTurn) -> None:
         prompt = render(start.message)
@@ -309,9 +325,11 @@ class Engine:
         if driver is not None:
             driver.close()
         with self._lock:
-            self._closed = True
             self._end_idle(orch.TURN_STATUS_FAILED)
             self._append(sc.SidecarEvent(closed=sc.SessionClosed()))
+            # Only once the close is on disk: a failed write leaves the session open, so the
+            # daemon's retried close is not dropped as already done.
+            self._closed = True
 
     # -- the worker
 

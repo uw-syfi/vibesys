@@ -83,7 +83,8 @@ directory has what it needs:
 
 - `sidecar.pid`: the sidecar's process id.
 - `agent.pgids`: one process-group id per line, for each group led by a direct child of the
-  sidecar (the agent). It is rewritten when the set changes.
+  sidecar (the agent). It is checked every 0.25 s, including during a turn, and rewritten when
+  the set changes; a sidecar that exits on its own empties it after closing the agent.
 
 To clean up a sidecar that is gone, the daemon sends SIGKILL to each group in `agent.pgids`
 (`kill(-pgid)`) after checking that `sidecar.pid` is not running, and before it launches a
