@@ -216,9 +216,13 @@ def decode_saved(encoded: EncodedSavedRun, registry: OperationRegistry | None) -
         state=_STATE.validate_json(_readable_state(encoded.state), context=context),
         envelope_version=encoded.envelope_version,
         strategy=encoded.strategy,
-        inputs=tuple(_EVENT.validate_json(_readable(event), context=context) for event in encoded.inputs),
+        inputs=tuple(
+            _EVENT.validate_json(_readable(event), context=context) for event in encoded.inputs
+        ),
         wakes=encoded.wakes,
-        held=_DECISIONS.validate_json(_readable(encoded.held), context=context) if encoded.held else (),
+        held=_DECISIONS.validate_json(_readable(encoded.held), context=context)
+        if encoded.held
+        else (),
     )
 
 
@@ -277,7 +281,8 @@ def decode_proposals(
     """The proposals core took in an advance, in the order it took them."""
     _same_encoding(message.schema_version)
     return tuple(
-        _EVENT.validate_json(_readable(proposal), context=_context(registry)) for proposal in message.proposals
+        _EVENT.validate_json(_readable(proposal), context=_context(registry))
+        for proposal in message.proposals
     )
 
 

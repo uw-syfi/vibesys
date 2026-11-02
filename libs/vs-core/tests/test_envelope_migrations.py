@@ -283,4 +283,7 @@ def test_the_migrated_waiting_save_decodes_with_its_wait() -> None:
     source = (_FIXTURES / "v44-waiting.json").read_text(encoding="utf-8")
     decoded = FAKE_REGISTRY.decode_envelope(_Envelope, source)
     (wait,) = decoded.core.evaluation.continuations
-    assert wait.deadline_at == json.loads(source)["core"]["evaluation"]["continuations"][0]["deadline_at"]
+    assert (
+        wait.deadline_at
+        == json.loads(source)["core"]["evaluation"]["continuations"][0]["deadline_at"]
+    )

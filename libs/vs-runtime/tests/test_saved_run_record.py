@@ -137,7 +137,9 @@ def _wait() -> core.Continuation:
 
 
 @pytest.mark.regression
-def test_a_snapshot_written_at_version_44_is_read_with_its_wait_without_the_downtime_credit() -> None:
+def test_a_snapshot_written_at_version_44_is_read_with_its_wait_without_the_downtime_credit() -> (
+    None
+):
     """Version 44 wrote ``downtime_credit`` (always 0) in each wait of the state (#3708).
 
     Delete this test with the tolerant read, after 2026-11-08.
