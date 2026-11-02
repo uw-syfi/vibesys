@@ -61,8 +61,8 @@ type DaemonServiceClient interface {
 	// a reusable result.
 	Submit(ctx context.Context, in *SubmitRequest, opts ...grpc.CallOption) (*SubmitResponse, error)
 	// Watch streams the watched jobs' states: first their current states, then each change, and it
-	// ends when all are final. A client implements `wait`, with its `--any` and `--timeout`, over
-	// this stream, so a timeout is only a client closing the stream and never cancels a job.
+	// ends when all are final. It is kept for command lines of protocol 1, which wait over it and
+	// decide the end themselves; a command line of 2 waits through Wait.
 	Watch(ctx context.Context, in *WatchRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchResponse], error)
 	// Wait streams the waited-on jobs' states like Watch, and ends with one WaitOutcome that says how
 	// the wait ended. The daemon decides the outcome, the timeout included, so every client reads the
@@ -357,8 +357,8 @@ type DaemonServiceServer interface {
 	// a reusable result.
 	Submit(context.Context, *SubmitRequest) (*SubmitResponse, error)
 	// Watch streams the watched jobs' states: first their current states, then each change, and it
-	// ends when all are final. A client implements `wait`, with its `--any` and `--timeout`, over
-	// this stream, so a timeout is only a client closing the stream and never cancels a job.
+	// ends when all are final. It is kept for command lines of protocol 1, which wait over it and
+	// decide the end themselves; a command line of 2 waits through Wait.
 	Watch(*WatchRequest, grpc.ServerStreamingServer[WatchResponse]) error
 	// Wait streams the waited-on jobs' states like Watch, and ends with one WaitOutcome that says how
 	// the wait ended. The daemon decides the outcome, the timeout included, so every client reads the

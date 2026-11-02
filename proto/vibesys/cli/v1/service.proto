@@ -28,8 +28,8 @@ service DaemonService {
   // a reusable result.
   rpc Submit(SubmitRequest) returns (SubmitResponse);
   // Watch streams the watched jobs' states: first their current states, then each change, and it
-  // ends when all are final. A client implements `wait`, with its `--any` and `--timeout`, over
-  // this stream, so a timeout is only a client closing the stream and never cancels a job.
+  // ends when all are final. It is kept for command lines of protocol 1, which wait over it and
+  // decide the end themselves; a command line of 2 waits through Wait.
   rpc Watch(WatchRequest) returns (stream WatchResponse);
   // Wait streams the waited-on jobs' states like Watch, and ends with one WaitOutcome that says how
   // the wait ended. The daemon decides the outcome, the timeout included, so every client reads the
