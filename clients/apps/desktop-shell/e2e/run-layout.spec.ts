@@ -180,10 +180,17 @@ test('a Pause the run does not take is shown as not confirmed, never thrown, and
   await expect(stop).not.toHaveAttribute('aria-disabled', 'true');
 });
 
-test('a person resizes the Ideas list by dragging or with the keys, and the app keeps the width', async ({
+test('a person resizes the Ideas list beside an idea by dragging or with the keys, and the app keeps the width', async ({
   page,
 }) => {
   await open(page, 'queue-rs-live', 1440);
+  const openIdea = async (): Promise<void> => {
+    await page
+      .getByRole('listbox', {name: 'Ideas'})
+      .getByRole('option', {name: /Wait-free consumer path/})
+      .click();
+  };
+  await openIdea();
   const list = page.locator('.vs-pane[data-width="master"]');
   const handle = page.getByRole('separator', {name: 'Resize the ideas list'});
   const width = async (): Promise<number> => Math.round((await list.boundingBox())?.width ?? 0);
@@ -199,19 +206,8 @@ test('a person resizes the Ideas list by dragging or with the keys, and the app 
   await handle.focus();
   await page.keyboard.press('ArrowLeft');
   expect(await width()).toBe(before + 104);
-  // The list keeps its width when an idea opens beside it.
-  await page
-    .getByRole('listbox', {name: 'Ideas'})
-    .getByRole('option', {name: /Wait-free consumer path/})
-    .click();
-  expect(await width()).toBe(before + 104);
-  // Opened again, the run finds the width where it was left.
+  // A reload restores the run and its idea at the width where it was left.
   await page.reload();
-  await page
-    .getByRole('main')
-    .getByRole('button', {name: /^queue-rs · mpmc/})
-    .first()
-    .click();
   await playLive(page, fixtureNamed('queue-rs-live'));
   await expect(handle).toBeVisible();
   expect(await width()).toBe(before + 104);

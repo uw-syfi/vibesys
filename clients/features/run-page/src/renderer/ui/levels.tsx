@@ -119,7 +119,7 @@ export function IdeasWorkspace(props: LevelProps & {readonly idea: Candidate | n
         base={base}
         core={props.core}
         selected={idea?.id ?? null}
-        resize={paneResize(panes, 'master', RESIZE_WORDS.ideas)}
+        resize={idea === null ? undefined : paneResize(panes, 'master', RESIZE_WORDS.ideas)}
         dispatch={dispatch}
       />
       {idea === null || view === null || logs === null ? null : (
