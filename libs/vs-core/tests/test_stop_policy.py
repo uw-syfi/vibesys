@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from types import UnionType
-from typing import Annotated, Literal, TypeAliasType, Union, get_args, get_origin
+from typing import Annotated, Literal, TypeAliasType, Union, cast, get_args, get_origin
 
 import pytest
 from hypothesis import given, settings
@@ -18,9 +18,10 @@ from hypothesis import strategies as st
 from pydantic import BaseModel
 
 import vs_core.api as core
+
+# test-isolation: the drain gate predicates are the unit under test; the public surface, decide, needs a runner loop.
 from vs_core._run_park import dispatch_allowed, pause_cancels
 from vs_core.api.recovery import StopPolicy, request_stop_policy
-from vs_core.types import records
 from vs_sim.api.testing import examples
 
 from .recovery_worlds import Kind, Standing, StepSpec, World, build, worlds
@@ -133,7 +134,7 @@ def request_classes() -> list[type[BaseModel]]:
         assert issubclass(tp, BaseModel), tp
         return [tp]
 
-    return flatten(records.Request.__value__)
+    return flatten(core.Request.__value__)
 
 
 def test_every_kind_of_step_has_the_stop_policy_the_design_gives_it() -> None:
@@ -151,4 +152,6 @@ def test_every_kind_of_step_has_the_stop_policy_the_design_gives_it() -> None:
             if cls.__name__ in KEEPS
             else StopPolicy.WORK
         )
-        assert request_stop_policy(cls.model_construct(), ()) is expected, cls.__name__
+        assert request_stop_policy(cast("core.Request", cls.model_construct()), ()) is expected, (
+            cls.__name__
+        )
