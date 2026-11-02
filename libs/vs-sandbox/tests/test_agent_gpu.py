@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 from vs_sandbox.api.slurm import (
@@ -409,6 +409,7 @@ class TestPartitionLimits:
         text = "main* 2:00:00\nbroken\nodd n/a\nthree 1 2\n\npriority 30:00\n"
         assert parse_partition_limits(text) == {"main": 120, "priority": 30}
 
+    @example(days=1, hours=11, minutes=0, seconds=1)
     @given(
         days=st.integers(0, 30),
         hours=st.integers(0, 23),
@@ -423,8 +424,9 @@ class TestPartitionLimits:
             if days
             else (f"{hours}:{minutes:02d}:{seconds:02d}")
         )
-        expected = (days * 24 + hours) * 60 + minutes + seconds / 60
-        assert parse_partition_limits(f"p {text}") == {"p": expected}
+        expected = ((days * 24 + hours) * 3600 + minutes * 60 + seconds) / 60
+        # Minutes are a float: the two orders of summing differ in the last bit.
+        assert parse_partition_limits(f"p {text}") == {"p": pytest.approx(expected, rel=1e-12)}
 
 
 class TestLauncher:
