@@ -1048,7 +1048,7 @@ def base_budget_spent(lab: Lab, name: str) -> bool:
     return any(
         b.identity.purpose == "baseline"
         and b.scope == lab.scopes[name]
-        and len(b.receipts) >= min(b.limit, core.MAX_SUBMISSIONS_PER_MEASUREMENT)
+        and len(b.receipts) >= b.limit
         for b in lab.state.evaluation.submission_budgets
     )
 
@@ -1079,6 +1079,11 @@ def base_running(lab: Lab) -> bool:
 )
 @example(calls=[("a", 0, 1.01, 0.0)], reload_at=7, floor=FLOOR)
 @example(calls=[("a", 0, 1.01, 0.0), ("a", 0, 1.0, 1.0)], reload_at=1, floor=0.0)
+@example(  # the base's budget holds MAX_CORE_BASE_RUNS, more than a candidate input's
+    calls=[("a", 0, 0.3, 0.0), ("a", 2, 0.3, STALENESS + 1.0), ("a", 0, 0.3, STALENESS + 1.0)],
+    reload_at=0,
+    floor=0.0,
+)
 def test_the_base_is_measured_once_per_input_and_again_only_on_staleness_or_a_close_call(
     calls: list[tuple[str, int, float, float]], reload_at: int, floor: float
 ) -> None:

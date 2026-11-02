@@ -238,6 +238,7 @@ def test_a_role_that_is_never_corrected_reports_its_first_invalid_reply() -> Non
     may_wait=st.booleans(),
     failure=st.sampled_from(["invalid", "unrecorded"]),
 )
+@example(correctable=frozenset(), may_wait=True, failure="unrecorded")
 def test_a_failed_reply_is_corrected_exactly_when_the_role_lists_it(
     *, correctable: frozenset[core.Correctable], may_wait: bool, failure: str
 ) -> None:
@@ -248,23 +249,25 @@ def test_a_failed_reply_is_corrected_exactly_when_the_role_lists_it(
 
     # A role that cannot wait sees a waiting reply as simply invalid.
     if failure == "invalid" or not may_wait:
-        kind, template, reason = (
+        kind, template, reason, refusal = (
             core.Correctable.INVALID_REPLY,
             EXCHANGES.correction,
             "invalid-reply",
+            None,
         )
     else:
-        kind, template, reason = (
+        kind, template, reason, refusal = (
             core.Correctable.UNRECORDED_WAIT,
             EXCHANGES.wait_unrecorded,
             "wait-refused",
+            core.WaitRefusal.NOT_RECORDED.value,
         )
     if kind in correctable:
         follow = turn(run)
         assert follow.template == template
         assert spec_of(follow).charge_class == "correction"
     else:
-        assert published(run) == Outcome(ended="Failed", reason=reason)
+        assert published(run) == Outcome(ended="Failed", reason=reason, refusal=refusal)
 
 
 def test_an_unrecorded_wait_is_corrected_with_what_the_wait_was() -> None:
