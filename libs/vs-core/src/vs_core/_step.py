@@ -1450,7 +1450,7 @@ def _park_authority(state: CoreState, run: RunState, event: RunControlEvent) -> 
             update={
                 "park": RunPark(
                     control_id=control.control_id,
-                    epoch=state.records.recovery.epoch,
+                    epoch=state.records.epoch,
                     immediate=control.action == "pause_now",
                     admitted_turns=(
                         state.run.park.admitted_turns

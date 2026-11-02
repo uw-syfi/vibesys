@@ -199,7 +199,7 @@ def drain_in_force(run: RunState, records: RecordsState) -> bool:
     park = run.park
     if park is None:
         return False
-    return run.status is RunStatus.DRAINING or park.epoch == records.recovery.epoch
+    return run.status is RunStatus.DRAINING or park.epoch == records.epoch
 
 
 def _operator_drain(facts: _Facts) -> bool:
@@ -418,6 +418,6 @@ def _holds(facts: _Facts, invocation: Invocation) -> bool:
         and row.request.turn == invocation.turn
         and row.request.scope == invocation.scope
         and row.phase != RequestPhase.PREPARED
-        and row.dispatched_in in (None, records.recovery.epoch)
+        and row.dispatched_in in (None, records.epoch)
         for row in records.records
     )

@@ -219,7 +219,7 @@ Field by field (`libs/vs-core/src/vs_core/types/kernel.py:CoreState`):
 | `run.controls`, `run.receipts`, `run.result` | controls from `CoreInput` control records; receipts and result derived |
 | `scheduling`, `attempts`, `sessions`, `evaluation`, `settlement` | derived from decisions, step results, controls and clock marks |
 | `records.records` (the request ledger) | derived; `phase` collapses to open or finished, and attempts come from `StepStarted` |
-| `records.recovery`, `records.hosts`, `records.children` | not folded from the log: only the restart reconciliation writes them ([Open items](#open-items)) |
+| `records.epoch` | the host epoch of the log: `epoch_opened` advances it when a later epoch of the log opens |
 | `strategy` and `event_cursor` | one `StrategyAdvanced` record per advance ([The search in the log](#the-search-in-the-log)); a resume on the same code replays the journal it holds |
 | `fence` | a `HostFence` value no product code reads; the run lock is the only fence |
 | `pending_inputs`, `pending_decisions`, `wakes`, `pending_publications`, `delivery_cursor` | derived, except the owner events: the ledger derives the owner event of a report (`_request_forward.py`) but not every fact an executor tells an owner (a turn's reply, a refused mid-turn steer, a job's failure class, an adoption's publication), so those travel in the `StepFinished` record ([Owner events](#owner-events)). Decisions and wakes are the strategy's output; publications are the fold's output. The delivery cursor is the one fact that is not derived: after a restart every publication since the last recorded acknowledgement is delivered again |
@@ -908,9 +908,10 @@ publisher and request inspector, the effect fences and the receipt store. `DELET
 (`ReconciliationDeadline`, `ReconciliationCommandLapsed` and the private functions that handled them).
 `DELETED_MEMBERS` holds `(class, member)` pairs for a value that leaves a type the type keeps (`ObservationStatus.UNKNOWN`
 joins it in the pull request that removes the value); it is empty today. The names still in `vs_core`
-(`RecoveryBarrier`, `RecoveryCheck`, `HostEpoch`, `ChildLease`, `InspectRequest`, `InspectTurn`,
-`InspectOwnedJob`, `CancelOwnedResource`, `BlockRequest`, `HostFence`) join the list in the pull request that
-deletes each.
+(`InspectRequest`, `InspectTurn`, `InspectOwnedJob`, `CancelOwnedResource`, `BlockRequest`, `HostFence`)
+join the list in the pull request that deletes each. `RecoveryBarrier`, `RecoveryCheck`, `RecoveryPhase`,
+`HostEpoch`, `HostRenewed`, `ChildLease` and `ChildObservationWatermark` are gone: the records state keeps
+only `records` and `epoch` (envelope version 44).
 
 The guard is an AST scan like `tests/architecture/test_epoch_ending_authority.py`. Unenforced: that every
 `StepRunner` implementation is in the contract suite's parametrization, and a new mechanism with a
@@ -1060,8 +1061,8 @@ Line counts are at the commit that last changed this page. The paths are under
 | `_recovery_owners.py`, `_recovery_unanswered.py` | 232, 85 | which area owns a resource a request reported; the four verdicts of an unanswered request. Imported by `_request_recovery.py`; `_recovery_unanswered.py` also by `_run_park.py` |
 | `_proofs.py` | 1,140 | the verdict algebra (`Proven`, `Missing`, `Mismatch`) that about 30 core modules use for request and observation correlation, and the release proofs |
 | `_attempt_retirement.py`, `_continuations.py`, `_settlement.py` | 1,941, 1,757, 505 | mostly the live path (attempt closure, wait-all suspension, assessment, settlement), with release-proof helpers |
-| `_inspection.py`, `_host_epochs.py`, `_ownership.py`, `_job_releases.py` | 217, 69, 150, 73 | correlation of inspection answers; the host epoch log; the cleanup fence before terminal publication; release proof of a closing attempt's jobs |
-| `_waits.py`, `_request_ledger.py`, `types/records.py` | 1,035, 1,081, 1,206 | live code, with the recovery-check waits, the inspected-target observation, `ChildLease`, `RecoveryPhase`, `RecoveryCheck`, `RecoveryBarrier`, `HostEpoch` and the five request kinds |
+| `_inspection.py`, `_ownership.py`, `_job_releases.py` | 217, 150, 73 | correlation of inspection answers; the cleanup fence before terminal publication; release proof of a closing attempt's jobs |
+| `_waits.py`, `_request_ledger.py`, `types/records.py` | 1,035, 1,081, 1,206 | live code, with the inspected-target observation and the five request kinds |
 
 Under `libs/vs-runtime/src/vs_runtime/`:
 

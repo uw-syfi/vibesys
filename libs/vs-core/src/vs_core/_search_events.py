@@ -156,9 +156,8 @@ def _ignored(core: CoreState, event: StrategyEvent) -> None:
 def _failed(core: CoreState, event: Failed) -> Event | Discarded:
     """A search hears only the failures of its own decisions.
 
-    One without a decision ended a request core made for itself (a recovery check, a
-    release, an inspection). Core owns those: the recovery barrier and the run status
-    already react to them, and the shell logs the discard.
+    One without a decision ended a request core made for itself (a release, an inspection).
+    Core owns those: the run status already reacts to them, and the shell logs the discard.
     """
     del core
     if event.decision is None:

@@ -12,7 +12,6 @@ from vibesys.hypothesis import RoundRecord
 from vibesys.metrics import AcceptedReading
 from vs_core.api import (
     ChargeReceipt,
-    ChildLease,
     EvidenceRef,
     InputDelivered,
     InputDropped,
@@ -40,6 +39,7 @@ from vs_runtime.api.core_values import to_proto
 
 from ._accepted import accepted_measurement
 from ._guidance import consolidate_guidance
+from ._legacy_child_lease import LegacyChildLease
 from ._rounds import lower_round
 from ._source import FactImportError, ImportSource, ensure_finite
 from ._stage import stage_measurement
@@ -202,7 +202,7 @@ class FactSet:
                 )
         elif isinstance(item, RegisteredOwnedJob):
             self._registered_job(source, path, item)
-        elif isinstance(item, ChildLease):
+        elif isinstance(item, LegacyChildLease):
             self._child(source, path, item)
         elif isinstance(item, RequestRecord) and item.dispatched_in is not None:
             self._request(source, path, item)
@@ -242,11 +242,8 @@ class FactSet:
             and identity.source_request in self._released_requests
         )
 
-    def _child(self, source: ImportSource, path: str, item: ChildLease) -> None:
-        released = item.watermark_history_complete and all(
-            mark.observation.released for mark in item.observation_watermarks
-        )
-        if released:
+    def _child(self, source: ImportSource, path: str, item: LegacyChildLease) -> None:
+        if item.released:
             self._released_children.add(item.resource_id.root)
         else:
             for request in item.source_requests:

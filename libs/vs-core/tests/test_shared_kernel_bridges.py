@@ -261,7 +261,7 @@ def test_acquisition_episode_reaches_prepared_requests() -> None:
         ),
     )
     assert result.requests[0].admission_id == decision.decision_id
-    assert result.state.records.recovery == state.records.recovery
+    assert result.state.records.epoch == state.records.epoch
 
 
 def test_queued_retirement_binds_exact_registration_generation() -> None:

@@ -1,7 +1,7 @@
 """Every wait names what will end it: a pure check over core state, no state change.
 
 Core waits in several places: a record in flight, a session acquiring, executing or
-closing, a recovery check, an owned job. Each one is ended by something that already exists:
+closing, an owned job. Each one is ended by something that already exists:
 a request the shell still holds, an event committed but not yet applied (the outbox), or a
 timer. A wait with none of these is an orphan: nothing will ever end it, so the run would sit
 until its deadline. ``orphan_waits`` reports it at the step that created it.
@@ -13,8 +13,6 @@ inferred from the ledger:
 - a session names its ensure, turn, inspection or close;
 - an acquiring turn names its session;
 - a yield or a draining interruption names the checkpoint request or turn inspection it needs;
-- a recovery check names its target, the inspections of it and its children, and the jobs
-  that settle those children;
 - a blocked record names the inspections, cancels and blocks sent about it
   (``RequestRecord.addressed_by``);
 - a prepared request waits on its own dispatch, and a retryably failed one on its retry time.
@@ -164,12 +162,6 @@ RESOLUTIONS: Mapping[WaitKind, Resolution] = MappingProxyType(
             "the second close ends unanswered too, or for an ambiguous ensure whose lease core "
             "does not know",
         ),
-        WaitKind.RECOVERY_CHECK: Resolution(
-            outcome=Outcome.FAILS_WITH_REASON,
-            reason="the check's inspection ends at its own limit; "
-            "at the target's limit the check ends blocked and recovery is BLOCKED with the "
-            "target named",
-        ),
         WaitKind.OWNED_JOB: Resolution(
             outcome=Outcome.WAITS_AGAIN,
             reason="a poll that ends without moving its job (blocked at its bound, or its answer "
@@ -278,18 +270,11 @@ def stalled_acquisitions(
 
 #: Which kinds of waiter may name which kinds of waiting entity (I1 of #2428). The graph is
 #: acyclic, so following named entities always ends at requests and timers, and a waiter only
-#: names an entity whose progress carries it: an acquiring turn names its session, and a
-#: recovery check names the owned jobs whose ledger settles the children its target left and,
-#: for an ensure, the session that has yet to learn whether it holds the ensured resource.
+#: names an entity whose progress carries it: an acquiring turn names its session.
 MAY_WAIT_ON: Mapping[WaitKind, frozenset[WaitKind]] = MappingProxyType(
     {
         WaitKind.TURN_ACQUISITION: frozenset({WaitKind.SESSION}),
-        WaitKind.RECOVERY_CHECK: frozenset({WaitKind.OWNED_JOB, WaitKind.SESSION}),
-        **{
-            kind: frozenset()
-            for kind in WaitKind
-            if kind not in (WaitKind.TURN_ACQUISITION, WaitKind.RECOVERY_CHECK)
-        },
+        **{kind: frozenset() for kind in WaitKind if kind is not WaitKind.TURN_ACQUISITION},
     }
 )
 
@@ -384,7 +369,7 @@ def _answered_in_this_epoch(records: RecordsState, request_id: RequestId) -> boo
     return (
         command is not None
         and not record_waits(command.phase)
-        and command.dispatched_in == records.recovery.epoch
+        and command.dispatched_in == records.epoch
     )
 
 
@@ -408,7 +393,7 @@ def _dispatched_by_dead_host(records: RecordsState, record: RequestRecord) -> bo
     return (
         record.phase != RequestPhase.PREPARED
         and record.dispatched_in is not None
-        and record.dispatched_in < records.recovery.epoch
+        and record.dispatched_in < records.epoch
     )
 
 

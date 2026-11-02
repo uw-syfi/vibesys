@@ -58,7 +58,7 @@ def publication_state(*, facts: bool = True) -> tuple[core.CoreState, core.Conti
             run=state.run,
             attempts=state.attempts,
             evaluation=core.EvaluationState(),
-            records=core.RecordsState(hosts=()),
+            records=core.RecordsState(),
         ),
         core.TurnRequested(
             until=core.Until(at=100.0), scope=predecessor.scope, turn=predecessor.turn
@@ -665,7 +665,7 @@ def test_initial_paid_cycle_prefix_requires_unique_current_run_admission(
             run=run,
             attempts=state.attempts,
             evaluation=core.EvaluationState(),
-            records=core.RecordsState(hosts=()),
+            records=core.RecordsState(),
         ),
         core.TurnRequested(
             until=core.Until(at=100.0), scope=predecessor.scope, turn=predecessor.turn

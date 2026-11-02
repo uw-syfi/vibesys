@@ -10,7 +10,6 @@ from pydantic import AwareDatetime, JsonValue, TypeAdapter
 
 from vs_core.api import (
     ChargeReceipt,
-    ChildLease,
     EvidenceRef,
     InputRecord,
     OperationSchemaRef,
@@ -23,6 +22,7 @@ from vs_core.api.values import ArtifactRef, RevisionRef, Sample
 
 from ._descriptors import descriptor
 from ._envelopes import validate_container
+from ._legacy_child_lease import LegacyChildLease
 from ._legacy_lower import lower_legacy_value
 from ._rounds import lower_round, read_round
 from ._source import FactImportError, decode
@@ -45,7 +45,7 @@ def _aware_datetime(value: object) -> bool:
 
 _TYPES: dict[str, TypeAdapter[Any]] = {
     "RequestRecord": TypeAdapter(RequestRecord),
-    "ChildLease": TypeAdapter(ChildLease),
+    "ChildLease": TypeAdapter(LegacyChildLease),
     "OwnedJob": TypeAdapter(OwnedJob),
     "RegisteredOwnedJob": TypeAdapter(RegisteredOwnedJob),
     "ArtifactRef": TypeAdapter(ArtifactRef),

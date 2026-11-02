@@ -131,7 +131,7 @@ def pre_cutover(draw: st.DrawFn) -> RuntimeRecord[FlowState]:
         else row
         for row in state.records.records
     )
-    recovery = state.records.recovery.model_copy(update={"epoch": draw(st.sampled_from([0, 1, 7]))})
+    epoch = draw(st.sampled_from([0, 1, 7]))
     limits = state.run.limits.model_copy(
         update={
             "request_retries": state.run.limits.request_retries.model_copy(
@@ -142,7 +142,7 @@ def pre_cutover(draw: st.DrawFn) -> RuntimeRecord[FlowState]:
     state = state.model_copy(
         update={
             "run": state.run.model_copy(update={"limits": limits}),
-            "records": state.records.model_copy(update={"records": rows, "recovery": recovery}),
+            "records": state.records.model_copy(update={"records": rows, "epoch": epoch}),
         }
     )
     envelope = saved.envelope.model_copy(update={"core": state})

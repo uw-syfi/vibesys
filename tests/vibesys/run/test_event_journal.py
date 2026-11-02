@@ -452,13 +452,7 @@ def test_closing_controls_target_the_published_epoch_after_startup_only_processe
     )
     core = initial_state()
     core = core.model_copy(
-        update={
-            "records": core.records.model_copy(
-                update={
-                    "recovery": core.records.recovery.model_copy(update={"epoch": epoch_count - 1})
-                }
-            )
-        }
+        update={"records": core.records.model_copy(update={"epoch": epoch_count - 1})}
     )
     for identity, epoch in [("old", epoch_count - 1), ("current", epoch_count)]:
         payload = json.dumps(

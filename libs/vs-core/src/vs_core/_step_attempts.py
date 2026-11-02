@@ -123,11 +123,8 @@ def epoch_opened(state: CoreState, epoch: int) -> CoreState:
     state = _with_attempts(state, tuple(rows))
     if origin:
         state = _earlier_version_settled(state)
-    recovery = state.records.recovery
-    counted = epoch if origin else max(recovery.epoch, epoch)
-    records = state.records.model_copy(
-        update={"recovery": recovery.model_copy(update={"epoch": counted})}
-    )
+    counted = epoch if origin else max(state.records.epoch, epoch)
+    records = state.records.model_copy(update={"epoch": counted})
     park = state.run.park
     if origin and park is not None:
         park = park.model_copy(update={"epoch": min(park.epoch, epoch - 1)})

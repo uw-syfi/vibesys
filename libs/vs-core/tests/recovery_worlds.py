@@ -177,12 +177,11 @@ def build(world: World) -> tuple[core.CoreState, core.OperationRegistry]:
         *_closes(state, world),
         *_retains(state, world),
     )
-    recovery = state.records.recovery.model_copy(update={"epoch": world.host_epoch})
     return (
         state.model_copy(
             update={
                 "records": state.records.model_copy(
-                    update={"records": records, "recovery": recovery}
+                    update={"records": records, "epoch": world.host_epoch}
                 )
             }
         ),

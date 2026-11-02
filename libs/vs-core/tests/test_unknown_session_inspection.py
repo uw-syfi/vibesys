@@ -160,9 +160,8 @@ def _ambiguous_ensure_in(epoch: int) -> core.Transition:
         core.TurnRequested(until=core.Until(at=100.0), scope=scope(), turn=spec),
     )
     records = prepared.state.records
-    recovery = records.recovery.model_copy(update={"epoch": epoch})
     state = prepared.state.model_copy(
-        update={"records": records.model_copy(update={"recovery": recovery})}
+        update={"records": records.model_copy(update={"epoch": epoch})}
     )
     observation = turn_observation(
         prepared.requests[0], terminal=True, status=core.ObservationStatus.UNKNOWN
