@@ -29,7 +29,7 @@ from typing import Literal
 
 from .types.common import LifecycleClass
 from .types.evaluation import CancelOwnedJob
-from .types.records import RequestPhase, RequestRecord
+from .types.records import RequestPhase, RequestRecord, phase_open
 from .types.settlement import AdoptRevision, VerifyAdoption
 
 type Settlement = Literal["resend", "unknown", "terminal", "blocked"]
@@ -59,7 +59,7 @@ def settlement(
     if record.phase == RequestPhase.BLOCKED:
         # Core ended it at its limit and its owner heard so: no executor fact can change that.
         return "terminal"
-    redo = resendable and record.phase in _OPEN
+    redo = resendable and phase_open(record.phase)
     if redo and isinstance(record.request, AdoptRevision | VerifyAdoption):
         # Restoring the root to the selected revision and then verifying it gives the same
         # result however far the dead host got, so the inspection was only a shortcut.
@@ -67,9 +67,6 @@ def settlement(
     if inspection is Inspection.UNREACHABLE:
         return "blocked"
     return _by_kind(record, redo=redo)
-
-
-_OPEN = (RequestPhase.PREPARED, RequestPhase.DISPATCHED, RequestPhase.RECONCILING)
 
 
 def _by_kind(record: RequestRecord, *, redo: bool) -> Settlement:

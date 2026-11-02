@@ -60,6 +60,7 @@ from .types.records import (
     CancelOwnedResource,
     InspectRequest,
     RequestPhase,
+    phase_open,
     reply_owed,
 )
 from .types.sessions import (
@@ -177,17 +178,6 @@ RESOLUTIONS: Mapping[WaitKind, Resolution] = MappingProxyType(
 """The outcome of every wait kind that has no live resolver. A new kind must declare one."""
 
 
-def record_waits(phase: RequestPhase) -> bool:
-    """Whether a record in this phase waits on the shell to execute or inspect its request."""
-    match phase:
-        case RequestPhase.PREPARED | RequestPhase.DISPATCHED | RequestPhase.RECONCILING:
-            return True
-        case RequestPhase.COMPLETED | RequestPhase.BLOCKED:
-            return False
-        case _:
-            assert_never(phase)
-
-
 def continuation_waits(phase: ContinuationPhase) -> bool:
     """Whether a continuation in this phase waits on a request rather than the strategy.
 
@@ -215,7 +205,7 @@ type WaitingPhase = RequestPhase | SessionPhase | ContinuationPhase
 def phase_waits(phase: WaitingPhase) -> bool:
     """Whether an entity in *phase* waits on a request, event or timer to end the phase."""
     if isinstance(phase, RequestPhase):
-        return record_waits(phase)
+        return phase_open(phase)
     if isinstance(phase, SessionPhase):
         return session_waits(phase)
     return continuation_waits(phase)
@@ -352,7 +342,7 @@ def _open(
     record = records.record(request_id)
     if record is None or request_id in seen:
         return False
-    waiting = record_waits(record.phase)
+    waiting = phase_open(record.phase)
     if waiting and not _dispatched_by_dead_host(records, record):
         return True
     if not waiting and not _reconciliation_command(record):
@@ -368,7 +358,7 @@ def _answered_in_this_epoch(records: RecordsState, request_id: RequestId) -> boo
     command = records.record(request_id)
     return (
         command is not None
-        and not record_waits(command.phase)
+        and not phase_open(command.phase)
         and command.dispatched_in == records.epoch
     )
 
@@ -404,7 +394,7 @@ def _reconciliation_command(record: RequestRecord) -> bool:
 def _request_open(core: CoreState, request_id: RequestId) -> bool:
     """Whether the ledger holds *request_id* still waiting on its executor, in any epoch."""
     record = core.records.record(request_id)
-    return record is not None and record_waits(record.phase)
+    return record is not None and phase_open(record.phase)
 
 
 def owned_job_subject(job: OwnedJob | RegisteredOwnedJob) -> WaitSubject:
@@ -546,7 +536,7 @@ def _request_ended(core: CoreState, request_id: RequestId) -> bool:
     A request the step has prepared but not yet recorded is not ended.
     """
     record = core.records.record(request_id)
-    return record is not None and not record_waits(record.phase)
+    return record is not None and not phase_open(record.phase)
 
 
 def unmet_waits(before: CoreState, after: CoreState) -> tuple[str, ...]:

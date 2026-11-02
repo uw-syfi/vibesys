@@ -180,6 +180,9 @@ DELETED_SYMBOLS: tuple[str, ...] = (
     "RecoveryPhase",
     # The wait's host-downtime credit, always 0 since the run clock excludes downtime (#3475 D11, version 45).
     "downtime_credit",
+    # The second and third definitions of open work: `phase_open` is the one (#3475 D7).
+    "record_waits",
+    "_OPEN_PHASES",
     # The envelope's fence, read by no code (#3475 D11, version 46); retained receipts keep their own model.
     "HostFence",
 )

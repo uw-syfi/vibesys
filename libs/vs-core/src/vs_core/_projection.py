@@ -14,7 +14,7 @@ from .types.records import (
     OperationView,
     RecordsState,
     Request,
-    RequestPhase,
+    phase_open,
 )
 from .types.scheduling import SchedulingState, SchedulingView
 from .types.sessions import SessionProjection
@@ -116,9 +116,7 @@ def settlement_view(state: SettlementState) -> tuple[Settlement, ...]:
 
 def pending_requests(state: RecordsState) -> tuple[Request, ...]:
     """The durable outbox; this does not authorize external dispatch."""
-    return tuple(
-        record.request for record in state.records if record.phase != RequestPhase.COMPLETED
-    )
+    return tuple(record.request for record in state.records if phase_open(record.phase))
 
 
 def project(state: CoreState) -> CoreView:

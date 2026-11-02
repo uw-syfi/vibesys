@@ -60,7 +60,7 @@ from .types.kernel import AreaChange
 from .types.records import (
     ExecuteRegisteredOperation,
     Outbound,
-    RequestPhase,
+    phase_open,
 )
 from .types.sessions import (
     Access,
@@ -437,10 +437,7 @@ def _turn_requested(
         return AreaChange(state=state)
     if isinstance(event, RegisteredTurnRequested):
         canonical = _record(context, event.request.request_id)
-        if canonical is not None and canonical.phase in (
-            RequestPhase.COMPLETED,
-            RequestPhase.BLOCKED,
-        ):
+        if canonical is not None and not phase_open(canonical.phase):
             raise ContractValidationError(
                 "registered_operation", "canonical turn record is already final"
             )
@@ -561,7 +558,7 @@ def _registered_dispatch(context: SessionsContext, invocation: Invocation) -> Re
     if (
         record is None
         or not isinstance(record.request, ExecuteRegisteredOperation)
-        or record.phase in (RequestPhase.COMPLETED, RequestPhase.BLOCKED)
+        or not phase_open(record.phase)
     ):
         raise ContractValidationError(
             "registered_operation", "missing unfinished canonical registered request"

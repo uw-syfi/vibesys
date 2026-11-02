@@ -22,8 +22,11 @@ from vs_core.api import (
     CoreState,
     DecisionId,
     DiscardWorkspace,
+    EventId,
     ItemId,
     LifecycleClass,
+    Observation,
+    ObservationStatus,
     RecordsState,
     RequestId,
     RequestPhase,
@@ -125,3 +128,24 @@ def test_core_holds_an_attempt_workspace_until_the_attempt_and_its_requests_end(
     assert holds.attempts == expected
     assert holds.workspace_ids() == WorkspaceHolds(final=False, attempts=expected).workspace_ids()
     assert len(holds.workspace_ids()) == len(expected)
+
+
+def test_a_blocked_record_that_named_nothing_holds_no_workspace() -> None:
+    """It owns nothing to release, so nothing of core's still references the attempt's workspace."""
+    attempt = _attempt("a0", 0)
+    record = _discard(0, attempt, RequestPhase.BLOCKED)
+    unnamed = record.model_copy(
+        update={
+            "observation": Observation(
+                event_id=EventId(root="e"),
+                request_id=record.request_id,
+                scope=record.request.scope,
+                sequence=0,
+                observed_at=1.0,
+                status=ObservationStatus.UNKNOWN,
+                terminal=False,
+            )
+        }
+    )
+    core = _state((), (unnamed,), RunStatus.RUNNING)
+    assert core_workspace_holds(core).attempts == frozenset()

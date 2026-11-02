@@ -39,7 +39,7 @@ from ._registry import ContractError
 from ._request_forward import turn_of
 from .types.common import ExecuteRegisteredOperation, ObservationStatus
 from .types.kernel import AreaChange
-from .types.records import RequestPhase, TurnHeld
+from .types.records import RequestPhase, TurnHeld, phase_open
 from .types.sessions import DispatchTurn, ResumeSessionTurn, TurnFailureKind
 
 if TYPE_CHECKING:
@@ -49,7 +49,6 @@ if TYPE_CHECKING:
 
 _HELD = (RequestPhase.DISPATCHED, RequestPhase.RECONCILING)
 """The phases of a dispatch record whose turn the gate can be holding."""
-_ENDED = (RequestPhase.BLOCKED, RequestPhase.COMPLETED)
 _NOT_RETURNED = (ObservationStatus.PENDING, ObservationStatus.CANCELLED)
 
 
@@ -129,7 +128,7 @@ def held_when_lost(records: RecordsState, invocation: Invocation) -> bool:
     held any more, whatever report of it is still on its way.
     """
     return any(
-        record.phase in _ENDED
+        not phase_open(record.phase)
         and record.capacity_hold is not None
         and record.capacity_hold.holding
         and _within_its_time(record, record.capacity_hold)

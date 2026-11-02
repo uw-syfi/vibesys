@@ -130,6 +130,7 @@ from .types.records import (
     RequestObserved,
     RequestPhase,
     inherit,
+    phase_open,
     within,
 )
 from .types.strategy import Measure
@@ -1350,7 +1351,7 @@ def _collecting(
     if collect is not None:
         return collect.request.request_id
     held = None if job.collecting is None else context.records.record(job.collecting)
-    return job.collecting if held is not None and _open(held) else None
+    return job.collecting if held is not None and phase_open(held.phase) else None
 
 
 def _queued_notice(
@@ -1553,7 +1554,7 @@ def _wait_lapsed(
         if _owner_request(job) != event.job or job.wait is None:
             return job
         ended = context.records.record(event.request_id)
-        if event.request_id not in job.wait.requests or ended is None or _open(ended):
+        if event.request_id not in job.wait.requests or ended is None or phase_open(ended.phase):
             return job
         if job.resource_id is not None:
             return job.model_copy(update=_backed_off(job, context))
@@ -1581,14 +1582,6 @@ def _wait_lapsed(
     # The collection of an ended job's evidence ended without reaching it: its run gave no
     # sample, and the comparisons it serves take the runs they still need.
     return after_run(change, context, event.job) if collected else change
-
-
-def _open(record: RequestRecord) -> bool:
-    return record.phase in (
-        RequestPhase.PREPARED,
-        RequestPhase.DISPATCHED,
-        RequestPhase.RECONCILING,
-    )
 
 
 def _history_unless_awaited(
