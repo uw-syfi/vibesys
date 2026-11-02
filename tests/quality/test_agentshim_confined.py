@@ -4,7 +4,10 @@
 ``vs_agent.api``. Ruff's ``TID251`` could say this, but its banned-API table is one table per
 config file: a per-library table for ``libs/vs-agent`` would replace the repository's table
 and drop its other bans, so the rule is checked here instead. The real end-to-end tier drives
-the real library and may name it too.
+the real library and may name it too, and so may the orchestrator sidecar
+(``orchestrator/sidecar``): a separate project with its own lock file that imports none of the
+repository's packages, so ``vs_agent.api`` is not reachable from it, and whose whole job is to
+drive one agent session through agentshim.
 
 Every Python file in the repository is scanned (hidden directories, ``node_modules`` and
 ``__pycache__`` aside), so scripts, packaging, resources, examples and the root
@@ -24,7 +27,7 @@ pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
 REPO = Path(__file__).resolve().parents[2]
 # Directories that hold no source of this repository's own.
 SKIPPED_DIRECTORIES = frozenset({"node_modules", "__pycache__"})
-ALLOWED_PREFIXES = ("libs/vs-agent/", "tests/e2e/")
+ALLOWED_PREFIXES = ("libs/vs-agent/", "tests/e2e/", "orchestrator/sidecar/")
 PACKAGE = "agentshim"
 
 
