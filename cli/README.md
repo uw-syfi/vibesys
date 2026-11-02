@@ -111,7 +111,7 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/changed/` | Pure helpers for the "what changed" facts a job records. |
 | `internal/clock/` | `Clock` and `Timers`, the only ways the daemon and the client read or wait on time. A test supplies its own and fires timers itself. |
 | `internal/owned/` | `Group`, the one way the daemon's packages start a goroutine: the group starts it and `Wait` joins it, so nothing outlives what started it. |
-| `internal/gitrepo/` | `Git`: the repository containing a directory, and a revision resolved to a full commit id. |
+| `internal/gitrepo/` | `Git`: a revision resolved to a full commit id, in the caller's checkout. `Resolver`: the repository a directory belongs to, through the common git directory, so every linked worktree of a repository resolves to one path. |
 | `internal/runtimedir/` | The per-user runtime directory (socket, locks, supervisor directories), its safety checks, and the advisory file locks. |
 | `internal/environment/fakeenv/` | A `Fake` `Environment`, a real implementation that runs scripted commands in memory. Tests only. |
 | `internal/environment/docker/` | The `docker` `Environment`: builds the task's Dockerfile into an image cached by content, runs a job's commands in one container over a clean checkout as the invoking user, and removes the container on every path. It decides over an `Engine`, the narrow interface to Docker. |
@@ -150,8 +150,10 @@ Dependencies point one way: `cmd` and the shell packages, then interfaces, then 
   types and the on-disk encoding are three separate models; none of them is another's
   representation. The adapters that serve the contract (`daemon`, `supervisor/rpc`,
   `supervisor/host`) import both, because they sit exactly on that boundary and call `wire` for each
-  conversion. `cmd/vibesys-cli` and `client` speak the generated messages only and never import
-  `core`.
+  conversion. `cmd/vibesys-cli` and `client` speak the generated messages and import `core` in no
+  product file, so they hold no domain rule: how a wait ended, a headline number and a store's
+  repository all come from the daemon. They still depend on `core` through `wire` and `gitrepo`,
+  which convert at the boundary.
 - `gen` imports nothing from this module.
 - `lifecycle` imports `core` only, so the machine stays pure. `app` imports no transport:
   `daemon` and `supervisor/rpc` are the shells around it, and neither imports the other's peer
@@ -185,7 +187,7 @@ default to the environment variables shown:
 
 | Flag | Environment | Meaning |
 | --- | --- | --- |
-| `--repo` | `VIBESYS_REPO` | The git repository. Defaults to the one containing the current directory. |
+| `--repo` | `VIBESYS_REPO` | A directory in the git repository. Defaults to the current directory. The daemon resolves it, so every linked worktree of a repository, and every directory in one, reaches the same stores. |
 | `--task` | `VIBESYS_TASK` | The task the jobs belong to. Required. |
 | `--run` | `VIBESYS_RUN` | The id of the optimization run. |
 | `--harness` | `VIBESYS_HARNESS` | The agent harness, such as `claude-code`. |
@@ -195,13 +197,13 @@ default to the environment variables shown:
 | --- | --- |
 | `submit check <commit> [flags]` | Queue the task's check. A pass already saved for the commit answers it without running. Also `--wait`, `--note`, `--no-cache`, `--plan` and `--env`. |
 | `submit measure <commit> [--samples n] [--recheck] [flags]` | Queue the task's benchmark for `n` samples (the task's default when omitted). Saved samples count: only the missing ones run. Flags as for `check`. |
-| `submit command <commit> [flags] -- <argv...>` | Queue a job and print its id. Returns at once; `--wait` blocks as `wait` does. Also `--note`, `--no-cache`, `--plan`, `--env`, `--timeout`, `--service` and `--probe`. A revision is resolved to a full commit id. |
-| `wait <job>... [--any] [--timeout d]` | Block until the jobs are final, or with `--any` until one is. |
+| `submit command <commit> [flags] -- <argv...>` | Queue a job and print its id. Returns at once; `--wait` blocks as `wait` does. Also `--note`, `--no-cache`, `--plan`, `--env`, `--timeout`, `--service` and `--probe`. A revision is resolved to a full commit id. `--service` and `--probe` are split into words as a shell would split them, with single quotes, double quotes and backslashes, and nothing else of a shell. |
+| `wait <job>... [--any] [--timeout d]` | Block until the jobs are final, or with `--any` until one is. The daemon decides how the wait ended and keeps the timeout. |
 | `cancel <job> [--reason text]` | Stop a job and print it once it is final. Cancelling a final job prints it unchanged. |
 | `note <job> <text>` | Add a note to a job in any state. |
 | `jobs [--commit rev] [--state s] [--note-contains text]` | List the task's jobs, oldest first. |
 | `logs <job> [--follow]` | Print a job's output, and with `--follow` keep printing until it ends. |
-| `show <commit>` | Every result saved for a commit, checks and measurements, oldest first. |
+| `show <commit>` | Every result saved for a commit, checks and measurements, oldest first. A measurement's `value` is its headline number, the mean of its samples that `compare` uses, computed by the daemon. |
 | `compare <commit> [--against rev]` | `better`, `worse`, `within_noise` or `inconclusive`, against the result branch head unless `--against` names a commit. Refuses to mix environments. |
 | `promote <commit>` | Fast-forward the result branch to a commit that is `better` than its head, or print every reason it was refused. A refusal exits `1` and is printed on stdout. |
 | `result` | The head and a final number measured after the head last moved, or why there is none (exit `1`). |
@@ -211,8 +213,8 @@ default to the environment variables shown:
 | `plan edit <n> [--title t] [--body text \| --body-file path] [--status s]` | Change what is given and keep the rest. |
 | `plan comment <n> --body text \| --body-file path` | Add a comment, which carries a decision or a result. |
 | `plan close <n> --status s [--comment text \| --comment-file path]` | Set a status other than `open` and add a comment, as one change. |
-| `daemon status\|stop\|restart` | Report on, stop, or restart the daemon. `daemon install` is not available yet. |
-| `daemon forget <repository>` | Give up a repository that is gone for good, such as a removed worktree: its commands are ended, then its jobs leave the daemon, what is left of their supervisors is let go of, and its stores leave the index. A command that does not end when told is reported left, and the next job waits while it can run, up to its time limit. Nothing is touched where the repository was. A repository that is there, one whose directory cannot be read (a disk that is not mounted or does not answer), or one the daemon does not know, is refused: only a repository whose directory is not there is gone. |
+| `daemon status\|stop\|restart` | Report on, stop, or restart the daemon. `daemon status` with no daemon prints `not running` (with `--json`, an `UNAVAILABLE` `Failure`) and exits `4`. `daemon install` is not available yet (exit `2`). |
+| `daemon forget <repository>` | Give up a repository that is gone for good, such as a store an older daemon made inside a removed linked worktree: its commands are ended, then its jobs leave the daemon, what is left of their supervisors is let go of, and its stores leave the index. A command that does not end when told is reported left, and the next job waits while it can run, up to its time limit. Nothing is touched where the repository was. A repository that is there, one whose directory cannot be read (a disk that is not mounted or does not answer), or one the daemon does not know, is refused: only a repository whose directory is not there is gone. |
 
 Plans belong to a task, are numbered 1, 2, ... by the daemon and never renumbered, and take one of
 five statuses: `open`, `chosen`, `won`, `parked` and `rejected`. The CLI orders none of them, so an
@@ -222,24 +224,40 @@ does not show their verdicts, so run `compare` on a linked job's commit for one.
 the first job. The other plan commands refuse a task with no store with a "no store" error, and
 `plan list` prints nothing for it.
 
-Exit codes: `0` ok (for `wait`, every job it waited on succeeded), `1` failed (a job did not
-succeed, or the call was refused), `2` invalid input or a job that does not exist, `3` a `wait`
-timed out, `4` a `wait` gave up without learning how its jobs ended, which says nothing about them:
-they may still succeed. A `wait` whose connection to the daemon breaks connects again, within its
-`--timeout` if it has one and for about a minute since it last heard anything if not.
+Every command ends with one of five exit codes, and which one is a function of one answer: the
+command's own yes or no, how a `wait` ended (a `WaitOutcomeKind`), or the kind of a `Failure`.
+
+| Code | Meaning | Endings |
+| --- | --- | --- |
+| 0 | yes | success; `ALL_SUCCEEDED`, `FIRST_SUCCEEDED` |
+| 1 | the answer is no | `SOME_FAILED`, `FIRST_FAILED`; a refused promote; no current result; `CONFLICT`, `ENVIRONMENT_MISMATCH`, `NOT_MEASURED` |
+| 2 | invalid input | usage errors; `INVALID_INPUT`, `NOT_FOUND` |
+| 3 | timed out | `TIMED_OUT` |
+| 4 | no answer | `UNAVAILABLE`, `INCOMPATIBLE`, `INTERNAL`, `UNSPECIFIED`; a kind or outcome this build does not know; a wait that could not learn how its jobs ended; no daemon for `daemon status` |
+
+Exit `4` says nothing about the jobs: they may still succeed. A value from a newer daemon that this
+build cannot read is `4`, never `0`. `TestTheReadmeExitTableIsTheCode` holds this table to the code.
+
+The daemon decides how a `wait` ended, and the command prints what it sent. A `wait` with a
+`--timeout` asks the daemon for it, and the daemon answers `TIMED_OUT` when it passes; no job is
+cancelled. A `wait` whose connection to the daemon breaks connects again and asks for what is left
+of its timeout. It tries within that time if it has a timeout, and for about a minute since it
+last heard anything if not. A timeout that passes while no daemon answers is exit `4`, not `3`,
+because no daemon said the jobs were not done.
 
 With `--json`, a command prints the contract's messages in protobuf's canonical JSON form with the
-original field names, one compact message per line: the response for `submit`, `cancel`, `note`,
-`jobs`, `logs`, `show`, `compare`, `promote`, `result`, `daemon status` and the `plan`
-subcommands; one `WatchResponse` per job for `wait` (the contract has no message for it); and, on
-stderr, a `Failure` for an error that a command reports: a refusal from
-the daemon, a missing argument, a job that does not exist, a `wait` that gave up (exit `4`).
+original field names, one compact message per line. That is the response for `submit`, `cancel`,
+`note`, `jobs`, `logs`, `show`, `compare`, `promote`, `result`, `daemon status` and the `plan`
+subcommands. For `wait` and `submit --wait`, it is the daemon's `WaitOutcome`: its `kind`, the job
+that decided it in `decided_by`, and every job's last state. An error that a command reports is a
+`Failure` on stderr: a refusal from the daemon, a missing argument, a job that does not exist, or a
+`wait` that gave up. The `Failure` the daemon sent is printed as it was sent, a kind this build does
+not know included.
 
 Some errors are plain text on stderr even with `--json`, because they come before the command has
-read its flags or are not errors of a call: a flag that does not parse (exit `2`, printed by Go's
-`flag` package), an unknown command or none (the usage text, exit `2`), and the note that a `wait`
-timed out (exit `3`; the jobs still print as `WatchResponse`s on stdout). A caller reads the exit
-code first and parses stderr as a `Failure` only for `1`, `2` and `4`, and only when it parses.
+read its flags: a flag that does not parse (exit `2`, printed by Go's `flag` package), and an
+unknown command or none (the usage text, exit `2`). A caller reads the exit code first, and parses
+stderr as a `Failure` only for `1`, `2` and `4`, and only when it parses.
 
 Text output rounds numbers to four significant digits. `--json` and the verdicts behind it carry
 the exact values.

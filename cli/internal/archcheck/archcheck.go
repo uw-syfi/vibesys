@@ -180,7 +180,7 @@ var testRules = map[string][]string{
 	// The whole daemon, over Fakes, in one process.
 	"internal/sim": {
 		"gen/", "internal/app", "internal/app/memstores", "internal/client", "internal/clock", "internal/core",
-		"internal/daemon", "internal/environment/fakeenv", "internal/lifecycle", "internal/owned",
+		"internal/daemon", "internal/environment/fakeenv", "internal/gitrepo", "internal/lifecycle", "internal/owned",
 		"internal/runtimedir", "internal/store", "internal/supervisor",
 	},
 	"cmd/vibesys-cli": {
