@@ -92,6 +92,9 @@ type interpreter struct {
 	dir string
 	// files is where the `emit` step writes; nil when the machine has no such files.
 	files Files
+	// ended is how a wait that its group ended reports, when it is not the default cancelled: a
+	// machine whose processes die with it cannot say how they ended.
+	ended core.ExecKind
 }
 
 // splitOutput separates the output file a command is told about from the rest of its script: a
@@ -129,7 +132,13 @@ func (in *interpreter) run(g *group, steps []step, out io.Writer, file string) (
 				return core.ExecOutcome{Kind: core.ExecUnknown}, err
 			}
 		case "hold":
-			if len(w) != 2 || !in.gates.Wait(g.ctx, w[1]) {
+			if len(w) != 2 {
+				return exited(127)
+			}
+			if !in.gates.Wait(g.ctx, w[1]) {
+				if in.ended != "" {
+					return core.ExecOutcome{Kind: in.ended}, nil
+				}
 				return core.ExecOutcome{Kind: core.ExecCancelled}, nil
 			}
 		case "mark", "alive", "unless-flag":
