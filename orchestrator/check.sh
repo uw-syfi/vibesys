@@ -11,6 +11,7 @@ fi
 
 go vet ./...
 
-# The core is pure and single-threaded and nothing here starts a goroutine yet, so there is no race
-# run. The first concurrent package adds one, as cli/check.sh does.
+# The core is pure and single-threaded, so only the store, which serves readers beside its writer,
+# runs under the race detector.
 go test -count=1 -timeout 180s ./...
+go test -race -count=1 -timeout 180s ./internal/store/...

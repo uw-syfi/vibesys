@@ -46,6 +46,8 @@ var rules = map[string][]string{
 var testRules = map[string][]string{
 	"internal/core": {"internal/jobs/jobstest", "internal/wire", "gen/"},
 	"internal/wire": {"internal/core"},
+	// The store's tests run the contract suite, which depends on the store.
+	"internal/store": {"internal/store/storetest"},
 }
 
 // pureImports is the standard library the core may use. Nothing here reaches a clock, a file, the

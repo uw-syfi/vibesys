@@ -10,6 +10,8 @@ import (
 	"reflect"
 	"slices"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -70,6 +72,7 @@ func Contract(t *testing.T, newHarness func(t *testing.T) *Harness) {
 	t.Run("EffectsNeedEvents", func(t *testing.T) { effectsNeedEvents(t, newHarness(t)) })
 	t.Run("RefusedCommitLeavesNothing", func(t *testing.T) { refusedCommit(t, newHarness(t)) })
 	t.Run("PagesHonorTheirCaps", func(t *testing.T) { pageCaps(t, newHarness(t)) })
+	t.Run("ReadersAndClaimersRunBesideTheWriter", func(t *testing.T) { concurrent(t, newHarness(t)) })
 	t.Run("SnapshotBoundsFinishedRuns", func(t *testing.T) { snapshotBound(t, newHarness(t)) })
 	t.Run("TimersWaitForTheirTime", func(t *testing.T) { timers(t, newHarness(t)) })
 	t.Run("WorkloadMatchesModel", func(t *testing.T) {
@@ -568,5 +571,107 @@ func snapshotBound(t *testing.T, h *Harness) {
 	}
 	if listed["run-001"] {
 		t.Error("run-001 changed longest ago and must be left out")
+	}
+}
+
+// concurrent runs readers and an outbox claimer beside one writer. What each sees must hold whatever
+// the interleaving: the log read in order has no gap, a snapshot is never behind what was read
+// before it, and every effect is claimed exactly once. Readers stop when the writer is done, so the
+// run has no timing in it, and a hang would be the test's timeout.
+func concurrent(t *testing.T, h *Harness) {
+	w := NewWorkload(11)
+	var done atomic.Bool
+	var wg sync.WaitGroup
+	problems := make(chan string, 16)
+	complain := func(format string, args ...any) {
+		select {
+		case problems <- fmt.Sprintf(format, args...):
+		default:
+		}
+	}
+	s := h.Store
+	for r := 0; r < 3; r++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var cursor, seen uint64
+			for !done.Load() {
+				recs, err := s.EventsAfter("", cursor, 40)
+				if err != nil {
+					complain("events: %v", err)
+					return
+				}
+				for _, rec := range recs {
+					if rec.Sequence != cursor+1 {
+						complain("read event %d after %d", rec.Sequence, cursor)
+						return
+					}
+					cursor = rec.Sequence
+				}
+				snap, err := s.Snapshot()
+				if err != nil || snap.Sequence < cursor || snap.Sequence < seen {
+					complain("snapshot at %d after reading %d and seeing %d (%v)", snap.Sequence, cursor, seen, err)
+					return
+				}
+				seen = snap.Sequence
+				for _, a := range snap.Agents {
+					if _, err := s.Items(a.ID, 0, 3); err != nil {
+						complain("items: %v", err)
+						return
+					}
+				}
+			}
+		}()
+	}
+	claimed := map[core.EffectID]int{}
+	var mu sync.Mutex
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		// A store that hands out an effect twice would never run dry, so the loop is bounded by
+		// what could ever be claimed: far more than one writer commits.
+		for rounds := 0; rounds < 100000; rounds++ {
+			finished := done.Load()
+			got, err := s.Claim(farFuture, 10)
+			if err != nil {
+				complain("claim: %v", err)
+				return
+			}
+			var ids []store.OutboxID
+			mu.Lock()
+			for _, c := range got {
+				claimed[c.Effect.ID()]++
+				ids = append(ids, c.ID)
+			}
+			mu.Unlock()
+			if err := s.Complete(ids...); err != nil {
+				complain("complete: %v", err)
+				return
+			}
+			if finished && len(got) == 0 {
+				return
+			}
+		}
+	}()
+	total := map[core.EffectID]int{}
+	for range 150 {
+		r := w.Next()
+		if _, err := s.Commit(r); err != nil {
+			t.Fatalf("commit: %v", err)
+		}
+		for _, e := range r.Effects {
+			total[e.ID()]++
+		}
+	}
+	done.Store(true)
+	wg.Wait()
+	close(problems)
+	for p := range problems {
+		t.Error(p)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !reflect.DeepEqual(claimed, total) {
+		t.Errorf("effects claimed %d distinct, committed %d distinct: each must be claimed exactly as often as it was committed", len(claimed), len(total))
 	}
 }
