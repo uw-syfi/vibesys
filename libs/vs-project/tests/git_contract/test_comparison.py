@@ -154,7 +154,7 @@ def test_a_staged_rename_stays_listed_when_its_origin_is_recreated(
     assert sandbox.repo.uncommitted_paths(["."]) == ("a.txt", "b.txt")
 
 
-def test_paths_Git_would_quote_are_listed_as_written(sandbox: ContractProject) -> None:
+def test_paths_git_would_quote_are_listed_as_written(sandbox: ContractProject) -> None:
     names = ("sp ace.txt", 'quo"te.txt', "caf\u00e9.txt")
     base = sandbox.start({"a.txt": "1\n"})
     for name in names:
