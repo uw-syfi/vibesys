@@ -153,7 +153,7 @@ func (m Environments) Environment(kind core.EnvironmentKind, target environment.
 // Run implements environment.Environment by running the command as a script, and its service as
 // another. Every process of a script is a goroutine of a group, and the group ends on every path
 // as the contract requires; Run returns when they all have.
-func (e *Environment) Run(ctx context.Context, x core.Execution, out io.Writer) (core.ExecOutcome, error) {
+func (e *Environment) Run(ctx context.Context, x core.Execution, out io.Writer) core.Attempt {
 	e.mu.Lock()
 	e.runs = append(e.runs, x)
 	e.active++
@@ -165,10 +165,10 @@ func (e *Environment) Run(ctx context.Context, x core.Execution, out io.Writer) 
 	}()
 
 	if err := environment.Validate(x); err != nil {
-		return core.ExecOutcome{}, err
+		return core.NotStarted{Failure: core.AsFailure(err)}
 	}
 	if ctx.Err() != nil {
-		return core.ExecOutcome{Kind: core.ExecCancelled}, nil
+		return core.Ended{Exec: core.ExecOutcome{Kind: core.ExecCancelled}}
 	}
 	if out == nil {
 		out = io.Discard
@@ -179,12 +179,13 @@ func (e *Environment) Run(ctx context.Context, x core.Execution, out io.Writer) 
 	// Several processes of the script write to out at once.
 	l := &launcher{in: &interpreter{gates: e.gates, dir: x.Checkout.Dir, files: e.files}, wg: &wg}
 	out = &syncWriter{w: out}
-	defer l.end()
-	return environment.Execute(x, l, environment.Events{
+	attempt := environment.Execute(x, l, environment.Events{
 		Limit:     limit,
 		Cancelled: ctx.Done(),
 		Pause:     func() (<-chan struct{}, func()) { return e.timers.Timeout(ctx, e.pause) },
 	}, out)
+	l.end()
+	return environment.Finish(ctx, attempt, nil)
 }
 
 // syncWriter serializes the writes of the several processes of one run.

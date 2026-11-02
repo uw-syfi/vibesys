@@ -153,7 +153,7 @@ func (d *Daemon) Plant(name string, labels docker.Labels, running bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	spec := docker.ContainerSpec{Name: name, Labels: maps.Clone(labels), Dir: "/"}
-	d.boxes[name] = &box{spec: spec, machine: fakeenv.NewMachine(d.gates, "/"), running: running}
+	d.boxes[name] = &box{spec: spec, machine: fakeenv.NewMachine(d.gates, "/", errMachineGone), running: running}
 }
 
 func (d *Daemon) fault(c Call) *Fault {
@@ -358,7 +358,7 @@ func (c *Client) Start(ctx context.Context, spec docker.ContainerSpec) (docker.C
 		}
 		return nil, &core.Failure{Kind: core.FailureNotFound, Message: fmt.Sprintf("docker: no such image: %s", spec.Image)}
 	}
-	b := &box{spec: spec, machine: fakeenv.NewMachine(c.d.gates, spec.Dir), running: true, owner: c}
+	b := &box{spec: spec, machine: fakeenv.NewMachine(c.d.gates, spec.Dir, errMachineGone), running: true, owner: c}
 	b.spec.Labels = maps.Clone(spec.Labels)
 	c.d.boxes[spec.Name] = b
 	c.d.mu.Unlock()
@@ -415,13 +415,16 @@ func (h *handle) Close() {
 	h.c.d.stop(h.b)
 }
 
+// errMachineGone is how a command ends whose container stopped under it.
+var errMachineGone = fmt.Errorf("%w: its container stopped", docker.ErrLost)
+
 // lostProcess is the process of a container the engine could not find: it has already ended, and
 // the engine cannot say how.
 type lostProcess struct{ exited chan environment.Exit }
 
 func newLostProcess() *lostProcess {
 	p := &lostProcess{exited: make(chan environment.Exit, 1)}
-	p.exited <- environment.Exit{Kind: core.ExecUnknown}
+	p.exited <- docker.Lost("the container is not there")
 	return p
 }
 

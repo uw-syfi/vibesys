@@ -83,10 +83,36 @@ func (f *FileStores) drop(scope app.Scope, seen *filestore.Store) {
 	}
 }
 
+// GivenUp implements app.Stores.
+func (f *FileStores) GivenUp(ctx context.Context, scope app.Scope) ([]core.JobID, error) {
+	s, err := f.get(ctx, scope, false)
+	if err != nil {
+		return nil, err
+	}
+	return s.GivenUp(), nil
+}
+
+// Reclaim implements app.Stores.
+func (f *FileStores) Reclaim(ctx context.Context, scope app.Scope, job core.JobID) error {
+	s, err := f.get(ctx, scope, false)
+	if err != nil {
+		return err
+	}
+	return s.Reclaim(job)
+}
+
 // Find implements app.Stores. A store is opened once and then shared, since opening it makes this
 // process its one owner. A store on disk that the index lost is taken up again.
 func (f *FileStores) Find(ctx context.Context, scope app.Scope) (store.Store, error) {
-	return f.get(ctx, scope, false)
+	return asStore(f.get(ctx, scope, false))
+}
+
+// asStore keeps a failed open from being a store.Store that holds a nil pointer.
+func asStore(s *filestore.Store, err error) (store.Store, error) {
+	if err != nil {
+		return nil, err
+	}
+	return s, nil
 }
 
 // Create implements app.Stores.
@@ -95,10 +121,10 @@ func (f *FileStores) Find(ctx context.Context, scope app.Scope) (store.Store, er
 // jobs and no entry, which loses nothing, and the next call records it. So a store the index has
 // was made: if it is missing, its disk is away, and it is not made again over the mount point.
 func (f *FileStores) Create(ctx context.Context, scope app.Scope) (store.Store, error) {
-	return f.get(ctx, scope, true)
+	return asStore(f.get(ctx, scope, true))
 }
 
-func (f *FileStores) get(ctx context.Context, scope app.Scope, create bool) (store.Store, error) {
+func (f *FileStores) get(ctx context.Context, scope app.Scope, create bool) (*filestore.Store, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

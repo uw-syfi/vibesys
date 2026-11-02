@@ -65,7 +65,7 @@ func newRun(ctx context.Context, e *Environment, x core.Execution, out io.Writer
 }
 
 // execute decides how the run ends: environment.Execute does, over the processes this run starts.
-func (r *run) execute() (core.ExecOutcome, error) {
+func (r *run) execute() core.Attempt {
 	return environment.Execute(r.x, r, environment.Events{
 		Limit:     r.limit,
 		Cancelled: r.ctx.Done(),

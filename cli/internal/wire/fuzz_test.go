@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/protobuf/proto"
@@ -220,21 +221,29 @@ func FuzzDecodePlanFilter(f *testing.F) {
 }
 
 // A supervisor's outcome and a peer's failure decode with no error to return, so what they must
-// hold is that they never panic and that an outcome that says nothing is never a success.
+// hold is that they never panic and that an outcome that does not say the job succeeded is never
+// a success: only a check or a measure job's pass with its result, and a command job's command
+// that was seen to exit 0, are.
 func FuzzDecodeOutcome(f *testing.F) {
+	exited := &cliv1.ExecutionOutcome{Kind: cliv1.ExecutionKind_EXECUTION_KIND_EXITED}
 	seedMessages(f,
 		&cliv1.SupervisorOutcome{},
-		&cliv1.SupervisorOutcome{Result: &cliv1.SupervisorOutcome_Executed{Executed: &cliv1.ExecutionOutcome{Kind: cliv1.ExecutionKind_EXECUTION_KIND_EXITED}}},
+		&cliv1.SupervisorOutcome{Result: &cliv1.SupervisorOutcome_Executed{Executed: exited}},
 		&cliv1.SupervisorOutcome{Result: &cliv1.SupervisorOutcome_NotAttempted{NotAttempted: &cliv1.Failure{Message: "no image"}}},
-		&cliv1.SupervisorOutcome{Result: &cliv1.SupervisorOutcome_Executed{}},
-		&cliv1.SupervisorOutcome{Result: &cliv1.SupervisorOutcome_NotAttempted{}},
+		&cliv1.SupervisorOutcome{Result: &cliv1.SupervisorOutcome_Command{Command: &cliv1.CommandEnd{Attempt: &cliv1.CommandEnd_Ended{Ended: exited}}}},
+		&cliv1.SupervisorOutcome{Result: &cliv1.SupervisorOutcome_Command{Command: &cliv1.CommandEnd{Attempt: &cliv1.CommandEnd_Unobserved{}}}},
+		&cliv1.SupervisorOutcome{Result: &cliv1.SupervisorOutcome_Command{Command: &cliv1.CommandEnd{}}},
+		&cliv1.SupervisorOutcome{Result: &cliv1.SupervisorOutcome_Flow{Flow: &cliv1.FlowEnd{Verdict: &cliv1.FlowEnd_Stopped{Stopped: exited}}}},
+		&cliv1.SupervisorOutcome{Result: &cliv1.SupervisorOutcome_Flow{Flow: &cliv1.FlowEnd{Verdict: &cliv1.FlowEnd_Passed{}}}},
+		&cliv1.SupervisorOutcome{Result: &cliv1.SupervisorOutcome_Flow{Flow: &cliv1.FlowEnd{}}},
 	)
 	f.Fuzz(func(t *testing.T, data []byte) {
 		message := &cliv1.SupervisorOutcome{}
 		decode(t, data, message)
 		first := wire.ToOutcome(message)
-		if ran, ok := first.End.(lifecycle.Ran); message.GetResult() == nil && (!ok || ran.Exec.Kind != core.ExecUnknown) {
-			t.Fatalf("an outcome with no result decoded as %+v, want unknown", first)
+		settled := lifecycle.Settle("j1", core.JobRunning, first, time.Unix(1, 0))
+		if settled.Transition.To == core.JobSucceeded && !saysSucceeded(message) {
+			t.Fatalf("%v settled as a success", message)
 		}
 		if again := wire.ToOutcome(wire.Outcome(first)); !reflect.DeepEqual(again, first) {
 			t.Fatalf("a decoded outcome changed when encoded and decoded again:\n got %+v\nwant %+v", again, first)
@@ -270,4 +279,17 @@ func FuzzFailureFromStatus(f *testing.F) {
 			t.Fatalf("a status read as the failure kind %q, which is not one of the kinds", failure.Kind)
 		}
 	})
+}
+
+// saysSucceeded is whether the message says, in the members that are sent, that the job
+// succeeded.
+func saysSucceeded(m *cliv1.SupervisorOutcome) bool {
+	switch r := m.GetResult().(type) {
+	case *cliv1.SupervisorOutcome_Command:
+		e := r.Command.GetEnded()
+		return e != nil && e.GetKind() == cliv1.ExecutionKind_EXECUTION_KIND_EXITED && e.GetExitCode() == 0
+	case *cliv1.SupervisorOutcome_Flow:
+		return r.Flow.GetPassed() != nil
+	}
+	return false
 }

@@ -73,6 +73,18 @@ func (m *Stores) Forget(_ context.Context, scope app.Scope) error {
 	return nil
 }
 
+// GivenUp implements app.Stores. Memory has no owner record to remove, so it gives up nothing.
+func (m *Stores) GivenUp(ctx context.Context, scope app.Scope) ([]core.JobID, error) {
+	_, err := m.Find(ctx, scope)
+	return nil, err
+}
+
+// Reclaim implements app.Stores. Nothing is given up, so nothing is taken back.
+func (m *Stores) Reclaim(ctx context.Context, scope app.Scope, _ core.JobID) error {
+	_, err := m.Find(ctx, scope)
+	return err
+}
+
 // Close implements app.Stores. Memory has nothing to give up.
 func (m *Stores) Close() error { return nil }
 

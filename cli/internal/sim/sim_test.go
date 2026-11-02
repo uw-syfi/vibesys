@@ -45,7 +45,8 @@ type profile struct {
 	lost bool
 	// lostHangs says the lost repository does not fail its calls but never answers them.
 	lostHangs bool
-	// forget says the lost repository is given up with `daemon forget` when the world heals.
+	// forget says the lost repository is given up with `daemon forget`, while the world is in
+	// chaos or when it heals.
 	forget bool
 }
 
@@ -251,9 +252,9 @@ func (w *world) wait(l located) {
 // ends in the world's own check and not in a loop no time passes in.
 const forgetAttempts = 20
 
-// forget gives up a repository that is gone, as an operator would: again until it is done, as a
-// daemon may die under the call or a store may not answer in time. It must not be refused, as the
-// repository is gone. A repository already forgotten is not known.
+// forget gives up a repository that is gone, as an operator would when the world heals: again until
+// it is done, as a daemon may die under the call or a store may not answer in time. It must not be
+// refused, as the repository is gone. A repository already forgotten is not known.
 func (w *world) forget(repo string) {
 	w.mu.Lock()
 	w.forgetting = true
@@ -263,22 +264,88 @@ func (w *world) forget(repo string) {
 			if ctx.Err() != nil {
 				break
 			}
-			c, err := client.Connect(ctx, w.options())
-			if err != nil {
-				continue
-			}
-			_, err = c.ForgetRepository(ctx, repo)
-			c.Close()
-			var f *core.Failure
-			switch {
-			case err == nil, errors.As(err, &f) && f.Kind == core.FailureNotFound:
-				return ""
-			case f != nil && f.Kind == core.FailureConflict:
-				return fmt.Sprintf("forgetting %s was refused: %v", repo, err)
+			if done, violation := w.tryForget(ctx, repo); done || violation != "" {
+				return violation
 			}
 		}
 		return ""
 	})
+}
+
+// forgetOnce is one try at giving up the lost repository while the world is in chaos: its command
+// may still run, and the other repository's work waits. Another try is offered until one is done.
+func (w *world) forgetOnce(repo string) {
+	w.mu.Lock()
+	w.forgetting, w.trying = true, true
+	w.mu.Unlock()
+	w.start("forget", func(ctx context.Context) string {
+		defer func() {
+			w.mu.Lock()
+			w.trying = false
+			w.mu.Unlock()
+		}()
+		_, violation := w.tryForget(ctx, repo)
+		return violation
+	})
+}
+
+// mayForget says a try at giving up the lost repository can start: none is in flight or went
+// through.
+func (w *world) mayForget() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.lost != "" && !w.forgot && !w.trying
+}
+
+// tryForget asks a daemon to give up the repository once, and says whether that is done, or what
+// it did wrong.
+func (w *world) tryForget(ctx context.Context, repo string) (bool, string) {
+	c, err := client.Connect(ctx, w.options())
+	if err != nil {
+		return false, ""
+	}
+	_, err = c.ForgetRepository(ctx, repo)
+	c.Close()
+	var f *core.Failure
+	switch {
+	case err == nil, errors.As(err, &f) && f.Kind == core.FailureNotFound:
+		w.mu.Lock()
+		w.forgot = true
+		w.mu.Unlock()
+		return true, ""
+	case f != nil && f.Kind == core.FailureConflict:
+		return false, fmt.Sprintf("forgetting %s was refused: %v", repo, err)
+	}
+	return false, ""
+}
+
+// forgetAway forgets a repository whose disk does not answer, as an operator who took it for gone
+// would. The daemon cannot tell it is gone, so it must refuse: the repository may be whole, with
+// jobs that run.
+func (w *world) forgetAway(repo string) {
+	w.start("forget-away", func(ctx context.Context) string {
+		c, err := client.Connect(ctx, w.options())
+		if err != nil {
+			return ""
+		}
+		defer c.Close()
+		if _, err := c.ForgetRepository(ctx, repo); err == nil {
+			return fmt.Sprintf("forgot %s, which was only away", repo)
+		}
+		return ""
+	})
+}
+
+// awayNow is a repository that is away now and not lost, if there is one.
+func (w *world) awayNow() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, s := range scopes {
+		if w.absent[s.Repository] && s.Repository != w.lost {
+			return s.Repository
+		}
+	}
+	return ""
 }
 
 // finalWait is what the check after the chaos runs: every job, through a client, to its end.
@@ -332,6 +399,13 @@ func (w *world) actions() []option {
 				w.killed[r] = true
 			}
 		})
+		add("the place of "+r.String()+" is gone for good", func() {
+			if w.survivors.Vanish(r) {
+				w.mu.Lock()
+				w.killed[r], w.vanished[r] = true, true
+				w.mu.Unlock()
+			}
+		})
 	}
 	if p.outage && outages {
 		add("flip the stores", func() { w.down = !w.down })
@@ -352,6 +426,9 @@ func (w *world) actions() []option {
 				w.absent[s.Repository] = true
 			}
 		})
+		if away := w.awayNow(); !p.lost && away != "" {
+			add("forget "+away+", which is only away", func() { w.forgetAway(away) })
+		}
 		add("every repository comes back", func() {
 			w.mu.Lock()
 			defer w.mu.Unlock()
@@ -374,6 +451,11 @@ func (w *world) actions() []option {
 				}
 			})
 		}
+	}
+	if p.forget && w.mayForget() {
+		// Given up while its command may still run and the other repository's work waits: the
+		// command ends before that work starts, or holds the machine while it can run.
+		add("forget "+w.lost, func() { w.forgetOnce(w.lost) })
 	}
 	if p.sever {
 		for _, ref := range follows {
@@ -431,7 +513,40 @@ func (w *world) moves(heal bool) []option {
 	if at, ok := w.timers.next(); ok && (!heal || len(out) == 0) && (!w.profile.lost || calls == 0) {
 		out = append(out, option{fmt.Sprintf("time moves to %s", at), func() { w.timers.advance(at) }})
 	}
+	if heal {
+		for _, scope := range w.toGiveUp() {
+			out = append(out, option{"the operator removes the owner record of " + scope.Repository + " " + scope.Task, func() { w.giveUp(scope) }})
+		}
+	}
 	return out
+}
+
+// toGiveUp is the stores whose owner record an operator removes, as the daemon tells them to: a job
+// of each runs in it, whose place is gone for good, and was not given up yet.
+func (w *world) toGiveUp() []app.Scope {
+	var out []app.Scope
+	for _, l := range w.jobs() {
+		ref := w.refIn(l.scope, l.job.ID)
+		w.mu.Lock()
+		due := l.job.State == core.JobRunning && w.vanished[ref] && !slices.Contains(w.givenUp[l.scope], l.job.ID)
+		w.mu.Unlock()
+		if due && !slices.Contains(out, l.scope) {
+			out = append(out, l.scope)
+		}
+	}
+	return out
+}
+
+// giveUp is the next owner of a store finding its record removed: every job it has running is
+// given up.
+func (w *world) giveUp(scope app.Scope) {
+	for _, l := range w.jobs() {
+		w.mu.Lock()
+		if l.scope == scope && l.job.State == core.JobRunning && !slices.Contains(w.givenUp[scope], l.job.ID) {
+			w.givenUp[scope] = append(w.givenUp[scope], l.job.ID)
+		}
+		w.mu.Unlock()
+	}
 }
 
 // check says what must hold after every step.
@@ -551,6 +666,14 @@ func countOf(list []string, s string) int {
 
 // finalCheck says what must hold when the world has healed.
 func (w *world) finalCheck() {
+	w.mu.Lock()
+	forgot := w.forgot
+	w.mu.Unlock()
+	// A repository that is gone for good says so, and so the operator's forget goes through; one
+	// that never answers cannot be told gone.
+	if w.profile.forget && w.lost != "" && !w.profile.lostHangs && !forgot {
+		w.violate("%s is gone for good and was not forgotten", w.lost)
+	}
 	all := w.jobs()
 	byToken := map[string]located{}
 	for _, l := range all {

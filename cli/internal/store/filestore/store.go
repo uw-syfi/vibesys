@@ -109,6 +109,16 @@ func Open(root string, opts ...Option) (*Store, error) {
 // Close gives up the store. Every later call on it fails, and the next Open may have it.
 func (s *Store) Close() error { return s.guard.release() }
 
+// GivenUp returns the jobs the store had running when it was taken over after its owner record was
+// removed, which the user does to give up the place that ran them, and has running still as far as
+// the record says. A run of one found by this owner is no run of the place given up, and is taken
+// back with Reclaim. See the Owners section of the package documentation.
+func (s *Store) GivenUp() []core.JobID { return s.guard.givenUp() }
+
+// Reclaim takes a job back from the ones given up, as a run of it was found by this owner. A job
+// that is not given up costs nothing.
+func (s *Store) Reclaim(job core.JobID) error { return s.guard.reclaim(job) }
+
 // Owned fails, marked store.ErrAway, when the store is no longer the opener's to use: another owner
 // took it, its record is gone, or its disk does not answer. A store that failed it is given up and
 // opened again.
@@ -123,12 +133,19 @@ func findStore(c config, root string) error {
 	if errors.Is(err, fs.ErrNotExist) {
 		return store.Mark(&core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf(
 			"the store at %s is not there, and %s says it was made: its disk may not be mounted, and if it was deleted on purpose, run vibesys-cli daemon forget on its repository",
-			root, c.entry)}, store.ErrAway)
+			root, c.entry)}, store.ErrAway, store.ErrGone)
 	}
 	if err != nil {
 		return unavailable(root, err)
 	}
 	return nil
+}
+
+// OwnerRecord is the file that names the owner of the store of one task of a repository. A user
+// removes it to give up the place that ran the store's running jobs: see the Owners section of the
+// package documentation.
+func OwnerRecord(repository, task string) string {
+	return path.Join(taskDir(path.Clean(repository), task), ownerFile)
 }
 
 // OpenTask opens the store of one task of a repository. The repository must be there: a store
@@ -137,8 +154,10 @@ func OpenTask(repository, task string, opts ...Option) (*Store, error) {
 	if err := ledger.CheckName("task", task); err != nil {
 		return nil, err
 	}
-	if _, err := optionsOf(opts).fs.ReadDir(repository); err != nil {
-		return nil, store.Mark(&core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("the repository %s is not there: %v", repository, err)}, store.ErrAway)
+	if _, err := optionsOf(opts).fs.ReadDir(repository); errors.Is(err, fs.ErrNotExist) {
+		return nil, store.Mark(&core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("the repository %s is not there: %v", repository, err)}, store.ErrAway, store.ErrGone)
+	} else if err != nil {
+		return nil, store.Mark(&core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("the repository %s cannot be read: %v", repository, err)}, store.ErrAway)
 	}
 	return Open(taskDir(repository, task), opts...)
 }

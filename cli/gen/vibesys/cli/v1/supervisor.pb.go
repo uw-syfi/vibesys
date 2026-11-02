@@ -32,8 +32,10 @@ const (
 	ExecutionKind_EXECUTION_KIND_CANCELLED         ExecutionKind = 3
 	ExecutionKind_EXECUTION_KIND_SERVICE_NOT_READY ExecutionKind = 4
 	ExecutionKind_EXECUTION_KIND_SERVICE_EXITED    ExecutionKind = 5
-	// The environment cannot say what happened, such as a lost connection to a container. It is
-	// neither success nor failure.
+	// Not sent: a command whose end the environment did not see has no ending, and is reported as
+	// CommandEnd.unobserved or FlowEnd.lost. A receiver reads it as an ending it does not know.
+	//
+	// Deprecated: Marked as deprecated in vibesys/cli/v1/supervisor.proto.
 	ExecutionKind_EXECUTION_KIND_UNKNOWN ExecutionKind = 6
 )
 
@@ -540,15 +542,260 @@ func (x *ExecutionOutcome) GetExitCode() int32 {
 	return 0
 }
 
+// CommandEnd is how a command job's one attempt went.
+type CommandEnd struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Attempt:
+	//
+	//	*CommandEnd_NotStarted
+	//	*CommandEnd_Ended
+	//	*CommandEnd_Unobserved
+	Attempt       isCommandEnd_Attempt `protobuf_oneof:"attempt"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CommandEnd) Reset() {
+	*x = CommandEnd{}
+	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CommandEnd) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CommandEnd) ProtoMessage() {}
+
+func (x *CommandEnd) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CommandEnd.ProtoReflect.Descriptor instead.
+func (*CommandEnd) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_supervisor_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *CommandEnd) GetAttempt() isCommandEnd_Attempt {
+	if x != nil {
+		return x.Attempt
+	}
+	return nil
+}
+
+func (x *CommandEnd) GetNotStarted() *Failure {
+	if x != nil {
+		if x, ok := x.Attempt.(*CommandEnd_NotStarted); ok {
+			return x.NotStarted
+		}
+	}
+	return nil
+}
+
+func (x *CommandEnd) GetEnded() *ExecutionOutcome {
+	if x != nil {
+		if x, ok := x.Attempt.(*CommandEnd_Ended); ok {
+			return x.Ended
+		}
+	}
+	return nil
+}
+
+func (x *CommandEnd) GetUnobserved() *Failure {
+	if x != nil {
+		if x, ok := x.Attempt.(*CommandEnd_Unobserved); ok {
+			return x.Unobserved
+		}
+	}
+	return nil
+}
+
+type isCommandEnd_Attempt interface {
+	isCommandEnd_Attempt()
+}
+
+type CommandEnd_NotStarted struct {
+	// The command never started, so nothing of it ran, and this says why.
+	NotStarted *Failure `protobuf:"bytes,1,opt,name=not_started,json=notStarted,proto3,oneof"`
+}
+
+type CommandEnd_Ended struct {
+	// The command started and the environment saw it end this way.
+	Ended *ExecutionOutcome `protobuf:"bytes,2,opt,name=ended,proto3,oneof"`
+}
+
+type CommandEnd_Unobserved struct {
+	// The command started and the environment cannot vouch for how it ended or for what it left,
+	// and this says what was lost.
+	Unobserved *Failure `protobuf:"bytes,3,opt,name=unobserved,proto3,oneof"`
+}
+
+func (*CommandEnd_NotStarted) isCommandEnd_Attempt() {}
+
+func (*CommandEnd_Ended) isCommandEnd_Attempt() {}
+
+func (*CommandEnd_Unobserved) isCommandEnd_Attempt() {}
+
+// FlowEnd is how a check or a measure job ended.
+type FlowEnd struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Verdict:
+	//
+	//	*FlowEnd_Passed
+	//	*FlowEnd_Stopped
+	//	*FlowEnd_NotAttempted
+	//	*FlowEnd_Rejected
+	//	*FlowEnd_Lost
+	Verdict       isFlowEnd_Verdict `protobuf_oneof:"verdict"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FlowEnd) Reset() {
+	*x = FlowEnd{}
+	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FlowEnd) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FlowEnd) ProtoMessage() {}
+
+func (x *FlowEnd) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FlowEnd.ProtoReflect.Descriptor instead.
+func (*FlowEnd) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_supervisor_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *FlowEnd) GetVerdict() isFlowEnd_Verdict {
+	if x != nil {
+		return x.Verdict
+	}
+	return nil
+}
+
+func (x *FlowEnd) GetPassed() *Result {
+	if x != nil {
+		if x, ok := x.Verdict.(*FlowEnd_Passed); ok {
+			return x.Passed
+		}
+	}
+	return nil
+}
+
+func (x *FlowEnd) GetStopped() *ExecutionOutcome {
+	if x != nil {
+		if x, ok := x.Verdict.(*FlowEnd_Stopped); ok {
+			return x.Stopped
+		}
+	}
+	return nil
+}
+
+func (x *FlowEnd) GetNotAttempted() *Failure {
+	if x != nil {
+		if x, ok := x.Verdict.(*FlowEnd_NotAttempted); ok {
+			return x.NotAttempted
+		}
+	}
+	return nil
+}
+
+func (x *FlowEnd) GetRejected() string {
+	if x != nil {
+		if x, ok := x.Verdict.(*FlowEnd_Rejected); ok {
+			return x.Rejected
+		}
+	}
+	return ""
+}
+
+func (x *FlowEnd) GetLost() *Failure {
+	if x != nil {
+		if x, ok := x.Verdict.(*FlowEnd_Lost); ok {
+			return x.Lost
+		}
+	}
+	return nil
+}
+
+type isFlowEnd_Verdict interface {
+	isFlowEnd_Verdict()
+}
+
+type FlowEnd_Passed struct {
+	// The job passed, and this is the result it found.
+	Passed *Result `protobuf:"bytes,1,opt,name=passed,proto3,oneof"`
+}
+
+type FlowEnd_Stopped struct {
+	// A step's command ended unlike a pass, this way.
+	Stopped *ExecutionOutcome `protobuf:"bytes,2,opt,name=stopped,proto3,oneof"`
+}
+
+type FlowEnd_NotAttempted struct {
+	// A step's command never started, and this says why.
+	NotAttempted *Failure `protobuf:"bytes,3,opt,name=not_attempted,json=notAttempted,proto3,oneof"`
+}
+
+type FlowEnd_Rejected struct {
+	// Every command ran and the job has no acceptable result. The text says why.
+	Rejected string `protobuf:"bytes,4,opt,name=rejected,proto3,oneof"`
+}
+
+type FlowEnd_Lost struct {
+	// A step's command started and nobody can say how it ended, and this says what was lost.
+	Lost *Failure `protobuf:"bytes,5,opt,name=lost,proto3,oneof"`
+}
+
+func (*FlowEnd_Passed) isFlowEnd_Verdict() {}
+
+func (*FlowEnd_Stopped) isFlowEnd_Verdict() {}
+
+func (*FlowEnd_NotAttempted) isFlowEnd_Verdict() {}
+
+func (*FlowEnd_Rejected) isFlowEnd_Verdict() {}
+
+func (*FlowEnd_Lost) isFlowEnd_Verdict() {}
+
 // SupervisorOutcome is the one report a supervisor makes about its job.
 type SupervisorOutcome struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
+	// How the job ended. Its member is the job's kind: a command job ends in command, and a check or
+	// a measure job in flow. The members before command are not sent, and a receiver reads them as
+	// an ending it does not know, which is never a success.
+	//
 	// Types that are valid to be assigned to Result:
 	//
 	//	*SupervisorOutcome_Executed
 	//	*SupervisorOutcome_NotAttempted
 	//	*SupervisorOutcome_Passed
 	//	*SupervisorOutcome_Rejected
+	//	*SupervisorOutcome_Command
+	//	*SupervisorOutcome_Flow
 	Result isSupervisorOutcome_Result `protobuf_oneof:"result"`
 	// The reason of the cancel request, present when one reached the supervisor before the command
 	// ended. The reason may be empty, so presence and not the text says that a cancel was asked. A
@@ -560,7 +807,7 @@ type SupervisorOutcome struct {
 
 func (x *SupervisorOutcome) Reset() {
 	*x = SupervisorOutcome{}
-	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[5]
+	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -572,7 +819,7 @@ func (x *SupervisorOutcome) String() string {
 func (*SupervisorOutcome) ProtoMessage() {}
 
 func (x *SupervisorOutcome) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[5]
+	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -585,7 +832,7 @@ func (x *SupervisorOutcome) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SupervisorOutcome.ProtoReflect.Descriptor instead.
 func (*SupervisorOutcome) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_supervisor_proto_rawDescGZIP(), []int{5}
+	return file_vibesys_cli_v1_supervisor_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *SupervisorOutcome) GetResult() isSupervisorOutcome_Result {
@@ -595,6 +842,7 @@ func (x *SupervisorOutcome) GetResult() isSupervisorOutcome_Result {
 	return nil
 }
 
+// Deprecated: Marked as deprecated in vibesys/cli/v1/supervisor.proto.
 func (x *SupervisorOutcome) GetExecuted() *ExecutionOutcome {
 	if x != nil {
 		if x, ok := x.Result.(*SupervisorOutcome_Executed); ok {
@@ -604,6 +852,7 @@ func (x *SupervisorOutcome) GetExecuted() *ExecutionOutcome {
 	return nil
 }
 
+// Deprecated: Marked as deprecated in vibesys/cli/v1/supervisor.proto.
 func (x *SupervisorOutcome) GetNotAttempted() *Failure {
 	if x != nil {
 		if x, ok := x.Result.(*SupervisorOutcome_NotAttempted); ok {
@@ -613,6 +862,7 @@ func (x *SupervisorOutcome) GetNotAttempted() *Failure {
 	return nil
 }
 
+// Deprecated: Marked as deprecated in vibesys/cli/v1/supervisor.proto.
 func (x *SupervisorOutcome) GetPassed() *Result {
 	if x != nil {
 		if x, ok := x.Result.(*SupervisorOutcome_Passed); ok {
@@ -622,6 +872,7 @@ func (x *SupervisorOutcome) GetPassed() *Result {
 	return nil
 }
 
+// Deprecated: Marked as deprecated in vibesys/cli/v1/supervisor.proto.
 func (x *SupervisorOutcome) GetRejected() string {
 	if x != nil {
 		if x, ok := x.Result.(*SupervisorOutcome_Rejected); ok {
@@ -629,6 +880,24 @@ func (x *SupervisorOutcome) GetRejected() string {
 		}
 	}
 	return ""
+}
+
+func (x *SupervisorOutcome) GetCommand() *CommandEnd {
+	if x != nil {
+		if x, ok := x.Result.(*SupervisorOutcome_Command); ok {
+			return x.Command
+		}
+	}
+	return nil
+}
+
+func (x *SupervisorOutcome) GetFlow() *FlowEnd {
+	if x != nil {
+		if x, ok := x.Result.(*SupervisorOutcome_Flow); ok {
+			return x.Flow
+		}
+	}
+	return nil
 }
 
 func (x *SupervisorOutcome) GetCancelReason() string {
@@ -643,23 +912,33 @@ type isSupervisorOutcome_Result interface {
 }
 
 type SupervisorOutcome_Executed struct {
-	// The command ran, or was killed, and this is how it ended.
+	// Deprecated: Marked as deprecated in vibesys/cli/v1/supervisor.proto.
 	Executed *ExecutionOutcome `protobuf:"bytes,1,opt,name=executed,proto3,oneof"`
 }
 
 type SupervisorOutcome_NotAttempted struct {
-	// The command could not be attempted, such as a checkout or an environment that failed.
+	// Deprecated: Marked as deprecated in vibesys/cli/v1/supervisor.proto.
 	NotAttempted *Failure `protobuf:"bytes,2,opt,name=not_attempted,json=notAttempted,proto3,oneof"`
 }
 
 type SupervisorOutcome_Passed struct {
-	// A check or a measure job passed, and this is the result it found.
+	// Deprecated: Marked as deprecated in vibesys/cli/v1/supervisor.proto.
 	Passed *Result `protobuf:"bytes,4,opt,name=passed,proto3,oneof"`
 }
 
 type SupervisorOutcome_Rejected struct {
-	// Every command ran and the job has no acceptable result. The text says why.
+	// Deprecated: Marked as deprecated in vibesys/cli/v1/supervisor.proto.
 	Rejected string `protobuf:"bytes,5,opt,name=rejected,proto3,oneof"`
+}
+
+type SupervisorOutcome_Command struct {
+	// How a command job's one attempt went.
+	Command *CommandEnd `protobuf:"bytes,6,opt,name=command,proto3,oneof"`
+}
+
+type SupervisorOutcome_Flow struct {
+	// How a check or a measure job ended.
+	Flow *FlowEnd `protobuf:"bytes,7,opt,name=flow,proto3,oneof"`
 }
 
 func (*SupervisorOutcome_Executed) isSupervisorOutcome_Result() {}
@@ -669,6 +948,10 @@ func (*SupervisorOutcome_NotAttempted) isSupervisorOutcome_Result() {}
 func (*SupervisorOutcome_Passed) isSupervisorOutcome_Result() {}
 
 func (*SupervisorOutcome_Rejected) isSupervisorOutcome_Result() {}
+
+func (*SupervisorOutcome_Command) isSupervisorOutcome_Result() {}
+
+func (*SupervisorOutcome_Flow) isSupervisorOutcome_Result() {}
 
 type HandshakeRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -682,7 +965,7 @@ type HandshakeRequest struct {
 
 func (x *HandshakeRequest) Reset() {
 	*x = HandshakeRequest{}
-	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[6]
+	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -694,7 +977,7 @@ func (x *HandshakeRequest) String() string {
 func (*HandshakeRequest) ProtoMessage() {}
 
 func (x *HandshakeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[6]
+	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -707,7 +990,7 @@ func (x *HandshakeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HandshakeRequest.ProtoReflect.Descriptor instead.
 func (*HandshakeRequest) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_supervisor_proto_rawDescGZIP(), []int{6}
+	return file_vibesys_cli_v1_supervisor_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *HandshakeRequest) GetComponent() Component {
@@ -738,7 +1021,7 @@ type HandshakeResponse struct {
 
 func (x *HandshakeResponse) Reset() {
 	*x = HandshakeResponse{}
-	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[7]
+	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -750,7 +1033,7 @@ func (x *HandshakeResponse) String() string {
 func (*HandshakeResponse) ProtoMessage() {}
 
 func (x *HandshakeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[7]
+	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -763,7 +1046,7 @@ func (x *HandshakeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HandshakeResponse.ProtoReflect.Descriptor instead.
 func (*HandshakeResponse) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_supervisor_proto_rawDescGZIP(), []int{7}
+	return file_vibesys_cli_v1_supervisor_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *HandshakeResponse) GetVersions() *BuildVersions {
@@ -801,7 +1084,7 @@ type RunRecord struct {
 
 func (x *RunRecord) Reset() {
 	*x = RunRecord{}
-	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[8]
+	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -813,7 +1096,7 @@ func (x *RunRecord) String() string {
 func (*RunRecord) ProtoMessage() {}
 
 func (x *RunRecord) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[8]
+	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -826,7 +1109,7 @@ func (x *RunRecord) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunRecord.ProtoReflect.Descriptor instead.
 func (*RunRecord) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_supervisor_proto_rawDescGZIP(), []int{8}
+	return file_vibesys_cli_v1_supervisor_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *RunRecord) GetBootId() string {
@@ -851,7 +1134,7 @@ type StartRequest struct {
 
 func (x *StartRequest) Reset() {
 	*x = StartRequest{}
-	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[9]
+	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -863,7 +1146,7 @@ func (x *StartRequest) String() string {
 func (*StartRequest) ProtoMessage() {}
 
 func (x *StartRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[9]
+	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -876,7 +1159,7 @@ func (x *StartRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartRequest.ProtoReflect.Descriptor instead.
 func (*StartRequest) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_supervisor_proto_rawDescGZIP(), []int{9}
+	return file_vibesys_cli_v1_supervisor_proto_rawDescGZIP(), []int{11}
 }
 
 type StartResponse struct {
@@ -887,7 +1170,7 @@ type StartResponse struct {
 
 func (x *StartResponse) Reset() {
 	*x = StartResponse{}
-	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[10]
+	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -899,7 +1182,7 @@ func (x *StartResponse) String() string {
 func (*StartResponse) ProtoMessage() {}
 
 func (x *StartResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[10]
+	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -912,7 +1195,7 @@ func (x *StartResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartResponse.ProtoReflect.Descriptor instead.
 func (*StartResponse) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_supervisor_proto_rawDescGZIP(), []int{10}
+	return file_vibesys_cli_v1_supervisor_proto_rawDescGZIP(), []int{12}
 }
 
 type AttachRequest struct {
@@ -925,7 +1208,7 @@ type AttachRequest struct {
 
 func (x *AttachRequest) Reset() {
 	*x = AttachRequest{}
-	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[11]
+	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -937,7 +1220,7 @@ func (x *AttachRequest) String() string {
 func (*AttachRequest) ProtoMessage() {}
 
 func (x *AttachRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[11]
+	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -950,7 +1233,7 @@ func (x *AttachRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AttachRequest.ProtoReflect.Descriptor instead.
 func (*AttachRequest) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_supervisor_proto_rawDescGZIP(), []int{11}
+	return file_vibesys_cli_v1_supervisor_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *AttachRequest) GetOffset() uint64 {
@@ -971,7 +1254,7 @@ type OutputChunk struct {
 
 func (x *OutputChunk) Reset() {
 	*x = OutputChunk{}
-	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[12]
+	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -983,7 +1266,7 @@ func (x *OutputChunk) String() string {
 func (*OutputChunk) ProtoMessage() {}
 
 func (x *OutputChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[12]
+	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -996,7 +1279,7 @@ func (x *OutputChunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OutputChunk.ProtoReflect.Descriptor instead.
 func (*OutputChunk) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_supervisor_proto_rawDescGZIP(), []int{12}
+	return file_vibesys_cli_v1_supervisor_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *OutputChunk) GetOffset() uint64 {
@@ -1026,7 +1309,7 @@ type AttachResponse struct {
 
 func (x *AttachResponse) Reset() {
 	*x = AttachResponse{}
-	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[13]
+	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1038,7 +1321,7 @@ func (x *AttachResponse) String() string {
 func (*AttachResponse) ProtoMessage() {}
 
 func (x *AttachResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[13]
+	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1051,7 +1334,7 @@ func (x *AttachResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AttachResponse.ProtoReflect.Descriptor instead.
 func (*AttachResponse) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_supervisor_proto_rawDescGZIP(), []int{13}
+	return file_vibesys_cli_v1_supervisor_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *AttachResponse) GetItem() isAttachResponse_Item {
@@ -1105,7 +1388,7 @@ type CancelJobRequest struct {
 
 func (x *CancelJobRequest) Reset() {
 	*x = CancelJobRequest{}
-	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[14]
+	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1117,7 +1400,7 @@ func (x *CancelJobRequest) String() string {
 func (*CancelJobRequest) ProtoMessage() {}
 
 func (x *CancelJobRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[14]
+	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1130,7 +1413,7 @@ func (x *CancelJobRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelJobRequest.ProtoReflect.Descriptor instead.
 func (*CancelJobRequest) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_supervisor_proto_rawDescGZIP(), []int{14}
+	return file_vibesys_cli_v1_supervisor_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *CancelJobRequest) GetReason() string {
@@ -1148,7 +1431,7 @@ type CancelJobResponse struct {
 
 func (x *CancelJobResponse) Reset() {
 	*x = CancelJobResponse{}
-	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[15]
+	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1160,7 +1443,7 @@ func (x *CancelJobResponse) String() string {
 func (*CancelJobResponse) ProtoMessage() {}
 
 func (x *CancelJobResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[15]
+	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1173,7 +1456,7 @@ func (x *CancelJobResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelJobResponse.ProtoReflect.Descriptor instead.
 func (*CancelJobResponse) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_supervisor_proto_rawDescGZIP(), []int{15}
+	return file_vibesys_cli_v1_supervisor_proto_rawDescGZIP(), []int{17}
 }
 
 type ReleaseRequest struct {
@@ -1184,7 +1467,7 @@ type ReleaseRequest struct {
 
 func (x *ReleaseRequest) Reset() {
 	*x = ReleaseRequest{}
-	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[16]
+	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1196,7 +1479,7 @@ func (x *ReleaseRequest) String() string {
 func (*ReleaseRequest) ProtoMessage() {}
 
 func (x *ReleaseRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[16]
+	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1209,7 +1492,7 @@ func (x *ReleaseRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReleaseRequest.ProtoReflect.Descriptor instead.
 func (*ReleaseRequest) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_supervisor_proto_rawDescGZIP(), []int{16}
+	return file_vibesys_cli_v1_supervisor_proto_rawDescGZIP(), []int{18}
 }
 
 type ReleaseResponse struct {
@@ -1220,7 +1503,7 @@ type ReleaseResponse struct {
 
 func (x *ReleaseResponse) Reset() {
 	*x = ReleaseResponse{}
-	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[17]
+	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1232,7 +1515,7 @@ func (x *ReleaseResponse) String() string {
 func (*ReleaseResponse) ProtoMessage() {}
 
 func (x *ReleaseResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[17]
+	mi := &file_vibesys_cli_v1_supervisor_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1245,7 +1528,7 @@ func (x *ReleaseResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReleaseResponse.ProtoReflect.Descriptor instead.
 func (*ReleaseResponse) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_supervisor_proto_rawDescGZIP(), []int{17}
+	return file_vibesys_cli_v1_supervisor_proto_rawDescGZIP(), []int{19}
 }
 
 var File_vibesys_cli_v1_supervisor_proto protoreflect.FileDescriptor
@@ -1284,12 +1567,30 @@ const file_vibesys_cli_v1_supervisor_proto_rawDesc = "" +
 	"\x11check_pass_job_id\x18\f \x01(\tR\x0echeckPassJobId\"b\n" +
 	"\x10ExecutionOutcome\x121\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x1d.vibesys.cli.v1.ExecutionKindR\x04kind\x12\x1b\n" +
-	"\texit_code\x18\x02 \x01(\x05R\bexitCode\"\xa9\x02\n" +
-	"\x11SupervisorOutcome\x12>\n" +
-	"\bexecuted\x18\x01 \x01(\v2 .vibesys.cli.v1.ExecutionOutcomeH\x00R\bexecuted\x12>\n" +
-	"\rnot_attempted\x18\x02 \x01(\v2\x17.vibesys.cli.v1.FailureH\x00R\fnotAttempted\x120\n" +
-	"\x06passed\x18\x04 \x01(\v2\x16.vibesys.cli.v1.ResultH\x00R\x06passed\x12\x1c\n" +
-	"\brejected\x18\x05 \x01(\tH\x00R\brejected\x12(\n" +
+	"\texit_code\x18\x02 \x01(\x05R\bexitCode\"\xc8\x01\n" +
+	"\n" +
+	"CommandEnd\x12:\n" +
+	"\vnot_started\x18\x01 \x01(\v2\x17.vibesys.cli.v1.FailureH\x00R\n" +
+	"notStarted\x128\n" +
+	"\x05ended\x18\x02 \x01(\v2 .vibesys.cli.v1.ExecutionOutcomeH\x00R\x05ended\x129\n" +
+	"\n" +
+	"unobserved\x18\x03 \x01(\v2\x17.vibesys.cli.v1.FailureH\x00R\n" +
+	"unobservedB\t\n" +
+	"\aattempt\"\x91\x02\n" +
+	"\aFlowEnd\x120\n" +
+	"\x06passed\x18\x01 \x01(\v2\x16.vibesys.cli.v1.ResultH\x00R\x06passed\x12<\n" +
+	"\astopped\x18\x02 \x01(\v2 .vibesys.cli.v1.ExecutionOutcomeH\x00R\astopped\x12>\n" +
+	"\rnot_attempted\x18\x03 \x01(\v2\x17.vibesys.cli.v1.FailureH\x00R\fnotAttempted\x12\x1c\n" +
+	"\brejected\x18\x04 \x01(\tH\x00R\brejected\x12-\n" +
+	"\x04lost\x18\x05 \x01(\v2\x17.vibesys.cli.v1.FailureH\x00R\x04lostB\t\n" +
+	"\averdict\"\xa0\x03\n" +
+	"\x11SupervisorOutcome\x12B\n" +
+	"\bexecuted\x18\x01 \x01(\v2 .vibesys.cli.v1.ExecutionOutcomeB\x02\x18\x01H\x00R\bexecuted\x12B\n" +
+	"\rnot_attempted\x18\x02 \x01(\v2\x17.vibesys.cli.v1.FailureB\x02\x18\x01H\x00R\fnotAttempted\x124\n" +
+	"\x06passed\x18\x04 \x01(\v2\x16.vibesys.cli.v1.ResultB\x02\x18\x01H\x00R\x06passed\x12 \n" +
+	"\brejected\x18\x05 \x01(\tB\x02\x18\x01H\x00R\brejected\x126\n" +
+	"\acommand\x18\x06 \x01(\v2\x1a.vibesys.cli.v1.CommandEndH\x00R\acommand\x12-\n" +
+	"\x04flow\x18\a \x01(\v2\x17.vibesys.cli.v1.FlowEndH\x00R\x04flow\x12(\n" +
 	"\rcancel_reason\x18\x03 \x01(\tH\x01R\fcancelReason\x88\x01\x01B\b\n" +
 	"\x06resultB\x10\n" +
 	"\x0e_cancel_reason\"\x86\x01\n" +
@@ -1318,15 +1619,15 @@ const file_vibesys_cli_v1_supervisor_proto_rawDesc = "" +
 	"\x06reason\x18\x01 \x01(\tR\x06reason\"\x13\n" +
 	"\x11CancelJobResponse\"\x10\n" +
 	"\x0eReleaseRequest\"\x11\n" +
-	"\x0fReleaseResponse*\xeb\x01\n" +
+	"\x0fReleaseResponse*\xef\x01\n" +
 	"\rExecutionKind\x12\x1e\n" +
 	"\x1aEXECUTION_KIND_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15EXECUTION_KIND_EXITED\x10\x01\x12\x1c\n" +
 	"\x18EXECUTION_KIND_TIMED_OUT\x10\x02\x12\x1c\n" +
 	"\x18EXECUTION_KIND_CANCELLED\x10\x03\x12$\n" +
 	" EXECUTION_KIND_SERVICE_NOT_READY\x10\x04\x12!\n" +
-	"\x1dEXECUTION_KIND_SERVICE_EXITED\x10\x05\x12\x1a\n" +
-	"\x16EXECUTION_KIND_UNKNOWN\x10\x06*\xac\x01\n" +
+	"\x1dEXECUTION_KIND_SERVICE_EXITED\x10\x05\x12\x1e\n" +
+	"\x16EXECUTION_KIND_UNKNOWN\x10\x06\x1a\x02\b\x01*\xac\x01\n" +
 	"\x0fSupervisorPhase\x12 \n" +
 	"\x1cSUPERVISOR_PHASE_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17SUPERVISOR_PHASE_PARKED\x10\x01\x12\x1c\n" +
@@ -1353,7 +1654,7 @@ func file_vibesys_cli_v1_supervisor_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_cli_v1_supervisor_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_vibesys_cli_v1_supervisor_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_vibesys_cli_v1_supervisor_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_vibesys_cli_v1_supervisor_proto_goTypes = []any{
 	(ExecutionKind)(0),             // 0: vibesys.cli.v1.ExecutionKind
 	(SupervisorPhase)(0),           // 1: vibesys.cli.v1.SupervisorPhase
@@ -1362,68 +1663,79 @@ var file_vibesys_cli_v1_supervisor_proto_goTypes = []any{
 	(*ResultFormat)(nil),           // 4: vibesys.cli.v1.ResultFormat
 	(*FlowPlan)(nil),               // 5: vibesys.cli.v1.FlowPlan
 	(*ExecutionOutcome)(nil),       // 6: vibesys.cli.v1.ExecutionOutcome
-	(*SupervisorOutcome)(nil),      // 7: vibesys.cli.v1.SupervisorOutcome
-	(*HandshakeRequest)(nil),       // 8: vibesys.cli.v1.HandshakeRequest
-	(*HandshakeResponse)(nil),      // 9: vibesys.cli.v1.HandshakeResponse
-	(*RunRecord)(nil),              // 10: vibesys.cli.v1.RunRecord
-	(*StartRequest)(nil),           // 11: vibesys.cli.v1.StartRequest
-	(*StartResponse)(nil),          // 12: vibesys.cli.v1.StartResponse
-	(*AttachRequest)(nil),          // 13: vibesys.cli.v1.AttachRequest
-	(*OutputChunk)(nil),            // 14: vibesys.cli.v1.OutputChunk
-	(*AttachResponse)(nil),         // 15: vibesys.cli.v1.AttachResponse
-	(*CancelJobRequest)(nil),       // 16: vibesys.cli.v1.CancelJobRequest
-	(*CancelJobResponse)(nil),      // 17: vibesys.cli.v1.CancelJobResponse
-	(*ReleaseRequest)(nil),         // 18: vibesys.cli.v1.ReleaseRequest
-	(*ReleaseResponse)(nil),        // 19: vibesys.cli.v1.ReleaseResponse
-	(*JobSpec)(nil),                // 20: vibesys.cli.v1.JobSpec
-	(*durationpb.Duration)(nil),    // 21: google.protobuf.Duration
-	(JobKind)(0),                   // 22: vibesys.cli.v1.JobKind
-	(*EnvironmentFingerprint)(nil), // 23: vibesys.cli.v1.EnvironmentFingerprint
-	(*Metric)(nil),                 // 24: vibesys.cli.v1.Metric
-	(*Failure)(nil),                // 25: vibesys.cli.v1.Failure
-	(*Result)(nil),                 // 26: vibesys.cli.v1.Result
-	(Component)(0),                 // 27: vibesys.cli.v1.Component
-	(*BuildVersions)(nil),          // 28: vibesys.cli.v1.BuildVersions
-	(Compatibility)(0),             // 29: vibesys.cli.v1.Compatibility
+	(*CommandEnd)(nil),             // 7: vibesys.cli.v1.CommandEnd
+	(*FlowEnd)(nil),                // 8: vibesys.cli.v1.FlowEnd
+	(*SupervisorOutcome)(nil),      // 9: vibesys.cli.v1.SupervisorOutcome
+	(*HandshakeRequest)(nil),       // 10: vibesys.cli.v1.HandshakeRequest
+	(*HandshakeResponse)(nil),      // 11: vibesys.cli.v1.HandshakeResponse
+	(*RunRecord)(nil),              // 12: vibesys.cli.v1.RunRecord
+	(*StartRequest)(nil),           // 13: vibesys.cli.v1.StartRequest
+	(*StartResponse)(nil),          // 14: vibesys.cli.v1.StartResponse
+	(*AttachRequest)(nil),          // 15: vibesys.cli.v1.AttachRequest
+	(*OutputChunk)(nil),            // 16: vibesys.cli.v1.OutputChunk
+	(*AttachResponse)(nil),         // 17: vibesys.cli.v1.AttachResponse
+	(*CancelJobRequest)(nil),       // 18: vibesys.cli.v1.CancelJobRequest
+	(*CancelJobResponse)(nil),      // 19: vibesys.cli.v1.CancelJobResponse
+	(*ReleaseRequest)(nil),         // 20: vibesys.cli.v1.ReleaseRequest
+	(*ReleaseResponse)(nil),        // 21: vibesys.cli.v1.ReleaseResponse
+	(*JobSpec)(nil),                // 22: vibesys.cli.v1.JobSpec
+	(*durationpb.Duration)(nil),    // 23: google.protobuf.Duration
+	(JobKind)(0),                   // 24: vibesys.cli.v1.JobKind
+	(*EnvironmentFingerprint)(nil), // 25: vibesys.cli.v1.EnvironmentFingerprint
+	(*Metric)(nil),                 // 26: vibesys.cli.v1.Metric
+	(*Failure)(nil),                // 27: vibesys.cli.v1.Failure
+	(*Result)(nil),                 // 28: vibesys.cli.v1.Result
+	(Component)(0),                 // 29: vibesys.cli.v1.Component
+	(*BuildVersions)(nil),          // 30: vibesys.cli.v1.BuildVersions
+	(Compatibility)(0),             // 31: vibesys.cli.v1.Compatibility
 }
 var file_vibesys_cli_v1_supervisor_proto_depIdxs = []int32{
-	20, // 0: vibesys.cli.v1.Launch.spec:type_name -> vibesys.cli.v1.JobSpec
+	22, // 0: vibesys.cli.v1.Launch.spec:type_name -> vibesys.cli.v1.JobSpec
 	5,  // 1: vibesys.cli.v1.Launch.plan:type_name -> vibesys.cli.v1.FlowPlan
-	21, // 2: vibesys.cli.v1.PlanCommand.timeout:type_name -> google.protobuf.Duration
-	22, // 3: vibesys.cli.v1.FlowPlan.kind:type_name -> vibesys.cli.v1.JobKind
-	23, // 4: vibesys.cli.v1.FlowPlan.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
+	23, // 2: vibesys.cli.v1.PlanCommand.timeout:type_name -> google.protobuf.Duration
+	24, // 3: vibesys.cli.v1.FlowPlan.kind:type_name -> vibesys.cli.v1.JobKind
+	25, // 4: vibesys.cli.v1.FlowPlan.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
 	3,  // 5: vibesys.cli.v1.FlowPlan.build:type_name -> vibesys.cli.v1.PlanCommand
 	3,  // 6: vibesys.cli.v1.FlowPlan.check:type_name -> vibesys.cli.v1.PlanCommand
 	3,  // 7: vibesys.cli.v1.FlowPlan.benchmark:type_name -> vibesys.cli.v1.PlanCommand
 	4,  // 8: vibesys.cli.v1.FlowPlan.result_format:type_name -> vibesys.cli.v1.ResultFormat
-	24, // 9: vibesys.cli.v1.FlowPlan.metric:type_name -> vibesys.cli.v1.Metric
+	26, // 9: vibesys.cli.v1.FlowPlan.metric:type_name -> vibesys.cli.v1.Metric
 	0,  // 10: vibesys.cli.v1.ExecutionOutcome.kind:type_name -> vibesys.cli.v1.ExecutionKind
-	6,  // 11: vibesys.cli.v1.SupervisorOutcome.executed:type_name -> vibesys.cli.v1.ExecutionOutcome
-	25, // 12: vibesys.cli.v1.SupervisorOutcome.not_attempted:type_name -> vibesys.cli.v1.Failure
-	26, // 13: vibesys.cli.v1.SupervisorOutcome.passed:type_name -> vibesys.cli.v1.Result
-	27, // 14: vibesys.cli.v1.HandshakeRequest.component:type_name -> vibesys.cli.v1.Component
-	28, // 15: vibesys.cli.v1.HandshakeRequest.versions:type_name -> vibesys.cli.v1.BuildVersions
-	28, // 16: vibesys.cli.v1.HandshakeResponse.versions:type_name -> vibesys.cli.v1.BuildVersions
-	29, // 17: vibesys.cli.v1.HandshakeResponse.compatibility:type_name -> vibesys.cli.v1.Compatibility
-	1,  // 18: vibesys.cli.v1.HandshakeResponse.phase:type_name -> vibesys.cli.v1.SupervisorPhase
-	2,  // 19: vibesys.cli.v1.RunRecord.launch:type_name -> vibesys.cli.v1.Launch
-	14, // 20: vibesys.cli.v1.AttachResponse.output:type_name -> vibesys.cli.v1.OutputChunk
-	7,  // 21: vibesys.cli.v1.AttachResponse.outcome:type_name -> vibesys.cli.v1.SupervisorOutcome
-	8,  // 22: vibesys.cli.v1.SupervisorService.Handshake:input_type -> vibesys.cli.v1.HandshakeRequest
-	11, // 23: vibesys.cli.v1.SupervisorService.Start:input_type -> vibesys.cli.v1.StartRequest
-	13, // 24: vibesys.cli.v1.SupervisorService.Attach:input_type -> vibesys.cli.v1.AttachRequest
-	16, // 25: vibesys.cli.v1.SupervisorService.CancelJob:input_type -> vibesys.cli.v1.CancelJobRequest
-	18, // 26: vibesys.cli.v1.SupervisorService.Release:input_type -> vibesys.cli.v1.ReleaseRequest
-	9,  // 27: vibesys.cli.v1.SupervisorService.Handshake:output_type -> vibesys.cli.v1.HandshakeResponse
-	12, // 28: vibesys.cli.v1.SupervisorService.Start:output_type -> vibesys.cli.v1.StartResponse
-	15, // 29: vibesys.cli.v1.SupervisorService.Attach:output_type -> vibesys.cli.v1.AttachResponse
-	17, // 30: vibesys.cli.v1.SupervisorService.CancelJob:output_type -> vibesys.cli.v1.CancelJobResponse
-	19, // 31: vibesys.cli.v1.SupervisorService.Release:output_type -> vibesys.cli.v1.ReleaseResponse
-	27, // [27:32] is the sub-list for method output_type
-	22, // [22:27] is the sub-list for method input_type
-	22, // [22:22] is the sub-list for extension type_name
-	22, // [22:22] is the sub-list for extension extendee
-	0,  // [0:22] is the sub-list for field type_name
+	27, // 11: vibesys.cli.v1.CommandEnd.not_started:type_name -> vibesys.cli.v1.Failure
+	6,  // 12: vibesys.cli.v1.CommandEnd.ended:type_name -> vibesys.cli.v1.ExecutionOutcome
+	27, // 13: vibesys.cli.v1.CommandEnd.unobserved:type_name -> vibesys.cli.v1.Failure
+	28, // 14: vibesys.cli.v1.FlowEnd.passed:type_name -> vibesys.cli.v1.Result
+	6,  // 15: vibesys.cli.v1.FlowEnd.stopped:type_name -> vibesys.cli.v1.ExecutionOutcome
+	27, // 16: vibesys.cli.v1.FlowEnd.not_attempted:type_name -> vibesys.cli.v1.Failure
+	27, // 17: vibesys.cli.v1.FlowEnd.lost:type_name -> vibesys.cli.v1.Failure
+	6,  // 18: vibesys.cli.v1.SupervisorOutcome.executed:type_name -> vibesys.cli.v1.ExecutionOutcome
+	27, // 19: vibesys.cli.v1.SupervisorOutcome.not_attempted:type_name -> vibesys.cli.v1.Failure
+	28, // 20: vibesys.cli.v1.SupervisorOutcome.passed:type_name -> vibesys.cli.v1.Result
+	7,  // 21: vibesys.cli.v1.SupervisorOutcome.command:type_name -> vibesys.cli.v1.CommandEnd
+	8,  // 22: vibesys.cli.v1.SupervisorOutcome.flow:type_name -> vibesys.cli.v1.FlowEnd
+	29, // 23: vibesys.cli.v1.HandshakeRequest.component:type_name -> vibesys.cli.v1.Component
+	30, // 24: vibesys.cli.v1.HandshakeRequest.versions:type_name -> vibesys.cli.v1.BuildVersions
+	30, // 25: vibesys.cli.v1.HandshakeResponse.versions:type_name -> vibesys.cli.v1.BuildVersions
+	31, // 26: vibesys.cli.v1.HandshakeResponse.compatibility:type_name -> vibesys.cli.v1.Compatibility
+	1,  // 27: vibesys.cli.v1.HandshakeResponse.phase:type_name -> vibesys.cli.v1.SupervisorPhase
+	2,  // 28: vibesys.cli.v1.RunRecord.launch:type_name -> vibesys.cli.v1.Launch
+	16, // 29: vibesys.cli.v1.AttachResponse.output:type_name -> vibesys.cli.v1.OutputChunk
+	9,  // 30: vibesys.cli.v1.AttachResponse.outcome:type_name -> vibesys.cli.v1.SupervisorOutcome
+	10, // 31: vibesys.cli.v1.SupervisorService.Handshake:input_type -> vibesys.cli.v1.HandshakeRequest
+	13, // 32: vibesys.cli.v1.SupervisorService.Start:input_type -> vibesys.cli.v1.StartRequest
+	15, // 33: vibesys.cli.v1.SupervisorService.Attach:input_type -> vibesys.cli.v1.AttachRequest
+	18, // 34: vibesys.cli.v1.SupervisorService.CancelJob:input_type -> vibesys.cli.v1.CancelJobRequest
+	20, // 35: vibesys.cli.v1.SupervisorService.Release:input_type -> vibesys.cli.v1.ReleaseRequest
+	11, // 36: vibesys.cli.v1.SupervisorService.Handshake:output_type -> vibesys.cli.v1.HandshakeResponse
+	14, // 37: vibesys.cli.v1.SupervisorService.Start:output_type -> vibesys.cli.v1.StartResponse
+	17, // 38: vibesys.cli.v1.SupervisorService.Attach:output_type -> vibesys.cli.v1.AttachResponse
+	19, // 39: vibesys.cli.v1.SupervisorService.CancelJob:output_type -> vibesys.cli.v1.CancelJobResponse
+	21, // 40: vibesys.cli.v1.SupervisorService.Release:output_type -> vibesys.cli.v1.ReleaseResponse
+	36, // [36:41] is the sub-list for method output_type
+	31, // [31:36] is the sub-list for method input_type
+	31, // [31:31] is the sub-list for extension type_name
+	31, // [31:31] is the sub-list for extension extendee
+	0,  // [0:31] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_supervisor_proto_init() }
@@ -1437,12 +1749,26 @@ func file_vibesys_cli_v1_supervisor_proto_init() {
 	file_vibesys_cli_v1_result_proto_init()
 	file_vibesys_cli_v1_version_proto_init()
 	file_vibesys_cli_v1_supervisor_proto_msgTypes[5].OneofWrappers = []any{
+		(*CommandEnd_NotStarted)(nil),
+		(*CommandEnd_Ended)(nil),
+		(*CommandEnd_Unobserved)(nil),
+	}
+	file_vibesys_cli_v1_supervisor_proto_msgTypes[6].OneofWrappers = []any{
+		(*FlowEnd_Passed)(nil),
+		(*FlowEnd_Stopped)(nil),
+		(*FlowEnd_NotAttempted)(nil),
+		(*FlowEnd_Rejected)(nil),
+		(*FlowEnd_Lost)(nil),
+	}
+	file_vibesys_cli_v1_supervisor_proto_msgTypes[7].OneofWrappers = []any{
 		(*SupervisorOutcome_Executed)(nil),
 		(*SupervisorOutcome_NotAttempted)(nil),
 		(*SupervisorOutcome_Passed)(nil),
 		(*SupervisorOutcome_Rejected)(nil),
+		(*SupervisorOutcome_Command)(nil),
+		(*SupervisorOutcome_Flow)(nil),
 	}
-	file_vibesys_cli_v1_supervisor_proto_msgTypes[13].OneofWrappers = []any{
+	file_vibesys_cli_v1_supervisor_proto_msgTypes[15].OneofWrappers = []any{
 		(*AttachResponse_Output)(nil),
 		(*AttachResponse_Outcome)(nil),
 	}
@@ -1452,7 +1778,7 @@ func file_vibesys_cli_v1_supervisor_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_cli_v1_supervisor_proto_rawDesc), len(file_vibesys_cli_v1_supervisor_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   18,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

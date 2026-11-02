@@ -168,8 +168,8 @@ var testRules = map[string][]string{
 	"internal/supervisor/rpc":  {"internal/environment/fakeenv", "internal/supervisor/suptest"},
 	"internal/supervisor/host": {"internal/environment/fakeenv", "internal/supervisor/suptest"},
 	"internal/app": {
-		"internal/app/memstores", "internal/backend/cpu", "internal/environment/fakeenv", "internal/hostfs",
-		"internal/store/storetest", "internal/task/tasktest",
+		"internal/app/filestores", "internal/app/memstores", "internal/backend/cpu", "internal/environment/fakeenv",
+		"internal/hostfs", "internal/store/filestore", "internal/store/storetest", "internal/task/tasktest",
 	},
 	"internal/app/filestores": {"internal/core"},
 	"internal/daemon":         {"internal/app/memstores", "internal/environment/fakeenv", "internal/store/storetest"},

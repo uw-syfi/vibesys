@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"path"
 	"slices"
+	"sync"
 	"sync/atomic"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -24,13 +25,15 @@ type Owner struct {
 }
 
 // ownerRec is the encoding of .owner. Generation counts the owners the store has had, so that no
-// two owners have the same record, not even the same process opening it twice.
+// two owners have the same record, not even the same process opening it twice. GivenUp is the
+// running jobs whose runs were given up: see the Owners section of the package documentation.
 type ownerRec struct {
-	Format     int    `json:"format"`
-	Generation uint64 `json:"generation"`
-	Host       string `json:"host"`
-	Dir        string `json:"dir"`
-	PID        int    `json:"pid"`
+	Format     int          `json:"format"`
+	Generation uint64       `json:"generation"`
+	Host       string       `json:"host"`
+	Dir        string       `json:"dir"`
+	PID        int          `json:"pid"`
+	GivenUp    []core.JobID `json:"given_up,omitempty"`
 }
 
 func (r ownerRec) String() string {
@@ -42,8 +45,12 @@ type guard struct {
 	fs     fsys.FS
 	root   string
 	lock   fsys.Lock
-	mine   []byte
 	closed atomic.Bool
+
+	// mu covers the record, which Reclaim writes again while other calls check it.
+	mu   sync.Mutex
+	rec  ownerRec
+	mine []byte
 }
 
 // claim makes the caller the owner of the store, or says why it cannot be.
@@ -68,36 +75,93 @@ func claim(b *backend, owner Owner) (*guard, error) {
 	return g, nil
 }
 
-// takeRecord writes the caller's record over the last owner's, unless that one's work is live.
+// takeRecord writes the caller's record over the last owner's, unless that one's work is live. A
+// store with running jobs and no record was given up by the user, who removed the record: those
+// jobs are given up, and stay so in every later record while they run.
 func takeRecord(b *backend, owner Owner, lock fsys.Lock) (*guard, error) {
 	name := path.Join(b.root, ownerFile)
 	last, err := readOwner(b, name)
 	if err != nil {
 		return nil, err
 	}
-	if last != nil && (last.Host != owner.Host || last.Dir != owner.Dir) {
-		running, err := b.hasRunningJob()
-		if err != nil {
+	elsewhere := last != nil && (last.Host != owner.Host || last.Dir != owner.Dir)
+	var running []core.JobID
+	// Only a record that is gone, names another place or gives jobs up needs the jobs read: the
+	// engine reads them next, and says what is wrong with one.
+	if last == nil || elsewhere || len(last.GivenUp) > 0 {
+		if running, err = b.runningJobs(); err != nil {
 			return nil, err
 		}
-		if running {
-			return nil, store.Mark(refused(
-				"the store at %s has running jobs that belong to %s: start the daemon there, or, if that place is gone for good, remove %s and those jobs will be marked lost",
-				b.root, last, name), store.ErrAway)
-		}
 	}
-	rec := ownerRec{Format: formatVersion, Generation: 1, Host: owner.Host, Dir: owner.Dir, PID: owner.PID}
+	if elsewhere && len(running) > 0 {
+		return nil, store.Mark(refused(
+			"the store at %s has running jobs that belong to %s: start the daemon there, or, if that place is gone for good, remove %s and those of them that no run can be found of here will be marked lost",
+			b.root, last, name), store.ErrAway)
+	}
+	rec := ownerRec{Format: formatVersion, Generation: 1, Host: owner.Host, Dir: owner.Dir, PID: owner.PID, GivenUp: running}
 	if last != nil {
 		rec.Generation = last.Generation + 1
+		rec.GivenUp = slices.DeleteFunc(running, func(id core.JobID) bool { return !slices.Contains(last.GivenUp, id) })
 	}
-	data, err := encode(rec)
-	if err != nil {
+	if len(rec.GivenUp) == 0 {
+		rec.GivenUp = nil
+	}
+	g := &guard{fs: b.fs, root: b.root, lock: lock}
+	if err := g.write(rec, b.publishBytes); err != nil {
 		return nil, err
 	}
-	if err := b.publishBytes(name, data); err != nil {
-		return nil, unavailable(b.root, err)
+	return g, nil
+}
+
+// write makes rec the record, as this guard's own.
+func (g *guard) write(rec ownerRec, publish func(name string, data []byte) error) error {
+	data, err := encode(rec)
+	if err != nil {
+		return err
 	}
-	return &guard{fs: b.fs, root: b.root, lock: lock, mine: data}, nil
+	if err := publish(path.Join(g.root, ownerFile), data); err != nil {
+		return unavailable(g.root, err)
+	}
+	g.rec, g.mine = rec, data
+	return nil
+}
+
+// givenUp returns the jobs the record has given up.
+func (g *guard) givenUp() []core.JobID {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return slices.Clone(g.rec.GivenUp)
+}
+
+// reclaim takes a job out of the given-up ones, writing the record again if it was one.
+func (g *guard) reclaim(job core.JobID) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !slices.Contains(g.rec.GivenUp, job) {
+		return nil
+	}
+	if err := g.checkLocked(); err != nil {
+		return err
+	}
+	rec := g.rec
+	rec.GivenUp = slices.DeleteFunc(slices.Clone(rec.GivenUp), func(id core.JobID) bool { return id == job })
+	if len(rec.GivenUp) == 0 {
+		rec.GivenUp = nil
+	}
+	// The temporary file has a name no commit uses, and the lock on mu keeps a second one out.
+	return g.write(rec, func(name string, data []byte) error {
+		b := newBackend(g.fs, g.root)
+		tmp := path.Join(g.root, tempPrefix+"owner")
+		if err := b.writeFile(tmp, data); err != nil {
+			_ = g.fs.Remove(tmp)
+			return err
+		}
+		if err := g.fs.Rename(tmp, name); err != nil {
+			_ = g.fs.Remove(tmp)
+			return err
+		}
+		return g.fs.SyncDir(g.root)
+	})
 }
 
 // readOwner reads the record, which is nil when there is none.
@@ -136,12 +200,19 @@ func inUse(b *backend, owner Owner) error {
 	return store.Mark(failure, store.ErrAway)
 }
 
-func (b *backend) hasRunningJob() (bool, error) {
+// runningJobs returns the jobs the store has running, in the order it lists them.
+func (b *backend) runningJobs() ([]core.JobID, error) {
 	jobs, err := b.loadJobs()
 	if err != nil {
-		return false, unavailable(b.root, err)
+		return nil, unavailable(b.root, err)
 	}
-	return slices.ContainsFunc(jobs, func(j core.Job) bool { return j.State == core.JobRunning }), nil
+	var out []core.JobID
+	for _, j := range jobs {
+		if j.State == core.JobRunning {
+			out = append(out, j.ID)
+		}
+	}
+	return out, nil
 }
 
 // check fails unless the store still belongs to this guard. A backend with no guard, which is an
@@ -150,6 +221,13 @@ func (g *guard) check() error {
 	if g == nil {
 		return nil
 	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.checkLocked()
+}
+
+// checkLocked is check with mu held.
+func (g *guard) checkLocked() error {
 	if g.closed.Load() {
 		return fenced("the store at %s is closed", g.root)
 	}

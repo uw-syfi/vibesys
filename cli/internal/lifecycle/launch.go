@@ -45,24 +45,48 @@ type Outcome struct {
 	CancelReason string
 }
 
-// End is how a job ended, one variant of SupervisorOutcome's result. The set is closed.
+// End is how a job ended, and its variant is the job's kind: a command job ends in CommandEnded
+// and a check or a measure job in FlowEnded. Only a FlowEnded carries a result, and only a
+// CommandEnded an exit code that alone means success, so neither kind's ending can be read as the
+// other's. The set is closed.
 type End interface {
 	end()
 }
 
-// Ran says the command ran, or was killed, and how it ended.
-type Ran struct{ Exec core.ExecOutcome }
+// CommandEnded is how a command job's one attempt went, as its environment said it: never
+// started, ended in a way the environment saw, or started and not seen to end.
+type CommandEnded struct{ Attempt core.Attempt }
 
-// NotAttempted says the command could not be attempted, such as a checkout that failed.
-type NotAttempted struct{ Failure core.Failure }
+// FlowEnded is how a check or a measure job ended.
+type FlowEnded struct{ Verdict Verdict }
 
-// Passed says a check or a measure job passed, and holds the result it found.
+func (CommandEnded) end() {}
+func (FlowEnded) end()    {}
+
+// Verdict is how a check or a measure job ended. The set is closed, and Passed is the only one
+// that succeeds.
+type Verdict interface {
+	verdict()
+}
+
+// Passed says the job passed, and holds the result it found.
 type Passed struct{ Result core.Result }
+
+// Stopped says a step's command ended unlike a pass: an exit code other than 0, a time limit, a
+// cancel.
+type Stopped struct{ Exec core.ExecOutcome }
+
+// NotAttempted says a step's command never started, such as a checkout that failed.
+type NotAttempted struct{ Failure core.Failure }
 
 // Rejected says every command ran and the job has no acceptable result.
 type Rejected struct{ Reason string }
 
-func (Ran) end()          {}
-func (NotAttempted) end() {}
-func (Passed) end()       {}
-func (Rejected) end()     {}
+// Lost says a step's command started and nobody can say how it ended.
+type Lost struct{ Failure core.Failure }
+
+func (Passed) verdict()       {}
+func (Stopped) verdict()      {}
+func (NotAttempted) verdict() {}
+func (Rejected) verdict()     {}
+func (Lost) verdict()         {}

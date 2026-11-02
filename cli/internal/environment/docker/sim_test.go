@@ -92,14 +92,13 @@ func (s *sim) step(i int, process uint32, sc scenario) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var (
-		outcome core.ExecOutcome
-		err     error
+		attempt core.Attempt
 		wg      sync.WaitGroup
 	)
 	done := make(chan struct{})
 	wg.Go(func() {
 		defer close(done)
-		outcome, err = e.Run(ctx, x, nil)
+		attempt = e.Run(ctx, x, nil)
 	})
 	switch sc {
 	case scenCancel:
@@ -118,7 +117,20 @@ func (s *sim) step(i int, process uint32, sc scenario) {
 	wg.Wait()
 
 	prefix := fmt.Sprintf("vibesys-cli-%08x", process)
-	where := fmt.Sprintf("seed %d step %d (%s), outcome %+v, err %v", s.seed, i, sc, outcome, err)
+	where := fmt.Sprintf("seed %d step %d (%s), attempt %+v", s.seed, i, sc, attempt)
+	var says string
+	switch a := attempt.(type) {
+	case core.NotStarted:
+		says = a.Failure.Message
+	case core.Unobserved:
+		says = a.Failure.Message
+	case core.Ended:
+		if a.Exec.Kind == "" {
+			t.Fatalf("%s: an ending of no kind", where)
+		}
+	default:
+		t.Fatalf("%s: no attempt", where)
+	}
 	if running := s.d.Running(); len(running) != 0 {
 		t.Fatalf("%s: containers %v still run after the run returned", where, running)
 	}
@@ -127,12 +139,9 @@ func (s *sim) step(i int, process uint32, sc scenario) {
 			continue
 		}
 		// A container this run made may stay only if the run says so, by name.
-		if err == nil || !strings.Contains(err.Error(), c.Name) {
+		if !strings.Contains(says, c.Name) {
 			t.Fatalf("%s: the run's container %s is left and the run does not say so", where, c.Name)
 		}
-	}
-	if err == nil && outcome.Kind == "" {
-		t.Fatalf("%s: neither an outcome nor an error", where)
 	}
 }
 
@@ -151,9 +160,9 @@ func TestNothingIsLeftBehindWhicheverCallFailsOrProcessDies(t *testing.T) {
 		// processes left, and then leaves nothing of its own.
 		s.d.SetFaults(nil)
 		r := newRig(t, s.d, options{process: 99})
-		out, err := r.env(t).Run(context.Background(), core.Execution{Checkout: checkout(t), Argv: []string{"print", "x"}, Timeout: time.Hour}, nil)
-		if err != nil || out.Kind != core.ExecExited {
-			t.Fatalf("seed %d: the run after the failures: %+v, %v", seed, out, err)
+		a := r.env(t).Run(context.Background(), core.Execution{Checkout: checkout(t), Argv: []string{"print", "x"}, Timeout: time.Hour}, nil)
+		if e, ok := a.(core.Ended); !ok || e.Exec.Kind != core.ExecExited {
+			t.Fatalf("seed %d: the run after the failures: %+v", seed, a)
 		}
 		if left := s.d.Containers(); len(left) != 0 {
 			t.Fatalf("seed %d: %d containers left after a clean run: %+v", seed, len(left), left)
@@ -168,7 +177,7 @@ func TestALostSupervisorsContainerStopsAndTheNextRunRemovesIt(t *testing.T) {
 	first := s.r
 	x := core.Execution{Checkout: checkout(t), Argv: []string{"alive", "job", ";", "mark", "up", ";", "hold", "forever"}, Timeout: time.Hour}
 	var wg sync.WaitGroup
-	wg.Go(func() { _, _ = first.env(t).Run(context.Background(), x, nil) })
+	wg.Go(func() { _ = first.env(t).Run(context.Background(), x, nil) })
 	ctx, cancel := context.WithTimeout(context.Background(), envtest.Backstop)
 	defer cancel()
 	if !s.world.Reached(ctx, "up") {
@@ -182,9 +191,7 @@ func TestALostSupervisorsContainerStopsAndTheNextRunRemovesIt(t *testing.T) {
 
 	next := newRig(t, s.daemon, options{process: 2})
 	e := next.env(t)
-	if _, err := e.Run(context.Background(), core.Execution{Checkout: checkout(t), Argv: []string{"print", "x"}, Timeout: time.Hour}, nil); err != nil {
-		t.Fatal(err)
-	}
+	envtest.Ended(t, e.Run(context.Background(), core.Execution{Checkout: checkout(t), Argv: []string{"print", "x"}, Timeout: time.Hour}, nil))
 	if left := s.daemon.Containers(); len(left) != 0 {
 		t.Fatalf("containers %+v left after the next run", left)
 	}

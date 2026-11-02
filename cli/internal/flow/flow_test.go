@@ -150,7 +150,7 @@ func (w *world) answer(n int, r flow.Request) flow.Event {
 		case cancelledRun:
 			ran.Exec = core.ExecOutcome{Kind: core.ExecCancelled}
 		case unknownEnding:
-			ran.Exec = core.ExecOutcome{Kind: core.ExecUnknown}
+			return flow.Unseen{Failure: core.Failure{Kind: core.FailureUnavailable, Message: "the container is gone"}}
 		case cannotRun:
 			return flow.NotRan{Failure: core.Failure{Kind: core.FailureUnavailable, Message: "no environment"}}
 		}
@@ -318,8 +318,9 @@ func checkRun(t *testing.T, label string, p flow.Plan, w *world, v flow.Verdict)
 			fail("time out not carried")
 		}
 	case unknownEnding:
-		if !wasStopped || stopped.Exec.Kind != core.ExecUnknown {
-			fail("unknown ending not carried")
+		// A step that started is never "not attempted": it may have done anything.
+		if _, ok := v.(flow.Lost); !ok {
+			fail("an ending nobody saw is not reported as lost")
 		}
 	case cannotRun, noCheckout, wrongAnswer:
 		if _, ok := v.(flow.NotAttempted); !ok {
@@ -504,7 +505,7 @@ func TestSeededRandomRunsKeepEveryInvariant(t *testing.T) {
 // The machine does not trust its shell: whatever events it is given, in whatever order, it stops
 // after a bounded number of steps with a coherent verdict, and a verdict is final.
 func randomEvent(r *rand.Rand) flow.Event {
-	switch r.IntN(8) {
+	switch r.IntN(9) {
 	case 0:
 		return flow.CheckedOut{Dir: "/d", Scratch: "/s"}
 	case 1:
@@ -517,8 +518,10 @@ func randomEvent(r *rand.Rand) flow.Event {
 		return flow.NotRan{Failure: core.Failure{Message: "x"}}
 	case 5:
 		return flow.Cancelled{}
+	case 6:
+		return flow.Unseen{Failure: core.Failure{Message: "x"}}
 	}
-	kinds := []core.ExecKind{core.ExecExited, core.ExecExited, core.ExecExited, core.ExecTimedOut, core.ExecCancelled, core.ExecServiceExited, core.ExecUnknown, "weird"}
+	kinds := []core.ExecKind{core.ExecExited, core.ExecExited, core.ExecExited, core.ExecTimedOut, core.ExecCancelled, core.ExecServiceExited, "weird"}
 	out := []string{``, `{"ops": 1}`, `{"kind":"hello","protocol":2,"metrics":{"ops":{}}}` + "\n" + `{"kind":"result","values":{"ops":2}}`, `}{`}
 	return flow.Ran{
 		Exec:   core.ExecOutcome{Kind: kinds[r.IntN(len(kinds))], ExitCode: r.IntN(2)},

@@ -277,7 +277,11 @@ func TestAPlanThatDoesNotPassSavesNoResultAndSaysWhy(t *testing.T) {
 			if passedOf(out) != nil {
 				t.Fatalf("outcome = %+v saves a result", out)
 			}
-			rejected, isRejected := out.End.(lifecycle.Rejected)
+			var rejected lifecycle.Rejected
+			isRejected := false
+			if end, ok := out.End.(lifecycle.FlowEnded); ok {
+				rejected, isRejected = end.Verdict.(lifecycle.Rejected)
+			}
 			if isRejected != c.rejected {
 				t.Fatalf("outcome = %+v, rejected = %v, want %v", out, isRejected, c.rejected)
 			}
@@ -395,26 +399,42 @@ func TestCloseEndsARunningCommand(t *testing.T) {
 	}
 }
 
-// execOf is how the command of an outcome ended, zero when it did not run.
+// execOf is how the command of an outcome ended, zero when no ending was seen.
 func execOf(o lifecycle.Outcome) core.ExecOutcome {
-	if end, ok := o.End.(lifecycle.Ran); ok {
-		return end.Exec
+	switch end := o.End.(type) {
+	case lifecycle.CommandEnded:
+		if e, ok := end.Attempt.(core.Ended); ok {
+			return e.Exec
+		}
+	case lifecycle.FlowEnded:
+		if s, ok := end.Verdict.(lifecycle.Stopped); ok {
+			return s.Exec
+		}
 	}
 	return core.ExecOutcome{}
 }
 
-// notAttemptedOf is why an outcome's command was not attempted, nil when it was.
+// notAttemptedOf is why an outcome's command never started, nil when it did.
 func notAttemptedOf(o lifecycle.Outcome) *core.Failure {
-	if end, ok := o.End.(lifecycle.NotAttempted); ok {
-		return &end.Failure
+	switch end := o.End.(type) {
+	case lifecycle.CommandEnded:
+		if e, ok := end.Attempt.(core.NotStarted); ok {
+			return &e.Failure
+		}
+	case lifecycle.FlowEnded:
+		if n, ok := end.Verdict.(lifecycle.NotAttempted); ok {
+			return &n.Failure
+		}
 	}
 	return nil
 }
 
 // passedOf is the result an outcome saves, nil when it saves none.
 func passedOf(o lifecycle.Outcome) *core.Result {
-	if end, ok := o.End.(lifecycle.Passed); ok {
-		return &end.Result
+	if end, ok := o.End.(lifecycle.FlowEnded); ok {
+		if p, ok := end.Verdict.(lifecycle.Passed); ok {
+			return &p.Result
+		}
 	}
 	return nil
 }

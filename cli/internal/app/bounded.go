@@ -82,6 +82,15 @@ func (s boundedStores) Forget(ctx context.Context, scope Scope) error {
 	return err
 }
 
+func (s boundedStores) GivenUp(ctx context.Context, scope Scope) ([]core.JobID, error) {
+	return bounded(ctx, s.timers, s.limit, func(ctx context.Context) ([]core.JobID, error) { return s.inner.GivenUp(ctx, scope) })
+}
+
+func (s boundedStores) Reclaim(ctx context.Context, scope Scope, job core.JobID) error {
+	_, err := bounded(ctx, s.timers, s.limit, func(ctx context.Context) (struct{}, error) { return struct{}{}, s.inner.Reclaim(ctx, scope, job) })
+	return err
+}
+
 // Close is not bounded, as giving a store up only drops a lock.
 func (s boundedStores) Close() error { return s.inner.Close() }
 
@@ -181,10 +190,12 @@ type Forgotten struct {
 	Left []string
 }
 
-// ForgetRepository gives up a repository that is gone for good. The machine forgets its jobs, their
-// supervisors are told to go, and the stores leave the index, so nothing of it waits or holds
-// anything. Nothing on disk is touched where the repository was. A repository that is there, or
-// that the daemon knows nothing of, is refused, as forgetting one is not undone.
+// ForgetRepository gives up a repository that is gone for good. Its commands are ended and their
+// supervisors told to go, then the machine forgets its jobs and the stores leave the index, so
+// nothing of it waits or holds anything. A command that does not end in time is reported left, and
+// holds the machine while it can run, for at most its limit. Nothing on disk is touched where the
+// repository was. A repository that is there or cannot be read, or that the daemon knows nothing
+// of, is refused, as forgetting one is not undone.
 func (a *App) ForgetRepository(ctx context.Context, repository string) (Forgotten, error) {
 	scopes, runs, err := a.ofRepository(ctx, repository)
 	if err != nil {
@@ -201,22 +212,39 @@ func (a *App) ForgetRepository(ctx context.Context, repository string) (Forgotte
 		return Forgotten{}, &core.Failure{Kind: core.FailureNotFound, Message: fmt.Sprintf("the daemon knows of no repository %s", repository)}
 	}
 	for _, scope := range scopes {
-		if _, err := a.cfg.Stores.Find(ctx, scope); err == nil {
+		_, err := a.cfg.Stores.Find(ctx, scope)
+		switch {
+		case err == nil:
 			return Forgotten{}, &core.Failure{Kind: core.FailureConflict, Message: fmt.Sprintf(
 				"the repository %s is still there, with task %s: only a repository that is gone can be forgotten", repository, scope.Task)}
-		} else if ctx.Err() != nil {
+		case ctx.Err() != nil:
 			return Forgotten{}, ctx.Err()
+		case errors.Is(err, store.ErrNoStore), errors.Is(err, store.ErrGone):
+			// Its place is not there: gone, as far as anyone can tell from here.
+		default:
+			// A store that cannot be reached, or that another daemon holds, may be whole: forgetting
+			// it would let its jobs go for good.
+			return Forgotten{}, &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf(
+				"the repository %s cannot be told gone, as task %s's store answered: %v; forget only a repository whose directory is not there",
+				repository, scope.Task, err)}
 		}
 	}
+	// The runs end first, while the machine still holds their jobs: a job it let go of before its
+	// command ended would let the next one start beside it. A run that does not end keeps holding
+	// the machine, as long as its command can run.
 	var out Forgotten
-	for _, scope := range scopes {
-		a.settle(message{event: lifecycle.StoreForgotten{Store: storeIDOf(scope)}})
-	}
+	left := map[lifecycle.StoreID][]lifecycle.LeftRun{}
 	for _, run := range runs {
 		if err := a.endRun(ctx, run); err != nil {
 			a.cfg.Logf("job %s: letting its supervisor go: %v", run.Job(), err)
 			out.Left = append(out.Left, run.Job().String())
+			ref := run.Job()
+			left[ref.Store] = append(left[ref.Store], lifecycle.LeftRun{Ref: ref, Supervisor: a.presenceOf(run)})
 		}
+	}
+	for _, scope := range scopes {
+		id := storeIDOf(scope)
+		a.settle(message{event: lifecycle.StoreForgotten{Store: id, Left: left[id], At: a.now()}})
 	}
 	for _, scope := range scopes {
 		if err := a.cfg.Stores.Forget(ctx, scope); err != nil {

@@ -47,8 +47,11 @@ func TestEveryEndOfACommandIsRecordedAsItIs(t *testing.T) {
 		{"time limit", []string{"timeout"}, core.JobFailed, nil, "ran past its time limit"},
 		{"service never ready", []string{"service-not-ready"}, core.JobFailed, nil, "service was not ready"},
 		{"service exited", []string{"service-exited"}, core.JobFailed, nil, "service exited"},
-		{"environment cannot say", []string{"unknown"}, core.JobLost, nil, "could not say how the job ended"},
-		{"cannot be attempted", []string{"fail", "no disk"}, core.JobFailed, nil, "no disk"},
+		{"environment cannot say", []string{"unknown"}, core.JobLost, nil, "how it ended is not known"},
+		{"cannot be attempted", []string{"fail", "no disk"}, core.JobFailed, nil, "could not be run: no disk"},
+		// A command that started and whose environment then failed may have done anything: it is
+		// lost, and never "could not be run", which says nothing of it ran.
+		{"environment fails after the start", []string{"print", "x", ";", "fail", "late"}, core.JobLost, nil, "how it ended is not known: late"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := newWorld(t)

@@ -94,6 +94,8 @@ type world struct {
 	// forgetting says an operator asked for the lost repository to be given up, which is the one
 	// thing that lets go of a run whose store shows it running.
 	forgetting bool
+	// forgot says the forget of the lost repository went through, and trying says one is in flight.
+	forgot, trying bool
 	// forgotten are the stores the daemon gave up.
 	forgotten map[app.Scope]bool
 	// down says the stores fail every call. Only the driver touches it.
@@ -101,6 +103,11 @@ type world struct {
 	// leaving is how many more opens find a store still held by the daemon that died, as the
 	// kernel frees the machine's lock before a store's. It is guarded by mu.
 	leaving int
+
+	// vanished are the runs whose place is gone for good, and givenUp the jobs of each store whose
+	// owner record the operator removed, less the ones the daemon took back. Both are guarded by mu.
+	vanished map[lifecycle.Ref]bool
+	givenUp  map[app.Scope][]core.JobID
 
 	// What happened, for the invariants.
 	killed     map[lifecycle.Ref]bool
@@ -167,7 +174,7 @@ func newWorld(seed uint64) *world {
 		follows:   map[lifecycle.Ref]context.CancelCauseFunc{},
 		absent:    map[string]bool{},
 		forgotten: map[app.Scope]bool{},
-		killed:    map[lifecycle.Ref]bool{}, asked: map[lifecycle.Ref]bool{},
+		killed:    map[lifecycle.Ref]bool{}, vanished: map[lifecycle.Ref]bool{}, givenUp: map[app.Scope][]core.JobID{}, asked: map[lifecycle.Ref]bool{},
 		finals: map[lifecycle.Ref]core.JobState{}, flaky: map[lifecycle.Ref]bool{},
 		cancelSeen: map[lifecycle.Ref]*incarnation{}, cancelSent: map[lifecycle.Ref]bool{},
 		probes: map[lifecycle.Ref]int{}, unanswered: map[string]bool{}, seed: seed,
@@ -246,6 +253,9 @@ func (s simStores) open(ctx context.Context, scope app.Scope) (store.Store, erro
 			return nil, &core.Failure{Kind: core.FailureInvalidInput, Message: "no such store in the simulation"}
 		}
 		if s.w.isAbsent(scope.Repository) {
+			if s.w.isLost(scope.Repository) {
+				return nil, errRemoved
+			}
 			return nil, errAway
 		}
 		if s.w.stillLeaving() {
@@ -269,6 +279,37 @@ func (s simStores) Forget(_ context.Context, scope app.Scope) error {
 	s.w.mu.Lock()
 	defer s.w.mu.Unlock()
 	s.w.forgotten[scope] = true
+	return nil
+}
+
+// GivenUp is the jobs the operator gave up that the store still has running.
+func (s simStores) GivenUp(ctx context.Context, scope app.Scope) ([]core.JobID, error) {
+	if _, err := s.open(ctx, scope); err != nil {
+		return nil, err
+	}
+	running, err := s.w.raw[scope].Jobs(context.Background(), core.JobFilter{States: []core.JobState{core.JobRunning}})
+	if err != nil {
+		return nil, err
+	}
+	s.w.mu.Lock()
+	defer s.w.mu.Unlock()
+	var out []core.JobID
+	for _, j := range running {
+		if slices.Contains(s.w.givenUp[scope], j.ID) {
+			out = append(out, j.ID)
+		}
+	}
+	return out, nil
+}
+
+// Reclaim takes a job back from the operator's give-up.
+func (s simStores) Reclaim(ctx context.Context, scope app.Scope, job core.JobID) error {
+	if _, err := s.open(ctx, scope); err != nil {
+		return err
+	}
+	s.w.mu.Lock()
+	defer s.w.mu.Unlock()
+	s.w.givenUp[scope] = slices.DeleteFunc(s.w.givenUp[scope], func(id core.JobID) bool { return id == job })
 	return nil
 }
 
@@ -298,6 +339,12 @@ func (w *world) isForgetting(repo string) bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.forgetting && repo == w.lost
+}
+
+func (w *world) isLost(repo string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return repo == w.lost
 }
 
 func (w *world) isAbsent(repo string) bool {

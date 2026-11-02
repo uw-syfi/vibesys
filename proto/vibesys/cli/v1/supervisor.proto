@@ -107,9 +107,9 @@ enum ExecutionKind {
   EXECUTION_KIND_CANCELLED = 3;
   EXECUTION_KIND_SERVICE_NOT_READY = 4;
   EXECUTION_KIND_SERVICE_EXITED = 5;
-  // The environment cannot say what happened, such as a lost connection to a container. It is
-  // neither success nor failure.
-  EXECUTION_KIND_UNKNOWN = 6;
+  // Not sent: a command whose end the environment did not see has no ending, and is reported as
+  // CommandEnd.unobserved or FlowEnd.lost. A receiver reads it as an ending it does not know.
+  EXECUTION_KIND_UNKNOWN = 6 [deprecated = true];
 }
 
 message ExecutionOutcome {
@@ -118,17 +118,49 @@ message ExecutionOutcome {
   int32 exit_code = 2;
 }
 
+// CommandEnd is how a command job's one attempt went.
+message CommandEnd {
+  oneof attempt {
+    // The command never started, so nothing of it ran, and this says why.
+    Failure not_started = 1;
+    // The command started and the environment saw it end this way.
+    ExecutionOutcome ended = 2;
+    // The command started and the environment cannot vouch for how it ended or for what it left,
+    // and this says what was lost.
+    Failure unobserved = 3;
+  }
+}
+
+// FlowEnd is how a check or a measure job ended.
+message FlowEnd {
+  oneof verdict {
+    // The job passed, and this is the result it found.
+    Result passed = 1;
+    // A step's command ended unlike a pass, this way.
+    ExecutionOutcome stopped = 2;
+    // A step's command never started, and this says why.
+    Failure not_attempted = 3;
+    // Every command ran and the job has no acceptable result. The text says why.
+    string rejected = 4;
+    // A step's command started and nobody can say how it ended, and this says what was lost.
+    Failure lost = 5;
+  }
+}
+
 // SupervisorOutcome is the one report a supervisor makes about its job.
 message SupervisorOutcome {
+  // How the job ended. Its member is the job's kind: a command job ends in command, and a check or
+  // a measure job in flow. The members before command are not sent, and a receiver reads them as
+  // an ending it does not know, which is never a success.
   oneof result {
-    // The command ran, or was killed, and this is how it ended.
-    ExecutionOutcome executed = 1;
-    // The command could not be attempted, such as a checkout or an environment that failed.
-    Failure not_attempted = 2;
-    // A check or a measure job passed, and this is the result it found.
-    Result passed = 4;
-    // Every command ran and the job has no acceptable result. The text says why.
-    string rejected = 5;
+    ExecutionOutcome executed = 1 [deprecated = true];
+    Failure not_attempted = 2 [deprecated = true];
+    Result passed = 4 [deprecated = true];
+    string rejected = 5 [deprecated = true];
+    // How a command job's one attempt went.
+    CommandEnd command = 6;
+    // How a check or a measure job ended.
+    FlowEnd flow = 7;
   }
   // The reason of the cancel request, present when one reached the supervisor before the command
   // ended. The reason may be empty, so presence and not the text says that a cancel was asked. A

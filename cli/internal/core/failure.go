@@ -1,6 +1,9 @@
 package core
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 // FailureKind is why a command could not do what it was asked.
 type FailureKind string
@@ -31,4 +34,14 @@ func (f *Failure) Error() string { return string(f.Kind) + ": " + f.Message }
 // failf builds a Failure of a kind with a formatted message.
 func failf(kind FailureKind, format string, args ...any) *Failure {
 	return &Failure{Kind: kind, Message: fmt.Sprintf(format, args...)}
+}
+
+// AsFailure returns the Failure an error is or wraps, and for any other error a FailureInternal
+// with its text.
+func AsFailure(err error) Failure {
+	var f *Failure
+	if errors.As(err, &f) {
+		return *f
+	}
+	return Failure{Kind: FailureInternal, Message: err.Error()}
 }

@@ -203,66 +203,78 @@ func (s *Supervisor) execute() lifecycle.Outcome {
 	s.mu.Lock()
 	asked := s.cancelAsked
 	s.mu.Unlock()
-	if asked {
-		// Cancelled while parked: the command never starts.
-		return ran(core.ExecOutcome{Kind: core.ExecCancelled})
-	}
+	cancelled := core.Ended{Exec: core.ExecOutcome{Kind: core.ExecCancelled}}
 	spec := s.cfg.Launch.Spec
 	if plan := s.cfg.Launch.Plan; plan != nil {
-		return s.executePlan(*plan)
+		if asked {
+			// Cancelled while parked: no step starts.
+			return lifecycle.Outcome{End: lifecycle.FlowEnded{Verdict: lifecycle.Stopped{Exec: cancelled.Exec}}}
+		}
+		return lifecycle.Outcome{End: lifecycle.FlowEnded{Verdict: s.executePlan(*plan)}}
 	}
+	if asked {
+		// Cancelled while parked: the command never starts.
+		return commandEnded(cancelled)
+	}
+	return commandEnded(s.executeCommand(spec))
+}
+
+// executeCommand runs a command job's command once and says what came of it.
+func (s *Supervisor) executeCommand(spec core.JobSpec) core.Attempt {
 	command, ok := spec.Settings.(core.CommandSettings)
 	if !ok {
-		return notAttempted(&core.Failure{Kind: core.FailureInternal, Message: fmt.Sprintf("the launch of a %s job carries no plan", spec.Settings.Kind())})
+		return core.NotStarted{Failure: core.Failure{Kind: core.FailureInternal, Message: fmt.Sprintf("the launch of a %s job carries no plan", spec.Settings.Kind())}}
 	}
 	env, err := s.cfg.Environments.Environment(spec.Environment, s.target())
 	if err != nil {
-		return notAttempted(err)
+		return core.NotStarted{Failure: core.AsFailure(err)}
 	}
 	checkout, remove, err := s.cfg.Checkouts.Checkout(s.ctx, s.cfg.Launch.Repository, spec.Commit)
 	if err != nil {
-		return s.attempt(core.ExecOutcome{}, err)
+		return environment.Finish(s.ctx, core.NotStarted{Failure: core.AsFailure(err)}, nil)
 	}
 	defer remove()
-	out, err := env.Run(s.ctx, core.Execution{
+	return env.Run(s.ctx, core.Execution{
 		Checkout: checkout, Argv: command.Argv, Service: command.Service, Timeout: command.Timeout,
 	}, writer{s})
-	return s.attempt(out, err)
 }
 
 // executePlan drives a check or a measure job through its plan and says how it ended. The plan is
 // the daemon's decision, so nothing here chooses what to run.
-func (s *Supervisor) executePlan(plan flow.Plan) lifecycle.Outcome {
+func (s *Supervisor) executePlan(plan flow.Plan) lifecycle.Verdict {
 	h := s.cfg.Host
 	if h.Backend == nil || h.Files == nil || h.Clock == nil {
-		return notAttempted(&core.Failure{Kind: core.FailureUnavailable, Message: "this supervisor was started without the machine a check or a measure job needs"})
+		return lifecycle.NotAttempted{Failure: core.Failure{Kind: core.FailureUnavailable, Message: "this supervisor was started without the machine a check or a measure job needs"}}
 	}
 	l := s.cfg.Launch
 	env, err := s.cfg.Environments.Environment(l.Spec.Environment, s.target())
 	if err != nil {
-		return notAttempted(err)
+		return lifecycle.NotAttempted{Failure: core.AsFailure(err)}
 	}
 	verdict, err := flowrun.Run(s.ctx, flowrun.Config{
 		Repository: l.Repository, Commit: l.Spec.Commit, Environment: env, Checkouts: s.cfg.Checkouts,
 		Backend: h.Backend, Files: h.Files, Clock: h.Clock, Output: writer{s},
 	}, plan)
 	if err != nil {
-		return notAttempted(err)
+		return lifecycle.NotAttempted{Failure: core.AsFailure(err)}
 	}
 	switch v := verdict.(type) {
 	case flow.Passed:
-		return lifecycle.Outcome{End: lifecycle.Passed{Result: plan.Record(l.Job, l.Spec.Commit, v.Findings, h.Clock.Now())}}
+		return lifecycle.Passed{Result: plan.Record(l.Job, l.Spec.Commit, v.Findings, h.Clock.Now())}
 	case flow.NotAttempted:
-		return lifecycle.Outcome{End: lifecycle.NotAttempted{Failure: v.Failure}}
+		return lifecycle.NotAttempted{Failure: v.Failure}
 	case flow.Rejected:
-		return lifecycle.Outcome{End: lifecycle.Rejected{Reason: v.Reason}}
+		return lifecycle.Rejected{Reason: v.Reason}
 	case flow.Stopped:
 		// A step that ended unlike a pass: the job's output says which, and the settlement of the
 		// exit says the rest.
 		_, _ = fmt.Fprintf(writer{s}, "vibesys-cli: %s\n", v.Reason)
-		return ran(v.Exec)
+		return lifecycle.Stopped{Exec: v.Exec}
+	case flow.Lost:
+		_, _ = fmt.Fprintf(writer{s}, "vibesys-cli: %s\n", v.Reason)
+		return lifecycle.Lost{Failure: v.Failure}
 	default:
-		return notAttempted(&core.Failure{Kind: core.FailureInternal, Message: "the flow of the job ended without a verdict"})
+		return lifecycle.Lost{Failure: core.Failure{Kind: core.FailureInternal, Message: "the flow of the job ended without a verdict"}}
 	}
 }
 
@@ -272,28 +284,8 @@ func (s *Supervisor) target() environment.Target {
 	return environment.Target{Repository: l.Repository, Commit: l.Spec.Commit, Task: l.Task}
 }
 
-// attempt turns what the environment returned into an outcome. An error is a command that could
-// not be attempted, unless a cancel is what stopped the attempt, which is a cancelled command.
-func (s *Supervisor) attempt(out core.ExecOutcome, err error) lifecycle.Outcome {
-	if err == nil {
-		return ran(out)
-	}
-	if s.ctx.Err() != nil && errors.Is(err, context.Canceled) {
-		return ran(core.ExecOutcome{Kind: core.ExecCancelled})
-	}
-	return notAttempted(err)
-}
-
-func notAttempted(err error) lifecycle.Outcome {
-	var f *core.Failure
-	if !errors.As(err, &f) {
-		f = &core.Failure{Kind: core.FailureInternal, Message: err.Error()}
-	}
-	return lifecycle.Outcome{End: lifecycle.NotAttempted{Failure: *f}}
-}
-
-func ran(out core.ExecOutcome) lifecycle.Outcome {
-	return lifecycle.Outcome{End: lifecycle.Ran{Exec: out}}
+func commandEnded(a core.Attempt) lifecycle.Outcome {
+	return lifecycle.Outcome{End: lifecycle.CommandEnded{Attempt: a}}
 }
 
 // writer is where the command's output goes: into the spool, and to whoever waits for it.

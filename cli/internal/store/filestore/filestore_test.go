@@ -1,8 +1,11 @@
 package filestore_test
 
 import (
+	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
+	"syscall"
 	"testing"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -139,5 +142,56 @@ func TestOpenTaskKeepsAFileStorePerTask(t *testing.T) {
 		if _, err := filestore.OpenTask(repo, bad); err == nil {
 			t.Errorf("OpenTask(%q) succeeded", bad)
 		}
+	}
+}
+
+// unreadable is a filesystem on which one directory cannot be listed, as a disk that answers
+// with an I/O error.
+type unreadable struct {
+	fsys.FS
+	dir string
+}
+
+func (u unreadable) ReadDir(name string) ([]fsys.Entry, error) {
+	if name == u.dir {
+		return nil, syscall.EIO
+	}
+	return u.FS.ReadDir(name)
+}
+
+// Only a store whose place is not there is marked gone, which is what lets a repository be
+// forgotten: one that cannot be read, or that another daemon holds, may be whole.
+func TestOnlyAStoreWhosePlaceIsNotThereIsGone(t *testing.T) {
+	repo := t.TempDir()
+	missing := filepath.Join(repo, "deleted")
+	if _, err := filestore.OpenTask(missing, "task"); !errors.Is(err, store.ErrGone) || !errors.Is(err, store.ErrAway) {
+		t.Errorf("a repository that is not there: %v, want it gone and away", err)
+	}
+	if _, err := filestore.OpenTask(repo, "task", filestore.WithFS(unreadable{fsys.OS{}, repo})); errors.Is(err, store.ErrGone) || !errors.Is(err, store.ErrAway) {
+		t.Errorf("a repository that cannot be read: %v, want it away and not gone", err)
+	}
+	made, err := filestore.OpenTask(repo, "task", filestore.WithOwner(filestore.Owner{Host: "host-a", Dir: "/run/a"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := filestore.OpenTask(repo, "task", filestore.WithOwner(filestore.Owner{Host: "host-b", Dir: "/run/b"})); err == nil || errors.Is(err, store.ErrGone) {
+		t.Errorf("a store another daemon holds: %v, want it refused and not gone", err)
+	}
+	if err := made.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// Everything the store made is deleted, and the repository stays.
+	entries, err := os.ReadDir(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if err := os.RemoveAll(filepath.Join(repo, e.Name())); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entry := filepath.Join(repo, "the-index-entry")
+	if _, err := filestore.OpenTask(repo, "task", filestore.Existing(entry)); !errors.Is(err, store.ErrGone) {
+		t.Errorf("a store that was made and whose directory is not there: %v, want it gone", err)
 	}
 }

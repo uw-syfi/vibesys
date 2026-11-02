@@ -138,15 +138,21 @@ var ErrNoStore = errors.New("no store was made here")
 // that does not carry it is the store's answer.
 var ErrAway = errors.New("the store is away")
 
-// Mark makes a failure carry a mark, which errors.Is finds, and keeps it a *core.Failure.
-func Mark(f *core.Failure, mark error) error { return marked{f, mark} }
+// ErrGone marks a failure that says the place of a store that was made is not there: its
+// repository or its directory does not exist. It comes with ErrAway, as a disk that is not mounted
+// looks the same, so the daemon holds the store's jobs; only a person who knows the repository was
+// deleted on purpose may forget it, and nothing else lets a store be forgotten.
+var ErrGone = errors.New("the store's place is not there")
+
+// Mark makes a failure carry marks, which errors.Is finds, and keeps it a *core.Failure.
+func Mark(f *core.Failure, marks ...error) error { return marked{f, marks} }
 
 type marked struct {
 	*core.Failure
-	mark error
+	marks []error
 }
 
-func (m marked) Unwrap() []error { return []error{m.Failure, m.mark} }
+func (m marked) Unwrap() []error { return append([]error{m.Failure}, m.marks...) }
 
 // ErrOwnerLeaving marks a refused store whose holder has the caller's own place: the same machine
 // and runtime directory, which have one daemon. So it is a daemon on its way out, whose descriptors

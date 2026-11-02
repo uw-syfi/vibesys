@@ -14,7 +14,6 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/backend/cpu"
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
-	"github.com/uw-syfi/vibesys/cli/internal/environment"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv"
 	"github.com/uw-syfi/vibesys/cli/internal/flow"
 	"github.com/uw-syfi/vibesys/cli/internal/flowrun"
@@ -250,39 +249,5 @@ func TestCloseRemovesWhatTheShellMade(t *testing.T) {
 	wg.Wait()
 	if left := r.leaks(); len(left) > 0 {
 		t.Errorf("left %v", left)
-	}
-}
-
-// cancelAsError is an environment that reports a cancel as the context's error and not as an
-// outcome, as an environment does that learns of it only from the call it was making.
-type cancelAsError struct{ environment.Environment }
-
-func (e cancelAsError) Run(ctx context.Context, x core.Execution, out io.Writer) (core.ExecOutcome, error) {
-	got, err := e.Environment.Run(ctx, x, out)
-	if err == nil && got.Kind == core.ExecCancelled {
-		return core.ExecOutcome{}, ctx.Err()
-	}
-	return got, err
-}
-
-func TestACancelThatSurfacesAsAnErrorIsStillACancel(t *testing.T) {
-	r := newFakeRig(t).(*fakeRig)
-	s := stageHangs()[2]
-	cfg := r.config(nil)
-	out := newLineWatch()
-	cfg.Output = out
-	cfg.Environment = cancelAsError{r.env}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	var (
-		wg      sync.WaitGroup
-		verdict flow.Verdict
-	)
-	wg.Go(func() { verdict, _ = flowrun.Run(ctx, cfg, s.plan(false)) })
-	awaitMarker(t, out)
-	cancel()
-	wg.Wait()
-	if stopped, ok := verdict.(flow.Stopped); !ok || !stopped.Cancelled() || stopped.Stage != flow.StageBenchmark {
-		t.Errorf("verdict = %+v", verdict)
 	}
 }

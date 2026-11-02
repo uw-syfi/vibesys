@@ -70,29 +70,21 @@ func (e *Environment) Fingerprint(ctx context.Context) (core.Fingerprint, error)
 }
 
 // Run implements environment.Environment.
-func (e *Environment) Run(ctx context.Context, x core.Execution, out io.Writer) (core.ExecOutcome, error) {
+func (e *Environment) Run(ctx context.Context, x core.Execution, out io.Writer) core.Attempt {
 	if err := environment.Validate(x); err != nil {
-		return core.ExecOutcome{}, err
+		return core.NotStarted{Failure: core.AsFailure(err)}
 	}
 	if ctx.Err() != nil {
-		return core.ExecOutcome{Kind: core.ExecCancelled}, nil
+		return core.Ended{Exec: core.ExecOutcome{Kind: core.ExecCancelled}}
 	}
 	if out == nil {
 		out = io.Discard
 	}
 	r, err := newRun(ctx, e, x, out)
 	if err != nil {
-		return core.ExecOutcome{}, err
+		return environment.Finish(ctx, core.NotStarted{Failure: core.AsFailure(err)}, nil)
 	}
-	outcome, err := r.execute()
-	lost := r.end()
-	switch {
-	case err != nil:
-		return core.ExecOutcome{}, err
-	case lost != nil:
-		// The command ran, but what it wrote was not kept: the environment cannot say what the
-		// run did, as far as its output goes.
-		return core.ExecOutcome{Kind: core.ExecUnknown}, lost
-	}
-	return outcome, nil
+	attempt := r.execute()
+	// What the command wrote and was not kept makes its end one the environment cannot vouch for.
+	return environment.Finish(ctx, attempt, r.end())
 }

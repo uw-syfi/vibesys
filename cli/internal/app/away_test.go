@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"runtime"
@@ -33,7 +34,8 @@ var (
 	scopeA = app.Scope{Repository: repoA, Task: "task"}
 	scopeB = app.Scope{Repository: repoB, Task: "task"}
 
-	errGone = store.Mark(&core.Failure{Kind: core.FailureUnavailable, Message: "the repository is not there"}, store.ErrAway)
+	errAway    = store.Mark(&core.Failure{Kind: core.FailureUnavailable, Message: "the repository cannot be read"}, store.ErrAway)
+	errRemoved = store.Mark(&core.Failure{Kind: core.FailureUnavailable, Message: "the repository is not there"}, store.ErrAway, store.ErrGone)
 )
 
 // limits are timers for a daemon with a store that may hang. A retry takes no time. The slow
@@ -65,6 +67,24 @@ func (l *limits) Timeout(ctx context.Context, d time.Duration) (<-chan struct{},
 	}
 }
 
+// awaitSlow waits until n things wait out the slow period.
+func (l *limits) awaitSlow(t *testing.T, n int) {
+	t.Helper()
+	ctx := ctxFor(t)
+	for {
+		l.mu.Lock()
+		got := len(l.slow)
+		l.mu.Unlock()
+		if got >= n {
+			return
+		}
+		if ctx.Err() != nil {
+			t.Fatalf("%d things wait out the slow period, want %d", got, n)
+		}
+		runtime.Gosched()
+	}
+}
+
 // pass ends the slow period of everything waiting it out.
 func (l *limits) pass() {
 	l.mu.Lock()
@@ -93,10 +113,34 @@ type outage struct {
 	limits *limits
 	freed  chan struct{}
 
+	// tries is how many times the daemon tries a call before it gives up; zero is attempts.
+	tries int
+	// stopTimeout is how long the daemon waits for a command it ended; zero is callLimit.
+	stopTimeout time.Duration
+
 	mu      sync.Mutex
 	away    map[string]bool
+	removed map[string]bool
 	hung    map[string]bool
 	refused map[string]int
+	// missRunning, when set, is the next record of a job as running: it waits for release and
+	// then fails as an away disk does, with nothing written.
+	missRunning *gate
+}
+
+// gate holds one call until the test lets it go, and says when the call arrived.
+type gate struct{ entered, release chan struct{} }
+
+func newGate() *gate { return &gate{entered: make(chan struct{}), release: make(chan struct{})} }
+
+// await waits until the call arrived.
+func (g *gate) await(t *testing.T) {
+	t.Helper()
+	select {
+	case <-g.entered:
+	case <-ctxFor(t).Done():
+		t.Fatal("the call never came")
+	}
 }
 
 func newOutage(t *testing.T) (*world, *outage) {
@@ -104,7 +148,7 @@ func newOutage(t *testing.T) (*world, *outage) {
 	w := newWorld(t)
 	o := &outage{
 		Stores: w.stores, w: w, limits: &limits{armed: map[context.Context]chan struct{}{}}, freed: make(chan struct{}),
-		away: map[string]bool{}, hung: map[string]bool{}, refused: map[string]int{},
+		away: map[string]bool{}, removed: map[string]bool{}, hung: map[string]bool{}, refused: map[string]int{},
 	}
 	t.Cleanup(func() { close(o.freed) })
 	return w, o
@@ -118,8 +162,8 @@ func (o *outage) build(sups supervisor.Supervisors) *app.App {
 	a := app.New(app.Config{
 		Clock: o.w.clock, Timers: o.limits, Stores: o, Supervisors: sups,
 		Environments: fakeenv.Environments{core.EnvironmentHost: o.w.env},
-		Retry:        app.Retry{Attempts: attempts, First: time.Millisecond, Longest: time.Millisecond},
-		CallTimeout:  callLimit, StopTimeout: callLimit, SlowPeriod: slowPeriod, LogBatchDelay: time.Millisecond,
+		Retry:        app.Retry{Attempts: cmp.Or(o.tries, attempts), First: time.Millisecond, Longest: time.Millisecond},
+		CallTimeout:  callLimit, StopTimeout: cmp.Or(o.stopTimeout, callLimit), SlowPeriod: slowPeriod, LogBatchDelay: time.Millisecond,
 		Logf: func(string, ...any) {},
 	})
 	o.w.apps = append(o.w.apps, a)
@@ -142,6 +186,24 @@ func (o *outage) takeAway(repo string) {
 	o.away[repo] = true
 }
 
+// remove deletes the repository: its directory is not there.
+func (o *outage) remove(repo string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.removed[repo] = true
+}
+
+func (o *outage) takeMissRunning(t core.Transition) *gate {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	g := o.missRunning
+	if g == nil || t.To != core.JobRunning {
+		return nil
+	}
+	o.missRunning = nil
+	return g
+}
+
 func (o *outage) bringBack(repo string) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -157,18 +219,21 @@ func (o *outage) hang(repo string) {
 // reach is what a call to the repository meets.
 func (o *outage) reach(ctx context.Context, repo string) error {
 	o.mu.Lock()
-	away, hung := o.away[repo], o.hung[repo]
-	if away || hung {
+	away, removed, hung := o.away[repo], o.removed[repo], o.hung[repo]
+	if away || removed || hung {
 		o.refused[repo]++
 	}
 	o.mu.Unlock()
+	if removed {
+		return errRemoved
+	}
 	if hung {
 		o.limits.expire(ctx)
 		<-o.freed
-		return errGone
+		return errAway
 	}
 	if away {
-		return errGone
+		return errAway
 	}
 	return nil
 }
@@ -238,6 +303,11 @@ func (s outageStore) Jobs(ctx context.Context, f core.JobFilter) ([]core.Job, er
 func (s outageStore) Transition(ctx context.Context, t core.Transition) (core.Job, error) {
 	if err := s.o.reach(ctx, s.repo); err != nil {
 		return core.Job{}, err
+	}
+	if g := s.o.takeMissRunning(t); g != nil {
+		close(g.entered)
+		<-g.release
+		return core.Job{}, errAway
 	}
 	return s.Store.Transition(ctx, t)
 }
@@ -444,6 +514,47 @@ func TestARunningJobOfAGoneRepositoryHoldsTheMachineUpToItsTimeout(t *testing.T)
 
 // P2-1: a job whose supervisor died while its store could not say what the job was ends, and the
 // calls that wait for it end with it.
+// A job cancelled while its store did not take the record of its launch is shown queued, and the
+// daemon moves it from there at once, even when it tries each call once: following the state the
+// store shows does not spend a try that a later call would need.
+func TestACancelDuringALaunchTheStoreMissedEndsOnOneTry(t *testing.T) {
+	w, o := newOutage(t)
+	o.tries = 1
+	miss := newGate()
+	o.missRunning = miss
+	a := o.start(w.supervisors())
+	job := submitAs(t, a, callA, "exit", "0")
+	<-miss.entered
+	type answer struct {
+		job core.Job
+		err error
+	}
+	done := make(chan answer, 1)
+	go func() {
+		got, err := a.Cancel(ctxFor(t), callA, job.ID, "enough")
+		done <- answer{got, err}
+	}()
+	// The sweep and the cancel wait out the slow period: the cancel was asked of the machine
+	// before the launch says how it went.
+	o.limits.awaitSlow(t, 2)
+	close(miss.release)
+	ctx := ctxFor(t)
+	for {
+		select {
+		case got := <-done:
+			if got.err != nil || got.job.State != core.JobCancelled {
+				t.Fatalf("Cancel = %s, %v; want cancelled", got.job.State, got.err)
+			}
+			return
+		case <-ctx.Done():
+			t.Fatal("Cancel did not answer")
+		default:
+		}
+		o.limits.pass()
+		runtime.Gosched()
+	}
+}
+
 func TestAJobDroppedWhileItsStoreWasAwayEnds(t *testing.T) {
 	for name, restart := range map[string]bool{"the daemon lives": false, "the daemon restarts": true} {
 		t.Run(name, func(t *testing.T) {
@@ -575,9 +686,108 @@ func TestEveryConnectionToASupervisorIsGivenUp(t *testing.T) {
 	}
 }
 
+// heldCancels is supervisors whose runs, as listed, take a cancel only when the test says: with a
+// gate, a cancel waits for it, and with none, a cancel is dropped, as one that never reaches a
+// command that ignores it.
+type heldCancels struct {
+	supervisor.Supervisors
+	gate *gate
+}
+
+func (s heldCancels) Runs(ctx context.Context) ([]supervisor.Run, error) {
+	runs, err := s.Supervisors.Runs(ctx)
+	for i, run := range runs {
+		if alive, ok := run.(supervisor.Alive); ok {
+			alive.Handle = heldCancel{Handle: alive.Handle, gate: s.gate}
+			runs[i] = alive
+		}
+	}
+	return runs, err
+}
+
+type heldCancel struct {
+	supervisor.Handle
+	gate *gate
+}
+
+func (h heldCancel) Cancel(ctx context.Context, reason string) error {
+	if h.gate == nil {
+		return nil
+	}
+	close(h.gate.entered)
+	<-h.gate.release
+	return h.Handle.Cancel(ctx, reason)
+}
+
+// #3762: forgetting a repository ends its commands before the machine lets its jobs go, so the next
+// job does not start beside a command that is still ending.
+func TestForgettingARepositoryEndsItsCommandsBeforeTheNextJobStarts(t *testing.T) {
+	w, o := newOutage(t)
+	cancel := newGate()
+	a := o.start(heldCancels{Supervisors: w.supervisors(), gate: cancel})
+	job := submitAs(t, a, callA, "hold", "g", ";", "exit", "0")
+	o.awaitIn(t, a, scopeA, job.ID, "running", func(j core.Job) bool { return j.State == core.JobRunning })
+	other := submitAs(t, a, callB, "print", "other", ";", "exit", "0")
+	o.remove(repoA)
+	done := make(chan error, 1)
+	go func() {
+		_, err := a.ForgetRepository(ctxFor(t), repoA)
+		done <- err
+	}()
+	cancel.await(t)
+	if st := a.Status(); st.Queued != 1 {
+		t.Fatalf("the next job left the queue while the forgotten repository's command still ran: %+v", st)
+	}
+	close(cancel.release)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctxFor(t).Done():
+		t.Fatal("the forget did not end")
+	}
+	if got := o.awaitFinalIn(t, a, scopeB, other.ID); got.State != core.JobSucceeded {
+		t.Fatalf("the other repository's job = %s", got.State)
+	}
+}
+
+// #3762: a command of a forgotten repository that does not end when it is told is reported left,
+// and holds the machine while it can run, up to its limit, as it did before the forget.
+func TestACommandLeftByAForgetHoldsTheMachineUpToItsLimit(t *testing.T) {
+	w, o := newOutage(t)
+	o.stopTimeout = time.Millisecond
+	a := o.start(heldCancels{Supervisors: w.supervisors()})
+	spec := command("hold", "g", ";", "exit", "0")
+	spec.Settings = core.CommandSettings{Argv: spec.Settings.(core.CommandSettings).Argv, Timeout: time.Minute}
+	if _, err := a.Submit(ctxFor(t), app.SubmitRequest{Context: callA, Spec: spec}); err != nil {
+		t.Fatal(err)
+	}
+	awaitActive(t, w)
+	other := submitAs(t, a, callB, "print", "other", ";", "exit", "0")
+	o.remove(repoA)
+	out, err := a.ForgetRepository(ctxFor(t), repoA)
+	if err != nil || len(out.Left) != 1 {
+		t.Fatalf("ForgetRepository = %+v, %v; want the running job left", out, err)
+	}
+	if st := a.Status(); st.Queued != 1 {
+		t.Fatalf("the next job left the queue beside a command left running within its limit: %+v", st)
+	}
+	o.limits.pass()
+	if n := w.ran("other"); n != 0 {
+		t.Fatalf("the other job ran beside a command left running within its limit: %d runs", n)
+	}
+	w.clock.Advance(2 * time.Minute)
+	if got := o.awaitFinalIn(t, a, scopeB, other.ID); got.State != core.JobSucceeded {
+		t.Fatalf("the other repository's job = %s", got.State)
+	}
+	w.gates.Release("g")
+	awaitIdle(t, w)
+}
+
 // A repository that is gone for good is given up: its jobs leave the machine, what is left of its
-// runs is let go of, and its stores leave what the daemon knows. One that is there, or that the
-// daemon never heard of, is refused, as forgetting cannot be undone.
+// runs is let go of, and its stores leave what the daemon knows. One that is there, one that cannot
+// be reached, and one the daemon never heard of are refused, as forgetting cannot be undone.
 func TestForgettingARepositoryThatIsGone(t *testing.T) {
 	w, o := newOutage(t)
 	a := o.start(w.supervisors())
@@ -596,6 +806,12 @@ func TestForgettingARepositoryThatIsGone(t *testing.T) {
 	o.takeAway(repoA)
 	a.Close()
 	a = o.start(w.supervisors())
+	// A store that cannot be read may be whole, with jobs that still run: only one whose place is
+	// not there is gone.
+	if _, err := a.ForgetRepository(ctxFor(t), repoA); !errors.As(err, &f) || f.Kind != core.FailureUnavailable {
+		t.Fatalf("forgetting a repository that cannot be reached = %v, want it refused as unavailable", err)
+	}
+	o.remove(repoA)
 	out, err := a.ForgetRepository(ctxFor(t), repoA)
 	if err != nil {
 		t.Fatal(err)

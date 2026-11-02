@@ -59,9 +59,13 @@ type Ran struct {
 	ReadError string
 }
 
-// NotRan answers Run when the command could not be attempted at all, such as an environment that
-// is not there.
+// NotRan answers Run when the command never started, such as an environment that is not there.
 type NotRan struct{ Failure core.Failure }
+
+// Unseen answers Run when the command started and nobody can say how it ended, such as an
+// environment whose container was lost under it. It is never NotRan: what started may have done
+// anything.
+type Unseen struct{ Failure core.Failure }
 
 // Observed answers Observe. A machine that could not be read leaves its fields zero: the facts
 // and the load are recorded and never acted on.
@@ -79,10 +83,11 @@ func (CheckedOut) event()     {}
 func (CheckoutFailed) event() {}
 func (Ran) event()            {}
 func (NotRan) event()         {}
+func (Unseen) event()         {}
 func (Observed) event()       {}
 func (Cancelled) event()      {}
 
-// Verdict is how the job ended: Passed, NotAttempted, Rejected or Stopped. The set is closed, so a
+// Verdict is how the job ended: Passed, NotAttempted, Rejected, Stopped or Lost. The set is closed, so a
 // job that passed carries its findings and nothing else, and one that did not pass carries none.
 // It is nil until the machine is done.
 type Verdict interface{ verdict() }
@@ -111,10 +116,19 @@ type Stopped struct {
 	Reason string
 }
 
+// Lost says a step's command started and nobody can say how it ended.
+type Lost struct {
+	Stage   Stage
+	Failure core.Failure
+	// Reason is a line for the job's output saying what ended it.
+	Reason string
+}
+
 func (Passed) verdict()       {}
 func (NotAttempted) verdict() {}
 func (Rejected) verdict()     {}
 func (Stopped) verdict()      {}
+func (Lost) verdict()         {}
 
 // Cancelled reports whether a cancel ended the job.
 func (s Stopped) Cancelled() bool { return s.Exec.Kind == core.ExecCancelled }
@@ -130,6 +144,8 @@ func Ending(v Verdict) (Stage, string) {
 	case Rejected:
 		return StageBenchmark, v.Reason
 	case Stopped:
+		return v.Stage, v.Reason
+	case Lost:
 		return v.Stage, v.Reason
 	default:
 		return "", ""
@@ -215,8 +231,8 @@ func Step(s State, e Event) (State, Request) {
 			}
 			return s.afterBuild()
 		}
-		if n, ok := e.(NotRan); ok {
-			return s.notRan(StageBuild, n), nil
+		if v, ok := s.unrun(StageBuild, e); ok {
+			return s.end(v), nil
 		}
 	case phaseCheck:
 		if r, ok := e.(Ran); ok {
@@ -229,8 +245,8 @@ func Step(s State, e Event) (State, Request) {
 			}
 			return s.afterCheck()
 		}
-		if n, ok := e.(NotRan); ok {
-			return s.notRan(StageCheck, n), nil
+		if v, ok := s.unrun(StageCheck, e); ok {
+			return s.end(v), nil
 		}
 	case phaseBefore:
 		if o, ok := e.(Observed); ok {
@@ -241,8 +257,8 @@ func Step(s State, e Event) (State, Request) {
 		if r, ok := e.(Ran); ok {
 			return s.sampled(r)
 		}
-		if n, ok := e.(NotRan); ok {
-			return s.notRan(StageBenchmark, n), nil
+		if v, ok := s.unrun(StageBenchmark, e); ok {
+			return s.end(v), nil
 		}
 	case phaseAfter:
 		if o, ok := e.(Observed); ok {
@@ -368,9 +384,20 @@ func (s State) commandEnded(stage Stage, r Ran) (Verdict, bool) {
 	return stopped(fmt.Sprintf("the %s step ended in a way that is neither success nor failure (%s)", stage, r.Exec.Kind))
 }
 
-func (s State) notRan(stage Stage, n NotRan) State {
-	f := n.Failure
-	return s.end(NotAttempted{Stage: stage, Failure: f, Reason: fmt.Sprintf("the %s step could not be run: %s", stage, f.Message)})
+// unrun is the verdict on a Run answered without an ending: a command that never started, or one
+// whose ending nobody saw. ok is false for any other answer.
+func (s State) unrun(stage Stage, e Event) (v Verdict, ok bool) {
+	switch e := e.(type) {
+	case NotRan:
+		f := e.Failure
+		return NotAttempted{Stage: stage, Failure: f, Reason: fmt.Sprintf("the %s step could not be run: %s", stage, f.Message)}, true
+	case Unseen:
+		f := e.Failure
+		return Lost{Stage: stage, Failure: f, Reason: fmt.Sprintf("the %s step ran, and how it ended is not known: %s", stage, f.Message)}, true
+	default:
+		// Any other answer says how the command ended, or is not an answer to Run.
+		return nil, false
+	}
 }
 
 func (s State) passed(o Observed) State {

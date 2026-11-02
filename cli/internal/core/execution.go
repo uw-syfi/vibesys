@@ -25,23 +25,42 @@ type Execution struct {
 	Timeout time.Duration
 }
 
-// ExecKind is how an execution ended.
+// ExecKind is how an execution that the environment saw end ended. The set is closed.
 type ExecKind string
 
-// The execution endings. ExecUnknown means the environment cannot say what happened, such as a
-// lost connection to a container, so a caller does not read it as success or failure.
+// The execution endings. An execution whose end the environment did not see has none: it is an
+// Unobserved attempt, not an ending.
 const (
 	ExecExited          ExecKind = "exited"
 	ExecTimedOut        ExecKind = "timed_out"
 	ExecCancelled       ExecKind = "cancelled"
 	ExecServiceNotReady ExecKind = "service_not_ready"
 	ExecServiceExited   ExecKind = "service_exited"
-	ExecUnknown         ExecKind = "unknown"
 )
 
-// ExecOutcome is what an execution did.
+// ExecOutcome is how an execution ended.
 type ExecOutcome struct {
 	Kind ExecKind
 	// ExitCode is set when Kind is ExecExited.
 	ExitCode int
 }
+
+// Attempt is what one attempt to run an execution did, as the environment knows it. The set is
+// closed, so a caller tells a command that never started from one that ran and whose end is not
+// known: only the first can be run again without repeating anything.
+type Attempt interface{ attempt() }
+
+// NotStarted says no process of the execution started, so nothing of it ran. Failure says why.
+type NotStarted struct{ Failure Failure }
+
+// Ended says the execution started and the environment saw it end as Exec says.
+type Ended struct{ Exec ExecOutcome }
+
+// Unobserved says a process of the execution started, and the environment cannot vouch for how it
+// ended or for what it left: its end was not seen, its output was not all kept, or its container
+// was not removed. Failure says what was lost.
+type Unobserved struct{ Failure Failure }
+
+func (NotStarted) attempt() {}
+func (Ended) attempt()      {}
+func (Unobserved) attempt() {}

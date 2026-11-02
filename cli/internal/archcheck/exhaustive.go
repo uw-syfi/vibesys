@@ -19,6 +19,7 @@ import (
 
 // closedEnums are the enums the rule holds, as package directory and type name.
 var closedEnums = []string{
+	"cli/internal/core.ExecKind",
 	"cli/internal/core.JobState",
 	"cli/internal/lifecycle.Cause",
 	"cli/internal/lifecycle.DeathProof",

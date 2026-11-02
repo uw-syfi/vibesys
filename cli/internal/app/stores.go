@@ -52,6 +52,16 @@ type Stores interface {
 	// store was. It is idempotent.
 	Forget(ctx context.Context, scope Scope) error
 
+	// GivenUp returns the running jobs of the scope's store whose runs the user gave up, by removing
+	// the owner record of the store, which is how a user says the place that ran them is gone for
+	// good. A run of one that this daemon finds is no run of that place: it is taken back with
+	// Reclaim. It makes nothing, and fails as Find does.
+	GivenUp(ctx context.Context, scope Scope) ([]core.JobID, error)
+
+	// Reclaim takes a job back from the given-up ones of the scope's store, durably, as a run of it
+	// was found by this daemon. A job that is not given up costs nothing.
+	Reclaim(ctx context.Context, scope Scope, job core.JobID) error
+
 	// Close gives up every store. A daemon calls it before it lets go of the machine, so that once
 	// a daemon is seen to be gone, its stores are free. Nothing may use a store after it.
 	Close() error

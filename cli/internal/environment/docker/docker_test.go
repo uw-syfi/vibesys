@@ -106,7 +106,7 @@ func TestDockerOverTheFakeEnginePassesTheEnvironmentContract(t *testing.T) {
 			daemon := dockerfake.NewDaemon(w.(fakeworld.World).MemoryGates)
 			r := newRig(t, daemon, options{timers: envtest.NewTimers()})
 			var wg sync.WaitGroup
-			wg.Go(func() { _, _ = r.env(t).Run(context.Background(), x, io.Discard) })
+			wg.Go(func() { _ = r.env(t).Run(context.Background(), x, io.Discard) })
 			var once sync.Once
 			kill := func() { once.Do(func() { r.client.Crash(); wg.Wait() }) }
 			t.Cleanup(kill)

@@ -16,8 +16,10 @@
 //	timeout            end the run, timed out
 //	service-not-ready  end the run, the service never became ready
 //	service-exited     end the run, the service exited early
-//	unknown            end the run, outcome unknown
-//	fail TEXT...       the run cannot be attempted: Run returns an unavailable failure
+//	unknown            end the run in a way the environment cannot say: Run returns core.Unobserved
+//	fail TEXT...       as the first step, the command cannot be started: Run returns core.NotStarted
+//	                   with an unavailable failure, unless an earlier process of the run started,
+//	                   which makes it core.Unobserved; later in a script, it ends the run unobserved
 //
 // The output file is the last argument of the command when it is an absolute path that follows a
 // flag, such as `--vs-output /scratch/sample-0.out`: the fake takes both off the script, as a

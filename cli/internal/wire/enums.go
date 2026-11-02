@@ -166,7 +166,6 @@ var executionKinds = []struct {
 	{core.ExecCancelled, cliv1.ExecutionKind_EXECUTION_KIND_CANCELLED},
 	{core.ExecServiceNotReady, cliv1.ExecutionKind_EXECUTION_KIND_SERVICE_NOT_READY},
 	{core.ExecServiceExited, cliv1.ExecutionKind_EXECUTION_KIND_SERVICE_EXITED},
-	{core.ExecUnknown, cliv1.ExecutionKind_EXECUTION_KIND_UNKNOWN},
 }
 
 // ExecutionKind returns the contract's value for how a command ended.
@@ -179,13 +178,14 @@ func ExecutionKind(k core.ExecKind) cliv1.ExecutionKind {
 	return cliv1.ExecutionKind_EXECUTION_KIND_UNSPECIFIED
 }
 
-// ToExecKind returns how a command ended for the contract's value. A value this build does not
-// know, which a supervisor from a newer build may send, is ExecUnknown and never a success.
-func ToExecKind(k cliv1.ExecutionKind) core.ExecKind {
+// ToExecKind returns how a command ended for the contract's value at field. It refuses a value
+// that says no ending, and one this build does not know, which a supervisor from a newer build may
+// send: the caller reads either as an ending nobody saw, never a success.
+func ToExecKind(field string, k cliv1.ExecutionKind) (core.ExecKind, error) {
 	for _, p := range executionKinds {
 		if p.wire == k {
-			return p.domain
+			return p.domain, nil
 		}
 	}
-	return core.ExecUnknown
+	return "", invalid("%s: %s is no ending this build knows", field, k)
 }

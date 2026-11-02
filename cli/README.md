@@ -212,7 +212,7 @@ default to the environment variables shown:
 | `plan comment <n> --body text \| --body-file path` | Add a comment, which carries a decision or a result. |
 | `plan close <n> --status s [--comment text \| --comment-file path]` | Set a status other than `open` and add a comment, as one change. |
 | `daemon status\|stop\|restart` | Report on, stop, or restart the daemon. `daemon install` is not available yet. |
-| `daemon forget <repository>` | Give up a repository that is gone for good, such as a removed worktree: its jobs leave the daemon, what is left of their supervisors is let go of, and its stores leave the index. Nothing is touched where the repository was. A repository that is there, or that the daemon does not know, is refused. |
+| `daemon forget <repository>` | Give up a repository that is gone for good, such as a removed worktree: its commands are ended, then its jobs leave the daemon, what is left of their supervisors is let go of, and its stores leave the index. A command that does not end when told is reported left, and the next job waits while it can run, up to its time limit. Nothing is touched where the repository was. A repository that is there, one whose directory cannot be read (a disk that is not mounted or does not answer), or one the daemon does not know, is refused: only a repository whose directory is not there is gone. |
 
 Plans belong to a task, are numbered 1, 2, ... by the daemon and never renumbered, and take one of
 five statuses: `open`, `chosen`, `won`, `parked` and `rejected`. The CLI orders none of them, so an
@@ -290,6 +290,14 @@ Recovery is the daemon's start, with no separate path:
   A run that is parked or finished runs nothing and holds up no other repository. A command that
   may still run holds the machine for as long as its job may run and no longer. A `wait` on a job
   held up this way ends with why (exit `4`) rather than waiting in silence.
+- A running job with no sign of a run here, or with a run this build cannot use, is held in doubt,
+  and so is every job of its store after it: no sign of a run is no proof that the command ended,
+  since it may run on another machine that has the repository on a shared disk. When the place that
+  ran it is gone for good, remove the store's owner record (`.vibesys-state/<task>/.owner` in the
+  repository), as the daemon's message and a refused start both say. The next daemon to open the
+  store gives up the runs of the jobs it has running: one that no run of can be found here is
+  `lost`, at once with no run here and after its time limit with one this build cannot use. A run of
+  it that the daemon does find is its own, and the job goes on.
 - A repository that is gone for good is given up with `daemon forget`.
 
 A store that goes away while the daemon runs stops no job: the supervisor's spool keeps the output,

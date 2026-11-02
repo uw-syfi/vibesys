@@ -2,6 +2,7 @@ package docker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"regexp"
@@ -52,14 +53,23 @@ type Container interface {
 	// container are the machine the command sees: they share its files and its network.
 	//
 	// A process whose program cannot be started in the container exits with 127, as a shell
-	// does. The process ends when the container is removed. Its Exit reports the code, or
-	// Kind core.ExecUnknown if the container was lost under it.
+	// does. The process ends when the container is removed. Its Exit reports the code, or an
+	// Err that is ErrLost if the engine cannot say how it ended, such as a container lost under it.
 	environment.Launcher
 
 	// Close releases everything the engine holds for the container and waits for it, so that
 	// nothing writes to a sink afterwards. It does not remove the container: one that still
 	// exists stops by itself, because Close ends the caller's side of the container's input.
 	Close()
+}
+
+// ErrLost is the Err of an Exit whose command the engine cannot say the end of: the container was
+// lost under it, or the client that followed it was killed.
+var ErrLost = errors.New("docker: the engine cannot say how the command ended")
+
+// Lost is an Exit of a command whose end the engine cannot say, and why.
+func Lost(why string) environment.Exit {
+	return environment.Exit{Err: fmt.Errorf("%w: %s", ErrLost, why)}
 }
 
 // Labels are the labels of an image or a container.

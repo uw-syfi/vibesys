@@ -46,6 +46,11 @@ const (
 	// always holds back the other jobs of its store, which might otherwise show two running. It
 	// holds the machine only while its command can run, and for a bounded time: see entry.holds.
 	PhaseInDoubt Phase = "in doubt"
+	// PhaseLeft is a job of a store the user gave up for good, whose command the shell could not
+	// end. Nothing records it any more, and it holds back no store. It holds the machine while its
+	// command can run, and no longer than the command's limit, so the next job does not start
+	// beside it; then it leaves the machine.
+	PhaseLeft Phase = "left"
 )
 
 type entry struct {
@@ -179,10 +184,13 @@ type StoreAway struct{}
 // NoSuchJob says the store has no such job, or none that needs the daemon.
 type NoSuchJob struct{}
 
-// JobIn says the store has the job, in State.
+// JobIn says the store has the job, in State. GivenUp says the store has the job running and was
+// taken over after its owner record was removed, which is how a user says that the place that ran
+// the job is gone for good: then a run of it that cannot be found or used from here is no run.
 type JobIn struct {
 	State       core.JobState
 	SubmittedAt time.Time
+	GivenUp     bool
 }
 
 func (StoreAway) finding() {}
@@ -316,8 +324,20 @@ type StoreUnread struct {
 // StoreRead says a store was read and the machine was told what it holds.
 type StoreRead struct{ Store StoreID }
 
-// StoreForgotten says the user gave a store up for good: the machine forgets its jobs.
-type StoreForgotten struct{ Store StoreID }
+// StoreForgotten says the user gave a store up for good: the machine forgets its jobs. The shell
+// sends it once it has tried to end their runs, and Left is what it found, at At, of each run it
+// could not end: a job whose command may still run holds the machine until its limit passes.
+type StoreForgotten struct {
+	Store StoreID
+	Left  []LeftRun
+	At    time.Time
+}
+
+// LeftRun is a run the shell could not end, and what was found of it.
+type LeftRun struct {
+	Ref        Ref
+	Supervisor Presence
+}
 
 // Closed says the daemon is done with a job: its last transition is recorded, or the store shows
 // that it needs nothing more.
@@ -461,6 +481,9 @@ func (Discard) request()       {}
 //     store that refuses for good, stops the job, which fails saying why. A job whose end its store
 //     does not take keeps that end and offers it again; it is never closed before it is recorded.
 //   - A job is lost only with a DeathProof.
+//   - A store the user gave up leaves the machine with its jobs once the shell has tried to end
+//     their runs. A run the shell could not end holds the machine while its command can run, for
+//     at most its limit, as a job in doubt does.
 //
 // A job the machine does not hold ignores a cancel, an outcome and a loss, so a duplicate or late
 // event changes nothing.
@@ -505,8 +528,7 @@ func Step(s State, e Event) (State, []Request) {
 	case StoreRead:
 		out.markRead(e.Store)
 	case StoreForgotten:
-		out.markRead(e.Store)
-		out.entries = slices.DeleteFunc(out.entries, func(cur entry) bool { return cur.ref.Store == e.Store })
+		reqs = out.forgotten(e)
 	case Closed:
 		out.remove(e.Ref)
 	}
@@ -514,6 +536,49 @@ func Step(s State, e Event) (State, []Request) {
 		reqs = append(reqs, r)
 	}
 	return out, reqs
+}
+
+// forgotten gives up a store's jobs. A job whose command may still run stays, in PhaseLeft, until a
+// look finds that command ended or its limit passes.
+func (s *State) forgotten(e StoreForgotten) []Request {
+	s.markRead(e.Store)
+	was := map[Ref]entry{}
+	for _, cur := range s.entries {
+		if cur.ref.Store == e.Store {
+			was[cur.ref] = cur
+		}
+	}
+	s.entries = slices.DeleteFunc(s.entries, func(cur entry) bool { return cur.ref.Store == e.Store })
+	var reqs []Request
+	for _, run := range e.Left {
+		if run.Ref.Store != e.Store || s.find(run.Ref) >= 0 {
+			continue
+		}
+		left, known := was[run.Ref]
+		if !known {
+			s.seq++
+			left.seq = s.seq
+		}
+		left = entry{ref: run.Ref, submittedAt: left.submittedAt, seq: left.seq, phase: PhaseLeft, holdUntil: left.holdUntil}
+		left.judgeHold(run.Supervisor, e.At)
+		if !left.holds {
+			continue
+		}
+		s.entries = append(s.entries, left)
+		reqs = append(reqs, s.awaitRetry(len(s.entries)-1)...)
+	}
+	return reqs
+}
+
+// recoverLeft judges again whether a left job's command can still run.
+func (s *State) recoverLeft(i int, e Recovered) []Request {
+	cur := &s.entries[i]
+	cur.judgeHold(e.Supervisor, e.At)
+	if !cur.holds {
+		s.remove(e.Ref)
+		return nil
+	}
+	return s.awaitRetry(i)
 }
 
 func (s *State) find(ref Ref) int {
@@ -553,6 +618,8 @@ func (s *State) recover(e Recovered) []Request {
 		case PhaseInDoubt:
 			kept = s.entries[i]
 			s.remove(e.Ref)
+		case PhaseLeft:
+			return s.recoverLeft(i, e)
 		case PhaseDiscarding, PhaseLaunching, PhaseRunning, PhaseStopping, PhaseSettling, PhaseCancelling, PhaseUnrecorded:
 			return nil
 		}
@@ -597,15 +664,32 @@ func (s *State) recoverRunning(e Recovered, kept entry) []Request {
 		return []Request{Adopt{Ref: e.Ref, CancelFirst: cur.cancelAsked, CancelReason: cur.cancelReason}}
 	case RunDead:
 		if !p.Proof.Valid() {
-			return s.inDoubt(e, kept)
+			return s.doubtUnlessGivenUp(e, kept)
 		}
 		// Its supervisor is dead, so the command ended with it, and the job is lost and never
 		// retried.
 		s.place(e, kept, PhaseRunning)
 		return s.settle(e.Ref, lostJob(e.Ref.Job, e.At))
 	default:
-		return s.inDoubt(e, kept)
+		return s.doubtUnlessGivenUp(e, kept)
 	}
+}
+
+// doubtUnlessGivenUp keeps a running job the machine cannot judge in doubt, unless its store gave
+// up the place that ran it. Such a job is lost as soon as nothing found of it here can be running
+// its command: at once with no run here, and once its limit passed with one this build cannot use.
+// The user's word is the proof for the other place, and the limit is the proof for this one. A
+// limit found by an earlier look stands, as a run seen here may be out of sight now.
+func (s *State) doubtUnlessGivenUp(e Recovered, kept entry) []Request {
+	if f, ok := e.Finding.(JobIn); ok && f.GivenUp {
+		probe := kept
+		probe.judgeHold(e.Supervisor, e.At)
+		if !probe.holds && (probe.holdUntil.IsZero() || !e.At.Before(probe.holdUntil)) {
+			s.place(e, kept, PhaseRunning)
+			return s.settle(e.Ref, givenUpJob(e.Ref.Job, e.At))
+		}
+	}
+	return s.inDoubt(e, kept)
 }
 
 // recoverEnded handles a job that needs the daemon no more: a run left over holds nothing of value,
@@ -686,9 +770,9 @@ func doubtOf(e Recovered) string {
 		return "its store cannot be read"
 	}
 	if _, none := e.Supervisor.(RunNone); none {
-		return "the store has it running and there is no sign of a run"
+		return "the store has it running and there is no sign of a run here: if the place that ran it is gone for good, remove the store's owner record and the job is marked lost"
 	}
-	return "its supervisor gives no answer this build can use, and may still run"
+	return "its supervisor gives no answer this build can use, and may still run: if the place that ran it is gone for good, remove the store's owner record and the job is marked lost once its time limit has passed"
 }
 
 // judgeHold decides whether a job in doubt holds the machine, from what was found of its
@@ -756,6 +840,8 @@ func (s *State) cancel(e CancelAsked) []Request {
 		}
 	case PhaseStopping, PhaseSettling, PhaseCancelling, PhaseUnrecorded:
 		// Its end is decided already.
+	case PhaseLeft:
+		// Its store is given up, and the shell asked its supervisor to end it already.
 	}
 	return nil
 }
@@ -934,7 +1020,7 @@ func (s *State) retryDue(ref Ref) []Request {
 	switch cur.phase {
 	case PhaseUnrecorded:
 		return []Request{Move{Ref: ref, Settlement: cur.settlement, Release: cur.release}}
-	case PhaseInDoubt:
+	case PhaseInDoubt, PhaseLeft:
 		return []Request{Reexamine{Ref: ref}}
 	case PhaseDiscarding:
 		return []Request{Discard{Ref: ref, Queued: true}}
@@ -1004,7 +1090,7 @@ func (e entry) holdsMachine() bool {
 	switch e.phase {
 	case PhaseQueued, PhaseDiscarding, PhaseCancelling, PhaseUnrecorded:
 		return false
-	case PhaseInDoubt:
+	case PhaseInDoubt, PhaseLeft:
 		return e.holds
 	case PhaseLaunching, PhaseRunning, PhaseStopping, PhaseSettling:
 		return true
@@ -1139,7 +1225,8 @@ func (s State) waitsOn(e entry) (string, bool) {
 // a look, a retry), so a state with no stranded job has no orphan wait.
 func (s State) Stranded(at time.Time) []Ref {
 	owed := func(e entry) bool {
-		return e.holdsMachine() && (e.phase != PhaseInDoubt || e.holdUntil.IsZero() || at.Before(e.holdUntil))
+		bounded := e.phase == PhaseInDoubt || e.phase == PhaseLeft
+		return e.holdsMachine() && (!bounded || e.holdUntil.IsZero() || at.Before(e.holdUntil))
 	}
 	if s.recovering || slices.ContainsFunc(s.entries, owed) {
 		return nil
