@@ -608,6 +608,7 @@ class _ParkedTurns:
         return kinds.count(RunControlTransitionKind.RESUMED)
 
 
+@example(waiters=[_Waiter(kind="capacity", seconds=100.0, cancelled=True)], cancel_at=2.0, seed=0)
 @given(
     waiters=_WAITERS,
     cancel_at=st.floats(min_value=2.0, max_value=99.0),
@@ -623,6 +624,8 @@ def test_a_turns_cancel_ends_only_its_own_wait(
     the others stay parked under the same request, and the run resumes itself, once, at the
     earliest deadline still in force (every timed one, and each surviving capacity wait). The
     timed resume belongs to the channel, so it fires even when every turn that armed it left.
+    When every turn was a cancelled capacity wait nothing owns the pause: the run resumes at
+    the cancel.
     Before, a cancelled wait counted as elapsed and resumed the run, and the first capacity
     turn to leave dropped the operator's request for all of them.
     """
@@ -631,6 +634,9 @@ def test_a_turns_cancel_ends_only_its_own_wait(
     deadlines = [w.seconds for w in waiters if w.kind == "timed"]
     deadlines += [1.0 + w.seconds for w in waiters if w.kind == "capacity" and not w.cancelled]
     resume_at = min(deadlines, default=None)
+    # No timed resume and no capacity turn left: nothing owns the pause, so the last turn
+    # out ends it (``leave_capacity``), at the cancel.
+    orphaned = resume_at is None and all(w.cancelled for w in waiters)
 
     def main() -> tuple[bool, bool, bool]:
         workers = [
@@ -653,11 +659,11 @@ def test_a_turns_cancel_ends_only_its_own_wait(
 
     paused_after_cancel, survivors_parked, paused_at_end = threads.run(main)
 
-    assert paused_after_cancel
+    assert paused_after_cancel is not orphaned
     assert survivors_parked
     assert len(set(run.requests.values())) <= 1
-    assert paused_at_end is (resume_at is None)
-    assert run.resumed() == (0 if resume_at is None else 1)
+    assert paused_at_end is (resume_at is None and not orphaned)
+    assert run.resumed() == (0 if resume_at is None and not orphaned else 1)
     for index, waiter in enumerate(waiters):
         wake, at = run.outcomes.get(index, (None, None))
         if waiter.cancelled:
