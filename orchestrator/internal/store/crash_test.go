@@ -12,6 +12,7 @@ import (
 
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/localfs"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/localfs/localfstest"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/store"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/store/storetest"
 )
@@ -37,7 +38,7 @@ func TestCrashChild(t *testing.T) {
 	seed, _ := strconv.ParseUint(os.Getenv(crashSeed), 10, 64)
 	at, _ := strconv.Atoi(os.Getenv(crashAt))
 	point := store.Point(os.Getenv(crashPoint))
-	dir, err := localfs.Resolve(dirPath, localfs.Fake{})
+	dir, err := localfs.Resolve(dirPath, localfstest.Fake{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +86,7 @@ func TestEveryCommitBoundaryIsAPrefix(t *testing.T) {
 				if !errors.As(err, &exit) || !exit.Sys().(syscall.WaitStatus).Signaled() || exit.Sys().(syscall.WaitStatus).Signal() != syscall.SIGKILL {
 					t.Fatalf("the child did not die by SIGKILL: %v\n%s", err, out)
 				}
-				dir, err := localfs.Resolve(dirPath, localfs.Fake{})
+				dir, err := localfs.Resolve(dirPath, localfstest.Fake{})
 				if err != nil {
 					t.Fatal(err)
 				}

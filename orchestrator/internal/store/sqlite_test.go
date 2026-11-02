@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/uw-syfi/vibesys/orchestrator/internal/localfs"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/localfs/localfstest"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/store"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/store/storetest"
 )
@@ -14,7 +15,7 @@ import (
 // localfs). Real databases belong on a local disk, so a host with an NFS TMPDIR should set it.
 func localDir(t *testing.T) localfs.Dir {
 	t.Helper()
-	dir, err := localfs.Resolve(t.TempDir(), localfs.Fake{})
+	dir, err := localfs.Resolve(t.TempDir(), localfstest.Fake{})
 	if err != nil {
 		t.Fatal(err)
 	}

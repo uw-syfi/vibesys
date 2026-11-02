@@ -13,6 +13,7 @@ import (
 
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/localfs"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/localfs/localfstest"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/store"
 )
 
@@ -33,7 +34,7 @@ func TestMeasureScale(t *testing.T) {
 		t.Fatal(err)
 	}
 	dirPath := t.TempDir()
-	dir, err := localfs.Resolve(dirPath, localfs.Fake{})
+	dir, err := localfs.Resolve(dirPath, localfstest.Fake{})
 	if err != nil {
 		t.Fatal(err)
 	}

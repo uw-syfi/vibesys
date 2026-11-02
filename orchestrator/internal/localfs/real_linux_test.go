@@ -52,6 +52,16 @@ func isNetworkMount(fstype string) bool {
 	return false
 }
 
+// isLocalMount lists the mount types of this host that the detector must take as local. A host type
+// in neither list is not compared: the detector is allowed to refuse what it does not know.
+func isLocalMount(fstype string) bool {
+	switch fstype {
+	case "ext4", "ext3", "ext2", "xfs", "btrfs", "tmpfs", "overlay", "zfs", "f2fs", "ramfs":
+		return true
+	}
+	return false
+}
+
 // TestRealDetectorAgreesWithTheMountTable runs the real detector over the directories of this host
 // and compares each answer with the mount table. A host that mounts one of these paths over a
 // network exercises the refusal; on another host every path is local, and the paths simply are what
@@ -72,8 +82,11 @@ func TestRealDetectorAgreesWithTheMountTable(t *testing.T) {
 			t.Fatalf("%s: %v", path, err)
 		}
 		t.Logf("%-10s mount type %-10s detected %+v", path, fstype, fs)
-		if fs.Network != isNetworkMount(fstype) {
-			t.Errorf("%s: mount table says %s, detector says network=%v", path, fstype, fs.Network)
+		switch {
+		case isNetworkMount(fstype) && fs.Class != localfs.Network:
+			t.Errorf("%s: mount table says %s, detector says %+v, want a network type", path, fstype, fs)
+		case isLocalMount(fstype) && fs.Class != localfs.Local:
+			t.Errorf("%s: mount table says %s, detector says %+v, want a local type", path, fstype, fs)
 		}
 	}
 }
@@ -89,8 +102,11 @@ func TestRealResolveRefusesNetworkAndAcceptsLocal(t *testing.T) {
 			t.Skip("no mount table on this host")
 		}
 		_, err = localfs.Resolve(filepath.Join(real, "vibesys-state-that-does-not-exist"), localfs.SystemDetector{})
-		if isNetworkMount(fstype) != (err != nil) {
-			t.Errorf("%s (%s): Resolve error = %v", path, fstype, err)
+		switch {
+		case isNetworkMount(fstype) && err == nil:
+			t.Errorf("%s (%s): a network mount passed", path, fstype)
+		case isLocalMount(fstype) && err != nil:
+			t.Errorf("%s (%s): a local mount was refused: %v", path, fstype, err)
 		}
 	}
 }

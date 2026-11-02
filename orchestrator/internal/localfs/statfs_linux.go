@@ -13,5 +13,5 @@ func (SystemDetector) Detect(path string) (Filesystem, error) {
 	if err := syscall.Statfs(path, &st); err != nil {
 		return Filesystem{}, err
 	}
-	return ClassifyLinux(int64(st.Type)), nil
+	return ClassifyLinux(st.Type), nil
 }

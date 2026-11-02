@@ -6,6 +6,10 @@
 // filesystem what the real location is, and returns a Dir only for a local one. Dir is the proof,
 // and the store opens nothing without it.
 //
+// The check fails closed: only filesystem types known to be local pass. A network type is refused
+// and named, and so is a type nobody listed, with its statfs number, because a guess of "local" is
+// the one answer that cannot be taken back.
+//
 // There is no flag to override a refusal. The error says what to do: point
 // VIBESYS_ORCHESTRATOR_STATE_DIR at a local path.
 //
@@ -31,9 +35,9 @@ const EnvStateDir = "VIBESYS_ORCHESTRATOR_STATE_DIR"
 type Filesystem struct {
 	// Type is the filesystem's own name for itself: "nfs", "smbfs", "ext4".
 	Type string
-	// Network says the filesystem is shared between hosts, or reached through a user-space driver
-	// whose locking cannot be vouched for. Locks and shared memory cannot be trusted there.
-	Network bool
+	// Class says whether Type is known to be local, known to be a network type, or unknown. Only
+	// Local passes.
+	Class Class
 }
 
 // Detector says what filesystem a path is on. The path exists.
@@ -48,8 +52,9 @@ type Dir struct{ path string }
 // Path is the resolved directory. It may not exist yet.
 func (d Dir) Path() string { return d.path }
 
-// NetworkError says a state directory is on a network filesystem.
-type NetworkError struct {
+// RefusedError says a state directory is not on a filesystem known to be local: it is a network
+// type, or a type this build does not know.
+type RefusedError struct {
 	// Path is what the caller asked for, and Resolved is where it really is.
 	Path, Resolved string
 	Filesystem     Filesystem
@@ -57,7 +62,7 @@ type NetworkError struct {
 	Default bool
 }
 
-func (e *NetworkError) Error() string {
+func (e *RefusedError) Error() string {
 	which := "state directory"
 	if e.Default {
 		which = "default state directory"
@@ -66,8 +71,11 @@ func (e *NetworkError) Error() string {
 	if e.Resolved != e.Path {
 		where = fmt.Sprintf("%s (resolved to %s)", e.Path, e.Resolved)
 	}
-	return fmt.Sprintf("the %s %s is on a network filesystem (%s), where SQLite cannot lock safely; "+
-		"set %s to a path on a local disk", which, where, e.Filesystem.Type, EnvStateDir)
+	what := fmt.Sprintf("on a network filesystem (%s), where SQLite cannot lock safely", e.Filesystem.Type)
+	if e.Filesystem.Class != Network {
+		what = fmt.Sprintf("on a filesystem this build does not know to be local (%s), and SQLite corrupts quietly on one that is not", e.Filesystem.Type)
+	}
+	return fmt.Sprintf("the %s %s is %s; set %s to a path on a local disk", which, where, what, EnvStateDir)
 }
 
 // Resolve proves a directory local. The directory need not exist: the nearest ancestor that does
@@ -94,8 +102,8 @@ func resolve(path string, d Detector, isDefault bool) (Dir, error) {
 		return Dir{}, fmt.Errorf("state directory %s: cannot tell what filesystem %s is on (%w); set %s to a path on a local disk",
 			path, existing, err, EnvStateDir)
 	}
-	if fs.Network {
-		return Dir{}, &NetworkError{Path: abs, Resolved: resolved, Filesystem: fs, Default: isDefault}
+	if fs.Class != Local {
+		return Dir{}, &RefusedError{Path: abs, Resolved: resolved, Filesystem: fs, Default: isDefault}
 	}
 	return Dir{path: resolved}, nil
 }
@@ -124,7 +132,8 @@ func evalExisting(path string) (resolved, existing string, err error) {
 }
 
 // StateDir picks the state directory and proves it local. The variable wins; without it the
-// directory is the default under the user's home. A default on a network filesystem is refused,
+// directory is the default under the user's home, and an empty home is an error, since the default
+// would otherwise be relative to the working directory. A default on a network filesystem is refused,
 // never replaced by another place: a daemon whose state moved without its operator knowing would
 // start empty and look like it lost everything.
 func StateDir(getenv func(string) string, home string, d Detector) (Dir, error) {
@@ -133,6 +142,9 @@ func StateDir(getenv func(string) string, home string, d Detector) (Dir, error) 
 			return Dir{}, fmt.Errorf("%s=%q must be an absolute path", EnvStateDir, v)
 		}
 		return resolve(v, d, false)
+	}
+	if home == "" && !filepath.IsAbs(getenv("XDG_STATE_HOME")) {
+		return Dir{}, fmt.Errorf("no home directory to put the default state directory under; set %s to an absolute path on a local disk", EnvStateDir)
 	}
 	return resolve(DefaultPath(getenv, home), d, true)
 }
