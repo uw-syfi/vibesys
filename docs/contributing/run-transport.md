@@ -289,6 +289,15 @@ connect; a release build later downloads the released binary instead. It is stat
 | `HostCall` | unary | typed host operations, including `relaunch` of an existing run; `vibesys host <method>` with protobuf on stdin and stdout |
 | `Attach` | bidi | reserved |
 
+The same session carries `vibesys.orchestrator.v1.OrchestratorService`, which `vibesysd` serves on the
+same socket. `GatewayConnection` checks every payload against the generated descriptors of the
+services it carries (`validateServicePayload`), so a method outside them is refused, and the
+`HostService` `Hello` is still the one handshake. An orchestrator stream is not re-issued when the
+session is lost: it ends as `UNAVAILABLE`, and its caller (`GatewaySource` in
+`@vibesys/orchestrator-source`, under the host machine's backoff) opens the next one from the
+sequence it has reached. A second `vibesysd` on the same state answers every orchestrator call
+`UNAVAILABLE` with the holder named, which the window shows as the host's connection state.
+
 The gateway preserves framed record bodies. Its store read boundary supplies semantic upgrades
 for retained records and keyframes before serving them.
 
