@@ -3,6 +3,7 @@
  * app knows of each run, and the machine that holds how the runs are grouped.
  */
 
+export {type AttentionCardView, RUN_AGAIN} from './attention-card.js';
 export {type GroupingContext, type GroupingEvent, groupingMachine} from './grouping.js';
 export {
   type Attention,

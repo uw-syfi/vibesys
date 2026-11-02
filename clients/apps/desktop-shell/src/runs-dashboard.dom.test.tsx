@@ -115,9 +115,9 @@ test('groups every run of every machine by status, the runs that need the user f
   const stalled = holding(tiles(shell, 'Needs you'), 'mpsc');
   expect(stalled).toHaveLength(1);
   expect(textOf(first(stalled, 'stalled run'))).toContain('host-b');
-  expect(textOf(first(stalled, 'stalled run'))).toContain('stalled 32m');
+  expect(textOf(first(stalled, 'stalled run'))).toContain('Quiet 32m');
   expect(textOf(first(holding(tiles(shell, 'Needs you'), 'spsc'), 'failed run'))).toContain(
-    'failed',
+    'Failed',
   );
   // A run that needs the user is in that group alone.
   expect(shell.container.querySelectorAll('.vs-overview-tile')).toHaveLength(9);
@@ -153,7 +153,7 @@ test('a live run whose input was never measured headlines its best measured valu
   expect(textOf(tile)).not.toContain('×');
 });
 
-test('a run that needs the user says why in a few words, whole words, with the full text on hover', async () => {
+test('a run that needs the user says why in a sentence, whole, with the full text on hover', async () => {
   const full = 'NestedRepositoryError: before the run could begin it found a repository inside';
   const long = 'the agent was interrupted because the machine went away during the second round';
   const failing = (runId: string, name: string, endSummary: string): RunCase => ({
@@ -173,18 +173,29 @@ test('a run that needs the user says why in a few words, whole words, with the f
       failing('r-fail-02', 'queue-rs-b', long),
     ]),
   );
-  const notes = tiles(shell, 'Needs you').flatMap(tile => [
-    ...tile.querySelectorAll('.vs-overview-tile-note'),
+  const why = tiles(shell, 'Needs you').flatMap(tile => [
+    ...tile.querySelectorAll('.vs-attention-card-why'),
   ]);
-  const shown = notes.map(note => ({
-    text: note.textContent ?? '',
-    title: note.getAttribute('title') ?? '',
+  const shown = why.map(each => ({
+    text: each.textContent ?? '',
+    title: each.getAttribute('title') ?? '',
   }));
-  expect(shown.map(note => note.text).sort()).toEqual([
-    'Nested repository error',
-    'the agent was interrupted because…',
+  expect(shown.map(each => each.text).sort()).toEqual([
+    'Nested repository error: before the run could begin it found a repository inside',
+    'The agent was interrupted because the machine went away during the second round',
   ]);
-  expect(shown.map(note => note.title).sort()).toEqual([full, long].sort());
+  expect(shown.every(each => each.title === each.text)).toBe(true);
+});
+
+test('Run again on a run that ended and needs the user opens New run, and a working run offers none', async () => {
+  const shell = await open(dashboardWorld(MANY_RUNS));
+  const card = (task: string): Element => first(holding(tiles(shell, 'Needs you'), task), task);
+  const [ended, working] = [card('spsc'), card('mpsc')];
+  expect(all(working, {role: 'button', name: 'Run again'})).toHaveLength(0);
+  await press(one(ended, {role: 'button', name: 'Run again'}));
+  await shell.read();
+  expect(maybe(shell.container, {role: 'heading', name: 'Runs'})).toBeNull();
+  expect(railButton(shell, /^New/).getAttribute('aria-current')).toBe('page');
 });
 
 test('a run with more ideas than its chart keeps still counts them all', async () => {

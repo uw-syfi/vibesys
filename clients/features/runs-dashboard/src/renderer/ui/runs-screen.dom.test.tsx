@@ -1,6 +1,7 @@
 /**
  * The Runs dashboard in a browser DOM, through its public props: the Group by control reads as a
- * labelled setting offering exactly Status and Machine, and choosing an option reports it.
+ * labelled setting offering exactly Status and Machine, and choosing an option reports it; a run
+ * that needs its user is a card that says why and offers Run again once it has ended.
  */
 
 import {afterAll, beforeAll, describe, expect, test} from 'bun:test';
@@ -60,6 +61,7 @@ async function mount(
   by: GroupBy,
   chosen: GroupBy[],
   runs: readonly RunInput[] = [run('a', 'host-a'), run('b', 'host-b')],
+  again: string[] = [],
 ): Promise<HTMLElement> {
   const container = document.createElement('div');
   document.body.append(container);
@@ -73,6 +75,7 @@ async function mount(
         clearMachine={() => undefined}
         group={next => chosen.push(next)}
         open={() => undefined}
+        again={id => again.push(id)}
         menu={() => []}
         draft={null}
         loads={[]}
@@ -130,5 +133,57 @@ describe('the Group by control', () => {
     expect(key).not.toBeNull();
     expect(key?.contains(control)).toBe(false);
     expect(key?.parentElement?.contains(control)).toBe(false);
+  });
+});
+
+describe('the runs that need their user', () => {
+  const failed: RunInput = {
+    ...run('f', 'host-a'),
+    status: {kind: 'failed', word: 'failed'},
+    attention: 'failed',
+    reason: 'NestedRepositoryError: a repository inside the project',
+    ideas: 3,
+    seconds: 2400,
+  };
+  const quiet: RunInput = {
+    ...run('q', 'host-b'),
+    status: {kind: 'running', word: 'running'},
+    attention: 'stalled',
+    silentSeconds: 32 * 60,
+  };
+
+  function cards(container: HTMLElement): HTMLElement[] {
+    return [...container.querySelectorAll<HTMLElement>('.vs-attention-card')];
+  }
+
+  test('each is a card with a pill and a sentence saying why; the others stay tiles', async () => {
+    const container = await mount('status', [], [failed, quiet, run('ok', 'host-a')]);
+    const found = cards(container);
+    expect(found.map(card => card.querySelector('.vs-chip')?.textContent)).toEqual([
+      'Failed',
+      'Quiet 32m',
+    ]);
+    expect(found[0]?.textContent).toContain(
+      'Nested repository error: a repository inside the project',
+    );
+    expect(found[1]?.textContent).toContain('Still running, but it has recorded nothing for 32m.');
+    expect(container.querySelectorAll('.vs-overview-tile:not(.vs-attention-card)')).toHaveLength(1);
+  });
+
+  test('Run again is offered to the ended run only, and reports which run', async () => {
+    const again: string[] = [];
+    const container = await mount('status', [], [failed, quiet], again);
+    const [ended, working] = cards(container);
+    const buttons = (card: HTMLElement | undefined): HTMLElement[] =>
+      [...(card?.querySelectorAll<HTMLElement>('button') ?? [])].filter(
+        button => button.textContent === 'Run again',
+      );
+    expect(buttons(working)).toHaveLength(0);
+    const press = buttons(ended)[0];
+    expect(press).toBeDefined();
+    await act(async () => {
+      press?.dispatchEvent(new window.MouseEvent('click', {bubbles: true}) as unknown as Event);
+    });
+    expect(again).toEqual(['f']);
   });
 });

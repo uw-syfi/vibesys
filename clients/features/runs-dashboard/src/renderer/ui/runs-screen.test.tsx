@@ -41,6 +41,7 @@ function screen(
       clearMachine={() => {}}
       group={() => {}}
       open={() => {}}
+      again={() => {}}
       menu={() => []}
       draft={null}
       loads={loads}

@@ -6,6 +6,11 @@
  * or two (`note`) and is in the "Needs you" group, and in no other.
  */
 
+import {type AttentionCardView, attentionCardOf} from './attention-card.js';
+import {durationWord, ideasWord, ratioWord} from './words.js';
+
+export {durationWord, ratioWord};
+
 /** How an idea came out (the run digest's wording). */
 export type Verdict = 'kept' | 'not_better' | 'failed' | 'running';
 
@@ -104,6 +109,8 @@ export interface Tile {
   readonly status: {readonly kind: StatusKind; readonly tone: Tone; readonly label: string};
   /** Whether the run needs its user (see `attentionOf`). */
   readonly attention: boolean;
+  /** What its card says, when it needs its user; null otherwise. */
+  readonly card: AttentionCardView | null;
   readonly createdAt: number;
   readonly machine: string;
 }
@@ -139,24 +146,6 @@ export function chartOf(points: readonly IdeaInput[], omitted: number): TileChar
     base: BASE,
     label: `Results of ${ideas} ${ideas === 1 ? 'idea' : 'ideas'} against the base, with the best so far`,
   };
-}
-
-/** A multiple of the base with its unit: `1.42×`. */
-export function ratioWord(ratio: number): string {
-  return `${ratio.toFixed(2)}×`;
-}
-
-/** A span in its two largest units: `45s`, `52m`, `1h 05m`. */
-export function durationWord(seconds: number): string {
-  const whole = Math.max(0, Math.round(seconds));
-  if (whole < 60) return `${whole}s`;
-  const minutes = Math.floor(whole / 60);
-  if (minutes < 60) return `${minutes}m`;
-  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`;
-}
-
-function ideasWord(count: number): string {
-  return count === 1 ? '1 idea' : `${count} ideas`;
 }
 
 /** The tone of a status's dot. */
@@ -204,13 +193,29 @@ function unitOf(reading: MeasuredBest): string | null {
   return named === null || named === '' ? null : named.includes('_') ? metricName(named) : named;
 }
 
+/** The run's best as a multiple of the base: the adopted or best so far, else the chart's rise; null when none beats the base. */
+function bestOf(input: RunInput, chart: TileChart | null): number | null {
+  const finalBest = chart === null ? null : (chart.line.at(-1) ?? null);
+  return input.best ?? (finalBest !== null && finalBest > BASE ? finalBest : null);
+}
+
+/** How many ideas there were when every one of them failed (the host left none out); null otherwise. */
+function allFailedOf(input: RunInput): number | null {
+  const points = input.points;
+  return points !== null &&
+    input.pointsOmitted === 0 &&
+    points.length > 0 &&
+    points.every(point => point.verdict === 'failed')
+    ? points.length
+    : null;
+}
+
 /** A tile's headline, and what it is measured in when it is a value and not a multiple of the base. */
 function headlineOf(
   input: RunInput,
   chart: TileChart | null,
 ): {readonly result: Tile['result']; readonly unit: string | null} {
-  const finalBest = chart === null ? null : (chart.line.at(-1) ?? null);
-  const best = input.best ?? (finalBest !== null && finalBest > BASE ? finalBest : null);
+  const best = bestOf(input, chart);
   if (best !== null) {
     return {result: {text: ratioWord(best), tone: best > BASE ? 'ok' : 'muted'}, unit: null};
   }
@@ -349,14 +354,15 @@ export function tileOf(input: RunInput): Tile {
   ].join(' · ');
   const ended = endNote(input);
   const {result, unit} = headlineOf(input, chart);
+  const facts = [input.machine, input.started, unit]
+    .filter((part): part is string => part !== null)
+    .join(' · ');
   return {
     id: input.id,
     title: input.title,
     hint: input.runId,
     result,
-    facts: [input.machine, input.started, unit]
-      .filter((part): part is string => part !== null)
-      .join(' · '),
+    facts,
     chart,
     figures,
     ...noteOf(
@@ -371,6 +377,21 @@ export function tileOf(input: RunInput): Tile {
       label: input.status.word,
     },
     attention: attention !== 'none',
+    card:
+      attention === 'none'
+        ? null
+        : attentionCardOf({
+            attention,
+            ended: input.status.kind !== 'running' && input.status.kind !== 'paused',
+            reason: firstLine(input.reason),
+            ideas,
+            best: bestOf(input, chart),
+            seconds: input.seconds,
+            allFailed: allFailedOf(input),
+            failedStreak: input.failedStreak,
+            silentSeconds: input.silentSeconds,
+            facts,
+          }),
     createdAt: input.createdAt,
     machine: input.machine,
   };

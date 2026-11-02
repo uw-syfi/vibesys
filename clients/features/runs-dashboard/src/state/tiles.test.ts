@@ -413,3 +413,68 @@ describe('a tile of a run that crashed', () => {
     );
   });
 });
+
+describe('the card of a run that needs its user', () => {
+  test('exists exactly for the runs that need their user, with a sentence that says why', () => {
+    for (const seed of SEEDS) {
+      const random = new Seeded(seed);
+      for (let n = 0; n < 40; n += 1) {
+        const tile = tileOf(randomRun(random, n));
+        expect(tile.card !== null).toBe(tile.attention);
+        if (tile.card === null) continue;
+        expect(tile.card.why).not.toBe('');
+        expect(tile.card.pill.label).not.toBe('');
+        expect(tile.card.facts.startsWith(tile.facts)).toBe(true);
+      }
+    }
+  });
+
+  test('offers Run again only to a run that has ended, and the pill is red only for a failure', () => {
+    for (const seed of SEEDS) {
+      const random = new Seeded(seed);
+      for (let n = 0; n < 40; n += 1) {
+        const input = randomRun(random, n);
+        const card = tileOf(input).card;
+        if (card === null) continue;
+        const working = input.status.kind === 'running' || input.status.kind === 'paused';
+        expect(card.again).toBe(!working);
+        expect(card.pill.tone).toBe(attentionOf(input) === 'failed' ? 'err' : 'warn');
+      }
+    }
+  });
+
+  test('says what the record gives for a failure, else what the ideas came to', () => {
+    const failed = (over: Partial<RunInput>): string | undefined =>
+      tileOf(
+        run('f', {
+          status: {kind: 'failed', word: 'failed'},
+          attention: 'failed',
+          ...over,
+        }),
+      ).card?.why;
+    expect(failed({reason: 'SandboxLifecycleError: the box went away'})).toBe(
+      'Sandbox lifecycle error: the box went away',
+    );
+    expect(
+      failed({
+        points: [
+          {ratio: null, verdict: 'failed'},
+          {ratio: null, verdict: 'failed'},
+        ],
+      }),
+    ).toBe('All 2 ideas failed, so nothing beat the input.');
+    expect(failed({ideas: 4, best: 1.2})).toBe('The run failed after 4 ideas; the best was 1.20×.');
+    expect(failed({points: null})).toBe('The run failed, and its record does not say why.');
+  });
+
+  test('words a quiet or failing working run from how long and how many', () => {
+    const working = (over: Partial<RunInput>) => tileOf(run('w', over)).card;
+    expect(working({attention: 'stalled', silentSeconds: 1920})?.pill.label).toBe('Quiet 32m');
+    expect(working({attention: 'repeated_failure', failedStreak: 3})?.pill.label).toBe(
+      '3 failed in a row',
+    );
+    expect(working({attention: 'repeated_failure', failedStreak: 3})?.why).toBe(
+      'Still running, but its last 3 ideas failed.',
+    );
+  });
+});

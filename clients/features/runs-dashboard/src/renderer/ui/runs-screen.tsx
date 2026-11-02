@@ -1,4 +1,5 @@
 import {
+  AttentionCard,
   Button,
   Card,
   type ChartKeyItem,
@@ -22,7 +23,15 @@ import {
   Text,
 } from '@vibesys/ui';
 import type {JSX} from 'react';
-import {BASE, type GroupBy, groupTiles, onMachine, type Tile} from '../../state/index.js';
+import {
+  BASE,
+  type GroupBy,
+  groupTiles,
+  NEEDS_YOU,
+  onMachine,
+  RUN_AGAIN,
+  type Tile,
+} from '../../state/index.js';
 
 /** An unfinished New run, as the dashboard offers it: what it is of so far, and where it stands. */
 export interface RunsDraft {
@@ -73,6 +82,31 @@ function TileOf(props: {
       noteFull={tile.noteFull}
       status={{tone: tile.status.tone, label: tile.status.label}}
       attention={tile.attention}
+      {...(menu.length === 0 ? {} : {menu})}
+      press={() => props.open(tile.id)}
+    />
+  );
+}
+
+/** The card of a run that needs its user: why in a sentence, and Run again once it has ended. */
+function CardOf(props: {
+  readonly tile: Tile;
+  readonly open: (id: string) => void;
+  readonly again: (id: string) => void;
+  readonly menu: (id: string) => readonly MenuItem[];
+}): JSX.Element {
+  const {tile} = props;
+  const menu = props.menu(tile.id);
+  const card = tile.card;
+  if (card === null) return <TileOf tile={tile} open={props.open} menu={props.menu} />;
+  return (
+    <AttentionCard
+      title={tile.title}
+      hint={tile.hint}
+      facts={card.facts}
+      status={card.pill}
+      why={card.why}
+      actions={card.again ? [{text: RUN_AGAIN, press: () => props.again(tile.id)}] : []}
       {...(menu.length === 0 ? {} : {menu})}
       press={() => props.open(tile.id)}
     />
@@ -137,7 +171,8 @@ function Draft(props: {readonly draft: RunsDraft}): JSX.Element {
  * that fills the width, the runs that need their user first, each run in one group. With no run and
  * every machine listed it says so, with a New run action; before that each machine still loading or
  * stopped has a block of its steps (`loads`), and once tiles show it keeps a line of where it
- * stands, so a machine that is missing is not silently absent. Pressing a tile opens its run
+ * stands, so a machine that is missing is not silently absent. The runs that need their user are
+ * cards that say why and, once ended, offer Run again (`again`). Pressing a tile opens its run
  * (`open` is handed the tile's id); `menu` is a tile's row menu.
  */
 export function RunsScreen(props: {
@@ -150,6 +185,8 @@ export function RunsScreen(props: {
   readonly clearMachine: () => void;
   readonly group: (by: GroupBy) => void;
   readonly open: (id: string) => void;
+  /** Starts New run from the run, as Run again on a card that needs its user. */
+  readonly again: (id: string) => void;
   readonly menu: (id: string) => readonly MenuItem[];
   readonly draft: RunsDraft | null;
   /** The machines that have not said what runs they hold, each with its steps. */
@@ -163,6 +200,9 @@ export function RunsScreen(props: {
   const loads = props.loads.filter(load => machine === null || load.machine === machine);
   const tile = (each: Tile): JSX.Element => (
     <TileOf key={each.id} tile={each} open={props.open} menu={props.menu} />
+  );
+  const card = (each: Tile): JSX.Element => (
+    <CardOf key={each.id} tile={each} open={props.open} again={props.again} menu={props.menu} />
   );
   return (
     <Page
@@ -242,8 +282,9 @@ export function RunsScreen(props: {
             title={group.title}
             count={group.tiles.length}
             {...(group.tone === null ? {} : {tone: group.tone})}
+            {...(group.key === NEEDS_YOU ? {wide: true} : {})}
           >
-            {group.tiles.map(tile)}
+            {group.tiles.map(group.key === NEEDS_YOU ? card : tile)}
           </OverviewGroup>
         ))}
       </Stack>
