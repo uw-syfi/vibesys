@@ -15,8 +15,6 @@ import {
   type PostIntentResponse,
   ReadRequestSchema,
   RecordSchema,
-  SteerMode,
-  SteerTargetKind,
   TerminateRunOutcome,
 } from '@vibesys/proto';
 import type {RunIntentAction} from './controls.js';
@@ -46,25 +44,18 @@ export function addressedIntent(
   });
 }
 
-/** The visible controls' defaults. The host surface accepts every typed intent. */
+/**
+ * The run controls' Pause and Pause now. A steer is written in the run chat, which picks its
+ * target and mode (`addressedIntent`); the host surface accepts every typed intent.
+ */
 export function runIntent(
   identity: RunReference & Pick<PostIntentRequest, 'requestId' | 'expectedEpoch'>,
-  action: RunIntentAction,
-  text = '',
+  action: Exclude<RunIntentAction, 'steer'>,
 ): PostIntentRequest {
-  switch (action) {
-    case 'pause':
-    case 'pauseNow':
-      return addressedIntent(identity, identity.requestId, identity.expectedEpoch, {
-        case: action,
-        value: {},
-      });
-    case 'steer':
-      return addressedIntent(identity, identity.requestId, identity.expectedEpoch, {
-        case: 'steer',
-        value: {text, mode: SteerMode.NEXT_TURN, target: {kind: SteerTargetKind.RUN}},
-      });
-  }
+  return addressedIntent(identity, identity.requestId, identity.expectedEpoch, {
+    case: action,
+    value: {},
+  });
 }
 
 /** Take ownership before a mutable generated request enters control state. */

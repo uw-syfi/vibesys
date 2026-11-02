@@ -43,7 +43,7 @@ async function openIntents(page: Page, options: {amendment?: boolean; history?: 
   await installGateway(page, world.input);
   await openFixture(page, {...fixtureNamed('queue-rs-live'), runId: 'run-a'});
   if (options.history !== 'pending')
-    await expect(page.getByRole('button', {name: 'Guidance', exact: true})).toBeVisible();
+    await expect(page.getByRole('button', {name: 'Pause now', exact: true})).toBeVisible();
   const append = (bytes: number[]) =>
     page.evaluate(bytes => (window as unknown as GatewayWindow).fakeGateway.append(bytes), bytes);
   return {
@@ -107,16 +107,6 @@ for (const kind of INTENT_REPLAYS) {
     await captureAtEvery(page, `intent-${kind}`);
   });
 }
-
-test('guidance beside the controls lays out', async ({page}) => {
-  await page.setViewportSize({width: 1000, height: 900});
-  await openIntents(page);
-  await page.getByRole('button', {name: 'Guidance', exact: true}).click();
-  const dialog = page.getByRole('dialog', {name: 'Guidance', exact: true});
-  await expect(dialog).toBeVisible();
-  await dialog.getByRole('textbox', {name: 'Guidance', exact: true}).fill('Measure contention');
-  await capture(page, 'intent-guidance-1000');
-});
 
 test('live controls stay reachable and lay out through pause, resume and finish', async ({
   page,

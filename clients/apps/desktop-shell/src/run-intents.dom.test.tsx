@@ -12,7 +12,7 @@ import {fixtureNamed, INTENT_REPLAYS} from '@vibesys/run-fixtures';
 import {FakeClock} from '@vibesys/transport/testing';
 import {Window} from 'happy-dom';
 import {act} from 'react';
-import {fillIn, press} from './testing/dom-controls.js';
+import {press} from './testing/dom-controls.js';
 import {maybe, notSee, one, see, settle, until} from './testing/dom-query.js';
 import {
   finishOpenSpans,
@@ -71,7 +71,7 @@ async function opened(
     options.history === 'pending' ? 'as shown' : 'read',
   );
   if (options.history !== 'pending')
-    one(shell.container, {role: 'button', name: 'Guidance', exact: true});
+    one(shell.container, {role: 'button', name: 'Pause now', exact: true});
   return {world, shell, clock};
 }
 
@@ -118,7 +118,7 @@ test('Pause escalates to Pause now in the same epoch and waits for journal outco
   await press(button(container, 'Settings'));
   await until(
     'the controls gone with the run',
-    () => maybe(container, {role: 'button', name: 'Guidance', exact: true}) === null,
+    () => maybe(container, {role: 'button', name: 'Pause now', exact: true}) === null,
   );
   // Leaving the run releases every stream it held.
   expect(shell.gateway?.active()).toBe(0);
@@ -146,27 +146,6 @@ for (const kind of INTENT_REPLAYS) {
     }
   });
 }
-
-test('guidance opens beside the controls and posts the typed text', async () => {
-  const {world, shell} = await opened();
-  const {container} = shell;
-  await press(button(container, 'Guidance'));
-  const dialog = one(container, {role: 'dialog', name: 'Guidance', exact: true});
-  await fillIn(
-    one(dialog, {role: 'textbox', name: 'Guidance', exact: true}) as HTMLTextAreaElement,
-    'Measure contention',
-  );
-  await press(one(dialog, {role: 'button', name: 'Send guidance'}));
-  await until(
-    'the dialog closed',
-    () => maybe(container, {role: 'dialog', name: 'Guidance', exact: true}) === null,
-  );
-  await see(container, 'Guidance · Pending', true);
-  expect(world.requests[0]?.request.intent).toMatchObject({
-    case: 'steer',
-    value: {text: 'Measure contention'},
-  });
-});
 
 test('live controls follow pause, resume and finish through the journal', async () => {
   const {world, shell} = await opened();

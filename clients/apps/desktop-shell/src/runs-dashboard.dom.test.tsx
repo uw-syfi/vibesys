@@ -208,13 +208,13 @@ test('Group by regroups the same tiles by machine and by status', async () => {
   expect(tiles(shell, 'Needs you')).toHaveLength(2);
 });
 
-test('the rail counts the runs that need the user, and Runs and the mark both go home', async () => {
+test('the rail counts the runs that need the user, and Runs goes home', async () => {
   const shell = await open(dashboardWorld(MANY_RUNS));
   expect(nameOfControl(railButton(shell, /^Runs/))).toMatch(/2 need you/);
   await showScreen(shell, 'New');
   expect(all(shell.container, {role: 'heading', name: 'Runs'})).toHaveLength(0);
   await shell.read();
-  await press(one(rail(shell), {role: 'button', name: 'VibeSys', exact: true}));
+  await press(railButton(shell, /^Runs/));
   await shell.read();
   one(shell.container, {role: 'heading', name: 'Runs'});
   expect(railButton(shell, /^Runs/).getAttribute('aria-current')).toBe('page');

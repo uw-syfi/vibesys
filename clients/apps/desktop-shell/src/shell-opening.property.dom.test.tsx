@@ -179,7 +179,7 @@ async function withWindow<T>(
   const container = document.createElement('div');
   const root = createRoot(container);
   try {
-    await act(async () => root.render(<Shell stores={stores} version="0" />));
+    await act(async () => root.render(<Shell stores={stores} />));
     await settle();
     return await use(stores);
   } finally {

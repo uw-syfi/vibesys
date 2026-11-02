@@ -207,21 +207,17 @@ async function verifyOffers(input: Scenario) {
         (state.case === 'starting' ||
           (state.case === 'running' && state.value.hold?.reason.case !== 'operator')),
     );
-    expect(buttons.includes('Guidance')).toBe(state.case === 'running' && alive);
     expect(buttons.includes('Resume')).toBe(
       input.liveness !== RunLiveness.ALIVE && (!live || dead),
     );
-    // Chat steers are the Guidance control's twin: one permission, whichever surface offers it.
-    // Ordinary questions stay available whatever the writer is.
+    // The chat's New steer is the one way to steer: offered while the writer runs, as the host
+    // admits a steer. Ordinary questions stay available whatever the writer is.
     const chat = container.querySelector('button[aria-label="Chat"]');
-    if (chat) {
-      await act(async () => (chat as HTMLElement).click());
-      const chatButtons = [...container.querySelectorAll('button')].map(
-        button => button.textContent,
-      );
-      expect(chatButtons.includes('New steer')).toBe(buttons.includes('Guidance'));
-      expect(chatButtons).toContain('New chat');
-    }
+    expect(chat).not.toBeNull();
+    await act(async () => (chat as HTMLElement).click());
+    const chatButtons = [...container.querySelectorAll('button')].map(button => button.textContent);
+    expect(chatButtons.includes('New steer')).toBe(state.case === 'running' && alive);
+    expect(chatButtons).toContain('New chat');
     if (!input.loading) {
       expect(container.querySelector('[inert] button') === null).toBe(true);
     }
@@ -328,7 +324,7 @@ async function withPeer(
 const controlButtons = (container: HTMLElement) =>
   [...container.querySelectorAll('button')]
     .map(button => button.textContent ?? '')
-    .filter(text => ['Pause', 'Pause now', 'Guidance', 'Resume'].includes(text));
+    .filter(text => ['Pause', 'Pause now', 'Resume'].includes(text));
 
 const FAULT = fc.record({
   // The intent history shares the lifecycle's reader: one records stream, not two. The host's
@@ -358,7 +354,7 @@ function assertOneLease(peer: RunPeer) {
 function assertAgree(container: HTMLElement) {
   const buttons = controlButtons(container);
   const word = statusWord(container);
-  if (buttons.some(text => ['Pause', 'Pause now', 'Guidance'].includes(text)))
+  if (buttons.some(text => ['Pause', 'Pause now'].includes(text)))
     expect(['Starting', 'Running', 'Paused']).toContain(word ?? 'no status word');
   if (buttons.includes('Resume')) expect(['Starting', 'Running']).not.toContain(word ?? '');
 }
@@ -372,7 +368,7 @@ function assertVisible(container: HTMLElement) {
 }
 
 const offersLiveControls = (container: HTMLElement) =>
-  controlButtons(container).some(text => ['Pause', 'Pause now', 'Guidance'].includes(text));
+  controlButtons(container).some(text => ['Pause', 'Pause now'].includes(text));
 
 /** The fault happens: the host stops delivering, or a records stream ends. A stall is silence. */
 async function inject(peer: RunPeer, fault: Generated<typeof FAULT>): Promise<void> {
@@ -602,7 +598,7 @@ test('property: every offered writer control changes visible content across life
     }),
     {numRuns: 32, seed: 34364},
   );
-  expect([...exercised].sort()).toEqual(['Guidance', 'Pause', 'Pause now', 'Resume']);
+  expect([...exercised].sort()).toEqual(['Pause', 'Pause now', 'Resume']);
 });
 
 test('property: optional recorded facts never erase the catalog-addressed controls or the missing-location reason', async () => {
@@ -785,7 +781,7 @@ test('property: relaunch headers and controls share the committed epoch even whe
             expect(controlButtons(container)).toEqual(['Pause', 'Pause now']);
             await deliver(packet(true));
             expect(statusWord(container)).toBe('Running');
-            expect(controlButtons(container)).toEqual(['Pause', 'Pause now', 'Guidance']);
+            expect(controlButtons(container)).toEqual(['Pause', 'Pause now']);
             await deliver(packet(false));
             expect(statusWord(container)).toBe('Running');
             // The host stops delivering: its last word is no fact, and the controls go.
@@ -796,7 +792,7 @@ test('property: relaunch headers and controls share the committed epoch even whe
             await act(async () => clock.advanceBy(1000));
             await deliver(packet(true));
             expect(statusWord(container)).toBe('Running');
-            expect(controlButtons(container)).toEqual(['Pause', 'Pause now', 'Guidance']);
+            expect(controlButtons(container)).toEqual(['Pause', 'Pause now']);
             seq += 2n;
           }
         });
@@ -837,7 +833,7 @@ function expectSuccessorScreen(
     return;
   }
   expect(statusWord(container)).toBe(word);
-  const live = frame.running ? ['Pause', 'Pause now', 'Guidance'] : ['Pause', 'Pause now'];
+  const live = ['Pause', 'Pause now'];
   expect(controlButtons(container)).toEqual(frame.liveness === RunLiveness.ALIVE ? live : []);
 }
 

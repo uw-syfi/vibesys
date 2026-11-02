@@ -1,8 +1,7 @@
 /**
  * The app never changes screen by itself. It opens on Runs, which shows each machine's steps while
  * the machines answer and says there is no run when they hold none, with a New run action. Runs is
- * always in the rail. The mark goes home, which is New run while no run is known and the Runs
- * dashboard once a machine lists one. Drawn in a DOM over the world of the browser journeys; these
+ * always in the rail. Drawn in a DOM over the world of the browser journeys; these
  * held no layout, so they ran in Chromium for nothing.
  */
 import {afterAll, afterEach, beforeAll, expect, test} from 'bun:test';
@@ -12,7 +11,7 @@ import {act} from 'react';
 import {press} from './testing/dom-controls.js';
 import {all, maybe, notSee, one, see, settle, textOf, until} from './testing/dom-query.js';
 import type {FakeBridgeSeed} from './testing/fake-bridge.js';
-import {listed, SEED, server} from './testing/seed.js';
+import {listed, SEED} from './testing/seed.js';
 import {type OpenShell, openShell} from './testing/shell-world.js';
 
 const window = new Window();
@@ -67,18 +66,6 @@ const railButton = (shell: OpenShell, name: string): HTMLElement =>
 const runsHeading = (shell: OpenShell): HTMLElement | null =>
   maybe(shell.container, {role: 'heading', name: 'Runs', level: 1});
 
-async function showScreen(shell: OpenShell, destination: string): Promise<void> {
-  await press(railButton(shell, destination));
-  await shell.read();
-}
-
-/** Presses the app's mark, which goes home, once the screen has read what it shows. */
-async function pressMark(shell: OpenShell): Promise<void> {
-  await shell.read();
-  await press(railButton(shell, 'VibeSys'));
-  await shell.read();
-}
-
 /** New run's first page names no run list: it is the form, with the rail marking New. */
 function expectNewRun(shell: OpenShell): void {
   expect(railButton(shell, 'New').getAttribute('aria-current')).toBe('page');
@@ -86,12 +73,6 @@ function expectNewRun(shell: OpenShell): void {
 }
 
 const retried = (): readonly string[] => fakeHost().retried;
-
-async function listingArrives(shell: OpenShell, listing: unknown): Promise<void> {
-  await act(async () => fakeHost().listing(listing));
-  await settle();
-  await shell.read();
-}
 
 test('with no run on any machine the app opens on Runs, which says so and offers New run', async () => {
   const shell = await launch(NO_RUNS);
@@ -104,27 +85,6 @@ test('with no run on any machine the app opens on Runs, which says so and offers
   railButton(shell, 'Runs');
 });
 
-test('the mark goes to New run while there is no run, from any screen', async () => {
-  const shell = await launch(NO_RUNS);
-  await showScreen(shell, 'Usage');
-  expect(railButton(shell, 'Usage').getAttribute('aria-current')).toBe('page');
-  await pressMark(shell);
-  expectNewRun(shell);
-});
-
-test('a run appearing sends the mark to the dashboard, without leaving New run', async () => {
-  const shell = await launch(NO_RUNS);
-  await pressMark(shell);
-  expectNewRun(shell);
-  await listingArrives(shell, listed([server('00000000000a', '20261015-163047', 'running')], []));
-  // The user is not taken from New run by it.
-  expectNewRun(shell);
-  await showScreen(shell, 'Usage');
-  await pressMark(shell);
-  expect(runsHeading(shell)).not.toBeNull();
-  expect(railButton(shell, 'Runs').getAttribute('aria-current')).toBe('page');
-});
-
 test('with a run listed the app opens on the Runs dashboard', async () => {
   const shell = await launch();
   railButton(shell, 'Runs');
@@ -135,37 +95,6 @@ test('a configured machine with a live run lists it on a fresh profile with no r
   const shell = await launch({...SEED, recent: [], projectRuns: {}});
   railButton(shell, 'Runs');
   expect(runsHeading(shell)).not.toBeNull();
-});
-
-test('a machine still connecting keeps the mark on Runs until it answers', async () => {
-  const shell = await launch({
-    ...NO_RUNS,
-    machines: [
-      {host: 'local', label: 'This Mac', checkout: '/bundled'},
-      {host: 'ssh:host-a', label: 'host-a', checkout: '/checkout'},
-    ],
-    listings: [
-      {kind: 'listed', host: 'local', live: [], ended: [], unreadable: [], unverified: []},
-      {
-        kind: 'unavailable',
-        host: 'ssh:host-a',
-        step: 'handshake',
-        connection: {kind: 'connecting'},
-      },
-    ],
-  });
-  await pressMark(shell);
-  expect(runsHeading(shell)).not.toBeNull();
-  await listingArrives(shell, {
-    kind: 'listed',
-    host: 'ssh:host-a',
-    live: [],
-    ended: [],
-    unreadable: [],
-    unverified: [],
-  });
-  await pressMark(shell);
-  expectNewRun(shell);
 });
 
 const stepLists = (shell: OpenShell): Element[] => [

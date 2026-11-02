@@ -9,8 +9,6 @@ import {
   IntentStep,
   OperationFailed,
   RecordSchema,
-  SteerMode,
-  SteerTargetKind,
   TerminateRunOutcome,
 } from '@vibesys/proto';
 import {
@@ -28,12 +26,11 @@ import {SEEDS, Seeded} from '@vibesys/store/testing';
 
 const identity = {runId: 'run-1', requestId: 'r-1', projectRoot: '/project', expectedEpoch: 1n};
 
-test('all visible controls use typed defaults and preserve identity through the pipes', () => {
-  for (const action of ['pause', 'pauseNow', 'steer'] as const) {
+test('the run controls address their intents and preserve identity through the pipes', () => {
+  for (const action of ['pause', 'pauseNow'] as const) {
     const request = runIntent(
       {...identity, ...runReference(identity.projectRoot, identity.runId)},
       action,
-      'guidance',
     );
     const envelope = fromBinary(
       HostCallRequestSchema,
@@ -44,11 +41,6 @@ test('all visible controls use typed defaults and preserve identity through the 
     if (envelope.method.case !== 'postIntent') throw new Error('wrong method');
     expect(envelope.method.value).toEqual(request);
     expect(request.intent.case).toBe(action);
-    if (request.intent.case === 'steer') {
-      expect(request.intent.value.mode).toBe(SteerMode.NEXT_TURN);
-      expect(request.intent.value.target?.kind).toBe(SteerTargetKind.RUN);
-      expect(request.intent.value.text).toBe('guidance');
-    }
   }
 });
 

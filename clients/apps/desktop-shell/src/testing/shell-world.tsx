@@ -173,7 +173,7 @@ export async function openShell(
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
-  await act(async () => root.render(<Shell stores={stores} version="0" />));
+  await act(async () => root.render(<Shell stores={stores} />));
   if (screen !== null) {
     await act(async () => stores.sidebar.store.dispatch({type: 'select', screen}));
   }

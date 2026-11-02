@@ -64,8 +64,6 @@ function useIntentActor(props: RunIntentsProps) {
 
 export function useRunIntents(props: RunIntentsProps) {
   const {snapshot, current} = useIntentActor(props);
-  const [text, setText] = useState('');
-  const [guidanceOpen, showGuidance] = useState(false);
   const projectRoot = props.projectRoot;
   const committed = snapshot ? historyEpoch(snapshot.context) : 0n;
   const writerFacts = props.writer;
@@ -107,7 +105,7 @@ export function useRunIntents(props: RunIntentsProps) {
   const confirmedEpoch = relaunch?.appliedEpoch ?? 0n;
   const epoch = writer.epoch > confirmedEpoch ? writer.epoch : confirmedEpoch;
   const actions = writer.actions;
-  const send = (action: RunIntentAction) => {
+  const send = (action: Exclude<RunIntentAction, 'steer'>) => {
     if (writer.status !== 'ready' || !writer.actions.includes(action)) return;
     const request = runIntent(
       {
@@ -116,10 +114,8 @@ export function useRunIntents(props: RunIntentsProps) {
         expectedEpoch: writerFacts.observation?.epoch ?? 0n,
       },
       action,
-      text,
     );
     current.current?.send({type: 'send', request});
-    if (action === 'steer') showGuidance(false);
   };
   const controls = (
     <IntentControls
@@ -131,10 +127,6 @@ export function useRunIntents(props: RunIntentsProps) {
       entries={snapshot ? intentRows(snapshot.context) : []}
       error={snapshot?.context.error ?? null}
       warning={snapshot?.context.warning ?? null}
-      guidanceOpen={guidanceOpen}
-      showGuidance={showGuidance}
-      text={text}
-      edit={setText}
       send={send}
       retry={requestId => current.current?.send({type: 'retry', requestId})}
       askAboutError={props.askAboutError}

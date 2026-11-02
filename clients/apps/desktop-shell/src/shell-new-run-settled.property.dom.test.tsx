@@ -142,7 +142,7 @@ test('property: New run says ready only when nothing it reads can still change w
       const readyAt: {text: string; after: string[]}[] = [];
       const arrived: string[] = [];
       try {
-        await act(async () => root.render(<Shell stores={stores} version="0" />));
+        await act(async () => root.render(<Shell stores={stores} />));
         await act(async () =>
           stores.sidebar.store.dispatch({type: 'select', screen: {kind: 'new-run'}}),
         );

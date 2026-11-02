@@ -44,12 +44,12 @@ async function launch(): Promise<OpenShell> {
 const rail = (shell: OpenShell): HTMLElement =>
   one(shell.container, {role: 'navigation', name: 'VibeSys'});
 
-test('the rail is the one navigation: the mark, New, Runs, Machines, Usage, and Settings below', async () => {
+test('the rail is the one navigation: New, Runs, Machines, Usage, and Settings below', async () => {
   const shell = await launch();
   const names = all(rail(shell), {role: 'button'}).map(
     button => button.getAttribute('aria-label') ?? button.textContent?.trim() ?? '',
   );
-  expect(names).toEqual(['VibeSys', 'New', 'Runs', 'Machines', 'Usage', 'Settings']);
+  expect(names).toEqual(['New', 'Runs', 'Machines', 'Usage', 'Settings']);
   expect(all(shell.container, {role: 'navigation', name: 'VibeSys'})).toHaveLength(1);
 });
 
@@ -63,16 +63,4 @@ test('the rail marks where the user is, on every screen', async () => {
     );
     expect(rail(shell).querySelectorAll('[aria-current="page"]')).toHaveLength(1);
   }
-});
-
-test('the rail starts with the app logo, whose tooltip is the version, and it goes home', async () => {
-  const shell = await launch();
-  const mark = one(rail(shell), {role: 'button', name: 'VibeSys', exact: true});
-  expect(mark.getAttribute('title')).toMatch(/^VibeSys \S+$/);
-  expect(mark.querySelectorAll('svg.vs-icon path')).toHaveLength(1);
-  await press(one(rail(shell), {role: 'button', name: 'New', exact: true}));
-  await shell.read();
-  await press(mark);
-  await shell.read();
-  one(shell.container, {role: 'heading', name: 'Runs'});
 });

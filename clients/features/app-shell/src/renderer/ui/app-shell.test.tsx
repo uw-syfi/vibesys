@@ -23,15 +23,13 @@ const LISTINGS: readonly HostListing[] = [
 ];
 
 /** The rail's destinations, in order, as `state` renders them. */
-function railEntries(state: SidebarState, home: 'new-run' | 'runs'): string[] {
+function railEntries(state: SidebarState): string[] {
   const html = renderToStaticMarkup(
     <AppShell
       state={state}
       settled="ready"
       dispatch={() => {}}
       badges={{needsYou: 0, machineWarning: null}}
-      home={{kind: home}}
-      version="test"
       screen={() => null}
     />,
   );
@@ -41,8 +39,8 @@ function railEntries(state: SidebarState, home: 'new-run' | 'runs'): string[] {
 }
 
 test('property: the rail lists the same entries in every listing state', () => {
-  const expected = railEntries(SIDEBAR_EMPTY, 'runs');
-  expect(expected).toEqual(['VibeSys test', 'New run', 'Runs', 'Machines', 'Usage', 'Settings']);
+  const expected = railEntries(SIDEBAR_EMPTY);
+  expect(expected).toEqual(['New run', 'Runs', 'Machines', 'Usage', 'Settings']);
   fc.assert(
     fc.property(
       fc.subarray([...LISTINGS]),
@@ -52,10 +50,9 @@ test('property: the rail lists the same entries in every listing state', () => {
         {kind: 'failed', reason: 'down'},
       ),
       fc.boolean(),
-      fc.constantFrom('new-run' as const, 'runs' as const),
-      (listings, overview, runsSeen, home) => {
+      (listings, overview, runsSeen) => {
         const state = {...SIDEBAR_EMPTY, listings, overview, runsSeen};
-        expect(railEntries(state, home)).toEqual(expected);
+        expect(railEntries(state)).toEqual(expected);
       },
     ),
   );

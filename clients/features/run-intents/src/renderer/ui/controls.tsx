@@ -1,5 +1,5 @@
 import {IntentAction, type RunIntentAction} from '@vibesys/runs/intents';
-import {Button, Dialog, ErrorActions, Field, Row, Stack, Text, TextInput} from '@vibesys/ui';
+import {Button, ErrorActions, Row, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import {
   ACTION_LABELS,
@@ -11,10 +11,11 @@ import {
 } from '../../state/index.js';
 import {RelaunchAction, RelaunchStatus, type RelaunchView} from './relaunch.js';
 
-const BUTTON_LABELS: Record<RunIntentAction, string> = {
+/** The actions this row offers; a steer is written in the run chat, which says what it does. */
+type ButtonAction = Exclude<RunIntentAction, 'steer'>;
+const BUTTON_LABELS: Record<ButtonAction, string> = {
   pause: 'Pause',
   pauseNow: 'Pause now',
-  steer: 'Guidance',
 };
 /** A request still on its way, or one that did not take, keeps its row; an applied one is done. */
 type Unsettled = IntentRow & {readonly status: Exclude<IntentRow['status'], 'applied'>};
@@ -35,11 +36,7 @@ export function IntentControls(props: {
   readonly entries: readonly IntentRow[];
   readonly error: string | null;
   readonly warning: string | null;
-  readonly guidanceOpen: boolean;
-  readonly showGuidance: (open: boolean) => void;
-  readonly text: string;
-  readonly edit: (text: string) => void;
-  readonly send: (action: RunIntentAction) => void;
+  readonly send: (action: ButtonAction) => void;
   readonly retry: (requestId: string) => void;
   /** Hands an error to the run chat; absent where no chat can take it. */
   readonly askAboutError?: ((report: ErrorReport) => void) | undefined;
@@ -49,7 +46,7 @@ export function IntentControls(props: {
       <WriterStatus status={props.status ?? 'ready'} />
       <Row gap="space-2" wrap>
         {props.actions
-          .filter(action => action !== 'steer')
+          .filter((action): action is ButtonAction => action !== 'steer')
           .map(action => (
             <Button
               key={action}
@@ -61,9 +58,6 @@ export function IntentControls(props: {
             />
           ))}
         {props.relaunch ? <RelaunchAction {...props.relaunch} /> : null}
-        {props.actions.includes('steer') ? (
-          <Button text="Guidance" press={() => props.showGuidance(true)} />
-        ) : null}
       </Row>
       {props.actions.includes('pauseNow') ? (
         <Text tone="muted">Unfinished work may need repeating and may still incur charges.</Text>
@@ -99,27 +93,6 @@ export function IntentControls(props: {
           askAboutError={props.askAboutError}
         />
       ))}
-      <Dialog
-        open={props.guidanceOpen && props.actions.includes('steer')}
-        title="Guidance"
-        dismiss={() => props.showGuidance(false)}
-        actions={
-          <>
-            <Button text="Cancel" press={() => props.showGuidance(false)} />
-            <Button
-              {...(props.busy || !props.text.trim()
-                ? {disabledReason: props.busy ? 'Sending' : 'Enter guidance'}
-                : {})}
-              press={() => props.send('steer')}
-              text="Send guidance"
-            />
-          </>
-        }
-      >
-        <Field label="Guidance">
-          <TextInput rows={3} value={props.text} change={props.edit} />
-        </Field>
-      </Dialog>
     </Stack>
   );
 }

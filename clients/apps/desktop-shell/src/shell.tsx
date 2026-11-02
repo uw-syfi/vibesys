@@ -19,7 +19,6 @@ import {
   recentNotice,
   runLabels,
   runProjectRoot,
-  runsKnown,
   type Screen,
   type SidebarState,
 } from '@vibesys/feature-app-shell/state';
@@ -620,10 +619,7 @@ function UsageRoute(props: {
 }
 
 /** The window: the rail and the selected screen. */
-export function Shell(props: {
-  readonly stores: ShellStores;
-  readonly version: string;
-}): JSX.Element {
+export function Shell(props: {readonly stores: ShellStores}): JSX.Element {
   const {sidebar, machines, newRun} = props.stores;
   const sidebarState = useStore(sidebar.store);
   const machinesState = useStore(machines);
@@ -646,11 +642,8 @@ export function Shell(props: {
   );
   const machinesListed = machineCounts(machinesState).listed;
   const saved = machinesListed ? machinesState.machines.map(each => each.host) : null;
-  const known = runsKnown(sidebarState, saved);
   // The window never changes screen by itself, on a clock or on what a machine says: Runs reads
-  // while the machines answer and says so when they hold no run. Only the mark, pressed, goes to
-  // New run when none is known.
-  const home: Screen = known === 'none' ? {kind: 'new-run'} : {kind: 'runs'};
+  // while the machines answer and says so when they hold no run.
   const draft = runsDraft(newRunState, select, newRun.dispatch);
   const screen = (selected: Screen): JSX.Element => {
     switch (selected.kind) {
@@ -699,12 +692,10 @@ export function Shell(props: {
       state={sidebarState}
       settled={runsSettled(sidebarState, machinesState)}
       dispatch={sidebar.store.dispatch}
-      version={props.version}
       badges={{
         needsYou: needsYou(tiles).length,
         machineWarning: attention === null ? null : problemWord(attention),
       }}
-      home={home}
       screen={screen}
     />
   );

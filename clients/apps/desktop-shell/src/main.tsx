@@ -78,11 +78,7 @@ if (bridge === undefined) {
     <StrictMode>
       <LinkOpener open={openExternal}>
         <ProblemHost board={stores.problems}>
-          {run === null ? (
-            <Shell stores={stores} version={String(import.meta.env['VITE_APP_VERSION'])} />
-          ) : (
-            <RunWindow stores={stores} run={run} />
-          )}
+          {run === null ? <Shell stores={stores} /> : <RunWindow stores={stores} run={run} />}
         </ProblemHost>
       </LinkOpener>
     </StrictMode>,
