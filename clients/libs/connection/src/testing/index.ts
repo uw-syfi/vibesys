@@ -9,7 +9,13 @@
  * Its one consumer, this package's own `host-connection.test.ts`, imports it by its relative path.
  */
 
-export {FakeGateway, type FakeSubscribe, type FakeTail, type FakeWatch} from './fake-gateway.js';
+export {
+  FakeGateway,
+  type FakeServed,
+  type FakeSubscribe,
+  type FakeTail,
+  type FakeWatch,
+} from './fake-gateway.js';
 export {
   ECHO_SERVER,
   FAKE_HARNESSES,

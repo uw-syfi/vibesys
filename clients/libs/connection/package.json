@@ -38,6 +38,7 @@
     "@vibesys/hosts": "workspace:*",
     "@vibesys/logs": "workspace:*",
     "@vibesys/machine": "workspace:*",
+    "@vibesys/orchestrator-proto": "workspace:*",
     "@vibesys/transport": "workspace:*",
     "xstate": "5.33.2",
     "@vibesys/proto": "workspace:*",

@@ -55,6 +55,23 @@ test('generic bridge validates methods and both payload directions', () => {
   );
 });
 
+test('a bridge validates the methods of exactly the services it carries', () => {
+  const method = `/${proto.HostService.typeName}/Hello`;
+  const bytes = toBinary(
+    proto.HelloRequestSchema,
+    create(proto.HelloRequestSchema, {apiSchemaHash: proto.API_SCHEMA_HASH}),
+  );
+  proto.validateServicePayload([proto.HostService], method, 'input', bytes);
+  assert.throws(
+    () => proto.validateServicePayload([], method, 'input', bytes),
+    /unknown\s+method: \/vibesys\.api\.v1\.HostService\/Hello/,
+  );
+  assert.throws(
+    () => proto.validateServicePayload([proto.HostService], '/other.Service/Hello', 'input', bytes),
+    /unknown HostService method/,
+  );
+});
+
 test('generated valid run ids round trip; forbidden path characters fail at every position', () => {
   const schemas = [
     proto.TailRequestSchema,

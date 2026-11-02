@@ -1022,6 +1022,9 @@ importers:
       '@vibesys/machine':
         specifier: workspace:*
         version: link:../machine
+      '@vibesys/orchestrator-proto':
+        specifier: workspace:*
+        version: link:../orchestrator-proto
       '@vibesys/proto':
         specifier: workspace:*
         version: link:../proto

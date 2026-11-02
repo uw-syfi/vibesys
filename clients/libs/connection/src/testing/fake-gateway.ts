@@ -81,6 +81,17 @@ export interface FakeWatch {
   end(code?: number, detail?: string): void;
 }
 
+/** One call to a method served through `FakeGateway.serve`. */
+export interface FakeServed {
+  readonly request: Uint8Array;
+  /** Settles when the client has ended this call: read the answer, cancelled it, or closed. */
+  readonly closed: Promise<void>;
+  send(bytes: Uint8Array): void;
+  /** The connection drops under the call, as an ssh link does. */
+  disconnect(): void;
+  end(code?: number, detail?: string): void;
+}
+
 export class FakeGateway implements GatewayDialer {
   readonly forces: boolean[] = [];
   schemaHash = API_SCHEMA_HASH;
@@ -104,6 +115,8 @@ export class FakeGateway implements GatewayDialer {
   readonly readsReceived: ReadRequest[] = [];
   readonly #reads: FakeRead[] = [];
   readonly #readWaiters: Array<(call: FakeRead) => void> = [];
+  readonly #served = new Map<string, FakeServed[]>();
+  readonly #servedWaiters = new Map<string, Array<(call: FakeServed) => void>>();
   readonly #dialWaiters: Array<() => void> = [];
   #dialsTaken = 0;
   readonly #waiters: Array<(tail: FakeTail) => void> = [];
@@ -181,7 +194,27 @@ export class FakeGateway implements GatewayDialer {
       this.#subscribe(stream, bytes);
       return true;
     }
+    if (method !== undefined && this.#served.has(method)) {
+      this.#serveCall(method, stream, bytes);
+      return true;
+    }
     return false;
+  }
+
+  #serveCall(method: string, stream: ServerHttp2Stream, request: Uint8Array): void {
+    const session = stream.session;
+    const call: FakeServed = {
+      request,
+      closed: new Promise<void>(resolve => stream.once('close', () => resolve())),
+      send: bytes => {
+        stream.write(grpcFrame(bytes));
+      },
+      disconnect: () => session?.destroy(),
+      end: (code, detail) => end(stream, code, detail),
+    };
+    const waiter = this.#servedWaiters.get(method)?.shift();
+    if (waiter === undefined) this.#served.get(method)?.push(call);
+    else waiter(call);
   }
 
   #hostCall(stream: ServerHttp2Stream, bytes: Uint8Array): void {
@@ -293,6 +326,24 @@ export class FakeGateway implements GatewayDialer {
     server.on('error', () => {});
     this.#server.emit('connection', server);
     return client;
+  }
+
+  /**
+   * Accept calls of `method`, a service this fake does not model, and hand each to a test through
+   * `nextServed`. The test sends and ends the call with the bytes it chooses.
+   */
+  serve(method: string): void {
+    if (!this.#served.has(method)) this.#served.set(method, []);
+  }
+
+  nextServed(method: string): Promise<FakeServed> {
+    const call = this.#served.get(method)?.shift();
+    if (call !== undefined) return Promise.resolve(call);
+    return new Promise(resolve => {
+      const waiters = this.#servedWaiters.get(method) ?? [];
+      waiters.push(resolve);
+      this.#servedWaiters.set(method, waiters);
+    });
   }
 
   nextTail(): Promise<FakeTail> {

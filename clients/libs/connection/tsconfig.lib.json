@@ -33,6 +33,9 @@
       "path": "../machine/tsconfig.lib.json"
     },
     {
+      "path": "../orchestrator-proto/tsconfig.lib.json"
+    },
+    {
       "path": "../transport/tsconfig.lib.json"
     },
     {
