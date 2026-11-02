@@ -19,7 +19,7 @@ func newStores(t *testing.T, indexDir string) *filestores.FileStores {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return filestores.New(index, app.Rules(filestores.DefaultSamples))
+	return filestores.New(index, app.Rules(filestores.DefaultSamples), filestore.Owner{})
 }
 
 // A scope opened once is found by a daemon that starts later, over the same index.

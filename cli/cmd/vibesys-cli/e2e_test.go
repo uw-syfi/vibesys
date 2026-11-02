@@ -88,7 +88,7 @@ func e2eDaemon() int {
 		Dir: dir, Version: "e2e", Clock: clock.System{}, Ready: os.NewFile(runtimedir.ReadyFD, "ready"),
 		Logf: func(format string, args ...any) { fmt.Fprintf(os.Stderr, "daemon: "+format+"\n", args...) },
 		Runtime: daemon.Runtime{
-			Stores:       filestores.New(index, app.Rules(5)),
+			Stores:       filestores.New(index, app.Rules(5), filestore.Owner{Host: "e2e", Dir: dir.Path(), PID: os.Getpid()}),
 			Environments: e2eEnvironments(),
 			Supervisors: host.New(dir.Supervisors(), func(runDir string) *exec.Cmd {
 				cmd := exec.Command(self, "-test.run=^$")

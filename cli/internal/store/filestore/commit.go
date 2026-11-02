@@ -14,6 +14,9 @@ import (
 // whole. A change that adds a result to a job writes the result first and publishes the job
 // last, because the job is what says the result belongs to the store.
 func (b *backend) Commit(change ledger.Change) error {
+	if err := b.guard.check(); err != nil {
+		return err
+	}
 	switch c := change.(type) {
 	case ledger.PutJob:
 		if c.Result != nil {

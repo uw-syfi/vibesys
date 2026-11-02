@@ -2,6 +2,7 @@ package filestores
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -19,6 +20,7 @@ const DefaultSamples = 5
 type FileStores struct {
 	index *filestore.Index
 	rules store.Rules
+	owner filestore.Owner
 	opts  []filestore.Option
 
 	mu     sync.Mutex
@@ -27,15 +29,27 @@ type FileStores struct {
 
 var _ app.Stores = (*FileStores)(nil)
 
-// New returns the stores of a user. Every store is opened with the rules, and with opts, which
-// tests use to put the stores on a fake file system. The index records the tasks that have a
-// store.
-func New(index *filestore.Index, rules store.Rules, opts ...filestore.Option) *FileStores {
-	return &FileStores{index: index, rules: rules, opts: opts, stores: map[app.Scope]*filestore.Store{}}
+// New returns the stores of a user. Every store is opened with the rules and as owner, and with
+// opts, which tests use to put the stores on a fake file system. The index records the tasks that
+// have a store.
+func New(index *filestore.Index, rules store.Rules, owner filestore.Owner, opts ...filestore.Option) *FileStores {
+	return &FileStores{index: index, rules: rules, owner: owner, opts: opts, stores: map[app.Scope]*filestore.Store{}}
 }
 
-// Open implements app.Stores. A store is opened once and then shared, since the daemon is the
-// only process that writes to it.
+// Close gives up every store. Process death does the same, so a daemon need not call it.
+func (f *FileStores) Close() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var errs []error
+	for scope, s := range f.stores {
+		errs = append(errs, s.Close())
+		delete(f.stores, scope)
+	}
+	return errors.Join(errs...)
+}
+
+// Open implements app.Stores. A store is opened once and then shared, since opening it makes this
+// process its one owner.
 //
 // The store is made before the index records it. A crash between the two leaves a store with no
 // jobs and no entry, which loses nothing, and the next Open records it.
@@ -51,12 +65,13 @@ func (f *FileStores) Open(ctx context.Context, scope app.Scope) (store.Store, er
 	if s, ok := f.stores[scope]; ok {
 		return s, nil
 	}
-	opts := append([]filestore.Option{filestore.WithRules(f.rules)}, f.opts...)
+	opts := append([]filestore.Option{filestore.WithRules(f.rules), filestore.WithOwner(f.owner)}, f.opts...)
 	s, err := filestore.OpenTask(scope.Repository, scope.Task, opts...)
 	if err != nil {
 		return nil, err
 	}
 	if err := f.index.Add(filestore.Task{Repository: scope.Repository, Name: scope.Task}); err != nil {
+		_ = s.Close()
 		return nil, fmt.Errorf("recording the store of task %s in %s: %w", scope.Task, scope.Repository, err)
 	}
 	f.stores[scope] = s

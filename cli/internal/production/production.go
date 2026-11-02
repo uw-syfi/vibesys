@@ -63,6 +63,11 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 	if err != nil {
 		return fmt.Errorf("opening the task index: %w", err)
 	}
+	machine, err := os.Hostname()
+	if err != nil {
+		return fmt.Errorf("naming this machine as the owner of its stores: %w", err)
+	}
+	owner := filestore.Owner{Host: machine, Dir: dir.Path(), PID: os.Getpid()}
 	clk := clock.System{}
 	return daemon.Run(ctx, daemon.Config{
 		Dir:     dir,
@@ -73,7 +78,7 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 			fmt.Fprintf(os.Stderr, "%s vibesys-cli daemon: %s\n", clk.Now().UTC().Format("2006-01-02T15:04:05Z"), fmt.Sprintf(format, args...))
 		},
 		Runtime: daemon.Runtime{
-			Stores: filestores.New(index, app.Rules(filestores.DefaultSamples)),
+			Stores: filestores.New(index, app.Rules(filestores.DefaultSamples), owner),
 			Supervisors: host.New(dir.Supervisors(), func(runDir string) *exec.Cmd {
 				return exec.Command(p.Executable, "supervisor", "serve", "--run-dir", runDir)
 			}, p.Version, clock.System{}),

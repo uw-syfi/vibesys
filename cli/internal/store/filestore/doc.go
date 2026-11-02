@@ -12,6 +12,8 @@
 // fact, each a JSON document that starts with its format version:
 //
 //	format                     the version of the layout
+//	.owner.lock                empty; the owner holds a lock on it
+//	.owner                     who owns the store, and how many owners it has had
 //	jobs/<job>.json            one job, replaced whole on each change
 //	results/<job>.json         the result a job saved, with its place in the order of saving
 //	plans/<number>.json        one plan, replaced whole on each change
@@ -29,7 +31,8 @@
 // create a file and write it, fsync it, rename it within its directory, fsync the directory,
 // create a directory (which fails if it exists), unlink, and read. Rename within a directory
 // replaces the destination in one step on a local filesystem and on NFS. Nothing here depends on
-// file locking, append, O_EXCL on a file, or a rename between directories.
+// append, O_EXCL on a file, or a rename between directories, and only the Owners section below
+// depends on file locking.
 //
 // A change is written to a temporary file in the directory it belongs to, fsynced, renamed to its
 // final name, and the directory is fsynced. The rename is the change's commit point. A change
@@ -42,12 +45,38 @@
 // store reads the directory again before it serves the next request, so the way back from a
 // failure is the way back from a crash.
 //
+// # Owners
+//
+// A store has one owner, and the store is what enforces that, because the store is what two
+// owners would damage and what they share: state may be on NFS and reached from several machines,
+// and anything kept beside the socket is per machine, or per value of XDG_RUNTIME_DIR. Open does
+// three things, and each covers what the one before cannot.
+//
+// The lock. Open takes a flock on .owner.lock, or fails. It ends with the process, however that
+// ends, so a crashed owner leaves nothing to clean up. On NFS a client machine that crashed keeps
+// it until its lease runs out or it reboots, and the store is refused until then with an error
+// that names that owner. A filesystem where the lock would keep nobody out is refused: see
+// fsys.OS.Lock for how that is found. There is no falling back to no lock.
+//
+// The record. A lock says nobody is here now. It does not say the last owner's work is over: its
+// supervisors outlive it, and can only be found from where they started. So .owner names the
+// machine and the runtime directory of the last owner, and a store with a running job whose
+// record names another place is refused, because opening it would mark a live job lost. When that
+// place is gone for good, removing the record is the way on, and the error says so.
+//
+// The fence. A lock can stop working under its holder: an NFS server can lose it while the client
+// is cut off, a mount can hide it from other machines without any sign, and anyone can delete the
+// file. So every open writes .owner again, under a new generation, and the owner reads the file
+// before every commit and every reload, and stops if it is not what it wrote. That read needs no
+// lock, and NFS shows a file renamed over another to the next open. It closes all but the last
+// instant: a commit that passed the check while another owner took over still lands, once. The
+// loser's next call fails, and it fails with FailureUnavailable, so that it holds everything it
+// has and decides nothing.
+//
 // # Use
 //
-// The store is for one process at a time. It serializes the requests of its own process and
-// does nothing about a second process on the same directory; the daemon is what keeps that from
-// happening. A run name is a file name, so two run names that differ only in case share a
-// directory on a case-insensitive filesystem.
+// The store serializes the requests of its one owner. A run name is a file name, so two run names
+// that differ only in case share a directory on a case-insensitive filesystem.
 //
 // # Versions
 //
@@ -55,5 +84,5 @@
 // program reads, with an error of kind core.FailureIncompatible that names the file. It refuses
 // a record it cannot decode, one with a field it does not know, and one whose name and content
 // disagree, with an error of kind core.FailureInternal that names the file. It refuses a
-// directory that holds other files and no format file.
+// directory that holds other files and no format file. The .owner file is a record like any other.
 package filestore
