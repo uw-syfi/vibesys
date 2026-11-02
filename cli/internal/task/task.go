@@ -83,6 +83,9 @@ type Task struct {
 	Backend core.BackendKind
 	// HasDockerfile says the task ships a Dockerfile, so its jobs run in docker.
 	HasDockerfile bool
+	// Dockerfile is that file's text at the task's commit, which pins the image the jobs run in.
+	// It is empty when HasDockerfile is false.
+	Dockerfile []byte
 	// NestedDocker says the task starts containers of its own, with [environment]
 	// docker_in_docker = true. A container run by this build has no container runtime in it, so
 	// a docker environment refuses the task instead of running it without what it needs.
@@ -137,8 +140,11 @@ func Read(fsys fs.FS, name string) (Task, error) {
 	if err != nil {
 		return Task{}, err
 	}
-	if _, err := fs.Stat(fsys, path.Join(dir, dockerfile)); err == nil {
-		t.HasDockerfile = true
+	switch text, err := fs.ReadFile(fsys, path.Join(dir, dockerfile)); {
+	case err == nil:
+		t.HasDockerfile, t.Dockerfile = true, text
+	case !errors.Is(err, fs.ErrNotExist):
+		return Task{}, &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("task %q: reading %s: %v", name, path.Join(dir, dockerfile), err)}
 	}
 	if t.Version, err = Version(fsys, dir); err != nil {
 		return Task{}, err

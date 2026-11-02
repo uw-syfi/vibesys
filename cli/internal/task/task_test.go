@@ -162,6 +162,26 @@ func TestADockerfileIsNoted(t *testing.T) {
 	if err != nil || !got.HasDockerfile || !got.Setup().HasDockerfile {
 		t.Fatalf("got %+v, %v", got, err)
 	}
+	if string(got.Dockerfile) != "FROM scratch" {
+		t.Errorf("the task carries the Dockerfile %q, want its text", got.Dockerfile)
+	}
+}
+
+func TestATaskWithoutADockerfileCarriesNone(t *testing.T) {
+	got, err := task.Read(repo(taskFiles("t", jsonManifest, objectives)), "t")
+	if err != nil || got.HasDockerfile || len(got.Dockerfile) != 0 {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+}
+
+func TestADockerfileThatCannotBeReadIsNotTakenForAbsent(t *testing.T) {
+	files := taskFiles("t", jsonManifest, objectives)
+	files[".vibesys/tasks/t/Dockerfile/inner"] = "x"
+	_, err := task.Read(repo(files), "t")
+	var f *core.Failure
+	if !errors.As(err, &f) || f.Kind != core.FailureUnavailable || !strings.Contains(f.Message, "Dockerfile") {
+		t.Fatalf("err = %v, want an unavailable failure naming the Dockerfile", err)
+	}
 }
 
 func TestDockerInDockerIsNotedAndMustBeABoolean(t *testing.T) {
