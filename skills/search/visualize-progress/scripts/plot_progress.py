@@ -104,11 +104,15 @@ def load_points(state: Path) -> tuple[list[Point], str, str]:
     return sorted(points.values(), key=lambda p: p.time), metric, direction
 
 
-def mark_main(points: list[Point], repo: Path, branch: str) -> None:
-    """Mark the commits on the result branch, in history order."""
+def branch_commits(repo: Path, branch: str) -> list[str]:
+    """Full SHAs on the result branch, oldest first."""
     argv = ["git", "-C", str(repo), "rev-list", "--reverse", branch]
     # lint-waiver: LW-715301 [S603]; a fixed git argv with no shell; reading history through git is the point.
-    shas = subprocess.run(argv, capture_output=True, text=True, check=True).stdout.split()  # noqa: S603
+    return subprocess.run(argv, capture_output=True, text=True, check=True).stdout.split()  # noqa: S603
+
+
+def mark_main(points: list[Point], shas: list[str]) -> None:
+    """Mark the points whose commit is on the result branch, in history order."""
     rank = {c: i for i, c in enumerate(shas)}
     for p in points:
         if p.commit in rank:
@@ -288,8 +292,24 @@ def write_report(out: Path, points: list[Point], metric: str) -> None:
     (out / "report.md").write_text("\n".join(["# Optimization progress", "", *rows, "", *images, ""]))
 
 
+def build(state: Path, task_dir: Path, promoted: list[str], out: Path, theme: str = "light") -> None:
+    """Write the charts and report for a state directory; `promoted` is the branch history."""
+    points, metric, direction = load_points(state)
+    mark_main(points, promoted)
+    objs, tol = read_objectives(task_dir)
+    th = THEMES[theme]
+    style(th)
+    out.mkdir(parents=True, exist_ok=True)
+    hl = Headline(metric, direction, objs, tol)
+    draw_progress(th, points, hl, out)
+    draw_frontier(th, points, hl, out)
+    draw_latency(th, points, hl, out)
+    draw_plans(th, read_plan_statuses(state), out)
+    write_report(out, points, metric)
+
+
 def main() -> None:
-    """Read the state and write the charts and report."""
+    """Parse the command line and build the charts."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--state", required=True, type=Path, help=".vibesys-state/optimize/<task>")
     ap.add_argument("--task-dir", required=True, type=Path, help=".vibesys/tasks/<task>")
@@ -298,19 +318,7 @@ def main() -> None:
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--theme", choices=THEMES, default="light")
     a = ap.parse_args()
-
-    points, metric, direction = load_points(a.state)
-    mark_main(points, a.repo, a.branch)
-    objs, tol = read_objectives(a.task_dir)
-    th = THEMES[a.theme]
-    style(th)
-    a.out.mkdir(parents=True, exist_ok=True)
-    hl = Headline(metric, direction, objs, tol)
-    draw_progress(th, points, hl, a.out)
-    draw_frontier(th, points, hl, a.out)
-    draw_latency(th, points, hl, a.out)
-    draw_plans(th, read_plan_statuses(a.state), a.out)
-    write_report(a.out, points, metric)
+    build(a.state, a.task_dir, branch_commits(a.repo, a.branch), a.out, a.theme)
 
 
 if __name__ == "__main__":

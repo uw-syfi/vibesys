@@ -4,8 +4,6 @@ import json
 import sys
 from pathlib import Path
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import plot_progress as pp
 
@@ -56,14 +54,8 @@ def test_frontier_uses_noise_tolerance() -> None:
     assert kept == {"fast", "near"}  # near is within 3% of fast on both objectives
 
 
-def test_cli_writes_all_outputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The CLI writes every chart and the report."""
-
-    def promote_all(points: list[pp.Point], repo: Path, branch: str) -> None:  # noqa: ARG001
-        for i, p in enumerate(points):
-            p.on_main, p.order = True, i
-
-    monkeypatch.setattr(pp, "mark_main", promote_all)
+def test_build_writes_all_outputs(tmp_path: Path) -> None:
+    """Building from a state directory writes every chart and the report."""
     first, second = "a" * 40, "b" * 40
     state = make_state(tmp_path / "state", [
         (first, record(first, 100, 50, "2026-01-01T00:00:00+00:00")),
@@ -74,8 +66,6 @@ def test_cli_writes_all_outputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         '[[objective]]\nname = "tput"\ndirection = "max"\n[[objective]]\nname = "ttft_p50_ms"\n'
         'direction = "min"\n[pareto]\nrelative_noise = 0.03\n')
     out = tmp_path / "out"
-    monkeypatch.setattr(sys, "argv", ["plot_progress", "--state", str(state), "--task-dir", str(task),
-                                      "--branch", "main", "--out", str(out)])
-    pp.main()
+    pp.build(state, task, [first, second], out)
     for name in ("progress.png", "frontier.png", "latency.png", "plans.png", "report.md"):
         assert (out / name).exists()
