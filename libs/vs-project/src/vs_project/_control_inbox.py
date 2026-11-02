@@ -1,5 +1,5 @@
 """The operator's control inbox: requests written from outside a run, read by the run.
-
+ 
 An operator (or an orchestrating agent, over ssh) controls a run that has no socket by
 writing one file per request into the run's state directory. The run reads the inbox at
 each control poll, applies each request once, and only then marks it settled, so a request
@@ -7,12 +7,12 @@ written while the run is down, or one the run read but had not yet committed whe
 crashed, is applied after the run resumes. The request's own id names its file, and the file
 is never removed: posting the same request again is one request, and an id, once posted,
 never names another request.
-
+ 
 Requests apply in the order they were posted, whatever their ids: each post claims the next
 free number of a sequence, which only an exclusive file creation hands out, so two posters
 on any processes never share one and a post that returned is ordered before any post that
 starts after it.
-
+ 
 The inbox stores opaque bytes; what a request says is the run's business
 (``vs_runtime``'s ``ControlRequest``). A request the run cannot apply is marked rejected with
 the reason, never silently dropped. Whether the run has ended is not the inbox's to record:
@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING, Protocol
 from vs_project.errors import ProjectStateError
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
     from vs_project._state import StateNamespace
 
@@ -127,11 +127,12 @@ class ControlInbox(Protocol):
     """Durable requests for one run, in the order they were posted.
 
     ``post`` is idempotent per id and refuses a different payload under an id ever posted,
-    pending or not. ``pending`` lists what has been neither settled nor rejected, in posting
-    order; it never fails on one bad entry. ``settle`` marks a request the run applied;
-    ``reject`` marks one it could not apply, with the reason. Both are idempotent, neither
-    touches another request, and a settled or rejected request is never pending again.
-    ``status`` says what became of one request. ``serve`` declares the reader's format.
+    pending or not, and any id that differs from a posted one only by case. ``pending`` lists
+    what has been neither settled nor rejected, in posting order; it never fails on one bad
+    entry. ``settle`` marks a request the run applied; ``reject`` marks one it could not
+    apply, with the reason. Both are idempotent, neither touches another request, and a
+    settled or rejected request is never pending again. ``status`` says what became of one
+    request. ``serve`` declares the reader's format.
     """
 
     def post(self, request_id: str, payload: bytes, *, ended: Ended) -> None:
@@ -139,9 +140,11 @@ class ControlInbox(Protocol):
 
         Posting the same payload again is one request, in its first place; a different
         payload under an id already posted raises ``ProjectStateError``, also when two posts
-        race. ``ended`` is read before writing and again after. Once the run has ended,
-        posting a request it applied again succeeds, so a retry after an uncertain write
-        stays one request; any other post raises ``InboxClosedError``: before writing
+        race. So does an id that differs from a posted one only by case, as the two would
+        name one file on a case-insensitive filesystem; that is checked first, before
+        ``ended`` is read. ``ended`` is read before writing and again after. Once the run has
+        ended, posting a request it applied again succeeds, so a retry after an uncertain
+        write stays one request; any other post raises ``InboxClosedError``: before writing
         anything when the run had ended already (naming the reason of a request it rejected,
         or saying a new one was not posted), and after writing when it ended during the post
         (the request then reads as rejected).
@@ -209,12 +212,24 @@ class FileControlInbox:
     def post(self, request_id: str, payload: bytes, *, ended: Ended) -> None:
         """Create the request's file and claim its place, unless the run has ended.
 
+        An id that differs only by case from one already held is refused with
+        ``ProjectStateError`` before the run's end is read or anything is written, since the
+        two would name one file on a case-insensitive filesystem.
+
         The run's end is read before the write and again after it. A run that ends settles
         or rejects every request it finds after its end is durable; so a post that sees no
         end afterwards wrote its file before the end and is read by the run, and one that
         sees it was applied before the end or never will be.
         """
         name = validate_request_id(request_id)
+        _refuse_case_collision(
+            name,
+            (
+                existing
+                for entry in self._namespace.entries(_POSTED, list_symlinks=True)
+                if (existing := _request_id_of(entry)) is not None
+            ),
+        )
         path = _POSTED / f"{name}{_SUFFIX}"
         before = ended()
         if before is not None:
@@ -382,8 +397,13 @@ class FakeControlInbox:
         )
 
     def post(self, request_id: str, payload: bytes, *, ended: Ended) -> None:
-        """Hold the request in its place, unless its id holds a different one or the run ended."""
+        """Hold the request in its place, unless its id holds a different one or the run ended.
+
+        An id that differs only by case from one already held is refused with
+        ``ProjectStateError`` before the run's end is read or anything is held.
+        """
         name = validate_request_id(request_id)
+        _refuse_case_collision(name, self._posted)
         before = ended()
         if before is not None:
             _different(name, self._payload(name), payload)
@@ -458,6 +478,22 @@ class FakeControlInbox:
             payload = b"" if isinstance(held, InboxEntry) else held
             found.append(RejectedEntry(key, payload, self._rejected[key]))
         return tuple(found)
+
+
+def _refuse_case_collision(name: str, held: Iterable[str]) -> None:
+    """Refuse ``name`` if a different held id differs from it only by case.
+
+    The two would name one file on a case-insensitive filesystem, so they are refused on
+    every platform. Ids are ASCII (``_REQUEST_ID``), so ``lower`` folds them as such a
+    filesystem does.
+    """
+    folded = name.lower()
+    for existing in sorted(held):
+        if existing != name and existing.lower() == folded:
+            message = (
+                f"control request id {name!r} differs only by case from existing id {existing!r}"
+            )
+            raise ProjectStateError(message)
 
 
 def _different(request_id: str, held: bytes | None, payload: bytes) -> None:
