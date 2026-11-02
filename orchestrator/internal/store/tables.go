@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"reflect"
 
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
@@ -141,4 +142,88 @@ func runAfter(e core.Effect) (nanos int64, timed bool) {
 		return t.FireAt.UnixNano(), true
 	}
 	return 0, false
+}
+
+// summary is the part of the tables that must equal the state: what a state holds for runs, agents,
+// mail in transit and receipts. Items, turns and settled messages are history, which no state keeps.
+type summary struct {
+	runs     map[core.RunID]core.Run
+	agents   map[core.AgentID]core.Agent
+	transit  map[core.MessageID]core.Message
+	receipts map[core.CommandID]core.Receipt
+}
+
+func newSummary() summary {
+	return summary{
+		runs: map[core.RunID]core.Run{}, agents: map[core.AgentID]core.Agent{},
+		transit: map[core.MessageID]core.Message{}, receipts: map[core.CommandID]core.Receipt{},
+	}
+}
+
+// summary reads a summary out of memory tables.
+func (t *tables) summary() summary {
+	out := newSummary()
+	for id, r := range t.runs {
+		out.runs[id] = r.event.Body.(core.Run)
+	}
+	for id, r := range t.agents {
+		out.agents[id] = r.event.Body.(core.Agent)
+	}
+	for id, r := range t.messages {
+		if m := r.event.Body.(core.Message); !m.Delivery.Final() {
+			out.transit[id] = m
+		}
+	}
+	for id, r := range t.receipts {
+		out.receipts[id] = r.event.Body.(core.Receipt)
+	}
+	return out
+}
+
+// check compares a summary with a state and names the first difference.
+func (sm summary) check(s core.State) error {
+	want := newSummary()
+	for _, run := range s.Runs() {
+		want.runs[run.ID] = run
+		for _, a := range s.Agents(run.ID) {
+			want.agents[a.ID] = a
+		}
+	}
+	for _, m := range s.InTransit() {
+		want.transit[m.ID] = m
+	}
+	for _, e := range s.Checkpoint() {
+		if r, ok := e.Body.(core.Receipt); ok {
+			want.receipts[r.Command] = r
+		}
+	}
+	if err := sameSet("runs", want.runs, sm.runs); err != nil {
+		return err
+	}
+	if err := sameSet("agents", want.agents, sm.agents); err != nil {
+		return err
+	}
+	if err := sameSet("messages in transit", want.transit, sm.transit); err != nil {
+		return err
+	}
+	return sameSet("receipts", want.receipts, sm.receipts)
+}
+
+// sameSet compares what a replay gives (want) with what a table holds (got).
+func sameSet[K comparable, V any](what string, want, got map[K]V) error {
+	for k, w := range want {
+		g, ok := got[k]
+		switch {
+		case !ok:
+			return corruptf("%s: a replay has %v and the table does not", what, k)
+		case !reflect.DeepEqual(w, g):
+			return corruptf("%s: %v differs.\n replay: %+v\n table:  %+v", what, k, w, g)
+		}
+	}
+	for k := range got {
+		if _, ok := want[k]; !ok {
+			return corruptf("%s: the table has %v and a replay does not", what, k)
+		}
+	}
+	return nil
 }
