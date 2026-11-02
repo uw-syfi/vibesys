@@ -7,7 +7,7 @@ nowhere else. Tests give it an ``Agent`` built on agentshim's scripted providers
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol
 
 from agentshim import (
@@ -177,6 +177,19 @@ class AgentshimDriver:
         self._live.close()
 
 
+#: The environment every MCP server of a session gets, so the server knows who is calling.
+IDENTITY_ENV = ("VIBESYS_AGENT_ID", "VIBESYS_RUN_ID", "VIBESYS_SESSION")
+
+
+def identity_env(launch: fx.LaunchSession) -> dict[str, str]:
+    """The session identity as environment variables, keyed by ``IDENTITY_ENV``."""
+    return {
+        "VIBESYS_AGENT_ID": launch.session.agent_id,
+        "VIBESYS_RUN_ID": launch.run_id,
+        "VIBESYS_SESSION": str(launch.session.session),
+    }
+
+
 def build_session(
     launch: fx.LaunchSession,
     *,
@@ -203,9 +216,14 @@ def build_session(
             permissions=NativePermissions.bypass(),
             approvals=ApprovalPolicy.DENY,
         )
+    # The identity wins over anything the server config says, so a server cannot be told it is
+    # another agent.
+    identified = tuple(
+        replace(server, env={**server.env, **identity_env(launch)}) for server in mcp_servers
+    )
     return agent.session(
         launch.worktree,
-        mcp_servers=tuple(mcp_servers),
+        mcp_servers=identified,
         reasoning_effort=launch.reasoning_effort or None,
         resume_id=launch.resume_conversation_id or None,
         partial_text=True,

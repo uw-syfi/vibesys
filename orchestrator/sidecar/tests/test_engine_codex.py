@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
     from agentshim import AgentEvent
 
-    from vs_sidecar.driver import TurnResult
+    from vs_sidecar.driver import Driver, TurnResult
 
 
 def _engine(script: CodexScript, store: MemoryStore | None = None) -> tuple[Engine, MemoryStore]:
@@ -126,23 +126,31 @@ def test_a_steer_the_turn_came_too_late_for_is_answered_after_the_turn_ends() ->
     assert tail[1].steer.accepted is False
 
 
-def test_a_steer_sent_while_the_turn_runs_is_accepted_when_the_provider_takes_it() -> None:
-    script = CodexScript().turn(AwaitSteer(then=(Say("thanks"),)))
-    engine, store = _engine(script)
-    engine.send(h.start_turn("e1", "t1"))
-    started = threading.Event()
-    driver = engine._driver  # noqa: SLF001 - the test splices into the turn it drives, which only the driver exposes
-    assert driver is not None
-    original = driver.run_turn
+class _Started:
+    """A driver that sets *started* when the turn it runs produces its first event."""
 
-    def run_turn(prompt: str, emit: Callable[[AgentEvent], None]) -> TurnResult:
+    def __init__(self, inner: Driver, started: threading.Event) -> None:
+        self._inner = inner
+        self._started = started
+
+    def run_turn(self, prompt: str, emit: Callable[[AgentEvent], None]) -> TurnResult:
         def emitting(event: AgentEvent) -> None:
             emit(event)
-            started.set()
+            self._started.set()
 
-        return original(prompt, emitting)
+        return self._inner.run_turn(prompt, emitting)
 
-    driver.run_turn = run_turn  # type: ignore[method-assign]  # a test double over the driver
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._inner, name)
+
+
+def test_a_steer_sent_while_the_turn_runs_is_accepted_when_the_provider_takes_it() -> None:
+    started = threading.Event()
+    factory = h.codex_factory(CodexScript().turn(AwaitSteer(then=(Say("thanks"),))))
+    store = MemoryStore()
+    engine = Engine(h.launch(), store, lambda sink: _Started(factory(sink), started))  # type: ignore[arg-type,return-value]
+    engine.start()
+    engine.send(h.start_turn("e1", "t1"))
     # A steer comes from another thread while the turn thread reads the provider. The wait only
     # guards against a hang: the steer is sent as soon as the turn has produced its first event.
     sender = threading.Thread(

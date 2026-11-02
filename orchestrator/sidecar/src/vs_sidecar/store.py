@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
 
+from google.protobuf.message import DecodeError
+
 from vs_sidecar.gen.vibesys.orchestrator.v1 import sidecar_pb2 as sc
 
 if TYPE_CHECKING:
@@ -95,7 +97,7 @@ def decode_events(data: bytes) -> tuple[list[sc.SidecarEvent], int]:
         event = sc.SidecarEvent()
         try:
             event.ParseFromString(data[at + _LENGTH.size : end])
-        except Exception:  # noqa: BLE001 - protobuf raises DecodeError and subclasses of Exception alike; any parse failure is a torn record
+        except DecodeError:
             break
         events.append(event)
         at = end

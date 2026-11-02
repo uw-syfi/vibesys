@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from jinja2 import Environment, FileSystemLoader, StrictUndefined
+from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 
 from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as orch
 
@@ -16,7 +16,7 @@ _ENV = Environment(
     loader=FileSystemLoader(Path(__file__).parent / "prompts"),
     undefined=StrictUndefined,
     keep_trailing_newline=False,
-    autoescape=False,  # noqa: S701 - the output is a plain-text prompt, not HTML
+    autoescape=select_autoescape(enabled_extensions=(), default=False),
     trim_blocks=True,
     lstrip_blocks=True,
 )

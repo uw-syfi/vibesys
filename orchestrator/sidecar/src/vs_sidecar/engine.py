@@ -21,6 +21,7 @@ from collections import deque
 from typing import TYPE_CHECKING
 
 import protovalidate
+from agentshim import AgentShimError
 
 from vs_sidecar.driver import SteerRefusedError
 from vs_sidecar.gen.vibesys.orchestrator.v1 import effects_pb2 as fx
@@ -88,7 +89,7 @@ class Engine:
         driver = self._driver_factory(self._on_raw)
         try:
             opened = driver.open()
-        except Exception as error:  # noqa: BLE001 - any failure to open is reported to the daemon as a failed session, which is the only place it can be acted on
+        except (AgentShimError, OSError, ValueError) as error:
             with self._lock:
                 self._fail(f"could not open the session: {type(error).__name__}: {error}")
             return
