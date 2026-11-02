@@ -29,7 +29,11 @@ size limits, lint waivers, and doc links.
   execution environment only; its build context is the task directory, and
   VibeSys mounts the candidate repository at runtime. Evaluator commands run
   from the repository root. Reusable evaluator implementations belong in
-  versioned packages, not copied task directories.
+  versioned packages, not copied task directories. CI builds every example
+  Dockerfile when it or its directory changes, or the Dockerfile is listed with
+  a reason under `excluded_roots` in `.repoctl/components.toml` (`repoctl
+  validate` fails otherwise); see "CI gates" in
+  [development.md](development.md).
 - Nontrivial candidate-facing APIs, ABIs, ownership rules, and service
   protocols go in `CANDIDATE_CONTRACT.md`; evaluator internals and trust-model
   discussion go in a separate design document.

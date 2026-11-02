@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -74,6 +75,60 @@ func ValidateCommands(suite Suite) error {
 		return fmt.Errorf("check_groups.%s: collection commands are unsupported for language %q", suite.Name, suite.Language)
 	}
 	return nil
+}
+
+// ValidatePackageCommands checks a suite for a language that expands a collection:
+// the collection must exist, package_commands and the collection come together,
+// and every package command names {package}.
+func ValidatePackageCommands(suite Suite, collections map[string]bool) error {
+	if suite.Collection != "" && (!collections[suite.Collection] || len(suite.PackageCommands) == 0) {
+		return fmt.Errorf("check_groups.%s: unknown collection or missing package_commands", suite.Name)
+	}
+	if suite.Collection == "" && len(suite.PackageCommands) != 0 {
+		return fmt.Errorf("check_groups.%s: package_commands require a collection", suite.Name)
+	}
+	for _, args := range suite.PackageCommands {
+		found := false
+		for _, arg := range args {
+			found = found || strings.Contains(arg, "{package}")
+		}
+		if !found {
+			return fmt.Errorf("check_groups.%s: package command requires {package}", suite.Name)
+		}
+	}
+	return nil
+}
+
+// PackageChecks plans a collection-expanding suite. With no selected values it
+// runs the suite's Commands; otherwise it runs AlwaysCommands, then every
+// package command once per value, in sorted value order, with {package} replaced.
+func PackageChecks(suite Suite, packages []string) ([]Check, error) {
+	if len(packages) == 0 {
+		return Commands(suite)
+	}
+	checks, err := Always(suite)
+	if err != nil {
+		return nil, err
+	}
+	packages = append([]string(nil), packages...)
+	sort.Strings(packages)
+	for _, name := range packages {
+		for _, configured := range suite.PackageCommands {
+			if len(configured) == 0 || configured[0] == "" {
+				return nil, fmt.Errorf("check group %q has an empty package command", suite.Name)
+			}
+			args := make([]string, len(configured))
+			for i, arg := range configured {
+				args[i] = strings.ReplaceAll(arg, "{package}", name)
+			}
+			checks = append(checks, Check{
+				Label: suite.Name + ":" + name, Directory: suite.Directory,
+				Args: args, Env: suite.Env,
+				Timeout: time.Duration(suite.TimeoutSeconds) * time.Second,
+			})
+		}
+	}
+	return checks, nil
 }
 
 // Commands builds checks for a group with no collection expansion.
