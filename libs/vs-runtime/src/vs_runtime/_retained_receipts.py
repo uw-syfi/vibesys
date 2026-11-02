@@ -14,7 +14,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from vs_core.api import HostFence, ObservationStatus, OperationSchemaRef, OperationWire, RequestId
+from vs_core.api import HostId, ObservationStatus, OperationSchemaRef, OperationWire, RequestId
 
 RECEIPT_SCHEMA_VERSION = 1
 
@@ -62,12 +62,24 @@ class ExecutionRecord(BaseModel):
     result_type: str | None = None
 
 
+class RetainedHost(BaseModel):
+    """The host that entered an effect fence, as a run written before the step loop stored it.
+
+    Frozen here: core no longer defines it (the envelope's own copy was dropped at version 46),
+    but the retained effect-fence receipts and the retained ``fences`` documents still carry it.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    host_id: HostId
+    epoch: int = Field(ge=0)
+
+
 class FenceEntry(BaseModel):
     """One request that entered an effect fence, on which host, and whether its delivery ended."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
     request_id: RequestId
-    host: HostFence
+    host: RetainedHost
     left: bool = False
 
 

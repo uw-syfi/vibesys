@@ -26,8 +26,6 @@ from vs_core.api import (
     CoreState,
     EventCursor,
     FlowState,
-    HostFence,
-    HostId,
     RevisionRef,
     Runaway,
     RunEnvelope,
@@ -83,7 +81,6 @@ def _record(state: CoreState, search: FlowState) -> RuntimeRecord[FlowState]:
     return RuntimeRecord[FlowState].fresh(
         RunEnvelope[FlowState](
             schema_version=ENVELOPE_SCHEMA_VERSION,
-            fence=HostFence(host_id=HostId(root="events"), epoch=1),
             strategy_id=declaration.strategy_id,
             state_schema=declaration.state_schema,
             core=state,

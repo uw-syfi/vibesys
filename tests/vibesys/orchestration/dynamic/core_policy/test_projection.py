@@ -57,8 +57,6 @@ from vs_core.api import (
     AttemptId,
     EventCursor,
     FlowState,
-    HostFence,
-    HostId,
     RejectionCode,
     RevisionRef,
     RunEnvelope,
@@ -432,7 +430,6 @@ def _commit(project: Project, run_id: str, state: FlowState) -> RuntimeRecord[Fl
     record = RuntimeRecord[FlowState].fresh(
         RunEnvelope[FlowState](
             schema_version=ENVELOPE_SCHEMA_VERSION,
-            fence=HostFence(host_id=HostId(root="writer"), epoch=1),
             strategy_id=declaration.strategy_id,
             state_schema=declaration.state_schema,
             core=core,

@@ -186,7 +186,7 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
     bridge = services.agent_evaluation
     observed = ObservedInputs(
         inputs,
-        RecordView(search, services.search.declaration, epoch=epoch, run_id=services.run_id),
+        RecordView(search, services.search.declaration),
         services.commit_observer,
         _unacknowledged_notes(bridge),
         clock,

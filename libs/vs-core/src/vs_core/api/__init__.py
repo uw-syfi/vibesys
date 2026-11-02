@@ -376,7 +376,6 @@ if TYPE_CHECKING:
         EvidenceKey,
         EvidenceKind,
         Generation,
-        HostFence,
         HostId,
         Identity,
         IdentityTypeError,
@@ -930,7 +929,7 @@ _MODULES: dict[str, str] = {
                 "AttemptRef Capabilities ChargeId ChargeKind ChargeReceipt ChildManifest "
                 "CompletionStatus ContinuationId ContractValidationError ControlAction ControlId "
                 "ControlInput Count DecisionId DependencyRef DependencyStatus DigestScheme EventCursor "
-                "EventId EvidenceId EvidenceKey EvidenceKind Generation HostFence HostId Identity "
+                "EventId EvidenceId EvidenceKey EvidenceKind Generation HostId Identity "
                 "IdentityTypeError InputId InputTarget InvocationId InvocationInputTarget "
                 "InvocationRef ItemId ItemInputTarget KernelNotImplementedError LifecycleCapability "
                 "LifecycleClass Limits Observation ObservationStatus OperationDescriptor OperationId "
@@ -1343,7 +1342,6 @@ __all__ = [
     "Generation",
     "Group",
     "HistoricalSubmissionReceipt",
-    "HostFence",
     "HostId",
     "IdScheme",
     "Identity",

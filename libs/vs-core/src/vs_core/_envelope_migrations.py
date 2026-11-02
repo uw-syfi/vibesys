@@ -240,6 +240,17 @@ def without_downtime_credit(value: JsonValue, run_deadline: float | None = None)
     return walked
 
 
+def _v45_to_v46(envelope: JsonObject) -> JsonObject:
+    """Version 46 dropped the envelope's ``fence``.
+
+    It named the host and epoch that wrote the envelope, and nothing read it: the run lock is the
+    only fence, and the step loop never stored an envelope. Only the key goes.
+    """
+    return {key: value for key, value in envelope.items() if key != "fence"} | {
+        "schema_version": 46
+    }
+
+
 def _floor_declared(core: JsonObject) -> bool:
     run = _object(core.get("run"))
     task = _object(_object(run.get("facts")).get("task"))
@@ -281,6 +292,7 @@ MIGRATIONS: Final[Mapping[int, Migration]] = {
     42: _v42_to_v43,
     43: _v43_to_v44,
     44: _v44_to_v45,
+    45: _v45_to_v46,
 }
 """Version ``n`` to ``n + 1``, one entry per version, contiguous from the oldest supported."""
 

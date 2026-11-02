@@ -126,7 +126,6 @@ __all__ = [
     "EvidenceKind",
     "ExecuteRegisteredOperation",
     "Generation",
-    "HostFence",
     "HostId",
     "Identity",
     "IdentityTypeError",
@@ -827,13 +826,6 @@ def validate_setup_failure(observation: Observation, failure: SetupFailureKind) 
         in (ObservationStatus.FAILED, ObservationStatus.REJECTED, ObservationStatus.CANCELLED)
     ):
         raise ContractValidationError("setup_failure", "requires terminal setup failure")
-
-
-class HostFence(Value):
-    """Host fence lifecycle contract."""
-
-    host_id: HostId
-    epoch: Count
 
 
 class EventCursor(Value):

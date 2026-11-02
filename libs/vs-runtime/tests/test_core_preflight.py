@@ -14,8 +14,6 @@ from vs_core.api import (
     ControlInput,
     EventCursor,
     FlowState,
-    HostFence,
-    HostId,
     RoleId,
     RunEnvelope,
     RunId,
@@ -76,7 +74,6 @@ def record(run_id: str) -> RuntimeRecord[FlowState]:
     )
     envelope = RunEnvelope[FlowState](
         schema_version=ENVELOPE_SCHEMA_VERSION,
-        fence=HostFence(host_id=HostId(root="writer"), epoch=1),
         strategy_id=strategy.declaration.strategy_id,
         state_schema=strategy.declaration.state_schema,
         core=core,

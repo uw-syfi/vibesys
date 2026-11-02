@@ -101,7 +101,6 @@ def reloaded(state: core.CoreState) -> core.CoreState:
     """The state as a restarted host reads it back from its stored envelope."""
     envelope = core.RunEnvelope[core.StrategyState](
         schema_version=core.ENVELOPE_SCHEMA_VERSION,
-        fence=core.HostFence(host_id=core.HostId(root="host"), epoch=1),
         strategy_id=state.run.declaration.strategy_id,
         state_schema=state.run.declaration.state_schema,
         core=state,

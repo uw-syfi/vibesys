@@ -46,7 +46,7 @@ def _at_44(stored: dict[str, Any]) -> dict[str, Any]:
     """``stored`` (a version 43 or older save) as version 44 holds the records state.
 
     Version 44 dropped ``hosts``, ``children`` and ``recovery`` and kept the epoch the barrier
-    counted as ``records.epoch``; the rest of the envelope is the one stored.
+    counted as ``records.epoch``; version 46 dropped the ``fence``; the rest is the one stored.
     """
     document = json.loads(json.dumps(stored))
     records = document["core"]["records"]
@@ -54,6 +54,7 @@ def _at_44(stored: dict[str, Any]) -> dict[str, Any]:
     del records["hosts"], records["children"]
     records["epoch"] = epoch
     document["schema_version"] = core.ENVELOPE_SCHEMA_VERSION
+    del document["fence"]
     return document
 
 
@@ -219,7 +220,7 @@ def test_a_save_of_version_43_keeps_its_epoch_and_drops_the_state_nothing_reads_
     assert records["epoch"] == epoch
     assert records["records"] == stored["core"]["records"]["records"]
     assert {**migrated, "core": {**migrated["core"], "records": None}} == {
-        **stored,
+        **{key: value for key, value in stored.items() if key != "fence"},
         "schema_version": core.ENVELOPE_SCHEMA_VERSION,
         "core": {**stored["core"], "records": None},
     }
@@ -255,10 +256,12 @@ def test_a_save_of_version_44_loses_the_downtime_credit_of_its_wait_and_nothing_
     (wait,) = _waits(stored)
     assert wait["downtime_credit"] == 0
     migrated = _upgraded(json.dumps(stored))
-    assert migrated["schema_version"] == 45
+    assert migrated["schema_version"] == core.ENVELOPE_SCHEMA_VERSION
     (kept,) = _waits(migrated)
     assert kept == {key: value for key, value in wait.items() if key != "downtime_credit"}
-    assert {**migrated, "core": None} == {**stored, "schema_version": 45, "core": None}
+    expected = {**stored, "schema_version": core.ENVELOPE_SCHEMA_VERSION, "core": None}
+    del expected["fence"]
+    assert {**migrated, "core": None} == expected
 
 
 @given(
@@ -287,3 +290,14 @@ def test_the_migrated_waiting_save_decodes_with_its_wait() -> None:
         wait.deadline_at
         == json.loads(source)["core"]["evaluation"]["continuations"][0]["deadline_at"]
     )
+
+
+def test_a_save_of_version_45_loses_its_fence_and_nothing_else() -> None:
+    stored = json.loads((_FIXTURES / "v45-waiting.json").read_text(encoding="utf-8"))
+    assert stored["fence"]
+    migrated = _upgraded(json.dumps(stored))
+    assert migrated == {
+        **{key: value for key, value in stored.items() if key != "fence"},
+        "schema_version": 46,
+    }
+    FAKE_REGISTRY.decode_envelope(_Envelope, json.dumps(stored))
