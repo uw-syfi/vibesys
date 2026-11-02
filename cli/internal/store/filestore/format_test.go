@@ -228,17 +228,26 @@ func TestNonStoreDirectoryIsRefused(t *testing.T) {
 		if _, err := s.Submit(t.Context(), core.Submission{Spec: measureSpec("c1"), Key: "k1", At: at(1)}); err != nil {
 			t.Fatal(err)
 		}
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
 		if _, err := filestore.Open("work", filestore.WithFS(mem)); err != nil {
 			t.Errorf("reopening: %v", err)
 		}
 	})
 
-	t.Run("opening twice leaves the directory as it was", func(t *testing.T) {
+	t.Run("opening twice leaves the directory as it was, but for who owns it", func(t *testing.T) {
 		mem := fsys.NewMemFS()
-		openOn(t, mem)
+		s := openOn(t, mem)
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
 		before := mem.Files()
 		openOn(t, mem)
-		if after := mem.Files(); !reflect.DeepEqual(before, after) {
+		after := mem.Files()
+		delete(before, "state/.owner")
+		delete(after, "state/.owner")
+		if !reflect.DeepEqual(before, after) {
 			t.Errorf("a second Open changed the directory:\nbefore %v\nafter  %v", before, after)
 		}
 	})
@@ -279,7 +288,7 @@ func TestLeftoversOfACrashAreRemovedAndOrphansIgnored(t *testing.T) {
 			}
 		}
 		mem.Put("state/results/j1.json", file(t, full, "state/results/j1.json"))
-		reopened, i, ok := reopen(t, ref, "with an orphan result", mem, where{done: 5})
+		reopened, i, ok := reopen(t, ref, "with an orphan result", mem.CrashImage(false), where{done: 5})
 		if !ok || i != 5 {
 			t.Fatalf("the orphan changed what the store shows (state %d)", i)
 		}
@@ -304,7 +313,7 @@ func TestEncodingIsPinned(t *testing.T) {
 	if got := string(file(t, mem, "state/jobs/j1.json")); got != wantJob {
 		t.Errorf("job file =\n%s\nwant\n%s", got, wantJob)
 	}
-	if got, want := slices.Sorted(maps.Keys(mem.Files())), []string{"state/format", "state/jobs/j1.json"}; !slices.Equal(got, want) {
+	if got, want := slices.Sorted(maps.Keys(mem.Files())), []string{"state/.owner", "state/.owner.lock", "state/format", "state/jobs/j1.json"}; !slices.Equal(got, want) {
 		t.Errorf("files = %v, want %v", got, want)
 	}
 
@@ -322,7 +331,7 @@ func TestEncodingIsPinned(t *testing.T) {
 // A store that ran to the end holds exactly these files, and no temporary one.
 func TestLayoutOfAFinishedScript(t *testing.T) {
 	want := []string{
-		"state/format",
+		"state/.owner", "state/.owner.lock", "state/format",
 		"state/jobs/j1.json", "state/jobs/j2.json", "state/jobs/j3.json",
 		"state/logs/j1/00000000000000000000", "state/logs/j1/00000000000000000006", "state/logs/j2/00000000000000000000",
 		"state/plans/1.json",

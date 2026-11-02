@@ -26,6 +26,11 @@ type upgradeEnv struct {
 	Target   string
 }
 
+// upgradeCommand adapts runUpgrade to the command table. An upgrade reaches no daemon.
+func upgradeCommand(_ context.Context, d deps, args []string) int {
+	return runUpgrade(args, d.stdout, d.stderr, d.upgrade)
+}
+
 // runUpgrade is `vibesys-cli upgrade`: it replaces this binary with the newest release. It takes
 // a constructor for its environment so a test supplies a fake release and a temporary target.
 func runUpgrade(args []string, stdout, stderr io.Writer, newEnv func() (upgradeEnv, error)) int {
@@ -36,14 +41,14 @@ func runUpgrade(args []string, stdout, stderr io.Writer, newEnv func() (upgradeE
 	env, err := newEnv()
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "vibesys-cli upgrade: %v\n", err)
-		return exitFailure
+		return exitFailed
 	}
 	result, err := upgrade.Upgrade(context.Background(), upgrade.Request{
 		Source: env.Source, Platform: env.Platform, Current: env.Current, Target: env.Target,
 	})
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "vibesys-cli upgrade: %v\n", err)
-		return exitFailure
+		return exitFailed
 	}
 	switch result.Outcome {
 	case upgrade.UpToDate:

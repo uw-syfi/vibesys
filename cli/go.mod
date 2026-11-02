@@ -2,6 +2,9 @@ module github.com/uw-syfi/vibesys/cli
 
 go 1.25.0
 
+// Go 1.25.0 corrupts the runtime under testing/synctest: the simulator dies at random there.
+toolchain go1.25.9
+
 require (
 	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.12

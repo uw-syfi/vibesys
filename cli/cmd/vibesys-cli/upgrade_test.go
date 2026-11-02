@@ -79,8 +79,8 @@ func TestUpgradeRefusesADamagedDownload(t *testing.T) {
 	name, _ := upgrade.AssetName(hostPlatform)
 	i.release.Inject(name, upgradetest.Fault{Truncate: true, TruncateAt: 4})
 	var stdout, stderr bytes.Buffer
-	if code := runUpgrade(nil, &stdout, &stderr, i.env("1.0.0")); code != exitFailure {
-		t.Fatalf("exit code = %d, want %d", code, exitFailure)
+	if code := runUpgrade(nil, &stdout, &stderr, i.env("1.0.0")); code != exitFailed {
+		t.Fatalf("exit code = %d, want %d", code, exitFailed)
 	}
 	if stdout.Len() != 0 || !strings.Contains(stderr.String(), "checksum") {
 		t.Fatalf("stdout = %q, stderr = %q", stdout.String(), stderr.String())
@@ -93,7 +93,7 @@ func TestUpgradeRefusesADamagedDownload(t *testing.T) {
 func TestUpgradeReportsAnEnvironmentItCannotBuild(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := runUpgrade(nil, &stdout, &stderr, func() (upgradeEnv, error) { return upgradeEnv{}, errors.New("no home") })
-	if code != exitFailure || stdout.Len() != 0 || !strings.Contains(stderr.String(), "no home") {
+	if code != exitFailed || stdout.Len() != 0 || !strings.Contains(stderr.String(), "no home") {
 		t.Fatalf("code = %d, stdout = %q, stderr = %q", code, stdout.String(), stderr.String())
 	}
 }
@@ -112,8 +112,8 @@ func TestUpgradeTakesNoArguments(t *testing.T) {
 func TestRunRoutesUpgradeToItsCommand(t *testing.T) {
 	t.Setenv(upgrade.ReleasesURLEnv, "http://insecure.invalid")
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"upgrade"}, &stdout, &stderr); code != exitFailure {
-		t.Fatalf("exit code = %d, want %d", code, exitFailure)
+	if code := run([]string{"upgrade"}, realDeps(&stdout, &stderr)); code != exitFailed {
+		t.Fatalf("exit code = %d, want %d", code, exitFailed)
 	}
 	if !strings.Contains(stderr.String(), upgrade.ReleasesURLEnv) {
 		t.Fatalf("stderr = %q, want it to name %s", stderr.String(), upgrade.ReleasesURLEnv)

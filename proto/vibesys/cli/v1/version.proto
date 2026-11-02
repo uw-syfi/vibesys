@@ -13,7 +13,7 @@ enum Component {
   COMPONENT_SUPERVISOR = 3;
 }
 
-// BuildVersions is what one build of the binary carries. It is also the `--version --json` output.
+// BuildVersions is what one build of the binary carries.
 message BuildVersions {
   // The release version, or "dev" for a build that is not a release. Display only: callers never
   // compare it.

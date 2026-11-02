@@ -9,6 +9,7 @@ import (
 	"testing/quick"
 	"time"
 
+	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/store/ledger"
 )
@@ -83,7 +84,7 @@ func TestHoldCanonicalForm(t *testing.T) {
 
 	t.Run("a time is the same instant in UTC without a monotonic reading", func(t *testing.T) {
 		zone := time.FixedZone("x", -7*3600)
-		in := time.Now().In(zone)
+		in := time.Date(2026, 3, 4, 5, 6, 7, 8, zone)
 		got, err := ledger.Hold("n", core.Note{At: in})
 		if err != nil {
 			t.Fatal(err)
@@ -91,7 +92,12 @@ func TestHoldCanonicalForm(t *testing.T) {
 		if !got.At.Equal(in) || got.At.Location() != time.UTC {
 			t.Errorf("held time = %v, want %v in UTC", got.At, in)
 		}
-		if !reflect.DeepEqual(got.At, got.At.Round(0)) {
+		// Only a reading of the system clock has a monotonic part, and no literal can.
+		live, err := ledger.Hold("n", core.Note{At: clock.System{}.Now()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(live.At, live.At.Round(0)) {
 			t.Errorf("the held time keeps a monotonic reading")
 		}
 	})

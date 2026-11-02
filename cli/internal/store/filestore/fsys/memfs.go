@@ -21,7 +21,7 @@ var ErrInjected = errors.New("fsys: injected failure")
 type FaultKind int
 
 // The fault kinds. A step is one call that changes the filesystem: Mkdir, Create, Write, Sync,
-// Rename, Remove or SyncDir. Reads, and Close, are not steps.
+// Rename, Remove, SyncDir or Lock. Reads, Close and Release are not steps.
 const (
 	// FaultCrash stops the process before the step: the step does not happen and every later call
 	// fails with ErrCrashed. CrashImage then says what a restart finds.
@@ -55,6 +55,10 @@ type MemFS struct {
 	steps int
 	fault *Fault
 	dead  bool
+	// locks holds the files with a hold on them. A hold is on the file and not on its name, and a
+	// restart finds none, as the operating system's.
+	locks   map[*fileNode]bool
+	noLocks bool
 }
 
 var _ FS = (*MemFS)(nil)
@@ -72,7 +76,7 @@ type dirNode struct {
 func newDir() *dirNode { return &dirNode{entries: map[string]any{}, durable: map[string]any{}} }
 
 // NewMemFS returns an empty filesystem whose root exists and is durable.
-func NewMemFS() *MemFS { return &MemFS{root: newDir()} }
+func NewMemFS() *MemFS { return &MemFS{root: newDir(), locks: map[*fileNode]bool{}} }
 
 // SetFault arms a fault. It replaces one not yet fired.
 func (m *MemFS) SetFault(f Fault) {
@@ -94,7 +98,23 @@ func (m *MemFS) Steps() int {
 func (m *MemFS) CrashImage(power bool) *MemFS {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return &MemFS{root: m.root.image(power)}
+	return &MemFS{root: m.root.image(power), locks: map[*fileNode]bool{}}
+}
+
+// WithoutLocks makes every later Lock fail with ErrNoLocks, as OS.Lock does on a filesystem where
+// a lock keeps nobody out.
+func (m *MemFS) WithoutLocks() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.noLocks = true
+}
+
+// ForgetLocks drops every hold without telling its holders, as an NFS server that lost them does
+// while the client that held one is cut off.
+func (m *MemFS) ForgetLocks() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	clear(m.locks)
 }
 
 func (d *dirNode) image(power bool) *dirNode {
@@ -396,6 +416,56 @@ func (m *MemFS) SyncDir(name string) error {
 	}
 	dir.durable = maps.Clone(dir.entries)
 	return err
+}
+
+// Lock implements FS.
+func (m *MemFS) Lock(name string) (Lock, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	d, base, err := m.lookup("lock", name)
+	if err != nil {
+		return nil, err
+	}
+	effect, _, err := m.step("lock", name)
+	if !effect {
+		return nil, err
+	}
+	file, ok := d.entries[base].(*fileNode)
+	switch {
+	case ok:
+	case d.entries[base] != nil:
+		return nil, pathErr("lock", name, errIsDir)
+	default:
+		file = &fileNode{}
+		d.entries[base] = file
+	}
+	switch {
+	case err != nil:
+		return nil, err
+	case m.noLocks:
+		return nil, pathErr("lock", name, ErrNoLocks)
+	case m.locks[file]:
+		return nil, pathErr("lock", name, ErrLocked)
+	}
+	m.locks[file] = true
+	return &memLock{fs: m, node: file}, nil
+}
+
+type memLock struct {
+	fs   *MemFS
+	node *fileNode
+	done bool
+}
+
+// Release implements Lock.
+func (l *memLock) Release() error {
+	l.fs.mu.Lock()
+	defer l.fs.mu.Unlock()
+	if !l.done {
+		l.done = true
+		delete(l.fs.locks, l.node)
+	}
+	return nil
 }
 
 type memFile struct {

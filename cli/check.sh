@@ -2,6 +2,10 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
+# The tests open real stores under TMPDIR, and a store refuses a file system whose locks do not work,
+# such as NFS mounted with nolock. Where /tmp is such a mount, set TMPDIR to a directory on a local
+# disk before running this script.
+
 unformatted="$(gofmt -l .)"
 if [[ -n "$unformatted" ]]; then
   printf '%s\n' "$unformatted" >&2
@@ -10,11 +14,6 @@ if [[ -n "$unformatted" ]]; then
 fi
 
 go vet ./...
-
-# The concurrency tests prove nothing without the race detector, and the whole suite under it takes
-# several times longer, so only they run with it. A new package's concurrency test belongs here by
-# the name pattern: a contract suite's "concurrency" group, or a test whose name starts with Parallel.
-go test -race -count=1 -timeout 120s -run '^(TestContract.*|TestParallel.*)$/^concurrency$' ./internal/store/...
 
 # Compile every package's tests for each release target, so a symbol missing on
 # another OS fails here and not only in CI. This runs before the tests because the
@@ -27,5 +26,15 @@ for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
   GOOS="${target%/*}" GOARCH="${target#*/}" go vet ./...
 done
 
-# The tests include the release build and install.sh, which run real tools.
-go test -count=1 -timeout 120s ./...
+# Every package's tests run under the race detector, since the daemon's flows are concurrent and
+# a package added later is covered without being listed here. The race run includes the tests of the
+# release build and install.sh, which run real tools. The per-package timeout only guards against a
+# hang; the slowest package, the seeded simulation, takes about a minute under the detector. The
+# lifecycle package includes the exhaustive model check of two jobs (model_test.go), every order of
+# events to depth 10 in one store and depth 9 across two, in a few seconds.
+go test -race -count=1 -timeout 300s ./...
+
+# More seeds without the detector, since a race the detector finds needs a schedule the first few
+# hundred seeds may not reach. The count goes past seed 1519, which was the first to lose a cancel
+# across recovery, and the run takes about 30 seconds.
+VIBESYS_SIM_SEEDS=1530 go test -count=1 -timeout 300s -run TestSeedsHoldTheInvariants ./internal/sim

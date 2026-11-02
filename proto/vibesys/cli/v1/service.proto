@@ -35,6 +35,9 @@ service DaemonService {
   rpc Cancel(CancelRequest) returns (CancelResponse);
   rpc AddNote(AddNoteRequest) returns (AddNoteResponse);
   rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
+  // ForgetRepository gives up a repository that is gone for good: what the daemon keeps of it is
+  // dropped, and what is left of its runs is ended. It refuses a repository whose store answers.
+  rpc ForgetRepository(ForgetRepositoryRequest) returns (ForgetRepositoryResponse);
   // ReadLogs streams a job's output from an offset, and with follow keeps streaming until the job
   // is final.
   rpc ReadLogs(ReadLogsRequest) returns (stream ReadLogsResponse);
@@ -90,6 +93,18 @@ message StatusResponse {
 message StopRequest {}
 
 message StopResponse {}
+
+message ForgetRepositoryRequest {
+  // The absolute path the repository had.
+  string repository = 1;
+}
+
+message ForgetRepositoryResponse {
+  // The tasks forgotten.
+  repeated string tasks = 1;
+  // The jobs whose run may still live and could not be ended, which the daemon leaves alone.
+  repeated string left = 2;
+}
 
 message SubmitRequest {
   CallContext context = 1;

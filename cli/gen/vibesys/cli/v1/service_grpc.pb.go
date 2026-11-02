@@ -19,25 +19,26 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	DaemonService_Hello_FullMethodName         = "/vibesys.cli.v1.DaemonService/Hello"
-	DaemonService_Status_FullMethodName        = "/vibesys.cli.v1.DaemonService/Status"
-	DaemonService_Stop_FullMethodName          = "/vibesys.cli.v1.DaemonService/Stop"
-	DaemonService_Submit_FullMethodName        = "/vibesys.cli.v1.DaemonService/Submit"
-	DaemonService_Watch_FullMethodName         = "/vibesys.cli.v1.DaemonService/Watch"
-	DaemonService_Cancel_FullMethodName        = "/vibesys.cli.v1.DaemonService/Cancel"
-	DaemonService_AddNote_FullMethodName       = "/vibesys.cli.v1.DaemonService/AddNote"
-	DaemonService_ListJobs_FullMethodName      = "/vibesys.cli.v1.DaemonService/ListJobs"
-	DaemonService_ReadLogs_FullMethodName      = "/vibesys.cli.v1.DaemonService/ReadLogs"
-	DaemonService_Show_FullMethodName          = "/vibesys.cli.v1.DaemonService/Show"
-	DaemonService_Compare_FullMethodName       = "/vibesys.cli.v1.DaemonService/Compare"
-	DaemonService_Promote_FullMethodName       = "/vibesys.cli.v1.DaemonService/Promote"
-	DaemonService_CurrentResult_FullMethodName = "/vibesys.cli.v1.DaemonService/CurrentResult"
-	DaemonService_CreatePlan_FullMethodName    = "/vibesys.cli.v1.DaemonService/CreatePlan"
-	DaemonService_ListPlans_FullMethodName     = "/vibesys.cli.v1.DaemonService/ListPlans"
-	DaemonService_ViewPlan_FullMethodName      = "/vibesys.cli.v1.DaemonService/ViewPlan"
-	DaemonService_EditPlan_FullMethodName      = "/vibesys.cli.v1.DaemonService/EditPlan"
-	DaemonService_CommentPlan_FullMethodName   = "/vibesys.cli.v1.DaemonService/CommentPlan"
-	DaemonService_ClosePlan_FullMethodName     = "/vibesys.cli.v1.DaemonService/ClosePlan"
+	DaemonService_Hello_FullMethodName            = "/vibesys.cli.v1.DaemonService/Hello"
+	DaemonService_Status_FullMethodName           = "/vibesys.cli.v1.DaemonService/Status"
+	DaemonService_Stop_FullMethodName             = "/vibesys.cli.v1.DaemonService/Stop"
+	DaemonService_Submit_FullMethodName           = "/vibesys.cli.v1.DaemonService/Submit"
+	DaemonService_Watch_FullMethodName            = "/vibesys.cli.v1.DaemonService/Watch"
+	DaemonService_Cancel_FullMethodName           = "/vibesys.cli.v1.DaemonService/Cancel"
+	DaemonService_AddNote_FullMethodName          = "/vibesys.cli.v1.DaemonService/AddNote"
+	DaemonService_ListJobs_FullMethodName         = "/vibesys.cli.v1.DaemonService/ListJobs"
+	DaemonService_ForgetRepository_FullMethodName = "/vibesys.cli.v1.DaemonService/ForgetRepository"
+	DaemonService_ReadLogs_FullMethodName         = "/vibesys.cli.v1.DaemonService/ReadLogs"
+	DaemonService_Show_FullMethodName             = "/vibesys.cli.v1.DaemonService/Show"
+	DaemonService_Compare_FullMethodName          = "/vibesys.cli.v1.DaemonService/Compare"
+	DaemonService_Promote_FullMethodName          = "/vibesys.cli.v1.DaemonService/Promote"
+	DaemonService_CurrentResult_FullMethodName    = "/vibesys.cli.v1.DaemonService/CurrentResult"
+	DaemonService_CreatePlan_FullMethodName       = "/vibesys.cli.v1.DaemonService/CreatePlan"
+	DaemonService_ListPlans_FullMethodName        = "/vibesys.cli.v1.DaemonService/ListPlans"
+	DaemonService_ViewPlan_FullMethodName         = "/vibesys.cli.v1.DaemonService/ViewPlan"
+	DaemonService_EditPlan_FullMethodName         = "/vibesys.cli.v1.DaemonService/EditPlan"
+	DaemonService_CommentPlan_FullMethodName      = "/vibesys.cli.v1.DaemonService/CommentPlan"
+	DaemonService_ClosePlan_FullMethodName        = "/vibesys.cli.v1.DaemonService/ClosePlan"
 )
 
 // DaemonServiceClient is the client API for DaemonService service.
@@ -67,6 +68,9 @@ type DaemonServiceClient interface {
 	Cancel(ctx context.Context, in *CancelRequest, opts ...grpc.CallOption) (*CancelResponse, error)
 	AddNote(ctx context.Context, in *AddNoteRequest, opts ...grpc.CallOption) (*AddNoteResponse, error)
 	ListJobs(ctx context.Context, in *ListJobsRequest, opts ...grpc.CallOption) (*ListJobsResponse, error)
+	// ForgetRepository gives up a repository that is gone for good: what the daemon keeps of it is
+	// dropped, and what is left of its runs is ended. It refuses a repository whose store answers.
+	ForgetRepository(ctx context.Context, in *ForgetRepositoryRequest, opts ...grpc.CallOption) (*ForgetRepositoryResponse, error)
 	// ReadLogs streams a job's output from an offset, and with follow keeps streaming until the job
 	// is final.
 	ReadLogs(ctx context.Context, in *ReadLogsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ReadLogsResponse], error)
@@ -175,6 +179,16 @@ func (c *daemonServiceClient) ListJobs(ctx context.Context, in *ListJobsRequest,
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListJobsResponse)
 	err := c.cc.Invoke(ctx, DaemonService_ListJobs_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) ForgetRepository(ctx context.Context, in *ForgetRepositoryRequest, opts ...grpc.CallOption) (*ForgetRepositoryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ForgetRepositoryResponse)
+	err := c.cc.Invoke(ctx, DaemonService_ForgetRepository_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -327,6 +341,9 @@ type DaemonServiceServer interface {
 	Cancel(context.Context, *CancelRequest) (*CancelResponse, error)
 	AddNote(context.Context, *AddNoteRequest) (*AddNoteResponse, error)
 	ListJobs(context.Context, *ListJobsRequest) (*ListJobsResponse, error)
+	// ForgetRepository gives up a repository that is gone for good: what the daemon keeps of it is
+	// dropped, and what is left of its runs is ended. It refuses a repository whose store answers.
+	ForgetRepository(context.Context, *ForgetRepositoryRequest) (*ForgetRepositoryResponse, error)
 	// ReadLogs streams a job's output from an offset, and with follow keeps streaming until the job
 	// is final.
 	ReadLogs(*ReadLogsRequest, grpc.ServerStreamingServer[ReadLogsResponse]) error
@@ -375,6 +392,9 @@ func (UnimplementedDaemonServiceServer) AddNote(context.Context, *AddNoteRequest
 }
 func (UnimplementedDaemonServiceServer) ListJobs(context.Context, *ListJobsRequest) (*ListJobsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListJobs not implemented")
+}
+func (UnimplementedDaemonServiceServer) ForgetRepository(context.Context, *ForgetRepositoryRequest) (*ForgetRepositoryResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ForgetRepository not implemented")
 }
 func (UnimplementedDaemonServiceServer) ReadLogs(*ReadLogsRequest, grpc.ServerStreamingServer[ReadLogsResponse]) error {
 	return status.Error(codes.Unimplemented, "method ReadLogs not implemented")
@@ -563,6 +583,24 @@ func _DaemonService_ListJobs_Handler(srv interface{}, ctx context.Context, dec f
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DaemonServiceServer).ListJobs(ctx, req.(*ListJobsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_ForgetRepository_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ForgetRepositoryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).ForgetRepository(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_ForgetRepository_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).ForgetRepository(ctx, req.(*ForgetRepositoryRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -792,6 +830,10 @@ var DaemonService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListJobs",
 			Handler:    _DaemonService_ListJobs_Handler,
+		},
+		{
+			MethodName: "ForgetRepository",
+			Handler:    _DaemonService_ForgetRepository_Handler,
 		},
 		{
 			MethodName: "Show",

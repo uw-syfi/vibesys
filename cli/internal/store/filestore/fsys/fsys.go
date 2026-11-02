@@ -5,13 +5,21 @@
 // rename it over its final name, and sync the directory. Nothing in it can append to a file or
 // change one in place, so a caller cannot write a torn record by using it as intended. Each
 // method is atomic or has no effect that outlives the process, on a local filesystem and on NFS:
-// rename within a directory, exclusive directory creation, unlink, and fsync.
+// rename within a directory, exclusive directory creation, unlink, and fsync. Lock is the one
+// method whose strength depends on the mount; see OS.Lock.
 package fsys
 
 import (
+	"errors"
 	"io/fs"
 	"os"
 )
+
+// ErrLocked says another hold has the file.
+var ErrLocked = errors.New("the file is locked")
+
+// ErrNoLocks says a lock here would not keep anyone out, so none was taken.
+var ErrNoLocks = errors.New("locks here keep nobody out")
 
 // Entry is one name in a directory.
 type Entry struct {
@@ -28,6 +36,12 @@ type File interface {
 	Sync() error
 	// Close releases the handle. It makes nothing durable.
 	Close() error
+}
+
+// Lock is a hold on a file. It ends at Release or when the process dies, however it dies.
+type Lock interface {
+	// Release ends the hold. A second Release does nothing.
+	Release() error
 }
 
 // FS is a filesystem. Names are slash-separated paths. An error satisfies errors.Is for
@@ -57,10 +71,20 @@ type FS interface {
 
 	// SyncDir makes the entries of a directory durable.
 	SyncDir(name string) error
+
+	// Lock makes the file if it is missing and takes the hold on it, at once or not at all: it
+	// fails with ErrLocked while any other hold has the file, in this process or another, and
+	// with ErrNoLocks where a hold would keep nobody out. A hold belongs to the file and not to
+	// its name: one on a file that was then removed keeps nobody out of a new file of that name.
+	Lock(name string) (Lock, error)
 }
 
 // OS is the filesystem of the operating system.
-type OS struct{}
+type OS struct {
+	// Flock is the system call behind Lock. Nil is the real one; a test gives one that fails, or
+	// one that does nothing, as a filesystem without working locks does.
+	Flock func(fd int, how int) error
+}
 
 var _ FS = OS{}
 

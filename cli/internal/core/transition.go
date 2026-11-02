@@ -21,8 +21,9 @@ func (s JobState) next() []JobState {
 		return []JobState{JobRunning, JobCancelled, JobFailed}
 	case JobRunning:
 		return []JobState{JobSucceeded, JobFailed, JobCancelled, JobLost}
+	default:
+		return nil
 	}
-	return nil
 }
 
 // CanMoveTo reports whether a job may move from this state to another in one step.

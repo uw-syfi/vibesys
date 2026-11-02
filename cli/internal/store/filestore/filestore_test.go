@@ -39,6 +39,9 @@ func TestReopenedStoreAgreesWithMemstore(t *testing.T) {
 		storetest.Differential(t, seed, 150, stores, func(step int) {
 			switch step % 9 {
 			case 3:
+				if err := stores[1].(*filestore.Store).Close(); err != nil {
+					t.Fatal(err)
+				}
 				stores[1] = openOn(t, mem)
 			case 6:
 				// What a power loss keeps: every call that returned was made durable.
@@ -93,6 +96,9 @@ func TestParallelDuplicateSubmissionsLandOnOneJobOnDisk(t *testing.T) {
 	if created != 1 {
 		t.Errorf("%d submissions created a job, want 1", created)
 	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
 	reopened, err := filestore.Open(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -118,6 +124,9 @@ func TestOpenTaskKeepsAFileStorePerTask(t *testing.T) {
 	}
 	if jobs, err := b.Jobs(t.Context(), core.JobFilter{}); err != nil || len(jobs) != 0 {
 		t.Errorf("task-b sees %d jobs, %v; want none", len(jobs), err)
+	}
+	if err := a.Close(); err != nil {
+		t.Fatal(err)
 	}
 	again, err := filestore.OpenTask(repo, "task-a")
 	if err != nil {

@@ -14,6 +14,11 @@ const (
 	stateDirName = ".vibesys-state"
 
 	formatFile = "format"
+	// lockFile is the file the owner holds a lock on. It is never renamed: a hold is on the file.
+	lockFile = ".owner.lock"
+	// ownerFile says who owns the store. The name starts with a dot because it is not a fact of
+	// the store: a copy of the store is a store with no owner.
+	ownerFile = ".owner"
 
 	jobsDir       = "jobs"
 	resultsDir    = "results"
