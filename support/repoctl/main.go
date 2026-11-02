@@ -216,7 +216,7 @@ func cliWithRunner(args []string, runner execution.Runner) error {
 	}
 	args = filtered
 	if len(args) == 0 {
-		return fmt.Errorf("usage: repoctl {plan|test|gate|dev|run-checks|run-native|verify-policy|explain|validate}")
+		return fmt.Errorf("usage: repoctl {plan|test|gate|dev|doctor|run-checks|run-native|verify-policy|explain|validate}")
 	}
 	root, err := rootPath(configPath)
 	if err != nil {
@@ -232,6 +232,8 @@ func cliWithRunner(args []string, runner execution.Runner) error {
 		return runGate(root, configPath, g, args[1:], os.Stdout)
 	case "dev":
 		return runDev(root, configPath, args[1:])
+	case "doctor":
+		return runDoctor(root, configPath, g, args[1:], os.Stdout)
 	case "verify-policy":
 		return runVerifyPolicy(root, g, args[1:])
 	case "run-checks":

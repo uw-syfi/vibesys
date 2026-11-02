@@ -22,6 +22,13 @@ From a repository root:
 ./support/repoctl/repoctl run-checks --group python_quality
 ```
 
+`doctor` checks that the machine can run the gate and the tests (Python, pinned Bun, `buf`,
+`TMPDIR`, installed client dependencies, `GOFLAGS` in a worktree, the hook) and prints the exact fix
+for each failure. `doctor --fix` does the safe repairs and `doctor --env` prints the exports for a
+shell to evaluate. The checks are policy in `.repoctl/doctor.toml`; the Go code in
+`internal/doctor` has a pure core (facts to findings) over a `Host` interface, tested on
+`FakeHost`. See [the contributor guide](../../docs/contributing/development.md#check-your-environment).
+
 `gate` runs the fast subset that the pre-push hook enforces: it plans like `test`, but runs each
 selected group's `gate_commands` (a group with none is not part of
 the gate), one concurrent lane per group, and refuses with the failing lane's output. The

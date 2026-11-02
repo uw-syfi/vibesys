@@ -79,6 +79,9 @@ Checks:
 - Treat lint suppressions as explicit opt-outs. Add one only after considering
   reasonable lint-compliant alternatives, and explain in the source comment why
   each would make the design more hacky than keeping the current code.
+- Before the first check on a machine, or when a gate failure looks like setup (wrong Python, `/tmp`
+  on NFS, a half-installed `node_modules`, missing `buf`), run `./support/repoctl/repoctl doctor`
+  (`--fix` repairs, `--env` prints the exports).
 - Run `./scripts/check_format.sh`, `./scripts/check_lint.sh`, and only the
   checks and tests the change can affect; CI runs the rest on the PR. A docs- or
   skills-only change runs no test suite. `./support/repoctl/repoctl test` runs
