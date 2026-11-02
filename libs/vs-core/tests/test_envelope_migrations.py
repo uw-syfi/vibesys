@@ -213,14 +213,14 @@ def test_a_save_of_version_43_keeps_its_epoch_and_drops_the_state_nothing_reads_
     stored = json.loads((_FIXTURES / "v43-resumed-pause-now.json").read_text(encoding="utf-8"))
     stored["core"]["records"]["recovery"]["epoch"] = epoch
     migrated = _upgraded(json.dumps(stored))
-    assert migrated["schema_version"] == 44
+    assert migrated["schema_version"] == core.ENVELOPE_SCHEMA_VERSION
     records = migrated["core"]["records"]
     assert set(records) == {"records", "epoch"}
     assert records["epoch"] == epoch
     assert records["records"] == stored["core"]["records"]["records"]
     assert {**migrated, "core": {**migrated["core"], "records": None}} == {
         **stored,
-        "schema_version": 44,
+        "schema_version": core.ENVELOPE_SCHEMA_VERSION,
         "core": {**stored["core"], "records": None},
     }
 
@@ -244,3 +244,46 @@ def test_the_migrated_resumed_pause_now_decodes_with_its_epoch() -> None:
     source = (_FIXTURES / "v43-resumed-pause-now.json").read_text(encoding="utf-8")
     decoded = FAKE_REGISTRY.decode_envelope(_Envelope, source)
     assert decoded.core.records.epoch == 2
+
+
+def _waits(document: dict[str, Any]) -> list[dict[str, Any]]:
+    return document["core"]["evaluation"]["continuations"]
+
+
+def test_a_save_of_version_44_loses_the_downtime_credit_of_its_wait_and_nothing_else() -> None:
+    stored = json.loads((_FIXTURES / "v44-waiting.json").read_text(encoding="utf-8"))
+    (wait,) = _waits(stored)
+    assert wait["downtime_credit"] == 0
+    migrated = _upgraded(json.dumps(stored))
+    assert migrated["schema_version"] == 45
+    (kept,) = _waits(migrated)
+    assert kept == {key: value for key, value in wait.items() if key != "downtime_credit"}
+    assert {**migrated, "core": None} == {**stored, "schema_version": 45, "core": None}
+
+
+@given(
+    credit=st.floats(min_value=0.0, max_value=1e4),
+    deadline=st.floats(min_value=0.0, max_value=1e4),
+    run_deadline=st.floats(min_value=0.0, max_value=2e4),
+)
+def test_a_credit_a_save_before_the_run_clock_holds_moves_the_deadline_as_the_old_limit_did(
+    credit: float, deadline: float, run_deadline: float
+) -> None:
+    """The limit was the deadline moved by the credit, capped at the run's when within it."""
+    stored = json.loads((_FIXTURES / "v44-waiting.json").read_text(encoding="utf-8"))
+    stored["core"]["run"]["deadline_at"] = run_deadline
+    (wait,) = _waits(stored)
+    wait["deadline_at"], wait["downtime_credit"] = deadline, credit
+    (kept,) = _waits(_upgraded(json.dumps(stored)))
+    moved = deadline + credit
+    assert kept["deadline_at"] == (min(moved, run_deadline) if deadline <= run_deadline else moved)
+
+
+def test_the_migrated_waiting_save_decodes_with_its_wait() -> None:
+    source = (_FIXTURES / "v44-waiting.json").read_text(encoding="utf-8")
+    decoded = FAKE_REGISTRY.decode_envelope(_Envelope, source)
+    (wait,) = decoded.core.evaluation.continuations
+    assert (
+        wait.deadline_at
+        == json.loads(source)["core"]["evaluation"]["continuations"][0]["deadline_at"]
+    )

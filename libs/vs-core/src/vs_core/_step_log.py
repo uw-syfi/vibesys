@@ -26,7 +26,11 @@ from vs_proto.api import (
     RunEnded as RunEndedRecord,
 )
 
-from ._envelope_migrations import REMOVED_AT_44, without_removed_records_keys
+from ._envelope_migrations import (
+    REMOVED_AT_44,
+    without_downtime_credit,
+    without_removed_records_keys,
+)
 from ._refusal import RecordRefusedError, RefusalReason
 from .types.common import Value
 from .types.kernel import CoreEvent, CoreState
@@ -123,7 +127,7 @@ def seed_message(state: CoreState) -> RunStarted:
 def decode_seed(message: RunStarted, registry: OperationRegistry | None) -> CoreState:
     """The state a ``RunStarted`` begins the fold from, refused when written by another encoding."""
     _same_encoding(message.schema_version)
-    return _STATE.validate_json(message.state, context=_context(registry))
+    return _STATE.validate_json(_readable_state(message.state), context=_context(registry))
 
 
 @dataclass(frozen=True)
@@ -172,6 +176,21 @@ def encode_saved(saved: SavedRun) -> EncodedSavedRun:
     )
 
 
+def _readable(data: bytes) -> bytes:
+    """``data``, a stored core document, without the key a wait's version 44 form still held.
+
+    A document written at version 44 holds ``downtime_credit`` (always 0) in each wait, and the
+    models forbid unknown keys. Data already on the current schema stays readable for seven
+    days; this is that read, for exactly that key.
+    TEMPORARY: delete after 2026-11-08 (#3708). A document at an older version never reaches
+    here: its envelope went through the migration chain when it was appended.
+    """
+    if b'"downtime_credit"' not in data:
+        return data
+    document = _ANY_JSON.validate_json(data)
+    return _ANY_JSON.dump_json(without_downtime_credit(document))
+
+
 def _readable_state(state: bytes) -> bytes:
     """``state`` without the keys of the records state that envelope version 44 dropped.
 
@@ -181,6 +200,7 @@ def _readable_state(state: bytes) -> bytes:
     TEMPORARY: delete after 2026-11-08 (#3708). A snapshot at a version older than 43 never
     reaches here: its envelope went through the migration chain when it was appended.
     """
+    state = _readable(state)
     if not any(f'"{key}"'.encode() in state for key in REMOVED_AT_44):
         return state
     document = _ANY_JSON.validate_json(state)
@@ -196,9 +216,13 @@ def decode_saved(encoded: EncodedSavedRun, registry: OperationRegistry | None) -
         state=_STATE.validate_json(_readable_state(encoded.state), context=context),
         envelope_version=encoded.envelope_version,
         strategy=encoded.strategy,
-        inputs=tuple(_EVENT.validate_json(event, context=context) for event in encoded.inputs),
+        inputs=tuple(
+            _EVENT.validate_json(_readable(event), context=context) for event in encoded.inputs
+        ),
         wakes=encoded.wakes,
-        held=_DECISIONS.validate_json(encoded.held, context=context) if encoded.held else (),
+        held=_DECISIONS.validate_json(_readable(encoded.held), context=context)
+        if encoded.held
+        else (),
     )
 
 
@@ -224,7 +248,7 @@ def decode_fold(
     raises ``FoldRulesChangedError``: the records after it would be folded by rules the state was not
     made under.
     """
-    body = _FOLD.validate_json(data, context=_context(registry))
+    body = _FOLD.validate_json(_readable(data), context=_context(registry))
     _same_encoding(body.schema_version)
     if not rules or body.rules != rules:
         raise FoldRulesChangedError(body.rules, rules)
@@ -248,7 +272,7 @@ def decode_held(
     _same_encoding(message.schema_version)
     if not message.held:
         return ()
-    return _DECISIONS.validate_json(message.held, context=_context(registry))
+    return _DECISIONS.validate_json(_readable(message.held), context=_context(registry))
 
 
 def decode_proposals(
@@ -257,7 +281,8 @@ def decode_proposals(
     """The proposals core took in an advance, in the order it took them."""
     _same_encoding(message.schema_version)
     return tuple(
-        _EVENT.validate_json(proposal, context=_context(registry)) for proposal in message.proposals
+        _EVENT.validate_json(_readable(proposal), context=_context(registry))
+        for proposal in message.proposals
     )
 
 
@@ -320,7 +345,7 @@ def decode_run_ended(message: RunEndedRecord) -> RunResultProposal:
 def decode_event(message: CoreInput, registry: OperationRegistry | None) -> CoreEvent:
     """The event of a ``CoreInput``, refused when written by another encoding."""
     _same_encoding(message.schema_version)
-    return _EVENT.validate_json(message.event, context=_context(registry))
+    return _EVENT.validate_json(_readable(message.event), context=_context(registry))
 
 
 def decode_request(message: StepStarted, registry: OperationRegistry | None) -> Request:

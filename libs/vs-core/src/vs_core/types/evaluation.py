@@ -450,9 +450,6 @@ class Continuation(Value):
     """Jobs whose own queue budget ran out while the wait went on, in the order they ran
     out: core cancelled each, and the wait goes on with its other jobs. Each is reported
     unfinished, ``by`` ``QUEUE_BUDGET``, when the wait ends."""
-    downtime_credit: Seconds = 0
-    """Host downtime credited to the wait's limit while it was open. Nothing credits it now:
-    the run clock excludes downtime, so it stays 0."""
     park_authority: RequestId | None = None
     reopen_authority: RequestId | None = None
     cancelled_resolutions: tuple[ResourceId, ...] = ()

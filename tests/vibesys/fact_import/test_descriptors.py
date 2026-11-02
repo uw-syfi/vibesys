@@ -16,6 +16,7 @@ from tests.vibesys.fact_import.descriptors import (
 _PINNED = {
     "envelope-v42.json": "2a98bcf319b3ba27df5a24ebaab8fea0613cc16b6665d7b0bfab3f682fd258a0",
     "envelope-v43.json": "250c0f42dd62fa9bf8c5ab96edce8b38aa3a91998307e3da6bc5ec1dde431665",
+    "envelope-v44.json": "9a94b93414f90306a7f9b7d998f6b939c23b64beca3d5fb0f5da90126e930844",
     "retained.json": "1d651d6d14af8db053ad400ce002812c26c9f1a17ede3ee47a14716503a2e7da",
 }
 

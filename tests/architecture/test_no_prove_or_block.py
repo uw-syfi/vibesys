@@ -178,6 +178,8 @@ DELETED_SYMBOLS: tuple[str, ...] = (
     "RecoveryBarrier",
     "RecoveryCheck",
     "RecoveryPhase",
+    # The wait's host-downtime credit, always 0 since the run clock excludes downtime (#3475 D11, version 45).
+    "downtime_credit",
 )
 """Names that no file under ``src/`` or ``libs/*/src`` may define or import."""
 

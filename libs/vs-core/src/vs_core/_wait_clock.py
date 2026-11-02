@@ -175,17 +175,14 @@ def wait_bounds(
 ) -> tuple[Bound, ...]:
     """The bound of each of ``wait``'s ``jobs``, in order: when the wait is done with it.
 
-    Each job's stated limit is the later of two. One is the wait's deadline, moved past the
-    host downtime the wait was credited (capped at the run deadline, as a record's moved
-    limit is). The other is the limit of the job's submission when an agent's call allocated
-    it, read from the submission's record, which a restart moves the same way. Each job adds
-    its own queue credit, so a sibling's queue time never extends a running job's limit.
+    Each job's stated limit is the later of two. One is the wait's deadline. The other is the
+    limit of the job's submission when an agent's call allocated it, read from the
+    submission's record. Each job adds its own queue credit, so a sibling's queue time never
+    extends a running job's limit.
     """
-    moved = wait.deadline_at + wait.downtime_credit
-    own = min(moved, run.deadline_at) if wait.deadline_at <= run.deadline_at else moved
 
     def stated(job: Job) -> float:
-        return max(own, _submission_limit(evaluation, records, job) or 0.0)
+        return max(wait.deadline_at, _submission_limit(evaluation, records, job) or 0.0)
 
     return tuple(job_bound(job, stated(job), run) for job in jobs)
 

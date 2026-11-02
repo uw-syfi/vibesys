@@ -800,7 +800,6 @@ def _validate_new(
         continuation.phase != ContinuationPhase.WAITING
         or continuation.timeout is not None
         or continuation.spent
-        or continuation.downtime_credit
         or continuation.evidence
         or continuation.park_authority is not None
         or continuation.reopen_authority is not None

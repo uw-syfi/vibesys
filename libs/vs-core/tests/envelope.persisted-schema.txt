@@ -2,7 +2,7 @@
 # with UPDATE_GOLDEN=1. scripts/check_persisted_schema_compat.py checks a change keeps
 # every saved document, or raises the version.
 shape RunEnvelope[FlowState]
-version 44
+version 45
 $root {"additionalProperties":false,"type":"object"}
 $root.core required {"$ref":"#/$defs/CoreState"}
 $root.event_cursor required {"$ref":"#/$defs/EventCursor"}
@@ -303,7 +303,6 @@ Continuation.authorization_receipt optional {"anyOf":[{"$ref":"#/$defs/ResumeAut
 Continuation.cancelled_resolutions optional {"default":[],"items":{"$ref":"#/$defs/ResourceId"},"type":"array"}
 Continuation.continuation_id required {"$ref":"#/$defs/ContinuationId"}
 Continuation.deadline_at required {"$ref":"#/$defs/vs_core__types__common__Seconds__1"}
-Continuation.downtime_credit optional {"$ref":"#/$defs/vs_core__types__common__Seconds__1","default":0}
 Continuation.evidence optional {"default":[],"items":{"$ref":"#/$defs/EvidenceRef"},"type":"array"}
 Continuation.invocation required {"$ref":"#/$defs/InvocationRef"}
 Continuation.jobs required {"items":{"$ref":"#/$defs/ResourceId"},"type":"array"}
