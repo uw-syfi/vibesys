@@ -19,7 +19,12 @@ var harnessNames = map[string]pb.Harness{"claude_code": pb.Harness_HARNESS_CLAUD
 
 func str(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
 
+// object is a JSON Schema object. A tool with no required argument says so with an empty list:
+// JSON Schema has no null there, and Claude Code drops every tool of a server whose list has one.
 func object(required []string, props map[string]any) map[string]any {
+	if required == nil {
+		required = []string{}
+	}
 	return map[string]any{"type": "object", "properties": props, "required": required, "additionalProperties": false}
 }
 

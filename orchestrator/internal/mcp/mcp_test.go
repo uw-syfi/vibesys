@@ -167,6 +167,55 @@ func TestListAgentsShowsOnlyTheCallersRun(t *testing.T) {
 	}
 }
 
+// TestEveryToolSchemaIsValidJSONSchemaForEveryRole holds what a client checks before it offers a
+// server's tools: an object schema, no null anywhere (Claude Code drops all of a server's tools
+// when one schema has a null), and required naming only listed properties.
+func TestEveryToolSchemaIsValidJSONSchemaForEveryRole(t *testing.T) {
+	for _, role := range roles {
+		tools := rpc(t, newServer(role, &fakeDaemon{}), 1, "tools/list", map[string]any{})["result"].(map[string]any)["tools"].([]any)
+		for _, raw := range tools {
+			tool := raw.(map[string]any)
+			schema := tool["inputSchema"].(map[string]any)
+			if path := nullIn(schema, tool["name"].(string)); path != "" {
+				t.Errorf("role %s: %s is null", role, path)
+			}
+			if schema["type"] != "object" {
+				t.Errorf("role %s: %s is not an object schema", role, tool["name"])
+			}
+			props, _ := schema["properties"].(map[string]any)
+			required, ok := schema["required"].([]any)
+			if !ok {
+				t.Errorf("role %s: %s required is %T, not a list", role, tool["name"], schema["required"])
+			}
+			for _, name := range required {
+				if _, ok := props[name.(string)]; !ok {
+					t.Errorf("role %s: %s requires %v, which it does not list", role, tool["name"], name)
+				}
+			}
+		}
+	}
+}
+
+func nullIn(v any, path string) string {
+	switch v := v.(type) {
+	case nil:
+		return path
+	case map[string]any:
+		for k, child := range v {
+			if p := nullIn(child, path+"."+k); p != "" {
+				return p
+			}
+		}
+	case []any:
+		for i, child := range v {
+			if p := nullIn(child, fmt.Sprintf("%s[%d]", path, i)); p != "" {
+				return p
+			}
+		}
+	}
+	return ""
+}
+
 func TestInitializeAndNotificationsFollowTheProtocol(t *testing.T) {
 	s := newServer(core.RoleLead, &fakeDaemon{})
 	res := rpc(t, s, 1, "initialize", map[string]any{"protocolVersion": "2025-03-26"})["result"].(map[string]any)
