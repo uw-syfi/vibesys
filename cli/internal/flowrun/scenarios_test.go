@@ -139,11 +139,12 @@ func (s scenario) plan(real bool) flow.Plan {
 // verify checks the verdict against what the scenario wants.
 func (s scenario) verify(t *testing.T, v flow.Verdict) {
 	t.Helper()
-	if v.Passed() != s.passed {
-		t.Fatalf("passed = %v, want %v: %+v", v.Passed(), s.passed, v)
+	passed, didPass := v.(flow.Passed)
+	if didPass != s.passed {
+		t.Fatalf("passed = %v, want %v: %+v", didPass, s.passed, v)
 	}
 	if s.passed {
-		f := v.Findings
+		f := passed.Findings
 		if s.kind == core.JobMeasure {
 			if len(f.Samples) != int(s.samples) {
 				t.Errorf("samples = %v, want %d of them", f.Samples, s.samples)
@@ -164,16 +165,23 @@ func (s scenario) verify(t *testing.T, v flow.Verdict) {
 		}
 		return
 	}
-	if v.Stage != s.stage {
-		t.Errorf("stage = %q, want %q (%+v)", v.Stage, s.stage, v)
+	stage, reason := flow.Ending(v)
+	if stage != s.stage {
+		t.Errorf("stage = %q, want %q (%+v)", stage, s.stage, v)
 	}
-	if s.exec != "" && (v.Exec.Kind != s.exec || v.Exec.ExitCode != s.exitCode) {
-		t.Errorf("exec = %+v, want %s with code %d", v.Exec, s.exec, s.exitCode)
+	if s.exec != "" {
+		stopped, ok := v.(flow.Stopped)
+		if !ok || stopped.Exec.Kind != s.exec || stopped.Exec.ExitCode != s.exitCode {
+			t.Errorf("verdict = %+v, want a stop with %s and code %d", v, s.exec, s.exitCode)
+		}
 	}
-	if s.rejected != "" && !strings.Contains(v.Rejected, s.rejected) {
-		t.Errorf("rejected = %q, want it to say %q", v.Rejected, s.rejected)
+	if s.rejected != "" {
+		rejected, ok := v.(flow.Rejected)
+		if !ok || !strings.Contains(rejected.Reason, s.rejected) {
+			t.Errorf("verdict = %+v, want a rejection that says %q", v, s.rejected)
+		}
 	}
-	if v.Reason == "" {
+	if reason == "" {
 		t.Errorf("a job that did not pass says nothing of why")
 	}
 }

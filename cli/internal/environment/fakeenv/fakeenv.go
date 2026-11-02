@@ -19,7 +19,7 @@ const DefaultProbePause = 500 * time.Millisecond
 // idleTimers are timers that never fire: an environment given no other has no limit.
 type idleTimers struct{}
 
-func (idleTimers) Timeout(time.Duration) (<-chan struct{}, func()) {
+func (idleTimers) Timeout(context.Context, time.Duration) (<-chan struct{}, func()) {
 	return make(chan struct{}), func() {}
 }
 
@@ -173,7 +173,7 @@ func (e *Environment) Run(ctx context.Context, x core.Execution, out io.Writer) 
 	if out == nil {
 		out = io.Discard
 	}
-	limit, stop := e.timers.Timeout(x.Timeout)
+	limit, stop := e.timers.Timeout(ctx, x.Timeout)
 	defer stop()
 	var wg sync.WaitGroup
 	// Several processes of the script write to out at once.
@@ -183,7 +183,7 @@ func (e *Environment) Run(ctx context.Context, x core.Execution, out io.Writer) 
 	return environment.Execute(x, l, environment.Events{
 		Limit:     limit,
 		Cancelled: ctx.Done(),
-		Pause:     func() (<-chan struct{}, func()) { return e.timers.Timeout(e.pause) },
+		Pause:     func() (<-chan struct{}, func()) { return e.timers.Timeout(ctx, e.pause) },
 	}, out)
 }
 

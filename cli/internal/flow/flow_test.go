@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand/v2"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -242,20 +243,20 @@ func checkRun(t *testing.T, label string, p flow.Plan, w *world, v flow.Verdict)
 			fail("step %d is %s, want %s", i, stages[i], want[i])
 		}
 	}
-	if (v.Findings != nil) == (v.NotAttempted != nil || v.Rejected != "" || v.Exec.Kind != core.ExecExited || v.Exec.ExitCode != 0) {
-		fail("a verdict is either findings or one way of not passing")
+	if v == nil {
+		fail("a finished flow has a verdict")
 	}
-	if v.Passed() {
+	if passed, ok := v.(flow.Passed); ok {
 		if w.fault != none && w.at < len(want) && w.fault != none {
 			fail("passed although the world was faulty (%s at %d)", w.fault, w.at)
 		}
 		if len(stages) != len(want) {
 			fail("passed after %d of %d steps", len(stages), len(want))
 		}
-		if v.Stage != "" || v.Reason != "" {
+		if stage, reason := flow.Ending(v); stage != "" || reason != "" {
 			fail("a pass names no ending")
 		}
-		f := v.Findings
+		f := passed.Findings
 		if p.Kind == core.JobMeasure {
 			if len(f.Samples) != int(p.Samples) || len(w.values) != int(p.Samples) {
 				fail("%d samples, %d measured, plan asks %d", len(f.Samples), len(w.values), p.Samples)
@@ -278,7 +279,7 @@ func checkRun(t *testing.T, label string, p flow.Plan, w *world, v flow.Verdict)
 		}
 		// What it would save is accepted by the same rule every store applies.
 		at := epoch.Add(time.Hour)
-		res := p.Record("j-run", commit, *f, at)
+		res := p.Record("j-run", commit, f, at)
 		if _, err := running(p).Apply(core.Transition{Job: "j-run", From: core.JobRunning, To: core.JobSucceeded, At: at, Result: &res}); err != nil {
 			fail("the result is not accepted: %v", err)
 		}
@@ -289,44 +290,43 @@ func checkRun(t *testing.T, label string, p flow.Plan, w *world, v flow.Verdict)
 	}
 	// Anything else saves nothing, and ends the flow where it ended: the last request is the
 	// one that was answered badly, and none follows it.
-	if v.Findings != nil {
-		fail("a job that did not pass has findings")
-	}
 	if w.fault == none {
 		fail("failed in a world with no fault")
 	}
 	if len(stages) != w.at+1 {
 		fail("fault at request %d, but %d requests were made", w.at, len(stages))
 	}
-	if v.Stage != stages[w.at] {
-		fail("ended in %s, the faulty request was %s", v.Stage, stages[w.at])
+	stage, reason := flow.Ending(v)
+	if stage != stages[w.at] {
+		fail("ended in %s, the faulty request was %s", stage, stages[w.at])
 	}
-	if v.Reason == "" {
+	if reason == "" {
 		fail("an ending says why")
 	}
+	stopped, wasStopped := v.(flow.Stopped)
 	switch w.fault {
 	case cancelEvent, cancelledRun:
-		if !v.Cancelled() {
+		if !wasStopped || !stopped.Cancelled() {
 			fail("a cancel is a cancelled verdict")
 		}
 	case exitsNonZero:
-		if v.Exec.Kind != core.ExecExited || v.Exec.ExitCode != 3 {
+		if !wasStopped || stopped.Exec.Kind != core.ExecExited || stopped.Exec.ExitCode != 3 {
 			fail("exit code not carried")
 		}
 	case timesOut:
-		if v.Exec.Kind != core.ExecTimedOut {
+		if !wasStopped || stopped.Exec.Kind != core.ExecTimedOut {
 			fail("time out not carried")
 		}
 	case unknownEnding:
-		if v.Exec.Kind != core.ExecUnknown {
+		if !wasStopped || stopped.Exec.Kind != core.ExecUnknown {
 			fail("unknown ending not carried")
 		}
 	case cannotRun, noCheckout, wrongAnswer:
-		if v.NotAttempted == nil {
+		if _, ok := v.(flow.NotAttempted); !ok {
 			fail("an unattempted step is reported as such")
 		}
 	case noFile, badFile, unreadable:
-		if v.Rejected == "" {
+		if _, ok := v.(flow.Rejected); !ok {
 			fail("an unreadable result is a rejection")
 		}
 	}
@@ -385,7 +385,7 @@ func TestAWorldWithNoFaultPassesWithExactlyWhatWasMeasured(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !v.Passed() {
+		if _, ok := v.(flow.Passed); !ok {
 			t.Fatalf("%s: %+v", s, v)
 		}
 		checkRun(t, s.String(), p, w, v)
@@ -398,13 +398,13 @@ func TestAWorldWithNoFaultPassesWithExactlyWhatWasMeasured(t *testing.T) {
 func TestACheckJobTimesTheCheckAndAMeasureJobGathersWhatTheBenchmarkReports(t *testing.T) {
 	check := &world{p: shape{kind: core.JobCheck}.plan(), at: -1}
 	v, _ := flow.Drive(context.Background(), check.p, check)
-	if v.Findings.CheckTook != 3*time.Second {
-		t.Errorf("the check took %v, the shell saw it take 3s", v.Findings.CheckTook)
+	if got := passedOf(t, v).CheckTook; got != 3*time.Second {
+		t.Errorf("the check took %v, the shell saw it take 3s", got)
 	}
 	m := shape{kind: core.JobMeasure, protocol2: true, samples: 3}
 	w := &world{p: m.plan(), at: -1}
 	v, _ = flow.Drive(context.Background(), w.p, w)
-	obs := v.Findings.Observations
+	obs := passedOf(t, v).Observations
 	if len(obs) != 1 || obs[0].Name != "p99" || fmt.Sprint(obs[0].Values) != "[0.25 1.25 2.25]" {
 		t.Errorf("observations %+v", obs)
 	}
@@ -423,14 +423,14 @@ func TestACheckJobsCheckRunsInTheCheckoutAndALinkedPassRunsNone(t *testing.T) {
 			t.Fatal("a measure job with a linked pass ran the check")
 		}
 	}
-	res := w.p.Record("j-run", commit, *v.Findings, epoch)
+	res := w.p.Record("j-run", commit, passedOf(t, v), epoch)
 	if res.Outcome.(core.MeasureOutcome).CheckJob != "j-pass" {
 		t.Errorf("check job %q, want the linked pass", res.Outcome.(core.MeasureOutcome).CheckJob)
 	}
 	own := shape{kind: core.JobMeasure, samples: 1}
 	w = &world{p: own.plan(), at: -1}
 	v, _ = flow.Drive(context.Background(), w.p, w)
-	res = w.p.Record("j-run", commit, *v.Findings, epoch)
+	res = w.p.Record("j-run", commit, passedOf(t, v), epoch)
 	if res.Outcome.(core.MeasureOutcome).CheckJob != "j-run" {
 		t.Errorf("a measure job that ran its check names itself, got %q", res.Outcome.(core.MeasureOutcome).CheckJob)
 	}
@@ -446,7 +446,7 @@ func TestACancelledContextEndsTheJobBeforeTheNextRequest(t *testing.T) {
 	p := shape{kind: core.JobMeasure, samples: 2}.plan()
 	w := &world{p: p, at: -1}
 	v, err := flow.Drive(ctx, p, w)
-	if err != nil || !v.Cancelled() || len(w.asked) != 0 {
+	if stopped, ok := v.(flow.Stopped); err != nil || !ok || !stopped.Cancelled() || len(w.asked) != 0 {
 		t.Fatalf("verdict %+v, error %v, asked %v", v, err, w.asked)
 	}
 }
@@ -548,24 +548,25 @@ func runRandomEvents(t *testing.T, seed uint64, shapeIndex int) {
 		t.Fatalf("seed %d: no request and not done", seed)
 	}
 	v := state.Verdict()
-	if v.Passed() {
-		if p.Kind == core.JobMeasure && len(v.Findings.Samples) != int(p.Samples) {
-			t.Fatalf("seed %d: passed with %d samples of %d", seed, len(v.Findings.Samples), p.Samples)
+	_, reason := flow.Ending(v)
+	if passed, ok := v.(flow.Passed); ok {
+		if p.Kind == core.JobMeasure && len(passed.Findings.Samples) != int(p.Samples) {
+			t.Fatalf("seed %d: passed with %d samples of %d", seed, len(passed.Findings.Samples), p.Samples)
 		}
-		for _, s := range v.Findings.Samples {
+		for _, s := range passed.Findings.Samples {
 			if math.IsNaN(s) || math.IsInf(s, 0) {
 				t.Fatalf("seed %d: non-finite sample", seed)
 			}
 		}
-		if v.Findings.CheckTook < 0 {
+		if passed.Findings.CheckTook < 0 {
 			t.Fatalf("seed %d: negative check duration", seed)
 		}
-	} else if v.Findings != nil || v.Reason == "" {
+	} else if v == nil || reason == "" {
 		t.Fatalf("seed %d: %+v", seed, v)
 	}
 	// A verdict is final.
 	again, next := flow.Step(state, flow.Observed{})
-	if next != nil || again.Verdict().Passed() != v.Passed() || again.Verdict().Reason != v.Reason {
+	if _, againReason := flow.Ending(again.Verdict()); next != nil || !reflect.DeepEqual(again.Verdict(), v) || againReason != reason {
 		t.Fatalf("seed %d: a step after the verdict changed it", seed)
 	}
 }
@@ -617,4 +618,14 @@ func requestAfter(requests []flow.Request, i int) flow.Request {
 		return requests[i+1]
 	}
 	return nil
+}
+
+// passedOf returns the findings of a job that passed, and fails the test for any other ending.
+func passedOf(t *testing.T, v flow.Verdict) flow.Findings {
+	t.Helper()
+	passed, ok := v.(flow.Passed)
+	if !ok {
+		t.Fatalf("the job did not pass: %+v", v)
+	}
+	return passed.Findings
 }

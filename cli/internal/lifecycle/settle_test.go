@@ -3,6 +3,7 @@ package lifecycle_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
@@ -106,11 +107,78 @@ func TestAwaitIsOverWhenTheJobsItWaitsForAreFinal(t *testing.T) {
 func TestAPassedJobSavesItsResultAndARejectedOneSaysWhy(t *testing.T) {
 	result := core.Result{Job: "j1", Outcome: core.MeasureOutcome{CheckJob: "j0"}}
 	passed := lifecycle.Settle("j1", core.JobRunning, lifecycle.Outcome{End: lifecycle.Passed{Result: result}}, epoch)
-	if passed.Transition.To != core.JobSucceeded || passed.Transition.Result == nil || passed.Transition.CheckJob != "j0" {
+	if passed.Transition.To != core.JobSucceeded || passed.Transition.Result == nil {
 		t.Fatalf("a passed job settles as %+v", passed.Transition)
+	}
+	// The check pass is stored once, in the result, and the job takes it from there.
+	if passed.Transition.CheckJob != "" {
+		t.Fatalf("the settlement copies the check pass %q beside the result that holds it", passed.Transition.CheckJob)
 	}
 	rejected := lifecycle.Settle("j1", core.JobRunning, lifecycle.Outcome{End: lifecycle.Rejected{Reason: "no result"}}, epoch)
 	if rejected.Transition.To != core.JobFailed || !strings.Contains(rejected.Log, "no result") {
 		t.Fatalf("a rejected job settles as %+v", rejected)
+	}
+}
+
+// planJob is a running check or measure job, and a result that is a result of it.
+func planJob(kind core.JobKind) (core.Job, core.Result) {
+	fp := core.Fingerprint{Kind: core.EnvironmentHost, Backend: core.BackendCPU, Facts: map[string]string{"os": "linux"}}
+	spec := core.JobSpec{Commit: core.Commit(strings.Repeat("ab", 20))}
+	var outcome core.Outcome
+	switch kind {
+	case core.JobCheck:
+		spec.Settings = core.CheckSettings{}
+		outcome = core.CheckOutcome{Duration: time.Second}
+	default:
+		spec.Settings = core.MeasureSettings{Samples: 2}
+		outcome = core.MeasureOutcome{Metric: core.Metric{Name: "ops", Direction: core.Maximize}, Samples: []float64{1, 2}, CheckJob: "j0"}
+	}
+	job := core.Job{ID: "j1", State: core.JobRunning, Key: "k1", Spec: spec, Environment: &fp}
+	res := core.Result{
+		Job: "j1", Key: "k1", Task: "t", TaskVersion: "v1", Commit: spec.Commit,
+		SchemaVersion: core.SchemaVersion, Environment: fp, Outcome: outcome, RecordedAt: epoch,
+	}
+	return job, res
+}
+
+// Whatever a supervisor reports about a check or a measure job, the settlement is one core
+// accepts, and a result is saved exactly when the job passed: a rejected result, a failed step, a
+// cancel and a loss save nothing, and a job that passed takes its check pass from its result.
+func TestAPlanJobSavesAResultExactlyWhenItPassed(t *testing.T) {
+	w := newWorld(t, 3, 1)
+	for range 4000 {
+		kind := []core.JobKind{core.JobCheck, core.JobMeasure}[w.r.IntN(2)]
+		job, res := planJob(kind)
+		o := anyOutcome(w)
+		if w.r.IntN(3) == 0 {
+			o.End = lifecycle.Passed{Result: res}
+		}
+		_, passed := o.End.(lifecycle.Passed)
+
+		st := lifecycle.Settle(job.ID, core.JobRunning, o, epoch)
+		if ran, ok := o.End.(lifecycle.Ran); ok && ran.Exec.Kind == core.ExecExited && ran.Exec.ExitCode == 0 {
+			// A plan job that only exited 0 is not a pass: core refuses it, which keeps a result
+			// from being missing. A supervisor reports a pass only as Passed.
+			if _, err := job.Apply(st.Transition); err == nil {
+				t.Fatalf("outcome %+v settles a %s job as succeeded without a result, and core accepts it", o, kind)
+			}
+			continue
+		}
+		got, err := job.Apply(st.Transition)
+		if err != nil {
+			t.Fatalf("outcome %+v settles a %s job as %+v, which core refuses: %v", o, kind, st.Transition, err)
+		}
+		if saved := st.Transition.Result != nil; saved != passed {
+			t.Fatalf("outcome %+v: result saved = %v, passed = %v", o, saved, passed)
+		}
+		if passed && (got.State != core.JobSucceeded || got.ResultJob != job.ID) {
+			t.Fatalf("a job that passed is %+v", got)
+		}
+		if m, ok := res.Outcome.(core.MeasureOutcome); ok && passed && got.CheckJob != m.CheckJob {
+			t.Fatalf("a measure that passed links check %q, want %q", got.CheckJob, m.CheckJob)
+		}
+		if _, rejected := o.End.(lifecycle.Rejected); rejected && (got.State != core.JobFailed || st.Log == "") {
+			t.Fatalf("a rejected result settles as %+v", st)
+		}
 	}
 }

@@ -94,7 +94,7 @@ func TestACancelledContextRunsNothingAndMakesNothing(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	v, err := flowrun.Run(ctx, r.config(io.Discard), scenarios()[2].plan(false))
-	if err != nil || !v.Cancelled() {
+	if stopped, ok := v.(flow.Stopped); err != nil || !ok || !stopped.Cancelled() {
 		t.Fatalf("verdict = %+v, %v", v, err)
 	}
 	if r.checkouts.Made() != 0 || len(r.env.Runs()) != 0 {
@@ -114,15 +114,16 @@ func TestACheckoutThatFailsEndsTheJobBeforeAnyCommand(t *testing.T) {
 			if runErr != nil {
 				t.Fatal(runErr)
 			}
-			if v.Passed() || v.NotAttempted == nil || v.Stage != flow.StageCheckout || len(r.env.Runs()) != 0 {
-				t.Errorf("verdict = %+v after running %d commands", v, len(r.env.Runs()))
+			unattempted, ok := v.(flow.NotAttempted)
+			if !ok || unattempted.Stage != flow.StageCheckout || len(r.env.Runs()) != 0 {
+				t.Fatalf("verdict = %+v after running %d commands", v, len(r.env.Runs()))
 			}
 			var f *core.Failure
-			if errors.As(err, &f) && *v.NotAttempted != *f {
-				t.Errorf("failure = %+v, want the checkout's own %+v", *v.NotAttempted, *f)
+			if errors.As(err, &f) && unattempted.Failure != *f {
+				t.Errorf("failure = %+v, want the checkout's own %+v", unattempted.Failure, *f)
 			}
-			if !errors.As(err, &f) && v.NotAttempted.Kind != core.FailureInternal {
-				t.Errorf("a plain error became %+v, want an internal failure", *v.NotAttempted)
+			if !errors.As(err, &f) && unattempted.Failure.Kind != core.FailureInternal {
+				t.Errorf("a plain error became %+v, want an internal failure", unattempted.Failure)
 			}
 		})
 	}
@@ -136,7 +137,7 @@ func TestAnEnvironmentThatCannotRunIsNotAttempted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.NotAttempted == nil || v.NotAttempted.Kind != core.FailureUnavailable || v.Stage != flow.StageCheck {
+	if unattempted, ok := v.(flow.NotAttempted); !ok || unattempted.Failure.Kind != core.FailureUnavailable || unattempted.Stage != flow.StageCheck {
 		t.Errorf("verdict = %+v", v)
 	}
 	if left := r.leaks(); len(left) > 0 {
@@ -148,11 +149,12 @@ func TestAMachineThatCannotBeReadDoesNotStopTheJob(t *testing.T) {
 	r := newFakeRig(t).(*fakeRig)
 	r.system.FailWith(errors.New("no /proc"))
 	v, err := flowrun.Run(context.Background(), r.config(io.Discard), scenarios()[2].plan(false))
-	if err != nil || !v.Passed() {
+	passed, ok := v.(flow.Passed)
+	if err != nil || !ok {
 		t.Fatalf("verdict = %+v, %v", v, err)
 	}
-	if v.Findings.Machine != (core.MachineFacts{}) {
-		t.Errorf("machine = %+v, want it empty", v.Findings.Machine)
+	if passed.Findings.Machine != (core.MachineFacts{}) {
+		t.Errorf("machine = %+v, want it empty", passed.Findings.Machine)
 	}
 }
 
@@ -275,7 +277,7 @@ func TestACancelThatSurfacesAsAnErrorIsStillACancel(t *testing.T) {
 	awaitMarker(t, out)
 	cancel()
 	wg.Wait()
-	if !verdict.Cancelled() || verdict.Stage != flow.StageBenchmark || verdict.NotAttempted != nil {
+	if stopped, ok := verdict.(flow.Stopped); !ok || !stopped.Cancelled() || stopped.Stage != flow.StageBenchmark {
 		t.Errorf("verdict = %+v", verdict)
 	}
 }

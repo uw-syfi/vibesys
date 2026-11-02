@@ -82,32 +82,58 @@ func (NotRan) event()         {}
 func (Observed) event()       {}
 func (Cancelled) event()      {}
 
-// Verdict is how the job ended. It mirrors what a supervisor reports: exactly one of the
-// fields below says so. A job that passed has Findings, and no other ending has them, so
-// whatever did not pass saves nothing.
-type Verdict struct {
-	// Findings is set when the job passed.
-	Findings *Findings
-	// NotAttempted is set when a step could not be attempted.
-	NotAttempted *core.Failure
-	// Rejected is set when every command ran but the job has no acceptable result: the
-	// benchmark's output was missing or invalid. It says why.
-	Rejected string
-	// Exec is how the last command ended, when it ended unlike a pass: a failing exit code, a
-	// time limit, a cancel. For a job that passed it is a plain exit 0.
-	Exec core.ExecOutcome
-	// Stage is the step the job ended in, and empty for a job that passed.
-	Stage Stage
-	// Reason is a line for the job's output saying what ended it, empty for a job that passed.
+// Verdict is how the job ended: Passed, NotAttempted, Rejected or Stopped. The set is closed, so a
+// job that passed carries its findings and nothing else, and one that did not pass carries none.
+// It is nil until the machine is done.
+type Verdict interface{ verdict() }
+
+// Passed says every step ran and the job found what it was asked for.
+type Passed struct{ Findings Findings }
+
+// NotAttempted says a step could not be attempted, such as a checkout that could not be made.
+type NotAttempted struct {
+	Stage   Stage
+	Failure core.Failure
+	// Reason is a line for the job's output saying what ended it.
 	Reason string
 }
 
-// Passed reports whether the job found a result.
-func (v Verdict) Passed() bool { return v.Findings != nil }
+// Rejected says every command ran but the job has no acceptable result: the benchmark's output was
+// missing or invalid. Reason says why.
+type Rejected struct{ Reason string }
+
+// Stopped says a step ended unlike a pass: a failing exit code, a time limit, a cancel.
+type Stopped struct {
+	Stage Stage
+	// Exec is how the step ended.
+	Exec core.ExecOutcome
+	// Reason is a line for the job's output saying what ended it.
+	Reason string
+}
+
+func (Passed) verdict()       {}
+func (NotAttempted) verdict() {}
+func (Rejected) verdict()     {}
+func (Stopped) verdict()      {}
 
 // Cancelled reports whether a cancel ended the job.
-func (v Verdict) Cancelled() bool {
-	return v.Findings == nil && v.NotAttempted == nil && v.Rejected == "" && v.Exec.Kind == core.ExecCancelled
+func (s Stopped) Cancelled() bool { return s.Exec.Kind == core.ExecCancelled }
+
+// Ending says in which step a job that did not pass ended and gives the line for its output that
+// says why. A job that passed, and a machine that is not done, have neither.
+func Ending(v Verdict) (Stage, string) {
+	switch v := v.(type) {
+	case Passed:
+		return "", ""
+	case NotAttempted:
+		return v.Stage, v.Reason
+	case Rejected:
+		return StageBenchmark, v.Reason
+	case Stopped:
+		return v.Stage, v.Reason
+	default:
+		return "", ""
+	}
 }
 
 type phase string
@@ -150,7 +176,7 @@ func Start(p Plan) (State, Request, error) {
 // Done reports whether the machine reached its verdict.
 func (s State) Done() bool { return s.phase == phaseDone }
 
-// Verdict returns how the job ended, and is meaningful when Done.
+// Verdict returns how the job ended, and is nil until the machine is Done.
 func (s State) Verdict() Verdict { return s.verdict }
 
 // Phase names where the machine is, for diagnostics.
@@ -178,7 +204,9 @@ func Step(s State, e Event) (State, Request) {
 			return s.afterCheckout()
 		case CheckoutFailed:
 			f := e.Failure
-			return s.end(Verdict{NotAttempted: &f, Stage: StageCheckout, Reason: "could not check out the commit: " + f.Message}), nil
+			return s.end(NotAttempted{Stage: StageCheckout, Failure: f, Reason: "could not check out the commit: " + f.Message}), nil
+		default:
+			// An answer that is not a checkout's is refused with the rest, below.
 		}
 	case phaseBuild:
 		if r, ok := e.(Ran); ok {
@@ -282,7 +310,7 @@ func (s State) sampled(r Ran) (State, Request) {
 		if errors.As(err, &reported) {
 			why = fmt.Sprintf("sample %d: %v", n+1, reported)
 		}
-		return s.end(Verdict{Rejected: why, Exec: r.Exec, Stage: StageBenchmark, Reason: why}), nil
+		return s.end(Rejected{Reason: why}), nil
 	}
 	s.samples = append(slices.Clip(s.samples), got.Value)
 	for _, o := range got.Others {
@@ -324,22 +352,25 @@ func addObservation(obs []core.Observation, v reading.Named) []core.Observation 
 // commandEnded decides whether a command's ending ends the job. A command that exited 0 does
 // not; any other ending does, and says how.
 func (s State) commandEnded(stage Stage, r Ran) (Verdict, bool) {
+	stopped := func(reason string) (Verdict, bool) {
+		return Stopped{Stage: stage, Exec: r.Exec, Reason: reason}, true
+	}
 	switch {
 	case r.Exec.Kind == core.ExecExited && r.Exec.ExitCode == 0:
-		return Verdict{}, false
+		return nil, false
 	case r.Exec.Kind == core.ExecExited:
-		return Verdict{Exec: r.Exec, Stage: stage, Reason: fmt.Sprintf("the %s step exited with code %d", stage, r.Exec.ExitCode)}, true
+		return stopped(fmt.Sprintf("the %s step exited with code %d", stage, r.Exec.ExitCode))
 	case r.Exec.Kind == core.ExecTimedOut:
-		return Verdict{Exec: r.Exec, Stage: stage, Reason: fmt.Sprintf("the %s step ran past its time limit and was ended", stage)}, true
+		return stopped(fmt.Sprintf("the %s step ran past its time limit and was ended", stage))
 	case r.Exec.Kind == core.ExecCancelled:
-		return Verdict{Exec: r.Exec, Stage: stage, Reason: "the job was cancelled during the " + string(stage) + " step"}, true
+		return stopped("the job was cancelled during the " + string(stage) + " step")
 	}
-	return Verdict{Exec: r.Exec, Stage: stage, Reason: fmt.Sprintf("the %s step ended in a way that is neither success nor failure (%s)", stage, r.Exec.Kind)}, true
+	return stopped(fmt.Sprintf("the %s step ended in a way that is neither success nor failure (%s)", stage, r.Exec.Kind))
 }
 
 func (s State) notRan(stage Stage, n NotRan) State {
 	f := n.Failure
-	return s.end(Verdict{NotAttempted: &f, Stage: stage, Reason: fmt.Sprintf("the %s step could not be run: %s", stage, f.Message)})
+	return s.end(NotAttempted{Stage: stage, Failure: f, Reason: fmt.Sprintf("the %s step could not be run: %s", stage, f.Message)})
 }
 
 func (s State) passed(o Observed) State {
@@ -348,17 +379,17 @@ func (s State) passed(o Observed) State {
 		f.Samples = slices.Clone(s.samples)
 		f.Observations = s.others
 	}
-	return s.end(Verdict{Findings: &f, Exec: core.ExecOutcome{Kind: core.ExecExited}})
+	return s.end(Passed{Findings: f})
 }
 
 func (s State) cancelled() State {
-	return s.end(Verdict{Exec: core.ExecOutcome{Kind: core.ExecCancelled}, Stage: s.stage(), Reason: "the job was cancelled during the " + string(s.stage()) + " step"})
+	return s.end(Stopped{Stage: s.stage(), Exec: core.ExecOutcome{Kind: core.ExecCancelled}, Reason: "the job was cancelled during the " + string(s.stage()) + " step"})
 }
 
 // refuse ends the job on a shell that broke the protocol.
 func (s State) refuse(why string) State {
 	f := core.Failure{Kind: core.FailureInternal, Message: "flow: " + why}
-	return s.end(Verdict{NotAttempted: &f, Stage: s.stage(), Reason: f.Message})
+	return s.end(NotAttempted{Stage: s.stage(), Failure: f, Reason: f.Message})
 }
 
 // stage is the step the machine is in.

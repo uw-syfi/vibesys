@@ -31,7 +31,7 @@ type Timer struct {
 func (t *Timer) Fire() { t.once.Do(func() { close(t.fired) }) }
 
 // Timeout implements clock.Timers.
-func (t *Timers) Timeout(d time.Duration) (<-chan struct{}, func()) {
+func (t *Timers) Timeout(_ context.Context, d time.Duration) (<-chan struct{}, func()) {
 	timer := &Timer{Duration: d, fired: make(chan struct{})}
 	t.mu.Lock()
 	t.armed = append(t.armed, timer)

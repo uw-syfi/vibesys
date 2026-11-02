@@ -9,17 +9,17 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/store"
 )
 
-// task is a task's store with the scope it was found for.
-type task struct {
+// taskStore is a task's store with the scope it was found for.
+type taskStore struct {
 	scope Scope
 	store store.Store
 }
 
 // openTask finds the store of the scope and makes none: results are only ever read from a store a
 // submission made.
-func (a *App) openTask(ctx context.Context, scope Scope) (task, error) {
+func (a *App) openTask(ctx context.Context, scope Scope) (taskStore, error) {
 	st, err := a.open(ctx, scope)
-	return task{scope: scope, store: st}, err
+	return taskStore{scope: scope, store: st}, err
 }
 
 // noDeclaredNoise is the relative noise every task has in this build: tasks do not declare one
@@ -150,7 +150,7 @@ const maxPromotionSteps = 3
 //
 // Once the promotion is recorded, a failure leaves a promotion the branch has not caught up with,
 // and says so, since the next look at the branch completes it.
-func (a *App) carryOut(ctx context.Context, t task, branch string, approved core.Approved) error {
+func (a *App) carryOut(ctx context.Context, t taskStore, branch string, approved core.Approved) error {
 	p := approved.Promotion()
 	recorded := false
 	fail := func(err error) error {
@@ -224,7 +224,7 @@ func (a *App) CurrentResult(ctx context.Context, c core.CallContext) (core.Resul
 }
 
 // resultsOf returns the saved results of the commits.
-func resultsOf(ctx context.Context, t task, commits ...core.Commit) ([]core.Result, error) {
+func resultsOf(ctx context.Context, t taskStore, commits ...core.Commit) ([]core.Result, error) {
 	var out []core.Result
 	for _, commit := range commits {
 		rs, err := t.store.Results(ctx, core.ResultFilter{Commit: commit})
@@ -238,7 +238,7 @@ func resultsOf(ctx context.Context, t task, commits ...core.Commit) ([]core.Resu
 
 // branchOf names the task's result branch, or fails as unavailable when the daemon has no
 // repository to ask.
-func (a *App) branchOf(t task) (string, error) {
+func (a *App) branchOf(t taskStore) (string, error) {
 	if a.cfg.Branches == nil {
 		return "", &core.Failure{Kind: core.FailureUnavailable, Message: "this daemon cannot read the result branch"}
 	}
@@ -247,7 +247,7 @@ func (a *App) branchOf(t task) (string, error) {
 
 // settledHead returns the commit the result branch is at, after completing a promotion that was
 // recorded and not yet applied. The caller holds branchMu.
-func (a *App) settledHead(ctx context.Context, t task) (core.Commit, error) {
+func (a *App) settledHead(ctx context.Context, t taskStore) (core.Commit, error) {
 	branch, err := a.branchOf(t)
 	if err != nil {
 		return "", err

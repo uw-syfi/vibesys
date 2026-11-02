@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/flow"
 )
 
 // Launch is what a supervisor is started with: a job as the daemon resolved it. The daemon
@@ -14,6 +15,9 @@ type Launch struct {
 	Task       string
 	Job        core.JobID
 	Spec       core.JobSpec
+	// Plan is what a check or a measure job runs, as the daemon decided it when the job started.
+	// It is nil for a command job, which the spec alone describes.
+	Plan *flow.Plan
 }
 
 // Ref is the job's identity.

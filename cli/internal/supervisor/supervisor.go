@@ -7,9 +7,14 @@ import (
 	"io"
 	"sync"
 
+	"github.com/uw-syfi/vibesys/cli/internal/backend"
 	"github.com/uw-syfi/vibesys/cli/internal/changed"
+	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
+	"github.com/uw-syfi/vibesys/cli/internal/flow"
+	"github.com/uw-syfi/vibesys/cli/internal/flowrun"
+	"github.com/uw-syfi/vibesys/cli/internal/hostfs"
 	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
 	"github.com/uw-syfi/vibesys/cli/internal/owned"
 )
@@ -17,12 +22,23 @@ import (
 // ErrReleased ends an Attach on a supervisor that was released while it waited.
 var ErrReleased = errors.New("the supervisor was released")
 
-// Config is what a Supervisor needs. Every field is required.
+// Host is what a check or a measure job needs of the machine besides its environment: the
+// machine's facts and load, the file system for the benchmark's result files, and the time. A
+// supervisor of a command job does not use it.
+type Host struct {
+	Backend backend.Backend
+	Files   hostfs.FS
+	Clock   clock.Clock
+}
+
+// Config is what a Supervisor needs. Every field is required, except Host for a launch that has
+// no plan.
 type Config struct {
 	Launch       lifecycle.Launch
 	Environments environment.Environments
 	Checkouts    Checkouts
 	Spool        Spool
+	Host         Host
 }
 
 // Supervisor runs one job's command and keeps what the daemon needs to learn about it. Create it
@@ -192,9 +208,12 @@ func (s *Supervisor) execute() lifecycle.Outcome {
 		return ran(core.ExecOutcome{Kind: core.ExecCancelled})
 	}
 	spec := s.cfg.Launch.Spec
+	if plan := s.cfg.Launch.Plan; plan != nil {
+		return s.executePlan(*plan)
+	}
 	command, ok := spec.Settings.(core.CommandSettings)
 	if !ok {
-		return notAttempted(&core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("this build cannot run %s jobs yet", spec.Settings.Kind())})
+		return notAttempted(&core.Failure{Kind: core.FailureInternal, Message: fmt.Sprintf("the launch of a %s job carries no plan", spec.Settings.Kind())})
 	}
 	env, err := s.cfg.Environments.Environment(spec.Environment)
 	if err != nil {
@@ -209,6 +228,42 @@ func (s *Supervisor) execute() lifecycle.Outcome {
 		Checkout: checkout, Argv: command.Argv, Service: command.Service, Timeout: command.Timeout,
 	}, writer{s})
 	return s.attempt(out, err)
+}
+
+// executePlan drives a check or a measure job through its plan and says how it ended. The plan is
+// the daemon's decision, so nothing here chooses what to run.
+func (s *Supervisor) executePlan(plan flow.Plan) lifecycle.Outcome {
+	h := s.cfg.Host
+	if h.Backend == nil || h.Files == nil || h.Clock == nil {
+		return notAttempted(&core.Failure{Kind: core.FailureUnavailable, Message: "this supervisor was started without the machine a check or a measure job needs"})
+	}
+	l := s.cfg.Launch
+	env, err := s.cfg.Environments.Environment(l.Spec.Environment)
+	if err != nil {
+		return notAttempted(err)
+	}
+	verdict, err := flowrun.Run(s.ctx, flowrun.Config{
+		Repository: l.Repository, Commit: l.Spec.Commit, Environment: env, Checkouts: s.cfg.Checkouts,
+		Backend: h.Backend, Files: h.Files, Clock: h.Clock, Output: writer{s},
+	}, plan)
+	if err != nil {
+		return notAttempted(err)
+	}
+	switch v := verdict.(type) {
+	case flow.Passed:
+		return lifecycle.Outcome{End: lifecycle.Passed{Result: plan.Record(l.Job, l.Spec.Commit, v.Findings, h.Clock.Now())}}
+	case flow.NotAttempted:
+		return lifecycle.Outcome{End: lifecycle.NotAttempted{Failure: v.Failure}}
+	case flow.Rejected:
+		return lifecycle.Outcome{End: lifecycle.Rejected{Reason: v.Reason}}
+	case flow.Stopped:
+		// A step that ended unlike a pass: the job's output says which, and the settlement of the
+		// exit says the rest.
+		_, _ = fmt.Fprintf(writer{s}, "vibesys-cli: %s\n", v.Reason)
+		return ran(v.Exec)
+	default:
+		return notAttempted(&core.Failure{Kind: core.FailureInternal, Message: "the flow of the job ended without a verdict"})
+	}
 }
 
 // attempt turns what the environment returned into an outcome. An error is a command that could

@@ -19,6 +19,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/owned"
 	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
+	"github.com/uw-syfi/vibesys/cli/internal/task"
 )
 
 // ErrAlreadyRunning says another daemon of this user holds the instance lock.
@@ -35,6 +36,9 @@ type Runtime struct {
 	Supervisors  supervisor.Supervisors
 	Environments environment.Environments
 	Branches     gitrepo.Branches
+	// Tasks reads the task of a check or a measure job as its commit has it. Without it those
+	// jobs are refused as unavailable.
+	Tasks task.Source
 }
 
 // Config is what Run needs.
@@ -105,6 +109,7 @@ func Run(ctx context.Context, cfg Config) (err error) {
 		Environments: cfg.Runtime.Environments,
 		Supervisors:  cfg.Runtime.Supervisors,
 		Branches:     cfg.Runtime.Branches,
+		Tasks:        cfg.Runtime.Tasks,
 		Logf:         cfg.Logf,
 	})
 	defer a.Close()

@@ -55,7 +55,7 @@ type run struct {
 func newRun(ctx context.Context, e *Environment, x core.Execution, out io.Writer) (*run, error) {
 	r := &run{ctx: ctx, env: e, x: x, sink: &lockedWriter{w: out}}
 	// The limit comes first, before anything starts, so that it bounds everything below.
-	r.limit, r.stopLimit = e.timers.Timeout(x.Timeout)
+	r.limit, r.stopLimit = e.timers.Timeout(ctx, x.Timeout)
 	var err error
 	if r.lifeRead, r.lifeWrite, err = os.Pipe(); err != nil {
 		r.stopLimit()
@@ -69,7 +69,7 @@ func (r *run) execute() (core.ExecOutcome, error) {
 	return environment.Execute(r.x, r, environment.Events{
 		Limit:     r.limit,
 		Cancelled: r.ctx.Done(),
-		Pause:     func() (<-chan struct{}, func()) { return r.env.timers.Timeout(r.env.pause) },
+		Pause:     func() (<-chan struct{}, func()) { return r.env.timers.Timeout(r.ctx, r.env.pause) },
 	}, r.sink)
 }
 

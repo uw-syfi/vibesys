@@ -61,11 +61,9 @@ func runCancellations(t *testing.T, newRig func(t *testing.T) rig) {
 			if err != nil {
 				t.Fatalf("Run: %v", err)
 			}
-			if !verdict.Cancelled() || verdict.Stage != s.stage {
+			stopped, ok := verdict.(flow.Stopped)
+			if !ok || !stopped.Cancelled() || stopped.Stage != s.stage {
 				t.Errorf("verdict = %+v, want cancelled in the %s", verdict, s.stage)
-			}
-			if verdict.Findings != nil {
-				t.Errorf("a cancelled job found %+v", verdict.Findings)
 			}
 			if left := r.leaks(); len(left) > 0 {
 				t.Errorf("the job left %v behind", left)

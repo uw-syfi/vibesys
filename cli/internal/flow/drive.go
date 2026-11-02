@@ -18,7 +18,7 @@ type Shell interface {
 func Drive(ctx context.Context, p Plan, sh Shell) (Verdict, error) {
 	state, req, err := Start(p)
 	if err != nil {
-		return Verdict{}, err
+		return nil, err
 	}
 	for req != nil {
 		var e Event = Cancelled{}

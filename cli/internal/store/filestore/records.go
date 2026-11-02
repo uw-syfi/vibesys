@@ -83,6 +83,7 @@ type jobRec struct {
 	Spec         specRec         `json:"spec"`
 	State        string          `json:"state"`
 	Key          string          `json:"key"`
+	NoCache      bool            `json:"no_cache,omitempty"`
 	Environment  *fingerprintRec `json:"environment"`
 	Notes        []noteRec       `json:"notes"`
 	Plans        []uint32        `json:"plans"`
@@ -373,7 +374,7 @@ func jobToRec(j core.Job) (jobRec, error) {
 	}
 	r := jobRec{
 		ID: string(j.ID), Spec: specRec{Commit: string(j.Spec.Commit), Environment: string(j.Spec.Environment), Settings: settings},
-		State: string(j.State), Key: string(j.Key), Environment: fingerprintPtrToRec(j.Environment),
+		State: string(j.State), Key: string(j.Key), NoCache: j.NoCache, Environment: fingerprintPtrToRec(j.Environment),
 		SubmittedAt: j.SubmittedAt, StartedAt: j.StartedAt, FinishedAt: j.FinishedAt, CancelReason: j.CancelReason, ExitCode: j.ExitCode,
 		ResultJob: string(j.ResultJob), CheckJob: string(j.CheckJob),
 	}
@@ -393,7 +394,7 @@ func jobFromRec(r jobRec) (core.Job, error) {
 	}
 	j := core.Job{
 		ID: core.JobID(r.ID), Spec: core.JobSpec{Commit: core.Commit(r.Spec.Commit), Environment: core.EnvironmentKind(r.Spec.Environment), Settings: settings},
-		State: core.JobState(r.State), Key: core.JobKey(r.Key), Environment: fingerprintPtrFromRec(r.Environment),
+		State: core.JobState(r.State), Key: core.JobKey(r.Key), NoCache: r.NoCache, Environment: fingerprintPtrFromRec(r.Environment),
 		SubmittedAt: r.SubmittedAt, StartedAt: r.StartedAt, FinishedAt: r.FinishedAt, CancelReason: r.CancelReason, ExitCode: r.ExitCode,
 		ResultJob: core.JobID(r.ResultJob), CheckJob: core.JobID(r.CheckJob),
 	}
