@@ -54,7 +54,7 @@ func (c *cli) run(args ...string) result {
 		cwd:    "/repo",
 		git:    c.git,
 		options: func() (client.Options, error) {
-			return client.Options{Dir: c.starter.Dir, Version: version, Starter: c.starter, Timers: c.timers}, nil
+			return client.Options{Rendezvous: client.LocalRendezvous{Dir: c.starter.Dir}, Version: version, Starter: c.starter, Timers: c.timers}, nil
 		},
 	}
 	code := run(args, d)

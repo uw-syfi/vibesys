@@ -45,7 +45,7 @@ func (p Process) ClientOptions() (client.Options, error) {
 		return client.Options{}, err
 	}
 	return client.Options{
-		Dir: dir, Version: p.Version,
+		Rendezvous: client.LocalRendezvous{Dir: dir}, Version: p.Version,
 		Starter: client.ExecStarter{Dir: dir, Command: func() *exec.Cmd {
 			return exec.Command(p.Executable, "daemon", "run")
 		}},

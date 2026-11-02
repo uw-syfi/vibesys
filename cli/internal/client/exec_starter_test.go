@@ -85,7 +85,7 @@ func execStarter(t *testing.T, dir runtimedir.Dir, mode string) client.ExecStart
 func killDaemon(t *testing.T, dir runtimedir.Dir) {
 	t.Helper()
 	t.Cleanup(func() {
-		c, err := client.Dial(ctxFor(t), client.Options{Dir: dir, Version: "test"})
+		c, err := client.Dial(ctxFor(t), client.Options{Rendezvous: client.LocalRendezvous{Dir: dir}, Version: "test"})
 		if err != nil {
 			return
 		}
@@ -99,7 +99,7 @@ func killDaemon(t *testing.T, dir runtimedir.Dir) {
 func TestExecStarterStartsADaemonProcessThatOutlivesTheCall(t *testing.T) {
 	dir := daemontest.RuntimeDir(t)
 	killDaemon(t, dir)
-	opts := client.Options{Dir: dir, Version: "test", Starter: execStarter(t, dir, "daemon")}
+	opts := client.Options{Rendezvous: client.LocalRendezvous{Dir: dir}, Version: "test", Starter: execStarter(t, dir, "daemon")}
 	c, err := client.Connect(ctxFor(t), opts)
 	if err != nil {
 		t.Fatalf("Connect: %v", err)

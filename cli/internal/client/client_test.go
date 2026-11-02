@@ -49,7 +49,7 @@ func newSetup(t *testing.T) *setup {
 }
 
 func (s *setup) options(start bool) client.Options {
-	o := client.Options{Dir: s.dir, Version: "test", Timers: s.timers}
+	o := client.Options{Rendezvous: client.LocalRendezvous{Dir: s.dir}, Version: "test", Timers: s.timers}
 	if start {
 		o.Starter = s.starter
 	}

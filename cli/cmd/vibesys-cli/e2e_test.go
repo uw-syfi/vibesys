@@ -169,7 +169,7 @@ func (e *e2e) options() client.Options {
 		e.t.Fatal(err)
 	}
 	return client.Options{
-		Dir: e.dir, Version: "e2e",
+		Rendezvous: client.LocalRendezvous{Dir: e.dir}, Version: "e2e",
 		Starter: client.ExecStarter{Dir: e.dir, Command: func() *exec.Cmd {
 			e.starts.Add(1)
 			cmd := exec.Command(self, "-test.run=^$")
@@ -307,7 +307,7 @@ func (e *e2e) killSupervisor(info host.Info) {
 }
 
 func (e *e2e) killEverything() {
-	if c, err := client.Dial(context.Background(), client.Options{Dir: e.dir, Version: "e2e"}); err == nil {
+	if c, err := client.Dial(context.Background(), client.Options{Rendezvous: client.LocalRendezvous{Dir: e.dir}, Version: "e2e"}); err == nil {
 		if st, err := c.Status(context.Background()); err == nil {
 			syscall.Kill(int(st.GetPid()), syscall.SIGKILL)
 		}

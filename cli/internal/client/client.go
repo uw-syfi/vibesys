@@ -20,10 +20,51 @@ type Starter interface {
 	Start(ctx context.Context) error
 }
 
+// Rendezvous is how the clients of a machine meet the one daemon: the connection to it, and the two
+// waits around starting it. LocalRendezvous is the shipped one, over the runtime directory.
+type Rendezvous interface {
+	// Dial connects to the daemon's socket.
+	Dial(ctx context.Context) (net.Conn, error)
+	// HoldStart waits for the right to start a daemon, which one client at a time has, and returns
+	// what gives it up.
+	HoldStart(ctx context.Context) (release func() error, err error)
+	// AwaitExit returns once no daemon holds the machine. It does not poll.
+	AwaitExit(ctx context.Context) error
+}
+
+// LocalRendezvous is the Rendezvous of the opened runtime directory.
+type LocalRendezvous struct{ Dir runtimedir.Dir }
+
+var _ Rendezvous = LocalRendezvous{}
+
+// Dial implements Rendezvous.
+func (l LocalRendezvous) Dial(ctx context.Context) (net.Conn, error) {
+	return (&net.Dialer{}).DialContext(ctx, "unix", l.Dir.Socket())
+}
+
+// HoldStart implements Rendezvous.
+func (l LocalRendezvous) HoldStart(ctx context.Context) (func() error, error) {
+	lock, err := runtimedir.WaitLock(ctx, l.Dir.StartLock())
+	if err != nil {
+		return nil, err
+	}
+	return lock.Unlock, nil
+}
+
+// AwaitExit implements Rendezvous. The instance lock is held for as long as a daemon lives, so
+// taking it is seeing the daemon gone.
+func (l LocalRendezvous) AwaitExit(ctx context.Context) error {
+	lock, err := runtimedir.WaitLock(ctx, l.Dir.DaemonLock())
+	if err != nil {
+		return err
+	}
+	return lock.Unlock()
+}
+
 // Options is what a client needs to reach a daemon.
 type Options struct {
-	// Dir is the opened runtime directory.
-	Dir runtimedir.Dir
+	// Rendezvous is how to reach the daemon.
+	Rendezvous Rendezvous
 	// Version is this build's release version, sent in the handshake.
 	Version string
 	// Starter starts a daemon when none runs. Nil means never start one.
@@ -88,11 +129,11 @@ func Connect(ctx context.Context, opts Options) (*Client, error) {
 // start starts a daemon under the start lock. A client that waited for the lock looks again
 // before it starts one: the client that held it may have started the daemon already.
 func start(ctx context.Context, opts Options) (*Client, error) {
-	lock, err := runtimedir.WaitLock(ctx, opts.Dir.StartLock())
+	release, err := opts.Rendezvous.HoldStart(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer lock.Unlock()
+	defer release()
 
 	c, answer, err := dial(ctx, opts)
 	switch {
@@ -117,11 +158,11 @@ func Restart(ctx context.Context, opts Options) (*Client, error) {
 	if opts.Starter == nil {
 		return nil, errors.New("restarting the daemon needs a way to start one")
 	}
-	lock, err := runtimedir.WaitLock(ctx, opts.Dir.StartLock())
+	release, err := opts.Rendezvous.HoldStart(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer lock.Unlock()
+	defer release()
 
 	c, _, err := dial(ctx, opts)
 	switch {
@@ -143,7 +184,7 @@ func Restart(ctx context.Context, opts Options) (*Client, error) {
 func dial(ctx context.Context, opts Options) (*Client, cliv1.Compatibility, error) {
 	conn, err := grpc.NewClient("passthrough:///daemon",
 		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
-			return (&net.Dialer{}).DialContext(ctx, "unix", opts.Dir.Socket())
+			return opts.Rendezvous.Dial(ctx)
 		}),
 		grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -167,19 +208,13 @@ func dial(ctx context.Context, opts Options) (*Client, cliv1.Compatibility, erro
 	return c, resp.GetCompatibility(), nil
 }
 
-// stopAndWait stops the daemon this client is connected to and returns once it has gone. Its
-// instance lock is held for as long as it lives, so waiting for that lock is waiting for it to
-// exit, without polling.
+// stopAndWait stops the daemon this client is connected to and returns once it has gone.
 func (c *Client) stopAndWait(ctx context.Context) error {
 	if _, err := c.rpc.Stop(ctx, &cliv1.StopRequest{}); err != nil && !wire.IsUnavailable(err) {
 		// A daemon that goes before it answers is what was asked for; the lock below says when.
 		return c.fail(err)
 	}
-	lock, err := runtimedir.WaitLock(ctx, c.opts.Dir.DaemonLock())
-	if err != nil {
-		return err
-	}
-	return lock.Unlock()
+	return c.opts.Rendezvous.AwaitExit(ctx)
 }
 
 // Close releases the connection.
