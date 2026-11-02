@@ -65,6 +65,7 @@ from vs_agent.api import AgentCapabilities, reap_orphaned_agents
 from vs_agent.api.testing import FakeAgentClient, FakeConfinement, FakeDockerBuildRunner
 from vs_core.api import AttemptBudget, ItemId, MeasurementFailure, WorkspaceMode, WorkspacePlan
 from vs_core.api.search import Flow, NotOpened, NoWinner, search
+from vs_core.api.testing import sample_limits, sample_retries
 from vs_project.api import OrchestrationDescriptor, Project
 from vs_project.api.testing import FakeGitRepositories
 from vs_runlog.api import RunLogReader
@@ -131,6 +132,9 @@ _FRAMED_RESULT = (
 _SIGNALS = (Signals.SIGKILL, Signals.SIGSEGV, Signals.SIGTERM)
 _TERMINAL = frozenset({"run_finished", "run_failed", "run_interrupted", "configuration_failed"})
 _NIGHTLY_SEEDS = range(64)
+_REQUEST_RETRIES = Config().evaluation.request_retry_limit
+"""The re-sends core grants a request the executor did not run: the product's default."""
+
 _NO_LINK_FAULT = LinkFault(LinkFaultKind.DELAY, seconds=0.0)
 """A fault that changes nothing, for cases that test only the ``docker`` deaths."""
 
@@ -627,6 +631,7 @@ def _run(tmp_path: Path, sim: Sim, faults: _Faults, stall: _Stall | None = None)
             _PLUGIN_ID,
             strategy=SkeletonStrategy.unmeasured(keeps_candidate=False),
             search=_one_attempt,
+            limits=sample_limits(request_retries=sample_retries(_REQUEST_RETRIES)),
         )
     )
 

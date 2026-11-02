@@ -18,6 +18,7 @@ from ._proofs import (
     invocation_for,
     observation_for,
 )
+from .types.attempts import EnsureWorkspace, RestoreRevision
 from .types.common import (
     AttemptRef,
     DecisionId,
@@ -43,7 +44,30 @@ from .types.sessions import (
 if TYPE_CHECKING:
     from .types.attempts import AttemptView
     from .types.evaluation import Continuation
+    from .types.records import RequestRecord
     from .types.sessions import Invocation, SessionView
+
+
+def vacant_workspace_request(record: RequestRecord | None) -> bool:
+    """A workspace request that was answered terminal without taking anything.
+
+    A request the executor rejected, failed, or cancelled before accepting it created no
+    workspace resource, so there is nothing for a closing attempt to wait to see released.
+    The executor marks such an answer neither ``released`` nor ``children_complete`` (there is
+    nothing to release and no manifest), so ``_released`` can never hold for it.
+    """
+    if record is None or not isinstance(record.request, EnsureWorkspace | RestoreRevision):
+        return False
+    observation = record.observation
+    return bool(
+        observation is not None
+        and observation.terminal
+        and not observation.accepted
+        and observation.resource_id is None
+        and not observation.children
+        and observation.status
+        in (ObservationStatus.REJECTED, ObservationStatus.FAILED, ObservationStatus.CANCELLED)
+    )
 
 
 def identity_mismatch(checks: tuple[tuple[ProofField, object, object], ...]) -> Mismatch | None:

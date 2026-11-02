@@ -19,6 +19,7 @@ from ._attempt_terminal import (
     retained_sessions_for,
     successful,
     unresolved_acceptance,
+    vacant_workspace_request,
 )
 from ._checkpoint_events import declined, retained
 from ._deadlines import from_dispatch, limit_to
@@ -114,6 +115,7 @@ from .types.sessions import (
     SessionsAcquireRequested,
 )
 from .types.strategy import Operation, RequestTurn, StartAttempt
+from .types.until import Failed, FailureReason
 
 if TYPE_CHECKING:
     from .types.attempts import AttemptsEvent
@@ -632,12 +634,20 @@ def _setup_failed(
             ),
         )
     )
-    updated = attempt.model_copy(update={"charges": charges})
+    # A workspace the executor never took leaves nothing to release; settling must not wait on it.
+    vacant = vacant_workspace_request(_record(context, observation.request_id))
+    pending = tuple(
+        identity
+        for identity in attempt.pending_records
+        if not (vacant and identity == observation.request_id)
+    )
+    updated = attempt.model_copy(update={"charges": charges, "pending_records": pending})
     return AreaChange(
         state=_replace(state, updated),
+        # The search waits for the start to open; it hears that it will not, not the close.
         events=(AttemptExhausted(attempt=attempt_ref(attempt), reason="paid-limit"),)
         if exhausted
-        else (),
+        else (Failed(reason=FailureReason.ATTEMPTS_EXHAUSTED, decision=attempt.admission_id),),
         signals=(
             RetireRequested(
                 attempt=attempt_ref(attempt),
