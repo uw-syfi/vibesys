@@ -164,6 +164,27 @@ func TestADockerfileIsNoted(t *testing.T) {
 	}
 }
 
+func TestDockerInDockerIsNotedAndMustBeABoolean(t *testing.T) {
+	read := func(section string) (task.Task, error) {
+		return task.Parse("t", []byte(strings.Replace(jsonManifest, "[catalogue]", section+"[catalogue]", 1)), []byte(objectives))
+	}
+	for section, want := range map[string]bool{
+		"": false,
+		"[environment]\ndocker_in_docker = true\n":  true,
+		"[environment]\ndocker_in_docker = false\n": false,
+		"[environment]\nsomething_else = 1\n":       false,
+	} {
+		got, err := read(section)
+		if err != nil || got.NestedDocker != want {
+			t.Errorf("%q: NestedDocker = %v, %v; want %v", section, got.NestedDocker, err, want)
+		}
+	}
+	_, err := read("[environment]\ndocker_in_docker = \"yes\"\n")
+	if f := failureOf(t, err); f.Kind != core.FailureInvalidInput || !strings.Contains(f.Message, "docker_in_docker") {
+		t.Errorf("a string value: %v, want invalid input naming docker_in_docker", err)
+	}
+}
+
 func failureOf(t *testing.T, err error) *core.Failure {
 	t.Helper()
 	var f *core.Failure

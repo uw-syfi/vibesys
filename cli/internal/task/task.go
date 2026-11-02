@@ -83,6 +83,10 @@ type Task struct {
 	Backend core.BackendKind
 	// HasDockerfile says the task ships a Dockerfile, so its jobs run in docker.
 	HasDockerfile bool
+	// NestedDocker says the task starts containers of its own, with [environment]
+	// docker_in_docker = true. A container run by this build has no container runtime in it, so
+	// a docker environment refuses the task instead of running it without what it needs.
+	NestedDocker bool
 	// Build runs first, when the task has one.
 	Build     *Command
 	Check     Command
@@ -140,6 +144,21 @@ func Read(fsys fs.FS, name string) (Task, error) {
 		return Task{}, err
 	}
 	return t, nil
+}
+
+// nestedDocker reads [environment] docker_in_docker. The section is otherwise held as data, but
+// this key decides whether a container can run the task, so a value that is not a boolean is
+// refused instead of read as false.
+func nestedDocker(environment map[string]any) (bool, error) {
+	v, ok := environment["docker_in_docker"]
+	if !ok {
+		return false, nil
+	}
+	b, ok := v.(bool)
+	if !ok {
+		return false, invalid("%s: [environment] docker_in_docker must be true or false, got %v", ManifestName, v)
+	}
+	return b, nil
 }
 
 func readOptional(fsys fs.FS, name string) ([]byte, error) {
@@ -319,6 +338,11 @@ func build(name string, m manifest, o objectivesFile) (Task, error) {
 		return Task{}, unsupported("%s: [environment.modal] cannot be honored on this machine", ManifestName)
 	}
 	t := Task{Name: name, Samples: DefaultSamples}
+	nested, err := nestedDocker(m.Environment)
+	if err != nil {
+		return Task{}, err
+	}
+	t.NestedDocker = nested
 	backend, err := backendOf(m.Backends)
 	if err != nil {
 		return Task{}, err
