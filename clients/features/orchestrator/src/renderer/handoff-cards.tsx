@@ -47,7 +47,11 @@ function HandoffCard(props: {
   readonly state: OrchestratorState;
 }): JSX.Element {
   const {handoff, message} = props;
-  const verdict = verdictOf(handoff, props.plans, props.state, message.fromAgentId);
+  // Only an attempt at an idea has a result to judge: a planner or a reviewer hands off words only.
+  const attempt = handoff.planNumber > 0 || handoff.hasCandidate;
+  const verdict = attempt
+    ? verdictOf(handoff, props.plans, props.state, message.fromAgentId)
+    : null;
   const rows: KeyValueItem[] = [
     {key: 'Checks', value: handoff.checks},
     {key: 'Measured', value: handoff.measurement},
@@ -66,15 +70,15 @@ function HandoffCard(props: {
       <Stack gap="space-3">
         <Row gap="space-3" wrap>
           <Text variant="body-strong">{`It says: ${handoff.claim}`}</Text>
-          {verdict === null ? (
-            <Chip label="No verdict recorded yet" tone="neutral" />
+          {!attempt ? null : verdict === null ? (
+            <Chip label="Not judged yet" tone="neutral" />
           ) : (
             <Chip label={verdict.label} tone={verdict.tone} dot />
           )}
         </Row>
-        {handoff.hasCandidate ? null : (
-          <Text tone="muted">It did not produce a change to keep.</Text>
-        )}
+        {attempt && !handoff.hasCandidate ? (
+          <Text tone="muted">No change was kept from this attempt.</Text>
+        ) : null}
         <KeyValue items={rows} />
       </Stack>
     </Card>

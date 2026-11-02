@@ -101,6 +101,7 @@ export function RunScreen(props: {
       </Row>
       <Split
         asideFirst
+        asideSticky
         aside={
           <AgentTree
             state={props.state}

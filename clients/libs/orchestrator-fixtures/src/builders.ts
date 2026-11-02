@@ -21,6 +21,12 @@ import {
   UsageSchema,
 } from '@vibesys/orchestrator-proto';
 
+/** Task names a fixture run takes, by its seed, so runs of one fixture are told apart. */
+const TASKS = ['faster-decode', 'smaller-cache', 'lower-latency', 'cheaper-batching'] as const;
+
+const taskOf = (runId: string): string =>
+  TASKS[Number(runId.replace(/\D/g, '') || 0) % TASKS.length] ?? TASKS[0];
+
 export function runOf(fields: {
   id: string;
   leadAgentId: string;
@@ -31,7 +37,7 @@ export function runOf(fields: {
   return create(RunSchema, {
     id: fields.id,
     repository: 'decode-service',
-    task: 'faster-decode',
+    task: taskOf(fields.id),
     status: fields.status,
     leadAgentId: fields.leadAgentId,
     fanoutLimit: fields.fanout,

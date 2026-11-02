@@ -2,7 +2,7 @@ import type {Run} from '@vibesys/orchestrator-proto';
 import {ms, type OrchestratorState} from '@vibesys/orchestrator-state';
 import {Chip, EmptyState, Stack, Table, type TableColumn} from '@vibesys/ui';
 import type {JSX} from 'react';
-import {formatClock, runWord} from './words.js';
+import {formatMoment, runWord} from './words.js';
 
 /** One connected host and the runs it has told us about. */
 export interface HostRuns {
@@ -46,10 +46,10 @@ const COLUMNS: readonly TableColumn<RunRow>[] = [
   {key: 'host', header: 'Host', mono: true, wide: true, cell: row => row.host},
   {
     key: 'started',
-    header: 'Started (UTC)',
+    header: 'Started',
     mono: true,
     wide: true,
-    cell: row => formatClock(ms(row.run.createdAt) ?? 0),
+    cell: row => formatMoment(ms(row.run.createdAt) ?? 0),
   },
 ];
 

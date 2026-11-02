@@ -20,6 +20,7 @@ import {
   type Receipt,
   ReceiptSchema,
   Refusal,
+  Rejection,
   type RunsSnapshot,
   RunsSnapshotSchema,
 } from '@vibesys/orchestrator-proto';
@@ -112,6 +113,24 @@ export class FakeDaemon {
         : this.#refuse(command.id, Refusal.NOT_PERMITTED, '', at);
     this.#receipts.set(command.id, receipt);
     return receipt;
+  }
+
+  /**
+   * The host gives up delivering a message it had accepted: the stored message becomes rejected
+   * and says why, which is how a person finds out a receipt's first answer did not hold.
+   */
+  reject(messageId: string, rejection: Rejection = Rejection.AGENT_GONE): void {
+    const message = this.#state(this.#visible).messages[messageId];
+    if (message === undefined) return;
+    const at = Date.parse('2026-11-01T18:00:00Z') + this.#log.length * 1000;
+    this.#append(
+      at,
+      {
+        case: 'messageUpdated',
+        value: create(MessageSchema, {...message, delivery: Delivery.REJECTED, rejection}),
+      },
+      '',
+    );
   }
 
   #refuse(commandId: string, refusal: Refusal, agentId: string, atMs: number): Receipt {

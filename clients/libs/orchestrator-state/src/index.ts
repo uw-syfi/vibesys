@@ -29,7 +29,6 @@ export {
   flattenTree,
   type JobBar,
   messagesOf,
-  oldestOrdinal,
   runAgents,
   type ThreadItem,
   type ThreadTurn,
@@ -39,5 +38,6 @@ export {
   timeline,
   type UsageReport,
   type UsageTotals,
+  unbrokenFrom,
   usageOf,
 } from './views.js';

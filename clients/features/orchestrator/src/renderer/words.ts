@@ -168,6 +168,14 @@ export function formatClock(atMs: number): string {
   return new Date(atMs).toISOString().slice(11, 16);
 }
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** A moment with its date and the zone it is told in, for lists that span days: `Nov 1, 17:00 UTC`. */
+export function formatMoment(atMs: number): string {
+  const at = new Date(atMs);
+  return `${MONTHS[at.getUTCMonth()]} ${at.getUTCDate()}, ${formatClock(atMs)} UTC`;
+}
+
 /** Why a connection or a request did not work, in a sentence a person can act on. */
 export function faultWord(kind: Fault['kind']): string {
   switch (kind) {

@@ -4,7 +4,7 @@ import {clockFrom} from '@vibesys/machine';
 import {FakeDaemon, FixtureSource, generateScenario} from '@vibesys/orchestrator-fixtures';
 import {ItemStatus} from '@vibesys/orchestrator-proto';
 import {type HostPorts, portsOf} from '@vibesys/orchestrator-source';
-import {applyEvent, emptyState, oldestOrdinal} from '@vibesys/orchestrator-state';
+import {applyEvent, emptyState, unbrokenFrom} from '@vibesys/orchestrator-state';
 import {BackoffSchedule} from '@vibesys/transport';
 import {FakeClock} from '@vibesys/transport/testing';
 import fc from 'fast-check';
@@ -200,13 +200,13 @@ describe('the host machine', () => {
     const agentId = longestHistory();
     actor.send({type: 'agent.open', agentId});
     await flush();
-    const firstOldest = oldestOrdinal(actor.getSnapshot().context.state, agentId);
+    const firstOldest = unbrokenFrom(actor.getSnapshot().context.state, agentId);
     expect(firstOldest).not.toBeNull();
     for (let page = 0; page < 20; page++) {
       actor.send({type: 'agent.older', agentId});
       await flush();
     }
-    expect(oldestOrdinal(actor.getSnapshot().context.state, agentId)).toBe(1);
+    expect(unbrokenFrom(actor.getSnapshot().context.state, agentId)).toBe(1);
     expect(openedAgent(actor)?.getSnapshot().value.older).toBe('idle');
     actor.stop();
   });

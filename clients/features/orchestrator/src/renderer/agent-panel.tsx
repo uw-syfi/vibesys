@@ -12,9 +12,9 @@ import {
   messagesOf,
   ms,
   type OrchestratorState,
-  oldestOrdinal,
   type ThreadItem as ShownItem,
   type ThreadTurn,
+  unbrokenFrom,
 } from '@vibesys/orchestrator-state';
 import {
   Button,
@@ -74,29 +74,30 @@ function toolItem(shown: ShownItem, call: ToolCall): ThreadItem {
   };
 }
 
-const SPEAKER = {
-  prompt: {author: 'Instructions', variant: 'prompt'},
-  reasoning: {author: 'Thinking', variant: 'reasoning'},
-  assistant: {author: 'Answer', variant: 'reply'},
-} as const;
+/** Who a written item is from. The message's own label already says what kind it is. */
+function speaker(kind: 'prompt' | 'reasoning' | 'assistant', name: string) {
+  return kind === 'prompt'
+    ? ({author: `Given to ${name}`, variant: 'prompt'} as const)
+    : kind === 'reasoning'
+      ? ({author: name, variant: 'reasoning'} as const)
+      : ({author: name, variant: 'reply'} as const);
+}
 
-function threadItem(shown: ShownItem): ThreadItem {
+function threadItem(shown: ShownItem, name: string): ThreadItem {
   const {item} = shown;
   const body = item.body;
   if (body.case === 'tool') return toolItem(shown, body.value);
-  const speaker =
-    SPEAKER[body.case === 'prompt' || body.case === 'reasoning' ? body.case : 'assistant'];
   return {
     kind: 'message',
     id: item.id,
-    ...speaker,
+    ...speaker(body.case === 'prompt' || body.case === 'reasoning' ? body.case : 'assistant', name),
     text: shown.text,
     ...(item.status === ItemStatus.RUNNING ? {notice: 'In progress'} : {}),
     startOpen: true,
   };
 }
 
-function turnItems(turn: ThreadTurn): ThreadItem[] {
+function turnItems(turn: ThreadTurn, name: string): ThreadItem[] {
   const head: ThreadItem[] = [];
   if (turn.missingBefore) {
     head.push({
@@ -116,7 +117,7 @@ function turnItems(turn: ThreadTurn): ThreadItem[] {
       detail: `${turnWord(turn.turn.status)}, ${formatDuration(ran)}`,
     });
   }
-  return [...head, ...turn.items.map(threadItem)];
+  return [...head, ...turn.items.map(shown => threadItem(shown, name))];
 }
 
 /** What this agent's tool lets a message do, in one sentence. */
@@ -140,8 +141,7 @@ function capabilityLine(agent: Agent): string {
 /** What a stored message's delivery says now, with the reason when it was rejected. */
 function storedLine(message: Message): {label: string; tone: Word['tone']} {
   const word = deliveryWord(message.delivery);
-  const why =
-    message.delivery === Delivery.REJECTED ? ` ${rejectionWord(message.rejection)}` : '';
+  const why = message.delivery === Delivery.REJECTED ? ` ${rejectionWord(message.rejection)}` : '';
   return {label: `${word.label}.${why}`, tone: word.tone};
 }
 
@@ -185,6 +185,29 @@ function SentMessage(props: {
   );
 }
 
+/** The messages sent so far, each with where it stands now, and the last answer until the host reports it. */
+function SentMessages(props: {readonly sent: readonly Message[]; readonly box: Box}): JSX.Element {
+  const {box} = props;
+  const pending =
+    box.status === 'answered' && !props.sent.some(message => message.id === box.receipt.messageId)
+      ? box
+      : null;
+  return (
+    <>
+      {props.sent.map(message => (
+        <SentMessage
+          key={message.id}
+          text={message.body.case === 'text' ? message.body.value : ''}
+          line={storedLine(message)}
+        />
+      ))}
+      {pending === null ? null : (
+        <SentMessage text={pending.text} line={receiptLine(pending.receipt)} />
+      )}
+    </>
+  );
+}
+
 function MessageBox(props: {
   readonly agent: Agent;
   readonly box: Box;
@@ -198,10 +221,10 @@ function MessageBox(props: {
   const {box} = props;
   const sending = box.status === 'sending';
   // The text stays until the host has taken the message; only then is the box empty again.
-  const taken = box.status === 'answered' && box.receipt.refusal === 0 && box.commandId === draft.id;
+  const taken =
+    box.status === 'answered' && box.receipt.refusal === 0 && box.commandId === draft.id;
   const shown = taken ? '' : draft.text;
   const retrying = box.status === 'failed' && box.commandId === draft.id;
-  const reported = box.status === 'answered' && props.sent.some(m => m.id === box.receipt.messageId);
   return (
     <Card section={`Message ${roleWord(props.agent.role)}`}>
       <Stack gap="space-3">
@@ -234,16 +257,7 @@ function MessageBox(props: {
         {box.status === 'failed' ? (
           <Text tone="muted" variant="small">{`Details: ${box.fault.detail}`}</Text>
         ) : null}
-        {props.sent.map(message => (
-          <SentMessage
-            key={message.id}
-            text={message.body.case === 'text' ? message.body.value : ''}
-            line={storedLine(message)}
-          />
-        ))}
-        {box.status === 'answered' && !reported ? (
-          <SentMessage text={box.text} line={receiptLine(box.receipt)} />
-        ) : null}
+        <SentMessages sent={props.sent} box={box} />
       </Stack>
     </Card>
   );
@@ -264,7 +278,7 @@ export function AgentPanel(props: {
 }): JSX.Element {
   const {state, agent} = props;
   const turns = agentThread(state, agent.id);
-  const oldest = oldestOrdinal(state, agent.id);
+  const oldest = unbrokenFrom(state, agent.id);
   const more = oldest !== null && oldest > 1;
   const status = agentWord(agent.status);
   return (
@@ -282,6 +296,16 @@ export function AgentPanel(props: {
           {key: 'Tool', value: harnessWord(agent.harness)},
           {key: 'Effort', value: agent.reasoningEffort === '' ? 'Default' : agent.reasoningEffort},
         ]}
+      />
+      <MessageBox
+        agent={agent}
+        box={props.view.box}
+        sent={messagesOf(state, agent.id).filter(
+          message => message.fromAgentId === '' && message.body.case === 'text',
+        )}
+        newId={props.newId}
+        send={props.send}
+        dismiss={props.dismiss}
       />
       {more ? (
         <Row gap="space-3">
@@ -302,18 +326,11 @@ export function AgentPanel(props: {
       {turns.length === 0 ? (
         <EmptyState title="Nothing yet" body="This agent has not taken a turn yet." />
       ) : (
-        <Thread label={`${props.name}, turn by turn`} items={turns.flatMap(turnItems)} />
+        <Thread
+          label={`${props.name}, turn by turn`}
+          items={turns.flatMap(turn => turnItems(turn, props.name))}
+        />
       )}
-      <MessageBox
-        agent={agent}
-        box={props.view.box}
-        sent={messagesOf(state, agent.id).filter(
-          message => message.fromAgentId === '' && message.body.case === 'text',
-        )}
-        newId={props.newId}
-        send={props.send}
-        dismiss={props.dismiss}
-      />
     </Stack>
   );
 }

@@ -21,7 +21,7 @@ import {
   applySnapshot,
   emptyState,
   type OrchestratorState,
-  oldestOrdinal,
+  unbrokenFrom,
 } from '@vibesys/orchestrator-state';
 import {type ActorRefFrom, assign, fromCallback, sendTo, setup, stopChild} from 'xstate';
 import {type AgentEvent, type AgentFold, agentMachine, type Outgoing} from './agent-machine.js';
@@ -159,7 +159,7 @@ export const hostMachine = setup({
       ({context, event}): AgentEvent => ({
         type: 'older',
         before:
-          event.type === 'agent.older' ? (oldestOrdinal(context.state, event.agentId) ?? 1) : 1,
+          event.type === 'agent.older' ? (unbrokenFrom(context.state, event.agentId) ?? 1) : 1,
       }),
     ),
     plansLoading: assign(({event}) =>
@@ -176,7 +176,7 @@ export const hostMachine = setup({
     isOpen: ({context, event}) => 'agentId' in event && context.agents[event.agentId] !== undefined,
     canPageOlder: ({context, event}) => {
       if (event.type !== 'agent.older' || context.agents[event.agentId] === undefined) return false;
-      const oldest = oldestOrdinal(context.state, event.agentId);
+      const oldest = unbrokenFrom(context.state, event.agentId);
       return oldest !== null && oldest > 1;
     },
   },

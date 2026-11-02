@@ -180,9 +180,15 @@ export function Split(props: {
   readonly aside: ReactNode;
   readonly gap?: SpaceToken;
   readonly asideFirst?: boolean;
+  /** The aside stays in view beside a long main column, and scrolls on its own when it is taller than a thread. */
+  readonly asideSticky?: boolean;
 }): JSX.Element {
   const main = <div className="vs-split-main">{props.main}</div>;
-  const aside = <div className="vs-split-aside">{props.aside}</div>;
+  const aside = (
+    <div className="vs-split-aside" data-sticky={props.asideSticky === true || undefined}>
+      {props.aside}
+    </div>
+  );
   return (
     <div className="vs-split" style={gapStyle(props.gap ?? 'space-5')}>
       {props.asideFirst === true ? aside : main}

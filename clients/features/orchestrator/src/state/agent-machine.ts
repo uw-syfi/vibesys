@@ -139,9 +139,7 @@ export const agentMachine = setup({
       event.type === 'message.send' ? {inflight: event, box: sending(event)} : {},
     ),
     enqueue: assign(({context, event}) =>
-      event.type === 'message.send'
-        ? {queue: [...context.queue, event], box: sending(event)}
-        : {},
+      event.type === 'message.send' ? {queue: [...context.queue, event], box: sending(event)} : {},
     ),
     dequeue: assign(({context}) => ({
       inflight: context.queue[0] ?? null,

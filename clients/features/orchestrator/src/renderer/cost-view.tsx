@@ -21,21 +21,21 @@ const COLUMNS: readonly TableColumn<Line>[] = [
   {key: 'turns', header: 'Turns', mono: true, align: 'end', cell: line => String(line.usage.turns)},
   {
     key: 'in',
-    header: 'Read',
+    header: 'Read (tokens)',
     mono: true,
     align: 'end',
     cell: line => formatTokens(line.usage.inputTokens),
   },
   {
     key: 'out',
-    header: 'Wrote',
+    header: 'Written (tokens)',
     mono: true,
     align: 'end',
     cell: line => formatTokens(line.usage.outputTokens),
   },
   {
     key: 'cache',
-    header: 'Reused from earlier',
+    header: 'Reused (tokens)',
     mono: true,
     align: 'end',
     wide: true,
@@ -43,7 +43,7 @@ const COLUMNS: readonly TableColumn<Line>[] = [
   },
   {
     key: 'cost',
-    header: 'Cost',
+    header: 'Reported cost',
     mono: true,
     align: 'end',
     cell: line => formatCost(line.usage.costUsd),
@@ -72,13 +72,15 @@ export function CostView(props: {
   return (
     <Stack gap="space-6">
       <Row gap="space-6" wrap>
-        <Stat label="Total cost" value={formatCost(usage.run.costUsd)} />
-        <Stat label="Words read" value={formatTokens(usage.run.inputTokens)} />
-        <Stat label="Words written" value={formatTokens(usage.run.outputTokens)} />
+        <Stat label="Reported cost" value={formatCost(usage.run.costUsd)} />
+        <Stat label="Tokens read" value={formatTokens(usage.run.inputTokens)} />
+        <Stat label="Tokens written" value={formatTokens(usage.run.outputTokens)} />
       </Row>
       <Text tone="muted" variant="small">
-        Some tools do not report a cost or a count. Those show "Not reported" and are left out of
-        the totals, never counted as zero.
+        A token is a small piece of text, roughly three quarters of a word; agents are billed by the
+        tokens they read and write. Some tools do not report a cost or a count. Those show "Not
+        reported" and are left out of the totals, never counted as zero, so the cost is only what
+        was reported.
       </Text>
       <Card section="By role">
         <Table label="Usage by role" columns={COLUMNS} rows={roles} rowKey={line => line.key} />

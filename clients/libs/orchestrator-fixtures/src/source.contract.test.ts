@@ -4,6 +4,7 @@ import {
   CommandSchema,
   Delivery,
   Refusal,
+  Rejection,
   type WatchRunsResponse,
 } from '@vibesys/orchestrator-proto';
 import {type OrchestratorSource, SourceError} from '@vibesys/orchestrator-source';
@@ -82,6 +83,26 @@ describe.each(sources)('%s', (_name, make) => {
     expect(first.refusal).toBe(Refusal.UNSPECIFIED);
     expect([Delivery.QUEUED, Delivery.STEERED]).toContain(first.delivery);
     expect(await source.dispatch(command, signal)).toEqual(first);
+  });
+
+  test('a message the host later rejects is stored as rejected, with the reason', async () => {
+    const daemon = new FakeDaemon(scenario);
+    const source = make(daemon);
+    const signal = new AbortController().signal;
+    const agent = Object.values(scenario.events.reduce(applyEvent, emptyState).agents).find(
+      candidate => candidate.status === 2,
+    );
+    const receipt = await source.dispatch(
+      create(CommandSchema, {
+        id: 'cmd-3',
+        body: {case: 'sendMessage', value: {agentId: agent?.id ?? '', text: 'hello'}},
+      }),
+      signal,
+    );
+    daemon.reject(receipt.messageId, Rejection.AGENT_GONE);
+    const stored = daemon.snapshot().messages.find(message => message.id === receipt.messageId);
+    expect(stored?.delivery).toBe(Delivery.REJECTED);
+    expect(stored?.rejection).toBe(Rejection.AGENT_GONE);
   });
 
   test('a message to an unknown agent is refused by name', async () => {

@@ -24,6 +24,8 @@ interface FixtureSpec {
   readonly subagents: number;
   readonly live: boolean;
   readonly depth: number;
+  /** The host accepts a message and later gives up delivering it. */
+  readonly rejectsMessages?: boolean;
   /** The connection drops after this many responses on its first connections. */
   readonly dropsAfter: readonly number[];
 }
@@ -50,6 +52,8 @@ const SPECS = {
   'short-run': [FINISHED_RUN],
   // The first host answers; the second never does, so the window shows a lost connection.
   disconnected: [LONG_RUN, {...FINISHED_RUN, unreachable: true}],
+  // Every message to a live agent is accepted and then rejected, as when the agent's session ends.
+  'rejected-message': [{...LONG_RUN, rejectsMessages: true}],
 } as const satisfies Record<string, readonly FixtureSpec[]>;
 
 export type FixtureName = keyof typeof SPECS;
@@ -60,7 +64,18 @@ export function fixtureHosts(name: FixtureName, revealed: number | null): Fixtur
   return SPECS[name].map(spec => {
     const scenario = generateScenario(spec);
     const daemon = new FakeDaemon(scenario, revealed ?? scenario.events.length);
-    const ports = portsOf(new FixtureSource(daemon, {dropsAfter: spec.dropsAfter}));
+    const base = portsOf(new FixtureSource(daemon, {dropsAfter: spec.dropsAfter}));
+    const ports: HostPorts =
+      spec.rejectsMessages === true
+        ? {
+            ...base,
+            send: async (command, signal) => {
+              const receipt = await base.send(command, signal);
+              if (receipt.messageId !== '') daemon.reject(receipt.messageId);
+              return receipt;
+            },
+          }
+        : base;
     return {
       host: spec.host,
       ports:

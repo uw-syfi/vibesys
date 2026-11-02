@@ -171,25 +171,21 @@ describe('the screens', () => {
   });
 
   test('a message is retried under its own id only while it has had no answer', () => {
+    const fault = {kind: 'timeout', detail: 'x'} as const;
+    const receipt = create(ReceiptSchema, {commandId: 'a'});
+    const boxes: readonly AgentView['box'][] = [
+      {status: 'idle'},
+      {status: 'sending', commandId: 'a', text: 't'},
+      {status: 'answered', commandId: 'a', text: 't', receipt},
+      {status: 'failed', commandId: 'a', text: 't', fault},
+    ];
     fc.assert(
       fc.property(
-        fc.constantFrom('idle', 'sending', 'answered', 'failed'),
-        fc.boolean(),
-        fc.boolean(),
-        (status, sameId, drafted) => {
-          const fault = {kind: 'timeout', detail: 'x'} as const;
-          const receipt = create(ReceiptSchema, {commandId: 'a'});
-          const box: AgentView['box'] =
-            status === 'idle'
-              ? {status}
-              : status === 'sending'
-                ? {status, commandId: 'a', text: 't'}
-                : status === 'answered'
-                  ? {status, commandId: 'a', text: 't', receipt}
-                  : {status, commandId: 'a', text: 't', fault};
-          const draft = {text: 't', id: drafted ? (sameId ? 'a' : 'b') : null};
-          const id = idForSend(draft, box, () => 'fresh');
-          expect(id).toBe(status === 'failed' && drafted && sameId ? 'a' : 'fresh');
+        fc.constantFrom(...boxes),
+        fc.constantFrom<string | null>(null, 'a', 'b'),
+        (box, drafted) => {
+          const id = idForSend({text: 't', id: drafted}, box, () => 'fresh');
+          expect(id).toBe(box.status === 'failed' && drafted === 'a' ? 'a' : 'fresh');
         },
       ),
     );

@@ -90,11 +90,12 @@ export function TimelineView(props: {
   }));
   const fanout = fanoutOverTime(state, runId);
   const peak = fanout.reduce((most, point) => Math.max(most, point.live), 0);
-  const subagents = runAgents(state, runId).length - 1;
+  const low = fanout.reduce((least, point) => Math.min(least, point.live), peak);
+  const agentCount = runAgents(state, runId).length;
   return (
     <Stack gap="space-6">
       <Row gap="space-6" wrap>
-        <Stat label="Agents so far" value={String(Math.max(0, subagents))} />
+        <Stat label="Agents so far" value={String(agentCount)} />
         <Stat label="Most at once" value={String(peak)} />
         <Stat label="Run time" value={formatDuration(to - from)} />
       </Row>
@@ -114,12 +115,21 @@ export function TimelineView(props: {
         {fanout.length === 0 ? (
           <Text tone="muted">No helpers have started yet.</Text>
         ) : (
-          <Sparkline
-            label="Agents running at once over the run"
-            steps={fanout.map(point => ({x: point.atMs, y: point.live}))}
-            from={from}
-            to={to}
-          />
+          <Stack gap="space-2">
+            <Sparkline
+              label="Agents running at once over the run"
+              steps={fanout.map(point => ({x: point.atMs, y: point.live}))}
+              from={from}
+              to={to}
+            />
+            <Row gap="space-3" justify="between">
+              <Text tone="muted" variant="small">{`${formatClock(from)} UTC`}</Text>
+              <Text tone="muted" variant="small">{`${formatClock(to)} UTC`}</Text>
+            </Row>
+            <Text tone="muted" variant="small">
+              {`Left to right is time. The higher the line, the more agents were working at the same moment: from ${low} up to ${peak}.`}
+            </Text>
+          </Stack>
         )}
       </Card>
       <Card section="Jobs">

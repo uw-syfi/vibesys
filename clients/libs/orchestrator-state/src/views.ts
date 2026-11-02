@@ -89,12 +89,21 @@ function shown(state: OrchestratorState, item: Item): ThreadItem {
   };
 }
 
-/** The oldest ordinal loaded for an agent, or null when nothing is. */
-export function oldestOrdinal(state: OrchestratorState, agentId: string): number | null {
-  const ordinals = Object.values(state.items)
-    .filter(item => item.agentId === agentId)
-    .map(item => item.ordinal);
-  return ordinals.length === 0 ? null : Math.min(...ordinals);
+/**
+ * Where the newest unbroken run of an agent's loaded items starts, or null when none is loaded.
+ * Reading older items below it first fills any hole left while the screen was away, then goes on
+ * to the beginning, so one "Show earlier steps" action reaches every step.
+ */
+export function unbrokenFrom(state: OrchestratorState, agentId: string): number | null {
+  const ordinals = new Set(
+    Object.values(state.items)
+      .filter(item => item.agentId === agentId)
+      .map(item => item.ordinal),
+  );
+  if (ordinals.size === 0) return null;
+  let from = Math.max(...ordinals);
+  while (ordinals.has(from - 1)) from -= 1;
+  return from;
 }
 
 /** The agent's items by turn, oldest first: past and live are the same view. */
