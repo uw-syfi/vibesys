@@ -129,7 +129,8 @@ def request_classes() -> list[type[BaseModel]]:
             return flatten(get_args(tp)[0])
         if get_origin(tp) in (Union, UnionType):
             return [cls for arg in get_args(tp) for cls in flatten(arg)]
-        assert isinstance(tp, type) and issubclass(tp, BaseModel), tp
+        assert isinstance(tp, type), tp
+        assert issubclass(tp, BaseModel), tp
         return [tp]
 
     return flatten(records.Request.__value__)
