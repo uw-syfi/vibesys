@@ -21,8 +21,11 @@ read `vibesys:measure` in a skill as the skill `measure`. Give it the `/skills` 
 because the repository also holds developer skills in `.agents/skills/` that
 `npx skills add uw-syfi/vibesys` would offer too. `--list` shows what a command would install.
 
-The optimize loop needs a harness with subagents and background commands, git and Python 3.10 or
-newer for its standard-library measurement scripts. It does not need the VibeSys Python package.
+The optimize loop needs a harness with subagents and background commands, git, and `vibesys-cli`,
+the standalone binary that measures, compares and promotes commits and stores the plans. Install
+it with `curl -fsSL https://raw.githubusercontent.com/uw-syfi/vibesys/main/cli/install.sh | sh`;
+the `optimize` skill stops with that instruction when `vibesys-cli --version` fails. The `commit`
+skill's message checker also needs Python 3.10 or newer. Nothing needs the VibeSys Python package.
 
 | Harness | Domain skills | `optimize` loop |
 | --- | --- | --- |
@@ -62,8 +65,8 @@ short section in the harness file.
   ([skill metadata](../docs/contributing/skill-metadata.md)).
 - `search/`: the optimization loop for the plugin alone. VibeSys runs never install it,
   because they read only `domains/`. Invoke `/vibesys:optimize <task> [--fanout N]` to start or resume the task's one long-running
-  optimization: planners write hypotheses as plan files, workers try them, every commit is
-  measured and judged. Its state is described by the `state` skill, and every commit follows the
+  optimization: planners store hypotheses as plans, workers try them, every commit is
+  measured and judged, all through `vibesys-cli`. Its state is described by the `state` skill, and every commit follows the
   `commit` skill's enforced message schema. Search skills are named verb-first
   (`measure`, `judge-candidate`, ...) except `state`.
 

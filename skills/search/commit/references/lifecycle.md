@@ -4,14 +4,11 @@
 
 1. **The hook** (`install-hook`) rejects a bad message at commit time. It accepts `wip`, so a
    checkpoint is never blocked. It can be skipped with `--no-verify`, so it is a convenience.
-2. **Measurement** is the gate that cannot be skipped. `measurements.py record --role
-   candidate` reads the commit's message and refuses it if it violates the schema, is `wip`, or
-   has a `Checks` other than `pass`. It names the fix. The base commit is exempt: it is the
-   repository's own history. A `record` run without this skill installed beside `measure` fails
-   with a message naming the missing script; it never passes silently.
-3. **Promotion**: `measurements.py check` runs the range check over every commit from the base to
-   the result branch head and lists schema violations, so a commit reaching the result branch
-   without passing `record` still shows.
+2. **The range check** is the gate that cannot be skipped by `--no-verify`. `vibesys-cli` measures
+   any commit and does not read its message, so the lead runs `commit_schema.py check-range
+   <base>..<candidate>` before it submits a measure, and before it promotes. The range check
+   refuses a schema violation, a `wip` head, and a `Checks` other than `pass`, and names the fix.
+   The base commit is exempt: it is the repository's own history.
 
 ## What lands on the result branch
 
@@ -21,7 +18,7 @@ checkpoints included. Only the head is measured and judged. The judge reviews th
 whole diff from its parent (`git diff <parent> <candidate>`), never one commit, so the number of
 commits does not change what is judged. Nobody squashes: that would change the measured SHA.
 
-A measured commit is never amended, rebased or force-pushed, because records are keyed by SHA.
+A measured commit is never amended, rebased or force-pushed, because results are keyed by SHA.
 Before measurement, history tidying is allowed and unnecessary.
 
 ## Why the hook is per-worktree
@@ -34,7 +31,7 @@ scoped to the optimization, survives git versions):
 | --- | --- | --- |
 | Write `.git/hooks/commit-msg` | 1, 1, 1, 5 | Replaces the user's hook and fires on all their commits. |
 | Repository `core.hooksPath` | 1, 2, 1, 5 | Hides every hook in the old directory from everyone. |
-| Per-worktree `core.hooksPath` (`extensions.worktreeConfig`), directory in the state directory, forwarding the other hooks | 4, 5, 5, 4 | Chosen. Only the optimization's worktrees change. |
+| Per-worktree `core.hooksPath` (`extensions.worktreeConfig`), directory inside the Git directory, forwarding the other hooks | 4, 5, 5, 4 | Chosen. Only the optimization's worktrees change. |
 | Environment variables on each `git` call | 5, 5, 5, 1 | Cannot reach agents' own shells. |
 
 The chosen option sets one repository key (`extensions.worktreeConfig`), which does not affect

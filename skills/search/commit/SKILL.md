@@ -54,14 +54,15 @@ Each violation names the commit, the rule and the fix.
 
 ## Measured commits are history
 
-The commit you hand to measurement must be a full commit with `Checks: pass`, never `wip`:
-`measurements.py record` refuses anything else. Never amend, rebase or force-push a commit that
-has been measured; records are keyed by its SHA. To change it, commit on top. Before measurement,
+The commit you hand to measurement must be a full commit with `Checks: pass`, never `wip`.
+`vibesys-cli` measures any commit, so the lead runs `check-range <base>..<sha>` before submitting
+a candidate. Never amend, rebase or force-push a commit that
+has been measured; results are keyed by its SHA. To change it, commit on top. Before measurement,
 you may tidy your history, but you never have to: `wip` commits below the candidate head stay.
 
 ## Hook
 
-`commit_schema.py install-hook --dir <state dir>` adds a `commit-msg` hook to the
-optimization's worktrees and keeps any hook the repository has. The lead runs it on first use
-(`vibesys:state`). `git commit --no-verify` skips the hook; the gate at measurement cannot be
-skipped.
+`commit_schema.py install-hook --worktree <path>` adds a `commit-msg` hook to the given
+worktrees and keeps any hook the repository has. The lead runs it after creating each worktree
+(`vibesys:state`). `git commit --no-verify` skips the hook; the range check before measurement
+does not.

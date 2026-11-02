@@ -20,15 +20,7 @@ sends no completion notification, so poll it: `write_stdin` with that `session_i
 `chars` waits for output (5 to 300 seconds) and reports the exit code once the command ends.
 `/ps` lists background terminals and `/stop` stops them all. Run the command
 in the foreground of that session, not behind `nohup`, `setsid` or a shell `&`, so the poll sees
-its output and exit code. If a PID is needed (to kill by PID later), have the command write `$$`
-to a file before it runs `exec`, and read that file.
-
-## Locate a skill's own scripts
-
-The skill list Codex shows names each skill with `(file: <path>/SKILL.md)`. The skill's
-directory is that file's parent. Its own script: `python3 "<directory>/scripts/measurements.py"`.
-A sibling skill's: `python3 "<directory>/../measure/scripts/measurements.py"`. Plugin installs
-and `npx skills` installs both keep the skills side by side, so the sibling path holds.
+its output and exit code.
 
 ## Schedule periodic work
 

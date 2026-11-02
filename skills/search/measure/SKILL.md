@@ -1,88 +1,78 @@
 ---
 name: measure
-description: "Use when you must measure a commit's benchmark result for a vibesys optimization, compare it with the base, or find the best commit so far. Builds and runs the exact commit from a clean git worktree, checks correctness first, takes several samples, and records them through a script that is the only writer of the optimization's measurement records."
+description: "Use when you must measure a commit for a vibesys optimization, compare it with another commit, or read the current best number. Submits check, measure and command jobs to vibesys-cli, which builds and runs the exact commit in a clean checkout and owns the queue, the cache, the verdict and the saved results. Says how to wait for a job, what each wait exit code means, and how to read what came back."
 ---
 
 # Measure
 
-A measurement is a commit, a correctness check and several benchmark samples, taken from a clean
-worktree of that exact commit and recorded by a script. Never trust a number that is not in the
-record.
+A number is a job that `vibesys-cli` ran from a clean checkout of one commit and saved. Never
+report a number that `vibesys-cli` did not print. The CLI decides what a check, a sample, a verdict
+and a promotion are; this skill says how to use it and how to read what comes back. The lead
+installs and checks the CLI (`vibesys:optimize`).
 
-The script: `measurements.py` in this skill's `scripts/` directory, run with `python3` (standard library
-only).
-`--dir` is the optimization's state directory, `.vibesys-state/optimize/<task>` (see
-`vibesys:state`). Details of every step and flag are
-in [measuring.md](references/measuring.md).
+Every call takes the context flags your brief names: `--task`, `--run`, `--harness` and `--agent`.
+All worktrees of the repository share one store per task, so a call from your worktree sees the
+jobs and results of every other agent. The examples leave them out. Add `--json` wherever you parse the output. Detail on jobs,
+exit codes and slow runs: [jobs.md](references/jobs.md).
 
-Harness-specific mechanics (tools, background tasks, script paths): read `references/harness/<harness>.md` for the harness you are running in.
+Harness-specific mechanics (background tasks, waiting): read `references/harness/<harness>.md` for
+the harness you are running in.
 
-## Steps
+## Jobs
 
-1. Read the task's `vibesys.input.toml`: the optional `[build]` command, `[accuracy]` command,
-   `[benchmark]` command, `[benchmark.result]` (`json_argument`, `metric`) and the direction in
-   `objectives.toml`. Use `command` arrays as the executable prefix; apply the service setup and runtime
-   arguments described in measuring.md.
-2. `git rev-parse <ref>` for the full SHA of a committed candidate (`vibesys:commit`: a full
-   commit with `Checks: pass`, never `wip`). Make a clean worktree of it:
-   `git worktree add --detach <state dir>/worktrees/measure-<work-id>-<attempt> <sha>`. Never measure a working copy.
-3. Get the lead's measurement slot (one check/benchmark/record sequence at a time).
-   In that worktree: build if the task has a build step, start the service if required, then run the correctness check. If the
-   build or the check fails, stop: record nothing, save the output to a file in
-   `scratch/` and report the failure with the commit SHA.
-4. Run the benchmark N times (default 5; the base at least 5). Each run appends the task's
-   `json_argument` and a fresh output path; read the `metric` field from that JSON.
-5. Record: `measurements.py record --dir <dir> --commit <sha> --role base|candidate --label <text>
-   --metric <name> --direction max|min --command "<benchmark command>" --sample V ... --check
-   pass|fail --exclusive yes|no`. For `--role candidate` it refuses a commit whose message breaks
-   the `vibesys:commit` schema or whose `Checks` is not `pass`, and names the fix; it needs the
-   `commit` skill installed beside this one and fails clearly without it.
-6. Ask: `measurements.py compare --dir <dir> --commit <sha>` (add `--base <sha>` to compare with
-   another commit, such as main). `best --dir <dir>` names the best verdict-backed commit.
-   `show --dir <dir> [--commit <sha>]` prints the records of all shards. Add `--json` for
-   machine output. `check --dir <dir> [--branch vibesys/<task>]` is read-only: it exits non-zero
-   unless the branch head has a passing `better` record, and lists unrecorded commits.
+Commit first: a job runs a commit, never a working copy, so what is not committed is not run
+(`vibesys:commit`).
 
-## Reading a verdict
+| You need | Run |
+| --- | --- |
+| The correctness check on a commit | `vibesys-cli submit check <sha>` |
+| The official number: check, then benchmark samples | `vibesys-cli submit measure <sha> --samples 5` |
+| Any other work that drives load (a sanity or tuning run, a profile) | `vibesys-cli submit command <sha> -- <argv...>` |
 
-`better`, `worse`: the gap is beyond the spread of the samples. `within_noise`: there is no
-evidence of a gap. `inconclusive`: too few samples (fewer than 3 on a side), samples that are
-both constant, or samples of a different metric or task version. Add samples only within the
-brief's budget; identical readings on both sides remain inconclusive even after repeats. Exit
-code 2 means the input was invalid and the message says which part.
+Each prints a job id and returns at once. Useful flags: `--plan <n>` links the job to your plan,
+`--note "<text>"` says why you ran it (notes are for readers; they change no result), and
+`--service` with `--probe` runs the command against a service the CLI starts and stops.
+`--no-cache` and `--recheck` force fresh work; only a reason to doubt a saved result justifies
+them. Use the task's own commands through `check` and `measure`; do not rebuild them by hand.
 
-Run each measurement's build/check/benchmark/record sequence as one background task your harness
-tracks and reports on when it finishes.
-Never detach the whole sequence with `nohup`, `setsid`, shell `&` or `disown`: the harness must
-track completion and notify the lead. Serialize by starting the
-next measurement only when the previous task's completion notification arrives. Do not
-launch a home-made chain script of measurements. While it runs, do other useful work or yield
-for its notification; never wait with foreground `sleep`.
+Everything that puts load on the machine goes through a job, so the queue runs one at a time and
+the numbers stay clean. Do not start a benchmark, a profiler or a server in your own shell.
 
-Use `set -euo pipefail` in the measurement shell. Preserve failure with
-`measure-command > "<state dir>/scratch/measure.log" 2>&1` as the last command; read the log in a separate
-call after notification. Never append `; tail ...` to a measurement. Record the exact
-executed benchmark command, including dependency flags, port and output argument. Build
-that command once and execute the same value you record; do not reconstruct it from memory.
-Use `scripts/service.py --service '<JSON argv>' --probe '<JSON argv>'
---client '<JSON argv>' --timeout <seconds>` to own services, readiness and cleanup.
-Keep the service in foreground mode; disable daemonization.
-It kills and verifies the whole process group, including wrapper descendants; readiness
-exhaustion fails before the client runs. Do not write `&`/PID/sleep recipes.
+## Wait
 
-Every load-generating command, recorded or unrecorded (including sanity and tuning runs),
-must execute through `measurements.py run -- <command>`. Its host-wide flock prevents overlap.
+Run `vibesys-cli wait <job>...` as one tracked background task of your harness and take its
+completion notification; add `--timeout` to bound it. `submit ... --wait` blocks the same way and
+is for short jobs only. Never wait with a foreground `sleep` or a polling loop. Read the exit code
+before the output:
 
-Use `record --observations <JSON file>` for descriptive auxiliary measurements such as
-latency: map metric names (including units) to numeric sample arrays. `compare` and the
-report print the pooled observed ranges for the exact contributing revisions and evaluator.
-Derive prose ranges only from that output; omit ranges that were not recorded.
+| Code | Meaning | Do |
+| --- | --- | --- |
+| 0 | every job succeeded (with `--any`, the first one did) | read the result |
+| 1 | the daemon said no: a job failed, was cancelled or was lost | `vibesys-cli logs <job>`, fix, commit, resubmit the new commit |
+| 2 | invalid input, or a job or commit that does not exist | fix the call |
+| 3 | the wait timed out; no job was cancelled | the jobs still run; wait again |
+| 4 | no answer: no daemon, an incompatible one, an internal failure, or the end of the jobs is unknown | says nothing about the jobs, which may still succeed; do not resubmit, inspect (see [jobs.md](references/jobs.md)) |
 
-## Slow or remote measurements
+With `--json`, `wait` prints one `WaitOutcome`: `kind` (`ALL_SUCCEEDED`, `SOME_FAILED`,
+`FIRST_SUCCEEDED`, `FIRST_FAILED` or `TIMED_OUT`), `decided_by` (the job that ended the wait) and
+`jobs` with each job's last state. `submit --wait --json` prints the submit response first and
+the `WaitOutcome` on the last line. The exit code follows the `kind`; use it to branch.
 
-When one measurement takes long (a cluster queue), submit one job per commit, cache its results
-by commit SHA, and record from the cache. After any relaunch, list the queue and cancel a
-duplicate job for the same commit before assuming the first died. Start the job as a tracked
-background task, never with shell `&`. Do not use `pkill -f` from the shell that matches
-its own command line; kill by the saved PID. Judge and compare on the multi-sample official
-record; a single development sample is only a smoke check.
+A failed check or build saves nothing; put the failing output in the hand-back, with the SHA.
+
+## Read
+
+- `vibesys-cli show <sha> --json` lists what was saved for a commit. A measure result's
+  `measure.value` is its headline number, computed by the CLI. Never average samples yourself, and
+  never report a number from anywhere else.
+- `vibesys-cli compare <sha> [--against <sha2>]` prints one verdict and its numbers, against the
+  result branch head or against `<sha2>`. It exits 0 for every verdict; read the verdict, which
+  `--json` has as `comparison.verdict.kind`. Only `better` is a gain. `worse` and `within_noise` are
+  not. On `inconclusive`, add samples within your brief's budget. Never compute a verdict yourself.
+- Samples add up: `submit measure <sha> --samples 8` runs only the missing ones. Identical readings
+  on both sides stay inconclusive however many you add.
+- `vibesys-cli result --json` has the number to report for the result branch, in
+  `current.result.measure.value`. It exits 1 when the head has no measurement taken since it last
+  moved (`none.reason` says why); the way to get one is `vibesys-cli submit measure <head SHA>
+  --no-cache`, because reusing the samples that picked a winner would overstate its score.
+- Tell the reader the base, the sample counts and the environment from the output, never from memory.

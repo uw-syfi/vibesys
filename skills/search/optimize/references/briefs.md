@@ -1,8 +1,10 @@
 # Brief templates
 
 A subagent knows nothing of this optimization. A brief is the whole of what it knows, so it must
-stand on its own. Dispatch a general-purpose subagent with a fresh context, running in the background. Do not create agent definition files or add a second automatic worktree: the lead already created the checkout. Layout and plan files:
-`vibesys:state`. Workers and judges never edit plan files.
+stand on its own. Dispatch a general-purpose subagent with a fresh context, running in the
+background. Do not create agent definition files or add a second automatic worktree: the lead
+already created the checkout. Where things live: `vibesys:state`. Workers and judges never write
+plans; they submit jobs linked to the plan and hand back evidence.
 
 ## Common header (worker, judge, combine, profile)
 
@@ -12,18 +14,20 @@ Worktree: <absolute path>      Branch: <branch or detached>      Base commit: <f
 First run: cd <worktree> && git rev-parse --show-toplevel && git branch --show-current
 Confirm both match before you change anything (an empty branch name means detached HEAD).
 Work only in this worktree.
-Measurement setup: <build/start/readiness/stop commands, runtime arguments, resource allocation>.
-Measurement script: <absolute installed path to measure/scripts/measurements.py>
-Service owner: <absolute installed path to measure/scripts/service.py>
-Every benchmark, even unrecorded sanity load, uses the measurement script run -- wrapper.
-Task: .vibesys/tasks/<task>/ (read OBJECTIVE.md). State dir (--dir): <abs path>
-Load these skills first: <the matching vibesys skill>, vibesys:commit, vibesys:measure, and <domain skills>.
+CLI context: add `--task <task> --run <run id> --harness <harness> --agent <your role>` to every
+  vibesys-cli call. Every agent sees your jobs through jobs, show and compare.
+Task: .vibesys/tasks/<task>/ (read OBJECTIVE.md).
+Plan: <n>      Budget: <at most this many measure jobs, samples and command jobs>
+Load these skills first: <the matching vibesys skill>, vibesys:commit, vibesys:measure, and
+<domain skills>.
 Rules:
 - Never edit anything under .vibesys/, the task's checker or its benchmark.
 - No stub, special case or shortcut that makes a check pass or a number rise without the
   program really doing the work. Obey every rule in OBJECTIVE.md.
+- All measurement and all load go through vibesys-cli jobs (vibesys:measure); report only numbers
+  it printed.
 - Implement and combine workers commit as vibesys:commit says before reporting (the candidate is a
-  full commit with `Checks: pass`; the branch name and `Plan: NNN` come from the brief); judge and
+  full commit with `Checks: pass`; the branch name and `Plan: N` come from the brief); judge and
   profile workers edit nothing.
 ```
 
@@ -35,7 +39,7 @@ Domain skills: pick from the plugin's skill list those whose description fits th
 Add:
 
 ```
-Plan: plan-NNN-<slug>: <a claim that a measurement can falsify>
+Plan: <n> <a claim that a measurement can falsify>   (read it: vibesys-cli plan view <n>)
 Why: <the evidence: a profile, a measurement, a code reading>
 Pass criteria: <what you will observe if it is right, in the task's metric>
 Scope: <files or components you may change; what to leave alone>
@@ -43,7 +47,8 @@ Specialize to: <what the task fixes, from OBJECTIVE.md: model, hardware, workloa
 First step: <the smallest change to the claim that you can finish, commit and measure in this
   turn>. Do it and measure it before anything larger.
 Parent: <base commit, or the candidate commit you build on and its measured value>
-Hand back: claim, commit SHA, the verdict from vibesys:measure, what you learned, the next step
+Measure: <whether you submit the measure yourself, or return `ready for measurement`>
+Hand back: claim, commit SHA, job ids and the compare output, what you learned, the next step
   you propose.
 ```
 
@@ -53,19 +58,17 @@ Give the judge a detached worktree of the candidate: `git worktree add --detach 
 
 ```
 Candidate: <full SHA>      Parent: <full SHA>
-Claim: <the implementer's claim>      Recorded verdict: <from vibesys:measure compare, or none>
-Read only. Edit nothing. Run the task correctness command yourself in this worktree,
-on your allocated port, with the supplied service owner (JSON service/probe/client argv).
-Run the supplied measurement script compare for this exact candidate and parent.
-Missing speed evidence is unmeasured.
-Return pass, fail or unmeasured with the command, port, exit status and reasons.
+Claim: <the implementer's claim>      Job ids: <the candidate's measure job, or none>
+Read only. Edit nothing. Read what vibesys-cli saved for the candidate (show), and its compare
+against the parent. Missing speed evidence is unmeasured.
+Return pass, fail or unmeasured with the commands run, their output and reasons.
 ```
 
 ## Combine
 
 ```
 Main commit: <SHA>      Apply in this order, each as the diff from where it was built:
-  1. plan-NNN at <SHA>, built on <parent SHA>
+  1. plan <n> at <SHA>, built on <parent SHA>
   2. ...
 How to combine them: <which side wins a conflict; what must survive>
 Watch for: <where the parts interact>
@@ -74,7 +77,8 @@ Hand back: the commit, the parts you could not apply and why, the checks you ran
 
 ## Profile
 
-Read-only worktree of the revision, as for the judge. Artifacts go in `scratch/`.
+Read-only worktree of the revision, as for the judge. Profiles that drive load run as
+`vibesys-cli submit command` jobs; their output is read with `vibesys-cli logs`.
 
 ```
 Question: <one question about one revision>      Revision: <SHA>
@@ -88,7 +92,7 @@ inform.
 A planner gets ONLY this, in a fresh context. No idea, no area.
 
 ```
-Task: <task>      Plan number: NNN      Nudge: <optional, one short phrase, or none>
-State dir: <abs path>
-Load vibesys:plan-hypotheses and vibesys:state. Write only your own plan file.
+Task: <task>      Nudge: <optional, one short phrase, or none>
+CLI context: <as above, with --agent planner>
+Load vibesys:plan-hypotheses and vibesys:state. Create only your own plan.
 ```

@@ -1,14 +1,14 @@
 ---
 name: plan-hypotheses
-description: "Use when a vibesys optimize brief asks you to propose one hypothesis as a plan file. Read-only on code: browses the optimization state and the code, picks its own idea, bounds the possible gain from measured peaks and observed numbers, and writes one falsifiable proposal into plans/plan-NNN-<slug>.md. Changes no code and runs no benchmark."
+description: "Use when a vibesys optimize brief asks you to propose one hypothesis as a plan. Read-only on code: browses the plans, the saved results and the code, picks its own idea, bounds the possible gain from measured peaks and observed numbers, and stores one falsifiable proposal with vibesys-cli plan create. Changes no code and runs no benchmark."
 ---
 
 # Plan a hypothesis
 
 You propose one idea; the lead decides. You edit no code, run no benchmark and submit no job. You
-write only your own plan file. Your brief gives the task name, a plan number NNN and maybe one
-short nudge. Nothing else: finding the idea is your job. State layout and plan files:
-`vibesys:state`.
+write only your own plan. Your brief gives the task name, the CLI context flags and maybe one
+short nudge. Nothing else: finding the idea is your job. The CLI assigns the plan number. Plans
+and where things live: `vibesys:state`.
 
 ## Nudge
 
@@ -33,24 +33,27 @@ you stop), so a miss costs one worker pass. Fill the Bold fields in
 ## Work
 
 1. Read `OBJECTIVE.md`; its rules bind every idea. Read the plan index first
-   (`grep -H -m3 -E '^(status|claim|gain):' plans/*.md`) and open full plan files only for plans
-   near your idea. Then browse `measurements/`, `scratch/` profiles and the code.
+   (`vibesys-cli plan list --json`) and open full plans only for plans near your idea
+   (`plan view <n>`). Then browse the saved results (`vibesys-cli result`, `show <sha>`, `jobs`,
+   `logs <job>`) and the code. A profile an earlier agent kept lives in its plan's comments.
 2. **Bound first.** Compute the speed-of-light floor of the part you look at from the bytes and
    operations it must move and the hardware's measured peaks. The gap to the observed time is the
    headroom. Use the benchmark's observed operating point, not its configured one. An idea may not
    claim more than that headroom; if the part's time is unmeasured, say "unattributed" and make the
    first step a measurement.
-3. **Claim early.** As soon as you chose an idea, create `plans/plan-NNN-<slug>.md` with the
-   header and a stub (slug and one-line claim). Before investing in details, list `plans/` again:
-   if a sibling already claimed the same mechanism, pick another idea and rename your file.
+3. **Claim early.** As soon as you chose an idea, run `vibesys-cli plan create --title "<claim>"
+   --body-file -` with a stub body (one line of mechanism); note the number it prints. Before
+   investing in details, list the plans again: if a sibling already claimed the same mechanism,
+   pick another idea and change yours with `plan edit <n> --title ... --body-file -`.
 4. Check premises cheaply: read the installed library or code to confirm the API, kernel or flag
    you rely on exists and fits this hardware. Check the idea against the rules in `OBJECTIVE.md`.
-5. Fill the `## Proposal` section as in [proposal.md](references/proposal.md): one claim that can
-   succeed or fail alone, the arithmetic, the files touched, and the smallest first step that
-   reaches a measurable commit in one worker pass. Leave `## Decision` and `## Result` empty.
+5. Write the proposal as the plan's body, as in [proposal.md](references/proposal.md): one claim
+   that can succeed or fail alone, the arithmetic, the files touched, and the smallest first step
+   that reaches a measurable commit in one worker pass. Leave the status `open`. Decisions and
+   results are the lead's comments, not yours.
 
 ## Hand back
 
-The plan file path, your confidence stated plainly, what you could not establish, and the
+The plan number, your confidence stated plainly, what you could not establish, and the
 measurement that would most change your view. Derive the idea from evidence and first principles;
 do not copy code from other systems.
