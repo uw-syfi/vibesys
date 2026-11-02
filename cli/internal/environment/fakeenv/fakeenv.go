@@ -14,7 +14,7 @@ import (
 
 // DefaultProbePause is the pause between two probes of a service that Environment waits on its
 // timers for.
-const DefaultProbePause = 500 * time.Millisecond
+const DefaultProbePause = environment.DefaultProbePause
 
 // idleTimers are timers that never fire: an environment given no other has no limit.
 type idleTimers struct{}
@@ -143,11 +143,11 @@ type Environments map[core.EnvironmentKind]*Environment
 var _ environment.Environments = Environments(nil)
 
 // Environment implements environment.Environments.
-func (m Environments) Environment(kind core.EnvironmentKind) (environment.Environment, error) {
+func (m Environments) Environment(kind core.EnvironmentKind, target environment.Target) (environment.Environment, error) {
 	if e, ok := m[kind]; ok {
 		return e, nil
 	}
-	return environment.None{}.Environment(kind)
+	return environment.None{}.Environment(kind, target)
 }
 
 // Run implements environment.Environment by running the command as a script, and its service as
@@ -177,7 +177,7 @@ func (e *Environment) Run(ctx context.Context, x core.Execution, out io.Writer) 
 	defer stop()
 	var wg sync.WaitGroup
 	// Several processes of the script write to out at once.
-	l := &launcher{in: &interpreter{env: e, x: x}, wg: &wg}
+	l := &launcher{in: &interpreter{gates: e.gates, dir: x.Checkout.Dir, files: e.files}, wg: &wg}
 	out = &syncWriter{w: out}
 	defer l.end()
 	return environment.Execute(x, l, environment.Events{

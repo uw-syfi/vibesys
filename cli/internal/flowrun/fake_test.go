@@ -76,6 +76,11 @@ func TestRunsEachSampleWithItsOwnFileInTheScratchDirectory(t *testing.T) {
 	}
 	var paths []string
 	for _, x := range r.env.Runs() {
+		// An environment that does not share the host's files makes this directory visible to the
+		// command, so every command is told which it is.
+		if x.Scratch != "/memory/scratch-1" {
+			t.Errorf("a command was given the scratch directory %q, want the one its result files are in", x.Scratch)
+		}
 		if n := len(x.Argv); n > 2 && x.Argv[n-2] == "--out" {
 			paths = append(paths, x.Argv[n-1])
 		}

@@ -6,7 +6,6 @@ import (
 	"context"
 	"io"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/uw-syfi/vibesys/cli/internal/backend"
@@ -16,7 +15,7 @@ import (
 )
 
 // DefaultProbePause is how long Run waits between two readiness probes of a service.
-const DefaultProbePause = 500 * time.Millisecond
+const DefaultProbePause = environment.DefaultProbePause
 
 // Config configures New.
 type Config struct {
@@ -96,31 +95,4 @@ func (e *Environment) Run(ctx context.Context, x core.Execution, out io.Writer) 
 		return core.ExecOutcome{Kind: core.ExecUnknown}, lost
 	}
 	return outcome, nil
-}
-
-// lockedWriter serializes writes from the several processes of one run to its one sink, and
-// remembers the first failure so the run can report that its output was not kept.
-type lockedWriter struct {
-	mu  sync.Mutex
-	w   io.Writer
-	err error
-}
-
-func (l *lockedWriter) Write(p []byte) (int, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.err == nil {
-		if _, err := l.w.Write(p); err != nil {
-			l.err = err
-		}
-	}
-	// The caller is a pipe copier: it keeps reading so the command is never blocked on a sink
-	// that failed.
-	return len(p), nil
-}
-
-func (l *lockedWriter) failure() error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.err
 }

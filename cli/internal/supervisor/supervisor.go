@@ -215,7 +215,7 @@ func (s *Supervisor) execute() lifecycle.Outcome {
 	if !ok {
 		return notAttempted(&core.Failure{Kind: core.FailureInternal, Message: fmt.Sprintf("the launch of a %s job carries no plan", spec.Settings.Kind())})
 	}
-	env, err := s.cfg.Environments.Environment(spec.Environment)
+	env, err := s.cfg.Environments.Environment(spec.Environment, s.target())
 	if err != nil {
 		return notAttempted(err)
 	}
@@ -238,7 +238,7 @@ func (s *Supervisor) executePlan(plan flow.Plan) lifecycle.Outcome {
 		return notAttempted(&core.Failure{Kind: core.FailureUnavailable, Message: "this supervisor was started without the machine a check or a measure job needs"})
 	}
 	l := s.cfg.Launch
-	env, err := s.cfg.Environments.Environment(l.Spec.Environment)
+	env, err := s.cfg.Environments.Environment(l.Spec.Environment, s.target())
 	if err != nil {
 		return notAttempted(err)
 	}
@@ -264,6 +264,12 @@ func (s *Supervisor) executePlan(plan flow.Plan) lifecycle.Outcome {
 	default:
 		return notAttempted(&core.Failure{Kind: core.FailureInternal, Message: "the flow of the job ended without a verdict"})
 	}
+}
+
+// target is what the environment is asked to run commands for: the job's task at its commit.
+func (s *Supervisor) target() environment.Target {
+	l := s.cfg.Launch
+	return environment.Target{Repository: l.Repository, Commit: l.Spec.Commit, Task: l.Task}
 }
 
 // attempt turns what the environment returned into an outcome. An error is a command that could

@@ -87,8 +87,14 @@ func (g *group) end() {
 
 // interpreter runs the scripts of one execution.
 type interpreter struct {
-	env *Environment
-	x   core.Execution
+	gates Gates
+	// dir is the working directory the `dir` step prints.
+	dir string
+	// files is where the `emit` step writes; nil when the machine has no such files.
+	files Files
+	// ended is how a wait that its group ended reports, when it is not the default cancelled: a
+	// machine whose processes die with it cannot say how they ended.
+	ended core.ExecKind
 }
 
 // splitOutput separates the output file a command is told about from the rest of its script: a
@@ -108,7 +114,7 @@ func (in *interpreter) run(g *group, steps []step, out io.Writer, file string) (
 	exited := func(code int) (core.ExecOutcome, error) {
 		return core.ExecOutcome{Kind: core.ExecExited, ExitCode: code}, nil
 	}
-	points, hasPoints := in.env.gates.(Points)
+	points, hasPoints := in.gates.(Points)
 	for _, s := range steps {
 		w := s.words
 		switch w[0] {
@@ -117,16 +123,22 @@ func (in *interpreter) run(g *group, steps []step, out io.Writer, file string) (
 				return core.ExecOutcome{Kind: core.ExecUnknown}, err
 			}
 		case "emit":
-			if in.env.files == nil || file == "" {
+			if in.files == nil || file == "" {
 				return exited(127)
 			}
-			in.env.files.Put(file, []byte(strings.Join(w[1:], " ")))
+			in.files.Put(file, []byte(strings.Join(w[1:], " ")))
 		case "dir":
-			if _, err := fmt.Fprintln(out, in.x.Checkout.Dir); err != nil {
+			if _, err := fmt.Fprintln(out, in.dir); err != nil {
 				return core.ExecOutcome{Kind: core.ExecUnknown}, err
 			}
 		case "hold":
-			if len(w) != 2 || !in.env.gates.Wait(g.ctx, w[1]) {
+			if len(w) != 2 {
+				return exited(127)
+			}
+			if !in.gates.Wait(g.ctx, w[1]) {
+				if in.ended != "" {
+					return core.ExecOutcome{Kind: in.ended}, nil
+				}
 				return core.ExecOutcome{Kind: core.ExecCancelled}, nil
 			}
 		case "mark", "alive", "unless-flag":
@@ -209,7 +221,11 @@ func (l *launcher) Start(argv []string, sink io.Writer) (environment.Process, er
 	l.groups = append(l.groups, g)
 	l.mu.Unlock()
 	p := &process{g: g, exited: make(chan environment.Exit, 1)}
+	// The leader is counted in its group before it runs, so the first child it starts never adds to
+	// a group that ending the group is already waiting on.
+	g.wg.Add(1)
 	l.wg.Go(func() {
+		defer g.wg.Done()
 		out, err := l.in.run(g, steps, sink, file)
 		p.exited <- toExit(out, err)
 	})

@@ -45,6 +45,7 @@ type Shell struct {
 
 	mu       sync.Mutex
 	checkout core.Checkout
+	scratch  string
 	removals []func()
 }
 
@@ -96,7 +97,7 @@ func (s *Shell) checkoutAndScratch(ctx context.Context) flow.Event {
 		return s.checkoutFailed(ctx, err)
 	}
 	s.mu.Lock()
-	s.checkout = checkout
+	s.checkout, s.scratch = checkout, scratch
 	s.removals = append(s.removals, remove, removeScratch)
 	s.mu.Unlock()
 	return flow.CheckedOut{Dir: checkout.Dir, Scratch: scratch}
@@ -112,11 +113,11 @@ func (s *Shell) checkoutFailed(ctx context.Context, err error) flow.Event {
 
 func (s *Shell) run(ctx context.Context, r flow.Run) flow.Event {
 	s.mu.Lock()
-	checkout := s.checkout
+	checkout, scratch := s.checkout, s.scratch
 	s.mu.Unlock()
 	_, _ = fmt.Fprintf(s.cfg.Output, "[%s] %s\n", r.Stage, strings.Join(r.Argv, " "))
 	started := s.cfg.Clock.Now()
-	exec, err := s.cfg.Environment.Run(ctx, core.Execution{Checkout: checkout, Argv: r.Argv, Timeout: r.Timeout}, s.cfg.Output)
+	exec, err := s.cfg.Environment.Run(ctx, core.Execution{Checkout: checkout, Scratch: scratch, Argv: r.Argv, Timeout: r.Timeout}, s.cfg.Output)
 	ended := s.cfg.Clock.Now()
 	if err != nil {
 		if ctx.Err() != nil && errors.Is(err, context.Canceled) {

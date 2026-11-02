@@ -180,6 +180,8 @@ func TestSupportPackagesAreImportedByTestsOnly(t *testing.T) {
 	support := []string{
 		"internal/environment/fakeenv", "internal/supervisor/suptest", "internal/daemon/daemontest",
 		"internal/store/storetest", "internal/environment/envtest", "internal/backend/backendtest",
+		"internal/environment/fakeenv/fakeworld", "internal/environment/docker/dockerfake",
+		"internal/environment/docker/dockertest",
 	}
 	var productDirs []string
 	for dir := range archcheck.Rules() {
@@ -187,7 +189,7 @@ func TestSupportPackagesAreImportedByTestsOnly(t *testing.T) {
 	}
 	for _, target := range support {
 		for _, dir := range productDirs {
-			if dir == target || strings.HasSuffix(dir, "test") || strings.HasSuffix(dir, "fakeenv") {
+			if dir == target || slices.Contains(support, dir) || strings.HasSuffix(dir, "test") || strings.HasSuffix(dir, "fakeenv") {
 				continue
 			}
 			got := archcheck.Violations(map[string]string{"cli/" + dir + "/a.go": goFile(module + target)})
