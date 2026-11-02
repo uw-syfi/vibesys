@@ -43,6 +43,9 @@ type deps struct {
 	// cwd is the directory the command runs in.
 	cwd string
 	git gitrepo.Git
+	// stdin and readFile are where a command reads text given as "-" or as a file.
+	stdin    io.Reader
+	readFile func(string) ([]byte, error)
 	// options says how to reach the daemon. It is called once a command needs one.
 	options func() (client.Options, error)
 	// process runs the daemon and supervisor processes, which are this same binary.
@@ -67,6 +70,7 @@ func realDeps(stdout, stderr io.Writer) deps {
 	return deps{
 		stdout: stdout, stderr: stderr, getenv: os.Getenv, cwd: cwd,
 		git: gitrepo.System{}, options: p.ClientOptions, process: p, upgrade: productionUpgrade,
+		stdin: os.Stdin, readFile: os.ReadFile,
 	}
 }
 
@@ -82,6 +86,7 @@ var commands = map[string]func(context.Context, deps, []string) int{
 	"compare":    compareCommand,
 	"promote":    promoteCommand,
 	"result":     resultCommand,
+	"plan":       planCommand,
 	"daemon":     daemonCommand,
 	"supervisor": supervisorCommand,
 	"upgrade":    upgradeCommand,
@@ -100,6 +105,7 @@ commands:
   compare <commit> [--against rev]               better, worse, within_noise or inconclusive
   promote <commit>                               move the result branch, or say why not
   result                                         the head and a fresh final number
+  plan create|list|view|edit|comment|close       store and find plans
   daemon status|stop|restart                     manage the daemon
   upgrade                                        replace this binary with the newest release
 

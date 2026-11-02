@@ -16,6 +16,8 @@
 //   - compare.go: Compare, the verdict on two sample sets, and compare_commits.go: CompareCommits,
 //     the same over the saved measurements of two commits.
 //   - promote.go: DecidePromotion, and current.go: CurrentResultOf, the number `result` reports.
+//   - plan.go: the plan statuses and which of them close a plan, and the checks on a plan's title,
+//     body and comments.
 //   - environment.go: ChooseEnvironment, the rule from a task's backend and setup to a run
 //     environment.
 //

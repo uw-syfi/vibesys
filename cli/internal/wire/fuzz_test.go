@@ -159,6 +159,66 @@ func FuzzDecodeJobFilter(f *testing.F) {
 	})
 }
 
+func FuzzDecodePlan(f *testing.F) {
+	seedMessages(f,
+		&cliv1.Plan{},
+		&cliv1.Plan{Number: 1, Title: "t", Body: "b", Status: cliv1.PlanStatus_PLAN_STATUS_OPEN},
+		&cliv1.Plan{Number: 2, Status: cliv1.PlanStatus_PLAN_STATUS_WON, Comments: []*cliv1.PlanComment{{Text: "c", Agent: "a"}}},
+		&cliv1.Plan{Status: 99},
+	)
+	f.Fuzz(func(t *testing.T, data []byte) {
+		message := &cliv1.Plan{}
+		decode(t, data, message)
+		_, statusErr := wire.ToPlanStatus("status", message.GetStatus())
+		first, err := wire.ToPlan(message)
+		if (err != nil) != (statusErr != nil) {
+			t.Fatalf("a plan with status %s: ToPlan error %v, ToPlanStatus error %v; they must agree", message.GetStatus(), err, statusErr)
+		}
+		if err != nil {
+			return
+		}
+		if !first.Status.Valid() {
+			t.Fatalf("a decoded plan has the status %q, which is not a status", first.Status)
+		}
+		for i, c := range message.GetComments() {
+			if got := wire.ToPlanComment(c); !reflect.DeepEqual(got, first.Comments[i]) {
+				t.Fatalf("comment %d decoded alone as %+v, in its plan as %+v", i, got, first.Comments[i])
+			}
+		}
+		again, err := wire.ToPlan(wire.Plan(first))
+		if err != nil {
+			t.Fatalf("a decoded plan %+v is refused once encoded again: %v", first, err)
+		}
+		if !reflect.DeepEqual(again, first) {
+			t.Fatalf("a decoded plan changed when encoded and decoded again:\n got %+v\nwant %+v", again, first)
+		}
+	})
+}
+
+func FuzzDecodePlanFilter(f *testing.F) {
+	seedMessages(f,
+		&cliv1.ListPlansRequest{},
+		&cliv1.ListPlansRequest{Text: "x", Statuses: []cliv1.PlanStatus{cliv1.PlanStatus_PLAN_STATUS_OPEN, cliv1.PlanStatus_PLAN_STATUS_WON}},
+		&cliv1.ListPlansRequest{Statuses: []cliv1.PlanStatus{99, -1, 0}},
+	)
+	f.Fuzz(func(t *testing.T, data []byte) {
+		message := &cliv1.ListPlansRequest{}
+		decode(t, data, message)
+		filter, err := wire.ToPlanFilter(message)
+		if err != nil {
+			return
+		}
+		if len(filter.Statuses) != len(message.GetStatuses()) {
+			t.Fatalf("a decoded filter has %d statuses for %d sent", len(filter.Statuses), len(message.GetStatuses()))
+		}
+		for _, s := range filter.Statuses {
+			if !s.Valid() {
+				t.Fatalf("a decoded filter has the status %q, which is not a status", s)
+			}
+		}
+	})
+}
+
 // A supervisor's outcome and a peer's failure decode with no error to return, so what they must
 // hold is that they never panic and that an outcome that says nothing is never a success.
 func FuzzDecodeOutcome(f *testing.F) {
