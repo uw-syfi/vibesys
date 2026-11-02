@@ -82,7 +82,10 @@ class PollingEvaluationExecutor:
     the first has ended and released its workspace.
     """
 
-    def __init__(
+    # lint-waiver: LW-346200 [PLR0913]; objectives are immutable policy, alongside five
+    # > independent runtime collaborators. A carrier would merely hide those seams;
+    # > a setter would allow objectives to change while evaluations are in flight.
+    def __init__(  # noqa: PLR0913
         self,
         evaluation: Evaluation,
         workspaces: Workspaces,
