@@ -1,9 +1,10 @@
 """Tests for plot_progress."""
 
 import json
-import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import plot_progress as pp
@@ -55,21 +56,15 @@ def test_frontier_uses_noise_tolerance() -> None:
     assert kept == {"fast", "near"}  # near is within 3% of fast on both objectives
 
 
-def test_cli_writes_all_outputs(tmp_path: Path) -> None:
+def test_cli_writes_all_outputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The CLI writes every chart and the report."""
-    repo = tmp_path / "repo"
-    repo.mkdir()
 
-    def git(*a: str) -> str:
-        argv = ["git", "-C", str(repo), *a]
-        # lint-waiver: LW-715302 [S603]; a fixed git argv with no shell, building a throwaway repo.
-        return subprocess.run(argv, check=True, capture_output=True, text=True).stdout.strip()  # noqa: S603
+    def promote_all(points: list[pp.Point], repo: Path, branch: str) -> None:  # noqa: ARG001
+        for i, p in enumerate(points):
+            p.on_main, p.order = True, i
 
-    git("init", "-q", "-b", "main")
-    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "one")
-    first = git("rev-parse", "HEAD")
-    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "two")
-    second = git("rev-parse", "HEAD")
+    monkeypatch.setattr(pp, "mark_main", promote_all)
+    first, second = "a" * 40, "b" * 40
     state = make_state(tmp_path / "state", [
         (first, record(first, 100, 50, "2026-01-01T00:00:00+00:00")),
         (second, record(second, 120, 40, "2026-01-02T00:00:00+00:00"))], statuses=("won", "rejected"))
@@ -79,8 +74,8 @@ def test_cli_writes_all_outputs(tmp_path: Path) -> None:
         '[[objective]]\nname = "tput"\ndirection = "max"\n[[objective]]\nname = "ttft_p50_ms"\n'
         'direction = "min"\n[pareto]\nrelative_noise = 0.03\n')
     out = tmp_path / "out"
-    sys.argv = ["plot_progress", "--state", str(state), "--task-dir", str(task), "--branch", "main",
-                "--repo", str(repo), "--out", str(out)]
+    monkeypatch.setattr(sys, "argv", ["plot_progress", "--state", str(state), "--task-dir", str(task),
+                                      "--branch", "main", "--out", str(out)])
     pp.main()
     for name in ("progress.png", "frontier.png", "latency.png", "plans.png", "report.md"):
         assert (out / name).exists()
