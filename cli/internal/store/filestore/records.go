@@ -119,6 +119,9 @@ func jobToMessage(j core.Job) (*cliv1.Job, error) {
 	out := wire.Job(j)
 	out.StartedAt, out.FinishedAt = stampPtr(j.StartedAt), stampPtr(j.FinishedAt)
 	out.SubmittedAt = stamp(j.SubmittedAt)
+	for i, a := range j.Attempts {
+		out.Attempts[i].StartedAt, out.Attempts[i].EndedAt = stamp(a.StartedAt), stamp(a.EndedAt)
+	}
 	return out, nil
 }
 
@@ -234,6 +237,17 @@ func jobFromMessage(m *cliv1.Job) (core.Job, error) {
 	if m.ExitCode != nil {
 		code := int(m.GetExitCode())
 		j.ExitCode = &code
+	}
+	if n := len(m.GetAttempts()); n >= core.MaxAttempts {
+		return fail(fmt.Errorf("%d attempts cut off, and a job gets %d in all", n, core.MaxAttempts))
+	}
+	for i, a := range m.GetAttempts() {
+		past, err := wire.ToAttempt(fmt.Sprintf("attempts[%d]", i), a)
+		if err != nil {
+			return fail(err)
+		}
+		past.StartedAt, past.EndedAt = instant(a.GetStartedAt()), instant(a.GetEndedAt())
+		j.Attempts = append(j.Attempts, past)
 	}
 	return j, nil
 }
