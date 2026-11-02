@@ -77,6 +77,7 @@ type sim struct {
 	retries []core.Command
 	// silent holds sessions that will not answer a close, which only the grace timer ends.
 	silent map[core.Session]bool
+	caps   map[core.AgentID]core.Capabilities
 	plan   []action
 
 	inputs  int
@@ -90,7 +91,7 @@ func newSim(t *testing.T, seed uint64) *sim {
 	w := &sim{
 		t: t, r: rand.New(rand.NewPCG(seed, seed^0x9e3779b97f4a7c15)), now: epoch, seed: seed,
 		read: map[core.Session]int{}, sessions: map[core.Session]*session{}, jobs: jobstest.NewFakeJobSource(),
-		silent: map[core.Session]bool{}, monitor: newMonitor(),
+		silent: map[core.Session]bool{}, caps: map[core.AgentID]core.Capabilities{}, monitor: newMonitor(),
 	}
 	w.plan = w.drawPlan()
 	return w
@@ -149,10 +150,8 @@ func (w *sim) decide(body core.InputBody) {
 		w.log = append(w.log, c)
 		w.outbox = append(w.outbox, c.effects...)
 	}
-	for _, e := range events {
-		if err := w.monitor.observe(e); err != nil {
-			w.fail("%v", err)
-		}
+	if err := w.monitor.commit(body, events); err != nil {
+		w.fail("%v", err)
 	}
 	if v := w.state.Violations(); len(v) > 0 {
 		w.fail("after input %d: %v", w.inputs, v)
@@ -379,8 +378,14 @@ func (w *sim) work() {
 	w.carryOut(effect)
 }
 
-func (w *sim) drawCaps() core.Capabilities {
-	return core.Capabilities{StreamsText: w.r.IntN(2) == 0, Steers: w.r.IntN(2) == 0, Resumes: w.r.IntN(3) != 0}
+// capabilities are the harness's, so they stay the same across an agent's sessions.
+func (w *sim) capabilities(agent core.AgentID) core.Capabilities {
+	c, ok := w.caps[agent]
+	if !ok {
+		c = core.Capabilities{StreamsText: w.r.IntN(2) == 0, Steers: w.r.IntN(2) == 0, Resumes: w.r.IntN(4) != 0}
+		w.caps[agent] = c
+	}
+	return c
 }
 
 // carryOut is the far side of the effects. A repeat changes nothing, as the contract says.
@@ -396,7 +401,7 @@ func (w *sim) carryOut(e core.Effect) {
 		if _, ok := w.sessions[b.Session]; ok {
 			return
 		}
-		s := &session{id: b.Session, caps: w.drawCaps(), seen: map[core.EffectID]bool{}}
+		s := &session{id: b.Session, caps: w.capabilities(b.Session.Agent), seen: map[core.EffectID]bool{}}
 		w.sessions[b.Session] = s
 		if b.ConversationID != "" && !strings.HasPrefix(b.ConversationID, "conv-") {
 			w.fail("a resume got conversation %q", b.ConversationID)
@@ -537,9 +542,17 @@ func (w *sim) readSidecar() bool {
 	return true
 }
 
-// killSidecar makes a sidecar die. The shell finds out when it next looks.
+// killSidecar makes a sidecar die. The shell finds out when it next looks. Half the time it picks a
+// lead, so that some lead dies often enough to run out of resumes.
 func (w *sim) killSidecar() {
-	s, ok := pick(w, w.openSessions())
+	open := w.openSessions()
+	if w.r.IntN(2) == 0 {
+		open = slices.DeleteFunc(open, func(s *session) bool {
+			a, _ := w.state.Agent(s.id.Agent)
+			return a.Role != core.RoleLead
+		})
+	}
+	s, ok := pick(w, open)
 	if !ok {
 		return
 	}
@@ -593,7 +606,7 @@ func (w *sim) drawPlan() []action {
 	return []action{
 		{20, w.startAnotherRun}, {100, w.spawn}, {80, w.send}, {60, w.handoff}, {40, w.pollJobs},
 		{fault(10), w.stopSubagent}, {fault(2), w.stopRun}, {fault(15), w.retry}, {fault(5), w.crash},
-		{fault(5), w.killSidecar}, {fault(5), w.silence}, {20, func() { w.fireTimer(false) }},
+		{fault(20), w.killSidecar}, {fault(5), w.silence}, {20, func() { w.fireTimer(false) }},
 		{200, w.work}, {160, w.act}, {230, func() { w.readSidecar() }},
 	}
 }

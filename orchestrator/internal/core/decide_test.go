@@ -401,6 +401,22 @@ func TestALateSteerStartsTheNextTurn(t *testing.T) {
 	}
 }
 
+// A steer sent as a handed-off agent's turn ends may still come back refused, and then only a new
+// turn can deliver it, so the session stays open until the steer is answered.
+func TestAHandedOffAgentWaitsForASteerStillInFlight(t *testing.T) {
+	w, run, leadID := started(t, 1, steers)
+	a := w.spawn(run, leadID, steers)
+	w.command(core.AgentCaller{Agent: a}, core.PostHandoff{Handoff: core.Handoff{Claim: "done"}})
+	sent := w.command(operator, core.SendMessage{Agent: a, Text: "one more thing"})
+	w.endTurn(a, core.TurnCompleted)
+	w.wantEffects()
+	w.fact(a, core.SteerOutcome{Message: sent.Message})
+	w.wantEffects("StartTurn")
+	if got := w.delivery(sent.Message); got != core.DeliveryNewTurn {
+		t.Fatalf("delivery = %s", got)
+	}
+}
+
 func TestALandedSteerIsConsumed(t *testing.T) {
 	w, run, leadID := started(t, 1, steers)
 	a := w.spawn(run, leadID, steers)

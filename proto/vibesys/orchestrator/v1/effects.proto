@@ -83,13 +83,18 @@ enum TimerKind {
 
 // ArmTimer asks for a TimerFired at a time. A timer that outlives its reason fires harmlessly.
 message ArmTimer {
-  string timer_id = 1 [(buf.validate.field).string.min_len = 1];
-  TimerKind kind = 2 [(buf.validate.field).enum = {
+  option (buf.validate.message).cel = {
+    id: "arm_timer.session"
+    message: "a stop grace names a session and a run deadline does not"
+    expression: "has(this.session) == (this.kind == 2)"
+  };
+
+  TimerKind kind = 1 [(buf.validate.field).enum = {
     defined_only: true
     not_in: [0]
   }];
-  string run_id = 3 [(buf.validate.field).string.min_len = 1];
+  string run_id = 2 [(buf.validate.field).string.min_len = 1];
   // Set on a stop grace.
-  SessionRef session = 4;
-  google.protobuf.Timestamp fire_at = 5 [(buf.validate.field).required = true];
+  SessionRef session = 3;
+  google.protobuf.Timestamp fire_at = 4 [(buf.validate.field).required = true];
 }

@@ -149,7 +149,7 @@ func EncodeEffect(e core.Effect) ([]byte, error) {
 		out.Body = &pb.Effect_CloseSession{CloseSession: &pb.CloseSession{Session: sessionRef(b.Session), Force: b.Force}}
 	case core.ArmTimer:
 		timer := &pb.ArmTimer{
-			TimerId: string(b.Timer()), Kind: timerKinds.out(b.Kind), RunId: string(b.Run), FireAt: when(b.FireAt),
+			Kind: timerKinds.out(b.Kind), RunId: string(b.Run), FireAt: when(b.FireAt),
 		}
 		if b.Session != (core.Session{}) {
 			timer.Session = sessionRef(b.Session)

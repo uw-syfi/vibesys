@@ -622,13 +622,12 @@ func (x *CloseSession) GetForce() bool {
 
 // ArmTimer asks for a TimerFired at a time. A timer that outlives its reason fires harmlessly.
 type ArmTimer struct {
-	state   protoimpl.MessageState `protogen:"open.v1"`
-	TimerId string                 `protobuf:"bytes,1,opt,name=timer_id,json=timerId,proto3" json:"timer_id,omitempty"`
-	Kind    TimerKind              `protobuf:"varint,2,opt,name=kind,proto3,enum=vibesys.orchestrator.v1.TimerKind" json:"kind,omitempty"`
-	RunId   string                 `protobuf:"bytes,3,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Kind  TimerKind              `protobuf:"varint,1,opt,name=kind,proto3,enum=vibesys.orchestrator.v1.TimerKind" json:"kind,omitempty"`
+	RunId string                 `protobuf:"bytes,2,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
 	// Set on a stop grace.
-	Session       *SessionRef            `protobuf:"bytes,4,opt,name=session,proto3" json:"session,omitempty"`
-	FireAt        *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=fire_at,json=fireAt,proto3" json:"fire_at,omitempty"`
+	Session       *SessionRef            `protobuf:"bytes,3,opt,name=session,proto3" json:"session,omitempty"`
+	FireAt        *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=fire_at,json=fireAt,proto3" json:"fire_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -661,13 +660,6 @@ func (x *ArmTimer) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ArmTimer.ProtoReflect.Descriptor instead.
 func (*ArmTimer) Descriptor() ([]byte, []int) {
 	return file_vibesys_orchestrator_v1_effects_proto_rawDescGZIP(), []int{7}
-}
-
-func (x *ArmTimer) GetTimerId() string {
-	if x != nil {
-		return x.TimerId
-	}
-	return ""
 }
 
 func (x *ArmTimer) GetKind() TimerKind {
@@ -745,14 +737,14 @@ const file_vibesys_orchestrator_v1_effects_proto_rawDesc = "" +
 	"\aturn_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x06turnId\"k\n" +
 	"\fCloseSession\x12E\n" +
 	"\asession\x18\x01 \x01(\v2#.vibesys.orchestrator.v1.SessionRefB\x06\xbaH\x03\xc8\x01\x01R\asession\x12\x14\n" +
-	"\x05force\x18\x02 \x01(\bR\x05force\"\x8e\x02\n" +
-	"\bArmTimer\x12\"\n" +
-	"\btimer_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\atimerId\x12B\n" +
-	"\x04kind\x18\x02 \x01(\x0e2\".vibesys.orchestrator.v1.TimerKindB\n" +
+	"\x05force\x18\x02 \x01(\bR\x05force\"\xe5\x02\n" +
+	"\bArmTimer\x12B\n" +
+	"\x04kind\x18\x01 \x01(\x0e2\".vibesys.orchestrator.v1.TimerKindB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04kind\x12\x1e\n" +
-	"\x06run_id\x18\x03 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\x12=\n" +
-	"\asession\x18\x04 \x01(\v2#.vibesys.orchestrator.v1.SessionRefR\asession\x12;\n" +
-	"\afire_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x06fireAt*_\n" +
+	"\x06run_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\x12=\n" +
+	"\asession\x18\x03 \x01(\v2#.vibesys.orchestrator.v1.SessionRefR\asession\x12;\n" +
+	"\afire_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x06fireAt:y\xbaHv\x1at\n" +
+	"\x11arm_timer.session\x128a stop grace names a session and a run deadline does not\x1a%has(this.session) == (this.kind == 2)*_\n" +
 	"\tTimerKind\x12\x1a\n" +
 	"\x16TIMER_KIND_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17TIMER_KIND_RUN_DEADLINE\x10\x01\x12\x19\n" +
