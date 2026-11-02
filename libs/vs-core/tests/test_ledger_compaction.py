@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
@@ -197,6 +197,19 @@ def test_an_answer_to_a_pruned_poll_delivered_again_changes_nothing() -> None:
 
 @_SETTINGS
 @given(scenario=SCENARIOS, faults=_PRUNING_FAULTS)
+@example(  # a settlement's dispatch ends the inspection prepared behind it, in the same round
+    scenario=Scenario(
+        workstreams=1,
+        in_flight=1,
+        waits=(False,),
+        polls=(0,),
+        roles=("implementer", "judge"),
+        ends=("wait",),
+        shares=False,
+        faults=Faults(),
+    ),
+    faults=Faults(crash_after=frozenset({18})),
+)
 def test_pruning_changes_nothing_a_run_does(scenario: Scenario, faults: Faults) -> None:
     """Same events, requests, observations, decisions and effects, with or without pruning.
 
