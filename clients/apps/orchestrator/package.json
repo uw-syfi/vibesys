@@ -19,7 +19,9 @@
   "dependencies": {
     "@vibesys/feature-orchestrator": "workspace:*",
     "@vibesys/hosts": "workspace:*",
+    "@vibesys/ipc": "workspace:*",
     "@vibesys/orchestrator-fixtures": "workspace:*",
+    "@vibesys/orchestrator-proto": "workspace:*",
     "@vibesys/orchestrator-source": "workspace:*",
     "@vibesys/transport": "workspace:*",
     "@vibesys/ui": "workspace:*",

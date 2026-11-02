@@ -9,6 +9,9 @@
   "exclude": [],
   "references": [
     {"path": "../../libs/ui/tsconfig.lib.json"},
+    {"path": "../../libs/hosts/tsconfig.lib.json"},
+    {"path": "../../libs/ipc/tsconfig.lib.json"},
+    {"path": "../../libs/orchestrator-proto/tsconfig.lib.json"},
     {"path": "../../libs/orchestrator-fixtures/tsconfig.lib.json"},
     {"path": "../../libs/orchestrator-source/tsconfig.lib.json"},
     {"path": "../../features/orchestrator/tsconfig.renderer.json"}

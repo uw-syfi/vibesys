@@ -242,9 +242,15 @@ importers:
       '@vibesys/hosts':
         specifier: workspace:*
         version: link:../../libs/hosts
+      '@vibesys/ipc':
+        specifier: workspace:*
+        version: link:../../libs/ipc
       '@vibesys/orchestrator-fixtures':
         specifier: workspace:*
         version: link:../../libs/orchestrator-fixtures
+      '@vibesys/orchestrator-proto':
+        specifier: workspace:*
+        version: link:../../libs/orchestrator-proto
       '@vibesys/orchestrator-source':
         specifier: workspace:*
         version: link:../../libs/orchestrator-source
@@ -1221,6 +1227,12 @@ importers:
 
   libs/orchestrator-source:
     dependencies:
+      '@bufbuild/protobuf':
+        specifier: 2.16.0
+        version: 2.16.0
+      '@vibesys/hosts':
+        specifier: workspace:*
+        version: link:../hosts
       '@vibesys/orchestrator-proto':
         specifier: workspace:*
         version: link:../orchestrator-proto
@@ -1228,6 +1240,9 @@ importers:
       '@types/bun':
         specifier: 1.4.2
         version: 1.4.2
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
       typescript:
         specifier: ^5.8.3
         version: 5.9.3

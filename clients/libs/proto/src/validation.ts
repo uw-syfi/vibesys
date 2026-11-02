@@ -1,5 +1,10 @@
 /** The generated schema is the sole source of field validation rules. */
-import {type DescMessage, type DescService, fromBinary, type MessageShape} from '@bufbuild/protobuf';
+import {
+  type DescMessage,
+  type DescService,
+  fromBinary,
+  type MessageShape,
+} from '@bufbuild/protobuf';
 import {createValidator} from '@bufbuild/protovalidate';
 import {HostService} from './generated/vibesys/api/v1/host_pb.js';
 
@@ -28,7 +33,9 @@ export function validateServicePayload(
   bytes: Uint8Array,
 ): void {
   for (const service of services) {
-    const descriptor = service.methods.find(value => `/${service.typeName}/${value.name}` === method);
+    const descriptor = service.methods.find(
+      value => `/${service.typeName}/${value.name}` === method,
+    );
     if (descriptor) {
       validatedFromBinary(descriptor[direction], bytes);
       return;

@@ -49,16 +49,15 @@ async function withConnection(
   }
 }
 
-test('a unary orchestrator call rides the session HostService opened', {timeout: 15000}, async () => {
+test('a unary orchestrator call rides the session HostService opened', {
+  timeout: 15000,
+}, async () => {
   await withConnection(async (fake, connection) => {
     const command = create(CommandSchema, {
       id: 'cmd-1',
       body: {case: 'sendMessage', value: {agentId: 'a', text: 'hi'}},
     });
-    const request = toBinary(
-      DispatchRequestSchema,
-      create(DispatchRequestSchema, {command}),
-    );
+    const request = toBinary(DispatchRequestSchema, create(DispatchRequestSchema, {command}));
     const reply = connection.unary(DISPATCH, request, new AbortController().signal);
     const served = await fake.nextServed(DISPATCH);
     expect(fromBinary(DispatchRequestSchema, served.request).command?.id).toBe('cmd-1');
@@ -96,7 +95,9 @@ test('a stream delivers frames that hold their schema and fails on one that does
   });
 });
 
-test('a request that breaks its schema is refused before it is sent', {timeout: 15000}, async () => {
+test('a request that breaks its schema is refused before it is sent', {
+  timeout: 15000,
+}, async () => {
   await withConnection(async (_fake, connection) => {
     const emptyAgent = toBinary(
       WatchAgentRequestSchema,
@@ -106,11 +107,7 @@ test('a request that breaks its schema is refused before it is sent', {timeout: 
       connection.stream(WATCH_AGENT, emptyAgent, new AbortController().signal, () => {}),
     ).rejects.toThrow('agent_id');
     await expect(
-      connection.unary(
-        method('Elsewhere'),
-        new Uint8Array(),
-        new AbortController().signal,
-      ),
+      connection.unary(method('Elsewhere'), new Uint8Array(), new AbortController().signal),
     ).rejects.toThrow('unknown HostService/OrchestratorService method');
   });
 });
