@@ -16,6 +16,8 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/daemon"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
+	"github.com/uw-syfi/vibesys/cli/internal/environment/docker"
+	"github.com/uw-syfi/vibesys/cli/internal/environment/docker/dockercli"
 	hostenv "github.com/uw-syfi/vibesys/cli/internal/environment/host"
 	"github.com/uw-syfi/vibesys/cli/internal/gitwork"
 	"github.com/uw-syfi/vibesys/cli/internal/hostfs"
@@ -33,8 +35,11 @@ type Process struct {
 	// Executable is the path of the running binary, which starts the daemon and the supervisors.
 	Executable string
 	Getenv     func(string) string
-	UID        int
-	Home       string
+	// UID and GID are the user and group the process runs as. Docker jobs run as them, so the
+	// files a job writes are the user's.
+	UID  int
+	GID  int
+	Home string
 }
 
 // RuntimeDir opens the user's runtime directory.
@@ -69,6 +74,10 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 		return fmt.Errorf("opening the task index: %w", err)
 	}
 	clk := clock.System{}
+	environments, err := p.machineEnvironments(clk, dir)
+	if err != nil {
+		return err
+	}
 	return daemon.Run(ctx, daemon.Config{
 		Dir:     dir,
 		Version: p.Version,
@@ -82,7 +91,7 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 			Supervisors: host.New(dir.Supervisors(), func(runDir string) *exec.Cmd {
 				return exec.Command(p.Executable, "supervisor", "serve", "--run-dir", runDir)
 			}, p.Version),
-			Environments: machineEnvironments(clk),
+			Environments: environments,
 			Tasks:        gitwork.Tasks{},
 		},
 	})
@@ -94,21 +103,48 @@ func (p Process) RunSupervisor(ctx context.Context, runDir string, ready io.Writ
 	if !filepath.IsAbs(runDir) {
 		return &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("--run-dir: %q is not an absolute path", runDir)}
 	}
+	dir, err := p.RuntimeDir()
+	if err != nil {
+		return err
+	}
 	clk := clock.System{}
+	environments, err := p.machineEnvironments(clk, dir)
+	if err != nil {
+		return err
+	}
 	return host.Serve(ctx, runDir, host.Deps{
-		Environments:  machineEnvironments(clk),
+		Environments:  environments,
 		Checkouts:     gitwork.Checkouts{},
 		Host:          supervisor.Host{Backend: cpu.New(cpu.Host(), clk), Files: hostfs.OS{}, Clock: clk},
 		BinaryVersion: p.Version,
 	}, ready)
 }
 
-// machineEnvironments are the environments this machine has: the host, measured by the CPU
-// backend. The daemon fingerprints them and the supervisors run jobs in them, so both see the same.
-func machineEnvironments(clk clock.System) environment.Environments {
-	return environment.Registry{
-		core.EnvironmentHost: hostenv.New(hostenv.Config{Backend: cpu.New(cpu.Host(), clk), Timers: clk}),
+// machineEnvironments are the environments this machine has: the host, and docker over the docker
+// program on the user's PATH. Both are measured by the CPU backend. The daemon fingerprints them
+// and the supervisors run jobs in them, so both see the same.
+//
+// Making the docker environment does not touch Docker: a machine without it fails a docker job
+// with a message that says so, and host jobs are unaffected. The containers of the jobs of one
+// daemon are one scope, named by its runtime directory, because the daemon runs one job at a time.
+func (p Process) machineEnvironments(clk clock.System, dir runtimedir.Dir) (environment.Environments, error) {
+	machine := cpu.New(cpu.Host(), clk)
+	engine, err := dockercli.New(dockercli.Config{Timers: clk})
+	if err != nil {
+		return nil, err
 	}
+	containers, err := docker.New(docker.Config{
+		Engine: engine, Source: docker.TaskSource{Tasks: gitwork.Tasks{}}, Backend: machine, Timers: clk,
+		IDs: dockercli.RandomIDs{}, Scope: docker.ScopeFor(dir.Path()), User: docker.User{UID: p.UID, GID: p.GID},
+	})
+	if err != nil {
+		return nil, err
+	}
+	onHost := hostenv.New(hostenv.Config{Backend: machine, Timers: clk})
+	return environment.Kinds{
+		core.EnvironmentHost:   func(environment.Target) (environment.Environment, error) { return onHost, nil },
+		core.EnvironmentDocker: containers.Environment,
+	}, nil
 }
 
 // ErrAlreadyRunning is what RunDaemon returns when another daemon of the user runs.

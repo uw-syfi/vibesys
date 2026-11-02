@@ -54,7 +54,7 @@ func realDeps(stdout, stderr io.Writer) deps {
 	cwd, _ := os.Getwd()
 	home, _ := os.UserHomeDir()
 	exe, _ := os.Executable()
-	p := production.Process{Version: version, Executable: exe, Getenv: os.Getenv, UID: os.Getuid(), Home: home}
+	p := production.Process{Version: version, Executable: exe, Getenv: os.Getenv, UID: os.Getuid(), GID: os.Getgid(), Home: home}
 	return deps{
 		stdout: stdout, stderr: stderr, getenv: os.Getenv, cwd: cwd,
 		git: gitrepo.System{}, options: p.ClientOptions, process: p,

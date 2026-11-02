@@ -11,10 +11,10 @@ else there. The Go binary keeps the name `vibesys-cli`.
 Work is landing in stages. The module has the foundation (the layout, the layer rules, the
 contract, the domain types, the interfaces, and the two `Store` implementations with the contract
 suite they share), the daemon, the per-job supervisor and the job lifecycle commands, and now real
-jobs on the host: an agent can submit a command, check or measure job, watch it, read its output,
-cancel it, and find it again after the client, the daemon or the machine went away, and a measure
-reuses the samples and the check pass that earlier jobs saved. Comparing and promoting results,
-and the docker environment, are not in this build; see "What this build runs" below.
+jobs on the host or in docker: an agent can submit a command, check or measure job, watch it, read
+its output, cancel it, and find it again after the client, the daemon or the machine went away, and a
+measure reuses the samples and the check pass that earlier jobs saved. Comparing and promoting
+results are not in this build; see "What this build runs" below.
 
 ## Layout
 
@@ -166,7 +166,8 @@ the store records the job running, and only then does the supervisor start the c
 
 ## What this build runs
 
-The shipped binary runs jobs on the host. A job is one of:
+The shipped binary runs jobs on the host, or in docker for a task that has a Dockerfile (see
+"Running in docker" below). A job is one of:
 
 - `submit command`: a command you give, run in a clean checkout of the commit. It is never cached.
 - `submit check`: the task's `[accuracy]` command, run in a clean checkout. A pass is saved, and a
@@ -187,11 +188,33 @@ ways: it writes a JSON file at the path given after the flag in `[benchmark.resu
 declare an `[evaluator]` or an `entrypoint` are refused: their commands belong to an evaluator
 package. `${PROJECT_ROOT}` in a command is the checkout's root.
 
-The docker environment, `show`, `compare` and `promote` are not in this build: a request for docker
-is refused as unavailable, and the calls that need results answer with an unavailable refusal that
-names the call. The lifecycle commands above work end to end against a `fakeenv` in tests, and the
-check and measure flows run on the same fake in `app` and `daemontest`, so a test of the whole
-daemon needs no process.
+`show`, `compare` and `promote` are not in this build: the calls that need results answer with an
+unavailable refusal that names the call. The lifecycle commands above work end to end against a
+`fakeenv` in tests, and the check and measure flows run on the same fake in `app` and `daemontest`,
+so a test of the whole daemon needs no process.
+
+### Running in docker
+
+A task with a `Dockerfile` next to its manifest runs its jobs in the image that file builds, unless
+the submission says `--env host`. Nothing falls back: a machine with no reachable Docker daemon
+fails the job with a message that says so, and a task that needs what the image cannot give is
+refused with the reason.
+
+- The image is built from the Dockerfile as the job's commit has it, with no build context, and is
+  cached by the Dockerfile's content. The first `submit` of a task builds the image before the job
+  is queued, so that submission takes as long as the build. The image digest is recorded with each
+  result and is part of what makes two results comparable, so results from different images are
+  never mixed.
+- A Dockerfile that copies files from the repository (`COPY` or `ADD` of a local path, or `RUN
+  --mount`) is refused: the image must be the same for every commit that has the same Dockerfile.
+- Commands run in a container as the invoking user, in a clean checkout of the exact commit. The
+  checkout and the job's scratch directory are mounted at their own paths, so a path a command is
+  given means the same inside. A task with `docker_in_docker = true` is refused: the container has
+  no container runtime. A task for an accelerator backend is refused: containers get no GPU yet.
+- Every container is named and labelled for the daemon that started it. A cancelled or timed out
+  job removes its container, and the next job removes any container an earlier job left, for
+  instance when the supervisor was killed. Containers that other tools started are never touched.
+- The docker program must be on the `PATH` of the daemon, and the user must be allowed to use it.
 
 ## Contract
 

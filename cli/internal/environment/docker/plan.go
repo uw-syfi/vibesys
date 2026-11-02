@@ -110,6 +110,15 @@ func checkRunID(id string) error {
 	return nil
 }
 
+// ScopeFor returns the scope of whatever the key names, which a daemon takes to be what is unique
+// to it, such as the directory its runtime files are in. Two keys name two scopes, and the same key
+// names the same scope in every process, so a daemon that starts again sweeps what the one before
+// it left, and two daemons of one user never sweep each other's containers.
+func ScopeFor(key string) string {
+	sum := sha256.Sum256([]byte(key))
+	return "d" + hex.EncodeToString(sum[:8])
+}
+
 // checkScope refuses a scope that cannot be a label value or part of one.
 func checkScope(scope string) error {
 	if !scopePattern.MatchString(scope) {
