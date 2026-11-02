@@ -63,17 +63,16 @@ def roundtrip(
     ).core
 
 
-_last_reload: tuple[core.CoreState, core.OperationRegistry | None, core.CoreState] | None = None
+_last_reload: list[tuple[core.CoreState, core.OperationRegistry | None, core.CoreState]] = []
 """The state last reloaded, its codec and its reloaded copy: a run's next step starts from it."""
 
 
 def _reloaded(state: core.CoreState, codec: core.OperationRegistry | None) -> core.CoreState:
     """``roundtrip(state)``, once for a state that a step's check and the next step both reload."""
-    global _last_reload  # noqa: PLW0603
-    if _last_reload is not None and _last_reload[0] is state and _last_reload[1] is codec:
-        return _last_reload[2]
+    if _last_reload and _last_reload[0][0] is state and _last_reload[0][1] is codec:
+        return _last_reload[0][2]
     again = roundtrip(state, codec=codec)
-    _last_reload = (state, codec, again)
+    _last_reload[:] = [(state, codec, again)]
     return again
 
 

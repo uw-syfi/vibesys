@@ -18,13 +18,13 @@ if TYPE_CHECKING:
 
     from vs_core.api import RequestRecord
 
-_live = 0
+_live = {"open": 0}
 """How many ``live_steps`` blocks are open."""
 
 
 def restarts() -> bool:
     """Whether tests reload the state between steps (nightly depth)."""
-    return depth() is Depth.NIGHTLY and not _live
+    return depth() is Depth.NIGHTLY and not _live["open"]
 
 
 @contextmanager
@@ -35,12 +35,11 @@ def live_steps() -> Iterator[None]:
     ledger, so a property that already reloads at a generated point (and checks the reloaded
     state) takes its nightly search from more examples, not from reloading every step.
     """
-    global _live  # noqa: PLW0603
-    _live += 1
+    _live["open"] += 1
     try:
         yield
     finally:
-        _live -= 1
+        _live["open"] -= 1
 
 
 def unaddressed(record: RequestRecord) -> RequestRecord:
