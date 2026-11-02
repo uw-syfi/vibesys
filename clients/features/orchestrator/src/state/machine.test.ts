@@ -5,7 +5,9 @@ import {orchestratorMachine} from './machine.js';
 
 describe('orchestratorMachine', () => {
   test('start begins the work, and the deadline gives up on it', () => {
-    const working = getNextSnapshot(orchestratorMachine, getInitialSnapshot(orchestratorMachine), {type: 'start'});
+    const working = getNextSnapshot(orchestratorMachine, getInitialSnapshot(orchestratorMachine), {
+      type: 'start',
+    });
     expect(working.value).toBe('working');
     const timedOut = getNextSnapshot(orchestratorMachine, working, {
       type: 'xstate.after.deadline.orchestrator.working',
