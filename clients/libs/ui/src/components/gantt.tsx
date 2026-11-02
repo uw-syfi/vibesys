@@ -300,23 +300,26 @@ export function Gantt(props: {
   const strip = props.strip === true;
   const {rows, changeView} = props;
   const detail = props.detail ?? (rows.length > AGGREGATE_ABOVE ? 'aggregate' : 'full');
+  const selectedIndex = rows.findIndex(row => row.selected === true);
+  // A Gantt drawn with a row selected (opened beside what that row opened) opens at that row.
   const win = useWindowed({
     count: rows.length,
     keyOf: index => rows[index]?.id ?? String(index),
     estimate: SIZE['row-dense'],
     follow: false,
+    ...(selectedIndex < 0 ? {} : {startAt: selectedIndex}),
   });
   const playhead: StyleWithVars | null =
     props.playhead === undefined
       ? null
       : {'--gantt-from': percent(shareOf(props.playhead, view.from, view.to))};
-  const selectedIndex = rows.findIndex(row => row.selected === true);
   const stop = Math.max(0, selectedIndex);
   const drawn = stop >= win.first && stop < win.last;
   const focusStop = (event: FocusEvent<HTMLDivElement>): void => {
     if (event.target === event.currentTarget) win.reveal(stop, row => row.focus());
   };
   const keys = (event: KeyboardEvent<HTMLElement>): void => {
+    win.touched();
     navigationKeys(event, win, rows.length);
     if (changeView === undefined || event.defaultPrevented) return;
     const next = viewKey(event.key, view, whole);
@@ -345,6 +348,9 @@ export function Gantt(props: {
         tabIndex={drawn ? -1 : 0}
         onFocus={focusStop}
         onScroll={win.scrolled}
+        onWheel={win.touched}
+        onTouchMove={win.touched}
+        onPointerDown={win.touched}
         onKeyDown={keys}
       >
         <div aria-hidden="true" style={{height: win.before}} />

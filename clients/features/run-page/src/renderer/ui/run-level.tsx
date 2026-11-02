@@ -174,6 +174,17 @@ export function IdeasPane(props: {
   );
 }
 
+/** The Timeline's controls as the page keeps them, so every Timeline of the run shares them. */
+function timelineControls(
+  state: RunPageState,
+  dispatch: Dispatch,
+): Pick<TimelineViewProps, 'controls' | 'change'> {
+  return {
+    controls: state.timeline,
+    change: controls => dispatch({type: 'timeline-controls', controls}),
+  };
+}
+
 /** The Agents list's unfolded groups, kept by the page so every list of agents shares them. */
 export function agentFolds(
   state: RunPageState,
@@ -203,7 +214,12 @@ function runFace(
   }
   switch (mode) {
     case 'timeline': {
-      const view: TimelineViewProps = {...base, idea: null};
+      const view: TimelineViewProps = {
+        ...base,
+        idea: null,
+        selected: null,
+        ...timelineControls(state, dispatch),
+      };
       return {header: timelineHeader(view), body: <TimelineView {...view} />};
     }
     case 'agents': {
