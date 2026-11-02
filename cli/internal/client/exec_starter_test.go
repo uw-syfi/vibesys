@@ -38,6 +38,12 @@ func TestMain(m *testing.M) {
 		os.Exit(3)
 	case "hang":
 		select {}
+	case "taken":
+		ready := os.NewFile(runtimedir.ReadyFD, "ready")
+		_, _ = ready.Write([]byte{runtimedir.ReadyTaken})
+		os.Exit(0)
+	case "silent":
+		os.Exit(0)
 	}
 	os.Exit(m.Run())
 }
@@ -129,6 +135,23 @@ func TestExecStarterReportsADaemonThatFailsToStart(t *testing.T) {
 	var f *core.Failure
 	if !errors.As(err, &f) || f.Kind != core.FailureUnavailable || !strings.Contains(f.Message, "the disk is gone") {
 		t.Fatalf("Start = %v, want an unavailable failure carrying the daemon's own message", err)
+	}
+}
+
+// A daemon that found the machine taken says so, and that is not a failure to start.
+func TestExecStarterReportsADaemonThatFoundTheMachineTaken(t *testing.T) {
+	err := execStarter(t, daemontest.RuntimeDir(t), "taken").Start(ctxFor(t))
+	if !errors.Is(err, runtimedir.ErrDaemonRunning) {
+		t.Fatalf("Start = %v, want ErrDaemonRunning", err)
+	}
+}
+
+// A daemon that exits 0 without a word closes the pipe, which ends the wait for it.
+func TestExecStarterDoesNotHangOnADaemonThatSaysNothing(t *testing.T) {
+	err := execStarter(t, daemontest.RuntimeDir(t), "silent").Start(ctxFor(t))
+	var f *core.Failure
+	if !errors.As(err, &f) || f.Kind != core.FailureUnavailable {
+		t.Fatalf("Start = %v, want an unavailable failure", err)
 	}
 }
 

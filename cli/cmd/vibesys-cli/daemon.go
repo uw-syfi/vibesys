@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
@@ -147,9 +148,9 @@ func readyPipe() io.WriteCloser {
 	if f == nil {
 		return nil
 	}
-	// A descriptor that is not open is not a pipe: writing to it fails and the daemon stops. Probe
-	// it with a stat.
-	if _, err := f.Stat(); err != nil {
+	// Only a pipe is that pipe. The descriptor may not be open, and it may be open and something
+	// else, such as the Go runtime's own epoll descriptor, and writing to it would stop the daemon.
+	if info, err := f.Stat(); err != nil || info.Mode()&fs.ModeNamedPipe == 0 {
 		return nil
 	}
 	return f

@@ -53,6 +53,9 @@ func TestMain(m *testing.M) {
 		os.Exit(e2eDaemon())
 	case "supervisor":
 		os.Exit(e2eSupervisor())
+	case "ready":
+		fmt.Print(readyPipe() != nil)
+		os.Exit(0)
 	}
 	os.Exit(m.Run())
 }
@@ -118,6 +121,33 @@ func e2eSupervisor() int {
 		return 1
 	}
 	return 0
+}
+
+// A daemon started by hand has no readiness pipe, and the daemon must see that it has none: a nil
+// file in an interface is not a nil interface, and the write to it would stop the daemon.
+func TestAProcessStartedByHandHasNoReadinessPipe(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	defer writer.Close()
+	for want, files := range map[string][]*os.File{"false": nil, "true": {writer}} {
+		cmd := exec.Command(self, "-test.run=^$")
+		cmd.Env = append(os.Environ(), roleVar+"=ready")
+		cmd.ExtraFiles = files
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(out) != want {
+			t.Errorf("with %d extra files, a readiness pipe = %s, want %s", len(files), out, want)
+		}
+	}
 }
 
 // e2e is a user's machine: a repository, a runtime directory, and the processes that come and go.

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -298,6 +299,137 @@ func TestADaemonOlderThanTheClientIsReplaced(t *testing.T) {
 	}
 	if _, err := c.Status(ctxFor(t)); err != nil {
 		t.Fatalf("the replacement does not answer: %v", err)
+	}
+}
+
+// watchedRendezvous is the shipped rendezvous, and says who waited for a daemon to exit without the
+// right to start one: that client can wait on a new daemon forever, since nothing ends it.
+type watchedRendezvous struct {
+	client.Rendezvous
+
+	mu      sync.Mutex
+	holders int
+	waits   int
+	unheld  int
+}
+
+func (r *watchedRendezvous) HoldStart(ctx context.Context) (func() error, error) {
+	release, err := r.Rendezvous.HoldStart(ctx)
+	if err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.holders++
+	return func() error {
+		r.mu.Lock()
+		r.holders--
+		r.mu.Unlock()
+		return release()
+	}, nil
+}
+
+func (r *watchedRendezvous) AwaitExit(ctx context.Context) error {
+	r.mu.Lock()
+	r.waits++
+	if r.holders == 0 {
+		r.unheld++
+	}
+	r.mu.Unlock()
+	return r.Rendezvous.AwaitExit(ctx)
+}
+
+// Replacing a daemon holds the right to start from the first look to the new daemon, so a client
+// never waits for the end of a daemon another client just started.
+func TestReplacingADaemonHoldsTheRightToStartThroughout(t *testing.T) {
+	s := newSetup(t)
+	serveStub(t, s.dir, cliv1.Compatibility_COMPATIBILITY_DAEMON_TOO_OLD)
+	watched := &watchedRendezvous{Rendezvous: client.LocalRendezvous{Dir: s.dir}}
+	opts := s.options(true)
+	opts.Rendezvous = watched
+	c, err := client.Connect(ctxFor(t), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if watched.waits == 0 {
+		t.Fatal("the old daemon's exit was not waited for, so this test tests nothing")
+	}
+	if watched.unheld != 0 {
+		t.Fatalf("%d of %d waits for a daemon's exit did not hold the right to start", watched.unheld, watched.waits)
+	}
+}
+
+// noAnswer is a machine held by a daemon that does not answer and does not go: every wait for its
+// end runs until it is told to stop waiting.
+type noAnswer struct{ starts int }
+
+func (*noAnswer) Dial(context.Context) (net.Conn, error) { return nil, syscall.ECONNREFUSED }
+
+func (*noAnswer) HoldStart(context.Context) (func() error, error) {
+	return func() error { return nil }, nil
+}
+
+func (*noAnswer) AwaitExit(ctx context.Context) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (n *noAnswer) Start(context.Context) error {
+	n.starts++
+	return runtimedir.ErrDaemonRunning
+}
+
+// A client that cannot start a daemon and cannot reach the one that is there ends in an error.
+func TestADaemonThatNeitherAnswersNorGoesEndsInAnError(t *testing.T) {
+	stuck := &noAnswer{}
+	_, err := client.Connect(ctxFor(t), client.Options{
+		Rendezvous: stuck, Starter: stuck, Version: "test", Timers: clock.Immediate{Longest: time.Hour},
+	})
+	var f *core.Failure
+	if !errors.As(err, &f) || f.Kind != core.FailureUnavailable {
+		t.Fatalf("Connect = %v, want an unavailable failure", err)
+	}
+	if stuck.starts < 2 {
+		t.Fatalf("%d starts: the client gave up without looking again", stuck.starts)
+	}
+}
+
+// lostRace is a start that lost to another client: its daemon exits 0 with no ready byte for the
+// client, because the other client's daemon has the machine.
+type lostRace struct {
+	winner client.Starter
+	starts int
+}
+
+func (l *lostRace) Start(ctx context.Context) error {
+	l.starts++
+	if l.starts == 1 {
+		if err := l.winner.Start(ctx); err != nil {
+			return err
+		}
+		return runtimedir.ErrDaemonRunning
+	}
+	return errors.New("the daemon that won was started over")
+}
+
+// A client that lost the race to start a daemon uses the one that won.
+func TestAStartThatLostTheRaceUsesTheDaemonThatWon(t *testing.T) {
+	s := newSetup(t)
+	race := &lostRace{winner: s.starter}
+	opts := s.options(true)
+	opts.Starter = race
+	opts.Timers = clock.Immediate{Longest: time.Hour}
+	c, err := client.Connect(ctxFor(t), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if _, err := c.Status(ctxFor(t)); err != nil {
+		t.Fatalf("the daemon that won does not answer: %v", err)
+	}
+	if race.starts != 1 {
+		t.Fatalf("%d starts, want 1", race.starts)
 	}
 }
 
