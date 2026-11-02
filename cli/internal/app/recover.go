@@ -79,7 +79,7 @@ func (a *App) Start(ctx context.Context) error {
 		case known && !slices.Contains(scopes, scope):
 			// The store is not in the index, so nothing was recorded for it, or the index lost it.
 			// Reading it says which.
-			found.Finding = a.lookInStore(ctx, ref, scope)
+			found.Finding = a.lookInStore(ctx, ref, scope, found.Supervisor)
 			if _, unread := found.Finding.(lifecycle.StoreAway); unread {
 				a.markUnread(scope, errNoRead)
 				away[ref.Store] = true
@@ -129,13 +129,18 @@ func (a *App) recoverScope(ctx context.Context, scope Scope, runOf func(lifecycl
 	if err != nil {
 		return err
 	}
+	given, err := a.cfg.Stores.GivenUp(ctx, scope)
+	if err != nil {
+		return err
+	}
 	for _, job := range jobs {
 		ref := lifecycle.Ref{Store: storeIDOf(scope), Job: job.ID}
 		run := runOf(ref)
+		presence := a.presenceOf(run)
 		a.post(message{
 			event: lifecycle.Recovered{
-				Ref: ref, Finding: lifecycle.JobIn{State: job.State, SubmittedAt: job.SubmittedAt},
-				Supervisor: a.presenceOf(run), At: a.now(),
+				Ref: ref, Finding: a.jobIn(ctx, scope, job, presence, given),
+				Supervisor: presence, At: a.now(),
 			},
 			handle: handleOf(run), scope: &scope,
 		})
@@ -212,8 +217,9 @@ func (a *App) sweepStore(ctx context.Context, scope Scope) {
 			a.post(message{event: lifecycle.Admitted{Ref: ref, SubmittedAt: job.SubmittedAt}, scope: &scope})
 		case !held[ref]:
 			run := a.look(ctx, ref)
+			presence := a.presenceOf(run)
 			a.post(message{
-				event:  lifecycle.Recovered{Ref: ref, Finding: a.lookInStore(ctx, ref, scope), Supervisor: a.presenceOf(run), At: a.now()},
+				event:  lifecycle.Recovered{Ref: ref, Finding: a.lookInStore(ctx, ref, scope, presence), Supervisor: presence, At: a.now()},
 				handle: handleOf(run), scope: &scope,
 			})
 		}

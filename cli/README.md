@@ -290,6 +290,14 @@ Recovery is the daemon's start, with no separate path:
   A run that is parked or finished runs nothing and holds up no other repository. A command that
   may still run holds the machine for as long as its job may run and no longer. A `wait` on a job
   held up this way ends with why (exit `4`) rather than waiting in silence.
+- A running job with no sign of a run here, or with a run this build cannot use, is held in doubt,
+  and so is every job of its store after it: no sign of a run is no proof that the command ended,
+  since it may run on another machine that has the repository on a shared disk. When the place that
+  ran it is gone for good, remove the store's owner record (`.vibesys-state/<task>/.owner` in the
+  repository), as the daemon's message and a refused start both say. The next daemon to open the
+  store gives up the runs of the jobs it has running: one that no run of can be found here is
+  `lost`, at once with no run here and after its time limit with one this build cannot use. A run of
+  it that the daemon does find is its own, and the job goes on.
 - A repository that is gone for good is given up with `daemon forget`.
 
 A store that goes away while the daemon runs stops no job: the supervisor's spool keeps the output,

@@ -163,3 +163,12 @@ func lostJob(job core.JobID, at time.Time) Settlement {
 		Log:        "vibesys-cli: the job's supervisor went away, so the job is lost and is not retried",
 	}
 }
+
+// givenUpJob is a running job whose store gave up the place that ran it, with nothing here that can
+// be running its command.
+func givenUpJob(job core.JobID, at time.Time) Settlement {
+	return Settlement{
+		Transition: core.Transition{Job: job, From: core.JobRunning, To: core.JobLost, At: at},
+		Log:        "vibesys-cli: the store's owner record was removed, which gives up the place that ran the job, and nothing here runs it, so the job is lost and is not retried",
+	}
+}

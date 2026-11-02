@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
@@ -632,7 +633,7 @@ func (a *App) reexamine(ctx context.Context, ref lifecycle.Ref, scope Scope, kno
 	found := lifecycle.Recovered{Ref: ref, Finding: lifecycle.StoreAway{}, Supervisor: a.presenceOf(run)}
 	m := message{handle: handleOf(run)}
 	if known {
-		found.Finding = a.lookInStore(ctx, ref, scope)
+		found.Finding = a.lookInStore(ctx, ref, scope, found.Supervisor)
 		m.scope = &scope
 	}
 	found.At = a.now()
@@ -694,9 +695,9 @@ func scopeOfRun(run supervisor.Run) (Scope, bool) {
 	return Scope{Repository: l.Repository, Task: l.Task}, true
 }
 
-// lookInStore says what a store has of a job. It makes nothing: a store that is not there is away,
-// as this is only asked of a job that had one.
-func (a *App) lookInStore(ctx context.Context, ref lifecycle.Ref, scope Scope) lifecycle.Finding {
+// lookInStore says what a store has of a job, whose run was found as presence. It makes nothing: a
+// store that is not there is away, as this is only asked of a job that had one.
+func (a *App) lookInStore(ctx context.Context, ref lifecycle.Ref, scope Scope, presence lifecycle.Presence) lifecycle.Finding {
 	st, err := a.cfg.Stores.Find(ctx, scope)
 	if err != nil {
 		return lifecycle.StoreAway{}
@@ -705,11 +706,36 @@ func (a *App) lookInStore(ctx context.Context, ref lifecycle.Ref, scope Scope) l
 	var f *core.Failure
 	switch {
 	case err == nil:
-		return lifecycle.JobIn{State: job.State, SubmittedAt: job.SubmittedAt}
+		var given []core.JobID
+		if job.State == core.JobRunning {
+			// A store that cannot say what it gave up gives up nothing, which holds the job in doubt.
+			if given, err = a.cfg.Stores.GivenUp(ctx, scope); err != nil {
+				a.cfg.Logf("job %s: reading which jobs its store gave up: %v", ref, err)
+			}
+		}
+		return a.jobIn(ctx, scope, job, presence, given)
 	case errors.As(err, &f) && f.Kind == core.FailureNotFound && !errors.Is(err, store.ErrAway):
 		return lifecycle.NoSuchJob{}
 	}
 	return lifecycle.StoreAway{}
+}
+
+// jobIn is what a store has of a job, whose run was found as presence, given the jobs the store gave
+// up. A running job the user gave up is given up only when no run of it is found here: a run found
+// here is this daemon's, so the job is taken back first.
+func (a *App) jobIn(ctx context.Context, scope Scope, job core.Job, presence lifecycle.Presence, given []core.JobID) lifecycle.JobIn {
+	in := lifecycle.JobIn{State: job.State, SubmittedAt: job.SubmittedAt}
+	if job.State != core.JobRunning || !slices.Contains(given, job.ID) {
+		return in
+	}
+	if _, here := presence.(lifecycle.RunAlive); here {
+		if err := a.retry(ctx, func(ctx context.Context) error { return a.cfg.Stores.Reclaim(ctx, scope, job.ID) }); err != nil {
+			a.cfg.Logf("job %s: a run of it is here, and its store still has it given up: %v", job.ID, err)
+		}
+		return in
+	}
+	in.GivenUp = true
+	return in
 }
 
 // logChunk is how much of a job's output is read at a time.

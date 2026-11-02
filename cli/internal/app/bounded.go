@@ -82,6 +82,15 @@ func (s boundedStores) Forget(ctx context.Context, scope Scope) error {
 	return err
 }
 
+func (s boundedStores) GivenUp(ctx context.Context, scope Scope) ([]core.JobID, error) {
+	return bounded(ctx, s.timers, s.limit, func(ctx context.Context) ([]core.JobID, error) { return s.inner.GivenUp(ctx, scope) })
+}
+
+func (s boundedStores) Reclaim(ctx context.Context, scope Scope, job core.JobID) error {
+	_, err := bounded(ctx, s.timers, s.limit, func(ctx context.Context) (struct{}, error) { return struct{}{}, s.inner.Reclaim(ctx, scope, job) })
+	return err
+}
+
 // Close is not bounded, as giving a store up only drops a lock.
 func (s boundedStores) Close() error { return s.inner.Close() }
 

@@ -107,6 +107,21 @@ func (s *Survivors) Wipe(ref lifecycle.Ref) bool {
 	return true
 }
 
+// Vanish kills the supervisor of a job and takes every trace of its run away, as a machine gone for
+// good does to the daemon of another place, which cannot see that machine. It returns false for a
+// job with no run.
+func (s *Survivors) Vanish(ref lifecycle.Ref) bool {
+	s.mu.Lock()
+	proc, ok := s.runs[ref]
+	delete(s.runs, ref)
+	delete(s.wiped, ref)
+	s.mu.Unlock()
+	if ok {
+		proc.kill()
+	}
+	return ok
+}
+
 // Close ends every command still running, so a test leaves nothing behind.
 func (s *Survivors) Close() {
 	// A copy, not the map: a daemon that is still settling a job forgets its run during this.

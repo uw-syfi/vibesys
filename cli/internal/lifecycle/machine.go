@@ -184,10 +184,13 @@ type StoreAway struct{}
 // NoSuchJob says the store has no such job, or none that needs the daemon.
 type NoSuchJob struct{}
 
-// JobIn says the store has the job, in State.
+// JobIn says the store has the job, in State. GivenUp says the store has the job running and was
+// taken over after its owner record was removed, which is how a user says that the place that ran
+// the job is gone for good: then a run of it that cannot be found or used from here is no run.
 type JobIn struct {
 	State       core.JobState
 	SubmittedAt time.Time
+	GivenUp     bool
 }
 
 func (StoreAway) finding() {}
@@ -661,15 +664,32 @@ func (s *State) recoverRunning(e Recovered, kept entry) []Request {
 		return []Request{Adopt{Ref: e.Ref, CancelFirst: cur.cancelAsked, CancelReason: cur.cancelReason}}
 	case RunDead:
 		if !p.Proof.Valid() {
-			return s.inDoubt(e, kept)
+			return s.doubtUnlessGivenUp(e, kept)
 		}
 		// Its supervisor is dead, so the command ended with it, and the job is lost and never
 		// retried.
 		s.place(e, kept, PhaseRunning)
 		return s.settle(e.Ref, lostJob(e.Ref.Job, e.At))
 	default:
-		return s.inDoubt(e, kept)
+		return s.doubtUnlessGivenUp(e, kept)
 	}
+}
+
+// doubtUnlessGivenUp keeps a running job the machine cannot judge in doubt, unless its store gave
+// up the place that ran it. Such a job is lost as soon as nothing found of it here can be running
+// its command: at once with no run here, and once its limit passed with one this build cannot use.
+// The user's word is the proof for the other place, and the limit is the proof for this one. A
+// limit found by an earlier look stands, as a run seen here may be out of sight now.
+func (s *State) doubtUnlessGivenUp(e Recovered, kept entry) []Request {
+	if f, ok := e.Finding.(JobIn); ok && f.GivenUp {
+		probe := kept
+		probe.judgeHold(e.Supervisor, e.At)
+		if !probe.holds && (probe.holdUntil.IsZero() || !e.At.Before(probe.holdUntil)) {
+			s.place(e, kept, PhaseRunning)
+			return s.settle(e.Ref, givenUpJob(e.Ref.Job, e.At))
+		}
+	}
+	return s.inDoubt(e, kept)
 }
 
 // recoverEnded handles a job that needs the daemon no more: a run left over holds nothing of value,
@@ -750,9 +770,9 @@ func doubtOf(e Recovered) string {
 		return "its store cannot be read"
 	}
 	if _, none := e.Supervisor.(RunNone); none {
-		return "the store has it running and there is no sign of a run"
+		return "the store has it running and there is no sign of a run here: if the place that ran it is gone for good, remove the store's owner record and the job is marked lost"
 	}
-	return "its supervisor gives no answer this build can use, and may still run"
+	return "its supervisor gives no answer this build can use, and may still run: if the place that ran it is gone for good, remove the store's owner record and the job is marked lost once its time limit has passed"
 }
 
 // judgeHold decides whether a job in doubt holds the machine, from what was found of its

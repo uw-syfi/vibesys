@@ -3,6 +3,7 @@ package filestore_test
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -277,6 +278,7 @@ func FuzzOwnerRecord(f *testing.F) {
 	f.Add([]byte(`{"format":1,"generation":18446744073709551615}`))
 	f.Add([]byte(`{"format":2}`))
 	f.Add([]byte(`[]`))
+	f.Add([]byte(`{"format":1,"generation":3,"host":"host-a","dir":"/run/user/1","pid":10,"given_up":["j1","j2"]}`))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		mem := fsys.NewMemFS()
 		seed := mustOpenAs(t, mem, daemonA)
@@ -294,4 +296,51 @@ func FuzzOwnerRecord(f *testing.F) {
 		}
 		submitTo(t, s, "k1")
 	})
+}
+
+// Removing the record gives up the runs of the jobs the store has running, and nothing else: the
+// next owner, from any place, names them; every later owner keeps the ones still running, through a
+// crash; a job that ends or is taken back stops being one; and a store whose record was never
+// removed gives up nothing.
+func TestRemovingTheRecordGivesUpTheRunningJobsUntilTheyEndOrAreTakenBack(t *testing.T) {
+	for _, next := range []filestore.Owner{daemonA, daemonB, daemonC} {
+		t.Run(fmt.Sprintf("%+v", next), func(t *testing.T) {
+			mem := fsys.NewMemFS()
+			first := mustOpenAs(t, mem, daemonA)
+			queued := submitTo(t, first, "k1")
+			running := []core.Job{submitTo(t, first, "k2"), submitTo(t, first, "k3"), submitTo(t, first, "k4")}
+			for _, j := range running {
+				start(t, first, j)
+			}
+			if got := first.GivenUp(); len(got) != 0 {
+				t.Fatalf("given up with the record in place: %v", got)
+			}
+			image := mem.CrashImage(false)
+			mustRemove(t, image, ownerRecord)
+
+			taken := mustOpenAs(t, image, next)
+			want := []core.JobID{running[0].ID, running[1].ID, running[2].ID}
+			if got := taken.GivenUp(); !slices.Equal(got, want) {
+				t.Fatalf("given up = %v, want the running jobs %v and not the queued %s", got, want, queued.ID)
+			}
+			if _, err := taken.Transition(t.Context(), core.Transition{Job: running[0].ID, From: core.JobRunning, To: core.JobLost, At: at(3)}); err != nil {
+				t.Fatal(err)
+			}
+			if err := taken.Reclaim(running[1].ID); err != nil {
+				t.Fatal(err)
+			}
+			if err := taken.Reclaim(queued.ID); err != nil {
+				t.Fatalf("Reclaim of a job not given up: %v", err)
+			}
+			if got := taken.GivenUp(); !slices.Equal(got, []core.JobID{running[0].ID, running[2].ID}) {
+				t.Fatalf("given up after a reclaim = %v, want all but %s, which was taken back", got, running[1].ID)
+			}
+			submitTo(t, taken, "k5") // The record Reclaim wrote is the owner's own.
+
+			restarted := mustOpenAs(t, image.CrashImage(false), filestore.Owner{Host: next.Host, Dir: next.Dir, PID: 99})
+			if got := restarted.GivenUp(); !slices.Equal(got, []core.JobID{running[2].ID}) {
+				t.Fatalf("given up after a crash = %v, want only %s, which runs and was not taken back", got, running[2].ID)
+			}
+		})
+	}
 }

@@ -65,6 +65,15 @@
 // record names another place is refused, because opening it would mark a live job lost. When that
 // place is gone for good, removing the record is the way on, and the error says so.
 //
+// Removing the record gives up the runs of the jobs the store has running, and that is all it gives
+// up. The next Open finds running jobs and no record, and writes those jobs into its record as given
+// up (Store.GivenUp); every later Open keeps the ones still running, so a crash does not take the
+// user's word back. A given-up job that no run of can be found or used by the new owner is lost once
+// none of it here can be running its command: the user's word is the proof for the place given up,
+// and a command's time limit the proof for this one. A run of it the new owner finds is its own, and
+// is taken back (Store.Reclaim). So a record deleted by accident under a live owner loses none of
+// that owner's jobs whose runs it can still find.
+//
 // The fence. A lock can stop working under its holder: an NFS server can lose it while the client
 // is cut off, a mount can hide it from other machines without any sign, and anyone can delete the
 // file. So every open writes .owner again, under a new generation, and the owner reads the file

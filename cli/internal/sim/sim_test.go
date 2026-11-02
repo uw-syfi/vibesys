@@ -399,6 +399,13 @@ func (w *world) actions() []option {
 				w.killed[r] = true
 			}
 		})
+		add("the place of "+r.String()+" is gone for good", func() {
+			if w.survivors.Vanish(r) {
+				w.mu.Lock()
+				w.killed[r], w.vanished[r] = true, true
+				w.mu.Unlock()
+			}
+		})
 	}
 	if p.outage && outages {
 		add("flip the stores", func() { w.down = !w.down })
@@ -506,7 +513,40 @@ func (w *world) moves(heal bool) []option {
 	if at, ok := w.timers.next(); ok && (!heal || len(out) == 0) && (!w.profile.lost || calls == 0) {
 		out = append(out, option{fmt.Sprintf("time moves to %s", at), func() { w.timers.advance(at) }})
 	}
+	if heal {
+		for _, scope := range w.toGiveUp() {
+			out = append(out, option{"the operator removes the owner record of " + scope.Repository + " " + scope.Task, func() { w.giveUp(scope) }})
+		}
+	}
 	return out
+}
+
+// toGiveUp is the stores whose owner record an operator removes, as the daemon tells them to: a job
+// of each runs in it, whose place is gone for good, and was not given up yet.
+func (w *world) toGiveUp() []app.Scope {
+	var out []app.Scope
+	for _, l := range w.jobs() {
+		ref := w.refIn(l.scope, l.job.ID)
+		w.mu.Lock()
+		due := l.job.State == core.JobRunning && w.vanished[ref] && !slices.Contains(w.givenUp[l.scope], l.job.ID)
+		w.mu.Unlock()
+		if due && !slices.Contains(out, l.scope) {
+			out = append(out, l.scope)
+		}
+	}
+	return out
+}
+
+// giveUp is the next owner of a store finding its record removed: every job it has running is
+// given up.
+func (w *world) giveUp(scope app.Scope) {
+	for _, l := range w.jobs() {
+		w.mu.Lock()
+		if l.scope == scope && l.job.State == core.JobRunning && !slices.Contains(w.givenUp[scope], l.job.ID) {
+			w.givenUp[scope] = append(w.givenUp[scope], l.job.ID)
+		}
+		w.mu.Unlock()
+	}
 }
 
 // check says what must hold after every step.

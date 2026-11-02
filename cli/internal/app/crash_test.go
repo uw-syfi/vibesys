@@ -89,6 +89,20 @@ func (s crashStores) Forget(ctx context.Context, scope app.Scope) error {
 	return s.inner.Forget(ctx, scope)
 }
 
+func (s crashStores) GivenUp(ctx context.Context, scope app.Scope) ([]core.JobID, error) {
+	if err := s.c.read(); err != nil {
+		return nil, err
+	}
+	return s.inner.GivenUp(ctx, scope)
+}
+
+func (s crashStores) Reclaim(ctx context.Context, scope app.Scope, job core.JobID) error {
+	if err := s.c.step(); err != nil {
+		return err
+	}
+	return s.inner.Reclaim(ctx, scope, job)
+}
+
 func (s crashStores) Close() error { return s.inner.Close() }
 
 type crashStore struct {
