@@ -1454,8 +1454,8 @@ def test_duplicate_continuation_identity_rejects_changed_immutable_payload(field
 
 
 @pytest.mark.parametrize("phase", tuple(core.AttemptPhase))
-@settings(max_examples=examples(pr=3, nightly=100))
-@given(run_status=st.sampled_from(tuple(core.RunStatus)), closing=st.booleans())
+@pytest.mark.parametrize("run_status", tuple(core.RunStatus))
+@pytest.mark.parametrize("closing", [False, True])
 def test_current_live_owner_guard_holds_at_admission_and_delayed_authorization(
     *, phase: core.AttemptPhase, run_status: core.RunStatus, closing: bool
 ) -> None:
@@ -1478,8 +1478,13 @@ def test_current_live_owner_guard_holds_at_admission_and_delayed_authorization(
             "run": state.run.model_copy(update={"status": run_status}),
         }
     )
-    # A paused run carries on with the work it admitted: a wait is recorded and resumed.
-    carries_on = run_status in (core.RunStatus.RUNNING, core.RunStatus.PAUSED)
+    # A paused run, and one draining an operator's pause, carry on with the work they admitted:
+    # a wait is recorded and resumed.
+    carries_on = run_status in (
+        core.RunStatus.RUNNING,
+        core.RunStatus.PAUSED,
+        core.RunStatus.DRAINING,
+    )
     permitted = phase == core.AttemptPhase.ACTIVE and carries_on and not closing
     if permitted:
         result = persisted_step(state, core.TurnSuspended(continuation=continuation))

@@ -520,8 +520,14 @@ class _Driver[S: StrategyState]:
     def authorize_round(self) -> list[Request]:
         """Authorize every prepared request core lets go now, in ledger order."""
         batch: list[Request] = []
-        for record in self.trace.core.records.records:
-            if record.phase is not RequestPhase.PREPARED:
+        for prepared in self.trace.core.records.records:
+            if prepared.phase is not RequestPhase.PREPARED:
+                continue
+            # An earlier authorization in this round can end a later request (a close settles the
+            # inspection that waited on it): read it as the ledger holds it now.
+            at = self.trace.core.records.positions(prepared.request_id)
+            record = self.trace.core.records.records[at[0]] if at else None
+            if record is None or record.phase is not RequestPhase.PREPARED:
                 continue
             try:
                 self.consume(DispatchAuthorized(request_id=record.request_id))
