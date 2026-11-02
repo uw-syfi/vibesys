@@ -98,8 +98,8 @@ data"; a new subsystem writes the full sketch first. For 1 and 2 read
     when you add or change a call across one, or an agent tool server. In
     short: agent output is untrusted input; an option the run does not offer is
     absent from the schema; every call has a deadline derived from the
-    caller's limit; failures are typed, idempotent, and retried a bounded
-    number of times.
+    caller's limit; failures are typed; operations are idempotent; retries
+    are bounded.
 11. **Fit the change to the design.** Make the change as if the design had
     anticipated it, not the smallest diff that works. Prepare first: refactor
     to make the change easy, then make it. Never extend an existing violating
