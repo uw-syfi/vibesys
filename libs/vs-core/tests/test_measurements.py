@@ -63,6 +63,19 @@ def roundtrip(
     ).core
 
 
+_last_reload: list[tuple[core.CoreState, core.OperationRegistry | None, core.CoreState]] = []
+"""The state last reloaded, its codec and its reloaded copy: a run's next step starts from it."""
+
+
+def _reloaded(state: core.CoreState, codec: core.OperationRegistry | None) -> core.CoreState:
+    """``roundtrip(state)``, once for a state that a step's check and the next step both reload."""
+    if _last_reload and _last_reload[0][0] is state and _last_reload[0][1] is codec:
+        return _last_reload[0][2]
+    again = roundtrip(state, codec=codec)
+    _last_reload[:] = [(state, codec, again)]
+    return again
+
+
 def transition(
     state: core.CoreState,
     event: core.CoreEvent,
@@ -74,8 +87,8 @@ def transition(
         return core.step(state, event, reducers=reducers)
     before = state.model_dump_json()
     result = core.step(state, event, reducers=reducers)
-    assert result == core.step(roundtrip(state, codec=codec), event, reducers=reducers)
-    assert roundtrip(result.state, codec=codec) == result.state
+    assert result == core.step(_reloaded(state, codec), event, reducers=reducers)
+    assert _reloaded(result.state, codec) == result.state
     assert state.model_dump_json() == before
     assert result.state.scheduling == state.scheduling
     assert result.state.sessions == state.sessions

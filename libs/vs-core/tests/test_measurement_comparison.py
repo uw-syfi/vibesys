@@ -19,6 +19,7 @@ from hypothesis import strategies as st
 import vs_core.api as core
 from vs_sim.api.testing import examples
 
+from .restart import live_steps
 from .test_measurement_reuse import (
     Variant,
     measured,
@@ -891,31 +892,34 @@ def test_the_official_record_states_the_value_its_comparison_compared(
     first run's value while the comparison stated the mean, so the agent saw one number and the
     leaderboard ranked another. Each run's own reading stays in its sample.
     """
-    lab = Lab.of("a")
-    for number, value in enumerate(values):
-        lab.call("a", f"c{number}", "input-1")
-        lab.measure({"input-1": value, "base": 100.0})
-    if reload:
-        lab.state = reloaded(lab.state)
-    check = final_check(lab, "a", f"c{len(values) - 1}", "input-1")
-    assert check.request_id is not None
-    lab.ended.add(check.request_id.root)
-    if check.reuses is None:
-        lab.state = ended_with(lab.state, check, official)
-    else:
-        source = next(s for s in lab.state.evaluation.samples if s.run == check.reuses)
-        lab.state = ended_with(lab.state, check, source.reading.value, reused=check.reuses)
-    stated = official_reading(lab, check)
-    assert stated.value == lab.comparisons()[-1].candidate_value
-    (ranked,) = (
-        item
-        for item in lab.state.evaluation.measurements_of(revision(f"c{len(values) - 1}"))
-        if item.purpose == "official" and item.kind is core.EvidenceKind.BENCHMARK
-    )
-    assert ranked.reading == stated
-    runs = [s.reading.value for s in lab.state.evaluation.samples if s.measured_input == "input-1"]
-    assert runs == [*values, *([official] if check.reuses is None else [])]
-    assert reloaded(lab.state) == lab.state
+    with live_steps():  # the reload is generated
+        lab = Lab.of("a")
+        for number, value in enumerate(values):
+            lab.call("a", f"c{number}", "input-1")
+            lab.measure({"input-1": value, "base": 100.0})
+        if reload:
+            lab.state = reloaded(lab.state)
+        check = final_check(lab, "a", f"c{len(values) - 1}", "input-1")
+        assert check.request_id is not None
+        lab.ended.add(check.request_id.root)
+        if check.reuses is None:
+            lab.state = ended_with(lab.state, check, official)
+        else:
+            source = next(s for s in lab.state.evaluation.samples if s.run == check.reuses)
+            lab.state = ended_with(lab.state, check, source.reading.value, reused=check.reuses)
+        stated = official_reading(lab, check)
+        assert stated.value == lab.comparisons()[-1].candidate_value
+        (ranked,) = (
+            item
+            for item in lab.state.evaluation.measurements_of(revision(f"c{len(values) - 1}"))
+            if item.purpose == "official" and item.kind is core.EvidenceKind.BENCHMARK
+        )
+        assert ranked.reading == stated
+        runs = [
+            s.reading.value for s in lab.state.evaluation.samples if s.measured_input == "input-1"
+        ]
+        assert runs == [*values, *([official] if check.reuses is None else [])]
+        assert reloaded(lab.state) == lab.state
 
 
 @pytest.mark.regression
@@ -1043,14 +1047,29 @@ def fresh_base_samples(lab: Lab) -> list[core.Sample]:
     ]
 
 
-def base_budget_spent(lab: Lab, name: str) -> bool:
-    """Whether the attempt's submission budget for the base's identity has no run left."""
-    return any(
-        b.identity.purpose == "baseline"
-        and b.scope == lab.scopes[name]
-        and len(b.receipts) >= min(b.limit, core.MAX_SUBMISSIONS_PER_MEASUREMENT)
-        for b in lab.state.evaluation.submission_budgets
-    )
+def base_budget_spent(lab: Lab, name: str, candidate_input: str) -> bool:
+    """Whether core may take no further run of the base for ``candidate_input``'s comparison.
+
+    The attempt's budget for the base's identity holds its limit, or the comparison is already
+    charged ``MAX_SUBMISSIONS_PER_MEASUREMENT`` base runs that gave a sample: its own, and those
+    nobody asked for it alone (core's runs for another input are charged to that input).
+    """
+    evaluation = lab.state.evaluation
+    others = {r.request_id for r in evaluation.core_runs if r.candidate_input != candidate_input}
+    sampled = {s.run for s in evaluation.samples}
+    for budget in evaluation.submission_budgets:
+        if budget.identity.purpose != "baseline" or budget.scope != lab.scopes[name]:
+            continue
+        charged = sum(
+            1
+            for receipt in budget.receipts
+            if isinstance(receipt, core.PreparedSubmissionReceipt)
+            and receipt.request_id in sampled
+            and receipt.request_id not in others
+        )
+        if len(budget.receipts) >= budget.limit or charged >= core.MAX_SUBMISSIONS_PER_MEASUREMENT:
+            return True
+    return False
 
 
 def base_running(lab: Lab) -> bool:
@@ -1079,6 +1098,16 @@ def base_running(lab: Lab) -> bool:
 )
 @example(calls=[("a", 0, 1.01, 0.0)], reload_at=7, floor=FLOOR)
 @example(calls=[("a", 0, 1.01, 0.0), ("a", 0, 1.0, 1.0)], reload_at=1, floor=0.0)
+@example(  # a comparison is charged at most MAX_SUBMISSIONS_PER_MEASUREMENT base runs
+    calls=[("b", 0, 0.3, 0.0)] + [("b", 0, 0.3, STALENESS + 1.0)] * 3,
+    reload_at=0,
+    floor=0.0,
+)
+@example(  # the base's budget holds MAX_CORE_BASE_RUNS, more than a candidate input's
+    calls=[("a", 0, 0.3, 0.0), ("a", 2, 0.3, STALENESS + 1.0), ("a", 0, 0.3, STALENESS + 1.0)],
+    reload_at=0,
+    floor=0.0,
+)
 def test_the_base_is_measured_once_per_input_and_again_only_on_staleness_or_a_close_call(
     calls: list[tuple[str, int, float, float]], reload_at: int, floor: float
 ) -> None:
@@ -1091,29 +1120,30 @@ def test_the_base_is_measured_once_per_input_and_again_only_on_staleness_or_a_cl
     floor (one extra run) or ``MIN_SAMPLES_WITHOUT_FLOOR`` without one (two extra runs). A
     reload loses nothing.
     """
-    lab = Lab.of("a", "b", floor=floor)
-    most = core.BASE_MAX_SAMPLES if floor else core.MIN_SAMPLES_WITHOUT_FLOOR
-    values: dict[str, float] = {"base": 100.0}
-    for number, (name, input_number, factor, wait) in enumerate(calls):
-        if number == reload_at:
-            lab.state = reloaded(lab.state)
-        lab.advance(wait)
-        key = f"input-{input_number}"
-        values[key] = 100.0 * factor
-        held, running, before = fresh_base_samples(lab), base_running(lab), len(lab.baselines())
-        spent = base_budget_spent(lab, name)
-        lab.call(name, f"c{number}", key)
-        allocated = len(lab.baselines()) - before
-        assert allocated == (0 if held or running or spent else 1), (held, running, spent)
-        logged = len(lab.comparisons())
-        after_call = len(lab.baselines())
-        lab.measure(values)
-        remeasures = len(lab.baselines()) - after_call
-        if remeasures:
-            assert any(core.close_call(c) for c in lab.comparisons()[logged:]), (
-                "a base run beyond the first is earned by a close call"
-            )
-        assert len(fresh_base_samples(lab)) <= most
+    with live_steps():
+        lab = Lab.of("a", "b", floor=floor)
+        most = core.BASE_MAX_SAMPLES if floor else core.MIN_SAMPLES_WITHOUT_FLOOR
+        values: dict[str, float] = {"base": 100.0}
+        for number, (name, input_number, factor, wait) in enumerate(calls):
+            if number == reload_at:
+                lab.state = reloaded(lab.state)
+            lab.advance(wait)
+            key = f"input-{input_number}"
+            values[key] = 100.0 * factor
+            held, running, before = fresh_base_samples(lab), base_running(lab), len(lab.baselines())
+            spent = base_budget_spent(lab, name, key)
+            lab.call(name, f"c{number}", key)
+            allocated = len(lab.baselines()) - before
+            assert allocated == (0 if held or running or spent else 1), (held, running, spent)
+            logged = len(lab.comparisons())
+            after_call = len(lab.baselines())
+            lab.measure(values)
+            remeasures = len(lab.baselines()) - after_call
+            if remeasures:
+                assert any(core.close_call(c) for c in lab.comparisons()[logged:]), (
+                    "a base run beyond the first is earned by a close call"
+                )
+            assert len(fresh_base_samples(lab)) <= most
     assert reloaded(lab.state) == lab.state
 
 
@@ -1133,9 +1163,10 @@ def test_a_comparison_is_the_aggregate_of_every_sample_in_any_order(
     depends on which run came first or last, so no run can be picked or favoured.
     """
     lab = Lab.of("a")
-    for number, value in enumerate(values):
-        lab.call("a", f"c{number}", "input-1")
-        lab.measure({"input-1": value, "base": base})
+    with live_steps():  # the property is of `compare`'s arithmetic, not of the codec
+        for number, value in enumerate(values):
+            lab.call("a", f"c{number}", "input-1")
+            lab.measure({"input-1": value, "base": base})
     held = lab.comparisons()[-1]
     assert held.candidate_samples == len(values)
     assert math.isclose(held.candidate_value, sum(values) / len(values))
