@@ -39,9 +39,11 @@ func (c Checkouts) Checkout(ctx context.Context, repository string, commit core.
 	var once sync.Once
 	remove := func() { once.Do(func() { _ = os.RemoveAll(parent) }) }
 	// The clone is one level below the directory made here, so that a cancel in the middle of the
-	// clone leaves only a directory that remove clears.
+	// clone leaves only a directory that remove clears. It does not force hard links (--local):
+	// git links the objects when it can and copies them when the repository is on another file
+	// system.
 	dir := filepath.Join(parent, "work")
-	if _, err := git(ctx, parent, "clone", "--quiet", "--no-checkout", "--local", "--", repository, dir); err != nil {
+	if _, err := git(ctx, parent, "clone", "--quiet", "--no-checkout", "--", repository, dir); err != nil {
 		remove()
 		return core.Checkout{}, nil, c.failed(ctx, err)
 	}

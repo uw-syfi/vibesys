@@ -3,10 +3,12 @@ package gitwork_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -164,6 +166,57 @@ func TestACheckoutOfACommitNoBranchReaches(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(co.Dir, "extra.txt")); err != nil {
 		t.Errorf("the checkout of a commit no branch reaches lacks its file: %v", err)
 	}
+}
+
+// A checkout is made whichever file system the repository and the checkouts are on. A clone that
+// forces hard links from the repository's objects fails when they are on different ones, which is
+// what happens when TMPDIR is on a disk of its own.
+func TestACheckoutIsMadeWhenTheRepositoryIsOnAnotherFileSystem(t *testing.T) {
+	repo, commit := newRepo(t, tasktest.Files("t"))
+	base := onAnotherFileSystem(t, repo)
+	co, remove, err := gitwork.Checkouts{Base: base}.Checkout(context.Background(), repo, commit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer remove()
+	if head := gitIn(t, co.Dir, "rev-parse", "HEAD"); head != string(commit) {
+		t.Errorf("HEAD = %s, want %s", head, commit)
+	}
+	if _, err := os.Stat(filepath.Join(co.Dir, "src/main.c")); err != nil {
+		t.Errorf("the checkout lacks a committed file: %v", err)
+	}
+}
+
+// onAnotherFileSystem returns a new directory on a different file system than dir is on. The test
+// skips on a machine where every place it may write is on one file system, because it has nothing
+// to say there.
+func onAnotherFileSystem(t *testing.T, dir string) string {
+	t.Helper()
+	// The device number is a different integer type on different systems, so it is compared as text.
+	device := func(path string) (string, bool) {
+		var st syscall.Stat_t
+		if err := syscall.Stat(path, &st); err != nil {
+			return "", false
+		}
+		return fmt.Sprint(st.Dev), true
+	}
+	here, ok := device(dir)
+	if !ok {
+		t.Fatalf("cannot stat %s", dir)
+	}
+	for _, candidate := range []string{"/dev/shm", "/tmp", "/var/tmp", "/run", "/mnt"} {
+		if there, ok := device(candidate); !ok || there == here {
+			continue
+		}
+		made, err := os.MkdirTemp(candidate, "vibesys-gitwork-test-")
+		if err != nil {
+			continue
+		}
+		t.Cleanup(func() { _ = os.RemoveAll(made) })
+		return made
+	}
+	t.Skip("every directory this test may write to is on one file system")
+	return ""
 }
 
 func TestACheckoutFailsAsTheInterfaceSays(t *testing.T) {
