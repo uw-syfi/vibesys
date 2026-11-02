@@ -64,7 +64,6 @@ from .types.records import (
     OperationRetireRequested,
     Outbound,
     RecordsState,
-    RecoveryPhase,
     ReissueProof,
     RequestObserved,
     RequestPhase,
@@ -709,18 +708,10 @@ def next_retry_at(state: RecordsState) -> float | None:
 def _retry(
     state: RecordsState, context: RecordsContext, event: RetryDue
 ) -> AreaChange[RecordsState]:
-    """Send a retryably failed request out again, unchanged, once its backoff has passed.
-
-    Recovery owns every open request while it gates the run, so a retry waits for it.
-    """
+    """Send a retryably failed request out again, unchanged, once its backoff has passed."""
     record = _unique(state, event.request_id)
     due = None if record is None else record.retry_wait_until
-    if (
-        record is None
-        or due is None
-        or max(context.run.now_at, event.now_at) < due
-        or state.recovery.phase != RecoveryPhase.READY
-    ):
+    if record is None or due is None or max(context.run.now_at, event.now_at) < due:
         return AreaChange(state=state)
     return _reissue(state, record, context)
 

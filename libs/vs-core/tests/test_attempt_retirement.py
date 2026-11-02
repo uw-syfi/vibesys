@@ -814,10 +814,10 @@ def test_typed_job_manifest_always_fences_unreleased_descendants(
 def test_a_job_ledger_release_proves_a_job_a_close_left_as_an_unsettled_child(
     *, job_released: bool
 ) -> None:
-    """Chaos seeds 268 and 479: a close left a job behind as a child it could not settle.
+    """Chaos seeds 268 and 479: a close left a job behind that it could not settle.
 
-    The job's own ledger later proved it released. That proof releases the job edge even
-    though the close's child lease never settles; without it the attempt never retires.
+    The job's own ledger later proved it released. That proof releases the job edge; without
+    it the attempt never retires.
     """
     state, ref = closing_fixture()
     job, job_record = released_job(state.attempts.attempts[0])
@@ -825,19 +825,12 @@ def test_a_job_ledger_release_proves_a_job_a_close_left_as_an_unsettled_child(
         job = changed(job, observation=None)
     resource = job.resource_id
     assert resource is not None
-    left = core.ChildLease(
-        resource_id=resource,
-        scope=job.scope,
-        source_requests=(core.RequestId(root="close"),),
-    )
     proof = observation(ref, core.RequestId(root="withdraw"))
     state = recorded_proof(state, proof)
     state = changed(
         state,
         evaluation=core.EvaluationState(registered_jobs=(job,)),
-        records=changed(
-            state.records, records=(*state.records.records, job_record), children=(left,)
-        ),
+        records=changed(state.records, records=(*state.records.records, job_record)),
     )
 
     result = checked_step(
@@ -1601,232 +1594,6 @@ def test_f4_disposal_requires_exact_disposition_and_positive_root_proof(
         assert result.state.attempts.attempts[0].phase == core.AttemptPhase.CLOSING
 
 
-@pytest.mark.parametrize("historical", [False, True])
-@pytest.mark.parametrize("aggregate", [False, True])
-@settings(max_examples=examples(pr=3, nightly=100))
-@given(
-    prefix=st.text(alphabet="abc", min_size=1, max_size=8),
-    suffix=st.text(alphabet="xyz", min_size=1, max_size=8),
-)
-@example(prefix="a", suffix="x")
-def test_opaque_inspection_identities_are_injective_across_sources_and_children(
-    prefix: str, suffix: str, *, historical: bool, aggregate: bool
-) -> None:
-    state, ref = closing_fixture()
-    sources = (core.RequestId(root=prefix), core.RequestId(root=f"{prefix}:inspect:child:x"))
-    resources = (core.ResourceId(root=f"x:inspect:child:{suffix}"), core.ResourceId(root=suffix))
-    scope = core.Scope(owner=ref.attempt_id, generation=ref.generation)
-    children = []
-    records = list(state.records.records)
-    events = []
-    for source, resource in zip(sources, resources, strict=True):
-        proof = observation(
-            ref,
-            source,
-            resource_id=resource,
-            admission_id=core.DecisionId(root="old" if historical else "admission"),
-            status=ObservationStatus.UNKNOWN,
-            terminal=False,
-            released=False,
-            children_complete=False,
-        )
-        other = changed(
-            proof,
-            request_id=core.RequestId(root=f"aggregate:{source.root}"),
-            event_id=core.EventId(root=f"aggregate:{source.root}"),
-        )
-        marks = (
-            (proof,)
-            if aggregate
-            else tuple(sorted((proof, other), key=lambda mark: mark.request_id.root))
-        )
-        children.append(
-            core.ChildLease(
-                resource_id=resource,
-                scope=scope,
-                source_requests=tuple(mark.request_id for mark in marks),
-                observation=proof if aggregate else other,
-                observation_watermarks=tuple(
-                    core.ChildObservationWatermark(source_request=mark.request_id, observation=mark)
-                    for mark in marks
-                ),
-                watermark_history_complete=True,
-            )
-        )
-        request = core.DiscardWorkspace(
-            request_id=source,
-            scope=scope,
-            attempt=ref,
-            admission_id=proof.admission_id,
-        )
-        root_proof = proof if aggregate else changed(proof, resource_id=None, children=(resource,))
-        records.append(
-            changed(
-                proof_record(request, state.run.deadline_at, root_proof),
-                phase=core.RequestPhase.RECONCILING,
-            )
-        )
-        if not aggregate:
-            other_request = changed(request, request_id=other.request_id)
-            records.append(
-                changed(
-                    proof_record(other_request, state.run.deadline_at, other),
-                    phase=core.RequestPhase.RECONCILING,
-                )
-            )
-        events.append(
-            core.ReleaseDependencyObserved(
-                attempt=ref,
-                dependency=core.ReleaseDependency(kind="job", identity=resource),
-                observation=proof,
-            )
-        )
-    owner = changed(
-        state.attempts.attempts[0],
-        release_dependencies=(
-            *state.attempts.attempts[0].release_dependencies,
-            *(event.dependency for event in events),
-        ),
-    )
-    state = with_owner(
-        state,
-        owner,
-        records=changed(state.records, records=tuple(records), children=tuple(children)),
-    )
-    ids = []
-    for event in events:
-        result = checked_step(state, event)
-        assert len(result.requests) == 1
-        request = result.requests[0]
-        assert isinstance(request, core.InspectRequest)
-        assert request.resource_id == event.observation.resource_id
-        assert request.target == event.observation.request_id
-        ids.append(request.request_id)
-        state = result.state
-        repeated = checked_step(state, event)
-        assert repeated.requests == ()
-    assert len(set(ids)) == 2
-
-
-@given(
-    proof=st.tuples(
-        st.sampled_from(list(ObservationStatus)),
-        st.booleans(),
-        st.booleans(),
-        st.booleans(),
-        st.booleans(),
-        st.sampled_from(
-            [
-                "exact",
-                "missing-source",
-                "missing-episode",
-                "wrong-episode",
-                "duplicate",
-                "reversed-duplicate",
-                "request-id",
-            ]
-        ),
-    )
-)
-@example(proof=(ObservationStatus.SUCCEEDED, True, True, True, True, "exact"))
-def test_child_release_requires_complete_positive_history_from_every_source(
-    proof: tuple[ObservationStatus, bool, bool, bool, bool, str],
-) -> None:
-    status, terminal, released, complete, history_complete, correspondence = proof
-    state, ref = closing_fixture()
-    resource = core.ResourceId(root="shared-child")
-    source_a = core.RequestId(root="source-a")
-    source_b = core.RequestId(root="source-b")
-    first = observation(ref, source_a, resource_id=resource)
-    second = observation(
-        ref,
-        source_b,
-        resource_id=resource,
-        status=status,
-        terminal=terminal,
-        released=released,
-        children_complete=complete,
-        admission_id=(
-            None
-            if correspondence == "missing-episode"
-            else core.DecisionId(root="other")
-            if correspondence == "wrong-episode"
-            else core.DecisionId(root="admission")
-        ),
-    )
-    child = core.ChildLease(
-        resource_id=resource,
-        scope=first.scope,
-        source_requests=(source_a, source_b),
-        observation=first,
-        observation_watermarks=(
-            core.ChildObservationWatermark(source_request=source_a, observation=first),
-            core.ChildObservationWatermark(source_request=source_b, observation=second),
-        ),
-        watermark_history_complete=history_complete,
-    )
-    sources = tuple(
-        core.RequestRecord(
-            request_id=mark.request_id,
-            request=core.DiscardWorkspace(
-                request_id=mark.request_id,
-                scope=mark.scope,
-                attempt=ref,
-                admission_id=core.DecisionId(root="admission"),
-            ),
-            payload_digest="source-proof",
-            lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
-            phase=core.RequestPhase.COMPLETED,
-            observation=mark,
-            until=core.Until(at=state.run.deadline_at),
-            addressed_by=(),
-        )
-        for mark in (first, second)
-    )
-    if "duplicate" in correspondence:
-        sources = (*sources, sources[0])
-    if correspondence == "reversed-duplicate":
-        sources = tuple(reversed(sources))
-    if correspondence == "request-id":
-        sources = (
-            changed(
-                sources[0],
-                request=changed(sources[0].request, request_id=core.RequestId(root="foreign")),
-            ),
-            sources[1],
-        )
-    state = changed(
-        state,
-        records=changed(
-            state.records,
-            children=(child,),
-            records=(*state.records.records, *sources)
-            if correspondence != "missing-source"
-            else state.records.records,
-        ),
-    )
-    root = observation(ref, core.RequestId(root="withdraw"))
-    state = recorded_proof(state, root)
-    result = checked_step(
-        state,
-        core.ReleaseDependencyObserved(
-            attempt=ref,
-            dependency=state.attempts.attempts[0].release_dependencies[0],
-            observation=root,
-        ),
-    )
-    edge = core.ReleaseDependency(kind="job", identity=resource)
-    positive = (
-        history_complete
-        and correspondence == "exact"
-        and status not in (ObservationStatus.UNKNOWN, ObservationStatus.PENDING)
-        and terminal
-        and released
-        and complete
-    )
-    assert (edge not in result.state.attempts.attempts[0].release_dependencies) == positive
-
-
 @pytest.mark.parametrize(
     "completion", [None, core.CompletionStatus.FAILED, core.CompletionStatus.CANCELLED]
 )
@@ -1899,7 +1666,6 @@ def test_unknown_scope_reopen_inspects_before_reacquisition_or_typed_outcome(
             "phase",
             "park",
             "checkpoint",
-            "late-child",
             "continuation",
         ]
     )
@@ -1944,27 +1710,16 @@ def test_reopen_admitted_requires_exact_accepted_episode_and_park_proof(guard: s
             state.evaluation.continuations[0], continuation_id=core.ContinuationId(root="foreign")
         )
         state = changed(state, evaluation=changed(state.evaluation, continuations=(continuation,)))
-    if guard == "late-child":
-        child = core.ChildLease(
-            resource_id=core.ResourceId(root="late"),
-            scope=core.Scope(owner=event.normalization.attempt.attempt_id, generation=0),
-            source_requests=(core.RequestId(root="late-source"),),
-        )
-        state = changed(state, records=changed(state.records, children=(child,)))
     signal = core.ScopeReopenAdmitted(
         attempt=event.normalization.attempt,
         request_id=request_id,
         admission_id=admission,
     )
-    if guard in ("exact", "late-child"):
+    if guard == "exact":
         result = core.step(state, signal, reducers=REDUCERS)
-        if guard == "late-child":
-            # A late child blocks reacquisition and closes the scope again.
-            assert result.state.attempts.attempts[0].closure != state.attempts.attempts[0].closure
-        else:
-            reacquiring = result.state.attempts.attempts[0]
-            assert reacquiring.phase == core.AttemptPhase.ACQUIRING
-            assert reacquiring.admission_id == signal.admission_id
+        reacquiring = result.state.attempts.attempts[0]
+        assert reacquiring.phase == core.AttemptPhase.ACQUIRING
+        assert reacquiring.admission_id == signal.admission_id
     else:
         result = checked_step(state, signal, codec=codec)
         assert (result.state.attempts, result.requests) == (state.attempts, ())

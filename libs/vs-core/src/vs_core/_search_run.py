@@ -19,7 +19,6 @@ from ._search_events import run_view, translate
 from ._validation import admits_command
 from .types.common import THIS_RUN, RunStatus, Scope
 from .types.kernel import ProposalSubmitted
-from .types.records import RecoveryPhase
 from .types.strategy import Finish, Wait, WakeAt
 from .types.until import Within
 
@@ -39,14 +38,12 @@ type CoreStep = Callable[[CoreState, CoreEvent], Transition]
 def deferred(core: CoreState, decision: Decision) -> bool:
     """Whether core cannot take ``decision`` yet but will later, so the shell holds it.
 
-    Until recovery is ready core takes no decision. While the operator has the run paused it
-    takes only what a paused run accepts (``admits_command``): the rest waits for the resume
-    instead of reaching the search as a refusal, which would end the search's work.
+    While the operator has the run paused core takes only what a paused run accepts
+    (``admits_command``): the rest waits for the resume instead of reaching the search as a
+    refusal, which would end the search's work.
     """
     if isinstance(decision, WakeAt):
         return False  # the shell waits on a wake; it is never submitted
-    if core.records.recovery.phase != RecoveryPhase.READY:
-        return True
     command = decision.request if isinstance(decision, Wait) else decision
     return core.run.status in (
         RunStatus.PAUSED,

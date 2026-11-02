@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from vs_core.api import RecoveryPhase, RequestPhase
+from vs_core.api import RequestPhase
 from vs_dst._delivery import Delivery
 from vs_dst._host import has_ended
 from vs_dst._interruptions import Action, Interruption, Moment
@@ -39,8 +39,6 @@ PATIENCE_FACTOR = 2.0
 """How many times the uninterrupted run's own duration a resumed host is waited on."""
 
 _OPEN = (RequestPhase.DISPATCHED, RequestPhase.RECONCILING, RequestPhase.BLOCKED)
-_UNPROVEN = ("pending", "unknown", "blocked")
-"""The resolutions of a recovery check that leave its target's fate unproven."""
 _DETAIL_LIMIT = 160
 _HOW_LIMIT = 48
 
@@ -337,10 +335,7 @@ def _classify(last: Hosted, expected: RunResultProposal | None) -> tuple[Outcome
 def _ended_as(core: CoreState, expected: RunResultProposal | None) -> tuple[Outcome, str]:
     """How the run stands in ``core``, whose host returned: ended, or stuck for a reason."""
     if not has_ended(core):
-        recovery = core.records.recovery.phase.value
-        return Outcome.STUCK, f"run {core.run.status.value}, recovery {recovery}"
-    if core.records.recovery.phase == RecoveryPhase.BLOCKED:
-        return Outcome.STUCK, "recovery blocked"
+        return Outcome.STUCK, f"run {core.run.status.value}"
     result = core.run.result
     if result is None:
         return Outcome.STUCK, "terminal with no result"
@@ -353,16 +348,7 @@ def _holding(core: CoreState | None) -> str:
     """The kinds of request the run holds open or cannot account for, as a suffix of a signature."""
     if core is None:
         return ""
-    unproven = {
-        check.target.root for check in core.records.recovery.checks if check.resolution in _UNPROVEN
-    }
-    kinds = sorted(
-        {
-            r.request.kind
-            for r in core.records.records
-            if r.phase in _OPEN or r.request_id.root in unproven
-        }
-    )
+    kinds = sorted({r.request.kind for r in core.records.records if r.phase in _OPEN})
     return f" [open: {', '.join(kinds)}]" if kinds else ""
 
 

@@ -77,7 +77,7 @@ if TYPE_CHECKING:
     from .types.evaluation_history import EvaluationHistoryCursor
     from .types.kernel import RunState, SessionsContext, Signal, StrategyEvent
     from .types.measurement import Comparison
-    from .types.records import ChildLease, Request, RequestRecord
+    from .types.records import Request, RequestRecord
     from .types.sessions import Invocation, SessionsState
 
 
@@ -523,37 +523,15 @@ def _job_released(job: OwnedJob | RegisteredOwnedJob) -> bool:
     )
 
 
-def _child_released(child: ChildLease) -> bool:
-    observation = child.observation
-    return (
-        _release_complete(observation)
-        and observation is not None
-        and observation.resource_id == child.resource_id
-        and observation.scope == child.scope
-        and observation.request_id in child.source_requests
-    )
-
-
-def _descendant_released(
-    state: EvaluationState, context: EvaluationContext, resource: ResourceId, scope: Scope
-) -> bool:
+def _descendant_released(state: EvaluationState, resource: ResourceId, scope: Scope) -> bool:
     jobs = tuple(
         job for job in (*state.jobs, *state.registered_jobs) if job.resource_id == resource
     )
-    leases = tuple(child for child in context.records.children if child.resource_id == resource)
-    return bool(jobs or leases) and (
-        len(jobs) <= 1
-        and len(leases) <= 1
-        and all(job.scope == scope and _job_released(job) for job in jobs)
-        and all(child.scope == scope and _child_released(child) for child in leases)
-    )
+    return len(jobs) == 1 and all(job.scope == scope and _job_released(job) for job in jobs)
 
 
 def _descendants(
-    state: EvaluationState,
-    context: EvaluationContext,
-    jobs: tuple[OwnedJob | RegisteredOwnedJob, ...],
-    scope: Scope,
+    state: EvaluationState, jobs: tuple[OwnedJob | RegisteredOwnedJob, ...], scope: Scope
 ) -> set[ResourceId]:
     sources = {_submission(job) for job in jobs}
     resources = {_resource(job) for job in jobs}
@@ -573,14 +551,6 @@ def _descendants(
                 descendants.update(job.children)
                 if job.observation is not None:
                     descendants.update(job.observation.descendants)
-        for child in context.records.children:
-            if child.scope == scope and (
-                sources.intersection(child.source_requests)
-                or resources.intersection(child.parent_resources)
-            ):
-                descendants.add(child.resource_id)
-                if child.observation is not None:
-                    descendants.update(child.observation.descendants)
         resources.update(descendants)
         if previous == (len(resources), len(sources)):
             break
@@ -598,8 +568,8 @@ def _released_dependencies(
         )
     scope = _invocation(context, continuation).scope
     if any(
-        not _descendant_released(state, context, resource, scope)
-        for resource in _descendants(state, context, jobs, scope)
+        not _descendant_released(state, resource, scope)
+        for resource in _descendants(state, jobs, scope)
     ):
         raise ContractError(
             ("continuation", "jobs", "children"),

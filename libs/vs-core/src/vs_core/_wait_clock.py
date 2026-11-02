@@ -16,15 +16,13 @@ earned (``queue_credit``), and every limit on work tied to the job is derived fr
   its queue time; a stale one (the scheduler stopped answering) earns at most that much, so a
   poll outage is never credited as queue time and cannot extend a limit.
 - **Downtime.** While no host runs, nothing waits: the run clock excludes downtime
-  (``Record.clock``), so a limit never counts it. It is never also queue time: the part of an
-  interval that overlaps a downtime earns no credit and spends no queue budget.
+  (``Record.clock``), so a limit never counts it and no interval of it is queue time.
 - **Bound.** A job's work ends at its stated limit plus its credit. While its latest fact is
   pending it may still earn up to the cap, so its bound is that much later; and its queue
   budget (``queue_wait_budget``) ends it once its credit and its current pending interval
   reach the budget. A limit that queue credit carries past the run deadline ends with the
   run (``job_bound``).
-- **Waits and records.** Each unfinished job of a wait or a record has its own bound. A
-  record ends at the earliest one (``record_bound``). A wait ends a job whose queue budget
+- **Waits.** Each unfinished job of a wait has its own bound. A wait ends a job whose queue budget
   ran out on its own and goes on with the rest; it ends at the earliest other bound, or once
   every job has ended (``wait_bounds``, ``_continuations``).
 
@@ -34,7 +32,6 @@ Every bound is a time (``Bound``), never absent, so an unbounded wait cannot be 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from itertools import pairwise
 from typing import TYPE_CHECKING
 
 from ._registry import ContractError
@@ -43,12 +40,10 @@ from .types.evaluation import OwnedJob, RegisteredOwnedJob
 from .types.job_observations import WaitEnd
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from .types.common import Limits, Observation, RequestId
     from .types.evaluation import Continuation, EvaluationState
     from .types.kernel import RunState
-    from .types.records import CapacityHold, HostEpoch, RecordsState, RequestRecord
+    from .types.records import CapacityHold, RecordsState, RequestRecord
     from .types.until import Until
 
 type Job = OwnedJob | RegisteredOwnedJob
@@ -83,30 +78,18 @@ def pending(job: Job) -> bool:
     )
 
 
-def _downtime_within(hosts: Sequence[HostEpoch], start: float, end: float) -> float:
-    """The part of ``[start, end]`` no host was alive, from the host log."""
-    return sum(
-        max(min(later.started_at, end) - max(earlier.alive_at, start), 0.0)
-        for earlier, later in pairwise(hosts)
-    )
-
-
-def credited(
-    job: Job, observation: Observation, limits: Limits, hosts: Sequence[HostEpoch]
-) -> float:
+def credited(job: Job, observation: Observation, limits: Limits) -> float:
     """``job``'s queue credit once it takes ``observation``, its next fact.
 
     The interval since a pending fact earns its length, capped at ``observe_backoff_cap``:
     a scheduler that answers polls never leaves a longer gap, so a longer one is an outage,
-    not queue time. Host downtime in the interval earns nothing: the wait's or record's
-    limit is already moved past it.
+    not queue time.
     """
     previous = job.observation
     if not pending(job) or previous is None or observation.observed_at <= previous.observed_at:
         return job.queue_credit
-    start, end = previous.observed_at, observation.observed_at
-    queued = end - start - _downtime_within(hosts, start, end)
-    return job.queue_credit + min(max(queued, 0.0), limits.observe_backoff_cap)
+    queued = observation.observed_at - previous.observed_at
+    return job.queue_credit + min(queued, limits.observe_backoff_cap)
 
 
 def source(job: Job) -> RequestId:
@@ -119,12 +102,11 @@ def queue_budget_left(job: Job, limits: Limits) -> float:
     return max(limits.queue_wait_budget - job.queue_credit, 0.0)
 
 
-def job_bound(job: Job, stated: float, run: RunState, hosts: Sequence[HostEpoch]) -> Bound:
+def job_bound(job: Job, stated: float, run: RunState) -> Bound:
     """When work on ``job`` with the stated limit ``stated`` ends, from the job's facts.
 
     The limit plus the job's credit; while its latest fact is pending, plus what that fact
-    may still earn (the cap), or sooner when its queue budget runs out. Host downtime since
-    the pending fact spends no budget. A limit that queue credit carries past the run
+    may still earn (the cap), or sooner when its queue budget runs out. A limit that queue credit carries past the run
     deadline ends with the run.
     """
     limits = run.limits
@@ -133,13 +115,12 @@ def job_bound(job: Job, stated: float, run: RunState, hosts: Sequence[HostEpoch]
         # The pending fact came before the limit passed, so the time since it is queue time,
         # up to the cap; one that came after it cannot revive the limit.
         queued_since = job.observation.observed_at
-        down = _downtime_within(hosts, queued_since, run.now_at)
         bound = _earliest(
             (
                 Bound(at=bound.at + limits.observe_backoff_cap, by=WaitEnd.LIMIT),
                 # When the budget is (or was) spent: a fact after that instant leaves it put.
                 Bound(
-                    at=queued_since + down + limits.queue_wait_budget - job.queue_credit,
+                    at=queued_since + limits.queue_wait_budget - job.queue_credit,
                     by=WaitEnd.QUEUE_BUDGET,
                 ),
             ),
@@ -206,7 +187,7 @@ def wait_bounds(
     def stated(job: Job) -> float:
         return max(own, _submission_limit(evaluation, records, job) or 0.0)
 
-    return tuple(job_bound(job, stated(job), run, records.hosts) for job in jobs)
+    return tuple(job_bound(job, stated(job), run) for job in jobs)
 
 
 def turn_bound(record: RequestRecord, run: RunState) -> Bound:
@@ -230,25 +211,6 @@ def held_turn_bound(stated: float, hold: CapacityHold | None, run_deadline: floa
         return Bound(at=at, by=WaitEnd.LIMIT)
     ceiling = Bound(at=max(run_deadline, stated), by=WaitEnd.RUN_END)
     return Bound(at=at, by=WaitEnd.LIMIT) if at <= ceiling.at else ceiling
-
-
-def record_bound(
-    record: RequestRecord,
-    evaluation: EvaluationState,
-    run: RunState,
-    hosts: Sequence[HostEpoch],
-) -> Bound:
-    """When ``record``'s limit ends it: at the earliest bound of an unfinished job it started.
-
-    A record that started no job (or whose jobs all ended) ends at its own bound: its stated
-    ``until``, extended by the capacity hold of the turn it dispatches (``turn_bound``).
-    """
-    bounds = tuple(
-        job_bound(job, record.until.at, run, hosts)
-        for job in (*evaluation.jobs, *evaluation.registered_jobs)
-        if source(job) == record.request_id and not job.terminal
-    )
-    return _earliest(bounds, turn_bound(record, run))
 
 
 def notice_due(job: Job, before: float, limits: Limits) -> bool:
