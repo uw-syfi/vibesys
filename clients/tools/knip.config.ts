@@ -19,6 +19,12 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
     // Tool-owned bindings are guarded by the proto regenerate-and-diff check.
     ignore: ['src/generated/**'],
   },
+  'libs/orchestrator-proto': {
+    entry: ['src/index.ts', 'src/**/*.test.ts'],
+    project: ['src/**/*.ts'],
+    // Tool-owned bindings, regenerated and diffed by the proto check.
+    ignore: ['src/generated/**'],
+  },
   'libs/contracts': {
     entry: ['src/**/*.test.ts'],
     project: ['src/**/*.ts'],
