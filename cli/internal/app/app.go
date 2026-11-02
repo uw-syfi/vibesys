@@ -28,6 +28,9 @@ type App struct {
 	cancel    context.CancelFunc
 	group     owned.Group
 	startedAt time.Time
+	// sups owns every connection to a supervisor that a call returned, and closes what is left at
+	// Close.
+	sups *ownedSupervisors
 
 	inbox chan message
 	view  atomic.Pointer[view]
@@ -74,9 +77,11 @@ type view struct {
 func New(cfg Config) *App {
 	cfg = cfg.withDefaults()
 	cfg.Stores = boundedStores{inner: cfg.Stores, timers: cfg.Timers, limit: cfg.CallTimeout}
+	sups := newOwnedSupervisors(cfg.Supervisors)
+	cfg.Supervisors = sups
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &App{
-		cfg: cfg, ctx: ctx, cancel: cancel, startedAt: cfg.Clock.Now(),
+		cfg: cfg, ctx: ctx, cancel: cancel, startedAt: cfg.Clock.Now(), sups: sups,
 		inbox: make(chan message),
 	}
 	a.view.Store(&view{})
@@ -85,11 +90,13 @@ func New(cfg Config) *App {
 }
 
 // Close stops the App: what it was waiting for is abandoned, and it returns once everything it
-// started has returned. Supervisors are not touched: they outlive the daemon, and the next start
-// finds them. Close may be called more than once.
+// started has returned and every connection to a supervisor is given up, including one a call
+// returned as Close began. Supervisors are not touched: they outlive the daemon, and the next
+// start finds them. Close may be called more than once.
 func (a *App) Close() {
 	a.cancel()
 	a.group.Wait()
+	a.sups.closeAll()
 }
 
 // post gives the loop a message. It returns false when the App is closing.

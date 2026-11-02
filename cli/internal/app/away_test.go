@@ -113,9 +113,8 @@ func newOutage(t *testing.T) (*world, *outage) {
 // attempts is how many times the daemon over an outage tries a call before it gives up.
 const attempts = 4
 
-// start starts a daemon over the outage.
-func (o *outage) start(sups supervisor.Supervisors) *app.App {
-	o.w.t.Helper()
+// build makes a daemon over the outage that has not started.
+func (o *outage) build(sups supervisor.Supervisors) *app.App {
 	a := app.New(app.Config{
 		Clock: o.w.clock, Timers: o.limits, Stores: o, Supervisors: sups,
 		Environments: fakeenv.Environments{core.EnvironmentHost: o.w.env},
@@ -124,6 +123,13 @@ func (o *outage) start(sups supervisor.Supervisors) *app.App {
 		Logf: func(string, ...any) {},
 	})
 	o.w.apps = append(o.w.apps, a)
+	return a
+}
+
+// start starts a daemon over the outage.
+func (o *outage) start(sups supervisor.Supervisors) *app.App {
+	o.w.t.Helper()
+	a := o.build(sups)
 	if err := a.Start(ctxFor(o.w.t)); err != nil {
 		o.w.t.Fatalf("Start: %v", err)
 	}

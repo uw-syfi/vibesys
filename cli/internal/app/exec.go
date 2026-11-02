@@ -242,6 +242,9 @@ func (a *App) launch(ctx context.Context, ref lifecycle.Ref, scope Scope, known 
 	h, gone, err := a.prepare(ctx, ref, scope)
 	switch {
 	case ctx.Err() != nil:
+		// The App is closing, so the machine hears nothing. A supervisor that Spawn started stays
+		// for the next start to find, and Close gives up the connection to it: the App owns every
+		// connection a call returned (ownedSupervisors), whether or not this goroutine hands it on.
 	case gone:
 		a.tell(lifecycle.Closed{Ref: ref})
 	case err != nil:
