@@ -176,11 +176,20 @@ func TestWaitAnyReturnsAtTheFirstFinalJob(t *testing.T) {
 // The daemon keeps the timeout: it answers TIMED_OUT, and the job goes on and succeeds.
 func TestAWaitTimeoutIsTheDaemonsAnswerAndNeverCancelsTheJob(t *testing.T) {
 	s := newSetup(t)
-	// The daemon's timers fire a timeout of up to five seconds at once, and never a longer one.
-	s.starter.Timers = clock.Immediate{Longest: 5 * time.Second}
-	c := s.connect(t)
+	// The daemon's timers fire this one timeout at once, and every other wait of the daemon (no
+	// other is this long) on the system's clock: no store or supervisor call can race it.
+	const timeout = 45 * time.Minute
+	s.starter.Timers = clock.Exactly{D: timeout, Others: clock.System{}}
+	// The client's time holds still, so it asks the daemon for exactly the whole timeout.
+	opts := s.options(true)
+	opts.Clock = clock.NewManual(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), 0)
+	c, err := client.Connect(ctxFor(t), opts)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	t.Cleanup(func() { c.Close() })
 	job := submit(t, c, "hold", "g", ";", "exit", "0")
-	res, err := c.Wait(ctxFor(t), call, []string{job.GetId()}, client.WaitOptions{Timeout: 5 * time.Second})
+	res, err := c.Wait(ctxFor(t), call, []string{job.GetId()}, client.WaitOptions{Timeout: timeout})
 	if err != nil {
 		t.Fatalf("Wait: %v", err)
 	}
