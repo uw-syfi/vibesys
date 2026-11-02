@@ -49,6 +49,7 @@ const (
 	runDirVar     = "VIBESYS_E2E_RUNDIR"
 	windowVar     = "VIBESYS_E2E_WINDOW"
 	quickRetryVar = "VIBESYS_E2E_QUICK_RETRY"
+	roleCLI       = "cli"
 )
 
 // The windows of a launch a test can stop it in.
@@ -70,6 +71,10 @@ func TestMain(m *testing.M) {
 	case "ready":
 		fmt.Print(readyPipe() != nil)
 		os.Exit(0)
+	case roleCLI:
+		// The test binary as the shipped tool: its daemon and supervisor processes are this binary
+		// again, composed by internal/production as the release is, over the real machine.
+		os.Exit(run(os.Args[1:], realDeps(os.Stdout, os.Stderr)))
 	}
 	os.Exit(m.Run())
 }

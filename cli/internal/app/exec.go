@@ -140,7 +140,7 @@ func causeOf(err error) lifecycle.Cause {
 
 func refusal(k core.FailureKind) bool {
 	switch k {
-	case core.FailureNotFound, core.FailureInvalidInput, core.FailureIncompatible, core.FailureConflict:
+	case core.FailureNotFound, core.FailureInvalidInput, core.FailureIncompatible, core.FailureConflict, core.FailureEnvironmentMismatch:
 		return true
 	}
 	return false
@@ -283,6 +283,13 @@ func (a *App) prepare(ctx context.Context, ref lifecycle.Ref, scope Scope) (h su
 		return nil, false, err
 	}
 	launch := lifecycle.Launch{Repository: scope.Repository, Task: scope.Task, Job: job.ID, Spec: spec}
+	if spec.Settings.Kind() != core.JobCommand {
+		plan, err := a.planFlow(ctx, st, scope, job, fingerprint)
+		if err != nil {
+			return nil, false, err
+		}
+		launch.Plan = &plan
+	}
 	err = a.call(ctx, func(ctx context.Context) error {
 		var err error
 		h, err = a.cfg.Supervisors.Spawn(ctx, launch)

@@ -27,8 +27,9 @@ type CacheQuery struct {
 	// Samples at zero.
 	DefaultSamples uint32
 	NoCache        bool
-	// Saved holds saved results, in any order. Only those under Key count, so a store may pass
-	// everything it has for the commit.
+	// Saved holds saved results, in any order. Only those that answer Key count, so a store may
+	// pass everything it has for the commit: a measurement is under its own key, and a pass is
+	// under the key of the check (Result.PassKey).
 	Saved []Result
 }
 
@@ -50,8 +51,9 @@ type CachePlan struct {
 // PlanCache decides what a submission does about saved results.
 //
 //   - A command job is never cached: it always runs.
-//   - A check reuses a pass. A failed check saves no result, so a saved check outcome is a pass,
-//     and failures always rerun.
+//   - A check reuses a pass: a saved check outcome, or the check a saved measurement ran in its own
+//     job (Result.PassKey). A failed check saves no result, so a saved check outcome is a pass, and
+//     failures always rerun.
 //   - A measure reuses its saved samples. When more samples are asked for than were saved, only the
 //     difference runs, and when none were saved the whole count runs. The count asked for is the
 //     settings' Samples, or the task's default when that is zero.
@@ -80,7 +82,7 @@ func PlanCache(q CacheQuery) (CachePlan, error) {
 }
 
 func planCheck(q CacheQuery) CachePlan {
-	passes := saved(q, func(r Result) bool { _, ok := r.Outcome.(CheckOutcome); return ok })
+	passes := savedBy(q.Saved, func(r Result) bool { key, ok := r.PassKey(); return ok && key == q.Key })
 	if q.NoCache || len(passes) == 0 {
 		return CachePlan{Action: CacheRun}
 	}
@@ -95,7 +97,10 @@ func planMeasure(q CacheQuery, settings MeasureSettings) (CachePlan, error) {
 	if q.NoCache {
 		return CachePlan{Action: CacheRun, Samples: want, FreshCheck: true}, nil
 	}
-	measurements := saved(q, func(r Result) bool { _, ok := r.Outcome.(MeasureOutcome); return ok })
+	measurements := savedBy(q.Saved, func(r Result) bool {
+		_, ok := r.Outcome.(MeasureOutcome)
+		return ok && r.Key == q.Key
+	})
 	var have uint32
 	from := make([]JobID, 0, len(measurements))
 	for _, r := range measurements {
@@ -112,11 +117,11 @@ func planMeasure(q CacheQuery, settings MeasureSettings) (CachePlan, error) {
 	}
 }
 
-// saved returns the results under the query's key that match, oldest first.
-func saved(q CacheQuery, match func(Result) bool) []Result {
+// savedBy returns the saved results that match, oldest first.
+func savedBy(all []Result, match func(Result) bool) []Result {
 	var out []Result
-	for _, r := range q.Saved {
-		if r.Key == q.Key && match(r) {
+	for _, r := range all {
+		if match(r) {
 			out = append(out, r)
 		}
 	}

@@ -10,6 +10,7 @@
 // A command is a script: steps separated by ";" arguments. The steps are
 //
 //	print TEXT...      write the text and a newline to the output
+//	emit TEXT...       write the text, with no newline, to the output file the command was given
 //	hold GATE          wait until the gate is released; a cancel ends the run, cancelled
 //	exit N             end the run, exited with code N
 //	timeout            end the run, timed out
@@ -17,6 +18,10 @@
 //	service-exited     end the run, the service exited early
 //	unknown            end the run, outcome unknown
 //	fail TEXT...       the run cannot be attempted: Run returns an unavailable failure
+//
+// The output file is the last argument of the command when it is an absolute path that follows a
+// flag, such as `--vs-output /scratch/sample-0.out`: the fake takes both off the script, as a
+// benchmark takes them off its command line, and `emit` writes to the path (see WithFiles).
 //
 // A script that runs out of steps exits with code 0. A step it does not know exits with code 127,
 // as a shell does for a command it cannot find.

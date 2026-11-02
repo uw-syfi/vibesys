@@ -27,3 +27,17 @@ func (None) Environment(kind core.EnvironmentKind) (Environment, error) {
 		Message: fmt.Sprintf("this build has no %q environment to run jobs in", kind),
 	}
 }
+
+// Registry is an Environments over the environments a build has, by kind. A kind it lacks is
+// unavailable, as with None.
+type Registry map[core.EnvironmentKind]Environment
+
+var _ Environments = Registry(nil)
+
+// Environment implements Environments.
+func (r Registry) Environment(kind core.EnvironmentKind) (Environment, error) {
+	if e, ok := r[kind]; ok && e != nil {
+		return e, nil
+	}
+	return None{}.Environment(kind)
+}

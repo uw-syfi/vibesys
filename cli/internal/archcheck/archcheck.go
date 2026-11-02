@@ -40,12 +40,26 @@ var rules = map[string][]string{
 	"internal/clock":               {},
 	"internal/changed":             {},
 	"internal/owned":               {},
-	"internal/lifecycle":           {"internal/core"},
+	"internal/lifecycle":           {"internal/core", "internal/flow"},
 	"internal/backend":             {"internal/core"},
+	"internal/backend/cpu":         {"internal/backend", "internal/clock", "internal/core"},
+	"internal/backend/backendtest": {"internal/backend"},
 	"internal/environment":         {"internal/core"},
-	"internal/environment/fakeenv": {"internal/core", "internal/environment"},
+	"internal/environment/fakeenv": {"internal/clock", "internal/core", "internal/environment"},
+	"internal/environment/envtest": {"internal/clock", "internal/core", "internal/environment"},
+	"internal/environment/host":    {"internal/backend", "internal/clock", "internal/core", "internal/environment"},
 	"internal/gitrepo":             {"internal/core"},
-	"internal/runtimedir":          {"internal/core"},
+	"internal/task":                {"internal/core"},
+	"internal/task/tasktest":       {"internal/core", "internal/task"},
+	"internal/gitwork":             {"internal/core", "internal/task"},
+	"internal/reading":             {},
+	"internal/flow":                {"internal/core", "internal/reading", "internal/task"},
+	"internal/hostfs":              {},
+	"internal/flowrun": {
+		"internal/backend", "internal/clock", "internal/core", "internal/environment", "internal/flow",
+		"internal/hostfs", "internal/reading",
+	},
+	"internal/runtimedir": {"internal/core"},
 
 	// Storage.
 	"internal/store":                {"internal/core"},
@@ -56,10 +70,13 @@ var rules = map[string][]string{
 	"internal/store/filestore/fsys": {},
 
 	// The translation between the domain and the contract.
-	"internal/wire": {"internal/core", "internal/lifecycle", "gen/"},
+	"internal/wire": {"internal/core", "internal/flow", "internal/lifecycle", "internal/task", "gen/"},
 
 	// Supervisors: the domain, its channel to the daemon, and the process that serves it.
-	"internal/supervisor":         {"internal/changed", "internal/core", "internal/environment", "internal/lifecycle", "internal/owned"},
+	"internal/supervisor": {
+		"internal/backend", "internal/changed", "internal/clock", "internal/core", "internal/environment", "internal/flow",
+		"internal/flowrun", "internal/hostfs", "internal/lifecycle", "internal/owned",
+	},
 	"internal/supervisor/suptest": {"internal/core", "internal/lifecycle", "internal/owned", "internal/supervisor"},
 	"internal/supervisor/rpc":     {"gen/", "internal/core", "internal/lifecycle", "internal/supervisor", "internal/wire"},
 	"internal/supervisor/host": {
@@ -70,18 +87,19 @@ var rules = map[string][]string{
 	// The daemon: its job flows, the process that serves them, and the client that calls it. The
 	// client speaks the contract's messages only, so it does not import the domain.
 	"internal/app": {
-		"internal/changed", "internal/clock", "internal/core", "internal/environment", "internal/gitrepo", "internal/lifecycle",
-		"internal/owned", "internal/store", "internal/supervisor",
+		"internal/changed", "internal/clock", "internal/core", "internal/environment", "internal/flow", "internal/gitrepo",
+		"internal/lifecycle", "internal/owned", "internal/store", "internal/supervisor", "internal/task",
 	},
 	"internal/app/filestores": {"internal/app", "internal/core", "internal/store", "internal/store/filestore"},
 	"internal/app/memstores":  {"internal/app", "internal/core", "internal/store", "internal/store/memstore"},
 	"internal/daemon": {
 		"gen/", "internal/app", "internal/clock", "internal/core", "internal/environment", "internal/owned",
-		"internal/gitrepo", "internal/runtimedir", "internal/supervisor", "internal/wire",
+		"internal/gitrepo", "internal/runtimedir", "internal/supervisor", "internal/task", "internal/wire",
 	},
 	"internal/daemon/daemontest": {
-		"internal/app", "internal/app/memstores", "internal/clock", "internal/core", "internal/daemon",
-		"internal/environment/fakeenv", "internal/gitrepo", "internal/owned", "internal/runtimedir", "internal/supervisor",
+		"internal/app", "internal/app/memstores", "internal/backend/cpu", "internal/clock", "internal/core",
+		"internal/daemon", "internal/environment/fakeenv", "internal/gitrepo", "internal/hostfs", "internal/owned",
+		"internal/runtimedir", "internal/supervisor", "internal/task",
 	},
 	"internal/client": {"gen/", "internal/clock", "internal/runtimedir", "internal/wire"},
 
@@ -90,10 +108,10 @@ var rules = map[string][]string{
 
 	// The wiring of the shipped binary.
 	"internal/production": {
-		"internal/app", "internal/app/filestores", "internal/client", "internal/clock", "internal/core",
-		"internal/daemon", "internal/environment", "internal/runtimedir", "internal/store/filestore",
-		"internal/supervisor", "internal/supervisor/host",
-		"internal/gitrepo",
+		"internal/app", "internal/app/filestores", "internal/backend/cpu", "internal/client", "internal/clock",
+		"internal/core", "internal/daemon", "internal/environment", "internal/environment/host", "internal/gitrepo",
+		"internal/gitwork", "internal/hostfs", "internal/runtimedir", "internal/store/filestore",
+		"internal/supervisor", "internal/supervisor/host", "internal/task",
 	},
 
 	// Replacing the running binary with a newer release.
@@ -108,15 +126,28 @@ var rules = map[string][]string{
 // implementation to compare it with, and the packages a test composes a daemon from. Product code
 // reaches none of them, so a fake never ships.
 var testRules = map[string][]string{
-	"internal/store/ledger":    {"internal/clock"},
-	"internal/store/memstore":  {"internal/store/storetest"},
-	"internal/store/filestore": {"internal/store/storetest", "internal/store/memstore"},
-	"internal/supervisor":      {"internal/environment/fakeenv", "internal/supervisor/suptest"},
+	"internal/backend/cpu":         {"internal/backend/backendtest"},
+	"internal/environment":         {"internal/environment/fakeenv"},
+	"internal/environment/fakeenv": {"internal/environment/envtest"},
+	"internal/environment/host":    {"internal/backend/cpu", "internal/environment/envtest", "internal/environment/fakeenv"},
+	"internal/store/ledger":        {"internal/clock"},
+	"internal/hostfs":              {},
+	"internal/flowrun":             {"internal/backend/cpu", "internal/environment/fakeenv", "internal/environment/host", "internal/task"},
+	"internal/task":                {"internal/task/tasktest"},
+	"internal/gitwork":             {"internal/task/tasktest"},
+	"internal/store/memstore":      {"internal/store/storetest"},
+	"internal/store/filestore":     {"internal/store/storetest", "internal/store/memstore"},
+	"internal/supervisor": {
+		"internal/backend/cpu", "internal/environment/fakeenv", "internal/supervisor/suptest", "internal/task",
+	},
 	"internal/supervisor/rpc":  {"internal/environment/fakeenv", "internal/supervisor/suptest"},
 	"internal/supervisor/host": {"internal/environment/fakeenv", "internal/supervisor/suptest"},
-	"internal/app":             {"internal/app/memstores", "internal/environment/fakeenv", "internal/store/storetest"},
-	"internal/app/filestores":  {"internal/core"},
-	"internal/daemon":          {"internal/app/memstores", "internal/environment/fakeenv", "internal/store/storetest"},
+	"internal/app": {
+		"internal/app/memstores", "internal/backend/cpu", "internal/environment/fakeenv", "internal/hostfs",
+		"internal/store/storetest", "internal/task/tasktest",
+	},
+	"internal/app/filestores": {"internal/core"},
+	"internal/daemon":         {"internal/app/memstores", "internal/environment/fakeenv", "internal/store/storetest"},
 	"internal/client": {
 		"internal/app", "internal/app/memstores", "internal/core", "internal/daemon", "internal/daemon/daemontest",
 		"internal/environment/fakeenv", "internal/supervisor",
@@ -131,6 +162,7 @@ var testRules = map[string][]string{
 		"internal/app", "internal/app/filestores", "internal/clock", "internal/core", "internal/daemon",
 		"internal/daemon/daemontest", "internal/environment/fakeenv", "internal/lifecycle", "internal/runtimedir",
 		"internal/store", "internal/store/filestore", "internal/store/storetest", "internal/supervisor", "internal/supervisor/host",
+		"internal/task", "internal/task/tasktest",
 	},
 }
 

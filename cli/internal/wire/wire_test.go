@@ -81,6 +81,7 @@ func anyJob(r *rand.Rand) core.Job {
 		j.ExitCode = &code
 	}
 	j.CancelReason = pick(r, "", "stop it")
+	j.NoCache = r.IntN(2) == 0
 	return j
 }
 

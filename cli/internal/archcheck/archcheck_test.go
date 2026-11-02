@@ -179,7 +179,7 @@ func repositorySources(t *testing.T) map[string]string {
 func TestSupportPackagesAreImportedByTestsOnly(t *testing.T) {
 	support := []string{
 		"internal/environment/fakeenv", "internal/supervisor/suptest", "internal/daemon/daemontest",
-		"internal/store/storetest",
+		"internal/store/storetest", "internal/environment/envtest", "internal/backend/backendtest",
 	}
 	var productDirs []string
 	for dir := range archcheck.Rules() {

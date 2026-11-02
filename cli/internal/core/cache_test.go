@@ -247,3 +247,73 @@ func b2u(b bool) uint32 {
 	}
 	return 0
 }
+
+// resultOf is the result a job of the inputs saves when it passes: a check outcome for a check, and
+// for a measure job a measurement resting on the pass named, under the job's own key.
+func resultOf(t *testing.T, in core.KeyInputs, job, checkJob core.JobID) core.Result {
+	t.Helper()
+	r := core.Result{
+		Job: job, Key: keyOf(t, in), Commit: in.Commit, TaskVersion: in.TaskVersion,
+		SchemaVersion: in.SchemaVersion, Environment: in.Environment, RecordedAt: at(1),
+	}
+	if in.Kind == core.JobCheck {
+		r.Outcome = core.CheckOutcome{}
+		return r
+	}
+	r.Outcome = core.MeasureOutcome{Metric: core.Metric{Name: "ops", Direction: core.Maximize}, Samples: []float64{1}, CheckJob: checkJob}
+	return r
+}
+
+// A measurement that ran its check in its own job holds the pass of the check with the same commit,
+// task version, environment and schema version, and of no other check. So a check answers from
+// it, and a check that differs in any of those runs.
+func TestAMeasurementThatRanItsCheckAnswersAChecksCacheQuery(t *testing.T) {
+	r := newRand(40)
+	other := map[string]func(core.KeyInputs) core.KeyInputs{
+		"commit":         func(in core.KeyInputs) core.KeyInputs { in.Commit = commitN(1<<30 + 1); return in },
+		"task version":   func(in core.KeyInputs) core.KeyInputs { in.TaskVersion += "x"; return in },
+		"schema version": func(in core.KeyInputs) core.KeyInputs { in.SchemaVersion++; return in },
+		"environment": func(in core.KeyInputs) core.KeyInputs {
+			in.Environment.Facts = withFact(in.Environment.Facts, "one more fact", "x")
+			return in
+		},
+	}
+	for range properties {
+		in := randomKeyInputs(r)
+		in.Kind, in.Settings = core.JobMeasure, core.MeasureSettings{Samples: 3}
+		checkInputs := in
+		checkInputs.Kind, checkInputs.Settings = core.JobCheck, core.CheckSettings{}
+		checkKey := keyOf(t, checkInputs)
+
+		ranIt := resultOf(t, in, "m1", "m1")
+		if key, ok := ranIt.PassKey(); !ok || key != checkKey {
+			t.Fatalf("a measurement that ran its check holds %q, %v; want the check's key %q", key, ok, checkKey)
+		}
+		if got := plan(t, core.CacheQuery{Key: checkKey, Settings: core.CheckSettings{}, Saved: []core.Result{ranIt}}); got.Action != core.CacheReuse || !slices.Equal(got.From, []core.JobID{"m1"}) {
+			t.Fatalf("a check after it: %+v, want it reused from m1", got)
+		}
+		if got := plan(t, core.CacheQuery{Key: checkKey, Settings: core.CheckSettings{}, NoCache: true, Saved: []core.Result{ranIt}}); got.Action != core.CacheRun {
+			t.Fatalf("a no-cache check after it: %+v, want a run", got)
+		}
+
+		linked := resultOf(t, in, "m2", "c-elsewhere")
+		if key, ok := linked.PassKey(); ok {
+			t.Fatalf("a measurement resting on another job's pass holds %q of its own", key)
+		}
+		if got := plan(t, core.CacheQuery{Key: checkKey, Settings: core.CheckSettings{}, Saved: []core.Result{linked}}); got.Action != core.CacheRun {
+			t.Fatalf("a check after a measurement that linked a pass: %+v, want a run", got)
+		}
+
+		own := resultOf(t, checkInputs, "c1", "")
+		if key, ok := own.PassKey(); !ok || key != checkKey {
+			t.Fatalf("a check result holds %q, %v; want its own key %q", key, ok, checkKey)
+		}
+
+		for name, change := range other {
+			differs := keyOf(t, change(checkInputs))
+			if got := plan(t, core.CacheQuery{Key: differs, Settings: core.CheckSettings{}, Saved: []core.Result{ranIt}}); got.Action != core.CacheRun {
+				t.Fatalf("a check with another %s: %+v, want a run: the pass is not its", name, got)
+			}
+		}
+	}
+}

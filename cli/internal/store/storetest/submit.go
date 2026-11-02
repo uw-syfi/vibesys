@@ -37,6 +37,18 @@ func testSubmit(t *testing.T, newStore New) {
 		}
 	})
 
+	t.Run("keeps whether the submission asked for no cache, because the job may start much later", func(t *testing.T) {
+		for _, noCache := range []bool{false, true} {
+			e := newEnv(t, newStore)
+			sub := e.measure(1, "key-a", 5)
+			sub.NoCache = noCache
+			job := e.submit(sub).Job
+			if job.NoCache != noCache || e.job(job.ID).NoCache != noCache {
+				t.Errorf("NoCache = %v on the returned job and %v on the stored one, want %v", job.NoCache, e.job(job.ID).NoCache, noCache)
+			}
+		}
+	})
+
 	t.Run("gives each job its own id and lists them oldest first", func(t *testing.T) {
 		e := newEnv(t, newStore)
 		var ids []core.JobID
@@ -299,6 +311,35 @@ func testSubmit(t *testing.T, newStore New) {
 		second := e.savedJob(again)
 		if out := e.submit(e.check(1, "key-a")); out.Job.ID != second.ID || out.Disposition != core.SubmitReused {
 			t.Errorf("submission = %s on %s, want reused on the latest, %s", out.Disposition, out.Job.ID, second.ID)
+		}
+	})
+
+	t.Run("a check lands on a measurement that ran its own check", func(t *testing.T) {
+		e := newEnv(t, newStore)
+		measured := e.submit(e.measure(1, "key-m", 3)).Job
+		res := ranItsCheck(e.resultFor(measured, 1, 2, 3))
+		e.finish(measured.ID, &res)
+		out := e.submit(e.check(1, string(e.passKeyOf(1))))
+		if out.Disposition != core.SubmitReused || out.Job.ID != measured.ID {
+			t.Errorf("a check = %s on %s, want reused on the measurement %s whose job ran the check", out.Disposition, out.Job.ID, measured.ID)
+		}
+		if n := len(e.jobs(core.JobFilter{})); n != 1 {
+			t.Errorf("%d jobs, want 1: reuse makes no job", n)
+		}
+	})
+
+	t.Run("a check does not land on a measurement that ran no check of its own", func(t *testing.T) {
+		e := newEnv(t, newStore)
+		measured := e.submit(e.measure(1, "key-m", 3)).Job
+		res := e.resultFor(measured, 1, 2, 3) // names a pass another job holds
+		e.finish(measured.ID, &res)
+		for name, sub := range map[string]core.Submission{
+			"a pass another job holds": e.check(1, string(e.passKeyOf(1))),
+			"a pass of another commit": e.check(2, string(e.passKeyOf(2))),
+		} {
+			if out := e.submit(sub); out.Disposition != core.SubmitCreated || out.Job.ID == measured.ID {
+				t.Errorf("%s: a check = %s on %s, want a new job", name, out.Disposition, out.Job.ID)
+			}
 		}
 	})
 

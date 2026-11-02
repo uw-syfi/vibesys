@@ -19,13 +19,16 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/store/filestore"
 )
 
+// defaultSamples is the sample count a measurement asks for when it asks for none.
+const defaultSamples = 5
+
 func newStores(t *testing.T, indexDir string) *filestores.FileStores {
 	t.Helper()
 	index, err := filestore.OpenIndex(indexDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return filestores.New(index, app.Rules(filestores.DefaultSamples), filestore.Owner{})
+	return filestores.New(index, app.Rules(defaultSamples), filestore.Owner{})
 }
 
 // A scope opened once is found by a daemon that starts later, over the same index.
@@ -169,7 +172,7 @@ func TestASecondDaemonIsRefusedAStoreAndNamesWhoHasIt(t *testing.T) {
 	scope := app.Scope{Repository: t.TempDir(), Task: "kv-store"}
 	index, err := filestore.OpenIndex(t.TempDir())
 	must(t, err)
-	rules := app.Rules(filestores.DefaultSamples)
+	rules := app.Rules(defaultSamples)
 	first := filestores.New(index, rules, filestore.Owner{Host: "host-a", Dir: "/run/one", PID: 1})
 	_, err = first.Create(ctx, scope)
 	must(t, err)
@@ -235,7 +238,7 @@ func TestTheStoreIsOpenedWithTheRules(t *testing.T) {
 			Key:     "measure-key",
 		}
 	}
-	first, err := st.Submit(context.Background(), sub(filestores.DefaultSamples))
+	first, err := st.Submit(context.Background(), sub(defaultSamples))
 	if err != nil {
 		t.Fatal(err)
 	}

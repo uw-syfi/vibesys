@@ -40,9 +40,8 @@ func Settle(job core.JobID, from core.JobState, o Outcome, at time.Time) Settlem
 		code := 0
 		result := end.Result
 		t.To, t.ExitCode, t.Result = core.JobSucceeded, &code, &result
-		if m, ok := result.Outcome.(core.MeasureOutcome); ok {
-			t.CheckJob = m.CheckJob
-		}
+		// The check pass a measurement links is in the result, and the job takes it from there:
+		// it is stored once, so the transition does not carry a second copy to disagree with it.
 		return Settlement{Transition: t}
 	case Rejected:
 		t.To = core.JobFailed
