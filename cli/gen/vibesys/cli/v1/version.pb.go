@@ -133,7 +133,7 @@ func (Compatibility) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_cli_v1_version_proto_rawDescGZIP(), []int{1}
 }
 
-// BuildVersions is what one build of the binary carries. It is also the `--version --json` output.
+// BuildVersions is what one build of the binary carries.
 type BuildVersions struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The release version, or "dev" for a build that is not a release. Display only: callers never
