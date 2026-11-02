@@ -826,14 +826,6 @@ class RequestObserved(OutcomeValue):
         return bind_outcome(self, info)
 
 
-class HostRenewed(Value):
-    """The current epoch's host renewed its lease at ``now_at``, so it was alive then."""
-
-    kind: Literal["host_renewed"] = "host_renewed"
-    epoch: Count
-    now_at: Seconds
-
-
 class RetryDue(Value):
     """Internal signal: core time reached the backoff of a request the executor failed retryably.
 
@@ -910,7 +902,6 @@ type RecordsEvent = Annotated[
     | RequestUndispatchable
     | BlockedRecordStalled
     | OperationRetireRequested
-    | HostRenewed
     | TurnHeld,
     Field(discriminator="kind"),
 ]

@@ -63,7 +63,6 @@ from .types.kernel import (
 from .types.records import (
     BlockedRecordStalled,
     DispatchAuthorized,
-    HostRenewed,
     OperationRetireRequested,
     RequestObserved,
     RequestPrepared,
@@ -249,7 +248,6 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | RetryDue()
             | RequestUndispatchable()
             | BlockedRecordStalled()
-            | HostRenewed()
             | TurnHeld()
             | OperationRetireRequested()
             | DecisionCompleted()

@@ -84,7 +84,7 @@ def pending(job: Job) -> bool:
 
 
 def _downtime_within(hosts: Sequence[HostEpoch], start: float, end: float) -> float:
-    """The part of ``[start, end]`` no host was alive, from the host log (``_host_epochs``)."""
+    """The part of ``[start, end]`` no host was alive, from the host log."""
     return sum(
         max(min(later.started_at, end) - max(earlier.alive_at, start), 0.0)
         for earlier, later in pairwise(hosts)
