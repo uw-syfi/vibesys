@@ -489,8 +489,15 @@ class _GrowingSends:
             raise _outage()
 
 
+_INSIDE_GRACE = 0.999
+
+
 def _resends_within_their_grace(grace: float) -> st.SearchStrategy[tuple[float, ...]]:
-    """Resend durations each at most the grace it gets: ``grace``, or twice the longest before."""
+    """Resend durations each inside the grace it gets: ``grace``, or twice the longest before.
+
+    A send exactly at its grace is not generated: the gate measures it as the difference of two
+    epoch-scale timestamps, whose rounding decides which side of the bound it falls on.
+    """
 
     def grow(factors: list[float]) -> tuple[float, ...]:
         sends: list[float] = []
@@ -498,7 +505,9 @@ def _resends_within_their_grace(grace: float) -> st.SearchStrategy[tuple[float, 
             sends.append(factor * max(grace, 2 * max(sends, default=0.0)))
         return tuple(sends)
 
-    return st.lists(st.floats(min_value=0.05, max_value=1.0), min_size=1, max_size=5).map(grow)
+    return st.lists(st.floats(min_value=0.05, max_value=_INSIDE_GRACE), min_size=1, max_size=5).map(
+        grow
+    )
 
 
 @pytest.mark.regression
@@ -509,6 +518,12 @@ def _resends_within_their_grace(grace: float) -> st.SearchStrategy[tuple[float, 
     first=240.0,
     resends=(450.0, 850.0, 1600.0),
     policy=QuotaPolicy(QuotaAction.WAIT, wait_seconds=7200.0, retry_seconds=300.0),
+)
+@example(
+    spare=0.0,
+    first=1.0,
+    resends=(525.0, 902.6909528497437, 1803.5),
+    policy=QuotaPolicy(QuotaAction.PAUSE, retry_seconds=300.0),
 )
 @given(
     spare=st.floats(min_value=0.0, max_value=600.0),
