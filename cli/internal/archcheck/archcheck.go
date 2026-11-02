@@ -70,18 +70,18 @@ var rules = map[string][]string{
 	// The daemon: its job flows, the process that serves them, and the client that calls it. The
 	// client speaks the contract's messages only, so it does not import the domain.
 	"internal/app": {
-		"internal/changed", "internal/clock", "internal/core", "internal/environment", "internal/lifecycle", "internal/owned",
-		"internal/store", "internal/supervisor",
+		"internal/changed", "internal/clock", "internal/core", "internal/environment", "internal/gitrepo", "internal/lifecycle",
+		"internal/owned", "internal/store", "internal/supervisor",
 	},
 	"internal/app/filestores": {"internal/app", "internal/core", "internal/store", "internal/store/filestore"},
 	"internal/app/memstores":  {"internal/app", "internal/core", "internal/store", "internal/store/memstore"},
 	"internal/daemon": {
 		"gen/", "internal/app", "internal/clock", "internal/core", "internal/environment", "internal/owned",
-		"internal/runtimedir", "internal/supervisor", "internal/wire",
+		"internal/gitrepo", "internal/runtimedir", "internal/supervisor", "internal/wire",
 	},
 	"internal/daemon/daemontest": {
 		"internal/app", "internal/app/memstores", "internal/clock", "internal/core", "internal/daemon",
-		"internal/environment/fakeenv", "internal/owned", "internal/runtimedir", "internal/supervisor",
+		"internal/environment/fakeenv", "internal/gitrepo", "internal/owned", "internal/runtimedir", "internal/supervisor",
 	},
 	"internal/client": {"gen/", "internal/clock", "internal/runtimedir", "internal/wire"},
 
@@ -93,6 +93,7 @@ var rules = map[string][]string{
 		"internal/app", "internal/app/filestores", "internal/client", "internal/clock", "internal/core",
 		"internal/daemon", "internal/environment", "internal/runtimedir", "internal/store/filestore",
 		"internal/supervisor", "internal/supervisor/host",
+		"internal/gitrepo",
 	},
 
 	// Replacing the running binary with a newer release.
@@ -113,8 +114,9 @@ var testRules = map[string][]string{
 	"internal/supervisor":      {"internal/environment/fakeenv", "internal/supervisor/suptest"},
 	"internal/supervisor/rpc":  {"internal/environment/fakeenv", "internal/supervisor/suptest"},
 	"internal/supervisor/host": {"internal/environment/fakeenv", "internal/supervisor/suptest"},
-	"internal/app":             {"internal/app/memstores", "internal/environment/fakeenv"},
-	"internal/daemon":          {"internal/app/memstores", "internal/environment/fakeenv"},
+	"internal/app":             {"internal/app/memstores", "internal/environment/fakeenv", "internal/store/storetest"},
+	"internal/app/filestores":  {"internal/core"},
+	"internal/daemon":          {"internal/app/memstores", "internal/environment/fakeenv", "internal/store/storetest"},
 	"internal/client": {
 		"internal/app", "internal/app/memstores", "internal/core", "internal/daemon", "internal/daemon/daemontest",
 		"internal/environment/fakeenv", "internal/supervisor",
@@ -128,7 +130,7 @@ var testRules = map[string][]string{
 	"cmd/vibesys-cli": {
 		"internal/app", "internal/app/filestores", "internal/clock", "internal/core", "internal/daemon",
 		"internal/daemon/daemontest", "internal/environment/fakeenv", "internal/lifecycle", "internal/runtimedir",
-		"internal/store/filestore", "internal/supervisor", "internal/supervisor/host",
+		"internal/store", "internal/store/filestore", "internal/store/storetest", "internal/supervisor", "internal/supervisor/host",
 	},
 }
 
@@ -154,6 +156,7 @@ func Violations(files map[string]string) []string {
 			found = append(found, layering(name, source)...)
 			found = append(found, layout(name, source)...)
 			found = append(found, effects(name, source)...)
+			found = append(found, approvalMints(name, source)...)
 		case strings.HasSuffix(name, ".proto") && strings.HasPrefix(name, "proto/vibesys/cli/"):
 			found = append(found, layout(name, source)...)
 		}

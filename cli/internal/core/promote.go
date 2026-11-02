@@ -38,7 +38,8 @@ type PromoteRefusal struct {
 // Promotion is a move of the result branch that happened.
 type Promotion struct {
 	Commit Commit
-	// PreviousHead is empty for the first promotion.
+	// PreviousHead is the head the move replaced: the commit the result branch was at. For the
+	// first promotion that is the commit the run started from.
 	PreviousHead Commit
 	Verdict      Verdict
 	Environment  Fingerprint
@@ -47,13 +48,34 @@ type Promotion struct {
 	At        time.Time
 }
 
-// PromotionDecision is the answer to a request to promote: a Promotion that may happen or a
-// PromoteRefusal.
+// Approved is the promotion a decision approved, and the only thing a Store records as a new
+// promotion. Its proof is a private field, so outside this package only DecidePromotion makes an
+// Approved that holds (AssumeApproved is for store tests, and archcheck keeps it there), and the
+// zero value approves nothing: a store refuses it. A promotion read back from a store is a plain
+// Promotion; it was approved when it was recorded.
+type Approved struct {
+	promotion Promotion
+	approved  bool
+}
+
+// Promotion returns the promotion that was approved.
+func (a Approved) Promotion() Promotion { return a.promotion }
+
+// Valid reports whether a decision approved it: false for the zero value.
+func (a Approved) Valid() bool { return a.approved }
+
+// AssumeApproved approves a promotion without a decision. It is for tests of stores, which hold
+// promotions that no decision would make, such as one with a NaN verdict. Only test files and
+// internal/store/storetest may use it (archcheck).
+func AssumeApproved(p Promotion) Approved { return Approved{promotion: p, approved: true} }
+
+// PromotionDecision is the answer to a request to promote: an Approved promotion that may happen
+// or a PromoteRefusal.
 type PromotionDecision interface {
 	promotionDecision()
 }
 
-func (Promotion) promotionDecision()      {}
+func (Approved) promotionDecision()       {}
 func (PromoteRefusal) promotionDecision() {}
 
 // PromotionRequest asks whether a commit may become the result branch's head.
@@ -74,7 +96,8 @@ type PromotionRequest struct {
 
 // DecidePromotion decides whether the candidate may be promoted. It may be only if the candidate
 // is better than the head, on measurements that stand: every reason it may not be is returned
-// together, in the order of the PromoteRefusalKind constants.
+// together, in the order of the PromoteRefusalKind constants. The approval is an Approved, which
+// no other code makes.
 //
 //   - RefusalUnmeasured: the candidate, or the head it is to beat, has no measurement. Nothing
 //     else is judged then.
@@ -92,7 +115,7 @@ type PromotionRequest struct {
 // It fails with a *Failure, rather than refusing, when the two sides cannot be compared at all:
 // see Compare. The promotion it returns has the environment both sides were measured in, the
 // candidate's latest measurement as the one it rests on, and the head before the move, which is
-// empty for the first promotion.
+// the commit a stale refusal says the measurement was taken against.
 func DecidePromotion(req PromotionRequest) (PromotionDecision, error) {
 	if req.At.IsZero() {
 		return nil, failf(FailureInvalidInput, "promotion: no time")
@@ -146,18 +169,14 @@ func DecidePromotion(req PromotionRequest) (PromotionDecision, error) {
 		return PromoteRefusal{Reasons: reasons}, nil
 	}
 
-	var previous Commit
-	if len(req.Promotions) > 0 {
-		previous = req.Head
-	}
-	return Promotion{
+	return Approved{approved: true, promotion: Promotion{
 		Commit:       req.Candidate,
-		PreviousHead: previous,
+		PreviousHead: req.Head,
 		Verdict:      compared.verdict,
 		Environment:  compared.environment,
 		ResultJob:    candidate[len(candidate)-1].Job,
 		At:           req.At,
-	}, nil
+	}}, nil
 }
 
 // verdictRefusal is the refusal for a verdict that is not better.

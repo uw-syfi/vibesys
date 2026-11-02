@@ -148,7 +148,7 @@ func (d *driver) step(step int) {
 		if g.pick(10) == 0 {
 			p.Commit = ""
 		}
-		d.do(step, "RecordPromotion", func(s store.Store) (any, error) { return nil, s.RecordPromotion(ctx, p) })
+		d.do(step, "RecordPromotion", func(s store.Store) (any, error) { return nil, s.RecordPromotion(ctx, core.AssumeApproved(p)) })
 	case op == 10:
 		np := core.NewPlan{Title: d.text(), Body: g.text(), At: d.instant()}
 		d.do(step, "CreatePlan", func(s store.Store) (any, error) { return s.CreatePlan(ctx, np) })

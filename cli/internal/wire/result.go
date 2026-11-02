@@ -10,8 +10,38 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 )
 
-// A result goes through here only from a supervisor to the daemon: it is what a check or a measure
-// job found.
+// A result goes through here from a supervisor to the daemon, as what a check or a measure job
+// found, and from the daemon to a client, as what is saved. A verdict, a comparison and a promotion
+// only go out: the daemon sends them and never receives them.
+
+var verdictKinds = map[core.VerdictKind]cliv1.VerdictKind{
+	core.Better:       cliv1.VerdictKind_VERDICT_KIND_BETTER,
+	core.Worse:        cliv1.VerdictKind_VERDICT_KIND_WORSE,
+	core.WithinNoise:  cliv1.VerdictKind_VERDICT_KIND_WITHIN_NOISE,
+	core.Inconclusive: cliv1.VerdictKind_VERDICT_KIND_INCONCLUSIVE,
+}
+
+var inconclusiveReasons = map[core.InconclusiveReason]cliv1.InconclusiveReason{
+	core.ReasonTooFewSamples:       cliv1.InconclusiveReason_INCONCLUSIVE_REASON_TOO_FEW_SAMPLES,
+	core.ReasonConstantSamples:     cliv1.InconclusiveReason_INCONCLUSIVE_REASON_CONSTANT_SAMPLES,
+	core.ReasonMetricMismatch:      cliv1.InconclusiveReason_INCONCLUSIVE_REASON_METRIC_MISMATCH,
+	core.ReasonTaskVersionMismatch: cliv1.InconclusiveReason_INCONCLUSIVE_REASON_TASK_VERSION_MISMATCH,
+}
+
+var refusalKinds = map[core.PromoteRefusalKind]cliv1.PromoteRefusalKind{
+	core.RefusalUnmeasured:          cliv1.PromoteRefusalKind_PROMOTE_REFUSAL_KIND_UNMEASURED,
+	core.RefusalCheckMissing:        cliv1.PromoteRefusalKind_PROMOTE_REFUSAL_KIND_CHECK_MISSING,
+	core.RefusalWorse:               cliv1.PromoteRefusalKind_PROMOTE_REFUSAL_KIND_WORSE,
+	core.RefusalWithinNoise:         cliv1.PromoteRefusalKind_PROMOTE_REFUSAL_KIND_WITHIN_NOISE,
+	core.RefusalInconclusive:        cliv1.PromoteRefusalKind_PROMOTE_REFUSAL_KIND_INCONCLUSIVE,
+	core.RefusalStale:               cliv1.PromoteRefusalKind_PROMOTE_REFUSAL_KIND_STALE,
+	core.RefusalEnvironmentMismatch: cliv1.PromoteRefusalKind_PROMOTE_REFUSAL_KIND_ENVIRONMENT_MISMATCH,
+}
+
+var noResultReasons = map[core.NoCurrentResultReason]cliv1.NoCurrentResultReason{
+	core.NoHead:                    cliv1.NoCurrentResultReason_NO_CURRENT_RESULT_REASON_NO_HEAD,
+	core.NotMeasuredSincePromotion: cliv1.NoCurrentResultReason_NO_CURRENT_RESULT_REASON_NOT_MEASURED_SINCE_PROMOTION,
+}
 
 var metricDirections = []struct {
 	domain core.Direction
@@ -39,8 +69,8 @@ func toDirection(field string, d cliv1.Direction) (core.Direction, error) {
 	return "", invalid("%s: %s is not a direction", field, d)
 }
 
-// result returns the contract's message for the result a job found.
-func result(r core.Result) *cliv1.Result {
+// Result returns the contract's message for a result.
+func Result(r core.Result) *cliv1.Result {
 	out := &cliv1.Result{
 		JobId: string(r.Job), Key: string(r.Key), Task: r.Task, TaskVersion: r.TaskVersion,
 		Commit: string(r.Commit), SchemaVersion: r.SchemaVersion, Environment: Fingerprint(r.Environment),
@@ -68,6 +98,89 @@ func result(r core.Result) *cliv1.Result {
 		out.Outcome = &cliv1.Result_Measure{Measure: m}
 	}
 	return out
+}
+
+// Verdict returns the contract's message for a verdict. Its numbers are carried as they are,
+// never rounded: rounding is for text.
+func Verdict(v core.Verdict) *cliv1.Verdict {
+	return &cliv1.Verdict{
+		Kind:             verdictKinds[v.Kind],
+		Reason:           inconclusiveReasons[v.Reason],
+		CandidateSamples: v.CandidateSamples,
+		BaseSamples:      v.BaseSamples,
+		CandidateMean:    v.CandidateMean,
+		BaseMean:         v.BaseMean,
+		Ratio:            v.Ratio,
+		Noise:            v.Noise,
+	}
+}
+
+// Comparison returns the contract's message for a comparison.
+func Comparison(c core.Comparison) *cliv1.Comparison {
+	return &cliv1.Comparison{
+		Commit: string(c.Commit), Against: string(c.Against),
+		Verdict: Verdict(c.Verdict), Environment: Fingerprint(c.Environment),
+	}
+}
+
+// Results returns the contract's messages for saved results.
+func Results(rs []core.Result) []*cliv1.Result {
+	out := make([]*cliv1.Result, len(rs))
+	for i, r := range rs {
+		out[i] = Result(r)
+	}
+	return out
+}
+
+// Promotion returns the contract's message for a promotion.
+func Promotion(p core.Promotion) *cliv1.Promotion {
+	return &cliv1.Promotion{
+		Commit: string(p.Commit), PreviousHead: string(p.PreviousHead), Verdict: Verdict(p.Verdict),
+		Environment: Fingerprint(p.Environment), ResultJobId: string(p.ResultJob), At: timestamp(p.At),
+	}
+}
+
+// PromoteRefusal returns the contract's message for a refusal, with every reason and the
+// evidence it rests on.
+func PromoteRefusal(r core.PromoteRefusal) *cliv1.PromoteRefusal {
+	out := &cliv1.PromoteRefusal{}
+	for _, reason := range r.Reasons {
+		m := &cliv1.PromoteRefusalReason{
+			Kind: refusalKinds[reason.Kind], Message: reason.Message,
+			MeasuredAgainst: string(reason.MeasuredAgainst), CurrentHead: string(reason.CurrentHead),
+		}
+		if reason.Verdict != nil {
+			m.Verdict = Verdict(*reason.Verdict)
+		}
+		out.Reasons = append(out.Reasons, m)
+	}
+	return out
+}
+
+// PromoteResponse returns the answer to a promotion: the promotion that happened or the refusal.
+func PromoteResponse(d core.PromotionDecision) *cliv1.PromoteResponse {
+	switch d := d.(type) {
+	case core.Approved:
+		return &cliv1.PromoteResponse{Outcome: &cliv1.PromoteResponse_Promoted{Promoted: Promotion(d.Promotion())}}
+	case core.PromoteRefusal:
+		return &cliv1.PromoteResponse{Outcome: &cliv1.PromoteResponse_Refused{Refused: PromoteRefusal(d)}}
+	}
+	return &cliv1.PromoteResponse{}
+}
+
+// CurrentResultResponse returns the answer to a request for the current result.
+func CurrentResultResponse(a core.ResultAnswer) *cliv1.CurrentResultResponse {
+	switch a := a.(type) {
+	case core.CurrentResult:
+		return &cliv1.CurrentResultResponse{State: &cliv1.CurrentResultResponse_Current{
+			Current: &cliv1.CurrentResult{Head: string(a.Head), Result: Result(a.Result)},
+		}}
+	case core.NoCurrentResult:
+		return &cliv1.CurrentResultResponse{State: &cliv1.CurrentResultResponse_None{
+			None: &cliv1.NoCurrentResult{Reason: noResultReasons[a.Reason], Head: string(a.Head)},
+		}}
+	}
+	return &cliv1.CurrentResultResponse{}
 }
 
 // toResult returns the domain result for the contract's message. A message with neither outcome is

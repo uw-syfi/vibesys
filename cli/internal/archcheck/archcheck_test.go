@@ -1,6 +1,7 @@
 package archcheck_test
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"path"
@@ -415,6 +416,71 @@ func TestASwitchOverAClosedSetLeavesNothingOut(t *testing.T) {
 				return
 			}
 			if !hasSwitchViolation(found, tc.bad) {
+				t.Fatalf("not flagged: %v", found)
+			}
+		})
+	}
+}
+
+// Only a test, the contract suite for stores and core itself may make an approval without a
+// decision; product code anywhere else may not, however it is written.
+func TestApprovalWithoutADecisionStaysInTests(t *testing.T) {
+	flagged := func(files map[string]string) bool {
+		for _, line := range archcheck.Violations(files) {
+			if strings.Contains(line, "AssumeApproved") {
+				return true
+			}
+		}
+		return false
+	}
+	property := func(pick uint8, arg string) bool {
+		packages := []string{"app", "daemon", "wire", "store/ledger", "store/memstore", "store/filestore"}
+		dir := "cli/internal/" + packages[int(pick)%len(packages)]
+		source := "package p\n\nimport \"github.com/uw-syfi/vibesys/cli/internal/core\"\n\nvar _ = core.AssumeApproved(core.Promotion{Commit: " + fmt.Sprintf("%q", arg) + "})\n"
+		return flagged(map[string]string{dir + "/a.go": source}) &&
+			!flagged(map[string]string{dir + "/a_test.go": source}) &&
+			!flagged(map[string]string{"cli/internal/store/storetest/a.go": source})
+	}
+	if err := quick.Check(property, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A type may belong to two closed sets, as a refusal is both a promotion decision and an event
+// detail. A switch that names one set whole is not held to the other for the shared member, and a
+// switch that names the shared member alone is held to both.
+func TestASwitchOverTwoOverlappingSetsIsHeldToTheOneItNames(t *testing.T) {
+	tree := func(body string) map[string]string {
+		return map[string]string{
+			"cli/internal/lifecycle/a.go": `package lifecycle
+
+type Event interface{ event() }
+type Answer interface{ answer() }
+type Started struct{}
+type Ended struct{}
+type Done struct{}
+
+func (Started) event() {}
+func (Ended) event()   {}
+func (Ended) answer()  {}
+func (Done) answer()   {}
+`,
+			"cli/internal/core/b.go": "package core\n\nimport \"github.com/uw-syfi/vibesys/cli/internal/lifecycle\"\n\n" +
+				"func f(e lifecycle.Event) {\n" + body + "\n}\n",
+		}
+	}
+	for name, tc := range map[string]struct{ body, bad string }{
+		"the first set whole":    {"switch e.(type) {\ncase lifecycle.Started:\ncase lifecycle.Ended:\n}", ""},
+		"the second set whole":   {"switch e.(type) {\ncase lifecycle.Ended:\ncase lifecycle.Done:\n}", ""},
+		"the shared member only": {"switch e.(type) {\ncase lifecycle.Ended:\n}", "lifecycle.Done"},
+		"a member of one set":    {"switch e.(type) {\ncase lifecycle.Done:\n}", "lifecycle.Ended"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			found := archcheck.Violations(tree(tc.body))
+			if tc.bad == "" && hasSwitchViolation(found, "") {
+				t.Fatalf("flagged: %v", found)
+			}
+			if tc.bad != "" && !hasSwitchViolation(found, tc.bad) {
 				t.Fatalf("not flagged: %v", found)
 			}
 		})

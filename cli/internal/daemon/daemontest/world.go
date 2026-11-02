@@ -10,6 +10,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/daemon"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv"
+	"github.com/uw-syfi/vibesys/cli/internal/gitrepo"
 	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
 )
@@ -24,6 +25,8 @@ type World struct {
 	Checkouts *fakeenv.Checkouts
 	Stores    *memstores.Stores
 	Survivors *supervisor.Survivors
+	// Branches are the repositories' result branches.
+	Branches *gitrepo.FakeBranches
 }
 
 // NewWorld returns a World that is cleaned up with the test, and fails the test if a command is
@@ -33,7 +36,7 @@ func NewWorld(t testing.TB) *World {
 	gates := fakeenv.NewMemoryGates()
 	w := &World{
 		Gates: gates, Env: fakeenv.New(core.EnvironmentHost, gates), Checkouts: &fakeenv.Checkouts{},
-		Stores: memstores.New(app.Rules(5)), Survivors: supervisor.NewSurvivors(),
+		Stores: memstores.New(app.Rules(5)), Survivors: supervisor.NewSurvivors(), Branches: gitrepo.NewFakeBranches(),
 	}
 	t.Cleanup(func() {
 		w.Survivors.Close()
@@ -51,7 +54,7 @@ func NewWorld(t testing.TB) *World {
 func (w *World) Runtime() daemon.Runtime {
 	envs := fakeenv.Environments{core.EnvironmentHost: w.Env}
 	return daemon.Runtime{
-		Stores: w.Stores, Environments: envs,
+		Stores: w.Stores, Environments: envs, Branches: w.Branches,
 		Supervisors: supervisor.NewInProcess(envs, w.Checkouts, w.Survivors),
 	}
 }

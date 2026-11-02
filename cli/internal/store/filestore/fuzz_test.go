@@ -79,11 +79,11 @@ func FuzzValues(f *testing.F) {
 				done, err := s.Transition(ctx, core.Transition{Job: "j1", From: core.JobRunning, To: core.JobSucceeded, At: instant, Result: result})
 				got = append(got, answer(done, err))
 			}
-			err = s.RecordPromotion(ctx, core.Promotion{
+			err = s.RecordPromotion(ctx, core.AssumeApproved(core.Promotion{
 				Commit: core.Commit(text), PreviousHead: core.Commit(text), Verdict: core.Verdict{Kind: core.Better, CandidateMean: x, BaseMean: -x, Ratio: x, Noise: -x},
 				Environment: core.Fingerprint{Kind: core.EnvironmentHost, Backend: core.BackendCPU, ImageDigest: text, Facts: map[string]string{text: text}},
 				ResultJob:   "j1", At: instant,
-			})
+			}))
 			got = append(got, answer(nil, err))
 			event, err := s.AppendEvent(ctx, core.EventDraft{
 				SchemaVersion: 1, Run: "run-a", HostID: text, Task: text, Commit: core.Commit(text), Harness: text, Agent: text, At: instant,

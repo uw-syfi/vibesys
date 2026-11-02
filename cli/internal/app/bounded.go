@@ -122,7 +122,7 @@ func (s boundedStore) Results(ctx context.Context, filter core.ResultFilter) ([]
 	return call(s, ctx, func(st store.Store, ctx context.Context) ([]core.Result, error) { return st.Results(ctx, filter) })
 }
 
-func (s boundedStore) RecordPromotion(ctx context.Context, p core.Promotion) error {
+func (s boundedStore) RecordPromotion(ctx context.Context, p core.Approved) error {
 	_, err := call(s, ctx, func(st store.Store, ctx context.Context) (struct{}, error) {
 		return struct{}{}, st.RecordPromotion(ctx, p)
 	})

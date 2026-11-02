@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -30,6 +31,10 @@ type App struct {
 
 	inbox chan message
 	view  atomic.Pointer[view]
+
+	// branchMu is held while a result branch is read for a decision or moved, so promotions go
+	// one at a time and nothing reads the branch between a recorded promotion and its move.
+	branchMu sync.Mutex
 
 	jobsChanged changed.Signal
 	logsChanged changed.Signal

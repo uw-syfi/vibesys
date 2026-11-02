@@ -295,8 +295,11 @@ func (l *Ledger) AddNote(id core.JobID, note core.Note) (Change, core.Job, error
 }
 
 // RecordPromotion decides appending a promotion to the record.
-func (l *Ledger) RecordPromotion(p core.Promotion) (Change, error) {
-	p, err := Hold("promotion", p)
+func (l *Ledger) RecordPromotion(approved core.Approved) (Change, error) {
+	if !approved.Valid() {
+		return nil, invalid("promotion", "was not approved by a decision")
+	}
+	p, err := Hold("promotion", approved.Promotion())
 	if err != nil {
 		return nil, err
 	}

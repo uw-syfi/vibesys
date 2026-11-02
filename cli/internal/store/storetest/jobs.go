@@ -415,7 +415,7 @@ func testResults(t *testing.T, newStore New) {
 				Verdict:     core.Verdict{Kind: core.Better, CandidateSamples: 5, BaseSamples: 5, CandidateMean: 1.5, BaseMean: 1.25, Ratio: 1.2, Noise: 0.05},
 				Environment: core.Fingerprint{Kind: core.EnvironmentHost, Backend: core.BackendCPU},
 			}
-			if err := e.s.RecordPromotion(e.ctx, p); err != nil {
+			if err := e.s.RecordPromotion(e.ctx, core.AssumeApproved(p)); err != nil {
 				t.Fatal(err)
 			}
 			want = append(want, p)
@@ -429,7 +429,7 @@ func testResults(t *testing.T, newStore New) {
 		if !reflect.DeepEqual(again, want) {
 			t.Errorf("a caller changed a promotion in the store: %+v", again[0])
 		}
-		wantKind(t, "a promotion with no commit", e.s.RecordPromotion(e.ctx, core.Promotion{At: e.now()}), core.FailureInvalidInput)
+		wantKind(t, "a promotion with no commit", e.s.RecordPromotion(e.ctx, core.AssumeApproved(core.Promotion{At: e.now()})), core.FailureInvalidInput)
 		if again, _ := e.s.Promotions(e.ctx); len(again) != 4 {
 			t.Errorf("%d promotions after a refused one, want 4", len(again))
 		}

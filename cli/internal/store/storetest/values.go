@@ -84,7 +84,7 @@ func testValues(t *testing.T, newStore New) {
 			}
 
 			p := g.promotion()
-			if err := e.s.RecordPromotion(e.ctx, p); err != nil {
+			if err := e.s.RecordPromotion(e.ctx, core.AssumeApproved(p)); err != nil {
 				t.Fatalf("seed %d: %v", seed, err)
 			}
 			if got, err := e.s.Promotions(e.ctx); err != nil || len(got) != 1 || !reflect.DeepEqual(got[0], p) {
@@ -211,11 +211,12 @@ func testValues(t *testing.T, newStore New) {
 		draft.Detail = core.Failure{Message: "bad\xff"}
 		_, err = e.s.AppendEvent(e.ctx, draft)
 		wantKind(t, "an event detail with text that is not UTF-8", err, core.FailureInvalidInput)
-		wantKind(t, "a promotion with a NaN verdict noise", e.s.RecordPromotion(e.ctx, func() core.Promotion {
+		wantKind(t, "a promotion with a NaN verdict noise", e.s.RecordPromotion(e.ctx, func() core.Approved {
 			p := g.promotion()
 			p.Verdict.Noise = math.NaN()
-			return p
+			return core.AssumeApproved(p)
 		}()), core.FailureInvalidInput)
+		wantKind(t, "a promotion no decision approved", e.s.RecordPromotion(e.ctx, core.Approved{}), core.FailureInvalidInput)
 		unchanged(t, "a refused value", e.s, before, runs...)
 	})
 }
@@ -261,7 +262,7 @@ func testCancelled(t *testing.T, newStore New) {
 			},
 			"AddNote":         func() error { _, err := e.s.AddNote(ctx, job.ID, *e.note("n")); return err },
 			"Results":         func() error { _, err := e.s.Results(ctx, core.ResultFilter{}); return err },
-			"RecordPromotion": func() error { return e.s.RecordPromotion(ctx, g.promotion()) },
+			"RecordPromotion": func() error { return e.s.RecordPromotion(ctx, core.AssumeApproved(g.promotion())) },
 			"Promotions":      func() error { _, err := e.s.Promotions(ctx); return err },
 			"CreatePlan":      func() error { _, err := e.s.CreatePlan(ctx, core.NewPlan{Title: "t", At: e.now()}); return err },
 			"Plan":            func() error { _, err := e.s.Plan(ctx, plan.Number); return err },

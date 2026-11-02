@@ -43,7 +43,7 @@ func Outcome(o lifecycle.Outcome) *cliv1.SupervisorOutcome {
 	case lifecycle.NotAttempted:
 		out.Result = &cliv1.SupervisorOutcome_NotAttempted{NotAttempted: Failure(end.Failure)}
 	case lifecycle.Passed:
-		out.Result = &cliv1.SupervisorOutcome_Passed{Passed: result(end.Result)}
+		out.Result = &cliv1.SupervisorOutcome_Passed{Passed: Result(end.Result)}
 	case lifecycle.Rejected:
 		out.Result = &cliv1.SupervisorOutcome_Rejected{Rejected: end.Reason}
 	default:

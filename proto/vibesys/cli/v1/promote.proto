@@ -46,7 +46,8 @@ message PromoteRefusal {
 // Promotion is a result branch move that happened.
 message Promotion {
   string commit = 1;
-  // The head before the move. Empty for the first promotion.
+  // The head before the move: the commit the result branch was at. For the first promotion that is
+  // the commit the run started from.
   string previous_head = 2;
   Verdict verdict = 3;
   EnvironmentFingerprint environment = 4;
