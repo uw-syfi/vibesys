@@ -24,6 +24,9 @@ func (b *backend) Recover() (ledger.Snapshot, error) {
 	b.durableDirs = map[string]bool{}
 	b.logs = map[core.JobID][]chunk{}
 	var snap ledger.Snapshot
+	if err := b.guard.check(); err != nil {
+		return snap, err
+	}
 	jobs, err := b.loadJobs()
 	if err != nil {
 		return snap, err

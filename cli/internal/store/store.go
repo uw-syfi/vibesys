@@ -8,6 +8,7 @@ package store
 
 import (
 	"context"
+	"errors"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 )
@@ -126,12 +127,17 @@ type LogStore interface {
 	ReadLog(ctx context.Context, id core.JobID, offset uint64, max int) (core.LogChunk, error)
 }
 
+// ErrOwnerLeaving marks a refused store whose holder has the caller's own place: the same machine
+// and runtime directory, which have one daemon. So it is a daemon on its way out, whose descriptors
+// the kernel is still closing, and trying again for a bounded time is the answer.
+var ErrOwnerLeaving = errors.New("the owner of the store is leaving")
+
 // Rules are the decisions of internal/core that depend on the task, which the daemon passes to an
 // implementation when it opens the store. The zero Rules is a store for a task that declares
 // nothing.
 type Rules struct {
-	// Reuse decides whether a saved result answers a submission with the same key. A nil Reuse
-	// accepts every saved result with the key, which is right when the key already covers
+	// Reuse decides whether the saved results answer a submission with the same key. A nil Reuse
+	// lands on the latest saved result with the key, which is right when the key already covers
 	// everything a result depends on. A key does not cover how many samples a measurement
 	// holds, so a daemon that tops up measurements passes a Reuse built from core.PlanCache.
 	Reuse ReusePolicy
@@ -142,6 +148,8 @@ type Rules struct {
 	DefaultSamples uint32
 }
 
-// ReusePolicy decides whether a saved result answers a submission with the same key. The rule
-// belongs to internal/core.
-type ReusePolicy func(saved core.Result, want core.Submission) bool
+// ReusePolicy decides whether saved results answer a submission. It is given every result saved
+// under the submission's key, in the order they were saved, because together they can answer what
+// none does alone: a measurement and its top-up. It returns the job, one of those results', that
+// the submission lands on. The rule belongs to internal/core.
+type ReusePolicy func(saved []core.Result, want core.Submission) (core.JobID, bool)

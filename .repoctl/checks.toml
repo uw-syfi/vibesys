@@ -492,7 +492,8 @@ language = "go"
 directory = "cli"
 # Same shape as gateway_checks: a cold Go cache costs about 70 s on a CI runner (module download,
 # then vet and test of the host and a vet per other release target); a warm one a few seconds. The
-# race run of the concurrency tests adds a race-instrumented build of the standard library, and
-# the tests build the four release binaries and run install.sh, a few seconds more.
-timeout_seconds = 300
+# race run of every package adds a race-instrumented build of the standard library and of each
+# package, the seeded simulation takes about a minute under the detector, and the tests build the
+# four release binaries and run install.sh. Measured on 4 cores with a cold cache: about 3 minutes.
+timeout_seconds = 600
 commands = [["./check.sh"]]

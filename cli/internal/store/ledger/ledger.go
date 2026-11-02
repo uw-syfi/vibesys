@@ -218,27 +218,32 @@ func (l *Ledger) joinable(sub core.Submission) (int, bool) {
 	return 0, false
 }
 
-// reusable finds the job whose latest saved result with the key the reuse rule accepts. Only a
-// job that succeeded has a result, so no state is checked here.
+// reusable finds the job a submission lands on from the saved results with its key, which the reuse
+// rule decides over together. Only a job that succeeded has a result, so no state is checked here.
 func (l *Ledger) reusable(sub core.Submission) (int, bool) {
-	best, found := -1, false
+	var found []int // indexes into results
 	for _, i := range l.byKey[sub.Key] {
-		job := l.jobs[i]
-		r, ok := l.resultOf[job.ID]
-		if !ok || l.results[r].Result.Key != sub.Key {
-			continue
-		}
-		if l.rules.Reuse != nil && !l.rules.Reuse(Copy(l.results[r].Result), Copy(sub)) {
-			continue
-		}
-		if !found || r > best {
-			best, found = r, true
+		if r, ok := l.resultOf[l.jobs[i].ID]; ok && l.results[r].Result.Key == sub.Key {
+			found = append(found, r)
 		}
 	}
-	if !found {
+	if len(found) == 0 {
 		return 0, false
 	}
-	return l.jobIndex[l.results[best].Result.Job], true
+	slices.Sort(found)
+	job := l.results[found[len(found)-1]].Result.Job
+	if l.rules.Reuse != nil {
+		saved := make([]core.Result, len(found))
+		for i, r := range found {
+			saved[i] = Copy(l.results[r].Result)
+		}
+		var ok bool
+		if job, ok = l.rules.Reuse(saved, Copy(sub)); !ok {
+			return 0, false
+		}
+	}
+	i, ok := l.jobIndex[job]
+	return i, ok
 }
 
 // Transition decides a state change. core.Job.Apply decides whether the move is legal and what

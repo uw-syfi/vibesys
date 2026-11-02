@@ -9,6 +9,8 @@ import (
 	"path"
 	"reflect"
 	"slices"
+	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/uw-syfi/vibesys/cli/internal/store/filestore/fsys"
@@ -197,6 +199,116 @@ func TestContract(t *testing.T) {
 }
 
 func second[T any](_ T, err error) error { return err }
+
+func TestALockKeepsOutEveryOtherHold(t *testing.T) {
+	for name, build := range implementations {
+		t.Run(name, func(t *testing.T) {
+			f, root := build(t)
+			if name == "MemFS" {
+				mustMkdir(t, f, root)
+			}
+			file := path.Join(root, "lock")
+			first, err := f.Lock(file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.Lock(file); !errors.Is(err, fsys.ErrLocked) {
+				t.Fatalf("second Lock: error = %v, want ErrLocked", err)
+			}
+			for range 2 {
+				if err := first.Release(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			again, err := f.Lock(file)
+			if err != nil {
+				t.Fatalf("Lock after Release: %v", err)
+			}
+			defer func() { _ = again.Release() }()
+
+			// A hold is on the file, so a new file of the same name is free. This is what a fence
+			// beyond the lock is for.
+			if err := f.Remove(file); err != nil {
+				t.Fatal(err)
+			}
+			beside, err := f.Lock(file)
+			if err != nil {
+				t.Fatalf("Lock of a new file with the name of a held one: %v", err)
+			}
+			_ = beside.Release()
+
+			if _, err := f.Lock(path.Join(root, "missing", "lock")); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("Lock in a missing directory: error = %v, want fs.ErrNotExist", err)
+			}
+		})
+	}
+}
+
+// A filesystem where the lock call does nothing, or is refused, gets no lock at all, and the
+// caller is told.
+func TestALockThatKeepsNobodyOutIsRefused(t *testing.T) {
+	calls := map[string]func(int, int) error{
+		"a call that does nothing": func(int, int) error { return nil },
+		"no lock records":          func(int, int) error { return syscall.ENOLCK },
+		"not supported":            func(int, int) error { return syscall.ENOTSUP },
+		"no such call":             func(int, int) error { return syscall.ENOSYS },
+	}
+	for name, call := range calls {
+		t.Run(name, func(t *testing.T) {
+			lock, err := fsys.OS{Flock: call}.Lock(path.Join(t.TempDir(), "lock"))
+			if !errors.Is(err, fsys.ErrNoLocks) {
+				t.Fatalf("Lock: %v, error = %v, want ErrNoLocks", lock, err)
+			}
+		})
+	}
+	t.Run("any other failure is that failure", func(t *testing.T) {
+		_, err := fsys.OS{Flock: func(int, int) error { return syscall.EIO }}.Lock(path.Join(t.TempDir(), "lock"))
+		if !errors.Is(err, syscall.EIO) || errors.Is(err, fsys.ErrNoLocks) {
+			t.Fatalf("error = %v, want EIO", err)
+		}
+	})
+}
+
+func TestCheckMount(t *testing.T) {
+	const table = `22 28 0:21 / /sys rw,nosuid shared:7 - sysfs sysfs rw
+28 1 254:1 / / rw,relatime shared:1 - ext4 /dev/vda1 rw,errors=remount-ro
+70 28 0:50 / /home rw,relatime shared:30 - nfs4 host-a:/home rw,vers=4.2,addr=10.0.0.1,local_lock=none
+71 28 0:51 / /flock rw,relatime shared:31 - nfs host-a:/flock rw,vers=3,local_lock=flock
+72 28 0:52 / /all rw,relatime - nfs host-a:/all rw,vers=3,local_lock=all
+73 28 0:53 / /nolock rw,relatime - nfs4 host-a:/nolock rw,nolock
+74 28 0:54 / /a\040b rw,relatime - ext4 /dev/vdb rw,nolock
+broken line
+`
+	cases := []struct {
+		major, minor uint32
+		refused      bool
+		mount        string
+	}{
+		{major: 254, minor: 1}, {major: 0, minor: 50}, {major: 0, minor: 54}, {major: 9, minor: 9},
+		{minor: 51, refused: true, mount: "/flock"},
+		{minor: 52, refused: true, mount: "/all"},
+		{minor: 53, refused: true, mount: "/nolock"},
+	}
+	for _, c := range cases {
+		err := fsys.CheckMount([]byte(table), c.major, c.minor)
+		if got := errors.Is(err, fsys.ErrNoLocks); got != c.refused {
+			t.Errorf("%d:%d: error = %v, want refused = %v", c.major, c.minor, err, c.refused)
+		}
+		if c.refused && !strings.Contains(err.Error(), c.mount) {
+			t.Errorf("%d:%d: error %q does not name %s", c.major, c.minor, err, c.mount)
+		}
+	}
+}
+
+func FuzzCheckMount(f *testing.F) {
+	f.Add([]byte("71 28 0:51 / /flock rw shared:31 - nfs host-a:/flock rw,local_lock=flock\n"), uint32(0), uint32(51))
+	f.Add([]byte("- - - - - - - - -\n7 - \n\x00"), uint32(0), uint32(0))
+	f.Fuzz(func(t *testing.T, table []byte, major, minor uint32) {
+		if err := fsys.CheckMount(table, major, minor); err != nil && !errors.Is(err, fsys.ErrNoLocks) {
+			t.Fatalf("error = %v, want nil or ErrNoLocks", err)
+		}
+	})
+}
 
 // Both implementations answer a random sequence of calls the same way.
 func TestImplementationsAgree(t *testing.T) {
