@@ -46,6 +46,11 @@ func actorOf(ctx context.Context) string {
 	if effect := app.EffectOf(ctx); effect != "" {
 		return "daemon " + strings.TrimPrefix(effect, "lifecycle.")
 	}
+	if md, ok := metadata.FromOutgoingContext(ctx); ok {
+		if v := md.Get(actorKey); len(v) > 0 {
+			return v[0]
+		}
+	}
 	return "daemon"
 }
 
@@ -77,7 +82,7 @@ type world struct {
 	mu        sync.Mutex
 	daemon    *incarnation
 	next      int
-	startHeld chan struct{}
+	startLock startLock
 	conns     []net.Conn
 	follows   map[lifecycle.Ref]context.CancelCauseFunc
 	absent    map[string]bool
@@ -143,7 +148,7 @@ func newWorld(seed uint64) *world {
 		survivors: supervisor.NewSurvivors(),
 		rules:     app.Rules(5),
 		raw:       map[app.Scope]store.Store{},
-		startHeld: make(chan struct{}, 1),
+		startLock: startLock{waiting: map[string]chan struct{}{}},
 		follows:   map[lifecycle.Ref]context.CancelCauseFunc{},
 		absent:    map[string]bool{},
 		killed:    map[lifecycle.Ref]bool{}, asked: map[lifecycle.Ref]bool{},
@@ -406,12 +411,7 @@ func (r rendezvous) Dial(ctx context.Context) (net.Conn, error) {
 }
 
 func (r rendezvous) HoldStart(ctx context.Context) (func() error, error) {
-	select {
-	case r.w.startHeld <- struct{}{}:
-		return func() error { <-r.w.startHeld; return nil }, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
+	return r.w.startLock.hold(ctx)
 }
 
 func (r rendezvous) AwaitExit(ctx context.Context) error {
@@ -427,6 +427,59 @@ func (r rendezvous) AwaitExit(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// startLock is the right to start a daemon. The driver says who gets it: clients that want it at
+// the same time arrive in the scheduler's order.
+type startLock struct {
+	mu      sync.Mutex
+	held    bool
+	waiting map[string]chan struct{}
+}
+
+func (l *startLock) hold(ctx context.Context) (func() error, error) {
+	actor := actorOf(ctx)
+	granted := make(chan struct{})
+	l.mu.Lock()
+	l.waiting[actor] = granted
+	l.mu.Unlock()
+	release := func() error {
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		l.held = false
+		return nil
+	}
+	select {
+	case <-granted:
+		return release, nil
+	case <-ctx.Done():
+		l.mu.Lock()
+		_, waiting := l.waiting[actor]
+		delete(l.waiting, actor)
+		l.mu.Unlock()
+		if !waiting {
+			_ = release()
+		}
+		return nil, ctx.Err()
+	}
+}
+
+// names returns who can be given the lock now.
+func (l *startLock) names() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.held {
+		return nil
+	}
+	return sortedKeys(l.waiting)
+}
+
+func (l *startLock) grant(actor string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.held = true
+	close(l.waiting[actor])
+	delete(l.waiting, actor)
 }
 
 func (w *world) options() client.Options {

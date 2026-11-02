@@ -315,6 +315,9 @@ func (w *world) moves(heal bool) []option {
 	for _, name := range w.gates.names() {
 		out = append(out, option{"command passes " + name, func() { w.gates.release(name) }})
 	}
+	for _, name := range w.startLock.names() {
+		out = append(out, option{"start lock to " + name, func() { w.startLock.grant(name) }})
+	}
 	if at, ok := w.timers.next(); ok {
 		out = append(out, option{fmt.Sprintf("time moves to %s", at), func() { w.timers.advance(at) }})
 	}
