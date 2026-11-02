@@ -30,11 +30,16 @@ const (
 // beyond itself. An entry ending in "/" allows the whole subtree. A package with Go files and no
 // entry fails the check, so a new package states its layer in the change that adds it.
 var rules = map[string][]string{
-	"internal/core":          {},
-	"internal/jobs":          {"internal/core"},
-	"internal/jobs/jobstest": {"internal/core", "internal/jobs"},
-	"internal/wire":          {"internal/core", "gen/"},
-	"internal/archcheck":     {},
+	"internal/core":            {},
+	"internal/jobs":            {"internal/core"},
+	"internal/jobs/jobstest":   {"internal/core", "internal/jobs"},
+	"internal/wire":            {"internal/core", "gen/"},
+	"internal/archcheck":       {},
+	"internal/store":           {"internal/core", "internal/wire", "internal/localfs"},
+	"internal/store/storetest": {"internal/core", "internal/store", "internal/wire"},
+	"internal/localfs":         {},
+	// The fake detector mints a Dir for any path, so it is a test fixture only (see testRules).
+	"internal/localfs/localfstest": {"internal/localfs"},
 }
 
 // testRules lists, for each package directory, the packages only its test files may import in
@@ -43,11 +48,17 @@ var rules = map[string][]string{
 var testRules = map[string][]string{
 	"internal/core": {"internal/jobs/jobstest", "internal/wire", "gen/"},
 	"internal/wire": {"internal/core"},
+	// The store's tests run the contract suite, which depends on the store.
+	// The store's tests also open stores on directories the fake detector vouches for, which
+	// no non-test file may import.
+	"internal/store": {"internal/store/storetest", "internal/localfs/localfstest"},
+	// localfs's own tests run its checks against the fake.
+	"internal/localfs": {"internal/localfs/localfstest"},
 }
 
 // pureImports is the standard library the core may use. Nothing here reaches a clock, a file, the
 // network, a random source or a goroutine primitive, so a new need states itself in this list.
-var pureImports = []string{"cmp", "fmt", "maps", "slices", "strconv", "time"}
+var pureImports = []string{"cmp", "fmt", "maps", "reflect", "slices", "strconv", "time"}
 
 // impureTime matches the parts of package time that read the clock or wait. The core uses time only
 // for values and arithmetic.

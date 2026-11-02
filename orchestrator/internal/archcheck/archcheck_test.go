@@ -46,6 +46,9 @@ func TestRules(t *testing.T) {
 		{"a package with no rule fails", map[string]string{"orchestrator/internal/newthing/a.go": goFile("time")}, true},
 		{"nothing imports the CLI", map[string]string{"orchestrator/internal/wire/a.go": goFile("github.com/uw-syfi/vibesys/cli/internal/core")}, true},
 		{"nothing imports the gateway", map[string]string{"orchestrator/internal/wire/a_test.go": goFile("github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1")}, true},
+		{"a store test may use the fake detector", map[string]string{"orchestrator/internal/store/a_test.go": goFile(module + "internal/localfs/localfstest")}, false},
+		{"store code cannot use the fake detector", map[string]string{"orchestrator/internal/store/a.go": goFile(module + "internal/localfs/localfstest")}, true},
+		{"the contract suite package cannot use the fake detector", map[string]string{"orchestrator/internal/store/storetest/a.go": goFile(module + "internal/localfs/localfstest")}, true},
 		{"an unparsable file fails", map[string]string{"orchestrator/internal/core/a.go": "package ("}, true},
 	}
 	for _, c := range cases {

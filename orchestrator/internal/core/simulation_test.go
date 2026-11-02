@@ -178,12 +178,40 @@ func (w *sim) crash() {
 	if !reflect.DeepEqual(live, w.state) {
 		w.fail("the replayed state differs from the live one\nlive:   %+v\nreplay: %+v", live, w.state)
 	}
+	if !live.Equal(w.state) {
+		w.fail("Equal calls the replayed state different from the live one")
+	}
+	w.checkCheckpoint(live)
 	if len(w.kept) < 4 {
 		w.kept = append(w.kept, kept{state: w.state, commits: len(w.log)})
 	}
 	w.read = map[core.Session]int{}
 	for id := range w.sessions {
 		w.read[id] = int(w.state.CommittedOffset(id))
+	}
+}
+
+// checkCheckpoint holds a state's checkpoint to what it promises: the events pass the contract, and
+// replaying them from nothing gives a state equal to the one they describe.
+func (w *sim) checkCheckpoint(s core.State) {
+	w.t.Helper()
+	var events []core.Event
+	for i, e := range s.Checkpoint() {
+		data, err := wire.EncodeEvent(uint64(i+1), e)
+		if err != nil {
+			w.fail("encode a checkpoint event %+v: %v", e, err)
+		}
+		_, back, err := wire.DecodeEvent(data)
+		if err != nil {
+			w.fail("decode a checkpoint event %+v: %v", e, err)
+		}
+		events = append(events, back)
+	}
+	if got := core.Replay(core.State{}, events); !got.Equal(s) {
+		w.fail("a checkpoint replays to a different state\nlive:       %+v\ncheckpoint: %+v", s, got)
+	}
+	if v := core.Replay(core.State{}, events).Violations(); len(v) > 0 {
+		w.fail("the state from a checkpoint breaks %v", v)
 	}
 }
 
