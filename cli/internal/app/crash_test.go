@@ -362,6 +362,80 @@ func TestARestartStopsWaitingForAStoreThatStaysHeld(t *testing.T) {
 	w.gates.Release("g")
 }
 
+// cancelScenario cancels a running job through a daemon that crashes at the given step, restarts
+// it, and returns the number of steps a run without a crash takes. A cancel that was answered
+// holds through the crash: the gate stays shut, so the job can only end by being cancelled.
+func cancelScenario(t *testing.T, limit int64) int64 {
+	w := newWorld(t)
+	watching, hangUp := context.WithCancel(ctxFor(t))
+	defer hangUp()
+	c := &crash{limit: limit, onDeath: hangUp}
+	a1 := w.startApp(crashStores{inner: w.stores, c: c}, crashSupervisors{Supervisors: w.supervisors(), c: c})
+
+	answered := false
+	out, err := a1.Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: command("print", "A", ";", "hold", "g", ";", "print", "A2", ";", "exit", "0")})
+	switch {
+	case err == nil:
+		_ = a1.Watch(watching, scope, []core.JobID{out.Job.ID}, func(j core.Job) error {
+			if j.State != core.JobRunning || answered {
+				return nil
+			}
+			if _, err := a1.Cancel(ctxFor(t), call, j.ID, "enough"); err == nil {
+				answered = true
+			} else if !c.dead.Load() {
+				t.Fatalf("Cancel: %v", err)
+			}
+			return nil
+		})
+	case !c.dead.Load():
+		t.Fatalf("Submit: %v", err)
+	}
+	if limit < 0 {
+		next, err := a1.Submit(ctxFor(t), app.SubmitRequest{Context: elsewhere, Spec: command("exit", "0")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := a1.Watch(ctxFor(t), scopeElsewhere, []core.JobID{next.Job.ID}, func(core.Job) error { return nil }); err != nil {
+			t.Fatal(err)
+		}
+		return c.steps.Load()
+	}
+	c.kill()
+	a1.Close()
+	a2 := w.newApp()
+	if !answered {
+		w.gates.Release("g")
+	}
+	jobs, err := a2.Jobs(ctxFor(t), scope, core.JobFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	where := fmt.Sprintf("crash at step %d", limit)
+	for _, j := range jobs {
+		final := awaitFinal(t, a2, j.ID)
+		if answered && final.State != core.JobCancelled {
+			t.Errorf("%s: an answered cancel ended as %s", where, final.State)
+		}
+		if !answered && final.State != core.JobCancelled && final.State != core.JobSucceeded {
+			t.Errorf("%s: the job ended as %s", where, final.State)
+		}
+		if n := w.ran("A"); n > 1 {
+			t.Errorf("%s: the command ran %d times", where, n)
+		}
+	}
+	return c.steps.Load()
+}
+
+func TestACancelHoldsThroughACrashAtAnyStep(t *testing.T) {
+	total := cancelScenario(t, -1)
+	if total < 10 {
+		t.Fatalf("the scenario took %d steps; it is too small to mean anything", total)
+	}
+	for limit := int64(0); limit <= total+2; limit++ {
+		t.Run(fmt.Sprintf("step %d", limit), func(t *testing.T) { cancelScenario(t, limit) })
+	}
+}
+
 // check says what must hold of the world after a crash and a restart, wherever the crash was.
 func check(t *testing.T, w *world, a *app.App, reboot bool, limit int64) {
 	t.Helper()

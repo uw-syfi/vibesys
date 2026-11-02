@@ -119,9 +119,6 @@ func transient(err error) bool {
 	if errors.Is(err, supervisor.ErrGone) {
 		return false
 	}
-	if errors.Is(err, store.ErrOwnerLeaving) {
-		return true
-	}
 	var f *core.Failure
 	if errors.As(err, &f) {
 		switch f.Kind {

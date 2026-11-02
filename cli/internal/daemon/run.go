@@ -44,6 +44,8 @@ type Config struct {
 	Clock   clock.Clock
 	// Timers is what the daemon's waits go through. It defaults to the system's.
 	Timers clock.Timers
+	// Retry is how the daemon tries again. It defaults to app.DefaultRetry.
+	Retry app.Retry
 	// Logf receives the daemon's diagnostics. It may be nil.
 	Logf func(format string, args ...any)
 	// Ready receives one runtimedir.ReadyByte once the daemon serves, and is closed. A daemon that fails
@@ -96,6 +98,7 @@ func Run(ctx context.Context, cfg Config) (err error) {
 	a := app.New(app.Config{
 		Clock:        cfg.Clock,
 		Timers:       cfg.Timers,
+		Retry:        cfg.Retry,
 		Stores:       cfg.Runtime.Stores,
 		Environments: cfg.Runtime.Environments,
 		Supervisors:  cfg.Runtime.Supervisors,

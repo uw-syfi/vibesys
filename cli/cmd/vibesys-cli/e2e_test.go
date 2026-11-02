@@ -26,8 +26,10 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/daemon"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv"
 	"github.com/uw-syfi/vibesys/cli/internal/gitrepo"
+	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
 	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
 	"github.com/uw-syfi/vibesys/cli/internal/store/filestore"
+	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor/host"
 )
 
@@ -40,11 +42,23 @@ import (
 // supervisor, composed as production composes them but over the fake environment, and otherwise
 // it runs the tests.
 const (
-	roleVar   = "VIBESYS_E2E_ROLE"
-	rtVar     = "VIBESYS_E2E_RT"
-	indexVar  = "VIBESYS_E2E_INDEX"
-	gatesVar  = "VIBESYS_E2E_GATES"
-	runDirVar = "VIBESYS_E2E_RUNDIR"
+	roleVar       = "VIBESYS_E2E_ROLE"
+	rtVar         = "VIBESYS_E2E_RT"
+	indexVar      = "VIBESYS_E2E_INDEX"
+	gatesVar      = "VIBESYS_E2E_GATES"
+	runDirVar     = "VIBESYS_E2E_RUNDIR"
+	windowVar     = "VIBESYS_E2E_WINDOW"
+	quickRetryVar = "VIBESYS_E2E_QUICK_RETRY"
+)
+
+// The windows of a launch a test can stop it in.
+const (
+	// windowSpawned kills the daemon with the supervisor parked.
+	windowSpawned = "spawned"
+	// windowStarted kills the daemon once the command was told to start.
+	windowStarted = "started"
+	// windowSupervisor kills the supervisor once it answered, and the daemon goes on.
+	windowSupervisor = "supervisor"
 )
 
 func TestMain(m *testing.M) {
@@ -87,17 +101,23 @@ func e2eDaemon() int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
+	// A test that has a live store holder on purpose does not want the minute of a real daemon.
+	var retry app.Retry
+	if os.Getenv(quickRetryVar) != "" {
+		retry = app.Retry{Attempts: 2, First: time.Millisecond, Longest: time.Millisecond}
+	}
+	supervisors := host.New(dir.Supervisors(), func(runDir string) *exec.Cmd {
+		cmd := exec.Command(self, "-test.run=^$")
+		cmd.Env = append(os.Environ(), roleVar+"=supervisor", runDirVar+"="+runDir)
+		return cmd
+	}, "e2e", clock.System{})
 	err = daemon.Run(ctx, daemon.Config{
-		Dir: dir, Version: "e2e", Clock: clock.System{}, Ready: os.NewFile(runtimedir.ReadyFD, "ready"),
+		Dir: dir, Version: "e2e", Clock: clock.System{}, Ready: os.NewFile(runtimedir.ReadyFD, "ready"), Retry: retry,
 		Logf: func(format string, args ...any) { fmt.Fprintf(os.Stderr, "daemon: "+format+"\n", args...) },
 		Runtime: daemon.Runtime{
 			Stores:       filestores.New(index, app.Rules(5), filestore.Owner{Host: "e2e", Dir: dir.Path(), PID: os.Getpid()}),
 			Environments: e2eEnvironments(),
-			Supervisors: host.New(dir.Supervisors(), func(runDir string) *exec.Cmd {
-				cmd := exec.Command(self, "-test.run=^$")
-				cmd.Env = append(os.Environ(), roleVar+"=supervisor", runDirVar+"="+runDir)
-				return cmd
-			}, "e2e", clock.System{}),
+			Supervisors:  dyingSupervisors{Supervisors: supervisors, host: supervisors, marker: os.Getenv(windowVar)},
 		},
 	})
 	if errors.Is(err, daemon.ErrAlreadyRunning) {
@@ -108,6 +128,53 @@ func e2eDaemon() int {
 		return 1
 	}
 	return 0
+}
+
+// dyingSupervisors stops a launch in the window a test wrote into the marker, once, so a kill lands
+// where the test says and not where the timing happens to put it.
+type dyingSupervisors struct {
+	supervisor.Supervisors
+	host   *host.Host
+	marker string
+}
+
+func die() {
+	syscall.Kill(os.Getpid(), syscall.SIGKILL)
+	select {}
+}
+
+// Spawn implements supervisor.Supervisors.
+func (d dyingSupervisors) Spawn(ctx context.Context, l lifecycle.Launch) (supervisor.Handle, error) {
+	window, _ := os.ReadFile(d.marker)
+	if len(window) > 0 {
+		os.Remove(d.marker)
+	}
+	h, err := d.Supervisors.Spawn(ctx, l)
+	if err != nil {
+		return nil, err
+	}
+	switch string(window) {
+	case windowSpawned:
+		die()
+	case windowStarted:
+		return dyingHandle{h}, nil
+	case windowSupervisor:
+		pid, err := d.host.PID(l.Ref())
+		if err != nil {
+			return nil, err
+		}
+		syscall.Kill(pid, syscall.SIGKILL)
+	}
+	return h, nil
+}
+
+// dyingHandle ends the daemon once the command was told to start.
+type dyingHandle struct{ supervisor.Handle }
+
+func (d dyingHandle) Start(ctx context.Context) error {
+	err := d.Handle.Start(ctx)
+	die()
+	return err
 }
 
 func e2eSupervisor() int {
@@ -159,6 +226,8 @@ type e2e struct {
 	gates  *fakeenv.FIFOGates
 	git    *gitrepo.Fake
 	starts atomic.Int64
+	// quickRetry starts daemons that give up on a held store at once.
+	quickRetry bool
 }
 
 func newE2E(t *testing.T) *e2e {
@@ -194,6 +263,17 @@ func mustOpen(t *testing.T, path string) runtimedir.Dir {
 	return dir
 }
 
+// elsewhere is the same user and repository under another runtime directory, as a daemon has when
+// XDG_RUNTIME_DIR differs. It cannot see the supervisors of the first.
+func (e *e2e) elsewhere() *e2e {
+	e.t.Helper()
+	o := &e2e{t: e.t, root: e.root, repo: e.repo, gates: e.gates, git: e.git, dir: mustOpen(e.t, filepath.Join(e.root, "rt2"))}
+	e.t.Cleanup(o.killEverything)
+	return o
+}
+
+func (e *e2e) windowFile() string { return filepath.Join(e.root, "window") }
+
 func (e *e2e) options() client.Options {
 	self, err := os.Executable()
 	if err != nil {
@@ -204,8 +284,11 @@ func (e *e2e) options() client.Options {
 		Starter: client.ExecStarter{Dir: e.dir, Command: func() *exec.Cmd {
 			e.starts.Add(1)
 			cmd := exec.Command(self, "-test.run=^$")
-			cmd.Env = append(os.Environ(), roleVar+"=daemon",
-				rtVar+"="+e.dir.Path(), indexVar+"="+filepath.Join(e.root, "index"), gatesVar+"="+e.gates.Dir())
+			cmd.Env = append(os.Environ(), roleVar+"=daemon", rtVar+"="+e.dir.Path(),
+				indexVar+"="+filepath.Join(e.root, "index"), gatesVar+"="+e.gates.Dir(), windowVar+"="+e.windowFile())
+			if e.quickRetry {
+				cmd.Env = append(cmd.Env, quickRetryVar+"=1")
+			}
 			return cmd
 		}},
 	}
@@ -245,7 +328,7 @@ func (e *e2e) release(gate string) {
 // waitFor blocks on the job through the command line and returns what it printed and its exit code.
 func (e *e2e) wait(ids ...string) result {
 	e.t.Helper()
-	return e.run(withTask(append([]string{"wait"}, ids...)...)...)
+	return e.run(withTask(append([]string{"wait", "--timeout", hangBound.String()}, ids...)...)...)
 }
 
 func (e *e2e) logs(id string) string {
@@ -313,22 +396,67 @@ func (e *e2e) killAndAwaitDeath(socket string, pid int) {
 		e.t.Fatalf("connecting to %s before killing %d: %v", socket, pid, err)
 	}
 	defer conn.Close()
+	e.killAndAwaitEnd(conn, pid)
+}
+
+// killAndAwaitEnd kills the process and returns when the connection to it ends.
+func (e *e2e) killAndAwaitEnd(conn net.Conn, pid int) {
+	e.t.Helper()
 	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
 		e.t.Fatalf("kill %d: %v", pid, err)
+	}
+	if err := conn.SetDeadline(time.Now().Add(hangBound)); err != nil {
+		e.t.Fatal(err)
 	}
 	if _, err := io.Copy(io.Discard, conn); err != nil && !errors.Is(err, syscall.ECONNRESET) {
 		e.t.Fatalf("waiting for %d to die: %v", pid, err)
 	}
 }
 
+// awaitCommandEnd blocks until the command of the job has ended, by asking its supervisor, which
+// needs no daemon.
+func (e *e2e) awaitCommandEnd(id string) {
+	e.t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), hangBound)
+	defer cancel()
+	for _, info := range e.supervisors() {
+		if string(info.Ref.Job) != id {
+			continue
+		}
+		run, err := host.New(e.dir.Supervisors(), nil, "e2e", clock.System{}).Probe(ctx, info.Ref)
+		if err != nil || run.Handle == nil {
+			e.t.Fatalf("Probe of the supervisor of %s = %+v, %v", id, run, err)
+		}
+		if _, err := run.Handle.Follow(ctx, 1<<62, func([]byte) error { return nil }); err != nil {
+			e.t.Fatal(err)
+		}
+		return
+	}
+	e.t.Fatalf("job %s has no supervisor", id)
+}
+
+// storeLock is the file the daemon of the job's store holds a lock on.
+func (e *e2e) storeLock() string {
+	return filepath.Join(e.repo, ".vibesys-state", "kv", ".owner.lock")
+}
+
+func awaitCtx(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), hangBound)
+	t.Cleanup(cancel)
+	return ctx
+}
+
 func (e *e2e) daemonPID() int {
 	e.t.Helper()
-	c, err := client.Dial(context.Background(), e.options())
+	ctx, cancel := context.WithTimeout(context.Background(), hangBound)
+	defer cancel()
+	c, err := client.Dial(ctx, e.options())
 	if err != nil {
 		e.t.Fatalf("no daemon: %v", err)
 	}
 	defer c.Close()
-	st, err := c.Status(context.Background())
+	st, err := c.Status(ctx)
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -472,12 +600,174 @@ func TestE2EAJobThatFinishesWhileTheDaemonIsDownIsCollected(t *testing.T) {
 	e.awaitOutput(id, "A\n")
 	e.killDaemon()
 	e.release("g")
+	e.awaitCommandEnd(id)
 
 	if r := e.wait(id); r.code != exitOK || !strings.Contains(r.stdout, "succeeded (exit 0)") {
 		t.Fatalf("wait = %+v", r)
 	}
 	if out := e.logs(id); out != "A\nA2\n" {
 		t.Fatalf("output = %q", out)
+	}
+}
+
+// A store has one daemon, wherever else one is started. A daemon under another runtime directory
+// cannot see the supervisors, so it is refused while the first lives and, while a job runs, after
+// that too. It may take the store over once the first stopped and nothing runs.
+func TestE2EAStoreHasOneDaemonAcrossRuntimeDirectories(t *testing.T) {
+	e := newE2E(t)
+	other := e.elsewhere()
+	id := e.submit("print", "A", ";", "hold", "g", ";", "print", "A2", ";", "exit", "0")
+	e.awaitOutput(id, "A\n")
+
+	r := other.run(append(withTask("submit", "command", "HEAD", "--"), "exit", "0")...)
+	if r.code == exitOK || !strings.Contains(r.stderr, "in use by process") || !strings.Contains(r.stderr, e.dir.Path()) {
+		t.Fatalf("a second daemon's submit = %+v", r)
+	}
+	e.killDaemon()
+	lock, err := runtimedir.WaitLock(awaitCtx(t), e.storeLock())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lock.Unlock()
+	r = other.run(append(withTask("submit", "command", "HEAD", "--"), "exit", "0")...)
+	if r.code == exitOK || !strings.Contains(r.stderr, "running") {
+		t.Fatalf("a submit elsewhere with a job running here = %+v", r)
+	}
+
+	e.release("g")
+	if r := e.wait(id); r.code != exitOK {
+		t.Fatalf("wait = %+v", r)
+	}
+	if r := e.run("daemon", "stop"); r.code != exitOK {
+		t.Fatalf("daemon stop = %+v", r)
+	}
+	next := other.submit("print", "moved", ";", "exit", "0")
+	if r := other.wait(next); r.code != exitOK {
+		t.Fatalf("wait after the store moved = %+v", r)
+	}
+}
+
+// The instance lock is only the first line. With it deleted, a second daemon comes up in the same
+// runtime directory while the first lives, and the store still has one daemon.
+func TestE2EADeletedInstanceLockStillLeavesTheStoreOneDaemon(t *testing.T) {
+	e := newE2E(t)
+	e.quickRetry = true
+	id := e.submit("print", "A", ";", "hold", "g", ";", "print", "A2", ";", "exit", "0")
+	e.awaitOutput(id, "A\n")
+	first := e.daemonPID()
+	conn, err := net.Dial("unix", e.dir.Socket())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	for _, f := range []string{e.dir.DaemonLock(), e.dir.Socket()} {
+		if err := os.Remove(f); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	r := e.run(append(withTask("submit", "command", "HEAD", "--"), "exit", "0")...)
+	if r.code == exitOK || !strings.Contains(r.stderr, fmt.Sprintf("in use by process %d", first)) {
+		t.Fatalf("a submit to the second daemon = %+v", r)
+	}
+
+	e.killAndAwaitEnd(conn, first)
+	lock, err := runtimedir.WaitLock(awaitCtx(t), e.storeLock())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lock.Unlock()
+	if r := e.run("daemon", "restart"); r.code != exitOK {
+		t.Fatalf("daemon restart = %+v", r)
+	}
+	e.release("g")
+	if r := e.wait(id); r.code != exitOK {
+		t.Fatalf("wait = %+v", r)
+	}
+	if out := e.logs(id); out != "A\nA2\n" {
+		t.Fatalf("output = %q", out)
+	}
+}
+
+// A repository on a disk that is unmounted leaves an empty directory at its path. That costs
+// nothing: no store is made there, its job is not lost, and what the job did meanwhile is there
+// when the disk comes back.
+func TestE2EARepositoryThatIsAwayKeepsItsJob(t *testing.T) {
+	e := newE2E(t)
+	id := e.submit("print", "A", ";", "hold", "g", ";", "print", "A2", ";", "exit", "0")
+	e.awaitOutput(id, "A\n")
+	e.killDaemon()
+	away := e.repo + ".away"
+	if err := os.Rename(e.repo, away); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(e.repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if r := e.run("daemon", "restart"); r.code != exitOK {
+		t.Fatalf("daemon restart while away = %+v", r)
+	}
+	e.release("g")
+	e.awaitCommandEnd(id)
+	if r := e.run("daemon", "restart"); r.code != exitOK {
+		t.Fatalf("daemon restart while away = %+v", r)
+	}
+	if made, err := os.ReadDir(e.repo); err != nil || len(made) != 0 {
+		t.Fatalf("the mount point holds %v, %v; want nothing", made, err)
+	}
+	if left := e.supervisors(); len(left) != 1 {
+		t.Fatalf("supervisors while away = %v, want the one that keeps the result", left)
+	}
+
+	if err := os.Remove(e.repo); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(away, e.repo); err != nil {
+		t.Fatal(err)
+	}
+	if r := e.run("daemon", "restart"); r.code != exitOK {
+		t.Fatalf("daemon restart after the return = %+v", r)
+	}
+	if r := e.wait(id); r.code != exitOK || !strings.Contains(r.stdout, "succeeded (exit 0)") {
+		t.Fatalf("wait = %+v", r)
+	}
+	if out := e.logs(id); out != "A\nA2\n" {
+		t.Fatalf("output = %q", out)
+	}
+}
+
+// A kill inside a launch, with real processes: the job after one that ends is launched with the
+// test's window armed, and it comes to a clean end from there. The daemon is killed by itself at
+// the very point the test names, so no timing decides which window this was.
+func TestE2EAKillInsideALaunch(t *testing.T) {
+	for _, tc := range []struct{ window, ended string }{
+		{windowSpawned, "succeeded (exit 0)"},
+		{windowStarted, "succeeded (exit 0)"},
+		{windowSupervisor, "lost"},
+	} {
+		t.Run(tc.window, func(t *testing.T) {
+			e := newE2E(t)
+			first := e.submit("print", "A", ";", "hold", "g", ";", "exit", "0")
+			e.awaitOutput(first, "A\n")
+			next := e.submit("print", "B", ";", "exit", "0")
+			if err := os.WriteFile(e.windowFile(), []byte(tc.window), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			e.release("g")
+			r := e.wait(first, next)
+			if !strings.Contains(r.stdout, tc.ended) {
+				t.Fatalf("wait = %+v, want a job %s", r, tc.ended)
+			}
+			if tc.window != windowSupervisor {
+				if n := e.starts.Load(); n != 2 {
+					t.Fatalf("%d daemons started; the kill should have made it 2", n)
+				}
+				if out := e.logs(next); out != "B\n" {
+					t.Fatalf("output = %q: the command ran other than once", out)
+				}
+			}
+			e.expectSupervisorGone(next)
+		})
 	}
 }
 
