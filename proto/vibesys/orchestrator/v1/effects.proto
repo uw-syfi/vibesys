@@ -1,0 +1,100 @@
+syntax = "proto3";
+package vibesys.orchestrator.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "vibesys/orchestrator/v1/orchestrator.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
+
+// Effect is one request for I/O. It commits in the same transaction as the events that decided
+// it, and a worker carries it out at least once, so its id must be enough to drop a repeat.
+message Effect {
+  // Stable across redelivery.
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+  oneof body {
+    option (buf.validate.oneof).required = true;
+    LaunchSession launch_session = 10;
+    StartTurn start_turn = 11;
+    Steer steer = 12;
+    Interrupt interrupt = 13;
+    CloseSession close_session = 14;
+    ArmTimer arm_timer = 15;
+  }
+}
+
+// SessionRef names one session of one agent. A sidecar refuses a stale one.
+message SessionRef {
+  string agent_id = 1 [(buf.validate.field).string.min_len = 1];
+  uint32 session = 2 [(buf.validate.field).uint32.gt = 0];
+}
+
+message LaunchSession {
+  SessionRef session = 1 [(buf.validate.field).required = true];
+  string run_id = 2 [(buf.validate.field).string.min_len = 1];
+  string repository = 3 [(buf.validate.field).string.min_len = 1];
+  AgentRole role = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  Harness harness = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  string model = 6;
+  string reasoning_effort = 7;
+  // Set to continue the provider's conversation instead of starting one.
+  string resume_conversation_id = 8;
+  // Set on a resume: the worktree the agent had.
+  string worktree = 9;
+}
+
+message StartTurn {
+  SessionRef session = 1 [(buf.validate.field).required = true];
+  string turn_id = 2 [(buf.validate.field).string.min_len = 1];
+  // The data a template renders into the prompt.
+  Message message = 3 [(buf.validate.field).required = true];
+}
+
+message Steer {
+  SessionRef session = 1 [(buf.validate.field).required = true];
+  string turn_id = 2 [(buf.validate.field).string.min_len = 1];
+  Message message = 3 [(buf.validate.field).required = true];
+}
+
+message Interrupt {
+  SessionRef session = 1 [(buf.validate.field).required = true];
+  string turn_id = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+message CloseSession {
+  SessionRef session = 1 [(buf.validate.field).required = true];
+  // Kill the session without waiting for it. Its stop grace ran out, so nothing listens for more.
+  bool force = 2;
+}
+
+// TimerKind says what a timer is for.
+enum TimerKind {
+  TIMER_KIND_UNSPECIFIED = 0;
+  TIMER_KIND_RUN_DEADLINE = 1;
+  // How long a session has to confirm a close.
+  TIMER_KIND_STOP_GRACE = 2;
+}
+
+// ArmTimer asks for a TimerFired at a time. A timer that outlives its reason fires harmlessly.
+message ArmTimer {
+  option (buf.validate.message).cel = {
+    id: "arm_timer.session"
+    message: "a stop grace names a session and a run deadline does not"
+    expression: "has(this.session) == (this.kind == 2)"
+  };
+
+  TimerKind kind = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  string run_id = 2 [(buf.validate.field).string.min_len = 1];
+  // Set on a stop grace.
+  SessionRef session = 3;
+  google.protobuf.Timestamp fire_at = 4 [(buf.validate.field).required = true];
+}

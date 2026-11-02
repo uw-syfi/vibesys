@@ -1,0 +1,125 @@
+syntax = "proto3";
+package vibesys.orchestrator.v1;
+
+import "buf/validate/validate.proto";
+import "vibesys/orchestrator/v1/effects.proto";
+import "vibesys/orchestrator/v1/orchestrator.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
+
+// SidecarService is what one agent's sidecar serves over a Unix socket. There is one sidecar per
+// session, and it outlives the daemon, so a daemon restart reattaches and loses only deltas.
+service SidecarService {
+  // Send carries out a command. A repeated effect_id answers as the first delivery did.
+  rpc Send(SendRequest) returns (SendResponse);
+  // Follow streams the session's events after an offset.
+  rpc Follow(FollowRequest) returns (stream FollowResponse);
+}
+
+// SidecarCommand is an effect addressed to a live session. Opening a session is not one: the
+// daemon starts the sidecar with what LaunchSession says.
+message SidecarCommand {
+  // The id of the effect this carries out.
+  string effect_id = 1 [(buf.validate.field).string.min_len = 1];
+  oneof body {
+    option (buf.validate.oneof).required = true;
+    StartTurn start_turn = 2;
+    Steer steer = 3;
+    Interrupt interrupt = 4;
+    CloseSession close = 5;
+  }
+}
+
+message SendRequest {
+  SidecarCommand command = 1 [(buf.validate.field).required = true];
+}
+
+message SendResponse {}
+
+message FollowRequest {
+  // The last offset the daemon committed. Zero reads from the start.
+  uint64 after_offset = 1;
+}
+
+message FollowResponse {
+  SidecarEvent event = 1 [(buf.validate.field).required = true];
+}
+
+// ConversationOpened says a session is ready. A resume that kept the conversation reports the
+// same conversation id.
+message ConversationOpened {
+  string provider_conversation_id = 1 [(buf.validate.field).string.min_len = 1];
+  Capabilities capabilities = 2 [(buf.validate.field).required = true];
+  string worktree = 3 [(buf.validate.field).string.min_len = 1];
+}
+
+// SidecarItem is an item as a provider reports it. The orchestrator assigns its ordinal and agent.
+message SidecarItem {
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+  string turn_id = 2 [(buf.validate.field).string.min_len = 1];
+  ItemStatus status = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  oneof body {
+    option (buf.validate.oneof).required = true;
+    Text assistant = 10;
+    Text reasoning = 11;
+    Text prompt = 12;
+    ToolCall tool = 13;
+  }
+}
+
+message SidecarDelta {
+  string item_id = 1 [(buf.validate.field).string.min_len = 1];
+  oneof body {
+    option (buf.validate.oneof).required = true;
+    string text = 2;
+    string command_output = 3;
+  }
+}
+
+message TurnEnded {
+  string turn_id = 1 [(buf.validate.field).string.min_len = 1];
+  // A final status: COMPLETED, INTERRUPTED or FAILED.
+  TurnStatus status = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    in: [2, 3, 4]
+  }];
+  Usage usage = 3;
+}
+
+// SteerOutcome answers one Steer. It follows the TurnEnded of a turn the steer came too late for.
+message SteerOutcome {
+  string message_id = 1 [(buf.validate.field).string.min_len = 1];
+  // False when the turn it was meant for had ended.
+  bool accepted = 2;
+}
+
+message UsageReported {
+  string turn_id = 1 [(buf.validate.field).string.min_len = 1];
+  Usage usage = 2 [(buf.validate.field).required = true];
+}
+
+message SessionFailed {
+  string detail = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+// SessionClosed confirms a session is over. It is the last event of a session.
+message SessionClosed {}
+
+message SidecarEvent {
+  // Increases within a session; deltas take offsets too, so offsets can skip.
+  uint64 offset = 1 [(buf.validate.field).uint64.gt = 0];
+  oneof body {
+    option (buf.validate.oneof).required = true;
+    ConversationOpened opened = 10;
+    SidecarItem item = 11;
+    SidecarDelta delta = 12;
+    TurnEnded turn_ended = 13;
+    SteerOutcome steer = 14;
+    UsageReported usage = 15;
+    SessionFailed failed = 16;
+    SessionClosed closed = 17;
+  }
+}
