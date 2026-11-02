@@ -30,6 +30,9 @@ const (
 	exitFailed       = 1
 	exitInvalidInput = 2
 	exitTimeout      = 3
+	// exitEndUnknown is a wait that gave up without learning how its jobs ended. It is not a job
+	// that failed.
+	exitEndUnknown = 4
 )
 
 // deps is what a command line is run with. A test supplies the pieces that would reach the

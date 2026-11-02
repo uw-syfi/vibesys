@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 	"fmt"
-	"time"
+	"maps"
+	"slices"
+	"strings"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
@@ -12,17 +14,30 @@ import (
 
 // Start tells the machine what the stores and the supervisors hold, and so starts the daemon's
 // work: queued jobs wait their turn again, a running job whose supervisor answers is followed
-// where it left off, one whose supervisor is gone is lost, and a run no job needs is cleared. A
+// where it left off, one whose supervisor is dead is lost, and a run no job needs is cleared. A
 // first start finds nothing and is the same code.
 //
-// It fails, and the daemon does not serve, when a store cannot be read: with a store missing from
-// the picture, a running job in it would look like a stray run and be mishandled.
+// It fails, and the daemon does not serve, only when the list of stores or of supervisors cannot be
+// read: without them it cannot tell what it would be touching. A store that cannot be read, such
+// as a repository on a disk that is not mounted, is left out for now and does not stop the rest.
+// A run of such a store is not released and its outcome is not discarded: the run is in doubt and
+// holds the machine, the store is tried again, and when it returns the run is taken up.
 func (a *App) Start(ctx context.Context) error {
-	scopes, err := a.cfg.Stores.Known(ctx)
+	var scopes []Scope
+	err := a.retry(ctx, func(ctx context.Context) error {
+		var err error
+		scopes, err = a.cfg.Stores.Known(ctx)
+		return err
+	})
 	if err != nil {
 		return fmt.Errorf("listing the stores: %w", err)
 	}
-	runs, err := a.cfg.Supervisors.Runs(ctx)
+	var runs []supervisor.Run
+	err = a.call(ctx, func(ctx context.Context) error {
+		var err error
+		runs, err = a.cfg.Supervisors.Runs(ctx)
+		return err
+	})
 	if err != nil {
 		return fmt.Errorf("listing the supervisors: %w", err)
 	}
@@ -30,46 +45,137 @@ func (a *App) Start(ctx context.Context) error {
 	for _, r := range runs {
 		byRef[r.Ref] = r
 	}
-	at := a.now()
+	away := map[Scope]bool{}
 	for _, scope := range scopes {
-		t, err := a.open(ctx, scope)
-		if err != nil {
-			return fmt.Errorf("opening the store of task %s in %s: %w", scope.Task, scope.Repository, err)
-		}
-		jobs, err := t.store.Jobs(ctx, core.JobFilter{States: []core.JobState{core.JobQueued, core.JobRunning}})
-		if err != nil {
-			return fmt.Errorf("reading the jobs of task %s in %s: %w", scope.Task, scope.Repository, err)
-		}
-		for _, job := range jobs {
-			ref := lifecycle.Ref{Store: lifecycle.StoreIDOf(scope.Repository, scope.Task), Job: job.ID}
-			a.recovered(ref, job.State, job.SubmittedAt, at, byRef[ref])
-			delete(byRef, ref)
+		if err := a.recoverScope(ctx, scope, byRef); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			a.cfg.Logf("the store of task %s in %s cannot be read yet: %v", scope.Task, scope.Repository, err)
+			away[scope] = true
 		}
 	}
-	// What is left is runs of jobs the stores do not have as queued or running.
-	for ref, r := range byRef {
-		a.recovered(ref, "", at, at, r)
+	// What is left is runs of jobs the stores do not have as queued or running, and runs of stores
+	// that could not be read.
+	for _, ref := range sortedRefs(byRef) {
+		r := byRef[ref]
+		scope := Scope{Repository: r.Launch.Repository, Task: r.Launch.Task}
+		found := lifecycle.Recovered{Ref: ref, Supervisor: presenceOf(r), At: a.now()}
+		switch {
+		case r.Launch.Repository == "":
+			found.Away = false
+		case away[scope]:
+			found.Away = true
+		default:
+			if !slices.Contains(scopes, scope) {
+				// The store is not in the index, so nothing was recorded for it, or the index
+				// lost it. Reading it says which.
+				found = a.lookInStore(found, scope)
+				if found.Away {
+					away[scope] = true
+				}
+			}
+		}
+		if r.Launch.Repository == "" {
+			a.post(message{event: found, handle: r.Handle})
+			continue
+		}
+		a.post(message{event: found, handle: r.Handle, scope: &scope})
 	}
-	a.dispatch(lifecycle.RecoveryDone{})
+	a.post(message{event: lifecycle.RecoveryDone{}, then: func() { a.sweep(away) }})
 	return nil
 }
 
-// recovered tells the machine of one job and what is left of its run. A run that has no entry in
-// the listing is PresenceNone. The state is empty for a run no store job needs.
-func (a *App) recovered(ref lifecycle.Ref, state core.JobState, submitted, at time.Time, run supervisor.Run) {
-	presence := run.Presence
-	if presence == "" {
-		presence = lifecycle.PresenceNone
+func sortedRefs(runs map[lifecycle.Ref]supervisor.Run) []lifecycle.Ref {
+	out := slices.Collect(maps.Keys(runs))
+	slices.SortFunc(out, func(a, b lifecycle.Ref) int { return strings.Compare(a.String(), b.String()) })
+	return out
+}
+
+// presenceOf is what a listing says of a run: no entry is PresenceNone.
+func presenceOf(r supervisor.Run) lifecycle.Presence {
+	if r.Presence == "" {
+		return lifecycle.PresenceNone
 	}
-	if presence == lifecycle.PresenceAlive && run.Handle != nil {
-		a.setHandle(ref, run.Handle)
+	return r.Presence
+}
+
+// recoverScope tells the machine of the unfinished jobs of one store, with what is left of their
+// runs, and takes those runs from byRef.
+func (a *App) recoverScope(ctx context.Context, scope Scope, byRef map[lifecycle.Ref]supervisor.Run) error {
+	st, err := a.cfg.Stores.Open(ctx, scope)
+	if err != nil {
+		return err
 	}
-	if state == core.JobQueued {
-		// A leftover run of a queued job is cleared and the job goes on queueing: the machine
-		// is told so with Discarded, not Closed.
-		a.mu.Lock()
-		a.discarded[ref] = true
-		a.mu.Unlock()
+	jobs, err := st.Jobs(ctx, core.JobFilter{States: []core.JobState{core.JobQueued, core.JobRunning}})
+	if err != nil {
+		return err
 	}
-	a.dispatch(lifecycle.Recovered{Ref: ref, State: state, SubmittedAt: submitted, Supervisor: presence, At: at})
+	for _, job := range jobs {
+		ref := lifecycle.Ref{Store: storeIDOf(scope), Job: job.ID}
+		run := byRef[ref]
+		delete(byRef, ref)
+		a.post(message{
+			event: lifecycle.Recovered{
+				Ref: ref, State: job.State, SubmittedAt: job.SubmittedAt, Supervisor: presenceOf(run), At: a.now(),
+			},
+			handle: run.Handle, scope: &scope,
+		})
+	}
+	return nil
+}
+
+func storeIDOf(s Scope) lifecycle.StoreID { return lifecycle.StoreIDOf(s.Repository, s.Task) }
+
+// sweep looks again, every slow period, at what no event will bring: a store that was away, and a
+// queued job the machine never heard of, because a submission reached the store and its answer
+// did not reach the daemon.
+func (a *App) sweep(away map[Scope]bool) {
+	for a.sleep(a.ctx, a.cfg.SlowPeriod) {
+		a.sweepOnce(away)
+	}
+}
+
+func (a *App) sweepOnce(away map[Scope]bool) {
+	scopes, err := a.cfg.Stores.Known(a.ctx)
+	if err != nil {
+		a.cfg.Logf("listing the stores: %v", err)
+		return
+	}
+	for _, scope := range scopes {
+		if away[scope] {
+			var runs []supervisor.Run
+			err := a.call(a.ctx, func(ctx context.Context) error {
+				var err error
+				runs, err = a.cfg.Supervisors.Runs(ctx)
+				return err
+			})
+			if err != nil {
+				a.cfg.Logf("listing the supervisors: %v", err)
+				continue
+			}
+			byRef := map[lifecycle.Ref]supervisor.Run{}
+			for _, r := range runs {
+				byRef[r.Ref] = r
+			}
+			if a.recoverScope(a.ctx, scope, byRef) == nil {
+				delete(away, scope)
+			}
+			continue
+		}
+		st, err := a.cfg.Stores.Open(a.ctx, scope)
+		if err != nil {
+			continue
+		}
+		jobs, err := st.Jobs(a.ctx, core.JobFilter{States: []core.JobState{core.JobQueued}})
+		if err != nil {
+			continue
+		}
+		for _, job := range jobs {
+			a.post(message{
+				event: lifecycle.Admitted{Ref: lifecycle.Ref{Store: storeIDOf(scope), Job: job.ID}, SubmittedAt: job.SubmittedAt},
+				scope: &scope,
+			})
+		}
+	}
 }

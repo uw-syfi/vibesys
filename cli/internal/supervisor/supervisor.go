@@ -11,6 +11,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
 	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
+	"github.com/uw-syfi/vibesys/cli/internal/owned"
 )
 
 // ErrReleased ends an Attach on a supervisor that was released while it waited.
@@ -50,6 +51,7 @@ type Supervisor struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
+	group    owned.Group
 	changed  changed.Signal
 	released chan struct{}
 	done     chan struct{}
@@ -92,7 +94,7 @@ func (s *Supervisor) Start() error {
 		return &core.Failure{Kind: core.FailureConflict, Message: "the supervisor was released and cannot start"}
 	}
 	s.phase = PhaseRunning
-	go s.run()
+	s.group.Go(s.run)
 	return nil
 }
 

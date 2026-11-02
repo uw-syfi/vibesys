@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/client"
+	"github.com/uw-syfi/vibesys/cli/internal/wire"
 )
 
 // waitCommand is `wait <job>... [--any] [--timeout d]`. Its exit code says how the jobs ended: 0
@@ -43,8 +45,12 @@ func waitCommand(ctx context.Context, d deps, args []string) int {
 // waitFor waits and prints the last state of each job: one line each, or one JSON message each.
 func waitFor(ctx context.Context, d deps, cl *client.Client, callCtx *cliv1.CallContext, ids []string, opts client.WaitOptions, asJSON bool) int {
 	res, err := cl.Wait(ctx, callCtx, ids, opts)
+	if errors.Is(err, client.ErrEndUnknown) {
+		fail(d, asJSON, wire.Unavailable(err.Error()))
+		return exitEndUnknown
+	}
 	if err != nil {
-		return fail(d, asJSON, err)
+		return failOnJob(d, asJSON, err)
 	}
 	for _, j := range res.Jobs {
 		if asJSON {
@@ -90,7 +96,7 @@ func cancelCommand(ctx context.Context, d deps, args []string) int {
 	defer cl.Close()
 	resp, err := cl.Cancel(ctx, &cliv1.CancelRequest{Context: callCtx, JobId: ids[0], Reason: *reason})
 	if err != nil {
-		return fail(d, c.json, err)
+		return failOnJob(d, c.json, err)
 	}
 	if c.json {
 		printJSON(d, resp)
@@ -124,7 +130,7 @@ func noteCommand(ctx context.Context, d deps, args []string) int {
 	defer cl.Close()
 	resp, err := cl.AddNote(ctx, &cliv1.AddNoteRequest{Context: callCtx, JobId: positional[0], Text: positional[1]})
 	if err != nil {
-		return fail(d, c.json, err)
+		return failOnJob(d, c.json, err)
 	}
 	if c.json {
 		printJSON(d, resp)
@@ -236,7 +242,7 @@ func logsCommand(ctx context.Context, d deps, args []string) int {
 		return werr
 	})
 	if err != nil {
-		return fail(d, c.json, err)
+		return failOnJob(d, c.json, err)
 	}
 	return exitOK
 }

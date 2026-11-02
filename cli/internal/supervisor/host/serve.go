@@ -7,11 +7,15 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"time"
 
 	"google.golang.org/grpc"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
+	"github.com/uw-syfi/vibesys/cli/internal/owned"
+	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor/rpc"
 )
@@ -24,7 +28,14 @@ type Deps struct {
 	Environments  environment.Environments
 	Checkouts     supervisor.Checkouts
 	BinaryVersion string
+	// Timers bound how long a released supervisor waits for its callers. It defaults to the
+	// system's.
+	Timers clock.Timers
 }
+
+// releaseGrace is how long a released supervisor waits for its calls to end. The answer to Release
+// needs moments; a caller that stopped reading a stream would otherwise keep the process for good.
+const releaseGrace = 5 * time.Second
 
 // Serve is the supervisor process. It reads the launch in the run directory, serves the
 // supervisor on the directory's socket, tells the daemon through ready that it does, and returns
@@ -42,6 +53,13 @@ func Serve(ctx context.Context, dirPath string, deps Deps, ready io.WriteCloser)
 			ready.Close()
 		}
 	}()
+	// First of all, so that the daemon can never prove this process dead while it runs. A daemon
+	// clearing the run holds this lock until the directory is gone, and the steps below then fail.
+	alive, err := runtimedir.WaitLock(ctx, dir.alive())
+	if err != nil {
+		return fmt.Errorf("supervisor: %w", err)
+	}
+	defer alive.Unlock()
 	if err := os.WriteFile(dir.pid(), []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
 		return fmt.Errorf("supervisor: %w", err)
 	}
@@ -72,7 +90,9 @@ func Serve(ctx context.Context, dirPath string, deps Deps, ready io.WriteCloser)
 	server := grpc.NewServer()
 	cliv1.RegisterSupervisorServiceServer(server, rpc.NewServer(sup, deps.BinaryVersion))
 	served := make(chan error, 1)
-	go func() { served <- server.Serve(listener) }()
+	var serving owned.Group
+	defer serving.Wait()
+	serving.Go(func() { served <- server.Serve(listener) })
 
 	if _, err := ready.Write([]byte{readyByte}); err != nil {
 		server.Stop()
@@ -83,7 +103,11 @@ func Serve(ctx context.Context, dirPath string, deps Deps, ready io.WriteCloser)
 	select {
 	case <-sup.Released():
 		// Let the answer to Release reach the daemon before the socket goes.
-		server.GracefulStop()
+		timers := deps.Timers
+		if timers == nil {
+			timers = clock.System{}
+		}
+		clock.Graceful(timers, releaseGrace, server.GracefulStop, server.Stop)
 		os.Remove(dir.spool())
 		return nil
 	case <-ctx.Done():

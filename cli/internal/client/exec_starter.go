@@ -26,7 +26,8 @@ var _ Starter = ExecStarter{}
 const logTail = 2048
 
 // Start implements Starter. It returns when the daemon says it serves; a daemon that exits first
-// closes the pipe, and the start fails with the end of its log, not after a wait of some length.
+// closes the pipe, and the start fails with the end of its log, not after a wait of some length. A
+// daemon that found another holding the machine says so, and that is ErrDaemonRunning.
 func (s ExecStarter) Start(ctx context.Context) error {
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -62,6 +63,10 @@ func (s ExecStarter) Start(ctx context.Context) error {
 		}
 		return wire.Unavailable(fmt.Sprintf(
 			"the daemon did not start; the end of %s says:\n%s", s.Dir.Log(), tailOf(s.Dir.Log())))
+	}
+	if buf[0] == runtimedir.ReadyTaken {
+		cmd.Wait()
+		return runtimedir.ErrDaemonRunning
 	}
 	if buf[0] != runtimedir.ReadyByte {
 		cmd.Process.Kill()

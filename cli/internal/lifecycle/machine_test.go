@@ -439,7 +439,7 @@ func TestStepLeavesTheStateItWasGivenAsItWas(t *testing.T) {
 	if !slices.Equal(held, before.Held()) {
 		t.Fatalf("Step changed its input: %+v became %+v", held, before.Held())
 	}
-	if len(after.Held()) != 1 || len(reqs) != 1 {
+	if len(after.Held()) != 2 || len(reqs) != 1 {
 		t.Fatalf("cancelling a queued job left %+v and asked for %+v", after.Held(), reqs)
 	}
 }

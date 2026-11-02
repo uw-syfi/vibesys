@@ -6,12 +6,17 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
+	"sync"
 	"syscall"
 	"testing"
+	"time"
 
+	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv"
 	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
+	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor/host"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor/suptest"
@@ -75,10 +80,15 @@ func (r *hostRig) newHost() *host.Host {
 		cmd.Env = append(os.Environ(), roleVar+"=supervisor", gatesVar+"="+r.gates.Dir())
 		cmd.ExtraFiles = []*os.File{r.lifeline}
 		return cmd
-	}, "test")
+	}, "test", clock.System{})
 }
 
 func newHostRig(t *testing.T) suptest.Rig {
+	t.Helper()
+	return openHostRig(t).rig()
+}
+
+func openHostRig(t *testing.T) *hostRig {
 	t.Helper()
 	// A short directory: a Unix socket path is limited to about a hundred bytes.
 	root, err := os.MkdirTemp("", "vsh")
@@ -102,6 +112,11 @@ func newHostRig(t *testing.T) suptest.Rig {
 		os.RemoveAll(root)
 		os.RemoveAll(gatesDir)
 	})
+	return r
+}
+
+func (r *hostRig) rig() suptest.Rig {
+	t := r.t
 	return suptest.Rig{
 		Supervisors: r.h,
 		Restart:     func() supervisor.Supervisors { return r.newHost() },
@@ -123,4 +138,61 @@ func newHostRig(t *testing.T) suptest.Rig {
 
 func TestHostPassesTheContract(t *testing.T) {
 	suptest.Run(t, newHostRig)
+}
+
+// A caller that stopped reading, like a daemon that was frozen, cannot keep a released supervisor
+// alive: the process goes, and with it what it holds. The Release goes through a second connection,
+// as a new daemon's does.
+func TestAReleasedSupervisorDoesNotWaitForACallerThatStoppedReading(t *testing.T) {
+	r := openHostRig(t)
+	ctx, cancel := context.WithTimeout(context.Background(), suptest.Backstop)
+	defer cancel()
+	l := lifecycle.Launch{
+		Repository: "/repo", Task: "task", Job: "stalled",
+		Spec: core.JobSpec{
+			Commit: "0123456789abcdef0123456789abcdef01234567", Environment: core.EnvironmentHost,
+			Settings: core.CommandSettings{Argv: []string{"print", strings.Repeat("x", 4<<20), ";", "exit", "0"}, Timeout: time.Hour},
+		},
+	}
+	frozen, err := r.h.Spawn(ctx, l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := frozen.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	stalled, unstall := make(chan struct{}), make(chan struct{})
+	var follower sync.WaitGroup
+	follower.Go(func() {
+		var once sync.Once
+		frozen.Follow(ctx, 0, func([]byte) error {
+			once.Do(func() { close(stalled) })
+			<-unstall
+			return nil
+		})
+	})
+	defer follower.Wait()
+	defer close(unstall)
+	<-stalled
+
+	next := r.newHost()
+	run, err := next.Probe(ctx, l.Ref())
+	if err != nil || run.Handle == nil {
+		t.Fatalf("Probe = %+v, %v", run, err)
+	}
+	if _, err := run.Handle.Follow(ctx, 1<<62, func([]byte) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	infos, err := host.Inspect(r.root)
+	if err != nil || len(infos) != 1 {
+		t.Fatalf("Inspect = %+v, %v", infos, err)
+	}
+	if err := run.Handle.Release(ctx); err != nil {
+		t.Fatal(err)
+	}
+	gone, err := runtimedir.WaitLock(ctx, infos[0].Alive)
+	if err != nil {
+		t.Fatalf("the released supervisor is still there: %v", err)
+	}
+	gone.Unlock()
 }

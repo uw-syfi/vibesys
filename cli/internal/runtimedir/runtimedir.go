@@ -1,6 +1,7 @@
 package runtimedir
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -86,13 +87,17 @@ func invalid(format string, args ...any) *core.Failure {
 }
 
 // ReadyFD is the file descriptor on which a client that starts the daemon passes the readiness
-// pipe, and ReadyByte is what the daemon writes to it once it serves. A daemon that fails first
-// closes the pipe without the byte, so the client learns of the failure when it happens and not
-// after some wait.
+// pipe, and ReadyByte is what the daemon writes to it once it serves. ReadyTaken is what it writes
+// instead when another daemon holds the machine. A daemon that fails first closes the pipe with
+// neither, so the client learns of the failure when it happens and not after some wait.
 const (
-	ReadyFD   = 3
-	ReadyByte = 'R'
+	ReadyFD    = 3
+	ReadyByte  = 'R'
+	ReadyTaken = 'T'
 )
+
+// ErrDaemonRunning says another daemon holds the machine.
+var ErrDaemonRunning = errors.New("a daemon is already running")
 
 // Path is the directory itself.
 func (d Dir) Path() string { return d.path }

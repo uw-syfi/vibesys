@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
@@ -149,7 +150,8 @@ func daemonRun(ctx context.Context, d deps) int {
 }
 
 // readyPipe is the readiness pipe a parent passed, or nil when the process was not started with one.
-func readyPipe() *os.File {
+// It returns the interface, as a nil *os.File in an io.WriteCloser would not be nil to the daemon.
+func readyPipe() io.WriteCloser {
 	f := os.NewFile(uintptr(production.ReadyFD), "ready")
 	if f == nil {
 		return nil

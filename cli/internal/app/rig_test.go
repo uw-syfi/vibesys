@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/uw-syfi/vibesys/cli/internal/app"
+	"github.com/uw-syfi/vibesys/cli/internal/app/memstores"
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv"
@@ -31,7 +32,7 @@ var (
 type world struct {
 	t         *testing.T
 	clock     *clock.Manual
-	stores    *app.MemoryStores
+	stores    *memstores.Stores
 	gates     *fakeenv.MemoryGates
 	env       *fakeenv.Environment
 	checkouts *fakeenv.Checkouts
@@ -45,7 +46,7 @@ func newWorld(t *testing.T) *world {
 	w := &world{
 		t:         t,
 		clock:     clock.NewManual(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), time.Millisecond),
-		stores:    app.NewMemoryStores(app.Rules(5)),
+		stores:    memstores.New(app.Rules(5)),
 		gates:     gates,
 		env:       fakeenv.New(core.EnvironmentHost, gates),
 		checkouts: &fakeenv.Checkouts{},
@@ -73,18 +74,28 @@ func (w *world) supervisors() supervisor.Supervisors {
 // newApp starts a daemon over the world. It fails the test if the daemon cannot start.
 func (w *world) newApp() *app.App {
 	w.t.Helper()
-	a := app.New(app.Config{
+	a := app.New(instant(app.Config{
 		Clock:        w.clock,
 		Stores:       w.stores,
 		Environments: fakeenv.Environments{core.EnvironmentHost: w.env},
 		Supervisors:  w.supervisors(),
 		Logf:         func(format string, args ...any) { w.t.Logf("daemon: "+format, args...) },
-	})
+	}))
 	w.apps = append(w.apps, a)
 	if err := a.Start(context.Background()); err != nil {
 		w.t.Fatalf("Start: %v", err)
 	}
 	return a
+}
+
+// instant makes every wait of a retry end at once, so a test sees the retries and not their pace,
+// and leaves the long waits that only guard against a hang to never fire.
+func instant(cfg app.Config) app.Config {
+	cfg.Timers = clock.Immediate{Longest: time.Second}
+	cfg.Retry = app.Retry{Attempts: 4, First: time.Millisecond, Longest: time.Millisecond}
+	cfg.LogBatchDelay = time.Millisecond
+	cfg.CallTimeout, cfg.StopTimeout, cfg.SlowPeriod = time.Hour, time.Hour, time.Hour
+	return cfg
 }
 
 func ctxFor(t *testing.T) context.Context {

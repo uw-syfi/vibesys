@@ -116,9 +116,37 @@ func Unavailable(message string) error {
 	return &core.Failure{Kind: core.FailureUnavailable, Message: message}
 }
 
+// Broken says the call ended because its connection failed or its daemon went away, so the error
+// says nothing about what the call asked: no failure came back, only the end of the transport. A
+// daemon that stops ends its streams with a cancel of its own, which is the same thing to a caller
+// whose context is live.
+func Broken(err error) bool {
+	st, isStatus := status.FromError(err)
+	if !isStatus || err == nil {
+		return false
+	}
+	for _, d := range st.Details() {
+		if _, isFailure := d.(*cliv1.Failure); isFailure {
+			return false
+		}
+	}
+	return st.Code() == codes.Unavailable || st.Code() == codes.Canceled
+}
+
+func hasKind(err error, kind core.FailureKind) bool {
+	f, ok := FailureOf(err)
+	return ok && f.Kind == kind
+}
+
+// IsNotFound says err is a failure of kind not found.
+func IsNotFound(err error) bool { return hasKind(err, core.FailureNotFound) }
+
+// IsInvalidInput says err is a failure of kind invalid input.
+func IsInvalidInput(err error) bool { return hasKind(err, core.FailureInvalidInput) }
+
+// IsIncompatible says err is a failure of kind incompatible.
+func IsIncompatible(err error) bool { return hasKind(err, core.FailureIncompatible) }
+
 // IsUnavailable says err is an unavailable failure: a typed one, or a status that carries one or
 // stands for a connection that failed.
-func IsUnavailable(err error) bool {
-	f, ok := FailureOf(err)
-	return ok && f.Kind == core.FailureUnavailable
-}
+func IsUnavailable(err error) bool { return hasKind(err, core.FailureUnavailable) }

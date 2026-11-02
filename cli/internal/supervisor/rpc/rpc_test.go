@@ -95,14 +95,27 @@ func (r *remote) Runs(ctx context.Context) ([]supervisor.Run, error) {
 	defer r.farm.mu.Unlock()
 	var out []supervisor.Run
 	for ref, s := range r.farm.runs {
-		h, err := r.connect(ctx, s)
-		if err != nil || s.sup.Phase() == supervisor.PhaseReleased {
-			out = append(out, supervisor.Run{Ref: ref, Presence: lifecycle.PresenceGone})
-			continue
-		}
-		out = append(out, supervisor.Run{Ref: ref, Presence: lifecycle.PresenceAlive, Handle: h})
+		out = append(out, r.probe(ctx, ref, s))
 	}
 	return out, nil
+}
+
+func (r *remote) probe(ctx context.Context, ref lifecycle.Ref, s *served) supervisor.Run {
+	h, err := r.connect(ctx, s)
+	if err != nil || s.sup.Phase() == supervisor.PhaseReleased {
+		return supervisor.Run{Ref: ref, Presence: lifecycle.PresenceGone}
+	}
+	return supervisor.Run{Ref: ref, Presence: lifecycle.PresenceAlive, Handle: h}
+}
+
+func (r *remote) Probe(ctx context.Context, ref lifecycle.Ref) (supervisor.Run, error) {
+	r.farm.mu.Lock()
+	defer r.farm.mu.Unlock()
+	s, ok := r.farm.runs[ref]
+	if !ok {
+		return supervisor.Run{Ref: ref, Presence: lifecycle.PresenceNone}, nil
+	}
+	return r.probe(ctx, ref, s), nil
 }
 
 func (r *remote) Forget(ctx context.Context, ref lifecycle.Ref) error {

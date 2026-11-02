@@ -173,7 +173,10 @@ default to the environment variables shown:
 | `daemon status\|stop\|restart` | Report on, stop, or restart the daemon. `daemon install` is not available yet. |
 
 Exit codes: `0` ok (for `wait`, every job it waited on succeeded), `1` failed (a job did not
-succeed, or the call was refused), `2` invalid input, `3` a `wait` timed out.
+succeed, or the call was refused), `2` invalid input or a job that does not exist, `3` a `wait`
+timed out, `4` a `wait` gave up without learning how its jobs ended, which says nothing about them:
+they may still succeed. A `wait` whose connection to the daemon breaks connects again, within its
+`--timeout` if it has one and for about a minute since it last heard anything if not.
 
 With `--json`, a command prints the contract's messages in protobuf's canonical JSON form with the
 original field names, one compact message per line: the response for `submit`, `cancel`, `note`,

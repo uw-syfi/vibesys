@@ -203,11 +203,11 @@ func (h crashHandle) Follow(ctx context.Context, off uint64, emit func([]byte) e
 // startApp starts a daemon over stores and supervisors that the world keeps.
 func (w *world) startApp(stores app.Stores, sups supervisor.Supervisors) *app.App {
 	w.t.Helper()
-	a := app.New(app.Config{
+	a := app.New(instant(app.Config{
 		Clock: w.clock, Stores: stores, Supervisors: sups,
 		Environments: fakeenv.Environments{core.EnvironmentHost: w.env},
 		Logf:         func(format string, args ...any) { w.t.Logf("daemon: "+format, args...) },
-	})
+	}))
 	w.apps = append(w.apps, a)
 	if err := a.Start(ctxFor(w.t)); err != nil {
 		w.t.Fatalf("Start: %v", err)

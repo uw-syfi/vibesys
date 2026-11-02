@@ -7,13 +7,16 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/app"
+	"github.com/uw-syfi/vibesys/cli/internal/app/memstores"
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/daemon"
@@ -56,7 +59,7 @@ func openDir(t *testing.T) runtimedir.Dir {
 func runtimeOf(t *testing.T, survivors *supervisor.Survivors) daemon.Runtime {
 	env := fakeenv.New(core.EnvironmentHost, fakeenv.NewMemoryGates())
 	return daemon.Runtime{
-		Stores:       app.NewMemoryStores(app.Rules(5)),
+		Stores:       memstores.New(app.Rules(5)),
 		Supervisors:  supervisor.NewInProcess(fakeenv.Environments{core.EnvironmentHost: env}, &fakeenv.Checkouts{}, survivors),
 		Environments: fakeenv.Environments{core.EnvironmentHost: env},
 	}
@@ -82,10 +85,14 @@ func start(t *testing.T, ctx context.Context, dir runtimedir.Dir) (*process, err
 		// The pipe closed without the byte: the daemon failed before it served.
 		return nil, <-p.done
 	}
-	if buf[0] != runtimedir.ReadyByte {
-		t.Fatalf("the daemon wrote %q to the readiness pipe", buf)
+	switch buf[0] {
+	case runtimedir.ReadyByte:
+		return p, nil
+	case runtimedir.ReadyTaken:
+		return nil, <-p.done
 	}
-	return p, nil
+	t.Fatalf("the daemon wrote %q to the readiness pipe", buf)
+	return nil, nil
 }
 
 func dial(t *testing.T, dir runtimedir.Dir) cliv1.DaemonServiceClient {
@@ -100,6 +107,75 @@ func dial(t *testing.T, dir runtimedir.Dir) cliv1.DaemonServiceClient {
 	}
 	t.Cleanup(func() { conn.Close() })
 	return cliv1.NewDaemonServiceClient(conn)
+}
+
+// A daemon that stopped reading nothing but whose client did cannot be kept from stopping: the
+// machine is held for as long as a daemon runs. The stop waits, and then it does not.
+func TestAClientThatStoppedReadingDoesNotHoldAStoppingDaemon(t *testing.T) {
+	dir := openDir(t)
+	ctx := ctxFor(t)
+	timers := clock.NewManualTimers()
+	survivors := supervisor.NewSurvivors()
+	t.Cleanup(survivors.Close)
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	done := make(chan error, 1)
+	go func() {
+		done <- daemon.Run(ctx, daemon.Config{
+			Dir: dir, Version: "test", Runtime: runtimeOf(t, survivors), Clock: clock.System{}, Timers: timers, Ready: w,
+		})
+	}()
+	if _, err := io.ReadFull(r, make([]byte, 1)); err != nil {
+		t.Fatal(err)
+	}
+	c := dial(t, dir)
+	call := &cliv1.CallContext{Repository: "/repo", Task: "task", RunId: "run", Harness: "h", Agent: "a"}
+	sub, err := c.Submit(ctx, &cliv1.SubmitRequest{Context: call, Spec: &cliv1.JobSpec{
+		Commit: "0123456789abcdef0123456789abcdef01234567", Environment: cliv1.EnvironmentKind_ENVIRONMENT_KIND_HOST,
+		Settings: &cliv1.JobSpec_Command{Command: &cliv1.CommandSettings{Argv: []string{"print", strings.Repeat("x", 3<<20), ";", "exit", "0"}}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The whole output is stored before anyone reads it, so the daemon has more to send than the
+	// stream holds.
+	watch, err := c.Watch(ctx, &cliv1.WatchRequest{Context: call, JobIds: []string{sub.GetJob().GetId()}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		if _, err := watch.Recv(); errors.Is(err, io.EOF) {
+			break
+		} else if err != nil {
+			t.Fatal(err)
+		}
+	}
+	logs, err := c.ReadLogs(ctx, &cliv1.ReadLogsRequest{Context: call, JobId: sub.GetJob().GetId()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := logs.Recv(); err != nil { // The stream is up, and this client reads no more of it.
+		t.Fatal(err)
+	}
+	if _, err := c.Stop(ctx, &cliv1.StopRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		select {
+		case <-timers.Armed():
+			timers.Fire()
+		case err := <-done:
+			if err != nil {
+				t.Fatal(err)
+			}
+			return
+		case <-ctx.Done():
+			t.Fatal("the daemon did not stop")
+		}
+	}
 }
 
 func TestRunServesTheSocketPrivatelyAndStopsOnStop(t *testing.T) {
@@ -193,7 +269,7 @@ func TestADaemonThatCannotRecoverDoesNotServe(t *testing.T) {
 	}
 	defer r.Close()
 	err = daemon.Run(ctxFor(t), daemon.Config{
-		Dir: dir, Version: "test", Clock: clock.System{}, Ready: w,
+		Dir: dir, Version: "test", Clock: clock.System{}, Timers: clock.Immediate{Longest: time.Minute}, Ready: w,
 		Runtime: daemon.Runtime{
 			Stores:       brokenStores{},
 			Supervisors:  supervisor.NewInProcess(fakeenv.Environments{}, &fakeenv.Checkouts{}, supervisor.NewSurvivors()),

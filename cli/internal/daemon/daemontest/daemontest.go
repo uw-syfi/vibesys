@@ -63,12 +63,11 @@ func (s *Starter) Start(ctx context.Context) error {
 	}()
 	buf := make([]byte, 1)
 	if _, err := io.ReadFull(r, buf); err != nil {
-		// A daemon that failed, or found another running, closed the pipe without the byte.
-		err := <-p.done
-		if errors.Is(err, daemon.ErrAlreadyRunning) {
-			return nil
-		}
-		return err
+		// A daemon that failed closed the pipe without a byte.
+		return <-p.done
+	}
+	if buf[0] == runtimedir.ReadyTaken {
+		return <-p.done
 	}
 	return nil
 }

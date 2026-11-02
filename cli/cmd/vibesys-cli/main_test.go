@@ -318,7 +318,7 @@ func TestJSONErrors(t *testing.T) {
 	c := newCLI(t)
 	r := c.run(withTask("wait", "j404", "--json")...)
 	var f struct{ Kind, Message string }
-	if r.code != exitFailed || r.stdout != "" || json.Unmarshal([]byte(r.stderr), &f) != nil || f.Kind != "FAILURE_KIND_NOT_FOUND" {
+	if r.code != exitInvalidInput || r.stdout != "" || json.Unmarshal([]byte(r.stderr), &f) != nil || f.Kind != "FAILURE_KIND_NOT_FOUND" {
 		t.Fatalf("wait of an unknown job --json = %+v", r)
 	}
 }

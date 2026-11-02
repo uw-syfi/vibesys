@@ -3,8 +3,10 @@ package client
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -15,7 +17,8 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/wire"
 )
 
-// Starter starts a daemon and returns once it serves, or says why it does not.
+// Starter starts a daemon and returns once it serves, or says why it does not. It fails with
+// runtimedir.ErrDaemonRunning when another daemon holds the machine.
 type Starter interface {
 	Start(ctx context.Context) error
 }
@@ -28,7 +31,8 @@ type Rendezvous interface {
 	// HoldStart waits for the right to start a daemon, which one client at a time has, and returns
 	// what gives it up.
 	HoldStart(ctx context.Context) (release func() error, err error)
-	// AwaitExit returns once no daemon holds the machine. It does not poll.
+	// AwaitExit returns once no daemon holds the machine. It does not poll. It can wait as long as
+	// a daemon lives, so a caller bounds it.
 	AwaitExit(ctx context.Context) error
 }
 
@@ -69,9 +73,26 @@ type Options struct {
 	Version string
 	// Starter starts a daemon when none runs. Nil means never start one.
 	Starter Starter
-	// Timers makes the timeout of a wait. It defaults to the system's.
+	// Timers makes the timeouts of a client. It defaults to the system's.
 	Timers clock.Timers
 }
+
+func (o Options) withDefaults() Options {
+	if o.Timers == nil {
+		o.Timers = clock.System{}
+	}
+	return o
+}
+
+const (
+	// stopBound is how long a daemon that was told to stop gets to go.
+	stopBound = time.Minute
+	// settleBound is how long a client waits for a daemon that holds the machine and does not
+	// answer yet, as it is going or still recovering, before it looks again.
+	settleBound = 5 * time.Second
+	// startRounds is how many times a client looks for a daemon and tries to start one.
+	startRounds = 8
+)
 
 // ErrNoDaemon says no daemon answers on the socket.
 var ErrNoDaemon = wire.Unavailable("no daemon is running")
@@ -102,32 +123,28 @@ func Dial(ctx context.Context, opts Options) (*Client, error) {
 // the jobs it was running keep running under their supervisors. A client older than the daemon
 // is refused, since it is the one to upgrade.
 func Connect(ctx context.Context, opts Options) (*Client, error) {
+	opts = opts.withDefaults()
 	c, answer, err := dial(ctx, opts)
 	switch {
 	case err == nil && answer == cliv1.Compatibility_COMPATIBILITY_COMPATIBLE:
 		return c, nil
-	case err == nil && wire.DaemonTooOld(answer):
-		defer c.Close()
-		if opts.Starter == nil {
-			return nil, wire.CompatibilityError(answer)
-		}
-		if err := c.stopAndWait(ctx); err != nil {
-			return nil, err
-		}
+	case err == nil && wire.DaemonTooOld(answer) && opts.Starter != nil:
+		c.Close()
 	case err == nil:
 		c.Close()
 		return nil, wire.CompatibilityError(answer)
 	case !errors.Is(err, ErrNoDaemon):
 		return nil, err
-	}
-	if opts.Starter == nil {
+	case opts.Starter == nil:
 		return nil, ErrNoDaemon
 	}
 	return start(ctx, opts)
 }
 
-// start starts a daemon under the start lock. A client that waited for the lock looks again
-// before it starts one: the client that held it may have started the daemon already.
+// start brings up the daemon that clients of this build can use. It holds the right to start for
+// all of it, which is why two clients upgrading a daemon at once do not stop each other's new one:
+// the second looks after the first is done, and finds the new daemon. Every wait in it is bounded,
+// and the rounds are too, so a daemon that neither answers nor goes ends in an error.
 func start(ctx context.Context, opts Options) (*Client, error) {
 	release, err := opts.Rendezvous.HoldStart(ctx)
 	if err != nil {
@@ -135,26 +152,54 @@ func start(ctx context.Context, opts Options) (*Client, error) {
 	}
 	defer release()
 
-	c, answer, err := dial(ctx, opts)
-	switch {
-	case err == nil:
-		if err := wire.CompatibilityError(answer); err != nil {
+	for range startRounds {
+		c, answer, err := dial(ctx, opts)
+		switch {
+		case err == nil && answer == cliv1.Compatibility_COMPATIBILITY_COMPATIBLE:
+			return c, nil
+		case err == nil && wire.DaemonTooOld(answer):
+			err := c.stopAndWait(ctx)
 			c.Close()
+			if err != nil {
+				return nil, err
+			}
+		case err == nil:
+			c.Close()
+			return nil, wire.CompatibilityError(answer)
+		case !errors.Is(err, ErrNoDaemon):
 			return nil, err
 		}
-		return c, nil
-	case !errors.Is(err, ErrNoDaemon):
-		return nil, err
+		err = opts.Starter.Start(ctx)
+		switch {
+		case err == nil:
+			return Dial(ctx, opts)
+		case !errors.Is(err, runtimedir.ErrDaemonRunning):
+			return nil, err
+		}
+		// A daemon holds the machine and did not answer: it is going, or it has not come up.
+		if err := awaitExit(ctx, opts, settleBound); err != nil {
+			return nil, err
+		}
 	}
-	if err := opts.Starter.Start(ctx); err != nil {
-		return nil, err
+	return nil, wire.Unavailable("a daemon holds this machine and does not answer; see `daemon status` and the daemon log")
+}
+
+// awaitExit waits for the daemon to go, for at most bound. A bound that passes is not a failure: a
+// caller looks at what it finds next.
+func awaitExit(ctx context.Context, opts Options, bound time.Duration) error {
+	bounded, done := clock.Deadline(ctx, opts.Timers, bound)
+	defer done()
+	err := opts.Rendezvous.AwaitExit(bounded)
+	if err != nil && ctx.Err() != nil {
+		return ctx.Err()
 	}
-	return Dial(ctx, opts)
+	return nil
 }
 
 // Restart stops the daemon if one runs, waits until it is gone, and starts a new one. Jobs that
 // run are not affected: the new daemon finds their supervisors.
 func Restart(ctx context.Context, opts Options) (*Client, error) {
+	opts = opts.withDefaults()
 	if opts.Starter == nil {
 		return nil, errors.New("restarting the daemon needs a way to start one")
 	}
@@ -182,6 +227,7 @@ func Restart(ctx context.Context, opts Options) (*Client, error) {
 
 // dial connects and says Hello. It fails with ErrNoDaemon when the socket does not answer.
 func dial(ctx context.Context, opts Options) (*Client, cliv1.Compatibility, error) {
+	opts = opts.withDefaults()
 	conn, err := grpc.NewClient("passthrough:///daemon",
 		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
 			return opts.Rendezvous.Dial(ctx)
@@ -189,9 +235,6 @@ func dial(ctx context.Context, opts Options) (*Client, cliv1.Compatibility, erro
 		grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, 0, err
-	}
-	if opts.Timers == nil {
-		opts.Timers = clock.System{}
 	}
 	c := &Client{opts: opts, conn: conn, rpc: cliv1.NewDaemonServiceClient(conn)}
 	resp, err := c.rpc.Hello(ctx, &cliv1.HelloRequest{
@@ -214,7 +257,15 @@ func (c *Client) stopAndWait(ctx context.Context) error {
 		// A daemon that goes before it answers is what was asked for; the lock below says when.
 		return c.fail(err)
 	}
-	return c.opts.Rendezvous.AwaitExit(ctx)
+	bounded, done := clock.Deadline(ctx, c.opts.Timers, stopBound)
+	defer done()
+	if err := c.opts.Rendezvous.AwaitExit(bounded); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return wire.Unavailable(fmt.Sprintf("the daemon was told to stop and did not go within %s", stopBound))
+	}
+	return nil
 }
 
 // Close releases the connection.

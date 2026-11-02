@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/uw-syfi/vibesys/cli/internal/app"
+	"github.com/uw-syfi/vibesys/cli/internal/app/memstores"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/daemon"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv"
@@ -21,7 +22,7 @@ type World struct {
 	Gates     *fakeenv.MemoryGates
 	Env       *fakeenv.Environment
 	Checkouts *fakeenv.Checkouts
-	Stores    *app.MemoryStores
+	Stores    *memstores.Stores
 	Survivors *supervisor.Survivors
 }
 
@@ -32,7 +33,7 @@ func NewWorld(t testing.TB) *World {
 	gates := fakeenv.NewMemoryGates()
 	w := &World{
 		Gates: gates, Env: fakeenv.New(core.EnvironmentHost, gates), Checkouts: &fakeenv.Checkouts{},
-		Stores: app.NewMemoryStores(app.Rules(5)), Survivors: supervisor.NewSurvivors(),
+		Stores: memstores.New(app.Rules(5)), Survivors: supervisor.NewSurvivors(),
 	}
 	t.Cleanup(func() {
 		w.Survivors.Close()

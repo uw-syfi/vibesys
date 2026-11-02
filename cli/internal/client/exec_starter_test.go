@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/uw-syfi/vibesys/cli/internal/app"
+	"github.com/uw-syfi/vibesys/cli/internal/app/memstores"
 	"github.com/uw-syfi/vibesys/cli/internal/client"
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -57,7 +58,7 @@ func runChildDaemon() int {
 	err = daemon.Run(context.Background(), daemon.Config{
 		Dir: dir, Version: "child", Clock: clock.System{}, Ready: os.NewFile(runtimedir.ReadyFD, "ready"),
 		Runtime: daemon.Runtime{
-			Stores: app.NewMemoryStores(app.Rules(5)), Environments: envs,
+			Stores: memstores.New(app.Rules(5)), Environments: envs,
 			Supervisors: supervisor.NewInProcess(envs, &fakeenv.Checkouts{}, survivors),
 		},
 	})

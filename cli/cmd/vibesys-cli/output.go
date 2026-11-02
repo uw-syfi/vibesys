@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -56,33 +57,38 @@ func describe(j *cliv1.Job) string {
 }
 
 // fail prints the error of a command and returns the exit code it stands for: 2 for a mistake in
-// the input, 1 for anything else.
+// the input and 1 for anything else. With --json the error is always a Failure.
 func fail(d deps, asJSON bool, err error) int {
-	code := exitFailed
-	var message string
-	var failure *cliv1.Failure
-	switch e := err.(type) {
-	case usageError:
-		code = exitInvalidInput
-		failure = &cliv1.Failure{Kind: cliv1.FailureKind_FAILURE_KIND_INVALID_INPUT, Message: e.message}
-	case *unavailable:
-		failure = &cliv1.Failure{Kind: cliv1.FailureKind_FAILURE_KIND_UNAVAILABLE, Message: e.message}
+	failure := &cliv1.Failure{Kind: cliv1.FailureKind_FAILURE_KIND_INTERNAL, Message: err.Error()}
+	var usage usageError
+	var away *unavailable
+	switch {
+	case errors.As(err, &usage):
+		failure = &cliv1.Failure{Kind: cliv1.FailureKind_FAILURE_KIND_INVALID_INPUT, Message: usage.message}
+	case errors.As(err, &away):
+		failure = &cliv1.Failure{Kind: cliv1.FailureKind_FAILURE_KIND_UNAVAILABLE, Message: away.message}
 	default:
 		if f, ok := wire.FailureOf(err); ok {
 			failure = wire.Failure(f)
-			if failure.GetKind() == cliv1.FailureKind_FAILURE_KIND_INVALID_INPUT {
-				code = exitInvalidInput
-			}
 		}
 	}
-	switch {
-	case asJSON && failure != nil:
+	if asJSON {
 		printJSONTo(d, failure)
-	case failure != nil:
-		message = failure.GetMessage()
-		fmt.Fprintf(d.stderr, "vibesys-cli: %s\n", message)
-	default:
-		fmt.Fprintf(d.stderr, "vibesys-cli: %v\n", err)
+	} else {
+		fmt.Fprintf(d.stderr, "vibesys-cli: %s\n", failure.GetMessage())
+	}
+	if failure.GetKind() == cliv1.FailureKind_FAILURE_KIND_INVALID_INPUT {
+		return exitInvalidInput
+	}
+	return exitFailed
+}
+
+// failOnJob is fail for a command that names a job: a job that does not exist is a mistake in the
+// input.
+func failOnJob(d deps, asJSON bool, err error) int {
+	code := fail(d, asJSON, err)
+	if wire.IsNotFound(err) {
+		return exitInvalidInput
 	}
 	return code
 }

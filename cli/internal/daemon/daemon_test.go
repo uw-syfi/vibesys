@@ -16,6 +16,7 @@ import (
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/app"
+	"github.com/uw-syfi/vibesys/cli/internal/app/memstores"
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/daemon"
@@ -56,7 +57,7 @@ func newRig(t *testing.T) *rig {
 	survivors := supervisor.NewSurvivors()
 	a := app.New(app.Config{
 		Clock:        clock.NewManual(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), time.Millisecond),
-		Stores:       app.NewMemoryStores(app.Rules(5)),
+		Stores:       memstores.New(app.Rules(5)),
 		Environments: fakeenv.Environments{core.EnvironmentHost: env},
 		Supervisors:  supervisor.NewInProcess(fakeenv.Environments{core.EnvironmentHost: env}, checkouts, survivors),
 	})

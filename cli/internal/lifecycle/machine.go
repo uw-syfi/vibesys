@@ -23,10 +23,26 @@ const (
 	PhaseLaunching Phase = "launching"
 	// PhaseRunning is a job the store has running, with a supervisor to report on it.
 	PhaseRunning Phase = "running"
+	// PhaseStopping is a running job the daemon could not go on following: its output can no
+	// longer be stored, or its supervisor no longer be followed. Its command is being ended, and
+	// it holds the machine until the command has.
+	PhaseStopping Phase = "stopping"
 	// PhaseSettling is a job that held the machine and has ended: its transition is being
 	// recorded and its supervisor released. It holds the machine until then, so the store never
 	// shows two jobs running and the next job does not start while the last one's end is in doubt.
 	PhaseSettling Phase = "settling"
+	// PhaseCancelling is a queued job whose cancel is being recorded. It never ran and has no
+	// supervisor to wait for, so it does not hold the machine.
+	PhaseCancelling Phase = "cancelling"
+	// PhaseUnrecorded is a job whose end is known and that its store would not take. The machine
+	// keeps the end and offers it again. A command does not run any more, so the job does not hold
+	// the machine, but a job that the store has running keeps every other job of that store from
+	// starting, so that no store ever shows two.
+	PhaseUnrecorded Phase = "unrecorded"
+	// PhaseInDoubt is a job the daemon cannot tell the state of: its store is away, or something
+	// answers for its supervisor that the daemon cannot use. Its command may run, so it holds the
+	// machine, and it is looked at again until the answer is known.
+	PhaseInDoubt Phase = "in doubt"
 )
 
 type entry struct {
@@ -34,12 +50,23 @@ type entry struct {
 	submittedAt time.Time
 	seq         uint64
 	phase       Phase
-	// cancelAsked and cancelReason record a cancel that arrived while the job was launching. A
-	// queued job is cancelled at once, and a running job's cancel is a request to its supervisor.
+	// cancelAsked and cancelReason record a cancel that arrived while the job could not act on it
+	// yet. A queued job is cancelled at once, and a running job's cancel is a request to its
+	// supervisor.
 	cancelAsked  bool
 	cancelReason string
 	// cancelSent says the request to the supervisor of a running job was made already.
 	cancelSent bool
+	// settlement and release are the end of a job in PhaseSettling, PhaseCancelling or
+	// PhaseUnrecorded: what to offer its store again.
+	settlement Settlement
+	release    bool
+	// trouble says why the job is in PhaseUnrecorded or PhaseInDoubt.
+	trouble core.Failure
+	// armed says a RetryDue is on its way, and waiting says a step that failed waits for it. A
+	// RetryDue with nothing waiting does nothing: it was armed for a phase the job has left, and
+	// what it would repeat is in flight.
+	armed, waiting bool
 }
 
 // State is the machine's whole memory: the jobs that need the daemon, and the order they came in.
@@ -67,8 +94,11 @@ const (
 	// PresenceAlive means a supervisor answered, parked or running or finished and waiting to be
 	// released.
 	PresenceAlive Presence = "alive"
-	// PresenceGone means a run directory exists and no supervisor answers.
+	// PresenceGone means a run directory exists and its supervisor is known to be dead.
 	PresenceGone Presence = "gone"
+	// PresenceUnknown means a run directory exists and the daemon cannot tell: something holds the
+	// run and does not answer in a way this build can use. Only proof of death makes a run gone.
+	PresenceUnknown Presence = "unknown"
 )
 
 // Event is something that happened, as the machine is told. Every event carries the time it
@@ -92,19 +122,28 @@ type Recovered struct {
 	State       core.JobState
 	SubmittedAt time.Time
 	Supervisor  Presence
-	At          time.Time
+	// Away says the store of the job could not be read, so State says nothing.
+	Away bool
+	At   time.Time
 }
 
-// CancelAsked says a user asked to cancel a job.
+// CancelAsked says a user asked to cancel a job that the store has as State, which was submitted
+// at SubmittedAt. The machine may not have heard of the job yet: a queued job it does not know is
+// taken in and cancelled, so that a cancel and a submission can arrive in any order.
 type CancelAsked struct {
-	Ref    Ref
-	Reason string
-	At     time.Time
+	Ref         Ref
+	Reason      string
+	State       core.JobState
+	SubmittedAt time.Time
+	At          time.Time
 }
 
 // Discarded says a run directory left over from an earlier launch is gone, and the queued job
 // that had it may start.
-type Discarded struct{ Ref Ref }
+type Discarded struct {
+	Ref Ref
+	At  time.Time
+}
 
 // Launched says the job's supervisor is up and the store has the job running.
 type Launched struct{ Ref Ref }
@@ -129,11 +168,40 @@ type SupervisorLost struct {
 	At  time.Time
 }
 
+// FollowFailed says the daemon gave up following a running job: the supervisor would not answer or
+// the store would not take the output, for as long as the daemon tried.
+type FollowFailed struct {
+	Ref     Ref
+	Failure core.Failure
+	At      time.Time
+}
+
+// StopFailed says the daemon could not end a job it stopped following.
+type StopFailed struct {
+	Ref     Ref
+	Failure core.Failure
+}
+
+// MoveFailed says the store would not take a job's end, for as long as the daemon tried.
+type MoveFailed struct {
+	Ref     Ref
+	Failure core.Failure
+}
+
+// DiscardFailed says what is left of a run could not be released.
+type DiscardFailed struct {
+	Ref     Ref
+	Failure core.Failure
+}
+
+// RetryDue says it is time to try again what ArmRetry was asked for.
+type RetryDue struct{ Ref Ref }
+
 // RecoveryDone says the machine has been told everything a restart found, so it may start jobs.
 type RecoveryDone struct{}
 
-// Closed says the daemon is done with a job: its last transition is recorded, or the daemon gave
-// up on recording it and the next start will recover it.
+// Closed says the daemon is done with a job: its last transition is recorded, or the store shows
+// that it needs nothing more.
 type Closed struct{ Ref Ref }
 
 func (Admitted) event()       {}
@@ -144,6 +212,11 @@ func (Launched) event()       {}
 func (LaunchFailed) event()   {}
 func (Finished) event()       {}
 func (SupervisorLost) event() {}
+func (FollowFailed) event()   {}
+func (StopFailed) event()     {}
+func (MoveFailed) event()     {}
+func (DiscardFailed) event()  {}
+func (RetryDue) event()       {}
 func (RecoveryDone) event()   {}
 func (Closed) event()         {}
 
@@ -157,19 +230,39 @@ type Request interface {
 // supervisor to start. The answer is Launched or LaunchFailed.
 type LaunchRequest struct{ Ref Ref }
 
-// Adopt asks the shell to attach to the job's live supervisor, start it if it is still parked,
-// and follow it. The answer is Finished or SupervisorLost.
-type Adopt struct{ Ref Ref }
+// Adopt asks the shell to attach to the job's supervisor, start it if it is still parked, and
+// follow it. With CancelFirst, the supervisor is told to cancel before it may start, so a command
+// whose cancel arrived in time never runs. The answer is Finished, SupervisorLost or FollowFailed.
+type Adopt struct {
+	Ref          Ref
+	CancelFirst  bool
+	CancelReason string
+}
 
-// SignalCancel asks the job's supervisor to end the job's process group.
+// SignalCancel asks the job's supervisor to end the job's process group. There is no answer: the
+// outcome of the job says what came of it.
 type SignalCancel struct {
 	Ref    Ref
 	Reason string
 }
 
-// Move asks the store to apply the settlement's transition, to append its log line to the job's
-// output, and, when Release is set, to release the job's supervisor and forget its run. The
-// answer is Closed.
+// Stop asks the shell to end the command of a job it gave up following, and to learn its outcome.
+// The answer is Finished, SupervisorLost or StopFailed.
+type Stop struct {
+	Ref    Ref
+	Reason string
+}
+
+// ArmRetry asks the shell to answer with RetryDue after a while.
+type ArmRetry struct{ Ref Ref }
+
+// Reexamine asks the shell to find out again what the store has of a job and what is left of its
+// supervisor. The answer is Recovered.
+type Reexamine struct{ Ref Ref }
+
+// Move asks the store to append the settlement's log line to the job's output and to apply its
+// transition, and then, when Release is set, to release the job's supervisor and forget its run.
+// The answer is Closed, or MoveFailed when the store would not take it.
 type Move struct {
 	Ref        Ref
 	Settlement Settlement
@@ -177,15 +270,20 @@ type Move struct {
 }
 
 // Discard asks the shell to release what is left of a run: its supervisor when one is alive, and
-// its run directory. The answer is Discarded for a job that is queued and Closed for any other.
+// its run directory. The answer is DiscardFailed when that did not work. Otherwise it is Discarded
+// when Queued says a queued job waits for the run to go, and Closed when none does.
 type Discard struct {
-	Ref   Ref
-	Alive bool
+	Ref    Ref
+	Alive  bool
+	Queued bool
 }
 
 func (LaunchRequest) request() {}
 func (Adopt) request()         {}
 func (SignalCancel) request()  {}
+func (Stop) request()          {}
+func (ArmRetry) request()      {}
+func (Reexamine) request()     {}
 func (Move) request()          {}
 func (Discard) request()       {}
 
@@ -194,15 +292,21 @@ func (Discard) request()       {}
 //
 //   - The machine runs one job at a time, the oldest queued first (by the time it was submitted,
 //     then by when the machine heard of it): a free machine and a queued job make a launch.
-//   - A cancel of a queued job moves it to cancelled at once. A cancel during a launch waits for
-//     the launch to end, and then cancels the job it started or, if the launch failed, cancels
-//     the job that never ran. A cancel of a running job asks its supervisor, once.
+//   - A cancel of a queued job moves it to cancelled at once. A cancel while a queued job's old run
+//     is cleared takes effect when that ends. A cancel during a launch waits for the launch to
+//     end: the supervisor is told before it may start, so the command never runs. A cancel of a
+//     running job asks its supervisor, once.
 //   - An outcome settles the job as Settle says and releases its supervisor. A supervisor that
 //     vanished settles it as lost, and a lost job is never retried. The job holds the machine
 //     until its settlement is recorded, so the next job starts after it, not beside it.
 //   - Recovery is a Recovered event per job, and it follows the same paths: a running job with a
-//     live supervisor is adopted, one without is lost, a queued job joins the queue whatever is
-//     left of an earlier launch, and a run no job needs is discarded.
+//     live supervisor is adopted, one whose supervisor is dead is lost, a queued job joins the
+//     queue whatever is left of an earlier launch, and a run no job needs is discarded. A job or a
+//     run the daemon cannot judge, because the store is away or the supervisor gives no usable
+//     answer, is touched by nothing: it holds the machine and is looked at again.
+//   - The shell tries a store or a supervisor for a bounded time, and then the machine decides. A
+//     job it cannot follow is stopped and fails, saying why. A job whose end its store refuses
+//     keeps that end and offers it again; it is never closed before the end is recorded.
 //
 // A job the machine does not hold ignores a cancel, an outcome and a loss, so a duplicate or late
 // event changes nothing.
@@ -217,9 +321,7 @@ func Step(s State, e Event) (State, []Request) {
 	case CancelAsked:
 		reqs = out.cancel(e)
 	case Discarded:
-		if i := out.find(e.Ref); i >= 0 && out.entries[i].phase == PhaseDiscarding {
-			out.entries[i].phase = PhaseQueued
-		}
+		reqs = out.discarded(e)
 	case Launched:
 		reqs = out.launched(e.Ref)
 	case LaunchFailed:
@@ -228,6 +330,16 @@ func Step(s State, e Event) (State, []Request) {
 		reqs = out.finished(e)
 	case SupervisorLost:
 		reqs = out.lost(e)
+	case FollowFailed:
+		reqs = out.followFailed(e)
+	case StopFailed:
+		reqs = out.stopFailed(e)
+	case MoveFailed:
+		reqs = out.moveFailed(e)
+	case DiscardFailed:
+		reqs = out.discardFailed(e)
+	case RetryDue:
+		reqs = out.retryDue(e.Ref)
 	case RecoveryDone:
 		out.recovering = false
 	case Closed:
@@ -257,52 +369,134 @@ func (s *State) admit(ref Ref, at time.Time) {
 	s.entries = append(s.entries, entry{ref: ref, submittedAt: at, seq: s.seq, phase: PhaseQueued})
 }
 
+// recover applies what a look at a job and its run found. Only a job in doubt is looked at twice:
+// any other job the machine holds is already on its way.
 func (s *State) recover(e Recovered) []Request {
-	alive := e.Supervisor == PresenceAlive
-	switch e.State {
-	case core.JobQueued:
-		// Whatever an earlier launch left is not the job: the store never recorded it running, so
-		// it never ran. It is released, and the job starts over from the queue.
-		s.admit(e.Ref, e.SubmittedAt)
-		if e.Supervisor == PresenceNone {
+	var kept entry
+	if i := s.find(e.Ref); i >= 0 {
+		if s.entries[i].phase != PhaseInDoubt {
+			if s.entries[i].phase == PhaseQueued {
+				return s.recoverQueued(e)
+			}
 			return nil
 		}
-		if i := s.find(e.Ref); i >= 0 && s.entries[i].phase == PhaseQueued {
-			s.entries[i].phase = PhaseDiscarding
+		kept = s.entries[i]
+		s.remove(e.Ref)
+	}
+	alive, unknown := e.Supervisor == PresenceAlive, e.Supervisor == PresenceUnknown
+	switch {
+	case e.Away:
+		if alive || unknown {
+			return s.inDoubt(e, kept)
 		}
-		return []Request{Discard{Ref: e.Ref, Alive: alive}}
-	case core.JobRunning:
-		if i := s.find(e.Ref); i >= 0 {
-			return nil
+		// Nothing runs for it, and the store can say what it is when it returns.
+		return nil
+	case e.State == core.JobQueued:
+		return s.recoverQueuedAfresh(e, kept)
+	case e.State == core.JobRunning:
+		switch {
+		case alive:
+			s.place(e, kept, PhaseRunning)
+			i := s.find(e.Ref)
+			reqs := []Request{Adopt{Ref: e.Ref}}
+			if s.entries[i].cancelAsked {
+				s.entries[i].cancelSent = true
+				reqs = append(reqs, SignalCancel{Ref: e.Ref, Reason: s.entries[i].cancelReason})
+			}
+			return reqs
+		case unknown:
+			return s.inDoubt(e, kept)
 		}
-		s.seq++
-		s.entries = append(s.entries, entry{ref: e.Ref, submittedAt: e.SubmittedAt, seq: s.seq, phase: PhaseRunning})
-		if alive {
-			return []Request{Adopt{Ref: e.Ref}}
-		}
-		// Its supervisor is gone, so the command was ended with it or is out of reach, and either
-		// way the job is lost and never retried.
+		// Its supervisor is dead, so the command ended with it, and the job is lost and never
+		// retried.
+		s.place(e, kept, PhaseRunning)
 		return s.settle(e.Ref, lostJob(e.Ref.Job, e.At))
 	default:
-		// Final in its store, or not in it at all: a run left over is garbage.
-		if e.Supervisor == PresenceNone {
+		// Final in its store, or not in it at all: a run left over holds nothing of value, once
+		// it is known to be what the store says. One the daemon cannot judge is left alone.
+		if e.Supervisor == PresenceNone || unknown {
 			return nil
 		}
 		return []Request{Discard{Ref: e.Ref, Alive: alive}}
 	}
 }
 
+// recoverQueued handles a look at a job that is queued in the machine, which can have a run left.
+func (s *State) recoverQueued(e Recovered) []Request {
+	if e.Away || e.State != core.JobQueued {
+		return nil
+	}
+	kept := s.entries[s.find(e.Ref)]
+	s.remove(e.Ref)
+	return s.recoverQueuedAfresh(e, kept)
+}
+
+// recoverQueuedAfresh places a job its store has queued. Whatever an earlier launch left is not the
+// job: the store never recorded it running, so it never ran. It is released, and the job starts
+// over from the queue.
+func (s *State) recoverQueuedAfresh(e Recovered, kept entry) []Request {
+	switch e.Supervisor {
+	case PresenceNone:
+		s.place(e, kept, PhaseQueued)
+		if s.entries[s.find(e.Ref)].cancelAsked {
+			return s.cancelQueuedJob(e.Ref, e.At)
+		}
+		return nil
+	case PresenceUnknown:
+		return s.inDoubt(e, kept)
+	}
+	s.place(e, kept, PhaseDiscarding)
+	return []Request{Discard{Ref: e.Ref, Alive: e.Supervisor == PresenceAlive, Queued: true}}
+}
+
+// place puts the job in the machine in a phase, keeping what it was told before.
+func (s *State) place(e Recovered, kept entry, phase Phase) {
+	if kept.seq == 0 {
+		s.seq++
+		kept = entry{ref: e.Ref, submittedAt: e.SubmittedAt, seq: s.seq}
+	}
+	kept.phase, kept.waiting = phase, false
+	s.entries = append(s.entries, kept)
+}
+
+// inDoubt keeps a job the machine cannot judge, and asks for another look.
+func (s *State) inDoubt(e Recovered, kept entry) []Request {
+	s.place(e, kept, PhaseInDoubt)
+	message := "its supervisor gives no answer this build can use"
+	if e.Away {
+		message = "its store cannot be read"
+	}
+	i := s.find(e.Ref)
+	s.entries[i].trouble = core.Failure{Kind: core.FailureUnavailable, Message: message}
+	return s.awaitRetry(i)
+}
+
+// awaitRetry has the job at i wait for a RetryDue, arming one unless one is on its way.
+func (s *State) awaitRetry(i int) []Request {
+	cur := &s.entries[i]
+	cur.waiting = true
+	if cur.armed {
+		return nil
+	}
+	cur.armed = true
+	return []Request{ArmRetry{Ref: cur.ref}}
+}
+
 func (s *State) cancel(e CancelAsked) []Request {
 	i := s.find(e.Ref)
 	if i < 0 {
-		return nil
+		if e.State != core.JobQueued {
+			return nil
+		}
+		s.admit(e.Ref, e.SubmittedAt)
+		i = s.find(e.Ref)
 	}
 	cur := &s.entries[i]
 	switch cur.phase {
 	case PhaseQueued:
-		s.remove(e.Ref)
-		return []Request{Move{Ref: e.Ref, Settlement: cancelQueued(e.Ref.Job, e.Reason, e.At)}}
-	case PhaseLaunching:
+		cur.cancelAsked, cur.cancelReason = true, e.Reason
+		return s.cancelQueuedJob(e.Ref, e.At)
+	case PhaseDiscarding, PhaseLaunching, PhaseInDoubt:
 		if !cur.cancelAsked {
 			cur.cancelAsked, cur.cancelReason = true, e.Reason
 		}
@@ -318,6 +512,28 @@ func (s *State) cancel(e CancelAsked) []Request {
 	return nil
 }
 
+// cancelQueuedJob records the cancel of a job that never ran. The job stays in the machine until
+// that is recorded, so a store that refuses it does not lose the cancel.
+func (s *State) cancelQueuedJob(ref Ref, at time.Time) []Request {
+	i := s.find(ref)
+	cur := &s.entries[i]
+	st := cancelQueued(ref.Job, cur.cancelReason, at)
+	cur.phase, cur.settlement, cur.release = PhaseCancelling, st, false
+	return []Request{Move{Ref: ref, Settlement: st}}
+}
+
+func (s *State) discarded(e Discarded) []Request {
+	i := s.find(e.Ref)
+	if i < 0 || s.entries[i].phase != PhaseDiscarding {
+		return nil
+	}
+	s.entries[i].phase = PhaseQueued
+	if s.entries[i].cancelAsked {
+		return s.cancelQueuedJob(e.Ref, e.At)
+	}
+	return nil
+}
+
 func (s *State) launched(ref Ref) []Request {
 	i := s.find(ref)
 	if i < 0 || s.entries[i].phase != PhaseLaunching {
@@ -325,11 +541,8 @@ func (s *State) launched(ref Ref) []Request {
 	}
 	cur := &s.entries[i]
 	cur.phase = PhaseRunning
-	if cur.cancelAsked {
-		cur.cancelSent = true
-		return []Request{SignalCancel{Ref: ref, Reason: cur.cancelReason}}
-	}
-	return nil
+	cur.cancelSent = cur.cancelAsked
+	return []Request{Adopt{Ref: ref, CancelFirst: cur.cancelAsked, CancelReason: cur.cancelReason}}
 }
 
 func (s *State) launchFailed(e LaunchFailed) []Request {
@@ -347,25 +560,102 @@ func (s *State) launchFailed(e LaunchFailed) []Request {
 
 func (s *State) finished(e Finished) []Request {
 	i := s.find(e.Ref)
-	if i < 0 || s.entries[i].phase != PhaseRunning {
+	if i < 0 {
 		return nil
 	}
-	return s.settle(e.Ref, Settle(e.Ref.Job, core.JobRunning, e.Outcome, e.At))
+	switch s.entries[i].phase {
+	case PhaseRunning:
+		return s.settle(e.Ref, Settle(e.Ref.Job, core.JobRunning, e.Outcome, e.At))
+	case PhaseStopping:
+		// Whatever the command did, its output did not all reach the store, so the job did not
+		// succeed as far as anyone can check.
+		return s.settle(e.Ref, stoppedJob(e.Ref.Job, s.entries[i].trouble, e.At))
+	}
+	return nil
 }
 
 func (s *State) lost(e SupervisorLost) []Request {
 	i := s.find(e.Ref)
-	if i < 0 || s.entries[i].phase != PhaseRunning {
+	if i < 0 || (s.entries[i].phase != PhaseRunning && s.entries[i].phase != PhaseStopping) {
 		return nil
 	}
 	return s.settle(e.Ref, lostJob(e.Ref.Job, e.At))
+}
+
+func (s *State) followFailed(e FollowFailed) []Request {
+	i := s.find(e.Ref)
+	if i < 0 || s.entries[i].phase != PhaseRunning {
+		return nil
+	}
+	s.entries[i].phase, s.entries[i].trouble = PhaseStopping, e.Failure
+	return []Request{Stop{Ref: e.Ref, Reason: StopReason + e.Failure.Message}}
+}
+
+// StopReason starts the reason of a cancel the daemon itself sent, to a job it could not go on
+// following. The supervisor keeps that cancel, so a daemon that takes over after a crash finds a
+// cancelled command and records the job as cancelled, with this reason, and not as failed.
+const StopReason = "the daemon could not follow the job: "
+
+func (s *State) stopFailed(e StopFailed) []Request {
+	i := s.find(e.Ref)
+	if i < 0 || s.entries[i].phase != PhaseStopping {
+		return nil
+	}
+	s.entries[i].phase, s.entries[i].trouble = PhaseInDoubt, e.Failure
+	return s.awaitRetry(i)
+}
+
+func (s *State) moveFailed(e MoveFailed) []Request {
+	i := s.find(e.Ref)
+	if i < 0 {
+		return nil
+	}
+	cur := &s.entries[i]
+	switch cur.phase {
+	case PhaseSettling, PhaseCancelling, PhaseUnrecorded:
+		cur.phase, cur.trouble = PhaseUnrecorded, e.Failure
+		return s.awaitRetry(i)
+	}
+	return nil
+}
+
+func (s *State) discardFailed(e DiscardFailed) []Request {
+	i := s.find(e.Ref)
+	if i < 0 || s.entries[i].phase != PhaseDiscarding {
+		return nil
+	}
+	s.entries[i].trouble = e.Failure
+	return s.awaitRetry(i)
+}
+
+func (s *State) retryDue(ref Ref) []Request {
+	i := s.find(ref)
+	if i < 0 {
+		return nil
+	}
+	cur := &s.entries[i]
+	due := cur.waiting
+	cur.armed, cur.waiting = false, false
+	if !due {
+		return nil
+	}
+	switch cur.phase {
+	case PhaseUnrecorded:
+		return []Request{Move{Ref: ref, Settlement: cur.settlement, Release: cur.release}}
+	case PhaseInDoubt:
+		return []Request{Reexamine{Ref: ref}}
+	case PhaseDiscarding:
+		return []Request{Discard{Ref: ref, Alive: true, Queued: true}}
+	}
+	return nil
 }
 
 // settle records a job that held the machine as ended: it keeps holding the machine until the
 // shell has recorded the settlement and released the supervisor.
 func (s *State) settle(ref Ref, st Settlement) []Request {
 	if i := s.find(ref); i >= 0 {
-		s.entries[i].phase = PhaseSettling
+		cur := &s.entries[i]
+		cur.phase, cur.settlement, cur.release = PhaseSettling, st, true
 	}
 	return []Request{Move{Ref: ref, Settlement: st, Release: true}}
 }
@@ -374,7 +664,7 @@ func (s *State) settle(ref Ref, st Settlement) []Request {
 func (s *State) schedule() (Request, bool) {
 	best := -1
 	for i, e := range s.entries {
-		if e.phase != PhaseQueued {
+		if e.phase != PhaseQueued || s.storeBlocked(e.ref.Store) {
 			continue
 		}
 		if best < 0 || e.submittedAt.Before(s.entries[best].submittedAt) ||
@@ -389,9 +679,23 @@ func (s *State) schedule() (Request, bool) {
 	return LaunchRequest{Ref: s.entries[best].ref}, true
 }
 
-// busy reports whether a job holds the machine: one being launched, running or settling.
+// busy reports whether a job holds the machine: one whose command may run or whose end is on its
+// way to the store.
 func (s *State) busy() bool {
-	return slices.ContainsFunc(s.entries, func(e entry) bool { return e.phase != PhaseQueued })
+	return slices.ContainsFunc(s.entries, func(e entry) bool {
+		switch e.phase {
+		case PhaseQueued, PhaseCancelling, PhaseUnrecorded:
+			return false
+		}
+		return true
+	})
+}
+
+// storeBlocked reports whether the store still shows a job running that has ended.
+func (s *State) storeBlocked(id StoreID) bool {
+	return slices.ContainsFunc(s.entries, func(e entry) bool {
+		return e.ref.Store == id && e.phase == PhaseUnrecorded && e.settlement.Transition.From == core.JobRunning
+	})
 }
 
 // Held is one job the machine holds.
@@ -410,6 +714,24 @@ func (s State) Held() []Held {
 	return out
 }
 
+// Trouble is a job that cannot go on until something outside the daemon does: why, and which job.
+type Trouble struct {
+	Ref     Ref
+	Failure core.Failure
+}
+
+// Troubled returns the jobs in PhaseUnrecorded and PhaseInDoubt. Whoever waits for one of them has
+// no end to wait for until the trouble passes, and is told so.
+func (s State) Troubled() []Trouble {
+	var out []Trouble
+	for _, e := range s.entries {
+		if e.phase == PhaseUnrecorded || e.phase == PhaseInDoubt {
+			out = append(out, Trouble{Ref: e.ref, Failure: e.trouble})
+		}
+	}
+	return out
+}
+
 // Counts returns how many jobs wait for the machine and how many hold it. A job being launched or
 // discarded is counted as waiting, since its store still has it queued.
 func (s State) Counts() (queued, running int) {
@@ -424,16 +746,16 @@ func (s State) Counts() (queued, running int) {
 }
 
 // Stranded returns the queued jobs that nothing will ever start: it is empty unless a job waits
-// for a free machine and nothing holds the machine. Every other job the machine holds waits for
-// an answer the shell owes it (a launch, a discard, a supervisor's outcome), so a state with no
-// stranded job has no orphan wait.
+// for a free machine and nothing holds the machine, and the job's store does not hold it back.
+// Every other job the machine holds waits for an answer the shell owes it (a launch, a discard, a
+// supervisor's outcome, a retry), so a state with no stranded job has no orphan wait.
 func (s State) Stranded() []Ref {
 	if s.busy() || s.recovering {
 		return nil
 	}
 	var out []Ref
 	for _, e := range s.entries {
-		if e.phase == PhaseQueued {
+		if e.phase == PhaseQueued && !s.storeBlocked(e.ref.Store) {
 			out = append(out, e.ref)
 		}
 	}

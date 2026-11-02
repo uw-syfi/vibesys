@@ -336,7 +336,7 @@ func TestAnUnavailableEnvironmentFailsTheJobAndRunsNothingElsewhere(t *testing.T
 }
 
 func newAppWith(w *world, envs environment.Environments) *app.App {
-	a := app.New(app.Config{Clock: w.clock, Stores: w.stores, Environments: envs, Supervisors: w.supervisors()})
+	a := app.New(instant(app.Config{Clock: w.clock, Stores: w.stores, Environments: envs, Supervisors: w.supervisors()}))
 	w.apps = append(w.apps, a)
 	if err := a.Start(ctxFor(w.t)); err != nil {
 		w.t.Fatal(err)

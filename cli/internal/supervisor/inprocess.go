@@ -11,6 +11,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
 	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
+	"github.com/uw-syfi/vibesys/cli/internal/owned"
 )
 
 // InProcess is Supervisors whose supervisors are Supervisor values in the daemon's own process.
@@ -35,6 +36,7 @@ type Survivors struct {
 // process is one supervisor of InProcess and whether it was killed.
 type process struct {
 	sup    *Supervisor
+	launch lifecycle.Launch
 	killed chan struct{}
 	once   sync.Once
 }
@@ -106,7 +108,7 @@ func (p *InProcess) Spawn(ctx context.Context, launch lifecycle.Launch) (Handle,
 	if _, ok := p.alive.runs[ref]; ok {
 		return nil, &core.Failure{Kind: core.FailureConflict, Message: fmt.Sprintf("job %s already has a run", ref)}
 	}
-	proc := &process{killed: make(chan struct{}),
+	proc := &process{killed: make(chan struct{}), launch: launch,
 		sup: New(Config{Launch: launch, Environments: p.env, Checkouts: p.checkouts, Spool: &MemorySpool{}})}
 	p.alive.runs[ref] = proc
 	return &inProcessHandle{proc: proc}, nil
@@ -118,13 +120,30 @@ func (p *InProcess) Runs(ctx context.Context) ([]Run, error) {
 	defer p.alive.mu.Unlock()
 	var out []Run
 	for ref, proc := range p.alive.runs {
-		if proc.dead() {
-			out = append(out, Run{Ref: ref, Presence: lifecycle.PresenceGone})
-			continue
-		}
-		out = append(out, Run{Ref: ref, Presence: lifecycle.PresenceAlive, Handle: &inProcessHandle{proc: proc}})
+		out = append(out, runOf(ref, proc))
 	}
 	return out, nil
+}
+
+func runOf(ref lifecycle.Ref, proc *process) Run {
+	if proc.dead() {
+		return Run{Ref: ref, Presence: lifecycle.PresenceGone, Launch: proc.launch}
+	}
+	return Run{Ref: ref, Presence: lifecycle.PresenceAlive, Handle: &inProcessHandle{proc: proc}, Launch: proc.launch}
+}
+
+// Probe implements Supervisors.
+func (p *InProcess) Probe(ctx context.Context, ref lifecycle.Ref) (Run, error) {
+	if err := ctx.Err(); err != nil {
+		return Run{}, err
+	}
+	p.alive.mu.Lock()
+	defer p.alive.mu.Unlock()
+	proc, ok := p.alive.runs[ref]
+	if !ok {
+		return Run{Ref: ref, Presence: lifecycle.PresenceNone}, nil
+	}
+	return runOf(ref, proc), nil
 }
 
 // Forget implements Supervisors.
@@ -177,14 +196,16 @@ func (h *inProcessHandle) Follow(ctx context.Context, offset uint64, emit func([
 	}
 	// A kill ends a waiting Attach: the connection to a killed process drops.
 	ctx, cancel := context.WithCancel(ctx)
+	var watcher owned.Group
+	defer watcher.Wait()
 	defer cancel()
-	go func() {
+	watcher.Go(func() {
 		select {
 		case <-h.proc.killed:
 			cancel()
 		case <-ctx.Done():
 		}
-	}()
+	})
 	out, err := h.proc.sup.Attach(ctx, offset, func(_ uint64, data []byte) error { return emit(data) })
 	if h.proc.dead() || errors.Is(err, ErrReleased) {
 		return lifecycle.Outcome{}, ErrGone

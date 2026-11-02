@@ -5,13 +5,10 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strings"
-	"sync"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/store"
-	"github.com/uw-syfi/vibesys/cli/internal/store/memstore"
 )
 
 // Scope names the store a request is about: one task in one repository.
@@ -63,55 +60,4 @@ func Rules(defaultSamples uint32) store.Rules {
 			return err == nil && plan.Action == core.CacheReuse
 		},
 	}
-}
-
-// MemoryStores is Stores over in-memory stores. It stands for the disk in tests: building a new
-// App over the same MemoryStores is a daemon that restarts.
-type MemoryStores struct {
-	rules store.Rules
-
-	mu     sync.Mutex
-	stores map[Scope]*memstore.Store
-}
-
-var _ Stores = (*MemoryStores)(nil)
-
-// NewMemoryStores returns Stores whose stores are opened with the rules.
-func NewMemoryStores(rules store.Rules) *MemoryStores {
-	return &MemoryStores{rules: rules, stores: map[Scope]*memstore.Store{}}
-}
-
-// Open implements Stores.
-func (m *MemoryStores) Open(ctx context.Context, scope Scope) (store.Store, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if err := scope.Validate(); err != nil {
-		return nil, err
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	s, ok := m.stores[scope]
-	if !ok {
-		s = memstore.New(memstore.WithRules(m.rules))
-		m.stores[scope] = s
-	}
-	return s, nil
-}
-
-// Known implements Stores.
-func (m *MemoryStores) Known(ctx context.Context) ([]Scope, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	out := make([]Scope, 0, len(m.stores))
-	for scope := range m.stores {
-		out = append(out, scope)
-	}
-	slices.SortFunc(out, func(a, b Scope) int {
-		if c := strings.Compare(a.Repository, b.Repository); c != 0 {
-			return c
-		}
-		return strings.Compare(a.Task, b.Task)
-	})
-	return out, nil
 }

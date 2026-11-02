@@ -94,7 +94,7 @@ func e2eDaemon() int {
 				cmd := exec.Command(self, "-test.run=^$")
 				cmd.Env = append(os.Environ(), roleVar+"=supervisor", runDirVar+"="+runDir)
 				return cmd
-			}, "e2e"),
+			}, "e2e", clock.System{}),
 		},
 	})
 	if errors.Is(err, daemon.ErrAlreadyRunning) {

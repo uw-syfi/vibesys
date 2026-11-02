@@ -37,6 +37,7 @@ var rules = map[string][]string{
 	"internal/core":                {},
 	"internal/clock":               {},
 	"internal/changed":             {},
+	"internal/owned":               {},
 	"internal/lifecycle":           {"internal/core"},
 	"internal/backend":             {"internal/core"},
 	"internal/environment":         {"internal/core"},
@@ -56,30 +57,34 @@ var rules = map[string][]string{
 	"internal/wire": {"internal/core", "internal/lifecycle", "gen/"},
 
 	// Supervisors: the domain, its channel to the daemon, and the process that serves it.
-	"internal/supervisor":         {"internal/changed", "internal/core", "internal/environment", "internal/lifecycle"},
+	"internal/supervisor":         {"internal/changed", "internal/core", "internal/environment", "internal/lifecycle", "internal/owned"},
 	"internal/supervisor/suptest": {"internal/core", "internal/lifecycle", "internal/supervisor"},
 	"internal/supervisor/rpc":     {"gen/", "internal/core", "internal/lifecycle", "internal/supervisor", "internal/wire"},
 	"internal/supervisor/host": {
-		"gen/", "internal/core", "internal/environment", "internal/lifecycle", "internal/supervisor",
-		"internal/supervisor/rpc", "internal/wire",
+		"gen/", "internal/clock", "internal/core", "internal/environment", "internal/lifecycle", "internal/owned",
+		"internal/runtimedir", "internal/supervisor", "internal/supervisor/rpc", "internal/wire",
 	},
 
 	// The daemon: its job flows, the process that serves them, and the client that calls it. The
 	// client speaks the contract's messages only, so it does not import the domain.
 	"internal/app": {
-		"internal/changed", "internal/clock", "internal/core", "internal/environment", "internal/lifecycle",
-		"internal/store", "internal/store/memstore", "internal/supervisor",
+		"internal/changed", "internal/clock", "internal/core", "internal/environment", "internal/lifecycle", "internal/owned",
+		"internal/store", "internal/supervisor",
 	},
 	"internal/app/filestores": {"internal/app", "internal/store", "internal/store/filestore"},
+	"internal/app/memstores":  {"internal/app", "internal/store", "internal/store/memstore"},
 	"internal/daemon": {
-		"gen/", "internal/app", "internal/clock", "internal/core", "internal/environment",
+		"gen/", "internal/app", "internal/clock", "internal/core", "internal/environment", "internal/owned",
 		"internal/runtimedir", "internal/supervisor", "internal/wire",
 	},
 	"internal/daemon/daemontest": {
-		"internal/app", "internal/clock", "internal/core", "internal/daemon", "internal/environment/fakeenv",
-		"internal/runtimedir", "internal/supervisor",
+		"internal/app", "internal/app/memstores", "internal/clock", "internal/core", "internal/daemon",
+		"internal/environment/fakeenv", "internal/runtimedir", "internal/supervisor",
 	},
 	"internal/client": {"gen/", "internal/clock", "internal/runtimedir", "internal/wire"},
+
+	// The simulation of the daemon has tests and no product code.
+	"internal/sim": {},
 
 	// The wiring of the shipped binary.
 	"internal/production": {
@@ -105,12 +110,18 @@ var testRules = map[string][]string{
 	"internal/supervisor":      {"internal/environment/fakeenv", "internal/supervisor/suptest"},
 	"internal/supervisor/rpc":  {"internal/environment/fakeenv", "internal/supervisor/suptest"},
 	"internal/supervisor/host": {"internal/environment/fakeenv", "internal/supervisor/suptest"},
-	"internal/app":             {"internal/environment/fakeenv"},
+	"internal/app":             {"internal/app/memstores", "internal/environment/fakeenv"},
 	"internal/app/filestores":  {"internal/core"},
-	"internal/daemon":          {"internal/environment/fakeenv"},
+	"internal/daemon":          {"internal/app/memstores", "internal/environment/fakeenv"},
 	"internal/client": {
-		"internal/app", "internal/core", "internal/daemon", "internal/daemon/daemontest",
+		"internal/app", "internal/app/memstores", "internal/core", "internal/daemon", "internal/daemon/daemontest",
 		"internal/environment/fakeenv", "internal/supervisor",
+	},
+	// The whole daemon, over Fakes, in one process.
+	"internal/sim": {
+		"gen/", "internal/app", "internal/app/memstores", "internal/client", "internal/clock", "internal/core",
+		"internal/daemon", "internal/environment/fakeenv", "internal/lifecycle", "internal/owned",
+		"internal/runtimedir", "internal/store", "internal/supervisor",
 	},
 	"cmd/vibesys-cli": {
 		"internal/app", "internal/app/filestores", "internal/clock", "internal/core", "internal/daemon",

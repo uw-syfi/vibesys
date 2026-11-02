@@ -76,7 +76,7 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 			Stores: filestores.New(index, app.Rules(filestores.DefaultSamples)),
 			Supervisors: host.New(dir.Supervisors(), func(runDir string) *exec.Cmd {
 				return exec.Command(p.Executable, "supervisor", "serve", "--run-dir", runDir)
-			}, p.Version),
+			}, p.Version, clock.System{}),
 			Environments: environment.None{},
 		},
 	})

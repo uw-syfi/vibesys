@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"time"
 
 	"google.golang.org/grpc"
 
@@ -14,12 +15,17 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/app"
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
+	"github.com/uw-syfi/vibesys/cli/internal/owned"
 	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
 )
 
 // ErrAlreadyRunning says another daemon of this user holds the instance lock.
-var ErrAlreadyRunning = errors.New("a daemon is already running")
+var ErrAlreadyRunning = runtimedir.ErrDaemonRunning
+
+// stopGrace is how long a stopping daemon waits for its calls to end. They end at once, but a client
+// that stopped reading a stream would otherwise hold the daemon, and with it the machine, for good.
+const stopGrace = 10 * time.Second
 
 // Runtime is what the daemon runs on. A shipped binary and a test compose it differently; the
 // daemon itself never branches on which.
@@ -36,6 +42,8 @@ type Config struct {
 	Version string
 	Runtime Runtime
 	Clock   clock.Clock
+	// Timers is what the daemon's waits go through. It defaults to the system's.
+	Timers clock.Timers
 	// Logf receives the daemon's diagnostics. It may be nil.
 	Logf func(format string, args ...any)
 	// Ready receives one runtimedir.ReadyByte once the daemon serves, and is closed. A daemon that fails
@@ -62,6 +70,11 @@ func Run(ctx context.Context, cfg Config) (err error) {
 	lock, err := runtimedir.TryLock(cfg.Dir.DaemonLock())
 	switch {
 	case errors.Is(err, runtimedir.ErrHeld):
+		if ready != nil {
+			// The client that started this process needs to know this from a failure: it looks
+			// again for the daemon there is. If the pipe is gone, so is that client.
+			_, _ = ready.Write([]byte{runtimedir.ReadyTaken})
+		}
 		return ErrAlreadyRunning
 	case err != nil:
 		return fmt.Errorf("daemon: the instance lock: %w", err)
@@ -75,6 +88,7 @@ func Run(ctx context.Context, cfg Config) (err error) {
 
 	a := app.New(app.Config{
 		Clock:        cfg.Clock,
+		Timers:       cfg.Timers,
 		Stores:       cfg.Runtime.Stores,
 		Environments: cfg.Runtime.Environments,
 		Supervisors:  cfg.Runtime.Supervisors,
@@ -99,7 +113,9 @@ func Run(ctx context.Context, cfg Config) (err error) {
 	server := grpc.NewServer()
 	cliv1.RegisterDaemonServiceServer(server, srv)
 	served := make(chan error, 1)
-	go func() { served <- server.Serve(listener) }()
+	var serving owned.Group
+	defer serving.Wait()
+	serving.Go(func() { served <- server.Serve(listener) })
 
 	if ready != nil {
 		if _, err := ready.Write([]byte{runtimedir.ReadyByte}); err != nil {
@@ -119,6 +135,10 @@ func Run(ctx context.Context, cfg Config) (err error) {
 	// Calls that wait on a job end now; then the answer to Stop reaches its caller before the
 	// socket goes.
 	srv.Shutdown()
-	server.GracefulStop()
+	timers := cfg.Timers
+	if timers == nil {
+		timers = clock.System{}
+	}
+	clock.Graceful(timers, stopGrace, server.GracefulStop, server.Stop)
 	return nil
 }

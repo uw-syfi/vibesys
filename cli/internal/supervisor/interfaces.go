@@ -37,8 +37,8 @@ type Handle interface {
 	// Follow passes the job's output from the byte offset to emit, in order and each byte once,
 	// and returns the job's outcome after the command has ended and every byte was passed. It
 	// waits as long as the command runs. A caller that comes back with the offset it already
-	// holds loses nothing and gets nothing twice. If emit fails, Follow stops and returns its
-	// error.
+	// holds loses nothing and gets nothing twice. An offset past the end passes nothing, which is
+	// how a caller learns only the outcome. If emit fails, Follow stops and returns its error.
 	Follow(ctx context.Context, offset uint64, emit func(data []byte) error) (lifecycle.Outcome, error)
 
 	// Release ends the supervisor and removes what it kept. It fails with core.FailureConflict
@@ -52,9 +52,13 @@ type Run struct {
 	Ref lifecycle.Ref
 	// Handle reaches the supervisor, and is nil when Presence is not PresenceAlive.
 	Handle Handle
-	// Presence is PresenceAlive for a supervisor that answered, and PresenceGone for a run left
-	// without one.
+	// Presence is PresenceAlive for a supervisor that answered, PresenceGone for a run whose
+	// supervisor is proved dead, PresenceUnknown for one that may live and that the daemon cannot
+	// use, and PresenceNone for a job with no run.
 	Presence lifecycle.Presence
+	// Launch is what the run was started with, which says what store its job is in. It is zero
+	// when the run's record of it cannot be read.
+	Launch lifecycle.Launch
 }
 
 // Supervisors starts supervisors and finds the ones left from before.
@@ -64,11 +68,15 @@ type Supervisors interface {
 	// left behind.
 	Spawn(ctx context.Context, launch lifecycle.Launch) (Handle, error)
 
-	// Runs returns every run left from an earlier daemon or launch, each probed once.
+	// Runs returns every run left from an earlier daemon or launch, each probed once. It fails
+	// with the context's error when ctx is done, and never reports that as a dead supervisor.
 	Runs(ctx context.Context) ([]Run, error)
 
-	// Forget removes what is left of a run whose supervisor is gone or released. It is
-	// idempotent, and it fails with core.FailureConflict for a run whose supervisor still
-	// answers.
+	// Probe returns what is left of one job's run now, as Runs does.
+	Probe(ctx context.Context, ref lifecycle.Ref) (Run, error)
+
+	// Forget removes what is left of a run whose supervisor is released or proved dead. It is
+	// idempotent. It fails with core.FailureConflict for a run whose supervisor may live, and with
+	// the context's error when ctx is done.
 	Forget(ctx context.Context, ref lifecycle.Ref) error
 }

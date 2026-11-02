@@ -77,6 +77,14 @@ func failedToLaunch(job core.JobID, f core.Failure, at time.Time) Settlement {
 	}
 }
 
+// stoppedJob is the end of a running job the daemon gave up following and whose command it ended.
+func stoppedJob(job core.JobID, f core.Failure, at time.Time) Settlement {
+	return Settlement{
+		Transition: core.Transition{Job: job, From: core.JobRunning, To: core.JobFailed, At: at},
+		Log:        fmt.Sprintf("vibesys-cli: the job was stopped because the daemon could not follow it: %s", f.Message),
+	}
+}
+
 // lostJob is the end of a running job whose supervisor is gone.
 func lostJob(job core.JobID, at time.Time) Settlement {
 	return Settlement{
