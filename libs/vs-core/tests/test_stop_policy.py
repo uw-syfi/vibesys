@@ -15,6 +15,7 @@ from typing import Annotated, Literal, TypeAliasType, Union, get_args, get_origi
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from pydantic import BaseModel
 
 import vs_core.api as core
 from vs_core._run_park import dispatch_allowed, pause_cancels
@@ -118,17 +119,17 @@ KEEPS = {
 }
 
 
-def request_classes() -> list[type]:
+def request_classes() -> list[type[BaseModel]]:
     """Every class of the ``Request`` union, flattened from its alias."""
 
-    def flatten(tp: object) -> list[type]:
+    def flatten(tp: object) -> list[type[BaseModel]]:
         if isinstance(tp, TypeAliasType):
             return flatten(tp.__value__)
         if get_origin(tp) is Annotated:
             return flatten(get_args(tp)[0])
         if get_origin(tp) in (Union, UnionType):
             return [cls for arg in get_args(tp) for cls in flatten(arg)]
-        assert isinstance(tp, type), tp
+        assert isinstance(tp, type) and issubclass(tp, BaseModel), tp
         return [tp]
 
     return flatten(records.Request.__value__)
