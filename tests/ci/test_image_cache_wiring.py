@@ -84,3 +84,14 @@ def test_registry_failures_do_not_silently_trigger_cold_installs() -> None:
     assert "timeout --kill-after=5s 180s docker pull" in script
     assert "timeout --kill-after=5s 180s docker push" in script
     assert "org.opencontainers.image.source" in script
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("job", [*JOBS, "example-dockerfiles"])
+@pytest.mark.parametrize("name", ["Snapshot Docker layer cache", "Save Docker layer cache"])
+def test_merge_queue_never_snapshots_or_publishes_image_archives(job: str, name: str) -> None:
+    """Cache publication must not exhaust the queue's budget after image tests passed."""
+    workflow = yaml.safe_load((REPO / ".github/workflows/test.yml").read_text())
+    step = next(step for step in workflow["jobs"][job]["steps"] if step.get("name") == name)
+    # The leading conjunction excludes merge groups regardless of hit or repository identity.
+    assert step["if"].startswith("github.event_name != 'merge_group' && ")
