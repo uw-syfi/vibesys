@@ -99,7 +99,7 @@ runner's `clear`. The table below keeps the four classes and adds what `clear` d
 | `DispatchTurn`, `ResumeSessionTurn`; registered `SESSION_TURN` operations | one agent turn: a process group, writes to the workspace, tokens, tool calls | safe after `clear` only | kill the processes carrying the tag in the run's containers (`vs_agent.reap_step_agents`; the containers belong to a role or a workspace and outlive the step, so none is removed), then, unless the journal holds an answer for the invocation, return the workspace to the baseline of its access receipt (`AccessSettlement.rewind`) and forget the invocation's unanswered journal record (`AgentSessions.forget_unfinished`), so the retry dispatches it again and resumes the last completed turn | tag |
 | `SubmitMeasurement`; registered `OWNED_JOB` operations | an evaluation job on Slurm, Docker or a local process | Slurm: safe, the ledger finds the job. Docker and local: safe after `clear` | Slurm: adopt (request claimed, queued, running or ended); a pause or a drain deadline leaves the job running and `run` attaches to it; only a cancel that ends the step cancels it. Local and Docker: cancel the process's own evaluation, kill the stage process group, remove the labelled container, discard partial stage output | Slurm: the ledger's content key, which `clear` computes from the step. Local: the tag |
 | registered `IDEMPOTENT_WRITE` operations: `render_artifacts`, `retain_revision`, the dynamic handoff write, issue-board `ApplyIssueChanges` and `LogProgress` | content-addressed or keyed writes | safe: each carries a key the tracker or store checks before writing | none | existing key |
-| `capture_command`, `validate_local` | run a command or validation recipe in a workspace | safe after `clear` | kill the process group, reset the workspace to the recorded commit | tag |
+| `capture_command`, `validate_local` | run a command or validation recipe in a throwaway candidate workspace | safe to rerun | none: the candidate is keyed by the request identity and replaced on the rerun | request identity |
 
 The ledger keys a request by a hash of the content the job reads and its spec, not by the tag, so `clear(step, tag)` computes the key from the step: it opens a candidate worktree at the step's revision, hashes it, discards it, and reads the ledger. Two steps of one content therefore share one job, and a step that finds the job another step submitted attaches to it. A job that was cancelled (its cancel ended the step, or someone else cancelled it) is final in the ledger, so the next attempt asks for a new handle of the tag (`-life-n`) and the ledger claims a new job. A pause or a drain deadline cancels nothing: the job stays queued or running, `clear` adopts it and the next attempt attaches. A local evaluation never attaches: each run takes a fresh handle.
 
@@ -198,12 +198,11 @@ takes it as a required argument): `ReadOnly`, `KeyedWrite` (names the key its ow
 naming the operation kind, a policy its lifecycle does not allow (`QUERY` takes `ReadOnly` or
 `ClearedWork`, `IDEMPOTENT_WRITE` takes `KeyedWrite` or `ClearedWork`, `OWNED_JOB` and `SESSION_TURN`
 take `OtherRunner`), and `OperationStepRunner` refuses a step of an operation another runner owns. The
-table above classes `capture_command` and `validate_local` as `ClearedWork` and `export_patch` as read
-only, which is how their lifecycles are declared in code. The production roles carry their policy in one
-table in `_operation_wiring.py`. The two command roles take the cleaner the run supplies; a run that
-supplies none gets `UnwiredWorkCleaner`, whose `clear` raises `ClearUnavailableError`, so the step loop
-waits on that runner visibly instead of repeating a command whose process nobody ended. Production
-wires no cleaner today (see [Open items](#open-items)).
+production roles carry their policy in one table in `_operation_wiring.py`, indexed by role, so a new
+role without a policy is a `KeyError` at wiring. `capture_command`, `validate_local` and `export_patch`
+are `ReadOnly`: the two command roles run in a throwaway candidate named by the request identity, which
+the workspaces replace when the rerun opens it. `ClearedWork` is declared and enforced by the entry but
+no production role uses it.
 
 ## Core state is a fold of the log
 
@@ -953,9 +952,10 @@ What main still holds of the old layer, and what the new one does not yet cover.
   `buf breaking` will flag the removals, and persisted data stays readable for seven days.
 - **Kills between awaits.** vs-dst interrupts at each commit and each effect. A kill between the awaits
   inside one `clear` or one effect is not covered.
-- **Command-role cleaner.** Production wires no `WorkCleaner` (`src/vibesys/run/core_services.py` builds the
-  catalog without one), so a re-run of `capture_command` or `validate_local` after a crash waits on
-  `ClearUnavailableError`, visibly on the `StallBoard`, until an operator escalates or the run ends.
+- **A command that outlives its host.** `capture_command` and `validate_local` are `ReadOnly`, so
+  nothing reaps their process by tag: `create_candidate` carries no `step_tag` for them. A command still
+  running when its host dies is expected to end because its sandbox closes with the host. No test kills a
+  host with a command in flight.
 - **A re-run on screen.** The span outcome enum has no value for an attempt a restart interrupted.
 
 ## Open risks
