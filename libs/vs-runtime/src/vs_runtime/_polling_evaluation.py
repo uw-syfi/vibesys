@@ -43,6 +43,7 @@ from vs_redaction.api import redact_diagnostic_tail
 from vs_runtime._evaluation_failure_text import render_evaluation_failure, render_stage_failure
 from vs_runtime._failure_classification import is_unsettled
 from vs_runtime._measurement_progress import StageRun
+from vs_runtime.contracts import validate_objectives
 from vs_sim.api import DISCARD
 
 if TYPE_CHECKING:
@@ -50,7 +51,13 @@ if TYPE_CHECKING:
 
     from vs_runtime._measurement_progress import StageOutputOpener
     from vs_runtime._run_control import RunControlChannel
-    from vs_runtime.contracts import CandidateWorkspace, Evaluation, Workspace, Workspaces
+    from vs_runtime.contracts import (
+        BenchmarkObjective,
+        CandidateWorkspace,
+        Evaluation,
+        Workspace,
+        Workspaces,
+    )
     from vs_sim.api import Clock, OutputSink
 
 
@@ -75,7 +82,10 @@ class PollingEvaluationExecutor:
     the first has ended and released its workspace.
     """
 
-    def __init__(
+    # lint-waiver: LW-346200 [PLR0913]; objectives are immutable policy, alongside five
+    # > independent runtime collaborators. A carrier would merely hide those seams;
+    # > a setter would allow objectives to change while evaluations are in flight.
+    def __init__(  # noqa: PLR0913
         self,
         evaluation: Evaluation,
         workspaces: Workspaces,
@@ -83,12 +93,17 @@ class PollingEvaluationExecutor:
         clock: Clock,
         stage_output: StageOutputOpener | None = None,
         control: RunControlChannel | None = None,
+        objectives: tuple[BenchmarkObjective, ...] = (),
     ) -> None:
         """Evaluate through ``evaluation`` in candidate workspaces from ``workspaces``.
 
         ``clock`` stamps availability observations. ``stage_output`` opens the stream
         each stage's command writes its raw output to while it runs; ``None`` discards it.
+        ``objectives`` are the run's selected benchmark axes, in headline order;
+        the evaluator validates their presence before evidence can pass.
         """
+        validate_objectives(objectives)
+        self._objectives = objectives
         self._control = control
         self._clock = clock
         self._stage_output = stage_output
@@ -341,7 +356,9 @@ class PollingEvaluationExecutor:
             partial = None
             kind = result.failure_kind
         elif stage.kind is EvidenceKind.BENCHMARK:
-            result = await self._evaluation.benchmark(workspace, output=output)
+            result = await self._evaluation.benchmark(
+                workspace, objectives=self._objectives, output=output
+            )
             completed = not is_unsettled(result.failure_kind)
             kind = result.failure_kind
             outcome = (
@@ -362,7 +379,10 @@ class PollingEvaluationExecutor:
                     ),
                     unit=result.metric_unit if name == result.metric_name else None,
                 )
-                for name, value in sorted((result.row or {}).items())
+                for name, value in sorted(
+                    (result.row or {}).items(),
+                    key=lambda item: (item[0] != result.metric_name, item[0]),
+                )
             )
         else:
             message = "direct profile evaluation is not supported by the trusted runtime"
