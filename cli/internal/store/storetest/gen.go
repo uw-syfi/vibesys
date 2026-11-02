@@ -211,7 +211,7 @@ func (g *gen) plan() core.Plan {
 func (g *gen) job() core.Job {
 	env, started, finished, code := g.fingerprint(), g.instant(), g.instant(), int(g.r.Int32())
 	return core.Job{
-		ID: core.JobID(g.name()), Spec: g.spec(), State: core.JobStates()[g.pick(6)], Key: core.JobKey(g.name()), Environment: &env,
+		ID: core.JobID(g.name()), Spec: g.spec(), State: core.JobStates()[g.pick(6)], Key: core.JobKey(g.name()), NoCache: true, Environment: &env,
 		Notes: []core.Note{g.note(), g.note()}, Plans: []core.PlanNumber{core.PlanNumber(1 + g.r.Uint32()), 2},
 		SubmittedAt: g.instant(), StartedAt: &started, FinishedAt: &finished, CancelReason: g.text(), ExitCode: &code,
 		ResultJob: core.JobID(g.name()), CheckJob: core.JobID(g.name()),

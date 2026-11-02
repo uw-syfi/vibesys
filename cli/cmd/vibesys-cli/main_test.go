@@ -13,7 +13,9 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/daemon/daemontest"
+	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv"
 	"github.com/uw-syfi/vibesys/cli/internal/gitrepo"
+	"github.com/uw-syfi/vibesys/cli/internal/task/tasktest"
 )
 
 var full = core.Commit("0123456789abcdef0123456789abcdef01234567")
@@ -131,6 +133,12 @@ func TestInvalidArgumentsAreRefusedBeforeTheDaemon(t *testing.T) {
 		{"empty command", withTask("submit", "command", "HEAD", "--"), "after --"},
 		{"no commit", withTask("submit", "command", "--", "true"), "one commit"},
 		{"bad env", withTask("submit", "command", "HEAD", "--env", "vm", "--", "true"), "--env"},
+		{"check with a command", withTask("submit", "check", "HEAD", "--", "true"), "own commands"},
+		{"check with samples", withTask("submit", "check", "HEAD", "--samples", "3"), "--samples"},
+		{"check with recheck", withTask("submit", "check", "HEAD", "--recheck"), "--recheck"},
+		{"measure with no commit", withTask("submit", "measure"), "one commit"},
+		{"measure with too many samples", withTask("submit", "measure", "HEAD", "--samples", "99999999999"), "--samples"},
+		{"measure with a bad env", withTask("submit", "measure", "HEAD", "--env", "vm"), "--env"},
 		{"probe without service", withTask("submit", "command", "HEAD", "--probe", "ok", "--", "true"), "--probe"},
 		{"negative timeout", withTask("submit", "command", "HEAD", "--timeout=-1s", "--", "true"), "--timeout"},
 		{"bad flag", withTask("submit", "command", "HEAD", "--nope", "--", "true"), "nope"},
@@ -323,17 +331,52 @@ func TestJSONErrors(t *testing.T) {
 	}
 }
 
-func TestSubmitOfLaterKindsIsUnavailable(t *testing.T) {
+func TestSubmitCheckAndMeasureRunTheTasksOwnCommands(t *testing.T) {
 	c := newCLI(t)
-	for _, kind := range []string{"check", "measure"} {
-		r := c.run(withTask("submit", kind, "HEAD")...)
-		if r.code != exitFailed || !strings.Contains(r.stderr, "not available in this build") {
-			t.Errorf("submit %s = %+v", kind, r)
+	c.world.Tasks.Put("/repo", full, tasktest.Scripted("kv", []string{"print", "checked", ";", "exit", "0"}, []string{"emit", `{"ops": 7.5}`}))
+
+	r := c.run(withTask("submit", "check", "HEAD", "--wait")...)
+	if r.code != exitOK || !strings.Contains(r.stdout, "\tsucceeded") || !strings.Contains(r.stdout, "\tcheck") {
+		t.Fatalf("submit check = %+v", r)
+	}
+	r = c.run(withTask("submit", "measure", "HEAD", "--samples", "3", "--wait")...)
+	if r.code != exitOK || !strings.Contains(r.stdout, "measure (3 samples)") || !strings.Contains(r.stdout, "succeeded") {
+		t.Fatalf("submit measure = %+v", r)
+	}
+	// The same measure again is answered from the saved samples, and says so.
+	r = c.run(withTask("submit", "measure", "HEAD", "--samples", "3")...)
+	if r.code != exitOK || !strings.Contains(r.stdout, "(reused a saved result)") {
+		t.Fatalf("second submit measure = %+v", r)
+	}
+	// --no-cache runs it again.
+	r = c.run(withTask("submit", "measure", "HEAD", "--samples", "3", "--no-cache", "--wait")...)
+	if r.code != exitOK || strings.Contains(r.stdout, "reused") {
+		t.Fatalf("no-cache submit measure = %+v", r)
+	}
+	if n := countRuns(c.world.Env, "emit"); n != 6 {
+		t.Errorf("the benchmark ran %d times, want 3 and then 3 more for --no-cache", n)
+	}
+}
+
+func TestSubmitOfATaskTheCommitLacksFailsAndQueuesNothing(t *testing.T) {
+	c := newCLI(t)
+	r := c.run(withTask("submit", "check", "HEAD")...)
+	if r.code != exitFailed || !strings.Contains(r.stderr, "is not a commit") {
+		t.Fatalf("submit check = %+v", r)
+	}
+	if r := c.run(withTask("jobs")...); r.code != exitOK || strings.TrimSpace(r.stdout) != "" {
+		t.Fatalf("jobs = %+v", r)
+	}
+}
+
+func countRuns(env *fakeenv.Environment, word string) int {
+	n := 0
+	for _, x := range env.Runs() {
+		if len(x.Argv) > 0 && x.Argv[0] == word {
+			n++
 		}
 	}
-	if c.starter.Calls() != 0 {
-		t.Fatal("a refused submission started a daemon")
-	}
+	return n
 }
 
 func TestEnvironmentVariablesFillTheCallContext(t *testing.T) {

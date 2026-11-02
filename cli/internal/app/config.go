@@ -7,6 +7,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
+	"github.com/uw-syfi/vibesys/cli/internal/task"
 )
 
 // Config is what an App is made of. Clock, Stores, Environments and Supervisors are required.
@@ -16,8 +17,13 @@ type Config struct {
 	Environments environment.Environments
 	Supervisors  supervisor.Supervisors
 
-	// DefaultEnvironment is the kind a job runs in when its submission leaves the environment
-	// unspecified. Until tasks declare their own, it is the host.
+	// Tasks reads a task as a commit has it. It is required to run check and measure jobs, which
+	// are refused as unavailable without it; command jobs do not read a task.
+	Tasks task.Source
+
+	// DefaultEnvironment is the kind a command job runs in when its submission leaves the
+	// environment unspecified. A check or a measure job's environment is decided by its task
+	// (core.ChooseEnvironment).
 	DefaultEnvironment core.EnvironmentKind
 	// DefaultTimeout is the time limit of a command that sets none.
 	DefaultTimeout time.Duration

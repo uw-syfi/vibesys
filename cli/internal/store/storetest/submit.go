@@ -37,6 +37,18 @@ func testSubmit(t *testing.T, newStore New) {
 		}
 	})
 
+	t.Run("keeps whether the submission asked for no cache, because the job may start much later", func(t *testing.T) {
+		for _, noCache := range []bool{false, true} {
+			e := newEnv(t, newStore)
+			sub := e.measure(1, "key-a", 5)
+			sub.NoCache = noCache
+			job := e.submit(sub).Job
+			if job.NoCache != noCache || e.job(job.ID).NoCache != noCache {
+				t.Errorf("NoCache = %v on the returned job and %v on the stored one, want %v", job.NoCache, e.job(job.ID).NoCache, noCache)
+			}
+		}
+	})
+
 	t.Run("gives each job its own id and lists them oldest first", func(t *testing.T) {
 		e := newEnv(t, newStore)
 		var ids []core.JobID

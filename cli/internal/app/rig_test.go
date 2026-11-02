@@ -9,10 +9,13 @@ import (
 	"time"
 
 	"github.com/uw-syfi/vibesys/cli/internal/app"
+	"github.com/uw-syfi/vibesys/cli/internal/backend/cpu"
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv"
+	"github.com/uw-syfi/vibesys/cli/internal/hostfs"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
+	"github.com/uw-syfi/vibesys/cli/internal/task"
 )
 
 // backstop bounds every wait. It only keeps a hung test from hanging the build: no test passes or
@@ -33,6 +36,8 @@ type world struct {
 	clock     *clock.Manual
 	stores    *app.MemoryStores
 	gates     *fakeenv.MemoryGates
+	files     *hostfs.Memory
+	tasks     *task.MemorySource
 	env       *fakeenv.Environment
 	checkouts *fakeenv.Checkouts
 	survivors *supervisor.Survivors
@@ -42,12 +47,15 @@ type world struct {
 func newWorld(t *testing.T) *world {
 	t.Helper()
 	gates := fakeenv.NewMemoryGates()
+	files := hostfs.NewMemory()
 	w := &world{
 		t:         t,
 		clock:     clock.NewManual(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), time.Millisecond),
 		stores:    app.NewMemoryStores(app.Rules(5)),
 		gates:     gates,
-		env:       fakeenv.New(core.EnvironmentHost, gates),
+		files:     files,
+		tasks:     task.NewMemorySource(),
+		env:       fakeenv.New(core.EnvironmentHost, gates, fakeenv.WithFiles(files)),
 		checkouts: &fakeenv.Checkouts{},
 		survivors: supervisor.NewSurvivors(),
 	}
@@ -62,12 +70,17 @@ func newWorld(t *testing.T) *world {
 		if n := w.checkouts.Open(); n != 0 {
 			t.Errorf("%d checkouts still open after the test", n)
 		}
+		if left := w.files.Scratch(); len(left) != 0 {
+			t.Errorf("scratch directories left: %v", left)
+		}
 	})
 	return w
 }
 
 func (w *world) supervisors() supervisor.Supervisors {
-	return supervisor.NewInProcess(fakeenv.Environments{core.EnvironmentHost: w.env}, w.checkouts, w.survivors)
+	facts := core.MachineFacts{HostID: "host-a", OS: "linux", Arch: "amd64", CPUModel: "Test CPU", LogicalCPUs: 8, MemoryBytes: 16 << 30}
+	host := supervisor.Host{Backend: cpu.New(cpu.NewFakeSystem(facts), w.clock), Files: w.files, Clock: w.clock}
+	return supervisor.NewInProcess(fakeenv.Environments{core.EnvironmentHost: w.env}, w.checkouts, w.survivors).WithHost(host)
 }
 
 // newApp starts a daemon over the world. It fails the test if the daemon cannot start.
@@ -78,6 +91,7 @@ func (w *world) newApp() *app.App {
 		Stores:       w.stores,
 		Environments: fakeenv.Environments{core.EnvironmentHost: w.env},
 		Supervisors:  w.supervisors(),
+		Tasks:        w.taskSource(),
 		Logf:         func(format string, args ...any) { w.t.Logf("daemon: "+format, args...) },
 	})
 	w.apps = append(w.apps, a)
@@ -184,4 +198,12 @@ func (w *world) ran(first string) int {
 
 func describe(j core.Job) string {
 	return fmt.Sprintf("%s %s", j.ID, j.State)
+}
+
+// taskSource is the world's tasks, or no source at all when the test took them away.
+func (w *world) taskSource() task.Source {
+	if w.tasks == nil {
+		return nil
+	}
+	return w.tasks
 }

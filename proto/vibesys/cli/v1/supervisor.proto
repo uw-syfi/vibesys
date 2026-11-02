@@ -1,8 +1,11 @@
 syntax = "proto3";
 package vibesys.cli.v1;
 
+import "google/protobuf/duration.proto";
+import "vibesys/cli/v1/environment.proto";
 import "vibesys/cli/v1/failure.proto";
 import "vibesys/cli/v1/job.proto";
+import "vibesys/cli/v1/result.proto";
 import "vibesys/cli/v1/version.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
@@ -51,6 +54,49 @@ message Launch {
   string task = 2;
   string job_id = 3;
   JobSpec spec = 4;
+  // What a check or a measure job runs, as the daemon decided it when the job started. It is set
+  // for those kinds and unset for a command job.
+  FlowPlan plan = 5;
+}
+
+// PlanCommand is one command of a plan, with its argument vector as the task wrote it and its
+// time limit. The supervisor resolves the project root placeholder in the checkout it makes.
+message PlanCommand {
+  repeated string argv = 1;
+  google.protobuf.Duration timeout = 2;
+}
+
+// ResultFormat is how a benchmark reports a result: the evaluator record stream, or a JSON file
+// with one numeric field. Exactly one of protocol2 and json_argument is set.
+message ResultFormat {
+  // The benchmark writes evaluator result protocol 2 records to the path after `--vs-output`.
+  bool protocol2 = 1;
+  // The flag the benchmark takes the path of its JSON result after.
+  string json_argument = 2;
+  // The numeric field of the JSON object that holds the scored value.
+  string field = 3;
+}
+
+// FlowPlan is everything a check or a measure job needs to run. Nothing in it is decided by the
+// supervisor: the daemon applies the cache to the task when the job starts, so the plan says how
+// many samples to take and which saved check pass to link.
+message FlowPlan {
+  JobKind kind = 1;
+  string task = 2;
+  string task_version = 3;
+  string key = 4;
+  EnvironmentFingerprint environment = 5;
+  // Run first when set.
+  PlanCommand build = 6;
+  PlanCommand check = 7;
+  // The following are for a measure job.
+  PlanCommand benchmark = 8;
+  ResultFormat result_format = 9;
+  Metric metric = 10;
+  // How many benchmark runs this job takes now: what the cache lacks.
+  uint32 samples = 11;
+  // The saved check pass a measure job links instead of running the check.
+  string check_pass_job_id = 12;
 }
 
 // ExecutionKind is how a command ended.
@@ -84,6 +130,12 @@ message SupervisorOutcome {
   // ended. The reason may be empty, so presence and not the text says that a cancel was asked. A
   // command that ended on its own before the request still reports how it ended.
   optional string cancel_reason = 3;
+  // The result a check or measure job found, when it passed. A job that passed saves it.
+  Result found = 4;
+  // A line for the job's output saying how a check or measure job ended, when it did not pass.
+  string reason = 5;
+  // Every command ran but the job has no acceptable result, such as a benchmark that wrote none.
+  bool rejected = 6;
 }
 
 message HandshakeRequest {

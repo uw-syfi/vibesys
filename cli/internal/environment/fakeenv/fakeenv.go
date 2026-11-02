@@ -2,15 +2,26 @@ package fakeenv
 
 import (
 	"context"
-	"fmt"
 	"io"
-	"strconv"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
 )
+
+// DefaultProbePause is the pause between two probes of a service that Environment waits on its
+// timers for.
+const DefaultProbePause = 500 * time.Millisecond
+
+// idleTimers are timers that never fire: an environment given no other has no limit.
+type idleTimers struct{}
+
+func (idleTimers) Timeout(time.Duration) (<-chan struct{}, func()) {
+	return make(chan struct{}), func() {}
+}
 
 // Gates holds the named points a script waits at. A test releases a gate to let the script go on.
 type Gates interface {
@@ -19,11 +30,20 @@ type Gates interface {
 	Wait(ctx context.Context, name string) bool
 }
 
+// Files is where the `emit` step puts the file a command was told to write. A hostfs.Memory is
+// one: the job flow reads the same files back from it.
+type Files interface {
+	Put(path string, data []byte)
+}
+
 // Environment is a fake environment.Environment. Create it with New.
 type Environment struct {
-	kind  core.EnvironmentKind
-	print core.Fingerprint
-	gates Gates
+	files  Files
+	kind   core.EnvironmentKind
+	print  core.Fingerprint
+	gates  Gates
+	timers clock.Timers
+	pause  time.Duration
 
 	mu       sync.Mutex
 	runs     []core.Execution
@@ -41,6 +61,18 @@ type Option func(*Environment)
 // environment on the CPU backend with a fixed set of facts.
 func WithFingerprint(f core.Fingerprint) Option { return func(e *Environment) { e.print = f } }
 
+// WithFiles sets where `emit` writes. Without it `emit` exits with code 127, as a command does
+// that is told to write a file it cannot.
+func WithFiles(f Files) Option { return func(e *Environment) { e.files = f } }
+
+// WithTimers sets the timers the environment takes its limit and its probe pauses from. The
+// default timers never fire. A test that wants a run to reach its limit supplies timers it fires.
+func WithTimers(t clock.Timers) Option { return func(e *Environment) { e.timers = t } }
+
+// WithProbePause sets the pause between two probes of a service. The default is
+// DefaultProbePause.
+func WithProbePause(d time.Duration) Option { return func(e *Environment) { e.pause = d } }
+
 // WithFingerprintError makes Fingerprint fail with err, as an environment does that cannot be
 // reached.
 func WithFingerprintError(err error) Option { return func(e *Environment) { e.finger = err } }
@@ -48,9 +80,11 @@ func WithFingerprintError(err error) Option { return func(e *Environment) { e.fi
 // New returns an environment of a kind whose scripts wait at the given gates.
 func New(kind core.EnvironmentKind, gates Gates, opts ...Option) *Environment {
 	e := &Environment{
-		kind:  kind,
-		gates: gates,
-		print: core.Fingerprint{Kind: kind, Backend: core.BackendCPU, Facts: map[string]string{"os": "fake", "arch": "fake"}},
+		kind:   kind,
+		gates:  gates,
+		timers: idleTimers{},
+		pause:  DefaultProbePause,
+		print:  core.Fingerprint{Kind: kind, Backend: core.BackendCPU, Facts: map[string]string{"os": "fake", "arch": "fake"}},
 	}
 	if kind == core.EnvironmentDocker {
 		e.print.ImageDigest = "sha256:" + strings.Repeat("0", 64)
@@ -92,87 +126,6 @@ func (e *Environment) Active() int {
 	return e.active
 }
 
-// Run implements environment.Environment by running the command as a script.
-func (e *Environment) Run(ctx context.Context, x core.Execution, out io.Writer) (core.ExecOutcome, error) {
-	e.mu.Lock()
-	e.runs = append(e.runs, x)
-	e.active++
-	e.mu.Unlock()
-	defer func() {
-		e.mu.Lock()
-		e.active--
-		e.mu.Unlock()
-	}()
-
-	if len(x.Argv) == 0 || x.Argv[0] == "" {
-		return core.ExecOutcome{}, &core.Failure{Kind: core.FailureInvalidInput, Message: "execution: no command to run"}
-	}
-	if x.Timeout <= 0 {
-		return core.ExecOutcome{}, &core.Failure{Kind: core.FailureInvalidInput, Message: "execution: the timeout must be positive"}
-	}
-	if x.Checkout.Dir == "" {
-		return core.ExecOutcome{}, &core.Failure{Kind: core.FailureInvalidInput, Message: "execution: no checkout directory"}
-	}
-	if x.Service != nil && len(x.Service.Probe) > 0 && x.Service.Probe[0] == "never" {
-		return core.ExecOutcome{Kind: core.ExecServiceNotReady}, nil
-	}
-	return e.script(ctx, x.Argv, out)
-}
-
-func (e *Environment) script(ctx context.Context, argv []string, out io.Writer) (core.ExecOutcome, error) {
-	for _, step := range steps(argv) {
-		switch step[0] {
-		case "print":
-			if _, err := fmt.Fprintln(out, strings.Join(step[1:], " ")); err != nil {
-				return core.ExecOutcome{Kind: core.ExecUnknown}, err
-			}
-		case "hold":
-			if len(step) != 2 || !e.gates.Wait(ctx, step[1]) {
-				return core.ExecOutcome{Kind: core.ExecCancelled}, nil
-			}
-		case "exit":
-			code, err := strconv.Atoi(strings.Join(step[1:], ""))
-			if err != nil {
-				return core.ExecOutcome{Kind: core.ExecExited, ExitCode: 127}, nil
-			}
-			return core.ExecOutcome{Kind: core.ExecExited, ExitCode: code}, nil
-		case "timeout":
-			return core.ExecOutcome{Kind: core.ExecTimedOut}, nil
-		case "service-not-ready":
-			return core.ExecOutcome{Kind: core.ExecServiceNotReady}, nil
-		case "service-exited":
-			return core.ExecOutcome{Kind: core.ExecServiceExited}, nil
-		case "unknown":
-			return core.ExecOutcome{Kind: core.ExecUnknown}, nil
-		case "fail":
-			return core.ExecOutcome{}, &core.Failure{Kind: core.FailureUnavailable, Message: strings.Join(step[1:], " ")}
-		default:
-			return core.ExecOutcome{Kind: core.ExecExited, ExitCode: 127}, nil
-		}
-	}
-	return core.ExecOutcome{Kind: core.ExecExited}, nil
-}
-
-// steps splits a script at its ";" arguments, dropping empty steps.
-func steps(argv []string) [][]string {
-	var out [][]string
-	var cur []string
-	for _, a := range argv {
-		if a == ";" {
-			if len(cur) > 0 {
-				out = append(out, cur)
-			}
-			cur = nil
-			continue
-		}
-		cur = append(cur, a)
-	}
-	if len(cur) > 0 {
-		out = append(out, cur)
-	}
-	return out
-}
-
 func cloneFacts(m map[string]string) map[string]string {
 	if m == nil {
 		return nil
@@ -195,4 +148,53 @@ func (m Environments) Environment(kind core.EnvironmentKind) (environment.Enviro
 		return e, nil
 	}
 	return environment.None{}.Environment(kind)
+}
+
+// Run implements environment.Environment by running the command as a script, and its service as
+// another. Every process of a script is a goroutine of a group, and the group ends on every path
+// as the contract requires; Run returns when they all have.
+func (e *Environment) Run(ctx context.Context, x core.Execution, out io.Writer) (core.ExecOutcome, error) {
+	e.mu.Lock()
+	e.runs = append(e.runs, x)
+	e.active++
+	e.mu.Unlock()
+	defer func() {
+		e.mu.Lock()
+		e.active--
+		e.mu.Unlock()
+	}()
+
+	if err := environment.Validate(x); err != nil {
+		return core.ExecOutcome{}, err
+	}
+	if ctx.Err() != nil {
+		return core.ExecOutcome{Kind: core.ExecCancelled}, nil
+	}
+	if out == nil {
+		out = io.Discard
+	}
+	limit, stop := e.timers.Timeout(x.Timeout)
+	defer stop()
+	var wg sync.WaitGroup
+	// Several processes of the script write to out at once.
+	l := &launcher{in: &interpreter{env: e, x: x}, wg: &wg}
+	out = &syncWriter{w: out}
+	defer l.end()
+	return environment.Execute(x, l, environment.Events{
+		Limit:     limit,
+		Cancelled: ctx.Done(),
+		Pause:     func() (<-chan struct{}, func()) { return e.timers.Timeout(e.pause) },
+	}, out)
+}
+
+// syncWriter serializes the writes of the several processes of one run.
+type syncWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (s *syncWriter) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.w.Write(p)
 }

@@ -5,16 +5,25 @@ import (
 	"sync"
 )
 
-// MemoryGates are gates in one process. A test releases a gate with Release.
+// MemoryGates are gates in one process. A test releases a gate with Release. They are also the
+// Points a script signals through and a test observes: see points.go.
 type MemoryGates struct {
 	mu    sync.Mutex
 	gates map[string]chan struct{}
+	marks map[string]chan struct{}
+	flags map[string]bool
+	lives map[string][]chan struct{}
 }
 
 var _ Gates = (*MemoryGates)(nil)
 
 // NewMemoryGates returns gates that are all closed.
-func NewMemoryGates() *MemoryGates { return &MemoryGates{gates: map[string]chan struct{}{}} }
+func NewMemoryGates() *MemoryGates {
+	return &MemoryGates{
+		gates: map[string]chan struct{}{}, marks: map[string]chan struct{}{},
+		flags: map[string]bool{}, lives: map[string][]chan struct{}{},
+	}
+}
 
 func (g *MemoryGates) gate(name string) chan struct{} {
 	g.mu.Lock()

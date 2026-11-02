@@ -125,6 +125,10 @@ type Job struct {
 	State JobState
 	// Key is empty for command jobs.
 	Key JobKey
+	// NoCache is the submission's choice to run the whole job fresh: it neither joined nor reused
+	// a job, and when it starts it reuses no saved samples and no saved check pass. It is kept on
+	// the job because the job may start long after, in another daemon.
+	NoCache bool
 	// Environment is pinned when the job starts and nil while it is queued.
 	Environment *Fingerprint
 	Notes       []Note

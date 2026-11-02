@@ -20,6 +20,7 @@ type InProcess struct {
 	env       environment.Environments
 	checkouts Checkouts
 	alive     *Survivors
+	host      Host
 }
 
 var _ Supervisors = (*InProcess)(nil)
@@ -95,6 +96,13 @@ func NewInProcess(env environment.Environments, checkouts Checkouts, alive *Surv
 	return &InProcess{env: env, checkouts: checkouts, alive: alive}
 }
 
+// WithHost gives the supervisors the machine that check and measure jobs run on, and returns p. A
+// supervisor of a job with a plan that has none refuses the job as unavailable.
+func (p *InProcess) WithHost(h Host) *InProcess {
+	p.host = h
+	return p
+}
+
 // Spawn implements Supervisors.
 func (p *InProcess) Spawn(ctx context.Context, launch lifecycle.Launch) (Handle, error) {
 	if err := ctx.Err(); err != nil {
@@ -107,7 +115,7 @@ func (p *InProcess) Spawn(ctx context.Context, launch lifecycle.Launch) (Handle,
 		return nil, &core.Failure{Kind: core.FailureConflict, Message: fmt.Sprintf("job %s already has a run", ref)}
 	}
 	proc := &process{killed: make(chan struct{}),
-		sup: New(Config{Launch: launch, Environments: p.env, Checkouts: p.checkouts, Spool: &MemorySpool{}})}
+		sup: New(Config{Launch: launch, Environments: p.env, Checkouts: p.checkouts, Spool: &MemorySpool{}, Host: p.host})}
 	p.alive.runs[ref] = proc
 	return &inProcessHandle{proc: proc}, nil
 }

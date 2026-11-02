@@ -45,6 +45,7 @@ const (
 	indexVar  = "VIBESYS_E2E_INDEX"
 	gatesVar  = "VIBESYS_E2E_GATES"
 	runDirVar = "VIBESYS_E2E_RUNDIR"
+	roleCLI   = "cli"
 )
 
 func TestMain(m *testing.M) {
@@ -53,6 +54,10 @@ func TestMain(m *testing.M) {
 		os.Exit(e2eDaemon())
 	case "supervisor":
 		os.Exit(e2eSupervisor())
+	case roleCLI:
+		// The test binary as the shipped tool: its daemon and supervisor processes are this binary
+		// again, composed by internal/production as the release is, over the real machine.
+		os.Exit(run(os.Args[1:], realDeps(os.Stdout, os.Stderr)))
 	}
 	os.Exit(m.Run())
 }

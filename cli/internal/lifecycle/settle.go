@@ -26,11 +26,25 @@ type Settlement struct {
 //     outside, is lost: the user did not cancel it and it did not finish.
 //   - An outcome the environment could not observe, and one this build does not know, is lost.
 //   - A command that could not be attempted failed, with the reason in its output.
+//   - A check or a measure job that passed has its result in the outcome and succeeds with it;
+//     one whose result was rejected fails; and one that failed says in its output which step did.
 func Settle(job core.JobID, from core.JobState, o Outcome, at time.Time) Settlement {
+	s := settle(job, from, o, at)
+	if o.Reason != "" && s.Transition.To == core.JobFailed {
+		s.Log = "vibesys-cli: " + o.Reason
+	}
+	return s
+}
+
+func settle(job core.JobID, from core.JobState, o Outcome, at time.Time) Settlement {
 	t := core.Transition{Job: job, From: from, At: at}
 	if o.NotAttempted != nil {
 		t.To = core.JobFailed
 		return Settlement{Transition: t, Log: fmt.Sprintf("vibesys-cli: the job could not be run: %s", o.NotAttempted.Message)}
+	}
+	if o.Rejected {
+		t.To = core.JobFailed
+		return Settlement{Transition: t, Log: "vibesys-cli: the job's result was rejected"}
 	}
 	switch o.Exec.Kind {
 	case core.ExecExited:
@@ -39,6 +53,12 @@ func Settle(job core.JobID, from core.JobState, o Outcome, at time.Time) Settlem
 		t.To = core.JobFailed
 		if code == 0 {
 			t.To = core.JobSucceeded
+			if o.Result != nil {
+				t.Result = o.Result
+				if m, ok := o.Result.Outcome.(core.MeasureOutcome); ok {
+					t.CheckJob = m.CheckJob
+				}
+			}
 		}
 		return Settlement{Transition: t}
 	case core.ExecTimedOut:

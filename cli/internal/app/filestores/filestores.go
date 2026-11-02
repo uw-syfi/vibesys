@@ -11,10 +11,6 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/store/filestore"
 )
 
-// DefaultSamples is the sample count of a measurement that asks for none, until tasks declare
-// their own. It is above the three samples a side that a verdict needs.
-const DefaultSamples = 5
-
 // FileStores is app.Stores over filestore. Create it with New.
 type FileStores struct {
 	index *filestore.Index

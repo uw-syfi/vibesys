@@ -80,7 +80,10 @@ var commands = map[string]func(context.Context, deps, []string) int{
 const usage = `usage: vibesys-cli <command> [flags]
 
 commands:
-  submit command <commit> [flags] -- <argv...>   queue a job and print its id
+  submit check <commit> [flags]                  queue the task's check and print the job
+  submit measure <commit> [--samples n] [--recheck] [flags]
+                                                 queue the task's benchmark and print the job
+  submit command <commit> [flags] -- <argv...>   queue a command and print the job
   wait <job>... [--any] [--timeout 30m]          block until the jobs are final
   cancel <job> [--reason text]                   stop a job
   note <job> <text>                              add a note to a job

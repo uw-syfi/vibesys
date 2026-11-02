@@ -28,16 +28,12 @@ func invalid(format string, args ...any) *core.Failure {
 // Submit queues a job in the store of its task and makes the machine know of it. It returns once
 // the job is durable; the job runs later, in its turn.
 //
-// This build runs command jobs. A check or a measure job needs an environment that can make a
-// clean checkout and read a task's files, which come with the real environments, and is refused
-// as unavailable and not queued to fail later.
+// A check or a measure job is keyed first: the task is read as the submission's commit has it,
+// the environment is decided and fingerprinted, and the job's cache key is made (keyFlow). A
+// command job has no key.
 func (a *App) Submit(ctx context.Context, req SubmitRequest) (core.SubmitOutcome, error) {
 	if req.Spec.Settings == nil {
 		return core.SubmitOutcome{}, invalid("spec: no job settings")
-	}
-	if kind := req.Spec.Settings.Kind(); kind != core.JobCommand {
-		return core.SubmitOutcome{}, &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf(
-			"this build runs command jobs only; %s jobs need the host or docker environment", kind)}
 	}
 	if !req.Spec.Commit.Valid() {
 		return core.SubmitOutcome{}, invalid("spec.commit: %q is not a full 40-digit commit id", req.Spec.Commit)
@@ -52,8 +48,14 @@ func (a *App) Submit(ctx context.Context, req SubmitRequest) (core.SubmitOutcome
 	if err != nil {
 		return core.SubmitOutcome{}, err
 	}
+	spec, key := req.Spec, core.JobKey("")
+	if spec.Settings.Kind() != core.JobCommand {
+		if spec, key, err = a.keyFlow(ctx, req.Context, spec); err != nil {
+			return core.SubmitOutcome{}, err
+		}
+	}
 	at := a.now()
-	sub := core.Submission{Context: req.Context, Spec: req.Spec, NoCache: req.NoCache, Plan: req.Plan, At: at}
+	sub := core.Submission{Context: req.Context, Spec: spec, Key: key, NoCache: req.NoCache, Plan: req.Plan, At: at}
 	if req.Note != "" {
 		sub.Note = &core.Note{Text: req.Note, At: at, Agent: req.Context.Agent}
 	}
