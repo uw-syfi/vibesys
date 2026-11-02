@@ -20,7 +20,6 @@ from vs_core.api import (
     AttemptPhase,
     AttemptsState,
     AttemptView,
-    ChildLease,
     ClockAdvanced,
     CloseSession,
     ContinuationPhase,
@@ -43,9 +42,6 @@ from vs_core.api import (
     Outcome,
     PoolId,
     Producer,
-    RecoveryBarrier,
-    RecoveryCheck,
-    RecoveryPhase,
     RegisteredOwnedJob,
     ReleaseDependency,
     RequestId,
@@ -71,7 +67,6 @@ from vs_core.api import (
     WorkspacePlan,
     initial_state,
     orphan_waits,
-    owned_job_subject,
     phase_waits,
     step,
     subjects,
@@ -83,7 +78,6 @@ from vs_sim.api.testing import examples
 from .records_fixtures import (
     fixture_digest,
     pending_record,
-    recovering_state,
     turn_record,
 )
 from .test_measurements import submitted
@@ -102,17 +96,12 @@ _WAITING = {
     SessionPhase.ACQUIRING,
     SessionPhase.EXECUTING,
     SessionPhase.CLOSING,
-    RecoveryPhase.RECOVERING,
 }
 
 
 @pytest.mark.parametrize(
     "phase",
-    [
-        phase
-        for enum in (RequestPhase, SessionPhase, RecoveryPhase, ContinuationPhase)
-        for phase in enum
-    ],
+    [phase for enum in (RequestPhase, SessionPhase, ContinuationPhase) for phase in enum],
     ids=lambda phase: f"{type(phase).__name__}.{phase.name}",
 )
 def test_every_phase_is_classified_as_waiting_or_not(phase: WaitingPhase) -> None:
@@ -192,314 +181,6 @@ def test_a_terminal_run_waits_on_nothing() -> None:
         update={"run": state.run.model_copy(update={"status": RunStatus.TERMINAL})}
     )
     assert orphan_waits(done) == ()
-
-
-def _recovering(target: RequestRecord) -> CoreState:
-    """A pending check on *target*, recorded while the target was open (#2428)."""
-    state = recovering_state(target)
-    barrier = RecoveryBarrier(
-        epoch=1,
-        phase=RecoveryPhase.RECOVERING,
-        checks=(
-            RecoveryCheck(target=target.request_id, wait=WaitOn(requests=(target.request_id,))),
-        ),
-    )
-    return state.model_copy(
-        update={"records": state.records.model_copy(update={"recovery": barrier})}
-    )
-
-
-def _check_naming(
-    state: CoreState, *requests: RequestId, subjects: tuple[WaitSubject, ...] = ()
-) -> CoreState:
-    """*state* with its one recovery check waiting on *requests* and *subjects* as well."""
-    (check,) = state.records.recovery.checks
-    assert check.wait is not None
-    wait = WaitOn(
-        requests=(*check.wait.requests, *requests), subjects=(*check.wait.subjects, *subjects)
-    )
-    barrier = state.records.recovery.model_copy(
-        update={"checks": (check.model_copy(update={"wait": wait}),)}
-    )
-    return state.model_copy(
-        update={"records": state.records.model_copy(update={"recovery": barrier})}
-    )
-
-
-def test_a_pending_recovery_check_needs_a_target_still_in_flight() -> None:
-    """The P1-2 shape: the target completed, so inspection can never resolve its check."""
-    live = _recovering(pending_record(phase=RequestPhase.DISPATCHED))
-    assert [wait.producer for wait in waits(live)] == [Producer.PENDING_REQUEST]
-    done = _recovering(
-        pending_record(phase=RequestPhase.COMPLETED).model_copy(update={"observation": None})
-    )
-    assert [(wait.waiter, wait.producer) for wait in orphan_waits(done)] == [
-        (WaitKind.RECOVERY_CHECK, None)
-    ]
-
-
-def test_a_pending_recovery_check_with_its_inspection_in_flight_is_not_an_orphan() -> None:
-    done = _recovering(pending_record(identity="target", phase=RequestPhase.COMPLETED))
-    inspection = pending_record(identity="inspection", phase=RequestPhase.PREPARED)
-    check = done.records.recovery.checks[0].model_copy(update={"inspection": inspection.request_id})
-    barrier = done.records.recovery.model_copy(update={"checks": (check,)})
-    done = _check_naming(done, inspection.request_id)
-    barrier = barrier.model_copy(update={"checks": done.records.recovery.checks})
-    state = done.model_copy(
-        update={
-            "records": done.records.model_copy(
-                update={
-                    "recovery": barrier,
-                    "records": (*done.records.records, inspection),
-                }
-            )
-        }
-    )
-    assert orphan_waits(state) == ()
-
-
-def _left_a_child(*, inspecting: bool, job_terminal: bool | None) -> CoreState:
-    """A completed target whose observation named a child resource, its check still pending.
-
-    *inspecting*: a child inspection of that resource is in flight. *job_terminal*: the job
-    ledger tracks the resource as a job (ended or not); ``None``: no job holds it.
-    """
-    jobs, _ = submitted()
-    job = jobs.evaluation.jobs[0]
-    target = pending_record(identity="target", phase=RequestPhase.COMPLETED)
-    target = target.model_copy(
-        update={"request": target.request.model_copy(update={"scope": job.scope})}
-    )
-    state = _recovering(target)
-    records = (target,)
-    if inspecting:
-        child = pending_record(identity="child", phase=RequestPhase.PREPARED)
-        records += (
-            child.model_copy(
-                update={
-                    "request": InspectRequest(
-                        request_id=child.request_id,
-                        scope=job.scope,
-                        target=target.request_id,
-                        resource_id=job.resource_id,
-                    )
-                }
-            ),
-        )
-    lease = ChildLease(
-        resource_id=job.resource_id, scope=job.scope, source_requests=(target.request_id,)
-    )
-    evaluation = state.evaluation
-    if job_terminal is not None:
-        evaluation = jobs.evaluation.model_copy(
-            update={
-                "jobs": (
-                    job.model_copy(
-                        update={
-                            "terminal": job_terminal,
-                            "wait": None if job_terminal else job.wait,
-                        }
-                    ),
-                )
-            }
-        )
-    state = state.model_copy(
-        update={
-            "evaluation": evaluation,
-            "records": state.records.model_copy(update={"records": records, "children": (lease,)}),
-        }
-    )
-    named = tuple(row.request_id for row in records[1:])
-    subjects = (owned_job_subject(job),) if job_terminal is not None else ()
-    return _check_naming(state, *named, subjects=subjects)
-
-
-@pytest.mark.parametrize("job_terminal", [None, False, True])
-@pytest.mark.parametrize("inspecting", [True, False])
-def test_a_recovery_check_waits_on_every_party_that_can_settle_the_child_its_target_left(
-    *, inspecting: bool, job_terminal: bool | None
-) -> None:
-    """Chaos seeds 268 and 479: a close left a job it could not end, as a child of the close.
-
-    Either a child inspection still in flight or the job's own ledger, still polling the job,
-    can settle that child, so the check is an orphan only when neither is left.
-    """
-    state = _left_a_child(inspecting=inspecting, job_terminal=job_terminal)
-
-    found = [(wait.waiter, wait.producer) for wait in waits(state)]
-
-    # Both parties named: the report is the one that fires last, the job's poll timer.
-    expected = (
-        Producer.TIMER
-        if job_terminal is False
-        else Producer.PENDING_REQUEST
-        if inspecting
-        else None
-    )
-    assert (WaitKind.RECOVERY_CHECK, expected) in found
-
-
-def _waiting_on(state: CoreState, job_wait: str) -> CoreState:
-    """The left job of *state* waiting on its poll timer, or on a poll still open or ended.
-
-    The poll is a ledger record naming the job; "ended" is one core already closed.
-    """
-    (job,) = state.evaluation.jobs
-    if job_wait == "timer":
-        assert job.wait is not None
-        assert job.wait.timer is not None
-        return state
-    poll = pending_record(
-        identity="poll",
-        phase=RequestPhase.DISPATCHED if job_wait == "open-poll" else RequestPhase.COMPLETED,
-    )
-    poll = poll.model_copy(
-        update={
-            "request": ObserveOwnedJob(
-                request_id=poll.request_id, scope=job.scope, resource_id=job.resource_id
-            )
-        }
-    )
-    waiting = job.model_copy(update={"wait": WaitOn(requests=(poll.request_id,))})
-    return state.model_copy(
-        update={
-            "evaluation": state.evaluation.model_copy(update={"jobs": (waiting,)}),
-            "records": state.records.model_copy(update={"records": (*state.records.records, poll)}),
-        }
-    )
-
-
-def _as_registered(state: CoreState) -> CoreState:
-    """The same left job, held by the registered-job ledger instead."""
-    (job,) = state.evaluation.jobs
-    registered = RegisteredOwnedJob(
-        operation_id=OperationId(root="left-operation"),
-        request_id=job.submission_id,
-        scope=job.scope,
-        resource_pool=PoolId(root="jobs"),
-        resource_id=job.resource_id,
-        wait=job.wait,
-    )
-    barrier = state.records.recovery.model_copy(
-        update={
-            "checks": tuple(
-                check.model_copy(
-                    update={
-                        "wait": check.wait.model_copy(
-                            update={"subjects": (owned_job_subject(registered),)}
-                        )
-                    }
-                )
-                if check.wait is not None
-                else check
-                for check in state.records.recovery.checks
-            )
-        }
-    )
-    return state.model_copy(
-        update={
-            "evaluation": state.evaluation.model_copy(
-                update={"jobs": (), "registered_jobs": (registered,)}
-            ),
-            "records": state.records.model_copy(update={"recovery": barrier}),
-        }
-    )
-
-
-_JOB_WAIT_PRODUCER = {
-    "timer": Producer.TIMER,
-    "open-poll": Producer.PENDING_REQUEST,
-    "ended-poll": None,
-}
-
-
-@pytest.mark.parametrize("observed", [False, True], ids=["no-outbox", "answer-in-outbox"])
-@pytest.mark.parametrize("job_wait", sorted(_JOB_WAIT_PRODUCER))
-@pytest.mark.parametrize("ledger", ["jobs", "registered"])
-def test_a_check_on_a_left_job_waits_on_what_the_job_recorded_in_either_ledger(
-    ledger: str, job_wait: str, *, observed: bool
-) -> None:
-    """A left job settles the check only through the wait it recorded, with the same producer.
-
-    A registered job counts like a measurement job. A job whose recorded wait names only an
-    ended request leaves the check an orphan too. The shell's pending inputs take no part: an
-    answer still queued in the shell belongs to a request core still holds open, so the
-    queue cannot change the verdict (it once could, and a resolver ended a check the queue
-    was about to settle).
-    """
-    state = _waiting_on(_left_a_child(inspecting=False, job_terminal=False), job_wait)
-    if ledger == "registered":
-        state = _as_registered(state)
-    outbox = (
-        (
-            RequestObserved(
-                observation=Observation(
-                    event_id=EventId(root="poll-answered"),
-                    request_id=RequestId(root="poll"),
-                    scope=state.records.children[0].scope,
-                    sequence=1,
-                    observed_at=1.0,
-                    status=ObservationStatus.PENDING,
-                )
-            ),
-        )
-        if observed
-        else ()
-    )
-
-    found = {(wait.waiter, wait.producer) for wait in waits(state, outbox)}
-
-    expected = _JOB_WAIT_PRODUCER[job_wait]
-    assert (WaitKind.RECOVERY_CHECK, expected) in found
-    assert (WaitKind.OWNED_JOB, expected) in found
-
-
-@settings(max_examples=examples(pr=10, nightly=300), deadline=None)
-@given(kinds=st.lists(st.sampled_from(["timer", "open-poll"]), min_size=1, max_size=4))
-def test_a_check_on_several_left_jobs_waits_on_the_one_that_settles_last_in_any_order(
-    kinds: list[str],
-) -> None:
-    """A check whose target left several jobs ends once the last of them settles.
-
-    Each child job is moved by what its own wait names. The check reports the one that fires
-    last (a timer after a request in flight), and never depends on the order the children
-    were recorded in; it once took the first child's.
-    """
-    state = _left_a_child(inspecting=False, job_terminal=False)
-    (job,) = state.evaluation.jobs
-    (lease,) = state.records.children
-    jobs, leases, records = [], [], list(state.records.records)
-    for index, kind in enumerate(kinds):
-        resource = ResourceId(root=f"left-{index}")
-        wait = job.wait
-        if kind == "open-poll":
-            poll = pending_record(identity=f"poll-{index}", phase=RequestPhase.DISPATCHED)
-            records.append(
-                poll.model_copy(
-                    update={
-                        "request": ObserveOwnedJob(
-                            request_id=poll.request_id, scope=job.scope, resource_id=resource
-                        )
-                    }
-                )
-            )
-            wait = WaitOn(requests=(poll.request_id,))
-        jobs.append(job.model_copy(update={"resource_id": resource, "wait": wait}))
-        leases.append(lease.model_copy(update={"resource_id": resource}))
-    expected = Producer.TIMER if "timer" in kinds else Producer.PENDING_REQUEST
-
-    state = _check_naming(state, subjects=tuple(owned_job_subject(row) for row in jobs))
-    for order in (leases, leases[::-1]):
-        left = state.model_copy(
-            update={
-                "evaluation": state.evaluation.model_copy(update={"jobs": tuple(jobs)}),
-                "records": state.records.model_copy(
-                    update={"records": tuple(records), "children": tuple(order)}
-                ),
-            }
-        )
-        checks = [wait.producer for wait in waits(left) if wait.waiter == WaitKind.RECOVERY_CHECK]
-        assert checks == [expected]
 
 
 def test_a_fresh_run_has_no_waits() -> None:
@@ -772,6 +453,26 @@ def test_every_wait_reads_the_recorded_waits_and_the_step_ends_exactly_the_orpha
     assert orphaned == (not any(phase_waits(row.phase) for row in records))
     [turn] = step(state, ClockAdvanced(now_at=2.0)).state.sessions.invocations
     assert (turn.phase == SessionPhase.TERMINAL) == orphaned
+
+
+def _as_registered(state: CoreState) -> CoreState:
+    """The same job, held by the registered-job ledger instead."""
+    (job,) = state.evaluation.jobs
+    registered = RegisteredOwnedJob(
+        operation_id=OperationId(root="left-operation"),
+        request_id=job.submission_id,
+        scope=job.scope,
+        resource_pool=PoolId(root="jobs"),
+        resource_id=job.resource_id,
+        wait=job.wait,
+    )
+    return state.model_copy(
+        update={
+            "evaluation": state.evaluation.model_copy(
+                update={"jobs": (), "registered_jobs": (registered,)}
+            )
+        }
+    )
 
 
 @settings(max_examples=examples(pr=30, nightly=1000), deadline=None)

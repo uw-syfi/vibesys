@@ -26,8 +26,6 @@ from ._continuations import (
 )
 from ._deadlines import queued_until, resolve_until
 from ._dispatch_episode import (
-    registered_retirement,
-    retirement_dispatch,
     scope_admission,
 )
 from ._dispatch_validation import validate_dispatch_episode, validate_resume_authority
@@ -138,7 +136,6 @@ from .types.records import (
     OperationRetireRequested,
     Outbound,
     RecordsEvent,
-    RecoveryPhase,
     Request,
     RequestObserved,
     RequestPhase,
@@ -1545,16 +1542,9 @@ def _unique_record(state: CoreState, identity: RequestId) -> RequestRecord | Non
 
 
 def _validate_authorization(state: CoreState, event: CoreEvent) -> None:
-    """Only dependencies and recovery proof authorize ordinary dispatch."""
+    """Only dependencies authorize ordinary dispatch."""
     if isinstance(event, DispatchAuthorized):
         record = _unique_record(state, event.request_id)
-        if (
-            record is not None
-            and state.records.recovery.phase != RecoveryPhase.READY
-            and not retirement_dispatch(record.request)
-            and not registered_retirement(state, record.request)
-        ):
-            raise ContractError(("recovery",), "ordinary dispatch requires ready recovery")
         if record is None or (
             request_dependency_status(record.request, state.run.receipts, state.records)
             != DependencyStatus.SUCCEEDED

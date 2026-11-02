@@ -1221,9 +1221,7 @@ def _job_observed(
             "released": observation.released,
             "children": tuple(dict.fromkeys((*job.children, *observation.children))),
             "evidence": tuple(accepted),
-            "queue_credit": _wait_clock.credited(
-                job, observation, context.run.limits, context.records.hosts
-            ),
+            "queue_credit": _wait_clock.credited(job, observation, context.run.limits),
             **_next_poll(job, observation, context),
         }
     )

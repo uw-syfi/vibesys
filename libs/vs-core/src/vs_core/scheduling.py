@@ -34,7 +34,6 @@ from .types.common import (
 )
 from .types.evaluation import ObservationsDue, RunJobsCancelRequested
 from .types.kernel import AreaChange
-from .types.records import RecoveryPhase
 from .types.scheduling import (
     AdmissionControl,
     AdmitAttempt,
@@ -159,11 +158,7 @@ def _accepting(context: SchedulingContext) -> bool:
     # admission_closed fences intake. Execution inhibition belongs to the run's
     # durable status, so closing intake cannot strand its already accepted FIFO.
     open_run = context.run.status == RunStatus.RUNNING and context.run.result is None
-    return (
-        (open_run or stop_draining(context.run))
-        and context.run.now_at < context.run.deadline_at
-        and context.records.recovery.phase == RecoveryPhase.READY
-    )
+    return (open_run or stop_draining(context.run)) and context.run.now_at < context.run.deadline_at
 
 
 def _deadline_retirements(state: SchedulingState, context: SchedulingContext) -> tuple[Signal, ...]:

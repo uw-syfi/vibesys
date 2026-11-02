@@ -459,7 +459,7 @@ def test_freed_slot_selects_fifo_head_at_real_attempts_boundary() -> None:
     )
 
 
-@pytest.mark.parametrize("gate", ["paused", "recovery", "capacity", "pool", "exclusive"])
+@pytest.mark.parametrize("gate", ["paused", "capacity", "pool", "exclusive"])
 def test_fifo_head_cannot_be_bypassed_when_any_admission_gate_is_closed(gate: str) -> None:
     pool = core.PoolId(root="exclusive-pool")
     running = _request(0, pools=(pool,))
@@ -481,14 +481,6 @@ def test_fifo_head_cannot_be_bypassed_when_any_admission_gate_is_closed(gate: st
         paused=gate == "paused",
         limits=sample_limits(max_attempts=20, max_parallel=1 if gate == "capacity" else 3),
     )
-    if gate == "recovery":
-        state = state.model_copy(
-            update={
-                "records": state.records.model_copy(
-                    update={"recovery": core.RecoveryBarrier(phase=core.RecoveryPhase.BLOCKED)}
-                )
-            }
-        )
     result = _step(state, core.ClockAdvanced(now_at=25.0))
     assert result.requests == result.events == ()
     assert result.state.scheduling.queue == (head, tail)

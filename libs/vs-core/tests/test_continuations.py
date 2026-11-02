@@ -2016,99 +2016,40 @@ def test_feedback_deduplicates_equal_evidence_and_rejects_conflicting_identity(
         assert feedback.timeout == continuation.timeout
 
 
-@pytest.mark.parametrize(
-    "proof",
-    [
-        "positive",
-        "missing",
-        "not-terminal",
-        "not-released",
-        "incomplete",
-        "unknown",
-        "wrong-request",
-        "wrong-scope",
-    ],
-)
-@settings(max_examples=examples(pr=4, nightly=100))
-@given(recorded_on_parent=st.booleans(), nested=st.booleans(), parent_known=st.booleans())
-def test_parent_release_never_substitutes_for_independent_child_proof(
-    *,
-    proof: str,
-    recorded_on_parent: bool,
-    nested: bool,
-    parent_known: bool,
-) -> None:
+@pytest.mark.parametrize("tracked", ["released-job", "unreleased-job", "no-job"])
+def test_a_reopening_needs_every_named_descendant_proven_released_by_a_job(tracked: str) -> None:
+    """The parent job's release never stands for a descendant it names: a job must prove it."""
     state, continuation, event = reopened_fixture()
     parent = state.evaluation.jobs[0]
     assert parent.observation is not None
     child_id = core.ResourceId(root="child")
-    middle_id = core.ResourceId(root="middle")
-    source = core.RequestId(root="middle-submission") if nested else parent.submission_id
-    middle = None
-    on_parent = recorded_on_parent or proof in ("missing", "wrong-scope")
-    if nested:
-        middle = parent.model_copy(
+    parent = parent.model_copy(
+        update={
+            "children": (child_id,),
+            "observation": parent.observation.model_copy(update={"children": (child_id,)}),
+        }
+    )
+    jobs = (parent, *state.evaluation.jobs[1:])
+    if tracked != "no-job":
+        source = core.RequestId(root="child-submission")
+        released = tracked == "released-job"
+        child_observation = observation(parent.scope, source, child_id).model_copy(
+            update={"released": released, "children_complete": True}
+        )
+        child = parent.model_copy(
             update={
-                "resource_id": middle_id,
+                "resource_id": child_id,
                 "submission_id": source,
-                "children": (child_id,) if on_parent else (),
-                "observation": observation(parent.scope, source, middle_id).model_copy(
-                    update={
-                        "released": True,
-                        "children_complete": True,
-                        "children": (child_id,) if on_parent else (),
-                    }
-                ),
+                "children": (),
+                "observation": child_observation,
             }
         )
-    if on_parent or nested:
-        children = (middle_id,) if nested else (child_id,)
-        parent = parent.model_copy(
-            update={
-                "children": children,
-                "observation": parent.observation.model_copy(update={"children": children}),
-            }
-        )
-    child_scope = (
-        parent.scope
-        if proof != "wrong-scope"
-        else core.Scope(owner=core.AttemptId(root="foreign"), generation=0)
-    )
-    child_observation = observation(child_scope, source, child_id).model_copy(
-        update={
-            "released": True,
-            "children_complete": True,
-        }
-    )
-    bad_fields = {
-        "not-terminal": {"terminal": False},
-        "not-released": {"released": False},
-        "incomplete": {"children_complete": False},
-        "unknown": {"status": core.ObservationStatus.UNKNOWN},
-        "wrong-request": {"request_id": core.RequestId(root="unrelated")},
-    }
-    child_observation = child_observation.model_copy(update=bad_fields.get(proof, {}))
-    child = core.ChildLease(
-        resource_id=child_id,
-        scope=child_scope,
-        source_requests=(source,),
-        parent_resources=((middle_id if nested else parent.resource_id),) if parent_known else (),
-        observation=child_observation,
-    )
+        jobs = (*jobs, child)
     state = state.model_copy(
-        update={
-            "evaluation": state.evaluation.model_copy(
-                update={
-                    "jobs": (parent, *state.evaluation.jobs[1:]) + ((middle,) if middle else ())
-                }
-            ),
-            "records": state.records.model_copy(
-                update={"children": () if proof == "missing" else (child,)}
-            ),
-        }
+        update={"evaluation": state.evaluation.model_copy(update={"jobs": jobs})}
     )
     state = synced(certified(state))
-    if proof == "positive":
+    if tracked == "released-job":
         result = persisted_step(state, event)
         assert len(result.events) == 1
         assert isinstance(result.events[0], core.ResumeAuthorized)

@@ -44,7 +44,6 @@ from .types.evaluation import (
     SubmitMeasurement,
 )
 from .types.records import (
-    ChildLease,
     RecordsState,
     Request,
     RequestPhase,
@@ -942,42 +941,6 @@ def _job_release_binding(
     return Proven(observation)
 
 
-def _released_child(owner: ChildLease, sources: tuple[RequestRecord, ...]) -> Verdict[Observation]:
-    observation = owner.observation
-    if observation is None:
-        return Missing(ProofReason.ABSENT_OBSERVATION)
-    if not owner.watermark_history_complete or (
-        {mark.source_request for mark in owner.observation_watermarks} != set(owner.source_requests)
-    ):
-        return Missing(ProofReason.INCOMPLETE_HISTORY)
-    if not any(mark.observation == observation for mark in owner.observation_watermarks):
-        return Mismatch(ProofField.MANIFEST)
-    for mark in owner.observation_watermarks:
-        proof = _released_child_source(owner, mark.observation, sources)
-        if not isinstance(proof, Proven):
-            return proof
-    return Proven(observation)
-
-
-def _released_child_source(
-    owner: ChildLease, observation: Observation, sources: tuple[RequestRecord, ...]
-) -> Verdict[Observation]:
-    matches = tuple(source for source in sources if source.request_id == observation.request_id)
-    if len(matches) > 1:
-        return Mismatch(ProofField.REQUEST_ID)
-    proof = _release_source(observation, matches[0] if matches else None)
-    if not isinstance(proof, Proven):
-        return proof
-    mismatch = _identity_mismatch(
-        (
-            (ProofField.RESOURCE_ID, observation.resource_id, owner.resource_id),
-            (ProofField.SCOPE, observation.scope.owner, owner.scope.owner),
-            (ProofField.GENERATION, observation.scope.generation, owner.scope.generation),
-        )
-    )
-    return mismatch if mismatch is not None else resolved_observation(observation)
-
-
 def _released_session(
     owner: SessionView, sources: tuple[RequestRecord, ...]
 ) -> Verdict[Observation]:
@@ -1036,7 +999,7 @@ def blocked_unnamed(record: RequestRecord) -> bool:
 
 
 def released_owner(
-    owner: RequestRecord | OwnedJob | RegisteredOwnedJob | SessionView | ChildLease | None,
+    owner: RequestRecord | OwnedJob | RegisteredOwnedJob | SessionView | None,
     sources: tuple[RequestRecord, ...],
 ) -> Verdict[Observation]:
     """Prove physical release in the source's recorded episode, preserving child debt."""
@@ -1046,8 +1009,6 @@ def released_owner(
         return _released_record(owner)
     if isinstance(owner, (OwnedJob, RegisteredOwnedJob)):
         return _released_job(owner, sources)
-    if isinstance(owner, ChildLease):
-        return _released_child(owner, sources)
     return _released_session(owner, sources)
 
 

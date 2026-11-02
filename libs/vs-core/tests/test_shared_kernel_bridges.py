@@ -6,8 +6,7 @@ from hypothesis import strategies as st
 
 import vs_core.api as core
 
-from .proof_digest import inspect_source, value_digest
-from .test_proof_ownership_regressions import stopped
+from .proof_digest import value_digest
 
 TIMES = st.floats(min_value=0.0, max_value=1000.0, allow_nan=False, allow_infinity=False)
 
@@ -172,33 +171,6 @@ def test_settlement_forwards_exact_candidate_revision(digest: str) -> None:
     assert isinstance(result.events[0], core.Accepted)
 
 
-@given(
-    st.sampled_from(
-        [core.RecoveryPhase.REQUIRED, core.RecoveryPhase.RECOVERING, core.RecoveryPhase.BLOCKED]
-    )
-)
-def test_recovery_barrier_rejects_ordinary_decisions(phase: core.RecoveryPhase) -> None:
-    state = core.initial_state()
-    state = state.model_copy(
-        update={
-            "records": state.records.model_copy(
-                update={"recovery": core.RecoveryBarrier(phase=phase)}
-            )
-        }
-    )
-    result = core.step(
-        state,
-        core.DecisionSubmitted(
-            decision=core.Wait(request=start(state), until=core.Within(limit=100.0)),
-            expected_revision=0,
-        ),
-    )
-    assert isinstance(result.events[0], core.Rejected)
-    assert result.events[0].code == core.RejectionCode.CLOSED_SCOPE
-    assert result.events[0].path == ("recovery",)
-    assert result.requests == ()
-
-
 def test_queued_registration_is_separate_from_slot_admission() -> None:
     state = core.initial_state()
     decision = start(state)
@@ -290,125 +262,6 @@ def test_acquisition_episode_reaches_prepared_requests() -> None:
     )
     assert result.requests[0].admission_id == decision.decision_id
     assert result.state.records.recovery == state.records.recovery
-
-
-@pytest.mark.parametrize("inspection", [False, True])
-def test_recovery_dispatch_permits_only_inspection_and_retirement(*, inspection: bool) -> None:
-    state = core.initial_state()
-    decision = start(state)
-    request_id = core.RequestId(root="dispatch")
-    request = (
-        core.InspectRequest(
-            request_id=request_id,
-            scope=decision.scope,
-            target=core.RequestId(root="target"),
-        )
-        if inspection
-        else core.EnsureWorkspace(
-            request_id=request_id,
-            scope=decision.scope,
-            attempt=core.AttemptRef(attempt_id=decision.attempt_id, generation=0),
-            plan=decision.workspace,
-        )
-    )
-    preparation = core.ClockAdvanced(now_at=0.0)
-    state = core.trace_step(
-        state,
-        preparation,
-        core.ReducerTrace(
-            frames=(
-                core.TraceFrame(
-                    signal=preparation,
-                    change=core.SchedulingChange(
-                        state=state.scheduling, requests=(core.within(request, 60.0),)
-                    ),
-                ),
-            )
-        ),
-    ).state
-    state = state.model_copy(
-        update={
-            "records": state.records.model_copy(
-                update={"recovery": core.RecoveryBarrier(phase=core.RecoveryPhase.BLOCKED)}
-            )
-        }
-    )
-    event = core.DispatchAuthorized(request_id=request_id)
-    if inspection:
-        dispatched = core.step(state, event)
-        (record,) = (
-            row for row in dispatched.state.records.records if row.request_id == request_id
-        )
-        assert record.phase == core.RequestPhase.DISPATCHED
-    else:
-        with pytest.raises(core.ContractError, match="recovery"):
-            core.step(state, event)
-
-
-@given(terminal=st.booleans(), released=st.booleans(), complete=st.booleans())
-def test_child_leases_fence_run_closure_until_exact_release_manifest(
-    *,
-    terminal: bool,
-    released: bool,
-    complete: bool,
-) -> None:
-    state = stopped(core.initial_state())
-    scope = core.Scope(owner=state.run.run_id, generation=0)
-    observed = observation(scope, 5.0).model_copy(
-        update={
-            "resource_id": core.ResourceId(root="child"),
-            "terminal": terminal,
-            "released": released,
-            "children_complete": complete,
-        }
-    )
-    child = core.ChildLease(
-        resource_id=core.ResourceId(root="child"),
-        scope=scope,
-        source_requests=(observed.request_id,),
-        observation=observed,
-        observation_watermarks=(
-            core.ChildObservationWatermark(
-                source_request=observed.request_id, observation=observed
-            ),
-        ),
-        watermark_history_complete=True,
-    )
-    state = state.model_copy(
-        update={
-            "run": state.run.model_copy(
-                update={
-                    "status": core.RunStatus.CLOSING,
-                    "result": core.RunResultProposal(outcome="cancelled", reason="cleanup"),
-                }
-            ),
-            "records": state.records.model_copy(
-                update={
-                    "children": (child,),
-                    "records": (inspect_source(observed.request_id, scope),),
-                }
-            ),
-        }
-    )
-    clock = core.ClockAdvanced(now_at=5.0)
-    result = core.trace_step(
-        state,
-        clock,
-        core.ReducerTrace(
-            frames=(
-                core.TraceFrame(
-                    signal=clock,
-                    change=core.SchedulingChange(
-                        state=state.scheduling, signals=(core.RunDrained(),)
-                    ),
-                ),
-            )
-        ),
-    )
-    expected = (
-        core.RunStatus.TERMINAL if terminal and released and complete else core.RunStatus.CLOSING
-    )
-    assert result.state.run.status == expected
 
 
 def test_queued_retirement_binds_exact_registration_generation() -> None:

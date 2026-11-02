@@ -114,41 +114,20 @@ def submission_released(
         return proof
     return (
         proof
-        if isinstance(descendants_released(context, job), Proven)
+        if isinstance(descendants_released(job), Proven)
         else Missing(ProofReason.INCOMPLETE_MANIFEST)
     )
 
 
 def descendants_released(
-    context: EvaluationContext, job: OwnedJob | RegisteredOwnedJob
+    job: OwnedJob | RegisteredOwnedJob,
 ) -> Verdict[OwnedJob | RegisteredOwnedJob]:
-    pending = list(
-        dict.fromkeys(
-            (*job.children, *(job.observation.descendants if job.observation is not None else ()))
-        )
-    )
-    seen = set()
-    while pending:
-        resource = pending.pop()
-        if resource in seen:
-            continue
-        seen.add(resource)
-        rows = tuple(
-            child
-            for child in context.records.children
-            if child.resource_id == resource and child.scope == job.scope
-        )
-        if len(rows) != 1:
-            return Missing(ProofReason.INCOMPLETE_MANIFEST)
-        child = rows[0]
-        if not isinstance(released_owner(child, context.records.records), Proven):
-            return Missing(ProofReason.UNRESOLVED)
-        pending.extend(
-            resource
-            for mark in child.observation_watermarks
-            for resource in mark.observation.descendants
-        )
-    return Proven(job)
+    """The job, when it names no descendant.
+
+    No ledger tracks a descendant's release, so any descendant leaves the manifest incomplete.
+    """
+    named = (*job.children, *(job.observation.descendants if job.observation is not None else ()))
+    return Missing(ProofReason.INCOMPLETE_MANIFEST) if named else Proven(job)
 
 
 @dataclass(frozen=True, slots=True)

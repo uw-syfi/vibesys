@@ -11,7 +11,7 @@ from .types.evaluation import ContinuationPhase
 
 if TYPE_CHECKING:
     from .types.evaluation import OwnedJob, RegisteredOwnedJob
-    from .types.records import ChildLease, RequestRecord
+    from .types.records import RequestRecord
     from .types.sessions import Invocation
 from .types.records import RequestPhase
 from .types.sessions import SessionPhase
@@ -47,10 +47,6 @@ def cleanup_pending(state: CoreState) -> bool:
             any(claim.phase != "completed" for claim in state.sessions.interrupts),
             _unreleased_children(state),
             any(group.phase == "acquiring" for group in state.sessions.acquisition_groups),
-            any(
-                not _child_release_confirmed(child, state.records.records)
-                for child in state.records.children
-            ),
             any(
                 _invocation_pending(state, invocation) for invocation in state.sessions.invocations
             ),
@@ -88,10 +84,6 @@ def _record_release_confirmed(record: RequestRecord, sources: tuple[RequestRecor
     return isinstance(released_owner(record, sources), Proven)
 
 
-def _child_release_confirmed(child: ChildLease, sources: tuple[RequestRecord, ...]) -> bool:
-    return isinstance(released_owner(child, sources), Proven)
-
-
 def _unreleased_children(state: CoreState) -> bool:
     jobs = (*state.evaluation.jobs, *state.evaluation.registered_jobs)
     released = {
@@ -99,23 +91,10 @@ def _unreleased_children(state: CoreState) -> bool:
         for job in jobs
         if _job_release_confirmed(job, state.records.records)
     }
-    released.update(
-        (child.resource_id, child.scope)
-        for child in state.records.children
-        if _child_release_confirmed(child, state.records.records)
-    )
     observations = tuple(
         record.observation for record in state.records.records if record.observation is not None
     )
     observations += tuple(job.observation for job in jobs if job.observation is not None)
-    observations += tuple(
-        child.observation for child in state.records.children if child.observation is not None
-    )
-    observations += tuple(
-        mark.observation
-        for child in state.records.children
-        for mark in child.observation_watermarks
-    )
     released.update(
         (record.observation.resource_id, record.observation.scope)
         for record in state.records.records

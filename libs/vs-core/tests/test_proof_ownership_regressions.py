@@ -242,12 +242,9 @@ def test_complete_empty_cleanup_debt_can_end_run(identity: int) -> None:
     assert isinstance(result.events[-1], core.RunEnded)
 
 
-@pytest.mark.parametrize("kind", ["record", "child"])
 @pytest.mark.parametrize("variant", ["exact", "missing_episode", "old_episode"])
 @given(identity=st.integers(min_value=0, max_value=10000))
-def test_every_ownership_source_keeps_its_recorded_episode(
-    kind: str, variant: str, identity: int
-) -> None:
+def test_every_ownership_source_keeps_its_recorded_episode(variant: str, identity: int) -> None:
     state, _, source = released_job(identity)
     observation = source.observation
     assert observation is not None
@@ -259,24 +256,8 @@ def test_every_ownership_source_keeps_its_recorded_episode(
                 else core.DecisionId(root="old")
             }
         )
-    if kind == "record":
-        source = source.model_copy(update={"observation": observation})
-        records = state.records.model_copy(update={"records": (source,)})
-    else:
-        assert observation.resource_id is not None
-        child = core.ChildLease(
-            resource_id=observation.resource_id,
-            scope=observation.scope,
-            source_requests=(source.request_id,),
-            observation=observation,
-            observation_watermarks=(
-                core.ChildObservationWatermark(
-                    source_request=source.request_id, observation=observation
-                ),
-            ),
-            watermark_history_complete=True,
-        )
-        records = state.records.model_copy(update={"records": (source,), "children": (child,)})
+    source = source.model_copy(update={"observation": observation})
+    records = state.records.model_copy(update={"records": (source,)})
     state = state.model_copy(update={"records": records})
     result = drain(state)
     assert result.state.run.status == (

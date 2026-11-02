@@ -61,7 +61,6 @@ from .types.records import (
     BlockRequest,
     CancelOwnedResource,
     InspectRequest,
-    RecoveryPhase,
     RequestPhase,
     reply_owed,
 )
@@ -197,20 +196,6 @@ def record_waits(phase: RequestPhase) -> bool:
             assert_never(phase)
 
 
-def recovery_waits(phase: RecoveryPhase) -> bool:
-    """Whether a recovery barrier in this phase waits on inspection results.
-
-    ``REQUIRED`` waits for the host to start recovery, which is the host's own act.
-    """
-    match phase:
-        case RecoveryPhase.RECOVERING:
-            return True
-        case RecoveryPhase.REQUIRED | RecoveryPhase.READY | RecoveryPhase.BLOCKED:
-            return False
-        case _:
-            assert_never(phase)
-
-
 def continuation_waits(phase: ContinuationPhase) -> bool:
     """Whether a continuation in this phase waits on a request rather than the strategy.
 
@@ -232,7 +217,7 @@ def continuation_waits(phase: ContinuationPhase) -> bool:
             assert_never(phase)
 
 
-type WaitingPhase = RequestPhase | SessionPhase | RecoveryPhase | ContinuationPhase
+type WaitingPhase = RequestPhase | SessionPhase | ContinuationPhase
 
 
 def phase_waits(phase: WaitingPhase) -> bool:
@@ -241,8 +226,6 @@ def phase_waits(phase: WaitingPhase) -> bool:
         return record_waits(phase)
     if isinstance(phase, SessionPhase):
         return session_waits(phase)
-    if isinstance(phase, RecoveryPhase):
-        return recovery_waits(phase)
     return continuation_waits(phase)
 
 
@@ -492,15 +475,6 @@ def _checkpoint_waits(core: CoreState) -> tuple[tuple[WaitSubject, WaitOn], ...]
     return (*yields, *claims)
 
 
-def _check_waits(core: CoreState) -> tuple[tuple[WaitSubject, WaitOn], ...]:
-    """Every pending recovery check's recorded wait, by the subject naming its target."""
-    return tuple(
-        (WaitSubject(kind=WaitKind.RECOVERY_CHECK, identity=check.target.root), check.wait)
-        for check in core.records.recovery.checks
-        if check.wait is not None
-    )
-
-
 def _session_waits(core: CoreState) -> tuple[tuple[WaitSubject, WaitOn], ...]:
     """Every waiting session's recorded wait, by the subject that names the session."""
     return tuple(
@@ -517,7 +491,6 @@ def recorded_waits(core: CoreState) -> tuple[tuple[WaitSubject, WaitOn], ...]:
         *_session_waits(core),
         *_turn_waits(core),
         *_checkpoint_waits(core),
-        *_check_waits(core),
     )
 
 
@@ -882,11 +855,6 @@ def subjects(core: CoreState) -> tuple[WaitSubject, ...]:
         *(
             (WaitKind.TURN_ACQUISITION, row.invocation.invocation_id.root)
             for row in _acquiring(core.sessions)
-        ),
-        *(
-            (WaitKind.RECOVERY_CHECK, check.target.root)
-            for check in core.records.recovery.checks
-            if recovery_waits(core.records.recovery.phase) and check.resolution == "pending"
         ),
         *((subject.kind, subject.identity) for subject, _, _ in _job_waits(core)),
         *((WaitKind.RELEASE_DEPENDENCY, identity) for identity in _released_job_edges(core)),

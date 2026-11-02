@@ -10,7 +10,7 @@ limit and the run with them.
 The gate reports each turn's hold as a cumulative ``CapacityHold`` (the host's control
 bridge makes it a ``TurnHeld``), and the turn's open dispatch record keeps the latest
 (``held``). Every stated limit stays as it was stated; the record's bound is derived from it
-in ``_wait_clock.turn_bound``, which ``record_bound`` uses for every record:
+in ``_wait_clock.turn_bound``:
 
 - **Credit.** A hold that ended credits its length; the gate bounds each one. While the gate
   holds the turn for a backoff, the turn may stay held up to the budget, so its bound moves

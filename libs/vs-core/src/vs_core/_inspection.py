@@ -84,11 +84,6 @@ def _root_resources(state: CoreState, original: RequestRecord) -> set[ResourceId
 def _descendants(state: CoreState, original: RequestRecord) -> set[ResourceId]:
     """Provisional roots still own every discovered descendant manifest."""
     resources = {
-        child.resource_id
-        for child in state.records.children
-        if child.scope == original.request.scope and original.request_id in child.source_requests
-    }
-    resources.update(
         resource
         for job, submission in (
             *((job, job.submission_id) for job in state.evaluation.jobs),
@@ -96,7 +91,7 @@ def _descendants(state: CoreState, original: RequestRecord) -> set[ResourceId]:
         )
         if submission == original.request_id and job.scope == original.request.scope
         for resource in job.children
-    )
+    }
     observations = tuple(
         job.observation
         for job, submission in (
