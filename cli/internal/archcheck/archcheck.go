@@ -156,6 +156,7 @@ func Violations(files map[string]string) []string {
 			found = append(found, layering(name, source)...)
 			found = append(found, layout(name, source)...)
 			found = append(found, effects(name, source)...)
+			found = append(found, approvalMints(name, source)...)
 		case strings.HasSuffix(name, ".proto") && strings.HasPrefix(name, "proto/vibesys/cli/"):
 			found = append(found, layout(name, source)...)
 		}

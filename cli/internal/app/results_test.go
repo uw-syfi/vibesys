@@ -118,11 +118,11 @@ func (r *resultsRig) promoted(commit core.Commit) core.Promotion {
 	if err != nil {
 		r.t.Fatalf("Promote(%.7s): %v", commit, err)
 	}
-	p, ok := d.(core.Promotion)
+	approved, ok := d.(core.Approved)
 	if !ok {
 		r.t.Fatalf("Promote(%.7s) = %+v, want a promotion", commit, d)
 	}
-	return p
+	return approved.Promotion()
 }
 
 func (r *resultsRig) head() core.Commit {
@@ -379,7 +379,7 @@ type noRecord struct {
 	fail *atomic.Bool
 }
 
-func (n noRecord) RecordPromotion(ctx context.Context, p core.Promotion) error {
+func (n noRecord) RecordPromotion(ctx context.Context, p core.Approved) error {
 	if n.fail.Load() {
 		return &core.Failure{Kind: core.FailureInternal, Message: "the disk is gone"}
 	}
@@ -438,9 +438,9 @@ func TestPromotionFollowsTheVerdictForAnySamples(t *testing.T) {
 			t.Fatalf("example %d: %v", i, err)
 		}
 		switch d := d.(type) {
-		case core.Promotion:
-			if cmp.Verdict.Kind != core.Better || d.Verdict != cmp.Verdict || r.head() != cm(1) || len(r.recorded()) != 1 {
-				t.Fatalf("example %d: promoted on %+v with verdict %+v, branch at %.7s", i, cmp.Verdict, d.Verdict, r.head())
+		case core.Approved:
+			if cmp.Verdict.Kind != core.Better || d.Promotion().Verdict != cmp.Verdict || r.head() != cm(1) || len(r.recorded()) != 1 {
+				t.Fatalf("example %d: promoted on %+v with verdict %+v, branch at %.7s", i, cmp.Verdict, d.Promotion().Verdict, r.head())
 			}
 		case core.PromoteRefusal:
 			if cmp.Verdict.Kind == core.Better || len(d.Reasons) != 1 || d.Reasons[0].Kind != kinds[cmp.Verdict.Kind] ||
@@ -470,7 +470,7 @@ func TestParallelPromotionsOfOneCommitMakeOnePromotion(t *testing.T) {
 			case err != nil:
 				t.Errorf("Promote: %v", err)
 			default:
-				if _, ok := d.(core.Promotion); ok {
+				if _, ok := d.(core.Approved); ok {
 					promotedCount.Add(1)
 				} else {
 					refusedCount.Add(1)
@@ -604,8 +604,38 @@ func TestShowListsEveryResultOfTheCommitOldestFirst(t *testing.T) {
 func TestWithoutBranchesTheBranchCommandsAreUnavailable(t *testing.T) {
 	w := newWorld(t)
 	a := w.newApp()
+	if _, err := w.stores.Create(ctxFor(t), scope); err != nil {
+		t.Fatal(err)
+	}
 	_, err := a.Promote(ctxFor(t), call, cm(1))
 	wantFailure(t, "Promote", err, core.FailureUnavailable)
 	_, err = a.Compare(ctxFor(t), call, cm(1), "")
 	wantFailure(t, "Compare", err, core.FailureUnavailable)
+}
+
+// Only a submission makes a store, so a read of results in a task that has had no job finds none
+// and makes none: a commit has no results, the task has no head, and a decision has nothing to rest
+// on and is refused as not found.
+func TestResultCommandsOnATaskWithNoStoreMakeNone(t *testing.T) {
+	w := newWorld(t)
+	r := newResultsRigOver(t, w, newBranches(), nil)
+	other := call
+	other.Task = "nobody"
+	otherScope := app.Scope{Repository: other.Repository, Task: other.Task}
+	ctx := ctxFor(t)
+	if got, err := r.app.Show(ctx, otherScope, cm(1)); err != nil || len(got) != 0 {
+		t.Fatalf("Show = %v, %v; want none", got, err)
+	}
+	answer, err := r.app.CurrentResult(ctx, other)
+	if none, ok := answer.(core.NoCurrentResult); err != nil || !ok || none.Reason != core.NoHead {
+		t.Fatalf("CurrentResult = %+v, %v; want no head", answer, err)
+	}
+	_, err = r.app.Compare(ctx, other, cm(1), cm(0))
+	wantFailure(t, "Compare", err, core.FailureNotFound)
+	_, err = r.app.Promote(ctx, other, cm(1))
+	wantFailure(t, "Promote", err, core.FailureNotFound)
+	known, err := w.stores.Known(ctx)
+	if err != nil || slices.Contains(known, otherScope) {
+		t.Fatalf("known stores = %v, %v; the reads must not have made one", known, err)
+	}
 }

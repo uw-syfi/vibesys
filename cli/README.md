@@ -290,8 +290,9 @@ forward: the new head must contain the old one, which a commit that does not is 
 
 `promote` decides from the saved measurements alone (internal/core), in this order: it is refused
 with every reason that applies (`unmeasured`, `check_missing`, `worse`, `within_noise`,
-`inconclusive`, `stale`, `environment_mismatch`), or it records the promotion in the store and
-then moves the branch. The sequence is one pure function, `core.NextPromotionStep`: from the branch
+`inconclusive`, `stale`, `environment_mismatch`), or it approves, which is a `core.Approved` that
+only that decision makes and that a store requires to record a promotion. The daemon records the
+promotion in the store and then moves the branch. The sequence is one pure function, `core.NextPromotionStep`: from the branch
 head and the record it names the next effect (record, move, done, or diverged), and the daemon does
 that effect and asks again. A crash or a failure at any point leaves a state the same question
 answers, so a crash between the two leaves a recorded promotion the branch has not caught up with,

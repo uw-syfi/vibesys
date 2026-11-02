@@ -2,6 +2,7 @@ package core_test
 
 import (
 	"math"
+	"math/rand/v2"
 	"slices"
 	"testing"
 	"time"
@@ -50,10 +51,11 @@ func kindsOf(t testing.TB, decision core.PromotionDecision) []core.PromoteRefusa
 
 func TestAClearWinIsPromoted(t *testing.T) {
 	req := ready()
-	got, ok := decide(t, req).(core.Promotion)
+	approved, ok := decide(t, req).(core.Approved)
 	if !ok {
-		t.Fatalf("%+v, want a promotion", got)
+		t.Fatalf("%+v, want a promotion", approved)
 	}
+	got := approved.Promotion()
 	if got.Commit != candidateCommit || got.PreviousHead != baseCommit || got.ResultJob != "cand" || !got.At.Equal(promoteAt) || !got.Environment.Equal(hostEnv) {
 		t.Fatalf("%+v", got)
 	}
@@ -69,8 +71,8 @@ func TestAClearWinIsPromoted(t *testing.T) {
 func TestAPromotionAfterAnotherNamesTheHeadItReplaces(t *testing.T) {
 	req := ready()
 	req.Promotions = []core.Promotion{{Commit: baseCommit, At: at(0)}}
-	got, ok := decide(t, req).(core.Promotion)
-	if !ok || got.PreviousHead != baseCommit {
+	approved, ok := decide(t, req).(core.Approved)
+	if got := approved.Promotion(); !ok || got.PreviousHead != baseCommit {
 		t.Fatalf("%+v, want a promotion that replaces %s", got, baseCommit)
 	}
 }
@@ -78,8 +80,8 @@ func TestAPromotionAfterAnotherNamesTheHeadItReplaces(t *testing.T) {
 func TestThePromotionRestsOnTheLatestMeasurement(t *testing.T) {
 	req := ready()
 	req.Results = append(req.Results, measurement("later", candidateCommit, []float64{121, 120}, 7), measurement("earlier", candidateCommit, []float64{121, 120}, 0))
-	got, ok := decide(t, req).(core.Promotion)
-	if !ok || got.ResultJob != "later" {
+	approved, ok := decide(t, req).(core.Approved)
+	if got := approved.Promotion(); !ok || got.ResultJob != "later" {
 		t.Fatalf("%+v, want a promotion resting on the latest measurement", got)
 	}
 }
@@ -148,7 +150,7 @@ func TestRefusalsNameEveryReasonInOrder(t *testing.T) {
 		c.change(&req)
 		got := decide(t, req)
 		if c.want == nil {
-			if _, ok := got.(core.Promotion); !ok {
+			if _, ok := got.(core.Approved); !ok {
 				t.Errorf("%s: %+v, want a promotion", c.name, got)
 			}
 			continue
@@ -272,10 +274,11 @@ func TestDecisionMatchesTheRulesOverRandomScenarios(t *testing.T) {
 			continue
 		}
 		if len(want) == 0 {
-			p, ok := got.(core.Promotion)
+			approved, ok := got.(core.Approved)
 			if !ok {
 				t.Fatalf("%+v, want a promotion", got)
 			}
+			p := approved.Promotion()
 			if p.Commit != candidateCommit || p.PreviousHead != baseCommit || p.ResultJob != "cand" {
 				t.Fatalf("%+v", p)
 			}
@@ -329,5 +332,42 @@ func TestRefusalOrderFollowsTheKinds(t *testing.T) {
 			}
 			last = i
 		}
+	}
+}
+
+// Approval is the decision's alone: every promotion a decision approves carries the proof, a refusal
+// never does, and a value nobody decided, the zero Approved, does not.
+func TestOnlyADecisionApproves(t *testing.T) {
+	if (core.Approved{}).Valid() {
+		t.Fatal("the zero Approved holds, so a store would record a promotion nobody decided")
+	}
+	approved, refused := 0, 0
+	for seed := range uint64(200) {
+		r := rand.New(rand.NewPCG(seed, 7))
+		req := ready()
+		samples := func() []float64 {
+			out := make([]float64, 5)
+			for i := range out {
+				out[i] = float64(90 + r.IntN(60))
+			}
+			return out
+		}
+		req.Results = sides(samples(), samples())
+		got, err := core.DecidePromotion(req)
+		if err != nil {
+			continue
+		}
+		switch d := got.(type) {
+		case core.Approved:
+			approved++
+			if !d.Valid() || d.Promotion().Commit != candidateCommit {
+				t.Fatalf("seed %d: an approval that does not hold or names another commit: %+v", seed, d)
+			}
+		case core.PromoteRefusal:
+			refused++
+		}
+	}
+	if approved == 0 || refused == 0 {
+		t.Fatalf("the generated requests gave %d approvals and %d refusals; want both", approved, refused)
 	}
 }

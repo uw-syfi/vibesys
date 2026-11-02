@@ -77,8 +77,13 @@ type faultyStores struct {
 	plan *faultPlan
 }
 
-func (f faultyStores) Open(ctx context.Context, s app.Scope) (store.Store, error) {
-	st, err := f.Stores.Open(ctx, s)
+func (f faultyStores) Find(ctx context.Context, s app.Scope) (store.Store, error) {
+	st, err := f.Stores.Find(ctx, s)
+	return faultyStore{Store: st, plan: f.plan}, err
+}
+
+func (f faultyStores) Create(ctx context.Context, s app.Scope) (store.Store, error) {
+	st, err := f.Stores.Create(ctx, s)
 	return faultyStore{Store: st, plan: f.plan}, err
 }
 
@@ -91,7 +96,7 @@ func (f faultyStore) Promotions(ctx context.Context) ([]core.Promotion, error) {
 	return wrap(f.plan, "Promotions", true, func() ([]core.Promotion, error) { return f.Store.Promotions(ctx) })
 }
 
-func (f faultyStore) RecordPromotion(ctx context.Context, p core.Promotion) error {
+func (f faultyStore) RecordPromotion(ctx context.Context, p core.Approved) error {
 	_, err := wrap(f.plan, "RecordPromotion", false, func() (struct{}, error) { return struct{}{}, f.Store.RecordPromotion(ctx, p) })
 	return err
 }

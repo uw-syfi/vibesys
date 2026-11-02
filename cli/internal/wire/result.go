@@ -160,8 +160,8 @@ func PromoteRefusal(r core.PromoteRefusal) *cliv1.PromoteRefusal {
 // PromoteResponse returns the answer to a promotion: the promotion that happened or the refusal.
 func PromoteResponse(d core.PromotionDecision) *cliv1.PromoteResponse {
 	switch d := d.(type) {
-	case core.Promotion:
-		return &cliv1.PromoteResponse{Outcome: &cliv1.PromoteResponse_Promoted{Promoted: Promotion(d)}}
+	case core.Approved:
+		return &cliv1.PromoteResponse{Outcome: &cliv1.PromoteResponse_Promoted{Promoted: Promotion(d.Promotion())}}
 	case core.PromoteRefusal:
 		return &cliv1.PromoteResponse{Outcome: &cliv1.PromoteResponse_Refused{Refused: PromoteRefusal(d)}}
 	}

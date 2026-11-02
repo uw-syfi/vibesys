@@ -118,7 +118,7 @@ func (a *App) Promote(ctx context.Context, c core.CallContext, commit core.Commi
 	if err != nil {
 		return nil, err
 	}
-	promotion, promoted := decision.(core.Promotion)
+	approved, promoted := decision.(core.Approved)
 	if !promoted {
 		return decision, nil
 	}
@@ -134,10 +134,10 @@ func (a *App) Promote(ctx context.Context, c core.CallContext, commit core.Commi
 			"commit %s does not contain the result branch head %s, so the branch cannot fast-forward to it; merge or rebase onto the head and measure it again",
 			commit, head)}
 	}
-	if err := a.carryOut(ctx, t, branch, promotion); err != nil {
+	if err := a.carryOut(ctx, t, branch, approved); err != nil {
 		return nil, err
 	}
-	return promotion, nil
+	return approved, nil
 }
 
 // maxPromotionSteps bounds carryOut. A promotion takes two effects, record and move, and one more
@@ -150,7 +150,8 @@ const maxPromotionSteps = 3
 //
 // Once the promotion is recorded, a failure leaves a promotion the branch has not caught up with,
 // and says so, since the next look at the branch completes it.
-func (a *App) carryOut(ctx context.Context, t *taskEntry, branch string, p core.Promotion) error {
+func (a *App) carryOut(ctx context.Context, t task, branch string, approved core.Approved) error {
+	p := approved.Promotion()
 	recorded := false
 	fail := func(err error) error {
 		if recorded {
@@ -169,7 +170,7 @@ func (a *App) carryOut(ctx context.Context, t *taskEntry, branch string, p core.
 		}
 		switch step := core.NextPromotionStep(p, head, promotions).(type) {
 		case core.RecordPromotionStep:
-			if err := t.store.RecordPromotion(ctx, step.Promotion); err != nil {
+			if err := t.store.RecordPromotion(ctx, approved); err != nil {
 				return err
 			}
 			recorded = true
@@ -195,6 +196,10 @@ func (a *App) carryOut(ctx context.Context, t *taskEntry, branch string, p core.
 // last moved: the cache cannot supply it.
 func (a *App) CurrentResult(ctx context.Context, c core.CallContext) (core.ResultAnswer, error) {
 	t, err := a.openTask(ctx, scopeOf(c))
+	if errors.Is(err, store.ErrNoStore) {
+		// A task with no store has promoted nothing.
+		return core.CurrentResultAt("", nil, nil), nil
+	}
 	if err != nil {
 		return nil, err
 	}

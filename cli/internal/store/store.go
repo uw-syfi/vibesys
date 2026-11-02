@@ -80,8 +80,9 @@ type ResultStore interface {
 	// error.
 	Results(ctx context.Context, filter core.ResultFilter) ([]core.Result, error)
 
-	// RecordPromotion appends a promotion to the record. The record is append-only.
-	RecordPromotion(ctx context.Context, promotion core.Promotion) error
+	// RecordPromotion appends an approved promotion to the record. The record is append-only, and
+	// a promotion no decision approved (the zero Approved) is refused as invalid input.
+	RecordPromotion(ctx context.Context, promotion core.Approved) error
 
 	// Promotions returns every recorded promotion, oldest first.
 	Promotions(ctx context.Context) ([]core.Promotion, error)

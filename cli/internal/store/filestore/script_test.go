@@ -48,10 +48,10 @@ func move(name string, tr core.Transition) op {
 
 func promotion(name string, c, previous core.Commit, n int) op {
 	return op{name, func(ctx context.Context, s store.Store) error {
-		return s.RecordPromotion(ctx, core.Promotion{
+		return s.RecordPromotion(ctx, core.AssumeApproved(core.Promotion{
 			Commit: c, PreviousHead: previous, Verdict: core.Verdict{Kind: core.Better, CandidateSamples: 3, BaseSamples: 3, CandidateMean: 2.5, BaseMean: 2, Ratio: 1.25, Noise: 0.5},
 			Environment: core.Fingerprint{Kind: core.EnvironmentHost, Backend: core.BackendCPU}, ResultJob: "j1", At: at(n),
-		})
+		}))
 	}}
 }
 

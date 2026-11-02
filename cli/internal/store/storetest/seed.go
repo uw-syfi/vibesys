@@ -115,3 +115,13 @@ func seed(t testing.TB, s store.Store, commit core.Commit, settings core.Setting
 	}
 	return result
 }
+
+// SeedPromotion records a promotion as if a decision had approved it, through the store's own
+// interface. It is how a test puts a promotion into a store without the measurements a decision
+// would rest on; the decision itself is tested in core.
+func SeedPromotion(t testing.TB, s store.Store, p core.Promotion) {
+	t.Helper()
+	if err := s.RecordPromotion(context.Background(), core.AssumeApproved(p)); err != nil {
+		t.Fatalf("seeding a promotion of %s: %v", p.Commit, err)
+	}
+}

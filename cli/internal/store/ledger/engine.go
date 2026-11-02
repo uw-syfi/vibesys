@@ -154,7 +154,7 @@ func (e *Engine) Results(ctx context.Context, filter core.ResultFilter) ([]core.
 }
 
 // RecordPromotion implements store.ResultStore.
-func (e *Engine) RecordPromotion(ctx context.Context, promotion core.Promotion) error {
+func (e *Engine) RecordPromotion(ctx context.Context, promotion core.Approved) error {
 	_, err := write(e, ctx, func(l *Ledger) (Change, struct{}, error) {
 		change, err := l.RecordPromotion(promotion)
 		return change, struct{}{}, err

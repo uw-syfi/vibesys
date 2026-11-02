@@ -159,7 +159,8 @@ func switchViolations(files map[string]string) []string {
 				return true
 			}
 			for _, set := range sets {
-				if !slices.ContainsFunc(named, func(m string) bool { return slices.Contains(set.members, m) }) {
+				touched := namedIn(set, named)
+				if len(touched) == 0 || explainedByWhole(set, touched, sets, named) {
 					continue
 				}
 				var missing []string
@@ -178,6 +179,33 @@ func switchViolations(files map[string]string) []string {
 		})
 	}
 	return found
+}
+
+// namedIn returns the members of the set that a switch names.
+func namedIn(set closedSet, named []string) []string {
+	var out []string
+	for _, m := range set.members {
+		if slices.Contains(named, m) {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// explainedByWhole says whether the members a switch names in a set are all members of another set
+// the switch names whole. A type can belong to two sets, such as a refusal that is both a
+// promotion decision and an event detail, and a switch over the one set then touches the other
+// without being a switch over it.
+func explainedByWhole(set closedSet, touched []string, sets []closedSet, named []string) bool {
+	for _, other := range sets {
+		if other.name == set.name || len(namedIn(other, named)) != len(other.members) {
+			continue
+		}
+		if !slices.ContainsFunc(touched, func(m string) bool { return !slices.Contains(other.members, m) }) {
+			return true
+		}
+	}
+	return false
 }
 
 func importsOf(file *ast.File) map[string]string {
