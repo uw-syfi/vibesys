@@ -34,7 +34,7 @@ from vs_dst._effects import RecoverableExecutors
 from vs_dst._host import FIRST_HOST_STARTS_AT, Hosted, WrongStoreError
 from vs_dst._interruptions import Moment
 from vs_dst._snapshots import RecordingRecords
-from vs_dst._world import ClearFailingWorld, HoldingWorld, ServingWorld
+from vs_dst._world import ClearFailingWorld, HoldingWorld, ServingWorld, SlowWorld
 from vs_proto.api import EpochStarted, Timestamp
 from vs_runlog.api import ConfirmedLog
 from vs_runtime.api.core import ExecutionContext, OperatorControls, OperatorInbox, RunControlBridge
@@ -681,6 +681,8 @@ def _executors(
                 watcher.reached(Moment.IN_FLIGHT, index)
 
         async def _running(self, request: Request) -> None:
+            if isinstance(world, SlowWorld):
+                await handle.clock.sleep(world.takes(request))
             if handle.serving is not None:
                 await handle.serving.during(request, core())
 

@@ -68,6 +68,21 @@ class HoldingWorld(Protocol):
 
 
 @runtime_checkable
+class SlowWorld(Protocol):
+    """A world whose far side takes time: each effect ends a while after it began.
+
+    The host honours it: the effect of a request begins (a kill landing then leaves it begun and
+    unsealed), the run clock passes ``takes(request)`` seconds, and then the effect ends. A step of
+    the run that began first can end last, so the order a scope's work is released in is the
+    world's to choose.
+    """
+
+    def takes(self, request: Request) -> float:
+        """Virtual seconds the effect of ``request`` is in flight before it ends."""
+        ...
+
+
+@runtime_checkable
 class ClearFailingWorld(Protocol):
     """A world whose far side cannot be reached to clear a request: a Docker daemon that is down.
 
