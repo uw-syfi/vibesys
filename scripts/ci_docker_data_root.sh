@@ -28,7 +28,11 @@ attach() {
     stop_docker
     sudo mkdir -p "${DATA_ROOT}"
     if [[ -s ${tarball} ]]; then
-        sudo tar --use-compress-program=unzstd -xf "${tarball}" -C "${DATA_ROOT}"
+        if ! sudo tar --use-compress-program=unzstd -xf "${tarball}" -C "${DATA_ROOT}"; then
+            echo '::warning::Docker cache archive could not be restored; using a cold image store'
+            sudo rm -rf -- "${DATA_ROOT}"
+            sudo mkdir -p "${DATA_ROOT}"
+        fi
     fi
     local current='{}'
     if [[ -f ${DAEMON_JSON} ]]; then
@@ -36,7 +40,13 @@ attach() {
     fi
     jq --arg root "${DATA_ROOT}" '. + {"data-root": $root} | .features = ((.features // {}) + {"containerd-snapshotter": false})' <<<"${current}" |
         sudo tee "${DAEMON_JSON}" >/dev/null
-    start_docker
+    if ! start_docker; then
+        echo '::warning::Docker could not start on restored storage; using a cold image store'
+        stop_docker
+        sudo rm -rf -- "${DATA_ROOT}"
+        sudo mkdir -p "${DATA_ROOT}"
+        start_docker
+    fi
     docker info --format 'docker root: {{.DockerRootDir}}'
     df -h "${DATA_ROOT}"
 }

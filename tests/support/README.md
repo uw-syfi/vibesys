@@ -26,6 +26,10 @@ It also points `GIT_CONFIG_GLOBAL` at an empty file, sets `GIT_CONFIG_NOSYSTEM=1
 Git identity, so a developer's hooks, commit signing, or default branch never reach a test.
 `tests/quality/test_git_hermetic.py` bans tests from resetting those variables.
 
+`DOCKER_CONFIG`, when set, passes through the private HOME unchanged: CI pins it
+(`scripts/ci_base_mirror_setup.sh`) so a test's Docker client reads the registry
+login the job made. Without it the client pulls anonymously.
+
 Installed Rust toolchains remain available through explicit CARGO_HOME and
 RUSTUP_HOME paths. Go compiler caches default to a private controller-owned
 directory shared with workers; explicit compiler-cache paths are preserved.

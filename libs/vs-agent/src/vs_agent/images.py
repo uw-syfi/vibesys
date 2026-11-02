@@ -34,7 +34,12 @@ from pydantic import JsonValue, TypeAdapter
 from vs_agent._build_context import DOCKERIGNORE, build_context_inputs
 from vs_agent.agent_feature import AGENT_USER, AGENT_WORKDIR, agent_feature
 from vs_decode.api import decode_json
-from vs_sandbox.api import FeatureImageBuildError, FinalImage, build_feature_image
+from vs_sandbox.api import (
+    FeatureImageBuildError,
+    FinalImage,
+    build_feature_image,
+    image_context_digest,
+)
 from vs_sim.api import (
     Clock,
     Lines,
@@ -979,9 +984,10 @@ def _task_image_digest(dockerfile: Path, base_image: str | None) -> str:
     digest = hashlib.sha256()
     digest.update(repr(base_image).encode())
     digest.update(b"\0")
-    files = {
-        path.relative_to(context).as_posix(): path for path in context.rglob("*") if path.is_file()
-    }
+    digest.update(dockerfile.read_bytes())
+    digest.update(b"\0")
+    files = {path.relative_to(context).as_posix(): path for path in context.rglob("*")}
+    files["."] = context
     dockerignore = files.get(DOCKERIGNORE)
     kept = build_context_inputs(
         files,
@@ -992,11 +998,7 @@ def _task_image_digest(dockerfile: Path, base_image: str | None) -> str:
         ),
         dockerfile=dockerfile.relative_to(context).as_posix(),
     )
-    for relative in kept:
-        digest.update(relative.encode())
-        digest.update(b"\0")
-        digest.update(files[relative].read_bytes())
-        digest.update(b"\0")
+    digest.update(image_context_digest(context, kept).encode())
     return digest.hexdigest()[:32]
 
 

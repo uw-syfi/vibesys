@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import sys
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 from vs_agent.api.images import (
@@ -572,3 +574,67 @@ def test_the_inputs_digest_honors_dockerignore(
         file.write("# edited\n")
 
     assert (task_image_reference(dockerfile, base_image=None) != before) is is_input
+
+
+@pytest.mark.regression
+@given(
+    changed=st.sampled_from(
+        ["mode", "directory_mode", "path", "content", "link", "empty_directory", "hardlink"]
+    ),
+    content=st.binary(min_size=1, max_size=100),
+    bit=st.integers(min_value=0, max_value=7),
+)
+@example(changed="mode", content=b"x", bit=6)
+@example(changed="directory_mode", content=b"x", bit=0)
+@example(changed="link", content=b"x", bit=0)
+@example(changed="hardlink", content=b"x", bit=0)
+def test_task_input_identity_covers_the_complete_filesystem_tree(
+    changed: str, content: bytes, bit: int
+) -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        task = Path(directory)
+        dockerfile = task / "Dockerfile"
+        dockerfile.write_text("FROM scratch\nCOPY . /payload\n")
+        data = task / "data"
+        data.mkdir()
+        data.chmod(0o755)
+        payload = data / "payload"
+        payload.write_bytes(content)
+        payload.chmod(0o644)
+        (data / "other").write_bytes(content)
+        link = task / "link"
+        link.symlink_to("data/payload")
+        before = task_image_reference(dockerfile, base_image=None)
+        if changed == "mode":
+            payload.chmod(0o644 ^ (1 << bit))
+        elif changed == "directory_mode":
+            data.chmod(0o755 ^ (1 << (bit % 6)))
+        elif changed == "path":
+            payload.rename(data / "renamed")
+        elif changed == "content":
+            payload.write_bytes(bytes([content[0] ^ 1]) + content[1:])
+        elif changed == "link":
+            link.unlink()
+            link.symlink_to("data/other")
+        elif changed == "hardlink":
+            (data / "other").unlink()
+            (data / "other").hardlink_to(payload)
+        else:
+            (task / "empty").mkdir()
+        assert task_image_reference(dockerfile, base_image=None) != before
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Python exposes extended attributes on Linux")
+@pytest.mark.regression
+@given(value=st.binary(max_size=40))
+@example(value=b"capability")
+def test_task_extended_attributes_invalidate_the_input_identity(value: bytes) -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        dockerfile = Path(directory) / "Dockerfile"
+        dockerfile.write_text("FROM scratch\nCOPY . /payload\n")
+        payload = dockerfile.parent / "payload"
+        payload.write_bytes(b"unchanged")
+        os.setxattr(payload, "user.vibesys-input", value)
+        before = task_image_reference(dockerfile, base_image=None)
+        os.setxattr(payload, "user.vibesys-input", value + b"\0")
+        assert task_image_reference(dockerfile, base_image=None) != before

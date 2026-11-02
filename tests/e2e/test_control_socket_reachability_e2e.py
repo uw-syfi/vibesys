@@ -67,6 +67,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
 import pytest
+from scripts.ci_base_images import base_image
 from tests.server.support import REQUEST_TIME, build_server_parts
 from tests.support import run_test_command
 
@@ -119,7 +120,7 @@ pytestmark = pytest.mark.e2e
 
 _REQUIRED = os.environ.get("VIBESYS_REQUIRE_SANDBOX_TESTS") == "1"
 _DOCKER_ENV = "VIBESYS_E2E_DOCKER"
-_BASE_IMAGE = os.environ.get("VIBESYS_E2E_DOCKER_BASE_IMAGE", "python:3.12-bookworm")
+_BASE_IMAGE = os.environ.get("VIBESYS_E2E_DOCKER_BASE_IMAGE", base_image("python:3.12-bookworm"))
 _ENV = {"HOME": "/home/socket-probe", "PATH": "/usr/bin:/bin"}
 
 #: Arguments: the socket, the key file, and the request line. Prints one JSON object:

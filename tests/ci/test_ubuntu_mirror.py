@@ -51,6 +51,7 @@ def test_missing_runner_archive_keeps_image_defaults(sources: str) -> None:
     assert ubuntu_mirror(sources) is None
 
 
+@pytest.mark.regression
 def test_only_cuda_feature_builds_use_the_runner_mirror() -> None:
     jobs = yaml.safe_load((REPO / ".github/workflows/test.yml").read_text())["jobs"]
     steps = jobs["feature-tests"]["steps"]
@@ -62,12 +63,13 @@ def test_only_cuda_feature_builds_use_the_runner_mirror() -> None:
     assert '--build-arg "UBUNTU_MIRROR=${mirror}"' in prepare["run"]
     assert '--build-arg "BASE_IMAGE=${BASE_IMAGE}"' in prepare["run"]
     assert "--tag vibesys-feature-base:ci" in prepare["run"]
+    assert "docker image inspect" not in prepare["run"]
     assert "steps.image-bases.outputs.base" in prepare["env"]["BASE_IMAGE"]
     test = next(step for step in steps if "test_features.sh" in step.get("run", ""))
     assert steps.index(prepare) < steps.index(test)
     assert test["env"]["FEATURE_BASE"] == (
         "${{ matrix.family == 'cuda-ubuntu' && 'vibesys-feature-base:ci' || "
-        "format('{0}@{1}', matrix.base, steps.image-bases.outputs.base) }}"
+        "steps.image-bases.outputs.base }}"
     )
     assert 'test_features.sh "$FEATURE_BASE"' in test["run"]
     cache = next(step for step in steps if step.get("id") == "docker-cache")

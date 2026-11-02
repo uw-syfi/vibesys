@@ -1,6 +1,8 @@
 # A one-node-per-container Slurm cluster for the slurm_cluster test tier.
 # Slurm comes from the distribution packages, so a build is an apt install.
-FROM ubuntu:24.04
+# The tier passes the CI mirror of this pin when it is readable; the default is the same digest upstream.
+ARG BASE_IMAGE=docker.io/library/ubuntu@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac
+FROM ${BASE_IMAGE}
 
 ARG USER_NAME
 ARG USER_UID

@@ -267,7 +267,7 @@ id = "agent_image"
 class = "manual"
 job = "agent_image"
 roots = ["libs/vs-agent/src/vs_agent/images", "libs/vs-sandbox", "libs/vs-runtime/src/vs_runtime/features"]
-files = ["libs/vs-agent/src/vs_agent/images.py", "libs/vs-agent/src/vs_agent/agent_feature.py", "libs/vs-agent/src/vs_agent/provider_policy.py", "libs/vs-runtime/src/vs_runtime/_image_features.py", "scripts/ci_docker_data_root.sh", "scripts/ci_ubuntu_mirror.py", "scripts/ci_image_cache.py", "scripts/ci_registry_image_cache.sh", ".github/actions/docker-image-cache/action.yml"]
+files = ["libs/vs-agent/src/vs_agent/images.py", "libs/vs-agent/src/vs_agent/agent_feature.py", "libs/vs-agent/src/vs_agent/provider_policy.py", "libs/vs-runtime/src/vs_runtime/_image_features.py", "scripts/ci_docker_data_root.sh", "scripts/ci_ubuntu_mirror.py", "scripts/ci_image_cache.py", "scripts/ci_registry_image_cache.sh", "scripts/ci_registry_image_cache.py", "scripts/ci_base_images.py", "scripts/ci_base_images.toml", ".github/actions/docker-image-cache/action.yml"]
 
 [[components]]
 id = "real_tiers"
@@ -309,8 +309,8 @@ files = [
   "scripts/run_minimal_container_tests.sh",
   "scripts/ci_docker_data_root.sh",
   "scripts/ci_image_cache.py",
-  "scripts/ci_registry_image_cache.sh",
-  ".github/actions/docker-image-cache/action.yml",
+  "scripts/ci_registry_image_cache.sh", "scripts/ci_registry_image_cache.py", "scripts/ci_base_images.py", "scripts/ci_base_images.toml", "scripts/ci_base_mirror_setup.sh",
+  ".github/actions/docker-image-cache/action.yml", ".github/actions/ci-base-mirror/action.yml",
 ]
 
 [[components]]

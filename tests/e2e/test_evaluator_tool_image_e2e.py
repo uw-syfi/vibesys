@@ -20,6 +20,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+from scripts.ci_base_images import base_image
 from tests.support import run_test_command
 
 from vs_agent.api.images import agent_image
@@ -50,7 +51,7 @@ _INSTALL_TIMEOUT_S = 1800.0
     os.environ.get("VIBESYS_E2E_DOCKER") != "1" or shutil.which("docker") is None,
     reason="set VIBESYS_E2E_DOCKER=1 with docker on PATH to build agent images",
 )
-@pytest.mark.parametrize("base", ["python:3.12-bookworm", "ubuntu:22.04"])
+@pytest.mark.parametrize("base", [base_image("python:3.12-bookworm"), base_image("ubuntu:22.04")])
 @pytest.mark.parametrize("root", _BUNDLED, ids=lambda root: root.name)
 def test_every_bundled_evaluator_tool_installs_in_the_agent_image(base: str, root: Path) -> None:
     package = load_evaluator_package(root)
