@@ -9,6 +9,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/backend/cpu"
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/environment"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv"
 	"github.com/uw-syfi/vibesys/cli/internal/flow"
 	"github.com/uw-syfi/vibesys/cli/internal/hostfs"
@@ -373,5 +374,33 @@ func TestCloseEndsARunningCommand(t *testing.T) {
 	// A command ended by Close is not a cancel the user asked for.
 	if out := finish(t, s); out.CancelAsked {
 		t.Fatalf("outcome = %+v, a close is not a cancel", out)
+	}
+}
+
+// targetRecorder is an Environments that remembers the target of every request.
+type targetRecorder struct {
+	environment.Environments
+	targets []environment.Target
+}
+
+func (r *targetRecorder) Environment(kind core.EnvironmentKind, target environment.Target) (environment.Environment, error) {
+	r.targets = append(r.targets, target)
+	return r.Environments.Environment(kind, target)
+}
+
+// The environment is asked for the repository, task and commit of the job it runs, since a docker
+// environment builds its image from a file of that task at that commit.
+func TestTheEnvironmentIsAskedForTheJobsTarget(t *testing.T) {
+	p := newParts(t)
+	envs := &targetRecorder{Environments: fakeenv.Environments{core.EnvironmentHost: p.env}}
+	l := launchOf("print", "x")
+	s := supervisor.New(supervisor.Config{Launch: l, Environments: envs, Checkouts: p.checkouts, Spool: &supervisor.MemorySpool{}})
+	if err := s.Start(); err != nil {
+		t.Fatal(err)
+	}
+	finish(t, s)
+	want := environment.Target{Repository: l.Repository, Commit: l.Spec.Commit, Task: l.Task}
+	if len(envs.targets) != 1 || envs.targets[0] != want {
+		t.Fatalf("the environment was asked for %+v, want exactly %+v", envs.targets, want)
 	}
 }

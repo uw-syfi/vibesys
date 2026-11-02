@@ -143,11 +143,11 @@ type Environments map[core.EnvironmentKind]*Environment
 var _ environment.Environments = Environments(nil)
 
 // Environment implements environment.Environments.
-func (m Environments) Environment(kind core.EnvironmentKind) (environment.Environment, error) {
+func (m Environments) Environment(kind core.EnvironmentKind, target environment.Target) (environment.Environment, error) {
 	if e, ok := m[kind]; ok {
 		return e, nil
 	}
-	return environment.None{}.Environment(kind)
+	return environment.None{}.Environment(kind, target)
 }
 
 // Run implements environment.Environment by running the command as a script, and its service as

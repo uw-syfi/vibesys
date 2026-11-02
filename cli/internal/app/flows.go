@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/environment"
 	"github.com/uw-syfi/vibesys/cli/internal/flow"
 	"github.com/uw-syfi/vibesys/cli/internal/task"
 )
@@ -23,7 +24,7 @@ func (a *App) keyFlow(ctx context.Context, c core.CallContext, spec core.JobSpec
 	if err != nil {
 		return spec, "", err
 	}
-	fingerprint, err := a.fingerprintOf(ctx, kind)
+	fingerprint, err := a.fingerprintOf(ctx, kind, environment.Target{Repository: c.Repository, Commit: spec.Commit, Task: c.Task})
 	if err != nil {
 		return spec, "", err
 	}
@@ -63,13 +64,13 @@ func (a *App) taskAt(ctx context.Context, repository string, commit core.Commit,
 	return a.cfg.Tasks.Task(ctx, repository, commit, name)
 }
 
-// fingerprintOf fingerprints the environment of a kind. The kind is concrete: a job's environment
-// is decided before it is queued.
-func (a *App) fingerprintOf(ctx context.Context, kind core.EnvironmentKind) (core.Fingerprint, error) {
+// fingerprintOf fingerprints the environment of a kind for the target the job runs. The kind is
+// concrete: a job's environment is decided before it is queued.
+func (a *App) fingerprintOf(ctx context.Context, kind core.EnvironmentKind, target environment.Target) (core.Fingerprint, error) {
 	if kind == core.EnvironmentAuto {
 		return core.Fingerprint{}, &core.Failure{Kind: core.FailureInternal, Message: fmt.Sprintf("the environment %q was not decided before the job was keyed", kind)}
 	}
-	env, err := a.cfg.Environments.Environment(kind)
+	env, err := a.cfg.Environments.Environment(kind, target)
 	if err != nil {
 		return core.Fingerprint{}, err
 	}

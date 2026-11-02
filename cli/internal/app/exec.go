@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/environment"
 	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
 	"github.com/uw-syfi/vibesys/cli/internal/store"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
@@ -63,7 +64,9 @@ func (a *App) prepare(ref lifecycle.Ref) (supervisor.Handle, error) {
 		c.Timeout = a.cfg.DefaultTimeout
 		spec.Settings = c
 	}
-	env, err := a.cfg.Environments.Environment(spec.Environment)
+	env, err := a.cfg.Environments.Environment(spec.Environment, environment.Target{
+		Repository: t.scope.Repository, Commit: spec.Commit, Task: t.scope.Task,
+	})
 	if err != nil {
 		return nil, err
 	}
