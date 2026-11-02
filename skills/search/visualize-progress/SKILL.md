@@ -16,7 +16,7 @@ uv run <skill>/scripts/plot_progress.py --state .vibesys-state/optimize/<task> \
   --task-dir .vibesys/tasks/<task> --branch vibesys/<task> --repo . --out <dir> [--theme dark]
 ```
 
-`uv` supplies matplotlib from the script's inline metadata; with plain Python install
+`uv` supplies matplotlib from the script's inline metadata; with plain Python (3.11 or newer) install
 `matplotlib>=3.8` first. The inputs must be well formed, as `vibesys:state` and `vibesys:measure`
 define them (full-SHA records with `recorded_at`, `label`, `check`, `samples`; single-word plan
 `status:`; `objectives.toml` with a `[pareto]` table). The script repairs nothing and fails on

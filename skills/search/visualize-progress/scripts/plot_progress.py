@@ -1,5 +1,5 @@
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.11"
 # dependencies = ["matplotlib>=3.8"]
 # ///
 """Plot an optimization's progress from its state directory.
