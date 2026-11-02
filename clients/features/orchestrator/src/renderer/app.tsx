@@ -133,13 +133,9 @@ export function OrchestratorApp(props: {
                 name={nameOf(names, agent)}
                 view={agentView}
                 showOlder={() => actor.send({type: 'agent.older', agentId: agent.id})}
-                send={text =>
-                  actor.send({
-                    type: 'message.send',
-                    commandId: props.newId(),
-                    agentId: agent.id,
-                    text,
-                  })
+                newId={props.newId}
+                send={(commandId, text) =>
+                  actor.send({type: 'message.send', commandId, agentId: agent.id, text})
                 }
                 dismiss={() => actor.send({type: 'message.dismiss', agentId: agent.id})}
                 close={() => {

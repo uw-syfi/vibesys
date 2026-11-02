@@ -39,9 +39,19 @@ export interface Outgoing {
 /** Where one agent's message box stands. */
 export type MessageBox =
   | {readonly status: 'idle'}
-  | {readonly status: 'sending'; readonly commandId: string}
-  | {readonly status: 'answered'; readonly commandId: string; readonly receipt: Receipt}
-  | {readonly status: 'failed'; readonly commandId: string; readonly fault: Fault};
+  | {readonly status: 'sending'; readonly commandId: string; readonly text: string}
+  | {
+      readonly status: 'answered';
+      readonly commandId: string;
+      readonly text: string;
+      readonly receipt: Receipt;
+    }
+  | {
+      readonly status: 'failed';
+      readonly commandId: string;
+      readonly text: string;
+      readonly fault: Fault;
+    };
 
 export const idleBox: MessageBox = {status: 'idle'};
 
@@ -87,7 +97,11 @@ export interface AgentStreamInput {
   readonly after: bigint;
 }
 
-const sending = (commandId: string): MessageBox => ({status: 'sending', commandId});
+const sending = (sent: Outgoing): MessageBox => ({
+  status: 'sending',
+  commandId: sent.commandId,
+  text: sent.text,
+});
 
 export const agentMachine = setup({
   types: {
@@ -122,11 +136,11 @@ export const agentMachine = setup({
     retried: assign({attempts: 0, fault: null}),
     olderTimedOut: assign({olderError: timeout('The host')}),
     startSend: assign(({event}) =>
-      event.type === 'message.send' ? {inflight: event, box: sending(event.commandId)} : {},
+      event.type === 'message.send' ? {inflight: event, box: sending(event)} : {},
     ),
     enqueue: assign(({context, event}) =>
       event.type === 'message.send'
-        ? {queue: [...context.queue, event], box: sending(event.commandId)}
+        ? {queue: [...context.queue, event], box: sending(event)}
         : {},
     ),
     dequeue: assign(({context}) => ({
@@ -274,6 +288,7 @@ export const agentMachine = setup({
                 box: {
                   status: 'answered',
                   commandId: context.inflight?.commandId ?? '',
+                  text: context.inflight?.text ?? '',
                   receipt: event.output,
                 } as MessageBox,
               })),
@@ -285,6 +300,7 @@ export const agentMachine = setup({
                 box: {
                   status: 'failed',
                   commandId: context.inflight?.commandId ?? '',
+                  text: context.inflight?.text ?? '',
                   fault: faultOf(event.error),
                 } as MessageBox,
               })),
@@ -298,6 +314,7 @@ export const agentMachine = setup({
                 box: {
                   status: 'failed',
                   commandId: context.inflight?.commandId ?? '',
+                  text: context.inflight?.text ?? '',
                   fault: timeout('The host'),
                 } as MessageBox,
               })),

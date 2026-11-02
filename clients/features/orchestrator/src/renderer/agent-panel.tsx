@@ -3,11 +3,13 @@ import {
   Delivery,
   ItemStatus,
   type Message,
+  type Receipt,
   type ToolCall,
   TurnTrigger,
 } from '@vibesys/orchestrator-proto';
 import {
   agentThread,
+  messagesOf,
   ms,
   type OrchestratorState,
   oldestOrdinal,
@@ -42,6 +44,7 @@ import {
   roleWord,
   toolLabel,
   turnWord,
+  type Word,
 } from './words.js';
 
 const TRIGGER: Readonly<Record<TurnTrigger, string>> = {
@@ -134,71 +137,112 @@ function capabilityLine(agent: Agent): string {
   return `${harnessWord(agent.harness)}: ${takes} ${streams} ${resumes}`;
 }
 
-/** Where the message stands now, from the stored message when the host has told us about it. */
-function deliveryLine(box: Extract<Box, {status: 'answered'}>, message: Message | undefined) {
-  const {receipt} = box;
-  if (receipt.refusal !== 0) return {label: refusalWord(receipt.refusal), tone: 'err' as const};
-  const delivery = message?.delivery ?? receipt.delivery;
-  const word = deliveryWord(delivery);
+/** What a stored message's delivery says now, with the reason when it was rejected. */
+function storedLine(message: Message): {label: string; tone: Word['tone']} {
+  const word = deliveryWord(message.delivery);
   const why =
-    delivery === Delivery.REJECTED && message !== undefined
-      ? ` ${rejectionWord(message.rejection)}`
-      : '';
+    message.delivery === Delivery.REJECTED ? ` ${rejectionWord(message.rejection)}` : '';
   return {label: `${word.label}.${why}`, tone: word.tone};
+}
+
+/** The line for an answer whose message the host has not reported yet: the receipt's own words. */
+function receiptLine(receipt: Receipt): {label: string; tone: Word['tone']} {
+  if (receipt.refusal !== 0) return {label: refusalWord(receipt.refusal), tone: 'err'};
+  const word = deliveryWord(receipt.delivery);
+  return {label: `${word.label}.`, tone: word.tone};
 }
 
 function failureLine(fault: Fault): string {
   return `Could not send. ${faultWord(fault.kind)}`;
 }
 
+/** What the person is typing, and the id of the send it is retrying (null until it is sent once). */
+export interface Draft {
+  readonly text: string;
+  readonly id: string | null;
+}
+
+/**
+ * The id a press of Send uses. A message that never got an answer is sent again under the id it
+ * already has, so the host cannot deliver it twice; any other press is a new message with a fresh
+ * id (an edit clears the draft's id, and a refused message is final under its id).
+ */
+export function idForSend(draft: Draft, box: Box, newId: () => string): string {
+  return box.status === 'failed' && draft.id !== null && box.commandId === draft.id
+    ? draft.id
+    : newId();
+}
+
+function SentMessage(props: {
+  readonly text: string;
+  readonly line: {readonly label: string; readonly tone: Word['tone']};
+}): JSX.Element {
+  return (
+    <Row gap="space-3" wrap>
+      <Text tone="muted">{`You wrote: ${props.text}`}</Text>
+      <Chip label={props.line.label} tone={props.line.tone} dot />
+    </Row>
+  );
+}
+
 function MessageBox(props: {
   readonly agent: Agent;
   readonly box: Box;
-  /** The stored message the last answer named, which keeps changing as the agent reads it. */
-  readonly stored: Message | undefined;
-  readonly send: (text: string) => void;
+  /** The messages the person sent to this agent, as the host last reported them. */
+  readonly sent: readonly Message[];
+  readonly newId: () => string;
+  readonly send: (commandId: string, text: string) => void;
   readonly dismiss: () => void;
 }): JSX.Element {
-  const [text, setText] = useState('');
-  const sending = props.box.status === 'sending';
+  const [draft, setDraft] = useState<Draft>({text: '', id: null});
+  const {box} = props;
+  const sending = box.status === 'sending';
+  // The text stays until the host has taken the message; only then is the box empty again.
+  const taken = box.status === 'answered' && box.receipt.refusal === 0 && box.commandId === draft.id;
+  const shown = taken ? '' : draft.text;
+  const retrying = box.status === 'failed' && box.commandId === draft.id;
+  const reported = box.status === 'answered' && props.sent.some(m => m.id === box.receipt.messageId);
   return (
     <Card section={`Message ${roleWord(props.agent.role)}`}>
       <Stack gap="space-3">
         <Field label="Your message" help={capabilityLine(props.agent)}>
           <TextInput
-            value={text}
-            change={setText}
+            value={shown}
+            change={text => setDraft({text, id: null})}
             placeholder="Write a message to this agent"
             rows={2}
           />
         </Field>
         <Row gap="space-3" wrap>
           <Button
-            text={sending ? 'Sending' : 'Send'}
+            text={sending ? 'Sending' : retrying ? 'Try again' : 'Send'}
             variant="primary"
             press={() => {
-              props.send(text);
-              setText('');
+              const id = idForSend(draft, box, props.newId);
+              setDraft({text: shown, id});
+              props.send(id, shown);
             }}
-            {...(text.trim() === '' || sending
+            {...(shown.trim() === '' || sending
               ? {disabledReason: sending ? 'Sending.' : 'Write a message first.', quietReason: true}
               : {})}
           />
-          {props.box.status === 'answered'
-            ? (() => {
-                const line = deliveryLine(props.box, props.stored);
-                return <Chip label={line.label} tone={line.tone} dot />;
-              })()
-            : null}
-          {props.box.status === 'failed' ? (
-            <Chip label={failureLine(props.box.fault)} tone="err" dot />
-          ) : null}
-          {props.box.status === 'answered' || props.box.status === 'failed' ? (
+          {box.status === 'failed' ? <Chip label={failureLine(box.fault)} tone="err" dot /> : null}
+          {box.status === 'answered' || box.status === 'failed' ? (
             <Button text="Clear" variant="quiet" size="sm" press={props.dismiss} />
           ) : null}
         </Row>
-        {props.box.status === 'failed' ? (
-          <Text tone="muted" variant="small">{`Details: ${props.box.fault.detail}`}</Text>
+        {box.status === 'failed' ? (
+          <Text tone="muted" variant="small">{`Details: ${box.fault.detail}`}</Text>
+        ) : null}
+        {props.sent.map(message => (
+          <SentMessage
+            key={message.id}
+            text={message.body.case === 'text' ? message.body.value : ''}
+            line={storedLine(message)}
+          />
+        ))}
+        {box.status === 'answered' && !reported ? (
+          <SentMessage text={box.text} line={receiptLine(box.receipt)} />
         ) : null}
       </Stack>
     </Card>
@@ -213,7 +257,8 @@ export function AgentPanel(props: {
   /** This agent's own connection, history and message box. */
   readonly view: AgentView;
   readonly showOlder: () => void;
-  readonly send: (text: string) => void;
+  readonly newId: () => string;
+  readonly send: (commandId: string, text: string) => void;
   readonly dismiss: () => void;
   readonly close: () => void;
 }): JSX.Element {
@@ -262,11 +307,10 @@ export function AgentPanel(props: {
       <MessageBox
         agent={agent}
         box={props.view.box}
-        stored={
-          props.view.box.status === 'answered'
-            ? state.messages[props.view.box.receipt.messageId]
-            : undefined
-        }
+        sent={messagesOf(state, agent.id).filter(
+          message => message.fromAgentId === '' && message.body.case === 'text',
+        )}
+        newId={props.newId}
         send={props.send}
         dismiss={props.dismiss}
       />

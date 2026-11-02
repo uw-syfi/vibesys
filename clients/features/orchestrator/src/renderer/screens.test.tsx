@@ -14,7 +14,7 @@ import {applyEvent, emptyState, type OrchestratorState} from '@vibesys/orchestra
 import fc from 'fast-check';
 import {renderToStaticMarkup} from 'react-dom/server';
 import type {AgentView} from '../state/index.js';
-import {AgentPanel} from './agent-panel.js';
+import {AgentPanel, idForSend} from './agent-panel.js';
 import {ConnectionBanner} from './connection-banner.js';
 import {verdictOf} from './handoff-cards.js';
 import type {RunView} from './route.js';
@@ -68,6 +68,7 @@ function panel(state: OrchestratorState, agent: Agent, view = quiet(agent.id)): 
       name="Worker 1"
       view={view}
       showOlder={() => undefined}
+      newId={() => 'id'}
       send={() => undefined}
       dismiss={() => undefined}
       close={() => undefined}
@@ -147,13 +148,19 @@ describe('the screens', () => {
     });
     const view: AgentView = {
       ...quiet(agent.id),
-      box: {status: 'answered', commandId: 'cmd', receipt},
+      box: {status: 'answered', commandId: 'cmd', text: 'hello', receipt},
     };
     const stored = (delivery: Delivery, rejection = Rejection.UNSPECIFIED) => ({
       ...state,
       messages: {
         ...state.messages,
-        'msg-1': create(MessageSchema, {id: 'msg-1', toAgentId: agent.id, delivery, rejection}),
+        'msg-1': create(MessageSchema, {
+          id: 'msg-1',
+          toAgentId: agent.id,
+          delivery,
+          rejection,
+          body: {case: 'text', value: 'hello'},
+        }),
       },
     });
     expect(panel(state, agent, view)).toContain('Sent, not yet confirmed');
@@ -161,6 +168,31 @@ describe('the screens', () => {
     const rejected = panel(stored(Delivery.REJECTED, Rejection.AGENT_GONE), agent, view);
     expect(rejected).toContain('Not delivered');
     expect(rejected).toContain('session is over');
+  });
+
+  test('a message is retried under its own id only while it has had no answer', () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom('idle', 'sending', 'answered', 'failed'),
+        fc.boolean(),
+        fc.boolean(),
+        (status, sameId, drafted) => {
+          const fault = {kind: 'timeout', detail: 'x'} as const;
+          const receipt = create(ReceiptSchema, {commandId: 'a'});
+          const box: AgentView['box'] =
+            status === 'idle'
+              ? {status}
+              : status === 'sending'
+                ? {status, commandId: 'a', text: 't'}
+                : status === 'answered'
+                  ? {status, commandId: 'a', text: 't', receipt}
+                  : {status, commandId: 'a', text: 't', fault};
+          const draft = {text: 't', id: drafted ? (sameId ? 'a' : 'b') : null};
+          const id = idForSend(draft, box, () => 'fresh');
+          expect(id).toBe(status === 'failed' && drafted && sameId ? 'a' : 'fresh');
+        },
+      ),
+    );
   });
 
   test('a command shows as the command, never as the JSON the tool received', () => {
