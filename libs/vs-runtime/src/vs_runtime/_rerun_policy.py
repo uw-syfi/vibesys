@@ -19,7 +19,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from vs_core.api import ContractError, LifecycleClass
-from vs_runtime._step_runner import ClearUnavailableError
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -55,20 +54,6 @@ class WorkCleaner(Protocol):
         reached.
         """
         ...
-
-
-class UnwiredWorkCleaner:
-    """The cleaner of a run that wires none: it cannot clear, and says so.
-
-    A command operation declared with it runs under the production loop, which never clears.
-    Under the step loop its ``clear`` raises ``ClearUnavailableError``, so the run waits on the
-    runner visibly instead of repeating a command whose process nobody ended.
-    """
-
-    async def clear(self, tag: RequestId, request: OperationRequest) -> None:
-        """Report that nothing here can end the processes of ``tag``."""
-        del request
-        raise ClearUnavailableError(tag, "no work cleaner is wired")
 
 
 @dataclass(frozen=True)
