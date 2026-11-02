@@ -23,7 +23,8 @@ Harness-specific mechanics (tools, background tasks, script paths): read `refere
    `[benchmark]` command, `[benchmark.result]` (`json_argument`, `metric`) and the direction in
    `objectives.toml`. Use `command` arrays as the executable prefix; apply the service setup and runtime
    arguments described in measuring.md.
-2. `git rev-parse <ref>` for the full SHA. Make a clean worktree of it:
+2. `git rev-parse <ref>` for the full SHA of a committed candidate (`vibesys:commit`: a full
+   commit with `Checks: pass`, never `wip`). Make a clean worktree of it:
    `git worktree add --detach <state dir>/worktrees/measure-<work-id>-<attempt> <sha>`. Never measure a working copy.
 3. Get the lead's measurement slot (one check/benchmark/record sequence at a time).
    In that worktree: build if the task has a build step, start the service if required, then run the correctness check. If the
@@ -33,7 +34,9 @@ Harness-specific mechanics (tools, background tasks, script paths): read `refere
    `json_argument` and a fresh output path; read the `metric` field from that JSON.
 5. Record: `measurements.py record --dir <dir> --commit <sha> --role base|candidate --label <text>
    --metric <name> --direction max|min --command "<benchmark command>" --sample V ... --check
-   pass|fail --exclusive yes|no`.
+   pass|fail --exclusive yes|no`. For `--role candidate` it refuses a commit whose message breaks
+   the `vibesys:commit` schema or whose `Checks` is not `pass`, and names the fix; it needs the
+   `commit` skill installed beside this one and fails clearly without it.
 6. Ask: `measurements.py compare --dir <dir> --commit <sha>` (add `--base <sha>` to compare with
    another commit, such as main). `best --dir <dir>` names the best verdict-backed commit.
    `show --dir <dir> [--commit <sha>]` prints the records of all shards. Add `--json` for

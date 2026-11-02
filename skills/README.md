@@ -63,7 +63,8 @@ short section in the harness file.
 - `search/`: the optimization loop for the plugin alone. VibeSys runs never install it,
   because they read only `domains/`. Invoke `/vibesys:optimize <task> [--fanout N]` to start or resume the task's one long-running
   optimization: planners write hypotheses as plan files, workers try them, every commit is
-  measured and judged. Its state is described by the `state` skill. Search skills are named verb-first
+  measured and judged. Its state is described by the `state` skill, and every commit follows the
+  `commit` skill's enforced message schema. Search skills are named verb-first
   (`measure`, `judge-candidate`, ...) except `state`.
 
 Assets that only the VibeSys app uses (evaluators, profilers, the chat agent's skills) stay in

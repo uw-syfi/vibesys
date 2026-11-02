@@ -52,6 +52,7 @@ GIT = shutil.which("git") or "git"
 SHA_A = "a" * 40
 SHA_B = "b" * 40
 SHA_C = "c" * 40
+VALID_MESSAGE = b"chore: add a file\n\nChecks: pass\n"
 STAMP = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
 VALUES = st.floats(min_value=1.0, max_value=1e4, allow_nan=False, allow_infinity=False)
 DIRECTIONS = st.sampled_from(("max", "min"))
@@ -67,6 +68,17 @@ class Run:
         (self.task / "OBJECTIVE.md").write_text("Maximize throughput.\n")
         self.dir = root / ".vibesys-state" / "optimize" / "demo"
         self.dir.mkdir(parents=True)
+        self.messages: dict[str, bytes] = {}
+        """Messages that replace what a commit holds, to exercise the schema gate."""
+
+    def read_message(self, root: Path, commit: str) -> bytes:
+        """A commit's message: a stated one, the real one, or a valid one for a made-up SHA."""
+        if commit in self.messages:
+            return self.messages[commit]
+        try:
+            return script.git_message(root, commit)
+        except script.InvalidInputError:
+            return VALID_MESSAGE
 
     @property
     def lines(self) -> list[str]:
@@ -96,12 +108,17 @@ class Run:
             self.git("init", "-q", "-b", "main")
         (self.root / name).write_text(name)
         self.git("add", name)
-        self.git("commit", "-q", "-m", name)
+        self.git("commit", "-q", "-m", f"chore: add {name}", "-m", "Checks: pass")
         return self.git("rev-parse", "HEAD")
 
     def cli(self, *argv: str, host: str = "host-a") -> tuple[int, str, str]:
         out, err = io.StringIO(), io.StringIO()
-        code = script.main(list(argv), now=lambda: STAMP, out=out, err=err, host=host)
+        code = script.main(
+            list(argv),
+            context=script.Context(lambda: STAMP, host, self.read_message),
+            out=out,
+            err=err,
+        )
         return code, out.getvalue(), err.getvalue()
 
     def record(
@@ -475,7 +492,10 @@ def test_an_unknown_flag_or_value_is_refused(new_run: NewRun, extra: list[str]) 
 def test_a_directory_that_is_not_a_state_directory_is_refused(tmp_path: Path) -> None:
     out, err = io.StringIO(), io.StringIO()
     code = script.main(
-        ["show", "--dir", str(tmp_path / "missing")], now=lambda: STAMP, out=out, err=err, host="h"
+        ["show", "--dir", str(tmp_path / "missing")],
+        context=script.Context(lambda: STAMP, "h"),
+        out=out,
+        err=err,
     )
     assert code == 2
     (tmp_path / "bare").mkdir()
@@ -483,7 +503,7 @@ def test_a_directory_that_is_not_a_state_directory_is_refused(tmp_path: Path) ->
     code = script.main(
         ["record", "--dir", str(tmp_path / "bare"), "--commit", SHA_A, "--role", "base",
          "--label", "x", "--metric", "m", "--direction", "max", "--command", "c", "--sample", "1"],
-        now=lambda: STAMP, out=out, err=err, host="h",
+        context=script.Context(lambda: STAMP, "h"), out=out, err=err,
     )  # fmt: skip
     assert code == 2
     assert ".vibesys-state/optimize" in err.getvalue()
@@ -846,3 +866,110 @@ def test_auxiliary_observations_are_numeric_samples(new_run: NewRun, values: lis
     assert code == 2
     assert err
     assert run.lines == []
+
+
+# --- the commit schema gate --------------------------------------------------------------------
+
+BAD_MESSAGES = {
+    "wip": b"wip: checkpoint\n",
+    "failed checks": b"fix: handle x\n\nChecks: fail\n",
+    "unchecked": b"fix: handle x\n\nChecks: not-run\n",
+    "no trailer": b"fix: handle x\n",
+    "not conventional": b"Added stuff.\n\nChecks: pass\n",
+    "not utf-8": b"fix: handle \xff\xfe\n\nChecks: pass\n",
+}
+
+
+@pytest.mark.parametrize("kind", sorted(BAD_MESSAGES))
+def test_record_refuses_a_candidate_whose_commit_is_not_a_valid_pass(
+    new_run: NewRun, kind: str
+) -> None:
+    run = new_run()
+    run.messages[SHA_A] = BAD_MESSAGES[kind]
+    code, _, err = run.record(SHA_A, [1.0, 2.0, 3.0])
+    assert code == 2
+    assert "not a valid candidate" in err
+    assert "Fix:" in err
+    assert SHA_A[:12] in err
+    assert run.lines == []
+
+
+def test_record_names_the_wip_fix(new_run: NewRun) -> None:
+    run = new_run()
+    run.messages[SHA_A] = BAD_MESSAGES["wip"]
+    assert "commit on top" in run.record(SHA_A, [1.0])[2]
+
+
+def test_record_reads_the_real_commit_message_in_a_repository(new_run: NewRun) -> None:
+    run = new_run()
+    good = run.commit("good")
+    (run.root / "w").write_text("w")
+    run.git("add", "w")
+    run.git("commit", "-q", "-m", "wip: half done")
+    wip = run.git("rev-parse", "HEAD")
+    assert run.record(good, [1.0, 2.0, 3.0])[0] == 0
+    code, _, err = run.record(wip, [1.0, 2.0, 3.0])
+    assert code == 2
+    assert "wip-not-measurable" in err
+
+
+def test_record_does_not_hold_the_base_commit_to_the_schema(new_run: NewRun) -> None:
+    run = new_run()
+    run.messages[SHA_A] = b"Initial commit\n"
+    assert run.record(SHA_A, [1.0, 2.0, 3.0], role="base")[0] == 0
+
+
+def test_record_without_the_commit_skill_fails_clearly(tmp_path: Path) -> None:
+    lonely = tmp_path / "skills" / "measure" / "scripts"
+    lonely.mkdir(parents=True)
+    shutil.copy(SCRIPT, lonely / "measurements.py")
+    spec = importlib.util.spec_from_file_location("lonely_measurements", lonely / "measurements.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    root = tmp_path / "repo"
+    (root / ".vibesys" / "tasks" / "demo").mkdir(parents=True)
+    state = root / ".vibesys-state" / "optimize" / "demo"
+    state.mkdir(parents=True)
+    out, err = io.StringIO(), io.StringIO()
+    argv = [
+        "record", "--dir", str(state), "--commit", SHA_A, "--role", "candidate", "--label", "x",
+        "--metric", "ops", "--direction", "max", "--command", "b", "--sample", "1",
+    ]  # fmt: skip
+    code = module.main(
+        argv, context=module.Context(lambda: STAMP, "h", lambda *_: VALID_MESSAGE), out=out, err=err
+    )
+    assert code == 2
+    assert "commit skill" in err.getvalue()
+    assert not list(state.glob("*/*"))
+
+
+def test_check_lists_commits_whose_messages_break_the_schema(new_run: NewRun) -> None:
+    run = new_run()
+    base = run.commit("base")
+    run.record(base, BASE, role="base")
+    run.git("checkout", "-q", "-b", "vibesys/demo")
+    (run.root / "q").write_text("q")
+    run.git("add", "q")
+    run.git("commit", "-q", "-m", "Added a thing.")
+    head = run.commit("head")
+    run.record(head, [10.0, 11.0, 12.0])
+    code, payload = run.check()
+    assert code == 1
+    assert not payload["proven"]
+    assert any("header-format" in v for v in payload["schema"])
+
+
+def test_check_accepts_wip_commits_below_a_valid_head(new_run: NewRun) -> None:
+    run = new_run()
+    base = run.commit("base")
+    run.record(base, BASE, role="base")
+    run.git("checkout", "-q", "-b", "vibesys/demo")
+    (run.root / "q").write_text("q")
+    run.git("add", "q")
+    run.git("commit", "-q", "-m", "wip: checkpoint")
+    head = run.commit("head")
+    run.record(head, FAST)
+    code, payload = run.check()
+    assert payload["schema"] == []
+    assert code == 0

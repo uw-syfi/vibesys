@@ -29,7 +29,8 @@ Harness-specific mechanics (tools, background tasks, script paths): read `refere
    `[benchmark.result]` table, the task directory is not committed, or tracked files have
    uncommitted changes (the base must be a commit).
 2. Use `vibesys:state` to create or resume `.vibesys-state/optimize/<task>/`. A new
-   optimization gets branch `vibesys/<task>` and a worktree for it in `worktrees/`.
+   optimization gets branch `vibesys/<task>` and a worktree for it in `worktrees/`. Install the
+   commit hook there and in every later worktree where anyone commits (`vibesys:state`).
 3. If no base record exists, measure the base with `vibesys:measure` (at least 5 samples) as a
    background task your harness tracks and reports on when it finishes. No comparison means anything
    until it lands. Plan while it runs.
@@ -45,7 +46,9 @@ Harness-specific mechanics (tools, background tasks, script paths): read `refere
    decision in the plan's Decision section.
 3. Dispatch workers for chosen plans with a self-contained brief from briefs.md; save the brief
    text in the plan's Result section. Branch new ideas from the current winner.
-4. Measure every returned commit (tracked background task, one at a time), then dispatch a judge.
+4. Measure every returned candidate commit (tracked background task, one at a time), then dispatch
+   a judge. A candidate is a full commit with `Checks: pass` (`vibesys:commit`); `wip` commits below
+   it are not measured.
    Combine parked or won plans with combine-candidates, and use profile-revision when a question
    needs evidence. Record outcomes, record ids and lessons in the plan, set `status` and `gain`.
 5. Keep slots busy; when you leave one idle, state the reason in your next report.
@@ -58,7 +61,9 @@ Harness-specific mechanics (tools, background tasks, script paths): read `refere
 - You never edit candidate code. Subagents do, in their own worktrees.
 - Main (`vibesys/<task>`) moves only for a plan whose judge verdict is `pass` AND whose recorded
   comparison against current main is `better`. Move it with `git merge --ff-only` of the
-  verified commit in main's worktree, then run `measurements.py check`.
+  verified commit in main's worktree, then run `measurements.py check`. Every commit from the
+  candidate's parent to its head lands, `wip` checkpoints included; the judge reviews the whole
+  diff from the parent. Never squash or rewrite a measured commit (`vibesys:commit`).
 - A judge verdict `unmeasured` is not a pass: re-judge after the measurement.
 - A number reported to the user must come from a measurement of main's current head taken after
   its last move.
