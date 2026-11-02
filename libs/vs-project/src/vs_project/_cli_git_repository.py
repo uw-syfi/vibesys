@@ -508,15 +508,15 @@ class CliGitRepository:
 
     def changed_since(self, commit: Revision, pathspecs: Sequence[Pathspec]) -> tuple[str, ...]:
         self.require_plain_work_tree(pathspecs)
-        committed = self._run_checked(["diff", "--name-only", f"{commit}..HEAD", "--", *pathspecs])
+        committed = self._run_checked(
+            ["diff", "--name-only", "-z", f"{commit}..HEAD", "--", *pathspecs]
+        )
         pending = self._run_checked(
             ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", *pathspecs]
         )
         prefix = self._prefix()
         changes = {
-            line.removeprefix(prefix) if prefix else line
-            for line in _text(committed.stdout).splitlines()
-            if line
+            path.removeprefix(prefix) for path in _text(committed.stdout).split("\0") if path
         }
         changes.update(self._status_paths(pending.stdout, prefix))
         return tuple(sorted(changes))

@@ -154,6 +154,20 @@ def test_a_staged_rename_stays_listed_when_its_origin_is_recreated(
     assert sandbox.repo.uncommitted_paths(["."]) == ("a.txt", "b.txt")
 
 
+def test_paths_Git_would_quote_are_listed_as_written(sandbox: ContractProject) -> None:
+    names = ("sp ace.txt", 'quo"te.txt', "caf\u00e9.txt")
+    base = sandbox.start({"a.txt": "1\n"})
+    for name in names:
+        sandbox.write(name, "x\n")
+    sandbox.repo.stage_all(["."])
+    sandbox.repo.commit("names")
+    sandbox.write("tab\tbed.txt", "y\n")
+
+    expected = tuple(sorted((*names, "tab\tbed.txt")))
+    assert sandbox.repo.uncommitted_paths(["."]) == ("tab\tbed.txt",)
+    assert sandbox.repo.changed_since(base, ["."]) == expected
+
+
 def test_changed_since_unions_committed_and_uncommitted_paths(sandbox: ContractProject) -> None:
     base = sandbox.start({"a.txt": "1\n", "b.txt": "1\n", "tests/t.py": "1\n"})
     sandbox.write("a.txt", "2\n")
