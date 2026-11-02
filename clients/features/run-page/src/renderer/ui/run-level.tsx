@@ -7,6 +7,7 @@
 import type {CoreState} from '@vibesys/run-state';
 import {
   EmptyState,
+  type PaneResize,
   Panes,
   PickList,
   SegmentedControl,
@@ -155,6 +156,7 @@ export function IdeasPane(props: {
   readonly base: ViewBase;
   readonly core: CoreState | null;
   readonly selected: string | null;
+  readonly resize?: PaneResize | undefined;
   readonly dispatch: Dispatch;
 }): JSX.Element {
   return (
@@ -165,6 +167,7 @@ export function IdeasPane(props: {
       header={{}}
       fixed
       bare
+      resize={props.resize}
     >
       <IdeasFace {...props} modeControls />
     </FramedPane>

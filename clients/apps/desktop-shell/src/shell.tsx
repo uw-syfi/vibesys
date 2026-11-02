@@ -48,8 +48,8 @@ import {
   type NewRunSnapshot,
 } from '@vibesys/feature-new-run/renderer';
 import type {
-  RunPageAddress,
   PaneWidthsMemory,
+  RunPageAddress,
   RunPageNavigation,
   RunPagePage,
 } from '@vibesys/feature-run-page/renderer';

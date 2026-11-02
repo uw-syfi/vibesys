@@ -36,8 +36,10 @@ import {
   machineBlockWords,
   NO_MODEL_NAMES,
   type Offer,
+  type PaneSizes,
   pauseNowConfirmView,
   positionOf,
+  RESIZE_WORDS,
   type ResolvedZoom,
   type Route,
   RUN_ROUTE,
@@ -63,6 +65,7 @@ import {
   usageRecords,
   whoBySpan,
 } from '../../state/index.js';
+import {paneResize} from './framed-pane.js';
 import {heroParts} from './hero.js';
 import {
   HistoryLoading,
@@ -502,6 +505,8 @@ export function RunScreen(props: {
   readonly chat?: RunChatSlot;
   /** The host's names for the run's models; absent or without a model: its id shows. */
   readonly modelNames?: ModelNames;
+  /** The widths a person gave the panes; absent: every pane keeps its default and none resizes. */
+  readonly panes?: PaneSizes;
   /** App-owned run diagnostics, in the page’s scrolling body. */
   readonly toolbar?: ReactNode;
   readonly supplemental?: ReactNode;
@@ -513,10 +518,15 @@ export function RunScreen(props: {
    */
   readonly loading?: boolean;
 }): JSX.Element {
-  const {chat, ...rest} = props;
+  const {chat, panes, ...rest} = props;
+  const resize = paneResize(panes, 'chat', RESIZE_WORDS.chat, 'start');
   return (
-    <Dock label="Chat" side={chat?.open === true ? chat.panel : null}>
-      <RunScreenBody {...rest} chat={chat} />
+    <Dock
+      label="Chat"
+      side={chat?.open === true ? chat.panel : null}
+      {...(resize === undefined ? {} : {resize})}
+    >
+      <RunScreenBody {...rest} chat={chat} panes={panes} />
     </Dock>
   );
 }
@@ -564,6 +574,7 @@ function RunScreenBody(props: {
   readonly dispatch: Dispatch;
   readonly chat: RunChatSlot | undefined;
   readonly modelNames?: ModelNames;
+  readonly panes: PaneSizes | undefined;
   /** App-owned run diagnostics, in the page’s scrolling body. */
   readonly toolbar?: ReactNode;
   readonly supplemental?: ReactNode;
@@ -604,7 +615,6 @@ function RunScreenBody(props: {
   );
   if (pending !== null) return pending;
   const problem = historyProblem(state);
-  const transcript = transcriptLoading(state);
   const zoomed = resolveZoom(model, route);
   const before = roundsBeforeTrace(state);
   const detail = openedDetail(state, route, props.core);
@@ -620,8 +630,9 @@ function RunScreenBody(props: {
     core: detail.core,
     mode: route.mode,
     dispatch,
-    loading: detail.loading ?? transcript,
+    loading: detail.loading ?? transcriptLoading(state),
     problem: detail.problem,
+    panes: props.panes,
   };
   const parts =
     before === null
