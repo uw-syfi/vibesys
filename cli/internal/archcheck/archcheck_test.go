@@ -118,6 +118,26 @@ func hasLayout(violations []string) bool {
 
 // The real tree obeys the rules.
 func TestRepositoryObeysTheRules(t *testing.T) {
+	for _, line := range archcheck.Violations(repositorySources(t)) {
+		t.Error(line)
+	}
+}
+
+// Every listed exception still excuses a violation, so fixing one removes its entry.
+func TestExceptionsAreStillNeeded(t *testing.T) {
+	for _, line := range archcheck.StaleExceptions(repositorySources(t)) {
+		t.Error(line)
+	}
+	clockList, goList := archcheck.Exceptions()
+	for _, e := range append(clockList, goList...) {
+		if strings.TrimSpace(e.Reason) == "" {
+			t.Errorf("%s: an exception states no reason", e.File)
+		}
+	}
+}
+
+func repositorySources(t *testing.T) map[string]string {
+	t.Helper()
 	root, err := filepath.Abs("../../..")
 	if err != nil {
 		t.Fatal(err)
@@ -149,9 +169,7 @@ func TestRepositoryObeysTheRules(t *testing.T) {
 	if len(files) == 0 {
 		t.Fatal("found no sources to check")
 	}
-	for _, line := range archcheck.Violations(files) {
-		t.Error(line)
-	}
+	return files
 }
 
 // Product code never imports a package that exists for tests: a fake, a contract suite or a test
@@ -175,5 +193,117 @@ func TestSupportPackagesAreImportedByTestsOnly(t *testing.T) {
 				t.Errorf("product code in %s may import the test support package %s", dir, target)
 			}
 		}
+	}
+}
+
+func hasLine(violations []string, part string) bool {
+	for _, line := range violations {
+		if strings.Contains(line, part) {
+			return true
+		}
+	}
+	return false
+}
+
+func withTime(import_, body string) string {
+	return "package p\n\nimport " + import_ + "\n\nfunc f() {\n\t" + body + "\n}\n"
+}
+
+// Every function that reads or waits on the real clock is refused outside internal/clock, however
+// the package is imported, in product code and in tests; internal/clock itself may use them.
+func TestRealClockStaysInsideTheClockPackage(t *testing.T) {
+	calls := []string{"Now()", "Since(x)", "Until(x)", "Sleep(d)", "After(d)", "AfterFunc(d, g)", "Tick(d)", "NewTimer(d)", "NewTicker(d)"}
+	files := []string{"cli/internal/core/a.go", "cli/internal/app/a.go", "cli/internal/daemon/a_test.go", "cli/cmd/vibesys-cli/a.go"}
+	property := func(pick, where uint8, aliased bool) bool {
+		call := calls[int(pick)%len(calls)]
+		name := files[int(where)%len(files)]
+		qualifier, spec := "time", `"time"`
+		if aliased {
+			qualifier, spec = "tm", `tm "time"`
+		}
+		source := withTime(spec, "_ = "+qualifier+"."+call)
+		outside := archcheck.Violations(map[string]string{name: source})
+		inside := archcheck.Violations(map[string]string{"cli/internal/clock/a.go": source})
+		return hasLine(outside, "the real clock is reached only through internal/clock") && !hasLine(inside, "real clock")
+	}
+	if err := quick.Check(property, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Values and constructors that read no clock are allowed, and so is a local named time.
+func TestPureTimeUseIsAllowed(t *testing.T) {
+	sources := []string{
+		withTime(`"time"`, "_ = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)"),
+		withTime(`"time"`, "_ = time.Unix(1, 2).In(time.FixedZone(\"z\", 3600)).Add(time.Second)"),
+		withTime(`"time"`, "var d time.Duration = 5 * time.Minute; _ = d"),
+		withTime(`"time"`, "_, _ = time.ParseDuration(\"1s\")"),
+		"package p\n\ntype clk struct{}\n\nfunc (clk) Now() int { return 0 }\n\nfunc f() { time := clk{}; _ = time.Now() }\n",
+		withTime(`"fmt"`, "_ = fmt.Sprint()"),
+	}
+	for _, source := range sources {
+		if got := archcheck.Violations(map[string]string{"cli/internal/core/a.go": source}); len(got) > 0 {
+			t.Errorf("%q: violations = %v, want none", source, got)
+		}
+	}
+}
+
+func TestGoStatementsStartThroughTheOwnedGroup(t *testing.T) {
+	bare := "package p\n\nfunc f() {\n\tgo func() {}()\n}\n"
+	cases := []struct {
+		name string
+		bad  bool
+	}{
+		{"cli/internal/app/a.go", true},
+		{"cli/internal/app/filestores/a.go", true},
+		{"cli/internal/daemon/a.go", true},
+		{"cli/internal/daemon/daemontest/a.go", true},
+		{"cli/internal/supervisor/a.go", true},
+		{"cli/internal/supervisor/rpc/a.go", true},
+		{"cli/internal/supervisor/suptest/a.go", true},
+		// A test starts its own client goroutines, bounded by the concurrency kit.
+		{"cli/internal/app/a_test.go", false},
+		{"cli/internal/daemon/a_test.go", false},
+		// Outside the daemon's packages the rule does not apply, and the group is built on goroutines.
+		{"cli/internal/owned/a.go", false},
+		{"cli/internal/runtimedir/a.go", false},
+		{"cli/internal/store/storetest/a.go", false},
+	}
+	for _, c := range cases {
+		got := archcheck.Violations(map[string]string{c.name: bare})
+		if hasLine(got, "bare go statement") != c.bad {
+			t.Errorf("%s: violations = %v, want bad=%v", c.name, got, c.bad)
+		}
+	}
+	grouped := "package p\n\nimport \"" + module + "internal/owned\"\n\nfunc f() {\n\tvar g owned.Group\n\tg.Go(func() {})\n\tg.Wait()\n}\n"
+	if got := archcheck.Violations(map[string]string{"cli/internal/app/a.go": grouped}); len(got) > 0 {
+		t.Errorf("a goroutine started through owned.Group was flagged: %v", got)
+	}
+}
+
+// An exception excuses only its own file, and goes stale when its file stops breaking the rule.
+func TestExceptionsExcuseOnlyTheirFile(t *testing.T) {
+	clockList, goList := archcheck.Exceptions()
+	if len(clockList) == 0 || len(goList) == 0 {
+		t.Fatal("expected both rules to list an exception")
+	}
+	clockBad := withTime(`"time"`, "_ = time.Now()")
+	if got := archcheck.Violations(map[string]string{clockList[0].File: clockBad}); hasLine(got, "real clock") {
+		t.Errorf("an excepted file was flagged: %v", got)
+	}
+	if got := archcheck.Violations(map[string]string{clockList[0].File + "x.go": clockBad}); !hasLine(got, "real clock") {
+		t.Errorf("a file beside an excepted one was not flagged: %v", got)
+	}
+	clean := "package p\n"
+	files := map[string]string{clockList[0].File: clean, goList[0].File: "package p\n\nfunc f() { go g() }\n"}
+	stale := archcheck.StaleExceptions(files)
+	if !hasLine(stale, clockList[0].File+": the clock exception is no longer needed") {
+		t.Errorf("a fixed clock exception was not reported stale: %v", stale)
+	}
+	if hasLine(stale, goList[0].File+": the go statement exception is no longer needed") {
+		t.Errorf("a needed go exception was reported stale: %v", stale)
+	}
+	if !hasLine(stale, "names a file that does not exist") {
+		t.Errorf("a missing excepted file was not reported: %v", stale)
 	}
 }

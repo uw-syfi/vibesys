@@ -1,6 +1,7 @@
-// Package archcheck enforces vibesys-cli's two structural rules over its sources: the layer rules
-// for imports, and the rule that knowledge of the storage layout stays inside
-// internal/store/filestore.
+// Package archcheck enforces vibesys-cli's structural rules over its sources: the layer rules
+// for imports, the rule that knowledge of the storage layout stays inside internal/store/filestore,
+// and the two rules that keep the daemon simulable: the real clock is reached only through
+// internal/clock, and goroutines in the daemon's packages start through owned.Group.
 //
 // Violations is a pure function of the files it is given, so its tests need no checkout; the
 // test in this package applies it to the real tree.
@@ -151,6 +152,7 @@ func Violations(files map[string]string) []string {
 		case strings.HasSuffix(name, ".go") && strings.HasPrefix(name, "cli/"):
 			found = append(found, layering(name, source)...)
 			found = append(found, layout(name, source)...)
+			found = append(found, effects(name, source)...)
 		case strings.HasSuffix(name, ".proto") && strings.HasPrefix(name, "proto/vibesys/cli/"):
 			found = append(found, layout(name, source)...)
 		}
