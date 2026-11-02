@@ -118,17 +118,48 @@ func (r *rig) client(args ...string) string {
 	return string(out)
 }
 
+// receipt is what a client verb that dispatches a command prints.
+type receipt struct {
+	RunID, AgentID string
+	// Sequence is the receipt's own event. What the command causes later, such as an agent's
+	// reply, comes after it.
+	Sequence uint64
+}
+
+// receipt runs a client verb that dispatches a command and returns its receipt.
+func (r *rig) receipt(args ...string) receipt {
+	r.t.Helper()
+	var raw struct {
+		RunID    string `json:"runId"`
+		AgentID  string `json:"agentId"`
+		Sequence string `json:"sequence"`
+	}
+	if err := json.Unmarshal([]byte(r.client(args...)), &raw); err != nil {
+		r.t.Fatal(err)
+	}
+	sequence, err := strconv.ParseUint(raw.Sequence, 10, 64)
+	if err != nil {
+		r.t.Fatalf("vibesysd %s printed no receipt sequence: %+v", strings.Join(args, " "), raw)
+	}
+	return receipt{RunID: raw.RunID, AgentID: raw.AgentID, Sequence: sequence}
+}
+
 func (r *rig) serveLog() string {
 	data, _ := os.ReadFile(r.state + ".serve.log")
 	return string(data)
 }
 
 // watchUntil runs `run watch` and returns once a line satisfies want, failing after the bound.
-func (r *rig) watchUntil(what string, want func(line string) bool) {
+//
+// With after zero the watch starts with a snapshot of runs and agents, so want may only look for
+// what a snapshot holds. An item is in no snapshot: a watch for one must replay the log after a
+// sequence from before the item, such as the receipt of the command that caused it, or it misses
+// an item committed before the watch opened.
+func (r *rig) watchUntil(what string, after uint64, want func(line string) bool) {
 	r.t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), bound)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, r.binary, "--root", r.root, "run", "watch")
+	cmd := exec.CommandContext(ctx, r.binary, "--root", r.root, "run", "watch", "--after", strconv.FormatUint(after, 10))
 	cmd.Env = r.env
 	out, err := cmd.StdoutPipe()
 	if err != nil {
@@ -190,17 +221,11 @@ func TestARunSurvivesADaemonRestart(t *testing.T) {
 	}
 
 	first := r.serve()
-	var receipt struct{ RunID, AgentID string }
-	var raw map[string]any
-	if err := json.Unmarshal([]byte(r.client("run", "start", "--repository", repository, "--task", "demo", "--brief", "say hello")), &raw); err != nil {
-		t.Fatal(err)
+	started := r.receipt("run", "start", "--repository", repository, "--task", "demo", "--brief", "say hello")
+	if started.RunID == "" || started.AgentID == "" {
+		t.Fatalf("run start printed no run and agent: %+v", started)
 	}
-	receipt.RunID, _ = raw["runId"].(string)
-	receipt.AgentID, _ = raw["agentId"].(string)
-	if receipt.RunID == "" || receipt.AgentID == "" {
-		t.Fatalf("run start printed no run and agent: %v", raw)
-	}
-	r.watchUntil("the lead's first reply", func(line string) bool { return strings.Contains(line, "reply 1") })
+	r.watchUntil("the lead's first reply", started.Sequence, func(line string) bool { return strings.Contains(line, "reply 1") })
 
 	// The daemon dies mid-run. The sidecar, which holds the agent, does not.
 	pids := r.sidecarPids()
@@ -216,17 +241,18 @@ func TestARunSurvivesADaemonRestart(t *testing.T) {
 	}
 
 	r.serve()
-	r.watchUntil("the run still running after the restart", func(line string) bool {
+	r.watchUntil("the run still running after the restart", 0, func(line string) bool {
 		return strings.Contains(line, `"snapshot"`) && strings.Contains(line, "RUN_STATUS_RUNNING")
 	})
-	r.client("send", receipt.AgentID, "say it again")
-	r.watchUntil("the lead's second reply, from the same sidecar", func(line string) bool { return strings.Contains(line, "reply 2") })
+	sent := r.receipt("send", started.AgentID, "say it again")
+	r.watchUntil("the lead's second reply, from the same sidecar", sent.Sequence, func(line string) bool { return strings.Contains(line, "reply 2") })
 	if got := r.sidecarPids(); len(got) != 1 || got[0] != pids[0] {
 		t.Fatalf("the restart replaced the sidecar: before %v, after %v", pids, got)
 	}
 
-	r.client("run", "stop", receipt.RunID)
-	r.watchUntil("the run ended", func(line string) bool {
-		return strings.Contains(line, receipt.RunID) && strings.Contains(line, "RUN_STATUS_ENDED")
+	r.client("run", "stop", started.RunID)
+	// A run's status is in the snapshot, so this watch needs no replay.
+	r.watchUntil("the run ended", 0, func(line string) bool {
+		return strings.Contains(line, started.RunID) && strings.Contains(line, "RUN_STATUS_ENDED")
 	})
 }

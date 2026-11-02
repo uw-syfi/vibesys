@@ -131,6 +131,10 @@ vibesysd run stop RUN
 vibesysd send AGENT "text"
 ```
 
+A snapshot holds runs and agents, not items. A watch opened after an agent replied does not show that
+reply; `run watch --after SEQUENCE` replays the log after a sequence, such as the one in a command's
+receipt.
+
 ## Running it
 
 Set `VIBESYS_ORCHESTRATOR_STATE_DIR` to a local-disk directory and `VIBESYS_ORCHESTRATOR_SIDECAR`
@@ -149,7 +153,7 @@ git -C /local/disk/smoke-repo add -A && git -C /local/disk/smoke-repo commit -qm
 vibesysd run start --repository /local/disk/smoke-repo --task fix-add --harness claude_code \
   --model claude-haiku-4-5 --fanout 2 \
   --brief 'calc.py has a bug in add. Use your vibesys tools to spawn one worker to fix it and one judge to review the fix, wait for their handoffs, then report.'
-vibesysd run watch          # in another shell; stop with `vibesysd run stop RUN` when the lead reports
+vibesysd run watch --after 1 # in another shell; stop with `vibesysd run stop RUN` when the lead reports
 ```
 
 ### Who may call
