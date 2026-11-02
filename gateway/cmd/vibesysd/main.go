@@ -18,6 +18,7 @@ import (
 	"github.com/uw-syfi/vibesys/gateway/internal/pipe"
 	"github.com/uw-syfi/vibesys/gateway/internal/server"
 	schema "github.com/uw-syfi/vibesys/gateway/schemahash"
+	"github.com/uw-syfi/vibesys/orchestrator/hosted"
 )
 
 const version = "0.1.0"
@@ -29,14 +30,24 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	if err := run(ctx, os.Args[1:]); err != nil {
+		var code exitCode
+		if errors.As(err, &code) {
+			os.Exit(int(code))
+		}
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
 func run(ctx context.Context, args []string) error {
+	if verb, root, rest := orchestratorVerb(args); verb {
+		if code := orchestratorCommand(ctx, root, rest); code != 0 {
+			return exitCode(code)
+		}
+		return nil
+	}
 	if len(args) == 0 || (args[0] != "serve" && args[0] != "connect") {
-		return errors.New("usage: vibesysd {serve|connect} [options]")
+		return errors.New("usage: vibesysd {serve|connect} [options]\n  vibesysd [--root PATH] VERB, where VERB is one of\n" + hosted.Usage)
 	}
 	command := args[0]
 	flags := flag.NewFlagSet(command, flag.ContinueOnError)
@@ -88,7 +99,32 @@ func serve(ctx context.Context, root string, idle time.Duration) error {
 	defer endpoint.Close()
 	monitor := lifecycle.NewMonitor(idle, lifecycle.SystemClock{}, func() { endpoint.Listener.Close() })
 	defer monitor.Stop()
-	return server.Serve(ctx, lifecycle.Track(endpoint.Listener, monitor), server.Config{Root: root, Version: version})
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	orchestrator, err := startOrchestrator(ctx)
+	if err != nil {
+		return err
+	}
+	go holdWhileLive(ctx, orchestrator.Live(), monitor)
+	served := make(chan error, 1)
+	go func() {
+		served <- server.Serve(ctx, lifecycle.Track(endpoint.Listener, monitor), server.Config{Root: root, Version: version, Register: orchestrator.Register})
+	}()
+	select {
+	case err := <-served:
+		cancel()
+		<-orchestrator.Done()
+		return err
+	case err, ok := <-orchestrator.Done():
+		if !ok || err == nil {
+			// No orchestrator in this process, or a clean stop: HostService serves on.
+			err = <-served
+			return err
+		}
+		cancel()
+		<-served
+		return fmt.Errorf("the orchestrator stopped: %w", err)
+	}
 }
 
 func bridge(ctx context.Context, root string, startup time.Duration) error {

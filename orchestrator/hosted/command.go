@@ -1,15 +1,4 @@
-// Command vibesys-orchestrator is the orchestrator's one binary: the daemon, the stdio pipe that
-// reaches it from another host, the tool server an agent uses, and the headless client.
-//
-//	vibesys-orchestrator daemon
-//	vibesys-orchestrator connect
-//	vibesys-orchestrator mcp
-//	vibesys-orchestrator [--host HOST] run start|stop|watch ...
-//	vibesys-orchestrator [--host HOST] send AGENT TEXT
-//
-// The client verbs reach the daemon on this host by its socket, or on HOST through
-// `ssh HOST vibesys-orchestrator connect`. There is no other transport.
-package main
+package hosted
 
 import (
 	"context"
@@ -17,11 +6,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log/slog"
+	"net"
 	"os"
-	"os/signal"
 	"strconv"
-	"syscall"
 
 	"github.com/uw-syfi/vibesys/orchestrator/internal/client"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
@@ -30,29 +17,31 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/internal/production"
 )
 
-func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	code := run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr)
-	stop()
-	os.Exit(code)
-}
+// Dial opens a connection to a host process that serves the orchestrator's operator service.
+type Dial func(ctx context.Context) (net.Conn, error)
 
-const usage = `usage:
-  vibesys-orchestrator daemon
-  vibesys-orchestrator connect
-  vibesys-orchestrator mcp
-  vibesys-orchestrator [--host HOST] run start --repository DIR --task NAME --brief TEXT [--harness claude_code|codex] [--fanout N] [--model M] [--effort E] [--deadline RFC3339]
-  vibesys-orchestrator [--host HOST] run stop RUN
-  vibesys-orchestrator [--host HOST] run watch [--after SEQUENCE]
-  vibesys-orchestrator [--host HOST] send AGENT TEXT
+// Usage lists the verbs Command runs, for the host binary's own usage text.
+const Usage = `  mcp
+  [--host HOST] run start --repository DIR --task NAME --brief TEXT [--harness claude_code|codex] [--fanout N] [--model M] [--effort E] [--deadline RFC3339]
+  [--host HOST] run stop RUN
+  [--host HOST] run watch [--after SEQUENCE]
+  [--host HOST] send AGENT TEXT
 `
 
-func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+// IsCommand says whether a verb is one of Command's.
+func IsCommand(verb string) bool {
+	return verb == "mcp" || verb == "run" || verb == "send" || verb == "--host"
+}
+
+// Command runs one orchestrator verb: the stdio tool server an agent launches (mcp), or the headless
+// client (run, send). The client reaches this host through local, or HOST through remote(HOST).
+// It returns the process exit code.
+func Command(ctx context.Context, version string, args []string, local Dial, remote func(host string) Dial, stdin io.Reader, stdout, stderr io.Writer) int {
 	fail := func(err error) int {
-		fmt.Fprintf(stderr, "vibesys-orchestrator: %v\n", err)
+		fmt.Fprintf(stderr, "vibesysd: %v\n", err)
 		return 1
 	}
-	global := flag.NewFlagSet("vibesys-orchestrator", flag.ContinueOnError)
+	global := flag.NewFlagSet("vibesysd", flag.ContinueOnError)
 	global.SetOutput(stderr)
 	host := global.String("host", "", "run the verb on this host through ssh; empty means this host")
 	if err := global.Parse(args); err != nil {
@@ -60,46 +49,35 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 	rest := global.Args()
 	if len(rest) == 0 {
-		fmt.Fprint(stderr, usage)
+		fmt.Fprint(stderr, "usage:\n"+Usage)
 		return 2
 	}
-	home, _ := os.UserHomeDir()
-	layout, layoutErr := production.LayoutFor(os.Getenv, home)
-
-	switch rest[0] {
-	case "daemon":
-		if layoutErr != nil {
-			return fail(layoutErr)
-		}
-		log := slog.New(slog.NewTextHandler(stderr, nil))
-		err := production.Serve(ctx, layout, production.Wiring{
-			Sidecars: production.NoSidecars{}, Plans: production.NoPlans{},
-		}, log)
-		if err != nil {
-			return fail(err)
-		}
-		return 0
-	case "connect":
-		if layoutErr != nil {
-			return fail(layoutErr)
-		}
-		dial := production.StartingDialer(layout.Socket, production.StartDetached(layout))
-		if err := client.Connect(ctx, dial, stdin, stdout); err != nil {
-			return fail(err)
-		}
-		return 0
-	case "mcp":
-		return runMCP(ctx, stdin, stdout, fail)
-	case "run", "send":
-		return runClient(ctx, *host, layout, layoutErr, rest, stdout, fail)
+	if rest[0] == "mcp" {
+		return runMCP(ctx, version, stdin, stdout, fail)
 	}
-	fmt.Fprint(stderr, usage)
-	return 2
+	dial := local
+	if *host != "" {
+		dial = remote(*host)
+	}
+	c, err := client.Dial(ctx, client.Dialer(dial), client.Options{BinaryVersion: version})
+	if err != nil {
+		return fail(err)
+	}
+	defer c.Close()
+	h := client.Headless{Client: c, IDs: production.CommandIDs{}, Out: stdout}
+	if err := dispatchVerb(ctx, h, rest); err != nil {
+		var usageErr usageError
+		if errors.As(err, &usageErr) {
+			fmt.Fprint(stderr, "usage:\n"+Usage)
+		}
+		return fail(err)
+	}
+	return 0
 }
 
 // runMCP serves the tools of the session this process was launched for. Its identity is read from
 // the environment the orchestrator gave the agent, and nowhere else.
-func runMCP(ctx context.Context, stdin io.Reader, stdout io.Writer, fail func(error) int) int {
+func runMCP(ctx context.Context, version string, stdin io.Reader, stdout io.Writer, fail func(error) int) int {
 	need := func(name string) (string, error) {
 		v := os.Getenv(name)
 		if v == "" {
@@ -120,7 +98,7 @@ func runMCP(ctx context.Context, stdin io.Reader, stdout io.Writer, fail func(er
 		return fail(fmt.Errorf("%s=%q is not a session number", daemon.EnvSession, env[daemon.EnvSession]))
 	}
 	c, err := client.Dial(ctx, production.UnixDialer(env[daemon.EnvSocket]), client.Options{
-		BinaryVersion: production.Version,
+		BinaryVersion: version,
 		Session:       &client.Session{Agent: env[daemon.EnvAgent], Session: uint32(n), Token: env[daemon.EnvToken]},
 	})
 	if err != nil {
@@ -131,32 +109,6 @@ func runMCP(ctx context.Context, stdin io.Reader, stdout io.Writer, fail func(er
 		Agent: core.AgentID(env[daemon.EnvAgent]), Run: core.RunID(env[daemon.EnvRun]), Role: core.AgentRole(env[daemon.EnvRole]),
 	}, c, production.RandomHex(6))
 	if err := server.Serve(ctx, stdin, stdout); err != nil {
-		return fail(err)
-	}
-	return 0
-}
-
-func runClient(ctx context.Context, host string, layout production.Layout, layoutErr error, rest []string, stdout io.Writer, fail func(error) int) int {
-	var dial client.Dialer
-	if host != "" {
-		dial = production.CommandDialer("ssh", host, "vibesys-orchestrator", "connect")
-	} else {
-		if layoutErr != nil {
-			return fail(layoutErr)
-		}
-		dial = production.StartingDialer(layout.Socket, production.StartDetached(layout))
-	}
-	c, err := client.Dial(ctx, dial, client.Options{BinaryVersion: production.Version})
-	if err != nil {
-		return fail(err)
-	}
-	defer c.Close()
-	h := client.Headless{Client: c, IDs: production.CommandIDs{}, Out: stdout}
-	if err := dispatchVerb(ctx, h, rest); err != nil {
-		var usageErr usageError
-		if errors.As(err, &usageErr) {
-			fmt.Fprint(os.Stderr, usage)
-		}
 		return fail(err)
 	}
 	return 0
@@ -204,4 +156,9 @@ func dispatchVerb(ctx context.Context, h client.Headless, rest []string) error {
 		return h.Watch(ctx, *after)
 	}
 	return usageError{fmt.Errorf("run %s is not start, stop or watch", rest[1])}
+}
+
+// SSH reaches the vibesysd on host through `ssh HOST vibesysd connect`.
+func SSH(host string) Dial {
+	return Dial(production.CommandDialer("ssh", host, "vibesysd", "connect"))
 }

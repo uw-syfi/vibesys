@@ -4,19 +4,34 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-// The agent socket is not the operator's, whether or not a runtime directory is set.
-func TestTheTwoSocketsDiffer(t *testing.T) {
-	for _, runtimeDir := range []string{"", "/run/user/1"} {
-		operator, agent := socketPaths("/var/state/vo", runtimeDir)
-		if operator == agent || operator == "" || agent == "" {
-			t.Errorf("runtime directory %q: operator socket %q and agent socket %q must differ", runtimeDir, operator, agent)
-		}
+// A second daemon on the same state directory is refused with an error that names the holder's pid
+// and version, and the holder keeps serving.
+func TestASecondDaemonNamesTheHolder(t *testing.T) {
+	dir := t.TempDir()
+	env := map[string]string{"VIBESYS_ORCHESTRATOR_STATE_DIR": dir}
+	layout, err := LayoutFor(func(k string) string { return env[k] }, dir)
+	if err != nil {
+		t.Skipf("the test directory is not a local filesystem: %v", err)
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	first, err := Open(layout, Wiring{Sidecars: NoSidecars{}, Plans: NoPlans{}, Version: "1.2.3"}, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	_, err = Open(layout, Wiring{Sidecars: NoSidecars{}, Plans: NoPlans{}, Version: "9.9.9"}, log)
+	want := fmt.Sprintf("pid %d version 1.2.3", os.Getpid())
+	if !errors.Is(err, ErrHeld) || !strings.Contains(err.Error(), want) {
+		t.Fatalf("second open gave %v, want ErrHeld naming %q", err, want)
 	}
 }
 
