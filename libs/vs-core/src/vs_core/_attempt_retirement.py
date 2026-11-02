@@ -1,4 +1,4 @@
-"""Durable attempt closure, release dependencies and guarded scope reopening."""
+"""Durable attempt closure and release dependencies."""
 
 from __future__ import annotations
 
@@ -12,20 +12,13 @@ from .types.attempts import (
     AttemptCheckpoint,
     AttemptClosure,
     AttemptPhase,
-    AttemptReacquireRequested,
     CloseAttemptScope,
     DiscardWorkspace,
-    EnsureWorkspace,
-    ReacquisitionReady,
     ReleaseDependencyBlocked,
     ReleaseDependencyObserved,
-    RestoreRevision,
     RetainRevision,
     RetentionRequired,
     RetireRequested,
-    ScopeAdmissionReopened,
-    ScopeReopenAdmitted,
-    ScopeReopenRequested,
     SnapshotAndRetain,
     WorkspaceObserved,
 )
@@ -35,7 +28,6 @@ from .types.common import (
     ContractValidationError,
     DecisionId,
     ExecuteRegisteredOperation,
-    InvocationRef,
     LifecycleClass,
     ObservationStatus,
     OperationId,
@@ -47,22 +39,17 @@ from .types.common import (
     SessionId,
 )
 from .types.evaluation import (
-    ContinuationPhase,
     ContinuationRetireRequested,
-    ContinuationScopeReopened,
     JobsDrainRequested,
     RegisteredOwnedJob,
 )
 from .types.kernel import AreaChange, DecisionCompleted
-from .types.records import InspectRequest, Outbound, inherit
+from .types.records import InspectRequest
 from .types.scheduling import (
-    AttemptReopenRequest,
-    AttemptReopenRequested,
     QueueEntryRetired,
     SlotChargeEnded,
     SlotReleased,
 )
-from .types.scope_reopen import ScopedAdmissionReopenOutcome
 from .types.sessions import (
     CloseSession,
     DispatchTurn,
@@ -76,7 +63,7 @@ from .types.strategy import Accepted, Operation, StartAttempt, Withdraw
 
 if TYPE_CHECKING:
     from .types.attempts import AttemptsEvent, AttemptsState, AttemptView
-    from .types.common import ContinuationId, Observation, RevisionRef
+    from .types.common import Observation, RevisionRef
     from .types.evaluation import OwnedJob
     from .types.kernel import AttemptsContext, Signal
     from .types.records import Request, RequestRecord
@@ -471,8 +458,6 @@ def _retention_request(
         )
     if owner.closure.disposition == "cancel" or owner.closure.retention_refused:
         retention, revision = "discard", None
-    elif owner.closure.disposition == "park":
-        retention, revision = "wip", None
     elif pending is not None:
         retention, revision = pending.retention, pending.candidate
     else:
@@ -692,26 +677,6 @@ def _withdrawal_completed(owner: AttemptView, context: AttemptsContext) -> tuple
     )
 
 
-def _reopen_failed_completed(owner: AttemptView, context: AttemptsContext) -> tuple[Signal, ...]:
-    closure = owner.closure
-    if closure is None or closure.disposition != "cancel":
-        return ()
-    return tuple(
-        DecisionCompleted(decision_id=row.decision_id, status=CompletionStatus.FAILED)
-        for row in context.run.receipts
-        if isinstance(row.feedback, Accepted)
-        and row.feedback.decision_id == row.decision_id
-        and isinstance(row.decision, Operation)
-        and row.decision.decision_id == row.decision_id
-        and row.decision.normalized_scope_reopen is not None
-        and row.decision.registered_scope_reopen == row.decision.normalized_scope_reopen
-        and row.decision.normalized_scope_reopen.attempt == _ref(owner)
-        and closure.admission_id == row.decision_id
-        and closure.authority == RequestId(root=f"reopen-failed:operation:{row.decision_id.root}")
-        and row.completion is None
-    )
-
-
 def _progress(
     owner: AttemptView, context: AttemptsContext, event: RetentionRequired | None = None
 ) -> tuple[AttemptView, tuple[Signal, ...], tuple[Request, ...]]:
@@ -736,15 +701,13 @@ def _progress(
     closure = owner.closure
     if closure is None:
         return owner, (), requests
-    phase = AttemptPhase.PARKED if closure.disposition == "park" else AttemptPhase.TERMINAL
-    owner = owner.model_copy(update={"phase": phase})
+    owner = owner.model_copy(update={"phase": AttemptPhase.TERMINAL})
     return (
         owner,
         (
             OwnershipSettled(attempt=_ref(owner), released=True),
             SlotReleased(attempt=_ref(owner), admission_id=closure.admission_id),
             *_withdrawal_completed(owner, context),
-            *_reopen_failed_completed(owner, context),
         ),
         requests,
     )
@@ -783,90 +746,12 @@ def _episode_authorized(owner: AttemptView, context: AttemptsContext, identity: 
                 and decision.scope.owner == context.run.run_id
                 and decision.scope.generation == owner.generation
             )
-        if isinstance(decision, Operation) and decision.normalized_scope_reopen is not None:
-            return (
-                decision.scope.owner == context.run.run_id
-                and decision.scope.generation == context.run.generation
-                and decision.registered_scope_reopen == decision.normalized_scope_reopen
-                and decision.normalized_scope_reopen.attempt == _ref(owner)
-            )
     return False
-
-
-def _retire_queued_reopen(
-    owner: AttemptView, context: AttemptsContext, event: RetireRequested
-) -> tuple[AttemptView, tuple[Signal, ...], tuple[Request, ...]]:
-    identity = RequestId(root=f"operation:{event.admission_id.root}")
-    request = _reopen_request(owner, context, identity)
-    continuation = next(
-        (
-            row
-            for row in context.evaluation.continuations
-            if row.reopen_authority == identity
-            and row.phase == ContinuationPhase.REOPENING
-            and _continuation_owned(owner, context, row.invocation)
-        ),
-        None,
-    )
-    if (
-        request is None
-        or continuation is None
-        or owner.closure is None
-        or event.admission_id == owner.admission_id
-        or event.disposition == "settle"
-    ):
-        return owner, (), ()
-    signals: tuple[Signal, ...] = (
-        QueueEntryRetired(attempt=_ref(owner), admission_id=event.admission_id),
-        DecisionCompleted(decision_id=event.admission_id, status=CompletionStatus.CANCELLED),
-        ContinuationRetireRequested(
-            continuation_id=continuation.continuation_id,
-            disposition=event.disposition,
-            park_authority=owner.closure.authority if event.disposition == "park" else None,
-        ),
-    )
-    discovered = _discover(owner, context)
-    if discovered.release_dependencies:
-        # Keep the historical fence processable while retiring the new queue entry.
-        # A second closure cannot be persisted in the frozen owner contract.
-        # Fail the exact withdrawal rather than lose it behind the historical fence.
-        signals += _queued_withdrawal_failed(owner, context, event)
-        return discovered.model_copy(update={"phase": AttemptPhase.CLOSING}), signals, ()
-    closure = AttemptClosure(
-        disposition=event.disposition,
-        requested_at=event.requested_at,
-        authority=event.authority,
-        admission_id=event.admission_id,
-    )
-    completed = owner.model_copy(update={"closure": closure})
-    signals += _withdrawal_completed(completed, context)
-    if event.disposition == "cancel":
-        owner = completed.model_copy(update={"phase": AttemptPhase.TERMINAL})
-    return owner, signals, ()
-
-
-def _queued_withdrawal_failed(
-    owner: AttemptView, context: AttemptsContext, event: RetireRequested
-) -> tuple[Signal, ...]:
-    return tuple(
-        DecisionCompleted(decision_id=row.decision_id, status=CompletionStatus.FAILED)
-        for row in context.run.receipts
-        if isinstance(row.feedback, Accepted)
-        and row.feedback.decision_id == row.decision_id
-        and isinstance(row.decision, Withdraw)
-        and row.decision.decision_id == row.decision_id
-        and row.decision.target == _ref(owner)
-        and row.decision.disposition.kind == event.disposition
-        and event.authority == RequestId(root=f"withdraw:{row.decision_id.root}")
-        and row.completion is None
-    )
 
 
 def _start_closure(
     owner: AttemptView, context: AttemptsContext, event: RetireRequested
 ) -> tuple[AttemptView, tuple[Signal, ...], tuple[Request, ...]]:
-    if owner.phase == AttemptPhase.PARKED:
-        return _retire_queued_reopen(owner, context, event)
     if (
         owner.closure is not None and owner.closure.admission_id == event.admission_id
     ) or owner.phase == AttemptPhase.TERMINAL:
@@ -948,11 +833,7 @@ def _start_closure(
         )
         if invocation is not None and invocation.scope == scope:
             signals.append(
-                ContinuationRetireRequested(
-                    continuation_id=continuation.continuation_id,
-                    disposition="park" if event.disposition == "park" else "cancel",
-                    park_authority=event.authority if event.disposition == "park" else None,
-                )
+                ContinuationRetireRequested(continuation_id=continuation.continuation_id)
             )
     request = CloseAttemptScope(
         request_id=event.authority,
@@ -1063,187 +944,6 @@ def _request_release_proof(
     )
 
 
-def _continuation_owned(
-    owner: AttemptView, context: AttemptsContext, invocation: InvocationRef
-) -> bool:
-    return any(
-        row.invocation == invocation and row.scope == _scope(owner)
-        for row in context.sessions.invocations
-    )
-
-
-def _park_revision(owner: AttemptView) -> RevisionRef | None:
-    if owner.closure is None or owner.closure.disposition != "park":
-        return None
-    checkpoints = tuple(
-        row for row in owner.checkpoints if row.request_id == _identity(owner, "retention")
-    )
-    if len(checkpoints) != 1 or checkpoints[0].retention != "wip":
-        return None
-    return checkpoints[0].revision
-
-
-def _reopen(
-    owner: AttemptView, context: AttemptsContext, event: ScopeReopenRequested
-) -> tuple[AttemptView, tuple[Signal, ...], tuple[Request, ...]]:
-    norm = event.normalization
-    closure = owner.closure
-    continuation = next(
-        (
-            row
-            for row in context.evaluation.continuations
-            if row.continuation_id == norm.continuation_id
-        ),
-        None,
-    )
-    receipt = next(
-        (
-            row
-            for row in context.run.receipts
-            if event.request.request_id == RequestId(root=f"operation:{row.decision_id.root}")
-        ),
-        None,
-    )
-    if (
-        owner.phase != AttemptPhase.PARKED
-        or closure is None
-        or closure.disposition != "park"
-        or closure.authority != norm.park_authority
-        or _discover(owner, context).release_dependencies
-        or _park_revision(owner) is None
-        or continuation is None
-        or not _continuation_owned(owner, context, continuation.invocation)
-        or continuation.phase != ContinuationPhase.REOPENING
-        or continuation.park_authority != norm.park_authority
-        or set(continuation.cancelled_resolutions) != set(norm.resolved_cancelled_jobs)
-        or event.request.request_id is None
-        or receipt is None
-        or not isinstance(receipt.feedback, Accepted)
-        or receipt.feedback.decision_id != receipt.decision_id
-        or not isinstance(receipt.decision, Operation)
-        or receipt.decision.normalized_scope_reopen != norm
-    ):
-        return owner, (), ()
-    canonical = _reopen_request(owner, context, event.request.request_id)
-    if canonical is None or not _original_request_matches(canonical, event.request):
-        return owner, (), ()
-    return (
-        owner,
-        (
-            AttemptReopenRequested(
-                request=AttemptReopenRequest(
-                    decision_id=receipt.decision_id,
-                    request_id=event.request.request_id,
-                    attempt=_ref(owner),
-                )
-            ),
-        ),
-        (),
-    )
-
-
-def _original_request_matches(
-    canonical: ExecuteRegisteredOperation, request: ExecuteRegisteredOperation
-) -> bool:
-    if request.decision_id not in (None, canonical.decision_id):
-        return False
-    return canonical.model_copy(update={"decision_id": request.decision_id}) == request
-
-
-def _reopen_request(
-    owner: AttemptView, context: AttemptsContext, identity: RequestId, *, cleanup: bool = False
-) -> ExecuteRegisteredOperation | None:
-    for receipt in context.run.receipts:
-        decision = receipt.decision
-        if (
-            not isinstance(receipt.feedback, Accepted)
-            or receipt.feedback.decision_id != receipt.decision_id
-            or (
-                not cleanup
-                and receipt.completion in (CompletionStatus.FAILED, CompletionStatus.CANCELLED)
-            )
-            or not isinstance(decision, Operation)
-            or decision.decision_id != receipt.decision_id
-            or decision.registered_wire is None
-            or decision.scope.owner != context.run.run_id
-            or decision.scope.generation != context.run.generation
-            or decision.normalized_scope_reopen is None
-            or decision.registered_scope_reopen != decision.normalized_scope_reopen
-            or decision.normalized_scope_reopen.attempt != _ref(owner)
-            or owner.closure is None
-            or decision.normalized_scope_reopen.park_authority != owner.closure.authority
-            or identity != RequestId(root=f"operation:{receipt.decision_id.root}")
-        ):
-            continue
-        return ExecuteRegisteredOperation(
-            request_id=identity,
-            operation_id=OperationId(root=identity.root),
-            scope=decision.scope,
-            decision_id=receipt.decision_id,
-            operation=decision.registered_wire,
-            retry_limit=context.run.limits.request_retries.limit,
-        )
-    return None
-
-
-def _admitted(
-    owner: AttemptView, context: AttemptsContext, event: ScopeReopenAdmitted
-) -> tuple[AttemptView, tuple[Signal, ...], tuple[Request, ...]]:
-    request = _reopen_request(owner, context, event.request_id)
-    checkpoint = _park_revision(owner)
-    continuation = next(
-        (
-            row
-            for row in context.evaluation.continuations
-            if row.reopen_authority == event.request_id
-        ),
-        None,
-    )
-    if (
-        owner.phase != AttemptPhase.PARKED
-        or owner.closure is None
-        or checkpoint is None
-        or request is None
-        or request.decision_id != event.admission_id
-        or continuation is None
-        or continuation.continuation_id != _request_continuation(context, event.request_id)
-        or continuation.park_authority != owner.closure.authority
-        or continuation.phase != ContinuationPhase.REOPENING
-        or not _continuation_owned(owner, context, continuation.invocation)
-    ):
-        return owner, (), ()
-    if checkpoint is None:
-        return owner, (), ()
-    owner = owner.model_copy(
-        update={"phase": AttemptPhase.ACQUIRING, "admission_id": event.admission_id}
-    )
-    if _discover(owner, context).release_dependencies:
-        return _start_closure(
-            owner,
-            context,
-            RetireRequested(
-                attempt=_ref(owner),
-                disposition="cancel",
-                authority=RequestId(root=f"reopen-failed:{event.request_id.root}"),
-                admission_id=event.admission_id,
-                requested_at=context.run.now_at,
-            ),
-        )
-    return (
-        owner,
-        (
-            AttemptReacquireRequested(
-                attempt=_ref(owner),
-                continuation_id=continuation.continuation_id,
-                request_id=event.request_id,
-                admission_id=event.admission_id,
-                base=checkpoint,
-            ),
-        ),
-        (),
-    )
-
-
 def _session_scope_owned(
     owner: AttemptView, context: AttemptsContext, scope: Scope, spec: SessionSpec
 ) -> bool:
@@ -1253,291 +953,6 @@ def _session_scope_owned(
         and scope.generation == context.run.generation
         and spec.policy == "reuse"
         and spec.lifetime == "owner"
-    )
-
-
-def _session_reattached(owner: AttemptView, context: AttemptsContext, identity: SessionId) -> bool:
-    if owner.closure is None:
-        return False
-    session = next(
-        (row for row in context.sessions.sessions if row.spec.session_id == identity), None
-    )
-    if (
-        session is None
-        or not _session_scope_owned(owner, context, session.scope, session.spec)
-        or session.phase
-        not in (SessionPhase.IDLE, SessionPhase.CHECKPOINTED, SessionPhase.SUSPENDED)
-        or session.pending_records
-        or session.resource_id is None
-        or not session.accepted
-    ):
-        return False
-    for record in context.records.records:
-        request, observation = record.request, record.observation
-        if (
-            not isinstance(request, EnsureSession)
-            or _record(context, record.request_id) != record
-            or request.spec != session.spec
-            or request.scope != session.scope
-            or request.admission_id != owner.admission_id
-            or request.required_resource != session.resource_id
-            or observation is None
-            or observation.request_id != record.request_id
-            or observation.scope != session.scope
-            or observation.admission_id != owner.admission_id
-            or observation.resource_id != request.required_resource
-            or observation.status != ObservationStatus.SUCCEEDED
-            or not observation.accepted
-            or not observation.terminal
-        ):
-            continue
-        return any(
-            _record(context, old.request_id) == old
-            and isinstance(old.request, EnsureSession)
-            and old.request.spec.session_id == identity
-            and old.request.scope == session.scope
-            and (
-                old.request.admission_id == owner.closure.admission_id
-                or (isinstance(session.scope.owner, RunId) and old.request.admission_id is None)
-            )
-            and old.observation is not None
-            and old.observation.request_id == old.request_id
-            and old.observation.scope == session.scope
-            and old.observation.admission_id == old.request.admission_id
-            and old.observation.resource_id == request.required_resource
-            and old.observation.accepted
-            and old.observation.status == ObservationStatus.SUCCEEDED
-            for old in context.records.records
-        )
-    return False
-
-
-def _request_continuation(context: AttemptsContext, identity: RequestId) -> ContinuationId | None:
-    return next(
-        (
-            row.decision.normalized_scope_reopen.continuation_id
-            for row in context.run.receipts
-            if isinstance(row.decision, Operation)
-            and row.decision.normalized_scope_reopen is not None
-            and identity == RequestId(root=f"operation:{row.decision_id.root}")
-        ),
-        None,
-    )
-
-
-def _reacquired(owner: AttemptView, context: AttemptsContext, identity: RequestId) -> bool:
-    if any(
-        row.request_id in owner.pending_records
-        and isinstance(row.request, EnsureWorkspace | RestoreRevision)
-        and row.request.admission_id == owner.admission_id
-        for row in context.records.records
-    ):
-        return False
-    workspace = any(
-        _record(context, row.request_id) == row
-        and isinstance(row.request, RestoreRevision)
-        and row.request.revision == _park_revision(owner)
-        and row.request.attempt == _ref(owner)
-        and row.request.scope == _scope(owner)
-        and row.request.admission_id == owner.admission_id
-        and row.request.decision_id == owner.admission_id
-        and row.observation is not None
-        and row.observation.request_id == row.request_id
-        and row.observation.scope == _scope(owner)
-        and row.observation.admission_id == owner.admission_id
-        and row.observation.status == ObservationStatus.SUCCEEDED
-        and row.observation.accepted
-        and row.observation.terminal
-        for row in context.records.records
-    )
-    sessions = any(
-        row.attempt == _ref(owner)
-        and row.admission_id == owner.admission_id
-        and row.scope == _scope(owner)
-        and row.phase == "ready"
-        and row.session_ids == owner.sessions
-        for row in context.sessions.acquisition_groups
-    )
-    continuations = tuple(
-        row
-        for row in context.evaluation.continuations
-        if owner.closure is not None
-        and row.park_authority == owner.closure.authority
-        and row.reopen_authority == identity
-        and row.continuation_id == _request_continuation(context, identity)
-        and row.phase == ContinuationPhase.REOPENING
-        and _continuation_owned(owner, context, row.invocation)
-    )
-    return (
-        workspace
-        and sessions
-        and bool(continuations)
-        and all(_session_reattached(owner, context, identity) for identity in owner.sessions)
-        and all(
-            row.next_invocation.session_id == row.invocation.session_id
-            and row.next_invocation.generation == row.invocation.generation
-            and row.next_invocation.invocation_id != row.invocation.invocation_id
-            and _session_reattached(owner, context, row.invocation.session_id)
-            for row in continuations
-        )
-    )
-
-
-def _ready(
-    owner: AttemptView, context: AttemptsContext, event: ReacquisitionReady
-) -> tuple[AttemptView, tuple[Request, ...]]:
-    request = _reopen_request(owner, context, event.request_id)
-    if (
-        owner.phase != AttemptPhase.ACQUIRING
-        or owner.admission_id != event.admission_id
-        or owner.closure is None
-        or request is None
-        or request.decision_id != event.admission_id
-        or not _reacquired(owner, context, event.request_id)
-        or not any(
-            row.phase == ContinuationPhase.REOPENING
-            and row.reopen_authority == event.request_id
-            and row.park_authority == owner.closure.authority
-            and _continuation_owned(owner, context, row.invocation)
-            for row in context.evaluation.continuations
-        )
-    ):
-        return owner, ()
-    return owner, (request.model_copy(update={"admission_id": event.admission_id}),)
-
-
-def _reopen_observation_proved(
-    owner: AttemptView,
-    context: AttemptsContext,
-    event: ScopeAdmissionReopened,
-    record: RequestRecord,
-) -> bool:
-    canonical = _reopen_request(owner, context, event.observation.request_id, cleanup=True)
-    if canonical is None or record.request != canonical.model_copy(
-        update={"admission_id": owner.admission_id}
-    ):
-        return False
-    if record.observation != event.observation:
-        return False
-    if event.admission == "unknown" or event.observation.status == ObservationStatus.UNKNOWN:
-        return True
-    if event.observation.status == ObservationStatus.PENDING:
-        return False
-    if event.observation.terminal and event.observation.status in (
-        ObservationStatus.FAILED,
-        ObservationStatus.REJECTED,
-        ObservationStatus.CANCELLED,
-    ):
-        return True
-    outcome = record.outcome
-    return (
-        record.observation == event.observation
-        and isinstance(outcome, ScopedAdmissionReopenOutcome)
-        and outcome.scope == _scope(owner)
-        and outcome.admission == event.admission
-        and record.outcome_is_registered
-        and (
-            _reopen_receipt_failed(context, owner.admission_id)
-            or _reacquired(owner, context, event.observation.request_id)
-        )
-    )
-
-
-def _reopen_receipt_failed(context: AttemptsContext, admission: DecisionId | None) -> bool:
-    return any(
-        row.decision_id == admission
-        and row.completion in (CompletionStatus.FAILED, CompletionStatus.CANCELLED)
-        for row in context.run.receipts
-    )
-
-
-def _reopened(
-    owner: AttemptView, context: AttemptsContext, event: ScopeAdmissionReopened
-) -> tuple[AttemptView, tuple[Signal, ...], tuple[Request, ...]]:
-    continuation = next(
-        (
-            row
-            for row in context.evaluation.continuations
-            if row.continuation_id == event.continuation_id
-        ),
-        None,
-    )
-    record = next(
-        (
-            row
-            for row in context.records.records
-            if isinstance(row.request, ExecuteRegisteredOperation)
-            and row.request.operation_id == event.operation_id
-        ),
-        None,
-    )
-    if (
-        owner.phase != AttemptPhase.ACQUIRING
-        or owner.closure is None
-        or owner.closure.authority != event.park_authority
-        or continuation is None
-        or continuation.continuation_id
-        != _request_continuation(context, event.observation.request_id)
-        or continuation.park_authority != event.park_authority
-        or continuation.reopen_authority != event.observation.request_id
-        or record is None
-        or record.request_id != event.observation.request_id
-        or record.request.decision_id != owner.admission_id
-        or event.observation.scope != record.request.scope
-        or event.observation.admission_id != owner.admission_id
-        or continuation.phase != ContinuationPhase.REOPENING
-        or not _continuation_owned(owner, context, continuation.invocation)
-        or not _reopen_observation_proved(owner, context, event, record)
-    ):
-        return owner, (), ()
-    if event.admission == "unknown" or event.observation.status == ObservationStatus.UNKNOWN:
-        request = InspectRequest(
-            request_id=_inspection_identity(record.request_id, None, event.observation.sequence),
-            scope=record.request.scope,
-            target=record.request_id,
-            admission_id=owner.admission_id,
-        )
-        existing = _record(context, request.request_id) if request.request_id is not None else None
-        return owner, (), (request,) if existing is None else ()
-    admission = owner.admission_id
-    if admission is None:
-        return owner, (), ()
-    if event.observation.terminal and (
-        event.admission == "closed"
-        or _reopen_receipt_failed(context, admission)
-        or event.observation.status
-        in (ObservationStatus.FAILED, ObservationStatus.REJECTED, ObservationStatus.CANCELLED)
-    ):
-        return _start_closure(
-            owner,
-            context,
-            RetireRequested(
-                attempt=_ref(owner),
-                disposition="cancel",
-                authority=RequestId(root=f"reopen-failed:{record.request_id.root}"),
-                admission_id=admission,
-                requested_at=context.run.now_at,
-            ),
-        )
-    if (
-        event.admission != "reopened"
-        or event.observation.status != ObservationStatus.SUCCEEDED
-        or not event.observation.accepted
-        or not event.observation.terminal
-    ):
-        return owner, (), ()
-    owner = owner.model_copy(update={"phase": AttemptPhase.ACTIVE, "closure": None})
-    return (
-        owner,
-        (
-            ContinuationScopeReopened(
-                continuation_id=event.continuation_id,
-                park_authority=event.park_authority,
-                observation=event.observation,
-            ),
-            DecisionCompleted(decision_id=admission, status=CompletionStatus.SUCCEEDED),
-        ),
-        (),
     )
 
 
@@ -1783,22 +1198,11 @@ def _closure_event(
     return owner, signals, requests
 
 
-def _outbound(context: AttemptsContext, request: Request) -> Outbound:
-    """A reopened operation ends with its decision; every other retirement request is cleanup."""
-    if isinstance(request, ExecuteRegisteredOperation):
-        return inherit(request)
-    return cleanup(context.run, request)
-
-
 def advance(
     state: AttemptsState, context: AttemptsContext, event: AttemptsEvent
 ) -> AreaChange[AttemptsState]:
     """Reduce only retirement-owned fields; all cross-area work uses typed signals."""
-    target = (
-        event.normalization.attempt
-        if isinstance(event, ScopeReopenRequested)
-        else getattr(event, "attempt", None)
-    )
+    target = getattr(event, "attempt", None)
     owner = next((row for row in state.attempts if _ref(row) == target), None)
     if owner is None:
         return AreaChange(state=state)
@@ -1806,20 +1210,12 @@ def advance(
     requests: tuple[Request, ...] = ()
     if isinstance(event, RetireRequested):
         owner, signals, requests = _start_closure(owner, context, event)
-    elif isinstance(event, ScopeReopenRequested):
-        owner, signals, requests = _reopen(owner, context, event)
     elif isinstance(
         event, RetentionRequired | ReleaseDependencyObserved | ReleaseDependencyBlocked
     ):
         owner, signals, requests = _closure_event(owner, context, event)
     elif isinstance(event, WorkspaceObserved):
         owner, signals, requests = retention_acknowledged(owner, context, event)
-    elif isinstance(event, ScopeReopenAdmitted):
-        owner, signals, requests = _admitted(owner, context, event)
-    elif isinstance(event, ReacquisitionReady):
-        owner, requests = _ready(owner, context, event)
-    elif isinstance(event, ScopeAdmissionReopened):
-        owner, signals, requests = _reopened(owner, context, event)
     return AreaChange(
         state=state.model_copy(
             update={
@@ -1827,5 +1223,5 @@ def advance(
             }
         ),
         signals=signals,
-        requests=tuple(_outbound(context, request) for request in requests),
+        requests=tuple(cleanup(context.run, request) for request in requests),
     )

@@ -238,7 +238,6 @@ class AttemptSummary(Value):
     phase: AttemptPhase
     workspace: WorkspacePlan
     budget: AttemptBudget
-    parent: AttemptRef | None
     checkpoint: RevisionRef | None
     evaluation_history: AttemptEvaluationHistory
     terminal_reason: AttemptTerminalReason | None
@@ -252,7 +251,6 @@ class AttemptSummary(Value):
             phase=view.phase,
             workspace=view.workspace,
             budget=view.budget,
-            parent=view.parent,
             checkpoint=view.checkpoint,
             evaluation_history=view.evaluation_history,
             terminal_reason=view.terminal_reason,

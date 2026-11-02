@@ -4,12 +4,10 @@ An operator action is a control (``ControlInput``) that core applies the same wa
 search, through the lifecycle a search's own decisions use:
 
 - ``cancel_attempt`` withdraws the attempt with a ``Cancel`` disposition, as a search would;
-  the search hears the attempt close cancelled (``WorkspaceClosed``). A parked attempt with a
-  reopening queued has that reopening retired instead.
-- ``cancel_item`` does that for every running attempt at the item, retires the queued
-  reopening of a parked one, and core refuses every later ``StartAttempt`` at the item and
-  every later reopening of a parked attempt at it. An attempt already settling finishes, and
-  its result stands (``ItemCancellation``).
+  the search hears the attempt close cancelled (``WorkspaceClosed``).
+- ``cancel_item`` does that for every running attempt at the item, and core refuses every
+  later ``StartAttempt`` at the item. An attempt already settling finishes, and its result
+  stands (``ItemCancellation``).
 - ``set_max_parallel`` changes the limit core's admission holds the run's attempts to. A
   lower limit admits nothing new until enough attempts end; it stops none that runs.
 
@@ -25,7 +23,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ._registry import ContractError
-from .types.attempts import AttemptPhase, RetireRequested
+from .types.attempts import AttemptPhase
 from .types.common import (
     OPERATOR_ACTIONS,
     ActionRefusal,
@@ -33,11 +31,9 @@ from .types.common import (
     DecisionId,
     InputId,
     InputMode,
-    RequestId,
     Scope,
     ScopeInputTarget,
 )
-from .types.scheduling import AttemptReopenRequest
 from .types.session_inputs import SessionInput
 from .types.sessions import SessionInputReceived
 from .types.strategy import Cancel, Withdraw
@@ -48,7 +44,7 @@ if TYPE_CHECKING:
     from .types.kernel import CoreState, RunState
 
 _ENDED = frozenset({AttemptPhase.CLOSING, AttemptPhase.TERMINAL})
-_PARKED = frozenset({AttemptPhase.PARKED, AttemptPhase.BLOCKED})
+_BLOCKED = frozenset({AttemptPhase.BLOCKED})
 
 
 def parallel_limit(run: RunState) -> int:
@@ -93,14 +89,11 @@ class ItemCancellation:
     """What ``cancel_item`` does to each attempt at the item that has not ended.
 
     ``stopped`` attempts run or wait to run: core withdraws each with a ``Cancel``
-    disposition. ``unqueued`` attempts are parked with a reopening queued for admission: core
-    retires that reopening, and the attempt ends cancelled. ``parked`` attempts (parked or
-    blocked, nothing queued) run nothing; core refuses to reopen them. ``settling`` attempts
+    disposition. ``parked`` attempts (blocked) run nothing to stop. ``settling`` attempts
     were already closing: they finish, and their results stand.
     """
 
     stopped: tuple[AttemptId, ...]
-    unqueued: tuple[AttemptId, ...]
     parked: tuple[AttemptId, ...]
     settling: tuple[AttemptId, ...]
 
@@ -108,53 +101,10 @@ class ItemCancellation:
 def item_cancellation(state: CoreState, item: ItemId) -> ItemCancellation:
     """What cancelling ``item`` in ``state`` does to each of its attempts."""
     rows = _attempts_of(state, item)
-    queued = _queued_reopens(state, rows)
-    parked = tuple(row.attempt_id for row in rows if row.phase in _PARKED)
     return ItemCancellation(
-        stopped=tuple(row.attempt_id for row in rows if row.phase not in _ENDED | _PARKED),
-        unqueued=tuple(attempt for attempt in parked if attempt in queued),
-        parked=tuple(attempt for attempt in parked if attempt not in queued),
+        stopped=tuple(row.attempt_id for row in rows if row.phase not in _ENDED | _BLOCKED),
+        parked=tuple(row.attempt_id for row in rows if row.phase in _BLOCKED),
         settling=tuple(row.attempt_id for row in rows if row.phase == AttemptPhase.CLOSING),
-    )
-
-
-def _queued_reopens(
-    state: CoreState, rows: tuple[AttemptView, ...]
-) -> dict[AttemptId, AttemptReopenRequest]:
-    """The reopening queued for admission of each parked attempt in ``rows`` that has one."""
-    parked = {(row.attempt_id, row.generation) for row in rows if row.phase == AttemptPhase.PARKED}
-    return {
-        request.attempt.attempt_id: request
-        for request in state.scheduling.queue
-        if isinstance(request, AttemptReopenRequest)
-        and (request.attempt.attempt_id, request.attempt.generation) in parked
-    }
-
-
-def reopen_retirements(state: CoreState, control: ControlInput) -> tuple[RetireRequested, ...]:
-    """The retirements of the queued reopenings a cancel ends, one per attempt.
-
-    Each cancels the queued admission episode, as a cancelling stop does, so the parked
-    attempt ends cancelled and never runs again; a parked attempt with nothing queued is
-    left as it is.
-    """
-    match control.action:
-        case "cancel_attempt":
-            latest = _latest(state, control.attempt)
-            rows = () if latest is None else (latest,)
-        case "cancel_item" if control.item is not None:
-            rows = _attempts_of(state, control.item)
-        case _:
-            rows = ()
-    return tuple(
-        RetireRequested(
-            attempt=request.attempt,
-            disposition="cancel",
-            authority=RequestId(root=f"control:{control.control_id.root}:{attempt.root}"),
-            admission_id=request.decision_id,
-            requested_at=state.run.now_at,
-        )
-        for attempt, request in _queued_reopens(state, rows).items()
     )
 
 
@@ -163,16 +113,12 @@ def action_refusal_kind(state: CoreState, control: ControlInput) -> ActionRefusa
 
     Core's ``control_refusal`` asks this for an operator action, after "a terminal run takes
     no control". An attempt or item core does not hold, an attempt that has ended or is
-    blocked or parked with no reopening queued, and an item already cancelled are refused, since the action could
-    change nothing; so is a parallel limit above the run's launch limit, which sized the
+    blocked, and an item already cancelled are refused, since the action could change nothing; so is a parallel limit above the run's launch limit, which sized the
     host. Anything else is taken.
     """
     match control.action:
         case "cancel_attempt":
-            latest = _latest(state, control.attempt)
-            if latest is not None and _queued_reopens(state, (latest,)):
-                return None
-            return _attempt_refusal(latest)
+            return _attempt_refusal(_latest(state, control.attempt))
         case "cancel_item":
             if control.item in cancelled_items(state.run):
                 return ActionRefusal.ALREADY_CANCELLED
@@ -190,7 +136,7 @@ def _attempt_refusal(latest: AttemptView | None) -> ActionRefusal | None:
         return ActionRefusal.NO_SUCH_SUBJECT
     if latest.phase in _ENDED:
         return ActionRefusal.ENDED
-    if latest.phase in _PARKED:
+    if latest.phase in _BLOCKED:
         return ActionRefusal.PARKED
     return None
 
@@ -204,8 +150,7 @@ def cancellations(state: CoreState, control: ControlInput) -> tuple[Withdraw, ..
     match control.action:
         case "cancel_attempt":
             latest = _latest(state, control.attempt)
-            # A parked attempt runs nothing to withdraw; ``reopen_retirements`` ends it.
-            targets = () if latest is None or latest.phase in _ENDED | _PARKED else (latest,)
+            targets = () if latest is None or latest.phase in _ENDED | _BLOCKED else (latest,)
         case "cancel_item" if control.item is not None:
             stopped = item_cancellation(state, control.item).stopped
             targets = tuple(

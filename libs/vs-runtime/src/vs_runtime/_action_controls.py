@@ -50,7 +50,6 @@ def notice_text(request: ActionRequest, core: CoreState) -> RenderedPrompt:
     """
     attempts: dict[str, tuple[str, ...]] = {
         "stopped": (),
-        "unqueued": (),
         "parked": (),
         "settling": (),
     }
@@ -58,7 +57,6 @@ def notice_text(request: ActionRequest, core: CoreState) -> RenderedPrompt:
         done = item_cancellation(core, ItemId(root=request.item))
         attempts = {
             "stopped": tuple(a.root for a in done.stopped),
-            "unqueued": tuple(a.root for a in done.unqueued),
             "parked": tuple(a.root for a in done.parked),
             "settling": tuple(a.root for a in done.settling),
         }
@@ -112,8 +110,7 @@ def submit_refusal(core: CoreState, request: ActionRequest) -> RefusalReason | N
 
     ``core`` may be a poll behind, so only what cannot change is refused: an attempt that has
     ended, an item already cancelled, or a limit above the launch limit. A subject core does
-    not hold yet may appear, and a parked attempt may be reopened, before the run takes the
-    request; the run asks core again then.
+    not hold yet may appear before the run takes the request; the run asks core again then.
     """
     refusal = control_refusal(core, action_control(ControlId(root="probe"), request, ""))
     kind = None if refusal is None else refusal.action_refusal

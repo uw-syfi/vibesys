@@ -1,4 +1,4 @@
-"""Pure wait-all authorization, frozen deadlines and guarded scope reopening.
+"""Pure wait-all authorization and frozen deadlines.
 
 CONT-BOUND remains a cutover prerequisite: scientific repeated-failure and
 no-new-evaluation policy must consume the durable history and publication bounds.
@@ -21,8 +21,6 @@ from ._wait_clock import Bound, wait_bounds
 from .types.attempts import (
     AttemptEvaluationHistoryUpdated,
     AttemptPhase,
-    CloseAttemptScope,
-    ScopeReopenRequested,
 )
 from .types.common import (
     AttemptId,
@@ -31,19 +29,14 @@ from .types.common import (
     ExecuteRegisteredOperation,
     LifecycleClass,
     ObservationStatus,
-    OperationId,
-    OperationNormalizationKind,
     RequestId,
-    RunStatus,
     Scope,
 )
 from .types.evaluation import (
     Continuation,
     ContinuationJobsChanged,
     ContinuationPhase,
-    ContinuationReopenRequested,
     ContinuationRetireRequested,
-    ContinuationScopeReopened,
     DeadlineReached,
     InspectOwnedJob,
     JobTerminationRequested,
@@ -59,8 +52,7 @@ from .types.evaluation import (
 from .types.evaluation_history import AttemptEvaluationHistory, EvaluationHistoryAvailability
 from .types.job_observations import JobTimeout, TimedOut, WaitEnd
 from .types.kernel import AreaChange, EvaluationContext
-from .types.records import InspectRequest, Outbound, RequestPhase, within
-from .types.scope_reopen import ScopedAdmissionReopenOutcome
+from .types.records import Outbound, RequestPhase, within
 from .types.sessions import Access, DispatchTurn, InspectTurn, ResumeSessionTurn, SessionPhase
 from .types.strategy import Accepted, Operation
 
@@ -214,15 +206,11 @@ def exhausted(attempts: AttemptsState, scope: Scope) -> bool:
 def _open(context: EvaluationContext, row: Continuation) -> bool:
     """Whether the continuation still owes its single resume.
 
-    A waiting, parked or reopening continuation does. An authorized one does until its
+    A waiting continuation does. An authorized one does until its
     successor invocation was dispatched: a successor that ran has consumed the resume,
     even when it ended without yielding again (nothing else marks it resumed then).
     """
-    if row.phase in (
-        ContinuationPhase.WAITING,
-        ContinuationPhase.PARKED,
-        ContinuationPhase.REOPENING,
-    ):
+    if row.phase == ContinuationPhase.WAITING:
         return True
     return row.phase == ContinuationPhase.AUTHORIZED and not any(
         held.invocation == row.next_invocation for held in context.sessions.invocations
@@ -557,26 +545,6 @@ def _descendants(
     return descendants - {_resource(job) for job in jobs}
 
 
-def _released_dependencies(
-    state: EvaluationState, context: EvaluationContext, continuation: Continuation
-) -> None:
-    jobs = _jobs(state, continuation)
-    if any(not _job_released(job) for job in jobs):
-        raise ContractError(
-            ("continuation", "jobs"),
-            "reopening requires independent terminal release proof for every dependency",
-        )
-    scope = _invocation(context, continuation).scope
-    if any(
-        not _descendant_released(state, resource, scope)
-        for resource in _descendants(state, jobs, scope)
-    ):
-        raise ContractError(
-            ("continuation", "jobs", "children"),
-            "reopening requires independent release proof for every discovered descendant",
-        )
-
-
 def _timeout_proof(continuation: Continuation) -> None:
     """A frozen timeout names only the wait's own jobs, and never precedes the stated deadline.
 
@@ -620,8 +588,6 @@ def _authorize(
     state: EvaluationState,
     context: EvaluationContext,
     continuation: Continuation,
-    *,
-    reopened: bool = False,
 ) -> AreaChange[EvaluationState]:
     _job_ownership(state, context, continuation)
     if continuation.phase != ContinuationPhase.WAITING or not _ready(state, continuation):
@@ -634,9 +600,7 @@ def _authorize(
         # Stay WAITING: each submission's conclusive observation wakes this again.
         return AreaChange(state=state)
     _successor(context, continuation)
-    _yield_proof(state, context, invocation, continuation, retained=reopened)
-    if reopened:
-        _released_dependencies(state, context, continuation)
+    _yield_proof(state, context, invocation, continuation)
     if any(job.scope != invocation.scope for job in _jobs(state, continuation)):
         raise ContractError(("continuation", "jobs"), "dependency belongs to a different scope")
     evidence = continuation.evidence
@@ -801,9 +765,6 @@ def _validate_new(
         or continuation.timeout is not None
         or continuation.spent
         or continuation.evidence
-        or continuation.park_authority is not None
-        or continuation.reopen_authority is not None
-        or continuation.cancelled_resolutions
         or continuation.authorization_receipt is not None
         or continuation.preceding_submission is not None
     ):
@@ -837,7 +798,6 @@ def _declared_operation(
     context: EvaluationContext,
     request: ExecuteRegisteredOperation,
     lifecycle: LifecycleClass,
-    normalization: OperationNormalizationKind = OperationNormalizationKind.NONE,
 ) -> bool:
     schema = request.operation.schema_ref
     descriptors = tuple(
@@ -852,7 +812,6 @@ def _declared_operation(
         descriptor.request_schema == schema.request_schema
         and descriptor.outcome_schema == schema.outcome_schema
         and descriptor.lifecycle == schema.lifecycle == lifecycle
-        and descriptor.normalization == normalization
     )
 
 
@@ -921,8 +880,6 @@ def _yield_proof(
     context: EvaluationContext,
     invocation: Invocation,
     continuation: Continuation,
-    *,
-    retained: bool = False,
 ) -> None:
     observation = invocation.observation
     if (
@@ -951,16 +908,9 @@ def _yield_proof(
         or session.spec != invocation.turn.session
         or session.scope != invocation.scope
         or session.generation != invocation.invocation.generation
-        or (
-            not retained
-            and (session.invocation != invocation.invocation.invocation_id or not session.accepted)
-        )
-        or session.phase
-        not in (
-            (SessionPhase.SUSPENDED, SessionPhase.CHECKPOINTED, SessionPhase.IDLE)
-            if retained
-            else (SessionPhase.SUSPENDED, SessionPhase.CHECKPOINTED)
-        )
+        or session.invocation != invocation.invocation.invocation_id
+        or not session.accepted
+        or session.phase not in (SessionPhase.SUSPENDED, SessionPhase.CHECKPOINTED)
         or session.resource_id is None
         or record is None
         or not _turn_matches(context, invocation, record)
@@ -991,7 +941,7 @@ def _yield_proof(
     if (
         attempt is None
         or record.request.admission_id is None
-        or (not retained and record.request.admission_id != attempt.admission_id)
+        or record.request.admission_id != attempt.admission_id
     ):
         raise ContractError(("continuation", "invocation"), "requires exact admitted turn episode")
     if not any(
@@ -1210,10 +1160,7 @@ def _deadline(
     ends the whole wait, freezing every unfinished job. A wait left with no job to wait on
     after one spent its budget ends at once, by that budget.
     """
-    if (
-        continuation.phase not in (ContinuationPhase.WAITING, ContinuationPhase.PARKED)
-        or continuation.timeout is not None
-    ):
+    if continuation.phase != ContinuationPhase.WAITING or continuation.timeout is not None:
         return AreaChange(state=state)
     _job_ownership(state, context, continuation)
     live = _live(state, continuation)
@@ -1377,64 +1324,15 @@ def _changed(
     )
 
 
-def _close_matches(context: EvaluationContext, scope: Scope, request: CloseAttemptScope) -> bool:
-    attempt = _attempt(context, scope)
-    if attempt is None:
-        return False
-    closure = attempt.closure
-    return (
-        closure is not None
-        and closure.disposition == "park"
-        and closure.authority == request.request_id
-        and attempt.admission_id is not None
-        and closure.admission_id == attempt.admission_id
-        and request.scope == scope
-        and request.attempt.attempt_id == attempt.attempt_id
-        and request.attempt.generation == attempt.generation
-        and request.admission_id == closure.admission_id
-    )
-
-
 def _retire(
     state: EvaluationState,
     context: EvaluationContext,
     continuation: Continuation,
-    event: ContinuationRetireRequested,
 ) -> AreaChange[EvaluationState]:
     if continuation.phase in (ContinuationPhase.CANCELLED, ContinuationPhase.RESUMED):
         return AreaChange(state=state)
-    if (
-        event.disposition == "park"
-        and continuation.phase == ContinuationPhase.AUTHORIZED
-        and continuation.authorization_receipt is None
-    ):
-        raise ContractError(
-            ("continuation", "authorization"),
-            "parking authorized feedback requires a durable authorization receipt",
-        )
-    if event.disposition == "park" and event.park_authority is None:
-        raise ContractError(("park_authority",), "parking requires exact cleanup authority")
-    if event.disposition == "park":
-        scope = _invocation(context, continuation).scope
-        authority = context.records.record(event.park_authority)
-        if (
-            authority is None
-            or not isinstance(authority.request, CloseAttemptScope)
-            or not _close_matches(context, scope, authority.request)
-        ):
-            raise ContractError(("park_authority",), "requires owned canonical scope close")
     _job_ownership(state, context, continuation)
-    phase = ContinuationPhase.PARKED if event.disposition == "park" else ContinuationPhase.CANCELLED
-    if continuation.phase == phase and continuation.park_authority == event.park_authority:
-        return AreaChange(state=state)
-    retired = continuation.model_copy(
-        update={
-            "phase": phase,
-            "park_authority": event.park_authority,
-            "reopen_authority": None,
-            "cancelled_resolutions": (),
-        }
-    )
+    retired = continuation.model_copy(update={"phase": ContinuationPhase.CANCELLED})
     signals: tuple[Signal, ...] = tuple(
         JobTerminationRequested(resource_id=_resource(job), cause="retirement")
         for job in _jobs(state, continuation)
@@ -1443,7 +1341,7 @@ def _retire(
     # A cancel ends a wait whose resume core has not authorized: the suspended turn hears why,
     # as it hears any wait core will never resume (S191), instead of waiting out the run.
     events: tuple[ResumeRefused, ...] = ()
-    if phase == ContinuationPhase.CANCELLED and continuation.phase != ContinuationPhase.AUTHORIZED:
+    if continuation.phase != ContinuationPhase.AUTHORIZED:
         events = (
             ResumeRefused(
                 continuation_id=continuation.continuation_id,
@@ -1452,216 +1350,6 @@ def _retire(
             ),
         )
     return AreaChange(state=_store(state, retired), signals=signals, events=events)
-
-
-def _reopen_decision(
-    context: EvaluationContext, request: ExecuteRegisteredOperation
-) -> Operation | None:
-    if not _declared_operation(
-        context,
-        request,
-        LifecycleClass.IDEMPOTENT_WRITE,
-        OperationNormalizationKind.SCOPE_REOPEN,
-    ):
-        return None
-    for receipt in context.run.receipts:
-        decision = receipt.decision
-        if (
-            not isinstance(receipt.feedback, Accepted)
-            or not isinstance(decision, Operation)
-            or decision.registered_scope_reopen is None
-        ):
-            continue
-        identity = f"operation:{decision.decision_id.root}"
-        if (
-            receipt.decision_id == decision.decision_id
-            and receipt.feedback.decision_id == receipt.decision_id
-            and receipt.completion not in (CompletionStatus.FAILED, CompletionStatus.CANCELLED)
-            and decision.registered_wire == request.operation
-            and decision.normalized_scope_reopen == decision.registered_scope_reopen
-            and decision.scope == request.scope
-            and request.scope == Scope(owner=context.run.run_id, generation=context.run.generation)
-            and request.operation_id == OperationId(root=identity)
-            and request.request_id == RequestId(root=identity)
-            and request.retry_limit == context.run.limits.request_retries.limit
-            and request.decision_id in (None, decision.decision_id)
-        ):
-            return decision
-    return None
-
-
-def _reopen(
-    state: EvaluationState,
-    context: EvaluationContext,
-    continuation: Continuation,
-    event: ContinuationReopenRequested,
-) -> AreaChange[EvaluationState]:
-    normalization = event.normalization
-    decision = _reopen_decision(context, event.request)
-    if decision is None or decision.registered_scope_reopen != normalization:
-        raise ContractError(("normalization",), "requires canonical registered reopening proof")
-    _job_ownership(state, context, continuation)
-    _timeout_proof(continuation)
-    if (
-        continuation.phase == ContinuationPhase.REOPENING
-        and continuation.reopen_authority == event.request.request_id
-    ):
-        if (
-            continuation.cancelled_resolutions != normalization.resolved_cancelled_jobs
-            or continuation.park_authority != normalization.park_authority
-        ):
-            raise ContractError(("normalization",), "reopen identity payload conflict")
-        return AreaChange(state=state)
-    receipt = next(row for row in context.run.receipts if row.decision_id == decision.decision_id)
-    if receipt.completion is not None:
-        raise ContractError(
-            ("normalization",), "completed reopen decision cannot authorize another dispatch"
-        )
-    _released_dependencies(state, context, continuation)
-    scope = _invocation(context, continuation).scope
-    attempt = _attempt(context, scope)
-    if (
-        continuation.phase != ContinuationPhase.PARKED
-        or attempt is None
-        or attempt.phase != AttemptPhase.PARKED
-        or attempt.closure is None
-        or attempt.closure.disposition != "park"
-        or attempt.closure.authority != continuation.park_authority
-        or context.run.status != RunStatus.RUNNING
-        or normalization.attempt.attempt_id != scope.owner
-        or normalization.attempt.generation != scope.generation
-        or continuation.park_authority != normalization.park_authority
-        or event.request.request_id is None
-        or not _ready(state, continuation)
-    ):
-        raise ContractError(("normalization",), "requires current ready parked ownership")
-    cancelled = {
-        job.resource_id
-        for job in _jobs(state, continuation)
-        if job.status == ObservationStatus.CANCELLED
-    }
-    if (
-        len(set(normalization.resolved_cancelled_jobs))
-        != len(normalization.resolved_cancelled_jobs)
-        or set(normalization.resolved_cancelled_jobs) != cancelled
-    ):
-        raise ContractError(
-            ("resolved_cancelled_jobs",), "must resolve exactly cancelled dependencies"
-        )
-    authority = context.records.record(continuation.park_authority)
-    if (
-        authority is None
-        or not isinstance(authority.request, CloseAttemptScope)
-        or not _close_matches(context, scope, authority.request)
-        or authority.phase != RequestPhase.COMPLETED
-        or authority.observation is None
-        or authority.observation.status != ObservationStatus.SUCCEEDED
-        or authority.observation.scope != scope
-        or authority.observation.request_id != authority.request_id
-        or authority.observation.admission_id != authority.request.admission_id
-        or not authority.observation.accepted
-        or not authority.observation.terminal
-        or not authority.observation.released
-    ):
-        raise ContractError(("park_authority",), "requires positive completed cleanup proof")
-    reopening = continuation.model_copy(
-        update={
-            "phase": ContinuationPhase.REOPENING,
-            "reopen_authority": event.request.request_id,
-            "cancelled_resolutions": normalization.resolved_cancelled_jobs,
-        }
-    )
-    return AreaChange(
-        state=_store(state, reopening),
-        signals=(ScopeReopenRequested(request=event.request, normalization=normalization),),
-    )
-
-
-def _reopened(
-    state: EvaluationState,
-    context: EvaluationContext,
-    continuation: Continuation,
-    event: ContinuationScopeReopened,
-) -> AreaChange[EvaluationState]:
-    if (
-        continuation.phase != ContinuationPhase.REOPENING
-        or continuation.park_authority != event.park_authority
-    ):
-        return AreaChange(state=state)
-    scope = _invocation(context, continuation).scope
-    attempt = _attempt(context, scope)
-    observation = event.observation
-    authority = context.records.record(continuation.reopen_authority)
-    decision = (
-        _reopen_decision(context, authority.request)
-        if authority is not None and isinstance(authority.request, ExecuteRegisteredOperation)
-        else None
-    )
-    if decision is None or authority is None:
-        return AreaChange(state=state)
-    normalization = decision.registered_scope_reopen
-    if (
-        normalization is None
-        or normalization.continuation_id != continuation.continuation_id
-        or normalization.park_authority != continuation.park_authority
-        or normalization.resolved_cancelled_jobs != continuation.cancelled_resolutions
-        or normalization.attempt.attempt_id != scope.owner
-        or normalization.attempt.generation != scope.generation
-        or attempt is None
-        or (
-            attempt.closure is not None and attempt.closure.authority != continuation.park_authority
-        )
-    ):
-        return AreaChange(state=state)
-    if (
-        (
-            observation.status == ObservationStatus.UNKNOWN
-            or (
-                isinstance(authority.outcome, ScopedAdmissionReopenOutcome)
-                and authority.outcome.admission == "unknown"
-            )
-        )
-        and observation.request_id == continuation.reopen_authority
-        and observation.scope == authority.request.scope
-        and authority.observation == observation
-        and observation.admission_id == attempt.admission_id
-        and (
-            not isinstance(authority.outcome, ScopedAdmissionReopenOutcome)
-            or authority.outcome.scope == scope
-        )
-    ):
-        return AreaChange(
-            state=state,
-            requests=(
-                _inspection(
-                    context,
-                    InspectRequest(
-                        request_id=RequestId(root=f"{observation.request_id.root}/inspect-reopen"),
-                        scope=authority.request.scope,
-                        target=observation.request_id,
-                    ),
-                ),
-            ),
-        )
-    if (
-        observation.request_id != continuation.reopen_authority
-        or observation.scope != authority.request.scope
-        or authority.phase != RequestPhase.COMPLETED
-        or authority.observation != observation
-        or not isinstance(authority.outcome, ScopedAdmissionReopenOutcome)
-        or authority.outcome.scope != scope
-        or authority.outcome.admission != "reopened"
-        or observation.status != ObservationStatus.SUCCEEDED
-        or not observation.accepted
-        or not observation.terminal
-        or attempt is None
-        or observation.admission_id is None
-        or observation.admission_id != attempt.admission_id
-        or not _active(context, scope)
-    ):
-        return AreaChange(state=state)
-    waiting = continuation.model_copy(update={"phase": ContinuationPhase.WAITING})
-    return _authorize(_store(state, waiting), context, waiting, reopened=True)
 
 
 def advance(
@@ -1674,32 +1362,19 @@ def advance(
         return _changed(state, context, event)
     if not isinstance(
         event,
-        DeadlineReached
-        | ContinuationRetireRequested
-        | ContinuationReopenRequested
-        | ContinuationScopeReopened,
+        DeadlineReached | ContinuationRetireRequested,
     ):
         raise ContractError(("event", "kind"), "event is not owned by continuations")
-    identity = (
-        event.normalization.continuation_id
-        if isinstance(event, ContinuationReopenRequested)
-        else event.continuation_id
-    )
     continuation = next(
-        (row for row in state.continuations if row.continuation_id == identity), None
+        (row for row in state.continuations if row.continuation_id == event.continuation_id),
+        None,
     )
     if continuation is None:
-        if isinstance(event, ContinuationReopenRequested):
-            raise ContractError(("continuation_id",), "requires an owned parked continuation")
         return AreaChange(state=state)
     if isinstance(event, DeadlineReached):
         change = _deadline(state, context, continuation, event.now_at)
     elif isinstance(event, ContinuationRetireRequested):
-        change = _retire(state, context, continuation, event)
-    elif isinstance(event, ContinuationReopenRequested):
-        change = _reopen(state, context, continuation, event)
-    elif isinstance(event, ContinuationScopeReopened):
-        change = _reopened(state, context, continuation, event)
+        change = _retire(state, context, continuation)
     else:
         raise ContractError(("event", "kind"), "event is not owned by continuations")
     return change

@@ -36,7 +36,6 @@ from vs_core.api import (
     ObservationStatus,
     RequestObserved,
     ResourceId,
-    RestoreRevision,
     RetainRevision,
     RevisionRef,
     RunInvocationCheckpointObserved,
@@ -241,7 +240,7 @@ def _checkout_diagnostic(checkout: CheckoutUpdate) -> str:
 
 _RUN_OWNER = "run"
 _WITHDRAWN = "the attempt's workspace was withdrawn before any ensure bound it"
-_HANDLED = (EnsureWorkspace, RestoreRevision, SnapshotAndRetain, RetainRevision, DiscardWorkspace)
+_HANDLED = (EnsureWorkspace, SnapshotAndRetain, RetainRevision, DiscardWorkspace)
 
 
 class RunInvocationProof(Protocol):
@@ -347,7 +346,7 @@ class RuntimeWorkspaceRequests:
                         checkout=facts.checkout,
                     ),
                 )
-            case EnsureWorkspace() | RestoreRevision():
+            case EnsureWorkspace():
                 events = (
                     WorkspaceObserved(
                         attempt=request.attempt,
@@ -378,7 +377,7 @@ class RuntimeWorkspaceRequests:
                 return await self._run_snapshot(request, repeat=repeat)
             case AdoptRevision() | VerifyAdoption():
                 return await self._adoption(request)
-            case RestoreRevision() | RetainRevision() | SnapshotAndRetain() | DiscardWorkspace():
+            case RetainRevision() | SnapshotAndRetain() | DiscardWorkspace():
                 return await self._attempt_request(request, repeat=repeat)
             case _:
                 return _rejected(f"{request.kind} cannot be executed against a workspace")
@@ -428,7 +427,7 @@ class RuntimeWorkspaceRequests:
 
     async def _attempt_request(
         self,
-        request: RestoreRevision | RetainRevision | SnapshotAndRetain | DiscardWorkspace,
+        request: RetainRevision | SnapshotAndRetain | DiscardWorkspace,
         *,
         repeat: bool,
     ) -> _Facts:
@@ -441,8 +440,6 @@ class RuntimeWorkspaceRequests:
         if isinstance(workspace, _Facts):
             return workspace
         match request:
-            case RestoreRevision():
-                return await self._restore(request, binding, workspace)
             case RetainRevision():
                 return await self._retain(request, binding, workspace)
             case _:
@@ -679,29 +676,6 @@ class RuntimeWorkspaceRequests:
         )
         with self._store.exclusive():
             return self._receipts.bind(request.attempt, binding)
-
-    async def _restore(
-        self, request: RestoreRevision, binding: AttemptBinding, workspace: RuntimeWorkspace
-    ) -> _Facts:
-        commit = await self._known_revision(
-            request.revision,
-            owner=attempt_key(request.attempt),
-            extra=commit_of(binding.base),
-        )
-        if commit is None:
-            return _rejected("revision is not a revision this attempt may restore")
-        # Restore is idempotent, so a repeated request only redoes it when the tree differs.
-        if not await workspace.matches_revision(commit):
-            failure = await self._materialize(workspace, commit, resource_id=binding.resource_id)
-            if failure is not None:
-                return failure
-        return _Facts(
-            ObservationStatus.SUCCEEDED,
-            accepted=True,
-            children_complete=True,
-            resource_id=binding.resource_id,
-            revision=request.revision,
-        )
 
     async def _retain(
         self, request: RetainRevision, binding: AttemptBinding, workspace: RuntimeWorkspace

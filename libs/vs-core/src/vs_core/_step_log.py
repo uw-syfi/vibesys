@@ -7,7 +7,7 @@ versioned by ``SCHEMA_VERSION``, until those values are proto messages (run-reco
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, assert_never
+from typing import TYPE_CHECKING, Final, assert_never
 
 from protobuf import Oneof
 from pydantic import JsonValue, TypeAdapter
@@ -28,8 +28,10 @@ from vs_proto.api import (
 
 from ._envelope_migrations import (
     REMOVED_AT_44,
+    REOPEN_KEYS,
     without_downtime_credit,
     without_removed_records_keys,
+    without_reopen_fields,
 )
 from ._refusal import RecordRefusedError, RefusalReason
 from .types.common import Value
@@ -176,19 +178,31 @@ def encode_saved(saved: SavedRun) -> EncodedSavedRun:
     )
 
 
-def _readable(data: bytes) -> bytes:
-    """``data``, a stored core document, without the key a wait's version 44 form still held.
+_DROPPED_MARKERS: Final = (
+    b'"downtime_credit"',
+    *(f'"{key}"'.encode() for key in REOPEN_KEYS),
+    b'"parent"',
+    b'"normalization"',
+)
+"""Text a document of version 44 or 45 holds and the current one does not."""
 
-    A document written at version 44 holds ``downtime_credit`` (always 0) in each wait, and the
-    models forbid unknown keys. Data already on the current schema stays readable for seven
-    days; this is that read, for exactly that key.
-    TEMPORARY: delete after 2026-11-08 (#3708). A document at an older version never reaches
-    here: its envelope went through the migration chain when it was appended.
+
+def _readable(data: bytes) -> bytes:
+    """``data``, a stored core document, without the keys that versions 44 and 45 dropped.
+
+    A document written at version 44 holds ``downtime_credit`` (always 0) in each wait, and one
+    written at version 45 holds the fields of the scope reopen (``normalized_scope_reopen``,
+    ``park_authority``, ``parent`` and the rest, each null or empty); the models forbid unknown
+    keys. Data already on the current schema stays readable for seven days; this is that read,
+    for exactly those keys.
+    TEMPORARY: delete after 2026-11-08 (#3708) and 2026-11-09 (#3475). A document at an older
+    version never reaches here: its envelope went through the migration chain when it was
+    appended.
     """
-    if b'"downtime_credit"' not in data:
+    if not any(marker in data for marker in _DROPPED_MARKERS):
         return data
     document = _ANY_JSON.validate_json(data)
-    return _ANY_JSON.dump_json(without_downtime_credit(document))
+    return _ANY_JSON.dump_json(without_reopen_fields(without_downtime_credit(document)))
 
 
 def _readable_state(state: bytes) -> bytes:

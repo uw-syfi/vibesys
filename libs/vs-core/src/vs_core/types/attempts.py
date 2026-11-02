@@ -14,7 +14,6 @@ from .common import (
     ChargeId,
     ChargeReceipt,
     CheckpointDecline,
-    ContinuationId,
     ContractValidationError,
     Count,
     DecisionId,
@@ -29,7 +28,6 @@ from .common import (
     RequestId,
     RevisionAuthority,
     RevisionRef,
-    ScopeReopenNormalization,
     Seconds,
     SessionId,
     SetupFailureKind,
@@ -52,7 +50,6 @@ class WorkspacePlan(Value):
 
     mode: WorkspaceMode
     base: RevisionRef
-    parked_predecessor: AttemptRef | None = None
 
 
 class AttemptBudget(Value):
@@ -71,7 +68,6 @@ class AttemptPhase(StrEnum):
     ACTIVE = "active"
     CLOSING = "closing"
     TERMINAL = "terminal"
-    PARKED = "parked"
     BLOCKED = "blocked"
 
 
@@ -82,7 +78,7 @@ class AttemptClosure(Value):
     physical slot release require every dependency to finish conclusively.
     """
 
-    disposition: Literal["park", "cancel", "settle"]
+    disposition: Literal["cancel", "settle"]
     requested_at: Seconds
     authority: RequestId
     admission_id: DecisionId
@@ -125,8 +121,7 @@ class AttemptView(Value):
 
     Accepted queued starts already have an ADMISSION receipt. Slot admission
     transitions QUEUED to ACQUIRING without a second charge. Initial workspace
-    and sessions must all be ready before execution. Reopen has a fresh episode
-    but no additional ADMISSION charge; historical checkpoints retain attribution.
+    and sessions must all be ready before execution.
     """
 
     attempt_id: AttemptId
@@ -146,7 +141,6 @@ class AttemptView(Value):
     closure: AttemptClosure | None = None
     checkpoints: tuple[AttemptCheckpoint, ...] = ()
     charges: tuple[ChargeReceipt, ...] = ()
-    parent: AttemptRef | None = None
     pending_records: tuple[RequestId, ...] = ()
     sessions: tuple[SessionId, ...] = ()
     release_dependencies: tuple[ReleaseDependency, ...] = ()
@@ -224,7 +218,7 @@ class RetireRequested(Value):
 
     kind: Literal["retire_requested"] = "retire_requested"
     attempt: AttemptRef
-    disposition: Literal["park", "cancel", "settle"]
+    disposition: Literal["cancel", "settle"]
     authority: RequestId
     admission_id: DecisionId
     requested_at: Seconds
@@ -260,14 +254,6 @@ class EnsureWorkspace(RequestBase):
     kind: Literal["ensure_workspace"] = "ensure_workspace"
     attempt: AttemptRef
     plan: WorkspacePlan
-
-
-class RestoreRevision(RequestBase):
-    """Restore revision lifecycle contract."""
-
-    kind: Literal["restore_revision"] = "restore_revision"
-    attempt: AttemptRef
-    revision: RevisionRef
 
 
 class SnapshotAndRetain(RequestBase):
@@ -314,7 +300,7 @@ class CloseAttemptScope(RequestBase):
     """Fence the exact carried admission episode and record its complete manifest.
 
     The executor must honor admission_id as the logical episode fence. Closing
-    an older episode cannot close or mutate a newer reopened episode. Discovered
+    an older episode cannot close or mutate a newer episode. Discovered
     child ownership remains until each child has independent release proof;
     successful scope close alone does not release those resources.
     """
@@ -331,55 +317,6 @@ class AttemptRegistered(Value):
     workspace: WorkspacePlan
     budget: AttemptBudget
     initial_sessions: tuple[SessionSpec, ...] = ()
-
-
-class ScopeReopenRequested(Value):
-    """Evaluation forwards validated guarded reopening to retirement authority."""
-
-    kind: Literal["scope_reopen_requested"] = "scope_reopen_requested"
-    request: ExecuteRegisteredOperation
-    normalization: ScopeReopenNormalization
-
-
-class ScopeReopenAdmitted(Value):
-    """New capacity episode has been acquired before lease reacquisition."""
-
-    kind: Literal["scope_reopen_admitted"] = "scope_reopen_admitted"
-    attempt: AttemptRef
-    request_id: RequestId
-    admission_id: DecisionId
-
-
-class AttemptReacquireRequested(Value):
-    """Acquire retained workspace and sessions for an admitted reopen."""
-
-    kind: Literal["attempt_reacquire_requested"] = "attempt_reacquire_requested"
-    attempt: AttemptRef
-    continuation_id: ContinuationId
-    request_id: RequestId
-    admission_id: DecisionId
-    base: RevisionRef
-
-
-class ReacquisitionReady(Value):
-    """Positive acquisition proof for the matching reopening episode."""
-
-    kind: Literal["reacquisition_ready"] = "reacquisition_ready"
-    attempt: AttemptRef
-    request_id: RequestId
-    admission_id: DecisionId
-
-
-class ScopeAdmissionReopened(Value):
-    """External scope admission observation; unknown retains capacity and fences."""
-
-    kind: Literal["scope_admission_reopened"] = "scope_admission_reopened"
-    attempt: AttemptRef
-    continuation_id: ContinuationId
-    park_authority: RequestId
-    operation_id: OperationId
-    observation: Observation
-    admission: Literal["reopened", "closed", "unknown"]
 
 
 class InitialSessionsReady(Value):
@@ -525,11 +462,6 @@ type AttemptsEvent = Annotated[
     | InvocationCheckpointed
     | RetentionRequired
     | AttemptRegistered
-    | ScopeReopenRequested
-    | ScopeReopenAdmitted
-    | AttemptReacquireRequested
-    | ReacquisitionReady
-    | ScopeAdmissionReopened
     | InitialSessionsReady
     | InitialSessionsFailed
     | InvocationChargeRequested
@@ -542,11 +474,6 @@ type AttemptsEvent = Annotated[
     Field(discriminator="kind"),
 ]
 type WorkspaceRequest = Annotated[
-    EnsureWorkspace
-    | RestoreRevision
-    | SnapshotAndRetain
-    | RetainRevision
-    | DiscardWorkspace
-    | CloseAttemptScope,
+    EnsureWorkspace | SnapshotAndRetain | RetainRevision | DiscardWorkspace | CloseAttemptScope,
     Field(discriminator="kind"),
 ]

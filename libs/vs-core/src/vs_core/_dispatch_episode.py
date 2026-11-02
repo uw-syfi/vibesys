@@ -39,7 +39,7 @@ from .types.records import (
     request_lifecycle,
 )
 from .types.sessions import CancelTurn, CloseSession, InspectTurn
-from .types.strategy import Finish, Operation, StartAttempt, Withdraw
+from .types.strategy import Finish, StartAttempt, Withdraw
 
 if TYPE_CHECKING:
     from .types.attempts import AttemptsState
@@ -121,11 +121,6 @@ def _episode_recorded(state: EpisodeFacts, request: Request) -> bool:
         and decision.scope.owner == state.run.run_id
         and decision.attempt_id == target.attempt_id
         and decision.scope.generation == target.generation
-    ) or (
-        isinstance(decision, Operation)
-        and decision.scope.owner == state.run.run_id
-        and decision.normalized_scope_reopen is not None
-        and decision.normalized_scope_reopen.attempt == target
     )
 
 

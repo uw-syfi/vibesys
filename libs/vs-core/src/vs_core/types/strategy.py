@@ -35,7 +35,6 @@ from .common import (
     RoleId,
     SchemaRef,
     Scope,
-    ScopeReopenNormalization,
     Seconds,
     StrategyId,
     Value,
@@ -73,12 +72,6 @@ class StartAttempt(DecisionBase):
     initial_sessions: tuple[SessionSpec, ...] = ()
 
 
-class Park(Value):
-    """Park lifecycle contract."""
-
-    kind: Literal["park"] = "park"
-
-
 class Cancel(Value):
     """Cancel lifecycle contract."""
 
@@ -109,7 +102,7 @@ class Settle(Value):
     candidate: RevisionRef | None = None
 
 
-type Disposition = Annotated[Park | Cancel | Settle | Interrupt, Field(discriminator="kind")]
+type Disposition = Annotated[Cancel | Settle | Interrupt, Field(discriminator="kind")]
 
 
 class Withdraw(DecisionBase):
@@ -164,12 +157,10 @@ class Operation(DecisionBase):
     request: SerializeAsAny[OperationRequest]
     normalized_turn: TurnSpec | None = None
     normalized_measurement: MeasurementIdentity | None = None
-    normalized_scope_reopen: ScopeReopenNormalization | None = None
 
     _registered_wire: OperationWire | None = PrivateAttr(default=None)
     _registered_turn: TurnSpec | None = PrivateAttr(default=None)
     _registered_measurement: MeasurementIdentity | None = PrivateAttr(default=None)
-    _registered_scope_reopen: ScopeReopenNormalization | None = PrivateAttr(default=None)
 
     @property
     def registered_wire(self) -> OperationWire | None:
@@ -186,11 +177,6 @@ class Operation(DecisionBase):
         """Expected measurement proof bound to the exact registered input."""
         return self._registered_measurement
 
-    @property
-    def registered_scope_reopen(self) -> ScopeReopenNormalization | None:
-        """Pure reopening proof bound to the registered canonical payload."""
-        return self._registered_scope_reopen
-
     @model_validator(mode="after")
     def validate_registered_model(self, info: ValidationInfo) -> Operation:
         """Normalize proposals; validate durable facts without rewriting identity."""
@@ -198,11 +184,9 @@ class Operation(DecisionBase):
             wire = info.context["operation_registry"].encode(self.request)
             turn = info.context["operation_registry"].normalize_turn(self.request)
             measurement = info.context["operation_registry"].normalize_measurement(self.request)
-            reopen = info.context["operation_registry"].normalize_scope_reopen(self.request)
             normalizations = {
                 "normalized_turn": turn,
                 "normalized_measurement": measurement,
-                "normalized_scope_reopen": reopen,
             }
             persisted = info.context.get("persisted_operation")
             if persisted:
@@ -221,7 +205,6 @@ class Operation(DecisionBase):
                     "_registered_wire": wire,
                     "_registered_turn": turn,
                     "_registered_measurement": measurement,
-                    "_registered_scope_reopen": reopen,
                 },
             )
             return validated

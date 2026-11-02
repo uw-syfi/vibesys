@@ -18,7 +18,7 @@ from ._proofs import (
     invocation_for,
     observation_for,
 )
-from .types.attempts import EnsureWorkspace, RestoreRevision
+from .types.attempts import EnsureWorkspace
 from .types.common import (
     AttemptRef,
     DecisionId,
@@ -56,7 +56,7 @@ def vacant_workspace_request(record: RequestRecord | None) -> bool:
     The executor marks such an answer neither ``released`` nor ``children_complete`` (there is
     nothing to release and no manifest), so ``_released`` can never hold for it.
     """
-    if record is None or not isinstance(record.request, EnsureWorkspace | RestoreRevision):
+    if record is None or not isinstance(record.request, EnsureWorkspace):
         return False
     observation = record.observation
     return bool(

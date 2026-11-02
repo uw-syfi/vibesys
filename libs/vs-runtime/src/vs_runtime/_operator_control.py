@@ -190,10 +190,8 @@ class CancelAttemptRequest(_Request):
     """Cancel one attempt: it stops, closes cancelled, and is never judged.
 
     The search hears it close as if it had withdrawn the attempt itself, and the run's agents
-    are told at their next turn. A parked attempt waiting to reopen has that reopen cancelled
-    and ends. An attempt that has ended is refused when submitted; a blocked one, a parked one
-    with no reopen waiting, or one the run does not hold, is refused when the run takes the
-    request.
+    are told at their next turn. An attempt that has ended is refused when submitted; a
+    blocked one, or one the run does not hold, is refused when the run takes the request.
     """
 
     action: Literal[ControlAction.CANCEL_ATTEMPT] = ControlAction.CANCEL_ATTEMPT
@@ -205,10 +203,9 @@ class CancelItemRequest(_Request):
     """Cancel one work item: no attempt at it runs or starts again.
 
     Each running or waiting attempt at the item stops, as ``CancelAttemptRequest`` stops one;
-    a parked one waiting to reopen has its reopen cancelled and ends; any other parked or
-    blocked one stays parked and is never reopened; one already finishing finishes, and its
-    result stands. The run starts no attempt at the item afterwards; the
-    search hears each refused start and reopen. The run's agents are told what became of
+    a blocked one stays blocked; one already finishing finishes, and its result stands. The
+    run starts no attempt at the item afterwards; the search hears each refused start. The
+    run's agents are told what became of
     each attempt. An item already cancelled is refused when submitted; one the run does not
     hold is refused when the run takes the request.
     """

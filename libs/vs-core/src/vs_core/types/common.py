@@ -147,7 +147,6 @@ __all__ = [
     "OperationDescriptor",
     "OperationDescriptorError",
     "OperationId",
-    "OperationNormalizationKind",
     "OperationRef",
     "OperationSchemaRef",
     "OperationWire",
@@ -177,7 +176,6 @@ __all__ = [
     "SchemaRef",
     "Scope",
     "ScopeInputTarget",
-    "ScopeReopenNormalization",
     "Seconds",
     "SessionId",
     "SettlementId",
@@ -297,7 +295,10 @@ type Count = Annotated[int, Field(ge=0)]
 type Generation = Annotated[int, Field(ge=0)]
 type RevisionNumber = Annotated[int, Field(ge=0)]
 type LifecycleCapability = Literal["park", "interrupt", "steer", "suspend", "profile-capture"]
-"""Host-offered lifecycle abilities. "profile-capture" admits profile measurements."""
+"""Host-offered lifecycle abilities. "profile-capture" admits profile measurements.
+
+"park" is retained for saves that declared it; no decision requires it any more.
+"""
 
 
 THIS_RUN = Scope(owner=RunId(root="this-run"), generation=0)
@@ -458,39 +459,9 @@ class RevisionAuthority(StrEnum):
     DISCARD = "discard"
 
 
-class OperationNormalizationKind(StrEnum):
-    """Closed normalization routes; pure normalizers live outside state."""
-
-    NONE = "none"
-    SCOPE_REOPEN = "scope_reopen"
-
-
-class ScopeReopenNormalization(Value):
-    """Canonical guarded reopen target bound to a registered payload.
-
-    The operation is run-scoped. Its target must be the exact parked attempt,
-    and resolved_cancelled_jobs must equal the continuation cancellation set.
-    A newer park authority invalidates older reopen acknowledgements.
-    """
-
-    kind: Literal["scope_reopen"] = "scope_reopen"
-    attempt: AttemptRef
-    continuation_id: ContinuationId
-    park_authority: RequestId
-    resolved_cancelled_jobs: tuple[ResourceId, ...]
-
-    @model_validator(mode="after")
-    def unique_resolutions(self) -> ScopeReopenNormalization:
-        """Reject duplicate cancellation-resolution claims at ingress."""
-        if len(set(self.resolved_cancelled_jobs)) != len(self.resolved_cancelled_jobs):
-            raise ContractValidationError("resolved_cancelled_jobs", "duplicate resource ID")
-        return self
-
-
 class OperationDescriptor(OperationSchemaRef):
     """Operation descriptor lifecycle contract."""
 
-    normalization: OperationNormalizationKind = OperationNormalizationKind.NONE
     inspect: bool = False
     cancel: bool = False
     watch: bool = False
@@ -514,15 +485,6 @@ class OperationDescriptor(OperationSchemaRef):
         ):
             raise OperationDescriptorError(
                 "revision_authority", "revision mutations require idempotent writes"
-            )
-        if self.normalization == OperationNormalizationKind.SCOPE_REOPEN and (
-            self.lifecycle != LifecycleClass.IDEMPOTENT_WRITE
-            or not self.inspect
-            or self.resource_pool is not None
-            or self.revision_authority != RevisionAuthority.NONE
-        ):
-            raise OperationDescriptorError(
-                "normalization", "scope reopen requires inspectable non-revision idempotent write"
             )
         return self
 
@@ -941,7 +903,7 @@ class ActionRefusal(StrEnum):
     ENDED = "ended"
     """The attempt has ended."""
     PARKED = "parked"
-    """The attempt is blocked, or parked with no reopening queued: nothing a cancel could stop."""
+    """The attempt is blocked: nothing a cancel could stop."""
     ALREADY_CANCELLED = "already_cancelled"
     """The item is already cancelled."""
     ABOVE_LAUNCH_LIMIT = "above_launch_limit"
@@ -951,7 +913,7 @@ class ActionRefusal(StrEnum):
 ACTION_REFUSAL_TEXT: dict[ActionRefusal, str] = {
     ActionRefusal.NO_SUCH_SUBJECT: "the run holds no such attempt or item",
     ActionRefusal.ENDED: "the attempt has ended",
-    ActionRefusal.PARKED: "the attempt is parked or blocked, so there is nothing to stop",
+    ActionRefusal.PARKED: "the attempt is blocked, so there is nothing to stop",
     ActionRefusal.ALREADY_CANCELLED: "the item is already cancelled",
     ActionRefusal.ABOVE_LAUNCH_LIMIT: "the limit is above the one the run was launched with",
 }

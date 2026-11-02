@@ -33,7 +33,6 @@ from vs_core.api import (
     OwnedJob,
     ReplyError,
     RequestObserved,
-    RestoreRevision,
     ResumeSessionTurn,
     SessionObserved,
     SubmitMeasurement,
@@ -132,7 +131,7 @@ def _lifecycle_event(request: Request, observed: RequestObserved) -> OwnerEvent 
             return SessionObserved(session_id=request.session_id, observation=view)
         case AdoptRevision() | VerifyAdoption():
             return AdoptionObserved(observation=view, revision=observed.revision)
-        case EnsureWorkspace() | RestoreRevision():
+        case EnsureWorkspace():
             return WorkspaceObserved(
                 attempt=request.attempt, observation=view, revision=observed.revision
             )

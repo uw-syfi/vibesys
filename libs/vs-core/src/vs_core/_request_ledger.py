@@ -47,7 +47,6 @@ from .types.common import (
     LifecycleClass,
     Observation,
     ObservationStatus,
-    OperationNormalizationKind,
     RejectionCode,
     RequestId,
     RevisionAuthority,
@@ -201,8 +200,6 @@ def _route_operation(
     request: ExecuteRegisteredOperation,
 ) -> AreaChange[RecordsState]:
     descriptor = declaration(context, request)
-    if descriptor.normalization == OperationNormalizationKind.SCOPE_REOPEN:
-        raise ContractError(("operation",), "scope reopen enters through its own guarded event")
     if descriptor.revision_authority != RevisionAuthority.NONE:
         owner: Signal = RevisionOperationRequested(
             request=request, authority=descriptor.revision_authority, until=event.until
@@ -1017,18 +1014,14 @@ def _cancel_prepared(
 def _asker_unheard(context: RecordsContext, record: RequestRecord) -> bool:
     """Whether ending ``record`` unsent leaves its asker without an event.
 
-    Every registered operation, but the two whose owning area answers it from the closing
-    observation's signal: an agent turn (its session ends the turn) and a scope reopen (its
-    attempt answers the reopen). The other kinds' areas answer their own.
+    Every registered operation but an agent turn, whose session ends the turn from the closing
+    observation's signal. The other kinds' areas answer their own.
     """
     request = record.request
     if not isinstance(request, ExecuteRegisteredOperation):
         return False
     descriptor = declaration(context, request)
-    return (
-        descriptor.lifecycle is not LifecycleClass.SESSION_TURN
-        and descriptor.normalization is not OperationNormalizationKind.SCOPE_REOPEN
-    )
+    return descriptor.lifecycle is not LifecycleClass.SESSION_TURN
 
 
 def _cancel_dependents(

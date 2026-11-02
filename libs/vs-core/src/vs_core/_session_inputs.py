@@ -373,7 +373,7 @@ def _release_record(
         return _pending(record), None
     owner = attempt_for(context, invocation.scope)
     closure = current_closure(owner, owner.closure if owner is not None else None)
-    if isinstance(closure, Proven) and closure.value.disposition != "park":
+    if isinstance(closure, Proven):
         reason = (
             InputDropReason.OWNER_CANCELLED
             if closure.value.disposition == "cancel"
@@ -766,7 +766,6 @@ def _drain(
         or not isinstance(closure, Proven)
         or closure.value.authority != event.authority
         or closure.value.disposition != event.disposition
-        or event.disposition == "park"
     ):
         return AreaChange(state=state)
     records = []

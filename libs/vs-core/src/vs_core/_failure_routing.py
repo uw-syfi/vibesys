@@ -20,7 +20,6 @@ from .types.attempts import (
     CloseAttemptScope,
     DiscardWorkspace,
     EnsureWorkspace,
-    RestoreRevision,
     RetainRevision,
     SnapshotAndRetain,
 )
@@ -65,7 +64,6 @@ def failure_hearer(request: Request) -> FailureHearer:
     match request:
         case (
             EnsureWorkspace()
-            | RestoreRevision()
             | SnapshotAndRetain()
             | RetainRevision()
             | DiscardWorkspace()

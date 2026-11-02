@@ -38,7 +38,6 @@ from vs_core.api import (
     RequestBase,
     RequestId,
     RequestObserved,
-    RestoreRevision,
     ResumeSessionTurn,
     RetainRevision,
     SnapshotAndRetain,
@@ -126,7 +125,6 @@ type ExecutionOutcome = ExecutionResult | ExecutorRefusal
 # names requests that belong to another role, which the dispatch cast would hide.
 type WorkspaceRoleRequest = (
     EnsureWorkspace
-    | RestoreRevision
     | SnapshotAndRetain
     | RetainRevision
     | DiscardWorkspace
@@ -191,7 +189,6 @@ class SemanticEvents(Protocol):
 REQUEST_DISPATCH: Mapping[type[RequestBase], ExecutorRole] = MappingProxyType(
     {
         EnsureWorkspace: ExecutorRole.WORKSPACES,
-        RestoreRevision: ExecutorRole.WORKSPACES,
         SnapshotAndRetain: ExecutorRole.WORKSPACES,
         RetainRevision: ExecutorRole.WORKSPACES,
         DiscardWorkspace: ExecutorRole.WORKSPACES,

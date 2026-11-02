@@ -453,7 +453,6 @@ def render_packaged_prompts(installed: Path) -> int:
         action="cancel_item",
         subject="I-1",
         stopped=("A-1",),
-        unqueued=("A-2",),
         parked=("A-3",),
         settling=("A-4",),
     )

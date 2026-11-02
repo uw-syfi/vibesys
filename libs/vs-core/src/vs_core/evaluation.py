@@ -11,9 +11,7 @@ from ._comparison import closed_answers, comparisons_settled, moment_of
 from .types.evaluation import (
     AgentMeasurementRequested,
     ContinuationJobsChanged,
-    ContinuationReopenRequested,
     ContinuationRetireRequested,
-    ContinuationScopeReopened,
     DeadlineReached,
     JobObserved,
     JobsDrainRequested,
@@ -48,8 +46,6 @@ EVENT_TO_SUBAREA: Mapping[type[EvaluationEvent], Reducer] = MappingProxyType(
         MeasurementSubmissionEnded: _measurements.submission_ended,
         ContinuationJobsChanged: _continuations.advance,
         ContinuationRetireRequested: _continuations.advance,
-        ContinuationReopenRequested: _continuations.advance,
-        ContinuationScopeReopened: _continuations.advance,
         RegisteredJobObserved: _measurements.advance,
         RegisteredJobRequested: _measurements.advance,
         MeasurementRequested: _measurements.advance,

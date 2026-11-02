@@ -199,9 +199,7 @@ def continuation_waits(phase: ContinuationPhase) -> bool:
             ContinuationPhase.WAITING
             | ContinuationPhase.AUTHORIZED
             | ContinuationPhase.RESUMED
-            | ContinuationPhase.PARKED
             | ContinuationPhase.CANCELLED
-            | ContinuationPhase.REOPENING
             | ContinuationPhase.BLOCKED
         ):
             return False

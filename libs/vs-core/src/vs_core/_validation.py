@@ -16,7 +16,6 @@ from .types.common import (
     InvocationRef,
     LifecycleCapability,
     OperationDescriptor,
-    OperationNormalizationKind,
     OperationRef,
     RejectionCode,
     RunStatus,
@@ -29,7 +28,6 @@ from .types.strategy import (
     Interrupt,
     Measure,
     Operation,
-    Park,
     ProposeWinner,
     Rejected,
     RequestTurn,
@@ -117,26 +115,12 @@ def validate_decision(
 
 
 def _cancelled_item(state: CoreState, decision: Command) -> Rejected | None:
-    """No attempt starts or reopens at a work item the operator cancelled (``cancel_item``)."""
-    if isinstance(decision, StartAttempt):
-        item, path = decision.item_id, ("item_id",)
-    elif isinstance(decision, Operation) and decision.normalized_scope_reopen is not None:
-        reopened = decision.normalized_scope_reopen.attempt
-        item = next(
-            (
-                attempt.item_id
-                for attempt in state.attempts.attempts
-                if (attempt.attempt_id, attempt.generation)
-                == (reopened.attempt_id, reopened.generation)
-            ),
-            None,
-        )
-        path = ("normalized_scope_reopen", "attempt")
-    else:
+    """No attempt starts at a work item the operator cancelled (``cancel_item``)."""
+    if not isinstance(decision, StartAttempt) or decision.item_id not in cancelled_items(state.run):
         return None
-    if item is None or item not in cancelled_items(state.run):
-        return None
-    return _reject(decision, RejectionCode.CLOSED_SCOPE, path, "the operator cancelled the item")
+    return _reject(
+        decision, RejectionCode.CLOSED_SCOPE, ("item_id",), "the operator cancelled the item"
+    )
 
 
 def _validate_until(state: CoreState, submission: Submission, decision: Command) -> Rejected | None:
@@ -251,11 +235,8 @@ def _is_target(owner: AttemptView, decision: Withdraw) -> bool:
 
 def _required_capability(decision: Command) -> LifecycleCapability | None:
     """The host capability a decision depends on, if any."""
-    if isinstance(decision, Withdraw):
-        if isinstance(decision.disposition, Park):
-            return "park"
-        if isinstance(decision.disposition, Interrupt):
-            return "interrupt"
+    if isinstance(decision, Withdraw) and isinstance(decision.disposition, Interrupt):
+        return "interrupt"
     if isinstance(decision, Measure) and decision.plan.purpose == "profile":
         return "profile-capture"
     return None
@@ -305,19 +286,10 @@ def _validate_root_fence(state: CoreState, decision: Command) -> Rejected | None
     """No decision takes the root workspace while an adoption is rewriting it."""
     if not fences_root_mutation(state.settlement, state.records):
         return None
-    if isinstance(decision, StartAttempt):
-        takes_root = decision.workspace.mode == WorkspaceMode.EXCLUSIVE_ROOT
-    elif isinstance(decision, Operation) and decision.normalized_scope_reopen is not None:
-        reopened = decision.normalized_scope_reopen.attempt
-        takes_root = any(
-            attempt.workspace.mode == WorkspaceMode.EXCLUSIVE_ROOT
-            and (attempt.attempt_id, attempt.generation)
-            == (reopened.attempt_id, reopened.generation)
-            for attempt in state.attempts.attempts
-        )
-    else:
-        takes_root = False
-    if not takes_root:
+    if (
+        not isinstance(decision, StartAttempt)
+        or decision.workspace.mode != WorkspaceMode.EXCLUSIVE_ROOT
+    ):
         return None
     return _reject(
         decision, RejectionCode.DEPENDENCY, ("workspace",), "root workspace adoption in progress"
@@ -342,7 +314,6 @@ def validate_scope(state: CoreState, decision: Command) -> Rejected | None:
             AttemptPhase.TERMINAL,
             AttemptPhase.BLOCKED,
             AttemptPhase.CLOSING,
-            AttemptPhase.PARKED,
         ):
             return _reject(
                 decision, RejectionCode.CLOSED_SCOPE, ("scope", "owner"), "attempt scope closed"
@@ -359,19 +330,9 @@ def validate_scope(state: CoreState, decision: Command) -> Rejected | None:
 
 
 def _validate_operation_semantics(
-    state: CoreState, decision: Operation, offered: OperationDescriptor
+    decision: Operation, offered: OperationDescriptor
 ) -> Rejected | None:
     """Validate semantic scope after registered payload/schema proofs succeed."""
-    if (
-        offered.normalization == OperationNormalizationKind.SCOPE_REOPEN
-        and decision.scope.owner != state.run.run_id
-    ):
-        return _reject(
-            decision,
-            RejectionCode.OWNERSHIP,
-            ("scope", "owner"),
-            "scope reopening requires a run-scoped operation",
-        )
     if offered.lifecycle != decision.request.lifecycle:
         return _reject(
             decision,
@@ -415,14 +376,12 @@ def validate_operation(state: CoreState, decision: Operation) -> Rejected | None
         state.run.capabilities,
         wire,
         decision.request.lifecycle,
-        offered.normalization,
     )
     if (
         not deeply_immutable(decision.request)
         or wire.payload_json != canonical_json(decision.request)
         or decision.normalized_turn != decision.registered_turn
         or decision.normalized_measurement != decision.registered_measurement
-        or decision.normalized_scope_reopen != decision.registered_scope_reopen
     ):
         return _reject(
             decision,
@@ -437,4 +396,4 @@ def validate_operation(state: CoreState, decision: Operation) -> Rejected | None
             ("request", "schema"),
             "registered operation schema mismatch",
         )
-    return _validate_operation_semantics(state, decision, offered)
+    return _validate_operation_semantics(decision, offered)

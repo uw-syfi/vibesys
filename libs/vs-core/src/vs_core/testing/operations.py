@@ -6,7 +6,7 @@ from vs_core.types.attempts import RevisionOperationRequested
 from vs_core.types.common import Area, ExecuteRegisteredOperation
 from vs_core.types.evaluation import RegisteredJobRequested
 from vs_core.types.kernel import CoreState
-from vs_core.types.records import RequestPrepared, inherit
+from vs_core.types.records import inherit
 from vs_core.types.sessions import RegisteredTurnRequested
 from vs_core.types.strategy import Operation
 
@@ -23,8 +23,6 @@ from .traces import (
 def operation_trace(state: CoreState, decision: Operation) -> ReducerTrace:
     """Describe passthrough leaf outputs to exercise shared operation routing."""
     prepared = _operation_prepared(state, decision)
-    if not isinstance(prepared, RequestPrepared):
-        raise ContractError(("normalized_scope_reopen",), "reopening requires owning guard traces")
     request = prepared.request
     if not isinstance(request, ExecuteRegisteredOperation):
         raise ContractError(("request",), "expected registered operation request")

@@ -71,7 +71,6 @@ from vs_core.api import (
     RequestObserved,
     RequestPhase,
     ResourceId,
-    RestoreRevision,
     ResumeSessionTurn,
     RevisionRef,
     RunEnvelope,
@@ -756,7 +755,7 @@ class _Driver[S: StrategyState]:
                 return SessionObserved(session_id=request.session_id, observation=view)
             case AdoptRevision() | VerifyAdoption():
                 return AdoptionObserved(observation=view, revision=observed.revision)
-            case EnsureWorkspace() | RestoreRevision():
+            case EnsureWorkspace():
                 return WorkspaceObserved(
                     attempt=request.attempt, observation=view, revision=observed.revision
                 )

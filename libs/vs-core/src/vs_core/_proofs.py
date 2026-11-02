@@ -26,7 +26,6 @@ from .types.common import (
     ObservationStatus,
     OperationDescriptor,
     OperationId,
-    OperationNormalizationKind,
     OperationWire,
     RequestBase,
     RevisionRef,
@@ -51,7 +50,6 @@ from .types.records import (
     RequestRecord,
     request_lifecycle,
 )
-from .types.scheduling import AdmissionRequest, AttemptReopenRequest, Slot
 from .types.sessions import CloseSession, Invocation, SessionPhase, SessionView, TurnSpec
 from .types.strategy import Accepted, Command, Finish, Operation
 
@@ -60,6 +58,7 @@ if TYPE_CHECKING:
 
     from .types.attempts import AttemptClosure, AttemptView
     from .types.kernel import DecisionReceipt, RunState
+    from .types.scheduling import AttemptRequest, Slot
 
 
 class ProofReason(StrEnum):
@@ -440,7 +439,6 @@ def descriptor_matches(
     offered: Capabilities,
     wire: OperationWire | None,
     lifecycle: LifecycleClass,
-    normalization: OperationNormalizationKind,
 ) -> Verdict[OperationDescriptor]:
     """Prove durable and offered declaration independently of codec availability."""
     if wire is None:
@@ -458,7 +456,6 @@ def descriptor_matches(
             (ProofField.SCHEMA, row.outcome_schema, wire.schema_ref.outcome_schema),
             (ProofField.LIFECYCLE, row.lifecycle, lifecycle),
             (ProofField.LIFECYCLE, wire.schema_ref.lifecycle, lifecycle),
-            (ProofField.NORMALIZATION, row.normalization, normalization),
             (ProofField.RESOURCE_ID, row.resource_pool, offers[0].resource_pool),
             (ProofField.SCHEMA, row.request_schema, offers[0].request_schema),
             (ProofField.SCHEMA, row.outcome_schema, offers[0].outcome_schema),
@@ -468,7 +465,6 @@ def descriptor_matches(
                 (offers[0].inspect, offers[0].cancel, offers[0].watch),
             ),
             (ProofField.LIFECYCLE, row.lifecycle, offers[0].lifecycle),
-            (ProofField.NORMALIZATION, row.normalization, offers[0].normalization),
             (ProofField.REVISION, row.revision_authority, offers[0].revision_authority),
         )
     )
@@ -549,7 +545,6 @@ def _operation_binding(operation: Operation) -> Verdict[Operation]:
     if (
         operation.normalized_turn != operation.registered_turn
         or operation.normalized_measurement != operation.registered_measurement
-        or operation.normalized_scope_reopen != operation.registered_scope_reopen
     ):
         return Mismatch(ProofField.NORMALIZATION)
     return Proven(operation)
@@ -592,7 +587,6 @@ def _operation_request(
     if isinstance(expected, RequestPrepared) and (
         expected.normalized_turn != operation.normalized_turn
         or expected.normalized_measurement != operation.normalized_measurement
-        or expected.normalized_scope_reopen != operation.normalized_scope_reopen
     ):
         return Mismatch(ProofField.NORMALIZATION)
     return Proven(operation)
@@ -1066,13 +1060,9 @@ def submission_budget_for(
     return mismatch if mismatch is not None else Proven(budget)
 
 
-def occupied_episode(slots: tuple[Slot, ...], request: AdmissionRequest) -> Verdict[Slot]:
+def occupied_episode(slots: tuple[Slot, ...], request: AttemptRequest) -> Verdict[Slot]:
     """Prove one exact capacity episode, never authorize queued registration."""
-    target = (
-        request.attempt
-        if isinstance(request, AttemptReopenRequest)
-        else AttemptRef(attempt_id=request.attempt_id, generation=request.generation)
-    )
+    target = AttemptRef(attempt_id=request.attempt_id, generation=request.generation)
     candidates = tuple(
         slot
         for slot in slots

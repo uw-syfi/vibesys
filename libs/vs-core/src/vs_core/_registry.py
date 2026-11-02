@@ -27,17 +27,15 @@ from .types.common import (
     LifecycleClass,
     OperationDescriptor,
     OperationId,
-    OperationNormalizationKind,
     OperationSchemaRef,
     OperationWire,
-    ScopeReopenNormalization,
 )
 from .types.evaluation import MeasurementIdentity
 from .types.records import OperationResult, RequestObserved
 from .types.sessions import TurnSpec
 from .types.strategy import Command, Operation, StrategyState, Wait
 
-ENVELOPE_SCHEMA_VERSION = 45
+ENVELOPE_SCHEMA_VERSION = 46
 """The version of the envelope a run writes now.
 
 A shape change that every saved envelope survives (a new field with a default, a closed set or
@@ -111,7 +109,6 @@ class OperationRegistration:
     request_model: type[OperationRequest]
     outcome_model: type[BaseModel]
     normalize_turn: Callable[[OperationRequest], TurnSpec] | None = None
-    normalize_scope_reopen: Callable[[OperationRequest], ScopeReopenNormalization] | None = None
     normalize_measurement: Callable[[OperationRequest], MeasurementIdentity] | None = None
 
 
@@ -226,19 +223,6 @@ class OperationRegistry:
             entry.normalize_measurement,
             MeasurementIdentity,
             ("operation", request.kind, "normalize_measurement"),
-        )
-
-    def normalize_scope_reopen(self, request: OperationRequest) -> ScopeReopenNormalization | None:
-        """Normalize the canonical payload into guarded reopening data, with no episode choice."""
-        wire = self.encode(request)
-        entry = self._find(wire.schema_ref)
-        if entry.normalize_scope_reopen is None:
-            return None
-        return _normalize(
-            self.decode(wire),
-            entry.normalize_scope_reopen,
-            ScopeReopenNormalization,
-            ("operation", request.kind, "normalize_scope_reopen"),
         )
 
     def decode(self, wire: OperationWire) -> OperationRequest:
@@ -585,7 +569,6 @@ def _normalize[M: BaseModel](
 def _validate_normalizer(registration: OperationRegistration, index: int) -> None:
     for name, normalizer in (
         ("normalize_turn", registration.normalize_turn),
-        ("normalize_scope_reopen", registration.normalize_scope_reopen),
         ("normalize_measurement", registration.normalize_measurement),
     ):
         if normalizer is not None and not callable(normalizer):
@@ -597,13 +580,6 @@ def _validate_normalizer(registration: OperationRegistration, index: int) -> Non
         raise ContractError(
             ("registry", index, "normalize_measurement"),
             "only owned jobs grant measurement authority",
-        )
-    if (registration.descriptor.normalization == OperationNormalizationKind.SCOPE_REOPEN) != (
-        registration.normalize_scope_reopen is not None
-    ):
-        raise ContractError(
-            ("registry", index, "normalize_scope_reopen"),
-            "scope reopening requires its declared explicit normalizer",
         )
     if (registration.descriptor.lifecycle == LifecycleClass.SESSION_TURN) != (
         registration.normalize_turn is not None

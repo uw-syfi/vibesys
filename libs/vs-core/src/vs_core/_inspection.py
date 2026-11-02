@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from ._proofs import Proven, descriptor_matches, invocation_for, observation_for, operation_for
 from ._registry import ContractError
-from .types.common import LifecycleClass, OperationNormalizationKind
+from .types.common import LifecycleClass
 from .types.evaluation import InspectOwnedJob
 from .types.records import ExecuteRegisteredOperation, InspectRequest
 from .types.sessions import DispatchTurn, InspectTurn, ResumeSessionTurn
@@ -45,7 +45,6 @@ def _validate_invocation(state: CoreState, query: InspectTurn, original: Request
             state.run.capabilities,
             request.operation,
             LifecycleClass.SESSION_TURN,
-            OperationNormalizationKind.NONE,
         )
         matched = (
             isinstance(operation, Proven)

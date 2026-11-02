@@ -17,7 +17,6 @@ from .attempts import (
     CloseAttemptScope,
     DiscardWorkspace,
     EnsureWorkspace,
-    RestoreRevision,
     RetainRevision,
     SnapshotAndRetain,
     WorkspaceRequest,
@@ -44,7 +43,6 @@ from .common import (
     RevisionRef,
     SchemaRef,
     Scope,
-    ScopeReopenNormalization,
     Seconds,
     SetupFailureKind,
     Value,
@@ -484,7 +482,6 @@ class RequestPrepared(Value):
     lifecycle: LifecycleClass
     normalized_turn: TurnSpec | None = None
     normalized_measurement: MeasurementIdentity | None = None
-    normalized_scope_reopen: ScopeReopenNormalization | None = None
 
 
 class DispatchAuthorized(Value):
@@ -790,7 +787,7 @@ def request_effect(request: Request, registry: tuple[OperationDescriptor, ...]) 
         case DispatchTurn() | ResumeSessionTurn():
             read_only = request.turn.session.access == Access.READ_ONLY
             return StepEffect.NEITHER if read_only else StepEffect.WRITES
-        case EnsureWorkspace() | RestoreRevision():
+        case EnsureWorkspace():
             return StepEffect.WRITES
         case SnapshotAndRetain() | SnapshotAndRetainRun() | RetainRevision():
             return StepEffect.SNAPSHOTS
@@ -857,7 +854,6 @@ def request_close_policy(
             DispatchTurn()
             | ResumeSessionTurn()
             | EnsureWorkspace()
-            | RestoreRevision()
             | SnapshotAndRetain()
             | SnapshotAndRetainRun()
             | RetainRevision()
@@ -914,7 +910,6 @@ def request_end_policy(request: Request, registry: tuple[OperationDescriptor, ..
             | ResumeSessionTurn()
             | SubmitMeasurement()
             | EnsureWorkspace()
-            | RestoreRevision()
             | SnapshotAndRetain()
             | SnapshotAndRetainRun()
             | RetainRevision()
@@ -954,7 +949,6 @@ def request_lifecycle(request: Request) -> LifecycleClass:
             lifecycle = LifecycleClass.QUERY
         case (
             EnsureWorkspace()
-            | RestoreRevision()
             | SnapshotAndRetain()
             | SnapshotAndRetainRun()
             | RetainRevision()

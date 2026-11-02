@@ -16,10 +16,8 @@ from .types.attempts import (
     DiscardWorkspace,
     EnsureWorkspace,
     ReleaseDependencyObserved,
-    RestoreRevision,
     RetainRevision,
     RevisionOperationObserved,
-    ScopeAdmissionReopened,
     SnapshotAndRetain,
     WorkspaceObserved,
 )
@@ -27,8 +25,6 @@ from .types.common import (
     AttemptRef,
     ExecuteRegisteredOperation,
     LifecycleClass,
-    ObservationStatus,
-    OperationNormalizationKind,
     RevisionAuthority,
 )
 from .types.evaluation import (
@@ -42,7 +38,6 @@ from .types.evaluation import (
     SubmitMeasurement,
 )
 from .types.records import reply_owed
-from .types.scope_reopen import ScopedAdmissionReopenOutcome
 from .types.sessions import (
     CloseSession,
     DispatchTurn,
@@ -76,7 +71,6 @@ def declaration(
         context.run.capabilities,
         request.operation,
         request.operation.schema_ref.lifecycle,
-        rows[0].normalization,
     )
     if not isinstance(proof, Proven):
         raise ContractError(("operation",), "requires an exact offered declaration")
@@ -88,7 +82,6 @@ def records_own(descriptor: OperationDescriptor) -> bool:
     return (
         descriptor.lifecycle in (LifecycleClass.QUERY, LifecycleClass.IDEMPOTENT_WRITE)
         and descriptor.revision_authority == RevisionAuthority.NONE
-        and descriptor.normalization != OperationNormalizationKind.SCOPE_REOPEN
     )
 
 
@@ -133,8 +126,6 @@ def _registered(
 ) -> tuple[Signal, ...]:
     observation = facts.observation
     descriptor = declaration(context, request)
-    if descriptor.normalization == OperationNormalizationKind.SCOPE_REOPEN:
-        return _reopened(context, request, observation, facts)
     if descriptor.revision_authority != RevisionAuthority.NONE:
         return (
             RevisionOperationObserved(
@@ -171,37 +162,6 @@ def _output_schema(facts: Facts) -> SchemaRef | None:
     if facts.outcome_schema is not None:
         return facts.outcome_schema
     return None if facts.operation_schema is None else facts.operation_schema.outcome_schema
-
-
-def _reopened(
-    context: RecordsContext,
-    request: ExecuteRegisteredOperation,
-    observation: Observation,
-    facts: Facts,
-) -> tuple[Signal, ...]:
-    receipt = next(
-        (row for row in context.run.receipts if row.decision_id == request.decision_id), None
-    )
-    decision = None if receipt is None else receipt.decision
-    normalization = getattr(decision, "normalized_scope_reopen", None)
-    if normalization is None:
-        raise ContractError(("operation",), "scope reopen requires its canonical normalization")
-    outcome = facts.outcome
-    admission = (
-        outcome.admission if isinstance(outcome, ScopedAdmissionReopenOutcome) else "unknown"
-    )
-    if observation.status != ObservationStatus.SUCCEEDED or not observation.terminal:
-        admission = "unknown" if not observation.terminal else "closed"
-    return (
-        ScopeAdmissionReopened(
-            attempt=normalization.attempt,
-            continuation_id=normalization.continuation_id,
-            park_authority=normalization.park_authority,
-            operation_id=request.operation_id,
-            observation=observation,
-            admission=admission,
-        ),
-    )
 
 
 def _releases(
@@ -245,7 +205,6 @@ def _owner_signal(
             signals = _registered(context, record, request, facts)
         case (
             EnsureWorkspace()
-            | RestoreRevision()
             | SnapshotAndRetain()
             | RetainRevision()
             | DiscardWorkspace()

@@ -408,14 +408,6 @@ def _submit(
             RejectionCode.OWNERSHIP,
             "attempt does not have current ownership",
         )
-    if owner.closure is not None and owner.closure.disposition == "park":
-        return _refuse_proposal(
-            state,
-            context,
-            proposal,
-            RejectionCode.CLOSED_SCOPE,
-            "parked attempt does not accept settlement completion",
-        )
     return _accept_proposal(state, context, proposal, owner)
 
 

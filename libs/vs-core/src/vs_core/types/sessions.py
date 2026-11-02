@@ -909,7 +909,7 @@ class SessionDrainRequested(Value):
     kind: Literal["session_drain_requested"] = "session_drain_requested"
     attempt: AttemptRef
     authority: RequestId
-    disposition: Literal["park", "cancel", "settle"]
+    disposition: Literal["cancel", "settle"]
 
 
 class RunSessionsDrainRequested(Value):

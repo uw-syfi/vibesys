@@ -10,7 +10,6 @@ from .types.attempts import (
     AttemptChargeRefundRequested,
     AttemptEvaluationExhausted,
     AttemptEvaluationHistoryUpdated,
-    AttemptReacquireRequested,
     AttemptRegistered,
     AttemptSetupFailed,
     InitialSessionsFailed,
@@ -19,25 +18,19 @@ from .types.attempts import (
     InvocationCheckpointed,
     InvocationCheckpointRequested,
     InvocationEnded,
-    ReacquisitionReady,
     ReleaseDependencyBlocked,
     ReleaseDependencyObserved,
     RetentionRequired,
     RetireRequested,
     RevisionOperationObserved,
     RevisionOperationRequested,
-    ScopeAdmissionReopened,
-    ScopeReopenAdmitted,
-    ScopeReopenRequested,
     WorkspaceObserved,
 )
 from .types.common import Area
 from .types.evaluation import (
     AgentMeasurementRequested,
     ContinuationJobsChanged,
-    ContinuationReopenRequested,
     ContinuationRetireRequested,
-    ContinuationScopeReopened,
     DeadlineReached,
     JobObserved,
     JobsDrainRequested,
@@ -75,7 +68,6 @@ from .types.scheduling import (
     AdmitAttempt,
     AdoptionFenceLifted,
     AttemptReady,
-    AttemptReopenRequested,
     AttemptRequested,
     ClockAdvanced,
     CloseAdmission,
@@ -139,7 +131,6 @@ def event_area(event: CoreEvent | Signal) -> Area:
     match event:
         case (
             AttemptRequested()
-            | AttemptReopenRequested()
             | SlotChargeEnded()
             | QueueEntryRetired()
             | RegisterAttempt()
@@ -159,7 +150,6 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | AttemptEvaluationHistoryUpdated()
             | RevisionOperationObserved()
             | AttemptRegistered()
-            | AttemptReacquireRequested()
             | InitialSessionsReady()
             | InitialSessionsFailed()
             | InvocationChargeRequested()
@@ -167,10 +157,6 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | InvocationEnded()
             | InvocationCheckpointRequested()
             | AttemptChargeRefundRequested()
-            | ScopeReopenRequested()
-            | ScopeReopenAdmitted()
-            | ReacquisitionReady()
-            | ScopeAdmissionReopened()
             | ReleaseDependencyObserved()
             | ReleaseDependencyBlocked()
             | RevisionOperationRequested()
@@ -221,8 +207,6 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | MeasurementSubmissionEnded()
             | ContinuationJobsChanged()
             | ContinuationRetireRequested()
-            | ContinuationReopenRequested()
-            | ContinuationScopeReopened()
             | RegisteredJobRequested()
             | MeasurementRequested()
             | AgentMeasurementRequested()

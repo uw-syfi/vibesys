@@ -24,8 +24,6 @@ from .types.common import (
     AttemptRef,
     ChargeKind,
     ContractValidationError,
-    OperationNormalizationKind,
-    OperationSchemaRef,
     RejectionCode,
     RequestId,
     RunStatus,
@@ -39,8 +37,6 @@ from .types.scheduling import (
     AdmitAttempt,
     AdoptionFenceLifted,
     AttemptReady,
-    AttemptReopenRequest,
-    AttemptReopenRequested,
     AttemptRequest,
     AttemptRequested,
     ClockAdvanced,
@@ -54,18 +50,16 @@ from .types.scheduling import (
     SlotReleased,
 )
 from .types.sessions import RunSessionsDrainRequested
-from .types.strategy import Accepted, Finish, Operation, Rejected, StartAttempt
+from .types.strategy import Accepted, Finish, Rejected, StartAttempt
 
 if TYPE_CHECKING:
     from .types.attempts import AttemptView
     from .types.common import DecisionId
     from .types.kernel import SchedulingContext, Signal
-    from .types.scheduling import AdmissionRequest, SchedulingEvent
+    from .types.scheduling import SchedulingEvent
 
 
-def _target(request: AdmissionRequest) -> AttemptRef:
-    if isinstance(request, AttemptReopenRequest):
-        return request.attempt
+def _target(request: AttemptRequest) -> AttemptRef:
     return AttemptRef(attempt_id=request.attempt_id, generation=request.generation)
 
 
@@ -105,13 +99,13 @@ def _remaining(state: SchedulingState, context: SchedulingContext) -> int:
     reserved = sum(
         request.admission_charge
         for request in state.queue
-        if isinstance(request, AttemptRequest) and _owner(context, _target(request)) is None
+        if _owner(context, _target(request)) is None
     )
     return admission_remaining(context.attempts.attempts, context.run.limits.max_attempts, reserved)
 
 
 def _reject(
-    state: SchedulingState, request: AdmissionRequest, code: RejectionCode, detail: str
+    state: SchedulingState, request: AttemptRequest, code: RejectionCode, detail: str
 ) -> AreaChange[SchedulingState]:
     return AreaChange(
         state=state,
@@ -185,10 +179,10 @@ def _deadline_retirements(state: SchedulingState, context: SchedulingContext) ->
     )
 
 
-def _fits(state: SchedulingState, context: SchedulingContext, request: AdmissionRequest) -> bool:
+def _fits(state: SchedulingState, context: SchedulingContext, request: AttemptRequest) -> bool:
     """The one admission gate: capacity, pools, and exclusive-root ownership.
 
-    Every precondition for starting or reopening an attempt lives here. Attempts
+    Every precondition for starting an attempt lives here. Attempts
     only re-checks defensively and declines, so an internally generated admission
     never fails the step.
     """
@@ -245,7 +239,7 @@ def _fill(
 
 
 def _duplicate(
-    state: SchedulingState, context: SchedulingContext, request: AdmissionRequest
+    state: SchedulingState, context: SchedulingContext, request: AttemptRequest
 ) -> AreaChange[SchedulingState] | None:
     for queued in state.queue:
         if queued.decision_id == request.decision_id:
@@ -269,16 +263,10 @@ def _duplicate(
 
 
 def _existing_duplicate(
-    state: SchedulingState, context: SchedulingContext, request: AdmissionRequest
+    state: SchedulingState, context: SchedulingContext, request: AttemptRequest
 ) -> AreaChange[SchedulingState] | None:
-    if isinstance(request, AttemptReopenRequest) and _reopen_replayed(context, request):
-        return AreaChange(state=state)
     owner = _owner(context, _target(request))
-    if (
-        isinstance(request, AttemptRequest)
-        and owner is not None
-        and owner.phase != AttemptPhase.QUEUED
-    ):
+    if owner is not None and owner.phase != AttemptPhase.QUEUED:
         return _reject(state, request, RejectionCode.OWNERSHIP, "attempt already registered")
     return None
 
@@ -342,74 +330,12 @@ def _validate_start(
     return None
 
 
-def _reopen_replayed(context: SchedulingContext, request: AttemptReopenRequest) -> bool:
-    owner = _owner(context, request.attempt)
-    if owner is not None and (
-        owner.admission_id == request.decision_id
-        or (owner.closure is not None and owner.closure.admission_id == request.decision_id)
-    ):
-        return True
-    return any(
-        receipt.decision_id == request.decision_id and receipt.completion is not None
-        for receipt in context.run.receipts
-    )
-
-
-def _reopen_proved(context: SchedulingContext, request: AttemptReopenRequest) -> bool:
-    owner = _owner(context, request.attempt)
-    if (
-        owner is None
-        or owner.phase != AttemptPhase.PARKED
-        or owner.closure is None
-        or owner.release_dependencies
-    ):
-        return False
-    if _reopen_replayed(context, request):
-        return False
-    proof = accepted_receipt_for(context.run.receipts, request.decision_id, None)
-    decision = proof.value.decision if isinstance(proof, Proven) else None
-    if not isinstance(decision, Operation):
-        return False
-    normalization = decision.normalized_scope_reopen
-    return (
-        _reopen_declared(context, decision)
-        and decision.scope.owner == context.run.run_id
-        and decision.scope.generation == context.run.generation
-        and request.request_id == RequestId(root=f"operation:{decision.decision_id.root}")
-        and normalization is not None
-        and normalization == decision.registered_scope_reopen
-        and normalization.attempt == request.attempt
-        and normalization.park_authority == owner.closure.authority
-        and owner.closure.disposition == "park"
-    )
-
-
-def _reopen_declared(context: SchedulingContext, decision: Operation) -> bool:
-    # A codec proves the payload's schema, not that this run offers reopening.
-    wire = decision.registered_wire
-    if wire is None:
-        return False
-    return any(
-        descriptor.normalization == OperationNormalizationKind.SCOPE_REOPEN
-        and OperationSchemaRef(
-            kind=descriptor.kind,
-            request_schema=descriptor.request_schema,
-            outcome_schema=descriptor.outcome_schema,
-            lifecycle=descriptor.lifecycle,
-        )
-        == wire.schema_ref
-        for descriptor in context.run.capabilities.operations
-    )
-
-
 def _admission_proved(
     state: SchedulingState,
     context: SchedulingContext,
-    request: AdmissionRequest,
+    request: AttemptRequest,
     registering: AttemptRequest | None,
 ) -> bool:
-    if isinstance(request, AttemptReopenRequest):
-        return _reopen_proved(context, request)
     owner = _owner(context, _target(request))
     if owner is None:
         # Only the same atomic transition that publishes RegisterAttempt may
@@ -423,12 +349,11 @@ def _admission_proved(
 
 
 def _enqueue(
-    state: SchedulingState, context: SchedulingContext, request: AdmissionRequest
+    state: SchedulingState, context: SchedulingContext, request: AttemptRequest
 ) -> AreaChange[SchedulingState]:
-    if isinstance(request, AttemptRequest):
-        invalid = _validate_start(state, context, request)
-        if invalid is not None:
-            return invalid
+    invalid = _validate_start(state, context, request)
+    if invalid is not None:
+        return invalid
     duplicate = _duplicate(state, context, request)
     if duplicate is not None:
         return duplicate
@@ -445,29 +370,14 @@ def _enqueue(
     ):
         return _reject(state, request, RejectionCode.CLOSED_SCOPE, "admission is closed")
     owner = _owner(context, _target(request))
-    if (
-        isinstance(request, AttemptRequest)
-        and owner is None
-        and request.admission_charge > _remaining(state, context)
-    ):
+    if owner is None and request.admission_charge > _remaining(state, context):
         return _reject(state, request, RejectionCode.BUDGET, "admission budget exhausted")
-    if isinstance(request, AttemptReopenRequest) and not _reopen_proved(context, request):
-        return _reject(
-            state,
-            request,
-            RejectionCode.OWNERSHIP,
-            "reentry requires declared canonical operation and exact park authority",
-        )
     if len(set(request.pools)) != len(request.pools):
         raise ContractValidationError("pools", "duplicate resource pool")
     queued = state.model_copy(update={"queue": (*state.queue, request)})
-    registering = request if isinstance(request, AttemptRequest) and owner is None else None
+    registering = request if owner is None else None
     filled = _fill(queued, context, registering)
-    registration = (
-        (RegisterAttempt(request=request),)
-        if isinstance(request, AttemptRequest) and owner is None
-        else ()
-    )
+    registration = (RegisterAttempt(request=request),) if owner is None else ()
     return filled.model_copy(update={"signals": (*registration, *filled.signals)})
 
 
@@ -518,8 +428,7 @@ def _cancel(state: SchedulingState, context: SchedulingContext) -> tuple[Signal,
     # its mode (``stop_mode``), and a later drain never weakens a cancel.
     if decision is None or stop_mode(context.run) is not StopMode.CANCEL:
         return None
-    # A parked closure fences its old episode, not a queued reopening. Cancel
-    # the carried new admission identity unless that exact episode is closing.
+    # Cancel each occupied or queued episode unless that exact episode is closing.
     episodes = tuple((slot.attempt, slot.admission_id) for slot in state.slots)
     episodes += tuple((_target(request), request.decision_id) for request in state.queue)
     # The run's own jobs (its input baseline) belong to no attempt, so no retirement ends them.
@@ -597,9 +506,9 @@ def _run_sessions_drain(context: SchedulingContext) -> tuple[Signal, ...]:
     return (RunSessionsDrainRequested(scope=stop.scope, authority=stop.decision_id),)
 
 
-def _retired_entry(request: AdmissionRequest, event: QueueEntryRetired) -> bool:
+def _retired_entry(request: AttemptRequest, event: QueueEntryRetired) -> bool:
     # Attempts B names the exact queued decision, so a delayed old retirement
-    # cannot remove a later start or reopen of the same attempt.
+    # cannot remove a later start of the same attempt.
     return _target(request) == event.attempt and request.decision_id == event.admission_id
 
 
@@ -633,7 +542,7 @@ def schedule(
     Cleanup retains capacity after charge-end until matching release proof.
     """
     match event:
-        case AttemptRequested() | AttemptReopenRequested():
+        case AttemptRequested():
             return _enqueue(state, context, event.request)
         case SlotChargeEnded():
             return _end_charge(state, event)

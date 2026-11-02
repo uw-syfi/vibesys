@@ -265,7 +265,7 @@ def _root_holder(context: SettlementContext) -> bool:
     return any(
         attempt.workspace.mode == WorkspaceMode.EXCLUSIVE_ROOT
         and (
-            attempt.phase not in (AttemptPhase.QUEUED, AttemptPhase.TERMINAL, AttemptPhase.PARKED)
+            attempt.phase not in (AttemptPhase.QUEUED, AttemptPhase.TERMINAL)
             or attempt.release_dependencies
             or attempt.pending_records
         )

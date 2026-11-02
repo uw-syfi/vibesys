@@ -240,6 +240,46 @@ def without_downtime_credit(value: JsonValue, run_deadline: float | None = None)
     return walked
 
 
+def _v45_to_v46(envelope: JsonObject) -> JsonObject:
+    """Version 46 dropped the fields only a scope reopen could set.
+
+    Nothing produced a scope reopen, so every save holds their defaults (null, empty or the
+    declared ``none`` normalization) and loses nothing. A key that holds anything else is
+    kept, and the strict read at version 46 refuses it by name instead of discarding it.
+    """
+    return _object(without_reopen_fields(envelope)) | {"schema_version": 46}
+
+
+REOPEN_KEYS: Final = (
+    "normalized_scope_reopen",
+    "park_authority",
+    "reopen_authority",
+    "cancelled_resolutions",
+    "parked_predecessor",
+)
+"""The keys version 46 dropped wherever they appear; each is null or empty in every save."""
+
+
+def without_reopen_fields(value: JsonValue) -> JsonValue:
+    """``value`` with the fields of the scope reopen removed where they hold their default.
+
+    The tolerant read of data written at version 45 (`_step_log`) calls it too.
+    """
+    if isinstance(value, list):
+        return [without_reopen_fields(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    walked = {key: without_reopen_fields(item) for key, item in value.items()}
+    for key in REOPEN_KEYS:
+        if key in walked and walked[key] in (None, []):
+            del walked[key]
+    if "phase" in walked and "workspace" in walked and walked.get("parent", 0) is None:
+        del walked["parent"]
+    if "request_schema" in walked and walked.get("normalization") == "none":
+        del walked["normalization"]
+    return walked
+
+
 def _floor_declared(core: JsonObject) -> bool:
     run = _object(core.get("run"))
     task = _object(_object(run.get("facts")).get("task"))
@@ -281,6 +321,7 @@ MIGRATIONS: Final[Mapping[int, Migration]] = {
     42: _v42_to_v43,
     43: _v43_to_v44,
     44: _v44_to_v45,
+    45: _v45_to_v46,
 }
 """Version ``n`` to ``n + 1``, one entry per version, contiguous from the oldest supported."""
 

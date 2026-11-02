@@ -304,7 +304,6 @@ if TYPE_CHECKING:
         AttemptEvaluationHistoryUpdated,
         AttemptExhausted,
         AttemptPhase,
-        AttemptReacquireRequested,
         AttemptRegistered,
         AttemptSetupFailed,
         AttemptsEvent,
@@ -322,18 +321,13 @@ if TYPE_CHECKING:
         InvocationCheckpointed,
         InvocationCheckpointRequested,
         InvocationEnded,
-        ReacquisitionReady,
         ReleaseDependencyBlocked,
         ReleaseDependencyObserved,
-        RestoreRevision,
         RetainRevision,
         RetentionRequired,
         RetireRequested,
         RevisionOperationObserved,
         RevisionOperationRequested,
-        ScopeAdmissionReopened,
-        ScopeReopenAdmitted,
-        ScopeReopenRequested,
         SnapshotAndRetain,
         WorkspaceObserved,
         WorkspacePlan,
@@ -395,7 +389,6 @@ if TYPE_CHECKING:
         ObservationStatus,
         OperationDescriptor,
         OperationId,
-        OperationNormalizationKind,
         OperationRef,
         OperationSchemaRef,
         OperationWire,
@@ -425,7 +418,6 @@ if TYPE_CHECKING:
         SchemaRef,
         Scope,
         ScopeInputTarget,
-        ScopeReopenNormalization,
         Seconds,
         SessionId,
         SettlementId,
@@ -451,9 +443,7 @@ if TYPE_CHECKING:
         Continuation,
         ContinuationJobsChanged,
         ContinuationPhase,
-        ContinuationReopenRequested,
         ContinuationRetireRequested,
-        ContinuationScopeReopened,
         DeadlineReached,
         EvaluationEvent,
         EvaluationRequest,
@@ -589,12 +579,9 @@ if TYPE_CHECKING:
     )
     from vs_core.types.scheduling import (
         AdmissionControl,
-        AdmissionRequest,
         AdmitAttempt,
         AdoptionFenceLifted,
         AttemptReady,
-        AttemptReopenRequest,
-        AttemptReopenRequested,
         AttemptRequest,
         AttemptRequested,
         ClockAdvanced,
@@ -610,7 +597,6 @@ if TYPE_CHECKING:
         SlotChargeEnded,
         SlotReleased,
     )
-    from vs_core.types.scope_reopen import ScopedAdmissionReopen, ScopedAdmissionReopenOutcome
     from vs_core.types.search import (
         AdoptionFinished,
         AttemptSummary,
@@ -742,7 +728,6 @@ if TYPE_CHECKING:
         Operation,
         OperationCodecError,
         OperationRequest,
-        Park,
         ProposeWinner,
         Rejected,
         RequestTurn,
@@ -909,15 +894,15 @@ _MODULES: dict[str, str] = {
             (
                 "AttemptAdmitted AttemptBudget AttemptChargeRefundRequested AttemptCheckpoint "
                 "AttemptClosure AttemptEvaluationExhausted AttemptEvaluationHistoryUpdated "
-                "AttemptExhausted AttemptPhase AttemptReacquireRequested AttemptRegistered "
+                "AttemptExhausted AttemptPhase AttemptRegistered "
                 "AttemptSetupFailed AttemptsEvent AttemptsState AttemptView CheckpointDecline "
                 "CheckpointDeclined CheckpointResolved CloseAttemptScope DiscardWorkspace "
                 "EnsureWorkspace InitialSessionsFailed InitialSessionsReady InvocationChargeRequested "
                 "InvocationCheckpointed InvocationCheckpointRequested InvocationEnded "
-                "ReacquisitionReady ReleaseDependencyBlocked ReleaseDependencyObserved RestoreRevision "
+                "ReleaseDependencyBlocked ReleaseDependencyObserved "
                 "RetainRevision RetentionRequired RetireRequested RevisionOperationObserved "
-                "RevisionOperationRequested ScopeAdmissionReopened ScopeReopenAdmitted "
-                "ScopeReopenRequested SnapshotAndRetain WorkspaceObserved WorkspacePlan "
+                "RevisionOperationRequested "
+                "SnapshotAndRetain WorkspaceObserved WorkspacePlan "
                 "WorkspaceRequest "
             ),
         ),
@@ -934,11 +919,11 @@ _MODULES: dict[str, str] = {
                 "IdentityTypeError InputId InputTarget InvocationId InvocationInputTarget "
                 "InvocationRef ItemId ItemInputTarget KernelNotImplementedError LifecycleCapability "
                 "LifecycleClass Limits Observation ObservationStatus OperationDescriptor OperationId "
-                "OperationNormalizationKind OperationRef OperationSchemaRef OperationWire PauseOwner "
+                "OperationRef OperationSchemaRef OperationWire PauseOwner "
                 "PoolCapacity PoolId PureOption RejectionCode ReleaseDependency RequestBase RequestId "
                 "RequestRetries ReservedInputOccurrence ResourceId ResumeWhen RevisionAuthority "
                 "RevisionId RevisionNumber RevisionRef RoleId RoleInputTarget RunFacts RunId RunPark "
-                "RunPause RunStatus SchemaRef Scope ScopeInputTarget ScopeReopenNormalization Seconds "
+                "RunPause RunStatus SchemaRef Scope ScopeInputTarget Seconds "
                 "SessionId SettlementId SetupFailureKind SignalCycleError StopMode StrategyId "
                 "TaskObjective TaskStage TaskTerms Value WorkspaceMode WorkspaceRef escalate_stop "
             ),
@@ -948,7 +933,7 @@ _MODULES: dict[str, str] = {
             (
                 "MEASUREMENT_DIAGNOSTIC_LIMIT AgentCall AgentMeasurementRequested AgentRejection "
                 "CancelOwnedJob CollectEvidence Continuation ContinuationJobsChanged ContinuationPhase "
-                "ContinuationReopenRequested ContinuationRetireRequested ContinuationScopeReopened "
+                "ContinuationRetireRequested "
                 "DeadlineReached EvaluationEvent EvaluationRequest EvaluationState "
                 "EvidenceAcceptanceReceipt EvidenceRef HistoricalSubmissionReceipt InspectOwnedJob "
                 "JobFactsBeforeObservation JobObserved JobQueued JobsDrainRequested "
@@ -1009,14 +994,13 @@ _MODULES: dict[str, str] = {
         (
             "vs_core.types.scheduling",
             (
-                "AdmissionControl AdmissionRequest AdmitAttempt AdoptionFenceLifted AttemptReady "
-                "AttemptReopenRequest AttemptReopenRequested AttemptRequest AttemptRequested "
+                "AdmissionControl AdmitAttempt AdoptionFenceLifted AttemptReady "
+                "AttemptRequest AttemptRequested "
                 "ClockAdvanced CloseAdmission ParallelLimitChanged QueueEntryRetired RegisterAttempt "
                 "RunDrained SchedulingEvent SchedulingState SchedulingView Slot SlotChargeEnded "
                 "SlotReleased "
             ),
         ),
-        ("vs_core.types.scope_reopen", ("ScopedAdmissionReopen ScopedAdmissionReopenOutcome ")),
         (
             "vs_core.types.search",
             (
@@ -1066,7 +1050,7 @@ _MODULES: dict[str, str] = {
             "vs_core.types.strategy",
             (
                 "Accepted Cancel Command Decision DecisionBase DecisionFeedback Disposition Finish "
-                "Interrupt Measure Operation OperationCodecError OperationRequest Park ProposeWinner "
+                "Interrupt Measure Operation OperationCodecError OperationRequest ProposeWinner "
                 "Rejected RequestTurn SearchDeclaration Settle StartAttempt StrategyState Submission "
                 "Wait WakeAt Withdraw Work "
             ),
@@ -1151,7 +1135,6 @@ __all__ = [
     "AcquisitionStalled",
     "ActionRefusal",
     "AdmissionControl",
-    "AdmissionRequest",
     "AdmitAttempt",
     "AdoptRevision",
     "Adoption",
@@ -1192,12 +1175,9 @@ __all__ = [
     "AttemptId",
     "AttemptOutcome",
     "AttemptPhase",
-    "AttemptReacquireRequested",
     "AttemptReady",
     "AttemptRef",
     "AttemptRegistered",
-    "AttemptReopenRequest",
-    "AttemptReopenRequested",
     "AttemptRequest",
     "AttemptRequested",
     "AttemptSettled",
@@ -1260,9 +1240,7 @@ __all__ = [
     "ContinuationId",
     "ContinuationJobsChanged",
     "ContinuationPhase",
-    "ContinuationReopenRequested",
     "ContinuationRetireRequested",
-    "ContinuationScopeReopened",
     "ContractError",
     "ContractValidationError",
     "ControlAction",
@@ -1446,7 +1424,6 @@ __all__ = [
     "OperationId",
     "OperationKindError",
     "OperationMigration",
-    "OperationNormalizationKind",
     "OperationRef",
     "OperationRegistration",
     "OperationRegistry",
@@ -1462,7 +1439,6 @@ __all__ = [
     "OwnershipSettled",
     "ParallelLimitChanged",
     "ParentVerification",
-    "Park",
     "Parking",
     "PatchExport",
     "PauseOwner",
@@ -1476,7 +1452,6 @@ __all__ = [
     "ProtocolContext",
     "PureOption",
     "QueueEntryRetired",
-    "ReacquisitionReady",
     "Reading",
     "ReconciliationRequest",
     "RecordsChange",
@@ -1517,7 +1492,6 @@ __all__ = [
     "ResourceId",
     "RestartSettleReason",
     "RestartSettled",
-    "RestoreRevision",
     "ResumeAuthorizationReceipt",
     "ResumeAuthorized",
     "ResumeFacts",
@@ -1575,13 +1549,7 @@ __all__ = [
     "SchedulingView",
     "SchemaRef",
     "Scope",
-    "ScopeAdmissionReopened",
     "ScopeInputTarget",
-    "ScopeReopenAdmitted",
-    "ScopeReopenNormalization",
-    "ScopeReopenRequested",
-    "ScopedAdmissionReopen",
-    "ScopedAdmissionReopenOutcome",
     "SearchDeclaration",
     "SearchDef",
     "SearchDriver",

@@ -15,7 +15,6 @@ from .common import (
     Generation,
     ItemId,
     PoolId,
-    RequestId,
     Seconds,
     Value,
 )
@@ -33,26 +32,11 @@ class AttemptRequest(Value):
     pools: tuple[PoolId, ...] = ()
 
 
-class AttemptReopenRequest(Value):
-    """FIFO reentry into capacity without an additional ADMISSION charge."""
-
-    kind: Literal["reopen"] = "reopen"
-    decision_id: DecisionId
-    request_id: RequestId
-    attempt: AttemptRef
-    pools: tuple[PoolId, ...] = ()
-
-
-type AdmissionRequest = Annotated[
-    AttemptRequest | AttemptReopenRequest, Field(discriminator="kind")
-]
-
-
 class Slot(Value):
     """One occupancy episode, retaining capacity through cleanup.
 
     Charge-end and physical release are separate. Match attempt and admission
-    identity so delayed old ready/end/release facts cannot affect reentry.
+    identity so delayed old ready/end/release facts cannot affect a later episode.
     """
 
     attempt: AttemptRef
@@ -72,11 +56,10 @@ class Slot(Value):
 class SchedulingState(Value):
     """Admission queue and capacity ownership; accounting derives from receipts.
 
-    Reopen obeys ordinary FIFO, pools, exclusivity, pause and parallel bounds.
     released_slot_seconds accumulates a released episode's interval once.
     """
 
-    queue: tuple[AdmissionRequest, ...] = ()
+    queue: tuple[AttemptRequest, ...] = ()
     slots: tuple[Slot, ...] = ()
     admission_closed: bool = False
     released_slot_seconds: Seconds = 0.0
@@ -90,7 +73,7 @@ class SchedulingView(Value):
     time minus admission time for charge-running held intervals.
     """
 
-    queue: tuple[AdmissionRequest, ...]
+    queue: tuple[AttemptRequest, ...]
     slots: tuple[Slot, ...]
     available_tokens: Count
     charged: Count
@@ -123,13 +106,6 @@ class SlotReleased(Value):
     admission_id: DecisionId
 
 
-class AttemptReopenRequested(Value):
-    """Scheduling reentry request after exact parked-authority validation."""
-
-    kind: Literal["attempt_reopen_requested"] = "attempt_reopen_requested"
-    request: AttemptReopenRequest
-
-
 class SlotChargeEnded(Value):
     """First closure ends telemetry charging while capacity remains occupied."""
 
@@ -149,8 +125,8 @@ class RegisterAttempt(Value):
 class QueueEntryRetired(Value):
     """Retire only the exact queued episode without inventing an occupied slot.
 
-    Attempts B supplies the queued start/reopen decision identity. Scheduling
-    ignores older parked admissions and never retires a later queue entry.
+    Attempts B supplies the queued start decision identity. Scheduling never retires
+    a later queue entry.
     """
 
     kind: Literal["queue_entry_retired"] = "queue_entry_retired"
@@ -176,7 +152,7 @@ class AdmitAttempt(Value):
     """Admit attempt lifecycle contract."""
 
     kind: Literal["admit_attempt"] = "admit_attempt"
-    request: AdmissionRequest
+    request: AttemptRequest
 
 
 class CloseAdmission(Value):
@@ -215,7 +191,6 @@ class ParallelLimitChanged(Value):
 # Admission/closure are internal signals, never shell I/O.
 type SchedulingEvent = Annotated[
     AttemptRequested
-    | AttemptReopenRequested
     | AttemptReady
     | SlotReleased
     | SlotChargeEnded

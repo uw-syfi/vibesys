@@ -31,7 +31,7 @@ from ._dispatch_episode import (
 from ._dispatch_validation import validate_dispatch_episode, validate_resume_authority
 from ._inspection import validate_inspection_target, validate_registered_owner
 from ._ledger_compaction import compact_ledger
-from ._operator_actions import cancellations, notice, reopen_retirements
+from ._operator_actions import cancellations, notice
 from ._ownership import cleanup_pending
 from ._parked_admission import parked_epoch_drops
 from ._proofs import (
@@ -40,7 +40,6 @@ from ._proofs import (
     committed_stop,
     descriptor_matches,
     observation_for,
-    occupied_episode,
     request_dependency_status,
     requested_stop_mode,
     stop_mode,
@@ -69,7 +68,6 @@ from .types.attempts import (
     AttemptRegistered,
     AttemptsEvent,
     RetireRequested,
-    ScopeReopenAdmitted,
 )
 from .types.common import (
     OPERATOR_ACTIONS,
@@ -82,7 +80,6 @@ from .types.common import (
     KernelNotImplementedError,
     LifecycleClass,
     OperationId,
-    OperationNormalizationKind,
     OperationRef,
     PauseOwner,
     RejectionCode,
@@ -97,7 +94,6 @@ from .types.common import (
     escalate_stop,
 )
 from .types.evaluation import (
-    ContinuationReopenRequested,
     EvaluationEvent,
     MeasurementRequested,
 )
@@ -149,7 +145,6 @@ from .types.records import (
 from .types.scheduling import (
     AdmissionControl,
     AdmitAttempt,
-    AttemptReopenRequest,
     AttemptRequest,
     AttemptRequested,
     ClockAdvanced,
@@ -488,20 +483,6 @@ def _with_requests(receipt: DecisionReceipt, request_ids: list[RequestId]) -> De
     return receipt.model_copy(update={"request_ids": merged})
 
 
-def _validate_reopen_episode(
-    state: CoreState, request: AttemptReopenRequest, decision: Operation
-) -> None:
-    """Reentry uses its normalized target and the scheduler's recorded capacity lease."""
-    normalization = decision.normalized_scope_reopen
-    if normalization is None or request.attempt != normalization.attempt:
-        raise ContractError(
-            ("admission", "attempt"), "reopen target differs from canonical normalization"
-        )
-    occupancy = occupied_episode(state.scheduling.slots, request)
-    if not isinstance(occupancy, Proven):
-        raise ContractError(("admission", "pools"), "reopen requires its recorded capacity episode")
-
-
 def _validate_initial_admission(request: AttemptRequest, decision: StartAttempt) -> None:
     """Queued registration and capacity acquisition use the accepted start payload."""
     expected = {
@@ -518,7 +499,7 @@ def _validate_initial_admission(request: AttemptRequest, decision: StartAttempt)
 def _admission_signal(
     state: CoreState, signal: RegisterAttempt | AdmitAttempt
 ) -> tuple[Transition, tuple[Signal, ...]]:
-    """Resolve original canonical decisions for initial admission and reentry."""
+    """Resolve the original canonical decision for initial admission."""
     origin = accepted_receipt_for(state.run.receipts, signal.request.decision_id, None)
     if not isinstance(origin, Proven):
         raise ContractError(("admission",), "signal requires accepted canonical admission")
@@ -529,29 +510,8 @@ def _admission_signal(
         raise ContractError(
             ("admission", "scope"), "signal requires current-run canonical admission"
         )
-    if isinstance(signal, AdmitAttempt) and isinstance(signal.request, AttemptReopenRequest):
-        if not isinstance(decision, Operation) or decision.normalized_scope_reopen is None:
-            raise ContractError(("admission",), "reopen has no registered normalized operation")
-        original = _operation_prepared(state, decision)
-        if (
-            not isinstance(original, ContinuationReopenRequested)
-            or original.request.request_id != signal.request.request_id
-        ):
-            raise ContractError(
-                ("admission", "request_id"), "reopen differs from canonical operation"
-            )
-        _validate_reopen_episode(state, signal.request, decision)
-        return Transition(state=state), (
-            ScopeReopenAdmitted(
-                attempt=signal.request.attempt,
-                request_id=signal.request.request_id,
-                admission_id=signal.request.decision_id,
-            ),
-        )
     if not isinstance(decision, StartAttempt):
         raise ContractError(("admission",), "signal has no registered StartAttempt")
-    if not isinstance(signal.request, AttemptRequest):
-        raise ContractError(("admission",), "initial admission requires a start request")
     _validate_initial_admission(signal.request, decision)
     if isinstance(signal, RegisterAttempt):
         return Transition(state=state), (
@@ -929,12 +889,7 @@ def _retirement_admission(state: CoreState, target: AttemptRef) -> DecisionId:
         (
             request
             for request in state.scheduling.queue
-            if (isinstance(request, AttemptReopenRequest) and request.attempt == target)
-            or (
-                isinstance(request, AttemptRequest)
-                and request.attempt_id == target.attempt_id
-                and request.generation == target.generation
-            )
+            if request.attempt_id == target.attempt_id and request.generation == target.generation
         ),
         None,
     )
@@ -1053,9 +1008,7 @@ def _decision_signal(state: CoreState, decision: Command) -> tuple[Signal, ...]:
     return signals
 
 
-def _operation_prepared(
-    state: CoreState, decision: Operation
-) -> RequestPrepared | ContinuationReopenRequested:
+def _operation_prepared(state: CoreState, decision: Operation) -> RequestPrepared:
     wire = decision.registered_wire
     if wire is None:
         raise ContractError(("operation",), "missing registered ingress proof")
@@ -1065,13 +1018,6 @@ def _operation_prepared(
         operation=wire,
         retry_limit=state.run.limits.request_retries.limit,
     )
-    if decision.normalized_scope_reopen is not None:
-        request = request.model_copy(
-            update={"request_id": RequestId(root=f"operation:{decision.decision_id.root}")}
-        )
-        return ContinuationReopenRequested(
-            request=request, normalization=decision.normalized_scope_reopen
-        )
     return RequestPrepared(
         request=request,
         until=_accepted_until(state, decision),
@@ -1093,15 +1039,11 @@ def operation_owner(state: CoreState, request: ExecuteRegisteredOperation) -> Ar
         state.run.capabilities,
         request.operation,
         request.operation.schema_ref.lifecycle,
-        declarations[0].normalization,
     )
     if not isinstance(declaration, Proven):
         raise ContractError(("operation",), "dispatch requires an exact offered declaration")
     descriptor = declaration.value
-    if (
-        descriptor.revision_authority != RevisionAuthority.NONE
-        or descriptor.normalization == OperationNormalizationKind.SCOPE_REOPEN
-    ):
+    if descriptor.revision_authority != RevisionAuthority.NONE:
         return Area.ATTEMPTS
     owners = {
         LifecycleClass.QUERY: Area.RECORDS,
@@ -1472,14 +1414,13 @@ def _operator_action(state: CoreState, event: RunControlEvent, dispatch: Dispatc
     """Apply an operator action core has recorded: its notice, then what it changes.
 
     A cancel withdraws each attempt it names as a search's own ``Withdraw`` would, with a
-    ``Cancel`` disposition and the cleanup bound as its limit, and retires each queued
-    reopening it ends; a new parallel limit retries admission. ``_operator_actions`` says what each action changes.
+    ``Cancel`` disposition and the cleanup bound as its limit; a new parallel limit retries
+    admission. ``_operator_actions`` says what each action changes.
     """
     control = event.control
     signals: tuple[Signal, ...] = (notice(state, control, event.now_at),)
     if control.action == "set_max_parallel":
         signals += (ParallelLimitChanged(),)
-    signals += reopen_retirements(state, control)
     result = propagate(state, signals, dispatch)
     within = Within(limit=state.run.limits.cleanup_bound)
     for withdraw in cancellations(state, control):

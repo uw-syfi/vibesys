@@ -31,7 +31,6 @@ from .types.common import (
     DecisionId,
     InvocationRef,
     LifecycleClass,
-    OperationNormalizationKind,
 )
 from .types.evaluation import (
     ContinuationPhase,
@@ -82,7 +81,6 @@ def _registered_session_turn(state: CoreState, request: ExecuteRegisteredOperati
         state.run.capabilities,
         request.operation,
         LifecycleClass.SESSION_TURN,
-        OperationNormalizationKind.NONE,
     )
     if (
         not isinstance(origin, Proven)

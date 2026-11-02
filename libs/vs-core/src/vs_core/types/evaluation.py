@@ -27,7 +27,6 @@ from .common import (
     ResourceId,
     RevisionRef,
     Scope,
-    ScopeReopenNormalization,
     Seconds,
     Value,
     unset,
@@ -372,9 +371,7 @@ class ContinuationPhase(StrEnum):
     WAITING = "waiting"
     AUTHORIZED = "authorized"
     RESUMED = "resumed"
-    PARKED = "parked"
     CANCELLED = "cancelled"
-    REOPENING = "reopening"
     BLOCKED = "blocked"
 
 
@@ -389,7 +386,7 @@ class ResumeAuthorizationReceipt(Value):
     """Immutable publication proof, independent of the current continuation phase.
 
     Continuations B stores this atomically with the single ResumeAuthorized event.
-    Parking/reopening retains the same receipt and logical successor. Only a
+    Only a
     confirmed successor dispatch moves it to RESUMED, never republishes feedback.
     A None history cursor means unavailable, never a certified empty history.
     """
@@ -428,12 +425,9 @@ class ResumeAuthorizationReceipt(Value):
 
 
 class Continuation(Value):
-    """One wait-all authorization with frozen timeout and exact park ownership.
+    """One wait-all authorization with frozen timeout.
 
-    Cancellation is terminal. Reopening requires exact cancelled-job resolutions,
-    current park authority, FIFO capacity and positive retained lease reacquisition.
-    Only confirmed external reopen permits ResumeAuthorized; actual resume uses
-    next_invocation. Unknown reopen retains the new slot and ownership fences.
+    Cancellation is terminal. Actual resume uses next_invocation.
     preceding_submission is the exact previous ResumeAuthorized publication
     cursor, distinct from the original paid-cycle prefix; None means absent or
     unavailable prior publication authority.
@@ -450,9 +444,6 @@ class Continuation(Value):
     """Jobs whose own queue budget ran out while the wait went on, in the order they ran
     out: core cancelled each, and the wait goes on with its other jobs. Each is reported
     unfinished, ``by`` ``QUEUE_BUDGET``, when the wait ends."""
-    park_authority: RequestId | None = None
-    reopen_authority: RequestId | None = None
-    cancelled_resolutions: tuple[ResourceId, ...] = ()
     evidence: tuple[EvidenceRef, ...] = ()
     preceding_submission: EvaluationHistoryCursor | None = None
     authorization_receipt: ResumeAuthorizationReceipt | None = None
@@ -1231,29 +1222,10 @@ class JobTerminationRequested(Value):
 
 
 class ContinuationRetireRequested(Value):
-    """Park or cancel continuation using exact canonical scope-close authority."""
+    """Cancel a continuation: its attempt's scope is closing."""
 
     kind: Literal["continuation_retire_requested"] = "continuation_retire_requested"
     continuation_id: ContinuationId
-    disposition: Literal["park", "cancel"]
-    park_authority: RequestId | None = None
-
-
-class ContinuationReopenRequested(Value):
-    """Kernel routes normalized guarded reopening to evaluation authority."""
-
-    kind: Literal["continuation_reopen_requested"] = "continuation_reopen_requested"
-    request: ExecuteRegisteredOperation
-    normalization: ScopeReopenNormalization
-
-
-class ContinuationScopeReopened(Value):
-    """Positive exact park-authority proof permits canonical resume authorization."""
-
-    kind: Literal["continuation_scope_reopened"] = "continuation_scope_reopened"
-    continuation_id: ContinuationId
-    park_authority: RequestId
-    observation: Observation
 
 
 class JobsDrainRequested(Value):
@@ -1262,7 +1234,7 @@ class JobsDrainRequested(Value):
     kind: Literal["jobs_drain_requested"] = "jobs_drain_requested"
     scope: Scope
     authority: RequestId
-    disposition: Literal["park", "cancel", "settle"]
+    disposition: Literal["cancel", "settle"]
 
 
 class RunJobsCancelRequested(Value):
@@ -1311,8 +1283,6 @@ type EvaluationEvent = Annotated[
     | ContinuationJobsChanged
     | JobTerminationRequested
     | ContinuationRetireRequested
-    | ContinuationReopenRequested
-    | ContinuationScopeReopened
     | JobsDrainRequested
     | RunJobsCancelRequested
     | MeasurementSubmissionObserved
