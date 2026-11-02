@@ -50,8 +50,9 @@ type faultConn struct {
 	fault func(Op) error
 }
 
-// The driver's connection implements every one of these; the assertions below fail at the first
-// use if a driver upgrade ever stops, and the wrapper then needs the matching change.
+// inner finds the context methods of the driver's connection, which the wrapper forwards to. The
+// driver implements all of them; if an upgrade ever stops, the first write says so, and the wrapper
+// needs the matching change.
 func (c *faultConn) inner() (driver.ConnBeginTx, driver.ConnPrepareContext, driver.ExecerContext, driver.QueryerContext, error) {
 	b, bok := c.Conn.(driver.ConnBeginTx)
 	p, pok := c.Conn.(driver.ConnPrepareContext)

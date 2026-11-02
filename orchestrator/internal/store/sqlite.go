@@ -42,7 +42,7 @@ const DefaultStepRows = 1000
 //
 // NORMAL means a power cut may lose the last commits, but never leaves a file that is not a prefix
 // of what was committed: the daemon's recovery relies on exactly that, and the crash tests check
-// it at every boundary of a commit. A process crash loses nothing that Commit returned.
+// it at every statement and COMMIT of a commit. A process crash loses nothing that Commit returned.
 type SQLite struct {
 	path    string
 	fault   func(Op) error

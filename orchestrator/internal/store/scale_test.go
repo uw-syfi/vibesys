@@ -159,8 +159,12 @@ func TestMeasureScale(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+		end, err := s.Snapshot()
+		if err != nil {
+			t.Fatal(err)
+		}
 		sample(tag+" events of a run after tail", func(i int) {
-			if _, err := s.EventsAfter(runID(r.IntN(agents)), 1<<30, 100); err != nil {
+			if _, err := s.EventsAfter(runID(r.IntN(agents)), end.Sequence, 100); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -231,12 +235,47 @@ func TestMeasureScale(t *testing.T) {
 	})
 	report("recover from a checkpoint and a tail of 10000 events: %v", d.Round(time.Millisecond))
 	reads("cold")
-	d = timed(func() {
+	// Commits go on beside a Compact and a Verify; the slowest of them is the pause a client sees.
+	stall := func(name string, f func()) {
+		stop, done := make(chan struct{}), make(chan [3]time.Duration)
+		go func() {
+			var worst, total time.Duration
+			n := 0
+			for {
+				select {
+				case <-stop:
+					done <- [3]time.Duration{worst, total / time.Duration(max(n, 1)), time.Duration(n)}
+					return
+				default:
+				}
+				start := time.Now()
+				_, err := s.Commit(store.Result{Events: []core.Event{{Run: "run-00", At: at, Body: core.Item{
+					ID: core.ItemID(fmt.Sprintf("stall-%s-%d", name, n)), Turn: "turn-stall", Agent: "agent-stall-" + core.AgentID(name),
+					Ordinal: uint32(n + 1), Status: core.ItemFinished, At: at, Body: core.Assistant{Text: "x"},
+				}}}})
+				if err != nil {
+					panic(err) // A scale measurement has no test goroutine to fail from here.
+				}
+				took := time.Since(start)
+				worst, total, n = max(worst, took), total+took, n+1
+			}
+		}()
+		elapsed := timed(f)
+		close(stop)
+		got := <-done
+		report("%s took %v; %d commits ran beside it, mean %v, slowest %v", name, elapsed.Round(time.Millisecond), got[2],
+			got[1].Round(time.Microsecond), got[0].Round(time.Microsecond))
+	}
+	stall("compact", func() {
+		if _, err := s.Compact(store.Retention{}, at.Add(1000*time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+	})
+	stall("verify", func() {
 		if err := s.Verify(); err != nil {
 			t.Fatal(err)
 		}
 	})
-	report("verify everything: %v", d.Round(time.Millisecond))
 }
 
 func pct(d []time.Duration, p int) time.Duration {
