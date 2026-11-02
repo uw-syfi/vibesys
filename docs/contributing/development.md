@@ -64,6 +64,43 @@ The main framework boundaries are:
 
 ## Local development
 
+### Check your environment
+
+Run one command to find out whether a machine can run the pre-push gate and the tests:
+
+```bash
+./support/repoctl/repoctl doctor          # check; each failure names its exact fix, exit 1 if any fails
+./support/repoctl/repoctl doctor --fix    # also do the safe repairs, then check again
+eval "$(./support/repoctl/repoctl doctor --env)"   # export what the fixes need into this shell
+```
+
+It takes about a second. It checks what has cost contributors time:
+
+- `python3` on `PATH` is at least the `requires-python` of `pyproject.toml`. The gate's policy
+  scripts run `python3`, and the first one on `PATH` is the system's, often older than the
+  project's `.venv`. The fix puts `.venv/bin` first; `--fix` runs `uv sync` when there is no venv.
+- `bun` is the version pinned in `packaging/fetch_bun.py`, and it is the first `bun` on `PATH`.
+- `buf` is available (it comes from `uv sync --group proto`), so generated code can be refreshed.
+- `TMPDIR` (or `/tmp`) is on a local disk, on the same file system as the repository, and short.
+  A network file system breaks Go tests and unix sockets, and a repository and `TMPDIR` on
+  different file systems break a local clone. The fix offers a directory: `$VIBESYS_DEV_TMPDIR` if
+  you set it, else `$XDG_RUNTIME_DIR/vibesys`, else `/var/tmp/vibesys-$USER`, the first that is local.
+- `clients/node_modules` is fully installed. A directory without pnpm's `.modules.yaml` was
+  installed halfway and fails the gate; `--fix` removes it and runs `pnpm install --frozen-lockfile`.
+- `GOFLAGS` has `-buildvcs=false` in a linked worktree, or Go builds fail with "error obtaining VCS
+  status".
+- `core.hooksPath` enables the gate; the working tree's changes all have an owner in
+  `.repoctl/components.toml` (an unowned file, such as an uncommitted new script, makes the gate
+  refuse); and every script `AGENTS.md` names exists.
+
+`--fix` only does repairs a repository owns and can recreate: install what is missing, remove a
+half-installed `node_modules`, enable the hook, create the offered temporary directory. It never
+changes a hooks path you set yourself, and it cannot change your shell, which is what `--env` is for.
+Machine-specific values are never written into the repository: they are read from your
+environment. What is checked, and the pins it reads, is the policy in `.repoctl/doctor.toml`.
+When the gate refuses a push and the doctor finds a problem on the machine, the gate names it and
+points here.
+
 ### Work from a source checkout
 
 Install Python 3.12+, Git, and [uv](https://docs.astral.sh/uv/), then clone the
@@ -466,6 +503,9 @@ neither runs nor lists, so the two cannot drift.
 Every push already runs a faster subset of these through the pre-push gate below.
 
 ### Pre-push gate
+
+If the gate fails for a reason that looks like your machine rather than your change, run
+`./support/repoctl/repoctl doctor` first (see [Check your environment](#check-your-environment)).
 
 Every `git push` runs `repoctl gate` (`.githooks/pre-push`) and is refused when it fails. The gate
 is the fast subset of what CI runs for the change, aimed at about 60 seconds on a laptop: the

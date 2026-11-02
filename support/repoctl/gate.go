@@ -214,10 +214,13 @@ func runGate(root, configPath string, g graph, args []string, out io.Writer) err
 	// the interrupt cancels the lanes instead.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return runGateWith(ctx, root, configPath, g, args, out, newRunner, time.Now)
+	hint := func() string { return gateSetupHint(root, configPath, g) }
+	return runGateWith(ctx, root, configPath, g, args, out, newRunner, time.Now, hint)
 }
 
-func runGateWith(parent context.Context, root, configPath string, g graph, args []string, out io.Writer, newRunner func(io.Writer) execution.Runner, now func() time.Time) error {
+// runGateWith runs the gate. When it refuses the push, setupHint (nil for none) may add a line
+// that points at the doctor if this machine's setup could explain the failure.
+func runGateWith(parent context.Context, root, configPath string, g graph, args []string, out io.Writer, newRunner func(io.Writer) execution.Runner, now func() time.Time, setupHint func() string) error {
 	fs := flag.NewFlagSet("gate", flag.ContinueOnError)
 	base := fs.String("base", "origin/"+g.DefaultBase, "Base revision")
 	head := fs.String("head", "HEAD", "Head revision")
@@ -257,5 +260,16 @@ func runGateWith(parent context.Context, root, configPath string, g graph, args 
 	defer cancel()
 	started := now()
 	results := runLanes(ctx, root, lanes, newRunner)
-	return reportGate(out, results, now().Sub(started), ctx)
+	return withSetupHint(out, reportGate(out, results, now().Sub(started), ctx), setupHint)
+}
+
+// withSetupHint adds the setup hint's line, when it has one, to a refused push and returns the
+// refusal unchanged. A gate that passed says nothing more.
+func withSetupHint(out io.Writer, refusal error, setupHint func() string) error {
+	if refusal != nil && setupHint != nil {
+		if line := setupHint(); line != "" {
+			fmt.Fprintln(out, line)
+		}
+	}
+	return refusal
 }
