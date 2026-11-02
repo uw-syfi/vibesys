@@ -184,11 +184,11 @@ def every_order() -> list[Held]:
     return cases
 
 
-def killable() -> list[Held]:
-    """The orders a killed run is swept over: those where the restarted host runs the scope's early work again before the search leaves.
+def settles_over_an_open_inspection(config: Held) -> bool:
+    """The orders whose restarted host settles the scope while an inspection of its session setup is open.
 
-    A kill that lands while a turn's render or session setup is in flight, with the search leaving
-    the workspace before they run again, breaks two things the sweep does not claim (below): the
-    render's decision is never answered, and the scope settles with a session inspection open.
+    A kill that lands while a turn's session setup is in flight, with the search leaving the
+    workspace before the setup runs again, settles the scope over the setup's open inspection
+    (#3716). Closure is not claimed of these; progress is claimed of every order.
     """
-    return [c for c in every_order() if not c.turn or c.leaves_at > 1.0]
+    return config.turn and config.leaves_at <= 1.0

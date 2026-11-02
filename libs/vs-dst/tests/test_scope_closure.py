@@ -38,7 +38,7 @@ from vs_dst.api import (
 from vs_runtime.api.infrastructure import PauseRequest
 from vs_sim.api.testing import examples
 
-from ._scoped import Held, HeldWorld, every_order, killable
+from ._scoped import Held, HeldWorld, every_order, settles_over_an_open_inspection
 
 if TYPE_CHECKING:
     from vs_core.api import AttemptRef, CoreState, OperationRegistry, Request
@@ -183,18 +183,34 @@ def _ends(records: tuple[Record, ...]) -> int:
     return sum(r.body is not None and r.body.field == "run_ended" for r in records)
 
 
-def _after(interrupted: Interrupted, point: Interruption, *, drained: bool = False) -> None:
+def _after(
+    interrupted: Interrupted, point: Interruption, config: Held, *, drained: bool = False
+) -> None:
     """The run recovered from ``point``, and its log still closes the scope as promised."""
     why = f"{interrupted.interruption} after {point}: {interrupted.detail}"
     assert interrupted.never_stuck(), f"progress: {interrupted.outcome.value}, {why}"
     assert interrupted.outcome is not Outcome.ERRORED, why
     assert 1 <= _ends(interrupted.log_records) <= 1 + drained, f"one ending, {why}"
-    check_closure(interrupted.log_records, _world(interrupted.world), why)
+    if not settles_over_an_open_inspection(config):
+        check_closure(interrupted.log_records, _world(interrupted.world), why)
+
+
+def test_a_kill_with_work_of_a_closing_scope_in_flight_never_leaves_the_run_waiting() -> None:
+    """The scope's render or measurement, never begun when the search leaves, is still answered (#3712).
+
+    The restarted host finds the scope closing before the interrupted step runs again, so core
+    ends it itself, unsent. Its asker hears that, and the run ends.
+    """
+    for config in every_order():
+        normal = simulate(HeldWorld(config), STEP_LOOP)
+        for point in normal.interruptions(Action.KILL, Moment.IN_FLIGHT):
+            interrupted = normal.interrupt(point)
+            assert interrupted.never_stuck(), f"{config} {point}: {interrupted.detail}"
 
 
 @settings(max_examples=examples(pr=15, nightly=300), deadline=None)
 @given(
-    config=st.sampled_from(killable()),
+    config=st.sampled_from(every_order()),
     action=st.sampled_from((Action.KILL, Action.PAUSE, Action.STOP)),
     moment=st.sampled_from((Moment.BEFORE_COMMIT, Moment.AFTER_COMMIT, Moment.IN_FLIGHT)),
     choice=st.integers(min_value=0, max_value=10_000),
@@ -207,12 +223,12 @@ def test_a_run_interrupted_anywhere_still_closes_its_scope_in_order(
     points = normal.interruptions(action, moment)
     point = points[choice % len(points)]
 
-    _after(normal.interrupt(point), point, drained=action is Action.STOP)
+    _after(normal.interrupt(point), point, config, drained=action is Action.STOP)
 
 
 @settings(max_examples=examples(pr=10, nightly=200), deadline=None)
 @given(
-    config=st.sampled_from(killable()),
+    config=st.sampled_from(every_order()),
     second=st.sampled_from((Action.KILL, Action.STOP, Action.PAUSE)),
     choice=st.integers(min_value=0, max_value=10_000),
 )
@@ -237,12 +253,12 @@ def test_a_second_interruption_inside_the_clear_still_closes_the_scope_in_order(
         else normal.interrupt(first, then=point)
     )
 
-    _after(interrupted, first, drained=second is Action.STOP)
+    _after(interrupted, first, config, drained=second is Action.STOP)
 
 
 @settings(max_examples=examples(pr=10, nightly=200), deadline=None)
 @given(
-    config=st.sampled_from(killable()),
+    config=st.sampled_from(every_order()),
     choice=st.integers(min_value=0, max_value=10_000),
     kill=st.booleans(),
 )
@@ -260,4 +276,4 @@ def test_an_operator_pause_at_any_point_still_closes_the_scope_in_order(
 
     interrupted = normal.operate([pause], kills[choice % len(kills)] if kill else None)
 
-    _after(interrupted, point)
+    _after(interrupted, point, config)
