@@ -236,6 +236,42 @@ func TestCommandsRunAsTheInvokingUser(t *testing.T) {
 	}
 }
 
+func TestACommandWritesToTheScratchDirectoryAndTheHostReadsIt(t *testing.T) {
+	scope := "t" + randomHex(6)
+	t.Cleanup(func() { removeScope(scope) })
+	env, err := newProvider(clock.System{}, scope, nil, dockerfile).Environment(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, scratch := t.TempDir(), t.TempDir()
+	for _, p := range []*string{&dir, &scratch} {
+		if real, err := evalSymlinks(*p); err == nil {
+			*p = real
+		}
+	}
+	var out strings.Builder
+	ctx, cancel := context.WithTimeout(context.Background(), envtest.Backstop)
+	defer cancel()
+	res, err := env.Run(ctx, core.Execution{
+		Checkout: core.Checkout{Commit: target.Commit, Dir: dir}, Scratch: scratch,
+		Argv: []string{"sh", "-c", `printf '{"ops": 1}' > "$1/sample-1.out"`, "sh", scratch}, Timeout: envtest.Backstop,
+	}, &syncWriter{b: &out})
+	if err != nil || res.Kind != core.ExecExited || res.ExitCode != 0 {
+		t.Fatalf("Run = %+v, %v, output %q", res, err, out.String())
+	}
+	data, err := os.ReadFile(scratch + "/sample-1.out")
+	if err != nil || string(data) != `{"ops": 1}` {
+		t.Fatalf("the host reads %q, %v from the scratch directory", data, err)
+	}
+	info, err := os.Stat(scratch + "/sample-1.out")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if uid := info.Sys().(*syscall.Stat_t).Uid; int(uid) != os.Getuid() {
+		t.Errorf("the file belongs to user %d, want the invoking user %d", uid, os.Getuid())
+	}
+}
+
 func TestAFinishedRunLeavesNoContainer(t *testing.T) {
 	scope := "t" + randomHex(6)
 	t.Cleanup(func() { removeScope(scope) })

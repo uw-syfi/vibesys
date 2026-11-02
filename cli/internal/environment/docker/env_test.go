@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"math/rand/v2"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -120,7 +121,7 @@ func TestTheFingerprintPinsTheImageAndTheMachine(t *testing.T) {
 func TestARunStartsItsContainerAsTheUserInTheCheckout(t *testing.T) {
 	s := newScene(t, options{})
 	f := s.fingerprint()
-	x := core.Execution{Checkout: checkout(t), Argv: []string{"mark", "up", ";", "hold", "go"}, Timeout: time.Hour}
+	x := core.Execution{Checkout: checkout(t), Scratch: "/memory/scratch-1", Argv: []string{"mark", "up", ";", "hold", "go"}, Timeout: time.Hour}
 	done := make(chan struct{})
 	var wg sync.WaitGroup
 	wg.Go(func() {
@@ -145,8 +146,9 @@ func TestARunStartsItsContainerAsTheUserInTheCheckout(t *testing.T) {
 	if spec.User != (docker.User{UID: 1000, GID: 1000}) || spec.Dir != x.Checkout.Dir {
 		t.Errorf("runs as %+v in %q, want the invoking user in the checkout %q", spec.User, spec.Dir, x.Checkout.Dir)
 	}
-	if len(spec.Mounts) != 1 || spec.Mounts[0] != (docker.Mount{Host: x.Checkout.Dir, Container: x.Checkout.Dir}) {
-		t.Errorf("mounts %+v, want the checkout at its own path, writable", spec.Mounts)
+	wantMounts := []docker.Mount{{Host: x.Checkout.Dir, Container: x.Checkout.Dir}, {Host: x.Scratch, Container: x.Scratch}}
+	if !slices.Equal(spec.Mounts, wantMounts) {
+		t.Errorf("mounts %+v, want the checkout and the scratch directory, each at its own path, writable", spec.Mounts)
 	}
 	for k, want := range map[string]string{docker.LabelOwner: docker.Owner, docker.LabelScope: "test"} {
 		if spec.Labels[k] != want {
@@ -452,3 +454,26 @@ func TestARunIDThatCannotNameAContainerIsRefused(t *testing.T) {
 type fixedID string
 
 func (f fixedID) New() string { return string(f) }
+
+func TestARunWithoutScratchMountsOnlyTheCheckout(t *testing.T) {
+	s := newScene(t, options{})
+	s.fingerprint()
+	x := core.Execution{Checkout: checkout(t), Argv: []string{"mark", "up", ";", "hold", "go"}, Timeout: time.Hour}
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		if _, err := s.env.Run(context.Background(), x, &bytes.Buffer{}); err != nil {
+			t.Error(err)
+		}
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), envtest.Backstop)
+	defer cancel()
+	if !s.world.Reached(ctx, "up") {
+		t.Fatal("the command never started")
+	}
+	boxes := s.daemon.Containers()
+	if len(boxes) != 1 || len(boxes[0].Spec.Mounts) != 1 {
+		t.Errorf("containers %+v, want one with only the checkout mounted", boxes)
+	}
+	s.world.Release("go")
+	wg.Wait()
+}

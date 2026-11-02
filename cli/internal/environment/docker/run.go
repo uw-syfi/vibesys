@@ -98,7 +98,7 @@ func (r *run) prepareAndExecute() (core.ExecOutcome, error) {
 		Labels: runLabels(p.cfg.Scope, id),
 		User:   p.cfg.User,
 		Dir:    r.x.Checkout.Dir,
-		Mounts: []Mount{{Host: r.x.Checkout.Dir, Container: r.x.Checkout.Dir}},
+		Mounts: r.mounts(),
 		// The user has no home in the image, and tools want one they can write to.
 		Env: map[string]string{"HOME": "/tmp"},
 	})
@@ -110,6 +110,18 @@ func (r *run) prepareAndExecute() (core.ExecOutcome, error) {
 		Cancelled: r.ctx.Done(),
 		Pause:     func() (<-chan struct{}, func()) { return p.cfg.Timers.Timeout(p.cfg.ProbePause) },
 	}, r.sink)
+}
+
+// mounts are the directories the commands see: the checkout, and the scratch directory when the
+// caller named one, each at its own path so that a path the caller hands a command means the same
+// inside the container. Both are writable: the checkout holds the build, and the scratch directory
+// holds what the caller reads after the command ends.
+func (r *run) mounts() []Mount {
+	mounts := []Mount{{Host: r.x.Checkout.Dir, Container: r.x.Checkout.Dir}}
+	if r.x.Scratch != "" {
+		mounts = append(mounts, Mount{Host: r.x.Scratch, Container: r.x.Scratch})
+	}
+	return mounts
 }
 
 // end removes the container and everything in it, waits for the engine's side of it to finish, and
