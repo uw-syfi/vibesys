@@ -20,37 +20,53 @@ import (
 // Every request is answered, whatever happens, unless the App closes: an unanswered request would
 // hold the machine for good. The one exception is SignalCancel, which the job's outcome answers.
 func (a *App) startEffect(r lifecycle.Request, scopes map[lifecycle.StoreID]Scope, handles map[lifecycle.Ref]supervisor.Handle) {
-	a.group.Go(a.effectOf(r, scopes, handles))
+	ref, run := a.effectOf(r, scopes, handles)
+	ctx := named(a.ctx, fmt.Sprintf("%T %s", r, ref))
+	a.group.Go(func() { run(ctx) })
 }
 
-// effectOf returns the effect of a request, bound to what the loop holds now.
-func (a *App) effectOf(r lifecycle.Request, scopes map[lifecycle.StoreID]Scope, handles map[lifecycle.Ref]supervisor.Handle) func() {
+type effectKey struct{}
+
+func named(ctx context.Context, name string) context.Context {
+	return context.WithValue(ctx, effectKey{}, name)
+}
+
+// EffectOf names the effect a context belongs to, and is empty outside one. Effects that start
+// together make calls that can look alike, and the order they arrive in is the scheduler's: this
+// is what tells them apart, for a simulation that must decide their order itself.
+func EffectOf(ctx context.Context) string {
+	name, _ := ctx.Value(effectKey{}).(string)
+	return name
+}
+
+// effectOf returns the effect of a request, bound to what the loop holds now, and the job it is for.
+func (a *App) effectOf(r lifecycle.Request, scopes map[lifecycle.StoreID]Scope, handles map[lifecycle.Ref]supervisor.Handle) (lifecycle.Ref, func(context.Context)) {
 	switch r := r.(type) {
 	case lifecycle.LaunchRequest:
 		scope, known := scopes[r.Ref.Store]
-		return func() { a.launch(r.Ref, scope, known) }
+		return r.Ref, func(ctx context.Context) { a.launch(ctx, r.Ref, scope, known) }
 	case lifecycle.Adopt:
 		scope, h := scopes[r.Ref.Store], handles[r.Ref]
-		return func() { a.follow(r, scope, h) }
+		return r.Ref, func(ctx context.Context) { a.follow(ctx, r, scope, h) }
 	case lifecycle.SignalCancel:
 		h := handles[r.Ref]
-		return func() { a.signalCancel(r, h) }
+		return r.Ref, func(ctx context.Context) { a.signalCancel(ctx, r, h) }
 	case lifecycle.Stop:
 		h := handles[r.Ref]
-		return func() { a.stopJob(r, h) }
+		return r.Ref, func(ctx context.Context) { a.stopJob(ctx, r, h) }
 	case lifecycle.Move:
 		scope, known, h := scopes[r.Ref.Store], hasScope(scopes, r.Ref), handles[r.Ref]
-		return func() { a.move(r, scope, known, h) }
+		return r.Ref, func(ctx context.Context) { a.move(ctx, r, scope, known, h) }
 	case lifecycle.Discard:
 		h := handles[r.Ref]
-		return func() { a.discard(r, h) }
+		return r.Ref, func(ctx context.Context) { a.discard(ctx, r, h) }
 	case lifecycle.ArmRetry:
-		return func() { a.armRetry(r.Ref) }
+		return r.Ref, func(ctx context.Context) { a.armRetry(ctx, r.Ref) }
 	case lifecycle.Reexamine:
 		scope, known := scopes[r.Ref.Store]
-		return func() { a.reexamine(r.Ref, scope, known) }
+		return r.Ref, func(ctx context.Context) { a.reexamine(ctx, r.Ref, scope, known) }
 	}
-	return func() {}
+	return lifecycle.Ref{}, func(context.Context) {}
 }
 
 func hasScope(scopes map[lifecycle.StoreID]Scope, ref lifecycle.Ref) bool {
@@ -80,7 +96,7 @@ func (a *App) retry(ctx context.Context, do func(ctx context.Context) error) err
 
 // sleep waits for d, and reports false when ctx or the App ends first.
 func (a *App) sleep(ctx context.Context, d time.Duration) bool {
-	fired, stop := a.cfg.Timers.Timeout(d)
+	fired, stop := a.cfg.Timers.Timeout(ctx, d)
 	defer stop()
 	select {
 	case <-fired:
@@ -174,14 +190,14 @@ func (a *App) record(ctx context.Context, st store.Store, t core.Transition) err
 // starts third, when the machine asks to follow it. A crash before the second step leaves a queued
 // job and a parked supervisor, which the next start discards; a crash after it leaves a running
 // job whose supervisor the next start adopts and starts.
-func (a *App) launch(ref lifecycle.Ref, scope Scope, known bool) {
+func (a *App) launch(ctx context.Context, ref lifecycle.Ref, scope Scope, known bool) {
 	if !known {
 		a.tell(lifecycle.LaunchFailed{Ref: ref, Failure: *errNoScope, At: a.now()})
 		return
 	}
-	h, gone, err := a.prepare(ref, scope)
+	h, gone, err := a.prepare(ctx, ref, scope)
 	switch {
-	case a.ctx.Err() != nil:
+	case ctx.Err() != nil:
 	case gone:
 		a.tell(lifecycle.Closed{Ref: ref})
 	case err != nil:
@@ -195,12 +211,12 @@ func (a *App) launch(ref lifecycle.Ref, scope Scope, known bool) {
 // prepare does the steps of a launch up to and including recording the job as running. gone says
 // the job is not queued any more, so there is nothing to launch. A failure can leave a parked
 // supervisor, which the handle reaches and the job's end releases.
-func (a *App) prepare(ref lifecycle.Ref, scope Scope) (h supervisor.Handle, gone bool, err error) {
-	st, err := a.openStore(a.ctx, scope)
+func (a *App) prepare(ctx context.Context, ref lifecycle.Ref, scope Scope) (h supervisor.Handle, gone bool, err error) {
+	st, err := a.openStore(ctx, scope)
 	if err != nil {
 		return nil, false, err
 	}
-	job, err := a.readJob(a.ctx, st, ref.Job)
+	job, err := a.readJob(ctx, st, ref.Job)
 	if err != nil {
 		return nil, false, err
 	}
@@ -219,12 +235,12 @@ func (a *App) prepare(ref lifecycle.Ref, scope Scope) (h supervisor.Handle, gone
 	if err != nil {
 		return nil, false, err
 	}
-	fingerprint, err := env.Fingerprint(a.ctx)
+	fingerprint, err := env.Fingerprint(ctx)
 	if err != nil {
 		return nil, false, err
 	}
 	launch := lifecycle.Launch{Repository: scope.Repository, Task: scope.Task, Job: job.ID, Spec: spec}
-	err = a.call(a.ctx, func(ctx context.Context) error {
+	err = a.call(ctx, func(ctx context.Context) error {
 		var err error
 		h, err = a.cfg.Supervisors.Spawn(ctx, launch)
 		return err
@@ -232,7 +248,7 @@ func (a *App) prepare(ref lifecycle.Ref, scope Scope) (h supervisor.Handle, gone
 	if err != nil {
 		return nil, false, err
 	}
-	return h, false, a.record(a.ctx, st, core.Transition{
+	return h, false, a.record(ctx, st, core.Transition{
 		Job: job.ID, From: core.JobQueued, To: core.JobRunning, At: a.now(), Environment: &fingerprint,
 	})
 }
@@ -241,7 +257,7 @@ func (a *App) prepare(ref lifecycle.Ref, scope Scope) (h supervisor.Handle, gone
 // store as it appears, and tells the machine how the job ended. A failure is tried again from what
 // the store holds, so no byte is lost or stored twice, and the attempts count from the last time
 // output reached the store. What cannot be fixed that way ends in FollowFailed.
-func (a *App) follow(r lifecycle.Adopt, scope Scope, h supervisor.Handle) {
+func (a *App) follow(ctx context.Context, r lifecycle.Adopt, scope Scope, h supervisor.Handle) {
 	if h == nil {
 		a.tell(lifecycle.SupervisorLost{Ref: r.Ref, At: a.now()})
 		return
@@ -249,19 +265,19 @@ func (a *App) follow(r lifecycle.Adopt, scope Scope, h supervisor.Handle) {
 	delay, attempts := a.cfg.Retry.First, 0
 	cancelFirst := r.CancelFirst
 	for {
-		st, err := a.cfg.Stores.Open(a.ctx, scope)
+		st, err := a.cfg.Stores.Open(ctx, scope)
 		var outcome lifecycle.Outcome
 		progress := false
 		if err == nil && cancelFirst {
-			if err = a.supervisorCall(h.Cancel, r.CancelReason); err == nil {
+			if err = a.supervisorCall(ctx, h.Cancel, r.CancelReason); err == nil {
 				cancelFirst = false
 			}
 		}
 		if err == nil {
-			outcome, progress, err = a.followOnce(r.Ref.Job, st, h)
+			outcome, progress, err = a.followOnce(ctx, r.Ref.Job, st, h)
 		}
 		switch {
-		case a.ctx.Err() != nil:
+		case ctx.Err() != nil:
 			return
 		case err == nil:
 			a.tell(lifecycle.Finished{Ref: r.Ref, Outcome: outcome, At: a.now()})
@@ -279,7 +295,7 @@ func (a *App) follow(r lifecycle.Adopt, scope Scope, h supervisor.Handle) {
 			a.tell(lifecycle.FollowFailed{Ref: r.Ref, Failure: failureOf(err), At: a.now()})
 			return
 		}
-		if !a.sleep(a.ctx, delay) {
+		if !a.sleep(ctx, delay) {
 			return
 		}
 		delay = min(delay*2, a.cfg.Retry.Longest)
@@ -287,33 +303,33 @@ func (a *App) follow(r lifecycle.Adopt, scope Scope, h supervisor.Handle) {
 }
 
 // supervisorCall makes one bounded call to a supervisor that takes a reason.
-func (a *App) supervisorCall(do func(context.Context, string) error, reason string) error {
-	ctx, done := clock.Deadline(a.ctx, a.cfg.Timers, a.cfg.CallTimeout)
+func (a *App) supervisorCall(ctx context.Context, do func(context.Context, string) error, reason string) error {
+	ctx, done := clock.Deadline(ctx, a.cfg.Timers, a.cfg.CallTimeout)
 	defer done()
 	return do(ctx, reason)
 }
 
 // followOnce is one attempt to follow a job from what the store holds.
-func (a *App) followOnce(job core.JobID, st store.Store, h supervisor.Handle) (lifecycle.Outcome, bool, error) {
-	start, done := clock.Deadline(a.ctx, a.cfg.Timers, a.cfg.CallTimeout)
+func (a *App) followOnce(ctx context.Context, job core.JobID, st store.Store, h supervisor.Handle) (lifecycle.Outcome, bool, error) {
+	start, done := clock.Deadline(ctx, a.cfg.Timers, a.cfg.CallTimeout)
 	err := h.Start(start)
 	done()
 	if err != nil {
 		return lifecycle.Outcome{}, false, err
 	}
-	offset, err := logSize(a.ctx, st, job)
+	offset, err := logSize(ctx, st, job)
 	if err != nil {
 		return lifecycle.Outcome{}, false, err
 	}
-	return a.pump(job, st, h, offset)
+	return a.pump(ctx, job, st, h, offset)
 }
 
 // pump passes a job's output to its store from the offset and returns its outcome. Output is
 // written in batches, when a batch is full and when it has waited long enough, so a job that
 // prints steadily does not make a write per line; the last batch is written before the outcome.
 // progress says output reached the store.
-func (a *App) pump(job core.JobID, st store.Store, h supervisor.Handle, offset uint64) (o lifecycle.Outcome, progress bool, err error) {
-	ctx, cancel := context.WithCancel(a.ctx)
+func (a *App) pump(ctx context.Context, job core.JobID, st store.Store, h supervisor.Handle, offset uint64) (o lifecycle.Outcome, progress bool, err error) {
+	ctx, cancel := context.WithCancel(ctx)
 	var follower owned.Group
 	defer follower.Wait()
 	defer cancel()
@@ -361,7 +377,7 @@ func (a *App) pump(job core.JobID, st store.Store, h supervisor.Handle, offset u
 					return lifecycle.Outcome{}, progress, err
 				}
 			case due == nil:
-				due, stopTimer = a.cfg.Timers.Timeout(a.cfg.LogBatchDelay)
+				due, stopTimer = a.cfg.Timers.Timeout(ctx, a.cfg.LogBatchDelay)
 			}
 		case <-due:
 			if err := flush(); err != nil {
@@ -379,11 +395,11 @@ func (a *App) pump(job core.JobID, st store.Store, h supervisor.Handle, offset u
 // signalCancel passes a cancel on to a supervisor. A cancel that cannot be delivered changes
 // nothing about the job: its outcome is still what ends it, and a supervisor that is gone is
 // reported by following it.
-func (a *App) signalCancel(r lifecycle.SignalCancel, h supervisor.Handle) {
+func (a *App) signalCancel(ctx context.Context, r lifecycle.SignalCancel, h supervisor.Handle) {
 	if h == nil {
 		return
 	}
-	if err := a.call(a.ctx, func(ctx context.Context) error { return h.Cancel(ctx, r.Reason) }); err != nil && a.ctx.Err() == nil {
+	if err := a.call(ctx, func(ctx context.Context) error { return h.Cancel(ctx, r.Reason) }); err != nil && ctx.Err() == nil {
 		a.cfg.Logf("job %s: asking its supervisor to cancel: %v", r.Ref, err)
 	}
 }
@@ -392,15 +408,15 @@ func (a *App) signalCancel(r lifecycle.SignalCancel, h supervisor.Handle) {
 const pastTheEnd = 1 << 62
 
 // stopJob ends the command of a job the daemon gave up following and learns how it ended.
-func (a *App) stopJob(r lifecycle.Stop, h supervisor.Handle) {
+func (a *App) stopJob(ctx context.Context, r lifecycle.Stop, h supervisor.Handle) {
 	if h == nil {
 		a.tell(lifecycle.SupervisorLost{Ref: r.Ref, At: a.now()})
 		return
 	}
 	var outcome lifecycle.Outcome
-	err := a.call(a.ctx, func(ctx context.Context) error { return h.Cancel(ctx, r.Reason) })
+	err := a.call(ctx, func(ctx context.Context) error { return h.Cancel(ctx, r.Reason) })
 	if err == nil {
-		err = a.retry(a.ctx, func(ctx context.Context) error {
+		err = a.retry(ctx, func(ctx context.Context) error {
 			ctx, done := clock.Deadline(ctx, a.cfg.Timers, a.cfg.StopTimeout)
 			defer done()
 			var err error
@@ -409,7 +425,7 @@ func (a *App) stopJob(r lifecycle.Stop, h supervisor.Handle) {
 		})
 	}
 	switch {
-	case a.ctx.Err() != nil:
+	case ctx.Err() != nil:
 	case err == nil:
 		a.tell(lifecycle.Finished{Ref: r.Ref, Outcome: outcome, At: a.now()})
 	case errors.Is(err, supervisor.ErrGone):
@@ -423,13 +439,13 @@ func (a *App) stopJob(r lifecycle.Stop, h supervisor.Handle) {
 // the job final sees the line, then the transition, then the release of the supervisor. The job
 // stays in the machine until the end is recorded. The supervisor is kept until then too, since it
 // holds the outcome. A release that fails after that loses nothing: the next start clears the run.
-func (a *App) move(m lifecycle.Move, scope Scope, known bool, h supervisor.Handle) {
+func (a *App) move(ctx context.Context, m lifecycle.Move, scope Scope, known bool, h supervisor.Handle) {
 	err := error(errNoScope)
 	if known {
-		err = a.moveInStore(m, scope)
+		err = a.moveInStore(ctx, m, scope)
 	}
 	switch {
-	case a.ctx.Err() != nil:
+	case ctx.Err() != nil:
 		return
 	case err != nil:
 		a.cfg.Logf("job %s: recording its end: %v", m.Ref, err)
@@ -438,34 +454,34 @@ func (a *App) move(m lifecycle.Move, scope Scope, known bool, h supervisor.Handl
 	}
 	a.notifyJobs()
 	if m.Release {
-		if err := a.release(m.Ref, h); err != nil {
+		if err := a.release(ctx, m.Ref, h); err != nil {
 			a.cfg.Logf("job %s: releasing its supervisor: %v", m.Ref, err)
 		}
 	}
 	a.tell(lifecycle.Closed{Ref: m.Ref})
 }
 
-func (a *App) moveInStore(m lifecycle.Move, scope Scope) error {
-	st, err := a.openStore(a.ctx, scope)
+func (a *App) moveInStore(ctx context.Context, m lifecycle.Move, scope Scope) error {
+	st, err := a.openStore(ctx, scope)
 	if err != nil {
 		return err
 	}
 	if m.Settlement.Log != "" {
-		err := a.retry(a.ctx, func(ctx context.Context) error {
+		err := a.retry(ctx, func(ctx context.Context) error {
 			return appendLineOnce(ctx, st, m.Ref.Job, m.Settlement.Log)
 		})
 		if err != nil {
 			return fmt.Errorf("adding a line to its output: %w", err)
 		}
 	}
-	return a.record(a.ctx, st, m.Settlement.Transition)
+	return a.record(ctx, st, m.Settlement.Transition)
 }
 
 // discard clears what is left of a run, when no job needs it.
-func (a *App) discard(d lifecycle.Discard, h supervisor.Handle) {
-	err := a.release(d.Ref, h)
+func (a *App) discard(ctx context.Context, d lifecycle.Discard, h supervisor.Handle) {
+	err := a.release(ctx, d.Ref, h)
 	switch {
-	case a.ctx.Err() != nil:
+	case ctx.Err() != nil:
 	case err != nil:
 		a.cfg.Logf("job %s: clearing its run: %v", d.Ref, err)
 		a.tell(lifecycle.DiscardFailed{Ref: d.Ref, Failure: failureOf(err)})
@@ -479,8 +495,8 @@ func (a *App) discard(d lifecycle.Discard, h supervisor.Handle) {
 // release lets go of a job's supervisor and removes what is left of its run. It is for a job whose
 // end is recorded or that never ran. It goes on while the daemon stops, as it is the last step of
 // something already decided, and its calls are bounded so that it cannot hold the stop.
-func (a *App) release(ref lifecycle.Ref, h supervisor.Handle) error {
-	ctx := context.WithoutCancel(a.ctx)
+func (a *App) release(ctx context.Context, ref lifecycle.Ref, h supervisor.Handle) error {
+	ctx = context.WithoutCancel(ctx)
 	if h != nil {
 		err := a.call(ctx, h.Release)
 		if err != nil && !errors.Is(err, supervisor.ErrGone) {
@@ -491,15 +507,15 @@ func (a *App) release(ref lifecycle.Ref, h supervisor.Handle) error {
 }
 
 // armRetry answers after the slow period.
-func (a *App) armRetry(ref lifecycle.Ref) {
-	if a.sleep(a.ctx, a.cfg.SlowPeriod) {
+func (a *App) armRetry(ctx context.Context, ref lifecycle.Ref) {
+	if a.sleep(ctx, a.cfg.SlowPeriod) {
 		a.tell(lifecycle.RetryDue{Ref: ref})
 	}
 }
 
 // reexamine looks again at a job in doubt.
-func (a *App) reexamine(ref lifecycle.Ref, scope Scope, known bool) {
-	run, err := a.probe(ref)
+func (a *App) reexamine(ctx context.Context, ref lifecycle.Ref, scope Scope, known bool) {
+	run, err := a.probe(ctx, ref)
 	if err != nil {
 		run = supervisor.Run{Ref: ref, Presence: lifecycle.PresenceUnknown}
 	}
@@ -508,7 +524,7 @@ func (a *App) reexamine(ref lifecycle.Ref, scope Scope, known bool) {
 	}
 	found := lifecycle.Recovered{Ref: ref, Supervisor: run.Presence, At: a.now()}
 	if known {
-		found = a.lookInStore(found, scope)
+		found = a.lookInStore(ctx, found, scope)
 	} else {
 		found.Away = true
 	}
@@ -516,20 +532,20 @@ func (a *App) reexamine(ref lifecycle.Ref, scope Scope, known bool) {
 	a.post(message{event: found, handle: run.Handle, scope: &scope})
 }
 
-func (a *App) probe(ref lifecycle.Ref) (supervisor.Run, error) {
-	ctx, done := clock.Deadline(a.ctx, a.cfg.Timers, a.cfg.CallTimeout)
+func (a *App) probe(ctx context.Context, ref lifecycle.Ref) (supervisor.Run, error) {
+	ctx, done := clock.Deadline(ctx, a.cfg.Timers, a.cfg.CallTimeout)
 	defer done()
 	return a.cfg.Supervisors.Probe(ctx, ref)
 }
 
 // lookInStore completes what was found of a job with what its store has.
-func (a *App) lookInStore(found lifecycle.Recovered, scope Scope) lifecycle.Recovered {
-	st, err := a.cfg.Stores.Open(a.ctx, scope)
+func (a *App) lookInStore(ctx context.Context, found lifecycle.Recovered, scope Scope) lifecycle.Recovered {
+	st, err := a.cfg.Stores.Open(ctx, scope)
 	if err != nil {
 		found.Away = true
 		return found
 	}
-	job, err := st.Job(a.ctx, found.Ref.Job)
+	job, err := st.Job(ctx, found.Ref.Job)
 	var f *core.Failure
 	switch {
 	case err == nil:

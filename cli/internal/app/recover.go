@@ -70,7 +70,7 @@ func (a *App) Start(ctx context.Context) error {
 			if !slices.Contains(scopes, scope) {
 				// The store is not in the index, so nothing was recorded for it, or the index
 				// lost it. Reading it says which.
-				found = a.lookInStore(found, scope)
+				found = a.lookInStore(ctx, found, scope)
 				if found.Away {
 					away[scope] = true
 				}
@@ -82,7 +82,7 @@ func (a *App) Start(ctx context.Context) error {
 		}
 		a.post(message{event: found, handle: r.Handle, scope: &scope})
 	}
-	a.post(message{event: lifecycle.RecoveryDone{}, then: func() { a.sweep(away) }})
+	a.post(message{event: lifecycle.RecoveryDone{}, then: func() { a.sweep(named(a.ctx, "sweep"), away) }})
 	return nil
 }
 
@@ -130,14 +130,14 @@ func storeIDOf(s Scope) lifecycle.StoreID { return lifecycle.StoreIDOf(s.Reposit
 // sweep looks again, every slow period, at what no event will bring: a store that was away, and a
 // queued job the machine never heard of, because a submission reached the store and its answer
 // did not reach the daemon.
-func (a *App) sweep(away map[Scope]bool) {
-	for a.sleep(a.ctx, a.cfg.SlowPeriod) {
-		a.sweepOnce(away)
+func (a *App) sweep(ctx context.Context, away map[Scope]bool) {
+	for a.sleep(ctx, a.cfg.SlowPeriod) {
+		a.sweepOnce(ctx, away)
 	}
 }
 
-func (a *App) sweepOnce(away map[Scope]bool) {
-	scopes, err := a.cfg.Stores.Known(a.ctx)
+func (a *App) sweepOnce(ctx context.Context, away map[Scope]bool) {
+	scopes, err := a.cfg.Stores.Known(ctx)
 	if err != nil {
 		a.cfg.Logf("listing the stores: %v", err)
 		return
@@ -145,7 +145,7 @@ func (a *App) sweepOnce(away map[Scope]bool) {
 	for _, scope := range scopes {
 		if away[scope] {
 			var runs []supervisor.Run
-			err := a.call(a.ctx, func(ctx context.Context) error {
+			err := a.call(ctx, func(ctx context.Context) error {
 				var err error
 				runs, err = a.cfg.Supervisors.Runs(ctx)
 				return err
@@ -158,16 +158,16 @@ func (a *App) sweepOnce(away map[Scope]bool) {
 			for _, r := range runs {
 				byRef[r.Ref] = r
 			}
-			if a.recoverScope(a.ctx, scope, byRef) == nil {
+			if a.recoverScope(ctx, scope, byRef) == nil {
 				delete(away, scope)
 			}
 			continue
 		}
-		st, err := a.cfg.Stores.Open(a.ctx, scope)
+		st, err := a.cfg.Stores.Open(ctx, scope)
 		if err != nil {
 			continue
 		}
-		jobs, err := st.Jobs(a.ctx, core.JobFilter{States: []core.JobState{core.JobQueued}})
+		jobs, err := st.Jobs(ctx, core.JobFilter{States: []core.JobState{core.JobQueued}})
 		if err != nil {
 			continue
 		}

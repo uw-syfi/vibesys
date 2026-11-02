@@ -1,6 +1,7 @@
 package sim_test
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"slices"
@@ -365,9 +366,17 @@ type simTimers struct {
 }
 
 type simTimer struct {
-	at    time.Duration
-	armed int
-	fired chan struct{}
+	at     time.Duration
+	actor  string
+	length time.Duration
+	armed  int
+	fired  chan struct{}
+}
+
+// before says which of two due timers fires first. The order they were armed in comes last: two
+// actors arming in one step do so in the scheduler's order, so it can only part timers of one actor.
+func (t *simTimer) before(o *simTimer) bool {
+	return cmp.Or(cmp.Compare(t.at, o.at), strings.Compare(t.actor, o.actor), cmp.Compare(t.length, o.length), cmp.Compare(t.armed, o.armed)) < 0
 }
 
 var _ clock.Timers = (*simTimers)(nil)
@@ -377,11 +386,11 @@ func newSimTimers(c *clock.Manual) *simTimers {
 }
 
 // Timeout implements clock.Timers.
-func (s *simTimers) Timeout(d time.Duration) (<-chan struct{}, func()) {
+func (s *simTimers) Timeout(ctx context.Context, d time.Duration) (<-chan struct{}, func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.armed++
-	t := &simTimer{at: s.now + d, armed: s.armed, fired: make(chan struct{})}
+	t := &simTimer{at: s.now + d, actor: actorOf(ctx), length: d, armed: s.armed, fired: make(chan struct{})}
 	s.due[t] = true
 	return t.fired, func() {
 		s.mu.Lock()
@@ -404,8 +413,8 @@ func (s *simTimers) next() (time.Duration, bool) {
 	return at, found
 }
 
-// advance moves the time to at and fires every timer due by then, in the order they fall due and
-// armed. Each one settles before the next fires: timers firing together would race into the
+// advance moves the time to at and fires every timer due by then, in the order of before. Each one
+// settles before the next fires: timers firing together would race into the
 // daemon's inbox, and the scheduler would pick the order of its events and not the seed.
 func (s *simTimers) advance(at time.Duration) {
 	s.mu.Lock()
@@ -428,7 +437,7 @@ func (s *simTimers) fireOne() bool {
 		if t.at > s.now {
 			continue
 		}
-		if first == nil || t.at < first.at || (t.at == first.at && t.armed < first.armed) {
+		if first == nil || t.before(first) {
 			first = t
 		}
 	}

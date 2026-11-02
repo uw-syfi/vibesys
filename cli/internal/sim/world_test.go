@@ -43,6 +43,9 @@ func actorOf(ctx context.Context) string {
 	if a, ok := ctx.Value(actorCtx{}).(string); ok {
 		return a
 	}
+	if effect := app.EffectOf(ctx); effect != "" {
+		return "daemon " + strings.TrimPrefix(effect, "lifecycle.")
+	}
 	return "daemon"
 }
 

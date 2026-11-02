@@ -164,7 +164,7 @@ func (a *App) Cancel(ctx context.Context, c core.CallContext, id core.JobID, rea
 
 // pause waits for a wake-up, for the slow period, or for ctx.
 func (a *App) pause(ctx context.Context, wake <-chan struct{}) error {
-	fired, stop := a.cfg.Timers.Timeout(a.cfg.SlowPeriod)
+	fired, stop := a.cfg.Timers.Timeout(ctx, a.cfg.SlowPeriod)
 	defer stop()
 	select {
 	case <-wake:

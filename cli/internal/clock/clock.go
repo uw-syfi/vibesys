@@ -21,14 +21,17 @@ func (System) Now() time.Time { return time.Now() }
 
 // Timers makes the timeouts a caller asks for, such as `wait --timeout`. A test supplies timers
 // it fires itself, so no test result depends on how long anything took.
+//
+// ctx does not end a timeout. It says on whose behalf the timeout runs, so that Timers that decide
+// the order of timeouts due at the same moment have something to decide by.
 type Timers interface {
 	// Timeout returns a channel that is closed after d, and a stop that releases the timer when
 	// the caller no longer needs it. Stop may be called more than once.
-	Timeout(d time.Duration) (fired <-chan struct{}, stop func())
+	Timeout(ctx context.Context, d time.Duration) (fired <-chan struct{}, stop func())
 }
 
 // Timeout implements Timers.
-func (System) Timeout(d time.Duration) (<-chan struct{}, func()) {
+func (System) Timeout(_ context.Context, d time.Duration) (<-chan struct{}, func()) {
 	fired := make(chan struct{})
 	t := time.AfterFunc(d, func() { close(fired) })
 	return fired, func() { t.Stop() }
@@ -36,7 +39,7 @@ func (System) Timeout(d time.Duration) (<-chan struct{}, func()) {
 
 // Sleep waits for d and reports true, or returns false as soon as ctx is done.
 func Sleep(ctx context.Context, t Timers, d time.Duration) bool {
-	fired, stop := t.Timeout(d)
+	fired, stop := t.Timeout(ctx, d)
 	defer stop()
 	select {
 	case <-fired:
@@ -50,7 +53,7 @@ func Sleep(ctx context.Context, t Timers, d time.Duration) bool {
 // It returns once gentle has. It is for a graceful stop, which waits for whoever is on the other end
 // and so must not be the only way to stop.
 func Graceful(t Timers, d time.Duration, gentle, force func()) {
-	fired, stop := t.Timeout(d)
+	fired, stop := t.Timeout(context.Background(), d)
 	defer stop()
 	done := make(chan struct{})
 	var wg sync.WaitGroup
@@ -72,7 +75,7 @@ func Graceful(t Timers, d time.Duration, gentle, force func()) {
 // left running for the deadline.
 func Deadline(ctx context.Context, t Timers, d time.Duration) (context.Context, func()) {
 	ctx, cancel := context.WithCancelCause(ctx)
-	fired, stopTimer := t.Timeout(d)
+	fired, stopTimer := t.Timeout(ctx, d)
 	var wg sync.WaitGroup
 	wg.Go(func() {
 		select {

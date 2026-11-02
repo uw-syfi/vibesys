@@ -1,6 +1,7 @@
 package clock
 
 import (
+	"context"
 	"sync"
 	"time"
 )
@@ -49,7 +50,7 @@ func NewManualTimers() *ManualTimers {
 }
 
 // Timeout implements Timers. The duration is reported on Armed, and the timer waits for Fire.
-func (m *ManualTimers) Timeout(d time.Duration) (<-chan struct{}, func()) {
+func (m *ManualTimers) Timeout(_ context.Context, d time.Duration) (<-chan struct{}, func()) {
 	fired := make(chan struct{})
 	m.mu.Lock()
 	m.pending = append(m.pending, fired)
@@ -78,7 +79,7 @@ func (m *ManualTimers) Fire() {
 type Immediate struct{ Longest time.Duration }
 
 // Timeout implements Timers.
-func (i Immediate) Timeout(d time.Duration) (<-chan struct{}, func()) {
+func (i Immediate) Timeout(_ context.Context, d time.Duration) (<-chan struct{}, func()) {
 	fired := make(chan struct{})
 	if d <= i.Longest {
 		close(fired)
