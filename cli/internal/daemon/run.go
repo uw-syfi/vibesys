@@ -52,6 +52,12 @@ type Config struct {
 	Timers clock.Timers
 	// Retry is how the daemon tries again. It defaults to app.DefaultRetry.
 	Retry app.Retry
+	// SlowPeriod is how often the daemon looks again at what it could not settle. It defaults to
+	// app.DefaultSlowPeriod.
+	SlowPeriod time.Duration
+	// LogBatchDelay is how long a job's first unwritten output byte waits to be written to its
+	// store. It defaults to app.DefaultLogBatchDelay.
+	LogBatchDelay time.Duration
 	// Logf receives the daemon's diagnostics. It may be nil.
 	Logf func(format string, args ...any)
 	// Ready receives one runtimedir.ReadyByte once the daemon serves, and is closed. A daemon that fails
@@ -102,15 +108,17 @@ func Run(ctx context.Context, cfg Config) (err error) {
 	}
 
 	a := app.New(app.Config{
-		Clock:        cfg.Clock,
-		Timers:       cfg.Timers,
-		Retry:        cfg.Retry,
-		Stores:       cfg.Runtime.Stores,
-		Environments: cfg.Runtime.Environments,
-		Supervisors:  cfg.Runtime.Supervisors,
-		Branches:     cfg.Runtime.Branches,
-		Tasks:        cfg.Runtime.Tasks,
-		Logf:         cfg.Logf,
+		Clock:         cfg.Clock,
+		Timers:        cfg.Timers,
+		Retry:         cfg.Retry,
+		SlowPeriod:    cfg.SlowPeriod,
+		LogBatchDelay: cfg.LogBatchDelay,
+		Stores:        cfg.Runtime.Stores,
+		Environments:  cfg.Runtime.Environments,
+		Supervisors:   cfg.Runtime.Supervisors,
+		Branches:      cfg.Runtime.Branches,
+		Tasks:         cfg.Runtime.Tasks,
+		Logf:          cfg.Logf,
 	})
 	defer a.Close()
 	if err := a.Start(ctx); err != nil {

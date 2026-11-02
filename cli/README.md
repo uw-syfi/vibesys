@@ -398,12 +398,20 @@ fails on a stale `gen/`.
 ```
 
 runs `gofmt` and `go vet`, vets for each release target (Linux and macOS, amd64 and arm64), then
-runs every package's tests under the race detector. The tests include the architecture rules above,
+runs the tests twice. The first run is every package under the race detector, which covers the
+packages a later change adds without listing them; the tests that drive a real Docker daemon run
+beside it, where a daemon is reachable. The second is every test again without the detector, as the
+binary ships, with a wider range of simulation seeds. The tests include the architecture rules above,
 building a real release with `build_release.sh` and installing it with `install.sh`, so they need
 `go`, `curl`, `awk` and `sha256sum` or `shasum`. CI runs the same script as the `cli` job
-(`cli_checks`, with a 600 s timeout). On a 4-core host with a cold Go cache it takes about three
-minutes; with a warm cache and 64 cores, about one minute. The slowest packages are `sim` and
-`filestore`, which take about a minute and half a minute under the detector.
+(`cli_checks`, with a 600 s timeout and a 7 minute job limit).
+
+A test that walks a large space of cases on one goroutine, such as the exhaustive model check of the
+lifecycle machine or a crash of a store at every step of its script, is a sweep. The detector has
+nothing to find in it and makes it ten times slower, so it lives in a file named `*_sweep_test.go`
+that starts with `//go:build !race`, and runs in the second run only. `internal/archcheck` refuses
+a sweep that starts a goroutine or imports `sync`, and a file that is built without the detector
+and is not named as a sweep.
 
 How the daemon is checked:
 

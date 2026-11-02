@@ -1,3 +1,10 @@
+//go:build !race
+
+// This file is a sweep: it walks a large space of cases on one goroutine, so the race detector has
+// nothing to check and only slows it down. check.sh runs it in its step without the detector, and
+// archcheck holds every file here to that: named *_sweep_test.go, built only without -race, and
+// free of goroutines.
+
 package lifecycle_test
 
 import (

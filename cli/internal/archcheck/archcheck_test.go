@@ -488,3 +488,35 @@ func (Done) answer()   {}
 		})
 	}
 }
+
+// The race detector runs on every test except the sweeps, which walk a space of cases on one
+// goroutine. What marks a sweep is its name and its build constraint together, so neither can be
+// changed alone, and a sweep that gains a goroutine is refused.
+func TestSweepsAreNamedBuiltWithoutRaceAndRunNoGoroutines(t *testing.T) {
+	const pkg = "package p\n"
+	cases := []struct {
+		name, source string
+		bad          string // part of the violation wanted, or "" for none
+	}{
+		{"cli/internal/core/x_sweep_test.go", "//go:build !race\n\n" + pkg, ""},
+		{"cli/internal/core/x_sweep_test.go", "//go:build !race && linux\n\n" + pkg, ""},
+		{"cli/internal/core/x_test.go", pkg, ""},
+		{"cli/internal/core/x_test.go", "//go:build docker\n\n" + pkg, ""},
+		{"cli/internal/core/x_test.go", "//go:build race\n\n" + pkg, ""},
+		{"cli/internal/core/x_test.go", "//go:build !race\n\n" + pkg, "is a sweep; name it"},
+		{"cli/internal/core/x_sweep_test.go", pkg, "must carry //go:build !race"},
+		{"cli/internal/core/x_sweep_test.go", "//go:build docker\n\n" + pkg, "must carry //go:build !race"},
+		{"cli/internal/core/x_sweep_test.go", "//go:build race\n\n" + pkg, "must carry //go:build !race"},
+		{"cli/internal/core/x_sweep_test.go", "//go:build !race\n\n" + pkg + "func f() { go func() {}() }\n", "starts a goroutine"},
+		{"cli/internal/core/x_sweep_test.go", "//go:build !race\n\n" + pkg + "import \"sync\"\n\nvar _ sync.Mutex\n", "imports sync"},
+		{"cli/internal/core/x_sweep_test.go", "//go:build !race\n\n" + pkg + "import \"sync/atomic\"\n\nvar _ atomic.Int64\n", "imports sync/atomic"},
+		// The convention is about tests: product code is never built conditionally on the detector here.
+		{"cli/internal/core/x.go", "//go:build !race\n\n" + pkg, ""},
+	}
+	for _, c := range cases {
+		got := archcheck.Violations(map[string]string{c.name: c.source})
+		if c.bad == "" && len(got) > 0 || c.bad != "" && !hasLine(got, c.bad) {
+			t.Errorf("%s with %q: violations = %v, want %q", c.name, c.source, got, c.bad)
+		}
+	}
+}
