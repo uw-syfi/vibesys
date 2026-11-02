@@ -94,6 +94,8 @@ interface ScreenProps {
   readonly machines: readonly MachineOption[];
   /** Open Machines, where the machine's VibeSys checkout is chosen. */
   readonly chooseCheckout: () => void;
+  /** Open Settings on `machine`'s Agent logins, where its CLI is signed in. */
+  readonly openLogins: (machine: HostKey) => void;
   /** Open Runs, where a run that did start is listed. */
   readonly showRuns: () => void;
   /** Open Settings on the clusters of `machine`, where a place to measure is set up. */
@@ -164,7 +166,11 @@ function StepBody(props: ScreenProps & {readonly at: StepId}): JSX.Element {
       return <AgentPage {...cardProps} />;
     case 'review':
       return (
-        <ReviewPage snapshot={snapshot} dispatch={dispatch} chooseCheckout={props.chooseCheckout} />
+        <ReviewPage
+          snapshot={snapshot}
+          dispatch={dispatch}
+          links={{chooseCheckout: props.chooseCheckout, openLogins: props.openLogins}}
+        />
       );
   }
 }

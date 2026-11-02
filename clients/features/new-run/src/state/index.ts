@@ -108,7 +108,9 @@ export {
   goalKey,
   type HelperFor,
   harnessLabel,
+  type InputsWait,
   inputsKey,
+  inputsWaitOn,
   installedHarnesses,
   joinWords,
   lastRun,
@@ -147,6 +149,7 @@ export {
   targetFacts,
 } from './measure.js';
 export {type Problem, problemOf, type Step, StepFailure, startUnconfirmed} from './problem.js';
+export {OPEN_LOGINS_WORDS, rolesWaitWords, signInWords} from './review-words.js';
 export {
   agentWithRoles,
   formWithRoles,
@@ -157,3 +160,4 @@ export {
   rolesAfter,
   rolesWithin,
 } from './roles.js';
+export {agentLogin} from './sign-in.js';

@@ -25,6 +25,7 @@ import {
   type NewRunContext,
   roleLabel,
   roleSummary,
+  rolesWaitWords,
 } from '../../state/index.js';
 import {TimeLimitField} from './budget-fields.js';
 import type {CardProps} from './card-props.js';
@@ -95,6 +96,13 @@ function RolesSection(props: CardProps): JSX.Element {
       <Text variant="small" tone="muted">
         This machine's VibeSys does not report its agent roles, so every role runs as the run.
         Update VibeSys on it to set a reasoning effort per role.
+      </Text>
+    );
+  }
+  if (view.kind === 'waiting') {
+    return (
+      <Text variant="small" tone="muted">
+        {rolesWaitWords(view.on).sentence}
       </Text>
     );
   }

@@ -20,9 +20,10 @@ import {
   roleModels,
   roleProviders,
   roleSummary,
+  rolesWaitWords,
 } from '../../state/index.js';
 import type {CardProps} from './card-props.js';
-import {NEEDS_UPDATE, roleAgentsChanged, rolesView} from './view.js';
+import {NEEDS_UPDATE, type RolesView, roleAgentsChanged, rolesView} from './view.js';
 
 /** The select's value for a role that follows the run. */
 const RUN = '';
@@ -106,6 +107,18 @@ function RoleStatus(props: {readonly status: string}): JSX.Element {
   );
 }
 
+/** Why the roles are not listed yet, in a few words. */
+function roleStatus(view: Exclude<RolesView, {readonly kind: 'ready'}>): string {
+  switch (view.kind) {
+    case 'unsupported':
+      return NEEDS_UPDATE;
+    case 'waiting':
+      return rolesWaitWords(view.on).short;
+    case 'pending':
+      return CHECKING;
+  }
+}
+
 /** The roles' toggle and rows, or the status of why there are none to show. */
 export function RoleAgents(
   props: CardProps & {readonly offers: readonly HarnessOffer[]; readonly agent: AgentChoice},
@@ -119,7 +132,7 @@ export function RoleAgents(
     return <RoleStatus status={context.helper?.for === machine ? NEEDS_UPDATE : CHECKING} />;
   }
   if (view.kind !== 'ready') {
-    return <RoleStatus status={view.kind === 'unsupported' ? NEEDS_UPDATE : CHECKING} />;
+    return <RoleStatus status={roleStatus(view)} />;
   }
   return (
     <Collapsible

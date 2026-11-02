@@ -78,6 +78,7 @@ import {
 import {type Compute, formWithMeasure} from './measure.js';
 import {type Problem, problemOf, type Step, startUnconfirmed} from './problem.js';
 import {formWithRoles, rolesAfter, rolesWithin} from './roles.js';
+import {agentLogin} from './sign-in.js';
 
 /** The fixes the screen performs itself; the rest are the shell's (Machines) or the user's. */
 export type ProjectFix =
@@ -542,6 +543,8 @@ export const newRunMachine = setup({
     mayStart: ({context}) =>
       checksPass(context.form, context.checks) &&
       missingFeatures(context.helper, context.form.machine).length === 0 &&
+      // The machine says the agent's CLI is signed out: it cannot work.
+      agentLogin(context.facts, context.form) !== 'signed_out' &&
       // A start that may have happened is not repeated before the person has looked.
       !startUnconfirmed(context.problem),
     unconfirmedStart: ({context}) => startUnconfirmed(context.problem),
@@ -706,6 +709,8 @@ export const newRunMachine = setup({
         facts: {
           initial: 'loading',
           on: {
+            // A login changed on the machine (Settings): read what it says now.
+            refresh: '.loading',
             retry: {
               guard: {type: 'failedAt', params: {step: 'describe'}},
               target: '.loading',

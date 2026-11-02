@@ -1244,3 +1244,124 @@ test('a form replaced after the screen was opened is read at once, not left idle
   ]);
   expect(store.getState().matches('idle')).toBe(false);
 });
+
+test("an example's roles wait for its project and say so, then come with the first check", async () => {
+  const roles = ['multi-orchestrator', 'multi-judge'];
+  const {store, clock} = await chooseExample(FREE, {
+    helperFeatures: () =>
+      ok([...REQUIRED_HELPER_FEATURES, 'run_roles', 'example_destination'] as HelperFeature[]),
+    preflight: () => ok({kind: 'offered' as const, value: {checks: [], roles, backend: null}}),
+  });
+  // Nothing checks the inputs of a project not made yet: the roles say what they wait for.
+  expect(rolesView(store.getState().context)).toEqual({kind: 'waiting', on: 'project'});
+  const fix = projectItem(store)?.fix;
+  if (fix?.kind !== 'create_from_example') throw new Error('expected the create fix');
+  store.dispatch({type: 'fix', fix});
+  await settle();
+  clock.runDue();
+  await settle();
+  expect(rolesView(store.getState().context)).toEqual({kind: 'ready', roles});
+});
+
+test('a machine with no VibeSys checkout says so before the inputs exist, with the fix in Machines', async () => {
+  const describe: NewRunBridge['describeMachine'] = () =>
+    ok({
+      kind: 'offered' as const,
+      value: {
+        checkout: null,
+        hardware: {cpu_cores: 8, gpus: [], accelerator: 'cpu' as const},
+        docker: {reachable: true as const, version: '27'},
+        harness_clis: ['claude'],
+        runs: {live: 0, ended_today: 0},
+      },
+    });
+  const {store, clock} = await chooseExample(FREE, {describeMachine: describe});
+  const checkout = () => readiness(store.getState()).filter(item => item.id === 'checkout_found');
+  expect(checkout()).toEqual([
+    {
+      id: 'checkout_found',
+      state: 'fail',
+      label: 'VibeSys checkout',
+      detail: 'No VibeSys checkout on This Mac',
+      fix: {kind: 'choose_checkout'},
+    },
+  ]);
+  // Once the inputs are checked, their own checkout item is the one said (here: none failed).
+  const fix = projectItem(store)?.fix;
+  if (fix?.kind !== 'create_from_example') throw new Error('expected the create fix');
+  store.dispatch({type: 'fix', fix});
+  await settle();
+  clock.runDue();
+  await settle();
+  expect(checkout()).toEqual([]);
+});
+
+/** What the machine says of the agent CLI's login: a state, nothing (an older VibeSys), or no CLI. */
+const LOGINS = [
+  {name: 'signed in', installed: true, logins: {claude: 'signed_in'}, state: 'ok'},
+  {name: 'signed out', installed: true, logins: {claude: 'signed_out'}, state: 'fail'},
+  {name: 'unknown', installed: true, logins: {claude: 'unknown'}, state: null},
+  {name: 'not reported', installed: true, logins: undefined, state: null},
+  {name: 'not installed', installed: false, logins: {}, state: null},
+] as const;
+
+/** A store on a machine whose description says `logins`, with the inputs checked and passing. */
+async function signedIn(login: (typeof LOGINS)[number]) {
+  const clock = manualSchedule();
+  const asked: string[] = [];
+  const said = {logins: login.logins as Record<string, string> | undefined};
+  const bridge: NewRunBridge = {
+    ...fakeBridge(REQUIRED_HELPER_FEATURES, asked),
+    describeMachine: () =>
+      ok({
+        kind: 'offered' as const,
+        value: {
+          checkout: null,
+          hardware: {cpu_cores: 8, gpus: [], accelerator: 'cpu' as const},
+          docker: {reachable: true as const, version: '27'},
+          harness_clis: login.installed ? ['claude'] : [],
+          runs: {live: 0, ended_today: 0},
+          ...(said.logins === undefined
+            ? {}
+            : {harness_logins: said.logins as Record<string, 'signed_in'>}),
+        },
+      }),
+  };
+  const {store} = runAgain(bridge, recentRun('local', '/p', 2), {schedule: clock.schedule});
+  await settle();
+  clock.runDue();
+  await settle();
+  return {store, asked, said, clock};
+}
+
+for (const login of LOGINS) {
+  test(`an agent CLI ${login.name} on the machine: the sign-in check and Start agree`, async () => {
+    const {store, asked} = await signedIn(login);
+    expect(store.getState().matches({editing: {checks: 'ready'}})).toBe(true);
+    const item = readiness(store.getState()).find(each => each.id === 'agent_signed_in');
+    expect(item?.state ?? null).toBe(login.state);
+    if (item !== undefined) expect(item.label).toBe('claude signed in on This Mac');
+    // Only a CLI that says it is signed out is fixed in Settings, and holds Start closed.
+    expect(item?.fix ?? null).toEqual(login.state === 'fail' ? {kind: 'open_logins'} : null);
+    if (login.state === 'fail') {
+      expect(item?.detail).toBe('Sign in once from a terminal on This Mac.');
+    }
+    expect(startBlocked(store.getState()) !== undefined).toBe(login.state === 'fail');
+    store.dispatch({type: 'start'});
+    await settle();
+    expect(asked.includes('startRun')).toBe(login.state !== 'fail');
+  });
+}
+
+test('checking again reads the machine again, so a CLI signed in since then opens Start', async () => {
+  const {store, said, clock} = await signedIn(LOGINS[1]);
+  expect(startBlocked(store.getState())).toBe('Fix the items marked above to start.');
+  said.logins = {claude: 'signed_in'};
+  store.dispatch({type: 'refresh'});
+  await settle();
+  clock.runDue();
+  await settle();
+  const item = readiness(store.getState()).find(each => each.id === 'agent_signed_in');
+  expect(item?.state).toBe('ok');
+  expect(startBlocked(store.getState())).toBeUndefined();
+});

@@ -10,6 +10,7 @@ import {
   type AgentMaker,
   type AgentPick,
   advancedProblem,
+  agentLogin,
   type Backend,
   type CatalogueEntry,
   type Check,
@@ -19,7 +20,9 @@ import {
   destinationView,
   fitOf,
   harnessLabel,
+  type InputsWait,
   inputsKey,
+  inputsWaitOn,
   type MachineDescription,
   type Maker,
   missingFeatures,
@@ -27,6 +30,7 @@ import {
   type NewRunSnapshot,
   offers,
   projectPath,
+  signInWords,
   startUnconfirmed,
   type Vendor,
 } from '../../state/index.js';
@@ -222,15 +226,20 @@ export function vendorMark(vendor: Vendor): BrandMarkName | null {
  */
 export type RolesView =
   | {readonly kind: 'ready'; readonly roles: readonly string[]}
+  /** Being read with the check of the inputs now. */
   | {readonly kind: 'pending'}
+  /** Not read until the inputs have what they wait for (an example's project made, say). */
+  | {readonly kind: 'waiting'; readonly on: InputsWait}
   | {readonly kind: 'unsupported'};
 
 export function rolesView(context: NewRunContext): RolesView {
   if (context.roles !== null) return {kind: 'ready', roles: context.roles};
   const known = context.helper?.for === context.form.machine;
-  return known && !offers(context.helper, context.form.machine, 'run_roles')
-    ? {kind: 'unsupported'}
-    : {kind: 'pending'};
+  if (known && !offers(context.helper, context.form.machine, 'run_roles')) {
+    return {kind: 'unsupported'};
+  }
+  const on = inputsWaitOn(context.form);
+  return on === null ? {kind: 'pending'} : {kind: 'waiting', on};
 }
 
 /**
@@ -277,6 +286,8 @@ export type ReadinessFix =
   /** The destination is taken: the user picks another name in More options. */
   | {readonly kind: 'rename_destination'}
   | {readonly kind: 'choose_checkout'}
+  /** The agent's CLI is signed out: Settings › Agent logins signs it in. */
+  | {readonly kind: 'open_logins'}
   | {readonly kind: 'recheck'};
 
 function checkFix(
@@ -414,8 +425,54 @@ function harnessItem(context: NewRunContext, machine: MachineDescription): Readi
   return {
     id: 'harness_installed',
     state: installed ? 'ok' : 'warn',
-    label: `${label} on ${name}`,
-    detail: installed ? `${label} is installed on ${name}.` : `${label} was not found on ${name}.`,
+    label: `${label} installed on ${name}`,
+    detail: installed ? `Found on ${name}.` : `${label} was not found on ${name}.`,
+  };
+}
+
+/**
+ * Whether the agent's CLI is signed in on the machine, as the machine says. Nothing is said of a
+ * CLI that is not installed (the item above warns), nor when the machine cannot tell.
+ */
+function signInItem(context: NewRunContext, machine: MachineDescription): Readiness | null {
+  const {agent} = context.form;
+  const offered = context.harnesses?.for === context.form.machine ? context.harnesses.list : null;
+  const login = agentLogin(context.facts, context.form);
+  if (agent === null || offered === null || login === null || login === 'unknown') return null;
+  if (!machine.harness_clis.includes(agent.provider)) return null;
+  const words = signInWords(
+    harnessLabel(offered, agent.provider),
+    machineLabel(context.form.machine),
+  );
+  return login === 'signed_in'
+    ? {id: 'agent_signed_in', state: 'ok', label: words.label, detail: words.signedIn}
+    : {
+        id: 'agent_signed_in',
+        state: 'fail',
+        label: words.label,
+        detail: words.signedOut,
+        fix: {kind: 'open_logins'},
+      };
+}
+
+/** Whether the checks of the inputs now have come back. */
+function inputsChecked(context: NewRunContext): boolean {
+  const key = inputsKey(context.form);
+  return key !== null && context.checks?.for === key;
+}
+
+/**
+ * A machine with no VibeSys checkout, said as soon as the machine describes itself: before the
+ * inputs exist to be checked, which then say the same in their own checkout item.
+ */
+function checkoutItem(context: NewRunContext, machine: MachineDescription): Readiness | null {
+  if (machine.checkout !== null || inputsChecked(context)) return null;
+  return {
+    id: 'checkout_found',
+    state: 'fail',
+    label: CHECK_LABELS.checkout_found,
+    detail: `No VibeSys checkout on ${machineLabel(context.form.machine)}`,
+    fix: {kind: 'choose_checkout'},
   };
 }
 
@@ -426,9 +483,12 @@ function harnessItem(context: NewRunContext, machine: MachineDescription): Readi
 function machineItems(context: NewRunContext): Readiness[] {
   const facts = context.facts?.for === context.form.machine ? context.facts.value : null;
   if (facts === null || facts.kind !== 'offered') return [];
-  return [hardwareItem(context, facts.value), harnessItem(context, facts.value)].flatMap(item =>
-    item === null ? [] : [item],
-  );
+  return [
+    checkoutItem(context, facts.value),
+    hardwareItem(context, facts.value),
+    harnessItem(context, facts.value),
+    signInItem(context, facts.value),
+  ].flatMap(item => (item === null ? [] : [item]));
 }
 
 /** The "Ready to start" items for the inputs now. */
@@ -464,10 +524,9 @@ export function startBlocked(snapshot: NewRunSnapshot): string | undefined {
   if (missingFeatures(context.helper, context.form.machine).length > 0) {
     return `VibeSys on ${machineLabel(context.form.machine)} needs an update`;
   }
-  if (checksPass(context.form, context.checks)) return undefined;
-  if (readiness(snapshot).some(item => item.state === 'fail')) {
-    return 'Fix the items marked above to start.';
-  }
+  const failed = readiness(snapshot).some(item => item.state === 'fail');
+  if (checksPass(context.form, context.checks) && !failed) return undefined;
+  if (failed) return 'Fix the items marked above to start.';
   if (inputsKey(context.form) === null) return 'Choose a project, task and agent to start.';
   return 'Checking these inputs.';
 }

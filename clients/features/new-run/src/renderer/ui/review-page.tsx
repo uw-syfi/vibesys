@@ -9,7 +9,9 @@ import {
   CheckList,
   type CheckState,
   Chip,
+  LabeledRow,
   Row,
+  Split,
   Stack,
   type StatusTone,
   Text,
@@ -22,6 +24,7 @@ import {
   type NewRunContext,
   type NewRunEvent,
   type NewRunSnapshot,
+  OPEN_LOGINS_WORDS,
   roleLabel,
   type StepId,
   startUnconfirmed,
@@ -45,6 +48,14 @@ import {
 
 type Dispatch = (event: NewRunEvent) => void;
 
+/** The ways out of Review into other screens. */
+export interface ReviewLinks {
+  /** Open Machines, where the machine's VibeSys checkout is chosen. */
+  readonly chooseCheckout: () => void;
+  /** Open Settings on `machine`'s Agent logins. */
+  readonly openLogins: (machine: HostKey) => void;
+}
+
 function fixText(fix: ReadinessFix): string {
   switch (fix.kind) {
     case 'copy_out':
@@ -57,6 +68,8 @@ function fixText(fix: ReadinessFix): string {
       return 'Choose another name';
     case 'choose_checkout':
       return 'Choose it in Machines';
+    case 'open_logins':
+      return OPEN_LOGINS_WORDS;
     case 'recheck':
       return 'Check again';
   }
@@ -65,7 +78,7 @@ function fixText(fix: ReadinessFix): string {
 function fixPress(
   fix: ReadinessFix,
   dispatch: Dispatch,
-  chooseCheckout: () => void,
+  links: ReviewLinks,
   machine: HostKey,
 ): () => void {
   switch (fix.kind) {
@@ -84,7 +97,9 @@ function fixPress(
       // The destination field is in More options.
       return () => dispatch({type: 'more_options', machine, open: true});
     case 'choose_checkout':
-      return chooseCheckout;
+      return links.chooseCheckout;
+    case 'open_logins':
+      return () => links.openLogins(machine);
     case 'recheck':
       return () => dispatch({type: 'refresh'});
   }
@@ -99,7 +114,10 @@ const TONES: Readonly<Record<CheckState, StatusTone>> = {
   ok: 'ok',
 };
 
+type Section = 'What' | 'Where' | 'Agent' | 'Limits';
+
 interface Answer {
+  readonly section: Section;
   readonly label: string;
   readonly value: string;
   readonly step: StepId;
@@ -120,6 +138,7 @@ function answers(context: NewRunContext): Answer[] {
   const rounds = form.budget.rounds;
   return [
     {
+      section: 'What',
       label: 'Task',
       value:
         entry === null
@@ -129,20 +148,30 @@ function answers(context: NewRunContext): Answer[] {
     },
     ...(target === null || target.vendor === 'cpu'
       ? []
-      : [{label: 'Tuned for', value: hardwareLabel(target), step: 'hardware' as const}]),
-    {label: 'Agent works on', value: machineLabel(form.machine), step: 'where'},
+      : [
+          {
+            section: 'What' as const,
+            label: 'Tuned for',
+            value: hardwareLabel(target),
+            step: 'hardware' as const,
+          },
+        ]),
+    {section: 'Where', label: 'Agent works on', value: machineLabel(form.machine), step: 'where'},
     {
+      section: 'Where',
       label: 'Measured on',
       value: `${measureLabel(form.measure)}${backend === null ? '' : `, ${backendLabel(backend)}`}`,
       step: 'where',
     },
-    {label: 'Agent', value: agentWords(context) ?? 'Not chosen', step: 'agent'},
+    {section: 'Agent', label: 'Model', value: agentWords(context) ?? 'Not chosen', step: 'agent'},
     ...roleAgentsChanged(context).map(({role, agent}) => ({
+      section: 'Agent' as const,
       label: `${roleLabel(role)} agent`,
       value: pickWords(context, agent) ?? `${agent.model} · ${agent.provider}`,
       step: 'agent' as const,
     })),
     {
+      section: 'Limits',
       label: 'Ideas to try',
       value: rounds === null ? 'As the task is configured' : String(rounds),
       step: 'agent',
@@ -150,28 +179,36 @@ function answers(context: NewRunContext): Answer[] {
   ];
 }
 
+const SECTIONS: readonly Section[] = ['What', 'Where', 'Agent', 'Limits'];
+
+/** The answers under What, Where, Agent and Limits, each row with the step that changes it. */
 function Summary(props: {
   readonly context: NewRunContext;
   readonly dispatch: Dispatch;
 }): JSX.Element {
+  const all = answers(props.context);
   return (
-    <Stack gap="space-3">
-      {answers(props.context).map(answer => (
-        <Row key={answer.label} justify="between" wrap>
-          <Stack gap="space-1">
-            <Text variant="small" tone="muted">
-              {answer.label}
-            </Text>
-            <Text variant="body-strong">{answer.value}</Text>
-          </Stack>
-          <Button
-            variant="quiet"
-            size="sm"
-            text="Change"
-            hint={`Change ${answer.label.toLowerCase()}: ${STEP_TITLES[answer.step]}`}
-            press={() => props.dispatch({type: 'go', step: answer.step})}
-          />
-        </Row>
+    <Stack gap="space-5">
+      {SECTIONS.map(section => (
+        <Stack key={section} gap="space-3">
+          <Text variant="section">{section}</Text>
+          {all
+            .filter(answer => answer.section === section)
+            .map(answer => (
+              <LabeledRow key={answer.label} label={answer.label}>
+                <Row justify="between" gap="space-3">
+                  <Text variant="body-strong">{answer.value}</Text>
+                  <Button
+                    variant="quiet"
+                    size="sm"
+                    text="Change"
+                    hint={`Change ${answer.label.toLowerCase()}: ${STEP_TITLES[answer.step]}`}
+                    press={() => props.dispatch({type: 'go', step: answer.step})}
+                  />
+                </Row>
+              </LabeledRow>
+            ))}
+        </Stack>
       ))}
     </Stack>
   );
@@ -213,9 +250,9 @@ export function ProblemStatus(props: {
 function Checks(props: {
   readonly snapshot: NewRunSnapshot;
   readonly dispatch: Dispatch;
-  readonly chooseCheckout: () => void;
+  readonly links: ReviewLinks;
 }): JSX.Element {
-  const {snapshot, dispatch, chooseCheckout} = props;
+  const {snapshot, dispatch, links} = props;
   const checks = readiness(snapshot);
   const items: CheckItem[] = [...checks]
     .sort((left, right) => RANK[left.state] - RANK[right.state])
@@ -226,7 +263,7 @@ function Checks(props: {
         : {
             fix: {
               text: fixText(fix),
-              press: fixPress(fix, dispatch, chooseCheckout, snapshot.context.form.machine),
+              press: fixPress(fix, dispatch, links, snapshot.context.form.machine),
             },
           }),
     }));
@@ -234,7 +271,7 @@ function Checks(props: {
   return (
     <Stack gap="space-3">
       <Row gap="space-3" align="center" wrap>
-        <Text variant="section">Ready to start</Text>
+        <Text variant="section">Before you start</Text>
         <Chip label={status.text} tone={TONES[status.state]} dot />
       </Row>
       <CheckList items={items} />
@@ -245,17 +282,21 @@ function Checks(props: {
 export function ReviewPage(props: {
   readonly snapshot: NewRunSnapshot;
   readonly dispatch: Dispatch;
-  readonly chooseCheckout: () => void;
+  readonly links: ReviewLinks;
 }): JSX.Element {
   const {snapshot, dispatch} = props;
   const {context} = snapshot;
   const cardProps = {context, dispatch};
   return (
-    <Stack gap="space-5">
-      <Summary {...cardProps} />
-      <Checks {...props} />
-      <MoreOptions {...cardProps} />
-    </Stack>
+    <Split
+      main={
+        <Stack gap="space-5">
+          <Summary {...cardProps} />
+          <MoreOptions {...cardProps} />
+        </Stack>
+      }
+      aside={<Checks {...props} />}
+    />
   );
 }
 
