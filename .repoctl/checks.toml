@@ -493,9 +493,12 @@ trigger_job = "gateway"
 include_in_test = true
 language = "go"
 directory = "gateway"
-# A cold Go cache costs about 70 s on a CI runner (module download, then vet and
-# test of the host and a vet per other release target); a warm one a few seconds.
-timeout_seconds = 150
+# A cold Go cache costs about 3 minutes on a CI runner: module download, then vet and test of the
+# host (about 90 s) and a vet per other release target. vibesysd links the orchestrator's store,
+# so every target compiles modernc.org/sqlite: measured cold on 4 cores, 28 to 41 s per target
+# vet against about 20 s without it. A warm cache, the usual case, costs a few seconds; a change to
+# gateway/go.sum starts cold.
+timeout_seconds = 300
 commands = [["./check.sh"]]
 
 [[check_groups]]
