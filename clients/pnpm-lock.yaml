@@ -1097,10 +1097,26 @@ importers:
         version: 5.9.3
 
   libs/orchestrator-fixtures:
+    dependencies:
+      '@bufbuild/protobuf':
+        specifier: 2.16.0
+        version: 2.16.0
+      '@vibesys/orchestrator-proto':
+        specifier: workspace:*
+        version: link:../orchestrator-proto
+      '@vibesys/orchestrator-source':
+        specifier: workspace:*
+        version: link:../orchestrator-source
+      '@vibesys/orchestrator-state':
+        specifier: workspace:*
+        version: link:../orchestrator-state
     devDependencies:
       '@types/bun':
         specifier: 1.4.2
         version: 1.4.2
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
@@ -1122,19 +1138,39 @@ importers:
         version: 5.9.3
 
   libs/orchestrator-source:
+    dependencies:
+      '@bufbuild/protobuf':
+        specifier: 2.16.0
+        version: 2.16.0
+      '@vibesys/orchestrator-proto':
+        specifier: workspace:*
+        version: link:../orchestrator-proto
     devDependencies:
       '@types/bun':
         specifier: 1.4.2
         version: 1.4.2
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
 
   libs/orchestrator-state:
+    dependencies:
+      '@vibesys/orchestrator-proto':
+        specifier: workspace:*
+        version: link:../orchestrator-proto
     devDependencies:
       '@types/bun':
         specifier: 1.4.2
         version: 1.4.2
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
       typescript:
         specifier: ^5.8.3
         version: 5.9.3

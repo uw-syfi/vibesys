@@ -16,5 +16,16 @@
   "exclude": [
     "src/**/*.test.ts",
     "src/**/*.test.tsx"
+  ],
+  "references": [
+    {
+      "path": "../orchestrator-proto/tsconfig.lib.json"
+    },
+    {
+      "path": "../orchestrator-state/tsconfig.lib.json"
+    },
+    {
+      "path": "../orchestrator-source/tsconfig.lib.json"
+    }
   ]
 }

@@ -74,6 +74,11 @@ message RunsSnapshot {
   repeated Agent agents = 2;
   // The sequence the snapshot is current to.
   uint64 sequence = 3;
+  // Every turn and message of those runs, so that a client that connects late can show when each
+  // agent ran, what each turn cost, and the handoffs and reports it missed. Items are not here:
+  // WatchAgent and ListItems page them.
+  repeated Turn turns = 4;
+  repeated Message messages = 5;
 }
 
 message WatchRunsResponse {
