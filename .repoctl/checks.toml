@@ -322,6 +322,20 @@ commands = [
   ["uv", "run", "--locked", "--directory", "examples/model-serving/qwen3.5-9b-mi210/.vibesys/tasks/default", "--project", "cpu_check", "python", "-m", "pytest", "cpu_check", "-v", "--durations=0"],
 ]
 
+# Builds the example Dockerfiles a change selects (the `dockerfile_contexts` collection), one build per
+# directory and nothing else: no benchmark, no secret, no GPU. CI runs one matrix leg per directory
+# (`example-dockerfiles` in test.yml); locally the builds take minutes each and need Docker.
+[[check_groups]]
+name = "example_dockerfile_builds"
+trigger_job = "dockerfiles"
+local_skip = "needs Docker; each build takes minutes"
+language = "docker"
+directory = "."
+collection = "dockerfile_contexts"
+timeout_seconds = 600
+commands = [["docker", "info", "--format", "{{.ServerVersion}}"]]
+package_commands = [["docker", "build", "--tag", "vibesys-example-dockerfile-check", "{package}"]]
+
 [[check_groups]]
 name = "agent_image_tests"
 trigger_job = "agent_image"

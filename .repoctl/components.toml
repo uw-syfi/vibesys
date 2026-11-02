@@ -1,6 +1,6 @@
 # Repository component ownership, discovery, and change impact policy.
 default_base = "main"
-jobs = ["python", "clients", "examples", "agent_image", "real_tiers", "evaluators", "impact", "stitch", "proto", "gateway", "cli"]
+jobs = ["python", "clients", "examples", "dockerfiles", "agent_image", "real_tiers", "evaluators", "impact", "stitch", "proto", "gateway", "cli"]
 
 ignored_roots = ["website", "third_party", ".agents", ".claude", ".claude-plugin", ".github/ISSUE_TEMPLATE", ".github/DISCUSSION_TEMPLATE"]
 ignored_files = ["AGENTS.md", "CLAUDE.md", "LICENSE", "agent.toml.example", ".env.example", ".gitattributes", ".gitignore", ".github/CODEOWNERS", ".github/pull_request_template.md", ".github/delegated-merge.md"]
@@ -71,6 +71,53 @@ selected_roots = [
   "sdk/vs-evaluator/vseval",
 ]
 selected_jobs = ["evaluators"]
+
+# Every example Dockerfile is built when it, or a file in its directory (the build context), changes.
+# `scope_roots` makes discovery fail for a Dockerfile under examples/ that is neither built nor
+# excluded below, so a new task Dockerfile has to choose. An excluded root names why a CI runner
+# cannot build it; it is still owned, but selects no job. The `dockerfile_contexts` collection holds
+# the built directories a change selects, one matrix leg each (the `example-dockerfiles` CI job).
+[[discoveries]]
+adapter = "manifest_directories"
+class = "dockerfile"
+id_prefix = "dockerfile:"
+ownership_group = "example_dockerfiles"
+manifests = { "Dockerfile" = "docker" }
+scope_roots = ["examples"]
+selected_roots = [
+  "examples/data-structures/kvstore-default/.vibesys/tasks/default",
+  "examples/data-structures/ordered-map/.vibesys/tasks/mw",
+  "examples/data-structures/ordered-map/.vibesys/tasks/point-heavy",
+  "examples/data-structures/ordered-map/.vibesys/tasks/range-heavy",
+  "examples/data-structures/ordered-map/.vibesys/tasks/swmr",
+  "examples/data-structures/prioqueue/.vibesys/tasks/mpmc",
+  "examples/data-structures/prioqueue/.vibesys/tasks/mpsc",
+  "examples/data-structures/prioqueue/.vibesys/tasks/spmc",
+  "examples/data-structures/prioqueue/.vibesys/tasks/spsc",
+  "examples/data-structures/repositories/queue-rs/.vibesys/tasks/mpmc",
+  "examples/data-structures/repositories/queue-rs/.vibesys/tasks/mpsc",
+  "examples/data-structures/repositories/queue-rs/.vibesys/tasks/spsc",
+  "examples/data-structures/repositories/queue-rs/.vibesys/tasks/verus-mpmc-open",
+  "examples/data-structures/stack/.vibesys/tasks/mpmc",
+  "examples/data-structures/stack/.vibesys/tasks/mpsc",
+  "examples/data-structures/stack/.vibesys/tasks/spmc",
+  "examples/data-structures/stack/.vibesys/tasks/spsc",
+  "examples/data-structures/unordered-map/.vibesys/tasks/mw",
+  "examples/data-structures/unordered-map/.vibesys/tasks/swmr",
+  "examples/database/differential-dataflow/.vibesys/tasks/default",
+  "examples/database/kv-store/.vibesys/tasks/default",
+]
+selected_jobs = ["dockerfiles"]
+
+[discoveries.excluded_roots]
+"examples/model-serving/Llama-3-8B-trn2/.vibesys/tasks/default" = "builds FROM the Trainium Neuron deep-learning image passed as BASE_IMAGE, a multi-gigabyte base that needs a Neuron host to be useful and is not pulled on a CI runner"
+"examples/model-serving/images/rocm-mi30x-engine-free" = "builds FROM the SGLang ROCm image (about 25 GB) and its verify step imports a ROCm build of torch, which does not fit a CI runner disk or its time budget"
+
+[[collections]]
+name = "dockerfile_contexts"
+class = "dockerfile"
+field = "root"
+selected_only = true
 
 [[collections]]
 name = "native_targets"

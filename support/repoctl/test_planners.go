@@ -2,6 +2,7 @@ package main
 
 import (
 	"repoctl/execution"
+	"repoctl/execution/docker"
 	"repoctl/execution/golang"
 	"repoctl/execution/python"
 	"repoctl/execution/rust"
@@ -9,7 +10,7 @@ import (
 )
 
 var testPlanners = map[string]execution.Planner{
-	"go": golang.Planner{}, "rust": rust.Planner{},
+	"docker": docker.Planner{}, "go": golang.Planner{}, "rust": rust.Planner{},
 	"python": python.Planner{}, "typescript": typescript.Planner{},
 }
 
