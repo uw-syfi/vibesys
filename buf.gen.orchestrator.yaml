@@ -1,0 +1,17 @@
+# Go bindings for the orchestrator's contract, generated into its own module. buf.gen.yaml excludes
+# this package, so the bindings of the Python runs are unaffected. A TypeScript client adds its own
+# template when it lands.
+version: v2
+clean: true
+inputs:
+  - directory: proto
+    paths: [proto/vibesys/orchestrator]
+plugins:
+  - local: [go, -C, orchestrator, tool, protoc-gen-go]
+    strategy: all
+    out: orchestrator/gen
+    opt: paths=source_relative
+  - local: [go, -C, orchestrator, tool, protoc-gen-go-grpc]
+    strategy: all
+    out: orchestrator/gen
+    opt: paths=source_relative

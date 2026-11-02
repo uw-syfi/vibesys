@@ -496,3 +496,14 @@ directory = "cli"
 # the tests build the four release binaries and run install.sh, a few seconds more.
 timeout_seconds = 300
 commands = [["./check.sh"]]
+
+[[check_groups]]
+name = "orchestrator_checks"
+trigger_job = "orchestrator"
+include_in_test = true
+language = "go"
+directory = "orchestrator"
+# Same shape as cli_checks without the cross-compilation: a cold Go cache costs about a minute on a
+# CI runner (module download, vet and the tests); a warm one seconds.
+timeout_seconds = 240
+commands = [["./check.sh"]]
