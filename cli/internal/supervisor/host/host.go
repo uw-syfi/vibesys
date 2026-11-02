@@ -371,11 +371,7 @@ func (h *Host) noDirectory(ref lifecycle.Ref) (supervisor.Run, error) {
 		return nil, fmt.Errorf("reading the boot id: %w", err)
 	}
 	if rec.BootID != boot {
-		start := lifecycle.Start(lifecycle.NeverStarted{})
-		if rec.StartSent {
-			start = lifecycle.MayHaveStarted{}
-		}
-		return supervisor.Dead{Ref: ref, Proof: lifecycle.ProofRebooted, Start: start, Launch: &rec.Launch}, nil
+		return supervisor.Dead{Ref: ref, Proof: lifecycle.ProofRebooted, Start: rec.Start, Launch: &rec.Launch}, nil
 	}
 	return supervisor.Unknown{Ref: ref, Launch: &rec.Launch}, nil
 }

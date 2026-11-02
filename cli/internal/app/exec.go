@@ -124,6 +124,23 @@ type storeError struct{ err error }
 func (e storeError) Error() string { return e.err.Error() }
 func (e storeError) Unwrap() error { return e.err }
 
+// spawnError is a failure of Supervisors.Spawn: a supervisor that did not come up.
+type spawnError struct{ err error }
+
+func (e spawnError) Error() string { return e.err.Error() }
+func (e spawnError) Unwrap() error { return e.err }
+
+// launchCauseOf is causeOf for a failed launch. Only a supervisor that did not come up is tried
+// again: a failure before Spawn, such as an environment with no fingerprint, fails the job at once.
+func launchCauseOf(err error) lifecycle.Cause {
+	cause := causeOf(err)
+	var se spawnError
+	if cause == lifecycle.CauseSupervisorSilent && !errors.As(err, &se) {
+		return lifecycle.CauseUnprepared
+	}
+	return cause
+}
+
 // causeOf says who a failed step depends on. A store that does not answer is away, whatever the
 // error looks like; only an answer that will not change is a refusal.
 func causeOf(err error) lifecycle.Cause {
@@ -263,7 +280,7 @@ func (a *App) launch(ctx context.Context, ref lifecycle.Ref, scope core.Scope, k
 	case gone:
 		a.tell(lifecycle.Closed{Ref: ref})
 	case err != nil:
-		a.post(message{event: lifecycle.LaunchFailed{Ref: ref, Cause: causeOf(err), Failure: failureOf(err), At: a.now()}, handle: h})
+		a.post(message{event: lifecycle.LaunchFailed{Ref: ref, Cause: launchCauseOf(err), Failure: failureOf(err), At: a.now()}, handle: h})
 	default:
 		a.post(message{event: lifecycle.Launched{Ref: ref}, handle: h, changed: true})
 	}
@@ -325,7 +342,7 @@ func (a *App) prepare(ctx context.Context, ref lifecycle.Ref, scope core.Scope) 
 		return err
 	})
 	if err != nil {
-		return nil, false, err
+		return nil, false, spawnError{err}
 	}
 	err = a.record(ctx, st, core.Transition{
 		Job: job.ID, From: core.JobQueued, To: core.JobRunning, At: a.now(), Environment: &fingerprint,

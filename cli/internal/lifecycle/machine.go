@@ -239,6 +239,9 @@ const (
 	CauseSupervisorSilent Cause = "supervisor silent"
 	// CauseRefused is an answer that will not change, such as an environment that does not exist.
 	CauseRefused Cause = "refused"
+	// CauseUnprepared is a launch that failed before it started a supervisor, such as one whose
+	// environment gave no fingerprint. Nothing ran, and nothing says a second try goes further.
+	CauseUnprepared Cause = "unprepared"
 )
 
 // Event is something that happened, as the machine is told. Every event carries the time it
@@ -975,7 +978,7 @@ func (s *State) launchFailed(e LaunchFailed) []Request {
 			cur.phase, cur.trouble = PhaseDiscarding, e.Failure
 			return []Request{Discard{Ref: e.Ref, Queued: true}}
 		}
-	case CauseRefused:
+	case CauseRefused, CauseUnprepared:
 	}
 	return s.settle(e.Ref, failedToLaunch(e.Ref.Job, e.Failure, e.At))
 }
@@ -1060,7 +1063,7 @@ func (s *State) followFailed(e FollowFailed) []Request {
 		// Nothing is wrong with the job. A fenced owner comes here too, and cancels nothing that a
 		// new owner may have adopted.
 		return s.lookAgain(i, e.Failure)
-	case CauseSupervisorSilent, CauseRefused:
+	case CauseSupervisorSilent, CauseRefused, CauseUnprepared:
 	}
 	s.entries[i].phase, s.entries[i].trouble = PhaseStopping, e.Failure
 	return []Request{Stop{Ref: e.Ref, Reason: StopReason + e.Failure.Message}}

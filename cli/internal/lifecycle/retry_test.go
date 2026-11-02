@@ -138,6 +138,20 @@ func TestALaunchWhoseSupervisorNeverCameUpIsTriedAgainUpToTheBound(t *testing.T)
 	}
 }
 
+// A launch that failed before it started a supervisor, or that was refused, fails the job at once:
+// only a supervisor that did not come up is tried again.
+func TestALaunchThatFailedBeforeItsSupervisorFailsTheJobAtOnce(t *testing.T) {
+	for _, policy := range policies {
+		for _, cause := range []lifecycle.Cause{lifecycle.CauseUnprepared, lifecycle.CauseRefused} {
+			d := newDriver(t, 0, policy)
+			m := d.move(d.want(lifecycle.LaunchFailed{Ref: aRef, Cause: cause, Failure: noSupervisor, At: d.at()}, "Move"))
+			if m.Settlement.Transition.To != core.JobFailed {
+				t.Errorf("%s, %s: the job ends %q, want failed", policy, cause, m.Settlement.Transition.To)
+			}
+		}
+	}
+}
+
 // A supervisor proved dead before its command started is run again, whatever the kind of job, as
 // long as the job has attempts left; the last attempt cut off loses the job.
 func TestASupervisorDeadBeforeItsCommandStartedRunsTheJobAgain(t *testing.T) {

@@ -480,3 +480,19 @@ func TestAReadMakesNoStore(t *testing.T) {
 		t.Fatalf("Known after reads: %v, %v, want nothing made", known, err)
 	}
 }
+
+// A launch that fails before it starts a supervisor, here at an environment that gives no
+// fingerprint, fails the job at once: only a supervisor that did not come up is tried again.
+func TestALaunchThatFailsBeforeItsSupervisorIsNotTriedAgain(t *testing.T) {
+	w := newWorld(t)
+	w.env = fakeenv.New(core.EnvironmentHost, w.gates, fakeenv.WithFiles(w.files),
+		fakeenv.WithFingerprintError(&core.Failure{Kind: core.FailureUnavailable, Message: "the environment cannot be reached"}))
+	a := w.newApp()
+	job := awaitFinal(t, a, submit(t, a, "print", "A").ID)
+	if job.State != core.JobFailed {
+		t.Fatalf("the job ended %s, want failed", job.State)
+	}
+	if n := w.env.Fingerprinted(); n != 1 {
+		t.Fatalf("the environment was asked for its fingerprint %d times, want once", n)
+	}
+}

@@ -111,6 +111,13 @@ func (e *Environment) Fingerprint(ctx context.Context) (core.Fingerprint, error)
 	return f, nil
 }
 
+// Fingerprinted returns how many times Fingerprint was called.
+func (e *Environment) Fingerprinted() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.fingered
+}
+
 // Runs returns every execution Run was given, in order.
 func (e *Environment) Runs() []core.Execution {
 	e.mu.Lock()

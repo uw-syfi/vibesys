@@ -208,10 +208,21 @@ message RunRecord {
   // The identity of the boot the run began in.
   string boot_id = 1;
   Launch launch = 2;
-  // Says the daemon told, or was about to tell, the supervisor to start the command. It is written
-  // before that request is sent, and a supervisor runs nothing before it, so a readable record
-  // without it proves the command never started.
-  bool start_sent = 3;
+  // What the record says of the command's start. A daemon that marks starts writes NOT_SENT with
+  // the record and SENT before it asks the supervisor to start, and a supervisor runs nothing
+  // before that request: so only NOT_SENT proves the command never started. UNSPECIFIED is a
+  // record written by a build that did not mark starts, whose command may have started.
+  StartMark start_mark = 3;
+}
+
+// StartMark is what a run record says of the command's start.
+enum StartMark {
+  // The record predates start marks: the command may have started.
+  START_MARK_UNSPECIFIED = 0;
+  // The supervisor was never asked to start the command.
+  START_MARK_NOT_SENT = 1;
+  // The supervisor was asked, or was about to be asked, to start the command.
+  START_MARK_SENT = 2;
 }
 
 message StartRequest {}

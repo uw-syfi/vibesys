@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -389,19 +390,15 @@ func testKilledParked(t *testing.T, r Rig) {
 		t.Fatalf("Spawn: %v", err)
 	}
 	defer h.Close()
+	w := watch(ctx, h, 0)
 	r.Kill(l.Ref())
-	var dead supervisor.Dead
-	for ctx.Err() == nil {
-		// A process's lock can outlive it for a moment, so proof can take another look.
-		run, err := r.Supervisors.Probe(ctx, l.Ref())
-		if err != nil {
-			t.Fatalf("Probe: %v", err)
-		}
-		if d, ok := run.(supervisor.Dead); ok {
-			dead = d
-			break
-		}
+	// Follow returns once the connection to the killed supervisor ends.
+	select {
+	case <-w.done:
+	case <-ctx.Done():
+		t.Fatal("Follow did not return after the supervisor was killed")
 	}
+	dead := awaitDead(t, ctx, r.Supervisors, l.Ref())
 	if _, never := dead.Start.(lifecycle.NeverStarted); !never {
 		t.Fatalf("a run killed before its start is %#v, want dead and never started", dead)
 	}
@@ -416,6 +413,26 @@ func testKilledParked(t *testing.T, r Rig) {
 	}
 	if d, ok := run.(supervisor.Dead); !ok || d.Start != (lifecycle.NeverStarted{}) {
 		t.Fatalf("after a restart the run is %#v, want dead and never started", run)
+	}
+}
+
+// awaitDead returns the run of a job whose supervisor was killed and whose connection ended. Its
+// lock can outlive the process for a moment, so proof can take another look: each look yields to
+// the rest of the program first, and only ctx, a guard against a hang, bounds them.
+func awaitDead(t *testing.T, ctx context.Context, sups supervisor.Supervisors, ref lifecycle.Ref) supervisor.Dead {
+	t.Helper()
+	for {
+		run, err := sups.Probe(ctx, ref)
+		if err != nil {
+			t.Fatalf("Probe: %v", err)
+		}
+		if d, ok := run.(supervisor.Dead); ok {
+			return d
+		}
+		if ctx.Err() != nil {
+			t.Fatalf("the killed supervisor never proved dead: %#v", run)
+		}
+		runtime.Gosched()
 	}
 }
 
