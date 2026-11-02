@@ -491,7 +491,7 @@ class CliGitRepository:
     def uncommitted_paths(self, pathspecs: Sequence[Pathspec]) -> tuple[str, ...]:
         self.require_plain_work_tree(pathspecs)
         status = self._run_checked(
-            ["status", "--porcelain=v1", "--untracked-files=all", "--", *pathspecs]
+            ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", *pathspecs]
         )
         prefix = self._prefix()
         # A path can have two status lines (``D `` staged deletion plus ``??`` recreated
@@ -508,26 +508,32 @@ class CliGitRepository:
 
     def changed_since(self, commit: Revision, pathspecs: Sequence[Pathspec]) -> tuple[str, ...]:
         self.require_plain_work_tree(pathspecs)
-        committed = self._run_checked(["diff", "--name-only", f"{commit}..HEAD", "--", *pathspecs])
+        committed = self._run_checked(
+            ["diff", "--name-only", "-z", f"{commit}..HEAD", "--", *pathspecs]
+        )
         pending = self._run_checked(
-            ["status", "--porcelain=v1", "--untracked-files=all", "--", *pathspecs]
+            ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", *pathspecs]
         )
         prefix = self._prefix()
         changes = {
-            line.removeprefix(prefix) if prefix else line
-            for line in _text(committed.stdout).splitlines()
-            if line
+            path.removeprefix(prefix) for path in _text(committed.stdout).split("\0") if path
         }
         changes.update(self._status_paths(pending.stdout, prefix))
         return tuple(sorted(changes))
 
     @staticmethod
     def _status_paths(output: bytes, prefix: str) -> list[str]:
-        return [
-            line[3:].removeprefix(prefix) if prefix else line[3:]
-            for line in _text(output).splitlines()
-            if line[3:]
-        ]
+        """Every path ``status -z`` names: a rename or copy names its new path, then its origin."""
+        fields = iter(_text(output).split("\0"))
+        paths: list[str] = []
+        for field in fields:
+            status, path = field[:2], field[3:]
+            if not path:
+                continue
+            paths.append(path)
+            if status[0] in "RC" or status[1] in "RC":
+                paths.append(next(fields, ""))
+        return [path.removeprefix(prefix) for path in paths if path]
 
     def has_staged_changes(self, pathspecs: Sequence[Pathspec] = ()) -> bool:
         args = ["diff", "--cached", "--quiet", *(["--", *pathspecs] if pathspecs else [])]
