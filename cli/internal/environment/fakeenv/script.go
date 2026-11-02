@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -90,9 +91,20 @@ type interpreter struct {
 	x   core.Execution
 }
 
-// run runs the steps as one process of the group g, writing to out. It returns when the process
-// ends: by its own steps, or because the group ended.
-func (in *interpreter) run(g *group, steps []step, out io.Writer) (core.ExecOutcome, error) {
+// splitOutput separates the output file a command is told about from the rest of its script: a
+// last argument that is an absolute path, after one that is a flag, as a benchmark is run with
+// `--vs-output /scratch/sample-0.out`. The `emit` step writes to that file.
+func splitOutput(argv []string) (script []string, file string) {
+	n := len(argv)
+	if n >= 2 && strings.HasPrefix(argv[n-2], "--") && path.IsAbs(argv[n-1]) {
+		return argv[:n-2], argv[n-1]
+	}
+	return argv, ""
+}
+
+// run runs the steps as one process of the group g, writing to out, and to file for `emit`. It
+// returns when the process ends: by its own steps, or because the group ended.
+func (in *interpreter) run(g *group, steps []step, out io.Writer, file string) (core.ExecOutcome, error) {
 	exited := func(code int) (core.ExecOutcome, error) {
 		return core.ExecOutcome{Kind: core.ExecExited, ExitCode: code}, nil
 	}
@@ -104,6 +116,11 @@ func (in *interpreter) run(g *group, steps []step, out io.Writer) (core.ExecOutc
 			if _, err := fmt.Fprintln(out, strings.Join(w[1:], " ")); err != nil {
 				return core.ExecOutcome{Kind: core.ExecUnknown}, err
 			}
+		case "emit":
+			if in.env.files == nil || file == "" {
+				return exited(127)
+			}
+			in.env.files.Put(file, []byte(strings.Join(w[1:], " ")))
 		case "dir":
 			if _, err := fmt.Fprintln(out, in.x.Checkout.Dir); err != nil {
 				return core.ExecOutcome{Kind: core.ExecUnknown}, err
@@ -128,7 +145,7 @@ func (in *interpreter) run(g *group, steps []step, out io.Writer) (core.ExecOutc
 			}
 		case "child":
 			body := s.body
-			g.wg.Go(func() { _, _ = in.run(g, body, out) })
+			g.wg.Go(func() { _, _ = in.run(g, body, out, file) })
 		case "exit":
 			code, err := strconv.Atoi(strings.Join(w[1:], ""))
 			if err != nil {
@@ -182,6 +199,7 @@ var _ environment.Launcher = (*launcher)(nil)
 // Start implements environment.Launcher. The script's own outcomes that are not an exit, such as
 // `timeout`, end the process with that outcome as the execution's.
 func (l *launcher) Start(argv []string, sink io.Writer) (environment.Process, error) {
+	argv, file := splitOutput(argv)
 	steps, ok := parse(argv)
 	if !ok {
 		steps = []step{{words: []string{"malformed"}}} // exits 127, as a shell does for a command it cannot run
@@ -192,7 +210,7 @@ func (l *launcher) Start(argv []string, sink io.Writer) (environment.Process, er
 	l.mu.Unlock()
 	p := &process{g: g, exited: make(chan environment.Exit, 1)}
 	l.wg.Go(func() {
-		out, err := l.in.run(g, steps, sink)
+		out, err := l.in.run(g, steps, sink, file)
 		p.exited <- toExit(out, err)
 	})
 	return p, nil
