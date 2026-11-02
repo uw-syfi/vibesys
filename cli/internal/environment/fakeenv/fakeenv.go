@@ -177,7 +177,7 @@ func (e *Environment) Run(ctx context.Context, x core.Execution, out io.Writer) 
 	defer stop()
 	var wg sync.WaitGroup
 	// Several processes of the script write to out at once.
-	l := &launcher{in: &interpreter{env: e, x: x}, wg: &wg}
+	l := &launcher{in: &interpreter{gates: e.gates, dir: x.Checkout.Dir, files: e.files}, wg: &wg}
 	out = &syncWriter{w: out}
 	defer l.end()
 	return environment.Execute(x, l, environment.Events{

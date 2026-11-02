@@ -5,6 +5,7 @@ import (
 	"io"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
@@ -140,4 +141,55 @@ func TestEmitFailsLikeAnyCommandThatCannotWriteItsFile(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A Machine is the place a fake container runs its commands: a script runs and reports how it
+// ended, and ending the machine ends every process it started, the ones in the background too.
+func TestMachineRunsScriptsAndEndsEveryProcess(t *testing.T) {
+	gates := fakeenv.NewMemoryGates()
+	m := fakeenv.NewMachine(gates, "/work")
+	var out syncBuffer
+	p, err := m.Start([]string{"dir", ";", "print", "hi", ";", "exit", "3"}, &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exit := <-p.Exited(); exit.Code != 3 || exit.Err != nil {
+		t.Fatalf("exit %+v, want code 3", exit)
+	}
+	if got, want := out.String(), "/work\nhi\n"; got != want {
+		t.Errorf("output %q, want %q", got, want)
+	}
+
+	if _, err := m.Start([]string{"alive", "leader", ";", "child", "{", "alive", "background", ";", "hold", "forever", "}", ";", "hold", "forever"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), envtest.Backstop)
+	defer cancel()
+	if !gates.Reached(ctx, fakeenv.LiveMark("background")) {
+		t.Fatal("the background process never started")
+	}
+	m.End()
+	m.End() // ending twice is the same as once
+	for _, name := range []string{"leader", "background"} {
+		if !gates.Gone(ctx, name) {
+			t.Errorf("the process %q still runs after the machine ended", name)
+		}
+	}
+}
+
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
