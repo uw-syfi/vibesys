@@ -221,7 +221,11 @@ func (l *launcher) Start(argv []string, sink io.Writer) (environment.Process, er
 	l.groups = append(l.groups, g)
 	l.mu.Unlock()
 	p := &process{g: g, exited: make(chan environment.Exit, 1)}
+	// The leader is counted in its group before it runs, so the first child it starts never adds to
+	// a group that ending the group is already waiting on.
+	g.wg.Add(1)
 	l.wg.Go(func() {
+		defer g.wg.Done()
 		out, err := l.in.run(g, steps, sink, file)
 		p.exited <- toExit(out, err)
 	})
