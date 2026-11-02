@@ -11,6 +11,9 @@ JSON exactly. Oversized strings are named blob attachments; their inline value
 is ``blob:<sha256>`` and the attachment role identifies the original field path.
 Unmatched historical workstream and adoption projections are retained in an
 UNATTRIBUTED_EVENT notice's typed detail; they never invent extra work units.
+Execution-specific gate observations own child spans beneath their measurement
+operation. Their sample readings remain distinct from the operation's settled
+aggregate; only the aggregate establishes the typed input measurement.
 Anonymous legacy controls use ``journal:<source sequence>`` as a local identity.
 """
 
