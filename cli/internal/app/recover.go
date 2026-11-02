@@ -19,9 +19,10 @@ import (
 //
 // It fails, and the daemon does not serve, only when the list of stores or of supervisors cannot be
 // read: without them it cannot tell what it would be touching. A store that cannot be read, such
-// as a repository on a disk that is not mounted, is left out for now and does not stop the rest.
-// A run of such a store is not released and its outcome is not discarded: the run is in doubt and
-// holds the machine, the store is tried again, and when it returns the run is taken up.
+// as a repository on a disk that is not mounted, stays known and does not stop the rest. A run of
+// such a store is not released and its outcome is not discarded: the run is in doubt and holds the
+// machine, the store is tried again, and when it returns the run is taken up. The same goes for a
+// store another daemon has.
 func (a *App) Start(ctx context.Context) error {
 	var scopes []Scope
 	err := a.retry(ctx, func(ctx context.Context) error {

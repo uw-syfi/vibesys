@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"sync"
 
 	"github.com/uw-syfi/vibesys/cli/internal/app"
@@ -52,7 +51,8 @@ func (f *FileStores) Close() error {
 // process its one owner.
 //
 // The store is made before the index records it. A crash between the two leaves a store with no
-// jobs and no entry, which loses nothing, and the next Open records it.
+// jobs and no entry, which loses nothing, and the next Open records it. So a store the index has
+// was made: if it is missing, its disk is away, and it is not made again over the mount point.
 func (f *FileStores) Open(ctx context.Context, scope app.Scope) (store.Store, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -65,12 +65,20 @@ func (f *FileStores) Open(ctx context.Context, scope app.Scope) (store.Store, er
 	if s, ok := f.stores[scope]; ok {
 		return s, nil
 	}
+	task := filestore.Task{Repository: scope.Repository, Name: scope.Task}
+	entry, err := f.index.Entry(task)
+	if err != nil {
+		return nil, err
+	}
 	opts := append([]filestore.Option{filestore.WithRules(f.rules), filestore.WithOwner(f.owner)}, f.opts...)
+	if entry != "" {
+		opts = append(opts, filestore.Existing(entry))
+	}
 	s, err := filestore.OpenTask(scope.Repository, scope.Task, opts...)
 	if err != nil {
 		return nil, err
 	}
-	if err := f.index.Add(filestore.Task{Repository: scope.Repository, Name: scope.Task}); err != nil {
+	if err := f.index.Add(task); err != nil {
 		_ = s.Close()
 		return nil, fmt.Errorf("recording the store of task %s in %s: %w", scope.Task, scope.Repository, err)
 	}
@@ -78,22 +86,16 @@ func (f *FileStores) Open(ctx context.Context, scope app.Scope) (store.Store, er
 	return s, nil
 }
 
-// Known implements app.Stores. A task whose repository is gone from the disk is left out: there
-// is nothing to recover in it, and opening its store would make the directory again.
-func (f *FileStores) Known(ctx context.Context) ([]app.Scope, error) {
+// Known implements app.Stores. It returns every task the index has, whether or not its repository
+// is there now: a repository that is away is what recovery must know of, to hold the runs of that
+// store until it returns. Open says whether a store can be reached.
+func (f *FileStores) Known(context.Context) ([]app.Scope, error) {
 	tasks, err := f.index.Tasks()
 	if err != nil {
 		return nil, err
 	}
 	out := make([]app.Scope, 0, len(tasks))
 	for _, t := range tasks {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		info, err := os.Stat(t.Repository)
-		if err != nil || !info.IsDir() {
-			continue
-		}
 		out = append(out, app.Scope{Repository: t.Repository, Task: t.Name})
 	}
 	return out, nil

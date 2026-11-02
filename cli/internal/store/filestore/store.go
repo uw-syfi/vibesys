@@ -28,6 +28,16 @@ type config struct {
 	fs    fsys.FS
 	rules store.Rules
 	owner Owner
+	// entry is set when the store is known to exist, and names what says so.
+	entry string
+}
+
+func optionsOf(opts []Option) config {
+	c := config{fs: fsys.OS{}}
+	for _, opt := range opts {
+		opt(&c)
+	}
+	return c
 }
 
 // WithFS sets the filesystem the store works on. Tests give it a fault-injecting one. The
@@ -43,6 +53,12 @@ func WithRules(rules store.Rules) Option { return func(c *config) { c.rules = ru
 // a program that does not leave work behind it.
 func WithOwner(owner Owner) Option { return func(c *config) { c.owner = owner } }
 
+// Existing says the store was made, and entry is the file that says so. Open then fails with
+// core.FailureUnavailable and makes nothing if the store is not there: a store that was made and
+// is missing is most likely on a disk that is not mounted, and one made now would hide the real
+// one and say none of its jobs exist.
+func Existing(entry string) Option { return func(c *config) { c.entry = entry } }
+
 // Open opens the store in the directory root, creating the directory and its parents when they
 // are not there. A directory that holds anything else, or records of a newer format, is refused
 // with an error that names the file.
@@ -51,12 +67,13 @@ func WithOwner(owner Owner) Option { return func(c *config) { c.owner = owner } 
 // with an error of kind core.FailureConflict that names the store and the owner; see the Owners
 // section of the package documentation.
 func Open(root string, opts ...Option) (*Store, error) {
-	c := config{fs: fsys.OS{}}
-	for _, opt := range opts {
-		opt(&c)
-	}
+	c := optionsOf(opts)
 	root = path.Clean(root)
-	if err := makeAll(c.fs, root); err != nil {
+	if c.entry != "" {
+		if err := findStore(c, root); err != nil {
+			return nil, err
+		}
+	} else if err := makeAll(c.fs, root); err != nil {
 		return nil, unavailable(root, err)
 	}
 	if err := initialize(c.fs, root); err != nil {
@@ -79,10 +96,28 @@ func Open(root string, opts ...Option) (*Store, error) {
 // Close gives up the store. Every later call on it fails, and the next Open may have it.
 func (s *Store) Close() error { return s.guard.release() }
 
-// OpenTask opens the store of one task of a repository.
+// findStore fails unless the store that was made is there.
+func findStore(c config, root string) error {
+	_, err := c.fs.ReadFile(path.Join(root, formatFile))
+	if errors.Is(err, fs.ErrNotExist) {
+		return &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf(
+			"the store at %s is not there, and %s says it was made: its disk may not be mounted, and if it was deleted on purpose, remove that file",
+			root, c.entry)}
+	}
+	if err != nil {
+		return unavailable(root, err)
+	}
+	return nil
+}
+
+// OpenTask opens the store of one task of a repository. The repository must be there: a store
+// makes its own directories, and never a repository.
 func OpenTask(repository, task string, opts ...Option) (*Store, error) {
 	if err := ledger.CheckName("task", task); err != nil {
 		return nil, err
+	}
+	if _, err := optionsOf(opts).fs.ReadDir(repository); err != nil {
+		return nil, &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("the repository %s is not there: %v", repository, err)}
 	}
 	return Open(taskDir(repository, task), opts...)
 }

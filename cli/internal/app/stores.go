@@ -38,7 +38,8 @@ type Stores interface {
 	// scope has one, so that Known finds it after a restart.
 	Open(ctx context.Context, scope Scope) (store.Store, error)
 
-	// Known returns every scope that has a store.
+	// Known returns every scope that has a store, including one whose store cannot be reached now:
+	// leaving that out would make its runs look like nobody's.
 	Known(ctx context.Context) ([]Scope, error)
 }
 

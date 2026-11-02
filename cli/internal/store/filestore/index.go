@@ -12,7 +12,6 @@ import (
 	"sync"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
-	"github.com/uw-syfi/vibesys/cli/internal/store/filestore/fsys"
 	"github.com/uw-syfi/vibesys/cli/internal/store/ledger"
 )
 
@@ -48,10 +47,7 @@ const tasksDir = "tasks"
 // OpenIndex opens the index in the directory dir, making the directory and its parents when they
 // are missing. WithFS is honoured and WithRules is not used.
 func OpenIndex(dir string, opts ...Option) (*Index, error) {
-	c := config{fs: fsys.OS{}}
-	for _, opt := range opts {
-		opt(&c)
-	}
+	c := optionsOf(opts)
 	dir = path.Clean(dir)
 	if err := makeAll(c.fs, path.Join(dir, tasksDir)); err != nil {
 		return nil, unavailable(dir, err)
@@ -90,6 +86,21 @@ func (x *Index) Add(t Task) error {
 		return unavailable(x.dir, err)
 	}
 	return nil
+}
+
+// Entry returns the file that records the task, which is empty when the index has no record of it.
+func (x *Index) Entry(t Task) (string, error) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	name := x.entry(t)
+	_, err := x.b.fs.ReadFile(name)
+	switch {
+	case err == nil:
+		return name, nil
+	case errors.Is(err, fs.ErrNotExist):
+		return "", nil
+	}
+	return "", unavailable(x.dir, err)
 }
 
 // Tasks returns every task recorded, by repository and then name. An entry this program cannot
