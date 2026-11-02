@@ -28,7 +28,7 @@ func TestFakePassesTheEnvironmentContract(t *testing.T) {
 			return newFake(w, timers)
 		},
 		World: func(t *testing.T) envtest.World { return fakeworld.New() },
-		Checkout: func(t *testing.T) core.Checkout {
+		Checkout: func(t *testing.T, _ envtest.World) core.Checkout {
 			return core.Checkout{Commit: "0123456789abcdef0123456789abcdef01234567", Dir: filepath.Join("/", "fake-checkouts", t.Name())}
 		},
 		// The fake has no process to kill. The nearest thing is the run being abandoned: its

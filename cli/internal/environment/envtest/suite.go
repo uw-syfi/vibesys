@@ -52,7 +52,9 @@ type Rig struct {
 	World func(t *testing.T) World
 
 	// Checkout returns a directory to run in, fresh for each case, removed when the case ends.
-	Checkout func(t *testing.T) core.Checkout
+	// It gets the case's world, since an environment whose commands run elsewhere, such as in a
+	// container, can reach the world only through the directory it mounts.
+	Checkout func(t *testing.T, w World) core.Checkout
 
 	// Spawn runs Run(x) in a separate process that is not the test's own, with the same
 	// environment New returns and the same world, and returns the function that kills that
@@ -118,7 +120,7 @@ func newHarness(t *testing.T, rig Rig) *harness {
 	h := &harness{t: t, rig: rig, timers: NewTimers()}
 	h.ctx, h.cancel = context.WithTimeout(context.Background(), Backstop)
 	h.world = rig.World(t)
-	h.checkout = rig.Checkout(t)
+	h.checkout = rig.Checkout(t, h.world)
 	h.env = rig.New(t, h.world, h.timers)
 	t.Cleanup(func() {
 		// A case that failed may leave a run waiting: end it so the cleanup does not hang.

@@ -35,7 +35,7 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func checkout(t *testing.T) core.Checkout {
+func checkout(t *testing.T, _ envtest.World) core.Checkout {
 	dir, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
