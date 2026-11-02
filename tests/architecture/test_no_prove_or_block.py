@@ -183,6 +183,8 @@ DELETED_SYMBOLS: tuple[str, ...] = (
     # The second and third definitions of open work: `phase_open` is the one (#3475 D7).
     "record_waits",
     "_OPEN_PHASES",
+    # The envelope's fence, read by no code (#3475 D11, version 46); retained receipts keep their own model.
+    "HostFence",
 )
 """Names that no file under ``src/`` or ``libs/*/src`` may define or import."""
 

@@ -31,8 +31,6 @@ from vs_core.api import (
     EvaluationTerminalFacts,
     EventCursor,
     EventId,
-    HostFence,
-    HostId,
     InvocationId,
     InvocationRef,
     ItemId,
@@ -133,7 +131,6 @@ def test_durable_history_cursor_and_terminal_reason_survive_step_and_codec(count
     assert state.model_dump_json() == before
     envelope = RunEnvelope[StrategyState](
         schema_version=ENVELOPE_SCHEMA_VERSION,
-        fence=HostFence(host_id=HostId(root="host"), epoch=1),
         strategy_id=state.run.declaration.strategy_id,
         state_schema=state.run.declaration.state_schema,
         core=result.state,

@@ -19,8 +19,6 @@ from vs_core.api import (
     CheckoutUpdate,
     EventCursor,
     EventId,
-    HostFence,
-    HostId,
     Observation,
     ObservationStatus,
     RequestId,
@@ -39,7 +37,6 @@ def _record() -> RuntimeRecord[StrategyState]:
     core = initial_state()
     envelope = RunEnvelope[StrategyState](
         schema_version=ENVELOPE_SCHEMA_VERSION,
-        fence=HostFence(host_id=HostId(root="host"), epoch=1),
         strategy_id=core.run.declaration.strategy_id,
         state_schema=core.run.declaration.state_schema,
         core=core,

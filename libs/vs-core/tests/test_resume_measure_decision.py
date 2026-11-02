@@ -152,14 +152,12 @@ class Host:
         self,
         definition: SearchDef[Config],
         *,
-        epoch: int,
         stepper: core.CoreStep = core.step,
     ) -> Host:
         """The host that takes over: the stored envelope reloaded, recovery started under a new
         epoch, and the search, in the code ``definition``, woken as the first event after it."""
         stored = core.RunEnvelope[core.FlowState](
             schema_version=core.ENVELOPE_SCHEMA_VERSION,
-            fence=core.HostFence(host_id=core.HostId(root=f"host-{epoch}"), epoch=epoch),
             strategy_id=self.core.run.declaration.strategy_id,
             state_schema=self.core.run.declaration.state_schema,
             core=self.core,
@@ -197,7 +195,7 @@ def test_a_resumed_search_asking_for_its_input_again_is_answered_from_the_run_th
     so the resumed root waited on it until its limit passed, and the search never went on."""
     host = measured_once()
     first = host.run_started()
-    after_change = host.restarted(CHANGED, epoch=2)  # the root restarts and asks again
+    after_change = host.restarted(CHANGED)  # the root restarts and asks again
     assert after_change.seen is not None
     assert host.seen is not None
     assert after_change.seen.count == 2, "the root went on past its second measurement"
@@ -205,7 +203,7 @@ def test_a_resumed_search_asking_for_its_input_again_is_answered_from_the_run_th
     assert_never_measured_again(after_change, first)
 
     code = CHANGED if later == "same" else code_changed(CHANGED)
-    resumed = after_change.restarted(code, epoch=3)
+    resumed = after_change.restarted(code)
     assert resumed.seen is not None
     assert resumed.seen.count == (2 if later == "same" else 3)
     assert resumed.seen.evidence == host.seen.evidence

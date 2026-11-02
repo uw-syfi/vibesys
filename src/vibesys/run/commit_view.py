@@ -16,8 +16,6 @@ from typing import TYPE_CHECKING, Any
 from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
     EventCursor,
-    HostFence,
-    HostId,
     RunEnvelope,
 )
 from vs_core.api.recovery import Finished
@@ -43,18 +41,10 @@ if TYPE_CHECKING:
 class RecordView:
     """The fold and the search beside it, in the shape of the record the observer reads."""
 
-    def __init__(
-        self,
-        search: SearchRun[Any, Any],
-        declaration: SearchDeclaration,
-        *,
-        epoch: int,
-        run_id: str,
-    ) -> None:
-        """View the run ``run_id`` that ``search`` runs, written by the process of ``epoch``."""
+    def __init__(self, search: SearchRun[Any, Any], declaration: SearchDeclaration) -> None:
+        """View the run that ``search`` runs."""
         self._search = search
         self._declaration = declaration
-        self._fence = HostFence(host_id=HostId(root=f"run:{run_id}"), epoch=epoch)
 
     def of(self, state: CoreState) -> RuntimeRecord[Any]:
         """The record that shows ``state`` and the search as it stands.
@@ -66,7 +56,6 @@ class RecordView:
             raise SearchNotAdvancedError
         envelope = RunEnvelope[Any].model_construct(
             schema_version=ENVELOPE_SCHEMA_VERSION,
-            fence=self._fence,
             strategy_id=self._declaration.strategy_id,
             state_schema=self._declaration.state_schema,
             core=state,

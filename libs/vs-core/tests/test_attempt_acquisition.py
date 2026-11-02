@@ -50,8 +50,6 @@ from vs_core.api import (
     EventCursor,
     EventId,
     ExecuteRegisteredOperation,
-    HostFence,
-    HostId,
     InitialSessionsFailed,
     InitialSessionsReady,
     InspectRequest,
@@ -129,7 +127,6 @@ def reload_state(state: CoreState, codec: OperationRegistry | None = None) -> Co
         return state
     envelope = RunEnvelope[StrategyState](
         schema_version=ENVELOPE_SCHEMA_VERSION,
-        fence=HostFence(host_id=HostId(root="host"), epoch=1),
         strategy_id=state.run.declaration.strategy_id,
         state_schema=state.run.declaration.state_schema,
         core=state,

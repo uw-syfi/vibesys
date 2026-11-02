@@ -20,8 +20,6 @@ from vs_core.api import (
     DecisionSubmitted,
     EventCursor,
     EventId,
-    HostFence,
-    HostId,
     LifecycleClass,
     Observation,
     ObservationStatus,
@@ -92,7 +90,6 @@ def envelope() -> RunEnvelope[StrategyState]:
     state = initial_state()
     return RunEnvelope[StrategyState](
         schema_version=ENVELOPE_SCHEMA_VERSION,
-        fence=HostFence(host_id=HostId(root="host"), epoch=1),
         strategy_id=state.run.declaration.strategy_id,
         state_schema=state.run.declaration.state_schema,
         core=state,

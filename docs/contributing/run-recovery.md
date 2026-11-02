@@ -221,7 +221,6 @@ Field by field (`libs/vs-core/src/vs_core/types/kernel.py:CoreState`):
 | `records.records` (the request ledger) | derived; `phase` collapses to open or finished, and attempts come from `StepStarted` |
 | `records.epoch` | the host epoch of the log: `epoch_opened` advances it when a later epoch of the log opens |
 | `strategy` and `event_cursor` | one `StrategyAdvanced` record per advance ([The search in the log](#the-search-in-the-log)); a resume on the same code replays the journal it holds |
-| `fence` | a `HostFence` value no product code reads; the run lock is the only fence |
 | `pending_inputs`, `pending_decisions`, `wakes`, `pending_publications`, `delivery_cursor` | derived, except the owner events: the ledger derives the owner event of a report (`_request_forward.py`) but not every fact an executor tells an owner (a turn's reply, a refused mid-turn steer, a job's failure class, an adoption's publication), so those travel in the `StepFinished` record ([Owner events](#owner-events)). Decisions and wakes are the strategy's output; publications are the fold's output. The delivery cursor is the one fact that is not derived: after a restart every publication since the last recorded acknowledgement is delivered again |
 
 Outside the log, executors keep durable state keyed by tag: the provider session ids
@@ -946,8 +945,7 @@ What main still holds of the old layer, and what the new one does not yet cover.
   five request kinds `InspectRequest`, `InspectTurn`, `InspectOwnedJob`, `CancelOwnedResource` and
   `BlockRequest`. They are reached from events a step loop run does not produce (`RetireRequested`,
   `ScopeReopenAdmitted`, `ReacquisitionReady`, the restart reconciliation); no simulation tier enters them.
-  The `HostFence` value remains as `CoreState.fence`, which no product code reads, and in the schemas the
-  retained-run import decodes.
+  The envelope no longer holds a fence (version 46); a retained run's fence receipts are read by their own frozen model.
 - **Protos.** `UNKNOWN` enum values, the inspection messages, the deprecated never-set `for_park` field of
   `CancelOwnedJob` and its replay twin, and the `replay*.proto` messages stay until the layer above goes;
   `buf breaking` will flag the removals, and persisted data stays readable for seven days.

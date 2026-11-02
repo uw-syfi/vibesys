@@ -81,7 +81,6 @@ def pending_state(value: core.Settlement) -> core.CoreState:
 def reload(state: core.CoreState, registry: core.OperationRegistry | None = None) -> core.CoreState:
     envelope = core.RunEnvelope[core.StrategyState](
         schema_version=core.ENVELOPE_SCHEMA_VERSION,
-        fence=core.HostFence(host_id=core.HostId(root="host"), epoch=1),
         strategy_id=state.run.declaration.strategy_id,
         state_schema=state.run.declaration.state_schema,
         core=state,

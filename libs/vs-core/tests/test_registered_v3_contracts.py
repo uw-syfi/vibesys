@@ -149,7 +149,6 @@ def test_expected_measurement_is_bound_to_canonical_registered_payload(fingerpri
         codec.encode_envelope(
             core.RunEnvelope[core.StrategyState](
                 schema_version=core.ENVELOPE_SCHEMA_VERSION,
-                fence=core.HostFence(host_id=core.HostId(root="host"), epoch=0),
                 strategy_id=state.run.declaration.strategy_id,
                 state_schema=state.run.declaration.state_schema,
                 core=state.model_copy(
@@ -243,7 +242,6 @@ def _measurement_envelope(
     )
     return core.RunEnvelope[core.StrategyState](
         schema_version=core.ENVELOPE_SCHEMA_VERSION,
-        fence=core.HostFence(host_id=core.HostId(root="host"), epoch=0),
         strategy_id=state.run.declaration.strategy_id,
         state_schema=state.run.declaration.state_schema,
         core=state,

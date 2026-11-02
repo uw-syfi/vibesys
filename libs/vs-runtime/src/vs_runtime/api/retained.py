@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, TypeAdapter
 
-from vs_core.api import AttemptRef, HostFence, Observation
+from vs_core.api import AttemptRef, Observation
 from vs_decode.api import Unreadable, ValidationOptions, decode_json
 from vs_runtime._access_settlement import AccessReceipt, UnsettledInvocations
 from vs_runtime._core_requests import ExecutionResult
@@ -28,6 +28,7 @@ from vs_runtime._retained_receipts import (
     Published,
     RecordReceipt,
     ResultReceipt,
+    RetainedHost,
 )
 from vs_runtime._session_requests import DispatchRecord, SessionBinding
 from vs_runtime._workspace_receipts import (
@@ -70,7 +71,7 @@ class RetainedReceipt:
 
 _READERS = {
     ("executions", "execution"): ExecutionRecord,
-    ("fences", "fence"): HostFence,
+    ("fences", "fence"): RetainedHost,
     ("workspace-bindings", "binding"): AttemptBinding,
     ("workspace-root", "holder"): AttemptRef,
     ("workspace-root-baseline", "baseline"): RootBaseline,

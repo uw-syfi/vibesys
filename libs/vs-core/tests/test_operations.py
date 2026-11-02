@@ -15,8 +15,6 @@ from vs_core.api import (
     DecisionId,
     DecisionSubmitted,
     EventCursor,
-    HostFence,
-    HostId,
     LifecycleClass,
     Operation,
     OperationDescriptor,
@@ -130,7 +128,6 @@ def operation_state() -> tuple[OperationRegistry, RunEnvelope[StrategyState]]:
     )
     envelope = RunEnvelope[StrategyState](
         schema_version=ENVELOPE_SCHEMA_VERSION,
-        fence=HostFence(host_id=HostId(root="host"), epoch=1),
         strategy_id=declaration.strategy_id,
         state_schema=declaration.state_schema,
         core=state,
