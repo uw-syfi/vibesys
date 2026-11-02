@@ -82,7 +82,7 @@ func TestLocalTestSelectionNarrowsHeavyGroups(t *testing.T) {
 		{
 			name:        "repoctl only (f39d7eb8c)",
 			paths:       []string{"support/repoctl/test.go", "support/repoctl/test_test.go"},
-			wantCI:      []string{"agent_image", "cli", "clients", "evaluators", "examples", "gateway", "impact", "proto", "python", "real_tiers", "stitch"},
+			wantCI:      []string{"agent_image", "cli", "clients", "dockerfiles", "evaluators", "examples", "gateway", "impact", "proto", "python", "real_tiers", "stitch"},
 			wantGroups:  []string{"always_on", "repoctl_tests"},
 			wantSkipped: []string{},
 			wantTargets: 0,
@@ -109,6 +109,14 @@ func TestLocalTestSelectionNarrowsHeavyGroups(t *testing.T) {
 			wantCI:      []string{"examples", "python"},
 			wantGroups:  []string{"always_on", "examples_native_evaluator_tests", "examples_tests", "python_architecture", "python_guards", "python_quality", "python_tests", "python_types"},
 			wantSkipped: []string{"examples_cpu_check_shard"},
+			wantTargets: -1,
+		},
+		{
+			name:        "an example Dockerfile builds in CI and is named as skipped locally",
+			paths:       []string{"examples/database/kv-store/.vibesys/tasks/default/Dockerfile"},
+			wantCI:      []string{"dockerfiles", "examples", "python"},
+			wantGroups:  []string{"always_on", "examples_native_evaluator_tests", "examples_tests", "python_architecture", "python_guards", "python_quality", "python_tests", "python_types"},
+			wantSkipped: []string{"example_dockerfile_builds", "examples_cpu_check_shard"},
 			wantTargets: -1,
 		},
 		{
