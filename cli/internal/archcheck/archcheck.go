@@ -48,6 +48,7 @@ var rules = map[string][]string{
 	"internal/gitrepo":             {"internal/core"},
 	"internal/task":                {"internal/core"},
 	"internal/reading":             {},
+	"internal/flow":                {"internal/core", "internal/reading", "internal/task"},
 	"internal/runtimedir":          {"internal/core"},
 
 	// Storage.

@@ -195,6 +195,10 @@ func TestWhatItCannotRunIsRefusedAndSaysWhy(t *testing.T) {
 			strings.Replace(jsonManifest, "${PROJECT_ROOT}/.vibesys/tasks/t/bench.py", "${PACKAGE_ROOT}/bench.py", 1),
 			"${PACKAGE_ROOT}", core.FailureUnavailable,
 		},
+		"a benchmark that needs no check": {
+			strings.Replace(jsonManifest, "[benchmark.result]", "requires_accuracy = false\n[benchmark.result]", 1),
+			"requires_accuracy", core.FailureUnavailable,
+		},
 		"two backends": {
 			strings.Replace(jsonManifest, `["cpu"]`, `["cpu", "cuda"]`, 1),
 			"backends", core.FailureUnavailable,
