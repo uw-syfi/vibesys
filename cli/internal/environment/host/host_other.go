@@ -10,10 +10,11 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/backend"
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/environment"
 )
 
 // DefaultProbePause is how long Run waits between two readiness probes of a service.
-const DefaultProbePause = 500 * time.Millisecond
+const DefaultProbePause = environment.DefaultProbePause
 
 // Config configures New.
 type Config struct {

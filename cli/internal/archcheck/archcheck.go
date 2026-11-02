@@ -43,15 +43,27 @@ var rules = map[string][]string{
 	"internal/backend/backendtest": {"internal/backend"},
 	"internal/environment":         {"internal/core"},
 	"internal/environment/fakeenv": {"internal/clock", "internal/core", "internal/environment"},
-	"internal/environment/envtest": {"internal/clock", "internal/core", "internal/environment"},
-	"internal/environment/host":    {"internal/backend", "internal/clock", "internal/core", "internal/environment"},
-	"internal/gitrepo":             {"internal/core"},
-	"internal/task":                {"internal/core"},
-	"internal/task/tasktest":       {"internal/core", "internal/task"},
-	"internal/gitwork":             {"internal/core", "internal/task"},
-	"internal/reading":             {},
-	"internal/flow":                {"internal/core", "internal/reading", "internal/task"},
-	"internal/hostfs":              {},
+	// The fake machine's world for the contract suite. Only tests reach it.
+	"internal/environment/fakeenv/fakeworld": {"internal/environment/envtest", "internal/environment/fakeenv"},
+	"internal/environment/envtest":           {"internal/clock", "internal/core", "internal/environment"},
+	"internal/environment/host":              {"internal/backend", "internal/clock", "internal/core", "internal/environment"},
+
+	// The docker environment decides what to run and how it ends; an engine is the only thing that
+	// talks to Docker. The real engine drives the docker program, the fake keeps a daemon in
+	// memory, and one contract suite holds both to the same behavior.
+	"internal/environment/docker":           {"internal/backend", "internal/clock", "internal/core", "internal/environment"},
+	"internal/environment/docker/dockercli": {"internal/clock", "internal/core", "internal/environment", "internal/environment/docker"},
+	"internal/environment/docker/dockerfake": {
+		"internal/core", "internal/environment", "internal/environment/docker", "internal/environment/fakeenv",
+	},
+	"internal/environment/docker/dockertest": {"internal/core", "internal/environment", "internal/environment/docker"},
+	"internal/gitrepo":                       {"internal/core"},
+	"internal/task":                          {"internal/core"},
+	"internal/task/tasktest":                 {"internal/core", "internal/task"},
+	"internal/gitwork":                       {"internal/core", "internal/task"},
+	"internal/reading":                       {},
+	"internal/flow":                          {"internal/core", "internal/reading", "internal/task"},
+	"internal/hostfs":                        {},
 	"internal/flowrun": {
 		"internal/backend", "internal/clock", "internal/core", "internal/environment", "internal/flow",
 		"internal/hostfs", "internal/reading",
@@ -116,14 +128,23 @@ var rules = map[string][]string{
 var testRules = map[string][]string{
 	"internal/backend/cpu":         {"internal/backend/backendtest"},
 	"internal/environment":         {"internal/environment/fakeenv"},
-	"internal/environment/fakeenv": {"internal/environment/envtest"},
+	"internal/environment/fakeenv": {"internal/environment/envtest", "internal/environment/fakeenv/fakeworld"},
 	"internal/environment/host":    {"internal/backend/cpu", "internal/environment/envtest", "internal/environment/fakeenv"},
-	"internal/hostfs":              {},
-	"internal/flowrun":             {"internal/backend/cpu", "internal/environment/fakeenv", "internal/environment/host", "internal/task"},
-	"internal/task":                {"internal/task/tasktest"},
-	"internal/gitwork":             {"internal/task/tasktest"},
-	"internal/store/memstore":      {"internal/store/storetest"},
-	"internal/store/filestore":     {"internal/store/storetest", "internal/store/memstore"},
+	"internal/environment/docker": {
+		"internal/backend/cpu", "internal/clock", "internal/environment/docker/dockerfake",
+		"internal/environment/docker/dockertest", "internal/environment/envtest", "internal/environment/fakeenv",
+		"internal/environment/fakeenv/fakeworld",
+	},
+	"internal/environment/docker/dockercli": {
+		"internal/backend/cpu", "internal/environment/docker/dockertest", "internal/environment/envtest",
+	},
+	"internal/environment/docker/dockerfake": {"internal/environment/docker/dockertest", "internal/environment/fakeenv/fakeworld"},
+	"internal/hostfs":                        {},
+	"internal/flowrun":                       {"internal/backend/cpu", "internal/environment/fakeenv", "internal/environment/host", "internal/task"},
+	"internal/task":                          {"internal/task/tasktest"},
+	"internal/gitwork":                       {"internal/task/tasktest"},
+	"internal/store/memstore":                {"internal/store/storetest"},
+	"internal/store/filestore":               {"internal/store/storetest", "internal/store/memstore"},
 	"internal/supervisor": {
 		"internal/backend/cpu", "internal/environment/fakeenv", "internal/supervisor/suptest", "internal/task",
 	},

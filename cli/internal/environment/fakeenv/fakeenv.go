@@ -14,7 +14,7 @@ import (
 
 // DefaultProbePause is the pause between two probes of a service that Environment waits on its
 // timers for.
-const DefaultProbePause = 500 * time.Millisecond
+const DefaultProbePause = environment.DefaultProbePause
 
 // idleTimers are timers that never fire: an environment given no other has no limit.
 type idleTimers struct{}
