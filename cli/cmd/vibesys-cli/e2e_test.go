@@ -108,8 +108,12 @@ func e2eDaemon() int {
 	}
 	// A test that has a live store holder on purpose does not want the minute of a real daemon.
 	var retry app.Retry
+	var slowPeriod time.Duration
 	if os.Getenv(quickRetryVar) != "" {
 		retry = app.Retry{Attempts: 2, First: time.Millisecond, Longest: time.Millisecond}
+		// A job in doubt is looked at again every slow period, which is 30 seconds by default.
+		// What the test checks holds at any pace; a short one only brings the second look sooner.
+		slowPeriod = 50 * time.Millisecond
 	}
 	supervisors := host.New(host.Config{
 		Root: dir.Supervisors(), Records: host.RecordsDir(os.Getenv(indexVar), "e2e", dir.Path()), BootID: runtimedir.BootID,
@@ -121,8 +125,11 @@ func e2eDaemon() int {
 		BinaryVersion: "e2e", Timers: clock.System{},
 	})
 	err = daemon.Run(ctx, daemon.Config{
-		Dir: dir, Version: "e2e", Clock: clock.System{}, Ready: os.NewFile(runtimedir.ReadyFD, "ready"), Retry: retry,
-		Logf: func(format string, args ...any) { fmt.Fprintf(os.Stderr, "daemon: "+format+"\n", args...) },
+		Dir: dir, Version: "e2e", Clock: clock.System{}, Ready: os.NewFile(runtimedir.ReadyFD, "ready"), Retry: retry, SlowPeriod: slowPeriod,
+		// Output is written to the store when it has waited this long, a second by default, and every
+		// test waits for some. When it is written changes no result.
+		LogBatchDelay: 10 * time.Millisecond,
+		Logf:          func(format string, args ...any) { fmt.Fprintf(os.Stderr, "daemon: "+format+"\n", args...) },
 		Runtime: daemon.Runtime{
 			Stores:       filestores.New(index, app.Rules(5), filestore.Owner{Host: "e2e", Dir: dir.Path(), PID: os.Getpid()}),
 			Environments: e2eEnvironments(),
@@ -235,7 +242,8 @@ type e2e struct {
 	gates  *fakeenv.FIFOGates
 	git    *gitrepo.Fake
 	starts atomic.Int64
-	// quickRetry starts daemons that give up on a held store at once.
+	// quickRetry starts daemons that give up on a held store at once and look again at what they could
+	// not settle at a short pace.
 	quickRetry bool
 }
 
@@ -912,8 +920,7 @@ func (e *e2e) waitThrough(ids ...string) result {
 // whole when the repository is back, and the job of another repository runs in its turn.
 func TestE2EARepositoryThatGoesAwayUnderALiveDaemonStopsNothing(t *testing.T) {
 	e := newE2E(t)
-	// The job in doubt is looked at again at the pace of the retries, and a real daemon's take a
-	// minute.
+	// The job in doubt is looked at again every slow period, and a real daemon's is 30 seconds.
 	e.quickRetry = true
 	b := e.otherRepository()
 	id := e.submit("print", "A", ";", "hold", "g", ";", "print", "A2", ";", "exit", "0")
