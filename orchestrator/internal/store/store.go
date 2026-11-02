@@ -39,6 +39,10 @@ const (
 	MaxPageMessages = 200
 	// MaxWindowTurns bounds what a timeline window returns.
 	MaxWindowTurns = 2000
+	// MaxFinishedRuns is how many finished runs a Snapshot lists, the most recently changed first
+	// chosen. Every live run is listed. A snapshot is what a client loads on every connect, so it
+	// must not grow with the age of the installation.
+	MaxFinishedRuns = 100
 )
 
 // ErrCompacted says the events a reader asked for were dropped by Compact. The reader takes a
@@ -101,8 +105,9 @@ type Store interface {
 
 // Reader is what the screens read. Every read sees one consistent commit.
 type Reader interface {
-	// Snapshot returns every run and agent, and the sequence of the last event they include. A
-	// client follows with EventsAfter from that sequence.
+	// Snapshot returns every live run, the MaxFinishedRuns finished runs that changed last, and the
+	// agents of those runs, with the sequence of the last event it includes. A client follows with
+	// EventsAfter from that sequence.
 	Snapshot() (Snapshot, error)
 
 	// EventsAfter returns up to limit events with a sequence above after, oldest first, for one

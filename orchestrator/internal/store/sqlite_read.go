@@ -1,9 +1,11 @@
 package store
 
 import (
+	"cmp"
 	"database/sql"
 	"fmt"
 	"math"
+	"slices"
 	"time"
 
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
@@ -46,26 +48,88 @@ func (s *SQLite) Snapshot() (Snapshot, error) {
 		if out.Sequence, err = s.meta(tx, "last_sequence"); err != nil {
 			return err
 		}
-		rows, err := tx.Query(screenQueries["snapshot runs"] + ` ORDER BY id`)
-		if err != nil {
-			return fmt.Errorf("store: %w", err)
+		type listed struct {
+			run  core.Run
+			last uint64
 		}
-		if err := scanEvents(rows, func(_ uint64, e core.Event, _ []any) error {
-			out.Runs = append(out.Runs, e.Body.(core.Run))
-			return nil
-		}); err != nil {
-			return err
+		var finished []listed
+		for _, status := range []core.RunStatus{core.RunStarting, core.RunRunning, core.RunStopping, core.RunEnded, core.RunFailed} {
+			limit := MaxFinishedRuns
+			if status.Live() || status == core.RunStopping {
+				limit = math.MaxInt32
+			}
+			rows, err := tx.Query(querySnapshotRuns, string(status), limit)
+			if err != nil {
+				return fmt.Errorf("store: %w", err)
+			}
+			var last uint64
+			err = scanEvents(rows, func(_ uint64, e core.Event, _ []any) error {
+				run := e.Body.(core.Run)
+				if status.Final() {
+					finished = append(finished, listed{run, last})
+				} else {
+					out.Runs = append(out.Runs, run)
+				}
+				return nil
+			}, &last)
+			if err != nil {
+				return err
+			}
 		}
-		rows, err = tx.Query(screenQueries["snapshot agents"] + ` ORDER BY id`)
-		if err != nil {
-			return fmt.Errorf("store: %w", err)
+		slices.SortFunc(finished, func(a, b listed) int { return cmp.Compare(b.last, a.last) })
+		for _, f := range finished[:min(len(finished), MaxFinishedRuns)] {
+			out.Runs = append(out.Runs, f.run)
 		}
-		return scanEvents(rows, func(_ uint64, e core.Event, _ []any) error {
-			out.Agents = append(out.Agents, e.Body.(core.Agent))
-			return nil
-		})
+		slices.SortFunc(out.Runs, func(a, b core.Run) int { return cmp.Compare(a.ID, b.ID) })
+		for _, run := range out.Runs {
+			rows, err := tx.Query(querySnapshotAgents, string(run.ID))
+			if err != nil {
+				return fmt.Errorf("store: %w", err)
+			}
+			if err := scanEvents(rows, func(_ uint64, e core.Event, _ []any) error {
+				out.Agents = append(out.Agents, e.Body.(core.Agent))
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		slices.SortFunc(out.Agents, func(a, b core.Agent) int { return cmp.Compare(a.ID, b.ID) })
+		return nil
 	})
 	return out, err
+}
+
+// Explain returns SQLite's query plan for each read that serves a screen, so that a test can hold
+// them to searches on an index.
+func (s *SQLite) Explain() (map[string][]string, error) {
+	args := map[string]int{
+		"snapshot runs": 2, "snapshot agents": 1, "events of a run": 3, "events of all": 2, "items page": 3,
+		"messages of a run": 3, "turns in window": 4, "receipt": 1, "claim": 2, "next due": 0,
+	}
+	out := map[string][]string{}
+	for name, query := range screenQueries {
+		params := make([]any, args[name])
+		for i := range params {
+			params[i] = 1
+		}
+		rows, err := s.r.Query(`EXPLAIN QUERY PLAN `+query, params...)
+		if err != nil {
+			return nil, fmt.Errorf("store: explain %s: %w", name, err)
+		}
+		for rows.Next() {
+			var id, parent, unused int
+			var detail string
+			if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("store: %w", err)
+			}
+			out[name] = append(out[name], detail)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("store: %w", err)
+		}
+	}
+	return out, nil
 }
 
 // EventsAfter implements Reader.

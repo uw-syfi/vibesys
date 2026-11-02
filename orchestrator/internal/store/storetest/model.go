@@ -65,21 +65,36 @@ func (m *model) state() core.State {
 
 func (m *model) snapshot() store.Snapshot {
 	runs := map[core.RunID]core.Run{}
+	changed := map[core.RunID]uint64{}
 	agents := map[core.AgentID]core.Agent{}
 	for _, r := range m.events {
 		switch b := r.Event.Body.(type) {
 		case core.Run:
 			runs[b.ID] = b
+			changed[b.ID] = r.Sequence
 		case core.Agent:
 			agents[b.ID] = b
 		}
 	}
+	var finished []core.Run
 	out := store.Snapshot{Sequence: m.last()}
 	for _, r := range runs {
-		out.Runs = append(out.Runs, r)
+		if r.Status.Final() {
+			finished = append(finished, r)
+		} else {
+			out.Runs = append(out.Runs, r)
+		}
+	}
+	slices.SortFunc(finished, func(a, b core.Run) int { return cmp.Compare(changed[b.ID], changed[a.ID]) })
+	out.Runs = append(out.Runs, finished[:min(len(finished), store.MaxFinishedRuns)]...)
+	listed := map[core.RunID]bool{}
+	for _, r := range out.Runs {
+		listed[r.ID] = true
 	}
 	for _, a := range agents {
-		out.Agents = append(out.Agents, a)
+		if listed[a.Run] {
+			out.Agents = append(out.Agents, a)
+		}
 	}
 	slices.SortFunc(out.Runs, func(a, b core.Run) int { return cmp.Compare(a.ID, b.ID) })
 	slices.SortFunc(out.Agents, func(a, b core.Agent) int { return cmp.Compare(a.ID, b.ID) })
@@ -179,19 +194,43 @@ func (m *model) turns(run core.RunID, from, to time.Time, limit int) store.TurnW
 	return store.TurnWindow{Turns: all[:min(len(all), limit)], Truncated: len(all) > limit}
 }
 
-// runs and agents list what the model knows, for a test to ask about each.
+// runs and agents list every one the log mentions, listed or not, for a test to ask about each.
 func (m *model) runs() []core.RunID {
+	seen := map[core.RunID]bool{}
 	var out []core.RunID
-	for _, r := range m.snapshot().Runs {
-		out = append(out, r.ID)
+	for _, r := range m.events {
+		if run, ok := r.Event.Body.(core.Run); ok && !seen[run.ID] {
+			seen[run.ID] = true
+			out = append(out, run.ID)
+		}
 	}
 	return out
 }
 
 func (m *model) agents() []core.AgentID {
+	seen := map[core.AgentID]bool{}
 	var out []core.AgentID
-	for _, a := range m.snapshot().Agents {
-		out = append(out, a.ID)
+	for _, r := range m.events {
+		if a, ok := r.Event.Body.(core.Agent); ok && !seen[a.ID] {
+			seen[a.ID] = true
+			out = append(out, a.ID)
+		}
 	}
 	return out
+}
+
+// RoundTrip passes events through the wire as a store does, so that a test compares what a reader
+// gets and not what the writer passed in.
+func RoundTrip(events []core.Event) ([]core.Event, error) {
+	out := make([]core.Event, len(events))
+	for i, e := range events {
+		b, err := wire.EncodeEvent(uint64(i+1), e)
+		if err != nil {
+			return nil, err
+		}
+		if _, out[i], err = wire.DecodeEvent(b); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }

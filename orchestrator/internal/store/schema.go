@@ -49,6 +49,8 @@ CREATE TABLE IF NOT EXISTS runs (
   updated_sequence INTEGER NOT NULL,
   body             BLOB NOT NULL) WITHOUT ROWID;
 
+CREATE INDEX IF NOT EXISTS runs_status ON runs(status, updated_sequence);
+
 CREATE TABLE IF NOT EXISTS agents (
   id               TEXT PRIMARY KEY,
   run_id           TEXT NOT NULL,
@@ -96,8 +98,8 @@ CREATE TABLE IF NOT EXISTS pruned (run_id TEXT PRIMARY KEY, through INTEGER NOT 
 // screenQueries are the reads that serve the screens, with the shape each must keep: a search on an
 // index and never a scan. A test asks SQLite for each plan.
 var screenQueries = map[string]string{
-	"snapshot runs":     `SELECT body FROM runs`,
-	"snapshot agents":   `SELECT body FROM agents`,
+	"snapshot runs":     querySnapshotRuns,
+	"snapshot agents":   querySnapshotAgents,
 	"events of a run":   queryRunEvents,
 	"events of all":     queryAllEvents,
 	"items page":        queryItems,
@@ -109,11 +111,13 @@ var screenQueries = map[string]string{
 }
 
 const (
-	queryRunEvents = `SELECT body FROM events WHERE run_id = ? AND sequence > ? ORDER BY sequence LIMIT ?`
-	queryAllEvents = `SELECT body FROM events WHERE sequence > ? ORDER BY sequence LIMIT ?`
-	queryItems     = `SELECT body FROM items WHERE agent_id = ? AND ordinal < ? ORDER BY ordinal DESC LIMIT ?`
-	queryMessages  = `SELECT body, seq FROM messages WHERE run_id = ? AND seq > ? ORDER BY seq LIMIT ?`
-	queryTurns     = `SELECT body, started_at, id FROM turns WHERE run_id = ?1 AND ended_at > ?2 AND started_at < ?3
+	querySnapshotRuns   = `SELECT body, updated_sequence FROM runs WHERE status = ? ORDER BY updated_sequence DESC LIMIT ?`
+	querySnapshotAgents = `SELECT body FROM agents WHERE run_id = ?`
+	queryRunEvents      = `SELECT body FROM events WHERE run_id = ? AND sequence > ? ORDER BY sequence LIMIT ?`
+	queryAllEvents      = `SELECT body FROM events WHERE sequence > ? ORDER BY sequence LIMIT ?`
+	queryItems          = `SELECT body FROM items WHERE agent_id = ? AND ordinal < ? ORDER BY ordinal DESC LIMIT ?`
+	queryMessages       = `SELECT body, seq FROM messages WHERE run_id = ? AND seq > ? ORDER BY seq LIMIT ?`
+	queryTurns          = `SELECT body, started_at, id FROM turns WHERE run_id = ?1 AND ended_at > ?2 AND started_at < ?3
 UNION ALL
 SELECT body, started_at, id FROM turns WHERE run_id = ?1 AND ended_at IS NULL AND started_at < ?3
 ORDER BY started_at, id LIMIT ?4`

@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/uw-syfi/vibesys/orchestrator/internal/localfs"
@@ -44,4 +45,30 @@ func TestSQLitePassesTheContract(t *testing.T) {
 		}
 		return h
 	})
+}
+
+func TestScreenQueriesNeverScan(t *testing.T) {
+	s := openSQLite(t, localDir(t), store.SQLiteOptions{})
+	plans, err := s.Explain()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plans) < 10 {
+		t.Fatalf("explained only %d queries: %v", len(plans), plans)
+	}
+	for name, lines := range plans {
+		searched := false
+		for _, line := range lines {
+			if strings.Contains(line, "SCAN") && !strings.Contains(line, "SCAN CONSTANT ROW") {
+				t.Errorf("%s scans: %q\nplan: %v", name, line, lines)
+			}
+			searched = searched || strings.Contains(line, "SEARCH")
+		}
+		if !searched && name != "next due" {
+			t.Errorf("%s does not search an index: %v", name, lines)
+		}
+	}
+	for name, lines := range plans {
+		t.Logf("%-18s %v", name, lines)
+	}
 }

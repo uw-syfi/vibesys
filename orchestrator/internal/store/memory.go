@@ -341,11 +341,26 @@ func (m *Memory) Snapshot() (Snapshot, error) {
 	defer unlock()
 	t := m.shared.tables
 	out := Snapshot{Sequence: m.shared.last}
+	var finished []row
 	for _, r := range t.runs {
+		if run := r.event.Body.(core.Run); run.Status.Final() {
+			finished = append(finished, r)
+		} else {
+			out.Runs = append(out.Runs, run)
+		}
+	}
+	slices.SortFunc(finished, func(a, b row) int { return cmp.Compare(b.last, a.last) })
+	for _, r := range finished[:min(len(finished), MaxFinishedRuns)] {
 		out.Runs = append(out.Runs, r.event.Body.(core.Run))
 	}
+	listed := map[core.RunID]bool{}
+	for _, run := range out.Runs {
+		listed[run.ID] = true
+	}
 	for _, r := range t.agents {
-		out.Agents = append(out.Agents, r.event.Body.(core.Agent))
+		if a := r.event.Body.(core.Agent); listed[a.Run] {
+			out.Agents = append(out.Agents, a)
+		}
 	}
 	slices.SortFunc(out.Runs, func(a, b core.Run) int { return cmp.Compare(a.ID, b.ID) })
 	slices.SortFunc(out.Agents, func(a, b core.Agent) int { return cmp.Compare(a.ID, b.ID) })

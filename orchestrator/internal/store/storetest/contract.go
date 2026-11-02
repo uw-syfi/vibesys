@@ -70,6 +70,7 @@ func Contract(t *testing.T, newHarness func(t *testing.T) *Harness) {
 	t.Run("EffectsNeedEvents", func(t *testing.T) { effectsNeedEvents(t, newHarness(t)) })
 	t.Run("RefusedCommitLeavesNothing", func(t *testing.T) { refusedCommit(t, newHarness(t)) })
 	t.Run("PagesHonorTheirCaps", func(t *testing.T) { pageCaps(t, newHarness(t)) })
+	t.Run("SnapshotBoundsFinishedRuns", func(t *testing.T) { snapshotBound(t, newHarness(t)) })
 	t.Run("TimersWaitForTheirTime", func(t *testing.T) { timers(t, newHarness(t)) })
 	t.Run("WorkloadMatchesModel", func(t *testing.T) {
 		for _, seed := range seeds(t) {
@@ -530,3 +531,42 @@ func checkItems(t *testing.T, seed uint64, s store.Store, m *model, agent core.A
 
 // farFuture is a time after every timer a test arms.
 var farFuture = time.Date(2200, 1, 1, 0, 0, 0, 0, time.UTC)
+
+// snapshotBound checks that a snapshot lists every live run and only the latest finished ones, so
+// that it does not grow with the age of the installation.
+func snapshotBound(t *testing.T, h *Harness) {
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	run := func(i int, status core.RunStatus) core.Event {
+		return core.Event{Run: core.RunID(fmt.Sprintf("run-%03d", i)), At: at, Body: core.Run{
+			ID: core.RunID(fmt.Sprintf("run-%03d", i)), Repository: "r", Task: "t", Status: status, Lead: "lead", CreatedAt: at, EndedAt: at,
+		}}
+	}
+	total := store.MaxFinishedRuns + 30
+	for i := 0; i < total; i++ {
+		mustCommit(t, h.Store, store.Result{Events: []core.Event{run(i, core.RunEnded)}})
+	}
+	for i := total; i < total+3; i++ {
+		mustCommit(t, h.Store, store.Result{Events: []core.Event{run(i, core.RunRunning)}})
+	}
+	// The oldest finished run changes last, so it must be listed and another dropped.
+	mustCommit(t, h.Store, store.Result{Events: []core.Event{run(0, core.RunFailed)}})
+	snap, err := h.Store.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.Runs) != store.MaxFinishedRuns+3 {
+		t.Fatalf("snapshot lists %d runs, want %d", len(snap.Runs), store.MaxFinishedRuns+3)
+	}
+	listed := map[core.RunID]bool{}
+	for _, r := range snap.Runs {
+		listed[r.ID] = true
+	}
+	for _, id := range []core.RunID{"run-000", "run-129", "run-130", "run-131", "run-132"} {
+		if !listed[id] {
+			t.Errorf("%s is missing from the snapshot", id)
+		}
+	}
+	if listed["run-001"] {
+		t.Error("run-001 changed longest ago and must be left out")
+	}
+}
