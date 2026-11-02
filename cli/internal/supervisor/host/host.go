@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"net"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"sync"
 	"syscall"
@@ -30,6 +32,8 @@ import (
 // Host is supervisor.Supervisors over processes. Create it with New.
 type Host struct {
 	root          string
+	records       string
+	bootID        func() (string, error)
 	command       func(runDir string) *exec.Cmd
 	binaryVersion string
 	timers        clock.Timers
@@ -40,12 +44,31 @@ type Host struct {
 
 var _ supervisor.Supervisors = (*Host)(nil)
 
-// New returns a Host that keeps run directories under root, which must exist, be private and be
-// on local disk, and starts a supervisor on a directory with the command command returns for it.
-// The command must run Serve on the directory, with the readiness pipe on file descriptor 3.
-// timers bound how long a supervisor gets to answer a probe.
-func New(root string, command func(runDir string) *exec.Cmd, binaryVersion string, timers clock.Timers) *Host {
-	return &Host{root: root, command: command, binaryVersion: binaryVersion, timers: timers, released: map[lifecycle.Ref]bool{}}
+// Config is what a Host needs. Every field is required.
+type Config struct {
+	// Root keeps the run directories. It must exist, be private and be on local disk. It may go
+	// away while the machine stays up, as a runtime directory does at logout.
+	Root string
+	// Records keeps a record of each run, outside Root and on a disk that outlives it, which is what
+	// tells a run that went away with the machine from a run whose directory was removed.
+	Records string
+	// BootID names this boot of the machine.
+	BootID func() (string, error)
+	// Command is how a supervisor starts on a directory. It must run Serve on the directory, with
+	// the readiness pipe on file descriptor 3.
+	Command func(runDir string) *exec.Cmd
+	// BinaryVersion is this build's version.
+	BinaryVersion string
+	// Timers bound how long a supervisor gets to answer a probe.
+	Timers clock.Timers
+}
+
+// New returns a Host.
+func New(cfg Config) *Host {
+	return &Host{
+		root: cfg.Root, records: cfg.Records, bootID: cfg.BootID, command: cfg.Command, binaryVersion: cfg.BinaryVersion,
+		timers: cfg.Timers, released: map[lifecycle.Ref]bool{},
+	}
 }
 
 // probeTimeout is how long a supervisor gets to answer a probe, so that one that hangs cannot hold
@@ -69,6 +92,9 @@ func (h *Host) Spawn(ctx context.Context, launch lifecycle.Launch) (supervisor.H
 	if err := checkSocketPath(dir); err != nil {
 		return nil, err
 	}
+	if err := h.writeRecord(ref, launch); err != nil {
+		return nil, fmt.Errorf("recording the run: %w", err)
+	}
 	if err := os.Mkdir(string(dir), 0o700); err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			return nil, &core.Failure{Kind: core.FailureConflict, Message: fmt.Sprintf("job %s already has a run", ref)}
@@ -78,6 +104,8 @@ func (h *Host) Spawn(ctx context.Context, launch lifecycle.Launch) (supervisor.H
 	handle, err := h.spawn(ctx, dir, launch)
 	if err != nil {
 		os.RemoveAll(string(dir))
+		// The directory is gone with whatever the attempt started, so the record is too.
+		h.removeRecord(ref)
 		return nil, err
 	}
 	return handle, nil
@@ -155,8 +183,8 @@ func (h *Host) why(dir runDir, err error) string {
 }
 
 // handle is a supervisor.Handle that closes its connection when the supervisor is released, and
-// that says a supervisor is gone only when it is proved dead. A connection can break for other
-// reasons, and the process can be on its way out with its command still ending.
+// that says a supervisor is gone only with the proof. A connection can break for other reasons,
+// and the process can be on its way out with its command still ending.
 type handle struct {
 	*rpc.Client
 	host *Host
@@ -167,7 +195,7 @@ type handle struct {
 
 var _ supervisor.Handle = (*handle)(nil)
 
-// proved passes on ErrGone only for a supervisor proved dead.
+// proved turns ErrGone into the proof of it, or into a failure when there is none.
 func (h *handle) proved(err error) error {
 	if !errors.Is(err, supervisor.ErrGone) {
 		return err
@@ -177,14 +205,14 @@ func (h *handle) proved(err error) error {
 	h.host.mu.Unlock()
 	if released {
 		// A supervisor that was let go is exiting, and its lock says nothing while it does.
-		return err
+		return supervisor.Gone{Proof: lifecycle.ProofReleased}
 	}
 	lock, lockErr := proveDead(h.dir)
 	if lockErr != nil {
 		return &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("job %s: its supervisor does not answer and may still live", h.ref)}
 	}
 	lock.Unlock()
-	return err
+	return supervisor.Gone{Proof: lifecycle.ProofLockFree}
 }
 
 // Start implements supervisor.Handle.
@@ -208,10 +236,13 @@ func (h *handle) Release(ctx context.Context) error {
 		h.host.mu.Lock()
 		h.host.released[h.ref] = true
 		h.host.mu.Unlock()
-		h.conn.Close()
+		h.Close()
 	}
 	return err
 }
+
+// Close implements supervisor.Handle. Closing a connection twice does nothing the second time.
+func (h *handle) Close() { h.conn.Close() }
 
 // connect dials the run directory's socket and runs the handshake.
 func (h *Host) connect(ctx context.Context, dir runDir, ref lifecycle.Ref) (*handle, error) {
@@ -232,18 +263,26 @@ func (h *Host) connect(ctx context.Context, dir runDir, ref lifecycle.Ref) (*han
 	return &handle{Client: client, host: h, ref: ref, dir: dir, conn: conn}, nil
 }
 
-// Runs implements supervisor.Supervisors.
+// Runs implements supervisor.Supervisors. A run with a record and no directory is listed too.
 func (h *Host) Runs(ctx context.Context) ([]supervisor.Run, error) {
 	entries, err := os.ReadDir(h.root)
 	if err != nil {
 		return nil, err
 	}
-	var refs []lifecycle.Ref
+	found := map[lifecycle.Ref]bool{}
 	for _, e := range entries {
 		if ref, ok := refOf(e.Name()); ok && e.IsDir() {
-			refs = append(refs, ref)
+			found[ref] = true
 		}
 	}
+	recorded, err := h.recordedRefs()
+	if err != nil {
+		return nil, err
+	}
+	for _, ref := range recorded {
+		found[ref] = true
+	}
+	refs := slices.Collect(maps.Keys(found))
 	// Together, so that supervisors that do not answer cost one probe's time and not one each,
 	// which a caller's deadline would turn into a failure to list any of them.
 	out := make([]supervisor.Run, len(refs))
@@ -254,46 +293,80 @@ func (h *Host) Runs(ctx context.Context) ([]supervisor.Run, error) {
 	}
 	probes.Wait()
 	if err := errors.Join(errs...); err != nil {
+		for _, r := range out {
+			if alive, ok := r.(supervisor.Alive); ok {
+				alive.Handle.Close()
+			}
+		}
 		return nil, err
 	}
 	return out, nil
 }
 
 // Probe implements supervisor.Supervisors. A supervisor that answers is alive and a free lock
-// proves it dead. Anything else, such as one of another build, is a supervisor that may live, whose
-// command may be running, and is never reported as gone.
+// proves it dead. A run with no directory is dead only if the machine restarted since it began;
+// with the same boot the directory was taken away from under what may still run. Anything else,
+// such as one of another build, is a supervisor that may live, whose command may be running, and is
+// never reported as gone.
 func (h *Host) Probe(ctx context.Context, ref lifecycle.Ref) (supervisor.Run, error) {
 	if err := ctx.Err(); err != nil {
-		return supervisor.Run{}, err
+		return nil, err
 	}
 	dir := h.dir(ref)
 	if _, err := os.Stat(string(dir)); errors.Is(err, fs.ErrNotExist) {
-		return supervisor.Run{Ref: ref, Presence: lifecycle.PresenceNone}, nil
+		return h.noDirectory(ref)
 	}
-	run := supervisor.Run{Ref: ref, Presence: lifecycle.PresenceUnknown}
-	if launch, err := readLaunch(dir); err == nil && launch.Ref() == ref {
-		run.Launch = launch
-	}
+	launch := readableLaunch(dir, ref)
 	bounded, done := clock.Deadline(ctx, h.timers, probeTimeout)
 	defer done()
 	hd, err := h.connect(bounded, dir, ref)
 	if err == nil {
-		run.Presence, run.Handle = lifecycle.PresenceAlive, hd
-		return run, nil
+		if launch == nil {
+			hd.Close()
+			return supervisor.Unknown{Ref: ref}, nil
+		}
+		return supervisor.Alive{Ref: ref, Handle: hd, Launch: *launch, Phase: hd.Phase()}, nil
 	}
 	if ctx.Err() != nil {
-		return supervisor.Run{}, ctx.Err()
+		return nil, ctx.Err()
 	}
 	lock, err := proveDead(dir)
 	switch {
 	case errors.Is(err, runtimedir.ErrHeld):
+		return supervisor.Unknown{Ref: ref, Launch: launch}, nil
 	case err != nil:
-		return supervisor.Run{}, err
-	default:
-		lock.Unlock()
-		run.Presence = lifecycle.PresenceGone
+		return nil, err
 	}
-	return run, nil
+	lock.Unlock()
+	return supervisor.Dead{Ref: ref, Proof: lifecycle.ProofLockFree, Launch: launch}, nil
+}
+
+// noDirectory judges a run with no directory by its record.
+func (h *Host) noDirectory(ref lifecycle.Ref) (supervisor.Run, error) {
+	rec, ok, err := h.readRecord(ref)
+	switch {
+	case err != nil:
+		// A record that cannot be read proves nothing.
+		return supervisor.Unknown{Ref: ref}, nil
+	case !ok:
+		return supervisor.None{Ref: ref}, nil
+	}
+	boot, err := h.bootID()
+	if err != nil {
+		return nil, fmt.Errorf("reading the boot id: %w", err)
+	}
+	if rec.BootID != boot {
+		return supervisor.Dead{Ref: ref, Proof: lifecycle.ProofRebooted, Launch: &rec.Launch}, nil
+	}
+	return supervisor.Unknown{Ref: ref, Launch: &rec.Launch}, nil
+}
+
+func readableLaunch(dir runDir, ref lifecycle.Ref) *lifecycle.Launch {
+	launch, err := readLaunch(dir)
+	if err != nil || launch.Ref() != ref {
+		return nil
+	}
+	return &launch
 }
 
 // PID returns the process id of the supervisor of a job, which the supervisor wrote down when it
@@ -308,19 +381,17 @@ func (h *Host) PID(ref lifecycle.Ref) (int, error) {
 }
 
 // Forget implements supervisor.Supervisors. The lock is held until the directory is gone, so a
-// supervisor that was started and had not come up finds nothing to come up in.
-func (h *Host) Forget(ctx context.Context, ref lifecycle.Ref) error {
+// supervisor that was started and had not come up finds nothing to come up in. A released
+// supervisor is exiting, and its lock says nothing while it does.
+func (h *Host) Forget(ctx context.Context, ref lifecycle.Ref, proof lifecycle.DeathProof) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	dir := h.dir(ref)
-	if _, err := os.Stat(string(dir)); errors.Is(err, fs.ErrNotExist) {
-		return nil
+	if !proof.Valid() {
+		return &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("job %s: nothing proves its supervisor gone", ref)}
 	}
-	h.mu.Lock()
-	released := h.released[ref]
-	h.mu.Unlock()
-	if !released {
+	dir := h.dir(ref)
+	if _, err := os.Stat(string(dir)); err == nil && proof != lifecycle.ProofReleased {
 		lock, err := proveDead(dir)
 		if errors.Is(err, runtimedir.ErrHeld) {
 			return &core.Failure{Kind: core.FailureConflict, Message: fmt.Sprintf("job %s still has a supervisor", ref)}
@@ -331,6 +402,9 @@ func (h *Host) Forget(ctx context.Context, ref lifecycle.Ref) error {
 		defer lock.Unlock()
 	}
 	if err := os.RemoveAll(string(dir)); err != nil {
+		return err
+	}
+	if err := h.removeRecord(ref); err != nil {
 		return err
 	}
 	h.mu.Lock()

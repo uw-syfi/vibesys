@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"sync"
 
 	"github.com/uw-syfi/vibesys/cli/internal/app"
@@ -53,14 +55,36 @@ func New(index *filestore.Index, rules store.Rules, owner filestore.Owner, opts 
 // Close implements app.Stores. An open still in progress gives its store up when it returns.
 func (f *FileStores) Close() error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.closed = true
+	open := slices.Collect(maps.Values(f.stores))
+	clear(f.stores)
+	f.mu.Unlock()
 	var errs []error
-	for scope, s := range f.stores {
+	for _, s := range open {
 		errs = append(errs, s.Close())
-		delete(f.stores, scope)
 	}
 	return errors.Join(errs...)
+}
+
+// Forget implements app.Stores.
+func (f *FileStores) Forget(_ context.Context, scope app.Scope) error {
+	f.drop(scope, nil)
+	return f.index.Remove(filestore.Task{Repository: scope.Repository, Name: scope.Task})
+}
+
+// drop gives up the store of a scope, if it is still the one a caller saw.
+func (f *FileStores) drop(scope app.Scope, seen *filestore.Store) {
+	f.mu.Lock()
+	s, ok := f.stores[scope]
+	if ok && (seen == nil || s == seen) {
+		delete(f.stores, scope)
+	} else {
+		ok = false
+	}
+	f.mu.Unlock()
+	if ok {
+		_ = s.Close()
+	}
 }
 
 // Find implements app.Stores. A store is opened once and then shared, since opening it makes this
@@ -93,7 +117,13 @@ func (f *FileStores) get(ctx context.Context, scope app.Scope, create bool) (sto
 		}
 		if s, ok := f.stores[scope]; ok {
 			f.mu.Unlock()
-			return s, nil
+			// A store this process lost, to another owner or with its disk, is opened again: the
+			// handle it has now would refuse for good.
+			if s.Owned() == nil {
+				return s, nil
+			}
+			f.drop(scope, s)
+			continue
 		}
 		op, busy := f.opening[scope]
 		if !busy {

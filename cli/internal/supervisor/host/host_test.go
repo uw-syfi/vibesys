@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -66,6 +67,8 @@ func superviseForTest() int {
 type hostRig struct {
 	t        *testing.T
 	root     string
+	records  string
+	boot     string
 	gates    *fakeenv.FIFOGates
 	lifeline *os.File
 	h        *host.Host
@@ -76,12 +79,17 @@ func (r *hostRig) newHost() *host.Host {
 	if err != nil {
 		r.t.Fatal(err)
 	}
-	return host.New(r.root, func(dir string) *exec.Cmd {
-		cmd := exec.Command(exe, dir)
-		cmd.Env = append(os.Environ(), roleVar+"=supervisor", gatesVar+"="+r.gates.Dir())
-		cmd.ExtraFiles = []*os.File{r.lifeline}
-		return cmd
-	}, "test", clock.System{})
+	return host.New(host.Config{
+		Root: r.root, Records: r.records,
+		BootID: func() (string, error) { return r.boot, nil },
+		Command: func(dir string) *exec.Cmd {
+			cmd := exec.Command(exe, dir)
+			cmd.Env = append(os.Environ(), roleVar+"=supervisor", gatesVar+"="+r.gates.Dir())
+			cmd.ExtraFiles = []*os.File{r.lifeline}
+			return cmd
+		},
+		BinaryVersion: "test", Timers: clock.System{},
+	})
 }
 
 func newHostRig(t *testing.T) suptest.Rig {
@@ -104,7 +112,7 @@ func openHostRig(t *testing.T) *hostRig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := &hostRig{t: t, root: root, gates: fakeenv.NewFIFOGates(gatesDir), lifeline: lifelineR}
+	r := &hostRig{t: t, root: root, records: t.TempDir(), boot: "first", gates: fakeenv.NewFIFOGates(gatesDir), lifeline: lifelineR}
 	r.h = r.newHost()
 	t.Cleanup(func() {
 		// Closing the pipe's write end ends every supervisor still up, with its command.
@@ -177,10 +185,12 @@ func TestAReleasedSupervisorDoesNotWaitForACallerThatStoppedReading(t *testing.T
 	<-stalled
 
 	next := r.newHost()
-	run, err := next.Probe(ctx, l.Ref())
-	if err != nil || run.Handle == nil {
-		t.Fatalf("Probe = %+v, %v", run, err)
+	found, err := next.Probe(ctx, l.Ref())
+	run, alive := found.(supervisor.Alive)
+	if err != nil || !alive {
+		t.Fatalf("Probe = %+v, %v", found, err)
 	}
+	defer run.Handle.Close()
 	if _, err := run.Handle.Follow(ctx, 1<<62, func([]byte) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
@@ -231,12 +241,13 @@ func TestOnlyProofOfDeathLetsARunGo(t *testing.T) {
 		}
 	}
 
-	run, err := next.Probe(ctx, ref)
-	if err != nil || run.Presence != lifecycle.PresenceUnknown || run.Launch.Ref() != ref {
-		t.Fatalf("Probe = %+v, %v; want an unknown run with its launch", run, err)
+	found, err := next.Probe(ctx, ref)
+	unknown, ok := found.(supervisor.Unknown)
+	if err != nil || !ok || unknown.Launch == nil || unknown.Launch.Ref() != ref {
+		t.Fatalf("Probe = %+v, %v; want an unknown run with its launch", found, err)
 	}
 	var refused *core.Failure
-	if err := next.Forget(ctx, ref); !errors.As(err, &refused) || refused.Kind != core.FailureConflict {
+	if err := next.Forget(ctx, ref, lifecycle.ProofLockFree); !errors.As(err, &refused) || refused.Kind != core.FailureConflict {
 		t.Fatalf("Forget of a run that may live = %v, want a conflict", err)
 	}
 	stillThere("after Forget")
@@ -249,7 +260,7 @@ func TestOnlyProofOfDeathLetsARunGo(t *testing.T) {
 	if _, err := next.Runs(done); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Runs with a done context = %v", err)
 	}
-	if err := next.Forget(done, ref); !errors.Is(err, context.Canceled) {
+	if err := next.Forget(done, ref, lifecycle.ProofLockFree); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Forget with a done context = %v", err)
 	}
 	stillThere("with a done context")
@@ -262,13 +273,76 @@ func TestOnlyProofOfDeathLetsARunGo(t *testing.T) {
 		t.Fatal(err)
 	}
 	gone.Unlock()
-	if run, err := next.Probe(ctx, ref); err != nil || run.Presence != lifecycle.PresenceGone {
-		t.Fatalf("Probe of a dead supervisor = %+v, %v", run, err)
+	found, err = next.Probe(ctx, ref)
+	dead, ok := found.(supervisor.Dead)
+	if err != nil || !ok {
+		t.Fatalf("Probe of a dead supervisor = %+v, %v", found, err)
 	}
-	if err := next.Forget(ctx, ref); err != nil {
+	if err := next.Forget(ctx, ref, dead.Proof); err != nil {
 		t.Fatal(err)
 	}
 	if left, err := host.Inspect(r.root); err != nil || len(left) != 0 {
 		t.Fatalf("after Forget of a dead run: %+v, %v", left, err)
+	}
+}
+
+// A runtime directory can go while the machine stays up, as it does at logout, and the supervisor
+// goes on. Its absence is no proof of anything then, and it is only one when the machine restarted.
+func TestAMissingRunDirectoryProvesNothingUntilAReboot(t *testing.T) {
+	r := openHostRig(t)
+	ctx, cancel := context.WithTimeout(context.Background(), suptest.Backstop)
+	defer cancel()
+	l := lifecycle.Launch{
+		Repository: "/repo", Task: "task", Job: "wiped",
+		Spec: core.JobSpec{
+			Commit: "0123456789abcdef0123456789abcdef01234567", Environment: core.EnvironmentHost,
+			Settings: core.CommandSettings{Argv: []string{"exit", "0"}, Timeout: time.Hour},
+		},
+	}
+	h, err := r.h.Spawn(ctx, l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	ref := l.Ref()
+	if err := os.RemoveAll(filepath.Join(r.root, ref.String())); err != nil {
+		t.Fatal(err)
+	}
+
+	next := r.newHost()
+	found, err := next.Probe(ctx, ref)
+	unknown, ok := found.(supervisor.Unknown)
+	if err != nil || !ok || unknown.Launch == nil || unknown.Launch.Ref() != ref {
+		t.Fatalf("Probe in the same boot = %#v, %v; want an unknown run with its launch", found, err)
+	}
+	runs, err := next.Runs(ctx)
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("Runs in the same boot = %#v, %v; want the run", runs, err)
+	}
+
+	r.boot = "second"
+	found, err = next.Probe(ctx, ref)
+	dead, ok := found.(supervisor.Dead)
+	if err != nil || !ok || dead.Proof != lifecycle.ProofRebooted || dead.Launch == nil {
+		t.Fatalf("Probe after a reboot = %#v, %v; want proof of the reboot", found, err)
+	}
+	if err := next.Forget(ctx, ref, dead.Proof); err != nil {
+		t.Fatal(err)
+	}
+	if found, err := next.Probe(ctx, ref); err != nil {
+		t.Fatal(err)
+	} else if _, none := found.(supervisor.None); !none {
+		t.Fatalf("Probe after Forget = %#v, want none", found)
+	}
+}
+
+// A job with no record never had a run, whatever the boot.
+func TestAJobWithNoRecordHasNoRun(t *testing.T) {
+	r := openHostRig(t)
+	ctx, cancel := context.WithTimeout(context.Background(), suptest.Backstop)
+	defer cancel()
+	found, err := r.h.Probe(ctx, lifecycle.Ref{Store: "s", Job: "never"})
+	if _, none := found.(supervisor.None); err != nil || !none {
+		t.Fatalf("Probe = %#v, %v; want none", found, err)
 	}
 }

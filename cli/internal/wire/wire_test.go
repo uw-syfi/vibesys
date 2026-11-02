@@ -306,3 +306,25 @@ func TestTheWaitRuleOverTheContractIsTheDomainRule(t *testing.T) {
 		t.Fatal("a wait ended on a state it cannot read")
 	}
 }
+
+// A phase this build cannot read is running, which holds, and never one that lets a run go.
+func TestAPhaseTheDaemonCannotReadHolds(t *testing.T) {
+	want := map[cliv1.SupervisorPhase]lifecycle.RunPhase{
+		cliv1.SupervisorPhase_SUPERVISOR_PHASE_UNSPECIFIED: lifecycle.RunRunning,
+		cliv1.SupervisorPhase_SUPERVISOR_PHASE_PARKED:      lifecycle.RunParked,
+		cliv1.SupervisorPhase_SUPERVISOR_PHASE_RUNNING:     lifecycle.RunRunning,
+		cliv1.SupervisorPhase_SUPERVISOR_PHASE_FINISHED:    lifecycle.RunFinished,
+		cliv1.SupervisorPhase_SUPERVISOR_PHASE_RELEASED:    lifecycle.RunReleased,
+		cliv1.SupervisorPhase(1 << 20):                     lifecycle.RunRunning,
+	}
+	for p := range cliv1.SupervisorPhase_name {
+		if _, ok := want[cliv1.SupervisorPhase(p)]; !ok {
+			t.Errorf("phase %d is not covered", p)
+		}
+	}
+	for p, phase := range want {
+		if got := wire.ToRunPhase(p); got != phase {
+			t.Errorf("ToRunPhase(%v) = %v, want %v", p, got, phase)
+		}
+	}
+}

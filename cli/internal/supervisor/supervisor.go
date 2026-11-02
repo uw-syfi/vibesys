@@ -17,22 +17,6 @@ import (
 // ErrReleased ends an Attach on a supervisor that was released while it waited.
 var ErrReleased = errors.New("the supervisor was released")
 
-// Phase is where a supervisor is in its life.
-type Phase string
-
-// The phases, in order. A supervisor only moves forward.
-const (
-	// PhaseParked is a supervisor that has not started the command.
-	PhaseParked Phase = "parked"
-	// PhaseRunning is a supervisor whose command is running.
-	PhaseRunning Phase = "running"
-	// PhaseFinished is a supervisor whose command ended. It keeps the outcome and the output
-	// until it is released.
-	PhaseFinished Phase = "finished"
-	// PhaseReleased is a supervisor that was told it may go.
-	PhaseReleased Phase = "released"
-)
-
 // Config is what a Supervisor needs. Every field is required.
 type Config struct {
 	Launch       lifecycle.Launch
@@ -57,7 +41,7 @@ type Supervisor struct {
 	done     chan struct{}
 
 	mu           sync.Mutex
-	phase        Phase
+	phase        lifecycle.RunPhase
 	cancelAsked  bool
 	cancelReason string
 	outcome      lifecycle.Outcome
@@ -68,12 +52,12 @@ func New(cfg Config) *Supervisor {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Supervisor{
 		cfg: cfg, ctx: ctx, cancel: cancel,
-		phase: PhaseParked, released: make(chan struct{}), done: make(chan struct{}),
+		phase: lifecycle.RunParked, released: make(chan struct{}), done: make(chan struct{}),
 	}
 }
 
 // Phase returns where the supervisor is.
-func (s *Supervisor) Phase() Phase {
+func (s *Supervisor) Phase() lifecycle.RunPhase {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.phase
@@ -88,12 +72,12 @@ func (s *Supervisor) Start() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	switch s.phase {
-	case PhaseRunning, PhaseFinished:
+	case lifecycle.RunRunning, lifecycle.RunFinished:
 		return nil
-	case PhaseReleased:
+	case lifecycle.RunReleased:
 		return &core.Failure{Kind: core.FailureConflict, Message: "the supervisor was released and cannot start"}
 	}
-	s.phase = PhaseRunning
+	s.phase = lifecycle.RunRunning
 	s.group.Go(s.run)
 	return nil
 }
@@ -104,7 +88,7 @@ func (s *Supervisor) Start() error {
 func (s *Supervisor) Cancel(reason string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.phase == PhaseFinished || s.phase == PhaseReleased || s.cancelAsked {
+	if s.phase == lifecycle.RunFinished || s.phase == lifecycle.RunReleased || s.cancelAsked {
 		return
 	}
 	s.cancelAsked, s.cancelReason = true, reason
@@ -117,12 +101,12 @@ func (s *Supervisor) Release() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	switch s.phase {
-	case PhaseReleased:
+	case lifecycle.RunReleased:
 		return nil
-	case PhaseRunning:
+	case lifecycle.RunRunning:
 		return &core.Failure{Kind: core.FailureConflict, Message: "the job is running; cancel it and release it after its outcome is recorded"}
 	}
-	s.phase = PhaseReleased
+	s.phase = lifecycle.RunReleased
 	s.cancel()
 	close(s.released)
 	s.changed.Notify()
@@ -134,7 +118,7 @@ func (s *Supervisor) Release() error {
 func (s *Supervisor) Close() {
 	s.cancel()
 	s.mu.Lock()
-	running := s.phase == PhaseRunning
+	running := s.phase == lifecycle.RunRunning
 	s.mu.Unlock()
 	if running {
 		<-s.done
@@ -153,7 +137,7 @@ func (s *Supervisor) Attach(ctx context.Context, offset uint64, emit func(offset
 		s.mu.Lock()
 		phase, outcome := s.phase, s.outcome
 		s.mu.Unlock()
-		if phase == PhaseReleased {
+		if phase == lifecycle.RunReleased {
 			return lifecycle.Outcome{}, ErrReleased
 		}
 		// The phase was read before the drain: a finished command wrote every byte already, so
@@ -172,7 +156,7 @@ func (s *Supervisor) Attach(ctx context.Context, offset uint64, emit func(offset
 			}
 			break
 		}
-		if phase == PhaseFinished {
+		if phase == lifecycle.RunFinished {
 			return outcome, nil
 		}
 		select {
@@ -189,8 +173,8 @@ func (s *Supervisor) run() {
 	s.mu.Lock()
 	outcome.CancelAsked, outcome.CancelReason = s.cancelAsked, s.cancelReason
 	s.outcome = outcome
-	if s.phase == PhaseRunning {
-		s.phase = PhaseFinished
+	if s.phase == lifecycle.RunRunning {
+		s.phase = lifecycle.RunFinished
 	}
 	s.mu.Unlock()
 	s.changed.Notify()

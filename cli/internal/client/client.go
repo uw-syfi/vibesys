@@ -292,6 +292,12 @@ func (c *Client) Status(ctx context.Context) (*cliv1.StatusResponse, error) {
 // Stop asks the daemon to end and returns once it has gone. Jobs that run are not affected.
 func (c *Client) Stop(ctx context.Context) error { return c.stopAndWait(ctx) }
 
+// ForgetRepository gives up a repository that is gone for good.
+func (c *Client) ForgetRepository(ctx context.Context, repository string) (*cliv1.ForgetRepositoryResponse, error) {
+	res, err := c.rpc.ForgetRepository(ctx, &cliv1.ForgetRepositoryRequest{Repository: repository})
+	return res, c.fail(err)
+}
+
 // Submit queues a job.
 func (c *Client) Submit(ctx context.Context, req *cliv1.SubmitRequest) (*cliv1.SubmitResponse, error) {
 	resp, err := c.rpc.Submit(ctx, req)

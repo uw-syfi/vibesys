@@ -35,7 +35,10 @@ func (s *Server) Handshake(_ context.Context, req *cliv1.HandshakeRequest) (*cli
 	}
 	ours := core.CurrentVersions()
 	compat := core.CheckCompatibility(wire.ToVersions(req.GetVersions()), ours)
-	return &cliv1.HandshakeResponse{Versions: wire.BuildVersions(s.binary, ours), Compatibility: wire.Compatibility(compat)}, nil
+	return &cliv1.HandshakeResponse{
+		Versions: wire.BuildVersions(s.binary, ours), Compatibility: wire.Compatibility(compat),
+		Phase: wire.RunPhase(s.supervisor.Phase()),
+	}, nil
 }
 
 // Start implements cliv1.SupervisorServiceServer.

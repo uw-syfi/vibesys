@@ -75,13 +75,14 @@ func LookOnly() Option { return func(c *config) { c.lookOnly = true } }
 func Open(root string, opts ...Option) (*Store, error) {
 	c := optionsOf(opts)
 	root = path.Clean(root)
+	var made []string
 	switch {
 	case c.entry != "" || c.lookOnly:
 		if err := findStore(c, root); err != nil {
 			return nil, err
 		}
 	default:
-		if err := makeAll(c.fs, root); err != nil {
+		if err := makeAll(c.fs, root, &made); err != nil {
 			return nil, unavailable(root, err)
 		}
 	}
@@ -90,6 +91,9 @@ func Open(root string, opts ...Option) (*Store, error) {
 	}
 	b := newBackend(c.fs, root)
 	g, err := claim(b, c.owner)
+	if errors.Is(err, fsys.ErrNoLocks) {
+		unmake(c.fs, root, made)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -105,6 +109,11 @@ func Open(root string, opts ...Option) (*Store, error) {
 // Close gives up the store. Every later call on it fails, and the next Open may have it.
 func (s *Store) Close() error { return s.guard.release() }
 
+// Owned fails, marked store.ErrAway, when the store is no longer the opener's to use: another owner
+// took it, its record is gone, or its disk does not answer. A store that failed it is given up and
+// opened again.
+func (s *Store) Owned() error { return s.guard.check() }
+
 // findStore fails unless the store that was made is there.
 func findStore(c config, root string) error {
 	_, err := c.fs.ReadFile(path.Join(root, formatFile))
@@ -112,9 +121,9 @@ func findStore(c config, root string) error {
 		return store.Mark(&core.Failure{Kind: core.FailureNotFound, Message: fmt.Sprintf("no store was made at %s", root)}, store.ErrNoStore)
 	}
 	if errors.Is(err, fs.ErrNotExist) {
-		return &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf(
-			"the store at %s is not there, and %s says it was made: its disk may not be mounted, and if it was deleted on purpose, remove that file",
-			root, c.entry)}
+		return store.Mark(&core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf(
+			"the store at %s is not there, and %s says it was made: its disk may not be mounted, and if it was deleted on purpose, run vibesys-cli daemon forget on its repository",
+			root, c.entry)}, store.ErrAway)
 	}
 	if err != nil {
 		return unavailable(root, err)
@@ -129,13 +138,13 @@ func OpenTask(repository, task string, opts ...Option) (*Store, error) {
 		return nil, err
 	}
 	if _, err := optionsOf(opts).fs.ReadDir(repository); err != nil {
-		return nil, &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("the repository %s is not there: %v", repository, err)}
+		return nil, store.Mark(&core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("the repository %s is not there: %v", repository, err)}, store.ErrAway)
 	}
 	return Open(taskDir(repository, task), opts...)
 }
 
 func unavailable(root string, err error) error {
-	return &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("the store at %s cannot be opened: %v", root, err)}
+	return store.Mark(&core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("the store at %s cannot be opened: %v", root, err)}, store.ErrAway)
 }
 
 // backend is the on-disk ledger.Backend. The Engine calls it one request at a time, so it holds
@@ -165,7 +174,7 @@ func newBackend(f fsys.FS, root string) *backend {
 }
 
 // makeAll makes the directory name and the parents of it that are missing.
-func makeAll(f fsys.FS, name string) error {
+func makeAll(f fsys.FS, name string, made *[]string) error {
 	_, err := f.ReadDir(name)
 	switch {
 	case err == nil:
@@ -177,13 +186,29 @@ func makeAll(f fsys.FS, name string) error {
 	if parent == name {
 		return err
 	}
-	if err := makeAll(f, parent); err != nil {
+	if err := makeAll(f, parent, made); err != nil {
 		return err
 	}
 	if err := f.Mkdir(name); err != nil && !errors.Is(err, fs.ErrExist) {
 		return err
 	}
+	*made = append(*made, name)
 	return f.SyncDir(parent)
+}
+
+// unmake removes a store that was made just now and turned out to be of no use, and the directories
+// that were made for it, so that a refusal leaves nothing behind. made is empty for a store that
+// was there.
+func unmake(f fsys.FS, root string, made []string) {
+	if len(made) == 0 {
+		return
+	}
+	for _, name := range append(slices.Clone(topDirs), formatFile, lockFile) {
+		_ = f.Remove(path.Join(root, name))
+	}
+	for _, dir := range slices.Backward(made) {
+		_ = f.Remove(dir)
+	}
 }
 
 // initialize makes the directory root a store when it is empty, and otherwise checks that it is

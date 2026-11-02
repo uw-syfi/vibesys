@@ -65,6 +65,14 @@ func (m *Stores) Create(ctx context.Context, scope app.Scope) (store.Store, erro
 	return s, nil
 }
 
+// Forget implements app.Stores.
+func (m *Stores) Forget(_ context.Context, scope app.Scope) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.stores, scope)
+	return nil
+}
+
 // Close implements app.Stores. Memory has nothing to give up.
 func (m *Stores) Close() error { return nil }
 

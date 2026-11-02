@@ -4,16 +4,32 @@ import (
 	"fmt"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
 )
 
 var (
-	aRef      = lifecycle.Ref{Store: "s", Job: "j1"}
-	storeHas  = []core.JobState{"", core.JobQueued, core.JobRunning, core.JobSucceeded, core.JobFailed, core.JobCancelled, core.JobLost}
-	presences = []lifecycle.Presence{lifecycle.PresenceNone, lifecycle.PresenceAlive, lifecycle.PresenceGone, lifecycle.PresenceUnknown}
+	aRef    = lifecycle.Ref{Store: "s", Job: "j1"}
+	allJobs = []lifecycle.Finding{
+		lifecycle.NoSuchJob{}, lifecycle.StoreAway{}, in(core.JobQueued), in(core.JobRunning), in(core.JobSucceeded),
+		in(core.JobFailed), in(core.JobCancelled), in(core.JobLost),
+	}
+	presences = []lifecycle.Presence{
+		lifecycle.RunNone{}, alive(lifecycle.RunParked), alive(lifecycle.RunRunning), alive(lifecycle.RunFinished),
+		lifecycle.RunDead{Proof: lifecycle.ProofLockFree}, lifecycle.RunDead{Proof: lifecycle.ProofRebooted},
+		lifecycle.RunUnknown{Limit: time.Hour},
+	}
 )
+
+func in(state core.JobState) lifecycle.JobIn {
+	return lifecycle.JobIn{State: state, SubmittedAt: epoch}
+}
+
+func alive(phase lifecycle.RunPhase) lifecycle.RunAlive {
+	return lifecycle.RunAlive{Phase: phase, Limit: time.Hour}
+}
 
 // kinds names the requests, so that a table can say what it wants.
 func kinds(reqs []lifecycle.Request) []string {
@@ -27,40 +43,43 @@ func kinds(reqs []lifecycle.Request) []string {
 // Every case of what a restart can find has one answer. The rows are grouped by what they protect:
 // a store that is away and a supervisor that cannot be judged touch nothing.
 func TestRecoveryDecidesEveryCase(t *testing.T) {
-	want := func(state core.JobState, presence lifecycle.Presence, away bool) []string {
-		final := state != core.JobQueued && state != core.JobRunning
+	want := func(finding lifecycle.Finding, presence lifecycle.Presence) []string {
+		_, none := presence.(lifecycle.RunNone)
+		_, unknown := presence.(lifecycle.RunUnknown)
+		_, live := presence.(lifecycle.RunAlive)
+		f, inStore := finding.(lifecycle.JobIn)
+		queued, running := inStore && f.State == core.JobQueued, inStore && f.State == core.JobRunning
+		_, away := finding.(lifecycle.StoreAway)
 		switch {
-		case away && (presence == lifecycle.PresenceAlive || presence == lifecycle.PresenceUnknown):
-			return []string{"ArmRetry"}
+		case away && none:
+			return nil
 		case away:
-			return nil
-		case presence == lifecycle.PresenceUnknown && final:
-			return nil
-		case presence == lifecycle.PresenceUnknown:
 			return []string{"ArmRetry"}
-		case state == core.JobRunning && presence == lifecycle.PresenceAlive:
-			return []string{"Adopt"}
-		case state == core.JobRunning:
-			return []string{"Move"}
-		case presence == lifecycle.PresenceNone && final:
+		case unknown && !queued && !running:
 			return nil
-		case presence == lifecycle.PresenceNone:
+		case unknown:
+			return []string{"ArmRetry"}
+		case running && live:
+			return []string{"Adopt"}
+		case running && none:
+			return []string{"ArmRetry"}
+		case running:
+			return []string{"Move"}
+		case none && !queued:
+			return nil
+		case none:
 			return []string{"LaunchRequest"}
 		}
 		return []string{"Discard"}
 	}
-	for _, state := range storeHas {
+	for _, finding := range allJobs {
 		for _, presence := range presences {
-			for _, away := range []bool{false, true} {
-				name := fmt.Sprintf("store %q, supervisor %s, away %v", state, presence, away)
-				s, reqs := lifecycle.Step(lifecycle.State{}, lifecycle.Recovered{
-					Ref: aRef, State: state, SubmittedAt: epoch, Supervisor: presence, Away: away, At: epoch,
-				})
-				_, more := lifecycle.Step(s, lifecycle.RecoveryDone{})
-				got := kinds(append(reqs, more...))
-				if !slices.Equal(got, want(state, presence, away)) {
-					t.Errorf("%s: requests = %v, want %v", name, got, want(state, presence, away))
-				}
+			name := fmt.Sprintf("store %#v, supervisor %#v", finding, presence)
+			s, reqs := lifecycle.Step(lifecycle.State{}, lifecycle.Recovered{Ref: aRef, Finding: finding, Supervisor: presence, At: epoch})
+			_, more := lifecycle.Step(s, lifecycle.RecoveryDone{})
+			got := kinds(append(reqs, more...))
+			if !slices.Equal(got, want(finding, presence)) {
+				t.Errorf("%s: requests = %v, want %v", name, got, want(finding, presence))
 			}
 		}
 	}
@@ -70,7 +89,7 @@ func TestRecoveryDecidesEveryCase(t *testing.T) {
 func inDiscard(t *testing.T) lifecycle.State {
 	t.Helper()
 	s, reqs := lifecycle.Step(lifecycle.State{}, lifecycle.Recovered{
-		Ref: aRef, State: core.JobQueued, SubmittedAt: epoch, Supervisor: lifecycle.PresenceAlive, At: epoch,
+		Ref: aRef, Finding: in(core.JobQueued), Supervisor: alive(lifecycle.RunRunning), At: epoch,
 	})
 	if got := kinds(reqs); !slices.Equal(got, []string{"Discard"}) {
 		t.Fatalf("recovery asked for %v, want a Discard", got)
@@ -98,14 +117,14 @@ func TestACancelWhileARunIsClearedStopsTheJob(t *testing.T) {
 // repeat is already in flight, and two discards of one run are two releases of a supervisor.
 func TestARetryForAStepNoLongerWaitingRepeatsNothing(t *testing.T) {
 	found := func(presence lifecycle.Presence) lifecycle.Recovered {
-		return lifecycle.Recovered{Ref: aRef, State: core.JobQueued, SubmittedAt: epoch, Supervisor: presence, At: epoch}
+		return lifecycle.Recovered{Ref: aRef, Finding: in(core.JobQueued), Supervisor: presence, At: epoch}
 	}
-	s, reqs := lifecycle.Step(lifecycle.State{}, found(lifecycle.PresenceUnknown))
+	s, reqs := lifecycle.Step(lifecycle.State{}, found(lifecycle.RunUnknown{Limit: time.Hour}))
 	if got := kinds(reqs); !slices.Equal(got, []string{"ArmRetry"}) {
 		t.Fatalf("a run that cannot be judged asked for %v, want a retry", got)
 	}
 	// A sweep looks before the retry fires, and now the run can be judged.
-	s, reqs = lifecycle.Step(s, found(lifecycle.PresenceAlive))
+	s, reqs = lifecycle.Step(s, found(alive(lifecycle.RunRunning)))
 	if got := kinds(reqs); !slices.Equal(got, []string{"Discard"}) {
 		t.Fatalf("a second look asked for %v, want a Discard", got)
 	}
@@ -129,11 +148,11 @@ func TestASecondLookAdoptsWithTheCancelFirst(t *testing.T) {
 	}
 	s, _ = lifecycle.Step(s, lifecycle.CancelAsked{Ref: aRef, Reason: "stop", State: core.JobQueued, SubmittedAt: epoch, At: epoch})
 	s, _ = lifecycle.Step(s, lifecycle.Launched{Ref: aRef})
-	s, _ = lifecycle.Step(s, lifecycle.FollowFailed{Ref: aRef, Failure: core.Failure{Message: "silent"}, At: epoch})
+	s, _ = lifecycle.Step(s, lifecycle.FollowFailed{Ref: aRef, Cause: lifecycle.CauseSupervisorSilent, Failure: core.Failure{Message: "silent"}, At: epoch})
 	s, _ = lifecycle.Step(s, lifecycle.StopFailed{Ref: aRef, Failure: core.Failure{Message: "silent"}})
 	s, _ = lifecycle.Step(s, lifecycle.RetryDue{Ref: aRef})
 	_, reqs = lifecycle.Step(s, lifecycle.Recovered{
-		Ref: aRef, State: core.JobRunning, SubmittedAt: epoch, Supervisor: lifecycle.PresenceAlive, At: epoch,
+		Ref: aRef, Finding: in(core.JobRunning), Supervisor: alive(lifecycle.RunRunning), At: epoch,
 	})
 	if len(reqs) != 1 {
 		t.Fatalf("the second look asked for %v, want one Adopt", reqs)

@@ -19,7 +19,8 @@ import (
 
 // Client is a supervisor.Handle that calls a SupervisorService.
 type Client struct {
-	rpc cliv1.SupervisorServiceClient
+	rpc   cliv1.SupervisorServiceClient
+	phase lifecycle.RunPhase
 }
 
 var _ supervisor.Handle = (*Client)(nil)
@@ -39,8 +40,15 @@ func Connect(ctx context.Context, conn grpc.ClientConnInterface, binaryVersion s
 		return nil, &core.Failure{Kind: core.FailureIncompatible, Message: fmt.Sprintf(
 			"the supervisor (build %s) cannot talk to this daemon: %s", res.GetVersions().GetBinaryVersion(), got)}
 	}
+	c.phase = wire.ToRunPhase(res.GetPhase())
 	return c, nil
 }
+
+// Phase is where the supervisor was when the connection was made.
+func (c *Client) Phase() lifecycle.RunPhase { return c.phase }
+
+// Close implements supervisor.Handle. The connection is its caller's to close.
+func (c *Client) Close() {}
 
 // mapError turns an error of a call made with ctx into the one the Handle contract names.
 func mapError(ctx context.Context, err error) error {

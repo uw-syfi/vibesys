@@ -2,6 +2,7 @@ package clock
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"time"
 )
@@ -49,14 +50,23 @@ func NewManualTimers() *ManualTimers {
 	return &ManualTimers{armed: make(chan time.Duration, 64)}
 }
 
-// Timeout implements Timers. The duration is reported on Armed, and the timer waits for Fire.
+// Timeout implements Timers. The duration is reported on Armed, and the timer waits for Fire or
+// for being stopped. Code under test never waits for the test to read: a report that does not fit
+// is dropped, which a test that reads Armed does not reach.
 func (m *ManualTimers) Timeout(_ context.Context, d time.Duration) (<-chan struct{}, func()) {
 	fired := make(chan struct{})
 	m.mu.Lock()
 	m.pending = append(m.pending, fired)
 	m.mu.Unlock()
-	m.armed <- d
-	return fired, func() {}
+	select {
+	case m.armed <- d:
+	default:
+	}
+	return fired, func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		m.pending = slices.DeleteFunc(m.pending, func(c chan struct{}) bool { return c == fired })
+	}
 }
 
 // Armed receives the duration of each timeout asked for, in order. A test that must fire a

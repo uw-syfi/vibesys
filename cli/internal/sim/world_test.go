@@ -240,6 +240,9 @@ func (s simStores) Known(ctx context.Context) ([]app.Scope, error) {
 	return gated(ctx, s.w, s.d, "stores.Known", false, func() ([]app.Scope, error) { return slices.Clone(scopes), nil })
 }
 
+// Forget has nothing to drop: the world's stores are fixed when it begins.
+func (s simStores) Forget(context.Context, app.Scope) error { return nil }
+
 // Close has nothing to give up: the store outlives every daemon of the world.
 func (s simStores) Close() error { return nil }
 
@@ -668,10 +671,12 @@ func (w *world) noteRelease(ref lifecycle.Ref) {
 // number for that run, as probes run beside each other and a shared generator would make their
 // order matter.
 func (w *world) probed(r supervisor.Run) supervisor.Run {
-	if r.Presence != lifecycle.PresenceAlive || !w.flakyProbe(r.Ref) {
+	alive, ok := r.(supervisor.Alive)
+	if !ok || !w.flakyProbe(alive.Ref) {
 		return r
 	}
-	return supervisor.Run{Ref: r.Ref, Presence: lifecycle.PresenceUnknown, Launch: r.Launch}
+	alive.Handle.Close()
+	return supervisor.Unknown{Ref: alive.Ref, Launch: &alive.Launch}
 }
 
 func (w *world) flakyProbe(ref lifecycle.Ref) bool {

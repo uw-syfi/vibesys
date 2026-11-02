@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"unicode/utf8"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -74,6 +75,10 @@ func (a *App) Submit(ctx context.Context, req SubmitRequest) (core.SubmitOutcome
 	if err != nil {
 		// The change may have been made with only its answer lost. The sweep finds such a job.
 		return core.SubmitOutcome{}, err
+	}
+	// A store that took a submission can be read: its jobs are not left to the next sweep.
+	if slices.Contains(a.view.Load().unread, scope) {
+		a.readAgain(ctx, scope)
 	}
 	if out.Disposition != core.SubmitReused && out.Job.State == core.JobQueued {
 		// Settled, so that a submission that returned is in Status.
@@ -193,8 +198,9 @@ func (a *App) pause(ctx context.Context, wake <-chan struct{}) error {
 
 // Watch passes the current state of each job to emit, and then each change, until every job is
 // final or ctx is done. A job is passed again only when something about it changed. A job whose end
-// is out of the daemon's hands for now ends the watch with why, so a waiter is never left waiting
-// for an end nobody is working on, and never told one that did not happen.
+// is out of the daemon's hands for now, or that waits on such a job or on its store, ends the watch
+// with why, so a waiter is never left waiting for an end nobody is working on, and never told one
+// that did not happen.
 func (a *App) Watch(ctx context.Context, scope Scope, ids []core.JobID, emit func(core.Job) error) error {
 	if len(ids) == 0 {
 		return invalid("job_ids: name at least one job to watch")
@@ -221,7 +227,7 @@ func (a *App) Watch(ctx context.Context, scope Scope, ids []core.JobID, emit fun
 			}
 			if job.State.Final() {
 				final++
-			} else if f, troubled := a.troubleOf(lifecycle.Ref{Store: storeIDOf(scope), Job: id}); troubled {
+			} else if f, waits := a.waitOf(lifecycle.Ref{Store: storeIDOf(scope), Job: id}); waits {
 				return &f
 			}
 		}
@@ -271,7 +277,7 @@ func (a *App) ReadLogs(ctx context.Context, scope Scope, id core.JobID, offset u
 		if !follow || job.State.Final() {
 			return nil
 		}
-		if f, troubled := a.troubleOf(lifecycle.Ref{Store: storeIDOf(scope), Job: id}); troubled {
+		if f, waits := a.waitOf(lifecycle.Ref{Store: storeIDOf(scope), Job: id}); waits {
 			return &f
 		}
 		if err := a.pause(ctx, wake); err != nil {

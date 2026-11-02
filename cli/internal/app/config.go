@@ -35,7 +35,8 @@ type Config struct {
 	MaxNoteBytes int
 	// Retry bounds the calls to stores and supervisors.
 	Retry Retry
-	// CallTimeout bounds one call to a supervisor that answers at once, when all is well.
+	// CallTimeout bounds one call to a store, and one to a supervisor that answers at once, when
+	// all is well.
 	CallTimeout time.Duration
 	// StopTimeout bounds the wait for a stopped command to end.
 	StopTimeout time.Duration

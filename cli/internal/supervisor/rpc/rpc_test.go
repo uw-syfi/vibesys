@@ -37,6 +37,7 @@ type farm struct {
 
 type served struct {
 	sup      *supervisor.Supervisor
+	launch   lifecycle.Launch
 	listener *bufconn.Listener
 	server   *grpc.Server
 	gone     bool
@@ -57,7 +58,7 @@ func (f *farm) closeAll() {
 
 var _ supervisor.Supervisors = (*remote)(nil)
 
-func (r *remote) connect(ctx context.Context, s *served) (supervisor.Handle, error) {
+func (r *remote) connect(ctx context.Context, s *served) (*rpc.Client, error) {
 	conn, err := grpc.NewClient("passthrough:///supervisor",
 		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return s.listener.DialContext(ctx) }),
 		grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -78,7 +79,7 @@ func (r *remote) Spawn(ctx context.Context, l lifecycle.Launch) (supervisor.Hand
 		Launch: l, Environments: fakeenv.Environments{core.EnvironmentHost: r.env},
 		Checkouts: r.checkouts, Spool: &supervisor.MemorySpool{},
 	})
-	s := &served{sup: sup, listener: bufconn.Listen(1 << 20), server: grpc.NewServer()}
+	s := &served{sup: sup, launch: l, listener: bufconn.Listen(1 << 20), server: grpc.NewServer()}
 	cliv1.RegisterSupervisorServiceServer(s.server, rpc.NewServer(sup, "test"))
 	go s.server.Serve(s.listener)
 	// A released supervisor's process exits: its server stops.
@@ -102,10 +103,10 @@ func (r *remote) Runs(ctx context.Context) ([]supervisor.Run, error) {
 
 func (r *remote) probe(ctx context.Context, ref lifecycle.Ref, s *served) supervisor.Run {
 	h, err := r.connect(ctx, s)
-	if err != nil || s.sup.Phase() == supervisor.PhaseReleased {
-		return supervisor.Run{Ref: ref, Presence: lifecycle.PresenceGone}
+	if err != nil || s.sup.Phase() == lifecycle.RunReleased {
+		return supervisor.Dead{Ref: ref, Proof: lifecycle.ProofLockFree, Launch: &s.launch}
 	}
-	return supervisor.Run{Ref: ref, Presence: lifecycle.PresenceAlive, Handle: h}
+	return supervisor.Alive{Ref: ref, Handle: h, Launch: s.launch, Phase: h.Phase()}
 }
 
 func (r *remote) Probe(ctx context.Context, ref lifecycle.Ref) (supervisor.Run, error) {
@@ -113,12 +114,15 @@ func (r *remote) Probe(ctx context.Context, ref lifecycle.Ref) (supervisor.Run, 
 	defer r.farm.mu.Unlock()
 	s, ok := r.farm.runs[ref]
 	if !ok {
-		return supervisor.Run{Ref: ref, Presence: lifecycle.PresenceNone}, nil
+		return supervisor.None{Ref: ref}, nil
 	}
 	return r.probe(ctx, ref, s), nil
 }
 
-func (r *remote) Forget(ctx context.Context, ref lifecycle.Ref) error {
+func (r *remote) Forget(ctx context.Context, ref lifecycle.Ref, proof lifecycle.DeathProof) error {
+	if !proof.Valid() {
+		return &core.Failure{Kind: core.FailureInvalidInput, Message: "nothing proves the supervisor gone"}
+	}
 	r.farm.mu.Lock()
 	s, ok := r.farm.runs[ref]
 	r.farm.mu.Unlock()
@@ -126,7 +130,7 @@ func (r *remote) Forget(ctx context.Context, ref lifecycle.Ref) error {
 		return nil
 	}
 	// A released supervisor is gone even while its server is still stopping.
-	if s.sup.Phase() != supervisor.PhaseReleased {
+	if s.sup.Phase() != lifecycle.RunReleased {
 		if _, err := r.connect(ctx, s); err == nil {
 			return &core.Failure{Kind: core.FailureConflict, Message: "the supervisor still answers"}
 		}

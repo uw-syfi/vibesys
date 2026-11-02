@@ -31,6 +31,11 @@ var _ Supervisors = (*InProcess)(nil)
 type Survivors struct {
 	mu   sync.Mutex
 	runs map[lifecycle.Ref]*process
+	// rebooted is the launches of runs a reboot took: their record survives, as the real one does
+	// outside the runtime directory.
+	rebooted map[lifecycle.Ref]lifecycle.Launch
+	// wiped is the runs whose directory went away while the machine stayed up.
+	wiped map[lifecycle.Ref]bool
 }
 
 // process is one supervisor of InProcess and whether it was killed.
@@ -56,7 +61,11 @@ func (p *process) dead() bool {
 }
 
 // NewSurvivors returns an empty set.
-func NewSurvivors() *Survivors { return &Survivors{runs: map[lifecycle.Ref]*process{}} }
+func NewSurvivors() *Survivors {
+	return &Survivors{
+		runs: map[lifecycle.Ref]*process{}, rebooted: map[lifecycle.Ref]lifecycle.Launch{}, wiped: map[lifecycle.Ref]bool{},
+	}
+}
 
 // Kill ends the supervisor of a job without letting it report, as a SIGKILL does, and leaves its
 // run behind. It returns false for a job that has none.
@@ -70,15 +79,31 @@ func (s *Survivors) Kill(ref lifecycle.Ref) bool {
 	return ok
 }
 
-// Reboot kills every supervisor and removes every run, as a machine that restarts does.
+// Reboot kills every supervisor and removes every run but its record, as a machine that restarts
+// does.
 func (s *Survivors) Reboot() {
 	s.mu.Lock()
 	runs := s.runs
 	s.runs = map[lifecycle.Ref]*process{}
+	for ref, proc := range runs {
+		s.rebooted[ref] = proc.launch
+	}
 	s.mu.Unlock()
 	for _, proc := range runs {
 		proc.kill()
 	}
+}
+
+// Wipe takes a job's run directory away and leaves its supervisor alive, as a logout that clears
+// the runtime directory does. It returns false for a job with no run.
+func (s *Survivors) Wipe(ref lifecycle.Ref) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.runs[ref]; !ok {
+		return false
+	}
+	s.wiped[ref] = true
+	return true
 }
 
 // Close ends every command still running, so a test leaves nothing behind.
@@ -119,45 +144,59 @@ func (p *InProcess) Runs(ctx context.Context) ([]Run, error) {
 	p.alive.mu.Lock()
 	defer p.alive.mu.Unlock()
 	var out []Run
-	for ref, proc := range p.alive.runs {
-		out = append(out, runOf(ref, proc))
+	for ref := range p.alive.runs {
+		out = append(out, p.alive.runOf(ref))
+	}
+	for ref := range p.alive.rebooted {
+		out = append(out, p.alive.runOf(ref))
 	}
 	return out, nil
 }
 
-func runOf(ref lifecycle.Ref, proc *process) Run {
-	if proc.dead() {
-		return Run{Ref: ref, Presence: lifecycle.PresenceGone, Launch: proc.launch}
+func (s *Survivors) runOf(ref lifecycle.Ref) Run {
+	if l, ok := s.rebooted[ref]; ok {
+		return Dead{Ref: ref, Proof: lifecycle.ProofRebooted, Launch: &l}
 	}
-	return Run{Ref: ref, Presence: lifecycle.PresenceAlive, Handle: &inProcessHandle{proc: proc}, Launch: proc.launch}
+	proc, ok := s.runs[ref]
+	if !ok {
+		return None{Ref: ref}
+	}
+	switch {
+	case proc.dead():
+		return Dead{Ref: ref, Proof: lifecycle.ProofLockFree, Launch: &proc.launch}
+	case s.wiped[ref]:
+		return Unknown{Ref: ref, Launch: &proc.launch}
+	}
+	return Alive{Ref: ref, Handle: &inProcessHandle{proc: proc}, Launch: proc.launch, Phase: proc.sup.Phase()}
 }
 
 // Probe implements Supervisors.
 func (p *InProcess) Probe(ctx context.Context, ref lifecycle.Ref) (Run, error) {
 	if err := ctx.Err(); err != nil {
-		return Run{}, err
+		return nil, err
 	}
 	p.alive.mu.Lock()
 	defer p.alive.mu.Unlock()
-	proc, ok := p.alive.runs[ref]
-	if !ok {
-		return Run{Ref: ref, Presence: lifecycle.PresenceNone}, nil
-	}
-	return runOf(ref, proc), nil
+	return p.alive.runOf(ref), nil
 }
 
 // Forget implements Supervisors.
-func (p *InProcess) Forget(ctx context.Context, ref lifecycle.Ref) error {
+func (p *InProcess) Forget(ctx context.Context, ref lifecycle.Ref, proof lifecycle.DeathProof) error {
+	if !proof.Valid() {
+		return &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("job %s: nothing proves its supervisor gone", ref)}
+	}
 	p.alive.mu.Lock()
 	defer p.alive.mu.Unlock()
+	delete(p.alive.rebooted, ref)
 	proc, ok := p.alive.runs[ref]
 	if !ok {
 		return nil
 	}
-	if !proc.dead() && proc.sup.Phase() != PhaseReleased {
+	if !proc.dead() && proc.sup.Phase() != lifecycle.RunReleased {
 		return &core.Failure{Kind: core.FailureConflict, Message: fmt.Sprintf("job %s still has a supervisor", ref)}
 	}
 	delete(p.alive.runs, ref)
+	delete(p.alive.wiped, ref)
 	return nil
 }
 
@@ -169,8 +208,16 @@ func (h *inProcessHandle) check(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if h.proc.dead() || h.proc.sup.Phase() == PhaseReleased {
-		return ErrGone
+	return h.proc.gone()
+}
+
+// gone says how the process is known to be gone, if it is.
+func (p *process) gone() error {
+	switch {
+	case p.dead():
+		return Gone{Proof: lifecycle.ProofLockFree}
+	case p.sup.Phase() == lifecycle.RunReleased:
+		return Gone{Proof: lifecycle.ProofReleased}
 	}
 	return nil
 }
@@ -207,8 +254,8 @@ func (h *inProcessHandle) Follow(ctx context.Context, offset uint64, emit func([
 		}
 	})
 	out, err := h.proc.sup.Attach(ctx, offset, func(_ uint64, data []byte) error { return emit(data) })
-	if h.proc.dead() || errors.Is(err, ErrReleased) {
-		return lifecycle.Outcome{}, ErrGone
+	if gone := h.proc.gone(); gone != nil && (h.proc.dead() || errors.Is(err, ErrReleased)) {
+		return lifecycle.Outcome{}, gone
 	}
 	return out, err
 }
@@ -218,7 +265,10 @@ func (h *inProcessHandle) Release(ctx context.Context) error {
 		return err
 	}
 	if h.proc.dead() {
-		return ErrGone
+		return Gone{Proof: lifecycle.ProofLockFree}
 	}
 	return h.proc.sup.Release()
 }
+
+// Close implements Handle. A connection that is not there has nothing to close.
+func (h *inProcessHandle) Close() {}

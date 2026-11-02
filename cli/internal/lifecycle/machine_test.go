@@ -89,7 +89,7 @@ func (w *world) checkState(after lifecycle.Event) {
 	if active > 1 {
 		w.fail("after %#v: %d jobs hold the machine, want at most 1: %+v", after, active, w.state.Held())
 	}
-	if stranded := w.state.Stranded(); len(stranded) > 0 {
+	if stranded := w.state.Stranded(w.tick()); len(stranded) > 0 {
 		w.fail("after %#v: queued jobs %v are stranded: nothing holds the machine and nothing will start them", after, stranded)
 	}
 }
@@ -171,7 +171,7 @@ func (w *world) answer(healthy bool) bool {
 	switch req := req.(type) {
 	case lifecycle.LaunchRequest:
 		if !healthy && w.r.IntN(4) == 0 {
-			w.feed(lifecycle.LaunchFailed{Ref: req.Ref, Failure: core.Failure{Kind: core.FailureUnavailable, Message: "no environment"}, At: w.tick()})
+			w.feed(lifecycle.LaunchFailed{Ref: req.Ref, Cause: lifecycle.CauseRefused, Failure: core.Failure{Kind: core.FailureUnavailable, Message: "no environment"}, At: w.tick()})
 			return true
 		}
 		w.store[req.Ref] = core.JobRunning
@@ -240,7 +240,7 @@ func (w *world) supervisorEnds(healthy bool) bool {
 	s := w.sup[ref]
 	if !healthy && w.r.IntN(5) == 0 {
 		s.alive = false
-		w.feed(lifecycle.SupervisorLost{Ref: ref, At: w.tick()})
+		w.feed(lifecycle.SupervisorLost{Ref: ref, Proof: lifecycle.ProofLockFree, At: w.tick()})
 		return true
 	}
 	var o lifecycle.Outcome
@@ -363,18 +363,22 @@ func (w *world) recoverAll(upTo int) {
 	w.t.Helper()
 	events := 0
 	for _, ref := range w.order {
-		presence := lifecycle.PresenceNone
+		var presence lifecycle.Presence = lifecycle.RunNone{}
 		switch s := w.sup[ref]; {
 		case s != nil && s.alive:
-			presence = lifecycle.PresenceAlive
+			presence = lifecycle.RunAlive{Phase: lifecycle.RunRunning, Limit: time.Hour}
 		case w.dirs[ref]:
-			presence = lifecycle.PresenceGone
+			presence = lifecycle.RunDead{Proof: lifecycle.ProofLockFree}
 		}
 		if events == upTo {
 			return
 		}
 		events++
-		w.feed(lifecycle.Recovered{Ref: ref, State: w.store[ref], SubmittedAt: w.at[ref], Supervisor: presence, At: w.tick()})
+		var finding lifecycle.Finding = lifecycle.NoSuchJob{}
+		if state := w.store[ref]; state != "" {
+			finding = lifecycle.JobIn{State: state, SubmittedAt: w.at[ref]}
+		}
+		w.feed(lifecycle.Recovered{Ref: ref, Finding: finding, Supervisor: presence, At: w.tick()})
 	}
 }
 

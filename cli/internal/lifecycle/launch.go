@@ -1,6 +1,8 @@
 package lifecycle
 
 import (
+	"time"
+
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 )
 
@@ -17,6 +19,14 @@ type Launch struct {
 // Ref is the job's identity.
 func (l Launch) Ref() Ref {
 	return Ref{Store: StoreIDOf(l.Repository, l.Task), Job: l.Job}
+}
+
+// Limit is the longest the launch's command can run, and zero when the launch does not say.
+func (l Launch) Limit() time.Duration {
+	if c, ok := l.Spec.Settings.(core.CommandSettings); ok {
+		return c.Timeout
+	}
+	return 0
 }
 
 // Outcome is the one report a supervisor makes about its job: how it ended, and whether a cancel

@@ -61,6 +61,7 @@ func Run(t *testing.T, newRig func(t *testing.T) Rig) {
 		{"a restarted daemon finds a running job and follows it", testRestartRunning},
 		{"a restarted daemon finds an ended job's outcome", testRestartFinished},
 		{"runs left over are found and forgotten", testRuns},
+		{"closing a handle leaves the supervisor", testCloseLeavesTheSupervisor},
 		{"a launch spawns once", testSpawnOnce},
 	}
 	for _, c := range cases {
@@ -331,7 +332,7 @@ func testParkedRelease(t *testing.T, r Rig) {
 	if err := h.Start(ctx); err == nil {
 		t.Fatal("Start after Release succeeded")
 	}
-	if err := r.Supervisors.Forget(ctx, l.Ref()); err != nil {
+	if err := r.Supervisors.Forget(ctx, l.Ref(), lifecycle.ProofReleased); err != nil {
 		t.Fatalf("Forget: %v", err)
 	}
 }
@@ -358,11 +359,14 @@ func testKilled(t *testing.T, r Rig) {
 	if !errors.Is(err, supervisor.ErrGone) {
 		t.Fatalf("Follow after a kill = %v, want ErrGone", err)
 	}
-	runs := find(t, r.Supervisors, l.Ref())
-	if runs.Presence != lifecycle.PresenceGone {
-		t.Fatalf("presence after a kill = %q, want gone", runs.Presence)
+	dead, ok := find(t, r.Supervisors, l.Ref()).(supervisor.Dead)
+	if !ok {
+		t.Fatalf("after a kill the run is %#v, want dead", find(t, r.Supervisors, l.Ref()))
 	}
-	if err := r.Supervisors.Forget(ctx, l.Ref()); err != nil {
+	if err := r.Supervisors.Forget(ctx, l.Ref(), ""); err == nil {
+		t.Fatal("Forget took no proof")
+	}
+	if err := r.Supervisors.Forget(ctx, l.Ref(), dead.Proof); err != nil {
 		t.Fatalf("Forget: %v", err)
 	}
 	if len(all(t, r.Supervisors)) != 0 {
@@ -380,10 +384,11 @@ func testRestartRunning(t *testing.T, r Rig) {
 
 	// The daemon goes away and a new one comes up.
 	sups := r.Restart()
-	run := find(t, sups, l.Ref())
-	if run.Presence != lifecycle.PresenceAlive || run.Handle == nil {
-		t.Fatalf("after a restart the run is %+v, want alive", run)
+	run, ok := find(t, sups, l.Ref()).(supervisor.Alive)
+	if !ok || run.Handle == nil || run.Phase != lifecycle.RunRunning {
+		t.Fatalf("after a restart the run is %+v, want alive and running", run)
 	}
+	defer run.Handle.Close()
 	r.Open("g")
 	got, o, err := follow(ctx, run.Handle, held)
 	if err != nil {
@@ -402,10 +407,11 @@ func testRestartFinished(t *testing.T, r Rig) {
 		t.Fatal(err)
 	}
 	// The command ended while no daemon looked; the supervisor keeps the outcome.
-	run := find(t, r.Restart(), l.Ref())
-	if run.Presence != lifecycle.PresenceAlive {
-		t.Fatalf("an ended job's run is %+v, want alive", run)
+	run, ok := find(t, r.Restart(), l.Ref()).(supervisor.Alive)
+	if !ok || run.Phase != lifecycle.RunFinished {
+		t.Fatalf("an ended job's run is %+v, want alive and finished", run)
 	}
+	defer run.Handle.Close()
 	got, o, err := follow(ctx, run.Handle, 0)
 	if err != nil || string(got) != "done\n" || execOf(o) != (core.ExecOutcome{Kind: core.ExecExited, ExitCode: 7}) {
 		t.Fatalf("output %q, outcome %+v, error %v", got, o, err)
@@ -422,28 +428,52 @@ func testRuns(t *testing.T, r Rig) {
 		}
 		refs = append(refs, l.Ref())
 	}
-	got := map[lifecycle.Ref]supervisor.Run{}
+	got := map[lifecycle.Ref]supervisor.Alive{}
 	for _, run := range all(t, r.Supervisors) {
-		got[run.Ref] = run
+		alive, ok := run.(supervisor.Alive)
+		if !ok || alive.Handle == nil || alive.Phase != lifecycle.RunParked {
+			t.Errorf("run %s = %+v, want alive and parked", run.Job(), run)
+			continue
+		}
+		defer alive.Handle.Close()
+		got[run.Job()] = alive
 	}
 	for _, ref := range refs {
-		run, ok := got[ref]
-		if !ok || run.Presence != lifecycle.PresenceAlive || run.Handle == nil {
-			t.Errorf("run %s = %+v, want alive", ref, run)
+		if _, ok := got[ref]; !ok {
+			t.Errorf("run %s is not listed", ref)
 		}
 	}
 	var f *core.Failure
-	if err := r.Supervisors.Forget(ctx, refs[0]); !errors.As(err, &f) || f.Kind != core.FailureConflict {
+	if err := r.Supervisors.Forget(ctx, refs[0], lifecycle.ProofLockFree); !errors.As(err, &f) || f.Kind != core.FailureConflict {
 		t.Errorf("Forget of a live run = %v, want a conflict", err)
 	}
 	if err := got[refs[0]].Handle.Release(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Supervisors.Forget(ctx, refs[0]); err != nil {
+	if err := r.Supervisors.Forget(ctx, refs[0], lifecycle.ProofReleased); err != nil {
 		t.Errorf("Forget after Release: %v", err)
 	}
-	if err := r.Supervisors.Forget(ctx, refs[0]); err != nil {
+	if err := r.Supervisors.Forget(ctx, refs[0], lifecycle.ProofReleased); err != nil {
 		t.Errorf("Forget twice: %v", err)
+	}
+}
+
+// Closing a handle lets go of the connection and of nothing else.
+func testCloseLeavesTheSupervisor(t *testing.T, r Rig) {
+	ctx := ctxFor(t)
+	l := launch("j1", "print", "up", ";", "hold", "g", ";", "print", "after")
+	h := start(t, r, l)
+	h.Close()
+	h.Close()
+	r.Open("g")
+	run, ok := find(t, r.Supervisors, l.Ref()).(supervisor.Alive)
+	if !ok {
+		t.Fatalf("after Close the run is %+v, want alive", run)
+	}
+	defer run.Handle.Close()
+	got, o, err := follow(ctx, run.Handle, 0)
+	if err != nil || string(got) != "up\nafter\n" || execOf(o).Kind != core.ExecExited {
+		t.Fatalf("output %q, outcome %+v, error %v", got, o, err)
 	}
 }
 
@@ -471,12 +501,12 @@ func all(t *testing.T, s supervisor.Supervisors) []supervisor.Run {
 func find(t *testing.T, s supervisor.Supervisors, ref lifecycle.Ref) supervisor.Run {
 	t.Helper()
 	for _, run := range all(t, s) {
-		if run.Ref == ref {
+		if run.Job() == ref {
 			return run
 		}
 	}
 	t.Fatalf("no run for %s", ref)
-	return supervisor.Run{}
+	return nil
 }
 
 // execOf is how the command of an outcome ended, zero when it did not run.

@@ -18,6 +18,7 @@ func (g *Group) Go(fn func()) { g.wg.Go(fn) }
 func (g *Group) Wait() { g.wg.Wait() }
 
 // Detached runs fn in a goroutine that nothing joins, because it outlives whoever starts it. It is
-// for waiting on a child process, which goes on after this one has gone. Anything else belongs in a
-// Group.
+// for waiting on a child process, which goes on after this one has gone, and for a call into a disk
+// that may never answer, which nothing can interrupt and nobody can wait for. Anything else belongs
+// in a Group.
 func Detached(fn func()) { go fn() }

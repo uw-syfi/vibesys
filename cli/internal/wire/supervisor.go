@@ -81,3 +81,33 @@ func ToOutcome(o *cliv1.SupervisorOutcome) lifecycle.Outcome {
 	}
 	return out
 }
+
+// RunPhase is a supervisor's phase on the wire.
+func RunPhase(p lifecycle.RunPhase) cliv1.SupervisorPhase {
+	switch p {
+	case lifecycle.RunParked:
+		return cliv1.SupervisorPhase_SUPERVISOR_PHASE_PARKED
+	case lifecycle.RunRunning:
+		return cliv1.SupervisorPhase_SUPERVISOR_PHASE_RUNNING
+	case lifecycle.RunFinished:
+		return cliv1.SupervisorPhase_SUPERVISOR_PHASE_FINISHED
+	case lifecycle.RunReleased:
+		return cliv1.SupervisorPhase_SUPERVISOR_PHASE_RELEASED
+	}
+	return cliv1.SupervisorPhase_SUPERVISOR_PHASE_UNSPECIFIED
+}
+
+// ToRunPhase is a supervisor's phase from the wire. A phase this build cannot read is running, the
+// one that makes the daemon wait.
+func ToRunPhase(p cliv1.SupervisorPhase) lifecycle.RunPhase {
+	switch p {
+	case cliv1.SupervisorPhase_SUPERVISOR_PHASE_PARKED:
+		return lifecycle.RunParked
+	case cliv1.SupervisorPhase_SUPERVISOR_PHASE_FINISHED:
+		return lifecycle.RunFinished
+	case cliv1.SupervisorPhase_SUPERVISOR_PHASE_RELEASED:
+		return lifecycle.RunReleased
+	case cliv1.SupervisorPhase_SUPERVISOR_PHASE_RUNNING, cliv1.SupervisorPhase_SUPERVISOR_PHASE_UNSPECIFIED:
+	}
+	return lifecycle.RunRunning
+}

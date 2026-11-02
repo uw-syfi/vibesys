@@ -53,7 +53,10 @@ func claim(b *backend, owner Owner) (*guard, error) {
 	case errors.Is(err, fsys.ErrLocked):
 		return nil, inUse(b, owner)
 	case errors.Is(err, fsys.ErrNoLocks):
-		return nil, refused("the store at %s cannot be kept to one daemon: %v: move the state to a filesystem with working locks, or mount this one without local_lock or nolock", b.root, err)
+		return nil, store.Mark(refused(
+			"the store at %s cannot be kept to one daemon, because file locks on this filesystem stop at this machine or do not work (%v). "+
+				"Keep the repository on a local disk, or have the filesystem mounted with working locks, without nolock or local_lock",
+			b.root, err), fsys.ErrNoLocks)
 	case err != nil:
 		return nil, unavailable(b.root, err)
 	}
@@ -78,9 +81,9 @@ func takeRecord(b *backend, owner Owner, lock fsys.Lock) (*guard, error) {
 			return nil, err
 		}
 		if running {
-			return nil, refused(
+			return nil, store.Mark(refused(
 				"the store at %s has running jobs that belong to %s: start the daemon there, or, if that place is gone for good, remove %s and those jobs will be marked lost",
-				b.root, last, name)
+				b.root, last, name), store.ErrAway)
 		}
 	}
 	rec := ownerRec{Format: formatVersion, Generation: 1, Host: owner.Host, Dir: owner.Dir, PID: owner.PID}
@@ -116,7 +119,7 @@ func readOwner(b *backend, name string) (*ownerRec, error) {
 // leaving is a refusal the caller may try again: see store.ErrOwnerLeaving.
 type leaving struct{ *core.Failure }
 
-func (l leaving) Unwrap() []error { return []error{l.Failure, store.ErrOwnerLeaving} }
+func (l leaving) Unwrap() []error { return []error{l.Failure, store.ErrOwnerLeaving, store.ErrAway} }
 
 // inUse refuses a store another hold has. A daemon that holds the lock may not have written its
 // record yet, and a record that cannot be read has a message of its own at the next Open.
@@ -124,13 +127,13 @@ func inUse(b *backend, owner Owner) error {
 	const message = "the store at %s is in use by %s: a store has one daemon, so stop that one or use it"
 	rec, err := readOwner(b, path.Join(b.root, ownerFile))
 	if err != nil || rec == nil {
-		return refused(message, b.root, "another daemon")
+		return store.Mark(refused(message, b.root, "another daemon"), store.ErrAway)
 	}
 	failure := refused(message, b.root, rec)
 	if rec.Host == owner.Host && rec.Dir == owner.Dir {
 		return leaving{failure}
 	}
-	return failure
+	return store.Mark(failure, store.ErrAway)
 }
 
 func (b *backend) hasRunningJob() (bool, error) {
@@ -148,14 +151,13 @@ func (g *guard) check() error {
 		return nil
 	}
 	if g.closed.Load() {
-		return &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("the store at %s is closed", g.root)}
+		return fenced("the store at %s is closed", g.root)
 	}
 	name := path.Join(g.root, ownerFile)
 	data, err := g.fs.ReadFile(name)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf(
-			"the store at %s no longer has the owner record %s: this daemon stopped using it", g.root, name)}
+		return fenced("the store at %s no longer has the owner record %s: this daemon stopped using it", g.root, name)
 	case err != nil:
 		return unavailable(g.root, err)
 	case bytes.Equal(data, g.mine):
@@ -166,8 +168,12 @@ func (g *guard) check() error {
 	if decode(name, data, &rec) == nil {
 		who = rec.String()
 	}
-	return &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf(
-		"the store at %s now belongs to %s: this daemon stopped using it", g.root, who)}
+	return fenced("the store at %s now belongs to %s: this daemon stopped using it", g.root, who)
+}
+
+// fenced is a store this owner may not touch now, which says nothing about the jobs in it.
+func fenced(format string, args ...any) error {
+	return store.Mark(&core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf(format, args...)}, store.ErrAway)
 }
 
 // release gives up the store. It lets go of the lock and leaves the record, which is what the next

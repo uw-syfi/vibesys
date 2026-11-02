@@ -7,17 +7,19 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
+	"strings"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/client"
 	"github.com/uw-syfi/vibesys/cli/internal/production"
 )
 
-// daemonCommand is `daemon status|stop|restart`, and `daemon run`, which is the daemon process
-// itself and is what a client starts.
+// daemonCommand is `daemon status|stop|restart|forget`, and `daemon run`, which is the daemon
+// process itself and is what a client starts.
 func daemonCommand(ctx context.Context, d deps, args []string) int {
 	if len(args) == 0 {
-		return fail(d, d.jsonErrors, usagef("daemon: status, stop or restart"))
+		return fail(d, d.jsonErrors, usagef("daemon: status, stop, restart or forget"))
 	}
 	switch args[0] {
 	case "status":
@@ -26,12 +28,14 @@ func daemonCommand(ctx context.Context, d deps, args []string) int {
 		return daemonStop(ctx, d, args[1:])
 	case "restart":
 		return daemonRestart(ctx, d, args[1:])
+	case "forget":
+		return daemonForget(ctx, d, args[1:])
 	case "run":
 		return daemonRun(ctx, d)
 	case "install":
 		return fail(d, d.jsonErrors, &unavailable{"daemon install is not available in this build; the daemon starts when a command needs it"})
 	default:
-		return fail(d, d.jsonErrors, usagef("daemon: %q is not a daemon command (status, stop or restart)", args[0]))
+		return fail(d, d.jsonErrors, usagef("daemon: %q is not a daemon command (status, stop, restart or forget)", args[0]))
 	}
 }
 
@@ -125,6 +129,43 @@ func daemonRestart(ctx context.Context, d deps, args []string) int {
 		return exitOK
 	}
 	fmt.Fprintf(d.stdout, "restarted\tpid %d\tversion %s\n", st.GetPid(), st.GetVersions().GetBinaryVersion())
+	return exitOK
+}
+
+// daemonForget gives up a repository that is gone for good, so that nothing waits for it.
+func daemonForget(ctx context.Context, d deps, args []string) int {
+	fs, c := newFlags("daemon forget", d)
+	rest, err := parse(fs, args)
+	if err != nil {
+		return parseFailed(d, fs, err)
+	}
+	if len(rest) != 1 {
+		return fail(d, c.json, usagef("daemon forget: name one repository: daemon forget <path>"))
+	}
+	repository, err := filepath.Abs(rest[0])
+	if err != nil {
+		return fail(d, c.json, usagef("daemon forget: %v", err))
+	}
+	cl, err := dialExisting(ctx, d)
+	if err == client.ErrNoDaemon {
+		return fail(d, c.json, &unavailable{"the daemon is not running; a repository is forgotten by the daemon that knows it"})
+	}
+	if err != nil {
+		return fail(d, c.json, err)
+	}
+	defer cl.Close()
+	res, err := cl.ForgetRepository(ctx, repository)
+	if err != nil {
+		return fail(d, c.json, err)
+	}
+	if c.json {
+		printJSON(d, res)
+		return exitOK
+	}
+	fmt.Fprintf(d.stdout, "forgot\t%s\ttasks %s\n", repository, strings.Join(res.GetTasks(), ","))
+	for _, job := range res.GetLeft() {
+		fmt.Fprintf(d.stdout, "left\t%s\tits supervisor may still run; it clears when that ends or the machine restarts\n", job)
+	}
 	return exitOK
 }
 

@@ -49,7 +49,9 @@ const tasksDir = "tasks"
 func OpenIndex(dir string, opts ...Option) (*Index, error) {
 	c := optionsOf(opts)
 	dir = path.Clean(dir)
-	if err := makeAll(c.fs, path.Join(dir, tasksDir)); err != nil {
+	// What it makes it keeps: the index belongs to the daemon's own state, which nothing refuses.
+	var made []string
+	if err := makeAll(c.fs, path.Join(dir, tasksDir), &made); err != nil {
 		return nil, unavailable(dir, err)
 	}
 	return &Index{b: newBackend(c.fs, dir), dir: dir}, nil
@@ -83,6 +85,20 @@ func (x *Index) Add(t Task) error {
 		return unavailable(x.dir, err)
 	}
 	if err := x.b.publish(name, taskFile{Format: formatVersion, Repository: t.Repository, Task: t.Name}); err != nil {
+		return unavailable(x.dir, err)
+	}
+	return nil
+}
+
+// Remove forgets a task. It is idempotent.
+func (x *Index) Remove(t Task) error {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	err := x.b.fs.Remove(x.entry(t))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return unavailable(x.dir, err)
+	}
+	if err := x.b.fs.SyncDir(path.Join(x.dir, tasksDir)); err != nil {
 		return unavailable(x.dir, err)
 	}
 	return nil

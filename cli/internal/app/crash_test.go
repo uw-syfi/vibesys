@@ -85,6 +85,10 @@ func (s crashStores) open(_ app.Scope, get func() (store.Store, error)) (store.S
 
 func (s crashStores) Known(ctx context.Context) ([]app.Scope, error) { return s.inner.Known(ctx) }
 
+func (s crashStores) Forget(ctx context.Context, scope app.Scope) error {
+	return s.inner.Forget(ctx, scope)
+}
+
 func (s crashStores) Close() error { return s.inner.Close() }
 
 type crashStore struct {
@@ -162,19 +166,20 @@ func (s crashSupervisors) Runs(ctx context.Context) ([]supervisor.Run, error) {
 		return nil, err
 	}
 	runs, err := s.Supervisors.Runs(ctx)
-	for i := range runs {
-		if runs[i].Handle != nil {
-			runs[i].Handle = crashHandle{Handle: runs[i].Handle, c: s.c}
+	for i, run := range runs {
+		if alive, ok := run.(supervisor.Alive); ok {
+			alive.Handle = crashHandle{Handle: alive.Handle, c: s.c}
+			runs[i] = alive
 		}
 	}
 	return runs, err
 }
 
-func (s crashSupervisors) Forget(ctx context.Context, ref lifecycle.Ref) error {
+func (s crashSupervisors) Forget(ctx context.Context, ref lifecycle.Ref, proof lifecycle.DeathProof) error {
 	if err := s.c.step(); err != nil {
 		return err
 	}
-	return s.Supervisors.Forget(ctx, ref)
+	return s.Supervisors.Forget(ctx, ref, proof)
 }
 
 type crashHandle struct {
@@ -388,7 +393,8 @@ func cancelScenario(t *testing.T, limit int64) int64 {
 			if j.State != core.JobRunning || answered {
 				return nil
 			}
-			if _, err := a1.Cancel(ctxFor(t), call, j.ID, "enough"); err == nil {
+			// Tied to the crash: a dead daemon's cancel answers nobody, and no retry of it comes.
+			if _, err := a1.Cancel(watching, call, j.ID, "enough"); err == nil {
 				answered = true
 			} else if !c.dead.Load() {
 				t.Fatalf("Cancel: %v", err)

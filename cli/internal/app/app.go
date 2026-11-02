@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -51,13 +52,21 @@ type message struct {
 // view is what the loop publishes for calls to read.
 type view struct {
 	queued, running int
-	trouble         map[lifecycle.Ref]core.Failure
+	// trouble is the jobs whose end is out of the daemon's hands for now, and why.
+	trouble map[lifecycle.Ref]core.Failure
+	// waits is the queued jobs held back by another job's or their store's trouble, and why.
+	waits map[lifecycle.Ref]core.Failure
+	// held is the jobs the machine holds.
+	held map[lifecycle.Ref]bool
+	// unread is the stores whose jobs the machine has not read.
+	unread []Scope
 }
 
 // New returns an App that is recovering: it launches nothing until Start has told it what the
 // stores and the supervisors hold.
 func New(cfg Config) *App {
 	cfg = cfg.withDefaults()
+	cfg.Stores = boundedStores{inner: cfg.Stores, timers: cfg.Timers, limit: cfg.CallTimeout}
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &App{
 		cfg: cfg, ctx: ctx, cancel: cancel, startedAt: cfg.Clock.Now(),
@@ -82,6 +91,9 @@ func (a *App) post(m message) bool {
 	case a.inbox <- m:
 		return true
 	case <-a.ctx.Done():
+		if m.handle != nil {
+			m.handle.Close()
+		}
 		return false
 	}
 }
@@ -106,6 +118,11 @@ func (a *App) loop() {
 	state := lifecycle.Recovering()
 	scopes := map[lifecycle.StoreID]Scope{}
 	handles := map[lifecycle.Ref]supervisor.Handle{}
+	defer func() {
+		for _, h := range handles {
+			h.Close()
+		}
+	}()
 	for {
 		var m message
 		select {
@@ -113,28 +130,30 @@ func (a *App) loop() {
 		case <-a.ctx.Done():
 			return
 		}
-		ref, hasRef := refOf(m.event)
-		if m.scope != nil && hasRef {
-			scopes[ref.Store] = *m.scope
+		if m.scope != nil {
+			scopes[storeIDOf(*m.scope)] = *m.scope
 		}
 		var reqs []lifecycle.Request
 		state, reqs = lifecycle.Step(state, m.event)
 		// Before any effect starts: whoever sees an effect's work in a store finds the counts
 		// already past it.
-		a.publish(state)
-		// A handle is kept only if the machine took the event up. One that a probe found before
-		// the machine moved on is not the job's, which may have a newer run by now.
-		if m.handle != nil && hasRef && len(reqs) > 0 {
-			handles[ref] = m.handle
-		}
+		a.publish(state, scopes)
+		keepHandle(handles, m, reqs)
 		for _, r := range reqs {
 			a.startEffect(r, scopes, handles)
 		}
 		switch e := m.event.(type) {
 		case lifecycle.Closed:
-			delete(handles, e.Ref)
+			dropHandle(handles, e.Ref)
 		case lifecycle.Discarded:
-			delete(handles, e.Ref)
+			dropHandle(handles, e.Ref)
+		case lifecycle.StoreForgotten:
+			delete(scopes, e.Store)
+			for ref := range handles {
+				if ref.Store == e.Store {
+					dropHandle(handles, ref)
+				}
+			}
 		}
 		if m.then != nil {
 			a.group.Go(m.then)
@@ -142,6 +161,28 @@ func (a *App) loop() {
 		if m.done != nil {
 			close(m.done)
 		}
+	}
+}
+
+// keepHandle keeps a message's handle if the machine asked for something of its job. One that a
+// probe found before the machine moved on is not the job's, which may have a newer run by now.
+func keepHandle(handles map[lifecycle.Ref]supervisor.Handle, m message, reqs []lifecycle.Request) {
+	if m.handle == nil {
+		return
+	}
+	ref, hasRef := refOf(m.event)
+	if !hasRef || !slices.ContainsFunc(reqs, func(r lifecycle.Request) bool { return r.Target() == ref }) {
+		m.handle.Close()
+		return
+	}
+	dropHandle(handles, ref)
+	handles[ref] = m.handle
+}
+
+func dropHandle(handles map[lifecycle.Ref]supervisor.Handle, ref lifecycle.Ref) {
+	if h, ok := handles[ref]; ok {
+		h.Close()
+		delete(handles, ref)
 	}
 }
 
@@ -162,23 +203,55 @@ func refOf(e lifecycle.Event) (lifecycle.Ref, bool) {
 	return lifecycle.Ref{}, false
 }
 
-// publish makes the machine's state readable, and wakes whoever a change of trouble concerns.
-func (a *App) publish(s lifecycle.State) {
-	next := &view{trouble: map[lifecycle.Ref]core.Failure{}}
+// publish makes the machine's state readable, and wakes whoever new trouble concerns.
+func (a *App) publish(s lifecycle.State, scopes map[lifecycle.StoreID]Scope) {
+	next := &view{trouble: map[lifecycle.Ref]core.Failure{}, waits: map[lifecycle.Ref]core.Failure{}, held: map[lifecycle.Ref]bool{}}
 	next.queued, next.running = s.Counts()
 	for _, t := range s.Troubled() {
 		next.trouble[t.Ref] = t.Failure
 	}
-	changed := len(next.trouble) != len(a.view.Load().trouble)
+	for _, t := range s.Waiting() {
+		next.waits[t.Ref] = t.Failure
+	}
+	for _, h := range s.Held() {
+		next.held[h.Ref] = true
+	}
+	for _, id := range s.Unread() {
+		if scope, ok := scopes[id]; ok {
+			next.unread = append(next.unread, scope)
+		}
+	}
+	last := a.view.Load()
 	a.view.Store(next)
-	if changed {
+	// Only what is new ends a wait. One that passes is seen at the next change of the job.
+	if appeared(next.trouble, last.trouble) || appeared(next.waits, last.waits) {
 		a.notifyJobs()
 	}
+}
+
+// appeared says whether a job has a failure it did not have before.
+func appeared(next, last map[lifecycle.Ref]core.Failure) bool {
+	for ref := range next {
+		if _, was := last[ref]; !was {
+			return true
+		}
+	}
+	return false
 }
 
 // troubleOf says what keeps a job from ending, if anything does.
 func (a *App) troubleOf(ref lifecycle.Ref) (core.Failure, bool) {
 	f, ok := a.view.Load().trouble[ref]
+	return f, ok
+}
+
+// waitOf says what a job waits for, when something other than its turn holds it: its own trouble,
+// or that of what stands before it.
+func (a *App) waitOf(ref lifecycle.Ref) (core.Failure, bool) {
+	if f, ok := a.troubleOf(ref); ok {
+		return f, true
+	}
+	f, ok := a.view.Load().waits[ref]
 	return f, ok
 }
 

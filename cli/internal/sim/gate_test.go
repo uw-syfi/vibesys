@@ -248,6 +248,9 @@ type gatedSupervisors struct {
 	d     *incarnation
 }
 
+// Close implements supervisor.Handle: it lets go of a connection, which takes no decision to go on.
+func (h gatedHandle) Close() { h.inner.Close() }
+
 func (s gatedSupervisors) wrap(h supervisor.Handle, ref lifecycle.Ref) supervisor.Handle {
 	return gatedHandle{inner: h, ref: ref, w: s.w, d: s.d}
 }
@@ -268,32 +271,35 @@ func (s gatedSupervisors) Runs(ctx context.Context) ([]supervisor.Run, error) {
 	if err != nil {
 		return nil, err
 	}
-	slices.SortFunc(runs, func(a, b supervisor.Run) int { return strings.Compare(a.Ref.String(), b.Ref.String()) })
+	slices.SortFunc(runs, func(a, b supervisor.Run) int { return strings.Compare(a.Job().String(), b.Job().String()) })
 	for i := range runs {
-		runs[i] = s.w.probed(runs[i])
-		if runs[i].Handle != nil {
-			runs[i].Handle = s.wrap(runs[i].Handle, runs[i].Ref)
-		}
+		runs[i] = s.seen(runs[i])
 	}
 	return runs, nil
+}
+
+// seen is a run as the daemon learns of it, with its handle gated.
+func (s gatedSupervisors) seen(r supervisor.Run) supervisor.Run {
+	r = s.w.probed(r)
+	if alive, ok := r.(supervisor.Alive); ok {
+		alive.Handle = s.wrap(alive.Handle, alive.Ref)
+		return alive
+	}
+	return r
 }
 
 func (s gatedSupervisors) Probe(ctx context.Context, ref lifecycle.Ref) (supervisor.Run, error) {
 	run, err := gated(ctx, s.w, s.d, "sup.Probe "+ref.String(), false, func() (supervisor.Run, error) { return s.inner.Probe(ctx, ref) })
 	if err != nil {
-		return supervisor.Run{}, err
+		return nil, err
 	}
-	run = s.w.probed(run)
-	if run.Handle != nil {
-		run.Handle = s.wrap(run.Handle, ref)
-	}
-	return run, nil
+	return s.seen(run), nil
 }
 
-func (s gatedSupervisors) Forget(ctx context.Context, ref lifecycle.Ref) error {
+func (s gatedSupervisors) Forget(ctx context.Context, ref lifecycle.Ref, proof lifecycle.DeathProof) error {
 	_, err := gated(ctx, s.w, s.d, "sup.Forget "+ref.String(), true, func() (struct{}, error) {
 		s.w.noteRelease(ref)
-		return struct{}{}, s.inner.Forget(ctx, ref)
+		return struct{}{}, s.inner.Forget(ctx, ref, proof)
 	})
 	return err
 }

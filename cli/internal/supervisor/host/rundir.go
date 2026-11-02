@@ -1,7 +1,11 @@
 package host
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,4 +97,90 @@ func readLaunch(dir runDir) (lifecycle.Launch, error) {
 		return lifecycle.Launch{}, fmt.Errorf("launch file: %w", err)
 	}
 	return wire.ToLaunch(&msg)
+}
+
+// RecordsDir is where the run records of one daemon are, under a state directory that outlives
+// the runtime directory. A home directory can be shared between machines and hold several runtime
+// directories, each with its own daemon and its own runs.
+func RecordsDir(state, machine, runtimeDir string) string {
+	sum := sha256.Sum256([]byte(machine + "\x00" + runtimeDir))
+	return filepath.Join(state, "run-records", hex.EncodeToString(sum[:6]))
+}
+
+// record is what is known of a run outside its directory.
+type record struct {
+	BootID string
+	Launch lifecycle.Launch
+}
+
+func (h *Host) recordPath(ref lifecycle.Ref) string { return filepath.Join(h.records, dirName(ref)) }
+
+// writeRecord writes the record of a run, whole or not at all, before anything of the run exists:
+// a run with no record is a run that never was.
+func (h *Host) writeRecord(ref lifecycle.Ref, l lifecycle.Launch) error {
+	boot, err := h.bootID()
+	if err != nil {
+		return fmt.Errorf("reading the boot id: %w", err)
+	}
+	data, err := proto.Marshal(&cliv1.RunRecord{BootId: boot, Launch: wire.Launch(l)})
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(h.records, 0o700); err != nil {
+		return err
+	}
+	path := h.recordPath(ref)
+	if err := os.WriteFile(path+".tmp", data, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(path+".tmp", path)
+}
+
+// readRecord returns the record of a run, and false when there is none.
+func (h *Host) readRecord(ref lifecycle.Ref) (record, bool, error) {
+	data, err := os.ReadFile(h.recordPath(ref))
+	if errors.Is(err, fs.ErrNotExist) {
+		return record{}, false, nil
+	}
+	if err != nil {
+		return record{}, false, err
+	}
+	var msg cliv1.RunRecord
+	if err := proto.Unmarshal(data, &msg); err != nil {
+		return record{}, false, fmt.Errorf("run record: %w", err)
+	}
+	launch, err := wire.ToLaunch(msg.GetLaunch())
+	if err != nil {
+		return record{}, false, err
+	}
+	if launch.Ref() != ref {
+		return record{}, false, fmt.Errorf("run record of job %s is for job %s", ref, launch.Ref())
+	}
+	return record{BootID: msg.GetBootId(), Launch: launch}, true, nil
+}
+
+// removeRecord removes the record of a run. It is idempotent.
+func (h *Host) removeRecord(ref lifecycle.Ref) error {
+	if err := os.Remove(h.recordPath(ref)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// recordedRefs lists the runs with a record.
+func (h *Host) recordedRefs() ([]lifecycle.Ref, error) {
+	entries, err := os.ReadDir(h.records)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []lifecycle.Ref
+	for _, e := range entries {
+		if ref, ok := refOf(e.Name()); ok && !strings.HasSuffix(e.Name(), ".tmp") {
+			out = append(out, ref)
+		}
+	}
+	return out, nil
 }

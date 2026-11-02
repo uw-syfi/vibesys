@@ -79,9 +79,16 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 		},
 		Runtime: daemon.Runtime{
 			Stores: filestores.New(index, app.Rules(filestores.DefaultSamples), owner),
-			Supervisors: host.New(dir.Supervisors(), func(runDir string) *exec.Cmd {
-				return exec.Command(p.Executable, "supervisor", "serve", "--run-dir", runDir)
-			}, p.Version, clock.System{}),
+			Supervisors: host.New(host.Config{
+				Root:    dir.Supervisors(),
+				Records: host.RecordsDir(filestore.IndexDir(p.Getenv, p.Home), machine, dir.Path()),
+				BootID:  runtimedir.BootID,
+				Command: func(runDir string) *exec.Cmd {
+					return exec.Command(p.Executable, "supervisor", "serve", "--run-dir", runDir)
+				},
+				BinaryVersion: p.Version,
+				Timers:        clock.System{},
+			}),
 			Environments: environment.None{},
 		},
 	})

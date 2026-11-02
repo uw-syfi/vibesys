@@ -106,11 +106,15 @@ func e2eDaemon() int {
 	if os.Getenv(quickRetryVar) != "" {
 		retry = app.Retry{Attempts: 2, First: time.Millisecond, Longest: time.Millisecond}
 	}
-	supervisors := host.New(dir.Supervisors(), func(runDir string) *exec.Cmd {
-		cmd := exec.Command(self, "-test.run=^$")
-		cmd.Env = append(os.Environ(), roleVar+"=supervisor", runDirVar+"="+runDir)
-		return cmd
-	}, "e2e", clock.System{})
+	supervisors := host.New(host.Config{
+		Root: dir.Supervisors(), Records: host.RecordsDir(os.Getenv(indexVar), "e2e", dir.Path()), BootID: runtimedir.BootID,
+		Command: func(runDir string) *exec.Cmd {
+			cmd := exec.Command(self, "-test.run=^$")
+			cmd.Env = append(os.Environ(), roleVar+"=supervisor", runDirVar+"="+runDir)
+			return cmd
+		},
+		BinaryVersion: "e2e", Timers: clock.System{},
+	})
 	err = daemon.Run(ctx, daemon.Config{
 		Dir: dir, Version: "e2e", Clock: clock.System{}, Ready: os.NewFile(runtimedir.ReadyFD, "ready"), Retry: retry,
 		Logf: func(format string, args ...any) { fmt.Fprintf(os.Stderr, "daemon: "+format+"\n", args...) },
@@ -423,10 +427,12 @@ func (e *e2e) awaitCommandEnd(id string) {
 		if string(info.Ref.Job) != id {
 			continue
 		}
-		run, err := host.New(e.dir.Supervisors(), nil, "e2e", clock.System{}).Probe(ctx, info.Ref)
-		if err != nil || run.Handle == nil {
-			e.t.Fatalf("Probe of the supervisor of %s = %+v, %v", id, run, err)
+		found, err := host.New(host.Config{Root: e.dir.Supervisors(), BinaryVersion: "e2e", Timers: clock.System{}}).Probe(ctx, info.Ref)
+		run, alive := found.(supervisor.Alive)
+		if err != nil || !alive {
+			e.t.Fatalf("Probe of the supervisor of %s = %+v, %v", id, found, err)
 		}
+		defer run.Handle.Close()
 		if _, err := run.Handle.Follow(ctx, 1<<62, func([]byte) error { return nil }); err != nil {
 			e.t.Fatal(err)
 		}

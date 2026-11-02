@@ -82,6 +82,17 @@ func (s *Server) Stop(context.Context, *cliv1.StopRequest) (*cliv1.StopResponse,
 	return &cliv1.StopResponse{}, nil
 }
 
+// ForgetRepository implements cliv1.DaemonServiceServer.
+func (s *Server) ForgetRepository(ctx context.Context, req *cliv1.ForgetRepositoryRequest) (*cliv1.ForgetRepositoryResponse, error) {
+	ctx, cancel := s.bound(ctx)
+	defer cancel()
+	out, err := s.app.ForgetRepository(ctx, req.GetRepository())
+	if err != nil {
+		return nil, wire.Error(err)
+	}
+	return &cliv1.ForgetRepositoryResponse{Tasks: out.Tasks, Left: out.Left}, nil
+}
+
 // Submit implements cliv1.DaemonServiceServer.
 func (s *Server) Submit(ctx context.Context, req *cliv1.SubmitRequest) (*cliv1.SubmitResponse, error) {
 	ctx, cancel := s.bound(ctx)

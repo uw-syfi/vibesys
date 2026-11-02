@@ -84,7 +84,7 @@ func TestParkedSupervisorRunsNothing(t *testing.T) {
 		Launch: launchOf("print", "x"), Environments: fakeenv.Environments{core.EnvironmentHost: p.env},
 		Checkouts: p.checkouts, Spool: &supervisor.MemorySpool{},
 	})
-	if n := len(p.env.Runs()); n != 0 || s.Phase() != supervisor.PhaseParked {
+	if n := len(p.env.Runs()); n != 0 || s.Phase() != lifecycle.RunParked {
 		t.Fatalf("a parked supervisor ran %d commands, phase %s", n, s.Phase())
 	}
 	if err := s.Release(); err != nil {

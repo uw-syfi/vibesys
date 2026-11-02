@@ -48,6 +48,10 @@ type Stores interface {
 	// leaving that out would make its runs look like nobody's.
 	Known(ctx context.Context) ([]Scope, error)
 
+	// Forget gives a scope up for good: Known no longer has it, and nothing is touched where its
+	// store was. It is idempotent.
+	Forget(ctx context.Context, scope Scope) error
+
 	// Close gives up every store. A daemon calls it before it lets go of the machine, so that once
 	// a daemon is seen to be gone, its stores are free. Nothing may use a store after it.
 	Close() error
