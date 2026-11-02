@@ -110,13 +110,16 @@ func newOutage(t *testing.T) (*world, *outage) {
 	return w, o
 }
 
+// attempts is how many times the daemon over an outage tries a call before it gives up.
+const attempts = 4
+
 // start starts a daemon over the outage.
 func (o *outage) start(sups supervisor.Supervisors) *app.App {
 	o.w.t.Helper()
 	a := app.New(app.Config{
 		Clock: o.w.clock, Timers: o.limits, Stores: o, Supervisors: sups,
 		Environments: fakeenv.Environments{core.EnvironmentHost: o.w.env},
-		Retry:        app.Retry{Attempts: 4, First: time.Millisecond, Longest: time.Millisecond},
+		Retry:        app.Retry{Attempts: attempts, First: time.Millisecond, Longest: time.Millisecond},
 		CallTimeout:  callLimit, StopTimeout: callLimit, SlowPeriod: slowPeriod, LogBatchDelay: time.Millisecond,
 		Logf: func(string, ...any) {},
 	})
@@ -289,19 +292,20 @@ func (o *outage) awaitFinal(t *testing.T, a *app.App, s app.Scope, id core.JobID
 	}
 }
 
-// awaitTurnedAway waits until the repository turns the daemon away, with no slow period passing.
-func (o *outage) awaitTurnedAway(t *testing.T, repo string) {
+// awaitTurnedAway waits until the repository has turned the daemon away n times, with no slow
+// period passing.
+func (o *outage) awaitTurnedAway(t *testing.T, repo string, n int) {
 	t.Helper()
 	ctx := ctxFor(t)
 	for {
 		o.mu.Lock()
-		n := o.refused[repo]
+		got := o.refused[repo]
 		o.mu.Unlock()
-		if n > 0 {
+		if got >= n {
 			return
 		}
 		if ctx.Err() != nil {
-			t.Fatalf("%s never turned the daemon away", repo)
+			t.Fatalf("%s turned the daemon away %d times, want %d", repo, got, n)
 		}
 		runtime.Gosched()
 	}
@@ -345,8 +349,10 @@ func TestAStoreAwayAtAJobsTurnLeavesTheJobToRun(t *testing.T) {
 	o.takeAway(repoB)
 	w.gates.Release("g")
 	o.awaitFinal(t, a, scopeA, first.ID)
-	// No slow period passes, so what meets the outage is the launch and not a sweep.
-	o.awaitTurnedAway(t, repoB)
+	// No slow period passes, so what meets the outage is the launch and not a sweep. The launch tries
+	// its store attempts times and then fails: bringing the store back any sooner would let a retry
+	// of the launch through, and the job would never meet the outage at its turn.
+	o.awaitTurnedAway(t, repoB, attempts)
 	o.bringBack(repoB)
 	got := o.awaitFinalIn(t, a, scopeB, next.ID)
 	if got.State != core.JobSucceeded {

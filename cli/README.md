@@ -266,7 +266,8 @@ the store records the job running, and only then does the supervisor start the c
 
 The shipped binary keeps its jobs on disk (`app/filestores`; the in-memory stores are test support
 and are not linked into it). It has no usable environment yet. It runs with `environment.None` and no checkouts,
-so a command job queues, runs in order, and ends not-attempted with a reason saying so. The host and
+so a command job queues, runs in order, and ends `failed`, its command not attempted, with one line in
+its output saying it could not be started and why. The host and
 docker environments land later, and with them `submit check`, `submit measure`, the result cache,
 `show`, `compare` and `promote`. Until then `submit check` and `submit measure` are refused locally
 as unavailable, the calls that need results answer with an unavailable refusal that names the call,
