@@ -146,7 +146,9 @@ trigger_job = "python"
 include_in_checks = true
 language = "python"
 directory = "."
-timeout_seconds = 60
+# A hang guard, not a budget. One serial pytest process over about 930 tests: 69 s of test time
+# measured on 8 cores with a warm environment, so a 60 s limit failed a healthy run.
+timeout_seconds = 180
 commands = [[
   "uv", "run", "python", "-m", "pytest", "-q", "-n", "0", "--no-cov", "tests/architecture",
   "--ignore=tests/architecture/test_stack_evaluator.py",
@@ -484,7 +486,12 @@ trigger_job = "proto"
 include_in_checks = true
 language = "python"
 directory = "."
-timeout_seconds = 60
+# A hang guard, not a budget. The script prints each stage's cost. Measured on a CI runner for a PR
+# that changes a .proto file: lint 1 s, generate 29 s (77 s of CPU), then breaking 8 s, hashes 31 s
+# and conversion about 31 s side by side; with no proto change, hashes take about 7 s and conversion
+# about 16 s. The script ran past 60 s with every stage passing, and every new proto makes
+# generation heavier, so the value sits at about twice the measured worst case.
+timeout_seconds = 180
 commands = [["./scripts/check_proto.sh"]]
 
 [[check_groups]]
