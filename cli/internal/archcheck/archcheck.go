@@ -73,8 +73,8 @@ var rules = map[string][]string{
 		"internal/changed", "internal/clock", "internal/core", "internal/environment", "internal/lifecycle", "internal/owned",
 		"internal/store", "internal/supervisor",
 	},
-	"internal/app/filestores": {"internal/app", "internal/store", "internal/store/filestore"},
-	"internal/app/memstores":  {"internal/app", "internal/store", "internal/store/memstore"},
+	"internal/app/filestores": {"internal/app", "internal/core", "internal/store", "internal/store/filestore"},
+	"internal/app/memstores":  {"internal/app", "internal/core", "internal/store", "internal/store/memstore"},
 	"internal/daemon": {
 		"gen/", "internal/app", "internal/clock", "internal/core", "internal/environment", "internal/owned",
 		"internal/runtimedir", "internal/supervisor", "internal/wire",
@@ -114,7 +114,6 @@ var testRules = map[string][]string{
 	"internal/supervisor/rpc":  {"internal/environment/fakeenv", "internal/supervisor/suptest"},
 	"internal/supervisor/host": {"internal/environment/fakeenv", "internal/supervisor/suptest"},
 	"internal/app":             {"internal/app/memstores", "internal/environment/fakeenv"},
-	"internal/app/filestores":  {"internal/core"},
 	"internal/daemon":          {"internal/app/memstores", "internal/environment/fakeenv"},
 	"internal/client": {
 		"internal/app", "internal/app/memstores", "internal/core", "internal/daemon", "internal/daemon/daemontest",

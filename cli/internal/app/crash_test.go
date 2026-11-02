@@ -64,11 +64,19 @@ type crashStores struct {
 	c     *crash
 }
 
-func (s crashStores) Open(ctx context.Context, scope app.Scope) (store.Store, error) {
+func (s crashStores) Find(ctx context.Context, scope app.Scope) (store.Store, error) {
+	return s.open(scope, func() (store.Store, error) { return s.inner.Find(ctx, scope) })
+}
+
+func (s crashStores) Create(ctx context.Context, scope app.Scope) (store.Store, error) {
+	return s.open(scope, func() (store.Store, error) { return s.inner.Create(ctx, scope) })
+}
+
+func (s crashStores) open(_ app.Scope, get func() (store.Store, error)) (store.Store, error) {
 	if err := s.c.read(); err != nil {
 		return nil, err
 	}
-	st, err := s.inner.Open(ctx, scope)
+	st, err := get()
 	if err != nil {
 		return nil, err
 	}
@@ -298,7 +306,7 @@ type leavingStores struct {
 	opened int
 }
 
-func (s *leavingStores) Open(ctx context.Context, scope app.Scope) (store.Store, error) {
+func (s *leavingStores) Find(ctx context.Context, scope app.Scope) (store.Store, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.opened++
@@ -306,7 +314,7 @@ func (s *leavingStores) Open(ctx context.Context, scope app.Scope) (store.Store,
 		s.left--
 		return nil, errors.Join(&core.Failure{Kind: core.FailureConflict, Message: "in use"}, store.ErrOwnerLeaving)
 	}
-	return s.Stores.Open(ctx, scope)
+	return s.Stores.Find(ctx, scope)
 }
 
 func (s *leavingStores) attempts() int {

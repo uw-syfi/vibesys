@@ -12,6 +12,7 @@ import (
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
 	"github.com/uw-syfi/vibesys/cli/internal/wire"
 	statuspb "google.golang.org/grpc/status"
 )
@@ -172,7 +173,7 @@ func FuzzDecodeOutcome(f *testing.F) {
 		message := &cliv1.SupervisorOutcome{}
 		decode(t, data, message)
 		first := wire.ToOutcome(message)
-		if message.GetResult() == nil && first.Exec.Kind != core.ExecUnknown {
+		if ran, ok := first.End.(lifecycle.Ran); message.GetResult() == nil && (!ok || ran.Exec.Kind != core.ExecUnknown) {
 			t.Fatalf("an outcome with no result decoded as %+v, want unknown", first)
 		}
 		if again := wire.ToOutcome(wire.Outcome(first)); !reflect.DeepEqual(again, first) {

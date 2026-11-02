@@ -188,7 +188,7 @@ func testOutputAndExit(t *testing.T, r Rig) {
 		if want := words + "\nsecond\n"; string(got) != want {
 			t.Errorf("output = %q, want %q", got, want)
 		}
-		if o.NotAttempted != nil || o.Exec != (core.ExecOutcome{Kind: core.ExecExited, ExitCode: code}) || o.CancelAsked {
+		if notAttemptedOf(o) != nil || execOf(o) != (core.ExecOutcome{Kind: core.ExecExited, ExitCode: code}) || o.CancelAsked {
 			t.Errorf("outcome = %+v, want exited %d", o, code)
 		}
 	}
@@ -211,7 +211,7 @@ func testFollowResumes(t *testing.T, r Rig) {
 		if !bytes.Equal(got, all[offset:]) {
 			t.Errorf("offset %d: got %q, want %q", offset, got, all[offset:])
 		}
-		if o.Exec.Kind != core.ExecExited {
+		if execOf(o).Kind != core.ExecExited {
 			t.Errorf("offset %d: outcome %+v", offset, o)
 		}
 	}
@@ -243,7 +243,7 @@ func testCancel(t *testing.T, r Rig) {
 		t.Fatalf("Cancel: %v", err)
 	}
 	o := w.finish(t, ctx)
-	if o.Exec.Kind != core.ExecCancelled || !o.CancelAsked || o.CancelReason != "because" {
+	if execOf(o).Kind != core.ExecCancelled || !o.CancelAsked || o.CancelReason != "because" {
 		t.Errorf("outcome = %+v, want cancelled because", o)
 	}
 	if bytes.Contains(w.output(), []byte("never")) {
@@ -264,7 +264,7 @@ func testCancelAfterEnd(t *testing.T, r Rig) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if o.CancelAsked || o.Exec != (core.ExecOutcome{Kind: core.ExecExited}) {
+	if o.CancelAsked || execOf(o) != (core.ExecOutcome{Kind: core.ExecExited}) {
 		t.Errorf("outcome = %+v, want the exit it had", o)
 	}
 }
@@ -291,7 +291,7 @@ func testNotAttempted(t *testing.T, r Rig) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if o.NotAttempted == nil || o.NotAttempted.Kind != core.FailureUnavailable || o.NotAttempted.Message != "no such environment" {
+	if notAttemptedOf(o) == nil || notAttemptedOf(o).Kind != core.FailureUnavailable || notAttemptedOf(o).Message != "no such environment" {
 		t.Errorf("outcome = %+v, want not attempted: unavailable", o)
 	}
 }
@@ -389,7 +389,7 @@ func testRestartRunning(t *testing.T, r Rig) {
 	if err != nil {
 		t.Fatalf("Follow after a restart: %v", err)
 	}
-	if string(got) != "after\n" || o.Exec.Kind != core.ExecExited {
+	if string(got) != "after\n" || execOf(o).Kind != core.ExecExited {
 		t.Errorf("resumed output %q, outcome %+v; want the rest, once", got, o)
 	}
 }
@@ -407,7 +407,7 @@ func testRestartFinished(t *testing.T, r Rig) {
 		t.Fatalf("an ended job's run is %+v, want alive", run)
 	}
 	got, o, err := follow(ctx, run.Handle, 0)
-	if err != nil || string(got) != "done\n" || o.Exec != (core.ExecOutcome{Kind: core.ExecExited, ExitCode: 7}) {
+	if err != nil || string(got) != "done\n" || execOf(o) != (core.ExecOutcome{Kind: core.ExecExited, ExitCode: 7}) {
 		t.Fatalf("output %q, outcome %+v, error %v", got, o, err)
 	}
 }
@@ -477,4 +477,20 @@ func find(t *testing.T, s supervisor.Supervisors, ref lifecycle.Ref) supervisor.
 	}
 	t.Fatalf("no run for %s", ref)
 	return supervisor.Run{}
+}
+
+// execOf is how the command of an outcome ended, zero when it did not run.
+func execOf(o lifecycle.Outcome) core.ExecOutcome {
+	if end, ok := o.End.(lifecycle.Ran); ok {
+		return end.Exec
+	}
+	return core.ExecOutcome{}
+}
+
+// notAttemptedOf is why an outcome's command was not attempted, nil when it was.
+func notAttemptedOf(o lifecycle.Outcome) *core.Failure {
+	if end, ok := o.End.(lifecycle.NotAttempted); ok {
+		return &end.Failure
+	}
+	return nil
 }

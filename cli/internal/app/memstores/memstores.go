@@ -3,11 +3,13 @@ package memstores
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
 
 	"github.com/uw-syfi/vibesys/cli/internal/app"
+	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/store"
 	"github.com/uw-syfi/vibesys/cli/internal/store/memstore"
 )
@@ -28,8 +30,25 @@ func New(rules store.Rules) *Stores {
 	return &Stores{rules: rules, stores: map[app.Scope]*memstore.Store{}}
 }
 
-// Open implements app.Stores.
-func (m *Stores) Open(ctx context.Context, scope app.Scope) (store.Store, error) {
+// Find implements app.Stores.
+func (m *Stores) Find(ctx context.Context, scope app.Scope) (store.Store, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.stores[scope]
+	if !ok {
+		return nil, store.Mark(&core.Failure{Kind: core.FailureNotFound, Message: fmt.Sprintf("task %s has no store in %s", scope.Task, scope.Repository)}, store.ErrNoStore)
+	}
+	return s, nil
+}
+
+// Create implements app.Stores.
+func (m *Stores) Create(ctx context.Context, scope app.Scope) (store.Store, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

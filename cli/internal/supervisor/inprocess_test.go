@@ -106,7 +106,7 @@ func TestCancelBeforeStartNeverRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := finish(t, s)
-	if out.Exec.Kind != core.ExecCancelled || !out.CancelAsked || out.CancelReason != "changed my mind" {
+	if execOf(out).Kind != core.ExecCancelled || !out.CancelAsked || out.CancelReason != "changed my mind" {
 		t.Fatalf("outcome = %+v, want cancelled", out)
 	}
 	if len(p.env.Runs()) != 0 || p.checkouts.Made() != 0 {
@@ -125,7 +125,7 @@ func TestCheckoutFailureIsNotAttempted(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := finish(t, s)
-	if out.NotAttempted == nil || out.NotAttempted.Kind != core.FailureNotFound {
+	if notAttemptedOf(out) == nil || notAttemptedOf(out).Kind != core.FailureNotFound {
 		t.Fatalf("outcome = %+v, want not attempted: not found", out)
 	}
 }
@@ -142,7 +142,7 @@ func TestUnknownEnvironmentIsNotAttempted(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := finish(t, s)
-	if out.NotAttempted == nil || out.NotAttempted.Kind != core.FailureUnavailable {
+	if notAttemptedOf(out) == nil || notAttemptedOf(out).Kind != core.FailureUnavailable {
 		t.Fatalf("outcome = %+v, want unavailable, never another environment", out)
 	}
 	if len(p.env.Runs()) != 0 {
@@ -161,7 +161,7 @@ func TestOnlyCommandJobsRunInThisBuild(t *testing.T) {
 	if err := s.Start(); err != nil {
 		t.Fatal(err)
 	}
-	if out := finish(t, s); out.NotAttempted == nil || out.NotAttempted.Kind != core.FailureUnavailable {
+	if out := finish(t, s); notAttemptedOf(out) == nil || notAttemptedOf(out).Kind != core.FailureUnavailable {
 		t.Fatalf("outcome = %+v, want unavailable", out)
 	}
 }
@@ -200,4 +200,20 @@ func TestCloseEndsARunningCommand(t *testing.T) {
 	if out := finish(t, s); out.CancelAsked {
 		t.Fatalf("outcome = %+v, a close is not a cancel", out)
 	}
+}
+
+// execOf is how the command of an outcome ended, zero when it did not run.
+func execOf(o lifecycle.Outcome) core.ExecOutcome {
+	if end, ok := o.End.(lifecycle.Ran); ok {
+		return end.Exec
+	}
+	return core.ExecOutcome{}
+}
+
+// notAttemptedOf is why an outcome's command was not attempted, nil when it was.
+func notAttemptedOf(o lifecycle.Outcome) *core.Failure {
+	if end, ok := o.End.(lifecycle.NotAttempted); ok {
+		return &end.Failure
+	}
+	return nil
 }

@@ -30,6 +30,8 @@ type config struct {
 	owner Owner
 	// entry is set when the store is known to exist, and names what says so.
 	entry string
+	// lookOnly says the caller wants a store that is there, and nothing made.
+	lookOnly bool
 }
 
 func optionsOf(opts []Option) config {
@@ -59,6 +61,10 @@ func WithOwner(owner Owner) Option { return func(c *config) { c.owner = owner } 
 // one and say none of its jobs exist.
 func Existing(entry string) Option { return func(c *config) { c.entry = entry } }
 
+// LookOnly says the caller wants the store if it is there. Open then fails with
+// core.FailureNotFound, marked store.ErrNoStore, and makes nothing if it is not.
+func LookOnly() Option { return func(c *config) { c.lookOnly = true } }
+
 // Open opens the store in the directory root, creating the directory and its parents when they
 // are not there. A directory that holds anything else, or records of a newer format, is refused
 // with an error that names the file.
@@ -69,12 +75,15 @@ func Existing(entry string) Option { return func(c *config) { c.entry = entry } 
 func Open(root string, opts ...Option) (*Store, error) {
 	c := optionsOf(opts)
 	root = path.Clean(root)
-	if c.entry != "" {
+	switch {
+	case c.entry != "" || c.lookOnly:
 		if err := findStore(c, root); err != nil {
 			return nil, err
 		}
-	} else if err := makeAll(c.fs, root); err != nil {
-		return nil, unavailable(root, err)
+	default:
+		if err := makeAll(c.fs, root); err != nil {
+			return nil, unavailable(root, err)
+		}
 	}
 	if err := initialize(c.fs, root); err != nil {
 		return nil, err
@@ -99,6 +108,9 @@ func (s *Store) Close() error { return s.guard.release() }
 // findStore fails unless the store that was made is there.
 func findStore(c config, root string) error {
 	_, err := c.fs.ReadFile(path.Join(root, formatFile))
+	if errors.Is(err, fs.ErrNotExist) && c.entry == "" {
+		return store.Mark(&core.Failure{Kind: core.FailureNotFound, Message: fmt.Sprintf("no store was made at %s", root)}, store.ErrNoStore)
+	}
 	if errors.Is(err, fs.ErrNotExist) {
 		return &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf(
 			"the store at %s is not there, and %s says it was made: its disk may not be mounted, and if it was deleted on purpose, remove that file",

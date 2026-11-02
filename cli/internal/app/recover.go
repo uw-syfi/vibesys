@@ -112,7 +112,7 @@ func (a *App) recoverScope(ctx context.Context, scope Scope, byRef map[lifecycle
 	var st store.Store
 	err := a.retryWhile(ctx, ownerLeaving, func(ctx context.Context) error {
 		var err error
-		st, err = a.cfg.Stores.Open(ctx, scope)
+		st, err = a.cfg.Stores.Find(ctx, scope)
 		return err
 	})
 	if err != nil {
@@ -176,7 +176,7 @@ func (a *App) sweepOnce(ctx context.Context, away map[Scope]bool) {
 			}
 			continue
 		}
-		st, err := a.cfg.Stores.Open(ctx, scope)
+		st, err := a.cfg.Stores.Find(ctx, scope)
 		if err != nil {
 			continue
 		}

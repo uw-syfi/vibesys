@@ -203,7 +203,7 @@ func (s *Supervisor) execute() lifecycle.Outcome {
 	s.mu.Unlock()
 	if asked {
 		// Cancelled while parked: the command never starts.
-		return lifecycle.Outcome{Exec: core.ExecOutcome{Kind: core.ExecCancelled}}
+		return ran(core.ExecOutcome{Kind: core.ExecCancelled})
 	}
 	spec := s.cfg.Launch.Spec
 	command, ok := spec.Settings.(core.CommandSettings)
@@ -229,10 +229,10 @@ func (s *Supervisor) execute() lifecycle.Outcome {
 // not be attempted, unless a cancel is what stopped the attempt, which is a cancelled command.
 func (s *Supervisor) attempt(out core.ExecOutcome, err error) lifecycle.Outcome {
 	if err == nil {
-		return lifecycle.Outcome{Exec: out}
+		return ran(out)
 	}
 	if s.ctx.Err() != nil && errors.Is(err, context.Canceled) {
-		return lifecycle.Outcome{Exec: core.ExecOutcome{Kind: core.ExecCancelled}}
+		return ran(core.ExecOutcome{Kind: core.ExecCancelled})
 	}
 	return notAttempted(err)
 }
@@ -242,7 +242,11 @@ func notAttempted(err error) lifecycle.Outcome {
 	if !errors.As(err, &f) {
 		f = &core.Failure{Kind: core.FailureInternal, Message: err.Error()}
 	}
-	return lifecycle.Outcome{NotAttempted: f}
+	return lifecycle.Outcome{End: lifecycle.NotAttempted{Failure: *f}}
+}
+
+func ran(out core.ExecOutcome) lifecycle.Outcome {
+	return lifecycle.Outcome{End: lifecycle.Ran{Exec: out}}
 }
 
 // writer is where the command's output goes: into the spool, and to whoever waits for it.

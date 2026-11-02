@@ -1,6 +1,7 @@
 package lifecycle_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -10,12 +11,17 @@ import (
 func anyOutcome(w *world) lifecycle.Outcome {
 	kinds := []core.ExecKind{core.ExecExited, core.ExecTimedOut, core.ExecCancelled, core.ExecServiceNotReady, core.ExecServiceExited, core.ExecUnknown, "a kind from a newer build", ""}
 	o := lifecycle.Outcome{
-		Exec:         core.ExecOutcome{Kind: kinds[w.r.IntN(len(kinds))], ExitCode: w.r.IntN(5) - 1},
+		End:          lifecycle.Ran{Exec: core.ExecOutcome{Kind: kinds[w.r.IntN(len(kinds))], ExitCode: w.r.IntN(5) - 1}},
 		CancelAsked:  w.r.IntN(2) == 0,
 		CancelReason: []string{"", "stop", "a longer reason"}[w.r.IntN(3)],
 	}
-	if w.r.IntN(6) == 0 {
-		o.NotAttempted = &core.Failure{Kind: core.FailureUnavailable, Message: "no such image"}
+	switch w.r.IntN(12) {
+	case 0:
+		o.End = lifecycle.NotAttempted{Failure: core.Failure{Kind: core.FailureUnavailable, Message: "no such image"}}
+	case 1:
+		o.End = lifecycle.Rejected{Reason: "the benchmark wrote no result"}
+	case 2:
+		o.End = nil
 	}
 	return o
 }
@@ -34,11 +40,12 @@ func TestSettleOnlyCallsAJobSucceededWhenItSaysSo(t *testing.T) {
 		if !st.Transition.To.Final() {
 			t.Fatalf("outcome %+v settles as %q, which is not final", o, st.Transition.To)
 		}
-		wantSuccess := o.NotAttempted == nil && o.Exec.Kind == core.ExecExited && o.Exec.ExitCode == 0
+		ran, attempted := o.End.(lifecycle.Ran)
+		wantSuccess := attempted && ran.Exec.Kind == core.ExecExited && ran.Exec.ExitCode == 0
 		if got := st.Transition.To == core.JobSucceeded; got != wantSuccess {
 			t.Fatalf("outcome %+v settles as %q", o, st.Transition.To)
 		}
-		wantCancel := o.NotAttempted == nil && o.Exec.Kind == core.ExecCancelled && o.CancelAsked
+		wantCancel := attempted && ran.Exec.Kind == core.ExecCancelled && o.CancelAsked
 		if got := st.Transition.To == core.JobCancelled; got != wantCancel {
 			t.Fatalf("outcome %+v settles as %q", o, st.Transition.To)
 		}
@@ -54,11 +61,11 @@ func TestSettleOnlyCallsAJobSucceededWhenItSaysSo(t *testing.T) {
 // A command that was cancelled and a command that was ended by something else are different
 // jobs: the first is cancelled and the second is lost, and an empty reason does not change that.
 func TestACancelWithNoReasonIsStillACancel(t *testing.T) {
-	asked := lifecycle.Settle("j1", core.JobRunning, lifecycle.Outcome{Exec: core.ExecOutcome{Kind: core.ExecCancelled}, CancelAsked: true}, epoch)
+	asked := lifecycle.Settle("j1", core.JobRunning, lifecycle.Outcome{End: lifecycle.Ran{Exec: core.ExecOutcome{Kind: core.ExecCancelled}}, CancelAsked: true}, epoch)
 	if asked.Transition.To != core.JobCancelled {
 		t.Fatalf("a cancel with no reason settles as %q", asked.Transition.To)
 	}
-	stopped := lifecycle.Settle("j1", core.JobRunning, lifecycle.Outcome{Exec: core.ExecOutcome{Kind: core.ExecCancelled}}, epoch)
+	stopped := lifecycle.Settle("j1", core.JobRunning, lifecycle.Outcome{End: lifecycle.Ran{Exec: core.ExecOutcome{Kind: core.ExecCancelled}}}, epoch)
 	if stopped.Transition.To != core.JobLost {
 		t.Fatalf("a command ended with no cancel behind it settles as %q", stopped.Transition.To)
 	}
@@ -91,5 +98,19 @@ func TestAwaitIsOverWhenTheJobsItWaitsForAreFinal(t *testing.T) {
 		if ok != (successes == finals) || okAny != ok {
 			t.Fatalf("wait %v: succeeded = %v and %v, want %v", states, ok, okAny, successes == finals)
 		}
+	}
+}
+
+// A job that passed saves its result with its success, and a measurement keeps its check pass. A
+// rejected job fails and says why.
+func TestAPassedJobSavesItsResultAndARejectedOneSaysWhy(t *testing.T) {
+	result := core.Result{Job: "j1", Outcome: core.MeasureOutcome{CheckJob: "j0"}}
+	passed := lifecycle.Settle("j1", core.JobRunning, lifecycle.Outcome{End: lifecycle.Passed{Result: result}}, epoch)
+	if passed.Transition.To != core.JobSucceeded || passed.Transition.Result == nil || passed.Transition.CheckJob != "j0" {
+		t.Fatalf("a passed job settles as %+v", passed.Transition)
+	}
+	rejected := lifecycle.Settle("j1", core.JobRunning, lifecycle.Outcome{End: lifecycle.Rejected{Reason: "no result"}}, epoch)
+	if rejected.Transition.To != core.JobFailed || !strings.Contains(rejected.Log, "no result") {
+		t.Fatalf("a rejected job settles as %+v", rejected)
 	}
 }

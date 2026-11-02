@@ -32,11 +32,17 @@ func (s Scope) Validate() error {
 var taskName = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
 
 // Stores opens the stores the daemon serves. The daemon is the only user of a store, so an
-// implementation hands the same store to every Open of a scope for as long as it lives.
+// implementation hands the same store to every call for a scope for as long as it lives.
 type Stores interface {
-	// Open returns the store of the scope, creating it when it is missing, and records that the
+	// Find returns the store of the scope, and makes nothing: only a submission brings a store into
+	// being, so a mistyped task and a mount point with no disk in it stay as they are. It fails with
+	// a failure marked store.ErrNoStore when none was made, and store.ErrAway when one was made and
+	// cannot be reached.
+	Find(ctx context.Context, scope Scope) (store.Store, error)
+
+	// Create returns the store of the scope, making it when it is missing, and records that the
 	// scope has one, so that Known finds it after a restart.
-	Open(ctx context.Context, scope Scope) (store.Store, error)
+	Create(ctx context.Context, scope Scope) (store.Store, error)
 
 	// Known returns every scope that has a store, including one whose store cannot be reached now:
 	// leaving that out would make its runs look like nobody's.

@@ -246,15 +246,15 @@ func (w *world) supervisorEnds(healthy bool) bool {
 	var o lifecycle.Outcome
 	switch {
 	case s.cancelAsked && w.r.IntN(4) != 0:
-		o = lifecycle.Outcome{Exec: core.ExecOutcome{Kind: core.ExecCancelled}}
+		o = lifecycle.Outcome{End: lifecycle.Ran{Exec: core.ExecOutcome{Kind: core.ExecCancelled}}}
 	case w.r.IntN(6) == 0:
-		o = lifecycle.Outcome{Exec: core.ExecOutcome{Kind: core.ExecTimedOut}}
+		o = lifecycle.Outcome{End: lifecycle.Ran{Exec: core.ExecOutcome{Kind: core.ExecTimedOut}}}
 	case w.r.IntN(8) == 0:
-		o = lifecycle.Outcome{Exec: core.ExecOutcome{Kind: core.ExecUnknown}}
+		o = lifecycle.Outcome{End: lifecycle.Ran{Exec: core.ExecOutcome{Kind: core.ExecUnknown}}}
 	case w.r.IntN(8) == 0:
-		o = lifecycle.Outcome{NotAttempted: &core.Failure{Kind: core.FailureUnavailable, Message: "no docker"}}
+		o = lifecycle.Outcome{End: lifecycle.NotAttempted{Failure: core.Failure{Kind: core.FailureUnavailable, Message: "no docker"}}}
 	default:
-		o = lifecycle.Outcome{Exec: core.ExecOutcome{Kind: core.ExecExited, ExitCode: w.r.IntN(3)}}
+		o = lifecycle.Outcome{End: lifecycle.Ran{Exec: core.ExecOutcome{Kind: core.ExecExited, ExitCode: w.r.IntN(3)}}}
 	}
 	o.CancelAsked, o.CancelReason = s.cancelAsked, s.cancelReason
 	s.finished = true
@@ -477,7 +477,7 @@ func TestJobsSubmittedAtOneInstantStartInArrivalOrder(t *testing.T) {
 		prev := launched[len(launched)-1]
 		s, _ = lifecycle.Step(s, lifecycle.Launched{Ref: prev})
 		var reqs []lifecycle.Request
-		s, reqs = lifecycle.Step(s, lifecycle.Finished{Ref: prev, Outcome: lifecycle.Outcome{Exec: core.ExecOutcome{Kind: core.ExecExited}}, At: epoch})
+		s, reqs = lifecycle.Step(s, lifecycle.Finished{Ref: prev, Outcome: lifecycle.Outcome{End: lifecycle.Ran{Exec: core.ExecOutcome{Kind: core.ExecExited}}}, At: epoch})
 		if slices.ContainsFunc(reqs, func(r lifecycle.Request) bool { _, ok := r.(lifecycle.LaunchRequest); return ok }) {
 			t.Fatalf("the next job was launched before %v was recorded as ended", prev)
 		}

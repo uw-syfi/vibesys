@@ -35,12 +35,19 @@ func ToLaunch(l *cliv1.Launch) (lifecycle.Launch, error) {
 // Outcome returns the contract's message for a supervisor's outcome.
 func Outcome(o lifecycle.Outcome) *cliv1.SupervisorOutcome {
 	out := &cliv1.SupervisorOutcome{}
-	if o.NotAttempted != nil {
-		out.Result = &cliv1.SupervisorOutcome_NotAttempted{NotAttempted: Failure(*o.NotAttempted)}
-	} else {
+	switch end := o.End.(type) {
+	case lifecycle.Ran:
 		out.Result = &cliv1.SupervisorOutcome_Executed{Executed: &cliv1.ExecutionOutcome{
-			Kind: ExecutionKind(o.Exec.Kind), ExitCode: int32(o.Exec.ExitCode),
+			Kind: ExecutionKind(end.Exec.Kind), ExitCode: int32(end.Exec.ExitCode),
 		}}
+	case lifecycle.NotAttempted:
+		out.Result = &cliv1.SupervisorOutcome_NotAttempted{NotAttempted: Failure(end.Failure)}
+	case lifecycle.Passed:
+		out.Result = &cliv1.SupervisorOutcome_Passed{Passed: result(end.Result)}
+	case lifecycle.Rejected:
+		out.Result = &cliv1.SupervisorOutcome_Rejected{Rejected: end.Reason}
+	default:
+		// An outcome with no end stays one: the receiver reads it as unobserved.
 	}
 	if o.CancelAsked {
 		reason := o.CancelReason
@@ -49,19 +56,28 @@ func Outcome(o lifecycle.Outcome) *cliv1.SupervisorOutcome {
 	return out
 }
 
-// ToOutcome returns the domain outcome for the contract's message. A message that says neither
-// that the command ran nor that it could not be attempted is an outcome the environment could
+// ToOutcome returns the domain outcome for the contract's message. A message that does not say how
+// the job ended, or that claims a result that cannot be read, is an outcome the environment could
 // not observe, never a success.
 func ToOutcome(o *cliv1.SupervisorOutcome) lifecycle.Outcome {
 	out := lifecycle.Outcome{CancelAsked: o.CancelReason != nil, CancelReason: o.GetCancelReason()}
+	unobserved := lifecycle.Ran{Exec: core.ExecOutcome{Kind: core.ExecUnknown}}
 	switch r := o.GetResult().(type) {
 	case *cliv1.SupervisorOutcome_NotAttempted:
-		f := ToFailure(r.NotAttempted)
-		out.NotAttempted = &f
+		out.End = lifecycle.NotAttempted{Failure: ToFailure(r.NotAttempted)}
 	case *cliv1.SupervisorOutcome_Executed:
-		out.Exec = core.ExecOutcome{Kind: ToExecKind(r.Executed.GetKind()), ExitCode: int(r.Executed.GetExitCode())}
+		out.End = lifecycle.Ran{Exec: core.ExecOutcome{Kind: ToExecKind(r.Executed.GetKind()), ExitCode: int(r.Executed.GetExitCode())}}
+	case *cliv1.SupervisorOutcome_Passed:
+		found, err := toResult("outcome.passed", r.Passed)
+		if err != nil {
+			out.End = unobserved
+			break
+		}
+		out.End = lifecycle.Passed{Result: found}
+	case *cliv1.SupervisorOutcome_Rejected:
+		out.End = lifecycle.Rejected{Reason: r.Rejected}
 	default:
-		out.Exec = core.ExecOutcome{Kind: core.ExecUnknown}
+		out.End = unobserved
 	}
 	return out
 }

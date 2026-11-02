@@ -363,8 +363,8 @@ type peekingStores struct {
 	after func()
 }
 
-func (p peekingStores) Open(ctx context.Context, scope app.Scope) (store.Store, error) {
-	st, err := p.Stores.Open(ctx, scope)
+func (p peekingStores) Find(ctx context.Context, scope app.Scope) (store.Store, error) {
+	st, err := p.Stores.Find(ctx, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -419,3 +419,22 @@ func TestStatusHasEverySubmissionThatReturned(t *testing.T) {
 }
 
 var _ = lifecycle.Ref{}
+
+// A read names a task, and a mistyped one has no store and gets none. Only a submission makes one.
+func TestAReadMakesNoStore(t *testing.T) {
+	w := newWorld(t)
+	a := w.newApp()
+	ctx := ctxFor(t)
+	scope := app.Scope{Repository: "/repo/typo", Task: "typo"}
+	jobs, err := a.Jobs(ctx, scope, core.JobFilter{})
+	if err != nil || len(jobs) != 0 {
+		t.Fatalf("Jobs of a task with no store: %v, %v, want none", jobs, err)
+	}
+	if _, err := a.Job(ctx, scope, "j1"); !errors.Is(err, store.ErrNoStore) {
+		t.Fatalf("Job of a task with no store: %v, want no store", err)
+	}
+	known, err := w.stores.Known(ctx)
+	if err != nil || len(known) != 0 {
+		t.Fatalf("Known after reads: %v, %v, want nothing made", known, err)
+	}
+}

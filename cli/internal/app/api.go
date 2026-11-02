@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"unicode/utf8"
@@ -50,7 +51,16 @@ func (a *App) Submit(ctx context.Context, req SubmitRequest) (core.SubmitOutcome
 		return core.SubmitOutcome{}, invalid("note: not valid UTF-8")
 	}
 	scope := scopeOf(req.Context)
-	st, err := a.open(ctx, scope)
+	if err := scope.Validate(); err != nil {
+		return core.SubmitOutcome{}, err
+	}
+	// Only a submission makes a store.
+	var st store.Store
+	err := a.retry(ctx, func(ctx context.Context) error {
+		var err error
+		st, err = a.cfg.Stores.Create(ctx, scope)
+		return err
+	})
 	if err != nil {
 		return core.SubmitOutcome{}, err
 	}
@@ -76,12 +86,12 @@ func (a *App) Submit(ctx context.Context, req SubmitRequest) (core.SubmitOutcome
 	return out, nil
 }
 
-// open returns the store of the scope, or says what is wrong with the scope.
+// open returns the store of the scope, or says what is wrong with the scope. It makes nothing.
 func (a *App) open(ctx context.Context, scope Scope) (store.Store, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
-	return a.openStore(ctx, scope)
+	return a.findStore(ctx, scope)
 }
 
 // Job returns one job.
@@ -93,9 +103,13 @@ func (a *App) Job(ctx context.Context, scope Scope, id core.JobID) (core.Job, er
 	return a.readJob(ctx, st, id)
 }
 
-// Jobs returns the jobs of a task that match the filter, oldest first.
+// Jobs returns the jobs of a task that match the filter, oldest first. A task with no store has
+// none.
 func (a *App) Jobs(ctx context.Context, scope Scope, filter core.JobFilter) ([]core.Job, error) {
 	st, err := a.open(ctx, scope)
+	if errors.Is(err, store.ErrNoStore) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}

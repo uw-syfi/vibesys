@@ -26,15 +26,37 @@ type Settlement struct {
 //     outside, is lost: the user did not cancel it and it did not finish.
 //   - An outcome the environment could not observe, and one this build does not know, is lost.
 //   - A command that could not be attempted failed, with the reason in its output.
+//   - A check or a measure job that passed succeeds with its result, and one whose result was
+//     rejected fails, with the reason in its output.
 func Settle(job core.JobID, from core.JobState, o Outcome, at time.Time) Settlement {
 	t := core.Transition{Job: job, From: from, At: at}
-	if o.NotAttempted != nil {
+	switch end := o.End.(type) {
+	case Ran:
+		return settleRan(t, end.Exec, o)
+	case NotAttempted:
 		t.To = core.JobFailed
-		return Settlement{Transition: t, Log: fmt.Sprintf("vibesys-cli: the job could not be run: %s", o.NotAttempted.Message)}
+		return Settlement{Transition: t, Log: fmt.Sprintf("vibesys-cli: the job could not be run: %s", end.Failure.Message)}
+	case Passed:
+		code := 0
+		result := end.Result
+		t.To, t.ExitCode, t.Result = core.JobSucceeded, &code, &result
+		if m, ok := result.Outcome.(core.MeasureOutcome); ok {
+			t.CheckJob = m.CheckJob
+		}
+		return Settlement{Transition: t}
+	case Rejected:
+		t.To = core.JobFailed
+		return Settlement{Transition: t, Log: fmt.Sprintf("vibesys-cli: the job's result was rejected: %s", end.Reason)}
+	default:
+		return settleRan(t, core.ExecOutcome{Kind: core.ExecUnknown}, o)
 	}
-	switch o.Exec.Kind {
+}
+
+// settleRan says what a command's end means.
+func settleRan(t core.Transition, exec core.ExecOutcome, o Outcome) Settlement {
+	switch exec.Kind {
 	case core.ExecExited:
-		code := o.Exec.ExitCode
+		code := exec.ExitCode
 		t.ExitCode = &code
 		t.To = core.JobFailed
 		if code == 0 {

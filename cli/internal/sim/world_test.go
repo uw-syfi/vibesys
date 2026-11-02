@@ -170,7 +170,7 @@ func newWorld(seed uint64) *world {
 	}
 	mem := memstores.New(w.rules)
 	for _, s := range scopes {
-		st, err := mem.Open(context.Background(), s)
+		st, err := mem.Create(context.Background(), s)
 		if err != nil {
 			panic(err)
 		}
@@ -207,7 +207,16 @@ type simStores struct {
 
 var _ app.Stores = simStores{}
 
-func (s simStores) Open(ctx context.Context, scope app.Scope) (store.Store, error) {
+func (s simStores) Find(ctx context.Context, scope app.Scope) (store.Store, error) {
+	return s.open(ctx, scope)
+}
+
+// Create is Find: every store of the world was made before the world began.
+func (s simStores) Create(ctx context.Context, scope app.Scope) (store.Store, error) {
+	return s.open(ctx, scope)
+}
+
+func (s simStores) open(ctx context.Context, scope app.Scope) (store.Store, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}

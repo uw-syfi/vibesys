@@ -138,12 +138,12 @@ func (a *App) call(ctx context.Context, do func(ctx context.Context) error) erro
 	})
 }
 
-// openStore opens a store, trying for a bounded time.
-func (a *App) openStore(ctx context.Context, scope Scope) (store.Store, error) {
+// findStore finds a store, trying for a bounded time.
+func (a *App) findStore(ctx context.Context, scope Scope) (store.Store, error) {
 	var st store.Store
 	err := a.retry(ctx, func(ctx context.Context) error {
 		var err error
-		st, err = a.cfg.Stores.Open(ctx, scope)
+		st, err = a.cfg.Stores.Find(ctx, scope)
 		return err
 	})
 	return st, err
@@ -217,7 +217,7 @@ func (a *App) launch(ctx context.Context, ref lifecycle.Ref, scope Scope, known 
 // the job is not queued any more, so there is nothing to launch. A failure can leave a parked
 // supervisor, which the handle reaches and the job's end releases.
 func (a *App) prepare(ctx context.Context, ref lifecycle.Ref, scope Scope) (h supervisor.Handle, gone bool, err error) {
-	st, err := a.openStore(ctx, scope)
+	st, err := a.findStore(ctx, scope)
 	if err != nil {
 		return nil, false, err
 	}
@@ -270,7 +270,7 @@ func (a *App) follow(ctx context.Context, r lifecycle.Adopt, scope Scope, h supe
 	delay, attempts := a.cfg.Retry.First, 0
 	cancelFirst := r.CancelFirst
 	for {
-		st, err := a.cfg.Stores.Open(ctx, scope)
+		st, err := a.cfg.Stores.Find(ctx, scope)
 		var outcome lifecycle.Outcome
 		progress := false
 		if err == nil && cancelFirst {
@@ -467,7 +467,7 @@ func (a *App) move(ctx context.Context, m lifecycle.Move, scope Scope, known boo
 }
 
 func (a *App) moveInStore(ctx context.Context, m lifecycle.Move, scope Scope) error {
-	st, err := a.openStore(ctx, scope)
+	st, err := a.findStore(ctx, scope)
 	if err != nil {
 		return err
 	}
@@ -545,7 +545,7 @@ func (a *App) probe(ctx context.Context, ref lifecycle.Ref) (supervisor.Run, err
 
 // lookInStore completes what was found of a job with what its store has.
 func (a *App) lookInStore(ctx context.Context, found lifecycle.Recovered, scope Scope) lifecycle.Recovered {
-	st, err := a.cfg.Stores.Open(ctx, scope)
+	st, err := a.cfg.Stores.Find(ctx, scope)
 	if err != nil {
 		found.Away = true
 		return found

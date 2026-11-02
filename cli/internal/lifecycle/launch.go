@@ -19,15 +19,36 @@ func (l Launch) Ref() Ref {
 	return Ref{Store: StoreIDOf(l.Repository, l.Task), Job: l.Job}
 }
 
-// Outcome is the one report a supervisor makes about its job.
+// Outcome is the one report a supervisor makes about its job: how it ended, and whether a cancel
+// reached the supervisor first.
 type Outcome struct {
-	// Exec is how the command ended. It is meaningful when NotAttempted is nil.
-	Exec core.ExecOutcome
-	// NotAttempted is set when the command could not be attempted, such as a checkout that failed.
-	NotAttempted *core.Failure
+	// End is how the job ended. An Outcome with no End says nothing, which is never a success.
+	End End
 	// CancelAsked says a cancel request reached the supervisor before the command ended, and
 	// CancelReason is its text, which may be empty. A command that ended on its own first still
 	// reports how it ended.
 	CancelAsked  bool
 	CancelReason string
 }
+
+// End is how a job ended, one variant of SupervisorOutcome's result. The set is closed.
+type End interface {
+	end()
+}
+
+// Ran says the command ran, or was killed, and how it ended.
+type Ran struct{ Exec core.ExecOutcome }
+
+// NotAttempted says the command could not be attempted, such as a checkout that failed.
+type NotAttempted struct{ Failure core.Failure }
+
+// Passed says a check or a measure job passed, and holds the result it found.
+type Passed struct{ Result core.Result }
+
+// Rejected says every command ran and the job has no acceptable result.
+type Rejected struct{ Reason string }
+
+func (Ran) end()          {}
+func (NotAttempted) end() {}
+func (Passed) end()       {}
+func (Rejected) end()     {}

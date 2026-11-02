@@ -15,6 +15,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/app"
 	"github.com/uw-syfi/vibesys/cli/internal/app/filestores"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/store"
 	"github.com/uw-syfi/vibesys/cli/internal/store/filestore"
 )
 
@@ -32,7 +33,7 @@ func TestAnOpenedScopeIsKnownAfterARestart(t *testing.T) {
 	repo, indexDir := t.TempDir(), t.TempDir()
 	first := newStores(t, indexDir)
 	scope := app.Scope{Repository: repo, Task: "kv-store"}
-	if _, err := first.Open(context.Background(), scope); err != nil {
+	if _, err := first.Create(context.Background(), scope); err != nil {
 		t.Fatal(err)
 	}
 	known, err := newStores(t, indexDir).Known(context.Background())
@@ -48,11 +49,11 @@ func TestAnOpenedScopeIsKnownAfterARestart(t *testing.T) {
 func TestOpenSharesTheStore(t *testing.T) {
 	stores := newStores(t, t.TempDir())
 	scope := app.Scope{Repository: t.TempDir(), Task: "kv-store"}
-	a, err := stores.Open(context.Background(), scope)
+	a, err := stores.Create(context.Background(), scope)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := stores.Open(context.Background(), scope)
+	b, err := stores.Find(context.Background(), scope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +90,7 @@ func TestARepositoryThatIsAwayIsKnownAndComesBackWhole(t *testing.T) {
 			scope := app.Scope{Repository: repo, Task: "kv-store"}
 
 			first := newStores(t, indexDir)
-			st, err := first.Open(ctx, scope)
+			st, err := first.Create(ctx, scope)
 			must(t, err)
 			out, err := st.Submit(ctx, core.Submission{
 				Spec: core.JobSpec{Commit: "c1", Settings: core.CommandSettings{Argv: []string{"true"}}}, At: time.Unix(1, 0).UTC(),
@@ -105,7 +106,7 @@ func TestARepositoryThatIsAwayIsKnownAndComesBackWhole(t *testing.T) {
 				t.Fatalf("Known = %v, want [%v]", known, scope)
 			}
 			before := listing(t, filepath.Dir(repo))
-			_, err = restarted.Open(ctx, scope)
+			_, err = restarted.Find(ctx, scope)
 			var f *core.Failure
 			if !errors.As(err, &f) || f.Kind != core.FailureUnavailable || !strings.Contains(f.Message, repo) {
 				t.Fatalf("Open of a store that is away: %v, want unavailable naming %s", err, repo)
@@ -115,7 +116,7 @@ func TestARepositoryThatIsAwayIsKnownAndComesBackWhole(t *testing.T) {
 			}
 
 			back()
-			st, err = restarted.Open(ctx, scope)
+			st, err = restarted.Find(ctx, scope)
 			must(t, err)
 			job, err := st.Job(ctx, out.Job.ID)
 			must(t, err)
@@ -130,7 +131,7 @@ func TestARepositoryThatIsAwayIsKnownAndComesBackWhole(t *testing.T) {
 // nothing.
 func TestAFirstOpenMakesNoRepository(t *testing.T) {
 	repo := filepath.Join(t.TempDir(), "typo")
-	_, err := newStores(t, t.TempDir()).Open(context.Background(), app.Scope{Repository: repo, Task: "kv-store"})
+	_, err := newStores(t, t.TempDir()).Create(context.Background(), app.Scope{Repository: repo, Task: "kv-store"})
 	var f *core.Failure
 	if !errors.As(err, &f) || f.Kind != core.FailureUnavailable {
 		t.Fatalf("Open: %v, want unavailable", err)
@@ -148,16 +149,16 @@ func TestASecondDaemonIsRefusedAStoreAndNamesWhoHasIt(t *testing.T) {
 	must(t, err)
 	rules := app.Rules(filestores.DefaultSamples)
 	first := filestores.New(index, rules, filestore.Owner{Host: "host-a", Dir: "/run/one", PID: 1})
-	_, err = first.Open(ctx, scope)
+	_, err = first.Create(ctx, scope)
 	must(t, err)
 	second := filestores.New(index, rules, filestore.Owner{Host: "host-a", Dir: "/run/two", PID: 2})
-	_, err = second.Open(ctx, scope)
+	_, err = second.Create(ctx, scope)
 	var f *core.Failure
 	if !errors.As(err, &f) || f.Kind != core.FailureConflict || !strings.Contains(f.Message, "/run/one") {
 		t.Fatalf("second Open: %v, want a conflict naming the first", err)
 	}
 	must(t, first.Close())
-	_, err = second.Open(ctx, scope)
+	_, err = second.Create(ctx, scope)
 	must(t, err)
 }
 
@@ -186,7 +187,7 @@ func TestOpenRefusesAScopeThatIsNotOne(t *testing.T) {
 		if scope.Validate() == nil {
 			return true
 		}
-		_, err := stores.Open(context.Background(), scope)
+		_, err := stores.Create(context.Background(), scope)
 		f, ok := err.(*core.Failure)
 		return ok && f.Kind == core.FailureInvalidInput
 	}
@@ -200,7 +201,7 @@ func TestOpenRefusesAScopeThatIsNotOne(t *testing.T) {
 func TestTheStoreIsOpenedWithTheRules(t *testing.T) {
 	stores := newStores(t, t.TempDir())
 	scope := app.Scope{Repository: t.TempDir(), Task: "kv-store"}
-	st, err := stores.Open(context.Background(), scope)
+	st, err := stores.Create(context.Background(), scope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,5 +223,51 @@ func TestTheStoreIsOpenedWithTheRules(t *testing.T) {
 	}
 	if second.Disposition != core.SubmitJoined || second.Job.ID != first.Job.ID {
 		t.Fatalf("a submission with no sample count made %s job %s, want to join %s", second.Disposition, second.Job.ID, first.Job.ID)
+	}
+}
+
+// Finding a store makes nothing: not a store for a mistyped task, not a state directory on a mount
+// point with no disk in it, and not an entry in the index that a later daemon would hold to.
+func TestFindMakesNothing(t *testing.T) {
+	ctx := context.Background()
+	repo, indexDir := t.TempDir(), t.TempDir()
+	scope := app.Scope{Repository: repo, Task: "typo"}
+	stores := newStores(t, indexDir)
+	_, err := stores.Find(ctx, scope)
+	var f *core.Failure
+	if !errors.Is(err, store.ErrNoStore) || !errors.As(err, &f) || f.Kind != core.FailureNotFound {
+		t.Fatalf("Find of a task with no store: %v, want not found, marked as no store", err)
+	}
+	entries, err := os.ReadDir(repo)
+	must(t, err)
+	if len(entries) != 0 {
+		t.Fatalf("Find made %v", entries)
+	}
+	known, err := stores.Known(ctx)
+	must(t, err)
+	if len(known) != 0 {
+		t.Fatalf("Find left %v in the index", known)
+	}
+	_, err = stores.Create(ctx, scope)
+	must(t, err)
+	_, err = stores.Find(ctx, scope)
+	must(t, err)
+}
+
+// A store on disk that the index lost is found, and the index has it again.
+func TestFindTakesUpAStoreTheIndexLost(t *testing.T) {
+	ctx := context.Background()
+	repo := t.TempDir()
+	scope := app.Scope{Repository: repo, Task: "kv-store"}
+	first := newStores(t, t.TempDir())
+	_, err := first.Create(ctx, scope)
+	must(t, err)
+	must(t, first.Close())
+
+	stores := newStores(t, t.TempDir())
+	_, err = stores.Find(ctx, scope)
+	must(t, err)
+	if known, err := stores.Known(ctx); err != nil || len(known) != 1 {
+		t.Fatalf("Known = %v, %v, want the store found", known, err)
 	}
 }

@@ -210,13 +210,19 @@ func TestAnOutcomeSurvivesTheContractAndBack(t *testing.T) {
 	kinds := []core.ExecKind{core.ExecExited, core.ExecTimedOut, core.ExecCancelled, core.ExecServiceNotReady, core.ExecServiceExited, core.ExecUnknown}
 	for range 500 {
 		o := lifecycle.Outcome{}
-		if r.IntN(5) == 0 {
-			o.NotAttempted = &core.Failure{Kind: pick(r, core.FailureUnavailable, core.FailureInternal), Message: "no image"}
-		} else {
-			o.Exec = core.ExecOutcome{Kind: pick(r, kinds...)}
-			if o.Exec.Kind == core.ExecExited {
-				o.Exec.ExitCode = r.IntN(300) - 1
+		switch r.IntN(7) {
+		case 0:
+			o.End = lifecycle.NotAttempted{Failure: core.Failure{Kind: pick(r, core.FailureUnavailable, core.FailureInternal), Message: "no image"}}
+		case 1:
+			o.End = lifecycle.Rejected{Reason: pick(r, "", "no result")}
+		case 2:
+			o.End = lifecycle.Passed{Result: aResult()}
+		default:
+			exec := core.ExecOutcome{Kind: pick(r, kinds...)}
+			if exec.Kind == core.ExecExited {
+				exec.ExitCode = r.IntN(300) - 1
 			}
+			o.End = lifecycle.Ran{Exec: exec}
 		}
 		if r.IntN(2) == 0 {
 			o.CancelAsked, o.CancelReason = true, pick(r, "", "stop")
@@ -225,8 +231,29 @@ func TestAnOutcomeSurvivesTheContractAndBack(t *testing.T) {
 			t.Fatalf("outcome came back changed: got %+v, want %+v", got, o)
 		}
 	}
-	if got := wire.ToOutcome(&cliv1.SupervisorOutcome{}); got.Exec.Kind != core.ExecUnknown {
+	unknown := lifecycle.Outcome{End: lifecycle.Ran{Exec: core.ExecOutcome{Kind: core.ExecUnknown}}}
+	if got := wire.ToOutcome(&cliv1.SupervisorOutcome{}); !reflect.DeepEqual(got, unknown) {
 		t.Fatalf("an empty outcome is %+v, want unknown", got)
+	}
+	unreadable := &cliv1.SupervisorOutcome{Result: &cliv1.SupervisorOutcome_Passed{Passed: &cliv1.Result{}}}
+	if got := wire.ToOutcome(unreadable); !reflect.DeepEqual(got, unknown) {
+		t.Fatalf("a result that cannot be read is %+v, want unknown and never a success", got)
+	}
+}
+
+// aResult is a result with every field set, as a supervisor reports it.
+func aResult() core.Result {
+	at := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	return core.Result{
+		Job: "j1", Key: "k", Task: "t", TaskVersion: "v", Commit: "c", SchemaVersion: 1,
+		Environment: core.Fingerprint{Kind: core.EnvironmentHost, Backend: core.BackendCPU, Facts: map[string]string{"os": "linux"}},
+		Machine:     core.MachineFacts{HostID: "h", OS: "linux", Arch: "amd64", CPUModel: "m", LogicalCPUs: 8, MemoryBytes: 1 << 30},
+		Load:        core.MachineLoad{SampledAt: at, LoadAverage1m: 0.5, CPUBusyFraction: 0.25, MemoryAvailableBytes: 1 << 20},
+		RecordedAt:  at,
+		Outcome: core.MeasureOutcome{
+			Metric: core.Metric{Name: "rps", Direction: core.Maximize}, Samples: []float64{1, 2, 3}, CheckJob: "j0",
+			Observations: []core.Observation{{Name: "p99", Values: []float64{4}}},
+		},
 	}
 }
 

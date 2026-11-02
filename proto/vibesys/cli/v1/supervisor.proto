@@ -3,6 +3,7 @@ package vibesys.cli.v1;
 
 import "vibesys/cli/v1/failure.proto";
 import "vibesys/cli/v1/job.proto";
+import "vibesys/cli/v1/result.proto";
 import "vibesys/cli/v1/version.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
@@ -79,6 +80,10 @@ message SupervisorOutcome {
     ExecutionOutcome executed = 1;
     // The command could not be attempted, such as a checkout or an environment that failed.
     Failure not_attempted = 2;
+    // A check or a measure job passed, and this is the result it found.
+    Result passed = 4;
+    // Every command ran and the job has no acceptable result. The text says why.
+    string rejected = 5;
   }
   // The reason of the cancel request, present when one reached the supervisor before the command
   // ended. The reason may be empty, so presence and not the text says that a cancel was asked. A
@@ -98,6 +103,30 @@ message HandshakeResponse {
   BuildVersions versions = 1;
   // Whether the two builds can talk, judged from the supervisor's side.
   Compatibility compatibility = 2;
+  // Where the supervisor is now, so that a daemon that finds one knows what it holds.
+  SupervisorPhase phase = 3;
+}
+
+// SupervisorPhase is where a supervisor is in its life. Only RUNNING has a command that may be
+// using the machine. A supervisor that says nothing is not assumed to be in any phase.
+enum SupervisorPhase {
+  SUPERVISOR_PHASE_UNSPECIFIED = 0;
+  // The command has not started, and does not until Start.
+  SUPERVISOR_PHASE_PARKED = 1;
+  SUPERVISOR_PHASE_RUNNING = 2;
+  // The command ended. The supervisor keeps the outcome and the output until Release.
+  SUPERVISOR_PHASE_FINISHED = 3;
+  // The supervisor was released and is on its way out.
+  SUPERVISOR_PHASE_RELEASED = 4;
+}
+
+// RunRecord is the daemon's own note that it started a run. It is kept apart from the run
+// directory, which can be cleared while the supervisor lives, so that a missing directory is proof
+// of death only when the machine restarted since the run began.
+message RunRecord {
+  // The identity of the boot the run began in.
+  string boot_id = 1;
+  Launch launch = 2;
 }
 
 message StartRequest {}
