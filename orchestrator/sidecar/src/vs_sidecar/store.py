@@ -147,6 +147,7 @@ class MemoryStore:
         raw: Iterable[RawRecord] = (),
         effects: Iterable[str] = (),
     ) -> None:
+        """Start with the given history (empty by default)."""
         self._events = list(events)
         self._raw = list(raw)
         self._effects = set(effects)
@@ -192,6 +193,7 @@ class FileStore:
     """
 
     def __init__(self, directory: Path) -> None:
+        """Open the store in *directory*, creating it, and repair a torn tail."""
         directory.mkdir(parents=True, exist_ok=True)
         self._events_path = directory / "events.log"
         self._raw_path = directory / "raw.log"

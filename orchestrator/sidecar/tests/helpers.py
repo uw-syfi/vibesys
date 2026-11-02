@@ -61,11 +61,15 @@ def start_turn(effect_id: str, turn_id: str, text: str = "do the thing") -> sc.S
     """A ``StartTurn`` command."""
     return sc.SidecarCommand(
         effect_id=effect_id,
-        start_turn=fx.StartTurn(session=REF, turn_id=turn_id, message=message(f"msg-{turn_id}", text)),
+        start_turn=fx.StartTurn(
+            session=REF, turn_id=turn_id, message=message(f"msg-{turn_id}", text)
+        ),
     )
 
 
-def steer(effect_id: str, turn_id: str, message_id: str, text: str = "also this") -> sc.SidecarCommand:
+def steer(
+    effect_id: str, turn_id: str, message_id: str, text: str = "also this"
+) -> sc.SidecarCommand:
     """A ``Steer`` command."""
     return sc.SidecarCommand(
         effect_id=effect_id,
@@ -75,7 +79,9 @@ def steer(effect_id: str, turn_id: str, message_id: str, text: str = "also this"
 
 def interrupt(effect_id: str, turn_id: str) -> sc.SidecarCommand:
     """An ``Interrupt`` command."""
-    return sc.SidecarCommand(effect_id=effect_id, interrupt=fx.Interrupt(session=REF, turn_id=turn_id))
+    return sc.SidecarCommand(
+        effect_id=effect_id, interrupt=fx.Interrupt(session=REF, turn_id=turn_id)
+    )
 
 
 def close(effect_id: str, *, force: bool = False) -> sc.SidecarCommand:
@@ -88,7 +94,9 @@ def kinds(events: Sequence[sc.SidecarEvent]) -> list[str]:
     return [event.WhichOneof("body") or "" for event in events]
 
 
-def codex_factory(script: CodexScript, **options: Any) -> Callable[[Callable[[RawFrame], None]], Driver]:
+def codex_factory(
+    script: CodexScript, **options: Any
+) -> Callable[[Callable[[RawFrame], None]], Driver]:
     """A driver factory over a scripted Codex app-server."""
     return _factory("codex", FakeExecutor([], peers=script.peer), options)
 
@@ -101,7 +109,9 @@ def claude_factory(
     return _factory("claude", FakeExecutor([], peers=lambda _request: peer, gates=gates), options)
 
 
-def claude_replay_factory(peers: ClaudeStreamPeers) -> Callable[[Callable[[RawFrame], None]], Driver]:
+def claude_replay_factory(
+    peers: ClaudeStreamPeers,
+) -> Callable[[Callable[[RawFrame], None]], Driver]:
     """A driver factory over agentshim's scripted Claude peers."""
     return _factory("claude", FakeExecutor([], peers=peers.peer), {})
 

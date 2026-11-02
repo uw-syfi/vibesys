@@ -39,7 +39,12 @@ def test_a_session_opens_with_its_conversation_id_and_what_it_can_do() -> None:
 
 
 def test_a_turn_gives_items_deltas_usage_and_one_end() -> None:
-    script = CodexScript().turn(Think("pondering"), RunCommand("ls", output="a\n"), Say("done"), Spend(input_tokens=10, output_tokens=2))
+    script = CodexScript().turn(
+        Think("pondering"),
+        RunCommand("ls", output="a\n"),
+        Say("done"),
+        Spend(input_tokens=10, output_tokens=2),
+    )
     engine, store = _engine(script)
     engine.send(h.start_turn("e1", "t1"))
     assert engine.run_next() is True
@@ -98,7 +103,9 @@ def test_a_command_that_breaks_its_contract_is_refused() -> None:
 
 
 def test_usage_reports_replace_one_another_instead_of_adding_up() -> None:
-    script = CodexScript().turn(Spend(input_tokens=100, output_tokens=10), Say("a"), Spend(input_tokens=50, output_tokens=5))
+    script = CodexScript().turn(
+        Spend(input_tokens=100, output_tokens=10), Say("a"), Spend(input_tokens=50, output_tokens=5)
+    )
     engine, store = _engine(script)
     engine.send(h.start_turn("e1", "t1"))
     engine.run_next()
@@ -138,7 +145,9 @@ def test_a_steer_sent_while_the_turn_runs_is_accepted_when_the_provider_takes_it
     driver.run_turn = run_turn  # type: ignore[method-assign]  # a test double over the driver
     # A steer comes from another thread while the turn thread reads the provider. The wait only
     # guards against a hang: the steer is sent as soon as the turn has produced its first event.
-    sender = threading.Thread(target=lambda: (started.wait(30), engine.send(h.steer("e2", "t1", "m-steer"))))
+    sender = threading.Thread(
+        target=lambda: (started.wait(30), engine.send(h.steer("e2", "t1", "m-steer")))
+    )
     sender.start()
     engine.run_next()
     sender.join(30)

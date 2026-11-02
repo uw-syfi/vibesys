@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 
 import protovalidate
 
-from vs_sidecar.driver import SteerRefused
+from vs_sidecar.driver import SteerRefusedError
 from vs_sidecar.gen.vibesys.orchestrator.v1 import effects_pb2 as fx
 from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as orch
 from vs_sidecar.gen.vibesys.orchestrator.v1 import sidecar_pb2 as sc
@@ -56,6 +56,11 @@ class Engine:
         driver_factory: Callable[[Callable[[RawFrame], None]], Driver],
         notify: Callable[[], None] = lambda: None,
     ) -> None:
+        """Hold the session *launch* describes.
+
+        *driver_factory* receives the sink for raw provider frames and returns the driver; *notify*
+        is called after each event is kept, to wake whoever follows the log.
+        """
         self._launch = launch
         self._store = store
         self._driver_factory = driver_factory
@@ -111,7 +116,11 @@ class Engine:
         started |= {event.usage.turn_id for event in history if event.HasField("usage")}
         ended = {event.turn_ended.turn_id for event in history if event.HasField("turn_ended")}
         for turn_id in sorted(started - ended - {IDLE_TURN}):
-            self._append(sc.SidecarEvent(turn_ended=sc.TurnEnded(turn_id=turn_id, status=orch.TURN_STATUS_FAILED)))
+            self._append(
+                sc.SidecarEvent(
+                    turn_ended=sc.TurnEnded(turn_id=turn_id, status=orch.TURN_STATUS_FAILED)
+                )
+            )
         if "failed" not in kinds:
             self._fail("the sidecar restarted and lost the agent process")
         self._failed = True
@@ -157,7 +166,10 @@ class Engine:
             raise InvalidCommandError(str(error)) from error
         body = command.WhichOneof("body")
         ref = getattr(command, body).session
-        if (ref.agent_id, ref.session) != (self._launch.session.agent_id, self._launch.session.session):
+        if (ref.agent_id, ref.session) != (
+            self._launch.session.agent_id,
+            self._launch.session.session,
+        ):
             msg = f"command is for session {ref.agent_id}/{ref.session}, this is {self._launch.session.agent_id}/{self._launch.session.session}"
             raise InvalidCommandError(msg)
         with self._lock:
@@ -189,13 +201,15 @@ class Engine:
                 self._steers.add(steer.message.id, text)
             elif not self._closed:
                 self._append(
-                    sc.SidecarEvent(steer=sc.SteerOutcome(message_id=steer.message.id, accepted=False))
+                    sc.SidecarEvent(
+                        steer=sc.SteerOutcome(message_id=steer.message.id, accepted=False)
+                    )
                 )
         if not running or driver is None:
             return
         try:
             driver.steer(text)
-        except SteerRefused:
+        except SteerRefusedError:
             # Left in the book: it is answered as not accepted when the turn ends.
             return
 

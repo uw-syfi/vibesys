@@ -57,13 +57,15 @@ class TurnResult:
     detail: str = ""
 
 
-class SteerRefused(Exception):
+class SteerRefusedError(Exception):
     """The provider could not take a steer now (no turn is running, or it cannot steer)."""
 
 
 class Driver(Protocol):
-    """A provider session, as the engine drives it. ``steer`` and ``interrupt`` may be called from
-    another thread while ``run_turn`` runs."""
+    """A provider session, as the engine drives it.
+
+    ``steer`` and ``interrupt`` may be called from another thread while ``run_turn`` runs.
+    """
 
     def open(self) -> Opened:
         """Start (or resume) the provider session and say what it can do."""
@@ -74,7 +76,7 @@ class Driver(Protocol):
         ...
 
     def steer(self, text: str) -> None:
-        """Send *text* to the running turn, or raise ``SteerRefused``."""
+        """Send *text* to the running turn, or raise ``SteerRefusedError``."""
         ...
 
     def interrupt(self) -> None:
@@ -94,45 +96,7 @@ class _Forward:
     """An agentshim event handler that calls a function."""
 
     def __init__(self, emit: Callable[[AgentEvent], None]) -> None:
-        self._emit = emit
-
-    def on_event(self, event: AgentEvent) -> None:
-        self._emit(event)
-
-
-class Driver(Protocol):
-    """A provider session, as the engine drives it. ``steer`` and ``interrupt`` may be called from
-    another thread while ``run_turn`` runs."""
-
-    def open(self) -> Opened:
-        """Start (or resume) the provider session and say what it can do."""
-        ...
-
-    def run_turn(self, prompt: str, emit: Callable[[AgentEvent], None]) -> TurnResult:
-        """Run one turn to its end, sending each event to *emit*. Never raises for a provider failure."""
-        ...
-
-    def steer(self, text: str) -> None:
-        """Send *text* to the running turn, or raise ``SteerRefused``."""
-        ...
-
-    def interrupt(self) -> None:
-        """End the running turn and keep the conversation."""
-        ...
-
-    def poll_idle(self, emit: Callable[[AgentEvent], None]) -> bool:
-        """Report what the provider did outside a turn. ``False`` once its process is gone."""
-        ...
-
-    def close(self) -> None:
-        """End the session and its process."""
-        ...
-
-
-class _Forward:
-    """An agentshim event handler that calls a function."""
-
-    def __init__(self, emit: Callable[[AgentEvent], None]) -> None:
+        """Forward events to *emit*."""
         self._emit = emit
 
     def on_event(self, event: AgentEvent) -> None:
@@ -148,7 +112,10 @@ class AgentshimDriver:
     refuses with ``ProviderCapabilityError`` and the session is rebuilt without it.
     """
 
-    def __init__(self, factory: Callable[[str | None], Session], preferred_id: str | None = None) -> None:
+    def __init__(
+        self, factory: Callable[[str | None], Session], preferred_id: str | None = None
+    ) -> None:
+        """Drive sessions built by *factory*, asking first for *preferred_id*."""
         self._factory = factory
         self._preferred_id = preferred_id
         self._session: Session | None = None
@@ -185,7 +152,9 @@ class AgentshimDriver:
             turn = self._live.run(ticket, on_event=_Forward(emit))
         except AgentShimError as error:
             return TurnResult(orch.TURN_STATUS_FAILED, detail=f"{type(error).__name__}: {error}")
-        status = orch.TURN_STATUS_INTERRUPTED if turn.result.interrupted else orch.TURN_STATUS_COMPLETED
+        status = (
+            orch.TURN_STATUS_INTERRUPTED if turn.result.interrupted else orch.TURN_STATUS_COMPLETED
+        )
         return TurnResult(status, turn.result.usage)
 
     def steer(self, text: str) -> None:
@@ -193,7 +162,7 @@ class AgentshimDriver:
         try:
             self._live.steer(text)
         except (NoRunningTurnError, ProviderCapabilityError, SessionStateError) as error:
-            raise SteerRefused(str(error)) from error
+            raise SteerRefusedError(str(error)) from error
 
     def interrupt(self) -> None:
         """See ``Driver.interrupt``."""

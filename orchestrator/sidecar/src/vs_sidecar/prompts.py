@@ -36,10 +36,16 @@ def render(message: orch.Message) -> str:
         template, context["report"] = "report", message.report
     elif kind == "job_finished":
         template, context["job"] = "job_finished", message.job_finished
-        context["outcome"] = orch.JobOutcome.Name(message.job_finished.outcome).removeprefix("JOB_OUTCOME_").lower()
+        context["outcome"] = (
+            orch.JobOutcome.Name(message.job_finished.outcome).removeprefix("JOB_OUTCOME_").lower()
+        )
     elif kind == "subagent_settled":
         template, context["settled"] = "subagent_settled", message.subagent_settled
-        context["status"] = orch.AgentStatus.Name(message.subagent_settled.status).removeprefix("AGENT_STATUS_").lower()
+        context["status"] = (
+            orch.AgentStatus.Name(message.subagent_settled.status)
+            .removeprefix("AGENT_STATUS_")
+            .lower()
+        )
     else:
         msg = "a message with no body has no prompt"
         raise ValueError(msg)

@@ -36,3 +36,13 @@ allow-direct-references = true
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-ra"
+
+[tool.ruff]
+# The repository's rules, applied here too, with the generated bindings left out. This project
+# has its own tree and lock, so the root configuration does not list it.
+extend = "../../pyproject.toml"
+src = ["src", "tests"]
+extend-exclude = ["src/vs_sidecar/gen"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "PLR2004", "D", "INP001", "ANN"]

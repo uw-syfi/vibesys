@@ -18,7 +18,6 @@ from agentshim import (
     ProviderUsage,
     Reasoning,
     SteerConsumed,
-    SteerRejected,
     TextDelta,
     TextKind,
     ToolCall,
@@ -31,7 +30,8 @@ from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as orch
 from vs_sidecar.gen.vibesys.orchestrator.v1 import sidecar_pb2 as sc
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
+    from typing import Any
 
     from agentshim import AgentEvent
 
@@ -44,6 +44,7 @@ class SteerBook:
     """
 
     def __init__(self) -> None:
+        """Start with no open steer."""
         self._open: list[tuple[str, str]] = []
 
     def add(self, message_id: str, text: str) -> None:
@@ -132,6 +133,7 @@ class TurnNormalizer:
     """
 
     def __init__(self, turn_id: str, steers: SteerBook | None = None) -> None:
+        """Fold the events of turn *turn_id*, answering steers from *steers*."""
         self._turn_id = turn_id
         self._steers = steers if steers is not None else SteerBook()
         self._items: dict[str, _Item] = {}
@@ -153,18 +155,23 @@ class TurnNormalizer:
         """What *event* adds to the log, in order."""
         if isinstance(event, (AssistantText, Reasoning)):
             return self._text(event)
-        if isinstance(event, ToolCall):
-            return self._call(event)
-        if isinstance(event, ToolResult):
-            return self._result(event)
-        if isinstance(event, TextDelta):
-            return self._delta(event)
-        if isinstance(event, UsageReport):
-            return self._report(event.usage)
-        if isinstance(event, SteerConsumed):
-            return self._steer(event.text, accepted=True)
-        if isinstance(event, TurnInterrupted):
-            self._interrupted = True
+        handler = self._handlers().get(type(event))
+        if handler is None:
+            return []
+        return handler(event)
+
+    def _handlers(self) -> dict[type, Callable[[Any], list[sc.SidecarEvent]]]:
+        return {
+            ToolCall: self._call,
+            ToolResult: self._result,
+            TextDelta: self._delta,
+            UsageReport: lambda event: self._report(event.usage),
+            SteerConsumed: lambda event: self._steer(event.text, accepted=True),
+            TurnInterrupted: self._interrupted_by,
+        }
+
+    def _interrupted_by(self, _event: TurnInterrupted) -> list[sc.SidecarEvent]:
+        self._interrupted = True
         return []
 
     def finish(self, status: int, usage: ProviderUsage | None = None) -> list[sc.SidecarEvent]:
@@ -175,7 +182,11 @@ class TurnNormalizer:
         is answered as not accepted, after the ``TurnEnded``, as ``SteerOutcome`` says.
         """
         out: list[sc.SidecarEvent] = []
-        settled = orch.ITEM_STATUS_FINISHED if status == orch.TURN_STATUS_COMPLETED else orch.ITEM_STATUS_FAILED
+        settled = (
+            orch.ITEM_STATUS_FINISHED
+            if status == orch.TURN_STATUS_COMPLETED
+            else orch.ITEM_STATUS_FAILED
+        )
         for item_id, item in self._items.items():
             if item.status == orch.ITEM_STATUS_RUNNING:
                 item.status = settled
@@ -199,7 +210,11 @@ class TurnNormalizer:
         item_id = event.item_id or self._mint()
         kind = "assistant" if isinstance(event, AssistantText) else "reasoning"
         known = self._items.get(item_id)
-        if known is not None and known.text == event.text and known.status == orch.ITEM_STATUS_FINISHED:
+        if (
+            known is not None
+            and known.text == event.text
+            and known.status == orch.ITEM_STATUS_FINISHED
+        ):
             return []
         item = _Item(kind=kind, status=orch.ITEM_STATUS_FINISHED, text=event.text)
         self._items[item_id] = item
@@ -224,9 +239,14 @@ class TurnNormalizer:
         item = self._items.get(item_id)
         if item is None:
             item = self._items[item_id] = _Item(
-                kind="tool", status=orch.ITEM_STATUS_RUNNING, tool=event.tool, call_id=event.tool_id or ""
+                kind="tool",
+                status=orch.ITEM_STATUS_RUNNING,
+                tool=event.tool,
+                call_id=event.tool_id or "",
             )
-        output = event.stdout + (("\n" if event.stdout else "") + event.stderr if event.stderr else "")
+        output = event.stdout + (
+            ("\n" if event.stdout else "") + event.stderr if event.stderr else ""
+        )
         finished = _Item(
             kind="tool",
             status=orch.ITEM_STATUS_FINISHED,
@@ -265,13 +285,11 @@ class TurnNormalizer:
         message_id = self._steers.take(text)
         return [] if message_id is None else [self._outcome(message_id, accepted=accepted)]
 
-    def reject(self, event: SteerRejected) -> list[sc.SidecarEvent]:
-        """Answer a steer the provider refused, now. ``feed`` leaves refusals to ``finish``."""
-        return self._steer(event.text, accepted=False)
-
     @staticmethod
     def _outcome(message_id: str, *, accepted: bool) -> sc.SidecarEvent:
-        return TurnNormalizer._event(steer=sc.SteerOutcome(message_id=message_id, accepted=accepted))
+        return TurnNormalizer._event(
+            steer=sc.SteerOutcome(message_id=message_id, accepted=accepted)
+        )
 
     @staticmethod
     def _event(**body: object) -> sc.SidecarEvent:
