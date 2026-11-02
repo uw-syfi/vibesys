@@ -243,6 +243,8 @@ func testSubmit(t *testing.T, newStore New) {
 						e.move(j.ID, core.JobQueued, core.JobRunning)
 					case core.JobRunning:
 						e.move(j.ID, core.JobRunning, core.JobFailed)
+					default:
+						// A final job goes nowhere.
 					}
 				}
 			}

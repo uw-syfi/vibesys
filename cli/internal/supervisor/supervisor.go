@@ -76,6 +76,7 @@ func (s *Supervisor) Start() error {
 		return nil
 	case lifecycle.RunReleased:
 		return &core.Failure{Kind: core.FailureConflict, Message: "the supervisor was released and cannot start"}
+	case lifecycle.RunParked:
 	}
 	s.phase = lifecycle.RunRunning
 	s.group.Go(s.run)
@@ -105,6 +106,7 @@ func (s *Supervisor) Release() error {
 		return nil
 	case lifecycle.RunRunning:
 		return &core.Failure{Kind: core.FailureConflict, Message: "the job is running; cancel it and release it after its outcome is recorded"}
+	case lifecycle.RunParked, lifecycle.RunFinished:
 	}
 	s.phase = lifecycle.RunReleased
 	s.cancel()

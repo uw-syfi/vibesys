@@ -75,6 +75,9 @@ type entry struct {
 	// a zero holdUntil, and the look it is owed sets it.
 	holds     bool
 	holdUntil time.Time
+	// parked says a job in doubt is known: its store has it running and its command has not
+	// started. It starts in its turn.
+	parked bool
 }
 
 // awayStore is a store the daemon could not read, whose jobs it has not all heard of.
@@ -581,6 +584,13 @@ func (s *State) recover(e Recovered) []Request {
 func (s *State) recoverRunning(e Recovered, kept entry) []Request {
 	switch p := e.Supervisor.(type) {
 	case RunAlive:
+		if p.Phase == RunParked {
+			// Its command has not started, so it starts in its turn: another job may run by now.
+			s.place(e, kept, PhaseInDoubt)
+			cur := &s.entries[s.find(e.Ref)]
+			cur.parked, cur.trouble = true, core.Failure{Kind: core.FailureUnavailable, Message: "its command waits for the machine"}
+			return nil
+		}
 		s.place(e, kept, PhaseRunning)
 		cur := &s.entries[s.find(e.Ref)]
 		cur.cancelSent = cur.cancelAsked
@@ -593,8 +603,9 @@ func (s *State) recoverRunning(e Recovered, kept entry) []Request {
 		// retried.
 		s.place(e, kept, PhaseRunning)
 		return s.settle(e.Ref, lostJob(e.Ref.Job, e.At))
+	default:
+		return s.inDoubt(e, kept)
 	}
-	return s.inDoubt(e, kept)
 }
 
 // recoverEnded handles a job that needs the daemon no more: a run left over holds nothing of value,
@@ -603,8 +614,9 @@ func (s *State) recoverEnded(e Recovered) []Request {
 	switch e.Supervisor.(type) {
 	case RunAlive, RunDead:
 		return []Request{Discard{Ref: e.Ref}}
+	default:
+		return nil
 	}
-	return nil
 }
 
 // recoverQueued handles a look at a job that is queued in the machine, which can have a run left.
@@ -631,8 +643,9 @@ func (s *State) recoverQueuedAfresh(e Recovered, kept entry) []Request {
 	case RunAlive, RunDead:
 		s.place(e, kept, PhaseDiscarding)
 		return []Request{Discard{Ref: e.Ref, Queued: true}}
+	default:
+		return s.inDoubt(e, kept)
 	}
-	return s.inDoubt(e, kept)
 }
 
 // place puts the job in the machine in a phase, keeping what it was told before.
@@ -644,7 +657,7 @@ func (s *State) place(e Recovered, kept entry, phase Phase) {
 			kept.submittedAt = f.SubmittedAt
 		}
 	}
-	kept.phase, kept.waiting, kept.holds = phase, false, false
+	kept.phase, kept.waiting, kept.holds, kept.parked = phase, false, false, false
 	if phase != PhaseInDoubt {
 		kept.holdUntil = time.Time{}
 	}
@@ -658,7 +671,13 @@ func (s *State) inDoubt(e Recovered, kept entry) []Request {
 	cur := &s.entries[i]
 	cur.trouble = core.Failure{Kind: core.FailureUnavailable, Message: doubtOf(e)}
 	cur.judgeHold(e.Supervisor, e.At)
-	return s.awaitRetry(i)
+	reqs := s.awaitRetry(i)
+	// A cancel needs the supervisor only, so it goes on while the store cannot be read.
+	if _, alive := e.Supervisor.(RunAlive); alive && cur.cancelAsked && !cur.cancelSent {
+		cur.cancelSent = true
+		reqs = append(reqs, SignalCancel{Ref: e.Ref, Reason: cur.cancelReason})
+	}
+	return reqs
 }
 
 // doubtOf says why a look left a job in doubt.
@@ -744,7 +763,7 @@ func (s *State) cancel(e CancelAsked) []Request {
 // cancelFailed offers a cancel that did not arrive again, after a while.
 func (s *State) cancelFailed(ref Ref) []Request {
 	i := s.find(ref)
-	if i < 0 || s.entries[i].phase != PhaseRunning {
+	if i < 0 || (s.entries[i].phase != PhaseRunning && s.entries[i].phase != PhaseInDoubt) {
 		return nil
 	}
 	s.entries[i].cancelSent = false
@@ -792,7 +811,13 @@ func (s *State) launchFailed(e LaunchFailed) []Request {
 	cur := &s.entries[i]
 	if cur.cancelAsked {
 		// The job never ran, so the cancel the user asked for is the end it gets.
-		return s.settle(e.Ref, cancelQueued(e.Ref.Job, cur.cancelReason, e.At))
+		st := cancelQueued(e.Ref.Job, cur.cancelReason, e.At)
+		if e.Cause == CauseStoreAway {
+			// Its store may have it running. The shell moves it from what the store shows, and
+			// until then the rest of the store waits, as for any job shown running.
+			st.Transition.From = core.JobRunning
+		}
+		return s.settle(e.Ref, st)
 	}
 	switch e.Cause {
 	case CauseStoreAway:
@@ -817,8 +842,9 @@ func (s *State) finished(e Finished) []Request {
 		// Whatever the command did, its output did not all reach the store, so the job did not
 		// succeed as far as anyone can check.
 		return s.settle(e.Ref, stoppedJob(e.Ref.Job, s.entries[i].trouble, e.At))
+	default:
+		return nil
 	}
-	return nil
 }
 
 func (s *State) lost(e SupervisorLost) []Request {
@@ -880,8 +906,9 @@ func (s *State) moveFailed(e MoveFailed) []Request {
 	case PhaseSettling, PhaseCancelling, PhaseUnrecorded:
 		cur.phase, cur.trouble = PhaseUnrecorded, e.Failure
 		return s.awaitRetry(i)
+	default:
+		return nil
 	}
-	return nil
 }
 
 func (s *State) discardFailed(e DiscardFailed) []Request {
@@ -932,8 +959,26 @@ func (s *State) settle(ref Ref, st Settlement) []Request {
 	return []Request{Move{Ref: ref, Settlement: st, Release: true}}
 }
 
-// schedule starts the oldest queued job when nothing else holds the machine.
+// adoptParked takes up the first job whose command waits in a parked supervisor, once the machine
+// is free. A cancel does not wait for that: it needs the supervisor only, and no command starts.
+func (s *State) adoptParked() (Request, bool) {
+	free := !s.busy() && !s.recovering
+	for i := range s.entries {
+		cur := &s.entries[i]
+		if cur.parked && (free || cur.cancelAsked) {
+			cur.phase, cur.parked, cur.cancelSent, cur.holdUntil = PhaseRunning, false, cur.cancelAsked, time.Time{}
+			return Adopt{Ref: cur.ref, CancelFirst: cur.cancelAsked, CancelReason: cur.cancelReason}, true
+		}
+	}
+	return nil, false
+}
+
+// schedule starts what is next when nothing else holds the machine: the first job with a parked
+// supervisor, and then the oldest queued job.
 func (s *State) schedule() (Request, bool) {
+	if r, ok := s.adoptParked(); ok {
+		return r, true
+	}
 	best := -1
 	for i, e := range s.entries {
 		if e.phase != PhaseQueued || s.storeBlocked(e.ref.Store) {
@@ -993,6 +1038,12 @@ func (s State) Held() []Held {
 		out = append(out, Held{Ref: e.ref, Phase: e.phase, CancelAsked: e.cancelAsked})
 	}
 	return out
+}
+
+// Parked says the job waits for its turn with a parked supervisor, which it will need.
+func (s State) Parked(ref Ref) bool {
+	i := s.find(ref)
+	return i >= 0 && s.entries[i].parked
 }
 
 // Trouble is a job that cannot go on until something outside the daemon does: why, and which job.

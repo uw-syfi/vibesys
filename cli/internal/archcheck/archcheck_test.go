@@ -5,6 +5,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"testing/quick"
@@ -358,4 +359,64 @@ func keys(m map[string]string) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// exhaustiveTree is a small tree with a union, an enum and one switch over each.
+func exhaustiveTree(body string) map[string]string {
+	return map[string]string{
+		"cli/internal/lifecycle/a.go": `package lifecycle
+
+type Event interface{ event() }
+type Started struct{}
+type Ended struct{}
+
+func (Started) event() {}
+func (Ended) event()   {}
+
+type Phase string
+
+const (
+	PhaseUp   Phase = "up"
+	PhaseDown Phase = "down"
+)
+`,
+		"cli/internal/core/b.go": "package core\n\nimport \"github.com/uw-syfi/vibesys/cli/internal/lifecycle\"\n\n" +
+			"func f(e lifecycle.Event, p lifecycle.Phase) {\n" + body + "\n}\n",
+	}
+}
+
+func hasSwitchViolation(found []string, naming string) bool {
+	return slices.ContainsFunc(found, func(line string) bool {
+		return strings.Contains(line, "a switch over") && strings.Contains(line, naming)
+	})
+}
+
+// A switch over a closed set names every member or has a default, and one found by its marker
+// needs no list, so a member added later is held too.
+func TestASwitchOverAClosedSetLeavesNothingOut(t *testing.T) {
+	for name, tc := range map[string]struct {
+		body string
+		bad  string
+	}{
+		"a union with a member left out":  {"switch e.(type) {\ncase lifecycle.Started:\n}", "lifecycle.Ended"},
+		"an enum with a member left out":  {"switch p {\ncase lifecycle.PhaseUp:\n}", "lifecycle.PhaseDown"},
+		"a union with every member":       {"switch e.(type) {\ncase lifecycle.Started, lifecycle.Ended:\n}", ""},
+		"an enum with every member":       {"switch p {\ncase lifecycle.PhaseUp:\ncase lifecycle.PhaseDown:\n}", ""},
+		"a default says what the rest do": {"switch e.(type) {\ncase lifecycle.Started:\ndefault:\n}", ""},
+		"a switch on something else":      {"switch x := 1; x {\ncase 1:\n}", ""},
+		"a switch with no tag":            {"switch {\ncase p == lifecycle.PhaseUp:\n}", ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			found := archcheck.Violations(exhaustiveTree(tc.body))
+			if tc.bad == "" {
+				if hasSwitchViolation(found, "") {
+					t.Fatalf("flagged: %v", found)
+				}
+				return
+			}
+			if !hasSwitchViolation(found, tc.bad) {
+				t.Fatalf("not flagged: %v", found)
+			}
+		})
+	}
 }

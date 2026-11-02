@@ -61,6 +61,8 @@ func (m *memory) Commit(change ledger.Change) error {
 		m.events[c.Event.Run] = append(m.events[c.Event.Run], c.Event)
 	case ledger.AddLog:
 		m.logs[c.Job] = append(m.logs[c.Job], c.Data...)
+	default:
+		// The engine keeps the rest itself, and memory has no other copy to keep.
 	}
 	return nil
 }

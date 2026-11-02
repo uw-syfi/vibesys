@@ -159,6 +159,7 @@ func Violations(files map[string]string) []string {
 		}
 	}
 	found = append(found, decoderViolations(files)...)
+	found = append(found, switchViolations(files)...)
 	sort.Strings(found)
 	return found
 }

@@ -138,7 +138,7 @@ func (a *App) loop() {
 		// Before any effect starts: whoever sees an effect's work in a store finds the counts
 		// already past it.
 		a.publish(state, scopes)
-		keepHandle(handles, m, reqs)
+		keepHandle(handles, m, reqs, state)
 		for _, r := range reqs {
 			a.startEffect(r, scopes, handles)
 		}
@@ -154,6 +154,8 @@ func (a *App) loop() {
 					dropHandle(handles, ref)
 				}
 			}
+		default:
+			// The rest leave the job in the machine, with whatever it holds.
 		}
 		if m.then != nil {
 			a.group.Go(m.then)
@@ -164,14 +166,16 @@ func (a *App) loop() {
 	}
 }
 
-// keepHandle keeps a message's handle if the machine asked for something of its job. One that a
-// probe found before the machine moved on is not the job's, which may have a newer run by now.
-func keepHandle(handles map[lifecycle.Ref]supervisor.Handle, m message, reqs []lifecycle.Request) {
+// keepHandle keeps a message's handle if the machine asked for something of its job, or keeps the
+// job for its turn. One that a probe found before the machine moved on is not the job's, which may
+// have a newer run by now.
+func keepHandle(handles map[lifecycle.Ref]supervisor.Handle, m message, reqs []lifecycle.Request, state lifecycle.State) {
 	if m.handle == nil {
 		return
 	}
 	ref, hasRef := refOf(m.event)
-	if !hasRef || !slices.ContainsFunc(reqs, func(r lifecycle.Request) bool { return r.Target() == ref }) {
+	asked := slices.ContainsFunc(reqs, func(r lifecycle.Request) bool { return r.Target() == ref })
+	if !hasRef || (!asked && !state.Parked(ref)) {
 		m.handle.Close()
 		return
 	}
@@ -199,8 +203,10 @@ func refOf(e lifecycle.Event) (lifecycle.Ref, bool) {
 		return e.Ref, true
 	case lifecycle.LaunchFailed:
 		return e.Ref, true
+	default:
+		// The rest bring no handle.
+		return lifecycle.Ref{}, false
 	}
-	return lifecycle.Ref{}, false
 }
 
 // publish makes the machine's state readable, and wakes whoever new trouble concerns.

@@ -3,6 +3,7 @@ package lifecycle_test
 import (
 	"fmt"
 	"math/rand/v2"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -492,5 +493,33 @@ func TestJobsSubmittedAtOneInstantStartInArrivalOrder(t *testing.T) {
 	}
 	if !slices.Equal(launched, refs) {
 		t.Fatalf("launch order %v, want %v", launched, refs)
+	}
+}
+
+// A store the machine has not read can have anything running, so none of its jobs starts until it
+// is read, and the rest of the machine goes on.
+func TestAStoreNotReadStartsNothingAndHoldsNothingElse(t *testing.T) {
+	away, other := lifecycle.StoreIDOf("/gone", "t"), lifecycle.StoreIDOf("/here", "t")
+	s, _ := lifecycle.Step(lifecycle.Recovering(), lifecycle.RecoveryDone{})
+	s, reqs := lifecycle.Step(s, lifecycle.StoreUnread{Store: away, Failure: core.Failure{Kind: core.FailureUnavailable, Message: "away"}})
+	if len(reqs) != 0 {
+		t.Fatalf("requests = %+v", reqs)
+	}
+	stuck := lifecycle.Ref{Store: away, Job: "a"}
+	s, reqs = lifecycle.Step(s, lifecycle.Admitted{Ref: stuck, SubmittedAt: time.Unix(1, 0)})
+	if len(reqs) != 0 {
+		t.Fatalf("a job of an unread store was asked for: %+v", reqs)
+	}
+	if got := s.Waiting(); len(got) != 1 || got[0].Ref != stuck {
+		t.Fatalf("waiting = %+v, want the job with a reason", got)
+	}
+	next := lifecycle.Ref{Store: other, Job: "b"}
+	s, reqs = lifecycle.Step(s, lifecycle.Admitted{Ref: next, SubmittedAt: time.Unix(2, 0)})
+	if want := []lifecycle.Request{lifecycle.LaunchRequest{Ref: next}}; !reflect.DeepEqual(reqs, want) {
+		t.Fatalf("requests = %+v, want %+v", reqs, want)
+	}
+	_, reqs = lifecycle.Step(s, lifecycle.StoreRead{Store: away})
+	if len(reqs) != 0 {
+		t.Fatalf("a store read again started a job beside another: %+v", reqs)
 	}
 }

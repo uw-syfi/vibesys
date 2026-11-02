@@ -161,6 +161,8 @@ func CanJoin(existing Job, submission Submission, defaultSamples uint32) bool {
 		return same && theirs.wanted(defaultSamples) > 0 &&
 			ours.wanted(defaultSamples) >= theirs.wanted(defaultSamples) &&
 			(ours.Recheck || !theirs.Recheck)
+	case CommandSettings:
+		return false
 	}
 	return false
 }
