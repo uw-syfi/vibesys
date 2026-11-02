@@ -34,8 +34,8 @@ var taskName = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
 // Stores opens the stores the daemon serves. The daemon is the only user of a store, so an
 // implementation hands the same store to every call for a scope for as long as it lives.
 type Stores interface {
-	// Find returns the store of the scope, and makes nothing: only a submission brings a store into
-	// being, so a mistyped task and a mount point with no disk in it stay as they are. It fails with
+	// Find returns the store of the scope, and makes nothing: only a submission or a new plan brings a
+	// store into being, so a mistyped task and a mount point with no disk in it stay as they are. It fails with
 	// a failure marked store.ErrNoStore when none was made, and store.ErrAway when one was made and
 	// cannot be reached.
 	Find(ctx context.Context, scope Scope) (store.Store, error)

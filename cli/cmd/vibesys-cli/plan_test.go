@@ -312,23 +312,21 @@ func TestPlanJSONOutput(t *testing.T) {
 	}
 }
 
-// Only a submission makes a store, so a plan cannot be made in a task that has had no job: the
-// command says the task has no store, a list is empty, and the refused create leaves no store, so
-// the same create works once a job was submitted.
-func TestAPlanNeedsATaskThatHasAStore(t *testing.T) {
+// A planner writes plans before the first job: a create makes the task's store, while a view on a
+// task with no store says so and a list is empty. The plan stays when the first job comes.
+func TestAPlanCanBeWrittenBeforeTheFirstJob(t *testing.T) {
 	c := newCLI(t)
-	r := c.plan("create", "--title", "t")
-	if r.code != exitFailed || r.stdout != "" || !strings.Contains(r.stderr, "no store") {
-		t.Fatalf("create in a task with no store = %+v, want a refusal that says so", r)
-	}
 	if r := c.plan("list"); r.code != exitOK || r.stdout != "" {
 		t.Fatalf("list in a task with no store = %+v, want nothing", r)
 	}
-	if r := c.plan("view", "1"); r.code != exitFailed {
-		t.Fatalf("view in a task with no store = %+v, want a refusal", r)
+	if r := c.plan("view", "1"); r.code != exitFailed || !strings.Contains(r.stderr, "no store") {
+		t.Fatalf("view in a task with no store = %+v, want a refusal that says so", r)
+	}
+	if r := c.plan("create", "--title", "t"); r.code != exitOK || r.stdout != "1\topen\tt\n" {
+		t.Fatalf("create in a task with no store = %+v, want plan 1", r)
 	}
 	c.taskWithAJob("kv")
-	if r := c.plan("create", "--title", "t"); r.code != exitOK || r.stdout != "1\topen\tt\n" {
-		t.Fatalf("create after a job was submitted = %+v", r)
+	if r := c.plan("list"); r.code != exitOK || r.stdout != "1\topen\tt\n" {
+		t.Fatalf("list after a job was submitted = %+v, want plan 1", r)
 	}
 }

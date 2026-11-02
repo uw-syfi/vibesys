@@ -204,8 +204,9 @@ five statuses: `open`, `chosen`, `won`, `parked` and `rejected`. The CLI orders 
 agent may move a plan from any status to any other, and it stores the body and the comments as they
 are given. A plan number may be written `3` or `#3`. `plan view` shows the jobs linked to a plan; the
 verdict of each against the result branch is not shown yet, because `compare` is not available in
-this build. Only a submission makes a task's store, so the plan commands that write or view refuse a
-task that has had no job with a "no store" error, and `plan list` prints nothing for it.
+this build. A submission or `plan create` makes a task's store, so a planner can write plans before
+the first job. The other plan commands refuse a task with no store with a "no store" error, and
+`plan list` prints nothing for it.
 
 Exit codes: `0` ok (for `wait`, every job it waited on succeeded), `1` failed (a job did not
 succeed, or the call was refused), `2` invalid input or a job that does not exist, `3` a `wait`

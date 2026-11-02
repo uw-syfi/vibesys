@@ -12,9 +12,9 @@ import (
 // beyond the store: every call is one atomic store operation, so a plan written by a call that
 // returned is durable, and a call that failed changed nothing. Which status a plan takes, and in
 // what order, is the agents' to decide: the daemon refuses only a value that is not a status.
-// Only a submission makes a store, so a task has plans to read or write once its first job was
-// submitted; a plan flow on a task with no store is refused as not found, and a list of its plans
-// is empty.
+// A new plan makes the task's store if it has none, like a submission, because planners write
+// plans before the first job runs. Every other plan flow makes nothing: on a task with no store it
+// is refused as not found, and a list of its plans is empty.
 
 // PlanChange is the fields an edit sets. A nil field is left as it is.
 type PlanChange struct {
@@ -31,7 +31,11 @@ func (a *App) CreatePlan(ctx context.Context, c core.CallContext, title, body st
 	if err := core.CheckPlanBody("body", body); err != nil {
 		return core.Plan{}, err
 	}
-	st, err := a.open(ctx, scopeOf(c))
+	scope := scopeOf(c)
+	if err := scope.Validate(); err != nil {
+		return core.Plan{}, err
+	}
+	st, err := a.createStore(ctx, scope)
 	if err != nil {
 		return core.Plan{}, err
 	}

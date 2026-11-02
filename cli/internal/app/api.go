@@ -55,13 +55,7 @@ func (a *App) Submit(ctx context.Context, req SubmitRequest) (core.SubmitOutcome
 	if err := scope.Validate(); err != nil {
 		return core.SubmitOutcome{}, err
 	}
-	// Only a submission makes a store.
-	var st store.Store
-	err := a.retry(ctx, func(ctx context.Context) error {
-		var err error
-		st, err = a.cfg.Stores.Create(ctx, scope)
-		return err
-	})
+	st, err := a.createStore(ctx, scope)
 	if err != nil {
 		return core.SubmitOutcome{}, err
 	}
@@ -90,6 +84,18 @@ func (a *App) Submit(ctx context.Context, req SubmitRequest) (core.SubmitOutcome
 	}
 	a.notifyJobs()
 	return out, nil
+}
+
+// createStore returns the store of a valid scope, making it if needed, trying for a bounded
+// time. Only the calls that write a task's first record make a store: a submission and a new plan.
+func (a *App) createStore(ctx context.Context, scope Scope) (store.Store, error) {
+	var st store.Store
+	err := a.retry(ctx, func(ctx context.Context) error {
+		var err error
+		st, err = a.cfg.Stores.Create(ctx, scope)
+		return err
+	})
+	return st, err
 }
 
 // open returns the store of the scope, or says what is wrong with the scope. It makes nothing.

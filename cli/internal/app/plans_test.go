@@ -27,8 +27,8 @@ func wantNotFound(t *testing.T, what string, err error) {
 	}
 }
 
-// Only a submission makes a store, so a task has plans once its first job was submitted. The
-// plan flows are tests of what is stored, and each starts from a task that has a store.
+// The plan flows are tests of what is stored, and each starts from a task that has a store made
+// by a submission.
 func taskWithAJob(t *testing.T, a *app.App, c core.CallContext) {
 	t.Helper()
 	out, err := a.Submit(ctxFor(t), app.SubmitRequest{Context: c, Spec: command("exit", "0")})
@@ -54,16 +54,15 @@ func newPlanApp(t *testing.T) *app.App {
 	return a
 }
 
-// A plan flow on a task that has no store makes none: a list is empty, and a write or a view is
-// refused as not found, so a mistyped task leaves nothing behind.
-func TestAPlanFlowOnATaskWithNoStoreMakesNone(t *testing.T) {
+// On a task with no store, a list is empty and a view, edit, comment or close is refused as not
+// found and makes no store. A new plan makes the store, since planners write plans before the
+// first job.
+func TestOnlyANewPlanMakesAStoreForATaskWithNone(t *testing.T) {
 	w := newWorld(t)
 	a := w.newApp()
 	ctx := ctxFor(t)
 	title := "t"
-	_, err := a.CreatePlan(ctx, call, "title", "body")
-	wantNotFound(t, "create", err)
-	_, err = a.ViewPlan(ctx, scope, 1)
+	_, err := a.ViewPlan(ctx, scope, 1)
 	wantNotFound(t, "view", err)
 	_, err = a.EditPlan(ctx, call, 1, app.PlanChange{Title: &title})
 	wantNotFound(t, "edit", err)
@@ -77,9 +76,15 @@ func TestAPlanFlowOnATaskWithNoStoreMakesNone(t *testing.T) {
 	if known, err := w.stores.Known(ctx); err != nil || len(known) != 0 {
 		t.Fatalf("known stores = %v, %v; the refused calls must not have made one", known, err)
 	}
-	taskWithAJob(t, a, call)
 	if p, err := a.CreatePlan(ctx, call, "title", "body"); err != nil || p.Number != 1 {
-		t.Fatalf("plan after the first job = %+v, %v; want number 1", p, err)
+		t.Fatalf("first plan on a task with no store = %+v, %v; want number 1", p, err)
+	}
+	if known, err := w.stores.Known(ctx); err != nil || len(known) != 1 {
+		t.Fatalf("known stores = %v, %v; the new plan must have made one", known, err)
+	}
+	taskWithAJob(t, a, call)
+	if got, err := a.Plans(ctx, scope, core.PlanFilter{}); err != nil || len(got) != 1 {
+		t.Fatalf("plans after the first job = %+v, %v; want the one plan", got, err)
 	}
 }
 
