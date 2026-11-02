@@ -720,9 +720,10 @@ def test_unknown_envelope_version_and_cross_run_input_are_prerequisites() -> Non
     value = _envelope()
     value["schema_version"] = 999
     # A document newer than every frozen version is read by the newest descriptors, so it has the
-    # newest shape: the records state version 44 dropped is not in it.
+    # newest shape: the records state version 44 dropped and the fence version 46 dropped are not in it.
     for removed in ("hosts", "children", "recovery"):
         del value["core"]["records"][removed]
+    del value["fence"]
     with pytest.raises(FactImportError, match="schema_version"):
         _import(ImportSource("future.json", SourceFormat.ENVELOPE, json.dumps(value).encode()))
     with pytest.raises(FactImportError, match="another run"):

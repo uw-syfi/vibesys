@@ -283,7 +283,6 @@ def saved_counter(run_id: str, *, wakes: tuple[float, ...] = ()) -> RuntimeRecor
     )
     envelope = RunEnvelope[FlowState](
         schema_version=core.ENVELOPE_SCHEMA_VERSION,
-        fence=core.HostFence(host_id=core.HostId(root="writer"), epoch=1),
         strategy_id=strategy.declaration.strategy_id,
         state_schema=strategy.declaration.state_schema,
         core=state,

@@ -26,8 +26,6 @@ from vs_core.api import (
     EvidenceId,
     EvidenceKind,
     EvidenceRef,
-    HostFence,
-    HostId,
     InvocationId,
     InvocationRef,
     JobObserved,
@@ -442,7 +440,6 @@ def test_crash_boundaries_do_not_duplicate_resume_or_paid_work() -> None:
     assert submitted.phase == core.RequestPhase.COMPLETED
     initial = RunEnvelope[CallbackState](
         schema_version=ENVELOPE_SCHEMA_VERSION,
-        fence=HostFence(host_id=HostId(root="host"), epoch=1),
         strategy_id=original.run.declaration.strategy_id,
         state_schema=SchemaRef(name="callbacks", version=1),
         core=ingress.state,

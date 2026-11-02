@@ -2,11 +2,10 @@
 # with UPDATE_GOLDEN=1. scripts/check_persisted_schema_compat.py checks a change keeps
 # every saved document, or raises the version.
 shape RunEnvelope[FlowState]
-version 45
+version 46
 $root {"additionalProperties":false,"type":"object"}
 $root.core required {"$ref":"#/$defs/CoreState"}
 $root.event_cursor required {"$ref":"#/$defs/EventCursor"}
-$root.fence required {"$ref":"#/$defs/HostFence"}
 $root.schema_version required {"minimum":1,"type":"integer"}
 $root.state_schema required {"$ref":"#/$defs/SchemaRef"}
 $root.strategy required {"$ref":"#/$defs/FlowState"}
@@ -522,12 +521,6 @@ HistoricalSubmissionReceipt {"additionalProperties":false,"type":"object"}
 HistoricalSubmissionReceipt.kind optional {"const":"historical","default":"historical","type":"string"}
 HistoricalSubmissionReceipt.ordinal required {"minimum":1,"type":"integer"}
 HistoricalSubmissionReceipt.proof required {"$ref":"#/$defs/ArtifactRef"}
-HostFence {"additionalProperties":false,"type":"object"}
-HostFence.epoch required {"$ref":"#/$defs/Count"}
-HostFence.host_id required {"$ref":"#/$defs/HostId"}
-HostId {"additionalProperties":false,"type":"object"}
-HostId.kind optional {"const":"host","default":"host","type":"string"}
-HostId.root required {"minLength":1,"pattern":"^\\S+$","type":"string"}
 InFlight {"additionalProperties":false,"type":"object"}
 InFlight.answer optional {"anyOf":[{"discriminator":{"mapping":{"adoption_finished":"#/$defs/AdoptionFinished","failed":"#/$defs/Failed","workspace_closed":"#/$defs/WorkspaceClosed","workspace_opened":"#/$defs/WorkspaceOpened"},"propertyName":"kind"},"oneOf":[{"$ref":"#/$defs/WorkspaceOpened"},{"$ref":"#/$defs/WorkspaceClosed"},{"$ref":"#/$defs/AdoptionFinished"},{"$ref":"#/$defs/Failed"}]},{"type":"null"}],"default":null}
 InFlight.label required {"type":"string"}

@@ -22,7 +22,6 @@ from .common import (
     Count,
     DecisionId,
     EventCursor,
-    HostFence,
     Limits,
     OperationDescriptor,
     RequestId,
@@ -430,7 +429,7 @@ class Transition(Value):
 
 
 class RunEnvelope[S: StrategyState](Value):
-    """Atomic core, strategy, fence and cursor envelope with explicit versioning.
+    """Atomic core, strategy and cursor envelope with explicit versioning.
 
     ``schema_version`` is ``ENVELOPE_SCHEMA_VERSION`` when written; the shape is pinned by
     vs-core's ``tests/envelope.persisted-schema.txt``, and a change every saved envelope
@@ -444,7 +443,6 @@ class RunEnvelope[S: StrategyState](Value):
     """
 
     schema_version: int = Field(ge=1)
-    fence: HostFence
     strategy_id: StrategyId
     state_schema: SchemaRef
     core: CoreState

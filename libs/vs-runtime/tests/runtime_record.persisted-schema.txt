@@ -2,7 +2,7 @@
 # with UPDATE_GOLDEN=1. scripts/check_persisted_schema_compat.py checks a change keeps
 # every saved document, or raises the version.
 shape RuntimeRecord[FlowState]
-version 45.1
+version 46.1
 $root {"additionalProperties":false,"type":"object"}
 $root.delivery_cursor required {"minimum":0,"type":"integer"}
 $root.envelope required {"$ref":"#/$defs/RunEnvelope_FlowState_"}
@@ -641,12 +641,6 @@ HistoricalSubmissionReceipt {"additionalProperties":false,"type":"object"}
 HistoricalSubmissionReceipt.kind optional {"const":"historical","default":"historical","type":"string"}
 HistoricalSubmissionReceipt.ordinal required {"minimum":1,"type":"integer"}
 HistoricalSubmissionReceipt.proof required {"$ref":"#/$defs/ArtifactRef"}
-HostFence {"additionalProperties":false,"type":"object"}
-HostFence.epoch required {"$ref":"#/$defs/Count"}
-HostFence.host_id required {"$ref":"#/$defs/HostId"}
-HostId {"additionalProperties":false,"type":"object"}
-HostId.kind optional {"const":"host","default":"host","type":"string"}
-HostId.root required {"minLength":1,"pattern":"^\\S+$","type":"string"}
 InFlight {"additionalProperties":false,"type":"object"}
 InFlight.answer optional {"anyOf":[{"discriminator":{"mapping":{"adoption_finished":"#/$defs/AdoptionFinished","failed":"#/$defs/Failed","workspace_closed":"#/$defs/WorkspaceClosed","workspace_opened":"#/$defs/WorkspaceOpened"},"propertyName":"kind"},"oneOf":[{"$ref":"#/$defs/WorkspaceOpened"},{"$ref":"#/$defs/WorkspaceClosed"},{"$ref":"#/$defs/AdoptionFinished"},{"$ref":"#/$defs/Failed"}]},{"type":"null"}],"default":null}
 InFlight.label required {"type":"string"}
@@ -1416,7 +1410,6 @@ RunEnded.result required {"$ref":"#/$defs/RunResultProposal"}
 RunEnvelope_FlowState_ {"additionalProperties":false,"type":"object"}
 RunEnvelope_FlowState_.core required {"$ref":"#/$defs/CoreState"}
 RunEnvelope_FlowState_.event_cursor required {"$ref":"#/$defs/EventCursor"}
-RunEnvelope_FlowState_.fence required {"$ref":"#/$defs/HostFence"}
 RunEnvelope_FlowState_.schema_version required {"minimum":1,"type":"integer"}
 RunEnvelope_FlowState_.state_schema required {"$ref":"#/$defs/SchemaRef"}
 RunEnvelope_FlowState_.strategy required {"$ref":"#/$defs/FlowState"}

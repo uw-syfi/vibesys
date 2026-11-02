@@ -49,8 +49,6 @@ from vs_core.api import (
     EventCursor,
     EventId,
     EvidenceRequirements,
-    HostFence,
-    HostId,
     Inbox,
     InspectRequest,
     InspectTurn,
@@ -919,7 +917,6 @@ class _Driver[S: StrategyState]:
             raise ValueError(message)
         envelope = self.envelope_type(
             schema_version=ENVELOPE_SCHEMA_VERSION,
-            fence=HostFence(host_id=HostId(root="driver"), epoch=1),
             strategy_id=trace.core.run.declaration.strategy_id,
             state_schema=trace.core.run.declaration.state_schema,
             core=trace.core,

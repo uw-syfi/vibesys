@@ -11,8 +11,6 @@ from scripts.corevalue.tests.api import FrozenMap, MapValue, TimestampValue, dec
 from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
     EventCursor,
-    HostFence,
-    HostId,
     OperationRegistry,
     RunEnvelope,
     StrategyState,
@@ -29,7 +27,6 @@ def test_generated_maps_work_inside_the_existing_persisted_envelope(counts: dict
     state = initial_state()
     envelope = RunEnvelope[GeneratedMapState](
         schema_version=ENVELOPE_SCHEMA_VERSION,
-        fence=HostFence(host_id=HostId(root="host"), epoch=1),
         strategy_id=state.run.declaration.strategy_id,
         state_schema=state.run.declaration.state_schema,
         core=state,

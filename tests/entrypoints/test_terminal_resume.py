@@ -14,8 +14,6 @@ from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
     EventCursor,
     FlowState,
-    HostFence,
-    HostId,
     RunEnvelope,
     RunId,
     RunResultProposal,
@@ -87,7 +85,6 @@ def _commit_core(root: Path, *, status: CoreRunStatus, result: RunResultProposal
     core = core.model_copy(update={"run": run})
     envelope = RunEnvelope[FlowState](
         schema_version=ENVELOPE_SCHEMA_VERSION,
-        fence=HostFence(host_id=HostId(root="writer"), epoch=1),
         strategy_id=strategy.declaration.strategy_id,
         state_schema=strategy.declaration.state_schema,
         core=core,

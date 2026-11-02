@@ -13,8 +13,6 @@ from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
     ContractError,
     EventCursor,
-    HostFence,
-    HostId,
     OperationRegistry,
     RunEnvelope,
     StrategyState,
@@ -73,7 +71,6 @@ def _envelope(tree: Tree) -> RunEnvelope[Tree]:
     state = initial_state()
     return RunEnvelope[Tree](
         schema_version=ENVELOPE_SCHEMA_VERSION,
-        fence=HostFence(host_id=HostId(root="host"), epoch=1),
         strategy_id=state.run.declaration.strategy_id,
         state_schema=state.run.declaration.state_schema,
         core=state,

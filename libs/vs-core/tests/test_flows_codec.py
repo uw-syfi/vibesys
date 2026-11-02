@@ -35,7 +35,6 @@ def _through_the_envelope(state: core.FlowState) -> core.FlowState:
     core_state = core.initial_state()
     envelope = core.RunEnvelope[core.FlowState](
         schema_version=core.ENVELOPE_SCHEMA_VERSION,
-        fence=core.HostFence(host_id=core.HostId(root="host"), epoch=0),
         strategy_id=core_state.run.declaration.strategy_id,
         state_schema=core_state.run.declaration.state_schema,
         core=core_state,
