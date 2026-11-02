@@ -116,19 +116,22 @@ def test_deltas_name_their_item_and_split_assistant_text_from_command_output() -
     ]
 
 
-def test_cumulative_usage_reports_replace_each_other() -> None:
+def test_usage_reports_during_the_turn_are_not_passed_on_only_the_result_is() -> None:
     out = normalize(
         "t1",
-        [
-            UsageReport(_usage(10, 1), None),
-            UsageReport(_usage(25, 4), None),
-            UsageReport(_usage(25, 4), None),
-        ],
+        [UsageReport(_usage(10, 1), None), UsageReport(_usage(25, 4), None)],
         DONE,
+        _usage(40, 7),
     )
     reports = [e.usage.usage for e in out if e.HasField("usage")]
-    assert [(u.input_tokens, u.output_tokens) for u in reports] == [(10, 1), (25, 4)]
+    assert [(u.input_tokens, u.output_tokens) for u in reports] == [(40, 7)]
     assert out[-1].turn_ended.usage == reports[-1]
+
+
+def test_a_turn_without_a_result_ends_without_usage() -> None:
+    out = normalize("t1", [UsageReport(_usage(10, 1), None)], orch.TURN_STATUS_FAILED)
+    assert not any(e.HasField("usage") for e in out)
+    assert not out[-1].turn_ended.HasField("usage")
 
 
 def test_usage_leaves_out_what_the_provider_does_not_report() -> None:
@@ -158,7 +161,7 @@ def test_usage_leaves_out_what_the_provider_does_not_report() -> None:
     assert not unknown.HasField("input_tokens")
 
 
-def test_a_steer_is_accepted_when_consumed_and_refused_after_the_turn_ends_otherwise() -> None:
+def test_a_steer_is_answered_when_consumed_or_rejected_and_refused_at_the_end_otherwise() -> None:
     book = SteerBook()
     book.add("m1", "one")
     book.add("m2", "two")
@@ -166,14 +169,11 @@ def test_a_steer_is_accepted_when_consumed_and_refused_after_the_turn_ends_other
     normalizer = TurnNormalizer("t1", book)
     consumed = normalizer.feed(SteerConsumed("two"))
     assert [(e.steer.message_id, e.steer.accepted) for e in consumed] == [("m2", True)]
-    normalizer.feed(SteerRejected("one", "turn ended"))  # answered at the end, after TurnEnded
+    rejected = normalizer.feed(SteerRejected("one", "turn ended"))
+    assert [(e.steer.message_id, e.steer.accepted) for e in rejected] == [("m1", False)]
     out = normalizer.finish(DONE)
-    kinds = [e.WhichOneof("body") for e in out]
-    assert kinds == ["turn_ended", "steer", "steer"]
-    assert [(e.steer.message_id, e.steer.accepted) for e in out[1:]] == [
-        ("m1", False),
-        ("m3", False),
-    ]
+    assert [e.WhichOneof("body") for e in out] == ["turn_ended", "steer"]
+    assert [(e.steer.message_id, e.steer.accepted) for e in out[1:]] == [("m3", False)]
 
 
 EVENT = st.one_of(

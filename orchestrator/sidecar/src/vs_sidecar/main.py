@@ -3,6 +3,10 @@
 The daemon writes the ``LaunchSession`` it wants (protobuf JSON) to a file, starts this process in
 its own session so it outlives the daemon, and talks to it over the socket. Everything the session
 did is in ``--state-dir``, so a restarted sidecar can tell the daemon what happened.
+
+The agent is a child of this process and leads a process group of its own. A sidecar that is killed
+without warning cannot stop it, so the state directory names both for the daemon, which reaps them
+(see the README, "Process lifetime"): ``sidecar.pid`` and ``agent.pgids``.
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import protovalidate
 from agentshim import StdioMcpServer
 from google.protobuf import json_format
 
@@ -37,6 +42,11 @@ if TYPE_CHECKING:
 IDLE_TICK_SECONDS = 0.25
 #: How long the process stays up after the session closes, so the daemon can read the close.
 LINGER_SECONDS = 60.0
+#: How long a stopped sidecar waits for its worker to wind down before it gives up on it.
+STOP_SECONDS = 30.0
+#: The state directory's names for the process ids the daemon reaps.
+PIDFILE = "sidecar.pid"
+GROUPS_FILE = "agent.pgids"
 
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
@@ -53,12 +63,60 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+class LaunchError(ValueError):
+    """The launch cannot start a session; the message names what is wrong."""
+
+
 def load_launch(path: Path, worktree: str | None) -> fx.LaunchSession:
-    """The launch spec in *path*, with *worktree* filled in where the file has none."""
+    """The launch spec in *path*, with *worktree* filled in where the file has none.
+
+    Raises ``LaunchError`` for a launch that breaks its contract or has no worktree, from the file
+    or ``--worktree``: the agent needs a directory to work in.
+    """
     launch = json_format.Parse(path.read_text(), fx.LaunchSession())
     if worktree and not launch.worktree:
         launch.worktree = worktree
+    if not launch.worktree:
+        msg = (
+            "launch.worktree is empty: give the agent's directory in the launch or with --worktree"
+        )
+        raise LaunchError(msg)
+    try:
+        protovalidate.Validator().validate(launch, fail_fast=True)
+    except protovalidate.ValidationError as error:
+        msg = f"launch is invalid: {error}"
+        raise LaunchError(msg) from error
     return launch
+
+
+def child_pids(proc: Path = Path("/proc")) -> list[int]:
+    """The process ids of this process's children, read from *proc* (Linux)."""
+    found: list[int] = []
+    for children in sorted(proc.glob("self/task/*/children")):
+        try:
+            found.extend(int(token) for token in children.read_text().split())
+        except (OSError, ValueError):
+            continue
+    return sorted(set(found))
+
+
+def agent_groups(proc: Path = Path("/proc")) -> list[int]:
+    """The process groups led by this process's children: the agent, which starts a session."""
+    groups: list[int] = []
+    for pid in child_pids(proc):
+        try:
+            if os.getpgid(pid) == pid:
+                groups.append(pid)
+        except ProcessLookupError:
+            continue
+    return groups
+
+
+def write_atomically(path: Path, text: str) -> None:
+    """Replace *path* with *text* so a reader sees the old file or the new one."""
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_text(text)
+    temporary.replace(path)
 
 
 def load_mcp(path: Path | None) -> list[StdioMcpServer]:
@@ -115,14 +173,86 @@ def _conversation_id(launch: fx.LaunchSession) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_URL, name))
 
 
-def work(engine: Engine, wakeup: Wakeup, stop: threading.Event) -> None:
-    """The worker: run queued turns, poll the provider between them, until closed or stopped."""
+def work(
+    engine: Engine,
+    wakeup: Wakeup,
+    stop: threading.Event,
+    record: Callable[[], None] = lambda: None,
+) -> None:
+    """The worker: run queued turns, poll the provider between them, until closed or stopped.
+
+    *record* runs after each step, to note the agent's process groups once it exists.
+    """
     while not stop.is_set() and not engine.finished:
         seen = wakeup.version
-        if engine.run_next():
+        ran = engine.run_next()
+        record()
+        if ran:
             continue
         engine.poll_idle()
         wakeup.wait(seen, IDLE_TICK_SECONDS)
+
+
+class AgentGroups:
+    """Keeps ``agent.pgids`` naming the process groups of this process's children."""
+
+    def __init__(self, path: Path) -> None:
+        """Write to *path*."""
+        self._path = path
+        self._written = ""
+
+    def record(self) -> None:
+        """Rewrite the file if the groups changed."""
+        text = "".join(f"{pgid}\n" for pgid in agent_groups())
+        if text != self._written:
+            write_atomically(self._path, text)
+            self._written = text
+
+
+def serve_session(engine: Engine, wakeup: Wakeup, args: argparse.Namespace) -> None:
+    """Serve *engine* and run its worker until the session ends or a signal stops it.
+
+    On the way out, whatever the reason (a signal, a failed write, a bug), the agent is closed, so
+    it does not outlive the sidecar's own knowledge of it. A failure in the worker is raised here
+    after that cleanup.
+    """
+    groups = AgentGroups(args.state_dir / GROUPS_FILE)
+    stop = threading.Event()
+    wake = threading.Event()
+    for number in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(number, lambda *_: (stop.set(), wake.set()))
+    failure: list[BaseException] = []
+
+    def run() -> None:
+        try:
+            engine.start()
+            groups.record()
+            work(engine, wakeup, stop, groups.record)
+        # lint-waiver: LW-770003 [BLE001]; the worker must report any failure to the main thread.
+        # > A narrower except would let a store failure or a bug end the thread silently, and then
+        # > the agent would be left running; the main thread re-raises what is caught here.
+        except BaseException as error:  # noqa: BLE001
+            failure.append(error)
+        finally:
+            wake.set()
+
+    server = None
+    try:
+        server = serve(engine, wakeup, args.socket)
+        worker = threading.Thread(target=run, name="vs-sidecar-worker")
+        worker.start()
+        wake.wait()
+        if stop.is_set():
+            engine.shutdown()
+        worker.join(STOP_SECONDS)
+        if not stop.is_set() and engine.finished:
+            stop.wait(LINGER_SECONDS)
+    finally:
+        engine.release()
+        if server is not None:
+            server.stop(grace=1).wait()
+    if failure:
+        raise failure[0]
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -130,22 +260,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     if args.detach:
         detach(args.state_dir / "sidecar.log")
-    launch = load_launch(args.launch, args.worktree)
+    try:
+        launch = load_launch(args.launch, args.worktree)
+    except LaunchError as error:
+        sys.stderr.write(f"vs_sidecar: {error}\n")
+        return 2
+    args.state_dir.mkdir(parents=True, exist_ok=True)
+    write_atomically(args.state_dir / PIDFILE, f"{os.getpid()}\n")
     wakeup = Wakeup()
     engine = Engine(
         launch,
-        FileStore(args.state_dir),
+        FileStore.at(args.state_dir),
         driver_factory(launch, load_mcp(args.mcp_config)),
         wakeup.notify,
     )
-    engine.start()
-    server = serve(engine, wakeup, args.socket)
-    stop = threading.Event()
-    for number in (signal.SIGTERM, signal.SIGINT):
-        signal.signal(number, lambda *_: stop.set())
-    work(engine, wakeup, stop)
-    stop.wait(LINGER_SECONDS if engine.finished else 0)
-    server.stop(grace=1).wait()
+    serve_session(engine, wakeup, args)
     return 0
 
 

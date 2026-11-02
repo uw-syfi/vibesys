@@ -11,7 +11,15 @@ Decisions:
   failed and the daemon launches a new one that resumes the conversation.
 - A restarted sidecar owns no provider process, so it ends every open turn as FAILED, reports
   ``SessionFailed`` and refuses further work except ``Close``.
-- Activity between turns is filed under the last turn's id.
+- Activity between turns is filed under the last turn's id. One normalizer folds a whole stretch of
+  idle activity, so an item that spans polls keeps its arguments; items still running when the idle
+  stretch ends (a turn begins, the session fails or closes) are settled as failed. Idle activity
+  reports no usage: the provider gives a total only for a turn's result.
+- An interrupt or a steer names its turn. The engine checks the name under its lock, the driver
+  checks it again, and an interrupt that arrives before the provider has started the turn is kept
+  and applied when it starts, so neither is lost nor lands on the turn after.
+- A failed write to the store is fatal: it propagates, the shell ends the process, and a restart
+  reports the session lost.
 """
 
 from __future__ import annotations
@@ -47,6 +55,10 @@ class InvalidCommandError(ValueError):
     """A command that breaks its contract, or names another session."""
 
 
+class InvalidEventError(RuntimeError):
+    """The engine built an event that breaks the event contract: a bug, never kept."""
+
+
 class Engine:
     """One agent session."""
 
@@ -70,6 +82,8 @@ class Engine:
         self._driver: Driver | None = None
         self._pending: deque[tuple[str, str]] = deque()
         self._turn: TurnNormalizer | None = None
+        self._idle: TurnNormalizer | None = None
+        self._idle_runs = 0
         self._steers = SteerBook()
         self._last_turn = IDLE_TURN
         self._closing = False
@@ -113,21 +127,38 @@ class Engine:
         if "closed" in kinds:
             self._closed = True
             return
-        started = {event.item.turn_id for event in history if event.HasField("item")}
+        last_item: dict[str, sc.SidecarItem] = {}
+        for event in history:
+            if event.HasField("item"):
+                last_item[event.item.id] = event.item
+        started = {item.turn_id for item in last_item.values()}
         started |= {event.usage.turn_id for event in history if event.HasField("usage")}
         ended = {event.turn_ended.turn_id for event in history if event.HasField("turn_ended")}
-        for turn_id in sorted(started - ended - {IDLE_TURN}):
-            self._append(
-                sc.SidecarEvent(
-                    turn_ended=sc.TurnEnded(turn_id=turn_id, status=orch.TURN_STATUS_FAILED)
+        # Nothing will report on a running item again: settle every one, each open turn's before
+        # that turn's end.
+        for turn_id in [*sorted(started - ended - {IDLE_TURN}), None]:
+            for item in last_item.values():
+                if item.status == orch.ITEM_STATUS_RUNNING and (
+                    turn_id is None or item.turn_id == turn_id
+                ):
+                    lost = sc.SidecarItem()
+                    lost.CopyFrom(item)
+                    lost.status = orch.ITEM_STATUS_FAILED
+                    last_item[item.id] = lost
+                    self._append(sc.SidecarEvent(item=lost))
+            if turn_id is not None:
+                self._append(
+                    sc.SidecarEvent(
+                        turn_ended=sc.TurnEnded(turn_id=turn_id, status=orch.TURN_STATUS_FAILED)
+                    )
                 )
-            )
         if "failed" not in kinds:
             self._fail("the sidecar restarted and lost the agent process")
         self._failed = True
 
     def _fail(self, detail: str) -> None:
         self._failed = True
+        self._end_idle(orch.TURN_STATUS_FAILED)
         self._append(sc.SidecarEvent(failed=sc.SessionFailed(detail=detail)))
 
     # -- reading
@@ -209,31 +240,66 @@ class Engine:
         if not running or driver is None:
             return
         try:
-            driver.steer(text)
+            driver.steer(steer.turn_id, text)
         except SteerRefusedError:
-            # Left in the book: it is answered as not accepted when the turn ends.
-            return
+            with self._lock:
+                if self._steers.take(text) is not None:
+                    self._append(
+                        sc.SidecarEvent(
+                            steer=sc.SteerOutcome(message_id=steer.message.id, accepted=False)
+                        )
+                    )
+
+    def _cancel_pending(self, matches: Callable[[str], bool]) -> None:
+        """End the queued turns *matches* picks as interrupted, so none is left without an end.
+
+        Call with the lock held.
+        """
+        kept: deque[tuple[str, str]] = deque()
+        for turn_id, prompt in self._pending:
+            if matches(turn_id):
+                self._append(
+                    sc.SidecarEvent(
+                        turn_ended=sc.TurnEnded(
+                            turn_id=turn_id, status=orch.TURN_STATUS_INTERRUPTED
+                        )
+                    )
+                )
+            else:
+                kept.append((turn_id, prompt))
+        self._pending = kept
 
     def _interrupt(self, interrupt: fx.Interrupt) -> None:
         with self._lock:
             driver = self._driver
             running = self._turn is not None and self._turn.turn_id == interrupt.turn_id
-            self._pending = deque(p for p in self._pending if p[0] != interrupt.turn_id)
+            self._cancel_pending(lambda queued: queued == interrupt.turn_id)
         if running and driver is not None:
-            driver.interrupt()
+            driver.interrupt(interrupt.turn_id)
 
     def _close(self, close: fx.CloseSession) -> None:
         with self._lock:
             self._closing = True
-            self._pending.clear()
+            self._cancel_pending(lambda _queued: True)
             driver = self._driver
-            running = self._turn is not None
-        if driver is not None and running:
-            driver.interrupt()
+            turn = self._turn
+        if driver is not None and turn is not None:
+            driver.interrupt(turn.turn_id)
             if close.force:
                 driver.close()
-        if not running:
+        if turn is None:
             self._finish_close()
+
+    def shutdown(self) -> None:
+        """End the session as ``Close(force)`` does: interrupt the turn, stop the agent, close."""
+        self._close(fx.CloseSession(force=True))
+
+    def release(self) -> None:
+        """Stop the provider process and write nothing: for a process that is ending."""
+        with self._lock:
+            driver = self._driver
+        if driver is not None:
+            driver.close()
 
     def _finish_close(self) -> None:
         with self._lock:
@@ -244,6 +310,7 @@ class Engine:
             driver.close()
         with self._lock:
             self._closed = True
+            self._end_idle(orch.TURN_STATUS_FAILED)
             self._append(sc.SidecarEvent(closed=sc.SessionClosed()))
 
     # -- the worker
@@ -255,14 +322,21 @@ class Engine:
             if not self._pending or self._unusable or driver is None:
                 return False
             turn_id, prompt = self._pending.popleft()
-            normalizer = self._turn = TurnNormalizer(turn_id, self._steers)
+            self._end_idle(orch.TURN_STATUS_FAILED)
+            normalizer = TurnNormalizer(turn_id, self._steers)
+            # The driver learns the turn before anyone can address it (``_turn`` is what
+            # ``_interrupt`` and ``_steer`` check), so an interrupt is never sent to a driver that
+            # has not heard of the turn, and the driver keeps one that comes before the provider
+            # starts it.
+            driver.begin_turn(turn_id, prompt)
+            self._turn = normalizer
 
         def emit(event: AgentEvent) -> None:
             with self._lock:
                 for out in normalizer.feed(event):
                     self._append(out)
 
-        result = driver.run_turn(prompt, emit)
+        result = driver.run_turn(emit)
         with self._lock:
             for out in normalizer.finish(result.status, result.usage):
                 self._append(out)
@@ -279,7 +353,12 @@ class Engine:
             driver = self._driver
             if driver is None or self._unusable or self._turn is not None:
                 return not self._unusable
-            normalizer = TurnNormalizer(self._last_turn, self._steers)
+            if self._idle is None:
+                self._idle_runs += 1
+                self._idle = TurnNormalizer(
+                    self._last_turn, self._steers, f"{self._last_turn}:idle{self._idle_runs}"
+                )
+            normalizer = self._idle
 
         def emit(event: AgentEvent) -> None:
             with self._lock:
@@ -293,12 +372,29 @@ class Engine:
                     self._fail("the agent process ended")
         return alive
 
+    def _end_idle(self, status: int) -> None:
+        """Settle the items of the idle stretch that is over. Call with the lock held."""
+        if self._idle is not None:
+            for out in self._idle.settle(status):
+                self._append(out)
+            self._idle = None
+
     # -- log
 
     def _append(self, event: sc.SidecarEvent) -> None:
+        # The offset is the store's to give, so a copy with a placeholder is what is checked.
+        probe = sc.SidecarEvent()
+        probe.CopyFrom(event)
+        probe.offset = 1
+        try:
+            self._validator.validate(probe, fail_fast=True)
+        except protovalidate.ValidationError as error:
+            msg = f"the sidecar made an event that breaks its contract: {error}"
+            raise InvalidEventError(msg) from error
         self._store.append(event)
         self._notify()
 
     def _on_raw(self, frame: RawFrame) -> None:
-        with self._lock:
-            self._store.append_raw(FrameDirection(frame.direction.value), frame.text)
+        # No engine lock: the store is thread-safe and a raw frame must not wait for, or make
+        # wait, anything that reads the event log.
+        self._store.append_raw(FrameDirection(frame.direction.value), frame.text)

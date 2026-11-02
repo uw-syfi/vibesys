@@ -39,6 +39,10 @@ class Client(Protocol):
         stream ends), within a bound that only guards against a hang."""
         ...
 
+    def restart(self) -> None:
+        """Kill the sidecar where it stands and start another on the state the first left."""
+        ...
+
 
 @dataclass(frozen=True)
 class Scenario:
@@ -82,6 +86,15 @@ def _reached(condition: Mapping[str, Any]) -> Callable[[Sequence[sc.SidecarEvent
                 return True
             if "closed" in condition and event.HasField("closed"):
                 return True
+            if "failed" in condition and event.HasField("failed"):
+                return True
+            if (
+                "item" in condition
+                and event.HasField("item")
+                and event.item.id == condition["item"]
+                and event.item.status == orch.ITEM_STATUS_FINISHED
+            ):
+                return True
         return False
 
     return done
@@ -92,6 +105,8 @@ def run(scenario: Scenario, client: Client) -> list[sc.SidecarEvent]:
     for step in scenario.steps:
         if "send" in step:
             client.send(command(step["send"]))
+        elif "restart" in step:
+            client.restart()
         else:
             client.follow(0, _reached(step["await"]))
     return client.follow(0, lambda events: _settled(events, scenario))
@@ -152,13 +167,41 @@ def _no_running_item_after_end(events: Sequence[sc.SidecarEvent], *_: object) ->
     assert orch.ITEM_STATUS_RUNNING not in status.values(), status
 
 
-def _usage_ends_the_turn(events: Sequence[sc.SidecarEvent], *_: object) -> None:
-    last: dict[str, sc.Usage] = {}
-    for event in events:
-        if event.HasField("usage"):
-            last[event.usage.turn_id] = event.usage.usage
-        elif event.HasField("turn_ended") and event.turn_ended.turn_id in last:
-            assert event.turn_ended.usage == last[event.turn_ended.turn_id]
+def _usage_is_the_turn_result(
+    events: Sequence[sc.SidecarEvent], scenario: Scenario, *_: object
+) -> None:
+    for turn, wanted in scenario.expect["usage"].items():
+        reports = [e.usage.usage for e in events if e.HasField("usage") and e.usage.turn_id == turn]
+        (end,) = [
+            e.turn_ended
+            for e in events
+            if e.HasField("turn_ended") and e.turn_ended.turn_id == turn
+        ]
+        if wanted is None:
+            assert not reports, f"turn {turn} has no result but reported {reports}"
+            assert not end.HasField("usage")
+        else:
+            assert reports == [end.usage], f"turn {turn}: one report, equal to the end's usage"
+            assert (end.usage.input_tokens, end.usage.output_tokens) == (
+                wanted["input"],
+                wanted["output"],
+            )
+
+
+def _session_lost_after_restart(
+    events: Sequence[sc.SidecarEvent], scenario: Scenario, *_: object
+) -> None:
+    lost = [i for i, e in enumerate(events) if e.HasField("failed")]
+    assert len(lost) == 1, "the loss is reported once"
+    for turn in scenario.expect["failed_turns"]:
+        ends = [
+            i
+            for i, e in enumerate(events)
+            if e.HasField("turn_ended") and e.turn_ended.turn_id == turn
+        ]
+        assert len(ends) == 1, f"turn {turn} must end once"
+        assert ends[0] < lost[0], f"turn {turn} must end before the loss"
+        assert events[ends[0]].turn_ended.status == orch.TURN_STATUS_FAILED
 
 
 def _effect_repeat_dropped(
@@ -207,7 +250,8 @@ CHECKS: dict[str, Callable[..., None]] = {
     "one_end_per_turn": _one_end_per_turn,
     "items_precede_end": _items_precede_end,
     "no_running_item_after_end": _no_running_item_after_end,
-    "usage_ends_the_turn": _usage_ends_the_turn,
+    "usage_is_the_turn_result": _usage_is_the_turn_result,
+    "session_lost_after_restart": _session_lost_after_restart,
     "effect_repeat_dropped": _effect_repeat_dropped,
     "follow_resumes": _follow_resumes,
     "late_steer_refused": _late_steer_refused,

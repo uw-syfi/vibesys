@@ -18,7 +18,7 @@
         "exit_code": 0
       },
       {
-        "usage": {
+        "total": {
           "input": 10,
           "output": 2
         }
@@ -58,7 +58,15 @@
     "one_end_per_turn",
     "items_precede_end",
     "no_running_item_after_end",
-    "usage_ends_the_turn",
+    "usage_is_the_turn_result",
     "follow_resumes"
-  ]
+  ],
+  "expect": {
+    "usage": {
+      "t1": {
+        "input": 10,
+        "output": 2
+      }
+    }
+  }
 }

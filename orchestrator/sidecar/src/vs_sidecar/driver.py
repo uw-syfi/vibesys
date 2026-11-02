@@ -7,6 +7,7 @@ nowhere else. Tests give it an ``Agent`` built on agentshim's scripted providers
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol
 
@@ -21,6 +22,7 @@ from agentshim import (
     SessionStateError,
     StdioMcpServer,
     TransportKind,
+    TurnCancelledError,
     TurnRequest,
 )
 
@@ -29,7 +31,7 @@ from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as orch
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
-    from agentshim import AgentEvent, RawFrame, Session
+    from agentshim import AgentEvent, RawFrame, Session, TurnTicket
 
     from vs_sidecar.gen.vibesys.orchestrator.v1 import effects_pb2 as fx
 
@@ -64,23 +66,35 @@ class SteerRefusedError(Exception):
 class Driver(Protocol):
     """A provider session, as the engine drives it.
 
-    ``steer`` and ``interrupt`` may be called from another thread while ``run_turn`` runs.
+    A turn is named: ``begin_turn`` announces it, ``run_turn`` runs it, and ``steer`` and
+    ``interrupt`` act on a turn by id and only on that turn. One that names a turn that has not
+    begun, or has ended, does nothing (``interrupt``) or raises ``SteerRefusedError`` (``steer``),
+    so a late command never reaches the turn after it. ``begin_turn`` never blocks. ``steer`` and
+    ``interrupt`` may be called from another thread while ``run_turn`` runs.
     """
 
     def open(self) -> Opened:
         """Start (or resume) the provider session and say what it can do."""
         ...
 
-    def run_turn(self, prompt: str, emit: Callable[[AgentEvent], None]) -> TurnResult:
-        """Run one turn to its end, sending each event to *emit*. Never raises for a provider failure."""
+    def begin_turn(self, turn_id: str, prompt: str) -> None:
+        """Announce the next turn, so a steer or an interrupt addressed to it is routed to it."""
         ...
 
-    def steer(self, text: str) -> None:
-        """Send *text* to the running turn, or raise ``SteerRefusedError``."""
+    def run_turn(self, emit: Callable[[AgentEvent], None]) -> TurnResult:
+        """Run the begun turn to its end, sending each event to *emit*.
+
+        An interrupt that arrived after ``begin_turn`` ends the turn, even if it arrived before the
+        provider had started it. Never raises for a provider failure.
+        """
         ...
 
-    def interrupt(self) -> None:
-        """End the running turn and keep the conversation."""
+    def steer(self, turn_id: str, text: str) -> None:
+        """Send *text* to turn *turn_id* if it is the one running, or raise ``SteerRefusedError``."""
+        ...
+
+    def interrupt(self, turn_id: str) -> None:
+        """End turn *turn_id* and keep the conversation; nothing if it is not the current turn."""
         ...
 
     def poll_idle(self, emit: Callable[[AgentEvent], None]) -> bool:
@@ -90,6 +104,16 @@ class Driver(Protocol):
     def close(self) -> None:
         """End the session and its process."""
         ...
+
+
+@dataclass
+class _Active:
+    """The turn the driver is on: announced, then (once the session reserved it) ticketed."""
+
+    turn_id: str
+    prompt: str
+    ticket: TurnTicket | None = None
+    interrupt_requested: bool = False
 
 
 class _Forward:
@@ -119,6 +143,10 @@ class AgentshimDriver:
         self._factory = factory
         self._preferred_id = preferred_id
         self._session: Session | None = None
+        # Guards ``_active`` only, and is never held while calling into the session, so it cannot
+        # wait on a turn.
+        self._lock = threading.Lock()
+        self._active: _Active | None = None
 
     def open(self) -> Opened:
         """See ``Driver.open``. Opens the conversation now so its id is known before a turn."""
@@ -145,28 +173,67 @@ class AgentshimDriver:
             raise SessionStateError(msg)
         return self._session
 
-    def run_turn(self, prompt: str, emit: Callable[[AgentEvent], None]) -> TurnResult:
+    def begin_turn(self, turn_id: str, prompt: str) -> None:
+        """See ``Driver.begin_turn``."""
+        with self._lock:
+            self._active = _Active(turn_id, prompt)
+
+    def run_turn(self, emit: Callable[[AgentEvent], None]) -> TurnResult:
         """See ``Driver.run_turn``."""
+        with self._lock:
+            active = self._active
+        if active is None:
+            msg = "no turn has begun"
+            raise SessionStateError(msg)
         try:
-            ticket = self._live.prepare_turn(TurnRequest(prompt=prompt))
+            ticket = self._live.prepare_turn(TurnRequest(prompt=active.prompt))
+            with self._lock:
+                active.ticket = ticket
+                early = active.interrupt_requested
+            if early:
+                self._live.interrupt(ticket)
             turn = self._live.run(ticket, on_event=_Forward(emit))
+        except TurnCancelledError:
+            return TurnResult(orch.TURN_STATUS_INTERRUPTED)
         except AgentShimError as error:
             return TurnResult(orch.TURN_STATUS_FAILED, detail=f"{type(error).__name__}: {error}")
+        finally:
+            with self._lock:
+                self._active = None
         status = (
             orch.TURN_STATUS_INTERRUPTED if turn.result.interrupted else orch.TURN_STATUS_COMPLETED
         )
         return TurnResult(status, turn.result.usage)
 
-    def steer(self, text: str) -> None:
+    def _ticket_of(self, turn_id: str) -> TurnTicket | None:
+        """The ticket of *turn_id* if it is the current turn and has one."""
+        with self._lock:
+            active = self._active
+            if active is None or active.turn_id != turn_id:
+                return None
+            return active.ticket
+
+    def steer(self, turn_id: str, text: str) -> None:
         """See ``Driver.steer``."""
+        ticket = self._ticket_of(turn_id)
+        if ticket is None:
+            msg = f"turn {turn_id} is not running"
+            raise SteerRefusedError(msg)
         try:
-            self._live.steer(text)
+            self._live.steer(text, ticket)
         except (NoRunningTurnError, ProviderCapabilityError, SessionStateError) as error:
             raise SteerRefusedError(str(error)) from error
 
-    def interrupt(self) -> None:
+    def interrupt(self, turn_id: str) -> None:
         """See ``Driver.interrupt``."""
-        self._live.interrupt()
+        with self._lock:
+            active = self._active
+            if active is None or active.turn_id != turn_id:
+                return
+            active.interrupt_requested = True
+            ticket = active.ticket
+        if ticket is not None:
+            self._live.interrupt(ticket)
 
     def poll_idle(self, emit: Callable[[AgentEvent], None]) -> bool:
         """See ``Driver.poll_idle``."""

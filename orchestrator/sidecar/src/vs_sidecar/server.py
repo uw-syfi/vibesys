@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import threading
 from concurrent import futures
 from typing import TYPE_CHECKING
@@ -92,9 +93,15 @@ def serve(engine: Engine, wakeup: Wakeup, socket: Path, workers: int = 8) -> grp
     socket.unlink(missing_ok=True)
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=workers))
     sc_grpc.add_SidecarServiceServicer_to_server(Servicer(engine, wakeup), server)
-    if server.add_insecure_port(f"unix:{socket}") == 0:
+    # The socket is created with the process's umask, so narrow it for the bind: it is never
+    # reachable by anyone but the owner, not even for the moment before a chmod.
+    previous = os.umask(0o077)
+    try:
+        bound = server.add_insecure_port(f"unix:{socket}")
+    finally:
+        os.umask(previous)
+    if bound == 0:
         msg = f"could not listen on {socket}"
         raise OSError(msg)
-    socket.chmod(0o600)
     server.start()
     return server

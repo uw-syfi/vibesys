@@ -33,7 +33,7 @@ def make(request: pytest.FixtureRequest, tmp_path: Path) -> Callable[[], Store]:
     if request.param == "memory":
         store = MemoryStore()
         return lambda: store
-    return lambda: FileStore(tmp_path / "state")
+    return lambda: FileStore.at(tmp_path / "state")
 
 
 def test_events_are_numbered_from_one_and_read_after_an_offset(make: Callable[[], Store]) -> None:
@@ -69,12 +69,12 @@ def test_raw_frames_keep_their_order_and_the_offset_they_followed(
 
 
 def test_a_reopened_file_store_has_everything(tmp_path: Path) -> None:
-    store = FileStore(tmp_path)
+    store = FileStore.at(tmp_path)
     for n in range(1, 4):
         store.append(_event(n))
     store.append_raw(FrameDirection.TO_PROVIDER, "frame")
     store.remember_effect("e1")
-    again = FileStore(tmp_path)
+    again = FileStore.at(tmp_path)
     assert again.events_after(0) == store.events_after(0)
     assert again.raw_frames() == store.raw_frames()
     assert again.remember_effect("e1") is False
@@ -108,12 +108,12 @@ def test_lines_decode_total(data: bytes) -> None:
 
 
 def test_reopening_cuts_a_torn_tail_off_the_files(tmp_path: Path) -> None:
-    store = FileStore(tmp_path)
+    store = FileStore.at(tmp_path)
     store.append(_event(1))
     store.append(_event(2))
     path = tmp_path / "events.log"
     path.write_bytes(path.read_bytes()[:-3])
-    again = FileStore(tmp_path)
+    again = FileStore.at(tmp_path)
     assert [e.offset for e in again.events_after(0)] == [1]
     assert again.append(_event(3)).offset == 2
-    assert [e.offset for e in FileStore(tmp_path).events_after(0)] == [1, 2]
+    assert [e.offset for e in FileStore.at(tmp_path).events_after(0)] == [1, 2]

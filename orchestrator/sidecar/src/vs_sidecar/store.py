@@ -1,8 +1,12 @@
 """The sidecar's memory: an offset-numbered event log, a raw frame log and the effect ids seen.
 
 Two implementations satisfy ``Store``: ``MemoryStore`` for tests and ``FileStore`` for a session.
-Both pass ``tests/store_contract.py``. A crash can tear the last record of a file, so the readers
-keep the whole records and stop at the first torn one; the next append continues from there.
+Both pass the contract tests in ``tests/test_store.py``. A crash can tear the last record of a file,
+so the readers keep the whole records and stop at the first torn one; the next append continues
+from there.
+
+Every method is safe to call from several threads. ``FileStore`` reaches the disk through
+``Files``, so tests give it a file that fails or tears at a chosen write.
 """
 
 from __future__ import annotations
@@ -10,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import struct
+import threading
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
@@ -69,6 +74,76 @@ class Store(Protocol):
     def remember_effect(self, effect_id: str) -> bool:
         """Note an effect id. ``True`` when it is new, ``False`` when it was seen before."""
         ...
+
+
+class StoreError(OSError):
+    """The store can no longer promise that what it holds is what it reported.
+
+    Raised when a write failed and the file could not be put back as it was. Every later append
+    raises it too; the process should end and let a restart repair the file.
+    """
+
+
+class LogFile(Protocol):
+    """One append-only file."""
+
+    def read(self) -> bytes:
+        """Everything in the file (empty when it does not exist yet)."""
+        ...
+
+    def append(self, data: bytes, *, durable: bool) -> None:
+        """Add *data* at the end; with *durable*, not return before it is on disk."""
+        ...
+
+    def truncate(self, size: int) -> None:
+        """Cut the file to *size* bytes."""
+        ...
+
+
+class Files(Protocol):
+    """The files of one session's store, by name."""
+
+    def open(self, name: str) -> LogFile:
+        """The file called *name*, created empty on first use."""
+        ...
+
+
+class DiskLog:
+    """A ``LogFile`` on disk."""
+
+    def __init__(self, path: Path) -> None:
+        """Use the file at *path*."""
+        self._path = path
+
+    def read(self) -> bytes:
+        """See ``LogFile.read``."""
+        return self._path.read_bytes() if self._path.exists() else b""
+
+    def append(self, data: bytes, *, durable: bool) -> None:
+        """See ``LogFile.append``."""
+        with self._path.open("ab") as handle:
+            handle.write(data)
+            handle.flush()
+            if durable:
+                os.fsync(handle.fileno())
+
+    def truncate(self, size: int) -> None:
+        """See ``LogFile.truncate``."""
+        if self._path.exists() and self._path.stat().st_size != size:
+            os.truncate(self._path, size)
+
+
+class DiskFiles:
+    """``Files`` in a directory."""
+
+    def __init__(self, directory: Path) -> None:
+        """Keep the files in *directory*, creating it."""
+        directory.mkdir(parents=True, exist_ok=True)
+        self._directory = directory
+
+    def open(self, name: str) -> LogFile:
+        """See ``Files.open``."""
+        return DiskLog(self._directory / name)
 
 
 def encode_events(events: Iterable[sc.SidecarEvent]) -> bytes:
@@ -150,89 +225,117 @@ class MemoryStore:
         effects: Iterable[str] = (),
     ) -> None:
         """Start with the given history (empty by default)."""
+        self._lock = threading.Lock()
         self._events = list(events)
         self._raw = list(raw)
         self._effects = set(effects)
 
+    def _last(self) -> int:
+        return self._events[-1].offset if self._events else 0
+
+    def numbered(self, event: sc.SidecarEvent) -> sc.SidecarEvent:
+        """A copy of *event* with the offset it would take next. Keeps nothing."""
+        with self._lock:
+            numbered = sc.SidecarEvent()
+            numbered.CopyFrom(event)
+            numbered.offset = self._last() + 1
+            return numbered
+
+    def keep(self, numbered: sc.SidecarEvent) -> None:
+        """Keep an event ``numbered`` gave out; it must still be the next offset."""
+        with self._lock:
+            if numbered.offset != self._last() + 1:
+                msg = f"offset {numbered.offset} is not the next offset {self._last() + 1}"
+                raise ValueError(msg)
+            self._events.append(numbered)
+
     def append(self, event: sc.SidecarEvent) -> sc.SidecarEvent:
         """See ``Store.append``."""
-        numbered = sc.SidecarEvent()
-        numbered.CopyFrom(event)
-        numbered.offset = self.last_offset() + 1
-        self._events.append(numbered)
-        return numbered
+        with self._lock:
+            numbered = sc.SidecarEvent()
+            numbered.CopyFrom(event)
+            numbered.offset = self._last() + 1
+            self._events.append(numbered)
+            return numbered
 
     def events_after(self, offset: int) -> list[sc.SidecarEvent]:
         """See ``Store.events_after``."""
-        return [event for event in self._events if event.offset > offset]
+        with self._lock:
+            return [event for event in self._events if event.offset > offset]
 
     def last_offset(self) -> int:
         """See ``Store.last_offset``."""
-        return self._events[-1].offset if self._events else 0
+        with self._lock:
+            return self._last()
 
     def append_raw(self, direction: FrameDirection, text: str) -> None:
         """See ``Store.append_raw``."""
-        self._raw.append(RawRecord(self.last_offset(), direction, text))
+        self.keep_raw(RawRecord(self.last_offset(), direction, text))
+
+    def keep_raw(self, record: RawRecord) -> None:
+        """Keep a raw record."""
+        with self._lock:
+            self._raw.append(record)
 
     def raw_frames(self) -> list[RawRecord]:
         """See ``Store.raw_frames``."""
-        return list(self._raw)
+        with self._lock:
+            return list(self._raw)
 
     def remember_effect(self, effect_id: str) -> bool:
         """See ``Store.remember_effect``."""
-        if effect_id in self._effects:
-            return False
-        self._effects.add(effect_id)
-        return True
+        with self._lock:
+            if effect_id in self._effects:
+                return False
+            self._effects.add(effect_id)
+            return True
+
+    def forget_effect(self, effect_id: str) -> None:
+        """Take back an effect id ``remember_effect`` just accepted."""
+        with self._lock:
+            self._effects.discard(effect_id)
 
 
 class FileStore:
-    """A ``Store`` in a directory: ``events.log``, ``raw.log`` and ``effects.log``.
+    """A ``Store`` over three files: ``events.log``, ``raw.log`` and ``effects.log``.
 
     Opening it reads what is there and cuts a torn tail off each file, so a crash costs at most
-    the record being written. Every append is flushed and synced before it returns, so an event
-    the daemon has read is an event a restart still has.
+    the record being written. An event is written and synced first and kept in memory second, so
+    what ``events_after`` returns is always on disk, and a write that fails is cut off the file
+    again before the error reaches the caller: the log never holds what a reader was not shown,
+    and an offset is never given to two different events. Raw frames are written without a sync
+    (they are diagnostics, and a torn tail is cut on open), so a frame never waits on the disk.
     """
 
-    def __init__(self, directory: Path) -> None:
-        """Open the store in *directory*, creating it, and repair a torn tail."""
-        directory.mkdir(parents=True, exist_ok=True)
-        self._events_path = directory / "events.log"
-        self._raw_path = directory / "raw.log"
-        self._effects_path = directory / "effects.log"
-        events, size = decode_events(self._read(self._events_path))
-        self._cut(self._events_path, size)
-        raw_lines, size = decode_lines(self._read(self._raw_path))
-        self._cut(self._raw_path, size)
-        effect_lines, size = decode_lines(self._read(self._effects_path))
-        self._cut(self._effects_path, size)
+    def __init__(self, files: Files) -> None:
+        """Open the store in *files*, repairing a torn tail."""
+        self._events = _Log(files.open("events.log"))
+        self._raw = _Log(files.open("raw.log"))
+        self._effects = _Log(files.open("effects.log"))
+        events, size = decode_events(self._events.file.read())
+        self._events.settle(size)
+        raw_lines, size = decode_lines(self._raw.file.read())
+        self._raw.settle(size)
+        effect_lines, size = decode_lines(self._effects.file.read())
+        self._effects.settle(size)
         self._memory = MemoryStore(
             events,
             [r for line in raw_lines if (r := _parse_raw(line)) is not None],
             [e for line in effect_lines if (e := _parse_effect(line)) is not None],
         )
 
-    @staticmethod
-    def _read(path: Path) -> bytes:
-        return path.read_bytes() if path.exists() else b""
-
-    @staticmethod
-    def _cut(path: Path, size: int) -> None:
-        if path.exists() and path.stat().st_size != size:
-            os.truncate(path, size)
-
-    @staticmethod
-    def _write(path: Path, data: bytes) -> None:
-        with path.open("ab") as handle:
-            handle.write(data)
-            handle.flush()
-            os.fsync(handle.fileno())
+    @classmethod
+    def at(cls, directory: Path) -> FileStore:
+        """The store in *directory* on disk."""
+        return cls(DiskFiles(directory))
 
     def append(self, event: sc.SidecarEvent) -> sc.SidecarEvent:
-        """See ``Store.append``."""
-        numbered = self._memory.append(event)
-        self._write(self._events_path, encode_events([numbered]))
-        return numbered
+        """See ``Store.append``. Raises the write's error, with the file as it was."""
+        with self._events.lock:
+            numbered = self._memory.numbered(event)
+            self._events.write(encode_events([numbered]), durable=True)
+            self._memory.keep(numbered)
+            return numbered
 
     def events_after(self, offset: int) -> list[sc.SidecarEvent]:
         """See ``Store.events_after``."""
@@ -244,8 +347,10 @@ class FileStore:
 
     def append_raw(self, direction: FrameDirection, text: str) -> None:
         """See ``Store.append_raw``."""
-        self._memory.append_raw(direction, text)
-        self._write(self._raw_path, (_raw_line(self._memory.raw_frames()[-1]) + "\n").encode())
+        with self._raw.lock:
+            record = RawRecord(self._memory.last_offset(), direction, text)
+            self._raw.write((_raw_line(record) + "\n").encode(), durable=False)
+            self._memory.keep_raw(record)
 
     def raw_frames(self) -> list[RawRecord]:
         """See ``Store.raw_frames``."""
@@ -253,7 +358,44 @@ class FileStore:
 
     def remember_effect(self, effect_id: str) -> bool:
         """See ``Store.remember_effect``."""
-        if not self._memory.remember_effect(effect_id):
-            return False
-        self._write(self._effects_path, (json.dumps(effect_id) + "\n").encode())
-        return True
+        with self._effects.lock:
+            if not self._memory.remember_effect(effect_id):
+                return False
+            try:
+                self._effects.write((json.dumps(effect_id) + "\n").encode(), durable=True)
+            except BaseException:
+                self._memory.forget_effect(effect_id)
+                raise
+            return True
+
+
+class _Log:
+    """One file of a ``FileStore`` and the size it is known to have."""
+
+    def __init__(self, file: LogFile) -> None:
+        self.file = file
+        self.lock = threading.Lock()
+        self._size = 0
+        self._broken = False
+
+    def settle(self, size: int) -> None:
+        """Cut the file to *size*, the length of its whole records."""
+        self.file.truncate(size)
+        self._size = size
+
+    def write(self, data: bytes, *, durable: bool) -> None:
+        """Add *data*, or leave the file as it was and raise."""
+        if self._broken:
+            msg = "an earlier write could not be undone"
+            raise StoreError(msg)
+        try:
+            self.file.append(data, durable=durable)
+        except OSError:
+            try:
+                self.file.truncate(self._size)
+            except OSError as undo:
+                self._broken = True
+                msg = "a write failed and could not be undone"
+                raise StoreError(msg) from undo
+            raise
+        self._size += len(data)

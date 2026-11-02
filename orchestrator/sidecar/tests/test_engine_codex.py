@@ -111,7 +111,7 @@ def test_a_command_that_breaks_its_contract_is_refused() -> None:
         engine.send(h.start_turn("", "t1"))
 
 
-def test_usage_reports_replace_one_another_instead_of_adding_up() -> None:
+def test_a_turns_usage_is_reported_once_from_its_result() -> None:
     script = CodexScript().turn(
         Spend(input_tokens=100, output_tokens=10), Say("a"), Spend(input_tokens=50, output_tokens=5)
     )
@@ -120,8 +120,8 @@ def test_usage_reports_replace_one_another_instead_of_adding_up() -> None:
     engine.run_next()
     events = store.events_after(0)
     reports = [e.usage.usage for e in events if e.HasField("usage")]
-    assert reports
-    assert events[-1].turn_ended.usage == reports[-1]
+    assert len(reports) == 1
+    assert events[-1].turn_ended.usage == reports[0]
 
 
 def test_a_steer_the_turn_came_too_late_for_is_answered_after_the_turn_ends() -> None:
@@ -142,12 +142,12 @@ class _Started:
         self._inner = inner
         self._started = started
 
-    def run_turn(self, prompt: str, emit: Callable[[AgentEvent], None]) -> TurnResult:
+    def run_turn(self, emit: Callable[[AgentEvent], None]) -> TurnResult:
         def emitting(event: AgentEvent) -> None:
             emit(event)
             self._started.set()
 
-        return self._inner.run_turn(prompt, emitting)
+        return self._inner.run_turn(emitting)
 
     def __getattr__(self, name: str) -> object:
         return getattr(self._inner, name)

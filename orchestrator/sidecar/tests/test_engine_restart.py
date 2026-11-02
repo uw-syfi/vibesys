@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 
 def _engine(path: Path, driver: ScriptedDriver) -> Engine:
-    engine = Engine(h.launch(), FileStore(path), lambda _sink: driver)
+    engine = Engine(h.launch(), FileStore.at(path), lambda _sink: driver)
     engine.start()
     return engine
 
@@ -35,16 +35,18 @@ def test_a_restart_in_the_middle_of_a_turn_ends_it_failed_and_reports_the_sessio
     first.send(h.start_turn("e1", "t1"))
     with pytest.raises(CrashError):
         first.run_next()
-    before = FileStore(tmp_path).events_after(0)
+    before = FileStore.at(tmp_path).events_after(0)
     assert h.kinds(before) == ["opened", "item", "item"]
 
     second = _engine(tmp_path, ScriptedDriver())
     events = second.events_after(0)
     assert events[: len(before)] == before
     tail = events[len(before) :]
-    assert h.kinds(tail) == ["turn_ended", "failed"]
-    assert tail[0].turn_ended.turn_id == "t1"
-    assert tail[0].turn_ended.status == orch.TURN_STATUS_FAILED
+    assert h.kinds(tail) == ["item", "turn_ended", "failed"]
+    assert tail[0].item.id == "c1"
+    assert tail[0].item.status == orch.ITEM_STATUS_FAILED
+    assert tail[1].turn_ended.turn_id == "t1"
+    assert tail[1].turn_ended.status == orch.TURN_STATUS_FAILED
     assert [e.offset for e in events] == list(range(1, len(events) + 1))
 
 

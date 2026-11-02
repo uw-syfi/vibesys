@@ -1,8 +1,8 @@
 """Frames to items: the deterministic fold from agentshim events to sidecar events.
 
 The same events in the same order always give the same output, and a repeated event changes
-nothing, so replaying a raw log reproduces the event log. Nothing here reads a clock, a file or a
-socket; the engine feeds events in and appends what comes out.
+nothing. Nothing here reads a clock, a file or a socket; the engine feeds events in and appends
+what comes out.
 
 Output events carry ``offset == 0``: the store numbers them.
 """
@@ -18,12 +18,12 @@ from agentshim import (
     ProviderUsage,
     Reasoning,
     SteerConsumed,
+    SteerRejected,
     TextDelta,
     TextKind,
     ToolCall,
     ToolResult,
     TurnInterrupted,
-    UsageReport,
 )
 
 from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as orch
@@ -128,13 +128,23 @@ class TurnNormalizer:
     """Folds the events of one turn into sidecar events.
 
     ``feed`` returns what one event adds; ``finish`` closes the turn. An event that repeats what
-    is already known adds nothing, and a usage report replaces the turn's usage (Codex reports
-    totals, so summing would count twice).
+    is already known adds nothing.
+
+    Usage comes only from the turn's result, passed to ``finish``. The provider's reports during a
+    turn are not turn totals (Claude reports each message's own tokens), so a turn that ends
+    without a result, one that failed, ends without usage rather than with a wrong number.
     """
 
-    def __init__(self, turn_id: str, steers: SteerBook | None = None) -> None:
-        """Fold the events of turn *turn_id*, answering steers from *steers*."""
+    def __init__(
+        self, turn_id: str, steers: SteerBook | None = None, mint_prefix: str | None = None
+    ) -> None:
+        """Fold the events of turn *turn_id*, answering steers from *steers*.
+
+        Items the provider does not name get ids ``<mint_prefix>:n<k>`` (default: the turn id), so
+        two folds filed under one turn id use different prefixes and cannot collide.
+        """
         self._turn_id = turn_id
+        self._mint_prefix = mint_prefix if mint_prefix is not None else turn_id
         self._steers = steers if steers is not None else SteerBook()
         self._items: dict[str, _Item] = {}
         self._minted = 0
@@ -165,8 +175,8 @@ class TurnNormalizer:
             ToolCall: self._call,
             ToolResult: self._result,
             TextDelta: self._delta,
-            UsageReport: lambda event: self._report(event.usage),
             SteerConsumed: lambda event: self._steer(event.text, accepted=True),
+            SteerRejected: lambda event: self._steer(event.text, accepted=False),
             TurnInterrupted: self._interrupted_by,
         }
 
@@ -174,25 +184,36 @@ class TurnNormalizer:
         self._interrupted = True
         return []
 
-    def finish(self, status: int, usage: ProviderUsage | None = None) -> list[sc.SidecarEvent]:
-        """Close the turn: settle unfinished items, end it, then answer unanswered steers.
+    def settle(self, status: int) -> list[sc.SidecarEvent]:
+        """Settle every item still running: finished if *status* completed, failed otherwise.
 
-        An item still running when the turn ends (Codex does not always send ``item/completed``)
-        is finished if the turn completed and failed otherwise. A steer that was never consumed
-        is answered as not accepted, after the ``TurnEnded``, as ``SteerOutcome`` says.
+        Codex does not always send ``item/completed``, and an item nobody will report on again
+        must not stay running.
         """
-        out: list[sc.SidecarEvent] = []
         settled = (
             orch.ITEM_STATUS_FINISHED
             if status == orch.TURN_STATUS_COMPLETED
             else orch.ITEM_STATUS_FAILED
         )
+        out: list[sc.SidecarEvent] = []
         for item_id, item in self._items.items():
             if item.status == orch.ITEM_STATUS_RUNNING:
                 item.status = settled
                 out.append(self._event(item=item.proto(item_id, self._turn_id)))
+        return out
+
+    def finish(self, status: int, usage: ProviderUsage | None = None) -> list[sc.SidecarEvent]:
+        """Close the turn: settle unfinished items, report *usage*, end it, answer open steers.
+
+        *usage* is the turn result's. A steer that was never consumed is answered as not
+        accepted, after the ``TurnEnded``, as ``SteerOutcome`` says.
+        """
+        out = self.settle(status)
         if usage is not None:
-            out.extend(self._report(usage))
+            self._usage = usage_proto(usage)
+            out.append(
+                self._event(usage=sc.UsageReported(turn_id=self._turn_id, usage=self._usage))
+            )
         ended = sc.TurnEnded(turn_id=self._turn_id, status=status)  # type: ignore[arg-type]
         if self._usage is not None:
             ended.usage.CopyFrom(self._usage)
@@ -204,7 +225,7 @@ class TurnNormalizer:
 
     def _mint(self) -> str:
         self._minted += 1
-        return f"{self._turn_id}:n{self._minted}"
+        return f"{self._mint_prefix}:n{self._minted}"
 
     def _text(self, event: AssistantText | Reasoning) -> list[sc.SidecarEvent]:
         item_id = event.item_id or self._mint()
@@ -272,14 +293,7 @@ class TurnNormalizer:
             delta.text = event.text
         return [self._event(delta=delta)]
 
-    # -- usage and steers
-
-    def _report(self, usage: ProviderUsage) -> list[sc.SidecarEvent]:
-        proto = usage_proto(usage)
-        if self._usage is not None and self._usage == proto:
-            return []
-        self._usage = proto
-        return [self._event(usage=sc.UsageReported(turn_id=self._turn_id, usage=proto))]
+    # -- steers
 
     def _steer(self, text: str, *, accepted: bool) -> list[sc.SidecarEvent]:
         message_id = self._steers.take(text)
