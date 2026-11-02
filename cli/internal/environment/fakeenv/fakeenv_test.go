@@ -93,3 +93,51 @@ func TestFakePassesTheEnvironmentContract(t *testing.T) {
 		},
 	})
 }
+
+type files map[string][]byte
+
+func (f files) Put(path string, data []byte) { f[path] = data }
+
+func TestEmitWritesTheOutputFileTheCommandWasGiven(t *testing.T) {
+	put := files{}
+	env := fakeenv.New(core.EnvironmentHost, fakeenv.NewMemoryGates(), fakeenv.WithFiles(put))
+	x := core.Execution{
+		Checkout: core.Checkout{Commit: "0123456789abcdef0123456789abcdef01234567", Dir: "/fake-checkouts/c"},
+		Argv:     []string{"emit", "a", "b", ";", "exit", "3", "--out", "/scratch/x.out"},
+		Timeout:  1,
+	}
+	got, err := env.Run(context.Background(), x, io.Discard)
+	if err != nil || got.Kind != core.ExecExited || got.ExitCode != 3 {
+		t.Fatalf("Run = %+v, %v", got, err)
+	}
+	if string(put["/scratch/x.out"]) != "a b" || len(put) != 1 {
+		t.Errorf("files = %q", put)
+	}
+}
+
+func TestEmitFailsLikeAnyCommandThatCannotWriteItsFile(t *testing.T) {
+	x := core.Execution{
+		Checkout: core.Checkout{Commit: "0123456789abcdef0123456789abcdef01234567", Dir: "/fake-checkouts/c"},
+		Timeout:  1,
+	}
+	for name, c := range map[string]struct {
+		files fakeenv.Files
+		argv  []string
+	}{
+		"no files":        {nil, []string{"emit", "x", "--out", "/scratch/x.out"}},
+		"no output given": {files{}, []string{"emit", "x"}},
+		"relative path":   {files{}, []string{"emit", "x", "--out", "x.out"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var opts []fakeenv.Option
+			if c.files != nil {
+				opts = append(opts, fakeenv.WithFiles(c.files))
+			}
+			env := fakeenv.New(core.EnvironmentHost, fakeenv.NewMemoryGates(), opts...)
+			x.Argv = c.argv
+			if got, err := env.Run(context.Background(), x, io.Discard); err != nil || got.ExitCode != 127 {
+				t.Errorf("Run = %+v, %v; want exit 127", got, err)
+			}
+		})
+	}
+}

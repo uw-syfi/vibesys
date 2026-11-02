@@ -30,8 +30,15 @@ type Gates interface {
 	Wait(ctx context.Context, name string) bool
 }
 
+// Files is where the `emit` step puts the file a command was told to write. A hostfs.Memory is
+// one: the job flow reads the same files back from it.
+type Files interface {
+	Put(path string, data []byte)
+}
+
 // Environment is a fake environment.Environment. Create it with New.
 type Environment struct {
+	files  Files
 	kind   core.EnvironmentKind
 	print  core.Fingerprint
 	gates  Gates
@@ -53,6 +60,10 @@ type Option func(*Environment)
 // WithFingerprint sets the fingerprint the environment reports. The default is a host
 // environment on the CPU backend with a fixed set of facts.
 func WithFingerprint(f core.Fingerprint) Option { return func(e *Environment) { e.print = f } }
+
+// WithFiles sets where `emit` writes. Without it `emit` exits with code 127, as a command does
+// that is told to write a file it cannot.
+func WithFiles(f Files) Option { return func(e *Environment) { e.files = f } }
 
 // WithTimers sets the timers the environment takes its limit and its probe pauses from. The
 // default timers never fire. A test that wants a run to reach its limit supplies timers it fires.

@@ -49,7 +49,12 @@ var rules = map[string][]string{
 	"internal/task":                {"internal/core"},
 	"internal/reading":             {},
 	"internal/flow":                {"internal/core", "internal/reading", "internal/task"},
-	"internal/runtimedir":          {"internal/core"},
+	"internal/hostfs":              {},
+	"internal/flowrun": {
+		"internal/backend", "internal/clock", "internal/core", "internal/environment", "internal/flow",
+		"internal/hostfs", "internal/reading",
+	},
+	"internal/runtimedir": {"internal/core"},
 
 	// Storage.
 	"internal/store":                {"internal/core"},
@@ -106,6 +111,8 @@ var testRules = map[string][]string{
 	"internal/backend/cpu":         {"internal/backend/backendtest"},
 	"internal/environment/fakeenv": {"internal/environment/envtest"},
 	"internal/environment/host":    {"internal/backend/cpu", "internal/environment/envtest", "internal/environment/fakeenv"},
+	"internal/hostfs":              {},
+	"internal/flowrun":             {"internal/backend/cpu", "internal/environment/fakeenv", "internal/environment/host", "internal/task"},
 	"internal/store/memstore":      {"internal/store/storetest"},
 	"internal/store/filestore":     {"internal/store/storetest", "internal/store/memstore"},
 	"internal/supervisor":          {"internal/environment/fakeenv", "internal/supervisor/suptest"},
