@@ -5,21 +5,16 @@ from hashlib import sha256
 
 from vs_core.api import (
     Access,
-    CoreState,
     DispatchTurn,
     EnsureSession,
-    ExecuteRegisteredOperation,
     InvocationId,
     LifecycleClass,
     OperationDescriptor,
     OperationSchemaRef,
-    RecordsState,
-    RecoveryBarrier,
     RequestId,
     RequestPhase,
     RequestRecord,
     RoleId,
-    RunStatus,
     SchemaRef,
     Scope,
     SessionId,
@@ -64,26 +59,6 @@ def pending_record(
         phase=phase,
         until=Until(at=100.0),
         addressed_by=(),
-    )
-
-
-def recovering_state(*records: RequestRecord) -> CoreState:
-    """Reloaded state starts behind the required barrier, retaining all ledgers.
-
-    A record of ``pending_operation`` brings its kind's registration, so a reload decodes it.
-    """
-    state = initial_state()
-    writes = any(
-        isinstance(record.request, ExecuteRegisteredOperation)
-        and record.request.operation.schema_ref == WRITE_SCHEMA
-        for record in records
-    )
-    return state.model_copy(
-        update={
-            "registry": (WRITE_DESCRIPTOR,) if writes else state.registry,
-            "records": RecordsState(hosts=(), records=records, recovery=RecoveryBarrier()),
-            "run": state.run.model_copy(update={"status": RunStatus.PAUSED}),
-        }
     )
 
 

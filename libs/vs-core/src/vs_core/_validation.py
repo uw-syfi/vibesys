@@ -22,7 +22,6 @@ from .types.common import (
     RunStatus,
     WorkspaceMode,
 )
-from .types.records import RecoveryPhase
 from .types.strategy import (
     Cancel,
     Command,
@@ -326,15 +325,6 @@ def _validate_root_fence(state: CoreState, decision: Command) -> Rejected | None
 
 
 def validate_scope(state: CoreState, decision: Command) -> Rejected | None:
-    if state.records.recovery.phase != RecoveryPhase.READY and not isinstance(
-        decision, Finish | Withdraw
-    ):
-        return _reject(
-            decision,
-            RejectionCode.CLOSED_SCOPE,
-            ("recovery",),
-            "ordinary decisions require ready recovery",
-        )
     if decision.scope.owner == state.run.run_id:
         generation = state.run.generation
     else:

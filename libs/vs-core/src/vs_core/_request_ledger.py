@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 
 from ._deadlines import from_dispatch, started_until
 from ._dispatch_episode import episode_ended
+from ._failure_routing import hear_failure, refusal_of
 from ._outcomes import prove_outcome
 from ._proofs import (
     Mismatch,
@@ -47,6 +48,7 @@ from .types.common import (
     Observation,
     ObservationStatus,
     OperationNormalizationKind,
+    RejectionCode,
     RequestId,
     RevisionAuthority,
     RunStatus,
@@ -64,7 +66,6 @@ from .types.records import (
     OperationRetireRequested,
     Outbound,
     RecordsState,
-    RecoveryPhase,
     ReissueProof,
     RequestObserved,
     RequestPhase,
@@ -248,7 +249,7 @@ def _dispatched(
         case _:
             raise ContractError(("phase",), f"{record.phase.value} request cannot be dispatched")
     updated = record.model_copy(
-        update={"phase": RequestPhase.DISPATCHED, "dispatched_in": state.recovery.epoch}
+        update={"phase": RequestPhase.DISPATCHED, "dispatched_in": state.epoch}
     )
     if record.limit_from_dispatch is not None and record.dispatched_at is None:
         until = dispatch_until(context.run, context.sessions, state, context.evaluation, record)
@@ -709,18 +710,10 @@ def next_retry_at(state: RecordsState) -> float | None:
 def _retry(
     state: RecordsState, context: RecordsContext, event: RetryDue
 ) -> AreaChange[RecordsState]:
-    """Send a retryably failed request out again, unchanged, once its backoff has passed.
-
-    Recovery owns every open request while it gates the run, so a retry waits for it.
-    """
+    """Send a retryably failed request out again, unchanged, once its backoff has passed."""
     record = _unique(state, event.request_id)
     due = None if record is None else record.retry_wait_until
-    if (
-        record is None
-        or due is None
-        or max(context.run.now_at, event.now_at) < due
-        or state.recovery.phase != RecoveryPhase.READY
-    ):
+    if record is None or due is None or max(context.run.now_at, event.now_at) < due:
         return AreaChange(state=state)
     return _reissue(state, record, context)
 
@@ -748,9 +741,11 @@ def _undispatchable(
     facts = _EpisodeFacts(
         run=context.run, attempts=context.attempts, sessions=context.sessions, records=state
     )
-    if not (dependency_failed(record.request, state) or episode_ended(facts, record.request)):
-        return AreaChange(state=state)
-    return _cancel_prepared(state, context, (record,))
+    if dependency_failed(record.request, state):
+        return _cancel_prepared(state, context, (record,), RejectionCode.DEPENDENCY)
+    if episode_ended(facts, record.request):
+        return _cancel_prepared(state, context, (record,), RejectionCode.CLOSED_SCOPE)
+    return AreaChange(state=state)
 
 
 def _ended_at_close(observation: Observation) -> bool:
@@ -992,8 +987,18 @@ def _unsent_cancellation(context: RecordsContext, record: RequestRecord) -> Targ
 
 
 def _cancel_prepared(
-    state: RecordsState, context: RecordsContext, doomed: tuple[RequestRecord, ...]
+    state: RecordsState,
+    context: RecordsContext,
+    doomed: tuple[RequestRecord, ...],
+    cause: RejectionCode | None,
 ) -> AreaChange[RecordsState]:
+    """Close never-sent requests as unsent cancellations; ``cause`` is why none will be sent.
+
+    Their owners hear of it. Most kinds are told by the area that owns them (from the closing
+    observation's signal). A registered operation has no outcome to tell its asker, so the asker
+    is told here, as ``Failed(REFUSED)`` naming ``cause``, exactly once per decision (see
+    ``_asker_unheard``). ``cause`` is ``None`` when the asker itself withdrew the request.
+    """
     change = AreaChange(state=state)
     for record in doomed:
         current = _unique(change.state, record.request_id)
@@ -1001,7 +1006,29 @@ def _cancel_prepared(
             continue
         facts = _unsent_cancellation(context, current)
         change = _finish(change, _apply(change.state, context, current, facts, unsent=True))
+        if cause is not None and _asker_unheard(context, current):
+            ended = _unique(change.state, current.request_id)
+            if ended is not None:
+                records, heard = hear_failure(change.state, ended, refusal_of(ended, cause))
+                change = _finish(change, AreaChange(state=records, events=heard))
     return change
+
+
+def _asker_unheard(context: RecordsContext, record: RequestRecord) -> bool:
+    """Whether ending ``record`` unsent leaves its asker without an event.
+
+    Every registered operation, but the two whose owning area answers it from the closing
+    observation's signal: an agent turn (its session ends the turn) and a scope reopen (its
+    attempt answers the reopen). The other kinds' areas answer their own.
+    """
+    request = record.request
+    if not isinstance(request, ExecuteRegisteredOperation):
+        return False
+    descriptor = declaration(context, request)
+    return (
+        descriptor.lifecycle is not LifecycleClass.SESSION_TURN
+        and descriptor.normalization is not OperationNormalizationKind.SCOPE_REOPEN
+    )
 
 
 def _cancel_dependents(
@@ -1013,7 +1040,7 @@ def _cancel_dependents(
         for row in state.records
         if row.phase == RequestPhase.PREPARED and failed.request_id in row.request.depends_on
     )
-    return _cancel_prepared(state, context, doomed)
+    return _cancel_prepared(state, context, doomed, RejectionCode.DEPENDENCY)
 
 
 def _retirement_decision(
@@ -1052,7 +1079,7 @@ def _retire(
         else _completion_signal(context, withdraw, CompletionStatus.SUCCEEDED)
     )
     if record.phase == RequestPhase.PREPARED:
-        change = _cancel_prepared(state, context, (record,))
+        change = _cancel_prepared(state, context, (record,), None)
         return _finish(change, AreaChange(state=change.state, signals=done))
     observation = record.observation
     if record.phase == RequestPhase.COMPLETED and isinstance(

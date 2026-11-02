@@ -152,7 +152,7 @@ def pause_outlived(state: CoreState) -> bool:
     return (
         run.status in (RunStatus.DRAINING, RunStatus.PARKED)
         and run.park is not None
-        and state.records.recovery.epoch > run.park.epoch
+        and state.records.epoch > run.park.epoch
     )
 
 

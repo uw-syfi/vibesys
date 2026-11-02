@@ -593,7 +593,7 @@ class RunControlBridge:
         if not isinstance(request, PauseRequest | PauseNowRequest):
             return None
         journal = None if self._inbox is None else self._inbox.journal
-        epoch = core.records.recovery.epoch if journal is None else journal.epoch
+        epoch = core.records.epoch if journal is None else journal.epoch
         if request.expected_epoch != epoch:
             return "closing request targets another epoch; refresh the run"
         return None

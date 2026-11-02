@@ -10,7 +10,7 @@ limit and the run with them.
 The gate reports each turn's hold as a cumulative ``CapacityHold`` (the host's control
 bridge makes it a ``TurnHeld``), and the turn's open dispatch record keeps the latest
 (``held``). Every stated limit stays as it was stated; the record's bound is derived from it
-in ``_wait_clock.turn_bound``, which ``record_bound`` uses for every record:
+in ``_wait_clock.turn_bound``:
 
 - **Credit.** A hold that ended credits its length; the gate bounds each one. While the gate
   holds the turn for a backoff, the turn may stay held up to the budget, so its bound moves
@@ -112,7 +112,7 @@ def interrupted_by_epoch(records: RecordsState, invocation: Invocation) -> bool:
     return any(
         _dispatches(record, invocation)
         and record.dispatched_in is not None
-        and record.dispatched_in < records.recovery.epoch
+        and record.dispatched_in < records.epoch
         and (record.observation is None or record.observation.status in _NOT_RETURNED)
         for record in records.records
     )

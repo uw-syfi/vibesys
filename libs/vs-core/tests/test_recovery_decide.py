@@ -561,7 +561,7 @@ def paused(
 ) -> core.CoreState:
     standing = core.RunPark(
         control_id=core.ControlId(root="pause"),
-        epoch=state.records.recovery.epoch,
+        epoch=state.records.epoch,
         immediate=immediate,
         deadline_at=deadline_at,
     )

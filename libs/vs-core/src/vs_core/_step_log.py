@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, assert_never
 
 from protobuf import Oneof
-from pydantic import TypeAdapter
+from pydantic import JsonValue, TypeAdapter
 
 from vs_proto.api import (
     AttemptInterrupted,
@@ -26,6 +26,7 @@ from vs_proto.api import (
     RunEnded as RunEndedRecord,
 )
 
+from ._envelope_migrations import REMOVED_AT_44, without_removed_records_keys
 from ._refusal import RecordRefusedError, RefusalReason
 from .types.common import Value
 from .types.kernel import CoreEvent, CoreState
@@ -89,6 +90,7 @@ _REQUEST = TypeAdapter(Request)
 _FINISHED = TypeAdapter(_FinishedBody)
 _RESULT = TypeAdapter(RunResultProposal)
 _FOLD = TypeAdapter(_FoldBody)
+_ANY_JSON = TypeAdapter(JsonValue)
 
 _CANCEL_REASONS = {
     CancelReason.DEADLINE: StepCancelReason.DEADLINE,
@@ -170,12 +172,28 @@ def encode_saved(saved: SavedRun) -> EncodedSavedRun:
     )
 
 
+def _readable_state(state: bytes) -> bytes:
+    """``state`` without the keys of the records state that envelope version 44 dropped.
+
+    A snapshot written at version 43 holds ``hosts``, ``children`` and ``recovery``, and the
+    state forbids unknown keys. Data already on the current schema stays readable for seven
+    days; this is that read, for exactly those keys (the epoch of ``recovery`` is kept).
+    TEMPORARY: delete after 2026-11-08 (#3708). A snapshot at a version older than 43 never
+    reaches here: its envelope went through the migration chain when it was appended.
+    """
+    if not any(f'"{key}"'.encode() in state for key in REMOVED_AT_44):
+        return state
+    document = _ANY_JSON.validate_json(state)
+    readable = without_removed_records_keys(document)
+    return state if readable is document else _ANY_JSON.dump_json(readable)
+
+
 def decode_saved(encoded: EncodedSavedRun, registry: OperationRegistry | None) -> SavedRun:
     """The run ``encode_saved`` wrote, refused when written by another encoding."""
     _same_encoding(encoded.schema_version)
     context = _context(registry)
     return SavedRun(
-        state=_STATE.validate_json(encoded.state, context=context),
+        state=_STATE.validate_json(_readable_state(encoded.state), context=context),
         envelope_version=encoded.envelope_version,
         strategy=encoded.strategy,
         inputs=tuple(_EVENT.validate_json(event, context=context) for event in encoded.inputs),

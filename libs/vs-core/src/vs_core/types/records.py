@@ -78,7 +78,6 @@ from .sessions import (
 )
 from .settlement import AdoptionRequest, AdoptRevision, VerifyAdoption
 from .until import Failed, FailureReason, FromDispatch, Inherited, ReplyError, Until, Watch, Within
-from .waits import WaitOn
 
 
 class InspectRequest(RequestBase):
@@ -356,182 +355,6 @@ def command_open(record: RequestRecord) -> bool:
     return not _canonical(record) and record.phase in _OPEN_PHASES
 
 
-class ChildObservationWatermark(Value):
-    """Highest accepted observation from one child-discovery source.
-
-    The full immutable observation carries sequence and equality proof. Records
-    B rejects an older sequence or conflicting facts at the same sequence before
-    changing aggregate ownership, even when another source supplies that proof.
-    """
-
-    source_request: RequestId
-    observation: Observation
-
-    @model_validator(mode="after")
-    def exact_source(self) -> ChildObservationWatermark:
-        """A watermark belongs only to its observation's canonical source."""
-        if self.source_request != self.observation.request_id:
-            raise ContractValidationError("source_request", "differs from observation request")
-        return self
-
-
-class ChildLease(Value):
-    """Discovered descendant ownership, distinct from its ancestor's record.
-
-    Source requests and parent resources are unique, canonically ordered proofs.
-    Conflicting scope or ancestry rejects; transfer to a typed owner is atomic.
-    Records B maintains watermarks independently of aggregate observation.
-    Incomplete historical watermarks cannot authorize release or transfer;
-    reconcile every source before marking the history complete.
-    Retained source claims conservatively retain independent ownership: run
-    finality requires conclusive release from every source and preserves every
-    retained source's descendant manifest. The aggregate observation cannot
-    erase those claims. No alternative-reporter authority is offered.
-    """
-
-    resource_id: ResourceId
-    scope: Scope
-    source_requests: tuple[RequestId, ...] = Field(min_length=1)
-    parent_resources: tuple[ResourceId, ...] = ()
-    observation: Observation | None = None
-    observation_watermarks: tuple[ChildObservationWatermark, ...] = ()
-    watermark_history_complete: bool = False
-
-    @model_validator(mode="after")
-    def ownership_proofs(self) -> ChildLease:
-        """Reject duplicate or noncanonical proof and resource correspondence."""
-        for name, values in (
-            ("source_requests", self.source_requests),
-            ("parent_resources", self.parent_resources),
-        ):
-            roots = tuple(value.root for value in values)
-            if roots != tuple(sorted(set(roots))):
-                raise ContractValidationError(
-                    name, "unique canonically ordered identities required"
-                )
-        if self.observation is not None and (
-            self.observation.scope != self.scope or self.observation.resource_id != self.resource_id
-        ):
-            raise ContractValidationError(
-                "observation", "child scope and resource_id must match its lease"
-            )
-        self._validate_watermarks()
-        return self
-
-    def _validate_watermarks(self) -> None:
-        """Incomplete migrated history grants no stale-source release authority."""
-        sources = tuple(mark.source_request.root for mark in self.observation_watermarks)
-        if sources != tuple(sorted(set(sources))):
-            raise ContractValidationError(
-                "observation_watermarks", "unique canonically ordered sources required"
-            )
-        for mark in self.observation_watermarks:
-            if (
-                mark.source_request not in self.source_requests
-                or mark.observation.scope != self.scope
-                or mark.observation.resource_id != self.resource_id
-            ):
-                raise ContractValidationError(
-                    "observation_watermarks", "source, scope and child resource must match lease"
-                )
-        if self.watermark_history_complete:
-            if set(sources) != {source.root for source in self.source_requests}:
-                raise ContractValidationError(
-                    "watermark_history_complete", "every source requires its watermark"
-                )
-            if self.observation is not None and not any(
-                mark.observation == self.observation for mark in self.observation_watermarks
-            ):
-                raise ContractValidationError(
-                    "observation", "aggregate proof must match an accepted source watermark"
-                )
-
-
-class RecoveryPhase(StrEnum):
-    """Recovery gates admission independently of the run's pause state."""
-
-    REQUIRED = "required"
-    RECOVERING = "recovering"
-    READY = "ready"
-    BLOCKED = "blocked"
-
-
-class RecoveryCheck(Value):
-    """Original target resolved by inspection, never command success alone."""
-
-    target: RequestId
-    inspection: RequestId | None = None
-    resolution: Literal[
-        "pending", "safe-prepared", "reattached", "terminal", "unknown", "blocked"
-    ] = "pending"
-    """How the check resolved. ``unknown``: its target's result is discarded whatever it was (a
-    cancel of a job) and its executor could not say, so recovery settled it without an answer."""
-    wait: WaitOn | None
-    """What a pending check waits on: its target while that is open, the inspections recovery
-    sent about the target and the children it left, and the owned jobs that settle children
-    their job ledger tracks. Only a pending check waits."""
-
-    @model_validator(mode="after")
-    def waits_only_while_pending(self) -> RecoveryCheck:
-        """A resolved or blocked check waits on nothing."""
-        if self.wait is not None and self.resolution != "pending":
-            raise ContractValidationError("wait", f"a {self.resolution} recovery check waits")
-        return self
-
-
-class RecoveryBarrier(Value):
-    """Fence-epoch barrier persisted before ordinary admission or dispatch.
-
-    READY requires every target safe to dispatch, positively reattached, or
-    conclusively terminal. BLOCKED still permits bounded inspection and cleanup.
-    Live jobs may remain owned when recovery finishes. Stale epochs cannot
-    resolve checks from a newer startup.
-    """
-
-    epoch: Count = 0
-    phase: RecoveryPhase = RecoveryPhase.REQUIRED
-    checks: tuple[RecoveryCheck, ...] = ()
-
-    @model_validator(mode="after")
-    def ready_proofs(self) -> RecoveryBarrier:
-        """No original target is checked twice or admitted without resolution."""
-        targets = tuple(check.target for check in self.checks)
-        if len(set(targets)) != len(targets):
-            raise ContractValidationError("checks", "duplicate recovery target")
-        if self.phase == RecoveryPhase.READY and any(
-            check.resolution in ("pending", "blocked") for check in self.checks
-        ):
-            raise ContractValidationError(
-                "checks",
-                "READY requires safe-prepared, reattached, terminal or unknown-settled checks",
-            )
-        return self
-
-
-HOST_LOG_LENGTH = 2
-"""Host epochs core keeps: the current one and the one before it, which bound the last downtime."""
-
-
-class HostEpoch(Value):
-    """One lease acquisition (an epoch): when its host started and when it last proved itself alive.
-
-    ``alive_at`` is the host's last recorded lease renewal while the epoch is current. When the
-    next epoch opens it becomes the later of that and the host's last commit, the last moment
-    the host is known to have been alive.
-    """
-
-    epoch: Count
-    started_at: Seconds
-    alive_at: Seconds
-
-    @model_validator(mode="after")
-    def alive_after_start(self) -> HostEpoch:
-        """A host proves itself alive no earlier than it started."""
-        if self.alive_at < self.started_at:
-            raise ContractValidationError("alive_at", "a host is alive no earlier than it started")
-        return self
-
-
 _LEDGER_INDEXES = ("_by_resource", "_inspections", "_positions")
 """The slots of `RecordsState` that hold its ledger indexes.
 
@@ -551,28 +374,18 @@ class RecordsState(Value):
     __slots__ = _LEDGER_INDEXES
 
     records: tuple[RequestRecord, ...] = ()
-    children: tuple[ChildLease, ...] = ()
-    recovery: RecoveryBarrier = RecoveryBarrier()
-    hosts: tuple[HostEpoch, ...] = Field(max_length=HOST_LOG_LENGTH)
-    """The latest host epochs, oldest first; the last is the recovery barrier's epoch."""
-
-    @model_validator(mode="after")
-    def host_log(self) -> RecordsState:
-        """Epochs strictly increase and the newest is the one recovery started."""
-        epochs = [host.epoch for host in self.hosts]
-        if epochs != sorted(set(epochs)):
-            raise ContractValidationError("hosts", "host epochs must strictly increase")
-        if epochs and epochs[-1] != self.recovery.epoch:
-            raise ContractValidationError("hosts", "the newest host epoch is the recovery epoch")
-        return self
+    epoch: Count = 0
+    """The host epoch the log is in: it advances when a later epoch of the log opens
+    (``_step_attempts.epoch_opened``), and ``RequestRecord.dispatched_in`` and ``RunPark.epoch``
+    are read against it."""
 
     def model_copy(self, *, update: Mapping[str, object] | None = None, deep: bool = False) -> Self:
         """A copy that keeps the ledger indexes when it keeps the very same ``records`` tuple.
 
         The indexes are positions in ``records`` and nothing else, so they hold for any copy
         whose ``records`` is the same object. Without this, each copy that changed only
-        ``children`` or ``recovery`` rebuilt the index on its next lookup: recovery copies the
-        state once per finished record, so a restart cost the square of the ledger.
+        ``epoch`` rebuilt the index on its next lookup, which cost the square of the ledger when
+        a state is copied once per record.
         """
         copy = super().model_copy(update=update, deep=deep)
         if copy.records is self.records:

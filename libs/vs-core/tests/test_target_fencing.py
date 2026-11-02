@@ -365,7 +365,7 @@ def test_observation_cannot_claim_another_owner_or_admission_episode(
         core.step(state, event)
 
 
-@pytest.mark.parametrize("manifest", ["record", "job", "job_observation", "lease"])
+@pytest.mark.parametrize("manifest", ["record", "job", "job_observation"])
 def test_missing_root_identity_does_not_let_known_child_masquerade_as_root(manifest: str) -> None:
     _, state, event = registered_fixture()
     assert event.target is not None
@@ -387,22 +387,6 @@ def test_missing_root_identity_does_not_let_known_child_masquerade_as_root(manif
         )
         state = state.model_copy(
             update={"evaluation": core.EvaluationState(registered_jobs=(job,))}
-        )
-    else:
-        state = state.model_copy(
-            update={
-                "records": state.records.model_copy(
-                    update={
-                        "children": (
-                            core.ChildLease(
-                                resource_id=child,
-                                scope=scope,
-                                source_requests=(original.request_id,),
-                            ),
-                        )
-                    }
-                )
-            }
         )
     state = state.model_copy(
         update={"records": state.records.model_copy(update={"records": (original, query)})}

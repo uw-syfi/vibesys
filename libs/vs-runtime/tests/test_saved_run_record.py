@@ -7,8 +7,11 @@ decoded from it. A record another encoding wrote, or damage left, is refused by 
 
 from __future__ import annotations
 
+import json
+import zlib
+
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
@@ -81,3 +84,37 @@ def test_a_snapshot_another_encoding_wrote_is_refused() -> None:
     message.schema_version += 1
     with pytest.raises(ValueError, match="encoding version"):
         saved_run_in(record(2, Oneof("core_snapshot", message)), seed.registry)
+
+
+@pytest.mark.regression
+@example(epoch=2, pending=True)
+@settings(max_examples=examples(pr=20, nightly=200), deadline=None)
+@given(epoch=st.integers(0, 50), pending=st.booleans())
+def test_a_snapshot_written_at_version_43_is_read_with_its_epoch_and_without_the_removed_state(
+    epoch: int, *, pending: bool
+) -> None:
+    """Version 43 wrote ``hosts``, ``children`` and ``recovery`` in the records state (#3708).
+
+    Delete this test with the tolerant read, after 2026-11-08.
+    """
+    registry = fake_run_seed((100.0,), 1).registry
+    saved = SavedRun(STATE, core.ENVELOPE_SCHEMA_VERSION, b"{}")
+    message = snapshot_message(saved)
+    document = json.loads(zlib.decompress(message.state))
+    records = document["records"]
+    assert "epoch" in records
+    del records["epoch"]
+    records["hosts"] = []
+    records["children"] = []
+    records["recovery"] = {
+        "checks": [],
+        "epoch": epoch,
+        "phase": "recovering" if pending else "ready",
+    }
+    message.state = zlib.compress(json.dumps(document).encode())
+    read = saved_run_in(record(2, Oneof("core_snapshot", message)), registry)
+    assert read is not None
+    assert read.state.records.epoch == epoch
+    assert read.state == STATE.model_copy(
+        update={"records": STATE.records.model_copy(update={"epoch": epoch})}
+    )

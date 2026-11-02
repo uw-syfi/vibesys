@@ -32,13 +32,3 @@ def canonical_source(
         until=core.Until(at=100.0),
         addressed_by=(),
     )
-
-
-def inspect_source(request_id: core.RequestId, scope: core.Scope) -> core.RequestRecord:
-    return canonical_source(
-        core.InspectRequest(
-            request_id=request_id,
-            scope=scope,
-            target=core.RequestId(root="target"),
-        )
-    )

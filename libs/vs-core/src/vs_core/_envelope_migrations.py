@@ -169,6 +169,42 @@ def _v42_to_v43(envelope: JsonObject) -> JsonObject:
     return envelope | {"core": core, "schema_version": 43}
 
 
+def _v43_to_v44(envelope: JsonObject) -> JsonObject:
+    """Version 44 dropped ``hosts``, ``children`` and ``recovery`` of the records and kept the epoch.
+
+    No run wrote those three after the step loop replaced the restart reconciliation (#3475 R5):
+    ``hosts`` stayed empty, ``children`` stayed empty and ``recovery`` stayed ready with no
+    check, so a save of that kind holds nothing they could name. Only ``recovery.epoch`` moved
+    (it follows the log's epoch), and it becomes ``records.epoch``. A save written before the
+    step loop may hold a host log, a lease or a barrier that was not ready; none of them can
+    resolve now (nothing reads them), so they are dropped with the rest.
+    """
+    core = _object(envelope.get("core"))
+    kept = records_at_44(_object(core.get("records")))
+    return envelope | {"core": core | {"records": kept}, "schema_version": 44}
+
+
+REMOVED_AT_44: Final = ("hosts", "children", "recovery")
+"""The keys of the records state that version 44 dropped."""
+
+
+def without_removed_records_keys(state: JsonValue) -> JsonValue:
+    """``state``, a core state, with the records state of version 44; the very object when it holds none."""
+    records = _object(state).get("records")
+    if not isinstance(records, dict) or not any(key in records for key in REMOVED_AT_44):
+        return state
+    return _object(state) | {"records": records_at_44(records)}
+
+
+def records_at_44(records: JsonObject) -> JsonObject:
+    """The records state ``records`` of version 43 as version 44 holds it (see `_v43_to_v44`)."""
+    epoch = _object(records.get("recovery")).get("epoch")
+    kept = {name: value for name, value in records.items() if name not in REMOVED_AT_44}
+    if isinstance(epoch, int) and not isinstance(epoch, bool):
+        kept["epoch"] = epoch
+    return kept
+
+
 def _floor_declared(core: JsonObject) -> bool:
     run = _object(core.get("run"))
     task = _object(_object(run.get("facts")).get("task"))
@@ -208,6 +244,7 @@ MIGRATIONS: Final[Mapping[int, Migration]] = {
     40: _v40_to_v41,
     41: _v41_to_v42,
     42: _v42_to_v43,
+    43: _v43_to_v44,
 }
 """Version ``n`` to ``n + 1``, one entry per version, contiguous from the oldest supported."""
 

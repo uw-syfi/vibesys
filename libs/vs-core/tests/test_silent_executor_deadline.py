@@ -20,8 +20,6 @@ from vs_core.api import (
     Observation,
     ObservationStatus,
     RecordsState,
-    RecoveryBarrier,
-    RecoveryPhase,
     RequestId,
     RequestPhase,
     RequestRecord,
@@ -71,15 +69,7 @@ def _silent(phase: RequestPhase, status: ObservationStatus, *, terminal: bool) -
         until=Until(at=BOUND),
         addressed_by=(),
     )
-    return state.model_copy(
-        update={
-            "records": RecordsState(
-                hosts=(),
-                records=(record,),
-                recovery=RecoveryBarrier(epoch=1, phase=RecoveryPhase.READY),
-            )
-        }
-    )
+    return state.model_copy(update={"records": RecordsState(records=(record,), epoch=1)})
 
 
 ANSWERS = st.sampled_from(

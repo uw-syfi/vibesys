@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import pytest
 from hypothesis import given
@@ -38,8 +38,23 @@ def _version(path: Path) -> int:
     return int(path.name.removeprefix("v").split("-", 1)[0])
 
 
-def _upgraded(source: str) -> dict[str, object]:
+def _upgraded(source: str) -> dict[str, Any]:
     return json.loads(core.upgrade_envelope(source, ("schema_version",)))
+
+
+def _at_44(stored: dict[str, Any]) -> dict[str, Any]:
+    """``stored`` (a version 43 or older save) as version 44 holds the records state.
+
+    Version 44 dropped ``hosts``, ``children`` and ``recovery`` and kept the epoch the barrier
+    counted as ``records.epoch``; the rest of the envelope is the one stored.
+    """
+    document = json.loads(json.dumps(stored))
+    records = document["core"]["records"]
+    epoch = records.pop("recovery")["epoch"]
+    del records["hosts"], records["children"]
+    records["epoch"] = epoch
+    document["schema_version"] = core.ENVELOPE_SCHEMA_VERSION
+    return document
 
 
 def _comparisons(envelope: dict[str, object]) -> list[dict[str, object]]:
@@ -73,7 +88,7 @@ def test_a_measured_within_noise_is_kept_and_nothing_else_of_the_envelope_change
     source = (_FIXTURES / "v34-floor.json").read_text(encoding="utf-8")
     stored = json.loads(source)
     assert {c["verdict"] for c in _comparisons(stored)} == {"within_noise"}
-    assert _upgraded(source) == {**stored, "schema_version": core.ENVELOPE_SCHEMA_VERSION}
+    assert _upgraded(source) == _at_44(stored)
 
 
 def test_an_envelope_of_the_current_version_is_returned_as_it_is() -> None:
@@ -169,8 +184,7 @@ def test_a_pause_now_saved_before_drain_deadlines_gets_the_cleanup_bound_and_not
     run["now_at"] = now_at
     run["limits"]["cleanup_bound"] = cleanup_bound
     assert "deadline_at" not in run["park"]
-    expected = json.loads(json.dumps(stored))
-    expected["schema_version"] = core.ENVELOPE_SCHEMA_VERSION
+    expected = _at_44(stored)
     if immediate:
         expected["core"]["run"]["park"]["deadline_at"] = now_at + cleanup_bound
     assert _upgraded(json.dumps(stored)) == expected
@@ -179,7 +193,7 @@ def test_a_pause_now_saved_before_drain_deadlines_gets_the_cleanup_bound_and_not
 def test_a_run_with_no_park_migrates_to_the_next_version_unchanged() -> None:
     stored = json.loads((_FIXTURES / "v42-floor.json").read_text(encoding="utf-8"))
     assert "park" not in stored["core"]["run"]
-    assert _upgraded(json.dumps(stored)) == {**stored, "schema_version": 43}
+    assert _upgraded(json.dumps(stored)) == _at_44({**stored, "schema_version": 43})
 
 
 def test_the_migrated_pause_now_decodes_with_its_deadline() -> None:
@@ -189,3 +203,44 @@ def test_the_migrated_pause_now_decodes_with_its_deadline() -> None:
     assert park is not None
     assert park.immediate
     assert park.deadline_at == decoded.core.run.now_at + decoded.core.run.limits.cleanup_bound
+
+
+@given(epoch=st.integers(min_value=0, max_value=1000))
+def test_a_save_of_version_43_keeps_its_epoch_and_drops_the_state_nothing_reads_now(
+    epoch: int,
+) -> None:
+    """The three constant records fields go; ``recovery.epoch`` moves to ``records.epoch``."""
+    stored = json.loads((_FIXTURES / "v43-resumed-pause-now.json").read_text(encoding="utf-8"))
+    stored["core"]["records"]["recovery"]["epoch"] = epoch
+    migrated = _upgraded(json.dumps(stored))
+    assert migrated["schema_version"] == 44
+    records = migrated["core"]["records"]
+    assert set(records) == {"records", "epoch"}
+    assert records["epoch"] == epoch
+    assert records["records"] == stored["core"]["records"]["records"]
+    assert {**migrated, "core": {**migrated["core"], "records": None}} == {
+        **stored,
+        "schema_version": 44,
+        "core": {**stored["core"], "records": None},
+    }
+
+
+@pytest.mark.parametrize("phase", ["ready", "required", "recovering", "blocked"])
+def test_a_save_that_holds_a_host_log_a_lease_or_a_barrier_that_was_not_ready_loses_them(
+    phase: str,
+) -> None:
+    """A save from before the step loop may hold them; nothing reads them, so they are dropped."""
+    stored = json.loads((_FIXTURES / "v43-floor.json").read_text(encoding="utf-8"))
+    records = stored["core"]["records"]
+    records["hosts"] = [{"epoch": 3, "started_at": 1.0, "alive_at": 2.0}]
+    records["recovery"] = {"checks": [], "epoch": 3, "phase": phase}
+    records["children"] = [{"resource_id": {"kind": "resource", "root": "child"}}]
+    migrated = _upgraded(json.dumps(stored))
+    assert set(migrated["core"]["records"]) == {"records", "epoch"}
+    assert migrated["core"]["records"]["epoch"] == 3
+
+
+def test_the_migrated_resumed_pause_now_decodes_with_its_epoch() -> None:
+    source = (_FIXTURES / "v43-resumed-pause-now.json").read_text(encoding="utf-8")
+    decoded = FAKE_REGISTRY.decode_envelope(_Envelope, source)
+    assert decoded.core.records.epoch == 2

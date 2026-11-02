@@ -750,20 +750,16 @@ def test_registered_request_conflicts_are_rejected_without_ownership(fault: str)
 @settings(max_examples=examples(pr=4, nightly=100))
 @given(
     root_released=st.booleans(),
-    manifest=st.sampled_from(["absent", "children", "descendant-manifest"]),
-    child_present=st.booleans(),
-    child_released=st.booleans(),
-    child_manifest=st.booleans(),
+    manifest=st.sampled_from(["none", "children", "descendant-manifest"]),
 )
-def test_retry_waits_for_root_and_every_discovered_child_release(
-    *,
-    root_released: bool,
-    manifest: str,
-    child_present: bool,
-    child_released: bool,
-    child_manifest: bool,
+def test_retry_waits_for_the_root_release_and_never_goes_ahead_of_a_discovered_child(
+    *, root_released: bool, manifest: str
 ) -> None:
-    """The child is named by Observation.children or only by its descendant manifest."""
+    """A child named by Observation.children or by its descendant manifest holds the retry.
+
+    No job ledger proves a descendant released, so a retry goes ahead only when the root is
+    released and names no descendant at all.
+    """
     state, request = submitted()
     child_id = core.ResourceId(root="child")
     only_manifest = manifest == "descendant-manifest"
@@ -773,8 +769,8 @@ def test_retry_waits_for_root_and_every_discovered_child_release(
         terminal=True,
         status=core.ObservationStatus.FAILED,
         released=root_released,
-        children_complete=manifest != "absent",
-        children=() if only_manifest else (child_id,),
+        children_complete=True,
+        children=(child_id,) if manifest == "children" else (),
     )
     if only_manifest:
         terminal = terminal.model_copy(
@@ -789,47 +785,10 @@ def test_retry_waits_for_root_and_every_discovered_child_release(
     state = transition(
         state, core.JobObserved(resource_id=core.ResourceId(root="job"), observation=terminal)
     ).state
-    child_observation = terminal.model_copy(
-        update={
-            "event_id": core.EventId(root="child-release"),
-            "resource_id": child_id,
-            "released": child_released,
-            "children": (),
-            "child_manifest": None,
-            "children_complete": child_manifest,
-        }
-    )
-    assert request.request_id is not None
-    child = core.ChildLease(
-        resource_id=child_id,
-        scope=request.scope,
-        source_requests=(request.request_id,),
-        parent_resources=(core.ResourceId(root="job"),),
-        observation=child_observation,
-        observation_watermarks=(
-            core.ChildObservationWatermark(
-                source_request=request.request_id, observation=child_observation
-            ),
-        ),
-        watermark_history_complete=True,
-    )
-    state = state.model_copy(
-        update={
-            "records": state.records.model_copy(
-                update={"children": (child,) if child_present else ()}
-            )
-        }
-    )
     result = requested(
         state,
         identity="after-release",
         measurement=request.plan.model_copy(update={"submitted_at": 3.0}),
     )
-    assert bool(result.requests) == (
-        root_released
-        and manifest != "absent"
-        and child_present
-        and child_released
-        and child_manifest
-    )
+    assert bool(result.requests) == (root_released and manifest == "none")
     assert len(result.state.evaluation.submission_budgets[0].receipts) <= 3

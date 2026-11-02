@@ -87,6 +87,7 @@ DELETED_MODULES: tuple[str, ...] = (
     # The restart reconciliation: no process emitted `RecoveryStarted` since the step loop (#3475 R5).
     "vs_core._request_recovery",
     "vs_core._recovery_owners",
+    # The host epoch log: the records state kept `hosts` constant empty since the step loop (#3475 R5).
     "vs_core._host_epochs",
 )
 """Dotted module paths that no file under ``src/`` or ``libs/*/src`` may provide, as a module or
@@ -156,7 +157,27 @@ DELETED_SYMBOLS: tuple[str, ...] = (
     "open_host_epoch",
     "unanswered_measures",
     "credit_downtime",
+    # The branches that read the constant recovery, hosts and children state (#3475 R5 group B).
+    "recovery_waits",
+    "record_bound",
+    "_check_waits",
+    "_child_dependencies",
+    "_child_release_confirmed",
+    "_child_released",
+    "_downtime_within",
+    "_historical_child_owned",
+    "_known_child_observation",
+    "_released_child",
+    "_released_child_source",
+    # The records state the step loop left constant (#3475 R5 group B, envelope version 44).
+    "ChildLease",
+    "ChildObservationWatermark",
+    "HOST_LOG_LENGTH",
+    "HostEpoch",
     "HostRenewed",
+    "RecoveryBarrier",
+    "RecoveryCheck",
+    "RecoveryPhase",
 )
 """Names that no file under ``src/`` or ``libs/*/src`` may define or import."""
 

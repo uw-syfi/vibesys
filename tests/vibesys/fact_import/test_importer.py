@@ -719,6 +719,10 @@ def test_frozen_snapshot_schema_keeps_properties_named_title_and_the_original_pr
 def test_unknown_envelope_version_and_cross_run_input_are_prerequisites() -> None:
     value = _envelope()
     value["schema_version"] = 999
+    # A document newer than every frozen version is read by the newest descriptors, so it has the
+    # newest shape: the records state version 44 dropped is not in it.
+    for removed in ("hosts", "children", "recovery"):
+        del value["core"]["records"][removed]
     with pytest.raises(FactImportError, match="schema_version"):
         _import(ImportSource("future.json", SourceFormat.ENVELOPE, json.dumps(value).encode()))
     with pytest.raises(FactImportError, match="another run"):
@@ -959,6 +963,34 @@ def test_parent_release_never_erases_a_childs_independent_ownership() -> None:
     assert any(
         identity.identity == "child-live" for identity in _payloads(result, "external_identity")
     )
+
+
+@pytest.mark.parametrize("released", [True, False])
+def test_a_retained_child_lease_is_owned_until_every_source_reported_it_released(
+    *, released: bool
+) -> None:
+    value = _envelope()
+    records = value["core"]["records"]
+    request = records["records"][0]["request_id"]
+    scope = {"owner": {"kind": "run", "root": "run"}, "generation": 0}
+    resource = {"kind": "resource", "root": "child-seen"}
+    observation = {**records["records"][0]["observation"], "released": released}
+    observation.update(resource_id=resource, request_id=request, scope=scope)
+    records["children"] = [
+        {
+            "resource_id": resource,
+            "scope": scope,
+            "source_requests": [request],
+            "observation": observation,
+            "observation_watermarks": [{"source_request": request, "observation": observation}],
+            "watermark_history_complete": True,
+        }
+    ]
+    result = _import(
+        ImportSource("envelope.json", SourceFormat.ENVELOPE, json.dumps(value).encode())
+    )
+    owned = {row.identity for row in _payloads(result, "external_identity")}
+    assert ("child-seen" in owned) is (not released)
 
 
 def test_creator_request_release_does_not_erase_a_retained_resource_binding() -> None:

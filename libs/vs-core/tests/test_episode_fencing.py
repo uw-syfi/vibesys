@@ -274,10 +274,7 @@ def test_old_recorded_cleanup_remains_dispatchable_after_reentry() -> None:
 
 
 @pytest.mark.parametrize("kind", ["snapshot", "retain", "discard"])
-@pytest.mark.parametrize("fence", ["episode", "recovery"])
-def test_ordinary_retention_and_discard_cannot_bypass_mutation_fences(
-    kind: str, fence: str
-) -> None:
+def test_ordinary_retention_and_discard_cannot_bypass_the_episode_fence(kind: str) -> None:
     state, scope = attempt_state()
     assert isinstance(scope.owner, core.AttemptId)
     attempt = core.AttemptRef(attempt_id=scope.owner, generation=scope.generation)
@@ -310,27 +307,20 @@ def test_ordinary_retention_and_discard_cannot_bypass_mutation_fences(
         ),
     )
     state = prepared.state
-    if fence == "episode":
-        state = state.model_copy(
-            update={
-                "attempts": core.AttemptsState(
-                    attempts=(
-                        state.attempts.attempts[0].model_copy(
-                            update={"admission_id": core.DecisionId(root="new")}
-                        ),
-                    )
+    state = state.model_copy(
+        update={
+            "attempts": core.AttemptsState(
+                attempts=(
+                    state.attempts.attempts[0].model_copy(
+                        update={"admission_id": core.DecisionId(root="new")}
+                    ),
                 )
-            }
-        )
-    else:
-        state = state.model_copy(
-            update={
-                "records": state.records.model_copy(update={"recovery": core.RecoveryBarrier()})
-            }
-        )
+            )
+        }
+    )
     identity = prepared.requests[0].request_id
     assert identity is not None
-    with pytest.raises(core.ContractError, match=r"admission|recovery"):
+    with pytest.raises(core.ContractError, match="admission"):
         core.step(state, core.DispatchAuthorized(request_id=identity))
 
 
@@ -444,55 +434,6 @@ def test_previous_cleanup_cannot_close_a_reused_session_in_a_new_episode() -> No
         core.step(state, core.DispatchAuthorized(request_id=identity))
 
 
-def test_cleanup_cause_for_another_attempt_cannot_authorize_snapshot() -> None:
-    state, scope, withdraw = retirement_state()
-    wrong = withdraw.model_copy(
-        update={"target": core.AttemptRef(attempt_id=core.AttemptId(root="other"), generation=0)}
-    )
-    state = state.model_copy(
-        update={
-            "run": state.run.model_copy(
-                update={
-                    "receipts": tuple(
-                        receipt.model_copy(update={"decision": wrong})
-                        if receipt.decision_id == wrong.decision_id
-                        else receipt
-                        for receipt in state.run.receipts
-                    )
-                }
-            ),
-            "records": state.records.model_copy(update={"recovery": core.RecoveryBarrier()}),
-        }
-    )
-    assert isinstance(scope.owner, core.AttemptId)
-    request = core.SnapshotAndRetain(
-        scope=scope,
-        attempt=core.AttemptRef(attempt_id=scope.owner, generation=0),
-        retention="wip",
-        admission_id=core.DecisionId(root="admission"),
-        decision_id=withdraw.decision_id,
-    )
-    clock = core.ClockAdvanced(now_at=0.0)
-    prepared = core.trace_step(
-        state,
-        clock,
-        core.ReducerTrace(
-            frames=(
-                core.TraceFrame(
-                    signal=clock,
-                    change=core.SchedulingChange(
-                        state=state.scheduling, requests=(core.within(request, 100.0),)
-                    ),
-                ),
-            )
-        ),
-    )
-    identity = prepared.requests[0].request_id
-    assert identity is not None
-    with pytest.raises(core.ContractError, match="recovery"):
-        core.step(prepared.state, core.DispatchAuthorized(request_id=identity))
-
-
 @pytest.mark.parametrize("kind", ["snapshot", "discard", "registered"])
 def test_recorded_retirement_cannot_mutate_a_reused_workspace_after_reentry(kind: str) -> None:
     state, scope, withdraw = retirement_state()
@@ -567,7 +508,7 @@ def test_recorded_retirement_cannot_mutate_a_reused_workspace_after_reentry(kind
         core.step(state, core.DispatchAuthorized(request_id=identity))
 
 
-def test_current_episode_cleanup_can_dispatch_during_recovery_and_closing() -> None:
+def test_current_episode_cleanup_can_dispatch_while_closing() -> None:
     state, scope, withdraw = retirement_state()
     assert isinstance(scope.owner, core.AttemptId)
     request = core.SnapshotAndRetain(
@@ -585,8 +526,7 @@ def test_current_episode_cleanup_can_dispatch_during_recovery_and_closing() -> N
                         update={"phase": core.AttemptPhase.CLOSING}
                     ),
                 )
-            ),
-            "records": state.records.model_copy(update={"recovery": core.RecoveryBarrier()}),
+            )
         }
     )
     clock = core.ClockAdvanced(now_at=0.0)
@@ -608,70 +548,3 @@ def test_current_episode_cleanup_can_dispatch_during_recovery_and_closing() -> N
     assert identity is not None
     dispatched = core.step(prepared.state, core.DispatchAuthorized(request_id=identity))
     assert _phase(dispatched.state, identity) == core.RequestPhase.DISPATCHED
-
-
-@pytest.mark.parametrize(
-    "proof", ["dependency", "authority", "absent", "wrong-episode", "reopened", "wrong-scope"]
-)
-def test_recorded_closure_authorizes_exact_settlement_and_setup_release_work(proof: str) -> None:
-    state, scope = attempt_state()
-    assert isinstance(scope.owner, core.AttemptId)
-    identity = core.RequestId(root="cleanup")
-    closure = core.AttemptClosure(
-        disposition="settle",
-        requested_at=1.0,
-        authority=identity if proof == "authority" else core.RequestId(root="retirement"),
-        admission_id=core.DecisionId(root="other")
-        if proof == "wrong-episode"
-        else core.DecisionId(root="admission"),
-    )
-    dependencies = (
-        (core.ReleaseDependency(kind="workspace", identity=identity),)
-        if proof in ("dependency", "wrong-episode", "reopened", "wrong-scope")
-        else ()
-    )
-    owner = state.attempts.attempts[0].model_copy(
-        update={
-            "phase": core.AttemptPhase.CLOSING,
-            "closure": closure,
-            "release_dependencies": dependencies,
-            "admission_id": core.DecisionId(root="new")
-            if proof == "reopened"
-            else core.DecisionId(root="admission"),
-        }
-    )
-    state = state.model_copy(
-        update={
-            "attempts": core.AttemptsState(attempts=(owner,)),
-            "records": state.records.model_copy(update={"recovery": core.RecoveryBarrier()}),
-        }
-    )
-    request_scope = scope.model_copy(update={"generation": 1}) if proof == "wrong-scope" else scope
-    request = core.SnapshotAndRetain(
-        request_id=identity,
-        scope=request_scope,
-        attempt=core.AttemptRef(attempt_id=scope.owner, generation=request_scope.generation),
-        retention="candidate",
-        admission_id=core.DecisionId(root="admission"),
-    )
-    clock = core.ClockAdvanced(now_at=0.0)
-    prepared = core.trace_step(
-        state,
-        clock,
-        core.ReducerTrace(
-            frames=(
-                core.TraceFrame(
-                    signal=clock,
-                    change=core.SchedulingChange(
-                        state=state.scheduling, requests=(core.within(request, 100.0),)
-                    ),
-                ),
-            )
-        ),
-    )
-    if proof in ("dependency", "authority"):
-        dispatched = core.step(prepared.state, core.DispatchAuthorized(request_id=identity))
-        assert _phase(dispatched.state, identity) == core.RequestPhase.DISPATCHED
-    else:
-        with pytest.raises(core.ContractError, match="recovery"):
-            core.step(prepared.state, core.DispatchAuthorized(request_id=identity))

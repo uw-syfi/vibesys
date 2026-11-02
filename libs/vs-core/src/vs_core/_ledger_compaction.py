@@ -49,8 +49,6 @@ def compact_ledger(state: CoreState) -> CoreState:
         return state
     records = state.records
     kept = tuple(record for record in records.records if record.request_id not in spent)
-    recovery = records.recovery
-    checks = tuple(check for check in recovery.checks if check.target not in spent)
     receipts = tuple(
         receipt.model_copy(
             update={"request_ids": tuple(i for i in receipt.request_ids if i not in spent)}
@@ -61,14 +59,7 @@ def compact_ledger(state: CoreState) -> CoreState:
     )
     return state.model_copy(
         update={
-            "records": records.model_copy(
-                update={
-                    "records": kept,
-                    "recovery": recovery
-                    if len(checks) == len(recovery.checks)
-                    else recovery.model_copy(update={"checks": checks}),
-                }
-            ),
+            "records": records.model_copy(update={"records": kept}),
             "run": state.run
             if all(new is old for new, old in zip(receipts, state.run.receipts, strict=True))
             else state.run.model_copy(update={"receipts": receipts}),
@@ -144,14 +135,6 @@ def _pinned(state: CoreState) -> frozenset[RequestId]:
         named.update(request.depends_on)
         if isinstance(request, InspectRequest | CancelOwnedResource | BlockRequest):
             named.add(request.target)
-    for child in records.children:
-        named.update(child.source_requests)
-        named.update(mark.source_request for mark in child.observation_watermarks)
-    for check in records.recovery.checks:
-        if check.resolution != "terminal":
-            named.add(check.target)
-        if check.inspection is not None:
-            named.add(check.inspection)
     for _subject, wait in recorded_waits(state):
         named.update(wait.requests)
     return frozenset(named)

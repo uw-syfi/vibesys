@@ -1,0 +1,4 @@
+# Python bytecode caches are written by running the task's checker and benchmark;
+# they are not build inputs, and would change the task image's tag.
+**/__pycache__
+**/*.pyc
