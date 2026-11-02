@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vs_core.api import AttemptId, AttemptPhase, AttemptRef, RequestPhase, RunStatus
+from vs_core.api import AttemptId, AttemptPhase, AttemptRef, RunStatus, unreleased_records
 from vs_runtime._workspace_lookup import candidate_member_id
 from vs_runtime.contracts import member_workspace_id
 
@@ -51,11 +51,7 @@ def core_workspace_holds(core: CoreState) -> WorkspaceHolds:
     )
     pending_scopes = (
         AttemptRef(attempt_id=scope.owner, generation=scope.generation)
-        for scope in (
-            record.request.scope
-            for record in core.records.records
-            if record.phase != RequestPhase.COMPLETED
-        )
+        for scope in (record.request.scope for record in unreleased_records(core))
         if isinstance(scope.owner, AttemptId)
     )
     return WorkspaceHolds(final=False, attempts=frozenset((*open_attempts, *pending_scopes)))

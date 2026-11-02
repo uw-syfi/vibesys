@@ -333,7 +333,20 @@ class RequestRecord(OutcomeValue):
         return bind_outcome(self, info)
 
 
-_OPEN_PHASES = (RequestPhase.PREPARED, RequestPhase.DISPATCHED, RequestPhase.RECONCILING)
+def phase_open(phase: RequestPhase) -> bool:
+    """Whether a record in this phase has not ended: it waits on its executor for a result.
+
+    The one definition of open work, for every kind of record. A blocked record ended at its limit
+    and nothing sends it again, so it is not open: it may still hold a release, which
+    ``unreleased_records`` names. A new phase raises here until someone says which it is.
+    """
+    match phase:
+        case RequestPhase.PREPARED | RequestPhase.DISPATCHED | RequestPhase.RECONCILING:
+            return True
+        case RequestPhase.COMPLETED | RequestPhase.BLOCKED:
+            return False
+        case _:
+            assert_never(phase)
 
 
 def _canonical(record: RequestRecord) -> bool:
@@ -347,12 +360,12 @@ def is_step(record: RequestRecord) -> bool:
 
 def is_open(record: RequestRecord) -> bool:
     """A canonical record that has not ended: core owes it a result by its ``until``."""
-    return _canonical(record) and record.phase in _OPEN_PHASES
+    return _canonical(record) and phase_open(record.phase)
 
 
 def command_open(record: RequestRecord) -> bool:
     """An inspection, cancel or block that has not ended: its limit ends it if nothing else."""
-    return not _canonical(record) and record.phase in _OPEN_PHASES
+    return not _canonical(record) and phase_open(record.phase)
 
 
 _LEDGER_INDEXES = ("_by_resource", "_inspections", "_positions")

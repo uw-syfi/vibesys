@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from vs_core.api import RequestPhase
+from vs_core.api import unreleased_records
 from vs_dst._delivery import Delivery
 from vs_dst._host import has_ended
 from vs_dst._interruptions import Action, Interruption, Moment
@@ -38,7 +38,6 @@ PATIENCE_FLOOR = 300.0
 PATIENCE_FACTOR = 2.0
 """How many times the uninterrupted run's own duration a resumed host is waited on."""
 
-_OPEN = (RequestPhase.DISPATCHED, RequestPhase.RECONCILING, RequestPhase.BLOCKED)
 _DETAIL_LIMIT = 160
 _HOW_LIMIT = 48
 
@@ -348,7 +347,7 @@ def _holding(core: CoreState | None) -> str:
     """The kinds of request the run holds open or cannot account for, as a suffix of a signature."""
     if core is None:
         return ""
-    kinds = sorted({r.request.kind for r in core.records.records if r.phase in _OPEN})
+    kinds = sorted({r.request.kind for r in unreleased_records(core)})
     return f" [open: {', '.join(kinds)}]" if kinds else ""
 
 

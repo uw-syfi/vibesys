@@ -20,7 +20,7 @@ from ._strategy_operations import RenderRoleArtifactsBase
 from ._wait_clock import turn_bound
 from .types.common import ExecuteRegisteredOperation, InvocationRef, RunStatus, Scope
 from .types.evaluation import EvaluationState, SubmitMeasurement
-from .types.records import RecordsState, RequestPhase, Scheduled
+from .types.records import RecordsState, RequestPhase, Scheduled, phase_open
 from .types.sessions import (
     DispatchTurn,
     EnsureSession,
@@ -68,14 +68,14 @@ def permit_for_request(state: CoreState, request: object) -> TurnPermit | None:
 def admitted_work_remains(state: CoreState, *, running: bool = False) -> bool:
     """Whether pause must still wait for work that holds a permit.
 
-    Unfinished request records are the durable outbox (the same set as
-    ``pending_requests``), and a non-terminal owned job is a measurement the
+    Open request records are the durable outbox (the same set as
+    ``pending_requests``; a blocked record is not open and holds no permit), and a non-terminal owned job is a measurement the
     permit admitted. ``running`` is a local call that has not returned. The
     run is paused only when this is false.
     """
     if running:
         return True
-    if any(row.phase != RequestPhase.COMPLETED for row in state.records.records):
+    if any(phase_open(row.phase) for row in state.records.records):
         return True
     return any(
         not job.terminal for job in (*state.evaluation.jobs, *state.evaluation.registered_jobs)
@@ -110,7 +110,7 @@ def cap_open_records(
     records = []
     changed = False
     for row in state.records.records:
-        if row.phase in (RequestPhase.COMPLETED, RequestPhase.BLOCKED):
+        if not phase_open(row.phase):
             records.append(row)
             continue
         deadline = deadline_of(row)

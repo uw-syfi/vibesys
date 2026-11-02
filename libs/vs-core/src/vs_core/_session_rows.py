@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ._waits import record_waits
 from .types.common import ContractValidationError, RequestId
+from .types.records import phase_open
 from .types.sessions import session_may_wait, turn_may_wait
 from .types.waits import WaitOn
 
@@ -85,7 +85,7 @@ def waiting_on(
 def request_ended(context: SessionsContext, request: RequestId) -> bool:
     """Whether core holds *request* and applied its end; one not yet recorded has not ended."""
     record = context.records.record(request)
-    return record is not None and not record_waits(record.phase)
+    return record is not None and not phase_open(record.phase)
 
 
 def replace_invocation(state: SessionsState, invocation: Invocation) -> SessionsState:
