@@ -47,6 +47,7 @@ var rules = map[string][]string{
 	"internal/environment/host":    {"internal/backend", "internal/clock", "internal/core", "internal/environment"},
 	"internal/gitrepo":             {"internal/core"},
 	"internal/task":                {"internal/core"},
+	"internal/reading":             {},
 	"internal/runtimedir":          {"internal/core"},
 
 	// Storage.
