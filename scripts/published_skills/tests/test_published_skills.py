@@ -218,7 +218,12 @@ def test_every_well_formed_name_matching_its_folder_passes(
 
 @settings(suppress_health_check=TMP)
 @example(description="x" * 1025)
-@given(description=st.text(alphabet="abc ", min_size=1025, max_size=1100).filter(str.strip))
+@given(
+    # The front matter parser strips the value, so the limit applies to the stripped text.
+    description=st.text(alphabet="abc ", min_size=1025, max_size=1100).filter(
+        lambda text: len(text.strip()) > 1024
+    )
+)
 def test_a_description_over_the_limit_is_reported(
     tmp_path_factory: pytest.TempPathFactory, description: str
 ) -> None:
