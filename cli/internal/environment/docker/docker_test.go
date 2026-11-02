@@ -98,7 +98,7 @@ func TestDockerOverTheFakeEnginePassesTheEnvironmentContract(t *testing.T) {
 			return newRig(t, daemon, options{timers: timers}).env(t)
 		},
 		World:    func(t *testing.T) envtest.World { return fakeworld.New() },
-		Checkout: checkout,
+		Checkout: func(t *testing.T, _ envtest.World) core.Checkout { return checkout(t) },
 		// The fake has no process to kill. The nearest thing is the death of the connection,
 		// which is what the death of the process is to the engine: what the connection held
 		// must stop by itself.
