@@ -27,8 +27,8 @@ and what a reader needs to trust it. A mismatch of `Checks` with the truth is th
 
 `wip: <note>` or `wip(<scope>): <note>`. Only that first line and a non-empty note are checked
 (`header-format`, `wip-note-empty`). No trailers, no length or imperative rule. It means checks
-not run or unknown. It is never a candidate: `wip-not-measurable` (from `--require-pass`, from
-`measurements.py record`, and for the head in `check-range`) says to commit a full commit on top.
+not run or unknown. It is never a candidate: `wip-not-measurable` (from `--require-pass` and for the head in
+`check-range`) says to commit a full commit on top.
 
 ## Examples
 

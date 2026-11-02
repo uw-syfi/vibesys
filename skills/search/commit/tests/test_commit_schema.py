@@ -402,14 +402,12 @@ def test_check_range_needs_a_real_nonempty_range(repo_of_commits: Repo) -> None:
 
 
 class Optimization:
-    """A repository with a user hook, a state directory and one linked worktree."""
+    """A repository with a user hook and one linked worktree."""
 
     def __init__(self, root: Path) -> None:
         self.repo = Repo(root)
         self.root = root
-        self.state = root / ".vibesys-state" / "optimize" / "demo"
-        (self.state / "worktrees").mkdir(parents=True)
-        self.worktree = self.state / "worktrees" / "main"
+        self.worktree = root.parent / f"{root.name}-work" / "main"
         git(root, "worktree", "add", "-q", "-b", "vibesys/demo", str(self.worktree))
         hooks = root / ".git" / "hooks"
         self.log = root / "hook.log"
@@ -419,7 +417,7 @@ class Optimization:
             hook.chmod(0o755)
 
     def install(self) -> tuple[int, str, str]:
-        return cli("install-hook", "--dir", str(self.state))
+        return cli("install-hook", "--worktree", str(self.worktree))
 
     def commit(self, cwd: Path, message: str) -> str:
         (cwd / "x").write_text(message)
@@ -493,9 +491,14 @@ def test_the_hook_requires_the_plan_trailer_on_a_plan_branch(optimization: Optim
     assert optimization.commit(optimization.worktree, planned).startswith("0\n")
 
 
-def test_install_hook_needs_a_worktree_and_a_state_directory(tmp_path: Path) -> None:
-    assert cli("install-hook", "--dir", str(tmp_path / "missing"))[0] == 2
-    state = tmp_path / ".vibesys-state" / "optimize" / "demo"
-    state.mkdir(parents=True)
+def test_install_hook_needs_a_worktree(tmp_path: Path) -> None:
     Repo(tmp_path)
-    assert cli("install-hook", "--dir", str(state))[0] == 2  # no worktree under it
+    assert cli("install-hook")[0] == 2
+    assert cli("install-hook", "--worktree", str(tmp_path / "missing"))[0] == 2
+
+
+def test_the_generated_hooks_live_in_the_git_directory(optimization: Optimization) -> None:
+    optimization.install()
+    generated = optimization.root / ".git" / "vibesys-hooks"
+    assert any(generated.rglob("commit-msg"))
+    assert not (optimization.root / ".vibesys-state").exists()

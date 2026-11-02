@@ -9,7 +9,7 @@
       "name": "vibesys",
       "source": "./skills",
       "description": "Resumable optimization with parallel hypotheses, measurements and independent judging, plus domain skills for kernels, LLM serving, microservices, Tokio services and Neuron.",
-      "version": "0.5.0",
+      "version": "0.6.0",
       "strict": false,
       "skills": [
         "./domains/dial9-tokio/dial9-rank-bottlenecks",

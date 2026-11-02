@@ -1,70 +1,71 @@
 ---
 name: state
-description: "Use when you create, resume or update the state of a vibesys optimization: the plan files, measurement records, worktrees and scratch output under .vibesys-state/optimize/<task>/. Defines the layout, the plan file format and who writes which part, how to find what is live, and how to resume after a stop."
+description: "Use when you create, resume or update the state of a vibesys optimization: what vibesys-cli stores (jobs, results, plans and their comments), what lives in git (the result branch, candidate branches, worktrees), who writes which part, how to find what is live, and how to resume after a stop."
 ---
 
 # Optimization state
 
-One optimization per task, stoppable and resumable at any time. Everything it knows is in
-`.vibesys-state/optimize/<task>/` at the repository root: untracked and listed in
-`.git/info/exclude` (the lead creates both on first use). The committed `.vibesys/` stays read-only.
+One optimization per task, stoppable and resumable at any time. Its state is split by owner. Read
+and write the CLI's part through its commands only; never open its files.
 
-```
-plans/         plan-NNN-<slug>.md   one file per idea; NNN zero-padded, ascending, never reused
-measurements/  <commit-sha>.jsonl   written ONLY by measure's measurements.py
-worktrees/     every git worktree: main, one per plan, judges, throwaway measurement checkouts
-scratch/       disposable machine output: logs, raw JSON, profiler output, cached external results
-```
+## What `vibesys-cli` stores
 
-Result branch (the optimization's "main"): `vibesys/<task>`. Candidates: `vibesys-work/<task>/plan-NNN`.
-Pass this directory to `measurements.py --dir`.
+All worktrees of the repository share one store per task, so any agent sees the same state.
 
-Commit rules: `vibesys:commit`. On first use, and after each `git worktree add` where anyone will
-commit, the lead runs `commit_schema.py install-hook --dir <state dir> --worktree <path>` (the
-`commit` skill's script; with no `--worktree` it covers every worktree under `worktrees/`). The
-hook is per-worktree and chains to the repository's own hooks, so the user's checkout is untouched.
+| Kept by the CLI | Ask with |
+| --- | --- |
+| Jobs, their states, logs and notes | `vibesys-cli jobs --json`, `logs <job>`, `show <sha>` |
+| Saved results: check passes and samples, per commit | `vibesys-cli show <sha> --json` |
+| The head of the result branch and its fresh number | `vibesys-cli result --json` |
+| Plans, their status and comments, and the jobs linked to them | `vibesys-cli plan list\|view` |
+| The daemon that runs it all | `vibesys-cli daemon status` |
 
-## Plan files
+## What lives in git and on disk
 
-One hypothesis per file. The header is three single-line fields, then three sections, each with
-one writer:
+- Result branch (the optimization's "main"): `vibesys/result/<task>`. The lead creates it once, at
+  the base commit, and never checks it out. Only `vibesys-cli promote` moves it.
+- Candidate branches: `vibesys-work/<task>/plan-N`, where N is the plan number.
+- Worktrees: the lead picks one directory outside the repository's working tree and puts every
+  worktree there (`git worktree add`), one per plan, one per judge or profile question. Each brief
+  names its worktree. `git worktree list` is the truth about which exist.
+- Scratch: disposable machine output (profiles, raw logs). Any directory the lead names in the
+  briefs; nothing depends on it.
 
-```
-status: proposed|chosen|returned|won|parked|rejected
-claim: <one line>
-gain: <one line, set by the lead when the plan closes: measured gain with record ids, or why rejected/parked>
+Commit rules: `vibesys:commit`. After each `git worktree add` where anyone will commit, the lead
+runs `commit_schema.py install-hook --worktree <path>` (the `commit` skill's script). The hook is
+per-worktree and chains to the repository's own hooks, so the user's checkout is untouched.
 
-## Proposal   (a planner subagent) claim, mechanism, expected gain and its basis, files touched, how to test, evidence
-## Decision   (the lead) chosen / rejected / deferred and why; duplicates; disjoint files with other chosen plans
-## Result     (the lead, from hand-backs) worker brief text, branch, commit, record ids, judge verdict, lessons
-```
+## Plans
 
-Workers and judges never edit plan files; they hand back evidence. The lead assigns the number.
-A planner names the file itself once it has chosen its idea.
+One hypothesis per plan. The title is the claim; the body is the planner's proposal; every later
+word is a comment. The CLI numbers plans and stores them as given.
 
-Cheap index of all plans, without reading bodies:
+Statuses: `open` (proposed, undecided), `chosen` (a worker is on it), `won` (promoted),
+`parked` (worth revisiting; say what would change the answer), `rejected` (ruled out; say why).
 
-```sh
-grep -H -m3 -E '^(status|claim|gain):' plans/*.md
-grep -l '^status: \(proposed\|chosen\|returned\)' plans/*.md    # what is live
-```
+| Writer | Writes |
+| --- | --- |
+| Planner | `plan create`, and `plan edit` of its own body |
+| Lead | status (`plan edit <n> --status`, `plan close <n> --status s --comment ...`) and comments: the decision (chosen, rejected, deferred and why; duplicates; disjoint files), the worker brief text, the result (branch, commit, job ids, judge verdict, lessons), and on close the gain with its `compare` verdict or the reason |
 
-## Measurements
+Workers and judges never write plans; they link jobs with `--plan <n>` and hand back evidence.
+Write each comment when the thing happens, not at the end.
 
-Only `measurements.py` writes records; never edit a shard. A final (fresh) measurement of a
-branch is one taken after its last move, on its current head, with several samples.
-`measurements.py check --dir D` verifies the result branch head has a passing `better` record.
-Slow external jobs (queues, clusters) must be idempotent and cached in `scratch/` by commit plus
-evaluator fingerprint, so a relaunch never repeats or duplicates work.
+Cheap index of all plans, without reading bodies: `vibesys-cli plan list --json`. What is live:
+`plan list --status open,chosen`. A plan's linked jobs: `plan view <n>`.
 
 ## Resume
 
-1. Read the open plans (`proposed`, `chosen`, `returned`), then the last few closed ones.
-2. Check git (branches, worktrees, the head of `vibesys/<task>`) and the running agents for what
-   is real, not what a plan claims.
-3. Relaunch or park every plan whose agent is gone, and say so in its Decision section.
-4. After a long gap or an evaluator change, re-measure main as a control (re-baseline).
+1. `plan list --status open,chosen`, then the last few closed plans.
+2. Check what is real, not what a plan claims: `git branch --list 'vibesys-work/<task>/*'`,
+   `git worktree list`, `vibesys-cli jobs --state queued,running`, `vibesys-cli result`, and the
+   running agents.
+3. Relaunch or park every plan whose agent is gone, and comment why. A job that is still queued
+   or running needs no resubmission.
+4. After a long gap or a change of environment, re-measure the head as a control
+   (`submit measure <head> --no-cache`).
 
 ## Housekeeping
 
-Remove the worktrees of closed plans; keep their branches (and never rewrite measured commits). Put bulky output in `scratch/`.
+Remove the worktrees of closed plans (`git worktree remove`); keep their branches, and never
+rewrite measured commits.

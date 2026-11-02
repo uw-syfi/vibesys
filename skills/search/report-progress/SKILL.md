@@ -27,7 +27,7 @@ and what you decided without them. It is not a log of what you did.
 
 - The main text reads at a high level: what was done, why it matters, what it gained. Keep
   worker or agent ids, commit SHAs, record ids and plan numbers out of sentences. They appear
-  only as a parenthetical reference after the item, such as "(plan-004, record 14, a1b2c3d)".
+  only as a parenthetical reference after the item, such as "(plan 4, job 14, a1b2c3d)".
 - Every number is backed by a record, and says how many samples and against what base; the
   record and commit go in the parenthetical.
 - A number from an earlier head is labeled with that head. Never present it as current.

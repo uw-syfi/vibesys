@@ -15,10 +15,10 @@
 
 ## Reading the measurement
 
-`show --dir <dir> --commit <candidate>` lists the records. Look at: the metric and direction are
-the task's; the evaluator fingerprint is the same as the base's; the check is `pass`; the
-samples were taken on a comparable host. `compare` gives the verdict and the oriented ratio
-(above 1 is better).
+`vibesys-cli show <candidate> --json` lists what was saved. Look at: the metric and direction are
+the task's; the environment is the same as the parent's; the check passed; the sample count is
+enough for the claim. `vibesys-cli compare` gives the verdict and the ratio; it refuses to mix
+environments, and its message says why.
 
 - `better`: the gain is real by the recorded samples.
 - `within_noise`: no evidence of a gain. A claim of gain fails on "real".
