@@ -31,7 +31,6 @@ from ._dispatch_episode import (
     scope_admission,
 )
 from ._dispatch_validation import validate_dispatch_episode, validate_resume_authority
-from ._host_epochs import downtime
 from ._inspection import validate_inspection_target, validate_registered_owner
 from ._ledger_compaction import compact_ledger
 from ._operator_actions import cancellations, notice, reopen_retirements
@@ -52,14 +51,13 @@ from ._quota_pause_clock import credit_quota_pause
 from ._registry import ContractError
 from ._request_forward import turn_of
 from ._routing import SIGNAL_ORDER, event_area
-from ._run_pause import EpochFacts, control_refusal, pause_outlived, reopened, stop_standing
+from ._run_pause import control_refusal, pause_outlived, reopened, stop_standing
 from ._session_inputs import check_declared_target, may_have_been_read
 from ._session_inputs import mid_turn_offers as _mid_turn_offers
 from ._session_scope import lost_turn_authority
 from ._validation import validate_decision
 from ._values import digest, share_unchanged
 from ._waits import (
-    lapsed_check_waits,
     lapsed_job_waits,
     lapsed_session_waits,
     stalled_acquisitions,
@@ -79,7 +77,6 @@ from .types.common import (
     OPERATOR_ACTIONS,
     Area,
     AttemptRef,
-    ControlId,
     ControlInput,
     DecisionId,
     DependencyStatus,
@@ -116,7 +113,6 @@ from .types.kernel import (
     DecisionCompleted,
     DecisionReceipt,
     DecisionSubmitted,
-    EpochResumed,
     EvaluationContext,
     ProposalSubmitted,
     RecordsContext,
@@ -143,8 +139,6 @@ from .types.records import (
     Outbound,
     RecordsEvent,
     RecoveryPhase,
-    RecoveryReady,
-    RecoveryStarted,
     Request,
     RequestObserved,
     RequestPhase,
@@ -582,36 +576,6 @@ def _admission_signal(
     )
 
 
-def _activation_signal(
-    state: CoreState, signal: RegisterAttempt | AdmitAttempt | RecoveryReady
-) -> tuple[Transition, tuple[Signal, ...]]:
-    """Admissions resolve canonical decisions; recovery wakes scheduling.
-
-    A recovered run asks again for the measurements it accepted and never answered
-    (`evaluation.unanswered_measures`). One that closes under a cancel applies the cancel again first: a state
-    saved before a stop escalated (``_escalated``) holds a drain Finish and a cancel
-    recorded after it, with nothing cancelled. Applying a cancel twice changes nothing.
-    """
-    if isinstance(signal, RecoveryReady):
-        barrier = state.records.recovery
-        if signal.epoch != barrier.epoch:
-            return Transition(state=state), ()
-        if barrier.phase != RecoveryPhase.READY:
-            raise ContractError(
-                ("recovery", "phase"), "ready notification requires committed barrier proof"
-            )
-        wake = ClockAdvanced(now_at=state.run.now_at)
-        asked_again = evaluation.unanswered_measures(state.run)
-        if _closing_under_cancel(state):
-            return Transition(state=state), (
-                AdmissionControl(action="cancel"),
-                wake,
-                *asked_again,
-            )
-        return Transition(state=state), (wake, *asked_again)
-    return _admission_signal(state, signal)
-
-
 def validate_terminal_inputs(
     before: SessionsState, change: AreaChange[SessionsState], now_at: float
 ) -> None:
@@ -696,7 +660,7 @@ def _finish_run_inputs(state: CoreState) -> Transition:
 
 def _kernel_signal(
     state: CoreState,
-    signal: RegisterAttempt | AdmitAttempt | CloseAdmission | RunDrained | RecoveryReady,
+    signal: RegisterAttempt | AdmitAttempt | CloseAdmission | RunDrained,
     *,
     publishing: bool,
 ) -> tuple[Transition, tuple[Signal, ...]]:
@@ -705,8 +669,8 @@ def _kernel_signal(
     A run is drained only once nothing is left to clean up, and a request this step publishes
     is cleanup the state does not hold yet: the run ends on a later tick, after they are done.
     """
-    if isinstance(signal, RegisterAttempt | AdmitAttempt | RecoveryReady):
-        return _activation_signal(state, signal)
+    if isinstance(signal, RegisterAttempt | AdmitAttempt):
+        return _admission_signal(state, signal)
     if isinstance(signal, CloseAdmission):
         return Transition(state=state), (AdmissionControl(action="drain"),)
     if state.run.result is None:
@@ -777,7 +741,7 @@ def _stall_entries(
     request that can never be dispatched (``RequestUndispatchable``), and a blocked record a closing
     run waits on that no live request addresses (``BlockedRecordStalled``), and a job whose
     recorded wait names a request that ended without moving it (``JobWaitLapsed``), and the same
-    for a session (``SessionWaitLapsed``) or a recovery check (``RecoveryCheckWaitLapsed``). A fired watch
+    for a session (``SessionWaitLapsed``). A fired watch
     (``WhileOpen``, ``WhileAlive``) is also raised here, as the deadline of the waits that declared it. A signal already raised
     in this step is not raised again: if its reducer could not end the wait (an ambiguous
     record it refuses to act on), the wait stays visible to the orphan check instead of the
@@ -804,31 +768,12 @@ def _stall_entries(
         ),
         *lapsed_job_waits(state),
         *lapsed_session_waits(state),
-        *lapsed_check_waits(state),
     )
     return [
         (signal, None, _signal_admission(state, signal))
         for signal in signals
         if (event_area(signal), digest(signal)) not in seen
     ]
-
-
-def _follow_ups(
-    signal: Signal, signals: tuple[Signal, ...], seen: set[tuple[Area, str]]
-) -> tuple[Signal, ...]:
-    """What a kernel signal sends on: for an opened recovery, without a clock tick already taken.
-
-    Opening recovery wakes the clock, but a tick that opened it (an inspection that lapsed
-    unanswered ended the last wait) already ran in this step, and a tick repeats no signal of
-    its own. The loop ticks again after any commit.
-    """
-    if not isinstance(signal, RecoveryReady):
-        return signals
-    return tuple(
-        child
-        for child in signals
-        if not (isinstance(child, ClockAdvanced) and (event_area(child), digest(child)) in seen)
-    )
 
 
 def propagate(
@@ -878,13 +823,10 @@ def propagate(
         seen.add(key)
         if len(seen) > MAX_SIGNALS:
             raise SignalCycleError("propagation-bound")
-        if isinstance(
-            signal, RegisterAttempt | AdmitAttempt | CloseAdmission | RunDrained | RecoveryReady
-        ):
+        if isinstance(signal, RegisterAttempt | AdmitAttempt | CloseAdmission | RunDrained):
             result, signals = _kernel_signal(state, signal, publishing=bool(requests))
             state = result.state
-            follow_ups = _follow_ups(signal, signals, seen)
-            pending.extend((child, cause, admission_id) for child in follow_ups)
+            pending.extend((child, cause, admission_id) for child in signals)
             events.extend(result.events)
             continue
         change = dispatch(state, signal)
@@ -1657,67 +1599,6 @@ def advance_run_time(state: CoreState, now_at: float) -> CoreState:
     return state.model_copy(update={"run": state.run.model_copy(update={"now_at": now_at})})
 
 
-def _recover_writer(state: CoreState, event: RecoveryStarted, dispatch: Dispatch) -> Transition:
-    """Reconcile a replacement writer without reopening the run or its flow journal."""
-    park = state.run.park
-    if park is not None and event.epoch > state.records.recovery.epoch:
-        state = state.model_copy(
-            update={
-                "run": state.run.model_copy(
-                    update={"park": park.model_copy(update={"epoch": event.epoch})}
-                )
-            }
-        )
-    opened = records.open_host_epoch(state.records, state.run, event)
-    credit = downtime(opened.hosts) if opened.hosts != state.records.hosts else 0.0
-    waits = evaluation.credit_downtime(state.evaluation, state.run, credit)
-    state = state.model_copy(update={"records": opened, "evaluation": waits})
-    state = _advance_event_time(state, event)
-    return propagate(state, (event,), dispatch, _event_cause(state, event))
-
-
-def _resume_epoch(state: CoreState, event: EpochResumed, dispatch: Dispatch) -> Transition:
-    """Construct fresh run authority only for an explicit operator Resume."""
-    previous_epoch = state.records.recovery.epoch
-    restart_search = (
-        state.run.park is not None or state.run.result is not None or stop_standing(state.run)
-    )
-    successor = previous_epoch > 0 and event.epoch > previous_epoch
-    control = ControlInput(
-        control_id=ControlId(root=f"epoch:{event.epoch}"), action="resume", when="now"
-    )
-    if successor:
-        state = state.model_copy(
-            update={
-                "run": EpochFacts.of(state.run)
-                .new_run()
-                .model_copy(update={"controls": (control,)}),
-                "scheduling": type(state.scheduling)(
-                    queue=state.scheduling.queue,
-                    slots=state.scheduling.slots,
-                    released_slot_seconds=state.scheduling.released_slot_seconds,
-                ),
-                "settlement": reopen_adoption(state.settlement),
-            }
-        )
-    result = _recover_writer(
-        state, RecoveryStarted(epoch=event.epoch, now_at=event.now_at), dispatch
-    )
-    if successor and restart_search:
-        result = result.model_copy(
-            update={
-                "events": (
-                    *result.events,
-                    StopLiftRecorded(
-                        control=control,
-                        new_epoch=True,
-                    ),
-                )
-            }
-        )
-    return result
-
-
 def consume(
     state: CoreState,
     event: CoreEvent,
@@ -1744,20 +1625,14 @@ def consume(
         return Transition(state=state)
     _validate_observation_ingress(state, event)
     _validate_authorization(state, event)
-    if isinstance(event, DecisionCompleted | RecoveryReady | InputWithdrawRequested):
-        raise ContractError(
-            ("event",), "completion, readiness and withdrawal are internal lifecycle signals"
-        )
+    if isinstance(event, DecisionCompleted | InputWithdrawRequested):
+        raise ContractError(("event",), "completion and withdrawal are internal lifecycle signals")
     if isinstance(event, ProposalSubmitted):
         result = _proposal(state, event, dispatch)
     elif isinstance(event, DecisionSubmitted):
         result = _submitted(state, event, dispatch)
     elif isinstance(event, RunControlEvent):
         result = _control(state, event, dispatch)
-    elif isinstance(event, RecoveryStarted):
-        result = _recover_writer(state, event, dispatch)
-    elif isinstance(event, EpochResumed):
-        result = _resume_epoch(state, event, dispatch)
     else:
         state = _advance_event_time(state, event)
         result = propagate(state, (event,), dispatch, _event_cause(state, event))

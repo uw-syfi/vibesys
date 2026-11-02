@@ -51,13 +51,11 @@ from .types.common import ObservationStatus, RevisionRef
 from .types.evaluation import (
     MEASUREMENT_DIAGNOSTIC_LIMIT,
     MeasurementIdentity,
-    MeasurementRequested,
     MeasurementResult,
     OwnedJob,
     PreparedSubmissionReceipt,
 )
 from .types.job_observations import MeasurementFailure
-from .types.strategy import Accepted, Measure
 
 if TYPE_CHECKING:
     from .types.common import DecisionId, Scope
@@ -67,7 +65,7 @@ if TYPE_CHECKING:
         MeasurementPlan,
         RegisteredOwnedJob,
     )
-    from .types.kernel import EvaluationContext, RunState
+    from .types.kernel import EvaluationContext
 
 __all__ = [
     "checkpoint_input",
@@ -76,7 +74,6 @@ __all__ = [
     "reused_evidence_complete",
     "reused_record",
     "reused_run",
-    "unanswered_measures",
 ]
 
 _RUN_PURPOSES = frozenset({"local-validation", "official"})
@@ -165,30 +162,6 @@ def held_answer(state: EvaluationState, run: OwnedJob, decision: DecisionId) -> 
         diagnostic=""
         if observation is None
         else observation.diagnostic[-MEASUREMENT_DIAGNOSTIC_LIMIT:],
-    )
-
-
-def unanswered_measures(run: RunState) -> tuple[MeasurementRequested, ...]:
-    """The ``Measure`` decisions core accepted and then answered nobody: ask each one again.
-
-    A measurement is answered by the request it started, or at once when it needed none
-    (`_requested`). One accepted with no request and not completed was not answered, whatever
-    became of the event that would have told its flow (a host that stopped between the two): no
-    request exists that could answer it later. Admitting it again gives it the same answer
-    from what core holds, or a request of its own when it still has to be measured.
-    """
-    return tuple(
-        MeasurementRequested(
-            decision_id=receipt.decision_id,
-            scope=receipt.decision.scope,
-            plan=receipt.decision.plan,
-            compared=receipt.decision.compared,
-        )
-        for receipt in run.receipts
-        if isinstance(receipt.decision, Measure)
-        and isinstance(receipt.feedback, Accepted)
-        and not receipt.request_ids
-        and receipt.completion is None
     )
 
 

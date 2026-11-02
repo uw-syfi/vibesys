@@ -48,7 +48,6 @@ if TYPE_CHECKING:
         trusted_keys,
         turn_candidate,
     )
-    from vs_core._host_epochs import downtime
     from vs_core._ids import (
         IdScheme,
         attempt_id,
@@ -528,7 +527,6 @@ if TYPE_CHECKING:
         DecisionCompleted,
         DecisionReceipt,
         DecisionSubmitted,
-        EpochResumed,
         EvaluationContext,
         ProposalSubmitted,
         RecordsContext,
@@ -570,7 +568,6 @@ if TYPE_CHECKING:
         DispatchAuthorized,
         ExecuteRegisteredOperation,
         HostEpoch,
-        HostRenewed,
         InspectRequest,
         OperationResult,
         OperationRetireRequested,
@@ -581,10 +578,7 @@ if TYPE_CHECKING:
         RecordsState,
         RecoveryBarrier,
         RecoveryCheck,
-        RecoveryCheckWaitLapsed,
         RecoveryPhase,
-        RecoveryReady,
-        RecoveryStarted,
         RegisteredOperationRequest,
         ReissueProof,
         Request,
@@ -808,7 +802,6 @@ _MODULES: dict[str, str] = {
                 "ledger_refs trusted_keys turn_candidate "
             ),
         ),
-        ("vs_core._host_epochs", ("downtime ")),
         (
             "vs_core._ids",
             ("IdScheme attempt_id attempt_ref component decision_of_operation item_id "),
@@ -992,7 +985,7 @@ _MODULES: dict[str, str] = {
             "vs_core.types.kernel",
             (
                 "AreaChange AreaContext AttemptsContext ControlChanged CoreEvent CoreState CoreView "
-                "DecisionCompleted DecisionReceipt DecisionSubmitted EpochResumed EvaluationContext "
+                "DecisionCompleted DecisionReceipt DecisionSubmitted EvaluationContext "
                 "ProposalSubmitted RecordsContext RunControlEvent RunEnded RunEnvelope RunState "
                 "RunSummary SchedulingContext SessionsContext SettlementContext Signal "
                 "StopLiftRecorded StrategyEvent Transition "
@@ -1011,10 +1004,10 @@ _MODULES: dict[str, str] = {
             (
                 "Attribution BlockedRecordStalled BlockRequest CancelOwnedResource CapacityHold "
                 "ChildLease ChildObservationWatermark DispatchAuthorized ExecuteRegisteredOperation "
-                "HostEpoch HostRenewed InspectRequest OperationResult OperationRetireRequested "
+                "HostEpoch InspectRequest OperationResult OperationRetireRequested "
                 "OperationView Outbound "
                 "ReconciliationRequest RecordsEvent RecordsState RecoveryBarrier RecoveryCheck "
-                "RecoveryCheckWaitLapsed RecoveryPhase RecoveryReady RecoveryStarted "
+                "RecoveryPhase "
                 "RegisteredOperationRequest ReissueProof Request RequestObserved RequestPhase "
                 "RequestPrepared RequestRecord RequestUndispatchable RetryDue TargetObservation "
                 "TurnHeld inherit within "
@@ -1321,7 +1314,6 @@ __all__ = [
     "EndReason",
     "EnsureSession",
     "EnsureWorkspace",
-    "EpochResumed",
     "EvaluationChange",
     "EvaluationContext",
     "EvaluationEvent",
@@ -1363,7 +1355,6 @@ __all__ = [
     "HostEpoch",
     "HostFence",
     "HostId",
-    "HostRenewed",
     "IdScheme",
     "Identity",
     "IdentityTypeError",
@@ -1504,10 +1495,7 @@ __all__ = [
     "RecordsState",
     "RecoveryBarrier",
     "RecoveryCheck",
-    "RecoveryCheckWaitLapsed",
     "RecoveryPhase",
-    "RecoveryReady",
-    "RecoveryStarted",
     "ReducerTrace",
     "RegisterAttempt",
     "RegisteredJobObserved",
@@ -1782,7 +1770,6 @@ __all__ = [
     "decision_of_operation",
     "decode_stored",
     "deferred",
-    "downtime",
     "effect_resolution",
     "effect_verdict",
     "encode_json",

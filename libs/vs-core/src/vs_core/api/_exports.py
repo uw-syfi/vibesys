@@ -112,12 +112,6 @@ def _load_evidence_views() -> dict[str, object]:
     }
 
 
-def _load_host_epochs() -> dict[str, object]:
-    from vs_core._host_epochs import downtime
-
-    return {"downtime": downtime}
-
-
 def _load_ids() -> dict[str, object]:
     from vs_core._ids import (
         IdScheme,
@@ -1198,7 +1192,6 @@ def _load_types_kernel() -> dict[str, object]:
         DecisionCompleted,
         DecisionReceipt,
         DecisionSubmitted,
-        EpochResumed,
         EvaluationContext,
         ProposalSubmitted,
         RecordsContext,
@@ -1227,7 +1220,6 @@ def _load_types_kernel() -> dict[str, object]:
         "DecisionCompleted": DecisionCompleted,
         "DecisionReceipt": DecisionReceipt,
         "DecisionSubmitted": DecisionSubmitted,
-        "EpochResumed": EpochResumed,
         "EvaluationContext": EvaluationContext,
         "ProposalSubmitted": ProposalSubmitted,
         "RecordsContext": RecordsContext,
@@ -1294,7 +1286,6 @@ def _load_types_records() -> dict[str, object]:
         DispatchAuthorized,
         ExecuteRegisteredOperation,
         HostEpoch,
-        HostRenewed,
         InspectRequest,
         OperationResult,
         OperationRetireRequested,
@@ -1305,10 +1296,7 @@ def _load_types_records() -> dict[str, object]:
         RecordsState,
         RecoveryBarrier,
         RecoveryCheck,
-        RecoveryCheckWaitLapsed,
         RecoveryPhase,
-        RecoveryReady,
-        RecoveryStarted,
         RegisteredOperationRequest,
         ReissueProof,
         Request,
@@ -1335,7 +1323,6 @@ def _load_types_records() -> dict[str, object]:
         "DispatchAuthorized": DispatchAuthorized,
         "ExecuteRegisteredOperation": ExecuteRegisteredOperation,
         "HostEpoch": HostEpoch,
-        "HostRenewed": HostRenewed,
         "InspectRequest": InspectRequest,
         "OperationResult": OperationResult,
         "OperationRetireRequested": OperationRetireRequested,
@@ -1346,10 +1333,7 @@ def _load_types_records() -> dict[str, object]:
         "RecordsState": RecordsState,
         "RecoveryBarrier": RecoveryBarrier,
         "RecoveryCheck": RecoveryCheck,
-        "RecoveryCheckWaitLapsed": RecoveryCheckWaitLapsed,
         "RecoveryPhase": RecoveryPhase,
-        "RecoveryReady": RecoveryReady,
-        "RecoveryStarted": RecoveryStarted,
         "RegisteredOperationRequest": RegisteredOperationRequest,
         "ReissueProof": ReissueProof,
         "Request": Request,
@@ -1810,7 +1794,6 @@ EXPORT_MODULES: dict[str, Callable[[], dict[str, object]]] = {
     "vs_core._corevalue": _load_corevalue,
     "vs_core._envelope_migrations": _load_envelope_migrations,
     "vs_core._evidence_views": _load_evidence_views,
-    "vs_core._host_epochs": _load_host_epochs,
     "vs_core._ids": _load_ids,
     "vs_core._ledger_compaction": _load_ledger_compaction,
     "vs_core._measurement_recipe": _load_measurement_recipe,

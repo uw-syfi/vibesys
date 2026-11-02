@@ -171,7 +171,6 @@ class Host:
         )
         host = Host(definition, loaded.core, loaded.strategy, stepper=stepper, held=self.held)
         now = loaded.core.run.now_at + 10.0
-        host.event(core.RecoveryStarted(epoch=epoch, now_at=now))
         host.event(core.ClockAdvanced(now_at=now + 1.0))
         host._advance((core.TimeReached(time=now + 1.0),))
         return host
@@ -210,27 +209,4 @@ def test_a_resumed_search_asking_for_its_input_again_is_answered_from_the_run_th
     assert resumed.seen is not None
     assert resumed.seen.count == (2 if later == "same" else 3)
     assert resumed.seen.evidence == host.seen.evidence
-    assert_never_measured_again(resumed, first)
-
-
-@pytest.mark.parametrize("later", ["same", "changed"])
-def test_a_search_saved_with_an_unanswered_measurement_is_answered_when_it_resumes(
-    later: str,
-) -> None:
-    """A host saved the run with the decision accepted, no request and no answer: the resumed
-    host answers it from what core holds, and the search goes on with nothing measured again."""
-    host = measured_once()
-    first = host.run_started()
-    # the host that took the run over asked again, and its core answered nobody
-    saved = host.restarted(CHANGED, epoch=2, stepper=Lost(core.DecisionId(root="measure.2")))
-    assert saved.seen is not None
-    assert saved.seen.count == 1, "nobody told the root"
-    receipt = next(r for r in saved.core.run.receipts if r.decision_id.root == "measure.2")
-    assert not receipt.request_ids
-    assert receipt.completion is None
-
-    code = CHANGED if later == "same" else code_changed(CHANGED)
-    resumed = saved.restarted(code, epoch=3)
-    assert resumed.seen is not None
-    assert resumed.seen.count == 2
     assert_never_measured_again(resumed, first)

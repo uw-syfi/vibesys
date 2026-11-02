@@ -12,9 +12,9 @@ import pytest
 
 from vs_core.api import (
     DEADLINE_STOP,
+    ClockAdvanced,
     ControlId,
     ControlInput,
-    RecoveryStarted,
     RunResultProposal,
     RunStatus,
     StopLiftRecorded,
@@ -140,7 +140,7 @@ def test_a_resumed_process_lifts_each_old_host_stop(stopper: str, *, replayed: b
     assert not run.channel.stop_requested()
     assert requested_stop_mode(run.core.run) is None
     if replayed and stopper == "environment":
-        run.core = step(run.core, RecoveryStarted(epoch=1, now_at=1.0)).state
+        run.core = step(run.core, ClockAdvanced(now_at=1.0)).state
         run.channel.request_environment_stop()
         run.poll()
         assert run.channel.stop_requested()

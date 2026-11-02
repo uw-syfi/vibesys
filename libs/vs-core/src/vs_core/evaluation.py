@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-from . import _continuations, _job_releases, _measurement_reuse, _measurements
+from . import _continuations, _job_releases, _measurements
 from ._comparison import closed_answers, comparisons_settled, moment_of
 from .types.evaluation import (
     AgentMeasurementRequested,
@@ -31,7 +31,7 @@ from .types.evaluation import (
 
 if TYPE_CHECKING:
     from .types.evaluation import EvaluationEvent, EvaluationState
-    from .types.kernel import AreaChange, EvaluationContext, RunState
+    from .types.kernel import AreaChange, EvaluationContext
 
 
 type Reducer = Callable[
@@ -90,21 +90,3 @@ def advance_evaluation(
             "events": (*due.events, *change.events, *after.events, *settled),
         }
     )
-
-
-def unanswered_measures(run: RunState) -> tuple[MeasurementRequested, ...]:
-    """The measurements core accepted and has no request or answer for, as they were asked.
-
-    The kernel admits each again when a resumed host is ready, so none waits for an answer
-    nothing will give (`_measurement_reuse.unanswered_measures`).
-    """
-    return _measurement_reuse.unanswered_measures(run)
-
-
-def credit_downtime(state: EvaluationState, run: RunState, credit: float) -> EvaluationState:
-    """Every open wait with ``credit`` seconds of host downtime added to its limit.
-
-    The kernel calls this when a new host epoch opens, with the downtime the host log proves,
-    as it moves every open request record's limit (``records.open_host_epoch``).
-    """
-    return _continuations.credit_downtime(state, run, credit)

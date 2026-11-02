@@ -294,17 +294,3 @@ def _grows_linearly(
 ) -> tuple[int, ...] | None:
     """None when ``event`` costs linearly more behind more ``finished`` rows, else its costs."""
     return _quadratic(lambda rows: _iterations(_behind(state, finished, rows), event))
-
-
-def test_a_restart_costs_in_proportion_to_the_ledger() -> None:
-    """Opening a new host epoch over ``n``, ``4 * n`` and ``16 * n`` finished requests.
-
-    A restart re-reads the answer every finished record holds. Each re-read copied the ledger
-    state, and the copy rebuilt the ledger's index on its next lookup, so a restart cost the
-    square of the run's length: on a 10-hour run (7,700 records) it held the run loop for
-    20 to 40 s while the run held its lease.
-    """
-    state = started(running_polls=5, ending=core.ObservationStatus.SUCCEEDED).state
-    restart = core.RecoveryStarted(epoch=state.records.recovery.epoch + 1, now_at=state.run.now_at)
-    finished = _finished(run_toy(ToyHost(waits=(True,), polls=(2,)), Config()).core)
-    assert _grows_linearly(state, restart, finished) is None

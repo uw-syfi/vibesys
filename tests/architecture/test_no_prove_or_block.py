@@ -84,6 +84,10 @@ DELETED_MODULES: tuple[str, ...] = (
     "vs_runtime.api.fence_contracts",
     # The receipt store: what it kept is the keyed document store, now named for that.
     "vs_runtime._receipt_store",
+    # The restart reconciliation: no process emitted `RecoveryStarted` since the step loop (#3475 R5).
+    "vs_core._request_recovery",
+    "vs_core._recovery_owners",
+    "vs_core._host_epochs",
 )
 """Dotted module paths that no file under ``src/`` or ``libs/*/src`` may provide, as a module or
 as a package (a listed ``a.b`` also forbids ``a.b.c``)."""
@@ -144,6 +148,15 @@ DELETED_SYMBOLS: tuple[str, ...] = (
     "_child_release_signals",
     "_cancelled_here",
     "_sourced",
+    # The restart reconciliation (#3475 R5): a killed run restarts through `fold` and `decide`.
+    "RecoveryStarted",
+    "RecoveryReady",
+    "RecoveryCheckWaitLapsed",
+    "EpochResumed",
+    "open_host_epoch",
+    "unanswered_measures",
+    "credit_downtime",
+    "HostRenewed",
 )
 """Names that no file under ``src/`` or ``libs/*/src`` may define or import."""
 

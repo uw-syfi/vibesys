@@ -61,7 +61,6 @@ from .types.records import (
     BlockRequest,
     CancelOwnedResource,
     InspectRequest,
-    RecoveryCheckWaitLapsed,
     RecoveryPhase,
     RequestPhase,
     reply_owed,
@@ -549,28 +548,6 @@ def lapsed_job_waits(core: CoreState) -> tuple[JobWaitLapsed, ...]:
     return (*polls, *collections)
 
 
-def lapsed_check_waits(core: CoreState) -> tuple[RecoveryCheckWaitLapsed, ...]:
-    """One wake per pending recovery check whose named entities settled and left it waiting.
-
-    An answer about a check's target re-resolves the check, so a check waiting only on
-    requests is moved by their answers. One that also waits on an entity (an ensure's session
-    still learning whether it holds the resource) heard its answer before that entity settled;
-    once nothing it names can move it, it is woken so recovery resolves it from the current
-    state (``RecoveryCheckWaitLapsed``).
-    """
-    if core.run.status == RunStatus.TERMINAL or not recovery_waits(core.records.recovery.phase):
-        return ()
-    named = dict(recorded_waits(core))
-    return tuple(
-        RecoveryCheckWaitLapsed(target=check.target)
-        for check in core.records.recovery.checks
-        if check.resolution == "pending"
-        and check.wait is not None
-        and check.wait.subjects
-        and not _live(core.records, named, check.wait, frozenset(), frozenset())
-    )
-
-
 def lapsed_session_waits(core: CoreState) -> tuple[SessionWaitLapsed, ...]:
     """One wake per waiting session whose wait names a request that is over.
 
@@ -1018,7 +995,6 @@ __all__ = [
     "WaitingPhase",
     "awaiting_refund",
     "draining_without_cancel",
-    "lapsed_check_waits",
     "lapsed_job_waits",
     "lapsed_session_waits",
     "orphan_waits",

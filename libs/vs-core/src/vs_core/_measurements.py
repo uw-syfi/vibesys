@@ -313,7 +313,7 @@ def _requested(
 
     A decision with no request of its own to wait on is answered here (refused, answered from
     evidence core holds, or from the run that already measured its input), and it completes
-    with that answer, so the receipt says it was answered (`unanswered_measures`).
+    with that answer, so the receipt says it was answered.
     """
     change = _admitted(state, context, event)
     results = tuple(

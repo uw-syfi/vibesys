@@ -8,7 +8,7 @@ turn as lost and leave the pause with nothing to resume it.
 
 Core learns of the wait only as the run's quota pause (``run_pause``, owned by ``QUOTA``). While
 the run is held by one, every dispatched turn's limit moves by the time that passes, exactly as
-host downtime moves an open record's limit (``_request_recovery.open_host_epoch``). The
+the run clock leaves host downtime out. The
 limit moves only for a turn already dispatched, and only as far as the run deadline, which
 still ends a wait that never resumes. A turn running beside the one that waited gets the same
 extra time, which is bounded by the pause.

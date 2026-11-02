@@ -65,7 +65,6 @@ from vs_core.api import (
     ObserveOwnedJob,
     OperationRegistry,
     OwnedJob,
-    RecoveryStarted,
     ReissueProof,
     ReplyError,
     Request,
@@ -312,7 +311,6 @@ class _Driver[S: StrategyState]:
         self.calls: dict[str, int] = {}
         self.ledger: dict[str, _Executed] = {}
         self.commits = 0
-        self.epoch = 1
         self.recovering = False
         self.ticked: CoreState | None = None
         self.in_turn = 0
@@ -365,12 +363,9 @@ class _Driver[S: StrategyState]:
         self.recovering = True
 
     def recover(self) -> None:
-        """A new host: reload what was persisted, then start recovery under the next epoch."""
+        """A new host: reload what was persisted and go on from it, as the step loop does."""
         self.reload()
-        self.epoch += 1
         self.recovering = False
-        now_at = max(self.clock, self.trace.core.run.now_at)
-        self.consume(RecoveryStarted(epoch=self.epoch, now_at=now_at))
         self.commit()
 
     def start(self, config: object, events: tuple[CoreEvent, ...]) -> None:

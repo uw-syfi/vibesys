@@ -535,7 +535,7 @@ def test_recorded_retirement_cannot_mutate_a_reused_workspace_after_reentry(kind
             "decision_id": withdraw.decision_id,
         }
     )
-    event = core.RecoveryStarted(epoch=0, now_at=0.0)
+    event = core.RetryDue(request_id=core.RequestId(root="trace"), now_at=0.0)
     prepared = core.trace_step(
         state,
         event,

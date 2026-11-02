@@ -133,7 +133,6 @@ EXPECTED_TARGET = {
         ("vs_core._session_stalls.advance_lapsed_session_waits", ("session_wait_lapsed",)),
         ("vs_core._session_checkpoints.advance", ("invocation_checkpoint_pending",)),
         ("vs_core.records._observation", ("request_observed",)),
-        ("vs_core._host_epochs.renewed", ("host_renewed",)),
         ("vs_core._turn_holds.held", ("turn_held",)),
         (
             "vs_core._settlement.advance",
@@ -153,14 +152,6 @@ EXPECTED_TARGET = {
                 "retry_due",
                 "request_undispatchable",
                 "blocked_record_stalled",
-            ),
-        ),
-        (
-            "vs_core._request_recovery.advance",
-            (
-                "recovery_started",
-                "recovery_ready",
-                "recovery_check_wait_lapsed",
             ),
         ),
         (

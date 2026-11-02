@@ -59,7 +59,7 @@ def observation(
 
 
 def prepare(state: core.CoreState, requests: tuple[core.Request, ...]) -> core.CoreState:
-    recovery = core.RecoveryStarted(epoch=0, now_at=0.0)
+    recovery = core.RetryDue(request_id=core.RequestId(root="trace"), now_at=0.0)
     return core.trace_step(
         state,
         recovery,

@@ -15,10 +15,9 @@ earned (``queue_credit``), and every limit on work tied to the job is derived fr
   delay between two polls (``credited``). A pending fact that keeps being refreshed earns all
   its queue time; a stale one (the scheduler stopped answering) earns at most that much, so a
   poll outage is never credited as queue time and cannot extend a limit.
-- **Downtime.** While no host runs, nothing waits: host downtime (``_host_epochs``) moves an
-  open record's limit (``open_host_epoch``) and an open wait's (``downtime_credit``) by the
-  same amount, so the two agree. It is never also queue time: the part of an interval that
-  overlaps a downtime earns no credit and spends no queue budget.
+- **Downtime.** While no host runs, nothing waits: the run clock excludes downtime
+  (``Record.clock``), so a limit never counts it. It is never also queue time: the part of an
+  interval that overlaps a downtime earns no credit and spends no queue budget.
 - **Bound.** A job's work ends at its stated limit plus its credit. While its latest fact is
   pending it may still earn up to the cap, so its bound is that much later; and its queue
   budget (``queue_wait_budget``) ends it once its credit and its current pending interval
@@ -85,7 +84,7 @@ def pending(job: Job) -> bool:
 
 
 def _downtime_within(hosts: Sequence[HostEpoch], start: float, end: float) -> float:
-    """The part of ``[start, end]`` no host was alive, from the host log (``_host_epochs``)."""
+    """The part of ``[start, end]`` no host was alive, from the host log."""
     return sum(
         max(min(later.started_at, end) - max(earlier.alive_at, start), 0.0)
         for earlier, later in pairwise(hosts)
@@ -173,9 +172,8 @@ def _submission_limit(evaluation: EvaluationState, records: RecordsState, job: J
     """The limit of ``job``'s submission when an agent's call allocated it, else None.
 
     The submission's record holds that limit (``until``): the call answered the agent with
-    the same value, and only the record's is moved when a host restart credits downtime
-    (``open_host_epoch``). So a wait opened after a restart counts from the moved limit, as
-    the record does.
+    the same value, and the run clock excludes downtime, so a wait opened after a restart counts
+    from the same limit as the record does.
     """
     if not isinstance(job, OwnedJob) or not any(
         call.request_id == job.submission_id and not call.repeat for call in evaluation.agent_calls
