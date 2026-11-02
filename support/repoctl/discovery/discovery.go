@@ -104,10 +104,14 @@ type Spec struct {
 	DependencyFields []string `toml:"dependency_fields"`
 	WorkspacePrefix  string   `toml:"workspace_prefix"`
 	// Native: manifest filename to language mapping, roots requiring CI
-	// selection, and jobs assigned to those selected roots.
+	// selection, and jobs assigned to those selected roots. ExcludedRoots maps a
+	// scoped root that CI does not select to the reason it cannot be; such a root
+	// is still discovered and owned, but selects no job and joins no selected-only
+	// collection.
 	Manifests     map[string]string `toml:"manifests"`
 	ScopeRoots    []string          `toml:"scope_roots"`
 	SelectedRoots []string          `toml:"selected_roots"`
+	ExcludedRoots map[string]string `toml:"excluded_roots"`
 	SelectedJobs  []string          `toml:"selected_jobs"`
 	Target        bool              `toml:"target"`
 }
