@@ -45,6 +45,7 @@ from vs_dst._world import (
     RunSetup,
     Serving,
     ServingWorld,
+    SlowWorld,
     World,
 )
 
@@ -77,6 +78,7 @@ __all__ = [
     "Serving",
     "ServingWorld",
     "SimulatedRun",
+    "SlowWorld",
     "StepLoopHosting",
     "StopKind",
     "StopPoint",
