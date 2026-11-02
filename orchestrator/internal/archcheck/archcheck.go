@@ -50,7 +50,7 @@ var testRules = map[string][]string{
 
 // pureImports is the standard library the core may use. Nothing here reaches a clock, a file, the
 // network, a random source or a goroutine primitive, so a new need states itself in this list.
-var pureImports = []string{"cmp", "fmt", "maps", "slices", "strconv", "time"}
+var pureImports = []string{"cmp", "fmt", "maps", "reflect", "slices", "strconv", "time"}
 
 // impureTime matches the parts of package time that read the clock or wait. The core uses time only
 // for values and arithmetic.
