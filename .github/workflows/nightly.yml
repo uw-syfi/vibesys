@@ -40,7 +40,15 @@ jobs:
       # `nightly` Hypothesis profile (conftest.py), so each night explores new
       # inputs. The `slow` tests run in the `crash-sweep` job below.
       - name: Run the full test suite at nightly depth
-        run: uv run python -m pytest --depth=nightly -m 'not slow and not native_build' -n auto --dist loadgroup --no-cov -q
+        run: |
+          # The job has ended on a runner shutdown signal; this prints what memory and the
+          # largest processes were doing, so the log names what the runner was killed for.
+          (while true; do
+            echo "MEM $(date -u +%H:%M:%S) $(free -m | awk 'NR==2{print "used="$3"M avail="$7"M"}') $(df -m / | awk 'NR==2{print "disk_free="$4"M"}')"
+            ps -eo rss,comm,args --sort=-rss | head -4 | cut -c1-180 | sed 's/^/MEM  /'
+            sleep 20
+          done) &
+          uv run python -m pytest --depth=nightly -m 'not slow and not native_build' -n auto --dist loadgroup --no-cov -q
 
       # A failure prints its `@reproduce_failure` blob (print_blob); the
       # artifact uploaded below holds the failing examples for replay.
