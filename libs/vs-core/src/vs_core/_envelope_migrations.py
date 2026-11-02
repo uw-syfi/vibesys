@@ -205,6 +205,41 @@ def records_at_44(records: JsonObject) -> JsonObject:
     return kept
 
 
+def _v44_to_v45(envelope: JsonObject) -> JsonObject:
+    """Version 45 dropped ``downtime_credit`` of a wait.
+
+    No run credited a wait since the run clock excluded host downtime, so every save of that
+    kind holds 0 and loses nothing. A save from before the clock may hold a credit: the wait's
+    limit was its deadline moved by it, capped at the run's deadline when the deadline was
+    within it, so the credit is folded into ``deadline_at`` the same way.
+    """
+    run_deadline = _number(_object(_object(envelope.get("core")).get("run")).get("deadline_at"))
+    walked = without_downtime_credit(envelope, run_deadline)
+    return _object(walked) | {"schema_version": 45}
+
+
+def without_downtime_credit(value: JsonValue, run_deadline: float | None = None) -> JsonValue:
+    """``value`` with every wait's ``downtime_credit`` removed (folded into its deadline).
+
+    The tolerant read of data written at version 44 (`_step_log`) calls it with no run deadline:
+    that credit is always 0.
+    """
+    if isinstance(value, list):
+        return [without_downtime_credit(item, run_deadline) for item in value]
+    if not isinstance(value, dict):
+        return value
+    walked = {key: without_downtime_credit(item, run_deadline) for key, item in value.items()}
+    if "continuation_id" not in walked or "downtime_credit" not in walked:
+        return walked
+    credit = _number(walked.pop("downtime_credit"))
+    deadline = _number(walked.get("deadline_at"))
+    if credit and deadline is not None:
+        moved = deadline + credit
+        capped = run_deadline is not None and deadline <= run_deadline
+        walked["deadline_at"] = min(moved, run_deadline) if capped else moved
+    return walked
+
+
 def _floor_declared(core: JsonObject) -> bool:
     run = _object(core.get("run"))
     task = _object(_object(run.get("facts")).get("task"))
@@ -245,6 +280,7 @@ MIGRATIONS: Final[Mapping[int, Migration]] = {
     41: _v41_to_v42,
     42: _v42_to_v43,
     43: _v43_to_v44,
+    44: _v44_to_v45,
 }
 """Version ``n`` to ``n + 1``, one entry per version, contiguous from the oldest supported."""
 

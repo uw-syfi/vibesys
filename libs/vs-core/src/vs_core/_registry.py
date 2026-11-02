@@ -37,7 +37,7 @@ from .types.records import OperationResult, RequestObserved
 from .types.sessions import TurnSpec
 from .types.strategy import Command, Operation, StrategyState, Wait
 
-ENVELOPE_SCHEMA_VERSION = 44
+ENVELOPE_SCHEMA_VERSION = 45
 """The version of the envelope a run writes now.
 
 A shape change that every saved envelope survives (a new field with a default, a closed set or

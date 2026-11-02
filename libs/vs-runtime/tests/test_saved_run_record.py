@@ -118,3 +118,40 @@ def test_a_snapshot_written_at_version_43_is_read_with_its_epoch_and_without_the
     assert read.state == STATE.model_copy(
         update={"records": STATE.records.model_copy(update={"epoch": epoch})}
     )
+
+
+def _wait() -> core.Continuation:
+    session = core.SessionId(root="s")
+    return core.Continuation(
+        continuation_id=core.ContinuationId(root="turn/evaluation"),
+        invocation=core.InvocationRef(
+            session_id=session, invocation_id=core.InvocationId(root="turn"), generation=0
+        ),
+        next_invocation=core.InvocationRef(
+            session_id=session, invocation_id=core.InvocationId(root="resume"), generation=0
+        ),
+        jobs=(core.ResourceId(root="job"),),
+        deadline_at=500.0,
+        phase=core.ContinuationPhase.WAITING,
+    )
+
+
+@pytest.mark.regression
+def test_a_snapshot_written_at_version_44_is_read_with_its_wait_without_the_downtime_credit() -> None:
+    """Version 44 wrote ``downtime_credit`` (always 0) in each wait of the state (#3708).
+
+    Delete this test with the tolerant read, after 2026-11-08.
+    """
+    registry = fake_run_seed((100.0,), 1).registry
+    wait = _wait()
+    state = STATE.model_copy(
+        update={"evaluation": STATE.evaluation.model_copy(update={"continuations": (wait,)})}
+    )
+    saved = SavedRun(state, core.ENVELOPE_SCHEMA_VERSION, b"{}")
+    message = snapshot_message(saved)
+    document = json.loads(zlib.decompress(message.state))
+    (stored,) = document["evaluation"]["continuations"]
+    assert "downtime_credit" not in stored
+    stored["downtime_credit"] = 0.0
+    message.state = zlib.compress(json.dumps(document).encode())
+    assert saved_run_in(record(2, Oneof("core_snapshot", message)), registry) == saved
