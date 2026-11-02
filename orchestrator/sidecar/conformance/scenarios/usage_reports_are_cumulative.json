@@ -1,0 +1,54 @@
+{
+  "name": "usage_reports_are_cumulative",
+  "doc": "Later reports replace earlier ones; the turn ends with the last.",
+  "provider": [
+    [
+      {
+        "usage": {
+          "input": 10,
+          "output": 1
+        }
+      },
+      {
+        "say": "a",
+        "item": "a1"
+      },
+      {
+        "usage": {
+          "input": 25,
+          "output": 4
+        }
+      }
+    ]
+  ],
+  "steps": [
+    {
+      "send": {
+        "effectId": "e1",
+        "startTurn": {
+          "session": {
+            "agentId": "agent-1",
+            "session": 1
+          },
+          "turnId": "t1",
+          "message": {
+            "id": "msg-t1",
+            "runId": "run-1",
+            "toAgentId": "agent-1",
+            "delivery": "DELIVERY_QUEUED",
+            "at": "1970-01-01T00:00:01Z",
+            "text": "go"
+          }
+        }
+      }
+    },
+    {
+      "await": {
+        "turn_ended": "t1"
+      }
+    }
+  ],
+  "checks": [
+    "usage_ends_the_turn"
+  ]
+}

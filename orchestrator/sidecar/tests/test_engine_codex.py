@@ -6,7 +6,16 @@ import threading
 from typing import TYPE_CHECKING
 
 import pytest
-from agentshim.testing import AwaitSteer, CodexScript, Leave, RunCommand, Say, Spend, Think
+from agentshim.testing import (
+    AwaitSteer,
+    CodexScript,
+    Leave,
+    Retrying,
+    RunCommand,
+    Say,
+    Spend,
+    Think,
+)
 
 from tests import helpers as h
 from vs_sidecar.engine import Engine, InvalidCommandError
@@ -162,3 +171,13 @@ def test_a_steer_sent_while_the_turn_runs_is_accepted_when_the_provider_takes_it
     assert not sender.is_alive()
     outcomes = [e.steer for e in store.events_after(0) if e.HasField("steer")]
     assert [(o.message_id, o.accepted) for o in outcomes] == [("m-steer", True)]
+
+
+def test_a_provider_retry_is_not_a_failure() -> None:
+    engine, store = _engine(CodexScript().turn(Retrying(), Retrying(), Say("recovered")))
+    engine.send(h.start_turn("e1", "t1"))
+    engine.run_next()
+    events = store.events_after(0)
+    assert h.kinds(events)[-1] == "turn_ended"
+    assert events[-1].turn_ended.status == orch.TURN_STATUS_COMPLETED
+    assert [e.item.WhichOneof("body") for e in events if e.HasField("item")] == ["assistant"]

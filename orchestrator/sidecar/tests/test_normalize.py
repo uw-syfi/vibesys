@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import protovalidate
 from agentshim import (
     AssistantText,
     ProviderUsage,
@@ -19,6 +20,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as orch
+from vs_sidecar.gen.vibesys.orchestrator.v1 import sidecar_pb2 as sc
 from vs_sidecar.normalize import SteerBook, TurnNormalizer, normalize, usage_proto
 
 DONE = orch.TURN_STATUS_COMPLETED
@@ -212,6 +214,19 @@ def test_the_fold_is_deterministic_and_well_formed(events: list, status: int) ->
         if e.HasField("item"):
             last[e.item.id] = e.item.status
     assert orch.ITEM_STATUS_RUNNING not in last.values()
+
+
+@given(
+    st.lists(EVENT, max_size=20),
+    st.sampled_from([DONE, orch.TURN_STATUS_INTERRUPTED, orch.TURN_STATUS_FAILED]),
+)
+def test_every_event_it_makes_satisfies_the_contract(events: list, status: int) -> None:
+    validator = protovalidate.Validator()
+    for event in normalize("t1", events, status, _usage(3, 1)):
+        numbered = sc.SidecarEvent()
+        numbered.CopyFrom(event)
+        numbered.offset = 1  # the store numbers events; the contract wants a positive offset
+        validator.validate(numbered)
 
 
 @given(st.lists(EVENT, max_size=20))
