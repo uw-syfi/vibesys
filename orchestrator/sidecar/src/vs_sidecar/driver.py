@@ -15,6 +15,8 @@ from agentshim import (
     Agent,
     AgentShimError,
     ApprovalPolicy,
+    ConfigScope,
+    McpScope,
     NativePermissions,
     NoRunningTurnError,
     ProviderCapabilityError,
@@ -257,6 +259,13 @@ def identity_env(launch: fx.LaunchSession) -> dict[str, str]:
     }
 
 
+#: Which of the operator's own CLI configuration a launched agent loads, per harness. Claude Code
+#: loads none of it (settings, hooks, plugins, ``~/.claude/CLAUDE.md``, memory), so the agent does
+#: what its brief says and not what the operator's personal setup does. Codex's long-lived
+#: transport cannot isolate it (that needs a dedicated ``CODEX_HOME``), so Codex loads it all.
+CONFIG_SCOPES: Mapping[int, ConfigScope] = {orch.HARNESS_CLAUDE_CODE: ConfigScope.PROJECT}
+
+
 def build_session(
     launch: fx.LaunchSession,
     *,
@@ -268,7 +277,7 @@ def build_session(
     """The agentshim session a ``LaunchSession`` describes.
 
     Native subagents are off, because the orchestrator's own tools are how a lead spawns agents,
-    and text streams. *agent* is the one to open it on (tests pass one over scripted providers);
+    and text streams. The agent sees only the MCP servers given here. *agent* is the one to open it on (tests pass one over scripted providers);
     by default the real provider for the harness.
     """
     if agent is None:
@@ -291,6 +300,10 @@ def build_session(
     return agent.session(
         launch.worktree,
         mcp_servers=identified,
+        # Only the orchestrator's server: never the operator's own MCP servers or account
+        # connectors (mail, drives, calendars), which a launched agent has no business reaching.
+        mcp_scope=McpScope.SESSION,
+        config_scope=CONFIG_SCOPES.get(launch.harness, ConfigScope.ALL),
         reasoning_effort=launch.reasoning_effort or None,
         resume_id=launch.resume_conversation_id or None,
         partial_text=True,
