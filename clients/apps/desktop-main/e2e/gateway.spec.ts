@@ -48,12 +48,15 @@ const repository = fileURLToPath(new URL('../../../../', import.meta.url));
 let buildDirectory: string;
 let binary: string;
 test.beforeAll(async () => {
+  // vibesysd links the orchestrator's store (modernc.org/sqlite): a build on a cold Go cache takes
+  // most of a minute on a CI runner, so the build and this hook get more than the default 30 s.
+  test.setTimeout(150_000);
   buildDirectory = await mkdtemp('/tmp/vsg-build-');
   binary = join(buildDirectory, 'vibesysd');
   execFileSync('go', ['build', '-o', binary, './cmd/vibesysd'], {
     cwd: join(repository, 'gateway'),
     env: {...process.env, CGO_ENABLED: '0'},
-    timeout: 30_000,
+    timeout: 120_000,
   });
 });
 test.afterAll(async () => {
