@@ -60,11 +60,12 @@ func (a *App) Compare(ctx context.Context, c core.CallContext, commit, against c
 // are failures.
 //
 // The order is the crash-safe one. The decision is made first and changes nothing. A promotion is
-// then recorded in the store, and only after that is the branch fast-forwarded. A crash between
-// the two leaves a promotion the branch has not caught up with, which every later look at the
-// branch completes (settledHead), so the branch ends at the promoted commit; a crash before the
-// record leaves everything as it was, and the promotion can be asked for again. The branch is
-// never moved ahead of the record.
+// then recorded in the store, and only after that is the branch fast-forwarded; core's
+// NextPromotionStep names each of those two effects from what is there, and carryOut does them.
+// A crash between the two leaves a promotion the branch has not caught up with, which every later
+// look at the branch completes (settledHead asks the same question), so the branch ends at the
+// promoted commit; a crash before the record leaves everything as it was, and the promotion can
+// be asked for again. The branch is never moved ahead of the record.
 func (a *App) Promote(ctx context.Context, c core.CallContext, commit core.Commit) (core.PromotionDecision, error) {
 	if !commit.Valid() {
 		return nil, invalid("commit: %q is not a full 40-digit commit id", commit)
@@ -116,13 +117,60 @@ func (a *App) Promote(ctx context.Context, c core.CallContext, commit core.Commi
 			"commit %s does not contain the result branch head %s, so the branch cannot fast-forward to it; merge or rebase onto the head and measure it again",
 			commit, head)}
 	}
-	if err := t.store.RecordPromotion(ctx, promotion); err != nil {
+	if err := a.carryOut(ctx, t, branch, promotion); err != nil {
 		return nil, err
 	}
-	if err := a.cfg.Branches.FastForward(ctx, t.scope.Repository, branch, head, commit); err != nil {
-		return nil, unmoved(commit, branch, err)
-	}
 	return promotion, nil
+}
+
+// maxPromotionSteps bounds carryOut. A promotion takes two effects, record and move, and one more
+// look to see it is done; more means the repository or the store changes under the daemon.
+const maxPromotionSteps = 3
+
+// carryOut does what core's NextPromotionStep says, one effect at a time, until the promotion is
+// recorded and the branch is at the promoted commit. The caller holds branchMu. Nothing here
+// decides: it reads the head and the record, asks, and does the one effect named.
+//
+// Once the promotion is recorded, a failure leaves a promotion the branch has not caught up with,
+// and says so, since the next look at the branch completes it.
+func (a *App) carryOut(ctx context.Context, t *taskEntry, branch string, p core.Promotion) error {
+	recorded := false
+	fail := func(err error) error {
+		if recorded {
+			return unmoved(p.Commit, branch, err)
+		}
+		return err
+	}
+	for range maxPromotionSteps {
+		head, err := a.cfg.Branches.Head(ctx, t.scope.Repository, branch)
+		if err != nil {
+			return fail(err)
+		}
+		promotions, err := t.store.Promotions(ctx)
+		if err != nil {
+			return fail(err)
+		}
+		switch step := core.NextPromotionStep(p, head, promotions).(type) {
+		case core.RecordPromotionStep:
+			if err := t.store.RecordPromotion(ctx, step.Promotion); err != nil {
+				return err
+			}
+			recorded = true
+		case core.MoveBranchStep:
+			recorded = true
+			if err := a.cfg.Branches.FastForward(ctx, t.scope.Repository, branch, step.From, step.To); err != nil {
+				return fail(err)
+			}
+		case core.PromotionDoneStep:
+			return nil
+		case core.PromotionDivergedStep:
+			return fail(&core.Failure{Kind: core.FailureConflict, Message: fmt.Sprintf(
+				"the result branch %s is at %s, which is neither the head %s this promotion replaces nor the promoted commit %s; someone moved it",
+				branch, step.Head, p.PreviousHead, p.Commit)})
+		}
+	}
+	return fail(&core.Failure{Kind: core.FailureInternal, Message: fmt.Sprintf(
+		"the promotion of %s did not settle after %d steps", p.Commit, maxPromotionSteps)})
 }
 
 // CurrentResult reports the head of the result branch and a final number for it, or says why
@@ -196,21 +244,18 @@ func (a *App) settledHead(ctx context.Context, t *taskEntry) (core.Commit, error
 	if err != nil {
 		return "", err
 	}
-	to, pending := core.PendingMove(head, promotions)
-	if !pending {
+	if len(promotions) == 0 {
 		return head, nil
 	}
-	behind, err := a.cfg.Branches.IsAncestor(ctx, t.scope.Repository, head, to)
-	if errors.As(err, &f) && f.Kind == core.FailureNotFound {
-		return head, nil // the repository lacks the promoted commit: nothing can be completed
+	last := promotions[len(promotions)-1]
+	move, pending := core.NextPromotionStep(last, head, promotions).(core.MoveBranchStep)
+	if !pending {
+		return head, nil // done, or moved by someone else, and then it is theirs
 	}
-	if err != nil || !behind {
-		return head, err
-	}
-	if err := a.cfg.Branches.FastForward(ctx, t.scope.Repository, branch, head, to); err != nil {
+	if err := a.cfg.Branches.FastForward(ctx, t.scope.Repository, branch, move.From, move.To); err != nil {
 		return "", err
 	}
-	return to, nil
+	return move.To, nil
 }
 
 // settleBranches completes the promotions that were interrupted before the daemon stopped, for

@@ -246,11 +246,15 @@ forward: the new head must contain the old one, which a commit that does not is 
 `promote` decides from the saved measurements alone (internal/core), in this order: it is refused
 with every reason that applies (`unmeasured`, `check_missing`, `worse`, `within_noise`,
 `inconclusive`, `stale`, `environment_mismatch`), or it records the promotion in the store and
-then moves the branch. A crash between the two leaves a recorded promotion the branch has not
-caught up with; the daemon completes the move the next time it looks at the branch (any of
-`compare`, `promote` or `result`, or on start), so the branch is never ahead of the record. The
-branch is read as the head to beat, so a branch moved by hand is the head the next commands use, and
-`result` reports no number for a head the last promotion did not set.
+then moves the branch. The sequence is one pure function, `core.NextPromotionStep`: from the branch
+head and the record it names the next effect (record, move, done, or diverged), and the daemon does
+that effect and asks again. A crash or a failure at any point leaves a state the same question
+answers, so a crash between the two leaves a recorded promotion the branch has not caught up with,
+and the daemon completes the move the next time it looks at the branch (any of `compare`, `promote`
+or `result`, or on start): the branch is never ahead of the record. Tests cut every effect off,
+before and after it took place, in core over a model and in the daemon over the fake repository.
+A branch someone moved by hand is diverged: nothing writes over it, it is the head the next
+commands use, and `result` reports no number for a head the last promotion did not set.
 
 ## Contract
 

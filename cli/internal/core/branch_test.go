@@ -52,3 +52,27 @@ func TestResultBranchNamesAPlainTask(t *testing.T) {
 		t.Fatalf("ResultBranch = %q, %v", got, err)
 	}
 }
+
+// FuzzResultBranch feeds the task-to-branch rule any bytes. It never panics, fails only with an
+// invalid-input failure that names the task, and when it names a branch the branch is the prefix
+// and the task and obeys the ref rules it states.
+func FuzzResultBranch(f *testing.F) {
+	for _, seed := range []string{"", "kv-store", "a..b", "a.", "x.lock", ".hidden", "a/b", "a b", "名前", "a\x00b", strings.Repeat("a", 300)} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, task string) {
+		got, err := core.ResultBranch(task)
+		if err != nil {
+			if failureKind(err) != core.FailureInvalidInput || !strings.Contains(err.Error(), "task") {
+				t.Fatalf("ResultBranch(%q) failed with %v, want an invalid-input failure naming the task", task, err)
+			}
+			return
+		}
+		if got != core.ResultBranchPrefix+task {
+			t.Fatalf("ResultBranch(%q) = %q", task, got)
+		}
+		if strings.Contains(task, "..") || strings.HasSuffix(task, ".") || strings.HasSuffix(task, ".lock") {
+			t.Fatalf("ResultBranch(%q) named a branch git refuses", task)
+		}
+	})
+}
