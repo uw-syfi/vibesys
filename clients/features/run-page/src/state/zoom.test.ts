@@ -6,6 +6,7 @@ import {
   RUN_ROUTE,
   type RunMode,
   routeFromQuery,
+  routeLevel,
   routeQuery,
   routeUp,
   type ZoomEvent,

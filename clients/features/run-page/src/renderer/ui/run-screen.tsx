@@ -55,6 +55,7 @@ import {
   runHasEnded,
   runNow,
   runPhase,
+  runRouteOf,
   runWallNow,
   stepLabel,
   streamLines,
@@ -356,15 +357,8 @@ function Startup(props: {readonly state: RunPageState}): JSX.Element | null {
 }
 
 function crumbs(zoomed: ResolvedZoom, route: Route, zoom: Zoom): Crumb[] {
-  const top: Route = {
-    mode: route.agent === null ? 'ideas' : 'agents',
-    idea: null,
-    agent: null,
-    step: null,
-    item: null,
-  };
   const items: {id: string; label: string; mono?: boolean; to: Route}[] = [
-    {id: 'run', label: 'Run', to: top},
+    {id: 'run', label: 'Run', to: runRouteOf(route)},
   ];
   const opened: Route = {...route, step: null, item: null};
   if (zoomed.idea !== null)

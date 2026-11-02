@@ -1,6 +1,6 @@
 /**
- * The Run screen's panes over the live `queue-rs-live` run: the list beside an opened idea resizes,
- * its width going to its role.
+ * The Run screen's panes over the live `queue-rs-live` run: an idea opened from the Timeline sits
+ * beside it, and the list beside an opened idea resizes, its width going to its role.
  */
 import {afterAll, beforeAll, expect, test} from 'bun:test';
 import {fixtureNamed} from '@vibesys/run-fixtures';
@@ -102,9 +102,44 @@ function separator(container: HTMLElement, name: string): HTMLElement {
   return found;
 }
 
-test('the Ideas list beside an opened idea resizes, and the new width goes to its kind of pane', async () => {
+test('an idea opened from the Timeline sits beside it, its row selected, and closes back to it', async () => {
+  const zooms: ZoomEvent[] = [];
+  const screen = await rendered(
+    <IdeasWorkspace
+      state={STATE}
+      base={base(zooms)}
+      core={CORE}
+      mode="timeline"
+      idea={IDEA}
+      dispatch={() => undefined}
+      loading={null}
+      problem={null}
+    />,
+  );
+  const {container} = screen;
+  const gantt = container.querySelector('[aria-label="Ideas on the timeline"]');
+  expect(gantt).not.toBeNull();
+  const selected = [...(gantt?.querySelectorAll('[aria-selected="true"]') ?? [])];
+  expect(selected.map(row => row.getAttribute('aria-label'))).toEqual(['Wait-free consumer path']);
+  const panes = [...container.querySelectorAll('section.vs-pane')];
+  expect(panes.map(pane => pane.getAttribute('data-width'))).toEqual(['wide', 'fill']);
+  expect(panes[1]?.querySelector('h2')?.textContent).toBe('Wait-free consumer path');
+  // One face switch, on the Timeline: the idea beside it has no Steps and Logs of its own.
+  const switches = [...container.querySelectorAll('[role="radiogroup"][aria-label="Show"]')];
+  expect(switches).toHaveLength(1);
+  expect(panes[0]?.contains(switches[0] ?? null)).toBe(true);
+  const close = panes[1]?.querySelector('button[aria-label="Close idea"]');
+  await act(async () => {
+    close?.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
+  });
+  expect(zooms).toEqual([{type: 'up'}]);
+  await screen.done();
+});
+
+test('the list beside an opened idea resizes, and the new width goes to its kind of pane', async () => {
   const cases = [
     {mode: 'ideas', idea: IDEA, name: 'Resize the ideas list', key: 'ArrowRight', role: 'master'},
+    {mode: 'timeline', idea: IDEA, name: 'Resize the timeline', key: 'ArrowRight', role: 'wide'},
   ] as const;
   for (const each of cases) {
     const changes: [PaneRole, number][] = [];

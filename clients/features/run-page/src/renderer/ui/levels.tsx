@@ -26,7 +26,7 @@ import {
 } from '../../state/index.js';
 import {statusWords} from '../../state/span-words.js';
 import {FramedPane, paneResize} from './framed-pane.js';
-import {agentFolds, IdeasList, IdeasPane, ModeSwitch} from './run-level.js';
+import {agentFolds, IdeasList, IdeasPane, ModeSwitch, TimelinePane} from './run-level.js';
 import {
   AgentPane,
   type AgentPaneProps,
@@ -89,16 +89,47 @@ function stepChip(step: CandidateStep): {tone: 'live' | 'ok' | 'err' | 'neutral'
     : {tone: 'neutral', label: statusWords(step.status).label};
 }
 
-function logsOptions(main: string): {value: RunMode; label: string}[] {
+/**
+ * The detail's own view and its logs. The first keeps the mode it was opened in (a step opened
+ * from the Timeline goes back up to it); leaving the logs returns to the Ideas.
+ */
+function logsOptions(main: string, mode: RunMode): {value: RunMode; label: string}[] {
   return [
-    {value: 'ideas', label: main},
+    {value: mode === 'logs' ? 'ideas' : mode, label: main},
     {value: 'logs', label: 'Logs'},
   ];
 }
 
-/** Keep the Ideas master mounted while only the neighboring pane changes on selection. */
-export function IdeasWorkspace(props: LevelProps & {readonly idea: Candidate | null}): JSX.Element {
+/** The list on the left of the workspace: the Timeline an idea was opened from, else the Ideas. */
+function WorkspaceList(props: LevelProps & {readonly idea: Candidate | null}): JSX.Element {
   const {state, base, mode, idea, dispatch, panes} = props;
+  return mode === 'timeline' && idea !== null ? (
+    <TimelinePane
+      state={state}
+      base={base}
+      selected={idea.id}
+      resize={paneResize(panes, 'wide', RESIZE_WORDS.timeline)}
+      dispatch={dispatch}
+    />
+  ) : (
+    <IdeasPane
+      state={state}
+      base={base}
+      core={props.core}
+      selected={idea?.id ?? null}
+      resize={idea === null ? undefined : paneResize(panes, 'master', RESIZE_WORDS.ideas)}
+      dispatch={dispatch}
+    />
+  );
+}
+
+/**
+ * The list an idea is opened from, kept mounted while only the pane beside it changes on
+ * selection: the Ideas, or the Timeline when the idea was opened there. Beside the Timeline the
+ * idea shows its steps only; its Logs are reached from the Ideas face.
+ */
+export function IdeasWorkspace(props: LevelProps & {readonly idea: Candidate | null}): JSX.Element {
+  const {state, base, mode, idea, dispatch} = props;
   const outcomes = implementerOutcomes(props.core, base.model.candidates);
   const effects = ideaEffects(props.core, base.model.candidates);
   const view: IdeaViewProps | null =
@@ -114,14 +145,7 @@ export function IdeasWorkspace(props: LevelProps & {readonly idea: Candidate | n
     idea === null ? null : {...base, state, scope: {kind: 'idea', idea}, dispatch};
   return (
     <Panes>
-      <IdeasPane
-        state={state}
-        base={base}
-        core={props.core}
-        selected={idea?.id ?? null}
-        resize={idea === null ? undefined : paneResize(panes, 'master', RESIZE_WORDS.ideas)}
-        dispatch={dispatch}
-      />
+      <WorkspaceList {...props} />
       {idea === null || view === null || logs === null ? null : (
         <FramedPane
           kicker="idea"
@@ -138,7 +162,9 @@ export function IdeasWorkspace(props: LevelProps & {readonly idea: Candidate | n
                 label="Close idea"
                 press={() => base.zoom({type: 'up'})}
               />
-              <ModeSwitch mode={mode} options={logsOptions('Steps')} zoom={base.zoom} />
+              {mode === 'timeline' ? null : (
+                <ModeSwitch mode={mode} options={logsOptions('Steps', mode)} zoom={base.zoom} />
+              )}
             </Row>
           }
           meta={ideaHeader(view).meta}
@@ -180,7 +206,7 @@ function IdeaLevel(props: LevelProps & {readonly idea: Candidate}): JSX.Element 
         mono
         width="fill"
         enterKey={`idea ${idea.id}`}
-        actions={<ModeSwitch mode={mode} options={logsOptions('Steps')} zoom={base.zoom} />}
+        actions={<ModeSwitch mode={mode} options={logsOptions('Steps', mode)} zoom={base.zoom} />}
         meta={ideaHeader(view).meta}
         header={mode === 'logs' ? logsHeader(logs) : {}}
       >
@@ -267,7 +293,7 @@ function StepPane(
           )}
         </Row>
       }
-      actions={<ModeSwitch mode={mode} options={logsOptions('Step')} zoom={base.zoom} />}
+      actions={<ModeSwitch mode={mode} options={logsOptions('Step', mode)} zoom={base.zoom} />}
       header={mode === 'logs' ? logsHeader(logs) : stepHeader(view)}
     >
       {mode === 'logs' ? (

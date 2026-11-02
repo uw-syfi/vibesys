@@ -185,6 +185,39 @@ function timelineControls(
   };
 }
 
+/**
+ * The Timeline beside the idea one of its rows opened: the same face as at the run level, its row
+ * of the opened idea selected, in the larger share of the row so its bars stay readable.
+ */
+export function TimelinePane(props: {
+  readonly state: RunPageState;
+  readonly base: ViewBase;
+  readonly selected: string;
+  readonly resize: PaneResize | undefined;
+  readonly dispatch: Dispatch;
+}): JSX.Element {
+  const {base} = props;
+  const view: TimelineViewProps = {
+    ...base,
+    idea: null,
+    selected: props.selected,
+    ...timelineControls(props.state, props.dispatch),
+  };
+  return (
+    <FramedPane
+      kicker="timeline"
+      title={`${base.model.candidates.candidates.length}`}
+      width="wide"
+      header={timelineHeader(view)}
+      bare={Object.keys(timelineHeader(view)).length === 0}
+      resize={props.resize}
+    >
+      <ModeSwitch mode="timeline" options={runModes(props.state)} zoom={base.zoom} />
+      <TimelineView {...view} />
+    </FramedPane>
+  );
+}
+
 /** The Agents list's unfolded groups, kept by the page so every list of agents shares them. */
 export function agentFolds(
   state: RunPageState,

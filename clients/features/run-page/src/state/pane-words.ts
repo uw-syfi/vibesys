@@ -3,12 +3,12 @@
  *
  * A role is remembered as one width (by the app, `PaneSizes`): `master` is the list at the left of
  * a level (the Ideas beside an idea, an idea's steps, a step beside its item), `list` a narrower
- * list (the agents), and `chat` the chat panel. A role
+ * list (the agents), `wide` the Timeline beside the idea it opened, and `chat` the chat panel. A role
  * keeps its width at every level, so moving between levels moves no pane.
  */
 
-export type PaneRole = 'master' | 'list' | 'chat';
-export const PANE_ROLES: readonly PaneRole[] = ['master', 'list', 'chat'];
+export type PaneRole = 'master' | 'list' | 'wide' | 'chat';
+export const PANE_ROLES: readonly PaneRole[] = ['master', 'list', 'wide', 'chat'];
 
 /** The width a person gave each role, in pixels; a role without one keeps its default width. */
 export type PaneWidths = Readonly<Partial<Record<PaneRole, number>>>;
@@ -22,6 +22,7 @@ export interface PaneSizes {
 /** The separator's accessible name beside each pane that has one. */
 export const RESIZE_WORDS = {
   ideas: 'Resize the ideas list',
+  timeline: 'Resize the timeline',
   steps: 'Resize the steps list',
   step: 'Resize the step',
   agents: 'Resize the agents list',

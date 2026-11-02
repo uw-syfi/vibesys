@@ -420,6 +420,27 @@ test('the levels, the Logs face and the timeline lay out without a page scroll',
   await check(page, 'ink-idea-steps');
 });
 
+test('an idea opened from the Timeline sits beside it, which stays as it was left', async ({
+  page,
+}) => {
+  await openRun(page, true);
+  await page.getByRole('radiogroup', {name: 'Show'}).getByText('Timeline', {exact: true}).click();
+  const gantt = page.getByRole('listbox', {name: 'Ideas on the timeline'});
+  const zoomBar = page.getByRole('toolbar', {name: 'Time range'});
+  await zoomBar.getByRole('button', {name: 'Zoom in'}).click();
+  const inView = (await zoomBar.getByRole('status').textContent()) ?? '';
+  await gantt.getByRole('option', {name: /Wait-free consumer path/}).click();
+  await expect(page.getByRole('heading', {name: 'Wait-free consumer path'})).toBeVisible();
+  await expect(zoomBar.getByRole('status')).toHaveText(inView);
+  await expect(gantt.getByRole('option', {selected: true})).toHaveAccessibleName(
+    /Wait-free consumer path/,
+  );
+  await check(page, 'ink-timeline-idea');
+  await page.getByRole('button', {name: 'Close idea'}).click();
+  await expect(page.getByRole('heading', {name: 'Wait-free consumer path'})).toHaveCount(0);
+  await expect(gantt).toBeVisible();
+});
+
 test('every face of the run level keeps the time bar and the hero in view', async ({page}) => {
   await openRun(page);
   const show = page.getByRole('radiogroup', {name: 'Show'});
