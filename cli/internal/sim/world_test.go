@@ -222,6 +222,15 @@ func (s simStores) Known(ctx context.Context) ([]app.Scope, error) {
 // Close has nothing to give up: the store outlives every daemon of the world.
 func (s simStores) Close() error { return nil }
 
+// retryOf is the default retry policy with the profile's bound, if it has one.
+func retryOf(p profile) app.Retry {
+	r := app.DefaultRetry
+	if p.attempts > 0 {
+		r.Attempts = p.attempts
+	}
+	return r
+}
+
 func (w *world) stillLeaving() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -270,7 +279,7 @@ func (w *world) Start(ctx context.Context) error {
 	w.tracef("daemon %d starts", d.id)
 
 	d.app = app.New(app.Config{
-		Clock: w.clock, Timers: w.timers, Stores: simStores{w, d},
+		Clock: w.clock, Timers: w.timers, Stores: simStores{w, d}, Retry: retryOf(w.profile),
 		Environments: fakeenv.Environments{core.EnvironmentHost: w.env},
 		Supervisors:  gatedSupervisors{supervisor.NewInProcess(fakeenv.Environments{core.EnvironmentHost: w.env}, w.checkouts, w.survivors), w, d},
 	})

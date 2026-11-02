@@ -26,8 +26,11 @@ const commit = "0123456789abcdef0123456789abcdef01234567"
 // profile is which faults a seed injects, so that a seed can stress one thing.
 type profile struct {
 	storeWrites, storeReads, supervisorFaults, crashes, machine, unmount, sever bool
-	// outage makes the stores fail for a stretch, which is what outlasts the bounded retries.
-	outage       bool
+	// outage makes the stores fail for a stretch.
+	outage bool
+	// attempts bounds the daemon's retries. At the eight of a real daemon a random schedule almost
+	// never serves a whole run of them, and giving up is a path to explore like any other.
+	attempts     int
 	faultPercent int
 	chaosSteps   int
 	jobs         int
@@ -48,6 +51,7 @@ func profileOf(r *rand.Rand) profile {
 	return profile{
 		storeWrites: coin(), storeReads: coin(), supervisorFaults: coin(),
 		crashes: coin(), machine: coin(), unmount: coin(), sever: coin(), outage: coin(),
+		attempts:     1 + r.IntN(4),
 		faultPercent: 3 + r.IntN(25),
 		chaosSteps:   80 + r.IntN(300),
 		jobs:         1 + r.IntN(6),
