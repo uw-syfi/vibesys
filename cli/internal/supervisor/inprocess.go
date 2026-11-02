@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"sync"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -79,8 +81,9 @@ func (s *Survivors) Reboot() {
 
 // Close ends every command still running, so a test leaves nothing behind.
 func (s *Survivors) Close() {
+	// A copy, not the map: a daemon that is still settling a job forgets its run during this.
 	s.mu.Lock()
-	runs := s.runs
+	runs := slices.Collect(maps.Values(s.runs))
 	s.mu.Unlock()
 	for _, proc := range runs {
 		proc.sup.Close()

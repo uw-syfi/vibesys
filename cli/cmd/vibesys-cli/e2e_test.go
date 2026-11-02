@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"testing"
+	"time"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/app"
@@ -228,17 +229,23 @@ func (e *e2e) logs(id string) string {
 
 var errSeen = errors.New("seen")
 
+// hangBound only turns a hang into a failure. A wait that reaches it found a bug, so it is far
+// longer than any wait takes on a loaded machine and no result depends on it.
+const hangBound = 5 * time.Minute
+
 // awaitOutput blocks until the job's stored output holds the text. It follows the output stream,
 // so it returns when the text arrives and not after a time.
 func (e *e2e) awaitOutput(id, text string) {
 	e.t.Helper()
-	c, err := client.Connect(context.Background(), e.options())
+	ctx, cancel := context.WithTimeout(context.Background(), hangBound)
+	defer cancel()
+	c, err := client.Connect(ctx, e.options())
 	if err != nil {
 		e.t.Fatal(err)
 	}
 	defer c.Close()
 	var seen strings.Builder
-	err = c.Logs(context.Background(), &cliv1.ReadLogsRequest{
+	err = c.Logs(ctx, &cliv1.ReadLogsRequest{
 		Context: &cliv1.CallContext{Repository: e.repo, Task: "kv"}, JobId: id, Follow: true,
 	}, func(r *cliv1.ReadLogsResponse) error {
 		seen.Write(r.GetData())
@@ -249,6 +256,20 @@ func (e *e2e) awaitOutput(id, text string) {
 	})
 	if !errors.Is(err, errSeen) {
 		e.t.Fatalf("waiting for %q in the output of %s: %v (saw %q)", text, id, err, seen.String())
+	}
+}
+
+// expectSupervisorGone checks a job that ended left no supervisor behind. Seeing the job end does
+// not show that: the daemon records the end first and lets the supervisor go after, so that an
+// outcome is never gone before it is safe. The next job does show it, because a job that ended
+// holds the machine until its run is removed. So this starts a job and looks once that job runs.
+func (e *e2e) expectSupervisorGone(id string) {
+	e.t.Helper()
+	next := e.submit("print", "next", ";", "hold", "next", ";", "exit", "0")
+	e.awaitOutput(next, "next\n")
+	left := e.supervisors()
+	if len(left) != 1 || string(left[0].Ref.Job) != next {
+		e.t.Fatalf("supervisors while the job after %s runs = %v, want only the one of %s", id, left, next)
 	}
 }
 
@@ -364,10 +385,7 @@ func TestE2EAJobRunsToTheEndInTheDaemonsProcess(t *testing.T) {
 	if got := e.starts.Load(); got != 1 {
 		t.Fatalf("daemon starts = %d, want 1", got)
 	}
-	// A finished job leaves no supervisor behind.
-	if left := e.supervisors(); len(left) != 0 {
-		t.Fatalf("supervisors left after the job ended: %v", left)
-	}
+	e.expectSupervisorGone(id)
 }
 
 // Commands that find no daemon at the same moment start one between them.
@@ -551,7 +569,5 @@ func TestE2ECancelEndsTheJobAndItsSupervisor(t *testing.T) {
 	if out := e.logs(id); out != "A\n" {
 		t.Fatalf("output = %q", out)
 	}
-	if left := e.supervisors(); len(left) != 0 {
-		t.Fatalf("supervisors left after a cancel: %v", left)
-	}
+	e.expectSupervisorGone(id)
 }
