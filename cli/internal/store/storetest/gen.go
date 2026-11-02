@@ -214,7 +214,7 @@ func (g *gen) job() core.Job {
 		ID: core.JobID(g.name()), Spec: g.spec(), State: core.JobStates()[g.pick(6)], Key: core.JobKey(g.name()), NoCache: true, Environment: &env,
 		Notes: []core.Note{g.note(), g.note()}, Plans: []core.PlanNumber{core.PlanNumber(1 + g.r.Uint32()), 2},
 		SubmittedAt: g.instant(), StartedAt: &started, FinishedAt: &finished, CancelReason: g.text(), ExitCode: &code,
-		ResultJob: core.JobID(g.name()), CheckJob: core.JobID(g.name()),
+		ResultJob: core.JobID(g.name()), CheckJob: core.JobID(g.name()), Attempts: g.attempts(),
 	}
 }
 
@@ -357,8 +357,33 @@ func (g *gen) transitionFor(job core.Job, at time.Time) core.Transition {
 	if g.pick(8) == 0 {
 		tr.CheckJob = core.JobID(g.name())
 	}
+	if (tr.To == core.JobQueued && g.pick(6) != 0) || g.pick(12) == 0 {
+		tr.Cut = g.cut()
+	}
 	if g.pick(25) == 0 {
 		tr.At = time.Time{}
 	}
 	return tr
+}
+
+// cut is any way an attempt is cut off, and now and then one with no cause.
+func (g *gen) cut() core.Cut {
+	cause := []core.CutCause{core.CutSupervisorDied, core.CutRebooted, ""}[g.pick(3)]
+	if g.pick(2) == 0 {
+		return core.CutBeforeStart{By: cause}
+	}
+	return core.CutMidCommand{By: cause}
+}
+
+// attempts is one or more attempts cut off, up to as many as a job keeps.
+func (g *gen) attempts() []core.PastAttempt {
+	var out []core.PastAttempt
+	for range 1 + g.pick(core.MaxAttempts-1) {
+		cut := g.cut()
+		for !cut.Cause().Valid() {
+			cut = g.cut()
+		}
+		out = append(out, core.PastAttempt{StartedAt: g.instant(), EndedAt: g.instant(), Cut: cut})
+	}
+	return out
 }

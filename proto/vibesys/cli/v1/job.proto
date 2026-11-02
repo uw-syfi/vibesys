@@ -25,7 +25,9 @@ enum JobState {
   JOB_STATE_SUCCEEDED = 3;
   JOB_STATE_FAILED = 4;
   JOB_STATE_CANCELLED = 5;
-  // The machine or the supervisor went away while the job ran. A lost job is never retried.
+  // The machine or the supervisor went away while the job ran, and the job is not run again: its
+  // command may have started and its kind is not rerun after that, or it was cut off as often as a
+  // job may be (see Job.attempts).
   JOB_STATE_LOST = 6;
 }
 
@@ -76,6 +78,30 @@ message Note {
   string agent = 3;
 }
 
+// CutCause is how an attempt's supervisor was proved gone.
+enum CutCause {
+  CUT_CAUSE_UNSPECIFIED = 0;
+  // The supervisor died: its lock could be taken.
+  CUT_CAUSE_SUPERVISOR_DIED = 1;
+  // The machine restarted since the attempt began.
+  CUT_CAUSE_REBOOTED = 2;
+}
+
+// Attempt is one earlier attempt at a job that was cut off, after which the job was queued again.
+// Its number is its place in Job.attempts, from 1. Exactly one end is set.
+message Attempt {
+  // When the store recorded the attempt running.
+  google.protobuf.Timestamp started_at = 1;
+  // When the attempt was found cut off and the job queued again.
+  google.protobuf.Timestamp ended_at = 2;
+  oneof end {
+    // The supervisor was proved gone before its command was told to start.
+    CutCause cut_before_start = 3;
+    // The supervisor was proved gone after its command may have started.
+    CutCause cut_mid_command = 4;
+  }
+}
+
 message Job {
   string id = 1;
   JobSpec spec = 2;
@@ -101,4 +127,7 @@ message Job {
   // The submission asked to run the whole job fresh: no saved samples and no saved check pass are
   // reused when it starts.
   bool no_cache = 15;
+  // The earlier attempts that were cut off, oldest first. The current attempt is the next one.
+  // There are fewer than the most attempts a job gets, which is 3.
+  repeated Attempt attempts = 16;
 }

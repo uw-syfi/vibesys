@@ -1,6 +1,7 @@
 package wire
 
 import (
+	"fmt"
 	"maps"
 	"time"
 
@@ -190,7 +191,44 @@ func Job(j core.Job) *cliv1.Job {
 		code := int32(*j.ExitCode)
 		out.ExitCode = &code
 	}
+	for _, a := range j.Attempts {
+		out.Attempts = append(out.Attempts, Attempt(a))
+	}
 	return out
+}
+
+// Attempt returns the contract's message for an attempt that was cut off.
+func Attempt(a core.PastAttempt) *cliv1.Attempt {
+	out := &cliv1.Attempt{StartedAt: timestamp(a.StartedAt), EndedAt: timestamp(a.EndedAt)}
+	switch c := a.Cut.(type) {
+	case core.CutBeforeStart:
+		out.End = &cliv1.Attempt_CutBeforeStart{CutBeforeStart: CutCause(c.By)}
+	case core.CutMidCommand:
+		out.End = &cliv1.Attempt_CutMidCommand{CutMidCommand: CutCause(c.By)}
+	}
+	return out
+}
+
+// ToAttempt returns the domain attempt for the contract's message: it has an end, with a cause.
+func ToAttempt(field string, a *cliv1.Attempt) (core.PastAttempt, error) {
+	out := core.PastAttempt{StartedAt: toTime(a.GetStartedAt()), EndedAt: toTime(a.GetEndedAt())}
+	switch end := a.GetEnd().(type) {
+	case *cliv1.Attempt_CutBeforeStart:
+		cause, err := ToCutCause(field+".cut_before_start", end.CutBeforeStart)
+		if err != nil {
+			return core.PastAttempt{}, err
+		}
+		out.Cut = core.CutBeforeStart{By: cause}
+	case *cliv1.Attempt_CutMidCommand:
+		cause, err := ToCutCause(field+".cut_mid_command", end.CutMidCommand)
+		if err != nil {
+			return core.PastAttempt{}, err
+		}
+		out.Cut = core.CutMidCommand{By: cause}
+	default:
+		return core.PastAttempt{}, invalid("%s: no end, so it was not cut off", field)
+	}
+	return out, nil
 }
 
 // Jobs returns the contract's messages for jobs, in order.
@@ -233,6 +271,16 @@ func ToJob(j *cliv1.Job) (core.Job, error) {
 	if j.ExitCode != nil {
 		code := int(j.GetExitCode())
 		out.ExitCode = &code
+	}
+	if len(j.GetAttempts()) >= core.MaxAttempts {
+		return core.Job{}, invalid("job.attempts: %d attempts cut off, and a job gets %d in all", len(j.GetAttempts()), core.MaxAttempts)
+	}
+	for i, a := range j.GetAttempts() {
+		past, err := ToAttempt(fmt.Sprintf("job.attempts[%d]", i), a)
+		if err != nil {
+			return core.Job{}, err
+		}
+		out.Attempts = append(out.Attempts, past)
 	}
 	return out, nil
 }

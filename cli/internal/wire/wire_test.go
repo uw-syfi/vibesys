@@ -74,6 +74,14 @@ func anyJob(r *rand.Rand) core.Job {
 	for range r.IntN(3) {
 		j.Plans = append(j.Plans, core.PlanNumber(1+r.IntN(5)))
 	}
+	for i := range r.IntN(core.MaxAttempts) {
+		cause := pick(r, core.CutSupervisorDied, core.CutRebooted)
+		past := core.PastAttempt{StartedAt: epoch.Add(time.Duration(i) * time.Minute), EndedAt: epoch.Add(time.Duration(i)*time.Minute + time.Second), Cut: core.CutBeforeStart{By: cause}}
+		if r.IntN(2) == 0 {
+			past.Cut = core.CutMidCommand{By: cause}
+		}
+		j.Attempts = append(j.Attempts, past)
+	}
 	if r.IntN(2) == 0 {
 		at := epoch.Add(time.Hour)
 		j.StartedAt = &at
@@ -125,6 +133,18 @@ func TestEveryContractEnumValueIsTranslatedOrRefused(t *testing.T) {
 			t.Fatalf("state %q has no contract value", s)
 		}
 	}
+	for n, name := range cliv1.CutCause_name {
+		cause, err := wire.ToCutCause("cause", cliv1.CutCause(n))
+		if name == "CUT_CAUSE_UNSPECIFIED" {
+			if err == nil {
+				t.Fatalf("%s was accepted as %q", name, cause)
+			}
+			continue
+		}
+		if err != nil || wire.CutCause(cause) != cliv1.CutCause(n) {
+			t.Fatalf("%s: got %q, %v", name, cause, err)
+		}
+	}
 	for n, name := range cliv1.EnvironmentKind_name {
 		kind, err := wire.ToEnvironmentKind("environment", cliv1.EnvironmentKind(n))
 		if err != nil || wire.EnvironmentKind(kind) != cliv1.EnvironmentKind(n) {
@@ -152,6 +172,21 @@ func TestEveryContractEnumValueIsTranslatedOrRefused(t *testing.T) {
 		if f.Kind == core.FailureInternal && name != "FAILURE_KIND_INTERNAL" {
 			t.Fatalf("%s is read as internal", name)
 		}
+	}
+}
+
+func TestAJobWithAsManyCutAttemptsAsItGetsIsRefused(t *testing.T) {
+	msg := wire.Job(anyJob(rand.New(rand.NewPCG(1, 2))))
+	msg.Attempts = nil
+	for range core.MaxAttempts {
+		msg.Attempts = append(msg.Attempts, &cliv1.Attempt{End: &cliv1.Attempt_CutMidCommand{CutMidCommand: cliv1.CutCause_CUT_CAUSE_REBOOTED}})
+	}
+	if _, err := wire.ToJob(msg); err == nil {
+		t.Fatalf("a job with %d attempts cut off was accepted", core.MaxAttempts)
+	}
+	msg.Attempts = []*cliv1.Attempt{{}}
+	if _, err := wire.ToJob(msg); err == nil {
+		t.Fatal("an attempt with no end was accepted")
 	}
 }
 

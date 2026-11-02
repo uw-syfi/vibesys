@@ -46,6 +46,40 @@ func testTransition(t *testing.T, newStore New) {
 		}
 	})
 
+	t.Run("a job cut off is queued again and keeps the attempt", func(t *testing.T) {
+		e := newEnv(t, newStore)
+		job := e.submit(e.measure(1, "key-a", 3)).Job
+		fp := core.Fingerprint{Kind: core.EnvironmentHost, Backend: core.BackendCPU}
+		for attempt := 1; attempt < core.MaxAttempts; attempt++ {
+			startAt := e.now()
+			if _, err := e.s.Transition(e.ctx, core.Transition{Job: job.ID, From: core.JobQueued, To: core.JobRunning, At: startAt, Environment: &fp}); err != nil {
+				t.Fatal(err)
+			}
+			cut := core.Cut(core.CutMidCommand{By: core.CutRebooted})
+			if attempt%2 == 0 {
+				cut = core.CutBeforeStart{By: core.CutSupervisorDied}
+			}
+			endAt := e.now()
+			out, err := e.s.Transition(e.ctx, core.Transition{Job: job.ID, From: core.JobRunning, To: core.JobQueued, At: endAt, Cut: cut})
+			if err != nil {
+				t.Fatal(err)
+			}
+			last := out.Attempts[len(out.Attempts)-1]
+			if out.State != core.JobQueued || out.StartedAt != nil || out.Environment != nil || len(out.Attempts) != attempt ||
+				last.Cut != cut || !last.StartedAt.Equal(startAt) || !last.EndedAt.Equal(endAt) {
+				t.Fatalf("after attempt %d: job = %+v, want it queued with the attempt kept", attempt, out)
+			}
+			if got := e.job(job.ID); !reflect.DeepEqual(got, out) {
+				t.Errorf("Job = %+v, want %+v", got, out)
+			}
+		}
+		if _, err := e.s.Transition(e.ctx, core.Transition{Job: job.ID, From: core.JobQueued, To: core.JobRunning, At: e.now(), Environment: &fp}); err != nil {
+			t.Fatal(err)
+		}
+		_, err := e.s.Transition(e.ctx, core.Transition{Job: job.ID, From: core.JobRunning, To: core.JobQueued, At: e.now(), Cut: core.CutMidCommand{By: core.CutRebooted}})
+		wantKind(t, "the attempt past the most a job gets, queued again", err, core.FailureInvalidInput)
+	})
+
 	t.Run("a job cancelled while queued never started", func(t *testing.T) {
 		e := newEnv(t, newStore)
 		job := e.submit(e.check(1, "key-a")).Job

@@ -2,6 +2,7 @@ syntax = "proto3";
 package vibesys.cli.v1;
 
 import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
 import "vibesys/cli/v1/environment.proto";
 import "vibesys/cli/v1/failure.proto";
 import "vibesys/cli/v1/job.proto";
@@ -204,6 +205,10 @@ message RunRecord {
   // The identity of the boot the run began in.
   string boot_id = 1;
   Launch launch = 2;
+  // When the daemon first told the supervisor to start the command. It is written before that
+  // request is sent, and a supervisor runs nothing before it, so a readable record without it proves
+  // the command never started.
+  google.protobuf.Timestamp start_sent_at = 3;
 }
 
 message StartRequest {}
