@@ -10,7 +10,8 @@
 //
 // Every change to State goes through one fold, so Decide's result and Replay of its events are the
 // same state by construction, and a restart is a replay. Terminal turns and settled messages leave
-// State once the store holds them, so its size follows what is live and not what happened.
+// State once the store holds them. Runs, agents, receipts and told jobs stay, and the maps holding
+// them are copied only when written, so an input costs what it changes and not what is remembered.
 //
 // The package imports nothing of this module. internal/wire parses the contract into these types
 // and encodes them back.

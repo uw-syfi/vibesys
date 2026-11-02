@@ -14,7 +14,7 @@ import (
 // with no events and no effects. Decide does not fail: a command it will not carry out gets a
 // receipt with a refusal, and an InputBody outside the closed set is a bug, which panics.
 func Decide(s State, in Input) (State, []Event, []Effect) {
-	t := &tx{s: s.clone(), in: in, delivery: map[MessageID]Delivery{}}
+	t := &tx{s: s, in: in, delivery: map[MessageID]Delivery{}}
 	switch b := in.Body.(type) {
 	case Command:
 		t.command(b)
@@ -37,8 +37,9 @@ func Decide(s State, in Input) (State, []Event, []Effect) {
 
 // tx is one Decide in progress.
 type tx struct {
-	s  State
-	in Input
+	s       State
+	written written
+	in      Input
 	// command and source fill the envelope of every event.
 	commandID CommandID
 	source    *SidecarSource
@@ -53,7 +54,7 @@ type tx struct {
 // emit commits one entity to the state and the event list.
 func (t *tx) emit(run RunID, body EventBody) {
 	e := Event{Run: run, Command: t.commandID, At: t.in.At, Source: t.source, Body: body}
-	t.s.apply(e)
+	t.s.apply(e, &t.written)
 	t.events = append(t.events, e)
 	if m, ok := body.(Message); ok {
 		t.delivery[m.ID] = m.Delivery

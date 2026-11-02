@@ -49,6 +49,12 @@ type session struct {
 
 func (s *session) say(f core.FactBody) { s.stream = append(s.stream, f) }
 
+// kept is a state from earlier in a run. Decide must leave it as it was, whatever came after.
+type kept struct {
+	state   core.State
+	commits int
+}
+
 // commit is one durable transaction, as the store will hold it.
 type commit struct {
 	events  [][]byte
@@ -77,6 +83,7 @@ type sim struct {
 	retries []core.Command
 	// silent holds sessions that will not answer a close, which only the grace timer ends.
 	silent map[core.Session]bool
+	kept   []kept
 	caps   map[core.AgentID]core.Capabilities
 	plan   []action
 
@@ -156,7 +163,7 @@ func (w *sim) decide(body core.InputBody) {
 	if v := w.state.Violations(); len(v) > 0 {
 		w.fail("after input %d: %v", w.inputs, v)
 	}
-	if !reflect.DeepEqual(core.Replay(before, events), core.Replay(w.state, nil)) {
+	if !reflect.DeepEqual(core.Replay(before, events), w.state) {
 		w.fail("replaying input %d's events differs from what Decide returned", w.inputs)
 	}
 }
@@ -168,8 +175,11 @@ func (w *sim) crash() {
 	w.note("%d crash", w.inputs)
 	live := w.state
 	w.state = core.Replay(core.State{}, w.decodeLog())
-	if !reflect.DeepEqual(core.Replay(live, nil), core.Replay(w.state, nil)) {
+	if !reflect.DeepEqual(live, w.state) {
 		w.fail("the replayed state differs from the live one\nlive:   %+v\nreplay: %+v", live, w.state)
+	}
+	if len(w.kept) < 4 {
+		w.kept = append(w.kept, kept{state: w.state, commits: len(w.log)})
 	}
 	w.read = map[core.Session]int{}
 	for id := range w.sessions {
@@ -177,10 +187,12 @@ func (w *sim) crash() {
 	}
 }
 
-func (w *sim) decodeLog() []core.Event {
+func (w *sim) decodeLog() []core.Event { return w.decodeCommits(len(w.log)) }
+
+func (w *sim) decodeCommits(n int) []core.Event {
 	w.t.Helper()
 	var out []core.Event
-	for _, c := range w.log {
+	for _, c := range w.log[:n] {
 		for _, data := range c.events {
 			_, e, err := wire.DecodeEvent(data)
 			if err != nil {
@@ -698,6 +710,11 @@ func (w *sim) finalChecks() {
 		w.fail("%v", err)
 	}
 	w.crash()
+	for _, k := range w.kept {
+		if !reflect.DeepEqual(k.state, core.Replay(core.State{}, w.decodeCommits(k.commits))) {
+			w.fail("a later Decide changed the state as of commit %d", k.commits)
+		}
+	}
 }
 
 func simulate(t *testing.T, seed uint64, steps int) *monitor {

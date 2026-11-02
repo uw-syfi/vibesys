@@ -103,7 +103,9 @@ func TestAnEffectSurvivesTheCoreTypes(t *testing.T) {
 // generatedEffect is a random effect with the id its body gives it.
 func generatedEffect(r *rand.Rand) *pb.Effect {
 	in := generated(r, &pb.Effect{})
-	ref := func(s *pb.SessionRef) core.Session { return core.Session{Agent: core.AgentID(s.GetAgentId()), N: s.GetSession()} }
+	ref := func(s *pb.SessionRef) core.Session {
+		return core.Session{Agent: core.AgentID(s.GetAgentId()), N: s.GetSession()}
+	}
 	var e core.Effect
 	switch b := in.GetBody().(type) {
 	case *pb.Effect_LaunchSession:

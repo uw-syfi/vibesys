@@ -35,42 +35,41 @@ type State struct {
 	jobs map[JobID]struct{}
 }
 
-// clone returns a State whose top-level maps can be written. What they hold is replaced and never
-// changed in place, so it is shared.
-func (s State) clone() State {
-	out := State{
-		runs:     maps.Clone(s.runs),
-		agents:   maps.Clone(s.agents),
-		messages: maps.Clone(s.messages),
-		receipts: maps.Clone(s.receipts),
-		jobs:     maps.Clone(s.jobs),
+// written says which of a State's maps one transaction has its own copy of. A map is copied when
+// the fold first writes to it, so an input costs what it changes and not what the State has
+// remembered. What the maps hold is replaced and never changed in place, so it is shared.
+type written struct{ runs, agents, messages, receipts, jobs bool }
+
+// own gives the transaction its own copy of a map, once.
+func own[K comparable, V any](m *map[K]V, done *bool) {
+	if *done {
+		return
 	}
-	if out.runs == nil {
-		out.runs = map[RunID]Run{}
-		out.agents = map[AgentID]agentState{}
-		out.messages = map[MessageID]Message{}
-		out.receipts = map[CommandID]Receipt{}
-		out.jobs = map[JobID]struct{}{}
+	*done = true
+	*m = maps.Clone(*m)
+	if *m == nil {
+		*m = map[K]V{}
 	}
-	return out
 }
 
 // Replay folds committed events into s. A restart is a Replay from the zero State.
 func Replay(s State, events []Event) State {
-	s = s.clone()
+	var w written
 	for _, e := range events {
-		s.apply(e)
+		s.apply(e, &w)
 	}
 	return s
 }
 
-// apply is the one fold: every change to a State is an Event passing through here. It writes to s,
-// so s must be a clone.
-func (s *State) apply(e Event) {
+// apply is the one fold: every change to a State is an Event passing through here. It writes only
+// to maps that w says are its own.
+func (s *State) apply(e Event, w *written) {
 	switch b := e.Body.(type) {
 	case Run:
+		own(&s.runs, &w.runs)
 		s.runs[b.ID] = b
 	case Agent:
+		own(&s.agents, &w.agents)
 		a := s.agents[b.ID]
 		if a.Session != b.Session {
 			a.offset = 0
@@ -78,6 +77,7 @@ func (s *State) apply(e Event) {
 		a.Agent = b
 		s.agents[b.ID] = a
 	case Turn:
+		own(&s.agents, &w.agents)
 		a := s.agents[b.Agent]
 		a.turns = max(a.turns, b.Ordinal)
 		if b.Status == TurnRunning {
@@ -87,6 +87,7 @@ func (s *State) apply(e Event) {
 		}
 		s.agents[b.Agent] = a
 	case Item:
+		own(&s.agents, &w.agents)
 		a := s.agents[b.Agent]
 		a.items = max(a.items, b.Ordinal)
 		a.current = maps.Clone(a.current)
@@ -99,22 +100,26 @@ func (s *State) apply(e Event) {
 		a.current[b.ID] = b
 		s.agents[b.Agent] = a
 	case Message:
-		s.applyMessage(b)
+		s.applyMessage(b, w)
 	case Receipt:
+		own(&s.receipts, &w.receipts)
 		s.receipts[b.Command] = b
 	default:
 		panic(fmt.Sprintf("core: unknown event body %T", e.Body))
 	}
 	if src := e.Source; src != nil {
 		if a, ok := s.agents[src.Session.Agent]; ok && a.Session == src.Session.N {
+			own(&s.agents, &w.agents)
 			a.offset = max(a.offset, src.Offset)
 			s.agents[src.Session.Agent] = a
 		}
 	}
 }
 
-func (s *State) applyMessage(m Message) {
+func (s *State) applyMessage(m Message, w *written) {
+	own(&s.messages, &w.messages)
 	if a, ok := s.agents[m.To]; ok {
+		own(&s.agents, &w.agents)
 		queue := slices.DeleteFunc(slices.Clone(a.queue), func(id MessageID) bool { return id == m.ID })
 		if m.Delivery == DeliveryQueued {
 			queue = append(queue, m.ID)
@@ -131,6 +136,7 @@ func (s *State) applyMessage(m Message) {
 		s.messages[m.ID] = m
 	}
 	if job, ok := m.Body.(JobFinished); ok {
+		own(&s.jobs, &w.jobs)
 		s.jobs[job.Job] = struct{}{}
 	}
 }
