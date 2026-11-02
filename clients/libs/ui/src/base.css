@@ -265,6 +265,12 @@ body > div:first-child {
   flex-direction: column;
   gap: var(--space-4);
 }
+.vs-split-aside[data-sticky] {
+  position: sticky;
+  top: var(--space-4);
+  max-height: var(--thread);
+  overflow-y: auto;
+}
 .vs-section-container {
   min-width: 0;
   container-type: inline-size;

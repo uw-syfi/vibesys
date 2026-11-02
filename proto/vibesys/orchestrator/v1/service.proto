@@ -74,6 +74,11 @@ message RunsSnapshot {
   repeated Agent agents = 2;
   // The sequence the snapshot is current to.
   uint64 sequence = 3;
+  // Every turn and message of those runs, so that a client that connects late can show when each
+  // agent ran, what each turn cost, and the handoffs and reports it missed. Items are not here:
+  // WatchAgent and ListItems page them.
+  repeated Turn turns = 4;
+  repeated Message messages = 5;
 }
 
 message WatchRunsResponse {
@@ -111,6 +116,11 @@ message WatchAgentResponse {
     Delta delta = 3;
     Turn turn = 4;
   }
+  // The committed sequence this frame is current to: for an item or a turn, the sequence of the
+  // event that committed it; for a delta, the latest committed sequence when the progress was
+  // made; for a page, the page's own sequence. A client decides by it which of two whole items,
+  // or whether a delta, is the newer, because neither carries a revision of its own.
+  uint64 sequence = 5;
 }
 
 message ListItemsRequest {

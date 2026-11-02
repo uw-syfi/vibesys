@@ -19,6 +19,12 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
     // Tool-owned bindings are guarded by the proto regenerate-and-diff check.
     ignore: ['src/generated/**'],
   },
+  'libs/orchestrator-proto': {
+    entry: ['src/index.ts', 'src/**/*.test.ts'],
+    project: ['src/**/*.ts'],
+    // Tool-owned bindings, regenerated and diffed by the proto check.
+    ignore: ['src/generated/**'],
+  },
   'libs/contracts': {
     entry: ['src/**/*.test.ts'],
     project: ['src/**/*.ts'],
@@ -66,6 +72,11 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
       'e2e/tools/dev-fixture.ts',
     ],
     project: ['src/**/*.ts', 'src/**/*.tsx', 'e2e/**/*.{ts,mjs}'],
+  },
+  'apps/orchestrator': {
+    // The orchestrator window as a page (`index.html`, built by `vite.config.ts`), driven by fixtures.
+    entry: ['src/main.tsx', 'src/**/*.test.ts'],
+    project: ['src/**/*.ts', 'src/**/*.tsx'],
   },
   'apps/ui-gallery': {
     // The development-only component gallery (`index.html`, built by `vite.config.ts`), its

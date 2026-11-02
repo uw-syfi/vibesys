@@ -1,0 +1,15 @@
+# TypeScript bindings for the orchestrator's contract, generated into their own client package.
+# buf.gen.yaml excludes this package, so the bindings of the existing clients are unaffected, and
+# buf.gen.orchestrator.yaml keeps generating the Go ones. include_imports puts the validation rules'
+# own messages next to the contract, so the package needs no other client package.
+version: v2
+clean: true
+inputs:
+  - directory: proto
+    paths: [proto/vibesys/orchestrator]
+plugins:
+  - local: clients/node_modules/.bin/protoc-gen-es
+    strategy: all
+    out: clients/libs/orchestrator-proto/src/generated
+    include_imports: true
+    opt: [target=ts, import_extension=js]
