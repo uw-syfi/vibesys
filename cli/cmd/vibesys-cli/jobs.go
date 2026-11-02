@@ -68,13 +68,18 @@ func waitFor(ctx context.Context, d deps, cl *client.Client, callCtx *cliv1.Call
 }
 
 // failWait is fail for a wait: a failure that is not about the input says nothing about the jobs,
-// so it is no answer. exitOfFailure already maps every such kind to it.
+// so it is no answer. A failure the daemon sent is printed as it sent it; a wait that could not
+// learn the end for another reason, such as no daemon answering, is UNAVAILABLE.
 func failWait(d deps, asJSON bool, err error) int {
-	if errors.Is(err, client.ErrEndUnknown) {
-		fail(d, asJSON, wire.Unavailable(err.Error()))
-		return exitNoAnswer
+	if !errors.Is(err, client.ErrEndUnknown) {
+		return fail(d, asJSON, err) // about the input: a job that does not exist, a bad request
 	}
-	return fail(d, asJSON, err)
+	var received *wire.Received
+	if !errors.As(err, &received) {
+		err = wire.Unavailable(err.Error())
+	}
+	fail(d, asJSON, err)
+	return exitNoAnswer
 }
 
 // cancelCommand is `cancel <job> [--reason text]`. It returns once the job is final, so the

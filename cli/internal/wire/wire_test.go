@@ -1,6 +1,10 @@
 package wire_test
 
 import (
+	"google.golang.org/genproto/googleapis/rpc/status"
+	statuspb "google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/anypb"
+
 	"context"
 	"errors"
 	"fmt"
@@ -359,6 +363,26 @@ func TestAPhaseTheDaemonCannotReadHolds(t *testing.T) {
 	for p, phase := range want {
 		if got := wire.ToRunPhase(p); got != phase {
 			t.Errorf("ToRunPhase(%v) = %v, want %v", p, got, phase)
+		}
+	}
+}
+
+// A failure a peer sent is read back exactly as sent, a kind this build does not know included,
+// so a command can print it unchanged.
+func TestAReceivedFailureKeepsAKindThisBuildDoesNotKnow(t *testing.T) {
+	for _, kind := range []cliv1.FailureKind{99, cliv1.FailureKind_FAILURE_KIND_CONFLICT, 0} {
+		sent := &cliv1.Failure{Kind: kind, Message: "m"}
+		detail, err := anypb.New(sent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = statuspb.FromProto(&status.Status{Code: 9, Message: "m", Details: []*anypb.Any{detail}}).Err()
+		got, ok := wire.ContractFailure(err)
+		if !ok || got.GetKind() != kind || got.GetMessage() != "m" {
+			t.Fatalf("kind %d read back as %v, %v", kind, got, ok)
+		}
+		if r := wire.ReceivedOf(err); r == nil || r.Failure.GetKind() != kind {
+			t.Fatalf("ReceivedOf kind %d = %v", kind, r)
 		}
 	}
 }

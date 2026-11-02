@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"fmt"
 	"os"
 	"regexp"
 	"strconv"
@@ -9,6 +11,8 @@ import (
 	"testing/quick"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+	"github.com/uw-syfi/vibesys/cli/internal/client"
+	"github.com/uw-syfi/vibesys/cli/internal/wire"
 )
 
 // Every value of each enum, the ones the contract names and any other a newer peer may send, maps
@@ -92,5 +96,31 @@ func TestTheReadmeExitTableIsTheCode(t *testing.T) {
 	}
 	if len(listed) != len(cliv1.FailureKind_name)+len(cliv1.WaitOutcomeKind_name)-1 {
 		t.Errorf("the README lists %v, which is not exactly the contract's values", listed)
+	}
+}
+
+// A failure kind from a newer daemon is printed as the daemon sent it, its number included, and is
+// no answer: never 0, and never rewritten to INTERNAL. In a wait, any failure that is not about the
+// input is no answer too.
+func TestAFailureKindThisBuildDoesNotKnowIsKeptAndIsNoAnswer(t *testing.T) {
+	newer := &wire.Received{Failure: &cliv1.Failure{Kind: cliv1.FailureKind(99), Message: "from a newer daemon"}}
+	conflict := &wire.Received{Failure: &cliv1.Failure{Kind: cliv1.FailureKind_FAILURE_KIND_CONFLICT, Message: "held"}}
+	cases := []struct {
+		name string
+		run  func(d deps) int
+		kind string
+		code int
+	}{
+		{"a command", func(d deps) int { return fail(d, true, newer) }, `"kind":99`, exitNoAnswer},
+		{"a wait", func(d deps) int { return failWait(d, true, fmt.Errorf("%w: %w", client.ErrEndUnknown, newer)) }, `"kind":99`, exitNoAnswer},
+		{"a conflict in a wait", func(d deps) int { return failWait(d, true, fmt.Errorf("%w: %w", client.ErrEndUnknown, conflict)) }, `"kind":"FAILURE_KIND_CONFLICT"`, exitNoAnswer},
+		{"a wait no daemon answered", func(d deps) int { return failWait(d, true, fmt.Errorf("%w: gone", client.ErrEndUnknown)) }, `"kind":"FAILURE_KIND_UNAVAILABLE"`, exitNoAnswer},
+	}
+	for _, tc := range cases {
+		var stdout, stderr bytes.Buffer
+		code := tc.run(deps{stdout: &stdout, stderr: &stderr})
+		if code != tc.code || stdout.Len() != 0 || !strings.Contains(stderr.String(), tc.kind) {
+			t.Errorf("%s: exit %d, stderr %q; want exit %d and %s", tc.name, code, stderr.String(), tc.code, tc.kind)
+		}
 	}
 }
