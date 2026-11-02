@@ -147,6 +147,8 @@ def _editor_image(
         sys.stderr.write(f"{plan.notice}\n")
     if plan.build is None:
         return plan
+    if plan.notice is None:
+        sys.stderr.write(_building_notice(plan.build.dockerfile))
     built = build_task_image(
         plan.build.dockerfile,
         base_image=plan.build.base_image,
@@ -155,6 +157,14 @@ def _editor_image(
         output=DISCARD,
     )
     return replace(plan, image_id=plan.resolve(built))
+
+
+def _building_notice(dockerfile: Path) -> str:
+    """Tell the user a task image build is starting, which prints nothing until it ends."""
+    return (
+        f"[environment] building the task image from {dockerfile}; the first build downloads "
+        f"the task's toolchain and can take several minutes, and later runs reuse it\n"
+    )
 
 
 def _image_option(image: str | None) -> dict[str, object]:

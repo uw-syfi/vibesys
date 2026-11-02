@@ -692,6 +692,30 @@ def test_task_dockerfile_builds_once_on_the_backend_base_for_every_container_env
     assert f"BASE_IMAGE={backend_default_image(backend)}" in build
 
 
+def test_a_task_image_build_is_announced_and_validation_stays_quiet(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A task image build prints nothing until it ends, so the launch says it started."""
+    project = tmp_path / "repository"
+    project.mkdir()
+    task = _write_repository_task(project, "latency")
+    dockerfile = task / "Dockerfile"
+    dockerfile.write_text("FROM python:3.12-bookworm\n")
+    invocation = parse_cli_invocation(["--project", str(project), "--task", "latency"])
+
+    run_environment_spec_from_args(invocation.args)
+    validating = capsys.readouterr().err
+    run_environment_spec_from_args(
+        invocation.args,
+        task_image=TaskImageBuild(backend=ComputeBackend.CPU, runner=FakeDockerBuildRunner()),
+    )
+    building = capsys.readouterr().err
+
+    assert validating == ""
+    assert building.count("building the task image") == 1
+    assert str(dockerfile.resolve()) in building
+
+
 @pytest.mark.parametrize(
     "loop_name",
     ["agent", "plain", "evolve"],
@@ -750,8 +774,13 @@ def test_fresh_task_dockerfile_rejects_an_explicit_docker_image(
         "custom:latest",
     ]
 
-    with pytest.raises(TaskImageError, match="cannot be combined with --docker-image"):
+    with pytest.raises(TaskImageError, match="cannot be combined with --docker-image") as raised:
         parse_cli_invocation(["--project", str(project), "--task", "latency", *flags])
+
+    # Regression: the refusal said the task image is built on the backend's default image,
+    # which is false for a Dockerfile with its own FROM, and did not say what to do.
+    assert "default image" not in str(raised.value)
+    assert "Drop --docker-image" in str(raised.value)
 
 
 def test_a_host_derived_environment_refuses_the_task_image_before_building(

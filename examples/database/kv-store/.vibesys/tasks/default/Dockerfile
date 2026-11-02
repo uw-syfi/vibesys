@@ -3,7 +3,7 @@
 # `redis-server` oracle through the `redis` client, and the benchmark runs YCSB
 # on Java. YCSB is baked in so a measurement never downloads it. Nothing from
 # the task or the candidate is copied in; VibeSys mounts the project at run time.
-FROM --platform=linux/amd64 python:3.12-slim-bookworm@sha256:e697c81897302a4c4333bade000d98038fbb21eb064f8ee1fd42d02ebcd9d337
+FROM python:3.12-slim-bookworm@sha256:e697c81897302a4c4333bade000d98038fbb21eb064f8ee1fd42d02ebcd9d337
 
 ARG YCSB_VERSION=0.17.0
 ARG YCSB_SHA256=353eb96c12a605c30c94928b85780ae4673578a21e2aa13782cd7f591991e484

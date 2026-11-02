@@ -102,7 +102,8 @@ class TaskImageError(ValueError):
         """Describe an explicit image paired with a task Dockerfile."""
         return cls(
             f"task Dockerfile {dockerfile} cannot be combined with --docker-image ({image}): "
-            f"the task image is built from the Dockerfile on the backend's default image"
+            f"the run uses the image built from that Dockerfile, not the one you name. "
+            f"Drop --docker-image to run on the task image."
         )
 
     @classmethod
