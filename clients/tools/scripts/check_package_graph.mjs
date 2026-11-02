@@ -934,6 +934,8 @@ export const STRICT_WORKSPACE_IMPORTS = {
   '@vibesys/orchestrator-proto': null,
   '@vibesys/orchestrator-state': null,
   '@vibesys/orchestrator-source': null,
+  // The window page runs on generated runs served by a fake daemon until a real one is chosen.
+  '@vibesys/orchestrator-fixtures': null,
 };
 /** An app imports the stylesheets of `@vibesys/ui` once, in its entry wiring. */
 const STRICT_APP_STYLESHEETS = ['./tokens.css', './fonts.css', './components.css'];

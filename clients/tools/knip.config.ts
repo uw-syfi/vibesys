@@ -73,6 +73,11 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
     ],
     project: ['src/**/*.ts', 'src/**/*.tsx', 'e2e/**/*.{ts,mjs}'],
   },
+  'apps/orchestrator': {
+    // The orchestrator window as a page (`index.html`, built by `vite.config.ts`), driven by fixtures.
+    entry: ['src/main.tsx', 'src/**/*.test.ts'],
+    project: ['src/**/*.ts', 'src/**/*.tsx'],
+  },
   'apps/ui-gallery': {
     // The development-only component gallery (`index.html`, built by `vite.config.ts`), its
     // Playwright suite, and the static server that suite starts (`playwright.config.ts`).

@@ -235,10 +235,41 @@ importers:
         version: 5.9.3
 
   apps/orchestrator:
+    dependencies:
+      '@vibesys/feature-orchestrator':
+        specifier: workspace:*
+        version: link:../../features/orchestrator
+      '@vibesys/orchestrator-fixtures':
+        specifier: workspace:*
+        version: link:../../libs/orchestrator-fixtures
+      '@vibesys/orchestrator-source':
+        specifier: workspace:*
+        version: link:../../libs/orchestrator-source
+      '@vibesys/ui':
+        specifier: workspace:*
+        version: link:../../libs/ui
+      react:
+        specifier: 19.1.1
+        version: 19.1.1
+      react-dom:
+        specifier: 19.1.1
+        version: 19.1.1(react@19.1.1)
     devDependencies:
       '@types/bun':
         specifier: 1.4.2
         version: 1.4.2
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      '@types/react':
+        specifier: 19.1.13
+        version: 19.1.13
+      '@types/react-dom':
+        specifier: 19.1.9
+        version: 19.1.9(@types/react@19.1.13)
+      '@vitejs/plugin-react':
+        specifier: 5.0.4
+        version: 5.0.4(vite@7.1.5(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(yaml@2.9.1))
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
@@ -493,6 +524,9 @@ importers:
 
   features/orchestrator:
     dependencies:
+      '@vibesys/contracts':
+        specifier: workspace:*
+        version: link:../../libs/contracts
       '@vibesys/machine':
         specifier: workspace:*
         version: link:../../libs/machine

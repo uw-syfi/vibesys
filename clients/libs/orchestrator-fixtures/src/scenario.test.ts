@@ -45,9 +45,7 @@ describe('a generated run', () => {
     expect(new Set(agents.map(agent => agent.harness))).toEqual(
       new Set([Harness.CLAUDE_CODE, Harness.CODEX]),
     );
-    const peak = Math.max(
-      ...fanoutOverTime(state, scenario.runId, scenario.endMs + 60_000).map(point => point.live),
-    );
+    const peak = Math.max(...fanoutOverTime(state, scenario.runId).map(point => point.live));
     expect(peak).toBeGreaterThan(1);
   });
 });

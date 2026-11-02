@@ -38,6 +38,7 @@
     "test": "node ../../tools/scripts/run_bun_tests.mjs ./src"
   },
   "dependencies": {
+    "@vibesys/contracts": "workspace:*",
     "@vibesys/machine": "workspace:*",
     "@vibesys/orchestrator-proto": "workspace:*",
     "@vibesys/orchestrator-source": "workspace:*",

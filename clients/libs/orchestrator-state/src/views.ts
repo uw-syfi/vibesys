@@ -235,13 +235,10 @@ export interface FanoutPoint {
 
 /**
  * How many subagents were open over time, as a step function. An agent counts from its start to
- * its end; one that is over but has no end time counts until its last turn ended.
+ * its end; one that is over but has no end time counts until its last turn ended, and one still
+ * open has no end at all.
  */
-export function fanoutOverTime(
-  state: OrchestratorState,
-  runId: string,
-  nowMs: number,
-): FanoutPoint[] {
+export function fanoutOverTime(state: OrchestratorState, runId: string): FanoutPoint[] {
   const spans = runAgents(state, runId)
     .filter(agent => agent.role !== AgentRole.LEAD)
     .map(agent => {
@@ -250,12 +247,14 @@ export function fanoutOverTime(
         start,
         ...agentTurns(state, agent.id).map(turn => ms(turn.endedAt) ?? start),
       );
-      const end = ms(agent.endedAt) ?? (FINAL_AGENT.has(agent.status) ? lastTurnEnd : nowMs);
-      return {start, end};
+      const over = FINAL_AGENT.has(agent.status) || agent.endedAt !== undefined;
+      // An agent still open has no end: it counts to the last point, so the line does not fall
+      // at "now" for work that is still going.
+      return {start, end: over ? (ms(agent.endedAt) ?? lastTurnEnd) : null};
     });
   const edges = [
     ...spans.map(span => ({at: span.start, delta: 1})),
-    ...spans.map(span => ({at: span.end, delta: -1})),
+    ...spans.flatMap(span => (span.end === null ? [] : [{at: span.end, delta: -1}])),
   ].sort((a, b) => a.at - b.at || a.delta - b.delta);
   const points: FanoutPoint[] = [];
   let live = 0;

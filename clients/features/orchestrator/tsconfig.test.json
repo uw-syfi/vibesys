@@ -6,7 +6,13 @@
       "node"
     ],
     "noEmit": true,
-    "tsBuildInfoFile": ".tsbuild/test.tsbuildinfo"
+    "tsBuildInfoFile": ".tsbuild/test.tsbuildinfo",
+    "jsx": "react-jsx",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ]
   },
   "include": [
     "src/**/*.test.ts",

@@ -5,7 +5,6 @@
     "paths": {
       "@vibesys/app-desktop-main": ["apps/desktop-main/src/main/index.ts"],
       "@vibesys/app-desktop-main/preload-welcome": ["apps/desktop-main/src/preload/welcome.cts"],
-      "@vibesys/app-orchestrator": ["apps/orchestrator/src/index.ts"],
       "@vibesys/connection": ["libs/connection/src/index.ts"],
       "@vibesys/connection/testing": ["libs/connection/src/testing/index.ts"],
       "@vibesys/contracts": ["libs/contracts/src/index.ts"],
