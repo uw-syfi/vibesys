@@ -14,7 +14,7 @@ import re
 import tomllib
 from pathlib import Path
 
-from vs_sandbox.toolchain_features import GO_TOOLCHAIN_VERSION, RUST_TOOLCHAIN_VERSION
+from vs_sandbox.api import GO_TOOLCHAIN_VERSION, RUST_TOOLCHAIN_VERSION
 
 _REPOSITORY = Path(__file__).resolve().parents[3]
 # The Verus Dockerfile is left out: it carries its own Rust and picks its platform on purpose,
