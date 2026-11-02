@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/store/ledger"
 )
@@ -57,12 +58,6 @@ func OpenIndex(dir string, opts ...Option) (*Index, error) {
 	return &Index{b: newBackend(c.fs, dir), dir: dir}, nil
 }
 
-type taskFile struct {
-	Format     int    `json:"format"`
-	Repository string `json:"repository"`
-	Task       string `json:"task"`
-}
-
 func (x *Index) entry(t Task) string {
 	sum := sha256.Sum256([]byte(t.Repository + "\x00" + t.Name))
 	return path.Join(x.dir, tasksDir, hex.EncodeToString(sum[:12])+recordSuffix)
@@ -84,7 +79,7 @@ func (x *Index) Add(t Task) error {
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return unavailable(x.dir, err)
 	}
-	if err := x.b.publish(name, taskFile{Format: formatVersion, Repository: t.Repository, Task: t.Name}); err != nil {
+	if err := x.b.publish(name, &cliv1.TaskFile{Format: formatVersion, Repository: t.Repository, Task: t.Name}); err != nil {
 		return unavailable(x.dir, err)
 	}
 	return nil
@@ -139,11 +134,11 @@ func (x *Index) Tasks() ([]Task, error) {
 		if err != nil {
 			return nil, unavailable(x.dir, err)
 		}
-		var file taskFile
+		var file cliv1.TaskFile
 		if err := decode(name, data, &file); err != nil {
 			return nil, err
 		}
-		t := Task{Repository: file.Repository, Name: file.Task}
+		t := Task{Repository: file.GetRepository(), Name: file.GetTask()}
 		if x.entry(t) != name {
 			return nil, corrupt(name, "its name and content disagree")
 		}

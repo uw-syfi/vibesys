@@ -29,7 +29,7 @@ func wantInvalid(t *testing.T, what string, err error, path string) {
 func TestHoldRefusesWhatNoStoreCanKeep(t *testing.T) {
 	nan, inf := math.NaN(), math.Inf(-1)
 	badTime := time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC)
-	early := time.Date(-1, 1, 1, 0, 0, 0, 0, time.UTC)
+	early := time.Date(0, 12, 31, 23, 59, 59, 0, time.UTC)
 	plan := core.Plan{Title: "ok"}
 	cases := []struct {
 		name string
@@ -52,7 +52,7 @@ func TestHoldRefusesWhatNoStoreCanKeep(t *testing.T) {
 		{"NaN", func() error { _, err := ledger.Hold("v", core.Verdict{CandidateMean: nan}); return err }, "v.CandidateMean"},
 		{"infinity in a slice", func() error { _, err := ledger.Hold("o", core.MeasureOutcome{Samples: []float64{1, inf}}); return err }, "o.Samples[1]"},
 		{"a time after year 9999", func() error { _, err := ledger.Hold("n", core.Note{At: badTime}); return err }, "n.At"},
-		{"a time before year 0", func() error { _, err := ledger.Hold("n", core.Note{At: early}); return err }, "n.At"},
+		{"a time before year 1", func() error { _, err := ledger.Hold("n", core.Note{At: early}); return err }, "n.At"},
 		{"a time behind a pointer", func() error {
 			_, err := ledger.Hold("job", core.Job{StartedAt: &badTime})
 			return err

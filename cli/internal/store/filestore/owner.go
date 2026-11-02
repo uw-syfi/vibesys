@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/store"
 	"github.com/uw-syfi/vibesys/cli/internal/store/filestore/fsys"
@@ -24,16 +25,32 @@ type Owner struct {
 	PID int
 }
 
-// ownerRec is the encoding of .owner. Generation counts the owners the store has had, so that no
-// two owners have the same record, not even the same process opening it twice. GivenUp is the
-// running jobs whose runs were given up: see the Owners section of the package documentation.
+// ownerRec is what .owner says, as the store reads it. Generation counts the owners the store has
+// had, so that no two owners have the same record, not even the same process opening it twice.
+// GivenUp is the running jobs whose runs were given up: see the Owners section of the package
+// documentation. The file is a cliv1.OwnerFile.
 type ownerRec struct {
-	Format     int          `json:"format"`
-	Generation uint64       `json:"generation"`
-	Host       string       `json:"host"`
-	Dir        string       `json:"dir"`
-	PID        int          `json:"pid"`
-	GivenUp    []core.JobID `json:"given_up,omitempty"`
+	Generation uint64
+	Host       string
+	Dir        string
+	PID        int
+	GivenUp    []core.JobID
+}
+
+func (r ownerRec) file() *cliv1.OwnerFile {
+	f := &cliv1.OwnerFile{Format: formatVersion, Generation: r.Generation, Host: r.Host, Dir: r.Dir, Pid: int64(r.PID)}
+	for _, id := range r.GivenUp {
+		f.GivenUp = append(f.GivenUp, string(id))
+	}
+	return f
+}
+
+func ownerRecOf(f *cliv1.OwnerFile) ownerRec {
+	r := ownerRec{Generation: f.GetGeneration(), Host: f.GetHost(), Dir: f.GetDir(), PID: int(f.GetPid())}
+	for _, id := range f.GetGivenUp() {
+		r.GivenUp = append(r.GivenUp, core.JobID(id))
+	}
+	return r
 }
 
 func (r ownerRec) String() string {
@@ -98,7 +115,7 @@ func takeRecord(b *backend, owner Owner, lock fsys.Lock) (*guard, error) {
 			"the store at %s has running jobs that belong to %s: start the daemon there, or, if that place is gone for good, remove %s and those of them that no run can be found of here will be marked lost",
 			b.root, last, name), store.ErrAway)
 	}
-	rec := ownerRec{Format: formatVersion, Generation: 1, Host: owner.Host, Dir: owner.Dir, PID: owner.PID, GivenUp: running}
+	rec := ownerRec{Generation: 1, Host: owner.Host, Dir: owner.Dir, PID: owner.PID, GivenUp: running}
 	if last != nil {
 		rec.Generation = last.Generation + 1
 		rec.GivenUp = slices.DeleteFunc(running, func(id core.JobID) bool { return !slices.Contains(last.GivenUp, id) })
@@ -115,7 +132,7 @@ func takeRecord(b *backend, owner Owner, lock fsys.Lock) (*guard, error) {
 
 // write makes rec the record, as this guard's own.
 func (g *guard) write(rec ownerRec, publish func(name string, data []byte) error) error {
-	data, err := encode(rec)
+	data, err := encode(rec.file())
 	if err != nil {
 		return err
 	}
@@ -173,10 +190,11 @@ func readOwner(b *backend, name string) (*ownerRec, error) {
 	if err != nil {
 		return nil, unavailable(b.root, err)
 	}
-	var rec ownerRec
-	if err := decode(name, data, &rec); err != nil {
+	var file cliv1.OwnerFile
+	if err := decode(name, data, &file); err != nil {
 		return nil, err
 	}
+	rec := ownerRecOf(&file)
 	return &rec, nil
 }
 
@@ -242,9 +260,9 @@ func (g *guard) checkLocked() error {
 		return nil
 	}
 	who := "another daemon"
-	var rec ownerRec
-	if decode(name, data, &rec) == nil {
-		who = rec.String()
+	var file cliv1.OwnerFile
+	if decode(name, data, &file) == nil {
+		who = ownerRecOf(&file).String()
 	}
 	return fenced("the store at %s now belongs to %s: this daemon stopped using it", g.root, who)
 }

@@ -8,6 +8,9 @@ import (
 	"strconv"
 	"strings"
 
+	"google.golang.org/protobuf/proto"
+
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/store/filestore/fsys"
 	"github.com/uw-syfi/vibesys/cli/internal/store/ledger"
@@ -74,7 +77,7 @@ func (b *backend) list(dir string) ([]fsys.Entry, error) {
 func strayEntry(name string) error { return corrupt(name, "it is not a name this store writes") }
 
 // readRecord reads and decodes one file.
-func (b *backend) readRecord(name string, file any) error {
+func (b *backend) readRecord(name string, file proto.Message) error {
 	data, err := b.fs.ReadFile(name)
 	if err != nil {
 		return err
@@ -114,11 +117,11 @@ func (b *backend) loadJobs() ([]core.Job, error) {
 		if _, numbered := ledger.JobNumber(core.JobID(base)); e.IsDir || !ok || !numbered {
 			return nil, strayEntry(full)
 		}
-		var file jobFile
+		var file cliv1.JobFile
 		if err := b.readRecord(full, &file); err != nil {
 			return nil, err
 		}
-		job, err := jobFromRec(file.Job)
+		job, err := jobFromMessage(file.GetJob())
 		if err != nil {
 			return nil, corrupt(full, "%v", err)
 		}
@@ -150,18 +153,18 @@ func (b *backend) loadResults(jobs []core.Job) ([]ledger.SavedResult, error) {
 		if !owner[core.JobID(base)] {
 			continue
 		}
-		var file resultFile
+		var file cliv1.ResultFile
 		if err := b.readRecord(full, &file); err != nil {
 			return nil, err
 		}
-		result, err := resultFromRec(file.Result)
+		result, err := resultFromMessage(file.GetResult())
 		if err != nil {
 			return nil, corrupt(full, "%v", err)
 		}
-		if string(result.Job) != base || file.Seq == 0 {
-			return nil, corrupt(full, "it holds the result of job %s, number %d", result.Job, file.Seq)
+		if string(result.Job) != base || file.GetSeq() == 0 {
+			return nil, corrupt(full, "it holds the result of job %s, number %d", result.Job, file.GetSeq())
 		}
-		results = append(results, ledger.SavedResult{Seq: file.Seq, Result: result})
+		results = append(results, ledger.SavedResult{Seq: file.GetSeq(), Result: result})
 	}
 	return results, nil
 }
@@ -173,14 +176,18 @@ func (b *backend) loadPlans() ([]core.Plan, error) {
 	}
 	plans := make([]core.Plan, 0, len(files))
 	for _, n := range slices.Sorted(mapKeys(files)) {
-		var file planFile
+		var file cliv1.PlanFile
 		if err := b.readRecord(files[n], &file); err != nil {
 			return nil, err
 		}
-		if uint64(file.Plan.Number) != n {
-			return nil, corrupt(files[n], "it holds plan %d", file.Plan.Number)
+		plan, err := planFromMessage(file.GetPlan())
+		if err != nil {
+			return nil, corrupt(files[n], "%v", err)
 		}
-		plans = append(plans, planFromRec(file.Plan))
+		if uint64(plan.Number) != n {
+			return nil, corrupt(files[n], "it holds plan %d", plan.Number)
+		}
+		plans = append(plans, plan)
 	}
 	return plans, nil
 }
@@ -196,14 +203,18 @@ func (b *backend) loadPromotions() ([]core.Promotion, error) {
 		if !ok {
 			return nil, corrupt(promotionPath(b.root, n), "it is missing, and later promotions are there")
 		}
-		var file promotionFile
+		var file cliv1.PromotionFile
 		if err := b.readRecord(name, &file); err != nil {
 			return nil, err
 		}
-		if file.Seq != n {
-			return nil, corrupt(name, "it holds promotion %d", file.Seq)
+		if file.GetSeq() != n {
+			return nil, corrupt(name, "it holds promotion %d", file.GetSeq())
 		}
-		promotions = append(promotions, promotionFromRec(file.Promotion))
+		promotion, err := promotionFromMessage(file.GetPromotion())
+		if err != nil {
+			return nil, corrupt(name, "%v", err)
+		}
+		promotions = append(promotions, promotion)
 	}
 	return promotions, nil
 }
@@ -292,11 +303,11 @@ func (b *backend) Events(run core.RunID, first, last uint64) ([]core.Event, erro
 	events := make([]core.Event, 0, last-first+1)
 	for seq := first; seq <= last; seq++ {
 		name := eventPath(b.root, run, seq)
-		var file eventFile
+		var file cliv1.EventFile
 		if err := b.readRecord(name, &file); err != nil {
 			return nil, err
 		}
-		event, err := eventFromRec(file.Event)
+		event, err := eventFromMessage(file.GetEvent())
 		if err != nil {
 			return nil, corrupt(name, "%v", err)
 		}

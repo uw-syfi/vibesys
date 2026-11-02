@@ -96,8 +96,8 @@ func holdStruct(src reflect.Value, path string) (reflect.Value, error) {
 	typ := src.Type()
 	if typ == timeType {
 		t := src.Interface().(time.Time).UTC()
-		if year := t.Year(); year < 0 || year > 9999 {
-			return src, invalid(path, fmt.Sprintf("year %d is outside 0 to 9999", year))
+		if year := t.Year(); year < 1 || year > 9999 {
+			return src, invalid(path, fmt.Sprintf("year %d is outside 1 to 9999", year))
 		}
 		return reflect.ValueOf(t), nil
 	}

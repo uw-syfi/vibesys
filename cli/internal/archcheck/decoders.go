@@ -18,17 +18,23 @@ const (
 
 // unfuzzedDecoders lists the wire decoders that have no fuzz target of their own.
 var unfuzzedDecoders = map[string]string{
-	"ToFingerprint":     "decoded inside ToJob, which FuzzDecodeJob fuzzes",
-	"ToNote":            "decoded inside ToJob, which FuzzDecodeJob fuzzes",
-	"ToVersions":        "copies three integers and refuses nothing; a copy has no input to fuzz",
-	"ToFailure":         "decoded inside FailureOf, which FuzzFailureFromStatus fuzzes",
-	"ToJobState":        "an enum translator, held total over every contract value by TestEveryContractEnumValueIsTranslatedOrRefused",
-	"ToRunPhase":        "an enum translator with no refusal: a phase it cannot read is running, which is the side that holds; TestAPhaseTheDaemonCannotReadHolds covers it",
-	"ToJobKind":         "an enum translator, held total over every contract value by TestEveryContractEnumValueIsTranslatedOrRefused",
-	"ToEnvironmentKind": "an enum translator, held total over every contract value by TestEveryContractEnumValueIsTranslatedOrRefused",
-	"ToBackendKind":     "an enum translator, held total over every contract value by TestEveryContractEnumValueIsTranslatedOrRefused",
-	"ToExecKind":        "an enum translator, held total over every contract value by TestEveryContractEnumValueIsTranslatedOrRefused",
-	"ToCompatibility":   "an enum translator, held total over every contract value by TestEveryContractEnumValueIsTranslatedOrRefused",
+	"ToFingerprint":        "decoded inside ToJob, which FuzzDecodeJob fuzzes",
+	"ToNote":               "decoded inside ToJob, which FuzzDecodeJob fuzzes",
+	"ToVersions":           "copies three integers and refuses nothing; a copy has no input to fuzz",
+	"ToFailure":            "decoded inside FailureOf, which FuzzFailureFromStatus fuzzes",
+	"ToJobState":           "an enum translator, held total over every contract value by TestEveryContractEnumValueIsTranslatedOrRefused",
+	"ToRunPhase":           "an enum translator with no refusal: a phase it cannot read is running, which is the side that holds; TestAPhaseTheDaemonCannotReadHolds covers it",
+	"ToJobKind":            "an enum translator, held total over every contract value by TestEveryContractEnumValueIsTranslatedOrRefused",
+	"ToEnvironmentKind":    "an enum translator, held total over every contract value by TestEveryContractEnumValueIsTranslatedOrRefused",
+	"ToBackendKind":        "an enum translator, held total over every contract value by TestEveryContractEnumValueIsTranslatedOrRefused",
+	"ToExecKind":           "an enum translator, held total over every contract value by TestEveryContractEnumValueIsTranslatedOrRefused",
+	"ToVerdictKind":        "an enum translator, held total over every contract value by TestEveryRecordEnumValueIsTranslatedOrRefused",
+	"ToInconclusiveReason": "an enum translator, held total over every contract value by TestEveryRecordEnumValueIsTranslatedOrRefused",
+	"ToPromoteRefusalKind": "an enum translator, held total over every contract value by TestEveryRecordEnumValueIsTranslatedOrRefused",
+	"ToDirection":          "an enum translator, held total over every contract value by TestEveryRecordEnumValueIsTranslatedOrRefused",
+	"ToCommand":            "an enum translator, held total over every contract value by TestEveryRecordEnumValueIsTranslatedOrRefused",
+	"ToCommandOutcome":     "an enum translator, held total over every contract value by TestEveryRecordEnumValueIsTranslatedOrRefused",
+	"ToCompatibility":      "an enum translator, held total over every contract value by TestEveryContractEnumValueIsTranslatedOrRefused",
 }
 
 // UnfuzzedDecoders returns the decoders excused from having a fuzz target, with the reason.

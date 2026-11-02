@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/store"
 	"github.com/uw-syfi/vibesys/cli/internal/store/filestore/fsys"
@@ -237,7 +238,7 @@ func initialize(f fsys.FS, root string) error {
 	name := path.Join(root, formatFile)
 	data, err := f.ReadFile(name)
 	if err == nil {
-		var file rootFile
+		var file cliv1.FormatFile
 		return decode(name, data, &file)
 	}
 	if !errors.Is(err, fs.ErrNotExist) {
@@ -266,7 +267,7 @@ func initialize(f fsys.FS, root string) error {
 		return unavailable(root, err)
 	}
 	b := newBackend(f, root)
-	if err := b.publish(name, rootFile{Format: formatVersion}); err != nil {
+	if err := b.publish(name, &cliv1.FormatFile{Format: formatVersion}); err != nil {
 		return unavailable(root, err)
 	}
 	return nil

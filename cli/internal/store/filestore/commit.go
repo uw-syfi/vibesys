@@ -6,7 +6,11 @@ import (
 	"io/fs"
 	"path"
 
+	"google.golang.org/protobuf/proto"
+
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/store/ledger"
+	"github.com/uw-syfi/vibesys/cli/internal/wire"
 )
 
 // Commit makes one change durable. Every change is published by one rename, which is its commit
@@ -28,24 +32,24 @@ func (b *backend) Commit(change ledger.Change) error {
 				return err
 			}
 		}
-		rec, err := jobToRec(c.Job)
+		job, err := jobToMessage(c.Job)
 		if err != nil {
 			return err
 		}
-		return b.publish(jobPath(b.root, c.Job.ID), jobFile{Format: formatVersion, Job: rec})
+		return b.publish(jobPath(b.root, c.Job.ID), &cliv1.JobFile{Format: formatVersion, Job: job})
 	case ledger.PutPlan:
-		return b.publish(planPath(b.root, c.Plan.Number), planFile{Format: formatVersion, Plan: planToRec(c.Plan)})
+		return b.publish(planPath(b.root, c.Plan.Number), &cliv1.PlanFile{Format: formatVersion, Plan: wire.Plan(c.Plan)})
 	case ledger.AddPromotion:
-		return b.publish(promotionPath(b.root, c.Seq), promotionFile{Format: formatVersion, Seq: c.Seq, Promotion: promotionToRec(c.Promotion)})
+		return b.publish(promotionPath(b.root, c.Seq), &cliv1.PromotionFile{Format: formatVersion, Seq: c.Seq, Promotion: wire.Promotion(c.Promotion)})
 	case ledger.AddEvent:
-		rec, err := eventToRec(c.Event)
+		event, err := eventToMessage(c.Event)
 		if err != nil {
 			return err
 		}
 		if err := b.ensureDir(path.Join(b.root, runsDir), string(c.Event.Run)); err != nil {
 			return err
 		}
-		return b.publish(eventPath(b.root, c.Event.Run, c.Event.Sequence), eventFile{Format: formatVersion, Event: rec})
+		return b.publish(eventPath(b.root, c.Event.Run, c.Event.Sequence), &cliv1.EventFile{Format: formatVersion, Event: event})
 	case ledger.AddLog:
 		if err := b.ensureDir(path.Join(b.root, logsDir), string(c.Job)); err != nil {
 			return err
@@ -60,7 +64,7 @@ func (b *backend) Commit(change ledger.Change) error {
 }
 
 // publish writes a record under its final name.
-func (b *backend) publish(name string, file any) error {
+func (b *backend) publish(name string, file proto.Message) error {
 	data, err := encode(file)
 	if err != nil {
 		return err
