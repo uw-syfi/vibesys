@@ -10,6 +10,8 @@ import (
 
 	"github.com/uw-syfi/vibesys/cli/internal/app"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv"
+	"github.com/uw-syfi/vibesys/cli/internal/store"
 	"github.com/uw-syfi/vibesys/cli/internal/task"
 	"github.com/uw-syfi/vibesys/cli/internal/task/tasktest"
 )
@@ -52,6 +54,9 @@ func done(t *testing.T, a *app.App, settings core.Settings, noCache bool) (core.
 func (w *world) results(a *app.App) []core.Result {
 	w.t.Helper()
 	st, err := w.stores.Find(context.Background(), scope)
+	if errors.Is(err, store.ErrNoStore) {
+		return nil // nothing was submitted yet, so nothing is saved
+	}
 	if err != nil {
 		w.t.Fatal(err)
 	}
@@ -404,10 +409,12 @@ func TestAnySequenceOfFlowSubmissionsKeepsTheCacheHonest(t *testing.T) {
 			w := newWorld(t)
 			w.withTask(passes, scores)
 			a := w.newApp()
-			var havePass bool
 			for step := 0; step < 14; step++ {
 				noCache, recheck := rng.Intn(4) == 0, rng.Intn(3) == 0
 				checks, benches := w.started("exit"), w.started("emit")
+				// Every check passes here, and a job that ran one saved it: in a check result, or in the
+				// measurement that ran it in its own job. So a pass is saved once any check ran.
+				havePass := checks > 0
 				saved := 0
 				for _, r := range w.results(a) {
 					saved += samplesOf(r)
@@ -424,7 +431,6 @@ func TestAnySequenceOfFlowSubmissionsKeepsTheCacheHonest(t *testing.T) {
 					if noCache || !havePass {
 						wantChecks = [2]int{1, 1}
 					}
-					havePass = true
 				} else {
 					n := 1 + rng.Intn(6)
 					what = fmt.Sprintf("measure %d nocache=%v recheck=%v", n, noCache, recheck)
@@ -466,7 +472,7 @@ func requireWhole(t *testing.T, results []core.Result) {
 	t.Helper()
 	passes := map[core.JobID]bool{}
 	for _, r := range results {
-		if _, ok := r.Outcome.(core.CheckOutcome); ok {
+		if _, ok := r.PassKey(); ok {
 			passes[r.Job] = true
 		}
 	}
@@ -481,5 +487,112 @@ func requireWhole(t *testing.T, results []core.Result) {
 		if m.CheckJob != r.Job && !passes[m.CheckJob] {
 			t.Errorf("result of %s links the check %q, which has no saved pass", r.Job, m.CheckJob)
 		}
+	}
+}
+
+// A measure job that ran its check saved a pass with its measurement: a check afterwards is
+// answered by it and runs nothing, and a measure that needs more samples links it.
+func TestAMeasureJobsCheckPassAnswersALaterCheckAndLaterMeasures(t *testing.T) {
+	w := newWorld(t)
+	w.withTask(passes, scores)
+	a := w.newApp()
+	measured, _ := done(t, a, core.MeasureSettings{Samples: 2}, false)
+	if measured.State != core.JobSucceeded || w.started("exit") != 1 {
+		t.Fatalf("setup: %s, the check ran %d times", describe(measured), w.started("exit"))
+	}
+
+	check, disposition := done(t, a, core.CheckSettings{}, false)
+	if disposition != core.SubmitReused || check.ID != measured.ID {
+		t.Errorf("a check after the measure = %s %s, want the measure job, reused", disposition, describe(check))
+	}
+	if n := w.started("exit"); n != 1 {
+		t.Errorf("the check ran %d times in all, want the one the measure ran", n)
+	}
+
+	// A larger measure takes only the missing samples and links the pass instead of checking again.
+	more, _ := done(t, a, core.MeasureSettings{Samples: 3}, false)
+	if more.State != core.JobSucceeded || more.CheckJob != measured.ID || w.started("exit") != 1 || w.started("emit") != 3 {
+		t.Errorf("the top-up = %s, links check %q; the check ran %d times, the benchmark %d", describe(more), more.CheckJob, w.started("exit"), w.started("emit"))
+	}
+	requireWhole(t, w.results(a))
+
+	// Asking for a check with no-cache runs it, as it does for every kind.
+	fresh, disposition := done(t, a, core.CheckSettings{}, true)
+	if disposition != core.SubmitCreated || fresh.ID == measured.ID || w.started("exit") != 2 {
+		t.Errorf("a no-cache check = %s %s; the check ran %d times, want 2", disposition, describe(fresh), w.started("exit"))
+	}
+}
+
+// A job's key is made of what its result is a result of: the job kind, the commit, the task version,
+// the environment fingerprint, the settings and the schema version. The test derives the key from
+// those facts, read through the public interfaces, and expects the daemon's to be the same; and it
+// expects every fact that differs to give another key.
+func TestAJobsKeyIsMadeOfItsKindCommitTaskVersionEnvironmentSettingsAndSchema(t *testing.T) {
+	other := core.Commit(strings.Repeat("cd", 20))
+	otherEnv := core.Fingerprint{Kind: core.EnvironmentHost, Backend: core.BackendCPU, Facts: map[string]string{"os": "other", "arch": "fake"}}
+	type variant struct {
+		name     string
+		commit   core.Commit
+		check    []string
+		print    *core.Fingerprint
+		settings core.Settings
+	}
+	variants := []variant{
+		{name: "base", commit: commit, check: passes, settings: core.CheckSettings{}},
+		{name: "another commit", commit: other, check: passes, settings: core.CheckSettings{}},
+		{name: "another task version", commit: commit, check: []string{"exit", "0", ";", "exit", "0"}, settings: core.CheckSettings{}},
+		{name: "another environment", commit: commit, check: passes, print: &otherEnv, settings: core.CheckSettings{}},
+		{name: "another kind", commit: commit, check: passes, settings: core.MeasureSettings{Samples: 2}},
+	}
+	seen := map[core.JobKey]string{}
+	for _, v := range variants {
+		w := newWorld(t)
+		if v.print != nil {
+			w.env = fakeenv.New(core.EnvironmentHost, w.gates, fakeenv.WithFiles(w.files), fakeenv.WithFingerprint(*v.print))
+		}
+		w.tasks.Put(call.Repository, v.commit, tasktest.Scripted("task", v.check, scores))
+		a := w.newApp()
+		out, err := a.Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: core.JobSpec{Commit: v.commit, Settings: v.settings}})
+		if err != nil {
+			t.Fatalf("%s: %v", v.name, err)
+		}
+		got := awaitFinal(t, a, out.Job.ID)
+
+		tk, err := w.tasks.Task(context.Background(), call.Repository, v.commit, call.Task)
+		if err != nil {
+			t.Fatal(err)
+		}
+		print, err := w.env.Fingerprint(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := core.NewJobKey(core.KeyInputs{
+			Kind: v.settings.Kind(), Commit: v.commit, TaskVersion: tk.Version,
+			Environment: print, Settings: v.settings, SchemaVersion: core.SchemaVersion,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Key != want {
+			t.Errorf("%s: key %s, want %s made of the kind, commit, task version %q, environment and schema version", v.name, got.Key, want, tk.Version)
+		}
+		if first, dup := seen[got.Key]; dup {
+			t.Errorf("%s has the key of %s", v.name, first)
+		}
+		seen[got.Key] = v.name
+	}
+
+	// The settings that change how many samples a measure takes, and whether it checks again, are
+	// not in the key: the cache tops up a measurement, and results of any count share one key.
+	w := newWorld(t)
+	w.withTask(passes, scores)
+	a := w.newApp()
+	var keys []core.JobKey
+	for _, s := range []core.MeasureSettings{{Samples: 2}, {Samples: 3}, {Samples: 3, Recheck: true}} {
+		job, _ := done(t, a, s, false)
+		keys = append(keys, job.Key)
+	}
+	if keys[0] != keys[1] || keys[1] != keys[2] {
+		t.Errorf("measure keys %v, want one key for every sample count and recheck", keys)
 	}
 }

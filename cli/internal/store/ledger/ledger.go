@@ -219,19 +219,20 @@ func (l *Ledger) joinable(sub core.Submission) (int, bool) {
 	return 0, false
 }
 
-// reusable finds the job a submission lands on from the saved results with its key, which the reuse
-// rule decides over together. Only a job that succeeded has a result, so no state is checked here.
+// reusable finds the job a submission lands on from the saved results that answer its key, which
+// the reuse rule decides over together. A result answers the key it was saved under, and the key of
+// the check whose pass it holds (core.Result.PassKey). Only a job that succeeded has a result, so no
+// state is checked here.
 func (l *Ledger) reusable(sub core.Submission) (int, bool) {
-	var found []int // indexes into results
-	for _, i := range l.byKey[sub.Key] {
-		if r, ok := l.resultOf[l.jobs[i].ID]; ok && l.results[r].Result.Key == sub.Key {
+	var found []int // indexes into results, ascending
+	for r, saved := range l.results {
+		if key, holds := saved.Result.PassKey(); saved.Result.Key == sub.Key || (holds && key == sub.Key) {
 			found = append(found, r)
 		}
 	}
 	if len(found) == 0 {
 		return 0, false
 	}
-	slices.Sort(found)
 	job := l.results[found[len(found)-1]].Result.Job
 	if l.rules.Reuse != nil {
 		saved := make([]core.Result, len(found))

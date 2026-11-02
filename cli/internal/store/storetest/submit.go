@@ -314,6 +314,35 @@ func testSubmit(t *testing.T, newStore New) {
 		}
 	})
 
+	t.Run("a check lands on a measurement that ran its own check", func(t *testing.T) {
+		e := newEnv(t, newStore)
+		measured := e.submit(e.measure(1, "key-m", 3)).Job
+		res := ranItsCheck(e.resultFor(measured, 1, 2, 3))
+		e.finish(measured.ID, &res)
+		out := e.submit(e.check(1, string(e.passKeyOf(1))))
+		if out.Disposition != core.SubmitReused || out.Job.ID != measured.ID {
+			t.Errorf("a check = %s on %s, want reused on the measurement %s whose job ran the check", out.Disposition, out.Job.ID, measured.ID)
+		}
+		if n := len(e.jobs(core.JobFilter{})); n != 1 {
+			t.Errorf("%d jobs, want 1: reuse makes no job", n)
+		}
+	})
+
+	t.Run("a check does not land on a measurement that ran no check of its own", func(t *testing.T) {
+		e := newEnv(t, newStore)
+		measured := e.submit(e.measure(1, "key-m", 3)).Job
+		res := e.resultFor(measured, 1, 2, 3) // names a pass another job holds
+		e.finish(measured.ID, &res)
+		for name, sub := range map[string]core.Submission{
+			"a pass another job holds": e.check(1, string(e.passKeyOf(1))),
+			"a pass of another commit": e.check(2, string(e.passKeyOf(2))),
+		} {
+			if out := e.submit(sub); out.Disposition != core.SubmitCreated || out.Job.ID == measured.ID {
+				t.Errorf("%s: a check = %s on %s, want a new job", name, out.Disposition, out.Job.ID)
+			}
+		}
+	})
+
 	t.Run("does not reuse a finished job without a result under the key", func(t *testing.T) {
 		e := newEnv(t, newStore)
 		ok := e.submit(e.check(1, "key-a")).Job

@@ -172,6 +172,29 @@ func resultAt(job core.Job, at time.Time, samples ...float64) core.Result {
 	return r
 }
 
+// ranItsCheck is a measurement of the job that names the job itself as its check pass: its check ran
+// in the same job.
+func ranItsCheck(r core.Result) core.Result {
+	m := r.Outcome.(core.MeasureOutcome)
+	m.CheckJob = r.Job
+	r.Outcome = m
+	return r
+}
+
+// passKeyOf is the key of the check on a commit that ran in the suite's environment, which is the
+// key a measurement that ran its check holds a pass under.
+func (e *env) passKeyOf(c int) core.JobKey {
+	e.t.Helper()
+	key, err := core.NewJobKey(core.KeyInputs{
+		Kind: core.JobCheck, Commit: commit(c), TaskVersion: "v1", Environment: pinned(),
+		Settings: core.CheckSettings{}, SchemaVersion: core.SchemaVersion,
+	})
+	if err != nil {
+		e.t.Fatalf("the key of a check: %v", err)
+	}
+	return key
+}
+
 func (e *env) resultFor(job core.Job, samples ...float64) core.Result {
 	return resultAt(job, e.now(), samples...)
 }

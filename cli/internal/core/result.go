@@ -67,3 +67,26 @@ type ResultFilter struct {
 	Commit Commit
 	Key    JobKey
 }
+
+// PassKey is the key of the check whose pass the result holds, and false for a result that holds
+// none. A check result holds the pass its own key names. A measurement that ran its check in its own
+// job holds the pass of the check job on the same commit, task version, environment and schema
+// version, so a later check is answered by it. A measurement that linked a pass saved by another
+// job holds none of its own: that pass is the other job's.
+func (r Result) PassKey() (JobKey, bool) {
+	switch o := r.Outcome.(type) {
+	case CheckOutcome:
+		return r.Key, true
+	case MeasureOutcome:
+		if o.CheckJob != r.Job {
+			return "", false
+		}
+		key, err := NewJobKey(KeyInputs{
+			Kind: JobCheck, Commit: r.Commit, TaskVersion: r.TaskVersion,
+			Environment: r.Environment, Settings: CheckSettings{}, SchemaVersion: r.SchemaVersion,
+		})
+		return key, err == nil
+	default:
+		return "", false
+	}
+}

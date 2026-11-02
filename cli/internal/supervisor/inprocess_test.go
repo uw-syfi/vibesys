@@ -305,8 +305,12 @@ func TestAPassingPlanSettlesAsASuccessWithItsResult(t *testing.T) {
 	out := finish(t, s)
 	settled := lifecycle.Settle("j1", core.JobRunning, out, time.Unix(1, 0))
 	tr := settled.Transition
-	if tr.To != core.JobSucceeded || tr.Result == nil || tr.CheckJob != "j1" || settled.Log != "" {
+	if tr.To != core.JobSucceeded || tr.Result == nil || settled.Log != "" {
 		t.Fatalf("settlement = %+v", settled)
+	}
+	// The check pass is in the result and nowhere else: the job takes it from there.
+	if m, ok := tr.Result.Outcome.(core.MeasureOutcome); !ok || m.CheckJob != "j1" || tr.CheckJob != "" {
+		t.Errorf("the result names check job %+v, and the transition %q", tr.Result.Outcome, tr.CheckJob)
 	}
 }
 

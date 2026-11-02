@@ -106,7 +106,7 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/flow/` | The check and measure flows as pure step functions (`State`, event in, `State` and requests out), and the `Plan` a job is run from. No clock, goroutines or files. |
 | `internal/flowrun/` | The shell that carries a flow's requests out on an `Environment`, a `Backend` and a file system, and nothing else. A `Fake` environment passes the same scenarios as the real one. |
 | `internal/hostfs/` | The file system a job reads results from, with the operating system's and an in-memory one. |
-| `internal/gitwork/` | The git program as a source of tasks (`git archive`) and of clean checkouts of a commit (`git clone --local`, then a detached checkout). The working tree of the repository is never read or touched. |
+| `internal/gitwork/` | The git program as a source of tasks (`git archive`) and of clean checkouts of a commit (`git clone`, then a detached checkout). The working tree of the repository is never read or touched. |
 | `internal/lifecycle/` | The job lifecycle as a pure machine: `Step(State, Event) (State, []Request)`. The daemon feeds it events and carries out the requests; recovery after a crash is the same events replayed. |
 | `internal/changed/` | Pure helpers for the "what changed" facts a job records. |
 | `internal/clock/` | `Clock` and `Timers`, the only ways the daemon and the client read or wait on time. A test supplies its own and fires timers itself. |
@@ -304,8 +304,9 @@ and are not linked into it) and runs them on the host. A job is one of:
 - `submit check`: the task's `[accuracy]` command, run in a clean checkout. A pass is saved, and a
   second check of the same commit, task version and environment is answered from it.
 - `submit measure`: the task's `[benchmark]` command, run once per sample after the check passes. The
-  samples are saved with the machine's facts and load, and the check pass is saved as a check result
-  too, so a later check reuses it. A measure for more samples than the cache holds takes only the
+  samples are saved with the machine's facts and load. When the measure ran the check itself, that
+  pass counts as a check result (`core.Result.PassKey`), so a later check is answered by the
+  measure job. A measure for more samples than the cache holds takes only the
   missing ones, and links the saved check pass instead of checking again.
 
 `--no-cache` runs the whole job again, with a fresh check. `--recheck` (measure) checks again but
