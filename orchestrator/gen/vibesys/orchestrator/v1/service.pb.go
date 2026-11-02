@@ -723,7 +723,12 @@ type WatchAgentResponse struct {
 	//	*WatchAgentResponse_Item
 	//	*WatchAgentResponse_Delta
 	//	*WatchAgentResponse_Turn
-	Body          isWatchAgentResponse_Body `protobuf_oneof:"body"`
+	Body isWatchAgentResponse_Body `protobuf_oneof:"body"`
+	// The committed sequence this frame is current to: for an item or a turn, the sequence of the
+	// event that committed it; for a delta, the latest committed sequence when the progress was
+	// made; for a page, the page's own sequence. A client decides by it which of two whole items,
+	// or whether a delta, is the newer, because neither carries a revision of its own.
+	Sequence      uint64 `protobuf:"varint,5,opt,name=sequence,proto3" json:"sequence,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -799,6 +804,13 @@ func (x *WatchAgentResponse) GetTurn() *Turn {
 		}
 	}
 	return nil
+}
+
+func (x *WatchAgentResponse) GetSequence() uint64 {
+	if x != nil {
+		return x.Sequence
+	}
+	return 0
 }
 
 type isWatchAgentResponse_Body interface {
@@ -1309,12 +1321,13 @@ const file_vibesys_orchestrator_v1_service_proto_rawDesc = "" +
 	"\tItemsPage\x123\n" +
 	"\x05items\x18\x01 \x03(\v2\x1d.vibesys.orchestrator.v1.ItemR\x05items\x12\x1a\n" +
 	"\bsequence\x18\x02 \x01(\x04R\bsequence\x12.\n" +
-	"\x13next_before_ordinal\x18\x03 \x01(\rR\x11nextBeforeOrdinal\"\xff\x01\n" +
+	"\x13next_before_ordinal\x18\x03 \x01(\rR\x11nextBeforeOrdinal\"\x9b\x02\n" +
 	"\x12WatchAgentResponse\x128\n" +
 	"\x04page\x18\x01 \x01(\v2\".vibesys.orchestrator.v1.ItemsPageH\x00R\x04page\x123\n" +
 	"\x04item\x18\x02 \x01(\v2\x1d.vibesys.orchestrator.v1.ItemH\x00R\x04item\x126\n" +
 	"\x05delta\x18\x03 \x01(\v2\x1e.vibesys.orchestrator.v1.DeltaH\x00R\x05delta\x123\n" +
-	"\x04turn\x18\x04 \x01(\v2\x1d.vibesys.orchestrator.v1.TurnH\x00R\x04turnB\r\n" +
+	"\x04turn\x18\x04 \x01(\v2\x1d.vibesys.orchestrator.v1.TurnH\x00R\x04turn\x12\x1a\n" +
+	"\bsequence\x18\x05 \x01(\x04R\bsequenceB\r\n" +
 	"\x04body\x12\x05\xbaH\x02\b\x01\"\x8f\x01\n" +
 	"\x10ListItemsRequest\x12\"\n" +
 	"\bagent_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\aagentId\x12.\n" +

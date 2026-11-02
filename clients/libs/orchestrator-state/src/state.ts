@@ -5,6 +5,13 @@
  */
 import type {Agent, Item, Message, Receipt, Run, Turn} from '@vibesys/orchestrator-proto';
 
+/** One piece of progress on a running item, with the sequence it was made at. */
+export interface Progress {
+  readonly sequence: bigint;
+  readonly text: string;
+  readonly commandOutput: string;
+}
+
 /** Progress on a running item that its next full update has not yet replaced. */
 export interface Overlay {
   readonly agentId: string;
@@ -12,6 +19,8 @@ export interface Overlay {
   readonly text: string;
   /** Command output added since the item was last stored. */
   readonly commandOutput: string;
+  /** The pieces `text` and `commandOutput` join, kept so a newer item can drop the ones it holds. */
+  readonly pieces: readonly Progress[];
 }
 
 /** The stream skipped events: the client must read again from a snapshot. */
@@ -27,6 +36,8 @@ export interface OrchestratorState {
   readonly agents: Readonly<Record<string, Agent>>;
   readonly turns: Readonly<Record<string, Turn>>;
   readonly items: Readonly<Record<string, Item>>;
+  /** The sequence each stored item was committed at: the revision that decides which copy is newer. */
+  readonly itemSequences: Readonly<Record<string, bigint>>;
   readonly messages: Readonly<Record<string, Message>>;
   /** Answers to commands this client has seen, by command id. */
   readonly receipts: Readonly<Record<string, Receipt>>;
@@ -41,6 +52,7 @@ export const emptyState: OrchestratorState = {
   agents: {},
   turns: {},
   items: {},
+  itemSequences: {},
   messages: {},
   receipts: {},
   overlays: {},

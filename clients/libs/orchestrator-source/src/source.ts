@@ -35,13 +35,16 @@ export class SourceError extends Error {
 export interface OrchestratorSource {
   /** A snapshot when `afterSequence` is 0n, then every event after it. */
   watchRuns(afterSequence: bigint, signal: CancelSignal): AsyncIterable<WatchRunsResponse['body']>;
-  /** A page of the newest items when `afterSequence` is 0n, then items, progress and turns. */
+  /**
+   * A page of the newest items when `afterSequence` is 0n, then items, progress and turns. Each
+   * response is whole, because its `sequence` is what tells two copies of an item apart.
+   */
   watchAgent(
     agentId: string,
     pageSize: number,
     afterSequence: bigint,
     signal: CancelSignal,
-  ): AsyncIterable<WatchAgentResponse['body']>;
+  ): AsyncIterable<WatchAgentResponse>;
   /** Items below `beforeOrdinal`, newest first. */
   listItems(
     agentId: string,

@@ -35,13 +35,13 @@ function handlers(source: FixtureSource): Record<string, Handler> {
     },
     [m.watchAgent.name]: async (request, respond, signal) => {
       const input = decodeValidatedJson(m.watchAgent.input, request);
-      for await (const body of source.watchAgent(
+      for await (const response of source.watchAgent(
         input.agentId,
         input.pageSize,
         input.afterSequence,
         signal,
       )) {
-        respond(encodeJson(m.watchAgent.output, create(m.watchAgent.output, {body})));
+        respond(encodeJson(m.watchAgent.output, response));
       }
     },
     [m.listItems.name]: async (request, respond, signal) => {

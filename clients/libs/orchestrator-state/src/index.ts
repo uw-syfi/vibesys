@@ -3,8 +3,21 @@
  * state, and the reads the screens take of it. Pure; a connection feeds it (docs/contributing/
  * clients-architecture.md, "State").
  */
-export {type AgentFeed, applyAgentFeed, applyEvent, applySnapshot, isFinalItem} from './fold.js';
-export {emptyState, type Gap, type OrchestratorState, type Overlay} from './state.js';
+export {
+  type AgentFrame,
+  applyAgentFeed,
+  applyEvent,
+  applySnapshot,
+  isFinalItem,
+  type OlderFrame,
+} from './fold.js';
+export {
+  emptyState,
+  type Gap,
+  type OrchestratorState,
+  type Overlay,
+  type Progress,
+} from './state.js';
 export {ms} from './time.js';
 export {
   agentThread,

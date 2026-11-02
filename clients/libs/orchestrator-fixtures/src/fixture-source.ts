@@ -3,14 +3,16 @@
  * the daemon until its caller cancels, and `dropsAfter` scripts the connection to fail after that
  * many responses on each successive connection, so a reconnect is a fixture too.
  */
-import type {
-  Command,
-  Event,
-  ItemsPage,
-  Plan,
-  Receipt,
-  WatchAgentResponse,
-  WatchRunsResponse,
+import {create} from '@bufbuild/protobuf';
+import {
+  type Command,
+  type Event,
+  type ItemsPage,
+  type Plan,
+  type Receipt,
+  type WatchAgentResponse,
+  WatchAgentResponseSchema,
+  type WatchRunsResponse,
 } from '@vibesys/orchestrator-proto';
 import {
   type CancelSignal,
@@ -125,23 +127,28 @@ export class FixtureSource implements OrchestratorSource {
     pageSize: number,
     afterSequence: bigint,
     signal: CancelSignal,
-  ): AsyncGenerator<WatchAgentResponse['body']> {
-    return this.#follow<WatchAgentResponse['body']>(
+  ): AsyncGenerator<WatchAgentResponse> {
+    const frame = (body: WatchAgentResponse['body'], sequence: bigint): WatchAgentResponse =>
+      create(WatchAgentResponseSchema, {body, sequence});
+    return this.#follow<WatchAgentResponse>(
       afterSequence,
       signal,
       () => {
         const page = this.daemon.page(agentId, pageSize, 0);
         const progress = this.daemon.scenario.deltas
           .filter(delta => delta.agentId === agentId)
-          .map((value): WatchAgentResponse['body'] => ({case: 'delta', value}));
-        return {first: [{case: 'page', value: page}, ...progress], after: page.sequence};
+          .map(value => frame({case: 'delta', value}, page.sequence));
+        return {
+          first: [frame({case: 'page', value: page}, page.sequence), ...progress],
+          after: page.sequence,
+        };
       },
       event => {
         const {body} = event;
         if (body.case === 'itemUpdated' && body.value.agentId === agentId)
-          return {case: 'item', value: body.value};
+          return frame({case: 'item', value: body.value}, event.sequence);
         if (body.case === 'turnUpdated' && body.value.agentId === agentId)
-          return {case: 'turn', value: body.value};
+          return frame({case: 'turn', value: body.value}, event.sequence);
         return null;
       },
     );

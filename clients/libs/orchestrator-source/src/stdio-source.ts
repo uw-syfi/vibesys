@@ -168,9 +168,7 @@ export class StdioSource implements OrchestratorSource {
       method.input,
       create(method.input, {agentId, pageSize, afterSequence}),
     );
-    for await (const response of this.#stream<WatchAgentResponse>(method, request, signal)) {
-      yield response.body;
-    }
+    yield* this.#stream<WatchAgentResponse>(method, request, signal);
   }
 
   async listItems(agentId: string, beforeOrdinal: number, pageSize: number, signal: CancelSignal) {

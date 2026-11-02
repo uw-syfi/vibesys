@@ -1,6 +1,7 @@
 /**
  * The operations a host connection machine asks for, over any `OrchestratorSource`. A watch owns
- * the cancellation of its stream, so the code that holds one only ever calls `close`.
+ * the cancellation of its stream, so the code that holds one only ever calls `close`; a request
+ * takes the signal of whoever asked, and the ports own the connection itself, released by `close`.
  */
 import type {
   Command,
@@ -20,14 +21,17 @@ export interface Watch<T> {
 
 export interface HostPorts {
   openRuns(afterSequence: bigint): Watch<WatchRunsResponse['body']>;
-  openAgent(
+  openAgent(agentId: string, pageSize: number, afterSequence: bigint): Watch<WatchAgentResponse>;
+  listItems(
     agentId: string,
+    beforeOrdinal: number,
     pageSize: number,
-    afterSequence: bigint,
-  ): Watch<WatchAgentResponse['body']>;
-  listItems(agentId: string, beforeOrdinal: number, pageSize: number): Promise<ItemsPage>;
-  listPlans(runId: string): Promise<readonly Plan[]>;
-  send(command: Command): Promise<Receipt>;
+    signal: CancelSignal,
+  ): Promise<ItemsPage>;
+  listPlans(runId: string, signal: CancelSignal): Promise<readonly Plan[]>;
+  send(command: Command, signal: CancelSignal): Promise<Receipt>;
+  /** Release the connection and whatever process carries it. Open streams and requests end as lost. */
+  close(): void;
 }
 
 function watchOf<T>(open: (signal: CancelSignal) => AsyncIterable<T>): Watch<T> {
@@ -35,16 +39,19 @@ function watchOf<T>(open: (signal: CancelSignal) => AsyncIterable<T>): Watch<T> 
   return {frames: open(controller.signal), close: () => controller.abort()};
 }
 
-export function portsOf(source: OrchestratorSource): HostPorts {
-  // Calls that are not streams are never cancelled by the machine: a request that was sent is
-  // answered, and a reply nobody wants is dropped by the state that asked.
-  const never = new AbortController().signal;
+/** `release` frees what the source holds open (a child process); a fixture holds nothing. */
+export function portsOf(
+  source: OrchestratorSource,
+  release: () => void = () => undefined,
+): HostPorts {
   return {
     openRuns: after => watchOf(signal => source.watchRuns(after, signal)),
     openAgent: (agentId, pageSize, after) =>
       watchOf(signal => source.watchAgent(agentId, pageSize, after, signal)),
-    listItems: (agentId, before, pageSize) => source.listItems(agentId, before, pageSize, never),
-    listPlans: runId => source.listPlans(runId, never),
-    send: command => source.dispatch(command, never),
+    listItems: (agentId, before, pageSize, signal) =>
+      source.listItems(agentId, before, pageSize, signal),
+    listPlans: (runId, signal) => source.listPlans(runId, signal),
+    send: (command, signal) => source.dispatch(command, signal),
+    close: release,
   };
 }
