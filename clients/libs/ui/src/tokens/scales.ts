@@ -99,7 +99,7 @@ export const SIZE: Readonly<Record<SizeToken, number>> = {
   'chart-height': 48,
   'pane-list': 380,
   'pane-outline': 340,
-  'pane-master': 400,
+  'pane-master': 480,
   'pane-min': 340,
   'pane-max': 960,
   'pane-dock': 360,
