@@ -131,6 +131,29 @@ def test_uncommitted_paths_report_a_path_once_when_it_is_staged_and_untracked(
     assert sandbox.repo.changed_since("HEAD", ["."]) == ("a.txt",)
 
 
+def test_a_staged_rename_lists_both_its_paths_as_paths(sandbox: ContractProject) -> None:
+    # Git prints "R  b.txt" with the origin as a second field; neither is "a.txt -> b.txt".
+    sandbox.start({"a.txt": "same\n", "dir/keep.txt": "k\n"})
+    sandbox.delete("a.txt")
+    sandbox.write("b.txt", "same\n")
+    sandbox.repo.stage_all(["."])
+
+    assert sandbox.repo.uncommitted_paths(["."]) == ("a.txt", "b.txt")
+    assert sandbox.repo.changed_since("HEAD", ["."]) == ("a.txt", "b.txt")
+
+
+def test_a_staged_rename_stays_listed_when_its_origin_is_recreated(
+    sandbox: ContractProject,
+) -> None:
+    sandbox.start({"a.txt": "same\n"})
+    sandbox.write("b.txt", "same\n")
+    sandbox.delete("a.txt")
+    sandbox.repo.stage_all(["."])
+    sandbox.write("a.txt", "same\n")
+
+    assert sandbox.repo.uncommitted_paths(["."]) == ("a.txt", "b.txt")
+
+
 def test_changed_since_unions_committed_and_uncommitted_paths(sandbox: ContractProject) -> None:
     base = sandbox.start({"a.txt": "1\n", "b.txt": "1\n", "tests/t.py": "1\n"})
     sandbox.write("a.txt", "2\n")
