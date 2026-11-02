@@ -13,7 +13,6 @@ class WaitKind(StrEnum):
     """What is waiting."""
 
     SESSION = "session"
-    RECOVERY_CHECK = "recovery-check"
     OWNED_JOB = "owned-job"
     RELEASE_DEPENDENCY = "release-dependency"
     YIELD_PUBLICATION = "yield-publication"

@@ -378,13 +378,7 @@ def _store_observed_epoch(owner: Project, run_id: str) -> None:
     finally:
         journal.close()
     core = initial_state()
-    core = core.model_copy(
-        update={
-            "records": core.records.model_copy(
-                update={"recovery": core.records.recovery.model_copy(update={"epoch": 1})}
-            )
-        }
-    )
+    core = core.model_copy(update={"records": core.records.model_copy(update={"epoch": 1})})
     seed_stored_record(
         owner,
         run_id,

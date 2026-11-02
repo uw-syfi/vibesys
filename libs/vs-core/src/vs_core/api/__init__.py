@@ -563,11 +563,8 @@ if TYPE_CHECKING:
         BlockRequest,
         CancelOwnedResource,
         CapacityHold,
-        ChildLease,
-        ChildObservationWatermark,
         DispatchAuthorized,
         ExecuteRegisteredOperation,
-        HostEpoch,
         InspectRequest,
         OperationResult,
         OperationRetireRequested,
@@ -576,9 +573,6 @@ if TYPE_CHECKING:
         ReconciliationRequest,
         RecordsEvent,
         RecordsState,
-        RecoveryBarrier,
-        RecoveryCheck,
-        RecoveryPhase,
         RegisteredOperationRequest,
         ReissueProof,
         Request,
@@ -1003,11 +997,10 @@ _MODULES: dict[str, str] = {
             "vs_core.types.records",
             (
                 "Attribution BlockedRecordStalled BlockRequest CancelOwnedResource CapacityHold "
-                "ChildLease ChildObservationWatermark DispatchAuthorized ExecuteRegisteredOperation "
-                "HostEpoch InspectRequest OperationResult OperationRetireRequested "
+                "DispatchAuthorized ExecuteRegisteredOperation "
+                "InspectRequest OperationResult OperationRetireRequested "
                 "OperationView Outbound "
-                "ReconciliationRequest RecordsEvent RecordsState RecoveryBarrier RecoveryCheck "
-                "RecoveryPhase "
+                "ReconciliationRequest RecordsEvent RecordsState "
                 "RegisteredOperationRequest ReissueProof Request RequestObserved RequestPhase "
                 "RequestPrepared RequestRecord RequestUndispatchable RetryDue TargetObservation "
                 "TurnHeld inherit within "
@@ -1248,9 +1241,7 @@ __all__ = [
     "CheckpointKnown",
     "CheckpointResolved",
     "CheckpointStalled",
-    "ChildLease",
     "ChildManifest",
-    "ChildObservationWatermark",
     "ClockAdvanced",
     "CloseAdmission",
     "CloseAttemptScope",
@@ -1352,7 +1343,6 @@ __all__ = [
     "Generation",
     "Group",
     "HistoricalSubmissionReceipt",
-    "HostEpoch",
     "HostFence",
     "HostId",
     "IdScheme",
@@ -1493,9 +1483,6 @@ __all__ = [
     "RecordsContext",
     "RecordsEvent",
     "RecordsState",
-    "RecoveryBarrier",
-    "RecoveryCheck",
-    "RecoveryPhase",
     "ReducerTrace",
     "RegisterAttempt",
     "RegisteredJobObserved",

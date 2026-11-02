@@ -93,7 +93,7 @@ def admitted_turns(state: CoreState) -> tuple[InvocationRef, ...]:
             and row.request.turn == invocation.turn
             and row.request.scope == invocation.scope
             and row.phase != RequestPhase.PREPARED
-            and row.dispatched_in in (None, state.records.recovery.epoch)
+            and row.dispatched_in in (None, state.records.epoch)
             for row in state.records.records
         )
     )
@@ -199,7 +199,7 @@ def _releases_a_job(state: CoreState, request: Request) -> bool:
     return (
         park is not None
         and state.run.status == RunStatus.DRAINING
-        and state.records.recovery.epoch == park.epoch
+        and state.records.epoch == park.epoch
         and request_lifecycle(request) is LifecycleClass.OWNED_JOB
     )
 

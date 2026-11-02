@@ -25,8 +25,6 @@ from vs_core.api import (
     ItemId,
     LifecycleClass,
     RecordsState,
-    RecoveryBarrier,
-    RecoveryPhase,
     RequestId,
     RequestPhase,
     RequestRecord,
@@ -90,9 +88,7 @@ def _state(
                 update={"declaration": counter.declaration, "status": status}
             ),
             "attempts": AttemptsState(attempts=views),
-            "records": RecordsState(
-                hosts=(), records=records, recovery=RecoveryBarrier(phase=RecoveryPhase.READY)
-            ),
+            "records": RecordsState(records=records),
         }
     )
 

@@ -85,9 +85,6 @@ def test_dependency_dispatch_requires_exact_owner_receipt(defect: str, identity:
     ready = state.records.model_copy(
         update={
             "records": (record,),
-            "recovery": state.records.recovery.model_copy(
-                update={"phase": core.RecoveryPhase.READY}
-            ),
         }
     )
     with pytest.raises(core.ContractError, match="dependency"):
@@ -160,7 +157,7 @@ def test_kernel_event_cause_requires_the_recorded_observation_episode(
         until=core.Until(at=10.0),
         addressed_by=(),
     )
-    state = state.model_copy(update={"records": core.RecordsState(hosts=(), records=(record,))})
+    state = state.model_copy(update={"records": core.RecordsState(records=(record,))})
     event = core.SessionObserved(
         session_id=spec.session_id,
         observation=core.Observation(

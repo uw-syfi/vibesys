@@ -51,7 +51,7 @@ def inspection_facts(draw: st.DrawFn) -> tuple[core.CoreState, core.RequestObser
         )
         for identity, request in ((source_id, source), (query_id, query))
     )
-    state = state.model_copy(update={"records": core.RecordsState(hosts=(), records=records)})
+    state = state.model_copy(update={"records": core.RecordsState(records=records)})
     observations = tuple(
         core.Observation(
             event_id=core.EventId(root=identity.root),

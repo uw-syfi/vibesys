@@ -14,7 +14,6 @@ from vs_core.api import (
     AttemptId,
     AttemptRef,
     Capabilities,
-    ChildLease,
     ContinuationId,
     ContractError,
     DecisionId,
@@ -32,9 +31,6 @@ from vs_core.api import (
     OperationRegistration,
     OperationRegistry,
     OperationRequest,
-    RecoveryBarrier,
-    RecoveryCheck,
-    RecoveryPhase,
     Rejected,
     RejectionCode,
     RequestId,
@@ -261,42 +257,6 @@ def test_unknown_target_fields_fail_at_the_contract_boundary() -> None:
     with pytest.raises(ValidationError, match="fabricated"):
         TargetObservation.model_validate(
             {"observation": observation("target", 1), "fabricated": "proof"}
-        )
-
-
-@given(st.integers(min_value=0, max_value=100))
-def test_ready_recovery_requires_a_conclusive_target_receipt(epoch: int) -> None:
-    target = RequestId(root="recover")
-    for resolution in ("pending", "blocked"):
-        with pytest.raises(ValidationError, match="READY"):
-            RecoveryBarrier(
-                epoch=epoch,
-                phase=RecoveryPhase.READY,
-                checks=(RecoveryCheck(target=target, resolution=resolution, wait=None),),
-            )
-    for resolution in ("safe-prepared", "reattached", "terminal"):
-        barrier = RecoveryBarrier(
-            epoch=epoch,
-            phase=RecoveryPhase.READY,
-            checks=(RecoveryCheck(target=target, resolution=resolution, wait=None),),
-        )
-        assert RecoveryBarrier.model_validate_json(barrier.model_dump_json()) == barrier
-
-
-def test_child_lease_cannot_reuse_an_ancestor_observation() -> None:
-    parent = observation("root", 1)
-    with pytest.raises(ValidationError, match="resource_id"):
-        ChildLease(
-            resource_id=ResourceId(root="child"),
-            scope=parent.scope,
-            source_requests=(parent.request_id,),
-            observation=parent,
-        )
-    with pytest.raises(ValidationError, match="source_requests"):
-        ChildLease(
-            resource_id=ResourceId(root="child"),
-            scope=parent.scope,
-            source_requests=(parent.request_id, parent.request_id),
         )
 
 

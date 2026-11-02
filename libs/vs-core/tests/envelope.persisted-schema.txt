@@ -2,7 +2,7 @@
 # with UPDATE_GOLDEN=1. scripts/check_persisted_schema_compat.py checks a change keeps
 # every saved document, or raises the version.
 shape RunEnvelope[FlowState]
-version 43
+version 44
 $root {"additionalProperties":false,"type":"object"}
 $root.core required {"$ref":"#/$defs/CoreState"}
 $root.event_cursor required {"$ref":"#/$defs/EventCursor"}
@@ -244,20 +244,9 @@ CheckpointKnown {"additionalProperties":false,"type":"object"}
 CheckpointKnown.checkpoint required {"$ref":"#/$defs/Checkpoint"}
 CheckpointKnown.invocation required {"$ref":"#/$defs/InvocationRef"}
 CheckpointKnown.kind optional {"const":"checkpoint_known","default":"checkpoint_known","type":"string"}
-ChildLease {"additionalProperties":false,"type":"object"}
-ChildLease.observation optional {"anyOf":[{"$ref":"#/$defs/Observation"},{"type":"null"}],"default":null}
-ChildLease.observation_watermarks optional {"default":[],"items":{"$ref":"#/$defs/ChildObservationWatermark"},"type":"array"}
-ChildLease.parent_resources optional {"default":[],"items":{"$ref":"#/$defs/ResourceId"},"type":"array"}
-ChildLease.resource_id required {"$ref":"#/$defs/ResourceId"}
-ChildLease.scope required {"$ref":"#/$defs/Scope"}
-ChildLease.source_requests required {"items":{"$ref":"#/$defs/RequestId"},"minItems":1,"type":"array"}
-ChildLease.watermark_history_complete optional {"default":false,"type":"boolean"}
 ChildManifest {"additionalProperties":false,"type":"object"}
 ChildManifest.basis required {"enum":["enumerated","lifecycle-closed"],"type":"string"}
 ChildManifest.members optional {"default":[],"items":{"$ref":"#/$defs/ResourceId"},"type":"array"}
-ChildObservationWatermark {"additionalProperties":false,"type":"object"}
-ChildObservationWatermark.observation required {"$ref":"#/$defs/Observation"}
-ChildObservationWatermark.source_request required {"$ref":"#/$defs/RequestId"}
 CloseAttemptScope {"additionalProperties":false,"type":"object"}
 CloseAttemptScope.admission_id optional {"anyOf":[{"$ref":"#/$defs/DecisionId"},{"type":"null"}],"default":null}
 CloseAttemptScope.attempt required {"$ref":"#/$defs/AttemptRef"}
@@ -357,7 +346,7 @@ CoreRun.scope required {"$ref":"#/$defs/Scope"}
 CoreState {"additionalProperties":false,"type":"object"}
 CoreState.attempts optional {"$ref":"#/$defs/AttemptsState","default":{"attempts":[]}}
 CoreState.evaluation optional {"$ref":"#/$defs/EvaluationState","default":{"agent_calls":[],"continuations":[],"evidence":[],"jobs":[],"registered_jobs":[],"submission_budgets":[]}}
-CoreState.records optional {"$ref":"#/$defs/RecordsState","default":{"children":[],"hosts":[],"records":[],"recovery":{"checks":[],"epoch":0,"phase":"required"}}}
+CoreState.records optional {"$ref":"#/$defs/RecordsState","default":{"epoch":0,"records":[]}}
 CoreState.registry optional {"default":[],"items":{"$ref":"#/$defs/OperationDescriptor"},"type":"array"}
 CoreState.revision optional {"$ref":"#/$defs/RevisionNumber","default":0}
 CoreState.run required {"$ref":"#/$defs/RunState"}
@@ -534,10 +523,6 @@ HistoricalSubmissionReceipt {"additionalProperties":false,"type":"object"}
 HistoricalSubmissionReceipt.kind optional {"const":"historical","default":"historical","type":"string"}
 HistoricalSubmissionReceipt.ordinal required {"minimum":1,"type":"integer"}
 HistoricalSubmissionReceipt.proof required {"$ref":"#/$defs/ArtifactRef"}
-HostEpoch {"additionalProperties":false,"type":"object"}
-HostEpoch.alive_at required {"$ref":"#/$defs/vs_core__types__common__Seconds__1"}
-HostEpoch.epoch required {"$ref":"#/$defs/Count"}
-HostEpoch.started_at required {"$ref":"#/$defs/vs_core__types__common__Seconds__1"}
 HostFence {"additionalProperties":false,"type":"object"}
 HostFence.epoch required {"$ref":"#/$defs/Count"}
 HostFence.host_id required {"$ref":"#/$defs/HostId"}
@@ -900,20 +885,8 @@ Recorded.decision required {"$ref":"#/$defs/DecisionId"}
 Recorded.kind optional {"const":"recorded_operation","default":"recorded_operation","type":"string"}
 Recorded.result_json required {"type":"string"}
 RecordsState {"additionalProperties":false,"type":"object"}
-RecordsState.children optional {"default":[],"items":{"$ref":"#/$defs/ChildLease"},"type":"array"}
-RecordsState.hosts required {"items":{"$ref":"#/$defs/HostEpoch"},"maxItems":2,"type":"array"}
+RecordsState.epoch optional {"$ref":"#/$defs/Count","default":0}
 RecordsState.records optional {"default":[],"items":{"$ref":"#/$defs/RequestRecord"},"type":"array"}
-RecordsState.recovery optional {"$ref":"#/$defs/RecoveryBarrier","default":{"checks":[],"epoch":0,"phase":"required"}}
-RecoveryBarrier {"additionalProperties":false,"type":"object"}
-RecoveryBarrier.checks optional {"default":[],"items":{"$ref":"#/$defs/RecoveryCheck"},"type":"array"}
-RecoveryBarrier.epoch optional {"$ref":"#/$defs/Count","default":0}
-RecoveryBarrier.phase optional {"$ref":"#/$defs/RecoveryPhase","default":"required"}
-RecoveryCheck {"additionalProperties":false,"type":"object"}
-RecoveryCheck.inspection optional {"anyOf":[{"$ref":"#/$defs/RequestId"},{"type":"null"}],"default":null}
-RecoveryCheck.resolution optional {"default":"pending","enum":["pending","safe-prepared","reattached","terminal","unknown","blocked"],"type":"string"}
-RecoveryCheck.target required {"$ref":"#/$defs/RequestId"}
-RecoveryCheck.wait required {"anyOf":[{"$ref":"#/$defs/WaitOn"},{"type":"null"}]}
-RecoveryPhase {"enum":["required","recovering","ready","blocked"],"type":"string"}
 RegisteredOperationRequest {"additionalProperties":false,"type":"object"}
 RegisteredOperationRequest.admission_id optional {"anyOf":[{"$ref":"#/$defs/DecisionId"},{"type":"null"}],"default":null}
 RegisteredOperationRequest.decision_id optional {"anyOf":[{"$ref":"#/$defs/DecisionId"},{"type":"null"}],"default":null}
@@ -1461,7 +1434,7 @@ VerifyAdoption.request_id optional {"anyOf":[{"$ref":"#/$defs/RequestId"},{"type
 VerifyAdoption.scope required {"$ref":"#/$defs/Scope"}
 VerifyAdoption.selection required {"$ref":"#/$defs/Selection"}
 WaitEnd {"enum":["limit","queue_budget","run_end"],"type":"string"}
-WaitKind {"enum":["session","recovery-check","owned-job","release-dependency","yield-publication","interrupt","refund","dispatch","retry","turn-acquisition","blocked-record"],"type":"string"}
+WaitKind {"enum":["session","owned-job","release-dependency","yield-publication","interrupt","refund","dispatch","retry","turn-acquisition","blocked-record"],"type":"string"}
 WaitOn {"additionalProperties":false,"type":"object"}
 WaitOn.requests optional {"default":[],"items":{"$ref":"#/$defs/RequestId"},"type":"array"}
 WaitOn.subjects optional {"default":[],"items":{"$ref":"#/$defs/WaitSubject"},"type":"array"}

@@ -738,13 +738,7 @@ def test_a_run_that_may_resume_keeps_its_inbox_open() -> None:
 def test_closing_requests_cannot_cross_an_epoch(epoch: int, target: int) -> None:
     inbox = FakeControlInbox()
     state = initial_state()
-    state = state.model_copy(
-        update={
-            "records": state.records.model_copy(
-                update={"recovery": state.records.recovery.model_copy(update={"epoch": epoch})}
-            )
-        }
-    )
+    state = state.model_copy(update={"records": state.records.model_copy(update={"epoch": epoch})})
     request = PauseNowRequest(control_id="close", expected_epoch=target)
     inbox.post("close", _json(request), ended=_LIVE)
     bridge = _bridge(inbox, _Texts())

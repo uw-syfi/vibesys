@@ -161,7 +161,7 @@ class CoreState(Value):
     sessions: SessionsState = SessionsState()
     evaluation: EvaluationState = EvaluationState()
     settlement: SettlementState = SettlementState()
-    records: RecordsState = RecordsState(hosts=())
+    records: RecordsState = RecordsState()
     steps: StepsState = Field(
         default=NO_STEPS, exclude_if=lambda value: value is NO_STEPS or value == NO_STEPS
     )

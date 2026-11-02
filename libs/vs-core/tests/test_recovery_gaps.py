@@ -338,7 +338,7 @@ def test_a_drain_a_kill_cut_short_parks_in_the_next_epoch_and_admits_the_resume_
     assert loop.state.run.status is core.RunStatus.PARKED
     park = loop.state.run.park
     assert park is not None
-    assert park.epoch == paused_in < loop.state.records.recovery.epoch
+    assert park.epoch == paused_in < loop.state.records.epoch
     resume_in_next_epoch_without_a_new_one(loop)
     assert loop.state.run.status is core.RunStatus.RUNNING
     (rerun,) = [a for a in decide(loop.state, loop.clock) if isinstance(a, Run)]

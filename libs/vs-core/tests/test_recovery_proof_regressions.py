@@ -87,7 +87,7 @@ def _recovering(record: core.RequestRecord) -> core.CoreState:
     return state.model_copy(
         update={
             "run": state.run.model_copy(update={"status": core.RunStatus.PAUSED}),
-            "records": core.RecordsState(hosts=(), records=(record, anchor)),
+            "records": core.RecordsState(records=(record, anchor)),
         }
     )
 

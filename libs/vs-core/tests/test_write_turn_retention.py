@@ -35,7 +35,6 @@ def write_turn_world(
     spec = session.spec
     turn = invocation.turn
     owner = owner.model_copy(update={"charges": (CHARGE,) if charged else ()})
-    ready = core.RecoveryBarrier(phase=core.RecoveryPhase.READY)
     assert owner.admission_id is not None
     admission = core.StartAttempt(
         decision_id=owner.admission_id,
@@ -60,7 +59,6 @@ def write_turn_world(
         update={
             "run": state.run.model_copy(update={"receipts": (*state.run.receipts, started)}),
             "scheduling": core.SchedulingState(slots=(slot,)),
-            "records": state.records.model_copy(update={"recovery": ready}),
             "attempts": core.AttemptsState(attempts=(owner,)),
             "sessions": core.SessionsState(
                 sessions=(session.model_copy(update={"spec": spec}),),

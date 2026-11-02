@@ -52,7 +52,7 @@ def test_request_dependencies_require_exact_success(
             record = _dependency_observation(variant, record)
     if variant not in ("request", "duplicate"):
         records = (record,)
-    assert dependencies_for(request, core.RecordsState(hosts=(), records=records)) == (
+    assert dependencies_for(request, core.RecordsState(records=records)) == (
         Proven(request) if denial is None else denial
     )
 
@@ -165,7 +165,7 @@ def test_inflight_dependencies_wait_without_an_observation(
 ) -> None:
     request, _, record = facts
     record = record.model_copy(update={"phase": phase, "observation": None})
-    verdict = dependencies_for(request, core.RecordsState(hosts=(), records=(record,)))
+    verdict = dependencies_for(request, core.RecordsState(records=(record,)))
     reason = (
         ProofReason.ABSENT_OBSERVATION
         if phase == core.RequestPhase.COMPLETED

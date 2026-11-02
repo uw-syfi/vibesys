@@ -112,7 +112,7 @@ def interrupted_by_epoch(records: RecordsState, invocation: Invocation) -> bool:
     return any(
         _dispatches(record, invocation)
         and record.dispatched_in is not None
-        and record.dispatched_in < records.recovery.epoch
+        and record.dispatched_in < records.epoch
         and (record.observation is None or record.observation.status in _NOT_RETURNED)
         for record in records.records
     )

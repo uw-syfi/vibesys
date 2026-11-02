@@ -136,13 +136,7 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
     )
     # The paid measurement was authorized by a real accepted Measure decision.
     measured = step(
-        state.model_copy(
-            update={
-                "records": core.RecordsState(
-                    hosts=(), recovery=core.RecoveryBarrier(phase=core.RecoveryPhase.READY)
-                )
-            }
-        ),
+        state.model_copy(update={"records": core.RecordsState()}),
         DecisionSubmitted(
             decision=core.Wait(
                 request=core.Measure(
@@ -243,8 +237,6 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
                 ),
             ),
             "records": core.RecordsState(
-                hosts=(),
-                recovery=core.RecoveryBarrier(phase=core.RecoveryPhase.READY),
                 records=(
                     core.RequestRecord(
                         request_id=yielded.request_id,
