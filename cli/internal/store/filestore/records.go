@@ -30,9 +30,11 @@ const formatVersion = 2
 // a record that leaves it unset. Decoding refuses an unknown field, which is how a record of a
 // different shape is told from one this program wrote.
 //
-// The output is indented, because protojson's compact output is deliberately unstable: it adds a
-// space after a comma at random, differently between builds, and a file that two builds write
-// differently cannot be compared or pinned by a test.
+// The output is indented for a person to read. Its exact spacing is not stable: protojson adds a
+// space after a colon or comma at random, differently for each build, to keep programs from
+// depending on it. Nothing here does: the store compares the owner record only with the bytes it
+// wrote itself, and every other file is read back through decode. A test that pins a file compares
+// it with its spaces removed.
 var (
 	encoder = protojson.MarshalOptions{UseProtoNames: true, Multiline: true, Indent: "  "}
 	// The first read of a file looks only at its version, so it discards what else the file holds.

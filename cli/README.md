@@ -94,7 +94,7 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/store/` | `Store`: the logical interface to results, events, logs, job state and plans. No paths, no formats. |
 | `internal/store/ledger/` | The decisions every `Store` shares (what a submission joins or reuses, numbering, what a value may hold), as a pure `Ledger`, and the `Engine` that runs one over a `Backend`. It asks `core` whether a transition is legal (`Job.Apply`) and whether a submission joins a job (`CanJoin`). |
 | `internal/store/memstore/` | In-memory `Store` for tests. The same `Engine` as `filestore`, with a backend in memory. |
-| `internal/store/filestore/` | The only code that knows the on-disk layout. Owns migrations. Its package comment states the layout, the commit protocol and the filesystem operations it relies on. |
+| `internal/store/filestore/` | The only code that knows the on-disk layout. Every file is protojson of a message in `store.proto`, so no hand-kept record format exists; a store of another format version is refused and never migrated. Its package comment states the layout, the commit protocol and the filesystem operations it relies on. |
 | `internal/store/filestore/fsys/` | The slice of a filesystem `filestore` uses, the operating system's implementation, and an in-memory one that models what a crash keeps and fails or dies at any write step. |
 | `internal/store/storetest/` | The one contract suite every `Store` passes, and a differential driver that compares stores. |
 | `internal/environment/` | `Environment`: where a job's commands run (`host`, `docker`), and `Registry`, the environments a build has by kind. |
@@ -146,9 +146,11 @@ Dependencies point one way: `cmd` and the shell packages, then interfaces, then 
 - `ledger` imports `core` and `store`. `memstore` and `filestore` import `ledger`, and `filestore`
   its `fsys` seam; they never import each other. The contract suite `storetest` imports `core` and
   `store` only, and only test files import it (and `filestore`'s tests, `memstore` to compare with).
-- `wire` holds every conversion between `core` and `gen`. Domain types, the generated contract
-  types and the on-disk encoding are three separate models; none of them is another's
-  representation. The adapters that serve the contract (`daemon`, `supervisor/rpc`,
+- `wire` holds every conversion between `core` and `gen`. Domain types and the generated contract
+  types are two separate models; neither is the other's representation. The on-disk encoding is not
+  a third model: the files of a store are messages of `store.proto` in protojson, and `filestore`
+  translates through `wire` and never imports `encoding/json` (`archcheck` holds that for every
+  package under `internal/store/`). The adapters that serve the contract (`daemon`, `supervisor/rpc`,
   `supervisor/host`) import both, because they sit exactly on that boundary and call `wire` for each
   conversion. `cmd/vibesys-cli` and `client` speak the generated messages and import `core` in no
   product file, so they hold no domain rule: how a wait ended, a headline number and a store's

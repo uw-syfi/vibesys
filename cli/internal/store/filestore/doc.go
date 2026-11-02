@@ -1,15 +1,19 @@
 // Package filestore implements store.Store on disk.
 //
-// It is the only code in the module that knows the physical layout: where state lives, the file
-// names, and the encoding of each record. It keeps that encoding separate from the domain types
-// in internal/core and the generated contract types in gen/. The layout rule in
-// internal/archcheck keeps every other package from naming it. The per-user index of stores is
+// It is the only code in the module that knows the physical layout: where state lives and the file
+// names. Each file is protojson of a message in proto/vibesys/cli/v1/store.proto, written with the
+// proto field names and indented, and read with unknown fields refused, so the stored form is
+// generated from the contract and no struct in this package describes a record by hand. The
+// domain types in internal/core are translated to those messages through internal/wire. The layout
+// rule in internal/archcheck keeps every other package from naming the layout, and its storage
+// encoding rule keeps every package under internal/store from importing encoding/json or any other
+// hand encoding. The per-user index of stores is
 // not part of this package yet.
 //
 // # Layout
 //
 // A store is a directory, <repository>/.vibesys-state/<task> for OpenTask, holding one file per
-// fact, each a JSON document that starts with its format version:
+// fact, each a protojson document that starts with its format version:
 //
 //	format                     the version of the layout
 //	.owner.lock                empty; the owner holds a lock on it
@@ -90,9 +94,11 @@
 //
 // # Versions
 //
-// Open refuses a directory whose format file, or any record, has a newer version than this
-// program reads, with an error of kind core.FailureIncompatible that names the file. It refuses
-// a record it cannot decode, one with a field it does not know, and one whose name and content
-// disagree, with an error of kind core.FailureInternal that names the file. It refuses a
+// Open refuses a directory whose format file, or any record, has a version other than the one this
+// program reads, with an error of kind core.FailureIncompatible that names the file: a newer
+// version says to upgrade, and an older one, which is the hand-written encoding that came before
+// protojson, says the store is to be removed, because nothing migrates it and no release wrote it.
+// It refuses a record it cannot decode, one with a field it does not know, and one whose name and
+// content disagree, with an error of kind core.FailureInternal that names the file. It refuses a
 // directory that holds other files and no format file. The .owner file is a record like any other.
 package filestore

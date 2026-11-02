@@ -22,7 +22,8 @@
 //     environment.
 //
 // It imports only the standard library and performs no I/O, reads no clock and starts no
-// goroutines. Time arrives as a value. These types are one of three separate models: the
-// generated contract types (gen/) and the on-disk encoding (internal/store/filestore) are the
-// others, and internal/wire translates between core and gen. None is another's representation.
+// goroutines. Time arrives as a value. These types are one of two separate models: the
+// generated contract types (gen/) are the other, and internal/wire translates between core and gen.
+// Neither is the other's representation. What a store keeps on disk is the contract's messages in
+// protojson (internal/store/filestore), not a model of its own.
 package core
