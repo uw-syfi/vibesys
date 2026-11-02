@@ -11,10 +11,20 @@ const (
 
 	// ProtocolVersion is the revision of the CLI, daemon and supervisor contract this build
 	// speaks. It starts at 1 and rises only when a change breaks an older peer.
-	ProtocolVersion uint32 = 1
+	//
+	// 2: the command line sends its working directory, which the daemon resolves to a repository,
+	// and waits through Wait, whose outcome the daemon decides. A daemon of 1 has neither.
+	ProtocolVersion uint32 = 2
 
-	// MinProtocolVersion is the oldest ProtocolVersion this build still serves.
+	// MinProtocolVersion is the oldest ProtocolVersion this build still serves. A daemon still
+	// serves command lines and supervisors of 1: an older command line waits through Watch and
+	// sends a repository root, which resolves as any directory in it does.
 	MinProtocolVersion uint32 = 1
+
+	// MinDaemonProtocolVersion is the oldest daemon the command line of this build works with. It
+	// is above MinProtocolVersion because the command line needs what 2 added, while a daemon of
+	// this build still serves older peers.
+	MinDaemonProtocolVersion uint32 = 2
 )
 
 // Versions is what one build carries, less the release version, which is display only and which
@@ -28,6 +38,13 @@ type Versions struct {
 // CurrentVersions returns the versions of this build.
 func CurrentVersions() Versions {
 	return Versions{Protocol: ProtocolVersion, MinProtocol: MinProtocolVersion, Schema: SchemaVersion}
+}
+
+// ClientVersions returns the versions the command line of this build sends in its handshake: its
+// minimum is the oldest daemon it works with, so an older daemon answers DaemonTooOld and is
+// replaced.
+func ClientVersions() Versions {
+	return Versions{Protocol: ProtocolVersion, MinProtocol: MinDaemonProtocolVersion, Schema: SchemaVersion}
 }
 
 // Compatibility is the answer to a handshake, from the daemon's side.

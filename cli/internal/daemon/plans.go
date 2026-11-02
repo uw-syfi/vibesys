@@ -13,7 +13,11 @@ import (
 func (s *Server) CreatePlan(ctx context.Context, req *cliv1.CreatePlanRequest) (*cliv1.CreatePlanResponse, error) {
 	ctx, cancel := s.bound(ctx)
 	defer cancel()
-	plan, err := s.app.CreatePlan(ctx, wire.ToCallContext(req.GetContext()), req.GetTitle(), req.GetBody())
+	call, err := s.call(ctx, req.GetContext())
+	if err != nil {
+		return nil, wire.Error(err)
+	}
+	plan, err := s.app.CreatePlan(ctx, call, req.GetTitle(), req.GetBody())
 	if err != nil {
 		return nil, wire.Error(err)
 	}
@@ -28,7 +32,11 @@ func (s *Server) ListPlans(ctx context.Context, req *cliv1.ListPlansRequest) (*c
 	if err != nil {
 		return nil, wire.Error(err)
 	}
-	plans, err := s.app.Plans(ctx, scopeOf(req.GetContext()), filter)
+	call, err := s.call(ctx, req.GetContext())
+	if err != nil {
+		return nil, wire.Error(err)
+	}
+	plans, err := s.app.Plans(ctx, call.Scope, filter)
 	if err != nil {
 		return nil, wire.Error(err)
 	}
@@ -39,7 +47,11 @@ func (s *Server) ListPlans(ctx context.Context, req *cliv1.ListPlansRequest) (*c
 func (s *Server) ViewPlan(ctx context.Context, req *cliv1.ViewPlanRequest) (*cliv1.ViewPlanResponse, error) {
 	ctx, cancel := s.bound(ctx)
 	defer cancel()
-	view, err := s.app.ViewPlan(ctx, scopeOf(req.GetContext()), core.PlanNumber(req.GetNumber()))
+	call, err := s.call(ctx, req.GetContext())
+	if err != nil {
+		return nil, wire.Error(err)
+	}
+	view, err := s.app.ViewPlan(ctx, call.Scope, core.PlanNumber(req.GetNumber()))
 	if err != nil {
 		return nil, wire.Error(err)
 	}
@@ -58,7 +70,11 @@ func (s *Server) EditPlan(ctx context.Context, req *cliv1.EditPlanRequest) (*cli
 		}
 		change.Status = &status
 	}
-	plan, err := s.app.EditPlan(ctx, wire.ToCallContext(req.GetContext()), core.PlanNumber(req.GetNumber()), change)
+	call, err := s.call(ctx, req.GetContext())
+	if err != nil {
+		return nil, wire.Error(err)
+	}
+	plan, err := s.app.EditPlan(ctx, call, core.PlanNumber(req.GetNumber()), change)
 	if err != nil {
 		return nil, wire.Error(err)
 	}
@@ -69,7 +85,11 @@ func (s *Server) EditPlan(ctx context.Context, req *cliv1.EditPlanRequest) (*cli
 func (s *Server) CommentPlan(ctx context.Context, req *cliv1.CommentPlanRequest) (*cliv1.CommentPlanResponse, error) {
 	ctx, cancel := s.bound(ctx)
 	defer cancel()
-	plan, err := s.app.CommentPlan(ctx, wire.ToCallContext(req.GetContext()), core.PlanNumber(req.GetNumber()), req.GetText())
+	call, err := s.call(ctx, req.GetContext())
+	if err != nil {
+		return nil, wire.Error(err)
+	}
+	plan, err := s.app.CommentPlan(ctx, call, core.PlanNumber(req.GetNumber()), req.GetText())
 	if err != nil {
 		return nil, wire.Error(err)
 	}
@@ -84,7 +104,11 @@ func (s *Server) ClosePlan(ctx context.Context, req *cliv1.ClosePlanRequest) (*c
 	if err != nil {
 		return nil, wire.Error(err)
 	}
-	plan, err := s.app.ClosePlan(ctx, wire.ToCallContext(req.GetContext()), core.PlanNumber(req.GetNumber()), status, req.GetComment())
+	call, err := s.call(ctx, req.GetContext())
+	if err != nil {
+		return nil, wire.Error(err)
+	}
+	plan, err := s.app.ClosePlan(ctx, call, core.PlanNumber(req.GetNumber()), status, req.GetComment())
 	if err != nil {
 		return nil, wire.Error(err)
 	}

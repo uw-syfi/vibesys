@@ -74,41 +74,33 @@ func describeSubmitted(r *cliv1.SubmitResponse) string {
 	return line
 }
 
-// fail prints the error of a command and returns the exit code it stands for: 2 for a mistake in
-// the input and 1 for anything else. With --json the error is always a Failure.
+// fail prints the error of a command and returns its exit code, from the failure's kind
+// (exitOfFailure). With --json the error is always a Failure: the one the daemon sent, exactly,
+// with a kind this build may not know; or the one the command made itself, for a mistake in its
+// input or a daemon it could not reach.
 func fail(d deps, asJSON bool, err error) int {
-	failure := &cliv1.Failure{Kind: cliv1.FailureKind_FAILURE_KIND_INTERNAL, Message: err.Error()}
 	var usage usageError
 	var away *unavailable
+	var failure *cliv1.Failure
 	switch {
 	case errors.As(err, &usage):
 		failure = &cliv1.Failure{Kind: cliv1.FailureKind_FAILURE_KIND_INVALID_INPUT, Message: usage.message}
 	case errors.As(err, &away):
 		failure = &cliv1.Failure{Kind: cliv1.FailureKind_FAILURE_KIND_UNAVAILABLE, Message: away.message}
 	default:
-		if f, ok := wire.FailureOf(err); ok {
-			failure = wire.Failure(f)
+		f, ok := wire.ContractFailure(err)
+		if !ok {
+			// The caller's own cancel, such as a signal: the command has no answer to give.
+			f = &cliv1.Failure{Kind: cliv1.FailureKind_FAILURE_KIND_UNAVAILABLE, Message: err.Error()}
 		}
+		failure = f
 	}
 	if asJSON {
 		printJSONTo(d, failure)
 	} else {
 		fmt.Fprintf(d.stderr, "vibesys-cli: %s\n", failure.GetMessage())
 	}
-	if failure.GetKind() == cliv1.FailureKind_FAILURE_KIND_INVALID_INPUT {
-		return exitInvalidInput
-	}
-	return exitFailed
-}
-
-// failOnJob is fail for a command that names a job: a job that does not exist is a mistake in the
-// input.
-func failOnJob(d deps, asJSON bool, err error) int {
-	code := fail(d, asJSON, err)
-	if wire.IsNotFound(err) {
-		return exitInvalidInput
-	}
-	return code
+	return exitOfFailure(failure.GetKind())
 }
 
 // printJSONTo writes a failure to stderr, where errors go, in the same form.

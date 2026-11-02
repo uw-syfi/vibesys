@@ -1,11 +1,11 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -74,32 +74,54 @@ func splitDashes(args []string) (before, after []string, found bool) {
 	return args, nil, false
 }
 
-// callContext makes the call context of a command: the repository it runs in and the task it is
-// about. A task is required, since the daemon serves many.
-func (c *common) callContext(ctx context.Context, d deps) (*cliv1.CallContext, error) {
+// callContext makes the call context of a command: the directory it runs in and the task it is
+// about. A task is required, since the daemon serves many. The daemon resolves the directory to its
+// repository, so the command line does not ask git which repository it is.
+func (c *common) callContext(d deps) (*cliv1.CallContext, error) {
 	if c.task == "" {
 		return nil, usagef("--task: name the task (or set VIBESYS_TASK)")
 	}
-	repo := c.repo
-	if repo == "" {
-		repo = d.cwd
+	dir := c.repo
+	switch {
+	case dir == "":
+		dir = d.cwd
+	case !filepath.IsAbs(dir):
+		dir = filepath.Join(d.cwd, dir)
 	}
-	top, err := d.git.Toplevel(ctx, repo)
-	if err != nil {
-		return nil, err
+	return &cliv1.CallContext{Repository: filepath.Clean(dir), Task: c.task, RunId: c.run, Harness: c.harness, Agent: c.agent}, nil
+}
+
+// enumNames maps the names a user writes to a contract enum's values: each value's name, lower
+// case, without the prefix, leaving out the unspecified value. It is read from the enum, so a value
+// added there is a name here.
+func enumNames[E ~int32](names map[int32]string, prefix string, of func(int32) E) map[string]E {
+	out := map[string]E{}
+	for n, name := range names {
+		if n != 0 {
+			out[strings.ToLower(strings.TrimPrefix(name, prefix))] = of(n)
+		}
 	}
-	return &cliv1.CallContext{Repository: top, Task: c.task, RunId: c.run, Harness: c.harness, Agent: c.agent}, nil
+	return out
+}
+
+// choices lists an enum's names as enumNames reads them, in the order the contract numbers them.
+func choices(names map[int32]string, prefix string) string {
+	numbers := make([]int32, 0, len(names))
+	for n := range names {
+		if n != 0 {
+			numbers = append(numbers, n)
+		}
+	}
+	slices.Sort(numbers)
+	out := make([]string, 0, len(numbers))
+	for _, n := range numbers {
+		out = append(out, strings.ToLower(strings.TrimPrefix(names[n], prefix)))
+	}
+	return strings.Join(out, ", ")
 }
 
 // stateNames maps the names a user writes to job states.
-var stateNames = map[string]cliv1.JobState{
-	"queued":    cliv1.JobState_JOB_STATE_QUEUED,
-	"running":   cliv1.JobState_JOB_STATE_RUNNING,
-	"succeeded": cliv1.JobState_JOB_STATE_SUCCEEDED,
-	"failed":    cliv1.JobState_JOB_STATE_FAILED,
-	"cancelled": cliv1.JobState_JOB_STATE_CANCELLED,
-	"lost":      cliv1.JobState_JOB_STATE_LOST,
-}
+var stateNames = enumNames(cliv1.JobState_name, "JOB_STATE_", func(n int32) cliv1.JobState { return cliv1.JobState(n) })
 
 func stateName(s cliv1.JobState) string {
 	return strings.ToLower(strings.TrimPrefix(s.String(), "JOB_STATE_"))
@@ -114,7 +136,7 @@ func (l *stateList) Set(v string) error {
 	for _, name := range strings.Split(v, ",") {
 		s, ok := stateNames[strings.TrimSpace(name)]
 		if !ok {
-			return fmt.Errorf("%q is not a job state (queued, running, succeeded, failed, cancelled or lost)", name)
+			return fmt.Errorf("%q is not a job state (%s)", name, choices(cliv1.JobState_name, "JOB_STATE_"))
 		}
 		*l = append(*l, s)
 	}

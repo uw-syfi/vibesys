@@ -194,7 +194,7 @@ func planTarget(sub string, positional []string) (uint32, error) {
 // planClient makes the call context of a plan command and connects to the daemon. The caller
 // closes the client.
 func planClient(ctx context.Context, d deps, c *common) (*cliv1.CallContext, *client.Client, error) {
-	callCtx, err := c.callContext(ctx, d)
+	callCtx, err := c.callContext(d)
 	if err != nil {
 		return nil, nil, err
 	}

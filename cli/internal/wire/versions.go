@@ -21,10 +21,10 @@ func ToVersions(b *cliv1.BuildVersions) core.Versions {
 	return core.Versions{Protocol: b.GetProtocolVersion(), MinProtocol: b.GetMinProtocolVersion(), Schema: b.GetSchemaVersion()}
 }
 
-// CurrentVersions returns the contract's message for this build's versions, as a handshake sends
-// them.
-func CurrentVersions(binaryVersion string) *cliv1.BuildVersions {
-	return BuildVersions(binaryVersion, core.CurrentVersions())
+// ClientVersions returns the contract's message for the versions this build's command line sends
+// in its handshake (core.ClientVersions).
+func ClientVersions(binaryVersion string) *cliv1.BuildVersions {
+	return BuildVersions(binaryVersion, core.ClientVersions())
 }
 
 // CompatibilityError returns nil for a handshake answer of COMPATIBLE, and otherwise the failure

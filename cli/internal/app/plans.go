@@ -31,8 +31,8 @@ func (a *App) CreatePlan(ctx context.Context, c core.CallContext, title, body st
 	if err := core.CheckPlanBody("body", body); err != nil {
 		return core.Plan{}, err
 	}
-	scope := scopeOf(c)
-	if err := scope.Validate(); err != nil {
+	scope := c.Scope
+	if err := resolved(scope); err != nil {
 		return core.Plan{}, err
 	}
 	st, err := a.createStore(ctx, scope)
@@ -43,7 +43,7 @@ func (a *App) CreatePlan(ctx context.Context, c core.CallContext, title, body st
 }
 
 // Plans returns the plans of a task that match the filter, by number.
-func (a *App) Plans(ctx context.Context, scope Scope, filter core.PlanFilter) ([]core.Plan, error) {
+func (a *App) Plans(ctx context.Context, scope core.Scope, filter core.PlanFilter) ([]core.Plan, error) {
 	for _, s := range filter.Statuses {
 		if !s.Valid() {
 			return nil, invalid("statuses: %q is not a plan status", s)
@@ -60,7 +60,7 @@ func (a *App) Plans(ctx context.Context, scope Scope, filter core.PlanFilter) ([
 }
 
 // ViewPlan returns a plan with its comments and the jobs linked to it, oldest first.
-func (a *App) ViewPlan(ctx context.Context, scope Scope, number core.PlanNumber) (core.PlanView, error) {
+func (a *App) ViewPlan(ctx context.Context, scope core.Scope, number core.PlanNumber) (core.PlanView, error) {
 	st, err := a.open(ctx, scope)
 	if err != nil {
 		return core.PlanView{}, err
@@ -122,7 +122,7 @@ func (a *App) ClosePlan(ctx context.Context, c core.CallContext, number core.Pla
 }
 
 func (a *App) editPlan(ctx context.Context, c core.CallContext, number core.PlanNumber, edit core.PlanEdit) (core.Plan, error) {
-	st, err := a.open(ctx, scopeOf(c))
+	st, err := a.open(ctx, c.Scope)
 	if err != nil {
 		return core.Plan{}, err
 	}

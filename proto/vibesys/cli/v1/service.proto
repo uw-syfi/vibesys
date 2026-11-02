@@ -1,6 +1,7 @@
 syntax = "proto3";
 package vibesys.cli.v1;
 
+import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "vibesys/cli/v1/job.proto";
 import "vibesys/cli/v1/plan.proto";
@@ -30,6 +31,10 @@ service DaemonService {
   // ends when all are final. A client implements `wait`, with its `--any` and `--timeout`, over
   // this stream, so a timeout is only a client closing the stream and never cancels a job.
   rpc Watch(WatchRequest) returns (stream WatchResponse);
+  // Wait streams the waited-on jobs' states like Watch, and ends with one WaitOutcome that says how
+  // the wait ended. The daemon decides the outcome, the timeout included, so every client reads the
+  // same answer. `wait` and `submit --wait` use it; a timeout never cancels a job.
+  rpc Wait(WaitRequest) returns (stream WaitResponse);
   // Cancel stops a job, whole process group included, and does so for every waiter on a shared
   // job. A cancelled measure saves nothing.
   rpc Cancel(CancelRequest) returns (CancelResponse);
@@ -60,7 +65,9 @@ service DaemonService {
 // CallContext identifies who is calling and about what. The daemon serves many repositories and
 // agents, so every call carries it, and it fills the envelope of the event the call appends.
 message CallContext {
-  // The absolute path of the git repository the command ran in.
+  // The absolute path of the directory the command ran in, or of --repo. The daemon resolves the
+  // repository from it through the common git directory, so every linked worktree of a repository
+  // shares one store per task.
   string repository = 1;
   string task = 2;
   string run_id = 3;
@@ -140,6 +147,51 @@ message WatchRequest {
 
 message WatchResponse {
   Job job = 1;
+}
+
+message WaitRequest {
+  CallContext context = 1;
+  repeated string job_ids = 2;
+  // The wait is over when one job is final, and not when all are.
+  bool any = 3;
+  // The wait ends with WAIT_OUTCOME_KIND_TIMED_OUT after this long. Unset waits as long as it takes.
+  google.protobuf.Duration timeout = 4;
+}
+
+message WaitResponse {
+  oneof event {
+    // A job's state: first the current state of each job, then each change.
+    Job job = 1;
+    // How the wait ended. It is the last message of the stream; a stream that ends without one
+    // says nothing about the jobs.
+    WaitOutcome outcome = 2;
+  }
+}
+
+// WaitOutcomeKind is how a wait ended. The exit code of `wait` is a function of it alone.
+enum WaitOutcomeKind {
+  WAIT_OUTCOME_KIND_UNSPECIFIED = 0;
+  // Every job is final and succeeded.
+  WAIT_OUTCOME_KIND_ALL_SUCCEEDED = 1;
+  // Every job is final and one did not succeed: decided_by is the first, in the order asked.
+  WAIT_OUTCOME_KIND_SOME_FAILED = 2;
+  // With any: a job is final and every final job succeeded. decided_by is the first final job, in
+  // the order asked.
+  WAIT_OUTCOME_KIND_FIRST_SUCCEEDED = 3;
+  // With any: a final job did not succeed. decided_by is the first such job, in the order asked.
+  WAIT_OUTCOME_KIND_FIRST_FAILED = 4;
+  // The timeout passed before the jobs got where the wait wants them. No job was cancelled.
+  WAIT_OUTCOME_KIND_TIMED_OUT = 5;
+}
+
+// WaitOutcome is how a wait ended, as the daemon decided it. It is the `--json` output of `wait`.
+message WaitOutcome {
+  WaitOutcomeKind kind = 1;
+  // The job that decided the outcome, for SOME_FAILED, FIRST_SUCCEEDED and FIRST_FAILED. Empty for
+  // ALL_SUCCEEDED, where every job did, and for TIMED_OUT.
+  string decided_by = 2;
+  // The state of each job when the wait ended, in the order asked.
+  repeated Job jobs = 3;
 }
 
 message CancelRequest {

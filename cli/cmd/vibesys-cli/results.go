@@ -38,7 +38,7 @@ func showCommand(ctx context.Context, d deps, args []string) int {
 	if len(positional) != 1 {
 		return fail(d, c.json, usagef("show: give one commit"))
 	}
-	callCtx, err := c.callContext(ctx, d)
+	callCtx, err := c.callContext(d)
 	if err != nil {
 		return fail(d, c.json, err)
 	}
@@ -80,7 +80,7 @@ func compareCommand(ctx context.Context, d deps, args []string) int {
 	if len(positional) != 1 {
 		return fail(d, c.json, usagef("compare: give one commit"))
 	}
-	callCtx, err := c.callContext(ctx, d)
+	callCtx, err := c.callContext(d)
 	if err != nil {
 		return fail(d, c.json, err)
 	}
@@ -127,7 +127,7 @@ func promoteCommand(ctx context.Context, d deps, args []string) int {
 	if len(positional) != 1 {
 		return fail(d, c.json, usagef("promote: give one commit"))
 	}
-	callCtx, err := c.callContext(ctx, d)
+	callCtx, err := c.callContext(d)
 	if err != nil {
 		return fail(d, c.json, err)
 	}
@@ -184,7 +184,7 @@ func resultCommand(ctx context.Context, d deps, args []string) int {
 	if len(positional) != 0 {
 		return fail(d, c.json, usagef("result: unexpected argument %q", positional[0]))
 	}
-	callCtx, err := c.callContext(ctx, d)
+	callCtx, err := c.callContext(d)
 	if err != nil {
 		return fail(d, c.json, err)
 	}

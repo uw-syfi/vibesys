@@ -10,49 +10,81 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 )
 
-// Fake is Git over repositories described in memory. It is a real implementation of Git that
-// tests of the command line, which must not depend on the developer's repositories, use.
+// Fake is Git and Resolver over repositories described in memory: repositories with their
+// revisions, and linked worktrees of them. It is a real implementation that tests of the command
+// line and of the daemon use, so none of them depends on the developer's repositories. It is as
+// strict as git: a directory in no repository it was told of is in no repository.
 type Fake struct {
 	mu    sync.Mutex
 	repos map[string]map[string]core.Commit
+	// worktrees maps a linked worktree's root to its repository's.
+	worktrees map[string]string
 }
 
-var _ Git = (*Fake)(nil)
+var (
+	_ Git      = (*Fake)(nil)
+	_ Resolver = (*Fake)(nil)
+)
 
 // NewFake returns a Fake with no repository.
-func NewFake() *Fake { return &Fake{repos: map[string]map[string]core.Commit{}} }
+func NewFake() *Fake {
+	return &Fake{repos: map[string]map[string]core.Commit{}, worktrees: map[string]string{}}
+}
 
 // AddRepo makes a repository at the absolute path, whose revisions are the given names for
 // commits. A full commit always names itself.
 func (f *Fake) AddRepo(path string, revisions map[string]core.Commit) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.repos[path] = revisions
+	f.repos[filepath.Clean(path)] = revisions
 }
 
-// Toplevel implements Git: the repository whose path is dir or a parent of it.
-func (f *Fake) Toplevel(_ context.Context, dir string) (string, error) {
+// AddWorktree makes path a linked worktree of the repository at repo, which must have been added.
+// It reads the repository's revisions, as a linked worktree shares them.
+func (f *Fake) AddWorktree(path, repo string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.worktrees[filepath.Clean(path)] = filepath.Clean(repo)
+}
+
+// repoOf returns the repository that contains dir, through a worktree when dir is in one.
+func (f *Fake) repoOf(dir string) (string, bool) {
 	for d := filepath.Clean(dir); ; d = filepath.Dir(d) {
 		if _, ok := f.repos[d]; ok {
-			return d, nil
+			return d, true
+		}
+		if repo, ok := f.worktrees[d]; ok {
+			_, known := f.repos[repo]
+			return repo, known
 		}
 		if d == filepath.Dir(d) {
-			break
+			return "", false
 		}
 	}
-	return "", &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("%s is not in a git repository", dir)}
+}
+
+// Resolve implements Resolver: the repository whose root, or whose linked worktree's root, is dir
+// or a parent of it.
+func (f *Fake) Resolve(_ context.Context, dir string) (core.Repository, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if filepath.IsAbs(dir) {
+		if repo, ok := f.repoOf(dir); ok {
+			return core.Repository(repo), nil
+		}
+	}
+	return "", &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("context.repository: %s is not in a git repository", dir)}
 }
 
 // Commit implements Git.
-func (f *Fake) Commit(_ context.Context, repository, revision string) (core.Commit, error) {
+func (f *Fake) Commit(_ context.Context, dir, revision string) (core.Commit, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	revs, ok := f.repos[repository]
+	repository, ok := f.repoOf(dir)
 	if !ok {
-		return "", &core.Failure{Kind: core.FailureNotFound, Message: fmt.Sprintf("%s is not a repository", repository)}
+		return "", &core.Failure{Kind: core.FailureNotFound, Message: fmt.Sprintf("%s is not in a repository", dir)}
 	}
+	revs := f.repos[repository]
 	if c, ok := revs[revision]; ok {
 		return c, nil
 	}

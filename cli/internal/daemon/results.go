@@ -12,7 +12,11 @@ import (
 func (s *Server) Show(ctx context.Context, req *cliv1.ShowRequest) (*cliv1.ShowResponse, error) {
 	ctx, cancel := s.bound(ctx)
 	defer cancel()
-	results, err := s.app.Show(ctx, scopeOf(req.GetContext()), core.Commit(req.GetCommit()))
+	call, err := s.call(ctx, req.GetContext())
+	if err != nil {
+		return nil, wire.Error(err)
+	}
+	results, err := s.app.Show(ctx, call.Scope, core.Commit(req.GetCommit()))
 	if err != nil {
 		return nil, wire.Error(err)
 	}
@@ -23,7 +27,11 @@ func (s *Server) Show(ctx context.Context, req *cliv1.ShowRequest) (*cliv1.ShowR
 func (s *Server) Compare(ctx context.Context, req *cliv1.CompareRequest) (*cliv1.CompareResponse, error) {
 	ctx, cancel := s.bound(ctx)
 	defer cancel()
-	comparison, err := s.app.Compare(ctx, wire.ToCallContext(req.GetContext()), core.Commit(req.GetCommit()), core.Commit(req.GetAgainst()))
+	call, err := s.call(ctx, req.GetContext())
+	if err != nil {
+		return nil, wire.Error(err)
+	}
+	comparison, err := s.app.Compare(ctx, call, core.Commit(req.GetCommit()), core.Commit(req.GetAgainst()))
 	if err != nil {
 		return nil, wire.Error(err)
 	}
@@ -34,7 +42,11 @@ func (s *Server) Compare(ctx context.Context, req *cliv1.CompareRequest) (*cliv1
 func (s *Server) Promote(ctx context.Context, req *cliv1.PromoteRequest) (*cliv1.PromoteResponse, error) {
 	ctx, cancel := s.bound(ctx)
 	defer cancel()
-	decision, err := s.app.Promote(ctx, wire.ToCallContext(req.GetContext()), core.Commit(req.GetCommit()))
+	call, err := s.call(ctx, req.GetContext())
+	if err != nil {
+		return nil, wire.Error(err)
+	}
+	decision, err := s.app.Promote(ctx, call, core.Commit(req.GetCommit()))
 	if err != nil {
 		return nil, wire.Error(err)
 	}
@@ -45,7 +57,11 @@ func (s *Server) Promote(ctx context.Context, req *cliv1.PromoteRequest) (*cliv1
 func (s *Server) CurrentResult(ctx context.Context, req *cliv1.CurrentResultRequest) (*cliv1.CurrentResultResponse, error) {
 	ctx, cancel := s.bound(ctx)
 	defer cancel()
-	answer, err := s.app.CurrentResult(ctx, wire.ToCallContext(req.GetContext()))
+	call, err := s.call(ctx, req.GetContext())
+	if err != nil {
+		return nil, wire.Error(err)
+	}
+	answer, err := s.app.CurrentResult(ctx, call)
 	if err != nil {
 		return nil, wire.Error(err)
 	}

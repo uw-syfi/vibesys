@@ -71,7 +71,7 @@ func submitFlow(ctx context.Context, d deps, kind string, args []string) int {
 	if err != nil {
 		return fail(d, asJSON, err)
 	}
-	callCtx, err := c.callContext(ctx, d)
+	callCtx, err := c.callContext(d)
 	if err != nil {
 		return fail(d, asJSON, err)
 	}
@@ -122,7 +122,7 @@ func submitJob(ctx context.Context, d deps, args []string) int {
 	if err != nil {
 		return fail(d, asJSON, err)
 	}
-	callCtx, err := c.callContext(ctx, d)
+	callCtx, err := c.callContext(d)
 	if err != nil {
 		return fail(d, asJSON, err)
 	}

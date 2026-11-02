@@ -49,6 +49,49 @@ func ToFailure(f *cliv1.Failure) core.Failure {
 	return out
 }
 
+// Received is a failure as a peer sent it. Its kind may be one this build does not know, from a
+// newer peer, and it is kept as it came, so a caller that reports it reports the peer's kind and
+// not a guess.
+type Received struct{ Failure *cliv1.Failure }
+
+// Error implements error.
+func (r *Received) Error() string {
+	return r.Failure.GetKind().String() + ": " + r.Failure.GetMessage()
+}
+
+// ReceivedOf returns the failure a peer sent in err, when err is a gRPC status whose details carry
+// one, and nil otherwise.
+func ReceivedOf(err error) *Received {
+	st, isStatus := status.FromError(err)
+	if !isStatus || err == nil {
+		return nil
+	}
+	for _, d := range st.Details() {
+		if detail, isFailure := d.(*cliv1.Failure); isFailure {
+			return &Received{Failure: detail}
+		}
+	}
+	return nil
+}
+
+// ContractFailure returns the contract's message for the failure err carries, as a command
+// reports it: a received failure exactly as the peer sent it, unknown kind included, and any other
+// failure through FailureOf. ok is false for a cancel the caller asked for.
+func ContractFailure(err error) (f *cliv1.Failure, ok bool) {
+	var received *Received
+	if errors.As(err, &received) {
+		return received.Failure, true
+	}
+	if r := ReceivedOf(err); r != nil {
+		return r.Failure, true
+	}
+	domain, ok := FailureOf(err)
+	if !ok {
+		return nil, false
+	}
+	return Failure(domain), true
+}
+
 // Error returns the error a gRPC handler returns for err: a status whose details carry a Failure.
 // A *core.Failure keeps its kind. A cancelled or timed-out context is what the caller asked for,
 // so it keeps its own code. Anything else is an internal failure that names the cause.
@@ -92,6 +135,10 @@ func FailureOf(err error) (f core.Failure, ok bool) {
 	var typed *core.Failure
 	if errors.As(err, &typed) {
 		return *typed, true
+	}
+	var received *Received
+	if errors.As(err, &received) {
+		return ToFailure(received.Failure), true
 	}
 	st, isStatus := status.FromError(err)
 	if !isStatus {

@@ -91,6 +91,7 @@ func Result(r core.Result) *cliv1.Result {
 		m := &cliv1.MeasureResult{
 			Metric:  &cliv1.Metric{Name: o.Metric.Name, Direction: direction(o.Metric.Direction)},
 			Samples: slices.Clone(o.Samples), CheckJobId: string(o.CheckJob),
+			Value: core.Headline(o.Samples),
 		}
 		for _, ob := range o.Observations {
 			m.Observations = append(m.Observations, &cliv1.Observation{Name: ob.Name, Values: slices.Clone(ob.Values)})

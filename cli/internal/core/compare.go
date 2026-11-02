@@ -73,7 +73,7 @@ func Compare(in CompareInput) (Verdict, error) {
 	}
 	// Sorted copies make the sums independent of the order the samples arrived in.
 	candidate, base := sorted(in.Candidate), sorted(in.Base)
-	c, b := mean(candidate), mean(base)
+	c, b := Headline(candidate), Headline(base)
 	if !finite(c) || !finite(b) {
 		return Verdict{}, failf(FailureInvalidInput, "the sample means overflow")
 	}
@@ -218,12 +218,16 @@ func studentCritical(degrees float64) float64 {
 	return studentT975[int(min(whole-firstTDegrees, float64(len(studentT975)-1)))]
 }
 
-func mean(xs []float64) float64 {
+// Headline is the one number a measurement's samples come to: their mean, summed in sorted order so
+// the order the samples arrived in does not change it. Compare weighs the same number, so the
+// number a reader sees and the one a verdict rests on never disagree. It is NaN for no samples,
+// which a saved measurement never has.
+func Headline(samples []float64) float64 {
 	var total float64
-	for _, x := range xs {
+	for _, x := range sorted(samples) {
 		total += x
 	}
-	return total / float64(len(xs))
+	return total / float64(len(samples))
 }
 
 func sorted(xs []float64) []float64 {

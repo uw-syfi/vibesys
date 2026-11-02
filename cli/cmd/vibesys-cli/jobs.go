@@ -11,8 +11,9 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/wire"
 )
 
-// waitCommand is `wait <job>... [--any] [--timeout d]`. Its exit code says how the jobs ended: 0
-// when every job that is final succeeded, 1 when one did not, 3 when the timeout came first.
+// waitCommand is `wait <job>... [--any] [--timeout d]`. Its exit code is the daemon's outcome
+// (exitOfWait): 0 when the jobs succeeded, 1 when one did not, 3 when the timeout came first, and
+// 4 when the wait got no answer.
 func waitCommand(ctx context.Context, d deps, args []string) int {
 	fs, c := newFlags("wait", d)
 	any := fs.Bool("any", false, "return when one job is final, not when all are")
@@ -27,44 +28,51 @@ func waitCommand(ctx context.Context, d deps, args []string) int {
 	case *timeout < 0:
 		return fail(d, c.json, usagef("--timeout: %v is negative", *timeout))
 	}
-	callCtx, err := c.callContext(ctx, d)
+	callCtx, err := c.callContext(d)
 	if err != nil {
 		return fail(d, c.json, err)
 	}
 	cl, err := connect(ctx, d)
 	if err != nil {
-		return fail(d, c.json, err)
+		return failWait(d, c.json, err)
 	}
 	defer cl.Close()
 	return waitFor(ctx, d, cl, callCtx, ids, client.WaitOptions{Any: *any, Timeout: *timeout}, c.json)
 }
 
-// waitFor waits and prints the last state of each job: one line each, or one JSON message each.
+// waitFor waits and prints how the wait ended: the last state of each job, one line each, or the
+// daemon's WaitOutcome as it is with --json.
 func waitFor(ctx context.Context, d deps, cl *client.Client, callCtx *cliv1.CallContext, ids []string, opts client.WaitOptions, asJSON bool) int {
 	res, err := cl.Wait(ctx, callCtx, ids, opts)
-	if errors.Is(err, client.ErrEndUnknown) {
-		fail(d, asJSON, wire.Unavailable(err.Error()))
-		return exitEndUnknown
-	}
 	if err != nil {
-		return failOnJob(d, asJSON, err)
+		return failWait(d, asJSON, err)
 	}
-	for _, j := range res.Jobs {
-		if asJSON {
-			printJSON(d, &cliv1.WatchResponse{Job: j})
-		} else {
+	o := res.Outcome
+	if asJSON {
+		printJSON(d, o)
+	} else {
+		for _, j := range o.GetJobs() {
 			fmt.Fprintln(d.stdout, describe(j))
 		}
 	}
+	code := exitOfWait(o.GetKind())
 	switch {
-	case res.TimedOut:
-		fail(d, asJSON, wire.Unavailable(timeoutNote(opts.Timeout)))
-		return exitTimeout
-	case res.Succeeded:
-		return exitOK
-	default:
-		return exitFailed
+	case code == exitTimeout:
+		fmt.Fprintf(d.stderr, "vibesys-cli: %s\n", timeoutNote(opts.Timeout))
+	case code == exitNoAnswer && !asJSON:
+		fmt.Fprintf(d.stderr, "vibesys-cli: the daemon ended the wait with %v, which this build cannot read; upgrade vibesys-cli\n", o.GetKind())
 	}
+	return code
+}
+
+// failWait is fail for a wait: a failure that is not about the input says nothing about the jobs,
+// so it is no answer. exitOfFailure already maps every such kind to it.
+func failWait(d deps, asJSON bool, err error) int {
+	if errors.Is(err, client.ErrEndUnknown) {
+		fail(d, asJSON, wire.Unavailable(err.Error()))
+		return exitNoAnswer
+	}
+	return fail(d, asJSON, err)
 }
 
 // cancelCommand is `cancel <job> [--reason text]`. It returns once the job is final, so the
@@ -79,7 +87,7 @@ func cancelCommand(ctx context.Context, d deps, args []string) int {
 	if len(ids) != 1 {
 		return fail(d, c.json, usagef("cancel: name one job"))
 	}
-	callCtx, err := c.callContext(ctx, d)
+	callCtx, err := c.callContext(d)
 	if err != nil {
 		return fail(d, c.json, err)
 	}
@@ -90,7 +98,7 @@ func cancelCommand(ctx context.Context, d deps, args []string) int {
 	defer cl.Close()
 	resp, err := cl.Cancel(ctx, &cliv1.CancelRequest{Context: callCtx, JobId: ids[0], Reason: *reason})
 	if err != nil {
-		return failOnJob(d, c.json, err)
+		return fail(d, c.json, err)
 	}
 	if c.json {
 		printJSON(d, resp)
@@ -110,7 +118,7 @@ func noteCommand(ctx context.Context, d deps, args []string) int {
 	if len(positional) != 2 {
 		return fail(d, c.json, usagef("note: give a job and the text of the note, quoted as one argument"))
 	}
-	callCtx, err := c.callContext(ctx, d)
+	callCtx, err := c.callContext(d)
 	if err != nil {
 		return fail(d, c.json, err)
 	}
@@ -121,7 +129,7 @@ func noteCommand(ctx context.Context, d deps, args []string) int {
 	defer cl.Close()
 	resp, err := cl.AddNote(ctx, &cliv1.AddNoteRequest{Context: callCtx, JobId: positional[0], Text: positional[1]})
 	if err != nil {
-		return failOnJob(d, c.json, err)
+		return fail(d, c.json, err)
 	}
 	if c.json {
 		printJSON(d, resp)
@@ -150,7 +158,7 @@ func jobsCommand(ctx context.Context, d deps, args []string) int {
 	if err != nil {
 		return fail(d, c.json, err)
 	}
-	callCtx, err := c.callContext(ctx, d)
+	callCtx, err := c.callContext(d)
 	if err != nil {
 		return fail(d, c.json, err)
 	}
@@ -181,19 +189,18 @@ func jobsCommand(ctx context.Context, d deps, args []string) int {
 	return exitOK
 }
 
+// jobKindNames maps what a user writes to job kinds. It is read from the contract's enum, so a
+// kind added there is a kind here.
+var jobKindNames = enumNames(cliv1.JobKind_name, "JOB_KIND_", func(n int32) cliv1.JobKind { return cliv1.JobKind(n) })
+
 func jobKindOf(name string) (cliv1.JobKind, error) {
-	switch strings.ToLower(name) {
-	case "":
+	if name == "" {
 		return cliv1.JobKind_JOB_KIND_UNSPECIFIED, nil
-	case "check":
-		return cliv1.JobKind_JOB_KIND_CHECK, nil
-	case "command":
-		return cliv1.JobKind_JOB_KIND_COMMAND, nil
-	case "measure":
-		return cliv1.JobKind_JOB_KIND_MEASURE, nil
-	default:
-		return 0, usagef("--kind: %q is not a kind of job (check, command or measure)", name)
 	}
+	if k, ok := jobKindNames[strings.ToLower(name)]; ok {
+		return k, nil
+	}
+	return 0, usagef("--kind: %q is not a kind of job (%s)", name, choices(cliv1.JobKind_name, "JOB_KIND_"))
 }
 
 // logsCommand is `logs <job> [--follow] [--offset n]`. Without --json it writes the job's output
@@ -209,7 +216,7 @@ func logsCommand(ctx context.Context, d deps, args []string) int {
 	if len(ids) != 1 {
 		return fail(d, c.json, usagef("logs: name one job"))
 	}
-	callCtx, err := c.callContext(ctx, d)
+	callCtx, err := c.callContext(d)
 	if err != nil {
 		return fail(d, c.json, err)
 	}
@@ -227,7 +234,7 @@ func logsCommand(ctx context.Context, d deps, args []string) int {
 		return werr
 	})
 	if err != nil {
-		return failOnJob(d, c.json, err)
+		return fail(d, c.json, err)
 	}
 	return exitOK
 }

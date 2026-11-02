@@ -23,18 +23,6 @@ import (
 // -ldflags "-X main.version=<version>"; any other build reports "dev".
 var version = "dev"
 
-// Exit codes. They match the contract in the project README: 2 is invalid input, so a caller can
-// tell a mistyped command from a failed job, and 3 is a wait that timed out.
-const (
-	exitOK           = 0
-	exitFailed       = 1
-	exitInvalidInput = 2
-	exitTimeout      = 3
-	// exitEndUnknown is a wait that gave up without learning how its jobs ended. It is not a job
-	// that failed.
-	exitEndUnknown = 4
-)
-
 // deps is what a command line is run with. A test supplies the pieces that would reach the
 // machine, and the real ones are made by realDeps.
 type deps struct {

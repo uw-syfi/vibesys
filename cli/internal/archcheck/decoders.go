@@ -20,7 +20,6 @@ const (
 var unfuzzedDecoders = map[string]string{
 	"ToFingerprint":     "decoded inside ToJob, which FuzzDecodeJob fuzzes",
 	"ToNote":            "decoded inside ToJob, which FuzzDecodeJob fuzzes",
-	"ToCallContext":     "copies five string fields and refuses nothing; a copy has no input to fuzz",
 	"ToVersions":        "copies three integers and refuses nothing; a copy has no input to fuzz",
 	"ToFailure":         "decoded inside FailureOf, which FuzzFailureFromStatus fuzzes",
 	"ToJobState":        "an enum translator, held total over every contract value by TestEveryContractEnumValueIsTranslatedOrRefused",

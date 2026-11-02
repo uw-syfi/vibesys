@@ -233,7 +233,10 @@ type MeasureResult struct {
 	Samples      []float64      `protobuf:"fixed64,2,rep,packed,name=samples,proto3" json:"samples,omitempty"`
 	Observations []*Observation `protobuf:"bytes,3,rep,name=observations,proto3" json:"observations,omitempty"`
 	// The check pass this measurement relies on, whether it ran in the same job or was reused.
-	CheckJobId    string `protobuf:"bytes,4,opt,name=check_job_id,json=checkJobId,proto3" json:"check_job_id,omitempty"`
+	CheckJobId string `protobuf:"bytes,4,opt,name=check_job_id,json=checkJobId,proto3" json:"check_job_id,omitempty"`
+	// The headline number of the measurement: the aggregate of the samples that compare uses (their
+	// mean). The daemon computes it, so no reader recomputes it.
+	Value         float64 `protobuf:"fixed64,5,opt,name=value,proto3" json:"value,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -294,6 +297,13 @@ func (x *MeasureResult) GetCheckJobId() string {
 		return x.CheckJobId
 	}
 	return ""
+}
+
+func (x *MeasureResult) GetValue() float64 {
+	if x != nil {
+		return x.Value
+	}
+	return 0
 }
 
 // Result is one saved outcome of a job. A result is immutable once saved.
@@ -474,13 +484,14 @@ const file_vibesys_cli_v1_result_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
 	"\x06values\x18\x02 \x03(\x01R\x06values\"D\n" +
 	"\vCheckResult\x125\n" +
-	"\bduration\x18\x01 \x01(\v2\x19.google.protobuf.DurationR\bduration\"\xbc\x01\n" +
+	"\bduration\x18\x01 \x01(\v2\x19.google.protobuf.DurationR\bduration\"\xd2\x01\n" +
 	"\rMeasureResult\x12.\n" +
 	"\x06metric\x18\x01 \x01(\v2\x16.vibesys.cli.v1.MetricR\x06metric\x12\x18\n" +
 	"\asamples\x18\x02 \x03(\x01R\asamples\x12?\n" +
 	"\fobservations\x18\x03 \x03(\v2\x1b.vibesys.cli.v1.ObservationR\fobservations\x12 \n" +
 	"\fcheck_job_id\x18\x04 \x01(\tR\n" +
-	"checkJobId\"\x92\x04\n" +
+	"checkJobId\x12\x14\n" +
+	"\x05value\x18\x05 \x01(\x01R\x05value\"\x92\x04\n" +
 	"\x06Result\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x10\n" +
 	"\x03key\x18\x02 \x01(\tR\x03key\x12\x12\n" +

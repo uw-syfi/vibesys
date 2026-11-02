@@ -910,7 +910,7 @@ func (e *e2e) waitThrough(ids ...string) result {
 	deadline := clock.System{}.Now().Add(hangBound)
 	for {
 		r := e.wait(ids...)
-		if r.code != exitEndUnknown || (clock.System{}).Now().After(deadline) {
+		if r.code != exitNoAnswer || (clock.System{}).Now().After(deadline) {
 			return r
 		}
 	}
@@ -996,7 +996,7 @@ func TestE2EAClearedRuntimeDirectoryStartsNothingBesideALiveCommand(t *testing.T
 		t.Fatal(err)
 	}
 	next := e.submit("print", "B", ";", "exit", "0")
-	if r := e.wait(next); r.code != exitEndUnknown || !strings.Contains(r.stderr, id) {
+	if r := e.wait(next); r.code != exitNoAnswer || !strings.Contains(r.stderr, id) {
 		t.Fatalf("wait for the job after = %+v, want it told it waits for %s", r, id)
 	}
 	if out := e.logs(next); out != "" {

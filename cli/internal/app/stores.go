@@ -2,34 +2,9 @@ package app
 
 import (
 	"context"
-	"fmt"
-	"path/filepath"
-	"regexp"
-	"strings"
-
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/store"
 )
-
-// Scope names the store a request is about: one task in one repository.
-type Scope struct {
-	Repository string
-	Task       string
-}
-
-// Validate checks the scope is one a store can be made for, naming the field that is not.
-func (s Scope) Validate() error {
-	if !filepath.IsAbs(s.Repository) {
-		return &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("context.repository: %q is not an absolute path", s.Repository)}
-	}
-	if !taskName.MatchString(s.Task) || strings.HasPrefix(s.Task, ".") {
-		return &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf(
-			"context.task: %q is not a task name (1 to 128 of A-Z, a-z, 0-9, dot, underscore and hyphen, not starting with a dot)", s.Task)}
-	}
-	return nil
-}
-
-var taskName = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
 
 // Stores opens the stores the daemon serves. The daemon is the only user of a store, so an
 // implementation hands the same store to every call for a scope for as long as it lives.
@@ -38,29 +13,29 @@ type Stores interface {
 	// store into being, so a mistyped task and a mount point with no disk in it stay as they are. It fails with
 	// a failure marked store.ErrNoStore when none was made, and store.ErrAway when one was made and
 	// cannot be reached.
-	Find(ctx context.Context, scope Scope) (store.Store, error)
+	Find(ctx context.Context, scope core.Scope) (store.Store, error)
 
 	// Create returns the store of the scope, making it when it is missing, and records that the
 	// scope has one, so that Known finds it after a restart.
-	Create(ctx context.Context, scope Scope) (store.Store, error)
+	Create(ctx context.Context, scope core.Scope) (store.Store, error)
 
 	// Known returns every scope that has a store, including one whose store cannot be reached now:
 	// leaving that out would make its runs look like nobody's.
-	Known(ctx context.Context) ([]Scope, error)
+	Known(ctx context.Context) ([]core.Scope, error)
 
 	// Forget gives a scope up for good: Known no longer has it, and nothing is touched where its
 	// store was. It is idempotent.
-	Forget(ctx context.Context, scope Scope) error
+	Forget(ctx context.Context, scope core.Scope) error
 
 	// GivenUp returns the running jobs of the scope's store whose runs the user gave up, by removing
 	// the owner record of the store, which is how a user says the place that ran them is gone for
 	// good. A run of one that this daemon finds is no run of that place: it is taken back with
 	// Reclaim. It makes nothing, and fails as Find does.
-	GivenUp(ctx context.Context, scope Scope) ([]core.JobID, error)
+	GivenUp(ctx context.Context, scope core.Scope) ([]core.JobID, error)
 
 	// Reclaim takes a job back from the given-up ones of the scope's store, durably, as a run of it
 	// was found by this daemon. A job that is not given up costs nothing.
-	Reclaim(ctx context.Context, scope Scope, job core.JobID) error
+	Reclaim(ctx context.Context, scope core.Scope, job core.JobID) error
 
 	// Close gives up every store. A daemon calls it before it lets go of the machine, so that once
 	// a daemon is seen to be gone, its stores are free. Nothing may use a store after it.

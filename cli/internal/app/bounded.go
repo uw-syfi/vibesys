@@ -65,28 +65,28 @@ func (s boundedStores) store(st store.Store, err error) (store.Store, error) {
 	return boundedStore{inner: st, timers: s.timers, limit: s.limit}, nil
 }
 
-func (s boundedStores) Find(ctx context.Context, scope Scope) (store.Store, error) {
+func (s boundedStores) Find(ctx context.Context, scope core.Scope) (store.Store, error) {
 	return s.store(bounded(ctx, s.timers, s.limit, func(ctx context.Context) (store.Store, error) { return s.inner.Find(ctx, scope) }))
 }
 
-func (s boundedStores) Create(ctx context.Context, scope Scope) (store.Store, error) {
+func (s boundedStores) Create(ctx context.Context, scope core.Scope) (store.Store, error) {
 	return s.store(bounded(ctx, s.timers, s.limit, func(ctx context.Context) (store.Store, error) { return s.inner.Create(ctx, scope) }))
 }
 
-func (s boundedStores) Known(ctx context.Context) ([]Scope, error) {
+func (s boundedStores) Known(ctx context.Context) ([]core.Scope, error) {
 	return bounded(ctx, s.timers, s.limit, s.inner.Known)
 }
 
-func (s boundedStores) Forget(ctx context.Context, scope Scope) error {
+func (s boundedStores) Forget(ctx context.Context, scope core.Scope) error {
 	_, err := bounded(ctx, s.timers, s.limit, func(ctx context.Context) (struct{}, error) { return struct{}{}, s.inner.Forget(ctx, scope) })
 	return err
 }
 
-func (s boundedStores) GivenUp(ctx context.Context, scope Scope) ([]core.JobID, error) {
+func (s boundedStores) GivenUp(ctx context.Context, scope core.Scope) ([]core.JobID, error) {
 	return bounded(ctx, s.timers, s.limit, func(ctx context.Context) ([]core.JobID, error) { return s.inner.GivenUp(ctx, scope) })
 }
 
-func (s boundedStores) Reclaim(ctx context.Context, scope Scope, job core.JobID) error {
+func (s boundedStores) Reclaim(ctx context.Context, scope core.Scope, job core.JobID) error {
 	_, err := bounded(ctx, s.timers, s.limit, func(ctx context.Context) (struct{}, error) { return struct{}{}, s.inner.Reclaim(ctx, scope, job) })
 	return err
 }
@@ -216,7 +216,7 @@ func (a *App) ForgetRepository(ctx context.Context, repository string) (Forgotte
 		switch {
 		case err == nil:
 			return Forgotten{}, &core.Failure{Kind: core.FailureConflict, Message: fmt.Sprintf(
-				"the repository %s is still there, with task %s: only a repository that is gone can be forgotten", repository, scope.Task)}
+				"the repository %s is still there, with task %s: only a repository that is gone can be forgotten", repository, string(scope.Task()))}
 		case ctx.Err() != nil:
 			return Forgotten{}, ctx.Err()
 		case errors.Is(err, store.ErrNoStore), errors.Is(err, store.ErrGone):
@@ -226,7 +226,7 @@ func (a *App) ForgetRepository(ctx context.Context, repository string) (Forgotte
 			// it would let its jobs go for good.
 			return Forgotten{}, &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf(
 				"the repository %s cannot be told gone, as task %s's store answered: %v; forget only a repository whose directory is not there",
-				repository, scope.Task, err)}
+				repository, string(scope.Task()), err)}
 		}
 	}
 	// The runs end first, while the machine still holds their jobs: a job it let go of before its
@@ -250,14 +250,14 @@ func (a *App) ForgetRepository(ctx context.Context, repository string) (Forgotte
 		if err := a.cfg.Stores.Forget(ctx, scope); err != nil {
 			return out, err
 		}
-		out.Tasks = append(out.Tasks, scope.Task)
+		out.Tasks = append(out.Tasks, string(scope.Task()))
 	}
 	a.notifyJobs()
 	return out, nil
 }
 
 // ofRepository returns the stores and the runs of a repository, by what the index and the runs say.
-func (a *App) ofRepository(ctx context.Context, repository string) ([]Scope, []supervisor.Run, error) {
+func (a *App) ofRepository(ctx context.Context, repository string) ([]core.Scope, []supervisor.Run, error) {
 	if !path.IsAbs(repository) {
 		return nil, nil, invalid("repository: %q is not an absolute path", repository)
 	}
@@ -265,9 +265,9 @@ func (a *App) ofRepository(ctx context.Context, repository string) ([]Scope, []s
 	if err != nil {
 		return nil, nil, err
 	}
-	var scopes []Scope
+	var scopes []core.Scope
 	for _, scope := range known {
-		if scope.Repository == repository {
+		if string(scope.Repository()) == repository {
 			scopes = append(scopes, scope)
 		}
 	}
@@ -284,7 +284,7 @@ func (a *App) ofRepository(ctx context.Context, repository string) ([]Scope, []s
 	for _, run := range all {
 		scope, ok := scopeOfRun(run)
 		switch {
-		case ok && scope.Repository == repository:
+		case ok && string(scope.Repository()) == repository:
 			runs = append(runs, run)
 			if !slices.Contains(scopes, scope) {
 				scopes = append(scopes, scope)
