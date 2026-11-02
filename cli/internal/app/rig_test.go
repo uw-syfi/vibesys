@@ -24,6 +24,9 @@ var (
 	commit = core.Commit("0123456789abcdef0123456789abcdef01234567")
 	scope  = app.Scope{Repository: "/repo", Task: "task"}
 	call   = core.CallContext{Repository: "/repo", Task: "task", Run: "run-1", Harness: "h", Agent: "agent-1"}
+	// elsewhere and scopeElsewhere are a second task, for a job a test does not count.
+	scopeElsewhere = app.Scope{Repository: "/repo", Task: "other"}
+	elsewhere      = core.CallContext{Repository: "/repo", Task: "other", Run: "run-1", Harness: "h", Agent: "agent-1"}
 )
 
 // world is everything that outlives one daemon: the stores (the disk), the supervisors (their

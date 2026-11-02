@@ -35,16 +35,21 @@ type crash struct {
 
 func (c *crash) step() error {
 	n := c.steps.Add(1)
-	if c.limit >= 0 && n > c.limit {
-		c.dead.Store(true)
-		c.once.Do(func() {
-			if c.onDeath != nil {
-				c.onDeath()
-			}
-		})
+	if c.dead.Load() || (c.limit >= 0 && n > c.limit) {
+		c.kill()
 		return errCrashed
 	}
 	return nil
+}
+
+// kill makes the daemon dead now, whatever step it is at.
+func (c *crash) kill() {
+	c.dead.Store(true)
+	c.once.Do(func() {
+		if c.onDeath != nil {
+			c.onDeath()
+		}
+	})
 }
 
 func (c *crash) read() error {
@@ -249,26 +254,37 @@ func scenario(t *testing.T, limit int64, reboot bool) int64 {
 			return nil
 		})
 	}
-	total := c.steps.Load()
-	if c.dead.Load() {
-		a1.Close()
-		if reboot {
-			w.survivors.Reboot()
-		}
-		a2 := w.newApp()
-		w.gates.Release("g")
-		all, err := a2.Jobs(ctxFor(t), scope, core.JobFilter{})
+	if limit < 0 {
+		// The last steps come after the last job is final. A next job starts only after them, so
+		// counting then counts them all. It is in its own task, which check does not look at.
+		next, err := a1.Submit(ctxFor(t), app.SubmitRequest{Context: elsewhere, Spec: command("exit", "0")})
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, j := range all {
-			awaitFinal(t, a2, j.ID)
+		if err := a1.Watch(ctxFor(t), scopeElsewhere, []core.JobID{next.Job.ID}, func(core.Job) error { return nil }); err != nil {
+			t.Fatal(err)
 		}
-		check(t, w, a2, reboot, limit)
-	} else {
 		check(t, w, a1, reboot, limit)
+		return c.steps.Load()
 	}
-	return total
+	// Steps can remain after the jobs are final, and one of them may be the crash, so the daemon
+	// dies here if it has not, and only the restarted one is read.
+	c.kill()
+	a1.Close()
+	if reboot {
+		w.survivors.Reboot()
+	}
+	a2 := w.newApp()
+	w.gates.Release("g")
+	all, err := a2.Jobs(ctxFor(t), scope, core.JobFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, j := range all {
+		awaitFinal(t, a2, j.ID)
+	}
+	check(t, w, a2, reboot, limit)
+	return c.steps.Load()
 }
 
 // check says what must hold of the world after a crash and a restart, wherever the crash was.
