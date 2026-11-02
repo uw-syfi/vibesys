@@ -57,9 +57,14 @@ type model struct {
 	// taken says the machine took a cancel while the job's store had it queued.
 	taken [modelJobs]bool
 	// died says its supervisor died or went silent, which can decide a job's end before a cancel.
-	died    [modelJobs]bool
-	away    [modelJobs]bool // By store.
-	limits  int             // How many command limits have passed since the start.
+	died [modelJobs]bool
+	away [modelJobs]bool // By store.
+	// forgetting says the shell is giving a store up: it ended the runs it could, and has not told
+	// the machine yet. By store.
+	forgetting [modelJobs]bool
+	// left is the phase the shell found a run in that it could not end, while it forgets the store.
+	left    [modelJobs]lifecycle.RunPhase
+	limits  int // How many command limits have passed since the start.
 	pending []lifecycle.Request
 	faults  int
 	restart int
@@ -78,7 +83,7 @@ func (m model) key() string {
 		keys = append(keys, fmt.Sprintf("%#v", r))
 	}
 	slices.Sort(keys)
-	return fmt.Sprintf("%#v|%v|%v|%v|%v|%v|%v|%v|%d|%d|%s", m.machine, m.jobs, m.runs, m.following, m.taken, m.died, m.away, m.limits, m.faults, m.restart, strings.Join(keys, ";"))
+	return fmt.Sprintf("%#v|%v|%v|%v|%v|%v|%v|%v|%v|%v|%d|%d|%s", m.machine, m.jobs, m.runs, m.following, m.taken, m.died, m.away, m.forgetting, m.left, m.limits, m.faults, m.restart, strings.Join(keys, ";"))
 }
 
 func (m model) at() time.Time {
@@ -143,9 +148,10 @@ func (s search) presence(m *model, i int) lifecycle.Presence {
 // finding is what a look finds in a store.
 func (s search) finding(m *model, i int) lifecycle.Finding {
 	switch {
-	case m.away[s.store(i)]:
+	case m.away[s.store(i)] || m.jobs[i] == gone:
+		// A store given up is not there: the shell cannot read it.
 		return lifecycle.StoreAway{}
-	case m.jobs[i] == "" || m.jobs[i] == gone:
+	case m.jobs[i] == "":
 		return lifecycle.NoSuchJob{}
 	}
 	return lifecycle.JobIn{State: m.jobs[i], SubmittedAt: submitted(i)}
@@ -169,6 +175,16 @@ func (s search) feed(m *model, e lifecycle.Event) {
 		s.checkRequest(m, e, r)
 		m.pending = append(m.pending, r)
 	}
+	s.checkWorld(m)
+	// A look in flight may be what ends a hold that ran out, so this asks only once none is.
+	if stranded := m.machine.Stranded(m.at()); len(stranded) != 0 && len(m.pending) == 0 {
+		m.fail("nothing will start %v: %+v", stranded, m.machine.Held())
+	}
+}
+
+// checkWorld checks what must hold of the world after any move, whether or not the machine heard
+// of it: a supervisor can start a command on a request the machine made earlier.
+func (s search) checkWorld(m *model) {
 	commands := 0
 	for _, r := range m.runs {
 		if r.alive() && r.phase == lifecycle.RunRunning {
@@ -188,10 +204,6 @@ func (s search) feed(m *model, e lifecycle.Event) {
 		if n > 1 {
 			m.fail("store %d shows %d jobs running", store, n)
 		}
-	}
-	// A look in flight may be what ends a hold that ran out, so this asks only once none is.
-	if stranded := m.machine.Stranded(m.at()); len(stranded) != 0 && len(m.pending) == 0 {
-		m.fail("nothing will start %v: %+v", stranded, m.machine.Held())
 	}
 }
 
@@ -320,7 +332,13 @@ func (s search) moves(m *model) []move {
 			add(free, true, "store"+digit(store)+" goes away", func(m *model) { m.away[store] = true })
 		} else {
 			add(answer, false, "store"+digit(store)+" returns", func(m *model) { m.away[store] = false })
-			add(free, true, "store"+digit(store)+" is forgotten", func(m *model) { s.forget(m, store) })
+		}
+		switch {
+		case m.forgetting[store]:
+			add(answer, false, "the machine forgets store"+digit(store), func(m *model) { s.forgotten(m, store) })
+		case m.away[store]:
+			add(free, true, "store"+digit(store)+" is forgotten", func(m *model) { s.endRuns(m, store, false) })
+			add(free, true, "store"+digit(store)+" is forgotten, a command left running", func(m *model) { s.endRuns(m, store, true) })
 		}
 	}
 	if m.limits == 0 {
@@ -375,16 +393,46 @@ func (s search) readAgain(m *model, store int) {
 	s.feed(m, lifecycle.StoreRead{Store: s.storeID(store)})
 }
 
-// forget gives up a store: its jobs leave the machine and their runs end.
-func (s search) forget(m *model, store int) {
-	s.feed(m, lifecycle.StoreForgotten{Store: s.storeID(store)})
-	m.away[store] = false
+// endRuns is the first half of giving up a store, as the shell does it: each run of the store is
+// cancelled and waited for, and a command that does not end in time is left running. A parked
+// supervisor never ends on its own, so it is left too. The machine is told later, by forgotten.
+func (s search) endRuns(m *model, store int, leaveOne bool) {
+	m.forgetting[store] = true
 	for i := range modelJobs {
-		if s.store(i) == store {
-			m.jobs[i], m.runs[i], m.following[i] = gone, run{}, false
+		r := &m.runs[i]
+		if s.store(i) != store || !r.alive() {
+			continue
+		}
+		r.cancel = true
+		switch {
+		case r.phase == lifecycle.RunParked:
+			m.left[i] = r.phase
+		case r.phase == lifecycle.RunRunning && leaveOne:
+			m.left[i], leaveOne = r.phase, false
+		case r.phase == lifecycle.RunRunning:
+			r.phase = lifecycle.RunFinished
 		}
 	}
+}
+
+// forgotten is the second half: the machine forgets the store's jobs and hears of the runs left,
+// the other runs are released, and the store's jobs are gone for good.
+func (s search) forgotten(m *model, store int) {
 	m.pending = slices.DeleteFunc(m.pending, func(r lifecycle.Request) bool { return s.store(s.index(r.Target())) == store })
+	e := lifecycle.StoreForgotten{Store: s.storeID(store), At: m.at()}
+	for i := range modelJobs {
+		if s.store(i) != store {
+			continue
+		}
+		if m.left[i] != "" {
+			e.Left = append(e.Left, lifecycle.LeftRun{Ref: s.ref(i), Supervisor: lifecycle.RunAlive{Phase: m.left[i], Limit: modelLimit}})
+		} else {
+			m.runs[i] = run{}
+		}
+		m.jobs[i], m.following[i], m.left[i] = gone, false, ""
+	}
+	m.away[store], m.forgetting[store] = false, false
+	s.feed(m, e)
 }
 
 // restartDaemon is Start: every store read, or marked unread, then what is left of the runs.
@@ -392,6 +440,8 @@ func (s search) restartDaemon(m *model, unreadable bool) {
 	m.restart++
 	m.machine, m.pending = lifecycle.Recovering(), nil
 	m.following, m.taken = [modelJobs]bool{}, [modelJobs]bool{}
+	// A forget the daemon was in the middle of ends with it; what it did to the runs stays.
+	m.forgetting, m.left = [modelJobs]bool{}, [modelJobs]lifecycle.RunPhase{}
 	look := func(i int) lifecycle.Recovered {
 		e := s.look(m, i)
 		if _, none := e.Supervisor.(lifecycle.RunNone); unreadable && !none {
@@ -400,11 +450,16 @@ func (s search) restartDaemon(m *model, unreadable bool) {
 		return e
 	}
 	for store := range s.stores {
-		if m.away[store] {
+		if m.away[store] || s.hasLeftRun(m, store) {
+			// A store given up is not in the index, and a run of it is looked for in it, which
+			// cannot be read.
 			s.feed(m, lifecycle.StoreUnread{Store: s.storeID(store), Failure: modelStop})
 		}
 	}
 	for i := range modelJobs {
+		if m.jobs[i] == gone && m.runs[i].phase != "" {
+			s.feed(m, look(i))
+		}
 		if m.jobs[i] == "" || m.jobs[i] == gone {
 			continue
 		}
@@ -413,6 +468,16 @@ func (s search) restartDaemon(m *model, unreadable bool) {
 		}
 	}
 	s.feed(m, lifecycle.RecoveryDone{})
+}
+
+// hasLeftRun says a store was given up with a run of it left.
+func (s search) hasLeftRun(m *model, store int) bool {
+	for i := range modelJobs {
+		if s.store(i) == store && m.jobs[i] == gone && m.runs[i].phase != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // answers lists how the shell can answer one request.
@@ -507,7 +572,13 @@ func (s search) answers(m *model, at int, r lifecycle.Request, add func(rank, bo
 	case lifecycle.ArmRetry:
 		add(retry, false, name, func(m *model) { take(m); s.feed(m, lifecycle.RetryDue{Ref: ref}) })
 	case lifecycle.Reexamine:
-		add(retry, false, name, func(m *model) { take(m); s.feed(m, s.look(m, i)) })
+		// A look at a run left of a store given up finds nothing new until its command ends, so a
+		// healing world takes it with the commands that end.
+		look := retry
+		if m.jobs[i] == gone {
+			look = ending
+		}
+		add(look, false, name, func(m *model) { take(m); s.feed(m, s.look(m, i)) })
 		add(retry, true, name+" finds nothing usable", func(m *model) {
 			take(m)
 			e := s.look(m, i)
@@ -607,6 +678,7 @@ func (s search) heal(m *model, awayFor int) bool {
 			s.checkCancels(m)
 		}
 		pick.do(m)
+		s.checkWorld(m)
 	}
 	return false
 }
@@ -627,6 +699,16 @@ func (s search) healed(m model) string {
 	for i := range modelJobs {
 		if m.away[s.store(i)] {
 			m.away[s.store(i)] = false
+		}
+	}
+	// A run left of a store given up, which a restart found, holds that store's job in doubt until
+	// the user gives the store up again, which is the way out the daemon names.
+	for store := range s.stores {
+		if s.hasLeftRun(&m, store) && slices.ContainsFunc(m.machine.Held(), func(h lifecycle.Held) bool {
+			return h.Ref.Store == s.storeID(store) && h.Phase == lifecycle.PhaseInDoubt
+		}) {
+			s.endRuns(&m, store, false)
+			s.forgotten(&m, store)
 		}
 	}
 	if !s.heal(&m, -1) {
@@ -724,6 +806,7 @@ func (s search) walk(t *testing.T) {
 				}
 				n := m.clone()
 				c.do(&n)
+				s.checkWorld(&n)
 				if n.violation != "" {
 					t.Fatalf("%s\nafter: %s", n.violation, trace(key, c.label))
 				}

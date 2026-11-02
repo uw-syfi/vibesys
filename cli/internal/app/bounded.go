@@ -181,10 +181,12 @@ type Forgotten struct {
 	Left []string
 }
 
-// ForgetRepository gives up a repository that is gone for good. The machine forgets its jobs, their
-// supervisors are told to go, and the stores leave the index, so nothing of it waits or holds
-// anything. Nothing on disk is touched where the repository was. A repository that is there, or
-// that the daemon knows nothing of, is refused, as forgetting one is not undone.
+// ForgetRepository gives up a repository that is gone for good. Its commands are ended and their
+// supervisors told to go, then the machine forgets its jobs and the stores leave the index, so
+// nothing of it waits or holds anything. A command that does not end in time is reported left, and
+// holds the machine while it can run, for at most its limit. Nothing on disk is touched where the
+// repository was. A repository that is there or cannot be read, or that the daemon knows nothing
+// of, is refused, as forgetting one is not undone.
 func (a *App) ForgetRepository(ctx context.Context, repository string) (Forgotten, error) {
 	scopes, runs, err := a.ofRepository(ctx, repository)
 	if err != nil {
@@ -218,15 +220,22 @@ func (a *App) ForgetRepository(ctx context.Context, repository string) (Forgotte
 				repository, scope.Task, err)}
 		}
 	}
+	// The runs end first, while the machine still holds their jobs: a job it let go of before its
+	// command ended would let the next one start beside it. A run that does not end keeps holding
+	// the machine, as long as its command can run.
 	var out Forgotten
-	for _, scope := range scopes {
-		a.settle(message{event: lifecycle.StoreForgotten{Store: storeIDOf(scope)}})
-	}
+	left := map[lifecycle.StoreID][]lifecycle.LeftRun{}
 	for _, run := range runs {
 		if err := a.endRun(ctx, run); err != nil {
 			a.cfg.Logf("job %s: letting its supervisor go: %v", run.Job(), err)
 			out.Left = append(out.Left, run.Job().String())
+			ref := run.Job()
+			left[ref.Store] = append(left[ref.Store], lifecycle.LeftRun{Ref: ref, Supervisor: a.presenceOf(run)})
 		}
+	}
+	for _, scope := range scopes {
+		id := storeIDOf(scope)
+		a.settle(message{event: lifecycle.StoreForgotten{Store: id, Left: left[id], At: a.now()}})
 	}
 	for _, scope := range scopes {
 		if err := a.cfg.Stores.Forget(ctx, scope); err != nil {

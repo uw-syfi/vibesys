@@ -94,8 +94,8 @@ type world struct {
 	// forgetting says an operator asked for the lost repository to be given up, which is the one
 	// thing that lets go of a run whose store shows it running.
 	forgetting bool
-	// forgot says the forget of the lost repository went through.
-	forgot bool
+	// forgot says the forget of the lost repository went through, and trying says one is in flight.
+	forgot, trying bool
 	// forgotten are the stores the daemon gave up.
 	forgotten map[app.Scope]bool
 	// down says the stores fail every call. Only the driver touches it.

@@ -212,7 +212,7 @@ default to the environment variables shown:
 | `plan comment <n> --body text \| --body-file path` | Add a comment, which carries a decision or a result. |
 | `plan close <n> --status s [--comment text \| --comment-file path]` | Set a status other than `open` and add a comment, as one change. |
 | `daemon status\|stop\|restart` | Report on, stop, or restart the daemon. `daemon install` is not available yet. |
-| `daemon forget <repository>` | Give up a repository that is gone for good, such as a removed worktree: its jobs leave the daemon, what is left of their supervisors is let go of, and its stores leave the index. Nothing is touched where the repository was. A repository that is there, one whose directory cannot be read (a disk that is not mounted or does not answer), or one the daemon does not know, is refused: only a repository whose directory is not there is gone. |
+| `daemon forget <repository>` | Give up a repository that is gone for good, such as a removed worktree: its commands are ended, then its jobs leave the daemon, what is left of their supervisors is let go of, and its stores leave the index. A command that does not end when told is reported left, and the next job waits while it can run, up to its time limit. Nothing is touched where the repository was. A repository that is there, one whose directory cannot be read (a disk that is not mounted or does not answer), or one the daemon does not know, is refused: only a repository whose directory is not there is gone. |
 
 Plans belong to a task, are numbered 1, 2, ... by the daemon and never renumbered, and take one of
 five statuses: `open`, `chosen`, `won`, `parked` and `rejected`. The CLI orders none of them, so an

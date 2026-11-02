@@ -115,6 +115,8 @@ type outage struct {
 
 	// tries is how many times the daemon tries a call before it gives up; zero is attempts.
 	tries int
+	// stopTimeout is how long the daemon waits for a command it ended; zero is callLimit.
+	stopTimeout time.Duration
 
 	mu      sync.Mutex
 	away    map[string]bool
@@ -130,6 +132,16 @@ type outage struct {
 type gate struct{ entered, release chan struct{} }
 
 func newGate() *gate { return &gate{entered: make(chan struct{}), release: make(chan struct{})} }
+
+// await waits until the call arrived.
+func (g *gate) await(t *testing.T) {
+	t.Helper()
+	select {
+	case <-g.entered:
+	case <-ctxFor(t).Done():
+		t.Fatal("the call never came")
+	}
+}
 
 func newOutage(t *testing.T) (*world, *outage) {
 	t.Helper()
@@ -151,7 +163,7 @@ func (o *outage) build(sups supervisor.Supervisors) *app.App {
 		Clock: o.w.clock, Timers: o.limits, Stores: o, Supervisors: sups,
 		Environments: fakeenv.Environments{core.EnvironmentHost: o.w.env},
 		Retry:        app.Retry{Attempts: cmp.Or(o.tries, attempts), First: time.Millisecond, Longest: time.Millisecond},
-		CallTimeout:  callLimit, StopTimeout: callLimit, SlowPeriod: slowPeriod, LogBatchDelay: time.Millisecond,
+		CallTimeout:  callLimit, StopTimeout: cmp.Or(o.stopTimeout, callLimit), SlowPeriod: slowPeriod, LogBatchDelay: time.Millisecond,
 		Logf: func(string, ...any) {},
 	})
 	o.w.apps = append(o.w.apps, a)
@@ -672,6 +684,105 @@ func TestEveryConnectionToASupervisorIsGivenUp(t *testing.T) {
 	if opened, closed := sups.opened.Load(), sups.closed.Load(); opened != closed {
 		t.Fatalf("%d connections opened and %d given up", opened, closed)
 	}
+}
+
+// heldCancels is supervisors whose runs, as listed, take a cancel only when the test says: with a
+// gate, a cancel waits for it, and with none, a cancel is dropped, as one that never reaches a
+// command that ignores it.
+type heldCancels struct {
+	supervisor.Supervisors
+	gate *gate
+}
+
+func (s heldCancels) Runs(ctx context.Context) ([]supervisor.Run, error) {
+	runs, err := s.Supervisors.Runs(ctx)
+	for i, run := range runs {
+		if alive, ok := run.(supervisor.Alive); ok {
+			alive.Handle = heldCancel{Handle: alive.Handle, gate: s.gate}
+			runs[i] = alive
+		}
+	}
+	return runs, err
+}
+
+type heldCancel struct {
+	supervisor.Handle
+	gate *gate
+}
+
+func (h heldCancel) Cancel(ctx context.Context, reason string) error {
+	if h.gate == nil {
+		return nil
+	}
+	close(h.gate.entered)
+	<-h.gate.release
+	return h.Handle.Cancel(ctx, reason)
+}
+
+// #3762: forgetting a repository ends its commands before the machine lets its jobs go, so the next
+// job does not start beside a command that is still ending.
+func TestForgettingARepositoryEndsItsCommandsBeforeTheNextJobStarts(t *testing.T) {
+	w, o := newOutage(t)
+	cancel := newGate()
+	a := o.start(heldCancels{Supervisors: w.supervisors(), gate: cancel})
+	job := submitAs(t, a, callA, "hold", "g", ";", "exit", "0")
+	o.awaitIn(t, a, scopeA, job.ID, "running", func(j core.Job) bool { return j.State == core.JobRunning })
+	other := submitAs(t, a, callB, "print", "other", ";", "exit", "0")
+	o.remove(repoA)
+	done := make(chan error, 1)
+	go func() {
+		_, err := a.ForgetRepository(ctxFor(t), repoA)
+		done <- err
+	}()
+	cancel.await(t)
+	if st := a.Status(); st.Queued != 1 {
+		t.Fatalf("the next job left the queue while the forgotten repository's command still ran: %+v", st)
+	}
+	close(cancel.release)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctxFor(t).Done():
+		t.Fatal("the forget did not end")
+	}
+	if got := o.awaitFinalIn(t, a, scopeB, other.ID); got.State != core.JobSucceeded {
+		t.Fatalf("the other repository's job = %s", got.State)
+	}
+}
+
+// #3762: a command of a forgotten repository that does not end when it is told is reported left,
+// and holds the machine while it can run, up to its limit, as it did before the forget.
+func TestACommandLeftByAForgetHoldsTheMachineUpToItsLimit(t *testing.T) {
+	w, o := newOutage(t)
+	o.stopTimeout = time.Millisecond
+	a := o.start(heldCancels{Supervisors: w.supervisors()})
+	spec := command("hold", "g", ";", "exit", "0")
+	spec.Settings = core.CommandSettings{Argv: spec.Settings.(core.CommandSettings).Argv, Timeout: time.Minute}
+	if _, err := a.Submit(ctxFor(t), app.SubmitRequest{Context: callA, Spec: spec}); err != nil {
+		t.Fatal(err)
+	}
+	awaitActive(t, w)
+	other := submitAs(t, a, callB, "print", "other", ";", "exit", "0")
+	o.remove(repoA)
+	out, err := a.ForgetRepository(ctxFor(t), repoA)
+	if err != nil || len(out.Left) != 1 {
+		t.Fatalf("ForgetRepository = %+v, %v; want the running job left", out, err)
+	}
+	if st := a.Status(); st.Queued != 1 {
+		t.Fatalf("the next job left the queue beside a command left running within its limit: %+v", st)
+	}
+	o.limits.pass()
+	if n := w.ran("other"); n != 0 {
+		t.Fatalf("the other job ran beside a command left running within its limit: %d runs", n)
+	}
+	w.clock.Advance(2 * time.Minute)
+	if got := o.awaitFinalIn(t, a, scopeB, other.ID); got.State != core.JobSucceeded {
+		t.Fatalf("the other repository's job = %s", got.State)
+	}
+	w.gates.Release("g")
+	awaitIdle(t, w)
 }
 
 // A repository that is gone for good is given up: its jobs leave the machine, what is left of its

@@ -45,7 +45,8 @@ type profile struct {
 	lost bool
 	// lostHangs says the lost repository does not fail its calls but never answers them.
 	lostHangs bool
-	// forget says the lost repository is given up with `daemon forget` when the world heals.
+	// forget says the lost repository is given up with `daemon forget`, while the world is in
+	// chaos or when it heals.
 	forget bool
 }
 
@@ -251,9 +252,9 @@ func (w *world) wait(l located) {
 // ends in the world's own check and not in a loop no time passes in.
 const forgetAttempts = 20
 
-// forget gives up a repository that is gone, as an operator would: again until it is done, as a
-// daemon may die under the call or a store may not answer in time. It must not be refused, as the
-// repository is gone. A repository already forgotten is not known.
+// forget gives up a repository that is gone, as an operator would when the world heals: again until
+// it is done, as a daemon may die under the call or a store may not answer in time. It must not be
+// refused, as the repository is gone. A repository already forgotten is not known.
 func (w *world) forget(repo string) {
 	w.mu.Lock()
 	w.forgetting = true
@@ -263,25 +264,59 @@ func (w *world) forget(repo string) {
 			if ctx.Err() != nil {
 				break
 			}
-			c, err := client.Connect(ctx, w.options())
-			if err != nil {
-				continue
-			}
-			_, err = c.ForgetRepository(ctx, repo)
-			c.Close()
-			var f *core.Failure
-			switch {
-			case err == nil, errors.As(err, &f) && f.Kind == core.FailureNotFound:
-				w.mu.Lock()
-				w.forgot = true
-				w.mu.Unlock()
-				return ""
-			case f != nil && f.Kind == core.FailureConflict:
-				return fmt.Sprintf("forgetting %s was refused: %v", repo, err)
+			if done, violation := w.tryForget(ctx, repo); done || violation != "" {
+				return violation
 			}
 		}
 		return ""
 	})
+}
+
+// forgetOnce is one try at giving up the lost repository while the world is in chaos: its command
+// may still run, and the other repository's work waits. Another try is offered until one is done.
+func (w *world) forgetOnce(repo string) {
+	w.mu.Lock()
+	w.forgetting, w.trying = true, true
+	w.mu.Unlock()
+	w.start("forget", func(ctx context.Context) string {
+		defer func() {
+			w.mu.Lock()
+			w.trying = false
+			w.mu.Unlock()
+		}()
+		_, violation := w.tryForget(ctx, repo)
+		return violation
+	})
+}
+
+// mayForget says a try at giving up the lost repository can start: none is in flight or went
+// through.
+func (w *world) mayForget() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.lost != "" && !w.forgot && !w.trying
+}
+
+// tryForget asks a daemon to give up the repository once, and says whether that is done, or what
+// it did wrong.
+func (w *world) tryForget(ctx context.Context, repo string) (bool, string) {
+	c, err := client.Connect(ctx, w.options())
+	if err != nil {
+		return false, ""
+	}
+	_, err = c.ForgetRepository(ctx, repo)
+	c.Close()
+	var f *core.Failure
+	switch {
+	case err == nil, errors.As(err, &f) && f.Kind == core.FailureNotFound:
+		w.mu.Lock()
+		w.forgot = true
+		w.mu.Unlock()
+		return true, ""
+	case f != nil && f.Kind == core.FailureConflict:
+		return false, fmt.Sprintf("forgetting %s was refused: %v", repo, err)
+	}
+	return false, ""
 }
 
 // forgetAway forgets a repository whose disk does not answer, as an operator who took it for gone
@@ -409,6 +444,11 @@ func (w *world) actions() []option {
 				}
 			})
 		}
+	}
+	if p.forget && w.mayForget() {
+		// Given up while its command may still run and the other repository's work waits: the
+		// command ends before that work starts, or holds the machine while it can run.
+		add("forget "+w.lost, func() { w.forgetOnce(w.lost) })
 	}
 	if p.sever {
 		for _, ref := range follows {

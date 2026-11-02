@@ -148,11 +148,13 @@ func (a *App) loop() {
 			scopes[storeIDOf(*m.scope)] = *m.scope
 		}
 		var reqs []lifecycle.Request
+		before := state
 		state, reqs = lifecycle.Step(state, m.event)
 		// Before any effect starts: whoever sees an effect's work in a store finds the counts
 		// already past it.
 		a.publish(state, scopes, m.changed)
 		keepHandle(handles, m, reqs, state)
+		dropLetGo(handles, before, state, reqs)
 		for _, r := range reqs {
 			a.startEffect(r, scopes, handles)
 		}
@@ -195,6 +197,21 @@ func keepHandle(handles map[lifecycle.Ref]supervisor.Handle, m message, reqs []l
 	}
 	dropHandle(handles, ref)
 	handles[ref] = m.handle
+}
+
+// dropLetGo closes the handles of the jobs the machine stopped holding at this step, such as a left
+// job whose command can no longer run, unless a request it just made needs one.
+func dropLetGo(handles map[lifecycle.Ref]supervisor.Handle, before, after lifecycle.State, reqs []lifecycle.Request) {
+	held := map[lifecycle.Ref]bool{}
+	for _, h := range after.Held() {
+		held[h.Ref] = true
+	}
+	for _, h := range before.Held() {
+		asked := slices.ContainsFunc(reqs, func(r lifecycle.Request) bool { return r.Target() == h.Ref })
+		if !held[h.Ref] && !asked {
+			dropHandle(handles, h.Ref)
+		}
+	}
 }
 
 func dropHandle(handles map[lifecycle.Ref]supervisor.Handle, ref lifecycle.Ref) {
