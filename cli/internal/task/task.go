@@ -330,6 +330,9 @@ func build(name string, m manifest, o objectivesFile) (Task, error) {
 	if t.Benchmark, err = bench.command("benchmark"); err != nil {
 		return Task{}, err
 	}
+	if bench.RequiresAccuracy != nil && !*bench.RequiresAccuracy {
+		return Task{}, unsupported("%s: requires_accuracy = false is not supported; a measurement is saved only after its check passed", ManifestName)
+	}
 	if m.Build != nil {
 		c, err := buildCommand(*m.Build)
 		if err != nil {
