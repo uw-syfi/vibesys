@@ -111,6 +111,8 @@ export {
 export {NewBelow} from './components/new-below.js';
 export {type NiceScale, niceScale} from './components/nice-scale.js';
 export {
+  type AttentionAction,
+  AttentionCard,
   type ChartKeyItem,
   OverviewGroup,
   OverviewTile,

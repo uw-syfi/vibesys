@@ -1,4 +1,5 @@
 import {
+  AttentionCard,
   OverviewGroup,
   OverviewTile,
   RailFrame,
@@ -70,7 +71,13 @@ function Tiles(props: {readonly title: string}): JSX.Element {
 
 export const OVERVIEW_ENTRIES: Pick<
   Record<ComponentName, GalleryEntry>,
-  'RailFrame' | 'RailItem' | 'ResultChart' | 'ResultChartKey' | 'OverviewTile' | 'OverviewGroup'
+  | 'RailFrame'
+  | 'RailItem'
+  | 'ResultChart'
+  | 'ResultChartKey'
+  | 'OverviewTile'
+  | 'OverviewGroup'
+  | 'AttentionCard'
 > = {
   RailFrame: {
     render: () => (
@@ -131,4 +138,27 @@ export const OVERVIEW_ENTRIES: Pick<
   },
   OverviewTile: {render: () => <Tiles title="Tiles" />},
   OverviewGroup: {render: () => <Tiles title="Running" />},
+  AttentionCard: {
+    render: () => (
+      <OverviewGroup title="Needs you" count={2} tone="err" wide>
+        <AttentionCard
+          title="queue-rs run7 spsc"
+          facts="host-a · Oct 17 00:00 · 3 ideas · 40m"
+          status={{tone: 'err', label: 'Failed'}}
+          why="All 3 ideas failed, so nothing beat the input."
+          actions={[{text: 'Run again', press: noop}]}
+          menu={[{id: 'archive', label: 'Archive', press: noop}]}
+          press={noop}
+        />
+        <AttentionCard
+          title="queue-rs run8 mpsc"
+          facts="host-b · Oct 16 21:00 · 2 ideas · best 1.30×"
+          status={{tone: 'warn', label: 'Quiet 32m'}}
+          why="Still running, but it has recorded nothing for 32m."
+          actions={[]}
+          press={noop}
+        />
+      </OverviewGroup>
+    ),
+  },
 };

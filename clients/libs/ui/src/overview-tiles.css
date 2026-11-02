@@ -29,6 +29,12 @@
   border-color: var(--chip-err-border);
   background: var(--banner-err-bg);
 }
+.vs-overview-group:has(> .vs-overview-tiles[data-wide]) {
+  gap: var(--space-4);
+}
+.vs-overview-tiles[data-wide] {
+  grid-template-columns: repeat(auto-fill, minmax(min(var(--column-metric), 100%), 1fr));
+}
 .vs-overview-tile:hover {
   border-color: var(--muted);
 }
@@ -193,4 +199,52 @@
   height: var(--focus-ring);
   border-radius: 0;
   background: var(--text);
+}
+/* A card for a run that needs its user: the pill on the title's row, why in a sentence, then actions. */
+.vs-attention-card {
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.vs-attention-card[data-attention-tone="err"] {
+  border-color: var(--chip-err-border);
+  background: var(--banner-err-bg);
+}
+.vs-attention-card[data-attention-tone="warn"] {
+  border-color: var(--chip-warn-border);
+  background: var(--banner-warn-bg);
+}
+.vs-attention-card-top {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.vs-attention-card-top > :last-child {
+  flex: none;
+}
+.vs-attention-card-head {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.vs-attention-card-head > :first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vs-attention-card[data-menu] .vs-attention-card-top {
+  padding-right: calc(var(--control-sm) - var(--space-4));
+}
+.vs-attention-card-why {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.vs-attention-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: 0 var(--space-4) var(--space-3);
 }

@@ -1,4 +1,5 @@
 import type {CSSProperties, JSX, ReactNode} from 'react';
+import {Button} from './button.js';
 import {Menu, type MenuItem} from './menu.js';
 import {Chip, StatusDot, type StatusTone} from './status.js';
 import {Text} from './text.js';
@@ -184,14 +185,93 @@ export function OverviewTile(props: {
   );
 }
 
+/** What a person can do about a subject that needs them, as a button under its card. */
+export interface AttentionAction {
+  readonly text: string;
+  readonly press: () => void;
+}
+
+/**
+ * One subject that needs its user, as a card: its `title` with the `facts` line under it and its
+ * `status` pill beside them, `why` it needs them in a sentence (three lines at most, the whole on
+ * the pointer), and what they can do about it (`actions`). The card's border is the pill's tone.
+ * Pressing the card opens the subject; `menu` adds a row menu in its corner.
+ */
+export function AttentionCard(props: {
+  readonly title: string;
+  readonly facts: string;
+  readonly status: {readonly tone: 'warn' | 'err'; readonly label: string};
+  readonly why: string;
+  readonly actions: readonly AttentionAction[];
+  readonly hint?: string;
+  readonly menu?: readonly MenuItem[];
+  readonly press: () => void;
+}): JSX.Element {
+  return (
+    <article
+      className="vs-overview-tile vs-attention-card"
+      data-attention-tone={props.status.tone}
+      data-menu={props.menu !== undefined || undefined}
+    >
+      <button
+        type="button"
+        className="vs-overview-tile-press"
+        title={props.hint}
+        onClick={props.press}
+      >
+        <span className="vs-attention-card-top">
+          <span className="vs-attention-card-head">
+            <Text variant="item">{props.title}</Text>
+            <span className="vs-overview-tile-line" title={props.facts}>
+              <Text variant="small" tone="muted">
+                {props.facts}
+              </Text>
+            </span>
+          </span>
+          <Chip label={props.status.label} tone={props.status.tone} />
+        </span>
+        <span className="vs-attention-card-why" title={props.why}>
+          <Text>{props.why}</Text>
+        </span>
+      </button>
+      {props.actions.length === 0 ? null : (
+        <span className="vs-attention-card-actions">
+          {props.actions.map(action => (
+            <Button
+              key={action.text}
+              variant="secondary"
+              size="sm"
+              text={action.text}
+              press={action.press}
+            />
+          ))}
+        </span>
+      )}
+      {props.menu === undefined ? null : (
+        <span className="vs-overview-tile-menu">
+          <Menu
+            icon="more"
+            label={`More for ${props.title}`}
+            variant="quiet"
+            size="sm"
+            items={props.menu}
+          />
+        </span>
+      )}
+    </article>
+  );
+}
+
 /**
  * A titled group of tiles on one grid that wraps to the width: a small status dot (when
- * `tone` is given), the group's `title` and the count of its tiles.
+ * `tone` is given), the group's `title` and the count of its tiles. `wide` gives each column the
+ * room of a card (`AttentionCard`) rather than a tile.
  */
 export function OverviewGroup(props: {
   readonly title: string;
   readonly count: number;
   readonly tone?: StatusTone;
+  readonly wide?: boolean;
   readonly children: ReactNode;
 }): JSX.Element {
   return (
@@ -201,7 +281,9 @@ export function OverviewGroup(props: {
         <Text variant="section">{props.title}</Text>
         <Text variant="section">{String(props.count)}</Text>
       </div>
-      <div className="vs-overview-tiles">{props.children}</div>
+      <div className="vs-overview-tiles" data-wide={props.wide === true || undefined}>
+        {props.children}
+      </div>
     </section>
   );
 }
