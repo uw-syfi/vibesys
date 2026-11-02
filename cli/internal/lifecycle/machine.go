@@ -1020,8 +1020,10 @@ func (s *State) storeBlocked(id StoreID) bool {
 	})
 }
 
+// A parked job in doubt does not block its store: it is known, its supervisor is parked, and it is
+// the first job the machine takes up when it is free.
 func (e entry) blocksStore() bool {
-	return e.phase == PhaseInDoubt || (e.phase == PhaseUnrecorded && e.settlement.Transition.From == core.JobRunning)
+	return (e.phase == PhaseInDoubt && !e.parked) || (e.phase == PhaseUnrecorded && e.settlement.Transition.From == core.JobRunning)
 }
 
 // Held is one job the machine holds.
@@ -1053,11 +1055,13 @@ type Trouble struct {
 }
 
 // Troubled returns the jobs in PhaseUnrecorded and PhaseInDoubt. Whoever waits for one of them has
-// no end to wait for until the trouble passes, and is told so.
+// no end to wait for until the trouble passes, and is told so. A parked job is not here: nothing is
+// wrong with it, it starts in its turn like a queued job, and Waiting says what holds its turn up
+// when that is a trouble.
 func (s State) Troubled() []Trouble {
 	var out []Trouble
 	for _, e := range s.entries {
-		if e.phase == PhaseUnrecorded || e.phase == PhaseInDoubt {
+		if e.phase == PhaseUnrecorded || (e.phase == PhaseInDoubt && !e.parked) {
 			out = append(out, Trouble{Ref: e.ref, Failure: e.trouble})
 		}
 	}
@@ -1089,13 +1093,13 @@ func (s State) Unread() []StoreID {
 	return out
 }
 
-// Waiting returns the queued jobs that wait on another job's or their own store's trouble, and why.
-// Each will start when that passes, and its waiter is told. A job that only waits its turn behind
-// a job that runs is not here.
+// Waiting returns the queued and parked jobs that wait on another job's or their own store's
+// trouble, and why. Each will start when that passes, and its waiter is told. A job that only
+// waits its turn behind a job that runs is not here.
 func (s State) Waiting() []Trouble {
 	var out []Trouble
 	for _, e := range s.entries {
-		if e.phase != PhaseQueued {
+		if e.phase != PhaseQueued && !e.parked {
 			continue
 		}
 		if why, ok := s.waitsOn(e); ok {

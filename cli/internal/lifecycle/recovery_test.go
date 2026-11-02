@@ -162,3 +162,61 @@ func TestASecondLookAdoptsWithTheCancelFirst(t *testing.T) {
 		t.Fatalf("the second look asked for %#v, want an Adopt with the cancel first", reqs[0])
 	}
 }
+
+// told is the jobs a waiter is told about: those in trouble and those held up by one.
+func told(s lifecycle.State) []lifecycle.Ref {
+	var out []lifecycle.Ref
+	for _, t := range append(s.Troubled(), s.Waiting()...) {
+		out = append(out, t.Ref)
+	}
+	return out
+}
+
+// A job whose store has it running and whose command has not started is not in trouble: it starts
+// in its turn, as a queued job does. A daemon that restarts at that point must not tell whoever
+// waits for the job that it cannot end. This holds before the machine has heard of every job, when
+// a client can already ask, and after, and for a job of the same store queued behind it.
+func TestAParkedJobIsNotToldAsTroubleToItsWaiters(t *testing.T) {
+	behind := lifecycle.Ref{Store: aRef.Store, Job: "j2"}
+	s, reqs := lifecycle.Step(lifecycle.Recovering(), lifecycle.Recovered{
+		Ref: aRef, Finding: in(core.JobRunning), Supervisor: alive(lifecycle.RunParked), At: epoch,
+	})
+	if len(reqs) != 0 {
+		t.Fatalf("recovering a parked job asked for %v, want nothing before RecoveryDone", kinds(reqs))
+	}
+	s, _ = lifecycle.Step(s, lifecycle.Admitted{Ref: behind, SubmittedAt: epoch.Add(time.Second)})
+	if got := told(s); len(got) != 0 {
+		t.Fatalf("while recovering, told %v about jobs that only wait for their turn", got)
+	}
+	s, reqs = lifecycle.Step(s, lifecycle.RecoveryDone{})
+	if got := kinds(reqs); !slices.Equal(got, []string{"Adopt"}) {
+		t.Fatalf("RecoveryDone asked for %v, want the parked job adopted", got)
+	}
+	if got := told(s); len(got) != 0 {
+		t.Fatalf("after recovery, told %v about jobs that only wait for their turn", got)
+	}
+}
+
+// A parked job that waits for a job the daemon cannot judge is told why, like a queued one, and not
+// as a trouble of its own.
+func TestAParkedJobBehindAJobInDoubtIsToldWhatItWaitsFor(t *testing.T) {
+	doubtful := lifecycle.Ref{Store: lifecycle.StoreIDOf("/other", "t"), Job: "j9"}
+	s, _ := lifecycle.Step(lifecycle.Recovering(), lifecycle.Recovered{
+		Ref: doubtful, Finding: in(core.JobRunning), Supervisor: lifecycle.RunUnknown{Limit: time.Hour}, At: epoch,
+	})
+	s, _ = lifecycle.Step(s, lifecycle.Recovered{
+		Ref: aRef, Finding: in(core.JobRunning), Supervisor: alive(lifecycle.RunParked), At: epoch,
+	})
+	s, reqs := lifecycle.Step(s, lifecycle.RecoveryDone{})
+	if got := kinds(reqs); len(got) != 0 {
+		t.Fatalf("the parked job started (%v) while a command that cannot be judged may hold the machine", got)
+	}
+	for _, tr := range s.Troubled() {
+		if tr.Ref == aRef {
+			t.Fatalf("the parked job is told as a trouble of its own: %+v", tr)
+		}
+	}
+	if w := s.Waiting(); len(w) != 1 || w[0].Ref != aRef {
+		t.Fatalf("waiting = %+v, want the parked job with the reason", w)
+	}
+}
