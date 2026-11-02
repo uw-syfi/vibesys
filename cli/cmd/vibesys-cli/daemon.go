@@ -16,7 +16,7 @@ import (
 // itself and is what a client starts.
 func daemonCommand(ctx context.Context, d deps, args []string) int {
 	if len(args) == 0 {
-		return fail(d, false, usagef("daemon: status, stop or restart"))
+		return fail(d, d.jsonErrors, usagef("daemon: status, stop or restart"))
 	}
 	switch args[0] {
 	case "status":
@@ -28,9 +28,9 @@ func daemonCommand(ctx context.Context, d deps, args []string) int {
 	case "run":
 		return daemonRun(ctx, d)
 	case "install":
-		return fail(d, false, &unavailable{"daemon install is not available in this build; the daemon starts when a command needs it"})
+		return fail(d, d.jsonErrors, &unavailable{"daemon install is not available in this build; the daemon starts when a command needs it"})
 	default:
-		return fail(d, false, usagef("daemon: %q is not a daemon command (status, stop or restart)", args[0]))
+		return fail(d, d.jsonErrors, usagef("daemon: %q is not a daemon command (status, stop or restart)", args[0]))
 	}
 }
 
@@ -46,10 +46,7 @@ func dialExisting(ctx context.Context, d deps) (*client.Client, error) {
 func daemonStatus(ctx context.Context, d deps, args []string) int {
 	fs, c := newFlags("daemon status", d)
 	if _, err := parse(fs, args); err != nil {
-		if isHelp(err) {
-			return exitOK
-		}
-		return exitInvalidInput
+		return parseFailed(d, fs, err)
 	}
 	cl, err := dialExisting(ctx, d)
 	if err == client.ErrNoDaemon {
@@ -78,10 +75,7 @@ func daemonStatus(ctx context.Context, d deps, args []string) int {
 func daemonStop(ctx context.Context, d deps, args []string) int {
 	fs, c := newFlags("daemon stop", d)
 	if _, err := parse(fs, args); err != nil {
-		if isHelp(err) {
-			return exitOK
-		}
-		return exitInvalidInput
+		return parseFailed(d, fs, err)
 	}
 	cl, err := dialExisting(ctx, d)
 	if err == client.ErrNoDaemon {
@@ -110,10 +104,7 @@ func daemonStop(ctx context.Context, d deps, args []string) int {
 func daemonRestart(ctx context.Context, d deps, args []string) int {
 	fs, c := newFlags("daemon restart", d)
 	if _, err := parse(fs, args); err != nil {
-		if isHelp(err) {
-			return exitOK
-		}
-		return exitInvalidInput
+		return parseFailed(d, fs, err)
 	}
 	opts, err := d.options()
 	if err != nil {
@@ -167,19 +158,16 @@ func readyPipe() io.WriteCloser {
 // supervisorCommand is `supervisor serve --run-dir dir`, the process the daemon starts for a job.
 func supervisorCommand(ctx context.Context, d deps, args []string) int {
 	if len(args) == 0 || args[0] != "serve" {
-		return fail(d, false, usagef("supervisor: serve --run-dir <dir> (the daemon runs this; it is not for hands)"))
+		return fail(d, d.jsonErrors, usagef("supervisor: serve --run-dir <dir> (the daemon runs this; it is not for hands)"))
 	}
 	fs, _ := newFlags("supervisor serve", d)
 	runDir := fs.String("run-dir", "", "the job's run directory")
 	if _, err := parse(fs, args[1:]); err != nil {
-		if isHelp(err) {
-			return exitOK
-		}
-		return exitInvalidInput
+		return parseFailed(d, fs, err)
 	}
 	ready := readyPipe()
 	if ready == nil {
-		return fail(d, false, usagef("supervisor serve: the daemon passes its readiness pipe on descriptor %d", production.ReadyFD))
+		return fail(d, d.jsonErrors, usagef("supervisor serve: the daemon passes its readiness pipe on descriptor %d", production.ReadyFD))
 	}
 	if err := d.process.RunSupervisor(ctx, *runDir, ready); err != nil {
 		fmt.Fprintf(d.stderr, "vibesys-cli: %v\n", err)

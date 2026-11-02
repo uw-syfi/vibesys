@@ -50,6 +50,9 @@ type deps struct {
 	// upgrade makes what `vibesys-cli upgrade` acts on: where releases come from and which binary
 	// to replace.
 	upgrade func() (upgradeEnv, error)
+	// jsonErrors says the command line asks for JSON, so that even an error from before its flags
+	// are read is a Failure.
+	jsonErrors bool
 }
 
 func main() {
@@ -109,8 +112,12 @@ func run(args []string, d deps) int {
 		_, _ = fmt.Fprint(d.stdout, usage)
 		return exitOK
 	}
+	d.jsonErrors = wantsJSON(args)
 	command, ok := lookup(args)
 	if !ok {
+		if d.jsonErrors {
+			return fail(d, true, usagef("%q is not a command", args[0]))
+		}
 		_, _ = fmt.Fprint(d.stderr, usage)
 		return exitInvalidInput
 	}

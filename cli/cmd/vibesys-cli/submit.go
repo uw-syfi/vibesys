@@ -16,15 +16,15 @@ import (
 // check and measure jobs need an environment that can build and benchmark a commit.
 func submitCommand(ctx context.Context, d deps, args []string) int {
 	if len(args) == 0 {
-		return fail(d, false, usagef("submit: name the kind of job: command"))
+		return fail(d, d.jsonErrors, usagef("submit: name the kind of job: command"))
 	}
 	switch args[0] {
 	case "command":
 		return submitJob(ctx, d, args[1:])
 	case "check", "measure":
-		return fail(d, false, &unavailable{fmt.Sprintf("submit %s is not available in this build: %s jobs need the host or docker environment", args[0], args[0])})
+		return fail(d, d.jsonErrors, &unavailable{fmt.Sprintf("submit %s is not available in this build: %s jobs need the host or docker environment", args[0], args[0])})
 	default:
-		return fail(d, false, usagef("submit: %q is not a kind of job (command)", args[0]))
+		return fail(d, d.jsonErrors, usagef("submit: %q is not a kind of job (command)", args[0]))
 	}
 }
 
@@ -48,10 +48,7 @@ func submitJob(ctx context.Context, d deps, args []string) int {
 	)
 	positional, err := parse(fs, flagArgs)
 	if err != nil {
-		if isHelp(err) {
-			return exitOK
-		}
-		return exitInvalidInput
+		return parseFailed(d, fs, err)
 	}
 	asJSON := c.json
 	switch {
@@ -138,5 +135,5 @@ func connect(ctx context.Context, d deps) (*client.Client, error) {
 // timeoutNote is what a wait that timed out tells its caller, who might otherwise think the jobs
 // were stopped.
 func timeoutNote(after time.Duration) string {
-	return fmt.Sprintf("vibesys-cli: timed out after %v; the jobs are still going. A timeout never cancels a job.\n", after)
+	return fmt.Sprintf("timed out after %v; the jobs are still going. A timeout never cancels a job.", after)
 }

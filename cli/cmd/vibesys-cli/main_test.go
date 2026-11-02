@@ -323,6 +323,60 @@ func TestJSONErrors(t *testing.T) {
 	}
 }
 
+// Whatever goes wrong, and however early, a command line with --json gets a Failure and no text.
+func TestJSONErrorsFromBeforeTheCommandRuns(t *testing.T) {
+	c := newCLI(t)
+	for _, args := range [][]string{
+		{"bogus", "--json"},
+		{"--json"},
+		{"wait", "--no-such-flag", "--json"},
+		{"wait", "--json", "--no-such-flag"},
+		{"wait", "--timeout", "soon", "--json"},
+		{"jobs", "--state", "nonsense", "--json"},
+		{"cancel", "--json", "--no-such-flag"},
+		{"note", "--json", "--no-such-flag"},
+		{"logs", "--json", "--no-such-flag"},
+		{"submit", "command", "--json", "--no-such-flag", "--", "true"},
+		{"daemon", "status", "--json", "--no-such-flag"},
+		{"daemon", "stop", "--json", "--no-such-flag"},
+		{"daemon", "restart", "--json", "--no-such-flag"},
+		{"daemon", "bogus", "--json"},
+	} {
+		r := c.run(args...)
+		var f struct{ Kind, Message string }
+		if err := json.Unmarshal([]byte(r.stderr), &f); err != nil {
+			t.Errorf("%v: stderr is not one Failure: %v: %q", args, err, r.stderr)
+			continue
+		}
+		if r.code != exitInvalidInput || r.stdout != "" || f.Kind != "FAILURE_KIND_INVALID_INPUT" || f.Message == "" {
+			t.Errorf("%v = %+v, failure %+v", args, r, f)
+		}
+	}
+}
+
+func TestWaitTimeoutUnderJSONIsAFailure(t *testing.T) {
+	c := newCLI(t)
+	id := c.submit("hold", "g", ";", "exit", "0")
+	done := make(chan result, 1)
+	go func() { done <- c.run(withTask("wait", id, "--timeout", "30m", "--json")...) }()
+	<-c.timers.Armed()
+	c.timers.Fire()
+	r := <-done
+	var f struct{ Kind, Message string }
+	if r.code != exitTimeout || json.Unmarshal([]byte(r.stderr), &f) != nil || f.Kind != "FAILURE_KIND_UNAVAILABLE" || !strings.Contains(f.Message, "never cancels") {
+		t.Fatalf("wait --json that timed out = %+v", r)
+	}
+	c.world.Gates.Release("g")
+}
+
+func TestAnArgumentOfTheJobIsNotAskingForJSON(t *testing.T) {
+	c := newCLI(t)
+	r := c.run("wait", "--no-such-flag", "--", "--json")
+	if json.Valid([]byte(r.stderr)) {
+		t.Fatalf("stderr = %q, want the plain error", r.stderr)
+	}
+}
+
 func TestSubmitOfLaterKindsIsUnavailable(t *testing.T) {
 	c := newCLI(t)
 	for _, kind := range []string{"check", "measure"} {

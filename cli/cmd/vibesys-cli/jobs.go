@@ -19,10 +19,7 @@ func waitCommand(ctx context.Context, d deps, args []string) int {
 	timeout := fs.Duration("timeout", 0, "give up after this long, such as 30m; the jobs are not cancelled")
 	ids, err := parse(fs, args)
 	if err != nil {
-		if isHelp(err) {
-			return exitOK
-		}
-		return exitInvalidInput
+		return parseFailed(d, fs, err)
 	}
 	switch {
 	case len(ids) == 0:
@@ -61,7 +58,7 @@ func waitFor(ctx context.Context, d deps, cl *client.Client, callCtx *cliv1.Call
 	}
 	switch {
 	case res.TimedOut:
-		fmt.Fprint(d.stderr, timeoutNote(opts.Timeout))
+		fail(d, asJSON, wire.Unavailable(timeoutNote(opts.Timeout)))
 		return exitTimeout
 	case res.Succeeded:
 		return exitOK
@@ -77,10 +74,7 @@ func cancelCommand(ctx context.Context, d deps, args []string) int {
 	reason := fs.String("reason", "", "why the job is cancelled; waiters see it")
 	ids, err := parse(fs, args)
 	if err != nil {
-		if isHelp(err) {
-			return exitOK
-		}
-		return exitInvalidInput
+		return parseFailed(d, fs, err)
 	}
 	if len(ids) != 1 {
 		return fail(d, c.json, usagef("cancel: name one job"))
@@ -111,10 +105,7 @@ func noteCommand(ctx context.Context, d deps, args []string) int {
 	fs, c := newFlags("note", d)
 	positional, err := parse(fs, args)
 	if err != nil {
-		if isHelp(err) {
-			return exitOK
-		}
-		return exitInvalidInput
+		return parseFailed(d, fs, err)
 	}
 	if len(positional) != 2 {
 		return fail(d, c.json, usagef("note: give a job and the text of the note, quoted as one argument"))
@@ -150,10 +141,7 @@ func jobsCommand(ctx context.Context, d deps, args []string) int {
 	fs.Var(&states, "state", "only jobs in this state; repeat or separate with commas")
 	positional, err := parse(fs, args)
 	if err != nil {
-		if isHelp(err) {
-			return exitOK
-		}
-		return exitInvalidInput
+		return parseFailed(d, fs, err)
 	}
 	if len(positional) != 0 {
 		return fail(d, c.json, usagef("jobs: unexpected argument %q", positional[0]))
@@ -216,10 +204,7 @@ func logsCommand(ctx context.Context, d deps, args []string) int {
 	offset := fs.Uint64("offset", 0, "start at this byte of the output")
 	ids, err := parse(fs, args)
 	if err != nil {
-		if isHelp(err) {
-			return exitOK
-		}
-		return exitInvalidInput
+		return parseFailed(d, fs, err)
 	}
 	if len(ids) != 1 {
 		return fail(d, c.json, usagef("logs: name one job"))

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
+	"slices"
 	"strings"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
@@ -32,6 +34,9 @@ type common struct {
 func newFlags(name string, d deps) (*flag.FlagSet, *common) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(d.stderr)
+	if d.jsonErrors {
+		fs.SetOutput(io.Discard) // parseFailed says it as a Failure.
+	}
 	c := &common{}
 	fs.BoolVar(&c.json, "json", false, "print the result as JSON")
 	fs.StringVar(&c.repo, "repo", d.getenv("VIBESYS_REPO"), "the git repository (default: the one containing the current directory)")
@@ -114,6 +119,35 @@ func (l *stateList) Set(v string) error {
 		*l = append(*l, s)
 	}
 	return nil
+}
+
+// wantsJSON says whether a command line asks for JSON. It is for what goes wrong before the command
+// has read its flags, so it reads the arguments itself. What follows a lone "--" is the job's.
+func wantsJSON(args []string) bool {
+	before, _, _ := splitDashes(args)
+	return slices.ContainsFunc(before, func(a string) bool {
+		switch a {
+		case "--json", "-json", "--json=true", "-json=true":
+			return true
+		}
+		return false
+	})
+}
+
+// parseFailed ends a command whose flags did not parse and returns its exit code. The flag package
+// has printed the error, unless --json asks for a Failure instead.
+func parseFailed(d deps, fs *flag.FlagSet, err error) int {
+	switch {
+	case isHelp(err) && d.jsonErrors:
+		fs.SetOutput(d.stderr)
+		fs.Usage()
+		return exitOK
+	case isHelp(err):
+		return exitOK
+	case d.jsonErrors:
+		return fail(d, true, usagef("%v", err))
+	}
+	return exitInvalidInput
 }
 
 // errHelp reports that help was asked for, which is not a failure.
