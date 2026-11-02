@@ -30,11 +30,14 @@ const (
 // beyond itself. An entry ending in "/" allows the whole subtree. A package with Go files and no
 // entry fails the check, so a new package states its layer in the change that adds it.
 var rules = map[string][]string{
-	"internal/core":          {},
-	"internal/jobs":          {"internal/core"},
-	"internal/jobs/jobstest": {"internal/core", "internal/jobs"},
-	"internal/wire":          {"internal/core", "gen/"},
-	"internal/archcheck":     {},
+	"internal/core":            {},
+	"internal/jobs":            {"internal/core"},
+	"internal/jobs/jobstest":   {"internal/core", "internal/jobs"},
+	"internal/wire":            {"internal/core", "gen/"},
+	"internal/archcheck":       {},
+	"internal/store":           {"internal/core", "internal/wire", "internal/localfs"},
+	"internal/store/storetest": {"internal/core", "internal/store", "internal/wire"},
+	"internal/localfs":         {},
 }
 
 // testRules lists, for each package directory, the packages only its test files may import in
