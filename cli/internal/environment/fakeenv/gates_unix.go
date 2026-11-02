@@ -9,8 +9,13 @@ import (
 )
 
 // FIFOGates are gates that live in a directory, so a script running in another process waits for
-// a test running in this one. A gate is a named pipe: the script blocks reading it, and a gate
-// is released when a byte is written to it. Nothing polls.
+// a test running in this one. A gate is a named pipe and a file beside it. The script blocks reading
+// the pipe, and a release creates the file and then writes a byte to the pipe. Nothing polls.
+//
+// The file is what makes a release last. A pipe keeps a byte only while someone has it open, so a
+// byte written before the script gets there is gone when the writer closes. A waiter opens the pipe
+// first and looks for the file second: a release that finished before it opened left the file, and
+// one that did not will write to a pipe the waiter holds. Either way the waiter sees it.
 type FIFOGates struct {
 	dir string
 	mu  sync.Mutex
@@ -37,9 +42,13 @@ func (g *FIFOGates) open(name string) (*os.File, error) {
 	return os.OpenFile(path, os.O_RDWR, 0)
 }
 
-// Release opens the gate. A gate released before anyone waits stays released, since the byte is
-// kept in the pipe.
+func (g *FIFOGates) marker(name string) string { return filepath.Join(g.dir, name+".released") }
+
+// Release opens the gate for everyone who waits at it, now and later, as MemoryGates does.
 func (g *FIFOGates) Release(name string) error {
+	if err := os.WriteFile(g.marker(name), nil, 0o600); err != nil {
+		return err
+	}
 	f, err := g.open(name)
 	if err != nil {
 		return err
@@ -55,19 +64,25 @@ func (g *FIFOGates) Wait(ctx context.Context, name string) bool {
 	if err != nil {
 		return false
 	}
+	defer f.Close()
+	if _, err := os.Stat(g.marker(name)); err == nil {
+		return true
+	}
 	released := make(chan bool, 1)
 	go func() {
 		var b [1]byte
 		n, err := f.Read(b[:])
+		if n == 1 && err == nil {
+			// Whoever else waits needs a byte too.
+			_, err = f.Write(b[:])
+		}
 		released <- n == 1 && err == nil
 	}()
 	select {
 	case ok := <-released:
-		f.Close()
 		return ok
 	case <-ctx.Done():
 		// Closing the file ends the blocked read, which is how the reader goroutine ends.
-		f.Close()
 		return false
 	}
 }
