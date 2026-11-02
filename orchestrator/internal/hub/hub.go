@@ -79,7 +79,7 @@ func New(limits Limits) *Hub {
 func (h *Hub) Subscribe(in Interest) *Subscription {
 	s := &Subscription{
 		hub: h, interest: in, wake: make(chan struct{}, 1),
-		pending: map[deltaKey]*pendingDelta{}, broken: map[core.ItemID]struct{}{}, final: map[core.ItemID]struct{}{},
+		pending: map[deltaKey]*pendingDelta{}, broken: newItemSet(), final: newItemSet(),
 	}
 	h.mu.Lock()
 	h.subs[s] = struct{}{}
@@ -151,9 +151,9 @@ type Subscription struct {
 	order   []deltaKey
 	// broken names items that lost a delta, so that later deltas would build on a gap. They are
 	// ignored until the item's next stored version.
-	broken map[core.ItemID]struct{}
+	broken *itemSet
 	// final names items whose last version was sent, so that a late delta is not shown after it.
-	final  map[core.ItemID]struct{}
+	final  *itemSet
 	count  int
 	bytes  int
 	lagged bool
@@ -208,7 +208,7 @@ func (s *Subscription) wantsStored(st Stored) bool {
 // lag drops everything queued, because the client must start from a snapshot anyway.
 func (s *Subscription) lag() {
 	s.ready, s.pending, s.order = nil, map[deltaKey]*pendingDelta{}, nil
-	s.broken, s.final = map[core.ItemID]struct{}{}, map[core.ItemID]struct{}{}
+	s.broken, s.final = newItemSet(), newItemSet()
 	s.count, s.bytes = 0, 0
 	s.lagged = true
 	s.signal()
@@ -220,11 +220,11 @@ func (s *Subscription) addStored(st Stored, size int, l Limits) {
 	}
 	if st.Item != "" {
 		s.supersede(st.Item)
-		delete(s.broken, st.Item)
+		s.broken.remove(st.Item)
 		if st.ItemFinal {
-			s.final[st.Item] = struct{}{}
+			s.final.add(st.Item)
 		} else {
-			delete(s.final, st.Item)
+			s.final.remove(st.Item)
 		}
 	}
 	if s.count+1 > l.MaxItems || s.bytes+size > l.MaxBytes {
@@ -273,10 +273,10 @@ func filterKeys(keys []deltaKey, item core.ItemID) []deltaKey {
 
 func (s *Subscription) addDelta(d *pb.Delta, l Limits) {
 	item := core.ItemID(d.GetItemId())
-	if _, stale := s.final[item]; stale || s.lagged {
+	if s.final.has(item) || s.lagged {
 		return
 	}
-	if _, gap := s.broken[item]; gap {
+	if s.broken.has(item) {
 		return
 	}
 	_, output := d.GetBody().(*pb.Delta_CommandOutput)
@@ -310,7 +310,7 @@ func (s *Subscription) addDelta(d *pb.Delta, l Limits) {
 
 // drop gives up on an item's deltas until its next stored version.
 func (s *Subscription) drop(item core.ItemID) {
-	s.broken[item] = struct{}{}
+	s.broken.add(item)
 	s.supersede(item)
 }
 

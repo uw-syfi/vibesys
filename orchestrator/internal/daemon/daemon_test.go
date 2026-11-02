@@ -112,7 +112,7 @@ func TestAnAgentCannotActWithoutItsToken(t *testing.T) {
 	r.Settle(t)
 	run, _ := r.Daemon.State().Run(core.RunID(receipt.GetRunId()))
 	ctx := agentContext(run.Lead, 1, "wrong")
-	_, err := r.Service.Dispatch(ctx, &pb.DispatchRequest{Command: &pb.Command{Id: "x", Body: &pb.Command_StopRun{StopRun: &pb.StopRun{RunId: string(run.ID)}}}})
+	_, err := r.AgentService.Dispatch(ctx, &pb.DispatchRequest{Command: &pb.Command{Id: "x", Body: &pb.Command_StopRun{StopRun: &pb.StopRun{RunId: string(run.ID)}}}})
 	if status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("a wrong token gave %v, want Unauthenticated", err)
 	}

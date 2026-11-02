@@ -31,6 +31,18 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/internal/store"
 )
 
+// CallBound is how long the daemon waits for one call to a sidecar, the job source or the plan
+// reader before it gives up and retries.
+const CallBound = 30 * time.Second
+
+// Timeouts bounds each call by CallBound on the system clock.
+type Timeouts struct{}
+
+// Bound implements daemon.Bounds.
+func (Timeouts) Bound(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, CallBound)
+}
+
 // Version is the release version, or "dev".
 var Version = "dev"
 
@@ -66,8 +78,11 @@ func (CommandIDs) NewCommandID() string { return "cli-" + RandomHex(12) }
 type Layout struct {
 	// State is the directory proven local that holds the database and the token secret.
 	State localfs.Dir
-	// Socket is the daemon's private Unix socket.
+	// Socket is the operator's private Unix socket. No agent's environment names it.
 	Socket string
+	// AgentSocket is the agent-only socket, the one every launched session is told. It serves only
+	// what an agent may do, to callers that carry a session's credentials.
+	AgentSocket string
 }
 
 // maxSocketPath is the longest path a Unix socket address holds on the systems that matter.
@@ -80,14 +95,22 @@ func LayoutFor(getenv func(string) string, home string) (Layout, error) {
 	if err != nil {
 		return Layout{}, err
 	}
-	socket := filepath.Join(state.Path(), "orchestrator.sock")
-	if run := getenv("XDG_RUNTIME_DIR"); run != "" {
-		socket = filepath.Join(run, "vibesys-orchestrator.sock")
+	socket, agentSocket := socketPaths(state.Path(), getenv("XDG_RUNTIME_DIR"))
+	for _, path := range []string{socket, agentSocket} {
+		if len(path) > maxSocketPath {
+			return Layout{}, fmt.Errorf("the socket path %s is longer than %d bytes, which a Unix socket cannot hold: set a shorter state directory", path, maxSocketPath)
+		}
 	}
-	if len(socket) > maxSocketPath {
-		return Layout{}, fmt.Errorf("the socket path %s is longer than %d bytes, which a Unix socket cannot hold: set a shorter state directory", socket, maxSocketPath)
+	return Layout{State: state, Socket: socket, AgentSocket: agentSocket}, nil
+}
+
+// socketPaths places the operator's socket and the agent-only socket, side by side: under the
+// user's runtime directory when there is one, and in the state directory otherwise.
+func socketPaths(state, runtimeDir string) (operator, agent string) {
+	if runtimeDir != "" {
+		return filepath.Join(runtimeDir, "vibesys-orchestrator.sock"), filepath.Join(runtimeDir, "vibesys-orchestrator-agent.sock")
 	}
-	return Layout{State: state, Socket: socket}, nil
+	return filepath.Join(state, "orchestrator.sock"), filepath.Join(state, "orchestrator-agent.sock")
 }
 
 // UnixDialer connects to a daemon's socket.
@@ -187,33 +210,65 @@ func (w *waitCloser) Close() error {
 	return nil
 }
 
-// secret returns the token secret of a state directory, creating it on first use.
-func secret(dir localfs.Dir) ([]byte, error) {
-	path := filepath.Join(dir.Path(), "token-secret")
-	if data, err := os.ReadFile(path); err == nil && len(data) >= 16 {
+// secret returns the token secret of a state directory, creating it on first use. It is written to
+// a file of its own and renamed into place, so that a crash leaves either no secret or a whole one:
+// a half-written secret would be regenerated on the next start and would end every live session's
+// token. A file that exists and is too short is an error and is never replaced.
+func secret(dir localfs.Dir) ([]byte, error) { return secretIn(dir.Path()) }
+
+func secretIn(dir string) ([]byte, error) {
+	path := filepath.Join(dir, "token-secret")
+	data, err := os.ReadFile(path)
+	switch {
+	case err == nil && len(data) >= 16:
 		return data, nil
+	case err == nil:
+		return nil, fmt.Errorf("%s holds %d bytes and needs at least 16: delete it to start over, which ends the tokens of every live session", path, len(data))
+	case !errors.Is(err, os.ErrNotExist):
+		return nil, fmt.Errorf("read the token secret: %w", err)
 	}
-	data := make([]byte, 32)
+	data = make([]byte, 32)
 	if _, err := rand.Read(data); err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	tmp, err := os.CreateTemp(dir, "token-secret-*.tmp")
+	if err != nil {
 		return nil, fmt.Errorf("write the token secret: %w", err)
+	}
+	defer os.Remove(tmp.Name())
+	_, werr := tmp.Write(data)
+	if serr := tmp.Sync(); werr == nil {
+		werr = serr
+	}
+	if cerr := tmp.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr == nil {
+		werr = os.Chmod(tmp.Name(), 0o600)
+	}
+	if werr == nil {
+		werr = os.Rename(tmp.Name(), path)
+	}
+	if werr != nil {
+		return nil, fmt.Errorf("write the token secret: %w", werr)
 	}
 	return data, nil
 }
 
 // Wiring is what a daemon needs that this build does not provide itself. The sidecar host is the
 // sidecar item's, and the job source and the plan reader are vibesys-cli's; until they are wired
-// the daemon starts and refuses launches with a message that says so.
+// the daemon starts and refuses launches with a message that says so. A nil Jobs means there is no
+// job source, which the daemon treats as no source and not as a source with no jobs.
 type Wiring struct {
 	Sidecars daemon.Sidecars
 	Jobs     jobs.JobSource
 	Plans    daemon.PlanReader
 }
 
-// Serve runs the daemon until ctx ends: it opens the database, listens on the private socket and
-// runs the loop. There is no shutdown work; a stop is a crash and the next start recovers.
+// Serve runs the daemon until ctx ends: it opens the database, listens on the operator's socket
+// and on the agent-only socket, and runs the loop. There is no shutdown work; a stop is a crash and
+// the next start recovers. If either server or the loop fails, the daemon stops with that error, so
+// it never stays up serving nothing.
 func Serve(ctx context.Context, layout Layout, wiring Wiring, log *slog.Logger) error {
 	db, err := store.OpenSQLite(layout.State, store.SQLiteOptions{})
 	if err != nil {
@@ -240,23 +295,41 @@ func Serve(ctx context.Context, layout Layout, wiring Wiring, log *slog.Logger) 
 				}
 			},
 		},
-		Sidecars: wiring.Sidecars, Jobs: wiring.Jobs, Authority: authority, Socket: layout.Socket,
-		JobPollEvery: 5 * time.Second,
+		Sidecars: wiring.Sidecars, Jobs: wiring.Jobs, Authority: authority, Bounds: Timeouts{},
+		AgentSocket: layout.AgentSocket, JobPollEvery: 5 * time.Second,
 	})
 	if err != nil {
 		return err
 	}
+	// Reattach reports the calls it could not finish and leaves them to the loop, so a sidecar host
+	// that is slow to answer does not keep the daemon from serving.
 	if err := d.Reattach(ctx); err != nil {
-		return fmt.Errorf("reattach the sidecars: %w", err)
+		log.Warn("some sessions are not reattached yet; the loop retries", "err", err)
 	}
-	listener, err := listenPrivate(layout.Socket)
-	if err != nil {
-		return err
+	ctx, stopAll := context.WithCancel(ctx)
+	defer stopAll()
+	var servers []*grpc.Server
+	failed := make(chan error, 2)
+	for _, s := range []struct {
+		socket   string
+		audience daemon.Audience
+	}{{layout.Socket, daemon.AudienceOperator}, {layout.AgentSocket, daemon.AudienceAgent}} {
+		listener, err := listenPrivate(s.socket)
+		if err != nil {
+			return err
+		}
+		defer os.Remove(s.socket)
+		service, err := daemon.NewService(d.Engine, daemon.ServiceDeps{
+			Plans: wiring.Plans, Authority: authority, Audience: s.audience, Bounds: Timeouts{}, Binary: Version,
+		})
+		if err != nil {
+			return err
+		}
+		server := grpc.NewServer()
+		service.Register(server)
+		servers = append(servers, server)
+		go func() { failed <- server.Serve(listener) }()
 	}
-	defer os.Remove(layout.Socket)
-	server := grpc.NewServer()
-	daemon.NewService(d.Engine, wiring.Plans, authority, Version).Register(server)
-
 	ticker := time.NewTicker(daemon.MergeWindow)
 	defer ticker.Stop()
 	wake <- struct{}{}
@@ -265,18 +338,32 @@ func Serve(ctx context.Context, layout Layout, wiring Wiring, log *slog.Logger) 
 		defer close(loopDone)
 		d.Run(ctx, ticker.C, wake, log)
 	}()
-	go func() {
-		<-ctx.Done()
+	log.Info("orchestrator serving", "socket", layout.Socket, "agent_socket", layout.AgentSocket, "version", Version)
+	serveErr := awaitServers(ctx, failed)
+	stopAll()
+	for _, server := range servers {
 		server.Stop()
-	}()
-	log.Info("orchestrator serving", "socket", layout.Socket, "version", Version)
-	err = server.Serve(listener)
-	<-ctx.Done()
+	}
 	<-loopDone
-	if err != nil && !errors.Is(err, grpc.ErrServerStopped) {
-		return err
+	if serveErr != nil && !errors.Is(serveErr, grpc.ErrServerStopped) {
+		return serveErr
 	}
 	return nil
+}
+
+// awaitServers blocks until the context ends, which is a clean stop, or until a server stops, which
+// is a failure whatever it returned: a server that returns nil has stopped serving too, and a
+// daemon that stays up with a socket nobody answers is worse than one that exits.
+func awaitServers(ctx context.Context, failed <-chan error) error {
+	select {
+	case <-ctx.Done():
+		return nil
+	case err := <-failed:
+		if err == nil {
+			return errors.New("a server stopped serving")
+		}
+		return err
+	}
 }
 
 // listenPrivate listens on a Unix socket only the user can reach. The store already holds the
@@ -310,12 +397,6 @@ func (NoSidecars) Launch(context.Context, core.LaunchSession, daemon.LaunchEnv) 
 func (NoSidecars) Attach(context.Context, core.Session) (daemon.Sidecar, error) {
 	return nil, daemon.ErrSidecarGone
 }
-
-// NoJobs is a job source with no jobs, for a build with no vibesys-cli wired in.
-type NoJobs struct{}
-
-// Jobs implements jobs.JobSource.
-func (NoJobs) Jobs(context.Context, core.Run) ([]core.JobUpdate, error) { return nil, nil }
 
 // NoPlans is a plan reader for a build with no vibesys-cli wired in.
 type NoPlans struct{}

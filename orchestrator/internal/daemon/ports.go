@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
@@ -24,6 +25,36 @@ type Clock interface{ Now() time.Time }
 // Nonces mints the nonce of each input. Two calls never return the same value, across restarts.
 type Nonces interface{ Next() core.Nonce }
 
+// Bounds gives each call the daemon makes outside itself a limit, so that one call that never
+// returns cannot stall the loop that serves every agent. Production returns a context with a
+// timeout; a test returns one it ends itself. The daemon asks for a bound for every call to a
+// Sidecars, Sidecar, JobSource or PlanReader, and treats the end of the bound as a failure to retry:
+// the call may or may not have had its effect, which every call it makes can bear.
+type Bounds interface {
+	Bound(ctx context.Context) (context.Context, context.CancelFunc)
+}
+
+// ErrExpired says a call outlived its bound. It is retryable, and says nothing of whether the call
+// had its effect.
+var ErrExpired = errors.New("daemon: the call outlived its bound")
+
+// bound runs call under a bound. An error caused by the bound ending, and not by the caller's
+// context, wraps ErrExpired.
+func bound[T any](b Bounds, ctx context.Context, call func(context.Context) (T, error)) (T, error) {
+	bctx, cancel := b.Bound(ctx)
+	defer cancel()
+	v, err := call(bctx)
+	if err != nil && bctx.Err() != nil && ctx.Err() == nil {
+		return v, fmt.Errorf("%w: %w", ErrExpired, err)
+	}
+	return v, err
+}
+
+func bounded(b Bounds, ctx context.Context, call func(context.Context) error) error {
+	_, err := bound(b, ctx, func(c context.Context) (struct{}, error) { return struct{}{}, call(c) })
+	return err
+}
+
 // ErrSidecarGone says a session's sidecar does not exist: it never started, or it died.
 var ErrSidecarGone = errors.New("daemon: the session's sidecar is gone")
 
@@ -33,7 +64,7 @@ var ErrSidecarGone = errors.New("daemon: the session's sidecar is gone")
 var ErrIdle = errors.New("daemon: no sidecar event is ready")
 
 // LaunchEnv is what the daemon gives a session's process at launch, so that the agent's tools reach
-// the daemon as that agent. The sidecar item decides how it reaches the process.
+// the daemon as that agent. It names the agent-only socket and never the operator's. The sidecar item decides how it reaches the process.
 type LaunchEnv map[string]string
 
 // The names in a LaunchEnv. The agent's identity is here and nowhere in a tool's arguments.
@@ -62,7 +93,8 @@ type Sidecar interface {
 	// Send carries out a command. A repeated effect id answers as the first delivery did. It
 	// returns ErrSidecarGone when the sidecar is no longer there.
 	Send(ctx context.Context, cmd *pb.SidecarCommand) error
-	// Follow streams the session's events after an offset.
+	// Follow streams the session's events after an offset. Its context bounds the call that opens the
+	// stream and not the stream, which outlives it and ends with Close.
 	Follow(ctx context.Context, afterOffset uint64) (EventStream, error)
 	// Kill ends the process without waiting for it. It is for a session written off.
 	Kill(ctx context.Context) error

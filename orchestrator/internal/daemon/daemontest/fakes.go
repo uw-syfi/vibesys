@@ -4,6 +4,7 @@ package daemontest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -54,6 +55,30 @@ func (n *Nonces) Next() core.Nonce {
 type Plans struct {
 	mu    sync.Mutex
 	plans map[core.RunID][]*pb.Plan
+	// Stall makes that many calls hang until their context ends, calling Elapse first.
+	Stall  int
+	Elapse func()
+}
+
+func (p *Plans) hang(ctx context.Context) (bool, error) {
+	p.mu.Lock()
+	stall := p.Stall > 0
+	if stall {
+		p.Stall--
+	}
+	elapse := p.Elapse
+	p.mu.Unlock()
+	if !stall {
+		return false, nil
+	}
+	if ctx.Done() == nil {
+		return true, errors.New("fake plans: a call that hangs was made with no bound")
+	}
+	if elapse != nil {
+		elapse()
+	}
+	<-ctx.Done()
+	return true, ctx.Err()
 }
 
 // NewPlans returns a reader with no plans.
@@ -67,7 +92,10 @@ func (p *Plans) Set(run core.RunID, plans ...*pb.Plan) {
 }
 
 // ListPlans implements daemon.PlanReader.
-func (p *Plans) ListPlans(_ context.Context, run core.Run) ([]*pb.Plan, error) {
+func (p *Plans) ListPlans(ctx context.Context, run core.Run) ([]*pb.Plan, error) {
+	if hung, err := p.hang(ctx); hung {
+		return nil, err
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.plans[run.ID], nil
@@ -102,6 +130,44 @@ type Sidecars struct {
 	Wake func()
 	// AttachFails makes Attach report every sidecar gone, as if a host restart had killed them.
 	AttachFails bool
+	// Stall makes that many calls (of Launch, Attach, Send, Follow, Kill) hang until their context
+	// ends, as a sidecar that has stopped answering would. Elapse is called when a call hangs, and
+	// stands for the time passing until the caller's bound ends: a Rig sets it to its Bounds. A
+	// call that hangs with a context nothing can end is reported as Unbounded and fails at once,
+	// so a daemon that forgot its bound fails a test and does not hang it.
+	Stall     int
+	Elapse    func()
+	Unbounded int
+	// LaunchError, when set, is what a failing launch reports.
+	LaunchError error
+	// AfterSend, when set, is called after each command a session took, with the session's lock
+	// released. A test crashes the process from it.
+	AfterSend func()
+}
+
+// hang blocks until the call's context ends, if a stall is pending. It returns whether it did.
+func (h *Sidecars) hang(ctx context.Context) (bool, error) {
+	h.mu.Lock()
+	stall := h.Stall > 0
+	if stall {
+		h.Stall--
+	}
+	elapse := h.Elapse
+	h.mu.Unlock()
+	if !stall {
+		return false, nil
+	}
+	if ctx.Done() == nil {
+		h.mu.Lock()
+		h.Unbounded++
+		h.mu.Unlock()
+		return true, errors.New("fake host: a call that hangs was made with no bound")
+	}
+	if elapse != nil {
+		elapse()
+	}
+	<-ctx.Done()
+	return true, ctx.Err()
 }
 
 // NewSidecars returns a host with no sessions.
@@ -126,7 +192,10 @@ func (h *Sidecars) Sessions() []*Session {
 }
 
 // Launch implements daemon.Sidecars. A repeated launch finds the session it started.
-func (h *Sidecars) Launch(_ context.Context, l core.LaunchSession, env daemon.LaunchEnv) (daemon.Sidecar, error) {
+func (h *Sidecars) Launch(ctx context.Context, l core.LaunchSession, env daemon.LaunchEnv) (daemon.Sidecar, error) {
+	if hung, err := h.hang(ctx); hung {
+		return nil, err
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if s, ok := h.sessions[l.Session]; ok {
@@ -134,6 +203,9 @@ func (h *Sidecars) Launch(_ context.Context, l core.LaunchSession, env daemon.La
 	}
 	if h.LaunchFailures > 0 {
 		h.LaunchFailures--
+		if h.LaunchError != nil {
+			return nil, h.LaunchError
+		}
 		return nil, fmt.Errorf("fake host: cannot start %s/%d", l.Session.Agent, l.Session.N)
 	}
 	s := &Session{Launch: l, Env: env, seen: map[string]bool{}, host: h}
@@ -150,7 +222,10 @@ func (h *Sidecars) Launch(_ context.Context, l core.LaunchSession, env daemon.La
 }
 
 // Attach implements daemon.Sidecars.
-func (h *Sidecars) Attach(_ context.Context, session core.Session) (daemon.Sidecar, error) {
+func (h *Sidecars) Attach(ctx context.Context, session core.Session) (daemon.Sidecar, error) {
+	if hung, err := h.hang(ctx); hung {
+		return nil, err
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	s, ok := h.sessions[session]
@@ -174,7 +249,9 @@ type Session struct {
 	closed bool
 	// Held, when set, keeps the session from reacting: a test emits events itself.
 	Held bool
-	host *Sidecars
+	// failNext makes the next read of the stream report a break that a reopened stream recovers from.
+	failNext bool
+	host     *Sidecars
 }
 
 // Emit appends an event to the session's stream, giving it the next offset.
@@ -204,6 +281,21 @@ func (s *Session) Die() {
 	s.dead = true
 }
 
+// BreakStream makes the next read of any stream of the session fail, as a dropped connection does.
+// The session and its events are untouched, and a stream opened afterwards reads them again.
+func (s *Session) BreakStream() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failNext = true
+}
+
+// Commands returns the commands the session took, each once.
+func (s *Session) Commands() []*pb.SidecarCommand {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]*pb.SidecarCommand(nil), s.Received...)
+}
+
 // Dead says the process is gone.
 func (s *Session) Dead() bool {
 	s.mu.Lock()
@@ -216,7 +308,18 @@ type conn struct {
 	s    *Session
 }
 
-func (c *conn) Send(_ context.Context, cmd *pb.SidecarCommand) error {
+func (c *conn) Send(ctx context.Context, cmd *pb.SidecarCommand) error {
+	if hung, err := c.host.hang(ctx); hung {
+		return err
+	}
+	err := c.send(cmd)
+	if c.host.AfterSend != nil {
+		c.host.AfterSend()
+	}
+	return err
+}
+
+func (c *conn) send(cmd *pb.SidecarCommand) error {
 	c.s.mu.Lock()
 	defer c.s.mu.Unlock()
 	if c.s.dead {
@@ -238,7 +341,10 @@ func (c *conn) Send(_ context.Context, cmd *pb.SidecarCommand) error {
 	return nil
 }
 
-func (c *conn) Follow(_ context.Context, after uint64) (daemon.EventStream, error) {
+func (c *conn) Follow(ctx context.Context, after uint64) (daemon.EventStream, error) {
+	if hung, err := c.host.hang(ctx); hung {
+		return nil, err
+	}
 	c.s.mu.Lock()
 	defer c.s.mu.Unlock()
 	if c.s.dead {
@@ -247,7 +353,10 @@ func (c *conn) Follow(_ context.Context, after uint64) (daemon.EventStream, erro
 	return &stream{s: c.s, after: after}, nil
 }
 
-func (c *conn) Kill(context.Context) error {
+func (c *conn) Kill(ctx context.Context) error {
+	if hung, err := c.host.hang(ctx); hung {
+		return err
+	}
 	c.s.mu.Lock()
 	defer c.s.mu.Unlock()
 	c.s.dead = true
@@ -262,6 +371,10 @@ type stream struct {
 func (st *stream) Next() (*pb.SidecarEvent, error) {
 	st.s.mu.Lock()
 	defer st.s.mu.Unlock()
+	if st.s.failNext {
+		st.s.failNext = false
+		return nil, errors.New("fake stream: the connection dropped")
+	}
 	for _, ev := range st.s.events {
 		if ev.Offset > st.after {
 			st.after = ev.Offset

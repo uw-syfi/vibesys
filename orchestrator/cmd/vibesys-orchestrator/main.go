@@ -73,7 +73,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		}
 		log := slog.New(slog.NewTextHandler(stderr, nil))
 		err := production.Serve(ctx, layout, production.Wiring{
-			Sidecars: production.NoSidecars{}, Jobs: production.NoJobs{}, Plans: production.NoPlans{},
+			Sidecars: production.NoSidecars{}, Plans: production.NoPlans{},
 		}, log)
 		if err != nil {
 			return fail(err)

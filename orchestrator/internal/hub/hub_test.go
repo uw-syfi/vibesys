@@ -254,3 +254,23 @@ func maps(t truth) map[string]string {
 	}
 	return out
 }
+
+// A subscription that lives as long as a client stays connected remembers a bounded number of
+// finished items. The recent ones still refuse a late delta; one forgotten after that many others
+// would show a stale delta, which is advisory and superseded by the stored item.
+func TestAConnectionRemembersOnlyABoundedNumberOfFinishedItems(t *testing.T) {
+	h := hub.New(hub.Limits{MaxItems: 1 << 30, MaxBytes: 1 << 30})
+	sub := h.Subscribe(hub.Interest{Agent: "a"})
+	total := hub.MaxRemembered + 10
+	for i := range total {
+		h.PublishStored(itemEvent(uint64(i+1), "a", fmt.Sprintf("i%d", i), "done", false))
+	}
+	sub.Take()
+	h.PublishDelta(textDelta("a", fmt.Sprintf("i%d", total-1), "late"))
+	h.PublishDelta(textDelta("a", "i0", "very late"))
+	h.Flush()
+	got, _ := sub.Take()
+	if len(got) != 1 || got[0].Delta.GetItemId() != "i0" {
+		t.Fatalf("got %v, want the late delta of the newest finished item refused and the forgotten oldest one shown", got)
+	}
+}

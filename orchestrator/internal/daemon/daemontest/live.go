@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+
+	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 )
 
 // PipeListener is a net.Listener whose connections are in-memory pipes: Dial is the client's
@@ -67,34 +69,46 @@ func (l *PipeListener) Dial(ctx context.Context) (net.Conn, error) {
 // waits for events and not for time.
 type Live struct {
 	*Rig
-	Listener *PipeListener
-	ticks    chan time.Time
-	stop     func()
+	// Listener is the operator's socket and AgentListener the agent-only socket.
+	Listener      *PipeListener
+	AgentListener *PipeListener
+	ticks         chan time.Time
+	stop          func()
 }
 
 // Serve starts the gRPC server and the daemon loop. The test's cleanup stops them.
 func (r *Rig) Serve(tb testing.TB) *Live {
 	tb.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	l := &Live{Rig: r, Listener: NewPipeListener(), ticks: make(chan time.Time)}
-	server := grpc.NewServer()
-	r.Service.Register(server)
+	l := &Live{Rig: r, Listener: NewPipeListener(), AgentListener: NewPipeListener(), ticks: make(chan time.Time)}
+	var servers []*grpc.Server
 	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		if err := server.Serve(l.Listener); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
-			tb.Errorf("serve: %v", err)
-		}
-	}()
+	wg.Add(3)
+	for _, s := range []struct {
+		service  *daemon.Service
+		listener *PipeListener
+	}{{r.Service, l.Listener}, {r.AgentService, l.AgentListener}} {
+		server := grpc.NewServer()
+		s.service.Register(server)
+		servers = append(servers, server)
+		go func() {
+			defer wg.Done()
+			if err := server.Serve(s.listener); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
+				tb.Errorf("serve: %v", err)
+			}
+		}()
+	}
 	go func() {
 		defer wg.Done()
 		r.Daemon.Run(ctx, l.ticks, r.Wake, slog.New(slog.DiscardHandler))
 	}()
 	l.stop = func() {
 		cancel()
-		server.Stop()
+		for _, server := range servers {
+			server.Stop()
+		}
 		_ = l.Listener.Close()
+		_ = l.AgentListener.Close()
 		wg.Wait()
 	}
 	tb.Cleanup(l.Stop)

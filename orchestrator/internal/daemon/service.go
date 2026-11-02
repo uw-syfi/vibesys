@@ -26,27 +26,54 @@ const (
 	MetaToken   = "vibesys-token"
 )
 
-// Service is OrchestratorService over an Engine and the hub. An operator connects with no
-// credentials, over the daemon's private socket. An agent calls with the metadata above, and may
-// then ask for its own commands and for the snapshot of its run: nothing else.
-type Service struct {
-	pb.UnimplementedOrchestratorServiceServer
-	e         *Engine
-	plans     PlanReader
-	authority Authority
-	binary    string
+// Audience says who a Service is for. The daemon serves two sockets with one Service each, so that
+// who may call is settled by which socket was reached and not by what the caller claims.
+type Audience int
+
+const (
+	// AudienceOperator is the operator's socket. A call that carries an agent's credentials is
+	// refused there, so a tool that was launched with the wrong socket fails loudly.
+	AudienceOperator Audience = iota + 1
+	// AudienceAgent is the agent-only socket, the only one an agent's environment names. Every call
+	// needs the credentials of the agent's current session, and the calls open to an agent are its
+	// commands and the snapshot of its run: nothing else.
+	AudienceAgent
+)
+
+// ServiceDeps is what a Service is made of.
+type ServiceDeps struct {
+	Plans     PlanReader
+	Authority Authority
+	Audience  Audience
+	// Bounds limits the calls the service makes to the plan reader.
+	Bounds Bounds
+	// Binary is the release version, for display.
+	Binary string
 }
 
-// NewService returns the service. binary is the release version, for display.
-func NewService(e *Engine, plans PlanReader, authority Authority, binary string) *Service {
-	return &Service{e: e, plans: plans, authority: authority, binary: binary}
+// Service is OrchestratorService over an Engine and the hub, for one Audience.
+type Service struct {
+	pb.UnimplementedOrchestratorServiceServer
+	e *Engine
+	ServiceDeps
+}
+
+// NewService returns the service.
+func NewService(e *Engine, deps ServiceDeps) (*Service, error) {
+	if deps.Audience != AudienceOperator && deps.Audience != AudienceAgent {
+		return nil, errors.New("daemon: a Service needs an Audience")
+	}
+	if deps.Bounds == nil {
+		return nil, errors.New("daemon: ServiceDeps.Bounds is required")
+	}
+	return &Service{e: e, ServiceDeps: deps}, nil
 }
 
 // Register adds the service to a gRPC server.
 func (s *Service) Register(g grpc.ServiceRegistrar) { pb.RegisterOrchestratorServiceServer(g, s) }
 
 func (s *Service) versions() *pb.BuildVersions {
-	return &pb.BuildVersions{BinaryVersion: s.binary, ProtocolVersion: ProtocolVersion, MinProtocolVersion: MinProtocolVersion}
+	return &pb.BuildVersions{BinaryVersion: s.Binary, ProtocolVersion: ProtocolVersion, MinProtocolVersion: MinProtocolVersion}
 }
 
 // Hello answers a handshake with the daemon's versions and whether the two can talk.
@@ -69,12 +96,18 @@ func (s *Service) Hello(_ context.Context, req *pb.HelloRequest) (*pb.HelloRespo
 func (s *Service) caller(ctx context.Context) (core.Caller, error) {
 	md, _ := metadata.FromIncomingContext(ctx)
 	agent := md.Get(MetaAgent)
-	if len(agent) == 0 {
+	if s.Audience == AudienceOperator {
+		if len(agent)+len(md.Get(MetaSession))+len(md.Get(MetaToken)) > 0 {
+			return nil, status.Error(codes.PermissionDenied, "this is the operator's socket and it takes no agent credentials: an agent's tools use the socket named by "+EnvSocket)
+		}
 		return core.Operator{}, nil
+	}
+	if len(agent) == 0 {
+		return nil, status.Error(codes.Unauthenticated, "this is the agent socket and every call needs the session credentials: start the tool from the environment the orchestrator launched the agent with")
 	}
 	n, err := strconv.ParseUint(first(md.Get(MetaSession)), 10, 32)
 	session := core.Session{Agent: core.AgentID(agent[0]), N: uint32(n)}
-	if err != nil || !s.authority.Valid(session, first(md.Get(MetaToken))) {
+	if err != nil || !s.Authority.Valid(session, first(md.Get(MetaToken))) {
 		return nil, status.Error(codes.Unauthenticated, "the session token is missing or wrong: start the tool from the environment the orchestrator launched the agent with")
 	}
 	if !isLive(s.e.State(), session) {
@@ -339,7 +372,7 @@ func (s *Service) ListPlans(ctx context.Context, req *pb.ListPlansRequest) (*pb.
 	if err != nil {
 		return nil, err
 	}
-	plans, err := s.plans.ListPlans(ctx, run)
+	plans, err := bound(s.Bounds, ctx, func(c context.Context) ([]*pb.Plan, error) { return s.Plans.ListPlans(c, run) })
 	if err != nil {
 		return nil, status.Errorf(codes.Unavailable, "list plans of run %s: %v", run.ID, err)
 	}
@@ -355,7 +388,7 @@ func (s *Service) ViewPlan(ctx context.Context, req *pb.ViewPlanRequest) (*pb.Vi
 	if err != nil {
 		return nil, err
 	}
-	plan, err := s.plans.ViewPlan(ctx, run, req.GetNumber())
+	plan, err := bound(s.Bounds, ctx, func(c context.Context) (*pb.Plan, error) { return s.Plans.ViewPlan(c, run, req.GetNumber()) })
 	switch {
 	case errors.Is(err, ErrPlanNotFound):
 		return nil, status.Errorf(codes.NotFound, "run %s has no plan %d: list them with ListPlans", run.ID, req.GetNumber())

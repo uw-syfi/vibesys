@@ -9,8 +9,8 @@ module here, and it reaches `vibesys-cli` only through that tool's public contra
 Work is landing in stages. This module holds the contract, the pure decision core, the interface
 over `vibesys-cli` jobs, the code that converts between the two, the store, the daemon with its
 live hub, the MCP server, a headless client and the `vibesys-orchestrator` command. The sidecar
-launcher, the job source and the plan reader are placeholders in production until their items land
-(`internal/production`), and there is no desktop client yet.
+launcher and the plan reader are placeholders in production, and the job source is left unwired, until
+their items land (`internal/production`); there is no desktop client yet.
 
 ## Vocabulary
 
@@ -113,8 +113,8 @@ time and read latency on generated data.
 
 ## The daemon and its commands
 
-One daemon runs per user per host, on a private Unix socket. It is crash-only: starting is
-recovering. A serial loop feeds commands, sidecar events, job polls and timers to `Decide`, commits
+One daemon runs per user per host, on two private Unix sockets (see "Who may call"). It is
+crash-only: starting is recovering. A serial loop feeds commands, sidecar events, job polls and timers to `Decide`, commits
 the result through the store, and then a worker carries out the effects at least once. Time and
 nonces are injected, and an input that changes nothing is logged.
 
@@ -127,6 +127,48 @@ vibesys-orchestrator run watch                      # a snapshot, then events, a
 vibesys-orchestrator run stop RUN
 vibesys-orchestrator send AGENT "text"
 ```
+
+### Who may call
+
+The daemon serves two sockets, and which one a caller reached decides who it is:
+
+- The **operator socket** takes calls with no credentials and refuses any call that carries an
+  agent's. It is what `vibesys-orchestrator run`, `send` and `connect` use, and it is never put in
+  an agent's environment.
+- The **agent socket** is the only socket a launched session is told (`VIBESYS_ORCHESTRATOR_SOCKET`).
+  Every call on it needs the credentials of the agent's current session (agent id, session number
+  and an HMAC token the daemon derives from a secret), and the daemon never reads the caller from a
+  request body. An agent may issue the commands its role allows and read the snapshot of its run.
+  It cannot read history or plans.
+
+An agent sees every agent's items of its own run through `WatchRuns`: that is intended, since a lead
+and its workers work from one picture of the run.
+
+The limit, stated plainly: agents run as the same Unix user as the daemon. A hostile process of that
+user can read the operator socket's path from the state directory, or the token secret from the file
+beside the database, and act as the operator. The split fences an agent's mistakes and a stale
+session, and makes the operator socket something no tool is pointed at. Holding a determined agent
+back is a matter of agent confinement and run environments, in `docs/contributing/sandboxing.md`.
+An operator token file was rejected: a same-user agent can read it too, so it adds a secret and no
+boundary.
+
+### Restarts, calls to the world and failures
+
+- A restart first carries out every effect the last daemon left in the outbox, and only then looks
+  for the sidecars of the other live sessions. A session whose launch was committed and not carried
+  out is therefore launched, and is never mistaken for one whose sidecar died.
+- Every call to a sidecar, the job source or the plan reader runs under a bound from an injected
+  source (30 seconds in production). A call that outlives it is retried, and the retry blocks the
+  loop for at most one bound, so a sidecar that stopped answering delays the others by that much
+  per attempt and loses nothing.
+- A failed effect holds back the later effects of its session in the same batch, so a stop never
+  reaches a session before the turn it stops. Outbox rows that the store could not settle are
+  settled by the next step.
+- A session that could not be launched or found carries the reason in the agent's `end_detail`, and
+  a subagent's lead is told it in the settled message. With no job source wired, the daemon asks
+  none; it does not pretend there are no jobs.
+- If either server or the loop stops, the daemon exits with the error, so it never stays up
+  serving nothing.
 
 Watching gives a snapshot and then the events after its sequence. A client too far behind gets a
 fresh snapshot, never a gap. Live deltas of a running item reach only the clients watching that
@@ -163,8 +205,12 @@ ORCHESTRATOR_SIM_SEEDS=400 go test ./internal/core -run 'TestSimulation$' -timeo
 
 `internal/daemon/sim_test.go` runs a whole daemon (engine, effect worker, sidecar streams, job poll,
 service and hub) over Fakes from one seed, while it kills and restarts the daemon, kills sidecars,
-repeats and conflicts commands, refuses bad credentials, fails launches and job reads, and leaves
-clients that stop reading. Replay one seed or search further the same way:
+repeats and conflicts commands, refuses bad credentials, fails launches and job reads, leaves
+clients that stop reading, makes sidecar calls hang until their bound ends, makes the store fail to
+settle rows, and ends the process inside a step (after the claim, after a command was sent, before
+the rows are completed). Besides the core's invariants it checks two promises: every effect
+committed for a session that is still live reaches its sidecar, and a restart alone never ends a
+live run or writes off a live agent. Replay one seed or search further the same way:
 
 ```sh
 ORCHESTRATOR_SIM_SEED=7 go test ./internal/daemon -run 'TestDaemonSimulation$'

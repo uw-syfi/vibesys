@@ -138,10 +138,10 @@ func TestAnAgentCannotReadWhatOnlyTheOperatorMay(t *testing.T) {
 	rig := daemontest.NewRig(t)
 	run, lead := beginRun(t, rig)
 	ctx := agentContext(lead.ID, lead.Session, rig.Auth.Token(core.Session{Agent: lead.ID, N: lead.Session}))
-	if _, err := rig.Service.ListItems(ctx, &pb.ListItemsRequest{AgentId: string(lead.ID), BeforeOrdinal: 5, PageSize: 2}); status.Code(err) != codes.PermissionDenied {
+	if _, err := rig.AgentService.ListItems(ctx, &pb.ListItemsRequest{AgentId: string(lead.ID), BeforeOrdinal: 5, PageSize: 2}); status.Code(err) != codes.PermissionDenied {
 		t.Errorf("ListItems by an agent gave %v, want PermissionDenied", err)
 	}
-	if _, err := rig.Service.ListPlans(ctx, &pb.ListPlansRequest{RunId: string(run.ID)}); status.Code(err) != codes.PermissionDenied {
+	if _, err := rig.AgentService.ListPlans(ctx, &pb.ListPlansRequest{RunId: string(run.ID)}); status.Code(err) != codes.PermissionDenied {
 		t.Errorf("ListPlans by an agent gave %v, want PermissionDenied", err)
 	}
 }

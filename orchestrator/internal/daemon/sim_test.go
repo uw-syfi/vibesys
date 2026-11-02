@@ -2,6 +2,7 @@ package daemon_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
@@ -22,12 +23,15 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon/daemontest"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/hub"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
 )
 
 // The simulation runs a whole daemon (engine, effect worker, sidecar streams, job poll, service and
 // hub) over Fakes in one thread, from one seed. Around it go the faults a deployment has: the
 // daemon is killed and restarted, sidecars die, clients retry, stop reading and reconnect, and the
-// job source fails. After every step the state must satisfy the core's invariants, and at the end
+// job source fails. The world is also unkind to the daemon's own calls: a sidecar call hangs until its
+// bound ends, the store fails to settle a row, and the process ends inside a step (after the claim,
+// after a command was sent, before the rows are completed). After every step the state must satisfy the core's invariants, and at the end
 // what the store recovers must equal the live state, and every watcher's view must equal the
 // daemon's.
 
@@ -48,6 +52,8 @@ type sim struct {
 	noops  int
 	next   int // the next command id, never reused.
 	tally  counter
+	// clockMoved says the clock advanced since the daemon last settled, so a timer may be due.
+	clockMoved bool
 }
 
 func (s *sim) note(format string, args ...any) {
@@ -179,18 +185,122 @@ func (s *sim) agentCtx(a core.Agent, token string, session uint32) context.Conte
 		daemon.MetaAgent, string(a.ID), daemon.MetaSession, fmt.Sprint(session), daemon.MetaToken, token))
 }
 
+// tolerated are the errors a step reports for the faults the simulation injects.
+func tolerated(err error) bool {
+	return strings.Contains(err.Error(), "source unavailable") || errors.Is(err, daemon.ErrExpired) || errors.Is(err, daemontest.ErrInjected)
+}
+
+// stepDaemon runs one step. A crash the store was told to inject ends the daemon there: the world
+// keeps what the step had done, and a new daemon starts over what was committed.
+func (s *sim) stepDaemon() (moved bool, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			crash, ok := r.(daemontest.Crash)
+			if !ok {
+				panic(r)
+			}
+			s.note("the daemon crashes %s", crash.At)
+			s.tally["crash "+crash.At]++
+			s.restart()
+			moved, err = true, nil
+		}
+	}()
+	return s.rig.Daemon.Step(context.Background())
+}
+
 func (s *sim) settle() {
 	for range 5000 {
 		s.rig.Hub.Flush()
-		moved, err := s.rig.Daemon.Step(context.Background())
-		if err != nil && !strings.Contains(err.Error(), "source unavailable") {
+		moved, err := s.stepDaemon()
+		if err != nil && !tolerated(err) {
 			s.fail("step: %v", err)
 		}
 		if !moved {
+			s.clockMoved = false
 			return
 		}
 	}
 	s.fail("the daemon never settled")
+}
+
+// clearFaults spends every fault still pending, so that the daemon can settle.
+func (s *sim) clearFaults() {
+	h := s.rig.Sidecars
+	h.Stall, h.AfterSend = 0, nil
+	s.rig.Plans.Stall, s.rig.JobStall = 0, 0
+	s.rig.Faults.FailComplete, s.rig.Faults.FailRelease, s.rig.Faults.CrashAt = 0, 0, ""
+}
+
+// injectFault arms one fault for the next steps of the daemon.
+func (s *sim) injectFault() {
+	switch s.pick(6) {
+	case 0:
+		s.rig.Sidecars.Stall = 1 + s.pick(3)
+		s.note("the next %d sidecar calls hang", s.rig.Sidecars.Stall)
+		s.tally["stalled call"]++
+	case 1:
+		s.rig.Faults.FailComplete = 1 + s.pick(2)
+		s.note("the store fails to complete %d rows", s.rig.Faults.FailComplete)
+	case 2:
+		s.rig.Faults.FailRelease = 1 + s.pick(2)
+		s.note("the store fails to release %d rows", s.rig.Faults.FailRelease)
+	case 3:
+		s.rig.Faults.CrashAt = daemontest.CrashAfterClaim
+		s.note("the daemon will crash after its next claim")
+	case 4:
+		s.rig.Faults.CrashAt = daemontest.CrashBeforeComplete
+		s.note("the daemon will crash before its next complete")
+	case 5:
+		armed := true
+		s.rig.Sidecars.AfterSend = func() {
+			if armed {
+				armed = false
+				panic(daemontest.Crash{At: "after send"})
+			}
+		}
+		s.note("the daemon will crash after its next command is sent")
+	}
+}
+
+// checkDelivered holds the daemon to its second promise: every effect committed for a session that
+// is still live reaches that session's sidecar. It runs after the faults are spent and the daemon
+// has settled, when nothing but a bug can keep one back.
+func (s *sim) checkDelivered() {
+	s.clearFaults()
+	s.settle()
+	state := s.rig.Daemon.State()
+	for _, e := range s.rig.Faults.Committed {
+		cmd, ok, err := wire.SidecarCommandFor(e)
+		if err != nil || !ok {
+			continue
+		}
+		var session core.Session
+		switch b := e.(type) {
+		case core.StartTurn:
+			session = b.Session
+		case core.Steer:
+			session = b.Session
+		case core.Interrupt:
+			session = b.Session
+		case core.CloseSession:
+			session = b.Session
+		default:
+			continue
+		}
+		if a, live := state.Agent(session.Agent); !live || a.Session != session.N || a.Status.Over() {
+			continue
+		}
+		delivered := false
+		if sidecar := s.rig.Sidecars.Session(session); sidecar != nil {
+			for _, got := range sidecar.Commands() {
+				delivered = delivered || got.GetEffectId() == cmd.GetEffectId()
+			}
+		}
+		if !delivered {
+			s.fail("effect %s was committed for %s/%d, which is still live, and never reached its sidecar", e.ID(), session.Agent, session.N)
+		}
+	}
+	s.tally["delivery checked"]++
 }
 
 func (s *sim) liveAgents() []core.Agent {
@@ -248,6 +358,7 @@ func (s *sim) step() {
 			if s.pick(5) == 0 {
 				s.note("clock advances %s", d)
 				s.rig.Clock.Advance(d)
+				s.clockMoved = s.clockMoved || d > 0
 				break
 			}
 		}
@@ -279,8 +390,13 @@ func (s *sim) step() {
 		s.note("the next %d launches fail", s.rig.Sidecars.LaunchFailures)
 	case roll < 82:
 		s.openWatchers()
-	case roll < 90:
+	case roll < 86:
 		s.pollSome()
+	case roll < 92:
+		s.injectFault()
+	case roll < 96:
+		s.note("settle and check delivery")
+		s.checkDelivered()
 	default:
 		s.note("settle")
 		s.settle()
@@ -359,7 +475,7 @@ func (s *sim) agentAct(a core.Agent) {
 	switch s.pick(8) {
 	case 0: // a wrong token must change nothing.
 		before := s.rig.Daemon.State()
-		_, err := s.rig.Service.Dispatch(s.agentCtx(a, "00", a.Session), &pb.DispatchRequest{Command: cmd})
+		_, err := s.rig.AgentService.Dispatch(s.agentCtx(a, "00", a.Session), &pb.DispatchRequest{Command: cmd})
 		if status.Code(err) != codes.Unauthenticated || !before.Equal(s.rig.Daemon.State()) {
 			s.fail("a wrong token gave %v", err)
 		}
@@ -369,7 +485,7 @@ func (s *sim) agentAct(a core.Agent) {
 	case 1: // a session that is not the current one is refused even with a valid token for it.
 		stale := a.Session + 1
 		before := s.rig.Daemon.State()
-		_, err := s.rig.Service.Dispatch(s.agentCtx(a, s.rig.Auth.Token(core.Session{Agent: a.ID, N: stale}), stale), &pb.DispatchRequest{Command: cmd})
+		_, err := s.rig.AgentService.Dispatch(s.agentCtx(a, s.rig.Auth.Token(core.Session{Agent: a.ID, N: stale}), stale), &pb.DispatchRequest{Command: cmd})
 		if status.Code(err) != codes.PermissionDenied || !before.Equal(s.rig.Daemon.State()) {
 			s.fail("a session that is not current gave %v", err)
 		}
@@ -377,7 +493,7 @@ func (s *sim) agentAct(a core.Agent) {
 		return
 	}
 	s.note("%s (%s) calls %T", a.ID, a.Role, cmd.GetBody())
-	if _, err := s.rig.Service.Dispatch(s.agentCtx(a, token, a.Session), &pb.DispatchRequest{Command: cmd}); err != nil {
+	if _, err := s.rig.AgentService.Dispatch(s.agentCtx(a, token, a.Session), &pb.DispatchRequest{Command: cmd}); err != nil {
 		s.fail("agent call: %v", err)
 	}
 }
@@ -394,14 +510,58 @@ func (s *sim) finishTurn() {
 	}
 }
 
+// liveRuns lists the runs that have not ended, and the agents that were written off.
+func (s *sim) liveRuns() (live map[core.RunID]bool, lost map[core.AgentID]bool) {
+	live, lost = map[core.RunID]bool{}, map[core.AgentID]bool{}
+	st := s.rig.Daemon.State()
+	for _, r := range st.Runs() {
+		live[r.ID] = r.Status.Live()
+		for _, a := range st.Agents(r.ID) {
+			lost[a.ID] = a.Status == core.AgentLost || a.Status == core.AgentFailed
+		}
+	}
+	return live, lost
+}
+
+// restartIsInnocent says nothing else the simulation did could end a run at this restart: no
+// sidecar has died, no launch is set to fail, and no timer is due.
+func (s *sim) restartIsInnocent() bool {
+	if s.rig.Sidecars.LaunchFailures > 0 || s.clockMoved {
+		return false
+	}
+	for _, a := range s.liveAgents() {
+		if se := s.rig.Sidecars.Session(core.Session{Agent: a.ID, N: a.Session}); se != nil && se.Dead() {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *sim) restart() {
 	held := make([]view, len(s.runs))
 	for i, w := range s.runs {
 		held[i] = w.v
 		w.w.Close()
 	}
+	innocent := s.restartIsInnocent()
+	liveBefore, lostBefore := s.liveRuns()
 	s.rig.Restart(s.t)
 	s.tally["restart"]++
+	if innocent {
+		// A restart alone never ends a live run or writes off a live agent.
+		liveAfter, lostAfter := s.liveRuns()
+		for id, was := range liveBefore {
+			if was && !liveAfter[id] {
+				s.fail("a restart alone ended run %s", id)
+			}
+		}
+		for id, now := range lostAfter {
+			if now && !lostBefore[id] {
+				s.fail("a restart alone wrote off agent %s", id)
+			}
+		}
+		s.tally["restart alone checked"]++
+	}
 	s.runs, s.agents = s.runs[:0], map[core.AgentID]*itemWatcher{}
 	// Clients reconnect, some resuming after the last sequence they read, some starting over.
 	for _, v := range held {
@@ -472,6 +632,7 @@ func (s *sim) init() {
 
 // finish stops every run and lets every timer and stuck turn run out, then checks the whole.
 func (s *sim) finish() {
+	s.clearFaults()
 	s.rig.Sidecars.LaunchFailures = 0
 	s.rig.Sidecars.AttachFails = false
 	for _, run := range s.rig.Daemon.State().Runs() {
@@ -479,6 +640,9 @@ func (s *sim) finish() {
 			continue
 		}
 		s.record(&pb.Command{Id: fmt.Sprintf("final-%s", run.ID), Body: &pb.Command_StopRun{StopRun: &pb.StopRun{RunId: string(run.ID)}}})
+	}
+	if s.rig.Sidecars.Unbounded > 0 {
+		s.fail("%d calls to the world were made with no bound", s.rig.Sidecars.Unbounded)
 	}
 	for range 20 {
 		s.settle()
@@ -615,7 +779,7 @@ func TestDaemonSimulation(t *testing.T) {
 		}
 	}
 	if len(seeds()) > 1 {
-		for _, k := range []string{"restart", "reconnect", "retry", "conflict", "sidecar death", "bad token refused", "stale session refused", "snapshot", "input changed nothing"} {
+		for _, k := range []string{"restart", "reconnect", "retry", "conflict", "sidecar death", "bad token refused", "stale session refused", "snapshot", "input changed nothing", "stalled call", "restart alone checked", "delivery checked", "crash " + daemontest.CrashAfterClaim, "crash " + daemontest.CrashBeforeComplete, "crash after send"} {
 			if total[k] == 0 {
 				t.Errorf("no seed reached %q: the simulation never exercised it (reached: %v)", k, total)
 			}

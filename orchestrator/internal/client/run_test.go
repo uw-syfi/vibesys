@@ -100,7 +100,7 @@ func toolClient(ctx context.Context, t testing.TB, live *daemontest.Live, agent 
 	}
 	var n uint32
 	fmt.Sscan(session.Env[daemon.EnvSession], &n)
-	c, err := client.Dial(ctx, live.Listener.Dial, client.Options{Session: &client.Session{
+	c, err := client.Dial(ctx, live.AgentListener.Dial, client.Options{Session: &client.Session{
 		Agent: session.Env[daemon.EnvAgent], Session: n, Token: session.Env[daemon.EnvToken],
 	}})
 	if err != nil {
