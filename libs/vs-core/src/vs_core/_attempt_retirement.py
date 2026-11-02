@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ._acquisition_stall import is_stalled_acquisition
+from ._attempt_terminal import vacant_workspace_request
 from ._deadlines import cleanup
 from ._submission_receipts import same_conclusion
 from .types.attempts import (
@@ -117,28 +118,6 @@ def _released(observation: Observation | None) -> bool:
         and observation.terminal
         and observation.released
         and observation.children_complete
-    )
-
-
-def _vacant_workspace_request(record: RequestRecord | None) -> bool:
-    """A workspace request that was answered terminal without taking anything.
-
-    A request the executor rejected, failed, or cancelled before accepting it created no
-    workspace resource, so there is nothing for a closing attempt to wait to see released.
-    The executor marks such an answer neither ``released`` nor ``children_complete`` (there is
-    nothing to release and no manifest), so ``_released`` can never hold for it.
-    """
-    if record is None or not isinstance(record.request, EnsureWorkspace | RestoreRevision):
-        return False
-    observation = record.observation
-    return bool(
-        observation is not None
-        and observation.terminal
-        and not observation.accepted
-        and observation.resource_id is None
-        and not observation.children
-        and observation.status
-        in (ObservationStatus.REJECTED, ObservationStatus.FAILED, ObservationStatus.CANCELLED)
     )
 
 
@@ -982,7 +961,7 @@ def _start_closure(
     edges.extend(
         ReleaseDependency(kind="request", identity=value)
         for value in owner.pending_records
-        if not _vacant_workspace_request(_record(context, value))
+        if not vacant_workspace_request(_record(context, value))
     )
     edges.append(ReleaseDependency(kind="request", identity=event.authority))
     closure = AttemptClosure(
@@ -1141,7 +1120,7 @@ def _request_release_proof(
             and observation.terminal
             and _retention_done(owner, context)
         )
-    return _vacant_workspace_request(record) or (
+    return vacant_workspace_request(record) or (
         _released(observation)
         and (
             edge.kind != "operation"
