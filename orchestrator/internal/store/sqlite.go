@@ -330,6 +330,16 @@ func decodeBody(body []byte) (uint64, core.Event, error) {
 	return seq, e, nil
 }
 
+// entity takes the body of a stored event as the kind its table holds. A row whose bytes decode
+// into another kind is corruption, and is reported as such.
+func entity[T core.EventBody](e core.Event) (T, error) {
+	v, ok := e.Body.(T)
+	if !ok {
+		return v, corruptf("a stored row holds a %T where a %T belongs", e.Body, v)
+	}
+	return v, nil
+}
+
 // batchSize bounds how many decoded events wait for one Replay, which copies the state's maps once
 // per call.
 const batchSize = 4096
@@ -552,7 +562,12 @@ func (s *SQLite) prune(p Retention, now time.Time, ckpt uint64) (int, error) {
 			rows.Close()
 			return 0, err
 		}
-		if run := e.Body.(core.Run); !run.EndedAt.Add(p.KeepEvents).After(now) {
+		run, err := entity[core.Run](e)
+		if err != nil {
+			rows.Close()
+			return 0, err
+		}
+		if !run.EndedAt.Add(p.KeepEvents).After(now) {
 			eligible = append(eligible, run.ID)
 		}
 	}
@@ -702,23 +717,31 @@ func verifySummary(tx *sql.Tx, state core.State) error {
 		}
 		return rows.Err()
 	}
-	if err := load(`SELECT body FROM runs`, func(e core.Event) error { r := e.Body.(core.Run); sm.runs[r.ID] = r; return nil }); err != nil {
+	if err := load(`SELECT body FROM runs`, func(e core.Event) error {
+		r, err := entity[core.Run](e)
+		sm.runs[r.ID] = r
+		return err
+	}); err != nil {
 		return err
 	}
-	if err := load(`SELECT body FROM agents`, func(e core.Event) error { a := e.Body.(core.Agent); sm.agents[a.ID] = a; return nil }); err != nil {
+	if err := load(`SELECT body FROM agents`, func(e core.Event) error {
+		a, err := entity[core.Agent](e)
+		sm.agents[a.ID] = a
+		return err
+	}); err != nil {
 		return err
 	}
 	if err := load(`SELECT result FROM command_receipts`, func(e core.Event) error {
-		r := e.Body.(core.Receipt)
+		r, err := entity[core.Receipt](e)
 		sm.receipts[r.Command] = r
-		return nil
+		return err
 	}); err != nil {
 		return err
 	}
 	if err := load(`SELECT body FROM messages WHERE delivery NOT IN (?, ?)`, func(e core.Event) error {
-		m := e.Body.(core.Message)
+		m, err := entity[core.Message](e)
 		sm.transit[m.ID] = m
-		return nil
+		return err
 	}, string(core.DeliveryConsumed), string(core.DeliveryRejected)); err != nil {
 		return err
 	}

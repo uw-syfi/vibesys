@@ -64,7 +64,10 @@ func (s *SQLite) Snapshot() (Snapshot, error) {
 			}
 			var last uint64
 			err = scanEvents(rows, func(_ uint64, e core.Event, _ []any) error {
-				run := e.Body.(core.Run)
+				run, err := entity[core.Run](e)
+				if err != nil {
+					return err
+				}
 				if status.Final() {
 					finished = append(finished, listed{run, last})
 				} else {
@@ -87,8 +90,9 @@ func (s *SQLite) Snapshot() (Snapshot, error) {
 				return fmt.Errorf("store: %w", err)
 			}
 			if err := scanEvents(rows, func(_ uint64, e core.Event, _ []any) error {
-				out.Agents = append(out.Agents, e.Body.(core.Agent))
-				return nil
+				a, err := entity[core.Agent](e)
+				out.Agents = append(out.Agents, a)
+				return err
 			}); err != nil {
 				return err
 			}
@@ -201,7 +205,11 @@ func (s *SQLite) Items(agent core.AgentID, before uint32, limit int) (ItemPage, 
 				return err
 			}
 			size += len(body)
-			page.Items = append(page.Items, e.Body.(core.Item))
+			item, err := entity[core.Item](e)
+			if err != nil {
+				return err
+			}
+			page.Items = append(page.Items, item)
 		}
 		return rows.Err()
 	})
@@ -230,7 +238,11 @@ func (s *SQLite) Messages(run core.RunID, after uint64, limit int) ([]MessageRec
 			if err != nil {
 				return err
 			}
-			out = append(out, MessageRecord{Seq: seq, Message: e.Body.(core.Message)})
+			msg, err := entity[core.Message](e)
+			if err != nil {
+				return err
+			}
+			out = append(out, MessageRecord{Seq: seq, Message: msg})
 		}
 		return rows.Err()
 	})
@@ -262,7 +274,11 @@ func (s *SQLite) Turns(run core.RunID, from, to time.Time, limit int) (TurnWindo
 			if err != nil {
 				return err
 			}
-			out.Turns = append(out.Turns, e.Body.(core.Turn))
+			turn, err := entity[core.Turn](e)
+			if err != nil {
+				return err
+			}
+			out.Turns = append(out.Turns, turn)
 		}
 		return rows.Err()
 	})

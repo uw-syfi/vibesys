@@ -7,8 +7,9 @@ shares nothing with them: it has its own contract under `proto/vibesys/orchestra
 module here, and it reaches `vibesys-cli` only through that tool's public contract.
 
 Work is landing in stages. This module so far holds the contract, the pure decision core, the
-interface over `vibesys-cli` jobs, and the code that converts between the two. There is no daemon
-yet, and no store, sidecar, MCP server or desktop client.
+interface over `vibesys-cli` jobs, the code that converts between the two, and the durable store
+with the check that keeps it off network filesystems. There is no daemon yet, and no sidecar, MCP
+server or desktop client.
 
 ## Vocabulary
 
@@ -30,6 +31,9 @@ yet, and no store, sidecar, MCP server or desktop client.
 | `internal/jobs` | `JobSource`, the interface over `vibesys-cli` jobs | `core` |
 | `internal/jobs/jobstest` | The in-memory `JobSource` and the contract every one passes | `core`, `jobs` |
 | `internal/wire` | Bytes to core types and back, once, at the edge | `core`, `gen` |
+| `internal/localfs` | Proof that the state directory is on a local filesystem | Nothing of this module |
+| `internal/store` | The durable record: atomic commits, recovery, outbox, paged reads, retention | `core`, `wire`, `localfs` |
+| `internal/store/storetest` | The contract every store passes, a workload from the real core, and a model | `core`, `store`, `wire` |
 | `gen/` | Generated from the `.proto` files. Do not edit | Nothing of this module |
 
 `internal/archcheck` enforces this table and the purity of the core from the import graph of every
@@ -61,6 +65,26 @@ What this gives the daemon to come:
   already changed, and a fact from a session that has been replaced changes nothing at all.
 - No wait is open forever. A session that does not answer a stop is written off by a timer, a
   subagent that stops without a handoff tells its lead, and retries are bounded.
+
+## The store
+
+`internal/store` makes each `Decide` result durable as one transaction: the events, the tables the
+screens read, the receipt of a command, and the effects still to carry out, with events written
+before effects. The events are the truth. A restart loads the checkpoint and replays the events
+after it with `core.Replay`, and `Verify` checks that every table equals what that replay gives.
+
+Two stores pass one contract suite: `Memory`, the Fake the daemon's tests use, and `SQLite`, one
+file in a state directory with a write-ahead log, `synchronous = NORMAL` and one writer. The driver
+is pure Go, so the daemon cross-compiles with no C toolchain.
+
+The state directory comes from `VIBESYS_ORCHESTRATOR_STATE_DIR`, or defaults to
+`$XDG_STATE_HOME/vibesys/orchestrator` and then `~/.local/state/vibesys/orchestrator`. SQLite cannot
+lock safely on NFS, SMB and their kin, so `localfs` follows symlinks and refuses such a directory
+before the database opens anything. There is no override: the error says to point the variable at a
+local path, and a default on a network filesystem is refused and never replaced by another place.
+
+`ORCHESTRATOR_STORE_SCALE=1000000 go test ./internal/store -run TestMeasureScale -v` measures recovery
+time and read latency on generated data.
 
 ## Testing
 
