@@ -30,14 +30,21 @@ const (
 // beyond itself. An entry ending in "/" allows the whole subtree. A package with Go files and no
 // entry fails the check, so a new package states its layer in the change that adds it.
 var rules = map[string][]string{
-	"internal/core":            {},
-	"internal/jobs":            {"internal/core"},
-	"internal/jobs/jobstest":   {"internal/core", "internal/jobs"},
-	"internal/wire":            {"internal/core", "gen/"},
-	"internal/archcheck":       {},
-	"internal/store":           {"internal/core", "internal/wire", "internal/localfs"},
-	"internal/store/storetest": {"internal/core", "internal/store", "internal/wire"},
-	"internal/localfs":         {},
+	"internal/production":        {"internal/client", "internal/core", "internal/daemon", "internal/hub", "internal/jobs", "internal/localfs", "internal/store", "gen/"},
+	"cmd/vibesys-orchestrator":   {"internal/client", "internal/core", "internal/daemon", "internal/mcp", "internal/production"},
+	"internal/core":              {},
+	"internal/jobs":              {"internal/core"},
+	"internal/jobs/jobstest":     {"internal/core", "internal/jobs"},
+	"internal/wire":              {"internal/core", "gen/"},
+	"internal/archcheck":         {},
+	"internal/store":             {"internal/core", "internal/wire", "internal/localfs"},
+	"internal/store/storetest":   {"internal/core", "internal/store", "internal/wire"},
+	"internal/localfs":           {},
+	"internal/hub":               {"internal/core", "gen/"},
+	"internal/client":            {"gen/"},
+	"internal/mcp":               {"internal/core", "gen/"},
+	"internal/daemon":            {"internal/core", "internal/hub", "internal/jobs", "internal/store", "internal/wire", "gen/"},
+	"internal/daemon/daemontest": {"internal/core", "internal/daemon", "internal/hub", "internal/jobs/jobstest", "internal/store", "gen/"},
 	// The fake detector mints a Dir for any path, so it is a test fixture only (see testRules).
 	"internal/localfs/localfstest": {"internal/localfs"},
 }
@@ -46,14 +53,16 @@ var rules = map[string][]string{
 // addition to rules. The core's simulation replays through the wire and draws jobs from the fake
 // source; the core's own code reaches neither.
 var testRules = map[string][]string{
-	"internal/core": {"internal/jobs/jobstest", "internal/wire", "gen/"},
-	"internal/wire": {"internal/core"},
 	// The store's tests run the contract suite, which depends on the store.
 	// The store's tests also open stores on directories the fake detector vouches for, which
 	// no non-test file may import.
 	"internal/store": {"internal/store/storetest", "internal/localfs/localfstest"},
 	// localfs's own tests run its checks against the fake.
 	"internal/localfs": {"internal/localfs/localfstest"},
+	"internal/client":  {"internal/core", "internal/daemon", "internal/daemon/daemontest", "internal/mcp"},
+	"internal/core":    {"internal/jobs/jobstest", "internal/wire", "gen/"},
+	"internal/wire":    {"internal/core"},
+	"internal/daemon":  {"internal/daemon/daemontest", "internal/store", "internal/jobs/jobstest"},
 }
 
 // pureImports is the standard library the core may use. Nothing here reaches a clock, a file, the
@@ -64,6 +73,38 @@ var pureImports = []string{"cmp", "fmt", "maps", "reflect", "slices", "strconv",
 // for values and arithmetic.
 var impureTime = regexp.MustCompile(`\btime\.(Now|Since|Until|Sleep|After|AfterFunc|Tick|NewTimer|NewTicker)\b`)
 
+// shellDirs are the packages of the daemon's shell and its clients that decide or relay and must
+// run in a simulation: they read no clock, start no process, draw no random number and handle no
+// signal. internal/production is where each of those happens, once.
+var shellDirs = []string{"internal/daemon", "internal/hub", "internal/mcp", "internal/client"}
+
+// realIO is the standard library a shell package may not import.
+var realIO = []string{"os/exec", "os/signal", "crypto/rand", "math/rand", "syscall", "net/http"}
+
+// confinement holds the shell packages' product code away from the real world.
+func confinement(name, source string) []string {
+	rel := strings.TrimPrefix(name, moduleDir)
+	if strings.HasSuffix(name, "_test.go") || !slices.ContainsFunc(shellDirs, func(d string) bool {
+		return strings.HasPrefix(rel, d+"/")
+	}) {
+		return nil
+	}
+	targets, err := imports(name, source)
+	if err != nil {
+		return nil // layering reports it.
+	}
+	var found []string
+	for _, target := range targets {
+		if slices.Contains(realIO, target) {
+			found = append(found, fmt.Sprintf("%s: imports %s; real I/O belongs to internal/production", name, target))
+		}
+	}
+	if match := impureTime.FindString(source); match != "" {
+		found = append(found, fmt.Sprintf("%s: uses %s; time comes from the injected clock", name, match))
+	}
+	return found
+}
+
 // Violations checks the files, keyed by slash-separated path from the repository root, and returns
 // one sorted line per violation.
 func Violations(files map[string]string) []string {
@@ -72,6 +113,7 @@ func Violations(files map[string]string) []string {
 		if strings.HasSuffix(name, ".go") && strings.HasPrefix(name, moduleDir) {
 			found = append(found, layering(name, source)...)
 			found = append(found, purity(name, source)...)
+			found = append(found, confinement(name, source)...)
 		}
 	}
 	sort.Strings(found)

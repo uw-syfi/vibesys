@@ -49,6 +49,11 @@ func TestRules(t *testing.T) {
 		{"a store test may use the fake detector", map[string]string{"orchestrator/internal/store/a_test.go": goFile(module + "internal/localfs/localfstest")}, false},
 		{"store code cannot use the fake detector", map[string]string{"orchestrator/internal/store/a.go": goFile(module + "internal/localfs/localfstest")}, true},
 		{"the contract suite package cannot use the fake detector", map[string]string{"orchestrator/internal/store/storetest/a.go": goFile(module + "internal/localfs/localfstest")}, true},
+		{"the daemon cannot read the clock", map[string]string{"orchestrator/internal/daemon/a.go": goFile("time") + "var t = time.Now()\n"}, true},
+		{"the daemon cannot start processes", map[string]string{"orchestrator/internal/daemon/a.go": goFile("os/exec")}, true},
+		{"the client cannot draw random numbers", map[string]string{"orchestrator/internal/client/a.go": goFile("crypto/rand")}, true},
+		{"production may read the clock", map[string]string{"orchestrator/internal/production/a.go": goFile("time") + "var t = time.Now()\n"}, false},
+		{"a daemon test may wait with a guard", map[string]string{"orchestrator/internal/daemon/a_test.go": goFile("time") + "var c = time.After(0)\n"}, false},
 		{"an unparsable file fails", map[string]string{"orchestrator/internal/core/a.go": "package ("}, true},
 	}
 	for _, c := range cases {
