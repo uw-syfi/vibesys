@@ -13,7 +13,12 @@ type Checkout struct {
 // Execution is one command to run in a checkout.
 type Execution struct {
 	Checkout Checkout
-	Argv     []string
+	// Scratch, when set, is a directory outside the checkout that the command writes files to and
+	// the caller reads after it ends: an absolute path. An environment whose commands do not
+	// share the host's files makes it visible at the same path, writable by the command. Empty
+	// means the command has none.
+	Scratch string
+	Argv    []string
 	// Service, when set, is started first and the command runs against it.
 	Service *ServiceSpec
 	// Timeout bounds the whole execution. It must be positive.
