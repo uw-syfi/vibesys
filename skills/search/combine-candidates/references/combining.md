@@ -24,4 +24,6 @@ For a combine, the result is a new candidate, judged and compared like any other
 
 Promotion is the lead's decision (see the optimize skill): it needs an independent judge pass,
 and `vibesys-cli promote` decides on the measurements and prints its reasons when it refuses. If
-the result branch moved since dispatch, measure against its new head before retrying.
+the result branch moved since dispatch, measure against its new head before retrying. A refusal
+of exit 1 with a `conflict` failure means the commit does not contain the head: build a new
+combine on that head. Never merge into the result branch.

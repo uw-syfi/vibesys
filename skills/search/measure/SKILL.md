@@ -41,28 +41,38 @@ the numbers stay clean. Do not start a benchmark, a profiler or a server in your
 ## Wait
 
 Run `vibesys-cli wait <job>...` as one tracked background task of your harness and take its
-completion notification; add `--timeout` to bound it. Never wait with a foreground `sleep` or a
-polling loop. Read the exit code before the output:
+completion notification; add `--timeout` to bound it. `submit ... --wait` blocks the same way and
+is for short jobs only. Never wait with a foreground `sleep` or a polling loop. Read the exit code
+before the output:
 
 | Code | Meaning | Do |
 | --- | --- | --- |
-| 0 | every job succeeded | read the result |
-| 1 | a job did not succeed | `vibesys-cli logs <job>`, fix, commit, resubmit the new commit |
-| 2 | invalid input | fix the call |
-| 3 | timeout | the jobs still run; wait again |
-| 4 | says nothing about the job (held, in doubt, daemon unreachable) | do not resubmit; inspect with `vibesys-cli jobs --json` or `vibesys-cli show <sha> --json` |
+| 0 | every job succeeded (with `--any`, the first one did) | read the result |
+| 1 | the daemon said no: a job failed, was cancelled or was lost | `vibesys-cli logs <job>`, fix, commit, resubmit the new commit |
+| 2 | invalid input, or a job or commit that does not exist | fix the call |
+| 3 | the wait timed out; no job was cancelled | the jobs still run; wait again |
+| 4 | no answer: no daemon, an incompatible one, an internal failure, or the end of the jobs is unknown | says nothing about the jobs, which may still succeed; do not resubmit, inspect (see [jobs.md](references/jobs.md)) |
+
+With `--json`, `wait` prints one `WaitOutcome`: `kind` (`ALL_SUCCEEDED`, `SOME_FAILED`,
+`FIRST_SUCCEEDED`, `FIRST_FAILED` or `TIMED_OUT`), `decided_by` (the job that ended the wait) and
+`jobs` with each job's last state. `submit --wait --json` prints the submit response first and
+the `WaitOutcome` on the last line. The exit code follows the `kind`; use it to branch.
 
 A failed check or build saves nothing; put the failing output in the hand-back, with the SHA.
 
 ## Read
 
-- `vibesys-cli show <sha> --json` lists what was saved for a commit; each result's `value` is its
-  headline number.
+- `vibesys-cli show <sha> --json` lists what was saved for a commit. A measure result's
+  `measure.value` is its headline number, computed by the CLI. Never average samples yourself, and
+  never report a number from anywhere else.
 - `vibesys-cli compare <sha> [--against <sha2>]` prints one verdict and its numbers, against the
-  result branch head or against `<sha2>`. Only `better` is a gain. `worse` and `within_noise` are
+  result branch head or against `<sha2>`. It exits 0 for every verdict; read the verdict, which
+  `--json` has as `comparison.verdict.kind`. Only `better` is a gain. `worse` and `within_noise` are
   not. On `inconclusive`, add samples within your brief's budget. Never compute a verdict yourself.
 - Samples add up: `submit measure <sha> --samples 8` runs only the missing ones. Identical readings
   on both sides stay inconclusive however many you add.
-- `vibesys-cli result --json` has the number to report for the result branch, in `value`. It refuses when the head has
-  no fresh measurement; its message says what to run.
+- `vibesys-cli result --json` has the number to report for the result branch, in
+  `current.result.measure.value`. It exits 1 when the head has no measurement taken since it last
+  moved (`none.reason` says why); the way to get one is `vibesys-cli submit measure <head SHA>
+  --no-cache`, because reusing the samples that picked a winner would overstate its score.
 - Tell the reader the base, the sample counts and the environment from the output, never from memory.

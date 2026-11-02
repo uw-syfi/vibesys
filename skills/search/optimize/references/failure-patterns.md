@@ -22,7 +22,8 @@ compaction. Put each decision, result and expectation in the plan as a comment a
 **A merge measured against the wrong head.** The result branch moved while a combine was running.
 Base every combine on the exact head SHA you name, and compare the result with
 `vibesys-cli compare <sha> --against <head SHA>`. A promotion the CLI refuses as stale needs a
-fresh measurement against the new head, not a retry.
+fresh measurement against the new head, not a retry. A candidate that does not contain the new
+head (a `conflict` failure) needs a combine onto that head and a new measurement.
 
 **Parallel fragments of one idea.** Three subagents each doing a third of one change. Plan
 hypotheses that can each succeed or fail alone.
@@ -35,8 +36,8 @@ without convergence: park the direction and say why.
 winner, or state why not in the next report. Re-decide after an item returns or the head moves.
 
 **Resubmitting by reflex.** A wait that exited 4 or 3, or a job that looks stuck, gets a second
-submission. Run `vibesys-cli jobs --json` or `show` first; the job may be finished, queued or retried by
-the daemon itself.
+submission. Exit 4 is no answer, not a failed job. Run `vibesys-cli jobs --json` or `show` first;
+the job may be finished, queued or still running.
 
 **Piling up the queue.** Several workers each submitting measures at once; the last waits an hour.
 Give each brief a budget, and read `vibesys-cli jobs` before you fund more.

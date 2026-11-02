@@ -28,13 +28,13 @@ Harness-specific mechanics (subagents, background tasks, scheduling): read
    thing this plugin needs besides git. `vibesys-cli upgrade` updates it.
 2. Read `.vibesys/tasks/<task>/OBJECTIVE.md`, `vibesys.input.toml` and `objectives.toml`. Stop and
    say why, creating nothing, when tracked files have uncommitted changes (the base must be a
-   commit) or the first `vibesys-cli submit` refuses the task: its message says what the CLI cannot
-   run. Leave the environment (`--env`) to the task unless the user chose one.
+   commit) or the first `vibesys-cli submit` fails with a message about the task: it says what the CLI
+   cannot run. Leave the environment (`--env`) to the task unless the user chose one.
 3. Create or resume the optimization (`vibesys:state`). A new one gets the result branch
    `vibesys/result/<task>` at the base commit, and a context line you reuse in every brief:
    `--task <task> --run <run id> --harness <harness>`. Every worktree of the repository shares the
    task's one store, so each agent sees the others' jobs.
-4. If `vibesys-cli show <base>` lists no measurement, measure the base with
+4. If `vibesys-cli show <base>` lists no measure result, measure the base with
    `vibesys-cli submit measure <base> --samples 5`, as a tracked background `wait`
    (`vibesys:measure`). No comparison means anything until it lands. Plan while it runs.
 
@@ -65,21 +65,28 @@ Harness-specific mechanics (subagents, background tasks, scheduling): read
 - You never edit candidate code. Subagents do, in their own worktrees.
 - Plans may fix bugs, add tests or microbenchmarks, reorganize code, or otherwise change code to make it more robust over time; an optimization must never sacrifice correctness.
 - The result branch moves only through `vibesys-cli promote <sha>`, and only for a candidate whose
-  judge verdict is `pass`. Never move it with git. Show the user a refusal as the CLI printed it.
+  judge verdict is `pass`. Never move it with git. Exit 0 promoted. Exit 1 refused: the reasons are
+  on stdout, one of `unmeasured`, `check_missing`, `worse`, `within_noise`, `inconclusive`, `stale`
+  or `environment_mismatch`; show the user a refusal as the CLI printed it. A candidate that does
+  not contain the head also exits 1, with a `conflict` failure on stderr: dispatch a combine of
+  the candidate onto the current head and measure the result; never merge into the result branch.
   The commits from the candidate's parent to its head land, `wip` checkpoints included; the judge
   reviews the whole diff from the parent. Never squash or rewrite a measured commit
   (`vibesys:commit`).
 - A judge verdict `unmeasured` is not a pass: re-judge after the measurement.
-- A number reported to the user is the `value` of `vibesys-cli result --json`. If it says there is none, submit
-  the measurement it names and report after that lands. Before the first promotion the headline is
-  the `value` from `vibesys-cli show <base> --json`.
+- A number reported to the user is the `value` the CLI printed in `vibesys-cli result --json`
+  (`current.result.measure.value`), never one you computed from samples. If `result` exits 1, there
+  is none: submit `vibesys-cli submit measure <head SHA> --no-cache` and report after that lands.
+  Before the first promotion the headline is the `measure.value` of `vibesys-cli show <base> --json`.
 - Workers may submit their own jobs; the CLI runs them one at a time, first come first served. Give
   each brief a budget in samples and jobs, and look at `vibesys-cli jobs` before you fund more.
 - Run fully autonomously and never block on a question to the user, unless the user asked to be
   consulted. Decide, write the decision into the plan, keep going, and report it in the next
   report so the user can reverse it.
-- Never resubmit a job after a `wait` that exited 4, or by reflex after a failure: inspect with
-  `vibesys-cli jobs --json` or `show`, per `vibesys:measure`. Wait on completion notifications, never on a sleep or a polling loop.
+- Branch on the exit code of `vibesys-cli wait` (`vibesys:measure`). Exit 4 is no answer, not a
+  failed job. Never resubmit a job after a `wait` that exited 3 or 4, or by reflex after a failure:
+  inspect with `vibesys-cli jobs --json` or `show`. Wait on completion notifications, never on a
+  sleep or a polling loop.
 - Stop when work plateaus (N consecutive plans within noise, or planners find nothing with
   meaningful expected gain) or when the user stops it. To pause, bring every plan up to date
   (status and a last comment); to resume, read the state.

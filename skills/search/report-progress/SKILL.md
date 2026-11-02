@@ -10,7 +10,8 @@ and what you decided without them. It is not a log of what you did.
 
 ## Steps
 
-1. Read the state, not your memory: plan files, measurement records, the agent list, git heads.
+1. Read the state, not your memory: `vibesys-cli plan list` and `result`, the jobs and saved
+   results, the agent list, git heads.
    Anything you cannot confirm from them is not reported as fact.
 2. Find the last report's time. Report only what happened since, and name that window.
 3. Write in this order:

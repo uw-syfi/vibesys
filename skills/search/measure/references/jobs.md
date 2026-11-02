@@ -5,7 +5,8 @@
 The CLI reads the task from the commit, builds and runs it in a clean checkout, runs one job at a
 time for the machine, saves a result only with its samples and a passing check, and answers a
 repeat of a job it already has from the saved result. A second submission of the same job joins
-the one in the queue. `submit command` jobs are never reused or joined.
+the one in the queue; the submit response's `disposition` says `CREATED`, `JOINED` or `REUSED`.
+`submit command` jobs are never reused or joined.
 
 You therefore do not take a measurement slot, serialize your own runs, clean a worktree, start a
 service by hand or record a sample. If a step seems missing, ask the CLI (`vibesys-cli --help`)
@@ -21,16 +22,21 @@ supervisor went away; the CLI never retries it, because a command may have had e
 
 - 1: read `vibesys-cli logs <job>`. A failed job is evidence about its commit. Do not resubmit the
   same commit unchanged unless the log shows a cause outside the commit (a full disk, a killed
-  process), and say so in a note.
+  process), and say so in a note. A `lost` job is the exception: it was running when the machine
+  or its supervisor went away, so resubmit it once, with a note, if you still need its result.
 - 3: nothing happened to the job. Wait again, or `vibesys-cli cancel <job> --reason "<why>"` if you
   no longer need it. Cancelling a shared job cancels it for everyone who waits on it, and a
   cancelled measure saves nothing.
-- 4: the answer says nothing about the job: it was held, the outcome is in doubt, or the daemon
-  could not be reached. The job may have finished, still run, or be rerun by the daemon itself
-  where its retry rule allows, so a blind resubmit can duplicate work. Inspect with
+- 4: no daemon answered about the jobs: it could not be reached, speaks another version, failed, or
+  could not learn how the jobs ended, and that says nothing about the jobs. They may have
+  finished, still run or never started, so a blind resubmit can duplicate work. Inspect with
   `vibesys-cli jobs --commit <sha> --json` or `vibesys-cli show <sha> --json`, and
-  `vibesys-cli daemon status` if the daemon was unreachable. Resubmit only a `lost` job whose
-  result you still need, once, with a note.
+  `vibesys-cli daemon status` (exit 4 means no daemon runs; the next command starts one, and
+  `daemon restart` replaces one of another version). Resubmit only what those commands show
+  missing.
+
+A submit that exits non-zero created no job. A task the CLI cannot run is refused at the first
+submit, with a message that says why.
 
 ## Commands that drive a service
 
@@ -43,6 +49,12 @@ The CLI starts the service, waits for the probe, runs the client, and stops the 
 group on every exit. Keep the service in the foreground; disable daemonizing. Output you need
 afterwards: print it and read it with `vibesys-cli logs <job>`; a file only helps where the
 environment can write it.
+
+## First submit of a task with a Dockerfile
+
+The CLI builds the task's image before it queues the first job, so that one submit returns after
+the build. Later submits reuse the image. If Docker is unavailable the job fails; nothing falls
+back to the host.
 
 ## Slow or remote work
 
