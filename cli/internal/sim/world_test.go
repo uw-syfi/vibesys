@@ -86,6 +86,8 @@ type world struct {
 	conns     []net.Conn
 	follows   map[lifecycle.Ref]context.CancelCauseFunc
 	absent    map[string]bool
+	// down says the stores fail every call. Only the driver touches it.
+	down bool
 
 	// What happened, for the invariants.
 	killed     map[lifecycle.Ref]bool

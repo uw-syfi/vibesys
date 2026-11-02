@@ -26,9 +26,11 @@ const commit = "0123456789abcdef0123456789abcdef01234567"
 // profile is which faults a seed injects, so that a seed can stress one thing.
 type profile struct {
 	storeWrites, storeReads, supervisorFaults, crashes, machine, unmount, sever bool
-	faultPercent                                                                int
-	chaosSteps                                                                  int
-	jobs                                                                        int
+	// outage makes the stores fail for a stretch, which is what outlasts the bounded retries.
+	outage       bool
+	faultPercent int
+	chaosSteps   int
+	jobs         int
 	// recovery aims the seed at what a restart finds: little chaos, no faults, and a restart.
 	recovery bool
 	// probes makes a live supervisor sometimes fail to answer the probe of a restart.
@@ -45,7 +47,7 @@ func profileOf(r *rand.Rand) profile {
 	}
 	return profile{
 		storeWrites: coin(), storeReads: coin(), supervisorFaults: coin(),
-		crashes: coin(), machine: coin(), unmount: coin(), sever: coin(),
+		crashes: coin(), machine: coin(), unmount: coin(), sever: coin(), outage: coin(),
 		faultPercent: 3 + r.IntN(25),
 		chaosSteps:   80 + r.IntN(300),
 		jobs:         1 + r.IntN(6),
@@ -72,6 +74,9 @@ func (w *world) faultFor(c *call, heal bool) verdict {
 		return pass
 	}
 	store, reads := strings.Contains(c.label, " store"), !c.write
+	if w.down && store {
+		return failBefore
+	}
 	p := w.profile
 	allowed := (store && reads && p.storeReads) || (store && !reads && p.storeWrites) ||
 		(!store && p.supervisorFaults)
@@ -260,6 +265,9 @@ func (w *world) actions() []option {
 				w.killed[r] = true
 			}
 		})
+	}
+	if p.outage {
+		add("flip the stores", func() { w.down = !w.down })
 	}
 	if p.unmount {
 		repo := scopes[w.rng.IntN(len(scopes))].Repository
@@ -582,6 +590,7 @@ func simulate(seed uint64) (string, string) {
 	synctest.Wait()
 	w.check()
 	w.mu.Lock()
+	w.down = false
 	clear(w.absent)
 	w.mu.Unlock()
 	for _, l := range w.jobs() {
