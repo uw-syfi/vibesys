@@ -329,31 +329,39 @@ func testSubmit(t *testing.T, newStore New) {
 		}
 	})
 
-	t.Run("the reuse rule it is given decides", func(t *testing.T) {
-		var asked []core.Result
+	t.Run("the reuse rule it is given decides over every saved result", func(t *testing.T) {
+		var asked [][]core.Result
 		var askedFor []core.Submission
-		answer := false
-		rule := func(saved core.Result, want core.Submission) bool {
+		var answer core.JobID
+		rule := func(saved []core.Result, want core.Submission) (core.JobID, bool) {
 			asked, askedFor = append(asked, saved), append(askedFor, want)
-			return answer
+			return answer, answer != ""
 		}
 		e := newEnv(t, newStore, store.Rules{Reuse: rule})
 		e.savedJob(e.measure(1, "key-a", 3), 1, 2, 3)
-		wantResult := e.results(core.ResultFilter{})[0]
+		e.savedJob(e.measure(2, "key-a", 2), 4, 5)
+		e.savedJob(e.measure(1, "key-other", 3), 6)
+		wantResults := e.results(core.ResultFilter{})[:2]
+		asked = nil
 		sub := e.measure(1, "key-a", 9)
 		if out := e.submit(sub); out.Disposition != core.SubmitCreated {
 			t.Errorf("with the rule refusing, submission = %s, want created", out.Disposition)
 		}
-		if len(asked) != 1 || !reflect.DeepEqual(asked[0], wantResult) || !reflect.DeepEqual(askedFor[0].Spec, sub.Spec) {
-			t.Errorf("the rule was asked %d times, with %+v for %+v; want once, with the saved result and the submission", len(asked), asked, askedFor)
+		if len(asked) != 1 || !reflect.DeepEqual(asked[0], wantResults) || !reflect.DeepEqual(askedFor[len(askedFor)-1].Spec, sub.Spec) {
+			t.Errorf("the rule was asked %d times, with %+v; want once, with every result of the key in the order saved", len(asked), asked)
 		}
-		answer = true
-		if out := e.submit(e.measure(1, "key-a", 3)); out.Disposition != core.SubmitJoined {
-			t.Errorf("with a job in flight under the key, submission = %s, want joined: a job in flight is joined before a result is considered", out.Disposition)
+		if out := e.submit(e.measure(1, "key-a", 9)); out.Disposition != core.SubmitJoined {
+			t.Errorf("with a job in flight under the key, submission = %s, want joined: a job in flight is joined whatever the rule says", out.Disposition)
 		}
-		e.savedJob(e.measure(1, "key-c", 3), 4)
-		if out := e.submit(e.measure(1, "key-c", 3)); out.Disposition != core.SubmitReused {
-			t.Errorf("with the rule accepting, submission = %s, want reused", out.Disposition)
+		e2 := newEnv(t, newStore, store.Rules{Reuse: rule})
+		first := e2.savedJob(e2.measure(1, "key-c", 3), 4)
+		second := e2.savedJob(e2.measure(2, "key-c", 3), 5)
+		for _, job := range []core.Job{first, second} {
+			answer = job.ID
+			out := e2.submit(e2.measure(1, "key-c", 3))
+			if out.Disposition != core.SubmitReused || out.Job.ID != job.ID {
+				t.Errorf("with the rule naming %s, submission = %s on %s, want reused on it", job.ID, out.Disposition, out.Job.ID)
+			}
 		}
 	})
 

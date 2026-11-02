@@ -44,21 +44,25 @@ type Stores interface {
 }
 
 // Rules returns the task-dependent decisions of internal/core that a store is opened with. Reuse
-// is core.PlanCache asked about one saved result: a saved result answers a submission only when
-// the cache would reuse it as it is, so a measurement with too few samples is topped up and not
-// reused. defaultSamples is the task's default sample count.
+// is core.PlanCache asked about every saved result with the key: they answer a submission only
+// when the cache would reuse them as they are, so a measurement with too few samples is topped up
+// and not reused, and one that was topped up is. The submission lands on the latest result the
+// cache used. defaultSamples is the task's default sample count.
 func Rules(defaultSamples uint32) store.Rules {
 	return store.Rules{
 		DefaultSamples: defaultSamples,
-		Reuse: func(saved core.Result, want core.Submission) bool {
+		Reuse: func(saved []core.Result, want core.Submission) (core.JobID, bool) {
 			plan, err := core.PlanCache(core.CacheQuery{
 				Key:            want.Key,
 				Settings:       want.Spec.Settings,
 				DefaultSamples: defaultSamples,
 				NoCache:        want.NoCache,
-				Saved:          []core.Result{saved},
+				Saved:          saved,
 			})
-			return err == nil && plan.Action == core.CacheReuse
+			if err != nil || plan.Action != core.CacheReuse || len(plan.From) == 0 {
+				return "", false
+			}
+			return plan.From[len(plan.From)-1], true
 		},
 	}
 }
