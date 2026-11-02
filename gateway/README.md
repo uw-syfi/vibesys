@@ -136,3 +136,10 @@ explicit handshakes. Timeouts only guard hangs; tests contain no sleeps.
 Go's `internal` visibility and import-cycle checks enforce the module's private
 surface and one-way dependencies. No existing Python or TypeScript module
 imports this binary.
+
+## The orchestrator
+
+`serve` also hosts the orchestrator (`orchestrator/hosted`, through a `replace` of the sibling
+module): its operator service shares this socket, and `mcp`, `run` and `send` are subcommands. See
+[the orchestrator README](../orchestrator/README.md). `e2e/` runs it end to end with real processes
+and a scripted provider: `go test -tags e2e ./e2e -v` (needs `uv`).

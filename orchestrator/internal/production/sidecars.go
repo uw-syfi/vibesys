@@ -112,6 +112,9 @@ func (s *ProcessSidecars) Launch(ctx context.Context, l core.LaunchSession, env 
 		return sc, nil
 	}
 	dir := s.sessionDir(l.Session)
+	if sock := filepath.Join(dir, "sock"); len(sock) > maxSocketPath {
+		return nil, fmt.Errorf("the sidecar socket path %s is longer than %d bytes, which a Unix socket cannot hold: set a shorter VIBESYS_ORCHESTRATOR_STATE_DIR", sock, maxSocketPath)
+	}
 	s.reapAgent(l.Session.Agent)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
@@ -203,7 +206,7 @@ func (s *ProcessSidecars) connect(session core.Session, dir string, pid int) (da
 	if old, ok := s.conns[session]; ok {
 		old.conn.Close()
 	}
-	c := &sidecarProcess{dir: dir, pid: pid, conn: conn, client: pb.NewSidecarServiceClient(conn)}
+	c := &sidecarProcess{dir: dir, pid: pid, conn: conn, client: pb.NewSidecarServiceClient(conn), log: s.Log.With("sidecar", dir)}
 	s.conns[session] = c
 	return c, nil
 }
@@ -257,6 +260,7 @@ type sidecarProcess struct {
 	pid    int
 	conn   *grpc.ClientConn
 	client pb.SidecarServiceClient
+	log    *slog.Logger
 }
 
 func (c *sidecarProcess) gone(err error) error {
@@ -284,10 +288,12 @@ func (c *sidecarProcess) Follow(_ context.Context, after uint64) (daemon.EventSt
 		return nil, c.gone(err)
 	}
 	f := &followStream{events: make(chan *pb.SidecarEvent, 256), cancel: cancel, owner: c}
+	c.log.Info("following the sidecar", "after", after)
 	go func() {
 		for {
 			resp, err := stream.Recv()
 			if err != nil {
+				c.log.Info("the sidecar stream ended", "err", err)
 				f.end.Store(err)
 				close(f.events)
 				return
