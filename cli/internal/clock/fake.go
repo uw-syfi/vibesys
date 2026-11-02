@@ -71,3 +71,17 @@ func (m *ManualTimers) Fire() {
 	}
 	m.pending = nil
 }
+
+// Immediate is Timers for tests that do not care how long a wait is: a timeout up to Longest fires
+// at once, and a longer one never does. So a test sees a retry at once, and a slow background
+// period does not spin.
+type Immediate struct{ Longest time.Duration }
+
+// Timeout implements Timers.
+func (i Immediate) Timeout(d time.Duration) (<-chan struct{}, func()) {
+	fired := make(chan struct{})
+	if d <= i.Longest {
+		close(fired)
+	}
+	return fired, func() {}
+}

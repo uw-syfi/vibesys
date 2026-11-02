@@ -2,7 +2,11 @@
 // it wants and never reads a real clock.
 package clock
 
-import "time"
+import (
+	"context"
+	"sync"
+	"time"
+)
 
 // Clock tells the time. The daemon stamps submissions, notes and state changes from it.
 type Clock interface {
@@ -28,4 +32,58 @@ func (System) Timeout(d time.Duration) (<-chan struct{}, func()) {
 	fired := make(chan struct{})
 	t := time.AfterFunc(d, func() { close(fired) })
 	return fired, func() { t.Stop() }
+}
+
+// Sleep waits for d and reports true, or returns false as soon as ctx is done.
+func Sleep(ctx context.Context, t Timers, d time.Duration) bool {
+	fired, stop := t.Timeout(d)
+	defer stop()
+	select {
+	case <-fired:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// Graceful runs gentle and, if it has not returned after d, runs force, which must make it return.
+// It returns once gentle has. It is for a graceful stop, which waits for whoever is on the other end
+// and so must not be the only way to stop.
+func Graceful(t Timers, d time.Duration, gentle, force func()) {
+	fired, stop := t.Timeout(d)
+	defer stop()
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	wg.Go(func() {
+		defer close(done)
+		gentle()
+	})
+	select {
+	case <-done:
+	case <-fired:
+		force()
+	}
+}
+
+// Deadline returns a context that also ends after d, measured by the timers. Its error is
+// context.Canceled, as a context cannot be made to report otherwise, and context.Cause says
+// context.DeadlineExceeded. Call the returned stop when done with it: it returns once nothing is
+// left running for the deadline.
+func Deadline(ctx context.Context, t Timers, d time.Duration) (context.Context, func()) {
+	ctx, cancel := context.WithCancelCause(ctx)
+	fired, stopTimer := t.Timeout(d)
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		select {
+		case <-fired:
+			cancel(context.DeadlineExceeded)
+		case <-ctx.Done():
+		}
+	})
+	return ctx, func() {
+		stopTimer()
+		cancel(nil)
+		wg.Wait()
+	}
 }
