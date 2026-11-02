@@ -1,11 +1,12 @@
 # Flint agentic serving on AMD
 
-Two selectable examples share one candidate project:
+Three selectable tasks share one candidate project:
 
 - **`mi2104x`**: four AMD MI210 GPUs, 64 GB HBM per GPU.
 - **`mi300x`**: one AMD MI300X GPU, 192 GB HBM.
+- **`mi2101x-int4`**: one AMD MI210 GPU, 64 GB HBM, official Q4_1 weights.
 
-Both target the BF16 `RecursiveSI/flint` checkpoint at revision
+The two BF16 tasks target the BF16 `RecursiveSI/flint` checkpoint at revision
 `2a247be0c0aec895ccb0ac7ca92229ec6df37288`, replay the same pinned AgentX
 coding corpus, and optimize the same throughput/TTFT/TPOT Pareto frontier.
 Select the task when creating a run from this example. The registry discovers
@@ -82,3 +83,26 @@ after it actually serves Flint correctly on the target hardware.
 - [Model card and BF16 weights](https://huggingface.co/RecursiveSI/flint)
 - [Architecture and reference attention behavior](https://huggingface.co/docs/transformers/model_doc/flint)
 - [vLLM recipe and its hardware-validation limits](https://recipes.vllm.ai/RecursiveSI/flint)
+
+## INT4 on one MI210
+
+Select [`mi2101x-int4`](.vibesys/tasks/mi2101x-int4/OBJECTIVE.md) to implement
+and optimize the official [Flint INT4 GGUF](https://huggingface.co/RecursiveSI/flint-int4-gguf)
+on one 64 GB AMD MI210. The fixed Q4_1 checkpoint is approximately 26 GB,
+with additional cache and workspace needs. This task preserves the published
+trained quantization; it does not optimize a new quantization recipe.
+
+The [quantized checker](.vibesys/shared/int4_checker.py) builds a pinned,
+CPU-only llama.cpp reference and scores against the same SHA256-verified GGUF.
+It reuses the BF16 checker's response validation and numerical error budgets,
+but does not load BF16 reference weights. Provision at least 40 GiB available
+host RAM for the reference plus candidate host memory, a C++17 compiler,
+CMake and OpenSSL development headers. Source builds use two jobs; allow
+5 GiB temporary build space and 8 GiB build memory. Full-size gate runtime,
+numerical tolerances and AMD execution remain unmeasured.
+
+The model and source revisions and hashes are declared in the quantized
+checker; task-scoped metadata provisions the quantized weights. AgentX uses
+the original pinned base tokenizer, the quantized served-model identifier,
+and the same four-tree/five-objective recipe. Keep its frontier separate from
+the two BF16 targets. No candidate engine or verified AMD baseline is supplied.
