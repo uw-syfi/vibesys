@@ -318,6 +318,32 @@ func TestAnUnavailableEnvironmentFailsTheJobAndRunsNothingElsewhere(t *testing.T
 	}
 }
 
+// targetRecorder is an Environments that remembers the target of every request.
+type targetRecorder struct {
+	environment.Environments
+	targets []environment.Target
+}
+
+func (r *targetRecorder) Environment(kind core.EnvironmentKind, target environment.Target) (environment.Environment, error) {
+	r.targets = append(r.targets, target)
+	return r.Environments.Environment(kind, target)
+}
+
+// The daemon asks for the environment of the job's repository, task and commit when it takes the
+// job's fingerprint, since a docker environment's fingerprint pins an image built from a file of
+// that task at that commit.
+func TestTheFingerprintIsTakenForTheJobsTarget(t *testing.T) {
+	w := newWorld(t)
+	envs := &targetRecorder{Environments: fakeenv.Environments{core.EnvironmentHost: w.env}}
+	a := newAppWith(w, envs)
+	job := submit(t, a, "print", "x")
+	awaitFinal(t, a, job.ID)
+	want := environment.Target{Repository: scope.Repository, Commit: commit, Task: scope.Task}
+	if len(envs.targets) == 0 || envs.targets[0] != want {
+		t.Fatalf("the environment was first asked for %+v, want %+v", envs.targets, want)
+	}
+}
+
 func newAppWith(w *world, envs environment.Environments) *app.App {
 	a := app.New(app.Config{Clock: w.clock, Stores: w.stores, Environments: envs, Supervisors: w.supervisors()})
 	w.apps = append(w.apps, a)

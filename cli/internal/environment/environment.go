@@ -8,9 +8,14 @@ package environment
 import (
 	"context"
 	"io"
+	"time"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 )
+
+// DefaultProbePause is how long an environment waits between two readiness probes of a service,
+// unless it is configured with another pause.
+const DefaultProbePause = 500 * time.Millisecond
 
 // Environment runs commands in a clean checkout and says what it is.
 //

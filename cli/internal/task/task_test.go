@@ -162,6 +162,47 @@ func TestADockerfileIsNoted(t *testing.T) {
 	if err != nil || !got.HasDockerfile || !got.Setup().HasDockerfile {
 		t.Fatalf("got %+v, %v", got, err)
 	}
+	if string(got.Dockerfile) != "FROM scratch" {
+		t.Errorf("the task carries the Dockerfile %q, want its text", got.Dockerfile)
+	}
+}
+
+func TestATaskWithoutADockerfileCarriesNone(t *testing.T) {
+	got, err := task.Read(repo(taskFiles("t", jsonManifest, objectives)), "t")
+	if err != nil || got.HasDockerfile || len(got.Dockerfile) != 0 {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+}
+
+func TestADockerfileThatCannotBeReadIsNotTakenForAbsent(t *testing.T) {
+	files := taskFiles("t", jsonManifest, objectives)
+	files[".vibesys/tasks/t/Dockerfile/inner"] = "x"
+	_, err := task.Read(repo(files), "t")
+	var f *core.Failure
+	if !errors.As(err, &f) || f.Kind != core.FailureUnavailable || !strings.Contains(f.Message, "Dockerfile") {
+		t.Fatalf("err = %v, want an unavailable failure naming the Dockerfile", err)
+	}
+}
+
+func TestDockerInDockerIsNotedAndMustBeABoolean(t *testing.T) {
+	read := func(section string) (task.Task, error) {
+		return task.Parse("t", []byte(strings.Replace(jsonManifest, "[catalogue]", section+"[catalogue]", 1)), []byte(objectives))
+	}
+	for section, want := range map[string]bool{
+		"": false,
+		"[environment]\ndocker_in_docker = true\n":  true,
+		"[environment]\ndocker_in_docker = false\n": false,
+		"[environment]\nsomething_else = 1\n":       false,
+	} {
+		got, err := read(section)
+		if err != nil || got.NestedDocker != want {
+			t.Errorf("%q: NestedDocker = %v, %v; want %v", section, got.NestedDocker, err, want)
+		}
+	}
+	_, err := read("[environment]\ndocker_in_docker = \"yes\"\n")
+	if f := failureOf(t, err); f.Kind != core.FailureInvalidInput || !strings.Contains(f.Message, "docker_in_docker") {
+		t.Errorf("a string value: %v, want invalid input naming docker_in_docker", err)
+	}
 }
 
 func failureOf(t *testing.T, err error) *core.Failure {

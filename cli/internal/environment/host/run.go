@@ -42,7 +42,7 @@ type run struct {
 	ctx   context.Context
 	env   *Environment
 	x     core.Execution
-	sink  *lockedWriter
+	sink  *environment.Sink
 	limit <-chan struct{}
 
 	stopLimit func()
@@ -53,7 +53,7 @@ type run struct {
 }
 
 func newRun(ctx context.Context, e *Environment, x core.Execution, out io.Writer) (*run, error) {
-	r := &run{ctx: ctx, env: e, x: x, sink: &lockedWriter{w: out}}
+	r := &run{ctx: ctx, env: e, x: x, sink: environment.NewSink(out)}
 	// The limit comes first, before anything starts, so that it bounds everything below.
 	r.limit, r.stopLimit = e.timers.Timeout(x.Timeout)
 	var err error
@@ -183,7 +183,7 @@ func (r *run) end() error {
 	r.lifeWrite.Close()
 	r.lifeRead.Close()
 	r.stopLimit()
-	if err := r.sink.failure(); err != nil {
+	if err := r.sink.Err(); err != nil {
 		return &core.Failure{Kind: core.FailureInternal, Message: fmt.Sprintf("host: the output could not be kept: %v", err)}
 	}
 	return nil

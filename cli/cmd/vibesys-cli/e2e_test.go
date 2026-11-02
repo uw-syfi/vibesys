@@ -303,6 +303,25 @@ func (e *e2e) supervisors() []host.Info {
 	return infos
 }
 
+// supervisorsOf lists the supervisors the daemon still keeps for a job that has ended. A job is
+// final before its supervisor is released, so a look right after the job ends races the release.
+// The daemon runs one job at a time and starts the next only once the one before it is closed, so
+// a job that runs after it, and ends, proves the release is done.
+func (e *e2e) supervisorsOf(id string) []host.Info {
+	e.t.Helper()
+	next := e.submit("exit", "0")
+	if r := e.wait(next); r.code != exitOK {
+		e.t.Fatalf("wait for the job that follows %s = %+v", id, r)
+	}
+	var left []host.Info
+	for _, info := range e.supervisors() {
+		if string(info.Ref.Job) == id {
+			left = append(left, info)
+		}
+	}
+	return left
+}
+
 func (e *e2e) killSupervisor(info host.Info) {
 	e.t.Helper()
 	if info.PID == 0 {
@@ -370,7 +389,7 @@ func TestE2EAJobRunsToTheEndInTheDaemonsProcess(t *testing.T) {
 		t.Fatalf("daemon starts = %d, want 1", got)
 	}
 	// A finished job leaves no supervisor behind.
-	if left := e.supervisors(); len(left) != 0 {
+	if left := e.supervisorsOf(id); len(left) != 0 {
 		t.Fatalf("supervisors left after the job ended: %v", left)
 	}
 }
@@ -556,7 +575,7 @@ func TestE2ECancelEndsTheJobAndItsSupervisor(t *testing.T) {
 	if out := e.logs(id); out != "A\n" {
 		t.Fatalf("output = %q", out)
 	}
-	if left := e.supervisors(); len(left) != 0 {
+	if left := e.supervisorsOf(id); len(left) != 0 {
 		t.Fatalf("supervisors left after a cancel: %v", left)
 	}
 }

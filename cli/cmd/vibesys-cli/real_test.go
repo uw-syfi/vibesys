@@ -104,7 +104,10 @@ type outcome struct {
 }
 
 // cli runs the tool in the repository, as a user's shell would.
-func (m *machine) cli(args ...string) outcome {
+func (m *machine) cli(args ...string) outcome { return m.cliWith(nil, args...) }
+
+// cliWith runs the tool with the variables added to its environment.
+func (m *machine) cliWith(env []string, args ...string) outcome {
 	m.t.Helper()
 	self, err := os.Executable()
 	if err != nil {
@@ -116,6 +119,7 @@ func (m *machine) cli(args ...string) outcome {
 	// nothing of the user running the test.
 	cmd.Env = append(os.Environ(), roleVar+"="+roleCLI,
 		"XDG_RUNTIME_DIR="+filepath.Join(m.root, "rt"), "HOME="+filepath.Join(m.root, "home"), "VIBESYS_TASK=bench")
+	cmd.Env = append(cmd.Env, env...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err = cmd.Run()
