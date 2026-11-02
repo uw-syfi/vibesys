@@ -59,6 +59,7 @@ Harness-specific mechanics (tools, background tasks, script paths): read `refere
 ## Rules
 
 - You never edit candidate code. Subagents do, in their own worktrees.
+- Plans may fix bugs, add tests or microbenchmarks, reorganize code, or otherwise change code to make it more robust over time; an optimization must never sacrifice correctness.
 - Main (`vibesys/<task>`) moves only for a plan whose judge verdict is `pass` AND whose recorded
   comparison against current main is `better`. Move it with `git merge --ff-only` of the
   verified commit in main's worktree, then run `measurements.py check`. Every commit from the
