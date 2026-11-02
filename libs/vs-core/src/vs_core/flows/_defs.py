@@ -69,9 +69,17 @@ def _adapter[T](model: type[T]) -> TypeAdapter[T]:
 
 
 @cache
+def _snapshot_codec(snapshot: type[Any] | UnionType) -> TypeAdapter[Any]:
+    return TypeAdapter(snapshot)
+
+
 def snapshot_adapter(definition: FlowDef) -> TypeAdapter[Any]:
-    """The codec of ``definition``'s snapshots: one type, or a union of its versions."""
-    return TypeAdapter(definition.snapshot)
+    """The codec of ``definition``'s snapshots: one type, or a union of its versions.
+
+    Cached by the snapshot type, not the definition: every run builds a definition (its root
+    closes over the run), so a cache keyed on one would keep every run's adapter and closure.
+    """
+    return _snapshot_codec(definition.snapshot)
 
 
 @dataclass(eq=False)
