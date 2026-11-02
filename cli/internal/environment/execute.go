@@ -3,6 +3,8 @@ package environment
 import (
 	"fmt"
 	"io"
+	"path"
+	"strings"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 )
@@ -21,6 +23,10 @@ func Validate(x core.Execution) error {
 		return invalid("the timeout must be positive, got %v", x.Timeout)
 	case x.Checkout.Dir == "" || x.Checkout.Dir[0] != '/':
 		return invalid("the checkout directory must be an absolute path, got %q", x.Checkout.Dir)
+	case x.Scratch != "" && x.Scratch[0] != '/':
+		return invalid("the scratch directory must be an absolute path, got %q", x.Scratch)
+	case x.Scratch != "" && overlap(x.Checkout.Dir, x.Scratch):
+		return invalid("the scratch directory %q and the checkout %q must be apart: neither may be inside the other", x.Scratch, x.Checkout.Dir)
 	}
 	if s := x.Service; s != nil {
 		if len(s.Argv) == 0 || s.Argv[0] == "" {
@@ -31,6 +37,12 @@ func Validate(x core.Execution) error {
 		}
 	}
 	return nil
+}
+
+// overlap reports whether one absolute directory is the other or inside it.
+func overlap(a, b string) bool {
+	a, b = path.Clean(a), path.Clean(b)
+	return a == b || strings.HasPrefix(a, strings.TrimSuffix(b, "/")+"/") || strings.HasPrefix(b, strings.TrimSuffix(a, "/")+"/")
 }
 
 // Exit is how a process group's leader ended.
