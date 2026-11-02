@@ -4,19 +4,77 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-// The agent socket is not the operator's, whether or not a runtime directory is set.
-func TestTheTwoSocketsDiffer(t *testing.T) {
-	for _, runtimeDir := range []string{"", "/run/user/1"} {
-		operator, agent := socketPaths("/var/state/vo", runtimeDir)
-		if operator == agent || operator == "" || agent == "" {
-			t.Errorf("runtime directory %q: operator socket %q and agent socket %q must differ", runtimeDir, operator, agent)
+// Orchestrators with different state directories get different agent sockets in one runtime
+// directory, each short enough for a Unix socket, and one state directory always gets the same.
+func TestEachStateDirectoryHasItsOwnAgentSocket(t *testing.T) {
+	root := t.TempDir()
+	// A short runtime directory, as a real one is: a test directory may be too long for a socket.
+	runtimeDir, err := os.MkdirTemp("", "vsr-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(runtimeDir) })
+	seen := map[string]string{}
+	for i := range 20 {
+		state := filepath.Join(root, fmt.Sprintf("state-%d", i))
+		if err := os.MkdirAll(state, 0o700); err != nil {
+			t.Fatal(err)
 		}
+		env := map[string]string{"VIBESYS_ORCHESTRATOR_STATE_DIR": state, "XDG_RUNTIME_DIR": runtimeDir}
+		layout, err := LayoutFor(func(k string) string { return env[k] }, root)
+		if err != nil && !strings.Contains(err.Error(), "socket path") {
+			t.Skipf("the test directory is not a local filesystem: %v", err)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		again, err := LayoutFor(func(k string) string { return env[k] }, root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		socket := layout.AgentSocket
+		switch {
+		case again.AgentSocket != socket:
+			t.Fatalf("state %s got %s, then %s", state, socket, again.AgentSocket)
+		case filepath.Dir(socket) != runtimeDir:
+			t.Fatalf("state %s got socket %s outside the runtime directory %s", state, socket, runtimeDir)
+		case len(socket) > maxSocketPath:
+			t.Fatalf("socket %s is longer than %d bytes", socket, maxSocketPath)
+		case seen[socket] != "":
+			t.Fatalf("states %s and %s share the agent socket %s", seen[socket], state, socket)
+		}
+		seen[socket] = state
+	}
+}
+
+// A second daemon on the same state directory is refused with an error that names the holder's pid
+// and version, and the holder keeps serving.
+func TestASecondDaemonNamesTheHolder(t *testing.T) {
+	dir := t.TempDir()
+	env := map[string]string{"VIBESYS_ORCHESTRATOR_STATE_DIR": dir}
+	layout, err := LayoutFor(func(k string) string { return env[k] }, dir)
+	if err != nil {
+		t.Skipf("the test directory is not a local filesystem: %v", err)
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	first, err := Open(layout, Wiring{Sidecars: NoSidecars{}, Plans: NoPlans{}, Version: "1.2.3"}, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	_, err = Open(layout, Wiring{Sidecars: NoSidecars{}, Plans: NoPlans{}, Version: "9.9.9"}, log)
+	want := fmt.Sprintf("pid %d version 1.2.3", os.Getpid())
+	if !errors.Is(err, ErrHeld) || !strings.Contains(err.Error(), want) {
+		t.Fatalf("second open gave %v, want ErrHeld naming %q", err, want)
 	}
 }
 

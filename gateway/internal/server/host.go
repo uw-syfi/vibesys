@@ -38,6 +38,8 @@ type Config struct {
 	HostRunner hostcommand.Runner
 	// Machine is what machine_stats samples.
 	Machine machinestats.Host
+	// Register adds the host process's other services to the same server and socket. Nil adds none.
+	Register func(grpc.ServiceRegistrar) error
 }
 
 // withDefaults fills what the caller left to the process: real time, real commands, this machine.
@@ -193,6 +195,11 @@ func Serve(ctx context.Context, listener net.Listener, config Config) error {
 	service := &host{config: config}
 	service.topics = newTopics(service)
 	apiv1.RegisterHostServiceServer(server, service)
+	if config.Register != nil {
+		if err := config.Register(server); err != nil {
+			return err
+		}
+	}
 	stop := context.AfterFunc(ctx, server.Stop)
 	defer stop()
 	defer server.Stop()
