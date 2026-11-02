@@ -43,9 +43,9 @@ const limit = time.Hour
 
 // Rig is what the suite needs to test one implementation.
 type Rig struct {
-	// New returns the environment under test. Every timeout and pause it takes must come from
-	// timers. It is called once per case.
-	New func(t *testing.T, timers clock.Timers) environment.Environment
+	// New returns the environment under test, which runs its commands in the world. Every
+	// timeout and pause it takes must come from timers. It is called once per case, after World.
+	New func(t *testing.T, w World, timers clock.Timers) environment.Environment
 
 	// World returns the world the programs run in, fresh for each case. A ShellWorld serves any
 	// implementation that runs shell commands on this machine's kernel.
@@ -119,7 +119,7 @@ func newHarness(t *testing.T, rig Rig) *harness {
 	h.ctx, h.cancel = context.WithTimeout(context.Background(), Backstop)
 	h.world = rig.World(t)
 	h.checkout = rig.Checkout(t)
-	h.env = rig.New(t, h.timers)
+	h.env = rig.New(t, h.world, h.timers)
 	t.Cleanup(func() {
 		// A case that failed may leave a run waiting: end it so the cleanup does not hang.
 		h.cancel()

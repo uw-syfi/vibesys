@@ -14,6 +14,7 @@ import (
 	"syscall"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/environment"
 )
 
 // guard is the shell program every leader is started by. It starts a watcher that waits for the
@@ -27,19 +28,13 @@ import (
 const guard = `( read -r _ <&3; kill -s KILL -- "-$$" ) &
 exec "$@" 3<&-`
 
-// exitStatus is how a process ended.
-type exitStatus struct {
-	code int
-	err  error // the process could not be waited for
-}
-
 // proc is one process group: a leader and what it started.
 type proc struct {
 	pgid   int
 	cmd    *exec.Cmd
-	exited chan exitStatus // receives once, when the leader has ended and been reaped
-	copied chan struct{}   // closed when everything the group wrote has been delivered
-	read   *os.File        // the read end of the group's output pipe
+	exited chan environment.Exit // receives once, when the leader has ended and been reaped
+	copied chan struct{}         // closed when everything the group wrote has been delivered
+	read   *os.File              // the read end of the group's output pipe
 }
 
 // run is one call of Run: the processes it started and what it needs to end them.
@@ -69,95 +64,19 @@ func newRun(ctx context.Context, e *Environment, x core.Execution, out io.Writer
 	return r, nil
 }
 
-// execute runs the service, then the command, and says how it ended.
+// execute decides how the run ends: environment.Execute does, over the processes this run starts.
 func (r *run) execute() (core.ExecOutcome, error) {
-	var serviceExited <-chan exitStatus
-	if s := r.x.Service; s != nil {
-		svc, err := r.start(s.Argv, r.sink)
-		if err != nil {
-			return core.ExecOutcome{}, err
-		}
-		serviceExited = svc.exited
-		if len(s.Probe) > 0 {
-			if outcome, ready, err := r.awaitReady(s.Probe, svc); err != nil || !ready {
-				return outcome, err
-			}
-		}
-	}
-	main, err := r.start(r.x.Argv, r.sink)
-	if err != nil {
-		return core.ExecOutcome{}, err
-	}
-	select {
-	case st := <-main.exited:
-		return exited(st)
-	case <-serviceExited:
-		// The command may have ended at the same time: a finished command is the result.
-		select {
-		case st := <-main.exited:
-			return exited(st)
-		default:
-			return core.ExecOutcome{Kind: core.ExecServiceExited}, nil
-		}
-	case <-r.limit:
-		return core.ExecOutcome{Kind: core.ExecTimedOut}, nil
-	case <-r.ctx.Done():
-		return core.ExecOutcome{Kind: core.ExecCancelled}, nil
-	}
-}
-
-func exited(st exitStatus) (core.ExecOutcome, error) {
-	if st.err != nil {
-		return core.ExecOutcome{}, st.err
-	}
-	return core.ExecOutcome{Kind: core.ExecExited, ExitCode: st.code}, nil
-}
-
-// awaitReady probes the service until a probe succeeds. It returns ready, or the outcome that
-// ended the wait: the limit (the service never became ready), the service ending, or a cancel.
-func (r *run) awaitReady(probe []string, svc *proc) (outcome core.ExecOutcome, ready bool, err error) {
-	for {
-		p, err := r.start(probe, io.Discard)
-		if err != nil {
-			return core.ExecOutcome{}, false, err
-		}
-		select {
-		case st := <-p.exited:
-			p.kill()
-			if st.err != nil {
-				return core.ExecOutcome{}, false, st.err
-			}
-			if st.code == 0 {
-				return core.ExecOutcome{}, true, nil
-			}
-		case <-svc.exited:
-			return core.ExecOutcome{Kind: core.ExecServiceExited}, false, nil
-		case <-r.limit:
-			return core.ExecOutcome{Kind: core.ExecServiceNotReady}, false, nil
-		case <-r.ctx.Done():
-			return core.ExecOutcome{Kind: core.ExecCancelled}, false, nil
-		}
-		pause, stop := r.env.timers.Timeout(r.env.pause)
-		select {
-		case <-pause:
-			stop()
-		case <-svc.exited:
-			stop()
-			return core.ExecOutcome{Kind: core.ExecServiceExited}, false, nil
-		case <-r.limit:
-			stop()
-			return core.ExecOutcome{Kind: core.ExecServiceNotReady}, false, nil
-		case <-r.ctx.Done():
-			stop()
-			return core.ExecOutcome{Kind: core.ExecCancelled}, false, nil
-		}
-	}
+	return environment.Execute(r.x, r, environment.Events{
+		Limit:     r.limit,
+		Cancelled: r.ctx.Done(),
+		Pause:     func() (<-chan struct{}, func()) { return r.env.timers.Timeout(r.env.pause) },
+	}, r.sink)
 }
 
 // start starts argv as the leader of a new process group in the checkout, with its combined
 // output going to sink. The command must exist: one that cannot be started is an error, not an
 // outcome.
-func (r *run) start(argv []string, sink io.Writer) (*proc, error) {
+func (r *run) Start(argv []string, sink io.Writer) (environment.Process, error) {
 	dir := r.x.Checkout.Dir
 	path, err := resolve(argv[0], dir)
 	if err != nil {
@@ -181,7 +100,7 @@ func (r *run) start(argv []string, sink io.Writer) (*proc, error) {
 	pw.Close()
 	p := &proc{
 		pgid: cmd.Process.Pid, cmd: cmd, read: pr,
-		exited: make(chan exitStatus, 1), copied: make(chan struct{}),
+		exited: make(chan environment.Exit, 1), copied: make(chan struct{}),
 	}
 	r.procs = append(r.procs, p)
 	r.wg.Go(func() { p.exited <- wait(cmd) })
@@ -217,24 +136,27 @@ func resolve(name, dir string) (string, error) {
 
 // wait reaps the leader and says how it ended. A signal ends a process with 128 plus its number,
 // as a shell reports it.
-func wait(cmd *exec.Cmd) exitStatus {
+func wait(cmd *exec.Cmd) environment.Exit {
 	_ = cmd.Wait()
 	state := cmd.ProcessState
 	if state == nil {
-		return exitStatus{err: &core.Failure{Kind: core.FailureInternal, Message: "host: the command was not waited for"}}
+		return environment.Exit{Err: &core.Failure{Kind: core.FailureInternal, Message: "host: the command was not waited for"}}
 	}
 	status, ok := state.Sys().(syscall.WaitStatus)
 	if !ok {
-		return exitStatus{code: state.ExitCode()}
+		return environment.Exit{Code: state.ExitCode()}
 	}
 	if status.Signaled() {
-		return exitStatus{code: 128 + int(status.Signal())}
+		return environment.Exit{Code: 128 + int(status.Signal())}
 	}
-	return exitStatus{code: status.ExitStatus()}
+	return environment.Exit{Code: status.ExitStatus()}
 }
 
-// kill ends the group, whatever is left of it.
-func (p *proc) kill() {
+// Exited implements environment.Process.
+func (p *proc) Exited() <-chan environment.Exit { return p.exited }
+
+// Kill implements environment.Process: it ends the group, whatever is left of it.
+func (p *proc) Kill() {
 	// The group no longer existing is the usual answer for a command that ended.
 	_ = syscall.Kill(-p.pgid, syscall.SIGKILL)
 }
@@ -243,7 +165,7 @@ func (p *proc) kill() {
 // failure of the sink, which is the one thing the run cannot recover from: output was lost.
 func (r *run) end() error {
 	for _, p := range r.procs {
-		p.kill()
+		p.Kill()
 	}
 	for _, p := range r.procs {
 		select {
