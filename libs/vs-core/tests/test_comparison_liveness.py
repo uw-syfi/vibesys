@@ -597,17 +597,23 @@ def charged_within_limit(lab: Lab) -> None:
     """No comparison is charged more runs of an identity than its submission limit (`_charged`).
 
     Core's own runs count toward the comparison they were taken for; any other run counts
-    toward every comparison.
+    toward every comparison. Only a run that gave a sample is charged: one that ended without
+    one (a death) is bounded by the budget's own limit over the attempt's lifetime, and by
+    the side's run of ends in a row, not by the comparison's.
     """
     limit = core.MAX_SUBMISSIONS_PER_MEASUREMENT
     served = {run.request_id: run.candidate_input for run in lab.state.evaluation.core_runs}
+    sampled = {sample.run for sample in lab.state.evaluation.samples}
     for budget in lab.state.evaluation.submission_budgets:
+        assert len(budget.receipts) <= budget.limit
         # A historical receipt names no request, so it counts toward every comparison.
         asked = [
             served.get(receipt.request_id)
             if isinstance(receipt, core.PreparedSubmissionReceipt)
             else None
             for receipt in budget.receipts
+            if not isinstance(receipt, core.PreparedSubmissionReceipt)
+            or receipt.request_id in sampled
         ]
         for candidate_input in set(asked) - {None}:
             charged = sum(1 for one in asked if one in (None, candidate_input))
@@ -660,6 +666,13 @@ def charged_within_limit(lab: Lab) -> None:
         ("call", 0, 2),
     ],
     seed=2,
+)
+@example(  # three base runs end in deaths, three give samples: the comparison is charged three
+    floor=0.0,
+    spread=0.0,
+    ratio=0.5,
+    steps=[("call", 0, 0), ("end", 1, 0), ("end", 1, 0), ("end", 1, 0)],
+    seed=0,
 )
 def test_every_candidate_with_a_sample_gets_a_comparison_and_the_runs_stay_bounded(
     floor: float, spread: float, ratio: float, steps: list[Step], seed: int
