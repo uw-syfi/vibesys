@@ -23,7 +23,8 @@ type Checkouts interface {
 
 // Handle is the daemon's end of one job's supervisor. Every method but Follow returns when the
 // supervisor has answered. A method fails with ErrGone when the supervisor is gone, with the
-// context's error when ctx is done, and with a *core.Failure otherwise.
+// context's error when ctx is done, and with a *core.Failure otherwise. A supervisor that is dying
+// can be a *core.Failure until its death is proved: asking again gives ErrGone.
 type Handle interface {
 	// Start lets the parked supervisor run the command. It is idempotent: on a supervisor that
 	// started already it does nothing, and so a daemon that is not sure may call it again.

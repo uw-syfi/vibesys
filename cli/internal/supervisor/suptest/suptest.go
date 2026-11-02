@@ -348,8 +348,15 @@ func testKilled(t *testing.T, r Rig) {
 	case <-ctx.Done():
 		t.Fatal("Follow did not return after the supervisor was killed")
 	}
-	if !errors.Is(w.err, supervisor.ErrGone) {
-		t.Fatalf("Follow after a kill = %v, want ErrGone", w.err)
+	// A process's connection can end before its lock does, so proof can take another look, and
+	// only ctx bounds them.
+	err := w.err
+	var notYet *core.Failure
+	for errors.As(err, &notYet) && ctx.Err() == nil {
+		_, err = h.Follow(ctx, 1<<62, func([]byte) error { return nil })
+	}
+	if !errors.Is(err, supervisor.ErrGone) {
+		t.Fatalf("Follow after a kill = %v, want ErrGone", err)
 	}
 	runs := find(t, r.Supervisors, l.Ref())
 	if runs.Presence != lifecycle.PresenceGone {
