@@ -44,6 +44,8 @@ type message struct {
 	// then, when set, is a goroutine to start after the event. It goes through the loop so that
 	// nothing is started while Close waits.
 	then func()
+	// done, when set, is closed once the loop has taken the event up.
+	done chan struct{}
 }
 
 // view is what the loop publishes for calls to read.
@@ -84,6 +86,18 @@ func (a *App) post(m message) bool {
 	}
 }
 
+// settle posts a message and returns when the loop has taken it up, or the App closes.
+func (a *App) settle(m message) {
+	m.done = make(chan struct{})
+	if !a.post(m) {
+		return
+	}
+	select {
+	case <-m.done:
+	case <-a.ctx.Done():
+	}
+}
+
 // tell posts an event that needs nothing else kept.
 func (a *App) tell(e lifecycle.Event) bool { return a.post(message{event: e}) }
 
@@ -105,6 +119,9 @@ func (a *App) loop() {
 		}
 		var reqs []lifecycle.Request
 		state, reqs = lifecycle.Step(state, m.event)
+		// Before any effect starts: whoever sees an effect's work in a store finds the counts
+		// already past it.
+		a.publish(state)
 		// A handle is kept only if the machine took the event up. One that a probe found before
 		// the machine moved on is not the job's, which may have a newer run by now.
 		if m.handle != nil && hasRef && len(reqs) > 0 {
@@ -119,9 +136,11 @@ func (a *App) loop() {
 		case lifecycle.Discarded:
 			delete(handles, e.Ref)
 		}
-		a.publish(state)
 		if m.then != nil {
 			a.group.Go(m.then)
+		}
+		if m.done != nil {
+			close(m.done)
 		}
 	}
 }

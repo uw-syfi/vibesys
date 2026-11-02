@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -12,6 +13,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv"
 	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
+	"github.com/uw-syfi/vibesys/cli/internal/store"
 )
 
 func TestAJobRunsAndSucceeds(t *testing.T) {
@@ -353,6 +355,67 @@ func TestStatusCountsTheWork(t *testing.T) {
 	if st := a.Status(); st.Running != 1 || st.Queued != 1 {
 		t.Fatalf("status = %+v, want 1 running, 1 queued", st)
 	}
+}
+
+// peekingStores runs after each time a store records a job as running.
+type peekingStores struct {
+	app.Stores
+	after func()
+}
+
+func (p peekingStores) Open(ctx context.Context, scope app.Scope) (store.Store, error) {
+	st, err := p.Stores.Open(ctx, scope)
+	if err != nil {
+		return nil, err
+	}
+	return peekingStore{st, p.after}, nil
+}
+
+type peekingStore struct {
+	store.Store
+	after func()
+}
+
+func (p peekingStore) Transition(ctx context.Context, t core.Transition) (core.Job, error) {
+	job, err := p.Store.Transition(ctx, t)
+	if err == nil && t.To == core.JobRunning {
+		p.after()
+	}
+	return job, err
+}
+
+func TestStatusNeverTrailsARunningJobInTheStore(t *testing.T) {
+	w := newWorld(t)
+	seen := make(chan app.Status, 1)
+	var a *app.App
+	a = app.New(instant(app.Config{
+		Clock: w.clock, Environments: fakeenv.Environments{core.EnvironmentHost: w.env}, Supervisors: w.supervisors(),
+		Stores: peekingStores{w.stores, func() { seen <- a.Status() }},
+		Logf:   func(format string, args ...any) { t.Logf("daemon: "+format, args...) },
+	}))
+	w.apps = append(w.apps, a)
+	if err := a.Start(ctxFor(t)); err != nil {
+		t.Fatal(err)
+	}
+	job := submit(t, a, "exit", "0")
+	if st := <-seen; st.Running != 1 || st.Queued != 0 {
+		t.Fatalf("as the store recorded the job as running, status = %+v, want 1 running", st)
+	}
+	awaitFinal(t, a, job.ID)
+}
+
+func TestStatusHasEverySubmissionThatReturned(t *testing.T) {
+	w := newWorld(t)
+	a := w.newApp()
+	first := submit(t, a, "hold", "g")
+	for n := 1; n <= 8; n++ {
+		if st := a.Status(); st.Queued+st.Running != n {
+			t.Fatalf("after %d submissions, status = %+v", n, st)
+		}
+		submit(t, a, "exit", "0")
+	}
+	w.gates.Release("g")
+	awaitFinal(t, a, first.ID)
 }
 
 var _ = lifecycle.Ref{}

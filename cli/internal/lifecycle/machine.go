@@ -732,14 +732,17 @@ func (s State) Troubled() []Trouble {
 	return out
 }
 
-// Counts returns how many jobs wait for the machine and how many hold it. A job being launched or
-// discarded is counted as waiting, since its store still has it queued.
+// Counts returns how many jobs wait for the machine and how many are past waiting. A job counts as
+// running from the moment the machine takes it, before its store says so, so that no reader of the
+// store sees a running job that the counts have as queued. It goes on counting until its end is
+// recorded. A discarding job waits: its store still has it queued.
 func (s State) Counts() (queued, running int) {
 	for _, e := range s.entries {
-		if e.phase == PhaseRunning {
-			running++
-		} else {
+		switch e.phase {
+		case PhaseQueued, PhaseDiscarding, PhaseCancelling:
 			queued++
+		default:
+			running++
 		}
 	}
 	return queued, running

@@ -430,6 +430,19 @@ func TestAStartWithNothingToRecoverIsAnEmptyMachine(t *testing.T) {
 	}
 }
 
+func TestAJobCountsAsRunningFromTheMomentItHoldsTheMachine(t *testing.T) {
+	first, second := lifecycle.Ref{Store: "s", Job: "j1"}, lifecycle.Ref{Store: "s", Job: "j2"}
+	s, _ := lifecycle.Step(lifecycle.Recovering(), lifecycle.RecoveryDone{})
+	s, _ = lifecycle.Step(s, lifecycle.Admitted{Ref: first, SubmittedAt: epoch})
+	if q, r := s.Counts(); q != 0 || r != 1 {
+		t.Fatalf("a launching job counts as %d queued and %d running", q, r)
+	}
+	s, _ = lifecycle.Step(s, lifecycle.Admitted{Ref: second, SubmittedAt: epoch})
+	if q, r := s.Counts(); q != 1 || r != 1 {
+		t.Fatalf("with one launching and one waiting, the counts are %d queued and %d running", q, r)
+	}
+}
+
 func TestStepLeavesTheStateItWasGivenAsItWas(t *testing.T) {
 	first, ref := lifecycle.Ref{Store: "s", Job: "j1"}, lifecycle.Ref{Store: "s", Job: "j2"}
 	before, _ := lifecycle.Step(lifecycle.State{}, lifecycle.Admitted{Ref: first, SubmittedAt: epoch})
