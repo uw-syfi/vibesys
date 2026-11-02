@@ -95,6 +95,10 @@ as a package (a listed ``a.b`` also forbids ``a.b.c``)."""
 
 DELETED_SYMBOLS: tuple[str, ...] = (
     "ReplayUnknown",
+    # The two per-kind stop tables, merged into the one `request_stop_policy` (#3475).
+    "_DRAIN_EFFECTS",
+    "EndPolicy",
+    "request_end_policy",
     # The old shell runtime (#3475 part 6b).
     "CoreRunHost",
     "CoreRuntime",

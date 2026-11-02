@@ -26,7 +26,6 @@ from .common import (
     ClosePolicy,
     ContractValidationError,
     Count,
-    EndPolicy,
     ExecuteRegisteredOperation,
     InterruptPolicy,
     InvocationId,
@@ -47,6 +46,7 @@ from .common import (
     ScopeReopenNormalization,
     Seconds,
     SetupFailureKind,
+    StopPolicy,
     Value,
     unset,
     validate_setup_failure,
@@ -882,15 +882,16 @@ def request_close_policy(
             assert_never(request)
 
 
-def request_end_policy(request: Request, registry: tuple[OperationDescriptor, ...]) -> EndPolicy:
-    """What a run that ends by a cancel does with this open step, as its kind declares.
+def request_stop_policy(request: Request, registry: tuple[OperationDescriptor, ...]) -> StopPolicy:
+    """What a stop does with this open step, as its kind declares: the one table.
 
     A cancel withdraws the work: the turns, the jobs, the setup and the reads. It does not
     withdraw what frees the resources the run holds, because the run has not ended while a
     session, a workspace, a job or a scope is still held: the closes, the discards and the
-    cancels of a turn or a job run on to their own result. A registered operation releases when
-    its descriptor says it discards a workspace (``RevisionAuthority.DISCARD``). The match is
-    exhaustive, so a new kind of step has to take a side here.
+    cancels of a turn or a job run on to their own result (``RELEASE``). A registered operation
+    releases when its descriptor says it discards a workspace (``RevisionAuthority.DISCARD``).
+    A Pause-now also lets finish the work a turn already did (``KEEP``), which an ending by a
+    cancel drops. The match is exhaustive, so a new kind of step has to take a side here.
     """
     match request:
         case ExecuteRegisteredOperation():
@@ -900,7 +901,7 @@ def request_end_policy(request: Request, registry: tuple[OperationDescriptor, ..
                 descriptor is not None
                 and descriptor.revision_authority is RevisionAuthority.DISCARD
             )
-            return EndPolicy.RELEASE if discards else EndPolicy.CANCEL
+            return StopPolicy.RELEASE if discards else StopPolicy.WORK
         case (
             CloseSession()
             | CancelTurn()
@@ -908,28 +909,31 @@ def request_end_policy(request: Request, registry: tuple[OperationDescriptor, ..
             | CloseAttemptScope()
             | CancelOwnedJob()
         ):
-            return EndPolicy.RELEASE
+            return StopPolicy.RELEASE
+        case (
+            SnapshotAndRetain()
+            | SnapshotAndRetainRun()
+            | RetainRevision()
+            | CollectEvidence()
+            | BlockRequest()
+        ):
+            return StopPolicy.KEEP
         case (
             DispatchTurn()
             | ResumeSessionTurn()
             | SubmitMeasurement()
             | EnsureWorkspace()
             | RestoreRevision()
-            | SnapshotAndRetain()
-            | SnapshotAndRetainRun()
-            | RetainRevision()
             | InspectTurn()
             | ObserveOwnedJob()
             | InspectOwnedJob()
-            | CollectEvidence()
             | InspectRequest()
             | VerifyAdoption()
             | EnsureSession()
             | AdoptRevision()
             | CancelOwnedResource()
-            | BlockRequest()
         ):
-            return EndPolicy.CANCEL
+            return StopPolicy.WORK
         case _:
             assert_never(request)
 

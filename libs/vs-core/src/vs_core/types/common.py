@@ -405,20 +405,23 @@ class ClosePolicy(StrEnum):
     scope reads its result, so waiting for it only keeps the scope open."""
 
 
-class EndPolicy(StrEnum):
-    """What a run that ends by a cancel does with an open step.
+class StopPolicy(StrEnum):
+    """What a stop does with an open step: a run ending by a cancel, and a Pause-now.
 
-    Every kind of step declares one (``request_end_policy``), so the rule never names a kind.
-    A cancel ends the work the run no longer wants and frees what the run holds.
+    Every kind of step declares one (``request_stop_policy``), so no rule names a kind.
     """
 
-    CANCEL = "cancel"
-    """The run ends the step as work nobody wants: it cancels an attempt that runs and settles
-    a step that has not started. The default."""
+    WORK = "work"
+    """Work nobody wants once the run stops: a stop cancels it if it runs and settles it if it
+    has not started. The default."""
+
+    KEEP = "keep"
+    """Work a turn already did (a snapshot, a retain, evidence, a block): a Pause-now lets it
+    finish, so the next epoch finds it done. A run ending by a cancel does not want it."""
 
     RELEASE = "release"
-    """The step frees what the run holds (a session, a workspace, a job, a scope), so the run
-    cannot end before it has its result: it runs on, within its own limit."""
+    """The step frees what the run holds (a session, a workspace, a job, a scope): every stop
+    lets it run on to its result, within its own limit."""
 
 
 class OperationSchemaRef(Value):

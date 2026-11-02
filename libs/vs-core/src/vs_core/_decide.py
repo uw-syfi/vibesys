@@ -54,19 +54,19 @@ from ._wait_clock import job_step_until, turn_bound
 from ._watches import fired_watch
 from .types.common import (
     DependencyStatus,
-    EndPolicy,
     InterruptPolicy,
     LifecycleClass,
     RequestId,
     RunStatus,
     StopMode,
+    StopPolicy,
 )
 from .types.records import (
     RequestPhase,
     is_open,
-    request_end_policy,
     request_interrupt_policy,
     request_lifecycle,
+    request_stop_policy,
 )
 from .types.steps import Cancelled, CancelReason, Failed
 from .types.until import FailureReason, Until
@@ -520,8 +520,8 @@ def _run_ends_step(state: CoreState, record: RequestRecord) -> bool:
     """Whether the run's ending cancels the open step ``record`` instead of letting it run.
 
     A run that ended holds nothing it could still free, so it ends every step. A run that is
-    ending by a cancel ends the steps its kind declares as work (``EndPolicy.CANCEL``) and lets
-    the ones that free what the run holds (``EndPolicy.RELEASE``) run on: the run is closing
+    ending by a cancel ends every step but the ones that free what the run holds
+    (``StopPolicy.RELEASE``), which run on: the run is closing
     until they have their results, and cancelling them would leave it closing until the host
     gave up on it.
     """
@@ -529,7 +529,7 @@ def _run_ends_step(state: CoreState, record: RequestRecord) -> bool:
         return False
     return (
         state.run.status is RunStatus.TERMINAL
-        or request_end_policy(record.request, state.registry) is EndPolicy.CANCEL
+        or request_stop_policy(record.request, state.registry) is not StopPolicy.RELEASE
     )
 
 
