@@ -4,7 +4,7 @@ A cancelled run is closing until every session, workspace, job and scope it hold
 and a release is a step like any other: it has to run to its result. The rule once settled every
 open step of a cancelled run as ``Cancelled(RUN_ENDING)``, the closes of its sessions included,
 so the run stayed closing until the host's stop grace cancelled it (#3475). Each kind of step
-declares what a run ending by a cancel does with it (``request_end_policy``): the property is
+declares what a run ending by a cancel does with it (``request_stop_policy``): the property is
 over generated runs, in any standing and after any history, and over the step kinds of every
 world.
 """
@@ -20,11 +20,11 @@ from vs_core.api.recovery import (
     Cancel,
     Cancelled,
     CancelReason,
-    EndPolicy,
     Run,
     Settle,
+    StopPolicy,
     decide,
-    request_end_policy,
+    request_stop_policy,
 )
 from vs_sim.api.testing import examples
 
@@ -81,9 +81,9 @@ def test_a_run_ending_by_a_cancel_ends_the_work_and_never_the_cleanup(
     for row in loop.state.records.records:
         if row.phase not in OPEN:
             continue
-        policy = request_end_policy(row.request, loop.state.registry)
+        policy = request_stop_policy(row.request, loop.state.registry)
         action = by_tag.get(row.request_id)
-        if policy is EndPolicy.CANCEL:
+        if policy is not StopPolicy.RELEASE:
             assert ends_the_step(action), (row.request.kind, action)
         else:
             assert not ends_the_step(action), (row.request.kind, action)

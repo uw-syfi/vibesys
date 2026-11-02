@@ -40,24 +40,24 @@ from ._turn_permit import (
     scope_in_flight,
     turn_executing,
 )
-from .types.attempts import CloseAttemptScope, DiscardWorkspace, RetainRevision, SnapshotAndRetain
-from .types.common import DependencyStatus, LifecycleClass, RequestId, RunStatus
+from .types.common import DependencyStatus, LifecycleClass, RequestId, RunStatus, StopPolicy
 from .types.evaluation import (
-    CancelOwnedJob,
-    CollectEvidence,
     InspectOwnedJob,
     ObserveOwnedJob,
     SubmitMeasurement,
 )
-from .types.records import BlockRequest, RequestPhase, Scheduled, request_lifecycle
+from .types.records import (
+    RequestPhase,
+    Scheduled,
+    request_lifecycle,
+    request_stop_policy,
+)
 from .types.sessions import (
     CancelTurn,
-    CloseSession,
     DispatchTurn,
     EnsureSession,
     ResumeSessionTurn,
     SessionPhase,
-    SnapshotAndRetainRun,
 )
 from .types.until import Until
 
@@ -67,20 +67,6 @@ if TYPE_CHECKING:
     from .types.records import Request, RequestRecord
     from .types.sessions import Invocation
     from .types.strategy import Command
-# These effects finish work already performed by a turn. Everything else waits for
-# relaunch, including prepared turns, measurements, polls and queued attempts.
-_DRAIN_EFFECTS = (
-    SnapshotAndRetain,
-    SnapshotAndRetainRun,
-    RetainRevision,
-    CloseSession,
-    CancelTurn,
-    DiscardWorkspace,
-    CloseAttemptScope,
-    BlockRequest,
-    CancelOwnedJob,
-    CollectEvidence,
-)
 
 
 def admitted_turns(state: CoreState) -> tuple[InvocationRef, ...]:
@@ -128,7 +114,7 @@ def dispatch_allowed(state: CoreState, request: Request) -> bool:
         return False
     return (
         _request_bound(state, request) is not None
-        or isinstance(request, _DRAIN_EFFECTS)
+        or request_stop_policy(request, state.registry) is not StopPolicy.WORK
         or (
             isinstance(request, ObserveOwnedJob | InspectOwnedJob)
             and scope_in_flight(state.sessions, state.records, request.scope)
@@ -189,7 +175,7 @@ def _pause_now_holds_back(state: CoreState, request: Request) -> bool:
         park is not None
         and drain_in_force(state.run, state.records)
         and _immediate(state, park)
-        and not isinstance(request, _DRAIN_EFFECTS)
+        and request_stop_policy(request, state.registry) is StopPolicy.WORK
     )
 
 

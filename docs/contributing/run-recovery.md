@@ -495,12 +495,14 @@ A run that ends by a cancel is closing until it holds nothing: every session, wo
 it opened is released, and a release is a step with its own result. Cancelling the release left the run
 closing on a session no one closed, until the host's stop grace (60 s) cancelled the whole run and it
 ended as `stopped`, a minute late. So each kind of step declares what an ending does with it
-(`request_end_policy`, beside `request_close_policy`; its match is exhaustive, so a new kind takes a
+(`request_stop_policy`, beside `request_close_policy`; its match is exhaustive, so a new kind takes a
 side):
 
-- `CANCEL` is the default: work the run no longer wants (turns, measurements, setup, reads, snapshots).
+- `WORK` is the default: work the run no longer wants (turns, measurements, setup, reads).
   `decide` returns `Cancel(RUN_ENDING)` while an attempt runs and `Settle(Cancelled(RUN_ENDING))`
   while none does.
+- `KEEP` is work a turn already did (`SnapshotAndRetain`, `SnapshotAndRetainRun`, `RetainRevision`,
+  `CollectEvidence`, `BlockRequest`): a Pause-now lets it finish, an ending cancels it like `WORK`.
 - `RELEASE` frees what the run holds: `CloseSession`, `CloseAttemptScope`, `DiscardWorkspace`,
   `CancelTurn`, `CancelOwnedJob`, and a registered operation whose descriptor discards a workspace.
   It starts and runs like any step and ends within its own limit; the ending waits for it.
@@ -510,9 +512,7 @@ cancel: it lets the admitted work finish, and the run ends when that work's limi
 `libs/vs-core/tests/test_recovery_run_ending.py` holds the rule over generated runs, and
 `libs/vs-dst/tests/test_stops_end_promptly.py` stops a run at every point by every kind of stop (operator
 cancel and drain, the deadline, the run environment) and requires it to end holding no session within
-the time its work needs. `_run_park._DRAIN_EFFECTS` is the pause's own list of what it lets finish; the two
-lists answer different questions (what a pause lets end, and what an ending must free) and share no
-member rule yet.
+the time its work needs. A Pause-now reads the same table: it cancels `WORK` only, and lets `KEEP` and `RELEASE` finish.
 
 #### Rest, drain, end and resume
 

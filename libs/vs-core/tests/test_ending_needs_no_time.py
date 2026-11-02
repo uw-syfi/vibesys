@@ -3,7 +3,7 @@
 Rule 4 of the recovery design: ending a run cannot fail and waits for nothing but the steps the
 loop has cancelled and the cleanup that frees what the run holds. The loop cancels
 (`CancelReason.RUN_ENDING`) the work a cancelled run holds and starts none, and runs on the steps
-that release (`EndPolicy.RELEASE`: a session's close, a workspace's discard, a scope's close),
+that release (`StopPolicy.RELEASE`: a session's close, a workspace's discard, a scope's close),
 which end by themselves. So core must not hold the run `closing` on an answer that only a step the
 loop no longer runs could bring: a poll of a job, an inspection, a release no one will prove. Core
 would otherwise ask again after a backoff, and a run that closes only when a timer fires ends
@@ -23,7 +23,7 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
-from vs_core.api.recovery import EndPolicy, RunRest, Wait, at_rest, decide, request_end_policy
+from vs_core.api.recovery import RunRest, StopPolicy, Wait, at_rest, decide, request_stop_policy
 from vs_sim.api.testing import examples
 
 from .recovery_loop import MOVES, Loop, Move, opens_no_unserved_step, play
@@ -65,7 +65,7 @@ def releases(loop: Loop, tag: core.RequestId) -> bool:
     """Whether the step ``tag`` frees what the run holds, so a cancelled run lets it run on."""
     record = loop.state.records.record(tag)
     assert record is not None
-    return request_end_policy(record.request, loop.state.registry) is EndPolicy.RELEASE
+    return request_stop_policy(record.request, loop.state.registry) is StopPolicy.RELEASE
 
 
 def stop_and_end(loop: Loop, late: list[int], *, by_search: bool) -> None:
