@@ -9,6 +9,7 @@ import (
 
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/environment"
 	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
 	"github.com/uw-syfi/vibesys/cli/internal/owned"
 	"github.com/uw-syfi/vibesys/cli/internal/store"
@@ -277,7 +278,9 @@ func (a *App) prepare(ctx context.Context, ref lifecycle.Ref, scope Scope) (h su
 		c.Timeout = a.cfg.DefaultTimeout
 		spec.Settings = c
 	}
-	env, err := a.cfg.Environments.Environment(spec.Environment)
+	env, err := a.cfg.Environments.Environment(spec.Environment, environment.Target{
+		Repository: scope.Repository, Commit: spec.Commit, Task: scope.Task,
+	})
 	if err != nil {
 		return nil, false, err
 	}
