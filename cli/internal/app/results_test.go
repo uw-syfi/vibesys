@@ -67,6 +67,16 @@ func newResultsRig(t *testing.T) *resultsRig {
 // newResultsRigOver starts a daemon on the world. Stores wraps the world's stores when given.
 func newResultsRigOver(t *testing.T, w *world, b *gitrepo.FakeBranches, wrap func(app.Stores) app.Stores) *resultsRig {
 	t.Helper()
+	return newResultsRigWith(t, w, b, wrap, nil)
+}
+
+// newResultsRigWith is newResultsRigOver with the repository seen through wrapBranches when given.
+func newResultsRigWith(t *testing.T, w *world, b *gitrepo.FakeBranches, wrap func(app.Stores) app.Stores, wrapBranches func(gitrepo.Branches) gitrepo.Branches) *resultsRig {
+	t.Helper()
+	var seen gitrepo.Branches = b
+	if wrapBranches != nil {
+		seen = wrapBranches(b)
+	}
 	var stores app.Stores = w.stores
 	if wrap != nil {
 		stores = wrap(stores)
@@ -76,7 +86,7 @@ func newResultsRigOver(t *testing.T, w *world, b *gitrepo.FakeBranches, wrap fun
 		Stores:       stores,
 		Environments: fakeenv.Environments{core.EnvironmentHost: w.env},
 		Supervisors:  w.supervisors(),
-		Branches:     b,
+		Branches:     seen,
 		Logf:         func(format string, args ...any) { t.Logf("daemon: "+format, args...) },
 	})
 	w.apps = append(w.apps, a)
