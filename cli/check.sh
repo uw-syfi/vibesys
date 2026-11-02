@@ -16,8 +16,9 @@ go test -count=1 -timeout 45s ./...
 
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   # They pass the same contracts the fakes pass, which is what lets the fakes stand in for Docker
-  # in every other test. They build and start real containers, so they get a longer bound.
-  go test -tags docker -count=1 -timeout 600s ./internal/environment/docker/...
+  # in every other test, and the tool as shipped runs a task of a Dockerfile through them. They
+  # build and start real containers, so they get a longer bound.
+  go test -tags docker -count=1 -timeout 600s ./internal/environment/docker/... ./cmd/vibesys-cli
 else
   printf 'No Docker daemon is reachable: the tests against a real one were compiled and not run.\n' >&2
 fi
