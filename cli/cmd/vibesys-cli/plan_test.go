@@ -220,10 +220,10 @@ func TestPlanRefusalsFromTheDaemon(t *testing.T) {
 		{"long title", []string{"create", "--title", strings.Repeat("t", 300)}, exitInvalidInput, "title"},
 		{"close as open", []string{"close", "1", "--status", "open"}, exitInvalidInput, "does not close"},
 		{"empty comment", []string{"comment", "1", "--body", ""}, exitInvalidInput, "not empty"},
-		{"unknown plan view", []string{"view", "9"}, exitFailed, "plan 9"},
-		{"unknown plan comment", []string{"comment", "9", "--body", "c"}, exitFailed, "plan 9"},
-		{"unknown plan close", []string{"close", "9", "--status", "won"}, exitFailed, "plan 9"},
-		{"unknown plan edit", []string{"edit", "9", "--title", "t"}, exitFailed, "plan 9"},
+		{"unknown plan view", []string{"view", "9"}, exitInvalidInput, "plan 9"},
+		{"unknown plan comment", []string{"comment", "9", "--body", "c"}, exitInvalidInput, "plan 9"},
+		{"unknown plan close", []string{"close", "9", "--status", "won"}, exitInvalidInput, "plan 9"},
+		{"unknown plan edit", []string{"edit", "9", "--title", "t"}, exitInvalidInput, "plan 9"},
 	} {
 		r := c.plan(tc.args[0], tc.args[1:]...)
 		if r.code != tc.code || r.stdout != "" || !strings.Contains(r.stderr, tc.want) {
@@ -282,7 +282,7 @@ func TestSubmitPlanLinksTheJobToThePlan(t *testing.T) {
 	}
 
 	r = c.run(withTask("submit", "command", "HEAD", "--plan", "7", "--", "exit", "0")...)
-	if r.code != exitFailed || !strings.Contains(r.stderr, "plan 7") {
+	if r.code != exitInvalidInput || !strings.Contains(r.stderr, "plan 7") {
 		t.Fatalf("submit --plan of an unknown plan = %+v", r)
 	}
 }
@@ -307,7 +307,7 @@ func TestPlanJSONOutput(t *testing.T) {
 	}
 	r := c.plan("view", "5", "--json")
 	var f struct{ Kind, Message string }
-	if r.code != exitFailed || r.stdout != "" || json.Unmarshal([]byte(r.stderr), &f) != nil || f.Kind != "FAILURE_KIND_NOT_FOUND" {
+	if r.code != exitInvalidInput || r.stdout != "" || json.Unmarshal([]byte(r.stderr), &f) != nil || f.Kind != "FAILURE_KIND_NOT_FOUND" {
 		t.Fatalf("view of an unknown plan --json = %+v", r)
 	}
 }
@@ -319,7 +319,7 @@ func TestAPlanCanBeWrittenBeforeTheFirstJob(t *testing.T) {
 	if r := c.plan("list"); r.code != exitOK || r.stdout != "" {
 		t.Fatalf("list in a task with no store = %+v, want nothing", r)
 	}
-	if r := c.plan("view", "1"); r.code != exitFailed || !strings.Contains(r.stderr, "no store") {
+	if r := c.plan("view", "1"); r.code != exitInvalidInput || !strings.Contains(r.stderr, "no store") {
 		t.Fatalf("view in a task with no store = %+v, want a refusal that says so", r)
 	}
 	if r := c.plan("create", "--title", "t"); r.code != exitOK || r.stdout != "1\topen\tt\n" {

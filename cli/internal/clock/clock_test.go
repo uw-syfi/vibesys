@@ -1,6 +1,7 @@
 package clock_test
 
 import (
+	"context"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -27,4 +28,27 @@ func TestGracefulForcesAGentleStopThatDoesNotEnd(t *testing.T) {
 	<-timers.Armed()
 	timers.Fire()
 	<-done
+}
+
+// Exactly fires only the timeout it names, and hands every other to the timers behind it.
+func TestExactlyFiresOnlyItsOwnTimeout(t *testing.T) {
+	others := clock.NewManualTimers()
+	e := clock.Exactly{D: 45 * time.Minute, Others: others}
+	fired, stop := e.Timeout(context.Background(), 45*time.Minute)
+	defer stop()
+	select {
+	case <-fired:
+	default:
+		t.Fatal("the named timeout did not fire at once")
+	}
+	other, stopOther := e.Timeout(context.Background(), 30*time.Minute)
+	defer stopOther()
+	if d := <-others.Armed(); d != 30*time.Minute {
+		t.Fatalf("the other timeout reached the timers behind as %v", d)
+	}
+	select {
+	case <-other:
+		t.Fatal("another timeout fired")
+	default:
+	}
 }

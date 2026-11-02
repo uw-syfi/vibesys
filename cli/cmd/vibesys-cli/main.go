@@ -103,7 +103,9 @@ commands:
 Every job and daemon command takes --json, and --repo, --task, --run, --harness and --agent, which
 default to the environment variables VIBESYS_REPO, VIBESYS_TASK, VIBESYS_RUN, VIBESYS_HARNESS and
 VIBESYS_AGENT.
-Exit codes: 0 ok, 1 failed, 2 invalid input, 3 wait timed out.
+Exit codes: 0 yes, 1 the answer is no (a job did not succeed, a refusal), 2 invalid input or a
+thing that does not exist, 3 a wait timed out, 4 no answer (no daemon, an internal failure, or an
+answer this build cannot read). The README lists every failure kind and wait outcome.
 `
 
 // run executes one invocation and returns its exit code. It takes its dependencies as parameters

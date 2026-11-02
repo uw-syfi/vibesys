@@ -58,11 +58,38 @@ func exitOfWait(kind cliv1.WaitOutcomeKind) int {
 	return exitNoAnswer
 }
 
-// exitOfAnswer is the exit code of a command whose answer is yes or no, such as a promotion that
-// was made or refused.
-func exitOfAnswer(yes bool) int {
-	if yes {
-		return exitOK
+// answer is the daemon's answer to a command that asks yes or no, such as a promotion that was
+// made or refused. Its zero value is an answer this build cannot read: a oneof arm from a newer
+// daemon.
+type answer int
+
+// The answers.
+const (
+	answerUnread answer = iota
+	answerYes
+	answerNo
+)
+
+// answerOf reads a response whose oneof is the yes arm, the no arm, or neither.
+func answerOf(yes, no bool) answer {
+	switch {
+	case yes:
+		return answerYes
+	case no:
+		return answerNo
 	}
-	return exitFailed
+	return answerUnread
+}
+
+// exitOfAnswer is the exit code of a command whose answer is yes or no.
+func exitOfAnswer(a answer) int {
+	switch a {
+	case answerYes:
+		return exitOK
+	case answerNo:
+		return exitFailed
+	case answerUnread:
+		return exitNoAnswer
+	}
+	return exitNoAnswer
 }

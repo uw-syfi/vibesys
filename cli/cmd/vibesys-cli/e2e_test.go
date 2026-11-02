@@ -134,6 +134,7 @@ func e2eDaemon() int {
 			Stores:       filestores.New(index, app.Rules(5), filestore.Owner{Host: "e2e", Dir: dir.Path(), PID: os.Getpid()}),
 			Environments: e2eEnvironments(),
 			Supervisors:  dyingSupervisors{Supervisors: supervisors, host: supervisors, marker: os.Getenv(windowVar)},
+			Repositories: ownRepository{},
 		},
 	})
 	if errors.Is(err, daemon.ErrAlreadyRunning) {
@@ -144,6 +145,14 @@ func e2eDaemon() int {
 		return 1
 	}
 	return 0
+}
+
+// ownRepository resolves a directory to itself: the e2e repositories are plain directories, each
+// its own repository, and the daemon process cannot see the test's gitrepo.Fake.
+type ownRepository struct{}
+
+func (ownRepository) Resolve(_ context.Context, dir string) (core.Repository, error) {
+	return core.Repository(filepath.Clean(dir)), nil
 }
 
 // dyingSupervisors stops a launch in the window a test wrote into the marker, once, so a kill lands

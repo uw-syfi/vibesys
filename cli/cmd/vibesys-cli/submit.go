@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"strings"
 	"time"
 
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -96,8 +95,8 @@ func submitJob(ctx context.Context, d deps, args []string) int {
 	var (
 		env     = fs.String("env", "", "the environment to run in: host or docker (default: the task's)")
 		timeout = fs.Duration("timeout", 0, "the time limit of the command, such as 10m (default: the daemon's)")
-		service = fs.String("service", "", "a long-lived process to run the command against, split on spaces")
-		probe   = fs.String("probe", "", "a command that succeeds when the service is ready, split on spaces")
+		service = fs.String("service", "", "a long-lived process to run the command against, split into words as a shell would, quotes kept")
+		probe   = fs.String("probe", "", "a command that succeeds when the service is ready, split as --service is")
 		note    = fs.String("note", "", "a note to attach to the job")
 		noCache = fs.Bool("no-cache", false, "run a new job even when a matching one exists")
 		plan    = fs.Uint("plan", 0, "the number of a plan to link the job to")
@@ -136,7 +135,18 @@ func submitJob(ctx context.Context, d deps, args []string) int {
 		settings.Timeout = durationpb.New(*timeout)
 	}
 	if *service != "" {
-		settings.Service = &cliv1.ServiceSpec{Argv: strings.Fields(*service), Probe: strings.Fields(*probe)}
+		serviceArgv, err := splitWords("--service", *service)
+		if err != nil {
+			return fail(d, asJSON, err)
+		}
+		probeArgv, err := splitWords("--probe", *probe)
+		if err != nil {
+			return fail(d, asJSON, err)
+		}
+		if len(serviceArgv) == 0 {
+			return fail(d, asJSON, usagef("--service: %q has no command in it", *service))
+		}
+		settings.Service = &cliv1.ServiceSpec{Argv: serviceArgv, Probe: probeArgv}
 	}
 	return send(ctx, d, asJSON, *wait, &cliv1.SubmitRequest{
 		Context: callCtx,

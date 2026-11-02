@@ -37,7 +37,9 @@ type cli struct {
 
 func newCLI(t *testing.T) *cli {
 	t.Helper()
-	c := &cli{t: t, world: daemontest.NewWorld(t), timers: clock.NewManualTimers(), git: gitrepo.NewFake(), env: map[string]string{}, files: map[string]string{}}
+	w := daemontest.NewWorld(t)
+	// The command line and the daemon see one set of repositories, as they do on one machine.
+	c := &cli{t: t, world: w, timers: clock.NewManualTimers(), git: w.Git, env: map[string]string{}, files: map[string]string{}}
 	c.git.AddRepo("/repo", map[string]core.Commit{"HEAD": full, "main": full})
 	dir := daemontest.RuntimeDir(t)
 	c.starter = &daemontest.Starter{Dir: dir, Version: version, Runtime: c.world.Runtime}
@@ -67,7 +69,9 @@ func (c *cli) run(args ...string) result {
 			return nil, fmt.Errorf("open %s: no such file or directory", path)
 		},
 		options: func() (client.Options, error) {
-			return client.Options{Rendezvous: client.LocalRendezvous{Dir: c.starter.Dir}, Version: version, Starter: c.starter, Timers: c.timers}, nil
+			return client.Options{Rendezvous: client.LocalRendezvous{Dir: c.starter.Dir}, Version: version, Starter: c.starter, Timers: c.timers,
+				// The command line's time holds still, so a wait asks the daemon for its whole timeout.
+				Clock: clock.NewManual(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), 0)}, nil
 		},
 	}
 	code := run(args, d)
@@ -167,10 +171,7 @@ func TestInvalidArgumentsAreRefusedBeforeTheDaemon(t *testing.T) {
 	}
 	for _, tc := range cases {
 		r := c.run(tc.args...)
-		wantCode := exitInvalidInput
-		if tc.name == "unknown commit" {
-			wantCode = exitFailed
-		}
+		wantCode := exitInvalidInput // an unknown commit is NOT_FOUND, which is invalid input too
 		if r.code != wantCode || r.stdout != "" || !strings.Contains(r.stderr, tc.want) {
 			t.Errorf("%s: exit %d, stdout %q, stderr %q; want exit %d, no stdout, and %q in stderr", tc.name, r.code, r.stdout, r.stderr, wantCode, tc.want)
 		}
@@ -214,22 +215,20 @@ func TestWaitExitsOneWhenAJobFailed(t *testing.T) {
 	}
 }
 
-// A timeout is exit 3 and says the job was not cancelled; the job then succeeds.
+// waitTimeout is the --timeout the timeout tests give. No other wait of the daemon is this long,
+// so the daemon's timers fire it alone, at once.
+const waitTimeout = 45 * time.Minute
+
+// A timeout is the daemon's answer, exit 3, and says the job was not cancelled; the job then
+// succeeds.
 func TestWaitTimeoutIsExitThreeAndTheJobGoesOn(t *testing.T) {
 	c := newCLI(t)
+	c.starter.Timers = clock.Exactly{D: waitTimeout, Others: clock.System{}}
 	id := c.submit("hold", "g", ";", "exit", "0")
-
-	done := make(chan result, 1)
-	go func() { done <- c.run(withTask("wait", id, "--timeout", "30m")...) }()
-	if d := <-c.timers.Armed(); d != 30*time.Minute {
-		t.Fatalf("the timeout armed was %v, want 30m", d)
-	}
-	c.timers.Fire()
-	r := <-done
-	if r.code != exitTimeout || !strings.Contains(r.stderr, "never cancels") {
+	r := c.run(withTask("wait", id, "--timeout", waitTimeout.String())...)
+	if r.code != exitTimeout || !strings.Contains(r.stderr, "never cancels") || !strings.Contains(r.stdout, id) {
 		t.Fatalf("wait = %+v, want exit 3 saying a timeout never cancels a job", r)
 	}
-
 	c.world.Gates.Release("g")
 	if r := c.run(withTask("wait", id)...); r.code != exitOK {
 		t.Fatalf("the job after a timed-out wait: %+v", r)
@@ -373,17 +372,38 @@ func TestJSONErrorsFromBeforeTheCommandRuns(t *testing.T) {
 	}
 }
 
-func TestWaitTimeoutUnderJSONIsAFailure(t *testing.T) {
+// With --json, wait prints the daemon's outcome as it sent it, on every way a wait ends.
+func TestWaitUnderJSONPrintsTheDaemonsOutcome(t *testing.T) {
 	c := newCLI(t)
-	id := c.submit("hold", "g", ";", "exit", "0")
-	done := make(chan result, 1)
-	go func() { done <- c.run(withTask("wait", id, "--timeout", "30m", "--json")...) }()
-	<-c.timers.Armed()
-	c.timers.Fire()
-	r := <-done
-	var f struct{ Kind, Message string }
-	if r.code != exitTimeout || json.Unmarshal([]byte(r.stderr), &f) != nil || f.Kind != "FAILURE_KIND_UNAVAILABLE" || !strings.Contains(f.Message, "never cancels") {
-		t.Fatalf("wait --json that timed out = %+v", r)
+	c.starter.Timers = clock.Exactly{D: waitTimeout, Others: clock.System{}}
+	ok := c.submit("exit", "0")
+	bad := c.submit("exit", "3")
+	held := c.submit("hold", "g", ";", "exit", "0")
+	cases := []struct {
+		args     []string
+		kind, by string
+		code     int
+	}{
+		{[]string{"wait", ok}, "WAIT_OUTCOME_KIND_ALL_SUCCEEDED", "", exitOK},
+		{[]string{"wait", ok, bad}, "WAIT_OUTCOME_KIND_SOME_FAILED", bad, exitFailed},
+		{[]string{"wait", "--any", bad, ok}, "WAIT_OUTCOME_KIND_FIRST_FAILED", bad, exitFailed},
+		{[]string{"wait", "--any", ok, held}, "WAIT_OUTCOME_KIND_FIRST_SUCCEEDED", ok, exitOK},
+		{[]string{"wait", held, "--timeout", waitTimeout.String()}, "WAIT_OUTCOME_KIND_TIMED_OUT", "", exitTimeout},
+	}
+	for _, tc := range cases {
+		r := c.run(append(withTask(tc.args...), "--json")...)
+		var o struct {
+			Kind      string            `json:"kind"`
+			DecidedBy string            `json:"decided_by"`
+			Jobs      []json.RawMessage `json:"jobs"`
+		}
+		if err := json.Unmarshal([]byte(r.stdout), &o); err != nil || r.code != tc.code || r.stderr != "" {
+			t.Errorf("%v: %+v (%v)", tc.args, r, err)
+			continue
+		}
+		if o.Kind != tc.kind || o.DecidedBy != tc.by || len(o.Jobs) == 0 {
+			t.Errorf("%v: outcome %+v, want %s decided by %q", tc.args, o, tc.kind, tc.by)
+		}
 	}
 	c.world.Gates.Release("g")
 }
@@ -426,7 +446,7 @@ func TestSubmitCheckAndMeasureRunTheTasksOwnCommands(t *testing.T) {
 func TestSubmitOfATaskTheCommitLacksFailsAndQueuesNothing(t *testing.T) {
 	c := newCLI(t)
 	r := c.run(withTask("submit", "check", "HEAD")...)
-	if r.code != exitFailed || !strings.Contains(r.stderr, "is not a commit") {
+	if r.code != exitInvalidInput || !strings.Contains(r.stderr, "is not a commit") {
 		t.Fatalf("submit check = %+v", r)
 	}
 	if r := c.run(withTask("jobs")...); r.code != exitOK || strings.TrimSpace(r.stdout) != "" {
@@ -457,7 +477,7 @@ func TestEnvironmentVariablesFillTheCallContext(t *testing.T) {
 
 func TestDaemonStatusStopRestart(t *testing.T) {
 	c := newCLI(t)
-	if r := c.run("daemon", "status"); r.code != exitFailed || r.stdout != "not running\n" {
+	if r := c.run("daemon", "status"); r.code != exitNoAnswer || r.stdout != "not running\n" {
 		t.Fatalf("status with no daemon = %+v", r)
 	}
 	if r := c.run("daemon", "stop"); r.code != exitOK || r.stdout != "not running\n" {
@@ -479,10 +499,10 @@ func TestDaemonStatusStopRestart(t *testing.T) {
 	if r := c.run("daemon", "stop"); r.code != exitOK || r.stdout != "stopped\n" {
 		t.Fatalf("stop = %+v", r)
 	}
-	if r := c.run("daemon", "status"); r.code != exitFailed {
+	if r := c.run("daemon", "status"); r.code != exitNoAnswer {
 		t.Fatalf("status after stop = %+v", r)
 	}
-	if r := c.run("daemon", "install"); r.code != exitFailed || !strings.Contains(r.stderr, "not available") {
+	if r := c.run("daemon", "install"); r.code != exitInvalidInput || !strings.Contains(r.stderr, "not available") {
 		t.Fatalf("install = %+v", r)
 	}
 }
@@ -504,4 +524,13 @@ func TestConcurrentCommandsStartOneDaemon(t *testing.T) {
 	if c.starter.Calls() != 1 {
 		t.Fatalf("starts = %d, want 1", c.starter.Calls())
 	}
+}
+
+// scopeAt is the scope of a task in a repository, as the daemon resolves one.
+func scopeAt(repo, task string) core.Scope {
+	s, err := core.ResolvedScope(core.Repository(repo), core.TaskName(task))
+	if err != nil {
+		panic(err)
+	}
+	return s
 }

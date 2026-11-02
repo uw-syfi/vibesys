@@ -62,6 +62,7 @@ func runtimeOf(t *testing.T, survivors *supervisor.Survivors) daemon.Runtime {
 		Stores:       memstores.New(app.Rules(5)),
 		Supervisors:  supervisor.NewInProcess(fakeenv.Environments{core.EnvironmentHost: env}, &fakeenv.Checkouts{}, survivors),
 		Environments: fakeenv.Environments{core.EnvironmentHost: env},
+		Repositories: repos(),
 	}
 }
 
@@ -356,8 +357,17 @@ func TestADaemonThatCannotRecoverDoesNotServe(t *testing.T) {
 
 type brokenStores struct{ app.Stores }
 
-func (brokenStores) Known(context.Context) ([]app.Scope, error) {
+func (brokenStores) Known(context.Context) ([]core.Scope, error) {
 	return nil, &core.Failure{Kind: core.FailureUnavailable, Message: "the disk is gone"}
 }
 
 func (brokenStores) Close() error { return nil }
+
+func mustScope(t *testing.T, repo, task string) core.Scope {
+	t.Helper()
+	s, err := core.ResolvedScope(core.Repository(repo), core.TaskName(task))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}

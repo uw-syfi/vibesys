@@ -23,11 +23,11 @@ const planUsage = "plan: name a subcommand: create, list, view, edit, comment or
 // belong to a task. The CLI stores what an agent writes in them and says nothing about it.
 func planCommand(ctx context.Context, d deps, args []string) int {
 	if len(args) == 0 {
-		return fail(d, false, usagef("%s", planUsage))
+		return fail(d, d.jsonErrors, usagef("%s", planUsage))
 	}
 	sub, ok := planSubcommands[args[0]]
 	if !ok {
-		return fail(d, false, usagef("plan: %q is not a subcommand (create, list, view, edit, comment or close)", args[0]))
+		return fail(d, d.jsonErrors, usagef("plan: %q is not a subcommand (create, list, view, edit, comment or close)", args[0]))
 	}
 	return sub(ctx, d, args[1:])
 }
@@ -43,15 +43,7 @@ var planSubcommands = map[string]func(context.Context, deps, []string) int{
 
 // planStatusNames maps what a user writes to plan statuses. It is read from the contract's enum,
 // so a status added there is a status here.
-var planStatusNames = func() map[string]cliv1.PlanStatus {
-	names := map[string]cliv1.PlanStatus{}
-	for n, name := range cliv1.PlanStatus_name {
-		if s := cliv1.PlanStatus(n); s != cliv1.PlanStatus_PLAN_STATUS_UNSPECIFIED {
-			names[strings.ToLower(strings.TrimPrefix(name, "PLAN_STATUS_"))] = s
-		}
-	}
-	return names
-}()
+var planStatusNames = enumNames(cliv1.PlanStatus_name, "PLAN_STATUS_", func(n int32) cliv1.PlanStatus { return cliv1.PlanStatus(n) })
 
 // planStatusChoices lists the statuses in the order the contract numbers them.
 func planStatusChoices() string {

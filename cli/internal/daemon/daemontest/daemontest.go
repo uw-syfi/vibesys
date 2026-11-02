@@ -27,6 +27,8 @@ type Starter struct {
 	Version string
 	Runtime func() daemon.Runtime
 	Clock   clock.Clock
+	// Timers is what the daemons' waits go through, the system's when nil.
+	Timers clock.Timers
 
 	calls atomic.Int64
 
@@ -60,7 +62,7 @@ func (s *Starter) Start(ctx context.Context) error {
 	var process owned.Group // Joined through p.done, which carries its result.
 	process.Go(func() {
 		p.done <- daemon.Run(runCtx, daemon.Config{
-			Dir: s.Dir, Version: s.Version, Runtime: s.Runtime(), Clock: clk, Ready: w,
+			Dir: s.Dir, Version: s.Version, Runtime: s.Runtime(), Clock: clk, Timers: s.Timers, Ready: w,
 		})
 	})
 	buf := make([]byte, 1)

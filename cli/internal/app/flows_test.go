@@ -28,7 +28,7 @@ var (
 
 // withTask puts a task into the repository the tests submit to.
 func (w *world) withTask(check, bench []string) {
-	w.tasks.Put(call.Repository, commit, tasktest.Scripted("task", check, bench))
+	w.tasks.Put(string(call.Scope.Repository()), commit, tasktest.Scripted("task", check, bench))
 }
 
 func flowSpec(settings core.Settings) core.JobSpec {
@@ -305,11 +305,11 @@ func TestSubmissionsTheDaemonCannotKeyAreRefusedNotQueued(t *testing.T) {
 	w.withTask(passes, scores)
 	a := w.newApp()
 	other := core.Commit(strings.Repeat("ab", 20))
-	w.tasks.Put(call.Repository, other, task.Tree{
+	w.tasks.Put(string(call.Scope.Repository()), other, task.Tree{
 		taskDir + task.ManifestName: {Data: []byte("version = 1\nbackends = [\"cpu\"]\n[evaluator]\nname = \"x\"\n")},
 	})
 	junk := core.Commit(strings.Repeat("ef", 20))
-	w.tasks.Put(call.Repository, junk, task.Tree{
+	w.tasks.Put(string(call.Scope.Repository()), junk, task.Tree{
 		taskDir + task.ManifestName: {Data: []byte("version = 1\nbackends = [\"cpu\"]\nunknown_key = 1\n")},
 	})
 	cases := map[string]struct {
@@ -550,7 +550,7 @@ func TestAJobsKeyIsMadeOfItsKindCommitTaskVersionEnvironmentSettingsAndSchema(t 
 		if v.print != nil {
 			w.env = fakeenv.New(core.EnvironmentHost, w.gates, fakeenv.WithFiles(w.files), fakeenv.WithFingerprint(*v.print))
 		}
-		w.tasks.Put(call.Repository, v.commit, tasktest.Scripted("task", v.check, scores))
+		w.tasks.Put(string(call.Scope.Repository()), v.commit, tasktest.Scripted("task", v.check, scores))
 		a := w.newApp()
 		out, err := a.Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: core.JobSpec{Commit: v.commit, Settings: v.settings}})
 		if err != nil {
@@ -558,7 +558,7 @@ func TestAJobsKeyIsMadeOfItsKindCommitTaskVersionEnvironmentSettingsAndSchema(t 
 		}
 		got := awaitFinal(t, a, out.Job.ID)
 
-		tk, err := w.tasks.Task(context.Background(), call.Repository, v.commit, call.Task)
+		tk, err := w.tasks.Task(context.Background(), string(call.Scope.Repository()), v.commit, string(call.Scope.Task()))
 		if err != nil {
 			t.Fatal(err)
 		}

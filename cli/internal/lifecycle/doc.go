@@ -1,6 +1,6 @@
 // Package lifecycle holds the pure rules of the daemon's job lifecycle: which queued job runs
 // next, what a finished command means for its job, what recovery does with a job found running
-// after a restart, and when a wait is over.
+// after a restart.
 //
 // It is the decision half of a pure core and a thin shell. The daemon (internal/app) feeds it
 // events (a job was admitted, a launch finished, a supervisor reported an outcome, a supervisor
@@ -17,5 +17,4 @@
 //   - launch.go: Launch and Outcome, what a supervisor is given and what it reports.
 //   - machine.go: State and Step, the scheduler and the recovery table.
 //   - settle.go: Settle, the transition that an outcome means.
-//   - await.go: Await, when a client's wait is over.
 package lifecycle

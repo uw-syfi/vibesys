@@ -52,3 +52,19 @@ func TestCompatibilityOverEveryPairOfBuilds(t *testing.T) {
 		}
 	}
 }
+
+// The command line of this build needs a daemon of protocol 2 (Wait, and the daemon resolving the
+// directory), so a daemon of 1 is replaced. The daemon of this build still serves a command line
+// and a supervisor of 1.
+func TestADaemonOfProtocolOneIsReplacedAndStillServesOldPeers(t *testing.T) {
+	old := core.Versions{Protocol: 1, MinProtocol: 1, Schema: core.SchemaVersion}
+	if got := core.CheckCompatibility(core.ClientVersions(), old); got != core.DaemonTooOld {
+		t.Fatalf("this command line and a daemon of 1: %s, want daemon_too_old", got)
+	}
+	if got := core.CheckCompatibility(old, core.CurrentVersions()); got != core.Compatible {
+		t.Fatalf("a command line of 1 and this daemon: %s, want compatible", got)
+	}
+	if got := core.CheckCompatibility(core.ClientVersions(), core.CurrentVersions()); got != core.Compatible {
+		t.Fatalf("this command line and this daemon: %s", got)
+	}
+}

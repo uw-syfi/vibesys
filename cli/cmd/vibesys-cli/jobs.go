@@ -57,9 +57,11 @@ func waitFor(ctx context.Context, d deps, cl *client.Client, callCtx *cliv1.Call
 	}
 	code := exitOfWait(o.GetKind())
 	switch {
+	case asJSON:
+		// The outcome on stdout says it all, and stderr holds only a Failure.
 	case code == exitTimeout:
 		fmt.Fprintf(d.stderr, "vibesys-cli: %s\n", timeoutNote(opts.Timeout))
-	case code == exitNoAnswer && !asJSON:
+	case code == exitNoAnswer:
 		fmt.Fprintf(d.stderr, "vibesys-cli: the daemon ended the wait with %v, which this build cannot read; upgrade vibesys-cli\n", o.GetKind())
 	}
 	return code

@@ -318,27 +318,26 @@ func TestALaunchCarriesWhatASupervisorIsPromised(t *testing.T) {
 	}
 }
 
-func TestTheWaitRuleOverTheContractIsTheDomainRule(t *testing.T) {
-	r := newRand(4)
-	for range 1000 {
-		n := 1 + r.IntN(4)
-		var jobs []*cliv1.Job
-		var states []core.JobState
-		for range n {
-			s := pick(r, core.JobStates()...)
-			states = append(states, s)
-			jobs = append(jobs, &cliv1.Job{State: wire.JobState(s)})
+// Every end of a wait has its own kind on the wire, and none is UNSPECIFIED, which a client reads
+// as no answer.
+func TestEveryWaitEndHasItsOwnKind(t *testing.T) {
+	ends := []core.WaitEnd{core.WaitAllSucceeded, core.WaitSomeFailed, core.WaitFirstSucceeded, core.WaitFirstFailed, core.WaitTimedOut}
+	seen := map[cliv1.WaitOutcomeKind]core.WaitEnd{}
+	for _, e := range ends {
+		k := wire.WaitOutcome(core.WaitOutcome{End: e}).GetKind()
+		if k == cliv1.WaitOutcomeKind_WAIT_OUTCOME_KIND_UNSPECIFIED {
+			t.Fatalf("the end %q goes on the wire as UNSPECIFIED", e)
 		}
-		for _, any := range []bool{false, true} {
-			done, ok := wire.Await(jobs, any)
-			wantDone, wantOK := lifecycle.Await(states, any)
-			if done != wantDone || ok != wantOK {
-				t.Fatalf("wait(any=%v) over %v: got %v, %v want %v, %v", any, states, done, ok, wantDone, wantOK)
-			}
+		if other, ok := seen[k]; ok {
+			t.Fatalf("the ends %q and %q share the kind %v", e, other, k)
 		}
+		seen[k] = e
 	}
-	if done, _ := wire.Await([]*cliv1.Job{{State: 99}}, true); done {
-		t.Fatal("a wait ended on a state it cannot read")
+	if n := len(cliv1.WaitOutcomeKind_name) - 1; n != len(seen) {
+		t.Fatalf("the contract has %d outcome kinds and the daemon sends %d", n, len(seen))
+	}
+	if k := wire.WaitOutcome(core.WaitOutcome{End: "unheard_of"}).GetKind(); k != cliv1.WaitOutcomeKind_WAIT_OUTCOME_KIND_UNSPECIFIED {
+		t.Fatalf("an end the table lacks goes out as %v", k)
 	}
 }
 

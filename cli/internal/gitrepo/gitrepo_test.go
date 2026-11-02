@@ -65,6 +65,29 @@ func TestSystemAnswersFromARealRepository(t *testing.T) {
 	if _, err := g.Resolve(ctx, "relative/dir"); !errors.As(err, &f) || f.Kind != core.FailureInvalidInput {
 		t.Fatalf("Resolve of a relative path = %v, want invalid_input", err)
 	}
+	if _, err := g.Resolve(ctx, filepath.Join(repo, "no-such-dir")); !errors.As(err, &f) || f.Kind != core.FailureInvalidInput {
+		t.Fatalf("Resolve of a directory that does not exist = %v, want invalid_input", err)
+	}
+}
+
+// A directory that cannot be read may be right, as on a mount that is away: that is unavailable,
+// which a caller tries again, and not invalid input, which says the path is wrong.
+func TestSystemSaysADirectoryItCannotReadIsUnavailable(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("permissions do not stop root")
+	}
+	locked := filepath.Join(t.TempDir(), "locked")
+	if err := os.Mkdir(locked, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(locked, 0o700) })
+	var f *core.Failure
+	if _, err := (gitrepo.System{}).Resolve(context.Background(), filepath.Join(locked, "repo")); !errors.As(err, &f) || f.Kind != core.FailureUnavailable {
+		t.Fatalf("Resolve under a directory that cannot be read = %v, want unavailable", err)
+	}
 }
 
 // Every linked worktree of a repository, and every directory inside one, resolves to the

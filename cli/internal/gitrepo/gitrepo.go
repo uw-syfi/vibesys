@@ -7,7 +7,10 @@ package gitrepo
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -44,14 +47,32 @@ var (
 // shares. A common directory called .git is the main worktree's, and the repository is the
 // directory it is in; any other, such as a bare repository's, is the repository itself. Symbolic
 // links are resolved, so two spellings of one path are one repository.
+//
+// A directory that does not exist, or that git says is in no repository, is invalid input. One
+// that cannot be read, such as one on a mount that is away, or a git that cannot run, is
+// unavailable: the directory may be right, and the call may work later.
 func (System) Resolve(ctx context.Context, dir string) (core.Repository, error) {
 	notRepo := &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf(
 		"context.repository: %s is not in a git repository; run the command inside the repository, or give --repo", dir)}
 	if !filepath.IsAbs(dir) {
 		return "", notRepo
 	}
+	if _, err := os.Stat(dir); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("context.repository: %s does not exist", dir)}
+		}
+		return "", &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("context.repository: %s cannot be read: %v", dir, err)}
+	}
 	out, err := run(ctx, dir, "rev-parse", "--git-common-dir")
-	if err != nil || out == "" {
+	var exit *exec.ExitError
+	switch {
+	case ctx.Err() != nil:
+		return "", ctx.Err()
+	case errors.As(err, &exit):
+		return "", notRepo
+	case err != nil:
+		return "", &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("context.repository: git cannot run in %s: %v", dir, err)}
+	case out == "":
 		return "", notRepo
 	}
 	if !filepath.IsAbs(out) {
@@ -59,7 +80,7 @@ func (System) Resolve(ctx context.Context, dir string) (core.Repository, error) 
 	}
 	common, err := filepath.EvalSymlinks(out)
 	if err != nil {
-		return "", notRepo
+		return "", &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("context.repository: the git directory of %s cannot be read: %v", dir, err)}
 	}
 	return canonical(common), nil
 }

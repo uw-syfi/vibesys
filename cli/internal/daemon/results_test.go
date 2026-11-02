@@ -58,7 +58,7 @@ func newResultsRig(t *testing.T) *resultsRig {
 	stores := memstores.New(app.Rules(5))
 	survivors := supervisor.NewSurvivors()
 	a := app.New(app.Config{
-		Clock: clk, Stores: stores, Environments: envs, Branches: branches,
+		Clock: clk, Stores: stores, Environments: envs, Branches: branches, Repositories: repos(),
 		Supervisors: supervisor.NewInProcess(envs, &fakeenv.Checkouts{}, survivors),
 	})
 	if err := a.Start(ctxFor(t)); err != nil {
@@ -87,7 +87,7 @@ func newResultsRig(t *testing.T) *resultsRig {
 
 func (r *resultsRig) measured(c core.Commit, samples ...float64) {
 	r.t.Helper()
-	st, err := r.stores.Create(ctxFor(r.t), app.Scope{Repository: "/repo", Task: "task"})
+	st, err := r.stores.Create(ctxFor(r.t), mustScope(r.t, "/repo", "task"))
 	if err != nil {
 		r.t.Fatal(err)
 	}

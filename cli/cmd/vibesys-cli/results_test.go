@@ -14,7 +14,6 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
-	"github.com/uw-syfi/vibesys/cli/internal/app"
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/store"
@@ -54,7 +53,7 @@ func newResultsCLI(t *testing.T) *resultsCLI {
 	}
 	c.world.Branches.AddBranch("/repo", resultBranch, rev(0))
 	c.git.AddRepo("/repo", revisions)
-	st, err := c.world.Stores.Create(context.Background(), app.Scope{Repository: "/repo", Task: "kv"})
+	st, err := c.world.Stores.Create(context.Background(), scopeAt("/repo", "kv"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +161,7 @@ func TestPromoteFailuresAreTypedErrors(t *testing.T) {
 	}
 
 	r = c.run(withTask("promote", "no-such-rev")...)
-	if r.code != exitFailed || r.stdout != "" || !strings.Contains(r.stderr, "no-such-rev") {
+	if r.code != exitInvalidInput || r.stdout != "" || !strings.Contains(r.stderr, "no-such-rev") {
 		t.Fatalf("promote of an unknown revision: %+v", r)
 	}
 }

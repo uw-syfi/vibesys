@@ -195,20 +195,50 @@ func TestCancelsFromManyCallersAllSeeTheOneEnd(t *testing.T) {
 	}
 }
 
+// Every linked worktree of a repository, and every directory inside one, resolves to the one
+// repository, so they share a task's store. What cannot be resolved is refused, naming the field.
+func TestACallerResolvesToItsRepositoryFromAnyWorktree(t *testing.T) {
+	w := newWorld(t)
+	w.git.AddRepo("/src/kv", nil)
+	w.git.AddWorktree("/work/kv-feature", "/src/kv")
+	a := w.newApp()
+	want := scopeAt("/src/kv", "task")
+	for _, dir := range []string{"/src/kv", "/src/kv/sub/dir", "/work/kv-feature", "/work/kv-feature/sub", "/work/kv-feature/../kv-feature/"} {
+		c, err := a.Resolve(ctxFor(t), app.Caller{Directory: dir, Task: "task", Run: "run-1", Harness: "h", Agent: "a"})
+		if err != nil || c.Scope != want || c.Run != "run-1" || c.Harness != "h" || c.Agent != "a" {
+			t.Errorf("%s resolves to %+v, %v; want %v", dir, c, err, want)
+		}
+	}
+	bad := map[string]app.Caller{
+		"context.task":       {Directory: "/src/kv", Task: "../escape"},
+		"context.repository": {Directory: "relative", Task: "task"},
+		"not in a git":       {Directory: "/elsewhere", Task: "task"},
+	}
+	for field, c := range bad {
+		var f *core.Failure
+		if _, err := a.Resolve(ctxFor(t), c); !errors.As(err, &f) || f.Kind != core.FailureInvalidInput || !strings.Contains(f.Message, field) {
+			t.Errorf("%+v: error = %v, want invalid input naming %s", c, err, field)
+		}
+	}
+}
+
 func TestSubmitValidatesBeforeAnythingChanges(t *testing.T) {
 	w := newWorld(t)
 	a := w.newApp()
 	bad := []app.SubmitRequest{
-		{Context: core.CallContext{Repository: "relative", Task: "t"}, Spec: command("exit", "0")},
-		{Context: core.CallContext{Repository: "/r", Task: "../escape"}, Spec: command("exit", "0")},
+		{Context: core.CallContext{Run: "run-1"}, Spec: command("exit", "0")},
 		{Context: call, Spec: core.JobSpec{Commit: "abc", Environment: core.EnvironmentHost, Settings: core.CommandSettings{Argv: []string{"x"}}}},
 		{Context: call, Spec: command("exit", "0"), Note: strings.Repeat("n", app.DefaultMaxNoteBytes+1)},
 		{Context: call, Spec: core.JobSpec{Commit: commit}},
 	}
 	for i, req := range bad {
 		var f *core.Failure
-		if _, err := a.Submit(ctxFor(t), req); !errors.As(err, &f) || f.Kind != core.FailureInvalidInput {
-			t.Errorf("request %d: error = %v, want invalid input", i, err)
+		want := core.FailureInvalidInput
+		if req.Context.Scope == (core.Scope{}) {
+			want = core.FailureInternal // a context that skipped Resolve is the daemon's own bug
+		}
+		if _, err := a.Submit(ctxFor(t), req); !errors.As(err, &f) || f.Kind != want {
+			t.Errorf("request %d: error = %v, want %s", i, err, want)
 		}
 	}
 	if jobs, _ := a.Jobs(ctxFor(t), scope, core.JobFilter{}); len(jobs) != 0 {
@@ -343,7 +373,7 @@ func TestTheFingerprintIsTakenForTheJobsTarget(t *testing.T) {
 	a := newAppWith(w, envs)
 	job := submit(t, a, "print", "x")
 	awaitFinal(t, a, job.ID)
-	want := environment.Target{Repository: scope.Repository, Commit: commit, Task: scope.Task}
+	want := environment.Target{Repository: string(scope.Repository()), Commit: commit, Task: string(scope.Task())}
 	if len(envs.targets) == 0 || envs.targets[0] != want {
 		t.Fatalf("the environment was first asked for %+v, want %+v", envs.targets, want)
 	}
@@ -375,7 +405,7 @@ type peekingStores struct {
 	after func()
 }
 
-func (p peekingStores) Find(ctx context.Context, scope app.Scope) (store.Store, error) {
+func (p peekingStores) Find(ctx context.Context, scope core.Scope) (store.Store, error) {
 	st, err := p.Stores.Find(ctx, scope)
 	if err != nil {
 		return nil, err
@@ -437,7 +467,7 @@ func TestAReadMakesNoStore(t *testing.T) {
 	w := newWorld(t)
 	a := w.newApp()
 	ctx := ctxFor(t)
-	scope := app.Scope{Repository: "/repo/typo", Task: "typo"}
+	scope := scopeAt("/repo/typo", "typo")
 	jobs, err := a.Jobs(ctx, scope, core.JobFilter{})
 	if err != nil || len(jobs) != 0 {
 		t.Fatalf("Jobs of a task with no store: %v, %v, want none", jobs, err)

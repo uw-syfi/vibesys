@@ -10,6 +10,7 @@ import (
 	"google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -77,9 +78,40 @@ func FuzzDecodeJob(f *testing.F) {
 		if !first.Spec.Commit.Valid() {
 			t.Fatalf("a decoded job has the commit %q, which is not a full hash", first.Spec.Commit)
 		}
-		// The wait rule reads whatever jobs a peer sends.
-		wire.Await([]*cliv1.Job{message}, false)
-		wire.Await([]*cliv1.Job{message, message}, true)
+	})
+}
+
+func FuzzDecodeWaitRequest(f *testing.F) {
+	seedMessages(f,
+		&cliv1.WaitRequest{JobIds: []string{"j1"}},
+		&cliv1.WaitRequest{JobIds: []string{"j1", "j2"}, Any: true, Timeout: durationpb.New(90 * time.Second)},
+		&cliv1.WaitRequest{JobIds: []string{"j1"}, Timeout: &durationpb.Duration{Seconds: -1}},
+		&cliv1.WaitRequest{JobIds: []string{""}},
+	)
+	f.Fuzz(func(t *testing.T, data []byte) {
+		message := &cliv1.WaitRequest{}
+		decode(t, data, message)
+		w, err := wire.ToWaitFor(message)
+		if err != nil {
+			return
+		}
+		if len(w.IDs) == 0 || slices.Contains(w.IDs, "") {
+			t.Fatalf("a decoded wait %+v names no job or an empty one", w)
+		}
+		if w.Timeout < 0 || (message.GetTimeout() != nil && w.Timeout == 0) {
+			t.Fatalf("a decoded wait has the timeout %v from %v", w.Timeout, message.GetTimeout())
+		}
+		again := &cliv1.WaitRequest{Any: w.Any}
+		for _, id := range w.IDs {
+			again.JobIds = append(again.JobIds, string(id))
+		}
+		if w.Timeout > 0 {
+			again.Timeout = durationpb.New(w.Timeout)
+		}
+		back, err := wire.ToWaitFor(again)
+		if err != nil || !reflect.DeepEqual(back, w) {
+			t.Fatalf("a decoded wait %+v changed when encoded and decoded again: %+v, %v", w, back, err)
+		}
 	})
 }
 

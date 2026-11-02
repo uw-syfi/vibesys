@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 
@@ -34,7 +35,15 @@ func (a *App) Resolve(ctx context.Context, c Caller) (core.CallContext, error) {
 	if a.cfg.Repositories == nil {
 		return core.CallContext{}, &core.Failure{Kind: core.FailureUnavailable, Message: "this daemon was built without a way to resolve repositories"}
 	}
-	repo, err := a.cfg.Repositories.Resolve(ctx, filepath.Clean(c.Directory))
+	// Resolving reads the caller's directory, which may be on a mount that does not answer, so it is
+	// bounded the way a store call is.
+	dir := filepath.Clean(c.Directory)
+	repo, err := bounded(ctx, a.cfg.Timers, a.cfg.CallTimeout, func(ctx context.Context) (core.Repository, error) {
+		return a.cfg.Repositories.Resolve(ctx, dir)
+	})
+	if errors.Is(err, errNoAnswer) {
+		return core.CallContext{}, &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("context.repository: git did not answer for %s in time", dir)}
+	}
 	if err != nil {
 		return core.CallContext{}, err
 	}

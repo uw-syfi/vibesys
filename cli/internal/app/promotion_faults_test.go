@@ -77,12 +77,12 @@ type faultyStores struct {
 	plan *faultPlan
 }
 
-func (f faultyStores) Find(ctx context.Context, s app.Scope) (store.Store, error) {
+func (f faultyStores) Find(ctx context.Context, s core.Scope) (store.Store, error) {
 	st, err := f.Stores.Find(ctx, s)
 	return faultyStore{Store: st, plan: f.plan}, err
 }
 
-func (f faultyStores) Create(ctx context.Context, s app.Scope) (store.Store, error) {
+func (f faultyStores) Create(ctx context.Context, s core.Scope) (store.Store, error) {
 	st, err := f.Stores.Create(ctx, s)
 	return faultyStore{Store: st, plan: f.plan}, err
 }

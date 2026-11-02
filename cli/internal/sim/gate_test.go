@@ -10,7 +10,6 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/uw-syfi/vibesys/cli/internal/app"
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv"
@@ -159,13 +158,13 @@ func gated[T any](ctx context.Context, w *world, d *incarnation, label string, w
 // of a test that starts to.
 type gatedStore struct {
 	store.Store
-	scope app.Scope
+	scope core.Scope
 	w     *world
 	d     *incarnation
 }
 
 // where names a call's repository, so that a repository that is away fails what it holds open.
-func (s gatedStore) where(label string) string { return label + " in " + s.scope.Repository }
+func (s gatedStore) where(label string) string { return label + " in " + string(s.scope.Repository()) }
 
 func (s gatedStore) Submit(ctx context.Context, sub core.Submission) (core.SubmitOutcome, error) {
 	return gated(ctx, s.w, s.d, s.where("store.Submit"), true, func() (core.SubmitOutcome, error) { return s.Store.Submit(ctx, sub) })
