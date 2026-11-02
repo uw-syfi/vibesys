@@ -1,7 +1,8 @@
 // Package archcheck enforces vibesys-cli's structural rules over its sources: the layer rules
 // for imports, the rule that knowledge of the storage layout stays inside internal/store/filestore,
-// and the two rules that keep the daemon simulable: the real clock is reached only through
-// internal/clock, and goroutines in the daemon's packages start through owned.Group.
+// and the rules that keep the daemon simulable and its decoders fuzzed: the real clock is reached
+// only through internal/clock, goroutines in the daemon's packages start through owned.Group, and
+// every decoder in internal/wire has a fuzz target.
 //
 // Violations is a pure function of the files it is given, so its tests need no checkout; the
 // test in this package applies it to the real tree.
@@ -157,6 +158,7 @@ func Violations(files map[string]string) []string {
 			found = append(found, layout(name, source)...)
 		}
 	}
+	found = append(found, decoderViolations(files)...)
 	sort.Strings(found)
 	return found
 }

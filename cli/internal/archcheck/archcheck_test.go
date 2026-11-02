@@ -307,3 +307,53 @@ func TestExceptionsExcuseOnlyTheirFile(t *testing.T) {
 		t.Errorf("a missing excepted file was not reported: %v", stale)
 	}
 }
+
+func wireSource(decoders ...string) string {
+	var b strings.Builder
+	b.WriteString("package wire\n")
+	for _, d := range decoders {
+		b.WriteString("\nfunc " + d + "() {}\n")
+	}
+	return b.String()
+}
+
+// A decoder of what a peer sent needs a fuzz target that calls it, unless it is listed with a
+// reason, and a listed decoder that is gone is stale.
+func TestEveryWireDecoderIsFuzzed(t *testing.T) {
+	const fuzz = "cli/internal/wire/fuzz_test.go"
+	unfuzzed := archcheck.UnfuzzedDecoders()
+	for name, reason := range unfuzzed {
+		if strings.TrimSpace(reason) == "" {
+			t.Errorf("%s: an unfuzzed decoder states no reason", name)
+		}
+	}
+	all := []string{"ToThing", "Thing"}
+	for name := range unfuzzed {
+		all = append(all, name)
+	}
+	cases := []struct {
+		name  string
+		files map[string]string
+		bad   bool
+	}{
+		{"a decoder that a fuzz target calls", map[string]string{"cli/internal/wire/a.go": wireSource(all...), fuzz: "package wire_test\nvar _ = wire.ToThing(x)\n"}, false},
+		{"a decoder no fuzz target calls", map[string]string{"cli/internal/wire/a.go": wireSource(all...), fuzz: "package wire_test\n"}, true},
+		{"a decoder with no fuzz file at all", map[string]string{"cli/internal/wire/a.go": wireSource(all...)}, true},
+		{"an encoder needs no target", map[string]string{"cli/internal/wire/a.go": wireSource(append([]string{"Thing"}, keys(unfuzzed)...)...), fuzz: "package wire_test\n"}, false},
+		{"a listed decoder is stale once wire no longer defines it", map[string]string{"cli/internal/wire/a.go": wireSource("ToThing"), fuzz: "package wire_test\nvar _ = wire.ToThing(x)\n"}, true},
+		{"a name in a test file is not a decoder", map[string]string{"cli/internal/wire/a_test.go": wireSource("ToThing")}, false},
+	}
+	for _, c := range cases {
+		if got := archcheck.Violations(c.files); (len(got) > 0) != c.bad {
+			t.Errorf("%s: violations = %v, want bad=%v", c.name, got, c.bad)
+		}
+	}
+}
+
+func keys(m map[string]string) []string {
+	var out []string
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
