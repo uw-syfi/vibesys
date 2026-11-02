@@ -87,8 +87,11 @@ func (g *group) end() {
 
 // interpreter runs the scripts of one execution.
 type interpreter struct {
-	env *Environment
-	x   core.Execution
+	gates Gates
+	// dir is the working directory the `dir` step prints.
+	dir string
+	// files is where the `emit` step writes; nil when the machine has no such files.
+	files Files
 }
 
 // splitOutput separates the output file a command is told about from the rest of its script: a
@@ -108,7 +111,7 @@ func (in *interpreter) run(g *group, steps []step, out io.Writer, file string) (
 	exited := func(code int) (core.ExecOutcome, error) {
 		return core.ExecOutcome{Kind: core.ExecExited, ExitCode: code}, nil
 	}
-	points, hasPoints := in.env.gates.(Points)
+	points, hasPoints := in.gates.(Points)
 	for _, s := range steps {
 		w := s.words
 		switch w[0] {
@@ -117,16 +120,16 @@ func (in *interpreter) run(g *group, steps []step, out io.Writer, file string) (
 				return core.ExecOutcome{Kind: core.ExecUnknown}, err
 			}
 		case "emit":
-			if in.env.files == nil || file == "" {
+			if in.files == nil || file == "" {
 				return exited(127)
 			}
-			in.env.files.Put(file, []byte(strings.Join(w[1:], " ")))
+			in.files.Put(file, []byte(strings.Join(w[1:], " ")))
 		case "dir":
-			if _, err := fmt.Fprintln(out, in.x.Checkout.Dir); err != nil {
+			if _, err := fmt.Fprintln(out, in.dir); err != nil {
 				return core.ExecOutcome{Kind: core.ExecUnknown}, err
 			}
 		case "hold":
-			if len(w) != 2 || !in.env.gates.Wait(g.ctx, w[1]) {
+			if len(w) != 2 || !in.gates.Wait(g.ctx, w[1]) {
 				return core.ExecOutcome{Kind: core.ExecCancelled}, nil
 			}
 		case "mark", "alive", "unless-flag":
