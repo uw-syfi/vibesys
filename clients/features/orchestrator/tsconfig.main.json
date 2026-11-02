@@ -1,0 +1,27 @@
+{
+  "extends": "../../tools/tsconfig.base.json",
+  "compilerOptions": {
+    "lib": [
+      "ES2022"
+    ],
+    "types": [
+      "node"
+    ],
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.main.tsbuildinfo"
+  },
+  "include": [
+    "src/main/**/*.ts",
+    "src/main/**/*.tsx"
+  ],
+  "exclude": [
+    "src/main/**/*.test.ts",
+    "src/main/**/*.test.tsx"
+  ],
+  "references": [
+    {
+      "path": "./tsconfig.state.json"
+    }
+  ]
+}

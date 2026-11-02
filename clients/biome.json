@@ -19,7 +19,8 @@
       "!libs/ui/src/tokens.css",
       "!**/dist",
       "!libs/contracts/src/generated",
-      "!libs/proto/src/generated"
+      "!libs/proto/src/generated",
+      "!libs/orchestrator-proto/src/generated"
     ]
   },
   "css": {

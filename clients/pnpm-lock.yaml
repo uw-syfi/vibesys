@@ -234,6 +234,15 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  apps/orchestrator:
+    devDependencies:
+      '@types/bun':
+        specifier: 1.4.2
+        version: 1.4.2
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
   apps/ui-gallery:
     dependencies:
       '@vibesys/feature-new-run':
@@ -478,6 +487,25 @@ importers:
       '@vibesys/run-fixtures':
         specifier: workspace:*
         version: link:../../libs/run-fixtures
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  features/orchestrator:
+    dependencies:
+      '@vibesys/machine':
+        specifier: workspace:*
+        version: link:../../libs/machine
+      xstate:
+        specifier: 5.33.2
+        version: 5.33.2
+    devDependencies:
+      '@types/bun':
+        specifier: 1.4.2
+        version: 1.4.2
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
@@ -1060,6 +1088,52 @@ importers:
       xstate:
         specifier: 5.33.2
         version: 5.33.2
+    devDependencies:
+      '@types/bun':
+        specifier: 1.4.2
+        version: 1.4.2
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  libs/orchestrator-fixtures:
+    devDependencies:
+      '@types/bun':
+        specifier: 1.4.2
+        version: 1.4.2
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  libs/orchestrator-proto:
+    dependencies:
+      '@bufbuild/protobuf':
+        specifier: 2.16.0
+        version: 2.16.0
+      '@bufbuild/protovalidate':
+        specifier: 1.3.0
+        version: 1.3.0(@bufbuild/protobuf@2.16.0)
+    devDependencies:
+      '@types/bun':
+        specifier: 1.4.2
+        version: 1.4.2
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  libs/orchestrator-source:
+    devDependencies:
+      '@types/bun':
+        specifier: 1.4.2
+        version: 1.4.2
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  libs/orchestrator-state:
     devDependencies:
       '@types/bun':
         specifier: 1.4.2
