@@ -193,7 +193,9 @@ func (e *Engine) Remove(ctx context.Context, name string) error {
 	if err := checkName(name); err != nil {
 		return err
 	}
-	res, err := e.call(ctx, "rm", "rm", "--force", name)
+	// --volumes removes the anonymous volumes an image's VOLUME lines made, which would otherwise be
+	// left dangling by every run.
+	res, err := e.call(ctx, "rm", "rm", "--force", "--volumes", name)
 	if err != nil {
 		return err
 	}

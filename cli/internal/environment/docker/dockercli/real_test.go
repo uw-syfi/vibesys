@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -390,5 +391,47 @@ func TestAnImageWithoutAShellIsRefusedAtTheRun(t *testing.T) {
 	left, err := newEngine().Containers(ctx, docker.Labels{docker.LabelScope: scope})
 	if err != nil || len(left) != 0 {
 		t.Errorf("containers %v after the refused run (%v)", left, err)
+	}
+}
+
+// An image that declares a VOLUME gives each container an anonymous volume. Removing the container
+// removes it too, so runs do not leave one dangling volume each.
+func TestRemovingAContainerRemovesItsAnonymousVolumes(t *testing.T) {
+	scope := "t" + randomHex(6)
+	t.Cleanup(func() { removeScope(scope) })
+	engine := newEngine()
+	ctx, cancel := context.WithTimeout(context.Background(), envtest.Backstop)
+	defer cancel()
+	env, err := newProvider(clock.System{}, scope, engine, dockerfile+"VOLUME /data\n").Environment(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fp, err := env.Fingerprint(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = exec.Command("docker", "rmi", fp.ImageDigest).Run() })
+	dir := t.TempDir()
+	name := "vibesys-cli-" + randomHex(8)
+	spec := docker.ContainerSpec{
+		Name: name, Image: fp.ImageDigest,
+		Labels: docker.Labels{docker.LabelOwner: docker.Owner, docker.LabelScope: scope, docker.LabelRun: randomHex(8)},
+		User:   docker.User{UID: os.Getuid(), GID: os.Getgid()}, Dir: dir, Mounts: []docker.Mount{{Host: dir, Container: dir}},
+	}
+	if _, err := engine.Start(ctx, spec); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	out, err := exec.CommandContext(ctx, "docker", "inspect", "--format",
+		`{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}`, name).Output()
+	volume := strings.TrimSpace(string(out))
+	if err != nil || volume == "" {
+		t.Fatalf("the container's volume for /data = %q (%v)", volume, err)
+	}
+	t.Cleanup(func() { _ = exec.Command("docker", "volume", "rm", "--force", volume).Run() })
+	if err := engine.Remove(ctx, name); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if err := exec.CommandContext(ctx, "docker", "volume", "inspect", volume).Run(); err == nil {
+		t.Fatalf("volume %s is still there after its container was removed", volume)
 	}
 }
