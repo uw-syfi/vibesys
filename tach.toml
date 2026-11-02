@@ -1592,7 +1592,7 @@ depends_on = ["vs_core._dispatch_episode", "vs_core._proofs", "vs_core.types", "
 
 [[interfaces]]
 from = ["vs_core._waits"]
-expose = ["MAY_WAIT_ON", "Outcome", "Producer", "RESOLUTIONS", "OpenWait", "Resolution", "WaitKind", "WaitSubject", "WaitingPhase", "checkpoint_stalls", "lapsed_check_waits", "lapsed_job_waits", "lapsed_session_waits", "orphan_waits", "owned_job_subject", "phase_waits", "record_waits", "recorded_waits", "recovery_waits", "stalled_acquisitions", "stalled_blocked_records", "stalled_checkpoint_waits", "subjects", "undispatchable_requests", "unmet_waits", "waits"]
+expose = ["MAY_WAIT_ON", "Outcome", "Producer", "RESOLUTIONS", "OpenWait", "Resolution", "WaitKind", "WaitSubject", "WaitingPhase", "checkpoint_stalls", "lapsed_check_waits", "lapsed_job_waits", "lapsed_session_waits", "orphan_waits", "owned_job_subject", "phase_waits", "recorded_waits", "recovery_waits", "stalled_acquisitions", "stalled_blocked_records", "stalled_checkpoint_waits", "subjects", "undispatchable_requests", "unmet_waits", "waits"]
 
 [[modules]]
 path = "vs_core._session_rows"
@@ -1628,7 +1628,7 @@ depends_on = ["vs_core.types.common", "vs_core._outcomes", "vs_core._generated",
 
 [[interfaces]]
 from = ["vs_core.types"]
-expose = ["[a-z_]+\\.[A-Z].*", "sessions\\.(session_waits|session_may_wait|turn_acquires|turn_may_wait)", "records\\.(request_lifecycle|request_interrupt_policy|request_effect|request_close_policy|request_end_policy|reply_owed|success_without_reply|is_open|is_step|command_open)", "records\\.(within|inherit)", "job_observations\\.may_resubmit"]
+expose = ["[a-z_]+\\.[A-Z].*", "sessions\\.(session_waits|session_may_wait|turn_acquires|turn_may_wait)", "records\\.(request_lifecycle|request_interrupt_policy|request_effect|request_close_policy|request_end_policy|reply_owed|success_without_reply|is_open|is_step|command_open|phase_open)", "records\\.(within|inherit)", "job_observations\\.may_resubmit"]
 
 [[modules]]
 path = "vs_core.types.common"
