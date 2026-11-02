@@ -100,7 +100,8 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/backend/` | `Backend`: facts about the compute hardware a task targets. |
 | `internal/lifecycle/` | The job lifecycle as a pure machine: `Step(State, Event) (State, []Request)`. The daemon feeds it events and carries out the requests; recovery after a crash is the same events replayed. |
 | `internal/changed/` | Pure helpers for the "what changed" facts a job records. |
-| `internal/clock/` | `Clock` and `Timers`, the only ways the daemon and the client read time. A test supplies its own and fires timers itself. |
+| `internal/clock/` | `Clock` and `Timers`, the only ways the daemon and the client read or wait on time. A test supplies its own and fires timers itself. |
+| `internal/owned/` | `Group`, the one way the daemon's packages start a goroutine: the group starts it and `Wait` joins it, so nothing outlives what started it. |
 | `internal/gitrepo/` | `Git`: the repository containing a directory, and a revision resolved to a full commit id. |
 | `internal/runtimedir/` | The per-user runtime directory (socket, locks, supervisor directories), its safety checks, and the advisory file locks. |
 | `internal/environment/fakeenv/` | A `Fake` `Environment`, a real implementation that runs scripted commands in memory. Tests only. |
@@ -110,13 +111,15 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/supervisor/host/` | Starting supervisor processes, finding the ones still alive after a daemon restart, and serving a supervisor on its socket. |
 | `internal/supervisor/suptest/` | The contract suite every supervisor implementation passes. Tests only. |
 | `internal/app/` | The daemon's job flows (submit, cancel, watch, logs, recovery on start) over `Store`, `Supervisors` and `Environments`, with no transport. |
-| `internal/app/filestores/` | `app.Stores` over `filestore`: one store per repository and task, and the per-user index that names them. |
+| `internal/app/filestores/` | `app.Stores` over `filestore`: one store per repository and task, and the per-user index that names them. The shipped binary's stores. |
+| `internal/app/memstores/` | `app.Stores` over `memstore`, standing for the disk. Tests only: `production` does not import it, so the binary ships no in-memory store. |
 | `internal/daemon/` | The daemon as a process: the gRPC server over `app`, the single-instance lock, the readiness signal, and a clean shutdown. |
 | `internal/daemon/daemontest/` | A daemon started in a test's process on a test directory. Tests only. |
 | `internal/client/` | What a command line calls: connect (starting the daemon under a lock when none runs), the version handshake, and `Wait`. It speaks the contract's messages and never imports `core`. |
 | `internal/production/` | The wiring of the shipped binary: which environment, stores and supervisors the daemon runs with. |
 | `internal/upgrade/` | `vibesys-cli upgrade`: the release asset names, a `Source` of releases (GitHub over HTTP, or the in-memory fake in `upgradetest/`), and the verify-then-rename install. |
-| `internal/archcheck/` | The layer and layout rules below, as a check `go test` runs. |
+| `internal/sim/` | The whole-daemon simulation: the real `app`, server and client over Fakes, driven by a seed. Tests only; it has no product code. |
+| `internal/archcheck/` | The layer, layout, clock, goroutine and fuzzing rules below, as a check `go test` runs. |
 | `gen/` | Generated Go for `proto/vibesys/cli/v1`. Never edited by hand. |
 
 ## Layer rules
@@ -145,9 +148,22 @@ Dependencies point one way: `cmd` and the shell packages, then interfaces, then 
 - Storage layout (state directory names, file names, the per-user index location) appears only in
   `internal/store/filestore`. Every other package reads and writes through `Store`.
 
-`internal/archcheck` enforces the import rules and the layout rule. A new package needs an entry in
-its rules table in the same change, so an unlisted package fails the test instead of passing
-unchecked. Imports that only test files may use are listed separately, so a fake never ships.
+- The real clock is reached only through `internal/clock`. No other package calls `time.Now`,
+  `Since`, `Until`, `Sleep`, `After`, `AfterFunc`, `Tick`, `NewTimer` or `NewTicker`, in product code
+  or in tests; `time.Date`, `time.Unix` and the duration types are fine. A daemon that read the real
+  clock could not be replayed from a seed.
+- A goroutine in `app`, `daemon` and `supervisor` (and their sub-packages) starts through
+  `owned.Group`, never with a bare `go` statement, so every goroutine has an owner that joins it.
+  Test files are not held to this: a test starts its own client goroutines and bounds them.
+- Every exported `To*` decoder in `internal/wire` (what turns a peer's message into a domain value)
+  is called by a fuzz target in `internal/wire/fuzz_test.go`, or is listed in `archcheck` with the
+  reason a fuzz target already covers it.
+
+`internal/archcheck` enforces all of these. A new package needs an entry in its rules table in the
+same change, so an unlisted package fails the test instead of passing unchecked. Imports that only
+test files may use are listed separately, so a fake never ships. A file that must break the clock
+or goroutine rule is listed in `archcheck` with its reason, and an entry whose file no longer
+breaks the rule fails the check until it is removed.
 
 ## Commands
 
@@ -181,7 +197,14 @@ they may still succeed. A `wait` whose connection to the daemon breaks connects 
 With `--json`, a command prints the contract's messages in protobuf's canonical JSON form with the
 original field names, one compact message per line: the response for `submit`, `cancel`, `note`,
 `jobs`, `logs` and `daemon status`; one `WatchResponse` per job for `wait` (the contract has no
-message for it); and, on stderr, a `Failure` for any error.
+message for it); and, on stderr, a `Failure` for an error that a command reports: a refusal from
+the daemon, a missing argument, a job that does not exist, a `wait` that gave up (exit `4`).
+
+Some errors are plain text on stderr even with `--json`, because they come before the command has
+read its flags or are not errors of a call: a flag that does not parse (exit `2`, printed by Go's
+`flag` package), an unknown command or none (the usage text, exit `2`), and the note that a `wait`
+timed out (exit `3`; the jobs still print as `WatchResponse`s on stdout). A caller reads the exit
+code first and parses stderr as a `Failure` only for `1`, `2` and `4`, and only when it parses.
 
 A signal ends the command and nothing more. A job the command submitted or waits on keeps running.
 
@@ -211,6 +234,12 @@ at a time and takes each decision from `lifecycle`.
 
 Recovery is the daemon's start, with no separate path:
 
+- The daemon lists the stores (the per-user index names them) and the supervisors left in the
+  runtime directory, and joins them by job. `Supervisors.Runs` lists the run directories by name and
+  probes each one; a probe also reads the run's `launch.pb` on a best-effort basis, only to learn
+  which repository and task a run belongs to when no store lists its job. A run whose launch cannot
+  be read has none, and recovery treats it as a run with no known store. `Runs` does not decide
+  anything from the file.
 - Queued jobs are in the store, so they run after a restart or a reboot.
 - A running job whose supervisor is alive is re-adopted: the daemon follows it again, and if the
   job finished while the daemon was down, it records the outcome.
@@ -224,7 +253,8 @@ the store records the job running, and only then does the supervisor start the c
 
 ## What this build runs
 
-The shipped binary has no usable environment yet. It runs with `environment.None` and no checkouts,
+The shipped binary keeps its jobs on disk (`app/filestores`; the in-memory stores are test support
+and are not linked into it). It has no usable environment yet. It runs with `environment.None` and no checkouts,
 so a command job queues, runs in order, and ends not-attempted with a reason saying so. The host and
 docker environments land later, and with them `submit check`, `submit measure`, the result cache,
 `show`, `compare` and `promote`. Until then `submit check` and `submit measure` are refused locally
@@ -253,15 +283,31 @@ fails on a stale `gen/`.
 ./check.sh
 ```
 
-runs `gofmt`, `go vet` and the tests, runs the concurrency tests again with the race detector, then
-vets for each release target (Linux and macOS, amd64 and arm64). The tests include building a real
-release with `build_release.sh` and installing it with `install.sh`, so they need `go`, `curl`, `awk`
-and `sha256sum` or `shasum`. CI runs the same script as the `cli` job. To run the whole store suite under the race detector, which takes several times longer:
+runs `gofmt` and `go vet`, vets for each release target (Linux and macOS, amd64 and arm64), then
+runs every package's tests under the race detector. The tests include the architecture rules above,
+building a real release with `build_release.sh` and installing it with `install.sh`, so they need
+`go`, `curl`, `awk` and `sha256sum` or `shasum`. CI runs the same script as the `cli` job
+(`cli_checks`, with a 600 s timeout). On a 4-core host with a cold Go cache it takes about three
+minutes; with a warm cache and 64 cores, about one minute. The slowest packages are `sim` and
+`filestore`, which take about a minute and half a minute under the detector.
 
-```sh
-go test -race ./internal/store/...
-```
+How the daemon is checked:
 
-The store tests do not depend on time, threads or the network: the crash tests fail a step by its
-number on an in-memory filesystem, so the same step fails on every run. A real directory is used
-only to run the contract suite once on the operating system's filesystem.
+- The job lifecycle is a pure machine (`lifecycle.Step`) and the stores share one `Ledger`, so most
+  rules are tested by property over many generated inputs, with no I/O.
+- `internal/sim` runs the whole daemon over Fakes inside `testing/synctest`, driven by a seed: every
+  store or supervisor call can fail or kill the daemon, every timer fires when the driver says, and
+  invariants are checked after each step. A failing seed replays exactly: set `VIBESYS_SIM_SEED=<n>`
+  to run just that seed. `VIBESYS_SIM_SEEDS=<count>` widens the default range.
+- The decoders in `internal/wire` have fuzz targets (`FuzzDecodeJob` and the others in
+  `fuzz_test.go`). `go test` runs their seed inputs; to search for new failures run one for a while,
+  for example `go test -run '^$' -fuzz '^FuzzDecodeJob$' -fuzztime 1m ./internal/wire`, and commit the
+  file it leaves under `testdata/fuzz` when it finds one. The store has fuzz targets too
+  (`internal/store/filestore`).
+- A few tests drive real processes (the release build, `install.sh`, a real supervisor process), to
+  show the Fakes match reality.
+
+The tests do not depend on time, threads or the network: the clock is injected, the crash tests fail
+a step by its number on an in-memory filesystem so the same step fails on every run, and a wait in
+a test is bounded only to guard against a hang. A real directory is used only to run the contract
+suite once on the operating system's filesystem.
