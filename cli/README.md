@@ -44,6 +44,10 @@ and the docker environment, are not in this build; see "What this build runs" be
 | `internal/gitrepo/` | `Git`: the repository containing a directory, and a revision resolved to a full commit id. |
 | `internal/runtimedir/` | The per-user runtime directory (socket, locks, supervisor directories), its safety checks, and the advisory file locks. |
 | `internal/environment/fakeenv/` | A `Fake` `Environment`, a real implementation that runs scripted commands in memory. Tests only. |
+| `internal/environment/docker/` | The `docker` `Environment`: builds the task's Dockerfile into an image cached by content, runs a job's commands in one container over a clean checkout as the invoking user, and removes the container on every path. It decides over an `Engine`, the narrow interface to Docker. |
+| `internal/environment/docker/dockercli/` | The `Engine` that drives the `docker` program. The only place that touches a real Docker. Its tests against a real daemon carry the `docker` build tag. |
+| `internal/environment/docker/dockerfake/` | An `Engine` that keeps a Docker daemon in memory and can fail or crash any call. Tests only. |
+| `internal/environment/docker/dockertest/` | The one contract suite every `Engine` passes. Tests only. |
 | `internal/wire/` | Translation between `core` types and the generated contract types, the version handshake, and typed refusals. |
 | `internal/supervisor/` | The supervisor as a domain type: it owns one job's command and its output, and reports the outcome. |
 | `internal/supervisor/rpc/` | The supervisor's gRPC server and client, over the additive `supervisor.proto`. |
