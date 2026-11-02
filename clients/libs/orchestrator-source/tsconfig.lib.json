@@ -19,6 +19,9 @@
   ],
   "references": [
     {
+      "path": "../hosts/tsconfig.lib.json"
+    },
+    {
       "path": "../orchestrator-proto/tsconfig.lib.json"
     }
   ]

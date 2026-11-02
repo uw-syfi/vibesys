@@ -16,6 +16,9 @@
       "path": "./tsconfig.lib.json"
     },
     {
+      "path": "../hosts/tsconfig.lib.json"
+    },
+    {
       "path": "../orchestrator-proto/tsconfig.lib.json"
     }
   ]

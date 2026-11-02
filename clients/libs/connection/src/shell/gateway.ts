@@ -3,6 +3,7 @@ import type {Duplex} from 'node:stream';
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {LISTING_STEPS, type ListingStep} from '@vibesys/hosts';
 import {clockFrom} from '@vibesys/machine';
+import {OrchestratorService} from '@vibesys/orchestrator-proto';
 import {
   API_SCHEMA_HASH,
   HelloRequestSchema,
@@ -18,7 +19,7 @@ import {
   TailRequestSchema,
   TailResponseSchema,
   validatedFromBinary,
-  validateHostPayload,
+  validateServicePayload,
   WatchRequestSchema,
   watchBudgets,
 } from '@vibesys/proto';
@@ -27,6 +28,20 @@ import {GrpcError, registerAbort, type ScheduleTimeout} from '@vibesys/transport
 import {createActor, fromPromise} from 'xstate';
 import {gatewayMachine} from '../state/gateway.js';
 import {type CallBound, GatewaySession} from './grpc.js';
+
+/**
+ * The services one gateway session carries. A payload is checked against the generated descriptors
+ * of these, and a method outside them is refused. `HostService` is the one the handshake is about;
+ * `OrchestratorService` is served by the same `vibesysd`, on the same socket.
+ */
+const SERVICES = [HostService, OrchestratorService];
+
+/** The orchestrator's server streams, from its generated descriptor. */
+const ORCHESTRATOR_STREAMS: ReadonlySet<string> = new Set(
+  OrchestratorService.methods
+    .filter(method => method.methodKind === 'server_streaming')
+    .map(method => `/${OrchestratorService.typeName}/${method.name}`),
+);
 
 export const HELLO_METHOD = `/${HostService.typeName}/${HostService.method.hello.name}`;
 export const TAIL_METHOD = `/${HostService.typeName}/${HostService.method.tail.name}`;
@@ -89,7 +104,9 @@ export class GatewayConnection {
             for (const call of [...this.#calls]) {
               // A subscription is not re-issued: a second stream in the same call would deliver
               // a second snapshot into state the caller already holds. Its machine reopens it.
-              if (call.method === SUBSCRIBE_METHOD)
+              // An orchestrator stream is not either: its caller knows the sequence it has
+              // reached, and reopens from there instead of from the one it first asked for.
+              if (call.method === SUBSCRIBE_METHOD || ORCHESTRATOR_STREAMS.has(call.method))
                 call.finish(new GrpcError(14, 'gateway connection lost'));
               call.abort?.abort();
               call.abort = null;
@@ -161,7 +178,7 @@ export class GatewayConnection {
       return Promise.reject(new Error('gateway closed'));
     if (signal.aborted) return Promise.reject(signal.reason);
     try {
-      validateHostPayload(method, 'input', bytes);
+      validateServicePayload(SERVICES, method, 'input', bytes);
     } catch (error) {
       return Promise.reject(error);
     }
@@ -330,7 +347,7 @@ async function openSession(
 function acceptResponse(call: LiveCall, bytes: Uint8Array): void {
   let resumed: Uint8Array | undefined;
   try {
-    validateHostPayload(call.method, 'output', bytes);
+    validateServicePayload(SERVICES, call.method, 'output', bytes);
     if (call.method === TAIL_METHOD) {
       const response = fromBinary(TailResponseSchema, bytes);
       const request = fromBinary(TailRequestSchema, call.bytes);
