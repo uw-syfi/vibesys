@@ -45,6 +45,28 @@ func TestAnOpenedScopeIsKnownAfterARestart(t *testing.T) {
 	}
 }
 
+// A forgotten scope leaves the index, so a daemon that starts later does not know it.
+func TestAForgottenScopeLeavesTheIndex(t *testing.T) {
+	repo, indexDir := t.TempDir(), t.TempDir()
+	first := newStores(t, indexDir)
+	kept, gone := app.Scope{Repository: repo, Task: "kept"}, app.Scope{Repository: repo, Task: "gone"}
+	for _, s := range []app.Scope{kept, gone} {
+		if _, err := first.Create(context.Background(), s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := first.Forget(context.Background(), gone); err != nil {
+		t.Fatal(err)
+	}
+	known, err := newStores(t, indexDir).Known(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(known) != 1 || known[0] != kept {
+		t.Fatalf("Known = %v, want [%v]", known, kept)
+	}
+}
+
 // Opening a scope again hands back the same store, so there is one writer in the process.
 func TestOpenSharesTheStore(t *testing.T) {
 	stores := newStores(t, t.TempDir())

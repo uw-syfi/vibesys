@@ -2,6 +2,10 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
+# The tests open real stores under TMPDIR, and a store refuses a file system whose locks do not work,
+# such as NFS mounted with nolock. Where /tmp is such a mount, set TMPDIR to a directory on a local
+# disk before running this script.
+
 unformatted="$(gofmt -l .)"
 if [[ -n "$unformatted" ]]; then
   printf '%s\n' "$unformatted" >&2
@@ -25,7 +29,9 @@ done
 # Every package's tests run under the race detector, since the daemon's flows are concurrent and
 # a package added later is covered without being listed here. The race run includes the tests of the
 # release build and install.sh, which run real tools. The per-package timeout only guards against a
-# hang; the slowest package, the seeded simulation, takes about a minute under the detector.
+# hang; the slowest package, the seeded simulation, takes about a minute under the detector. The
+# lifecycle package includes the exhaustive model check of two jobs (model_test.go), every order of
+# events to depth 10 in one store and depth 9 across two, in a few seconds.
 go test -race -count=1 -timeout 300s ./...
 
 # More seeds without the detector, since a race the detector finds needs a schedule the first few

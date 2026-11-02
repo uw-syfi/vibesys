@@ -187,6 +187,7 @@ default to the environment variables shown:
 | `jobs [--commit rev] [--state s] [--note-contains text]` | List the task's jobs, oldest first. |
 | `logs <job> [--follow]` | Print a job's output, and with `--follow` keep printing until it ends. |
 | `daemon status\|stop\|restart` | Report on, stop, or restart the daemon. `daemon install` is not available yet. |
+| `daemon forget <repository>` | Give up a repository that is gone for good, such as a removed worktree: its jobs leave the daemon, what is left of their supervisors is let go of, and its stores leave the index. Nothing is touched where the repository was. A repository that is there, or that the daemon does not know, is refused. |
 
 Exit codes: `0` ok (for `wait`, every job it waited on succeeded), `1` failed (a job did not
 succeed, or the call was refused), `2` invalid input or a job that does not exist, `3` a `wait`
@@ -247,6 +248,16 @@ Recovery is the daemon's start, with no separate path:
   becomes `lost`, with one explanatory line in its output. A lost job is never retried: the
   command may have had effects.
 - A supervisor that was started for a job the store never marked running is discarded.
+- A store that cannot be read, such as a repository on a disk that is not mounted, stays known and
+  is read again every slow period. None of its jobs starts, and a run of it is kept, not released.
+  A run that is parked or finished runs nothing and holds up no other repository. A command that
+  may still run holds the machine for as long as its job may run and no longer. A `wait` on a job
+  held up this way ends with why (exit `4`) rather than waiting in silence.
+- A repository that is gone for good is given up with `daemon forget`.
+
+A store that goes away while the daemon runs stops no job: the supervisor's spool keeps the output,
+and the daemon records it when the store is back. A job whose store is away at its turn waits for
+the store.
 
 A job's launch is ordered so any crash leaves one of those cases: the supervisor is started parked,
 the store records the job running, and only then does the supervisor start the command.
@@ -298,7 +309,13 @@ How the daemon is checked:
 - `internal/sim` runs the whole daemon over Fakes inside `testing/synctest`, driven by a seed: every
   store or supervisor call can fail or kill the daemon, every timer fires when the driver says, and
   invariants are checked after each step. A failing seed replays exactly: set `VIBESYS_SIM_SEED=<n>`
-  to run just that seed. `VIBESYS_SIM_SEEDS=<count>` widens the default range.
+  to run just that seed. `VIBESYS_SIM_SEEDS=<count>` widens the default range. Its faults include
+  repositories that go away while the daemon runs, every repository at once, a store that never
+  answers, and a repository gone for good with a job running, and it checks that every job ends or
+  its waiters are told why, and that no repository going away fails a job.
+- `internal/lifecycle/model_test.go` checks the machine exhaustively for two jobs: every order of
+  events up to a depth, for safety (one command at a time, nothing started beside a job its store
+  shows running), the cancel a user asked for, and that a healthy world ends every job.
 - The decoders in `internal/wire` have fuzz targets (`FuzzDecodeJob` and the others in
   `fuzz_test.go`). `go test` runs their seed inputs; to search for new failures run one for a while,
   for example `go test -run '^$' -fuzz '^FuzzDecodeJob$' -fuzztime 1m ./internal/wire`, and commit the
@@ -306,6 +323,13 @@ How the daemon is checked:
   (`internal/store/filestore`).
 - A few tests drive real processes (the release build, `install.sh`, a real supervisor process), to
   show the Fakes match reality.
+
+The tests open real stores under `TMPDIR`, and a store refuses a file system without working locks,
+such as NFS mounted with `nolock`. Where `/tmp` is such a mount, set `TMPDIR` to a directory on a
+local disk.
+
+The module pins Go 1.25.9 with a `toolchain` line: under `testing/synctest`, Go 1.25.0 corrupts its
+own runtime state at random, which the simulator hit as fatal errors and stalls.
 
 The tests do not depend on time, threads or the network: the clock is injected, the crash tests fail
 a step by its number on an in-memory filesystem so the same step fails on every run, and a wait in

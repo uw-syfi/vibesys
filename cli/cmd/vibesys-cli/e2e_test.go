@@ -877,3 +877,124 @@ func TestE2ECancelEndsTheJobAndItsSupervisor(t *testing.T) {
 	}
 	e.expectSupervisorGone(id)
 }
+
+// otherRepository is a second repository of the same user, under the same runtime directory, so
+// the same daemon serves both.
+func (e *e2e) otherRepository() *e2e {
+	e.t.Helper()
+	o := &e2e{t: e.t, root: e.root, repo: filepath.Join(e.root, "repo-b"), dir: e.dir, gates: e.gates, git: e.git}
+	if err := os.MkdirAll(o.repo, 0o755); err != nil {
+		e.t.Fatal(err)
+	}
+	e.git.AddRepo(o.repo, map[string]core.Commit{"HEAD": full})
+	return o
+}
+
+// waitThrough waits for the jobs as a caller that is told why a job waits and asks again would:
+// a wait that ends with a stated reason is made again, up to the bound that only guards a hang.
+func (e *e2e) waitThrough(ids ...string) result {
+	e.t.Helper()
+	deadline := clock.System{}.Now().Add(hangBound)
+	for {
+		r := e.wait(ids...)
+		if r.code != exitEndUnknown || (clock.System{}).Now().After(deadline) {
+			return r
+		}
+	}
+}
+
+// A repository that goes away under a live daemon stops nothing: its job runs on and is recorded
+// whole when the repository is back, and the job of another repository runs in its turn.
+func TestE2EARepositoryThatGoesAwayUnderALiveDaemonStopsNothing(t *testing.T) {
+	e := newE2E(t)
+	// The job in doubt is looked at again at the pace of the retries, and a real daemon's take a
+	// minute.
+	e.quickRetry = true
+	b := e.otherRepository()
+	id := e.submit("print", "A", ";", "hold", "g", ";", "print", "A2", ";", "exit", "0")
+	e.awaitOutput(id, "A\n")
+	next := b.submit("print", "B", ";", "exit", "0")
+	away := e.repo + ".away"
+	if err := os.Rename(e.repo, away); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(e.repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	e.release("g")
+	if r := b.waitThrough(next); r.code != exitOK || !strings.Contains(r.stdout, "succeeded (exit 0)") {
+		t.Fatalf("wait in the other repository = %+v", r)
+	}
+	if err := os.Remove(e.repo); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(away, e.repo); err != nil {
+		t.Fatal(err)
+	}
+	if r := e.waitThrough(id); r.code != exitOK || !strings.Contains(r.stdout, "succeeded (exit 0)") {
+		t.Fatalf("wait after the return = %+v", r)
+	}
+	if out := e.logs(id); out != "A\nA2\n" {
+		t.Fatalf("output = %q", out)
+	}
+}
+
+// P1-1 with real processes: a worktree removed while its job runs leaves a supervisor that keeps
+// its result forever, and that never holds up another repository. `daemon forget` lets it go.
+func TestE2EARepositoryGoneForGoodHoldsUpNoOtherAndIsForgotten(t *testing.T) {
+	e := newE2E(t)
+	b := e.otherRepository()
+	id := e.submit("print", "A", ";", "hold", "g", ";", "exit", "0")
+	e.awaitOutput(id, "A\n")
+	e.killDaemon()
+	if err := os.RemoveAll(e.repo); err != nil {
+		t.Fatal(err)
+	}
+	e.release("g")
+	e.awaitCommandEnd(id)
+
+	next := b.submit("print", "B", ";", "exit", "0")
+	if r := b.waitThrough(next); r.code != exitOK || !strings.Contains(r.stdout, "succeeded (exit 0)") {
+		t.Fatalf("wait in the other repository = %+v", r)
+	}
+	if r := b.run("daemon", "forget", e.repo); r.code != exitOK || !strings.Contains(r.stdout, "task") {
+		t.Fatalf("daemon forget = %+v", r)
+	}
+	if left := e.supervisors(); len(left) != 0 {
+		t.Fatalf("supervisors after the forget = %v, want none", left)
+	}
+	if r := b.run("daemon", "forget", e.repo); r.code == exitOK {
+		t.Fatalf("a second forget = %+v, want it refused as unknown", r)
+	}
+}
+
+// P2-4 with real processes: a runtime directory cleared at logout takes a live supervisor's socket
+// and its proof of life with it. That proves nothing, so the next job of the store waits, with a
+// reason, and is not started beside the command that still runs.
+func TestE2EAClearedRuntimeDirectoryStartsNothingBesideALiveCommand(t *testing.T) {
+	e := newE2E(t)
+	id := e.submit("print", "A", ";", "hold", "g", ";", "exit", "0")
+	e.awaitOutput(id, "A\n")
+	live := e.supervisors()
+	e.killDaemon()
+	if err := os.RemoveAll(e.dir.Supervisors()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(e.dir.Supervisors(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	next := e.submit("print", "B", ";", "exit", "0")
+	if r := e.wait(next); r.code != exitEndUnknown || !strings.Contains(r.stderr, id) {
+		t.Fatalf("wait for the job after = %+v, want it told it waits for %s", r, id)
+	}
+	if out := e.logs(next); out != "" {
+		t.Fatalf("the next job ran beside a live command: output %q", out)
+	}
+	// The command still runs, which is what made starting the next one wrong.
+	for _, info := range live {
+		if err := syscall.Kill(info.PID, 0); err != nil {
+			t.Fatalf("supervisor %d: %v", info.PID, err)
+		}
+		syscall.Kill(info.PID, syscall.SIGKILL)
+	}
+}

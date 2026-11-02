@@ -523,3 +523,28 @@ func TestAStoreNotReadStartsNothingAndHoldsNothingElse(t *testing.T) {
 		t.Fatalf("a store read again started a job beside another: %+v", reqs)
 	}
 }
+
+// A command of a store that is away may hold the machine for as long as its job may run. Within
+// that bound a queued job of another store waits for it; past it, nothing owes that job a start,
+// and Stranded says so, which is what lets a check see a hold that never ends.
+func TestAHoldPastItsBoundStrandsTheQueue(t *testing.T) {
+	away, other := lifecycle.StoreIDOf("/gone", "t"), lifecycle.StoreIDOf("/here", "t")
+	at := time.Unix(100, 0)
+	held := lifecycle.Ref{Store: away, Job: "a"}
+	s, _ := lifecycle.Step(lifecycle.Recovering(), lifecycle.Recovered{
+		Ref: held, Finding: lifecycle.StoreAway{}, At: at,
+		Supervisor: lifecycle.RunAlive{Phase: lifecycle.RunRunning, Limit: time.Minute},
+	})
+	s, _ = lifecycle.Step(s, lifecycle.RecoveryDone{})
+	queued := lifecycle.Ref{Store: other, Job: "b"}
+	s, reqs := lifecycle.Step(s, lifecycle.Admitted{Ref: queued, SubmittedAt: at})
+	if len(reqs) != 0 {
+		t.Fatalf("a job started beside a command that may run: %+v", reqs)
+	}
+	if got := s.Stranded(at.Add(30 * time.Second)); len(got) != 0 {
+		t.Fatalf("within the bound, stranded = %v, want none", got)
+	}
+	if got := s.Stranded(at.Add(2 * time.Minute)); len(got) != 1 || got[0] != queued {
+		t.Fatalf("past the bound, stranded = %v, want %v", got, queued)
+	}
+}

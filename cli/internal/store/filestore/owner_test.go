@@ -136,6 +136,9 @@ func TestAFilesystemWithoutLocksIsRefused(t *testing.T) {
 	mem.WithoutLocks()
 	_, err := openAs(mem, daemonA)
 	wantFailure(t, "Open", err, core.FailureConflict, stateDir, "local_lock")
+	if files := mem.Files(); len(files) != 0 {
+		t.Fatalf("a refused store left %d files behind: %v", len(files), files)
+	}
 }
 
 // Whatever takes the store from under an owner, the owner finds out at its next call, before it
@@ -162,6 +165,10 @@ func TestAnOwnerThatLostTheStoreStopsWriting(t *testing.T) {
 			// The failed commit makes the store read the disk again, and that stops too.
 			_, err = loser.Jobs(t.Context(), core.JobFilter{})
 			wantFailure(t, "Jobs", err, core.FailureUnavailable, stateDir, "host-b")
+			// The loser is fenced, which says nothing of the jobs, so it gives up none of them.
+			if !errors.Is(err, store.ErrAway) {
+				t.Errorf("a fenced store's failure %v is not marked as away", err)
+			}
 			if got := mem.Files(); len(got) != len(files) {
 				t.Errorf("the loser changed the store: %d files, was %d", len(got), len(files))
 			}

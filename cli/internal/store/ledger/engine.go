@@ -66,11 +66,12 @@ func (e *Engine) recover() error {
 	return nil
 }
 
-// failure keeps a backend's own typed failure and makes every other error an internal one.
+// failure keeps a backend's own typed failure, with the marks it carries, such as a store that is
+// away, and makes every other error an internal one.
 func failure(err error) error {
 	var f *core.Failure
 	if errors.As(err, &f) {
-		return f
+		return err
 	}
 	return &core.Failure{Kind: core.FailureInternal, Message: err.Error()}
 }
