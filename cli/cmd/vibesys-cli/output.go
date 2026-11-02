@@ -46,13 +46,31 @@ func describe(j *cliv1.Job) string {
 		commit = commit[:12]
 	}
 	fmt.Fprintf(&b, "\t%s", commit)
-	if c := j.GetSpec().GetCommand(); c != nil {
-		fmt.Fprintf(&b, "\t%s", strings.Join(c.GetArgv(), " "))
+	switch spec := j.GetSpec(); {
+	case spec.GetCommand() != nil:
+		fmt.Fprintf(&b, "\t%s", strings.Join(spec.GetCommand().GetArgv(), " "))
+	case spec.GetCheck() != nil:
+		fmt.Fprint(&b, "\tcheck")
+	case spec.GetMeasure() != nil:
+		fmt.Fprintf(&b, "\tmeasure (%d samples)", spec.GetMeasure().GetSamples())
 	}
 	for _, n := range j.GetNotes() {
 		fmt.Fprintf(&b, "\n\t  note: %s", n.GetText())
 	}
 	return b.String()
+}
+
+// describeSubmitted is describe, with what the submission turned into when it did not make a new
+// job: a job that was joined or reused ran, or runs, for an earlier submission.
+func describeSubmitted(r *cliv1.SubmitResponse) string {
+	line := describe(r.GetJob())
+	switch r.GetDisposition() {
+	case cliv1.SubmitDisposition_SUBMIT_DISPOSITION_JOINED:
+		line += "\t(joined an existing job)"
+	case cliv1.SubmitDisposition_SUBMIT_DISPOSITION_REUSED:
+		line += "\t(reused a saved result)"
+	}
+	return line
 }
 
 // fail prints the error of a command and returns the exit code it stands for: 2 for a mistake in

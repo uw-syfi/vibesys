@@ -21,8 +21,10 @@ const readyByte = 'R'
 
 // Deps is what a supervisor process runs jobs with.
 type Deps struct {
-	Environments  environment.Environments
-	Checkouts     supervisor.Checkouts
+	Environments environment.Environments
+	Checkouts    supervisor.Checkouts
+	// Host is the machine check and measure jobs run on.
+	Host          supervisor.Host
 	BinaryVersion string
 }
 
@@ -56,7 +58,7 @@ func Serve(ctx context.Context, dirPath string, deps Deps, ready io.WriteCloser)
 	defer spool.close()
 
 	sup := supervisor.New(supervisor.Config{
-		Launch: launch, Environments: deps.Environments, Checkouts: deps.Checkouts, Spool: spool,
+		Launch: launch, Environments: deps.Environments, Checkouts: deps.Checkouts, Spool: spool, Host: deps.Host,
 	})
 	defer sup.Close()
 

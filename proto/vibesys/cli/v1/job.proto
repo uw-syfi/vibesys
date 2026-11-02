@@ -98,4 +98,7 @@ message Job {
   string result_job_id = 13;
   // The check pass a measure job links to.
   string check_job_id = 14;
+  // The submission asked to run the whole job fresh: no saved samples and no saved check pass are
+  // reused when it starts.
+  bool no_cache = 15;
 }

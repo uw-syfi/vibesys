@@ -169,6 +169,7 @@ func Job(j core.Job) *cliv1.Job {
 		Spec:         JobSpec(j.Spec),
 		State:        JobState(j.State),
 		Key:          string(j.Key),
+		NoCache:      j.NoCache,
 		SubmittedAt:  timestamp(j.SubmittedAt),
 		StartedAt:    timePtr(j.StartedAt),
 		FinishedAt:   timePtr(j.FinishedAt),
@@ -212,7 +213,7 @@ func ToJob(j *cliv1.Job) (core.Job, error) {
 		return core.Job{}, err
 	}
 	out := core.Job{
-		ID: core.JobID(j.GetId()), Spec: spec, State: state, Key: core.JobKey(j.GetKey()),
+		ID: core.JobID(j.GetId()), Spec: spec, State: state, Key: core.JobKey(j.GetKey()), NoCache: j.GetNoCache(),
 		SubmittedAt: toTime(j.GetSubmittedAt()), StartedAt: toTimePtr(j.GetStartedAt()), FinishedAt: toTimePtr(j.GetFinishedAt()),
 		CancelReason: j.GetCancelReason(), ResultJob: core.JobID(j.GetResultJobId()), CheckJob: core.JobID(j.GetCheckJobId()),
 	}

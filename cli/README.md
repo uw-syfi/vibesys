@@ -10,10 +10,11 @@ else there. The Go binary keeps the name `vibesys-cli`.
 
 Work is landing in stages. The module has the foundation (the layout, the layer rules, the
 contract, the domain types, the interfaces, and the two `Store` implementations with the contract
-suite they share), and now the daemon, the per-job supervisor and the job lifecycle commands: an
-agent can submit a command job, watch it, read its output, cancel it, and find it again after the
-client, the daemon or the machine went away. Checking and measuring a commit need a real
-environment and are not available in this build; see "What this build runs" below.
+suite they share), the daemon, the per-job supervisor and the job lifecycle commands, and now real
+jobs on the host: an agent can submit a command, check or measure job, watch it, read its output,
+cancel it, and find it again after the client, the daemon or the machine went away, and a measure
+reuses the samples and the check pass that earlier jobs saved. Comparing and promoting results,
+and the docker environment, are not in this build; see "What this build runs" below.
 
 ## Layout
 
@@ -27,8 +28,16 @@ environment and are not available in this build; see "What this build runs" belo
 | `internal/store/filestore/` | The only code that knows the on-disk layout. Owns migrations. Its package comment states the layout, the commit protocol and the filesystem operations it relies on. |
 | `internal/store/filestore/fsys/` | The slice of a filesystem `filestore` uses, the operating system's implementation, and an in-memory one that models what a crash keeps and fails or dies at any write step. |
 | `internal/store/storetest/` | The one contract suite every `Store` passes, and a differential driver that compares stores. |
-| `internal/environment/` | `Environment`: where a job's commands run (`host`, `docker`). |
+| `internal/environment/` | `Environment`: where a job's commands run (`host`, `docker`), and `Registry`, the environments a build has by kind. |
+| `internal/environment/host/` | The host `Environment`: runs a command on this machine in its own process group, and ends the whole group on every path. Passes the environment contract suite. |
 | `internal/backend/` | `Backend`: facts about the compute hardware a task targets. |
+| `internal/backend/cpu/` | The CPU `Backend`: the machine's facts and load, read through a `System` seam with a fake. |
+| `internal/task/` | Reading a task from `.vibesys/tasks/<task>/` as a commit has it (unknown keys, `[evaluator]` and `entrypoint` tasks are refused), its version, and `Source`, how a task is fetched. |
+| `internal/reading/` | Reading a benchmark's result: one field of a JSON file, or the records of an evaluator result stream. |
+| `internal/flow/` | The check and measure flows as pure step functions (`State`, event in, `State` and requests out), and the `Plan` a job is run from. No clock, goroutines or files. |
+| `internal/flowrun/` | The shell that carries a flow's requests out on an `Environment`, a `Backend` and a file system, and nothing else. A `Fake` environment passes the same scenarios as the real one. |
+| `internal/hostfs/` | The file system a job reads results from, with the operating system's and an in-memory one. |
+| `internal/gitwork/` | The git program as a source of tasks (`git archive`) and of clean checkouts of a commit (`git clone --local`, then a detached checkout). The working tree of the repository is never read or touched. |
 | `internal/lifecycle/` | The job lifecycle as a pure machine: `Step(State, Event) (State, []Request)`. The daemon feeds it events and carries out the requests; recovery after a crash is the same events replayed. |
 | `internal/changed/` | Pure helpers for the "what changed" facts a job records. |
 | `internal/clock/` | `Clock` and `Timers`, the only ways the daemon and the client read time. A test supplies its own and fires timers itself. |
@@ -94,6 +103,8 @@ default to the environment variables shown:
 
 | Command | What it does |
 | --- | --- |
+| `submit check <commit> [flags]` | Queue the task's check. A pass already saved for the commit answers it without running. Also `--wait`, `--note`, `--no-cache`, `--plan` and `--env`. |
+| `submit measure <commit> [--samples n] [--recheck] [flags]` | Queue the task's benchmark for `n` samples (the task's default when omitted). Saved samples count: only the missing ones run. Flags as for `check`. |
 | `submit command <commit> [flags] -- <argv...>` | Queue a job and print its id. Returns at once; `--wait` blocks as `wait` does. Also `--note`, `--no-cache`, `--plan`, `--env`, `--timeout`, `--service` and `--probe`. A revision is resolved to a full commit id. |
 | `wait <job>... [--any] [--timeout d]` | Block until the jobs are final, or with `--any` until one is. |
 | `cancel <job> [--reason text]` | Stop a job and print it once it is final. Cancelling a final job prints it unchanged. |
@@ -151,12 +162,32 @@ the store records the job running, and only then does the supervisor start the c
 
 ## What this build runs
 
-The shipped binary has no usable environment yet. It runs with `environment.None` and no checkouts,
-so a command job queues, runs in order, and ends not-attempted with a reason saying so. The host and
-docker environments land later, and with them `submit check`, `submit measure`, the result cache,
-`show`, `compare` and `promote`. Until then `submit check` and `submit measure` are refused locally
-as unavailable, the calls that need results answer with an unavailable refusal that names the call,
-and the lifecycle commands above work end to end against a `fakeenv` in tests.
+The shipped binary runs jobs on the host. A job is one of:
+
+- `submit command`: a command you give, run in a clean checkout of the commit. It is never cached.
+- `submit check`: the task's `[accuracy]` command, run in a clean checkout. A pass is saved, and a
+  second check of the same commit, task version and environment is answered from it.
+- `submit measure`: the task's `[benchmark]` command, run once per sample after the check passes. The
+  samples are saved with the machine's facts and load. A measure for more samples than the cache holds
+  takes only the missing ones, and links the saved check pass instead of checking again.
+
+`--no-cache` runs the whole job again, with a fresh check. `--recheck` (measure) checks again but
+still takes only the missing samples. A cancelled job, a failed check, and a benchmark that wrote no
+usable result save nothing, so a result is never saved without its samples and its check.
+
+A task is read from `.vibesys/tasks/<task>/` of the job's commit, not from the working tree, and its
+version (a digest of its files) is part of the cache key. A benchmark reports its score in one of two
+ways: it writes a JSON file at the path given after the flag in `[benchmark.result]`, or, with
+`result_protocol = 2` in `[benchmark]`, a stream of evaluator records at the path given after
+`--vs-output`. Tasks that
+declare an `[evaluator]` or an `entrypoint` are refused: their commands belong to an evaluator
+package. `${PROJECT_ROOT}` in a command is the checkout's root.
+
+The docker environment, `show`, `compare` and `promote` are not in this build: a request for docker
+is refused as unavailable, and the calls that need results answer with an unavailable refusal that
+names the call. The lifecycle commands above work end to end against a `fakeenv` in tests, and the
+check and measure flows run on the same fake in `app` and `daemontest`, so a test of the whole
+daemon needs no process.
 
 ## Contract
 

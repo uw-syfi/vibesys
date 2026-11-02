@@ -37,7 +37,7 @@ var rules = map[string][]string{
 	"internal/core":                {},
 	"internal/clock":               {},
 	"internal/changed":             {},
-	"internal/lifecycle":           {"internal/core"},
+	"internal/lifecycle":           {"internal/core", "internal/flow"},
 	"internal/backend":             {"internal/core"},
 	"internal/backend/cpu":         {"internal/backend", "internal/clock", "internal/core"},
 	"internal/backend/backendtest": {"internal/backend"},
@@ -47,6 +47,8 @@ var rules = map[string][]string{
 	"internal/environment/host":    {"internal/backend", "internal/clock", "internal/core", "internal/environment"},
 	"internal/gitrepo":             {"internal/core"},
 	"internal/task":                {"internal/core"},
+	"internal/task/tasktest":       {"internal/core", "internal/task"},
+	"internal/gitwork":             {"internal/core", "internal/task"},
 	"internal/reading":             {},
 	"internal/flow":                {"internal/core", "internal/reading", "internal/task"},
 	"internal/hostfs":              {},
@@ -65,10 +67,13 @@ var rules = map[string][]string{
 	"internal/store/filestore/fsys": {},
 
 	// The translation between the domain and the contract.
-	"internal/wire": {"internal/core", "internal/lifecycle", "gen/"},
+	"internal/wire": {"internal/core", "internal/flow", "internal/lifecycle", "internal/task", "gen/"},
 
 	// Supervisors: the domain, its channel to the daemon, and the process that serves it.
-	"internal/supervisor":         {"internal/changed", "internal/core", "internal/environment", "internal/lifecycle"},
+	"internal/supervisor": {
+		"internal/backend", "internal/changed", "internal/clock", "internal/core", "internal/environment", "internal/flow",
+		"internal/flowrun", "internal/hostfs", "internal/lifecycle",
+	},
 	"internal/supervisor/suptest": {"internal/core", "internal/lifecycle", "internal/supervisor"},
 	"internal/supervisor/rpc":     {"gen/", "internal/core", "internal/lifecycle", "internal/supervisor", "internal/wire"},
 	"internal/supervisor/host": {
@@ -79,25 +84,26 @@ var rules = map[string][]string{
 	// The daemon: its job flows, the process that serves them, and the client that calls it. The
 	// client speaks the contract's messages only, so it does not import the domain.
 	"internal/app": {
-		"internal/changed", "internal/clock", "internal/core", "internal/environment", "internal/lifecycle",
-		"internal/store", "internal/store/memstore", "internal/supervisor",
+		"internal/changed", "internal/clock", "internal/core", "internal/environment", "internal/flow",
+		"internal/lifecycle", "internal/store", "internal/store/memstore", "internal/supervisor", "internal/task",
 	},
 	"internal/app/filestores": {"internal/app", "internal/store", "internal/store/filestore"},
 	"internal/daemon": {
 		"gen/", "internal/app", "internal/clock", "internal/core", "internal/environment",
-		"internal/runtimedir", "internal/supervisor", "internal/wire",
+		"internal/runtimedir", "internal/supervisor", "internal/task", "internal/wire",
 	},
 	"internal/daemon/daemontest": {
-		"internal/app", "internal/clock", "internal/core", "internal/daemon", "internal/environment/fakeenv",
-		"internal/runtimedir", "internal/supervisor",
+		"internal/app", "internal/backend/cpu", "internal/clock", "internal/core", "internal/daemon",
+		"internal/environment/fakeenv", "internal/hostfs", "internal/runtimedir", "internal/supervisor", "internal/task",
 	},
 	"internal/client": {"gen/", "internal/clock", "internal/runtimedir", "internal/wire"},
 
 	// The wiring of the shipped binary.
 	"internal/production": {
-		"internal/app", "internal/app/filestores", "internal/client", "internal/clock", "internal/core",
-		"internal/daemon", "internal/environment", "internal/runtimedir", "internal/store/filestore",
-		"internal/supervisor", "internal/supervisor/host",
+		"internal/app", "internal/app/filestores", "internal/backend/cpu", "internal/client", "internal/clock",
+		"internal/core", "internal/daemon", "internal/environment", "internal/environment/host",
+		"internal/gitwork", "internal/hostfs", "internal/runtimedir", "internal/store/filestore",
+		"internal/supervisor", "internal/supervisor/host", "internal/task",
 	},
 
 	"internal/archcheck": {},
@@ -109,18 +115,23 @@ var rules = map[string][]string{
 // reaches none of them, so a fake never ships.
 var testRules = map[string][]string{
 	"internal/backend/cpu":         {"internal/backend/backendtest"},
+	"internal/environment":         {"internal/environment/fakeenv"},
 	"internal/environment/fakeenv": {"internal/environment/envtest"},
 	"internal/environment/host":    {"internal/backend/cpu", "internal/environment/envtest", "internal/environment/fakeenv"},
 	"internal/hostfs":              {},
 	"internal/flowrun":             {"internal/backend/cpu", "internal/environment/fakeenv", "internal/environment/host", "internal/task"},
+	"internal/task":                {"internal/task/tasktest"},
+	"internal/gitwork":             {"internal/task/tasktest"},
 	"internal/store/memstore":      {"internal/store/storetest"},
 	"internal/store/filestore":     {"internal/store/storetest", "internal/store/memstore"},
-	"internal/supervisor":          {"internal/environment/fakeenv", "internal/supervisor/suptest"},
-	"internal/supervisor/rpc":      {"internal/environment/fakeenv", "internal/supervisor/suptest"},
-	"internal/supervisor/host":     {"internal/environment/fakeenv", "internal/supervisor/suptest"},
-	"internal/app":                 {"internal/environment/fakeenv"},
-	"internal/app/filestores":      {"internal/core"},
-	"internal/daemon":              {"internal/environment/fakeenv"},
+	"internal/supervisor": {
+		"internal/backend/cpu", "internal/environment/fakeenv", "internal/supervisor/suptest", "internal/task",
+	},
+	"internal/supervisor/rpc":  {"internal/environment/fakeenv", "internal/supervisor/suptest"},
+	"internal/supervisor/host": {"internal/environment/fakeenv", "internal/supervisor/suptest"},
+	"internal/app":             {"internal/backend/cpu", "internal/environment/fakeenv", "internal/hostfs", "internal/task/tasktest"},
+	"internal/app/filestores":  {"internal/core"},
+	"internal/daemon":          {"internal/environment/fakeenv"},
 	"internal/client": {
 		"internal/app", "internal/core", "internal/daemon", "internal/daemon/daemontest",
 		"internal/environment/fakeenv", "internal/supervisor",
@@ -128,7 +139,7 @@ var testRules = map[string][]string{
 	"cmd/vibesys-cli": {
 		"internal/app", "internal/app/filestores", "internal/clock", "internal/core", "internal/daemon",
 		"internal/daemon/daemontest", "internal/environment/fakeenv", "internal/runtimedir",
-		"internal/store/filestore", "internal/supervisor/host",
+		"internal/store/filestore", "internal/supervisor/host", "internal/task", "internal/task/tasktest",
 	},
 }
 

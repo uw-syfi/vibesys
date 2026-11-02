@@ -190,23 +190,6 @@ func TestCancelsFromManyCallersAllSeeTheOneEnd(t *testing.T) {
 	}
 }
 
-func TestCheckAndMeasureAreRefusedNotQueued(t *testing.T) {
-	w := newWorld(t)
-	a := w.newApp()
-	for _, settings := range []core.Settings{core.CheckSettings{}, core.MeasureSettings{Samples: 3}} {
-		spec := core.JobSpec{Commit: commit, Environment: core.EnvironmentHost, Settings: settings}
-		_, err := a.Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: spec})
-		var f *core.Failure
-		if !errors.As(err, &f) || f.Kind != core.FailureUnavailable {
-			t.Errorf("Submit(%s) = %v, want unavailable", settings.Kind(), err)
-		}
-	}
-	jobs, err := a.Jobs(ctxFor(t), scope, core.JobFilter{})
-	if err != nil || len(jobs) != 0 {
-		t.Fatalf("jobs = %v, %v; a refused submission queues nothing", jobs, err)
-	}
-}
-
 func TestSubmitValidatesBeforeAnythingChanges(t *testing.T) {
 	w := newWorld(t)
 	a := w.newApp()

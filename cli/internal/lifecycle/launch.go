@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/flow"
 )
 
 // Launch is what a supervisor is started with: a job as the daemon resolved it. The daemon
@@ -12,6 +13,9 @@ type Launch struct {
 	Task       string
 	Job        core.JobID
 	Spec       core.JobSpec
+	// Plan is what a check or a measure job runs, as the daemon decided it when the job started.
+	// It is nil for a command job, which the spec alone describes.
+	Plan *flow.Plan
 }
 
 // Ref is the job's identity.
@@ -30,4 +34,15 @@ type Outcome struct {
 	// reports how it ended.
 	CancelAsked  bool
 	CancelReason string
+
+	// The rest is for a check or a measure job, which the supervisor drives through a plan.
+	//
+	// Result is the result the job found. It is set exactly when the job passed, and Exec is then
+	// a plain exit 0.
+	Result *core.Result
+	// Rejected says every command ran but the job has no acceptable result, such as a benchmark
+	// that wrote none. Reason says why.
+	Rejected bool
+	// Reason is a line for the job's output saying how the job ended, when it did not pass.
+	Reason string
 }

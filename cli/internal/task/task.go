@@ -102,10 +102,19 @@ func (t Task) Setup() core.TaskSetup {
 	return core.TaskSetup{Backend: t.Backend, HasDockerfile: t.HasDockerfile}
 }
 
+// ValidName says whether name is a task name: one path element, which cannot reach outside the
+// tasks directory. It fails with FailureInvalidInput.
+func ValidName(name string) error {
+	if name == "" || strings.ContainsAny(name, "/\\") || name == "." || name == ".." {
+		return invalid("task: %q is not a task name", name)
+	}
+	return nil
+}
+
 // Read reads the task called name from a repository whose root is fsys.
 func Read(fsys fs.FS, name string) (Task, error) {
-	if name == "" || strings.ContainsAny(name, "/\\") || name == "." || name == ".." {
-		return Task{}, invalid("task: %q is not a task name", name)
+	if err := ValidName(name); err != nil {
+		return Task{}, err
 	}
 	dir := path.Join(TasksDir, name)
 	info, err := fs.Stat(fsys, dir)

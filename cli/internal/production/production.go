@@ -10,15 +10,20 @@ import (
 
 	"github.com/uw-syfi/vibesys/cli/internal/app"
 	"github.com/uw-syfi/vibesys/cli/internal/app/filestores"
+	"github.com/uw-syfi/vibesys/cli/internal/backend/cpu"
 	"github.com/uw-syfi/vibesys/cli/internal/client"
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/daemon"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
+	hostenv "github.com/uw-syfi/vibesys/cli/internal/environment/host"
+	"github.com/uw-syfi/vibesys/cli/internal/gitwork"
+	"github.com/uw-syfi/vibesys/cli/internal/hostfs"
 	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
 	"github.com/uw-syfi/vibesys/cli/internal/store/filestore"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor/host"
+	"github.com/uw-syfi/vibesys/cli/internal/task"
 )
 
 // Process is what the binary knows of itself and of the process it runs in.
@@ -73,11 +78,12 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 			fmt.Fprintf(os.Stderr, "%s vibesys-cli daemon: %s\n", clk.Now().UTC().Format("2006-01-02T15:04:05Z"), fmt.Sprintf(format, args...))
 		},
 		Runtime: daemon.Runtime{
-			Stores: filestores.New(index, app.Rules(filestores.DefaultSamples)),
+			Stores: filestores.New(index, app.Rules(task.DefaultSamples)),
 			Supervisors: host.New(dir.Supervisors(), func(runDir string) *exec.Cmd {
 				return exec.Command(p.Executable, "supervisor", "serve", "--run-dir", runDir)
 			}, p.Version),
-			Environments: environment.None{},
+			Environments: machineEnvironments(clk),
+			Tasks:        gitwork.Tasks{},
 		},
 	})
 }
@@ -88,11 +94,21 @@ func (p Process) RunSupervisor(ctx context.Context, runDir string, ready io.Writ
 	if !filepath.IsAbs(runDir) {
 		return &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("--run-dir: %q is not an absolute path", runDir)}
 	}
+	clk := clock.System{}
 	return host.Serve(ctx, runDir, host.Deps{
-		Environments:  environment.None{},
-		Checkouts:     noCheckouts{},
+		Environments:  machineEnvironments(clk),
+		Checkouts:     gitwork.Checkouts{},
+		Host:          supervisor.Host{Backend: cpu.New(cpu.Host(), clk), Files: hostfs.OS{}, Clock: clk},
 		BinaryVersion: p.Version,
 	}, ready)
+}
+
+// machineEnvironments are the environments this machine has: the host, measured by the CPU
+// backend. The daemon fingerprints them and the supervisors run jobs in them, so both see the same.
+func machineEnvironments(clk clock.System) environment.Environments {
+	return environment.Registry{
+		core.EnvironmentHost: hostenv.New(hostenv.Config{Backend: cpu.New(cpu.Host(), clk), Timers: clk}),
+	}
 }
 
 // ErrAlreadyRunning is what RunDaemon returns when another daemon of the user runs.
@@ -100,12 +116,3 @@ var ErrAlreadyRunning = daemon.ErrAlreadyRunning
 
 // ReadyFD is the descriptor the readiness pipe of both processes is on.
 const ReadyFD = runtimedir.ReadyFD
-
-// noCheckouts is the Checkouts of a build that cannot check out a commit yet.
-type noCheckouts struct{}
-
-var _ supervisor.Checkouts = noCheckouts{}
-
-func (noCheckouts) Checkout(context.Context, string, core.Commit) (core.Checkout, func(), error) {
-	return core.Checkout{}, nil, &core.Failure{Kind: core.FailureUnavailable, Message: "this build cannot check out a commit to run a job in"}
-}

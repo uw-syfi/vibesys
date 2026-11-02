@@ -174,6 +174,7 @@ func (l *Ledger) Submit(sub core.Submission) (Change, core.SubmitOutcome, error)
 		Spec:        sub.Spec,
 		State:       core.JobQueued,
 		Key:         sub.Key,
+		NoCache:     sub.NoCache,
 		SubmittedAt: sub.At,
 	}, sub)
 	return PutJob{Job: job}, core.SubmitOutcome{Job: Copy(job), Disposition: core.SubmitCreated}, nil

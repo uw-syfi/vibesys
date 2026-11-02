@@ -71,9 +71,15 @@ func (a *App) prepare(ref lifecycle.Ref) (supervisor.Handle, error) {
 	if err != nil {
 		return nil, err
 	}
-	h, err := a.cfg.Supervisors.Spawn(a.ctx, lifecycle.Launch{
-		Repository: t.scope.Repository, Task: t.scope.Task, Job: job.ID, Spec: spec,
-	})
+	launch := lifecycle.Launch{Repository: t.scope.Repository, Task: t.scope.Task, Job: job.ID, Spec: spec}
+	if spec.Settings.Kind() != core.JobCommand {
+		plan, err := a.planFlow(t, job, fingerprint)
+		if err != nil {
+			return nil, err
+		}
+		launch.Plan = &plan
+	}
+	h, err := a.cfg.Supervisors.Spawn(a.ctx, launch)
 	if err != nil {
 		return nil, err
 	}

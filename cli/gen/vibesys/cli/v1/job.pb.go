@@ -550,7 +550,10 @@ type Job struct {
 	// The result a check or measure job saved. Empty when it saved none.
 	ResultJobId string `protobuf:"bytes,13,opt,name=result_job_id,json=resultJobId,proto3" json:"result_job_id,omitempty"`
 	// The check pass a measure job links to.
-	CheckJobId    string `protobuf:"bytes,14,opt,name=check_job_id,json=checkJobId,proto3" json:"check_job_id,omitempty"`
+	CheckJobId string `protobuf:"bytes,14,opt,name=check_job_id,json=checkJobId,proto3" json:"check_job_id,omitempty"`
+	// The submission asked to run the whole job fresh: no saved samples and no saved check pass are
+	// reused when it starts.
+	NoCache       bool `protobuf:"varint,15,opt,name=no_cache,json=noCache,proto3" json:"no_cache,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -683,6 +686,13 @@ func (x *Job) GetCheckJobId() string {
 	return ""
 }
 
+func (x *Job) GetNoCache() bool {
+	if x != nil {
+		return x.NoCache
+	}
+	return false
+}
+
 var File_vibesys_cli_v1_job_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_job_proto_rawDesc = "" +
@@ -711,7 +721,7 @@ const file_vibesys_cli_v1_job_proto_rawDesc = "" +
 	"\x04Note\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x12*\n" +
 	"\x02at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x02at\x12\x14\n" +
-	"\x05agent\x18\x03 \x01(\tR\x05agent\"\xe2\x04\n" +
+	"\x05agent\x18\x03 \x01(\tR\x05agent\"\xfd\x04\n" +
 	"\x03Job\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12+\n" +
 	"\x04spec\x18\x02 \x01(\v2\x17.vibesys.cli.v1.JobSpecR\x04spec\x12.\n" +
@@ -730,7 +740,8 @@ const file_vibesys_cli_v1_job_proto_rawDesc = "" +
 	"\texit_code\x18\f \x01(\x05H\x00R\bexitCode\x88\x01\x01\x12\"\n" +
 	"\rresult_job_id\x18\r \x01(\tR\vresultJobId\x12 \n" +
 	"\fcheck_job_id\x18\x0e \x01(\tR\n" +
-	"checkJobIdB\f\n" +
+	"checkJobId\x12\x19\n" +
+	"\bno_cache\x18\x0f \x01(\bR\anoCacheB\f\n" +
 	"\n" +
 	"_exit_code*c\n" +
 	"\aJobKind\x12\x18\n" +
