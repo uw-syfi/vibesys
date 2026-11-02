@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from vs_project.api import NestedRepositoryError
@@ -56,6 +56,7 @@ _DIRECTORIES = st.lists(st.sampled_from(["src", "deep", "repos", ".hidden"]), ma
 
 
 @settings(max_examples=examples(pr=2, nightly=25), deadline=None)
+@example(directories=["src"], kind="directory", operation="commit_only")
 @given(
     directories=_DIRECTORIES.filter(bool),
     kind=st.sampled_from(["directory", "file", "symlink"]),

@@ -213,6 +213,10 @@ def _fake_inbox(_: Path) -> _Opened:
     ]
 )
 @example(operations=[("post-as-it-ends", "racing", b"{}")])
+@example(operations=[("post", "a", b"1"), ("settle", "b"), ("post-as-it-ends", "b", b"2")])
+@example(operations=[("post", "a", b"1"), ("end", "completed"), ("post-as-it-ends", "a", b"2")])
+@example(operations=[("unreadable", "a", "directory"), ("post", "a", b"1")])
+@example(operations=[("unreadable", "a", "symlink"), ("post-as-it-ends", "a", b"1")])
 def test_an_inbox_lists_what_was_posted_in_posting_order_and_reports_each_status(
     tmp_path_factory: pytest.TempPathFactory,
     opener: Callable[[Path], _Opened],
