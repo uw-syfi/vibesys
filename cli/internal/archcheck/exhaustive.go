@@ -17,10 +17,16 @@ import (
 // switch over that set. The sets are found and not listed where they can be: every interface closed
 // by an unexported marker method is one. A switch that names no member is not held to anything.
 
-// closedEnums are the enums the rule holds, as package directory and type name.
+// closedEnums are the enums the rule holds, as package directory and type name. The contract's
+// enums are read from the generated code: a switch over one names every value the contract has,
+// and says after the switch, not in a default, what a value from a newer peer does.
 var closedEnums = []string{
+	"cli/cmd/vibesys-cli.answer",
+	"cli/gen/vibesys/cli/v1.FailureKind",
+	"cli/gen/vibesys/cli/v1.WaitOutcomeKind",
 	"cli/internal/core.ExecKind",
 	"cli/internal/core.JobState",
+	"cli/internal/core.WaitEnd",
 	"cli/internal/lifecycle.Cause",
 	"cli/internal/lifecycle.DeathProof",
 	"cli/internal/lifecycle.Phase",
@@ -38,7 +44,8 @@ func closedSets(files map[string]string) []closedSet {
 	union := map[string][]string{}
 	enum := map[string][]string{}
 	for name, source := range files {
-		if !isProduct(name) {
+		generated := strings.HasPrefix(name, genAt) && strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go")
+		if !isProduct(name) && !generated {
 			continue
 		}
 		file, err := parser.ParseFile(token.NewFileSet(), name, source, 0)
@@ -49,7 +56,7 @@ func closedSets(files map[string]string) []closedSet {
 		for _, decl := range file.Decls {
 			switch d := decl.(type) {
 			case *ast.FuncDecl:
-				if t, ok := markerOf(d); ok {
+				if t, ok := markerOf(d); ok && !generated {
 					key := dir + "." + d.Name.Name
 					union[key] = append(union[key], dir+"."+t)
 				}

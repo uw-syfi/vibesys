@@ -1,6 +1,10 @@
 package wire_test
 
 import (
+	"google.golang.org/genproto/googleapis/rpc/status"
+	statuspb "google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/anypb"
+
 	"context"
 	"errors"
 	"fmt"
@@ -318,27 +322,26 @@ func TestALaunchCarriesWhatASupervisorIsPromised(t *testing.T) {
 	}
 }
 
-func TestTheWaitRuleOverTheContractIsTheDomainRule(t *testing.T) {
-	r := newRand(4)
-	for range 1000 {
-		n := 1 + r.IntN(4)
-		var jobs []*cliv1.Job
-		var states []core.JobState
-		for range n {
-			s := pick(r, core.JobStates()...)
-			states = append(states, s)
-			jobs = append(jobs, &cliv1.Job{State: wire.JobState(s)})
+// Every end of a wait has its own kind on the wire, and none is UNSPECIFIED, which a client reads
+// as no answer.
+func TestEveryWaitEndHasItsOwnKind(t *testing.T) {
+	ends := []core.WaitEnd{core.WaitAllSucceeded, core.WaitSomeFailed, core.WaitFirstSucceeded, core.WaitFirstFailed, core.WaitTimedOut}
+	seen := map[cliv1.WaitOutcomeKind]core.WaitEnd{}
+	for _, e := range ends {
+		k := wire.WaitOutcome(core.WaitOutcome{End: e}).GetKind()
+		if k == cliv1.WaitOutcomeKind_WAIT_OUTCOME_KIND_UNSPECIFIED {
+			t.Fatalf("the end %q goes on the wire as UNSPECIFIED", e)
 		}
-		for _, any := range []bool{false, true} {
-			done, ok := wire.Await(jobs, any)
-			wantDone, wantOK := lifecycle.Await(states, any)
-			if done != wantDone || ok != wantOK {
-				t.Fatalf("wait(any=%v) over %v: got %v, %v want %v, %v", any, states, done, ok, wantDone, wantOK)
-			}
+		if other, ok := seen[k]; ok {
+			t.Fatalf("the ends %q and %q share the kind %v", e, other, k)
 		}
+		seen[k] = e
 	}
-	if done, _ := wire.Await([]*cliv1.Job{{State: 99}}, true); done {
-		t.Fatal("a wait ended on a state it cannot read")
+	if n := len(cliv1.WaitOutcomeKind_name) - 1; n != len(seen) {
+		t.Fatalf("the contract has %d outcome kinds and the daemon sends %d", n, len(seen))
+	}
+	if k := wire.WaitOutcome(core.WaitOutcome{End: "unheard_of"}).GetKind(); k != cliv1.WaitOutcomeKind_WAIT_OUTCOME_KIND_UNSPECIFIED {
+		t.Fatalf("an end the table lacks goes out as %v", k)
 	}
 }
 
@@ -360,6 +363,26 @@ func TestAPhaseTheDaemonCannotReadHolds(t *testing.T) {
 	for p, phase := range want {
 		if got := wire.ToRunPhase(p); got != phase {
 			t.Errorf("ToRunPhase(%v) = %v, want %v", p, got, phase)
+		}
+	}
+}
+
+// A failure a peer sent is read back exactly as sent, a kind this build does not know included,
+// so a command can print it unchanged.
+func TestAReceivedFailureKeepsAKindThisBuildDoesNotKnow(t *testing.T) {
+	for _, kind := range []cliv1.FailureKind{99, cliv1.FailureKind_FAILURE_KIND_CONFLICT, 0} {
+		sent := &cliv1.Failure{Kind: kind, Message: "m"}
+		detail, err := anypb.New(sent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = statuspb.FromProto(&status.Status{Code: 9, Message: "m", Details: []*anypb.Any{detail}}).Err()
+		got, ok := wire.ContractFailure(err)
+		if !ok || got.GetKind() != kind || got.GetMessage() != "m" {
+			t.Fatalf("kind %d read back as %v, %v", kind, got, ok)
+		}
+		if r := wire.ReceivedOf(err); r == nil || r.Failure.GetKind() != kind {
+			t.Fatalf("ReceivedOf kind %d = %v", kind, r)
 		}
 	}
 }

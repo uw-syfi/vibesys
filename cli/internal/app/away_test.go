@@ -29,10 +29,10 @@ const (
 )
 
 var (
-	callA  = core.CallContext{Repository: repoA, Task: "task", Run: "run-1", Harness: "h", Agent: "agent-1"}
-	callB  = core.CallContext{Repository: repoB, Task: "task", Run: "run-1", Harness: "h", Agent: "agent-1"}
-	scopeA = app.Scope{Repository: repoA, Task: "task"}
-	scopeB = app.Scope{Repository: repoB, Task: "task"}
+	callA  = core.CallContext{Scope: scopeAt(repoA, "task"), Run: "run-1", Harness: "h", Agent: "agent-1"}
+	callB  = core.CallContext{Scope: scopeAt(repoB, "task"), Run: "run-1", Harness: "h", Agent: "agent-1"}
+	scopeA = scopeAt(repoA, "task")
+	scopeB = scopeAt(repoB, "task")
 
 	errAway    = store.Mark(&core.Failure{Kind: core.FailureUnavailable, Message: "the repository cannot be read"}, store.ErrAway)
 	errRemoved = store.Mark(&core.Failure{Kind: core.FailureUnavailable, Message: "the repository is not there"}, store.ErrAway, store.ErrGone)
@@ -258,26 +258,26 @@ func (o *outage) awaitRefused(t *testing.T, repo string, n int) {
 	}
 }
 
-func (o *outage) Find(ctx context.Context, scope app.Scope) (store.Store, error) {
-	if err := o.reach(ctx, scope.Repository); err != nil {
+func (o *outage) Find(ctx context.Context, scope core.Scope) (store.Store, error) {
+	if err := o.reach(ctx, string(scope.Repository())); err != nil {
 		return nil, err
 	}
 	st, err := o.Stores.Find(ctx, scope)
 	if err != nil {
 		return nil, err
 	}
-	return outageStore{Store: st, o: o, repo: scope.Repository}, nil
+	return outageStore{Store: st, o: o, repo: string(scope.Repository())}, nil
 }
 
-func (o *outage) Create(ctx context.Context, scope app.Scope) (store.Store, error) {
-	if err := o.reach(ctx, scope.Repository); err != nil {
+func (o *outage) Create(ctx context.Context, scope core.Scope) (store.Store, error) {
+	if err := o.reach(ctx, string(scope.Repository())); err != nil {
 		return nil, err
 	}
 	st, err := o.Stores.Create(ctx, scope)
 	if err != nil {
 		return nil, err
 	}
-	return outageStore{Store: st, o: o, repo: scope.Repository}, nil
+	return outageStore{Store: st, o: o, repo: string(scope.Repository())}, nil
 }
 
 type outageStore struct {
@@ -337,7 +337,7 @@ func submitAs(t *testing.T, a *app.App, c core.CallContext, script ...string) co
 
 // awaitIn waits until a job of the scope is as wanted, with the slow period passing meanwhile: the
 // daemon gets there or the test's bound says it did not.
-func (o *outage) awaitIn(t *testing.T, a *app.App, s app.Scope, id core.JobID, what string, ok func(core.Job) bool) core.Job {
+func (o *outage) awaitIn(t *testing.T, a *app.App, s core.Scope, id core.JobID, what string, ok func(core.Job) bool) core.Job {
 	t.Helper()
 	ctx := ctxFor(t)
 	for {
@@ -346,7 +346,7 @@ func (o *outage) awaitIn(t *testing.T, a *app.App, s app.Scope, id core.JobID, w
 			return j
 		}
 		if ctx.Err() != nil {
-			t.Fatalf("job %s of %s never was %s: last seen %s, %v", id, s.Repository, what, j.State, err)
+			t.Fatalf("job %s of %s never was %s: last seen %s, %v", id, string(s.Repository()), what, j.State, err)
 		}
 		o.limits.pass()
 		runtime.Gosched()
@@ -354,7 +354,7 @@ func (o *outage) awaitIn(t *testing.T, a *app.App, s app.Scope, id core.JobID, w
 }
 
 // awaitFinal waits for a job to end with no slow period passing.
-func (o *outage) awaitFinal(t *testing.T, a *app.App, s app.Scope, id core.JobID) {
+func (o *outage) awaitFinal(t *testing.T, a *app.App, s core.Scope, id core.JobID) {
 	t.Helper()
 	got, err := a.Job(ctxFor(t), s, id)
 	if err != nil {
@@ -387,13 +387,13 @@ func (o *outage) awaitTurnedAway(t *testing.T, repo string, n int) {
 	}
 }
 
-func (o *outage) awaitFinalIn(t *testing.T, a *app.App, s app.Scope, id core.JobID) core.Job {
+func (o *outage) awaitFinalIn(t *testing.T, a *app.App, s core.Scope, id core.JobID) core.Job {
 	t.Helper()
 	return o.awaitIn(t, a, s, id, "final", func(j core.Job) bool { return j.State.Final() })
 }
 
-func refOf(s app.Scope, id core.JobID) lifecycle.Ref {
-	return lifecycle.Ref{Store: lifecycle.StoreIDOf(s.Repository, s.Task), Job: id}
+func refOf(s core.Scope, id core.JobID) lifecycle.Ref {
+	return lifecycle.Ref{Store: lifecycle.StoreIDOf(string(s.Repository()), string(s.Task())), Job: id}
 }
 
 // P1-2: the output waits in the spool, so a store going away costs a running job nothing, however
@@ -828,7 +828,7 @@ func TestForgettingARepositoryThatIsGone(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, s := range known {
-		if s.Repository == repoA {
+		if string(s.Repository()) == repoA {
 			t.Fatalf("the store of a forgotten repository is still known: %v", known)
 		}
 	}

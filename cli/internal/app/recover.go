@@ -25,7 +25,7 @@ import (
 // its jobs starts, a run of it is not released and its outcome is not discarded, the store is tried
 // again, and when it returns the run is taken up. The same goes for a store another daemon has.
 func (a *App) Start(ctx context.Context) error {
-	var scopes []Scope
+	var scopes []core.Scope
 	err := a.retry(ctx, func(ctx context.Context) error {
 		var err error
 		scopes, err = a.cfg.Stores.Known(ctx)
@@ -61,7 +61,7 @@ func (a *App) Start(ctx context.Context) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			a.cfg.Logf("the store of task %s in %s cannot be read yet: %v", scope.Task, scope.Repository, err)
+			a.cfg.Logf("the store of task %s in %s cannot be read yet: %v", string(scope.Task()), string(scope.Repository()), err)
 			a.markUnread(scope, err)
 			away[storeIDOf(scope)] = true
 		}
@@ -100,7 +100,7 @@ func (a *App) Start(ctx context.Context) error {
 var errNoRead = &core.Failure{Kind: core.FailureUnavailable, Message: "it could not be read"}
 
 // markUnread tells the machine a store could not be read, so that none of its jobs starts.
-func (a *App) markUnread(scope Scope, err error) {
+func (a *App) markUnread(scope core.Scope, err error) {
 	a.post(message{event: lifecycle.StoreUnread{Store: storeIDOf(scope), Failure: failureOf(err)}, scope: &scope})
 }
 
@@ -112,7 +112,7 @@ func sortedRefs(runs map[lifecycle.Ref]supervisor.Run) []lifecycle.Ref {
 
 // recoverScope tells the machine of the unfinished jobs of one store, each with what runOf finds
 // of its run.
-func (a *App) recoverScope(ctx context.Context, scope Scope, runOf func(lifecycle.Ref) supervisor.Run) error {
+func (a *App) recoverScope(ctx context.Context, scope core.Scope, runOf func(lifecycle.Ref) supervisor.Run) error {
 	// Most failures here wait for the slow sweep, and hold up nothing. A daemon that died a moment
 	// ago is different: its store is free as soon as the kernel gets to it, and its jobs are this
 	// daemon's to answer for.
@@ -150,7 +150,9 @@ func (a *App) recoverScope(ctx context.Context, scope Scope, runOf func(lifecycl
 
 func ownerLeaving(err error) bool { return errors.Is(err, store.ErrOwnerLeaving) }
 
-func storeIDOf(s Scope) lifecycle.StoreID { return lifecycle.StoreIDOf(s.Repository, s.Task) }
+func storeIDOf(s core.Scope) lifecycle.StoreID {
+	return lifecycle.StoreIDOf(string(s.Repository()), string(s.Task()))
+}
 
 // sweep looks again, every slow period, at what no event will bring: a store that could not be
 // read, a queued job the machine never heard of, because a submission reached the store and its
@@ -183,17 +185,17 @@ func (a *App) sweepOnce(ctx context.Context) {
 }
 
 // readAgain takes up a store that could not be read before.
-func (a *App) readAgain(ctx context.Context, scope Scope) {
+func (a *App) readAgain(ctx context.Context, scope core.Scope) {
 	err := a.recoverScope(ctx, scope, func(ref lifecycle.Ref) supervisor.Run { return a.look(ctx, ref) })
 	if err != nil {
-		a.cfg.Logf("the store of task %s in %s cannot be read yet: %v", scope.Task, scope.Repository, err)
+		a.cfg.Logf("the store of task %s in %s cannot be read yet: %v", string(scope.Task()), string(scope.Repository()), err)
 		return
 	}
 	a.post(message{event: lifecycle.StoreRead{Store: storeIDOf(scope)}})
 }
 
 // sweepStore looks at a store the machine has read before.
-func (a *App) sweepStore(ctx context.Context, scope Scope) {
+func (a *App) sweepStore(ctx context.Context, scope core.Scope) {
 	st, err := a.cfg.Stores.Find(ctx, scope)
 	var jobs []core.Job
 	if err == nil {
@@ -201,7 +203,7 @@ func (a *App) sweepStore(ctx context.Context, scope Scope) {
 	}
 	if err != nil {
 		if ctx.Err() == nil {
-			a.cfg.Logf("the store of task %s in %s cannot be read: %v", scope.Task, scope.Repository, err)
+			a.cfg.Logf("the store of task %s in %s cannot be read: %v", string(scope.Task()), string(scope.Repository()), err)
 			a.markUnread(scope, err)
 		}
 		return

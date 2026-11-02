@@ -364,12 +364,12 @@ type failingRecord struct {
 	fail *atomic.Bool
 }
 
-func (f failingRecord) Find(ctx context.Context, s app.Scope) (store.Store, error) {
+func (f failingRecord) Find(ctx context.Context, s core.Scope) (store.Store, error) {
 	st, err := f.Stores.Find(ctx, s)
 	return noRecord{Store: st, fail: f.fail}, err
 }
 
-func (f failingRecord) Create(ctx context.Context, s app.Scope) (store.Store, error) {
+func (f failingRecord) Create(ctx context.Context, s core.Scope) (store.Store, error) {
 	st, err := f.Stores.Create(ctx, s)
 	return noRecord{Store: st, fail: f.fail}, err
 }
@@ -620,8 +620,8 @@ func TestResultCommandsOnATaskWithNoStoreMakeNone(t *testing.T) {
 	w := newWorld(t)
 	r := newResultsRigOver(t, w, newBranches(), nil)
 	other := call
-	other.Task = "nobody"
-	otherScope := app.Scope{Repository: other.Repository, Task: other.Task}
+	other.Scope = scopeAt("/repo", "nobody")
+	otherScope := other.Scope
 	ctx := ctxFor(t)
 	if got, err := r.app.Show(ctx, otherScope, cm(1)); err != nil || len(got) != 0 {
 		t.Fatalf("Show = %v, %v; want none", got, err)

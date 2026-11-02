@@ -36,6 +36,8 @@ type Runtime struct {
 	Supervisors  supervisor.Supervisors
 	Environments environment.Environments
 	Branches     gitrepo.Branches
+	// Repositories resolves a caller's directory to the repository its store is keyed by.
+	Repositories gitrepo.Resolver
 	// Tasks reads the task of a check or a measure job as its commit has it. Without it those
 	// jobs are refused as unavailable.
 	Tasks task.Source
@@ -117,6 +119,7 @@ func Run(ctx context.Context, cfg Config) (err error) {
 		Environments:  cfg.Runtime.Environments,
 		Supervisors:   cfg.Runtime.Supervisors,
 		Branches:      cfg.Runtime.Branches,
+		Repositories:  cfg.Runtime.Repositories,
 		Tasks:         cfg.Runtime.Tasks,
 		Logf:          cfg.Logf,
 	})

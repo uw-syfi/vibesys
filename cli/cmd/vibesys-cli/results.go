@@ -38,7 +38,7 @@ func showCommand(ctx context.Context, d deps, args []string) int {
 	if len(positional) != 1 {
 		return fail(d, c.json, usagef("show: give one commit"))
 	}
-	callCtx, err := c.callContext(ctx, d)
+	callCtx, err := c.callContext(d)
 	if err != nil {
 		return fail(d, c.json, err)
 	}
@@ -80,7 +80,7 @@ func compareCommand(ctx context.Context, d deps, args []string) int {
 	if len(positional) != 1 {
 		return fail(d, c.json, usagef("compare: give one commit"))
 	}
-	callCtx, err := c.callContext(ctx, d)
+	callCtx, err := c.callContext(d)
 	if err != nil {
 		return fail(d, c.json, err)
 	}
@@ -127,7 +127,7 @@ func promoteCommand(ctx context.Context, d deps, args []string) int {
 	if len(positional) != 1 {
 		return fail(d, c.json, usagef("promote: give one commit"))
 	}
-	callCtx, err := c.callContext(ctx, d)
+	callCtx, err := c.callContext(d)
 	if err != nil {
 		return fail(d, c.json, err)
 	}
@@ -140,12 +140,13 @@ func promoteCommand(ctx context.Context, d deps, args []string) int {
 		if err != nil {
 			return fail(d, c.json, err)
 		}
-		code := exitOK
-		if resp.GetRefused() != nil {
-			code = exitFailed
-		}
+		code := exitOfAnswer(answerOf(resp.GetPromoted() != nil, resp.GetRefused() != nil))
 		if c.json {
 			printJSON(d, resp)
+			return code
+		}
+		if code == exitNoAnswer {
+			fmt.Fprintln(d.stderr, unreadAnswer)
 			return code
 		}
 		if p := resp.GetPromoted(); p != nil {
@@ -184,7 +185,7 @@ func resultCommand(ctx context.Context, d deps, args []string) int {
 	if len(positional) != 0 {
 		return fail(d, c.json, usagef("result: unexpected argument %q", positional[0]))
 	}
-	callCtx, err := c.callContext(ctx, d)
+	callCtx, err := c.callContext(d)
 	if err != nil {
 		return fail(d, c.json, err)
 	}
@@ -193,12 +194,13 @@ func resultCommand(ctx context.Context, d deps, args []string) int {
 		if err != nil {
 			return fail(d, c.json, err)
 		}
-		code := exitOK
-		if resp.GetCurrent() == nil {
-			code = exitFailed
-		}
+		code := exitOfAnswer(answerOf(resp.GetCurrent() != nil, resp.GetNone() != nil))
 		if c.json {
 			printJSON(d, resp)
+			return code
+		}
+		if code == exitNoAnswer {
+			fmt.Fprintln(d.stderr, unreadAnswer)
 			return code
 		}
 		if cur := resp.GetCurrent(); cur != nil {
@@ -214,6 +216,9 @@ func resultCommand(ctx context.Context, d deps, args []string) int {
 		return code
 	})
 }
+
+// unreadAnswer is what a command says of an answer from a newer daemon that this build cannot read.
+const unreadAnswer = "vibesys-cli: the daemon's answer is one this build cannot read; upgrade vibesys-cli"
 
 // Text. These functions round and name; the JSON path never calls them.
 
@@ -275,16 +280,8 @@ func describeResult(r *cliv1.Result) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\t", r.GetJobId())
 	if m := r.GetMeasure(); m != nil {
-		var sum float64
-		for _, s := range m.GetSamples() {
-			sum += s
-		}
-		mean := 0.0
-		if len(m.GetSamples()) > 0 {
-			mean = sum / float64(len(m.GetSamples()))
-		}
 		fmt.Fprintf(&b, "measure\t%s (%s)\tmean %s over %d samples\tcheck %s", m.GetMetric().GetName(),
-			lower("DIRECTION_", m.GetMetric().GetDirection().String()), number(mean), len(m.GetSamples()), m.GetCheckJobId())
+			lower("DIRECTION_", m.GetMetric().GetDirection().String()), number(m.GetValue()), len(m.GetSamples()), m.GetCheckJobId())
 	} else {
 		b.WriteString("check\tpassed")
 	}

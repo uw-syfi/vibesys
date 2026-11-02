@@ -28,6 +28,9 @@ type Config struct {
 	Stores       Stores
 	Environments environment.Environments
 	Supervisors  supervisor.Supervisors
+	// Repositories resolves the directory a caller sent to the repository its store is keyed by. It
+	// is required: without it every call that names a task fails as unavailable.
+	Repositories gitrepo.Resolver
 	// Branches reads and moves the result branch. Without it, compare against the branch, promote
 	// and result fail as unavailable.
 	Branches gitrepo.Branches

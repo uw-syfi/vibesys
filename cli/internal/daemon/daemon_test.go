@@ -21,6 +21,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/daemon"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv"
+	"github.com/uw-syfi/vibesys/cli/internal/gitrepo"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
 	"github.com/uw-syfi/vibesys/cli/internal/wire"
 )
@@ -33,6 +34,13 @@ var (
 	commit = core.Commit("0123456789abcdef0123456789abcdef01234567")
 	call   = &cliv1.CallContext{Repository: "/repo", Task: "task", RunId: "run-1", Harness: "h", Agent: "agent-1"}
 )
+
+// repos is where callers' directories resolve: the one repository /repo the tests call from.
+func repos() *gitrepo.Fake {
+	g := gitrepo.NewFake()
+	g.AddRepo("/repo", nil)
+	return g
+}
 
 func ctxFor(t *testing.T) context.Context {
 	t.Helper()
@@ -60,6 +68,7 @@ func newRig(t *testing.T) *rig {
 		Stores:       memstores.New(app.Rules(5)),
 		Environments: fakeenv.Environments{core.EnvironmentHost: env},
 		Supervisors:  supervisor.NewInProcess(fakeenv.Environments{core.EnvironmentHost: env}, checkouts, survivors),
+		Repositories: repos(),
 	})
 	if err := a.Start(ctxFor(t)); err != nil {
 		t.Fatal(err)

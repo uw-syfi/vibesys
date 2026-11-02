@@ -237,14 +237,6 @@ func ToJob(j *cliv1.Job) (core.Job, error) {
 	return out, nil
 }
 
-// ToCallContext returns the domain call context for the contract's message.
-func ToCallContext(c *cliv1.CallContext) core.CallContext {
-	return core.CallContext{
-		Repository: c.GetRepository(), Task: c.GetTask(), Run: core.RunID(c.GetRunId()),
-		Harness: c.GetHarness(), Agent: c.GetAgent(),
-	}
-}
-
 // ToJobFilter returns the domain filter for a ListJobs request. A commit that is set must be a
 // full hash, since a prefix would match nothing the store knows.
 func ToJobFilter(r *cliv1.ListJobsRequest) (core.JobFilter, error) {

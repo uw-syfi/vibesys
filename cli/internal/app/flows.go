@@ -17,7 +17,7 @@ import (
 // run. The key is the job's cache key. Everything is decided here and not by the store or the
 // supervisor, which only keep what they are given.
 func (a *App) keyFlow(ctx context.Context, c core.CallContext, spec core.JobSpec) (core.JobSpec, core.JobKey, error) {
-	t, err := a.taskAt(ctx, c.Repository, spec.Commit, c.Task)
+	t, err := a.taskAt(ctx, string(c.Scope.Repository()), spec.Commit, string(c.Scope.Task()))
 	if err != nil {
 		return spec, "", err
 	}
@@ -25,7 +25,7 @@ func (a *App) keyFlow(ctx context.Context, c core.CallContext, spec core.JobSpec
 	if err != nil {
 		return spec, "", err
 	}
-	fingerprint, err := a.fingerprintOf(ctx, kind, environment.Target{Repository: c.Repository, Commit: spec.Commit, Task: c.Task})
+	fingerprint, err := a.fingerprintOf(ctx, kind, environment.Target{Repository: string(c.Scope.Repository()), Commit: spec.Commit, Task: string(c.Scope.Task())})
 	if err != nil {
 		return spec, "", err
 	}
@@ -44,8 +44,8 @@ func (a *App) keyFlow(ctx context.Context, c core.CallContext, spec core.JobSpec
 // planFlow makes the plan of a queued check or measure job that is about to start: the rule for
 // what the cache lets it skip, applied now and not when the job was queued (flow.Prepare). It
 // fails when the task or the environment is not what the job was keyed under.
-func (a *App) planFlow(ctx context.Context, st store.Store, scope Scope, job core.Job, fingerprint core.Fingerprint) (flow.Plan, error) {
-	tk, err := a.taskAt(ctx, scope.Repository, job.Spec.Commit, scope.Task)
+func (a *App) planFlow(ctx context.Context, st store.Store, scope core.Scope, job core.Job, fingerprint core.Fingerprint) (flow.Plan, error) {
+	tk, err := a.taskAt(ctx, string(scope.Repository()), job.Spec.Commit, string(scope.Task()))
 	if err != nil {
 		return flow.Plan{}, err
 	}

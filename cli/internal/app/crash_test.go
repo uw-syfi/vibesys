@@ -64,15 +64,15 @@ type crashStores struct {
 	c     *crash
 }
 
-func (s crashStores) Find(ctx context.Context, scope app.Scope) (store.Store, error) {
+func (s crashStores) Find(ctx context.Context, scope core.Scope) (store.Store, error) {
 	return s.open(scope, func() (store.Store, error) { return s.inner.Find(ctx, scope) })
 }
 
-func (s crashStores) Create(ctx context.Context, scope app.Scope) (store.Store, error) {
+func (s crashStores) Create(ctx context.Context, scope core.Scope) (store.Store, error) {
 	return s.open(scope, func() (store.Store, error) { return s.inner.Create(ctx, scope) })
 }
 
-func (s crashStores) open(_ app.Scope, get func() (store.Store, error)) (store.Store, error) {
+func (s crashStores) open(_ core.Scope, get func() (store.Store, error)) (store.Store, error) {
 	if err := s.c.read(); err != nil {
 		return nil, err
 	}
@@ -83,20 +83,20 @@ func (s crashStores) open(_ app.Scope, get func() (store.Store, error)) (store.S
 	return crashStore{Store: st, c: s.c}, nil
 }
 
-func (s crashStores) Known(ctx context.Context) ([]app.Scope, error) { return s.inner.Known(ctx) }
+func (s crashStores) Known(ctx context.Context) ([]core.Scope, error) { return s.inner.Known(ctx) }
 
-func (s crashStores) Forget(ctx context.Context, scope app.Scope) error {
+func (s crashStores) Forget(ctx context.Context, scope core.Scope) error {
 	return s.inner.Forget(ctx, scope)
 }
 
-func (s crashStores) GivenUp(ctx context.Context, scope app.Scope) ([]core.JobID, error) {
+func (s crashStores) GivenUp(ctx context.Context, scope core.Scope) ([]core.JobID, error) {
 	if err := s.c.read(); err != nil {
 		return nil, err
 	}
 	return s.inner.GivenUp(ctx, scope)
 }
 
-func (s crashStores) Reclaim(ctx context.Context, scope app.Scope, job core.JobID) error {
+func (s crashStores) Reclaim(ctx context.Context, scope core.Scope, job core.JobID) error {
 	if err := s.c.step(); err != nil {
 		return err
 	}
@@ -325,7 +325,7 @@ type leavingStores struct {
 	opened int
 }
 
-func (s *leavingStores) Find(ctx context.Context, scope app.Scope) (store.Store, error) {
+func (s *leavingStores) Find(ctx context.Context, scope core.Scope) (store.Store, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.opened++

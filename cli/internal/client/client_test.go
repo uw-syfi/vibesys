@@ -44,6 +44,7 @@ type setup struct {
 func newSetup(t *testing.T) *setup {
 	t.Helper()
 	s := &setup{dir: daemontest.RuntimeDir(t), world: daemontest.NewWorld(t), timers: clock.NewManualTimers()}
+	s.world.Git.AddRepo("/repo", nil)
 	s.starter = &daemontest.Starter{Dir: s.dir, Version: "test", Runtime: s.world.Runtime}
 	t.Cleanup(func() { s.starter.Close(t) })
 	return s
@@ -147,11 +148,12 @@ func TestWaitAllReturnsWhenEveryJobIsFinal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.Done || res.Succeeded || res.TimedOut {
-		t.Fatalf("result = %+v, want done, not succeeded", res)
+	o := res.Outcome
+	if o.GetKind() != cliv1.WaitOutcomeKind_WAIT_OUTCOME_KIND_SOME_FAILED || o.GetDecidedBy() != b.GetId() {
+		t.Fatalf("outcome = %v, want some failed, decided by %s", o, b.GetId())
 	}
-	if len(res.Jobs) != 2 || res.Jobs[0].GetId() != a.GetId() || res.Jobs[1].GetId() != b.GetId() {
-		t.Fatalf("jobs = %v, want both in the order asked", res.Jobs)
+	if len(o.GetJobs()) != 2 || o.GetJobs()[0].GetId() != a.GetId() || o.GetJobs()[1].GetId() != b.GetId() {
+		t.Fatalf("jobs = %v, want both in the order asked", o.GetJobs())
 	}
 }
 
@@ -165,39 +167,39 @@ func TestWaitAnyReturnsAtTheFirstFinalJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.Done || !res.Succeeded {
-		t.Fatalf("result = %+v, want done and succeeded", res)
+	if o := res.Outcome; o.GetKind() != cliv1.WaitOutcomeKind_WAIT_OUTCOME_KIND_FIRST_SUCCEEDED || o.GetDecidedBy() != fast.GetId() {
+		t.Fatalf("outcome = %v, want first succeeded, decided by %s", o, fast.GetId())
 	}
 	s.world.Gates.Release("g")
 }
 
-// A timeout ends the wait and nothing else: the job goes on and succeeds.
-func TestAWaitTimeoutNeverCancelsTheJob(t *testing.T) {
+// The daemon keeps the timeout: it answers TIMED_OUT, and the job goes on and succeeds.
+func TestAWaitTimeoutIsTheDaemonsAnswerAndNeverCancelsTheJob(t *testing.T) {
 	s := newSetup(t)
-	c := s.connect(t)
+	// The daemon's timers fire this one timeout at once, and every other wait of the daemon (no
+	// other is this long) on the system's clock: no store or supervisor call can race it.
+	const timeout = 45 * time.Minute
+	s.starter.Timers = clock.Exactly{D: timeout, Others: clock.System{}}
+	// The client's time holds still, so it asks the daemon for exactly the whole timeout.
+	opts := s.options(true)
+	opts.Clock = clock.NewManual(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), 0)
+	c, err := client.Connect(ctxFor(t), opts)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	t.Cleanup(func() { c.Close() })
 	job := submit(t, c, "hold", "g", ";", "exit", "0")
-
-	waited := make(chan client.WaitResult, 1)
-	go func() {
-		res, err := c.Wait(ctxFor(t), call, []string{job.GetId()}, client.WaitOptions{Timeout: 5 * time.Second})
-		if err != nil {
-			t.Errorf("Wait: %v", err)
-		}
-		waited <- res
-	}()
-	if d := <-s.timers.Armed(); d != 5*time.Second {
-		t.Fatalf("the timeout armed was %v, want 5s", d)
+	res, err := c.Wait(ctxFor(t), call, []string{job.GetId()}, client.WaitOptions{Timeout: timeout})
+	if err != nil {
+		t.Fatalf("Wait: %v", err)
 	}
-	s.timers.Fire()
-	res := <-waited
-	if !res.TimedOut || res.Done {
-		t.Fatalf("result = %+v, want timed out", res)
+	if o := res.Outcome; o.GetKind() != cliv1.WaitOutcomeKind_WAIT_OUTCOME_KIND_TIMED_OUT || len(o.GetJobs()) != 1 {
+		t.Fatalf("outcome = %v, want timed out with the job", o)
 	}
-
 	s.world.Gates.Release("g")
 	again, err := c.Wait(ctxFor(t), call, []string{job.GetId()}, client.WaitOptions{})
-	if err != nil || !again.Done || !again.Succeeded {
-		t.Fatalf("the job after a timed-out wait: %+v, %v; want it to have succeeded", again, err)
+	if err != nil || again.Outcome.GetKind() != cliv1.WaitOutcomeKind_WAIT_OUTCOME_KIND_ALL_SUCCEEDED {
+		t.Fatalf("the job after a timed-out wait: %v, %v; want it to have succeeded", again.Outcome, err)
 	}
 }
 
@@ -205,8 +207,7 @@ func TestWaitOnAnUnknownJobFailsWithNotFound(t *testing.T) {
 	s := newSetup(t)
 	c := s.connect(t)
 	_, err := c.Wait(ctxFor(t), call, []string{"j404"}, client.WaitOptions{})
-	var f *core.Failure
-	if !errors.As(err, &f) || f.Kind != core.FailureNotFound {
+	if f, ok := wire.FailureOf(err); !ok || f.Kind != core.FailureNotFound {
 		t.Fatalf("Wait = %v, want a not_found failure", err)
 	}
 }
@@ -462,8 +463,8 @@ func TestRestartReplacesTheDaemonAndKeepsTheJob(t *testing.T) {
 	}
 	s.world.Gates.Release("g")
 	res, err := c2.Wait(ctxFor(t), call, []string{job.GetId()}, client.WaitOptions{})
-	if err != nil || !res.Done || !res.Succeeded {
-		t.Fatalf("the job after a restart: %+v, %v; want it to have succeeded", res, err)
+	if err != nil || res.Outcome.GetKind() != cliv1.WaitOutcomeKind_WAIT_OUTCOME_KIND_ALL_SUCCEEDED {
+		t.Fatalf("the job after a restart: %v, %v; want it to have succeeded", res.Outcome, err)
 	}
 	var out string
 	if err := c2.Logs(ctxFor(t), &cliv1.ReadLogsRequest{Context: call, JobId: job.GetId()}, func(r *cliv1.ReadLogsResponse) error {

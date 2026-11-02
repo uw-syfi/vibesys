@@ -15,7 +15,6 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
-	"github.com/uw-syfi/vibesys/cli/internal/app"
 	"github.com/uw-syfi/vibesys/cli/internal/client"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
@@ -155,7 +154,7 @@ func (w *world) start(kind string, do func(ctx context.Context) string) {
 }
 
 func (w *world) callContext(s int) *cliv1.CallContext {
-	return &cliv1.CallContext{Repository: scopes[s].Repository, Task: scopes[s].Task, RunId: "run", Harness: "h", Agent: "a"}
+	return &cliv1.CallContext{Repository: string(scopes[s].Repository()), Task: string(scopes[s].Task()), RunId: "run", Harness: "h", Agent: "a"}
 }
 
 func (w *world) submit() {
@@ -233,16 +232,21 @@ func (w *world) wait(l located) {
 			if errors.Is(err, client.ErrEndUnknown) {
 				return ""
 			}
-			return fmt.Sprintf("wait for %s/%s ended with %v", scope.Task, id, err)
+			return fmt.Sprintf("wait for %s/%s ended with %v", string(scope.Task()), id, err)
 		}
-		if r.Done {
-			j, jerr := w.raw[scope].Job(context.Background(), core.JobID(id))
-			if jerr != nil || !j.State.Final() {
-				return fmt.Sprintf("wait for %s said done, the store has %s", id, j.State)
-			}
-			if r.Succeeded != (j.State == core.JobSucceeded) {
-				return fmt.Sprintf("wait for %s said succeeded=%v, the store has %s", id, r.Succeeded, j.State)
-			}
+		kind := r.Outcome.GetKind()
+		if kind != cliv1.WaitOutcomeKind_WAIT_OUTCOME_KIND_ALL_SUCCEEDED && kind != cliv1.WaitOutcomeKind_WAIT_OUTCOME_KIND_SOME_FAILED {
+			return fmt.Sprintf("wait for all of %s ended %v", id, kind)
+		}
+		j, jerr := w.raw[scope].Job(context.Background(), core.JobID(id))
+		if jerr != nil || !j.State.Final() {
+			return fmt.Sprintf("wait for %s said %v, the store has %s", id, kind, j.State)
+		}
+		if succeeded := kind == cliv1.WaitOutcomeKind_WAIT_OUTCOME_KIND_ALL_SUCCEEDED; succeeded != (j.State == core.JobSucceeded) {
+			return fmt.Sprintf("wait for %s said %v, the store has %s", id, kind, j.State)
+		}
+		if got := r.Outcome.GetJobs(); len(got) != 1 || got[0].GetId() != id {
+			return fmt.Sprintf("wait for %s sent the jobs %v", id, got)
 		}
 		return ""
 	})
@@ -341,8 +345,8 @@ func (w *world) awayNow() string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	for _, s := range scopes {
-		if w.absent[s.Repository] && s.Repository != w.lost {
-			return s.Repository
+		if repo := string(s.Repository()); w.absent[repo] && repo != w.lost {
+			return repo
 		}
 	}
 	return ""
@@ -361,7 +365,7 @@ func (w *world) actions() []option {
 	}
 	if len(all) > 0 {
 		l := all[w.rng.IntN(len(all))]
-		name := fmt.Sprintf("%s/%s", l.scope.Task, l.job.ID)
+		name := fmt.Sprintf("%s/%s", string(l.scope.Task()), l.job.ID)
 		add("cancel "+name, func() { w.cancel(l) })
 		add("wait "+name, func() { w.wait(l) })
 	}
@@ -411,7 +415,7 @@ func (w *world) actions() []option {
 		add("flip the stores", func() { w.down = !w.down })
 	}
 	if p.unmount && outages {
-		repo := scopes[w.rng.IntN(len(scopes))].Repository
+		repo := string(scopes[w.rng.IntN(len(scopes))].Repository())
 		add("flip "+repo, func() {
 			w.mu.Lock()
 			defer w.mu.Unlock()
@@ -423,7 +427,7 @@ func (w *world) actions() []option {
 			w.mu.Lock()
 			defer w.mu.Unlock()
 			for _, s := range scopes {
-				w.absent[s.Repository] = true
+				w.absent[string(s.Repository())] = true
 			}
 		})
 		if away := w.awayNow(); !p.lost && away != "" {
@@ -515,7 +519,7 @@ func (w *world) moves(heal bool) []option {
 	}
 	if heal {
 		for _, scope := range w.toGiveUp() {
-			out = append(out, option{"the operator removes the owner record of " + scope.Repository + " " + scope.Task, func() { w.giveUp(scope) }})
+			out = append(out, option{"the operator removes the owner record of " + string(scope.Repository()) + " " + string(scope.Task()), func() { w.giveUp(scope) }})
 		}
 	}
 	return out
@@ -523,8 +527,8 @@ func (w *world) moves(heal bool) []option {
 
 // toGiveUp is the stores whose owner record an operator removes, as the daemon tells them to: a job
 // of each runs in it, whose place is gone for good, and was not given up yet.
-func (w *world) toGiveUp() []app.Scope {
-	var out []app.Scope
+func (w *world) toGiveUp() []core.Scope {
+	var out []core.Scope
 	for _, l := range w.jobs() {
 		ref := w.refIn(l.scope, l.job.ID)
 		w.mu.Lock()
@@ -539,7 +543,7 @@ func (w *world) toGiveUp() []app.Scope {
 
 // giveUp is the next owner of a store finding its record removed: every job it has running is
 // given up.
-func (w *world) giveUp(scope app.Scope) {
+func (w *world) giveUp(scope core.Scope) {
 	for _, l := range w.jobs() {
 		w.mu.Lock()
 		if l.scope == scope && l.job.State == core.JobRunning && !slices.Contains(w.givenUp[scope], l.job.ID) {
@@ -551,7 +555,7 @@ func (w *world) giveUp(scope app.Scope) {
 
 // check says what must hold after every step.
 func (w *world) check() {
-	running := map[app.Scope]int{}
+	running := map[core.Scope]int{}
 	for _, l := range w.jobs() {
 		ref := w.refIn(l.scope, l.job.ID)
 		if l.job.State == core.JobRunning {
@@ -569,7 +573,7 @@ func (w *world) check() {
 	// store that was away shows a job whose supervisor died meanwhile, but not more than one.
 	for _, scope := range scopes {
 		if running[scope] > 1 {
-			w.violate("%d jobs of %s are running", running[scope], scope.Task)
+			w.violate("%d jobs of %s are running", running[scope], string(scope.Task()))
 		}
 	}
 	if n := w.env.Active(); n > 1 {
@@ -703,10 +707,10 @@ func (w *world) struck(all []located) []string {
 	var out []string
 	for _, l := range all {
 		queued := slices.ContainsFunc(all, func(o located) bool {
-			return o.job.State == core.JobQueued && o.scope.Repository != l.scope.Repository
+			return o.job.State == core.JobQueued && string(o.scope.Repository()) != string(l.scope.Repository())
 		})
-		if l.job.State == core.JobRunning && queued && !slices.Contains(out, l.scope.Repository) {
-			out = append(out, l.scope.Repository)
+		if l.job.State == core.JobRunning && queued && !slices.Contains(out, string(l.scope.Repository())) {
+			out = append(out, string(l.scope.Repository()))
 		}
 	}
 	return out
@@ -716,7 +720,7 @@ func (w *world) struck(all []located) []string {
 // waiters were told why. No fault of that repository keeps the rest from ending.
 func (w *world) settled() bool {
 	for _, l := range w.jobs() {
-		if !l.job.State.Final() && l.scope.Repository != w.lost {
+		if !l.job.State.Final() && string(l.scope.Repository()) != w.lost {
 			return false
 		}
 	}
@@ -753,7 +757,7 @@ func (w *world) lateRestart() {
 	w.tracef("late restart")
 	w.crash()
 	if w.profile.unmount {
-		repo := scopes[w.rng.IntN(len(scopes))].Repository
+		repo := string(scopes[w.rng.IntN(len(scopes))].Repository())
 		w.tracef("%s goes away", repo)
 		w.mu.Lock()
 		w.absent[repo] = true
@@ -881,7 +885,7 @@ func (w *world) unfinished() string {
 	var out []string
 	for _, l := range w.jobs() {
 		if !l.job.State.Final() {
-			out = append(out, fmt.Sprintf("job %s/%s %s", l.scope.Task, l.job.ID, l.job.State))
+			out = append(out, fmt.Sprintf("job %s/%s %s", string(l.scope.Task()), l.job.ID, l.job.State))
 		}
 	}
 	for _, o := range w.ops {

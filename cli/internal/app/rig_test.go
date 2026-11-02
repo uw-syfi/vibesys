@@ -14,6 +14,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv"
+	"github.com/uw-syfi/vibesys/cli/internal/gitrepo"
 	"github.com/uw-syfi/vibesys/cli/internal/hostfs"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
 	"github.com/uw-syfi/vibesys/cli/internal/task"
@@ -25,11 +26,11 @@ const backstop = time.Minute
 
 var (
 	commit = core.Commit("0123456789abcdef0123456789abcdef01234567")
-	scope  = app.Scope{Repository: "/repo", Task: "task"}
-	call   = core.CallContext{Repository: "/repo", Task: "task", Run: "run-1", Harness: "h", Agent: "agent-1"}
+	scope  = scopeAt("/repo", "task")
+	call   = core.CallContext{Scope: scopeAt("/repo", "task"), Run: "run-1", Harness: "h", Agent: "agent-1"}
 	// elsewhere and scopeElsewhere are a second task, for a job a test does not count.
-	scopeElsewhere = app.Scope{Repository: "/repo", Task: "other"}
-	elsewhere      = core.CallContext{Repository: "/repo", Task: "other", Run: "run-1", Harness: "h", Agent: "agent-1"}
+	scopeElsewhere = scopeAt("/repo", "other")
+	elsewhere      = core.CallContext{Scope: scopeAt("/repo", "other"), Run: "run-1", Harness: "h", Agent: "agent-1"}
 )
 
 // world is everything that outlives one daemon: the stores (the disk), the supervisors (their
@@ -45,6 +46,7 @@ type world struct {
 	env       *fakeenv.Environment
 	checkouts *fakeenv.Checkouts
 	survivors *supervisor.Survivors
+	git       *gitrepo.Fake
 	apps      []*app.App
 }
 
@@ -62,6 +64,7 @@ func newWorld(t *testing.T) *world {
 		env:       fakeenv.New(core.EnvironmentHost, gates, fakeenv.WithFiles(files)),
 		checkouts: &fakeenv.Checkouts{},
 		survivors: supervisor.NewSurvivors(),
+		git:       gitrepo.NewFake(),
 	}
 	t.Cleanup(func() {
 		for _, a := range w.apps {
@@ -96,6 +99,7 @@ func (w *world) newApp() *app.App {
 		Environments: fakeenv.Environments{core.EnvironmentHost: w.env},
 		Supervisors:  w.supervisors(),
 		Tasks:        w.taskSource(),
+		Repositories: w.git,
 		Logf:         func(format string, args ...any) { w.t.Logf("daemon: "+format, args...) },
 	}))
 	w.apps = append(w.apps, a)
@@ -220,4 +224,14 @@ func (w *world) taskSource() task.Source {
 		return nil
 	}
 	return w.tasks
+}
+
+// scopeAt is the scope of a task in a repository, as the daemon resolves one. Tests name
+// repositories by path, so the path is the repository.
+func scopeAt(repo, task string) core.Scope {
+	s, err := core.ResolvedScope(core.Repository(repo), core.TaskName(task))
+	if err != nil {
+		panic(err)
+	}
+	return s
 }

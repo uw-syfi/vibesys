@@ -46,14 +46,15 @@ func (w *world) startAt(p place) *app.App {
 }
 
 // onDisk is a store in a repository on the real disk, and the index that knows it.
-func onDisk(t *testing.T) (*filestore.Index, app.Scope, core.CallContext) {
+func onDisk(t *testing.T) (*filestore.Index, core.Scope, core.CallContext) {
 	t.Helper()
 	index, err := filestore.OpenIndex(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	repo := t.TempDir()
-	return index, app.Scope{Repository: repo, Task: "task"}, core.CallContext{Repository: repo, Task: "task", Run: "run-1", Harness: "h", Agent: "agent-1"}
+	sc := scopeAt(repo, "task")
+	return index, sc, core.CallContext{Scope: sc, Run: "run-1", Harness: "h", Agent: "agent-1"}
 }
 
 func submitIn(t *testing.T, a *app.App, cc core.CallContext, script ...string) core.Job {
@@ -65,7 +66,7 @@ func submitIn(t *testing.T, a *app.App, cc core.CallContext, script ...string) c
 	return out.Job
 }
 
-func awaitIn(t *testing.T, a *app.App, sc app.Scope, id core.JobID, want core.JobState) {
+func awaitIn(t *testing.T, a *app.App, sc core.Scope, id core.JobID, want core.JobState) {
 	t.Helper()
 	var got core.Job
 	err := a.Watch(ctxFor(t), sc, []core.JobID{id}, func(j core.Job) error {
@@ -80,9 +81,9 @@ func awaitIn(t *testing.T, a *app.App, sc app.Scope, id core.JobID, want core.Jo
 	}
 }
 
-func removeOwnerRecord(t *testing.T, sc app.Scope) {
+func removeOwnerRecord(t *testing.T, sc core.Scope) {
 	t.Helper()
-	if err := os.Remove(filestore.OwnerRecord(sc.Repository, sc.Task)); err != nil {
+	if err := os.Remove(filestore.OwnerRecord(string(sc.Repository()), string(sc.Task()))); err != nil {
 		t.Fatal(err)
 	}
 }

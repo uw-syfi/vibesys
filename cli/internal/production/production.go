@@ -106,6 +106,7 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 			}),
 			Environments: environments,
 			Branches:     gitrepo.System{},
+			Repositories: gitrepo.System{},
 			Tasks:        gitwork.Tasks{},
 		},
 	})

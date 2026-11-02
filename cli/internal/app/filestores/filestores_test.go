@@ -9,7 +9,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"testing/quick"
 	"time"
 
 	"github.com/uw-syfi/vibesys/cli/internal/app"
@@ -35,7 +34,7 @@ func newStores(t *testing.T, indexDir string) *filestores.FileStores {
 func TestAnOpenedScopeIsKnownAfterARestart(t *testing.T) {
 	repo, indexDir := t.TempDir(), t.TempDir()
 	first := newStores(t, indexDir)
-	scope := app.Scope{Repository: repo, Task: "kv-store"}
+	scope := scopeAt(repo, "kv-store")
 	if _, err := first.Create(context.Background(), scope); err != nil {
 		t.Fatal(err)
 	}
@@ -52,8 +51,8 @@ func TestAnOpenedScopeIsKnownAfterARestart(t *testing.T) {
 func TestAForgottenScopeLeavesTheIndex(t *testing.T) {
 	repo, indexDir := t.TempDir(), t.TempDir()
 	first := newStores(t, indexDir)
-	kept, gone := app.Scope{Repository: repo, Task: "kept"}, app.Scope{Repository: repo, Task: "gone"}
-	for _, s := range []app.Scope{kept, gone} {
+	kept, gone := scopeAt(repo, "kept"), scopeAt(repo, "gone")
+	for _, s := range []core.Scope{kept, gone} {
 		if _, err := first.Create(context.Background(), s); err != nil {
 			t.Fatal(err)
 		}
@@ -73,7 +72,7 @@ func TestAForgottenScopeLeavesTheIndex(t *testing.T) {
 // Opening a scope again hands back the same store, so there is one writer in the process.
 func TestOpenSharesTheStore(t *testing.T) {
 	stores := newStores(t, t.TempDir())
-	scope := app.Scope{Repository: t.TempDir(), Task: "kv-store"}
+	scope := scopeAt(t.TempDir(), "kv-store")
 	a, err := stores.Create(context.Background(), scope)
 	if err != nil {
 		t.Fatal(err)
@@ -112,7 +111,7 @@ func TestARepositoryThatIsAwayIsKnownAndComesBackWhole(t *testing.T) {
 			indexDir := t.TempDir()
 			repo := filepath.Join(t.TempDir(), "repo")
 			must(t, os.Mkdir(repo, 0o755))
-			scope := app.Scope{Repository: repo, Task: "kv-store"}
+			scope := scopeAt(repo, "kv-store")
 
 			first := newStores(t, indexDir)
 			st, err := first.Create(ctx, scope)
@@ -156,7 +155,7 @@ func TestARepositoryThatIsAwayIsKnownAndComesBackWhole(t *testing.T) {
 // nothing.
 func TestAFirstOpenMakesNoRepository(t *testing.T) {
 	repo := filepath.Join(t.TempDir(), "typo")
-	_, err := newStores(t, t.TempDir()).Create(context.Background(), app.Scope{Repository: repo, Task: "kv-store"})
+	_, err := newStores(t, t.TempDir()).Create(context.Background(), scopeAt(repo, "kv-store"))
 	var f *core.Failure
 	if !errors.As(err, &f) || f.Kind != core.FailureUnavailable {
 		t.Fatalf("Open: %v, want unavailable", err)
@@ -169,7 +168,7 @@ func TestAFirstOpenMakesNoRepository(t *testing.T) {
 // Two sets of stores are two daemons, whatever else separates them.
 func TestASecondDaemonIsRefusedAStoreAndNamesWhoHasIt(t *testing.T) {
 	ctx := context.Background()
-	scope := app.Scope{Repository: t.TempDir(), Task: "kv-store"}
+	scope := scopeAt(t.TempDir(), "kv-store")
 	index, err := filestore.OpenIndex(t.TempDir())
 	must(t, err)
 	rules := app.Rules(defaultSamples)
@@ -204,28 +203,11 @@ func listing(t *testing.T, dir string) []string {
 	return out
 }
 
-// A scope that is not a path and a task name is refused with the field named, whatever it is.
-func TestOpenRefusesAScopeThatIsNotOne(t *testing.T) {
-	stores := newStores(t, t.TempDir())
-	property := func(repository, task string) bool {
-		scope := app.Scope{Repository: repository, Task: task}
-		if scope.Validate() == nil {
-			return true
-		}
-		_, err := stores.Create(context.Background(), scope)
-		f, ok := err.(*core.Failure)
-		return ok && f.Kind == core.FailureInvalidInput
-	}
-	if err := quick.Check(property, nil); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // The rules reach the store: a submission that leaves the sample count at zero joins a queued
 // measurement of the task's default count.
 func TestTheStoreIsOpenedWithTheRules(t *testing.T) {
 	stores := newStores(t, t.TempDir())
-	scope := app.Scope{Repository: t.TempDir(), Task: "kv-store"}
+	scope := scopeAt(t.TempDir(), "kv-store")
 	st, err := stores.Create(context.Background(), scope)
 	if err != nil {
 		t.Fatal(err)
@@ -233,7 +215,7 @@ func TestTheStoreIsOpenedWithTheRules(t *testing.T) {
 	commit := core.Commit("0123456789abcdef0123456789abcdef01234567")
 	sub := func(samples uint32) core.Submission {
 		return core.Submission{
-			Context: core.CallContext{Repository: scope.Repository, Task: scope.Task},
+			Context: core.CallContext{Scope: scope},
 			Spec:    core.JobSpec{Commit: commit, Settings: core.MeasureSettings{Samples: samples}},
 			Key:     "measure-key",
 		}
@@ -256,7 +238,7 @@ func TestTheStoreIsOpenedWithTheRules(t *testing.T) {
 func TestFindMakesNothing(t *testing.T) {
 	ctx := context.Background()
 	repo, indexDir := t.TempDir(), t.TempDir()
-	scope := app.Scope{Repository: repo, Task: "typo"}
+	scope := scopeAt(repo, "typo")
 	stores := newStores(t, indexDir)
 	_, err := stores.Find(ctx, scope)
 	var f *core.Failure
@@ -283,7 +265,7 @@ func TestFindMakesNothing(t *testing.T) {
 func TestFindTakesUpAStoreTheIndexLost(t *testing.T) {
 	ctx := context.Background()
 	repo := t.TempDir()
-	scope := app.Scope{Repository: repo, Task: "kv-store"}
+	scope := scopeAt(repo, "kv-store")
 	first := newStores(t, t.TempDir())
 	_, err := first.Create(ctx, scope)
 	must(t, err)
@@ -295,4 +277,13 @@ func TestFindTakesUpAStoreTheIndexLost(t *testing.T) {
 	if known, err := stores.Known(ctx); err != nil || len(known) != 1 {
 		t.Fatalf("Known = %v, %v, want the store found", known, err)
 	}
+}
+
+// scopeAt is the scope of a task in a repository, as the daemon resolves one.
+func scopeAt(repo, task string) core.Scope {
+	s, err := core.ResolvedScope(core.Repository(repo), core.TaskName(task))
+	if err != nil {
+		panic(err)
+	}
+	return s
 }

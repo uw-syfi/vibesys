@@ -30,13 +30,13 @@ type RunID string
 // PlanNumber is a plan's number, assigned by the store. Zero means no plan.
 type PlanNumber uint32
 
-// CallContext identifies who made a call and about what. It fills the envelope of the event the
-// call appends.
+// CallContext identifies who made a call and about what, once the daemon resolved what the caller
+// sent. It fills the envelope of the event the call appends.
 type CallContext struct {
-	// Repository is the absolute path of the git repository the command ran in.
-	Repository string
-	Task       string
-	Run        RunID
+	// Scope is the store the call is about: the task, in the repository the caller's directory
+	// belongs to.
+	Scope Scope
+	Run   RunID
 	// Harness is the agent harness, such as "claude-code".
 	Harness string
 	Agent   string

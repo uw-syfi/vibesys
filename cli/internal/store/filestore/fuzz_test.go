@@ -54,7 +54,7 @@ func FuzzValues(f *testing.F) {
 			ctx := t.Context()
 			var got []answered
 			sub, err := s.Submit(ctx, core.Submission{
-				Context: core.CallContext{Repository: text, Task: text, Harness: text, Agent: text},
+				Context: core.CallContext{Harness: text, Agent: text},
 				Spec:    measureSpec(core.Commit(text)), Key: "k1", Note: &core.Note{Text: text, At: instant, Agent: text}, At: instant,
 			})
 			got = append(got, answer(sub, err))

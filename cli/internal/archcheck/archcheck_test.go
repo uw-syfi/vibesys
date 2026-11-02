@@ -520,3 +520,58 @@ func TestSweepsAreNamedBuiltWithoutRaceAndRunNoGoroutines(t *testing.T) {
 		}
 	}
 }
+
+// A store key is made only where a scope is resolved, or read back from what resolution wrote:
+// product code anywhere else may not name ResolvedScope, however it is written.
+func TestAScopeIsMadeOnlyByResolution(t *testing.T) {
+	flagged := func(files map[string]string) bool {
+		return slices.ContainsFunc(archcheck.Violations(files), func(line string) bool { return strings.Contains(line, "ResolvedScope") })
+	}
+	property := func(pick uint8, repo string) bool {
+		packages := []string{"app", "daemon", "wire", "client", "app/memstores", "store/filestore"}
+		dir := "cli/internal/" + packages[int(pick)%len(packages)]
+		source := "package p\n\nimport \"github.com/uw-syfi/vibesys/cli/internal/core\"\n\nvar _, _ = core.ResolvedScope(" + fmt.Sprintf("%q", repo) + ", \"task\")\n"
+		return flagged(map[string]string{dir + "/a.go": source}) &&
+			!flagged(map[string]string{dir + "/a_test.go": source}) &&
+			!flagged(map[string]string{"cli/internal/app/scope.go": source}) &&
+			!flagged(map[string]string{"cli/internal/core/a.go": source})
+	}
+	if err := quick.Check(property, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The contract's enums are closed sets too, read from the generated code: a switch over a failure
+// kind that leaves one out, with no default, is flagged, and one that names them all is not.
+func TestASwitchOverAContractEnumNamesEveryValue(t *testing.T) {
+	gen := "cli/gen/vibesys/cli/v1/failure.pb.go"
+	source, ok := repositorySources(t)[gen]
+	if !ok {
+		t.Fatalf("%s is not in the tree", gen)
+	}
+	switchOver := func(cases string) map[string]string {
+		return map[string]string{gen: source, "cli/cmd/vibesys-cli/a.go": `package main
+
+import cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+
+func f(k cliv1.FailureKind) int {
+	switch k {
+	case ` + cases + `:
+		return 1
+	}
+	return 4
+}
+`}
+	}
+	all := []string{}
+	for _, v := range []string{"UNSPECIFIED", "INVALID_INPUT", "NOT_FOUND", "CONFLICT", "UNAVAILABLE", "INCOMPATIBLE", "ENVIRONMENT_MISMATCH", "NOT_MEASURED", "INTERNAL"} {
+		all = append(all, "cliv1.FailureKind_FAILURE_KIND_"+v)
+	}
+	if found := archcheck.Violations(switchOver(strings.Join(all, ", "))); hasSwitchViolation(found, "FailureKind") {
+		t.Fatalf("a switch naming every kind was flagged: %v", found)
+	}
+	missing := archcheck.Violations(switchOver(strings.Join(all[:len(all)-1], ", ")))
+	if !hasSwitchViolation(missing, "FAILURE_KIND_INTERNAL") {
+		t.Fatalf("a switch leaving INTERNAL out was not flagged: %v", missing)
+	}
+}

@@ -48,9 +48,13 @@ func (s *Server) bound(ctx context.Context) (context.Context, context.CancelFunc
 	return ctx, func() { detach(); cancel() }
 }
 
-func scopeOf(c *cliv1.CallContext) app.Scope {
-	ctx := wire.ToCallContext(c)
-	return app.Scope{Repository: ctx.Repository, Task: ctx.Task}
+// call resolves the context a request carries: the task is parsed and the caller's directory is
+// resolved to its repository, once, before the request reaches the app.
+func (s *Server) call(ctx context.Context, c *cliv1.CallContext) (core.CallContext, error) {
+	return s.app.Resolve(ctx, app.Caller{
+		Directory: c.GetRepository(), Task: c.GetTask(), Run: core.RunID(c.GetRunId()),
+		Harness: c.GetHarness(), Agent: c.GetAgent(),
+	})
 }
 
 // Hello implements cliv1.DaemonServiceServer.
@@ -101,8 +105,12 @@ func (s *Server) Submit(ctx context.Context, req *cliv1.SubmitRequest) (*cliv1.S
 	if err != nil {
 		return nil, wire.Error(err)
 	}
+	call, err := s.call(ctx, req.GetContext())
+	if err != nil {
+		return nil, wire.Error(err)
+	}
 	out, err := s.app.Submit(ctx, app.SubmitRequest{
-		Context: wire.ToCallContext(req.GetContext()),
+		Context: call,
 		Spec:    spec,
 		NoCache: req.GetNoCache(),
 		Note:    req.GetNote(),
@@ -122,17 +130,46 @@ func (s *Server) Watch(req *cliv1.WatchRequest, stream cliv1.DaemonService_Watch
 	for _, id := range req.GetJobIds() {
 		ids = append(ids, core.JobID(id))
 	}
-	err := s.app.Watch(ctx, scopeOf(req.GetContext()), ids, func(j core.Job) error {
+	call, err := s.call(ctx, req.GetContext())
+	if err != nil {
+		return wire.Error(err)
+	}
+	err = s.app.Watch(ctx, call.Scope, ids, func(j core.Job) error {
 		return stream.Send(&cliv1.WatchResponse{Job: wire.Job(j)})
 	})
 	return wire.Error(err)
+}
+
+// Wait implements cliv1.DaemonServiceServer. The stream ends with the outcome the app decided.
+func (s *Server) Wait(req *cliv1.WaitRequest, stream cliv1.DaemonService_WaitServer) error {
+	ctx, cancel := s.bound(stream.Context())
+	defer cancel()
+	wait, err := wire.ToWaitFor(req)
+	if err != nil {
+		return wire.Error(err)
+	}
+	call, err := s.call(ctx, req.GetContext())
+	if err != nil {
+		return wire.Error(err)
+	}
+	outcome, err := s.app.Wait(ctx, call.Scope, wait, func(j core.Job) error {
+		return stream.Send(&cliv1.WaitResponse{Event: &cliv1.WaitResponse_Job{Job: wire.Job(j)}})
+	})
+	if err != nil {
+		return wire.Error(err)
+	}
+	return wire.Error(stream.Send(&cliv1.WaitResponse{Event: &cliv1.WaitResponse_Outcome{Outcome: wire.WaitOutcome(outcome)}}))
 }
 
 // Cancel implements cliv1.DaemonServiceServer.
 func (s *Server) Cancel(ctx context.Context, req *cliv1.CancelRequest) (*cliv1.CancelResponse, error) {
 	ctx, cancel := s.bound(ctx)
 	defer cancel()
-	job, err := s.app.Cancel(ctx, wire.ToCallContext(req.GetContext()), core.JobID(req.GetJobId()), req.GetReason())
+	call, err := s.call(ctx, req.GetContext())
+	if err != nil {
+		return nil, wire.Error(err)
+	}
+	job, err := s.app.Cancel(ctx, call, core.JobID(req.GetJobId()), req.GetReason())
 	if err != nil {
 		return nil, wire.Error(err)
 	}
@@ -143,7 +180,11 @@ func (s *Server) Cancel(ctx context.Context, req *cliv1.CancelRequest) (*cliv1.C
 func (s *Server) AddNote(ctx context.Context, req *cliv1.AddNoteRequest) (*cliv1.AddNoteResponse, error) {
 	ctx, cancel := s.bound(ctx)
 	defer cancel()
-	job, err := s.app.AddNote(ctx, wire.ToCallContext(req.GetContext()), core.JobID(req.GetJobId()), req.GetText())
+	call, err := s.call(ctx, req.GetContext())
+	if err != nil {
+		return nil, wire.Error(err)
+	}
+	job, err := s.app.AddNote(ctx, call, core.JobID(req.GetJobId()), req.GetText())
 	if err != nil {
 		return nil, wire.Error(err)
 	}
@@ -158,7 +199,11 @@ func (s *Server) ListJobs(ctx context.Context, req *cliv1.ListJobsRequest) (*cli
 	if err != nil {
 		return nil, wire.Error(err)
 	}
-	jobs, err := s.app.Jobs(ctx, scopeOf(req.GetContext()), filter)
+	call, err := s.call(ctx, req.GetContext())
+	if err != nil {
+		return nil, wire.Error(err)
+	}
+	jobs, err := s.app.Jobs(ctx, call.Scope, filter)
 	if err != nil {
 		return nil, wire.Error(err)
 	}
@@ -169,7 +214,11 @@ func (s *Server) ListJobs(ctx context.Context, req *cliv1.ListJobsRequest) (*cli
 func (s *Server) ReadLogs(req *cliv1.ReadLogsRequest, stream cliv1.DaemonService_ReadLogsServer) error {
 	ctx, cancel := s.bound(stream.Context())
 	defer cancel()
-	err := s.app.ReadLogs(ctx, scopeOf(req.GetContext()), core.JobID(req.GetJobId()), req.GetOffset(), req.GetFollow(), func(c core.LogChunk) error {
+	call, err := s.call(ctx, req.GetContext())
+	if err != nil {
+		return wire.Error(err)
+	}
+	err = s.app.ReadLogs(ctx, call.Scope, core.JobID(req.GetJobId()), req.GetOffset(), req.GetFollow(), func(c core.LogChunk) error {
 		return stream.Send(wire.LogChunk(c))
 	})
 	return wire.Error(err)

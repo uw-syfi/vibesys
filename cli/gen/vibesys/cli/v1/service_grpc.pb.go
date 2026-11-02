@@ -24,6 +24,7 @@ const (
 	DaemonService_Stop_FullMethodName             = "/vibesys.cli.v1.DaemonService/Stop"
 	DaemonService_Submit_FullMethodName           = "/vibesys.cli.v1.DaemonService/Submit"
 	DaemonService_Watch_FullMethodName            = "/vibesys.cli.v1.DaemonService/Watch"
+	DaemonService_Wait_FullMethodName             = "/vibesys.cli.v1.DaemonService/Wait"
 	DaemonService_Cancel_FullMethodName           = "/vibesys.cli.v1.DaemonService/Cancel"
 	DaemonService_AddNote_FullMethodName          = "/vibesys.cli.v1.DaemonService/AddNote"
 	DaemonService_ListJobs_FullMethodName         = "/vibesys.cli.v1.DaemonService/ListJobs"
@@ -60,9 +61,13 @@ type DaemonServiceClient interface {
 	// a reusable result.
 	Submit(ctx context.Context, in *SubmitRequest, opts ...grpc.CallOption) (*SubmitResponse, error)
 	// Watch streams the watched jobs' states: first their current states, then each change, and it
-	// ends when all are final. A client implements `wait`, with its `--any` and `--timeout`, over
-	// this stream, so a timeout is only a client closing the stream and never cancels a job.
+	// ends when all are final. It is kept for command lines of protocol 1, which wait over it and
+	// decide the end themselves; a command line of 2 waits through Wait.
 	Watch(ctx context.Context, in *WatchRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchResponse], error)
+	// Wait streams the waited-on jobs' states like Watch, and ends with one WaitOutcome that says how
+	// the wait ended. The daemon decides the outcome, the timeout included, so every client reads the
+	// same answer. `wait` and `submit --wait` use it; a timeout never cancels a job.
+	Wait(ctx context.Context, in *WaitRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WaitResponse], error)
 	// Cancel stops a job, whole process group included, and does so for every waiter on a shared
 	// job. A cancelled measure saves nothing.
 	Cancel(ctx context.Context, in *CancelRequest, opts ...grpc.CallOption) (*CancelResponse, error)
@@ -155,6 +160,25 @@ func (c *daemonServiceClient) Watch(ctx context.Context, in *WatchRequest, opts 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type DaemonService_WatchClient = grpc.ServerStreamingClient[WatchResponse]
 
+func (c *daemonServiceClient) Wait(ctx context.Context, in *WaitRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WaitResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &DaemonService_ServiceDesc.Streams[1], DaemonService_Wait_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[WaitRequest, WaitResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type DaemonService_WaitClient = grpc.ServerStreamingClient[WaitResponse]
+
 func (c *daemonServiceClient) Cancel(ctx context.Context, in *CancelRequest, opts ...grpc.CallOption) (*CancelResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CancelResponse)
@@ -197,7 +221,7 @@ func (c *daemonServiceClient) ForgetRepository(ctx context.Context, in *ForgetRe
 
 func (c *daemonServiceClient) ReadLogs(ctx context.Context, in *ReadLogsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ReadLogsResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &DaemonService_ServiceDesc.Streams[1], DaemonService_ReadLogs_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &DaemonService_ServiceDesc.Streams[2], DaemonService_ReadLogs_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -333,9 +357,13 @@ type DaemonServiceServer interface {
 	// a reusable result.
 	Submit(context.Context, *SubmitRequest) (*SubmitResponse, error)
 	// Watch streams the watched jobs' states: first their current states, then each change, and it
-	// ends when all are final. A client implements `wait`, with its `--any` and `--timeout`, over
-	// this stream, so a timeout is only a client closing the stream and never cancels a job.
+	// ends when all are final. It is kept for command lines of protocol 1, which wait over it and
+	// decide the end themselves; a command line of 2 waits through Wait.
 	Watch(*WatchRequest, grpc.ServerStreamingServer[WatchResponse]) error
+	// Wait streams the waited-on jobs' states like Watch, and ends with one WaitOutcome that says how
+	// the wait ended. The daemon decides the outcome, the timeout included, so every client reads the
+	// same answer. `wait` and `submit --wait` use it; a timeout never cancels a job.
+	Wait(*WaitRequest, grpc.ServerStreamingServer[WaitResponse]) error
 	// Cancel stops a job, whole process group included, and does so for every waiter on a shared
 	// job. A cancelled measure saves nothing.
 	Cancel(context.Context, *CancelRequest) (*CancelResponse, error)
@@ -383,6 +411,9 @@ func (UnimplementedDaemonServiceServer) Submit(context.Context, *SubmitRequest) 
 }
 func (UnimplementedDaemonServiceServer) Watch(*WatchRequest, grpc.ServerStreamingServer[WatchResponse]) error {
 	return status.Error(codes.Unimplemented, "method Watch not implemented")
+}
+func (UnimplementedDaemonServiceServer) Wait(*WaitRequest, grpc.ServerStreamingServer[WaitResponse]) error {
+	return status.Error(codes.Unimplemented, "method Wait not implemented")
 }
 func (UnimplementedDaemonServiceServer) Cancel(context.Context, *CancelRequest) (*CancelResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Cancel not implemented")
@@ -532,6 +563,17 @@ func _DaemonService_Watch_Handler(srv interface{}, stream grpc.ServerStream) err
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type DaemonService_WatchServer = grpc.ServerStreamingServer[WatchResponse]
+
+func _DaemonService_Wait_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(WaitRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(DaemonServiceServer).Wait(m, &grpc.GenericServerStream[WaitRequest, WaitResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type DaemonService_WaitServer = grpc.ServerStreamingServer[WaitResponse]
 
 func _DaemonService_Cancel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CancelRequest)
@@ -880,6 +922,11 @@ var DaemonService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "Watch",
 			Handler:       _DaemonService_Watch_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "Wait",
+			Handler:       _DaemonService_Wait_Handler,
 			ServerStreams: true,
 		},
 		{

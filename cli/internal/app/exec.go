@@ -22,7 +22,7 @@ import (
 // Every request is answered, whatever happens, unless the App closes: an unanswered request would
 // hold the machine for good. SignalCancel is answered only when it did not arrive, as the job's
 // outcome answers it otherwise.
-func (a *App) startEffect(r lifecycle.Request, scopes map[lifecycle.StoreID]Scope, handles map[lifecycle.Ref]supervisor.Handle) {
+func (a *App) startEffect(r lifecycle.Request, scopes map[lifecycle.StoreID]core.Scope, handles map[lifecycle.Ref]supervisor.Handle) {
 	ref, run := a.effectOf(r, scopes, handles)
 	ctx := named(a.ctx, fmt.Sprintf("%T %s", r, ref))
 	a.group.Go(func() { run(ctx) })
@@ -43,7 +43,7 @@ func EffectOf(ctx context.Context) string {
 }
 
 // effectOf returns the effect of a request, bound to what the loop holds now, and the job it is for.
-func (a *App) effectOf(r lifecycle.Request, scopes map[lifecycle.StoreID]Scope, handles map[lifecycle.Ref]supervisor.Handle) (lifecycle.Ref, func(context.Context)) {
+func (a *App) effectOf(r lifecycle.Request, scopes map[lifecycle.StoreID]core.Scope, handles map[lifecycle.Ref]supervisor.Handle) (lifecycle.Ref, func(context.Context)) {
 	switch r := r.(type) {
 	case lifecycle.LaunchRequest:
 		scope, known := scopes[r.Ref.Store]
@@ -73,7 +73,7 @@ func (a *App) effectOf(r lifecycle.Request, scopes map[lifecycle.StoreID]Scope, 
 	panic(fmt.Sprintf("the machine made a request no effect carries out: %T", r))
 }
 
-func hasScope(scopes map[lifecycle.StoreID]Scope, ref lifecycle.Ref) bool {
+func hasScope(scopes map[lifecycle.StoreID]core.Scope, ref lifecycle.Ref) bool {
 	_, ok := scopes[ref.Store]
 	return ok
 }
@@ -180,7 +180,7 @@ func (a *App) call(ctx context.Context, do func(ctx context.Context) error) erro
 }
 
 // findStore finds a store, trying for a bounded time.
-func (a *App) findStore(ctx context.Context, scope Scope) (store.Store, error) {
+func (a *App) findStore(ctx context.Context, scope core.Scope) (store.Store, error) {
 	var st store.Store
 	err := a.retry(ctx, func(ctx context.Context) error {
 		var err error
@@ -243,7 +243,7 @@ func (a *App) record(ctx context.Context, st store.Store, t core.Transition) err
 // starts third, when the machine asks to follow it. A crash before the second step leaves a queued
 // job and a parked supervisor, which the next start discards; a crash after it leaves a running
 // job whose supervisor the next start adopts and starts.
-func (a *App) launch(ctx context.Context, ref lifecycle.Ref, scope Scope, known bool) {
+func (a *App) launch(ctx context.Context, ref lifecycle.Ref, scope core.Scope, known bool) {
 	if !known {
 		a.tell(lifecycle.LaunchFailed{Ref: ref, Cause: lifecycle.CauseRefused, Failure: *errNoScope, At: a.now()})
 		return
@@ -266,7 +266,7 @@ func (a *App) launch(ctx context.Context, ref lifecycle.Ref, scope Scope, known 
 // prepare does the steps of a launch up to and including recording the job as running. gone says
 // the job is not queued any more, so there is nothing to launch. A failure can leave a parked
 // supervisor, which the handle reaches and the job's end releases.
-func (a *App) prepare(ctx context.Context, ref lifecycle.Ref, scope Scope) (h supervisor.Handle, gone bool, err error) {
+func (a *App) prepare(ctx context.Context, ref lifecycle.Ref, scope core.Scope) (h supervisor.Handle, gone bool, err error) {
 	st, err := a.findStore(ctx, scope)
 	if err != nil {
 		return nil, false, storeError{err}
@@ -287,7 +287,7 @@ func (a *App) prepare(ctx context.Context, ref lifecycle.Ref, scope Scope) (h su
 		spec.Settings = c
 	}
 	env, err := a.cfg.Environments.Environment(spec.Environment, environment.Target{
-		Repository: scope.Repository, Commit: spec.Commit, Task: scope.Task,
+		Repository: string(scope.Repository()), Commit: spec.Commit, Task: string(scope.Task()),
 	})
 	if err != nil {
 		return nil, false, err
@@ -296,7 +296,7 @@ func (a *App) prepare(ctx context.Context, ref lifecycle.Ref, scope Scope) (h su
 	if err != nil {
 		return nil, false, err
 	}
-	launch := lifecycle.Launch{Repository: scope.Repository, Task: scope.Task, Job: job.ID, Spec: spec}
+	launch := lifecycle.Launch{Repository: string(scope.Repository()), Task: string(scope.Task()), Job: job.ID, Spec: spec}
 	if spec.Settings.Kind() != core.JobCommand {
 		plan, err := a.planFlow(ctx, st, scope, job, fingerprint)
 		if err != nil {
@@ -326,7 +326,7 @@ func (a *App) prepare(ctx context.Context, ref lifecycle.Ref, scope Scope) (h su
 // the store holds, so no byte is lost or stored twice, and the attempts count from the last time
 // output reached the store. What cannot be fixed that way ends in FollowFailed. A cancel goes first:
 // it needs only the supervisor, and a store that is away must not hold it back.
-func (a *App) follow(ctx context.Context, r lifecycle.Adopt, scope Scope, h supervisor.Handle) {
+func (a *App) follow(ctx context.Context, r lifecycle.Adopt, scope core.Scope, h supervisor.Handle) {
 	if h == nil {
 		a.tell(lifecycle.FollowFailed{Ref: r.Ref, Cause: lifecycle.CauseSupervisorSilent, Failure: *errNoHandle, At: a.now()})
 		return
@@ -517,7 +517,7 @@ func (a *App) stopJob(ctx context.Context, r lifecycle.Stop, h supervisor.Handle
 // the job final sees the line, then the transition, then the release of the supervisor. The job
 // stays in the machine until the end is recorded. The supervisor is kept until then too, since it
 // holds the outcome. A release that fails after that loses nothing: the next start clears the run.
-func (a *App) move(ctx context.Context, m lifecycle.Move, scope Scope, known bool, h supervisor.Handle) {
+func (a *App) move(ctx context.Context, m lifecycle.Move, scope core.Scope, known bool, h supervisor.Handle) {
 	err := error(errNoScope)
 	if known {
 		err = a.moveInStore(ctx, m, scope)
@@ -539,7 +539,7 @@ func (a *App) move(ctx context.Context, m lifecycle.Move, scope Scope, known boo
 	a.tell(lifecycle.Closed{Ref: m.Ref})
 }
 
-func (a *App) moveInStore(ctx context.Context, m lifecycle.Move, scope Scope) error {
+func (a *App) moveInStore(ctx context.Context, m lifecycle.Move, scope core.Scope) error {
 	st, err := a.findStore(ctx, scope)
 	if err != nil {
 		return err
@@ -625,7 +625,7 @@ func (a *App) armRetry(ctx context.Context, ref lifecycle.Ref) {
 }
 
 // reexamine looks again at a job in doubt.
-func (a *App) reexamine(ctx context.Context, ref lifecycle.Ref, scope Scope, known bool) {
+func (a *App) reexamine(ctx context.Context, ref lifecycle.Ref, scope core.Scope, known bool) {
 	run := a.look(ctx, ref)
 	if !known {
 		scope, known = scopeOfRun(run)
@@ -686,18 +686,9 @@ func handleOf(run supervisor.Run) supervisor.Handle {
 	return nil
 }
 
-// scopeOfRun is the store a run says it belongs to, when its record is its own.
-func scopeOfRun(run supervisor.Run) (Scope, bool) {
-	l, ok := run.Started()
-	if !ok || l.Ref() != run.Job() {
-		return Scope{}, false
-	}
-	return Scope{Repository: l.Repository, Task: l.Task}, true
-}
-
 // lookInStore says what a store has of a job, whose run was found as presence. It makes nothing: a
 // store that is not there is away, as this is only asked of a job that had one.
-func (a *App) lookInStore(ctx context.Context, ref lifecycle.Ref, scope Scope, presence lifecycle.Presence) lifecycle.Finding {
+func (a *App) lookInStore(ctx context.Context, ref lifecycle.Ref, scope core.Scope, presence lifecycle.Presence) lifecycle.Finding {
 	st, err := a.cfg.Stores.Find(ctx, scope)
 	if err != nil {
 		return lifecycle.StoreAway{}
@@ -723,7 +714,7 @@ func (a *App) lookInStore(ctx context.Context, ref lifecycle.Ref, scope Scope, p
 // jobIn is what a store has of a job, whose run was found as presence, given the jobs the store gave
 // up. A running job the user gave up is given up only when no run of it is found here: a run found
 // here is this daemon's, so the job is taken back first.
-func (a *App) jobIn(ctx context.Context, scope Scope, job core.Job, presence lifecycle.Presence, given []core.JobID) lifecycle.JobIn {
+func (a *App) jobIn(ctx context.Context, scope core.Scope, job core.Job, presence lifecycle.Presence, given []core.JobID) lifecycle.JobIn {
 	in := lifecycle.JobIn{State: job.State, SubmittedAt: job.SubmittedAt}
 	if job.State != core.JobRunning || !slices.Contains(given, job.ID) {
 		return in

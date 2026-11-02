@@ -96,3 +96,21 @@ func (i Immediate) Timeout(_ context.Context, d time.Duration) (<-chan struct{},
 	}
 	return fired, func() {}
 }
+
+// Exactly is Timers for a test about one timeout: a timeout of exactly D fires at once, and every
+// other goes to Others. So a test can end a wait it asked for a time no other wait of the system
+// asks for, and leave the rest as they are.
+type Exactly struct {
+	D      time.Duration
+	Others Timers
+}
+
+// Timeout implements Timers.
+func (e Exactly) Timeout(ctx context.Context, d time.Duration) (<-chan struct{}, func()) {
+	if d != e.D {
+		return e.Others.Timeout(ctx, d)
+	}
+	fired := make(chan struct{})
+	close(fired)
+	return fired, func() {}
+}

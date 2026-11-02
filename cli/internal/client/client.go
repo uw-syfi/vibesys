@@ -75,11 +75,17 @@ type Options struct {
 	Starter Starter
 	// Timers makes the timeouts of a client. It defaults to the system's.
 	Timers clock.Timers
+	// Clock measures how much of a wait's timeout is left when it connects again. It defaults to
+	// the system's.
+	Clock clock.Clock
 }
 
 func (o Options) withDefaults() Options {
 	if o.Timers == nil {
 		o.Timers = clock.System{}
+	}
+	if o.Clock == nil {
+		o.Clock = clock.System{}
 	}
 	return o
 }
@@ -239,7 +245,7 @@ func dial(ctx context.Context, opts Options) (*Client, cliv1.Compatibility, erro
 	c := &Client{opts: opts, conn: conn, rpc: cliv1.NewDaemonServiceClient(conn)}
 	resp, err := c.rpc.Hello(ctx, &cliv1.HelloRequest{
 		Component: cliv1.Component_COMPONENT_CLI,
-		Versions:  wire.CurrentVersions(opts.Version),
+		Versions:  wire.ClientVersions(opts.Version),
 	})
 	if err != nil {
 		conn.Close()
@@ -276,6 +282,11 @@ func (c *Client) Close() error { return c.conn.Close() }
 func (c *Client) fail(err error) error {
 	if err == nil {
 		return nil
+	}
+	// A failure the daemon sent is kept as it came, so a kind this build does not know is reported
+	// as the daemon's and not as one of ours.
+	if r := wire.ReceivedOf(err); r != nil {
+		return r
 	}
 	if f, ok := wire.FailureOf(err); ok {
 		return &f

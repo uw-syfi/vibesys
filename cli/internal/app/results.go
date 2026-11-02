@@ -11,13 +11,13 @@ import (
 
 // taskStore is a task's store with the scope it was found for.
 type taskStore struct {
-	scope Scope
+	scope core.Scope
 	store store.Store
 }
 
 // openTask finds the store of the scope and makes none: results are only ever read from a store a
 // submission made.
-func (a *App) openTask(ctx context.Context, scope Scope) (taskStore, error) {
+func (a *App) openTask(ctx context.Context, scope core.Scope) (taskStore, error) {
 	st, err := a.open(ctx, scope)
 	return taskStore{scope: scope, store: st}, err
 }
@@ -28,7 +28,7 @@ const noDeclaredNoise = 0
 
 // Show returns every result saved for a commit, checks and measurements, oldest first. A commit
 // with none is not an error.
-func (a *App) Show(ctx context.Context, scope Scope, commit core.Commit) ([]core.Result, error) {
+func (a *App) Show(ctx context.Context, scope core.Scope, commit core.Commit) ([]core.Result, error) {
 	if !commit.Valid() {
 		return nil, invalid("commit: %q is not a full 40-digit commit id", commit)
 	}
@@ -52,7 +52,7 @@ func (a *App) Compare(ctx context.Context, c core.CallContext, commit, against c
 	if against != "" && !against.Valid() {
 		return core.Comparison{}, invalid("against: %q is not a full 40-digit commit id", against)
 	}
-	t, err := a.openTask(ctx, scopeOf(c))
+	t, err := a.openTask(ctx, c.Scope)
 	if err != nil {
 		return core.Comparison{}, err
 	}
@@ -87,7 +87,7 @@ func (a *App) Promote(ctx context.Context, c core.CallContext, commit core.Commi
 	if !commit.Valid() {
 		return nil, invalid("commit: %q is not a full 40-digit commit id", commit)
 	}
-	t, err := a.openTask(ctx, scopeOf(c))
+	t, err := a.openTask(ctx, c.Scope)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +125,7 @@ func (a *App) Promote(ctx context.Context, c core.CallContext, commit core.Commi
 
 	// A fast-forward is the only move the branch makes, so a commit that does not contain the head
 	// cannot be promoted. This is known before anything is recorded.
-	ahead, err := a.cfg.Branches.IsAncestor(ctx, t.scope.Repository, head, commit)
+	ahead, err := a.cfg.Branches.IsAncestor(ctx, string(t.scope.Repository()), head, commit)
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +160,7 @@ func (a *App) carryOut(ctx context.Context, t taskStore, branch string, approved
 		return err
 	}
 	for range maxPromotionSteps {
-		head, err := a.cfg.Branches.Head(ctx, t.scope.Repository, branch)
+		head, err := a.cfg.Branches.Head(ctx, string(t.scope.Repository()), branch)
 		if err != nil {
 			return fail(err)
 		}
@@ -176,7 +176,7 @@ func (a *App) carryOut(ctx context.Context, t taskStore, branch string, approved
 			recorded = true
 		case core.MoveBranchStep:
 			recorded = true
-			if err := a.cfg.Branches.FastForward(ctx, t.scope.Repository, branch, step.From, step.To); err != nil {
+			if err := a.cfg.Branches.FastForward(ctx, string(t.scope.Repository()), branch, step.From, step.To); err != nil {
 				return fail(err)
 			}
 		case core.PromotionDoneStep:
@@ -195,7 +195,7 @@ func (a *App) carryOut(ctx context.Context, t taskStore, branch string, approved
 // there is none. The number is a measurement of the head with a check, both taken after the head
 // last moved: the cache cannot supply it.
 func (a *App) CurrentResult(ctx context.Context, c core.CallContext) (core.ResultAnswer, error) {
-	t, err := a.openTask(ctx, scopeOf(c))
+	t, err := a.openTask(ctx, c.Scope)
 	if errors.Is(err, store.ErrNoStore) {
 		// A task with no store has promoted nothing.
 		return core.CurrentResultAt("", nil, nil), nil
@@ -242,7 +242,7 @@ func (a *App) branchOf(t taskStore) (string, error) {
 	if a.cfg.Branches == nil {
 		return "", &core.Failure{Kind: core.FailureUnavailable, Message: "this daemon cannot read the result branch"}
 	}
-	return core.ResultBranch(t.scope.Task)
+	return core.ResultBranch(string(t.scope.Task()))
 }
 
 // settledHead returns the commit the result branch is at, after completing a promotion that was
@@ -252,12 +252,12 @@ func (a *App) settledHead(ctx context.Context, t taskStore) (core.Commit, error)
 	if err != nil {
 		return "", err
 	}
-	head, err := a.cfg.Branches.Head(ctx, t.scope.Repository, branch)
+	head, err := a.cfg.Branches.Head(ctx, string(t.scope.Repository()), branch)
 	var f *core.Failure
 	if errors.As(err, &f) && f.Kind == core.FailureNotFound {
 		return "", &core.Failure{Kind: core.FailureNotFound, Message: fmt.Sprintf(
 			"the result branch %s does not exist in %s; create it at the commit the run starts from, with git branch %s <commit>",
-			branch, t.scope.Repository, branch)}
+			branch, string(t.scope.Repository()), branch)}
 	}
 	if err != nil {
 		return "", err
@@ -274,7 +274,7 @@ func (a *App) settledHead(ctx context.Context, t taskStore) (core.Commit, error)
 	if !pending {
 		return head, nil // done, or moved by someone else, and then it is theirs
 	}
-	if err := a.cfg.Branches.FastForward(ctx, t.scope.Repository, branch, move.From, move.To); err != nil {
+	if err := a.cfg.Branches.FastForward(ctx, string(t.scope.Repository()), branch, move.From, move.To); err != nil {
 		return "", err
 	}
 	return move.To, nil
@@ -283,7 +283,7 @@ func (a *App) settledHead(ctx context.Context, t taskStore) (core.Commit, error)
 // settleBranches completes the promotions that were interrupted before the daemon stopped, for
 // every task it knows. A task that cannot be settled now is settled by the first call that looks
 // at its branch, so a failure here is only noted.
-func (a *App) settleBranches(ctx context.Context, scopes []Scope) {
+func (a *App) settleBranches(ctx context.Context, scopes []core.Scope) {
 	if a.cfg.Branches == nil {
 		return
 	}
@@ -297,7 +297,7 @@ func (a *App) settleBranches(ctx context.Context, scopes []Scope) {
 		a.branchMu.Unlock()
 		var f *core.Failure
 		if err != nil && !(errors.As(err, &f) && f.Kind == core.FailureNotFound) {
-			a.cfg.Logf("task %s in %s: completing a promotion: %v", scope.Task, scope.Repository, err)
+			a.cfg.Logf("task %s in %s: completing a promotion: %v", string(scope.Task()), string(scope.Repository()), err)
 		}
 	}
 }

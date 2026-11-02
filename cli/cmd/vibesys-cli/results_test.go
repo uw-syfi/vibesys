@@ -14,7 +14,6 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
-	"github.com/uw-syfi/vibesys/cli/internal/app"
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/store"
@@ -54,7 +53,7 @@ func newResultsCLI(t *testing.T) *resultsCLI {
 	}
 	c.world.Branches.AddBranch("/repo", resultBranch, rev(0))
 	c.git.AddRepo("/repo", revisions)
-	st, err := c.world.Stores.Create(context.Background(), app.Scope{Repository: "/repo", Task: "kv"})
+	st, err := c.world.Stores.Create(context.Background(), scopeAt("/repo", "kv"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +161,7 @@ func TestPromoteFailuresAreTypedErrors(t *testing.T) {
 	}
 
 	r = c.run(withTask("promote", "no-such-rev")...)
-	if r.code != exitFailed || r.stdout != "" || !strings.Contains(r.stderr, "no-such-rev") {
+	if r.code != exitInvalidInput || r.stdout != "" || !strings.Contains(r.stderr, "no-such-rev") {
 		t.Fatalf("promote of an unknown revision: %+v", r)
 	}
 }
@@ -338,5 +337,52 @@ func TestResultCommandsRefuseBadArgumentsBeforeTheDaemon(t *testing.T) {
 	}
 	if c.starter.Calls() != 0 {
 		t.Fatal("an invalid invocation started a daemon")
+	}
+}
+
+// Two worktrees of one repository are one repository to the daemon: a job submitted in either is
+// listed in both, and compare and promote in a linked worktree see the main worktree's results and
+// move its result branch.
+func TestTwoWorktreesOfARepositoryShareItsStore(t *testing.T) {
+	c := newResultsCLI(t)
+	c.git.AddWorktree("/worktrees/feature", "/repo")
+	c.measured(0, level)
+	c.measured(1, win)
+	inMain := c.submit("exit", "0")
+	r := c.run(withTask("submit", "command", "HEAD", "--repo", "/worktrees/feature/sub", "--", "exit", "0")...)
+	mustExit(t, r, exitOK, "submit in the linked worktree")
+	inLinked := strings.Fields(r.stdout)[0]
+	for _, repo := range []string{"/repo", "/worktrees/feature"} {
+		r := c.run(withTask("jobs", "--repo", repo)...)
+		if r.code != exitOK || !strings.Contains(r.stdout, inMain) || !strings.Contains(r.stdout, inLinked) {
+			t.Fatalf("jobs in %s = %+v, want both %s and %s", repo, r, inMain, inLinked)
+		}
+	}
+	r = c.run(withTask("compare", "c1", "--repo", "/worktrees/feature")...)
+	if r.code != exitOK || !strings.Contains(r.stdout, "better") {
+		t.Fatalf("compare in the linked worktree = %+v", r)
+	}
+	mustExit(t, c.run(withTask("promote", "c1", "--repo", "/worktrees/feature")...), exitOK, "promote in the linked worktree")
+	if c.branchAt() != rev(1) {
+		t.Fatalf("the main repository's branch is at %.7s", c.branchAt())
+	}
+}
+
+// A measurement's value is the number compare decides on: the daemon computes it, and the command
+// prints it.
+func TestAMeasurementsValueIsTheMeanCompareUses(t *testing.T) {
+	c := newResultsCLI(t)
+	samples := []float64{3, 1, 2, 10}
+	c.measured(1, samples)
+	r := c.run(withTask("show", "c1", "--json")...)
+	var resp cliv1.ShowResponse
+	if err := protojson.Unmarshal([]byte(r.stdout), &resp); err != nil || len(resp.GetResults()) != 1 {
+		t.Fatalf("show --json = %+v (%v)", r, err)
+	}
+	if got := resp.GetResults()[0].GetMeasure().GetValue(); got != core.Headline(samples) || got != 4 {
+		t.Fatalf("value = %v, want the mean %v", got, core.Headline(samples))
+	}
+	if text := c.run(withTask("show", "c1")...); !strings.Contains(text.stdout, "mean 4 over 4 samples") {
+		t.Fatalf("show = %q lacks the value", text.stdout)
 	}
 }

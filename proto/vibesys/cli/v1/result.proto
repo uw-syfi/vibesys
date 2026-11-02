@@ -40,6 +40,9 @@ message MeasureResult {
   repeated Observation observations = 3;
   // The check pass this measurement relies on, whether it ran in the same job or was reused.
   string check_job_id = 4;
+  // The headline number of the measurement: the aggregate of the samples that compare uses (their
+  // mean). The daemon computes it, so no reader recomputes it.
+  double value = 5;
 }
 
 // Result is one saved outcome of a job. A result is immutable once saved.

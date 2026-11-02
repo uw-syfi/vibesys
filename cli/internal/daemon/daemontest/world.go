@@ -32,6 +32,9 @@ type World struct {
 	Survivors *supervisor.Survivors
 	// Branches are the repositories' result branches.
 	Branches *gitrepo.FakeBranches
+	// Git holds the repositories callers' directories resolve in, for the daemon and for a command
+	// line that runs on this World: AddRepo makes one, AddWorktree a linked worktree of it.
+	Git *gitrepo.Fake
 	// Tasks holds the repositories the daemons read tasks from: Put the files of a commit to give
 	// it a task. A benchmark's `emit` writes into Files, where the job reads its result from.
 	Tasks *task.MemorySource
@@ -47,7 +50,7 @@ func NewWorld(t testing.TB) *World {
 	w := &World{
 		Gates: gates, Env: fakeenv.New(core.EnvironmentHost, gates, fakeenv.WithFiles(files)), Checkouts: &fakeenv.Checkouts{},
 		Stores: memstores.New(app.Rules(task.DefaultSamples)), Survivors: supervisor.NewSurvivors(),
-		Branches: gitrepo.NewFakeBranches(), Tasks: task.NewMemorySource(), Files: files,
+		Branches: gitrepo.NewFakeBranches(), Git: gitrepo.NewFake(), Tasks: task.NewMemorySource(), Files: files,
 	}
 	t.Cleanup(func() {
 		w.Survivors.Close()
@@ -68,7 +71,7 @@ func (w *World) Runtime() daemon.Runtime {
 	facts := core.MachineFacts{HostID: "host-a", OS: "linux", Arch: "amd64", CPUModel: "Test CPU", LogicalCPUs: 8, MemoryBytes: 16 << 30}
 	host := supervisor.Host{Backend: cpu.New(cpu.NewFakeSystem(facts), clk), Files: w.Files, Clock: clk}
 	return daemon.Runtime{
-		Stores: w.Stores, Environments: envs, Branches: w.Branches, Tasks: w.Tasks,
+		Stores: w.Stores, Environments: envs, Branches: w.Branches, Repositories: w.Git, Tasks: w.Tasks,
 		Supervisors: supervisor.NewInProcess(envs, w.Checkouts, w.Survivors).WithHost(host),
 	}
 }

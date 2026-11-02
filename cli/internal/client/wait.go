@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"google.golang.org/protobuf/types/known/durationpb"
+
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/wire"
@@ -15,21 +17,15 @@ import (
 type WaitOptions struct {
 	// Any ends the wait when one job is final, and not when all are.
 	Any bool
-	// Timeout ends the wait after this long. Zero waits as long as it takes. A timeout only
-	// closes the watch; it never cancels a job.
+	// Timeout ends the wait after this long. Zero waits as long as it takes. The daemon keeps the
+	// time and answers TIMED_OUT; a timeout never cancels a job.
 	Timeout time.Duration
 }
 
-// WaitResult is how a wait ended.
+// WaitResult is how a wait ended: the daemon's outcome, as it sent it. The client decides nothing
+// about it; a kind it does not know is for the caller to read as no answer.
 type WaitResult struct {
-	// Jobs holds the last state seen of each job, in the order they were asked for.
-	Jobs []*cliv1.Job
-	// Done says the wait ended because the jobs reached the states it waits for.
-	Done bool
-	// Succeeded says every job that is final succeeded. It is meaningful when Done.
-	Succeeded bool
-	// TimedOut says the wait ended because the timeout fired first.
-	TimedOut bool
+	Outcome *cliv1.WaitOutcome
 }
 
 // ErrEndUnknown says a wait stopped without learning how its jobs ended. It says nothing about the
@@ -44,21 +40,20 @@ const (
 	reconnectLongest  = 30 * time.Second
 )
 
-// Wait blocks on the jobs. It is done over the daemon's watch stream, from the states it reports,
-// so the answer is the same for every caller who waits on a shared job.
+// Wait blocks on the jobs over the daemon's Wait stream, and returns the outcome the daemon
+// decided, so the answer is the same for every caller who waits on a shared job.
 //
 // A stream that breaks says nothing about the jobs: their end is in the store, and the supervisors
 // carry on without the daemon. So Wait connects again, which starts a daemon if none runs, and
-// watches from there. A failure that is not about the input, like a job whose end the daemon
-// cannot record yet, and attempts that run out, are ErrEndUnknown.
+// waits from there, asking for what is left of the timeout as the client's clock measures it. The
+// client's own deadline only bounds the reconnecting: a timeout that passes while no daemon
+// answers is ErrEndUnknown, since no daemon said the jobs were not done. So are a failure that is
+// not about the input, like a job whose end the daemon cannot record yet, attempts that run out,
+// and a stream that ends without an outcome.
 func (c *Client) Wait(ctx context.Context, callCtx *cliv1.CallContext, ids []string, opts WaitOptions) (WaitResult, error) {
-	caller := ctx
-	if opts.Timeout > 0 {
-		var stop func()
-		ctx, stop = clock.Deadline(ctx, c.opts.Timers, opts.Timeout)
-		defer stop()
-	}
-	w := waiter{ids: ids, any: opts.Any, callCtx: callCtx, latest: map[string]*cliv1.Job{}}
+	clk := c.opts.Clock
+	started := clk.Now()
+	remaining := func() time.Duration { return opts.Timeout - clk.Now().Sub(started) }
 	current := c
 	defer func() {
 		if current != c {
@@ -67,101 +62,97 @@ func (c *Client) Wait(ctx context.Context, callCtx *cliv1.CallContext, ids []str
 	}()
 	delay, attempts := reconnectFirst, 0
 	for {
-		res, heard, err := w.watch(ctx, current)
+		req := &cliv1.WaitRequest{Context: callCtx, JobIds: ids, Any: opts.Any}
+		if opts.Timeout > 0 {
+			left := remaining()
+			if left <= 0 {
+				return WaitResult{}, fmt.Errorf("%w: the timeout of %v passed while no daemon answered", ErrEndUnknown, opts.Timeout)
+			}
+			req.Timeout = durationpb.New(left)
+		}
+		outcome, heard, err := wait(ctx, current, req)
 		if heard {
 			delay, attempts = reconnectFirst, 0
 		}
 		switch {
 		case err == nil:
-			return res, nil
-		case caller.Err() != nil:
-			return w.result(), caller.Err()
+			return WaitResult{Outcome: outcome}, nil
 		case ctx.Err() != nil:
-			res := w.result()
-			res.TimedOut = true
-			return res, nil
+			return WaitResult{}, ctx.Err()
 		case !errors.Is(err, errBroken):
-			return w.result(), err
+			return WaitResult{}, err
 		}
-		for {
-			attempts++
-			if opts.Timeout == 0 && attempts >= reconnectAttempts {
-				return w.result(), fmt.Errorf("%w: %w", ErrEndUnknown, err)
-			}
-			if !clock.Sleep(ctx, c.opts.Timers, delay) {
-				break
-			}
-			delay = min(delay*2, reconnectLongest)
-			next, cerr := Connect(ctx, c.opts)
-			if cerr == nil {
-				if current != c {
-					current.Close()
-				}
-				current = next
-				break
-			}
-			if wire.IsIncompatible(cerr) {
-				return w.result(), cerr
-			}
-			err = fmt.Errorf("%w: %w", errBroken, cerr)
+		if err := c.reconnect(ctx, &current, &delay, &attempts, opts, remaining, err); err != nil {
+			return WaitResult{}, err
 		}
 	}
 }
 
-// errBroken marks a watch that ended without saying anything about its jobs.
+// reconnect connects again after a broken stream, with a backoff, and makes current the new
+// connection. It gives up after reconnectAttempts with no timeout, and when the timeout passes
+// with one.
+func (c *Client) reconnect(ctx context.Context, current **Client, delay *time.Duration, attempts *int, opts WaitOptions, remaining func() time.Duration, err error) error {
+	for {
+		*attempts++
+		if opts.Timeout == 0 && *attempts >= reconnectAttempts {
+			return fmt.Errorf("%w: %w", ErrEndUnknown, err)
+		}
+		step := *delay
+		if opts.Timeout > 0 {
+			left := remaining()
+			if left <= 0 {
+				return fmt.Errorf("%w: the timeout of %v passed while no daemon answered: %w", ErrEndUnknown, opts.Timeout, err)
+			}
+			step = min(step, left)
+		}
+		if !clock.Sleep(ctx, c.opts.Timers, step) {
+			return ctx.Err()
+		}
+		*delay = min(*delay*2, reconnectLongest)
+		next, cerr := Connect(ctx, c.opts)
+		if cerr == nil {
+			if *current != c {
+				(*current).Close()
+			}
+			*current = next
+			return nil
+		}
+		if wire.IsIncompatible(cerr) {
+			// A daemon this client cannot talk to says nothing about the jobs either.
+			return fmt.Errorf("%w: %w", ErrEndUnknown, cerr)
+		}
+		err = fmt.Errorf("%w: %w", errBroken, cerr)
+	}
+}
+
+// errBroken marks a wait that ended without saying anything about its jobs.
 var errBroken = errors.New("the connection to the daemon broke")
 
-// waiter is what one Wait has seen, which outlives the streams it watches.
-type waiter struct {
-	ids     []string
-	any     bool
-	callCtx *cliv1.CallContext
-	latest  map[string]*cliv1.Job
-}
-
-func (w *waiter) result() WaitResult {
-	jobs := make([]*cliv1.Job, 0, len(w.ids))
-	for _, id := range w.ids {
-		if j, ok := w.latest[id]; ok {
-			jobs = append(jobs, j)
-		}
-	}
-	return WaitResult{Jobs: jobs}
-}
-
-// watch follows one stream. It returns the result when the jobs got where the wait wants them, and
-// heard says the stream delivered something.
-func (w *waiter) watch(ctx context.Context, c *Client) (res WaitResult, heard bool, err error) {
+// wait follows one Wait stream to its outcome. heard says the stream delivered something.
+func wait(ctx context.Context, c *Client, req *cliv1.WaitRequest) (outcome *cliv1.WaitOutcome, heard bool, err error) {
 	// Leaving early ends the stream.
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	stream, err := c.rpc.Watch(ctx, &cliv1.WatchRequest{Context: w.callCtx, JobIds: w.ids})
+	stream, err := c.rpc.Wait(ctx, req)
 	if err != nil {
-		return WaitResult{}, false, classify(c, err)
+		return nil, false, classify(c, err)
 	}
 	for {
 		resp, err := stream.Recv()
 		if err != nil {
 			if end := streamEnd(c, err); end != nil {
-				return WaitResult{}, heard, classify(c, err)
+				return nil, heard, classify(c, err)
 			}
-			// The daemon ends the stream once every job is final.
-			r := w.result()
-			r.Done, r.Succeeded = wire.Await(r.Jobs, false)
-			return r, heard, nil
+			return nil, heard, fmt.Errorf("%w: the daemon ended the wait without saying how it ended", ErrEndUnknown)
 		}
 		heard = true
-		w.latest[resp.GetJob().GetId()] = resp.GetJob()
-		if r := w.result(); len(r.Jobs) == len(w.ids) {
-			if done, ok := wire.Await(r.Jobs, w.any); done {
-				r.Done, r.Succeeded = true, ok
-				return r, heard, nil
-			}
+		if o := resp.GetOutcome(); o != nil {
+			return o, true, nil
 		}
 	}
 }
 
-// classify says what the end of a watch means for the wait.
+// classify says what the end of a wait means for the caller.
 func classify(c *Client, err error) error {
 	if wire.Broken(err) {
 		return fmt.Errorf("%w: %v", errBroken, err)

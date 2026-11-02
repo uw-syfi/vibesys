@@ -25,8 +25,8 @@ type FileStores struct {
 	// holds up the callers of that store and no other.
 	mu      sync.Mutex
 	closed  bool
-	stores  map[app.Scope]*filestore.Store
-	opening map[app.Scope]*opening
+	stores  map[core.Scope]*filestore.Store
+	opening map[core.Scope]*opening
 }
 
 // opening is one open of a store in progress, which every other caller for the scope waits for.
@@ -44,7 +44,7 @@ var _ app.Stores = (*FileStores)(nil)
 func New(index *filestore.Index, rules store.Rules, owner filestore.Owner, opts ...filestore.Option) *FileStores {
 	return &FileStores{
 		index: index, rules: rules, owner: owner, opts: opts,
-		stores: map[app.Scope]*filestore.Store{}, opening: map[app.Scope]*opening{},
+		stores: map[core.Scope]*filestore.Store{}, opening: map[core.Scope]*opening{},
 	}
 }
 
@@ -63,13 +63,13 @@ func (f *FileStores) Close() error {
 }
 
 // Forget implements app.Stores.
-func (f *FileStores) Forget(_ context.Context, scope app.Scope) error {
+func (f *FileStores) Forget(_ context.Context, scope core.Scope) error {
 	f.drop(scope, nil)
-	return f.index.Remove(filestore.Task{Repository: scope.Repository, Name: scope.Task})
+	return f.index.Remove(filestore.Task{Repository: string(scope.Repository()), Name: string(scope.Task())})
 }
 
 // drop gives up the store of a scope, if it is still the one a caller saw.
-func (f *FileStores) drop(scope app.Scope, seen *filestore.Store) {
+func (f *FileStores) drop(scope core.Scope, seen *filestore.Store) {
 	f.mu.Lock()
 	s, ok := f.stores[scope]
 	if ok && (seen == nil || s == seen) {
@@ -84,7 +84,7 @@ func (f *FileStores) drop(scope app.Scope, seen *filestore.Store) {
 }
 
 // GivenUp implements app.Stores.
-func (f *FileStores) GivenUp(ctx context.Context, scope app.Scope) ([]core.JobID, error) {
+func (f *FileStores) GivenUp(ctx context.Context, scope core.Scope) ([]core.JobID, error) {
 	s, err := f.get(ctx, scope, false)
 	if err != nil {
 		return nil, err
@@ -93,7 +93,7 @@ func (f *FileStores) GivenUp(ctx context.Context, scope app.Scope) ([]core.JobID
 }
 
 // Reclaim implements app.Stores.
-func (f *FileStores) Reclaim(ctx context.Context, scope app.Scope, job core.JobID) error {
+func (f *FileStores) Reclaim(ctx context.Context, scope core.Scope, job core.JobID) error {
 	s, err := f.get(ctx, scope, false)
 	if err != nil {
 		return err
@@ -103,7 +103,7 @@ func (f *FileStores) Reclaim(ctx context.Context, scope app.Scope, job core.JobI
 
 // Find implements app.Stores. A store is opened once and then shared, since opening it makes this
 // process its one owner. A store on disk that the index lost is taken up again.
-func (f *FileStores) Find(ctx context.Context, scope app.Scope) (store.Store, error) {
+func (f *FileStores) Find(ctx context.Context, scope core.Scope) (store.Store, error) {
 	return asStore(f.get(ctx, scope, false))
 }
 
@@ -120,15 +120,12 @@ func asStore(s *filestore.Store, err error) (store.Store, error) {
 // The store is made before the index records it. A crash between the two leaves a store with no
 // jobs and no entry, which loses nothing, and the next call records it. So a store the index has
 // was made: if it is missing, its disk is away, and it is not made again over the mount point.
-func (f *FileStores) Create(ctx context.Context, scope app.Scope) (store.Store, error) {
+func (f *FileStores) Create(ctx context.Context, scope core.Scope) (store.Store, error) {
 	return asStore(f.get(ctx, scope, true))
 }
 
-func (f *FileStores) get(ctx context.Context, scope app.Scope, create bool) (*filestore.Store, error) {
+func (f *FileStores) get(ctx context.Context, scope core.Scope, create bool) (*filestore.Store, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
 	for {
@@ -177,7 +174,7 @@ func (f *FileStores) get(ctx context.Context, scope app.Scope, create bool) (*fi
 var errClosed = store.Mark(&core.Failure{Kind: core.FailureUnavailable, Message: "the daemon has given up its stores"}, store.ErrAway)
 
 // open does the work of one opening, with no lock held.
-func (f *FileStores) open(scope app.Scope, create bool, op *opening) {
+func (f *FileStores) open(scope core.Scope, create bool, op *opening) {
 	s, err := f.openTask(scope, create)
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -194,8 +191,8 @@ func (f *FileStores) open(scope app.Scope, create bool, op *opening) {
 	close(op.done)
 }
 
-func (f *FileStores) openTask(scope app.Scope, create bool) (*filestore.Store, error) {
-	task := filestore.Task{Repository: scope.Repository, Name: scope.Task}
+func (f *FileStores) openTask(scope core.Scope, create bool) (*filestore.Store, error) {
+	task := filestore.Task{Repository: string(scope.Repository()), Name: string(scope.Task())}
 	entry, err := f.index.Entry(task)
 	if err != nil {
 		return nil, err
@@ -207,13 +204,13 @@ func (f *FileStores) openTask(scope app.Scope, create bool) (*filestore.Store, e
 	case !create:
 		opts = append(opts, filestore.LookOnly())
 	}
-	s, err := filestore.OpenTask(scope.Repository, scope.Task, opts...)
+	s, err := filestore.OpenTask(string(scope.Repository()), string(scope.Task()), opts...)
 	if err != nil {
 		return nil, err
 	}
 	if err := f.index.Add(task); err != nil {
 		_ = s.Close()
-		return nil, fmt.Errorf("recording the store of task %s in %s: %w", scope.Task, scope.Repository, err)
+		return nil, fmt.Errorf("recording the store of task %s in %s: %w", string(scope.Task()), string(scope.Repository()), err)
 	}
 	return s, nil
 }
@@ -221,14 +218,19 @@ func (f *FileStores) openTask(scope app.Scope, create bool) (*filestore.Store, e
 // Known implements app.Stores. It returns every task the index has, whether or not its repository
 // is there now: a repository that is away is what recovery must know of, to hold the runs of that
 // store until it returns. Find says whether a store can be reached.
-func (f *FileStores) Known(context.Context) ([]app.Scope, error) {
+func (f *FileStores) Known(context.Context) ([]core.Scope, error) {
 	tasks, err := f.index.Tasks()
 	if err != nil {
 		return nil, err
 	}
-	out := make([]app.Scope, 0, len(tasks))
+	out := make([]core.Scope, 0, len(tasks))
 	for _, t := range tasks {
-		out = append(out, app.Scope{Repository: t.Repository, Task: t.Name})
+		// The index records only scopes the daemon resolved, so each is read back as one.
+		scope, err := core.ResolvedScope(core.Repository(t.Repository), core.TaskName(t.Name))
+		if err != nil {
+			return nil, fmt.Errorf("the index records %s/%s, which is not a store's scope: %w", t.Repository, t.Name, err)
+		}
+		out = append(out, scope)
 	}
 	return out, nil
 }

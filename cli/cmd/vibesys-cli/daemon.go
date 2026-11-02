@@ -33,7 +33,7 @@ func daemonCommand(ctx context.Context, d deps, args []string) int {
 	case "run":
 		return daemonRun(ctx, d)
 	case "install":
-		return fail(d, d.jsonErrors, &unavailable{"daemon install is not available in this build; the daemon starts when a command needs it"})
+		return fail(d, d.jsonErrors, usagef("daemon install is not available in this build; the daemon starts when a command needs it"))
 	default:
 		return fail(d, d.jsonErrors, usagef("daemon: %q is not a daemon command (status, stop, restart or forget)", args[0]))
 	}
@@ -55,8 +55,12 @@ func daemonStatus(ctx context.Context, d deps, args []string) int {
 	}
 	cl, err := dialExisting(ctx, d)
 	if err == client.ErrNoDaemon {
+		// No daemon is no answer, and with --json it is the Failure that says so.
+		if c.json {
+			return fail(d, true, err)
+		}
 		fmt.Fprintln(d.stdout, "not running")
-		return exitFailed
+		return exitNoAnswer
 	}
 	if err != nil {
 		return fail(d, c.json, err)

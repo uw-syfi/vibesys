@@ -35,7 +35,7 @@ func taskWithAJob(t *testing.T, a *app.App, c core.CallContext) {
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
-	s := app.Scope{Repository: c.Repository, Task: c.Task}
+	s := scopeAt(string(c.Scope.Repository()), string(c.Scope.Task()))
 	err = a.Watch(ctxFor(t), s, []core.JobID{out.Job.ID}, func(j core.Job) error {
 		if j.State.Final() {
 			return errDone
@@ -269,7 +269,7 @@ func TestPlansBelongToATask(t *testing.T) {
 	a := newPlanApp(t)
 	ctx := ctxFor(t)
 	other := call
-	other.Task = "other"
+	other.Scope = scopeAt("/repo", "other")
 	taskWithAJob(t, a, other)
 	if _, err := a.CreatePlan(ctx, call, "mine", ""); err != nil {
 		t.Fatal(err)

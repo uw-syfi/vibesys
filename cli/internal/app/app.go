@@ -47,7 +47,7 @@ type App struct {
 type message struct {
 	event lifecycle.Event
 	// scope, when set, is the scope of the store the event's job is in.
-	scope *Scope
+	scope *core.Scope
 	// handle, when set, reaches the event's job's supervisor.
 	handle supervisor.Handle
 	// then, when set, is a goroutine to start after the event. It goes through the loop so that
@@ -69,7 +69,7 @@ type view struct {
 	// held is the jobs the machine holds.
 	held map[lifecycle.Ref]bool
 	// unread is the stores whose jobs the machine has not read.
-	unread []Scope
+	unread []core.Scope
 }
 
 // New returns an App that is recovering: it launches nothing until Start has told it what the
@@ -130,7 +130,7 @@ func (a *App) tell(e lifecycle.Event) bool { return a.post(message{event: e}) }
 // loop is the only place the machine steps.
 func (a *App) loop() {
 	state := lifecycle.Recovering()
-	scopes := map[lifecycle.StoreID]Scope{}
+	scopes := map[lifecycle.StoreID]core.Scope{}
 	handles := map[lifecycle.Ref]supervisor.Handle{}
 	defer func() {
 		for _, h := range handles {
@@ -241,7 +241,7 @@ func refOf(e lifecycle.Event) (lifecycle.Ref, bool) {
 }
 
 // publish makes the machine's state readable, and wakes whoever new trouble concerns.
-func (a *App) publish(s lifecycle.State, scopes map[lifecycle.StoreID]Scope, changed bool) {
+func (a *App) publish(s lifecycle.State, scopes map[lifecycle.StoreID]core.Scope, changed bool) {
 	next := &view{trouble: map[lifecycle.Ref]core.Failure{}, waits: map[lifecycle.Ref]core.Failure{}, held: map[lifecycle.Ref]bool{}}
 	next.queued, next.running = s.Counts()
 	for _, t := range s.Troubled() {

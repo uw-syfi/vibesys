@@ -131,36 +131,6 @@ func TestACancelWithNoReasonIsStillACancel(t *testing.T) {
 	}
 }
 
-func TestAwaitIsOverWhenTheJobsItWaitsForAreFinal(t *testing.T) {
-	w := newWorld(t, 2, 1)
-	all := core.JobStates()
-	for range 2000 {
-		n := 1 + w.r.IntN(5)
-		states := make([]core.JobState, n)
-		finals, successes := 0, 0
-		for i := range states {
-			states[i] = all[w.r.IntN(len(all))]
-			if states[i].Final() {
-				finals++
-				if states[i] == core.JobSucceeded {
-					successes++
-				}
-			}
-		}
-		done, ok := lifecycle.Await(states, false)
-		if done != (finals == n) {
-			t.Fatalf("wait for all %v: done = %v", states, done)
-		}
-		doneAny, okAny := lifecycle.Await(states, true)
-		if doneAny != (finals > 0) {
-			t.Fatalf("wait for any %v: done = %v", states, doneAny)
-		}
-		if ok != (successes == finals) || okAny != ok {
-			t.Fatalf("wait %v: succeeded = %v and %v, want %v", states, ok, okAny, successes == finals)
-		}
-	}
-}
-
 // A job that passed saves its result with its success, and a measurement keeps its check pass. A
 // rejected job fails and says why.
 func TestAPassedJobSavesItsResultAndARejectedOneSaysWhy(t *testing.T) {

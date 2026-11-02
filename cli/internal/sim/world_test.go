@@ -24,6 +24,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/daemon"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv"
+	"github.com/uw-syfi/vibesys/cli/internal/gitrepo"
 	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
 	"github.com/uw-syfi/vibesys/cli/internal/owned"
 	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
@@ -55,10 +56,28 @@ func actorOf(ctx context.Context) string {
 }
 
 // scopes are the stores of the simulation: two repositories, one of them with two tasks.
-var scopes = []app.Scope{
-	{Repository: "/repo-a", Task: "t"},
-	{Repository: "/repo-a", Task: "u"},
-	{Repository: "/repo-b", Task: "t"},
+var scopes = []core.Scope{
+	scopeAt("/repo-a", "t"),
+	scopeAt("/repo-a", "u"),
+	scopeAt("/repo-b", "t"),
+}
+
+// scopeAt is the scope of a task in a repository, as the daemon resolves one.
+func scopeAt(repo, task string) core.Scope {
+	s, err := core.ResolvedScope(core.Repository(repo), core.TaskName(task))
+	if err != nil {
+		panic(err)
+	}
+	return s
+}
+
+// simRepositories resolves callers' directories to the simulation's repositories.
+func simRepositories() *gitrepo.Fake {
+	g := gitrepo.NewFake()
+	for _, s := range scopes {
+		g.AddRepo(string(s.Repository()), nil)
+	}
+	return g
 }
 
 // world is what outlives one daemon, and the record of what happened.
@@ -80,7 +99,7 @@ type world struct {
 	checkouts *fakeenv.Checkouts
 	survivors *supervisor.Survivors
 	rules     store.Rules
-	raw       map[app.Scope]store.Store
+	raw       map[core.Scope]store.Store
 
 	mu        sync.Mutex
 	daemon    *incarnation
@@ -97,7 +116,7 @@ type world struct {
 	// forgot says the forget of the lost repository went through, and trying says one is in flight.
 	forgot, trying bool
 	// forgotten are the stores the daemon gave up.
-	forgotten map[app.Scope]bool
+	forgotten map[core.Scope]bool
 	// down says the stores fail every call. Only the driver touches it.
 	down bool
 	// leaving is how many more opens find a store still held by the daemon that died, as the
@@ -107,7 +126,7 @@ type world struct {
 	// vanished are the runs whose place is gone for good, and givenUp the jobs of each store whose
 	// owner record the operator removed, less the ones the daemon took back. Both are guarded by mu.
 	vanished map[lifecycle.Ref]bool
-	givenUp  map[app.Scope][]core.JobID
+	givenUp  map[core.Scope][]core.JobID
 
 	// What happened, for the invariants.
 	killed     map[lifecycle.Ref]bool
@@ -169,12 +188,12 @@ func newWorld(seed uint64) *world {
 		checkouts: &fakeenv.Checkouts{},
 		survivors: supervisor.NewSurvivors(),
 		rules:     app.Rules(5),
-		raw:       map[app.Scope]store.Store{},
+		raw:       map[core.Scope]store.Store{},
 		startLock: startLock{waiting: map[string]chan struct{}{}},
 		follows:   map[lifecycle.Ref]context.CancelCauseFunc{},
 		absent:    map[string]bool{},
-		forgotten: map[app.Scope]bool{},
-		killed:    map[lifecycle.Ref]bool{}, vanished: map[lifecycle.Ref]bool{}, givenUp: map[app.Scope][]core.JobID{}, asked: map[lifecycle.Ref]bool{},
+		forgotten: map[core.Scope]bool{},
+		killed:    map[lifecycle.Ref]bool{}, vanished: map[lifecycle.Ref]bool{}, givenUp: map[core.Scope][]core.JobID{}, asked: map[lifecycle.Ref]bool{},
 		finals: map[lifecycle.Ref]core.JobState{}, flaky: map[lifecycle.Ref]bool{},
 		cancelSeen: map[lifecycle.Ref]*incarnation{}, cancelSent: map[lifecycle.Ref]bool{},
 		probes: map[lifecycle.Ref]int{}, unanswered: map[string]bool{}, seed: seed,
@@ -199,8 +218,8 @@ func (w *world) awayIn(label string) (string, bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	for _, s := range scopes {
-		if w.absent[s.Repository] && strings.Contains(label, s.Repository) {
-			return s.Repository, true
+		if w.absent[string(s.Repository())] && strings.Contains(label, string(s.Repository())) {
+			return string(s.Repository()), true
 		}
 	}
 	return "", false
@@ -234,26 +253,23 @@ type simStores struct {
 
 var _ app.Stores = simStores{}
 
-func (s simStores) Find(ctx context.Context, scope app.Scope) (store.Store, error) {
+func (s simStores) Find(ctx context.Context, scope core.Scope) (store.Store, error) {
 	return s.open(ctx, scope)
 }
 
 // Create is Find: every store of the world was made before the world began.
-func (s simStores) Create(ctx context.Context, scope app.Scope) (store.Store, error) {
+func (s simStores) Create(ctx context.Context, scope core.Scope) (store.Store, error) {
 	return s.open(ctx, scope)
 }
 
-func (s simStores) open(ctx context.Context, scope app.Scope) (store.Store, error) {
-	if err := scope.Validate(); err != nil {
-		return nil, err
-	}
-	return gated(ctx, s.w, s.d, "stores.Open "+scope.Repository+" "+scope.Task, false, func() (store.Store, error) {
+func (s simStores) open(ctx context.Context, scope core.Scope) (store.Store, error) {
+	return gated(ctx, s.w, s.d, "stores.Open "+string(scope.Repository())+" "+string(scope.Task()), false, func() (store.Store, error) {
 		st, ok := s.w.raw[scope]
 		if !ok {
 			return nil, &core.Failure{Kind: core.FailureInvalidInput, Message: "no such store in the simulation"}
 		}
-		if s.w.isAbsent(scope.Repository) {
-			if s.w.isLost(scope.Repository) {
+		if s.w.isAbsent(string(scope.Repository())) {
+			if s.w.isLost(string(scope.Repository())) {
 				return nil, errRemoved
 			}
 			return nil, errAway
@@ -266,16 +282,16 @@ func (s simStores) open(ctx context.Context, scope app.Scope) (store.Store, erro
 }
 
 // Known is as filestores.Known behaves: a repository that is away stays known until it is forgotten.
-func (s simStores) Known(ctx context.Context) ([]app.Scope, error) {
-	return gated(ctx, s.w, s.d, "stores.Known", false, func() ([]app.Scope, error) {
+func (s simStores) Known(ctx context.Context) ([]core.Scope, error) {
+	return gated(ctx, s.w, s.d, "stores.Known", false, func() ([]core.Scope, error) {
 		s.w.mu.Lock()
 		defer s.w.mu.Unlock()
-		return slices.DeleteFunc(slices.Clone(scopes), func(scope app.Scope) bool { return s.w.forgotten[scope] }), nil
+		return slices.DeleteFunc(slices.Clone(scopes), func(scope core.Scope) bool { return s.w.forgotten[scope] }), nil
 	})
 }
 
 // Forget drops a store from what the daemon knows. The world's own copy stays, for the invariants.
-func (s simStores) Forget(_ context.Context, scope app.Scope) error {
+func (s simStores) Forget(_ context.Context, scope core.Scope) error {
 	s.w.mu.Lock()
 	defer s.w.mu.Unlock()
 	s.w.forgotten[scope] = true
@@ -283,7 +299,7 @@ func (s simStores) Forget(_ context.Context, scope app.Scope) error {
 }
 
 // GivenUp is the jobs the operator gave up that the store still has running.
-func (s simStores) GivenUp(ctx context.Context, scope app.Scope) ([]core.JobID, error) {
+func (s simStores) GivenUp(ctx context.Context, scope core.Scope) ([]core.JobID, error) {
 	if _, err := s.open(ctx, scope); err != nil {
 		return nil, err
 	}
@@ -303,7 +319,7 @@ func (s simStores) GivenUp(ctx context.Context, scope app.Scope) ([]core.JobID, 
 }
 
 // Reclaim takes a job back from the operator's give-up.
-func (s simStores) Reclaim(ctx context.Context, scope app.Scope, job core.JobID) error {
+func (s simStores) Reclaim(ctx context.Context, scope core.Scope, job core.JobID) error {
 	if _, err := s.open(ctx, scope); err != nil {
 		return err
 	}
@@ -388,6 +404,7 @@ func (w *world) Start(ctx context.Context) error {
 		Clock: w.clock, Timers: w.timers, Stores: simStores{w, d}, Retry: retryOf(w.profile),
 		Environments: fakeenv.Environments{core.EnvironmentHost: w.env},
 		Supervisors:  gatedSupervisors{supervisor.NewInProcess(fakeenv.Environments{core.EnvironmentHost: w.env}, w.checkouts, w.survivors), w, d},
+		Repositories: simRepositories(),
 	})
 	w.group.Go(func() { w.process(d) })
 	select {
@@ -650,8 +667,8 @@ func (w *world) crash() {
 
 // The records the Fakes keep.
 
-func (w *world) refIn(scope app.Scope, id core.JobID) lifecycle.Ref {
-	return lifecycle.Ref{Store: lifecycle.StoreIDOf(scope.Repository, scope.Task), Job: id}
+func (w *world) refIn(scope core.Scope, id core.JobID) lifecycle.Ref {
+	return lifecycle.Ref{Store: lifecycle.StoreIDOf(string(scope.Repository()), string(scope.Task())), Job: id}
 }
 
 func (w *world) addFollow(ref lifecycle.Ref, sever context.CancelCauseFunc) {
@@ -673,7 +690,7 @@ func (w *world) noteSpawn(ref lifecycle.Ref) {
 }
 
 // noteCancelRead records a cancel call that found its job queued: the daemon has the cancel now.
-func (w *world) noteCancelRead(d *incarnation, scope app.Scope, j core.Job) {
+func (w *world) noteCancelRead(d *incarnation, scope core.Scope, j core.Job) {
 	if j.State != core.JobQueued {
 		return
 	}
@@ -719,7 +736,7 @@ func (w *world) noteStart(d *incarnation, ref lifecycle.Ref) {
 
 // noteAppend counts appends that came with no time between them: output that arrives steadily is
 // batched and not stored line by line.
-func (w *world) noteAppend(scope app.Scope, id core.JobID) {
+func (w *world) noteAppend(scope core.Scope, id core.JobID) {
 	ref := w.refIn(scope, id)
 	w.timers.mu.Lock()
 	now := w.timers.now
@@ -742,7 +759,7 @@ func (w *world) noteRelease(ref lifecycle.Ref) {
 			continue
 		}
 		j, err := w.raw[scope].Job(context.Background(), ref.Job)
-		if err == nil && j.State == core.JobRunning && !w.isForgetting(scope.Repository) {
+		if err == nil && j.State == core.JobRunning && !w.isForgetting(string(scope.Repository())) {
 			w.violate("the supervisor of %s was let go while its job is running", ref)
 		}
 	}
@@ -789,7 +806,7 @@ func (w *world) jobs() []located {
 }
 
 type located struct {
-	scope app.Scope
+	scope core.Scope
 	job   core.Job
 }
 
