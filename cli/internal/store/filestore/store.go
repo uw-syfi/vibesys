@@ -123,7 +123,7 @@ func findStore(c config, root string) error {
 	if errors.Is(err, fs.ErrNotExist) {
 		return store.Mark(&core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf(
 			"the store at %s is not there, and %s says it was made: its disk may not be mounted, and if it was deleted on purpose, run vibesys-cli daemon forget on its repository",
-			root, c.entry)}, store.ErrAway)
+			root, c.entry)}, store.ErrAway, store.ErrGone)
 	}
 	if err != nil {
 		return unavailable(root, err)
@@ -137,8 +137,10 @@ func OpenTask(repository, task string, opts ...Option) (*Store, error) {
 	if err := ledger.CheckName("task", task); err != nil {
 		return nil, err
 	}
-	if _, err := optionsOf(opts).fs.ReadDir(repository); err != nil {
-		return nil, store.Mark(&core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("the repository %s is not there: %v", repository, err)}, store.ErrAway)
+	if _, err := optionsOf(opts).fs.ReadDir(repository); errors.Is(err, fs.ErrNotExist) {
+		return nil, store.Mark(&core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("the repository %s is not there: %v", repository, err)}, store.ErrAway, store.ErrGone)
+	} else if err != nil {
+		return nil, store.Mark(&core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("the repository %s cannot be read: %v", repository, err)}, store.ErrAway)
 	}
 	return Open(taskDir(repository, task), opts...)
 }

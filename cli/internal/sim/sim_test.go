@@ -272,6 +272,9 @@ func (w *world) forget(repo string) {
 			var f *core.Failure
 			switch {
 			case err == nil, errors.As(err, &f) && f.Kind == core.FailureNotFound:
+				w.mu.Lock()
+				w.forgot = true
+				w.mu.Unlock()
 				return ""
 			case f != nil && f.Kind == core.FailureConflict:
 				return fmt.Sprintf("forgetting %s was refused: %v", repo, err)
@@ -279,6 +282,35 @@ func (w *world) forget(repo string) {
 		}
 		return ""
 	})
+}
+
+// forgetAway forgets a repository whose disk does not answer, as an operator who took it for gone
+// would. The daemon cannot tell it is gone, so it must refuse: the repository may be whole, with
+// jobs that run.
+func (w *world) forgetAway(repo string) {
+	w.start("forget-away", func(ctx context.Context) string {
+		c, err := client.Connect(ctx, w.options())
+		if err != nil {
+			return ""
+		}
+		defer c.Close()
+		if _, err := c.ForgetRepository(ctx, repo); err == nil {
+			return fmt.Sprintf("forgot %s, which was only away", repo)
+		}
+		return ""
+	})
+}
+
+// awayNow is a repository that is away now and not lost, if there is one.
+func (w *world) awayNow() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, s := range scopes {
+		if w.absent[s.Repository] && s.Repository != w.lost {
+			return s.Repository
+		}
+	}
+	return ""
 }
 
 // finalWait is what the check after the chaos runs: every job, through a client, to its end.
@@ -352,6 +384,9 @@ func (w *world) actions() []option {
 				w.absent[s.Repository] = true
 			}
 		})
+		if away := w.awayNow(); !p.lost && away != "" {
+			add("forget "+away+", which is only away", func() { w.forgetAway(away) })
+		}
 		add("every repository comes back", func() {
 			w.mu.Lock()
 			defer w.mu.Unlock()
@@ -551,6 +586,14 @@ func countOf(list []string, s string) int {
 
 // finalCheck says what must hold when the world has healed.
 func (w *world) finalCheck() {
+	w.mu.Lock()
+	forgot := w.forgot
+	w.mu.Unlock()
+	// A repository that is gone for good says so, and so the operator's forget goes through; one
+	// that never answers cannot be told gone.
+	if w.profile.forget && w.lost != "" && !w.profile.lostHangs && !forgot {
+		w.violate("%s is gone for good and was not forgotten", w.lost)
+	}
 	all := w.jobs()
 	byToken := map[string]located{}
 	for _, l := range all {

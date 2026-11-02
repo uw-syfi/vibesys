@@ -40,8 +40,19 @@ const (
 var (
 	errInjected = &core.Failure{Kind: core.FailureInternal, Message: "injected failure"}
 	errCrashed  = errors.New("the daemon crashed")
-	errAway     = store.Mark(&core.Failure{Kind: core.FailureUnavailable, Message: "the repository is not there"}, store.ErrAway)
+	errAway     = store.Mark(&core.Failure{Kind: core.FailureUnavailable, Message: "the repository's disk does not answer"}, store.ErrAway)
+	// errRemoved is the lost repository's answer: it was deleted, and its directory is not there.
+	errRemoved = store.Mark(&core.Failure{Kind: core.FailureUnavailable, Message: "the repository is not there"}, store.ErrAway, store.ErrGone)
 )
+
+// awayError is what a call to the store of a repository that is away meets: the lost one was
+// deleted, and any other is on a disk that does not answer now.
+func (w *world) awayError(label string) error {
+	if repo, ok := w.awayIn(label); ok && w.isLost(repo) {
+		return errRemoved
+	}
+	return errAway
+}
 
 // call is one Fake call waiting for the driver.
 type call struct {
@@ -120,7 +131,7 @@ func gated[T any](ctx context.Context, w *world, d *incarnation, label string, w
 	case failBefore:
 		return zero, errInjected
 	case away:
-		return zero, errAway
+		return zero, w.awayError(label)
 	case hang:
 		select {
 		case <-ctx.Done():

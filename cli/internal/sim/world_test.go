@@ -94,6 +94,8 @@ type world struct {
 	// forgetting says an operator asked for the lost repository to be given up, which is the one
 	// thing that lets go of a run whose store shows it running.
 	forgetting bool
+	// forgot says the forget of the lost repository went through.
+	forgot bool
 	// forgotten are the stores the daemon gave up.
 	forgotten map[app.Scope]bool
 	// down says the stores fail every call. Only the driver touches it.
@@ -246,6 +248,9 @@ func (s simStores) open(ctx context.Context, scope app.Scope) (store.Store, erro
 			return nil, &core.Failure{Kind: core.FailureInvalidInput, Message: "no such store in the simulation"}
 		}
 		if s.w.isAbsent(scope.Repository) {
+			if s.w.isLost(scope.Repository) {
+				return nil, errRemoved
+			}
 			return nil, errAway
 		}
 		if s.w.stillLeaving() {
@@ -298,6 +303,12 @@ func (w *world) isForgetting(repo string) bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.forgetting && repo == w.lost
+}
+
+func (w *world) isLost(repo string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return repo == w.lost
 }
 
 func (w *world) isAbsent(repo string) bool {

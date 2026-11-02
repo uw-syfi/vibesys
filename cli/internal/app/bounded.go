@@ -201,11 +201,21 @@ func (a *App) ForgetRepository(ctx context.Context, repository string) (Forgotte
 		return Forgotten{}, &core.Failure{Kind: core.FailureNotFound, Message: fmt.Sprintf("the daemon knows of no repository %s", repository)}
 	}
 	for _, scope := range scopes {
-		if _, err := a.cfg.Stores.Find(ctx, scope); err == nil {
+		_, err := a.cfg.Stores.Find(ctx, scope)
+		switch {
+		case err == nil:
 			return Forgotten{}, &core.Failure{Kind: core.FailureConflict, Message: fmt.Sprintf(
 				"the repository %s is still there, with task %s: only a repository that is gone can be forgotten", repository, scope.Task)}
-		} else if ctx.Err() != nil {
+		case ctx.Err() != nil:
 			return Forgotten{}, ctx.Err()
+		case errors.Is(err, store.ErrNoStore), errors.Is(err, store.ErrGone):
+			// Its place is not there: gone, as far as anyone can tell from here.
+		default:
+			// A store that cannot be reached, or that another daemon holds, may be whole: forgetting
+			// it would let its jobs go for good.
+			return Forgotten{}, &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf(
+				"the repository %s cannot be told gone, as task %s's store answered: %v; forget only a repository whose directory is not there",
+				repository, scope.Task, err)}
 		}
 	}
 	var out Forgotten

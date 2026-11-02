@@ -206,27 +206,34 @@ var errMoved = errors.New("the job moved")
 
 // record applies a transition. A call that failed may have worked, as a reply can be lost, so what
 // counts is the state the store shows afterwards: the end asked for, or any end, is recorded, and
-// a job in a state the transition did not expect is moved on from there.
+// a job in a state the transition did not expect is moved on from there at once, in the same try:
+// a try spent on learning the state would leave a daemon that tries once never moving the job.
 func (a *App) record(ctx context.Context, st store.Store, t core.Transition) error {
 	return a.retry(ctx, func(ctx context.Context) error {
-		_, err := st.Transition(ctx, t)
-		if err == nil {
-			return nil
-		}
-		job, jerr := st.Job(ctx, t.Job)
-		switch {
-		case jerr != nil:
+		// A job has two states that are not final, so following the store twice is enough.
+		for follows := 0; ; follows++ {
+			_, err := st.Transition(ctx, t)
+			if err == nil {
+				return nil
+			}
+			job, jerr := st.Job(ctx, t.Job)
+			switch {
+			case jerr != nil:
+				return err
+			case job.State == t.To || job.State.Final():
+				return nil
+			case job.State != t.From && follows < 2:
+				t.From = job.State
+				continue
+			case job.State != t.From:
+				t.From = job.State
+				return errMoved
+			}
+			if !transient(err) {
+				return errMoved
+			}
 			return err
-		case job.State == t.To || job.State.Final():
-			return nil
-		case job.State != t.From:
-			t.From = job.State
-			return errMoved
 		}
-		if !transient(err) {
-			return errMoved
-		}
-		return err
 	})
 }
 
