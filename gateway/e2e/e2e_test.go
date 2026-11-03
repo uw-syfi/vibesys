@@ -27,7 +27,10 @@ type rig struct {
 	binary string
 	root   string
 	state  string
+	dir    string
 	env    []string
+	// marketplace is the plugin marketplace the orchestrator was given, once the test sets it.
+	marketplace string
 }
 
 func newRig(t *testing.T) *rig {
@@ -60,16 +63,29 @@ func newRig(t *testing.T) *rig {
 	if out, err := exec.Command("uv", "sync", "--frozen", "--quiet", "--project", sidecar).CombinedOutput(); err != nil {
 		t.Fatalf("prepare the sidecar environment: %v\n%s", err, out)
 	}
-	r := &rig{t: t, binary: binary, root: filepath.Join(dir, "r"), state: filepath.Join(dir, "state")}
+	r := &rig{t: t, binary: binary, dir: dir, root: filepath.Join(dir, "r"), state: filepath.Join(dir, "state")}
 	for _, kv := range os.Environ() {
-		if !strings.HasPrefix(kv, "XDG_RUNTIME_DIR=") && !strings.HasPrefix(kv, "VIBESYS_ORCHESTRATOR_") {
+		if !strings.HasPrefix(kv, "XDG_RUNTIME_DIR=") && !strings.HasPrefix(kv, "XDG_STATE_HOME=") && !strings.HasPrefix(kv, "VIBESYS_") {
 			r.env = append(r.env, kv)
 		}
 	}
+	// The runtime directory holds vibesys-cli's socket and the agent socket (whose name carries a
+	// hash of the state directory, so it never meets another orchestrator's). Both live under dir,
+	// so the test touches nothing of the user running it.
 	r.env = append(r.env,
+		"XDG_RUNTIME_DIR="+filepath.Join(dir, "rt"),
+		"XDG_STATE_HOME="+filepath.Join(dir, "xdg-state"),
+		// The scripted sidecar imports its sibling modules as the package e2e of the sidecar project.
+		"PYTHONPATH="+sidecar,
 		"VIBESYS_ORCHESTRATOR_STATE_DIR="+r.state,
 		"VIBESYS_ORCHESTRATOR_SIDECAR=uv run --frozen --quiet --project "+sidecar+" python "+script,
 	)
+	for _, d := range []string{"rt", "xdg-state"} {
+		if err := os.MkdirAll(filepath.Join(dir, d), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r.useMarketplace()
 	t.Cleanup(r.killSidecars)
 	return r
 }

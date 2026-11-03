@@ -21,6 +21,7 @@ The only provider names here are the `Harness` to provider table in `driver.py`.
 | `prompts.py`, `prompts/` | The words sent to the agent for a `Message`, rendered from templates. |
 | `server.py`, `main.py` | The thin shell: gRPC over a Unix socket, a worker thread, process start. |
 | `gen/` | Generated bindings. `./generate.sh` rewrites them. |
+| `e2e/` | The scripted sidecar the end to end tests launch, and the acting peers behind it (see below). Test support; the product never imports it. |
 
 ## The plugin
 
@@ -108,3 +109,21 @@ uv run ruff check . && uv run pytest
 ```
 
 `conformance/` holds the scenarios shared with a Go Fake of this service.
+
+## The scripted sidecar for end to end tests
+
+`e2e/scripted_sidecar.py` is the real sidecar over agentshim's scripted Claude and Codex peers, so
+no model is called. It has two modes, chosen by `VIBESYS_E2E_SCRIPT`:
+
+- `reply` (default): each message gets a canned reply.
+- `act`: each role runs a script (`e2e/scripts.py`) whose steps are real effects, shell commands
+  and the orchestrator's MCP tools, performed through `e2e/host.py`, and the peer's turn mirrors
+  them with their real output. The lead spawns two workers and a judge, workers commit, check and
+  measure with `vibesys-cli`, the judge compares, and the lead promotes and reports. A message
+  beyond a script's steps fails the turn and writes `peer-failure.txt` in the session state
+  directory. `prompts/N.md` and `spawns.json` (argv, provider home, plugin commands; the MCP token
+  is redacted) record what the agent was sent and how it was launched.
+
+`gateway/e2e/desktop_path_test.go` drives this through the desktop path (`desktop_path_e2e` check
+group, CI job `desktop-path`). The scripts are pure generators over a `Machine` protocol, so
+`tests/test_e2e_scripts.py` runs them against a Fake without processes.

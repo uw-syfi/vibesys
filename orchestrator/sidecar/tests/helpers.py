@@ -36,7 +36,9 @@ _root: Path | None = None
 
 def use_plugin_root(root: Path | None) -> None:
     """Make launches built from now on load a plugin from a marketplace written under *root*."""
-    global _root  # noqa: PLW0603 - the fixture's per-test directory; the builders below are plain functions
+    # lint-waiver: LW-997303 [PLW0603]; The fixture's per-test directory is read by the plain builder functions below.
+    # > A class or closure would force every builder in this module to become a method or take the directory as a parameter.
+    global _root  # noqa: PLW0603
     _root = root
 
 

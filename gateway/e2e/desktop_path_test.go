@@ -1,0 +1,418 @@
+//go:build e2e
+
+package e2e
+
+import (
+	"encoding/json"
+	"math"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"reflect"
+	"regexp"
+	"strconv"
+	"strings"
+	"testing"
+)
+
+// useCLI builds vibesys-cli and puts it first on the PATH of everything the rig starts, so the
+// scripted agents call it as a real agent would. Its daemon is the user's one per machine; here
+// that is the rig's own, in the rig's runtime directory, and the test stops it when it ends.
+func (r *rig) useCLI() {
+	r.t.Helper()
+	bin := filepath.Join(r.dir, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		r.t.Fatal(err)
+	}
+	build := exec.Command("go", "build", "-buildvcs=false", "-o", filepath.Join(bin, "vibesys-cli"), "./cmd/vibesys-cli")
+	build.Dir = "../../cli"
+	if out, err := build.CombinedOutput(); err != nil {
+		r.t.Fatalf("build vibesys-cli: %v\n%s", err, out)
+	}
+	r.env = append(r.env, "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	r.t.Cleanup(func() { _ = exec.Command(filepath.Join(bin, "vibesys-cli"), "daemon", "stop").Run() })
+}
+
+// useMarketplace points the orchestrator at this repository's own plugin marketplace, which is
+// what every session loads (the daemon refuses to start a session without one). Nothing is
+// installed: the providers are scripted.
+func (r *rig) useMarketplace() {
+	r.t.Helper()
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	r.marketplace = root
+	r.env = append(r.env, "VIBESYS_ORCHESTRATOR_MARKETPLACE="+root)
+}
+
+// actingAgents makes the scripted sidecars act: each agent runs its role's script instead of
+// answering "reply N".
+func (r *rig) actingAgents() { r.env = append(r.env, "VIBESYS_E2E_SCRIPT=act") }
+
+// session is one launched session's directory under the orchestrator's state.
+type session struct {
+	dir    string
+	launch struct {
+		Plugin struct {
+			Marketplace string `json:"marketplace"`
+			Name        string `json:"name"`
+			Home        string `json:"home"`
+		} `json:"plugin"`
+	}
+}
+
+func (r *rig) sessions() []session {
+	r.t.Helper()
+	dirs, err := filepath.Glob(filepath.Join(r.state, "sessions", "*", "[0-9]*"))
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	var out []session
+	for _, dir := range dirs {
+		s := session{dir: dir}
+		data, err := os.ReadFile(filepath.Join(dir, "launch.json"))
+		if err != nil {
+			r.t.Fatalf("session %s has no launch spec: %v", dir, err)
+		}
+		if err := json.Unmarshal(data, &s.launch); err != nil {
+			r.t.Fatalf("launch spec of %s: %v", dir, err)
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// vibesysCLI runs vibesys-cli in the repository as an operator would, and returns its stdout.
+func (r *rig) vibesysCLI(repository string, args ...string) string {
+	r.t.Helper()
+	cmd := exec.Command(filepath.Join(r.dir, "bin", "vibesys-cli"), append(args, "--task", toyTask)...)
+	cmd.Dir = repository
+	cmd.Env = r.env
+	out, err := cmd.Output()
+	if err != nil {
+		r.t.Fatalf("vibesys-cli %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return string(out)
+}
+
+// measured is the headline number vibesys-cli saved for a commit, or fails if there is none.
+func (r *rig) measured(repository, commit string) float64 {
+	r.t.Helper()
+	var shown struct {
+		Results []struct {
+			Measure *struct {
+				Value float64 `json:"value"`
+			} `json:"measure"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal([]byte(r.vibesysCLI(repository, "show", commit, "--json")), &shown); err != nil {
+		r.t.Fatal(err)
+	}
+	for _, res := range shown.Results {
+		if res.Measure != nil {
+			return res.Measure.Value
+		}
+	}
+	r.t.Fatalf("vibesys-cli has no measurement of %s", commit)
+	return 0
+}
+
+// running reports whether a process exists and has not died (a zombie, which no one has reaped
+// yet, does not run).
+func running(pid int) bool {
+	if data, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat"); err == nil {
+		fields := strings.Fields(string(data[strings.LastIndexByte(string(data), ')')+1:]))
+		return len(fields) > 0 && fields[0] != "Z"
+	}
+	return alive(pid)
+}
+
+// pgids lists the process groups the sidecars recorded for their agents.
+func (r *rig) pgids() []int {
+	files, _ := filepath.Glob(filepath.Join(r.state, "sessions", "*", "[0-9]*", "agent.pgids"))
+	var out []int
+	for _, f := range files {
+		data, _ := os.ReadFile(f)
+		for _, field := range strings.Fields(string(data)) {
+			if n, err := strconv.Atoi(field); err == nil {
+				out = append(out, n)
+			}
+		}
+	}
+	return out
+}
+
+// uiWorld is a running world, as a UI test needs to attach to it.
+type uiWorld struct {
+	// Root and Binary are the daemon's --root and the vibesysd to run client verbs with.
+	Root, Binary string
+	// Env is the environment every process of the world was started with.
+	Env []string
+	// RunID and LeadID name the run, which has reported and not yet been stopped.
+	RunID, LeadID string
+	Repository    string
+}
+
+// observeUI is the hook for the UI observer (the Playwright spec of the desktop app). When set, the
+// test calls it once the lead has reported and before the operator's Stop: the observer attaches
+// to the running world, asserts what the Run screen shows against it, presses Stop in the UI
+// instead of the test doing it, and returns. Nil until the app has a Run screen with Stop.
+var observeUI func(t *testing.T, world uiWorld)
+
+func TestTheDesktopPathRunsAnOptimizationEndToEnd(t *testing.T) {
+	r := newRig(t)
+	r.useCLI()
+	r.actingAgents()
+	repository := newToy(t, r.dir)
+
+	r.serve()
+	const steering = "Prefer Codex workers for volume."
+	started := r.receipt("run", "start", "--repository", repository.path, "--task", toyTask, "--brief", steering)
+	if started.RunID == "" || started.AgentID == "" {
+		t.Fatalf("run start printed no run and lead: %+v", started)
+	}
+	w := newWorld()
+	w.last = started.Sequence - 1
+	r.observe("the lead's report", w, func() bool { return w.report() != "" })
+
+	// The lead and two or more subagents ran, on both harnesses, and the lead's own harness is
+	// not the only one.
+	lead := w.agents[started.AgentID]
+	workers := w.agentsWhere(func(a *agentView) bool { return a.Role == "AGENT_ROLE_WORKER" })
+	judges := w.agentsWhere(func(a *agentView) bool { return a.Role == "AGENT_ROLE_JUDGE" })
+	if lead == nil || len(workers) != 2 || len(judges) != 1 {
+		t.Fatalf("want a lead, two workers and a judge, got %d agents: %+v", len(w.agents), w.agents)
+	}
+	harnesses := map[string]string{} // plan number to harness
+	for _, a := range workers {
+		if a.Parent != lead.ID {
+			t.Errorf("worker %s is not a subagent of the lead %s", a.ID, lead.ID)
+		}
+		harnesses[strconv.Itoa(a.Plan)] = a.Harness
+	}
+	if lead.Harness != "HARNESS_CLAUDE_CODE" || harnesses["1"] != "HARNESS_CLAUDE_CODE" || harnesses["2"] != "HARNESS_CODEX" || judges[0].Harness != "HARNESS_CLAUDE_CODE" {
+		t.Errorf("harnesses: lead %s, workers by plan %v, judge %s", lead.Harness, harnesses, judges[0].Harness)
+	}
+
+	// Every session loaded the vibesys plugin from the marketplace, in a home of its agent's own.
+	homes := map[string]string{} // plugin home to the agent directory that owns it
+	for _, sess := range r.sessions() {
+		p := sess.launch.Plugin
+		if p.Name != "vibesys" || p.Marketplace != r.marketplace || p.Home == "" {
+			t.Errorf("session %s launched with plugin %+v, want vibesys from %s with a home", sess.dir, p, r.marketplace)
+		}
+		agentDir := filepath.Dir(sess.dir)
+		if owner, ok := homes[p.Home]; ok && owner != agentDir {
+			t.Errorf("agents %s and %s share the plugin home %s", owner, agentDir, p.Home)
+		}
+		homes[p.Home] = agentDir
+		r.checkProviderLoadsOnlyThePlugin(sess)
+		if data, err := os.ReadFile(filepath.Join(sess.dir, "peer-failure.txt")); err == nil {
+			t.Errorf("a scripted agent broke off: %s", data)
+		}
+	}
+	if len(homes) != len(w.agents) {
+		t.Errorf("want one plugin home per agent (%d), got %d: %v", len(w.agents), len(homes), homes)
+	}
+
+	// The lead's first message was the rendered lead brief, with this run's values.
+	leadDir := filepath.Join(r.state, "sessions", sessionDirOf(r, started.AgentID), "1")
+	brief, err := os.ReadFile(filepath.Join(leadDir, "prompts", "1.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"vibesys:optimize", "`" + toyTask + "`", "--fanout " + strconv.Itoa(w.run.FanoutLimit), steering} {
+		if !strings.Contains(string(brief), want) {
+			t.Errorf("the lead's first message lacks %q:\n%s", want, brief)
+		}
+	}
+
+	// The lead was woken once for each handoff, and no more.
+	if prompts, _ := filepath.Glob(filepath.Join(leadDir, "prompts", "*.md")); len(prompts) != 4 {
+		t.Errorf("the lead was sent %d messages (a brief and three handoffs expected): %v", len(prompts), prompts)
+	}
+
+	// Each worker's commit was measured by vibesys-cli and the number is the worker's score; the
+	// lead promoted the better one, and the number it reported is the one the CLI has for the head.
+	commits := map[int]string{}
+	for _, m := range w.messages {
+		if m.Handoff == nil || m.Handoff.Commit == "" {
+			continue
+		}
+		sender := w.agents[m.From]
+		if sender == nil || sender.Role != "AGENT_ROLE_WORKER" || sender.Plan != m.Handoff.PlanNumber || m.To != lead.ID {
+			t.Errorf("handoff %+v is not a worker's own to the lead (sender %+v)", m.Handoff, sender)
+		}
+		commits[m.Handoff.PlanNumber] = m.Handoff.Commit
+	}
+	scores := map[int]float64{1: 14, 2: 17}
+	for plan, score := range scores {
+		got := r.measured(repository.path, commits[plan])
+		// Three samples report score+0.00, +0.01 and +0.02.
+		if math.Abs(got-(score+0.01)) > 1e-9 {
+			t.Errorf("plan %d: vibesys-cli measured %v for %s, want %v", plan, got, commits[plan], score+0.01)
+		}
+	}
+	var current struct {
+		Current struct {
+			Head   string `json:"head"`
+			Result struct {
+				Measure struct {
+					Value float64 `json:"value"`
+				} `json:"measure"`
+			} `json:"result"`
+		} `json:"current"`
+	}
+	if err := json.Unmarshal([]byte(r.vibesysCLI(repository.path, "result", "--json")), &current); err != nil {
+		t.Fatal(err)
+	}
+	if current.Current.Head != commits[2] {
+		t.Errorf("the result branch is at %s, want the Codex worker's %s", current.Current.Head, commits[2])
+	}
+	reported := regexp.MustCompile(`^best score ([0-9.]+) at ([0-9a-f]{40})$`).FindStringSubmatch(w.report())
+	if reported == nil {
+		t.Fatalf("the lead's report headline %q is not 'best score N at COMMIT'", w.report())
+	}
+	if value, _ := strconv.ParseFloat(reported[1], 64); value != current.Current.Result.Measure.Value || reported[2] != current.Current.Head {
+		t.Errorf("the report says %s at %s, vibesys-cli says %v at %s", reported[1], reported[2], current.Current.Result.Measure.Value, current.Current.Head)
+	}
+
+	t.Logf("run %s: lead %s, workers %s (plan %s) and %s (plan %s), judge %s",
+		started.RunID, lead.ID, workers[0].ID, strconv.Itoa(workers[0].Plan), workers[1].ID, strconv.Itoa(workers[1].Plan), judges[0].ID)
+	t.Logf("result branch at %s with score %v; the lead reported %q", current.Current.Head, current.Current.Result.Measure.Value, w.report())
+
+	if observeUI != nil {
+		observeUI(t, uiWorld{Root: r.root, Binary: r.binary, Env: r.env, RunID: started.RunID, LeadID: started.AgentID, Repository: repository.path})
+	}
+
+	// Stop ends the run: every agent ended, and the agent process groups the sidecars recorded
+	// are gone. A sidecar whose session closed stays up for a while so the daemon can read the
+	// close, then exits by itself (vs_sidecar.main.LINGER_SECONDS), so it is not asserted dead;
+	// what is asserted is that none of them still holds an agent. The jobs vibesys-cli ran for the
+	// scripted agents were all awaited by them, so none is left queued or running.
+	pgids := r.pgids()
+	if observeUI == nil {
+		r.client("run", "stop", started.RunID)
+	}
+	r.observe("the run ended", w, func() bool { return w.run.Status == "RUN_STATUS_ENDED" })
+	for _, a := range w.agents {
+		if a.Status != "AGENT_STATUS_ENDED" {
+			t.Errorf("agent %s (%s) is %s after Stop", a.ID, a.Role, a.Status)
+		}
+	}
+	for _, pgid := range pgids {
+		if running(pgid) {
+			t.Errorf("agent process group %d still runs after Stop", pgid)
+		}
+	}
+	if left := r.pgids(); len(left) != 0 {
+		t.Errorf("sidecars still record agent process groups after Stop: %v", left)
+	}
+	// A watch from the start of the run ends in the state the live feed reached.
+	replay := newWorld()
+	replay.last = started.Sequence - 1
+	r.observe("the replay of the whole run", replay, func() bool { return replay.last >= w.last })
+	if !reflect.DeepEqual(replay.agents, w.agents) || !reflect.DeepEqual(replay.run, w.run) || !reflect.DeepEqual(replay.messages, w.messages) {
+		t.Errorf("the replay differs from the live feed:\nlive   %+v\nreplay %+v", w, replay)
+	}
+	var jobs struct {
+		Jobs []struct {
+			ID    string `json:"id"`
+			State string `json:"state"`
+		} `json:"jobs"`
+	}
+	if err := json.Unmarshal([]byte(r.vibesysCLI(repository.path, "jobs", "--json")), &jobs); err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs.Jobs) == 0 {
+		t.Error("vibesys-cli ran no job for the run")
+	}
+	for _, j := range jobs.Jobs {
+		if j.State != "JOB_STATE_SUCCEEDED" {
+			t.Errorf("job %s is %s after Stop, want succeeded", j.ID, j.State)
+		}
+	}
+}
+
+// sessionDirOf is the directory name the orchestrator keeps an agent's sessions under.
+func sessionDirOf(r *rig, agent string) string {
+	for _, sess := range r.sessions() {
+		data, err := os.ReadFile(filepath.Join(sess.dir, "launch.json"))
+		if err == nil && strings.Contains(string(data), `"`+agent+`"`) {
+			return filepath.Base(filepath.Dir(sess.dir))
+		}
+	}
+	r.t.Fatalf("no session of agent %s", agent)
+	return ""
+}
+
+// checkProviderLoadsOnlyThePlugin reads what the real driver asked the scripted provider to
+// start: the plugin, enabled in the agent's own home, and none of the operator's configuration.
+func (r *rig) checkProviderLoadsOnlyThePlugin(sess session) {
+	r.t.Helper()
+	data, err := os.ReadFile(filepath.Join(sess.dir, "spawns.json"))
+	if err != nil {
+		r.t.Fatalf("session %s recorded no provider start: %v", sess.dir, err)
+	}
+	var spawned struct {
+		Provider string `json:"provider"`
+		Spawns   []struct {
+			Argv []string `json:"argv"`
+			Home string   `json:"home"`
+		} `json:"spawns"`
+		Commands [][]string `json:"commands"`
+	}
+	if err := json.Unmarshal(data, &spawned); err != nil {
+		r.t.Fatal(err)
+	}
+	if len(spawned.Spawns) != 1 {
+		r.t.Fatalf("session %s started the provider %d times", sess.dir, len(spawned.Spawns))
+	}
+	spawn := spawned.Spawns[0]
+	if spawn.Home != sess.launch.Plugin.Home {
+		r.t.Errorf("session %s: the provider's config home is %q, want the plugin home %q", sess.dir, spawn.Home, sess.launch.Plugin.Home)
+	}
+	flag := func(name string) []string {
+		var values []string
+		for i, a := range spawn.Argv {
+			if a == name && i+1 < len(spawn.Argv) {
+				values = append(values, spawn.Argv[i+1])
+			}
+		}
+		return values
+	}
+	switch spawned.Provider {
+	case "claude":
+		if got := flag("--setting-sources"); len(got) != 1 || got[0] != "project,local" {
+			r.t.Errorf("session %s: claude reads setting sources %v, want only project,local", sess.dir, got)
+		}
+		var settings struct {
+			Enabled map[string]bool `json:"enabledPlugins"`
+		}
+		if got := flag("--settings"); len(got) != 1 || json.Unmarshal([]byte(got[0]), &settings) != nil || len(settings.Enabled) != 1 || !settings.Enabled["vibesys@vibesys"] {
+			r.t.Errorf("session %s: claude settings %v do not enable exactly vibesys@vibesys", sess.dir, got)
+		}
+	case "codex":
+		want := `plugins={"vibesys@vibesys" = {enabled = true}}`
+		found := false
+		for _, c := range flag("--config") {
+			found = found || c == want
+		}
+		if !found {
+			r.t.Errorf("session %s: codex is not configured with %s: %v", sess.dir, want, flag("--config"))
+		}
+	default:
+		r.t.Errorf("session %s: unknown provider %q", sess.dir, spawned.Provider)
+	}
+	var added, installed bool
+	for _, c := range spawned.Commands {
+		line := strings.Join(c[1:], " ")
+		added = added || line == "plugin marketplace add "+r.marketplace
+		// Claude installs with `plugin install`, Codex with `plugin add`.
+		installed = installed || ((strings.HasPrefix(line, "plugin install ") || strings.HasPrefix(line, "plugin add ")) && strings.HasSuffix(line, "vibesys@vibesys"))
+	}
+	if !added || !installed {
+		r.t.Errorf("session %s: the plugin was not added and installed before the provider started: %v", sess.dir, spawned.Commands)
+	}
+}
