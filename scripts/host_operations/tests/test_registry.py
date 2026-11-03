@@ -17,6 +17,7 @@ from scripts.host_operations.api import (
     compile_subscribe_timing,
     compile_topics,
 )
+from scripts.host_operations.generate import generate
 
 from vs_proto.api import (
     OperationFailure,
@@ -27,6 +28,7 @@ from vs_proto.api import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
 _SLOTS = tuple(host_operations.ADAPTER_OPERATIONS)
 _STREAM = 2
@@ -156,6 +158,37 @@ def test_the_descriptor_pass_compiles_all_language_outputs_before_publication() 
         if path.endswith(".py"):
             ast.parse(content)
     assert compile_outputs(image) == outputs
+
+
+@pytest.mark.parametrize("include_schema", [False, True])
+def test_generation_publishes_compiled_outputs_and_preserves_schema_in_bindings_mode(
+    tmp_path: Path, *, include_schema: bool
+) -> None:
+    image = _image().SerializeToString()
+    outputs = compile_outputs(image)
+    for name in outputs:
+        if name.endswith(".proto"):
+            schema_path = tmp_path / name
+            schema_path.parent.mkdir(parents=True, exist_ok=True)
+            schema_path.write_text("existing schema\n")
+
+    generate(tmp_path, image, include_schema=include_schema)
+
+    for name, expected in outputs.items():
+        if name.endswith(".proto") and not include_schema:
+            assert (tmp_path / name).read_text() == "existing schema\n"
+        else:
+            assert (tmp_path / name).read_text() == expected
+    assert {
+        path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*") if path.is_file()
+    } == set(outputs)
+
+
+def test_generation_rejects_invalid_descriptors_before_publishing(tmp_path: Path) -> None:
+    image = _changed(lambda policy: setattr(policy, "cap_ms", 0))
+    with pytest.raises(GenerationError, match="budgets"):
+        generate(tmp_path, image)
+    assert list(tmp_path.iterdir()) == []
 
 
 def _topic_image(
