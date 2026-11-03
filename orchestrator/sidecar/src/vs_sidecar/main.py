@@ -40,7 +40,10 @@ if TYPE_CHECKING:
 
 #: How long the worker sleeps between looks at the provider when nothing else wakes it.
 IDLE_TICK_SECONDS = 0.25
-#: How long the process stays up after the session closes, so the daemon can read the close.
+#: How long the process stays up after the session closes, for the case where no daemon is there to
+#: end it: one that is down, or restarting, still finds the close when it reattaches. A running daemon
+#: does not wait for this; it ends the sidecar as soon as it has the close ("Reattach" and the
+#: release in orchestrator/internal/daemon), so a stopped run leaves no sidecar behind.
 LINGER_SECONDS = 60.0
 #: How long a stopped sidecar waits for its worker to wind down before it gives up on it.
 STOP_SECONDS = 30.0

@@ -133,11 +133,15 @@ vibesysd send AGENT "text"
 
 The daemon ends the sidecar process of every session the core no longer counts as live, whatever ended
 it: a close the sidecar reported, a failure, a stop nobody answered, or a resume that replaced the
-session. A closed sidecar would otherwise stay up for its linger (a minute) so that the daemon could read
-the close. A kill that fails is tried again by the next step; a daemon that stopped before it made the
-kill ends the sidecars of the sessions it finds over when it starts (`Reattach`), and the sidecar's own
-linger is the backstop. A process id is only signalled when the process's command line carries the
-session's directory, so a number the system has given to another program is never killed.
+session. So when `run stop` returns and the run is over, none of its sidecars is left, the lead's
+included. The sidecar's own linger (a minute after it closes) does not serve a stop: it is for a
+daemon that is down or restarting, which reads the close when it reattaches, and it is the backstop if
+the daemon never gets to end the process. Before the daemon did this, a closed sidecar exited only when
+its linger ran out, and the sidecar of a session that failed without closing never exited. A kill that
+fails is tried again by the next step; a daemon that stopped before it made the kill ends the sidecars
+of the sessions it finds over when it starts (`Reattach`). A process id is only signalled when the
+process's command line carries the session's directory, so a number the system has given to another
+program is never killed.
 
 A snapshot holds runs and agents, not items. A watch opened after an agent replied does not show that
 reply; `run watch --after SEQUENCE` replays the log after a sequence, such as the one in a command's
