@@ -6,7 +6,9 @@
       "DOM",
       "DOM.Iterable"
     ],
-    "types": [],
+    "types": [
+      "node"
+    ],
     "jsx": "react-jsx",
     "noEmit": true,
     "tsBuildInfoFile": ".tsbuild/ui-test.tsbuildinfo"
@@ -14,7 +16,7 @@
   "include": [
     "src/ui/**/*.test.ts",
     "src/ui/**/*.test.tsx",
-    "src/testing/orchestrator/**/*.ts"
+    "src/testing/**/*.ts"
   ],
   "references": [
     {
@@ -25,6 +27,12 @@
     },
     {
       "path": "../../libs/orchestrator-proto/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/hosts/tsconfig.lib.json"
+    },
+    {
+      "path": "./tsconfig.core.json"
     }
   ],
   "exclude": [

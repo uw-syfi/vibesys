@@ -1,12 +1,12 @@
 import {Page, pageState, Stack, Text} from '@vibesys/ui';
-import {type JSX, useReducer} from 'react';
-import {
-  type CommandProgress,
-  type FeedStatus,
-  type HostConnectionState,
-  type HostModel,
-  initialRoute,
-  routeReducer,
+import type {JSX} from 'react';
+import type {
+  CommandProgress,
+  FeedStatus,
+  HostConnectionState,
+  HostModel,
+  Route,
+  RouteAction,
 } from '../../state/index.js';
 import {AgentPanel} from './agent-panel.js';
 import {ConnectionBanner, type ConnectionNote} from './connection-banner.js';
@@ -69,9 +69,11 @@ export function OrchestratorApp(props: {
   readonly commands: AppCommands;
   /** The person pressed Retry on a host's connection or feed. */
   readonly retryHost: (host: string) => void;
+  /** Where the person is; the caller owns it so it can watch what that screen needs. */
+  readonly route: Route;
+  readonly go: (action: RouteAction) => void;
 }): JSX.Element {
-  const [route, go] = useReducer(routeReducer, initialRoute);
-  const {hosts, commands} = props;
+  const {hosts, commands, route, go} = props;
   if (route.screen === 'runs') {
     return (
       <Page

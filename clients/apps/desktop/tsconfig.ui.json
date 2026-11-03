@@ -6,7 +6,9 @@
       "DOM",
       "DOM.Iterable"
     ],
-    "types": [],
+    "types": [
+      "vite/client"
+    ],
     "jsx": "react-jsx",
     "rootDir": "src",
     "outDir": "dist",
@@ -35,6 +37,9 @@
     },
     {
       "path": "../../libs/orchestrator-proto/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/hosts/tsconfig.lib.json"
     }
   ]
 }
