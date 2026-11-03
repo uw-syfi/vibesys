@@ -10,8 +10,16 @@ import (
 // searchState is called with the engine lock held. A cached revision makes the
 // health transition time stable across snapshots and unchanged ticks.
 func (e *Engine) searchState(run core.RunID) *pb.SearchState {
-	v := search.View{Reason: search.NoDaemon}
+	old := e.searches[run]
 	var revision uint64
+	if e.Search != nil {
+		revision = e.Search.Revision(run)
+	}
+	// Compare metadata before Get can clone any facts. A released view stays cached.
+	if old != nil && (revision == 0 || revision+1 == old.Revision) {
+		return old
+	}
+	v := search.View{Reason: search.NoDaemon}
 	if e.Search != nil {
 		v, revision = e.Search.Get(run)
 		if revision == 0 {
@@ -20,7 +28,6 @@ func (e *Engine) searchState(run core.RunID) *pb.SearchState {
 	}
 	// Reserve the first revision for a run that has not received a CLI view yet.
 	revision++
-	old := e.searches[run]
 	// Reconciliation may release a finished run's store entry. Its last view
 	// remains available to watchers for the lifetime of this daemon.
 	if revision == 1 && old != nil {
@@ -75,6 +82,14 @@ func (d *Daemon) publishSearch() bool {
 	moved := false
 	_ = d.Cut(func(state core.State, _ uint64) error {
 		for _, r := range state.Runs() {
+			revision := uint64(1)
+			if d.Search != nil {
+				revision = d.Search.Revision(r.ID) + 1
+			}
+			// Ended runs with no new facts, like unchanged live runs, need no projection.
+			if revision <= d.searchPublished[r.ID] {
+				continue
+			}
 			s := d.searchState(r.ID)
 			if s.Revision > d.searchPublished[r.ID] {
 				d.Hub.PublishLatest(r.ID, s)

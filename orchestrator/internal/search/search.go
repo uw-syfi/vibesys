@@ -89,6 +89,14 @@ func (s *Store) Put(run core.RunID, v View) {
 	c.Reason, c.Detail = v.Reason, v.Detail
 	s.views[run] = entry{c, s.revision}
 }
+
+// Revision reads only metadata, without copying the run's facts. Zero means absent.
+func (s *Store) Revision(run core.RunID) uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.views[run].revision
+}
+
 func (s *Store) Get(run core.RunID) (View, uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

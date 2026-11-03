@@ -132,3 +132,49 @@ func TestSearchSnapshotsRetainReleasedViewAndScopeAgents(t *testing.T) {
 		t.Fatal(retained)
 	}
 }
+
+func TestUnchangedTickPublishesNothingIncludingEndedRuns(t *testing.T) {
+	r := daemontest.NewRig(t)
+	store := new(search.Store)
+	r.Daemon.Search = store
+	run, _ := beginRun(t, r)
+	store.Put(run.ID, search.View{Reason: search.CLINotInstalled, Detail: "missing"})
+	r.Settle(t)
+	w, _, err := r.Service.WatchRunsFrom(core.Operator{}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	assertQuiet := func() {
+		t.Helper()
+		moved, err := r.Daemon.Step(context.Background())
+		if err != nil || moved {
+			t.Fatalf("unchanged tick reports progress: %v %v", moved, err)
+		}
+		frames, err := w.Poll()
+		if err != nil || len(frames) != 0 {
+			t.Fatalf("unchanged tick published %d frames: %v", len(frames), err)
+		}
+	}
+	assertQuiet()
+	_, err = r.Service.Dispatch(context.Background(), &pb.DispatchRequest{Command: &pb.Command{Id: "stop", Body: &pb.Command_StopRun{StopRun: &pb.StopRun{RunId: string(run.ID)}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Settle(t)
+	if _, err := w.Poll(); err != nil {
+		t.Fatal(err)
+	}
+	assertQuiet()
+	// An ended run still publishes a later revision rather than being skipped forever.
+	store.Put(run.ID, search.View{Reason: search.StreamLost, Detail: "later"})
+	r.Settle(t)
+	frames, err := w.Poll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(frames) != 1 || frames[0].GetSearch().GetHealth().GetUnreadable().GetReason() != pb.UnreadableReason_UNREADABLE_REASON_STREAM_LOST {
+		t.Fatal("new facts of ended run lost", frames)
+	}
+	assertQuiet()
+}
