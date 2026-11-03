@@ -58,6 +58,19 @@ message MeasureResult {
   Objectives objectives = 6;
 }
 
+// Measurement is a commit's measurements of one kind pooled into one: a measure job that tops up
+// an earlier one adds its samples to the same measurement, as compare counts them.
+message Measurement {
+  string commit = 1;
+  string task_version = 2;
+  EnvironmentFingerprint environment = 3;
+  // The measure jobs pooled, oldest first.
+  repeated string job_ids = 4;
+  // Every job's samples and observations in the jobs' order, their headline value, and the
+  // newest job's check.
+  MeasureResult measure = 5;
+}
+
 // Result is one saved outcome of a job. A result is immutable once saved.
 message Result {
   // The job that produced it, which is also the result's identity.
