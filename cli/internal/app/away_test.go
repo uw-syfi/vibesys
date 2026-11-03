@@ -723,6 +723,67 @@ func (h heldCancel) Cancel(ctx context.Context, reason string) error {
 	return h.Handle.Cancel(ctx, reason)
 }
 
+// lostStarts is supervisors whose start, as the daemon sends it when it launches a job, is lost: the
+// store has the job running and its supervisor is still parked, which is what a daemon that went
+// down between the two leaves behind. A run listed afterwards is the supervisor's own.
+type lostStarts struct{ supervisor.Supervisors }
+
+func (s lostStarts) Spawn(ctx context.Context, l lifecycle.Launch) (supervisor.Handle, error) {
+	h, err := s.Supervisors.Spawn(ctx, l)
+	if err != nil {
+		return nil, err
+	}
+	return lostStart{Handle: h}, nil
+}
+
+type lostStart struct{ supervisor.Handle }
+
+func (lostStart) Start(context.Context) error { return nil }
+
+// #3834: a run whose command never started has no end to wait for until something starts it, so
+// forgetting its repository ended only when the wait ran out, with the run reported left. It ends at
+// once, with nothing run and nothing left, whatever the run was doing when the forget came.
+func TestForgettingARepositoryEndsRunsInEveryPhase(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		sups  func(*world) supervisor.Supervisors
+		phase lifecycle.RunPhase
+	}{
+		{"parked", func(w *world) supervisor.Supervisors { return lostStarts{w.supervisors()} }, lifecycle.RunParked},
+		{"running", func(w *world) supervisor.Supervisors { return w.supervisors() }, lifecycle.RunRunning},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			w, o := newOutage(t)
+			sups := c.sups(w)
+			a := o.start(sups)
+			job := submitAs(t, a, callA, "print", "ran", ";", "hold", "g", ";", "exit", "0")
+			o.awaitIn(t, a, scopeA, job.ID, "running", func(j core.Job) bool { return j.State == core.JobRunning })
+			if c.phase == lifecycle.RunRunning {
+				// The store has the job running before its supervisor is told to start.
+				awaitActive(t, w)
+			}
+			ref := lifecycle.Ref{Store: lifecycle.StoreIDOf(repoA, "task"), Job: job.ID}
+			run, err := w.supervisors().Probe(ctxFor(t), ref)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if alive, ok := run.(supervisor.Alive); !ok || alive.Phase != c.phase {
+				t.Fatalf("before the forget the run is %+v, want alive and %s", run, c.phase)
+			}
+			o.remove(repoA)
+			out, err := a.ForgetRepository(ctxFor(t), repoA)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(out.Tasks) != 1 || len(out.Left) != 0 {
+				t.Fatalf("forgotten = %+v, want its one task and nothing left", out)
+			}
+			requireNoRun(t, sups, ref)
+			awaitIdle(t, w)
+		})
+	}
+}
+
 // #3762: forgetting a repository ends its commands before the machine lets its jobs go, so the next
 // job does not start beside a command that is still ending.
 func TestForgettingARepositoryEndsItsCommandsBeforeTheNextJobStarts(t *testing.T) {
