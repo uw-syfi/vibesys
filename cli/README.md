@@ -303,7 +303,7 @@ an older writer rejects the unknown field in a job that has submitters. No store
 
 ## The daemon and the supervisors
 
-There is one daemon per user per machine. It listens on a Unix socket in a private (`0700`) runtime
+There is one daemon per user per machine. Its process name is `vibesysd`; it runs from the `vibesys-cli` binary. It listens on a Unix socket in a private (`0700`) runtime
 directory on local disk: `$XDG_RUNTIME_DIR/vibesys-cli` when that is set to an absolute path, and
 otherwise `/tmp/vibesys-cli-<uid>`. A directory on a network file system is refused, because
 sockets and locks are not reliable there. The directory holds:

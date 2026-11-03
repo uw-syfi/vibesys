@@ -51,6 +51,7 @@ func (s Socket) Path() string { return s.path }
 
 // Locate follows the CLI discovery golden. It creates and repairs nothing.
 func Locate(loc Location, uid int, fsys FS) (Socket, error) {
+	// The runtime directory retains the vibesys-cli name for compatibility.
 	dir := fmt.Sprintf("/tmp/vibesys-cli-%d", uid)
 	if filepath.IsAbs(loc.XDGRuntimeDir) {
 		dir = filepath.Join(loc.XDGRuntimeDir, "vibesys-cli")

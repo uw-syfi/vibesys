@@ -55,6 +55,8 @@ func (p Process) RuntimeDir() (runtimedir.Dir, error) {
 // IndexDir is where the task index is, which filestore decides from the environment and the home.
 func (p Process) IndexDir() string { return filestore.IndexDir(p.Getenv, p.Home) }
 
+const daemonName = "vibesysd"
+
 // ClientOptions returns how a client reaches the daemon, starting it from this binary when none
 // runs.
 func (p Process) ClientOptions() (client.Options, error) {
@@ -65,7 +67,9 @@ func (p Process) ClientOptions() (client.Options, error) {
 	return client.Options{
 		Rendezvous: client.LocalRendezvous{Dir: dir}, Version: p.Version,
 		Starter: client.ExecStarter{Dir: dir, Command: func() *exec.Cmd {
-			return exec.Command(p.Executable, "daemon", "run")
+			cmd := exec.Command(p.Executable, "daemon", "run")
+			cmd.Args[0] = daemonName
+			return cmd
 		}},
 	}, nil
 }
@@ -97,7 +101,7 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 		Clock:   clk,
 		Ready:   ready,
 		Logf: func(format string, args ...any) {
-			fmt.Fprintf(os.Stderr, "%s vibesys-cli daemon: %s\n", clk.Now().UTC().Format("2006-01-02T15:04:05Z"), fmt.Sprintf(format, args...))
+			fmt.Fprintf(os.Stderr, "%s %s: %s\n", clk.Now().UTC().Format("2006-01-02T15:04:05Z"), daemonName, fmt.Sprintf(format, args...))
 		},
 		Runtime: daemon.Runtime{
 			Stores: filestores.New(index, app.Rules(task.DefaultSamples), owner),

@@ -26,6 +26,7 @@ func System() FS { return systemFS{} }
 // Resolve returns where the runtime directory is for a user: a directory named for the tool under
 // XDG_RUNTIME_DIR when it is set to an absolute path, and otherwise a private directory named
 // for the user under /tmp, which is local on every system the tool supports.
+// The directory retains the vibesys-cli name for compatibility.
 func Resolve(getenv func(string) string, uid int) string {
 	if dir := getenv("XDG_RUNTIME_DIR"); dir != "" && filepath.IsAbs(dir) {
 		return filepath.Join(dir, "vibesys-cli")
