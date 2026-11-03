@@ -49,8 +49,13 @@ export class HostConnection extends Context.Service<
     readonly suspect: (epoch: number, error: AppError) => Effect.Effect<void>;
     /** The user asked to try again: skips a wait, or leaves a terminal state. */
     readonly retry: Effect.Effect<void>;
+    /** Suspends while the connection is terminal; returns once the user's retry leaves that state. */
+    readonly leftTerminal: Effect.Effect<void>;
   }
 >()('app/HostConnection') {}
+
+/** What a feed holds of a `HostConnection`. */
+export type HostConnectionApi = HostConnection['Service'];
 
 interface OpenEpoch {
   readonly epoch: number;
@@ -179,10 +184,17 @@ export const makeHostConnection = Effect.fn('HostConnection.make')(function* (
     if (s._tag === 'Waiting' || isTerminal(s)) yield* Queue.offer(w.retries, true);
   });
 
+  const leftTerminal = SubscriptionRef.changes(w.state).pipe(
+    Stream.filter(s => !isTerminal(s)),
+    Stream.runHead,
+    Effect.asVoid,
+  );
+
   return HostConnection.of({
     state: Atom.keepAlive(Atom.subscriptionRef(w.state)),
     ready,
     suspect,
     retry,
+    leftTerminal,
   });
 });
