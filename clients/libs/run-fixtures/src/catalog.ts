@@ -4,6 +4,7 @@ import basesAndEffects from './data/bases-and-effects.json' with {type: 'json'};
 import comparisonBaselines from './data/comparison-baselines.json' with {type: 'json'};
 import continuation from './data/continuation-rounds.json' with {type: 'json'};
 import crashed from './data/crashed-after-turn.json' with {type: 'json'};
+import failedAtSetup from './data/failed-at-setup.json' with {type: 'json'};
 import failures from './data/failure-reasons.json' with {type: 'json'};
 import finished from './data/finished-run.json' with {type: 'json'};
 import tenIdeas from './data/finished-ten-ideas.json' with {type: 'json'};
@@ -35,6 +36,7 @@ const SOURCES: readonly unknown[] = [
   gateFailed,
   comparisonBaselines,
   crashed,
+  failedAtSetup,
 ];
 
 let parsed: readonly RunFixture[] | null = null;
@@ -63,6 +65,7 @@ export const FIXTURE_NAMES: readonly string[] = [
   'input-gate-failed',
   'comparison-baselines',
   'crashed-after-turn',
+  'failed-at-setup',
   'weeks-600-ideas',
 ];
 
