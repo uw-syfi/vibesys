@@ -1,7 +1,7 @@
 /**
  * The loop every subscription runs: wait for a Ready connection, open the stream, fold each frame
  * into the host model, and say how it is going. It never retries on its own clock. A link-level
- * failure goes to `HostConnection.suspect` and the loop waits for the next Ready epoch, so the
+ * failure goes to `HostConnectionApi.suspect` and the loop waits for the next Ready epoch, so the
  * connection is the only place that counts failures and waits. What the loop decides itself is
  * which cursor to resume from and when to stop and show a failure.
  */

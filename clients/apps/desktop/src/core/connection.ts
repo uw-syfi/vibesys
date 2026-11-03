@@ -5,7 +5,6 @@
  */
 import {Compatibility} from '@vibesys/orchestrator-proto';
 import * as Clock from 'effect/Clock';
-import * as Context from 'effect/Context';
 import * as Data from 'effect/Data';
 import * as Deferred from 'effect/Deferred';
 import * as Duration from 'effect/Duration';
@@ -36,26 +35,21 @@ export class ConnectionTerminal extends Data.TaggedError('ConnectionTerminal')<{
   readonly state: Terminal;
 }> {}
 
-export class HostConnection extends Context.Service<
-  HostConnection,
-  {
-    readonly state: Atom.Atom<HostConnectionState>;
-    /**
-     * Suspends until the connection is Ready at an epoch greater than `after` (any, by default),
-     * then answers that epoch. Fails when the connection is terminal. The first call dials.
-     */
-    readonly ready: (after?: number) => Effect.Effect<number, ConnectionTerminal>;
-    /** A feed saw `error` on `epoch`. A no-op when that epoch is already over. */
-    readonly suspect: (epoch: number, error: AppError) => Effect.Effect<void>;
-    /** The user asked to try again: skips a wait, or leaves a terminal state. */
-    readonly retry: Effect.Effect<void>;
-    /** Suspends while the connection is terminal; returns once the user's retry leaves that state. */
-    readonly leftTerminal: Effect.Effect<void>;
-  }
->()('app/HostConnection') {}
-
-/** What a feed holds of a `HostConnection`. */
-export type HostConnectionApi = HostConnection['Service'];
+/** One host's connection: a record per host, built by `makeHostConnection`. */
+export interface HostConnectionApi {
+  readonly state: Atom.Atom<HostConnectionState>;
+  /**
+   * Suspends until the connection is Ready at an epoch greater than `after` (any, by default),
+   * then answers that epoch. Fails when the connection is terminal. The first call dials.
+   */
+  readonly ready: (after?: number) => Effect.Effect<number, ConnectionTerminal>;
+  /** A feed saw `error` on `epoch`. A no-op when that epoch is already over. */
+  readonly suspect: (epoch: number, error: AppError) => Effect.Effect<void>;
+  /** The user asked to try again: skips a wait, or leaves a terminal state. */
+  readonly retry: Effect.Effect<void>;
+  /** Suspends while the connection is terminal; returns once the user's retry leaves that state. */
+  readonly leftTerminal: Effect.Effect<void>;
+}
 
 interface OpenEpoch {
   readonly epoch: number;
@@ -190,11 +184,12 @@ export const makeHostConnection = Effect.fn('HostConnection.make')(function* (
     Effect.asVoid,
   );
 
-  return HostConnection.of({
+  const connection: HostConnectionApi = {
     state: Atom.keepAlive(Atom.subscriptionRef(w.state)),
     ready,
     suspect,
     retry,
     leftTerminal,
-  });
+  };
+  return connection;
 });

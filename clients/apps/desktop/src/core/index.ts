@@ -11,7 +11,6 @@ export {
 export {type Commands, type Intent, makeCommands} from './commands.js';
 export {
   ConnectionTerminal,
-  HostConnection,
   type HostConnectionApi,
   makeHostConnection,
 } from './connection.js';
