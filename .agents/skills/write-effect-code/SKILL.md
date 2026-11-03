@@ -48,10 +48,13 @@ Adding a client package or a screen of the old desktop packages is the
 2. **Import Effect modules as namespaces from their subpath**:
    `import * as Effect from 'effect/Effect'`. The Grit rule `effect-namespace-imports`
    rejects the `effect` barrel and named imports of a module's members.
-3. **Make a service a `Context.Service` named for its role, with one `Layer` per
-   implementation.** Callers `yield*` the service and never name an implementation;
-   the entry files build the layers. Unenforced: whether something deserves a
-   service is a design judgment.
+3. **Make a dependency with interchangeable implementations a `Context.Service`
+   named for its role, with one `Layer` per implementation.** Callers `yield*` the
+   service and never name an implementation; the entry files build the layers. What
+   exists once per host (connection, store, views, commands) is a plain record built
+   by a `make…` function and handed out through `HostSession`, with no tag, because a
+   tag is one per context. Unenforced: whether something deserves a service is a
+   design judgment.
 4. **Name each operation with `Effect.fn("Service.op")`** so it has a span and a
    stack trace. Unenforced: a lint cannot tell an operation from a local helper.
 5. **Type failures.** Declare `Data.TaggedError` classes, put them in the error

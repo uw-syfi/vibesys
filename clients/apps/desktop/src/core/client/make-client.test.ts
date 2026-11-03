@@ -10,18 +10,21 @@ import * as Cause from 'effect/Cause';
 import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
 import * as Fiber from 'effect/Fiber';
+import * as Layer from 'effect/Layer';
 import * as Schema from 'effect/Schema';
 import * as Stream from 'effect/Stream';
 import * as TestClock from 'effect/testing/TestClock';
-import {settle} from '../../testing/settle.js';
+import {quiescent, settle} from '../../testing/settle.js';
 import {
   type CallRecord,
   type FakeTransport,
+  makeFakeBridge,
   makeFakeTransport,
   type Recording,
   type Step,
 } from '../../testing/transport/index.js';
 import {type AppError, RpcStatus} from '../errors.js';
+import {GatewayPorts, GatewayTransportLive} from '../transport/live.js';
 import {makeClient} from './make-client.js';
 
 const HELLO = '/vibesys.orchestrator.v1.OrchestratorService/Hello';
@@ -49,11 +52,11 @@ const HELLO_REQUEST = {
   client: {binaryVersion: 'desktop', protocolVersion: 1, minProtocolVersion: 1},
 };
 
-/** What each call has done so far, as `[open, cancelled]`. */
+/** What each call has done so far, as `[open, released]`. */
 const states = (
   fake: FakeTransport,
-): ReadonlyArray<readonly [CallRecord['open'], CallRecord['cancelled']]> =>
-  fake.calls().map(call => [call.open, call.cancelled]);
+): ReadonlyArray<readonly [CallRecord['open'], CallRecord['released']]> =>
+  fake.calls().map(call => [call.open, call.released]);
 
 /** The typed failure of an effect, or undefined when it succeeded. */
 const failureOf = <A>(effect: Effect.Effect<A, AppError>) =>
@@ -69,7 +72,7 @@ it.effect('a unary call sends the descriptor path and host and returns the typed
     const [call] = fake.calls();
     expect(call?.target.method).toBe(HELLO);
     expect(call?.target.host).toBe('local');
-    expect(call?.cancelled).toBe(0);
+    expect(call?.released).toBe(1);
   }),
 );
 
@@ -130,7 +133,7 @@ it.effect('a stream the daemon closes cleanly ends cleanly', () =>
   }),
 );
 
-it.effect('a unary call that never answers fails at its deadline and is cancelled once', () =>
+it.effect('a unary call that never answers fails at its deadline and is released once', () =>
   Effect.gen(function* () {
     const {fake, client} = setup(steps({hang: true}));
     const fiber = yield* Effect.forkChild(
@@ -172,7 +175,7 @@ it.effect('a stream with no first frame fails at its deadline; later silence is 
     expect(got).toEqual([1]);
     yield* Fiber.interrupt(consumer);
     expect(states(quiet)).toEqual([[false, 1]]);
-  }),
+  }).pipe(quiescent),
 );
 
 // P3: interrupt cancels exactly once
@@ -197,7 +200,7 @@ const script = (gapMs: number, frames: number, how: 'hang' | 'close' | 'end'): S
 ];
 
 it.effect.prop(
-  'interrupting a stream cancels it at most once, and no frame arrives afterwards',
+  'interrupting a stream releases it exactly once, and no frame arrives afterwards',
   {at: interruptAt, gapMs: gap, frames: frameCount, how: ending},
   ({at, gapMs, frames, how}) =>
     Effect.gen(function* () {
@@ -220,13 +223,13 @@ it.effect.prop(
       expect(delivered, JSON.stringify({at, gapMs, frames, how})).toBe(due);
       expect(seen.length).toBe(delivered);
       expect(call?.open).toBe(false);
-      expect(call?.cancelled).toBeLessThanOrEqual(1);
+      expect(call?.released).toBe(1);
       expect(fake.calls().length).toBe(1);
-    }),
+    }).pipe(quiescent),
 );
 
 it.effect.prop(
-  'interrupting a unary call cancels it at most once, and only if it was unanswered',
+  'interrupting a unary call, answered or not, releases it exactly once',
   {at: interruptAt, gapMs: gap, how: ending},
   ({at, gapMs, how}) =>
     Effect.gen(function* () {
@@ -242,9 +245,40 @@ it.effect.prop(
       yield* Fiber.interrupt(fiber);
       const [call] = fake.calls();
       expect(call?.open).toBe(false);
-      expect(call?.cancelled).toBeLessThanOrEqual(1);
-      if (how !== 'hang' && at >= gapMs) expect(call?.cancelled).toBe(0);
+      expect(call?.released).toBe(1);
     }),
+);
+
+// Through the real transport: a client call, the gateway transport, and a bridge that counts releases
+
+it.effect.prop(
+  'over the gateway transport, a call that ends or is interrupted releases its port exactly once',
+  {frames: frameCount, how: ending, interrupt: Schema.Boolean, stream: Schema.Boolean},
+  ({frames, how, interrupt, stream}) =>
+    Effect.gen(function* () {
+      const reply = stream ? snapshotBytes(1n) : helloBytes(Compatibility.COMPATIBLE);
+      const recording = steps(
+        ...Array.from({length: stream ? frames : 1}, (): Step => ({frame: reply})),
+        how === 'hang' ? {hang: true} : how === 'close' ? {close: true} : {end: {status: 14}},
+      );
+      const bridge = makeFakeBridge(recording);
+      const client = yield* makeClient(OrchestratorService, 'local').pipe(
+        Effect.provide(
+          GatewayTransportLive.pipe(
+            Layer.provide(Layer.succeed(GatewayPorts, {bridge: bridge.bridge})),
+          ),
+        ),
+      );
+      const call = stream
+        ? Effect.exit(Stream.runDrain(client.watchRuns({})))
+        : Effect.exit(client.hello(HELLO_REQUEST));
+      const fiber = yield* Effect.forkChild(call);
+      yield* settle;
+      if (interrupt || how === 'hang') yield* Fiber.interrupt(fiber);
+      else yield* Fiber.join(fiber);
+      expect(bridge.ports().map(port => port.cancels)).toEqual([1]);
+    }).pipe(quiescent),
+  {arbitrary: {runs: 40}},
 );
 
 // P4: error totality

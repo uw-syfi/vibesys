@@ -640,7 +640,11 @@ app it is written once, in `core/`:
 
 - a *service* is a `Context.Service` class named for its role, with one `Layer` per implementation
   (the real one and a Fake). A caller `yield*`s the service and never names an implementation;
-  the layers are wired once, in the entry files;
+  the layers are wired once, in the entry files. A service is a dependency with interchangeable
+  implementations, one for the whole app (the gateway transport, ids). What exists once per host
+  (its connection, store, views and commands) is a plain record built by a `make…` function in a
+  `Scope`, and `HostSession` hands the screens that record: a tag would allow one per context,
+  and a second host would need a second context;
 - an operation is `Effect.fn("Service.op")`, so it carries a span and a stack trace, and its
   failures are typed: `Data.TaggedError` values in the error channel, handled with
   `Effect.catchTag`. A defect is a bug and is not caught;
