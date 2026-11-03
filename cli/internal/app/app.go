@@ -54,6 +54,8 @@ type App struct {
 // message is an event for the machine, with what the loop must keep because of it.
 type message struct {
 	event lifecycle.Event
+	// generation rejects effect replies from a store forgotten since the effect started.
+	generation *effectGeneration
 	// scope, when set, is the scope of the store the event's job is in.
 	scope *core.Scope
 	// handle, when set, reaches the event's job's supervisor.
@@ -144,6 +146,7 @@ func (a *App) loop() {
 	state := lifecycle.Recovering()
 	scopes := map[lifecycle.StoreID]core.Scope{}
 	handles := map[lifecycle.Ref]supervisor.Handle{}
+	generations := map[lifecycle.StoreID]*effectGeneration{}
 	defer func() {
 		for _, h := range handles {
 			h.Close()
@@ -156,6 +159,12 @@ func (a *App) loop() {
 		case <-a.ctx.Done():
 			return
 		}
+		if g := m.generation; g != nil && generations[g.store] != g {
+			if m.handle != nil {
+				m.handle.Close()
+			}
+			continue
+		}
 		if m.scope != nil {
 			scopes[storeIDOf(*m.scope)] = *m.scope
 		}
@@ -167,8 +176,15 @@ func (a *App) loop() {
 		a.publish(state, scopes, m.changed)
 		keepHandle(handles, m, reqs, state)
 		dropLetGo(handles, before, state, reqs)
+		if e, ok := m.event.(lifecycle.StoreForgotten); ok {
+			delete(generations, e.Store)
+		}
 		for _, r := range reqs {
-			a.startEffect(r, scopes, handles)
+			id := r.Target().Store
+			if generations[id] == nil {
+				generations[id] = &effectGeneration{store: id}
+			}
+			a.startEffect(r, scopes, handles, generations[id])
 		}
 		switch e := m.event.(type) {
 		case lifecycle.Closed:
