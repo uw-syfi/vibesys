@@ -169,7 +169,8 @@
         "apps/desktop/src/**/*.ts",
         "apps/desktop/src/**/*.tsx",
         "!apps/desktop/src/main/index.ts",
-        "!apps/desktop/src/ui/main.tsx"
+        "!apps/desktop/src/ui/main.tsx",
+        "!apps/desktop/src/testing/page/main.tsx"
       ],
       "plugins": ["./tools/lint-rules/effect-run-only-in-entries.grit"]
     },

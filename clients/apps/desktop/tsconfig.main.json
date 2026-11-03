@@ -13,6 +13,8 @@
     {"path": "../../libs/connection/tsconfig.lib.json"},
     {"path": "../../libs/hosts/tsconfig.lib.json"},
     {"path": "../../libs/ipc/tsconfig.lib.json"},
+    {"path": "../../libs/proto/tsconfig.lib.json"},
+    {"path": "../../libs/settings/tsconfig.lib.json"},
     {"path": "../../libs/transport/tsconfig.lib.json"},
     {"path": "./tsconfig.core.json"},
     {"path": "./tsconfig.state.json"}

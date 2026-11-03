@@ -1,0 +1,41 @@
+{
+  "extends": "../../tools/tsconfig.base.json",
+  "compilerOptions": {
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "types": [
+      "node"
+    ],
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "tsBuildInfoFile": ".tsbuild/ui-test.tsbuildinfo"
+  },
+  "include": [
+    "src/ui/**/*.test.ts",
+    "src/ui/**/*.test.tsx",
+    "src/testing/**/*.ts"
+  ],
+  "references": [
+    {
+      "path": "./tsconfig.ui.json"
+    },
+    {
+      "path": "./tsconfig.state.json"
+    },
+    {
+      "path": "../../libs/orchestrator-proto/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/hosts/tsconfig.lib.json"
+    },
+    {
+      "path": "./tsconfig.core.json"
+    }
+  ],
+  "exclude": [
+    "src/testing/**/*.test.ts"
+  ]
+}
