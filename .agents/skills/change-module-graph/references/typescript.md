@@ -43,26 +43,15 @@ anything else in another package is an error.
 - **Closed sets.** A string-literal union. When the values cross the backend
   boundary, take the union from the generated protocol types, never a
   hand-written copy. Branch exhaustively so a new member is a compile error.
-- **Generated types.** Never edit the generated protocol types in the
-  contracts package. Regenerate with `pnpm generate:protocol` (from the
-  contracts package) and review the diff.
+- **Generated types.** Never edit the generated bindings (`@vibesys/proto`,
+  `@vibesys/orchestrator-proto`, `@vibesys/display-names`). Change the `.proto`
+  or the Python catalog, regenerate (`./scripts/generate_proto.sh`, or
+  `pnpm --filter @vibesys/display-names generate`) and review the diff.
 - **State.** Frontend state changes only from backend events; keep folds pure
   and pass time as event data. See [functional-core.md](../../software-design/references/functional-core.md).
-  Ask whether the state is a mode with effects or a fold:
-  - Control state (a mode that starts work, waits, retries, cancels) is an
-    XState v5 machine: `setup({types, actors, actions, guards, delays})`, each
-    operation an injected `invoke` with an explicit `id` (placeholder:
-    `unprovided` from `@vibesys/machine`), delays as `after`, cancellation by
-    leaving the state. The shell provides the operations with
-    `machine.provide` and exposes the actor with `actorStore`.
-  - A data fold (events in, a value out, no mode) is a plain reducer on
-    `@vibesys/store`.
-  - Test a machine with pure `getNextSnapshot`/`transition` steps and
-    `checkMachine` from `@vibesys/machine/testing`; test stale replies on a
-    live actor. `pnpm new:package feature <name>` scaffolds all three.
-  The rule, examples, and rejected alternatives are in
-  [clients-architecture.md](../../../../docs/contributing/clients-architecture.md),
-  "State".
+  In the Effect desktop app control state is an Effect service and a data fold
+  is a plain reducer (the `write-effect-code` skill and "State" in
+  [clients-architecture.md](../../../../docs/contributing/clients-architecture.md)).
 - **I/O.** Keep transport behind an interface called by the shell, and use an
   in-memory implementation in composed tests (see the `testing` skill).
 
@@ -72,10 +61,10 @@ Named by package.
 
 | Rule | Look at |
 | --- | --- |
-| 1, 2 | `@vibesys/connection` (small `exports`, logic behind it) |
+| 1, 2 | `@vibesys/ui` (small `exports`, logic behind it) |
 | 4 | The layering rules in the dependency-cruiser configuration |
-| 6 | The runtime-neutral `@vibesys/transport` versus the Node-only `@vibesys/connection` |
-| 8 | `@vibesys/contracts` generated protocol types |
+| 6 | The runtime-neutral `@vibesys/display-names` versus the DOM `@vibesys/ui` |
+| 8 | `@vibesys/proto` generated protocol types |
 
 ## Commands
 
@@ -85,5 +74,5 @@ From the clients workspace:
 pnpm check:ts                  # biome
 pnpm check:ts-architecture     # dependency-cruiser + manifest check
 pnpm check:knip
-pnpm generate:protocol         # in contracts, after changing protocol models
+pnpm --filter @vibesys/display-names generate   # after changing the display-name catalog
 ```

@@ -1,7 +1,6 @@
 package server_test
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"os"
@@ -11,13 +10,10 @@ import (
 
 	"buf.build/go/protovalidate"
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
-	"github.com/uw-syfi/vibesys/gateway/internal/hostcommand"
 	"github.com/uw-syfi/vibesys/gateway/internal/runlog"
-	"github.com/uw-syfi/vibesys/gateway/internal/server"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 )
@@ -149,19 +145,6 @@ func TestHostWithholdsInvalidHeadFromTheListing(t *testing.T) {
 	}
 	if marker, err := stream.Recv(); err != nil || !marker.GetInitialComplete() {
 		t.Fatalf("expected the listing to complete, got %v, %v", marker, err)
-	}
-}
-
-func TestHostCallValidationKeepsItsFailureEnvelope(t *testing.T) {
-	runner := hostcommand.FakeRunner{Program: func(_ context.Context, _ hostcommand.Command) (hostcommand.Result, error) {
-		output, err := proto.Marshal(&apiv1.HostCallResponse{Result: &apiv1.HostCallResponse_ConfigurationFailed{ConfigurationFailed: &apiv1.ConfigurationFailed{Stage: "test", Message: "missing code"}}})
-		return hostcommand.Result{Output: output}, err
-	}}
-	f := startWithConfig(t, server.Config{HostRunner: runner})
-	response, err := client(t, f, false).HostCall(f.ctx, intentRequest())
-	failure := response.GetConfigurationFailed()
-	if err != nil || failure.GetCode() != "invalid_host_response" || !strings.Contains(failure.GetMessage(), "configuration_failed.code") {
-		t.Fatalf("expected typed invalid configuration_failed.code, got %v %v", response, err)
 	}
 }
 

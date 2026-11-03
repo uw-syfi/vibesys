@@ -12,7 +12,6 @@ import (
 
 	"github.com/uw-syfi/vibesys/gateway/gen"
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
-	"github.com/uw-syfi/vibesys/gateway/internal/hostcommand"
 	"github.com/uw-syfi/vibesys/gateway/internal/machinestats"
 	"github.com/uw-syfi/vibesys/gateway/internal/runindex"
 	"github.com/uw-syfi/vibesys/gateway/internal/runlog"
@@ -34,19 +33,15 @@ type Config struct {
 	Clock   Clock
 	// Probes times the run index's liveness probes and their lease. A test that drives
 	// them by hand sets it, apart from the Clock that paces the hub. Nil means Clock.
-	Probes     Clock
-	HostRunner hostcommand.Runner
+	Probes Clock
 	// Machine is what machine_stats samples.
 	Machine machinestats.Host
 	// Register adds the host process's other services to the same server and socket. Nil adds none.
 	Register func(grpc.ServiceRegistrar) error
 }
 
-// withDefaults fills what the caller left to the process: real time, real commands, this machine.
+// withDefaults fills what the caller left to the process: real time, this machine.
 func (c Config) withDefaults() Config {
-	if c.HostRunner == nil {
-		c.HostRunner = hostcommand.ExecRunner{}
-	}
 	if c.Clock == nil {
 		c.Clock = SystemClock{}
 	}

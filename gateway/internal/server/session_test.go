@@ -7,9 +7,7 @@ import (
 	"fmt"
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
 	storev1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1"
-	"github.com/uw-syfi/vibesys/gateway/internal/hostcommand"
 	"github.com/uw-syfi/vibesys/gateway/internal/runlog"
-	"github.com/uw-syfi/vibesys/gateway/internal/server"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -77,34 +75,6 @@ func TestSessionDiscoveryTailFenceAndBlobReads(t *testing.T) {
 	}
 }
 
-func TestChatMessageHostCallRoundTrip(t *testing.T) {
-	request := &apiv1.HostCallRequest{Checkout: "/src/vibesys", Method: &apiv1.HostCallRequest_ChatMessage{ChatMessage: &apiv1.ChatMessageRequest{ProjectRoot: "/project", RunId: "run-1", SessionId: "default", RequestId: "q-1", Text: "Why?"}}}
-	runner := hostcommand.FakeRunner{Program: func(ctx context.Context, c hostcommand.Command) (hostcommand.Result, error) {
-		if len(c.Args) != 2 || c.Args[1] != "chat-message" {
-			t.Errorf("method: %v", c.Args)
-		}
-		decoded := &apiv1.HostCallRequest{}
-		if err := proto.Unmarshal(c.Input, decoded); err != nil {
-			t.Fatal(err)
-		}
-		deadline, ok := ctx.Deadline()
-		if !ok {
-			t.Fatal("missing runner deadline")
-		}
-		expected := proto.Clone(request).(*apiv1.HostCallRequest)
-		expected.Deadline = timestamppb.New(deadline)
-		if !proto.Equal(expected, decoded) {
-			t.Errorf("input: got %v, want %v", decoded, expected)
-		}
-		return hostcommand.Result{Output: encode(t, &apiv1.HostCallResponse{Result: &apiv1.HostCallResponse_ChatMessage{ChatMessage: &apiv1.ChatMessageResponse{SessionId: "default", RequestId: "q-1"}}})}, nil
-	}}
-	f := startWithConfig(t, server.Config{HostRunner: runner})
-	response, err := client(t, f, false).HostCall(f.ctx, request)
-	if err != nil || response.GetChatMessage().GetRequestId() != "q-1" {
-		t.Fatalf("response: %v %v", response, err)
-	}
-}
-
 func TestSessionListingRespectsSkeletonBudget(t *testing.T) {
 	f := start(t)
 	writeFrames(t, f, 1)
@@ -117,31 +87,6 @@ func TestSessionListingRespectsSkeletonBudget(t *testing.T) {
 	_, err := client(t, f, false).Skeleton(f.ctx, &apiv1.SkeletonRequest{RunId: "run-1"})
 	if status.Code(err) != codes.ResourceExhausted {
 		t.Fatalf("listing budget: %v", err)
-	}
-}
-
-func TestChatCreationHostCallUsesGeneratedDispatchAndIdentity(t *testing.T) {
-	for _, id := range []string{"thread-a", "thread_2", "0"} {
-		t.Run(id, func(t *testing.T) {
-			runner := hostcommand.FakeRunner{Program: func(_ context.Context, c hostcommand.Command) (hostcommand.Result, error) {
-				if len(c.Args) != 2 || c.Args[1] != "create-chat-session" {
-					t.Fatalf("command: %v", c.Args)
-				}
-				request := &apiv1.HostCallRequest{}
-				if err := proto.Unmarshal(c.Input, request); err != nil {
-					t.Fatal(err)
-				}
-				if request.GetCreateChatSession().GetSessionId() != id {
-					t.Fatalf("identity: %v", request)
-				}
-				return hostcommand.Result{Output: encode(t, &apiv1.HostCallResponse{Result: &apiv1.HostCallResponse_CreateChatSession{CreateChatSession: &apiv1.CreateChatSessionResponse{SessionId: id}}})}, nil
-			}}
-			f := startWithConfig(t, server.Config{HostRunner: runner})
-			response, err := client(t, f, false).HostCall(f.ctx, &apiv1.HostCallRequest{Checkout: "/src/vibesys", Method: &apiv1.HostCallRequest_CreateChatSession{CreateChatSession: &apiv1.CreateChatSessionRequest{ProjectRoot: "/project", RunId: "run-1", SessionId: id, Provider: "claude", Model: "opus"}}})
-			if err != nil || response.GetCreateChatSession().GetSessionId() != id {
-				t.Fatalf("response: %v %v", response, err)
-			}
-		})
 	}
 }
 

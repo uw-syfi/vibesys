@@ -93,7 +93,9 @@ test('effect-namespace-imports covers every folder of the app, tests included', 
   }
 });
 test('effect-namespace-imports leaves other packages alone', async t => {
-  const fixture = await mkdtemp(join(WORKSPACE_ROOT, 'libs', 'hosts', 'src', 'effect-fixture-'));
+  const fixture = await mkdtemp(
+    join(WORKSPACE_ROOT, 'libs', 'display-names', 'src', 'effect-fixture-'),
+  );
   t.after(() => rm(fixture, {recursive: true, force: true}));
   const path = join(fixture, 'sample.ts');
   await writeFile(path, BARREL['a named import from the barrel']);

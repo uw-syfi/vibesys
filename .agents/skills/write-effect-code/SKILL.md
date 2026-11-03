@@ -12,7 +12,6 @@ role: plain folds, Effect services, React screens, the Electron main process
 and preload, and test doubles. Its control state is Effect services and atoms;
 its data folds are plain reducers ("State" in
 [clients-architecture.md](../../../docs/contributing/clients-architecture.md)).
-The XState packages that predate it are legacy and get no new work.
 
 ## Builds on
 
@@ -28,8 +27,8 @@ The XState packages that predate it are legacy and get no new work.
 - A test of that code.
 - An Effect lint rule or a folder rule failing on a change.
 
-Adding a client package or a screen of the old desktop packages is the
-`build-client-feature` skill.
+Adding a client package is described in "Adding a package" of
+[clients-architecture.md](../../../docs/contributing/clients-architecture.md).
 
 ## Steps
 

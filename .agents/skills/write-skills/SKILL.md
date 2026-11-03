@@ -62,9 +62,9 @@ moves, and a stale pointer reads exactly like a live one.
 - Keep: architectural principles (layers, one-way dependencies, the facade
   rule that product code is reached through `vibesys.api`, pure core and thin
   shell); library and package names (`vs-core`, `agentshim`,
-  `@vibesys/connection`); the codebase's concept names (flow, search, Role,
+  `@vibesys/proto`); the codebase's concept names (flow, search, Role,
   provider, registry); the public entry points an agent starts from
-  (`vs_agent.api`, `pnpm new:package`); stable commands
+  (`vs_agent.api`); stable commands
   (`./support/repoctl/repoctl test`); the identifiers of the enforcing checks;
   links to pages under `docs/` and to other skills.
 - Remove: file and directory paths, `<file>:<symbol>` and `<test>::<name>`

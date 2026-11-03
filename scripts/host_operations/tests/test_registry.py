@@ -206,7 +206,7 @@ def test_the_descriptor_pass_compiles_all_language_outputs_before_publication() 
     root = Path(__file__).resolve().parents[3]
     image = _image().SerializeToString()
     outputs = compile_outputs(image, _slots(), _server_sources(root), _watches())
-    assert len(outputs) == 14
+    assert len(outputs) == 10
     for path, content in outputs.items():
         if path.endswith(".py"):
             ast.parse(content)
@@ -368,7 +368,6 @@ def test_every_client_budget_exceeds_its_runner_cap() -> None:
     outputs = compile_outputs(image, _slots(), _server_sources(root), _watches())
     typescript = outputs["clients/libs/proto/src/generated/host-operations.ts"]
     runner = outputs["gateway/internal/hostoperations/registry_generated.go"]
-    calls = outputs["gateway/internal/hostoperations/host_call_generated.go"]
     python = outputs["libs/vs-proto/src/vs_proto/_generated/host_operations.py"]
     compiled = compile_registry(image, _slots(), _watches())
     assert compiled
@@ -384,7 +383,6 @@ def test_every_client_budget_exceeds_its_runner_cap() -> None:
                 f"{case}: Object.freeze({{capMs: {runner_cap}, graceMs: {op.policy.grace_ms}, totalMs: {client}}}"
                 in typescript
             )
-            assert f"Deadline: {runner_cap} * time.Millisecond" in calls
             assert (
                 f"HostCall({op.slot!r}, {op.slot.replace('_', '-')!r}, "
                 f"{op.policy.request_tag}, {op.policy.response_tag}, {runner_cap}, {op.policy.grace_ms})"
@@ -407,17 +405,6 @@ def test_every_client_budget_exceeds_its_runner_cap() -> None:
             )
             assert f"Cap: {runner_cap}*time.Millisecond" in runner
             assert f"Grace: {op.policy.grace_ms}*time.Millisecond" in runner
-            dispatch = (
-                "host_watch_generated.go"
-                if op.is_watch()
-                else "host_mutate_generated.go"
-                if op.is_mutation()
-                else "host_read_generated.go"
-            )
-            assert (
-                f"Deadline: {runner_cap} * time.Millisecond"
-                in outputs[f"gateway/internal/hostoperations/{dispatch}"]
-            )
 
 
 def test_generate_publishes_every_projection(tmp_path: Path) -> None:

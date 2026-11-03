@@ -4,8 +4,6 @@ import (
 	"context"
 
 	"buf.build/go/protovalidate"
-	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
-	hostv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -26,11 +24,7 @@ func validateMessage(value any, code codes.Code) error {
 }
 
 func validateUnary(ctx context.Context, request any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-	// HostCall and HostRead input validation belongs to the Python command so a
-	// bad envelope stays a typed failure instead of a transport error.
-	_, hostCall := request.(*apiv1.HostCallRequest)
-	_, hostRead := request.(*apiv1.ReadRequest)
-	if err := validateMessage(request, codes.InvalidArgument); err != nil && !hostCall && !hostRead {
+	if err := validateMessage(request, codes.InvalidArgument); err != nil {
 		return nil, err
 	}
 	response, err := handler(ctx, request)
@@ -38,15 +32,6 @@ func validateUnary(ctx context.Context, request any, _ *grpc.UnaryServerInfo, ha
 		return nil, err
 	}
 	if err := validateMessage(response, codes.Internal); err != nil {
-		// HostCall promises typed diagnostics for invalid subprocess replies too.
-		if hostCall {
-			reply, _ := response.(*apiv1.HostCallResponse)
-			failure := reply.GetConfigurationFailed()
-			return hostFailure("invalid_host_response", err.Error(), int(failure.GetExitCode()), failure.GetStderr()), nil
-		}
-		if hostRead {
-			return readFailure(hostv1.FailureCategory_FAILURE_CATEGORY_INVALID_INPUT, err.Error()), nil
-		}
 		return nil, err
 	}
 	return response, nil

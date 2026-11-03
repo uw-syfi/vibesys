@@ -59,26 +59,26 @@ function desktopMainPackage() {
           default: './dist/preload/run.cjs',
         },
       },
-      dependencies: {'@vibesys/connection': 'workspace:*', '@vibesys/contracts': 'workspace:*'},
+      dependencies: {'@vibesys/proto': 'workspace:*', '@vibesys/display-names': 'workspace:*'},
     },
     files: {
       'src/main/index.ts':
-        "import 'electron';\nimport 'node:path';\nexport type {E} from '@vibesys/connection';\n",
+        "import 'electron';\nimport 'node:path';\nexport type {E} from '@vibesys/proto';\n",
       // A sandboxed preload loads only Electron; the workspace types it names are erased.
       'src/preload/run.cts':
-        "import electron = require('electron');\nimport type {RunEvent} from '@vibesys/contracts';\n" +
-        "type Contracts = typeof import('@vibesys/contracts');\n" +
+        "import electron = require('electron');\nimport type {RunEvent} from '@vibesys/display-names';\n" +
+        "type Contracts = typeof import('@vibesys/display-names');\n" +
         'export type P = [RunEvent, Contracts, typeof electron];\n',
       'tsconfig.lib.json': project({
         types: ['node'],
         include: ['src/main'],
-        references: ['../../libs/connection/tsconfig.lib.json'],
+        references: ['../../libs/proto/tsconfig.lib.json'],
       }),
       'tsconfig.preload-run.json': project({
         lib: ['ES2022', 'DOM'],
         types: ['node'],
         include: ['src/preload/run.cts'],
-        references: ['../../libs/contracts/tsconfig.lib.json'],
+        references: ['../../libs/display-names/tsconfig.lib.json'],
       }),
     },
   };
@@ -122,16 +122,14 @@ function strictScreenPackage() {
       },
       exports: {'./state': source('state/index'), './renderer': source('renderer/index')},
       dependencies: {
-        '@vibesys/contracts': 'workspace:*',
+        '@vibesys/display-names': 'workspace:*',
         '@vibesys/ui': 'workspace:*',
         react: '19.1.1',
-        xstate: '5.33.2',
       },
     },
     files: {
       'src/state/index.ts':
-        "import {setup} from 'xstate';\nimport type {RunEvent} from '@vibesys/contracts';\n" +
-        'export const machine = setup({});\nexport type S = RunEvent;\n',
+        "import type {RunEvent} from '@vibesys/display-names';\nexport type S = RunEvent;\n",
       'src/renderer/index.ts':
         "import 'react/jsx-runtime';\nimport {button} from '@vibesys/ui';\n" +
         "import {space} from '@vibesys/ui/tokens';\nexport const r = [button, space];\n",
@@ -139,7 +137,7 @@ function strictScreenPackage() {
       'src/renderer/index.test.ts': "import '@radix-ui/react-dialog';\nimport './index.js';\n",
       'tsconfig.state.json': project({
         include: ['src/state'],
-        references: ['../../libs/contracts/tsconfig.lib.json'],
+        references: ['../../libs/display-names/tsconfig.lib.json'],
       }),
       'tsconfig.renderer.json': project({
         lib: ['ES2022', 'DOM'],
@@ -153,9 +151,9 @@ function strictScreenPackage() {
 /** The valid workspace: one package per layer shape the design uses. */
 function validWorkspace() {
   return {
-    contracts: {
+    'display-names': {
       manifest: {
-        name: '@vibesys/contracts',
+        name: '@vibesys/display-names',
         vibesys: {layer: 'foundation', entries: {'.': 'neutral'}},
         exports: {'.': source('index')},
       },
@@ -165,20 +163,20 @@ function validWorkspace() {
       },
     },
     ui: uiPackage(),
-    connection: {
+    proto: {
       manifest: {
-        name: '@vibesys/connection',
+        name: '@vibesys/proto',
         vibesys: {layer: 'service', entries: {'.': 'node'}},
         exports: {'.': source('index')},
-        dependencies: {'@vibesys/contracts': 'workspace:*'},
+        dependencies: {'@vibesys/display-names': 'workspace:*'},
       },
       files: {
         'src/index.ts':
-          "import 'node:net';\nimport type {RunEvent} from '@vibesys/contracts';\nexport type E = RunEvent;\n",
+          "import 'node:net';\nimport type {RunEvent} from '@vibesys/display-names';\nexport type E = RunEvent;\n",
         'tsconfig.lib.json': project({
           types: ['node'],
           include: ['src'],
-          references: ['../contracts/tsconfig.lib.json'],
+          references: ['../display-names/tsconfig.lib.json'],
         }),
       },
     },
@@ -195,20 +193,20 @@ function validWorkspace() {
           './main': source('main/index'),
         },
         dependencies: {
-          '@vibesys/connection': 'workspace:*',
-          '@vibesys/contracts': 'workspace:*',
+          '@vibesys/proto': 'workspace:*',
+          '@vibesys/display-names': 'workspace:*',
           '@vibesys/ui': 'workspace:*',
         },
       },
       files: {
         'src/state/index.ts':
-          "import type {RunEvent} from '@vibesys/contracts';\nexport type S = RunEvent;\n",
+          "import type {RunEvent} from '@vibesys/display-names';\nexport type S = RunEvent;\n",
         'src/renderer/index.ts': "import {button} from '@vibesys/ui';\nexport const r = button;\n",
-        'src/main/index.ts': "import 'electron';\nexport type {E} from '@vibesys/connection';\n",
-        'src/main/index.test.ts': "import '@vibesys/connection';\n",
+        'src/main/index.ts': "import 'electron';\nexport type {E} from '@vibesys/proto';\n",
+        'src/main/index.test.ts': "import '@vibesys/proto';\n",
         'tsconfig.state.json': project({
           include: ['src/state'],
-          references: ['../../libs/contracts/tsconfig.lib.json'],
+          references: ['../../libs/display-names/tsconfig.lib.json'],
         }),
         'tsconfig.renderer.json': project({
           lib: ['ES2022', 'DOM'],
@@ -218,7 +216,7 @@ function validWorkspace() {
         'tsconfig.main.json': project({
           types: ['node'],
           include: ['src/main'],
-          references: ['./tsconfig.state.json', '../../libs/connection/tsconfig.lib.json'],
+          references: ['./tsconfig.state.json', '../../libs/proto/tsconfig.lib.json'],
         }),
       },
     },
@@ -321,10 +319,10 @@ const RULE_CASES = {
     workspace.ui.manifest.vibesys = {layer: 'widgets', entries: {'.': 'dom'}};
   },
   'entries-match-exports': workspace => {
-    workspace.contracts.manifest.vibesys.entries['./testing'] = 'neutral';
+    workspace['display-names'].manifest.vibesys.entries['./testing'] = 'neutral';
   },
   'exports-name-source': workspace => {
-    workspace.contracts.manifest.exports['.'] = {
+    workspace['display-names'].manifest.exports['.'] = {
       types: './dist/index.d.ts',
       default: './dist/index.js',
     };
@@ -343,10 +341,10 @@ const RULE_CASES = {
     });
   },
   'workspace-protocol': workspace => {
-    workspace.connection.manifest.dependencies['@vibesys/contracts'] = '^0.1.0';
+    workspace.proto.manifest.dependencies['@vibesys/display-names'] = '^0.1.0';
   },
   'imports-are-workspace-packages': workspace => {
-    workspace.contracts.files['src/index.ts'] += "import '@vibesys/nowhere';\n";
+    workspace['display-names'].files['src/index.ts'] += "import '@vibesys/nowhere';\n";
   },
   'imports-are-declared': workspace => {
     workspace['web-app'].files['src/index.ts'] += "import '@vibesys/ui';\n";
@@ -357,7 +355,7 @@ const RULE_CASES = {
   'preload-sandbox': workspace => {
     // A value import: the sandbox's require cannot load a workspace package.
     workspace['desktop-main'].files['src/preload/run.cts'] =
-      "import {RunEvent} from '@vibesys/contracts';\nexport type P = RunEvent;\n";
+      "import {RunEvent} from '@vibesys/display-names';\nexport type P = RunEvent;\n";
   },
   'external-dependencies': workspace => {
     // The pure state entry reaching a Node builtin.
@@ -365,7 +363,7 @@ const RULE_CASES = {
   },
   'runtime-reachability': workspace => {
     // A renderer entry reaching a Node-only package.
-    workspace['stop-run'].files['src/renderer/index.ts'] += "import '@vibesys/connection';\n";
+    workspace['stop-run'].files['src/renderer/index.ts'] += "import '@vibesys/proto';\n";
   },
   'entry-projects': workspace => {
     delete workspace.ui.files['tsconfig.lib.json'];
@@ -375,7 +373,7 @@ const RULE_CASES = {
     workspace['stop-run'].files['tsconfig.state.json'].compilerOptions = {types: ['node']};
   },
   'references-match-dependencies': workspace => {
-    workspace.connection.files['tsconfig.lib.json'].references = [];
+    workspace.proto.files['tsconfig.lib.json'].references = [];
   },
   'domain-free': workspace => {
     workspace.ui.files['src/index.ts'] += 'export const runStatus = 2;\n';
@@ -383,7 +381,7 @@ const RULE_CASES = {
   },
   'bucket-names': workspace => {
     // A foundation package named for where things go rather than what it owns.
-    workspace['shared-models'] = structuredClone(workspace.contracts);
+    workspace['shared-models'] = structuredClone(workspace['display-names']);
     workspace['shared-models'].manifest.name = '@vibesys/shared-models';
   },
   'layer-matches-folder': workspace => {
@@ -399,7 +397,7 @@ const RULE_CASES = {
 
 /** A leaf foundation library filed at `directory`, which nothing depends on. */
 function misfiledLibrary(directory) {
-  const library = structuredClone(validWorkspace().contracts);
+  const library = structuredClone(validWorkspace()['display-names']);
   library.manifest.name = '@vibesys/misfiled';
   library.directory = directory;
   library.files['tsconfig.lib.json'] = project({
@@ -431,7 +429,7 @@ for (const [rule, mutate] of Object.entries(RULE_CASES)) {
 test('a preload reaches neither a Node entry nor a Node builtin', async t => {
   const workspace = validWorkspace();
   workspace['desktop-main'].files['src/preload/run.cts'] =
-    "import type {E} from '@vibesys/connection';\nimport fs = require('node:fs');\n" +
+    "import type {E} from '@vibesys/proto';\nimport fs = require('node:fs');\n" +
     'export type P = [E, typeof fs];\n';
   const errors = packageGraphErrors(await materialize(t, workspace));
   assert.deepEqual(errors.map(error => error.split(':')[0]).sort(), [
@@ -444,11 +442,11 @@ test('a preload reaches neither a Node entry nor a Node builtin', async t => {
 test('test code may import a dev dependency of any runtime', async t => {
   const workspace = validWorkspace();
   const app = workspace['web-app'];
-  app.manifest.devDependencies = {'@vibesys/connection': 'workspace:*'};
+  app.manifest.devDependencies = {'@vibesys/proto': 'workspace:*'};
   app.files['tsconfig.lib.json'].references.push({
-    path: '../../libs/connection/tsconfig.lib.json',
+    path: '../../libs/proto/tsconfig.lib.json',
   });
-  app.files['src/index.test.ts'] = "import 'node:fs';\nimport '@vibesys/connection';\n";
+  app.files['src/index.test.ts'] = "import 'node:fs';\nimport '@vibesys/proto';\n";
   assert.deepEqual(packageGraphErrors(await materialize(t, workspace)), []);
 });
 
@@ -460,54 +458,18 @@ const EXTERNAL_CASES = {
     workspace['stop-run'].files['src/renderer/index.ts'] += "import 'electron';\n";
   },
   'Electron in a service package': workspace => {
-    workspace.connection.files['src/index.ts'] += "import 'electron';\n";
+    workspace.proto.files['src/index.ts'] += "import 'electron';\n";
   },
   'a bare Node builtin in a dom entry': workspace => {
     workspace.ui.files['src/index.ts'] += "import 'fs';\n";
   },
   'a Node builtin in a neutral entry': workspace => {
-    workspace.contracts.files['src/index.ts'] += "import 'node:fs';\n";
+    workspace['display-names'].files['src/index.ts'] += "import 'node:fs';\n";
   },
   'React declared by a package with no dom entry': workspace => {
-    workspace.contracts.manifest.dependencies = {'react-dom': '19.1.1'};
-  },
-  // Control state is a machine; a fold, a model, a primitive, or a wire package is not.
-  'XState in a foundation package': workspace => {
-    workspace.contracts.files['src/index.ts'] += "import 'xstate';\n";
-  },
-  'XState in an app': workspace => {
-    workspace['web-app'].files['src/index.ts'] += "import {setup} from 'xstate';\n";
-  },
-  "XState in a feature's main-process entry": workspace => {
-    workspace['stop-run'].files['src/main/index.ts'] += "import 'xstate';\n";
-  },
-  'XState declared by a package that may not use it': workspace => {
-    workspace.ui.manifest.dependencies.xstate = '5.33.2';
+    workspace['display-names'].manifest.dependencies = {'react-dom': '19.1.1'};
   },
 };
-
-test('XState is allowed in a feature state and renderer entry and in a machine package', async t => {
-  const workspace = validWorkspace();
-  workspace['stop-run'].manifest.dependencies.xstate = '5.33.2';
-  workspace['stop-run'].files['src/state/index.ts'] += "import {setup} from 'xstate';\n";
-  workspace['stop-run'].files['src/renderer/index.ts'] += "import {createActor} from 'xstate';\n";
-  workspace.machine = {
-    manifest: {
-      name: '@vibesys/machine',
-      vibesys: {layer: 'core', entries: {'.': 'neutral'}},
-      exports: {'.': source('index')},
-      dependencies: {xstate: '5.33.2'},
-    },
-    files: {
-      'src/index.ts': "export {setup} from 'xstate';\n",
-      'tsconfig.lib.json': project({include: ['src']}),
-    },
-  };
-  // The connection manager is a machine package: its host connection is a machine.
-  workspace.connection.manifest.dependencies.xstate = '5.33.2';
-  workspace.connection.files['src/index.ts'] += "import {setup} from 'xstate';\n";
-  assert.deepEqual(packageGraphErrors(await materialize(t, workspace)), []);
-});
 
 for (const [name, mutate] of Object.entries(EXTERNAL_CASES)) {
   test(`external-dependencies rejects ${name}`, async t => {
@@ -529,7 +491,7 @@ const EFFECT_CASES = {
     workspace['web-app'].files['src/index.ts'] += "import 'effect/Effect';\n";
   },
   'Effect declared by a foundation package': workspace => {
-    workspace.contracts.manifest.dependencies = {effect: '4.1.2'};
+    workspace['display-names'].manifest.dependencies = {effect: '4.1.2'};
   },
   'the Effect React bindings in the app folds': workspace => {
     workspace.desktop.manifest.dependencies['@effect/atom-react'] = '4.1.2';
@@ -561,8 +523,12 @@ for (const [name, mutate] of Object.entries(EFFECT_CASES)) {
 test('specifiers in comments and strings are not imports', () => {
   const text =
     "// import '@vibesys/ui';\nconst s = \"from '@vibesys/ui'\";\n" +
-    "import a from '@vibesys/contracts';\nexport * from '@vibesys/x/y';\nawait import('@vibesys/z');\n";
-  assert.deepEqual(workspaceSpecifiers(text), ['@vibesys/contracts', '@vibesys/x/y', '@vibesys/z']);
+    "import a from '@vibesys/display-names';\nexport * from '@vibesys/x/y';\nawait import('@vibesys/z');\n";
+  assert.deepEqual(workspaceSpecifiers(text), [
+    '@vibesys/display-names',
+    '@vibesys/x/y',
+    '@vibesys/z',
+  ]);
 });
 
 test('a file belongs to its exact entry, else the deepest index directory', () => {
@@ -598,7 +564,7 @@ test('a bucket name is allowed above the domain layer and as part of a longer wo
   const workspace = validWorkspace();
   workspace['web-app'].manifest.name = '@vibesys/app-shared';
   workspace['web-app'].manifest.vibesys.layer = 'app';
-  workspace['core-model'] = structuredClone(workspace.contracts);
+  workspace['core-model'] = structuredClone(workspace['display-names']);
   workspace['core-model'].manifest.name = '@vibesys/coresident';
   assert.deepEqual(packageGraphErrors(await materialize(t, workspace)), []);
 });
@@ -811,11 +777,11 @@ test('strict-imports rejects a UI kit declared in the manifest, naming the key',
 test('strict-imports allows the listed libraries, react-dom and tests', async t => {
   const workspace = validWorkspace();
   workspace.screen.files['src/renderer/index.ts'] +=
-    "import 'react-dom/client';\nimport '@vibesys/connection';\nimport '@vibesys/ui';\n";
-  workspace.screen.manifest.dependencies['@vibesys/connection'] = 'workspace:*';
+    "import 'react-dom/client';\nimport '@vibesys/proto';\nimport '@vibesys/ui';\n";
+  workspace.screen.manifest.dependencies['@vibesys/proto'] = 'workspace:*';
   workspace.screen.manifest.dependencies['react-dom'] = '19.1.1';
   workspace.screen.files['tsconfig.renderer.json'].references.push({
-    path: '../../libs/connection/tsconfig.lib.json',
+    path: '../../libs/proto/tsconfig.lib.json',
   });
   const errors = packageGraphErrors(await materialize(t, workspace));
   assert.deepEqual(strictRules(errors), []);
@@ -845,26 +811,5 @@ test('an app composes feature screens without marker declarations', async t => {
 
   app.manifest.dependencies['@vibesys/feature-stop-run'] = 'workspace:*';
   app.files['src/index.ts'] += "import '@vibesys/feature-stop-run/renderer';\n";
-  assert.deepEqual(strictRules(packageGraphErrors(await materialize(t, workspace))), []);
-});
-
-test('strict packages can allocate request identities through the neutral foundation entry', async t => {
-  const workspace = validWorkspace();
-  workspace['request-identity'] = {
-    manifest: {
-      name: '@vibesys/request-identity',
-      vibesys: {layer: 'foundation', entries: {'.': 'neutral'}},
-      exports: {'.': source('index')},
-    },
-    files: {
-      'src/index.ts': 'export const newRequestId = () => "id";\n',
-      'tsconfig.lib.json': project({include: ['src']}),
-    },
-  };
-  workspace.screen.manifest.dependencies['@vibesys/request-identity'] = 'workspace:*';
-  workspace.screen.files['src/renderer/index.ts'] += "import '@vibesys/request-identity';\n";
-  workspace.screen.files['tsconfig.renderer.json'].references.push({
-    path: '../../libs/request-identity/tsconfig.lib.json',
-  });
   assert.deepEqual(strictRules(packageGraphErrors(await materialize(t, workspace))), []);
 });
