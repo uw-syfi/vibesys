@@ -83,7 +83,7 @@ replaced. A stage that ran between two polls opens its stream then, or at settle
 
 `vibesys.run.logs.open_run_log_store(project_root, run_id, threads=..., warn=...)` opens a
 run's store in `Project.log_streams_directory_for(root, run_id)`, the one place that path is
-built (the host helper reads it there too). Opening a store closes as `abandoned` every
+built. Opening a store closes as `abandoned` every
 stream a crashed writer left open.
 
 A run opens its store in one place: run assembly (`vibesys.run.resources`) enters
@@ -152,10 +152,10 @@ an opened record from an older store may carry `adopted_path: null`, which is ig
 carries the bytes, the pipe spans, `truncated_before` (asked-for bytes were evicted),
 `eof` and `closed`. The close state is read before the bytes, so `closed` with `eof`
 means the chunk reaches the final end. Every byte is read through `ByteSource`. A
-`StreamInfo` says `degraded` when the store lost some of the stream's bytes; the wire's
-`logs.list` does not carry it yet. A listing or read raises `CorruptLogError` when the
-index holds a complete record that does not decode; the host helper answers that with
-`log_store_corrupt`, which the client does not retry on its own.
+`StreamInfo` says `degraded` when the store lost some of the stream's bytes. A listing
+or read raises `CorruptLogError` when the index holds a complete record that does not
+decode. The reader remains covered by the library's contract tests; no product module
+currently imports it. The current desktop does not expose this log-store reader.
 
 ## Enforcement
 
@@ -176,7 +176,7 @@ index holds a complete record that does not decode; the host helper answers that
 | `vs_sim` sinks and `ByteSource` | built |
 | `vs_logs` store, scope, reader; `LogOwner` and its TypeScript | built |
 | Startup producers (image build, container start) | built |
-| Host helper `logs` feature | built; the client logs library was deleted |
+| Host helper `logs` feature | deleted with the legacy Python server and client libraries |
 | Narration handler and excepthook | built |
 | `NarrationLine` in the generated protocol types | built |
 | Run view Startup log panel and Inspect log sheet | deleted with the legacy desktop app |

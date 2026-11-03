@@ -1,20 +1,14 @@
-"""The light host commands import only light modules.
+"""The light CLI commands import only light modules.
 
-``vibesys example``, ``vibesys instances``, ``vibesys tasks``, ``vibesys evals`` and the host
-helper are what the desktop app runs on a host, once per action or channel, so
-their start-up time is the app's latency. The run engine (``vibesys.api`` and what it loads) takes about
-1.7 s to import; these commands must never pay for it. Tach cannot keep them
-light on its own: its edges are module granular, and ``server.api`` (run
-protocol and engine together) is one module.
+``vibesys example`` and ``vibesys evals`` must load without the run engine.
+The launcher routes these commands before loading the engine. Tach declares
+allowed edges but does not bound their transitive import cost.
 
-This guard computes the *static module-level import closure* of each light
-entrypoint: every module its import statements execute when it is loaded,
-followed transitively through first-party source and the packages each dotted
-name initializes. Imports under ``if TYPE_CHECKING:`` and inside function bodies
-are excluded, because they do not run at import;
-``tests/e2e/test_light_host_commands.py`` checks what a real process loads.
-The closure must stay within ``ALLOWED``; a violation names the import chain
-that pulled the module in.
+This guard computes the static module-level import closure of each light
+entrypoint, following first-party imports and package initializers. Imports
+under ``if TYPE_CHECKING:`` and inside function bodies are excluded because
+they do not run at import. The closure must stay within ``ALLOWED``; a
+violation names the import chain that pulled the module in.
 """
 
 from __future__ import annotations
@@ -38,7 +32,7 @@ LIGHT_ENTRYPOINTS = (
     "entrypoints.examples",
     "entrypoints.evals",
 )
-"""Modules a light host command loads first. The launcher routes on argv before
+"""Modules a light CLI command loads first. The launcher routes on argv before
 it loads anything heavy, so its own module level is held to the same bound."""
 
 ALLOWED_THIRD_PARTY = frozenset({"pydantic", "pydantic_core", "typing_extensions"})
@@ -60,11 +54,8 @@ ALLOWED_FIRST_PARTY = (
 """First-party modules, or packages with everything under them, the closure may hold.
 
 ``vs_sim``, ``vs_project``, ``vs_decode``, ``vs_redaction``, ``vs_logs`` and ``vs_slurm``
-are allowed whole: they are the light libraries the host commands are built on
-(``vs_redaction`` imports only the standard library; ``vs_decode`` imports only pydantic;
-``vs_logs``, which a detached run needs to buffer its narration before the engine loads and
-the host helper reads run logs with, only pydantic, ``vs_decode`` and ``vs_sim``; ``vs_slurm``
-only pydantic, ``vs_decode`` and ``vs_sim``), and their own boundaries are tach's job."""
+are allowed whole: these libraries have bounded dependencies and their own
+boundaries are enforced by tach."""
 
 
 def _module_file(name: str, roots: tuple[Path, ...] = SOURCE_ROOTS) -> Path | None:
@@ -166,14 +157,7 @@ def _allowed(name: str, roots: tuple[Path, ...] = SOURCE_ROOTS) -> bool:
         exact = name in ALLOWED_FIRST_PARTY
         whole_package = _within(
             name,
-            (
-                "vs_sim",
-                "vs_project",
-                "vs_decode",
-                "vs_redaction",
-                "vs_logs",
-                "vs_slurm",
-            ),
+            ("vs_sim", "vs_project", "vs_decode", "vs_redaction", "vs_logs", "vs_slurm"),
         )
         return (exact or whole_package) and not is_heavy(name)
     top = name.partition(".")[0]
@@ -195,28 +179,22 @@ def test_light_entrypoint_imports_only_light_modules(entrypoint: str) -> None:
     assert violations(entrypoint) == []
 
 
-LAZY_MODULE_PRIMITIVE = frozenset({"server"})
-"""The ``server`` package, whose init holds only ``lazy_module``: it imports nothing until a handle is read."""
-
-
 # --- the guard's own behavior ----------------------------------------------------
 
 
-def test_a_heavy_module_is_reported_with_the_chain_that_loaded_it(
-    tmp_path: Path,
-) -> None:
+def test_a_heavy_module_is_reported_with_the_chain_that_loaded_it(tmp_path: Path) -> None:
     # A protocol module that builds on the control envelope and loads the engine: a small
     # tree with the same shape, so the closure walk does not cross the whole product.
-    package = tmp_path / "server"
+    package = tmp_path / "adapter"
     package.mkdir()
     (package / "__init__.py").write_text("")
-    (package / "protocol.py").write_text("from server import api\nfrom server import envelope\n")
+    (package / "protocol.py").write_text("from adapter import api\nfrom adapter import envelope\n")
     (package / "envelope.py").write_text("import json\n")
     (package / "api.py").write_text("import vibesys.api\n")
 
-    found = violations("server.protocol", (tmp_path,))
+    found = violations("adapter.protocol", (tmp_path,))
 
-    assert any(line.startswith("server.api: server.protocol -> server.api") for line in found)
+    assert any(line.startswith("adapter.api: adapter.protocol -> adapter.api") for line in found)
     assert any(line.startswith("vibesys") for line in found)
 
 

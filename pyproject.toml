@@ -45,7 +45,7 @@ Repository = "https://github.com/uw-syfi/vibesys"
 Issues = "https://github.com/uw-syfi/vibesys/issues"
 
 [project.scripts]
-# The `vibesys` launcher routes run and host commands to their Python entrypoints.
+# The `vibesys` launcher routes Python run and utility commands to their entrypoints.
 vibesys = "entrypoints.launcher:main"
 
 [tool.setuptools.package-data]
@@ -270,9 +270,6 @@ extend-exclude = [
     "examples/microservices/repositories/masa",
     "examples/microservices/repositories/rpcstack",
     "examples/microservices/repositories/train-ticket",
-    # This pinned external source owns its lint policy. Rewriting upstream waivers
-    # would alter a separate repository; per-task exceptions would duplicate its tree.
-    "examples/model-serving/repositories/sglang",
     "examples/model-serving/repositories/vllm",
     "examples/model-serving/repositories/vllm-omni",
     # Verbatim transformers modeling code shipped as a bundle reference.

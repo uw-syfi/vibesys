@@ -233,7 +233,7 @@ CLOCK_FUNCTIONS = frozenset(
 )
 PACKAGE_API = "api"
 EXTRA_PUBLIC_MODULES: dict[str, tuple[str, ...]] = {
-    # The read side, split from `vs_logs.api` so tach can show it to the host helper only.
+    # The separate reader interface remains public for its library contract tests.
     "vs_logs": ("read",),
 }
 """Public modules a library declares besides ``api``, each its own tach interface."""

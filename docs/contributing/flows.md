@@ -320,8 +320,9 @@ running or waiting span. A defect crashes the step that raised it, which is neve
 trace holds no defect.
 
 The shell reads the spans as `FlowDriver.trace(state)`, a frozen `RunTrace` of `Span`s (exported
-from `vs_core.api`); `FlowState` itself stays private. Clients get the trace as span events and
-snapshot spans: see "Run trace events" in [wire-protocol.md](wire-protocol.md). `test_flows_trace.py` and the sweep in
+from `vs_core.api`); `FlowState` itself stays private. The run log records span events for
+replay, and the Go gateway projects them into its Skeleton view; see
+[Run recovery](run-recovery.md) for log authority and replay. `test_flows_trace.py` and the sweep in
 `test_flows_properties.py` check the properties, live and with a restart after every step.
 
 ### Span labels

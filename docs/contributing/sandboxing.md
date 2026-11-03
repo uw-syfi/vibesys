@@ -190,69 +190,26 @@ macOS when full read confinement matters.
   only. The operator actions `cancel_attempt` and `cancel_item` do change selection: a
   cancelled attempt is never judged, so it cannot win. `set_max_parallel` only lowers how
   much runs at once. No control field carries a measurement command, a checker or a trust
-  rule. The inbox is outside the project's write grant (above). The server's control
-  socket (`control.sock`) serves a connection only after its first line presents the
-  operator key (`vs_project.api.OperatorKey`, checked in `server.transport.unix_jsonl`).
-  The key is a `0600` file, `control.key`, in the user's runtime root
-  (`vs_project.api.user_runtime_root`: `$XDG_RUNTIME_DIR/vibesys`, else
-  `/tmp/vibesys-<uid>`), and it never enters an argument vector or an environment
-  variable. Only a server creates it; clients only read it. Every operator socket (a
-  detached run's, web mode's) is created in that root, and the operator's clients present
-  the key only to a socket whose resolved directory is inside it (`OperatorDialer`), so an
-  agent that can write elsewhere cannot swap in its own listener to read the key. On every
-  dial the client first checks that the root itself is a directory, not a symlink, owned
-  by the user with mode `0700`, and reads the key through the directory it checked. The
-  server refuses at startup a `--control-socket` outside the root, naming both. A
-  connection must send its whole hello within 2 s of being accepted (every operator
-  client sends it as its first write), and at most 8 connections may wait to do so. A
-  connection accepted while 8 wait closes the one that has waited longest, not the new
-  one, so peers without the key hold at most 8 server workers for at most 2 s each and
-  cannot keep the operator out by reconnecting. The operator's hello arrives with its
-  connection, so it is evicted only if 8 more connections are accepted before the server
-  reads that write; against 8 peers that reconnect at once, every operator connection
-  is served (`tests/server/test_control_admission.py`). Every agent confinement keeps
-  the root out of the agent's view (`vs_sandbox.operator_root`): bubblewrap, Landlock and
-  Docker refuse with `SandboxUnavailableError` to build a view in which a grant or mount
-  contains the root or lies inside it, checked again each time a view is compiled (for
-  Docker, as each `docker run` is built), and Seatbelt denies it after every allow. Code that runs unconfined on the host as the
-  operator can read the key, including candidate code a trusted gate runs on the host: the
-  key separates confined agents from the operator, not one unconfined host process from
-  another.
-- **Only bubblewrap and Docker keep the agent from the operator's pathname sockets, the
-  runtime root and the key; only Docker keeps it off the host network namespace too.**
-  `WorkspaceSandbox.claims_operator_control_boundary` records which confinements claim the
-  first, and says in its docstring that it covers no more. `build_host_sandbox` logs the
-  gap for one that does not claim it. Landlock does not restrict `connect()` to a
-  pathname Unix socket, so a Landlock agent can connect to any socket its uid may open,
-  wherever it is. Two give a full escape: the user's D-Bus (`$XDG_RUNTIME_DIR/bus`;
-  `systemd-run --user --pipe cat <file>` runs any command as the operator, unconfined,
-  and reads the operator key with it) and the Docker daemon (`/var/run/docker.sock`, for
-  a user in the `docker` group; a container can mount the host's filesystem). Under
-  Landlock, the operator key and the runtime root's placement stop an agent that only
-  talks to the control socket from being served or from keeping the operator out, but
-  not one that uses those sockets. Seatbelt's profile allows `network*`, so the same
-  holds on macOS by analogy (not probed there).
+  rule. The machine-local inbox is outside the project's write grant; the run reads it
+  through `vs_project.api.ControlInbox`. See [Run recovery](run-recovery.md) for control
+  delivery and replay.
+- **Operator runtime root.** The confinement library still protects the per-user runtime
+  root (`vs_project.api.user_runtime_root`: `$XDG_RUNTIME_DIR/vibesys`, else
+  `/tmp/vibesys-<uid>`). Bubblewrap, Landlock and Docker refuse a grant or mount that
+  contains the root or lies inside it, checked each time a view is compiled. Seatbelt
+  denies the root after every allow. `libs/vs-sandbox/tests/test_operator_root.py` covers
+  these checks and the backends' declared boundaries without a real confinement.
+  Landlock grants `/tmp`, so it needs `XDG_RUNTIME_DIR` outside that grant or refuses to
+  start.
 
-  Bubblewrap shares the host's network namespace, because the agent must reach its model
-  provider. Abstract Unix sockets and services on host loopback TCP therefore stay
-  reachable under it, as under Landlock and Seatbelt: a session bus that `dbus-launch`
-  started on `unix:abstract=`, or a Docker daemon on `127.0.0.1:2375`, is the same escape
-  as the pathname sockets above. Landlock ABI 6 scopes abstract sockets, so a Landlock
-  agent on such a kernel cannot reach them; bubblewrap applies no Landlock scope (a
-  follow-up). A Docker container has its own network namespace, so neither is reachable
-  from it. Use the default Docker run environment where operator control or the host
-  must be protected and such a listener may exist; bubblewrap suffices where none does.
-
-  `tests/e2e/test_control_socket_reachability_e2e.py` probes every backend for real: the
-  bus and Docker sockets, an abstract socket and a loopback TCP port, each known gap
-  pinned so that closing it fails the test. Under `VIBESYS_REQUIRE_SANDBOX_TESTS=1` on
-  Linux a missing bus or Docker socket fails it, and CI's `sandbox-linux` job starts the
-  runner's user bus for it. The real-Docker test runs only with `VIBESYS_E2E_DOCKER=1`,
-  which no CI job sets: it is run by hand. `tests/server/test_control_admission.py` and
-  `libs/vs-sandbox/tests/test_operator_root.py` cover the refusal without a real
-  confinement. Because Landlock grants `/tmp`, it needs `XDG_RUNTIME_DIR` (systemd's
-  `/run/user/<uid>`): without it the root falls back to `/tmp/vibesys-<uid>`, inside the
-  grant, and Landlock refuses to start.
+  Runtime-root protection does not isolate the host network. Landlock does not restrict
+  connections to pathname Unix sockets; Seatbelt allows `network*`. Bubblewrap hides
+  pathname sockets but shares the host network namespace, so abstract Unix sockets and
+  services on host loopback remain reachable. Docker has a separate network namespace.
+  A reachable user bus or Docker daemon can let an agent run unconfined commands. Use
+  the Docker run environment where such a listener may exist and the host must be
+  protected. The deleted Python server's key handshake and connection-admission tests
+  provide no guarantee for the current daemon transports.
 - **Seatbelt** reads are broader than bubblewrap (above).
 - **Hidden-path design.** The planning issue for prebuilt agent images (#674,
   closed) proposed "no explicit hidden access: deny what is not listed". The

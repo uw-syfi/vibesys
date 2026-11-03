@@ -231,8 +231,9 @@ class WorkspaceSandbox(ABC):
     #: Unix sockets (such as a ``dbus-launch`` bus at ``unix:abstract=``) and services on
     #: host loopback TCP (such as a Docker daemon on ``127.0.0.1:2375``) stay reachable
     #: under it; a Docker container has its own network namespace, so neither is.
-    #: ``tests/e2e/test_control_socket_reachability_e2e.py`` probes every one of these
-    #: answers, the gaps pinned.
+    #: The backend declarations and runtime-root grant checks are covered by
+    #: ``libs/vs-sandbox/tests/test_operator_root.py``; network reachability is
+    #: not exercised by those deterministic tests.
     claims_operator_control_boundary: ClassVar[bool]
 
     def _refuse_operator_root(self, backend: str, granted: Iterable[Path | str]) -> None:

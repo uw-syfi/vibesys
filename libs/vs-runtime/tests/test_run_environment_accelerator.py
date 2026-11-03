@@ -1,7 +1,7 @@
 """Which run environments hand their agent the compute backend's accelerator on this host.
 
 A run in such an environment checks the accelerator before its image build, and
-``vibesys preflight`` asks the same question through ``attaches_backend_accelerator``.
+startup validation asks the same question through ``attaches_backend_accelerator``.
 """
 
 from __future__ import annotations

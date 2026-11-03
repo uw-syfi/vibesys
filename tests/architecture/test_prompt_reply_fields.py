@@ -30,7 +30,6 @@ from tests.support.prompt_context import registered_reply_models
 from vs_prompts.api import reply_fields
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-# `src/server` renders chat prompts, which have no reply model.
 _TEMPLATE_ROOTS = (_REPO_ROOT / "src" / "vibesys", _REPO_ROOT / "libs")
 
 _TOOL_RESULT = "the evaluation tool's own result field, not a field of an agent reply"

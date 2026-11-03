@@ -493,9 +493,7 @@ def test_stale_reference_exclusions_are_current() -> None:
         },
     ],
 )
-def test_registry_entry_model_rejects_inconsistent_entries(
-    fields: dict[str, object],
-) -> None:
+def test_registry_entry_model_rejects_inconsistent_entries(fields: dict[str, object]) -> None:
     base = {"path": "examples/x"}
     with pytest.raises(
         ValueError, match=r"examples/x|surprise|Extra|live|tracking|forbidden|under"

@@ -145,7 +145,7 @@ For cheap per-module and patch coverage checks before push, supply the touched
 Python modules' own test files explicitly (repeat `--coverage-test` as needed):
 
 ```bash
-./support/repoctl/repoctl test --coverage-only --base origin/main --coverage-test tests/entrypoints/test_host_helper.py
+./support/repoctl/repoctl test --coverage-only --base origin/main --coverage-test tests/entrypoints/test_launcher.py
 ```
 
 This mode runs only those files with one worker, then reports coverage for

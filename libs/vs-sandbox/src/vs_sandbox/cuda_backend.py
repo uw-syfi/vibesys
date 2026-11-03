@@ -368,8 +368,7 @@ def cuda_accelerator_unavailable(probe: CommandProbe) -> str | None:
     """Why the ``cuda`` backend cannot run on this host, read through *probe*, or ``None``.
 
     The same decision :meth:`CudaBackend.ensure_accelerator_available` makes before a
-    run builds its image, so a check made ahead of the run (``vibesys preflight``)
-    agrees with the run.
+    run builds its image, so startup validation agrees with the run.
     """
     if _gpu_usable(NvidiaSmiTelemetry(probe=probe)):
         return None

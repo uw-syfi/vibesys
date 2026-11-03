@@ -83,9 +83,7 @@ def test_profiler_summary_rejects_non_finite_perf_metric(value: float) -> None:
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
-def test_profiler_summary_rejects_non_finite_multi_objective_metric(
-    value: float,
-) -> None:
+def test_profiler_summary_rejects_non_finite_multi_objective_metric(value: float) -> None:
     with pytest.raises(ValidationError, match="finite number"):
         _profiler_summary(metrics={"throughput": value})
 

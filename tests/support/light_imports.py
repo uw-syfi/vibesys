@@ -1,10 +1,9 @@
-"""What the light host commands may not import: shared by the static and real guards.
+"""What the light CLI commands may not import.
 
 ``tests/architecture/test_light_entrypoints.py`` checks the static import
-closure of each light entrypoint; ``tests/e2e/test_light_host_commands.py``
-checks what a real process loads (as does ``tests/e2e/test_host_helper.py``).
-They name the heavy layers from this one list, in groups, so a failure names the layer a
-module belongs to as well as the module.
+closure of each light entrypoint. It names the heavy layers from this one
+list, in groups, so a failure names the layer a module belongs to as well as
+the module.
 
 A module list is only as complete as its source. ``-X importtime`` does not report a module
 loaded through ``importlib`` (a ``lazy_module`` handle, or a package that loads its submodules

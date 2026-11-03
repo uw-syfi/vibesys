@@ -71,7 +71,7 @@ owners; see [Sandboxing and confinement](sandboxing.md).
 
 Long-running work writes its output to `vs_logs`, which keeps each stream under a typed
 owner for humans to read. `vs_logs` sits in the tach layer `logs`, above every library, so
-no library imports it; only the product writes logs and its readers use `vs_logs.read`. See [Log streams](logs.md).
+no library imports it. The product writes logs; `vs_logs.read` currently has only library-test consumers. See [Log streams](logs.md).
 
 The TypeScript clients under `clients/` have their own package graph, layers, and
 build model; see [Clients architecture](clients-architecture.md).

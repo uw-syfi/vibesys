@@ -124,11 +124,8 @@ role override, a quota fallback, a chat thread), raises
 `resolve_agent_specs` runs in `validate_run_request`, before any image build,
 and reports the error naming the configuration key. Only the terminal's
 `--allow-unvetted-model` and a resume set the opt-out. Experiment chat offers
-the same list. The host helper serves it to the desktop app's start sheet
-(`harnesses.list`), starts a run only with a pair from it, and refuses the
-opt-out flag in a start's arguments, so a run started from the desktop app
-cannot leave the list
-([desktop-connection.md](desktop-connection.md)).
+the same list. Python run validation enforces this policy before starting work; see
+[CLI flags](../cli-flags.md) for the operator's options.
 
 The same construction also applies the host allow-list
 (`~/.config/vibesys/host.toml`, key `allowed_models`; see

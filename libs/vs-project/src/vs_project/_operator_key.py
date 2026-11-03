@@ -134,7 +134,7 @@ class OperatorKey:
 
     def admits(self, line: bytes) -> bool:
         """Whether ``line`` is this key's hello."""
-        import hmac  # noqa: PLC0415  # lint-waiver: LW-313306 [PLC0415]; only a server admits, and the host helper imports this module to dial, where #2351 pins that answering hello loads no hmac (tests/e2e/test_host_helper.py). A module-level import would load it for every client; moving admits to a server-only module would split the key's one contract across two owners; hand-rolling a constant-time compare would trade a vetted primitive for an unvetted one.
+        import hmac  # noqa: PLC0415  # lint-waiver: LW-313306 [PLC0415]; only key verification needs hmac. A module-level import would load it for key readers and generators too; moving admits to a separate module would split the key's one contract across two owners; hand-rolling a constant-time compare would trade a vetted primitive for an unvetted one.
 
         return hmac.compare_digest(line, self.hello())
 

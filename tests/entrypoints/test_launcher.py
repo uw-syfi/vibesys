@@ -8,11 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from entrypoints import launcher as cli
-from vs_sim.api.testing import (
-    FakeForegroundLauncher,
-    FakeSignalSource,
-    ForegroundScript,
-)
+from vs_sim.api.testing import FakeForegroundLauncher, FakeSignalSource, ForegroundScript
 
 if TYPE_CHECKING:
     from pathlib import Path

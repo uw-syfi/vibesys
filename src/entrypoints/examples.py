@@ -144,10 +144,7 @@ class NewProject:
 
     def instructions(self) -> str:
         """The lines that tell the user how to start a run in the new project."""
-        lines = [
-            f"Created {self.destination} from example {self.example}.",
-            "Run it with:",
-        ]
+        lines = [f"Created {self.destination} from example {self.example}.", "Run it with:"]
         lines.append(f"  cd {self.destination}")
         if self.tasks:
             lines.append(f"  vibesys --task {self.tasks[0]}")
@@ -188,10 +185,7 @@ def new_example(
             materializer.clone_pinned(root, example, target)
         else:
             materializer.copy_tracked(
-                root,
-                example,
-                target,
-                message=f"Start from VibeSys example {entry.name}",
+                root, example, target, message=f"Start from VibeSys example {entry.name}"
             )
         tasks = example_tasks(target)
     except BaseException:

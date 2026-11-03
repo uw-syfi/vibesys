@@ -297,12 +297,7 @@ def _convert_run_journal(frame: bytes, directory: Path) -> None:
         journal = Project.event_journal_path_for(project_root, "run-1")
         journal.parent.mkdir(parents=True, exist_ok=True)
         journal.write_bytes(frame)
-        convert_run(
-            Project.open(project_root),
-            "run-1",
-            clock=ManualClock(),
-            threads=SimThreads(),
-        )
+        convert_run(Project.open(project_root), "run-1", clock=ManualClock(), threads=SimThreads())
 
 
 def _retained_facts(frame: bytes, _: Path) -> None:

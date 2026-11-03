@@ -143,5 +143,5 @@ conformance corpus.
 - The CI test workflow: shards, wall-time thresholds, and which jobs run.
 - [testing-map.md](../../../docs/contributing/testing-map.md): the layers and
   where a new test goes.
-- The wire-protocol conformance corpus and its readers, described in
-  [wire-protocol.md](../../../docs/contributing/wire-protocol.md).
+- The retained conformance fixtures and their consumers, described in
+  [references/typescript.md](references/typescript.md).
