@@ -52,6 +52,15 @@ type App struct {
 	epoch string
 }
 
+// storeReadiness separates a successful write from a complete recovery read.
+type storeReadiness uint8
+
+const (
+	storeNotObserved storeReadiness = iota
+	storeReadable
+	storeRecoveryPending
+)
+
 // message is an event for the machine, with what the loop must keep because of it.
 type message struct {
 	event lifecycle.Event
@@ -59,8 +68,8 @@ type message struct {
 	// started. postEffect attaches the token captured in its context.
 	generation  *effectGeneration
 	observation *storeObservation
-	// readable supersedes older reads and clears unread state in the same loop step.
-	readable bool
+	// Readiness supersedes older observations; only a complete recovery clears unread.
+	readiness storeReadiness
 	// scope, when set, is the scope of the store the event's job is in.
 	scope *core.Scope
 	// handle, when set, reaches the event's job's supervisor.
@@ -118,28 +127,37 @@ func (a *App) Close() {
 	a.sups.closeAll()
 }
 
-// post gives the loop a message. It returns false when the App is closing.
-func (a *App) post(m message) bool {
+// post is the loop's only input boundary. Readiness needs a lifetime stamp;
+// reject malformed messages with a typed error before they can reach the loop.
+func (a *App) post(m message) error {
+	if m.readiness != storeNotObserved && m.generation == nil {
+		if m.handle != nil {
+			m.handle.Close()
+		}
+		return &core.Failure{Kind: core.FailureInternal, Message: "a store readiness post requires a generation"}
+	}
 	select {
 	case a.inbox <- m:
-		return true
+		return nil
 	case <-a.ctx.Done():
 		if m.handle != nil {
 			m.handle.Close()
 		}
-		return false
+		return a.ctx.Err()
 	}
 }
 
 // settle posts a message and returns when the loop has taken it up, or the App closes.
-func (a *App) settle(m message) {
+func (a *App) settle(m message) error {
 	m.done = make(chan struct{})
-	if !a.post(m) {
-		return
+	if err := a.post(m); err != nil {
+		return err
 	}
 	select {
 	case <-m.done:
+		return nil
 	case <-a.ctx.Done():
+		return a.ctx.Err()
 	}
 }
 
@@ -174,9 +192,9 @@ func (a *App) loop() {
 		}
 		var reqs []lifecycle.Request
 		before := state
-		if m.readable {
+		if m.readiness != storeNotObserved {
 			a.generations.advance(m.generation)
-			if _, read := m.event.(lifecycle.StoreRead); !read {
+			if _, read := m.event.(lifecycle.StoreRead); !read && m.readiness == storeReadable {
 				state, reqs = lifecycle.Step(state, lifecycle.StoreRead{Store: m.generation.store})
 			}
 		}

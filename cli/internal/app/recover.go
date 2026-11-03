@@ -193,14 +193,15 @@ func (a *App) sweepOnce(ctx context.Context) {
 }
 
 // readAgain takes up a store that could not be read before.
-func (a *App) readAgain(ctx context.Context, scope core.Scope) {
+func (a *App) readAgain(ctx context.Context, scope core.Scope) error {
 	ctx = a.observationContext(ctx, storeIDOf(scope))
 	err := a.recoverScope(ctx, scope, func(ref lifecycle.Ref) supervisor.Run { return a.look(ctx, ref) })
 	if err != nil {
 		a.cfg.Logf("the store of task %s in %s cannot be read yet: %v", string(scope.Task()), string(scope.Repository()), err)
-		return
+		return err
 	}
-	a.postEffect(ctx, message{event: lifecycle.StoreRead{Store: storeIDOf(scope)}, readable: true})
+	a.postEffect(ctx, message{event: lifecycle.StoreRead{Store: storeIDOf(scope)}, readiness: storeReadable})
+	return nil
 }
 
 // sweepStore looks at a store the machine has read before.
@@ -237,5 +238,5 @@ func (a *App) sweepStore(ctx context.Context, scope core.Scope) {
 		}
 	}
 
-	a.postEffect(ctx, message{event: lifecycle.StoreRead{Store: storeIDOf(scope)}, readable: true})
+	a.postEffect(ctx, message{event: lifecycle.StoreRead{Store: storeIDOf(scope)}, readiness: storeReadable})
 }

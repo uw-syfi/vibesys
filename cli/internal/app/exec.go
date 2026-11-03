@@ -32,14 +32,14 @@ func (a *App) startEffect(r lifecycle.Request, scopes map[lifecycle.StoreID]core
 func (a *App) postEffect(ctx context.Context, m message) bool {
 	m.generation, _ = ctx.Value(generationKey{}).(*effectGeneration)
 	m.observation, _ = ctx.Value(observationKey{}).(*storeObservation)
-	return a.post(m)
+	return a.post(m) == nil
 }
 
 // settleEffect preserves a caller's lifetime stamp while awaiting application.
-func (a *App) settleEffect(ctx context.Context, m message) {
+func (a *App) settleEffect(ctx context.Context, m message) error {
 	m.generation, _ = ctx.Value(generationKey{}).(*effectGeneration)
 	m.observation, _ = ctx.Value(observationKey{}).(*storeObservation)
-	a.settle(m)
+	return a.settle(m)
 }
 
 func (a *App) answer(ctx context.Context, e lifecycle.Event) bool {
