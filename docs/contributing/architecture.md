@@ -233,7 +233,7 @@ typed-field checks above are the part a check can hold.
 [//]: # (tach-graph:start)
 ## Architecture overview
 
-Submodules such as `vibesys.orchestration` and `server.api` are collapsed into their top-level package.
+Submodules such as `vibesys.orchestration` and `vibesys.api` are collapsed into their top-level package.
 
 ```mermaid
 graph TD
