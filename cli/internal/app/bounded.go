@@ -297,7 +297,10 @@ func (a *App) ofRepository(ctx context.Context, repository string) ([]core.Scope
 }
 
 // endRun ends what is left of a run of a repository that is gone. A live command is cancelled and
-// given its time to end. A run that may live and cannot be reached stays.
+// given its time to end. A run whose command never started, as when the daemon went down between
+// recording the job running and telling the supervisor to start, is started after the cancel: the
+// supervisor then ends without running anything, and nothing else would ever start it for the
+// wait to see. A run that may live and cannot be reached stays.
 func (a *App) endRun(ctx context.Context, run supervisor.Run) error {
 	switch r := run.(type) {
 	case supervisor.Dead:
@@ -306,6 +309,13 @@ func (a *App) endRun(ctx context.Context, run supervisor.Run) error {
 		if err := a.call(ctx, func(ctx context.Context) error { return r.Handle.Cancel(ctx, "its repository was forgotten") }); err != nil {
 			if _, gone := goneProof(err); !gone {
 				return err
+			}
+		}
+		if r.Phase == lifecycle.RunParked {
+			if err := a.call(ctx, r.Handle.Start); err != nil {
+				if _, gone := goneProof(err); !gone {
+					return err
+				}
 			}
 		}
 		stop, done := clock.Deadline(ctx, a.cfg.Timers, a.cfg.StopTimeout)
