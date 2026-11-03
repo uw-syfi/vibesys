@@ -19,6 +19,7 @@ it('views preserve the facts while unreadable and only accept judgments against 
         VerdictKind.WORSE,
         VerdictKind.WITHIN_NOISE,
         VerdictKind.INCONCLUSIVE,
+        VerdictKind.TRADEOFF,
         VerdictKind.UNSPECIFIED,
       ),
       fc.boolean(),
@@ -50,6 +51,7 @@ it('views preserve the facts while unreadable and only accept judgments against 
                 [VerdictKind.WORSE]: 'Worse',
                 [VerdictKind.WITHIN_NOISE]: 'Within noise',
                 [VerdictKind.INCONCLUSIVE]: 'Inconclusive',
+                [VerdictKind.TRADEOFF]: 'Tradeoff',
                 [VerdictKind.UNSPECIFIED]: 'Not judged',
               }[kind],
         );
