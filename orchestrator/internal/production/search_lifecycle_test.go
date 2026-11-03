@@ -27,7 +27,7 @@ func TestFollowerEveryFailureReplacesReadableReason(t *testing.T) {
 			Bound: func(c context.Context) (context.Context, context.CancelFunc) {
 				return context.WithDeadline(c, time.Unix(1<<40, 0))
 			},
-			Ensurer: missingEnsurer{reason},
+			Ensurer: availableEnsurer{},
 			Sleep:   func(context.Context, time.Duration) error { cancel(); return context.Canceled },
 		}
 		followSearch(ctx, f, Subscription{Repository: "/repo", Task: "task"}, &v, func(search.View) {})
@@ -38,11 +38,9 @@ func TestFollowerEveryFailureReplacesReadableReason(t *testing.T) {
 	}
 }
 
-type missingEnsurer struct{ reason clidaemon.Reason }
+type availableEnsurer struct{}
 
-func (e missingEnsurer) Ensure(context.Context, clidaemon.Location) error {
-	return &clidaemon.Unreadable{Reason: e.reason, Detail: "failure"}
-}
+func (availableEnsurer) Ensure(context.Context, clidaemon.Location) error { return nil }
 
 func TestReconcilerGeneratedLifetimes(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
@@ -52,6 +50,7 @@ func TestReconcilerGeneratedLifetimes(t *testing.T) {
 		active := map[Subscription]bool{}
 		callbacks := map[Subscription]func(search.View){}
 		r := &Reconciler{Store: store}
+		defer r.Close()
 		r.Follow = func(ctx context.Context, k Subscription, publish func(search.View)) {
 			mu.Lock()
 			if active[k] {
@@ -127,6 +126,7 @@ func TestTerminalFollowerRestartsOnlyWithChangedSubscription(t *testing.T) {
 			publish(search.View{Reason: search.CLINotInstalled})
 		}}
 		run := core.Run{ID: "r", Status: core.RunRunning, Location: core.CliLocation{CLI: "/old/cli"}}
+		defer r.Close()
 		r.Sync(context.Background(), []core.Run{run})
 		synctest.Wait()
 		for range 10 {
@@ -150,6 +150,7 @@ func TestTerminalFollowerRestartsOnlyWithChangedSubscription(t *testing.T) {
 func TestNewFollowerStartsConnecting(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r := &Reconciler{Store: new(search.Store), Follow: func(ctx context.Context, _ Subscription, _ func(search.View)) { <-ctx.Done() }}
+		defer r.Close()
 		r.Sync(context.Background(), []core.Run{{ID: "r", Status: core.RunRunning}})
 		v, rev := r.Store.Get("r")
 		if rev == 0 || v.Reason != search.Connecting {
