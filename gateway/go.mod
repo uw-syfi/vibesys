@@ -43,3 +43,5 @@ tool (
 )
 
 replace github.com/uw-syfi/vibesys/orchestrator => ../orchestrator
+
+replace github.com/uw-syfi/vibesys/cli => ../cli

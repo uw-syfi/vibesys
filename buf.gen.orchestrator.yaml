@@ -10,8 +10,10 @@ plugins:
   - local: [go, -C, orchestrator, tool, protoc-gen-go]
     strategy: all
     out: orchestrator/gen
-    opt: paths=source_relative
+    opt:
+      - paths=source_relative
   - local: [go, -C, orchestrator, tool, protoc-gen-go-grpc]
     strategy: all
     out: orchestrator/gen
-    opt: paths=source_relative
+    opt:
+      - paths=source_relative

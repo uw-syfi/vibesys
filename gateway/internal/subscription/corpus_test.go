@@ -129,11 +129,15 @@ func record(t *testing.T, scripts []streamScript) []corpusStream {
 			if each.fail {
 				turns++
 			}
-			for range turns {
+			for turn := range turns {
 				gate <- struct{}{}
 				synctest.Wait()
-				time.Sleep(time.Second)
-				synctest.Wait()
+				// The initial snapshot flushes immediately. Keep the next step inside
+				// its interval so its writes are conflated before the next tick.
+				if turn > 0 {
+					time.Sleep(time.Second)
+					synctest.Wait()
+				}
 			}
 			if each.quiet > 0 {
 				time.Sleep(each.quiet)

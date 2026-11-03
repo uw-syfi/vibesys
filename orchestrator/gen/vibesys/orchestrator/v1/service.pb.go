@@ -77,7 +77,8 @@ func (Compatibility) EnumDescriptor() ([]byte, []int) {
 }
 
 // PlanStatus mirrors vibesys-cli's plan status. The orchestrator shows it and decides nothing on
-// it. This module does not import the CLI's contract, so the read-through has its own message.
+// it. New consumers use the CLI contract generated in this module. This legacy read-through
+// remains until ListPlans and ViewPlan are retired.
 type PlanStatus int32
 
 const (
