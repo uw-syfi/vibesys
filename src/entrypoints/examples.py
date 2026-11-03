@@ -63,10 +63,6 @@ class ExampleMaterializer(Protocol):
         """Clone the repository ``checkout`` pins as the submodule ``example``, at the pinned commit."""
         ...
 
-    def repository_root(self, path: Path) -> Path | None:
-        """The root of the Git repository ``path`` is in, or ``None`` when it is in none."""
-        ...
-
 
 @dataclass(frozen=True)
 class GitExampleMaterializer:
@@ -106,15 +102,6 @@ class GitExampleMaterializer:
         clone = ["clone", "--quiet", *(["--branch", branch] if branch else []), url]
         self._git(checkout, *clone, str(destination))
         self._git(destination, "checkout", "--quiet", "-B", branch or "vibesys", commit)
-
-    def repository_root(self, path: Path) -> Path | None:
-        """``git rev-parse --show-toplevel`` in ``path``; ``None`` outside any repository."""
-        try:
-            completed = self.git.run_text(("rev-parse", "--show-toplevel"), cwd=path)
-        except OSError:
-            return None
-        top = completed.stdout.strip()
-        return Path(top).resolve() if completed.returncode == 0 and top else None
 
     def _git(self, cwd: Path, *args: str) -> str:
         try:
@@ -181,10 +168,6 @@ class DestinationNestedError(DestinationError):
     """The destination lies inside the VibeSys checkout or another Git repository."""
 
 
-class NotNestedError(Exception):
-    """A folder to copy out is in no other Git repository; it can run where it is."""
-
-
 def new_example(
     checkout: Path, name: str, destination: Path, materializer: ExampleMaterializer
 ) -> NewProject:
@@ -215,43 +198,6 @@ def new_example(
         _restore(target, existed=existed)
         raise
     return NewProject(example=entry.name, destination=target, tasks=tasks)
-
-
-def copy_out(source: Path, destination: Path, materializer: ExampleMaterializer) -> NewProject:
-    """Copy ``source``'s tracked files into their own new Git repository at ``destination``.
-
-    ``source`` must sit inside another repository (a project there cannot be its own
-    repository); ``destination`` must not exist, nor lie inside that repository. Nothing
-    is left behind on failure.
-    """
-    folder = source.expanduser().resolve()
-    if not folder.is_dir():
-        message = f"no folder to copy out at {folder}"
-        raise FileNotFoundError(message)
-    repository = materializer.repository_root(folder)
-    if repository is None or repository == folder:
-        message = f"{folder} is in no other Git repository; run it where it is"
-        raise NotNestedError(message)
-    target = destination.expanduser().resolve()
-    if target.exists() or target.is_symlink():
-        message = f"refusing to copy out to {target}: it exists"
-        raise DestinationExistsError(message)
-    if target.is_relative_to(repository):
-        message = f"refusing to copy out inside the repository {repository}: {target}"
-        raise DestinationNestedError(message)
-    relative = PurePosixPath(folder.relative_to(repository).as_posix())
-    try:
-        materializer.copy_tracked(
-            repository,
-            relative,
-            target,
-            message=f"Copy {relative} out of {repository.name}",
-        )
-        tasks = example_tasks(target)
-    except BaseException:
-        _restore(target, existed=False)
-        raise
-    return NewProject(example=relative.as_posix(), destination=target, tasks=tasks)
 
 
 def _restore(target: Path, *, existed: bool) -> None:

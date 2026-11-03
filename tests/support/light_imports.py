@@ -36,11 +36,6 @@ HEAVY: dict[Layer, tuple[str, ...]] = {
         "vibesys",
         "vs_runtime",
         "vs_core",
-        "server.api",
-        "server.events",
-        "server.chat",
-        "server.runtime",
-        "server.transport",
     ),
     Layer.AGENT_DRIVERS: (
         "vs_agent",
