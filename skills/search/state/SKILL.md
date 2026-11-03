@@ -23,7 +23,8 @@ All worktrees of the repository share one store per task, so any agent sees the 
 ## What lives in git and on disk
 
 - Result branch (the optimization's "main"): `vibesys/result/<task>`. The lead creates it once, at
-  the base commit, and never checks it out. Only `vibesys-cli promote` moves it.
+  the base commit (for a base that fails the check, at the bootstrap commit:
+  `vibesys:optimize`), and never checks it out. Only `vibesys-cli promote` moves it.
 - Candidate branches: `vibesys-work/<task>/plan-N`, where N is the plan number.
 - Worktrees: the lead picks one directory outside the repository's working tree and puts every
   worktree there (`git worktree add`), one per plan, one per judge or profile question. Each brief

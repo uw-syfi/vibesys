@@ -68,7 +68,7 @@ A failed check or build saves nothing; put the failing output in the hand-back, 
 - `vibesys-cli compare <sha> [--against <sha2>]` prints one verdict and its numbers, against the
   result branch head or against `<sha2>`. It exits 0 for every verdict; read the verdict, which
   `--json` has as `comparison.verdict.kind`. Only `better` is a gain. `worse` and `within_noise` are
-  not. On `inconclusive`, add samples within your brief's budget. Never compute a verdict yourself.
+  not. On `inconclusive`, add samples within your brief's budget, unless the line says `not comparable`: the two commits were measured under different task versions or metrics, which more samples cannot fix, so report it. Never compute a verdict yourself.
 - Samples add up: `submit measure <sha> --samples 8` runs only the missing ones. Identical readings
   on both sides stay inconclusive however many you add.
 - `vibesys-cli result --json` has the number to report for the result branch, in

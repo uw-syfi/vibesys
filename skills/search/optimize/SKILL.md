@@ -5,8 +5,8 @@ description: "Use when asked to optimize a repository against a benchmark, unatt
 
 # Optimize
 
-You are the lead of one optimization for one task. You steer; you never edit candidate code.
-Subagents do that, each in its own git worktree. Everything you need is stored by `vibesys-cli` or
+You are the lead of one optimization for one task. You steer; you never write code. Subagents do
+that, each in its own git worktree. Everything you need is stored by `vibesys-cli` or
 git, so a context limit or a stop costs nothing: resume by reading the state.
 
 Arguments: `<task>` and `--fanout N`, the most subagents running at once (default 3). Planners,
@@ -31,11 +31,16 @@ in your environment, read `references/harness/vibesys-orchestrator.md`; otherwis
 2. Read `.vibesys/tasks/<task>/OBJECTIVE.md`, `vibesys.input.toml` and `objectives.toml`. Stop and
    say why, creating nothing, when tracked files have uncommitted changes (the base must be a
    commit) or the first `vibesys-cli submit` fails with a message about the task: it says what the CLI
-   cannot run. Leave the environment (`--env`) to the task unless the user chose one.
-3. Create or resume the optimization (`vibesys:state`). A new one gets the result branch
-   `vibesys/result/<task>` at the base commit, and a context line you reuse in every brief:
-   `--task <task> --run <run id> --harness <harness>`. Every worktree of the repository shares the
-   task's one store, so each agent sees the others' jobs.
+   cannot run. A broken task is the user's to fix, never yours (Rules). Leave the environment
+   (`--env`) to the task unless the user chose one.
+3. Create or resume the optimization (`vibesys:state`). A new one first needs a base that passes
+   its check: run `vibesys-cli submit check <base> --wait` (a pass is saved and later measures reuse
+   it). If it fails, the base can never be measured and every promotion would be refused
+   `unmeasured`: read [from-scratch.md](references/from-scratch.md) and create nothing else
+   until it says to. Otherwise it gets the result branch `vibesys/result/<task>` at the base
+   commit, and a context line you reuse in every brief: `--task <task> --run <run id> --harness
+   <harness>`. Every worktree of the repository shares the task's one store, so each agent sees
+   the others' jobs.
 4. If `vibesys-cli show <base>` lists no measure result, measure the base with
    `vibesys-cli submit measure <base> --samples 5`, as a tracked background `wait`
    (`vibesys:measure`). No comparison means anything until it lands. Plan while it runs.
@@ -64,10 +69,20 @@ in your environment, read `references/harness/vibesys-orchestrator.md`; otherwis
 
 ## Rules
 
-- You never edit candidate code. Subagents do, in their own worktrees.
+- You never write code or edit a file of the repository: not candidate code, not a first draft or
+  a stub to get going, not a test. Workers do, each in its own worktree. When every slot is busy,
+  wait for one; do not do the work yourself.
+- Never edit anything under `.vibesys/`, and no file of the task (its checker, benchmark,
+  manifest, objectives or data), not even to make a failing base pass. A task that cannot run, or
+  a check that fails for a reason in the task and not in the code, is a broken task: stop, change
+  nothing, and report what failed (`vibesys-cli logs <job>`). `vibesys-cli submit check|measure`
+  refuses a commit whose task files differ from the result branch head's (a `conflict` failure
+  that names the paths), so such an edit could not be measured or promoted anyway. A base that
+  fails the check because the code is missing is not a broken task: [from-scratch.md](references/from-scratch.md).
 - Plans may fix bugs, add tests or microbenchmarks, reorganize code, or otherwise change code to make it more robust over time; an optimization must never sacrifice correctness.
 - The result branch moves only through `vibesys-cli promote <sha>`, and only for a candidate whose
-  judge verdict is `pass`. Never move it with git. Exit 0 promoted. Exit 1 refused: the reasons are
+  judge verdict is `pass`. Never move it with git (`branch -f`, `update-ref`, `reset`, `push`),
+  and never create it again after it exists. Exit 0 promoted. Exit 1 refused: the reasons are
   on stdout, one of `unmeasured`, `check_missing`, `worse`, `within_noise`, `inconclusive`, `stale`
   or `environment_mismatch`; show the user a refusal as the CLI printed it. A candidate that does
   not contain the head also exits 1, with a `conflict` failure on stderr: dispatch a combine of
@@ -89,6 +104,11 @@ in your environment, read `references/harness/vibesys-orchestrator.md`; otherwis
   failed job. Never resubmit a job after a `wait` that exited 3 or 4, or by reflex after a failure:
   inspect with `vibesys-cli jobs --json` or `show`. Wait on completion notifications, never on a
   sleep or a polling loop.
+- After you dispatch a subagent, wait for it. Its handoff and the harness's settle message reach
+  you on their own; end your turn or block on them (the harness file, "Wait for work without
+  polling"). Never poll the list of agents, or their state, on a timer: every poll spends your
+  context and tells you nothing a message would not. Look at the list when a message arrives, on a
+  resume, or when an expected handoff is so overdue that you say why you looked.
 - Stop when work plateaus (N consecutive plans within noise, or planners find nothing with
   meaningful expected gain) or when the user stops it. To pause, bring every plan up to date
   (status and a last comment); to resume, read the state.

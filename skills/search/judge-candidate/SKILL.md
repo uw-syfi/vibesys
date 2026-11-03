@@ -33,7 +33,8 @@ candidate's whole diff from its parent, not one commit: the candidate may sit on
    evidence. Fail a claim about speed only when a saved result shows it is not there. If the
    candidate or its parent has no comparable result, return `unmeasured` and ask the lead to
    schedule the measurement. Never run a long measurement in the judge. A correctness-only pass is
-   `unmeasured`, never an unconditional `pass`.
+   `unmeasured`, never an unconditional `pass`, except for a bootstrap candidate, which your brief
+   names: it claims no speed, so correctness and honesty decide, and it needs no comparison.
 
 Source reading decides correctness and benchmark integrity. Only a recorded measurement decides a
 claim about speed. Do not run other benchmarks. The correctness check is the exception to the short-command budget.
@@ -44,4 +45,5 @@ the verdict. Do not start benchmarks of your own.
 ## Return
 
 `pass`, `fail` or `unmeasured`, and the reasons, each tied to a file and line or a recorded
-number.
+number. Deliver it through the harness's handoff tool (`post_handoff` in a run that has it) as
+your last act; a verdict written as prose reaches nobody. Never end a turn without it.

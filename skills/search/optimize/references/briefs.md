@@ -29,6 +29,9 @@ Rules:
 - Implement and combine workers commit as vibesys:commit says before reporting (the candidate is a
   full commit with `Checks: pass`; the branch name and `Plan: N` come from the brief); judge and
   profile workers edit nothing.
+- Finish every turn by measuring (within the budget), then delivering the handoff with the
+  harness's handoff tool (`post_handoff` in a run that has it) as your last act. A prose summary
+  is not a handoff; never end a turn without one.
 ```
 
 Domain skills: pick from the plugin's skill list those whose description fits the task's
