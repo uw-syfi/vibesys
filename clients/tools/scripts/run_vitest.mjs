@@ -17,6 +17,9 @@ import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {VITEST_ARGUMENTS} from './test_runner_config.mjs';
 
+/** The shared configuration: source resolution for workspace packages (see the file). */
+const SHARED_CONFIG = fileURLToPath(new URL('./vitest.config.mjs', import.meta.url));
+
 /** The roots as path filters Vitest matches against test file paths, or a rejection. */
 export function parseRoots(argv) {
   if (argv.length === 0) {
@@ -43,7 +46,7 @@ function main(argv) {
   const roots = parseRoots(argv);
   const child = spawn(
     process.execPath,
-    [vitestEntry(process.cwd()), ...VITEST_ARGUMENTS, ...roots],
+    [vitestEntry(process.cwd()), ...VITEST_ARGUMENTS, '--config', SHARED_CONFIG, ...roots],
     {
       stdio: 'inherit',
     },
