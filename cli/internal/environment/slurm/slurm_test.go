@@ -179,11 +179,11 @@ func TestAnAllocationNotConfirmedEndedMakesTheRunUnobserved(t *testing.T) {
 	}
 }
 
-func TestAnAllocationAsksForTheNodeWithoutRequeueAndOutlastsTheCommand(t *testing.T) {
+func TestAnAllocationAsksForTheNodeAndOutlastsTheCommand(t *testing.T) {
 	a := slurm.Allocator{Partition: "gpu", Gres: "gpu:1", Exclusive: true, Arguments: []string{"--nodelist=node-a"}}
 	got := a.Allocate(dockercli.Allocation{Name: "vibesys-cli-0123", Scope: "d42", Limit: time.Hour}, []string{"docker", "run", "x"})
 	want := []string{
-		"srun", "--no-requeue", "--job-name=vibesys-docker-vibesys-cli-0123", "--nodes=1", "--ntasks=1", "--time=70",
+		"srun", "--job-name=vibesys-docker-vibesys-cli-0123", "--nodes=1", "--ntasks=1", "--time=70",
 		"--comment=d42", "--partition=gpu", "--gres=gpu:1", "--exclusive", "--nodelist=node-a", "--", "docker", "run", "x",
 	}
 	if !slices.Equal(got, want) {

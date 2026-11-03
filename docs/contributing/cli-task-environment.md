@@ -187,7 +187,7 @@ through `ssh`, so the image is built and kept on the machine that runs it.
 ### Slurm: the allocation holds the container
 
 Under `slurm`, the container's first process is started by `srun` inside a new
-allocation (`--no-requeue`, the configured partition, GRES, `--exclusive` and
+allocation (the configured partition, GRES, `--exclusive` and
 extra arguments, and a time limit of the command's timeout plus a margin), and
 image builds run under `srun` too, so neither perturbs another job's
 measurement. The Docker daemon runs outside Slurm's cgroups, so ending the
@@ -195,7 +195,10 @@ allocation does not end the container; the CLI removes the container itself on
 every path, then cancels the allocation and confirms it ended. From `vs-slurm`
 this keeps the semantics, not the code:
 
-- `--no-requeue`: a job Slurm requeues would run a command twice.
+- No requeue: a job Slurm requeues would run a command twice. `vs-slurm`
+  passes `--no-requeue` to `sbatch`; an allocation `srun` makes is interactive,
+  and Slurm requeues batch jobs only, so `srun` has no such option (Slurm
+  23.11 refuses it) and none is needed.
 - State is read with `squeue`, then `sacct` once `squeue` no longer lists the
   job.
 - A cancel is `scancel` by job name, then confirmed by waiting until `squeue`

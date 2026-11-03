@@ -54,7 +54,7 @@ func (e *Engine) Build(ctx context.Context, spec docker.BuildSpec, log io.Writer
 		return unavailable("cannot run %q to build: %v; %s", e.program, err, hint)
 	}
 	if e.shell.Lost(exit.ExitCode()) {
-		return unavailable("the connection to %s was lost while it built the task's image; the end of the build's output:\n%s", e.shell.Where(), out.last())
+		return unavailable("the build of the task's image on %s ended with the transport's own exit code %d (a lost connection, or a command that exited with it); the end of the build's output:\n%s", e.shell.Where(), exit.ExitCode(), out.last())
 	}
 	return unavailable("building the task's image failed (exit %d); the end of the build's output:\n%s", exit.ExitCode(), out.last())
 }

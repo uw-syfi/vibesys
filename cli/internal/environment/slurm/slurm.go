@@ -8,9 +8,11 @@
 // and a sweep of a scope finds allocations whose container is gone, by the job's name and
 // comment, so the next run cancels what a dead one left.
 //
-// What it keeps of vs-slurm is the semantics, not the code: --no-requeue, a job's state read with
-// squeue and then sacct, a cancel confirmed, a run found again by its job name, and an exit status
-// nobody saw treated as unknown (the docker engine reports a transport's lost exit as lost).
+// What it keeps of vs-slurm is the semantics, not the code: a job is never requeued (vs-slurm
+// passes --no-requeue to sbatch; an allocation srun makes is interactive, and Slurm requeues batch
+// jobs only, so srun has no such option), a job's state is read with squeue and then sacct, a
+// cancel is confirmed, a run is found again by its job name, and an exit status nobody saw is
+// unknown (the docker engine reports a transport's lost exit as lost).
 package slurm
 
 import (
@@ -72,7 +74,7 @@ func (a Allocator) Allocate(x dockercli.Allocation, argv []string) []string {
 	}
 	minutes := int((limit + time.Minute - 1) / time.Minute)
 	out := []string{
-		"srun", "--no-requeue", "--job-name=" + JobName(x.Name), "--nodes=1", "--ntasks=1",
+		"srun", "--job-name=" + JobName(x.Name), "--nodes=1", "--ntasks=1",
 		"--time=" + strconv.Itoa(minutes),
 	}
 	if x.Scope != "" {
