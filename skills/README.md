@@ -31,6 +31,7 @@ skill's message checker also needs Python 3.10 or newer. Nothing needs the VibeS
 | --- | --- | --- |
 | Claude Code | supported | supported |
 | Codex | supported | harness mechanisms written from Codex's docs and source; **untested end to end** |
+| VibeSys orchestrator (Claude Code or Codex agents, spawned through its tools) | supported | `vibesys-orchestrator.md`, selected when `VIBESYS_RUN_ID` is set; **untested end to end** |
 | Other agents (`npx skills`) | supported | needs a harness file for that agent, as described below |
 
 ## Harness neutrality
@@ -41,6 +42,8 @@ needs any carries `references/harness/<harness>.md`, and its `SKILL.md` points t
 sentence. Skills with no harness need have no such folder. The plugin packaging
 (`.claude-plugin/`) is Claude Code's delivery format, which Codex and `npx skills` also read, and
 is the only Claude-specific part outside those folders.
+
+The VibeSys orchestrator is a harness in this sense too: it hosts the lead and starts every subagent through MCP tools, on either Claude Code or Codex, so its file replaces the per-harness choice whenever `VIBESYS_RUN_ID` is set.
 
 A harness file answers only the capabilities its skill uses, under these headings:
 
