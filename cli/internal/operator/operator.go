@@ -84,8 +84,11 @@ type Remote struct {
 // SlurmConfig is how an allocation is asked for.
 type SlurmConfig struct {
 	Partition string
-	// Gres is what a container asks for; a build asks for no GRES.
+	// Gres is what a measured container asks for; a build asks for no GRES.
 	Gres string
+	// SharedGres, when set, is what an unmeasured container asks for instead of Gres, such as a
+	// shard of a GPU.
+	SharedGres string
 	// Exclusive gives a measured container, a benchmark sample, the whole node.
 	Exclusive bool
 	// CPUs is how many CPUs a build or an unmeasured container asks for.
@@ -146,6 +149,7 @@ type file struct {
 	Slurm *struct {
 		Partition           string   `toml:"partition"`
 		Gres                string   `toml:"gres"`
+		SharedGres          string   `toml:"shared_gres"`
 		Exclusive           *bool    `toml:"exclusive"`
 		CPUs                *int     `toml:"cpus"`
 		Memory              string   `toml:"memory"`
@@ -243,7 +247,7 @@ func Parse(data []byte) (Config, error) {
 	}
 	if s := f.Slurm; s != nil {
 		c.Slurm = &SlurmConfig{
-			Partition: s.Partition, Gres: s.Gres, Exclusive: true, CPUs: DefaultCPUs, Memory: s.Memory, SrunArguments: s.SrunArguments,
+			Partition: s.Partition, Gres: s.Gres, SharedGres: s.SharedGres, Exclusive: true, CPUs: DefaultCPUs, Memory: s.Memory, SrunArguments: s.SrunArguments,
 			PollInterval: DefaultPollInterval, QueueTimeout: DefaultQueueTimeout,
 		}
 		if s.Exclusive != nil {
@@ -258,7 +262,7 @@ func Parse(data []byte) (Config, error) {
 		if s.Memory != "" && !memoryPattern.MatchString(s.Memory) {
 			return Config{}, invalid("slurm.memory: %q is not a Slurm size such as 32G", s.Memory)
 		}
-		for key, v := range map[string]string{"partition": s.Partition, "gres": s.Gres} {
+		for key, v := range map[string]string{"partition": s.Partition, "gres": s.Gres, "shared_gres": s.SharedGres} {
 			if !valuePattern.MatchString(v) {
 				return Config{}, invalid("slurm.%s: %q is not a Slurm value", key, v)
 			}

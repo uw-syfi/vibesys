@@ -47,8 +47,8 @@ func TestASlurmConfigReadsWithItsDefaults(t *testing.T) {
 		s.CPUs != operator.DefaultCPUs || s.Memory != "" {
 		t.Errorf("slurm %+v", c.Slurm)
 	}
-	c, err = operator.Parse([]byte(strings.Replace(slurmConfig, "[slurm]", "[slurm]\ncpus = 12\nmemory = \"48G\"", 1)))
-	if err != nil || c.Slurm.CPUs != 12 || c.Slurm.Memory != "48G" {
+	c, err = operator.Parse([]byte(strings.Replace(slurmConfig, "[slurm]", "[slurm]\ncpus = 12\nmemory = \"48G\"\nshared_gres = \"shard:1\"", 1)))
+	if err != nil || c.Slurm.CPUs != 12 || c.Slurm.Memory != "48G" || c.Slurm.SharedGres != "shard:1" {
 		t.Errorf("slurm %+v, %v; want 12 CPUs and 48G", c.Slurm, err)
 	}
 }
@@ -92,6 +92,7 @@ func TestAMistakeIsRefusedNamingTheKey(t *testing.T) {
 		"an empty ssh command":              strings.Replace(slurmConfig, "[slurm]", "ssh_command = []\n[slurm]", 1),
 		"a gres that is not a value":        strings.Replace(slurmConfig, `"gpu:1"`, `"gpu:1 --x"`, 1),
 		"an unknown key in a sub-table":     strings.Replace(slurmConfig, "[slurm]", "[slurm]\nnodes = 1", 1),
+		"a shared gres that is not a value": strings.Replace(slurmConfig, "[slurm]", "[slurm]\nshared_gres = \"shard:1 --x\"", 1),
 		"no CPUs":                           strings.Replace(slurmConfig, "[slurm]", "[slurm]\ncpus = 0", 1),
 		"a memory with no unit":             strings.Replace(slurmConfig, "[slurm]", "[slurm]\nmemory = \"32\"", 1),
 		"a memory Docker reads another way": strings.Replace(slurmConfig, "[slurm]", "[slurm]\nmemory = \"32GB\"", 1),

@@ -195,7 +195,7 @@ func (p Process) machineEnvironments(clk clock.System, dir runtimedir.Dir) (envi
 		cfg.GPUFacts = &nvidia.GPUs{Shell: ssh, Timers: clk}
 		if s := op.Slurm; s != nil {
 			engineCfg.Allocator = slurm.Allocator{
-				Partition: s.Partition, Gres: s.Gres, Exclusive: s.Exclusive, CPUs: s.CPUs, Memory: s.Memory,
+				Partition: s.Partition, Gres: s.Gres, SharedGres: s.SharedGres, Exclusive: s.Exclusive, CPUs: s.CPUs, Memory: s.Memory,
 				Arguments: s.SrunArguments, Builder: slurm.BuilderName(scope),
 			}
 			engineCfg.StartTimeout = s.QueueTimeout

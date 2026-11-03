@@ -63,8 +63,9 @@ const DefaultCPUs = 8
 //   - An image build asks for CPUs and memory only, and builds in a BuildKit builder of its own
 //     whose container is confined to the CPUs and memory Slurm gave it (Docker's own builder
 //     runs in the daemon, outside Slurm's cgroups, and cannot be confined).
-//   - A container whose commands are not measured, a check, asks for the GPUs (Gres) and its
-//     share of CPUs and memory, so it can run beside other work on the node.
+//   - A container whose commands are not measured, a check, asks for SharedGres (Gres when it is
+//     empty) and its share of CPUs and memory, so it can run beside other work on the node: with
+//     a GPU split into Slurm shards, a shard of it.
 //   - A measured container, a benchmark sample, asks for the GPUs and, when Exclusive, the whole
 //     node, so nothing else runs while it is timed.
 //
@@ -72,7 +73,11 @@ const DefaultCPUs = 8
 // from the allocation itself.
 type Allocator struct {
 	Partition string
-	Gres      string
+	// Gres is what a measured container asks for: the whole GPU.
+	Gres string
+	// SharedGres is what an unmeasured container asks for, such as "shard:1" of a GPU that Slurm
+	// shares; empty means Gres.
+	SharedGres string
 	// Exclusive gives a measured container the whole node.
 	Exclusive bool
 	// CPUs is how many CPUs a build or an unmeasured container asks for; zero means DefaultCPUs.
@@ -110,8 +115,8 @@ func (a Allocator) Allocate(x dockercli.Allocation, argv []string) []string {
 	if a.Partition != "" {
 		out = append(out, "--partition="+a.Partition)
 	}
-	if !x.Build && a.Gres != "" {
-		out = append(out, "--gres="+a.Gres)
+	if gres := a.gres(x); gres != "" {
+		out = append(out, "--gres="+gres)
 	}
 	if x.Measured && a.Exclusive {
 		out = append(out, "--exclusive")
@@ -134,6 +139,17 @@ func (a Allocator) Allocate(x dockercli.Allocation, argv []string) []string {
 		return append(append(out, "sh", "-c", buildScript, "vs-build", a.builder(), a.Memory, argv[0]), argv[2:]...)
 	}
 	return append(append(out, "sh", "-c", confineScript, "vs-run", argv[0], argv[1]), argv[2:]...)
+}
+
+// gres is what the allocation asks for of the node's generic resources: nothing for a build.
+func (a Allocator) gres(x dockercli.Allocation) string {
+	switch {
+	case x.Build:
+		return ""
+	case !x.Measured && a.SharedGres != "":
+		return a.SharedGres
+	}
+	return a.Gres
 }
 
 func (a Allocator) builder() string {

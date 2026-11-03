@@ -91,7 +91,8 @@ remote_workspace_root = "/home/user/vibesys-cli"
 
 [slurm]
 partition = "gpu"
-gres = "gpu:1"             # what a check and a benchmark sample ask for
+gres = "gpu:1"             # what a benchmark sample asks for
+shared_gres = "shard:1"    # what a check asks for; gres when unset
 exclusive = true           # a benchmark sample holds the whole node
 cpus = 8                   # what a build and a check ask for
 memory = "32G"             # optional, a Slurm size
@@ -235,7 +236,7 @@ it runs:
 | Command | Asks for | Confined by |
 | --- | --- | --- |
 | Image build | `cpus` and `memory`; no GRES, not exclusive | a BuildKit builder of its own whose container is limited to the allocation's CPUs and `memory` |
-| Check (accuracy) | `gres`, `cpus` and `memory`; not exclusive | `docker run --cpuset-cpus` with the allocation's CPUs |
+| Check (accuracy) | `shared_gres` (or `gres`), `cpus` and `memory`; not exclusive | `docker run --cpuset-cpus` with the allocation's CPUs |
 | Benchmark sample | `gres` and, with `exclusive = true`, the whole node | the same, which is then every CPU |
 
 The core marks an execution `Measured` when it is a benchmark sample, the docker
@@ -301,6 +302,12 @@ running one's store works in a separate clone.
   task starts the candidate's compiler cache cold (on the Spark, 308 s for the
   candidate build instead of 9 to 10 s warm). Keying it by the task alone
   would keep it, at the cost of a cache that a new toolchain may misuse.
-- One GPU is one GRES: dropping `--exclusive` lets a check share the node's
-  CPUs, not its GPU, so two GPU jobs on a one-GPU node still run one after the
-  other.
+- Without GPU shards, one GPU is one GRES: dropping `--exclusive` lets a
+  check share the node's CPUs, not its GPU, so two GPU jobs on a one-GPU node
+  still run one after the other. With the node's GPU split into Slurm shards
+  (`Gres=gpu:gb10:1,shard:4`), `shared_gres = "shard:1"` lets up to four checks
+  share it, while a sample still asks for `gpu:1` and the whole node. A shard
+  is a scheduling token, not a limit on the GPU, and `memory` is one too for a
+  container (the Docker daemon runs outside Slurm's cgroups): a bounded
+  `memory` keeps Slurm from packing more checks onto the node than its unified
+  memory holds, but nothing stops one check from using more.

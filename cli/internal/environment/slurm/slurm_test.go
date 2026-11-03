@@ -212,6 +212,15 @@ func TestAnAllocationIsSizedByWhatTheCommandIs(t *testing.T) {
 		{"a sample on a shared node", slurm.Allocator{Gres: "gpu:1", CPUs: 4},
 			dockercli.Allocation{Name: "c", Limit: time.Minute, Measured: true},
 			[]string{"--time=11", "--gres=gpu:1", "--cpus-per-task=4"}},
+		{"a check on a sharded GPU", slurm.Allocator{Gres: "gpu:1", SharedGres: "shard:1", Exclusive: true, Memory: "32G"},
+			dockercli.Allocation{Name: "c", Limit: time.Minute},
+			[]string{"--time=11", "--gres=shard:1", "--cpus-per-task=8", "--mem=32G"}},
+		{"a sample on a sharded GPU", slurm.Allocator{Gres: "gpu:1", SharedGres: "shard:1", Exclusive: true, Memory: "32G"},
+			dockercli.Allocation{Name: "c", Limit: time.Minute, Measured: true},
+			[]string{"--time=11", "--gres=gpu:1", "--exclusive"}},
+		{"a build on a sharded GPU", slurm.Allocator{Gres: "gpu:1", SharedGres: "shard:1", Exclusive: true},
+			dockercli.Allocation{Name: "c", Build: true},
+			[]string{"--time=240", "--cpus-per-task=8"}},
 	}
 	for _, c := range cases {
 		opts, _ := srunOptions(t, c.allocator.Allocate(c.x, []string{"docker", "run", "x"}))
