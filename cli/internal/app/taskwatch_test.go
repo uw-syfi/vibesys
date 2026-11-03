@@ -141,7 +141,11 @@ func TestAWatcherHoldsTheTaskAfterAnyInterleaving(t *testing.T) {
 						if _, err := a.ForgetRepository(ctxFor(t), repoA); err != nil {
 							t.Fatalf("ForgetRepository: %v", err)
 						}
+						// Let the watcher observe removal before restoring the repository.
+						synctest.Wait()
 						o.bringBackRemoved(repoA)
+						// Restoring a removed repository emits no daemon wake-up.
+						pass = true
 						submitted = nil
 					default:
 						pass = true
