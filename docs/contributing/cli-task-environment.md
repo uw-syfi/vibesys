@@ -285,6 +285,17 @@ running one's store works in a separate clone.
   and removal would have to go through `srun --overlap` into the allocation.
 - Passing exactly the GPUs Slurm allocated on a node with several, instead of
   the configured `--gpus` value.
-- Machine facts recorded with a result (`MachineFacts`, never compared) come
-  from the engine's machine for every placement, read over ssh for the remote
-  ones; the per-sample load reading is taken there too.
+- The per-sample load reading and the machine facts recorded with a result
+  (`MachineFacts`, never compared) come from the supervisor's own machine, not
+  the engine's: the fingerprint's facts are read over ssh, but the supervisor's
+  host backend stays local.
+- A build's log is kept only when the build fails (its last lines are in the
+  error); a successful build's output is discarded, so its duration is not in
+  the job's log.
+- The cache directory is keyed by the image, so a change to any file of the
+  task starts the candidate's compiler cache cold (on the Spark, 308 s for the
+  candidate build instead of 9 to 10 s warm). Keying it by the task alone
+  would keep it, at the cost of a cache that a new toolchain may misuse.
+- One GPU is one GRES: dropping `--exclusive` lets a check share the node's
+  CPUs, not its GPU, so two GPU jobs on a one-GPU node still run one after the
+  other.
