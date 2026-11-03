@@ -20,7 +20,6 @@ bundles, and the desktop app.
 
 ```text
 src/vibesys/             Orchestration policy and thin product API/composition
-src/server/              Frontend-serving runtime and protocol
 src/entrypoints/         Process composition and command entrypoints
 clients/apps/desktop/        The Effect desktop app
 clients/libs/                Generated protocol bindings, display names and the design system
@@ -38,8 +37,6 @@ The main framework boundaries are:
 
 - `src/entrypoints/` owns executable composition. Entrypoints do not live in
   `libs/`.
-- `src/server/` owns serving and frontend-specific behavior. It may depend on
-  `src/vibesys/`, but the headless core does not depend on it.
 - `src/vibesys/orchestration/` owns built-in orchestration plugins: agent
   roles, prompts, reply schemas, search and selection policy, evaluation
   cadence, and policy state. See

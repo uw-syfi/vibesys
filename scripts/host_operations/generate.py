@@ -1,50 +1,16 @@
-"""Run the host-operation descriptor pass before normal language generation."""
+"""Generate admission contracts and subscription policies from descriptors."""
 
 from __future__ import annotations
 
-import ast
 import sys
 from pathlib import Path
 
 from scripts.host_operations.api import compile_outputs
 
 
-def _slot_tuple(tree: ast.AST, name: str) -> tuple[str, ...]:
-    """String constants assigned to one module-level slot tuple."""
-    return tuple(
-        constant.value
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Assign)
-        and any(isinstance(target, ast.Name) and target.id == name for target in node.targets)
-        and isinstance(node.value, ast.Tuple)
-        for constant in node.value.elts
-        if isinstance(constant, ast.Constant) and isinstance(constant.value, str)
-    )
-
-
 def generate(root: Path, image: bytes, *, include_schema: bool = True) -> None:
-    """Check static slots, then publish all projections from the same descriptor image."""
-    tree = ast.parse((root / "src/vibesys/api/host_operations/_handlers.py").read_text())
-    registrations = tuple(
-        keyword.arg
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "Handlers"
-        for keyword in node.keywords
-        if keyword.arg is not None
-    )
-    paths = (
-        root / "src/server/host_api.py",
-        *sorted(
-            path for path in (root / "src/server").glob("host_*.py") if path.name != "host_api.py"
-        ),
-    )
-    sources = tuple(path.read_text() for path in paths)
-    mutations = _slot_tuple(tree, "MUTATION_SLOTS")
-    watches = _slot_tuple(tree, "WATCH_SLOTS")
-    outputs = compile_outputs(image, (*registrations, *mutations), sources, watches)
-    for name, content in outputs.items():
+    """Publish projections of the descriptor contracts used by the run path and gateway."""
+    for name, content in compile_outputs(image, None).items():
         if name.endswith(".proto") and not include_schema:
             continue
         path = root / name

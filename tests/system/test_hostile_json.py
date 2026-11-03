@@ -28,24 +28,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING, get_args
 
 import pytest
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict
 from resources.profilers.flashinfer import flashinfer_trace
 from resources.profilers.rocprof import analyze_rocprof, att, counters
-from tests.server.support import REQUEST_TIME
 
-from server.api.protocol import Response, SubscribeRequest, decode_request
-from server.control_envelope import ResponseEnvelopeReader
-from server.host_api import (
-    HelperError,
-    LiveInstanceRecord,
-    UnreadableRecord,
-    parse_helper_message,
-    parse_helper_request,
-    parse_record,
+from vibesys.api.importing import (
+    FactImportError,
+    ImportSource,
+    SourceFormat,
+    import_run_facts,
 )
-from server.host_helper import ChannelState, Received, Send, step
-from server.transport.discovery import WebInstanceRecord
-from vibesys.api.importing import FactImportError, ImportSource, SourceFormat, import_run_facts
 from vibesys.api.transport import convert_run
 from vibesys.run import CoreAgentEventSink
 from vs_core.api.testing import FAKE_REGISTRY
@@ -78,19 +70,17 @@ from vs_sim.api.testing import (
     SimThreads,
     hostile_json_frames,
 )
-from vs_slurm.api import SlurmConfig, SlurmConnectorTransport, slurm_transport_broker_policy
+from vs_slurm.api import (
+    SlurmConfig,
+    SlurmConnectorTransport,
+    slurm_transport_broker_policy,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from types import ModuleType
 
-_VALID = (
-    SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0).model_dump_json().encode(),
-    json.dumps(
-        {"type": "hello", "request_id": "h", "client_versions": [1, 1], "app_version": "v"}
-    ).encode(),
-    json.dumps({"version": 1, "id": "0123456789ab", "pid": 1}).encode(),
-)
+_VALID = (b'{"ok": true}',)
 _CASES = hostile_json_frames(_VALID)
 _MODEL_MANIFEST = ".vibesys/models.json"
 """Where an agent asks for model volumes; its own test file states the same path."""
@@ -104,29 +94,6 @@ class _Decoder:
     """Decode one frame; the directory is the test's own, for decoders that read files."""
     rejections: tuple[type[Exception], ...] = ()
     """Empty for a decoder that answers every frame with a value."""
-
-
-def _decode_request(frame: bytes, _: Path) -> None:
-    result = decode_request(frame, clock=ManualClock())
-    assert isinstance(result, Response) or result.type
-
-
-def _parse_record(frame: bytes, _: Path) -> None:
-    assert isinstance(parse_record("0123456789ab", frame), LiveInstanceRecord | UnreadableRecord)
-
-
-def _helper_channel(frame: bytes, _: Path) -> None:
-    """A helper channel's first line: a request, or a refusal it sends back."""
-    outputs = step(ChannelState(), Received(frame, 0.0), "v")[1]
-    assert frame in _VALID or all(
-        isinstance(output, Send) and isinstance(output.message, HelperError) for output in outputs
-    )
-
-
-def _web_instance_record(frame: bytes, directory: Path) -> None:
-    path = directory / "web-gateway.json"
-    path.write_bytes(frame)
-    WebInstanceRecord.read(path)
 
 
 def _model_manifest(frame: bytes, workspace: Path) -> None:
@@ -330,7 +297,12 @@ def _convert_run_journal(frame: bytes, directory: Path) -> None:
         journal = Project.event_journal_path_for(project_root, "run-1")
         journal.parent.mkdir(parents=True, exist_ok=True)
         journal.write_bytes(frame)
-        convert_run(Project.open(project_root), "run-1", clock=ManualClock(), threads=SimThreads())
+        convert_run(
+            Project.open(project_root),
+            "run-1",
+            clock=ManualClock(),
+            threads=SimThreads(),
+        )
 
 
 def _retained_facts(frame: bytes, _: Path) -> None:
@@ -347,17 +319,9 @@ _DECODERS = {
     "decode-json": _Decoder(_decode_json_file),
     "runlog-conversion": _Decoder(_convert_run_journal, (ValueError,)),
     "slurm-connector-broker": _Decoder(_connector_broker_request, (PermissionError,)),
-    "protocol-request": _Decoder(_decode_request),
-    "instance-record": _Decoder(_parse_record),
-    "helper-channel": _Decoder(_helper_channel),
-    "helper-request": _Decoder(lambda frame, _: parse_helper_request(frame)),
-    "helper-message": _Decoder(lambda frame, _: parse_helper_message(frame)),
-    "response-envelope": _Decoder(
-        lambda frame, _: ResponseEnvelopeReader.model_validate_json(frame), (ValidationError,)
-    ),
-    "web-instance-record": _Decoder(_web_instance_record),
     "evaluator-records": _Decoder(
-        lambda frame, _: parse_records(frame.decode("utf-8", "replace")), (ProtocolError,)
+        lambda frame, _: parse_records(frame.decode("utf-8", "replace")),
+        (ProtocolError,),
     ),
     **{
         f"{type(contract).__name__}-result": _benchmark_result(contract)

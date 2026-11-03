@@ -16,8 +16,6 @@ tool's output at its call site, through a `tee` of its sink, is allowed.
 | Recorder | `vs_logs.api` | Streams, offsets, the cap, the index. No docker, gates or UI. |
 | Owners | `vibesys.log_owners` (`LogOwner`) | What each stream is for, as a typed reference to the run model; `span_id` names the run-trace span it belongs to when its writer knows it: a gate stage's stream names its gate's operation span (`op:<decision>`), from the decision its measurement answers (`MeasurementDecisions`, which `MeasurementRequests` fills as it submits; a job an earlier host submitted names none). |
 | Reader | `vs_logs.read` | List streams; read a bounded chunk from an offset or the tail. |
-| Serving | `server.host_helper_logs` (`logs` feature), over `server.host_helper_os.StoreLogReader` | Chunk caps, long-poll follow, discovery. |
-| Clients | `clients/` logs lib | Selection, follow, rendering. |
 
 ## Writing
 
@@ -105,11 +103,7 @@ tracebacks) is one stream per run, under the `RunNarration` owner.
   `traceback`). Before a sink is attached it keeps the newest 1000 records and counts
   the rest; attaching writes them first, in order. If the sink fails, the handler warns
   once on stderr and stops; the caller never sees the failure.
-- `entrypoints.detached_run` installs the handler on the root logger before it loads
-  the engine. It sets the root level to `INFO` and keeps `logging.lastResort`, so
-  stderr shows the warnings it always showed. It also installs `sys.excepthook` and
-  `threading.excepthook` (`uncaught_hook`, `uncaught_thread_hook`), which add the
-  traceback to the stream and then call the previous hook.
+
 - `open_run_logs` finds that handler (`installed_narration()`) and attaches the
   narration stream until the run's resources close.
 - `RunLogger.lprint` also logs each line, without ANSI escapes, to the `run` logger
@@ -168,7 +162,6 @@ index holds a complete record that does not decode; the host helper answers that
 | Rule | Enforced by |
 | --- | --- |
 | No library imports `vs_logs` | tach layer `logs`, above `prompts_and_lower_libs` |
-| Only the host helper reads logs | tach `[[interfaces]]` for `vs_logs.read`, `visibility = ["server.host_helper_os"]` (its real-host `StoreLogReader`) |
 | Libraries cannot name owners | `LogOwner` lives in `vibesys`, which libraries cannot import |
 | Unknown owner keys and kinds are rejected | `extra="forbid"` and the discriminated union, `tests/vibesys/run/test_run_logs.py` |
 | Our own processes' output is never parsed for facts | Not lintable: a parse at a foreign tool's call site looks the same. Review. |

@@ -42,13 +42,6 @@
 {"path": "tests/examples/test_differential_dataflow_example.py", "rule": "patch", "count": 11}
 {"path": "tests/examples/test_qwen35_mi210_bundle.py", "rule": "patch", "count": 5}
 {"path": "tests/packaging/test_installed_release_verifier.py", "rule": "patch", "count": 3}
-{"path": "tests/server/test_api_transport.py", "rule": "patch", "count": 1}
-{"path": "tests/server/test_event_store.py", "rule": "patch", "count": 2}
-{"path": "tests/server/test_event_store_index.py", "rule": "patch", "count": 13}
-{"path": "tests/server/test_execution_tracker.py", "rule": "patch", "count": 3}
-{"path": "tests/server/test_experiments.py", "rule": "patch", "count": 2}
-{"path": "tests/server/test_lazy_event_store.py", "rule": "patch", "count": 1}
-{"path": "tests/server/test_transport_subscription.py", "rule": "patch", "count": 3}
 {"path": "tests/vibesys/agents/test_agent_client.py", "rule": "patch", "count": 1}
 {"path": "tests/vibesys/agents/test_agent_runners.py", "rule": "mock", "count": 11}
 {"path": "tests/vibesys/agents/test_agent_selection.py", "rule": "mock", "count": 4}

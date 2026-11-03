@@ -6,7 +6,6 @@ import pytest
 from pydantic import ValidationError
 from tests.support import make_orchestrator_plan
 
-from server.api.protocol import PerformanceRound
 from vibesys.hypothesis import (
     HYPOTHESIS_TITLE_MAX_LEN,
     OrchestratorPlan,
@@ -84,7 +83,9 @@ def test_profiler_summary_rejects_non_finite_perf_metric(value: float) -> None:
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
-def test_profiler_summary_rejects_non_finite_multi_objective_metric(value: float) -> None:
+def test_profiler_summary_rejects_non_finite_multi_objective_metric(
+    value: float,
+) -> None:
     with pytest.raises(ValidationError, match="finite number"):
         _profiler_summary(metrics={"throughput": value})
 
@@ -103,17 +104,6 @@ def test_single_agent_response_rejects_non_finite_perf_metric(value: float) -> N
             profile_analysis="analysis",
             perf_metric=value,
             perf_unit="req/s",
-        )
-
-
-@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
-def test_performance_round_rejects_non_finite_values(value: float) -> None:
-    with pytest.raises(ValidationError, match="finite number"):
-        PerformanceRound(
-            round=1,
-            perf_metric=value,
-            perf_unit="req/s",
-            passed=True,
         )
 
 

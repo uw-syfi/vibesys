@@ -3,7 +3,7 @@
 [`tach.toml`](https://github.com/uw-syfi/vibesys/blob/main/tach.toml) freezes
 the Python module graph, and CI runs `uv run python scripts/check_tach.py`. An import between
 modules that is not a declared `depends_on` edge fails the check. Modules cover
-`src/` (`entrypoints`, `launch`, `headless`, `server.*`, `vibesys.*`) and every `libs/*/src`.
+`src/` (`entrypoints`, `launch`, `headless`, `vibesys.*`) and every `libs/*/src`.
 Run it through the wrapper, not `tach check` directly: tach treats a library with
 its own `pyproject.toml` (a uv workspace member) as a separate package and stops
 checking its edges and interfaces, and the wrapper runs tach on a copy of the
@@ -71,8 +71,7 @@ owners; see [Sandboxing and confinement](sandboxing.md).
 
 Long-running work writes its output to `vs_logs`, which keeps each stream under a typed
 owner for humans to read. `vs_logs` sits in the tach layer `logs`, above every library, so
-no library imports it; only the product writes logs and only `server.host_helper` reads
-them (`vs_logs.read`). See [Log streams](logs.md).
+no library imports it; only the product writes logs and its readers use `vs_logs.read`. See [Log streams](logs.md).
 
 The TypeScript clients under `clients/` have their own package graph, layers, and
 build model; see [Clients architecture](clients-architecture.md).
@@ -92,7 +91,7 @@ run roles live in `vibesys.api`: `Runs` starts and resumes independent
 return results. `launch.default_runs` selects VibeSys implementations;
 `vs-runtime` owns the generic task and event-stream mechanism. Only
 entrypoints, tests and scripts import `launch`. Headless receives one started
-handle; the server receives `Runs`. The transitional `vibesys.api.session`
+handle. The transitional `vibesys.api.session`
 contract retains queries, readiness and auxiliary-agent access;
 workspace, persistence, and sandbox mechanisms live in the runtime libraries.
 The `vibesys.api` package root is policy-neutral. Applications opt into a
@@ -240,7 +239,6 @@ Submodules such as `vibesys.orchestration` and `server.api` are collapsed into t
 graph TD
     entrypoints --> headless
     entrypoints --> launch
-    entrypoints --> server
     entrypoints --> vibesys
     entrypoints --> vs_agent
     entrypoints --> vs_decode
@@ -266,18 +264,6 @@ graph TD
     launch --> vs_sandbox
     launch --> vs_sim
     launch --> vs_slurm
-    server --> vibesys
-    server --> vs_agent
-    server --> vs_async_ops
-    server --> vs_decode
-    server --> vs_logs
-    server --> vs_project
-    server --> vs_prompts
-    server --> vs_proto
-    server --> vs_redaction
-    server --> vs_runlog
-    server --> vs_sim
-    server --> vs_slurm
     vibesys --> vs_agent
     vibesys --> vs_core
     vibesys --> vs_decode

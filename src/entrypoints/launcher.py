@@ -64,14 +64,9 @@ def source_checkout_root() -> Path | None:
 
 
 def headless_command(args: Sequence[str]) -> list[str]:
-    """Return the Python child command for a run or detached server."""
+    """Return the Python child command for a run."""
     arguments = list(args)
-    module = (
-        "entrypoints.server"
-        if "--web" in arguments or "--web-reopen" in arguments or "--detach" in arguments
-        else "entrypoints.headless"
-    )
-    return [sys.executable, "-m", module, *arguments]
+    return [sys.executable, "-m", "entrypoints.headless", *arguments]
 
 
 _FORWARDED_SIGNALS = (Signals.SIGTERM, Signals.SIGHUP, Signals.SIGQUIT, Signals.SIGCONT)
@@ -127,11 +122,8 @@ async def run_child(
 
 
 _LIGHT_COMMANDS: dict[str, str] = {
-    "host": "entrypoints.host",
     "evals": "entrypoints.evals",
     "example": "entrypoints.examples",
-    "instances": "entrypoints.instances",
-    "tasks": "entrypoints.tasks",
 }
 
 

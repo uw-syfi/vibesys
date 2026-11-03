@@ -29,11 +29,6 @@ CONNECTION = re.compile(r"(^|_)(connection|conn|sock|socket|client)$")
 SENDS = frozenset({"send", "sendall"})
 
 ALLOWED: dict[str, tuple[int, str]] = {
-    "src/server/relay.py": (
-        1,
-        "the relay's supervisor ends a write that makes no progress for "
-        "BridgeLimits.write_deadline_seconds and closes both sides",
-    ),
     "libs/vs-runtime/src/vs_runtime/_agent_evaluation.py": (
         2,
         "one reply line, far under a socket buffer, so the send never waits for room",

@@ -6,9 +6,8 @@ import argparse
 import shlex
 from pathlib import Path
 
-from entrypoints.cli.constants import _OUTER_LOOPS
-from entrypoints.cli.errors import _configuration_error, _RunArgumentParser
-from server.host_api import (
+from entrypoints.cli.constants import (
+    _OUTER_LOOPS,
     CLI_PROVIDER_FLAG,
     LOCAL_FLAG,
     MAX_RUN_SECONDS_FLAG,
@@ -20,6 +19,7 @@ from server.host_api import (
     ROLE_REASONING_EFFORT_FLAG,
     UNVETTED_MODEL_FLAG,
 )
+from entrypoints.cli.errors import _configuration_error, _RunArgumentParser
 from vibesys.api import (
     KNOWN_COMPUTE_BACKENDS,
     ComputeBackend,

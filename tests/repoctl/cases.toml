@@ -1,26 +1,6 @@
 # Repository-owned contracts for the impact policy. Verify with `repoctl verify-policy`.
 
 [[cases]]
-name = "server event changes reach the client"
-paths = ["src/server/events.py"]
-jobs = ["python", "clients"]
-[cases.collections]
-native_languages = []
-dockerfile_contexts = []
-native_targets = []
-pnpm_packages = []
-
-[[cases]]
-name = "gateway transport changes reach the desktop e2e suite"
-paths = ["src/server/transport/websocket.py"]
-jobs = ["python", "clients"]
-[cases.collections]
-native_languages = []
-dockerfile_contexts = []
-native_targets = []
-pnpm_packages = []
-
-[[cases]]
 name = "protocol package changes reach downstream TypeScript packages"
 paths = ["clients/libs/orchestrator-proto/src/index.ts"]
 jobs = ["clients", "desktop_path"]
@@ -441,38 +421,8 @@ native_targets = []
 pnpm_packages = []
 
 [[cases]]
-name = "generated checkout compatibility remains a light Python module"
-paths = ["src/server/host_compatibility_generated.py"]
-jobs = ["python"]
-[cases.collections]
-native_languages = []
-dockerfile_contexts = []
-native_targets = []
-pnpm_packages = []
-
-[[cases]]
-name = "native saved-run metadata selects its consumers"
-paths = ["src/server/host_saved_runs.py"]
-jobs = ["python"]
-[cases.collections]
-native_languages = []
-dockerfile_contexts = []
-native_targets = []
-pnpm_packages = []
-
-[[cases]]
 name = "Pause-now escalation selects its Python owners"
 paths = ["src/vibesys/api/host_terminate.py"]
-jobs = ["python"]
-[cases.collections]
-native_languages = []
-dockerfile_contexts = []
-native_targets = []
-pnpm_packages = []
-
-[[cases]]
-name = "native host read adapter selects its Python consumers"
-paths = ["src/server/host_operation_reads.py"]
 jobs = ["python"]
 [cases.collections]
 native_languages = []
@@ -489,16 +439,6 @@ native_languages = []
 dockerfile_contexts = []
 native_targets = []
 pnpm_packages = { dependents_of = "pnpm:@vibesys/desktop" }
-
-[[cases]]
-name = "native compute runtime selects its Python consumers"
-paths = ["src/server/host_compute_runtime.py", "src/server/host_slurm.py"]
-jobs = ["python"]
-[cases.collections]
-native_languages = []
-dockerfile_contexts = []
-native_targets = []
-pnpm_packages = []
 
 [[cases]]
 name = "facts importer selects Python verification"
@@ -534,16 +474,6 @@ pnpm_packages = []
 name = "an excluded Dockerfile selects no build"
 paths = ["examples/model-serving/images/rocm-mi30x-engine-free/Dockerfile"]
 jobs = ["examples", "python"]
-[cases.collections]
-native_languages = []
-dockerfile_contexts = []
-native_targets = []
-pnpm_packages = []
-
-[[cases]]
-name = "a change to no Dockerfile builds none"
-paths = ["src/server/events.py", "examples/database/kv-store/README.md"]
-jobs = ["python", "clients", "examples"]
 [cases.collections]
 native_languages = []
 dockerfile_contexts = []

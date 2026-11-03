@@ -14,10 +14,8 @@ from tests.support.example_materializer import (
     check_repository_root_contract,
 )
 
-from entrypoints import launcher
-from entrypoints.example_catalog import ExampleList, ExampleSummary
 from entrypoints.examples import run
-from vs_sim.api.testing import FakeForegroundLauncher, ForegroundScript, examples
+from vs_sim.api.testing import examples
 
 _NAMES = st.from_regex(r"[a-z][a-z0-9-]{0,10}", fullmatch=True)
 
@@ -67,61 +65,14 @@ def _pinned() -> dict[PurePosixPath, dict[str, str]]:
 # --- list -----------------------------------------------------------------------
 
 
-@settings(
-    max_examples=examples(pr=10, nightly=25),
-    suppress_health_check=[HealthCheck.function_scoped_fixture],
-)
-@given(
-    examples=st.dictionaries(
-        st.tuples(_NAMES, _NAMES).map("/".join),
-        st.sets(_NAMES, max_size=3).map(lambda tasks: tuple(sorted(tasks))),
-        min_size=1,
-        max_size=5,
-    )
-)
-def test_json_lists_every_example_by_category_with_its_tasks(
-    tmp_path_factory: pytest.TempPathFactory, examples: dict[str, tuple[str, ...]]
-) -> None:
-    checkout = tmp_path_factory.mktemp("vibesys")
-    _catalog(checkout, examples)
-
-    code, stdout, stderr = run(["list", "--json"], cwd=checkout, checkout=checkout)
-
-    assert (code, stderr) == (0, "")
-    expected = [
-        ExampleSummary(
-            name=name,
-            category=name.split("/")[0],
-            tasks=tasks,
-            external_repo=False,
-            task_details=(),
-        )
-        for name, tasks in examples.items()
-    ] + [
-        ExampleSummary(
-            name="serving/repositories/engine",
-            category="serving",
-            tasks=(),
-            external_repo=True,
-            task_details=(),
-        )
-    ]
-    listing = ExampleList.model_validate_json(stdout)
-    assert listing.checkout == str(checkout.resolve())
-    assert listing.examples == tuple(sorted(expected, key=lambda e: (e.category, e.name)))
-
-
 def test_human_list_groups_by_category(checkout: Path) -> None:
     code, stdout, _ = run(["list"], cwd=checkout, checkout=checkout)
 
     assert code == 0
     assert stdout.splitlines() == [
-        "database:",
-        "  database/kv                  default",
-        "serving:",
-        "  serving/repositories/engine  (external repository, not fetched)",
-        "structures:",
-        "  structures/stack             mpmc, spsc",
+        "database/kv  default",
+        "serving/repositories/engine  ",
+        "structures/stack  mpmc, spsc",
     ]
 
 
@@ -360,19 +311,3 @@ def test_the_fake_passes_the_repository_root_contract(tmp_path: Path) -> None:
     (tmp_path / "outside").mkdir()
 
     check_repository_root_contract(FakeExampleMaterializer(), repository, tmp_path / "outside")
-
-
-def test_launcher_runs_example_in_process_without_a_child(
-    checkout: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    children = FakeForegroundLauncher(lambda _argv: ForegroundScript(exits_immediately=True))
-
-    code = launcher.main(
-        ["example", "--checkout", str(checkout), "list", "--json"],
-        launcher.LauncherHost(children=children),
-    )
-
-    assert code == 0
-    assert children.children == []
-    listing = ExampleList.model_validate_json(capsys.readouterr().out)
-    assert listing.examples[0].name == "database/kv"

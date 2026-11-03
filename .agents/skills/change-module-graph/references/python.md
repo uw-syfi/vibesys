@@ -29,7 +29,7 @@ Tach is module-granular: each `[[modules]]` entry lists its allowed
   one split under rule 5, must add an `[[interfaces]]` entry the same way the
   libraries do. Do not treat an existing module's lack of one as license.
 - **Facades.** `vibesys.api` is the only core module other packages import.
-  `server`, `headless`, and `entrypoints` reach core through it.
+  `headless` and `entrypoints` reach core through it.
 
 ## Adding an edge
 
@@ -91,7 +91,7 @@ Named by public entry point; read them before writing something similar.
 | 4 | The `tach.toml` module graph; `entrypoints` reaching core only through `vibesys.api` |
 | 5 | The libraries, each a separately declared unit behind `<pkg>.api` |
 | 6 | The orchestration registry (stable ids to registrations) and the domain registry keyed by enums |
-| 7 | The `server.api.protocol` models (`extra="forbid"`) |
+| 7 | The owning wire contracts reject unknown fields |
 | 8 | `vibesys.api.display_catalog` to the generated display-name table (`pnpm --filter @vibesys/display-names generate`); `vs_project.api.Project.open` as the only way to reach the `.vibesys` layout |
 | 9 | `vs_agent.api.testing` (`FakeAgentClient`) |
 | 10 | `vs_sim.api.testing.hostile_json_frames` (the shared hostile-input corpus every untrusted JSON decoder runs against) |

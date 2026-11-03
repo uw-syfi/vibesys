@@ -24,14 +24,14 @@ Membership is source-controlled and changes through the normal maintainer path.
 For example:
 
 ```toml
-[capabilities.server]
+[capabilities.headless]
 members = ["alice"]
-prefixes = ["src/server/"]
+prefixes = ["src/headless/"]
 paths = []
 additional_checks = []
 ```
 
-Capabilities also bound source ownership. Client paths have no delegated capability; server source uses `server`.
+Capabilities also bound source ownership. The retired client and Python server capabilities grant no paths.
 
 The broker's policy, workflow, implementation, and configured check workflow
 paths are always denied, even if a future capability section would otherwise
@@ -152,7 +152,7 @@ The temporary `Scoped merge gate` compatibility job was removed after the live
 repository was audited and had neither a branch-protection rule nor a ruleset
 that referred to it. `Required PR CI` is the broker's named test check and the
 merge queue's aggregate test result. Add each delegated maintainer to the
-`clients`, `server`, or applicable combination of capability member
+applicable capability member
 lists through the normal maintainer path. The accepted command is
 `/merge-scoped`; the old command is not accepted.
 

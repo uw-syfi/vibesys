@@ -1,7 +1,6 @@
 package devlaunch
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -66,63 +65,4 @@ func ValidateRemotePath(path string) error {
 		return fmt.Errorf("the checkout path %q must be absolute or start with ~/", path)
 	}
 	return nil
-}
-
-// Hello is the part of a helper's hello reply this command reads.
-type Hello struct {
-	Version  string
-	Root     string
-	Commit   string
-	HasCheck bool
-}
-
-// ParseHello reads one reply line, naming the reply type when it is not a hello.
-func ParseHello(line []byte) (Hello, error) {
-	var raw struct {
-		Type     string `json:"type"`
-		Version  string `json:"vibesys_version"`
-		Checkout *struct {
-			Root   string  `json:"root"`
-			Commit *string `json:"commit"`
-		} `json:"checkout"`
-		Message string `json:"message"`
-	}
-	if err := json.Unmarshal(line, &raw); err != nil {
-		return Hello{}, fmt.Errorf("reply is not JSON: %w", err)
-	}
-	if raw.Type != "hello" {
-		return Hello{}, fmt.Errorf("reply of type %q, not hello: %s", raw.Type, truncate(string(line), 200))
-	}
-	h := Hello{Version: raw.Version}
-	if raw.Checkout != nil {
-		h.HasCheck, h.Root = true, raw.Checkout.Root
-		if raw.Checkout.Commit != nil {
-			h.Commit = *raw.Checkout.Commit
-		}
-	}
-	return h, nil
-}
-
-// HelloReady reports whether a hello shows the helper runs the shipped code: it runs from a
-// checkout and, when wantCommit is not empty, from that commit. seen says what the hello showed.
-func HelloReady(h Hello, wantCommit string) (ready bool, seen string) {
-	seen = fmt.Sprintf("version %s, root %s, commit %s", h.Version, orNone(h.Root), orNone(h.Commit))
-	if !h.HasCheck {
-		return false, seen
-	}
-	return wantCommit == "" || h.Commit == wantCommit, seen
-}
-
-func orNone(s string) string {
-	if s == "" {
-		return "none"
-	}
-	return s
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "..."
 }

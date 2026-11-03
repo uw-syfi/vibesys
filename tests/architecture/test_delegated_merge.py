@@ -305,9 +305,10 @@ def test_checked_in_policy_names_one_existing_job_for_every_check() -> None:
 
 
 @pytest.mark.parametrize(
-    "filename", ["clients/libs/ui/src/index.ts", "clients/libs/transport/src/index.ts"]
+    "filename",
+    ["clients/libs/ui/src/index.ts", "clients/libs/transport/src/index.ts", "src/server/events.py"],
 )
-def test_checked_in_policy_grants_no_client_paths(filename: str) -> None:
+def test_checked_in_policy_grants_no_retired_paths(filename: str) -> None:
     policy = load_policy()
     assert "clients" not in policy.capabilities
     with pytest.raises(MergeRefusalError, match="does not match"):

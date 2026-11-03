@@ -74,7 +74,6 @@ const (
 	StepShipGit   StepKind = "ship-git"
 	StepShipFiles StepKind = "ship-files"
 	StepSync      StepKind = "sync"
-	StepHelper    StepKind = "helper"
 	StepApp       StepKind = "app"
 )
 
@@ -115,12 +114,11 @@ func PlanSteps(in Inputs) ([]Step, error) {
 		steps = append(steps, Step{StepInstall, "install client packages", why})
 	}
 	steps = append(steps, Step{StepBuild, "build client packages", "always: the build tool skips what is current"})
-	steps = append(steps, Step{StepPython, "install Python dependencies here", "This Mac's helper starts without syncing; a no-op when current"})
+	steps = append(steps, Step{StepPython, "install Python dependencies here", "keep the checkout environment current"})
 	if r := in.Remote; r != nil {
 		steps = append(steps, shipSteps(in.Git, *r)...)
 		steps = append(steps,
-			Step{StepSync, "install Python dependencies on the machine", "the helper starts without syncing"},
-			Step{StepHelper, "start the machine's helper and wait for its hello", "a fresh helper reads the checkout as it is now"},
+			Step{StepSync, "install Python dependencies on the machine", "keep the remote environment current"},
 		)
 	}
 	return append(steps, Step{StepApp, "open the desktop app", "own profile directory"}), nil

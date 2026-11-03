@@ -43,7 +43,7 @@ func TestLocalPlanTable(t *testing.T) {
 
 func TestMachinePlanTable(t *testing.T) {
 	clean := LocalGit{Head: "aaa"}
-	tail := []StepKind{StepSync, StepHelper, StepApp}
+	tail := []StepKind{StepSync, StepApp}
 	for _, tc := range []struct {
 		name    string
 		git     LocalGit
@@ -104,9 +104,9 @@ func TestPlanInvariants(t *testing.T) {
 		}
 		last := ks[len(ks)-1] == StepApp
 		buildFirst := pos[StepBuild] > 0 && pos[StepBuild] < pos[StepApp] && (pos[StepInstall] == 0 || pos[StepInstall] < pos[StepBuild])
-		remoteOrder := in.Remote == nil || (pos[StepSync] > 0 && pos[StepHelper] > pos[StepSync] &&
+		remoteOrder := in.Remote == nil || (pos[StepSync] > 0 &&
 			(pos[StepShipGit] == 0 || pos[StepShipGit] < pos[StepSync]) && (pos[StepShipFiles] == 0 || pos[StepShipFiles] < pos[StepSync]))
-		localOnly := in.Remote != nil || (pos[StepSync] == 0 && pos[StepHelper] == 0 && pos[StepShipGit] == 0 && pos[StepShipFiles] == 0)
+		localOnly := in.Remote != nil || (pos[StepSync] == 0 && pos[StepShipGit] == 0 && pos[StepShipFiles] == 0)
 		return last && buildFirst && remoteOrder && localOnly
 	}
 	if err := quick.Check(check, &quick.Config{MaxCount: 500}); err != nil {

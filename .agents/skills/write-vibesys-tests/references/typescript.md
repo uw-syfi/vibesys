@@ -31,7 +31,7 @@ transport ([wire-protocol.md](../../../../docs/contributing/wire-protocol.md)):
 
 - It holds one fixture per event type, the connection-exchange scenarios, and
   an inventory each runner registers to say which scenarios it executes.
-- `test_every_event_kind_has_exactly_one_fixture_and_no_fixture_is_unknown`
+- `test_gateway_conversion_fixture_regenerates_identically`
   gates fixture coverage.
 - A Python test replays the scenarios on every server transport.
 

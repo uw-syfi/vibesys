@@ -8,7 +8,11 @@ from typing import TYPE_CHECKING
 import pytest
 
 from entrypoints import launcher as cli
-from vs_sim.api.testing import FakeForegroundLauncher, FakeSignalSource, ForegroundScript
+from vs_sim.api.testing import (
+    FakeForegroundLauncher,
+    FakeSignalSource,
+    ForegroundScript,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -19,8 +23,6 @@ if TYPE_CHECKING:
     [
         (["--input", "example.py"], "entrypoints.headless"),
         (["validate", "bundle"], "entrypoints.headless"),
-        (["--detach", "--input", "example.py"], "entrypoints.server"),
-        (["--web", "--input", "example.py"], "entrypoints.server"),
     ],
 )
 def test_launcher_routes_run_commands_to_python(args: list[str], module: str) -> None:

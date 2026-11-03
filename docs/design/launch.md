@@ -47,8 +47,6 @@ The audit's move list (paths under `src/`):
 | `vibesys/api/_session.py:77,112,147,162`, `vibesys/composition.py:68-251` | `launch` default wiring and injected core session construction |
 | `vibesys/api/request.py:104-148`, `vibesys/api/_store.py:137` | explicit catalog selection from launch wiring |
 | `headless/execute.py:129`, `entrypoints/cli/loops.py:382` | entrypoints start a handle; headless renders it |
-| `headless/execute.py:24-110`, `server/runtime.py:156-242` | entrypoints process signals and exit codes |
-| `server/runtime.py:139-229`, `entrypoints/server.py:616` | injected `Runs`, server consumes handles |
 
 Generic task, stream and registry mechanisms live in `vs-runtime` without
 VibeSys imports. Launch connects concrete implementations to core contracts.

@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import ast
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 from google.protobuf import descriptor_pb2, descriptor_pool, message_factory
-from hypothesis import example, given
+from hypothesis import given
 from hypothesis import strategies as st
 from scripts.generate_proto_framing import HOST_API_MAX_MESSAGE_BYTES
 from scripts.host_operations.api import (
@@ -18,7 +17,6 @@ from scripts.host_operations.api import (
     compile_subscribe_timing,
     compile_topics,
 )
-from scripts.host_operations.generate import generate
 
 from vs_proto.api import (
     OperationFailure,
@@ -133,7 +131,9 @@ def test_every_method_has_one_typed_handler_and_canonical_budget() -> None:
 @pytest.mark.parametrize(
     "handlers", [(), _slots()[:-1], (*_slots(), "list_tasks"), (*_slots(), "unknown")]
 )
-def test_missing_duplicate_and_unknown_handlers_fail_generation(handlers: tuple[str, ...]) -> None:
+def test_missing_duplicate_and_unknown_handlers_fail_generation(
+    handlers: tuple[str, ...],
+) -> None:
     with pytest.raises(GenerationError, match="handlers"):
         compile_registry(_image().SerializeToString(), handlers)
 
@@ -188,29 +188,14 @@ def test_a_correlation_cannot_cross_a_scalar_even_with_repeated_field_numbers() 
         compile_registry(_changed(change), _slots())
 
 
-def _server_sources(root: Path) -> tuple[str, ...]:
-    return tuple(
-        path.read_text()
-        for path in (
-            root / "src/server/host_api.py",
-            *sorted(
-                path
-                for path in (root / "src/server").glob("host_*.py")
-                if path.name != "host_api.py"
-            ),
-        )
-    )
-
-
 def test_the_descriptor_pass_compiles_all_language_outputs_before_publication() -> None:
-    root = Path(__file__).resolve().parents[3]
     image = _image().SerializeToString()
-    outputs = compile_outputs(image, _slots(), _server_sources(root), _watches())
-    assert len(outputs) == 10
+    outputs = compile_outputs(image, _slots(), _watches())
+    assert len(outputs) == 7
     for path, content in outputs.items():
         if path.endswith(".py"):
             ast.parse(content)
-    assert compile_outputs(image, _slots(), _server_sources(root), _watches()) == outputs
+    assert compile_outputs(image, _slots(), _watches()) == outputs
 
 
 def _topic_image(
@@ -227,7 +212,12 @@ def _topic_image(
 def test_topic_policies_compile_from_the_descriptor() -> None:
     topics = compile_topics(_image().SerializeToString())
     assert [
-        (topic.name, topic.policy.cadence_ms, topic.policy.max_keys, topic.policy.source_lease_ms)
+        (
+            topic.name,
+            topic.policy.cadence_ms,
+            topic.policy.max_keys,
+            topic.policy.source_lease_ms,
+        )
         for topic in topics
     ] == [
         ("machine_stats", 10000, 1, 0),
@@ -261,12 +251,21 @@ def test_a_topic_without_its_value_arm_fails_generation() -> None:
         ("max_value_bytes", 0, "max_value_bytes"),
         # A value of exactly the transport cap leaves no room for its key and framing.
         ("max_value_bytes", HOST_API_MAX_MESSAGE_BYTES, "exceeds the transport cap"),
-        ("max_value_bytes", HOST_API_MAX_MESSAGE_BYTES + 1, "exceeds the transport cap"),
+        (
+            "max_value_bytes",
+            HOST_API_MAX_MESSAGE_BYTES + 1,
+            "exceeds the transport cap",
+        ),
         ("stale_after_ms", 10000, "stale_after_ms must exceed cadence_ms"),
     ],
 )
 def test_invalid_topic_policies_name_the_topic(field: str, value: int, message: str) -> None:
-    number = {"stale_after_ms": 2, "first_frame_ms": 3, "max_keys": 4, "max_value_bytes": 6}[field]
+    number = {
+        "stale_after_ms": 2,
+        "first_frame_ms": 3,
+        "max_keys": 4,
+        "max_value_bytes": 6,
+    }[field]
 
     def change(topic: descriptor_pb2.DescriptorProto, _: object) -> None:
         # A later occurrence of a scalar wins, so appending overrides the checked-in policy.
@@ -297,11 +296,10 @@ def _timing_image(change: Callable[[descriptor_pb2.DescriptorProto], None]) -> b
 
 
 def test_frame_timing_compiles_from_the_descriptor_into_both_languages() -> None:
-    root = Path(__file__).resolve().parents[3]
     image = _image().SerializeToString()
     timing = compile_subscribe_timing(image)
     assert (timing.heartbeat_ms, timing.lease_ms) == (5000, 30000)
-    outputs = compile_outputs(image, _slots(), _server_sources(root), _watches())
+    outputs = compile_outputs(image, _slots(), _watches())
     typescript = outputs["clients/libs/proto/src/generated/host-operations.ts"]
     go = outputs["gateway/internal/hostoperations/topics_generated.go"]
     assert f"heartbeatMs: {timing.heartbeat_ms}, leaseMs: {timing.lease_ms}" in typescript
@@ -362,80 +360,6 @@ def _append_to_policy(number: int, value: int) -> bytes:
     return _varint(51004 << 3 | 2) + _varint(len(update)) + update
 
 
-def test_every_client_budget_exceeds_its_runner_cap() -> None:
-    root = Path(__file__).resolve().parents[3]
-    image = _image().SerializeToString()
-    outputs = compile_outputs(image, _slots(), _server_sources(root), _watches())
-    typescript = outputs["clients/libs/proto/src/generated/host-operations.ts"]
-    runner = outputs["gateway/internal/hostoperations/registry_generated.go"]
-    python = outputs["libs/vs-proto/src/vs_proto/_generated/host_operations.py"]
-    compiled = compile_registry(image, _slots(), _watches())
-    assert compiled
-    for op in compiled:
-        client = op.policy.cap_ms + op.policy.grace_ms
-        runner_cap = op.policy.cap_ms
-        assert client > runner_cap
-        if op.is_host_call():
-            case = op.slot.split("_", maxsplit=1)[0] + "".join(
-                part.title() for part in op.slot.split("_")[1:]
-            )
-            assert (
-                f"{case}: Object.freeze({{capMs: {runner_cap}, graceMs: {op.policy.grace_ms}, totalMs: {client}}}"
-                in typescript
-            )
-            assert (
-                f"HostCall({op.slot!r}, {op.slot.replace('_', '-')!r}, "
-                f"{op.policy.request_tag}, {op.policy.response_tag}, {runner_cap}, {op.policy.grace_ms})"
-                in python
-            )
-        else:
-            case = op.slot.split("_", maxsplit=1)[0] + "".join(
-                part.title() for part in op.slot.split("_")[1:]
-            )
-            assert f"totalMs: {client}" in typescript
-            first = (
-                f", firstEventMs: {op.policy.first_event_ms if op.policy.HasField('first_event_ms') else 0}"
-                f", progressMs: {op.policy.progress_ms if op.policy.HasField('progress_ms') else 0}"
-                if op.is_watch()
-                else ""
-            )
-            assert (
-                f"{case}: Object.freeze({{capMs: {runner_cap}, graceMs: {op.policy.grace_ms}, totalMs: {client}{first}}}"
-                in typescript
-            )
-            assert f"Cap: {runner_cap}*time.Millisecond" in runner
-            assert f"Grace: {op.policy.grace_ms}*time.Millisecond" in runner
-
-
-def test_generate_publishes_every_projection(tmp_path: Path) -> None:
-    root = Path(__file__).resolve().parents[3]
-    handler = root / "src/vibesys/api/host_operations/_handlers.py"
-    destination = tmp_path / handler.relative_to(root)
-    destination.parent.mkdir(parents=True)
-    destination.write_bytes(handler.read_bytes())
-    for path in (
-        root / "src/server/host_api.py",
-        *sorted(
-            path for path in (root / "src/server").glob("host_*.py") if path.name != "host_api.py"
-        ),
-    ):
-        target = tmp_path / path.relative_to(root)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(path.read_bytes())
-    image = _image().SerializeToString()
-    expected = compile_outputs(image, _slots(), _server_sources(root), _watches())
-    generate(tmp_path, image, include_schema=False)
-    for name, content in expected.items():
-        published = tmp_path / name
-        if name.endswith(".proto"):
-            assert not published.exists()
-        else:
-            assert published.read_text(encoding="utf-8") == content
-    generate(tmp_path, image)
-    for name, content in expected.items():
-        assert (tmp_path / name).read_text(encoding="utf-8") == content
-
-
 def _with_minimum_version(version: str) -> bytes:
     image = _image()
     pool = descriptor_pool.DescriptorPool()
@@ -452,54 +376,7 @@ def _with_minimum_version(version: str) -> bytes:
     return image.SerializeToString()
 
 
-@given(st.tuples(*(st.integers(min_value=0, max_value=1000) for _ in range(3))))
-@example((0, 1, 1))
-def test_minimum_version_has_one_owner_for_every_language(release: tuple[int, int, int]) -> None:
-    root = Path(__file__).resolve().parents[3]
-    version = ".".join(map(str, release))
-    outputs = compile_outputs(
-        _with_minimum_version(version), _slots(), _server_sources(root), _watches()
-    )
-    for path in (
-        "src/server/host_compatibility_generated.py",
-        "libs/vs-proto/src/vs_proto/_generated/host_operations.py",
-    ):
-        tree = ast.parse(outputs[path])
-        values = [
-            ast.literal_eval(node.value)
-            for node in tree.body
-            if isinstance(node, ast.Assign)
-            if any(
-                isinstance(target, ast.Name) and target.id == "MIN_CHECKOUT_VERSION"
-                for target in node.targets
-            )
-        ]
-        assert values == [version]
-    assert (
-        f'const MinCheckoutVersion = "{version}"'
-        in outputs["gateway/internal/hostoperations/registry_generated.go"]
-    )
-
-
 @pytest.mark.parametrize("version", ["", "1.2", "1.2.3.4", "01.2.3", "v1.2.3", "1.2.3-dev"])
 def test_minimum_version_rejects_missing_or_invalid_policy(version: str) -> None:
-    root = Path(__file__).resolve().parents[3]
     with pytest.raises(GenerationError, match="minimum_checkout_version"):
-        compile_outputs(_with_minimum_version(version), _slots(), _server_sources(root), _watches())
-
-
-def test_native_reads_keep_typed_routing_without_a_legacy_helper_adapter() -> None:
-    root = Path(__file__).resolve().parents[3]
-    outputs = compile_outputs(
-        _image().SerializeToString(), _slots(), _server_sources(root), _watches()
-    )
-    operations = compile_registry(_image().SerializeToString(), _slots(), _watches())
-    native = next(op for op in operations if op.name == "ListRunDigests")
-    assert native.policy.adapter_method == ""
-    assert "list_run_digests" in outputs["proto/vibesys/api/v1/host_read_generated.proto"]
-    assert "ListRunDigests" in outputs["clients/libs/proto/src/generated/host-operations.ts"]
-    assert "ListRunDigests" not in outputs["src/server/host_operation_types_generated.py"]
-    assert (
-        "'': ListRunDigests"
-        not in outputs["libs/vs-proto/src/vs_proto/_generated/host_operations.py"]
-    )
+        compile_outputs(_with_minimum_version(version), _slots(), _watches())

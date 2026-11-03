@@ -11,11 +11,6 @@ from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from server.chat.manager import ChatManager
-from server.controller import RunController
-from server.execution import ExecutionTracker
-from server.integration import RunIntegrationAdapter
-from server.journal import WireJournal
 from vibesys.api.transport import convert_run
 from vibesys.events import CoreEvent, CoreEventType, RunStartedData, SpanStartedData
 from vibesys.run.runlog_tee import RunLogTee
@@ -115,9 +110,6 @@ def fixtures(project: Project) -> dict[str, bytes]:
         "run.head": head.to_binary(),
         f"keyframes/{head.committed_seq}.pb": expected,
         "expected.pb": expected,
-        "legacy.events.json.gz": legacy_events(
-            [CoreEvent.model_validate_json(line) for line in journal.splitlines()]
-        ),
         **usage_fixtures(),
     }
 
@@ -138,29 +130,6 @@ def deterministic_gzip(data: bytes) -> bytes:
 
 #: Where the operating-system byte sits in a gzip header (RFC 1952).
 GZIP_HEADER_OS_OFFSET = 9
-
-
-def legacy_events(events: list[CoreEvent]) -> bytes:
-    """Project the same journal through the shipping legacy frontend owner."""
-    threads, clock = SimThreads(), ManualClock()
-    condition = threads.condition(threads.rlock())
-    journal = WireJournal(condition, clock=clock, threads=threads)
-    executions = ExecutionTracker(condition, journal, clock=clock, threads=threads)
-    controller = RunController(condition, journal, executions)
-    chat = ChatManager(condition, journal, run_status=controller.run_status, threads=threads)
-    integration = RunIntegrationAdapter(
-        controller, executions, journal, chat, clock=clock, threads=threads
-    )
-    with TemporaryDirectory() as temporary:
-        integration.attach(Path(temporary), run_id="run-1")
-        controller.ready()
-        for event in events:
-            integration.project_event(event)
-        encoded = (
-            "[" + ",".join(event.model_dump_json() for event in journal.read()) + "]"
-        ).encode()
-        integration.close()
-    return deterministic_gzip(encoded)
 
 
 def usage_fixtures() -> dict[str, bytes]:

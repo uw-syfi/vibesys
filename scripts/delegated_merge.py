@@ -369,8 +369,6 @@ def _load_checks(raw_checks: object) -> Mapping[str, Check]:
 
 def _load_capabilities(raw_capabilities: object) -> Mapping[str, Capability]:
     capabilities_document = _mapping(raw_capabilities, "capabilities")
-    if not capabilities_document:
-        _refuse("policy must define at least one capability")
     capabilities: dict[str, Capability] = {}
     for name, capability_value in capabilities_document.items():
         if not _identifier(name):

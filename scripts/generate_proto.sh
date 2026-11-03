@@ -16,10 +16,10 @@ done
 uv run --locked --group proto buf format -w "${format_args[@]}"
 uv run --locked --group proto buf generate
 uv run --locked --group proto python -m scripts.host_operations.generate "$image" --bindings
-uv run --locked ruff check --select I --fix libs/vs-proto/src/vs_proto/_generated/host_operations.py src/server/host_operation_types_generated.py src/server/host_compatibility_generated.py
-uv run --locked ruff format libs/vs-proto/src/vs_proto/_generated/host_operations.py src/server/host_operation_types_generated.py src/server/host_compatibility_generated.py
+uv run --locked ruff check --select I --fix libs/vs-proto/src/vs_proto/_generated/host_operations.py
+uv run --locked ruff format libs/vs-proto/src/vs_proto/_generated/host_operations.py
 gofmt_paths=()
-for path in gateway/internal/hostoperations/registry_generated.go gateway/internal/hostoperations/topics_generated.go; do
+for path in gateway/internal/hostoperations/topics_generated.go; do
   if [[ -f "$path" ]]; then
     gofmt_paths+=("$path")
   fi

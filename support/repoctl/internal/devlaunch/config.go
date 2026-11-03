@@ -33,7 +33,7 @@ type LocalConfig struct {
 	InstallCommand  []string `toml:"install_command"`
 	InstallInputs   []string `toml:"install_inputs"`
 	InstallStamp    string   `toml:"install_stamp"`
-	// PythonSyncCommand runs in the repository root: the app's This Mac helper starts without syncing.
+	// PythonSyncCommand runs in the repository root: keep the checkout environment current.
 	PythonSyncCommand []string `toml:"python_sync_command"`
 	BuildCommand      []string `toml:"build_command"`
 	AppDirectory      string   `toml:"app_directory"`
@@ -43,17 +43,14 @@ type LocalConfig struct {
 	ProfileDirectory string            `toml:"profile_directory"`
 }
 
-// MachineConfig says how to ship a commit to a machine and how to start its helper.
+// MachineConfig says how to ship a commit to a machine and synchronize its environment.
 type MachineConfig struct {
 	// AppHostsFiles are the desktop app's saved hosts files by platform (`~` is the home
 	// directory); the first that exists says where each machine's checkout is.
-	AppHostsFiles    []string `toml:"app_hosts_files"`
-	ShipRef          string   `toml:"ship_ref"`
-	SyncCommand      []string `toml:"sync_command"`
-	HelperCommand    []string `toml:"helper_command"`
-	PathDirectories  []string `toml:"path_directories"`
-	HelloSeconds     int      `toml:"hello_seconds"`
-	HelloPollSeconds int      `toml:"hello_poll_seconds"`
+	AppHostsFiles   []string `toml:"app_hosts_files"`
+	ShipRef         string   `toml:"ship_ref"`
+	SyncCommand     []string `toml:"sync_command"`
+	PathDirectories []string `toml:"path_directories"`
 }
 
 // ReadConfig reads and validates the policy in policyDir, naming the offending key or path.
@@ -99,7 +96,6 @@ func (c Config) validate() error {
 		"local.python_sync_command": c.Local.PythonSyncCommand,
 		"local.app_command":         c.Local.AppCommand,
 		"machine.sync_command":      c.Machine.SyncCommand,
-		"machine.helper_command":    c.Machine.HelperCommand,
 	} {
 		if len(argv) == 0 || argv[0] == "" {
 			return fmt.Errorf("%s must name a program", key)
@@ -115,9 +111,6 @@ func (c Config) validate() error {
 	}
 	if !strings.HasPrefix(c.Machine.ShipRef, "refs/") {
 		return fmt.Errorf("machine.ship_ref must start with refs/, got %q", c.Machine.ShipRef)
-	}
-	if c.Machine.HelloSeconds <= 0 || c.Machine.HelloPollSeconds <= 0 {
-		return fmt.Errorf("machine.hello_seconds and machine.hello_poll_seconds must be positive")
 	}
 	if len(c.Machine.AppHostsFiles) == 0 {
 		return fmt.Errorf("machine.app_hosts_files must list at least one path")
