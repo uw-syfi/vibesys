@@ -515,10 +515,11 @@ describe('machinesStep', () => {
         result: {ok: true, value: inspection},
       }).state;
     }
+    // The checkouts first: they are what the field asks for.
     expect(formSuggestions(state.adding?.path as never)).toEqual([
-      {value: '/home/me/src/'},
       {value: '/home/me/vibesys/', detail: '0.1.1 · e66d941'},
       {value: '/home/me/vibesys-old/', detail: '0.0.9 · too old for this app'},
+      {value: '/home/me/src/'},
     ]);
   });
 

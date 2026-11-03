@@ -7,6 +7,7 @@ import {
   completionStep,
   type PathCompletion,
   splitPath,
+  suggestedEntries,
   suggestions,
 } from './index.js';
 
@@ -69,6 +70,33 @@ describe('path completion', () => {
     expect(suggestions(typed.state, 'project')).toEqual(['/home/me/scratch/']);
   });
 
+  test('what a field asks for comes first, so a project is never below the folders around it', () => {
+    const listed = (field: 'checkout' | 'project') => {
+      const asked = completionStep(COMPLETION_EMPTY, {
+        type: 'input',
+        field,
+        host: 'local',
+        value: '/home/me/',
+      });
+      return completionStep(asked.state, {
+        type: 'reply',
+        field,
+        token: asked.requests[0]?.token ?? -1,
+        result: {ok: true, value: COMPLETION},
+      }).state;
+    };
+    expect(suggestedEntries(listed('project'), 'project')).toEqual([
+      {value: '/home/me/scratch/', name: 'scratch', fits: true},
+      {value: '/home/me/src/', name: 'src', fits: false},
+      {value: '/home/me/vibesys/', name: 'vibesys', fits: false},
+    ]);
+    expect(suggestions(listed('checkout'), 'checkout')).toEqual([
+      '/home/me/vibesys/',
+      '/home/me/src/',
+      '/home/me/scratch/',
+    ]);
+  });
+
   test('a path names its directory up to the last slash, only when absolute or under ~/', () => {
     expect(splitPath('/home/me/sr')).toEqual({directory: '/home/me/', typed: 'sr'});
     expect(splitPath('~/')).toEqual({directory: '~/', typed: ''});
@@ -111,7 +139,10 @@ describe('path completion', () => {
         project: state.fields.project?.awaiting ?? null,
       }),
       reply: action => (action.type === 'reply' ? {slot: action.field, token: action.token} : null),
-      also: (before, action, _after, requests) => {
+      also: (before, action, after, requests) => {
+        // Whatever was typed, nothing the field asks for is listed after something it does not.
+        const fits = suggestedEntries(after, action.field).map(each => each.fits);
+        expect(fits).toEqual([...fits].sort((left, right) => Number(right) - Number(left)));
         if (action.type !== 'input') return;
         const was = before.fields[action.field];
         const {directory} = splitPath(action.value);

@@ -20,7 +20,9 @@ export {
   type CompletionState,
   completionStep,
   type PathCompletion,
+  type Suggestion,
   splitPath,
+  suggestedEntries,
   suggestions,
 } from './completion.js';
 export type {ConnectionStatus} from './connection-status.js';

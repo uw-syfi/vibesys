@@ -92,14 +92,30 @@ export function splitPath(value: string): {directory: string | null; typed: stri
   return {directory: absolute ? directory : null, typed: value.slice(slash + 1)};
 }
 
-/** The paths to offer for `field`: its directory's entries whose names start with what was typed. */
-export function suggestions(state: CompletionState, field: CompletionField): string[] {
+/** A path to offer: the folder's path (ending in `/`), its name, and whether it is what the field asks for. */
+export interface Suggestion {
+  readonly value: string;
+  readonly name: string;
+  /** The folder is a `field`: a project for the project field, a checkout for the checkout field. */
+  readonly fits: boolean;
+}
+
+/**
+ * The paths to offer for `field`: its directory's entries whose names start with what was typed,
+ * those that are what the field asks for (a project, a checkout) first, each group in listing order.
+ */
+export function suggestedEntries(state: CompletionState, field: CompletionField): Suggestion[] {
   const completion = state.fields[field];
   if (completion?.listed == null) return [];
-  return completion.listed.entries
+  const typed = completion.listed.entries
     .filter(entry => entry.name.startsWith(completion.typed))
-    .slice(0, SHOWN)
-    .map(entry => `${entry.path}/`);
+    .map(entry => ({value: `${entry.path}/`, name: entry.name, fits: entry[field]}));
+  return [...typed.filter(each => each.fits), ...typed.filter(each => !each.fits)].slice(0, SHOWN);
+}
+
+/** The paths `suggestedEntries` offers, alone. */
+export function suggestions(state: CompletionState, field: CompletionField): string[] {
+  return suggestedEntries(state, field).map(each => each.value);
 }
 
 function input(

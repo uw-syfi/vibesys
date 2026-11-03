@@ -161,13 +161,14 @@ test('add a machine, change a checkout from labelled suggestions, and remove a m
   const field = page.getByRole('combobox', {name: 'VibeSys checkout on This Mac'});
   await field.fill('/home/me/');
   const options = page.getByRole('listbox').getByRole('option');
+  // The checkouts first: they are what the field asks for.
   await expect(options).toHaveText([
-    '/home/me/notes/',
     '/home/me/vibesys/0.1.1 · e66d941',
     '/home/me/vibesys-old/0.0.9 · too old for this app',
+    '/home/me/notes/',
   ]);
   await shoot(page, 'ink-change-checkout');
-  await options.nth(1).click();
+  await options.nth(0).click();
   await expect(field).toHaveValue('/home/me/vibesys/');
   await page.getByRole('button', {name: 'Check and save'}).click();
   await expect(page.getByRole('definition').first()).toHaveText('/home/me/vibesys');
