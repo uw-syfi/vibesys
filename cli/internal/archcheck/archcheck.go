@@ -49,6 +49,11 @@ var rules = map[string][]string{
 	"internal/backend":             {"internal/core"},
 	"internal/backend/cpu":         {"internal/backend", "internal/clock", "internal/core"},
 	"internal/backend/backendtest": {"internal/backend"},
+	"internal/backend/nvidia":      {"internal/clock", "internal/core", "internal/remote"},
+	// Reaching a machine to run programs on: this one, or another over ssh and rsync.
+	"internal/remote": {"internal/backend/cpu", "internal/clock", "internal/core"},
+	// The operator's settings of the machine, which never come from a task.
+	"internal/operator":            {"internal/core", "internal/environment/docker"},
 	"internal/environment":         {"internal/core"},
 	"internal/environment/fakeenv": {"internal/clock", "internal/core", "internal/environment"},
 	// The fake machine's world for the contract suite. Only tests reach it.
@@ -60,7 +65,13 @@ var rules = map[string][]string{
 	// talks to Docker. The real engine drives the docker program, the fake keeps a daemon in
 	// memory, and one contract suite holds both to the same behavior.
 	"internal/environment/docker":           {"internal/backend", "internal/clock", "internal/core", "internal/environment", "internal/task"},
-	"internal/environment/docker/dockercli": {"internal/clock", "internal/core", "internal/environment", "internal/environment/docker"},
+	"internal/environment/docker/dockercli": {"internal/clock", "internal/core", "internal/environment", "internal/environment/docker", "internal/remote"},
+	// Where a docker engine's containers find a run's directories: this machine, or copies on one
+	// reached over ssh.
+	"internal/environment/docker/machine": {"internal/clock", "internal/core", "internal/environment/docker", "internal/remote"},
+	// Containers and builds placed in Slurm allocations: a dockercli allocator, and an engine that
+	// ends the allocations.
+	"internal/environment/slurm": {"internal/clock", "internal/core", "internal/environment/docker", "internal/environment/docker/dockercli", "internal/remote"},
 	"internal/environment/docker/dockerfake": {
 		"internal/core", "internal/environment", "internal/environment/docker", "internal/environment/fakeenv",
 	},
@@ -132,6 +143,8 @@ var rules = map[string][]string{
 		"internal/environment/docker/dockercli", "internal/environment/host", "internal/gitrepo",
 		"internal/gitwork", "internal/hostfs", "internal/runtimedir", "internal/store/filestore",
 		"internal/supervisor", "internal/supervisor/host", "internal/task",
+		"internal/backend/nvidia", "internal/environment/docker/machine", "internal/environment/slurm",
+		"internal/operator", "internal/remote",
 	},
 
 	// Replacing the running binary with a newer release.
@@ -150,6 +163,12 @@ var testRules = map[string][]string{
 	"internal/environment":         {"internal/environment/fakeenv"},
 	"internal/environment/fakeenv": {"internal/environment/envtest", "internal/environment/fakeenv/fakeworld"},
 	"internal/environment/host":    {"internal/backend/cpu", "internal/environment/envtest", "internal/environment/fakeenv"},
+	"internal/environment/slurm": {
+		"internal/backend/cpu", "internal/environment", "internal/environment/docker/dockerfake",
+		"internal/environment/envtest", "internal/environment/fakeenv/fakeworld",
+	},
+	"internal/environment/docker/machine": {"internal/environment/envtest"},
+	"internal/remote":                     {"internal/environment/envtest"},
 	"internal/environment/docker": {
 		"internal/backend/cpu", "internal/clock", "internal/environment/docker/dockerfake",
 		"internal/environment/docker/dockertest", "internal/environment/envtest", "internal/environment/fakeenv",

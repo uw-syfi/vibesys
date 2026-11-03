@@ -37,7 +37,7 @@ func (e *Engine) Build(ctx context.Context, spec docker.BuildSpec, log io.Writer
 		args = append(args, "--label", k+"="+spec.Labels[k])
 	}
 	args = append(args, "-")
-	cmd := exec.CommandContext(ctx, e.program, args...)
+	cmd := e.command(ctx, &Allocation{Name: BuildName(spec.Tag), Scope: spec.Labels[docker.LabelScope], Build: true}, args...)
 	cmd.Stdin = bytes.NewReader(spec.Context)
 	out := &tail{w: log}
 	// One writer for both streams: the build's progress is one ordered log.
@@ -53,8 +53,20 @@ func (e *Engine) Build(ctx context.Context, spec docker.BuildSpec, log io.Writer
 	if !asExit(err, &exit) {
 		return unavailable("cannot run %q to build: %v; %s", e.program, err, hint)
 	}
+	if e.shell.Lost(exit.ExitCode()) {
+		return unavailable("the connection to %s was lost while it built the task's image; the end of the build's output:\n%s", e.shell.Where(), out.last())
+	}
 	return unavailable("building the task's image failed (exit %d); the end of the build's output:\n%s", exit.ExitCode(), out.last())
 }
+
+// BuildName is the unique name of a build of the tag, as an Allocator is given it: a build of one
+// tag runs at most once at a time in one process, and its name says which image it builds.
+func BuildName(tag string) string {
+	return BuildPrefix + strings.ReplaceAll(strings.ReplaceAll(tag, ":", "-"), "/", "-")
+}
+
+// BuildPrefix starts the name of every build.
+const BuildPrefix = docker.Owner + "-build-"
 
 // tail passes a log on and remembers its last lines.
 type tail struct {

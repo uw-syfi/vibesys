@@ -87,7 +87,7 @@ func (e *Engine) Start(ctx context.Context, spec docker.ContainerSpec) (docker.C
 		return nil, unavailable("cannot make the pipe that guards the container: %v", err)
 	}
 	h := &handle{e: e, name: spec.Name, stdin: inWrite, keeperDone: make(chan struct{})}
-	cmd := exec.Command(e.program, runArgs(spec)...)
+	cmd := e.command(context.Background(), &Allocation{Name: spec.Name, Scope: spec.Labels[docker.LabelScope], Limit: spec.Limit}, runArgs(spec)...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = inRead, outWrite, &h.stderr
 	startErr := cmd.Start()
 	inRead.Close()
@@ -111,7 +111,8 @@ func (e *Engine) Start(ctx context.Context, spec docker.ContainerSpec) (docker.C
 		close(h.keeperDone)
 	})
 
-	bounded, done := e.bound(ctx)
+	// The wait includes the wait for an allocation, when the container is placed in one.
+	bounded, done := e.boundBy(ctx, e.startTimeout)
 	defer done()
 	select {
 	case ok := <-ready:
@@ -185,7 +186,7 @@ func (h *handle) Start(argv []string, sink io.Writer) (environment.Process, erro
 		return nil, &core.Failure{Kind: core.FailureInvalidInput, Message: "dockercli: no command to run"}
 	}
 	args := append([]string{"exec", h.name, "/bin/sh", "-c", execWrapper, "vs-exec"}, argv...)
-	cmd := exec.Command(h.e.program, args...)
+	cmd := h.e.command(context.Background(), nil, args...)
 	var stderr lockedBuffer
 	cmd.Stdout, cmd.Stderr = sink, &stderr
 
@@ -213,6 +214,10 @@ func (h *handle) finish(waitErr error, stderr string) environment.Exit {
 		code = exit.ExitCode()
 	default:
 		return environment.Exit{Err: unavailable("waiting for a command of %s: %v", h.name, waitErr)}
+	}
+	if h.e.shell.Lost(code) {
+		// The transport's own code: the command's end was not seen, and is never a success.
+		return docker.Lost(fmt.Sprintf("the connection to %s was lost while it ran a command of %s: %s", h.e.shell.Where(), h.name, strings.TrimSpace(stderr)))
 	}
 	if code == 0 {
 		return environment.Exit{}

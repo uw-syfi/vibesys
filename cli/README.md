@@ -118,6 +118,11 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/environment/docker/dockercli/` | The `Engine` that drives the `docker` program. The only place that touches a real Docker. Its tests against a real daemon carry the `docker` build tag. |
 | `internal/environment/docker/dockerfake/` | An `Engine` that keeps a Docker daemon in memory and can fail or crash any call. Tests only. |
 | `internal/environment/docker/dockertest/` | The one contract suite every `Engine` passes. Tests only. |
+| `internal/environment/docker/machine/` | Where a docker engine's containers find a run's directories: `Local` (this machine's own directories, and its caches) and `Remote` (copies made with rsync on a machine reached over ssh, copied back when the command ends). |
+| `internal/environment/slurm/` | The Slurm placement: an `Allocator` that runs a container's first process and every image build under `srun`, and an `Engine` that removes a container and then cancels and confirms the end of its allocation, and sweeps the allocations a dead run left. Passes the environment contract suite over the fake engine. |
+| `internal/remote/` | Running programs on a machine and copying directories to and from it: this one, or another over ssh and rsync. An exit code that is ssh's own is never taken for the program's. |
+| `internal/backend/nvidia/` | The GPU facts of a machine (model, count, driver, the driver's CUDA version) for a fingerprint, read with `nvidia-smi`. |
+| `internal/operator/` | The operator config (`cli.toml`): where the Docker engine runs, which GPUs a container gets, and the read-only mounts. |
 | `internal/wire/` | Translation between `core` types and the generated contract types, the version handshake, and typed refusals. |
 | `internal/supervisor/` | The supervisor as a domain type: it owns one job's command and its output, and reports the outcome. |
 | `internal/supervisor/rpc/` | The supervisor's gRPC server and client, over the additive `supervisor.proto`. |
@@ -483,7 +488,38 @@ refused with the reason.
 - Every container is named and labelled for the daemon that started it. A cancelled or timed out
   job removes its container, and the next job removes any container an earlier job left, for
   instance when the supervisor was killed. Containers that other tools started are never touched.
-- The docker program must be on the `PATH` of the daemon, and the user must be allowed to use it.
+- The docker program must be on the `PATH` of the daemon, and the user must be allowed to use it,
+  on the machine the operator config places the engine on.
+
+### The operator config
+
+Settings about the machine belong to whoever runs the CLI, never to a task. They are read from
+`$XDG_CONFIG_HOME/vibesys/cli.toml` (`~/.config/vibesys/cli.toml`), or the file
+`VIBESYS_CLI_CONFIG` names, when the daemon and each supervisor start; `daemon restart` applies a
+change. Unknown keys are refused. With no file, docker runs on this machine with no GPU.
+
+| Key | Meaning |
+| --- | --- |
+| `[docker] placement` | `local` (default), `ssh` (docker runs on `[remote] host`, reached over ssh) or `slurm` (as `ssh`, with every container and image build inside a new allocation made by `srun`). |
+| `[docker] gpus` | A `docker --gpus` value such as `all`; empty passes no GPU, and a `cuda` task is refused. |
+| `[docker] runtime` | `nvidia` passes the GPUs with `--runtime nvidia` and `NVIDIA_VISIBLE_DEVICES` instead of `--gpus`. |
+| `[docker.mounts] <name> = "<dir>"` | A directory of the engine's machine every container sees read-only at `/vibesys/mounts/<name>`. |
+| `[remote] host`, `ssh_command`, `rsync_command` | The ssh destination and the programs that reach it. |
+| `[remote] remote_workspace_root` | An absolute directory there for the copies of runs' directories (`staged/`) and the caches (`cache/`). |
+| `[slurm] partition`, `gres`, `exclusive`, `srun_arguments` | What each allocation asks for; `exclusive` defaults to true. |
+| `[slurm] poll_interval_seconds`, `queue_timeout_seconds` | The pause between reads of a job's state while its cancel is confirmed, and the bound on the wait for an allocation (24 hours by default). |
+
+On another machine, a run's checkout and scratch directory are copied to `remote_workspace_root`
+and mounted at their local paths; the scratch directory and the artifacts are copied back when the
+command ends, and a copy that fails makes the command's ending unknown. Under `slurm`, a container
+is removed and then its allocation is cancelled and confirmed ended, on every path, because the
+Docker daemon runs outside Slurm's cgroups; a run first cancels any allocation of its scope that a
+dead run left. The queue wait does not count against a command's timeout. The ssh host must be the
+node Docker runs on.
+
+A second daemon independent of the first takes its own `XDG_RUNTIME_DIR`, `XDG_STATE_HOME` and
+`VIBESYS_CLI_CONFIG`; its containers and Slurm jobs carry its own scope. Stores live in the
+repository, so it must use another clone of a repository the first one uses.
 
 ## The result branch
 
