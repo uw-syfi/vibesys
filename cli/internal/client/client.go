@@ -310,10 +310,60 @@ func (c *Client) ForgetRepository(ctx context.Context, repository string) (*cliv
 }
 
 // Submit queues a job.
+//
+// A submission is answered only after the daemon has the environment's fingerprint, which for a
+// docker task means its image is built, so a daemon that stops or restarts meanwhile breaks the
+// call with nothing recorded. Submit then connects again, which starts a daemon if none runs, and
+// sends the same submission, which joins the job if the first one was recorded after all. Only a
+// keyed submission joins: a command job has no key and one with no_cache asks for a new job, so
+// either is not sent again, since a second one would run a second job: it fails with
+// ErrSubmissionUnknown.
 func (c *Client) Submit(ctx context.Context, req *cliv1.SubmitRequest) (*cliv1.SubmitResponse, error) {
-	resp, err := c.rpc.Submit(ctx, req)
-	return resp, c.fail(err)
+	current := c
+	defer func() {
+		if current != c {
+			current.Close()
+		}
+	}()
+	delay := reconnectFirst
+	for attempt := 1; ; attempt++ {
+		resp, err := current.rpc.Submit(ctx, req)
+		switch {
+		case err == nil:
+			return resp, nil
+		case ctx.Err() != nil:
+			return nil, ctx.Err()
+		case !wire.Broken(err):
+			return nil, c.fail(err)
+		case req.GetNoCache() || req.GetSpec().GetCommand() != nil:
+			return nil, fmt.Errorf("%w: %v", ErrSubmissionUnknown, err)
+		case attempt >= reconnectAttempts:
+			return nil, fmt.Errorf("the daemon did not answer the submission after %d attempts: %w", attempt, err)
+		}
+		// Connect waits for a daemon that is going and starts the next, so a restart needs no pause
+		// of its own; one that leaves no daemon to reach is tried again after a backoff.
+		next, cerr := Connect(ctx, c.opts)
+		switch {
+		case cerr == nil:
+			if current != c {
+				current.Close()
+			}
+			current = next
+		case wire.IsIncompatible(cerr):
+			return nil, cerr
+		default:
+			if !clock.Sleep(ctx, c.opts.Timers, delay) {
+				return nil, ctx.Err()
+			}
+			delay = min(delay*2, reconnectLongest)
+		}
+	}
 }
+
+// ErrSubmissionUnknown says the connection to the daemon broke while it handled a submission it
+// would not join to an earlier one, a command job or one with no_cache, so whether the job was
+// recorded is unknown: `jobs` lists it if it was.
+var ErrSubmissionUnknown = errors.New("the daemon stopped during the submission, which may or may not have been recorded; list the jobs before submitting it again")
 
 // Cancel cancels a job and returns it once it is final.
 func (c *Client) Cancel(ctx context.Context, req *cliv1.CancelRequest) (*cliv1.CancelResponse, error) {

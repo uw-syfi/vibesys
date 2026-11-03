@@ -50,6 +50,9 @@ type Environment struct {
 	active   int
 	finger   error
 	fingered int
+	// hold, when set, is the gate Fingerprint waits at, as a real environment waits for an
+	// image build.
+	hold string
 }
 
 var _ environment.Environment = (*Environment)(nil)
@@ -101,6 +104,17 @@ func (e *Environment) Kind() core.EnvironmentKind { return e.kind }
 // Fingerprint implements environment.Environment.
 func (e *Environment) Fingerprint(ctx context.Context) (core.Fingerprint, error) {
 	e.mu.Lock()
+	hold := e.hold
+	e.mu.Unlock()
+	if hold != "" {
+		if p, ok := e.gates.(Points); ok {
+			p.Mark(FingerprintMark)
+		}
+		if !e.gates.Wait(ctx, hold) {
+			return core.Fingerprint{}, ctx.Err()
+		}
+	}
+	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.fingered++
 	if e.finger != nil {
@@ -109,6 +123,18 @@ func (e *Environment) Fingerprint(ctx context.Context) (core.Fingerprint, error)
 	f := e.print
 	f.Facts = cloneFacts(f.Facts)
 	return f, nil
+}
+
+// FingerprintMark is the point Fingerprint marks when it waits at the gate HoldFingerprint names.
+const FingerprintMark = "fingerprint-held"
+
+// HoldFingerprint makes every later Fingerprint wait at the gate until it is released or the
+// caller's context ends, as an environment that builds an image first does; an empty gate holds
+// none.
+func (e *Environment) HoldFingerprint(gate string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.hold = gate
 }
 
 // Fingerprinted returns how many times Fingerprint was called.

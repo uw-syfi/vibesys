@@ -201,7 +201,7 @@ var testRules = map[string][]string{
 	"internal/daemon":         {"internal/store", "internal/app/memstores", "internal/environment/fakeenv", "internal/store/storetest"},
 	"internal/client": {
 		"internal/app", "internal/app/memstores", "internal/core", "internal/daemon", "internal/daemon/daemontest",
-		"internal/environment/fakeenv", "internal/supervisor",
+		"internal/environment/fakeenv", "internal/supervisor", "internal/task/tasktest",
 	},
 	// The whole daemon, over Fakes, in one process.
 	"internal/sim": {
