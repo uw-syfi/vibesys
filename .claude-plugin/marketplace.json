@@ -1,6 +1,6 @@
 {
   "name": "vibesys",
-  "description": "Skills that run VibeSys-style, measurement-driven optimization inside Claude Code.",
+  "description": "Skills that run VibeSys-style, measurement-driven optimization inside Claude Code, with domain skills for kernels, LLM serving, databases and microservices.",
   "owner": {
     "name": "uw-syfi"
   },
@@ -8,32 +8,10 @@
     {
       "name": "vibesys",
       "source": "./skills",
-      "description": "Resumable optimization with parallel hypotheses, measurements and independent judging, plus domain skills for kernels, LLM serving, microservices, Tokio services and Neuron.",
-      "version": "0.8.1",
+      "description": "Resumable, measurement-driven optimization loop with parallel hypotheses, measurements and independent judging; the domain skills are in the vibesys-llm-serving, vibesys-database, vibesys-microservices and vibesys-kernels-<backend> plugins.",
+      "version": "0.9.0",
       "strict": false,
       "skills": [
-        "./domains/dial9-tokio/dial9-rank-bottlenecks",
-        "./domains/dial9-tokio/skills/dial9-diagnose-long-poll",
-        "./domains/dial9-tokio/skills/dial9-red-flags",
-        "./domains/dial9-tokio/skills/dial9-runtime",
-        "./domains/dial9-tokio/skills/dial9-toolkit",
-        "./domains/dial9-tokio/skills/dial9-trace-analysis",
-        "./domains/dial9-tokio/skills/dial9-trace-loading",
-        "./domains/dial9-tokio/skills/dial9-trace-recipes",
-        "./domains/dial9-tokio/skills/dial9-zoom-window",
-        "./domains/kernel-correctness",
-        "./domains/kernel-ncu-analysis",
-        "./domains/kernel-performance",
-        "./domains/kernel-rocprof-analysis",
-        "./domains/kernel-timeline-analysis",
-        "./domains/microservice-optimization",
-        "./domains/neuron-agentic-development/skills/neuron-explorer-profile-schema",
-        "./domains/neuron-agentic-development/skills/neuron-nki-debugging",
-        "./domains/neuron-agentic-development/skills/neuron-nki-docs",
-        "./domains/neuron-agentic-development/skills/neuron-nki-profile-querying",
-        "./domains/neuron-agentic-development/skills/neuron-nki-profiling",
-        "./domains/neuron-agentic-development/skills/neuron-nki-writing",
-        "./domains/serving-systems",
         "./search/combine-candidates",
         "./search/commit",
         "./search/create-task",
@@ -46,6 +24,95 @@
         "./search/report-progress",
         "./search/state",
         "./search/visualize-progress"
+      ]
+    },
+    {
+      "name": "vibesys-llm-serving",
+      "source": "./skills",
+      "description": "Domain skills for optimizing LLM serving systems, for use with the vibesys optimization loop.",
+      "version": "0.1.0",
+      "strict": false,
+      "skills": [
+        "./domains/serving-systems"
+      ]
+    },
+    {
+      "name": "vibesys-microservices",
+      "source": "./skills",
+      "description": "Domain skills for optimizing microservices, including Tokio services profiled with dial9, for use with the vibesys optimization loop.",
+      "version": "0.1.0",
+      "strict": false,
+      "skills": [
+        "./domains/dial9-tokio/dial9-rank-bottlenecks",
+        "./domains/dial9-tokio/skills/dial9-diagnose-long-poll",
+        "./domains/dial9-tokio/skills/dial9-red-flags",
+        "./domains/dial9-tokio/skills/dial9-runtime",
+        "./domains/dial9-tokio/skills/dial9-toolkit",
+        "./domains/dial9-tokio/skills/dial9-trace-analysis",
+        "./domains/dial9-tokio/skills/dial9-trace-loading",
+        "./domains/dial9-tokio/skills/dial9-trace-recipes",
+        "./domains/dial9-tokio/skills/dial9-zoom-window",
+        "./domains/microservice-optimization"
+      ]
+    },
+    {
+      "name": "vibesys-database",
+      "source": "./skills",
+      "description": "Tokio runtime diagnosis for database and other Tokio-based services.",
+      "version": "0.1.0",
+      "strict": false,
+      "skills": [
+        "./domains/dial9-tokio/dial9-rank-bottlenecks",
+        "./domains/dial9-tokio/skills/dial9-diagnose-long-poll",
+        "./domains/dial9-tokio/skills/dial9-red-flags",
+        "./domains/dial9-tokio/skills/dial9-runtime",
+        "./domains/dial9-tokio/skills/dial9-toolkit",
+        "./domains/dial9-tokio/skills/dial9-trace-analysis",
+        "./domains/dial9-tokio/skills/dial9-trace-loading",
+        "./domains/dial9-tokio/skills/dial9-trace-recipes",
+        "./domains/dial9-tokio/skills/dial9-zoom-window"
+      ]
+    },
+    {
+      "name": "vibesys-kernels-cuda",
+      "source": "./skills",
+      "description": "Domain skills for correct and fast CUDA kernels, with Nsight Compute and timeline analysis, for use with the vibesys optimization loop.",
+      "version": "0.1.0",
+      "strict": false,
+      "skills": [
+        "./domains/kernel-correctness",
+        "./domains/kernel-ncu-analysis",
+        "./domains/kernel-performance",
+        "./domains/kernel-timeline-analysis"
+      ]
+    },
+    {
+      "name": "vibesys-kernels-rocm",
+      "source": "./skills",
+      "description": "Domain skills for correct and fast ROCm kernels, with rocprof analysis, for use with the vibesys optimization loop.",
+      "version": "0.1.0",
+      "strict": false,
+      "skills": [
+        "./domains/kernel-correctness",
+        "./domains/kernel-performance",
+        "./domains/kernel-rocprof-analysis"
+      ]
+    },
+    {
+      "name": "vibesys-kernels-trainium",
+      "source": "./skills",
+      "description": "Domain skills for correct and fast Trainium kernels, with the vendored Neuron NKI pack, for use with the vibesys optimization loop.",
+      "version": "0.1.0",
+      "strict": false,
+      "skills": [
+        "./domains/kernel-correctness",
+        "./domains/kernel-performance",
+        "./domains/neuron-agentic-development/skills/neuron-explorer-profile-schema",
+        "./domains/neuron-agentic-development/skills/neuron-nki-debugging",
+        "./domains/neuron-agentic-development/skills/neuron-nki-docs",
+        "./domains/neuron-agentic-development/skills/neuron-nki-profile-querying",
+        "./domains/neuron-agentic-development/skills/neuron-nki-profiling",
+        "./domains/neuron-agentic-development/skills/neuron-nki-writing"
       ]
     }
   ]

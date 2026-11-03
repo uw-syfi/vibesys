@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+from scripts.published_skills.plugins import PLUGIN_SKILLS
 from scripts.published_skills.skills import PUBLISHED_ROOT, discover
 
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
 MANIFEST_PATH = Path(".claude-plugin/marketplace.json")
-PLUGIN_NAME = "vibesys"
 PLUGIN_SOURCE = f"./{PUBLISHED_ROOT.as_posix()}"
 
 
@@ -32,46 +36,98 @@ def _load(root: Path) -> dict[str, object]:
     return loaded
 
 
-def _plugin_entry(manifest: dict[str, object]) -> dict[str, object]:
-    plugins = manifest.get("plugins")
-    entries = (
-        [p for p in plugins if isinstance(p, dict) and p.get("name") == PLUGIN_NAME]
-        if isinstance(plugins, list)
-        else []
-    )
-    if len(entries) != 1:
+def _plugin_entries(
+    manifest: dict[str, object], plugins: Mapping[str, tuple[str, ...]]
+) -> dict[str, dict[str, object]]:
+    """The manifest's entries by name, which must be exactly the table's plugins."""
+    listed = manifest.get("plugins")
+    entries = [p for p in listed if isinstance(p, dict)] if isinstance(listed, list) else []
+    names = [entry.get("name") for entry in entries]
+    duplicated = sorted({str(n) for n in names if names.count(n) > 1})
+    missing = sorted(set(plugins) - set(names))
+    extra = sorted(str(n) for n in set(names) - set(plugins))
+    if duplicated or missing or extra:
+        problems = [
+            f"{label} {', '.join(f'`{n}`' for n in found)}"
+            for label, found in (("duplicate", duplicated), ("missing", missing), ("extra", extra))
+            if found
+        ]
         message = (
-            f"{MANIFEST_PATH.as_posix()}: `plugins` must hold exactly one entry named "
-            f"`{PLUGIN_NAME}`"
+            f"{MANIFEST_PATH.as_posix()}: `plugins` must hold exactly one entry for each of "
+            f"{', '.join(f'`{n}`' for n in plugins)}; {'; '.join(problems)}"
         )
         raise ManifestError(message)
-    entry = entries[0]
+    by_name = {str(entry["name"]): entry for entry in entries}
+    for name, entry in by_name.items():
+        _check_entry(name, entry)
+    return by_name
+
+
+def _check_entry(name: str, entry: dict[str, object]) -> None:
     if entry.get("source") != PLUGIN_SOURCE:
         message = (
-            f"{MANIFEST_PATH.as_posix()}: the `{PLUGIN_NAME}` entry's `source` must be "
+            f"{MANIFEST_PATH.as_posix()}: the `{name}` entry's `source` must be "
             f"`{PLUGIN_SOURCE}` so that everything under it, and nothing else, is published"
         )
         raise ManifestError(message)
     if not isinstance(entry.get("version"), str) or not entry["version"]:
         message = (
-            f"{MANIFEST_PATH.as_posix()}: the `{PLUGIN_NAME}` entry needs an explicit `version`; "
+            f"{MANIFEST_PATH.as_posix()}: the `{name}` entry needs an explicit `version`; "
             "without one every commit looks like an update"
         )
         raise ManifestError(message)
-    return entry
 
 
-def render_manifest(root: Path) -> str:
-    """The committed manifest with its skill list regenerated from the tree."""
+def _belongs(path: str, prefix: str) -> bool:
+    return path == prefix or path.startswith(f"{prefix}/")
+
+
+def _plugin_skills(
+    paths: list[str], plugins: Mapping[str, tuple[str, ...]]
+) -> dict[str, list[str]]:
+    """Each plugin's skills in discovery order; every skill and every prefix must be used."""
+    dangling = [
+        f"`{prefix}` of `{name}`"
+        for name, prefixes in plugins.items()
+        for prefix in prefixes
+        if not any(_belongs(path, prefix) for path in paths)
+    ]
+    if dangling:
+        message = f"plugin table: no skill lies under {', '.join(dangling)}"
+        raise ManifestError(message)
+    unassigned = [
+        path
+        for path in paths
+        if not any(_belongs(path, prefix) for prefixes in plugins.values() for prefix in prefixes)
+    ]
+    if unassigned:
+        message = (
+            f"plugin table: skill(s) {', '.join(f'`{p}`' for p in unassigned)} belong to no "
+            "plugin; list their folder in scripts/published_skills/plugins.py"
+        )
+        raise ManifestError(message)
+    return {
+        name: [p for p in paths if any(_belongs(p, prefix) for prefix in prefixes)]
+        for name, prefixes in plugins.items()
+    }
+
+
+def render_manifest(root: Path, plugins: Mapping[str, tuple[str, ...]] = PLUGIN_SKILLS) -> str:
+    """The committed manifest with each plugin's skill list regenerated from the tree."""
     manifest = _load(root)
-    _plugin_entry(manifest)["skills"] = [skill.path for skill in discover(root)]
+    entries = _plugin_entries(manifest, plugins)
+    lists = _plugin_skills([skill.path for skill in discover(root)], plugins)
+    for name, skills in lists.items():
+        entries[name]["skills"] = skills
     return json.dumps(manifest, indent=2) + "\n"
 
 
-def check_manifest(root: Path) -> list[str]:
+def check_manifest(
+    root: Path, plugins: Mapping[str, tuple[str, ...]] = PLUGIN_SKILLS
+) -> list[str]:
     """Findings for a manifest that differs from what the tree generates; empty when current."""
     try:
-        expected = render_manifest(root)
+        expected = render_manifest(root, plugins)
     except ManifestError as exc:
         return [str(exc)]
     actual = (root / MANIFEST_PATH).read_text(encoding="utf-8")

@@ -15,6 +15,7 @@ from hypothesis import strategies as st
 from scripts.published_skills import (
     HARNESS_HEADINGS,
     MANIFEST_PATH,
+    PLUGIN_SKILLS,
     SPEC_FIELDS,
     VIBESYS_TOOL_NAMES,
     ManifestError,
@@ -34,12 +35,18 @@ if TYPE_CHECKING:
 
 TMP = [HealthCheck.function_scoped_fixture]
 NAMES = st.from_regex(r"\A[a-z][a-z0-9]{0,8}(-[a-z0-9]{1,8}){0,2}\Z")
+TABLE = {"core": ("./search",), "kernels": ("./domains/kernel-performance",)}
+"""A plugin table injected over the throwaway trees, instead of the committed one."""
+
+
+def _entry(name: str, version: str = "0.1.0") -> dict[str, object]:
+    return {"name": name, "source": "./skills", "version": version, "strict": False, "skills": []}
+
+
 MANIFEST = {
     "name": "vibesys",
     "owner": {"name": "uw-syfi"},
-    "plugins": [
-        {"name": "vibesys", "source": "./skills", "version": "0.1.0", "strict": False, "skills": []}
-    ],
+    "plugins": [_entry("core"), _entry("kernels", "0.2.0")],
 }
 
 
@@ -112,47 +119,192 @@ def test_discovery_finds_exactly_the_skills_present_in_sorted_order(
     assert set(paths) == {f"./search/{n}" for n in search} | {f"./domains/{n}" for n in domains}
 
 
-def test_render_replaces_only_the_skill_list(tmp_path: Path) -> None:
+def test_render_replaces_only_the_skill_lists(tmp_path: Path) -> None:
+    _skill(tmp_path, "search/optimize")
     _skill(tmp_path, "domains/kernel-performance")
     _manifest(tmp_path, {**MANIFEST, "description": "kept"})
 
-    rendered = json.loads(render_manifest(tmp_path))
+    rendered = json.loads(render_manifest(tmp_path, TABLE))
 
     assert rendered["description"] == "kept"
-    assert rendered["plugins"][0]["skills"] == ["./domains/kernel-performance"]
-    assert rendered["plugins"][0]["version"] == "0.1.0"
-    assert rendered["plugins"][0]["strict"] is False
+    core, kernels = rendered["plugins"]
+    assert core["skills"] == ["./search/optimize"]
+    assert kernels["skills"] == ["./domains/kernel-performance"]
+    assert [p["version"] for p in rendered["plugins"]] == ["0.1.0", "0.2.0"]
+    assert all(p["strict"] is False for p in rendered["plugins"])
+
+
+def test_each_plugin_lists_the_skills_under_its_prefixes_in_discovery_order(
+    tmp_path: Path,
+) -> None:
+    for relative in (
+        "search/optimize",
+        "domains/pack/skills/b-skill",
+        "domains/pack/skills/a-skill",
+        "domains/kernel-performance",
+        "domains/kernel-performance-extra",
+    ):
+        _skill(tmp_path, relative)
+    table = {
+        "core": ("./search",),
+        "kernels": ("./domains/kernel-performance", "./domains/pack"),
+        "extra": ("./domains/kernel-performance-extra",),
+    }
+    manifest = {
+        **MANIFEST,
+        "plugins": [_entry(name) for name in table],
+    }
+    _manifest(tmp_path, manifest)
+
+    lists = {
+        p["name"]: p["skills"] for p in json.loads(render_manifest(tmp_path, table))["plugins"]
+    }
+
+    assert lists == {
+        "core": ["./search/optimize"],
+        "kernels": [
+            "./domains/kernel-performance",
+            "./domains/pack/skills/a-skill",
+            "./domains/pack/skills/b-skill",
+        ],
+        "extra": ["./domains/kernel-performance-extra"],
+    }
+
+
+def test_a_skill_listed_by_several_plugins_is_allowed_and_names_stay_unique(
+    tmp_path: Path,
+) -> None:
+    _skill(tmp_path, "domains/kernel-correctness")
+    _skill(tmp_path, "domains/kernel-ncu")
+    _skill(tmp_path, "domains/kernel-rocprof")
+    table = {
+        "cuda": ("./domains/kernel-correctness", "./domains/kernel-ncu"),
+        "rocm": ("./domains/kernel-correctness", "./domains/kernel-rocprof"),
+    }
+    _manifest(tmp_path, {**MANIFEST, "plugins": [_entry(name) for name in table]})
+    (tmp_path / MANIFEST_PATH).write_text(render_manifest(tmp_path, table))
+
+    lists = {
+        p["name"]: p["skills"]
+        for p in json.loads((tmp_path / MANIFEST_PATH).read_text())["plugins"]
+    }
+
+    assert "./domains/kernel-correctness" in lists["cuda"]
+    assert "./domains/kernel-correctness" in lists["rocm"]
+    assert check_manifest(tmp_path, table) == []
+    assert _messages(tmp_path) == []
+
+
+def test_the_committed_table_lists_dial9_tokio_in_two_plugins() -> None:
+    holders = [n for n, prefixes in PLUGIN_SKILLS.items() if "./domains/dial9-tokio" in prefixes]
+
+    assert holders == ["vibesys-microservices", "vibesys-database"]
+    assert check_manifest(REPOSITORY) == []
+
+
+def test_a_pack_listed_by_two_plugins_appears_in_both_generated_lists(tmp_path: Path) -> None:
+    _skill(tmp_path, "domains/pack/skills/pack-runtime")
+    _skill(tmp_path, "domains/pack/skills/pack-trace")
+    table = {"one": ("./domains/pack",), "two": ("./domains/pack",)}
+    _manifest(tmp_path, {**MANIFEST, "plugins": [_entry(name) for name in table]})
+
+    lists = [p["skills"] for p in json.loads(render_manifest(tmp_path, table))["plugins"]]
+
+    assert lists[0] == lists[1] == [
+        "./domains/pack/skills/pack-runtime",
+        "./domains/pack/skills/pack-trace",
+    ]
 
 
 @settings(suppress_health_check=TMP)
-@given(names=st.sets(NAMES, max_size=5))
+@given(names=st.sets(NAMES, min_size=1, max_size=5))
 def test_a_written_manifest_always_checks_clean_and_any_tree_change_makes_it_stale(
     tmp_path_factory: pytest.TempPathFactory, names: set[str]
 ) -> None:
     root = tmp_path_factory.mktemp("repo")
     for name in names:
         _skill(root, f"domains/{name}")
-    _manifest(root)
-    (root / MANIFEST_PATH).write_text(render_manifest(root))
+    table = {"all": ("./domains",)}
+    _manifest(root, {**MANIFEST, "plugins": [_entry("all")]})
+    (root / MANIFEST_PATH).write_text(render_manifest(root, table))
 
-    assert check_manifest(root) == []
+    assert check_manifest(root, table) == []
 
     _skill(root, "domains/zz-added")
-    stale = check_manifest(root)
+    stale = check_manifest(root, table)
     assert len(stale) == 1
     assert MANIFEST_PATH.as_posix() in stale[0]
     assert "--write" in stale[0]
 
 
 def test_a_hand_edited_skill_list_is_reported(tmp_path: Path) -> None:
+    _skill(tmp_path, "search/optimize")
     _skill(tmp_path, "domains/kernel-performance")
     _manifest(tmp_path)
-    (tmp_path / MANIFEST_PATH).write_text(render_manifest(tmp_path))
+    (tmp_path / MANIFEST_PATH).write_text(render_manifest(tmp_path, TABLE))
+    assert check_manifest(tmp_path, TABLE) == []
     manifest = json.loads((tmp_path / MANIFEST_PATH).read_text())
-    manifest["plugins"][0]["skills"].append("./domains/ghost")
+    manifest["plugins"][1]["skills"].append("./domains/ghost")
     _manifest(tmp_path, manifest)
 
-    assert len(check_manifest(tmp_path)) == 1
+    assert len(check_manifest(tmp_path, TABLE)) == 1
+
+
+def test_a_skill_that_belongs_to_no_plugin_is_reported_by_path(tmp_path: Path) -> None:
+    _skill(tmp_path, "search/optimize")
+    _skill(tmp_path, "domains/kernel-performance")
+    _skill(tmp_path, "domains/orphan")
+    _manifest(tmp_path)
+
+    findings = check_manifest(tmp_path, TABLE)
+
+    assert len(findings) == 1
+    assert "`./domains/orphan`" in findings[0]
+    assert "belong to no plugin" in findings[0]
+    assert "kernel-performance" not in findings[0]
+
+
+def test_a_prefix_that_matches_no_skill_is_reported_with_its_plugin(tmp_path: Path) -> None:
+    _skill(tmp_path, "search/optimize")
+    _skill(tmp_path, "domains/kernel-performance")
+    _manifest(tmp_path)
+    table = {**TABLE, "kernels": (*TABLE["kernels"], "./domains/kernel-perf")}
+
+    findings = check_manifest(tmp_path, table)
+
+    assert len(findings) == 1
+    assert "`./domains/kernel-perf` of `kernels`" in findings[0]
+
+
+def test_a_prefix_matches_whole_path_segments_only(tmp_path: Path) -> None:
+    _skill(tmp_path, "domains/kernel-performance")
+    table = {"kernels": ("./domains/kernel",)}
+    _manifest(tmp_path, {**MANIFEST, "plugins": [_entry("kernels")]})
+
+    findings = check_manifest(tmp_path, table)
+
+    assert len(findings) == 1
+    assert "`./domains/kernel` of `kernels`" in findings[0]
+
+
+@pytest.mark.parametrize(
+    ("plugins", "mention"),
+    [
+        ([_entry("core")], "missing `kernels`"),
+        ([_entry("core"), _entry("kernels"), _entry("stray")], "extra `stray`"),
+        ([_entry("core"), _entry("kernels"), _entry("core")], "duplicate `core`"),
+    ],
+    ids=["missing", "extra", "duplicate"],
+)
+def test_manifest_entries_must_be_exactly_the_plugin_table(
+    tmp_path: Path, plugins: list[dict[str, object]], mention: str
+) -> None:
+    _manifest(tmp_path, {**MANIFEST, "plugins": plugins})
+
+    findings = check_manifest(tmp_path, TABLE)
+
+    assert len(findings) == 1
+    assert mention in findings[0]
 
 
 @pytest.mark.parametrize(
@@ -161,31 +313,44 @@ def test_a_hand_edited_skill_list_is_reported(tmp_path: Path) -> None:
         (lambda e: e.update(version=""), "explicit `version`"),
         (lambda e: e.pop("version"), "explicit `version`"),
         (lambda e: e.update(source="./"), "`source` must be `./skills`"),
-        (lambda e: e.update(name="other"), "exactly one entry"),
     ],
-    ids=["empty-version", "no-version", "wrong-source", "wrong-name"],
+    ids=["empty-version", "no-version", "wrong-source"],
 )
+@pytest.mark.parametrize("index", [0, 1])
 def test_a_manifest_entry_the_generator_cannot_trust_is_reported_by_name(
-    tmp_path: Path, edit: Callable[[dict[str, object]], object], mention: str
+    tmp_path: Path, edit: Callable[[dict[str, object]], object], mention: str, index: int
 ) -> None:
     manifest = json.loads(json.dumps(MANIFEST))
-    edit(manifest["plugins"][0])
+    edit(manifest["plugins"][index])
     _manifest(tmp_path, manifest)
 
-    findings = check_manifest(tmp_path)
+    findings = check_manifest(tmp_path, TABLE)
 
     assert len(findings) == 1
     assert MANIFEST_PATH.as_posix() in findings[0]
     assert mention in findings[0]
+    assert f"`{manifest['plugins'][index]['name']}`" in findings[0]
 
 
 def test_a_missing_or_malformed_manifest_is_reported(tmp_path: Path) -> None:
-    assert "missing" in check_manifest(tmp_path)[0]
+    assert "missing" in check_manifest(tmp_path, TABLE)[0]
     (tmp_path / MANIFEST_PATH).parent.mkdir(parents=True)
     (tmp_path / MANIFEST_PATH).write_text("{")
-    assert "not valid JSON" in check_manifest(tmp_path)[0]
+    assert "not valid JSON" in check_manifest(tmp_path, TABLE)[0]
     with pytest.raises(ManifestError):
-        render_manifest(tmp_path)
+        render_manifest(tmp_path, TABLE)
+
+
+def test_the_committed_plugin_table_lists_the_expected_plugins() -> None:
+    assert list(PLUGIN_SKILLS) == [
+        "vibesys",
+        "vibesys-llm-serving",
+        "vibesys-microservices",
+        "vibesys-database",
+        "vibesys-kernels-cuda",
+        "vibesys-kernels-rocm",
+        "vibesys-kernels-trainium",
+    ]
 
 
 def test_a_skill_whose_name_differs_from_its_folder_is_reported(tmp_path: Path) -> None:

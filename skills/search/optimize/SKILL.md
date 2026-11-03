@@ -40,7 +40,10 @@ in your environment, read `references/harness/vibesys-orchestrator.md`; otherwis
    commit) or the first `vibesys-cli submit` fails with a message about the task: it says what the CLI
    cannot run. A broken task is the user's to fix, never yours (Rules). Leave the environment
    (`--env`) to the task unless the user chose one.
-3. Create or resume the optimization (`vibesys:state`). A new one first needs a base that passes
+3. From `vibesys.input.toml`, check that the domain skills the task needs are available, per
+   [domain-plugins.md](references/domain-plugins.md). If one is not listed among your skills, stop
+   and print its install commands from there; do not plan without it.
+4. Create or resume the optimization (`vibesys:state`). A new one first needs a base that passes
    its check: run `vibesys-cli submit check <base> --wait` (a pass is saved and later measures reuse
    it). If it fails, the base can never be measured and every promotion would be refused
    `unmeasured`: read [from-scratch.md](references/from-scratch.md) and create nothing else
@@ -48,7 +51,7 @@ in your environment, read `references/harness/vibesys-orchestrator.md`; otherwis
    commit, and a context line you reuse in every brief: `--task <task> --run <run id> --harness
    <harness>`. Every worktree of the repository shares the task's one store, so each agent sees
    the others' jobs.
-4. If `vibesys-cli show <base>` lists no measure result, measure the base with
+5. If `vibesys-cli show <base>` lists no measure result, measure the base with
    `vibesys-cli submit measure <base> --samples 5`, as a tracked background `wait`
    (`vibesys:measure`). No comparison means anything until it lands. Plan while it runs.
 
