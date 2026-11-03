@@ -439,8 +439,9 @@ type RunsSnapshot struct {
 	// Every turn and message of those runs, so that a client that connects late can show when each
 	// agent ran, what each turn cost, and the handoffs and reports it missed. Items are not here:
 	// WatchAgent and ListItems page them.
-	Turns         []*Turn    `protobuf:"bytes,4,rep,name=turns,proto3" json:"turns,omitempty"`
-	Messages      []*Message `protobuf:"bytes,5,rep,name=messages,proto3" json:"messages,omitempty"`
+	Turns         []*Turn        `protobuf:"bytes,4,rep,name=turns,proto3" json:"turns,omitempty"`
+	Messages      []*Message     `protobuf:"bytes,5,rep,name=messages,proto3" json:"messages,omitempty"`
+	Searches      []*SearchState `protobuf:"bytes,6,rep,name=searches,proto3" json:"searches,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -510,12 +511,20 @@ func (x *RunsSnapshot) GetMessages() []*Message {
 	return nil
 }
 
+func (x *RunsSnapshot) GetSearches() []*SearchState {
+	if x != nil {
+		return x.Searches
+	}
+	return nil
+}
+
 type WatchRunsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Body:
 	//
 	//	*WatchRunsResponse_Snapshot
 	//	*WatchRunsResponse_Event
+	//	*WatchRunsResponse_Search
 	Body          isWatchRunsResponse_Body `protobuf_oneof:"body"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -576,6 +585,15 @@ func (x *WatchRunsResponse) GetEvent() *Event {
 	return nil
 }
 
+func (x *WatchRunsResponse) GetSearch() *SearchState {
+	if x != nil {
+		if x, ok := x.Body.(*WatchRunsResponse_Search); ok {
+			return x.Search
+		}
+	}
+	return nil
+}
+
 type isWatchRunsResponse_Body interface {
 	isWatchRunsResponse_Body()
 }
@@ -588,9 +606,15 @@ type WatchRunsResponse_Event struct {
 	Event *Event `protobuf:"bytes,2,opt,name=event,proto3,oneof"`
 }
 
+type WatchRunsResponse_Search struct {
+	Search *SearchState `protobuf:"bytes,3,opt,name=search,proto3,oneof"`
+}
+
 func (*WatchRunsResponse_Snapshot) isWatchRunsResponse_Body() {}
 
 func (*WatchRunsResponse_Event) isWatchRunsResponse_Body() {}
+
+func (*WatchRunsResponse_Search) isWatchRunsResponse_Body() {}
 
 type WatchAgentRequest struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
@@ -1287,7 +1311,7 @@ var File_vibesys_orchestrator_v1_service_proto protoreflect.FileDescriptor
 
 const file_vibesys_orchestrator_v1_service_proto_rawDesc = "" +
 	"\n" +
-	"%vibesys/orchestrator/v1/service.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a$vibesys/orchestrator/v1/events.proto\x1a*vibesys/orchestrator/v1/orchestrator.proto\"\x93\x01\n" +
+	"%vibesys/orchestrator/v1/service.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a$vibesys/orchestrator/v1/events.proto\x1a*vibesys/orchestrator/v1/orchestrator.proto\x1a$vibesys/orchestrator/v1/search.proto\"\x93\x01\n" +
 	"\rBuildVersions\x12%\n" +
 	"\x0ebinary_version\x18\x01 \x01(\tR\rbinaryVersion\x12)\n" +
 	"\x10protocol_version\x18\x02 \x01(\rR\x0fprotocolVersion\x120\n" +
@@ -1303,16 +1327,18 @@ const file_vibesys_orchestrator_v1_service_proto_rawDesc = "" +
 	"\rcompatibility\x18\x02 \x01(\x0e2&.vibesys.orchestrator.v1.CompatibilityB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\rcompatibility\"9\n" +
 	"\x10WatchRunsRequest\x12%\n" +
-	"\x0eafter_sequence\x18\x01 \x01(\x04R\rafterSequence\"\x87\x02\n" +
+	"\x0eafter_sequence\x18\x01 \x01(\x04R\rafterSequence\"\xc9\x02\n" +
 	"\fRunsSnapshot\x120\n" +
 	"\x04runs\x18\x01 \x03(\v2\x1c.vibesys.orchestrator.v1.RunR\x04runs\x126\n" +
 	"\x06agents\x18\x02 \x03(\v2\x1e.vibesys.orchestrator.v1.AgentR\x06agents\x12\x1a\n" +
 	"\bsequence\x18\x03 \x01(\x04R\bsequence\x123\n" +
 	"\x05turns\x18\x04 \x03(\v2\x1d.vibesys.orchestrator.v1.TurnR\x05turns\x12<\n" +
-	"\bmessages\x18\x05 \x03(\v2 .vibesys.orchestrator.v1.MessageR\bmessages\"\x9f\x01\n" +
+	"\bmessages\x18\x05 \x03(\v2 .vibesys.orchestrator.v1.MessageR\bmessages\x12@\n" +
+	"\bsearches\x18\x06 \x03(\v2$.vibesys.orchestrator.v1.SearchStateR\bsearches\"\xdf\x01\n" +
 	"\x11WatchRunsResponse\x12C\n" +
 	"\bsnapshot\x18\x01 \x01(\v2%.vibesys.orchestrator.v1.RunsSnapshotH\x00R\bsnapshot\x126\n" +
-	"\x05event\x18\x02 \x01(\v2\x1e.vibesys.orchestrator.v1.EventH\x00R\x05eventB\r\n" +
+	"\x05event\x18\x02 \x01(\v2\x1e.vibesys.orchestrator.v1.EventH\x00R\x05event\x12>\n" +
+	"\x06search\x18\x03 \x01(\v2$.vibesys.orchestrator.v1.SearchStateH\x00R\x06searchB\r\n" +
 	"\x04body\x12\x05\xbaH\x02\b\x01\"\x87\x01\n" +
 	"\x11WatchAgentRequest\x12\"\n" +
 	"\bagent_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\aagentId\x12'\n" +
@@ -1425,10 +1451,11 @@ var file_vibesys_orchestrator_v1_service_proto_goTypes = []any{
 	(*Agent)(nil),                 // 24: vibesys.orchestrator.v1.Agent
 	(*Turn)(nil),                  // 25: vibesys.orchestrator.v1.Turn
 	(*Message)(nil),               // 26: vibesys.orchestrator.v1.Message
-	(*Event)(nil),                 // 27: vibesys.orchestrator.v1.Event
-	(*Item)(nil),                  // 28: vibesys.orchestrator.v1.Item
-	(*Delta)(nil),                 // 29: vibesys.orchestrator.v1.Delta
-	(*timestamppb.Timestamp)(nil), // 30: google.protobuf.Timestamp
+	(*SearchState)(nil),           // 27: vibesys.orchestrator.v1.SearchState
+	(*Event)(nil),                 // 28: vibesys.orchestrator.v1.Event
+	(*Item)(nil),                  // 29: vibesys.orchestrator.v1.Item
+	(*Delta)(nil),                 // 30: vibesys.orchestrator.v1.Delta
+	(*timestamppb.Timestamp)(nil), // 31: google.protobuf.Timestamp
 }
 var file_vibesys_orchestrator_v1_service_proto_depIdxs = []int32{
 	21, // 0: vibesys.orchestrator.v1.DispatchRequest.command:type_name -> vibesys.orchestrator.v1.Command
@@ -1440,40 +1467,42 @@ var file_vibesys_orchestrator_v1_service_proto_depIdxs = []int32{
 	24, // 6: vibesys.orchestrator.v1.RunsSnapshot.agents:type_name -> vibesys.orchestrator.v1.Agent
 	25, // 7: vibesys.orchestrator.v1.RunsSnapshot.turns:type_name -> vibesys.orchestrator.v1.Turn
 	26, // 8: vibesys.orchestrator.v1.RunsSnapshot.messages:type_name -> vibesys.orchestrator.v1.Message
-	8,  // 9: vibesys.orchestrator.v1.WatchRunsResponse.snapshot:type_name -> vibesys.orchestrator.v1.RunsSnapshot
-	27, // 10: vibesys.orchestrator.v1.WatchRunsResponse.event:type_name -> vibesys.orchestrator.v1.Event
-	28, // 11: vibesys.orchestrator.v1.ItemsPage.items:type_name -> vibesys.orchestrator.v1.Item
-	11, // 12: vibesys.orchestrator.v1.WatchAgentResponse.page:type_name -> vibesys.orchestrator.v1.ItemsPage
-	28, // 13: vibesys.orchestrator.v1.WatchAgentResponse.item:type_name -> vibesys.orchestrator.v1.Item
-	29, // 14: vibesys.orchestrator.v1.WatchAgentResponse.delta:type_name -> vibesys.orchestrator.v1.Delta
-	25, // 15: vibesys.orchestrator.v1.WatchAgentResponse.turn:type_name -> vibesys.orchestrator.v1.Turn
-	11, // 16: vibesys.orchestrator.v1.ListItemsResponse.page:type_name -> vibesys.orchestrator.v1.ItemsPage
-	30, // 17: vibesys.orchestrator.v1.PlanComment.at:type_name -> google.protobuf.Timestamp
-	1,  // 18: vibesys.orchestrator.v1.Plan.status:type_name -> vibesys.orchestrator.v1.PlanStatus
-	15, // 19: vibesys.orchestrator.v1.Plan.comments:type_name -> vibesys.orchestrator.v1.PlanComment
-	30, // 20: vibesys.orchestrator.v1.Plan.created_at:type_name -> google.protobuf.Timestamp
-	30, // 21: vibesys.orchestrator.v1.Plan.updated_at:type_name -> google.protobuf.Timestamp
-	16, // 22: vibesys.orchestrator.v1.ListPlansResponse.plans:type_name -> vibesys.orchestrator.v1.Plan
-	16, // 23: vibesys.orchestrator.v1.ViewPlanResponse.plan:type_name -> vibesys.orchestrator.v1.Plan
-	5,  // 24: vibesys.orchestrator.v1.OrchestratorService.Hello:input_type -> vibesys.orchestrator.v1.HelloRequest
-	3,  // 25: vibesys.orchestrator.v1.OrchestratorService.Dispatch:input_type -> vibesys.orchestrator.v1.DispatchRequest
-	7,  // 26: vibesys.orchestrator.v1.OrchestratorService.WatchRuns:input_type -> vibesys.orchestrator.v1.WatchRunsRequest
-	10, // 27: vibesys.orchestrator.v1.OrchestratorService.WatchAgent:input_type -> vibesys.orchestrator.v1.WatchAgentRequest
-	13, // 28: vibesys.orchestrator.v1.OrchestratorService.ListItems:input_type -> vibesys.orchestrator.v1.ListItemsRequest
-	17, // 29: vibesys.orchestrator.v1.OrchestratorService.ListPlans:input_type -> vibesys.orchestrator.v1.ListPlansRequest
-	19, // 30: vibesys.orchestrator.v1.OrchestratorService.ViewPlan:input_type -> vibesys.orchestrator.v1.ViewPlanRequest
-	6,  // 31: vibesys.orchestrator.v1.OrchestratorService.Hello:output_type -> vibesys.orchestrator.v1.HelloResponse
-	4,  // 32: vibesys.orchestrator.v1.OrchestratorService.Dispatch:output_type -> vibesys.orchestrator.v1.DispatchResponse
-	9,  // 33: vibesys.orchestrator.v1.OrchestratorService.WatchRuns:output_type -> vibesys.orchestrator.v1.WatchRunsResponse
-	12, // 34: vibesys.orchestrator.v1.OrchestratorService.WatchAgent:output_type -> vibesys.orchestrator.v1.WatchAgentResponse
-	14, // 35: vibesys.orchestrator.v1.OrchestratorService.ListItems:output_type -> vibesys.orchestrator.v1.ListItemsResponse
-	18, // 36: vibesys.orchestrator.v1.OrchestratorService.ListPlans:output_type -> vibesys.orchestrator.v1.ListPlansResponse
-	20, // 37: vibesys.orchestrator.v1.OrchestratorService.ViewPlan:output_type -> vibesys.orchestrator.v1.ViewPlanResponse
-	31, // [31:38] is the sub-list for method output_type
-	24, // [24:31] is the sub-list for method input_type
-	24, // [24:24] is the sub-list for extension type_name
-	24, // [24:24] is the sub-list for extension extendee
-	0,  // [0:24] is the sub-list for field type_name
+	27, // 9: vibesys.orchestrator.v1.RunsSnapshot.searches:type_name -> vibesys.orchestrator.v1.SearchState
+	8,  // 10: vibesys.orchestrator.v1.WatchRunsResponse.snapshot:type_name -> vibesys.orchestrator.v1.RunsSnapshot
+	28, // 11: vibesys.orchestrator.v1.WatchRunsResponse.event:type_name -> vibesys.orchestrator.v1.Event
+	27, // 12: vibesys.orchestrator.v1.WatchRunsResponse.search:type_name -> vibesys.orchestrator.v1.SearchState
+	29, // 13: vibesys.orchestrator.v1.ItemsPage.items:type_name -> vibesys.orchestrator.v1.Item
+	11, // 14: vibesys.orchestrator.v1.WatchAgentResponse.page:type_name -> vibesys.orchestrator.v1.ItemsPage
+	29, // 15: vibesys.orchestrator.v1.WatchAgentResponse.item:type_name -> vibesys.orchestrator.v1.Item
+	30, // 16: vibesys.orchestrator.v1.WatchAgentResponse.delta:type_name -> vibesys.orchestrator.v1.Delta
+	25, // 17: vibesys.orchestrator.v1.WatchAgentResponse.turn:type_name -> vibesys.orchestrator.v1.Turn
+	11, // 18: vibesys.orchestrator.v1.ListItemsResponse.page:type_name -> vibesys.orchestrator.v1.ItemsPage
+	31, // 19: vibesys.orchestrator.v1.PlanComment.at:type_name -> google.protobuf.Timestamp
+	1,  // 20: vibesys.orchestrator.v1.Plan.status:type_name -> vibesys.orchestrator.v1.PlanStatus
+	15, // 21: vibesys.orchestrator.v1.Plan.comments:type_name -> vibesys.orchestrator.v1.PlanComment
+	31, // 22: vibesys.orchestrator.v1.Plan.created_at:type_name -> google.protobuf.Timestamp
+	31, // 23: vibesys.orchestrator.v1.Plan.updated_at:type_name -> google.protobuf.Timestamp
+	16, // 24: vibesys.orchestrator.v1.ListPlansResponse.plans:type_name -> vibesys.orchestrator.v1.Plan
+	16, // 25: vibesys.orchestrator.v1.ViewPlanResponse.plan:type_name -> vibesys.orchestrator.v1.Plan
+	5,  // 26: vibesys.orchestrator.v1.OrchestratorService.Hello:input_type -> vibesys.orchestrator.v1.HelloRequest
+	3,  // 27: vibesys.orchestrator.v1.OrchestratorService.Dispatch:input_type -> vibesys.orchestrator.v1.DispatchRequest
+	7,  // 28: vibesys.orchestrator.v1.OrchestratorService.WatchRuns:input_type -> vibesys.orchestrator.v1.WatchRunsRequest
+	10, // 29: vibesys.orchestrator.v1.OrchestratorService.WatchAgent:input_type -> vibesys.orchestrator.v1.WatchAgentRequest
+	13, // 30: vibesys.orchestrator.v1.OrchestratorService.ListItems:input_type -> vibesys.orchestrator.v1.ListItemsRequest
+	17, // 31: vibesys.orchestrator.v1.OrchestratorService.ListPlans:input_type -> vibesys.orchestrator.v1.ListPlansRequest
+	19, // 32: vibesys.orchestrator.v1.OrchestratorService.ViewPlan:input_type -> vibesys.orchestrator.v1.ViewPlanRequest
+	6,  // 33: vibesys.orchestrator.v1.OrchestratorService.Hello:output_type -> vibesys.orchestrator.v1.HelloResponse
+	4,  // 34: vibesys.orchestrator.v1.OrchestratorService.Dispatch:output_type -> vibesys.orchestrator.v1.DispatchResponse
+	9,  // 35: vibesys.orchestrator.v1.OrchestratorService.WatchRuns:output_type -> vibesys.orchestrator.v1.WatchRunsResponse
+	12, // 36: vibesys.orchestrator.v1.OrchestratorService.WatchAgent:output_type -> vibesys.orchestrator.v1.WatchAgentResponse
+	14, // 37: vibesys.orchestrator.v1.OrchestratorService.ListItems:output_type -> vibesys.orchestrator.v1.ListItemsResponse
+	18, // 38: vibesys.orchestrator.v1.OrchestratorService.ListPlans:output_type -> vibesys.orchestrator.v1.ListPlansResponse
+	20, // 39: vibesys.orchestrator.v1.OrchestratorService.ViewPlan:output_type -> vibesys.orchestrator.v1.ViewPlanResponse
+	33, // [33:40] is the sub-list for method output_type
+	26, // [26:33] is the sub-list for method input_type
+	26, // [26:26] is the sub-list for extension type_name
+	26, // [26:26] is the sub-list for extension extendee
+	0,  // [0:26] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_orchestrator_v1_service_proto_init() }
@@ -1483,9 +1512,11 @@ func file_vibesys_orchestrator_v1_service_proto_init() {
 	}
 	file_vibesys_orchestrator_v1_events_proto_init()
 	file_vibesys_orchestrator_v1_orchestrator_proto_init()
+	file_vibesys_orchestrator_v1_search_proto_init()
 	file_vibesys_orchestrator_v1_service_proto_msgTypes[7].OneofWrappers = []any{
 		(*WatchRunsResponse_Snapshot)(nil),
 		(*WatchRunsResponse_Event)(nil),
+		(*WatchRunsResponse_Search)(nil),
 	}
 	file_vibesys_orchestrator_v1_service_proto_msgTypes[10].OneofWrappers = []any{
 		(*WatchAgentResponse_Page)(nil),

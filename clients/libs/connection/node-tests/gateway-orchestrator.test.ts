@@ -82,9 +82,10 @@ test('a stream delivers frames that hold their schema and fails on one that does
   await withConnection(async (fake, connection) => {
     const seen: bigint[] = [];
     const ended = connection
-      .stream(WATCH_RUNS, watchRuns(0n), new AbortController().signal, bytes =>
-        seen.push(fromBinary(WatchRunsResponseSchema, bytes).body.value?.sequence ?? -1n),
-      )
+      .stream(WATCH_RUNS, watchRuns(0n), new AbortController().signal, bytes => {
+        const body = fromBinary(WatchRunsResponseSchema, bytes).body;
+        if (body.case === 'snapshot' || body.case === 'event') seen.push(body.value.sequence);
+      })
       .catch(error => String(error));
     const served = await fake.nextServed(WATCH_RUNS);
     served.send(snapshotFrame(4n));

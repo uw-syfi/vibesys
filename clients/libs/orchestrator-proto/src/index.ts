@@ -10,5 +10,6 @@
 export {sendMessageCommand} from './commands.js';
 export * from './generated/vibesys/orchestrator/v1/events_pb.js';
 export * from './generated/vibesys/orchestrator/v1/orchestrator_pb.js';
+export * from './generated/vibesys/orchestrator/v1/search_pb.js';
 export * from './generated/vibesys/orchestrator/v1/service_pb.js';
 export {decodeValidated, decodeValidatedJson, encodeJson, encodeMessage} from './validated.js';
