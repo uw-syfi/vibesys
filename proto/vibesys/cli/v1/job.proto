@@ -86,7 +86,16 @@ message Submitter {
   string run_id = 1;
   string agent = 2;
   // When this caller first submitted the job.
-  google.protobuf.Timestamp at = 3 [(buf.validate.field).required = true];
+  google.protobuf.Timestamp at = 3 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).timestamp = {
+      gte: {seconds: -62135596800}
+      lte: {
+        seconds: 253402300799
+        nanos: 999999999
+      }
+    }
+  ];
 }
 
 // CutCause is how an attempt's supervisor was proved gone.
