@@ -1,6 +1,7 @@
 // Package hub carries the daemon's live view to the clients watching it.
 //
-// Two kinds of thing pass through. A stored event has a sequence and is never lost: a client that
+// Three kinds of thing pass through. A latest value is a whole search view with one
+// slot per run per subscription, outside lag accounting. A stored event has a sequence and is never lost: a client that
 // cannot keep up is told to start again from a fresh snapshot, which holds everything the events it
 // missed would have said. A delta is progress on a running item that is stored nowhere, so it may
 // be merged with the deltas next to it, dropped, or superseded, and the next stored version of its
@@ -12,6 +13,7 @@
 package hub
 
 import (
+	"sort"
 	"sync"
 
 	"google.golang.org/protobuf/proto"
@@ -56,6 +58,7 @@ type Interest struct {
 type Message struct {
 	Stored *Stored
 	Delta  *pb.Delta
+	Search *pb.SearchState
 	// size is what the message counts against its subscription's bounds.
 	size int
 }
@@ -79,6 +82,7 @@ func New(limits Limits) *Hub {
 func (h *Hub) Subscribe(in Interest) *Subscription {
 	s := &Subscription{
 		hub: h, interest: in, wake: make(chan struct{}, 1),
+		latest: map[core.RunID]*pb.SearchState{}, revisions: map[core.RunID]uint64{},
 		pending: map[deltaKey]*pendingDelta{}, broken: newItemSet(), final: newItemSet(),
 	}
 	h.mu.Lock()
@@ -96,6 +100,24 @@ func (h *Hub) PublishStored(st Stored) {
 	for s := range h.subs {
 		if s.wantsStored(st) {
 			s.addStored(st, size, h.limits)
+		}
+	}
+}
+
+// PublishLatest replaces a run's unread whole view only with a newer revision.
+// It never consumes queue capacity, even while lagged. Only run watchers receive it.
+// The hub owns a copy, so callers may reuse their input after publishing.
+func (h *Hub) PublishLatest(run core.RunID, state *pb.SearchState) {
+	if state == nil || state.GetRunId() != string(run) || state.GetRevision() == 0 {
+		panic("hub: invalid latest identity")
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for s := range h.subs {
+		if s.interest.Everything && state.Revision > s.revisions[run] {
+			s.revisions[run] = state.Revision
+			s.latest[run] = proto.Clone(state).(*pb.SearchState)
+			s.signal()
 		}
 	}
 }
@@ -146,9 +168,11 @@ type Subscription struct {
 	wake     chan struct{}
 
 	// The fields below are guarded by hub.mu.
-	ready   []Message
-	pending map[deltaKey]*pendingDelta
-	order   []deltaKey
+	latest    map[core.RunID]*pb.SearchState
+	revisions map[core.RunID]uint64
+	ready     []Message
+	pending   map[deltaKey]*pendingDelta
+	order     []deltaKey
 	// broken names items that lost a delta, so that later deltas would build on a gap. They are
 	// ignored until the item's next stored version.
 	broken *itemSet
@@ -164,7 +188,7 @@ func (s *Subscription) Ready() <-chan struct{} { return s.wake }
 
 // Take returns what is readable, oldest first, and empties the queue. Lagged says the client fell
 // behind its bounds: the queue was dropped, and the client must read a fresh snapshot, then call
-// Resume. While lagged, nothing is queued.
+// Resume. While lagged, only latest values are queued.
 func (s *Subscription) Take() (messages []Message, lagged bool) {
 	s.hub.mu.Lock()
 	defer s.hub.mu.Unlock()
@@ -175,6 +199,15 @@ func (s *Subscription) Take() (messages []Message, lagged bool) {
 	for _, m := range messages {
 		s.count--
 		s.bytes -= m.size
+	}
+	keys := make([]core.RunID, 0, len(s.latest))
+	for run := range s.latest {
+		keys = append(keys, run)
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	for _, run := range keys {
+		messages = append(messages, Message{Search: s.latest[run]})
+		delete(s.latest, run)
 	}
 	return messages, false
 }
