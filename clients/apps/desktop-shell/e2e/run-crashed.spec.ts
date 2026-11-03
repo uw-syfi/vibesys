@@ -1,11 +1,15 @@
 import {expect, type Page, test} from '@playwright/test';
+import {UNSTARTED_WORDS} from '@vibesys/feature-run-page/state';
 import {fixtureNamed} from '@vibesys/run-fixtures';
+import {screenCheck} from './checks/screen-check.js';
 import {openFixture} from './fixture-world.js';
 
 /**
  * A real run that crashed after its implementer turn finished, as the Run screen shows it: nothing
  * it left open reads as running, the turn and the idea last as long as they did, the baseline's
- * failed gates read as `input not measured` on the figures, and the header gives the whole failure on its status. `RUN_SHOTS` names a directory to save the app window in.
+ * failed gates read as `input not measured` on the figures, and the header gives the whole failure on its status. A run
+ * that failed while setting up says so once, in place of the charts and faces it has nothing for.
+ * `RUN_SHOTS` names a directory to save the app window in.
  */
 const shots = process.env['RUN_SHOTS'];
 
@@ -55,4 +59,24 @@ test('the header gives a few words of why the run failed, and the whole reason o
   await expect(main.getByTitle(fixture.end?.reason ?? '', {exact: true}).first()).toBeAttached();
   await expect(main.getByRole('button', {name: 'Run again', exact: true})).toBeVisible();
   await expect(main.getByRole('button', {name: 'Resume', exact: true})).toBeVisible();
+});
+
+test('a run that failed while setting up states it once, with Run again as the way on', async ({
+  page,
+}) => {
+  const fixture = fixtureNamed('failed-at-setup');
+  const reason = fixture.end?.reason ?? '';
+  await openFixture(page, fixture);
+  const main = page.getByRole('main');
+  await expect(main.getByRole('heading', {name: UNSTARTED_WORDS.title})).toBeVisible();
+  await expect(main.getByText(reason, {exact: true})).toBeVisible();
+  await expect(main.getByRole('button', {name: 'Resume', exact: true})).toHaveCount(0);
+  await expect(main.getByRole('button', {name: 'Run again', exact: true})).toHaveCount(1);
+  await expect(main.getByRole('slider', {name: 'Run position'})).toHaveCount(0);
+  await expect(main.getByRole('radiogroup', {name: 'Show'})).toHaveCount(0);
+  expect(await screenCheck(page)).toEqual([]);
+  await shot(page, 'unstarted');
+  await main.getByRole('button', {name: UNSTARTED_WORDS.viewLogs}).click();
+  await expect(main.getByRole('log').getByText(`Run failed: ${reason}`)).toBeVisible();
+  await expect(main.getByRole('button', {name: 'Run again', exact: true})).toHaveCount(1);
 });

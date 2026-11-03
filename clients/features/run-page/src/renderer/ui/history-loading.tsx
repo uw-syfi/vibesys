@@ -6,7 +6,12 @@
  */
 import {Button, Card, LoadingBar, Meter, Row, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
-import {type HistoryProgress, historyLoadingView} from '../../state/index.js';
+import {
+  type HistoryProgress,
+  historyLoadingView,
+  UNSTARTED_WORDS,
+  type UnstartedView,
+} from '../../state/index.js';
 
 export function HistoryLoading(props: {readonly progress: HistoryProgress}): JSX.Element {
   const view = historyLoadingView(props.progress);
@@ -60,6 +65,41 @@ export function RunUnplaced(props: {readonly label: string; readonly words: stri
   return (
     <Card>
       <Text variant="heading">{`${props.label} · ${props.words}`}</Text>
+    </Card>
+  );
+}
+
+/**
+ * A run that ended before any of its work began, in place of its empty charts and faces: what
+ * happened, its whole reason, Run again (the way on) and its log.
+ */
+export function UnstartedRun(props: {
+  readonly view: UnstartedView;
+  readonly runAgain: () => void;
+  readonly viewLogs: () => void;
+}): JSX.Element {
+  return (
+    <Card>
+      <Stack gap="space-3">
+        <Text as="h2" variant="heading">
+          {props.view.title}
+        </Text>
+        <Text as="p">{props.view.reason}</Text>
+        <Row gap="space-2" wrap>
+          <Button
+            variant="primary"
+            text={UNSTARTED_WORDS.runAgain}
+            hint={UNSTARTED_WORDS.runAgainHint}
+            press={props.runAgain}
+          />
+          <Button
+            variant="secondary"
+            text={UNSTARTED_WORDS.viewLogs}
+            hint={UNSTARTED_WORDS.viewLogsHint}
+            press={props.viewLogs}
+          />
+        </Row>
+      </Stack>
     </Card>
   );
 }

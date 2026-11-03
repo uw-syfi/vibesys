@@ -46,9 +46,9 @@ import {
   type RunPageState,
   resolveZoom,
   roleLabel,
-  roundsBeforeTrace,
   routeLevel,
   runAwaiting,
+  runCharted,
   runGoneWords,
   runHasEnded,
   runNow,
@@ -60,6 +60,7 @@ import {
   traceArrival,
   transcriptLoading,
   unplacedRun,
+  unstartedRun,
   usageRecords,
   whoBySpan,
 } from '../../state/index.js';
@@ -70,6 +71,7 @@ import {
   RunGone,
   RunLoadError,
   RunUnplaced,
+  UnstartedRun,
 } from './history-loading.js';
 import {DeepLevel, IdeasWorkspace, type LevelProps} from './levels.js';
 import {RunLevel} from './run-level.js';
@@ -205,6 +207,8 @@ function Header(props: {
   readonly toolbar: ReactNode;
   /** Goes up to the Runs dashboard, first among the actions; absent where the crumbs say it, and in a run's own window. */
   readonly runs?: (() => void) | undefined;
+  /** The body's statement offers Run again, as its way on: the header does not. */
+  readonly runAgainBelow?: boolean;
 }): JSX.Element {
   const {state, dispatch, chat, header} = props;
   const items: MenuItem[] = [
@@ -246,7 +250,7 @@ function Header(props: {
             press={() => dispatch({type: 'resume-ended'})}
           />
         ) : null}
-        {header.runAgain.shown ? (
+        {header.runAgain.shown && props.runAgainBelow !== true ? (
           <Button
             variant="secondary"
             size="sm"
@@ -407,6 +411,31 @@ function openedDetail(
   return {core, loading, problem: null};
 }
 
+/** Opens the run's Logs face, which reads the run's own log and needs no history. */
+function viewLogs(dispatch: Dispatch, zoom: Zoom): () => void {
+  return () => {
+    dispatch({type: 'view-logs'});
+    zoom({type: 'jump', route: {...RUN_ROUTE, mode: 'logs'}});
+  };
+}
+
+/** A run that never started says so where the panes would be, until its log is asked for. */
+function unstartedStatement(
+  state: RunPageState,
+  route: Route,
+  dispatch: Dispatch,
+  zoom: Zoom,
+): JSX.Element | null {
+  const unstarted = unstartedRun(state);
+  return unstarted === null || route.mode === 'logs' ? null : (
+    <UnstartedRun
+      view={unstarted}
+      runAgain={() => dispatch({type: 'run-again'})}
+      viewLogs={viewLogs(dispatch, zoom)}
+    />
+  );
+}
+
 /** Replace data-dependent panes until the first complete run view is available. */
 function pendingRunScreen(
   state: RunPageState,
@@ -474,10 +503,7 @@ function pendingRunScreen(
         <RunLoadError
           message={problem}
           retry={() => dispatch({type: 'retry-load'})}
-          viewLogs={() => {
-            dispatch({type: 'view-logs'});
-            zoom({type: 'jump', route: {...RUN_ROUTE, mode: 'logs'}});
-          }}
+          viewLogs={viewLogs(dispatch, zoom)}
         />
       </Screen>
     );
@@ -603,10 +629,10 @@ function RunScreenBody(props: {
     />,
   );
   if (pending !== null) return pending;
+  const statement = unstartedStatement(state, route, dispatch, zoom);
+  const charted = runCharted(state);
   const problem = historyProblem(state);
-  const transcript = transcriptLoading(state);
   const zoomed = resolveZoom(model, route);
-  const before = roundsBeforeTrace(state);
   const detail = openedDetail(state, route, props.core);
   // The chain lit on the chart and in the tree: what the pointer is on, else what was pinned or opened.
   const lit = ideaAncestry(
@@ -620,19 +646,18 @@ function RunScreenBody(props: {
     core: detail.core,
     mode: route.mode,
     dispatch,
-    loading: detail.loading ?? transcript,
+    loading: detail.loading ?? transcriptLoading(state),
     problem: detail.problem,
   };
-  const parts =
-    before === null
-      ? heroParts({
-          ...base,
-          position,
-          idea: zoomed.idea?.id ?? null,
-          lit,
-          hover: idea => dispatch({type: 'ideas-hover', idea}),
-        })
-      : null;
+  const parts = charted
+    ? heroParts({
+        ...base,
+        position,
+        idea: zoomed.idea?.id ?? null,
+        lit,
+        hover: idea => dispatch({type: 'ideas-hover', idea}),
+      })
+    : null;
   return (
     <Screen
       density="compact"
@@ -646,7 +671,8 @@ function RunScreenBody(props: {
           historyProblem={problem}
           toolbar={props.toolbar}
           runs={showsBreadcrumb(route, zoomed) ? undefined : props.runs}
-          scrubber={traceArrival(state) === 'arrived' && before === null}
+          runAgainBelow={statement !== null}
+          scrubber={charted && traceArrival(state) === 'arrived'}
           figures={
             parts === null ? null : (
               <Row gap="space-2" justify="between" align="baseline" wrap>
@@ -666,7 +692,7 @@ function RunScreenBody(props: {
         </>
       )}
       <CrumbRow runs={props.runs} route={route} zoomed={zoomed} zoom={zoom} />
-      <LevelBody deep={deep} route={route} zoomed={zoomed} level={level} />
+      {statement ?? <LevelBody deep={deep} route={route} zoomed={zoomed} level={level} />}
       {props.supplemental}
     </Screen>
   );

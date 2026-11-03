@@ -18,6 +18,7 @@ import {
 } from './end-words.js';
 import {overviewAt, traceAt} from './live.js';
 import {type ModelNames, NO_MODEL_NAMES} from './model-names.js';
+import {roundsBeforeTrace} from './predates-trace.js';
 import {
   commandable,
   type HistoryProgress,
@@ -29,6 +30,7 @@ import {
 } from './run-page.js';
 import {STARTUP_LABELS} from './startup-stages.js';
 import {type TokensReading, tokensReading} from './token-words.js';
+import {UNSTARTED_WORDS} from './unstarted-words.js';
 import {roleAgents} from './usage-view.js';
 import {whoWords} from './usage-who.js';
 
@@ -51,12 +53,16 @@ export interface HeaderView {
   /**
    * How an ended run ended, whatever its outcome: the whole reason, as the status's description (a
    * status word never has to carry it), and for a failure a few words of its message beside the
-   * status (`brief`). Null while the run is not over, and while its Resume is on its way.
+   * status (`brief`). Null while the run is not over, while its Resume is on its way, and for a run
+   * that never started, whose reason the body states instead (`unstartedRun`).
    */
   readonly ended: {readonly brief: string | null; readonly reason: string} | null;
   readonly pause: Offer;
   readonly pauseNow: Offer;
-  /** Resume an ended run; disabled while its request is on its way. */
+  /**
+   * Resume an ended run; disabled while its request is on its way. Not offered for a run that never
+   * started: resuming one repeats its setup, and Run again can change it.
+   */
   readonly resume: Offer;
   /** Start again from an ended run. */
   readonly runAgain: Offer;
@@ -155,6 +161,7 @@ export function headerView(state: RunPageState, names: ModelNames = NO_MODEL_NAM
   const {project, task} = state.title;
   const name = projectName(project);
   const unavailable: Unavailable = state.unavailable;
+  const unstarted = unstartedRun(state) !== null;
   return {
     title: task === null ? name : `${name} · ${task}`,
     subtitle: `${state.hostLabel} · ${state.identity.runId}`,
@@ -171,7 +178,7 @@ export function headerView(state: RunPageState, names: ModelNames = NO_MODEL_NAM
       role: each.role,
       ran: each.ran.flatMap(who => whoWords(who) ?? []),
     })),
-    ended: endedWords(state),
+    ended: unstarted ? null : endedWords(state),
     pause: offer(
       state.readOnly !== true && phase.kind === 'running' && !phase.pausing,
       commandReason(state),
@@ -187,7 +194,7 @@ export function headerView(state: RunPageState, names: ModelNames = NO_MODEL_NAM
           : 'Pausing',
     ),
     resume: offer(
-      state.readOnly !== true && phase.kind === 'ended',
+      state.readOnly !== true && phase.kind === 'ended' && !unstarted,
       state.resumeStatus?.pending ? state.resumeStatus.reason : undefined,
     ),
     runAgain: offer(phase.kind === 'ended'),
@@ -635,6 +642,40 @@ export function endedView(state: RunPageState): EndedView | null {
 function endedWords(state: RunPageState): HeaderView['ended'] {
   const ended = resumingStatus(state) === null ? endedView(state) : null;
   return ended === null ? null : {brief: ended.brief, reason: ended.reason};
+}
+
+/** What the Run screen says in place of its panes for a run that never started (`unstartedRun`). */
+export interface UnstartedView {
+  /** What happened. */
+  readonly title: string;
+  /** Why the run ended, whole: the reason the header gives a few words of for any other run. */
+  readonly reason: string;
+}
+
+/**
+ * An ended run that did none of its work, read whole: its trace holds no span, so it has no idea,
+ * measurement, turn or running time to draw. The screen states what happened and the way on in
+ * place of its empty charts, time bar and faces, and its header keeps neither the reason nor
+ * Resume. Null for any other run, and while the page has not read all of the run, or cannot say it
+ * kept no trace (an older VibeSys's run, `roundsBeforeTrace`).
+ */
+export function unstartedRun(state: RunPageState): UnstartedView | null {
+  if (resumingStatus(state) !== null || historyLoading(state) !== null) return null;
+  if (historyProblem(state) !== null || roundsBeforeTrace(state) !== null) return null;
+  if (state.progress !== undefined && state.progress.phase !== 'complete') return null;
+  if (traceArrival(state) !== 'arrived' || traceAt(state.run.trace, null).spans.size > 0) {
+    return null;
+  }
+  const ended = endedView(state);
+  return ended === null ? null : {title: UNSTARTED_WORDS.title, reason: ended.reason};
+}
+
+/**
+ * Whether the screen draws the run's charts, figures and time bar: not for an older VibeSys's run,
+ * which kept no trace to draw them from (`roundsBeforeTrace`), nor for one that never started.
+ */
+export function runCharted(state: RunPageState): boolean {
+  return roundsBeforeTrace(state) === null && unstartedRun(state) === null;
 }
 
 /**

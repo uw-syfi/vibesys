@@ -161,6 +161,7 @@ export {
   tokensReading,
   tokensTitle,
 } from './token-words.js';
+export {UNSTARTED_WORDS} from './unstarted-words.js';
 export {
   followed,
   groupedBy,
@@ -204,6 +205,7 @@ export {
   machineBlockWords,
   type Offer,
   pauseNowConfirmView,
+  runCharted,
   runEnding,
   runGoneWords,
   streamLines,
@@ -211,7 +213,9 @@ export {
   timelineView,
   traceArrival,
   transcriptLoading,
+  type UnstartedView,
   unplacedRun,
+  unstartedRun,
   usageRecords,
   viewedRun,
 } from './views.js';
