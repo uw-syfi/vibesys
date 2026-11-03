@@ -29,6 +29,8 @@ type Starter struct {
 	Clock   clock.Clock
 	// Timers is what the daemons' waits go through, the system's when nil.
 	Timers clock.Timers
+	// Inherited is what the daemons report their jobs inherit.
+	Inherited daemon.Inherited
 
 	calls atomic.Int64
 
@@ -63,6 +65,7 @@ func (s *Starter) Start(ctx context.Context) error {
 	process.Go(func() {
 		p.done <- daemon.Run(runCtx, daemon.Config{
 			Dir: s.Dir, Version: s.Version, Runtime: s.Runtime(), Clock: clk, Timers: s.Timers, Ready: w,
+			Inherited: s.Inherited,
 		})
 	})
 	buf := make([]byte, 1)

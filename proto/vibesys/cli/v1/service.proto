@@ -108,6 +108,20 @@ message StatusResponse {
   google.protobuf.Timestamp started_at = 3;
   uint32 queued_jobs = 4;
   uint32 running_jobs = 5;
+  // The environment variables of the daemon, which every job inherits, sorted by name. Only the
+  // names are reported, but for the variables whose value is safe to show and says where a job
+  // runs: PATH, HOME, TMPDIR, and those whose names start with VIBESYS_ and do not look like a
+  // secret (contain KEY, TOKEN, SECRET, PASSWORD or CREDENTIAL).
+  repeated InheritedVariable environment = 6;
+  // The directory clean checkouts of a job's commit are made in.
+  string checkout_directory = 7;
+}
+
+// InheritedVariable is one environment variable a job inherits from the daemon.
+message InheritedVariable {
+  string name = 1;
+  // Set only for a variable whose value the daemon shows.
+  optional string value = 2;
 }
 
 message StopRequest {}
