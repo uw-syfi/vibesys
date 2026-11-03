@@ -130,6 +130,25 @@ var (
 	lead     = core.AgentSpec{Harness: core.ClaudeCode, Model: "opus", Effort: "high"}
 )
 
+// The lead's first message carries the task, the fan-out limit and the operator's steering text as
+// data, for the sidecar's template to word; a subagent's brief stays the text its lead wrote.
+func TestTheLeadsFirstMessageCarriesTheTaskTheFanoutAndTheSteering(t *testing.T) {
+	for _, steering := range []string{"", "prefer cheap workers"} {
+		w := newScript(t)
+		r := w.command(operator, core.StartRun{Repository: "repo", Task: "kv-store", FanoutLimit: 3, Lead: lead, Brief: steering})
+		var bodies []core.MessageBody
+		for _, m := range w.s.InTransit() {
+			if m.ID == r.Message {
+				bodies = append(bodies, m.Body)
+			}
+		}
+		want := core.LeadBrief{Task: "kv-store", FanoutLimit: 3, Steering: steering}
+		if len(bodies) != 1 || bodies[0] != want {
+			t.Fatalf("with steering %q the lead's first message is %v, want %v", steering, bodies, want)
+		}
+	}
+}
+
 // started is a running run whose lead is resting after its brief.
 func started(t *testing.T, fanout uint32, caps core.Capabilities) (*script, core.RunID, core.AgentID) {
 	t.Helper()

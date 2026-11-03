@@ -353,5 +353,15 @@ message Message {
     SubagentSettled subagent_settled = 14;
     // The first prompt of an agent. It carries data; a template renders it for the agent.
     string brief = 15;
+    // The first prompt of a run's lead: the task, how many subagents may be live, and the
+    // operator's steering text. Templates word it; the lead is not told the run's internals.
+    LeadBrief lead_brief = 16;
   }
+}
+
+message LeadBrief {
+  string task = 1 [(buf.validate.field).string.min_len = 1];
+  uint32 fanout_limit = 2;
+  // Empty when the operator gave none.
+  string steering = 3;
 }

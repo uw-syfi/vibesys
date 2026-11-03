@@ -132,7 +132,7 @@ func dispatchVerb(ctx context.Context, h client.Headless, rest []string) error {
 		var a client.StartArgs
 		fs.StringVar(&a.Repository, "repository", "", "the repository the run works in")
 		fs.StringVar(&a.Task, "task", "", "the task to optimize")
-		fs.StringVar(&a.Brief, "brief", "", "the lead's first prompt")
+		fs.StringVar(&a.Brief, "brief", "", "optional steering text for the lead, such as a note about cost or harnesses")
 		fs.StringVar(&a.Harness, "harness", "claude_code", "claude_code or codex")
 		fs.StringVar(&a.Model, "model", "", "the lead's model")
 		fs.StringVar(&a.Effort, "effort", "", "the lead's reasoning effort")

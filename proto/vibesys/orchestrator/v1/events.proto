@@ -75,7 +75,9 @@ message StartRun {
       expression: "this.harness != 0"
     }
   ];
-  string brief = 6 [(buf.validate.field).string.min_len = 1];
+  // The operator's steering text for the lead, such as a note about cost or which harnesses to
+  // prefer. Empty when there is none; a template words the lead's first prompt around it.
+  string brief = 6;
 }
 
 message StopRun {

@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/orchestrator/v1/effects.proto.
  */
 export const file_vibesys_orchestrator_v1_effects: GenFile = /*@__PURE__*/
-  fileDesc("CiV2aWJlc3lzL29yY2hlc3RyYXRvci92MS9lZmZlY3RzLnByb3RvEhd2aWJlc3lzLm9yY2hlc3RyYXRvci52MSKKAwoGRWZmZWN0EhMKAmlkGAEgASgJQge6SARyAhABEkAKDmxhdW5jaF9zZXNzaW9uGAogASgLMiYudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuTGF1bmNoU2Vzc2lvbkgAEjgKCnN0YXJ0X3R1cm4YCyABKAsyIi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TdGFydFR1cm5IABIvCgVzdGVlchgMIAEoCzIeLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlN0ZWVySAASNwoJaW50ZXJydXB0GA0gASgLMiIudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSW50ZXJydXB0SAASPgoNY2xvc2Vfc2Vzc2lvbhgOIAEoCzIlLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkNsb3NlU2Vzc2lvbkgAEjYKCWFybV90aW1lchgPIAEoCzIhLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkFybVRpbWVySABCDQoEYm9keRIFukgCCAEiQQoKU2Vzc2lvblJlZhIZCghhZ2VudF9pZBgBIAEoCUIHukgEcgIQARIYCgdzZXNzaW9uGAIgASgNQge6SAQqAiAAItsCCg1MYXVuY2hTZXNzaW9uEjwKB3Nlc3Npb24YASABKAsyIy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TZXNzaW9uUmVmQga6SAPIAQESFwoGcnVuX2lkGAIgASgJQge6SARyAhABEhsKCnJlcG9zaXRvcnkYAyABKAlCB7pIBHICEAESPAoEcm9sZRgEIAEoDjIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkFnZW50Um9sZUIKukgHggEEEAEgABI9CgdoYXJuZXNzGAUgASgOMiAudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSGFybmVzc0IKukgHggEEEAEgABINCgVtb2RlbBgGIAEoCRIYChByZWFzb25pbmdfZWZmb3J0GAcgASgJEh4KFnJlc3VtZV9jb252ZXJzYXRpb25faWQYCCABKAkSEAoId29ya3RyZWUYCSABKAkingEKCVN0YXJ0VHVybhI8CgdzZXNzaW9uGAEgASgLMiMudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2Vzc2lvblJlZkIGukgDyAEBEhgKB3R1cm5faWQYAiABKAlCB7pIBHICEAESOQoHbWVzc2FnZRgDIAEoCzIgLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk1lc3NhZ2VCBrpIA8gBASKaAQoFU3RlZXISPAoHc2Vzc2lvbhgBIAEoCzIjLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNlc3Npb25SZWZCBrpIA8gBARIYCgd0dXJuX2lkGAIgASgJQge6SARyAhABEjkKB21lc3NhZ2UYAyABKAsyIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5NZXNzYWdlQga6SAPIAQEiYwoJSW50ZXJydXB0EjwKB3Nlc3Npb24YASABKAsyIy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TZXNzaW9uUmVmQga6SAPIAQESGAoHdHVybl9pZBgCIAEoCUIHukgEcgIQASJbCgxDbG9zZVNlc3Npb24SPAoHc2Vzc2lvbhgBIAEoCzIjLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNlc3Npb25SZWZCBrpIA8gBARINCgVmb3JjZRgCIAEoCCLHAgoIQXJtVGltZXISPAoEa2luZBgBIAEoDjIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlRpbWVyS2luZEIKukgHggEEEAEgABIXCgZydW5faWQYAiABKAlCB7pIBHICEAESNAoHc2Vzc2lvbhgDIAEoCzIjLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNlc3Npb25SZWYSMwoHZmlyZV9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBATp5ukh2GnQKEWFybV90aW1lci5zZXNzaW9uEjhhIHN0b3AgZ3JhY2UgbmFtZXMgYSBzZXNzaW9uIGFuZCBhIHJ1biBkZWFkbGluZSBkb2VzIG5vdBolaGFzKHRoaXMuc2Vzc2lvbikgPT0gKHRoaXMua2luZCA9PSAyKSpfCglUaW1lcktpbmQSGgoWVElNRVJfS0lORF9VTlNQRUNJRklFRBAAEhsKF1RJTUVSX0tJTkRfUlVOX0RFQURMSU5FEAESGQoVVElNRVJfS0lORF9TVE9QX0dSQUNFEAJCVFpSZ2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvb3JjaGVzdHJhdG9yL2dlbi92aWJlc3lzL29yY2hlc3RyYXRvci92MTtvcmNoZXN0cmF0b3J2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_orchestrator_v1_orchestrator]);
+  fileDesc("CiV2aWJlc3lzL29yY2hlc3RyYXRvci92MS9lZmZlY3RzLnByb3RvEhd2aWJlc3lzLm9yY2hlc3RyYXRvci52MSKKAwoGRWZmZWN0EhMKAmlkGAEgASgJQge6SARyAhABEkAKDmxhdW5jaF9zZXNzaW9uGAogASgLMiYudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuTGF1bmNoU2Vzc2lvbkgAEjgKCnN0YXJ0X3R1cm4YCyABKAsyIi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TdGFydFR1cm5IABIvCgVzdGVlchgMIAEoCzIeLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlN0ZWVySAASNwoJaW50ZXJydXB0GA0gASgLMiIudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSW50ZXJydXB0SAASPgoNY2xvc2Vfc2Vzc2lvbhgOIAEoCzIlLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkNsb3NlU2Vzc2lvbkgAEjYKCWFybV90aW1lchgPIAEoCzIhLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkFybVRpbWVySABCDQoEYm9keRIFukgCCAEiQQoKU2Vzc2lvblJlZhIZCghhZ2VudF9pZBgBIAEoCUIHukgEcgIQARIYCgdzZXNzaW9uGAIgASgNQge6SAQqAiAAIpMDCg1MYXVuY2hTZXNzaW9uEjwKB3Nlc3Npb24YASABKAsyIy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TZXNzaW9uUmVmQga6SAPIAQESFwoGcnVuX2lkGAIgASgJQge6SARyAhABEhsKCnJlcG9zaXRvcnkYAyABKAlCB7pIBHICEAESPAoEcm9sZRgEIAEoDjIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkFnZW50Um9sZUIKukgHggEEEAEgABI9CgdoYXJuZXNzGAUgASgOMiAudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSGFybmVzc0IKukgHggEEEAEgABINCgVtb2RlbBgGIAEoCRIYChByZWFzb25pbmdfZWZmb3J0GAcgASgJEh4KFnJlc3VtZV9jb252ZXJzYXRpb25faWQYCCABKAkSEAoId29ya3RyZWUYCSABKAkSNgoGcGx1Z2luGAogASgLMiYudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2Vzc2lvblBsdWdpbiL0AQoNU2Vzc2lvblBsdWdpbhJsCgttYXJrZXRwbGFjZRgBIAEoCUJXukhUugFNChtwbHVnaW4ubWFya2V0cGxhY2UuYWJzb2x1dGUSGG11c3QgYmUgYW4gYWJzb2x1dGUgcGF0aBoUdGhpcy5zdGFydHNXaXRoKCcvJylyAhABEhUKBG5hbWUYAiABKAlCB7pIBHICEAESXgoEaG9tZRgDIAEoCUJQukhNugFGChRwbHVnaW4uaG9tZS5hYnNvbHV0ZRIYbXVzdCBiZSBhbiBhYnNvbHV0ZSBwYXRoGhR0aGlzLnN0YXJ0c1dpdGgoJy8nKXICEAEingEKCVN0YXJ0VHVybhI8CgdzZXNzaW9uGAEgASgLMiMudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2Vzc2lvblJlZkIGukgDyAEBEhgKB3R1cm5faWQYAiABKAlCB7pIBHICEAESOQoHbWVzc2FnZRgDIAEoCzIgLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk1lc3NhZ2VCBrpIA8gBASKaAQoFU3RlZXISPAoHc2Vzc2lvbhgBIAEoCzIjLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNlc3Npb25SZWZCBrpIA8gBARIYCgd0dXJuX2lkGAIgASgJQge6SARyAhABEjkKB21lc3NhZ2UYAyABKAsyIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5NZXNzYWdlQga6SAPIAQEiYwoJSW50ZXJydXB0EjwKB3Nlc3Npb24YASABKAsyIy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TZXNzaW9uUmVmQga6SAPIAQESGAoHdHVybl9pZBgCIAEoCUIHukgEcgIQASJbCgxDbG9zZVNlc3Npb24SPAoHc2Vzc2lvbhgBIAEoCzIjLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNlc3Npb25SZWZCBrpIA8gBARINCgVmb3JjZRgCIAEoCCLHAgoIQXJtVGltZXISPAoEa2luZBgBIAEoDjIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlRpbWVyS2luZEIKukgHggEEEAEgABIXCgZydW5faWQYAiABKAlCB7pIBHICEAESNAoHc2Vzc2lvbhgDIAEoCzIjLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNlc3Npb25SZWYSMwoHZmlyZV9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBATp5ukh2GnQKEWFybV90aW1lci5zZXNzaW9uEjhhIHN0b3AgZ3JhY2UgbmFtZXMgYSBzZXNzaW9uIGFuZCBhIHJ1biBkZWFkbGluZSBkb2VzIG5vdBolaGFzKHRoaXMuc2Vzc2lvbikgPT0gKHRoaXMua2luZCA9PSAyKSpfCglUaW1lcktpbmQSGgoWVElNRVJfS0lORF9VTlNQRUNJRklFRBAAEhsKF1RJTUVSX0tJTkRfUlVOX0RFQURMSU5FEAESGQoVVElNRVJfS0lORF9TVE9QX0dSQUNFEAJCVFpSZ2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvb3JjaGVzdHJhdG9yL2dlbi92aWJlc3lzL29yY2hlc3RyYXRvci92MTtvcmNoZXN0cmF0b3J2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_orchestrator_v1_orchestrator]);
 
 /**
  * Effect is one request for I/O. It commits in the same transaction as the events that decided
@@ -156,6 +156,15 @@ export type LaunchSession = Message<"vibesys.orchestrator.v1.LaunchSession"> & {
    * @generated from field: string worktree = 9;
    */
   worktree: string;
+
+  /**
+   * The plugin every session loads, and none of the operator's own plugins, skills or config.
+   * Absent from the stored effect: the daemon's sidecar launcher fills it from its configuration
+   * when it writes the launch file, and the sidecar refuses a launch file without it.
+   *
+   * @generated from field: vibesys.orchestrator.v1.SessionPlugin plugin = 10;
+   */
+  plugin?: SessionPlugin | undefined;
 };
 
 /**
@@ -164,6 +173,44 @@ export type LaunchSession = Message<"vibesys.orchestrator.v1.LaunchSession"> & {
  */
 export const LaunchSessionSchema: GenMessage<LaunchSession> = /*@__PURE__*/
   messageDesc(file_vibesys_orchestrator_v1_effects, 2);
+
+/**
+ * SessionPlugin is the published plugin a session loads, named by value so the sidecar never
+ * guesses where its own checkout is.
+ *
+ * @generated from message vibesys.orchestrator.v1.SessionPlugin
+ */
+export type SessionPlugin = Message<"vibesys.orchestrator.v1.SessionPlugin"> & {
+  /**
+   * The root of a local marketplace checkout: the directory holding .claude-plugin/marketplace.json.
+   *
+   * @generated from field: string marketplace = 1;
+   */
+  marketplace: string;
+
+  /**
+   * The plugin's name in that marketplace.
+   *
+   * @generated from field: string name = 2;
+   */
+  name: string;
+
+  /**
+   * The session's plugin home: a fresh directory the first session of an agent installs the plugin
+   * into, and every later session of that agent reuses, because the provider keeps the
+   * conversation to resume there too. One per agent; never shared between agents.
+   *
+   * @generated from field: string home = 3;
+   */
+  home: string;
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.SessionPlugin.
+ * Use `create(SessionPluginSchema)` to create a new message.
+ */
+export const SessionPluginSchema: GenMessage<SessionPlugin> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_effects, 3);
 
 /**
  * @generated from message vibesys.orchestrator.v1.StartTurn
@@ -192,7 +239,7 @@ export type StartTurn = Message<"vibesys.orchestrator.v1.StartTurn"> & {
  * Use `create(StartTurnSchema)` to create a new message.
  */
 export const StartTurnSchema: GenMessage<StartTurn> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_effects, 3);
+  messageDesc(file_vibesys_orchestrator_v1_effects, 4);
 
 /**
  * @generated from message vibesys.orchestrator.v1.Steer
@@ -219,7 +266,7 @@ export type Steer = Message<"vibesys.orchestrator.v1.Steer"> & {
  * Use `create(SteerSchema)` to create a new message.
  */
 export const SteerSchema: GenMessage<Steer> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_effects, 4);
+  messageDesc(file_vibesys_orchestrator_v1_effects, 5);
 
 /**
  * @generated from message vibesys.orchestrator.v1.Interrupt
@@ -241,7 +288,7 @@ export type Interrupt = Message<"vibesys.orchestrator.v1.Interrupt"> & {
  * Use `create(InterruptSchema)` to create a new message.
  */
 export const InterruptSchema: GenMessage<Interrupt> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_effects, 5);
+  messageDesc(file_vibesys_orchestrator_v1_effects, 6);
 
 /**
  * @generated from message vibesys.orchestrator.v1.CloseSession
@@ -265,7 +312,7 @@ export type CloseSession = Message<"vibesys.orchestrator.v1.CloseSession"> & {
  * Use `create(CloseSessionSchema)` to create a new message.
  */
 export const CloseSessionSchema: GenMessage<CloseSession> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_effects, 6);
+  messageDesc(file_vibesys_orchestrator_v1_effects, 7);
 
 /**
  * ArmTimer asks for a TimerFired at a time. A timer that outlives its reason fires harmlessly.
@@ -301,7 +348,7 @@ export type ArmTimer = Message<"vibesys.orchestrator.v1.ArmTimer"> & {
  * Use `create(ArmTimerSchema)` to create a new message.
  */
 export const ArmTimerSchema: GenMessage<ArmTimer> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_effects, 7);
+  messageDesc(file_vibesys_orchestrator_v1_effects, 8);
 
 /**
  * TimerKind says what a timer is for.

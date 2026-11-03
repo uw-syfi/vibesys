@@ -193,6 +193,8 @@ func messageOut(m core.Message) *pb.Message {
 		out.Body = &pb.Message_Text{Text: b.Text}
 	case core.Brief:
 		out.Body = &pb.Message_Brief{Brief: b.Text}
+	case core.LeadBrief:
+		out.Body = &pb.Message_LeadBrief{LeadBrief: &pb.LeadBrief{Task: b.Task, FanoutLimit: b.FanoutLimit, Steering: b.Steering}}
 	case core.Handoff:
 		out.Body = &pb.Message_Handoff{Handoff: handoffOut(b)}
 	case core.Report:
@@ -221,6 +223,8 @@ func messageIn(m *pb.Message, errs *errorList) core.Message {
 		out.Body = core.Text{Text: b.Text}
 	case *pb.Message_Brief:
 		out.Body = core.Brief{Text: b.Brief}
+	case *pb.Message_LeadBrief:
+		out.Body = core.LeadBrief{Task: b.LeadBrief.GetTask(), FanoutLimit: b.LeadBrief.GetFanoutLimit(), Steering: b.LeadBrief.GetSteering()}
 	case *pb.Message_Handoff:
 		out.Body = handoffIn(b.Handoff)
 	case *pb.Message_Report:

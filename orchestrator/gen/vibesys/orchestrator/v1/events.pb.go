@@ -522,8 +522,10 @@ type StartRun struct {
 	// Absent when the run has no deadline.
 	Deadline *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=deadline,proto3" json:"deadline,omitempty"`
 	// The lead has nothing to inherit from, so its harness is required.
-	Lead          *AgentSpec `protobuf:"bytes,5,opt,name=lead,proto3" json:"lead,omitempty"`
-	Brief         string     `protobuf:"bytes,6,opt,name=brief,proto3" json:"brief,omitempty"`
+	Lead *AgentSpec `protobuf:"bytes,5,opt,name=lead,proto3" json:"lead,omitempty"`
+	// The operator's steering text for the lead, such as a note about cost or which harnesses to
+	// prefer. Empty when there is none; a template words the lead's first prompt around it.
+	Brief         string `protobuf:"bytes,6,opt,name=brief,proto3" json:"brief,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1218,7 +1220,7 @@ const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"\tAgentSpec\x12D\n" +
 	"\aharness\x18\x01 \x01(\x0e2 .vibesys.orchestrator.v1.HarnessB\b\xbaH\x05\x82\x01\x02\x10\x01R\aharness\x12\x14\n" +
 	"\x05model\x18\x02 \x01(\tR\x05model\x12)\n" +
-	"\x10reasoning_effort\x18\x03 \x01(\tR\x0freasoningEffort\"\xd3\x02\n" +
+	"\x10reasoning_effort\x18\x03 \x01(\tR\x0freasoningEffort\"\xca\x02\n" +
 	"\bStartRun\x12'\n" +
 	"\n" +
 	"repository\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\n" +
@@ -1227,8 +1229,8 @@ const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"\ffanout_limit\x18\x03 \x01(\rR\vfanoutLimit\x126\n" +
 	"\bdeadline\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\bdeadline\x12\x86\x01\n" +
 	"\x04lead\x18\x05 \x01(\v2\".vibesys.orchestrator.v1.AgentSpecBN\xbaHK\xba\x01E\n" +
-	"\x16start_run.lead.harness\x12\x18the lead needs a harness\x1a\x11this.harness != 0\xc8\x01\x01R\x04lead\x12\x1d\n" +
-	"\x05brief\x18\x06 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05brief\")\n" +
+	"\x16start_run.lead.harness\x12\x18the lead needs a harness\x1a\x11this.harness != 0\xc8\x01\x01R\x04lead\x12\x14\n" +
+	"\x05brief\x18\x06 \x01(\tR\x05brief\")\n" +
 	"\aStopRun\x12\x1e\n" +
 	"\x06run_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\"\xea\x01\n" +
 	"\n" +

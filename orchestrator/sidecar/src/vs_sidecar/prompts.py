@@ -30,6 +30,8 @@ def render(message: orch.Message) -> str:
         template = "text"
     elif kind == "brief":
         template = "brief"
+    elif kind == "lead_brief":
+        template, context["lead"] = "lead_brief", message.lead_brief
     elif kind == "handoff":
         template, context["handoff"] = "handoff", message.handoff
     elif kind == "report":
