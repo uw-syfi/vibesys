@@ -1,4 +1,10 @@
-import {type Handoff, JobOutcome, type Message, type Report} from '@vibesys/orchestrator-proto';
+import {
+  type Handoff,
+  JobOutcome,
+  type Message,
+  oneofIs,
+  type Report,
+} from '@vibesys/orchestrator-proto';
 import {Card, Chip, EmptyState, KeyValue, type KeyValueItem, Row, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import {ms, type OrchestratorState} from '../../state/index.js';
@@ -12,9 +18,28 @@ export function verdictOf(
 ): {readonly label: string; readonly tone: 'neutral' | 'live' | 'ok' | 'warn' | 'err'} | null {
   const job = Object.values(state.messages).find(
     message =>
-      message.body.case === 'jobFinished' && message.body.value.submittedByAgentId === from,
+      oneofIs(message.body, 'jobFinished', {
+        text: true,
+        handoff: true,
+        report: true,
+        jobFinished: true,
+        subagentSettled: true,
+        brief: true,
+        leadBrief: true,
+      }) && message.body.value.submittedByAgentId === from,
   );
-  if (job?.body.case === 'jobFinished' && job.body.value.outcome !== JobOutcome.UNSPECIFIED) {
+  if (
+    oneofIs(job?.body, 'jobFinished', {
+      text: true,
+      handoff: true,
+      report: true,
+      jobFinished: true,
+      subagentSettled: true,
+      brief: true,
+      leadBrief: true,
+    }) &&
+    job.body.value.outcome !== JobOutcome.UNSPECIFIED
+  ) {
     const word = jobWord(job.body.value.outcome);
     return {label: `Its benchmark job: ${word.label}`, tone: word.tone};
   }
@@ -89,7 +114,26 @@ export function HandoffCards(props: {
   const names = agentNames(props.state, props.runId);
   const messages = Object.values(props.state.messages)
     .filter(message => message.runId === props.runId)
-    .filter(message => message.body.case === 'handoff' || message.body.case === 'report')
+    .filter(
+      message =>
+        oneofIs(message.body, 'handoff', {
+          text: true,
+          handoff: true,
+          report: true,
+          jobFinished: true,
+          subagentSettled: true,
+          brief: true,
+          leadBrief: true,
+        }) ||
+        oneofIs(message.body, 'report', {
+          text: true,
+          report: true,
+          jobFinished: true,
+          subagentSettled: true,
+          brief: true,
+          leadBrief: true,
+        }),
+    )
     .sort((a, b) => (ms(a.at) ?? 0) - (ms(b.at) ?? 0));
   if (messages.length === 0) {
     return (
@@ -99,7 +143,15 @@ export function HandoffCards(props: {
   return (
     <Stack gap="space-4" align="start">
       {messages.map(message =>
-        message.body.case === 'handoff' ? (
+        oneofIs(message.body, 'handoff', {
+          text: true,
+          handoff: true,
+          report: true,
+          jobFinished: true,
+          subagentSettled: true,
+          brief: true,
+          leadBrief: true,
+        }) ? (
           <HandoffCard
             key={message.id}
             message={message}
@@ -107,7 +159,14 @@ export function HandoffCards(props: {
             names={names}
             state={props.state}
           />
-        ) : message.body.case === 'report' ? (
+        ) : oneofIs(message.body, 'report', {
+            text: true,
+            report: true,
+            jobFinished: true,
+            subagentSettled: true,
+            brief: true,
+            leadBrief: true,
+          }) ? (
           <ReportCard key={message.id} message={message} report={message.body.value} />
         ) : null,
       )}

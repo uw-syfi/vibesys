@@ -1,4 +1,5 @@
 import {expect, it} from '@effect/vitest';
+import {oneofIs} from '@vibesys/orchestrator-proto';
 import * as Schema from 'effect/Schema';
 import {decodeGatewayReply, gatewayReply} from '../core/gateway-codec.js';
 import {GatewayFailed, GrpcFailed, LinkFailed} from './errors.js';
@@ -101,7 +102,7 @@ async function settle(): Promise<void> {
 function ends(port: FakePort): {error: string | undefined}[] {
   return port.posted.flatMap(message => {
     const reply = decodeGatewayReply(message);
-    return reply.case === 'end' ? [{error: reply.value.error}] : [];
+    return oneofIs(reply, 'end', {bytes: true, end: true}) ? [{error: reply.value.error}] : [];
   });
 }
 
@@ -254,7 +255,7 @@ it.prop(
 it('terminal replies keep every gRPC status and a single error prefix', () => {
   const ended = (error?: unknown) => {
     const reply = decodeGatewayReply(endOf(error));
-    if (reply.case !== 'end') throw new Error('not an end');
+    if (!oneofIs(reply, 'end', {bytes: true, end: true})) throw new Error('not an end');
     return {error: reply.value.error, status: reply.value.status};
   };
   for (let code = 0; code <= 16; code++)

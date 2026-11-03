@@ -2,6 +2,7 @@ package daemon_test
 
 import (
 	"context"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/client"
 	"math/rand"
 	"testing"
 	"testing/quick"
@@ -28,7 +29,7 @@ func TestSearchWatchConvergesAcrossLagAndReconnect(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer w.Close()
-		latest := first[0].GetSnapshot().Searches[0]
+		latest := client.WatchRunsSnapshot(first[0]).Searches[0]
 		for i, n := range history {
 			v := search.Fold(search.Facts{{Fact: &cli.TaskFact_Job{Job: &cli.Job{Id: "j1", CancelReason: string(rune(n + 32))}}}})
 			if n%2 == 0 {
@@ -51,9 +52,9 @@ func TestSearchWatchConvergesAcrossLagAndReconnect(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, m := range msgs {
-				if snap := m.GetSnapshot(); snap != nil {
+				if snap := client.WatchRunsSnapshot(m); snap != nil {
 					latest = snap.Searches[0]
-				} else if s := m.GetSearch(); s != nil {
+				} else if s := client.WatchRunsSearch(m); s != nil {
 					if s.Revision < latest.Revision {
 						return false
 					}
@@ -69,8 +70,8 @@ func TestSearchWatchConvergesAcrossLagAndReconnect(t *testing.T) {
 		defer re.Close()
 		var current *pb.SearchState
 		for _, m := range frames {
-			if m.GetSearch() != nil {
-				current = m.GetSearch()
+			if client.WatchRunsSearch(m) != nil {
+				current = client.WatchRunsSearch(m)
 			}
 		}
 		if current == nil || wire.Validate(current) != nil {
@@ -91,9 +92,9 @@ func TestSearchWatchConvergesAcrossLagAndReconnect(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, m := range msgs {
-			if snap := m.GetSnapshot(); snap != nil {
+			if snap := client.WatchRunsSnapshot(m); snap != nil {
 				latest = snap.Searches[0]
-			} else if s := m.GetSearch(); s != nil {
+			} else if s := client.WatchRunsSearch(m); s != nil {
 				latest = s
 			}
 		}
@@ -116,7 +117,7 @@ func TestSearchSnapshotsRetainReleasedViewAndScopeAgents(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer w.Close()
-	view := first[0].GetSnapshot().Searches
+	view := client.WatchRunsSnapshot(first[0]).Searches
 	if len(view) != 1 || view[0].RunId != string(run.ID) || len(view[0].Jobs) != 1 || view[0].Health.GetUnreadable().GetReason() != pb.UnreadableReason_UNREADABLE_REASON_CLI_NOT_INSTALLED {
 		t.Fatal(view)
 	}
@@ -127,7 +128,7 @@ func TestSearchSnapshotsRetainReleasedViewAndScopeAgents(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer re.Close()
-	retained := frames[0].GetSnapshot().Searches[0]
+	retained := client.WatchRunsSnapshot(frames[0]).Searches[0]
 	if retained.Revision != view[0].Revision || len(retained.Jobs) != 1 || retained.Health.GetUnreadable().GetReason() != pb.UnreadableReason_UNREADABLE_REASON_CLI_NOT_INSTALLED {
 		t.Fatal(retained)
 	}
@@ -173,7 +174,7 @@ func TestUnchangedTickPublishesNothingIncludingEndedRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(frames) != 1 || frames[0].GetSearch().GetHealth().GetUnreadable().GetReason() != pb.UnreadableReason_UNREADABLE_REASON_STREAM_LOST {
+	if len(frames) != 1 || client.WatchRunsSearch(frames[0]).GetHealth().GetUnreadable().GetReason() != pb.UnreadableReason_UNREADABLE_REASON_STREAM_LOST {
 		t.Fatal("new facts of ended run lost", frames)
 	}
 	assertQuiet()

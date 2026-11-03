@@ -9,6 +9,7 @@ import {
   gatewayReply,
   parseGatewayRequest,
 } from '../../core/gateway-codec.js';
+import {invokeCallback} from '../callback-errors.js';
 import type {Recording, Step} from './fake-transport.js';
 
 export interface OpenedPort {
@@ -62,7 +63,10 @@ export const makeFakeBridge = (recording?: Recording): FakeBridge => {
           const {host, method, bytes} = parseGatewayRequest(request);
           const nth = countByMethod.get(method) ?? 0;
           countByMethod.set(method, nth + 1);
-          deliver(recording.respond({host, method, request: bytes}, nth), receive);
+          deliver(
+            invokeCallback(() => recording.respond({host, method, request: bytes}, nth)),
+            reply => invokeCallback(() => receive(reply)),
+          );
         }
         return {
           cancel: () => {
@@ -75,8 +79,8 @@ export const makeFakeBridge = (recording?: Recording): FakeBridge => {
       opened.map(port => ({
         request: port.request,
         cancels: port.cancels,
-        reply: message => port.receive(message as Uint8Array),
-        fail: message => port.failed(message),
+        reply: message => invokeCallback(() => port.receive(message as Uint8Array)),
+        fail: message => invokeCallback(() => port.failed(message)),
       })),
   };
 };

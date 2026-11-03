@@ -16,6 +16,7 @@ import {
   ItemsPageSchema,
   type Message,
   MessageSchema,
+  oneofIs,
   type Plan,
   type Receipt,
   ReceiptSchema,
@@ -26,6 +27,7 @@ import {
 } from '@vibesys/orchestrator-proto';
 import {applyEvent} from '../../state/orchestrator/fold.js';
 import {emptyState, type OrchestratorState} from '../../state/orchestrator/state.js';
+import {invokeCallback} from '../callback-errors.js';
 import type {Scenario} from './scenario.js';
 import {searchFixture} from './search.js';
 
@@ -56,7 +58,7 @@ export class FakeDaemon {
   /** Reveal up to `count` more events of the scenario. */
   commit(count: number): void {
     this.#visible = Math.min(this.#log.length, this.#visible + count);
-    for (const watcher of this.#watchers) watcher();
+    for (const watcher of this.#watchers) invokeCallback(watcher);
   }
 
   /** Call `listener` whenever events are committed; returns how to stop. */
@@ -120,10 +122,17 @@ export class FakeDaemon {
     const seen = this.#receipts.get(command.id);
     if (seen !== undefined) return seen;
     const at = Date.parse('2026-11-01T18:00:00Z') + this.#log.length * 1000;
-    const receipt =
-      command.body.case === 'sendMessage'
-        ? this.#sendMessage(command.id, command.body.value.agentId, command.body.value.text, at)
-        : this.#refuse(command.id, Refusal.NOT_PERMITTED, '', at);
+    const receipt = oneofIs(command.body, 'sendMessage', {
+      startRun: true,
+      stopRun: true,
+      spawnAgent: true,
+      stopAgent: true,
+      sendMessage: true,
+      postHandoff: true,
+      postReport: true,
+    })
+      ? this.#sendMessage(command.id, command.body.value.agentId, command.body.value.text, at)
+      : this.#refuse(command.id, Refusal.NOT_PERMITTED, '', at);
     this.#receipts.set(command.id, receipt);
     return receipt;
   }
@@ -204,6 +213,6 @@ export class FakeDaemon {
     });
     this.#log.push(event);
     this.#visible = this.#log.length;
-    for (const watcher of this.#watchers) watcher();
+    for (const watcher of this.#watchers) invokeCallback(watcher);
   }
 }

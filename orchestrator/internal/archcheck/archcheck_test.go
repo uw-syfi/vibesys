@@ -1,6 +1,7 @@
 package archcheck_test
 
 import (
+	"golang.org/x/tools/go/packages"
 	"io/fs"
 	"os"
 	"path"
@@ -96,5 +97,33 @@ func TestRepositoryObeysTheRules(t *testing.T) {
 	}
 	for _, v := range archcheck.Violations(files) {
 		t.Error(v)
+	}
+}
+
+// Include gateway e2e readers, whose build tag otherwise hides them from ordinary checks.
+func TestTypedWatchRunsReaders(t *testing.T) {
+	root, err := filepath.Abs("../../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{"orchestrator", "gateway"} {
+		pkgs, err := packages.Load(&packages.Config{Dir: filepath.Join(root, dir), Tests: true, BuildFlags: []string{"-tags=e2e"}, Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports | packages.NeedDeps}, "./...")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if packages.PrintErrors(pkgs) > 0 {
+			t.Fatal("cannot type-check readers")
+		}
+		for _, pkg := range pkgs {
+			for _, file := range pkg.Syntax {
+				name, err := filepath.Rel(root, pkg.Fset.Position(file.Pos()).Filename)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, violation := range archcheck.WatchRunsReaders(filepath.ToSlash(name), file, pkg.Fset, pkg.TypesInfo) {
+					t.Error(violation)
+				}
+			}
+		}
 	}
 }

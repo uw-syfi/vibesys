@@ -330,7 +330,7 @@ func (c *sidecarProcess) Follow(_ context.Context, after uint64) (daemon.EventSt
 				return
 			}
 			select {
-			case f.events <- resp.Event:
+			case f.events <- resp.GetEvent():
 			case <-ctx.Done():
 				f.end.Store(ctx.Err())
 				close(f.events)

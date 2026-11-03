@@ -128,13 +128,18 @@ it('search frames preserve the cursor and gap in arbitrary snapshot and event in
         for (const step of steps) {
           if (step.kind === 'search') {
             const before = model.data;
+            const view = create(SearchStateSchema, {runId: 'r', revision: step.revision});
             model = applyHostFrame(model, {
               from: 'runs',
               body: {
                 case: 'search',
-                value: create(SearchStateSchema, {runId: 'r', revision: step.revision}),
+                value: view,
               },
             });
+            const previous = before.searches['r'];
+            expect(model.data.searches['r']).toEqual(
+              previous !== undefined && previous.revision > view.revision ? previous : view,
+            );
             expect(model.data.sequence).toBe(before.sequence);
             expect(model.data.gap).toBe(before.gap);
           } else {

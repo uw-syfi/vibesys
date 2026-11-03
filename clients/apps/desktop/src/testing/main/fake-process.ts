@@ -10,6 +10,7 @@ import * as Exit from 'effect/Exit';
 import * as Layer from 'effect/Layer';
 import {SpawnFailed} from '../../main/errors.js';
 import {type KillSignal, ProcessSpawner, type SpawnedProcess} from '../../main/process.js';
+import {invokeCallback} from '../callback-errors.js';
 
 /** How a fake process answers a kill. */
 export type KillBehavior =
@@ -129,7 +130,7 @@ export function fakeSpawner(
       Effect.suspend(() => {
         const entry: Started = {command, args, env, process: fakeProcess(kill)};
         started.push(entry);
-        if (script(entry, started) === 'refuse')
+        if (invokeCallback(() => script(entry, started)) === 'refuse')
           return Effect.fail(new SpawnFailed({command, message: 'refused'}));
         return Effect.succeed(entry.process.process);
       }),

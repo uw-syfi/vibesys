@@ -3,6 +3,7 @@ package daemon_test
 import (
 	"context"
 	"fmt"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/client"
 	"testing"
 	"time"
 
@@ -185,7 +186,7 @@ func TestTheRunsSnapshotHoldsEveryMessageAndTurnOfTheRun(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer w.Close()
-			snap := first[0].GetSnapshot()
+			snap := client.WatchRunsSnapshot(first[0])
 			assertSame(t, "messages", snap.GetMessages(), wantMessages)
 			assertSame(t, "turns", snap.GetTurns(), wantTurns)
 		})

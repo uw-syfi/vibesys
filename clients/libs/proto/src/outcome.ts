@@ -22,8 +22,21 @@ export function outcomePresentation(outcome: Outcome): RunOutcomePresentation {
  * outcome, whether the records stated it or not. Mirrors `vs_runlog.project_lifecycle`.
  */
 export function projectLifecycle(lifecycle: Lifecycle | undefined): Lifecycle | undefined {
-  if (lifecycle?.state.case !== 'ended') return lifecycle;
-  const ended = lifecycle.state.value;
+  if (lifecycle === undefined) return lifecycle;
+  const state = lifecycle.state;
+  switch (state.case) {
+    case 'ended':
+      break;
+    case undefined:
+    case 'starting':
+    case 'running':
+    case 'draining':
+    case 'parked':
+      return lifecycle;
+    default:
+      state satisfies never;
+  }
+  const ended = state.value;
   return create(LifecycleSchema, {
     ...lifecycle,
     state: {case: 'ended', value: {...ended, presentation: outcomePresentation(ended.outcome)}},

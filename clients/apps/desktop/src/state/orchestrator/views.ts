@@ -11,6 +11,7 @@ import {
   ItemStatus,
   JobOutcome,
   type Message,
+  oneofIs,
   type Turn,
   TurnStatus,
   type Usage,
@@ -79,8 +80,14 @@ export interface ThreadTurn {
 function shown(state: OrchestratorState, item: Item): ThreadItem {
   const overlay = state.overlays[item.id];
   const body = item.body;
-  const stored = body.case === 'tool' ? '' : body.case === undefined ? '' : body.value.text;
-  const output = body.case === 'tool' ? body.value.output : '';
+  const stored = oneofIs(body, 'tool', {assistant: true, reasoning: true, prompt: true, tool: true})
+    ? ''
+    : oneofIs(body, undefined, {assistant: true, reasoning: true, prompt: true})
+      ? ''
+      : body.value.text;
+  const output = oneofIs(body, 'tool', {assistant: true, reasoning: true, prompt: true, tool: true})
+    ? body.value.output
+    : '';
   return {
     item,
     text: stored + (overlay?.text ?? ''),
@@ -188,9 +195,31 @@ export function timeline(state: OrchestratorState, runId: string, nowMs: number)
     }),
   }));
   const jobs = Object.values(state.messages)
-    .filter(message => message.runId === runId && message.body.case === 'jobFinished')
+    .filter(
+      message =>
+        message.runId === runId &&
+        oneofIs(message.body, 'jobFinished', {
+          text: true,
+          handoff: true,
+          report: true,
+          jobFinished: true,
+          subagentSettled: true,
+          brief: true,
+          leadBrief: true,
+        }),
+    )
     .flatMap((message): JobBar[] => {
-      const job = message.body.case === 'jobFinished' ? message.body.value : null;
+      const job = oneofIs(message.body, 'jobFinished', {
+        text: true,
+        handoff: true,
+        report: true,
+        jobFinished: true,
+        subagentSettled: true,
+        brief: true,
+        leadBrief: true,
+      })
+        ? message.body.value
+        : null;
       const fact = state.searches[runId]?.jobs.find(candidate => candidate.id === job?.jobId);
       const startMs = ms(fact?.startedAt) ?? ms(fact?.submittedAt);
       const endMs = ms(fact?.finishedAt) ?? ms(message.at);

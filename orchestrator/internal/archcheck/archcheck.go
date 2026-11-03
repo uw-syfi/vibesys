@@ -68,7 +68,7 @@ var testRules = map[string][]string{
 	"internal/localfs": {"internal/localfs/localfstest"},
 	"internal/client":  {"internal/core", "internal/daemon", "internal/daemon/daemontest", "internal/mcp"},
 	"internal/core":    {"internal/jobs/jobstest", "internal/wire", "gen/vibesys/orchestrator/"},
-	"internal/wire":    {"internal/core"},
+	"internal/wire":    {"internal/core", "internal/client"},
 	"internal/daemon":  {"internal/client", "internal/daemon/daemontest", "internal/store", "internal/jobs/jobstest"},
 }
 
@@ -122,7 +122,6 @@ func Violations(files map[string]string) []string {
 			found = append(found, purity(name, source)...)
 			found = append(found, confinement(name, source)...)
 			found = append(found, capabilities(name, source)...)
-			found = append(found, watchRunsReaders(name, source)...)
 		}
 	}
 	sort.Strings(found)

@@ -3,6 +3,7 @@ package daemon_test
 import (
 	"context"
 	"fmt"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/client"
 	"math/rand"
 	"strings"
 	"testing"
@@ -49,7 +50,7 @@ func TestEverySearchFrameFitsForGeneratedRunsAndViews(t *testing.T) {
 				if proto.Size(f) > daemon.MaxWatchFrameBytes {
 					return false
 				}
-				if snap := f.GetSnapshot(); snap != nil && proto.Size(snap) > daemon.MaxSnapshotBytes {
+				if snap := client.WatchRunsSnapshot(f); snap != nil && proto.Size(snap) > daemon.MaxSnapshotBytes {
 					return false
 				}
 			}
@@ -95,7 +96,7 @@ func TestLargestSnapshotFitsAndOmittedSearchesFollow(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer w.Close()
-	snap := frames[0].GetSnapshot()
+	snap := client.WatchRunsSnapshot(frames[0])
 	if !snap.Truncated || proto.Size(snap) > daemon.MaxSnapshotBytes || proto.Size(snap) < daemon.MaxSnapshotBytes/2 {
 		t.Fatal("snapshot budget not exercised", proto.Size(snap))
 	}
@@ -107,7 +108,7 @@ func TestLargestSnapshotFitsAndOmittedSearchesFollow(t *testing.T) {
 		if proto.Size(f) > daemon.MaxWatchFrameBytes {
 			t.Fatal("oversized frame")
 		}
-		if s := f.GetSearch(); s != nil {
+		if s := client.WatchRunsSearch(f); s != nil {
 			seen[s.RunId] = true
 		}
 	}

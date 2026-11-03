@@ -1,5 +1,6 @@
 import type {Duplex} from 'node:stream';
 import {describe, expect, it} from '@effect/vitest';
+import {oneofIs} from '@vibesys/orchestrator-proto';
 import {API_SCHEMA_HASH, DesktopLinkProblem} from '@vibesys/proto';
 import * as Effect from 'effect/Effect';
 import * as Fiber from 'effect/Fiber';
@@ -73,7 +74,7 @@ describe('gateway connection', () => {
         expect(failure).toBeInstanceOf(LinkFailed);
         expect(attempts).toBe(1);
         const reply = decodeGatewayReply(endOf(failure));
-        if (reply.case !== 'end') throw new Error('expected end');
+        if (!oneofIs(reply, 'end', {bytes: true, end: true})) throw new Error('expected end');
         const appError = fromEnd(
           new CallEnded({
             message: reply.value.error ?? '',
@@ -133,7 +134,9 @@ describe('gateway connection', () => {
           const failure = yield* Fiber.join(call);
           expect(attempts).toBe(5);
           const reply = decodeGatewayReply(endOf(failure));
-          expect(reply.case === 'end' && reply.value.linkProblem).toBe(expected);
+          expect(oneofIs(reply, 'end', {bytes: true, end: true}) && reply.value.linkProblem).toBe(
+            expected,
+          );
         }
       }),
     ),
@@ -185,7 +188,7 @@ describe('gateway connection', () => {
         expect(failure).toBeInstanceOf(GrpcFailed);
         expect(failure.message).toContain('API hash mismatch');
         const reply = decodeGatewayReply(endOf(failure));
-        expect(reply.case === 'end' && reply.value.status).toBe(9);
+        expect(oneofIs(reply, 'end', {bytes: true, end: true}) && reply.value.status).toBe(9);
         expect(forces).toEqual([false, true]);
         expect(yield* connection.ended).toBe(true);
       }),

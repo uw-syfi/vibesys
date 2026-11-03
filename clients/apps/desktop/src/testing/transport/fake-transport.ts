@@ -13,6 +13,7 @@ import * as Queue from 'effect/Queue';
 import * as Stream from 'effect/Stream';
 import {CallEnded, StreamOverflow} from '../../core/errors.js';
 import {type CallTarget, GatewayTransport} from '../../core/transport/gateway-transport.js';
+import {invokeCallback} from '../callback-errors.js';
 
 /** One thing a call does, in order. */
 export type Step =
@@ -141,7 +142,12 @@ export const makeFakeTransport = (recording: Recording): FakeTransport => {
           Deferred.fail(answer, new CallEnded({message: 'a unary reply has no buffer to fill'})),
         ),
       };
-      yield* Effect.forkChild(play(recording.respond(target, call.nth), sink));
+      yield* Effect.forkChild(
+        play(
+          invokeCallback(() => recording.respond(target, call.nth)),
+          sink,
+        ),
+      );
       return yield* Deferred.await(answer).pipe(Effect.ensuring(Effect.sync(() => release(call))));
     });
 
@@ -169,7 +175,12 @@ export const makeFakeTransport = (recording: Recording): FakeTransport => {
             Queue.failCauseUnsafe(queue, Cause.fail(new StreamOverflow({capacity}))),
           ),
         };
-        yield* Effect.forkScoped(play(recording.respond(target, call.nth), sink));
+        yield* Effect.forkScoped(
+          play(
+            invokeCallback(() => recording.respond(target, call.nth)),
+            sink,
+          ),
+        );
       }),
       {bufferSize: capacity},
     );

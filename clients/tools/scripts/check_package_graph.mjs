@@ -1073,6 +1073,9 @@ const searchBindings = new Set(
   }),
 );
 
+// This pure predicate requires an explicit decision for every generated oneof kind.
+searchBindings.add('oneofIs');
+
 function checkSearchBindings(node, report) {
   const clause = node.importClause;
   const bindings = clause?.namedBindings;

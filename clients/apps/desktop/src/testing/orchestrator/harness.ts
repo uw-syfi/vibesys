@@ -12,6 +12,7 @@ import * as TestClock from 'effect/testing/TestClock';
 import {type HostSession, makeHostSession} from '../../core/host-session.js';
 import {Ids} from '../../core/ids.js';
 import type {HostModel} from '../../state/index.js';
+import {invokeCallback} from '../callback-errors.js';
 import {makeQuiescence} from '../settle.js';
 import {
   type FaultPlan,
@@ -41,7 +42,8 @@ export const hostHarness = (daemon: FakeDaemon, options: HarnessOptions = {}) =>
   Effect.gen(function* () {
     const {scheduler, settle} = yield* makeQuiescence;
     const base = daemonRecording(daemon, options);
-    const fake = makeFakeTransport(options.wrap === undefined ? base : options.wrap(base));
+    const wrap = options.wrap;
+    const fake = makeFakeTransport(wrap === undefined ? base : invokeCallback(() => wrap(base)));
     const session: HostSession = yield* makeHostSession('local').pipe(
       Effect.provide(fake.layer),
       Effect.provide(Ids.layer),

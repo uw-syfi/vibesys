@@ -1,4 +1,4 @@
-import {JobState, type SearchState, UnreadableReason} from '@vibesys/orchestrator-proto';
+import {JobState, oneofIs, type SearchState, UnreadableReason} from '@vibesys/orchestrator-proto';
 import {Card, Chip, KeyValue, Row, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import {
@@ -32,11 +32,15 @@ export function SearchPanels(props: {
   const {search, nowMs} = props;
   const health = search.health?.state;
   const head = resultSoFar(search);
-  const outcome = head?.case === 'current' ? head.value.result?.outcome : undefined;
-  const measure = outcome?.case === 'measure' ? outcome.value : undefined;
+  const outcome = oneofIs(head, 'current', {current: true, none: true})
+    ? head.value.result?.outcome
+    : undefined;
+  const measure = oneofIs(outcome, 'measure', {check: true, measure: true})
+    ? outcome.value
+    : undefined;
   return (
     <Stack gap="space-4">
-      {health?.case === 'unreadable' ? (
+      {oneofIs(health, 'unreadable', {liveSince: true, unreadable: true}) ? (
         <Row gap="space-3" wrap>
           <Chip label="Search state is stale" tone="warn" />
           <Text title={health.value.detail}>{unreadableWords[health.value.reason]}</Text>
@@ -54,7 +58,7 @@ export function SearchPanels(props: {
                 ? 'No official measurement of the current result yet.'
                 : `${measure.metric?.name ?? 'Score'}: ${measure.value}`}
             </Text>
-            {head?.case === 'current' ? (
+            {oneofIs(head, 'current', {current: true, none: true}) ? (
               <Text variant="code" title={head.value.head}>
                 {head.value.head.slice(0, 12)}
               </Text>
@@ -70,7 +74,7 @@ export function SearchPanels(props: {
             items={candidates(search).map(row => ({
               key: row.result.commit.slice(0, 12),
               mono: true,
-              value: `${row.result.outcome.case === 'measure' ? `${row.result.outcome.value.metric?.name ?? 'Score'} ${row.result.outcome.value.value}` : ''}: ${row.label}${row.stale ? ' (previous head)' : ''}`,
+              value: `${oneofIs(row.result.outcome, 'measure', {check: true, measure: true}) ? `${row.result.outcome.value.metric?.name ?? 'Score'} ${row.result.outcome.value.value}` : ''}: ${row.label}${row.stale ? ' (previous head)' : ''}`,
             }))}
           />
         </Card>

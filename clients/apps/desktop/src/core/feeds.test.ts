@@ -8,14 +8,20 @@ import {
   WatchRunsRequestSchema,
   WatchRunsResponseSchema,
 } from '@vibesys/orchestrator-proto';
+import * as Deferred from 'effect/Deferred';
 import * as Effect from 'effect/Effect';
 import * as Random from 'effect/Random';
+import * as Atom from 'effect/reactivity/Atom';
 import * as Schema from 'effect/Schema';
+import * as Stream from 'effect/Stream';
+import * as SubscriptionRef from 'effect/SubscriptionRef';
 import {
   applyEvent,
+  emptyHostModel,
   emptyState,
   type FeedStatus,
   type Freshness,
+  type HostModel,
   type OrchestratorState,
 } from '../state/index.js';
 import {
@@ -28,6 +34,7 @@ import {
 } from '../testing/orchestrator/index.js';
 import type {FaultPlan, Recording, Step} from '../testing/transport/index.js';
 import {RpcStatus} from './errors.js';
+import {runFeed} from './feeds.js';
 import {MAX_QUIET_RESTARTS, STABLE_PASS_FRAMES} from './policy.js';
 import {defaultReconnect, delayMs} from './reconnect.js';
 
@@ -699,5 +706,49 @@ it.effect('the Fake sends current search frames on resume after replayed events'
     expect(data.searches[scenario.runId]).toEqual(daemon.snapshot().searches[0]);
     expect(callsTo(h, 'WatchRuns')).toHaveLength(2);
     expect(data.gap).toBeNull();
+  }),
+);
+
+it.effect('opening a feed without begin publishes no unchanged model', () =>
+  Effect.gen(function* () {
+    const model = yield* SubscriptionRef.make(emptyHostModel);
+    const initial = yield* Deferred.make<void>();
+    const opened = yield* Deferred.make<void>();
+    const publications: HostModel[] = [];
+    const retry = Effect.void;
+    yield* SubscriptionRef.changes(model).pipe(
+      Stream.runForEach(value =>
+        Effect.gen(function* () {
+          publications.push(value);
+          yield* Deferred.succeed(initial, undefined);
+        }),
+      ),
+      Effect.forkScoped,
+    );
+    yield* Deferred.await(initial);
+    yield* runFeed(
+      {
+        model,
+        connection: {
+          state: Atom.make({_tag: 'Idle'} as const),
+          ready: () => Effect.succeed(1),
+          suspect: () => Effect.void,
+          retry,
+          leftTerminal: Effect.never,
+        },
+        setStatus: () => Effect.void,
+        awaitRetry: () => Effect.never,
+      },
+      {
+        open: () =>
+          Stream.fromEffect(Deferred.succeed(opened, undefined)).pipe(
+            Stream.flatMap(() => Stream.never),
+          ),
+        apply: value => value,
+        gapped: () => false,
+      },
+    ).pipe(Effect.forkScoped);
+    yield* Deferred.await(opened);
+    expect(publications).toEqual([emptyHostModel]);
   }),
 );

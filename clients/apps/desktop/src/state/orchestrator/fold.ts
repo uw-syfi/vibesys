@@ -24,6 +24,7 @@ import {
   type Event,
   type Item,
   ItemStatus,
+  oneofIs,
   type RunsSnapshot,
   type SearchState,
   type Turn,
@@ -162,8 +163,10 @@ function withDelta(state: OrchestratorState, delta: Delta, sequence: bigint): Or
   if (sequence < (state.itemSequences[delta.itemId] ?? 0n)) return state;
   const piece: Progress = {
     sequence,
-    text: delta.body.case === 'text' ? delta.body.value : '',
-    commandOutput: delta.body.case === 'commandOutput' ? delta.body.value : '',
+    text: oneofIs(delta.body, 'text', {text: true, commandOutput: true}) ? delta.body.value : '',
+    commandOutput: oneofIs(delta.body, 'commandOutput', {text: true, commandOutput: true})
+      ? delta.body.value
+      : '',
   };
   const before = state.overlays[delta.itemId];
   const pieces = [...(before?.pieces ?? []), piece];

@@ -1,5 +1,11 @@
 /** Pure reads of CLI-owned facts. No verdict or headline is inferred from agent text. */
-import {JobState, PlanStatus, type SearchState, VerdictKind} from '@vibesys/orchestrator-proto';
+import {
+  JobState,
+  oneofIs,
+  PlanStatus,
+  type SearchState,
+  VerdictKind,
+} from '@vibesys/orchestrator-proto';
 import {ms} from './time.js';
 
 /** The official measurement of the current head, or its typed absence. */
@@ -25,20 +31,24 @@ export function candidates(search: SearchState): {
   stale: boolean;
 }[] {
   const head = search.head?.state;
-  const against = head?.case === 'current' ? head.value.head : head?.value?.head;
+  const against = oneofIs(head, 'current', {current: true, none: true})
+    ? head.value.head
+    : head?.value?.head;
   return search.results
-    .filter(result => result.outcome.case === 'measure')
+    .filter(result => oneofIs(result.outcome, 'measure', {check: true, measure: true}))
     .map(result => {
       const judgment = search.judgments.find(row => row.commit === result.commit);
       const current = judgment !== undefined && judgment.against === against;
       const outcome = current ? judgment.outcome : undefined;
-      const verdict = outcome?.case === 'comparison' ? outcome.value.verdict : undefined;
+      const verdict = oneofIs(outcome, 'comparison', {comparison: true, refused: true})
+        ? outcome.value.verdict
+        : undefined;
       return {
         result,
         judgment,
         label:
           verdict === undefined
-            ? outcome?.case === 'refused'
+            ? oneofIs(outcome, 'refused', {comparison: true, refused: true})
               ? 'Comparison unavailable'
               : 'Not judged'
             : verdictWords[verdict.kind],

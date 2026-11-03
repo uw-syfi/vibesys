@@ -4,6 +4,7 @@ package e2e
 
 import (
 	"context"
+	"github.com/uw-syfi/vibesys/orchestrator/hosted"
 	"net"
 	"testing"
 
@@ -38,13 +39,14 @@ func (r *rig) awaitLeadDeliveries(lead string) {
 		if err != nil {
 			r.t.Fatalf("waiting for all lead deliveries: %v", err)
 		}
-		if snap := frame.GetSnapshot(); snap != nil {
+		snap, event, _ := hosted.DecodeWatchRuns(frame)
+		if snap != nil {
 			clear(messages)
 			for _, m := range snap.Messages {
 				messages[m.Id] = m
 			}
 		}
-		if m := frame.GetEvent().GetMessageUpdated(); m != nil {
+		if m := event.GetMessageUpdated(); m != nil {
 			messages[m.Id] = m
 		}
 		if leadDeliveriesComplete(r.t, messages, lead) {
