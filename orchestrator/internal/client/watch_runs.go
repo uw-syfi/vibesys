@@ -6,18 +6,25 @@ import (
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 )
 
-// DecodeWatchRuns classifies a frame once for client and test readers. Unknown or missing bodies panic rather than being
-// mistaken for events. Callers may ignore search views, which carry no event sequence.
+// DecodeWatchRuns classifies a frame for test readers, panicking on unknown or missing bodies.
 func DecodeWatchRuns(frame *pb.WatchRunsResponse) (*pb.RunsSnapshot, *pb.Event, *pb.SearchState) {
+	s, e, search, err := classifyWatchRuns(frame)
+	if err != nil {
+		panic(err)
+	}
+	return s, e, search
+}
+
+func classifyWatchRuns(frame *pb.WatchRunsResponse) (*pb.RunsSnapshot, *pb.Event, *pb.SearchState, error) {
 	switch body := frame.GetBody().(type) {
 	case *pb.WatchRunsResponse_Snapshot:
-		return body.Snapshot, nil, nil
+		return body.Snapshot, nil, nil, nil
 	case *pb.WatchRunsResponse_Event:
-		return nil, body.Event, nil
+		return nil, body.Event, nil, nil
 	case *pb.WatchRunsResponse_Search:
-		return nil, nil, body.Search
+		return nil, nil, body.Search, nil
 	default:
-		panic(fmt.Sprintf("unhandled WatchRunsResponse body %T", body))
+		return nil, nil, nil, fmt.Errorf("unhandled WatchRunsResponse body %T", body)
 	}
 }
 

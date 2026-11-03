@@ -10,6 +10,7 @@ import (
 
 // WatchRunsReaders checks resolved types, including aliases and method values. Writers may
 // construct frames, but only the decoder may project their body or inspect wrapper types.
+// Interface erasure, generics and ProtoReflect are not detected.
 func WatchRunsReaders(name string, file *ast.File, positions *token.FileSet, info *types.Info) []string {
 	if name == "orchestrator/internal/client/watch_runs.go" || strings.Contains(name, "/gen/") {
 		return nil

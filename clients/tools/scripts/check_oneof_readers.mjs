@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // A syntactic guard plus TypeScript's never proof: a new generated case breaks tsc, even when
 // a default would otherwise silently discard it. Dispatch comparisons use the same proof.
+// Does not catch includes or Set.has on the case, nested destructuring, or casts to string.
 import {readdirSync, readFileSync} from 'node:fs';
 import {join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -135,6 +136,10 @@ function scan(directory) {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const files = workspaceLayout(process.cwd()).scanRoots.flatMap(scan);
+  if (files.length === 0) {
+    console.error('oneof reader check found no files to scan');
+    process.exit(1);
+  }
   const program = ts.createProgram(files, {
     strict: true,
     target: ts.ScriptTarget.ESNext,

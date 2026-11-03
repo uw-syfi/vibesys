@@ -179,8 +179,8 @@ func (c *Client) Snapshot(ctx context.Context) (*pb.RunsSnapshot, error) {
 	if err != nil {
 		return nil, err
 	}
-	snapshot, _, _ := DecodeWatchRuns(msg)
-	if snapshot == nil {
+	snapshot, _, _, classifyErr := classifyWatchRuns(msg)
+	if classifyErr != nil || snapshot == nil {
 		return nil, errors.New("the orchestrator began a stream of runs with something other than a snapshot")
 	}
 	return snapshot, nil
