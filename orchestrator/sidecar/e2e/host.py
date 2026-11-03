@@ -39,7 +39,9 @@ class HostMachine:
         return self._tool(effect)
 
     def _shell(self, effect: Shell) -> Outcome:
-        done = subprocess.run(  # noqa: S603 - the scripted agent's own command, from a script in this directory
+        # lint-waiver: LW-997301 [S603]; The scripted agent's own command, from a script in this directory, runs without a shell.
+        # > A wrapper would only move this one call: argv is already a list and shell=False.
+        done = subprocess.run(  # noqa: S603
             effect.argv,
             cwd=self._cwd,
             env=self._env,
@@ -72,7 +74,9 @@ class HostMachine:
                 "params": {"name": effect.tool, "arguments": dict(effect.arguments)},
             },
         ]
-        done = subprocess.run(  # noqa: S603 - the server the daemon wrote into mcp.json
+        # lint-waiver: LW-997302 [S603]; The MCP server command is the one the daemon wrote into mcp.json, run without a shell.
+        # > A wrapper would only move this one call: argv is already a list and shell=False.
+        done = subprocess.run(  # noqa: S603
             [self._server.command, *self._server.args],
             input="".join(json.dumps(r) + "\n" for r in requests),
             env={**self._env, **self._server.env},
