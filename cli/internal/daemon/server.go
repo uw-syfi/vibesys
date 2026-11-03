@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"buf.build/go/protovalidate"
 	"context"
 	"fmt"
 	"os"
@@ -91,6 +92,9 @@ func (s *Server) WatchTask(req *cliv1.WatchTaskRequest, stream cliv1.DaemonServi
 		for _, m := range wire.TaskMessages(send) {
 			sequence++
 			m.Epoch, m.Sequence = epoch, sequence
+			if err := protovalidate.Validate(m); err != nil {
+				return err
+			}
 			if err := stream.Send(m); err != nil {
 				return err
 			}

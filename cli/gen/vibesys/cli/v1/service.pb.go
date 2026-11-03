@@ -7,6 +7,7 @@
 package cliv1
 
 import (
+	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	durationpb "google.golang.org/protobuf/types/known/durationpb"
@@ -3621,7 +3622,7 @@ var File_vibesys_cli_v1_service_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1cvibesys/cli/v1/service.proto\x12\x0evibesys.cli.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1cvibesys/cli/v1/failure.proto\x1a\x18vibesys/cli/v1/job.proto\x1a\x19vibesys/cli/v1/plan.proto\x1a\x1cvibesys/cli/v1/promote.proto\x1a\x1bvibesys/cli/v1/result.proto\x1a\x1cvibesys/cli/v1/verdict.proto\x1a\x1cvibesys/cli/v1/version.proto\"\x88\x01\n" +
+	"\x1cvibesys/cli/v1/service.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1cvibesys/cli/v1/failure.proto\x1a\x18vibesys/cli/v1/job.proto\x1a\x19vibesys/cli/v1/plan.proto\x1a\x1cvibesys/cli/v1/promote.proto\x1a\x1bvibesys/cli/v1/result.proto\x1a\x1cvibesys/cli/v1/verdict.proto\x1a\x1cvibesys/cli/v1/version.proto\"\x88\x01\n" +
 	"\vCallContext\x12\x1e\n" +
 	"\n" +
 	"repository\x18\x01 \x01(\tR\n" +
@@ -3777,24 +3778,24 @@ const file_vibesys_cli_v1_service_proto_rawDesc = "" +
 	"\x06status\x18\x03 \x01(\x0e2\x1a.vibesys.cli.v1.PlanStatusR\x06status\x12\x18\n" +
 	"\acomment\x18\x04 \x01(\tR\acomment\"=\n" +
 	"\x11ClosePlanResponse\x12(\n" +
-	"\x04plan\x18\x01 \x01(\v2\x14.vibesys.cli.v1.PlanR\x04plan\"\xad\x01\n" +
-	"\x10WatchTaskRequest\x125\n" +
-	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x14\n" +
+	"\x04plan\x18\x01 \x01(\v2\x14.vibesys.cli.v1.PlanR\x04plan\"\xbe\x01\n" +
+	"\x10WatchTaskRequest\x12=\n" +
+	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextB\x06\xbaH\x03\xc8\x01\x01R\acontext\x12\x14\n" +
 	"\x05epoch\x18\x02 \x01(\tR\x05epoch\x12%\n" +
-	"\x0eafter_sequence\x18\x03 \x01(\x04R\rafterSequence\x12%\n" +
-	"\x0ejudged_commits\x18\x04 \x01(\rR\rjudgedCommits\"\xe8\x01\n" +
-	"\x11WatchTaskResponse\x12\x14\n" +
-	"\x05epoch\x18\x01 \x01(\tR\x05epoch\x12\x1a\n" +
-	"\bsequence\x18\x02 \x01(\x04R\bsequence\x12-\n" +
+	"\x0eafter_sequence\x18\x03 \x01(\x04R\rafterSequence\x12.\n" +
+	"\x0ejudged_commits\x18\x04 \x01(\rB\a\xbaH\x04*\x02\x18dR\rjudgedCommits\"\x81\x02\n" +
+	"\x11WatchTaskResponse\x12\x1d\n" +
+	"\x05epoch\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05epoch\x12#\n" +
+	"\bsequence\x18\x02 \x01(\x04B\a\xbaH\x042\x02 \x00R\bsequence\x12-\n" +
 	"\x05reset\x18\x03 \x01(\v2\x15.vibesys.cli.v1.ResetH\x00R\x05reset\x121\n" +
 	"\x05facts\x18\x04 \x01(\v2\x19.vibesys.cli.v1.TaskFactsH\x00R\x05facts\x127\n" +
-	"\tcaught_up\x18\x05 \x01(\v2\x18.vibesys.cli.v1.CaughtUpH\x00R\bcaughtUpB\x06\n" +
-	"\x04body\"\a\n" +
+	"\tcaught_up\x18\x05 \x01(\v2\x18.vibesys.cli.v1.CaughtUpH\x00R\bcaughtUpB\r\n" +
+	"\x04body\x12\x05\xbaH\x02\b\x01\"\a\n" +
 	"\x05Reset\"\n" +
 	"\n" +
-	"\bCaughtUp\";\n" +
-	"\tTaskFacts\x12.\n" +
-	"\x05facts\x18\x01 \x03(\v2\x18.vibesys.cli.v1.TaskFactR\x05facts\"\xad\x03\n" +
+	"\bCaughtUp\"H\n" +
+	"\tTaskFacts\x12;\n" +
+	"\x05facts\x18\x01 \x03(\v2\x18.vibesys.cli.v1.TaskFactB\v\xbaH\b\x92\x01\x05\b\x01\x10\xf4\x03R\x05facts\"\xb4\x03\n" +
 	"\bTaskFact\x12'\n" +
 	"\x03job\x18\x01 \x01(\v2\x13.vibesys.cli.v1.JobH\x00R\x03job\x120\n" +
 	"\x06result\x18\x02 \x01(\v2\x16.vibesys.cli.v1.ResultH\x00R\x06result\x126\n" +
@@ -3803,35 +3804,36 @@ const file_vibesys_cli_v1_service_proto_rawDesc = "" +
 	"\x04plan\x18\x05 \x01(\v2\x14.vibesys.cli.v1.PlanH\x00R\x04plan\x12*\n" +
 	"\x04head\x18\x06 \x01(\v2\x14.vibesys.cli.v1.HeadH\x00R\x04head\x125\n" +
 	"\x06health\x18\a \x01(\v2\x1b.vibesys.cli.v1.StoreHealthH\x00R\x06health\x126\n" +
-	"\atrouble\x18\b \x01(\v2\x1a.vibesys.cli.v1.JobTroubleH\x00R\atroubleB\x06\n" +
-	"\x04fact\"\xba\x01\n" +
-	"\bJudgment\x12\x16\n" +
-	"\x06commit\x18\x01 \x01(\tR\x06commit\x12\x18\n" +
-	"\aagainst\x18\x02 \x01(\tR\aagainst\x12<\n" +
+	"\atrouble\x18\b \x01(\v2\x1a.vibesys.cli.v1.JobTroubleH\x00R\atroubleB\r\n" +
+	"\x04fact\x12\x05\xbaH\x02\b\x01\"\xef\x01\n" +
+	"\bJudgment\x12-\n" +
+	"\x06commit\x18\x01 \x01(\tB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{40}$R\x06commit\x12/\n" +
+	"\aagainst\x18\x02 \x01(\tB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{40}$R\aagainst\x12<\n" +
 	"\n" +
 	"comparison\x18\x03 \x01(\v2\x1a.vibesys.cli.v1.ComparisonH\x00R\n" +
 	"comparison\x123\n" +
-	"\arefused\x18\x04 \x01(\v2\x17.vibesys.cli.v1.FailureH\x00R\arefusedB\t\n" +
-	"\aoutcome\"\\\n" +
-	"\x0fPromotionRecord\x12\x10\n" +
-	"\x03seq\x18\x01 \x01(\x04R\x03seq\x127\n" +
-	"\tpromotion\x18\x02 \x01(\v2\x19.vibesys.cli.v1.PromotionR\tpromotion\"V\n" +
+	"\arefused\x18\x04 \x01(\v2\x17.vibesys.cli.v1.FailureH\x00R\arefusedB\x10\n" +
+	"\aoutcome\x12\x05\xbaH\x02\b\x01\"m\n" +
+	"\x0fPromotionRecord\x12\x19\n" +
+	"\x03seq\x18\x01 \x01(\x04B\a\xbaH\x042\x02 \x00R\x03seq\x12?\n" +
+	"\tpromotion\x18\x02 \x01(\v2\x19.vibesys.cli.v1.PromotionB\x06\xbaH\x03\xc8\x01\x01R\tpromotion\"g\n" +
 	"\n" +
-	"JobTrouble\x12\x15\n" +
-	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x121\n" +
-	"\afailure\x18\x02 \x01(\v2\x17.vibesys.cli.v1.FailureR\afailure\"\x81\x01\n" +
+	"JobTrouble\x12\x1e\n" +
+	"\x06job_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05jobId\x129\n" +
+	"\afailure\x18\x02 \x01(\v2\x17.vibesys.cli.v1.FailureB\x06\xbaH\x03\xc8\x01\x01R\afailure\"\x88\x01\n" +
 	"\x04Head\x129\n" +
 	"\acurrent\x18\x01 \x01(\v2\x1d.vibesys.cli.v1.CurrentResultH\x00R\acurrent\x125\n" +
-	"\x04none\x18\x02 \x01(\v2\x1f.vibesys.cli.v1.NoCurrentResultH\x00R\x04noneB\a\n" +
-	"\x05state\"n\n" +
+	"\x04none\x18\x02 \x01(\v2\x1f.vibesys.cli.v1.NoCurrentResultH\x00R\x04noneB\x0e\n" +
+	"\x05state\x12\x05\xbaH\x02\b\x01\"u\n" +
 	"\vStoreHealth\x12*\n" +
 	"\x04live\x18\x01 \x01(\v2\x14.vibesys.cli.v1.LiveH\x00R\x04live\x12*\n" +
-	"\x04away\x18\x02 \x01(\v2\x14.vibesys.cli.v1.AwayH\x00R\x04awayB\a\n" +
-	"\x05state\"\x06\n" +
-	"\x04Live\"m\n" +
-	"\x04Away\x122\n" +
-	"\x06reason\x18\x01 \x01(\x0e2\x1a.vibesys.cli.v1.AwayReasonR\x06reason\x121\n" +
-	"\afailure\x18\x02 \x01(\v2\x17.vibesys.cli.v1.FailureR\afailure*\x95\x01\n" +
+	"\x04away\x18\x02 \x01(\v2\x14.vibesys.cli.v1.AwayH\x00R\x04awayB\x0e\n" +
+	"\x05state\x12\x05\xbaH\x02\b\x01\"\x06\n" +
+	"\x04Live\"\x81\x01\n" +
+	"\x04Away\x12>\n" +
+	"\x06reason\x18\x01 \x01(\x0e2\x1a.vibesys.cli.v1.AwayReasonB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06reason\x129\n" +
+	"\afailure\x18\x02 \x01(\v2\x17.vibesys.cli.v1.FailureB\x06\xbaH\x03\xc8\x01\x01R\afailure*\x95\x01\n" +
 	"\x11SubmitDisposition\x12\"\n" +
 	"\x1eSUBMIT_DISPOSITION_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x1aSUBMIT_DISPOSITION_CREATED\x10\x01\x12\x1d\n" +

@@ -1,0 +1,491 @@
+{
+  "lifecycle": true,
+  "description": "A running job whose supervisor died is recovered on reopen, reports trouble when its task cannot run, and disappears only after explicit forget",
+  "judged_commits": 0,
+  "setup": [
+    {
+      "op": "submit",
+      "run": "run-a",
+      "agent": "lead",
+      "commit": "c0"
+    },
+    {
+      "op": "start",
+      "job": "j1"
+    }
+  ],
+  "ops": [
+    {
+      "op": "crash_reopen"
+    },
+    {
+      "op": "owner_loss"
+    },
+    {
+      "op": "owner_return"
+    },
+    {
+      "op": "cancel",
+      "job": "j1"
+    },
+    {
+      "op": "crash_reopen"
+    },
+    {
+      "op": "forget"
+    }
+  ],
+  "cuts": [
+    1,
+    2
+  ],
+  "expect": [
+    [
+      {
+        "epoch": "E1",
+        "reset": {},
+        "sequence": "1"
+      }
+    ],
+    [
+      {
+        "epoch": "E1",
+        "reset": {},
+        "sequence": "1"
+      },
+      {
+        "epoch": "E1",
+        "facts": {
+          "facts": [
+            {
+              "health": {
+                "live": {}
+              }
+            },
+            {
+              "head": {
+                "none": {
+                  "reason": "NO_CURRENT_RESULT_REASON_NO_HEAD"
+                }
+              }
+            },
+            {
+              "job": {
+                "environment": {
+                  "backend": "BACKEND_KIND_CPU",
+                  "facts": {
+                    "go": "1.25"
+                  },
+                  "kind": "ENVIRONMENT_KIND_HOST"
+                },
+                "id": "j1",
+                "key": "corpus-check",
+                "spec": {
+                  "check": {},
+                  "commit": "c0",
+                  "environment": "ENVIRONMENT_KIND_HOST"
+                },
+                "startedAt": "T",
+                "state": "JOB_STATE_RUNNING",
+                "submittedAt": "T",
+                "submitters": [
+                  {
+                    "agent": "lead",
+                    "at": "T",
+                    "runId": "run-a"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "sequence": "2"
+      }
+    ],
+    [
+      {
+        "epoch": "E1",
+        "reset": {},
+        "sequence": "1"
+      },
+      {
+        "epoch": "E1",
+        "facts": {
+          "facts": [
+            {
+              "health": {
+                "live": {}
+              }
+            },
+            {
+              "head": {
+                "none": {
+                  "reason": "NO_CURRENT_RESULT_REASON_NO_HEAD"
+                }
+              }
+            },
+            {
+              "job": {
+                "environment": {
+                  "backend": "BACKEND_KIND_CPU",
+                  "facts": {
+                    "go": "1.25"
+                  },
+                  "kind": "ENVIRONMENT_KIND_HOST"
+                },
+                "id": "j1",
+                "key": "corpus-check",
+                "spec": {
+                  "check": {},
+                  "commit": "c0",
+                  "environment": "ENVIRONMENT_KIND_HOST"
+                },
+                "startedAt": "T",
+                "state": "JOB_STATE_RUNNING",
+                "submittedAt": "T",
+                "submitters": [
+                  {
+                    "agent": "lead",
+                    "at": "T",
+                    "runId": "run-a"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "sequence": "2"
+      },
+      {
+        "caughtUp": {},
+        "epoch": "E1",
+        "sequence": "3"
+      }
+    ],
+    [
+      {
+        "epoch": "E1",
+        "reset": {},
+        "sequence": "1"
+      },
+      {
+        "epoch": "E1",
+        "facts": {
+          "facts": [
+            {
+              "health": {
+                "live": {}
+              }
+            },
+            {
+              "head": {
+                "none": {
+                  "reason": "NO_CURRENT_RESULT_REASON_NO_HEAD"
+                }
+              }
+            },
+            {
+              "job": {
+                "environment": {
+                  "backend": "BACKEND_KIND_CPU",
+                  "facts": {
+                    "go": "1.25"
+                  },
+                  "kind": "ENVIRONMENT_KIND_HOST"
+                },
+                "id": "j1",
+                "key": "corpus-check",
+                "spec": {
+                  "check": {},
+                  "commit": "c0",
+                  "environment": "ENVIRONMENT_KIND_HOST"
+                },
+                "startedAt": "T",
+                "state": "JOB_STATE_RUNNING",
+                "submittedAt": "T",
+                "submitters": [
+                  {
+                    "agent": "lead",
+                    "at": "T",
+                    "runId": "run-a"
+                  }
+                ]
+              }
+            },
+            {
+              "trouble": {
+                "failure": {
+                  "kind": "FAILURE_KIND_UNAVAILABLE",
+                  "message": "the store has it running and there is no sign of a run here: if the place that ran it is gone for good, remove the store's owner record and the job is marked lost"
+                },
+                "jobId": "j1"
+              }
+            }
+          ]
+        },
+        "sequence": "2"
+      },
+      {
+        "caughtUp": {},
+        "epoch": "E1",
+        "sequence": "3"
+      }
+    ],
+    [
+      {
+        "epoch": "E1",
+        "reset": {},
+        "sequence": "1"
+      },
+      {
+        "epoch": "E1",
+        "facts": {
+          "facts": [
+            {
+              "health": {
+                "away": {
+                  "failure": {
+                    "kind": "FAILURE_KIND_CONFLICT",
+                    "message": "store owned elsewhere"
+                  },
+                  "reason": "AWAY_REASON_OWNED_ELSEWHERE"
+                }
+              }
+            }
+          ]
+        },
+        "sequence": "2"
+      },
+      {
+        "caughtUp": {},
+        "epoch": "E1",
+        "sequence": "3"
+      }
+    ],
+    [
+      {
+        "epoch": "E1",
+        "reset": {},
+        "sequence": "1"
+      },
+      {
+        "epoch": "E1",
+        "facts": {
+          "facts": [
+            {
+              "health": {
+                "live": {}
+              }
+            },
+            {
+              "head": {
+                "none": {
+                  "reason": "NO_CURRENT_RESULT_REASON_NO_HEAD"
+                }
+              }
+            },
+            {
+              "job": {
+                "environment": {
+                  "backend": "BACKEND_KIND_CPU",
+                  "facts": {
+                    "go": "1.25"
+                  },
+                  "kind": "ENVIRONMENT_KIND_HOST"
+                },
+                "id": "j1",
+                "key": "corpus-check",
+                "spec": {
+                  "check": {},
+                  "commit": "c0",
+                  "environment": "ENVIRONMENT_KIND_HOST"
+                },
+                "startedAt": "T",
+                "state": "JOB_STATE_RUNNING",
+                "submittedAt": "T",
+                "submitters": [
+                  {
+                    "agent": "lead",
+                    "at": "T",
+                    "runId": "run-a"
+                  }
+                ]
+              }
+            },
+            {
+              "trouble": {
+                "failure": {
+                  "kind": "FAILURE_KIND_UNAVAILABLE",
+                  "message": "the store has it running and there is no sign of a run here: if the place that ran it is gone for good, remove the store's owner record and the job is marked lost"
+                },
+                "jobId": "j1"
+              }
+            }
+          ]
+        },
+        "sequence": "2"
+      },
+      {
+        "caughtUp": {},
+        "epoch": "E1",
+        "sequence": "3"
+      }
+    ],
+    [
+      {
+        "epoch": "E1",
+        "reset": {},
+        "sequence": "1"
+      },
+      {
+        "epoch": "E1",
+        "facts": {
+          "facts": [
+            {
+              "health": {
+                "live": {}
+              }
+            },
+            {
+              "head": {
+                "none": {
+                  "reason": "NO_CURRENT_RESULT_REASON_NO_HEAD"
+                }
+              }
+            },
+            {
+              "job": {
+                "cancelReason": "cancelled by corpus",
+                "environment": {
+                  "backend": "BACKEND_KIND_CPU",
+                  "facts": {
+                    "go": "1.25"
+                  },
+                  "kind": "ENVIRONMENT_KIND_HOST"
+                },
+                "finishedAt": "T",
+                "id": "j1",
+                "key": "corpus-check",
+                "spec": {
+                  "check": {},
+                  "commit": "c0",
+                  "environment": "ENVIRONMENT_KIND_HOST"
+                },
+                "startedAt": "T",
+                "state": "JOB_STATE_CANCELLED",
+                "submittedAt": "T",
+                "submitters": [
+                  {
+                    "agent": "lead",
+                    "at": "T",
+                    "runId": "run-a"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "sequence": "2"
+      },
+      {
+        "caughtUp": {},
+        "epoch": "E1",
+        "sequence": "3"
+      }
+    ],
+    [
+      {
+        "epoch": "E1",
+        "reset": {},
+        "sequence": "1"
+      },
+      {
+        "epoch": "E1",
+        "facts": {
+          "facts": [
+            {
+              "health": {
+                "live": {}
+              }
+            },
+            {
+              "head": {
+                "none": {
+                  "reason": "NO_CURRENT_RESULT_REASON_NO_HEAD"
+                }
+              }
+            },
+            {
+              "job": {
+                "cancelReason": "cancelled by corpus",
+                "environment": {
+                  "backend": "BACKEND_KIND_CPU",
+                  "facts": {
+                    "go": "1.25"
+                  },
+                  "kind": "ENVIRONMENT_KIND_HOST"
+                },
+                "finishedAt": "T",
+                "id": "j1",
+                "key": "corpus-check",
+                "spec": {
+                  "check": {},
+                  "commit": "c0",
+                  "environment": "ENVIRONMENT_KIND_HOST"
+                },
+                "startedAt": "T",
+                "state": "JOB_STATE_CANCELLED",
+                "submittedAt": "T",
+                "submitters": [
+                  {
+                    "agent": "lead",
+                    "at": "T",
+                    "runId": "run-a"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "sequence": "2"
+      },
+      {
+        "caughtUp": {},
+        "epoch": "E1",
+        "sequence": "3"
+      }
+    ],
+    [
+      {
+        "epoch": "E1",
+        "reset": {},
+        "sequence": "1"
+      },
+      {
+        "epoch": "E1",
+        "facts": {
+          "facts": [
+            {
+              "health": {
+                "live": {}
+              }
+            },
+            {
+              "head": {
+                "none": {
+                  "reason": "NO_CURRENT_RESULT_REASON_NO_HEAD"
+                }
+              }
+            }
+          ]
+        },
+        "sequence": "2"
+      },
+      {
+        "caughtUp": {},
+        "epoch": "E1",
+        "sequence": "3"
+      }
+    ]
+  ]
+}

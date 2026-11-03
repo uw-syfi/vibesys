@@ -62,6 +62,8 @@ func TestLayerRules(t *testing.T) {
 		{"the command line cannot import the daemon", map[string]string{"cli/cmd/vibesys-cli/a.go": goFile(module + "internal/daemon")}, true},
 		{"the client cannot import the domain", map[string]string{"cli/internal/client/a.go": goFile(module + "internal/core")}, true},
 		{"the client cannot import the daemon", map[string]string{"cli/internal/client/a.go": goFile(module + "internal/daemon")}, true},
+		{"a daemon test composes a store interface", map[string]string{"cli/internal/daemon/a_test.go": goFile(module + "internal/store")}, false},
+		{"daemon product code cannot import stores", map[string]string{"cli/internal/daemon/a.go": goFile(module + "internal/store")}, true},
 		{"the daemon cannot import the client", map[string]string{"cli/internal/daemon/a.go": goFile(module + "internal/client")}, true},
 		{"the daemon imports the job flows", map[string]string{"cli/internal/daemon/a.go": goFile(module+"internal/app", module+"internal/wire")}, false},
 		{"the job flows cannot import the daemon", map[string]string{"cli/internal/app/a.go": goFile(module + "internal/daemon")}, true},

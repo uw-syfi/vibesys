@@ -928,3 +928,10 @@ func TestForgettingARepositoryThatIsGone(t *testing.T) {
 		}
 	}
 }
+
+func (s outageStore) Snapshot(ctx context.Context) (store.TaskSnapshot, error) {
+	if err := s.o.reach(ctx, s.repo); err != nil {
+		return store.TaskSnapshot{}, err
+	}
+	return s.Store.Snapshot(ctx)
+}

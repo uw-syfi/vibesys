@@ -1,14 +1,18 @@
 package wire
 
 import (
+	"buf.build/go/protovalidate"
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 )
 
 // JudgedCommits is how many commits a WatchTask judges for what the request asked. It is checked
-// here because the contract has no protovalidate: 0 means the default, and more than the most a
+// at the wire boundary by protovalidate: 0 means the default, and more than the most a
 // watch may judge is INVALID_INPUT.
 func JudgedCommits(r *cliv1.WatchTaskRequest) (int, error) {
+	if err := protovalidate.Validate(r); err != nil {
+		return 0, &core.Failure{Kind: core.FailureInvalidInput, Message: err.Error()}
+	}
 	return core.ResolveJudgedCommits(r.GetJudgedCommits())
 }
 

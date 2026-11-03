@@ -36,7 +36,8 @@ type Engine struct {
 	rules   store.Rules
 	ledger  *Ledger
 	// stale is set when a Commit failed, so the Ledger may differ from the durable state.
-	stale bool
+	stale    bool
+	revision uint64
 }
 
 var _ store.Store = (*Engine)(nil)
@@ -63,6 +64,7 @@ func (e *Engine) recover() error {
 		return err
 	}
 	e.ledger, e.stale = ledger, false
+	e.revision++
 	return nil
 }
 
@@ -120,6 +122,7 @@ func write[T any](e *Engine, ctx context.Context, decide func(*Ledger) (Change, 
 		return none, failure(err)
 	}
 	e.ledger.Apply(change)
+	e.revision++
 	return answer, nil
 }
 
@@ -228,5 +231,13 @@ func (e *Engine) ReadLog(ctx context.Context, id core.JobID, offset uint64, max 
 			return core.LogChunk{}, failure(err)
 		}
 		return core.LogChunk{Data: append([]byte(nil), data...), Next: to}, nil
+	})
+}
+
+// Snapshot reads every task fact under the same request lock, after recovery.
+func (e *Engine) Snapshot(ctx context.Context) (store.TaskSnapshot, error) {
+	return read(e, ctx, func(l *Ledger) (store.TaskSnapshot, error) {
+		return store.TaskSnapshot{Revision: e.revision, Jobs: l.Jobs(core.JobFilter{}),
+			Results: l.Results(core.ResultFilter{}), Promotions: l.Promotions(), Plans: l.Plans(core.PlanFilter{})}, nil
 	})
 }

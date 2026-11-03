@@ -29,6 +29,9 @@ var updateConformance = flag.Bool("update-conformance", false, "write the messag
 const conformanceDir = "../../../proto/vibesys/cli/v1/conformance/task_watch"
 
 type scenario struct {
+	DuringReset   []scenarioOp       `json:"during_reset,omitempty"`
+	AfterMessages int                `json:"after_messages,omitempty"`
+	Lifecycle     bool               `json:"lifecycle,omitempty"`
 	Description   string             `json:"description"`
 	JudgedCommits uint32             `json:"judged_commits"`
 	Setup         []scenarioOp       `json:"setup"`
@@ -38,13 +41,16 @@ type scenario struct {
 }
 
 type scenarioOp struct {
-	Op      string `json:"op"`
-	Commit  string `json:"commit,omitempty"`
-	Samples string `json:"samples,omitempty"`
-	Title   string `json:"title,omitempty"`
-	Body    string `json:"body,omitempty"`
-	Number  uint32 `json:"number,omitempty"`
-	Text    string `json:"text,omitempty"`
+	Op      scenarioOperation `json:"op"`
+	Job     string            `json:"job,omitempty"`
+	Run     string            `json:"run,omitempty"`
+	Agent   string            `json:"agent,omitempty"`
+	Commit  string            `json:"commit,omitempty"`
+	Samples string            `json:"samples,omitempty"`
+	Title   string            `json:"title,omitempty"`
+	Body    string            `json:"body,omitempty"`
+	Number  uint32            `json:"number,omitempty"`
+	Text    string            `json:"text,omitempty"`
 }
 
 var sampleSets = map[string][]float64{"level": level, "win": win, "lose": lose}
@@ -176,7 +182,12 @@ func TestTaskWatchConformance(t *testing.T) {
 			if err := dec.Decode(&sc); err != nil {
 				t.Fatalf("%s: %v", file, err)
 			}
-			got := runScenario(t, sc)
+			var got [][]map[string]any
+			if sc.Lifecycle {
+				got = runLifecycleScenario(t, sc)
+			} else {
+				got = runScenario(t, sc)
+			}
 			ran++
 			if *updateConformance {
 				sc.Expect = got

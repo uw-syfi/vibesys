@@ -39,7 +39,17 @@ import (
 //     is ever reused.
 //
 // Values come back as copies: changing one never changes the store.
+// TaskSnapshot is a single store revision. Its values are independent copies.
+type TaskSnapshot struct {
+	Revision   uint64
+	Jobs       []core.Job
+	Results    []core.Result
+	Promotions []core.Promotion
+	Plans      []core.Plan
+}
+
 type Store interface {
+	Snapshot(context.Context) (TaskSnapshot, error)
 	JobStore
 	ResultStore
 	PlanStore

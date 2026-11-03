@@ -37,3 +37,22 @@ Commits are `c0`, `c1`, ... in the scenario; `samples` name a set: `level` (abou
 
 A scenario changes the task one commit at a time and waits for the stream between ops, so the
 messages are the same on every run.
+
+
+Lifecycle scenarios set `lifecycle: true` and use `submit` (commit, run, agent),
+`start`, `finish` and `cancel` (job), `owner_loss`, `owner_return`,
+`crash_reopen` and `forget`. `create_plans` (number, title) seeds resets
+larger than one fact batch. Each lifecycle operation is followed by a fresh
+stream; the ordinary scenarios pin live deltas. Reopen starts a new App over
+the same store and runs real recovery. The interrupted-job scenario pins
+trouble creation and removal, and the ownership scenario retains attribution
+and final results across replacement.
+
+Every consumer must replay every JSON file, reject unknown fields and
+operations, and compare every message. The orchestrator Fake's consumer joins
+with PR 6; it must implement lifecycle scenarios before that PR lands.
+
+A lifecycle scenario may specify `during_reset` operations and `after_messages`.
+The server's Send is gated at that exact message boundary while those writes
+land. This models a slow reader without time or scheduler assumptions. The
+pending reset remains the captured revision; reconnect observes the new one.

@@ -324,7 +324,9 @@ connect, and a mismatch is a refusal that says which side is older and what to r
 `daemon ensure` is that same start protocol as a command: it holds `start.lock`, so any number of
 `ensure` commands and other commands that run at once start one daemon between them. A new client
 replaces a daemon older than protocol 3 (`MinDaemonProtocolVersion`), because only a daemon of
-protocol 3 can serve `WatchTask`.
+protocol 3 can serve `WatchTask`. The entire ensure operation has a two-minute limit,
+including the start-lock wait, handshakes, stop, child readiness and final status. Expiry
+releases startup ownership and returns a typed unavailable failure with exit 4.
 
 ### Watching a task
 
@@ -332,7 +334,8 @@ protocol 3 can serve `WatchTask`.
 the head of the result branch, plans, promotions, jobs and their results, a judgment of each of the
 newest measured commits (`judged_commits`, 0 for 20, at most 100), jobs that are held up and why,
 and whether the task's store is readable. The state is a set of keyed facts. On every wake the
-daemon reads the store again and sends the facts that differ from what the stream last sent, so a
+daemon captures the store under one request lock, checks its revision and lifecycle view after
+deriving branch and trouble facts, and sends the facts that differ from what the stream last sent, so a
 wake missed or merged with another loses nothing. Wakes are store commits (including failed ones),
 fast-forwards of the result branch, new jobs, changes in what holds a job up, and the slow period.
 

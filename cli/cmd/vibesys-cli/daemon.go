@@ -92,18 +92,19 @@ func daemonEnsure(ctx context.Context, d deps, args []string) int {
 	if _, err := parse(fs, args); err != nil {
 		return parseFailed(d, fs, err)
 	}
-	cl, err := connect(ctx, d)
+	opts, err := d.options()
+	if err != nil {
+		fail(d, c.json, err)
+		return exitNoAnswer
+	}
+	st, err := client.Ensure(ctx, opts)
 	if err == nil {
-		defer cl.Close()
-		var st *cliv1.StatusResponse
-		if st, err = cl.Status(ctx); err == nil {
-			if c.json {
-				printJSON(d, st)
-			} else {
-				fmt.Fprintf(d.stdout, "ready\tpid %d\tversion %s\n", st.GetPid(), st.GetVersions().GetBinaryVersion())
-			}
-			return exitOK
+		if c.json {
+			printJSON(d, st)
+		} else {
+			fmt.Fprintf(d.stdout, "ready\tpid %d\tversion %s\n", st.GetPid(), st.GetVersions().GetBinaryVersion())
 		}
+		return exitOK
 	}
 	fail(d, c.json, err)
 	return exitNoAnswer

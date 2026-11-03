@@ -357,3 +357,7 @@ func (a *App) endRun(ctx context.Context, run supervisor.Run) error {
 
 // errMayLive says nothing proves a supervisor gone.
 var errMayLive = errors.New("what is left of its supervisor may still live")
+
+func (s boundedStore) Snapshot(ctx context.Context) (store.TaskSnapshot, error) {
+	return call(s, ctx, func(st store.Store, ctx context.Context) (store.TaskSnapshot, error) { return st.Snapshot(ctx) })
+}

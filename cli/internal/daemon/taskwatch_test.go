@@ -26,17 +26,19 @@ import (
 // boot is one daemon boot over stores that outlive it, reached through an in-memory connection.
 type boot struct {
 	client cliv1.DaemonServiceClient
+	app    *app.App
 	stop   func()
 }
 
 // serveOver starts a daemon of the given epoch over stores. Stopping it ends its streams, as the
 // death of the process would, and leaves the stores for the next boot.
-func serveOver(t *testing.T, stores *memstores.Stores, epoch string) *boot {
+func serveOver(t *testing.T, stores app.Stores, epoch string) *boot {
 	t.Helper()
 	gates := fakeenv.NewMemoryGates()
 	env := fakeenv.New(core.EnvironmentHost, gates)
 	survivors := supervisor.NewSurvivors()
 	a := app.New(app.Config{
+		Timers:       clock.Immediate{},
 		Clock:        clock.NewManual(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), time.Millisecond),
 		Stores:       stores,
 		Environments: fakeenv.Environments{core.EnvironmentHost: env},
@@ -71,7 +73,7 @@ func serveOver(t *testing.T, stores *memstores.Stores, epoch string) *boot {
 		survivors.Close()
 	}
 	t.Cleanup(stop)
-	return &boot{client: cliv1.NewDaemonServiceClient(conn), stop: stop}
+	return &boot{client: cliv1.NewDaemonServiceClient(conn), stop: stop, app: a}
 }
 
 // recvReset reads the messages up to CaughtUp and returns them.

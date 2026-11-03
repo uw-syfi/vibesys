@@ -63,10 +63,9 @@ func (a *App) TaskView(ctx context.Context, scope core.Scope, judged int) (core.
 	return core.TaskView{}, false
 }
 
-// lookAtTask reads a task's store, jobs first and results after. A job that is final in the jobs
-// has its result in the results, because results are only added, so no job is shown final without
-// its result. A result of a job the jobs do not show final was saved between the two reads, and
-// then the look is not settled.
+// lookAtTask captures all stored facts under one store lock. It serializes branch
+// reads with promotion commands and rejects a fold if the store revision or the
+// immutable lifecycle view changes while deriving branch and trouble facts.
 func (a *App) lookAtTask(ctx context.Context, scope core.Scope, judged int) (core.TaskView, bool) {
 	t, err := a.openTask(ctx, scope)
 	if errors.Is(err, store.ErrNoStore) {
@@ -79,24 +78,13 @@ func (a *App) lookAtTask(ctx context.Context, scope core.Scope, judged int) (cor
 		}
 		return awayView(err), true
 	}
-	var (
-		jobs       []core.Job
-		results    []core.Result
-		promotions []core.Promotion
-		plans      []core.Plan
-	)
+	a.branchMu.Lock()
+	defer a.branchMu.Unlock()
+	lifecycleView := a.view.Load()
+	var snapshot store.TaskSnapshot
 	err = a.retry(ctx, func(ctx context.Context) error {
 		var err error
-		if jobs, err = t.store.Jobs(ctx, core.JobFilter{}); err != nil {
-			return err
-		}
-		if results, err = t.store.Results(ctx, core.ResultFilter{}); err != nil {
-			return err
-		}
-		if promotions, err = t.store.Promotions(ctx); err != nil {
-			return err
-		}
-		plans, err = t.store.Plans(ctx, core.PlanFilter{})
+		snapshot, err = t.store.Snapshot(ctx)
 		return err
 	})
 	if err != nil {
@@ -105,9 +93,7 @@ func (a *App) lookAtTask(ctx context.Context, scope core.Scope, judged int) (cor
 		}
 		return awayView(err), true
 	}
-	if !agree(jobs, results) {
-		return core.TaskView{}, false
-	}
+	jobs, results, promotions, plans := snapshot.Jobs, snapshot.Results, snapshot.Promotions, snapshot.Plans
 	c := &core.TaskContent{Plans: plans, Jobs: jobs, Results: results}
 	for i, p := range promotions {
 		c.Promotions = append(c.Promotions, core.PromotionRecord{Seq: uint64(i + 1), Promotion: p})
@@ -125,31 +111,18 @@ func (a *App) lookAtTask(ctx context.Context, scope core.Scope, judged int) (cor
 			c.Troubles = append(c.Troubles, core.JobTrouble{Job: j.ID, Failure: f})
 		}
 	}
+	after, err := t.store.Snapshot(ctx)
+	if err != nil {
+		return awayView(err), true
+	}
+	if after.Revision != snapshot.Revision || a.view.Load() != lifecycleView {
+		return core.TaskView{}, false
+	}
+	// Find rechecks ownership, including a store lost during the fold.
+	if _, err := a.cfg.Stores.Find(ctx, scope); err != nil {
+		return awayView(err), true
+	}
 	return core.TaskView{Content: c}, true
-}
-
-// agree says the results are the results of the jobs: every final job that has a result has it
-// among them, and every result is of a job that is final in the jobs.
-func agree(jobs []core.Job, results []core.Result) bool {
-	final := map[core.JobID]bool{}
-	for _, j := range jobs {
-		if j.State.Final() {
-			final[j.ID] = true
-		}
-	}
-	have := map[core.JobID]bool{}
-	for _, r := range results {
-		if !final[r.Job] {
-			return false
-		}
-		have[r.Job] = true
-	}
-	for _, j := range jobs {
-		if j.State.Final() && j.ResultJob != "" && !have[j.ResultJob] {
-			return false
-		}
-	}
-	return true
 }
 
 // headOf is the head of the task's result branch with its final number, as `result` reports it, and
@@ -158,9 +131,7 @@ func (a *App) headOf(ctx context.Context, t taskStore, promotions []core.Promoti
 	if len(promotions) == 0 {
 		return core.CurrentResultAt("", nil, nil), false
 	}
-	a.branchMu.Lock()
 	head, err := a.settledHead(ctx, t)
-	a.branchMu.Unlock()
 	if err != nil {
 		var f *core.Failure
 		if !errors.As(err, &f) || (f.Kind != core.FailureNotFound && f.Kind != core.FailureUnavailable) {
