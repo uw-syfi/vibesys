@@ -1,6 +1,6 @@
 """`[agent.roles.<id>]` model overrides address `evolve`'s roles by their declared role ids.
 
-Design question Q6 of `docs/design/strategies-on-core.md`. `evolve` declares `evolve-mutator`,
+`evolve` declares `evolve-mutator`,
 `evolve-judge` and `evolve-profiler`; the legacy ids of the loop it replaces (`implementer`,
 `judge`, `profiler`) are not declared and are refused naming the key.
 """

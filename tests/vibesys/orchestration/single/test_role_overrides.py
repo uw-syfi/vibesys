@@ -1,6 +1,6 @@
 """`[agent.roles.<id>]` model overrides address `single`'s roles by their declared role ids.
 
-Design question Q6 of `docs/design/strategies-on-core.md`. A role override in `agent.toml` is
+A role override in `agent.toml` is
 keyed by a role id the selected plugin declares, and any other key is refused before the run
 opens. `single` declares `single-orchestrator` and `single-implementer`, so those are the keys;
 the legacy ids of the loop it replaces (`orchestrator`, `implementer`) are not declared and are

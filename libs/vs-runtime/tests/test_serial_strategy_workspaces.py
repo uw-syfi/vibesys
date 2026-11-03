@@ -12,7 +12,7 @@ ends, so the next attempt is granted it, and (2) hand the next attempt a root th
 base revision, not the previous attempt's edits.
 
 Both properties hold: discarding a root attempt ends its hold, and granting the root restores
-the plan's base. See `docs/design/strategies-on-core.md`, section 11, assumption A2.
+the plan's base.
 """
 
 from __future__ import annotations

@@ -54,6 +54,8 @@ const config: Config = {
       '@docusaurus/plugin-client-redirects',
       {
         redirects: [
+          ...['contributing/kernel3-contract-decisions', 'design/strategies-on-core', 'design/launch', 'design/iteration-navigation', 'design/core-agent-evaluation-bridge'].map(id => ({from: `/docs/${id}`, to: '/docs/contributing/architecture'})),
+          ...[
           'development',
           'coding-best-practices',
           'extending-profilers',
@@ -62,6 +64,7 @@ const config: Config = {
           'issue-authoring',
           'publishing',
         ].map(id => ({from: `/docs/${id}`, to: `/docs/contributing/${id}`})),
+        ],
       },
     ],
   ],
