@@ -139,9 +139,6 @@ func (a *App) settle(m message) {
 	}
 }
 
-// tell posts an event that needs nothing else kept.
-func (a *App) tell(e lifecycle.Event) bool { return a.post(message{event: e}) }
-
 // loop is the only place the machine steps.
 func (a *App) loop() {
 	state := lifecycle.Recovering()
