@@ -16,11 +16,20 @@ The only provider names here are the `Harness` to provider table in `driver.py`.
 |---|---|
 | `normalize.py` | Pure fold from agentshim events to sidecar events. Same events, same output. |
 | `store.py` | `Store` protocol, `MemoryStore`, `FileStore` (`events.log`, `raw.log`, `effects.log`). Offsets, effect ids, torn-tail repair. |
-| `driver.py` | `Driver` protocol and `AgentshimDriver`; builds the agentshim session (subagents off, text streaming, MCP identity env). |
+| `driver.py` | `Driver` protocol and `AgentshimDriver`; builds the agentshim session (subagents off, text streaming, MCP identity env, the launch's plugin). |
 | `engine.py` | Carries out commands, drops repeated effect ids, numbers events, reports a lost session on restart. No threads, no sockets. |
 | `prompts.py`, `prompts/` | The words sent to the agent for a `Message`, rendered from templates. |
 | `server.py`, `main.py` | The thin shell: gRPC over a Unix socket, a worker thread, process start. |
 | `gen/` | Generated bindings. `./generate.sh` rewrites them. |
+
+## The plugin
+
+`launch.plugin` names the marketplace checkout, the plugin and the plugin home. `build_session`
+hands them to agentshim as `SessionPlugins`, so both harnesses load that plugin and the project's own
+configuration and nothing of the operator's plugins, skills, settings or memory. The launch has no
+default: a missing plugin, a relative path, a marketplace without a manifest, or a name the manifest
+does not hold is refused before an agent starts, naming the field. The home belongs to the agent and
+is reused by each of its sessions, because the provider keeps the conversation there too.
 
 ## Running one
 
