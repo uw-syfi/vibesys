@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	cli "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/cli/v1"
+	cli "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/clidaemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/clidaemon/clidaemontest"
