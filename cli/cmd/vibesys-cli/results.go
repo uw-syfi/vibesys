@@ -58,8 +58,15 @@ func showCommand(ctx context.Context, d deps, args []string) int {
 		if len(resp.GetResults()) == 0 {
 			fmt.Fprintf(d.stdout, "no results for %s\n", shortCommit(string(commit)))
 		}
+		// A commit's measurements are printed pooled, one line per kind, as compare counts them:
+		// a measure job that topped up an earlier one is part of the same measurement.
 		for _, r := range resp.GetResults() {
-			fmt.Fprintln(d.stdout, describeResult(r))
+			if r.GetCheck() != nil {
+				fmt.Fprintln(d.stdout, describeResult(r))
+			}
+		}
+		for _, m := range resp.GetMeasurements() {
+			fmt.Fprintln(d.stdout, describeMeasurement(m))
 		}
 		return exitOK
 	})
@@ -311,6 +318,15 @@ func environmentName(e *cliv1.EnvironmentFingerprint) string {
 		name += " " + digest
 	}
 	return name
+}
+
+// describeMeasurement is a commit's pooled measurement in a line, with its numbers rounded: the
+// jobs it pools, then what describeResult says of a measurement.
+func describeMeasurement(m *cliv1.Measurement) string {
+	return describeResult(&cliv1.Result{
+		JobId: strings.Join(m.GetJobIds(), ","), Commit: m.GetCommit(), Environment: m.GetEnvironment(),
+		Outcome: &cliv1.Result_Measure{Measure: m.GetMeasure()},
+	})
 }
 
 // describeResult is one saved result in a line, with its numbers rounded.

@@ -20,7 +20,7 @@ func (s *Server) Show(ctx context.Context, req *cliv1.ShowRequest) (*cliv1.ShowR
 	if err != nil {
 		return nil, wire.Error(err)
 	}
-	return &cliv1.ShowResponse{Results: wire.Results(results)}, nil
+	return &cliv1.ShowResponse{Results: wire.Results(results), Measurements: wire.Measurements(core.PoolMeasurements(results))}, nil
 }
 
 // Compare implements cliv1.DaemonServiceServer.

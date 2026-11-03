@@ -357,6 +357,30 @@ func TestShowListsTheResultsOfACommit(t *testing.T) {
 	}
 }
 
+// Two measure jobs of one commit, a measure and its top-up, are one measurement: show prints one
+// line with every sample, as compare counts them, and its JSON carries it pooled beside the
+// results of each job.
+func TestShowPoolsACommitsMeasureJobs(t *testing.T) {
+	c := newResultsCLI(t)
+	first := c.measured(1, []float64{100, 102})
+	c.clk.Advance(time.Minute)
+	topUp := c.measured(1, []float64{104})
+
+	r := c.run(withTask("show", "c1")...)
+	mustExit(t, r, exitOK, "show c1")
+	lines := strings.Split(strings.TrimSuffix(r.stdout, "\n"), "\n")
+	want := string(first.Job) + "," + string(topUp.Job) + "\tmeasure\tops (maximize)\tmean 102 over 3 samples\tcheck " + string(topUp.Job)
+	if len(lines) != 1 || !strings.HasPrefix(lines[0], want) {
+		t.Fatalf("show = %q, want one line starting %q", r.stdout, want)
+	}
+	var resp cliv1.ShowResponse
+	j := c.run(withTask("show", "c1", "--json")...)
+	if err := protojson.Unmarshal([]byte(j.stdout), &resp); err != nil || len(resp.GetResults()) != 2 || len(resp.GetMeasurements()) != 1 ||
+		len(resp.GetMeasurements()[0].GetMeasure().GetSamples()) != 3 || resp.GetMeasurements()[0].GetMeasure().GetValue() != 102 {
+		t.Fatalf("show --json = %+v (%v), want two results and one measurement of 3 samples, value 102", j, err)
+	}
+}
+
 func TestResultCommandsRefuseBadArgumentsBeforeTheDaemon(t *testing.T) {
 	c := newCLI(t)
 	cases := []struct {

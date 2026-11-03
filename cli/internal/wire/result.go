@@ -91,16 +91,36 @@ func Result(r core.Result) *cliv1.Result {
 	case core.CheckOutcome:
 		out.Outcome = &cliv1.Result_Check{Check: &cliv1.CheckResult{Duration: durationpb.New(o.Duration)}}
 	case core.MeasureOutcome:
-		m := &cliv1.MeasureResult{
-			Metric:  &cliv1.Metric{Name: o.Metric.Name, Direction: direction(o.Metric.Direction)},
-			Samples: slices.Clone(o.Samples), CheckJobId: string(o.CheckJob),
-			Value: core.Headline(o.Samples),
+		out.Outcome = &cliv1.Result_Measure{Measure: measureResult(o)}
+	}
+	return out
+}
+
+func measureResult(o core.MeasureOutcome) *cliv1.MeasureResult {
+	m := &cliv1.MeasureResult{
+		Metric:  &cliv1.Metric{Name: o.Metric.Name, Direction: direction(o.Metric.Direction)},
+		Samples: slices.Clone(o.Samples), CheckJobId: string(o.CheckJob),
+		Value: core.Headline(o.Samples),
+	}
+	for _, ob := range o.Observations {
+		m.Observations = append(m.Observations, &cliv1.Observation{Name: ob.Name, Values: slices.Clone(ob.Values)})
+	}
+	m.Objectives = Objectives(o.Objectives)
+	return m
+}
+
+// Measurements returns the contract's messages for pooled measurements.
+func Measurements(ms []core.Measurement) []*cliv1.Measurement {
+	out := make([]*cliv1.Measurement, len(ms))
+	for i, m := range ms {
+		jobs := make([]string, len(m.Jobs))
+		for j, job := range m.Jobs {
+			jobs[j] = string(job)
 		}
-		for _, ob := range o.Observations {
-			m.Observations = append(m.Observations, &cliv1.Observation{Name: ob.Name, Values: slices.Clone(ob.Values)})
+		out[i] = &cliv1.Measurement{
+			Commit: string(m.Commit), TaskVersion: m.TaskVersion, Environment: Fingerprint(m.Environment),
+			JobIds: jobs, Measure: measureResult(m.Outcome),
 		}
-		m.Objectives = Objectives(o.Objectives)
-		out.Outcome = &cliv1.Result_Measure{Measure: m}
 	}
 	return out
 }
