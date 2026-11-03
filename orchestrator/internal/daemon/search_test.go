@@ -2,6 +2,10 @@ package daemon_test
 
 import (
 	"context"
+	"math/rand"
+	"testing"
+	"testing/quick"
+
 	cli "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
@@ -9,9 +13,6 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/internal/hub"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
-	"math/rand"
-	"testing"
-	"testing/quick"
 )
 
 func TestSearchWatchConvergesAcrossLagAndReconnect(t *testing.T) {

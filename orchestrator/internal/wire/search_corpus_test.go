@@ -1,14 +1,15 @@
 package wire_test
 
 import (
+	"os"
+	"path/filepath"
+	"testing"
+
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
-	"os"
-	"path/filepath"
-	"testing"
 )
 
 func TestSearchConformanceCorpus(t *testing.T) {

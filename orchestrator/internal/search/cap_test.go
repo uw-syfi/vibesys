@@ -2,12 +2,13 @@ package search_test
 
 import (
 	"fmt"
-	cli "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
-	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
-	"google.golang.org/protobuf/types/known/timestamppb"
 	"math/rand"
 	"testing"
 	"testing/quick"
+
+	cli "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func TestCapKeepsNewestAndTheirFacts(t *testing.T) {

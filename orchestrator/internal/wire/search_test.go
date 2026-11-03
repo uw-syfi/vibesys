@@ -1,11 +1,12 @@
 package wire_test
 
 import (
+	"testing"
+
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
-	"testing"
 )
 
 func TestSearchStateValidation(t *testing.T) {

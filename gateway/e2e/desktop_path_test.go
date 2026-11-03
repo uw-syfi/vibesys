@@ -298,9 +298,16 @@ func TestTheDesktopPathRunsAnOptimizationEndToEnd(t *testing.T) {
 		}
 	}
 
-	// The lead was woken once for each handoff, and no more.
-	if prompts, _ := filepath.Glob(filepath.Join(leadDir, "prompts", "*.md")); len(prompts) != 4 {
-		t.Errorf("the lead was sent %d messages (a brief and three handoffs expected): %v", len(prompts), prompts)
+	// Job-finished notifications also wake the lead. Count the semantic handoffs
+	// in the mailbox instead of prompt files, whose count includes those notices.
+	handoffs := 0
+	for _, message := range w.messages {
+		if message.To == lead.ID && message.Handoff != nil {
+			handoffs++
+		}
+	}
+	if handoffs != 3 {
+		t.Errorf("the lead received %d handoffs, want three", handoffs)
 	}
 
 	// Each worker's commit was measured by vibesys-cli and the number is the worker's score; the
