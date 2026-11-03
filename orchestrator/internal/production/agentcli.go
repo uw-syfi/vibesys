@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 )
 
 // EnvCLI names the setting that chooses the vibesys-cli every agent of this daemon runs: the
@@ -69,19 +71,20 @@ func ResolveCLI(getenv func(string) string, executable string, files Files) (str
 	return "", fmt.Errorf("no vibesys-cli found beside the daemon or on its PATH; set %s to the absolute path of the one to use", EnvCLI)
 }
 
-// sessionEnv is the environment of a sidecar process: the daemon's own, with the CLI the daemon
-// chose under EnvCLI and nothing else of the launch environment. A value inherited under that name
-// is dropped first, so an agent never runs a build the daemon did not choose; when the daemon chose
-// none, the name is unset.
-func sessionEnv(base []string, launch map[string]string, name string) []string {
-	out := make([]string, 0, len(base)+1)
-	for _, kv := range base {
-		if !strings.HasPrefix(kv, name+"=") {
-			out = append(out, kv)
+// LocationFor is the CliLocation the daemon records on each run it starts: the vibesys-cli it
+// chose, and the places that build reads its daemon and store from, taken from the daemon's own
+// environment. The vibesys-cli resolves its own places from the same three names and treats one
+// that is not an absolute path as unset, so such a value is recorded as unset too: an agent then
+// resolves the place as the daemon would have.
+func LocationFor(getenv func(string) string, home, cli string) core.CliLocation {
+	absolute := func(path string) string {
+		if filepath.IsAbs(path) {
+			return filepath.Clean(path)
 		}
+		return ""
 	}
-	if v := launch[name]; v != "" {
-		out = append(out, name+"="+v)
+	return core.CliLocation{
+		CLI: absolute(cli), RuntimeDir: absolute(getenv("XDG_RUNTIME_DIR")),
+		StateHome: absolute(getenv("XDG_STATE_HOME")), Home: absolute(home),
 	}
-	return out
 }

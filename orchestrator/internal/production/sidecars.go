@@ -147,7 +147,7 @@ func (s *ProcessSidecars) Launch(ctx context.Context, l core.LaunchSession, env 
 		_ = os.Remove(filepath.Join(dir, name))
 	}
 	var out bytes.Buffer
-	cmd := s.command(ctx, dir, env)
+	cmd := s.command(ctx, dir)
 	cmd.Stdout, cmd.Stderr = &out, &out
 	// The sidecar detaches itself (it forks twice), so this returns once it is on its own.
 	if err := cmd.Run(); err != nil {
@@ -178,16 +178,15 @@ func (s *ProcessSidecars) launchSpec(ctx context.Context, l core.LaunchSession) 
 	return launch, nil
 }
 
-// command is the process that starts a session's sidecar in dir. The agent's shell commands run in
-// the sidecar's environment, so this is where the daemon's choice of CLI reaches them, and the only
-// part of the launch environment that does.
-func (s *ProcessSidecars) command(ctx context.Context, dir string, env daemon.LaunchEnv) *exec.Cmd {
+// command is the process that starts a session's sidecar in dir. It inherits the daemon's
+// environment and nothing of the launch environment: what the agent's shell sees is built by the
+// sidecar from the launch message, not from this process.
+func (s *ProcessSidecars) command(ctx context.Context, dir string) *exec.Cmd {
 	argv := append(append([]string(nil), s.Command...),
 		"--launch", filepath.Join(dir, "launch.json"), "--state-dir", dir, "--socket", filepath.Join(dir, "sock"),
 		"--mcp-config", filepath.Join(dir, "mcp.json"), "--detach")
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	cmd.Env = sessionEnv(os.Environ(), env, daemon.EnvCLI)
 	return cmd
 }
 

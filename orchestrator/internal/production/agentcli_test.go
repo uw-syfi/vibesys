@@ -1,15 +1,13 @@
 package production
 
 import (
-	"context"
-	"log/slog"
 	"math/rand/v2"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
-	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 )
 
 // fakeFiles is a file system of executable paths.
@@ -96,65 +94,28 @@ func TestNoCLIAnywhereIsAnErrorNamingTheSettingAndNotAGuess(t *testing.T) {
 	}
 }
 
-// Whatever environment the daemon itself runs in, a sidecar's holds exactly the CLI the daemon
-// chose under the name, or no value at all when it chose none, and everything else is the daemon's.
-func TestASidecarsEnvironmentHoldsOnlyTheChosenCLI(t *testing.T) {
-	names := []string{"PATH=/usr/bin", "HOME=/h", "VIBESYS_CLI=/old/vibesys-cli", "VIBESYS_CLIX=1", "VIBESYS_CLI=/older", "TOKEN=VIBESYS_CLI=x"}
+// The location a run records is exactly the daemon's own absolute settings: a value the
+// vibesys-cli would treat as unset (empty or relative) is recorded as unset, and an absolute one
+// is kept as it is (cleaned), so an agent resolves each place as the daemon would.
+func TestTheLocationRecordsEachAbsoluteSettingAndNothingElse(t *testing.T) {
+	values := []string{"", "relative/dir", "/abs/dir", "/abs//dir/", "/"}
 	for seed := uint64(1); seed <= 200; seed++ {
-		rng := rand.New(rand.NewPCG(seed, 5))
-		var base []string
-		for _, kv := range names {
-			if rng.IntN(2) == 0 {
-				base = append(base, kv)
+		rng := rand.New(rand.NewPCG(seed, 9))
+		pick := func() string { return values[rng.IntN(len(values))] }
+		env := map[string]string{"XDG_RUNTIME_DIR": pick(), "XDG_STATE_HOME": pick(), "HOME": "/ignored", "PATH": "/bin"}
+		home, cli := pick(), pick()
+		got := LocationFor(func(k string) string { return env[k] }, home, cli)
+		want := func(v string) string {
+			if v == "" || v[0] != '/' {
+				return ""
 			}
+			return filepath.Clean(v)
 		}
-		launch := map[string]string{"VIBESYS_ORCHESTRATOR_TOKEN": "secret"}
-		chosen := ""
-		if rng.IntN(2) == 0 {
-			chosen = "/opt/vibesys-cli"
-			launch[daemon.EnvCLI] = chosen
+		wantLocation := core.CliLocation{
+			CLI: want(cli), RuntimeDir: want(env["XDG_RUNTIME_DIR"]), StateHome: want(env["XDG_STATE_HOME"]), Home: want(home),
 		}
-		got := sessionEnv(base, launch, daemon.EnvCLI)
-		var values, others []string
-		for _, kv := range got {
-			if v, ok := strings.CutPrefix(kv, daemon.EnvCLI+"="); ok {
-				values = append(values, v)
-			} else {
-				others = append(others, kv)
-			}
+		if got != wantLocation {
+			t.Fatalf("seed %d: env %v home %q cli %q gave %+v, want %+v", seed, env, home, cli, got, wantLocation)
 		}
-		var wantOthers []string
-		for _, kv := range base {
-			if !strings.HasPrefix(kv, daemon.EnvCLI+"=") {
-				wantOthers = append(wantOthers, kv)
-			}
-		}
-		if chosen == "" && len(values) != 0 || chosen != "" && !slices.Equal(values, []string{chosen}) {
-			t.Fatalf("seed %d: %v gave %v under the name, chosen %q", seed, base, values, chosen)
-		}
-		if !slices.Equal(others, wantOthers) {
-			t.Fatalf("seed %d: the rest of the environment changed: %v, want %v", seed, others, wantOthers)
-		}
-		for _, kv := range got {
-			if strings.Contains(kv, "secret") {
-				t.Fatalf("seed %d: the launch environment's token reached the sidecar's: %v", seed, got)
-			}
-		}
-	}
-}
-
-// The process that starts a sidecar carries that environment.
-func TestTheSidecarProcessCarriesTheChosenCLI(t *testing.T) {
-	t.Setenv(daemon.EnvCLI, "/inherited/vibesys-cli")
-	s := &ProcessSidecars{Root: t.TempDir(), Command: []string{"python", "-m", "vs_sidecar"}, Log: slog.New(slog.DiscardHandler)}
-	cmd := s.command(context.Background(), "/s/a/1", daemon.LaunchEnv{daemon.EnvCLI: "/opt/vibesys-cli"})
-	var got []string
-	for _, kv := range cmd.Env {
-		if v, ok := strings.CutPrefix(kv, daemon.EnvCLI+"="); ok {
-			got = append(got, v)
-		}
-	}
-	if !slices.Equal(got, []string{"/opt/vibesys-cli"}) {
-		t.Fatalf("the sidecar's environment holds %v under %s, want only the chosen build", got, daemon.EnvCLI)
 	}
 }

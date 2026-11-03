@@ -131,8 +131,9 @@ func EncodeEffect(e core.Effect) ([]byte, error) {
 	switch b := e.(type) {
 	case core.LaunchSession:
 		out.Body = &pb.Effect_LaunchSession{LaunchSession: &pb.LaunchSession{
-			Session: sessionRef(b.Session), RunId: string(b.Run), Repository: b.Repository, Role: roles.out(b.Role),
-			Harness: harnesses.out(b.Spec.Harness), Model: string(b.Spec.Model), ReasoningEffort: string(b.Spec.Effort),
+			Session: sessionRef(b.Session), RunId: string(b.Run), Repository: b.Repository, Task: b.Task, Role: roles.out(b.Role),
+			CliLocation: locationOut(b.Location),
+			Harness:     harnesses.out(b.Spec.Harness), Model: string(b.Spec.Model), ReasoningEffort: string(b.Spec.Effort),
 			ResumeConversationId: b.ConversationID, Worktree: b.Worktree,
 		}}
 	case core.StartTurn:
@@ -173,8 +174,9 @@ func DecodeEffect(data []byte) (core.Effect, error) {
 	case *pb.Effect_LaunchSession:
 		l := b.LaunchSession
 		e = core.LaunchSession{
-			Session: session(l.GetSession()), Run: core.RunID(l.GetRunId()), Repository: l.GetRepository(),
-			Role: roles.in(l.GetRole(), &errs),
+			Session: session(l.GetSession()), Run: core.RunID(l.GetRunId()), Repository: l.GetRepository(), Task: l.GetTask(),
+			Location: locationIn(l.GetCliLocation()),
+			Role:     roles.in(l.GetRole(), &errs),
 			Spec: core.AgentSpec{
 				Harness: harnesses.in(l.GetHarness(), &errs), Model: core.ModelName(l.GetModel()),
 				Effort: core.EffortName(l.GetReasoningEffort()),

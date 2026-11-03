@@ -75,10 +75,6 @@ const (
 	EnvToken   = "VIBESYS_ORCHESTRATOR_TOKEN"
 	EnvRun     = "VIBESYS_ORCHESTRATOR_RUN"
 	EnvRole    = "VIBESYS_ORCHESTRATOR_ROLE"
-	// EnvCLI is the absolute path of the vibesys-cli the daemon means the agent to run. The skills
-	// name the CLI through it, because the agent's shell may find another build on its PATH. It is
-	// absent when the daemon chose none.
-	EnvCLI = "VIBESYS_CLI"
 )
 
 // Sidecars starts and finds the sidecars. A sidecar serves the contract in sidecar.proto.

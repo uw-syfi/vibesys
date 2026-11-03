@@ -15,6 +15,19 @@ type Run struct {
 	CreatedAt  time.Time
 	StopReason RunStopReason
 	EndedAt    time.Time
+	// Location is where the run's agents find the vibesys-cli and its daemon and store. It is
+	// recorded when the run starts and every session of the run is launched with it.
+	Location CliLocation
+}
+
+// CliLocation names the vibesys-cli an agent runs and the places that build reads its daemon and
+// store from. Each is an absolute path, or empty for "not set", which the agent's environment
+// leaves unset.
+type CliLocation struct {
+	CLI        string
+	RuntimeDir string
+	StateHome  string
+	Home       string
 }
 
 // AgentSpec says what an agent runs on.

@@ -50,13 +50,20 @@ func main() {
 	os.Exit(run(os.Args[1:], realDeps(os.Stdout, os.Stderr)))
 }
 
-func realDeps(stdout, stderr io.Writer) deps {
+func realDeps(stdout, stderr io.Writer) deps { return depsFrom(stdout, stderr, os.Getenv) }
+
+// depsFrom makes the real dependencies over getenv, which is the one way the binary reads its
+// environment: the context flags' defaults, the places of its daemon and store, and the home
+// directory. The names it reads are listed, with who sets them, in the identity golden
+// (proto/vibesys/cli/v1/conformance/identity_env.golden.json), which a test holds this to.
+func depsFrom(stdout, stderr io.Writer, getenv func(string) string) deps {
 	cwd, _ := os.Getwd()
-	home, _ := os.UserHomeDir()
+	// The home directory is $HOME, as os.UserHomeDir finds it on Unix, read through getenv.
+	home := getenv("HOME")
 	exe, _ := os.Executable()
-	p := production.Process{Version: version, Executable: exe, Getenv: os.Getenv, UID: os.Getuid(), GID: os.Getgid(), Home: home}
+	p := production.Process{Version: version, Executable: exe, Getenv: getenv, UID: os.Getuid(), GID: os.Getgid(), Home: home}
 	return deps{
-		stdout: stdout, stderr: stderr, getenv: os.Getenv, cwd: cwd,
+		stdout: stdout, stderr: stderr, getenv: getenv, cwd: cwd,
 		git: gitrepo.System{}, options: p.ClientOptions, process: p, upgrade: productionUpgrade,
 		stdin: os.Stdin, readFile: os.ReadFile,
 	}

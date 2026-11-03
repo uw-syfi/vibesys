@@ -150,6 +150,7 @@ func (t *tx) startRun(c Command, b StartRun, r *Receipt) RunID {
 	run := Run{
 		ID: RunID(t.mint("run")), Repository: b.Repository, Task: b.Task, Status: RunStarting,
 		Lead: AgentID(t.mint("agent")), FanoutLimit: b.FanoutLimit, Deadline: b.Deadline, CreatedAt: t.in.At,
+		Location: t.in.Location,
 	}
 	r.Run, r.Agent = run.ID, run.Lead
 	t.emit(run.ID, run)
@@ -166,7 +167,8 @@ func (t *tx) launch(run Run, a Agent) {
 	a.Status, a.Stop, a.Session, a.StartedAt = AgentLaunching, StopNone, 1, t.in.At
 	t.emit(run.ID, a)
 	t.effect(LaunchSession{
-		Session: Session{a.ID, 1}, Run: run.ID, Repository: run.Repository, Role: a.Role, Spec: a.Spec,
+		Session: Session{a.ID, 1}, Run: run.ID, Repository: run.Repository, Task: run.Task, Role: a.Role, Spec: a.Spec,
+		Location: run.Location,
 	})
 }
 

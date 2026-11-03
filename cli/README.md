@@ -195,6 +195,24 @@ default to the environment variables shown:
 | `--harness` | `VIBESYS_HARNESS` | The agent harness, such as `claude-code`. |
 | `--agent` | `VIBESYS_AGENT` | The agent making the call. |
 
+### Environment
+
+These are all the environment names the CLI reads (through one `getenv`, which a test records).
+The orchestrator sets every one of them for the agents it launches, from the golden
+`proto/vibesys/cli/v1/conformance/identity_env.golden.json`, which the CLI's and the sidecar's tests
+both read; a name that is empty there is left unset in the agent's environment.
+
+| Name | Meaning |
+| --- | --- |
+| `VIBESYS_REPO`, `VIBESYS_TASK`, `VIBESYS_RUN`, `VIBESYS_HARNESS`, `VIBESYS_AGENT` | The defaults of the context flags above. |
+| `XDG_RUNTIME_DIR` | Where the runtime directory is (see "The daemon and the supervisors"). Ignored unless it is an absolute path. |
+| `XDG_STATE_HOME` | Where the task index is: `$XDG_STATE_HOME/vibesys`, else `~/.local/state/vibesys`. Ignored unless it is an absolute path. |
+| `HOME` | The home directory the index falls back to. |
+
+The orchestrator also sets `VIBESYS_CLI`, the absolute path of this binary for the skills to run
+(`"$VIBESYS_CLI"`), and `VIBESYS_SESSION`; the CLI itself reads neither. Installing and upgrading
+read their own settings (`VIBESYS_CLI_VERSION`, `VIBESYS_CLI_INSTALL_DIR`, `VIBESYS_CLI_RELEASES_URL`).
+
 | Command | What it does |
 | --- | --- |
 | `submit check <commit> [flags]` | Queue the task's check. A pass already saved for the commit answers it without running. Also `--wait`, `--note`, `--no-cache`, `--plan` and `--env`. |
