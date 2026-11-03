@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -124,5 +125,12 @@ func TestTheGatewayRootRefusesWhatItCannotPlaceWithoutGuessing(t *testing.T) {
 	}
 	if got, err := hosted.GatewayRoot("/f", getenv(nil), ""); err != nil || got != "/f" {
 		t.Errorf("a flag needs no home: got %q, %v", got, err)
+	}
+}
+
+// test-isolation: pin the private argv builder without starting a real ssh process.
+func TestSSHCommand(t *testing.T) {
+	if got := hosted.SSHCommand("h"); !slices.Equal(got, []string{"ssh", "h", "vibesysd", "connect"}) {
+		t.Fatalf("sshCommand = %v", got)
 	}
 }

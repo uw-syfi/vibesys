@@ -128,6 +128,16 @@ runtime journals and replays). It follows [flows.md](flows.md): the `ctx` vocabu
 workspaces, evaluation, groups), the rule for flow code, how core ends the run from the winner
 the flow chose, and how to test it.
 
+## Host composition
+
+The host process only composes typed services. It holds no product logic: it
+parses flags, opens a listener, and registers services that other packages own.
+The command is a thin entry point that hands control to a composition package.
+The composition package uses transport and lifecycle services, the schema hash,
+and the orchestrator host surface. Service packages own their behavior. The
+gateway archcheck enforces the command shape and composition boundary.
+Unenforced: product decisions through allowed imports still need human review.
+
 ## Talking to daemons
 
 A **daemon** here is a long-lived local process that owns some state and that

@@ -128,7 +128,11 @@ explicit handshakes. Timeouts only guard hangs; tests contain no sleeps.
 
 ## Package boundaries
 
-- `cmd/vibesysd` wires CLI options, process signals, and standard streams.
+See [Host composition](../docs/contributing/architecture.md#host-composition) for the boundary rule.
+
+- `cmd/vibesysd` exits with the result of `internal/hostmain.Main`.
+- `internal/hostmain` wires CLI options, process signals, standard streams and typed services.
+- `internal/archcheck` checks the command shape and host composition imports.
 - `internal/runlog` owns framing and filesystem following.
 - `internal/runindex` resolves published run symlinks.
 - `internal/server` implements the HostService reads (Hello, Tail, Skeleton, GetBlobs, TailStream,

@@ -20,6 +20,9 @@ import (
 // Dial opens a connection to a host process that serves the orchestrator's operator service.
 type Dial func(ctx context.Context) (net.Conn, error)
 
+// HostProgram is the executable name used by host commands and remote connections.
+const HostProgram = "vibesysd"
+
 // Usage lists the verbs Command runs, for the host binary's own usage text.
 const Usage = `  mcp
   [--host HOST] run start --repository DIR --task NAME --brief TEXT [--harness claude_code|codex] [--fanout N] [--model M] [--effort E] [--deadline RFC3339]
@@ -38,10 +41,10 @@ func IsCommand(verb string) bool {
 // It returns the process exit code.
 func Command(ctx context.Context, version string, args []string, local Dial, remote func(host string) Dial, stdin io.Reader, stdout, stderr io.Writer) int {
 	fail := func(err error) int {
-		fmt.Fprintf(stderr, "vibesysd: %v\n", err)
+		fmt.Fprintf(stderr, "%s: %v\n", HostProgram, err)
 		return 1
 	}
-	global := flag.NewFlagSet("vibesysd", flag.ContinueOnError)
+	global := flag.NewFlagSet(HostProgram, flag.ContinueOnError)
 	global.SetOutput(stderr)
 	host := global.String("host", "", "run the verb on this host through ssh; empty means this host")
 	if err := global.Parse(args); err != nil {
@@ -160,5 +163,10 @@ func dispatchVerb(ctx context.Context, h client.Headless, rest []string) error {
 
 // SSH reaches the vibesysd on host through `ssh HOST vibesysd connect`.
 func SSH(host string) Dial {
-	return Dial(production.CommandDialer("ssh", host, "vibesysd", "connect"))
+	argv := sshCommand(host)
+	return Dial(production.CommandDialer(argv...))
+}
+
+func sshCommand(host string) []string {
+	return []string{"ssh", host, HostProgram, "connect"}
 }
