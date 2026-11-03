@@ -141,7 +141,7 @@ func (t *tx) lost(b SidecarLost) {
 // going changes nothing here.
 func (t *tx) job(b JobUpdate) {
 	run, ok := t.s.runs[b.Run]
-	if _, told := t.s.jobs[b.Job]; told || !ok || !b.State.Final() {
+	if _, told := t.s.jobs[toldJob{run: b.Run, job: b.Job}]; told || !ok || !b.State.Final() {
 		return
 	}
 	t.post(Message{

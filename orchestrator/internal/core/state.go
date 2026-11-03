@@ -31,8 +31,15 @@ type State struct {
 	// messages holds the messages still in transit.
 	messages map[MessageID]Message
 	receipts map[CommandID]Receipt
-	// jobs holds the jobs whose end was already told.
-	jobs map[JobID]struct{}
+	// jobs holds the jobs whose end was already told, by run: a job id is only unique within the
+	// store of one task, so two runs can both finish a job called j1.
+	jobs map[toldJob]struct{}
+}
+
+// toldJob names a job whose end was told to a run's lead.
+type toldJob struct {
+	run RunID
+	job JobID
 }
 
 // written says which of a State's maps one transaction has its own copy of. A map is copied when
@@ -137,7 +144,7 @@ func (s *State) applyMessage(m Message, w *written) {
 	}
 	if job, ok := m.Body.(JobFinished); ok {
 		own(&s.jobs, &w.jobs)
-		s.jobs[job.Job] = struct{}{}
+		s.jobs[toldJob{run: m.Run, job: job.Job}] = struct{}{}
 	}
 }
 

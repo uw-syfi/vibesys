@@ -62,6 +62,12 @@ type messageRecord struct {
 	finished int
 }
 
+// toldJob is a job as one run's lead is told of it: job ids repeat across runs.
+type toldJob struct {
+	run core.RunID
+	job core.JobID
+}
+
 // monitor checks the guarantees from the committed log alone, keeping its own books, so it shares
 // no code and no bug with the core.
 type monitor struct {
@@ -74,7 +80,7 @@ type monitor struct {
 	agents   map[core.AgentID]core.Agent
 	runs     map[core.RunID]core.Run
 	messages map[core.MessageID]*messageRecord
-	jobs     map[core.JobID]core.MessageID
+	jobs     map[toldJob]core.MessageID
 	receipts map[core.CommandID]core.Receipt
 	offsets  map[core.Session]uint64
 	// handed holds the agents whose handoff stands: nothing has given them new work since.
@@ -94,7 +100,7 @@ func newMonitor() *monitor {
 	return &monitor{
 		turns: map[core.TurnID]core.Turn{}, running: map[core.AgentID]core.TurnID{}, ordinals: map[core.AgentID]uint32{},
 		items: map[core.AgentID]uint32{}, open: map[core.TurnID]map[core.ItemID]bool{}, agents: map[core.AgentID]core.Agent{},
-		runs: map[core.RunID]core.Run{}, messages: map[core.MessageID]*messageRecord{}, jobs: map[core.JobID]core.MessageID{},
+		runs: map[core.RunID]core.Run{}, messages: map[core.MessageID]*messageRecord{}, jobs: map[toldJob]core.MessageID{},
 		receipts: map[core.CommandID]core.Receipt{}, offsets: map[core.Session]uint64{}, handed: map[core.AgentID]bool{},
 		failures: map[core.AgentID]uint32{},
 	}
@@ -343,10 +349,11 @@ func (m *monitor) message(msg core.Message) error {
 			m.noticed[b.Agent]++
 		case core.JobFinished:
 			m.covered.jobs++
-			if first, told := m.jobs[b.Job]; told {
-				return fmt.Errorf("job %s told twice: %s and %s", b.Job, first, msg.ID)
+			key := toldJob{run: msg.Run, job: b.Job}
+			if first, told := m.jobs[key]; told {
+				return fmt.Errorf("job %s of run %s told twice: %s and %s", b.Job, msg.Run, first, msg.ID)
 			}
-			m.jobs[b.Job] = msg.ID
+			m.jobs[key] = msg.ID
 		}
 	}
 	if record.last.Final() {
