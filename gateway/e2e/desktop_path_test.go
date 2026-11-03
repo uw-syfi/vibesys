@@ -278,6 +278,10 @@ func TestTheDesktopPathRunsAnOptimizationEndToEnd(t *testing.T) {
 		t.Errorf("the report says %s at %s, vibesys-cli says %v at %s", reported[1], reported[2], current.Current.Result.Measure.Value, current.Current.Head)
 	}
 
+	t.Logf("run %s: lead %s, workers %s (plan %s) and %s (plan %s), judge %s",
+		started.RunID, lead.ID, workers[0].ID, strconv.Itoa(workers[0].Plan), workers[1].ID, strconv.Itoa(workers[1].Plan), judges[0].ID)
+	t.Logf("result branch at %s with score %v; the lead reported %q", current.Current.Head, current.Current.Result.Measure.Value, w.report())
+
 	if observeUI != nil {
 		observeUI(t, uiWorld{Root: r.root, Binary: r.binary, Env: r.env, RunID: started.RunID, LeadID: started.AgentID, Repository: repository.path})
 	}
