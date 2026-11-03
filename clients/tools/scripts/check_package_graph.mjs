@@ -955,7 +955,15 @@ const STRICT_APP_STYLESHEETS = ['./tokens.css', './fonts.css', './components.css
  * The third-party packages a feature or app imports and declares: no component kit, utility CSS or
  * icon package. Electron and Node builtins stay confined by `external-dependencies`.
  */
-export const STRICT_THIRD_PARTY = ['react', 'react-dom', 'xstate', ...EFFECT_PACKAGES];
+export const STRICT_THIRD_PARTY = [
+  'react',
+  'react-dom',
+  'xstate',
+  ...EFFECT_PACKAGES,
+  // The wire contract's runtime: a typed client builds, encodes and validates generated messages.
+  '@bufbuild/protobuf',
+  '@bufbuild/protovalidate',
+];
 const STRICT_STYLE_FILE = /\.(?:css|scss|sass|less|styl|pcss)$/;
 const STRICT_FIX =
   'build the UI from @vibesys/ui (add the missing component there) and drop the dependency';
