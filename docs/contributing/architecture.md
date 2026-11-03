@@ -132,15 +132,11 @@ the flow chose, and how to test it.
 
 The host process only composes typed services. It holds no product logic: it
 parses flags, opens a listener, and registers services that other packages own.
-The gateway's `TestRepositoryObeysTheRules` archcheck enforces the command's single
-non-test file and exact imports, and the allowed imports of `internal/hostmain`.
+The command is a thin entry point that hands control to a composition package.
+The composition package uses transport and lifecycle services, the schema hash,
+and the orchestrator host surface. Service packages own their behavior. The
+gateway archcheck enforces the command shape and composition boundary.
 Unenforced: product decisions through allowed imports still need human review.
-
-The gateway command `cmd/vibesysd` calls `internal/hostmain.Main(args)` and exits
-with its result. `internal/hostmain` composes `internal/connect`,
-`internal/lifecycle`, `internal/pipe`, `internal/server`, `schemahash` and
-`orchestrator/hosted`; `internal/archcheck` enforces this boundary. The service
-packages own their behavior; the command owns no service implementation.
 
 ## Talking to daemons
 

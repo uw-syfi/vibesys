@@ -1,4 +1,4 @@
-package hosted
+package hosted_test
 
 import (
 	"context"
@@ -9,10 +9,12 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/uw-syfi/vibesys/orchestrator/hosted"
 )
 
 // start opens an orchestrator over a fresh state directory with the given settings.
-func start(t *testing.T, settings map[string]string) *Orchestrator {
+func start(t *testing.T, settings map[string]string) *hosted.Orchestrator {
 	t.Helper()
 	// A Unix socket path is short, so the directory is made under the temporary directory's root.
 	state, err := os.MkdirTemp("", "h")
@@ -22,7 +24,7 @@ func start(t *testing.T, settings map[string]string) *Orchestrator {
 	t.Cleanup(func() { _ = os.RemoveAll(state) })
 	settings["VIBESYS_ORCHESTRATOR_STATE_DIR"] = state
 	ctx, cancel := context.WithCancel(context.Background())
-	x := Start(ctx, Options{
+	x := hosted.Start(ctx, hosted.Options{
 		Version: "test", Executable: filepath.Join(state, "bin", "vibesysd"), Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Getenv: func(k string) string { return settings[k] }, Home: state,
 	})
@@ -81,7 +83,7 @@ func TestTheGatewayRootFollowsTheFlagThenTheStateDirectoryThenTheDefault(t *test
 	for _, state := range states {
 		for _, flag := range flags {
 			for _, home := range homes {
-				got, err := GatewayRoot(flag, getenv(map[string]string{stateEnv: state}), home)
+				got, err := hosted.GatewayRoot(flag, getenv(map[string]string{stateEnv: state}), home)
 				if err != nil {
 					t.Fatalf("flag %q state %q home %q: %v", flag, state, home, err)
 				}
@@ -114,21 +116,21 @@ func TestTheGatewayRootFollowsTheFlagThenTheStateDirectoryThenTheDefault(t *test
 // A state directory that is not absolute is an error naming the setting, never a root relative to the
 // working directory; with no state directory and no home there is nothing to default to.
 func TestTheGatewayRootRefusesWhatItCannotPlaceWithoutGuessing(t *testing.T) {
-	_, err := GatewayRoot("", getenv(map[string]string{"VIBESYS_ORCHESTRATOR_STATE_DIR": "state"}), "/h")
+	_, err := hosted.GatewayRoot("", getenv(map[string]string{"VIBESYS_ORCHESTRATOR_STATE_DIR": "state"}), "/h")
 	if err == nil || !strings.Contains(err.Error(), "VIBESYS_ORCHESTRATOR_STATE_DIR") {
 		t.Errorf("relative state directory: %v, want an error naming the setting", err)
 	}
-	if _, err := GatewayRoot("", getenv(nil), ""); err == nil {
+	if _, err := hosted.GatewayRoot("", getenv(nil), ""); err == nil {
 		t.Error("no home and no state directory: want an error")
 	}
-	if got, err := GatewayRoot("/f", getenv(nil), ""); err != nil || got != "/f" {
+	if got, err := hosted.GatewayRoot("/f", getenv(nil), ""); err != nil || got != "/f" {
 		t.Errorf("a flag needs no home: got %q, %v", got, err)
 	}
 }
 
 // test-isolation: pin the private argv builder without starting a real ssh process.
 func TestSSHCommand(t *testing.T) {
-	if got := sshCommand("h"); !slices.Equal(got, []string{"ssh", "h", "vibesysd", "connect"}) {
+	if got := hosted.SSHCommand("h"); !slices.Equal(got, []string{"ssh", "h", "vibesysd", "connect"}) {
 		t.Fatalf("sshCommand = %v", got)
 	}
 }

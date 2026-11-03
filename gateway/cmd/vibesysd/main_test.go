@@ -37,6 +37,13 @@ func TestConnectCLI(t *testing.T) {
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, output)
 	}
+	for _, command := range []string{"serve", "connect"} {
+		t.Run(command+"-help", func(t *testing.T) {
+			if output, err := exec.CommandContext(ctx, binary, command, "--help").CombinedOutput(); err != nil {
+				t.Fatalf("help: %v\n%s", err, output)
+			}
+		})
+	}
 	t.Run("Tail", func(t *testing.T) { testTailCLI(t, binary) })
 	t.Run("closed-output", func(t *testing.T) { testClosedOutput(t, binary) })
 	t.Run("state-directory-root", func(t *testing.T) { testStateDirectoryRoot(t, binary) })

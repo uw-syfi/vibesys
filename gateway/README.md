@@ -128,12 +128,7 @@ explicit handshakes. Timeouts only guard hangs; tests contain no sleeps.
 
 ## Package boundaries
 
-The host process only composes typed services. It holds no product logic: it
-parses flags, opens a listener, and registers services that other packages own.
-The gateway's `TestRepositoryObeysTheRules` archcheck enforces the command's single
-non-test file and exact imports, and the allowed imports of `internal/hostmain`.
-Unenforced: product decisions through allowed imports still need human review.
-
+See [Host composition](../docs/contributing/architecture.md#host-composition) for the boundary rule.
 
 - `cmd/vibesysd` exits with the result of `internal/hostmain.Main`.
 - `internal/hostmain` wires CLI options, process signals, standard streams and typed services.
