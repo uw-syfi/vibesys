@@ -24,6 +24,7 @@ const (
 	resultsDir    = "results"
 	plansDir      = "plans"
 	promotionsDir = "promotions"
+	frontierDir   = "frontier"
 	runsDir       = "runs"
 	logsDir       = "logs"
 
@@ -32,7 +33,7 @@ const (
 )
 
 // topDirs are the directories of an initialized store, in the order they are made.
-var topDirs = []string{jobsDir, resultsDir, plansDir, promotionsDir, runsDir, logsDir}
+var topDirs = []string{jobsDir, resultsDir, plansDir, promotionsDir, runsDir, logsDir, frontierDir}
 
 func jobPath(root string, id core.JobID) string {
 	return path.Join(root, jobsDir, string(id)+recordSuffix)
@@ -48,6 +49,10 @@ func planPath(root string, n core.PlanNumber) string {
 
 func promotionPath(root string, seq uint64) string {
 	return path.Join(root, promotionsDir, strconv.FormatUint(seq, 10)+recordSuffix)
+}
+
+func frontierPath(root string, seq uint64) string {
+	return path.Join(root, frontierDir, strconv.FormatUint(seq, 10)+recordSuffix)
 }
 
 func eventPath(root string, run core.RunID, seq uint64) string {

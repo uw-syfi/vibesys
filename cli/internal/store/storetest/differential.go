@@ -181,6 +181,21 @@ func (d *driver) step(step int) {
 			data[i] = byte(g.pick(256))
 		}
 		d.do(step, "AppendLog", func(s store.Store) (any, error) { return nil, s.AppendLog(ctx, id, data) })
+	case op == 14:
+		members := g.members()
+		switch g.pick(8) {
+		case 0:
+			members = append(members, members[0])
+		case 1:
+			members[0].Commit = core.Commit(d.text())
+		case 2:
+			members[0].AddedAt = d.instant()
+		}
+		admission := core.AssumeAdmitted(uint64(g.pick(4)), members)
+		if g.pick(15) == 0 {
+			admission = core.FrontierAdmission{}
+		}
+		d.do(step, "UpdateFrontier", func(s store.Store) (any, error) { return s.UpdateFrontier(ctx, admission) })
 	default:
 		d.read(step, jobs)
 	}
@@ -230,6 +245,7 @@ func (d *driver) read(step int, jobs []core.Job) {
 		d.do(step, "Results", func(s store.Store) (any, error) { return s.Results(ctx, f) })
 	case 3:
 		d.do(step, "Promotions", func(s store.Store) (any, error) { return s.Promotions(ctx) })
+		d.do(step, "Frontier", func(s store.Store) (any, error) { return s.Frontier(ctx) })
 	case 4:
 		n := d.planNumber()
 		d.do(step, "Plan", func(s store.Store) (any, error) { return s.Plan(ctx, n) })

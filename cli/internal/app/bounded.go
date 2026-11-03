@@ -162,6 +162,14 @@ func (s boundedStore) Promotions(ctx context.Context) ([]core.Promotion, error) 
 	return call(s, ctx, func(st store.Store, ctx context.Context) ([]core.Promotion, error) { return st.Promotions(ctx) })
 }
 
+func (s boundedStore) Frontier(ctx context.Context) (core.Frontier, error) {
+	return call(s, ctx, func(st store.Store, ctx context.Context) (core.Frontier, error) { return st.Frontier(ctx) })
+}
+
+func (s boundedStore) UpdateFrontier(ctx context.Context, admission core.FrontierAdmission) (core.Frontier, error) {
+	return call(s, ctx, func(st store.Store, ctx context.Context) (core.Frontier, error) { return st.UpdateFrontier(ctx, admission) })
+}
+
 func (s boundedStore) CreatePlan(ctx context.Context, plan core.NewPlan) (core.Plan, error) {
 	defer touched(s.tasks)
 	return call(s, ctx, func(st store.Store, ctx context.Context) (core.Plan, error) { return st.CreatePlan(ctx, plan) })

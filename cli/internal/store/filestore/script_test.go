@@ -55,6 +55,17 @@ func promotion(name string, c, previous core.Commit, n int) op {
 	}}
 }
 
+func frontier(name string, from uint64, members ...core.Commit) op {
+	return op{name, func(ctx context.Context, s store.Store) error {
+		var ms []core.FrontierMember
+		for i, c := range members {
+			ms = append(ms, core.FrontierMember{Commit: c, AddedAt: at(40 + i)})
+		}
+		_, err := s.UpdateFrontier(ctx, core.AssumeAdmitted(from, ms))
+		return err
+	}}
+}
+
 func appendEvent(name string, run core.RunID, detail core.EventDetail, n int) op {
 	return op{name, func(ctx context.Context, s store.Store) error {
 		_, err := s.AppendEvent(ctx, core.EventDraft{
@@ -83,12 +94,17 @@ func savedResult(job core.JobID, key core.JobKey, c core.Commit) *core.Result {
 		Outcome: core.MeasureOutcome{
 			Metric: core.Metric{Name: "ops", Direction: core.Maximize}, Samples: []float64{1.5, 2.5, 3.5},
 			Observations: []core.Observation{{Name: "p99", Values: []float64{0.1}}}, CheckJob: "j-check",
+			Objectives: core.Objectives{
+				Metrics:       []core.Metric{{Name: "ops", Direction: core.Maximize}, {Name: "p99", Direction: core.Minimize}},
+				RelativeNoise: 0.02,
+			},
 		},
 	}
 }
 
 // script is a workload that makes every kind of change a store makes: a job created, joined,
-// moved, finished with a result and reused; plans created and edited; promotions; events of two
+// moved, finished with a result and reused; plans created and edited; promotions; two revisions of
+// the frontier; events of two
 // runs; and a log appended in pieces. Each operation is one call to the store, so a crash during
 // it leaves the state before the call or the state after it.
 func script() []op {
@@ -120,6 +136,8 @@ func script() []op {
 		}},
 		promotion("record a promotion", "c1", "c0", 13),
 		promotion("record a second promotion", "c4", "c1", 14),
+		frontier("admit a commit to the frontier", 0, "c1"),
+		frontier("admit another beside it", 1, "c1", "c4"),
 		appendEvent("append the first event of run-a", "run-a", nil, 14),
 		appendEvent("append a second event with a detail", "run-a", core.Verdict{Kind: core.WithinNoise}, 15),
 		appendEvent("append the first event of run-b", "run-b", nil, 16),

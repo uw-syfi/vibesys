@@ -16,10 +16,27 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/wire"
 )
 
-// formatVersion remains 2: submitters is additive and absent on historical jobs.
-// Old writers reject unknown fields in jobs containing submitters. Upgrade all writers;
-// never invent attribution for records written before submitters existed.
-const formatVersion = 2
+// formatVersion is the version of every record and of the layout. A program reads records of
+// this version and refuses any other: a newer one is reported as newer, and an older one as one
+// this program does not migrate. A change to a record that an older program could not read raises
+// it.
+//
+// Version 1 was a hand-written JSON encoding. Version 2 is protojson of the messages in
+// proto/vibesys/cli/v1/store.proto, so the stored form is generated from the contract and not kept
+// by hand. A prerelease store of version 1 is thrown away and never converted. A job's submitters
+// were added within version 2: the field is additive and absent on historical jobs, and attribution
+// is never invented for records written before submitters existed.
+//
+// Version 3 adds the frontier/ directory, and fields that a version 2 program would refuse as
+// unknown: a measurement's objectives, and the verdict on each objective of a promotion and of a
+// refusal. It only adds, so a record of version 2 is a record of version 3 as it is: this program
+// reads both, and migrates a store of version 2 by making the frontier directory and then writing
+// the format file at version 3, which a program of version 2 refuses to open from then on. The
+// records keep the version they were written with.
+const formatVersion = 3
+
+// oldestFormat is the oldest version this program reads, and migrates a store of.
+const oldestFormat = 2
 
 // The files of a store are the messages of store.proto in protojson: the proto field names, and
 // only the fields that are set, so that adding a field to a message does not change the bytes of
@@ -65,10 +82,10 @@ func decode(name string, data []byte, file proto.Message) error {
 	case v > formatVersion:
 		return &core.Failure{Kind: core.FailureIncompatible, Message: fmt.Sprintf(
 			"%s is format version %d, and this program reads version %d: upgrade vibesys-cli", name, v, formatVersion)}
-	case v < formatVersion:
+	case v < oldestFormat:
 		return &core.Failure{Kind: core.FailureIncompatible, Message: fmt.Sprintf(
-			"%s is format version %d, from a prerelease encoding that this program does not read (it reads version %d): "+
-				"remove the store and let the daemon make it again", name, v, formatVersion)}
+			"%s is format version %d, from a prerelease encoding that this program does not read (it reads versions %d to %d): "+
+				"remove the store and let the daemon make it again", name, v, oldestFormat, formatVersion)}
 	}
 	if err := recordReader.Unmarshal(data, file); err != nil {
 		return corrupt(name, "%v", err)
@@ -308,6 +325,9 @@ func resultFromMessage(m *cliv1.Result) (core.Result, error) {
 		for _, ob := range o.Measure.GetObservations() {
 			out.Observations = append(out.Observations, core.Observation{Name: ob.GetName(), Values: slices.Clone(ob.GetValues())})
 		}
+		if out.Objectives, err = objectivesFromMessage("objectives", o.Measure.GetObjectives()); err != nil {
+			return fail(err)
+		}
 		r.Outcome = out
 	default:
 		return fail(fmt.Errorf("it says neither that it is a check nor a measurement"))
@@ -330,8 +350,61 @@ func verdictFromMessage(field string, v *cliv1.Verdict) (core.Verdict, error) {
 	}, nil
 }
 
+// objectivesFromMessage reads a measurement's objectives, which are absent for a single-metric task.
+func objectivesFromMessage(field string, o *cliv1.Objectives) (core.Objectives, error) {
+	if o == nil {
+		return core.Objectives{}, nil
+	}
+	out := core.Objectives{RelativeNoise: o.GetRelativeNoise()}
+	for i, m := range o.GetMetrics() {
+		d, err := wire.ToDirection(fmt.Sprintf("%s.metrics[%d].direction", field, i), m.GetDirection())
+		if err != nil {
+			return core.Objectives{}, err
+		}
+		out.Metrics = append(out.Metrics, core.Metric{Name: m.GetName(), Direction: d})
+	}
+	return out, nil
+}
+
+func objectiveVerdictsFromMessage(field string, vs []*cliv1.ObjectiveVerdict) ([]core.ObjectiveVerdict, error) {
+	var out []core.ObjectiveVerdict
+	for i, v := range vs {
+		at := fmt.Sprintf("%s[%d]", field, i)
+		d, err := wire.ToDirection(at+".metric.direction", v.GetMetric().GetDirection())
+		if err != nil {
+			return nil, err
+		}
+		verdict, err := verdictFromMessage(at+".verdict", v.GetVerdict())
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, core.ObjectiveVerdict{Metric: core.Metric{Name: v.GetMetric().GetName(), Direction: d}, Verdict: verdict})
+	}
+	return out, nil
+}
+
+func frontierFromFile(f *cliv1.FrontierFile) core.Frontier {
+	out := core.Frontier{Revision: f.GetSeq()}
+	for _, m := range f.GetMembers() {
+		out.Members = append(out.Members, core.FrontierMember{Commit: core.Commit(m.GetCommit()), AddedAt: instant(m.GetAddedAt())})
+	}
+	return out
+}
+
+func frontierToFile(f core.Frontier) *cliv1.FrontierFile {
+	out := &cliv1.FrontierFile{Format: formatVersion, Seq: f.Revision}
+	for _, m := range f.Members {
+		out.Members = append(out.Members, &cliv1.FrontierMember{Commit: string(m.Commit), AddedAt: stamp(m.AddedAt)})
+	}
+	return out
+}
+
 func promotionFromMessage(m *cliv1.Promotion) (core.Promotion, error) {
 	verdict, err := verdictFromMessage("promotion.verdict", m.GetVerdict())
+	if err != nil {
+		return core.Promotion{}, err
+	}
+	objectives, err := objectiveVerdictsFromMessage("promotion.objectives", m.GetObjectives())
 	if err != nil {
 		return core.Promotion{}, err
 	}
@@ -341,7 +414,7 @@ func promotionFromMessage(m *cliv1.Promotion) (core.Promotion, error) {
 	}
 	return core.Promotion{
 		Commit: core.Commit(m.GetCommit()), PreviousHead: core.Commit(m.GetPreviousHead()), Verdict: verdict,
-		Environment: env, ResultJob: core.JobID(m.GetResultJobId()), At: instant(m.GetAt()),
+		Objectives: objectives, Environment: env, ResultJob: core.JobID(m.GetResultJobId()), At: instant(m.GetAt()),
 	}, nil
 }
 
@@ -362,6 +435,9 @@ func refusalFromMessage(m *cliv1.PromoteRefusal) (core.PromoteRefusal, error) {
 				return core.PromoteRefusal{}, err
 			}
 			reason.Verdict = &v
+		}
+		if reason.Objectives, err = objectiveVerdictsFromMessage(field+".objectives", rr.GetObjectives()); err != nil {
+			return core.PromoteRefusal{}, err
 		}
 		out.Reasons = append(out.Reasons, reason)
 	}
