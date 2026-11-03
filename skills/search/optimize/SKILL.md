@@ -10,7 +10,8 @@ Subagents do that, each in its own git worktree. Everything you need is stored b
 git, so a context limit or a stop costs nothing: resume by reading the state.
 
 Arguments: `<task>` and `--fanout N`, the most subagents running at once (default 3). Planners,
-workers, profilers, combiners and judges all count; a judge takes a slot too.
+workers, profilers, combiners and judges all count; a judge takes a slot too. A repository with no
+`.vibesys/tasks/<task>/` needs one first: `vibesys:create-task`.
 
 Needs a harness that can run background tasks and subagents, on POSIX (Linux or macOS), with git
 and `vibesys-cli`. Where things live and how to resume: `vibesys:state`. Commands for measuring:

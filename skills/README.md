@@ -67,7 +67,8 @@ short section in the harness file.
   because they read only `domains/`. Invoke `/vibesys:optimize <task> [--fanout N]` to start or resume the task's one long-running
   optimization: planners store hypotheses as plans, workers try them, every commit is
   measured and judged, all through `vibesys-cli`. Its state is described by the `state` skill, and every commit follows the
-  `commit` skill's enforced message schema. Search skills are named verb-first
+  `commit` skill's enforced message schema. `create-task` turns a description of what to
+  optimize into a task and validates it with real jobs before a run starts. Search skills are named verb-first
   (`measure`, `judge-candidate`, ...) except `state`.
 
 Assets that only the VibeSys app uses (evaluators, profilers, the chat agent's skills) stay in
