@@ -13,7 +13,7 @@ import (
 )
 
 // CommandDirectory is the single command path changed when the host is renamed.
-const CommandDirectory = "gateway/cmd/vibesysd"
+const CommandDirectory = "gateway/cmd/vibesys-host"
 
 const module = "github.com/uw-syfi/vibesys/"
 

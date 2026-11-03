@@ -121,7 +121,7 @@ func UnixDialer(socket string) client.Dialer {
 	}
 }
 
-// CommandDialer runs a command, such as `ssh host vibesys-orchestrator connect`, and makes its
+// CommandDialer runs a command, such as `ssh host vibesys-host connect`, and makes its
 // stdio a connection. The process ends with the connection.
 func CommandDialer(argv ...string) client.Dialer {
 	return func(context.Context) (net.Conn, error) {

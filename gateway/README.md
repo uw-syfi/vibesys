@@ -1,6 +1,6 @@
 # Host gateway
 
-`vibesysd` serves the generated HostService gRPC API over a Unix socket. It reads
+`vibesys-host` serves the generated HostService gRPC API over a Unix socket. It reads
 published run logs and has no product policy or dependency on Python. It can
 serve multiple clients from one process; a blocked Tail stream retains its own
 bounded batch and uses HTTP/2 flow control.
@@ -16,8 +16,8 @@ and Mutate, including InspectCandidate) were removed from the API.
 From this directory, with Go 1.25 installed:
 
 ```sh
-go build -o /tmp/vibesysd ./cmd/vibesysd
-/tmp/vibesysd serve
+go build -o /tmp/vibesys-host ./cmd/vibesys-host
+/tmp/vibesys-host serve
 ```
 
 Both commands accept `--root PATH`, the host's `.vibesys` directory. Without it the root is
@@ -34,7 +34,7 @@ Diagnostics go to stderr; stdout carries only transport bytes.
 
 The first 16 hexadecimal characters of the generated API hash select
 `ROOT/gateway/PREFIX/sock`; the provisioned binary belongs at
-`ROOT/gateway/PREFIX/vibesysd`. `lifecycle.HashPrefixLength` defines that length
+`ROOT/gateway/PREFIX/vibesys-host`. `lifecycle.HashPrefixLength` defines that length
 once. This prefix selects the binary and directory only. Hello compares the
 full hash, so a prefix collision cannot establish compatibility. Its directory
 is mode 0700 and the socket is mode 0600. A process lock serializes serving and
@@ -117,8 +117,8 @@ From the repository root:
 ./support/repoctl/repoctl run-checks --group gateway_checks
 ```
 
-The build script emits `linux-amd64/vibesysd`, `linux-arm64/vibesysd`, and
-`darwin-arm64/vibesysd` under the supplied directory with `CGO_ENABLED=0`.
+The build script emits `linux-amd64/vibesys-host`, `linux-arm64/vibesys-host`, and
+`darwin-arm64/vibesys-host` under the supplied directory with `CGO_ENABLED=0`.
 No target C toolchain is needed.
 
 The Go check group checks formatting, runs vet, and runs package tests. Pure
@@ -130,7 +130,7 @@ explicit handshakes. Timeouts only guard hangs; tests contain no sleeps.
 
 See [Host composition](../docs/contributing/architecture.md#host-composition) for the boundary rule.
 
-- `cmd/vibesysd` exits with the result of `internal/hostmain.Main`.
+- `cmd/vibesys-host` exits with the result of `internal/hostmain.Main`.
 - `internal/hostmain` wires CLI options, process signals, standard streams and typed services.
 - `internal/archcheck` checks the command shape and host composition imports.
 - `internal/runlog` owns framing and filesystem following.

@@ -7,6 +7,7 @@ import {fileURLToPath} from 'node:url';
 import {API_SCHEMA_HASH as apiHash} from '@vibesys/proto';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
+const {program} = JSON.parse(await readFile(join(root, 'proto/testdata/host_program.golden.json'), 'utf8'));
 const gateway = join(root, 'gateway');
 const buildFlags = ['-trimpath', '-buildvcs=false', '-ldflags', '-s -w'];
 const output = join(root, 'clients/apps/desktop/dist/gateway', apiHash.slice(0, 16));
@@ -39,7 +40,7 @@ if (version.error?.code === 'ENOENT') {
   const unknown = targets.filter(target => !known.includes(target));
   if (unknown.length > 0) throw new Error(`VIBESYS_GATEWAY_TARGETS names unknown targets: ${unknown.join(', ')}`);
   for (const target of targets) {
-    const binary = join(output, `vibesysd-${target}`);
+    const binary = join(output, `${program}-${target}`);
     const stamp = `${binary}.sha256`;
     let cached = false;
     try {
@@ -49,7 +50,7 @@ if (version.error?.code === 'ENOENT') {
     if (cached) continue;
     const [GOOS, GOARCH] = target.split('-');
     console.info(`Building gateway ${target} (${apiHash.slice(0, 16)})`);
-    const result = spawnSync('go', ['build', ...buildFlags, '-o', `${binary}.tmp`, './cmd/vibesysd'], {
+    const result = spawnSync('go', ['build', ...buildFlags, '-o', `${binary}.tmp`, `./cmd/${program}`], {
       cwd: gateway, env: {...process.env, CGO_ENABLED: '0', GOOS, GOARCH}, stdio: 'inherit',
     });
     if (result.status !== 0) throw new Error(`gateway build failed: ${target}`);

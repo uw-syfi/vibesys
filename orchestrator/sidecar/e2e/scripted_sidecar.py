@@ -1,4 +1,4 @@
-"""A sidecar process over agentshim's scripted providers, for vibesysd's end-to-end tests.
+"""A sidecar process over agentshim's scripted providers, for vibesys-host's end-to-end tests.
 
 It takes the real sidecar's command line and runs the real engine, store and server, with the one
 difference that the provider process is scripted, on the harness the launch names. Two modes:

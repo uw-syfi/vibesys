@@ -78,7 +78,7 @@ func orchestratorVerb(args []string) (bool, string, []string) {
 
 // orchestratorCommand runs mcp, run or send. The client verbs reach this host's gateway through its
 // socket, starting a gateway when none serves, as connect does; with --host they run
-// `ssh HOST vibesysd connect`, so the remote vibesysd must be on that host's PATH.
+// `ssh HOST vibesys-host connect`, so the remote vibesys-host must be on that host's PATH.
 func orchestratorCommand(ctx context.Context, root string, args []string) int {
 	root, err := gatewayRoot(root)
 	if err != nil {

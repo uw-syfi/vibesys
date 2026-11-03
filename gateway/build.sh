@@ -12,5 +12,5 @@ for target in linux/amd64 linux/arm64 darwin/arm64; do
   mkdir -p "$output_dir/$target_os-$target_arch"
   CGO_ENABLED=0 GOOS="$target_os" GOARCH="$target_arch" \
     go build -trimpath -ldflags='-s -w' \
-      -o "$output_dir/$target_os-$target_arch/vibesysd" ./cmd/vibesysd
+      -o "$output_dir/$target_os-$target_arch/vibesys-host" ./cmd/vibesys-host
 done

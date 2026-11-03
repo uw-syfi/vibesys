@@ -4,11 +4,21 @@ import * as Effect from 'effect/Effect';
 import * as Fiber from 'effect/Fiber';
 import * as Layer from 'effect/Layer';
 import * as TestClock from 'effect/testing/TestClock';
+import hostProgram from '../../../../../proto/testdata/host_program.golden.json' with {
+  type: 'json',
+};
 import {commandOf} from '../state/remote-command.js';
 import {joinDriving} from '../testing/main/drive.js';
 import {fakeSpawner} from '../testing/main/fake-process.js';
 import {LinkFailed} from './errors.js';
-import {GatewayArtifacts, provisionGateway, runCommand} from './gateway-provision.js';
+import {
+  GATEWAY_CONNECT_SCRIPT,
+  GATEWAY_DIRECTORY,
+  GatewayArtifacts,
+  HOST_PROGRAM,
+  provisionGateway,
+  runCommand,
+} from './gateway-provision.js';
 import {makeSshLink} from './ssh-link.js';
 
 const OPTIONS = {alias: 'host-a', controlPath: '/tmp/vsd-1/%C'};
@@ -17,6 +27,7 @@ const OPTIONS = {alias: 'host-a', controlPath: '/tmp/vsd-1/%C'};
 function fakeHost(artifact: Uint8Array, platform = 'Linux\nx86_64\n') {
   const host = {
     installed: false,
+    files: new Map<string, Uint8Array>(),
     uploads: [] as Uint8Array[],
     scripts: [] as string[],
     corrupt: false,
@@ -34,6 +45,9 @@ function fakeHost(artifact: Uint8Array, platform = 'Linux\nx86_64\n') {
         host.uploads.push(packed);
         const same = Buffer.compare(gunzipSync(packed), artifact) === 0;
         host.installed = same && !host.corrupt;
+        const destination = script.match(/mv -f "[^"]+" "([^"]+)"/)?.[1];
+        if (destination && host.installed)
+          host.files.set(destination, new Uint8Array(gunzipSync(packed)));
         process.end(0);
       });
       return;
@@ -53,13 +67,27 @@ const provision = (bytes: Uint8Array, force: boolean, fake: ReturnType<typeof fa
   });
 
 describe('gateway provisioning', () => {
+  it('uses the shared host program for remote connect', () => {
+    expect(HOST_PROGRAM).toBe(hostProgram.program);
+    expect(GATEWAY_CONNECT_SCRIPT).toBe(
+      `exec "$HOME/${GATEWAY_DIRECTORY}/${hostProgram.program}" connect`,
+    );
+  });
   it.effect('uploads a gzip of the artifact to a host that has none, then verifies it', () =>
     Effect.gen(function* () {
       const bytes = new TextEncoder().encode('gateway-binary');
       const fake = fakeHost(bytes);
+      const oldPath = `$HOME/${GATEWAY_DIRECTORY}/vibesysd`;
+      const oldBytes = new Uint8Array([9, 8, 7]);
+      fake.host.files.set(oldPath, oldBytes);
       const running = yield* Effect.forkChild(provision(bytes, false, fake));
       yield* joinDriving(running);
       expect(fake.host.installed).toBe(true);
+      expect(fake.host.files.get(oldPath)).toEqual(oldBytes);
+      expect(fake.host.files.get(`$HOME/${GATEWAY_DIRECTORY}/${hostProgram.program}`)).toEqual(
+        bytes,
+      );
+      expect(fake.host.scripts.every(script => !script.includes('vibesysd'))).toBe(true);
       expect(fake.host.uploads).toHaveLength(1);
       expect(fake.host.scripts.at(-1)).toContain('printf match');
     }),

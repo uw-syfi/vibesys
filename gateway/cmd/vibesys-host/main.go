@@ -1,4 +1,4 @@
-// vibesysd serves the host API, or connects stdio to a detached serving process.
+// vibesys-host serves the host API, or connects stdio to a detached serving process.
 package main
 
 import (

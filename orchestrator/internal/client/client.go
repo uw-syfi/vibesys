@@ -3,7 +3,7 @@
 // session metadata that says which agent is calling.
 //
 // There is one transport: a net.Conn from a Dialer. On the daemon's host the Dialer opens its
-// private Unix socket. From another host it runs `ssh host vibesys-orchestrator connect`, which
+// private Unix socket. From another host it runs `ssh host vibesys-host connect`, which
 // pipes its stdio to that socket, and wraps the pipes as a net.Conn. The package starts no process
 // and opens no socket itself.
 package client

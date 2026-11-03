@@ -21,7 +21,7 @@ import (
 type Dial func(ctx context.Context) (net.Conn, error)
 
 // HostProgram is the executable name used by host commands and remote connections.
-const HostProgram = "vibesysd"
+const HostProgram = "vibesys-host"
 
 // Usage lists the verbs Command runs, for the host binary's own usage text.
 const Usage = `  mcp
@@ -161,7 +161,7 @@ func dispatchVerb(ctx context.Context, h client.Headless, rest []string) error {
 	return usageError{fmt.Errorf("run %s is not start, stop or watch", rest[1])}
 }
 
-// SSH reaches the vibesysd on host through `ssh HOST vibesysd connect`.
+// SSH reaches the vibesys-host on host through `ssh HOST vibesys-host connect`.
 func SSH(host string) Dial {
 	argv := sshCommand(host)
 	return Dial(production.CommandDialer(argv...))
