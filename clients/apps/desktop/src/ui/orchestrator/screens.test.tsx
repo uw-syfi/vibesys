@@ -305,9 +305,14 @@ describe('the screens', () => {
 });
 
 it('an unread run inventory is unknown rather than a claim that no runs exist', () => {
-  const html = renderToStaticMarkup(
-    <RunList hosts={[]} unreadHosts={['host-a']} open={() => undefined} />,
+  fc.assert(
+    fc.property(fc.array(fc.string(), {minLength: 1, maxLength: 8}), unreadHosts => {
+      const html = renderToStaticMarkup(
+        <RunList hosts={[]} unreadHosts={unreadHosts} open={() => undefined} />,
+      );
+      expect(html).toContain('has not been read');
+      expect(html).not.toContain('No runs yet');
+    }),
+    {seed: 3858, examples: [[['host-a']]]},
   );
-  expect(html).toContain('has not been read');
-  expect(html).not.toContain('No runs yet');
 });

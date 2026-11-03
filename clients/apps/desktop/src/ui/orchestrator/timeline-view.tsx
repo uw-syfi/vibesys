@@ -129,7 +129,7 @@ export function TimelineView(props: {
       </Card>
       <Card section="Jobs">
         {jobs.length === 0 ? (
-          <Text tone="muted">No jobs have finished yet.</Text>
+          <Text tone="muted">No finished job timing has been read.</Text>
         ) : (
           <Gantt
             label="Jobs the agents started"

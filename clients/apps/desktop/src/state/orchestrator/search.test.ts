@@ -48,6 +48,7 @@ describe('whole search facts', () => {
       ...applySearch(emptyState, create(SearchStateSchema, {runId: 'r', revision: 99n})),
       sequence: 100n,
     };
+    expect(applySnapshot(old, create(RunsSnapshotSchema)).searches).toEqual({});
     const restarted = create(SearchStateSchema, {runId: 'r', revision: 1n});
     expect(
       applySnapshot(old, create(RunsSnapshotSchema, {searches: [restarted]})).searches,
