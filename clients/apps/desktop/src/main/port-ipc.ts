@@ -1,3 +1,4 @@
+import {DesktopLinkProblem} from '@vibesys/proto';
 /**
  * One renderer port per call, for every channel that carries one. A call is authorized before
  * anything is provisioned or dialed, owns an abort signal that every way the caller can go away
@@ -135,5 +136,13 @@ export function endOf(error?: unknown): Uint8Array {
       : error instanceof GrpcFailed || error instanceof GatewayFailed || error instanceof LinkFailed
         ? error.message
         : String(error);
-  return gatewayEnd(message, status);
+  const problem =
+    error instanceof LinkFailed
+      ? {
+          auth: DesktopLinkProblem.AUTH,
+          link: DesktopLinkProblem.LINK,
+          capacity: DesktopLinkProblem.CAPACITY,
+        }[error.problem]
+      : undefined;
+  return gatewayEnd(message, status, problem);
 }

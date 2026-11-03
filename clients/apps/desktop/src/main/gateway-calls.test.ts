@@ -8,7 +8,7 @@ import * as Fiber from 'effect/Fiber';
 import * as Scope from 'effect/Scope';
 import * as TestClock from 'effect/testing/TestClock';
 import {type HostKey, hostKey} from '../state/host.js';
-import {joinDriving, untilTrue} from '../testing/main/drive.js';
+import {untilTrue} from '../testing/main/drive.js';
 import {fakeGateway} from '../testing/main/fake-gateway.js';
 import {GatewayFailed, GrpcFailed} from './errors.js';
 import {makeGatewayCalls} from './gateway-calls.js';
@@ -153,11 +153,13 @@ describe('gateway calls', () => {
       const w = world({failing: new Set([HOST_A])});
       const {made, scope} = yield* calls(w);
       const first = yield* Effect.forkChild(Effect.flip(made.unary(HOST_A, LIST_ITEMS, request)));
-      const failure = yield* joinDriving(first, '1 second');
+      yield* TestClock.adjust('8 seconds');
+      const failure = yield* Fiber.join(first);
       expect(failure.message).toBe('host unreachable');
       expect(w.dials).toHaveLength(5);
       const second = yield* Effect.forkChild(Effect.flip(made.unary(HOST_A, LIST_ITEMS, request)));
-      yield* joinDriving(second, '1 second');
+      yield* TestClock.adjust('8 seconds');
+      yield* Fiber.join(second);
       expect(w.dials).toHaveLength(10);
       expect(
         w.lines.some(line => line.includes('gateway call failed') && line.includes('no status')),

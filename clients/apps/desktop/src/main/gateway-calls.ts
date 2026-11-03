@@ -15,7 +15,14 @@ import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
 import * as Scope from 'effect/Scope';
 import type {HostKey} from '../state/host.js';
-import {failureMessage, GatewayFailed, GrpcCode, GrpcFailed, grpcCodeOf} from './errors.js';
+import {
+  failureMessage,
+  GatewayFailed,
+  GrpcCode,
+  GrpcFailed,
+  grpcCodeOf,
+  type LinkFailed,
+} from './errors.js';
 import {
   type GatewayConnection,
   type GatewayDialer,
@@ -32,7 +39,7 @@ const ALLOWED: ReadonlySet<string> = new Set([
   ...OrchestratorService.methods.map(method => `/${OrchestratorService.typeName}/${method.name}`),
 ]);
 
-export type CallError = GrpcFailed | GatewayFailed;
+export type CallError = GrpcFailed | GatewayFailed | LinkFailed;
 
 export interface GatewayCalls {
   /**

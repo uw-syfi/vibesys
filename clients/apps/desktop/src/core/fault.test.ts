@@ -2,6 +2,7 @@ import {describe, expect, it} from '@effect/vitest';
 import {FAULT_KINDS} from '../state/index.js';
 import {
   type AppError,
+  AuthenticationFailed,
   DeadlineExceeded,
   FellBehind,
   InvalidMessage,
@@ -19,6 +20,7 @@ import {faultOf} from './fault.js';
 /** One of every error the app's calls can fail with. */
 const everyError: ReadonlyArray<AppError> = [
   new NoBridge(),
+  new AuthenticationFailed({detail: 'key refused'}),
   new TransportFailed({message: 'port closed'}),
   new Unavailable({detail: 'link lost'}),
   new DeadlineExceeded({origin: 'client'}),

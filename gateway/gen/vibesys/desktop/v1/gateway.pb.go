@@ -71,6 +71,58 @@ func (DesktopGatewayKind) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_desktop_v1_gateway_proto_rawDescGZIP(), []int{0}
 }
 
+type DesktopLinkProblem int32
+
+const (
+	DesktopLinkProblem_DESKTOP_LINK_PROBLEM_UNSPECIFIED DesktopLinkProblem = 0
+	DesktopLinkProblem_DESKTOP_LINK_PROBLEM_AUTH        DesktopLinkProblem = 1
+	DesktopLinkProblem_DESKTOP_LINK_PROBLEM_LINK        DesktopLinkProblem = 2
+	DesktopLinkProblem_DESKTOP_LINK_PROBLEM_CAPACITY    DesktopLinkProblem = 3
+)
+
+// Enum value maps for DesktopLinkProblem.
+var (
+	DesktopLinkProblem_name = map[int32]string{
+		0: "DESKTOP_LINK_PROBLEM_UNSPECIFIED",
+		1: "DESKTOP_LINK_PROBLEM_AUTH",
+		2: "DESKTOP_LINK_PROBLEM_LINK",
+		3: "DESKTOP_LINK_PROBLEM_CAPACITY",
+	}
+	DesktopLinkProblem_value = map[string]int32{
+		"DESKTOP_LINK_PROBLEM_UNSPECIFIED": 0,
+		"DESKTOP_LINK_PROBLEM_AUTH":        1,
+		"DESKTOP_LINK_PROBLEM_LINK":        2,
+		"DESKTOP_LINK_PROBLEM_CAPACITY":    3,
+	}
+)
+
+func (x DesktopLinkProblem) Enum() *DesktopLinkProblem {
+	p := new(DesktopLinkProblem)
+	*p = x
+	return p
+}
+
+func (x DesktopLinkProblem) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (DesktopLinkProblem) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_desktop_v1_gateway_proto_enumTypes[1].Descriptor()
+}
+
+func (DesktopLinkProblem) Type() protoreflect.EnumType {
+	return &file_vibesys_desktop_v1_gateway_proto_enumTypes[1]
+}
+
+func (x DesktopLinkProblem) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use DesktopLinkProblem.Descriptor instead.
+func (DesktopLinkProblem) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_desktop_v1_gateway_proto_rawDescGZIP(), []int{1}
+}
+
 // Electron routes this message as protobuf bytes. The preload owns the port,
 // while the caller owns decoding and cancellation; neither transports JSON.
 type DesktopGatewayRequest struct {
@@ -146,7 +198,8 @@ type DesktopGatewayEnd struct {
 	Error *string                `protobuf:"bytes,1,opt,name=error,proto3,oneof" json:"error,omitempty"`
 	// The gRPC status code when the gateway refused the call, so a typed refusal
 	// (not found, unavailable) is not flattened into a retryable disconnect.
-	Status        *int32 `protobuf:"varint,2,opt,name=status,proto3,oneof" json:"status,omitempty"`
+	Status        *int32              `protobuf:"varint,2,opt,name=status,proto3,oneof" json:"status,omitempty"`
+	LinkProblem   *DesktopLinkProblem `protobuf:"varint,3,opt,name=link_problem,json=linkProblem,proto3,enum=vibesys.desktop.v1.DesktopLinkProblem,oneof" json:"link_problem,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -193,6 +246,13 @@ func (x *DesktopGatewayEnd) GetStatus() int32 {
 		return *x.Status
 	}
 	return 0
+}
+
+func (x *DesktopGatewayEnd) GetLinkProblem() DesktopLinkProblem {
+	if x != nil && x.LinkProblem != nil {
+		return *x.LinkProblem
+	}
+	return DesktopLinkProblem_DESKTOP_LINK_PROBLEM_UNSPECIFIED
 }
 
 type DesktopGatewayReply struct {
@@ -288,12 +348,15 @@ const file_vibesys_desktop_v1_gateway_proto_rawDesc = "" +
 	"\x04host\x18\x02 \x01(\tB;\xbaH8r624^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$R\x04host\x12Q\n" +
 	"\x06method\x18\x03 \x01(\tB9\xbaH6r4(\x80\b2/^/[A-Za-z][A-Za-z0-9_.]*/[A-Za-z][A-Za-z0-9_]*$R\x06method\x12 \n" +
 	"\x05bytes\x18\x04 \x01(\fB\n" +
-	"\xbaH\az\x05\x18\x80\x80\x80\bR\x05bytes\"v\n" +
+	"\xbaH\az\x05\x18\x80\x80\x80\bR\x05bytes\"\xe3\x01\n" +
 	"\x11DesktopGatewayEnd\x12$\n" +
 	"\x05error\x18\x01 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04H\x00R\x05error\x88\x01\x01\x12&\n" +
-	"\x06status\x18\x02 \x01(\x05B\t\xbaH\x06\x1a\x04\x18\x10(\x00H\x01R\x06status\x88\x01\x01B\b\n" +
+	"\x06status\x18\x02 \x01(\x05B\t\xbaH\x06\x1a\x04\x18\x10(\x00H\x01R\x06status\x88\x01\x01\x12Z\n" +
+	"\flink_problem\x18\x03 \x01(\x0e2&.vibesys.desktop.v1.DesktopLinkProblemB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00H\x02R\vlinkProblem\x88\x01\x01B\b\n" +
 	"\x06_errorB\t\n" +
-	"\a_status\"\x83\x01\n" +
+	"\a_statusB\x0f\n" +
+	"\r_link_problem\"\x83\x01\n" +
 	"\x13DesktopGatewayReply\x12\"\n" +
 	"\x05bytes\x18\x01 \x01(\fB\n" +
 	"\xbaH\az\x05\x18\x80\x80\x80\bH\x00R\x05bytes\x129\n" +
@@ -302,7 +365,12 @@ const file_vibesys_desktop_v1_gateway_proto_rawDesc = "" +
 	"\x12DesktopGatewayKind\x12$\n" +
 	" DESKTOP_GATEWAY_KIND_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x1aDESKTOP_GATEWAY_KIND_UNARY\x10\x01\x12\x1f\n" +
-	"\x1bDESKTOP_GATEWAY_KIND_STREAM\x10\x02BEZCgithub.com/uw-syfi/vibesys/gateway/gen/vibesys/desktop/v1;desktopv1b\x06proto3"
+	"\x1bDESKTOP_GATEWAY_KIND_STREAM\x10\x02*\x9b\x01\n" +
+	"\x12DesktopLinkProblem\x12$\n" +
+	" DESKTOP_LINK_PROBLEM_UNSPECIFIED\x10\x00\x12\x1d\n" +
+	"\x19DESKTOP_LINK_PROBLEM_AUTH\x10\x01\x12\x1d\n" +
+	"\x19DESKTOP_LINK_PROBLEM_LINK\x10\x02\x12!\n" +
+	"\x1dDESKTOP_LINK_PROBLEM_CAPACITY\x10\x03BEZCgithub.com/uw-syfi/vibesys/gateway/gen/vibesys/desktop/v1;desktopv1b\x06proto3"
 
 var (
 	file_vibesys_desktop_v1_gateway_proto_rawDescOnce sync.Once
@@ -316,22 +384,24 @@ func file_vibesys_desktop_v1_gateway_proto_rawDescGZIP() []byte {
 	return file_vibesys_desktop_v1_gateway_proto_rawDescData
 }
 
-var file_vibesys_desktop_v1_gateway_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_vibesys_desktop_v1_gateway_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_vibesys_desktop_v1_gateway_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_vibesys_desktop_v1_gateway_proto_goTypes = []any{
 	(DesktopGatewayKind)(0),       // 0: vibesys.desktop.v1.DesktopGatewayKind
-	(*DesktopGatewayRequest)(nil), // 1: vibesys.desktop.v1.DesktopGatewayRequest
-	(*DesktopGatewayEnd)(nil),     // 2: vibesys.desktop.v1.DesktopGatewayEnd
-	(*DesktopGatewayReply)(nil),   // 3: vibesys.desktop.v1.DesktopGatewayReply
+	(DesktopLinkProblem)(0),       // 1: vibesys.desktop.v1.DesktopLinkProblem
+	(*DesktopGatewayRequest)(nil), // 2: vibesys.desktop.v1.DesktopGatewayRequest
+	(*DesktopGatewayEnd)(nil),     // 3: vibesys.desktop.v1.DesktopGatewayEnd
+	(*DesktopGatewayReply)(nil),   // 4: vibesys.desktop.v1.DesktopGatewayReply
 }
 var file_vibesys_desktop_v1_gateway_proto_depIdxs = []int32{
 	0, // 0: vibesys.desktop.v1.DesktopGatewayRequest.kind:type_name -> vibesys.desktop.v1.DesktopGatewayKind
-	2, // 1: vibesys.desktop.v1.DesktopGatewayReply.end:type_name -> vibesys.desktop.v1.DesktopGatewayEnd
-	2, // [2:2] is the sub-list for method output_type
-	2, // [2:2] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	1, // 1: vibesys.desktop.v1.DesktopGatewayEnd.link_problem:type_name -> vibesys.desktop.v1.DesktopLinkProblem
+	3, // 2: vibesys.desktop.v1.DesktopGatewayReply.end:type_name -> vibesys.desktop.v1.DesktopGatewayEnd
+	3, // [3:3] is the sub-list for method output_type
+	3, // [3:3] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_desktop_v1_gateway_proto_init() }
@@ -349,7 +419,7 @@ func file_vibesys_desktop_v1_gateway_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_desktop_v1_gateway_proto_rawDesc), len(file_vibesys_desktop_v1_gateway_proto_rawDesc)),
-			NumEnums:      1,
+			NumEnums:      2,
 			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,

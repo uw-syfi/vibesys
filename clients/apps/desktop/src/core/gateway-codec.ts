@@ -9,6 +9,7 @@ import {
   DesktopGatewayKind,
   DesktopGatewayReplySchema,
   DesktopGatewayRequestSchema,
+  type DesktopLinkProblem,
   validatedExactFromBinary,
 } from '@vibesys/proto';
 import type {HostKey} from '../state/host.js';
@@ -68,7 +69,11 @@ export function gatewayReply(bytes: Uint8Array): Uint8Array {
 }
 
 /** The last reply of a call: clean without `error` and `status`, else the failure and its gRPC status. */
-export function gatewayEnd(error?: string, status?: number): Uint8Array {
+export function gatewayEnd(
+  error?: string,
+  status?: number,
+  linkProblem?: DesktopLinkProblem,
+): Uint8Array {
   const reply = toBinary(
     DesktopGatewayReplySchema,
     create(DesktopGatewayReplySchema, {
@@ -77,6 +82,7 @@ export function gatewayEnd(error?: string, status?: number): Uint8Array {
         value: {
           ...(error === undefined ? {} : {error}),
           ...(status === undefined ? {} : {status}),
+          ...(linkProblem === undefined ? {} : {linkProblem}),
         },
       },
     }),

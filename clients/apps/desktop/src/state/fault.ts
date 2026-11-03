@@ -6,6 +6,7 @@
 
 /** One kind per client reaction: the tag of each error the client distinguishes. */
 export const FAULT_KINDS = [
+  'AuthenticationFailed',
   'NoBridge',
   'TransportFailed',
   'Unavailable',

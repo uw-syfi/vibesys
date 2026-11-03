@@ -16,6 +16,7 @@ export {
 } from './connection.js';
 export {
   type AppError,
+  AuthenticationFailed,
   CallEnded,
   DeadlineExceeded,
   FellBehind,

@@ -46,21 +46,18 @@ export interface GatewayDialer {
 type ConnectionState =
   | {readonly _tag: 'connecting'}
   | {readonly _tag: 'ready'; readonly session: GatewaySession}
-  | {readonly _tag: 'offline'; readonly reason: string}
+  | {readonly _tag: 'offline'; readonly error: DialError}
   | {readonly _tag: 'closed'};
 
 export interface GatewayConnection {
   /** A unary call, waiting for the session if it is being dialed. */
-  readonly unary: (
-    method: string,
-    bytes: Uint8Array,
-  ) => Effect.Effect<Uint8Array, GrpcFailed | GatewayFailed>;
+  readonly unary: (method: string, bytes: Uint8Array) => Effect.Effect<Uint8Array, DialError>;
   /** A call with any number of replies, handed to `receive` in order. */
   readonly stream: (
     method: string,
     bytes: Uint8Array,
     receive: (bytes: Uint8Array) => void,
-  ) => Effect.Effect<void, GrpcFailed | GatewayFailed>;
+  ) => Effect.Effect<void, DialError>;
   /** Whether this connection will never serve again: offline or closed. */
   readonly ended: Effect.Effect<boolean>;
 }
@@ -101,15 +98,23 @@ interface Opened {
   readonly scope: Scope.Closeable;
 }
 
+export type SessionOpener = (
+  duplex: Duplex,
+) => Effect.Effect<GatewaySession, GrpcFailed, Scope.Scope>;
+
 type DialError = GrpcFailed | GatewayFailed | LinkFailed;
 
 /** Dial, open the session and shake hands; on any failure nothing stays open. */
-const openOnce = (dialer: GatewayDialer, force: boolean): Effect.Effect<Opened, DialError> =>
+const openOnce = (
+  dialer: GatewayDialer,
+  force: boolean,
+  openSessionWith: SessionOpener,
+): Effect.Effect<Opened, DialError> =>
   Effect.gen(function* () {
     const scope = yield* Scope.make();
     return yield* Effect.gen(function* () {
       const duplex = yield* dialer.dial(force);
-      const session = yield* openSession(duplex);
+      const session = yield* openSessionWith(duplex);
       yield* hello(session);
       return {session, scope} satisfies Opened;
     }).pipe(
@@ -119,38 +124,48 @@ const openOnce = (dialer: GatewayDialer, force: boolean): Effect.Effect<Opened, 
   });
 
 /** One dial with the one forced retry a schema mismatch earns. */
-const open = (dialer: GatewayDialer): Effect.Effect<Opened, DialError> =>
-  openOnce(dialer, false).pipe(
+const open = (
+  dialer: GatewayDialer,
+  openSessionWith: SessionOpener,
+): Effect.Effect<Opened, DialError> =>
+  openOnce(dialer, false, openSessionWith).pipe(
     Effect.catchIf(
       error => error._tag === 'GrpcFailed' && error.code === GrpcCode.FAILED_PRECONDITION,
-      () => openOnce(dialer, true),
+      () => openOnce(dialer, true, openSessionWith),
     ),
   );
 
 type Connected =
   | {readonly _tag: 'opened'; readonly opened: Opened}
-  | {readonly _tag: 'offline'; readonly reason: string};
+  | {readonly _tag: 'offline'; readonly error: DialError};
+
+const fatalAuth = (error: DialError): boolean =>
+  error._tag === 'LinkFailed' && error.problem === 'auth';
 
 /** Dial until the session is open or the policy gives up. */
-const connect = (dialer: GatewayDialer, log: (line: string) => void): Effect.Effect<Connected> =>
+const connect = (
+  dialer: GatewayDialer,
+  log: (line: string) => void,
+  openSessionWith: SessionOpener,
+): Effect.Effect<Connected> =>
   Effect.gen(function* () {
     let failures = 0;
     while (true) {
-      const dialed = yield* open(dialer).pipe(
+      const dialed = yield* open(dialer, openSessionWith).pipe(
         Effect.timeoutOption(`${DIAL_DEADLINE_MS} millis`),
         Effect.result,
       );
       if (dialed._tag === 'Success' && Option.isSome(dialed.success))
         return {_tag: 'opened', opened: dialed.success.value} as const;
-      const reason =
-        dialed._tag === 'Failure' ? failureMessage(dialed.failure) : 'gateway dial timed out';
+      const error =
+        dialed._tag === 'Failure'
+          ? dialed.failure
+          : new GatewayFailed({message: 'gateway dial timed out'});
+      const reason = failureMessage(error);
       failures += 1;
-      const verdict = afterFailure(
-        failures,
-        dialed._tag === 'Failure' ? grpcCodeOf(dialed.failure) : undefined,
-      );
+      const verdict = afterFailure(failures, grpcCodeOf(error));
       log(`gateway dial ${failures} failed: ${reason}`);
-      if (verdict._tag === 'offline') return {_tag: 'offline', reason} as const;
+      if (fatalAuth(error) || verdict._tag === 'offline') return {_tag: 'offline', error} as const;
       yield* Effect.sleep(`${verdict.afterMs} millis`);
     }
   });
@@ -164,6 +179,7 @@ const lostError = new GrpcFailed({
 export const makeGatewayConnection = (
   dialer: GatewayDialer,
   log: (line: string) => void,
+  openSessionWith: SessionOpener = openSession,
 ): Effect.Effect<GatewayConnection, never, Scope.Scope> =>
   Effect.gen(function* () {
     const state = yield* SubscriptionRef.make<ConnectionState>({_tag: 'connecting'});
@@ -172,13 +188,16 @@ export const makeGatewayConnection = (
     const serve = Effect.gen(function* () {
       let provisioned = false;
       while (true) {
-        const connected = yield* connect(dialer, log).pipe(
+        const connected = yield* connect(dialer, log, openSessionWith).pipe(
           Effect.timeoutOption(`${connectBudgetMs(provisioned)} millis`),
         );
         if (Option.isNone(connected))
-          return yield* set({_tag: 'offline', reason: 'gateway did not connect in time'});
+          return yield* set({
+            _tag: 'offline',
+            error: new GatewayFailed({message: 'gateway did not connect in time'}),
+          });
         if (connected.value._tag === 'offline')
-          return yield* set({_tag: 'offline', reason: connected.value.reason});
+          return yield* set({_tag: 'offline', error: connected.value.error});
         const {session, scope} = connected.value.opened;
         provisioned = true;
         yield* set({_tag: 'ready', session});
@@ -200,9 +219,9 @@ export const makeGatewayConnection = (
             current._tag === 'ready'
               ? Effect.succeed(current.session)
               : Effect.fail(
-                  new GatewayFailed({
-                    message: current._tag === 'offline' ? current.reason : 'gateway closed',
-                  }),
+                  current._tag === 'offline'
+                    ? current.error
+                    : new GatewayFailed({message: 'gateway closed'}),
                 ),
         }),
       ),

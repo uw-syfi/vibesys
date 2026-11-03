@@ -25,11 +25,19 @@ message DesktopGatewayRequest {
   }];
   bytes bytes = 4 [(buf.validate.field).bytes.max_len = 16777216];
 }
+enum DesktopLinkProblem {
+  DESKTOP_LINK_PROBLEM_UNSPECIFIED = 0;
+  DESKTOP_LINK_PROBLEM_AUTH = 1;
+  DESKTOP_LINK_PROBLEM_LINK = 2;
+  DESKTOP_LINK_PROBLEM_CAPACITY = 3;
+}
+
 message DesktopGatewayEnd {
   optional string error = 1 [(buf.validate.field).string.max_bytes = 65536];
   // The gRPC status code when the gateway refused the call, so a typed refusal
   // (not found, unavailable) is not flattened into a retryable disconnect.
   optional int32 status = 2 [(buf.validate.field).int32 = {gte: 0, lte: 16}];
+  optional DesktopLinkProblem link_problem = 3 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
 }
 message DesktopGatewayReply {
   oneof body {

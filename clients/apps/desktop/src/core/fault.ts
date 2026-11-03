@@ -8,6 +8,7 @@ const detailOf = (error: AppError): string => {
       return 'this window has no connection to the app';
     case 'TransportFailed':
       return error.message;
+    case 'AuthenticationFailed':
     case 'Unavailable':
     case 'NotFound':
     case 'Unimplemented':

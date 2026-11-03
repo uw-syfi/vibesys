@@ -3,6 +3,7 @@
  * retry, resubscribe, stop and say so, or show the daemon's reason. The transport fails with the
  * three `TransportError`s, and `fromTransportError` turns them into an `AppError`.
  */
+import {DesktopLinkProblem} from '@vibesys/proto';
 import * as Data from 'effect/Data';
 import type * as Duration from 'effect/Duration';
 
@@ -43,6 +44,7 @@ export const rpcStatusOf = (code: number): RpcStatus =>
 export class CallEnded extends Data.TaggedError('CallEnded')<{
   readonly message: string;
   readonly status?: number;
+  readonly linkProblem?: DesktopLinkProblem;
 }> {}
 
 /** A stream held more unread frames than its capacity. */
@@ -56,6 +58,11 @@ export class NoBridge extends Data.TaggedError('NoBridge') {}
 export type TransportError = CallEnded | StreamOverflow | NoBridge;
 
 // The client's errors: what a call through `makeClient` fails with.
+
+/** SSH key authentication was refused. */
+export class AuthenticationFailed extends Data.TaggedError('AuthenticationFailed')<{
+  readonly detail: string;
+}> {}
 
 /** The end had no gRPC status, or a stream was closed by the daemon. Retry. */
 export class TransportFailed extends Data.TaggedError('TransportFailed')<{
@@ -108,6 +115,7 @@ export class Rejected extends Data.TaggedError('Rejected')<{
 }> {}
 
 export type AppError =
+  | AuthenticationFailed
   | NoBridge
   | TransportFailed
   | Unavailable
@@ -126,6 +134,7 @@ export const isRetryable = (error: AppError): boolean => {
     case 'DeadlineExceeded':
     case 'FellBehind':
       return true;
+    case 'AuthenticationFailed':
     case 'NoBridge':
     case 'InvalidMessage':
     case 'NotFound':
@@ -143,6 +152,8 @@ const detailOf = (end: CallEnded): string =>
  * status (15) that says the gateway could not read a frame.
  */
 export const fromEnd = (end: CallEnded, type = '(unknown)'): AppError => {
+  if (end.linkProblem === DesktopLinkProblem.AUTH)
+    return new AuthenticationFailed({detail: detailOf(end)});
   if (end.status === undefined) return new TransportFailed({message: detailOf(end)});
   const detail = detailOf(end);
   switch (end.status) {

@@ -10,7 +10,6 @@ import {fileURLToPath} from 'node:url';
 import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
 import * as Layer from 'effect/Layer';
-import * as Option from 'effect/Option';
 import * as Scope from 'effect/Scope';
 import {app, BrowserWindow, ipcMain, session, type WebContents} from 'electron';
 import {hostKey} from '../state/host.js';
@@ -24,6 +23,7 @@ import {makeLinkPool} from './link-pool.js';
 import {NodeLocalHost} from './local-host.js';
 import {isOwnWindow, type PortEvent} from './port-ipc.js';
 import {NodeProcessSpawner} from './process.js';
+import {quit} from './quit.js';
 import {savedHosts} from './saved-hosts.js';
 import {trackWindow} from './window-lifetime.js';
 import {hostsFromArgv, isAppPage, startupHosts, windowUrl} from './window-policy.js';
@@ -72,14 +72,6 @@ async function wire(userData: string) {
 }
 
 const run: RunCall = (effect, signal) => Effect.runPromiseExit(effect, {signal});
-
-/** End the app's lifetime, giving up on a host that does not release within the bound. */
-const release = (): Promise<void> =>
-  Effect.runPromise(
-    Scope.close(lifetime, Exit.void).pipe(Effect.timeoutOption(`${RELEASE_BOUND_MS} millis`)),
-  ).then(released => {
-    if (Option.isNone(released)) log('gave up waiting for the hosts to be released');
-  });
 
 /** Keep `contents` on the built page and refuse every new window and every network request. */
 function confine(contents: WebContents): void {
@@ -154,7 +146,18 @@ async function start(): Promise<void> {
     if (releasing) return;
     releasing = true;
     event.preventDefault();
-    void release().finally(() => app.exit(0));
+    void quit({
+      release: () => Effect.runPromise(Scope.close(lifetime, Exit.void)),
+      deadline: () => {
+        let timer: ReturnType<typeof setTimeout>;
+        const elapsed = new Promise<void>(resolve => {
+          timer = setTimeout(resolve, RELEASE_BOUND_MS);
+        });
+        return {elapsed, cancel: () => clearTimeout(timer)};
+      },
+      timedOut: () => log('gave up waiting for the hosts to be released'),
+      exit: () => app.exit(0),
+    });
   });
 }
 
