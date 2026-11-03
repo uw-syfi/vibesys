@@ -344,6 +344,8 @@ def test_all_repository_skill_metadata_is_valid() -> None:
         for item in validate_skill_tree(PROJECT_ROOT / "skills" / "domains")
     }
     assert metadata["serving-systems"].domains == (DomainName.LLM_SERVING,)
+    assert metadata["custom-rpc-optimization"].domains == (DomainName.MICROSERVICES,)
+    assert metadata["custom-rpc-optimization"].backends is None
     assert metadata["kernel-correctness"].domains == (DomainName.KERNEL_WRITING,)
     assert metadata["kernel-performance"].domains == (DomainName.KERNEL_WRITING,)
     assert metadata["kernel-ncu-analysis"].domains == (DomainName.KERNEL_WRITING,)
@@ -565,3 +567,13 @@ def test_skill_catalog_rejects_frontmatter_name_that_cannot_be_materialized(tmp_
 
     with pytest.raises(RuntimeSkillMetadataError, match="must match directory name"):
         build_skill_catalog([skill])
+
+
+@pytest.mark.parametrize("domain", list(DomainName))
+def test_custom_rpc_skill_is_selected_only_for_microservices(
+    tmp_path: Path, domain: DomainName
+) -> None:
+    _, selected, _ = load_config_and_skills(_args(tmp_path, ComputeBackend.CPU), domain=domain)
+    assert ("custom-rpc-optimization" in _skill_names(selected)) == (
+        domain is DomainName.MICROSERVICES
+    )
