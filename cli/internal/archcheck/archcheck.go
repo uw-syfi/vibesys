@@ -33,6 +33,11 @@ var rules = map[string][]string{
 	// The command line reads flags and prints. It reaches the daemon through the client, resolves
 	// revisions through gitrepo, and in the binary's wiring through production. It never names the
 	// domain: it speaks the contract's messages, and wire translates.
+	// The public test server other modules start the CLI daemon with, over Fakes.
+	"daemontest": {
+		"gen/", "internal/app", "internal/app/memstores", "internal/clock", "internal/core", "internal/daemon",
+		"internal/environment/fakeenv", "internal/gitrepo", "internal/supervisor",
+	},
 	"cmd/vibesys-cli": {"gen/", "internal/wire", "internal/client", "internal/gitrepo", "internal/production", "internal/upgrade/"},
 
 	// The domain and what it needs from the machine.
