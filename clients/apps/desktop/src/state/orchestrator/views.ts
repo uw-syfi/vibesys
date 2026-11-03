@@ -169,25 +169,6 @@ export interface Timeline {
   readonly jobs: readonly JobBar[];
 }
 
-/** The earliest tool call of the submitting agent that mentions the job: when it was started. */
-function jobStart(
-  state: OrchestratorState,
-  jobId: string,
-  submittedBy: string,
-  endMs: number,
-): number {
-  const times = Object.values(state.items)
-    .filter(
-      item =>
-        jobId !== '' &&
-        (submittedBy === '' || item.agentId === submittedBy) &&
-        item.body.case === 'tool' &&
-        (item.body.value.output.includes(jobId) || item.body.value.argsJson.includes(jobId)),
-    )
-    .map(item => ms(item.at) ?? endMs);
-  return times.length === 0 ? endMs : Math.min(...times);
-}
-
 /** When each agent ran, and the jobs underneath. */
 export function timeline(state: OrchestratorState, runId: string, nowMs: number): Timeline {
   const run = state.runs[runId];
@@ -215,7 +196,14 @@ export function timeline(state: OrchestratorState, runId: string, nowMs: number)
         jobId: job?.jobId ?? '',
         outcome: job?.outcome ?? JobOutcome.UNSPECIFIED,
         submittedBy: job?.submittedByAgentId ?? '',
-        startMs: jobStart(state, job?.jobId ?? '', job?.submittedByAgentId ?? '', endMs),
+        startMs:
+          ms(
+            state.searches[runId]?.jobs.find(candidate => candidate.id === job?.jobId)?.startedAt,
+          ) ??
+          ms(
+            state.searches[runId]?.jobs.find(candidate => candidate.id === job?.jobId)?.submittedAt,
+          ) ??
+          endMs,
         endMs,
         detail: job?.detail ?? '',
       };

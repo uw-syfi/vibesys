@@ -25,6 +25,7 @@ import {
   type Item,
   ItemStatus,
   type RunsSnapshot,
+  type SearchState,
   type Turn,
   TurnStatus,
   type WatchAgentResponse,
@@ -43,11 +44,17 @@ function byId<T extends {readonly id: string}>(rows: readonly T[]): Record<strin
  * progress) stays, and a turn the agent stream already finished is not taken back to running.
  */
 export function applySnapshot(state: OrchestratorState, snapshot: RunsSnapshot): OrchestratorState {
-  if (snapshot.sequence < state.sequence && state.gap === null) return state;
+  if (snapshot.sequence < state.sequence && state.gap === null) {
+    return {
+      ...state,
+      searches: Object.fromEntries(snapshot.searches.map(search => [search.runId, search])),
+    };
+  }
   const turns = snapshot.turns.reduce(withTurn, state).turns;
   return {
     ...state,
     sequence: snapshot.sequence,
+    searches: Object.fromEntries(snapshot.searches.map(search => [search.runId, search])),
     runs: byId(snapshot.runs),
     agents: byId(snapshot.agents),
     turns,
@@ -192,4 +199,11 @@ export function applyAgentFeed(state: OrchestratorState, frame: AgentFrame): Orc
     default:
       return state;
   }
+}
+
+/** Whole search facts have a per-boot revision, independent of the stored event sequence. */
+export function applySearch(state: OrchestratorState, search: SearchState): OrchestratorState {
+  const held = state.searches[search.runId];
+  if (held !== undefined && search.revision <= held.revision) return state;
+  return {...state, searches: {...state.searches, [search.runId]: search}};
 }

@@ -33,6 +33,7 @@ export {
   type AgentFrame,
   applyAgentFeed,
   applyEvent,
+  applySearch,
   applySnapshot,
   isFinalItem,
   type OlderFrame,
