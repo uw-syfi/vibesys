@@ -216,6 +216,49 @@ func TestCompareRoundsTextAndKeepsJSONExact(t *testing.T) {
 	}
 }
 
+// A comparison that compared nothing, because the sides were measured under another task version
+// or for another metric, says so in text instead of printing zeros that read as a measured zero.
+// Every other verdict keeps its numbers. For any samples, the numbers appear exactly when the two
+// sides were comparable.
+func TestCompareOfSidesThatCannotBeComparedPrintsNoNumbers(t *testing.T) {
+	rng := rand.New(rand.NewPCG(7, 11))
+	samples := func() []float64 {
+		out := make([]float64, 3+rng.IntN(5))
+		level := 10 + rng.Float64()*1000
+		for i := range out {
+			out[i] = level * (1 + (rng.Float64()-0.5)*0.05)
+		}
+		return out
+	}
+	other := core.Metric{Name: "latency", Direction: core.Minimize}
+	for i := range 30 {
+		c := newResultsCLI(t)
+		kind := i % 3 // 0: comparable, 1: task versions differ, 2: metrics differ
+		candidate := storetest.Measurement{Commit: rev(1), Samples: samples(), At: c.clk.Now()}
+		switch kind {
+		case 1:
+			candidate.TaskVersion = fmt.Sprintf("v%d", 2+rng.IntN(1000))
+		case 2:
+			candidate.Metric = other
+		}
+		storetest.SeedMeasurement(t, c.store, storetest.Measurement{Commit: rev(0), Samples: samples(), At: c.clk.Now()})
+		storetest.SeedMeasurement(t, c.store, candidate)
+
+		r := c.run(withTask("compare", "c1")...)
+		mustExit(t, r, exitOK, "compare")
+		numbers := strings.Contains(r.stdout, "ratio ") || strings.Contains(r.stdout, "mean ")
+		if numbers != (kind == 0) {
+			t.Fatalf("example %d (kind %d): text %q, numbers printed = %v", i, kind, r.stdout, numbers)
+		}
+		if kind != 0 && !strings.Contains(r.stdout, "not comparable") {
+			t.Fatalf("example %d (kind %d): text %q does not say the sides are not comparable", i, kind, r.stdout)
+		}
+		if kind != 0 && !strings.HasPrefix(r.stdout, "inconclusive\t") {
+			t.Fatalf("example %d (kind %d): text %q does not lead with the verdict", i, kind, r.stdout)
+		}
+	}
+}
+
 func TestCompareFailuresAreTypedAndMixedEnvironmentsAreRefused(t *testing.T) {
 	c := newResultsCLI(t)
 	c.measured(0, level)

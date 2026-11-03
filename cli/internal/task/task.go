@@ -80,6 +80,8 @@ type Task struct {
 	Name string
 	// Version names the task's files: results taken under another version are not comparable.
 	Version string
+	// Files are the files Version names, by path from the task's directory (VersionedFiles).
+	Files   map[string]string
 	Backend core.BackendKind
 	// HasDockerfile says the task ships a Dockerfile, so its jobs run in docker.
 	HasDockerfile bool
@@ -146,9 +148,10 @@ func Read(fsys fs.FS, name string) (Task, error) {
 	case !errors.Is(err, fs.ErrNotExist):
 		return Task{}, &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("task %q: reading %s: %v", name, path.Join(dir, dockerfile), err)}
 	}
-	if t.Version, err = Version(fsys, dir); err != nil {
+	if t.Files, err = VersionedFiles(fsys, dir); err != nil {
 		return Task{}, err
 	}
+	t.Version = versionOf(t.Files)
 	return t, nil
 }
 
@@ -178,17 +181,38 @@ func readOptional(fsys fs.FS, name string) ([]byte, error) {
 	return data, nil
 }
 
-// Version names the files under dir: every regular file, by its path from dir, its executable
-// bit and the digest of its content. It does not depend on the order files are listed in, on
-// times, or on anything outside the directory.
+// Version names the files under dir that belong to the task (VersionedFiles): each by its path
+// from dir, its executable bit and the digest of its content. It does not depend on the order
+// files are listed in, on times, or on anything outside the directory, and files a tool
+// generates (Generated) do not count.
 func Version(fsys fs.FS, dir string) (string, error) {
-	type entry struct{ path, line string }
-	var entries []entry
+	files, err := VersionedFiles(fsys, dir)
+	if err != nil {
+		return "", err
+	}
+	return versionOf(files), nil
+}
+
+// VersionedFiles returns the files under dir that the task's version names: every regular file
+// that is not Generated, by its path from dir, with a fingerprint of its executable bit and
+// content. Two trees have one version exactly when they have equal VersionedFiles.
+func VersionedFiles(fsys fs.FS, dir string) (map[string]string, error) {
+	files := map[string]string{}
 	err := fs.WalkDir(fsys, dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
+		if p == dir {
+			return nil
+		}
+		rel := strings.TrimPrefix(p, dir+"/")
 		if d.IsDir() {
+			if Generated(rel) {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if Generated(rel) {
 			return nil
 		}
 		info, err := d.Info()
@@ -202,24 +226,31 @@ func Version(fsys fs.FS, dir string) (string, error) {
 		if err != nil {
 			return err
 		}
-		sum := sha256.Sum256(data)
 		exec := "-"
 		if info.Mode()&0o111 != 0 {
 			exec = "x"
 		}
-		rel := strings.TrimPrefix(p, dir+"/")
-		entries = append(entries, entry{rel, fmt.Sprintf("%s %s %x\n", exec, rel, sum)})
+		files[rel] = fmt.Sprintf("%s %x", exec, sha256.Sum256(data))
 		return nil
 	})
 	if err != nil {
-		return "", &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("reading the files of %s: %v", dir, err)}
+		return nil, &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("reading the files of %s: %v", dir, err)}
 	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].path < entries[j].path })
+	return files, nil
+}
+
+func versionOf(files map[string]string) string {
+	paths := make([]string, 0, len(files))
+	for p := range files {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
 	h := sha256.New()
-	for _, e := range entries {
-		h.Write([]byte(e.line))
+	for _, p := range paths {
+		exec, sum, _ := strings.Cut(files[p], " ")
+		fmt.Fprintf(h, "%s %s %s\n", exec, p, sum)
 	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 func invalid(format string, args ...any) error {

@@ -251,16 +251,28 @@ func noResultText(r cliv1.NoCurrentResultReason) string {
 }
 
 // describeVerdict is the numbers of a verdict in a line, rounded. The verdict itself is named by
-// the caller.
+// the caller. A verdict that compared nothing, because the two sides were measured under another
+// task version or for another metric, has no numbers: printing its zeros would read as a measured
+// zero, so the line says the sides are not comparable and why.
 func describeVerdict(v *cliv1.Verdict) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "ratio %s (noise %s), mean %s vs %s, %d vs %d samples",
-		number(v.GetRatio()), number(v.GetNoise()), number(v.GetCandidateMean()), number(v.GetBaseMean()),
-		v.GetCandidateSamples(), v.GetBaseSamples())
+	if why, ok := notComparable[v.GetReason()]; ok {
+		fmt.Fprintf(&b, "not comparable: %s; %d vs %d samples", why, v.GetCandidateSamples(), v.GetBaseSamples())
+	} else {
+		fmt.Fprintf(&b, "ratio %s (noise %s), mean %s vs %s, %d vs %d samples",
+			number(v.GetRatio()), number(v.GetNoise()), number(v.GetCandidateMean()), number(v.GetBaseMean()),
+			v.GetCandidateSamples(), v.GetBaseSamples())
+	}
 	if v.GetReason() != cliv1.InconclusiveReason_INCONCLUSIVE_REASON_UNSPECIFIED {
 		fmt.Fprintf(&b, " [%s]", lower("INCONCLUSIVE_REASON_", v.GetReason().String()))
 	}
 	return b.String()
+}
+
+// notComparable are the inconclusive reasons whose verdict holds no numbers, with what to say.
+var notComparable = map[cliv1.InconclusiveReason]string{
+	cliv1.InconclusiveReason_INCONCLUSIVE_REASON_TASK_VERSION_MISMATCH: "the two commits were measured under different task versions",
+	cliv1.InconclusiveReason_INCONCLUSIVE_REASON_METRIC_MISMATCH:       "the two commits were measured for different metrics",
 }
 
 func environmentName(e *cliv1.EnvironmentFingerprint) string {

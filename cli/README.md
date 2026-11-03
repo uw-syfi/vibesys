@@ -353,7 +353,12 @@ still takes only the missing samples. A cancelled job, a failed check, and a ben
 usable result save nothing, so a result is never saved without its samples and its check.
 
 A task is read from `.vibesys/tasks/<task>/` of the job's commit, not from the working tree, and its
-version (a digest of its files) is part of the cache key. A benchmark reports its score in one of two
+version (a digest of its files) is part of the cache key. Generated files do not count toward the
+version: a `__pycache__` or `.pytest_cache` directory and any `*.pyc` or `*.pyo` file under the task
+(`task.Generated`), so bytecode committed by accident never makes two commits incomparable. Once the
+task's result branch exists (below), a `submit check` or `submit measure` of a commit whose task
+files differ from the branch head's is refused before any job exists, as a `conflict` failure that
+names the changed paths: a candidate scores under the task it was given, never one it edited. A benchmark reports its score in one of two
 ways: it writes a JSON file at the path given after the flag in `[benchmark.result]`, or, with
 `result_protocol = 2` in `[benchmark]`, a stream of evaluator records at the path given after
 `--vs-output`. Tasks that declare an `[evaluator]` or an `entrypoint` are refused: their commands

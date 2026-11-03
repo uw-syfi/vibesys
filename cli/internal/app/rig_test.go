@@ -47,7 +47,10 @@ type world struct {
 	checkouts *fakeenv.Checkouts
 	survivors *supervisor.Survivors
 	git       *gitrepo.Fake
-	apps      []*app.App
+	// branches is the repository's result branch, for a test of what the daemon holds a submission to.
+	// Without it the daemon cannot read the branch.
+	branches *gitrepo.FakeBranches
+	apps     []*app.App
 }
 
 func newWorld(t *testing.T) *world {
@@ -93,7 +96,12 @@ func (w *world) supervisors() supervisor.Supervisors {
 // newApp starts a daemon over the world. It fails the test if the daemon cannot start.
 func (w *world) newApp() *app.App {
 	w.t.Helper()
+	var branches gitrepo.Branches
+	if w.branches != nil {
+		branches = w.branches
+	}
 	a := app.New(instant(app.Config{
+		Branches:     branches,
 		Clock:        w.clock,
 		Stores:       w.stores,
 		Environments: fakeenv.Environments{core.EnvironmentHost: w.env},
