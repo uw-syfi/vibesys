@@ -113,10 +113,10 @@ const REJECTION: Readonly<Record<Rejection, string>> = {
 export const rejectionWord = (rejection: Rejection): string => REJECTION[rejection];
 
 const REFUSAL: Readonly<Record<Refusal, string>> = {
-  [Refusal.UNSPECIFIED]: 'The message was not accepted.',
+  [Refusal.UNSPECIFIED]: 'The host did not accept that.',
   [Refusal.RUN_NOT_FOUND]: 'That run no longer exists.',
   [Refusal.AGENT_NOT_FOUND]: 'No such agent in this run.',
-  [Refusal.NOT_PERMITTED]: 'You are not allowed to message that agent.',
+  [Refusal.NOT_PERMITTED]: 'This app is not allowed to do that.',
   [Refusal.RUN_NOT_RUNNING]: 'The run is not running.',
   [Refusal.FANOUT_LIMIT]: 'The run is already at its limit of agents.',
   [Refusal.AGENT_IS_LEAD]: 'That message cannot go to the lead.',

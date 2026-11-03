@@ -80,6 +80,8 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
       'src/main/index.ts',
       'src/preload/index.cts',
       'src/ui/main.tsx',
+      // The browser page over a fake daemon (`fixture.html`, built with `vite build --mode fixture`).
+      'src/testing/page/main.tsx',
       'src/**/*.test.ts',
       'src/**/*.test.tsx',
       'e2e/**/*.spec.ts',

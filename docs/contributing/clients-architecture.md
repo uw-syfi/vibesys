@@ -680,7 +680,8 @@ The Biome rules (`tools/lint-rules/effect-*.grit`, wired in `biome.json`) hold t
 `effect-namespace-imports` (modules are imported as namespaces from their subpath, as in
 `import * as Effect from 'effect/Effect'`), `effect-no-ambient-time-random` (no `Date.now`,
 `setTimeout`, `Math.random` or `crypto.randomUUID` in `core/`, `state/` or `ui/`),
-`effect-run-only-in-entries` (`Effect.run*` only in `main/index.ts` and `ui/main.tsx`),
+`effect-run-only-in-entries` (`Effect.run*` only in `main/index.ts`, `ui/main.tsx` and the browser
+fixture page `testing/page/main.tsx`),
 `effect-core-no-promises` (no `async`, `await`, `Promise` or `AbortController` in `core/`; wrap a
 Promise API once with `Effect.tryPromise`), and `effect-tests-no-real-time`. A suppression needs
 a comment that says why each alternative is worse.
