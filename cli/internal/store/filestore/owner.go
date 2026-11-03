@@ -113,7 +113,7 @@ func takeRecord(b *backend, owner Owner, lock fsys.Lock) (*guard, error) {
 	if elsewhere && len(running) > 0 {
 		return nil, store.Mark(refused(
 			"the store at %s has running jobs that belong to %s: start the daemon there, or, if that place is gone for good, remove %s and those of them that no run can be found of here will be marked lost",
-			b.root, last, name), store.ErrAway)
+			b.root, last, name), store.ErrOwnedElsewhere, store.ErrAway)
 	}
 	rec := ownerRec{Generation: 1, Host: owner.Host, Dir: owner.Dir, PID: owner.PID, GivenUp: running}
 	if last != nil {
@@ -201,7 +201,9 @@ func readOwner(b *backend, name string) (*ownerRec, error) {
 // leaving is a refusal the caller may try again: see store.ErrOwnerLeaving.
 type leaving struct{ *core.Failure }
 
-func (l leaving) Unwrap() []error { return []error{l.Failure, store.ErrOwnerLeaving, store.ErrAway} }
+func (l leaving) Unwrap() []error {
+	return []error{l.Failure, store.ErrOwnerLeaving, store.ErrOwnedElsewhere, store.ErrAway}
+}
 
 // inUse refuses a store another hold has. A daemon that holds the lock may not have written its
 // record yet, and a record that cannot be read has a message of its own at the next Open.
@@ -209,13 +211,13 @@ func inUse(b *backend, owner Owner) error {
 	const message = "the store at %s is in use by %s: a store has one daemon, so stop that one or use it"
 	rec, err := readOwner(b, path.Join(b.root, ownerFile))
 	if err != nil || rec == nil {
-		return store.Mark(refused(message, b.root, "another daemon"), store.ErrAway)
+		return store.Mark(refused(message, b.root, "another daemon"), store.ErrOwnedElsewhere, store.ErrAway)
 	}
 	failure := refused(message, b.root, rec)
 	if rec.Host == owner.Host && rec.Dir == owner.Dir {
 		return leaving{failure}
 	}
-	return store.Mark(failure, store.ErrAway)
+	return store.Mark(failure, store.ErrOwnedElsewhere, store.ErrAway)
 }
 
 // runningJobs returns the jobs the store has running, in the order it lists them.

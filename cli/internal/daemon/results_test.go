@@ -94,6 +94,16 @@ func (r *resultsRig) measured(c core.Commit, samples ...float64) {
 	storetest.SeedMeasurement(r.t, st, storetest.Measurement{Commit: c, Samples: samples, At: r.clk.Now()})
 }
 
+// measuredAt is measured at a time the test gives, so what is recorded does not depend on the clock.
+func (r *resultsRig) measuredAt(c core.Commit, samples []float64, at time.Time) {
+	r.t.Helper()
+	st, err := r.stores.Create(ctxFor(r.t), mustScope(r.t, "/repo", "task"))
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	storetest.SeedMeasurement(r.t, st, storetest.Measurement{Commit: c, Samples: samples, At: at})
+}
+
 var (
 	winning = []float64{120, 121, 119, 122, 120}
 	levelAt = []float64{100, 101, 99, 100, 102}

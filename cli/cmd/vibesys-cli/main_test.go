@@ -33,6 +33,8 @@ type cli struct {
 	// stdin and files are what a command reads when given "-" or a path.
 	stdin string
 	files map[string]string
+	// cannotStart is a machine on which no daemon can be started.
+	cannotStart bool
 }
 
 func newCLI(t *testing.T) *cli {
@@ -69,7 +71,11 @@ func (c *cli) run(args ...string) result {
 			return nil, fmt.Errorf("open %s: no such file or directory", path)
 		},
 		options: func() (client.Options, error) {
-			return client.Options{Rendezvous: client.LocalRendezvous{Dir: c.starter.Dir}, Version: version, Starter: c.starter, Timers: c.timers,
+			var starter client.Starter = c.starter
+			if c.cannotStart {
+				starter = nil
+			}
+			return client.Options{Rendezvous: client.LocalRendezvous{Dir: c.starter.Dir}, Version: version, Starter: starter, Timers: c.timers,
 				// The command line's time holds still, so a wait asks the daemon for its whole timeout.
 				Clock: clock.NewManual(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), 0)}, nil
 		},
@@ -165,7 +171,7 @@ func TestInvalidArgumentsAreRefusedBeforeTheDaemon(t *testing.T) {
 		{"jobs bad kind", withTask("jobs", "--kind", "nap"), "--kind"},
 		{"jobs extra argument", withTask("jobs", "j1"), "j1"},
 		{"logs no job", withTask("logs"), "one job"},
-		{"daemon nothing", []string{"daemon"}, "status, stop, restart or forget"},
+		{"daemon nothing", []string{"daemon"}, "status, ensure, stop, restart or forget"},
 		{"daemon bogus", []string{"daemon", "bogus"}, "bogus"},
 		{"unknown commit", withTask("submit", "command", "no-such-rev", "--", "true"), "no-such-rev"},
 	}

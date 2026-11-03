@@ -3,6 +3,7 @@ package vibesys.cli.v1;
 
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
+import "vibesys/cli/v1/failure.proto";
 import "vibesys/cli/v1/job.proto";
 import "vibesys/cli/v1/plan.proto";
 import "vibesys/cli/v1/promote.proto";
@@ -35,6 +36,11 @@ service DaemonService {
   // the wait ended. The daemon decides the outcome, the timeout included, so every client reads the
   // same answer. `wait` and `submit --wait` use it; a timeout never cancels a job.
   rpc Wait(WaitRequest) returns (stream WaitResponse);
+  // WatchTask streams the state of one task as facts, and never ends on its own. Each message is
+  // the difference between the task's store now and what this stream last sent, so a client that
+  // applies the messages in order holds the store as it was at some moment, and a slow client gets
+  // a larger difference later, never a gap. Protocol 3.
+  rpc WatchTask(WatchTaskRequest) returns (stream WatchTaskResponse);
   // Cancel stops a job, whole process group included, and does so for every waiter on a shared
   // job. A cancelled measure saves nothing.
   rpc Cancel(CancelRequest) returns (CancelResponse);
@@ -346,4 +352,112 @@ message ClosePlanRequest {
 
 message ClosePlanResponse {
   Plan plan = 1;
+}
+
+message WatchTaskRequest {
+  // The repository and the task. The run and the agent are not used.
+  CallContext context = 1;
+  // The token of the last CaughtUp the client applied, or empty. Protocol 3 ignores it and
+  // answers every connection with a Reset; the fields stay so a later protocol can resume.
+  string epoch = 2;
+  uint64 after_sequence = 3;
+  // How many of the newest measured commits to judge against the head. 0 means 20, and more than
+  // 100 is INVALID_INPUT.
+  uint32 judged_commits = 4;
+}
+
+message WatchTaskResponse {
+  // Names one daemon boot. A client resumes only within one epoch.
+  string epoch = 1;
+  // 1.. on a stream, with no gap.
+  uint64 sequence = 2;
+  oneof body {
+    Reset reset = 3;
+    TaskFacts facts = 4;
+    CaughtUp caught_up = 5;
+  }
+}
+
+// Reset says the facts that follow, up to CaughtUp, are the whole state: a client holds them aside
+// and replaces what it has, all at once, at CaughtUp. A client cut before CaughtUp keeps what it
+// had.
+message Reset {}
+
+// CaughtUp ends a Reset. Its epoch and sequence are the client's resume token.
+message CaughtUp {}
+
+// TaskFacts is 1 to 500 facts, each replacing the fact with the same key.
+message TaskFacts {
+  repeated TaskFact facts = 1;
+}
+
+// A fact is keyed by job.id, result.job_id, judgment.commit, promotion.seq, plan.number or
+// trouble.job_id; head and health are singletons. A trouble fact exists while the job's end is out
+// of the daemon's hands; a key that stops existing is conveyed by a Reset, except a judgment, which
+// leaves the window of judged commits and is then stale by its against.
+message TaskFact {
+  oneof fact {
+    Job job = 1;
+    Result result = 2;
+    Judgment judgment = 3;
+    PromotionRecord promotion = 4;
+    Plan plan = 5;
+    Head head = 6;
+    StoreHealth health = 7;
+    JobTrouble trouble = 8;
+  }
+}
+
+// Judgment is how a measured commit compares with the head at `against`, or why it cannot be.
+message Judgment {
+  string commit = 1;
+  string against = 2;
+  oneof outcome {
+    Comparison comparison = 3;
+    Failure refused = 4;
+  }
+}
+
+// PromotionRecord is a promotion with its place in the task's record, 1 for the first.
+message PromotionRecord {
+  uint64 seq = 1;
+  Promotion promotion = 2;
+}
+
+// JobTrouble is why a job that is not final is not being worked on, the failure Wait would end
+// with.
+message JobTrouble {
+  string job_id = 1;
+  Failure failure = 2;
+}
+
+message Head {
+  oneof state {
+    CurrentResult current = 1;
+    NoCurrentResult none = 2;
+  }
+}
+
+message StoreHealth {
+  oneof state {
+    Live live = 1;
+    Away away = 2;
+  }
+}
+
+// Live says the task's store was read.
+message Live {}
+
+// Away says it could not be read now. The facts sent before stay as they were.
+message Away {
+  AwayReason reason = 1;
+  Failure failure = 2;
+}
+
+enum AwayReason {
+  AWAY_REASON_UNSPECIFIED = 0;
+  // Another daemon or machine owns the store.
+  AWAY_REASON_OWNED_ELSEWHERE = 1;
+  // The store did not answer or could not be read.
+  AWAY_REASON_UNAVAILABLE = 2;
 }

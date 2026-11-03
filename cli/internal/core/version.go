@@ -14,7 +14,10 @@ const (
 	//
 	// 2: the command line sends its working directory, which the daemon resolves to a repository,
 	// and waits through Wait, whose outcome the daemon decides. A daemon of 1 has neither.
-	ProtocolVersion uint32 = 2
+	//
+	// 3: WatchTask streams a task's state as facts, and the handshake accepts the orchestrator as
+	// a component. A daemon of 2 has neither, and rejects the component.
+	ProtocolVersion uint32 = 3
 
 	// MinProtocolVersion is the oldest ProtocolVersion this build still serves. A daemon still
 	// serves command lines and supervisors of 1: an older command line waits through Watch and
@@ -23,9 +26,15 @@ const (
 
 	// MinDaemonProtocolVersion is the oldest daemon the command line of this build works with. It
 	// is above MinProtocolVersion because the command line needs what 2 added, while a daemon of
-	// this build still serves older peers.
-	MinDaemonProtocolVersion uint32 = 2
+	// this build still serves older peers. It is at least WatchTaskSince, so a command line of this
+	// build, `daemon ensure` included, replaces a daemon that cannot serve WatchTask.
+	MinDaemonProtocolVersion uint32 = 3
 )
+
+// WatchTaskSince is the protocol version that added WatchTask. It is the one definition of the
+// version a client needs of a daemon to watch a task; conformance/protocol.json holds the same
+// number for the other side of the contract, and a test holds this to it.
+const WatchTaskSince uint32 = 3
 
 // Versions is what one build carries, less the release version, which is display only and which
 // no caller compares.

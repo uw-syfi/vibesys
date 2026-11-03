@@ -138,6 +138,12 @@ var ErrNoStore = errors.New("no store was made here")
 // that does not carry it is the store's answer.
 var ErrAway = errors.New("the store is away")
 
+// ErrOwnedElsewhere marks a refusal that says another daemon, or another place, owns the store: a
+// store is held by another daemon, or has running jobs that belong to another place. It always
+// comes with ErrAway. A reader that reports the store's state names it, rather than a store that
+// is merely out of reach.
+var ErrOwnedElsewhere = errors.New("the store is owned elsewhere")
+
 // ErrGone marks a failure that says the place of a store that was made is not there: its
 // repository or its directory does not exist. It comes with ErrAway, as a disk that is not mounted
 // looks the same, so the daemon holds the store's jobs; only a person who knows the repository was

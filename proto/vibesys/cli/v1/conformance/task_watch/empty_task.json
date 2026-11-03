@@ -1,0 +1,41 @@
+{
+  "description": "a task that has no store: a reset of its health and its head, and nothing else",
+  "judged_commits": 0,
+  "setup": [],
+  "ops": [],
+  "cuts": null,
+  "expect": [
+    [
+      {
+        "epoch": "E1",
+        "reset": {},
+        "sequence": "1"
+      },
+      {
+        "epoch": "E1",
+        "facts": {
+          "facts": [
+            {
+              "health": {
+                "live": {}
+              }
+            },
+            {
+              "head": {
+                "none": {
+                  "reason": "NO_CURRENT_RESULT_REASON_NO_HEAD"
+                }
+              }
+            }
+          ]
+        },
+        "sequence": "2"
+      },
+      {
+        "caughtUp": {},
+        "epoch": "E1",
+        "sequence": "3"
+      }
+    ]
+  ]
+}

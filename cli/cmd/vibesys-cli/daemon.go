@@ -15,15 +15,17 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/production"
 )
 
-// daemonCommand is `daemon status|stop|restart|forget`, and `daemon run`, which is the daemon
+// daemonCommand is `daemon status|ensure|stop|restart|forget`, and `daemon run`, which is the daemon
 // process itself and is what a client starts.
 func daemonCommand(ctx context.Context, d deps, args []string) int {
 	if len(args) == 0 {
-		return fail(d, d.jsonErrors, usagef("daemon: status, stop, restart or forget"))
+		return fail(d, d.jsonErrors, usagef("daemon: status, ensure, stop, restart or forget"))
 	}
 	switch args[0] {
 	case "status":
 		return daemonStatus(ctx, d, args[1:])
+	case "ensure":
+		return daemonEnsure(ctx, d, args[1:])
 	case "stop":
 		return daemonStop(ctx, d, args[1:])
 	case "restart":
@@ -35,7 +37,7 @@ func daemonCommand(ctx context.Context, d deps, args []string) int {
 	case "install":
 		return fail(d, d.jsonErrors, usagef("daemon install is not available in this build; the daemon starts when a command needs it"))
 	default:
-		return fail(d, d.jsonErrors, usagef("daemon: %q is not a daemon command (status, stop, restart or forget)", args[0]))
+		return fail(d, d.jsonErrors, usagef("daemon: %q is not a daemon command (status, ensure, stop, restart or forget)", args[0]))
 	}
 }
 
@@ -77,6 +79,34 @@ func daemonStatus(ctx context.Context, d deps, args []string) int {
 	fmt.Fprintf(d.stdout, "running\tpid %d\tversion %s\tqueued %d\trunning %d\n",
 		st.GetPid(), st.GetVersions().GetBinaryVersion(), st.GetQueuedJobs(), st.GetRunningJobs())
 	return exitOK
+}
+
+// daemonEnsure is the one way to have a daemon that this build can use. It does what every
+// command does to reach the daemon: it takes the right to start, and starts a daemon when none
+// runs or replaces one older than this build, and waits until it answers. A caller that is not a
+// command line, such as the orchestrator, runs this and reads the exit code only: 0 means a
+// compatible daemon answers, and 4 means none does, whatever the reason; the message names it.
+// Only a command that is itself malformed ends otherwise, with 2.
+func daemonEnsure(ctx context.Context, d deps, args []string) int {
+	fs, c := newFlags("daemon ensure", d)
+	if _, err := parse(fs, args); err != nil {
+		return parseFailed(d, fs, err)
+	}
+	cl, err := connect(ctx, d)
+	if err == nil {
+		defer cl.Close()
+		var st *cliv1.StatusResponse
+		if st, err = cl.Status(ctx); err == nil {
+			if c.json {
+				printJSON(d, st)
+			} else {
+				fmt.Fprintf(d.stdout, "ready\tpid %d\tversion %s\n", st.GetPid(), st.GetVersions().GetBinaryVersion())
+			}
+			return exitOK
+		}
+	}
+	fail(d, c.json, err)
+	return exitNoAnswer
 }
 
 // daemonStop stops the daemon. Jobs that run have supervisors of their own and go on. Stopping a

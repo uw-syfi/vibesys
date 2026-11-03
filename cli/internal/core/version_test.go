@@ -1,6 +1,10 @@
 package core_test
 
 import (
+	"bytes"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -68,3 +72,41 @@ func TestADaemonOfProtocolOneIsReplacedAndStillServesOldPeers(t *testing.T) {
 		t.Fatalf("this command line and this daemon: %s", got)
 	}
 }
+
+// The version WatchTask needs has one definition, the conformance file the other side of the
+// contract reads too. This build speaks it, and its command line replaces a daemon below it.
+func TestTheProtocolConstantsAreTheConformanceFile(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "proto", "vibesys", "cli", "v1", "conformance", "protocol.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var file struct {
+		WatchTaskSince *uint32 `json:"watch_task_since"`
+	}
+	dec := json.NewDecoder(bytesReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&file); err != nil || file.WatchTaskSince == nil {
+		t.Fatalf("protocol.json: %v, want watch_task_since", err)
+	}
+	if core.WatchTaskSince != *file.WatchTaskSince {
+		t.Errorf("WatchTaskSince = %d, protocol.json says %d", core.WatchTaskSince, *file.WatchTaskSince)
+	}
+	if core.ProtocolVersion < core.WatchTaskSince {
+		t.Errorf("this build speaks protocol %d, below the %d that added WatchTask", core.ProtocolVersion, core.WatchTaskSince)
+	}
+	// The command line of this build, `daemon ensure` included, replaces a daemon that cannot serve WatchTask.
+	older := core.Versions{Protocol: core.WatchTaskSince - 1, MinProtocol: 1, Schema: core.SchemaVersion}
+	if got := core.CheckCompatibility(core.ClientVersions(), older); got != core.DaemonTooOld {
+		t.Errorf("this command line and a daemon of %d: %s, want daemon_too_old", older.Protocol, got)
+	}
+	// An orchestrator that needs WatchTask is refused by a daemon below it, and served by this one.
+	needs := core.Versions{Protocol: core.WatchTaskSince, MinProtocol: core.WatchTaskSince, Schema: core.SchemaVersion}
+	if got := core.CheckCompatibility(needs, older); got != core.DaemonTooOld {
+		t.Errorf("a client that needs WatchTask and a daemon of %d: %s, want daemon_too_old", older.Protocol, got)
+	}
+	if got := core.CheckCompatibility(needs, core.CurrentVersions()); got != core.Compatible {
+		t.Errorf("a client that needs WatchTask and this daemon: %s", got)
+	}
+}
+
+func bytesReader(b []byte) *bytes.Reader { return bytes.NewReader(b) }

@@ -210,6 +210,13 @@ func (o *outage) bringBack(repo string) {
 	delete(o.away, repo)
 }
 
+// bringBackRemoved puts a removed repository back, as a new one would be.
+func (o *outage) bringBackRemoved(repo string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	delete(o.removed, repo)
+}
+
 func (o *outage) hang(repo string) {
 	o.mu.Lock()
 	defer o.mu.Unlock()

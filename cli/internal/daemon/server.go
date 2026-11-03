@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"sync"
 
@@ -59,12 +60,44 @@ func (s *Server) call(ctx context.Context, c *cliv1.CallContext) (core.CallConte
 
 // Hello implements cliv1.DaemonServiceServer.
 func (s *Server) Hello(_ context.Context, req *cliv1.HelloRequest) (*cliv1.HelloResponse, error) {
-	if req.GetComponent() != cliv1.Component_COMPONENT_CLI {
-		return nil, wire.Error(&core.Failure{Kind: core.FailureInvalidInput, Message: "component: the daemon serves the command line tool only"})
+	switch req.GetComponent() {
+	case cliv1.Component_COMPONENT_CLI, cliv1.Component_COMPONENT_ORCHESTRATOR:
+	default:
+		return nil, wire.Error(&core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf(
+			"component: %s is not a client of the daemon; it serves the command line tool and the orchestrator", req.GetComponent())})
 	}
 	ours := core.CurrentVersions()
 	compat := core.CheckCompatibility(wire.ToVersions(req.GetVersions()), ours)
 	return &cliv1.HelloResponse{Versions: wire.BuildVersions(s.binary, ours), Compatibility: wire.Compatibility(compat)}, nil
+}
+
+// WatchTask implements cliv1.DaemonServiceServer. It reports a task's state until the call ends,
+// as a reset, then the changes. Protocol 3 ignores the resume token and resets on every
+// connection.
+func (s *Server) WatchTask(req *cliv1.WatchTaskRequest, stream cliv1.DaemonService_WatchTaskServer) error {
+	ctx, cancel := s.bound(stream.Context())
+	defer cancel()
+	judged, err := wire.JudgedCommits(req)
+	if err != nil {
+		return wire.Error(err)
+	}
+	call, err := s.call(ctx, req.GetContext())
+	if err != nil {
+		return wire.Error(err)
+	}
+	epoch := s.app.Epoch()
+	var sequence uint64
+	err = s.app.WatchTask(ctx, call.Scope, judged, func(send core.Send) error {
+		for _, m := range wire.TaskMessages(send) {
+			sequence++
+			m.Epoch, m.Sequence = epoch, sequence
+			if err := stream.Send(m); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return wire.Error(err)
 }
 
 // Status implements cliv1.DaemonServiceServer.
