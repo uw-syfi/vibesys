@@ -9,6 +9,7 @@ import '@vibesys/ui/components.css';
 import * as Effect from 'effect/Effect';
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
+import {RpcStatus} from '../../core/errors.js';
 import {Ids, makeHostSession} from '../../core/index.js';
 import {ConnectedApp} from '../../ui/orchestrator/connected.js';
 import {FakeDaemon, generateScenario} from '../orchestrator/index.js';
@@ -28,8 +29,18 @@ function scenarioOf(search: string) {
   });
 }
 
-const daemon = new FakeDaemon(scenarioOf(window.location.search));
-const fake = makeFakeTransport(daemonRecording(daemon));
+const query = new URLSearchParams(window.location.search);
+const daemon = new FakeDaemon({
+  ...scenarioOf(window.location.search),
+  search: true,
+  searchStale: query.has('stale'),
+});
+const fake = makeFakeTransport(
+  daemonRecording(
+    daemon,
+    query.has('login-failed') ? {helloFails: () => RpcStatus.UNAUTHENTICATED} : {},
+  ),
+);
 
 const root = document.getElementById('root');
 if (root === null) throw new Error('fixture.html has no #root');

@@ -33,7 +33,7 @@ function HandoffCard(props: {
   const verdict = attempt ? verdictOf(props.state, message.fromAgentId) : null;
   const rows: KeyValueItem[] = [
     {key: 'Checks', value: handoff.checks},
-    {key: 'Measured', value: handoff.measurement},
+    {key: 'Measured (the agent’s words)', value: handoff.measurement},
     {key: 'Learned', value: handoff.learned},
     {key: 'Suggested next', value: handoff.next},
     {

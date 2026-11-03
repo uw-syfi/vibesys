@@ -27,6 +27,7 @@ import {
 import {applyEvent} from '../../state/orchestrator/fold.js';
 import {emptyState, type OrchestratorState} from '../../state/orchestrator/state.js';
 import type {Scenario} from './scenario.js';
+import {searchFixture} from './search.js';
 
 const FINAL = new Set([AgentStatus.ENDED, AgentStatus.FAILED, AgentStatus.LOST]);
 
@@ -76,6 +77,16 @@ export class FakeDaemon {
       turns: Object.values(state.turns),
       messages: Object.values(state.messages),
       sequence: state.sequence,
+      searches:
+        this.scenario.search === true
+          ? [
+              searchFixture(
+                this.scenario.runId,
+                this.scenario.endMs,
+                this.scenario.searchStale ?? false,
+              ),
+            ]
+          : [],
     });
   }
 

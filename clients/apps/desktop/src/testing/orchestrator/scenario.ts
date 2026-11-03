@@ -48,6 +48,8 @@ export interface ScenarioOptions {
 }
 
 export interface Scenario {
+  readonly search?: boolean;
+  readonly searchStale?: boolean;
   readonly runId: string;
   readonly events: readonly Event[];
   readonly plans: readonly Plan[];
