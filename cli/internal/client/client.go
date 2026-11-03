@@ -321,41 +321,49 @@ func (c *Client) ForgetRepository(ctx context.Context, repository string) (*cliv
 func (c *Client) Submit(ctx context.Context, req *cliv1.SubmitRequest) (*cliv1.SubmitResponse, error) {
 	current := c
 	defer func() {
-		if current != c {
+		if current != nil && current != c {
 			current.Close()
 		}
 	}()
 	delay := reconnectFirst
+	var last error
 	for attempt := 1; ; attempt++ {
-		resp, err := current.rpc.Submit(ctx, req)
+		if current != nil {
+			resp, err := current.rpc.Submit(ctx, req)
+			switch {
+			case err == nil:
+				return resp, nil
+			case ctx.Err() != nil:
+				return nil, ctx.Err()
+			case !wire.Broken(err):
+				return nil, c.fail(err)
+			case req.GetNoCache() || req.GetSpec().GetCommand() != nil:
+				return nil, fmt.Errorf("%w: %v", ErrSubmissionUnknown, err)
+			}
+			last = err
+		}
+		if attempt >= reconnectAttempts {
+			return nil, fmt.Errorf("the daemon did not answer the submission after %d attempts: %w", attempt, last)
+		}
+		// A daemon that is stopping can still answer and cancel the call again, so every attempt
+		// after the first waits a pause that grows; Connect then waits for a daemon that is going
+		// and starts the next.
+		if !clock.Sleep(ctx, c.opts.Timers, delay) {
+			return nil, ctx.Err()
+		}
+		delay = min(delay*2, reconnectLongest)
+		if current != c && current != nil {
+			current.Close()
+		}
+		current = nil
+		next, err := Connect(ctx, c.opts)
 		switch {
 		case err == nil:
-			return resp, nil
-		case ctx.Err() != nil:
-			return nil, ctx.Err()
-		case !wire.Broken(err):
-			return nil, c.fail(err)
-		case req.GetNoCache() || req.GetSpec().GetCommand() != nil:
-			return nil, fmt.Errorf("%w: %v", ErrSubmissionUnknown, err)
-		case attempt >= reconnectAttempts:
-			return nil, fmt.Errorf("the daemon did not answer the submission after %d attempts: %w", attempt, err)
-		}
-		// Connect waits for a daemon that is going and starts the next, so a restart needs no pause
-		// of its own; one that leaves no daemon to reach is tried again after a backoff.
-		next, cerr := Connect(ctx, c.opts)
-		switch {
-		case cerr == nil:
-			if current != c {
-				current.Close()
-			}
 			current = next
-		case wire.IsIncompatible(cerr):
-			return nil, cerr
+		case wire.IsIncompatible(err):
+			return nil, err
 		default:
-			if !clock.Sleep(ctx, c.opts.Timers, delay) {
-				return nil, ctx.Err()
-			}
-			delay = min(delay*2, reconnectLongest)
+			last = err
 		}
 	}
 }
