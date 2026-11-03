@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 
 	"github.com/uw-syfi/vibesys/cli/internal/app"
 	"github.com/uw-syfi/vibesys/cli/internal/changed"
@@ -113,47 +114,54 @@ func converge(t *testing.T, a *app.App, w *watcher, o *outage, s core.Scope, pas
 func TestAWatcherHoldsTheTaskAfterAnyInterleaving(t *testing.T) {
 	for seed := uint64(1); seed <= 25; seed++ {
 		t.Run(fmt.Sprintf("seed %d", seed), func(t *testing.T) {
-			r := rand.New(rand.NewPCG(seed, seed*7919))
-			w, o := newOutage(t)
-			a := o.start(w.supervisors())
-			wt := watch(t, a, scopeA)
-			var submitted []core.JobID
-			away := false
-			for step := 0; step < 14; step++ {
-				pass := false
-				switch op := r.IntN(10); {
-				case op < 5 && !away:
-					job := submitAs(t, a, callA, "print", fmt.Sprint(seed, step), ";", "exit", "0")
-					submitted = append(submitted, job.ID)
-					o.awaitFinal(t, a, scopeA, job.ID)
-				case op < 7 && !away:
-					o.takeAway(repoA)
-					away, pass = true, true
-				case op < 8 && away:
-					o.bringBack(repoA)
-					away, pass = false, true
-				case op < 9 && !away && len(submitted) > 0:
-					o.remove(repoA)
-					if _, err := a.ForgetRepository(ctxFor(t), repoA); err != nil {
-						t.Fatalf("ForgetRepository: %v", err)
+			synctest.Test(t, func(t *testing.T) {
+				r := rand.New(rand.NewPCG(seed, seed*7919))
+				w, o := newOutage(t)
+				a := o.start(w.supervisors())
+				wt := watch(t, a, scopeA)
+				var submitted []core.JobID
+				away := false
+				for step := 0; step < 14; step++ {
+					pass := false
+					switch op := r.IntN(10); {
+					case op < 5 && !away:
+						job := submitAs(t, a, callA, "print", fmt.Sprint(seed, step), ";", "exit", "0")
+						submitted = append(submitted, job.ID)
+						// A sweep can still report the preceding outage after Submit.
+						// Recovery needs the slow period even though the repository is back.
+						o.awaitFinalIn(t, a, scopeA, job.ID)
+					case op < 7 && !away:
+						o.takeAway(repoA)
+						away, pass = true, true
+					case op < 8 && away:
+						o.bringBack(repoA)
+						away, pass = false, true
+					case op < 9 && !away && len(submitted) > 0:
+						o.remove(repoA)
+						if _, err := a.ForgetRepository(ctxFor(t), repoA); err != nil {
+							t.Fatalf("ForgetRepository: %v", err)
+						}
+						o.bringBackRemoved(repoA)
+						submitted = nil
+					default:
+						pass = true
 					}
-					o.bringBackRemoved(repoA)
-					submitted = nil
-				default:
-					pass = true
-				}
-				v := converge(t, a, wt, o, scopeA, pass)
-				if v.Content == nil {
-					continue
-				}
-				// Every job that is final in the store is held final.
-				for _, j := range v.Content.Jobs {
-					got, ok := wt.held[core.FactKey("job/"+string(j.ID))].(core.Job)
-					if j.State.Final() && (!ok || got.State != j.State) {
-						t.Fatalf("step %d: the final job %s is held as %+v", step, j.ID, got)
+					v := converge(t, a, wt, o, scopeA, pass)
+					if v.Content == nil {
+						continue
 					}
+					// Every job that is final in the store is held final.
+					wt.mu.Lock()
+					for _, j := range v.Content.Jobs {
+						got, ok := wt.held[core.FactKey("job/"+string(j.ID))].(core.Job)
+						if j.State.Final() && (!ok || got.State != j.State) {
+							wt.mu.Unlock()
+							t.Fatalf("step %d: the final job %s is held as %+v", step, j.ID, got)
+						}
+					}
+					wt.mu.Unlock()
 				}
-			}
+			})
 		})
 	}
 }
