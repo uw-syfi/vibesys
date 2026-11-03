@@ -57,7 +57,6 @@ type realRig struct {
 	scratch   string
 	checkouts *dirCheckouts
 	clock     *clock.Manual
-	backend   *cpu.Backend
 	env       *host.Environment
 }
 
@@ -68,10 +67,9 @@ func newRealRig(t *testing.T) rig {
 		t.Fatal(err)
 	}
 	clk := clock.NewManual(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), time.Millisecond)
-	be := cpu.New(cpu.NewFakeSystem(facts), clk)
 	return &realRig{
-		scratch: filepath.Join(base, "scratch"), checkouts: &dirCheckouts{base: base}, clock: clk, backend: be,
-		env: host.New(host.Config{Backend: be, Timers: clock.System{}}),
+		scratch: filepath.Join(base, "scratch"), checkouts: &dirCheckouts{base: base}, clock: clk,
+		env: host.New(host.Config{Backend: cpu.New(cpu.NewFakeSystem(facts), clk), Timers: clock.System{}}),
 	}
 }
 
@@ -81,7 +79,7 @@ func (r *realRig) config(out io.Writer) flowrun.Config {
 	_ = os.MkdirAll(r.scratch, 0o700)
 	return flowrun.Config{
 		Repository: "/repo", Commit: commit, Environment: r.env, Checkouts: r.checkouts,
-		Backend: r.backend, Files: hostfs.OS{Base: r.scratch}, Clock: r.clock, Output: out,
+		Files: hostfs.OS{Base: r.scratch}, Clock: r.clock, Output: out,
 	}
 }
 

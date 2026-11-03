@@ -41,14 +41,18 @@ type World struct {
 	Files *hostfs.Memory
 }
 
+// Machine is what the World's environment reads of the machine its commands run on.
+var Machine = core.MachineFacts{HostID: "host-a", OS: "linux", Arch: "amd64", CPUModel: "Test CPU", LogicalCPUs: 8, MemoryBytes: 16 << 30}
+
 // NewWorld returns a World that is cleaned up with the test, and fails the test if a command is
 // still running or a checkout open when it ends.
 func NewWorld(t testing.TB) *World {
 	t.Helper()
 	gates := fakeenv.NewMemoryGates()
 	files := hostfs.NewMemory()
+	machine := cpu.New(cpu.NewFakeSystem(Machine), clock.NewManual(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), time.Millisecond))
 	w := &World{
-		Gates: gates, Env: fakeenv.New(core.EnvironmentHost, gates, fakeenv.WithFiles(files)), Checkouts: &fakeenv.Checkouts{},
+		Gates: gates, Env: fakeenv.New(core.EnvironmentHost, gates, fakeenv.WithFiles(files), fakeenv.WithMachine(machine)), Checkouts: &fakeenv.Checkouts{},
 		Stores: memstores.New(app.Rules(task.DefaultSamples)), Survivors: supervisor.NewSurvivors(),
 		Branches: gitrepo.NewFakeBranches(), Git: gitrepo.NewFake(), Tasks: task.NewMemorySource(), Files: files,
 	}
@@ -68,8 +72,7 @@ func NewWorld(t testing.TB) *World {
 func (w *World) Runtime() daemon.Runtime {
 	envs := fakeenv.Environments{core.EnvironmentHost: w.Env}
 	clk := clock.NewManual(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), time.Millisecond)
-	facts := core.MachineFacts{HostID: "host-a", OS: "linux", Arch: "amd64", CPUModel: "Test CPU", LogicalCPUs: 8, MemoryBytes: 16 << 30}
-	host := supervisor.Host{Backend: cpu.New(cpu.NewFakeSystem(facts), clk), Files: w.Files, Clock: clk}
+	host := supervisor.Host{Files: w.Files, Clock: clk}
 	return daemon.Runtime{
 		Stores: w.Stores, Environments: envs, Branches: w.Branches, Repositories: w.Git, Tasks: w.Tasks,
 		Supervisors: supervisor.NewInProcess(envs, w.Checkouts, w.Survivors).WithHost(host),

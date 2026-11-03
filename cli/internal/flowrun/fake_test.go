@@ -28,7 +28,6 @@ type fakeRig struct {
 	env       *fakeenv.Environment
 	checkouts *fakeenv.Checkouts
 	system    *cpu.FakeSystem
-	backend   *cpu.Backend
 }
 
 func newFakeRig(t *testing.T) rig {
@@ -37,8 +36,8 @@ func newFakeRig(t *testing.T) rig {
 	clk := clock.NewManual(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), time.Millisecond)
 	system := cpu.NewFakeSystem(facts)
 	return &fakeRig{
-		clock: clk, files: files, system: system, backend: cpu.New(system, clk),
-		env:       fakeenv.New(core.EnvironmentHost, fakeenv.NewMemoryGates(), fakeenv.WithFiles(files)),
+		clock: clk, files: files, system: system,
+		env:       fakeenv.New(core.EnvironmentHost, fakeenv.NewMemoryGates(), fakeenv.WithFiles(files), fakeenv.WithMachine(cpu.New(system, clk))),
 		checkouts: &fakeenv.Checkouts{},
 	}
 }
@@ -48,7 +47,7 @@ func (*fakeRig) real() bool { return false }
 func (r *fakeRig) config(out io.Writer) flowrun.Config {
 	return flowrun.Config{
 		Repository: "/repo", Commit: commit, Environment: r.env, Checkouts: r.checkouts,
-		Backend: r.backend, Files: r.files, Clock: r.clock, Output: out,
+		Files: r.files, Clock: r.clock, Output: out,
 	}
 }
 

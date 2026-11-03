@@ -57,14 +57,16 @@ func newWorld(t *testing.T) *world {
 	t.Helper()
 	gates := fakeenv.NewMemoryGates()
 	files := hostfs.NewMemory()
+	clk := clock.NewManual(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), time.Millisecond)
+	machine := cpu.New(cpu.NewFakeSystem(rigMachine), clk)
 	w := &world{
 		t:         t,
-		clock:     clock.NewManual(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), time.Millisecond),
+		clock:     clk,
 		stores:    memstores.New(app.Rules(5)),
 		gates:     gates,
 		files:     files,
 		tasks:     task.NewMemorySource(),
-		env:       fakeenv.New(core.EnvironmentHost, gates, fakeenv.WithFiles(files)),
+		env:       fakeenv.New(core.EnvironmentHost, gates, fakeenv.WithFiles(files), fakeenv.WithMachine(machine)),
 		checkouts: &fakeenv.Checkouts{},
 		survivors: supervisor.NewSurvivors(),
 		git:       gitrepo.NewFake(),
@@ -87,9 +89,11 @@ func newWorld(t *testing.T) *world {
 	return w
 }
 
+// rigMachine is what the world's environment reads of the machine its commands run on.
+var rigMachine = core.MachineFacts{HostID: "host-a", OS: "linux", Arch: "amd64", CPUModel: "Test CPU", LogicalCPUs: 8, MemoryBytes: 16 << 30}
+
 func (w *world) supervisors() supervisor.Supervisors {
-	facts := core.MachineFacts{HostID: "host-a", OS: "linux", Arch: "amd64", CPUModel: "Test CPU", LogicalCPUs: 8, MemoryBytes: 16 << 30}
-	host := supervisor.Host{Backend: cpu.New(cpu.NewFakeSystem(facts), w.clock), Files: w.files, Clock: w.clock}
+	host := supervisor.Host{Files: w.files, Clock: w.clock}
 	return supervisor.NewInProcess(fakeenv.Environments{core.EnvironmentHost: w.env}, w.checkouts, w.survivors).WithHost(host)
 }
 

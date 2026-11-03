@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/uw-syfi/vibesys/cli/internal/backend"
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
@@ -32,7 +31,6 @@ type Config struct {
 	Commit      core.Commit
 	Environment environment.Environment
 	Checkouts   Checkouts
-	Backend     backend.Backend
 	Files       hostfs.FS
 	Clock       clock.Clock
 	// Output receives the output of every command and a line before each saying what runs.
@@ -174,14 +172,14 @@ func (s *Shell) read(path string) (data []byte, found bool, problem string) {
 	}
 }
 
-// observe reads the machine. What cannot be read stays empty: the facts and the load are
-// recorded and never acted on.
+// observe reads the machine the environment's commands run on. What cannot be read stays empty:
+// the facts and the load are recorded and never acted on.
 func (s *Shell) observe(ctx context.Context) flow.Event {
 	var o flow.Observed
-	if m, err := s.cfg.Backend.Machine(ctx); err == nil {
+	if m, err := s.cfg.Environment.Machine(ctx); err == nil {
 		o.Machine = m
 	}
-	if l, err := s.cfg.Backend.Load(ctx); err == nil {
+	if l, err := s.cfg.Environment.Load(ctx); err == nil {
 		o.Load = l
 	}
 	return o

@@ -192,9 +192,9 @@ func newPlanRig(t *testing.T) planRig {
 	facts := core.MachineFacts{HostID: "host-a", OS: "linux", Arch: "amd64", CPUModel: "Test CPU", LogicalCPUs: 8, MemoryBytes: 16 << 30}
 	r := planRig{
 		files:     files,
-		env:       fakeenv.New(core.EnvironmentHost, fakeenv.NewMemoryGates(), fakeenv.WithFiles(files)),
+		env:       fakeenv.New(core.EnvironmentHost, fakeenv.NewMemoryGates(), fakeenv.WithFiles(files), fakeenv.WithMachine(cpu.New(cpu.NewFakeSystem(facts), clk))),
 		checkouts: &fakeenv.Checkouts{},
-		host:      supervisor.Host{Backend: cpu.New(cpu.NewFakeSystem(facts), clk), Files: files, Clock: clk},
+		host:      supervisor.Host{Files: files, Clock: clk},
 	}
 	t.Cleanup(func() {
 		if n := r.env.Active(); n != 0 {
@@ -253,6 +253,34 @@ func TestAPlanRunsAndThePassingJobReportsItsResult(t *testing.T) {
 	}
 	if res.Job != "j1" || res.Commit != launchOf().Spec.Commit || res.Key != "k1" {
 		t.Errorf("result identity = %+v", res)
+	}
+}
+
+// A result records the machine of the environment that ran the job, which for docker on another
+// machine is that machine and not the daemon's, and its load there.
+func TestAResultRecordsTheMachineItsEnvironmentRanOn(t *testing.T) {
+	r := newPlanRig(t)
+	clk := clock.NewManual(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), time.Millisecond)
+	there := core.MachineFacts{HostID: "host-b", OS: "linux", Arch: "arm64", CPUModel: "Other CPU", LogicalCPUs: 20, MemoryBytes: 128 << 30}
+	docker := fakeenv.New(core.EnvironmentDocker, fakeenv.NewMemoryGates(), fakeenv.WithFiles(r.files),
+		fakeenv.WithMachine(cpu.New(cpu.NewFakeSystem(there), clk)))
+	p := measurePlan("emit", `{"ops": 7.5}`)
+	p.Environment.Kind = core.EnvironmentDocker
+	l := planLaunch(p)
+	l.Spec.Environment = core.EnvironmentDocker
+	s := supervisor.New(supervisor.Config{
+		Launch: l, Environments: fakeenv.Environments{core.EnvironmentHost: r.env, core.EnvironmentDocker: docker},
+		Checkouts: r.checkouts, Spool: &supervisor.MemorySpool{}, Host: r.host,
+	})
+	if err := s.Start(); err != nil {
+		t.Fatal(err)
+	}
+	res := passedOf(finish(t, s))
+	if res == nil {
+		t.Fatal("the job did not pass")
+	}
+	if res.Machine != there || res.Load.SampledAt.IsZero() {
+		t.Errorf("result machine = %+v, load %+v; want the docker machine's %+v and its load", res.Machine, res.Load, there)
 	}
 }
 
