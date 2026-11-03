@@ -126,6 +126,8 @@ type outage struct {
 	// missRunning, when set, is the next record of a job as running: it waits for release and
 	// then fails as an away disk does, with nothing written.
 	missRunning *gate
+	// staleRead holds one refused read after it observed the outage.
+	staleRead *gate
 }
 
 // gate holds one call until the test lets it go, and says when the call arrived.
@@ -240,6 +242,17 @@ func (o *outage) reach(ctx context.Context, repo string) error {
 		return errAway
 	}
 	if away {
+		o.mu.Lock()
+		g := o.staleRead
+		o.staleRead = nil
+		o.mu.Unlock()
+		if g != nil {
+			close(g.entered)
+			select {
+			case <-g.release:
+			case <-ctx.Done():
+			}
+		}
 		return errAway
 	}
 	return nil
