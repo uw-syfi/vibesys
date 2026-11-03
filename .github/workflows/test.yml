@@ -28,6 +28,11 @@ on:
 #   exploration, coverage, the real-system tiers and the example and image jobs. Every
 #   test therefore still runs before every merge, on the tree the merge will produce.
 #
+# Merge groups restore image caches but do not snapshot or publish multi-GB archives:
+# cache maintenance must not exhaust the merge budget after tests have passed. Eligible
+# PR and main-push jobs still publish. test_merge_queue_never_snapshots_or_publishes_image_archives
+# holds both archive steps to this rule; the Slurm cache already publishes only on push.
+#
 # A job that belongs to the full stage only carries `github.event_name != 'pull_request'` in
 # its `if`. `Required PR CI` and `ci-budget` run on both events. `validate-examples` also runs in
 # the commit stage when the change moves an example repository's pin (`example_pointers`), and
@@ -843,11 +848,11 @@ jobs:
           echo "Built $CONTEXT in $(( $(date +%s) - start )) s (layer cache hit: ${{ steps.docker-cache.outputs.cache-hit }})" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Snapshot Docker layer cache
-        if: steps.docker-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        if: github.event_name != 'merge_group' && steps.docker-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         run: ./scripts/ci_docker_data_root.sh snapshot "${{ runner.temp }}/docker-data.tar.zst"
 
       - name: Save Docker layer cache
-        if: steps.docker-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        if: github.event_name != 'merge_group' && steps.docker-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         uses: ./.github/actions/docker-image-cache
         with:
           mode: save
@@ -928,11 +933,11 @@ jobs:
         run: ./support/repoctl/repoctl run-checks --group agent_image_tests
 
       - name: Snapshot Docker layer cache
-        if: steps.docker-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        if: github.event_name != 'merge_group' && steps.docker-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         run: ./scripts/ci_docker_data_root.sh snapshot "${{ runner.temp }}/docker-data.tar.zst"
 
       - name: Save Docker layer cache
-        if: steps.docker-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        if: github.event_name != 'merge_group' && steps.docker-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         uses: ./.github/actions/docker-image-cache
         with:
           mode: save
@@ -1518,11 +1523,11 @@ jobs:
           ./scripts/run_minimal_container_tests.sh "${cache_sources[@]}"
 
       - name: Snapshot Docker layer cache
-        if: steps.docker-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        if: github.event_name != 'merge_group' && steps.docker-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         run: ./scripts/ci_docker_data_root.sh snapshot "${{ runner.temp }}/docker-data.tar.zst"
 
       - name: Save Docker layer cache
-        if: steps.docker-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        if: github.event_name != 'merge_group' && steps.docker-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         uses: ./.github/actions/docker-image-cache
         with:
           mode: save
@@ -1611,11 +1616,11 @@ jobs:
           libs/vs-runtime/src/vs_runtime/features
 
       - name: Snapshot Docker layer cache
-        if: steps.docker-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        if: github.event_name != 'merge_group' && steps.docker-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         run: ./scripts/ci_docker_data_root.sh snapshot "${{ runner.temp }}/docker-data.tar.zst"
 
       - name: Save Docker layer cache
-        if: steps.docker-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        if: github.event_name != 'merge_group' && steps.docker-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         uses: ./.github/actions/docker-image-cache
         with:
           mode: save
