@@ -148,12 +148,10 @@ test('the S3 and S4 rules do not apply to tests or paths outside the override', 
   assert.notEqual((await lintStrict(t, raw)).length, 0);
 });
 
-test('the workspace override covers new feature and app packages without a marker', async t => {
+test('the workspace override covers new app packages without a marker', async t => {
   const raw = 'export const a = <button style={{color: "#fff"}} />;\n';
-  for (const folder of ['features', 'apps']) {
-    const diagnostics = await lintInWorkspace(t, folder, 'src/screen.tsx', raw);
-    assert.equal(diagnostics.length, 3);
-  }
+  const diagnostics = await lintInWorkspace(t, 'apps', 'src/screen.tsx', raw);
+  assert.equal(diagnostics.length, 3);
 });
 
 // S4: raw colors and lengths in strings.

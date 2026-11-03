@@ -24,7 +24,7 @@ on:
 #   (`test-impact`), and the client quality, unit-test and build checks. It is the fast
 #   signal on every push and has a budget of about 270 s.
 # - The full stage runs on `merge_group` (and on `push` to main): the commit stage's checks
-#   and everything else, every Python test shard, the client end-to-end shards, seed
+#   and everything else, every Python test shard, the client end-to-end check, seed
 #   exploration, coverage, the real-system tiers and the example and image jobs. Every
 #   test therefore still runs before every merge, on the tree the merge will produce.
 #
@@ -36,7 +36,7 @@ on:
 # A job that belongs to the full stage only carries `github.event_name != 'pull_request'` in
 # its `if`. `Required PR CI` and `ci-budget` run on both events. `validate-examples` also runs in
 # the commit stage when the change moves an example repository's pin (`example_pointers`), and
-# `clients-e2e` runs the desktop specs the change can affect (`e2e_specs`).
+# `clients-e2e` runs the UI gallery's browser suite when the clients change.
 
 env:
   # Wall-clock thresholds for a whole run, checked by `ci-budget` below (issue
@@ -81,8 +81,6 @@ jobs:
       orchestrator: ${{ steps.filter.outputs.orchestrator }}
       desktop_path: ${{ steps.filter.outputs.desktop_path }}
       example_pointers: ${{ steps.example-pointers.outputs.example_pointers }}
-      e2e_specs: ${{ steps.e2e.outputs.specs }}
-      e2e_shards: ${{ steps.e2e.outputs.shards }}
       # The per-file test seconds the shards balance on, read once here so that
       # every shard of a run sees the same record (a shard that read a newer
       # cache entry than its siblings would break the partition of the suite).
@@ -118,25 +116,6 @@ jobs:
         id: example-pointers
         if: github.event_name == 'pull_request'
         run: python3 -m scripts.check_example_pointers --base-ref origin/main --github-output "$GITHUB_OUTPUT"
-
-      # The desktop end-to-end specs a change can affect (clients/tools/scripts/e2e_affected.mjs):
-      # a pull request runs those, the merge queue and main run the whole suite. A matrix of no
-      # jobs skips `clients-e2e`.
-      - name: Set up Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-
-      - name: Select the desktop end-to-end specs
-        id: e2e
-        env:
-          EVENT: ${{ github.event_name }}
-        run: |
-          if [ "$EVENT" = pull_request ]; then
-            node clients/tools/scripts/e2e_affected.mjs --mode selected --base origin/main --head HEAD --github-output "$GITHUB_OUTPUT"
-          else
-            node clients/tools/scripts/e2e_affected.mjs --mode all --github-output "$GITHUB_OUTPUT"
-          fi
 
       # Best effort: a missing, evicted or malformed cache entry only means the
       # shards balance on the checked-in record, never that the run fails.
@@ -480,28 +459,14 @@ jobs:
       - name: Build TypeScript packages
         run: ./support/repoctl/repoctl run-checks --group clients_build
 
-  # The queue and main run every spec of the three Playwright apps; a pull request runs the
-  # specs its change can affect (`e2e_specs`, chosen by clients/tools/scripts/e2e_affected.mjs
-  # from the package graph and the specs' imports), so a change that breaks a spec is found
-  # before the queue, not by ejecting it and the entries behind it. The specs are split across
-  # the runners in `matrix.shard`
-  # (`VIBESYS_E2E_SHARD`, see clients/tools/e2e/shard.mts) so no job nears the 10-minute
-  # check limit. One duration-weighted file plan spans all three apps, so the Electron and
-  # gallery files do not pile onto the shell's first slice. New specs join the plan even
-  # before they have a recorded timing. Each leg pays setup, so five trade summed runner
-  # time against wall time (a pull request sizes the list to its specs, five at most). The count
-  # is the length of the list (`strategy.job-total`);
-  # `fail-fast: false` lets a red shard finish its siblings so one run lists every failure.
+  # The UI gallery's visual and accessibility suite (Playwright, Chromium on Linux), the one
+  # browser suite of the clients. The desktop app's own screens are checked by the vitest suites of
+  # `clients-tests`.
   clients-e2e:
     needs: changes
-    if: needs.changes.outputs.clients == 'true' && needs.changes.outputs.e2e_shards != '[]'
+    if: needs.changes.outputs.clients == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: ${{ fromJSON(needs.changes.outputs.e2e_shards) }}
-
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -510,27 +475,16 @@ jobs:
         with:
           playwright: true
 
-      - name: Test the desktop app (shard ${{ matrix.shard }} of ${{ strategy.job-total }})
-        env:
-          VIBESYS_E2E_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
-          # Empty runs every spec (the merge queue); a pull request names the specs its change can affect.
-          VIBESYS_E2E_SPECS: ${{ needs.changes.outputs.e2e_specs }}
-          # The downloaded Electron runtime's SUID helper cannot have Chromium's required root
-          # ownership on a hosted runner. This opt-out is scoped to the E2E child process.
-          VIBESYS_ELECTRON_E2E_DISABLE_CHROMIUM_SANDBOX: "1"
-        # Electron's native windows require a display. The setup action's Playwright
-        # dependency install provides Xvfb on this Linux runner. The wrapper owns the
-        # display for this one check group.
-        run: xvfb-run -a ./support/repoctl/repoctl run-checks --group clients_e2e
+      - name: Test the UI gallery
+        run: ./support/repoctl/repoctl run-checks --group clients_e2e
 
       # A gallery screenshot that differs from its baseline leaves the actual and the diff here, so
-      # a reviewer can see the change without rerunning it in the Linux image. Only the shard
-      # assigned the gallery spec has files; the others upload nothing.
+      # a reviewer can see the change without rerunning it in the Linux image.
       - name: Upload the gallery's screenshot differences
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ui-gallery-test-results-${{ matrix.shard }}
+          name: ui-gallery-test-results
           path: clients/apps/ui-gallery/test-results/
           if-no-files-found: ignore
           retention-days: 7

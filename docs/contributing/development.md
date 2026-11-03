@@ -24,7 +24,6 @@ src/server/              Frontend-serving runtime and protocol
 src/entrypoints/         Process composition and command entrypoints
 clients/libs/contracts/      TypeScript server protocol types and validator
 clients/libs/transport/      Runtime-neutral transport and the WebSocket adapter
-clients/libs/run-state/      Pure backend-event projection (the run fold)
 libs/                    Reusable standalone libraries
 examples/                Candidate repositories, tasks, and input bundles
 resources/evaluators/    Reusable versioned evaluator packages
@@ -438,51 +437,22 @@ keeps the quality groups and those scripts and leaves the test groups.
 `--dry-run` lists either selection.
 
 This does not run every CI check. A group that cannot run locally sets
-`local_skip` and `--dry-run` prints the reason. Electron end-to-end tests
-(`clients_e2e`) need a display, Chromium, and its system libraries as well as
-the client and Python environments. The real-system tiers need Docker. Run
-`clients_e2e` explicitly when desktop coverage is needed. Each Playwright run
+`local_skip` and `--dry-run` prints the reason. The browser end-to-end run
+(`clients_e2e`, the UI gallery's Playwright specs) needs Chromium and its system
+libraries as well as the client environment. The real-system tiers need Docker. Run
+`clients_e2e` explicitly when browser coverage is needed. Each Playwright run
 asks the OS for a free port for its own server, so parallel runs on one machine
-do not collide. CI splits the group across runners with `VIBESYS_E2E_SHARD=i/N`
-(for example `2/5`), which each app's Playwright config reads; leave it unset
-to run every spec. The desktop shell's specs run on four workers (fewer on a
-smaller machine); `VIBESYS_E2E_WORKERS=<n>` names another count. A run that
-writes screenshots and a contact sheet (`SCREENS_DIR` and the other capture
-variables in `clients/tools/e2e/workers.mts`) builds each sheet from one
-worker's screens, so it runs on one.
+do not collide.
 
 ```bash
 uv sync --dev
 pnpm --dir clients install --frozen-lockfile
-(cd clients && pnpm --filter @vibesys/app-desktop-main exec playwright install --with-deps chromium)
+(cd clients && pnpm --filter @vibesys/app-ui-gallery exec playwright install --with-deps chromium)
 ./support/repoctl/repoctl run-checks --group clients_e2e
 ```
 
-A pull request runs the desktop specs its change can affect, not the whole suite, so a
-change that breaks a spec is found before the merge queue (which runs every spec and
-ejects the change and the entries behind it). `clients/tools/scripts/e2e_affected.mjs`
-selects them from the path list: a changed spec runs; a changed helper runs the specs
-that import it; a changed app file runs the app's specs; a changed workspace package runs
-the specs that depend on it, through the dependencies of the spec's area
-(`clients/tools/e2e/areas.json`, one entry per family of desktop-shell specs naming the
-feature packages it exercises) and through the packages its imports reach. A spec the table
-does not place depends on everything its app does, so an unplaced spec costs a run, never a
-miss, and a lockfile change that only records what a workspace package asks for selects
-nothing. The commit stage has a time budget (`ci-budget`), so a pull request runs the
-selected specs up to `SPEC_BUDGET_SECONDS` of recorded time (about half the suite): a changed
-spec always, then the specs importing a changed helper, then those of a changed app file,
-then the specs a package change reaches, nearest first, each tier fastest first so more
-distinct specs run. The log names the specs left to the queue, which runs every spec.
-A job whose slice holds none of an app's specs skips that app's build and run (`with_e2e_specs.mjs`).
-To see the selection for your branch:
-
-```bash
-node clients/tools/scripts/e2e_affected.mjs --mode selected --base origin/main --head HEAD
-```
-
-Place a new desktop-shell spec in the area it exercises by adding its file name to that
-area's `specs`; the area table's tests fail on a spec two areas claim or a name that
-matches no spec.
+CI runs it as one job. The desktop app has no Playwright spec yet; its screens are checked in the
+browser over a fake daemon (`desktop-development.md`).
 
 `clients_e2e` and the real-tier groups are the `local_skip` entries. Other
 groups without `include_in_test` or `include_in_checks` are the CI form of a
@@ -502,7 +472,7 @@ screenshots. One command runs them, as the same repoctl check groups CI runs:
 The client tests need the Bun version pinned in `packaging/fetch_bun.py` (`BUN_VERSION`), the
 one CI installs. `clients/tools/scripts/run_bun_tests.mjs` fails at once, naming the pin and
 `packaging/fetch_bun.py`, when the Bun on `PATH` differs, because another version resolves
-imports differently (Bun 1.3.9 cannot find `./welcome.cjs` from its `welcome.cts` source).
+imports differently.
 
 `ui_gallery_linux` compares the gallery's screenshots in the Linux image CI uses and checks
 that two baseline updates write identical images, so it needs Docker. The script leaves out the

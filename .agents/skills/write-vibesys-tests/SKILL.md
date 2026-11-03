@@ -77,13 +77,10 @@ conformance corpus.
    bounded-comparison plugin explains a failed `==` over a large operand by
    sizes, digests and the first difference
    (`test_a_failed_comparison_prints_no_diff_at_any_verbosity`).
-9. **Do not commit what a projector or schema change rewrites.** The clients'
-   native replays are generated under a coarse hash of their inputs, the same
-   list that also selects the client jobs (`test_a_changed_byte_of_any_input_names_a_different_set`).
-   A committed golden pins a contract or is read where no Python runs
+9. **Commit a golden only when it pins a contract or is read where no Python runs**
    (`test_gateway_conversion_fixture_regenerates_identically`;
-   `./scripts/regenerate_goldens.sh` rewrites it); a text snapshot per scenario
-   (`test_a_scenario_projects_to_the_shape_its_snapshot_records`) shows a projector change.
+   `./scripts/regenerate_goldens.sh` rewrites it). Do not commit what a projector or schema
+   change would rewrite for a consumer that can regenerate it.
 10. **Keep a parametrized test id short.** A long value in the id cut a
     shard's CI log; give it `pytest.param(value, id="short-name")`.
     `test_a_long_parameter_value_stops_the_session_naming_the_fix` covers it.

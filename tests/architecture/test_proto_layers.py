@@ -61,7 +61,7 @@ def test_generic_python_consumers_cannot_import_strategy_messages(path: str, sou
 
 
 def test_viewer_uses_shared_facts_and_generic_descriptor_views() -> None:
-    path = "clients/libs/run-state/src/view.ts"
+    path = "clients/apps/desktop/src/state/view.ts"
     assert violations(
         {path: 'import {Request} from "@vibesys/proto/strategies/dynamic/request_pb.js";'}
     )

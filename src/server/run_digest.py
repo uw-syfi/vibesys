@@ -14,7 +14,7 @@ hypothesis search labels its spans with (``workstream`` and ``adoption``,
 them, so a host command that lists runs stays light (``tests/architecture/test_light_entrypoints.py``).
 While the run works it has opened no adoption, so the page headlines its best idea so far
 (``best_so_far_ratio``): the latest idea that passed and beat the input, read from the gates under
-each workstream. The page's fold is ``CandidateFold`` in ``@vibesys/run-state``;
+each workstream. The page's fold is the client's ``CandidateFold``;
 ``tests/conformance/fixtures/run-digest`` holds the journals both must fold to the same figures.
 
 A journal with finished rounds and no span event predates the run trace

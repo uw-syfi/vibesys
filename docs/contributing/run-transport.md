@@ -413,8 +413,7 @@ The next section maps every current event kind onto this model and proposes the 
 The 57 kinds are the files in `tests/conformance/events/` and the `EventType` enum in
 `clients/libs/contracts/src/generated/protocol.schema.json`. Producers are in `src/vibesys/run`
 (the commit observer, `integration.py`, and the agent, evaluation and git event adapters) and
-`src/server` (journal, controller, chat manager, execution). Viewers are `clients/libs/run-state`,
-`clients/features/run-page`, `clients/features/run-chat` and the server summary, digest and usage
+`src/server` (journal, controller, chat manager, execution). Viewers are the desktop app (`clients/apps/desktop`) and the server summary, digest and usage
 folds (`src/server/run_summary.py`, `run_digest.py`, `run_usage.py`).
 
 How to read the table:
@@ -435,7 +434,7 @@ How to read the table:
 | `server_started` | server journal | delete | none | S | Artifact of the old server process. `EpochStarted` and `Lifecycle.starting` replace it. |
 | `server_ready` | server runtime | delete | e2e fakes only | S | `Lifecycle.running` when startup ends. |
 | `run_started` | `vibesys.api` session, server | epoch | live page fold (objective, metric), digest, run map | M | Strategy name, input, expected roles and `RunOverview` go in `EpochStarted.run` (`RunDescription`); search limits go in its descriptor-backed `SearchRunDescription` detail. Objective text is a blob. Unit and direction are in the series declarations, so the server no longer back-fills them into a snapshot. |
-| `run_startup_progress` | `vibesys.run.resources` | lifecycle | startup bar (`run-session`), startup timing words (`scoped-logs`) | S | `Lifecycle.starting{stage, state, condition, elapsed, progress}`. One record per step; bounded by the number of image-build steps. |
+| `run_startup_progress` | `vibesys.run.resources` | lifecycle | startup bar, startup timing words (`scoped-logs`) | S | `Lifecycle.starting{stage, state, condition, elapsed, progress}`. One record per step; bounded by the number of image-build steps. |
 | `workspace_root_probe` | `slurm_probe_events` | span:`environment_probe` | none (ignored by the fold) | S | Runtime-declared kind. Attrs: `state`, `job_id`, `pending_reason`, `waited_seconds`, `queue_timeout_seconds`, `failure`, `attempt`, `retry_in_seconds`. A `failed` probe ends the run with `RunFailure.kind = environment_unavailable`. |
 | `run_status_changed` | server controller, journal | lifecycle | `CoreState.status`: header, recent-status words | S | `starting\|running\|pausing\|paused\|stopping\|stopped\|completed\|failed` becomes `Running{hold}`, `Draining{goal}`, `Parked`, `Ended{outcome}`. `previous` is derived. |
 | `run_finished` | controller, runtime, session | lifecycle | fold terminates run; digest closing | S | `Ended{outcome = finished}`. |

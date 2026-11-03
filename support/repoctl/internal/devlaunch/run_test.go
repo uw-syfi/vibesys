@@ -19,7 +19,7 @@ install_command = ["pnpm", "install"]
 install_inputs = ["clients/pnpm-lock.yaml", "clients/apps/*/package.json"]
 install_stamp = "build/dev/install.stamp"
 build_command = ["pnpm", "build"]
-app_directory = "clients/apps/desktop-main"
+app_directory = "clients/apps/desktop"
 app_command = ["pnpm", "exec", "electron", "."]
 app_env = { USER_DIR = "{profile}" }
 profile_directory = "build/dev/profile"
@@ -123,10 +123,10 @@ func newHarness(t *testing.T, files map[string]string, rules ...rule) *harness {
 func baseFiles() map[string]string {
 	saved, _ := SeedHosts("host-a", "/srv/v")
 	return map[string]string{
-		"home:~/app/hosts.json":                  string(saved),
-		"clients/pnpm-lock.yaml":                 "lock",
-		"clients/apps/desktop-main/package.json": "{}",
-		"clients/node_modules":                   "",
+		"home:~/app/hosts.json":             string(saved),
+		"clients/pnpm-lock.yaml":            "lock",
+		"clients/apps/desktop/package.json": "{}",
+		"clients/node_modules":              "",
 	}
 }
 

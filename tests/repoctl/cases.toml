@@ -21,14 +21,14 @@ native_targets = []
 pnpm_packages = []
 
 [[cases]]
-name = "run fold changes reach downstream TypeScript packages"
-paths = ["clients/libs/run-state/src/reduce.test.ts"]
+name = "protocol package changes reach downstream TypeScript packages"
+paths = ["clients/libs/orchestrator-proto/src/index.ts"]
 jobs = ["clients"]
 [cases.collections]
 native_languages = []
 dockerfile_contexts = []
 native_targets = []
-pnpm_packages = { dependents_of = "pnpm:@vibesys/run-state" }
+pnpm_packages = { dependents_of = "pnpm:@vibesys/orchestrator-proto" }
 
 [[cases]]
 name = "evaluator SDK changes reach consumers"
@@ -301,16 +301,6 @@ native_targets = []
 pnpm_packages = []
 
 [[cases]]
-name = "a replay generator selects the client tests that read its replays"
-paths = ["tests/support/materialize_replays.py"]
-jobs = ["python", "clients"]
-[cases.collections]
-native_languages = []
-dockerfile_contexts = []
-native_targets = []
-pnpm_packages = []
-
-[[cases]]
 name = "typed journal projection selects Python checks"
 paths = ["src/vibesys/records/api.py"]
 jobs = ["python", "clients"]
@@ -341,14 +331,14 @@ native_targets = []
 pnpm_packages = []
 
 [[cases]]
-name = "intent control changes select their mountable feature"
-paths = ["clients/features/run-intents/src/state/machine.ts"]
+name = "connection state changes select their dependents"
+paths = ["clients/libs/connection/src/state/host-connection.ts"]
 jobs = ["clients"]
 [cases.collections]
 native_languages = []
 dockerfile_contexts = []
 native_targets = []
-pnpm_packages = { dependents_of = "pnpm:@vibesys/feature-run-intents" }
+pnpm_packages = { dependents_of = "pnpm:@vibesys/connection" }
 
 [[cases]]
 name = "core value compiler and generated values select regeneration and Python checks"
@@ -361,14 +351,14 @@ native_targets = []
 pnpm_packages = []
 
 [[cases]]
-name = "chat session feature changes select its Run screen composition"
-paths = ["clients/features/run-sessions/src/state/machine.ts"]
+name = "desktop app state changes select the app"
+paths = ["clients/apps/desktop/src/state/index.ts"]
 jobs = ["clients"]
 [cases.collections]
 native_languages = []
 dockerfile_contexts = []
 native_targets = []
-pnpm_packages = ["@vibesys/app-desktop-shell", "@vibesys/feature-run-sessions"]
+pnpm_packages = ["@vibesys/desktop"]
 
 [[cases]]
 name = "session process changes select Python checks"
@@ -404,7 +394,7 @@ pnpm_packages = []
 
 [[cases]]
 name = "a clients change selects the client quality groups"
-paths = ["clients/features/run-intents/src/state/machine.ts"]
+paths = ["clients/libs/connection/src/state/host-connection.ts"]
 jobs = ["clients"]
 local_groups = ["always_on", "clients_build", "clients_quality", "clients_tests"]
 checks_groups = ["always_on", "clients_build", "clients_quality"]
@@ -413,7 +403,7 @@ skipped_groups = ["clients_e2e"]
 native_languages = []
 dockerfile_contexts = []
 native_targets = []
-pnpm_packages = { dependents_of = "pnpm:@vibesys/feature-run-intents" }
+pnpm_packages = { dependents_of = "pnpm:@vibesys/connection" }
 
 [[cases]]
 name = "a proto change selects the contract check"
@@ -561,14 +551,14 @@ native_targets = []
 pnpm_packages = []
 
 [[cases]]
-name = "protobuf gateway browser fixture selects its client consumers"
-paths = ["clients/apps/desktop-shell/e2e/gateway-preload.ts"]
+name = "desktop app preload selects its client consumers"
+paths = ["clients/apps/desktop/src/preload/index.cts"]
 jobs = ["clients"]
 [cases.collections]
 native_languages = []
 dockerfile_contexts = []
 native_targets = []
-pnpm_packages = { dependents_of = "pnpm:@vibesys/app-desktop-shell" }
+pnpm_packages = { dependents_of = "pnpm:@vibesys/desktop" }
 
 [[cases]]
 name = "native compute runtime selects its Python consumers"

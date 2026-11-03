@@ -35,47 +35,30 @@ read whole, and the build model below keeps a graph of thirty packages as fast a
 clients/
   libs/request-identity/ @vibesys/request-identity  UUID request identities across clients and restarts
   libs/contracts/   @vibesys/contracts        generated message types + the one runtime validator
+  libs/proto/       @vibesys/proto            generated protocol bindings (store records, host API)
+  libs/orchestrator-proto/ @vibesys/orchestrator-proto  generated orchestrator protocol bindings
   libs/ui/          @vibesys/ui               the design system: domain-free components + design tokens
   libs/store/       @vibesys/store            domain-free reducer kernel + fold model-test kit
   libs/machine/     @vibesys/machine          domain-free machine glue + machine model-test kit
                                                                                  -> store
-  libs/problems/    @vibesys/problems         what is wrong right now as data with a stable identity,
-                                              and the board that turns it into toasts -> store
-  libs/run-state/   @vibesys/run-state        pure fold of run events; ./rounds, ./performance,
-                                              ./transcript projections -> contracts
   libs/transport/   @vibesys/transport        framing, redial, persistent stream -> contracts
   libs/hosts/       @vibesys/hosts            host identity, listing, connection status,
-                                              checkout path rules              -> contracts
+                                              checkout path rules              -> contracts, store
   libs/runs/        @vibesys/runs             run identity, launch profiles, recent status,
                                               resume and stop
                                                                                  -> contracts, hosts
-  libs/run-session/ @vibesys/run-session      one live run: runStep, the session machine, its
-                                              ports, connectRun, WebSession    -> contracts, run-state,
-                                                                       transport, store, machine
+  libs/logs/        @vibesys/logs             a run's log streams            -> contracts, machine, transport
   libs/subscription/ @vibesys/subscription    a host's live keyed state as one bounded state type
                                               (connecting, live, stale, failed), its fold, the machine
                                               that owns every wait, and a window's source of it
                                                                                  -> hosts, machine, proto
-  libs/run-fixtures/ @vibesys/run-fixtures   replayable run fixtures (recorded, scrubbed of hosts,
-                                              paths and user names, or synthetic) for e2e harnesses
-                                              and screen checks; dev only            -> contracts
-  libs/run-history/ @vibesys/run-history      main-process store of ended runs' recorded events,
-                                              one copy for every window (node; no workspace deps;
-                                              the app injects the host as its source)
-  libs/ipc/         @vibesys/ipc              typed main <-> renderer messages, the shell's
-                                              requests' parsers per feature      -> hosts, runs
+  libs/ipc/         @vibesys/ipc              typed main <-> renderer messages and the gateway
+                                              port codec                     -> hosts, runs, ...
   libs/connection/  @vibesys/connection       host connection manager            -> contracts, transport, hosts,
-                                                                                    machine
+                                                                                    machine, subscription
   libs/settings/    @vibesys/settings         settings store, atomic files       -> hosts, runs
-  features/<x>/     @vibesys/feature-<x>      hosts, run-control (main process only), app-shell,
-                                              settings, machines, new-run, run-page, usage
-  apps/desktop           @vibesys/desktop               the Effect rebuild of the desktop app, one
-                                                        package with a folder per role (see
-                                                        "The Effect desktop app")
-  apps/desktop-main      @vibesys/app-desktop-main      composition only (Electron main), and the
-                                                        sandboxed preloads
-  apps/desktop-shell     @vibesys/app-desktop-shell     composition only: the desktop
-                                                        window (`shell.html`), the only renderer
+  apps/desktop           @vibesys/desktop               the Effect desktop app, one package with a
+                                                        folder per role (see "The Effect desktop app")
   apps/ui-gallery        @vibesys/app-ui-gallery        development only, never shipped: every
                                                         component in every theme, screenshot-tested
                                                         in Ink
@@ -84,7 +67,8 @@ clients/
 ```
 
 The folder a package sits in mirrors its layer: `libs/` holds the `foundation`, `core`, `domain`,
-and `service` packages, `features/` the `feature` packages, and `apps/` the `app` packages. The
+and `service` packages and `apps/` the `app` packages (`features/` holds the `feature` packages,
+of which there are none today). The
 manifest's `vibesys.layer` stays the one source of truth; the `layer-matches-folder` rule fails a
 package filed under the wrong folder. Imports are by package name, so moving a package between
 folders changes no source. Files a tool requires at the workspace root stay there: `package.json`,
@@ -97,19 +81,16 @@ flowchart BT
   contracts["contracts (L0)"]
   ui["ui (L0, DOM)"]
   store["store (L0)"]
-  run-state["run-state (L1)"] --> contracts
   transport["transport (L1)"] --> contracts
-  hosts["hosts (L1)"] --> contracts
+  hosts["hosts (L1)"] --> contracts & store
   runs["runs (L2)"] --> contracts & hosts
   machine["machine (L1)"] --> store
-  problems["problems (L1)"] --> store
-  run-session["run-session (L2)"] --> contracts & run-state & transport & store & machine
-  ipc["ipc (L3)"] --> hosts & runs
-  connection["connection (L3, Node)"] --> contracts & transport & hosts & machine
-  settings["settings (L3, Node)"] --> hosts & runs
-  features["feature-* (L4)"] --> run-session & runs & hosts & ipc & ui & store & problems
-  features -. "./main only" .-> connection & settings
-  apps["apps/* (L5)"] --> features
+  logs["logs (L2)"] --> contracts & machine & transport
+  subscription["subscription (L2)"] --> hosts & machine
+  ipc["ipc (L3)"] --> hosts & runs & logs & subscription & ui
+  connection["connection (L3, Node)"] --> contracts & transport & hosts & machine & logs & subscription
+  settings["settings (L3, Node)"] --> hosts & runs & ui
+  desktop["apps/desktop (L5)"] --> connection & settings & ipc & ui & transport & hosts
 ```
 
 ### Layers
@@ -120,11 +101,11 @@ cycles, and forbids feature-to-feature and app-to-app edges, because peers share
 
 | Layer | Rank | Packages | May depend on |
 | --- | --- | --- | --- |
-| `foundation` | 0 | `contracts`, `ui`, `store`, `request-identity` | nothing in the workspace |
-| `core` | 1 | `run-state`, `transport`, `hosts`, `machine`, `problems` | foundation |
-| `domain` | 2 | `runs`, `run-session`, `subscription`, `run-history`, `run-fixtures` | foundation, core |
+| `foundation` | 0 | `contracts`, `proto`, `orchestrator-proto`, `ui`, `store`, `request-identity` | nothing in the workspace |
+| `core` | 1 | `transport`, `hosts`, `machine` | foundation |
+| `domain` | 2 | `runs`, `logs`, `subscription` | foundation, core |
 | `service` | 3 | `ipc`, `connection`, `settings` | foundation, core, domain |
-| `feature` | 4 | `feature-*` | anything below |
+| `feature` | 4 | none today | anything below |
 | `app` | 5 | `apps/*` | anything below |
 
 This refines the sketch in the brief in three places. `ui` and `store` sit in `foundation`: rank 0
@@ -140,9 +121,8 @@ its host's listing; the stop flow is keyed by host) while a host never names a r
 A package is named for the concept it owns, never for a place to put things. `@vibesys/core-state`
 and `@vibesys/entities` were split for this reason: the first held both the generic store kernel
 and the run fold, the second every domain model the views shared, and each name invited the next
-unrelated addition. The split gave `store` (generic, domain-free like `ui`), `run-state` (the run
-fold, its round, performance, and transcript projections as separate entries), `hosts`, `runs`, and
-`run-session` (the live session below the UI). A helper used by one feature lives in that feature;
+unrelated addition. The split gave `store` (generic, domain-free like `ui`), `hosts`, and `runs`.
+A helper used by one app lives in that app;
 shared run-domain behavior such as `shellWords` belongs to `@vibesys/runs`. The `bucket-names` rule keeps foundation,
 core, and domain packages from being named `entities`, `core`, `common`, `utils`, `shared`,
 `helpers`, or `misc`.
@@ -166,43 +146,32 @@ and nothing else, so it may import a workspace package only as a type (`import t
 is one file and one entry, which the main process loads by path into a page.
 
 An entry may import an entry of another package only when the target is `neutral` or has the same
-runtime. A feature package has up to three entries:
+runtime. A `feature`-layer package (the layer exists; no package uses it today) has up to three
+entries, `./state` (`neutral`), `./renderer` (`dom`) and `./main` (`node`), which the
+`feature-entries` rule holds.
 
-- `./state` (`neutral`): the pure reducer, selectors, and the interfaces its effects need (for
-  example `RunControl`). No React, no I/O.
-- `./renderer` (`dom`): state plus `ui/` components plus `effects/`, which call the injected
-  interfaces. It depends on `@vibesys/ui`, never on a platform package.
-- `./main` (`node`): the main-process controller that answers the feature's requests with
-  `@vibesys/connection` and `@vibesys/settings` (`Hosts`, `RunControl`). `apps/desktop-main` routes
-  each request `@vibesys/ipc` parsed to the controller of the feature that owns it.
+Apps ship no stylesheets of their own. They build their views from `@vibesys/ui` components and
+tokens; the desktop page imports the design system's stylesheets once.
 
-Features and apps ship no stylesheets. They build their views from `@vibesys/ui` components and
-tokens; the desktop shell imports the design system's stylesheets once.
-
-A feature publishes only the entries it has. Its pure core is `./state` when it needs nothing
-beyond `ES2022`. Effects reach the platform only through the interfaces `./state` declares, which
-the app implements. A domain package that owns effects declares its ports the same way:
-`@vibesys/run-session` declares its run connection's control transport and page lifecycle.
-
-Node-only packages (`connection`, `settings`) therefore reach the renderer
-through no path: only `node` entries may import them, and only `desktop-main` and features'
-`./main` entries are `node`. A preload is not `node` either, so it reaches none of them.
+Node-only packages (`connection`, `settings`) therefore reach the renderer through no path: only
+`node` entries may import them, and `apps/desktop`'s `./main` entry is `node`. A preload is not
+`node` either, so it reaches none of them.
 
 ### Rules and what enforces them
 
 | # | Rule | Enforced by (rule id in `check_package_graph.mjs`) |
 | --- | --- | --- |
 | 1 | Layer direction; Node-only packages reachable only from `node` entries | `layer-direction`, `runtime-reachability` |
-| 2 | No feature depends on another feature; cross-feature flows are composed in apps | `layer-direction` (peers share a layer) |
+| 2 | No package depends on a peer in its own layer; flows between peers are composed in apps | `layer-direction` (peers share a layer) |
 | 3 | A package is used only through its `exports` map; every import of a workspace package is a declared dependency | `imports-use-exports`, `imports-are-declared`, `imports-are-workspace-packages`, `workspace-protocol`; `.dependency-cruiser.mjs` for relative paths into another package |
 | 4 | Each entry is compiled with the `lib` and `types` of its runtime, so importing a Node module from a renderer entry is a type error | `entry-projects`, `entry-capability`; `tsc -b` then enforces it |
 | 5 | Inside a package: `state/` pure, `ui/` free of I/O, `effects/` never import `ui/`, effects depend on injected interfaces | `tools/lint-rules/*.grit` (Biome) and `.dependency-cruiser.mjs` |
 | 6 | `@vibesys/ui` and `@vibesys/store` have no domain dependencies and name no domain concept; helpers live in the lowest package that needs them, with no shared junk drawer | `layer-direction` (both are rank 0), `domain-free` (no word of `DOMAIN_WORDS`, or an inflection of one, in their production source or stylesheet); review |
 | 7 | A foundation, core, or domain package is named for the concept it owns, not for a bucket | `bucket-names` (no segment of its name in `BUCKET_NAMES`) |
 | 8 | A sandboxed preload loads only Electron at run time; every workspace import in it is erased | `preload-sandbox` (what the entry's emitted CommonJS still requires); `.dependency-cruiser.mjs` keeps a preload's imports to `@vibesys/ipc` and Electron |
-| 9 | In `apps/desktop`, control state is Effect services and atoms and data folds are plain reducers; the packages that predate it keep XState machines (see [State](#state)) | `external-dependencies` (`effect` only in the app's `./core`, `./ui` and `./main` entries; `xstate` only in features' `./state` and `./renderer` and `MACHINE_PACKAGES`); the app's folder rules in `.dependency-cruiser.mjs` and the `tools/lint-rules/effect-*.grit` rules; for the legacy packages `tools/lint-rules/features-no-hand-rolled-control.grit` and `tools/lint-rules/control-state-no-store-kernel.grit` |
+| 9 | In `apps/desktop`, control state is Effect services and atoms and data folds are plain reducers; the libraries it reuses (`connection`) keep XState machines (see [State](#state)) | `external-dependencies` (`effect` only in the app's `./core`, `./ui` and `./main` entries; `xstate` only in `MACHINE_PACKAGES`); the app's folder rules in `.dependency-cruiser.mjs` and the `tools/lint-rules/effect-*.grit` rules; for `connection` `tools/lint-rules/features-no-hand-rolled-control.grit` and `tools/lint-rules/control-state-no-store-kernel.grit` |
 | 10 | A package's folder matches the layer its manifest declares: `libs/*` is foundation, core, domain, or service; `features/*` is feature; `apps/*` is app; nothing else | `layer-matches-folder` |
-| 11 | Every feature and app builds UI only from `@vibesys/ui` (see [Design system enforcement](#design-system-enforcement)) | `strict-no-stylesheets`, `strict-imports`; `tools/lint-rules/strict-*.grit` through `biome.json` |
+| 11 | Every app builds UI only from `@vibesys/ui` (see [Design system enforcement](#design-system-enforcement)) | `strict-no-stylesheets`, `strict-imports`; `tools/lint-rules/strict-*.grit` through `biome.json` |
 
 All package-graph rules, and the tables they read, live in one module,
 [`clients/tools/scripts/check_package_graph.mjs`](https://github.com/uw-syfi/vibesys/blob/main/clients/tools/scripts/check_package_graph.mjs),
@@ -216,7 +185,7 @@ the rules about modules inside a package and about how imports resolve.
 graph:
 
 ```json
-"vibesys": {"layer": "feature", "entries": {"./state": "neutral", "./renderer": "dom", "./main": "node"}}
+"vibesys": {"layer": "app", "entries": {"./core": "neutral", "./ui": "dom", "./main": "node"}}
 ```
 
 The checker, the scaffold (which writes one `tsconfig.<entry>.json` per entry from it), Knip's
@@ -224,7 +193,7 @@ policy, and this document all read that block. An export whose source is a style
 (`@vibesys/ui`'s `./tokens.css`) is a `dom` asset: it has no tsconfig project, and Vite resolves
 it through the same source condition. Unknown keys, layers, and runtimes are rejected by
 name (`declarations`), and the entries must be exactly the `exports` keys
-(`entries-match-exports`). Feature and app packages are always subject to the
+(`entries-match-exports`). App packages are always subject to the
 [design system rules](#design-system-enforcement). The obsolete `design` marker is an unknown key
 and fails `declarations`.
 
@@ -239,10 +208,10 @@ checker (`EXTERNAL_DEPENDENCIES`, rule `external-dependencies`):
 
 | Import | Allowed in |
 | --- | --- |
-| `react`, `react-dom` (and subpaths) | `dom` entries: `ui`, features' `./renderer`, browser and renderer apps |
-| `electron` | `node` and `preload` entries of features (`./main`) and apps (`desktop-main`) |
+| `react`, `react-dom` (and subpaths) | `dom` entries: `ui`, `apps/desktop`'s `./ui` and the gallery |
+| `electron` | `node` and `preload` entries of apps (`apps/desktop`'s `./main` and `./preload`) |
 | `effect`, `@effect/atom-react` | `@vibesys/desktop`'s `./core`, `./ui` and `./main` entries (`EFFECT_PACKAGES`). Never its `./state` folds or its sandboxed preload, and no other package |
-| `xstate` | features' `./state` and `./renderer`; `MACHINE_PACKAGES`: `machine`, `connection` (its host connection machine), `run-session` (its session machine), and `subscription` (its subscription machine). Never `store`, `run-state`, `hosts`, `runs`, `ui`, `contracts`, `transport`, or `ipc` |
+| `xstate` | `MACHINE_PACKAGES`: `machine`, `connection` (its host connection machine), and `subscription` (its subscription machine). Never `store`, `hosts`, `runs`, `ui`, `contracts`, `transport`, or `ipc` |
 | Node builtins (`node:*` and bare names) | `node` entries |
 
 A package that declares one of them in `dependencies` must have an entry allowed to use it. Knip
@@ -256,9 +225,8 @@ used, and used only where its runtime allows.
 orchestrator path. It is an `app`-layer package with five entries, each compiled by its own
 `tsconfig.<entry>.json` with its runtime's `lib` and `types`: `./main` (`node`), `./preload`
 (`preload`), `./core` and `./state` (`neutral`) and `./ui` (`dom`). It may depend on `@vibesys/ui`,
-`@vibesys/connection`, `@vibesys/orchestrator-proto` and `@vibesys/hosts`; a dependency is declared
-when the first file imports it. The existing desktop packages are legacy: they may break while the
-app is rebuilt, and nothing new is written in them. The [State](#state) section holds its rules.
+`@vibesys/connection`, `@vibesys/settings`, `@vibesys/ipc`, `@vibesys/transport`, `@vibesys/orchestrator-proto` and `@vibesys/hosts`; a dependency is declared
+when the first file imports it. The [State](#state) section holds its rules.
 
 It is one package on purpose. A new package is justified later only by a second real consumer,
 generated code, or a measured build problem; until one of those exists, the folder rules and the
@@ -411,34 +379,13 @@ message is one of three things, and each has one form.
   diagnostic is a row of the Logs, with a dot on the Logs tab.
 - **Anything else is not said.** A fact the screen already shows is not repeated in a message.
 
-The data flow is one-way. A feature's `./state` derives its problems from its state with a pure
-function (`settingsProblems`, `machineSettingsProblems`, `machinesProblems`, `runPageProblems`).
-The app reports them to its window's one board (`@vibesys/problems`; `reportProblems` follows a
-store, `useReportedProblems` follows a mounted screen) under a source name. The board is a plain
-reducer: it keeps one entry per identity, so repeats collapse; orders them newest first; drops a
-problem when no source reports it; and forgets a dismissal or an open toast when the problem
-clears, so one that recurs is shown again. `ProblemHost` renders the board's toasts once, at the
-root of each window (the main window and a run window), so no screen holds a toast list or a
-timer of its own.
-
-Enforced: `@vibesys/ui` has no `Banner`; no stylesheet rule paints a panel with the tone fills
+Enforced: `@vibesys/ui` has no `Banner`, and no stylesheet rule paints a panel with the tone fills
 (`--banner-*-bg`, `--chip-*-bg`, or a mix of a status color) unless it is on the allow-list of
-`tone-fills.test.ts`; the `banner` screen check fails an element at least half as wide as the
-main pane that is filled with a status color, whatever it is called; the `status-row` screen check
-fails one that is not filled: an alert, a status or a live region outside a toast, or `Text` in a
-status tone, whose words reach half the pane (it measures the words, not the box, so a figure a flex
-column stretches or a live region around other content is not one), and a chip whose box reaches half
-the pane (a chip must be as wide as its label); an announced element that holds a chip is a status
-word with its detail, however long the detail wraps; a
-feature's `./state` is the only place a problem's words are written; and `toasts.spec.ts` shows a toast on every top-level
-screen at the smallest and a wide window, with each platform's window controls, and checks it
-sits below the header row and covers nothing in it. Unenforced: whether a message is a passing
-event or a problem with a thing needs a reader; a lone status word on a line of its own (it cannot be
-told from a figure or an empty-state word), and a strip that is neither filled, announced nor written
-in a status tone (a bordered box with a status dot, a chevron and a sentence), are found by no check,
-because the screens' data rows have the same parts; and a new screen that puts its title row in the
-body instead of the `header` slot gets toasts over that row, until it is added to the spec's
-screens and given a `header`.
+`tone-fills.test.ts`. Unenforced: whether a message is a passing event or a problem with a thing
+needs a reader. The board that collected a screen's problems into one set of toasts
+(`@vibesys/problems`) was deleted with the legacy desktop app; the Effect desktop app has no toast
+host yet and shows a problem as a status word at the thing it concerns (a connection note above
+the list it makes out of date).
 
 ### The gallery and its screenshots
 
@@ -482,130 +429,28 @@ Every glyph the UI draws comes from a bundled font. The body face has no check m
 cross, so a symbol set in it is drawn by whatever font the machine falls back to, and the same
 screen differs between operating systems (the gallery's baselines are the one place it showed
 first). Set a symbol in `var(--font-mono)`, whose bundled face has it, or use an icon. Enforced:
-the gallery's `every glyph the gallery draws comes from a bundled font` test and the
-`bundled-font` check in the desktop shell's `screenCheck` ask Chromium which font drew each text
-(`CSS.getPlatformFontsForNode`) and fail on any family `fonts.css` does not declare. One fixture
-writes run titles in other scripts and emoji on purpose, to test wrapping, and is exempt
-(`OTHER_SCRIPTS` in `screens.spec.ts`).
+the gallery's `every glyph the gallery draws comes from a bundled font` test asks Chromium which
+font drew each text (`CSS.getPlatformFontsForNode`) and fails on any family `fonts.css` does not
+declare.
 
-## Where a desktop shell test goes
+## Where a desktop test goes
 
-The shell's tests share one world: a seed for the Fake of the bridge (`apps/desktop-shell/src/testing`,
-`seed.ts`, `fixture-seed.ts`, `usage-world.ts`, `dashboard-world.ts`, `machines-world.ts`), with nothing of
-a browser in it.
+`apps/desktop` tests live beside the module they test and use only that module's public interface.
+The doubles they share are in `src/testing/`, which only tests import (the
+`desktop-production-code-does-not-import-testing` rule).
 
-- **A behavior** (what a screen says of a world, what a press sends the host, how one screen leads to
-  another) is a DOM test, `src/*.dom.test.tsx`: `openShell` (`testing/shell-world.tsx`) draws the shell's
-  own stores and screens over the world in happy-dom, and `testing/dom-query.ts` finds what a person sees
-  by a role and a name, as Playwright's locators do. A page is drawn in about 25 ms.
-  The Run screen is the same: `openShell(null, {run})` installs the browser journeys' Fake gateway
-  (`testing/gateway-preload.ts`) over a run (`testing/gateway-fixture.ts`, `testing/replay-world.ts`,
-  `testing/journey-records.ts`), `shellOnRun` opens it from the dashboard as a person does, and
-  `shell.gateway` (`observe`, `disconnect`, `append`) and `shell.emit` feed it the live run's later events.
-- **A layout** (where a control sits, what overflows or overlaps, what the window's controls cover, a
-  computed font, axe, a screenshot) needs a browser, so it is a Playwright spec in `e2e/`. A browser
-  test keeps its logic only where the layout check needs the state the logic reaches.
-- **A fact the feature tier already holds** (`features/<name>` tests, which draw the feature's own screen
-  over its own Fakes) is not tested again here. Before moving a browser test down, mutate the product the
-  test guards and run the feature's tests: if they fail, delete the browser test.
-
-A DOM has no stylesheet, so "shown" is what the markup says (`hidden`, `aria-hidden`, `inert`); the disclosure
-that stands for a list when the window is narrow (it has `aria-controls`) is told from the list.
-A spec file deleted from `e2e/` takes its line out of `tools/e2e/durations.json`: `e2eTestMatch` fails
-every shard on a recorded line for a spec that is gone.
-
-## Where a Run screen change goes
-
-The Run screen is `clients/features/run-page`. Paths below are relative to its `src/`; a
-quality test (`test_run_page_ownership_map`) fails when a listed path does not exist. Pick the
-row by what the change is about, and edit only that module and its tests, because several agents
-change this screen at the same time.
-
-| Change | Owner |
-| --- | --- |
-| What a number, word or row says (data folds and selectors) | `state/`, one module per concern, below |
-| How the screen is laid out and what sits where | `renderer/ui/run-screen.tsx` (the frame), `renderer/ui/levels.tsx`, `renderer/ui/run-level.tsx`, `renderer/ui/hero.tsx` |
-| What one face or level draws inside its pane | one folder of `renderer/ui/views/` |
-| The run's summary read model and its seeding | `state/run-summary.ts` |
-| Talking to the app, the host or the live session | `renderer/effects/` |
-
-The per-host transport-v2 setting selects an additive reader. `@vibesys/run-skeleton` owns
-Skeleton and Tail loading, local history lookup, content caching and log following. The pure
-`@vibesys/run-state/skeleton` adapter translates sought store values into the existing screen's
-span, measurement and usage values. `state/skeleton-projection.ts` builds the shared `RunModel`;
-`state/gateway-machine.ts` owns the reader's setting, content requests and selected log stream.
-The desktop shell injects the generic Electron byte bridge. With the setting off, the existing
-run session and screen store remain the read path.
-
-A run opens by painting from the first Skeleton that holds an epoch; the history follows into the
-same fold. The loader reads each run's log once: record rows and intent outcomes subscribe to its
-Skeleton and Tail records (`recordsFanout`) and never open a Tail of their own. Its first Tail
-reaches back `RECORD_WINDOW` records past a keyframe for the record log. A refusal by the gateway
-(NotFound, DataLoss and the like) is final and typed; any other failure backs off (1 s doubling to
-30 s) for six tries, resumes a cut Tail from its cursor, and then waits for the person to retry.
-The gateway's gRPC status crosses the Electron bridge as `status` on the rejection.
-
-Data folds and selectors, all pure and under `state/`:
-
-- `state/run-page.ts`: the store, a reducer over the host's record of the run and the user's
-  actions. `state/views.ts` holds the selectors the header, banners and logs read.
-- `state/run-model.ts`: the run at one sequence (trace, overview, candidates, agents). Every
-  view reads the run through it. `state/live.ts` holds the data slice it reads, and
-  `state/scrub.ts` the scrubber's positions over it.
-- `state/run-level.ts` (the performance row, Now, `resolveZoom`), `state/performance.ts` (the
-  chart's fold), `state/ideas-view.ts` and `state/ideas-tree.ts` (the Ideas list and tree),
-  `state/timeline-rows.ts` (the Gantt rows), `state/agent-tree.ts` (the Agents rows).
-- `state/step-narrative.ts`, `state/turn-transcript.ts` and `state/turn-result.ts`: an opened
-  step and the card its turn ends with.
-- `state/zoom.ts`: the route machine (run, idea or agent, step, item).
-- Words: `state/end-words.ts`, `state/history-words.ts`, `state/idea-words.ts`,
-  `state/span-words.ts`, `state/token-words.ts`, `state/metric-words.ts` and `state/names.ts`.
-  User-visible wording is written in these, not in a component.
-- History and summary: `state/history-pager.ts` reads an ended run's journal in pages;
-  `state/run-summary.ts` takes the host's `runs.summary` fold in its place.
-
-Components, under `renderer/ui/`:
-
-- The frame (`renderer/ui/run-screen.tsx`) decides which view shows where; views never read the
-  route. `renderer/ui/hero.tsx` is drawn at every level, so navigating moves
-  nothing in it.
-- `renderer/ui/views/timeline/`, `renderer/ui/views/agents/`, `renderer/ui/views/logs/`,
-  `renderer/ui/views/usage/`, `renderer/ui/views/step/` and `renderer/ui/views/idea/`: one folder
-  per view, each owned on its own. A view gets its props from `renderer/ui/views/props.ts` and reads the run only through
-  them and the selectors in `state/`. Its pane header goes through
-  `renderer/ui/views/headers.ts`.
-- Layout that must hold is checked by the desktop screen checks
-  (`clients/apps/desktop-shell/e2e/checks/`), not by a component test.
-
-To see a change on a recorded run with hot reload, use the fixture dev app
-(`pnpm --filter @vibesys/app-desktop-shell dev:fixture`, see the `verify-desktop-ui` skill).
-
-The native replays that the run page tests and the desktop e2e read (the records the shipping Python
-projector makes of each declaration in `libs/run-fixtures/src/data` and
-`apps/desktop-shell/e2e/scenarios`) are not committed. `tests/support/derived_replays.py` stores them
-under a hash of every file they can derive from: the roots and files of the `derived_replays`
-component in `.repoctl/components.toml` (whole source packages the projection imports, the lock and
-project files, the generators) and the Python version. The key errs wide because regenerating takes
-seconds. CI selects the client jobs on a change to the same component, so a projector, schema or
-library change the projection runs still runs the client tests that read the replays. The thirteen
-libraries the projection only imports (the runtime, the sandbox, the agent library and their kin)
-are entries written `{ path = "...", selects = false }`: they key the set and regenerate it, but a
-change to one selects no client job, because the projection snapshots and the conversion golden in
-the Python job still see what it does to a replay. A stale set is never read, and two pull requests
-cannot conflict on them.
-
-The `test` script of `run-page` and the `e2e`, `e2e:linux` and `dev:fixture` scripts of the desktop
-shell start through `tools/scripts/with_derived_replays.mjs`, which makes the set (about 15 s the
-first time for each key, shared by every checkout on the machine; 0.1 s after) and exports its
-directory, and forwards SIGINT, SIGTERM and SIGHUP to what it runs. This is a prerequisite a
-TypeScript-only checkout did not have: `uv` and a synced Python environment (`uv sync --dev`). A
-test reads a replay through `@vibesys/run-fixtures/derived`, which fails naming the script when it
-was skipped. A fixture that differs from its declaration is projected by the same projector into
-`variants/` inside the set. `e2e:linux` makes the set on the host and mounts it read-only into the
-Linux image, which has no `uv`; a spec that builds such a fixture needs one host run first. Because a projector change no
-longer shows as a changed file, `tests/vibesys/run/projection_shapes` commits a text snapshot of
-what each scenario projects to (record kinds and span label kinds, with counts). Only the goldens
-that pin a contract stay committed (`proto/testdata`), rewritten by `./scripts/regenerate_goldens.sh`.
+- **A fold or a view** (`src/state/`) is a plain function: a unit or property test calls it with
+  events from `testing/orchestrator` (`generateScenario`) and compares data.
+- **A service** (`src/core/`) is an Effect service: a test provides the fake transport
+  (`testing/transport`) and the `TestClock`, runs the service and reads the atoms. No test reads a
+  real clock.
+- **A screen** (`src/ui/`) renders from fixture state with `renderToStaticMarkup`: the same
+  scenarios, no transport. A screen's observer hooks (the stable names a later browser observer
+  looks up) are asserted there.
+- **The whole window** over a fake daemon runs in a browser: `pnpm --filter @vibesys/desktop
+  build:fixture` builds `src/testing/page`, which serves a scripted fake daemon to the real
+  screens, and the `verify-desktop-ui` skill drives it. A Playwright spec against the real Electron
+  app belongs under `apps/desktop/e2e/`, where the client end-to-end job picks it up.
 
 ## Display names
 
@@ -624,8 +469,8 @@ vendor id). Each vocabulary has one owner of its names:
 - harness and model names are agentshim's, served by the backend. A client renders the field it
   receives and never maps or prettifies those ids.
 
-`CODE_IDS` (generated beside the names) lists the harness, model and role ids, so the desktop's
-screen checks fail on any a screen draws as text outside a `data-mono-id` element.
+`CODE_IDS` (generated beside the names) lists the harness, model and role ids, so a screen check
+can fail on any a screen draws as text outside a `data-mono-id` element.
 
 ## State
 
@@ -701,15 +546,14 @@ makes every wait a step a test takes. The machines' seeded invariant harness was
 earlier form chose XState over Effect; the rebuilt app has no machines to step, and its folds,
 where the seeded model tests belong, are plain functions.
 
-### Legacy packages (XState)
+### Packages that run XState machines
 
-The packages that predate `apps/desktop` (the features, `connection`, `run-session`, `subscription`) keep the form below until the new app replaces them. Nothing new is written in it: new control state goes in `apps/desktop` as Effect services.
+`connection`, `subscription` and `machine`, which the app reuses, keep the form below. Nothing new is written in it: new control state goes in `apps/desktop` as Effect services (above).
 
 **Control state is an XState v5 machine.** Control state is a mode with effects: it starts work,
-waits for it, retries, times out, cancels, and decides what a late answer means. The live run
-session (start-up, then the stream; single-flight recovery), the run-control banner (the latest
-command wins), the desktop connection manager (dial, back off, redial on wake), and a sheet that
-loads, submits, and cancels are all control state. Each is written as
+waits for it, retries, times out, cancels, and decides what a late answer means. The desktop
+connection manager (dial, back off, redial on wake) and a host's live subscription (connect, hold,
+retry) are control state. Each is written as
 `setup({types, actors, actions, guards, delays}).createMachine(...)`:
 
 - every operation is an invoked actor with an explicit `id`, declared with a placeholder
@@ -722,7 +566,7 @@ loads, submits, and cancels are all control state. Each is written as
 - the view reads the actor through `actorStore`, which notifies only when the view changes.
 
 **A data fold is a plain reducer.** A data fold turns ordered inputs into a value and has no mode:
-the run event fold (`@vibesys/run-state`), a host's listing, recent runs. It is a pure
+a host's listing, recent runs. It is a pure
 `(state, action) -> state` on `@vibesys/store`, tested with `checkModel`. A package that owns
 control state keeps its folds in their own modules and uses `createStore` nowhere else.
 
@@ -784,17 +628,12 @@ its outcome was delivered, so an operation disposes what it opened on that abort
 generating events once the snapshot's `status` is `done`.
 
 **Where XState may appear** is rule 9 (the Effect desktop app is outside it: neither rule below applies to `apps/desktop`, and `biome.json` does not list it): the `external-dependencies` table confines the import, and
-two GritQL rules (wired in `biome.json`) keep features' `state/` and `effects/` (and
-`connection`'s `state/`) free of `setTimeout`, `setInterval`, and `AbortController`, and keep
-migrated control-state packages (`run-control`, `connection`, `run-session`) off `createStore`
-(except their fold modules, such as `run-session`'s `run.ts`). The features still on the reducer
-kernel are migrated one per change. The remaining exception for `hosts`' path completion is listed in `biome.json`; its migration
-is tracked in #1969.
+two GritQL rules (wired in `biome.json`) keep `connection`'s `state/` free of `setTimeout`,
+`setInterval`, and `AbortController`, and keep `connection` off `createStore`. The remaining
+exception for `hosts`' path completion is listed in `biome.json`; its migration is tracked in #1969.
 
 | Control state | Form | Status |
 | --- | --- | --- |
-| `run-session`'s session lifecycle (`sessionMachine`, `WebSession`) | machine | migrated (#2071) |
-| `feature-run-control`'s commands and banner | machine | migrated (#1950) |
 | `@vibesys/connection`'s `HostConnection` | machine | migrated (phase 8) |
 | `@vibesys/subscription`'s `subscriptionMachine` (one per host and topic instance, in main) | machine | new (#3498) |
 
@@ -880,31 +719,20 @@ names a missing or extra one.
 | `@vibesys/contracts` | foundation | exists (pilot: generated run-protocol and host-helper types, the one schema walker, error taxonomy, `./host-helper` validation, `./testing` fixtures) | foundation item (#1869) |
 | `@vibesys/ui` | foundation | exists: the batch 1 components (`.`, `dom`; see [Components](#components)), the legacy primitives (`./legacy`, unused) and the design tokens (`./tokens`, `./tokens.css`, `./fonts.css`, and the components' `./components.css`; see [Design tokens and themes](#design-tokens-and-themes)); desktop features use the public components | domain packages (phase 5 of #1878) |
 | `@vibesys/store` | foundation | exists: `Step`, `Reducer`, `only`, `createStore` (`.`) and the fold model-test kit (`./testing`: `checkModel`, `Seeded`, `SEEDS`); domain-free | domain split (#1949) |
-| `@vibesys/run-state` | core | exists: the run event fold (`.`), with `./rounds`, `./performance`, and `./transcript` projections (the run's transcript, and `transcriptBySpan`, which reads it by the span id the server stamped on each event); depends on `contracts` only | domain split (#1949) |
+| `libs/run-state`, `run-session`, `run-history`, `run-fixtures`, `run-skeleton`, `problems`, the twelve `features/*` packages, `apps/desktop-shell` and `apps/desktop-main` | various | deleted with the legacy desktop app; the Effect desktop app (`apps/desktop`) replaces them | Effect desktop app (#3799, roadmap #3796) |
 | `@vibesys/core-state` | core | deleted: split into `store` and `run-state` | domain split (#1949) |
 | `@vibesys/transport` | core | exists: `.` and `./testing` (the shared `FakeClock`) are `neutral`, `./websocket` is `dom` | backend-client split (#1910) |
 | `@vibesys/transport-node` | domain | deleted: its Unix-socket `ServerClient` lost its last importer with the terminal client (#3156), and it presented no operator key | #3158 |
 | `@vibesys/hosts` | core | exists: host identity and keys, labels, the checkout and project path rules (`HostValidationError`), a host's listed runs with their phase text (`instancePhaseText`), path completion for host path fields (`completionStep`, moved down from `feature-hosts`), and what the window shows about a connection; depends on `contracts`, `store` | domain split (#1949) |
 | `@vibesys/runs` | domain | exists: run, task, and instance ids, bounded launch-profile values and optimistic mutations, a recent run's status from its host's listing, the exact-resume policy, the stop flow; depends on `contracts`, `hosts` | domain split (#1949), launch profiles (#2718) |
 | `@vibesys/machine` | core | exists: `actorStore`, `clockFrom`, `unprovided` (`.`) and `checkMachine` (`./testing`); domain-free | state architecture (#1950) |
-| `@vibesys/run-session` | domain | exists: the run fold's wiring (`runStep`), the session lifecycle (`sessionMachine`, three parallel regions: start-up, recovery, and the fenced replacement snapshot), its ports, the run connection over a control transport (`connectRun`), and `WebSession`, with `./testing` (an in-memory control transport and page lifecycle, and `sessionWith`) | domain split (#1949) |
 | `@vibesys/subscription` | domain | exists (`.` and `./testing`, `neutral`; `./contract`, `node`: the `SubscriptionPort` contract suite every implementation passes): a host's keyed live state as one closed state type that cannot express loading with no end, its fold (a snapshot swapped in at `synced`, so a removed key leaves no ghost), `subscriptionMachine` (the stream, its lease and its backoff, bounded by `failureBoundMs`), the topic registry, and `subscriptionSource` for a window's `useSyncExternalStore`; depends on `hosts`, `machine`, `proto`. `@vibesys/connection`'s `Subscriptions` runs it in main, and `@vibesys/ipc` carries it to windows | live subscriptions (#3498) |
 | `@vibesys/entities` | domain | deleted: split into `hosts` and `runs`; task arguments (`shellWords`) lived in `@vibesys/feature-start-run`, deleted with the Start sheet, and are now owned by `runs` | domain split (#1949), launch profiles (#2718) |
 | `@vibesys/ipc` | service | exists: the run connection's port messages and their validation, and the shell's channels, events, and payloads, with each feature's requests (channels, bridge slice, and the parser the main process runs) in `welcome/<feature>.ts` (the surface's historical name); depends on `hosts`, `runs` | domain packages (phase 5 of #1878); per-feature parsers with phase 8 |
 | `@vibesys/connection` | service | exists (`.`, `node`): the connection manager (`ConnectionManager`, `HostConnection`: an XState machine in `state/` and a `shell/` owning the links, channels, and the machine's clock), the ssh and local links, the bootstrap, and `connectionStatus`, with `./testing` (`FakeHelper`, `FakeLink`, and the `HostConnection` contract suite); depends on `contracts`, `transport`, `hosts` | desktop main process (phase 8 of #1878) |
 | `@vibesys/settings` | service | exists (`.`, `node`): the settings store (`hosts.json`, `recent.json`, `preferences.json` with the appearance, notifications and archived runs; one writer, atomic replace), with `./testing` (`FakeSettingsFilesystem`); depends on `hosts`, `runs` | desktop main process (phase 8 of #1878) |
-| `@vibesys/feature-hosts`, `@vibesys/feature-run-control` | feature | exist, main process only (`./main`): `Hosts` (the host connections' leases, checkout changes, sign-in, path completion, a run's logs and recorded history) and `RunControl` (attach, start, resume, stop, with its relay and stop flow). Their renderers (the host panel, the Start sheet, the title strip, Recent) and `@vibesys/feature-start-run` and `@vibesys/feature-recent-runs` were deleted with the welcome view at the cutover (#2850) | desktop renderer (phase 7 of #1878); `./main` with the main-process split (phase 8) |
-| `apps/desktop-renderer` | app | deleted at the cutover (#2850): the welcome view. `apps/desktop-shell` is the one desktop renderer | desktop renderer (phase 7 of #1878) |
-| `@vibesys/feature-app-shell` | feature | exists: the sidebar store (Live, Recent with the last 20 and Show all, Machines, the selected screen) over the hosts' listings, Recent and archived runs, with seeded-sequence invariant tests; the shell layout, the All runs screen (every run of the projects the app has met on each connected machine, grouped by machine) and the placeholder screens (`./renderer`); the run notices a listing calls for, raised by `./main` when Settings enables them | redesign (#2842) |
-| `@vibesys/feature-settings` | feature | exists: the Settings store (appearance and notifications, saved under tokens) and screen; `./main` answers the preference requests and keeps Electron's `nativeTheme` on the appearance's mode | redesign (#2842) |
-| `@vibesys/feature-machines` | feature | exists: the Machines store (the saved machines, each one's status a selector over its last report: Ready, Checkout not found, Sign in, or Can't connect; the Add form and the checkout form, whose path suggestions carry each checkout's version), with seeded-sequence invariant tests, and the screen (`./renderer`), each card reading its host's live CPU, memory and GPU through a `machine_stats` subscription; `./main` lists the machines from `hosts.json`, reports a machine's facts from its connection's state and `machine.describe`, inspects paths (`checkout.inspect`) and removes a machine. Adding a machine or changing its checkout is `feature-hosts`' checked `setCheckout` | redesign (#2843) |
-| `@vibesys/feature-new-run` | feature | exists: New run as a guided form, one question to a page (`./state`: the answers and the steps they ask as a plain fold, the example catalogue's questions, the inputs a run starts with and their key, the draft a window keeps) and its machine (parallel regions loading what the machine offers, the project's tasks and the debounced "Ready to start" checks, with model tests); the pages and its store (`./renderer`); `./main` answers its requests with one host helper method each and records a started run in Recent | redesign (#2844) |
-| `@vibesys/feature-run-chat` | feature | exists: a run's chat panel. `./state`: the panel machine (open or closed, the thread shown, the harness choice, the composer, creating a thread and asking it), the steer card machine (draft, send, withdraw) with its delivery fold (`foldDelivery`; `deliveriesOf` is the one place the server's `steer_delivery` steps become card events), and selectors over the run fold for threads and items. `./renderer`: `useRunChat` over injected ports (the live session's chat and controls, the host's harness catalogue) and the panel UI. `run-page` hosts only the Chat button and the dock slot; `apps/desktop-shell` composes the two | chat panel (#3224) |
-| `apps/desktop-shell` | app | exists: the desktop window's composition (`shell.html`), the one page every window loads (a run window adds its run to the query); its Playwright journeys run against a Fake of the bridge | redesign (#2842); the only renderer since the cutover (#2850) |
 | `apps/ui-gallery` | app | exists: development only, never shipped (one `dom` entry, no exports): the component gallery and its screenshot and axe suite (see [The gallery and its screenshots](#the-gallery-and-its-screenshots)) | none |
-| `apps/desktop-main` | app | exists: composition only (Electron main, `.`, `node`): the lifecycle, page confinement, the windows, launch arguments, and the shell's requests routed to the features' `./main` controllers; and the sandboxed preload (`./preload-welcome`, `preload`; the name is the surface's historical one). Its build copies the shell's bundle into `dist/ui` | desktop main process (phase 8 of #1878) |
 | `@vibesys/backend-client` | core | deleted: split into `transport` and `transport-node` | backend-client split (#1910) |
-| `@vibesys/desktop` | app | deleted: emptied into `connection`, `settings`, the features' `./main`, and `apps/desktop-main` | desktop main process (phase 8 of #1878) |
 | `@vibesys/desktop` | app | exists again as the Effect rebuild (`apps/desktop`; see [The Effect desktop app](#the-effect-desktop-app)): the name of the package deleted above, reused for a new package | Effect desktop app (#3799, roadmap #3796) |
 | `@vibesys/web` | app | deleted with the browser client; desktop shell is the renderer | desktop cutover (#2850) |
 

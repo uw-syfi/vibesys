@@ -42,110 +42,23 @@ const LEAF_TOOLS = `^(?:${LEAF_TOOL_DIRECTORIES})/`;
 // `^$1/` matches no path: such an importer may reach no tool directory at all.
 const LEAF_TOOL_IMPORTER = `^(${LEAF_TOOL_DIRECTORIES})/|${PACKAGES}`;
 
-// A feature package (`features/<name>/src/`) is a pure `state/` core (its `./state` entry) and a
-// `renderer/` (its `./renderer` entry) of presentational `ui/` and an `effects/` shell that calls
-// the interfaces the app injects. Which packages a feature may reach is the package-graph
-// checker's; these rules hold the layers inside one feature package.
-// Only a feature's browser parts: a later `main/` (Node) entry is not held to the renderer rules.
-const FEATURE = '^features/[^/]+/src/(?:state|renderer)/';
-const RENDERER_PART = part => `^features/[^/]+/src/renderer/${part}/`;
 const TRANSPORT = ['^libs/transport(?:-node)?/', '/node_modules/@vibesys/transport(?:-node)?/'];
 // The protocol vocabulary, which presentational code never names.
 const CONTRACTS = ['^libs/contracts/', '/node_modules/@vibesys/contracts/'];
 
-function featureRules() {
-  return [
-    {
-      // The functional core does no I/O: no React, no renderer, no transport runtime values.
-      // Generated types and the run fold are the inputs it reads. Group 1 is the importer's own
-      // feature, whose renderer its state never reaches. A core that needs a DOM global (the
-      // gateway form parses with `URL`) sits in `renderer/state/` and is held to the same rule.
-      name: 'feature-state-is-pure',
-      severity: 'error',
-      from: {path: '^features/([^/]+)/src/(?:renderer/)?state/', pathNot: TEST_FILE},
-      to: {
-        path: [
-          '^features/$1/src/renderer/(?!state/)',
-          '(?:^|/)node_modules/(?:react|react-dom|electron)/',
-          ...TRANSPORT,
-          '^libs/request-identity/',
-        ],
-        dependencyTypesNot: ['type-only'],
-      },
-    },
-    {
-      // Presentational components render props and report events; `ui-no-*.grit` forbids their
-      // I/O calls and effect hooks, and this forbids reaching anything that does I/O.
-      name: 'feature-ui-does-not-depend-on-shell',
-      severity: 'error',
-      from: {path: RENDERER_PART('ui'), pathNot: TEST_FILE},
-      to: {
-        path: [
-          RENDERER_PART('effects'),
-          ...TRANSPORT,
-          ...CONTRACTS,
-          '(?:^|/)node_modules/electron/',
-        ],
-      },
-    },
-    {
-      name: 'feature-effects-do-not-import-ui',
-      severity: 'error',
-      from: {path: RENDERER_PART('effects'), pathNot: TEST_FILE},
-      to: {path: RENDERER_PART('ui')},
-    },
-    {
-      // A feature's effects call the interfaces its `./state` declares; the web app's backend
-      // adapter is the one module that imports @vibesys/transport's runtime values.
-      name: 'feature-transport-is-type-only',
-      severity: 'error',
-      from: {path: FEATURE, pathNot: TEST_FILE},
-      to: {path: TRANSPORT, dependencyTypesNot: ['type-only']},
-    },
-  ];
-}
-
-// The desktop app's Electron main process is composed from packages, as its renderer is
+// The desktop app's Electron main process is composed from packages
 // (`docs/contributing/clients-architecture.md`): `@vibesys/connection` (the connection manager, a
 // pure `state/` machine and a `shell/` that owns its processes, channels, and timers),
-// `@vibesys/settings`, the features' `./main` controllers, and `apps/desktop-main`, which composes
-// them in `src/main/` and holds the sandboxed preloads in `src/preload/`. Which package may reach
-// which is the package-graph checker's (a preload is its own runtime there); these rules hold the
-// modules inside those packages.
-const DESKTOP_MAIN = '^apps/desktop-main/src/main/';
-const DESKTOP_PRELOAD = '^apps/desktop-main/src/preload/';
+// `@vibesys/settings`, and `apps/desktop`, which composes them in `src/main/`. Which package may
+// reach which is the package-graph checker's; these rules hold the modules inside those packages.
 const CONNECTION_STATE = '^libs/connection/src/state/';
 const CONNECTION_SHELL = '^libs/connection/src/shell/';
-// Every module of the main process: the app, the packages only it runs, the features' `./main`.
-const MAIN_PROCESS = [
-  '^apps/desktop-main/src/',
-  '^libs/connection/src/',
-  '^libs/settings/src/',
-  '^features/[^/]+/src/main/',
-];
-// The desktop shell app (`apps/desktop-shell/src`) is the one desktop renderer.
-const DESKTOP_SHELL = '^apps/desktop-shell/src/';
+// Every module of the main process: the app's, and the packages only it runs.
+const MAIN_PROCESS = ['^apps/desktop/src/main/', '^libs/connection/src/', '^libs/settings/src/'];
 const UI_RUNTIME = '(?:^|/)node_modules/(?:react|react-dom|electron)/';
 
 function desktopRules() {
   return [
-    {
-      // A preload is the sandboxed page's only way to the main process, and runs before the page
-      // with Electron's renderer APIs: it binds `@vibesys/ipc`'s typed messages to Electron and
-      // nothing else. A feature or domain package would put product code in the trusted bridge;
-      // the payload types it carries are reached through `@vibesys/ipc`'s bridge interfaces.
-      name: 'desktop-preloads-import-only-ipc-and-electron',
-      severity: 'error',
-      from: {path: DESKTOP_PRELOAD, pathNot: TEST_FILE},
-      to: {pathNot: ['^libs/ipc/src/', '(?:^|/)node_modules/electron/']},
-    },
-    {
-      // The main process loads a preload by path into a page; it never runs one itself.
-      name: 'desktop-main-does-not-import-preloads',
-      severity: 'error',
-      from: {path: DESKTOP_MAIN},
-      to: {path: DESKTOP_PRELOAD},
-    },
     {
       // The connection manager's functional core folds events into state and requests: no Node or
       // Electron, no shell, no view.
@@ -251,32 +164,29 @@ function desktopAppRules() {
       to: {pathNot: '(?:^|/)node_modules/electron/', dependencyTypesNot: ['type-only']},
     },
     {
+      // The page reaches the main process only through the preload's bridge.
+      name: 'desktop-page-code-does-not-import-electron',
+      severity: 'error',
+      from: {
+        path: [DESKTOP_PART('state'), DESKTOP_PART('core'), DESKTOP_PART('ui')],
+        pathNot: TEST_FILE,
+      },
+      to: {path: '(?:^|/)node_modules/electron/', dependencyTypesNot: ['type-only']},
+    },
+    {
+      name: 'desktop-page-code-opens-no-sockets-or-processes',
+      severity: 'error',
+      from: {
+        path: [DESKTOP_PART('state'), DESKTOP_PART('core'), DESKTOP_PART('ui')],
+        pathNot: TEST_FILE,
+      },
+      to: {dependencyTypes: ['core'], path: '^(?:node:)?(?:net|child_process)$'},
+    },
+    {
       name: 'desktop-production-code-does-not-import-testing',
       severity: 'error',
       from: {path: DESKTOP_APP, pathNot: [TEST_FILE, DESKTOP_PART('testing')]},
       to: {path: DESKTOP_PART('testing')},
-    },
-  ];
-}
-
-/** The renderers' rules: what no renderer may reach. */
-function rendererRules() {
-  return [
-    {
-      // Renderer code (the renderer apps and the features) reaches the main process only through
-      // its preload's bridge.
-      name: 'renderers-do-not-import-electron',
-      severity: 'error',
-      from: {path: [DESKTOP_SHELL, FEATURE], pathNot: TEST_FILE},
-      to: {path: '(?:^|/)node_modules/electron/', dependencyTypesNot: ['type-only']},
-    },
-    {
-      // The renderer apps and the features reach the server only through @vibesys/transport or
-      // the preload's bridge.
-      name: 'web-opens-no-sockets-or-processes',
-      severity: 'error',
-      from: {path: [DESKTOP_SHELL, FEATURE], pathNot: TEST_FILE},
-      to: {dependencyTypes: ['core'], path: '^(?:node:)?(?:net|child_process)$'},
     },
   ];
 }
@@ -384,8 +294,6 @@ export default {
     },
     ...desktopRules(),
     ...desktopAppRules(),
-    ...rendererRules(),
-    ...featureRules(),
   ],
   options: {
     tsConfig: {fileName: 'tools/tsconfig.architecture.json'},

@@ -68,8 +68,6 @@
   "overrides": [
     {
       "includes": [
-        "features/**/src/**/*.ts",
-        "features/**/src/**/*.tsx",
         "apps/**/src/**/*.ts",
         "apps/**/src/**/*.tsx",
         "!**/*.test.ts",
@@ -116,15 +114,12 @@
       "includes": [
         "apps/*/src/**/*.ts",
         "apps/*/src/**/*.tsx",
-        "features/*/src/**/*.ts",
-        "features/*/src/**/*.tsx",
         "libs/*/src/**/*.ts",
         "libs/*/src/**/*.tsx",
         "!**/*.test.ts",
         "!**/*.test.tsx",
         "!**/generated/**",
-        "!**/testing/**",
-        "!libs/run-fixtures/**"
+        "!**/testing/**"
       ],
       "plugins": ["./tools/lint-rules/no-role-words.grit"]
     },
@@ -133,27 +128,11 @@
       "plugins": ["./tools/lint-rules/ui-no-timers.grit"]
     },
     {
-      "includes": [
-        "features/*/src/**/state/**/*.ts",
-        "features/*/src/**/state/**/*.tsx",
-        "features/*/src/**/effects/**/*.ts",
-        "features/*/src/**/effects/**/*.tsx",
-        "libs/connection/src/state/**/*.ts",
-        "!**/*.test.ts",
-        "!**/*.test.tsx"
-      ],
+      "includes": ["libs/connection/src/state/**/*.ts", "!**/*.test.ts", "!**/*.test.tsx"],
       "plugins": ["./tools/lint-rules/features-no-hand-rolled-control.grit"]
     },
     {
-      "includes": [
-        "features/run-control/src/**/*.ts",
-        "features/run-control/src/**/*.tsx",
-        "libs/run-session/src/**/*.ts",
-        "!libs/run-session/src/run.ts",
-        "libs/connection/src/**/*.ts",
-        "!**/*.test.ts",
-        "!**/*.test.tsx"
-      ],
+      "includes": ["libs/connection/src/**/*.ts", "!**/*.test.ts", "!**/*.test.tsx"],
       "plugins": ["./tools/lint-rules/control-state-no-store-kernel.grit"]
     },
     {
@@ -192,10 +171,6 @@
     {
       "includes": ["apps/desktop/src/**/*.test.ts", "apps/desktop/src/**/*.test.tsx"],
       "plugins": ["./tools/lint-rules/effect-tests-no-real-time.grit"]
-    },
-    {
-      "includes": ["apps/desktop-shell/e2e/**/*.ts", "!apps/desktop-shell/e2e/read.ts"],
-      "plugins": ["./tools/lint-rules/e2e-rail-through-read.grit"]
     },
     {
       "includes": ["**/*.test.ts", "**/*.test.tsx"],

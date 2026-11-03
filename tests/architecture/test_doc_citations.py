@@ -339,7 +339,7 @@ def test_a_repo_path_resolves_to_a_tracked_file_directory_or_glob(
 @pytest.mark.parametrize(
     "text",
     [
-        "clients/apps/desktop-shell/dist/main.js",
+        "clients/apps/desktop/dist/main/index.js",
         "elsewhere/file.md",
         "docs/<name>.md",
         "uv run docs/x",

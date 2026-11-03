@@ -106,7 +106,7 @@ def test_the_list_is_the_catalog_in_its_own_order_whichever_clis_are_installed(
     The host asks the machine nothing: telling which CLIs are installed takes a login shell, and
     the app asks for this list at every launch. Which providers are installed is
     ``machine.describe``'s ``harness_clis``; putting the installed ones first, and so choosing
-    New run's default, is the client's, and #3545 (``clients/features/new-run``) owns that order.
+    New run's default, is the client's, and #3545 owns that order.
     A host that sorted here again would bring the shell back and give the order two owners.
 
     Regression: a machine without the first provider's CLI defaulted a run to it (the host sorted

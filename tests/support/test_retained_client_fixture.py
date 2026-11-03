@@ -102,18 +102,6 @@ def test_server_output_lines_keep_their_bytes_and_order_per_stream(
     assert sorted(bytes(value) for value in streams.values()) == sorted(expected.values())
 
 
-FIXTURES = sorted((ROOT / "clients/libs/run-fixtures/src/data").glob("*.json"))
-
-
-@pytest.mark.parametrize("path", FIXTURES, ids=lambda path: path.stem)
-def test_every_committed_run_fixture_converts(path: Path) -> None:
-    """The journeys' own run data reaches the native path whole, in every state a fixture takes."""
-    fixture = json.loads(path.read_text())
-    if "runId" not in fixture:
-        pytest.skip("not a run: a catalogue of examples")
-    assert replay_of(fixture).batches
-
-
 CONFORMANCE = ROOT / "tests/conformance/fixtures/run-summary"
 
 

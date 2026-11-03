@@ -6,7 +6,7 @@ import test from 'node:test';
 import {fileURLToPath} from 'node:url';
 
 // The control-state rules (docs/contributing/clients-architecture.md, "State"), as wired in
-// biome.json: a feature's state/ and effects/ schedule no timers and abort nothing by hand, and a
+// biome.json: a package's state/ schedules no timers and aborts nothing by hand, and a
 // control-state package does not run its control state on the reducer kernel.
 
 const WORKSPACE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -47,7 +47,7 @@ const HAND_ROLLED = {
   'globalThis.setTimeout': 'export const later = () => globalThis.setTimeout(() => 0, 1);\n',
 };
 
-for (const directory of ['features/run-page/src/state', 'features/run-page/src/renderer/effects']) {
+for (const directory of ['libs/connection/src/state']) {
   for (const [name, source] of Object.entries(HAND_ROLLED)) {
     test(`${directory} forbids ${name}`, async t => {
       assert.equal((await lintFixture(t, directory, source)).length, 1);
@@ -55,17 +55,14 @@ for (const directory of ['features/run-page/src/state', 'features/run-page/src/r
   }
 }
 
-test("a feature's state tests may use timers", async t => {
+test("a package's state tests may use timers", async t => {
   const source = HAND_ROLLED['a setTimeout call'];
-  assert.deepEqual(
-    await lintFixture(t, 'features/run-page/src/state', source, 'sample.test.ts'),
-    [],
-  );
+  assert.deepEqual(await lintFixture(t, 'libs/connection/src/state', source, 'sample.test.ts'), []);
 });
 
-test('code outside state/ and effects/ is not held to the feature rule', async t => {
+test('code outside state/ is not held to the feature rule', async t => {
   assert.deepEqual(
-    await lintFixture(t, 'libs/run-session/src', HAND_ROLLED['an AbortController']),
+    await lintFixture(t, 'libs/connection/src/shell', HAND_ROLLED['an AbortController']),
     [],
   );
 });
@@ -78,27 +75,13 @@ const KERNEL = {
     "import {createStore} from '@vibesys/store';\nexport const make = createStore;\n",
 };
 
-for (const directory of ['features/run-control/src/main', 'libs/run-session/src']) {
+for (const directory of ['libs/connection/src/state', 'libs/connection/src/shell']) {
   for (const [name, source] of Object.entries(KERNEL)) {
     test(`${directory} forbids ${name}`, async t => {
       assert.equal((await lintFixture(t, directory, source)).length, 1);
     });
   }
 }
-
-test("a control-state package's fold module may run its fold on the reducer kernel", () => {
-  assert.deepEqual(
-    pluginDiagnostics(join(WORKSPACE_ROOT, 'libs', 'run-session', 'src', 'run.ts')),
-    [],
-  );
-});
-
-test('a feature still on the reducer kernel is not held to the control-state rule', async t => {
-  assert.deepEqual(
-    await lintFixture(t, 'features/app-shell/src/renderer/effects', KERNEL['a createStore call']),
-    [],
-  );
-});
 
 // `apps/desktop` is the Effect desktop app: its control state is Effect services, held by the
 // `effect-*` rules (docs/contributing/clients-architecture.md, "State"). The two XState-era rules

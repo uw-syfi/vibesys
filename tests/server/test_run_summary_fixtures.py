@@ -3,7 +3,7 @@
 ``tests/conformance/fixtures/run-summary/*.json`` hold ``events`` (a run's recorded events, each a
 ``RunEvent``; a fixture marked ``legacy`` was recorded by an older VibeSys, in a shape today's
 models no longer accept, and is read as the journal it is) and the ``summary`` a client folds from them. This side checks that the helper's
-fold equals it; ``clients/features/run-page`` checks that the client's own fold does, so the two
+fold equals it; the client checks that the client's own fold does, so the two
 implementations of one definition cannot drift apart without a fixture failing.
 """
 

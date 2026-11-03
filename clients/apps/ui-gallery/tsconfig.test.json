@@ -9,7 +9,6 @@
   "exclude": [],
   "references": [
     {"path": "../../libs/ui/tsconfig.lib.json"},
-    {"path": "../../features/new-run/tsconfig.renderer.json"},
-    {"path": "../../features/new-run/tsconfig.state.json"}
+    {"path": "../../libs/contracts/tsconfig.lib.json"}
   ]
 }

@@ -92,8 +92,8 @@ func TestPythonWriterSkeletonFixtures(t *testing.T) {
 	}
 }
 
-// The TypeScript reader decodes this exact reply (clients/libs/run-skeleton
-// descriptors.test.ts), so the two languages agree on what the hash names.
+// The TypeScript reader decodes this exact reply, so the two languages agree on what the hash
+// names.
 // ./scripts/regenerate_goldens.sh rewrites it (with VIBESYS_UPDATE_GOLDEN=1) after a deliberate
 // wire change.
 func pinWireGolden(t *testing.T, reply *apiv1.SkeletonResponse) {

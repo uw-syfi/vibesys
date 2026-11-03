@@ -25,24 +25,14 @@ Control state is an XState v5 machine written as
   rejection the same way, so a throw ends the flight instead of leaving its
   region waiting.
 
-Examples to read: the session machine in `@vibesys/run-session` (start-up,
-recovery and snapshot fencing as parallel regions), the host-connection
-machine in `@vibesys/connection`, and the run-control feature's machine
-(latest command wins).
+Example to read: the host-connection machine in `@vibesys/connection`.
 
 ## Folds
 
 A data fold is a pure `(state, action) -> state` reducer on `@vibesys/store`
 (`createStore`), in its own module, tested with `checkModel` from
 `@vibesys/store/testing`. Wrapping a fold in a one-state machine adds a
-runtime and checks nothing more. `@vibesys/run-session` keeps its fold in a
-module apart from its machine.
-
-Features not yet migrated still run control state as reducers with request
-tokens. The clients Biome configuration shows which features the control-state
-rules already cover. Migrate one
-feature per change, keeping its seeded invariants (ported to `checkMachine`)
-and deleting the reducer in the same change.
+runtime and checks nothing more.
 
 ## Cancellation
 
@@ -60,9 +50,7 @@ ending the owner aborts the work.
   transition whose action hands the resource back: the `current` guard and
   `discard` action in the host-connection machine of `@vibesys/connection`.
 - Outside machines, pass the signal down every layer: a dial takes the signal
-  its relay owns (the run-control feature's relay), and a snapshot load takes
-  the signal of the state that asked for it (the `RunConnection` port of
-  `@vibesys/run-session`). Attach abort listeners with `registerAbort` from
+  its connection owns, and a load takes the signal of the state that asked for it. Attach abort listeners with `registerAbort` from
   `@vibesys/transport`, which has no gap between checking `aborted` and
   listening.
 - Shutting down a stream composition closes both the stream and its transport
