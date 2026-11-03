@@ -192,7 +192,7 @@ class _RoundFailureProjection(Protocol):
     """Product shape of one round's typed failure, independent of its policy's own failure type.
 
     Structural, not imported from a policy module: ``vibesys.run`` sits below
-    every policy in the dependency graph (see architecture.md), so it names
+    every policy in the dependency graph (see python-module-graph.md), so it names
     the shape it needs rather than importing ``vibesys.run.contracts``'s
     concrete ``RoundFailureSummary`` (a module one layer above it).
     """

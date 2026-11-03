@@ -29,7 +29,7 @@ matching the changed surfaces.
   framework or create shared infrastructure merely to set up an example.
 - Keep strategy and domain prompt assets in their owning packages; keep only
   shared rendering and templates in the prompt-rendering package. Follow the
-  [package placement rule](../../../../docs/contributing/architecture.md).
+  [package placement rule](../../../../docs/contributing/python-module-graph.md).
 - Keep long-form serving knowledge in the bundled product skills. Follow the
   authoring guide (`CLAUDE.md`) in the serving-systems skill's directory.
 - Preserve unidirectional data flow: stable interfaces and typed values feed

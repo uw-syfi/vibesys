@@ -175,7 +175,7 @@ Keep code near the strategy that owns the decision:
 Every direct subfolder of `vibesys.orchestration` is one strategy package. Shared policy and
 resources live beside it under `vibesys`, including `hypothesis`, `metrics`,
 `profile_focus`, `steering`, `domains`, and shared `prompts`; these siblings never import
-orchestration. Follow the layout and placement rule in [architecture.md](architecture.md).
+orchestration. Follow the layout and placement rule in [python-module-graph.md](python-module-graph.md).
 Extract shared policy only when real callers need the same semantics.
 
 ## Adding a plugin

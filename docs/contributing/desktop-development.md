@@ -1,7 +1,6 @@
 # Desktop app development
 
-Build and open the desktop with `./support/repoctl/repoctl dev`.
-The app uses the Go gateway and orchestrator.
-Remote shipping no longer probes a Python host helper.
-
-See [Clients architecture](clients-architecture.md).
+Build and open the desktop through the repository development launcher.
+It prepares the app and its Go host services together. See the
+[development guide](development.md) for setup and checks, and
+[Clients architecture](clients-architecture.md) for the process and state boundaries.

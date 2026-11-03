@@ -2,7 +2,7 @@
 
 A sentence that describes code and points at it by line range decays silently:
 the cited file grows, the range still exists, and the citation now names
-unrelated code. All eleven ranges in `docs/contributing/wire-protocol.md` had
+unrelated code. All eleven ranges in the former transport guide had
 drifted that way before this check existed (#1056), two of them onto an error
 class instead of the request loop they claimed to show.
 `scripts/check_doc_links.py` cannot see any of it, because it strips the inline
@@ -102,7 +102,7 @@ from scripts.check_doc_links import iter_code_spans, iter_markdown_files, run_gi
 
 # Docs whose citations are swept and gated. One entry per doc, so opting a doc
 # in is a reviewed decision rather than a repo-wide sweep nobody asked for.
-GATED_DOCS = ("docs/contributing/wire-protocol.md",)
+GATED_DOCS = ("docs/contributing/run-recovery.md",)
 
 CITATION = re.compile(r"^(?P<path>[\w./-]+\.[A-Za-z][\w+]*)::?(?P<locator>[^\s`]+)$")
 # A line range on its own, continuing the file named by an earlier citation.

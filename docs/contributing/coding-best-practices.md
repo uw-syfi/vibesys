@@ -10,7 +10,7 @@ change:
   public-API tests, Fakes instead of mocks, property-based tests, no flakiness.
 - [`AGENTS.md`](https://github.com/uw-syfi/vibesys/blob/main/AGENTS.md): the
   short always-true rules. The Python module graph is in
-  [architecture.md](architecture.md).
+  [python-module-graph.md](python-module-graph.md).
 
 This page keeps what has no better home: placement, task-triggered rules,
 size limits, lint waivers, and doc links.
