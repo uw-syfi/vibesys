@@ -21,6 +21,9 @@ import (
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 )
 
+// MaxReceiveMessageBytes is the explicit receive limit for the orchestrator link.
+const MaxReceiveMessageBytes = 4 << 20
+
 // The versions this build speaks, sent in the handshake. They equal the daemon package's, which the
 // client does not import; a test holds the two together.
 const (
@@ -79,6 +82,7 @@ func (e *IncompatibleError) Error() string {
 // IncompatibleError that says which side to update.
 func Dial(ctx context.Context, dial Dialer, opts Options) (*Client, error) {
 	dialOpts := []grpc.DialOption{
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(MaxReceiveMessageBytes)),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return dial(ctx) }),
 	}

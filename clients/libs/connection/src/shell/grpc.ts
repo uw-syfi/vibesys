@@ -1,6 +1,7 @@
 /** gRPC over one caller-owned HTTP/2 session. No compression; bounded incremental framing. */
 import {type ClientHttp2Session, connect, constants, type IncomingHttpHeaders} from 'node:http2';
 import type {Duplex} from 'node:stream';
+import {ORCHESTRATOR_MAX_MESSAGE_BYTES, OrchestratorService} from '@vibesys/orchestrator-proto';
 import {HOST_API_MAX_MESSAGE_BYTES as MAX_MESSAGE} from '@vibesys/proto';
 import {GrpcCode, GrpcError, registerAbort, type ScheduleTimeout} from '@vibesys/transport';
 
@@ -16,6 +17,8 @@ export function grpcFrame(bytes: Uint8Array): Buffer {
 export class GrpcDecoder {
   #buffer = Buffer.alloc(0);
 
+  constructor(private readonly maxMessageBytes = MAX_MESSAGE) {}
+
   push(bytes: Uint8Array): readonly Uint8Array[] {
     this.#buffer = Buffer.concat([this.#buffer, bytes]);
     const messages: Uint8Array[] = [];
@@ -23,7 +26,8 @@ export class GrpcDecoder {
       if (this.#buffer[0] !== 0)
         throw new GrpcError(12, 'compressed gRPC messages are unsupported');
       const size = this.#buffer.readUInt32BE(1);
-      if (size > MAX_MESSAGE) throw new GrpcError(8, `gRPC message exceeds ${MAX_MESSAGE} bytes`);
+      if (size > this.maxMessageBytes)
+        throw new GrpcError(8, `gRPC message exceeds ${this.maxMessageBytes} bytes`);
       if (this.#buffer.length < size + 5) break;
       messages.push(this.#buffer.subarray(5, size + 5));
       this.#buffer = this.#buffer.subarray(size + 5);
@@ -125,7 +129,11 @@ export class GatewaySession {
         'content-type': 'application/grpc',
         te: 'trailers',
       });
-      const decoder = new GrpcDecoder();
+      const decoder = new GrpcDecoder(
+        method.startsWith(`/${OrchestratorService.typeName}/`)
+          ? ORCHESTRATOR_MAX_MESSAGE_BYTES
+          : MAX_MESSAGE,
+      );
       let status: string | undefined;
       let detail = '';
       let settled = false;

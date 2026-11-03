@@ -439,9 +439,12 @@ type RunsSnapshot struct {
 	// Every turn and message of those runs, so that a client that connects late can show when each
 	// agent ran, what each turn cost, and the handoffs and reports it missed. Items are not here:
 	// WatchAgent and ListItems page them.
-	Turns         []*Turn        `protobuf:"bytes,4,rep,name=turns,proto3" json:"turns,omitempty"`
-	Messages      []*Message     `protobuf:"bytes,5,rep,name=messages,proto3" json:"messages,omitempty"`
-	Searches      []*SearchState `protobuf:"bytes,6,rep,name=searches,proto3" json:"searches,omitempty"`
+	Turns    []*Turn        `protobuf:"bytes,4,rep,name=turns,proto3" json:"turns,omitempty"`
+	Messages []*Message     `protobuf:"bytes,5,rep,name=messages,proto3" json:"messages,omitempty"`
+	Searches []*SearchState `protobuf:"bytes,6,rep,name=searches,proto3" json:"searches,omitempty"`
+	// Older run bundles or history were omitted to fit the snapshot byte budget.
+	// Search views omitted here follow as individual search responses.
+	Truncated     bool `protobuf:"varint,7,opt,name=truncated,proto3" json:"truncated,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -516,6 +519,13 @@ func (x *RunsSnapshot) GetSearches() []*SearchState {
 		return x.Searches
 	}
 	return nil
+}
+
+func (x *RunsSnapshot) GetTruncated() bool {
+	if x != nil {
+		return x.Truncated
+	}
+	return false
 }
 
 type WatchRunsResponse struct {
@@ -1327,14 +1337,15 @@ const file_vibesys_orchestrator_v1_service_proto_rawDesc = "" +
 	"\rcompatibility\x18\x02 \x01(\x0e2&.vibesys.orchestrator.v1.CompatibilityB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\rcompatibility\"9\n" +
 	"\x10WatchRunsRequest\x12%\n" +
-	"\x0eafter_sequence\x18\x01 \x01(\x04R\rafterSequence\"\xc9\x02\n" +
+	"\x0eafter_sequence\x18\x01 \x01(\x04R\rafterSequence\"\xe7\x02\n" +
 	"\fRunsSnapshot\x120\n" +
 	"\x04runs\x18\x01 \x03(\v2\x1c.vibesys.orchestrator.v1.RunR\x04runs\x126\n" +
 	"\x06agents\x18\x02 \x03(\v2\x1e.vibesys.orchestrator.v1.AgentR\x06agents\x12\x1a\n" +
 	"\bsequence\x18\x03 \x01(\x04R\bsequence\x123\n" +
 	"\x05turns\x18\x04 \x03(\v2\x1d.vibesys.orchestrator.v1.TurnR\x05turns\x12<\n" +
 	"\bmessages\x18\x05 \x03(\v2 .vibesys.orchestrator.v1.MessageR\bmessages\x12@\n" +
-	"\bsearches\x18\x06 \x03(\v2$.vibesys.orchestrator.v1.SearchStateR\bsearches\"\xdf\x01\n" +
+	"\bsearches\x18\x06 \x03(\v2$.vibesys.orchestrator.v1.SearchStateR\bsearches\x12\x1c\n" +
+	"\ttruncated\x18\a \x01(\bR\ttruncated\"\xdf\x01\n" +
 	"\x11WatchRunsResponse\x12C\n" +
 	"\bsnapshot\x18\x01 \x01(\v2%.vibesys.orchestrator.v1.RunsSnapshotH\x00R\bsnapshot\x126\n" +
 	"\x05event\x18\x02 \x01(\v2\x1e.vibesys.orchestrator.v1.EventH\x00R\x05event\x12>\n" +

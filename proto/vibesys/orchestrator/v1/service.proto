@@ -81,6 +81,9 @@ message RunsSnapshot {
   repeated Turn turns = 4;
   repeated Message messages = 5;
   repeated SearchState searches = 6;
+  // Older run bundles or history were omitted to fit the snapshot byte budget.
+  // Search views omitted here follow as individual search responses.
+  bool truncated = 7;
 }
 
 message WatchRunsResponse {

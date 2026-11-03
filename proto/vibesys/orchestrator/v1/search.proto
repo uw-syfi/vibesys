@@ -12,7 +12,7 @@ option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchest
 
 // SearchState is a whole, ephemeral view. Revisions grow within one daemon boot.
 message SearchState {
-  string run_id = 1 [(buf.validate.field).string.min_len = 1];
+  string run_id = 1 [(buf.validate.field).string = {min_len: 1, max_bytes: 256}];
   uint64 revision = 2 [(buf.validate.field).uint64.gt = 0];
   SearchHealth health = 3 [(buf.validate.field).required = true];
   repeated vibesys.cli.v1.Job jobs = 4 [(buf.validate.field).repeated.max_items = 500];
@@ -41,7 +41,7 @@ message Unreadable {
   }];
   google.protobuf.Timestamp since = 2 [(buf.validate.field).required = true];
   // Display only.
-  string detail = 3;
+  string detail = 3 [(buf.validate.field).string.max_bytes = 4096];
 }
 
 enum UnreadableReason {

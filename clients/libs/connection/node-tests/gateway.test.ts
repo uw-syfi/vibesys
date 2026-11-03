@@ -1,5 +1,6 @@
 import {describe, test} from 'node:test';
 import {create, toBinary} from '@bufbuild/protobuf';
+import {ORCHESTRATOR_MAX_MESSAGE_BYTES} from '@vibesys/orchestrator-proto';
 import {
   API_SCHEMA_HASH,
   encodeHostMutate,
@@ -493,4 +494,14 @@ test('a maximum-size blob plus response metadata fits the shared gateway frame b
   expect(
     validatedFromBinary(GetBlobsResponseSchema, decoded[0] as Uint8Array).blobs[0]?.data.byteLength,
   ).toBe(data.byteLength);
+});
+
+test('the orchestrator receive limit accepts its largest frame and refuses a larger header', () => {
+  const decoder = new GrpcDecoder(ORCHESTRATOR_MAX_MESSAGE_BYTES);
+  expect(
+    decoder.push(grpcFrame(new Uint8Array(ORCHESTRATOR_MAX_MESSAGE_BYTES)))[0]?.byteLength,
+  ).toBe(ORCHESTRATOR_MAX_MESSAGE_BYTES);
+  const header = Buffer.alloc(5);
+  header.writeUInt32BE(ORCHESTRATOR_MAX_MESSAGE_BYTES + 1, 1);
+  expect(() => decoder.push(header)).toThrow('exceeds');
 });

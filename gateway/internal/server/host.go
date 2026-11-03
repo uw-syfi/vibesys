@@ -181,12 +181,16 @@ func rpcError(err error) error {
 	}
 }
 
+// MaxReceiveMessageBytes bounds the gateway bridge's incoming RPC messages.
+const MaxReceiveMessageBytes = gen.HostAPIMaxMessageBytes
+
 // Serve owns the gRPC server until listener closure or context cancellation.
 // The caller owns socket publication and connection/idle accounting.
 func Serve(ctx context.Context, listener net.Listener, config Config) error {
 	config = config.withDefaults()
 	server := grpc.NewServer(
 		grpc.MaxSendMsgSize(gen.HostAPIMaxMessageBytes),
+		grpc.MaxRecvMsgSize(MaxReceiveMessageBytes),
 		grpc.UnaryInterceptor(validateUnary),
 		grpc.StreamInterceptor(validateStream),
 		grpc.KeepaliveParams(keepalive.ServerParameters{Time: KeepaliveTime, Timeout: KeepaliveTimeout}),

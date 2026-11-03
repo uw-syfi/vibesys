@@ -7,6 +7,7 @@ import (
 	"testing/quick"
 
 	cli "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -20,7 +21,7 @@ func TestCapKeepsNewestAndTheirFacts(t *testing.T) {
 			facts = append(facts, &cli.TaskFact{Fact: &cli.TaskFact_Job{Job: &cli.Job{Id: id, SubmittedAt: &timestamppb.Timestamp{Seconds: int64(i)}}}}, &cli.TaskFact{Fact: &cli.TaskFact_Result{Result: &cli.Result{JobId: id}}}, &cli.TaskFact{Fact: &cli.TaskFact_Trouble{Trouble: &cli.JobTrouble{JobId: id}}}, &cli.TaskFact{Fact: &cli.TaskFact_Plan{Plan: &cli.Plan{Number: uint32(i + 1)}}}, &cli.TaskFact{Fact: &cli.TaskFact_Promotion{Promotion: &cli.PromotionRecord{Seq: uint64(i + 1)}}}, &cli.TaskFact{Fact: &cli.TaskFact_Judgment{Judgment: &cli.Judgment{Commit: id}}})
 		}
 		v := search.Fold(facts)
-		s := search.Cap(v)
+		s := search.Cap(v, &pb.SearchState{})
 		if len(s.Jobs) != min(n, 500) || len(s.Results) != len(s.Jobs) || len(s.Troubles) != len(s.Jobs) || len(s.Judgments) != min(n, 100) || len(s.Plans) != min(n, 200) || len(s.Promotions) != min(n, 200) || s.Truncated != (n >= 100) {
 			return false
 		}

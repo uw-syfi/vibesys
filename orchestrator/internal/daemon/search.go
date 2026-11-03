@@ -29,9 +29,7 @@ func (e *Engine) searchState(run core.RunID) *pb.SearchState {
 	if old != nil && old.Revision == revision {
 		return old
 	}
-	s := search.Cap(v)
-	s.RunId = string(run)
-	s.Revision = revision
+	s := &pb.SearchState{RunId: string(run), Revision: revision}
 	at := timestamppb.New(e.Clock.Now())
 	if v.Reason == search.Readable {
 		s.Health = &pb.SearchHealth{State: &pb.SearchHealth_LiveSince{LiveSince: at}}
@@ -43,8 +41,9 @@ func (e *Engine) searchState(run core.RunID) *pb.SearchState {
 		if old != nil && old.Health.GetUnreadable().GetReason() == reason {
 			at = old.Health.GetUnreadable().Since
 		}
-		s.Health = &pb.SearchHealth{State: &pb.SearchHealth_Unreadable{Unreadable: &pb.Unreadable{Reason: reason, Since: at, Detail: v.Detail}}}
+		s.Health = &pb.SearchHealth{State: &pb.SearchHealth_Unreadable{Unreadable: &pb.Unreadable{Reason: reason, Since: at, Detail: search.Detail(v.Detail)}}}
 	}
+	s = search.Cap(v, s)
 	e.searches[run] = s
 	return s
 }

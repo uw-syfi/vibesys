@@ -13,3 +13,6 @@ export * from './generated/vibesys/orchestrator/v1/orchestrator_pb.js';
 export * from './generated/vibesys/orchestrator/v1/search_pb.js';
 export * from './generated/vibesys/orchestrator/v1/service_pb.js';
 export {decodeValidated, decodeValidatedJson, encodeJson, encodeMessage} from './validated.js';
+
+/** Maximum encoded response on the orchestrator link; checked before allocating a frame. */
+export const ORCHESTRATOR_MAX_MESSAGE_BYTES = 4 * 1024 * 1024;

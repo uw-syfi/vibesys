@@ -371,9 +371,10 @@ var File_vibesys_orchestrator_v1_search_proto protoreflect.FileDescriptor
 
 const file_vibesys_orchestrator_v1_search_proto_rawDesc = "" +
 	"\n" +
-	"$vibesys/orchestrator/v1/search.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x18vibesys/cli/v1/job.proto\x1a\x19vibesys/cli/v1/plan.proto\x1a\x1bvibesys/cli/v1/result.proto\x1a\x1cvibesys/cli/v1/service.proto\"\x87\x05\n" +
-	"\vSearchState\x12\x1e\n" +
-	"\x06run_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\x12#\n" +
+	"$vibesys/orchestrator/v1/search.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x18vibesys/cli/v1/job.proto\x1a\x19vibesys/cli/v1/plan.proto\x1a\x1bvibesys/cli/v1/result.proto\x1a\x1cvibesys/cli/v1/service.proto\"\x8a\x05\n" +
+	"\vSearchState\x12!\n" +
+	"\x06run_id\x18\x01 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01(\x80\x02R\x05runId\x12#\n" +
 	"\brevision\x18\x02 \x01(\x04B\a\xbaH\x042\x02 \x00R\brevision\x12E\n" +
 	"\x06health\x18\x03 \x01(\v2%.vibesys.orchestrator.v1.SearchHealthB\x06\xbaH\x03\xc8\x01\x01R\x06health\x122\n" +
 	"\x04jobs\x18\x04 \x03(\v2\x13.vibesys.cli.v1.JobB\t\xbaH\x06\x92\x01\x03\x10\xf4\x03R\x04jobs\x12;\n" +
@@ -394,13 +395,13 @@ const file_vibesys_orchestrator_v1_search_proto_rawDesc = "" +
 	"\n" +
 	"unreadable\x18\x02 \x01(\v2#.vibesys.orchestrator.v1.UnreadableH\x00R\n" +
 	"unreadableB\x0e\n" +
-	"\x05state\x12\x05\xbaH\x02\b\x01\"\xad\x01\n" +
+	"\x05state\x12\x05\xbaH\x02\b\x01\"\xb7\x01\n" +
 	"\n" +
 	"Unreadable\x12M\n" +
 	"\x06reason\x18\x01 \x01(\x0e2).vibesys.orchestrator.v1.UnreadableReasonB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06reason\x128\n" +
-	"\x05since\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x05since\x12\x16\n" +
-	"\x06detail\x18\x03 \x01(\tR\x06detail*\xe1\x02\n" +
+	"\x05since\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x05since\x12 \n" +
+	"\x06detail\x18\x03 \x01(\tB\b\xbaH\x05r\x03(\x80 R\x06detail*\xe1\x02\n" +
 	"\x10UnreadableReason\x12!\n" +
 	"\x1dUNREADABLE_REASON_UNSPECIFIED\x10\x00\x12\x1f\n" +
 	"\x1bUNREADABLE_REASON_NO_DAEMON\x10\x01\x12\"\n" +

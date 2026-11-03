@@ -10,8 +10,8 @@ import (
 
 // Cap projects an owned view to the bounded wire shape. It keeps the newest jobs
 // and only their results and troubles. Health and identity belong to the caller.
-func Cap(v View) *pb.SearchState {
-	s := &pb.SearchState{UnattributedJobs: v.UnattributedJobs, Truncated: v.Truncated}
+func Cap(v View, s *pb.SearchState) *pb.SearchState {
+	s.UnattributedJobs, s.Truncated = v.UnattributedJobs, v.Truncated || len(v.Detail) > len(Detail(v.Detail))
 	for _, f := range v.Facts {
 		switch b := f.Fact.(type) {
 		case *cli.TaskFact_Job:
@@ -51,6 +51,7 @@ func Cap(v View) *pb.SearchState {
 	s.Judgments = capList(s.Judgments, 100, &s.Truncated)
 	s.Promotions = capList(s.Promotions, 200, &s.Truncated)
 	s.Plans = capList(s.Plans, 200, &s.Truncated)
+	boundBytes(s, v)
 	return s
 }
 
