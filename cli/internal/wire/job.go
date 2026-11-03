@@ -77,7 +77,7 @@ func ToNote(n *cliv1.Note) core.Note {
 
 // Submitter returns the contract's message for a caller that submitted a job.
 func Submitter(s core.Submitter) *cliv1.Submitter {
-	return &cliv1.Submitter{RunId: string(s.Run), Agent: s.Agent, At: timestamp(s.At)}
+	return &cliv1.Submitter{RunId: string(s.Run), Agent: s.Agent, At: timestamppb.New(s.At)}
 }
 
 // ToSubmitter returns the domain submitter for the contract's message.
