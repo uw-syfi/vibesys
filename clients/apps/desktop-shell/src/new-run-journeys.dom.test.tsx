@@ -307,10 +307,26 @@ test('changing the domain clears the questions of the old one, and Back returns 
 
 test('Start over forgets the answers', async () => {
   const shell = await openAt(pageNamed('goal LLM'));
-  await press(one(steps(shell), {role: 'button', name: 'Start over'}));
+  await press(one(main(shell), {role: 'button', name: 'Start over'}));
   await settle();
   await expectQuestion(shell, 'What do you want to optimize?');
-  expect(all(steps(shell), {role: 'button', name: 'Start over'})).toHaveLength(0);
+  expect(all(main(shell), {role: 'button', name: 'Start over'})).toHaveLength(0);
+});
+
+test('every step ends with one action row: Back and Start over first, the way on last', async () => {
+  for (const each of NEW_RUN_PAGES.filter(page => page.answers.from !== null)) {
+    const shell = await openAt(each);
+    const names = all(main(shell), {role: 'button'}).map(nameOfControl);
+    const next =
+      each.step === 'review' ? 'Start run' : each.step === 'goal' ? 'Looks right' : 'Continue';
+    // Back, then Start over, open the row; only the screen's status sits between them and the way on.
+    expect(names.at(-1), each.name).toBe(next);
+    expect(names.indexOf('Start over'), each.name).toBe(names.indexOf('Back') + 1);
+    expect(names.indexOf('Start over'), each.name).toBeLessThan(names.length - 1);
+    expect(all(steps(shell), {role: 'button', name: 'Start over'}), each.name).toHaveLength(0);
+    await shell.close();
+    shells.splice(shells.indexOf(shell), 1);
+  }
 });
 
 /** The user's own project in `path`, chosen, with the page of `step` shown. */

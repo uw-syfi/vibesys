@@ -6,17 +6,7 @@
  * wordmark above its question; the others do not.
  */
 import type {HostKey} from '@vibesys/hosts';
-import {
-  Button,
-  Page,
-  type PageState,
-  Row,
-  SectionLayout,
-  SidebarItem,
-  Stack,
-  Text,
-  Wordmark,
-} from '@vibesys/ui';
+import {Page, type PageState, SectionLayout, SidebarItem, Stack, Text, Wordmark} from '@vibesys/ui';
 import type {JSX} from 'react';
 import {
   examplesStatus,
@@ -24,6 +14,7 @@ import {
   type NewRunContext,
   type NewRunEvent,
   type NewRunSnapshot,
+  START_OVER_WORDS,
   type StepId,
   TASKS_UNREAD_WORDS,
 } from '../../state/index.js';
@@ -41,7 +32,7 @@ import {
 } from './example-pages.js';
 import {GoalPage} from './goal-page.js';
 import {type FolderCompletion, ProjectPage, TaskPage} from './project-pages.js';
-import {Nav, Question} from './question.js';
+import {Nav, NextButton, Question} from './question.js';
 import {pageShowsProblem} from './read-failed.js';
 import {ProblemStatus, ReviewPage, StartButton} from './review-page.js';
 import {progressLine, type StepView, stepViews} from './steps.js';
@@ -177,35 +168,53 @@ function StepBody(props: ScreenProps & {readonly at: StepId}): JSX.Element {
   }
 }
 
-/** Back, and the way on: Continue, Looks right on the goal, Start run on Review. */
-function StepNav(props: ScreenProps & {readonly at: StepId; readonly first: boolean}): JSX.Element {
-  const {snapshot, dispatch, at} = props;
-  const {context} = snapshot;
-  if (at === 'review') {
-    return (
-      <Row justify="between" align="start" wrap>
-        <Button text="Back" press={() => dispatch({type: 'back'})} />
-        <StartButton snapshot={snapshot} dispatch={dispatch} />
-      </Row>
-    );
-  }
+/** Why the step shown cannot go on yet: '' for a plain unanswered question; absent when it can. */
+function blockedAt(context: NewRunContext, at: StepId): string | undefined {
+  // The project's tasks could not be read: its page says why, and the form waits for another.
+  if (at === 'project' && context.problem?.step === 'tasks') return TASKS_UNREAD_WORDS;
+  // The goal is answered by accepting it, which is what its button does.
+  if (at === 'goal') return undefined;
   const done = isDone(at, context.answers, entriesIn(context), {
     agent: context.form.agent !== null,
   });
-  // The project's tasks could not be read: its page says why, and the form waits for another.
-  const unread = at === 'project' && context.problem?.step === 'tasks';
+  return done ? undefined : '';
+}
+
+/**
+ * The one action row every step ends with: Back and Start over at its start; at its end the
+ * screen's problem (unless the page says it where it happened) and the way on (Continue, Looks
+ * right on the goal, Start run on Review), always last.
+ */
+function StepNav(props: ScreenProps & {readonly at: StepId; readonly first: boolean}): JSX.Element {
+  const {snapshot, dispatch, at} = props;
+  const {context} = snapshot;
+  const blocked = blockedAt(context, at);
   return (
     <Nav
+      {...(context.answers.from === null
+        ? {}
+        : {startOver: {text: START_OVER_WORDS, press: () => dispatch({type: 'reset'})}})}
+      status={
+        pageShowsProblem(context, at, examplesFailed(context, at)) ? null : (
+          <ProblemStatus context={context} dispatch={dispatch} showRuns={props.showRuns} />
+        )
+      }
       {...(props.first ? {} : {back: () => dispatch({type: 'back'})})}
-      next={{
-        text: at === 'goal' ? 'Looks right' : 'Continue',
-        press: () =>
-          at === 'goal'
-            ? dispatch({type: 'answer', change: {kind: 'goal'}, advance: true})
-            : dispatch({type: 'next'}),
-        // The goal is answered by accepting it, which is what its button does.
-        blocked: unread ? TASKS_UNREAD_WORDS : done || at === 'goal' ? undefined : '',
-      }}
+      next={
+        at === 'review' ? (
+          <StartButton snapshot={snapshot} dispatch={dispatch} />
+        ) : (
+          <NextButton
+            text={at === 'goal' ? 'Looks right' : 'Continue'}
+            press={() =>
+              at === 'goal'
+                ? dispatch({type: 'answer', change: {kind: 'goal'}, advance: true})
+                : dispatch({type: 'next'})
+            }
+            blocked={blocked}
+          />
+        )
+      }
     />
   );
 }
@@ -214,7 +223,6 @@ function StepNav(props: ScreenProps & {readonly at: StepId; readonly first: bool
 function Steps(props: {
   readonly views: readonly StepView[];
   readonly at: StepId | null;
-  readonly started: boolean;
   readonly dispatch: Dispatch;
 }): JSX.Element {
   const {dispatch} = props;
@@ -236,14 +244,6 @@ function Steps(props: {
           press={() => dispatch({type: 'go', step: view.id})}
         />
       ))}
-      {props.started ? (
-        <Button
-          variant="quiet"
-          size="sm"
-          text="Start over"
-          press={() => dispatch({type: 'reset'})}
-        />
-      ) : null}
     </>
   );
 }
@@ -272,20 +272,10 @@ export function NewRunScreen(props: ScreenProps): JSX.Element {
               : 'Listing the examples'
             : progressLine(views, at)
         }
-        sections={
-          <Steps
-            views={views}
-            at={at}
-            started={context.answers.from !== null}
-            dispatch={dispatch}
-          />
-        }
+        sections={<Steps views={views} at={at} dispatch={dispatch} />}
       >
         <Stack gap="space-5">
           {at === 'start' ? <Wordmark art={VIBESYS_WORDMARK} size="compact" /> : null}
-          {pageShowsProblem(context, at, examplesFailed(context, at)) ? null : (
-            <ProblemStatus context={context} dispatch={dispatch} showRuns={props.showRuns} />
-          )}
           {at === null || copy === null ? (
             examplesFailed(context, at) ? (
               <ExamplesFailed context={context} dispatch={dispatch} machines={props.machines} />

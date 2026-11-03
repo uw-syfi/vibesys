@@ -152,6 +152,7 @@ export {type Problem, problemOf, type Step, StepFailure, startUnconfirmed} from 
 export {
   OTHER_PROJECT_WORDS,
   PROJECT_FOLDER_WORDS,
+  START_OVER_WORDS,
   TASKS_UNREAD_WORDS,
   USE_FOLDER_WORDS,
 } from './project-words.js';
