@@ -1,6 +1,6 @@
 import {expect, test} from 'bun:test';
 import {create} from '@bufbuild/protobuf';
-import {LifecycleSchema, Outcome, RunLiveness} from '@vibesys/proto';
+import {LifecycleSchema, Outcome, RunFailureKind, RunLiveness} from '@vibesys/proto';
 import * as intents from './index.js';
 
 test('every ended observation offers Resume while a live writer never does', () => {
@@ -71,6 +71,40 @@ test('every ended observation offers Resume while a live writer never does', () 
       ),
     ).toBeNull();
   }
+});
+
+test('an ending that failed while setting up offers no Resume, and the controls settle', () => {
+  const setup = new Set([RunFailureKind.ENVIRONMENT_UNAVAILABLE, RunFailureKind.CONFIGURATION]);
+  const kinds = Object.values(RunFailureKind).filter(kind => typeof kind === 'number');
+  for (let epoch = 1n; epoch <= 3n; epoch += 1n)
+    for (const kind of kinds)
+      for (const value of [RunLiveness.ENDED, RunLiveness.INTERRUPTED, RunLiveness.UNSPECIFIED]) {
+        const lifecycle = create(LifecycleSchema, {
+          state: {
+            case: 'ended',
+            value: {outcome: Outcome.FAILED, resumable: true, failure: {kind, reason: 'refused'}},
+          },
+        });
+        const observation = {epoch, lifecycle};
+        const liveness = {epoch, value};
+        const controls = intents.writerControls({
+          reference: intents.runReference('/work/project', 'run-1'),
+          fresh: true,
+          observation,
+          liveness,
+          historyEpoch: epoch,
+        });
+        expect({kind, relaunch: intents.relaunchTarget(observation, liveness)}).toEqual({
+          kind,
+          relaunch: setup.has(kind) ? null : {epoch, state: 'ended'},
+        });
+        // Settled, not catching up: nothing asks the page to read the writer again.
+        expect({kind, status: controls.status, actions: controls.actions}).toEqual({
+          kind,
+          status: 'ready',
+          actions: [],
+        });
+      }
 });
 
 test('a newer host epoch fences an older parked snapshot', () => {

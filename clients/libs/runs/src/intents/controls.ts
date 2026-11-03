@@ -1,4 +1,4 @@
-import {RunLiveness} from '@vibesys/proto';
+import {type Lifecycle, RunFailureKind, RunLiveness} from '@vibesys/proto';
 import type {RunReference} from './reference.js';
 import type {RelaunchLiveness, RelaunchObservation, RelaunchTarget} from './relaunch.js';
 
@@ -28,6 +28,15 @@ type WriterAvailability = {readonly epoch: bigint} & (
       readonly relaunch: RelaunchTarget;
     }
   | {
+      /**
+       * An ending a resume would only repeat (`failedAtSetup`): there is nothing to offer, so its
+       * actions are empty (typed as a list of actions, so callers can ask any variant for one).
+       */
+      readonly status: 'ready';
+      readonly actions: readonly RunIntentAction[];
+      readonly relaunch: null;
+    }
+  | {
       readonly status: 'catching-up' | 'unknown' | 'unknown-project';
       readonly actions: readonly [];
       readonly relaunch: null;
@@ -41,7 +50,8 @@ type WriterAvailability = {readonly epoch: bigint} & (
  * The total projection yields actions, Resume, or a visible catching-up/unknown reason.
  * The liveness watch resubscribes within 31 seconds; unresolved facts ask the owning page to
  * re-read lifecycle within 30 seconds, repeatedly while the gap persists. Machine/DOM properties
- * enforce these bounds. Resume follows the host contract: every ending is eligible.
+ * enforce these bounds. Resume follows the host contract, where every ending is eligible, except
+ * an ending a resume would only repeat (`failedAtSetup`).
  */
 export type WriterControls = WriterAvailability &
   (
@@ -75,6 +85,8 @@ function writerAvailability(facts: Omit<WriterFacts, 'reference' | 'fresh'>): Wr
     const actions = liveActions(observation);
     return actions ? {epoch, actions, relaunch: null, status: 'ready'} : waiting('catching-up');
   }
+  if (failedAtSetup(observation.lifecycle))
+    return {epoch, actions: [], relaunch: null, status: 'ready'};
   if (live === RunLiveness.INTERRUPTED || state?.case === 'parked' || state?.case === 'ended')
     return {
       epoch,
@@ -86,6 +98,25 @@ function writerAvailability(facts: Omit<WriterFacts, 'reference' | 'fresh'>): Wr
       },
     };
   return waiting(live === RunLiveness.ENDED ? 'catching-up' : 'unknown');
+}
+
+/**
+ * The failures that say the run never got going: its environment could run none of its work, or
+ * its configuration was refused. A resume reopens the same setup and fails the same way; Run again,
+ * which can change it, is the way on.
+ */
+const SETUP_FAILURES: ReadonlySet<RunFailureKind> = new Set([
+  RunFailureKind.ENVIRONMENT_UNAVAILABLE,
+  RunFailureKind.CONFIGURATION,
+]);
+
+/** Whether `lifecycle` is an ending whose failure is one of `SETUP_FAILURES`. */
+function failedAtSetup(lifecycle: Lifecycle | undefined): boolean {
+  const state = lifecycle?.state;
+  return (
+    state?.case === 'ended' &&
+    SETUP_FAILURES.has(state.value.failure?.kind ?? RunFailureKind.UNSPECIFIED)
+  );
 }
 
 function liveActions(
