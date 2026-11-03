@@ -32,3 +32,7 @@ domains = ["kernel-writing"]
 [[rule]]
 path = "dial9-tokio"
 domains = ["database"]
+
+[[rule]]
+path = "custom-rpc-optimization"
+domains = ["microservices"]
