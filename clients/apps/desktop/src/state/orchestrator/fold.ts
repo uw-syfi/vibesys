@@ -15,7 +15,7 @@
  * - events in any order, repeated any number of times, leave the state of the longest gap-free
  *   prefix received, so a skipped event is never papered over and a repeat changes nothing;
  * - a snapshot over a populated state keeps what the snapshot does not carry (items, receipts,
- *   progress) and never takes the state back to an earlier sequence;
+ *   progress) and takes the state back to an earlier sequence only to close a gap;
  * - however the run stream and the agent stream interleave, every item ends as the newest copy
  *   either stream carried, and progress shown is never text a stored item already holds.
  */
@@ -37,11 +37,13 @@ function byId<T extends {readonly id: string}>(rows: readonly T[]): Record<strin
 
 /**
  * A read of the runs from scratch: replaces runs, agents and messages wholesale. A snapshot older
- * than what is applied changes nothing. What it does not carry (items, receipts, progress) stays,
- * and a turn the agent stream already finished is not taken back to running.
+ * than what is applied changes nothing, unless the state is waiting out a gap: the read that was
+ * asked for to close the gap is authoritative, even when the daemon's sequence restarted below
+ * the one held, or the same gap would reopen forever. What it does not carry (items, receipts,
+ * progress) stays, and a turn the agent stream already finished is not taken back to running.
  */
 export function applySnapshot(state: OrchestratorState, snapshot: RunsSnapshot): OrchestratorState {
-  if (snapshot.sequence < state.sequence) return state;
+  if (snapshot.sequence < state.sequence && state.gap === null) return state;
   const turns = snapshot.turns.reduce(withTurn, state).turns;
   return {
     ...state,

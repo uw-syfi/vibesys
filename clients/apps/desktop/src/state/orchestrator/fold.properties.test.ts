@@ -168,6 +168,33 @@ describe('a snapshot', () => {
       {numRuns: 40},
     );
   });
+
+  it('older than what is applied closes a gap, so a daemon whose sequence restarted is followed', () => {
+    fc.assert(
+      fc.property(scenarios, fc.nat(), fc.nat(), (options, cut, back) => {
+        const scenario = generateScenario(options);
+        const total = scenario.events.length;
+        fc.pre(total >= 3);
+        // The client holds events up to `at` and then sees one that skips the next.
+        const at = 1 + (cut % (total - 2));
+        const gapped = applyEvent(
+          fold(scenario.events.slice(0, at)),
+          scenario.events[at + 1] as Event,
+        );
+        expect(gapped.gap).not.toBeNull();
+        // The daemon answers the resync from a sequence below the one held.
+        const restarted = new FakeDaemon(scenario, back % at).snapshot();
+        const resynced = applySnapshot(gapped, restarted);
+        expect(resynced.gap).toBeNull();
+        expect(resynced.sequence).toBe(restarted.sequence);
+        const fresh = applySnapshot(emptyState, restarted);
+        expect(resynced.runs).toEqual(fresh.runs);
+        expect(resynced.agents).toEqual(fresh.agents);
+        expect(resynced.messages).toEqual(fresh.messages);
+      }),
+      {numRuns: 60},
+    );
+  });
 });
 
 /** A hand-made history of items: each has running versions, and maybe a final one, committed in any order. */
