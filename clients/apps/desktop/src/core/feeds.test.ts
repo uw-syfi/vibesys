@@ -327,6 +327,64 @@ describe('an agent stream', () => {
     }),
   );
 
+  // P1 for an agent stream: its first open is a page and then the progress made since, a reopen
+  // continues from the cursor. A link that drops anywhere, and a page or item frame delivered
+  // twice, still end with the items and turns an uninterrupted stream gives. (A progress frame
+  // carries no ordinal, so a repeated one cannot be told from new text: the transport delivers
+  // each frame once, and the faults here repeat only frames whose repeat is a no-op.)
+  describe('under generated faults (P1)', () => {
+    const liveScenario = generateScenario({seed: 7, subagents: 2, live: true});
+    const liveDaemon = () => new FakeDaemon(liveScenario);
+    const watched = liveScenario.deltas[0]?.agentId ?? '';
+    const progressFrames = liveScenario.deltas.filter(delta => delta.agentId === watched).length;
+
+    const schedules = Schema.Struct({
+      dropAfter: upTo(4, between(0, progressFrames + 6)),
+      // The page (frame 0) and the frames after the progress: not the progress frames.
+      duplicate: upTo(
+        3,
+        Schema.Union([Schema.Literal(0), between(progressFrames + 1, progressFrames + 6)]),
+      ),
+      helloFails: upTo(2, between(0, 3)),
+    });
+
+    const play = (schedule: typeof schedules.Type) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const failing = new Set(schedule.helloFails);
+          const h = yield* hostHarness(liveDaemon(), {
+            closeStreams: true,
+            helloFails: nth => (failing.has(nth) ? RpcStatus.UNAVAILABLE : undefined),
+            wrap: faultsOn('WatchAgent', {
+              dropAfter: schedule.dropAfter,
+              duplicate: schedule.duplicate,
+            }),
+          });
+          h.mount(h.session.agents.watch(watched));
+          yield* h.elapse(600, 5);
+          return (yield* h.model).data;
+        }).pipe(Random.withSeed(SEED)),
+      );
+    const textOf = (data: OrchestratorState) =>
+      Object.fromEntries(Object.entries(data.overlays).map(([id, o]) => [id, o.text]));
+
+    it.effect.prop(
+      'ends with the items an uninterrupted stream gives, and progress that is a prefix of its',
+      {schedule: schedules},
+      ({schedule}) =>
+        Effect.gen(function* () {
+          const clean = yield* play({dropAfter: [], duplicate: [], helloFails: []});
+          const faulty = yield* play(schedule);
+          expect(faulty.items).toEqual(clean.items);
+          expect(faulty.turns).toEqual(clean.turns);
+          for (const [id, text] of Object.entries(textOf(faulty))) {
+            expect(textOf(clean)[id]?.startsWith(text), `progress of ${id}`).toBe(true);
+          }
+        }),
+      {arbitrary: {runs: 20}},
+    );
+  });
+
   it.effect('fails alone when the agent is unknown, and reopens on the user retry', () =>
     Effect.gen(function* () {
       const daemon = daemonAt();
