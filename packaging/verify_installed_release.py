@@ -27,7 +27,6 @@ from vs_runtime.api.infrastructure import (
 FRAMEWORK_PACKAGES = (
     "vibesys",
     "entrypoints",
-    "server",
     "headless",
     "launch",
     "vs_agent",

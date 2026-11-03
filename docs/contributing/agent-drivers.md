@@ -418,7 +418,7 @@ resolves the immutable manifest ID rather than keeping a manifest of its own.
 How a run's Dockerfile is generated from its Features, why no devcontainer CLI
 or Docker socket is involved at run time, and how Features are tested on each
 base family are in
-[devcontainer-features.md](devcontainer-features.md).
+[Feature README](https://github.com/uw-syfi/vibesys/blob/main/libs/vs-sandbox/src/vs_sandbox/features/README.md).
 
 CLI and toolchain versions are not in the Features' scripts: they are options
 that `agent_feature` fills from the library's public API, `vs_agent.api`

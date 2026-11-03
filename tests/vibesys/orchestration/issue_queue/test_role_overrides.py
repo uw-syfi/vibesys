@@ -1,6 +1,6 @@
 """`[agent.roles.<id>]` model overrides address the issue queue's roles by their declared ids.
 
-Design question Q6 of `docs/design/strategies-on-core.md`, as pinned for `dynamic`: an override is
+An override is
 keyed by a role id the plugin declares (`plain-implementer`, `plain-judge`,
 `plain-perf-evaluator`), and a legacy id of the loop it replaces is refused naming the key.
 """

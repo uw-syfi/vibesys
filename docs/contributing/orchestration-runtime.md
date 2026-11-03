@@ -29,9 +29,7 @@ A strategy imports `vs_core.api` and the product's shared policy packages; it ne
 constructs agent clients, sandboxes, worktrees, or run resources. Runtime libraries do not
 import VibeSys policy.
 [`tach.toml`](https://github.com/uw-syfi/vibesys/blob/main/tach.toml) enforces the
-dependency direction. The design behind this contract, and the vocabulary (decision,
-attempt, settlement, operation, adoption, suspension), is in
-[Running single, multi, evolve and issue_queue on the vs-core lifecycle](../design/strategies-on-core.md).
+dependency direction.
 
 ## Plugin declaration
 

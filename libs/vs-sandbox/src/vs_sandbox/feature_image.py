@@ -6,7 +6,7 @@ directory the final image should start in. :mod:`vs_sandbox.feature_dockerfile`
 turns that into a Dockerfile, and :func:`build_feature_image` runs plain
 ``docker build`` on it. No container drives the host's Docker daemon through
 its socket and no Node.js is needed, so it works on hosts whose daemon refuses
-to bind-mount the socket. See ``docs/contributing/devcontainer-features.md``.
+to bind-mount the socket. See ``libs/vs-sandbox/src/vs_sandbox/features/README.md``.
 
 Features belong to their owners (the agent layer, a run environment, the
 toolchain catalog in :mod:`vs_sandbox.toolchain_features`) and arrive here as

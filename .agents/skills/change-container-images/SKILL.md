@@ -15,8 +15,7 @@ Feature is a folder with `devcontainer-feature.json` (id, options,
 environment) and an install script that runs as root during the build. VibeSys
 does not run the `devcontainer` CLI at run time: it generates a Dockerfile from
 the Features and runs plain `docker build`. The CLI only proves in CI that each
-Feature conforms to the specification. The design and the Feature owners are in
-[devcontainer-features.md](../../../docs/contributing/devcontainer-features.md).
+Feature conforms to the specification. Each Feature belongs to the module that owns what it installs.
 
 ## Builds on
 
@@ -136,8 +135,6 @@ Feature conforms to the specification. The design and the Feature owners are in
 
 ## Sources of truth
 
-- [devcontainer-features.md](../../../docs/contributing/devcontainer-features.md):
-  design, Feature owners, supported metadata, CI bases.
 - The Feature-to-Dockerfile generator and image builder in `vs-sandbox`, and
   its toolchain catalog (names and pins).
 - The agent policy pins, the in-container interpreter module and the agent

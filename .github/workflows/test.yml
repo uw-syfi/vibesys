@@ -1543,7 +1543,7 @@ jobs:
   # Ubuntu. The product's real GPU bases (rocm/pytorch is 23 GB compressed,
   # nvcr.io pytorch 25 GB) cannot be pulled inside the budget, so each family is
   # represented by a small official image of the same distribution and package
-  # manager; the real bases are built by hand (docs/contributing/devcontainer-features.md).
+  # manager; the real bases are built by hand (libs/vs-sandbox/src/vs_sandbox/features/README.md).
   # Docker's own storage is cached by install inputs and resolved base digests.
   # Every successful event saves missing entries, including PRs and merge groups.
   feature-tests:

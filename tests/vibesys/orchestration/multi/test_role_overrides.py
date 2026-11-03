@@ -1,6 +1,6 @@
 """`[agent.roles.<id>]` model overrides address `multi`'s roles by their declared role ids.
 
-Design question Q6 of `docs/design/strategies-on-core.md`. A role override in `agent.toml` is
+A role override in `agent.toml` is
 keyed by a role id the selected plugin declares, and any other key is refused before the run
 opens. `multi` declares `multi-orchestrator`, `multi-profiler`, `multi-implementer` and `multi-judge`, so those are the keys
 (the router is the orchestrator asked another question, so it has no key of its own);
