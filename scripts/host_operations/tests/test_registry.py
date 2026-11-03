@@ -51,36 +51,6 @@ def _image() -> descriptor_pb2.FileDescriptorSet:
     return descriptor_pb2.FileDescriptorSet(file=list(seen.values()))
 
 
-def _slots() -> tuple[str, ...]:
-    return (
-        "list_tasks",
-        "list_run_digests",
-        "usage_summary",
-        "usage_rates_refresh",
-        "usage_limits",
-        "list_harnesses",
-        "list_examples",
-        "get_task_goal",
-        "describe_machine",
-        "list_compute",
-        "list_agent_logins",
-        "inspect_destination",
-        "preflight_run",
-        "terminate_run",
-        "put_cluster",
-        "remove_cluster",
-        "test_cluster",
-        "create_example",
-        "copy_project",
-        "start_run",
-        "usage_prices_save",
-    )
-
-
-def _watches() -> tuple[str, ...]:
-    return ("login", "stream_saved_runs")
-
-
 def _changed(change: Callable[[object], None], index: int = 0) -> bytes:
     image = _image()
     pool = descriptor_pool.DescriptorPool()
@@ -99,7 +69,7 @@ def _changed(change: Callable[[object], None], index: int = 0) -> bytes:
 
 
 def test_every_method_has_one_typed_handler_and_canonical_budget() -> None:
-    compiled = compile_registry(_image().SerializeToString(), _slots(), _watches())
+    compiled = compile_registry(_image().SerializeToString())
     reads = [op for op in compiled if op.is_read()]
     assert [op.name for op in reads if op.policy.executor == 1] == list(_HANDLERS)
     assert [op.name for op in reads if op.policy.executor != 1] == [
@@ -128,21 +98,11 @@ def test_every_method_has_one_typed_handler_and_canonical_budget() -> None:
     }
 
 
-@pytest.mark.parametrize(
-    "handlers", [(), _slots()[:-1], (*_slots(), "list_tasks"), (*_slots(), "unknown")]
-)
-def test_missing_duplicate_and_unknown_handlers_fail_generation(
-    handlers: tuple[str, ...],
-) -> None:
-    with pytest.raises(GenerationError, match="handlers"):
-        compile_registry(_image().SerializeToString(), handlers)
-
-
 @pytest.mark.parametrize("field", ["operation_id", "request_tag", "response_tag"])
 def test_duplicate_identifiers_fail_generation(field: str) -> None:
     image = _changed(lambda policy: setattr(policy, field, 10), index=1)
     with pytest.raises(GenerationError, match=f"duplicate {field}"):
-        compile_registry(image, _slots())
+        compile_registry(image)
 
 
 @pytest.mark.parametrize(
@@ -168,7 +128,7 @@ def test_duplicate_identifiers_fail_generation(field: str) -> None:
 def test_invalid_policies_name_the_method(field: str, value: int, message: str) -> None:
     image = _changed(lambda policy: setattr(policy, field, value))
     with pytest.raises(GenerationError, match=f"ListTasks: .*{message}"):
-        compile_registry(image, _slots())
+        compile_registry(image)
 
 
 @given(number=st.integers(min_value=100, max_value=10000))
@@ -177,7 +137,7 @@ def test_every_bad_correlation_path_fails_generation(number: int) -> None:
         policy.correlation[0].request_path[:] = [number]
 
     with pytest.raises(GenerationError, match="correlation"):
-        compile_registry(_changed(change), _slots())
+        compile_registry(_changed(change))
 
 
 def test_a_correlation_cannot_cross_a_scalar_even_with_repeated_field_numbers() -> None:
@@ -185,17 +145,17 @@ def test_a_correlation_cannot_cross_a_scalar_even_with_repeated_field_numbers() 
         policy.correlation[0].request_path[:] = [1, 1]
 
     with pytest.raises(GenerationError, match="correlation crosses a scalar"):
-        compile_registry(_changed(change), _slots())
+        compile_registry(_changed(change))
 
 
 def test_the_descriptor_pass_compiles_all_language_outputs_before_publication() -> None:
     image = _image().SerializeToString()
-    outputs = compile_outputs(image, _slots(), _watches())
+    outputs = compile_outputs(image)
     assert len(outputs) == 7
     for path, content in outputs.items():
         if path.endswith(".py"):
             ast.parse(content)
-    assert compile_outputs(image, _slots(), _watches()) == outputs
+    assert compile_outputs(image) == outputs
 
 
 def _topic_image(
@@ -299,7 +259,7 @@ def test_frame_timing_compiles_from_the_descriptor_into_both_languages() -> None
     image = _image().SerializeToString()
     timing = compile_subscribe_timing(image)
     assert (timing.heartbeat_ms, timing.lease_ms) == (5000, 30000)
-    outputs = compile_outputs(image, _slots(), _watches())
+    outputs = compile_outputs(image)
     typescript = outputs["clients/libs/proto/src/generated/host-operations.ts"]
     go = outputs["gateway/internal/hostoperations/topics_generated.go"]
     assert f"heartbeatMs: {timing.heartbeat_ms}, leaseMs: {timing.lease_ms}" in typescript
@@ -379,4 +339,4 @@ def _with_minimum_version(version: str) -> bytes:
 @pytest.mark.parametrize("version", ["", "1.2", "1.2.3.4", "01.2.3", "v1.2.3", "1.2.3-dev"])
 def test_minimum_version_rejects_missing_or_invalid_policy(version: str) -> None:
     with pytest.raises(GenerationError, match="minimum_checkout_version"):
-        compile_outputs(_with_minimum_version(version), _slots(), _watches())
+        compile_outputs(_with_minimum_version(version))

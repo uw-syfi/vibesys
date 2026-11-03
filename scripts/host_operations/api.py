@@ -156,12 +156,8 @@ def _stream_policy(policy: object, method: object) -> None:
         _fail(name, "invalid progress_ms")
 
 
-def compile_registry(
-    image: bytes,
-    handlers: tuple[str, ...] | None,
-    watches: tuple[str, ...] | None = None,
-) -> tuple[Operation, ...]:
-    """Validate metadata, correlation paths and complete static handler registration."""
+def compile_registry(image: bytes) -> tuple[Operation, ...]:
+    """Validate descriptor budgets, identifiers and correlation paths."""
     files = descriptor_pb2.FileDescriptorSet.FromString(image)
     pool = descriptor_pool.DescriptorPool()
     for file in files.file:
@@ -208,21 +204,6 @@ def compile_registry(
                 tuple(correlations),
                 method.input_type.full_name in host_call_requests,
             )
-        )
-    expected = {op.slot for op in operations if op.is_read() and op.policy.executor == _CHECKOUT}
-    expected |= {op.slot for op in operations if op.is_mutation()}
-    if handlers is not None and (len(set(handlers)) != len(handlers) or set(handlers) != expected):
-        _fail(
-            service.full_name,
-            f"missing, duplicate or unknown handlers: expected {sorted(expected)}, got {sorted(handlers)}",
-        )
-    expected_watches = {op.slot for op in operations if op.is_watch()}
-    if watches is not None and (
-        len(set(watches)) != len(watches) or set(watches) != expected_watches
-    ):
-        _fail(
-            service.full_name,
-            f"missing, duplicate or unknown watches: expected {sorted(expected_watches)}, got {sorted(watches)}",
         )
     return tuple(operations)
 
@@ -276,20 +257,14 @@ def compile_topics(image: bytes) -> tuple[Topic, ...]:
         if field.name not in values:
             _fail(field.message_type.name, "no TopicEntry.value arm of the same name")
         if not (policy.first_frame_ms and policy.max_keys and policy.max_value_bytes):
-            _fail(
-                field.message_type.name,
-                "first_frame_ms, max_keys, max_value_bytes are required",
-            )
+            _fail(field.message_type.name, "first_frame_ms, max_keys, max_value_bytes are required")
         if policy.max_value_bytes > value_room:
             _fail(field.message_type.name, "max_value_bytes exceeds the transport cap")
         if policy.stale_after_ms and policy.stale_after_ms <= policy.cadence_ms:
             _fail(field.message_type.name, "stale_after_ms must exceed cadence_ms")
         topics.append(Topic(field.name, policy))
     if len(topics) != len(values):
-        _fail(
-            "TopicEntry",
-            "a value arm has no SubscribeRequest.topic arm of the same name",
-        )
+        _fail("TopicEntry", "a value arm has no SubscribeRequest.topic arm of the same name")
     return tuple(topics)
 
 
@@ -322,13 +297,9 @@ def _minimum_checkout_version(image: bytes) -> str:
     return version
 
 
-def compile_outputs(
-    image: bytes,
-    handlers: tuple[str, ...] | None,
-    watches: tuple[str, ...] | None = None,
-) -> dict[str, str]:
+def compile_outputs(image: bytes) -> dict[str, str]:
     """Compile every projection atomically in memory after validating the complete registry."""
-    operations = compile_registry(image, handlers, watches)
+    operations = compile_registry(image)
     minimum = _minimum_checkout_version(image)
     reads = tuple(op for op in operations if op.is_read())
     checkout_reads = tuple(op for op in reads if op.policy.executor == _CHECKOUT)

@@ -9,8 +9,8 @@ from scripts.host_operations.api import compile_outputs
 
 
 def generate(root: Path, image: bytes, *, include_schema: bool = True) -> None:
-    """Publish projections of the descriptor contracts used by the run path and gateway."""
-    for name, content in compile_outputs(image, None).items():
+    """Publish retained host contracts and live gateway subscription policies."""
+    for name, content in compile_outputs(image).items():
         if name.endswith(".proto") and not include_schema:
             continue
         path = root / name
