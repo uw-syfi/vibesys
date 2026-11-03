@@ -13,8 +13,6 @@ screen draws as text.
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, ConfigDict
@@ -111,7 +109,7 @@ def code_ids() -> CodeIds:
 def display_names_typescript() -> str:
     """The TypeScript module of the role names a person reads and the ids a screen must not draw.
 
-    ``python -m vibesys.api.display_catalog OUTPUT`` writes it, so the clients' copy is generated
+    ``python scripts/generate_display_names.py OUTPUT`` writes it, so the clients' copy is generated
     from the one definition above and the two cannot drift.
     """
     names = json.dumps(display_names().model_dump(), indent=2)
@@ -121,17 +119,3 @@ def display_names_typescript() -> str:
         f"export const DISPLAY_NAMES = {names} as const;\n\n"
         f"export const CODE_IDS = {ids} as const;\n"
     )
-
-
-def main(arguments: Sequence[str]) -> None:
-    """Write the generated module to the path named by the one argument."""
-    if len(arguments) != 1:
-        message = "usage: python -m vibesys.api.display_catalog OUTPUT"
-        raise SystemExit(message)
-    output = Path(arguments[0])
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(display_names_typescript())
-
-
-if __name__ == "__main__":
-    main(sys.argv[1:])

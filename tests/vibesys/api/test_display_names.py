@@ -8,12 +8,12 @@ from pathlib import Path
 
 import pytest
 
+from scripts.generate_display_names import main
 from vibesys.api.display_catalog import (
     ConflictingNamesError,
     code_ids,
     display_names,
     display_names_typescript,
-    main,
 )
 from vibesys.orchestration.dynamic.search.api import dynamic
 from vibesys.orchestration.issue_queue.search.api import issue_queue
@@ -51,7 +51,7 @@ def test_the_code_ids_are_every_shipped_harness_vetted_model_and_role() -> None:
 
 
 def test_the_generator_names_its_usage_when_given_no_output_path() -> None:
-    with pytest.raises(SystemExit, match=r"usage: python -m vibesys.api.display_catalog OUTPUT"):
+    with pytest.raises(SystemExit, match=r"usage: python scripts/generate_display_names.py OUTPUT"):
         main([])
 
 
