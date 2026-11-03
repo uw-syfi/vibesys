@@ -187,16 +187,26 @@ function desktopRules() {
 const DESKTOP_APP = '^apps/desktop/src/';
 const DESKTOP_PART = part => `^apps/desktop/src/${part}/`;
 const EFFECT_RUNTIME = '(?:^|/)node_modules/(?:effect|@effect/[^/]+)/';
+// The generated orchestrator protocol: plain message and enum definitions with no I/O. A fold
+// reads its enums (`ItemStatus`, `TurnStatus`) at run time, and a mirrored table would repeat them.
+const ORCHESTRATOR_PROTO = [
+  '^libs/orchestrator-proto/',
+  '/node_modules/@vibesys/orchestrator-proto/',
+];
 
 function desktopAppRules() {
   return [
     {
       // A fold is a function from data to data that a test calls directly. Only a type, which the
-      // compiler erases, may name another module (the protocol's messages a fold reads).
+      // compiler erases, may name another module, except the generated orchestrator protocol,
+      // whose enums a fold reads at run time.
       name: 'desktop-state-imports-nothing-outside-itself',
       severity: 'error',
       from: {path: DESKTOP_PART('state'), pathNot: TEST_FILE},
-      to: {pathNot: DESKTOP_PART('state'), dependencyTypesNot: ['type-only']},
+      to: {
+        pathNot: [DESKTOP_PART('state'), ...ORCHESTRATOR_PROTO],
+        dependencyTypesNot: ['type-only'],
+      },
     },
     {
       // Not even for a type: a fold that names an Effect type is on its way to running one.
