@@ -93,6 +93,42 @@ func TestRunsEachSampleWithItsOwnFileInTheScratchDirectory(t *testing.T) {
 	}
 }
 
+// Every command of a job gets its own artifacts directory in the job's, made before it runs and
+// named in the order the commands ran; a job with no artifacts directory gives its commands none.
+func TestEachCommandGetsItsOwnArtifactsDirectoryInTheJobs(t *testing.T) {
+	for _, job := range []string{"", "/state/.artifacts/t/j7"} {
+		r := newFakeRig(t).(*fakeRig)
+		cfg := r.config(io.Discard)
+		cfg.Artifacts = job
+		if _, err := flowrun.Run(context.Background(), cfg, scenarios()[2].plan(false)); err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, x := range r.env.Runs() {
+			got = append(got, x.Artifacts)
+		}
+		var want []string
+		if job != "" {
+			for i := range r.env.Runs() {
+				stage := "benchmark"
+				if i == 0 {
+					stage = "check"
+				}
+				want = append(want, fmt.Sprintf("%s/%02d-%s", job, i+1, stage))
+			}
+		} else {
+			want = make([]string, len(got))
+		}
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Errorf("job %q: artifacts %v, want %v", job, got, want)
+		}
+		made := r.files.Dirs()
+		if job == "" && len(made) != 0 || job != "" && strings.Join(made, ",") != strings.Join(want, ",") {
+			t.Errorf("job %q: made %v, want %v", job, made, want)
+		}
+	}
+}
+
 func TestACancelledContextRunsNothingAndMakesNothing(t *testing.T) {
 	r := newFakeRig(t).(*fakeRig)
 	ctx, cancel := context.WithCancel(context.Background())

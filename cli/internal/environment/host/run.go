@@ -85,6 +85,10 @@ func (r *run) Start(argv []string, sink io.Writer) (environment.Process, error) 
 	args := append([]string{"-c", guard, "vs-host", path}, argv[1:]...)
 	cmd := exec.Command("/bin/sh", args...)
 	cmd.Dir = dir
+	if r.x.Artifacts != "" {
+		// A command on the host finds its artifacts directory where one in a container does.
+		cmd.Env = append(os.Environ(), "VIBESYS_ARTIFACTS_DIR="+r.x.Artifacts)
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.ExtraFiles = []*os.File{r.lifeRead}
 	pr, pw, err := os.Pipe()

@@ -674,3 +674,53 @@ func passedOf(t *testing.T, v flow.Verdict) flow.Findings {
 	}
 	return passed.Findings
 }
+
+// failingBench is a shell whose benchmark exits 1 after writing the stream it is given.
+type failingBench struct{ stream string }
+
+func (f failingBench) Do(_ context.Context, r flow.Request) flow.Event {
+	switch r := r.(type) {
+	case flow.Checkout:
+		return flow.CheckedOut{Dir: "/w", Scratch: "/s"}
+	case flow.Run:
+		if r.Stage == flow.StageBenchmark {
+			return flow.Ran{Exec: core.ExecOutcome{Kind: core.ExecExited, ExitCode: 1}, Output: []byte(f.stream), Found: f.stream != ""}
+		}
+		return flow.Ran{Exec: core.ExecOutcome{Kind: core.ExecExited}}
+	}
+	return flow.Observed{}
+}
+
+// A benchmark that fails and says why in an error record has its reason carried into the job's;
+// one that wrote no error record, or a stream that is not one, fails with the exit code alone.
+func TestAFailedSampleSaysWhatItsErrorRecordSays(t *testing.T) {
+	hello := `{"kind":"hello","protocol":2,"metrics":{"m":{"direction":"max","required":true}}}` + "\n"
+	cases := map[string]struct{ stream, want string }{
+		"an error record":        {hello + `{"kind":"error","message":"warmup did not finish within 60 s"}` + "\n", "warmup did not finish within 60 s"},
+		"a requirement not met":  {hello + `{"kind":"error","message":"no GPU","error_kind":"requirement_not_met","requirement":"gpu"}` + "\n", "requirement gpu is not met: no GPU"},
+		"no stream":              {"", ""},
+		"a stream with no error": {hello, ""},
+		"not a stream":           {"garbage\n", ""},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			p := shape{kind: core.JobMeasure, protocol2: true, samples: 1}.plan()
+			p.Metric = core.Metric{Name: "m", Direction: core.Maximize}
+			p.Objectives = core.Objectives{}
+			v, err := flow.Drive(context.Background(), p, failingBench{c.stream})
+			if err != nil {
+				t.Fatal(err)
+			}
+			stopped, ok := v.(flow.Stopped)
+			if !ok || !strings.Contains(stopped.Reason, "exited with code 1") {
+				t.Fatalf("verdict %+v, want stopped by the exit code", v)
+			}
+			if c.want != "" && !strings.Contains(stopped.Reason, c.want) {
+				t.Errorf("reason %q does not carry %q", stopped.Reason, c.want)
+			}
+			if c.want == "" && strings.Contains(stopped.Reason, "reported") {
+				t.Errorf("reason %q claims a report the stream did not make", stopped.Reason)
+			}
+		})
+	}
+}

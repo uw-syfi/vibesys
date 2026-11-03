@@ -429,6 +429,12 @@ and are not linked into it) and runs them on the host, or in docker for a task t
   measure job. A measure for more samples than the cache holds takes only the
   missing ones, and links the saved check pass instead of checking again.
 
+Each command of a job gets its own artifacts directory, numbered in the order the commands ran
+(`01-check`, `02-benchmark`, ...), in the repository's state directory
+(`.vibesys-state/.artifacts/<task>/<job>/`); the job's output names it before the command runs. A
+command finds it in `VIBESYS_ARTIFACTS_DIR`. A benchmark that exits non-zero after writing an error
+record says the record's message in the job's reason.
+
 `--no-cache` runs the whole job again, with a fresh check. `--recheck` (measure) checks again but
 still takes only the missing samples. A cancelled job, a failed check, and a benchmark that wrote no
 usable result save nothing, so a result is never saved without its samples and its check.

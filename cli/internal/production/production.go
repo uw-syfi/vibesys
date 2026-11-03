@@ -144,9 +144,11 @@ func (p Process) RunSupervisor(ctx context.Context, runDir string, ready io.Writ
 		return err
 	}
 	return host.Serve(ctx, runDir, host.Deps{
-		Environments:  environments,
-		Checkouts:     gitwork.Checkouts{},
-		Host:          supervisor.Host{Backend: cpu.New(cpu.Host(), clk), Files: hostfs.OS{}, Clock: clk},
+		Environments: environments,
+		Checkouts:    gitwork.Checkouts{},
+		Host: supervisor.Host{
+			Backend: cpu.New(cpu.Host(), clk), Files: hostfs.OS{}, Clock: clk, Artifacts: filestore.ArtifactsDir,
+		},
 		BinaryVersion: p.Version,
 	}, ready)
 }

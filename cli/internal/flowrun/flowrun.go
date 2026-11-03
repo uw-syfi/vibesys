@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"path"
 	"strings"
 	"sync"
 
@@ -36,6 +37,9 @@ type Config struct {
 	Clock       clock.Clock
 	// Output receives the output of every command and a line before each saying what runs.
 	Output io.Writer
+	// Artifacts, when set, is the job's artifacts directory: an absolute path that outlives the
+	// job. Each command gets its own directory in it, numbered in the order they run.
+	Artifacts string
 }
 
 // Shell carries out the requests of one job's flow. Create it with New and close it when the job
@@ -47,6 +51,7 @@ type Shell struct {
 	checkout core.Checkout
 	scratch  string
 	removals []func()
+	runs     int // the commands run so far
 }
 
 var _ flow.Shell = (*Shell)(nil)
@@ -114,10 +119,20 @@ func (s *Shell) checkoutFailed(ctx context.Context, err error) flow.Event {
 func (s *Shell) run(ctx context.Context, r flow.Run) flow.Event {
 	s.mu.Lock()
 	checkout, scratch := s.checkout, s.scratch
+	s.runs++
+	n := s.runs
 	s.mu.Unlock()
 	_, _ = fmt.Fprintf(s.cfg.Output, "[%s] %s\n", r.Stage, strings.Join(r.Argv, " "))
+	x := core.Execution{Checkout: checkout, Scratch: scratch, Argv: r.Argv, Timeout: r.Timeout}
+	if s.cfg.Artifacts != "" {
+		x.Artifacts = ArtifactsOf(s.cfg.Artifacts, n, r.Stage)
+		if err := s.cfg.Files.MakeDir(ctx, x.Artifacts); err != nil {
+			return flow.NotRan{Failure: core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("making the artifacts directory: %v", err)}}
+		}
+		_, _ = fmt.Fprintf(s.cfg.Output, "[%s] artifacts: %s\n", r.Stage, x.Artifacts)
+	}
 	started := s.cfg.Clock.Now()
-	attempt := s.cfg.Environment.Run(ctx, core.Execution{Checkout: checkout, Scratch: scratch, Argv: r.Argv, Timeout: r.Timeout}, s.cfg.Output)
+	attempt := s.cfg.Environment.Run(ctx, x, s.cfg.Output)
 	ended := s.cfg.Clock.Now()
 	var exec core.ExecOutcome
 	switch a := attempt.(type) {
@@ -135,6 +150,12 @@ func (s *Shell) run(ctx context.Context, r flow.Run) flow.Event {
 		ran.Output, ran.Found, ran.ReadError = s.read(r.Read)
 	}
 	return ran
+}
+
+// ArtifactsOf is the artifacts directory of the nth command of a job (from 1), of the stage: the
+// commands' directories sort in the order they ran.
+func ArtifactsOf(job string, n int, stage flow.Stage) string {
+	return path.Join(job, fmt.Sprintf("%02d-%s", n, stage))
 }
 
 // read reads the result file a command was asked to write. A file that is not there is not an

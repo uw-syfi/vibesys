@@ -18,4 +18,8 @@ type FS interface {
 	// errors.Is(err, fs.ErrNotExist) for a file that is not there and with ErrTooLarge for a file
 	// of more than limit bytes, and in both cases returns no content.
 	ReadFile(path string, limit int64) ([]byte, error)
+
+	// MakeDir creates the directory at the absolute path, with its parents, and leaves it as it
+	// is when it exists. It is how a job's artifacts directory is made, which outlives the job.
+	MakeDir(ctx context.Context, path string) error
 }

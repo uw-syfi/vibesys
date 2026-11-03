@@ -29,6 +29,9 @@ type Host struct {
 	Backend backend.Backend
 	Files   hostfs.FS
 	Clock   clock.Clock
+	// Artifacts, when set, names the artifacts directory of a job, which outlives it. A job of a
+	// host with none keeps no artifacts.
+	Artifacts func(repository, task string, job core.JobID) string
 }
 
 // Config is what a Supervisor needs. Every field is required, except Host for a launch that has
@@ -240,9 +243,15 @@ func (s *Supervisor) executeCommand(spec core.JobSpec) core.Attempt {
 		return environment.Finish(s.ctx, core.NotStarted{Failure: core.AsFailure(err)}, nil)
 	}
 	defer remove()
-	return env.Run(s.ctx, core.Execution{
-		Checkout: checkout, Argv: command.Argv, Service: command.Service, Timeout: command.Timeout,
-	}, writer{s})
+	x := core.Execution{Checkout: checkout, Argv: command.Argv, Service: command.Service, Timeout: command.Timeout}
+	if h := s.cfg.Host; h.Artifacts != nil && h.Files != nil {
+		x.Artifacts = flowrun.ArtifactsOf(h.Artifacts(s.cfg.Launch.Repository, s.cfg.Launch.Task, s.cfg.Launch.Job), 1, "command")
+		if err := h.Files.MakeDir(s.ctx, x.Artifacts); err != nil {
+			return core.NotStarted{Failure: core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("making the artifacts directory: %v", err)}}
+		}
+		_, _ = fmt.Fprintf(writer{s}, "[command] artifacts: %s\n", x.Artifacts)
+	}
+	return env.Run(s.ctx, x, writer{s})
 }
 
 // executePlan drives a check or a measure job through its plan and says how it ended. The plan is
@@ -257,10 +266,14 @@ func (s *Supervisor) executePlan(plan flow.Plan) lifecycle.Verdict {
 	if err != nil {
 		return lifecycle.NotAttempted{Failure: core.AsFailure(err)}
 	}
-	verdict, err := flowrun.Run(s.ctx, flowrun.Config{
+	cfg := flowrun.Config{
 		Repository: l.Repository, Commit: l.Spec.Commit, Environment: env, Checkouts: s.cfg.Checkouts,
 		Backend: h.Backend, Files: h.Files, Clock: h.Clock, Output: writer{s},
-	}, plan)
+	}
+	if h.Artifacts != nil {
+		cfg.Artifacts = h.Artifacts(l.Repository, l.Task, l.Job)
+	}
+	verdict, err := flowrun.Run(s.ctx, cfg, plan)
 	if err != nil {
 		return lifecycle.NotAttempted{Failure: core.AsFailure(err)}
 	}

@@ -31,6 +31,20 @@ func (o OS) MakeScratch(ctx context.Context) (string, func(), error) {
 	return dir, func() { _ = os.RemoveAll(dir) }, nil
 }
 
+// MakeDir implements FS.
+func (OS) MakeDir(ctx context.Context, path string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("making a directory: %q is not an absolute path", path)
+	}
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		return fmt.Errorf("making a directory: %w", err)
+	}
+	return nil
+}
+
 // ReadFile implements FS.
 func (OS) ReadFile(path string, limit int64) ([]byte, error) {
 	f, err := os.Open(path)
