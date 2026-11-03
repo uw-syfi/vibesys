@@ -269,9 +269,9 @@ func testCancelled(t *testing.T, newStore New) {
 				_, err := e.s.UpdateFrontier(ctx, core.AssumeAdmitted(0, g.members()))
 				return err
 			},
-			"CreatePlan":     func() error { _, err := e.s.CreatePlan(ctx, core.NewPlan{Title: "t", At: e.now()}); return err },
-			"Plan":            func() error { _, err := e.s.Plan(ctx, plan.Number); return err },
-			"Plans":           func() error { _, err := e.s.Plans(ctx, core.PlanFilter{}); return err },
+			"CreatePlan": func() error { _, err := e.s.CreatePlan(ctx, core.NewPlan{Title: "t", At: e.now()}); return err },
+			"Plan":       func() error { _, err := e.s.Plan(ctx, plan.Number); return err },
+			"Plans":      func() error { _, err := e.s.Plans(ctx, core.PlanFilter{}); return err },
 			"EditPlan": func() error {
 				_, err := e.s.EditPlan(ctx, plan.Number, core.PlanEdit{Title: &title, At: e.now()})
 				return err

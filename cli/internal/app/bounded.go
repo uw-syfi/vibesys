@@ -167,7 +167,9 @@ func (s boundedStore) Frontier(ctx context.Context) (core.Frontier, error) {
 }
 
 func (s boundedStore) UpdateFrontier(ctx context.Context, admission core.FrontierAdmission) (core.Frontier, error) {
-	return call(s, ctx, func(st store.Store, ctx context.Context) (core.Frontier, error) { return st.UpdateFrontier(ctx, admission) })
+	return call(s, ctx, func(st store.Store, ctx context.Context) (core.Frontier, error) {
+		return st.UpdateFrontier(ctx, admission)
+	})
 }
 
 func (s boundedStore) CreatePlan(ctx context.Context, plan core.NewPlan) (core.Plan, error) {
