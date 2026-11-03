@@ -8,17 +8,20 @@ import {
 } from '@vibesys/orchestrator-proto';
 import * as Effect from 'effect/Effect';
 import * as Random from 'effect/Random';
-import fc from 'fast-check';
+import * as Schema from 'effect/Schema';
 import type {CommandProgress} from '../state/index.js';
 import {
   type DispatchFate,
   FakeDaemon,
+  faultsOn,
   generateScenario,
   type HostHarness,
   hostHarness,
   methodPathOf,
 } from '../testing/orchestrator/index.js';
+import type {Recording} from '../testing/transport/index.js';
 import type {Intent} from './commands.js';
+import {RpcStatus} from './errors.js';
 
 const SEED = 20261103;
 const FINAL = new Set([AgentStatus.ENDED, AgentStatus.FAILED, AgentStatus.LOST]);
@@ -49,26 +52,55 @@ const dispatched = (h: HostHarness) =>
 const answered = (progress: CommandProgress | undefined) =>
   progress?._tag === 'Accepted' || progress?._tag === 'Refused';
 
-describe('commands (P6: no mutation is sent twice by the app)', () => {
-  interface Plan {
-    readonly fates: ReadonlyArray<DispatchFate>;
-    readonly actions: number;
-    readonly retries: number;
-  }
-  const plans = fc.record({
-    fates: fc.array(fc.constantFrom<DispatchFate>('ok', 'lose-request', 'lose-reply'), {
-      maxLength: 8,
-    }),
-    actions: fc.integer({min: 1, max: 4}),
-    retries: fc.integer({min: 0, max: 2}),
+const between = (minimum: number, maximum: number) =>
+  Schema.Int.check(Schema.isBetween({minimum, maximum}));
+
+/** `base` with every Dispatch taking `millis` of virtual time before it answers. */
+const slowDispatch =
+  (millis: number) =>
+  (base: Recording): Recording => ({
+    respond: (target, nth) => {
+      const steps = base.respond(target, nth);
+      return target.method === methodPathOf('Dispatch') && millis > 0
+        ? [{sleep: `${millis} millis`}, ...steps]
+        : steps;
+    },
   });
+
+describe('commands (P6: no mutation is sent twice by the app)', () => {
+  // The link faults of a plan: Hellos that fail before the first Ready, a run stream that is
+  // mounted and drops after some frames (an epoch change while a command may be in flight), and
+  // a Dispatch that takes a while to answer.
+  const plans = Schema.Struct({
+    fates: Schema.Array(Schema.Literals(['ok', 'lose-request', 'lose-reply'])).check(
+      Schema.isMaxLength(8),
+    ),
+    actions: between(1, 4),
+    retries: between(0, 2),
+    helloFails: Schema.Array(between(0, 3)).check(Schema.isMaxLength(2)),
+    mounted: Schema.Boolean,
+    drops: Schema.Array(between(0, 4)).check(Schema.isMaxLength(3)),
+    dispatchMillis: Schema.Literals([0, 400, 3000]),
+  });
+  type Plan = typeof plans.Type;
+  const fateOf = (plan: Plan, nth: number): DispatchFate => plan.fates[nth] ?? 'ok';
 
   const play = (plan: Plan) =>
     Effect.scoped(
       Effect.gen(function* () {
         const daemon = freshDaemon();
         const agent = liveAgentId(daemon);
-        const h = yield* hostHarness(daemon, {dispatch: nth => plan.fates[nth] ?? 'ok'});
+        const failing = new Set(plan.helloFails);
+        const h = yield* hostHarness(daemon, {
+          dispatch: nth => fateOf(plan, nth),
+          closeStreams: true,
+          helloFails: nth => (failing.has(nth) ? RpcStatus.UNAVAILABLE : undefined),
+          wrap: base =>
+            faultsOn('WatchRuns', {dropAfter: plan.drops, duplicate: []})(
+              slowDispatch(plan.dispatchMillis)(base),
+            ),
+        });
+        if (plan.mounted) h.mount(h.session.runs.watch);
         const ids: string[] = [];
         for (let action = 0; action < plan.actions; action += 1) {
           ids.push(yield* h.session.commands.submit(say(agent, `message ${action}`)));
@@ -84,9 +116,11 @@ describe('commands (P6: no mutation is sent twice by the app)', () => {
       }).pipe(Random.withSeed(SEED)),
     );
 
-  it.effect('sends once per action plus once per explicit retry, always under the same id', () =>
-    Effect.gen(function* () {
-      for (const plan of fc.sample(plans, {seed: SEED, numRuns: 30})) {
+  it.effect.prop(
+    'sends once per action plus once per explicit retry, always under the same id',
+    {plan: plans},
+    ({plan}) =>
+      Effect.gen(function* () {
         const {h, ids, progress} = yield* play(plan);
         const calls = dispatched(h);
         expect(new Set(ids).size).toBe(ids.length);
@@ -97,17 +131,20 @@ describe('commands (P6: no mutation is sent twice by the app)', () => {
           expect(sent.length).toBeLessThanOrEqual(1 + plan.retries);
         }
         if (plan.retries === 0) expect(calls).toHaveLength(plan.actions);
-        // An outcome is known exactly when a reply arrived for one of the action's sends.
         ids.forEach((id, index) => {
-          const fates = calls
-            .filter(call => call.id === id)
-            .map(call => plan.fates[call.nth] ?? 'ok');
+          const fates = calls.filter(call => call.id === id).map(call => fateOf(plan, call.nth));
           const replied = fates.includes('ok');
-          expect(answered(progress[index])).toBe(replied);
-          if (!replied) expect(progress[index]?._tag).toBe('Unconfirmed');
+          // The daemon holds a receipt once it carried a command out, and a mounted run stream
+          // may carry that receipt to a command whose reply was lost.
+          const receipted = replied || fates.includes('lose-reply');
+          if (replied) expect(answered(progress[index])).toBe(true);
+          else if (plan.mounted && receipted)
+            expect(['Unconfirmed', 'Accepted', 'Refused']).toContain(progress[index]?._tag);
+          else expect(progress[index]?._tag).toBe('Unconfirmed');
+          if (answered(progress[index])) expect(receipted).toBe(true);
         });
-      }
-    }),
+      }),
+    {arbitrary: {runs: 30}},
   );
 
   it.effect('settles a command whose reply was lost from the receipt on the run stream', () =>

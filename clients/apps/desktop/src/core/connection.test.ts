@@ -4,8 +4,8 @@ import * as Clock from 'effect/Clock';
 import * as Effect from 'effect/Effect';
 import * as Fiber from 'effect/Fiber';
 import * as AtomRegistry from 'effect/reactivity/AtomRegistry';
+import * as Schema from 'effect/Schema';
 import * as TestClock from 'effect/testing/TestClock';
-import fc from 'fast-check';
 import type {HostConnectionState} from '../state/index.js';
 import {
   type DaemonOptions,
@@ -156,16 +156,17 @@ describe('the host connection', () => {
 
 /** One step of a generated history: a Hello that is lost, or a Ready period of `up` ms then a loss. */
 type Step = {readonly kind: 'fail'} | {readonly kind: 'up'; readonly up: number};
-const steps = fc.array(
-  fc.oneof(
-    fc.constant<Step>({kind: 'fail'}),
-    fc.record({
-      kind: fc.constant('up' as const),
-      up: fc.oneof(fc.integer({min: 0, max: 29_999}), fc.integer({min: 30_000, max: 120_000})),
+const between = (minimum: number, maximum: number) =>
+  Schema.Int.check(Schema.isBetween({minimum, maximum}));
+const steps = Schema.Array(
+  Schema.Union([
+    Schema.Struct({kind: Schema.Literal('fail')}),
+    Schema.Struct({
+      kind: Schema.Literal('up'),
+      up: Schema.Union([between(0, 29_999), between(30_000, 120_000)]),
     }),
-  ),
-  {minLength: 1, maxLength: 14},
-);
+  ]),
+).check(Schema.isMinLength(1), Schema.isMaxLength(14));
 
 /** Play `step` against a connection that is waiting on its next Hello; answers the new count. */
 const playStep = (connected: Connected, step: Step, count: number) =>
@@ -193,11 +194,12 @@ const waitOut = (connected: Connected, count: number) =>
   });
 
 describe('the wait between attempts, over generated histories of losses', () => {
-  it.effect(
+  it.effect.prop(
     'stays within the jittered ceiling for the count of failures since the last stable period',
-    () =>
-      Effect.gen(function* () {
-        for (const history of fc.sample(steps, {seed: 20261103, numRuns: 25})) {
+    {history: steps},
+    ({history}) =>
+      Effect.scoped(
+        Effect.gen(function* () {
           const connected = yield* connect({
             helloFails: nth => (history[nth]?.kind === 'fail' ? RpcStatus.UNAVAILABLE : undefined),
           });
@@ -208,7 +210,8 @@ describe('the wait between attempts, over generated histories of losses', () => 
             yield* waitOut(connected, count);
           }
           yield* Fiber.interrupt(dial);
-        }
-      }),
+        }),
+      ),
+    {arbitrary: {runs: 25}},
   );
 });

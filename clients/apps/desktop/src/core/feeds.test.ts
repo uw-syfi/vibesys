@@ -9,7 +9,6 @@ import {
 import * as Effect from 'effect/Effect';
 import * as Random from 'effect/Random';
 import * as Schema from 'effect/Schema';
-import fc from 'fast-check';
 import {
   applyEvent,
   emptyState,
@@ -31,6 +30,11 @@ import {MAX_QUIET_RESTARTS, STABLE_PASS_FRAMES} from './policy.js';
 import {defaultReconnect, delayMs} from './reconnect.js';
 
 const SEED = 20261103;
+const between = (minimum: number, maximum: number) =>
+  Schema.Int.check(Schema.isBetween({minimum, maximum}));
+/** At most `max` values of `item`. */
+const upTo = <S extends Schema.Top>(max: number, item: S) =>
+  Schema.Array(item).check(Schema.isMaxLength(max));
 const scenario = generateScenario({seed: 7, subagents: 2, live: false});
 const TOTAL = scenario.events.length;
 const daemonAt = (visible: number = TOTAL) => new FakeDaemon(scenario, visible);
@@ -104,14 +108,14 @@ describe('the run stream', () => {
       readonly plan: FaultPlan;
       readonly helloFails: ReadonlyArray<number>;
     }
-    const schedules = fc.record({
-      startTenths: fc.integer({min: 1, max: 9}),
-      commits: fc.array(fc.integer({min: 1, max: 60}), {maxLength: 3}),
-      plan: fc.record({
-        dropAfter: fc.array(fc.integer({min: 0, max: 6}), {maxLength: 4}),
-        duplicate: fc.array(fc.integer({min: 0, max: 5}), {maxLength: 3}),
+    const schedules = Schema.Struct({
+      startTenths: between(1, 9),
+      commits: upTo(3, between(1, 60)),
+      plan: Schema.Struct({
+        dropAfter: upTo(4, between(0, 6)),
+        duplicate: upTo(3, between(0, 5)),
       }),
-      helloFails: fc.array(fc.integer({min: 0, max: 3}), {maxLength: 2}),
+      helloFails: upTo(2, between(0, 3)),
     });
 
     const play = (schedule: Schedule) =>
@@ -136,12 +140,14 @@ describe('the run stream', () => {
         }),
       );
 
-    it.effect('ends in the state of an uninterrupted stream', () =>
-      Effect.gen(function* () {
-        for (const schedule of fc.sample(schedules, {seed: SEED, numRuns: 20})) {
+    it.effect.prop(
+      'ends in the state of an uninterrupted stream',
+      {schedule: schedules},
+      ({schedule}) =>
+        Effect.gen(function* () {
           expect(yield* play(schedule).pipe(Random.withSeed(SEED))).toEqual(everything);
-        }
-      }),
+        }),
+      {arbitrary: {runs: 20}},
     );
   });
 
@@ -211,18 +217,17 @@ describe('the run stream', () => {
 });
 
 describe('a Hello that is not COMPATIBLE (P7)', () => {
-  const outcomes = fc.record({
-    compatibility: fc.constantFrom(
+  const outcomes = Schema.Struct({
+    compatibility: Schema.Literals([
       Compatibility.COMPATIBLE,
       Compatibility.CLIENT_TOO_OLD,
       Compatibility.DAEMON_TOO_OLD,
-    ),
-    failures: fc.integer({min: 0, max: 3}),
-    status: fc.constantFrom(RpcStatus.UNAVAILABLE, RpcStatus.UNIMPLEMENTED),
+    ]),
+    failures: between(0, 3),
+    status: Schema.Literals([RpcStatus.UNAVAILABLE, RpcStatus.UNIMPLEMENTED]),
   });
 
-  type Outcome = typeof outcomes extends fc.Arbitrary<infer T> ? T : never;
-  const sampleOutcomes = () => fc.sample(outcomes, {seed: SEED, numRuns: 24});
+  type Outcome = typeof outcomes.Type;
 
   const play = (outcome: Outcome) =>
     Effect.scoped(
@@ -239,9 +244,11 @@ describe('a Hello that is not COMPATIBLE (P7)', () => {
       }).pipe(Random.withSeed(SEED)),
     );
 
-  it.effect('opens no stream until one has been answered COMPATIBLE', () =>
-    Effect.gen(function* () {
-      for (const outcome of sampleOutcomes()) {
+  it.effect.prop(
+    'opens no stream until one has been answered COMPATIBLE',
+    {outcome: outcomes},
+    ({outcome}) =>
+      Effect.gen(function* () {
         const {h, freshness} = yield* play(outcome);
         const calls = h.fake.calls();
         const firstStream = calls.findIndex(call => call.kind === 'stream');
@@ -256,8 +263,8 @@ describe('a Hello that is not COMPATIBLE (P7)', () => {
           expect(calls).toHaveLength(1);
           expect(freshness).toBe('unavailable');
         }
-      }
-    }),
+      }),
+    {arbitrary: {runs: 24}},
   );
 });
 
