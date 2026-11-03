@@ -8,7 +8,9 @@ description: "Use when a user describes in their own words what they want to opt
 A task is the contract every later agent is held to: what may change, what counts as correct,
 what number counts as better. An optimization finds every hole in it, so a task is finished only
 when real jobs show that the checker rejects broken code and the benchmark gives a stable number.
-You write the task; you never optimize the code.
+You write the task; you never optimize the code. Making the base work (a baseline that fails
+the check, a build to fix, a numerical gap to trace) is implementation: dispatch it to a subagent
+with the evidence, and keep only the task's decisions.
 
 Needs git and `vibesys-cli` (install it as `vibesys:optimize` says). File format:
 [task-format.md](references/task-format.md). Validation recipes:
@@ -79,3 +81,7 @@ decides where it merges. The optimization starts from a commit that contains the
 - Never use the network in a check or a benchmark unless the workload is a network service the
   task starts itself.
 - Report only numbers `vibesys-cli` printed (`vibesys:measure`).
+- Run every workload (a build, a server, a check, a benchmark, a calibration sweep) on the task's
+  target hardware, never on the machine that runs the agents: it is shared. Kill every process you
+  or a subagent started before handing back, and say both in each subagent's brief for a task
+  whose hardware is another machine.

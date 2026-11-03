@@ -85,14 +85,21 @@ it through a contract the candidate implements (a start script, a port, a readin
 waits for it, runs the checker or the load generator against it, and stops its whole process
 group on every exit. Say the contract in `OBJECTIVE.md`.
 
-Jobs run on the machine of the CLI's daemon, and docker jobs get no accelerator. When the
-hardware is another machine, the wrapper copies the clean checkout there (by commit, so a check
-and the samples of one commit can share a build), runs under that machine's scheduler if it has
-one, copies the result file back, and cancels the remote work when it receives SIGTERM. Read the
-host from an environment variable, never from the repository. Jobs inherit the daemon's
+Today jobs run on the machine of the CLI's daemon, and docker jobs get no accelerator, so a task
+whose hardware is another machine carries a wrapper script for it. The wrapper copies the clean
+checkout there (by commit, so a check and the samples of one commit can share a build), runs
+under that machine's scheduler if it has one, copies the result file back, and cancels the remote
+work when it receives SIGTERM. Read the host from an environment variable, never from the
+repository. Jobs inherit the daemon's
 environment, not the submitting shell's: set the variable, then `vibesys-cli daemon restart`. The
 clean checkouts go under the daemon's `TMPDIR`; point it at a local disk when `/tmp` is a network
-mount.
+mount. Environment plumbing (placement, accelerators, file sync, cancellation, caching) belongs to
+the CLI and moves into it as it grows, so keep the wrapper thin and the task's own logic (what to
+check, what to time) out of it.
+
+The machine that runs the agents is not the target. Every build, server, check and benchmark runs
+on the target hardware, and an agent kills every process it starts. A brief for a remote task
+names the target and says so.
 
 ## `Dockerfile`
 
