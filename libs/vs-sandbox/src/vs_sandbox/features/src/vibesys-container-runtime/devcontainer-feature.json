@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "name": "VibeSys container runtime",
   "description": "A static Docker engine (dockerd and the docker CLI), the compose plugin, kind, and kubectl, plus the `docker` group, for tasks whose candidate is a container topology. Debian/Ubuntu bases only.",
-  "documentationURL": "https://github.com/uw-syfi/vibesys/blob/main/docs/contributing/devcontainer-features.md",
+  "documentationURL": "https://github.com/uw-syfi/vibesys/blob/main/libs/vs-sandbox/src/vs_sandbox/features/README.md",
   "options": {
     "docker_engine_version": {
       "type": "string",
