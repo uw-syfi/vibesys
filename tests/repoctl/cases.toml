@@ -151,9 +151,9 @@ native_targets = []
 pnpm_packages = []
 
 [[cases]]
-name = "generated TypeScript bindings select clients and the contract check"
+name = "generated TypeScript bindings select clients, the contract check and the desktop path test"
 paths = ["clients/libs/proto/src/generated/vibesys/api/v1/host_pb.ts"]
-jobs = ["clients", "proto"]
+jobs = ["clients", "desktop_path", "proto"]
 [cases.collections]
 native_languages = []
 dockerfile_contexts = []
@@ -463,7 +463,7 @@ pnpm_packages = []
 [[cases]]
 name = "request identity changes reach every client request producer"
 paths = ["clients/libs/request-identity/src/index.ts"]
-jobs = ["clients"]
+jobs = ["clients", "desktop_path"]
 [cases.collections]
 native_languages = []
 dockerfile_contexts = []
