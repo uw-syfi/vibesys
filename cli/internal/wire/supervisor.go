@@ -9,7 +9,7 @@ import (
 
 // Launch returns the contract's message for a launch.
 func Launch(l lifecycle.Launch) *cliv1.Launch {
-	return &cliv1.Launch{Repository: l.Repository, Task: l.Task, JobId: string(l.Job), Spec: JobSpec(l.Spec), Plan: flowPlan(l.Plan)}
+	return &cliv1.Launch{Repository: l.Repository, Task: l.Task, JobId: string(l.Job), Spec: JobSpec(l.Spec), Plan: flowPlan(l.Plan), OutputBase: l.OutputBase}
 }
 
 // ToLaunch returns the domain launch for the contract's message, validated like a submission and
@@ -41,7 +41,7 @@ func ToLaunch(l *cliv1.Launch) (lifecycle.Launch, error) {
 	case plan != nil && (plan.Kind != kind || plan.Environment.Kind != spec.Environment):
 		return lifecycle.Launch{}, invalid("launch.plan: the plan is for a %s job in %s, and the job is a %s job in %s", plan.Kind, plan.Environment.Kind, kind, spec.Environment)
 	}
-	return lifecycle.Launch{Repository: l.GetRepository(), Task: l.GetTask(), Job: core.JobID(l.GetJobId()), Spec: spec, Plan: plan}, nil
+	return lifecycle.Launch{Repository: l.GetRepository(), Task: l.GetTask(), Job: core.JobID(l.GetJobId()), Spec: spec, Plan: plan, OutputBase: l.GetOutputBase()}, nil
 }
 
 // Outcome returns the contract's message for a supervisor's outcome.

@@ -384,7 +384,7 @@ func (w *world) recoverAll(upTo int) {
 }
 
 // Recovery is replay: a restart at any point, including in the middle of a restart, ends with
-// every job final, a job that was running without a supervisor lost and not retried, and a job
+// every job final, a job that was running without a supervisor lost and not run again, and a job
 // that was running with one adopted.
 func TestRecoveryAfterACrashAtAnyPointSettlesEveryJob(t *testing.T) {
 	for seed := range uint64(300) {

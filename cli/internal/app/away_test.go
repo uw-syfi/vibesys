@@ -560,8 +560,12 @@ func TestAJobDroppedWhileItsStoreWasAwayEnds(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			w, o := newOutage(t)
 			a := o.start(w.supervisors())
-			job := submitAs(t, a, callA, "hold", "g", ";", "exit", "0")
-			o.awaitIn(t, a, scopeA, job.ID, "running", func(j core.Job) bool { return j.State == core.JobRunning })
+			job := submitAs(t, a, callA, "mark", "started", ";", "hold", "g", ";", "exit", "0")
+			// The store says running before the command is told to start, and a supervisor killed
+			// before that runs the job again: the job is lost only once its command started.
+			if !w.gates.Reached(ctxFor(t), "started") {
+				t.Fatal("the command never started")
+			}
 			o.takeAway(repoA)
 			if restart {
 				a.Close()

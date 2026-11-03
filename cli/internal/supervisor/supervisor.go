@@ -144,12 +144,18 @@ func (s *Supervisor) Close() {
 }
 
 // Attach passes the output from the offset to emit, in order and each byte once, and returns the
-// outcome when the command has ended and every byte was passed. It waits as long as the command
-// runs, and stops with ctx's error, with ErrReleased if the supervisor is released, or with
-// emit's error.
+// outcome when the command has ended and every byte was passed. Offsets are in the job's output,
+// which starts this attempt's at the launch's OutputBase: an offset before it fails with
+// core.FailureInvalidInput. It waits as long as the command runs, and stops with ctx's error, with
+// ErrReleased if the supervisor is released, or with emit's error.
 func (s *Supervisor) Attach(ctx context.Context, offset uint64, emit func(offset uint64, data []byte) error) (lifecycle.Outcome, error) {
+	base := s.cfg.Launch.OutputBase
+	if offset < base {
+		return lifecycle.Outcome{}, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf(
+			"the job's output from offset %d was asked for, and this attempt's starts at %d", offset, base)}
+	}
 	buf := make([]byte, 32<<10)
-	pos := offset
+	pos := offset - base
 	for {
 		wake := s.changed.Wait()
 		s.mu.Lock()
@@ -163,7 +169,7 @@ func (s *Supervisor) Attach(ctx context.Context, offset uint64, emit func(offset
 		for {
 			n, err := s.cfg.Spool.ReadAt(buf, pos)
 			if n > 0 {
-				if err := emit(pos, buf[:n]); err != nil {
+				if err := emit(base+pos, buf[:n]); err != nil {
 					return lifecycle.Outcome{}, err
 				}
 				pos += uint64(n)

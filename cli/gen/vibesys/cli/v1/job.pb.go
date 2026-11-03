@@ -88,7 +88,9 @@ const (
 	JobState_JOB_STATE_SUCCEEDED   JobState = 3
 	JobState_JOB_STATE_FAILED      JobState = 4
 	JobState_JOB_STATE_CANCELLED   JobState = 5
-	// The machine or the supervisor went away while the job ran. A lost job is never retried.
+	// The machine or the supervisor went away while the job ran, and the job is not run again: its
+	// command may have started and its kind is not rerun after that, or it was cut off as often as a
+	// job may be (see Job.attempts).
 	JobState_JOB_STATE_LOST JobState = 6
 )
 
@@ -139,6 +141,58 @@ func (x JobState) Number() protoreflect.EnumNumber {
 // Deprecated: Use JobState.Descriptor instead.
 func (JobState) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{1}
+}
+
+// CutCause is how an attempt's supervisor was proved gone.
+type CutCause int32
+
+const (
+	CutCause_CUT_CAUSE_UNSPECIFIED CutCause = 0
+	// The supervisor died: its lock could be taken.
+	CutCause_CUT_CAUSE_SUPERVISOR_DIED CutCause = 1
+	// The machine restarted since the attempt began.
+	CutCause_CUT_CAUSE_REBOOTED CutCause = 2
+)
+
+// Enum value maps for CutCause.
+var (
+	CutCause_name = map[int32]string{
+		0: "CUT_CAUSE_UNSPECIFIED",
+		1: "CUT_CAUSE_SUPERVISOR_DIED",
+		2: "CUT_CAUSE_REBOOTED",
+	}
+	CutCause_value = map[string]int32{
+		"CUT_CAUSE_UNSPECIFIED":     0,
+		"CUT_CAUSE_SUPERVISOR_DIED": 1,
+		"CUT_CAUSE_REBOOTED":        2,
+	}
+)
+
+func (x CutCause) Enum() *CutCause {
+	p := new(CutCause)
+	*p = x
+	return p
+}
+
+func (x CutCause) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (CutCause) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_cli_v1_job_proto_enumTypes[2].Descriptor()
+}
+
+func (CutCause) Type() protoreflect.EnumType {
+	return &file_vibesys_cli_v1_job_proto_enumTypes[2]
+}
+
+func (x CutCause) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use CutCause.Descriptor instead.
+func (CutCause) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{2}
 }
 
 type CheckSettings struct {
@@ -528,6 +582,110 @@ func (x *Note) GetAgent() string {
 	return ""
 }
 
+// Attempt is one earlier attempt at a job that was cut off, after which the job was queued again.
+// Its number is its place in Job.attempts, from 1. Exactly one end is set.
+type Attempt struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// When the store recorded the attempt running.
+	StartedAt *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	// When the attempt was found cut off and the job queued again.
+	EndedAt *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=ended_at,json=endedAt,proto3" json:"ended_at,omitempty"`
+	// Types that are valid to be assigned to End:
+	//
+	//	*Attempt_CutBeforeStart
+	//	*Attempt_CutMidCommand
+	End           isAttempt_End `protobuf_oneof:"end"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Attempt) Reset() {
+	*x = Attempt{}
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Attempt) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Attempt) ProtoMessage() {}
+
+func (x *Attempt) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Attempt.ProtoReflect.Descriptor instead.
+func (*Attempt) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *Attempt) GetStartedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.StartedAt
+	}
+	return nil
+}
+
+func (x *Attempt) GetEndedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.EndedAt
+	}
+	return nil
+}
+
+func (x *Attempt) GetEnd() isAttempt_End {
+	if x != nil {
+		return x.End
+	}
+	return nil
+}
+
+func (x *Attempt) GetCutBeforeStart() CutCause {
+	if x != nil {
+		if x, ok := x.End.(*Attempt_CutBeforeStart); ok {
+			return x.CutBeforeStart
+		}
+	}
+	return CutCause_CUT_CAUSE_UNSPECIFIED
+}
+
+func (x *Attempt) GetCutMidCommand() CutCause {
+	if x != nil {
+		if x, ok := x.End.(*Attempt_CutMidCommand); ok {
+			return x.CutMidCommand
+		}
+	}
+	return CutCause_CUT_CAUSE_UNSPECIFIED
+}
+
+type isAttempt_End interface {
+	isAttempt_End()
+}
+
+type Attempt_CutBeforeStart struct {
+	// The supervisor was proved gone before its command was told to start.
+	CutBeforeStart CutCause `protobuf:"varint,3,opt,name=cut_before_start,json=cutBeforeStart,proto3,enum=vibesys.cli.v1.CutCause,oneof"`
+}
+
+type Attempt_CutMidCommand struct {
+	// The supervisor was proved gone after its command may have started.
+	CutMidCommand CutCause `protobuf:"varint,4,opt,name=cut_mid_command,json=cutMidCommand,proto3,enum=vibesys.cli.v1.CutCause,oneof"`
+}
+
+func (*Attempt_CutBeforeStart) isAttempt_End() {}
+
+func (*Attempt_CutMidCommand) isAttempt_End() {}
+
 type Job struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -553,14 +711,17 @@ type Job struct {
 	CheckJobId string `protobuf:"bytes,14,opt,name=check_job_id,json=checkJobId,proto3" json:"check_job_id,omitempty"`
 	// The submission asked to run the whole job fresh: no saved samples and no saved check pass are
 	// reused when it starts.
-	NoCache       bool `protobuf:"varint,15,opt,name=no_cache,json=noCache,proto3" json:"no_cache,omitempty"`
+	NoCache bool `protobuf:"varint,15,opt,name=no_cache,json=noCache,proto3" json:"no_cache,omitempty"`
+	// The earlier attempts that were cut off, oldest first. The current attempt is the next one.
+	// There are fewer than the most attempts a job gets, which is 3.
+	Attempts      []*Attempt `protobuf:"bytes,16,rep,name=attempts,proto3" json:"attempts,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Job) Reset() {
 	*x = Job{}
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[6]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -572,7 +733,7 @@ func (x *Job) String() string {
 func (*Job) ProtoMessage() {}
 
 func (x *Job) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_job_proto_msgTypes[6]
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -585,7 +746,7 @@ func (x *Job) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Job.ProtoReflect.Descriptor instead.
 func (*Job) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{6}
+	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *Job) GetId() string {
@@ -693,6 +854,13 @@ func (x *Job) GetNoCache() bool {
 	return false
 }
 
+func (x *Job) GetAttempts() []*Attempt {
+	if x != nil {
+		return x.Attempts
+	}
+	return nil
+}
+
 var File_vibesys_cli_v1_job_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_job_proto_rawDesc = "" +
@@ -721,7 +889,14 @@ const file_vibesys_cli_v1_job_proto_rawDesc = "" +
 	"\x04Note\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x12*\n" +
 	"\x02at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x02at\x12\x14\n" +
-	"\x05agent\x18\x03 \x01(\tR\x05agent\"\xfd\x04\n" +
+	"\x05agent\x18\x03 \x01(\tR\x05agent\"\x8c\x02\n" +
+	"\aAttempt\x129\n" +
+	"\n" +
+	"started_at\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x125\n" +
+	"\bended_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\aendedAt\x12D\n" +
+	"\x10cut_before_start\x18\x03 \x01(\x0e2\x18.vibesys.cli.v1.CutCauseH\x00R\x0ecutBeforeStart\x12B\n" +
+	"\x0fcut_mid_command\x18\x04 \x01(\x0e2\x18.vibesys.cli.v1.CutCauseH\x00R\rcutMidCommandB\x05\n" +
+	"\x03end\"\xb2\x05\n" +
 	"\x03Job\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12+\n" +
 	"\x04spec\x18\x02 \x01(\v2\x17.vibesys.cli.v1.JobSpecR\x04spec\x12.\n" +
@@ -741,7 +916,8 @@ const file_vibesys_cli_v1_job_proto_rawDesc = "" +
 	"\rresult_job_id\x18\r \x01(\tR\vresultJobId\x12 \n" +
 	"\fcheck_job_id\x18\x0e \x01(\tR\n" +
 	"checkJobId\x12\x19\n" +
-	"\bno_cache\x18\x0f \x01(\bR\anoCacheB\f\n" +
+	"\bno_cache\x18\x0f \x01(\bR\anoCache\x123\n" +
+	"\battempts\x18\x10 \x03(\v2\x17.vibesys.cli.v1.AttemptR\battemptsB\f\n" +
 	"\n" +
 	"_exit_code*c\n" +
 	"\aJobKind\x12\x18\n" +
@@ -756,7 +932,11 @@ const file_vibesys_cli_v1_job_proto_rawDesc = "" +
 	"\x13JOB_STATE_SUCCEEDED\x10\x03\x12\x14\n" +
 	"\x10JOB_STATE_FAILED\x10\x04\x12\x17\n" +
 	"\x13JOB_STATE_CANCELLED\x10\x05\x12\x12\n" +
-	"\x0eJOB_STATE_LOST\x10\x06B9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3"
+	"\x0eJOB_STATE_LOST\x10\x06*\\\n" +
+	"\bCutCause\x12\x19\n" +
+	"\x15CUT_CAUSE_UNSPECIFIED\x10\x00\x12\x1d\n" +
+	"\x19CUT_CAUSE_SUPERVISOR_DIED\x10\x01\x12\x16\n" +
+	"\x12CUT_CAUSE_REBOOTED\x10\x02B9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3"
 
 var (
 	file_vibesys_cli_v1_job_proto_rawDescOnce sync.Once
@@ -770,43 +950,50 @@ func file_vibesys_cli_v1_job_proto_rawDescGZIP() []byte {
 	return file_vibesys_cli_v1_job_proto_rawDescData
 }
 
-var file_vibesys_cli_v1_job_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_vibesys_cli_v1_job_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_vibesys_cli_v1_job_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+var file_vibesys_cli_v1_job_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_vibesys_cli_v1_job_proto_goTypes = []any{
 	(JobKind)(0),                   // 0: vibesys.cli.v1.JobKind
 	(JobState)(0),                  // 1: vibesys.cli.v1.JobState
-	(*CheckSettings)(nil),          // 2: vibesys.cli.v1.CheckSettings
-	(*ServiceSpec)(nil),            // 3: vibesys.cli.v1.ServiceSpec
-	(*CommandSettings)(nil),        // 4: vibesys.cli.v1.CommandSettings
-	(*MeasureSettings)(nil),        // 5: vibesys.cli.v1.MeasureSettings
-	(*JobSpec)(nil),                // 6: vibesys.cli.v1.JobSpec
-	(*Note)(nil),                   // 7: vibesys.cli.v1.Note
-	(*Job)(nil),                    // 8: vibesys.cli.v1.Job
-	(*durationpb.Duration)(nil),    // 9: google.protobuf.Duration
-	(EnvironmentKind)(0),           // 10: vibesys.cli.v1.EnvironmentKind
-	(*timestamppb.Timestamp)(nil),  // 11: google.protobuf.Timestamp
-	(*EnvironmentFingerprint)(nil), // 12: vibesys.cli.v1.EnvironmentFingerprint
+	(CutCause)(0),                  // 2: vibesys.cli.v1.CutCause
+	(*CheckSettings)(nil),          // 3: vibesys.cli.v1.CheckSettings
+	(*ServiceSpec)(nil),            // 4: vibesys.cli.v1.ServiceSpec
+	(*CommandSettings)(nil),        // 5: vibesys.cli.v1.CommandSettings
+	(*MeasureSettings)(nil),        // 6: vibesys.cli.v1.MeasureSettings
+	(*JobSpec)(nil),                // 7: vibesys.cli.v1.JobSpec
+	(*Note)(nil),                   // 8: vibesys.cli.v1.Note
+	(*Attempt)(nil),                // 9: vibesys.cli.v1.Attempt
+	(*Job)(nil),                    // 10: vibesys.cli.v1.Job
+	(*durationpb.Duration)(nil),    // 11: google.protobuf.Duration
+	(EnvironmentKind)(0),           // 12: vibesys.cli.v1.EnvironmentKind
+	(*timestamppb.Timestamp)(nil),  // 13: google.protobuf.Timestamp
+	(*EnvironmentFingerprint)(nil), // 14: vibesys.cli.v1.EnvironmentFingerprint
 }
 var file_vibesys_cli_v1_job_proto_depIdxs = []int32{
-	3,  // 0: vibesys.cli.v1.CommandSettings.service:type_name -> vibesys.cli.v1.ServiceSpec
-	9,  // 1: vibesys.cli.v1.CommandSettings.timeout:type_name -> google.protobuf.Duration
-	10, // 2: vibesys.cli.v1.JobSpec.environment:type_name -> vibesys.cli.v1.EnvironmentKind
-	2,  // 3: vibesys.cli.v1.JobSpec.check:type_name -> vibesys.cli.v1.CheckSettings
-	4,  // 4: vibesys.cli.v1.JobSpec.command:type_name -> vibesys.cli.v1.CommandSettings
-	5,  // 5: vibesys.cli.v1.JobSpec.measure:type_name -> vibesys.cli.v1.MeasureSettings
-	11, // 6: vibesys.cli.v1.Note.at:type_name -> google.protobuf.Timestamp
-	6,  // 7: vibesys.cli.v1.Job.spec:type_name -> vibesys.cli.v1.JobSpec
-	1,  // 8: vibesys.cli.v1.Job.state:type_name -> vibesys.cli.v1.JobState
-	12, // 9: vibesys.cli.v1.Job.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
-	7,  // 10: vibesys.cli.v1.Job.notes:type_name -> vibesys.cli.v1.Note
-	11, // 11: vibesys.cli.v1.Job.submitted_at:type_name -> google.protobuf.Timestamp
-	11, // 12: vibesys.cli.v1.Job.started_at:type_name -> google.protobuf.Timestamp
-	11, // 13: vibesys.cli.v1.Job.finished_at:type_name -> google.protobuf.Timestamp
-	14, // [14:14] is the sub-list for method output_type
-	14, // [14:14] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	4,  // 0: vibesys.cli.v1.CommandSettings.service:type_name -> vibesys.cli.v1.ServiceSpec
+	11, // 1: vibesys.cli.v1.CommandSettings.timeout:type_name -> google.protobuf.Duration
+	12, // 2: vibesys.cli.v1.JobSpec.environment:type_name -> vibesys.cli.v1.EnvironmentKind
+	3,  // 3: vibesys.cli.v1.JobSpec.check:type_name -> vibesys.cli.v1.CheckSettings
+	5,  // 4: vibesys.cli.v1.JobSpec.command:type_name -> vibesys.cli.v1.CommandSettings
+	6,  // 5: vibesys.cli.v1.JobSpec.measure:type_name -> vibesys.cli.v1.MeasureSettings
+	13, // 6: vibesys.cli.v1.Note.at:type_name -> google.protobuf.Timestamp
+	13, // 7: vibesys.cli.v1.Attempt.started_at:type_name -> google.protobuf.Timestamp
+	13, // 8: vibesys.cli.v1.Attempt.ended_at:type_name -> google.protobuf.Timestamp
+	2,  // 9: vibesys.cli.v1.Attempt.cut_before_start:type_name -> vibesys.cli.v1.CutCause
+	2,  // 10: vibesys.cli.v1.Attempt.cut_mid_command:type_name -> vibesys.cli.v1.CutCause
+	7,  // 11: vibesys.cli.v1.Job.spec:type_name -> vibesys.cli.v1.JobSpec
+	1,  // 12: vibesys.cli.v1.Job.state:type_name -> vibesys.cli.v1.JobState
+	14, // 13: vibesys.cli.v1.Job.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
+	8,  // 14: vibesys.cli.v1.Job.notes:type_name -> vibesys.cli.v1.Note
+	13, // 15: vibesys.cli.v1.Job.submitted_at:type_name -> google.protobuf.Timestamp
+	13, // 16: vibesys.cli.v1.Job.started_at:type_name -> google.protobuf.Timestamp
+	13, // 17: vibesys.cli.v1.Job.finished_at:type_name -> google.protobuf.Timestamp
+	9,  // 18: vibesys.cli.v1.Job.attempts:type_name -> vibesys.cli.v1.Attempt
+	19, // [19:19] is the sub-list for method output_type
+	19, // [19:19] is the sub-list for method input_type
+	19, // [19:19] is the sub-list for extension type_name
+	19, // [19:19] is the sub-list for extension extendee
+	0,  // [0:19] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_job_proto_init() }
@@ -820,14 +1007,18 @@ func file_vibesys_cli_v1_job_proto_init() {
 		(*JobSpec_Command)(nil),
 		(*JobSpec_Measure)(nil),
 	}
-	file_vibesys_cli_v1_job_proto_msgTypes[6].OneofWrappers = []any{}
+	file_vibesys_cli_v1_job_proto_msgTypes[6].OneofWrappers = []any{
+		(*Attempt_CutBeforeStart)(nil),
+		(*Attempt_CutMidCommand)(nil),
+	}
+	file_vibesys_cli_v1_job_proto_msgTypes[7].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_cli_v1_job_proto_rawDesc), len(file_vibesys_cli_v1_job_proto_rawDesc)),
-			NumEnums:      2,
-			NumMessages:   7,
+			NumEnums:      3,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

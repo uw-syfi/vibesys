@@ -484,12 +484,21 @@ func check(t *testing.T, w *world, a *app.App, reboot bool, limit int64) {
 		} else {
 			name = "B"
 		}
-		// A command runs at most once, whatever happens to the daemon, and a lost job is not
-		// retried.
+		// A command runs at most once, whatever happens to the daemon: a command job runs again
+		// only when its attempt was cut off before its command started, and a lost job is not run
+		// again.
 		if n := w.ran(name); n > 1 {
 			t.Errorf("%s: command %s ran %d times", where, name, n)
 		}
-		out := logOf(t, a, j.ID)
+		out, cuts := withoutCutLines(logOf(t, a, j.ID))
+		if cuts != len(j.Attempts) || (cuts > 0 && !reboot) {
+			t.Errorf("%s: job %s has %d attempts cut off and says %d, with reboot %v", where, name, len(j.Attempts), cuts, reboot)
+		}
+		for _, past := range j.Attempts {
+			if _, before := past.Cut.(core.CutBeforeStart); !before {
+				t.Errorf("%s: command job %s was queued again after its command may have started: %+v", where, name, past)
+			}
+		}
 		switch j.State {
 		case core.JobSucceeded:
 			if out != want[name] {
@@ -524,6 +533,21 @@ func check(t *testing.T, w *world, a *app.App, reboot bool, limit int64) {
 	}
 }
 
+// withoutCutLines returns a job's output less the lines that say an attempt was cut off and the
+// job runs again, and how many there were.
+func withoutCutLines(out string) (string, int) {
+	var kept strings.Builder
+	cuts := 0
+	for _, line := range strings.SplitAfter(out, "\n") {
+		if strings.HasPrefix(line, "vibesys-cli: attempt ") && strings.Contains(line, "running it again") {
+			cuts++
+			continue
+		}
+		kept.WriteString(line)
+	}
+	return kept.String(), cuts
+}
+
 func argvOf(j core.Job) []string {
 	if c, ok := j.Spec.Settings.(core.CommandSettings); ok {
 		return c.Argv
@@ -549,5 +573,90 @@ func TestAMachineRestartAtAnyStepRecovers(t *testing.T) {
 	total := scenario(t, -1, true)
 	for limit := int64(0); limit <= total+2; limit++ {
 		t.Run(fmt.Sprintf("step %d", limit), func(t *testing.T) { scenario(t, limit, true) })
+	}
+}
+
+// requeueScenario has a daemon die at step first, the machine restart, a second daemon die at
+// step second, and a daemon on another machine end the job, given up, or cancel it. It returns the job as the third left it.
+func requeueScenario(t *testing.T, first, second int64) (core.Job, string) {
+	w := newWorld(t)
+	watching1, hangUp1 := context.WithCancel(ctxFor(t))
+	defer hangUp1()
+	c1 := &crash{limit: first, onDeath: hangUp1}
+	a1 := w.startApp(crashStores{inner: w.stores, c: c1}, crashSupervisors{Supervisors: w.supervisors(), c: c1})
+	out, err := a1.Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: command("print", "A", ";", "mark", "started", ";", "hold", "g", ";", "exit", "0")})
+	if err != nil {
+		if !c1.dead.Load() {
+			t.Fatalf("Submit: %v", err)
+		}
+		return core.Job{}, ""
+	}
+	id := out.Job.ID
+	// The first daemon goes on until it dies or the command starts, which the gate then holds.
+	w.gates.Reached(watching1, "started")
+	c1.kill()
+	a1.Close()
+	w.survivors.Reboot()
+
+	watching, hangUp := context.WithCancel(ctxFor(t))
+	defer hangUp()
+	before, err := w.stores.Find(ctxFor(t), scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	was, err := before.Job(ctxFor(t), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c2 := &crash{limit: second, onDeath: hangUp}
+	a2 := w.startApp(crashStores{inner: w.stores, c: c2}, crashSupervisors{Supervisors: w.supervisors(), c: c2})
+	// The second daemon goes on until it dies or moves the job.
+	_ = a2.Watch(watching, scope, []core.JobID{id}, func(j core.Job) error {
+		if j.State != was.State || len(j.Attempts) != len(was.Attempts) {
+			return errDone
+		}
+		return nil
+	})
+	c2.kill()
+	a2.Close()
+
+	// The machine is gone for good, and the user gives the job up: a daemon elsewhere, which finds no
+	// run of it, ends it.
+	elsewhere := supervisor.NewSurvivors()
+	t.Cleanup(elsewhere.Close)
+	envs := fakeenv.Environments{core.EnvironmentHost: w.env}
+	a3 := w.startApp(givenUp{Stores: w.stores, job: id}, supervisor.NewInProcess(envs, w.checkouts, elsewhere))
+	if _, err := a3.Cancel(ctxFor(t), call, id, "enough"); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	final := awaitFinal(t, a3, id)
+	return final, logOf(t, a3, id)
+}
+
+// givenUp is Stores in which the user gave one job up.
+type givenUp struct {
+	app.Stores
+	job core.JobID
+}
+
+func (s givenUp) GivenUp(ctx context.Context, scope core.Scope) ([]core.JobID, error) {
+	given, err := s.Stores.GivenUp(ctx, scope)
+	return append(given, s.job), err
+}
+
+// A job's output says it runs again only for an attempt its store records as cut off: a daemon that
+// dies while it queues a job again, and a job that ends before it runs again, leave no line that
+// promises a run that never comes, and no recorded attempt without its line.
+func TestALineSayingAJobRunsAgainMatchesItsRecordedAttempts(t *testing.T) {
+	for first := int64(0); first <= 8; first++ {
+		for second := int64(0); second <= 10; second++ {
+			job, out := requeueScenario(t, first, second)
+			if job.ID == "" {
+				continue
+			}
+			if _, cuts := withoutCutLines(out); cuts != len(job.Attempts) {
+				t.Errorf("crash at steps %d and %d: the job ended %s with %d attempts recorded and output %q", first, second, job.State, len(job.Attempts), out)
+			}
+		}
 	}
 }

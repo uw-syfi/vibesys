@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -58,7 +59,8 @@ const (
 	windowSpawned = "spawned"
 	// windowStarted kills the daemon once the command was told to start.
 	windowStarted = "started"
-	// windowSupervisor kills the supervisor once it answered, and the daemon goes on.
+	// windowSupervisor kills the supervisor once it answered and before its start is sent, and the
+	// daemon goes on.
 	windowSupervisor = "supervisor"
 )
 
@@ -189,6 +191,19 @@ func (d dyingSupervisors) Spawn(ctx context.Context, l lifecycle.Launch) (superv
 			return nil, err
 		}
 		syscall.Kill(pid, syscall.SIGKILL)
+		// The daemon goes on once the supervisor is proved dead, so it always tells a dead one to
+		// start: its command never started, and the job runs again. A look before the kernel freed
+		// the lock would mark the start sent first, and the job would be lost.
+		for {
+			run, err := d.host.Probe(ctx, l.Ref())
+			if err != nil {
+				return nil, err
+			}
+			if _, dead := run.(supervisor.Dead); dead {
+				break
+			}
+			runtime.Gosched()
+		}
 	}
 	return h, nil
 }
@@ -538,7 +553,7 @@ func (e *e2e) expectLostOutput(id, ran string) {
 	e.t.Helper()
 	out := e.logs(id)
 	rest, found := strings.CutPrefix(out, ran)
-	if !found || strings.Count(rest, "\n") != 1 || !strings.Contains(rest, "is lost and is not retried") {
+	if !found || strings.Count(rest, "\n") != 1 || !strings.Contains(rest, "is lost and is not run again") {
 		e.t.Fatalf("output of the lost job = %q, want %q and one line saying the job is lost", out, ran)
 	}
 }
@@ -765,7 +780,7 @@ func TestE2EAKillInsideALaunch(t *testing.T) {
 	for _, tc := range []struct{ window, ended string }{
 		{windowSpawned, "succeeded (exit 0)"},
 		{windowStarted, "succeeded (exit 0)"},
-		{windowSupervisor, "lost"},
+		{windowSupervisor, "succeeded (exit 0)"},
 	} {
 		t.Run(tc.window, func(t *testing.T) {
 			e := newE2E(t)
@@ -780,13 +795,19 @@ func TestE2EAKillInsideALaunch(t *testing.T) {
 			if !strings.Contains(r.stdout, tc.ended) {
 				t.Fatalf("wait = %+v, want a job %s", r, tc.ended)
 			}
-			if tc.window != windowSupervisor {
-				if n := e.starts.Load(); n != 2 {
-					t.Fatalf("%d daemons started; the kill should have made it 2", n)
-				}
-				if out := e.logs(next); out != "B\n" {
-					t.Fatalf("output = %q: the command ran other than once", out)
-				}
+			// The supervisor window kills only the supervisor, before its start: the daemon goes on
+			// and runs the job again.
+			if n := e.starts.Load(); tc.window != windowSupervisor && n != 2 {
+				t.Fatalf("%d daemons started; the kill should have made it 2", n)
+			}
+			want := "B\n"
+			if tc.window == windowSupervisor {
+				// The log keeps the line that says why the job runs again, then the command's
+				// output, once.
+				want = lifecycle.CutLine(1, core.CutBeforeStart{By: core.CutSupervisorDied}) + "\n" + want
+			}
+			if out := e.logs(next); out != want {
+				t.Fatalf("output = %q, want %q: the command ran other than once", out, want)
 			}
 			e.expectSupervisorGone(next)
 		})

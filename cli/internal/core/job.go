@@ -28,7 +28,9 @@ const (
 	JobSucceeded JobState = "succeeded"
 	JobFailed    JobState = "failed"
 	JobCancelled JobState = "cancelled"
-	// JobLost means the machine or the supervisor went away while the job ran. It is never retried.
+	// JobLost means the machine or the supervisor went away while the job ran, and the job is not
+	// run again: its command may have started and RerunPolicyOf its kind does not rerun it after
+	// that, or it was cut off as often as MaxAttempts allows.
 	JobLost JobState = "lost"
 )
 
@@ -144,6 +146,84 @@ type Job struct {
 	ResultJob JobID
 	// CheckJob is the check pass a measure job links to.
 	CheckJob JobID
+	// Attempts are the earlier attempts at the job that were cut off, oldest first: each ended
+	// when its supervisor was proved gone, and the job was queued again. The current attempt is
+	// number len(Attempts)+1, and there are always fewer than MaxAttempts.
+	Attempts []PastAttempt
+}
+
+// MaxAttempts is the most attempts a job gets. A job whose supervisor is proved gone is queued again
+// only while it has had fewer, so a supervisor that dies every time cannot run a job for ever. It
+// counts attempts cut off before the command started too.
+const MaxAttempts = 3
+
+// PastAttempt is an attempt at a job that was cut off, after which the job was queued again.
+type PastAttempt struct {
+	// StartedAt is when the store recorded the attempt running, and EndedAt when it was found cut
+	// off.
+	StartedAt, EndedAt time.Time
+	Cut                Cut
+}
+
+// Cut is how an attempt was cut off: before its command was told to start, or after it may have
+// started. The set is closed.
+type Cut interface {
+	// Cause is how the attempt's supervisor was proved gone.
+	Cause() CutCause
+	cut()
+}
+
+// CutBeforeStart is an attempt whose supervisor was proved gone before its command was told to
+// start, so nothing of it ran.
+type CutBeforeStart struct{ By CutCause }
+
+// CutMidCommand is an attempt whose supervisor was proved gone after its command may have started.
+type CutMidCommand struct{ By CutCause }
+
+// Cause implements Cut.
+func (c CutBeforeStart) Cause() CutCause { return c.By }
+
+// Cause implements Cut.
+func (c CutMidCommand) Cause() CutCause { return c.By }
+
+func (CutBeforeStart) cut() {}
+func (CutMidCommand) cut()  {}
+
+// CutCause is how a supervisor was proved gone. The set is closed.
+type CutCause string
+
+// The causes.
+const (
+	// CutSupervisorDied is a supervisor whose lock could be taken.
+	CutSupervisorDied CutCause = "supervisor died"
+	// CutRebooted is a machine that started again since the attempt began.
+	CutRebooted CutCause = "machine restarted"
+)
+
+// Valid says the cause is one of the causes.
+func (c CutCause) Valid() bool { return c == CutSupervisorDied || c == CutRebooted }
+
+// RerunPolicy is when a job whose supervisor is proved gone may run again. The set is closed.
+type RerunPolicy string
+
+// The policies.
+const (
+	// RerunBeforeStartOnly runs a job again only when its command never started. A command job may
+	// have done anything once it started, so it is not run twice.
+	RerunBeforeStartOnly RerunPolicy = "before start only"
+	// RerunAfterProvenDeath runs a job again whenever its supervisor is proved gone. A check or a
+	// measure job saves nothing until it passes, so a second attempt cannot meet half of the first.
+	RerunAfterProvenDeath RerunPolicy = "after proven death"
+)
+
+// RerunPolicyOf is the rerun policy of a kind of job.
+func RerunPolicyOf(kind JobKind) RerunPolicy {
+	switch kind {
+	case JobCheck, JobMeasure:
+		return RerunAfterProvenDeath
+	case JobCommand:
+	}
+	return RerunBeforeStartOnly
 }
 
 // JobFilter selects jobs. Fields combine with AND and the zero value matches every job.
@@ -202,4 +282,7 @@ type Transition struct {
 	CancelReason string
 	// CheckJob links a measure job to the check pass it relies on.
 	CheckJob JobID
+	// Cut is set on the move from running back to queued, and only there: it says how the attempt
+	// that ran was cut off, and the job keeps it in Attempts.
+	Cut Cut
 }

@@ -14,6 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv"
@@ -344,5 +347,62 @@ func TestAJobWithNoRecordHasNoRun(t *testing.T) {
 	found, err := r.h.Probe(ctx, lifecycle.Ref{Store: "s", Job: "never"})
 	if _, none := found.(supervisor.None); err != nil || !none {
 		t.Fatalf("Probe = %#v, %v; want none", found, err)
+	}
+}
+
+// A run record written by a build that did not mark starts says nothing of the start, so its
+// command may have started: an upgrade over a run of the old build, after a reboot, must not run
+// its command twice.
+func TestARecordFromBeforeStartMarksMayHaveStarted(t *testing.T) {
+	r := openHostRig(t)
+	ctx, cancel := context.WithTimeout(context.Background(), suptest.Backstop)
+	defer cancel()
+	l := lifecycle.Launch{
+		Repository: "/repo", Task: "task", Job: "old",
+		Spec: core.JobSpec{
+			Commit: "0123456789abcdef0123456789abcdef01234567", Environment: core.EnvironmentHost,
+			Settings: core.CommandSettings{Argv: []string{"exit", "0"}, Timeout: time.Hour},
+		},
+	}
+	h, err := r.h.Spawn(ctx, l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	ref := l.Ref()
+	writeOldRecord(t, filepath.Join(r.records, ref.String()))
+	if err := os.RemoveAll(filepath.Join(r.root, ref.String())); err != nil {
+		t.Fatal(err)
+	}
+	r.boot = "second"
+
+	found, err := r.newHost().Probe(ctx, ref)
+	dead, ok := found.(supervisor.Dead)
+	if err != nil || !ok || dead.Proof != lifecycle.ProofRebooted {
+		t.Fatalf("Probe after a reboot = %#v, %v; want proof of the reboot", found, err)
+	}
+	if _, may := dead.Start.(lifecycle.MayHaveStarted); !may {
+		t.Fatalf("Probe after a reboot says the start was %#v; a record from before start marks proves nothing of it", dead.Start)
+	}
+}
+
+// writeOldRecord rewrites a run record in the shape a build before start marks wrote: the boot and
+// the launch, and nothing else.
+func writeOldRecord(t *testing.T, path string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rec cliv1.RunRecord
+	if err := proto.Unmarshal(data, &rec); err != nil {
+		t.Fatal(err)
+	}
+	old, err := proto.Marshal(&cliv1.RunRecord{BootId: rec.GetBootId(), Launch: rec.GetLaunch()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, old, 0o600); err != nil {
+		t.Fatal(err)
 	}
 }

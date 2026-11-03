@@ -77,6 +77,8 @@ func moveTo(j core.Job, to core.JobState) core.Transition {
 		t.ExitCode = &exit
 	case core.JobFailed:
 		t.ExitCode = &exit
+	case core.JobQueued:
+		t.Cut = core.CutMidCommand{By: core.CutSupervisorDied}
 	case core.JobCancelled:
 		t.CancelReason = "no longer needed"
 	}
@@ -95,7 +97,7 @@ func applied(t testing.TB, j core.Job, tr core.Transition) core.Job {
 func TestTheJobStateMachineMovesOnlyAlongItsEdges(t *testing.T) {
 	legal := map[core.JobState][]core.JobState{
 		core.JobQueued:  {core.JobRunning, core.JobCancelled, core.JobFailed},
-		core.JobRunning: {core.JobSucceeded, core.JobFailed, core.JobCancelled, core.JobLost},
+		core.JobRunning: {core.JobSucceeded, core.JobFailed, core.JobCancelled, core.JobLost, core.JobQueued},
 	}
 	states := append(core.JobStates(), "", "paused")
 	for _, from := range states {
@@ -153,8 +155,14 @@ func checkMoved(t *testing.T, name string, kind core.JobKind, before, after core
 	if (to == core.JobRunning) != (after.StartedAt != nil && before.StartedAt == nil) {
 		t.Errorf("%s: started at %v", name, after.StartedAt)
 	}
-	if after.StartedAt == nil && before.State == core.JobRunning {
+	if after.StartedAt == nil && before.State == core.JobRunning && to != core.JobQueued {
 		t.Errorf("%s: a running job lost its start time", name)
+	}
+	if requeued := to == core.JobQueued; requeued != (len(after.Attempts) == len(before.Attempts)+1) {
+		t.Errorf("%s: attempts %v before, %v after", name, before.Attempts, after.Attempts)
+	}
+	if to == core.JobQueued && (after.StartedAt != nil || after.Environment != nil) {
+		t.Errorf("%s: a job queued again keeps its start %v and environment %v", name, after.StartedAt, after.Environment)
 	}
 	if (after.FinishedAt != nil) != to.Final() {
 		t.Errorf("%s: finished at %v", name, after.FinishedAt)
@@ -209,6 +217,8 @@ func TestApplyRefusesEveryEffectThatDoesNotBelongToTheMove(t *testing.T) {
 			func(_ core.JobKind, to core.JobState) bool { return to == core.JobSucceeded || to == core.JobFailed }},
 		{"check job", func(t *core.Transition) { t.CheckJob = "check-1" },
 			func(kind core.JobKind, _ core.JobState) bool { return kind == core.JobMeasure }},
+		{"cut", func(t *core.Transition) { t.Cut = core.CutBeforeStart{By: core.CutRebooted} },
+			func(_ core.JobKind, to core.JobState) bool { return to == core.JobQueued }},
 	}
 	for _, kind := range jobKinds {
 		for _, from := range []core.JobState{core.JobQueued, core.JobRunning} {
@@ -260,6 +270,8 @@ func TestApplyRefusesAMoveThatLeavesOutWhatItNeeds(t *testing.T) {
 		"a measure succeeding with nothing": edit(running, core.JobSucceeded, func(tr *core.Transition) { tr.Result = nil }),
 		"a command saving a result":         edit(command, core.JobSucceeded, func(tr *core.Transition) { tr.Result = resultFor(running) }),
 		"a job with no settings":            edit(running, core.JobFailed, func(*core.Transition) {}),
+		"queued again with no cut":          edit(running, core.JobQueued, func(tr *core.Transition) { tr.Cut = nil }),
+		"queued again with no cause":        edit(running, core.JobQueued, func(tr *core.Transition) { tr.Cut = core.CutMidCommand{} }),
 	}
 	noSettings := cases["a job with no settings"]
 	noSettings.job.Spec.Settings = nil
@@ -355,7 +367,7 @@ func TestRandomAttemptsAtMovingAJobKeepItsInvariants(t *testing.T) {
 			if !reflect.DeepEqual(before, copyOf) {
 				t.Fatalf("Apply changed the job it was given")
 			}
-			legal := j.State.CanMoveTo(to)
+			legal := j.State.CanMoveTo(to) && (to != core.JobQueued || len(j.Attempts)+1 < core.MaxAttempts)
 			if err != nil {
 				if legal && !spoiled {
 					t.Fatalf("%s job %s to %s: a well-formed legal move failed: %v", kind, j.State, to, err)
@@ -365,7 +377,7 @@ func TestRandomAttemptsAtMovingAJobKeepItsInvariants(t *testing.T) {
 			if !legal || spoiled {
 				t.Fatalf("%s job %s to %s: an illegal or spoiled move (spoiled %v) applied", kind, j.State, to, spoiled)
 			}
-			ran = ran || to == core.JobRunning
+			ran = to == core.JobRunning || (ran && to != core.JobQueued)
 			j = out
 			checkInvariants(t, j, ran)
 		}
@@ -400,11 +412,19 @@ func spoil(r *rand.Rand, kind core.JobKind, tr *core.Transition) {
 	if tr.To != core.JobSucceeded && tr.To != core.JobFailed {
 		ways = append(ways, func() { code := 9; tr.ExitCode = &code })
 	}
+	if tr.To == core.JobQueued {
+		ways = append(ways, func() { tr.Cut = nil })
+	} else {
+		ways = append(ways, func() { tr.Cut = core.CutMidCommand{By: core.CutRebooted} })
+	}
 	ways[r.IntN(len(ways))]()
 }
 
 func checkInvariants(t *testing.T, j core.Job, ran bool) {
 	t.Helper()
+	if len(j.Attempts) >= core.MaxAttempts {
+		t.Fatalf("job %+v: %d attempts cut off, and a job gets %d in all", j, len(j.Attempts), core.MaxAttempts)
+	}
 	if (j.StartedAt != nil) != ran {
 		t.Fatalf("job %+v: started at %v, but ran is %v", j, j.StartedAt, ran)
 	}
@@ -422,5 +442,44 @@ func checkInvariants(t *testing.T, j core.Job, ran bool) {
 	}
 	if j.State == core.JobSucceeded && j.Spec.Settings.Kind() != core.JobCommand && j.ResultJob != j.ID {
 		t.Fatalf("job %+v: succeeded without its result", j)
+	}
+}
+
+// A job is queued again after each cut-off attempt until it has had MaxAttempts, and never after:
+// whatever the cuts were, the move that would make one more is refused, and each cut kept is the
+// attempt it ended, oldest first.
+func TestAJobIsQueuedAgainOnlyUntilItHadTheMostAttempts(t *testing.T) {
+	r := newRand(21)
+	cuts := []core.Cut{
+		core.CutBeforeStart{By: core.CutSupervisorDied}, core.CutBeforeStart{By: core.CutRebooted},
+		core.CutMidCommand{By: core.CutSupervisorDied}, core.CutMidCommand{By: core.CutRebooted},
+	}
+	for range properties {
+		kind := jobKinds[r.IntN(len(jobKinds))]
+		j := newJob(kind, core.JobRunning)
+		var want []core.Cut
+		for attempt := 1; ; attempt++ {
+			tr := moveTo(j, core.JobQueued)
+			tr.At = at(10 * attempt)
+			tr.Cut = cuts[r.IntN(len(cuts))]
+			out, err := j.Apply(tr)
+			if attempt >= core.MaxAttempts {
+				if failureKind(err) != core.FailureInvalidInput {
+					t.Fatalf("attempt %d of %d cut off: %v, want the move refused", attempt, core.MaxAttempts, err)
+				}
+				break
+			}
+			if err != nil {
+				t.Fatalf("attempt %d of %d cut off: %v", attempt, core.MaxAttempts, err)
+			}
+			want = append(want, tr.Cut)
+			if len(out.Attempts) != len(want) || out.Attempts[len(want)-1].Cut != tr.Cut ||
+				!out.Attempts[len(want)-1].StartedAt.Equal(*j.StartedAt) || !out.Attempts[len(want)-1].EndedAt.Equal(tr.At) {
+				t.Fatalf("after attempt %d: attempts %+v, want cuts %v", attempt, out.Attempts, want)
+			}
+			start := moveTo(out, core.JobRunning)
+			start.At = at(10*attempt + 1)
+			j = applied(t, out, start)
+		}
 	}
 }

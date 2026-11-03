@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -58,6 +59,8 @@ func Run(t *testing.T, newRig func(t *testing.T) Rig) {
 		{"release refuses a running job and works after the end", testRelease},
 		{"a parked supervisor can be released and never runs", testParkedRelease},
 		{"a killed supervisor is gone", testKilled},
+		{"a supervisor killed before its start proves its command never started", testKilledParked},
+		{"output is numbered from the launch's output base", testOutputBase},
 		{"a restarted daemon finds a running job and follows it", testRestartRunning},
 		{"a restarted daemon finds an ended job's outcome", testRestartFinished},
 		{"runs left over are found and forgotten", testRuns},
@@ -363,6 +366,9 @@ func testKilled(t *testing.T, r Rig) {
 	if !ok {
 		t.Fatalf("after a kill the run is %#v, want dead", find(t, r.Supervisors, l.Ref()))
 	}
+	if _, never := dead.Start.(lifecycle.NeverStarted); never {
+		t.Fatal("a run killed after its start is said to have never started")
+	}
 	if err := r.Supervisors.Forget(ctx, l.Ref(), ""); err == nil {
 		t.Fatal("Forget took no proof")
 	}
@@ -371,6 +377,82 @@ func testKilled(t *testing.T, r Rig) {
 	}
 	if len(all(t, r.Supervisors)) != 0 {
 		t.Fatal("a forgotten run is still listed")
+	}
+}
+
+// A supervisor killed while parked, never told to start, is proved dead with a command that never
+// started, which is what lets a job run again whatever its kind.
+func testKilledParked(t *testing.T, r Rig) {
+	ctx := ctxFor(t)
+	l := launch("j1", "print", "never")
+	h, err := r.Supervisors.Spawn(ctx, l)
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	defer h.Close()
+	w := watch(ctx, h, 0)
+	r.Kill(l.Ref())
+	// Follow returns once the connection to the killed supervisor ends.
+	select {
+	case <-w.done:
+	case <-ctx.Done():
+		t.Fatal("Follow did not return after the supervisor was killed")
+	}
+	dead := awaitDead(t, ctx, r.Supervisors, l.Ref())
+	if _, never := dead.Start.(lifecycle.NeverStarted); !never {
+		t.Fatalf("a run killed before its start is %#v, want dead and never started", dead)
+	}
+	// A daemon that tells a supervisor proved dead to start learns it never started.
+	var gone supervisor.Gone
+	if err := h.Start(ctx); !errors.As(err, &gone) || gone.Start != (lifecycle.NeverStarted{}) {
+		t.Fatalf("Start of a supervisor proved dead = %v, want it gone and never started", err)
+	}
+	run, err := r.Restart().Probe(ctx, l.Ref())
+	if err != nil {
+		t.Fatalf("Probe after a restart: %v", err)
+	}
+	if d, ok := run.(supervisor.Dead); !ok || d.Start != (lifecycle.NeverStarted{}) {
+		t.Fatalf("after a restart the run is %#v, want dead and never started", run)
+	}
+}
+
+// awaitDead returns the run of a job whose supervisor was killed and whose connection ended. Its
+// lock can outlive the process for a moment, so proof can take another look: each look yields to
+// the rest of the program first, and only ctx, a guard against a hang, bounds them.
+func awaitDead(t *testing.T, ctx context.Context, sups supervisor.Supervisors, ref lifecycle.Ref) supervisor.Dead {
+	t.Helper()
+	for {
+		run, err := sups.Probe(ctx, ref)
+		if err != nil {
+			t.Fatalf("Probe: %v", err)
+		}
+		if d, ok := run.(supervisor.Dead); ok {
+			return d
+		}
+		if ctx.Err() != nil {
+			t.Fatalf("the killed supervisor never proved dead: %#v", run)
+		}
+		runtime.Gosched()
+	}
+}
+
+// A run's output is numbered from its launch's output base, the length of the job's log before the
+// run, so a daemon follows each attempt from the log's own offset.
+func testOutputBase(t *testing.T, r Rig) {
+	ctx := ctxFor(t)
+	l := launch("j1", "print", "alpha")
+	l.OutputBase = 100
+	h := start(t, r, l)
+	got, _, err := follow(ctx, h, 100)
+	if err != nil || string(got) != "alpha\n" {
+		t.Fatalf("from the base: output %q, error %v", got, err)
+	}
+	if got, _, err := follow(ctx, h, 102); err != nil || string(got) != "pha\n" {
+		t.Fatalf("from inside the output: output %q, error %v", got, err)
+	}
+	var f *core.Failure
+	if _, _, err := follow(ctx, h, 99); !errors.As(err, &f) || f.Kind != core.FailureInvalidInput {
+		t.Fatalf("from before the base: error %v, want invalid input", err)
 	}
 }
 

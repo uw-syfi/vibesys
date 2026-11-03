@@ -107,10 +107,11 @@ func RecordsDir(state, machine, runtimeDir string) string {
 	return filepath.Join(state, "run-records", hex.EncodeToString(sum[:6]))
 }
 
-// record is what is known of a run outside its directory.
+// record is what is known of a run outside its directory. Start is what its start mark proves.
 type record struct {
 	BootID string
 	Launch lifecycle.Launch
+	Start  lifecycle.Start
 }
 
 func (h *Host) recordPath(ref lifecycle.Ref) string { return filepath.Join(h.records, dirName(ref)) }
@@ -122,11 +123,16 @@ func (h *Host) writeRecord(ref lifecycle.Ref, l lifecycle.Launch) error {
 	if err != nil {
 		return fmt.Errorf("reading the boot id: %w", err)
 	}
-	data, err := proto.Marshal(&cliv1.RunRecord{BootId: boot, Launch: wire.Launch(l)})
-	if err != nil {
+	if err := os.MkdirAll(h.records, 0o700); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(h.records, 0o700); err != nil {
+	return h.putRecord(ref, &cliv1.RunRecord{BootId: boot, Launch: wire.Launch(l), StartMark: cliv1.StartMark_START_MARK_NOT_SENT})
+}
+
+// putRecord writes a run's record, whole or not at all.
+func (h *Host) putRecord(ref lifecycle.Ref, msg *cliv1.RunRecord) error {
+	data, err := proto.Marshal(msg)
+	if err != nil {
 		return err
 	}
 	path := h.recordPath(ref)
@@ -134,6 +140,44 @@ func (h *Host) writeRecord(ref lifecycle.Ref, l lifecycle.Launch) error {
 		return err
 	}
 	return os.Rename(path+".tmp", path)
+}
+
+// markStartSent writes into a run's record that its supervisor is told to start, unless it says so
+// already. It is called before the request is sent, so a record still marked not sent proves the
+// command never started. A run with no record cannot be marked, which fails: it is not this daemon's.
+func (h *Host) markStartSent(ref lifecycle.Ref) error {
+	data, err := os.ReadFile(h.recordPath(ref))
+	if err != nil {
+		return fmt.Errorf("reading the run record to mark the start: %w", err)
+	}
+	var msg cliv1.RunRecord
+	if err := proto.Unmarshal(data, &msg); err != nil {
+		return fmt.Errorf("run record: %w", err)
+	}
+	if msg.GetStartMark() == cliv1.StartMark_START_MARK_SENT {
+		return nil
+	}
+	msg.StartMark = cliv1.StartMark_START_MARK_SENT
+	return h.putRecord(ref, &msg)
+}
+
+// startOf says what a run's record proves of its start: NeverStarted only for a record that can be
+// read and is marked not sent.
+func (h *Host) startOf(ref lifecycle.Ref) lifecycle.Start {
+	rec, ok, err := h.readRecord(ref)
+	if err != nil || !ok {
+		return lifecycle.MayHaveStarted{}
+	}
+	return rec.Start
+}
+
+// startOfMark says what a start mark proves. Only NOT_SENT proves the command never started: a
+// record with no mark was written by a build that did not mark starts.
+func startOfMark(mark cliv1.StartMark) lifecycle.Start {
+	if mark == cliv1.StartMark_START_MARK_NOT_SENT {
+		return lifecycle.NeverStarted{}
+	}
+	return lifecycle.MayHaveStarted{}
 }
 
 // readRecord returns the record of a run, and false when there is none.
@@ -156,7 +200,7 @@ func (h *Host) readRecord(ref lifecycle.Ref) (record, bool, error) {
 	if launch.Ref() != ref {
 		return record{}, false, fmt.Errorf("run record of job %s is for job %s", ref, launch.Ref())
 	}
-	return record{BootID: msg.GetBootId(), Launch: launch}, true, nil
+	return record{BootID: msg.GetBootId(), Launch: launch, Start: startOfMark(msg.GetStartMark())}, true, nil
 }
 
 // removeRecord removes the record of a run. It is idempotent.

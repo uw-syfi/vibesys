@@ -47,6 +47,9 @@ type run struct {
 	// apart says the run is in a place the daemon cannot see, such as the machine of an owner the
 	// store had before: no look finds it, and its command does not use this machine.
 	apart bool
+	// started says the run's record has the start mark: the supervisor was told, or was about to be
+	// told, to start the command.
+	started bool
 }
 
 func (r run) alive() bool { return r.phase != "" && !r.dead }
@@ -73,10 +76,14 @@ type model struct {
 	// givenUp says the job ran when its store's owner record was removed, which is how a user gives
 	// up the place that ran it. By job.
 	givenUp [modelJobs]bool
-	limits  int // How many command limits have passed since the start.
-	pending []lifecycle.Request
-	faults  int
-	restart int
+	// attempts is how many attempts of the job its store records as cut off, and ran how many times
+	// a command of the job started. By job.
+	attempts [modelJobs]int
+	ran      [modelJobs]int
+	limits   int // How many command limits have passed since the start.
+	pending  []lifecycle.Request
+	faults   int
+	restart  int
 
 	violation string
 }
@@ -92,7 +99,7 @@ func (m model) key() string {
 		keys = append(keys, fmt.Sprintf("%#v", r))
 	}
 	slices.Sort(keys)
-	return fmt.Sprintf("%#v|%v|%v|%v|%v|%v|%v|%v|%v|%v|%v|%d|%d|%s", m.machine, m.jobs, m.runs, m.following, m.taken, m.died, m.away, m.forgetting, m.left, m.givenUp, m.limits, m.faults, m.restart, strings.Join(keys, ";"))
+	return fmt.Sprintf("%#v|%v|%v|%v|%v|%v|%v|%v|%v|%v|%v|%v|%v|%d|%d|%s", m.machine, m.jobs, m.runs, m.following, m.taken, m.died, m.away, m.forgetting, m.left, m.givenUp, m.attempts, m.ran, m.limits, m.faults, m.restart, strings.Join(keys, ";"))
 }
 
 func (m model) at() time.Time {
@@ -115,12 +122,17 @@ type search struct {
 	depth    int
 	faults   int
 	restarts int
-	refs     [modelJobs]lifecycle.Ref
-	ids      [modelJobs]lifecycle.StoreID
+	// prior is how many cut-off attempts each job has when it is submitted, as a job the store had
+	// queued again before a restart has, so that a search of a few moves reaches the bound.
+	prior int
+	refs  [modelJobs]lifecycle.Ref
+	ids   [modelJobs]lifecycle.StoreID
+	// step is the machine under check: lifecycle.Step, or a broken one the check must catch.
+	step func(lifecycle.State, lifecycle.Event) (lifecycle.State, []lifecycle.Request)
 }
 
 func newSearch(stores, depth int) search {
-	s := search{stores: stores, depth: depth, faults: 2, restarts: 1}
+	s := search{stores: stores, depth: depth, faults: 2, restarts: 1, step: lifecycle.Step}
 	for i := range modelJobs {
 		s.ids[i] = lifecycle.StoreIDOf("/repo", fmt.Sprintf("task%d", i))
 	}
@@ -140,6 +152,28 @@ func (s search) index(ref lifecycle.Ref) int {
 
 func (s search) storeID(store int) lifecycle.StoreID { return s.ids[store] }
 
+// policy is a job's rerun policy: job 0 is a check, which runs again after a proven death, and job
+// 1 a command, which never runs twice.
+func (s search) policy(i int) core.RerunPolicy {
+	if i == 0 {
+		return core.RerunAfterProvenDeath
+	}
+	return core.RerunBeforeStartOnly
+}
+
+// admitted is the job as the shell admits it, with what its store records.
+func (s search) admitted(m *model, i int) lifecycle.Admitted {
+	return lifecycle.Admitted{Ref: s.ref(i), SubmittedAt: submitted(i), Attempts: m.attempts[i], Policy: s.policy(i)}
+}
+
+// start is what a run's record proves of its start.
+func start(r run) lifecycle.Start {
+	if r.started {
+		return lifecycle.MayHaveStarted{}
+	}
+	return lifecycle.NeverStarted{}
+}
+
 func submitted(i int) time.Time { return modelEpoch.Add(time.Duration(i+1) * time.Second) }
 
 // presence is what a look finds of a run.
@@ -149,7 +183,7 @@ func (s search) presence(m *model, i int) lifecycle.Presence {
 	case !r.visible():
 		return lifecycle.RunNone{}
 	case r.dead:
-		return lifecycle.RunDead{Proof: lifecycle.ProofLockFree}
+		return lifecycle.RunDead{Proof: lifecycle.ProofLockFree, Start: start(r)}
 	}
 	return lifecycle.RunAlive{Phase: r.phase, Limit: modelLimit}
 }
@@ -167,7 +201,10 @@ func (s search) finding(m *model, i int, p lifecycle.Presence) lifecycle.Finding
 	if _, here := p.(lifecycle.RunAlive); here {
 		m.givenUp[i] = false
 	}
-	return lifecycle.JobIn{State: m.jobs[i], SubmittedAt: submitted(i), GivenUp: m.givenUp[i] && m.jobs[i] == core.JobRunning}
+	return lifecycle.JobIn{
+		State: m.jobs[i], SubmittedAt: submitted(i), GivenUp: m.givenUp[i] && m.jobs[i] == core.JobRunning,
+		Attempts: m.attempts[i], Policy: s.policy(i),
+	}
 }
 
 func (s search) look(m *model, i int) lifecycle.Recovered {
@@ -192,7 +229,7 @@ func (m *model) fail(format string, args ...any) {
 // feed steps the machine and checks what must hold after any event.
 func (s search) feed(m *model, e lifecycle.Event) {
 	var reqs []lifecycle.Request
-	m.machine, reqs = lifecycle.Step(m.machine, e)
+	m.machine, reqs = s.step(m.machine, e)
 	for _, r := range reqs {
 		s.checkRequest(m, e, r)
 		m.pending = append(m.pending, r)
@@ -215,6 +252,16 @@ func (s search) checkWorld(m *model) {
 	}
 	if commands > 1 {
 		m.fail("two commands run at once: %+v", m.runs)
+	}
+	for i := range modelJobs {
+		switch {
+		case m.attempts[i] >= core.MaxAttempts:
+			m.fail("job %d has %d attempts cut off, and a job gets %d", i, m.attempts[i], core.MaxAttempts)
+		case s.policy(i) == core.RerunBeforeStartOnly && m.ran[i] > 1:
+			m.fail("the command of job %d ran %d times, and a command job runs once", i, m.ran[i])
+		case m.ran[i] > core.MaxAttempts-s.prior:
+			m.fail("job %d ran %d times, past its attempts", i, m.ran[i])
+		}
 	}
 	running := map[int]int{}
 	for i, state := range m.jobs {
@@ -282,8 +329,8 @@ func (s search) moves(m *model) []move {
 		case m.jobs[i] == "":
 			if !m.away[store] && (i == 0 || m.jobs[i-1] != "") {
 				add(free, false, "submit"+digit(i), func(m *model) {
-					m.jobs[i] = core.JobQueued
-					s.feed(m, lifecycle.Admitted{Ref: ref, SubmittedAt: submitted(i)})
+					m.jobs[i], m.attempts[i] = core.JobQueued, s.prior
+					s.feed(m, s.admitted(m, i))
 				})
 			}
 		case m.jobs[i] != gone && !m.jobs[i].Final() && !m.away[store] && !m.taken[i]:
@@ -307,7 +354,7 @@ func (s search) moves(m *model) []move {
 				m.runs[i].dead, m.died[i] = true, true
 				if m.following[i] {
 					m.following[i] = false
-					s.feed(m, lifecycle.SupervisorLost{Ref: ref, Proof: lifecycle.ProofLockFree, At: m.at()})
+					s.feed(m, lifecycle.SupervisorLost{Ref: ref, Proof: lifecycle.ProofLockFree, Start: start(m.runs[i]), At: m.at()})
 				}
 			})
 		}
@@ -346,7 +393,7 @@ func (s search) moves(m *model) []move {
 				switch m.jobs[i] {
 				case core.JobQueued:
 					add(answer, false, "sweep admits"+digit(i), func(m *model) {
-						s.feed(m, lifecycle.Admitted{Ref: s.ref(i), SubmittedAt: submitted(i)})
+						s.feed(m, s.admitted(m, i))
 					})
 				case core.JobRunning:
 					add(answer, false, "sweep looks at"+digit(i), func(m *model) { s.feed(m, s.look(m, i)) })
@@ -438,7 +485,7 @@ func (s search) placesGone(m *model) {
 		m.runs[i].dead, m.died[i] = true, true
 		if m.following[i] {
 			m.following[i] = false
-			s.feed(m, lifecycle.SupervisorLost{Ref: s.ref(i), Proof: lifecycle.ProofLockFree, At: m.at()})
+			s.feed(m, lifecycle.SupervisorLost{Ref: s.ref(i), Proof: lifecycle.ProofLockFree, Start: start(m.runs[i]), At: m.at()})
 		}
 	}
 }
@@ -585,6 +632,11 @@ func (s search) answers(m *model, at int, r lifecycle.Request, add func(rank, bo
 				take(m)
 				s.feed(m, lifecycle.LaunchFailed{Ref: ref, Cause: lifecycle.CauseRefused, Failure: modelStop, At: m.at()})
 			})
+			add(answer, true, name+" supervisor never came up", func(m *model) {
+				take(m)
+				m.runs[i] = run{phase: lifecycle.RunParked, dead: true}
+				s.feed(m, lifecycle.LaunchFailed{Ref: ref, Cause: lifecycle.CauseSupervisorSilent, Failure: modelStop, At: m.at()})
+			})
 			add(answer, true, name+" parked, store lost", func(m *model) {
 				take(m)
 				m.runs[i] = run{phase: lifecycle.RunParked}
@@ -601,7 +653,7 @@ func (s search) answers(m *model, at int, r lifecycle.Request, add func(rank, bo
 			take(m)
 			if !m.runs[i].alive() {
 				if m.runs[i].phase != "" {
-					s.feed(m, lifecycle.SupervisorLost{Ref: ref, Proof: lifecycle.ProofLockFree, At: m.at()})
+					s.feed(m, lifecycle.SupervisorLost{Ref: ref, Proof: lifecycle.ProofLockFree, Start: start(m.runs[i]), At: m.at()})
 				}
 				return
 			}
@@ -610,6 +662,7 @@ func (s search) answers(m *model, at int, r lifecycle.Request, add func(rank, bo
 			if m.runs[i].phase != lifecycle.RunParked {
 				return
 			}
+			m.runs[i].started = true
 			if m.runs[i].cancel {
 				// A supervisor told to cancel while parked ends without running the command.
 				m.runs[i].phase = lifecycle.RunFinished
@@ -618,7 +671,8 @@ func (s search) answers(m *model, at int, r lifecycle.Request, add func(rank, bo
 			if m.taken[i] {
 				m.fail("job %s started after its cancel was taken while it was queued", ref)
 			}
-			m.runs[i].phase = lifecycle.RunRunning
+			m.runs[i].phase, m.runs[i].started = lifecycle.RunRunning, true
+			m.ran[i]++
 		})
 	case lifecycle.SignalCancel:
 		add(answer, false, name, func(m *model) {
@@ -634,7 +688,7 @@ func (s search) answers(m *model, at int, r lifecycle.Request, add func(rank, bo
 		add(answer, false, name, func(m *model) {
 			take(m)
 			if !m.runs[i].alive() {
-				s.feed(m, lifecycle.SupervisorLost{Ref: ref, Proof: lifecycle.ProofLockFree, At: m.at()})
+				s.feed(m, lifecycle.SupervisorLost{Ref: ref, Proof: lifecycle.ProofLockFree, Start: start(m.runs[i]), At: m.at()})
 				return
 			}
 			m.runs[i].cancel = true
@@ -692,9 +746,14 @@ func (s search) answers(m *model, at int, r lifecycle.Request, add func(rank, bo
 	}
 }
 
-// settle is the shell's move: the first end a store records is the end.
+// settle is the shell's move: the first end a store records is the end. A settlement that queues
+// the job again is recorded only on a job its store has running, and answered with Requeued.
 func (s search) settle(m *model, i int, r lifecycle.Move) {
 	t := r.Settlement.Transition
+	if r.Settlement.Requeues() {
+		s.requeue(m, i, r)
+		return
+	}
 	if !m.jobs[i].Final() {
 		// A job given up may be lost with a supervisor that cannot be used, as long as its command
 		// does not run: the user gave up its outcome, and no command is lost.
@@ -718,6 +777,33 @@ func (s search) settle(m *model, i int, r lifecycle.Move) {
 		}
 	}
 	s.feed(m, lifecycle.Closed{Ref: s.ref(i)})
+}
+
+// requeue records a cut-off attempt and checks that the machine asked for it only with the proof a
+// rerun needs: the run is dead, and a job that runs only before its start never started.
+func (s search) requeue(m *model, i int, r lifecycle.Move) {
+	t := r.Settlement.Transition
+	if m.jobs[i] != core.JobRunning {
+		// The store has the job elsewhere: the move does not apply, and the daemon is done with it.
+		s.feed(m, lifecycle.Closed{Ref: s.ref(i)})
+		return
+	}
+	switch _, before := t.Cut.(core.CutBeforeStart); {
+	case m.runs[i].alive():
+		m.fail("job %d is queued again with a live supervisor", i)
+	case before && m.runs[i].started:
+		m.fail("job %d is queued again as never started, and its command was told to start", i)
+	case !before && s.policy(i) != core.RerunAfterProvenDeath:
+		m.fail("command job %d is queued again after its command may have started", i)
+	}
+	job := core.Job{ID: t.Job, State: m.jobs[i], Spec: core.JobSpec{Settings: core.CommandSettings{}}, Attempts: make([]core.PastAttempt, m.attempts[i])}
+	if _, err := job.Apply(t); err != nil {
+		m.fail("the store refuses to queue job %d again: %v", i, err)
+		return
+	}
+	m.jobs[i] = core.JobQueued
+	m.attempts[i]++
+	s.feed(m, lifecycle.Requeued{Ref: s.ref(i)})
 }
 
 // heal lets a world run with no more faults or callers, and returns false if it does not end. A
@@ -855,8 +941,26 @@ type step struct {
 
 func digit(i int) string { return " " + string(rune('0'+i)) }
 
-func (s search) walk(t *testing.T) {
+// walked is what a walk found: the first violation, with the moves that led to it, how many
+// states it saw, and how many of them have a job queued again.
+type walked struct {
+	violation string
+	states    int
+	requeued  int
+}
+
+func (s search) walk(t *testing.T) walked {
 	t.Helper()
+	w := s.explore()
+	if w.violation != "" {
+		t.Fatal(w.violation)
+	}
+	t.Logf("%d states to depth %d, %d with a job queued again", w.states, s.depth, w.requeued)
+	return w
+}
+
+// explore walks every order of moves to the search's depth, and stops at the first violation.
+func (s search) explore() walked {
 	start := model{machine: lifecycle.Recovering()}
 	s.feed(&start, lifecycle.RecoveryDone{})
 	seen := map[string]step{start.key(): {}}
@@ -869,19 +973,24 @@ func (s search) walk(t *testing.T) {
 		slices.Reverse(path)
 		return strings.Join(path, " -> ")
 	}
+	var out walked
+	fail := func(why, key, last string) walked {
+		out.violation, out.states = fmt.Sprintf("%s\nafter: %s", why, trace(key, last)), len(seen)
+		return out
+	}
 	frontier := []model{start}
 	for depth := 0; depth < s.depth && len(frontier) > 0; depth++ {
 		var next []model
 		for _, m := range frontier {
 			key := m.key()
 			if why := s.healed(m.clone()); why != "" {
-				t.Fatalf("%s\nafter: %s", why, trace(key, "(healing)"))
+				return fail(why, key, "(healing)")
 			}
 			for store := range s.stores {
 				// Only a store already away: from any other, one more move makes it so.
 				if s.stores > 1 && m.away[store] {
 					if why := s.strandedBy(m.clone(), store); why != "" {
-						t.Fatalf("%s\nafter: %s", why, trace(key, "(store gone)"))
+						return fail(why, key, "(store gone)")
 					}
 				}
 			}
@@ -893,7 +1002,7 @@ func (s search) walk(t *testing.T) {
 				c.do(&n)
 				s.checkWorld(&n)
 				if n.violation != "" {
-					t.Fatalf("%s\nafter: %s", n.violation, trace(key, c.label))
+					return fail(n.violation, key, c.label)
 				}
 				if c.fault {
 					n.faults++
@@ -904,14 +1013,18 @@ func (s search) walk(t *testing.T) {
 				}
 				seen[k] = step{key, c.label}
 				if len(seen) > modelStates {
-					t.Fatalf("more than %d states", modelStates)
+					return fail(fmt.Sprintf("more than %d states", modelStates), key, c.label)
+				}
+				if slices.ContainsFunc(n.attempts[:], func(a int) bool { return a > s.prior }) {
+					out.requeued++
 				}
 				next = append(next, n)
 			}
 		}
 		frontier = next
 	}
-	t.Logf("%d states to depth %d", len(seen), s.depth)
+	out.states = len(seen)
+	return out
 }
 
 func TestEveryOrderOfEventsForTwoJobsInOneStore(t *testing.T) {
@@ -920,4 +1033,81 @@ func TestEveryOrderOfEventsForTwoJobsInOneStore(t *testing.T) {
 
 func TestEveryOrderOfEventsForTwoStores(t *testing.T) {
 	newSearch(2, 9).walk(t)
+}
+
+// withPrior is a search whose jobs come with attempts already cut off, as a job its store queued
+// again before a restart does, so that a few moves reach the bound.
+func withPrior(prior, depth int) search {
+	s := newSearch(1, depth)
+	s.prior = prior
+	return s
+}
+
+// A job with attempts cut off before is queued again only while it has attempts left: on its last
+// attempt, checkWorld fails any order of events that queues it again.
+func TestEveryOrderOfEventsForJobsWithAttemptsCutOff(t *testing.T) {
+	for prior := 1; prior < core.MaxAttempts; prior++ {
+		last := prior == core.MaxAttempts-1
+		depth := 9
+		if last {
+			depth = 8
+		}
+		if w := withPrior(prior, depth).walk(t); !last && w.requeued == 0 {
+			t.Errorf("with %d attempts cut off before, no order of events queued a job again", prior)
+		}
+	}
+}
+
+// The model check catches a machine that breaks the rule: each mutant changes what the machine is
+// told the way a bug in it or in the shell would, and the check must find a violation.
+func TestTheModelCheckCatchesABrokenRetryRule(t *testing.T) {
+	type mutant struct {
+		prior  int
+		mutate func(lifecycle.Event) lifecycle.Event
+	}
+	mutants := map[string]mutant{
+		// The record's start mark is ignored: every run is taken for one that never started.
+		"never started is assumed": {0, func(e lifecycle.Event) lifecycle.Event {
+			switch e := e.(type) {
+			case lifecycle.SupervisorLost:
+				e.Start = lifecycle.NeverStarted{}
+				return e
+			case lifecycle.Recovered:
+				if d, ok := e.Supervisor.(lifecycle.RunDead); ok {
+					d.Start = lifecycle.NeverStarted{}
+					e.Supervisor = d
+				}
+				return e
+			}
+			return e
+		}},
+		// The attempts a store records are not counted, so the bound never comes.
+		"attempts are not counted": {core.MaxAttempts - 1, func(e lifecycle.Event) lifecycle.Event {
+			switch e := e.(type) {
+			case lifecycle.Admitted:
+				e.Attempts = 0
+				return e
+			case lifecycle.Recovered:
+				if f, ok := e.Finding.(lifecycle.JobIn); ok {
+					f.Attempts = 0
+					e.Finding = f
+				}
+				return e
+			}
+			return e
+		}},
+	}
+	for name, m := range mutants {
+		t.Run(name, func(t *testing.T) {
+			s := withPrior(m.prior, 7)
+			s.step = func(st lifecycle.State, e lifecycle.Event) (lifecycle.State, []lifecycle.Request) {
+				return lifecycle.Step(st, m.mutate(e))
+			}
+			w := s.explore()
+			if w.violation == "" {
+				t.Fatalf("the model check found nothing wrong in %d states", w.states)
+			}
+			t.Logf("caught: %s", w.violation)
+		})
+	}
 }

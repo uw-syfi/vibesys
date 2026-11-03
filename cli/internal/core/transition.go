@@ -10,17 +10,18 @@ import (
 // machine is written down:
 //
 //	queued  -> running | cancelled | failed
-//	running -> succeeded | failed | cancelled | lost
+//	running -> succeeded | failed | cancelled | lost | queued
 //
 // A queued job fails without running when its environment cannot be reached, and is never lost,
-// since queued jobs survive a restart. Only a running job is lost. A final state has no way out,
-// and a lost job is never retried.
+// since queued jobs survive a restart. Only a running job is lost. A running job goes back to
+// queued only when its attempt was cut off (see Transition.Cut and MaxAttempts). A final state has
+// no way out.
 func (s JobState) next() []JobState {
 	switch s {
 	case JobQueued:
 		return []JobState{JobRunning, JobCancelled, JobFailed}
 	case JobRunning:
-		return []JobState{JobSucceeded, JobFailed, JobCancelled, JobLost}
+		return []JobState{JobSucceeded, JobFailed, JobCancelled, JobLost, JobQueued}
 	default:
 		return nil
 	}
@@ -45,7 +46,10 @@ func (s JobState) CanMoveTo(to JobState) bool {
 //     the pinned environment at the current schema version, and of the job's own kind. A
 //     measurement needs a metric with a direction, finite samples and a check pass to name, so a
 //     measurement exists only for a check that passed;
-//   - a cancel reason goes with cancelled only, and an exit code with succeeded or failed.
+//   - a cancel reason goes with cancelled only, and an exit code with succeeded or failed;
+//   - a cut goes with the move from running back to queued and with nothing else, and only while
+//     the job has had fewer than MaxAttempts attempts counting the one cut off. That move keeps the
+//     attempt in Attempts and unpins the environment, which the next start pins again.
 func (j Job) Apply(t Transition) (Job, error) {
 	if t.Job != j.ID {
 		return Job{}, failf(FailureInvalidInput, "transition: for job %q, applied to job %q", t.Job, j.ID)
@@ -70,12 +74,20 @@ func (j Job) Apply(t Transition) (Job, error) {
 	out := j
 	out.State = t.To
 	at := t.At
-	if t.To == JobRunning {
+	switch t.To {
+	case JobRunning:
 		out.StartedAt = &at
 		pinned := *t.Environment
 		pinned.Facts = maps.Clone(pinned.Facts)
 		out.Environment = &pinned
-	} else {
+	case JobQueued:
+		past := PastAttempt{EndedAt: at, Cut: t.Cut}
+		if j.StartedAt != nil {
+			past.StartedAt = *j.StartedAt
+		}
+		out.Attempts = append(slices.Clone(j.Attempts), past)
+		out.StartedAt, out.Environment = nil, nil
+	default:
 		out.FinishedAt = &at
 	}
 	if t.ExitCode != nil {
@@ -112,6 +124,14 @@ func checkEffects(j Job, kind JobKind, t Transition) error {
 		return failf(FailureInvalidInput, "transition: a cancel reason goes with cancelled, not %s", t.To)
 	case t.ExitCode != nil && t.To != JobSucceeded && t.To != JobFailed:
 		return failf(FailureInvalidInput, "transition: an exit code goes with succeeded or failed, not %s", t.To)
+	case t.To == JobQueued && t.Cut == nil:
+		return failf(FailureInvalidInput, "transition: the move back to queued says how the attempt was cut off, and none is set")
+	case t.To != JobQueued && t.Cut != nil:
+		return failf(FailureInvalidInput, "transition: a cut goes with the move back to queued, not %s", t.To)
+	case t.Cut != nil && !t.Cut.Cause().Valid():
+		return failf(FailureInvalidInput, "transition: cut cause %q is not one of the causes", t.Cut.Cause())
+	case t.To == JobQueued && len(j.Attempts)+1 >= MaxAttempts:
+		return failf(FailureInvalidInput, "transition: job %s had %d attempts, the most it gets, and is not queued again", j.ID, len(j.Attempts)+1)
 	case t.CheckJob != "" && kind != JobMeasure:
 		return failf(FailureInvalidInput, "transition: only a measure job links a check pass, not a %s job", kind)
 	case t.Result != nil && t.To != JobSucceeded:

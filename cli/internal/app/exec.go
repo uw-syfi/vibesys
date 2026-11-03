@@ -124,6 +124,23 @@ type storeError struct{ err error }
 func (e storeError) Error() string { return e.err.Error() }
 func (e storeError) Unwrap() error { return e.err }
 
+// spawnError is a failure of Supervisors.Spawn: a supervisor that did not come up.
+type spawnError struct{ err error }
+
+func (e spawnError) Error() string { return e.err.Error() }
+func (e spawnError) Unwrap() error { return e.err }
+
+// launchCauseOf is causeOf for a failed launch. Only a supervisor that did not come up is tried
+// again: a failure before Spawn, such as an environment with no fingerprint, fails the job at once.
+func launchCauseOf(err error) lifecycle.Cause {
+	cause := causeOf(err)
+	var se spawnError
+	if cause == lifecycle.CauseSupervisorSilent && !errors.As(err, &se) {
+		return lifecycle.CauseUnprepared
+	}
+	return cause
+}
+
 // causeOf says who a failed step depends on. A store that does not answer is away, whatever the
 // error looks like; only an answer that will not change is a refusal.
 func causeOf(err error) lifecycle.Cause {
@@ -150,11 +167,17 @@ func refusal(k core.FailureKind) bool {
 
 // goneProof returns the proof in an error that a supervisor is gone. ErrGone alone holds none.
 func goneProof(err error) (lifecycle.DeathProof, bool) {
+	g, ok := goneOf(err)
+	return g.Proof, ok
+}
+
+// goneOf returns the Gone in an error, with its proof, and false when it holds no proof.
+func goneOf(err error) (supervisor.Gone, bool) {
 	var g supervisor.Gone
 	if errors.As(err, &g) && g.Proof.Valid() {
-		return g.Proof, true
+		return g, true
 	}
-	return "", false
+	return supervisor.Gone{}, false
 }
 
 // errNoHandle says the daemon holds no connection to a job's supervisor, which proves nothing.
@@ -257,7 +280,7 @@ func (a *App) launch(ctx context.Context, ref lifecycle.Ref, scope core.Scope, k
 	case gone:
 		a.tell(lifecycle.Closed{Ref: ref})
 	case err != nil:
-		a.post(message{event: lifecycle.LaunchFailed{Ref: ref, Cause: causeOf(err), Failure: failureOf(err), At: a.now()}, handle: h})
+		a.post(message{event: lifecycle.LaunchFailed{Ref: ref, Cause: launchCauseOf(err), Failure: failureOf(err), At: a.now()}, handle: h})
 	default:
 		a.post(message{event: lifecycle.Launched{Ref: ref}, handle: h, changed: true})
 	}
@@ -296,7 +319,16 @@ func (a *App) prepare(ctx context.Context, ref lifecycle.Ref, scope core.Scope) 
 	if err != nil {
 		return nil, false, err
 	}
-	launch := lifecycle.Launch{Repository: string(scope.Repository()), Task: string(scope.Task()), Job: job.ID, Spec: spec}
+	// An earlier attempt of a job queued again left output in the store, and this one's follows it,
+	// after the line that says why it runs again.
+	if err := ensureCutLine(ctx, st, job); err != nil {
+		return nil, false, storeError{err}
+	}
+	base, err := logSize(ctx, st, job.ID)
+	if err != nil {
+		return nil, false, storeError{err}
+	}
+	launch := lifecycle.Launch{Repository: string(scope.Repository()), Task: string(scope.Task()), Job: job.ID, Spec: spec, OutputBase: base}
 	if spec.Settings.Kind() != core.JobCommand {
 		plan, err := a.planFlow(ctx, st, scope, job, fingerprint)
 		if err != nil {
@@ -310,7 +342,7 @@ func (a *App) prepare(ctx context.Context, ref lifecycle.Ref, scope core.Scope) 
 		return err
 	})
 	if err != nil {
-		return nil, false, err
+		return nil, false, spawnError{err}
 	}
 	err = a.record(ctx, st, core.Transition{
 		Job: job.ID, From: core.JobQueued, To: core.JobRunning, At: a.now(), Environment: &fingerprint,
@@ -350,7 +382,7 @@ func (a *App) follow(ctx context.Context, r lifecycle.Adopt, scope core.Scope, h
 				outcome, progress, err = a.followOnce(ctx, r.Ref.Job, st, h)
 			}
 		}
-		proof, gone := goneProof(err)
+		g, gone := goneOf(err)
 		switch {
 		case ctx.Err() != nil:
 			return
@@ -358,7 +390,7 @@ func (a *App) follow(ctx context.Context, r lifecycle.Adopt, scope core.Scope, h
 			a.tell(lifecycle.Finished{Ref: r.Ref, Outcome: outcome, At: a.now()})
 			return
 		case gone:
-			a.tell(lifecycle.SupervisorLost{Ref: r.Ref, Proof: proof, At: a.now()})
+			a.tell(lifecycle.SupervisorLost{Ref: r.Ref, Proof: g.Proof, Start: g.Start, At: a.now()})
 			return
 		}
 		a.cfg.Logf("job %s: following it: %v", r.Ref, err)
@@ -501,20 +533,21 @@ func (a *App) stopJob(ctx context.Context, r lifecycle.Stop, h supervisor.Handle
 			return err
 		})
 	}
-	proof, gone := goneProof(err)
+	g, gone := goneOf(err)
 	switch {
 	case ctx.Err() != nil:
 	case err == nil:
 		a.tell(lifecycle.Finished{Ref: r.Ref, Outcome: outcome, At: a.now()})
 	case gone:
-		a.tell(lifecycle.SupervisorLost{Ref: r.Ref, Proof: proof, At: a.now()})
+		a.tell(lifecycle.SupervisorLost{Ref: r.Ref, Proof: g.Proof, Start: g.Start, At: a.now()})
 	default:
 		a.tell(lifecycle.StopFailed{Ref: r.Ref, Failure: failureOf(err)})
 	}
 }
 
-// move records the end of a job: its explanation in the output first, so that a reader who sees
-// the job final sees the line, then the transition, then the release of the supervisor. The job
+// move records the end of a job, or the cut-off attempt of one queued again: its explanation in the
+// output first, so that a reader who sees the job final sees the line, then the transition, then
+// the release of the supervisor. The job
 // stays in the machine until the end is recorded. The supervisor is kept until then too, since it
 // holds the outcome. A release that fails after that loses nothing: the next start clears the run.
 func (a *App) move(ctx context.Context, m lifecycle.Move, scope core.Scope, known bool, h supervisor.Handle) {
@@ -531,6 +564,11 @@ func (a *App) move(ctx context.Context, m lifecycle.Move, scope core.Scope, know
 		return
 	}
 	a.notifyJobs()
+	if m.Settlement.Requeues() {
+		// The machine releases the run that was cut off before it launches the job again.
+		a.tell(lifecycle.Requeued{Ref: m.Ref})
+		return
+	}
 	if m.Release {
 		if err := a.release(ctx, m.Ref, h); err != nil {
 			a.cfg.Logf("job %s: releasing its supervisor: %v", m.Ref, err)
@@ -544,24 +582,65 @@ func (a *App) moveInStore(ctx context.Context, m lifecycle.Move, scope core.Scop
 	if err != nil {
 		return err
 	}
-	if m.Settlement.Log != "" {
+	if m.Settlement.Requeues() {
+		return a.requeueInStore(ctx, st, m)
+	}
+	if m.Settlement.Log == "" && m.Settlement.Transition.From != core.JobQueued {
+		return a.record(ctx, st, m.Settlement.Transition)
+	}
+	job, err := a.readJob(ctx, st, m.Ref.Job)
+	if err != nil {
+		return err
+	}
+	if job.State.Final() {
 		// An end that is recorded already has its own explanation, which a line after it would
 		// contradict: the job was not in the daemon's hands when this one was decided.
-		job, err := a.readJob(ctx, st, m.Ref.Job)
-		if err != nil {
-			return err
+		return nil
+	}
+	err = a.retry(ctx, func(ctx context.Context) error {
+		if job.State == core.JobQueued {
+			// A job that ends from the queue says first why it was there again.
+			if err := ensureCutLine(ctx, st, job); err != nil {
+				return err
+			}
 		}
-		if job.State.Final() {
+		if m.Settlement.Log == "" {
 			return nil
 		}
-		err = a.retry(ctx, func(ctx context.Context) error {
-			return appendLineOnce(ctx, st, m.Ref.Job, m.Settlement.Log)
-		})
-		if err != nil {
-			return fmt.Errorf("adding a line to its output: %w", err)
-		}
+		return appendLineOnce(ctx, st, m.Ref.Job, m.Settlement.Log)
+	})
+	if err != nil {
+		return fmt.Errorf("adding a line to its output: %w", err)
 	}
 	return a.record(ctx, st, m.Settlement.Transition)
+}
+
+// requeueInStore queues a job again and then says why in its output. The line promises the job runs
+// again, so it follows the transition: written first, a crash before the transition could leave it
+// in the output of a job that a later decision ends. A line lost to a crash after the transition is
+// written by the job's next launch (see ensureCutLine).
+func (a *App) requeueInStore(ctx context.Context, st store.Store, m lifecycle.Move) error {
+	if err := a.record(ctx, st, m.Settlement.Transition); err != nil {
+		return err
+	}
+	job, err := a.readJob(ctx, st, m.Ref.Job)
+	if err == nil && job.State == core.JobQueued {
+		err = a.retry(ctx, func(ctx context.Context) error { return ensureCutLine(ctx, st, job) })
+	}
+	if err != nil {
+		a.cfg.Logf("job %s: saying why it runs again: %v", m.Ref, err)
+	}
+	return nil
+}
+
+// ensureCutLine writes the line of a queued job's last attempt that was cut off, unless its output
+// ends with it already.
+func ensureCutLine(ctx context.Context, st store.Store, job core.Job) error {
+	n := len(job.Attempts)
+	if n == 0 {
+		return nil
+	}
+	return appendLineOnce(ctx, st, job.ID, lifecycle.CutLine(n, job.Attempts[n-1].Cut))
 }
 
 // discard clears what is left of a run, when no job needs it.
@@ -715,7 +794,9 @@ func (a *App) lookInStore(ctx context.Context, ref lifecycle.Ref, scope core.Sco
 // up. A running job the user gave up is given up only when no run of it is found here: a run found
 // here is this daemon's, so the job is taken back first.
 func (a *App) jobIn(ctx context.Context, scope core.Scope, job core.Job, presence lifecycle.Presence, given []core.JobID) lifecycle.JobIn {
-	in := lifecycle.JobIn{State: job.State, SubmittedAt: job.SubmittedAt}
+	in := lifecycle.JobIn{
+		State: job.State, SubmittedAt: job.SubmittedAt, Attempts: len(job.Attempts), Policy: core.RerunPolicyOf(job.Spec.Settings.Kind()),
+	}
 	if job.State != core.JobRunning || !slices.Contains(given, job.ID) {
 		return in
 	}

@@ -7,6 +7,7 @@ import (
 	"maps"
 	"slices"
 	"sync"
+	"sync/atomic"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
@@ -32,19 +33,29 @@ var _ Supervisors = (*InProcess)(nil)
 type Survivors struct {
 	mu   sync.Mutex
 	runs map[lifecycle.Ref]*process
-	// rebooted is the launches of runs a reboot took: their record survives, as the real one does
-	// outside the runtime directory.
-	rebooted map[lifecycle.Ref]lifecycle.Launch
+	// rebooted is the runs a reboot took: their record survives, as the real one does outside the
+	// runtime directory.
+	rebooted map[lifecycle.Ref]rebootedRun
 	// wiped is the runs whose directory went away while the machine stayed up.
 	wiped map[lifecycle.Ref]bool
 }
 
-// process is one supervisor of InProcess and whether it was killed.
+// process is one supervisor of InProcess and whether it was killed. startSent is the mark the host
+// writes in a run's record before it tells the supervisor to start.
 type process struct {
-	sup    *Supervisor
-	launch lifecycle.Launch
-	killed chan struct{}
-	once   sync.Once
+	sup       *Supervisor
+	launch    lifecycle.Launch
+	killed    chan struct{}
+	once      sync.Once
+	startSent atomic.Bool
+}
+
+// start says what is known of whether the process was told to start.
+func (p *process) start() lifecycle.Start {
+	if p.startSent.Load() {
+		return lifecycle.MayHaveStarted{}
+	}
+	return lifecycle.NeverStarted{}
 }
 
 func (p *process) kill() {
@@ -61,10 +72,16 @@ func (p *process) dead() bool {
 	}
 }
 
+// rebootedRun is the record of a run a reboot took.
+type rebootedRun struct {
+	launch lifecycle.Launch
+	start  lifecycle.Start
+}
+
 // NewSurvivors returns an empty set.
 func NewSurvivors() *Survivors {
 	return &Survivors{
-		runs: map[lifecycle.Ref]*process{}, rebooted: map[lifecycle.Ref]lifecycle.Launch{}, wiped: map[lifecycle.Ref]bool{},
+		runs: map[lifecycle.Ref]*process{}, rebooted: map[lifecycle.Ref]rebootedRun{}, wiped: map[lifecycle.Ref]bool{},
 	}
 }
 
@@ -87,12 +104,38 @@ func (s *Survivors) Reboot() {
 	runs := s.runs
 	s.runs = map[lifecycle.Ref]*process{}
 	for ref, proc := range runs {
-		s.rebooted[ref] = proc.launch
+		s.rebooted[ref] = rebootedRun{launch: proc.launch, start: proc.start()}
 	}
 	s.mu.Unlock()
 	for _, proc := range runs {
 		proc.kill()
 	}
+}
+
+// StartSent says the job's supervisor was told to start, as the record of a run says, and false for
+// a job with no run.
+func (s *Survivors) StartSent(ref lifecycle.Ref) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if r, ok := s.rebooted[ref]; ok {
+		_, maybe := r.start.(lifecycle.MayHaveStarted)
+		return maybe
+	}
+	proc, ok := s.runs[ref]
+	return ok && proc.startSent.Load()
+}
+
+// Parked lists the jobs whose supervisor lives and was not told to start yet, in no order.
+func (s *Survivors) Parked() []lifecycle.Ref {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []lifecycle.Ref
+	for ref, proc := range s.runs {
+		if !proc.startSent.Load() && !proc.dead() {
+			out = append(out, ref)
+		}
+	}
+	return out
 }
 
 // Wipe takes a job's run directory away and leaves its supervisor alive, as a logout that clears
@@ -177,8 +220,8 @@ func (p *InProcess) Runs(ctx context.Context) ([]Run, error) {
 }
 
 func (s *Survivors) runOf(ref lifecycle.Ref) Run {
-	if l, ok := s.rebooted[ref]; ok {
-		return Dead{Ref: ref, Proof: lifecycle.ProofRebooted, Launch: &l}
+	if r, ok := s.rebooted[ref]; ok {
+		return Dead{Ref: ref, Proof: lifecycle.ProofRebooted, Start: r.start, Launch: &r.launch}
 	}
 	proc, ok := s.runs[ref]
 	if !ok {
@@ -186,7 +229,7 @@ func (s *Survivors) runOf(ref lifecycle.Ref) Run {
 	}
 	switch {
 	case proc.dead():
-		return Dead{Ref: ref, Proof: lifecycle.ProofLockFree, Launch: &proc.launch}
+		return Dead{Ref: ref, Proof: lifecycle.ProofLockFree, Start: proc.start(), Launch: &proc.launch}
 	case s.wiped[ref]:
 		return Unknown{Ref: ref, Launch: &proc.launch}
 	}
@@ -238,7 +281,7 @@ func (h *inProcessHandle) check(ctx context.Context) error {
 func (p *process) gone() error {
 	switch {
 	case p.dead():
-		return Gone{Proof: lifecycle.ProofLockFree}
+		return Gone{Proof: lifecycle.ProofLockFree, Start: p.start()}
 	case p.sup.Phase() == lifecycle.RunReleased:
 		return Gone{Proof: lifecycle.ProofReleased}
 	}
@@ -249,6 +292,7 @@ func (h *inProcessHandle) Start(ctx context.Context) error {
 	if err := h.check(ctx); err != nil {
 		return err
 	}
+	h.proc.startSent.Store(true)
 	return h.proc.sup.Start()
 }
 
@@ -288,7 +332,7 @@ func (h *inProcessHandle) Release(ctx context.Context) error {
 		return err
 	}
 	if h.proc.dead() {
-		return Gone{Proof: lifecycle.ProofLockFree}
+		return Gone{Proof: lifecycle.ProofLockFree, Start: h.proc.start()}
 	}
 	return h.proc.sup.Release()
 }

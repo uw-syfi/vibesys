@@ -189,3 +189,31 @@ func ToExecKind(field string, k cliv1.ExecutionKind) (core.ExecKind, error) {
 	}
 	return "", invalid("%s: %s is no ending this build knows", field, k)
 }
+
+var cutCauses = []struct {
+	domain core.CutCause
+	wire   cliv1.CutCause
+}{
+	{core.CutSupervisorDied, cliv1.CutCause_CUT_CAUSE_SUPERVISOR_DIED},
+	{core.CutRebooted, cliv1.CutCause_CUT_CAUSE_REBOOTED},
+}
+
+// CutCause returns the contract's value for a cut cause.
+func CutCause(c core.CutCause) cliv1.CutCause {
+	for _, p := range cutCauses {
+		if p.domain == c {
+			return p.wire
+		}
+	}
+	return cliv1.CutCause_CUT_CAUSE_UNSPECIFIED
+}
+
+// ToCutCause returns the domain cause for the contract's value, or invalid_input naming field.
+func ToCutCause(field string, c cliv1.CutCause) (core.CutCause, error) {
+	for _, p := range cutCauses {
+		if p.wire == c {
+			return p.domain, nil
+		}
+	}
+	return "", invalid("%s: %s is not a cut cause", field, c)
+}

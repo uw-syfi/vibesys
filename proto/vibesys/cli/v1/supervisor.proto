@@ -57,6 +57,10 @@ message Launch {
   // What a check or a measure job runs, as the daemon decided it when the job started. It is set
   // for those kinds and unset for a command job.
   FlowPlan plan = 5;
+  // Where this attempt's output starts in the job's stored output: what earlier attempts of a job
+  // that was queued again left there. The supervisor's output offsets count from it, so a daemon
+  // follows the job from what its store holds, whichever attempt wrote it.
+  uint64 output_base = 6;
 }
 
 // PlanCommand is one command of a plan, with its argument vector as the task wrote it and its
@@ -204,6 +208,21 @@ message RunRecord {
   // The identity of the boot the run began in.
   string boot_id = 1;
   Launch launch = 2;
+  // What the record says of the command's start. A daemon that marks starts writes NOT_SENT with
+  // the record and SENT before it asks the supervisor to start, and a supervisor runs nothing
+  // before that request: so only NOT_SENT proves the command never started. UNSPECIFIED is a
+  // record written by a build that did not mark starts, whose command may have started.
+  StartMark start_mark = 3;
+}
+
+// StartMark is what a run record says of the command's start.
+enum StartMark {
+  // The record predates start marks: the command may have started.
+  START_MARK_UNSPECIFIED = 0;
+  // The supervisor was never asked to start the command.
+  START_MARK_NOT_SENT = 1;
+  // The supervisor was asked, or was about to be asked, to start the command.
+  START_MARK_SENT = 2;
 }
 
 message StartRequest {}
