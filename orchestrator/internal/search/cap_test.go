@@ -1,8 +1,10 @@
 package search_test
 
 import (
+	"context"
 	"fmt"
 	cli "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/cli/v1"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"testing"
@@ -14,9 +16,15 @@ func TestCapsKeepNewestJobsTheirResultsAndFullSource(t *testing.T) {
 		var facts search.Facts
 		for i := range n {
 			id := fmt.Sprint(i)
-			facts = append(facts, &cli.TaskFact{Fact: &cli.TaskFact_Job{Job: &cli.Job{Id: id, SubmittedAt: timestamppb.New(time.Unix(int64(i), 0))}}}, &cli.TaskFact{Fact: &cli.TaskFact_Result{Result: &cli.Result{JobId: id}}})
+			facts = append(facts, &cli.TaskFact{Fact: &cli.TaskFact_Job{Job: &cli.Job{Id: id, State: cli.JobState_JOB_STATE_SUCCEEDED, Submitters: []*cli.Submitter{{RunId: "r"}}, SubmittedAt: timestamppb.New(time.Unix(int64(i), 0))}}}, &cli.TaskFact{Fact: &cli.TaskFact_Result{Result: &cli.Result{JobId: id}}})
 		}
 		view := search.Fold(facts)
+		store := new(search.Store)
+		store.Put("r", view)
+		updates, err := (search.Source{Store: store}).Jobs(context.Background(), core.Run{ID: "r"})
+		if err != nil || len(updates) != n {
+			t.Fatalf("notification source capped %d jobs to %d: %v", n, len(updates), err)
+		}
 		capped := search.Cap(view)
 		jobs, results := 0, 0
 		for _, f := range capped.Facts {

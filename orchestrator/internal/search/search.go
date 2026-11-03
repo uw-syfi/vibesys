@@ -108,9 +108,6 @@ func Cap(v View) View {
 		if r := f.GetResult(); r != nil && !jobs[r.JobId] {
 			continue
 		}
-		if t := f.GetTrouble(); t != nil && !jobs[t.JobId] {
-			continue
-		}
 		kept = append(kept, f)
 	}
 	out.Facts = kept
