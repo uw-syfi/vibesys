@@ -128,6 +128,20 @@ runtime journals and replays). It follows [flows.md](flows.md): the `ctx` vocabu
 workspaces, evaluation, groups), the rule for flow code, how core ends the run from the winner
 the flow chose, and how to test it.
 
+## Host composition
+
+The host process only composes typed services. It holds no product logic: it
+parses flags, opens a listener, and registers services that other packages own.
+The gateway's `TestRepositoryObeysTheRules` archcheck enforces the command's single
+non-test file and exact imports, and the allowed imports of `internal/hostmain`.
+Unenforced: product decisions through allowed imports still need human review.
+
+The gateway command `cmd/vibesysd` calls `internal/hostmain.Main(args)` and exits
+with its result. `internal/hostmain` composes `internal/connect`,
+`internal/lifecycle`, `internal/pipe`, `internal/server`, `schemahash` and
+`orchestrator/hosted`; `internal/archcheck` enforces this boundary. The service
+packages own their behavior; the command owns no service implementation.
+
 ## Talking to daemons
 
 A **daemon** here is a long-lived local process that owns some state and that
