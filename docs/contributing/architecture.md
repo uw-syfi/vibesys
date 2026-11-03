@@ -151,7 +151,7 @@ process that dials it.
 | Term | Meaning |
 | --- | --- |
 | `vibesys-host` | The host process composing typed services |
-| `vibesysd` | The CLI daemon process name after the CLI rename |
+| `vibesysd` | The CLI daemon's process name |
 | `HostService` | The host wire API |
 | host | The machine running the host process |
 
